@@ -197,3 +197,82 @@ def test_recompenses_desactivees_par_defaut():
 def test_vip_par_defaut_demande_un_mois():
     """Le VIP doit se mériter : le défaut vise ~30 jours de présence."""
     assert rec.jours_pour_niveau(rec.CLES_DEFAUT["activite_vip_niveau"]) >= 30
+
+
+# ─── calendrier : les bornes de temps ───────────────────────────────────────
+
+import activite_calendrier as cal
+
+
+def _le(s):
+    return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=cal.FUSEAU)
+
+
+def test_semaine_commence_le_lundi():
+    """Toute date de la semaine doit renvoyer le MÊME lundi 00h00."""
+    lundi = _le("2026-08-10")
+    for j in range(7):
+        d = lundi + timedelta(days=j)
+        deb = cal.debut_de_semaine(d)
+        assert deb.weekday() == 0, "le début de semaine doit être un lundi"
+        assert (deb.hour, deb.minute, deb.second) == (0, 0, 0)
+        assert deb.date() == lundi.date()
+
+
+def test_semaine_change_bien_le_lundi():
+    """Dimanche 23h59 et lundi 00h01 ne sont PAS la même semaine."""
+    dim = _le("2026-08-16").replace(hour=23, minute=59)
+    lun = _le("2026-08-17").replace(hour=0, minute=1)
+    assert cal.semaine(dim) != cal.semaine(lun)
+
+
+def test_semaine_iso_ne_saute_pas_au_nouvel_an():
+    """Le piège : du 29/12/2025 au 04/01/2026 = UNE seule semaine.
+
+    Avec %Y au lieu de %G, ces jours porteraient deux identifiants differents
+    et le rappel hebdomadaire sauterait une semaine une annee sur deux.
+    """
+    ids = {cal.semaine(_le(d)) for d in
+           ("2025-12-29", "2025-12-31", "2026-01-01", "2026-01-04")}
+    assert len(ids) == 1, f"devrait etre une seule semaine, obtenu {ids}"
+    assert cal.semaine(_le("2026-01-05")) not in ids
+
+
+def test_fin_de_semaine_est_le_lundi_suivant():
+    d = _le("2026-08-12")
+    assert (cal.fin_de_semaine(d) - cal.debut_de_semaine(d)).days == 7
+    assert cal.fin_de_semaine(d).weekday() == 0
+
+
+def test_mois_borne_au_premier():
+    for d, n in (("2026-01-15", 31), ("2026-02-10", 28), ("2026-04-30", 30)):
+        dt = _le(d)
+        assert cal.debut_de_mois(dt).day == 1
+        assert cal.fin_de_mois(dt).day == 1
+        assert cal.jours_du_mois(dt) == n
+
+
+def test_mois_passe_bien_a_l_annee_suivante():
+    fin = cal.fin_de_mois(_le("2026-12-05"))
+    assert (fin.year, fin.month, fin.day) == (2027, 1, 1)
+
+
+def test_annee_bissextile():
+    assert cal.jours_du_mois(_le("2028-02-10")) == 29
+
+
+def test_prochain_jour_de_semaine_saute_aujourdhui():
+    """Demander « prochain lundi » un lundi doit donner le lundi SUIVANT."""
+    lundi = _le("2026-08-10")
+    suivant = cal.prochain_jour_de_semaine(0, lundi)
+    assert suivant.weekday() == 0
+    assert (suivant - lundi).days == 7
+
+
+def test_jours_entre_inconnu_renvoie_none():
+    assert cal.jours_entre("pas-une-date") is None
+
+
+def test_jour_est_stable_dans_la_journee():
+    d = _le("2026-08-12")
+    assert cal.jour(d.replace(hour=0, minute=1)) == cal.jour(d.replace(hour=23, minute=59))

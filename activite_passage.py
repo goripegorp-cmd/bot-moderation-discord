@@ -19,9 +19,8 @@ L'ORDRE, ET POURQUOI IL EST AINSI
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import activite
+import activite_calendrier as cal
 import activite_escalade as esc
 import activite_recompenses as rec
 
@@ -101,14 +100,22 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
             f"Vérifiez que le suivi tourne depuis assez longtemps.")
         return rap
 
-    # ── 4. Rappel hebdomadaire, le jour choisi seulement ──
+    # ── 4. Rappel hebdomadaire — UNE SEULE FOIS PAR SEMAINE ──
+    #  ⚠️ La boucle passe toutes les 6 h. Tester seulement « on est le bon jour »
+    #  enverrait QUATRE fois le même rappel le lundi. On mémorise donc la semaine
+    #  ISO du dernier envoi et on compare : un rappel par semaine, quel que soit
+    #  le nombre de passages, et sans dépendre de l'heure exacte du passage.
     jour_voulu = int(cfg_act.get("activite_jour_rappel", 0) or 0)
-    est_le_jour = datetime.now(timezone.utc).weekday() == jour_voulu
+    maintenant = cal.maintenant()
+    semaine_courante = cal.semaine(maintenant)
+    est_le_jour = maintenant.weekday() == jour_voulu
+    deja_envoye = str(cfg_act.get("activite_derniere_semaine", "") or "") == semaine_courante
+
     salon = guild.get_channel(int(cfg_act.get("activite_salon_annonce", 0) or 0))
     salon_retour = guild.get_channel(int(cfg_act.get("activite_salon_retour", 0) or 0))
 
     envoyes = 0
-    if est_le_jour and salon is not None and not dry_run:
+    if est_le_jour and not deja_envoye and salon is not None and not dry_run:
         for fiches, avec_retrait in ((cl["rappel"], False), (cl["retrait"], True)):
             txt = esc.texte_rappel(fiches, salon_retour, avec_retrait=avec_retrait)
             if not txt:
@@ -118,8 +125,17 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
                 envoyes += 1
             except Exception as ex:
                 _log(f"[activite passage rappel] {ex}")
+        #  Marquer la semaine MÊME si aucun message n'est parti (personne
+        #  d'inactif) : sinon on retenterait à chaque passage de la journée.
+        try:
+            await activite._db_set(guild.id, "activite_derniere_semaine", semaine_courante)
+        except Exception as ex:
+            _log(f"[activite passage marque semaine] {ex}")
+
     rap["actions"]["messages_envoyes"] = envoyes
     rap["actions"]["jour_de_rappel"] = est_le_jour
+    rap["actions"]["semaine"] = semaine_courante
+    rap["actions"]["rappel_deja_envoye"] = deja_envoye
 
     # ── 5. Retrait des rôles ──
     if dry_run:

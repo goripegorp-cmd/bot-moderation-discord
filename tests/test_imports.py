@@ -9,6 +9,7 @@ import pytest
 
 PHASE_163_MODULES = [
     "activite",
+    "activite_calendrier",
     "activite_recompenses",
     "dm_digest",
     "webhook_tracker",

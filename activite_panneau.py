@@ -615,10 +615,16 @@ class ActiviteApercuPanelV2(_Base):
             rap = await passage.passage(self.g, dry_run=True)
             cl = rap.get("fiches") or {}
             expulsables = cl.get("expulsion") or []
+            diag = await activite.diagnostic(self.g.id)
 
             items = [
                 v2_title("🔎 Aperçu"),
                 v2_subtitle("Calculé à blanc — rien n'est appliqué ici"),
+                v2_divider(),
+                # Le diagnostic AVANT le classement : avant de regarder qui est
+                # inactif, il faut savoir si le suivi capte quelque chose. Un
+                # classement calculé sur un suivi muet accuse tout le monde.
+                v2_body(activite.diagnostic_texte(diag)),
                 v2_divider(),
                 v2_body(passage.resume_texte(rap)),
             ]

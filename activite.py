@@ -10,7 +10,8 @@ Un membre est ACTIF sur une journée s'il fait AU MOINS UNE des trois choses :
   · envoyer un message      (source « m »)
   · se connecter en vocal   (source « v »)
   · réagir à un message     (source « r »)
-Une seule suffit. La journée est comptée en UTC, bornée par `JOUR_FMT`.
+Une seule suffit. La journée va de minuit à minuit **heure de Paris**, et la
+semaine du lundi 00h00 au lundi 00h00 — voir `activite_calendrier.py`.
 
 L'ESCALADE, par rôle surveillé, avec des seuils propres à chaque rôle :
   · palier 1 (défaut 7 j)  → rappel public hebdomadaire, le membre garde tout
@@ -42,7 +43,12 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-JOUR_FMT = "%Y-%m-%d"
+import activite_calendrier as cal
+
+#  Les bornes de temps vivent dans `activite_calendrier` : semaine du lundi 00h00
+#  au lundi 00h00, mois du 1er au 1er, heure de Paris. Ne pas recalculer de dates
+#  ici — c'est là que se cachent les décalages d'une ou deux heures.
+JOUR_FMT = cal.JOUR_FMT
 
 #  Les trois sources d'activité. La valeur est la lettre stockée en base.
 SOURCE_MESSAGE = "m"
@@ -133,6 +139,7 @@ CLES_DEFAUT = {
     "activite_salon_retour": 0,         # où un membre écrit pour récupérer son rôle
     "activite_salon_staff": 0,          # où poster la liste des expulsables
     "activite_jour_rappel": 0,          # 0 = lundi … 6 = dimanche
+    "activite_derniere_semaine": "",    # semaine ISO du dernier rappel envoyé
 }
 
 
@@ -184,7 +191,7 @@ async def actif(guild_id: int) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _aujourdhui() -> str:
-    return datetime.now(timezone.utc).strftime(JOUR_FMT)
+    return cal.jour()
 
 
 #  ⚠️ CACHE INDISPENSABLE — `marquer_actif` tourne sur CHAQUE message du serveur.
@@ -263,11 +270,7 @@ def jours_ecoules(depuis: str | None) -> int | None:
     """
     if not depuis:
         return None
-    try:
-        d = datetime.strptime(depuis, JOUR_FMT).replace(tzinfo=timezone.utc)
-    except Exception:
-        return None
-    return max(0, (datetime.now(timezone.utc).date() - d.date()).days)
+    return cal.jours_entre(depuis)
 
 
 async def jours_inactif(guild_id: int, member) -> int | None:
@@ -283,7 +286,10 @@ async def jours_inactif(guild_id: int, member) -> int | None:
     arrivee = getattr(member, "joined_at", None)
     if arrivee is None:
         return None
-    return max(0, (datetime.now(timezone.utc).date() - arrivee.date()).days)
+    #  Passe par le calendrier pour que l'arrivée soit ramenée au même fuseau
+    #  que les journées d'activité : sinon un membre arrivé à 23h30 heure de
+    #  Paris compterait un jour d'écart de plus.
+    return cal.jours_entre(cal.jour(arrivee))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -341,3 +347,83 @@ def role_surveille_du_membre(member, cfg_act: dict):
     if not portes:
         return None
     return min(portes, key=lambda r: seuils_du_role(cfg_act, r.id)["expulsion"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Diagnostic — la preuve que le suivi fonctionne vraiment
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def diagnostic(guild_id: int, jours: int = 7) -> dict:
+    """Ce que le suivi a RÉELLEMENT enregistré ces derniers jours.
+
+    Sert à répondre à la seule question qui compte avant d'allumer les paliers :
+    « est-ce que ça capte vraiment mes messages, mon vocal et mes réactions ? »
+    Un système de présence qui se trompe expulse des innocents ; on ne l'allume
+    pas sur la foi d'une intention, on l'allume sur des chiffres.
+
+    Retourne, par source, le nombre de membres distincts captés, plus le détail
+    des derniers jours.
+    """
+    out = {"par_source": {k: 0 for k in SOURCES}, "jours": [],
+           "total_membres": 0, "premier_jour": None}
+    try:
+        depuis = cal.debut_du_jour() - timedelta(days=max(1, int(jours)))
+        borne = depuis.strftime(JOUR_FMT)
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT jour, COUNT(DISTINCT user_id), group_concat(sources, '')"
+                " FROM activite_jours WHERE guild_id=? AND jour>=?"
+                " GROUP BY jour ORDER BY jour DESC",
+                (guild_id, borne),
+            ) as cur:
+                rows = await cur.fetchall()
+            for j, n, src in rows:
+                src = src or ""
+                out["jours"].append({
+                    "jour": j, "membres": int(n),
+                    "sources": {k: src.count(k) for k in SOURCES},
+                })
+                for k in SOURCES:
+                    out["par_source"][k] += src.count(k)
+
+            async with db.execute(
+                "SELECT COUNT(DISTINCT user_id), MIN(jour) FROM activite_jours"
+                " WHERE guild_id=?", (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+            if row:
+                out["total_membres"] = int(row[0] or 0)
+                out["premier_jour"] = row[1]
+    except Exception as ex:
+        _log(f"[activite diagnostic] {ex}")
+    return out
+
+
+def diagnostic_texte(d: dict) -> str:
+    """Le diagnostic, lisible. Dit franchement ce qui ne capte pas."""
+    lignes = [cal.description(), ""]
+
+    muettes = [nom for k, nom in SOURCES.items() if d["par_source"].get(k, 0) == 0]
+    for k, nom in SOURCES.items():
+        n = d["par_source"].get(k, 0)
+        icone = "✅" if n else "⚠️"
+        lignes.append(f"{icone} **{nom.capitalize()}** · `{n}` enregistrement(s)")
+
+    if d["premier_jour"]:
+        recul = cal.jours_entre(d["premier_jour"])
+        lignes.append("")
+        lignes.append(f"📈 `{d['total_membres']}` membre(s) connu(s) · "
+                      f"suivi depuis `{recul}` jour(s)")
+        if recul is not None and recul < SEUIL_RAPPEL_DEFAUT:
+            lignes.append(f"-# ⚠️ Le suivi n'a que `{recul}` jour(s) d'historique. "
+                          f"Tout le monde paraît inactif avant d'avoir eu le temps "
+                          f"d'être vu — n'allumez pas les paliers maintenant.")
+    else:
+        lignes.append("")
+        lignes.append("⚠️ **Aucune activité enregistrée.** Le système est peut-être "
+                      "éteint, ou vient d'être installé.")
+
+    if muettes and d["premier_jour"]:
+        lignes.append(f"-# Aucune trace pour : {', '.join(muettes)}. "
+                      f"Testez-les vous-même, puis rouvrez cet écran.")
+    return "\n".join(lignes)
