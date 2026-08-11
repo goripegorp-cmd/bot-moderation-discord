@@ -22,7 +22,7 @@ Le module ne connaît pas `bot.py` : tout ce dont il a besoin lui est injecté p
 from __future__ import annotations
 
 import discord
-from discord.ui import Button, ChannelSelect, RoleSelect
+from discord.ui import Button, ChannelSelect, RoleSelect, Select
 
 import activite
 import activite_escalade as esc
@@ -229,11 +229,14 @@ class ActiviteCiblesPanelV2(_Base):
             elif roles:
                 lignes = []
                 for r in roles:
-                    s = activite.seuils_du_role(c, r.id)
-                    suffixe = "" if s["retirer_role"] else "  ·  _sans retrait de rôle_"
+                    cf = activite.config_du_role(c, r.id)
+                    salon = self.g.get_channel(cf["salon_annonce"])
+                    etat = "" if cf["actif"] else "  ⏸️ _suspendu_"
                     lignes.append(
-                        f"• {r.mention} — `{s['rappel']}` / `{s['retrait']}` / "
-                        f"`{s['expulsion']}` j{suffixe}")
+                        f"{_pastille(cf['actif'])} {r.mention} — "
+                        f"`{cf['rappel']}`/`{cf['retrait']}`/`{cf['expulsion']}` j · "
+                        f"{JOURS_SEMAINE[cf['jour_rappel'] % 7][:3]} · "
+                        f"{salon.mention if salon else '⚪'}{etat}")
                 detail = "\n".join(lignes)
             else:
                 detail = ("⚠️ **Aucune cible.** Le système ne surveillera personne, "
@@ -260,16 +263,35 @@ class ActiviteCiblesPanelV2(_Base):
                 custom_id="act_tout")
             b_tout.callback = self._cb_tout
 
-            ligne = [b_tout]
-            for r in roles[:3]:
-                b = Button(label=f"Seuils · {r.name[:16]}", emoji="⚙️",
-                           style=discord.ButtonStyle.primary,
-                           custom_id=f"act_seuils_{r.id}")
-                b.callback = self._faire_seuils(r.id)
-                ligne.append(b)
-
             items.append(discord.ui.ActionRow(sel))
-            items.append(discord.ui.ActionRow(*ligne))
+
+            #  ⚠️ Un SELECT, pas des boutons. Discord plafonne à 5 boutons par
+            #  ligne : le panneau ne pouvait donc proposer que 3 rôles, et les
+            #  suivants devenaient inconfigurables. Un menu en accepte 25, et
+            #  chaque entrée ouvre la configuration COMPLÈTE du rôle.
+            entrees = []
+            if tout:
+                entrees.append(discord.SelectOption(
+                    label="Tout le serveur", value=activite.ROLE_TOUS, emoji="🌍",
+                    description="Les membres sans rôle surveillé"))
+            for r in roles[:24]:
+                cf = activite.config_du_role(c, r.id)
+                entrees.append(discord.SelectOption(
+                    label=r.name[:90], value=str(r.id),
+                    emoji="🟢" if cf["actif"] else "⚪",
+                    description=(f"{cf['rappel']}/{cf['retrait']}/{cf['expulsion']} j"
+                                 f" · {JOURS_SEMAINE[cf['jour_rappel'] % 7]}")[:100]))
+            if entrees:
+                sel_conf = Select(placeholder="Configurer un rôle en détail…",
+                                  options=entrees, custom_id="act_role_conf")
+                sel_conf.callback = self._cb_configurer
+                items.append(discord.ui.ActionRow(sel_conf))
+            if len(roles) > 24:
+                items.append(v2_body(
+                    f"-# ⚠️ {len(roles) - 24} rôle(s) au-delà du 25e ne peuvent pas "
+                    f"être listés : Discord plafonne les menus à 25 entrées."))
+
+            items.append(discord.ui.ActionRow(b_tout))
             items.append(discord.ui.ActionRow(_bouton_retour(self._cb_retour, "act_cib_back")))
             await self._envoyer(i, items, Palette.INFO, edit)
         except Exception as ex:
@@ -298,10 +320,9 @@ class ActiviteCiblesPanelV2(_Base):
         except Exception as ex:
             await self._secours(i, ex, "cibles tout")
 
-    def _faire_seuils(self, rid: int):
-        async def _cb(i):
-            await ActiviteRoleSeuilsPanelV2(self.u, self.g, rid).render_to(i, edit=True)
-        return _cb
+    async def _cb_configurer(self, i):
+        await ActiviteRoleSeuilsPanelV2(
+            self.u, self.g, i.data["values"][0]).render_to(i, edit=True)
 
     async def _cb_retour(self, i):
         await ActivitePanelV2(self.u, self.g).render_to(i, edit=True)
@@ -342,12 +363,9 @@ class _SeuilsModal(discord.ui.Modal):
                     "❌ Les seuils doivent être croissants : rappel < retrait < expulsion.",
                     ephemeral=True)
 
-            c = await activite.config(self.parent.g.id)
-            roles = dict(c["activite_roles"] or {})
-            conf = dict(roles.get(str(self.rid)) or {})
-            conf["rappel"], conf["retrait"], conf["expulsion"] = vals
-            roles[str(self.rid)] = conf
-            await _db_set(self.parent.g.id, "activite_roles", roles)
+            await activite.ecrire_config_role(
+                self.parent.g.id, self.rid,
+                rappel=vals[0], retrait=vals[1], expulsion=vals[2])
             await ActiviteRoleSeuilsPanelV2(
                 self.parent.u, self.parent.g, self.rid).render_to(i, edit=True)
         except ValueError:
@@ -362,69 +380,181 @@ class _SeuilsModal(discord.ui.Modal):
 
 
 class ActiviteRoleSeuilsPanelV2(_Base):
-    """Les seuils d'UN rôle précis."""
+    """La configuration COMPLÈTE d'un rôle — son suivi à lui, indépendant des autres.
 
-    def __init__(self, u, g, rid: int):
+    Chaque rôle a ses seuils, son salon d'annonce, son salon de retour et son
+    jour de rappel. Un champ laissé vide retombe sur le réglage du serveur :
+    on ne force pas à tout ressaisir pour changer un seul seuil, et l'écran dit
+    clairement ce qui est « propre au rôle » et ce qui est « hérité ».
+    """
+
+    def __init__(self, u, g, rid):
         super().__init__(u, g)
-        self.rid = int(rid)
+        self.rid = str(rid)
+
+    def _nom(self):
+        if self.rid == activite.ROLE_TOUS:
+            return "tout le serveur"
+        r = self.g.get_role(int(self.rid))
+        return r.name if r else f"rôle {self.rid}"
 
     async def render_to(self, i, *, edit: bool = True):
         try:
             c = await activite.config(self.g.id)
-            s = activite.seuils_du_role(c, self.rid)
-            role = self.g.get_role(self.rid)
-            nom = role.mention if role else f"`{self.rid}` _(rôle supprimé)_"
+            conf = activite.config_du_role(c, self.rid)
+            propres = conf["_propres"]
+
+            def _marque(cle):
+                return "" if cle in propres else "  -# _(serveur)_"
+
+            role = (None if self.rid == activite.ROLE_TOUS
+                    else self.g.get_role(int(self.rid)))
+            cible = ("**tout le serveur**" if role is None
+                     else (role.mention if role else f"`{self.rid}` _(rôle supprimé)_"))
+            an = self.g.get_channel(conf["salon_annonce"])
+            ret = self.g.get_channel(conf["salon_retour"])
 
             items = [
-                v2_title("⚙️ Seuils du rôle"),
-                v2_subtitle(f"Réglages propres à {role.name if role else 'ce rôle'}"),
+                v2_title(f"⚙️ Suivi · {self._nom()}"),
+                v2_subtitle("Cette configuration n'appartient qu'à ce rôle"),
                 v2_divider(),
                 v2_body(
-                    f"🎭 **Rôle** · {nom}\n\n"
-                    f"1️⃣ **Rappel public** · après `{s['rappel']}` jour(s)\n"
-                    f"2️⃣ **Retrait du rôle** · après `{s['retrait']}` jour(s)\n"
-                    f"3️⃣ **Expulsion proposée** · après `{s['expulsion']}` jour(s)"
+                    f"🎭 **Cible** · {cible}\n"
+                    f"{_pastille(conf['actif'])} **Suivi** · "
+                    + ("actif" if conf["actif"] else "suspendu pour ce rôle seulement")
                 ),
                 v2_divider(),
                 v2_body(
-                    f"{_pastille(s['retirer_role'])} **Retrait du rôle au palier 2** · "
-                    + ("oui" if s["retirer_role"] else "non — le membre garde son rôle")
+                    f"1️⃣ **Rappel** · `{conf['rappel']}` j{_marque('rappel')}\n"
+                    f"2️⃣ **Retrait du rôle** · `{conf['retrait']}` j{_marque('retrait')}\n"
+                    f"3️⃣ **Expulsion proposée** · `{conf['expulsion']}` j{_marque('expulsion')}"
                 ),
+                v2_body(
+                    f"📢 **Annonce** · {an.mention if an else '⚪ _aucun_'}"
+                    f"{_marque('salon_annonce')}\n"
+                    f"🔙 **Retour** · {ret.mention if ret else '⚪ _aucun_'}"
+                    f"{_marque('salon_retour')}\n"
+                    f"📅 **Jour** · {JOURS_SEMAINE[conf['jour_rappel'] % 7]}"
+                    f"{_marque('jour_rappel')}"
+                ),
+                v2_divider(),
+                v2_body(
+                    f"{_pastille(conf['retirer_role'])} **Retirer le rôle au palier 2** · "
+                    + ("oui" if conf["retirer_role"] else "non — le membre le garde")
+                ),
+                v2_body("-# « serveur » = valeur héritée des réglages généraux. "
+                        "Définissez-la ici pour rendre ce rôle indépendant."),
             ]
 
-            b_ed = Button(label="Modifier les seuils", emoji="✏️",
-                          style=discord.ButtonStyle.primary, custom_id="act_seuils_edit")
-            b_ed.callback = self._cb_modifier
-            b_rt = Button(
-                label="Retirer le rôle" if s["retirer_role"] else "Ne pas retirer",
-                emoji="🟢" if s["retirer_role"] else "⚪",
-                style=(discord.ButtonStyle.success if s["retirer_role"]
-                       else discord.ButtonStyle.secondary),
-                custom_id="act_seuils_rt")
-            b_rt.callback = self._cb_toggle_retrait
+            sel_an = ChannelSelect(
+                channel_types=[discord.ChannelType.text],
+                placeholder="Salon d'annonce PROPRE à ce rôle…",
+                min_values=1, max_values=1, custom_id=f"actr_an_{self.rid}")
+            sel_an.callback = self._faire_salon("salon_annonce")
+            sel_ret = ChannelSelect(
+                channel_types=[discord.ChannelType.text],
+                placeholder="Salon de retour PROPRE à ce rôle…",
+                min_values=1, max_values=1, custom_id=f"actr_ret_{self.rid}")
+            sel_ret.callback = self._faire_salon("salon_retour")
 
+            b_seuils = Button(label="Seuils", emoji="✏️",
+                              style=discord.ButtonStyle.primary,
+                              custom_id=f"actr_ed_{self.rid}")
+            b_seuils.callback = self._cb_seuils
+            b_jour = Button(label=JOURS_SEMAINE[conf["jour_rappel"] % 7], emoji="📅",
+                            style=discord.ButtonStyle.secondary,
+                            custom_id=f"actr_j_{self.rid}")
+            b_jour.callback = self._cb_jour
+            b_actif = Button(
+                label="Suivi actif" if conf["actif"] else "Suivi suspendu",
+                emoji="🟢" if conf["actif"] else "⚪",
+                style=(discord.ButtonStyle.success if conf["actif"]
+                       else discord.ButtonStyle.secondary),
+                custom_id=f"actr_a_{self.rid}")
+            b_actif.callback = self._cb_actif
+            b_retr = Button(
+                label="Retire le rôle" if conf["retirer_role"] else "Ne retire pas",
+                emoji="🟢" if conf["retirer_role"] else "⚪",
+                style=(discord.ButtonStyle.success if conf["retirer_role"]
+                       else discord.ButtonStyle.secondary),
+                custom_id=f"actr_r_{self.rid}")
+            b_retr.callback = self._cb_retrait
+            b_reset = Button(label="Tout hériter du serveur", emoji="↩️",
+                             style=discord.ButtonStyle.secondary,
+                             custom_id=f"actr_z_{self.rid}")
+            b_reset.callback = self._cb_reset
+
+            items.append(discord.ui.ActionRow(sel_an))
+            items.append(discord.ui.ActionRow(sel_ret))
+            items.append(discord.ui.ActionRow(b_seuils, b_jour, b_actif, b_retr))
             items.append(discord.ui.ActionRow(
-                b_ed, b_rt, _bouton_retour(self._cb_retour, "act_seuils_back")))
+                b_reset, _bouton_retour(self._cb_retour, f"actr_b_{self.rid}")))
             await self._envoyer(i, items, Palette.INFO, edit)
         except Exception as ex:
-            await self._secours(i, ex, "seuils")
+            await self._secours(i, ex, "role")
 
-    async def _cb_modifier(self, i):
+    def _faire_salon(self, cle):
+        async def _cb(i):
+            try:
+                await activite.ecrire_config_role(
+                    self.g.id, self.rid, **{cle: int(i.data["values"][0])})
+                await self.render_to(i, edit=True)
+            except Exception as ex:
+                await self._secours(i, ex, f"role {cle}")
+        return _cb
+
+    async def _cb_seuils(self, i):
         c = await activite.config(self.g.id)
         await i.response.send_modal(
-            _SeuilsModal(self, self.rid, activite.seuils_du_role(c, self.rid)))
+            _SeuilsModal(self, self.rid, activite.config_du_role(c, self.rid)))
 
-    async def _cb_toggle_retrait(self, i):
+    async def _cb_jour(self, i):
         try:
             c = await activite.config(self.g.id)
-            roles = dict(c["activite_roles"] or {})
-            conf = dict(roles.get(str(self.rid)) or {})
-            conf["retirer_role"] = not activite.seuils_du_role(c, self.rid)["retirer_role"]
-            roles[str(self.rid)] = conf
-            await _db_set(self.g.id, "activite_roles", roles)
+            conf = activite.config_du_role(c, self.rid)
+            await activite.ecrire_config_role(
+                self.g.id, self.rid, jour_rappel=(conf["jour_rappel"] + 1) % 7)
             await self.render_to(i, edit=True)
         except Exception as ex:
-            await self._secours(i, ex, "seuils toggle")
+            await self._secours(i, ex, "role jour")
+
+    async def _cb_actif(self, i):
+        try:
+            c = await activite.config(self.g.id)
+            conf = activite.config_du_role(c, self.rid)
+            await activite.ecrire_config_role(
+                self.g.id, self.rid, actif=not conf["actif"])
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "role actif")
+
+    async def _cb_retrait(self, i):
+        try:
+            c = await activite.config(self.g.id)
+            conf = activite.config_du_role(c, self.rid)
+            await activite.ecrire_config_role(
+                self.g.id, self.rid, retirer_role=not conf["retirer_role"])
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "role retrait")
+
+    async def _cb_reset(self, i):
+        """Efface les réglages propres au rôle : il repasse sur ceux du serveur.
+
+        On garde `actif` et le marqueur de semaine : remettre à zéro une
+        configuration ne doit pas relancer un rappel déjà envoyé.
+        """
+        try:
+            c = await activite.config(self.g.id)
+            conf = activite.config_du_role(c, self.rid)
+            await activite.ecrire_config_role(
+                self.g.id, self.rid,
+                rappel=None, retrait=None, expulsion=None,
+                salon_annonce=0, salon_retour=0, jour_rappel=None,
+                actif=conf["actif"], derniere_semaine=conf["derniere_semaine"])
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "role reset")
 
     async def _cb_retour(self, i):
         await ActiviteCiblesPanelV2(self.u, self.g).render_to(i, edit=True)

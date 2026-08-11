@@ -44,19 +44,32 @@ def setup(*, log=None):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def classer(guild) -> dict:
-    """Range les membres concernés par palier. NE MODIFIE RIEN.
+    """Range les membres concernés par RÔLE, puis par palier. NE MODIFIE RIEN.
 
-    C'est la fonction que le panneau appelle pour l'aperçu, et celle que le
-    passage quotidien appelle avant d'agir : même calcul, donc ce que le staff
-    voit est exactement ce qui sera appliqué.
+    Chaque rôle surveillé a son propre suivi : ses seuils, son salon, son jour.
+    Le classement est donc groupé par rôle — c'est ce qui permet à deux rôles de
+    vivre sur des rythmes totalement différents sans se mélanger.
 
-    Retourne {"rappel": [...], "retrait": [...], "expulsion": [...],
-              "actifs": n, "suivis": n}
+    Retourne :
+      {"groupes": {role_id: {"role": obj|None, "conf": {...},
+                             "rappel": [...], "retrait": [...], "expulsion": [...]}},
+       "suivis": n, "actifs": n,
+       "rappel"/"retrait"/"expulsion": [...]}   ← totaux tous rôles confondus
     """
     cfg_act = await activite.config(guild.id)
-    out = {"rappel": [], "retrait": [], "expulsion": [], "actifs": 0, "suivis": 0}
+    out = {"groupes": {}, "suivis": 0, "actifs": 0,
+           "rappel": [], "retrait": [], "expulsion": []}
     if not await activite.actif(guild.id):
         return out
+
+    def _groupe(cle, role_obj):
+        if cle not in out["groupes"]:
+            out["groupes"][cle] = {
+                "role": role_obj,
+                "conf": activite.config_du_role(cfg_act, cle),
+                "rappel": [], "retrait": [], "expulsion": [],
+            }
+        return out["groupes"][cle]
 
     for member in guild.members:
         try:
@@ -70,24 +83,35 @@ async def classer(guild) -> dict:
                 continue
 
             role = activite.role_surveille_du_membre(member, cfg_act)
-            seuils = (activite.seuils_du_role(cfg_act, role.id) if role
-                      else {"rappel": activite.SEUIL_RAPPEL_DEFAUT,
-                            "retrait": activite.SEUIL_RETRAIT_DEFAUT,
-                            "expulsion": activite.SEUIL_EXPULSION_DEFAUT,
-                            "retirer_role": True})
+            cle = str(role.id) if role is not None else activite.ROLE_TOUS
+            g = _groupe(cle, role)
+            conf = g["conf"]
 
-            fiche = {"member": member, "jours": jours, "role": role, "seuils": seuils}
+            #  Un rôle peut être suspendu seul, sans éteindre tout le système.
+            if not conf["actif"]:
+                out["actifs"] += 1
+                continue
+
+            fiche = {"member": member, "jours": jours, "role": role,
+                     "seuils": conf, "groupe": cle}
             #  Du plus grave au moins grave : un membre n'apparaît qu'une fois.
-            if jours >= seuils["expulsion"]:
-                out["expulsion"].append(fiche)
-            elif jours >= seuils["retrait"]:
-                out["retrait"].append(fiche)
-            elif jours >= seuils["rappel"]:
-                out["rappel"].append(fiche)
+            if jours >= conf["expulsion"]:
+                palier = "expulsion"
+            elif jours >= conf["retrait"]:
+                palier = "retrait"
+            elif jours >= conf["rappel"]:
+                palier = "rappel"
             else:
                 out["actifs"] += 1
+                continue
+            g[palier].append(fiche)
+            out[palier].append(fiche)
         except Exception as ex:
             _log(f"[activite classer {getattr(member, 'id', '?')}] {ex}")
+
+    for g in out["groupes"].values():
+        for k in ("rappel", "retrait", "expulsion"):
+            g[k].sort(key=lambda f: -f["jours"])
     for k in ("rappel", "retrait", "expulsion"):
         out[k].sort(key=lambda f: -f["jours"])
     return out

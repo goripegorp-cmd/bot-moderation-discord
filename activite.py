@@ -184,15 +184,88 @@ async def config(guild_id: int) -> dict:
     return out
 
 
-def seuils_du_role(cfg_act: dict, role_id: int) -> dict:
-    """Seuils d'un rôle surveillé, complétés par les défauts."""
+#  Pseudo-identifiant du mode « tout le serveur ». Il se configure exactement
+#  comme un rôle — même écran, mêmes réglages — pour qu'il n'y ait qu'UNE façon
+#  de raisonner dans tout le code.
+ROLE_TOUS = "*"
+
+#  Ce que chaque rôle surveillé peut définir POUR LUI SEUL. Une valeur laissée à
+#  `None` (ou 0 pour un salon) veut dire « prends le réglage global du serveur ».
+#  C'est ce qui permet à un rôle d'être totalement indépendant d'un autre sans
+#  obliger à tout ressaisir quand on ne veut changer qu'un seuil.
+CLES_ROLE = {
+    "actif": True,           # ce rôle est-il suivi ? (on peut le suspendre seul)
+    "rappel": None,          # jours avant le rappel public
+    "retrait": None,         # jours avant le retrait du rôle
+    "expulsion": None,       # jours avant la proposition d'expulsion
+    "retirer_role": True,    # retirer effectivement le rôle au palier 2 ?
+    "salon_annonce": 0,      # SON salon d'annonce (0 = celui du serveur)
+    "salon_retour": 0,       # SON salon de retour   (0 = celui du serveur)
+    "jour_rappel": None,     # SON jour de rappel    (None = celui du serveur)
+    "derniere_semaine": "",  # marqueur d'envoi PROPRE à ce rôle
+}
+
+
+def config_du_role(cfg_act: dict, role_id) -> dict:
+    """Configuration COMPLÈTE d'un rôle surveillé, réglages globaux en repli.
+
+    Chaque rôle a son propre suivi : ses seuils, son salon d'annonce, son salon
+    de retour, son jour de rappel, et son propre marqueur de semaine. Deux rôles
+    peuvent donc vivre sur des rythmes totalement différents — l'un relancé le
+    lundi dans le salon général au bout de 3 jours, l'autre le vendredi dans un
+    salon privé au bout de 30.
+
+    Un champ non renseigné retombe sur le réglage du serveur : on ne force pas à
+    tout ressaisir pour changer un seul seuil.
+    """
     brut = (cfg_act.get("activite_roles") or {}).get(str(role_id)) or {}
+
+    def _n(cle, defaut_global):
+        v = brut.get(cle)
+        return int(v) if v not in (None, "", 0) else int(defaut_global)
+
+    jour = brut.get("jour_rappel")
     return {
-        "rappel": int(brut.get("rappel", SEUIL_RAPPEL_DEFAUT) or SEUIL_RAPPEL_DEFAUT),
-        "retrait": int(brut.get("retrait", SEUIL_RETRAIT_DEFAUT) or SEUIL_RETRAIT_DEFAUT),
-        "expulsion": int(brut.get("expulsion", SEUIL_EXPULSION_DEFAUT) or SEUIL_EXPULSION_DEFAUT),
+        "actif": bool(brut.get("actif", True)),
+        "rappel": _n("rappel", SEUIL_RAPPEL_DEFAUT),
+        "retrait": _n("retrait", SEUIL_RETRAIT_DEFAUT),
+        "expulsion": _n("expulsion", SEUIL_EXPULSION_DEFAUT),
         "retirer_role": bool(brut.get("retirer_role", True)),
+        "salon_annonce": int(brut.get("salon_annonce") or
+                             cfg_act.get("activite_salon_annonce") or 0),
+        "salon_retour": int(brut.get("salon_retour") or
+                            cfg_act.get("activite_salon_retour") or 0),
+        "jour_rappel": (int(jour) if jour not in (None, "")
+                        else int(cfg_act.get("activite_jour_rappel") or 0)),
+        "derniere_semaine": str(brut.get("derniere_semaine") or ""),
+        #  Vrai si le champ a été réglé sur ce rôle : le panneau affiche alors
+        #  « propre au rôle » plutôt que « hérité du serveur ».
+        "_propres": {k for k in ("rappel", "retrait", "expulsion",
+                                 "salon_annonce", "salon_retour", "jour_rappel")
+                     if brut.get(k) not in (None, "", 0)},
     }
+
+
+def seuils_du_role(cfg_act: dict, role_id) -> dict:
+    """Alias historique — la configuration complète contient les seuils."""
+    return config_du_role(cfg_act, role_id)
+
+
+async def ecrire_config_role(guild_id: int, role_id, **champs) -> None:
+    """Écrit un ou plusieurs champs de la config d'UN rôle, sans toucher aux autres.
+
+    Lecture-modification-écriture sur le dict complet : `db_set` ne sait écrire
+    qu'une clé de premier niveau, et deux rôles ne doivent jamais s'écraser.
+    """
+    try:
+        c = await config(guild_id)
+        roles = dict(c.get("activite_roles") or {})
+        conf = dict(roles.get(str(role_id)) or {})
+        conf.update(champs)
+        roles[str(role_id)] = conf
+        await _db_set(guild_id, "activite_roles", roles)
+    except Exception as ex:
+        _log(f"[activite ecrire_config_role] {ex}")
 
 
 async def actif(guild_id: int) -> bool:

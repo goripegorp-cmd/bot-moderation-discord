@@ -328,3 +328,78 @@ def test_source_inconnue_est_ignoree():
     finally:
         activite._get_db = ancien
     assert appels == [], "une source inconnue ne doit rien ecrire"
+
+
+# ─── configuration INDEPENDANTE par role ────────────────────────────────────
+
+_GLOBAL = {
+    "activite_salon_annonce": 111,
+    "activite_salon_retour": 222,
+    "activite_jour_rappel": 0,
+}
+
+
+def _cfg(roles):
+    d = dict(_GLOBAL)
+    d["activite_roles"] = roles
+    return d
+
+
+def test_role_herite_du_serveur_quand_rien_nest_defini():
+    c = activite.config_du_role(_cfg({"7": {}}), 7)
+    assert c["salon_annonce"] == 111
+    assert c["salon_retour"] == 222
+    assert c["jour_rappel"] == 0
+    assert c["rappel"] == activite.SEUIL_RAPPEL_DEFAUT
+    assert c["_propres"] == set(), "rien ne doit etre marque comme propre"
+
+
+def test_role_totalement_independant():
+    """Le coeur de la demande : deux roles, deux suivis sans rapport."""
+    roles = {
+        "1": {"rappel": 3, "retrait": 5, "expulsion": 7,
+              "salon_annonce": 900, "jour_rappel": 0},
+        "2": {"rappel": 30, "retrait": 60, "expulsion": 90,
+              "salon_annonce": 901, "jour_rappel": 4},
+    }
+    a = activite.config_du_role(_cfg(roles), 1)
+    b = activite.config_du_role(_cfg(roles), 2)
+    assert (a["rappel"], a["retrait"], a["expulsion"]) == (3, 5, 7)
+    assert (b["rappel"], b["retrait"], b["expulsion"]) == (30, 60, 90)
+    assert a["salon_annonce"] != b["salon_annonce"]
+    assert a["jour_rappel"] != b["jour_rappel"]
+
+
+def test_reglage_partiel_ne_touche_pas_le_reste():
+    """Regler un seul seuil ne doit pas forcer a tout ressaisir."""
+    c = activite.config_du_role(_cfg({"5": {"expulsion": 60}}), 5)
+    assert c["expulsion"] == 60
+    assert c["rappel"] == activite.SEUIL_RAPPEL_DEFAUT
+    assert c["salon_annonce"] == 111          # herite
+    assert c["_propres"] == {"expulsion"}
+
+
+def test_role_suspendable_seul():
+    """On doit pouvoir mettre UN role en pause sans eteindre le systeme."""
+    assert activite.config_du_role(_cfg({"9": {"actif": False}}), 9)["actif"] is False
+    assert activite.config_du_role(_cfg({"9": {}}), 9)["actif"] is True
+
+
+def test_marqueur_de_semaine_est_propre_au_role():
+    """Sinon un role relance le lundi bloquerait celui du vendredi."""
+    roles = {"1": {"derniere_semaine": "2026-S33"}, "2": {}}
+    assert activite.config_du_role(_cfg(roles), 1)["derniere_semaine"] == "2026-S33"
+    assert activite.config_du_role(_cfg(roles), 2)["derniere_semaine"] == ""
+
+
+def test_mode_tout_le_monde_se_configure_comme_un_role():
+    c = activite.config_du_role(_cfg({activite.ROLE_TOUS: {"rappel": 2}}),
+                                activite.ROLE_TOUS)
+    assert c["rappel"] == 2
+    assert c["salon_annonce"] == 111
+
+
+def test_seuils_du_role_reste_compatible():
+    """L'ancien nom doit continuer de marcher : du code l'appelle encore."""
+    c = activite.seuils_du_role(_cfg({"3": {"rappel": 4}}), 3)
+    assert c["rappel"] == 4 and "retirer_role" in c

@@ -51,9 +51,38 @@ redémarre ou passe plusieurs fois dans la journée.
 
 ---
 
-## 2. Ce qui arrive à un membre inactif
+## 2. Chaque rôle a SON propre suivi
 
-Trois paliers, avec des seuils que **vous** réglez, **rôle par rôle**.
+C'est le cœur du système : vous ne réglez pas « l'activité du serveur », vous
+réglez **le suivi de chaque rôle, séparément**.
+
+Un rôle peut définir, rien que pour lui :
+
+| Réglage | Exemple |
+|---|---|
+| Ses **trois seuils** | Rappel à 3 j, retrait à 5 j, expulsion à 7 j |
+| Son **salon d'annonce** | Les recrues relancées dans #recrutement |
+| Son **salon de retour** | Où ce rôle-là revient se signaler |
+| Son **jour de rappel** | Lundi pour l'un, vendredi pour l'autre |
+| **Retirer le rôle ou non** | Certains rôles ne se retirent jamais |
+| **Suspendre ce rôle seul** | Sans éteindre le reste du système |
+
+Deux rôles peuvent donc vivre sur des rythmes qui n'ont rien à voir. Un réglage
+laissé vide retombe sur celui du serveur — vous n'avez pas à tout ressaisir pour
+changer un seul seuil, et l'écran marque `(serveur)` à côté de ce qui est hérité.
+
+Le **marqueur de semaine est propre à chaque rôle** : un rôle relancé le lundi
+n'empêche pas celui du vendredi de partir.
+
+> Le menu « Configurer un rôle en détail » liste jusqu'à **25 rôles** — la limite
+> de Discord pour un menu déroulant.
+
+---
+
+## 3. Ce qui arrive à un membre inactif
+
+Les seuils ci-dessous sont les **défauts**, repris par tout rôle qui ne définit
+pas les siens.
 
 | Palier | Défaut | Ce qui se passe |
 |---|---|---|
@@ -72,7 +101,7 @@ quelqu'un revenu entre-temps est épargné.
 
 ---
 
-## 3. Qui n'est JAMAIS touché
+## 4. Qui n'est JAMAIS touché
 
 À aucun palier, jamais, même en cas de bug :
 
@@ -89,7 +118,7 @@ administrateur entre les deux.
 
 ---
 
-## 4. Le garde-fou qui peut tout arrêter
+## 5. Le garde-fou qui peut tout arrêter
 
 Si un passage veut agir sur **plus de 25 membres d'un coup**, il n'agit sur
 **personne** et vous alerte.
@@ -104,7 +133,7 @@ pour « débloquer » la situation** : cherchez d'abord pourquoi il s'est décle
 
 ---
 
-## 5. Récompenses : niveaux et VIP
+## 6. Récompenses : niveaux et VIP
 
 Tout dérive d'**une seule mesure** : le nombre de **jours actifs cumulés**.
 
@@ -125,7 +154,7 @@ le palier de retrait d'inactivité — pas au premier jour d'absence.
 
 ---
 
-## 6. Les trois salons
+## 7. Les salons du serveur
 
 | Salon | À quoi il sert | Qui doit le voir |
 |---|---|---|
@@ -136,15 +165,18 @@ le palier de retrait d'inactivité — pas au premier jour d'absence.
 ⚠️ **Ne les mélangez pas.** Mettre le salon staff en public exposerait la liste
 des membres proposés à l'expulsion.
 
-Le rappel n'est envoyé **qu'une fois par semaine**, le jour que vous choisissez.
+Ce sont les salons **par défaut**. Chaque rôle peut avoir les siens.
+
+Le rappel part **une fois par semaine par rôle**, le jour propre à ce rôle.
 
 ---
 
-## 7. Comment le mettre en route
+## 8. Comment le mettre en route
 
 1. `/configure` → **📊 Activité**
 2. **🎯 Qui est surveillé** → choisissez un rôle, ou « tout le serveur »
-3. **⚙️ Seuils** → réglez les trois paliers pour ce rôle
+3. **Configurer un rôle en détail** → ses seuils, son salon, son jour —
+   répétez pour chaque rôle, ils sont indépendants
 4. **📢 Salons** → les trois salons + le jour du rappel
 5. **🔎 Aperçu** → il vous dit d'abord **si le suivi capte vraiment** vos
    messages, votre vocal et vos réactions, puis qui serait concerné —
@@ -157,7 +189,7 @@ Le rappel n'est envoyé **qu'une fois par semaine**, le jour que vous choisissez
 
 ---
 
-## 8. Où est quoi
+## 9. Où est quoi
 
 | Fichier | Rôle |
 |---|---|

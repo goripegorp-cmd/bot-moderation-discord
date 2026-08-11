@@ -82,7 +82,11 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
 
     # ── 3. Classement + PLAFOND ──
     cl = await esc.classer(guild)
-    rap["classement"] = {k: (len(v) if isinstance(v, list) else v) for k, v in cl.items()}
+    rap["classement"] = {
+        "suivis": cl["suivis"], "actifs": cl["actifs"],
+        "rappel": len(cl["rappel"]), "retrait": len(cl["retrait"]),
+        "expulsion": len(cl["expulsion"]), "roles": len(cl.get("groupes") or {}),
+    }
     rap["fiches"] = cl
 
     total_actions = len(cl["retrait"]) + len(cl["expulsion"])
@@ -100,23 +104,41 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
             f"Vérifiez que le suivi tourne depuis assez longtemps.")
         return rap
 
-    # ── 4. Rappel hebdomadaire — UNE SEULE FOIS PAR SEMAINE ──
-    #  ⚠️ La boucle passe toutes les 6 h. Tester seulement « on est le bon jour »
-    #  enverrait QUATRE fois le même rappel le lundi. On mémorise donc la semaine
-    #  ISO du dernier envoi et on compare : un rappel par semaine, quel que soit
-    #  le nombre de passages, et sans dépendre de l'heure exacte du passage.
-    jour_voulu = int(cfg_act.get("activite_jour_rappel", 0) or 0)
+    # ── 4. Rappel hebdomadaire — PAR RÔLE, chacun sur son rythme ──
+    #  Chaque rôle a SON salon, SON jour et SON marqueur de semaine. Deux rôles
+    #  peuvent donc être relancés à des jours différents, dans des salons
+    #  différents, sans jamais se mélanger.
+    #
+    #  ⚠️ Le marqueur par rôle n'est pas un luxe : la boucle passe toutes les 6 h.
+    #  Sans lui, le rappel partirait QUATRE fois le jour choisi. Et un marqueur
+    #  global ferait qu'un rôle relancé le lundi empêcherait celui du vendredi.
     maintenant = cal.maintenant()
     semaine_courante = cal.semaine(maintenant)
-    est_le_jour = maintenant.weekday() == jour_voulu
-    deja_envoye = str(cfg_act.get("activite_derniere_semaine", "") or "") == semaine_courante
-
-    salon = guild.get_channel(int(cfg_act.get("activite_salon_annonce", 0) or 0))
-    salon_retour = guild.get_channel(int(cfg_act.get("activite_salon_retour", 0) or 0))
-
     envoyes = 0
-    if est_le_jour and not deja_envoye and salon is not None and not dry_run:
-        for fiches, avec_retrait in ((cl["rappel"], False), (cl["retrait"], True)):
+    detail_rappels = []
+
+    for cle, g in (cl.get("groupes") or {}).items():
+        conf = g["conf"]
+        if not conf["actif"]:
+            continue
+        if maintenant.weekday() != conf["jour_rappel"]:
+            continue
+        if conf["derniere_semaine"] == semaine_courante:
+            continue          # déjà relancé cette semaine pour CE rôle
+
+        salon = guild.get_channel(int(conf["salon_annonce"] or 0))
+        salon_retour = guild.get_channel(int(conf["salon_retour"] or 0))
+        nom = g["role"].name if g["role"] is not None else "tout le serveur"
+
+        if salon is None:
+            detail_rappels.append(f"{nom} : aucun salon d'annonce")
+            continue
+        if dry_run:
+            detail_rappels.append(
+                f"{nom} : {len(g['rappel'])} + {len(g['retrait'])} à relancer")
+            continue
+
+        for fiches, avec_retrait in ((g["rappel"], False), (g["retrait"], True)):
             txt = esc.texte_rappel(fiches, salon_retour, avec_retrait=avec_retrait)
             if not txt:
                 continue
@@ -124,18 +146,19 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
                 await salon.send(txt)
                 envoyes += 1
             except Exception as ex:
-                _log(f"[activite passage rappel] {ex}")
+                _log(f"[activite passage rappel {nom}] {ex}")
+
         #  Marquer la semaine MÊME si aucun message n'est parti (personne
         #  d'inactif) : sinon on retenterait à chaque passage de la journée.
         try:
-            await activite._db_set(guild.id, "activite_derniere_semaine", semaine_courante)
+            await activite.ecrire_config_role(
+                guild.id, cle, derniere_semaine=semaine_courante)
         except Exception as ex:
-            _log(f"[activite passage marque semaine] {ex}")
+            _log(f"[activite passage marque semaine {nom}] {ex}")
 
     rap["actions"]["messages_envoyes"] = envoyes
-    rap["actions"]["jour_de_rappel"] = est_le_jour
     rap["actions"]["semaine"] = semaine_courante
-    rap["actions"]["rappel_deja_envoye"] = deja_envoye
+    rap["actions"]["rappels_par_role"] = detail_rappels
 
     # ── 5. Retrait des rôles ──
     if dry_run:
