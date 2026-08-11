@@ -51,6 +51,11 @@ GARDER = {
     "grooming_detector", "nsfw_scan", "ocr_scan", "token_grabber",
     "webhook_leak", "webhook_tracker", "anti_token_leak", "compromised_detector",
     "honeypot", "delegations",
+    # ⚠️ AJOUTS 08/2026 — ils manquaient à cette liste, et deux d'entre eux sont
+    #    de la sécurité pure. Les supprimer aurait retiré une protection.
+    "impersonation_detector",  # usurpation de staff : nommée explicitement par l'owner
+    "member_risk",             # score de risque des nouvelles arrivées
+    "i18n",                    # socle de traduction, utilisé par les MP de sanction
     # Divers infra encore câblés
     "setup_wizard", "slash_commands_2026", "admin_panels_v2", "ui_usage",
     # Outillage : régénère INDEX.md (carte des symboles) — appelé par le workflow
