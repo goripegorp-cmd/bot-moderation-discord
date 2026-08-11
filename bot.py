@@ -27987,11 +27987,57 @@ async def on_ready():
 #                           📨 ON_INTERACTION POUR MESSAGES AUTO
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ACTIVITÉ — deux sources de plus, toutes deux volontaires
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.event
+async def on_thread_create(thread):
+    """Ouvrir un fil est un geste d'animation : celui qui le fait est présent."""
+    try:
+        if thread.guild and thread.owner_id:
+            membre = thread.guild.get_member(thread.owner_id)
+            if membre is not None and not membre.bot:
+                await activite_module.marquer_actif(
+                    thread.guild.id, thread.owner_id, activite_module.SOURCE_FIL)
+    except Exception as ex:
+        print(f"[activite on_thread_create] {ex}")
+
+
+@bot.event
+async def on_raw_poll_vote_add(payload):
+    """Voter à un sondage : exactement comme une réaction, un clic délibéré.
+
+    On écoute la version RAW pour capter aussi les votes sur d'anciens sondages
+    sortis du cache — même raison que pour les réactions.
+    """
+    try:
+        gid = getattr(payload, "guild_id", None)
+        uid = getattr(payload, "user_id", None)
+        if gid and uid:
+            await activite_module.marquer_actif(
+                gid, uid, activite_module.SOURCE_SONDAGE)
+    except Exception as ex:
+        print(f"[activite on_poll_vote] {ex}")
+
+
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
     """Repositionne les messages d'aide après les interactions (commandes slash, boutons, etc.)"""
     if not interaction.channel or not interaction.guild:
         return
+
+    # ═══ ACTIVITÉ — la source la plus fiable : un geste délibéré ═══
+    # Lancer une commande, cliquer un bouton ou choisir dans un menu ne peut pas
+    # arriver par accident, ni pendant qu'on dort. C'est le contraire du statut
+    # « en ligne » : ici, quelqu'un a forcément agi.
+    try:
+        if interaction.user is not None and not interaction.user.bot:
+            await activite_module.marquer_actif(
+                interaction.guild.id, interaction.user.id,
+                activite_module.SOURCE_INTERACTION)
+    except Exception as _ex_act:
+        print(f"[activite on_interaction] {_ex_act}")
 
     try:
         c = await cfg(interaction.guild.id)
@@ -39175,12 +39221,23 @@ async def on_voice_state_update(member, before, after):
     if member.bot:
         return
 
-    # ═══ ACTIVITÉ — source 2/3 : le vocal ═══
-    # On compte l'ARRIVÉE dans un salon (before sans salon, after avec), pas les
-    # changements d'état (micro coupé, sourdine) : rester muet dans un salon vide
-    # ne doit pas suffire à passer pour actif.
+    # ═══ ACTIVITÉ — le vocal, compté comme un GESTE et non comme une présence ═══
+    # RESTER assis dans un salon ne prouve rien : on peut y dormir des jours. Ne
+    # compter que l'entrée ne suffit pas non plus — quelqu'un entré lundi 20h et
+    # resté jusqu'à mardi 2h ne serait crédité que du lundi.
+    # On retient donc les gestes VOLONTAIRES, qui se reproduisent naturellement
+    # au fil d'une vraie session :
+    #   · entrer dans un salon, ou en changer ;
+    #   · reprendre son micro (sortir de sourdine) — l'intention de parler ;
+    #   · lancer un partage d'écran ou la caméra.
     try:
-        if after.channel is not None and before.channel is None:
+        entre = after.channel is not None and before.channel is None
+        change = (after.channel is not None and before.channel is not None
+                  and after.channel.id != before.channel.id)
+        reprend_micro = before.self_mute and not after.self_mute
+        se_montre = ((after.self_stream and not before.self_stream)
+                     or (after.self_video and not before.self_video))
+        if entre or change or reprend_micro or se_montre:
             await activite_module.marquer_actif(
                 member.guild.id, member.id, activite_module.SOURCE_VOCAL)
     except Exception as _ex_act:

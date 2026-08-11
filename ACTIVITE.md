@@ -7,16 +7,33 @@
 
 ## 1. Qu'est-ce qu'être « actif » ?
 
-Un membre est actif **sur une journée** s'il fait **au moins une** de ces trois choses :
+Un membre est actif **sur une journée** s'il pose **au moins un geste
+volontaire** parmi ces six :
 
-| | Ce qui compte | Ce qui ne compte pas |
-|---|---|---|
-| 💬 **Message** | Écrire dans n'importe quel salon | Un message supprimé compte quand même — il a été écrit |
-| 🎤 **Vocal** | **Entrer** dans un salon vocal | Couper son micro, se mettre en sourdine, changer de salon |
-| 👍 **Réaction** | Réagir à un message, même ancien | Retirer une réaction |
+| | Ce qui compte |
+|---|---|
+| 💬 **Message** | Écrire dans n'importe quel salon (un message supprimé compte : il a été écrit) |
+| 🎤 **Vocal** | Entrer dans un salon, en changer, **reprendre son micro**, partager son écran ou sa caméra |
+| 👍 **Réaction** | Réagir à un message, même très ancien |
+| 🎛️ **Commande ou bouton** | Lancer une commande, cliquer un bouton, choisir dans un menu |
+| 🧵 **Fil** | Ouvrir un fil de discussion |
+| 📊 **Sondage** | Voter à un sondage |
 
 Une seule suffit. 200 messages dans la soirée valent exactement une journée,
 comme un seul message : le système mesure la **présence**, pas le volume.
+
+### ⚠️ Ce qui ne comptera jamais
+
+**Le statut « en ligne ».** Être connecté ne prouve rien : un téléphone oublié
+allumé, un client jamais fermé, un compte secondaire en veille affichent tous
+« en ligne » sans qu'aucun humain soit là. C'est exactement ce que ce système
+doit attraper — le compter reviendrait à récompenser la fraude.
+
+**Rester assis dans un salon vocal.** On peut y dormir des jours. Seuls les
+gestes comptent : entrer, changer de salon, reprendre son micro, se montrer.
+Ces gestes se reproduisent naturellement au fil d'une vraie session, donc
+quelqu'un qui participe vraiment est crédité chaque jour — même s'il ne quitte
+jamais le vocal.
 
 ### Les bornes de temps
 

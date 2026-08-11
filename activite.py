@@ -6,10 +6,19 @@ système ET désigné au moins un rôle surveillé (ou « tout le monde »).
 ═══════════════════════════════════════════════════════════════════════════════
 LE PRINCIPE
 ═══════════════════════════════════════════════════════════════════════════════
-Un membre est ACTIF sur une journée s'il fait AU MOINS UNE des trois choses :
-  · envoyer un message      (source « m »)
-  · se connecter en vocal   (source « v »)
-  · réagir à un message     (source « r »)
+Un membre est ACTIF sur une journée s'il pose AU MOINS UN geste volontaire :
+  · envoyer un message                   (source « m »)
+  · parler en vocal — voir plus bas      (source « v »)
+  · réagir à un message                  (source « r »)
+  · utiliser une commande ou un bouton   (source « i »)
+  · ouvrir un fil de discussion          (source « f »)
+  · voter à un sondage                   (source « s »)
+
+⚠️ LE STATUT « EN LIGNE » N'EST PAS UNE SOURCE, et ne le sera pas. Être connecté
+ne prouve rien : un téléphone oublié allumé, un compte secondaire en veille
+affichent « en ligne » sans qu'aucun humain soit là. Idem pour le fait de RESTER
+assis dans un salon vocal : seule l'entrée, le changement de salon, la reprise du
+micro ou le partage d'écran comptent — des gestes, pas une présence.
 Une seule suffit. La journée va de minuit à minuit **heure de Paris**, et la
 semaine du lundi 00h00 au lundi 00h00 — voir `activite_calendrier.py`.
 
@@ -50,14 +59,26 @@ import activite_calendrier as cal
 #  ici — c'est là que se cachent les décalages d'une ou deux heures.
 JOUR_FMT = cal.JOUR_FMT
 
-#  Les trois sources d'activité. La valeur est la lettre stockée en base.
+#  Les sources d'activité. La valeur est la lettre stockée en base.
+#
+#  ⚠️ CE QUI N'EST PAS UNE SOURCE, ET NE LE SERA PAS : le STATUT EN LIGNE.
+#  Être « connecté » ne prouve rien — un téléphone oublié allumé, un client
+#  ouvert en permanence, un compte secondaire en veille affichent tous « en
+#  ligne » sans qu'aucun humain soit là. C'est justement ce que ce système doit
+#  attraper. Chaque source ci-dessous demande un GESTE VOLONTAIRE.
 SOURCE_MESSAGE = "m"
 SOURCE_VOCAL = "v"
 SOURCE_REACTION = "r"
+SOURCE_INTERACTION = "i"      # commande, bouton, menu déroulant
+SOURCE_FIL = "f"              # a ouvert un fil de discussion
+SOURCE_SONDAGE = "s"          # a voté à un sondage
 SOURCES = {
     SOURCE_MESSAGE: "message",
     SOURCE_VOCAL: "vocal",
     SOURCE_REACTION: "réaction",
+    SOURCE_INTERACTION: "commande ou bouton",
+    SOURCE_FIL: "fil ouvert",
+    SOURCE_SONDAGE: "vote à un sondage",
 }
 
 #  Seuils par défaut, en JOURS d'inactivité. Chaque rôle surveillé peut avoir les

@@ -146,9 +146,12 @@ def test_systeme_desactive_par_defaut():
     assert activite.CLES_DEFAUT["activite_roles"] == {}
 
 
-def test_les_trois_sources_existent():
-    assert set(activite.SOURCES) == {
-        activite.SOURCE_MESSAGE, activite.SOURCE_VOCAL, activite.SOURCE_REACTION}
+def test_les_sources_historiques_existent_toujours():
+    """Message, vocal et reaction sont les trois d'origine : elles ne doivent
+    jamais disparaitre au fil des ajouts."""
+    for s in (activite.SOURCE_MESSAGE, activite.SOURCE_VOCAL,
+              activite.SOURCE_REACTION):
+        assert s in activite.SOURCES
 
 
 # ─── récompenses : la courbe de niveaux ─────────────────────────────────────
@@ -276,3 +279,52 @@ def test_jours_entre_inconnu_renvoie_none():
 def test_jour_est_stable_dans_la_journee():
     d = _le("2026-08-12")
     assert cal.jour(d.replace(hour=0, minute=1)) == cal.jour(d.replace(hour=23, minute=59))
+
+
+# ─── les sources : ce qui compte, et surtout ce qui ne compte pas ───────────
+
+def test_six_sources_declarees():
+    assert len(activite.SOURCES) == 6
+    for lettre in "mvrifs":
+        assert lettre in activite.SOURCES
+
+
+def test_chaque_source_a_une_lettre_unique():
+    """Les lettres s'accumulent dans une colonne texte : une collision
+    ferait passer un vote de sondage pour un message."""
+    assert len(set(activite.SOURCES)) == len(activite.SOURCES)
+    for lettre in activite.SOURCES:
+        assert len(lettre) == 1
+
+
+def test_le_statut_en_ligne_n_est_pas_une_source():
+    """Garde-fou explicite : être connecte ne doit JAMAIS compter.
+
+    Un telephone oublie allume, un compte secondaire en veille affichent
+    « en ligne » sans humain derriere — c'est exactement ce qu'on veut attraper.
+    """
+    interdits = ("presence", "statut", "status", "online", "en_ligne", "connecte")
+    for lettre, nom in activite.SOURCES.items():
+        for mot in interdits:
+            assert mot not in nom.lower(), f"source suspecte : {nom}"
+
+
+def test_source_inconnue_est_ignoree():
+    """marquer_actif ne doit rien ecrire pour une lettre non declaree."""
+    import asyncio
+    appels = []
+
+    class _FauxDB:
+        async def execute(self, *a, **k): appels.append(a)
+        async def commit(self): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    ancien = activite._get_db
+    activite._get_db = lambda: _FauxDB()
+    try:
+        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+            activite.marquer_actif(1, 2, "ZZZ"))
+    finally:
+        activite._get_db = ancien
+    assert appels == [], "une source inconnue ne doit rien ecrire"
