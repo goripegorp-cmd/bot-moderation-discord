@@ -4178,6 +4178,9 @@ async def cfg(gid):
         'link_allowed_channels': [], 'image_allowed_channels': [],
         'phishing_action': 'delete', 'scam_action': 'mute', 'spam_action': 'mute',
         'compromised_action': 'mute', 'qrcode_action': 'mute', 'alt_action': 'kick',
+        # anti_newaccount : rendu configurable 08/2026. « kick » = comportement historique,
+        # à l'octet près (DM + immunités via _kick_young_account).
+        'newaccount_action': 'kick', 'newaccount_mute_duration': 60,
         'spam_max': 5, 'spam_interval': 5, 'caps_percent': 70, 'newaccount_days': 7,
         # Échelle anti-spam (owner 2026-07-17) : rappels 1-3 → avertissement officiel (4e et 5e,
         # avec privation VIP) → sanction. Un spam ne déclenche QUE si le contenu est TOXIQUE
@@ -25652,18 +25655,30 @@ class ProtDetailV2(LayoutView):
             ))
 
         elif self.key == "anti_compromised":
+            # Ce bloc décrivait `check_compromised_behavior`, une fonction morte, et
+            # affichait une ligne « Sanction » construite sur des clés jamais appliquées.
+            # Il décrit maintenant ce que le détecteur fait RÉELLEMENT.
+            _cad_ch = self.g.get_channel(
+                c.get('compromised_alerts_channel', 0)
+                or c.get('log_anti_compromised', 0)
+                or c.get('mod_log_channel', 0)
+            )
             items.append(v2_body(
                 "🔐 **Détection des comptes compromis/hackés**\n\n"
-                "Détecte les comportements suspects indiquant qu'un compte a été compromis :\n"
-                "• Spam de @everyone avec liens\n"
-                "• Messages identiques répétés\n"
-                "• Premier message = lien suspect"
+                "Chaque message reçoit un score de compromission : lien de phishing connu, "
+                "invitation Discord doublée d'une mention massive, même message répété dans "
+                "plusieurs salons, compte récent qui poste soudainement un lien…"
             ))
-            sl = _sanction_line(self.key)
-            if sl: items.append(v2_body(sl))
             items.append(v2_body(
-                f"📊 **Détections** · `{len(PHISHING_DOMAINS)}` domaines · "
-                f"`{len(SCAM_KEYWORDS)}` mots-clés · `{len(COMPROMISED_PATTERNS)}` patterns"
+                f"🎯 **Seuil** · `{c.get('compromised_alert_threshold', 60)}`/100  ·  "
+                f"⏱️ **Anti-rafale** · `{c.get('compromised_alert_cooldown', 300)}` s\n"
+                f"📬 **Dossier envoyé dans** · "
+                f"{_cad_ch.mention if _cad_ch else '⚠️ _aucun salon — utilise « 📜 Log »_'}"
+            ))
+            items.append(v2_body(
+                "⚡ **Sanction** · aucune sanction automatique. Le compte est **gelé** et un "
+                "dossier avec les boutons Mute 24 h / Kick / Ban est posté pour le staff "
+                "(kick et ban réservés au fondateur)."
             ))
 
         elif self.key == "anti_qrcode":
@@ -25798,6 +25813,24 @@ class ProtDetailV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_sanction(self, i):
+        # Trois protections ne se règlent PAS par ActionConfigPanelV2 : il écrirait une clé
+        # que le chemin d'exécution ne relit jamais, donc un bouton sans effet (UI.md §3).
+        if self.key == "anti_badwords":
+            # La sanction réelle est badwords_sanction_action / badwords_sanction_duration,
+            # lues par _badword_strike. ActionConfigPanelV2 écrirait `badwords_action`,
+            # clé qui n'existe nulle part ailleurs dans le fichier.
+            return await _BadwordsSanctionActionView(self.u, self.g).render_to(i, edit=True)
+        if self.key == "anti_raid":
+            # La riposte anti-raid vit dans son propre panneau (raid_config.action).
+            return await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+        if self.key == "anti_compromised":
+            # Cette protection ne sanctionne pas automatiquement : le panneau doit le dire
+            # plutôt que de proposer un réglage qui ne s'appliquerait jamais.
+            return await i.response.send_message(
+                "ℹ️ Cette protection ne sanctionne **pas** automatiquement : elle gèle le "
+                "compte et ouvre un dossier que le staff tranche à la main.",
+                ephemeral=True,
+            )
         v = ActionConfigPanelV2(self.u, self.g, self.key)
         await v.render_to(i, edit=True)
 
@@ -26516,7 +26549,9 @@ _PROT_ACTION_KEYS = {
     'anti_link': 'link_action',
     'anti_invite': 'invite_action',
     'anti_image': 'image_action',
-    'anti_badwords': 'badwords_action',
+    # `badwords_action` n'était lue NULLE PART : la sanction réelle des insultes utilise
+    # badwords_sanction_action (lue par _badword_strike). Corrigé 08/2026.
+    'anti_badwords': 'badwords_sanction_action',
     'anti_caps': 'caps_action',
 }
 _PROT_DURATION_KEYS = {
@@ -26529,7 +26564,9 @@ _PROT_DURATION_KEYS = {
     'anti_link': 'link_mute_duration',
     'anti_invite': 'invite_mute_duration',
     'anti_image': 'image_mute_duration',
-    'anti_badwords': 'badwords_mute_duration',
+    # Symétrique de _PROT_ACTION_KEYS : la durée réellement appliquée aux insultes est
+    # badwords_sanction_duration (réglée par « ⚙️ Configurer » → « Seuils »).
+    'anti_badwords': 'badwords_sanction_duration',
     'anti_caps': 'caps_mute_duration',
 }
 _PROT_DEFAULT_ACTIONS = {
@@ -26537,16 +26574,23 @@ _PROT_DEFAULT_ACTIONS = {
     'anti_compromised': 'mute', 'anti_qrcode': 'mute',
     'anti_spam': 'mute', 'anti_mass_mention': 'mute',
     'anti_link': 'delete', 'anti_invite': 'delete',
-    'anti_image': 'delete', 'anti_badwords': 'delete',
+    # anti_badwords : le panneau annonçait « delete / 5 min » alors que le chemin réel
+    # (_badword_strike) applique un mute de 60 min. On aligne l'affiché sur l'appliqué —
+    # ça ne durcit rien, ça arrête de mentir.
+    'anti_image': 'delete', 'anti_badwords': 'mute',
     'anti_caps': 'delete',
+    # anti_newaccount : le kick était codé en dur, sans clé lisible. Déclaré ici pour que
+    # le panneau affiche KICK (et non le repli générique « delete / 5 min »).
+    'anti_newaccount': 'kick',
 }
 _PROT_DEFAULT_DURATIONS = {
     'anti_phishing': 60, 'anti_scam': 60,
     'anti_compromised': 60, 'anti_qrcode': 30,
     'anti_spam': 10, 'anti_mass_mention': 10,
     'anti_link': 5, 'anti_invite': 5,
-    'anti_image': 5, 'anti_badwords': 5,
+    'anti_image': 5, 'anti_badwords': 60,
     'anti_caps': 5,
+    'anti_newaccount': 60,
 }
 
 
@@ -43184,10 +43228,26 @@ async def on_member_join(m):
             days = c.get('newaccount_days', 7)
             age = (now() - m.created_at.replace(tzinfo=timezone.utc)).days
             if age < days:
-                await send_log(m.guild, 'anti_newaccount', m, None, "Compte trop récent — KICK", f"Âge: {age} jour(s)")
+                # Le bouton « ⚡ Sanction » de cette protection n'avait AUCUNE clé lisible :
+                # le kick était codé en dur, donc le réglage était purement décoratif.
+                act = str(c.get('newaccount_action', 'kick') or 'kick')
+                if act not in ('delete', 'mute', 'kick', 'ban'):
+                    act = 'kick'
+                await send_log(
+                    m.guild, 'anti_newaccount', m, None,
+                    f"Compte trop récent — {'SURVEILLANCE' if act == 'delete' else act.upper()}",
+                    f"Âge: {age} jour(s)",
+                )
                 # owner 2026-06-21 : compte trop jeune → KICK + DM (jamais ban/isolement),
-                # seuil JAMAIS révélé au membre.
-                await _kick_young_account(m, f"Compte trop récent ({age} j) — anti-raid auto")
+                # seuil JAMAIS révélé au membre. « kick » RESTE LE DÉFAUT et passe toujours
+                # par _kick_young_account (DM + immunités + kick direct) — surtout PAS par
+                # sanction(), qui dégraderait ce kick automatique en isolement.
+                if act == 'kick':
+                    await _kick_young_account(m, f"Compte trop récent ({age} j) — anti-raid auto")
+                elif act in ('mute', 'ban'):
+                    await sanction(m, act, int(c.get('newaccount_mute_duration', 60) or 60),
+                                   f"Compte trop récent ({age} j)", m.guild)
+                # act == 'delete' : surveillance seule, aucune sanction à l'arrivée.
                 return  # Ne pas continuer
         
         # ═══════════════ ANTI-ALT (Comptes Secondaires) ═══════════════
@@ -44606,9 +44666,22 @@ async def _check_compromised_account(msg):
         return
 
     c = await cfg(msg.guild.id)
-    channel_id = c.get('compromised_alerts_channel', 0)
-    if not channel_id:
-        return  # Pas configuré → pas de détection
+
+    # Le bouton « 🔐 Anti-Compromis » (PROTS) commande RÉELLEMENT cette détection.
+    # Avant 08/2026 il ne branchait rien : il basculait une clé que personne ne lisait.
+    # Fail-closed : clé absente → protection ACTIVE.
+    if not c.get('anti_compromised', 1):
+        return
+
+    # ⚠️ CORRECTIF 08/2026 — LA DÉTECTION ÉTAIT DORMANTE SUR TOUS LES SERVEURS.
+    # `compromised_alerts_channel` n'a AUCUN écran de configuration dans le dépôt : ses
+    # deux seules occurrences étaient son défaut (0) et cette lecture. Il valait donc 0
+    # partout, et ce `return` coupait toute la détection avant même le calcul du score.
+    # On retombe maintenant sur le salon de log de CETTE protection (bouton « 📜 Log »
+    # du panneau), puis sur le salon de logs de modération.
+    channel_id = (c.get('compromised_alerts_channel', 0)
+                  or c.get('log_anti_compromised', 0)
+                  or c.get('mod_log_channel', 0))
 
     threshold = c.get('compromised_alert_threshold', 60)
     cooldown_seconds = c.get('compromised_alert_cooldown', 300)
@@ -44627,6 +44700,13 @@ async def _check_compromised_account(msg):
 
     if score < threshold:
         return  # pas assez confiant
+
+    # Marquer le cooldown DÈS que le score dépasse le seuil, avant tout effet de bord.
+    # Il était marqué plus bas, après les contrôles de salon et de permissions : si le
+    # salon manquait, on repartait par le `return` sans jamais marquer, et le gel
+    # ci-dessous se rejouait à CHAQUE message du compte (écriture DB en rafale).
+    _compromised_alert_cooldown[key] = now_ts
+    _evict_if_big(_compromised_alert_cooldown)  # audit 2026-07-03 : borne mémoire
 
     # TASK A5 : GEL ÉCONOMIE immédiat (anti-drain) — placé AVANT les checks de salon/perms
     # pour qu'un compte au score ≥ seuil soit gelé MÊME si l'alerte ne peut pas être postée
@@ -44651,10 +44731,7 @@ async def _check_compromised_account(msg):
         print(f"[CAD] guild={msg.guild.id} permissions manquantes dans #{alert_channel.name}")
         return
 
-    # Marquer cooldown AVANT l'envoi pour éviter doubles
-    _compromised_alert_cooldown[key] = now_ts
-    _evict_if_big(_compromised_alert_cooldown)  # audit 2026-07-03 : borne mémoire
-    # (Le gel économie A5 est désormais posé plus haut, dès score ≥ seuil.)
+    # (Cooldown et gel économie A5 sont désormais posés plus haut, dès score ≥ seuil.)
 
     # Construire le dossier
     try:
