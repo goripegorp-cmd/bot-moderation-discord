@@ -53,8 +53,10 @@ redémarre ou passe plusieurs fois dans la journée.
 
 ## 2. Chaque rôle a SON propre suivi
 
-C'est le cœur du système : vous ne réglez pas « l'activité du serveur », vous
-réglez **le suivi de chaque rôle, séparément**.
+**Par défaut, tout le serveur est suivi.** Tous vos membres portent `@everyone`
+et beaucoup n'ont aucun autre rôle : allumer le système suffit à couvrir tout le
+monde. Les rôles ne servent pas à *activer* le suivi, mais à donner des
+**réglages différents** à certains.
 
 Un rôle peut définir, rien que pour lui :
 
@@ -108,8 +110,23 @@ quelqu'un revenu entre-temps est épargné.
 - le **propriétaire** du serveur
 - le **super-owner**
 - tout **administrateur**
-- tout membre **immunisé** (section 👮 Staff & immunités)
+- tout membre **immunisé** en modération (section 👮 Staff & immunités)
 - les **bots**
+
+### Et ceux que **vous** dispensez
+
+Écran **🛡️ Dispenses** : vous y désignez les **rôles** et les **membres** qui
+n'ont aucune obligation de présence — un ancien, un ami du serveur, un bot
+partenaire.
+
+⚠️ **C'est distinct de l'immunité de modération.** Dispenser quelqu'un de
+*présence* ne le dispense pas des filtres anti-spam ou anti-scam. Les deux listes
+sont séparées exprès : vous pouvez laisser un ancien membre tranquille sans en
+faire quelqu'un d'intouchable.
+
+Choisir une entrée déjà dispensée la retire — un seul geste pour les deux sens.
+Si la liste devient illisible, le système **dispense** plutôt que d'exposer
+quelqu'un à l'expulsion.
 
 La vérification est **fail-closed** : si le bot n'arrive pas à établir qu'un
 membre est touchable, il le laisse tranquille. Et elle est **refaite juste avant

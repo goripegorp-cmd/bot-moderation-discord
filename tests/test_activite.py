@@ -141,8 +141,14 @@ def test_plafond_actions_est_raisonnable():
 
 
 def test_systeme_desactive_par_defaut():
+    """L'interrupteur est OFF ; mais une fois allume, il couvre tout le monde.
+
+    `activite_tout_le_monde` vaut True par defaut DEPUIS 08/2026 : tous les
+    membres portent @everyone, exiger de designer un role laissait le systeme
+    allume mais aveugle.
+    """
     assert activite.CLES_DEFAUT["activite_enabled"] is False
-    assert activite.CLES_DEFAUT["activite_tout_le_monde"] is False
+    assert activite.CLES_DEFAUT["activite_tout_le_monde"] is True
     assert activite.CLES_DEFAUT["activite_roles"] == {}
 
 
@@ -403,3 +409,62 @@ def test_seuils_du_role_reste_compatible():
     """L'ancien nom doit continuer de marcher : du code l'appelle encore."""
     c = activite.seuils_du_role(_cfg({"3": {"rappel": 4}}), 3)
     assert c["rappel"] == 4 and "retirer_role" in c
+
+
+# ─── tout le monde par defaut + dispenses ───────────────────────────────────
+
+class _Membre2:
+    def __init__(self, mid, roles=(), bot=False):
+        self.id = mid
+        self.roles = [_Role(r) for r in roles]
+        self.bot = bot
+
+
+def test_tout_le_monde_est_le_defaut():
+    """Tous les membres portent @everyone : exiger un role rendait le systeme
+    allumé mais aveugle, sans que ca se voie."""
+    assert activite.CLES_DEFAUT["activite_tout_le_monde"] is True
+
+
+def test_systeme_reste_eteint_par_defaut():
+    """Couvrir tout le monde ne veut pas dire demarrer tout seul."""
+    assert activite.CLES_DEFAUT["activite_enabled"] is False
+
+
+def test_dispenses_vides_par_defaut():
+    assert activite.CLES_DEFAUT["activite_roles_immunises"] == []
+    assert activite.CLES_DEFAUT["activite_membres_immunises"] == []
+
+
+def test_role_dispense_est_ecarte():
+    cfg = {"activite_roles_immunises": [42], "activite_membres_immunises": []}
+    assert activite.est_dispense(_Membre2(1, roles=[42]), cfg) is True
+    assert activite.est_dispense(_Membre2(2, roles=[7]), cfg) is False
+
+
+def test_membre_dispense_est_ecarte():
+    cfg = {"activite_roles_immunises": [], "activite_membres_immunises": [99]}
+    assert activite.est_dispense(_Membre2(99), cfg) is True
+    assert activite.est_dispense(_Membre2(98), cfg) is False
+
+
+def test_dispense_fail_closed_si_liste_illisible():
+    """Une liste corrompue doit DISPENSER, jamais exposer a l'expulsion."""
+    cfg = {"activite_roles_immunises": ["pas-un-nombre"]}
+    assert activite.est_dispense(_Membre2(1, roles=[1]), cfg) is True
+
+
+def test_dispense_accepte_les_identifiants_en_texte():
+    """Discord renvoie souvent des identifiants en chaine : ils doivent marcher."""
+    cfg = {"activite_roles_immunises": ["42"], "activite_membres_immunises": ["99"]}
+    assert activite.est_dispense(_Membre2(1, roles=[42]), cfg) is True
+    assert activite.est_dispense(_Membre2(99), cfg) is True
+
+
+def test_dispense_ne_touche_pas_la_moderation():
+    """Les deux listes sont distinctes : dispenser de PRESENCE ne doit pas
+    dispenser des filtres anti-spam."""
+    for cle in activite.CLES_DEFAUT:
+        assert not cle.startswith("immune_"), (
+            "les dispenses d'activite ne doivent pas reutiliser les cles "
+            "d'immunite de moderation")

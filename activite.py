@@ -154,13 +154,24 @@ async def init_db():
 
 CLES_DEFAUT = {
     "activite_enabled": False,          # interrupteur général — OFF par défaut
-    "activite_tout_le_monde": False,    # surveiller tout le serveur, sans rôle
+    #  ⚠️ TOUT LE MONDE PAR DÉFAUT. Sur un serveur Discord, tous les membres
+    #  portent @everyone et beaucoup n'ont aucun autre rôle : exiger de désigner
+    #  un rôle laissait le système allumé mais aveugle, sans que ça se voie.
+    #  Allumer le système suffit donc à couvrir tout le monde ; les rôles servent
+    #  à AFFINER (seuils, salons, jours différents), pas à activer.
+    "activite_tout_le_monde": True,
     "activite_roles": {},               # {role_id(str): {rappel, retrait, expulsion}}
     "activite_salon_annonce": 0,        # où poster le rappel hebdomadaire
     "activite_salon_retour": 0,         # où un membre écrit pour récupérer son rôle
     "activite_salon_staff": 0,          # où poster la liste des expulsables
     "activite_jour_rappel": 0,          # 0 = lundi … 6 = dimanche
     "activite_derniere_semaine": "",    # semaine ISO du dernier rappel envoyé
+    #  Immunité PROPRE au système d'activité : dispenser quelqu'un de présence
+    #  n'a rien à voir avec le dispenser de modération. Un ami du serveur, un
+    #  ancien, un bot partenaire n'ont pas à être surveillés — sans pour autant
+    #  devenir intouchables face aux insultes ou au spam.
+    "activite_roles_immunises": [],     # rôles dispensés d'activité
+    "activite_membres_immunises": [],   # membres dispensés, un par un
 }
 
 
@@ -424,10 +435,36 @@ async def membre_concerne(member, cfg_act: dict) -> bool:
         _log(f"[activite membre_concerne] {ex}")
         return False
 
+    #  Immunité propre à l'activité, définie par le propriétaire. Vérifiée AVANT
+    #  toute inclusion : un membre dispensé ne doit apparaître dans aucune liste,
+    #  même pour information.
+    if est_dispense(member, cfg_act):
+        return False
+
     if cfg_act.get("activite_tout_le_monde"):
         return True
     ids = {int(r) for r in (cfg_act.get("activite_roles") or {})}
     return any(r.id in ids for r in member.roles)
+
+
+def est_dispense(member, cfg_act: dict) -> bool:
+    """Ce membre est-il dispensé d'activité par un réglage du propriétaire ?
+
+    Distinct de l'immunité de modération : on peut vouloir qu'un ancien membre
+    reste sur le serveur sans rien faire, tout en le laissant soumis aux filtres
+    anti-spam. Les deux listes sont donc séparées, et celle-ci n'a d'effet QUE
+    sur le système d'activité.
+    """
+    try:
+        membres = {int(x) for x in (cfg_act.get("activite_membres_immunises") or [])}
+        if member.id in membres:
+            return True
+        roles = {int(x) for x in (cfg_act.get("activite_roles_immunises") or [])}
+        return any(r.id in roles for r in member.roles)
+    except Exception:
+        #  Fail-CLOSED comme le reste : si la liste est illisible, on dispense
+        #  plutôt que de risquer d'expulser quelqu'un qui devait être épargné.
+        return True
 
 
 def role_surveille_du_membre(member, cfg_act: dict):

@@ -22,7 +22,7 @@ Le module ne connaît pas `bot.py` : tout ce dont il a besoin lui est injecté p
 from __future__ import annotations
 
 import discord
-from discord.ui import Button, ChannelSelect, RoleSelect, Select
+from discord.ui import Button, ChannelSelect, RoleSelect, Select, UserSelect
 
 import activite
 import activite_escalade as esc
@@ -104,9 +104,16 @@ class ActivitePanelV2(_Base):
             en_marche = await activite.actif(self.g.id)
 
             roles = await activite.roles_surveilles(self.g, c)
-            cible = ("**tout le serveur**" if c["activite_tout_le_monde"]
-                     else (", ".join(r.mention for r in roles[:5]) if roles
-                           else "⚠️ _aucune cible_"))
+            nb_disp = (len(c.get("activite_roles_immunises") or [])
+                       + len(c.get("activite_membres_immunises") or []))
+            if c["activite_tout_le_monde"]:
+                cible = "**tout le serveur**"
+                if roles:
+                    cible += f" · `{len(roles)}` rôle(s) avec des réglages à part"
+            elif roles:
+                cible = ", ".join(r.mention for r in roles[:5])
+            else:
+                cible = "⚠️ _aucune cible_"
             an = self.g.get_channel(int(c["activite_salon_annonce"] or 0))
             ret = self.g.get_channel(int(c["activite_salon_retour"] or 0))
             st = self.g.get_channel(int(c["activite_salon_staff"] or 0))
@@ -164,9 +171,13 @@ class ActivitePanelV2(_Base):
             b_ap = Button(label="Aperçu & expulsions", emoji="🔎",
                           style=discord.ButtonStyle.secondary, custom_id="act_apercu")
             b_ap.callback = self._cb_apercu
+            b_disp = Button(label="Dispenses", emoji="🛡️",
+                            style=discord.ButtonStyle.secondary, custom_id="act_disp")
+            b_disp.callback = self._cb_dispenses
 
             items.append(discord.ui.ActionRow(b_on, b_cibles, b_salons, b_rec))
-            items.append(discord.ui.ActionRow(b_ap, _bouton_retour(self._cb_retour, "act_back")))
+            items.append(discord.ui.ActionRow(
+                b_ap, b_disp, _bouton_retour(self._cb_retour, "act_back")))
             await self._envoyer(i, items, Palette.INFO, edit)
         except Exception as ex:
             await self._secours(i, ex, "racine")
@@ -190,6 +201,9 @@ class ActivitePanelV2(_Base):
 
     async def _cb_apercu(self, i):
         await ActiviteApercuPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_dispenses(self, i):
+        await ActiviteDispensesPanelV2(self.u, self.g).render_to(i, edit=True)
 
     async def _cb_retour(self, i):
         #  Injecté par bot.py pour éviter l'import circulaire avec MainPanelV2.
@@ -826,6 +840,96 @@ class ActiviteApercuPanelV2(_Base):
             await self.render_to(i, edit=True)
         except Exception as ex:
             await self._secours(i, ex, "expulsion")
+
+    async def _cb_retour(self, i):
+        await ActivitePanelV2(self.u, self.g).render_to(i, edit=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DISPENSES — qui n'est pas soumis à l'obligation de présence
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ActiviteDispensesPanelV2(_Base):
+    """Rôles et membres dispensés d'activité.
+
+    À ne pas confondre avec les immunités de modération : dispenser quelqu'un de
+    PRÉSENCE n'a rien à voir avec le dispenser des filtres anti-spam. Un ancien,
+    un ami du serveur ou un bot partenaire n'ont pas à être surveillés, sans pour
+    autant devenir intouchables face aux insultes.
+    """
+
+    async def render_to(self, i, *, edit: bool = True):
+        try:
+            c = await activite.config(self.g.id)
+            rids = [int(x) for x in (c.get("activite_roles_immunises") or [])]
+            mids = [int(x) for x in (c.get("activite_membres_immunises") or [])]
+
+            roles = [self.g.get_role(r) for r in rids]
+            roles = [r for r in roles if r is not None]
+            membres = [self.g.get_member(m) for m in mids]
+            membres = [m for m in membres if m is not None]
+
+            bloc_roles = (", ".join(r.mention for r in roles[:15]) if roles
+                          else "⚪ _aucun_")
+            bloc_membres = (", ".join(m.mention for m in membres[:15]) if membres
+                            else "⚪ _aucun_")
+            perdus = (len(rids) - len(roles)) + (len(mids) - len(membres))
+
+            items = [
+                v2_title("🛡️ Dispenses d'activité"),
+                v2_subtitle("Qui n'a pas d'obligation de présence"),
+                v2_divider(),
+                v2_body(f"🎭 **Rôles dispensés**\n{bloc_roles}"),
+                v2_body(f"👤 **Membres dispensés**\n{bloc_membres}"),
+                v2_divider(),
+                v2_body(
+                    "**Toujours dispensés, sans rien régler :**\n"
+                    "-# le propriétaire du serveur · le super-owner · tout "
+                    "administrateur · les membres immunisés en modération · les bots"
+                ),
+                v2_body(
+                    "-# Ces listes ne concernent QUE l'activité. Un membre dispensé "
+                    "ici reste soumis aux filtres anti-spam, anti-scam et aux "
+                    "sanctions — ce sont deux choses différentes."
+                ),
+            ]
+            if perdus:
+                items.append(v2_body(
+                    f"-# ⚠️ {perdus} entrée(s) pointent vers un rôle ou un membre "
+                    f"qui n'existe plus. Elles sont ignorées ; re-choisissez-les "
+                    f"pour nettoyer."))
+
+            sel_r = RoleSelect(placeholder="Ajouter ou retirer un rôle dispensé…",
+                               min_values=1, max_values=1, custom_id="actd_role")
+            sel_r.callback = self._faire_bascule("activite_roles_immunises")
+            sel_m = UserSelect(placeholder="Ajouter ou retirer un membre dispensé…",
+                               min_values=1, max_values=1, custom_id="actd_membre")
+            sel_m.callback = self._faire_bascule("activite_membres_immunises")
+
+            items.append(discord.ui.ActionRow(sel_r))
+            items.append(discord.ui.ActionRow(sel_m))
+            items.append(discord.ui.ActionRow(
+                _bouton_retour(self._cb_retour, "actd_back")))
+            await self._envoyer(i, items, Palette.SUCCESS, edit)
+        except Exception as ex:
+            await self._secours(i, ex, "dispenses")
+
+    def _faire_bascule(self, cle: str):
+        """Choisir une entrée déjà présente la RETIRE — un seul geste pour les deux."""
+        async def _cb(i):
+            try:
+                choisi = int(i.data["values"][0])
+                c = await activite.config(self.g.id)
+                liste = [int(x) for x in (c.get(cle) or [])]
+                if choisi in liste:
+                    liste.remove(choisi)
+                else:
+                    liste.append(choisi)
+                await _db_set(self.g.id, cle, liste)
+                await self.render_to(i, edit=True)
+            except Exception as ex:
+                await self._secours(i, ex, f"dispense {cle}")
+        return _cb
 
     async def _cb_retour(self, i):
         await ActivitePanelV2(self.u, self.g).render_to(i, edit=True)
