@@ -11,37 +11,26 @@ PHASE_163_MODULES = [
     "dm_digest",
     "webhook_tracker",
     "reputation",
-    "pet_evolution",
-    "onboarding_journey",
     "mentor_bonus",
     "honeypot",
     "behavior_anomaly",
-    "roblox_game_stats",
     "roblox_raffle",
-    "stream_watch_party",
-    "community_goals",
     "weekly_stats",
     "server_pulse",
     # Phase 165 — nouveaux modules
     "stream_schedule",
-    "activity_heatmap",
     # Phase 166 — anti-token-leak, birthday, welcome, spotlight
     "anti_token_leak",
     "birthday_panel",
-    "welcome_ack",
-    "spotlight_quality",
     # Phase 167 — status rotator, voice autoclean, member risk
     "member_risk",
     # Phase 168 — error logger
     "error_logger",
     # Phase 169 — mob hunts, marchand, invasion
     # Phase 173.2 — Boss du jour (4×/jour, gating niveau)
-    "daily_bosses",
     # Phase 174.2 — Récompenses VIP des plus actifs (messages + vocal)
     # Phase 184 — Donjons instanciés (lobby groupe + salons dédiés)
-    "dungeon_instances",
     # Phase 170 — Chronique d'Abylumis (récit collectif persistant)
-    "story_engine",
     "codex_chronicle",
     # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
     "daily_encounters",
@@ -74,22 +63,14 @@ INIT_DB_MODULES = [
     "dm_digest",
     "webhook_tracker",
     "reputation",
-    "pet_evolution",
-    "onboarding_journey",
     "mentor_bonus",
     "honeypot",
     "behavior_anomaly",
-    "roblox_game_stats",
     "roblox_raffle",
-    "stream_watch_party",
-    "community_goals",
     # Phase 165
     "stream_schedule",
-    "activity_heatmap",
     # Phase 166 (birthday_panel n'a pas d'init_db, lit cfg directement)
     "anti_token_leak",
-    "welcome_ack",
-    "spotlight_quality",
     # Phase 167 (status_rotator n'a pas d'init_db, pas de table)
     "member_risk",
     # Phase 168 — error_logger
@@ -97,7 +78,6 @@ INIT_DB_MODULES = [
     # Phase 169 — mob_hunts, merchant, invasion
     # Phase 170 — story_engine (codex_chronicle n'a pas d'init_db, lit DB
     # de story_engine)
-    "story_engine",
     # Phase 170.2-3 : NPCs mood + encounters log
     "daily_encounters",
     # Phase 170.4 : council sessions + votes
@@ -107,7 +87,6 @@ INIT_DB_MODULES = [
     # Phase 170.8 : climax events + attackers + titles
     # Phase 174.2 : VIP grants + role IDs
     # Phase 184 : dungeon_runs + dungeon_members
-    "dungeon_instances",
 ]
 
 
