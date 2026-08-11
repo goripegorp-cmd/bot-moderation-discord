@@ -51061,40 +51061,6 @@ async def on_ready():
         owner_export_module.setup(get_db, SUPER_OWNER_ID)
     except Exception as ex:
         print(f"[on_ready mod_dashboard setup] {ex}")
-    # Phase 134 : Communauté — wiki + roadmap + weekly highlights
-    try:
-        cmty_hub_module.setup(
-            bot,
-            get_db,
-            db_get,
-            db_set,
-            {
-                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                'v2_divider': v2_divider, 'v2_container': v2_container,
-                'LayoutView': LayoutView,
-            },
-        )
-        if not cmty_hub_module.weekly_highlights_task.is_running():
-            cmty_hub_module.weekly_highlights_task.start()
-    except Exception as ex:
-        print(f"[on_ready cmty_hub setup] {ex}")
-    # Phase 136 + 142 : Roblox link verify + game library + auto-updates
-    try:
-        rblx_link_module.setup(
-            get_db,
-            {
-                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                'v2_divider': v2_divider, 'v2_container': v2_container,
-                'LayoutView': LayoutView,
-            },
-            bot_instance=bot,
-            db_get_fn=db_get,
-        )
-        # Phase 142 : start polling task for tracked games updates
-        if not rblx_link_module.roblox_updates_check_task.is_running():
-            rblx_link_module.roblox_updates_check_task.start()
-    except Exception as ex:
-        print(f"[on_ready rblx_link setup] {ex}")
     # Phase 138 : Tickets enhancements (priority + templates + auto-close)
     try:
         tix_module.setup(
@@ -51135,23 +51101,6 @@ async def on_ready():
             obs_module.anomaly_check_task.start()
     except Exception as ex:
         print(f"[on_ready obs setup] {ex}")
-    # Phase 140 : Publish metrics + cross-poster
-    try:
-        pubmet_module.setup(
-            bot,
-            get_db,
-            db_get,
-            db_set,
-            {
-                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                'v2_divider': v2_divider, 'v2_container': v2_container,
-                'LayoutView': LayoutView,
-            },
-        )
-        if not pubmet_module.metrics_refresh_task.is_running():
-            pubmet_module.metrics_refresh_task.start()
-    except Exception as ex:
-        print(f"[on_ready pubmet setup] {ex}")
     # Phase 141 : UX final — theme switcher + tutorial
     try:
         ux_module.setup(
@@ -51258,31 +51207,6 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 148 robustness] {ex}")
 
-    # Phase 149 : Events MMO — sagas + profil joueur + FAQ
-    try:
-        faq_module.setup(_v2h)
-
-        # Phase 150.3 : openers vers les sub-hubs existants
-        async def _open_hub_root(i):
-            try:
-                await i.response.send_message(
-                    "🎮 **Ouvre /hub** pour accéder au panneau principal.",
-                    ephemeral=True,
-                )
-            except Exception:
-                pass
-
-        # Tous les open_hub_* pointent vers le hub central (l'utilisateur
-        # navigue ensuite via les boutons du hub).
-        for k in ("open_hub_economy", "open_hub_combat",
-                  "open_hub_pvp", "open_hub_boss", "open_hub_alliance",
-                  "open_hub_marketplace", "open_hub_bank",
-                  "open_hub_events"):
-            faq_module.register_panel_opener(k, _open_hub_root)
-
-        print("[Phase 149] Events MMO actifs : sagas + profil + FAQ")
-    except Exception as ex:
-        print(f"[on_ready Phase 149 events] {ex}")
 
     # Phase 152 : DM digest + webhook tracker + owner daily digest
     try:
@@ -51496,64 +51420,10 @@ async def on_ready():
 
 
 
-        # Phase 280 : Zones sociales (groupes d'entraide + trades privés) 100% boutons.
-        try:
-            def _sz_is_staff(member):
-                try:
-                    if member is None or member.guild is None:
-                        return False
-                    if member.id == member.guild.owner_id:
-                        return True
-                    p = member.guild_permissions
-                    return bool(p.administrator or p.manage_guild or p.manage_channels
-                                or p.manage_messages or p.kick_members or p.ban_members
-                                or p.moderate_members)
-                except Exception:
-                    return False
-            social_zones_module.setup(bot, get_db, db_get, is_staff_fn=_sz_is_staff)
-            await social_zones_module.init_db()
-            await social_zones_module.boot_cleanup()  # ferme les zones orphelines (reboot)
-            social_zones_module.register_persistent_views(bot)
-            if not social_zones_module.zone_watchdog.is_running():
-                social_zones_module.zone_watchdog.start()
-        except Exception as ex:
-            print(f"[on_ready 280 social_zones] {ex}")
 
-        # Phase 174.2 : Récompenses VIP des plus actifs (messages + vocal)
-        try:
-            activity_rewards_module.setup(bot, get_db, db_get, _v2h)
-            await activity_rewards_module.init_db()
-            if not activity_rewards_module.weekly_reward_task.is_running():
-                activity_rewards_module.weekly_reward_task.start()
-        except Exception as ex:
-            print(f"[on_ready 174.2 activity_rewards] {ex}")
 
-        # owner 2026-07-02 : VIP CONTINU par SEUIL (tout le monde qui reste actif l'obtient ;
-        # décroissance douce + rappels ; SEUL propriétaire des rôles 🌟VIP/💎VIP+ quand activé).
-        try:
-            activity_vip_module.setup(bot, get_db, db_get, _v2h)
-            await activity_vip_module.init_db()
-            if not activity_vip_module.vip_eval_task.is_running():
-                activity_vip_module.vip_eval_task.start()
-        except Exception as ex:
-            print(f"[on_ready activity_vip] {ex}")
 
-        # owner 2026-07-12 : PRIVATION VIP/activité des fauteurs de trouble (1→2→4→8 mois→1 an).
-        # Déclenchée par les VRAIES sanctions auto (mute/kick/ban) et les warns du staff.
-        try:
-            vip_exclusion_module.setup(get_db)
-            await vip_exclusion_module.init_db()
-        except Exception as ex:
-            print(f"[on_ready vip_exclusion] {ex}")
 
-        # owner 2026-07-12 : bouton « 🔔 Me ping pour les prochaines » sous chaque mise à jour.
-        # register_persistent = les boutons des ANCIENS messages remarchent après un reboot.
-        try:
-            upd_ping_module.setup(bot, get_db)
-            await upd_ping_module.init_db()
-            upd_ping_module.register_persistent(bot)
-        except Exception as ex:
-            print(f"[on_ready update_ping_role] {ex}")
 
         # owner 2026-07-17 : mesure d'usage des menus/boutons/commandes. L'owner veut désactiver
         # ce qui ne sert plus — or RIEN n'enregistrait les clics, donc c'était inmesurable et
@@ -51584,173 +51454,13 @@ async def on_ready():
 
 
 
-        # Phase 235.25 : 📊 Système d'ACTIVITÉ — clé d'accès aux events.
-        # Score glissant 7 j : 1 message = 1 pt · 1 min vocal = 1 pt. Paliers
-        # 🟢 3 / 🟡 20 / 🔴 60 (gate appliqué AU-DESSUS du gate de niveau, phase
-        # suivante). Ici on ne fait QUE démarrer la collecte (tracking) pour que
-        # les scores s'accumulent dès maintenant.
-        try:
-            activity_system_module.setup(get_db)
-            await activity_system_module.init_db()
-            await activity_system_module.cleanup_old()
-            # Garde anti-doublon : on_ready peut refirer (reconnexion gateway) →
-            # sans ce flag, on ajouterait un 2e listener → messages comptés ×2.
-            if not getattr(bot, "_activity_listener_added", False):
-                bot.add_listener(activity_system_module.on_message_activity, "on_message")
-                bot._activity_listener_added = True
-            # Phase 235.32 : crédit VOCAL en TEMPS RÉEL (fix « pas assez de vocal »
-            # alors qu'on est en vocal — le vocal n'était compté qu'à la déconnexion).
-            if not voice_activity_ticker.is_running():
-                voice_activity_ticker.start()
-            print("[Phase 235.25] activity_system OK (messages live + vocal temps réel)")
-        except Exception as ex:
-            print(f"[on_ready 235.25 activity_system] {ex}")
-
-        # Phase 242 : Titres saisonniers (champion d'activité du mois) — module
-        # autonome, snapshot LAZY au /profile, ne touche ni le combat ni le gate.
-        try:
-            seasonal_titles_module.setup(get_db)
-            await seasonal_titles_module.init_db()
-            print("[Phase 242] seasonal_titles OK (champion d'activité du mois)")
-        except Exception as ex:
-            print(f"[on_ready 242 seasonal_titles] {ex}")
-
-        # Titre mensuel « 🎙️ Voix du serveur » (owner 2026-06-15) — jumeau VOCAL de
-        # seasonal_titles : snapshot LAZY au /profile, valorise le temps en vocal à
-        # égalité avec le texte. Ne touche ni le combat ni le gate d'accès aux events.
-        try:
-            vocal_voice_title_module.setup(get_db)
-            await vocal_voice_title_module.init_db()
-            print("[Voix du serveur] vocal_voice_title OK (titre mensuel vocal)")
-        except Exception as ex:
-            print(f"[on_ready vocal_voice_title] {ex}")
-
-        # Tâche A.2 : 🔗 Chaîne collective de présence quotidienne (compteur SERVEUR).
-        # Réutilise activity_system comme source de vérité (N membres distincts actifs
-        # / jour → +1, sinon casse). Annonce de palier (7/30/100 j) dans un salon chatty
-        # (allowed_mentions=none). Récompense collective MODESTE anti-doublon. Task
-        # quotidienne FAIL-OPEN, inscrite au superviseur (_SUPERVISED_MODULE_LOOPS).
-        try:
-            async def _presence_chain_pick_chatty(guild):
-                """Salon chatty pour l'annonce de palier : hub configuré en priorité,
-                sinon premier salon chatty disponible. Fail-safe : None si rien."""
-                try:
-                    _c = await cfg(guild.id)
-                    hub_id = int(_c.get('hub_channel', 0) or 0)
-                    hub_ch = guild.get_channel(hub_id) if hub_id else None
-                    if hub_ch and await _is_chatty_channel(hub_ch):
-                        return hub_ch
-                except Exception:
-                    pass
-                for ch in guild.text_channels:
-                    try:
-                        if await _is_chatty_channel(ch):
-                            return ch
-                    except Exception:
-                        continue
-                return None
-
-            presence_chain_module.setup(
-                get_db,
-                bot=bot,
-                distinct_active_fn=activity_system_module.distinct_active_on_day,
-                pick_chatty_fn=_presence_chain_pick_chatty,
-                award_fn=add_coins,  # récompense collective MODESTE (pièces)
-            )
-            await presence_chain_module.init_db()
-            if not presence_chain_module.chain_daily_task.is_running():
-                presence_chain_module.chain_daily_task.start()
-            print("[Tâche A.2] presence_chain OK (chaîne collective de présence)")
-        except Exception as ex:
-            print(f"[on_ready A.2 presence_chain] {ex}")
 
 
-        # Tâche B.1 : PARRAINAGE RÉCOMPENSÉ (anti-alt, zéro DM). Suivi d'invitations
-        # léger (cache mémoire ré-amorcé au boot), crédit DIFFÉRÉ derrière double gate
-        # (activité réelle + âge du compte). Score d'activité réutilisé d'activity_system.
-        try:
-            referrals_module.setup(
-                get_db,
-                add_coins_fn=add_coins,  # récompense MODESTE en pièces (gameplay)
-                activity_score_fn=activity_system_module.get_score,
-                bot=bot,
-            )
-            await referrals_module.init_db()
-            # Amorce le cache des uses d'invites de chaque guilde (fail-safe par guilde).
-            for _g in list(bot.guilds):
-                try:
-                    await referrals_module.prime_guild_cache(_g)
-                except Exception:
-                    pass
-            if not referrals_module.referral_reward_task.is_running():
-                referrals_module.referral_reward_task.start()
-            print("[Tâche B.1] referrals OK (parrainage anti-alt, crédit différé)")
-        except Exception as ex:
-            print(f"[on_ready B.1 referrals] {ex}")
 
-        # Promotion externe (owner 2026-06-29) : suivi par-annuaire + kit + checklist. 0 bot ajouté.
-        try:
-            promo_tools_module.setup(get_db, bot=bot)
-            await promo_tools_module.init_db()
-        except Exception as ex:
-            print(f"[on_ready promo_tools] {ex}")
 
-        # Entraide multi-gaming : relier demandeurs/aidants, vocal temp, rôle aidant
-        # opt-in (catalogue de jeux configurable). MÊME patron que referrals/presence_chain :
-        # setup(deps injectées) + init_db + tâche d'expiration supervisée + DynamicItem
-        # persistants (claim/resolve) re-captés au reboot. FAIL-SAFE : OFF si non configuré.
-        try:
-            entraide_module.setup(
-                bot, get_db, cfg, db_set,
-                v2_helpers={
-                    'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                    'v2_divider': v2_divider, 'v2_container': v2_container,
-                    'LayoutView': LayoutView,
-                },
-                add_coins_fn=add_coins,                 # récompense MODESTE en pièces (atomique)
-                register_cleanup_fn=_register_for_cleanup,
-                chatty_fn=None,
-            )
-            await entraide_module.init_db()
-            if not entraide_module.entraide_expiry_task.is_running():
-                entraide_module.entraide_expiry_task.start()
-            # Tâche bot.py (supervisée) : édite les posts expirés + supprime les vocaux
-            # temp orphelins vides. Fail-open, no-op si l'entraide n'est pas configurée.
-            if not entraide_cleanup_task.is_running():
-                entraide_cleanup_task.start()
-            # C3 : titre d'honneur « Pilier de l'entraide » aux meilleurs aidants
-            # (recalcul périodique, cosmétique, fail-open, no-op si entraide OFF).
-            if not entraide_pillar_task.is_running():
-                entraide_pillar_task.start()
-            # Veilleur de questions sans réponse (serveur entier) : poste un nudge
-            # discret après ~10 min sans réponse. Supervisé, fail-open, no-op si OFF.
-            if not unanswered_watch_task.is_running():
-                unanswered_watch_task.start()
-            # #1/#2 CONTRÔLES SERVEUR : statut support ouvert/fermé + slowmode nuit
-            # (supervisé, fail-open, no-op tant que non configuré).
-            try:
-                if not server_controls_task.is_running():
-                    server_controls_task.start()
-            except Exception as _ex_sc:
-                print(f"[on_ready server_controls start] {_ex_sc}")
-            try:
-                if not gdpr_retention_task.is_running():
-                    gdpr_retention_task.start()
-            except Exception as _ex_gd:
-                print(f"[on_ready gdpr_retention start] {_ex_gd}")
-            try:  # #12 owner 2026-06-21 : rapport sécurité hebdomadaire (visibilité seule)
-                if not weekly_security_report.is_running():
-                    weekly_security_report.start()
-            except Exception as _ex_wsr:
-                print(f"[on_ready weekly_security_report start] {_ex_wsr}")
-            # Boutons persistants du POST de demande (re-captés au reboot).
-            bot.add_dynamic_items(EntraideClaimButton, EntraideResolveButton)
-            # Bouton persistant du NUDGE auto (détection d'appel à l'aide en chat) :
-            # « 🆘 Trouver de l'aide » → ouvre le flux besoin-d'aide pré-rempli.
-            bot.add_dynamic_items(EntraideDetectButton)
-            print("[Entraide] entraide OK (multi-gaming : demandes + vocal temp + rôle aidant + détection chat)")
-        except Exception as ex:
-            print(f"[on_ready entraide] {ex}")
+
+
+
 
         # OPT-OUT « propositions d'aide » par membre (owner 2026-06-15) : charge le set en
         # mémoire + re-capte le bouton toggle (DynamicItem persistant → aucun bouton mort).
@@ -51781,15 +51491,6 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready i18n] {ex}")
 
-        # Traduction à la demande (réaction 🌐) : module autonome MyMemory. On lui
-        # passe une fabrique de ClientSession (calque l'usage aiohttp du bot). OPT-IN
-        # (un membre réagit volontairement) + DÉSACTIVABLE (cfg translate_enabled +
-        # toggle EntraidePanelV2). FAIL-SAFE : tout échec → la réaction ne fait rien.
-        try:
-            translate_module.setup(session_factory=aiohttp.ClientSession)
-            print("[translate] traduction à la demande OK (réaction 🌐 → MyMemory, opt-in)")
-        except Exception as ex:
-            print(f"[on_ready translate] {ex}")
 
 
 
@@ -51819,25 +51520,7 @@ async def on_ready():
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
 
-    # Phase 161 : Weekly stats (récap perso + leaderboards auto)
-    try:
-        weekly_stats_module.setup(bot, get_db, db_get, _v2h)
-        if not weekly_stats_module.weekly_post_task.is_running():
-            weekly_stats_module.weekly_post_task.start()
-        print("[Phase 161] Weekly stats actifs : récap + leaderboards lundi 9h FR")
-    except Exception as ex:
-        print(f"[on_ready Phase 161 weekly_stats] {ex}")
 
-    # Phase 162 : Server Pulse + Tips Rotator
-    try:
-        server_pulse_module.setup(
-            bot, get_db, db_get, _v2h,
-            season_module=season_module,
-            saga_module=saga_module,
-        )
-        print("[Phase 162] Server Pulse + Tips Rotator setup OK")
-    except Exception as ex:
-        print(f"[on_ready Phase 162 server_pulse] {ex}")
 
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
@@ -51945,16 +51628,6 @@ async def on_ready():
     # Tâche B.2 : annonce de sortie à l'échéance du countdown (fail-open, no-op sans date)
     if not release_countdown_task.is_running():
         release_countdown_task.start()
-    # Phase 234 : conversation starters extrait dans conversation_starters.py
-    # (1re brique de modularisation — toutes les déps de bot.py sont injectées).
-    try:
-        conversation_starters_module.setup(
-            bot, get_db, cfg, _is_event_active_hour,
-            _is_chatty_channel, _register_for_cleanup)
-        if not conversation_starters_module.conv_starter_task.is_running():
-            conversation_starters_module.conv_starter_task.start()
-    except Exception as ex:
-        print(f"[on_ready conversation_starters] {ex}")
     # Phase 54 : alertes auto owner
     if not owner_alerts_task.is_running():
         owner_alerts_task.start()
@@ -51973,40 +51646,8 @@ async def on_ready():
     # Phase 235.5 : watchdog des vocaux temporaires « Voc Build » (anti-orphelins reboot)
     if not temp_voice_watchdog.is_running():
         temp_voice_watchdog.start()
-    # Panneau de contrôle des vocaux temp (owner 2026-06-15) : setup + boutons persistants
-    # (DynamicItem) + tâche d'auto-déverrouillage. FAIL-SAFE : un échec n'empêche pas le boot.
-    try:
-        voice_control_module.setup(bot, get_db, {
-            'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-            'v2_divider': v2_divider, 'v2_container': v2_container, 'LayoutView': LayoutView,
-        })
-        await voice_control_module.init_db()
-        voice_control_module.register_persistent(bot)
-        if not voice_control_module.unlock_expired_task.is_running():
-            voice_control_module.unlock_expired_task.start()
-        print("[voice_control] OK (panneau de contrôle des vocaux temp + auto-unlock)")
-    except Exception as ex:
-        print(f"[on_ready voice_control] {ex}")
 
-    # « Dernier message » sticky (owner 2026-06-16) : setup + chargement du cache des
-    # salons sticky. FAIL-SAFE : un échec n'empêche pas le boot.
-    try:
-        sticky_messages_module.setup(bot, get_db)
-        await sticky_messages_module.init_db()
-        print("[sticky_messages] OK (dernier message en bas de salon)")
-    except Exception as ex:
-        print(f"[on_ready sticky_messages] {ex}")
 
-    # Abonnements RSS universels (owner 2026-06-24) : Twitter/TikTok/Insta (& tout) → Discord
-    # via flux RSS (RSSHub gratuit / RSS.app). setup + table + démarrage du poll. FAIL-SAFE.
-    try:
-        rss_feeds.setup(bot, get_db)
-        await rss_feeds.init_db()
-        if not rss_feeds_task.is_running():
-            rss_feeds_task.start()
-        print("[rss_feeds] OK (abonnements RSS → Discord, /feed)")
-    except Exception as ex:
-        print(f"[on_ready rss_feeds] {ex}")
 
     # Rappel auto de /bump (owner 2026-06-27, croissance) — démarrage de la tâche. FAIL-SAFE.
     try:
