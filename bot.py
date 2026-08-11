@@ -321,7 +321,6 @@ import sticky_messages as sticky_messages_module  # « Dernier message » sticky
 import presence_chain as presence_chain_module  # Tâche A.2 : chaîne collective de présence quotidienne (compteur serveur)
 import cosmetics as cosmetics_module  # Phase 249 : sink éco — titres cosmétiques
 import referrals as referrals_module  # Tâche B.1 : parrainage récompensé (anti-alt, zéro DM)
-import promo_tools as promo_tools_module  # Promotion externe : suivi par-annuaire + kit + checklist (0 bot)
 import entraide as entraide_module  # Entraide multi-gaming : relier demandeurs/aidants, vocal temp, rôle aidant opt-in
 import insult_filter as insult_filter  # Filtre insultes/haine GRADUÉ multilingue (owner 2026-06-21, lexique vérifié anti-FP)
 import offtopic_filter as offtopic_filter  # Filtre politique/religion/militantisme (owner 2026-06-21, slogans + slugs de GIF, anti-FP gaming)

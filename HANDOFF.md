@@ -33,8 +33,9 @@ du jour, entraide, zones sociales, hub communautaire…).
 | Élément | Valeur |
 |---|---|
 | Branche | `main` |
-| `bot.py` | **91 796 lignes** (départ : 108 519) |
-| Modules | ~146 (16 déjà supprimés) |
+| `bot.py` | **74 923 lignes** (départ : 108 519) |
+| Modules | **123** à la racine (dont 50 gardés) |
+| Commandes slash | **40** (départ : 148) |
 | Point de restauration | tag git **`avant-purge-mmorpg`** (poussé sur GitHub) |
 | CI | **verte** sur tous les commits livrés |
 
@@ -50,14 +51,40 @@ du jour, entraide, zones sociales, hub communautaire…).
 - **Purge des panneaux morts** : 226 classes / 12 552 lignes, prouvées inatteignables par
   fermeture transitive inverse (`outils/purge_morts.py`).
 
+- **Boutons rebranchés** : les 3 contrôles qui n'agissaient sur rien, + la détection de
+  comptes piratés qui était **dormante sur tous les serveurs**.
+- **Anti-raid unifié** : l'ancien système neutralisait le nouveau (fail-open) — un seul reste.
+- **Commandes** : 148 → 40, par identifiants QUALIFIÉS (le piège §5.2 est évité par
+  construction, l'outil refuse un nom nu).
+- **Runtimes purgés** : fermeture inverse étendue aux FONCTIONS (`outils/purge_runtimes.py`).
+- **Plus aucun nom inconnu dans `bot.py`** (`outils/verif_noms.py` passe au vert).
+
 **Il reste à faire, dans cet ordre :**
-1. **Boutons qui mentent** (§11) — 3 contrôles ne branchent rien, 2 bugs à corriger.
-2. Corriger `KEEP_CMD_NAMES` (voir §5) puis **relancer la fermeture sur les COMMANDES**
-   (les panneaux, eux, sont déjà tombés).
-3. Supprimer les modules non gardés (par lots) et leurs **runtimes** (moteurs de giveaway,
-   d'événements, d'entraide) : les panneaux sont partis, les moteurs vivent encore.
-4. Base de données : supprimer les tables non-sécurité, puis mettre à jour `gdpr.py` (registre
+
+1. **Détacher les 65 modules encore accrochés.** Ils ne le sont plus par le câblage
+   d'`on_ready` (déjà propre : 25 `setup()`, presque tous des modules gardés) mais par des
+   appels DISPERSÉS À L'INTÉRIEUR de symboles survivants — vues de quêtes, hooks de
+   récompense, tâches de fond décorées. `outils/purge_modules.py` les liste avec le nombre
+   de références et les lignes exactes. C'est une coupe CHIRURGICALE, bloc par bloc, pas
+   mécanique : la fermeture transitive ne peut plus rien pour eux.
+   Les plus accrochés : `entraide` (39 réf.), `activity_system` (28), `lore49` (21),
+   `combat_actions` (13), `engagement47` (13), `cosmetics` (10), `community_goals` (10).
+2. Supprimer alors les fichiers de modules (`purge_modules.py --apply` fait le lot sûr).
+3. Base de données : supprimer les tables non-sécurité, puis mettre à jour `gdpr.py` (registre
    ~290 tables) **et** `backup_lite.CRITICAL_TABLES` **dans le même commit**.
+4. Décision propriétaire en attente : l'AFK lit `activity_tracking`. Conserver les deux seules
+   écritures (`last_message` dans `track_member_message`, `last_vocal` dans
+   `track_member_vocal_join`) comme infra de modération — elles vivent dans le cœur
+   d'événements, pas dans un module supprimable.
+
+**⚠️ TROIS CI ROUGES ONT ÉTÉ PAYÉES POUR CES LEÇONS — ne pas les réapprendre :**
+- `ast.parse` valide la SYNTAXE, pas les NOMS. Lancer `outils/verif_noms.py` avant chaque push.
+- Un module condamné mais **pas encore supprimé** est toujours importé par `bot.py` : son
+  propre import cassé tue le boot. Ne pas ne bloquer que sur les modules gardés.
+- Un `try: import x` avec repli est conçu pour l'absence du module : il ne bloque PAS.
+  Distinguer import DUR (niveau module) et import PARESSEUX.
+- Les tests aussi importent les modules supprimés (§5.8) — vérifier `tests/` en entier,
+  pas seulement `tests/test_imports.py`.
 
 ---
 
@@ -256,7 +283,11 @@ pour écrire, `ast.parse` avant écriture**.
 | `verif_socle.sh` | Le contrôle §6 en un script : fonctions critiques + `NEVER_DELETE` + `ast.parse` + compteurs. Sort en code non nul si régression. |
 | `sonde_panneaux.py` | Pour une classe de panneau : signatures `__init__`/`render_to`, boutons « Retour », et **tous ses appelants** (par AST). |
 | `purge_morts.py` | **Fermeture transitive inverse à point fixe.** Trouve les classes que plus rien de vivant n'atteint. Épargne automatiquement tout nom cité dans une chaîne (le hub V2 résout par nom) et tout nom utilisé hors `bot.py`. Bloque sur une référence en **code**, signale seulement celles en commentaire. |
-| `refonte_configure.py` · `retape_selecteurs.py` | Les deux migrations d'UI déjà appliquées, gardées comme modèles : preview par défaut, jeton attendu vérifié, `ast.parse` avant écriture. |
+| `verif_noms.py` | **Détecteur de NameError avant le boot.** Fait en 5 s ce que la CI met 3 min à trouver : liste les noms utilisés mais jamais définis. À lancer avant CHAQUE push. |
+| `purge_runtimes.py` | Fermeture inverse étendue aux **fonctions** de niveau module. Protège d'office les `on_*`, les fonctions décorées, les noms cités en chaîne, les noms utilisés hors `bot.py`. |
+| `purge_commandes.py` | Purge des slash commands par identifiant **qualifié** (`/mod warn`, jamais `warn`). Refuse un nom nu. Gère les commandes imbriquées dans un `try` et les `add_command` enveloppés. |
+| `purge_modules.py` | Suppression atomique d'un module : fichier + import + entrée de test. Distingue import DUR et import PARESSEUX, refuse de casser un importeur encore présent. |
+| `unifier_antiraid.py` · `refonte_configure.py` · `retape_selecteurs.py` | Les migrations déjà appliquées, gardées comme modèles : preview par défaut, jeton attendu vérifié, `ast.parse` avant écriture. |
 
 ---
 
