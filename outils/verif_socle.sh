@@ -22,7 +22,12 @@ done
 
 echo
 echo "── Points d'entrée NEVER_DELETE (§5 piège 1) ───────────────"
-for f in help_cmd notify_cmd hub_cmd; do
+# `notify_cmd` et `hub_cmd` ont quitté cette liste en 08/2026 : ils appartenaient
+# au hub communautaire et aux notifications d'événements, explicitement condamnés
+# par la décision du propriétaire. Leur présence dans NEVER_DELETE protégeait
+# contre une suppression ACCIDENTELLE par analyse de code mort, pas contre une
+# suppression DÉCIDÉE. `help_cmd` reste, lui : c'est l'aide générale.
+for f in help_cmd; do
   c=$(grep -c "def $f" bot.py)
   if [ "$c" -gt 0 ]; then
     printf '  OK        %-28s (%s)\n' "$f" "$c"
