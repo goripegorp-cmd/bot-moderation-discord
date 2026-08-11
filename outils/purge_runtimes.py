@@ -35,7 +35,7 @@ import sys
 FICHIER = "bot.py"
 
 NEVER_DELETE = {
-    "MainPanelV2", "SuspectScanPanel", "AfkRolePanel",
+    "MainPanelV2", "SuspectScanPanel",   # AfkRolePanel retiré : le système AFK est supprimé
     "on_ready", "on_message", "on_member_join", "help_cmd",
     "sanction", "is_immune", "create_ticket", "task_supervisor",
     "check_expired_restrictions", "_record_infraction", "check_badwords",

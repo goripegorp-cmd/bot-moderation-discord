@@ -50,7 +50,7 @@ PROTEGES = {
     "help_cmd", "sanction", "is_immune", "create_ticket", "task_supervisor",
     "check_expired_restrictions", "_record_infraction", "check_badwords",
     "_ocr_scam_check", "_kick_young_account", "_handle_antiraid_join",
-    "MainPanelV2", "SuspectScanPanel", "AfkRolePanel",
+    "MainPanelV2", "SuspectScanPanel",   # AfkRolePanel retiré : le système AFK est supprimé
 }
 
 

@@ -8,3 +8,8 @@ pytesseract==0.3.13
 Pillow>=10.0.0
 nudenet==3.4.2
 pyzbar==0.1.9
+
+# Base de fuseaux horaires — garantit que ZoneInfo("Europe/Paris") existe partout
+# (absent des images minimales et de Windows). Le système d'activité en dépend :
+# une semaine doit commencer le lundi 00h00 heure de Paris, pas UTC.
+tzdata>=2024.1

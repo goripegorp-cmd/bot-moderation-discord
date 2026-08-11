@@ -186,6 +186,14 @@ import tracking_layer as tracking2026
 # architecture_builder, custom_blueprint, slash_commands_architecture) → libère
 # ~3600 lignes. Le serveur reste géré manuellement par l'owner.
 import unified_logger as ulogger2026
+# ═══ SYSTÈME D'ACTIVITÉ (11/08/2026) — désactivé par défaut ═══
+#  Suivi (3 sources), escalade par paliers, niveaux et VIP. Rien ne tourne tant
+#  que le propriétaire n'a pas activé le système ET désigné une cible.
+import activite as activite_module
+import activite_escalade as activite_esc
+import activite_recompenses as activite_rec
+import activite_passage as activite_pass
+import activite_panneau as activite_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
 import delegations as delegations2026
 import compromised_detector as compromised2026
@@ -4162,210 +4170,10 @@ async def _is_chatty_channel(channel, *, allow_announce: bool = False) -> bool:
 #                           📺 SÉLECTEURS PAGINÉS UNIVERSELS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class UniversalChannelSelect(View):
-    """
-    Sélecteur de salon universel avec pagination.
-    Supporte tous les types de salons et toutes les callbacks.
-    """
-    def __init__(self, u, g, callback_func, return_view_func, channel_type='text', page=0, 
-                 title="📺 Choisir un salon", allow_none=True, none_label="❌ Aucun", extra_data=None):
-        super().__init__(timeout=180)
-        self.u = u
-        self.g = g
-        self.callback_func = callback_func  # Fonction async à appeler avec (interaction, channel_id)
-        self.return_view_func = return_view_func  # Fonction qui retourne la view de retour
-        self.channel_type = channel_type
-        self.page = page
-        self.title = title
-        self.allow_none = allow_none
-        self.none_label = none_label
-        self.extra_data = extra_data or {}
-        
-        # Récupérer les salons selon le type
-        if channel_type == 'text':
-            self.channels = list(g.text_channels)
-        elif channel_type == 'voice':
-            self.channels = list(g.voice_channels)
-        elif channel_type == 'category':
-            self.channels = list(g.categories)
-        else:
-            self.channels = list(g.channels)
-        
-        self.per_page = 23 if allow_none else 24
-        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
-        self._build()
-    
-    def _build(self):
-        self.clear_items()
-        
-        start = self.page * self.per_page
-        end = start + self.per_page
-        page_channels = self.channels[start:end]
-        
-        opts = []
-        if self.allow_none and self.page == 0:
-            opts.append(discord.SelectOption(label=self.none_label, value="0", emoji="🚫"))
-        
-        for ch in page_channels:
-            if self.channel_type == 'voice':
-                label = f"🔊 {ch.name}"[:25]
-            elif self.channel_type == 'category':
-                label = f"📁 {ch.name}"[:25]
-            else:
-                label = f"# {ch.name}"[:25]
-            
-            desc = ch.category.name[:50] if hasattr(ch, 'category') and ch.category else "Sans catégorie"
-            opts.append(discord.SelectOption(label=label, value=str(ch.id), description=desc))
-        
-        if opts:
-            select = UniversalChannelSelectMenu(self, opts)
-            self.add_item(select)
-        
-        # Navigation si plusieurs pages
-        if self.max_page > 0:
-            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
-            prev_btn.callback = self.prev_page
-            self.add_item(prev_btn)
-            
-            page_btn = discord.ui.Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
-            self.add_item(page_btn)
-            
-            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
-            next_btn.callback = self.next_page
-            self.add_item(next_btn)
-        
-        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
-        back_btn.callback = self.go_back
-        self.add_item(back_btn)
-    
-    async def prev_page(self, i):
-        self.page -= 1
-        self._build()
-        await i.response.edit_message(view=self)
-    
-    async def next_page(self, i):
-        self.page += 1
-        self._build()
-        await i.response.edit_message(view=self)
-    
-    async def go_back(self, i):
-        v = self.return_view_func()
-        # V2-aware navigation (Phase 3.0d)
-        if hasattr(v, 'render_to'):
-            await v.render_to(i, edit=True)
-            return
-        if hasattr(v, 'embed'):
-            embed = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-            await i.response.edit_message(content=None, embed=embed, view=v, attachments=[])
-        else:
-            await i.response.edit_message(content=None, view=v, attachments=[])
-
-class UniversalChannelSelectMenu(Select):
-    def __init__(self, parent, opts):
-        placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - {parent.title}"[:100]
-        super().__init__(placeholder=placeholder, options=opts)
-        self.parent_view = parent
-    
-    async def callback(self, i):
-        channel_id = int(self.values[0])
-        await self.parent_view.callback_func(i, channel_id, self.parent_view.extra_data)
 
 
-class UniversalRoleSelect(View):
-    """
-    Sélecteur de rôle universel avec pagination.
-    """
-    def __init__(self, u, g, callback_func, return_view_func, page=0,
-                 title="🎭 Choisir un rôle", allow_none=True, none_label="❌ Aucun rôle", 
-                 exclude_bots=True, extra_data=None):
-        super().__init__(timeout=180)
-        self.u = u
-        self.g = g
-        self.callback_func = callback_func
-        self.return_view_func = return_view_func
-        self.page = page
-        self.title = title
-        self.allow_none = allow_none
-        self.none_label = none_label
-        self.extra_data = extra_data or {}
-        
-        # Récupérer les rôles (exclure @everyone et les rôles de bot si demandé)
-        if exclude_bots:
-            self.roles = [r for r in g.roles[1:] if not r.is_bot_managed()]
-        else:
-            self.roles = list(g.roles[1:])
-        
-        self.per_page = 23 if allow_none else 24
-        self.max_page = max(0, (len(self.roles) - 1) // self.per_page)
-        self._build()
-    
-    def _build(self):
-        self.clear_items()
-        
-        start = self.page * self.per_page
-        end = start + self.per_page
-        page_roles = self.roles[start:end]
-        
-        opts = []
-        if self.allow_none and self.page == 0:
-            opts.append(discord.SelectOption(label=self.none_label, value="0", emoji="🚫"))
-        
-        for r in page_roles:
-            desc = f"{len(r.members)} membres"[:50]
-            opts.append(discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id), description=desc))
-        
-        if opts:
-            select = UniversalRoleSelectMenu(self, opts)
-            self.add_item(select)
-        
-        # Navigation
-        if self.max_page > 0:
-            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
-            prev_btn.callback = self.prev_page
-            self.add_item(prev_btn)
-            
-            page_btn = discord.ui.Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
-            self.add_item(page_btn)
-            
-            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
-            next_btn.callback = self.next_page
-            self.add_item(next_btn)
-        
-        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
-        back_btn.callback = self.go_back
-        self.add_item(back_btn)
-    
-    async def prev_page(self, i):
-        self.page -= 1
-        self._build()
-        await i.response.edit_message(view=self)
-    
-    async def next_page(self, i):
-        self.page += 1
-        self._build()
-        await i.response.edit_message(view=self)
-    
-    async def go_back(self, i):
-        v = self.return_view_func()
-        # V2-aware navigation (Phase 3.0d)
-        if hasattr(v, 'render_to'):
-            await v.render_to(i, edit=True)
-            return
-        if hasattr(v, 'embed'):
-            embed = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-            await i.response.edit_message(content=None, embed=embed, view=v, attachments=[])
-        else:
-            await i.response.edit_message(content=None, view=v, attachments=[])
 
-class UniversalRoleSelectMenu(Select):
-    def __init__(self, parent, opts):
-        placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - {parent.title}"[:100]
-        super().__init__(placeholder=placeholder, options=opts)
-        self.parent_view = parent
-    
-    async def callback(self, i):
-        role_id = int(self.values[0])
-        await self.parent_view.callback_func(i, role_id, self.parent_view.extra_data)
+
 
 
 
@@ -5077,7 +4885,7 @@ async def bump_reminder_task():
                 head = f"<@&{role_id}> " if role_id else ""
                 am = discord.AllowedMentions(roles=bool(role_id), everyone=False, users=False)
                 await ch.send(
-                    f"{head}⏰ **C'est l'heure de bump !** Tape `/bump` (Disboard) pour nous "
+                    f"{head}⏰ **C'est l'heure de bump !** Pense à bumper le serveur pour nous "
                     f"remonter dans l'annuaire et gagner en visibilité. 🚀", allowed_mentions=am)
                 await asyncio.sleep(1)
             except Exception:
@@ -10502,7 +10310,7 @@ _CONFIG_SECTIONS = [
     ("antiraid",    "⚔️", "Anti-Raid",         "Vague d'arrivées · âge de compte minimum · riposte"),
     ("tickets",     "🎫", "Tickets",           "Panneaux d'ouverture · rôle staff · logs · blacklist"),
     ("logs",        "📋", "Logs & Audit",      "Un salon · toutes les catégories d'événements"),
-    ("afk",         "💤", "Rôle AFK",          "Rôle automatique pour les membres inactifs"),
+    ("activite",    "📊", "Activité",          "Présence exigée · rappels · retrait de rôle · expulsion"),
     ("rgpd",        "🔒", "Données & RGPD",    "Droit à l'effacement (art. 17) · rétention"),
 ]
 
@@ -10681,7 +10489,7 @@ class MainPanelV2(LayoutView):
             'antiraid':    lambda: AntiRaidPanelV2(self.u, self.g),
             'tickets':     lambda: TicketMainPanelV2(self.u, self.g),
             'logs':        lambda: LogsPanelV2(self.u, self.g),
-            'afk':         lambda: AfkRolePanelV2(self.u, self.g),
+            'activite':    lambda: activite_ui.ActivitePanelV2(self.u, self.g),
             'rgpd':        lambda: RgpdPanelV2(self.u, self.g),
         }
         fabrique = panneaux.get(valeur)
@@ -13006,137 +12814,8 @@ class EntraideRatingButton(discord.ui.DynamicItem[Button],
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def _get_wakeup_candidates(guild, max_count: int = 15) -> list[discord.Member]:
-    """Phase 40 : retourne les membres dormants à réveiller en priorité.
-
-    Critères :
-    - Inactif depuis 3 jours mais moins de 30 jours (probabilité de revenir)
-    - Pas mentionné publiquement dans les dernières 48h
-    - N'est pas un bot
-    - Est encore membre du serveur
-    """
-    try:
-        async with get_db() as db:
-            # On prend tous les membres avec activité connue
-            async with db.execute(
-                'SELECT user_id, last_message FROM activity_tracking '
-                'WHERE guild_id=? AND last_message IS NOT NULL '
-                'ORDER BY last_message DESC LIMIT 500',
-                (guild.id,),
-            ) as cur:
-                rows = await cur.fetchall()
-
-            # Charger les last_mentioned pour le cooldown 48h
-            async with db.execute(
-                'SELECT user_id, last_mentioned_at FROM wakeup_log WHERE guild_id=?',
-                (guild.id,),
-            ) as cur:
-                wakeup_rows = {r[0]: r[1] for r in await cur.fetchall()}
-
-        candidates_with_score = []
-        now_dt = datetime.now(timezone.utc)
-        cooldown_48h_cutoff = now_dt - timedelta(hours=48)
-
-        for user_id, last_msg in rows:
-            try:
-                # Catégoriser
-                cat = events2026.categorize_member_activity(last_msg)
-
-                # On veut DORMANT principalement, et un peu d'ASLEEP
-                if cat not in ('dormant', 'asleep'):
-                    continue
-
-                # Cooldown : pas mentionné dans les 48h
-                last_ping = wakeup_rows.get(user_id)
-                if last_ping:
-                    try:
-                        last_ping_dt = (
-                            datetime.fromisoformat(last_ping)
-                            if 'T' in str(last_ping)
-                            else datetime.strptime(last_ping, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                        )
-                        if last_ping_dt > cooldown_48h_cutoff:
-                            continue  # mentionné récemment, on attend
-                    except Exception:
-                        pass
-
-                member = guild.get_member(user_id)
-                if not member or member.bot:
-                    continue
-
-                # Score : dormant en priorité, puis asleep
-                # Plus l'inactivité est récente (3-7j), plus le score est haut
-                # (ils ont le plus de chances de revenir)
-                try:
-                    last_dt = (
-                        datetime.fromisoformat(last_msg)
-                        if 'T' in str(last_msg)
-                        else datetime.strptime(last_msg, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                    )
-                    days_inactive = (now_dt - last_dt).days
-                    # Score décroissant avec l'inactivité
-                    # 3j → 20, 7j → 15, 14j → 10, 30j → 5
-                    if days_inactive < 7:
-                        score = 20
-                    elif days_inactive < 14:
-                        score = 15
-                    elif days_inactive < 30:
-                        score = 10
-                    else:
-                        score = 5
-                except Exception:
-                    score = 5
-
-                candidates_with_score.append((member, score))
-            except Exception:
-                continue
-
-        # Tirage pondéré
-        if not candidates_with_score:
-            return []
-
-        # On prend les top N en mélangeant un peu (pas toujours les mêmes)
-        total_w = sum(s for _, s in candidates_with_score)
-        chosen = []
-        remaining = list(candidates_with_score)
-        for _ in range(min(max_count, len(remaining))):
-            if not remaining:
-                break
-            current_total = sum(s for _, s in remaining)
-            if current_total <= 0:
-                break
-            r = random.uniform(0, current_total)
-            acc = 0
-            for idx, (m, s) in enumerate(remaining):
-                acc += s
-                if r <= acc:
-                    chosen.append(m)
-                    remaining.pop(idx)
-                    break
-
-        return chosen
-    except Exception as ex:
-        print(f"[_get_wakeup_candidates] {ex}")
-        return []
 
 
-async def _log_wakeup_mentions(guild_id: int, member_ids: list[int]):
-    """Phase 40 : enregistre que ces membres viennent d'être mentionnés."""
-    if not member_ids:
-        return
-    try:
-        async with get_db() as db:
-            for uid in member_ids:
-                await db.execute(
-                    'INSERT INTO wakeup_log(guild_id, user_id, last_mentioned_at, mention_count) '
-                    'VALUES(?,?,CURRENT_TIMESTAMP,1) '
-                    'ON CONFLICT(guild_id, user_id) DO UPDATE SET '
-                    'last_mentioned_at=CURRENT_TIMESTAMP, mention_count=mention_count+1',
-                    (guild_id, uid),
-                )
-            await db.commit()
-    except Exception as ex:
-        print(f"[_log_wakeup_mentions] {ex}")
 
 
 
@@ -13655,206 +13334,93 @@ async def restore_active_comebacks():
 
 
 
-@bot.tree.command(name="help", description="📖 Aide complète : toutes les commandes disponibles")
+@bot.tree.command(name="help", description="❓ Voir ce que le bot sait faire")
 async def help_cmd(i: discord.Interaction):
-    """Phase 123 : aide complète en LayoutView V2 magnifique avec sections
-    catégorisées par thème + boutons navigation vers le hub.
+    """Aide générale — RÉÉCRITE 08/2026.
+
+    L'ancienne version listait 42 commandes qui n'existent plus depuis la refonte
+    (niveaux, boutique, quêtes, profils, réseaux sociaux…). Une aide qui promet
+    des commandes mortes est pire que pas d'aide : le membre tape, ça échoue, et
+    il conclut que le bot est cassé.
+
+    Celle-ci ne liste QUE ce qui existe, et sépare franchement ce qui est ouvert
+    à tous de ce qui est réservé au staff — un membre ne doit pas perdre son
+    temps sur des commandes qu'il ne peut pas lancer.
     """
     try:
-        _viewer_id = i.user.id
+        await i.response.defer(ephemeral=True, thinking=False)
+    except (discord.InteractionResponded, discord.NotFound):
+        pass
 
-        class _GotoHubBtn(discord.ui.Button):
-            def __init__(self):
-                super().__init__(
-                    label="🎮 Ouvrir mon Hub",
-                    style=discord.ButtonStyle.primary,
-                    custom_id=f"phase123_help_hub_{_viewer_id}",
-                )
+    est_staff = False
+    try:
+        est_staff = bool(i.user.guild_permissions.manage_messages)
+    except Exception:
+        pass
 
-            async def callback(self, btn_i: discord.Interaction):
-                if btn_i.user.id != _viewer_id:
-                    return await btn_i.response.send_message(
-                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
-                    )
-                try:
-                    if not btn_i.response.is_done():
-                        await btn_i.response.send_message(
-                            "ℹ️ Le hub communautaire a été retiré du serveur.",
-                            ephemeral=True,
-                        )
-                    else:
-                        await btn_i.followup.send(
-                            "ℹ️ Le hub communautaire a été retiré du serveur.",
-                            ephemeral=True,
-                        )
-                except Exception as ex:
-                    print(f"[phase123 help hub btn] {ex}")
-                    try:
-                        if not btn_i.response.is_done():
-                            await btn_i.response.send_message(
-                                f"❌ Erreur : `{ex}`", ephemeral=True
-                            )
-                    except Exception:
-                        pass
+    v = LayoutView(timeout=300)
+    items = [
+        v2_title("❓ Aide"),
+        v2_subtitle("Un bot de modération — sécurité, sanctions, tickets"),
+        v2_divider(),
+        v2_title("Pour tout le monde", level=3),
+        v2_body(
+            "🚨 `/signaler` — signaler un message gênant, **en toute discrétion**\n"
+            "🔊 `/signaler-vocal` — signaler une nuisance en vocal\n"
+            "❓ `/help` — cette aide"
+        ),
+    ]
 
-        class _GotoInventoryBtn(discord.ui.Button):
-            def __init__(self):
-                super().__init__(
-                    label="🎒 Mon inventaire",
-                    style=discord.ButtonStyle.secondary,
-                    custom_id=f"phase123_help_inv_{_viewer_id}",
-                )
+    if est_staff:
+        items += [
+            v2_divider(),
+            v2_title("Modération", level=3),
+            v2_body(
+                "`/mod warn` · `/mod unwarn` — avertir, retirer un avertissement\n"
+                "`/mod mute` · `/mod unmute` — rendre muet\n"
+                "`/mod direction` · `/mod undirection` — restreindre complètement\n"
+                "`/mod infractions` — le casier d'un membre\n"
+                "`/mod note` — note interne du staff\n"
+                "`/mod active` — restrictions en cours\n"
+                "`/mod clear` — vider un salon\n"
+                "`/mod ticketblacklist` — interdire les tickets à un membre"
+            ),
+            v2_body(
+                "`/off on` · `/off off` · `/off list` — radier totalement un membre\n"
+                "`/bouclier on` · `/bouclier off` — verrouiller le serveur\n"
+                "`/bouclier secours` — filet AutoMod, tient même bot éteint"
+            ),
+            v2_divider(),
+            v2_title("Tickets", level=3),
+            v2_body(
+                "`/ticket search` · `/ticket queue` — retrouver, répartir\n"
+                "`/ticket priority` · `/ticket stats`\n"
+                "`/ticket reply` · `/ticket templates` — réponses pré-rédigées\n"
+                "`/ticket template_add` · `/ticket template_remove`"
+            ),
+            v2_divider(),
+            v2_title("Journaux et suivi", level=3),
+            v2_body(
+                "`/logs setchannel` · `/logs status` · `/logs categories`\n"
+                "`/server report` · `/server history` · `/server anomalies`"
+            ),
+            v2_divider(),
+            v2_body("⚙️ `/configure` — **tout le reste se règle ici** : protections, "
+                    "sanctions, immunités, anti-raid, tickets, journaux, activité."),
+        ]
+    else:
+        items += [
+            v2_divider(),
+            v2_body("-# Les commandes de modération n'apparaissent que pour le staff."),
+        ]
 
-            async def callback(self, btn_i: discord.Interaction):
-                if btn_i.user.id != _viewer_id:
-                    return await btn_i.response.send_message(
-                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
-                    )
-                try:
-                    await btn_i.response.send_message("ℹ️ Cette fonctionnalité a été retirée du serveur.", ephemeral=True)
-                except Exception as ex:
-                    print(f"[phase123 help inv btn] {ex}")
-                    try:
-                        if not btn_i.response.is_done():
-                            await btn_i.response.send_message(
-                                f"❌ Erreur : `{ex}`", ephemeral=True
-                            )
-                    except Exception:
-                        pass
-
-        class _HelpLayout(LayoutView):
-            def __init__(self):
-                super().__init__(timeout=600)
-                items = []
-
-                # ═══ HEADER ═══
-                items.append(v2_title("📖 Aide"))
-                items.append(v2_subtitle(
-                    f"_Toutes les fonctionnalités de {i.guild.name}_"
-                ))
-                items.append(v2_divider())
-
-                # ═══ GROUPE 1 — COMBAT & ÉQUIPEMENT ═══
-                items.append(v2_body("### ⚔️ Combat & équipement"))
-                items.append(v2_body(
-                    "• `/event` — l'événement en cours + tes stats\n"
-                    "• `/inventory` — ton équipement, set bonus, durabilité\n"
-                    "• `/loadout save·load·list` — préréglages d'équipement (PvP/Donjon…)\n"
-                    "• `/badges` — tes hauts faits et ton rang\n"
-                    "• `/loots` — tes items uniques\n"
-                    "• `/event_shop` — boutique d'équipements (rotation hebdo)\n"
-                    "• `/class choose` — Tank / DPS / Healer / Mage / Rogue / Bard"
-                ))
-                items.append(v2_divider())
-
-                # ═══ GROUPE 2 — QUÊTES & PROGRESSION ═══
-                items.append(v2_body("### 📈 Quêtes & progression"))
-                items.append(v2_body(
-                    "• `/daily` — 3 quêtes du jour + streak\n"
-                    "• `/weekly` — 5 quêtes de la semaine\n"
-                    "• `/monthly` — Méga quête du mois\n"
-                    "• `/achievements` — tous tes hauts faits\n"
-                    "• `/wheel` — Daily Wheel (1 spin / 24h)\n"
-                    "• `/level` — ton niveau et ton XP\n"
-                    "• `/prestige` — Prestige (niveau 100+)\n"
-                    "• `/profile` — vue complète unifiée"
-                ))
-                items.append(v2_divider())
-
-                # ═══ GROUPE 3 — ÉCONOMIE & MARCHÉ ═══
-                items.append(v2_body("### 💰 Économie & marché"))
-                items.append(v2_body(
-                    "• `/shop` — boutique de rôles\n"
-                    "• `/bank deposit/withdraw/status` — banque (1%/jour)\n"
-                    "• `/auction browse/create/mine` — Maison des enchères\n"
-                    "• `/trade` — créer annonce marketplace\n"
-                    "• `/marketplace` — voir les annonces actives\n"
-                    "• `/sell_pet` — vendre un pet\n"
-                    "• `/leaderboard` — top joueurs (coins · msg · vocal)"
-                ))
-                items.append(v2_divider())
-
-                # ═══ GROUPE 4 — COMPÉTITIF & PvP ═══
-                items.append(v2_body("### 🏆 Compétitif & PvP"))
-                items.append(v2_body(
-                    "• `/duel @membre [mise]` — défier en combat 1v1\n"
-                    "• `/duel_report` — reporter le gagnant\n"
-                    "• `/pvp_top` — top 10 du Ladder Elo\n"
-                    "• `/voice_top` — top 10 vocal de la semaine"
-                ))
-                items.append(v2_divider())
-
-                # ═══ GROUPE 5 — SOCIAL & COMMUNAUTÉ ═══
-                items.append(v2_body("### 💬 Social & communauté"))
-                items.append(v2_body(
-                    "• `/poll <question> <options=A|B|C>` — sondage\n"
-                    "• `/groupe` — cherche ou crée un groupe de joueurs (parties)\n"
-                    "• `/suggestion` — proposer une idée\n"
-                    "• `/confess` — confession anonyme (100%)\n"
-                    "• `/shoutout` — remercier publiquement un membre\n"
-                    "• `/mentor_invite` — devenir mentor d'un apprenti\n"
-                    "• `/afk` — voir les AFK du serveur"
-                ))
-                items.append(v2_divider())
-
-                # ═══ GROUPE 6 — PERSONNEL & UTILITAIRES ═══
-                items.append(v2_body("### 🎨 Personnel & utilitaires"))
-                items.append(v2_body(
-                    "• `/profile` — profil complet (level/prestige/saison)\n"
-                    "• `/pet` — familiers : collection · **codex %** · œufs · achat\n"
-                    "• `/birthday set JJ-MM` — ton anniversaire\n"
-                    "• `/birthday list` — anniversaires du mois\n"
-                    "• `/notifs` — choisir ce qui te ping\n"
-                    "• `/quiet_hours` — heures calmes (owner)\n"
-                    "• `/vocal_optin` — autoriser déplacement vocal en raid\n"
-                    "• `/capsule_create` — sceller un message dans le futur\n"
-                    "• `/weather` — météo et streak du serveur\n"
-                    "• `/stat [@membre]` — stats d'activité (messages · vocal · streak)"
-                ))
-                items.append(v2_divider())
-
-                # ═══ GROUPE 7 — MODÉRATION (staff) ═══
-                items.append(v2_body("### 🛡️ Modération (staff)"))
-                items.append(v2_body(
-                    "• `/mod warn @membre raison` — avertir\n"
-                    "• `/mod mute @membre durée` — timeout\n"
-                    "• `/mod unmute @membre` — retirer mute\n"
-                    "• `/mod direction @membre` — restriction complète\n"
-                    "• `/mod infractions @membre` — fiche d'infractions\n"
-                    "• `/mod active` — restrictions/mutes en cours (qui · jusqu'à quand)\n"
-                    "• `/ticket search [non_pris]` — lister les tickets ouverts\n"
-                    "• `/ticket queue` — charge des tickets par staff\n"
-                    "• `/configure` — panneau de config global"
-                ))
-                items.append(v2_divider())
-
-                # ═══ Navigation rapide ═══
-                items.append(v2_body("### 🚀 Navigation rapide"))
-                items.append(v2_section(
-                    v2_title("🎮  Hub d'engagement"),
-                    v2_subtitle("Tout en 1 clic — quêtes, profil, achievements, etc."),
-                    accessory=_GotoHubBtn(),
-                ))
-                items.append(v2_section(
-                    v2_title("🎒  Mon inventaire"),
-                    v2_subtitle("Équipement, set bonus, durabilité, actions rapides"),
-                    accessory=_GotoInventoryBtn(),
-                ))
-
-                items.append(v2_divider())
-                items.append(v2_body(
-                    f"-# {i.guild.name} · {events2026.get_help_footer('general')}"
-                ))
-
-                self.add_item(v2_container(*items, color=0x5865F2))
-
-        await i.response.send_message(view=_HelpLayout(), ephemeral=True)
+    v.add_item(v2_container(*items, color=Palette.PRIMARY))
+    try:
+        await i.followup.send(view=v, ephemeral=True)
     except Exception as ex:
-        print(f"[/help V2] {ex}")
-        import traceback; traceback.print_exc()
+        print(f"[help_cmd] {ex}")
         try:
-            if not i.response.is_done():
-                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            await i.followup.send("❌ Impossible d'afficher l'aide.", ephemeral=True)
         except Exception:
             pass
 
@@ -15286,6 +14852,46 @@ async def _stale_event_cleanup_wait():
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 203 — SUPERVISEUR DE TÂCHES (anti "bot online mais plus aucun event")
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ⏱️ ACTIVITÉ — le passage quotidien
+#
+#  Toutes les 6 h plutôt qu'une fois par jour : si le bot redémarre au mauvais
+#  moment, un passage sauté ne fait pas perdre une journée entière. Le passage
+#  est idempotent — les paliers sont calculés depuis les dates, pas incrémentés —
+#  donc le repasser dans la même journée ne double rien.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tasks.loop(hours=6)
+async def activite_passage_task():
+    """Applique les paliers d'activité sur chaque serveur. FAIL-SAFE par guilde."""
+    for g in list(bot.guilds):
+        try:
+            if not await activite_module.actif(g.id):
+                continue
+            rap = await activite_pass.passage(g)
+            #  On ne poste au staff QUE s'il s'est passé quelque chose : une
+            #  notification quotidienne « rien à signaler » se fait ignorer, puis
+            #  masquer, et le jour où le garde-fou parle personne ne le voit.
+            a = rap.get("actions", {})
+            interessant = (rap.get("plafond_declenche")
+                           or a.get("messages_envoyes")
+                           or (a.get("retraits") or {}).get("faits")
+                           or a.get("a_expulser"))
+            if not interessant:
+                continue
+            c = await activite_module.config(g.id)
+            salon = g.get_channel(int(c.get("activite_salon_staff", 0) or 0))
+            if salon is not None:
+                await salon.send(activite_pass.resume_texte(rap))
+        except Exception as ex:
+            print(f"[activite_passage_task {g.id}] {ex}")
+
+
+@activite_passage_task.before_loop
+async def _activite_passage_wait():
+    await bot.wait_until_ready()
+
+
 #  Une @tasks.loop qui lève une exception non gérée s'ARRÊTE définitivement
 #  (jusqu'au reboot). Symptôme vécu : tout se tait alors que le bot est en ligne.
 #  Ce superviseur re-démarre toute boucle critique morte, toutes les 5 min.
@@ -15293,6 +14899,7 @@ async def _stale_event_cleanup_wait():
 #  touche qu'à des boucles censées tourner en continu.
 # ═══════════════════════════════════════════════════════════════════════════════
 _SUPERVISED_LOOP_NAMES = [
+    "activite_passage_task",
     "ui_usage_flush_task",
     "event_timeout_checker", "event_auto_scheduler", "stale_event_cleanup",
     "personal_event_dispatcher", "light_events_dispatcher",
@@ -15303,7 +14910,7 @@ _SUPERVISED_LOOP_NAMES = [
     "flash_treasure_dispatcher", "evening_ritual_dispatcher",
     "tag_royale_starter", "tag_royale_timeout_checker", "server_anniversary_checker",
     "daily_quest_push_dispatcher", "channel_camouflage_dispatcher",
-    "voice_spotlight_dispatcher", "auto_promote_dying_events",
+    "voice_spotlight_dispatcher",
     "npc_chatter_task", "missions_runner_task", "daily_studio_tip_task",
     "golden_hour_announce_task", "hub_live_events_refresh_task",
     "auction_settler_task", "reversibles_failsafe", "persistent_msg_cleaner",
@@ -15324,7 +14931,7 @@ _SUPERVISED_LOOP_NAMES = [
     #   • temp_voice_watchdog     → les vocaux temporaires s'empilent (plainte owner)
     # Toutes sont lancées INCONDITIONNELLEMENT au boot (garde is_running() seule) →
     # les superviser est sans effet de bord (no-op si déjà vivantes, resurrection sinon).
-    "check_realsy_inactivity", "check_social_feeds", "check_afk_automatic",
+    "check_realsy_inactivity", "check_social_feeds",
     "cleanup_old_db_data", "check_giveaways", "check_scheduled_messages",
     "check_expired_roles", "cleanup_deals_task", "check_expired_restrictions",
     "birthday_announcer", "poll_closer", "weekly_recap_task", "owner_alerts_task",
@@ -20110,7 +19717,7 @@ async def _warn_api_dead(guild, platform: str, reason: str):
             description=(
                 f"**Les publications {platform} ne peuvent pas être détectées automatiquement.**\n\n"
                 f"📡 Cause : {reason}\n\n"
-                "💡 Solution : publie manuellement avec `/publish` dans le salon configuré. "
+                "💡 Solution : publie manuellement dans le salon configuré. "
                 "Le bot continuera de vérifier en arrière-plan au cas où l'API revient."
             ),
             extra={"🛠️ Action": "Aucune (la détection auto est en panne) · Prochaine alerte dans 24h max"},
@@ -20552,118 +20159,6 @@ class V2GenericChannelPicker(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
 
-class V2GenericMultiChannelPicker(LayoutView):
-    """Selecteur multi-salons V2 (Phase 4.5).
-
-    Stocke une liste d'IDs de salons dans la config (clé directe ou sous-clé).
-    Sélection vide acceptée = "tous les salons".
-    """
-
-    def __init__(self, u, g, *, config_key: str, return_panel_factory,
-                 title: str = "Choisir des salons",
-                 description: str = "Sélectionne les salons (vide = tous).",
-                 color: int = 0x5865F2,
-                 channel_types=None,
-                 sub_dict_key: str = None,
-                 max_values: int = 25):
-        super().__init__(timeout=300)
-        self.u = u
-        self.g = g
-        self.config_key = config_key
-        self.return_panel_factory = return_panel_factory
-        self.title = title
-        self.description = description
-        self.color = color
-        self.channel_types = channel_types or [discord.ChannelType.text, discord.ChannelType.news]
-        self.sub_dict_key = sub_dict_key
-        self.max_values = min(25, max_values)
-        self._build()
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    async def _save(self, channel_ids: list[int]):
-        if self.sub_dict_key:
-            c = await cfg(self.g.id)
-            sub = c.get(self.sub_dict_key, {}) or {}
-            if not isinstance(sub, dict):
-                sub = {}
-            sub[self.config_key] = channel_ids
-            await db_set(self.g.id, self.sub_dict_key, sub)
-        else:
-            await db_set(self.g.id, self.config_key, channel_ids)
-
-    async def _return_to_parent(self, i: discord.Interaction):
-        v = self.return_panel_factory()
-        if hasattr(v, 'render_to'):
-            await v.render_to(i, edit=True)
-        elif hasattr(v, 'embed'):
-            emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-            await i.response.edit_message(embed=emb, view=v, attachments=[])
-        else:
-            await i.response.edit_message(view=v, attachments=[])
-
-    def _build(self):
-        self.clear_items()
-        sel = discord.ui.ChannelSelect(
-            channel_types=self.channel_types,
-            placeholder="📁 Sélectionne les salons (multi)...",
-            min_values=0,
-            max_values=self.max_values,
-        )
-        sel.callback = self._on_select
-
-        b_clear = Button(label="🧹 Tout effacer", style=discord.ButtonStyle.danger, custom_id="v2mcp_clear")
-        b_clear.callback = self._cb_clear
-        b_back = Button(label="◀️ Annuler", style=discord.ButtonStyle.secondary, custom_id="v2mcp_back")
-        b_back.callback = self._cb_back
-
-        items = [
-            v2_title(self.title),
-            v2_subtitle(self.description),
-            v2_divider(),
-            v2_subtitle("Tu peux sélectionner plusieurs salons en une seule fois."),
-            discord.ui.ActionRow(sel),
-            discord.ui.ActionRow(b_clear, b_back),
-        ]
-        self.add_item(v2_container(*items, color=discord.Color(self.color)))
-
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _on_select(self, i):
-        try:
-            channel_ids = [int(c.id) for c in i.data.get('resolved', {}).get('channels', {}).values()] if False else []
-            # discord.py expose les valeurs via i.data['values'] (liste d'IDs en str)
-            raw_values = i.data.get('values', [])
-            channel_ids = [int(v) for v in raw_values]
-            await self._save(channel_ids)
-            await self._return_to_parent(i)
-        except Exception as ex:
-            print(f"[V2GenericMultiChannelPicker] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
-
-    async def _cb_clear(self, i):
-        try:
-            await self._save([])
-            await self._return_to_parent(i)
-        except Exception as ex:
-            print(f"[V2GenericMultiChannelPicker clear] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.defer()
-            except Exception:
-                pass
-
-    async def _cb_back(self, i):
-        await self._return_to_parent(i)
 
 
 class V2GenericRolePicker(LayoutView):
@@ -20867,47 +20362,8 @@ class V2GenericRolePicker(LayoutView):
 
 
 
-def _count_giveaway_conditions(conditions: dict) -> int:
-    """Compte le nombre de conditions actives sur ce giveaway."""
-    n = 0
-    if conditions.get('min_messages', 0) > 0: n += 1
-    if conditions.get('min_vocal_minutes', 0) > 0: n += 1
-    if conditions.get('required_role', 0) > 0: n += 1
-    if conditions.get('min_account_days', 0) > 0: n += 1
-    if conditions.get('no_afk', False): n += 1
-    return n
 
 
-def _format_giveaway_conditions(conditions: dict, guild) -> str:
-    """Format les conditions giveaway en texte propre (utilisé pour l'embed ephemeral)."""
-    mode = conditions.get('condition_mode', 'OR')
-    parts = []
-
-    if conditions.get('min_messages', 0) > 0:
-        parts.append(f"📝 **{conditions['min_messages']}**+ messages envoyés")
-    if conditions.get('min_vocal_minutes', 0) > 0:
-        parts.append(f"🎤 **{conditions['min_vocal_minutes']}**+ minutes en vocal")
-    if conditions.get('required_role', 0) > 0:
-        role = guild.get_role(conditions['required_role'])
-        if role:
-            parts.append(f"🎭 Avoir le rôle {role.mention}")
-    if conditions.get('min_account_days', 0) > 0:
-        parts.append(f"📅 Compte créé il y a ≥ **{conditions['min_account_days']}** jours")
-    if conditions.get('no_afk', False):
-        afk_days = conditions.get('afk_days', 7)
-        parts.append(f"❌ Ne pas être AFK depuis **{afk_days}** jours")
-
-    if not parts:
-        return "✅ **Aucune condition** — tout le monde peut participer !"
-
-    sep = "\n**OU** ".join if mode == 'OR' else "\n**ET** ".join
-    header = (
-        "📋 Conditions (mode **OU** — une seule suffit) :"
-        if mode == 'OR'
-        else "📋 Conditions (mode **ET** — toutes requises) :"
-    )
-    body = "\n".join(parts) if mode == 'AND' else " **OU**\n".join(parts)
-    return f"{header}\n\n{body}"
 
 
 
@@ -20945,7 +20401,7 @@ class CompromisedAccountActionView(View):
         if not is_owner:
             await i.response.send_message(
                 "⛔ Seul le propriétaire du serveur peut décider sur les comptes suspects.\n"
-                "Les staff peuvent utiliser `/mute` ou `/warn` via les commandes normales.",
+                "Les staff peuvent utiliser `/mod mute` ou `/mod warn`.",
                 ephemeral=True,
             )
             return False
@@ -21137,331 +20593,9 @@ class CompromisedAccountActionView(View):
 _giveaway_locks = {}
 
 
-def _gw_lock(mid):
-    return _giveaway_locks.setdefault(mid, asyncio.Lock())
 
 
-class GiveawayParticipateView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
 
-    @discord.ui.button(label="📋 Conditions", style=discord.ButtonStyle.secondary, custom_id="giveaway_conditions")
-    async def show_conditions(self, i, b):
-        """Phase 4.3 : affiche les conditions en ephemeral (visible UNIQUEMENT par le clicker)."""
-        try:
-            # Récupérer les conditions depuis la DB
-            async with get_db() as db:
-                async with db.execute(
-                    'SELECT conditions, title, prize, end_time FROM giveaways WHERE message_id=?',
-                    (i.message.id,),
-                ) as cursor:
-                    row = await cursor.fetchone()
-            if not row:
-                return await i.response.send_message(
-                    "❌ Giveaway introuvable.", ephemeral=True,
-                )
-            conditions = json.loads(row[0]) if row[0] else {}
-            title = row[1] or "Giveaway"
-            prize = row[2] or "—"
-
-            n_cond = _count_giveaway_conditions(conditions)
-            cond_text = _format_giveaway_conditions(conditions, i.guild)
-
-            e = discord.Embed(
-                title=f"📋 Conditions · {title}",
-                description=cond_text,
-                color=0xF1C40F,
-            )
-            e.add_field(name="🏆 Prix", value=f"`{prize}`", inline=True)
-            e.add_field(name="📊 Conditions", value=f"`{n_cond}`", inline=True)
-            e.set_footer(text="💡 Tu vois ce message seul · personne d'autre ne peut le voir")
-            await i.response.send_message(embed=e, ephemeral=True)
-        except Exception as ex:
-            print(f"[GiveawayParticipateView show_conditions] {ex}")
-            try:
-                await i.response.send_message(
-                    f"❌ Impossible d'afficher les conditions : `{ex}`",
-                    ephemeral=True,
-                )
-            except Exception:
-                pass
-
-    @discord.ui.button(label="🎉 Participer", style=discord.ButtonStyle.success, custom_id="giveaway_participate")
-    async def participate(self, i, b):
-        try:
-            # Obtenir le membre complet
-            member = i.guild.get_member(i.user.id)
-            if not member:
-                return await i.response.send_message("❌ Erreur: membre introuvable", ephemeral=True)
-            
-            # ═══════════════ ÉTAPE 1: Récupérer le giveaway ═══════════════
-            giveaway_data = None
-            try:
-                async with get_db() as db:
-                    async with db.execute(
-                        'SELECT id, participants, ended, conditions FROM giveaways WHERE message_id=?',
-                        (i.message.id,)
-                    ) as cursor:
-                        row = await cursor.fetchone()
-                        if row:
-                            giveaway_data = {
-                                'id': row[0],
-                                'participants': json.loads(row[1]) if row[1] else [],
-                                'ended': row[2],
-                                'conditions': json.loads(row[3]) if row[3] else {}
-                            }
-            except Exception as e:
-                print(f"Erreur lecture giveaway: {e}")
-                return await i.response.send_message("❌ Erreur de lecture du cadeau", ephemeral=True)
-            
-            if not giveaway_data:
-                return await i.response.send_message("❌ Cadeau introuvable", ephemeral=True)
-            
-            if giveaway_data['ended']:
-                return await i.response.send_message("❌ Ce cadeau est terminé !", ephemeral=True)
-            
-            if i.user.id in giveaway_data['participants']:
-                return await i.response.send_message("✅ Vous participez déjà !", ephemeral=True)
-            
-            # ═══════════════ ÉTAPE 2: Vérifier les conditions ═══════════════
-            conditions = giveaway_data['conditions']
-            mode = conditions.get('condition_mode', 'OR')
-            failed_conditions = []
-            passed_conditions = []
-            total_conditions = 0
-
-            # 1. Vérifier AFK
-            afk_days = conditions.get('afk_days', 0)
-            if afk_days > 0:
-                total_conditions += 1
-                try:
-                    is_afk = await check_member_afk(i.guild.id, i.user.id, days=afk_days)
-                    if is_afk:
-                        failed_conditions.append(f"❌ Vous êtes **inactif** depuis plus de {afk_days} jours")
-                    else:
-                        passed_conditions.append("afk")
-                except Exception as e:
-                    print(f"Erreur check AFK: {e}")
-
-            # 2. Vérifier les messages minimum
-            min_messages = conditions.get('min_messages', 0)
-            if min_messages > 0:
-                total_conditions += 1
-                try:
-                    user_msgs = 0
-                    async with get_db() as db:
-                        async with db.execute(
-                            'SELECT total_messages FROM activity_tracking WHERE guild_id=? AND user_id=?',
-                            (i.guild.id, i.user.id)
-                        ) as cursor:
-                            msg_row = await cursor.fetchone()
-                            user_msgs = msg_row[0] if msg_row and msg_row[0] else 0
-                    if user_msgs < min_messages:
-                        failed_conditions.append(f"📝 Vous avez **{user_msgs}** messages (minimum: **{min_messages}**)")
-                    else:
-                        passed_conditions.append("messages")
-                except Exception as e:
-                    print(f"Erreur check messages: {e}")
-
-            # 3. Vérifier le temps vocal minimum
-            min_vocal = conditions.get('min_vocal_minutes', 0)
-            if min_vocal > 0:
-                total_conditions += 1
-                try:
-                    user_vocal_minutes = 0
-                    async with get_db() as db:
-                        async with db.execute(
-                            'SELECT total_vocal_time FROM activity_tracking WHERE guild_id=? AND user_id=?',
-                            (i.guild.id, i.user.id)
-                        ) as cursor:
-                            vocal_row = await cursor.fetchone()
-                            user_vocal_seconds = vocal_row[0] if vocal_row and vocal_row[0] else 0
-                            user_vocal_minutes = user_vocal_seconds // 60
-                    if user_vocal_minutes < min_vocal:
-                        failed_conditions.append(f"🎤 Vous avez **{user_vocal_minutes}** min en vocal (minimum: **{min_vocal}**)")
-                    else:
-                        passed_conditions.append("vocal")
-                except Exception as e:
-                    print(f"Erreur check vocal: {e}")
-
-            # 4. Vérifier le rôle requis
-            required_role_id = conditions.get('required_role', 0)
-            if required_role_id > 0:
-                total_conditions += 1
-                try:
-                    role = i.guild.get_role(required_role_id)
-                    if role:
-                        member_role_ids = [r.id for r in member.roles]
-                        if role.id not in member_role_ids:
-                            failed_conditions.append(f"🎭 Vous devez avoir le rôle **{role.name}**")
-                        else:
-                            passed_conditions.append("role")
-                except Exception as e:
-                    print(f"Erreur check role: {e}")
-
-            # 5. Vérifier l'ancienneté du compte
-            min_days = conditions.get('min_account_days', 0)
-            if min_days > 0:
-                total_conditions += 1
-                try:
-                    created = member.created_at
-                    if not created.tzinfo:
-                        created = created.replace(tzinfo=timezone.utc)
-                    account_age = (now() - created).days
-                    if account_age < min_days:
-                        failed_conditions.append(f"📅 Votre compte a **{account_age}** jours (minimum: **{min_days}**)")
-                    else:
-                        passed_conditions.append("account_age")
-                except Exception as e:
-                    print(f"Erreur check account age: {e}")
-
-            # Vérification selon le mode
-            if total_conditions > 0 and failed_conditions:
-                if mode == 'OR':
-                    # Mode OR : au moins 1 condition remplie suffit
-                    if not passed_conditions:
-                        error_msg = "❌ **Vous ne pouvez pas participer !**\n\n**Vous devez remplir au moins UNE condition :**\n"
-                        error_msg += "\n".join(failed_conditions)
-                        error_msg += "\n\n*Remplissez au moins une condition pour participer.*"
-                        return await i.response.send_message(error_msg, ephemeral=True)
-                else:
-                    # Mode AND : toutes les conditions doivent être remplies
-                    error_msg = "❌ **Vous ne pouvez pas participer !**\n\n**Conditions non remplies :**\n"
-                    error_msg += "\n".join(failed_conditions)
-                    error_msg += "\n\n*Remplissez toutes les conditions pour participer.*"
-                    return await i.response.send_message(error_msg, ephemeral=True)
-            
-            # ═══════════════ ÉTAPE 3: Ajouter le participant ═══════════════
-            # Section critique sérialisée par message_id : on relit la liste
-            # À JOUR sous le verrou (le snapshot de l'ÉTAPE 1 est périmé après
-            # tous les await de vérification de conditions), on déduplique, on
-            # ajoute, puis on écrit — sinon deux clics concurrents s'écrasent.
-            try:
-                async with _gw_lock(i.message.id):
-                    async with get_db() as db:
-                        async with db.execute(
-                            'SELECT participants, ended FROM giveaways WHERE id=?',
-                            (giveaway_data['id'],)
-                        ) as cursor:
-                            fresh = await cursor.fetchone()
-                        if not fresh:
-                            return await i.response.send_message("❌ Cadeau introuvable", ephemeral=True)
-                        if fresh[1]:
-                            return await i.response.send_message("❌ Ce cadeau est terminé !", ephemeral=True)
-                        current = json.loads(fresh[0]) if fresh[0] else []
-                        if i.user.id in current:
-                            return await i.response.send_message("✅ Vous participez déjà !", ephemeral=True)
-                        current.append(i.user.id)
-                        await db.execute(
-                            'UPDATE giveaways SET participants=? WHERE id=?',
-                            (json.dumps(current), giveaway_data['id'])
-                        )
-                        await db.commit()
-                        giveaway_data['participants'] = current
-            except Exception as e:
-                print(f"Erreur update participants: {e}")
-                return await i.response.send_message("❌ Erreur lors de l'enregistrement", ephemeral=True)
-            
-            # ═══════════════ ÉTAPE 4: Mettre à jour l'embed ═══════════════
-            try:
-                embed = i.message.embeds[0].copy()
-                count = len(giveaway_data['participants'])
-                # Mettre à jour le compteur dans la description
-                if embed.description:
-                    import re as _re
-                    embed.description = _re.sub(
-                        r'(👥\s*\*\*Participants\s*:\*\*\s*)`\d+`',
-                        f'\\1`{count}`',
-                        embed.description
-                    )
-                # Aussi vérifier les fields au cas où
-                for idx, field in enumerate(embed.fields):
-                    if "Participants" in field.name:
-                        embed.set_field_at(idx, name="👥 Participants", value=f"```{count}```", inline=True)
-                        break
-                # Phase 235.5 : le giveaway est posté par un WEBHOOK → i.message.edit()
-                # échoue (403 50005, avalé silencieusement) et le compteur de
-                # participants ne s'incrémentait JAMAIS. On passe par webhook_edit()
-                # qui édite via le webhook (avec fallback fetch_message().edit()).
-                try:
-                    await webhook_edit(i.channel, 'giveaway', i.message.id, embed=embed)
-                except Exception as _ge:
-                    print(f"[giveaway participate edit] {_ge}")
-            except Exception as e:
-                print(f"Erreur update embed: {e}")
-            
-            await i.response.send_message(f"🎉 **Vous participez au cadeau !**\nBonne chance !", ephemeral=True)
-            
-        except Exception as ex:
-            import traceback
-            print(f"Erreur participation giveaway: {ex}")
-            traceback.print_exc()
-            try:
-                await i.response.send_message("❌ Erreur lors de la participation. Réessayez.", ephemeral=True)
-            except:
-                pass
-
-async def check_member_afk(guild_id, user_id, days=7):
-    """Vérifie si un membre est AFK depuis X jours (les immunisés ne sont jamais AFK)"""
-    try:
-        async with get_db() as db:
-            # ⚠️ VÉRIFIER L'IMMUNITÉ D'ABORD
-            # Vérifier si l'utilisateur est immunisé directement
-            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=? AND user_id=?', (guild_id, user_id)) as cursor:
-                if await cursor.fetchone():
-                    return False  # Immunisé = jamais AFK
-            
-            # Vérifier les rôles immunisés (nécessite de récupérer le membre)
-            guild = bot.get_guild(guild_id)
-            if guild:
-                member = guild.get_member(user_id)
-                if member:
-                    # Admin = immunisé
-                    if member.guild_permissions.administrator or member.id == guild.owner_id:
-                        return False
-                    
-                    # Vérifier les rôles immunisés
-                    async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (guild_id,)) as cursor:
-                        immune_roles = {r[0] for r in await cursor.fetchall()}
-                        if any(r.id in immune_roles for r in member.roles):
-                            return False  # A un rôle immunisé = jamais AFK
-            
-            # Vérifier l'activité normale
-            async with db.execute(
-                'SELECT last_message, last_vocal FROM activity_tracking WHERE guild_id=? AND user_id=?',
-                (guild_id, user_id)
-            ) as cursor:
-                row = await cursor.fetchone()
-                
-                if not row:
-                    return True  # Non tracké = considéré AFK
-                
-                last_msg, last_vocal = row
-                last_activity = None
-                
-                if last_msg:
-                    try:
-                        last_activity = datetime.fromisoformat(last_msg)
-                    except:
-                        pass
-                
-                if last_vocal:
-                    try:
-                        lv = datetime.fromisoformat(last_vocal)
-                        if not last_activity or lv > last_activity:
-                            last_activity = lv
-                    except:
-                        pass
-                
-                if not last_activity:
-                    return True
-                
-                cutoff = now() - timedelta(days=days)
-                la_utc = last_activity.replace(tzinfo=timezone.utc) if last_activity.tzinfo is None else last_activity
-                return la_utc < cutoff.replace(tzinfo=timezone.utc)
-                
-    except:
-        return False
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📈 SYSTÈME DE NIVEAUX & BOUTIQUE
@@ -21986,365 +21120,6 @@ AutoMessageChannelSelectView = AutoMessageChannelPaginatedView
 #                           📊 STATISTIQUES PANEL
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class StatPanel(View):
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-    
-    async def embed(self):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-        
-        e = discord.Embed(color=0x9B59B6)
-        e.set_author(name="📊 Statistiques & Suivi d'Activité", icon_url=self.g.icon.url if self.g.icon else None)
-        
-        # Compter les AFK avec détails
-        afk_data = await self.get_afk_full_data()
-        humans = sum(1 for m in self.g.members if not m.bot)
-        active = humans - afk_data['afk_7d']
-        active_pct = round(active / humans * 100) if humans > 0 else 0
-        
-        # Barre de santé
-        bar_n = round(active_pct / 10)
-        if active_pct >= 70: bar_color = "🟢"
-        elif active_pct >= 40: bar_color = "🟡"
-        else: bar_color = "🔴"
-        bar = "█" * bar_n + "░" * (10 - bar_n)
-        
-        e.description = (
-            f"**{bar_color} Santé du serveur : {active_pct}%**\n"
-            f"`[{bar}]` {active}/{humans} actifs\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-        
-        # Stats rapides
-        e.add_field(
-            name="📈 Aperçu",
-            value=(
-                f"🟢 **{active}** actifs (7j)\n"
-                f"😴 **{afk_data['afk_7d']}** AFK 7j\n"
-                f"💤 **{afk_data['afk_30d']}** AFK 30j"
-            ),
-            inline=True
-        )
-        
-        # Config
-        action_labels = {'ping': '📊 Rapport', 'remove_role': '🎭 Retrait rôle', 'kick': '👢 Kick'}
-        actions_7d = stat_cfg.get('actions_7d', [])
-        actions_30d = stat_cfg.get('actions_30d', [])
-        role = self.g.get_role(stat_cfg.get('activity_role', 0))
-        
-        e.add_field(
-            name="⚙️ Actions auto",
-            value=(
-                f"**7j:** {' + '.join([action_labels.get(a, a) for a in actions_7d]) or '❌'}\n"
-                f"**30j:** {' + '.join([action_labels.get(a, a) for a in actions_30d]) or '❌'}\n"
-                f"**Rôle:** {role.mention if role else '❌'}"
-            ),
-            inline=True
-        )
-        
-        # Salons
-        notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
-        recovery_ch = self.g.get_channel(stat_cfg.get('recovery_channel', 0))
-        e.add_field(
-            name="📍 Salons",
-            value=(
-                f"📢 {notif_ch.mention if notif_ch else '🔴 Non configuré'}\n"
-                f"🔄 {recovery_ch.mention if recovery_ch else '🔴 Non configuré'}"
-            ),
-            inline=True
-        )
-        
-        # Top 5 AFK
-        if afk_data['top_afk']:
-            afk_lines = []
-            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-            for idx, (uid, days) in enumerate(afk_data['top_afk'][:5]):
-                m = self.g.get_member(uid)
-                name = m.display_name[:15] if m else f"ID:{uid}"
-                afk_lines.append(f"{medals[idx]} **{name}** — `{days}j` sans activité")
-            e.add_field(name="💤 Top AFK", value="\n".join(afk_lines), inline=False)
-        
-        e.set_footer(text="💡 Récupération auto : message ou vocal • 📊 Graphiques disponibles")
-        return e
-    
-    async def get_afk_full_data(self):
-        """Récupère stats AFK complètes avec top inactifs"""
-        result = {'afk_7d': 0, 'afk_30d': 0, 'tracked': 0, 'top_afk': []}
-        now_dt = now()
-        cutoff_7 = (now_dt - timedelta(days=7)).replace(tzinfo=timezone.utc)
-        cutoff_30 = (now_dt - timedelta(days=30)).replace(tzinfo=timezone.utc)
-        
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
-                    (self.g.id,)
-                ) as cursor:
-                    tracked = set()
-                    async for row in cursor:
-                        uid, last_msg, last_voc = row[0], row[1], row[2]
-                        tracked.add(uid)
-                        result['tracked'] += 1
-                        
-                        la = None
-                        for ts in [last_msg, last_voc]:
-                            if ts:
-                                try:
-                                    dt = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
-                                    if not la or dt > la:
-                                        la = dt
-                                except: pass
-                        
-                        if la:
-                            days_off = (now_dt.replace(tzinfo=timezone.utc) - la).days
-                            if la < cutoff_7:
-                                result['afk_7d'] += 1
-                            if la < cutoff_30:
-                                result['afk_30d'] += 1
-                            if days_off >= 3:
-                                result['top_afk'].append((uid, days_off))
-                        else:
-                            result['afk_7d'] += 1
-                            result['afk_30d'] += 1
-                
-                for m in self.g.members:
-                    if not m.bot and m.id not in tracked and m.id != self.g.owner_id:
-                        result['afk_7d'] += 1
-                        result['afk_30d'] += 1
-            
-            result['top_afk'].sort(key=lambda x: x[1], reverse=True)
-        except Exception as ex:
-            print(f"[STAT] Erreur AFK: {ex}")
-        return result
-    
-    @discord.ui.button(label="⚙️ Configurer Actions", style=discord.ButtonStyle.primary, row=0)
-    async def config_actions(self, i, b):
-        v = StatActionPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-    
-    @discord.ui.button(label="📈 Graphique", style=discord.ButtonStyle.success, row=0)
-    async def view_graph(self, i, b):
-        await i.response.defer()
-        
-        # Générer le graphique
-        img = await self.generate_afk_graph()
-        
-        if img:
-            file = discord.File(img, filename="afk_stats.png")
-            e = discord.Embed(title="📊 Statistiques d'Activité", color=C.PURPLE)
-            e.set_image(url="attachment://afk_stats.png")
-            e.set_footer(text=f"{self.g.name} • Statistiques d'activité")
-            await i.followup.send(embed=e, file=file, ephemeral=True)
-        else:
-            await i.followup.send("❌ Erreur lors de la génération du graphique", ephemeral=True)
-    
-    async def generate_afk_graph(self):
-        """Génère un graphique professionnel des stats d'activité avec tendances"""
-        try:
-            afk_data = await self.get_afk_full_data()
-            humans = sum(1 for m in self.g.members if not m.bot)
-            active = humans - afk_data['afk_7d']
-            afk_only_7d = afk_data['afk_7d'] - afk_data['afk_30d']
-            afk_30d = afk_data['afk_30d']
-            
-            # Récupérer les stats journalières (14 derniers jours)
-            daily_data = []
-            try:
-                async with get_db() as db:
-                    fourteen_ago = (now() - timedelta(days=14)).strftime('%Y-%m-%d')
-                    async with db.execute(
-                        'SELECT date, total_messages FROM daily_guild_stats WHERE guild_id=? AND date>=? ORDER BY date',
-                        (self.g.id, fourteen_ago)
-                    ) as cur:
-                        async for row in cur:
-                            daily_data.append((row[0], row[1]))
-            except: pass
-            
-            fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-            fig.patch.set_facecolor('#1a1a2e')
-            fig.suptitle(f'{self.g.name} — Tableau de Bord', color='white', fontsize=18, fontweight='bold', y=0.98)
-            
-            # ── 1. Donut chart (haut gauche) ──
-            ax1 = axes[0][0]
-            sizes = [max(0, active), max(0, afk_only_7d), max(0, afk_30d)]
-            colors = ['#00d2ff', '#f39c12', '#e74c3c']
-            labels = [f'Actifs\n{active}', f'AFK 7j\n{afk_only_7d}', f'AFK 30j\n{afk_30d}']
-            
-            filtered = [(s, l, c) for s, l, c in zip(sizes, labels, colors) if s > 0]
-            if filtered:
-                sizes, labels, colors = zip(*filtered)
-            
-            wedges, texts, autotexts = ax1.pie(sizes, labels=labels, colors=colors, autopct='%1.0f%%',
-                startangle=90, pctdistance=0.75, textprops={'color': 'white', 'fontsize': 10, 'fontweight': 'bold'},
-                wedgeprops={'width': 0.4, 'edgecolor': '#1a1a2e', 'linewidth': 2})
-            for t in autotexts: t.set_fontsize(9)
-            centre = plt.Circle((0, 0), 0.55, fc='#1a1a2e')
-            ax1.add_artist(centre)
-            ax1.text(0, 0, f'{humans}', ha='center', va='center', color='white', fontsize=24, fontweight='bold')
-            ax1.text(0, -0.15, 'membres', ha='center', va='center', color='#888', fontsize=9)
-            ax1.set_title('Répartition', color='white', fontsize=14, fontweight='bold', pad=15)
-            ax1.set_facecolor('#1a1a2e')
-            
-            # ── 2. Barres comparaison (haut droite) ──
-            ax2 = axes[0][1]
-            cats = ['Actifs', 'AFK 7j', 'AFK 30j']
-            vals = [active, afk_data['afk_7d'], afk_30d]
-            colors2 = ['#00d2ff', '#f39c12', '#e74c3c']
-            bars = ax2.barh(cats, vals, color=colors2, height=0.5, edgecolor='#1a1a2e')
-            for bar, val in zip(bars, vals):
-                ax2.text(bar.get_width() + max(vals)*0.02, bar.get_y() + bar.get_height()/2,
-                    f'{val}', va='center', color='white', fontweight='bold', fontsize=13)
-            ax2.set_xlim(0, max(vals) * 1.25 if vals else 1)
-            ax2.set_title('Comparaison Activité', color='white', fontsize=14, fontweight='bold', pad=15)
-            ax2.set_facecolor('#16213e')
-            ax2.tick_params(colors='white', labelsize=11)
-            for spine in ax2.spines.values(): spine.set_visible(False)
-            ax2.xaxis.set_visible(False)
-            
-            # ── 3. Top AFK (bas gauche) ──
-            ax3 = axes[1][0]
-            top = afk_data['top_afk'][:8]
-            if top:
-                names, days_vals, bar_colors = [], [], []
-                for uid, d in top:
-                    m = self.g.get_member(uid)
-                    names.append(m.display_name[:10] if m else str(uid)[:8])
-                    days_vals.append(d)
-                    bar_colors.append('#e74c3c' if d >= 30 else '#f39c12' if d >= 14 else '#00d2ff')
-                b3 = ax3.bar(names, days_vals, color=bar_colors, edgecolor='#1a1a2e', width=0.6)
-                for bar, val in zip(b3, days_vals):
-                    ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
-                        f'{val}j', ha='center', color='white', fontweight='bold', fontsize=9)
-                ax3.set_ylabel('Jours', color='#888', fontsize=10)
-            else:
-                ax3.text(0.5, 0.5, 'Pas de données AFK', ha='center', va='center', color='#555', fontsize=13, transform=ax3.transAxes)
-            ax3.set_title('Top Inactifs', color='white', fontsize=14, fontweight='bold', pad=15)
-            ax3.set_facecolor('#16213e')
-            ax3.tick_params(colors='white', labelsize=8, axis='x', rotation=30)
-            for spine in ax3.spines.values(): spine.set_visible(False)
-            
-            # ── 4. Tendance messages 14 jours (bas droite) ──
-            ax4 = axes[1][1]
-            if daily_data:
-                dates = [d[0][-5:] for d in daily_data]  # MM-DD
-                msgs = [d[1] for d in daily_data]
-                ax4.fill_between(range(len(dates)), msgs, alpha=0.3, color='#00d2ff')
-                ax4.plot(range(len(dates)), msgs, color='#00d2ff', linewidth=2.5, marker='o', markersize=4)
-                for idx, val in enumerate(msgs):
-                    if val > 0:
-                        ax4.annotate(str(val), (idx, val), textcoords="offset points", xytext=(0, 8),
-                            ha='center', color='white', fontsize=8, fontweight='bold')
-                ax4.set_xticks(range(len(dates)))
-                ax4.set_xticklabels(dates, rotation=45, ha='right')
-                ax4.set_ylabel('Messages', color='#888', fontsize=10)
-                avg = sum(msgs) / len(msgs) if msgs else 0
-                ax4.axhline(y=avg, color='#f39c12', linestyle='--', alpha=0.5, linewidth=1)
-                ax4.text(len(dates)-1, avg, f' moy: {avg:.0f}', color='#f39c12', fontsize=9, va='bottom')
-            else:
-                ax4.text(0.5, 0.5, 'Pas encore de données\n(se remplit jour après jour)', 
-                    ha='center', va='center', color='#555', fontsize=12, transform=ax4.transAxes)
-            ax4.set_title('Messages / jour (14j)', color='white', fontsize=14, fontweight='bold', pad=15)
-            ax4.set_facecolor('#16213e')
-            ax4.tick_params(colors='white', labelsize=8)
-            for spine in ax4.spines.values(): spine.set_visible(False)
-            
-            buf = io.BytesIO()
-            # Phase 172 : rendu (tight_layout + savefig) sorti de la boucle
-            # asyncio via thread + lock global. dpi 120 -> 90 (rendu + rapide).
-            async with _PLOT_LOCK:
-                def _render_save():
-                    fig.tight_layout(rect=[0, 0, 1, 0.95])
-                    fig.savefig(buf, format='png', facecolor='#1a1a2e',
-                                edgecolor='none', dpi=90, bbox_inches='tight')
-                await asyncio.to_thread(_render_save)
-            buf.seek(0)
-            plt.close(fig)
-            return buf
-        except Exception as ex:
-            print(f"[GRAPH] Erreur: {ex}")
-            import traceback; traceback.print_exc()
-            return None
-    
-    @discord.ui.button(label="📋 Liste AFK", style=discord.ButtonStyle.primary, row=0)
-    async def afk_list(self, i, b):
-        """Affiche la liste complète des membres AFK"""
-        await i.response.defer()
-        afk_data = await self.get_afk_full_data()
-        
-        pages = []
-        all_afk = afk_data['top_afk']  # Already sorted by days desc
-        
-        if not all_afk:
-            e = discord.Embed(color=0x57F287)
-            e.set_author(name="📋 Liste AFK", icon_url=self.g.icon.url if self.g.icon else None)
-            e.description = "🎉 **Aucun membre AFK détecté !**\nTout le monde est actif sur le serveur."
-            return await i.followup.send(embed=e, ephemeral=True)
-        
-        # Paginer par 15
-        chunk_size = 15
-        for page_idx in range(0, len(all_afk), chunk_size):
-            chunk = all_afk[page_idx:page_idx+chunk_size]
-            e = discord.Embed(color=0xE74C3C)
-            e.set_author(name=f"📋 Liste AFK — {len(all_afk)} membres", icon_url=self.g.icon.url if self.g.icon else None)
-            
-            lines = []
-            for idx, (uid, days) in enumerate(chunk, page_idx + 1):
-                m = self.g.get_member(uid)
-                name = m.mention if m else f"`{uid}`"
-                if days >= 30:
-                    icon = "🔴"
-                elif days >= 14:
-                    icon = "🟠"
-                elif days >= 7:
-                    icon = "🟡"
-                else:
-                    icon = "🟢"
-                lines.append(f"`{idx:>3}.` {icon} {name} — **{days}j**")
-            
-            e.description = "\n".join(lines)
-            page_num = page_idx // chunk_size + 1
-            total_pages = (len(all_afk) + chunk_size - 1) // chunk_size
-            e.set_footer(text=f"Page {page_num}/{total_pages} • 🔴 30j+ | 🟠 14j+ | 🟡 7j+ | 🟢 3j+")
-            pages.append(e)
-        
-        # Envoyer la première page (max 3 pages en ephemeral)
-        embeds = pages[:3]
-        await i.followup.send(embeds=embeds, ephemeral=True)
-    
-    @discord.ui.button(label="⚡ Exécuter maintenant", style=discord.ButtonStyle.danger, row=0)
-    async def execute_actions(self, i, b):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-        actions_7d = stat_cfg.get('actions_7d', [])
-        actions_30d = stat_cfg.get('actions_30d', [])
-        
-        if not actions_7d and not actions_30d:
-            return await i.response.send_message("❌ Aucune action configurée. Configurez d'abord les actions.", ephemeral=True)
-        
-        afk_data = await self.get_afk_full_data()
-        
-        await i.response.send_message(
-            f"⚠️ **Exécution manuelle des actions**\n\n"
-            f"**Membres concernés:**\n"
-            f"• 😴 AFK 7 jours: **{afk_data['afk_7d']}** membres\n"
-            f"• 💤 AFK 30 jours: **{afk_data['afk_30d']}** membres\n\n"
-            f"*Le système s'exécute automatiquement chaque jour, mais vous pouvez forcer l'exécution maintenant.*",
-            view=StatExecuteConfirmView(self.u, self.g),
-            ephemeral=True
-        )
-    
-    @discord.ui.button(label="🔕 Rôle AFK", style=discord.ButtonStyle.primary, row=1)
-    async def afk_role(self, i, b):
-        v = AfkRolePanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = MainPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -22352,2044 +21127,52 @@ class StatPanel(View):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class StatPanelV2(LayoutView):
-    """Panneau Statistiques & Suivi d'Activité en V2."""
-
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    async def get_afk_full_data(self):
-        return await StatPanel(self.u, self.g).get_afk_full_data()
-
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-
-        afk_data = await self.get_afk_full_data()
-        humans = sum(1 for m in self.g.members if not m.bot)
-        active = humans - afk_data['afk_7d']
-        active_pct = round(active / humans * 100) if humans > 0 else 0
-
-        bar_n = round(active_pct / 10)
-        if active_pct >= 70: bar_color = "🟢"
-        elif active_pct >= 40: bar_color = "🟡"
-        else: bar_color = "🔴"
-        bar = "█" * bar_n + "░" * (10 - bar_n)
-
-        action_labels = {'ping': '📊 Rapport', 'remove_role': '🎭 Retrait rôle', 'kick': '👢 Kick'}
-        actions_7d = stat_cfg.get('actions_7d', [])
-        actions_30d = stat_cfg.get('actions_30d', [])
-        role = self.g.get_role(stat_cfg.get('activity_role', 0))
-        notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
-        recovery_ch = self.g.get_channel(stat_cfg.get('recovery_channel', 0))
-
-        # Top AFK
-        top_afk_lines = []
-        if afk_data['top_afk']:
-            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-            for idx, (uid, days) in enumerate(afk_data['top_afk'][:5]):
-                m = self.g.get_member(uid)
-                name = m.display_name[:20] if m else f"ID:{uid}"
-                top_afk_lines.append(f"{medals[idx]} **{name}** — `{days}j` sans activité")
-        top_afk_block = "\n".join(top_afk_lines) if top_afk_lines else "_Aucune donnée AFK_"
-
-        # Boutons
-        self.clear_items()
-        b_actions = Button(label="⚙️ Configurer Actions", style=discord.ButtonStyle.primary, custom_id="spv2_actions")
-        b_actions.callback = self._cb_actions
-        b_graph = Button(label="📈 Graphique", style=discord.ButtonStyle.success, custom_id="spv2_graph")
-        b_graph.callback = self._cb_graph
-        b_afk_role = Button(label="🔕 Rôle AFK", style=discord.ButtonStyle.primary, custom_id="spv2_afkrole")
-        b_afk_role.callback = self._cb_afk_role
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="spv2_back")
-        b_back.callback = self._cb_back
-
-        items: list = []
-        if self.g.icon:
-            items.append(v2_section(
-                v2_title("📊 Statistiques & Suivi d'Activité"),
-                v2_subtitle(f"{bar_color} Santé du serveur · {active_pct}%"),
-                accessory=v2_thumb(self.g.icon.url),
-            ))
-        else:
-            items.append(v2_title("📊 Statistiques & Suivi d'Activité"))
-            items.append(v2_subtitle(f"{bar_color} Santé du serveur · {active_pct}%"))
-
-        items.append(v2_divider())
-        items.append(v2_body(f"`[{bar}]` **{active}** / `{humans}` actifs"))
-        items.append(v2_divider())
-        items.append(v2_body(
-            f"🟢 **Actifs (7j)** · `{active}`\n"
-            f"😴 **AFK 7j** · `{afk_data['afk_7d']}`\n"
-            f"💤 **AFK 30j** · `{afk_data['afk_30d']}`"
-        ))
-        items.append(v2_divider())
-        items.append(v2_title("⚙️ Actions automatiques", level=3))
-        items.append(v2_body(
-            f"**7 jours** · {' + '.join(action_labels.get(a, a) for a in actions_7d) if actions_7d else '_Aucune_'}\n"
-            f"**30 jours** · {' + '.join(action_labels.get(a, a) for a in actions_30d) if actions_30d else '_Aucune_'}\n"
-            f"**Rôle d'activité** · {role.mention if role else '_Non configuré_'}"
-        ))
-        items.append(v2_divider())
-        items.append(v2_title("📍 Salons", level=3))
-        items.append(v2_body(
-            f"📢 **Notifications** · {notif_ch.mention if notif_ch else '⚪ _non configuré_'}\n"
-            f"🔄 **Récupération** · {recovery_ch.mention if recovery_ch else '⚪ _non configuré_'}"
-        ))
-        if top_afk_block != "_Aucune donnée AFK_":
-            items.append(v2_divider())
-            items.append(v2_title("💤 Top AFK", level=3))
-            items.append(v2_body(top_afk_block))
-        items.append(v2_divider())
-        items.append(v2_subtitle("💡 Récupération auto : message ou vocal · 📊 Graphiques disponibles"))
-        items.append(discord.ui.ActionRow(b_actions, b_graph, b_afk_role, b_back))
-
-        self.add_item(v2_container(*items, color=Palette.ACCENT))
-
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _cb_actions(self, i):
-        v = StatActionPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-    async def _cb_graph(self, i):
-        await i.response.defer()
-        old_panel = StatPanel(self.u, self.g)
-        img = await old_panel.generate_afk_graph()
-        if img:
-            file = discord.File(img, filename="afk_stats.png")
-            view = LayoutView(timeout=None)
-            view.add_item(v2_container(
-                v2_title("📊 Statistiques d'Activité", level=2),
-                v2_subtitle(f"{self.g.name}"),
-                v2_divider(),
-                discord.ui.MediaGallery(
-                    discord.MediaGalleryItem(media="attachment://afk_stats.png")
-                ),
-                color=Palette.ACCENT,
-            ))
-            await i.followup.send(view=view, file=file, ephemeral=True)
-        else:
-            await i.followup.send("❌ Erreur lors de la génération du graphique", ephemeral=True)
-
-    async def _cb_afk_role(self, i):
-        v = AfkRolePanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-    async def _cb_back(self, i):
-        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
-        # sans son résumé d'état (celui-ci est lu en base, donc en async).
-        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
-
-
-class AfkRolePanel(View):
-    """Panel de gestion du système de rôle AFK"""
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-    
-    async def embed(self):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        
-        e = discord.Embed(
-            title="🔕 Système Rôle AFK",
-            description="Surveillez l'activité des membres avec un rôle spécifique.\n\n"
-                        "💡 **Fonctionnement :**\n"
-                        "• Les membres avec le rôle surveillé doivent être actifs\n"
-                        "• Activité = Message **OU** Vocal (au moins l'un des deux)\n"
-                        "• Après X jours sans activité → Actions configurées",
-            color=0xE74C3C
-        )
-        
-        # Configuration actuelle
-        role_id = afk_cfg.get('role', 0)
-        role = self.g.get_role(role_id)
-        days = afk_cfg.get('days', 7)
-        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
-        enabled = afk_cfg.get('enabled', False)
-        
-        status = "✅ Activé" if enabled else "❌ Désactivé"
-        
-        e.add_field(name="📊 Statut", value=status, inline=True)
-        e.add_field(name="🎭 Rôle surveillé", value=role.mention if role else "❌ Non défini", inline=True)
-        e.add_field(name="📅 Jours d'inactivité", value=f"**{days}** jour(s)", inline=True)
-        e.add_field(name="📢 Salon notifications", value=notif_ch.mention if notif_ch else "❌ Non défini", inline=True)
-        
-        # Compter les membres AFK
-        if role:
-            afk_count, total = await self.count_afk_with_role(role, days)
-            e.add_field(name="😴 Membres AFK", value=f"**{afk_count}** / {total} membre(s)", inline=True)
-        else:
-            e.add_field(name="😴 Membres AFK", value="*Configurez un rôle*", inline=True)
-        
-        e.set_footer(text="💡 Cliquez sur 📋 Liste AFK pour voir les membres inactifs")
-        
-        return e
-    
-    async def count_afk_with_role(self, role, days):
-        """Compte les membres AFK ayant le rôle surveillé"""
-        afk_count = 0
-        total = 0
-        now_dt = now()
-        threshold = now_dt - timedelta(days=days)
-        
-        try:
-            # Récupérer tous les membres avec le rôle
-            members_with_role = [m for m in self.g.members if role in m.roles and not m.bot]
-            total = len(members_with_role)
-            
-            if not members_with_role:
-                return 0, 0
-            
-            member_ids = [m.id for m in members_with_role]
-            
-            async with get_db() as db:
-                # Récupérer l'activité de ces membres
-                placeholders = ','.join('?' * len(member_ids))
-                async with db.execute(
-                    f'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=? AND user_id IN ({placeholders})',
-                    [self.g.id] + member_ids
-                ) as cursor:
-                    tracked = {}
-                    async for row in cursor:
-                        user_id, last_msg, last_vocal = row
-                        tracked[user_id] = (last_msg, last_vocal)
-                
-                # Vérifier chaque membre
-                for member in members_with_role:
-                    if member.id in tracked:
-                        last_msg, last_vocal = tracked[member.id]
-                        last_activity = None
-                        
-                        if last_msg:
-                            try:
-                                last_activity = datetime.fromisoformat(last_msg)
-                            except:
-                                pass
-                        if last_vocal:
-                            try:
-                                lv = datetime.fromisoformat(last_vocal)
-                                if not last_activity or lv > last_activity:
-                                    last_activity = lv
-                            except:
-                                pass
-                        
-                        if last_activity:
-                            if last_activity.replace(tzinfo=timezone.utc) < threshold.replace(tzinfo=timezone.utc):
-                                afk_count += 1
-                        else:
-                            afk_count += 1  # Pas d'activité enregistrée
-                    else:
-                        afk_count += 1  # Non tracké = considéré AFK
-        except Exception as ex:
-            print(f"[AFK ROLE] Erreur count: {ex}")
-        
-        return afk_count, total
-    
-    async def get_afk_members(self, role, days):
-        """Retourne la liste des membres AFK avec le rôle surveillé"""
-        afk_members = []
-        now_dt = now()
-        threshold = now_dt - timedelta(days=days)
-        
-        try:
-            members_with_role = [m for m in self.g.members if role in m.roles and not m.bot]
-            if not members_with_role:
-                return []
-            
-            member_ids = [m.id for m in members_with_role]
-            
-            async with get_db() as db:
-                placeholders = ','.join('?' * len(member_ids))
-                async with db.execute(
-                    f'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=? AND user_id IN ({placeholders})',
-                    [self.g.id] + member_ids
-                ) as cursor:
-                    tracked = {}
-                    async for row in cursor:
-                        user_id, last_msg, last_vocal = row
-                        tracked[user_id] = (last_msg, last_vocal)
-                
-                for member in members_with_role:
-                    if member.id in tracked:
-                        last_msg, last_vocal = tracked[member.id]
-                        last_activity = None
-                        
-                        if last_msg:
-                            try:
-                                last_activity = datetime.fromisoformat(last_msg)
-                            except:
-                                pass
-                        if last_vocal:
-                            try:
-                                lv = datetime.fromisoformat(last_vocal)
-                                if not last_activity or lv > last_activity:
-                                    last_activity = lv
-                            except:
-                                pass
-                        
-                        if last_activity:
-                            if last_activity.replace(tzinfo=timezone.utc) < threshold.replace(tzinfo=timezone.utc):
-                                days_afk = (now_dt.replace(tzinfo=timezone.utc) - last_activity.replace(tzinfo=timezone.utc)).days
-                                afk_members.append((member, days_afk))
-                        else:
-                            afk_members.append((member, 999))  # Très longtemps AFK
-                    else:
-                        afk_members.append((member, 999))  # Non tracké
-        except Exception as ex:
-            print(f"[AFK ROLE] Erreur get_afk: {ex}")
-        
-        # Trier par nombre de jours AFK (décroissant)
-        afk_members.sort(key=lambda x: x[1], reverse=True)
-        return afk_members
-    
-    @discord.ui.button(label="✅ Activer/Désactiver", style=discord.ButtonStyle.success, row=0)
-    async def toggle(self, i, b):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        afk_cfg['enabled'] = not afk_cfg.get('enabled', False)
-        await db_set(self.g.id, 'afk_role_config', afk_cfg)
-        v = AfkRolePanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-    
-    @discord.ui.button(label="🎭 Définir Rôle", style=discord.ButtonStyle.primary, row=0)
-    async def set_role(self, i, b):
-        roles = [r for r in self.g.roles if not r.is_default() and not r.managed]
-        if not roles:
-            return await i.response.send_message("❌ Aucun rôle disponible", ephemeral=True)
-        
-        async def role_callback(interaction, role_id, extra):
-            c = await cfg(self.g.id)
-            afk_cfg = c.get('afk_role_config', {})
-            afk_cfg['role'] = role_id
-            await db_set(self.g.id, 'afk_role_config', afk_cfg)
-            v = AfkRolePanel(self.u, self.g)
-            await interaction.response.edit_message(embed=await v.embed(), view=v)
-        
-        v = UniversalRoleSelect(
-            self.u, self.g,
-            callback_func=role_callback,
-            return_view_func=lambda: AfkRolePanel(self.u, self.g),
-            title="🎭 Rôle à surveiller",
-            allow_none=False
-        )
-        await i.response.edit_message(
-            embed=discord.Embed(title="🎭 Choisir le rôle à surveiller", description=f"**{len(roles)}** rôles disponibles", color=C.PURPLE),
-            view=v
-        )
-    
-    @discord.ui.button(label="📅 Définir Jours", style=discord.ButtonStyle.primary, row=0)
-    async def set_days(self, i, b):
-        await i.response.send_modal(AfkDaysModal(self.u, self.g))
-    
-    @discord.ui.button(label="📢 Salon Notifs", style=discord.ButtonStyle.primary, row=1)
-    async def set_channel(self, i, b):
-        async def channel_callback(interaction, channel_id, extra):
-            c = await cfg(self.g.id)
-            afk_cfg = c.get('afk_role_config', {})
-            afk_cfg['notif_channel'] = channel_id
-            await db_set(self.g.id, 'afk_role_config', afk_cfg)
-            v = AfkRolePanel(self.u, self.g)
-            await interaction.response.edit_message(embed=await v.embed(), view=v)
-        
-        v = UniversalChannelSelect(
-            self.u, self.g,
-            callback_func=channel_callback,
-            return_view_func=lambda: AfkRolePanel(self.u, self.g),
-            title="📢 Salon notifications",
-            allow_none=True
-        )
-        await i.response.edit_message(
-            embed=discord.Embed(title="📢 Choisir le salon de notifications", description=f"**{len(list(self.g.text_channels))}** salons disponibles", color=C.PURPLE),
-            view=v
-        )
-    
-    @discord.ui.button(label="📋 Liste AFK", style=discord.ButtonStyle.secondary, row=1)
-    async def list_afk(self, i, b):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        role_id = afk_cfg.get('role', 0)
-        role = self.g.get_role(role_id)
-        days = afk_cfg.get('days', 7)
-        
-        if not role:
-            return await i.response.send_message("❌ Aucun rôle configuré", ephemeral=True)
-        
-        afk_members = await self.get_afk_members(role, days)
-        
-        if not afk_members:
-            return await i.response.send_message(f"✅ Aucun membre AFK avec le rôle {role.mention}!", ephemeral=True)
-        
-        v = AfkListView(self.u, self.g, afk_members, role)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="⚡ Actions", style=discord.ButtonStyle.danger, row=1)
-    async def actions(self, i, b):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        role_id = afk_cfg.get('role', 0)
-        role = self.g.get_role(role_id)
-        days = afk_cfg.get('days', 7)
-        
-        if not role:
-            return await i.response.send_message("❌ Aucun rôle configuré", ephemeral=True)
-        
-        afk_members = await self.get_afk_members(role, days)
-        
-        if not afk_members:
-            return await i.response.send_message(f"✅ Aucun membre AFK à traiter!", ephemeral=True)
-        
-        v = AfkActionsView(self.u, self.g, afk_members, role)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
-    async def back(self, i, b):
-        v = StatPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-
-
-class AfkRolePanelV2(LayoutView):
-    """Configuration AFK — Phase 4.5 refonte propre.
-
-    Modèle d'usage :
-    - PAR DÉFAUT : système désactivé. Les membres rejoignent sans contrôle.
-    - Si ACTIVÉ : surveillance d'activité sur le rôle ciblé.
-      Cible : 1 rôle. Salons surveillés : multi-select (vide = tous).
-      Seuil : N jours sans activité → actions configurées.
-
-    Activité = message dans un salon surveillé OU connexion vocale.
-    Les immunisés sont exclus (admin / owner / rôles immune).
-    """
-
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        enabled = bool(afk_cfg.get('enabled', False))
-        role = self.g.get_role(afk_cfg.get('role', 0) or afk_cfg.get('role_id', 0))
-        days = int(afk_cfg.get('days', 14))
-        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
-        tracked_channels = afk_cfg.get('tracked_channels', []) or []
-
-        # Construction des composants
-        self.clear_items()
-
-        items: list = []
-        # Header
-        if self.g.icon:
-            items.append(v2_section(
-                v2_title("💤 Système AFK"),
-                v2_subtitle("Surveillance d'activité par rôle"),
-                accessory=v2_thumb(self.g.icon.url),
-            ))
-        else:
-            items.append(v2_title("💤 Système AFK"))
-            items.append(v2_subtitle("Surveillance d'activité par rôle"))
-        items.append(v2_divider())
-
-        # ─── STATE : ACTIVÉ vs DÉSACTIVÉ ───
-        if enabled:
-            items.append(v2_body(
-                "🟢 **Système activé** — les membres avec le rôle sont surveillés\n"
-                "-# Le bouton ci-dessous affiche l'état actuel ; cliquez-le pour l'inverser."
-            ))
-        else:
-            items.append(v2_body(
-                "⚪ **Système désactivé** — aucun contrôle d'activité\n"
-                "*Les membres rejoignent et restent librement.*"
-            ))
-        items.append(v2_divider())
-
-        # ─── BOUTON TOGGLE (toujours visible) ───
-        # ⚠️ Le bouton montre l'ÉTAT, pas l'action (UI.md §3).
-        # Avant : allumé → « ⚪ Désactiver le système » en ROUGE. On lisait le
-        # bouton, pas la ligne d'état, et on croyait le système éteint — l'emoji
-        # ⚪ (= éteint) sur un système allumé achevait de tromper. Signalé en vrai
-        # par le propriétaire : il a cru le bouton bloqué alors qu'il marchait.
-        b_toggle = Button(
-            label="Système activé" if enabled else "Système désactivé",
-            emoji="🟢" if enabled else "⚪",
-            style=(discord.ButtonStyle.success if enabled
-                   else discord.ButtonStyle.secondary),
-            custom_id="arpv2_toggle",
-        )
-        b_toggle.callback = self._cb_toggle
-        items.append(discord.ui.ActionRow(b_toggle))
-
-        # ─── SI ACTIVÉ : affiche la config détaillée ───
-        if enabled:
-            items.append(v2_divider())
-            items.append(v2_title("⚙️ Configuration", level=3))
-
-            # Liste salons surveillés
-            if tracked_channels:
-                ch_objs = [self.g.get_channel(cid) for cid in tracked_channels]
-                ch_mentions = [c.mention for c in ch_objs if c]
-                tracked_txt = ", ".join(ch_mentions) if ch_mentions else "⚠️ _Salons supprimés_"
-            else:
-                tracked_txt = "📡 **Tous les salons** (config vide = tout compte)"
-
-            items.append(v2_body(
-                f"🎭 **Rôle surveillé** · {role.mention if role else '⚪ _non défini_'}\n"
-                f"📅 **Seuil d'inactivité** · `{days}` jours\n"
-                f"📺 **Salons d'activité** · {tracked_txt}\n"
-                f"📢 **Salon notifications** · {notif_ch.mention if notif_ch else '⚪ _non défini_'}"
-            ))
-            items.append(v2_divider())
-
-            # Boutons config
-            b_role = Button(label="🎭 Rôle", style=discord.ButtonStyle.primary, custom_id="arpv2_role")
-            b_role.callback = self._cb_role
-            b_days = Button(label="📅 Jours", style=discord.ButtonStyle.primary, custom_id="arpv2_days")
-            b_days.callback = self._cb_days
-            b_chans = Button(label="📺 Salons", style=discord.ButtonStyle.primary, custom_id="arpv2_chans")
-            b_chans.callback = self._cb_channels
-            b_notif = Button(label="📢 Notifs", style=discord.ButtonStyle.primary, custom_id="arpv2_notif")
-            b_notif.callback = self._cb_notif
-
-            items.append(discord.ui.ActionRow(b_role, b_days, b_chans, b_notif))
-
-            # Boutons actions
-            b_list = Button(label="📋 Voir AFK", style=discord.ButtonStyle.secondary, custom_id="arpv2_list")
-            b_list.callback = self._cb_list
-            b_actions = Button(label="⚡ Actions auto", style=discord.ButtonStyle.danger, custom_id="arpv2_actions")
-            b_actions.callback = self._cb_actions
-            items.append(discord.ui.ActionRow(b_list, b_actions))
-
-        # Bouton retour (toujours)
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="arpv2_back")
-        b_back.callback = self._cb_back
-        items.append(discord.ui.ActionRow(b_back))
-
-        self.add_item(v2_container(*items, color=Palette.INFO if enabled else Palette.NEUTRAL))
-
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _cb_toggle(self, i):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        afk_cfg['enabled'] = not bool(afk_cfg.get('enabled', False))
-        await db_set(self.g.id, 'afk_role_config', afk_cfg)
-        await AfkRolePanelV2(self.u, self.g).render_to(i, edit=True)
-
-    async def _cb_role(self, i):
-        v = V2GenericRolePicker(
-            self.u, self.g,
-            config_key='role',
-            sub_dict_key='afk_role_config',
-            return_panel_factory=lambda: AfkRolePanelV2(self.u, self.g),
-            title="🎭 Rôle à surveiller",
-            description="Les membres avec ce rôle seront vérifiés pour leur activité.",
-            color=0x3498DB,
-        )
-        await v.render_to(i, edit=True)
-
-    async def _cb_days(self, i):
-        # ⚠️ Les arguments étaient INVERSÉS ici : AfkDaysModal(self.g, self.u).
-        # Conséquence : on_submit lisait la config avec un identifiant de MEMBRE et
-        # écrivait le seuil AFK sous un guild_id qui était en fait un user_id. Le
-        # réglage « Jours » ne se sauvegardait donc jamais là où il est relu.
-        await i.response.send_modal(AfkDaysModal(self.u, self.g))
-
-    async def _cb_channels(self, i):
-        # Phase 4.5 : nouveau picker multi-salons
-        v = V2GenericMultiChannelPicker(
-            self.u, self.g,
-            config_key='tracked_channels',
-            sub_dict_key='afk_role_config',
-            return_panel_factory=lambda: AfkRolePanelV2(self.u, self.g),
-            title="📺 Salons d'activité",
-            description=(
-                "Sélectionne les salons qui comptent comme activité.\n"
-                "**Aucune sélection = tous les salons comptent.**"
-            ),
-            color=0x3498DB,
-        )
-        await v.render_to(i, edit=True)
-
-    async def _cb_notif(self, i):
-        v = V2GenericChannelPicker(
-            self.u, self.g,
-            config_key='notif_channel',
-            sub_dict_key='afk_role_config',
-            return_panel_factory=lambda: AfkRolePanelV2(self.u, self.g),
-            title="📢 Salon notifications AFK",
-            description="Salon où le bot annonce les détections et actions.",
-            color=0x3498DB,
-        )
-        await v.render_to(i, edit=True)
-
-    async def _cb_list(self, i):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        role_id = afk_cfg.get('role', 0) or afk_cfg.get('role_id', 0)
-        role = self.g.get_role(role_id)
-        if not role:
-            return await i.response.send_message(
-                "❌ Aucun rôle surveillé configuré.", ephemeral=True,
-            )
-        helper = AfkRolePanel(self.u, self.g)
-        afk_members = await helper.get_afk_members(role, int(afk_cfg.get('days', 7)))
-        if not afk_members:
-            return await i.response.send_message(
-                f"✅ Aucun membre AFK avec le rôle {role.mention} !", ephemeral=True,
-            )
-        v = AfkListViewV2(self.u, self.g, afk_members, role)
-        await v.render_to(i, edit=True)
-
-    async def _cb_actions(self, i):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        role_id = afk_cfg.get('role', 0) or afk_cfg.get('role_id', 0)
-        role = self.g.get_role(role_id)
-        if not role:
-            return await i.response.send_message(
-                "❌ Aucun rôle surveillé configuré.", ephemeral=True,
-            )
-        helper = AfkRolePanel(self.u, self.g)
-        afk_members = await helper.get_afk_members(role, int(afk_cfg.get('days', 7)))
-        if not afk_members:
-            return await i.response.send_message(
-                f"✅ Aucun membre AFK avec le rôle {role.mention} !", ephemeral=True,
-            )
-        v = AfkActionsViewV2(self.u, self.g, afk_members, role)
-        await v.render_to(i, edit=True)
-
-    async def _cb_back(self, i):
-        # Refonte 2026-08 : retour direct à la racine /configure (MainPanelV2).
-        v = MainPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-
-
-
-
-
-
-
-
-
-class AfkDaysModal(Modal):
-    def __init__(self, u, g):
-        super().__init__(title="📅 Jours d'inactivité")
-        self.u = u
-        self.g = g
-        
-        self.days_input = TextInput(
-            label="Nombre de jours sans activité",
-            placeholder="Ex: 7",
-            default="7",
-            max_length=3,
-            required=True
-        )
-        self.add_item(self.days_input)
-    
-    async def on_submit(self, i):
-        try:
-            days = int(self.days_input.value)
-            if days < 1 or days > 365:
-                return await i.response.send_message("❌ Le nombre doit être entre 1 et 365", ephemeral=True)
-            
-            c = await cfg(self.g.id)
-            afk_cfg = c.get('afk_role_config', {})
-            afk_cfg['days'] = days
-            await db_set(self.g.id, 'afk_role_config', afk_cfg)
-            
-            # Le message a été rendu par AfkRolePanelV2 en Components V2 : y réinjecter
-            # un embed + une View classique est refusé par l'API (erreur 400). On revient
-            # donc sur le panneau V2, seul atteignable depuis /configure.
-            await AfkRolePanelV2(self.u, self.g).render_to(i, edit=True)
-        except ValueError:
-            await i.response.send_message("❌ Entrez un nombre valide", ephemeral=True)
-        except Exception as ex:
-            # Sans ce filet, une erreur de rendu laissait l'interaction sans réponse
-            # (« Échec de l'interaction » côté client).
-            print(f"[AfkDaysModal on_submit] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message("❌ Erreur lors de l'enregistrement.", ephemeral=True)
-            except Exception:
-                pass
-
-
-
-
-class AfkListViewV2(LayoutView):
-    """Liste paginee des membres AFK en V2."""
-
-    def __init__(self, u, g, afk_members, role, page=0):
-        super().__init__(timeout=300)
-        self.u = u
-        self.g = g
-        self.afk_members = afk_members
-        self.role = role
-        self.page = page
-        self.per_page = 15
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    async def render_to(self, interaction, *, edit=True):
-        total = len(self.afk_members)
-        max_page = max(0, (total - 1) // self.per_page)
-        start = self.page * self.per_page
-        end = start + self.per_page
-        page_members = self.afk_members[start:end]
-
-        lines_out = []
-        for member, days_afk in page_members:
-            days_txt = "Jamais actif" if days_afk >= 999 else f"{days_afk}j AFK"
-            lines_out.append(f"• {member.mention} · **{days_txt}**")
-        list_block = "\n".join(lines_out) if lines_out else "_Aucun membre sur cette page_"
-
-        self.clear_items()
-        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="alvv2_prev")
-        b_prev.callback = self._cb_prev
-        b_page = Button(label=f"Page {self.page + 1}/{max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="alvv2_page")
-        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="alvv2_next")
-        b_next.callback = self._cb_next
-        b_refresh = Button(label="🔄 Actualiser", style=discord.ButtonStyle.primary, custom_id="alvv2_refresh")
-        b_refresh.callback = self._cb_refresh
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="alvv2_back")
-        b_back.callback = self._cb_back
-
-        items: list = [
-            v2_title(f"📋 Membres AFK avec {self.role.name}"),
-            v2_subtitle(f"`{total}` membre(s) inactif(s) détecté(s)"),
-            v2_divider(),
-            v2_body(list_block),
-            v2_divider(),
-            v2_subtitle("💡 Utilise ⚡ Actions pour agir sur ces membres"),
-            discord.ui.ActionRow(b_prev, b_page, b_next, b_refresh),
-            discord.ui.ActionRow(b_back),
-        ]
-
-        self.add_item(v2_container(*items, color=Palette.DANGER))
-
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _cb_prev(self, i):
-        if self.page > 0:
-            self.page -= 1
-        await self.render_to(i, edit=True)
-
-    async def _cb_next(self, i):
-        max_page = max(0, (len(self.afk_members) - 1) // self.per_page)
-        if self.page < max_page:
-            self.page += 1
-        await self.render_to(i, edit=True)
-
-    async def _cb_refresh(self, i):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        days = afk_cfg.get('days', 7)
-        helper = AfkRolePanel(self.u, self.g)
-        self.afk_members = await helper.get_afk_members(self.role, days)
-        self.page = 0
-        await self.render_to(i, edit=True)
-
-    async def _cb_back(self, i):
-        v = AfkRolePanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-
-class AfkListView(View):
-    """Liste paginée des membres AFK"""
-    def __init__(self, u, g, afk_members, role, page=0):
-        super().__init__(timeout=300)
-        self.u = u
-        self.g = g
-        self.afk_members = afk_members
-        self.role = role
-        self.page = page
-        self.per_page = 15
-    
-    async def embed(self):
-        total = len(self.afk_members)
-        max_page = (total - 1) // self.per_page
-        
-        start = self.page * self.per_page
-        end = start + self.per_page
-        page_members = self.afk_members[start:end]
-        
-        e = discord.Embed(
-            title=f"📋 Membres AFK avec {self.role.name}",
-            description=f"**{total}** membre(s) inactif(s) détecté(s)",
-            color=0xE74C3C
-        )
-        
-        if page_members:
-            lines = []
-            for member, days_afk in page_members:
-                if days_afk >= 999:
-                    days_txt = "Jamais actif"
-                else:
-                    days_txt = f"{days_afk}j AFK"
-                lines.append(f"• {member.mention} - **{days_txt}**")
-            
-            e.add_field(name=f"Page {self.page + 1}/{max_page + 1}", value="\n".join(lines), inline=False)
-        
-        e.set_footer(text="💡 Utilisez ⚡ Actions pour agir sur ces membres")
-        
-        return e
-    
-    @discord.ui.button(label="◀️ Préc.", style=discord.ButtonStyle.secondary, row=0)
-    async def prev(self, i, b):
-        if self.page > 0:
-            self.page -= 1
-        await i.response.edit_message(embed=await self.embed(), view=self)
-    
-    @discord.ui.button(label="▶️ Suiv.", style=discord.ButtonStyle.secondary, row=0)
-    async def next(self, i, b):
-        max_page = (len(self.afk_members) - 1) // self.per_page
-        if self.page < max_page:
-            self.page += 1
-        await i.response.edit_message(embed=await self.embed(), view=self)
-    
-    @discord.ui.button(label="🔄 Actualiser", style=discord.ButtonStyle.primary, row=0)
-    async def refresh(self, i, b):
-        # Recalculer la liste
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        days = afk_cfg.get('days', 7)
-        
-        panel = AfkRolePanel(self.u, self.g)
-        self.afk_members = await panel.get_afk_members(self.role, days)
-        v = AfkListView(self.u, self.g, self.afk_members, self.role, page=0)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = AfkRolePanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-
-
-
-class AfkActionsViewV2(LayoutView):
-    """Actions sur les membres AFK en V2."""
-
-    def __init__(self, u, g, afk_members, role):
-        super().__init__(timeout=300)
-        self.u = u
-        self.g = g
-        self.afk_members = afk_members
-        self.role = role
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    async def render_to(self, interaction, *, edit=True):
-        # Aperçu des 5 premiers
-        preview_lines = []
-        for member, days_afk in self.afk_members[:5]:
-            days_txt = f"{days_afk}j" if days_afk < 999 else "∞"
-            preview_lines.append(f"• {member.display_name} · `{days_txt}`")
-        if len(self.afk_members) > 5:
-            preview_lines.append(f"_… + {len(self.afk_members) - 5} autres_")
-        preview_block = "\n".join(preview_lines) if preview_lines else "_Aucun membre_"
-
-        self.clear_items()
-        b_remove = Button(label="🎭 Retirer le rôle", style=discord.ButtonStyle.primary, custom_id="aavv2_remove")
-        b_remove.callback = self._cb_remove
-        b_kick = Button(label="👢 Kick", style=discord.ButtonStyle.danger, custom_id="aavv2_kick")
-        b_kick.callback = self._cb_kick
-        b_ping = Button(label="📢 Ping dans salon", style=discord.ButtonStyle.success, custom_id="aavv2_ping")
-        b_ping.callback = self._cb_ping
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="aavv2_back")
-        b_back.callback = self._cb_back
-
-        items: list = [
-            v2_title("⚡ Actions sur les membres AFK"),
-            v2_subtitle(f"`{len(self.afk_members)}` membre(s) AFK avec {self.role.mention}"),
-            v2_divider(),
-            v2_title("👥 Membres concernés", level=3),
-            v2_body(preview_block),
-            v2_divider(),
-            v2_body(
-                "🎭 **Retirer le rôle** · enlève le rôle d'activité aux membres\n"
-                "👢 **Kick** · expulse les membres du serveur (irréversible)\n"
-                "📢 **Ping dans salon** · mention dans le salon de notifications"
-            ),
-            v2_divider(),
-            v2_subtitle("⚠️ Choisis une action à exécuter"),
-            discord.ui.ActionRow(b_remove, b_kick, b_ping, b_back),
-        ]
-
-        self.add_item(v2_container(*items, color=Palette.DANGER))
-
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _cb_remove(self, i):
-        await i.response.defer()
-        success = 0
-        failed = 0
-        for member, _ in self.afk_members:
-            try:
-                await member.remove_roles(self.role, reason="AFK - Rôle retiré automatiquement")
-                success += 1
-                await asyncio.sleep(0.5)  # throttle anti-429 (remove_roles par membre)
-            except Exception:
-                failed += 1
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
-        if notif_ch:
-            e = discord.Embed(
-                title="🎭 Rôles retirés - Membres AFK",
-                description=f"Le rôle {self.role.mention} a été retiré à **{success}** membre(s) inactif(s).",
-                color=0xE74C3C,
-                timestamp=now(),
-            )
-            e.add_field(name="✅ Succès", value=str(success), inline=True)
-            e.add_field(name="❌ Échecs", value=str(failed), inline=True)
-            e.set_footer(text=f"Action par {i.user.display_name}")
-            await webhook_send(notif_ch, 'realsy', embed=e)
-        await i.followup.send(f"✅ Rôle retiré à **{success}** membre(s) ! ❌ Échecs : **{failed}**", ephemeral=True)
-        # Retour au panel V2 AfkRole
-        v = AfkRolePanelV2(self.u, self.g)
-        try:
-            await i.message.edit(view=v, embed=None, attachments=[])
-        except Exception:
-            pass
-
-    async def _cb_kick(self, i):
-        await i.response.send_message(
-            f"⚠️ **Confirmation requise**\n\n"
-            f"Tu es sur le point de **kick {len(self.afk_members)} membre(s)**.\n"
-            f"Cette action est irréversible !",
-            view=AfkKickConfirmView(self.u, self.g, self.afk_members, self.role),
-            ephemeral=True,
-        )
-
-    async def _cb_ping(self, i):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
-        days = afk_cfg.get('days', 7)
-        if not notif_ch:
-            return await i.response.send_message("❌ Aucun salon de notifications configuré !", ephemeral=True)
-        await i.response.defer()
-
-        e = discord.Embed(
-            title="🔕 Alerte Inactivité",
-            description=(
-                f"Les membres suivants avec le rôle {self.role.mention} sont inactifs depuis plus de **{days} jours**.\n\n"
-                "⚠️ **Merci de manifester votre activité (message ou vocal) pour conserver votre rôle.**"
-            ),
-            color=0xE74C3C,
-            timestamp=now(),
-        )
-        mentions = [m.mention for m, _ in self.afk_members]
-        mention_chunks = [mentions[k:k + 20] for k in range(0, len(mentions), 20)]
-        for idx, chunk in enumerate(mention_chunks[:5]):
-            e.add_field(
-                name=(f"👥 Membres ({idx*20 + 1}-{idx*20 + len(chunk)})" if len(mention_chunks) > 1 else "👥 Membres concernés"),
-                value=" ".join(chunk),
-                inline=False,
-            )
-        if len(self.afk_members) > 100:
-            e.add_field(name="⚠️", value=f"_… et {len(self.afk_members) - 100} autres membres_", inline=False)
-        e.set_footer(text=f"Action par {i.user.display_name} · {len(self.afk_members)} membre(s) concerné(s)")
-        mention_content = " ".join(mentions[:50])
-        await webhook_send(notif_ch, 'realsy', content=mention_content, embed=e)
-        await i.followup.send(
-            f"✅ Message envoyé dans {notif_ch.mention} avec **{len(self.afk_members)}** mention(s) !",
-            ephemeral=True,
-        )
-
-    async def _cb_back(self, i):
-        v = AfkRolePanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-
-class AfkActionsView(View):
-    """Choisir et exécuter les actions sur les membres AFK"""
-    def __init__(self, u, g, afk_members, role):
-        super().__init__(timeout=300)
-        self.u = u
-        self.g = g
-        self.afk_members = afk_members
-        self.role = role
-    
-    async def embed(self):
-        e = discord.Embed(
-            title="⚡ Actions sur les membres AFK",
-            description=f"**{len(self.afk_members)}** membre(s) AFK avec le rôle {self.role.mention}\n\n"
-                        "⚠️ **Choisissez une action à exécuter :**",
-            color=0xE74C3C
-        )
-        
-        # Aperçu des membres (5 premiers)
-        preview = []
-        for member, days_afk in self.afk_members[:5]:
-            days_txt = f"{days_afk}j" if days_afk < 999 else "∞"
-            preview.append(f"• {member.display_name} ({days_txt})")
-        
-        if len(self.afk_members) > 5:
-            preview.append(f"*...et {len(self.afk_members) - 5} autres*")
-        
-        e.add_field(name="👥 Membres concernés", value="\n".join(preview), inline=False)
-        
-        e.add_field(
-            name="🎭 Retirer le rôle",
-            value=f"Enlève {self.role.mention} aux membres AFK",
-            inline=True
-        )
-        e.add_field(
-            name="👢 Kick",
-            value="Expulse les membres AFK du serveur",
-            inline=True
-        )
-        e.add_field(
-            name="📢 Ping",
-            value="Mentionne les membres dans le salon de notifications",
-            inline=True
-        )
-        
-        return e
-    
-    @discord.ui.button(label="🎭 Retirer le rôle", style=discord.ButtonStyle.primary, row=0)
-    async def remove_role(self, i, b):
-        await i.response.defer()
-        
-        success = 0
-        failed = 0
-        
-        for member, _ in self.afk_members:
-            try:
-                await member.remove_roles(self.role, reason="AFK - Rôle retiré automatiquement")
-                success += 1
-                await asyncio.sleep(0.5)  # throttle anti-429 (remove_roles par membre)
-            except:
-                failed += 1
-        
-        # Log dans le salon de notifications
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
-        
-        if notif_ch:
-            e = discord.Embed(
-                title="🎭 Rôles retirés - Membres AFK",
-                description=f"Le rôle {self.role.mention} a été retiré à **{success}** membre(s) inactif(s).",
-                color=0xE74C3C,
-                timestamp=now()
-            )
-            e.add_field(name="✅ Succès", value=str(success), inline=True)
-            e.add_field(name="❌ Échecs", value=str(failed), inline=True)
-            e.set_footer(text=f"Action par {i.user.display_name}")
-            await webhook_send(notif_ch, 'realsy', embed=e)
-        
-        await i.followup.send(f"✅ Rôle retiré à **{success}** membre(s)!\n❌ Échecs: **{failed}**", ephemeral=True)
-        
-        v = AfkRolePanel(self.u, self.g)
-        await i.message.edit(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="👢 Kick", style=discord.ButtonStyle.danger, row=0)
-    async def kick_members(self, i, b):
-        # Demander confirmation
-        await i.response.send_message(
-            f"⚠️ **Confirmation requise**\n\n"
-            f"Vous êtes sur le point de **kick {len(self.afk_members)} membre(s)**.\n"
-            f"Cette action est irréversible!\n\n"
-            f"Êtes-vous sûr ?",
-            view=AfkKickConfirmView(self.u, self.g, self.afk_members, self.role),
-            ephemeral=True
-        )
-    
-    @discord.ui.button(label="📢 Ping dans salon", style=discord.ButtonStyle.success, row=0)
-    async def ping_members(self, i, b):
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
-        days = afk_cfg.get('days', 7)
-        
-        if not notif_ch:
-            return await i.response.send_message("❌ Aucun salon de notifications configuré!", ephemeral=True)
-        
-        await i.response.defer()
-        
-        # Créer l'embed avec les mentions
-        e = discord.Embed(
-            title="🔕 Alerte Inactivité",
-            description=f"Les membres suivants avec le rôle {self.role.mention} sont inactifs depuis plus de **{days} jours**.\n\n"
-                        "⚠️ **Merci de manifester votre activité (message ou vocal) pour conserver votre rôle.**",
-            color=0xE74C3C,
-            timestamp=now()
-        )
-        
-        # Ajouter les mentions par groupes de 20
-        mentions = [m.mention for m, _ in self.afk_members]
-        mention_chunks = [mentions[i:i+20] for i in range(0, len(mentions), 20)]
-        
-        for idx, chunk in enumerate(mention_chunks[:5]):  # Max 5 chunks (100 membres)
-            e.add_field(
-                name=f"👥 Membres ({idx*20 + 1}-{idx*20 + len(chunk)})" if len(mention_chunks) > 1 else "👥 Membres concernés",
-                value=" ".join(chunk),
-                inline=False
-            )
-        
-        if len(self.afk_members) > 100:
-            e.add_field(name="⚠️", value=f"*...et {len(self.afk_members) - 100} autres membres*", inline=False)
-        
-        e.set_footer(text=f"Action par {i.user.display_name} • {len(self.afk_members)} membre(s) concerné(s)")
-        
-        # Envoyer avec mention
-        mention_content = " ".join(mentions[:50])
-        await webhook_send(notif_ch, 'realsy', content=mention_content, embed=e)
-        
-        await i.followup.send(f"✅ Message envoyé dans {notif_ch.mention} avec **{len(self.afk_members)}** mention(s)!", ephemeral=True)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = AfkRolePanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-
-class AfkKickConfirmView(View):
-    def __init__(self, u, g, afk_members, role):
-        super().__init__(timeout=60)
-        self.u = u
-        self.g = g
-        self.afk_members = afk_members
-        self.role = role
-    
-    @discord.ui.button(label="✅ Confirmer le Kick", style=discord.ButtonStyle.danger)
-    async def confirm(self, i, b):
-        await i.response.defer()
-        
-        success = 0
-        failed = 0
-        
-        # RÈGLE FONDATEUR-ONLY (2026-06-13) : plus AUCUN kick auto/staff, même pour
-        # l'inactivité. Les membres AFK ne sont plus expulsés (le fondateur peut le faire
-        # nativement s'il le souhaite). success reste 0 (rapport honnête).
-        for member, _ in self.afk_members:
-            pass
-        
-        # Log
-        c = await cfg(self.g.id)
-        afk_cfg = c.get('afk_role_config', {})
-        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
-        
-        if notif_ch:
-            e = discord.Embed(
-                title="👢 Membres Kick - Inactivité",
-                description=f"**{success}** membre(s) ont été expulsés pour inactivité.",
-                color=0xE74C3C,
-                timestamp=now()
-            )
-            e.add_field(name="✅ Kicks réussis", value=str(success), inline=True)
-            e.add_field(name="❌ Échecs", value=str(failed), inline=True)
-            e.set_footer(text=f"Action par {i.user.display_name}")
-            await webhook_send(notif_ch, 'realsy', embed=e)
-        
-        await i.followup.send(f"✅ **{success}** membre(s) kick!\n❌ Échecs: **{failed}**", ephemeral=True)
-    
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
-    async def cancel(self, i, b):
-        await i.response.edit_message(content="❌ Action annulée", view=None)
-
-
-class StatActionPanel(View):
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-    
-    async def embed(self):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-        
-        e = discord.Embed(color=C.ORANGE)
-        e.set_author(name="⚙️ Configuration des Actions", icon_url=self.g.icon.url if self.g.icon else None)
-        e.description = (
-            "Configurez les actions automatiques sur les membres inactifs.\n"
-            "**Vous pouvez sélectionner plusieurs actions !**\n\n"
-            "*⚠️ Aucune mention automatique - Vous ferez le @here/@everyone vous-même*"
-        )
-        
-        action_labels = {'ping': '📊 Rapport', 'remove_role': '🎭 Retirer rôle', 'kick': '👢 Kick'}
-        
-        actions_7d = stat_cfg.get('actions_7d', [])
-        actions_7d_txt = " + ".join([action_labels.get(a, a) for a in actions_7d]) if actions_7d else "❌ Aucune"
-        
-        actions_30d = stat_cfg.get('actions_30d', [])
-        actions_30d_txt = " + ".join([action_labels.get(a, a) for a in actions_30d]) if actions_30d else "❌ Aucune"
-        
-        role_id = stat_cfg.get('activity_role', 0)
-        notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
-        recovery_ch = self.g.get_channel(stat_cfg.get('recovery_channel', 0))
-        role = self.g.get_role(role_id) if role_id else None
-        
-        e.add_field(name="😴 Actions après 7 jours", value=actions_7d_txt, inline=True)
-        e.add_field(name="💤 Actions après 30 jours", value=actions_30d_txt, inline=True)
-        e.add_field(name="\u200b", value="\u200b", inline=True)
-        
-        e.add_field(name="🎭 Rôle d'activité", value=role.mention if role else "❌ Non défini", inline=True)
-        e.add_field(name="📢 Salon notifications", value=notif_ch.mention if notif_ch else "❌ Non défini", inline=True)
-        e.add_field(name="💬 Salon récupération", value=recovery_ch.mention if recovery_ch else "❌ Non défini", inline=True)
-        
-        e.set_footer(text="💡 Le rôle sera redonné automatiquement si le membre envoie un message ou rejoint un vocal")
-        return e
-    
-    @discord.ui.select(
-        placeholder="😴 Actions 7 jours (multi-sélection)...",
-        options=[
-            discord.SelectOption(label="Envoyer le rapport", value="ping", emoji="📊", description="Afficher le rapport dans le salon de notifications"),
-            discord.SelectOption(label="Retirer le rôle", value="remove_role", emoji="🎭", description="Enlever le rôle d'activité"),
-            discord.SelectOption(label="Kick les membres", value="kick", emoji="👢", description="Expulser du serveur"),
-        ],
-        min_values=0,
-        max_values=3,
-        row=0
-    )
-    async def action_7d(self, i, s):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-        stat_cfg['actions_7d'] = s.values
-        await db_set(self.g.id, 'stat_config', stat_cfg)
-        v = StatActionPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-    
-    @discord.ui.select(
-        placeholder="💤 Actions 30 jours (multi-sélection)...",
-        options=[
-            discord.SelectOption(label="Envoyer le rapport", value="ping", emoji="📊", description="Afficher le rapport dans le salon de notifications"),
-            discord.SelectOption(label="Retirer le rôle", value="remove_role", emoji="🎭", description="Enlever le rôle d'activité"),
-            discord.SelectOption(label="Kick les membres", value="kick", emoji="👢", description="Expulser du serveur"),
-        ],
-        min_values=0,
-        max_values=3,
-        row=1
-    )
-    async def action_30d(self, i, s):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-        stat_cfg['actions_30d'] = s.values
-        await db_set(self.g.id, 'stat_config', stat_cfg)
-        v = StatActionPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-    
-    @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=2)
-    async def set_role(self, i, b):
-        v = StatRoleSelectView(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
-    
-    @discord.ui.button(label="📢 Notifs", style=discord.ButtonStyle.primary, row=2)
-    async def set_notif(self, i, b):
-        v = StatChannelSelectView(self.u, self.g, config_key='notif_channel', title="📢 Salon Notifications",
-                                   description="Salon où seront envoyés les rapports d'inactivité")
-        await i.response.edit_message(embed=v.embed(), view=v)
-    
-    @discord.ui.button(label="💬 Récup", style=discord.ButtonStyle.primary, row=2)
-    async def set_recovery(self, i, b):
-        v = StatChannelSelectView(self.u, self.g, config_key='recovery_channel', title="💬 Salon Récupération",
-                                   description="Les membres écrivent ici pour récupérer leur rôle d'activité")
-        await i.response.edit_message(embed=v.embed(), view=v)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
-    async def back(self, i, b):
-        v = StatPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="👢 Kick AFK 7j", style=discord.ButtonStyle.danger, row=3)
-    async def kick_7d(self, i, b):
-        count = await count_afk_members_by_days(self.g, 7)
-        await i.response.send_message(
-            f"⚠️ **ATTENTION - Action irréversible !**\n\n"
-            f"Vous êtes sur le point d'expulser **{count}** membre(s) inactif(s) depuis **7 jours**.\n\n"
-            f"Cette action est **DÉFINITIVE** et ne peut pas être annulée.",
-            view=KickConfirmView(self.u, self.g, 7, count),
-            ephemeral=True
-        )
-    
-    @discord.ui.button(label="👢 Kick AFK 30j", style=discord.ButtonStyle.danger, row=3)
-    async def kick_30d(self, i, b):
-        count = await count_afk_members_by_days(self.g, 30)
-        await i.response.send_message(
-            f"⚠️ **ATTENTION - Action irréversible !**\n\n"
-            f"Vous êtes sur le point d'expulser **{count}** membre(s) inactif(s) depuis **30 jours**.\n\n"
-            f"Cette action est **DÉFINITIVE** et ne peut pas être annulée.",
-            view=KickConfirmView(self.u, self.g, 30, count),
-            ephemeral=True
-        )
-
-
-class StatActionPanelV2(LayoutView):
-    """Configuration des actions d'inactivite en V2."""
-
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-
-        action_labels = {'ping': 'Rapport', 'remove_role': 'Retrait role', 'kick': 'Kick'}
-        actions_7d = stat_cfg.get('actions_7d', [])
-        actions_30d = stat_cfg.get('actions_30d', [])
-
-        actions_7d_txt = " + ".join(action_labels.get(a, a) for a in actions_7d) if actions_7d else "_Aucune_"
-        actions_30d_txt = " + ".join(action_labels.get(a, a) for a in actions_30d) if actions_30d else "_Aucune_"
-
-        role_id = stat_cfg.get('activity_role', 0)
-        role = self.g.get_role(role_id) if role_id else None
-        notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
-        recovery_ch = self.g.get_channel(stat_cfg.get('recovery_channel', 0))
-
-        # Selects
-        opt_actions = [
-            discord.SelectOption(label="Envoyer le rapport", value="ping", emoji="📊", description="Afficher le rapport dans le salon"),
-            discord.SelectOption(label="Retirer le rôle", value="remove_role", emoji="🎭", description="Enlever le rôle d'activité"),
-            discord.SelectOption(label="Kick les membres", value="kick", emoji="👢", description="Expulser du serveur"),
-        ]
-        # Marquer les options déjà sélectionnées par "default" — Discord 2.7 supporte default=True
-        def _opts_with_defaults(selected):
-            opts = []
-            for o in opt_actions:
-                opts.append(discord.SelectOption(
-                    label=o.label, value=o.value, emoji=o.emoji,
-                    description=o.description, default=(o.value in selected),
-                ))
-            return opts
-
-        sel_7d = Select(
-            placeholder="😴 Actions 7 jours (multi)…",
-            options=_opts_with_defaults(actions_7d),
-            min_values=0, max_values=3,
-            custom_id="sapv2_7d",
-        )
-        sel_7d.callback = self._cb_7d
-
-        sel_30d = Select(
-            placeholder="💤 Actions 30 jours (multi)…",
-            options=_opts_with_defaults(actions_30d),
-            min_values=0, max_values=3,
-            custom_id="sapv2_30d",
-        )
-        sel_30d.callback = self._cb_30d
-
-        # Boutons
-        self.clear_items()
-        b_role = Button(label="🎭 Rôle", style=discord.ButtonStyle.primary, custom_id="sapv2_role")
-        b_role.callback = self._cb_role
-        b_notif = Button(label="📢 Notifs", style=discord.ButtonStyle.primary, custom_id="sapv2_notif")
-        b_notif.callback = self._cb_notif
-        b_recov = Button(label="💬 Récup", style=discord.ButtonStyle.primary, custom_id="sapv2_recov")
-        b_recov.callback = self._cb_recov
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="sapv2_back")
-        b_back.callback = self._cb_back
-        b_kick7 = Button(label="👢 Kick AFK 7j", style=discord.ButtonStyle.danger, custom_id="sapv2_kick7")
-        b_kick7.callback = self._cb_kick7
-        b_kick30 = Button(label="👢 Kick AFK 30j", style=discord.ButtonStyle.danger, custom_id="sapv2_kick30")
-        b_kick30.callback = self._cb_kick30
-
-        items: list = [
-            v2_title("⚙️ Configuration des Actions"),
-            v2_subtitle("Actions automatiques sur les membres inactifs"),
-            v2_divider(),
-            v2_body(
-                "Configure les actions automatiques. Tu peux sélectionner **plusieurs actions** en même temps.\n\n"
-                "_⚠️ Aucune mention automatique — tu fais le @here / @everyone toi-même._"
-            ),
-            v2_divider(),
-            v2_body(
-                f"😴 **Actions 7 jours** · {actions_7d_txt}\n"
-                f"💤 **Actions 30 jours** · {actions_30d_txt}"
-            ),
-            v2_divider(),
-            v2_body(
-                f"🎭 **Rôle d'activité** · {role.mention if role else '_Non défini_'}\n"
-                f"📢 **Salon notifications** · {notif_ch.mention if notif_ch else '_Non défini_'}\n"
-                f"💬 **Salon récupération** · {recovery_ch.mention if recovery_ch else '_Non défini_'}"
-            ),
-            v2_divider(),
-            v2_subtitle("💡 Le rôle est redonné automatiquement si message ou vocal"),
-            discord.ui.ActionRow(sel_7d),
-            discord.ui.ActionRow(sel_30d),
-            discord.ui.ActionRow(b_role, b_notif, b_recov, b_back),
-            discord.ui.ActionRow(b_kick7, b_kick30),
-        ]
-
-        self.add_item(v2_container(*items, color=Palette.WARNING))
-
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _cb_7d(self, i):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-        stat_cfg['actions_7d'] = i.data.get('values', [])
-        await db_set(self.g.id, 'stat_config', stat_cfg)
-        await StatActionPanelV2(self.u, self.g).render_to(i, edit=True)
-
-    async def _cb_30d(self, i):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-        stat_cfg['actions_30d'] = i.data.get('values', [])
-        await db_set(self.g.id, 'stat_config', stat_cfg)
-        await StatActionPanelV2(self.u, self.g).render_to(i, edit=True)
-
-    async def _cb_role(self, i):
-        v = StatRoleSelectView(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v, attachments=[])
-
-    async def _cb_notif(self, i):
-        v = StatChannelSelectView(
-            self.u, self.g,
-            config_key='notif_channel',
-            title="📢 Salon Notifications",
-            description="Salon où seront envoyés les rapports d'inactivité",
-        )
-        await i.response.edit_message(embed=v.embed(), view=v, attachments=[])
-
-    async def _cb_recov(self, i):
-        v = StatChannelSelectView(
-            self.u, self.g,
-            config_key='recovery_channel',
-            title="💬 Salon Récupération",
-            description="Les membres écrivent ici pour récupérer leur rôle d'activité",
-        )
-        await i.response.edit_message(embed=v.embed(), view=v, attachments=[])
-
-    async def _cb_back(self, i):
-        v = StatPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-    async def _cb_kick7(self, i):
-        count = await count_afk_members_by_days(self.g, 7)
-        await i.response.send_message(
-            f"⚠️ **ATTENTION - Action irréversible !**\n\n"
-            f"Tu es sur le point d'expulser **{count}** membre(s) inactif(s) depuis **7 jours**.\n\n"
-            f"Cette action est **DÉFINITIVE** et ne peut pas être annulée.",
-            view=KickConfirmView(self.u, self.g, 7, count),
-            ephemeral=True,
-        )
-
-    async def _cb_kick30(self, i):
-        count = await count_afk_members_by_days(self.g, 30)
-        await i.response.send_message(
-            f"⚠️ **ATTENTION - Action irréversible !**\n\n"
-            f"Tu es sur le point d'expulser **{count}** membre(s) inactif(s) depuis **30 jours**.\n\n"
-            f"Cette action est **DÉFINITIVE** et ne peut pas être annulée.",
-            view=KickConfirmView(self.u, self.g, 30, count),
-            ephemeral=True,
-        )
-
-
-class StatRoleSelectView(View):
-    """Sélecteur de rôle dédié pour le système d'activité"""
-    def __init__(self, u, g, page=0):
-        super().__init__(timeout=180)
-        self.u = u
-        self.g = g
-        self.page = page
-        self.roles = sorted(
-            [r for r in g.roles[1:] if not r.is_bot_managed() and not r.is_default()],
-            key=lambda r: r.position, reverse=True
-        )
-        self.max_page = max(0, (len(self.roles) - 1) // 23)
-        self._build_select()
-    
-    def embed(self):
-        c_roles = len(self.roles)
-        e = discord.Embed(color=0x9B59B6)
-        e.set_author(name="🎭 Sélectionner le rôle d'activité", icon_url=self.g.icon.url if self.g.icon else None)
-        e.description = (
-            f"Le rôle sera **retiré** aux membres inactifs et **redonné** automatiquement "
-            f"quand ils envoient un message ou rejoignent un vocal.\n\n"
-            f"**{c_roles}** rôles disponibles"
-        )
-        e.set_footer(text=f"Page {self.page + 1}/{self.max_page + 1}")
-        return e
-    
-    def _build_select(self):
-        start = self.page * 23
-        end = start + 23
-        page_roles = self.roles[start:end]
-        
-        opts = [discord.SelectOption(label="❌ Aucun rôle (désactiver)", value="0", emoji="🚫")]
-        for r in page_roles:
-            opts.append(discord.SelectOption(
-                label=f"@{r.name}"[:25], value=str(r.id),
-                description=f"{len(r.members)} membres"
-            ))
-        
-        if opts:
-            select = StatRoleSelectMenu(self, opts)
-            self.add_item(select)
-        
-        if self.page > 0:
-            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, row=1)
-            prev_btn.callback = self._prev
-            self.add_item(prev_btn)
-        if self.page < self.max_page:
-            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, row=1)
-            next_btn.callback = self._next
-            self.add_item(next_btn)
-        
-        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
-        back_btn.callback = self._back
-        self.add_item(back_btn)
-    
-    async def _prev(self, i):
-        v = StatRoleSelectView(self.u, self.g, self.page - 1)
-        await i.response.edit_message(embed=v.embed(), view=v)
-    
-    async def _next(self, i):
-        v = StatRoleSelectView(self.u, self.g, self.page + 1)
-        await i.response.edit_message(embed=v.embed(), view=v)
-    
-    async def _back(self, i):
-        v = StatActionPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-
-class StatRoleSelectMenu(Select):
-    def __init__(self, parent, opts):
-        super().__init__(placeholder="Choisir le rôle d'activité...", options=opts)
-        self.parent_view = parent
-    
-    async def callback(self, i):
-        role_id = int(self.values[0])
-        try:
-            c = await cfg(self.parent_view.g.id)
-            stat_cfg = c.get('stat_config', {})
-            stat_cfg['activity_role'] = role_id
-            await db_set(self.parent_view.g.id, 'stat_config', stat_cfg)
-            
-            role = self.parent_view.g.get_role(role_id)
-            role_txt = role.mention if role else "Aucun"
-            
-            v = StatActionPanel(self.parent_view.u, self.parent_view.g)
-            await i.response.edit_message(content=f"✅ Rôle d'activité : {role_txt}", embed=await v.embed(), view=v)
-        except Exception as ex:
-            print(f"[STAT] Erreur set role: {ex}")
-            await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
-
-
-class StatChannelSelectView(View):
-    """Sélecteur de salon dédié pour le système d'activité"""
-    def __init__(self, u, g, config_key, title, description, page=0):
-        super().__init__(timeout=180)
-        self.u = u
-        self.g = g
-        self.config_key = config_key  # 'notif_channel' ou 'recovery_channel'
-        self.title = title
-        self.description = description
-        self.page = page
-        self.channels = list(g.text_channels)
-        self.max_page = max(0, (len(self.channels) - 1) // 23)
-        self._build_select()
-    
-    def embed(self):
-        e = discord.Embed(color=0x3498DB)
-        e.set_author(name=self.title, icon_url=self.g.icon.url if self.g.icon else None)
-        e.description = f"{self.description}\n\n**{len(self.channels)}** salons disponibles"
-        e.set_footer(text=f"Page {self.page + 1}/{self.max_page + 1}")
-        return e
-    
-    def _build_select(self):
-        start = self.page * 23
-        end = start + 23
-        page_channels = self.channels[start:end]
-        
-        opts = [discord.SelectOption(label="❌ Aucun (désactiver)", value="0", emoji="🚫")]
-        for ch in page_channels:
-            cat = ch.category.name[:30] if ch.category else "Sans catégorie"
-            opts.append(discord.SelectOption(
-                label=f"# {ch.name}"[:25], value=str(ch.id),
-                description=cat
-            ))
-        
-        if opts:
-            select = StatChannelSelectMenu(self, opts)
-            self.add_item(select)
-        
-        if self.page > 0:
-            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, row=1)
-            prev_btn.callback = self._prev
-            self.add_item(prev_btn)
-        if self.page < self.max_page:
-            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, row=1)
-            next_btn.callback = self._next
-            self.add_item(next_btn)
-        
-        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
-        back_btn.callback = self._back
-        self.add_item(back_btn)
-    
-    async def _prev(self, i):
-        v = StatChannelSelectView(self.u, self.g, self.config_key, self.title, self.description, self.page - 1)
-        await i.response.edit_message(embed=v.embed(), view=v)
-    
-    async def _next(self, i):
-        v = StatChannelSelectView(self.u, self.g, self.config_key, self.title, self.description, self.page + 1)
-        await i.response.edit_message(embed=v.embed(), view=v)
-    
-    async def _back(self, i):
-        v = StatActionPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-
-class StatChannelSelectMenu(Select):
-    def __init__(self, parent, opts):
-        super().__init__(placeholder=f"Choisir le salon...", options=opts)
-        self.parent_view = parent
-    
-    async def callback(self, i):
-        channel_id = int(self.values[0])
-        try:
-            c = await cfg(self.parent_view.g.id)
-            stat_cfg = c.get('stat_config', {})
-            stat_cfg[self.parent_view.config_key] = channel_id
-            await db_set(self.parent_view.g.id, 'stat_config', stat_cfg)
-            
-            ch = self.parent_view.g.get_channel(channel_id)
-            ch_txt = ch.mention if ch else "Aucun"
-            
-            v = StatActionPanel(self.parent_view.u, self.parent_view.g)
-            await i.response.edit_message(content=f"✅ {self.parent_view.title} : {ch_txt}", embed=await v.embed(), view=v)
-        except Exception as ex:
-            print(f"[STAT] Erreur set channel {self.parent_view.config_key}: {ex}")
-            await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
-
-async def count_afk_members_by_days(guild, days):
-    """Compte les membres AFK depuis X jours"""
-    count = 0
-    now_dt = now()
-    cutoff = now_dt - timedelta(days=days)
-    
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
-                (guild.id,)
-            ) as cursor:
-                tracked_users = set()
-                async for row in cursor:
-                    user_id, last_msg, last_vocal = row
-                    tracked_users.add(user_id)
-                    
-                    last_activity = None
-                    if last_msg:
-                        try:
-                            last_activity = datetime.fromisoformat(last_msg)
-                        except:
-                            pass
-                    if last_vocal:
-                        try:
-                            lv = datetime.fromisoformat(last_vocal)
-                            if not last_activity or lv > last_activity:
-                                last_activity = lv
-                        except:
-                            pass
-                    
-                    if last_activity:
-                        if last_activity.replace(tzinfo=timezone.utc) < cutoff.replace(tzinfo=timezone.utc):
-                            member = guild.get_member(user_id)
-                            if member and not member.bot and member.id != guild.owner_id:
-                                count += 1
-            
-            for member in guild.members:
-                if not member.bot and member.id not in tracked_users and member.id != guild.owner_id:
-                    count += 1
-    except:
-        pass
-    
-    return count
-
-class KickConfirmView(View):
-    def __init__(self, u, g, days, count):
-        super().__init__(timeout=60)
-        self.u = u
-        self.g = g
-        self.days = days
-        self.count = count
-    
-    @discord.ui.button(label="✅ Confirmer l'expulsion", style=discord.ButtonStyle.danger)
-    async def confirm(self, i, b):
-        await i.response.defer()
-        for item in self.children:
-            item.disabled = True
-        await i.message.edit(view=self)
-        result = await kick_afk_members(self.g, self.days)
-        await i.followup.send(result, ephemeral=True)
-    
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
-    async def cancel(self, i, b):
-        await i.response.edit_message(content="❌ Expulsion annulée.", view=None)
-
-async def kick_afk_members(guild, days):
-    """Expulse tous les membres AFK depuis X jours"""
-    now_dt = now()
-    cutoff = now_dt - timedelta(days=days)
-    
-    kicked = 0
-    failed = 0
-    skipped = 0
-    
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
-                (guild.id,)
-            ) as cursor:
-                tracked_users = {}
-                async for row in cursor:
-                    user_id, last_msg, last_vocal = row
-                    last_activity = None
-                    if last_msg:
-                        try: last_activity = datetime.fromisoformat(last_msg)
-                        except: pass
-                    if last_vocal:
-                        try:
-                            lv = datetime.fromisoformat(last_vocal)
-                            if not last_activity or lv > last_activity:
-                                last_activity = lv
-                        except: pass
-                    tracked_users[user_id] = last_activity
-        
-        for member in list(guild.members):
-            if member.bot:
-                continue
-            if member.id == guild.owner_id:
-                skipped += 1
-                continue
-            if member.top_role >= guild.me.top_role:
-                skipped += 1
-                continue
-            
-            last_activity = tracked_users.get(member.id)
-            is_afk = False
-            if not last_activity:
-                is_afk = True
-            else:
-                la_utc = last_activity.replace(tzinfo=timezone.utc) if last_activity.tzinfo is None else last_activity
-                is_afk = la_utc < cutoff.replace(tzinfo=timezone.utc)
-            
-            if is_afk:
-                # RÈGLE FONDATEUR-ONLY : kick d'inactivité désactivé (aucun kick auto/staff).
-                pass
-        
-        result = f"✅ **Expulsion terminée !**\n\n"
-        result += f"👢 **{kicked}** membre(s) expulsé(s)\n"
-        if failed > 0:
-            result += f"❌ **{failed}** échec(s)\n"
-        if skipped > 0:
-            result += f"⏭️ **{skipped}** ignoré(s)\n"
-        result += f"\n*Critère: inactif depuis plus de {days} jours*"
-        return result
-        
-    except Exception as ex:
-        return f"❌ Erreur: {ex}"
-
-class StatExecuteConfirmView(View):
-    def __init__(self, u, g):
-        super().__init__(timeout=60)
-        self.u = u
-        self.g = g
-    
-    @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
-    async def confirm(self, i, b):
-        await i.response.defer()
-        result = await execute_afk_actions(self.g)
-        await i.followup.send(result, ephemeral=True)
-    
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
-    async def cancel(self, i, b):
-        await i.response.edit_message(content="❌ Action annulée", view=None)
-
-async def execute_afk_actions(guild):
-    """Exécute les actions sur les membres AFK - Version ULTRA optimisée"""
-    c = await cfg(guild.id)
-    stat_cfg = c.get('stat_config', {})
-    
-    actions_7d = stat_cfg.get('actions_7d', [])
-    actions_30d = stat_cfg.get('actions_30d', [])
-    role_id = stat_cfg.get('activity_role', 0)
-    notif_ch_id = stat_cfg.get('notif_channel', 0)
-    recovery_ch_id = stat_cfg.get('recovery_channel', 0)
-    
-    role = guild.get_role(role_id) if role_id else None
-    notif_ch = guild.get_channel(notif_ch_id) if notif_ch_id else None
-    recovery_ch = guild.get_channel(recovery_ch_id) if recovery_ch_id else None
-    
-    now_dt = now()
-    seven_days_ago = now_dt - timedelta(days=7)
-    thirty_days_ago = now_dt - timedelta(days=30)
-    
-    results = {
-        'ping_7d': 0, 'remove_role_7d': 0, 'kick_7d': 0,
-        'ping_30d': 0, 'remove_role_30d': 0, 'kick_30d': 0,
-        'immune_skipped': 0
-    }
-    
-    try:
-        # ═══════════════ ÉTAPE 1: COLLECTE DES DONNÉES ═══════════════
-        user_activities = {}
-        immune_roles = set()
-        immune_users = set()
-        
-        async with get_db() as db:
-            # Activités
-            async with db.execute(
-                'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
-                (guild.id,)
-            ) as cursor:
-                async for row in cursor:
-                    user_id, last_msg, last_vocal = row
-                    last_activity = None
-                    if last_msg:
-                        try: last_activity = datetime.fromisoformat(last_msg)
-                        except: pass
-                    if last_vocal:
-                        try:
-                            lv = datetime.fromisoformat(last_vocal)
-                            if not last_activity or lv > last_activity:
-                                last_activity = lv
-                        except: pass
-                    user_activities[user_id] = last_activity
-            
-            # Rôles immunisés
-            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (guild.id,)) as cursor:
-                async for row in cursor:
-                    immune_roles.add(row[0])
-            
-            # Utilisateurs immunisés
-            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (guild.id,)) as cursor:
-                async for row in cursor:
-                    immune_users.add(row[0])
-        
-        # ═══════════════ ÉTAPE 2: CLASSIFICATION (avec immunité) ═══════════════
-        afk_members_7d = []
-        afk_members_30d = []
-        members_to_remove_role_7d = []
-        members_to_remove_role_30d = []
-        members_to_kick_7d = []
-        members_to_kick_30d = []
-        
-        for member in guild.members:
-            if member.bot or member.id == guild.owner_id:
-                continue
-            
-            # ⚠️ VÉRIFICATION IMMUNITÉ - Les immunisés sont ignorés !
-            if member.id in immune_users or any(r.id in immune_roles for r in member.roles):
-                results['immune_skipped'] += 1
-                continue
-            
-            # Admins sont aussi immunisés
-            if member.guild_permissions.administrator:
-                results['immune_skipped'] += 1
-                continue
-            
-            last_activity = user_activities.get(member.id)
-            
-            if not last_activity:
-                is_afk_7d = True
-                is_afk_30d = True
-            else:
-                la_utc = last_activity.replace(tzinfo=timezone.utc) if last_activity.tzinfo is None else last_activity
-                is_afk_7d = la_utc < seven_days_ago.replace(tzinfo=timezone.utc)
-                is_afk_30d = la_utc < thirty_days_ago.replace(tzinfo=timezone.utc)
-            
-            if is_afk_30d:
-                afk_members_30d.append(member)
-                if role and role in member.roles and actions_30d:
-                    members_to_remove_role_30d.append(member)
-                if 'kick' in actions_30d and member.top_role < guild.me.top_role:
-                    members_to_kick_30d.append(member)
-            elif is_afk_7d:
-                afk_members_7d.append(member)
-                if role and role in member.roles and actions_7d:
-                    members_to_remove_role_7d.append(member)
-                if 'kick' in actions_7d and member.top_role < guild.me.top_role:
-                    members_to_kick_7d.append(member)
-        
-        # ═══════════════ ÉTAPE 3: RETRAIT DES RÔLES EN BATCH ═══════════════
-        async def remove_role_batch(members_list, reason):
-            """Retire les rôles par batch de 10 en parallèle"""
-            removed = 0
-            batch_size = 10
-            
-            for i in range(0, len(members_list), batch_size):
-                batch = members_list[i:i + batch_size]
-                tasks = []
-                for member in batch:
-                    tasks.append(member.remove_roles(role, reason=reason))
-                
-                results_batch = await asyncio.gather(*tasks, return_exceptions=True)
-                removed += sum(1 for r in results_batch if not isinstance(r, Exception))
-                
-                # Petit délai entre les batches pour éviter le rate limit
-                if i + batch_size < len(members_list):
-                    await asyncio.sleep(0.5)
-            
-            return removed
-        
-        # Retirer les rôles 30j
-        if members_to_remove_role_30d:
-            results['remove_role_30d'] = await remove_role_batch(members_to_remove_role_30d, "Inactivité 30 jours")
-        
-        # Retirer les rôles 7j
-        if members_to_remove_role_7d:
-            results['remove_role_7d'] = await remove_role_batch(members_to_remove_role_7d, "Inactivité 7 jours")
-        
-        # ═══════════════ ÉTAPE 4: KICKS — DÉSACTIVÉS (règle fondateur-only) ═══════════
-        # RÈGLE OWNER (2026-06-13) : aucun kick auto/staff, même pour l'inactivité.
-        # Le retrait des rôles d'inactivité ci-dessus reste actif ; plus de kick.
-        # (results['kick_30d']/['kick_7d'] restent à 0 — rapport honnête.)
-        
-        # ═══════════════ ÉTAPE 5: NOTIFICATIONS ═══════════════
-        if notif_ch:
-            recovery_mention = recovery_ch.mention if recovery_ch else "un salon textuel ou vocal"
-            
-            # Notification 30 jours (si ping activé et membres non kickés)
-            members_to_ping_30d = [m for m in afk_members_30d if 'kick' not in actions_30d]
-            if 'ping' in actions_30d and members_to_ping_30d:
-                results['ping_30d'] = len(members_to_ping_30d)
-                await send_compact_afk_notification(
-                    notif_ch, members_to_ping_30d, 30, recovery_mention, role
-                )
-            
-            # Notification 7 jours (si ping activé et membres non kickés)
-            members_to_ping_7d = [m for m in afk_members_7d if 'kick' not in actions_7d]
-            if 'ping' in actions_7d and members_to_ping_7d:
-                results['ping_7d'] = len(members_to_ping_7d)
-                await send_compact_afk_notification(
-                    notif_ch, members_to_ping_7d, 7, recovery_mention, role
-                )
-        
-        # Résumé
-        summary = "✅ **Actions exécutées:**\n\n"
-        
-        if results['ping_7d']: summary += f"📊 **Rapport 7j** envoyé ({results['ping_7d']} membre(s) inactifs)\n"
-        if results['remove_role_7d']: summary += f"🎭 **{results['remove_role_7d']}** rôle(s) retiré(s) (7j)\n"
-        if results['kick_7d']: summary += f"👢 **{results['kick_7d']}** membre(s) expulsé(s) (7j)\n"
-        
-        if results['ping_30d']: summary += f"📊 **Rapport 30j** envoyé ({results['ping_30d']} membre(s) inactifs)\n"
-        if results['remove_role_30d']: summary += f"🎭 **{results['remove_role_30d']}** rôle(s) retiré(s) (30j)\n"
-        if results['kick_30d']: summary += f"👢 **{results['kick_30d']}** membre(s) expulsé(s) (30j)\n"
-        
-        if results['immune_skipped']: summary += f"\n👑 **{results['immune_skipped']}** membre(s) immunisé(s) ignoré(s)\n"
-        
-        total_actions = results['ping_7d'] + results['remove_role_7d'] + results['kick_7d'] + results['ping_30d'] + results['remove_role_30d'] + results['kick_30d']
-        
-        if total_actions == 0:
-            summary = "ℹ️ Aucune action effectuée.\n\n**Vérifiez:**\n• Les actions sont-elles configurées ?\n• Y a-t-il des membres inactifs ?"
-            if results['immune_skipped']:
-                summary += f"\n\n👑 *{results['immune_skipped']} membre(s) immunisé(s) ont été ignorés*"
-        else:
-            summary += "\n💡 *Vous pouvez maintenant utiliser @here ou @everyone pour notifier les membres*"
-        
-        return summary
-        
-    except Exception as ex:
-        return f"❌ Erreur: {ex}"
-
-async def send_compact_afk_notification(channel, members, days, recovery_mention, role):
-    """Envoie uniquement le rapport d'inactivité - SANS liste de membres"""
-    if not members:
-        return
-    
-    # Configuration selon la durée
-    if days == 7:
-        title = "😴 Rapport d'Inactivité - 7 Jours"
-        color = C.YELLOW
-        emoji = "⚠️"
-        severity = "modérée"
-    else:
-        title = "💤 Rapport d'Inactivité - 30 Jours"
-        color = C.RED
-        emoji = "🚨"
-        severity = "critique"
-    
-    role_txt = f"**{role.name}**" if role else "d'activité"
-    
-    # ═══════════════ EMBED PRINCIPAL (UNIQUE) ═══════════════
-    e = discord.Embed(title=title, color=color)
-    
-    e.description = (
-        f"{emoji} **{len(members)}** membre(s) ont été détectés comme inactifs.\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    )
-    
-    # Statistiques
-    e.add_field(
-        name="📊 Statistiques",
-        value=f"```\n"
-              f"Membres concernés : {len(members)}\n"
-              f"Durée d'inactivité: {days} jours\n"
-              f"Sévérité          : {severity.upper()}\n"
-              f"```",
-        inline=False
-    )
-    
-    # Actions effectuées
-    actions_txt = ""
-    if role:
-        actions_txt += f"🎭 Le rôle {role_txt} a été **retiré** aux membres inactifs"
-    else:
-        actions_txt += f"📋 {len(members)} membre(s) détecté(s) comme inactif(s)"
-    
-    e.add_field(
-        name="⚡ Actions effectuées",
-        value=actions_txt,
-        inline=False
-    )
-    
-    # Comment récupérer
-    e.add_field(
-        name="🔄 Comment récupérer son activité ?",
-        value=f"```\n"
-              f"1️⃣ Envoyer un message dans {recovery_mention}\n"
-              f"   → Le message sera supprimé automatiquement\n"
-              f"   → Le rôle sera redonné instantanément\n\n"
-              f"2️⃣ OU rejoindre un salon vocal\n"
-              f"   → Le rôle sera redonné automatiquement\n"
-              f"```",
-        inline=False
-    )
-    
-    e.set_footer(text=f"📌 Aucune mention automatique • L'administrateur peut ping @here ou @everyone")
-    e.timestamp = now()
-    
-    await webhook_send(channel, 'realsy', embed=e)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🔄 TÂCHE AUTOMATIQUE INACTIVITÉ
@@ -24477,145 +21260,8 @@ async def _cleanup_old_db_wait():
     await bot.wait_until_ready()
 
 
-@tasks.loop(hours=24)
-async def check_afk_automatic():
-    """Vérifie automatiquement l'inactivité des membres chaque jour"""
-    try:
-        async with get_db() as db:
-            async with db.execute('SELECT guild_id, data FROM guild_config') as cursor:
-                async for row in cursor:
-                    guild_id, data_str = row
-                    try:
-                        data = json.loads(data_str) if data_str else {}
-                        guild = bot.get_guild(guild_id)
-                        if not guild:
-                            continue
-                        
-                        stat_cfg = data.get('stat_config', {})
-                        actions_7d = stat_cfg.get('actions_7d', [])
-                        actions_30d = stat_cfg.get('actions_30d', [])
-                        
-                        # Si aucune action configurée, passer
-                        if not actions_7d and not actions_30d:
-                            continue
-                        
-                        # Exécuter les actions automatiques
-                        await execute_afk_actions_auto(guild, stat_cfg)
-                        
-                    except Exception as ex:
-                        print(f"Erreur AFK auto {guild_id}: {ex}")
-                        continue
-    except Exception as ex:
-        print(f"Erreur tâche AFK: {ex}")
 
-@check_afk_automatic.before_loop
-async def before_afk_check():
-    await bot.wait_until_ready()
 
-async def execute_afk_actions_auto(guild, stat_cfg):
-    """Exécute les actions automatiques sur les membres AFK"""
-    actions_7d = stat_cfg.get('actions_7d', [])
-    actions_30d = stat_cfg.get('actions_30d', [])
-    role_id = stat_cfg.get('activity_role', 0)
-    notif_ch_id = stat_cfg.get('notif_channel', 0)
-    recovery_ch_id = stat_cfg.get('recovery_channel', 0)
-    
-    role = guild.get_role(role_id) if role_id else None
-    notif_ch = guild.get_channel(notif_ch_id) if notif_ch_id else None
-    recovery_ch = guild.get_channel(recovery_ch_id) if recovery_ch_id else None
-    
-    now_dt = now()
-    seven_days_ago = now_dt - timedelta(days=7)
-    thirty_days_ago = now_dt - timedelta(days=30)
-    
-    # Récupérer les activités
-    user_activities = {}
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
-                (guild.id,)
-            ) as cursor:
-                async for row in cursor:
-                    user_id, last_msg, last_vocal = row
-                    last_activity = None
-                    if last_msg:
-                        try: last_activity = datetime.fromisoformat(last_msg)
-                        except: pass
-                    if last_vocal:
-                        try:
-                            lv = datetime.fromisoformat(last_vocal)
-                            if not last_activity or lv > last_activity:
-                                last_activity = lv
-                        except: pass
-                    user_activities[user_id] = last_activity
-    except:
-        return
-    
-    # Classifier les membres
-    afk_members_7d = []
-    afk_members_30d = []
-    
-    for member in guild.members:
-        if member.bot or member.id == guild.owner_id:
-            continue
-        
-        last_activity = user_activities.get(member.id)
-        
-        if not last_activity:
-            is_afk_7d = True
-            is_afk_30d = True
-        else:
-            la_utc = last_activity.replace(tzinfo=timezone.utc) if last_activity.tzinfo is None else last_activity
-            is_afk_7d = la_utc < seven_days_ago.replace(tzinfo=timezone.utc)
-            is_afk_30d = la_utc < thirty_days_ago.replace(tzinfo=timezone.utc)
-        
-        if is_afk_30d:
-            afk_members_30d.append(member)
-        elif is_afk_7d:
-            afk_members_7d.append(member)
-    
-    # ═══════════════ ACTIONS 30 JOURS ═══════════════
-    kicked_30d = []
-    role_removed_30d = []
-    
-    for member in afk_members_30d:
-        # Retirer le rôle
-        if 'remove_role' in actions_30d and role and role in member.roles:
-            try:
-                await member.remove_roles(role, reason="Inactivité 30 jours (auto)")
-                role_removed_30d.append(member)
-                await asyncio.sleep(0.5)  # throttle anti-429 (remove_roles par membre)
-            except: pass
-        
-        # Kick — DÉSACTIVÉ (règle fondateur-only : aucun kick auto). Retrait de rôle conservé.
-    
-    # Notification 30j (seulement si ping ET pas kick)
-    members_to_notify_30d = [m for m in afk_members_30d if m not in kicked_30d]
-    if 'ping' in actions_30d and members_to_notify_30d and notif_ch:
-        recovery_mention = recovery_ch.mention if recovery_ch else "un salon textuel"
-        await send_compact_afk_notification(notif_ch, members_to_notify_30d, 30, recovery_mention, role if 'remove_role' in actions_30d else None)
-    
-    # ═══════════════ ACTIONS 7 JOURS ═══════════════
-    kicked_7d = []
-    role_removed_7d = []
-    
-    for member in afk_members_7d:
-        # Retirer le rôle
-        if 'remove_role' in actions_7d and role and role in member.roles:
-            try:
-                await member.remove_roles(role, reason="Inactivité 7 jours (auto)")
-                role_removed_7d.append(member)
-                await asyncio.sleep(0.5)  # throttle anti-429 (remove_roles par membre)
-            except: pass
-        
-        # Kick — DÉSACTIVÉ (règle fondateur-only : aucun kick auto). Retrait de rôle conservé.
-    
-    # Notification 7j (seulement si ping ET pas kick)
-    members_to_notify_7d = [m for m in afk_members_7d if m not in kicked_7d]
-    if 'ping' in actions_7d and members_to_notify_7d and notif_ch:
-        recovery_mention = recovery_ch.mention if recovery_ch else "un salon textuel"
-        await send_compact_afk_notification(notif_ch, members_to_notify_7d, 7, recovery_mention, role if 'remove_role' in actions_7d else None)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📺 CONFIG SALON
@@ -26696,6 +23342,48 @@ _did_boot = False  # audit 2026-07-03 : on_ready peut se re-déclencher (reconne
 #                    la ré-inscription des vues persistantes (nécessaire à chaque reconnexion).
 
 
+async def _activite_boot():
+    """Câble et initialise le système d'activité. Appelé une fois au boot.
+
+    `est_immunise` réunit TOUTES les protections en une seule fonction, pour que
+    le module d'activité n'ait pas à connaître les règles du bot : propriétaire,
+    super-owner, administrateur, immunisé, bot. Fail-CLOSED — si le calcul échoue,
+    on répond « intouchable » plutôt que de risquer de sanctionner un innocent.
+    """
+    async def est_immunise(member) -> bool:
+        try:
+            if member.bot:
+                return True
+            if member.id == member.guild.owner_id:
+                return True
+            if owner_ids_module.is_super_owner(member.id):
+                return True
+            if member.guild_permissions.administrator:
+                return True
+            return bool(await is_fully_immune(member))
+        except Exception as ex:
+            print(f"[activite est_immunise] {ex}")
+            return True          # dans le doute, on protège
+
+    activite_module.setup(get_db=get_db, cfg=cfg, db_set=db_set,
+                          est_immunise=est_immunise, log=print)
+    activite_esc.setup(log=print)
+    activite_rec.setup(log=print)
+    activite_pass.setup(log=print)
+    activite_ui.setup(db_set=db_set, log=print)
+
+    #  Le bouton « Retour » du panneau d'activité doit rouvrir /configure. On
+    #  l'injecte plutôt que de laisser le module importer MainPanelV2 : ça
+    #  créerait un import circulaire (bot.py → panneau → bot.py).
+    async def _retour_vers_configure(u, g, inter):
+        await MainPanelV2(u, g).render_to(inter, edit=True)
+
+    activite_ui.set_retour(_retour_vers_configure)
+
+    await activite_module.init_db()
+    await activite_rec.init_db()
+
+
 @bot.event
 async def on_ready():
     global _did_boot
@@ -26749,7 +23437,8 @@ async def on_ready():
         _BOT_AVATAR_URL = None
     
     bot.add_view(TicketControlView())
-    bot.add_view(GiveawayParticipateView())  # Pour les boutons de participation aux giveaways
+    # (Les giveaways sont partis avec le périmètre supprimé : plus de vue à
+    #  réenregistrer. La classe avait survécu à la purge par cet unique appel.)
     # Phase 40 — views persistantes (custom_ids stables, callbacks utilisent i.user.id)
     try:
         pass  # bloc vidé (module détaché)
@@ -27210,9 +23899,16 @@ async def on_ready():
     if not check_social_feeds.is_running():
         check_social_feeds.start()
     
-    # Lancer la tâche de vérification AFK automatique
-    if not check_afk_automatic.is_running():
-        check_afk_automatic.start()
+    # ═══ ACTIVITÉ ═══ câblage + tables, puis la boucle. La boucle démarre même
+    # si le système est éteint : elle sort d'elle-même sur chaque guilde inactive.
+    # Ainsi, activer le système depuis le panneau prend effet sans redémarrage.
+    try:
+        await _activite_boot()
+        if not activite_passage_task.is_running():
+            activite_passage_task.start()
+    except Exception as ex:
+        print(f"[on_ready activite] {ex}")
+
 
     # Phase 20 : tâche journalière de cleanup DB
     if not cleanup_old_db_data.is_running():
@@ -27786,9 +24482,7 @@ async def on_ready():
     if not hub_orphan_cleaner_task.is_running():
         hub_orphan_cleaner_task.start()
 
-    # Phase 48.1 : auto-promote des events en danger + marketplace cleanup
-    if not auto_promote_dying_events.is_running():
-        auto_promote_dying_events.start()
+    # (auto-promote des events retiré avec les événements.)
     if not marketplace_expire_cleaner.is_running():
         marketplace_expire_cleaner.start()
     # Phase 49 : NPC chatter (toutes les 6h) + missions runner (daily)
@@ -27887,11 +24581,57 @@ async def on_ready():
 #                           📨 ON_INTERACTION POUR MESSAGES AUTO
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ACTIVITÉ — deux sources de plus, toutes deux volontaires
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.event
+async def on_thread_create(thread):
+    """Ouvrir un fil est un geste d'animation : celui qui le fait est présent."""
+    try:
+        if thread.guild and thread.owner_id:
+            membre = thread.guild.get_member(thread.owner_id)
+            if membre is not None and not membre.bot:
+                await activite_module.marquer_actif(
+                    thread.guild.id, thread.owner_id, activite_module.SOURCE_FIL)
+    except Exception as ex:
+        print(f"[activite on_thread_create] {ex}")
+
+
+@bot.event
+async def on_raw_poll_vote_add(payload):
+    """Voter à un sondage : exactement comme une réaction, un clic délibéré.
+
+    On écoute la version RAW pour capter aussi les votes sur d'anciens sondages
+    sortis du cache — même raison que pour les réactions.
+    """
+    try:
+        gid = getattr(payload, "guild_id", None)
+        uid = getattr(payload, "user_id", None)
+        if gid and uid:
+            await activite_module.marquer_actif(
+                gid, uid, activite_module.SOURCE_SONDAGE)
+    except Exception as ex:
+        print(f"[activite on_poll_vote] {ex}")
+
+
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
     """Repositionne les messages d'aide après les interactions (commandes slash, boutons, etc.)"""
     if not interaction.channel or not interaction.guild:
         return
+
+    # ═══ ACTIVITÉ — la source la plus fiable : un geste délibéré ═══
+    # Lancer une commande, cliquer un bouton ou choisir dans un menu ne peut pas
+    # arriver par accident, ni pendant qu'on dort. C'est le contraire du statut
+    # « en ligne » : ici, quelqu'un a forcément agi.
+    try:
+        if interaction.user is not None and not interaction.user.bot:
+            await activite_module.marquer_actif(
+                interaction.guild.id, interaction.user.id,
+                activite_module.SOURCE_INTERACTION)
+    except Exception as _ex_act:
+        print(f"[activite on_interaction] {_ex_act}")
 
     try:
         c = await cfg(interaction.guild.id)
@@ -31094,6 +27834,18 @@ async def on_message(msg):
     if not msg.guild:
         return
 
+    # ═══ ACTIVITÉ — source 1/3 : le message ═══
+    # Placé tout en haut, AVANT toute autre logique : un membre qui écrit est
+    # actif, même si son message est ensuite supprimé par une protection.
+    # `marquer_actif` coupe sur son cache du jour avant d'ouvrir la base : le coût
+    # réel est une lecture de `set` pour tous les messages sauf le premier.
+    try:
+        if not msg.author.bot:
+            await activite_module.marquer_actif(
+                msg.guild.id, msg.author.id, activite_module.SOURCE_MESSAGE)
+    except Exception as _ex_act:
+        print(f"[activite on_message] {_ex_act}")
+
     # « Dernier message » (sticky, owner 2026-06-16) : si le salon a un sticky actif, on
     # le redescend en bas. Garde O(1) mémoire AVANT toute requête (anti-429) + fire-and-
     # forget throttlé → ne bloque JAMAIS on_message ni les autres handlers.
@@ -33895,7 +30647,7 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     e.add_field(name="📝 Motif", value=raison, inline=False)
     e.add_field(
         name="🆔 ID de la fiche",
-        value=f"`{warn_id_str}` — utilise `/infractions` pour voir la fiche complète",
+        value=f"`{warn_id_str}` — utilise `/mod infractions` pour voir la fiche complète",
         inline=False,
     )
     e.set_thumbnail(url=membre.display_avatar.url)
@@ -35133,7 +31885,7 @@ async def mod_note_cmd(i: discord.Interaction, membre: discord.Member, texte: st
         title="🗒️ Note interne ajoutée",
         description=(
             f"Note enregistrée sur {membre.mention} — visible par le staff via "
-            f"`/infractions`.\n_Non-punitive : aucun rôle, aucun impact sur le casier._"
+            f"`/mod infractions`.\n_Non-punitive : aucun rôle, aucun impact sur le casier._"
         ),
         color=discord.Color.light_grey(),
         timestamp=now(),
@@ -35868,108 +32620,6 @@ trade_cooldowns = {}
 #                              📊 COMMANDE /STAT - STATISTIQUES MEMBRE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="afk", description="💤 Voir les membres AFK du serveur")
-@app_commands.describe(jours="Nombre de jours d'inactivité minimum (défaut: 7)")
-async def afk_cmd(i: discord.Interaction, jours: int = 7):
-    """Commande /afk — Liste des membres inactifs"""
-    ok, msg = await security_check(i, "afk")
-    if not ok:
-        return await i.response.send_message(msg, ephemeral=True)
-    
-    # Seuls les admins/owner peuvent voir la liste complète
-    if not (i.user.guild_permissions.administrator or i.user.id == i.guild.owner_id):
-        return await i.response.send_message("❌ Réservé aux administrateurs.", ephemeral=True)
-    
-    await i.response.defer(ephemeral=True)
-    
-    jours = max(1, min(jours, 365))
-    cutoff = (now() - timedelta(days=jours)).replace(tzinfo=timezone.utc)
-    afk_members = []
-    
-    try:
-        async with get_db() as db:
-            tracked = set()
-            async with db.execute(
-                'SELECT user_id, last_message, last_vocal, total_messages FROM activity_tracking WHERE guild_id=?',
-                (i.guild.id,)
-            ) as cursor:
-                async for row in cursor:
-                    uid = row[0]
-                    tracked.add(uid)
-                    la = None
-                    for ts in [row[1], row[2]]:
-                        if ts:
-                            try:
-                                dt = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
-                                if not la or dt > la: la = dt
-                            except: pass
-                    
-                    if la and la < cutoff:
-                        days_off = (now().replace(tzinfo=timezone.utc) - la).days
-                        total_msg = row[3] if row[3] else 0
-                        afk_members.append((uid, days_off, total_msg))
-                    elif not la:
-                        afk_members.append((uid, jours, 0))
-            
-            for m in i.guild.members:
-                if not m.bot and m.id not in tracked and m.id != i.guild.owner_id:
-                    days_since_join = (now().replace(tzinfo=timezone.utc) - m.joined_at.replace(tzinfo=timezone.utc)).days if m.joined_at else 999
-                    afk_members.append((m.id, min(days_since_join, 999), 0))
-    except Exception as ex:
-        return await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
-    
-    afk_members.sort(key=lambda x: x[1], reverse=True)
-    
-    # ─── Aucun membre AFK ───
-    if not afk_members:
-        empty_view = LayoutView(timeout=None)
-        empty_items = []
-        if i.guild.icon:
-            empty_items.append(v2_section(
-                v2_title(f"💤 AFK ({jours}j+)"),
-                v2_body(f"🎉 Aucun membre inactif depuis **{jours}+ jours** !"),
-                accessory=v2_thumb(i.guild.icon.url),
-            ))
-        else:
-            empty_items.append(v2_title(f"💤 AFK ({jours}j+)"))
-            empty_items.append(v2_body(f"🎉 Aucun membre inactif depuis **{jours}+ jours** !"))
-        empty_view.add_item(v2_container(*empty_items, color=Palette.SUCCESS))
-        return await i.followup.send(view=empty_view, ephemeral=True)
-
-    # ─── Liste des AFK (max 45 affichés) ───
-    afk_to_show = afk_members[:45]
-    lines_out = []
-    for idx, (uid, days, msgs) in enumerate(afk_to_show, 1):
-        m = i.guild.get_member(uid)
-        name = m.mention if m else f"`{uid}`"
-        icon = "🔴" if days >= 30 else ("🟠" if days >= 14 else ("🟡" if days >= 7 else "⚪"))
-        msg_txt = f" · `{msgs}` msgs" if msgs else ""
-        lines_out.append(f"`{idx:>3}.` {icon} {name} — **{days}j**{msg_txt}")
-
-    items_v2 = []
-    if i.guild.icon:
-        items_v2.append(v2_section(
-            v2_title(f"💤 {len(afk_members)} membres AFK"),
-            v2_body(f"Inactifs depuis **{jours}+ jours**"),
-            accessory=v2_thumb(i.guild.icon.url),
-        ))
-    else:
-        items_v2.append(v2_title(f"💤 {len(afk_members)} membres AFK"))
-        items_v2.append(v2_subtitle(f"Inactifs depuis {jours}+ jours"))
-    items_v2.append(v2_divider())
-    items_v2.append(v2_body("\n".join(lines_out)))
-
-    # Indication si plus de 45 membres
-    if len(afk_members) > 45:
-        items_v2.append(v2_divider())
-        items_v2.append(v2_subtitle(f"+ {len(afk_members) - 45} autres membres non affichés"))
-
-    items_v2.append(v2_divider())
-    items_v2.append(v2_subtitle("🔴 30j+  ·  🟠 14j+  ·  🟡 7j+  ·  ⚪ < 7j"))
-
-    view = LayoutView(timeout=None)
-    view.add_item(v2_container(*items_v2, color=Palette.DANGER))
-    await i.followup.send(view=view, ephemeral=True)
 
 
 
@@ -36094,9 +32744,15 @@ async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
         return
 
-    # owner 2026-07-20 : une RÉACTION DONNÉE compte comme ACTIVITÉ dans le VRAI système d'activité
-    # (activity_tracker, avec historique par jour) — utilisé par le rapport clan. RAW = capte aussi
-    # les réactions sur les ANCIENNES annonces (hors cache). FAIL-SAFE.
+    # ═══ ACTIVITÉ — source 3/3 : la réaction ═══
+    # RAW = capte aussi les réactions sur d'ANCIENS messages (hors cache).
+    try:
+        if payload.guild_id and payload.user_id:
+            await activite_module.marquer_actif(
+                payload.guild_id, payload.user_id, activite_module.SOURCE_REACTION)
+    except Exception as _ex_act:
+        print(f"[activite on_reaction] {_ex_act}")
+
     try:
         if payload.guild_id:
             await activity2026.track_reaction(payload.guild_id, payload.user_id)
@@ -39056,7 +35712,29 @@ _VOICE_HUB_WINDOW = 600.0   # …par fenêtre de 10 min
 async def on_voice_state_update(member, before, after):
     if member.bot:
         return
-    
+
+    # ═══ ACTIVITÉ — le vocal, compté comme un GESTE et non comme une présence ═══
+    # RESTER assis dans un salon ne prouve rien : on peut y dormir des jours. Ne
+    # compter que l'entrée ne suffit pas non plus — quelqu'un entré lundi 20h et
+    # resté jusqu'à mardi 2h ne serait crédité que du lundi.
+    # On retient donc les gestes VOLONTAIRES, qui se reproduisent naturellement
+    # au fil d'une vraie session :
+    #   · entrer dans un salon, ou en changer ;
+    #   · reprendre son micro (sortir de sourdine) — l'intention de parler ;
+    #   · lancer un partage d'écran ou la caméra.
+    try:
+        entre = after.channel is not None and before.channel is None
+        change = (after.channel is not None and before.channel is not None
+                  and after.channel.id != before.channel.id)
+        reprend_micro = before.self_mute and not after.self_mute
+        se_montre = ((after.self_stream and not before.self_stream)
+                     or (after.self_video and not before.self_video))
+        if entre or change or reprend_micro or se_montre:
+            await activite_module.marquer_actif(
+                member.guild.id, member.id, activite_module.SOURCE_VOCAL)
+    except Exception as _ex_act:
+        print(f"[activite on_voice] {_ex_act}")
+
     guild_id = member.guild.id
     user_id = member.id
     key = (guild_id, user_id)
@@ -47660,175 +44338,15 @@ _EVENT_KIND_TO_METRICS = {
 }
 
 
-async def _get_user_event_affinity(guild_id: int, user_id: int, event_kind: str) -> int:
-    """Renvoie un score d'affinité (0-100) du membre pour ce type d'event.
-    Plus le score est haut, plus la mention est pertinente.
-    """
-    try:
-        metrics = _EVENT_KIND_TO_METRICS.get(event_kind, [])
-        if not metrics:
-            return 50  # neutre si type inconnu
-        stats = await _get_user_stats41(guild_id, user_id)
-        score = 0
-        for m in metrics:
-            val = int(stats.get(m, 0) or 0)
-            # Mapping logarithmique : 0 → 0, 1 → 20, 5 → 40, 20 → 60, 100 → 80, 500 → 100
-            if val >= 500:
-                score += 100
-            elif val >= 100:
-                score += 80
-            elif val >= 20:
-                score += 60
-            elif val >= 5:
-                score += 40
-            elif val >= 1:
-                score += 20
-        return min(100, score // max(1, len(metrics)))
-    except Exception:
-        return 50
 
 
-async def _build_wakeup_mention_line_smart(guild, event_kind: str, max_count: int = 3,
-                                           reward_hint: str = None) -> str:
-    """Phase 48.1 : mention que les inactifs avec affinité élevée pour ce type d'event.
-    Phase 48.3 : RESPECTE les préférences notif granulaires (skip si opted-out).
-    Phase 186 : framing RÉ-ENGAGEMENT honnête — on ne dit plus « spécialement pour
-    vous » (trompeur). Ces membres ont DÉJÀ participé à ce type d'event et sont
-    devenus inactifs → on les invite à REVENIR retenter leur chance (ouvert à tous).
-    Le but : faire revivre le serveur en redonnant une chance aux anciens actifs.
-
-    `reward_hint` (optionnel) : si fourni, on précise « tenter de gagner X ».
-    Cap 3 mentions max + cooldown 48h + opt-out (TOS Discord respect).
-    """
-    # Phase 257 : DÉSACTIVÉ — plus AUCUNE mention individuelle de membre (directive
-    # owner). La portée des events passe par le rôle @Tous (gros events, plafonné).
-    return ""
-    try:
-        all_candidates = await _get_wakeup_candidates(guild, max_count=20)
-        if not all_candidates:
-            return ""
-        # Phase 48.3 : filter out les users qui ont opt-out de ce kind
-        # Phase 48.4.A : FAIL-CLOSED — si la lecture des prefs échoue, on SKIP le user
-        # (prudent : mieux vaut ne pas ping que pinger malgré opt-out — risque TOS)
-        filtered = []
-        for m in all_candidates:
-            try:
-                if await _member_wants_notif(guild.id, m.id, event_kind):
-                    filtered.append(m)
-            except Exception as _ex:
-                print(f"[smart_mention opt-out check fail-closed user={m.id}] {_ex}")
-                # On SKIP ce user pour éviter de violer un opt-out qu'on n'a pas pu lire
-        if not filtered:
-            return ""
-        # Score chaque candidat restant pour ce kind
-        scored = []
-        for m in filtered:
-            score = await _get_user_event_affinity(guild.id, m.id, event_kind)
-            scored.append((score, m))
-        scored.sort(key=lambda x: -x[0])
-        chosen = [m for score, m in scored[:max_count] if score >= 30]
-        if not chosen:
-            chosen = [scored[0][1]] if scored else []
-        if not chosen:
-            return ""
-        await _log_wakeup_mentions(guild.id, [m.id for m in chosen])
-        mentions = " ".join(m.mention for m in chosen)
-        reward_part = f" et tenter de gagner **{reward_hint}**" if reward_hint else ""
-        return (
-            f"\n\n🔔 {mentions} — vous aviez déjà participé à ce genre d'événement et "
-            f"vous nous manquez ! Il **revient maintenant** : si ça vous tente toujours, "
-            f"revenez retenter votre chance{reward_part}. _C'est ouvert à tout le monde_ 👀"
-        )
-    except Exception as ex:
-        print(f"[_build_wakeup_mention_line_smart] {ex}")
-        return ""
 
 
 # ─── AUTO-PROMOTE des events morts ────────────────────────────────────────────
 
 
-@tasks.loop(hours=6)
-async def auto_promote_dying_events():
-    """Toutes les 6h, scan les events à faible engagement et boost leur visibilité.
-
-    Stratégie : si un event_kind a count_started >= 5 mais participations/start < 1.0
-    sur la dernière semaine → on ping un message dans le hub channel pour le rappeler.
-    """
-    try:
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                if not hub_id:
-                    continue
-                hub_ch = guild.get_channel(hub_id)
-                if not hub_ch or not await _is_chatty_channel(hub_ch):
-                    continue
-
-                # Identifier les events morts (>5 starts, <1 participation/event)
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT event_kind, count_started, count_participations "
-                        "FROM event_engagement WHERE guild_id=? AND count_started >= 5",
-                        (guild.id,),
-                    ) as cur:
-                        rows = await cur.fetchall()
-                dying = []
-                for kind, started, parts in rows:
-                    if started > 0 and (parts / started) < 1.0:
-                        dying.append(kind)
-                # Phase 48.4.A : log de vie même si rien à faire (debug visibility)
-                print(f"[auto_promote SCAN] guild={guild.id} rows={len(rows)} dying={len(dying)}")
-                if not dying:
-                    continue
-
-                # On promote 1 seul à la fois (anti-spam)
-                target_kind = random.choice(dying)
-                msg_map = {
-                    'boss_raid':      "⚔️ Les Boss Raids manquent de combattants ! Rejoins le prochain.",
-                    'world_boss':     "🌍 Le World Boss attend des héros — samedi 21h.",
-                    'treasure':       "💎 Les chasses au trésor commencent dans peu — préparez-vous !",
-                    'flash_treasure': "💎 Des Trésors Flash apparaissent dans nos salons actifs — sois prêt à les saisir.",
-                    'quiz':           "🎓 Les Quiz cherchent des cerveaux ! Le prochain est imminent.",
-                    'daily_riddle':   "🧠 L'énigme du jour t'attend dans le hub — premier à trouver gagne gros.",
-                    'duel':           "⚔️ Défie un autre membre en duel — `/duel`.",
-                    'game_night':     "🎮 La Game Night du vendredi t'attend — 21h, vocal + chat éphémères.",
-                }
-                content = msg_map.get(target_kind, f"🎯 L'event **{target_kind}** revient bientôt !")
-
-                # Mention intelligente des inactifs avec affinité
-                wakeup_line = await _build_wakeup_mention_line_smart(guild, target_kind, max_count=3)
-
-                LIFETIME_PROMO = 30 * 60  # 30 min
-                try:
-                    promo_msg = await hub_ch.send(
-                        embed=discord.Embed(
-                            title="🔥 Un event te recherche !",
-                            description=(
-                                f"{content}\n\n"
-                                + (wakeup_line if wakeup_line else "")
-                                + f"\n\n{_chrono_footer(LIFETIME_PROMO)}"
-                            ),
-                            color=0xE67E22,
-                        ),
-                        allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
-                        delete_after=LIFETIME_PROMO,
-                    )
-                    await _register_for_cleanup(promo_msg, LIFETIME_PROMO, 'auto_promote')
-                    print(f"[AUTO_PROMOTE] guild={guild.id} kind={target_kind}")
-                except Exception as ex:
-                    print(f"[auto_promote send guild={guild.id}] {ex}")
-            except Exception as ex:
-                print(f"[auto_promote_dying_events guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[auto_promote_dying_events] {ex}")
 
 
-@auto_promote_dying_events.before_loop
-async def _auto_promote_wait():
-    await bot.wait_until_ready()
 
 
 # ─── MARKETPLACE P2P (vente de pets entre joueurs) ────────────────────────────
@@ -50146,7 +46664,7 @@ async def owner_alerts_task():
                                     f"💡 _Tu peux :_\n"
                                     f"• _Lancer un event manuellement_\n"
                                     f"• _Vérifier que les tasks d'engagement tournent_\n"
-                                    f"• _Forcer un NPC à parler via `/npc_force_post`_"
+                                    "• _(commande de forçage retirée)_"
                                 ),
                                 color=0xF39C12,
                             )
