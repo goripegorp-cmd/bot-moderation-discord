@@ -191,7 +191,22 @@ des membres proposés à l'expulsion.
 
 Ce sont les salons **par défaut**. Chaque rôle peut avoir les siens.
 
-Le rappel part **une fois par semaine par rôle**, le jour propre à ce rôle.
+Le rappel part **une fois par semaine par rôle**, le jour propre à ce rôle —
+**dimanche par défaut**, la fin de la semaine.
+
+### Un seul message vivant à la fois
+
+Chaque semaine, **l'ancien rappel est supprimé** avant que le nouveau soit posté.
+Sans ça, le salon accumulerait des listes périmées où d'anciens absents restent
+affichés alors qu'ils sont revenus.
+
+Le message est un vrai panneau, pas un pavé : il dit **comment revenir avant de
+dire pourquoi**, indique depuis combien de **semaines** chacun est absent (pas en
+jours — « 3 semaines » se ressent, « 21 jours » ne dit rien), et se termine en
+rappelant que **ce n'est ni une sanction ni un reproche**.
+
+Il mentionne les membres concernés, mais **jamais @everyone ni un rôle** : un
+rappel d'inactivité ne doit pas réveiller tout le serveur.
 
 ---
 

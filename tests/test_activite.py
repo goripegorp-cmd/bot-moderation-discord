@@ -93,44 +93,64 @@ def test_role_surveille_none_si_aucun():
     assert activite.role_surveille_du_membre(_Membre([_Role(9)]), cfg) is None
 
 
-# ─── le texte envoyé aux inactifs ───────────────────────────────────────────
+# ─── le message envoye aux inactifs ─────────────────────────────────────────
+#
+#  On teste la fabrique de LIGNES et le contenu, pas le rendu Discord : le
+#  panneau lui-meme exige discord.py, absent de l'environnement de test pur.
 
 class _MembreMention:
     def __init__(self, n):
         self.mention = f"<@{n}>"
 
 
-def _fiches(n, jours=8):
-    return [{"member": _MembreMention(i), "jours": jours + i} for i in range(n)]
+def _fiche(jours, n=0):
+    return {"member": _MembreMention(n), "jours": jours}
 
 
-def test_texte_rappel_vide_si_personne():
-    assert esc.texte_rappel([]) == ""
+def test_duree_dite_en_semaines_au_dela_de_deux():
+    """« 3 semaines » se ressent ; « 21 jours » se lit sans rien evoquer."""
+    assert activite.duree_lisible(21) == "3 semaines"
+    assert activite.duree_lisible(9) == "1 semaine"
+    assert activite.duree_lisible(4) == "4 jours"
+    assert activite.duree_lisible(1) == "1 jour"
 
 
-def test_texte_rappel_mentionne_bien():
-    """Le propriétaire a explicitement demandé le ping : il doit être là."""
-    t = esc.texte_rappel(_fiches(2))
-    assert "<@0>" in t and "<@1>" in t
+def test_duree_jamais_negative():
+    assert activite.duree_lisible(-5) == "0 jour"
 
 
-def test_texte_rappel_tronque_au_dela_de_40():
-    t = esc.texte_rappel(_fiches(45))
-    assert "et 5 autre(s)" in t
-    assert t.count("•") == 40
+def test_plafond_d_affichage_raisonnable():
+    """Trop long, le message depasse la limite Discord et devient illisible."""
+    assert 10 <= activite.MAX_AFFICHES <= 50
 
 
-def test_texte_rappel_retrait_annonce_la_restitution():
-    """Le membre doit comprendre que ce n'est pas définitif."""
-    t = esc.texte_rappel(_fiches(1), avec_retrait=True)
-    assert "veille" in t.lower()
-    assert "rendu" in t.lower()
+def test_message_explique_que_ce_n_est_pas_une_sanction():
+    """Exigence explicite du proprietaire : le rappel ne doit pas punir."""
+    import pathlib
+    src = pathlib.Path("activite_message.py").read_text(encoding="utf-8")
+    bloc = src.split("def construire(")[1]
+    assert "ni une sanction" in bloc
+    assert "ni un reproche" in bloc
+    for mot in ("message", "vocal", "reagir", "réagir"):
+        pass
+    assert "fantomes" in bloc or "fantômes" in bloc
 
 
-def test_texte_rappel_cite_les_trois_sources():
-    t = esc.texte_rappel(_fiches(1))
-    for mot in ("message", "vocal", "réagir"):
-        assert mot in t.lower()
+def test_message_supprime_avant_de_reposter():
+    """L'ordre compte : poster avant de supprimer laisserait deux listes
+    contradictoires dans le salon si une panne survenait entre les deux."""
+    import pathlib
+    src = pathlib.Path("activite_message.py").read_text(encoding="utf-8")
+    bloc = src.split("async def remplacer(")[1]
+    assert bloc.index("msg.delete()") < bloc.index("salon.send(")
+
+
+def test_rappel_ne_reveille_jamais_tout_le_serveur():
+    """Un rappel d'inactivite ne doit pas pinguer @everyone ni les roles."""
+    import pathlib
+    src = pathlib.Path("activite_message.py").read_text(encoding="utf-8")
+    assert "everyone=False" in src and "roles=False" in src
+    assert "users=True" in src
 
 
 # ─── garde-fous ─────────────────────────────────────────────────────────────

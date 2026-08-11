@@ -22,6 +22,7 @@ from __future__ import annotations
 import activite
 import activite_calendrier as cal
 import activite_escalade as esc
+import activite_message as msgs
 import activite_recompenses as rec
 
 _log = print
@@ -138,7 +139,7 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
     #
     #  ⚠️ Le marqueur par rôle n'est pas un luxe : la boucle passe toutes les 6 h.
     #  Sans lui, le rappel partirait QUATRE fois le jour choisi. Et un marqueur
-    #  global ferait qu'un rôle relancé le lundi empêcherait celui du vendredi.
+    #  global ferait qu'un rôle relancé le dimanche empêcherait celui du mercredi.
     maintenant = cal.maintenant()
     semaine_courante = cal.semaine(maintenant)
     envoyes = 0
@@ -165,15 +166,20 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
                 f"{nom} : {len(g['rappel'])} + {len(g['retrait'])} à relancer")
             continue
 
-        for fiches, avec_retrait in ((g["rappel"], False), (g["retrait"], True)):
-            txt = esc.texte_rappel(fiches, salon_retour, avec_retrait=avec_retrait)
-            if not txt:
-                continue
-            try:
-                await salon.send(txt)
-                envoyes += 1
-            except Exception as ex:
-                _log(f"[activite passage rappel {nom}] {ex}")
+        #  Un seul message vivant à la fois : `remplacer` supprime celui de la
+        #  semaine passée AVANT de poster le nouveau. Sans ça le salon accumule
+        #  des listes périmées où d'anciens absents restent affichés alors
+        #  qu'ils sont revenus.
+        vues = [
+            msgs.construire(g["rappel"], salon_retour=salon_retour,
+                            avec_retrait=False, nom_role=nom),
+            msgs.construire(g["retrait"], salon_retour=salon_retour,
+                            avec_retrait=True, nom_role=nom),
+        ]
+        try:
+            envoyes += await msgs.remplacer(guild, salon, cle, vues, cfg_act)
+        except Exception as ex:
+            _log(f"[activite passage rappel {nom}] {ex}")
 
         #  Marquer la semaine MÊME si aucun message n'est parti (personne
         #  d'inactif) : sinon on retenterait à chaque passage de la journée.

@@ -164,7 +164,7 @@ CLES_DEFAUT = {
     "activite_salon_annonce": 0,        # où poster le rappel hebdomadaire
     "activite_salon_retour": 0,         # où un membre écrit pour récupérer son rôle
     "activite_salon_staff": 0,          # où poster la liste des expulsables
-    "activite_jour_rappel": 0,          # 0 = lundi … 6 = dimanche
+    "activite_jour_rappel": 6,          # 0 = lundi … 6 = DIMANCHE (fin de semaine)
     "activite_derniere_semaine": "",    # semaine ISO du dernier rappel envoyé
     #  Immunité PROPRE au système d'activité : dispenser quelqu'un de présence
     #  n'a rien à voir avec le dispenser de modération. Un ami du serveur, un
@@ -220,6 +220,9 @@ CLES_ROLE = {
     "salon_retour": 0,       # SON salon de retour   (0 = celui du serveur)
     "jour_rappel": None,     # SON jour de rappel    (None = celui du serveur)
     "derniere_semaine": "",  # marqueur d'envoi PROPRE à ce rôle
+    #  Identifiants des messages de rappel de la semaine passée, pour les
+    #  supprimer avant d'en poster de nouveaux : un seul rappel vivant à la fois.
+    "dernier_message_rappel": [],
 }
 
 
@@ -256,6 +259,7 @@ def config_du_role(cfg_act: dict, role_id) -> dict:
         "jour_rappel": (int(jour) if jour not in (None, "")
                         else int(cfg_act.get("activite_jour_rappel") or 0)),
         "derniere_semaine": str(brut.get("derniere_semaine") or ""),
+        "dernier_message_rappel": list(brut.get("dernier_message_rappel") or []),
         #  Vrai si le champ a été réglé sur ce rôle : le panneau affiche alors
         #  « propre au rôle » plutôt que « hérité du serveur ».
         "_propres": {k for k in ("rappel", "retrait", "expulsion",
@@ -565,3 +569,24 @@ def diagnostic_texte(d: dict) -> str:
         lignes.append(f"-# Aucune trace pour : {', '.join(muettes)}. "
                       f"Testez-les vous-même, puis rouvrez cet écran.")
     return "\n".join(lignes)
+
+
+def duree_lisible(jours: int) -> str:
+    """Une durée d'absence telle qu'un humain la ressent.
+
+    « 3 semaines » se ressent ; « 21 jours » se lit sans rien évoquer. C'est le
+    genre de détail qui décide si quelqu'un se dit « ah oui, quand même » ou
+    survole la ligne.
+    Pure et sans dépendance : testable sans Discord.
+    """
+    j = max(0, int(jours))
+    if j >= 14:
+        return f"{j // 7} semaines"
+    if j >= 7:
+        return "1 semaine"
+    return f"{j} jour" + ("s" if j > 1 else "")
+
+
+#  Plafond d'affichage du rappel : au-delà, la liste devient illisible et le
+#  message frôle la limite de taille de Discord.
+MAX_AFFICHES = 30

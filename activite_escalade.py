@@ -230,31 +230,6 @@ async def appliquer_retraits(guild, fiches: list) -> dict:
     return res
 
 
-def texte_rappel(fiches: list, salon_retour=None, avec_retrait: bool = False) -> str:
-    """Le message public. MENTIONNE les membres — choix explicite du propriétaire.
-
-    Volontairement court et sans reproche : le but est de faire revenir quelqu'un,
-    pas de l'humilier devant le serveur.
-    """
-    if not fiches:
-        return ""
-    lignes = []
-    for f in fiches[:40]:
-        lignes.append(f"• {f['member'].mention} — `{f['jours']}` jour(s)")
-    if len(fiches) > 40:
-        lignes.append(f"-# … et {len(fiches) - 40} autre(s)")
-
-    if avec_retrait:
-        tete = ("## ⚠️ Rôle retiré pour inactivité\n"
-                "Votre rôle vous a été **mis en veille**. Il vous sera rendu "
-                "automatiquement dès votre retour.")
-        pied = (f"\n👉 Pour le récupérer tout de suite : écrivez un message dans "
-                f"{salon_retour.mention}." if salon_retour else
-                "\n👉 Il suffit de redevenir actif pour le récupérer.")
-    else:
-        tete = ("## 👋 On ne vous a pas vu depuis un moment\n"
-                "Rien de grave — un simple signe suffit à repartir de zéro.")
-        pied = ("\n👉 **Une seule** de ces trois choses suffit : écrire un message, "
-                "passer en vocal, ou réagir à un message.")
-
-    return f"{tete}\n\n" + "\n".join(lignes) + "\n" + pied
+#  (`texte_rappel` a été remplacé par `activite_message.construire`, qui rend un
+#   vrai panneau Components V2 au lieu d'un bloc de texte. Garder les deux aurait
+#   laissé diverger deux versions du même message.)
