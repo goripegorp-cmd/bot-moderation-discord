@@ -15,7 +15,16 @@ import activite_escalade as esc
 # ─── jours_ecoules : le calcul dont tout dépend ─────────────────────────────
 
 def _il_y_a(n):
-    return (datetime.now(timezone.utc) - timedelta(days=n)).strftime(activite.JOUR_FMT)
+    """Date d'il y a n jours, DANS LE MÊME FUSEAU que le système.
+
+    ⚠️ Ce helper utilisait `datetime.now(timezone.utc)` alors que le système
+    compte les journées en heure de Paris. Entre 22h et minuit UTC en été, les
+    deux fuseaux sont sur des jours DIFFÉRENTS : le test échouait d'un jour, et
+    seulement à ces heures-là. La CI l'a attrapé en tournant à 22h10 UTC.
+    Toute date de test doit passer par `activite_calendrier`.
+    """
+    import activite_calendrier as _cal
+    return _cal.jour(_cal.maintenant() - timedelta(days=n))
 
 
 def test_jours_ecoules_aujourdhui():
