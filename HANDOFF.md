@@ -33,21 +33,29 @@ du jour, entraide, zones sociales, hub communautaire…).
 | Élément | Valeur |
 |---|---|
 | Branche | `main` |
-| `bot.py` | **104 296 lignes** (départ : 108 519) |
+| `bot.py` | **91 796 lignes** (départ : 108 519) |
 | Modules | ~146 (16 déjà supprimés) |
 | Point de restauration | tag git **`avant-purge-mmorpg`** (poussé sur GitHub) |
 | CI | **verte** sur tous les commits livrés |
 
-**Déjà fait** (6 commits, chacun CI verte) :
+**Déjà fait** (10 commits, chacun CI verte) :
 - MMORPG **débranché** (câblage `on_ready` + 30 boucles retirées du superviseur).
 - Code RPG mort supprimé (−2 696 l.), dont `_do_prestige` qui **remettait les niveaux à 0**.
 - 16 modules RPG supprimés (+ leurs imports + `tests/test_imports.py` + tests RPG).
 - **`on_ready` est désormais 100 % sécurité / tickets / logs / infra.**
+- **`/configure` réécrit** : 13 sections → 8, périmètre sécurité seul. `SecurityPanelV2`
+  (étage intermédiaire) supprimé, ses 5 enfants remontés à la racine. **L'ancre est levée.**
+- **Sélecteurs retapés** : `ChannelSelect` natif partout, fin des paginations manuelles
+  (23/page) et des deux fuites qui ressuscitaient des panneaux V1 en Embed.
+- **Purge des panneaux morts** : 226 classes / 12 552 lignes, prouvées inatteignables par
+  fermeture transitive inverse (`outils/purge_morts.py`).
 
 **Il reste à faire, dans cet ordre :**
-1. **Réécrire `/configure`** → ne garder que la section **sécurité + tickets**. ← *l'ancre qui bloque tout*
-2. Corriger `KEEP_CMD_NAMES` (voir §5) puis **relancer la fermeture** → **c'est là que ~80 000 lignes tombent**.
-3. Supprimer les modules non gardés (par lots).
+1. **Boutons qui mentent** (§11) — 3 contrôles ne branchent rien, 2 bugs à corriger.
+2. Corriger `KEEP_CMD_NAMES` (voir §5) puis **relancer la fermeture sur les COMMANDES**
+   (les panneaux, eux, sont déjà tombés).
+3. Supprimer les modules non gardés (par lots) et leurs **runtimes** (moteurs de giveaway,
+   d'événements, d'entraide) : les panneaux sont partis, les moteurs vivent encore.
 4. Base de données : supprimer les tables non-sécurité, puis mettre à jour `gdpr.py` (registre
    ~290 tables) **et** `backup_lite.CRITICAL_TABLES` **dans le même commit**.
 
@@ -181,6 +189,11 @@ done
 
 ## 8. 🎨 UI — EXIGENCE OWNER : DU MODERNE, PAS DU VIEUX DISCORD
 
+> 📌 **La charte complète est dans [`UI.md`](UI.md)** — 7 sections, à passer avant toute livraison
+> d'interface. Condition permanente posée le 11/08/2026 : *« tous les menus ultra propres, les
+> dernières technologies Discord, des boutons vraiment très bien, du travail bien rangé, ultra
+> optimisé et protégé. »* Ce qui suit en est le résumé.
+
 > **« Les dernières technologies de Discord, pas des vieux emojis pour cocher les cases.
 > Des vrais labels, des vrais menus, du professionnel. »**
 
@@ -235,6 +248,45 @@ pour écrire, `ast.parse` avant écriture**.
 | `deadcode.py` | **Joignabilité AST** : supprime une def/class seulement si rien du socle ne l'appelle. **Exige `NEVER_DELETE`.** |
 | `keepclosure.py` | **Fermeture transitive inverse** : garde les points d'entrée sécurité **+ tout ce dont ils dépendent**, supprime le reste. ← *l'outil principal pour finir* |
 | `drop_modules.py` | Supprime un lot de modules : import + fichier + entrée dans `tests/test_imports.py` + tests associés. |
+
+### Déjà recréés et versionnés dans `outils/`
+
+| Script | Rôle |
+|---|---|
+| `verif_socle.sh` | Le contrôle §6 en un script : fonctions critiques + `NEVER_DELETE` + `ast.parse` + compteurs. Sort en code non nul si régression. |
+| `sonde_panneaux.py` | Pour une classe de panneau : signatures `__init__`/`render_to`, boutons « Retour », et **tous ses appelants** (par AST). |
+| `purge_morts.py` | **Fermeture transitive inverse à point fixe.** Trouve les classes que plus rien de vivant n'atteint. Épargne automatiquement tout nom cité dans une chaîne (le hub V2 résout par nom) et tout nom utilisé hors `bot.py`. Bloque sur une référence en **code**, signale seulement celles en commentaire. |
+| `refonte_configure.py` · `retape_selecteurs.py` | Les deux migrations d'UI déjà appliquées, gardées comme modèles : preview par défaut, jeton attendu vérifié, `ast.parse` avant écriture. |
+
+---
+
+## 11. BOUTONS QUI MENTENT ET BUGS RESTANTS (mesurés, pas supposés)
+
+À traiter en priorité — un contrôle sans effet est pire qu'un contrôle absent :
+
+1. **`anti_compromised`** — le toggle ON/OFF ne branche **rien** : aucun `c.get('anti_compromised')`
+   nulle part. La vraie détection de compte piraté vit dans `compromised_detector.py`, pilotée par
+   la clé indépendante `compromised_alerts_channel`. `compromised_action` n'est jamais appliqué.
+2. **`badwords_action`** — `_PROT_ACTION_KEYS` mappe `anti_badwords` → `badwords_action`, clé qui
+   n'apparaît **qu'à cette ligne** dans tout le fichier. La sanction réellement appliquée utilise
+   `badwords_sanction_action`. Le bouton « Sanction » d'Anti-Insultes écrit donc dans le vide.
+3. **`anti_newaccount`** — aucune clé `newaccount_action` : le kick est **codé en dur** dans
+   `_kick_young_account`. Le bouton « Sanction » n'a aucun effet sur cette protection.
+4. **`AfkDaysModal` — arguments inversés.** L'appel V2 passe `(self.g, self.u)` au lieu de
+   `(self.u, self.g)` : `cfg()` est lu avec un identifiant d'UTILISATEUR, et le seuil AFK s'écrit
+   sous un `guild_id` qui est en réalité un `user_id`. Le réglage « Jours » ne se sauvegarde pas
+   là où il est lu.
+5. **Deux classes AFK définies deux fois** (`AfkListViewV2`, `AfkActionsViewV2`) : seule la seconde
+   existe à l'exécution. Vérifier par diff que la version morte ne contient pas un correctif absent
+   de la vivante **avant** de supprimer.
+6. **Deux systèmes anti-raid en parallèle**, tous deux vivants sur `on_member_join`, avec des seuils
+   et des actions différents et **aucune coordination** : clé `anti_raid` + dict `raid_config` d'un
+   côté, `antiraid_enabled` + `antiraid_*` de l'autre. **Décision propriétaire requise** avant de
+   fusionner — c'est un changement de comportement de sécurité.
+7. **L'AFK dépend d'un module condamné** : `get_afk_members` lit la table `activity_tracking`,
+   alimentée par le module « activité ». Le jour où il part, l'AFK ne détecte plus personne.
+   **Décision propriétaire requise** : garder les seules écritures `last_message`/`last_vocal`
+   comme infra de modération, réécrire sur une source propre, ou supprimer l'AFK.
 
 ---
 
