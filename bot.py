@@ -22806,7 +22806,10 @@ class AfkRolePanelV2(LayoutView):
 
         # ─── STATE : ACTIVÉ vs DÉSACTIVÉ ───
         if enabled:
-            items.append(v2_body("🔘 **Système activé** — les membres avec le rôle sont surveillés"))
+            items.append(v2_body(
+                "🟢 **Système activé** — les membres avec le rôle sont surveillés\n"
+                "-# Le bouton ci-dessous affiche l'état actuel ; cliquez-le pour l'inverser."
+            ))
         else:
             items.append(v2_body(
                 "⚪ **Système désactivé** — aucun contrôle d'activité\n"
@@ -22815,18 +22818,18 @@ class AfkRolePanelV2(LayoutView):
         items.append(v2_divider())
 
         # ─── BOUTON TOGGLE (toujours visible) ───
-        if enabled:
-            b_toggle = Button(
-                label="⚪ Désactiver le système",
-                style=discord.ButtonStyle.danger,
-                custom_id="arpv2_toggle",
-            )
-        else:
-            b_toggle = Button(
-                label="🔘 Activer le système",
-                style=discord.ButtonStyle.success,
-                custom_id="arpv2_toggle",
-            )
+        # ⚠️ Le bouton montre l'ÉTAT, pas l'action (UI.md §3).
+        # Avant : allumé → « ⚪ Désactiver le système » en ROUGE. On lisait le
+        # bouton, pas la ligne d'état, et on croyait le système éteint — l'emoji
+        # ⚪ (= éteint) sur un système allumé achevait de tromper. Signalé en vrai
+        # par le propriétaire : il a cru le bouton bloqué alors qu'il marchait.
+        b_toggle = Button(
+            label="Système activé" if enabled else "Système désactivé",
+            emoji="🟢" if enabled else "⚪",
+            style=(discord.ButtonStyle.success if enabled
+                   else discord.ButtonStyle.secondary),
+            custom_id="arpv2_toggle",
+        )
         b_toggle.callback = self._cb_toggle
         items.append(discord.ui.ActionRow(b_toggle))
 
