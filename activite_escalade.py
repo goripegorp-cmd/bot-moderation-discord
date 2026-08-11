@@ -121,13 +121,20 @@ async def classer(guild) -> dict:
 #  Restitution — le pendant du retrait
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def rendre_roles(guild, member) -> list:
-    """Rend les rôles retirés à un membre redevenu actif. Retourne les rôles rendus.
+async def rendre_roles(guild, member, *, cfg_act: dict | None = None) -> dict:
+    """Traite le retour d'un membre qui avait perdu des rôles.
 
-    Appelée dès qu'un membre est marqué actif. Sans elle, le retrait de rôle
-    serait définitif et le système deviendrait une punition, pas une mise en veille.
+    Deux comportements, choisis PAR RÔLE :
+      · restitution automatique — le rôle revient dès la première activité. Bon
+        pour un rôle de confort qu'on met simplement en veille.
+      · restitution validée par le staff — le rôle reste retiré, et le staff est
+        prévenu qu'un retour attend son accord. C'est ce qu'il faut pour un rôle
+        qui a de la VALEUR : un clan, une faction. Un rôle qu'on récupère tout
+        seul en postant un emoji ne veut plus rien dire.
+
+    Retourne {"rendus": [rôles], "a_valider": [rôles]}.
     """
-    rendus = []
+    rendus, a_valider = [], []
     try:
         async with activite._get_db() as db:
             async with db.execute(
@@ -136,21 +143,31 @@ async def rendre_roles(guild, member) -> list:
             ) as cur:
                 row = await cur.fetchone()
         if not row or not row[0]:
-            return rendus
+            return {"rendus": rendus, "a_valider": a_valider}
         ids = json.loads(row[0]) or []
         if not ids:
-            return rendus
+            return {"rendus": rendus, "a_valider": a_valider}
+
+        if cfg_act is None:
+            cfg_act = await activite.config(guild.id)
 
         for rid in ids:
             r = guild.get_role(int(rid))
+            if r is None or r in member.roles:
+                continue
             #  Ne jamais tenter un rôle au-dessus du bot : l'API refuserait et on
             #  perdrait la mémoire du rôle en le retirant de la liste.
-            if r is not None and r not in member.roles and r < guild.me.top_role:
-                try:
-                    await member.add_roles(r, reason="Activité : retour du membre")
-                    rendus.append(r)
-                except Exception as ex:
-                    _log(f"[activite rendre_roles {r.id}] {ex}")
+            if r >= guild.me.top_role:
+                _log(f"[activite rendre_roles] rôle {r.id} au-dessus du bot — gardé en mémoire")
+                continue
+            if not activite.config_du_role(cfg_act, r.id)["restitution_auto"]:
+                a_valider.append(r)      # le staff tranchera
+                continue
+            try:
+                await member.add_roles(r, reason="Activité : retour du membre")
+                rendus.append(r)
+            except Exception as ex:
+                _log(f"[activite rendre_roles {r.id}] {ex}")
 
         if rendus:
             restants = [int(x) for x in ids if guild.get_role(int(x)) not in rendus]
@@ -163,7 +180,7 @@ async def rendre_roles(guild, member) -> list:
                 await db.commit()
     except Exception as ex:
         _log(f"[activite rendre_roles] {ex}")
-    return rendus
+    return {"rendus": rendus, "a_valider": a_valider}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

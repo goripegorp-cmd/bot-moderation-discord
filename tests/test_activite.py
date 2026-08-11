@@ -468,3 +468,38 @@ def test_dispense_ne_touche_pas_la_moderation():
         assert not cle.startswith("immune_"), (
             "les dispenses d'activite ne doivent pas reutiliser les cles "
             "d'immunite de moderation")
+
+
+# ─── restitution : le role de clan ne revient pas tout seul ─────────────────
+
+def test_restitution_auto_par_defaut():
+    """Par defaut le role revient seul : c'est le bon reglage pour un role de
+    confort mis en veille."""
+    assert activite.config_du_role(_cfg({"1": {}}), 1)["restitution_auto"] is True
+
+
+def test_restitution_peut_etre_confiee_au_staff():
+    """Pour un role de clan ou de faction : il a de la valeur, il ne se
+    recupere pas en postant un emoji."""
+    c = activite.config_du_role(_cfg({"1": {"restitution_auto": False}}), 1)
+    assert c["restitution_auto"] is False
+
+
+def test_restitution_independante_par_role():
+    """Un role de clan peut exiger validation pendant qu'un autre revient seul."""
+    roles = {"1": {"restitution_auto": False}, "2": {"restitution_auto": True}}
+    assert activite.config_du_role(_cfg(roles), 1)["restitution_auto"] is False
+    assert activite.config_du_role(_cfg(roles), 2)["restitution_auto"] is True
+
+
+def test_restitution_survit_au_retour_aux_defauts():
+    """« Tout heriter du serveur » ne doit PAS reactiver le retour automatique
+    d'un role de clan : ce serait rendre en silence des roles qui attendaient
+    une validation."""
+    #  On lit le fichier plutot que d'importer le panneau : l'import exigerait
+    #  discord.py, et ce test doit pouvoir tourner sans dependance graphique.
+    import pathlib
+    src = pathlib.Path("activite_panneau.py").read_text(encoding="utf-8")
+    bloc = src.split("async def _cb_reset")[1].split("async def ")[0]
+    assert "restitution_auto=conf" in bloc, (
+        "le retour aux defauts doit conserver le mode de restitution")

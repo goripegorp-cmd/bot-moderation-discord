@@ -63,6 +63,7 @@ Un rôle peut définir, rien que pour lui :
 | Réglage | Exemple |
 |---|---|
 | Ses **trois seuils** | Rappel à 3 j, retrait à 5 j, expulsion à 7 j |
+| **Le retour du rôle** | Automatique, ou **validé par le staff** |
 | Son **salon d'annonce** | Les recrues relancées dans #recrutement |
 | Son **salon de retour** | Où ce rôle-là revient se signaler |
 | Son **jour de rappel** | Lundi pour l'un, vendredi pour l'autre |
@@ -92,10 +93,16 @@ pas les siens.
 | 2️⃣ | 14 jours | 2ᵉ rappel + **son rôle lui est retiré**. |
 | 3️⃣ | 21 jours | **Proposé à l'expulsion** — jamais automatique. |
 
-**Le retrait de rôle est réversible.** Le rôle est mémorisé et **rendu
-automatiquement** dès que le membre redevient actif. C'est une mise en veille,
-pas une punition. Le membre peut aussi écrire dans le **salon de retour** pour
-le récupérer tout de suite.
+**Le retrait de rôle est réversible**, de deux façons au choix, **par rôle** :
+
+- **Retour automatique** (défaut) — le rôle revient dès la première activité.
+  Bon pour un rôle de confort qu'on met simplement en veille.
+- **Retour validé par le staff** — le rôle reste retiré, et le staff est prévenu
+  qu'un retour attend son accord.
+
+> **Pour un rôle de clan ou de faction, choisissez la validation.** Ce rôle a de
+> la valeur : s'il se récupère en postant un emoji, il ne veut plus rien dire.
+> Le but est d'avoir un clan **actif**, pas un clan sur le papier.
 
 **L'expulsion n'est jamais automatique.** Le bot poste la liste dans le salon
 staff ; vous seul cliquez. Le bouton **recalcule la liste juste avant d'agir** —

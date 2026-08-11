@@ -456,6 +456,12 @@ class ActiviteRoleSeuilsPanelV2(_Base):
                     f"{_pastille(conf['retirer_role'])} **Retirer le rôle au palier 2** · "
                     + ("oui" if conf["retirer_role"] else "non — le membre le garde")
                 ),
+                v2_body(
+                    f"{_pastille(conf['restitution_auto'])} **Retour du rôle** · "
+                    + ("automatique dès la première activité"
+                       if conf["restitution_auto"]
+                       else "**validé par le staff** — pour un rôle qui a de la valeur")
+                ),
                 v2_body("-# « serveur » = valeur héritée des réglages généraux. "
                         "Définissez-la ici pour rendre ce rôle indépendant."),
             ]
@@ -493,6 +499,13 @@ class ActiviteRoleSeuilsPanelV2(_Base):
                        else discord.ButtonStyle.secondary),
                 custom_id=f"actr_r_{self.rid}")
             b_retr.callback = self._cb_retrait
+            b_rest = Button(
+                label="Retour auto" if conf["restitution_auto"] else "Retour validé",
+                emoji="🟢" if conf["restitution_auto"] else "🛡️",
+                style=(discord.ButtonStyle.success if conf["restitution_auto"]
+                       else discord.ButtonStyle.primary),
+                custom_id=f"actr_rest_{self.rid}")
+            b_rest.callback = self._cb_restitution
             b_reset = Button(label="Tout hériter du serveur", emoji="↩️",
                              style=discord.ButtonStyle.secondary,
                              custom_id=f"actr_z_{self.rid}")
@@ -500,7 +513,7 @@ class ActiviteRoleSeuilsPanelV2(_Base):
 
             items.append(discord.ui.ActionRow(sel_an))
             items.append(discord.ui.ActionRow(sel_ret))
-            items.append(discord.ui.ActionRow(b_seuils, b_jour, b_actif, b_retr))
+            items.append(discord.ui.ActionRow(b_seuils, b_jour, b_actif, b_retr, b_rest))
             items.append(discord.ui.ActionRow(
                 b_reset, _bouton_retour(self._cb_retour, f"actr_b_{self.rid}")))
             await self._envoyer(i, items, Palette.INFO, edit)
@@ -552,6 +565,21 @@ class ActiviteRoleSeuilsPanelV2(_Base):
         except Exception as ex:
             await self._secours(i, ex, "role retrait")
 
+    async def _cb_restitution(self, i):
+        """Bascule : le rôle revient tout seul, ou le staff valide.
+
+        Pour un rôle de clan ou de faction, la validation est le bon réglage :
+        un rôle qu'on récupère en postant un emoji ne veut plus rien dire.
+        """
+        try:
+            c = await activite.config(self.g.id)
+            conf = activite.config_du_role(c, self.rid)
+            await activite.ecrire_config_role(
+                self.g.id, self.rid, restitution_auto=not conf["restitution_auto"])
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "role restitution")
+
     async def _cb_reset(self, i):
         """Efface les réglages propres au rôle : il repasse sur ceux du serveur.
 
@@ -565,7 +593,8 @@ class ActiviteRoleSeuilsPanelV2(_Base):
                 self.g.id, self.rid,
                 rappel=None, retrait=None, expulsion=None,
                 salon_annonce=0, salon_retour=0, jour_rappel=None,
-                actif=conf["actif"], derniere_semaine=conf["derniere_semaine"])
+                actif=conf["actif"], restitution_auto=conf["restitution_auto"],
+                derniere_semaine=conf["derniere_semaine"])
             await self.render_to(i, edit=True)
         except Exception as ex:
             await self._secours(i, ex, "role reset")

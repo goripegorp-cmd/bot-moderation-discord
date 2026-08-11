@@ -210,6 +210,12 @@ CLES_ROLE = {
     "retrait": None,         # jours avant le retrait du rôle
     "expulsion": None,       # jours avant la proposition d'expulsion
     "retirer_role": True,    # retirer effectivement le rôle au palier 2 ?
+    #  Comment le rôle revient quand le membre repointe.
+    #  True  = rendu automatiquement, dès la première activité.
+    #  False = le staff est prévenu et décide. À préférer pour un rôle qui a de
+    #          la VALEUR — un rôle de clan ou de faction ne se récupère pas tout
+    #          seul, sinon il ne veut plus rien dire.
+    "restitution_auto": True,
     "salon_annonce": 0,      # SON salon d'annonce (0 = celui du serveur)
     "salon_retour": 0,       # SON salon de retour   (0 = celui du serveur)
     "jour_rappel": None,     # SON jour de rappel    (None = celui du serveur)
@@ -242,6 +248,7 @@ def config_du_role(cfg_act: dict, role_id) -> dict:
         "retrait": _n("retrait", SEUIL_RETRAIT_DEFAUT),
         "expulsion": _n("expulsion", SEUIL_EXPULSION_DEFAUT),
         "retirer_role": bool(brut.get("retirer_role", True)),
+        "restitution_auto": bool(brut.get("restitution_auto", True)),
         "salon_annonce": int(brut.get("salon_annonce") or
                              cfg_act.get("activite_salon_annonce") or 0),
         "salon_retour": int(brut.get("salon_retour") or

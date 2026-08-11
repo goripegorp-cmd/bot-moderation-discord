@@ -68,17 +68,44 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
     rap["actions"]["montees"] = len(montees)
 
     # ── 2. Ceux qui sont revenus récupèrent leur rôle ──
-    rendus = 0
+    rendus, attentes = 0, []
     if not dry_run:
         for m in guild.members:
             try:
                 jours = await activite.jours_inactif(guild.id, m)
-                if jours is not None and jours == 0:
-                    if await esc.rendre_roles(guild, m):
-                        rendus += 1
+                if jours is None or jours != 0:
+                    continue
+                r = await esc.rendre_roles(guild, m, cfg_act=cfg_act)
+                if r["rendus"]:
+                    rendus += 1
+                for role in r["a_valider"]:
+                    attentes.append((m, role))
             except Exception as ex:
                 _log(f"[activite passage restitution] {ex}")
+
+        #  Les retours qui demandent un accord : on prévient le staff UNE fois.
+        #  Sans ce message, un rôle « à valider » resterait retiré sans que
+        #  personne ne sache qu'une demande attend — le membre croirait le
+        #  système cassé, et le staff ne verrait rien passer.
+        if attentes:
+            salon = guild.get_channel(int(cfg_act.get("activite_salon_staff", 0) or 0))
+            if salon is not None:
+                lignes = [f"• {m.mention} → {role.mention}" for m, role in attentes[:20]]
+                if len(attentes) > 20:
+                    lignes.append(f"-# … et {len(attentes) - 20} autre(s)")
+                texte = "\n".join([
+                    "## 🔙 Retours à valider",
+                    "Ces membres sont redevenus actifs. Leur rôle ne revient pas "
+                    "tout seul — à vous de le rendre.",
+                    "",
+                ] + lignes)
+                try:
+                    await salon.send(texte)
+                except Exception as ex:
+                    _log(f"[activite passage attentes] {ex}")
+
     rap["actions"]["roles_rendus"] = rendus
+    rap["actions"]["retours_a_valider"] = len(attentes)
 
     # ── 3. Classement + PLAFOND ──
     cl = await esc.classer(guild)
