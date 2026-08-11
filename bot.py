@@ -1263,12 +1263,6 @@ async def db_init():
             PRIMARY KEY (guild_id, user_id)
         )''')
         # Phase 206 : journal de rotation des pings « membres actifs » (combat)
-        await db.execute('''CREATE TABLE IF NOT EXISTS combat_ping_log (
-            guild_id INTEGER,
-            user_id INTEGER,
-            last_pinged DATETIME,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
         # Phase 210 : arènes de combat éphémères (catégorie + salons créés par
         # event de combat, supprimés à la fin). Suivi pour cleanup garanti.
         await db.execute('''CREATE TABLE IF NOT EXISTS combat_arenas (
@@ -1422,12 +1416,6 @@ async def db_init():
         # claim auto-expire (TTL) après que l'event soit inséré ; au-delà, c'est le
         # verrou _has_any_major_event_running (lecture des tables d'events) qui
         # sérialise. Pas de release explicite nécessaire (auto-expiration).
-        await db.execute('''CREATE TABLE IF NOT EXISTS active_combat_lock (
-            guild_id INTEGER PRIMARY KEY,
-            event_type TEXT,
-            event_id INTEGER DEFAULT 0,
-            claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )''')
 
         # Table des niveaux (pour récompenses automatiques)
         await db.execute('''CREATE TABLE IF NOT EXISTS level_rewards (
@@ -1527,14 +1515,6 @@ async def db_init():
         # Phase 179 : COFFRE / STASH — collection d'objets POSSÉDÉS mais non
         # équipés. player_inventory = les 6 pièces ÉQUIPÉES (source de vérité
         # combat) ; player_stash = tout le reste qu'on peut équiper à la main.
-        await db.execute('''CREATE TABLE IF NOT EXISTS player_stash (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            slot TEXT NOT NULL,
-            item_json TEXT NOT NULL,
-            acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
         try:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_player_stash_owner "
@@ -1561,21 +1541,6 @@ async def db_init():
                 pass
 
         # Phase 105 : Loot history — journal de chaque drop obtenu
-        await db.execute('''CREATE TABLE IF NOT EXISTS loot_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            user_id INTEGER,
-            item_name TEXT,
-            item_emoji TEXT,
-            item_slot TEXT,
-            rarity TEXT,
-            atk INTEGER DEFAULT 0,
-            def INTEGER DEFAULT 0,
-            crit INTEGER DEFAULT 0,
-            enchant_name TEXT,
-            source TEXT,
-            obtained_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_loot_history_user '
                          'ON loot_history(guild_id, user_id, obtained_at)')
 
@@ -1656,43 +1621,12 @@ async def db_init():
             pass
 
         # Phase 33 : historique des duels
-        await db.execute('''CREATE TABLE IF NOT EXISTS duels (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            challenger_id INTEGER,
-            opponent_id INTEGER,
-            bet_amount INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'pending',
-            winner_id INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            resolved_at DATETIME
-        )''')
 
         # Phase 37 : classes choisies par les joueurs
-        await db.execute('''CREATE TABLE IF NOT EXISTS player_classes (
-            guild_id INTEGER,
-            user_id INTEGER,
-            class_id TEXT,
-            chosen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
 
         # Phase 37 : opt-in pour déplacement vocal automatique
-        await db.execute('''CREATE TABLE IF NOT EXISTS player_voice_optin (
-            guild_id INTEGER,
-            user_id INTEGER,
-            opted_in INTEGER DEFAULT 0,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
 
         # Phase 37 : zones vocales par event (3 vocaux temporaires)
-        await db.execute('''CREATE TABLE IF NOT EXISTS event_voice_zones (
-            event_id INTEGER,
-            zone_id TEXT,
-            channel_id INTEGER,
-            PRIMARY KEY (event_id, zone_id)
-        )''')
 
         # Phase 40 : log des wake-up pings (pour éviter de spammer le même
         # membre trop souvent — cap 1 mention publique / 48h)
@@ -1786,28 +1720,8 @@ async def db_init():
         )''')
 
         # Pets possédés par les membres (1 ligne par pet, plusieurs possibles)
-        await db.execute('''CREATE TABLE IF NOT EXISTS user_pets (
-            guild_id INTEGER,
-            user_id INTEGER,
-            pet_id TEXT,
-            custom_name TEXT,
-            level INTEGER DEFAULT 1,
-            xp INTEGER DEFAULT 0,
-            hunger INTEGER DEFAULT 100,            -- 0..100, baisse avec le temps
-            last_fed DATETIME DEFAULT CURRENT_TIMESTAMP,
-            acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            is_active INTEGER DEFAULT 0,           -- 1 si c'est le pet actif
-            PRIMARY KEY (guild_id, user_id, pet_id)
-        )''')
 
         # Log des spins de Daily Wheel (cooldown 24h)
-        await db.execute('''CREATE TABLE IF NOT EXISTS wheel_log (
-            guild_id INTEGER,
-            user_id INTEGER,
-            last_spin_at DATETIME,
-            total_spins INTEGER DEFAULT 0,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
 
         # Confessions anonymes (auto-incrément, conservées 30j)
         await db.execute('''CREATE TABLE IF NOT EXISTS confessions (
@@ -1865,12 +1779,6 @@ async def db_init():
         # Phase 251.15 : claim PAR JOUEUR de la consolation d'énigme (anti-spam de la
         # bonne réponse → +50 à chaque clic). 1 ligne = ce joueur a déjà été récompensé
         # pour l'énigme de ce jour. INSERT OR IGNORE + rowcount = paiement unique.
-        await db.execute('''CREATE TABLE IF NOT EXISTS daily_riddle_answered (
-            guild_id INTEGER NOT NULL,
-            day TEXT NOT NULL,
-            user_id INTEGER NOT NULL,
-            PRIMARY KEY (guild_id, day, user_id)
-        )''')
 
         # Voice Chaos : log des chaos appliqués pour éviter de re-frapper le même vocal
         await db.execute('''CREATE TABLE IF NOT EXISTS voice_chaos_log (
@@ -1903,11 +1811,6 @@ async def db_init():
 
         # owner 2026-06-30 (équité hybride) : qui a déjà reçu le lot de CONSOLATION d'un trésor
         # (1 fois/joueur/trésor). Anti-double + reboot-safe.
-        await db.execute('''CREATE TABLE IF NOT EXISTS flash_consolations (
-            treasure_id INTEGER,
-            user_id INTEGER,
-            PRIMARY KEY (treasure_id, user_id)
-        )''')
 
         # Rituel du Soir : récap des emojis par jour
         await db.execute('''CREATE TABLE IF NOT EXISTS evening_rituals (
@@ -1989,14 +1892,6 @@ async def db_init():
         )''')
 
         # Compliment du jour : tracking pour cooldown 1/jour/user
-        await db.execute('''CREATE TABLE IF NOT EXISTS compliments_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            day TEXT,
-            from_user_hash TEXT,             -- HMAC anonyme
-            to_user_id INTEGER,
-            sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 46 — Alliances + Game Night
@@ -2039,14 +1934,6 @@ async def db_init():
         # Phase 253 : POINTS DE COMBAT d'alliance. Chaque attaque de boss d'un membre
         # crédite SON alliance → classement + concours. Table dédiée (reset de saison
         # = simple DELETE/UPDATE, sans toucher au schéma des alliances).
-        await db.execute('''CREATE TABLE IF NOT EXISTS alliance_combat_points (
-            guild_id INTEGER NOT NULL,
-            alliance_id INTEGER NOT NULL,
-            points INTEGER DEFAULT 0,
-            boss_hits INTEGER DEFAULT 0,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, alliance_id)
-        )''')
 
         # Game Nights : tracking pour cleanup salons + éviter double creation
         await db.execute('''CREATE TABLE IF NOT EXISTS game_nights (
@@ -2065,25 +1952,9 @@ async def db_init():
         # ═══════════════════════════════════════════════════════════════════
 
         # Season pass progress (1 ligne par user/saison)
-        await db.execute('''CREATE TABLE IF NOT EXISTS season_progress (
-            guild_id INTEGER,
-            user_id INTEGER,
-            season_id TEXT,                  -- 'spring_2026'
-            points INTEGER DEFAULT 0,
-            claimed_tiers_json TEXT DEFAULT '[]',  -- liste des tiers déjà claim
-            seasonal_role_id INTEGER,        -- role saisonnier attribué (tier 15+)
-            PRIMARY KEY (guild_id, user_id, season_id)
-        )''')
 
         # owner 2026-06-30 : « jouer fait avancer » — participer aux events crédite le Season
         # Pass + l'XP, PLAFONNÉ par jour pour anti-farm (cf. _award_event_meta).
-        await db.execute('''CREATE TABLE IF NOT EXISTS event_meta_daily (
-            guild_id INTEGER,
-            user_id INTEGER,
-            day TEXT,                        -- 'YYYY-MM-DD' (UTC)
-            points INTEGER DEFAULT 0,        -- points de saison déjà gagnés via events ce jour
-            PRIMARY KEY (guild_id, user_id, day)
-        )''')
 
         # owner 2026-06-30 : cartes d'accueil à purger périodiquement (restent ~1h puis supprimées).
         await db.execute('''CREATE TABLE IF NOT EXISTS welcome_msgs (
@@ -2095,55 +1966,12 @@ async def db_init():
         )''')
 
         # Prestige rank (1 ligne par user)
-        await db.execute('''CREATE TABLE IF NOT EXISTS user_prestige (
-            guild_id INTEGER,
-            user_id INTEGER,
-            rank INTEGER DEFAULT 0,
-            total_prestiges INTEGER DEFAULT 0,
-            last_prestige_at DATETIME,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
 
         # Réputation par faction (4 lignes max par user : 1 par faction)
-        await db.execute('''CREATE TABLE IF NOT EXISTS faction_reputation (
-            guild_id INTEGER,
-            user_id INTEGER,
-            faction_id TEXT,                 -- 'garde' / 'sage' / 'marchand' / 'legende'
-            points INTEGER DEFAULT 0,
-            current_tier INTEGER DEFAULT 0,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, user_id, faction_id)
-        )''')
 
         # Weekly quests progress (5 lignes par user/semaine)
-        await db.execute('''CREATE TABLE IF NOT EXISTS weekly_quests (
-            guild_id INTEGER,
-            user_id INTEGER,
-            week TEXT,                       -- 'YYYY-Www' (ISO week)
-            quest_id TEXT,
-            metric TEXT,
-            target INTEGER,
-            progress INTEGER DEFAULT 0,
-            completed INTEGER DEFAULT 0,
-            completed_at DATETIME,
-            claimed INTEGER DEFAULT 0,
-            PRIMARY KEY (guild_id, user_id, week, quest_id)
-        )''')
 
         # Monthly mega quest progress (1 ligne par user/mois)
-        await db.execute('''CREATE TABLE IF NOT EXISTS monthly_quests (
-            guild_id INTEGER,
-            user_id INTEGER,
-            month TEXT,                      -- 'YYYY-MM'
-            quest_id TEXT,
-            metric TEXT,
-            target INTEGER,
-            progress INTEGER DEFAULT 0,
-            completed INTEGER DEFAULT 0,
-            completed_at DATETIME,
-            claimed INTEGER DEFAULT 0,
-            PRIMARY KEY (guild_id, user_id, month)
-        )''')
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 48.1 — Analytics + Marketplace + Mention intelligente
@@ -2295,30 +2123,8 @@ async def db_init():
         )''')
 
         # Catalogue jeux Roblox (owner-managed)
-        await db.execute('''CREATE TABLE IF NOT EXISTS roblox_games (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            game_id TEXT,
-            name TEXT,
-            place_id INTEGER DEFAULT 0,
-            description TEXT,
-            image_url TEXT,
-            active INTEGER DEFAULT 1,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
 
         # Updates de jeu (annonces owner avec thread feedback)
-        await db.execute('''CREATE TABLE IF NOT EXISTS game_updates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            game_id TEXT,
-            title TEXT,
-            content TEXT,
-            posted_by INTEGER,
-            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            message_id INTEGER,
-            thread_id INTEGER
-        )''')
 
         # Spotlight UGC (owner 2026-06-29) : 1 ligne par annonce d'accessoire postée → permet
         # le « Créateur du mois » (votes ❤️ agrégés par créateur) + le suivi d'intérêt + la vitrine.
@@ -2361,12 +2167,6 @@ async def db_init():
         )''')
 
         # Studio tips déjà postés (anti-repeat 60j)
-        await db.execute('''CREATE TABLE IF NOT EXISTS studio_tip_posts_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            tip_id INTEGER,
-            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
         try:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tip_log_guild_at "
@@ -2379,18 +2179,6 @@ async def db_init():
         # Phase 51 — COMPÉTITIF : Bingo + Prediction Market + Faction Wars
         # ═══════════════════════════════════════════════════════════════════
         # Bingo cards (1 carte/user/mois, cells_json = liste des 25 IDs de défis)
-        await db.execute('''CREATE TABLE IF NOT EXISTS bingo_cards (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            user_id INTEGER,
-            month_year TEXT,
-            cells_json TEXT,
-            checked_cells_json TEXT DEFAULT '[]',
-            completed_lines_json TEXT DEFAULT '[]',
-            full_card_completed INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
         try:
             await db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_bingo_user_month "
@@ -2442,18 +2230,6 @@ async def db_init():
             pass
 
         # Faction wars (objectif compétitif par saison)
-        await db.execute('''CREATE TABLE IF NOT EXISTS faction_wars (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            season_id TEXT,
-            objective_kind TEXT,
-            title TEXT,
-            description TEXT,
-            status TEXT DEFAULT 'active',
-            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            ended_at DATETIME,
-            winner_faction TEXT
-        )''')
         try:
             await db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_faction_war_season "
@@ -2462,13 +2238,6 @@ async def db_init():
         except Exception:
             pass
 
-        await db.execute('''CREATE TABLE IF NOT EXISTS faction_war_scores (
-            war_id INTEGER,
-            faction_id TEXT,
-            score INTEGER DEFAULT 0,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (war_id, faction_id)
-        )''')
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 52 — SOCIAL : Shoutouts + Mentor + Confess Replies
@@ -2528,14 +2297,6 @@ async def db_init():
         )''')
 
         # Confess replies (réponses publiques avec identité)
-        await db.execute('''CREATE TABLE IF NOT EXISTS confession_replies (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            confession_id INTEGER,
-            guild_id INTEGER,
-            replier_id INTEGER,
-            content TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
         try:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_confess_replies "
@@ -2564,12 +2325,6 @@ async def db_init():
             pass
 
         # Conversation starters log (anti-spam)
-        await db.execute('''CREATE TABLE IF NOT EXISTS conv_starter_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            content TEXT,
-            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
         try:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_conv_starter_at "
@@ -2619,13 +2374,6 @@ async def db_init():
         )''')
 
         # Classe RP de chaque membre (1 par guild+user)
-        await db.execute('''CREATE TABLE IF NOT EXISTS player_class_choice (
-            guild_id INTEGER,
-            user_id INTEGER,
-            class_id TEXT,
-            chosen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
 
         # Mémoires du serveur (événements importants)
         await db.execute('''CREATE TABLE IF NOT EXISTS lore_memories (
@@ -2797,15 +2545,6 @@ async def db_init():
             pass
 
         # Banque avec intérêts
-        await db.execute('''CREATE TABLE IF NOT EXISTS user_bank_deposits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            user_id INTEGER,
-            amount INTEGER,
-            deposited_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            withdrawn INTEGER DEFAULT 0,
-            withdrawn_at DATETIME
-        )''')
         try:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_bank_user "
@@ -2815,17 +2554,6 @@ async def db_init():
             pass
 
         # Loots uniques (1 exemplaire max au monde, possédable, tradable)
-        await db.execute('''CREATE TABLE IF NOT EXISTS unique_loots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            name TEXT,
-            description TEXT,
-            rarity TEXT DEFAULT 'legendary',
-            current_owner_id INTEGER,
-            obtained_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            event_kind TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
         try:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_unique_loot_owner "
@@ -2834,13 +2562,6 @@ async def db_init():
         except Exception:
             pass
 
-        await db.execute('''CREATE TABLE IF NOT EXISTS unique_loot_history (
-            loot_id INTEGER,
-            owner_id INTEGER,
-            acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            released_at DATETIME,
-            PRIMARY KEY (loot_id, owner_id, acquired_at)
-        )''')
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 61 — VIE QUOTIDIENNE : Streak + Avent + Météo + Badges
@@ -3001,22 +2722,7 @@ async def db_init():
         # ═══════════════════════════════════════════════════════════════════
         # Phase 67 — ALLIANCE COMPLÈTE : Trésorerie + Audit log
         # ═══════════════════════════════════════════════════════════════════
-        await db.execute('''CREATE TABLE IF NOT EXISTS alliance_treasury (
-            alliance_id INTEGER PRIMARY KEY,
-            coins INTEGER DEFAULT 0,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
 
-        await db.execute('''CREATE TABLE IF NOT EXISTS alliance_audit_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            alliance_id INTEGER,
-            action TEXT,
-            actor_id INTEGER,
-            target_id INTEGER,
-            amount INTEGER DEFAULT 0,
-            detail TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
         try:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_alliance_audit "

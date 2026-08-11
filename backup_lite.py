@@ -195,68 +195,56 @@ def _latest_backup_size_bytes() -> int:
 # simplement marquée "missing" et ignorée (aucun crash du dump). On peut donc
 # lister sans risque des noms qui n'existent pas sur tous les déploiements.
 CRITICAL_TABLES = [
-    "guild_config",
-    "infractions",
-    "ladder_ratings",
-    "season_drops_log",
-    "bank_accounts",
-    "alliances",
-    "alliance_members",
-    "daily_quests",
-    "achievements",
-    "pvp_duels",
-    "hall_of_fame_entries",
-    "marketplace_listings",
-    "marketplace_history",
-    "inventory_items",
-    "user_titles",
-    "tournaments",
-    "voice_protected_channels",
-    "dormant_dm_log",
+    # ═══ RÉÉCRIT 08/2026 ═══
+    # L'ancienne liste sauvegardait surtout des tables de jeu — ladder, banque,
+    # alliances, marketplace, inventaire, tournois, quêtes — toutes supprimées
+    # avec leurs fonctionnalités, et 9 d'entre elles n'existaient même plus.
+    # Pendant ce temps le casier, les immunités et les tickets n'étaient PAS
+    # sauvegardés : la sauvegarde protégeait ce qui n'existait plus et laissait
+    # tomber ce qui compte. Voici le périmètre réel.
+    #
+    # Critère d'inclusion : donnée dont la perte est IRRÉCUPÉRABLE.
+    # Les journaux volumineux (raid_join_log, phishing_log, error_log,
+    # health_check_log, ticket_log_*) sont volontairement EXCLUS : ils se
+    # reconstituent, et les inclure a déjà provoqué un incident mémoire
+    # (voir la deny-list de la boucle de backup).
+
+    # ─── Configuration ───
+    "guild_config",              # toute la config du serveur, y compris sécurité
+
+    # ─── Casier et sanctions (le cœur : rien ne les régénère) ───
+    "infractions",               # le casier lui-même
+    "mod_notes",                 # notes internes du staff sur un membre
+    "member_restrictions",       # restrictions en cours
+    "restricted_members",        # membres sous restriction
+    "badword_strikes",           # compteurs d'avertissements insultes
+
+    # ─── Immunités : les perdre rend le staff sanctionnable ───
+    "immune_roles",
+    "immune_users",
+    "immune_channels",
+
+    # ─── Mémoire de la sécurité (récidive, multicomptes, fuites) ───
+    "alt_accounts",              # comptes secondaires détectés
+    "phishing_offender",         # récidivistes phishing
+    "honeypot_hits",             # pièges déclenchés
+    "token_leaks",
+    "webhook_registry",          # webhooks approuvés — la perte ouvre une faille
+    "raid_shield",
+
+    # ─── Staff ───
     "staff_signatures",
-    # ─── Progression VITALE oubliée (Phase durcissement B1) ──────────────────
-    # Anti data-loss : ces tables portent la progression réelle des joueurs et
-    # leur perte serait irrécupérable. Noms vérifiés sur les CREATE TABLE du repo.
-    # (Corrige aussi 3 entrées historiques qui ne correspondaient à AUCUNE table
-    #  réelle : `season_drops_log`→`seasonal_drops_log`, `bank_accounts`→
-    #  `user_bank_deposits`, `hall_of_fame_entries`→`hall_of_fame_records`,
-    #  `inventory_items`→`player_inventory`/`player_stash`. On AJOUTE les vrais
-    #  noms sans retirer les anciens, qui restent inoffensifs car ignorés.)
-    "economy",               # portefeuille de pièces (coins) — bot.py
-    "citadelle_wallet",      # Éclats (monnaie citadelle) — citadelle.py
-    "user_bank_deposits",    # banque (vrai nom) — bot.py
-    "activity_score",        # score d'activité (gates events) — activity_system.py
-    "seasonal_drops_log",    # drops saisonniers (vrai nom) — seasonal_engine.py
-    "hall_of_fame_records",  # hall of fame (vrai nom) — bot.py
-    "player_inventory",      # inventaire équipé (items + enchant/affixes JSON) — bot.py
-    "player_stash",          # coffre/stash (vrai nom) — bot.py
-    "user_cosmetics",        # cosmétiques possédés — cosmetics.py
-    "auctions",              # enchères (vrai nom) — bot.py
-    "user_pets",             # familiers — bot.py
-    "pet_eggs",              # œufs de familier — pet_eggs.py
-    "pet_evolution",         # évolution familier — pet_evolution.py
-    "player_classes",        # classe choisie — bot.py
-    "player_class_choice",   # choix de classe (table dédiée) — bot.py
-    "achievements_unlocked", # succès débloqués — bot.py
-    "user_prestige",         # prestige — bot.py
-    "season_progress",       # progression de saison — bot.py
-    "user_streaks",          # streaks quotidiens — bot.py
-    "faction_reputation",    # réputation de faction — bot.py
-    "reputation",            # réputation joueur — reputation.py
-    "referrals",             # parrainages — referrals.py
-    "milestone_claims",      # paliers réclamés — progression_milestones.py
-    "hero_journey",          # parcours héros — hero_journey.py
-    "roblox_account_links",  # liens compte Roblox (vital, non recréable) — roblox_link.py
-    # Citadelle : builds/cosmétiques/métiers (progression sans combat)
-    "citadelle_active",      # build actif — citadelle.py
-    "citadelle_cosmetics",   # cosmétiques citadelle — citadelle.py
-    "citadelle_materials",   # matériaux/récolte — citadelle.py
-    "citadelle_professions", # métiers à niveaux — citadelle.py
-    "citadelle_passe",       # passe citadelle — citadelle.py
-    "citadelle_garden",      # jardin — citadelle.py
-    "citadelle_domaine",     # domaine — citadelle.py
-    "citadelle_rente",       # rente — citadelle.py
-    "citadelle_mastery",     # maîtrise — citadelle.py
+    "staff_audit_log",           # qui a sanctionné qui : contestations
+    "staff_sanction_log",
+
+    # ─── Tickets (contenu et configuration, pas les journaux) ───
+    "tickets",
+    "ticket_extras",
+    "ticket_tags",
+    "ticket_response_templates",
+    "ticket_auto_close_config",
+    "ticket_feedback",
+    "ticket_audit",
 ]
 
 # Limite par table : ne pas sauvegarder + de N rows par table (sécurité)
