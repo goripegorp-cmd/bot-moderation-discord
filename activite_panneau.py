@@ -27,6 +27,7 @@ import discord
 from discord.ui import Button, ChannelSelect, RoleSelect, Select, UserSelect
 
 import activite
+import activite_calendrier as cal
 import activite_escalade as esc
 import activite_niveaux as niv
 import activite_passage as passage
@@ -132,6 +133,28 @@ class ActivitePanelV2(_Base):
             afk1 = self.g.get_role(int(c["activite_role_niveau1"] or 0))
             afk2 = self.g.get_role(int(c["activite_role_niveau2"] or 0))
 
+            #  ⚠️ Ne PAS appeler `observation_jours` ici : elle POSE l'ancre si
+            #  elle manque. Ouvrir l'écran de configuration ne doit rien
+            #  démarrer — sinon un simple coup d'œil lancerait le compte à
+            #  rebours d'un système que le propriétaire n'a pas encore allumé.
+            ancre = str(c.get("activite_observe_depuis") or "")
+            obs = cal.jours_entre(ancre) if ancre else None
+            seuil_max = activite.config_du_role(c, activite.ROLE_TOUS)["expulsion"]
+            if not ancre:
+                obs_texte = ("🕐 **Observation** · _pas encore commencée_\n"
+                             "-# Elle démarre à l'allumage. Aucune absence "
+                             "antérieure ne sera reprochée à qui que ce soit.")
+            elif obs is not None and obs < seuil_max:
+                obs_texte = (
+                    f"🕐 **Observation** · `{obs}` jour(s) depuis le `{ancre}`\n"
+                    f"-# Le silence de chacun est plafonné à `{obs}` j : "
+                    f"personne ne peut être proposé à l'expulsion avant "
+                    f"`{seuil_max - obs}` jour(s) de plus. C'est voulu — on ne "
+                    f"reproche pas des journées qu'on n'a pas observées.")
+            else:
+                obs_texte = (f"🕐 **Observation** · `{obs}` jour(s) depuis le "
+                             f"`{ancre}` — tous les paliers sont atteignables.")
+
             items = [
                 v2_title("📊 Système d'activité"),
                 v2_subtitle("Un message · un passage en vocal · une réaction — "
@@ -161,6 +184,12 @@ class ActivitePanelV2(_Base):
                     f"{_pastille(c['activite_masquer_salons'])} **Masquage** · "
                     f"{'les absents ne voient plus que 2 salons' if c['activite_masquer_salons'] else 'désactivé'}"
                 ),
+                v2_divider(),
+                #  L'observation : la seule ligne qui explique pourquoi rien ne
+                #  se passe encore. Sans elle, un propriétaire qui vient
+                #  d'allumer croit le système cassé — ou pire, ne comprend pas
+                #  pourquoi il agirait un jour.
+                v2_body(obs_texte),
                 v2_divider(),
                 #  La règle telle qu'un membre la vit, pas telle que le code la
                 #  calcule. Les seuils affichés sont ceux du serveur ; un rôle
@@ -216,7 +245,16 @@ class ActivitePanelV2(_Base):
     async def _cb_toggle(self, i):
         try:
             c = await activite.config(self.g.id)
-            await _db_set(self.g.id, "activite_enabled", not c["activite_enabled"])
+            allume = not c["activite_enabled"]
+            await _db_set(self.g.id, "activite_enabled", allume)
+            #  Poser l'ancre d'observation au PREMIER allumage, jamais ensuite.
+            #  Sans elle, le système reprocherait aux membres des mois qu'il n'a
+            #  pas observés (voir `activite.observation_jours`). La réécrire à
+            #  chaque ON ferait d'un OFF/ON un moyen de repousser l'escalade
+            #  indéfiniment : c'est pour ça que le bouton de réarmement est
+            #  séparé, explicite, et dans un autre écran.
+            if allume and not c.get("activite_observe_depuis"):
+                await activite.observation_jours(self.g.id)
             await self.render_to(i, edit=True)
         except Exception as ex:
             await self._secours(i, ex, "toggle")
@@ -1094,7 +1132,20 @@ class ActiviteApercuPanelV2(_Base):
                 v2_body(passage.resume_texte(rap)),
             ]
 
-            if expulsables:
+            #  ⚠️ Ne JAMAIS proposer une action que le passage refuse d'exécuter.
+            #  Avant le 12/08/2026, ce bloc et son bouton rouge s'affichaient
+            #  trois lignes sous la bannière du garde-fou, dans le MÊME message :
+            #  le staff lisait « rien n'a été appliqué », voyait « Expulser les
+            #  941 », cliquait, et se faisait refuser. Un panneau qui se
+            #  contredit finit par ne plus être lu du tout.
+            gele = bool(rap.get("suivi_muet"))
+            if gele:
+                items.append(v2_divider())
+                items.append(v2_body(
+                    "🛑 **Aucune action possible tant que le suivi ne capte rien.**\n"
+                    "-# Écrivez un message, passez en vocal, mettez une réaction, "
+                    "puis rouvrez cet écran : les compteurs ci-dessus doivent bouger."))
+            elif expulsables:
                 lignes = [f"• {f['member'].mention} — `{f['jours']}` j"
                           for f in expulsables[:15]]
                 if len(expulsables) > 15:
@@ -1103,16 +1154,24 @@ class ActiviteApercuPanelV2(_Base):
                 items.append(v2_title("🚪 Proposés à l'expulsion", level=3))
                 items.append(v2_body("\n".join(lignes)))
                 items.append(v2_body(
-                    "-# ⚠️ Action irréversible. Le bot ne l'exécutera JAMAIS seul : "
-                    "ce bouton est le seul chemin."))
+                    f"-# ⚠️ Action irréversible. Le bot ne l'exécutera JAMAIS seul : "
+                    f"ce bouton est le seul chemin, et il n'en traite que "
+                    f"`{activite.PLAFOND_ACTIONS_PAR_PASSAGE}` par clic."))
 
             b_maj = Button(label="Recalculer", emoji="🔄",
                            style=discord.ButtonStyle.secondary, custom_id="act_ap_maj")
             b_maj.callback = self._cb_recalculer
-            ligne = [b_maj]
-            if expulsables:
+            b_rearm = Button(label="Réarmer l'observation", emoji="🕐",
+                             style=discord.ButtonStyle.secondary,
+                             custom_id="act_ap_rearm")
+            b_rearm.callback = self._cb_rearmer
+            ligne = [b_maj, b_rearm]
+            if expulsables and not gele:
+                lot = min(len(expulsables), activite.PLAFOND_ACTIONS_PAR_PASSAGE)
                 b_kick = Button(
-                    label=f"Expulser les {len(expulsables)}", emoji="🚪",
+                    label=(f"Expulser {lot}" if lot == len(expulsables)
+                           else f"Expulser {lot} sur {len(expulsables)}"),
+                    emoji="🚪",
                     style=discord.ButtonStyle.danger, custom_id="act_ap_kick")
                 b_kick.callback = self._cb_expulser
                 ligne.append(b_kick)
@@ -1128,6 +1187,30 @@ class ActiviteApercuPanelV2(_Base):
     async def _cb_recalculer(self, i):
         await self.render_to(i, edit=True)
 
+    async def _cb_rearmer(self, i):
+        """Repart de zéro sur l'observation : plus personne n'est en retard.
+
+        Le seul geste du système qui va dans le sens de la CLÉMENCE — il ne
+        peut que retarder une sanction, jamais l'avancer. C'est pour ça qu'il
+        n'exige pas de confirmation, contrairement à l'expulsion.
+
+        Utile après un changement de seuils, une migration de base, ou une
+        longue coupure du bot : dans tous ces cas le compteur ne reflète plus
+        ce qui a réellement été observé.
+        """
+        try:
+            if not i.response.is_done():
+                await i.response.defer()
+            jour = cal.jour()
+            await _db_set(self.g.id, "activite_observe_depuis", jour)
+            await i.followup.send(
+                f"🕐 Observation réarmée au `{jour}`. Le silence de chacun "
+                f"repart de 0 : aucune absence antérieure ne sera reprochée.",
+                ephemeral=True)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "réarmement")
+
     async def _cb_expulser(self, i):
         """Expulse les membres proposés. SEUL chemin d'expulsion du système."""
         try:
@@ -1136,13 +1219,19 @@ class ActiviteApercuPanelV2(_Base):
             #  Recalcul JUSTE AVANT d'agir : la liste affichée peut dater de
             #  plusieurs minutes, et quelqu'un a pu revenir entre-temps.
             rap = await passage.passage(self.g, dry_run=True)
-            if rap.get("plafond_declenche"):
+            if rap.get("suivi_muet"):
                 return await i.followup.send(
-                    f"🛑 Garde-fou : {rap['raison']}", ephemeral=True)
+                    f"🛑 {rap['raison']}", ephemeral=True)
 
             faits, echecs, epargnes = 0, 0, 0
             cfg_act = await activite.config(self.g.id)
-            for f in (rap.get("fiches") or {}).get("expulsion", []):
+            #  PAR LOTS. Un clic ne doit pas pouvoir vider neuf cents membres :
+            #  même validée par un humain, une action irréversible de cette
+            #  taille se déclenche par erreur bien plus souvent qu'à dessein.
+            tous = (rap.get("fiches") or {}).get("expulsion", [])
+            lot = tous[:activite.PLAFOND_ACTIONS_PAR_PASSAGE]
+            restants = len(tous) - len(lot)
+            for f in lot:
                 m = f["member"]
                 #  Dernière vérification d'immunité avant l'irréversible.
                 if not await activite.membre_concerne(m, cfg_act):
@@ -1162,7 +1251,9 @@ class ActiviteApercuPanelV2(_Base):
 
             await i.followup.send(
                 f"🚪 **{faits}** expulsé(s) · ❌ {echecs} échec(s) · "
-                f"🛡️ {epargnes} épargné(s) (devenus intouchables)", ephemeral=True)
+                f"🛡️ {epargnes} épargné(s) (devenus intouchables)"
+                + (f"\n⏳ `{restants}` restant(s) — recliquez pour le lot suivant."
+                   if restants else ""), ephemeral=True)
             await self.render_to(i, edit=True)
         except Exception as ex:
             await self._secours(i, ex, "expulsion")

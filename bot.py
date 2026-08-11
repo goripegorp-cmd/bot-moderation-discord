@@ -190,6 +190,7 @@ import unified_logger as ulogger2026
 #  Suivi (3 sources), escalade par paliers, niveaux et VIP. Rien ne tourne tant
 #  que le propriétaire n'a pas activé le système ET désigné une cible.
 import activite as activite_module
+import activite_calendrier as activite_cal
 import activite_escalade as activite_esc
 import activite_niveaux as activite_niv
 import activite_message as activite_msg
@@ -14874,14 +14875,32 @@ async def activite_passage_task():
             #  On ne poste au staff QUE s'il s'est passé quelque chose : une
             #  notification quotidienne « rien à signaler » se fait ignorer, puis
             #  masquer, et le jour où le garde-fou parle personne ne le voit.
+            #
+            #  ⚠️ DEUX NATURES DE MESSAGE, ET C'EST TOUT LE SUJET (12/08/2026).
+            #  Un ÉVÉNEMENT (des rôles retirés, un rappel parti) est neuf à
+            #  chaque fois : on le poste toujours. Un ÉTAT (quota atteint,
+            #  suivi muet, expulsions en attente) est le MÊME à chaque passage :
+            #  le poster toutes les 6 h l'a transformé en bruit de fond — c'est
+            #  exactement ce qui est arrivé avec « 941 actions demandées »,
+            #  répété quatre fois par jour. Un état ne se dit qu'une fois par jour.
             a = rap.get("actions", {})
-            interessant = (rap.get("plafond_declenche")
-                           or a.get("messages_envoyes")
-                           or (a.get("retraits") or {}).get("faits")
-                           or a.get("a_expulser"))
-            if not interessant:
-                continue
+            evenement = (a.get("messages_envoyes")
+                         or (a.get("retraits") or {}).get("faits")
+                         or (a.get("rappels") or {}).get("faits")
+                         or a.get("retours"))
+            etat = (rap.get("suivi_muet") or rap.get("quota_atteint")
+                    or a.get("a_expulser"))
+
             c = await activite_module.config(g.id)
+            aujourdhui = activite_cal.jour()
+            if not evenement:
+                if not etat:
+                    continue
+                if str(c.get("activite_jour_alerte") or "") == aujourdhui:
+                    continue          # cet état a déjà été signalé aujourd'hui
+            if etat:
+                await db_set(g.id, "activite_jour_alerte", aujourdhui)
+
             salon = g.get_channel(int(c.get("activite_salon_staff", 0) or 0))
             if salon is not None:
                 await salon.send(activite_pass.resume_texte(rap))

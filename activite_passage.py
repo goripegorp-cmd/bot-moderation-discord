@@ -48,7 +48,9 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
      "plafond_declenche": bool, "dry_run": bool}
     """
     rap = {"actif": False, "raison": "", "dry_run": dry_run,
-           "plafond_declenche": False, "actions": {}}
+           "suivi_muet": False, "quota_atteint": False, "anormal": False,
+           "observation": 0, "reporte": {"rappel": 0, "retrait": 0},
+           "actions": {}}
 
     if not await activite.actif(guild.id):
         rap["raison"] = "système désactivé, ou aucune cible désignée"
@@ -82,23 +84,67 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
     }
     rap["fiches"] = cl
 
-    # ── 3. PLAFOND ──
-    total_actions = len(cl["retrait"]) + len(cl["expulsion"])
-    if total_actions > activite.PLAFOND_ACTIONS_PAR_PASSAGE:
-        # ⚠️ NE PAS ASSOUPLIR. Ce plafond n'est pas une limite de débit, c'est un
-        # détecteur de panne. Si des dizaines de membres basculent d'un coup, la
-        # cause la plus probable n'est pas que le serveur s'est vidé cette nuit :
-        # c'est que le suivi est cassé (base réinitialisée, horloge décalée,
-        # système activé sur un serveur sans historique). Dans ce cas, agir
-        # ferait des dégâts irréversibles — et « retirer tous les rôles » de
-        # cinquante membres ne se rattrape pas à la main. On alerte, on ne
-        # touche à rien.
-        rap["plafond_declenche"] = True
+    # ── 3. DÉTECTEUR DE PANNE, puis QUOTA ──
+    #
+    # ⚠️ CE BLOC A ÉTÉ REFAIT LE 12/08/2026 APRÈS UN INTERBLOCAGE EN PRODUCTION.
+    # L'ancienne version comptait `retrait + expulsion` et faisait un `return`
+    # si le total dépassait 25. Sur un serveur de 941 membres jamais observés,
+    # elle affichait « 941 actions demandées » toutes les 6 heures, pour
+    # toujours : ces anciennetés ne décroissent pas, donc le compte ne pouvait
+    # jamais repasser sous 25. Et le `return` sautait AUSSI les retours, le
+    # masquage et le rappel hebdomadaire — le garde-fou bloquait la réparation.
+    #
+    # Trois corrections, chacune pour une raison distincte :
+    #   · la CAUSE est traitée en amont (`activite.observation_jours`) : le
+    #     silence ne peut plus dépasser le temps d'observation réel ;
+    #   · on ne compte plus l'EXPULSION, qui n'est qu'une proposition au staff
+    #     et n'applique rien — la compter gonflait le total de non-actions ;
+    #   · on RATIONNE au lieu d'avorter : les plus anciens d'abord, le reste au
+    #     passage suivant. Le retard s'écoule ; il ne bloque plus.
+    rap["observation"] = cl.get("observation", 0)
+
+    if cl.get("suivi_muet"):
+        # Journal totalement vide alors qu'on observe depuis des jours : sur un
+        # serveur vivant c'est impossible. Suivi cassé, pas serveur endormi.
+        # C'est le SEUL cas où l'on refuse encore d'agir en bloc.
+        rap["suivi_muet"] = True
         rap["raison"] = (
-            f"{total_actions} actions demandées, plafond à "
-            f"{activite.PLAFOND_ACTIONS_PAR_PASSAGE} — RIEN n'a été appliqué. "
-            f"Vérifiez que le suivi tourne depuis assez longtemps.")
-        return rap
+            "aucune activité enregistrée alors que le suivi tourne depuis "
+            f"{rap['observation']} jour(s) — les sondes ne captent rien. "
+            "RIEN n'a été appliqué.")
+        cl["doux"], cl["rappel"] = [], []
+        cl["retrait"], cl["expulsion"] = [], []
+
+    quota = activite.PLAFOND_ACTIONS_PAR_PASSAGE
+    #  Seuls les paliers qui APPLIQUENT quelque chose entrent dans le quota.
+    applicables = len(cl["retrait"]) + len(cl["rappel"])
+    reporte = {"rappel": 0, "retrait": 0}
+    if applicables > quota:
+        #  Le retrait passe avant le rappel : c'est le palier le plus avancé,
+        #  et laisser quelqu'un stagner à 30 jours pendant qu'on étiquette des
+        #  absents de 7 jours n'aurait aucun sens. Les listes sont déjà triées
+        #  du plus ancien au plus récent par `classer`.
+        garde_retrait = cl["retrait"][:quota]
+        reporte["retrait"] = len(cl["retrait"]) - len(garde_retrait)
+        garde_rappel = cl["rappel"][:max(0, quota - len(garde_retrait))]
+        reporte["rappel"] = len(cl["rappel"]) - len(garde_rappel)
+        cl["retrait"], cl["rappel"] = garde_retrait, garde_rappel
+
+        #  ⚠️ COHÉRENCE DES GROUPES — indispensable. Le rappel hebdomadaire est
+        #  construit à partir de `cl["groupes"]`, pas des listes globales. Sans
+        #  ce filtre, un membre REPORTÉ serait annoncé publiquement comme ayant
+        #  perdu ses rôles alors qu'on n'y a pas touché.
+        gardes = {f["member"].id for f in garde_retrait + garde_rappel}
+        for g in (cl.get("groupes") or {}).values():
+            for k in ("rappel", "retrait"):
+                g[k] = [f for f in g[k] if f["member"].id in gardes]
+
+    rap["quota_atteint"] = bool(reporte["rappel"] or reporte["retrait"])
+    rap["reporte"] = reporte
+    #  Signalement, plus blocage : si la moitié du serveur bascule d'un coup,
+    #  le staff doit le savoir — mais le quota a déjà borné les dégâts à 25.
+    rap["anormal"] = bool(cl["suivis"] and applicables > 0.5 * cl["suivis"])
+    rap["classement"]["reporte"] = reporte["rappel"] + reporte["retrait"]
 
     # ── 4. Les retours, avant tout le reste ──
     rendus, attentes = 0, []
@@ -300,22 +346,50 @@ def resume_texte(rap: dict) -> str:
     """Rapport lisible, pour le salon staff ou le panneau."""
     if not rap.get("actif"):
         return f"⚪ Système inactif — {rap.get('raison', '')}"
-    if rap.get("plafond_declenche"):
-        return f"🛑 **Passage interrompu par le garde-fou**\n{rap['raison']}"
+    if rap.get("suivi_muet"):
+        return (f"🛑 **Suivi muet — rien n'a été appliqué**\n{rap['raison']}\n"
+                f"-# Ouvrez 🔎 Aperçu : le diagnostic dit quelle source ne "
+                f"capte pas.")
 
     c = rap.get("classement", {})
     a = rap.get("actions", {})
     masq = a.get("masquage") or {}
+    rep = rap.get("reporte") or {}
     tete = "🔎 **Aperçu** (rien appliqué)" if rap.get("dry_run") else "✅ **Passage**"
-    return (
-        f"{tete}\n"
-        f"👥 `{c.get('suivis', 0)}` suivi(s) · `{c.get('actifs', 0)}` à jour\n"
-        f"👀 `{c.get('doux', 0)}` trop rares · "
-        f"💤 `{c.get('rappel', 0)}` au rôle AFK · "
-        f"🔒 `{c.get('retrait', 0)}` sans rôles · "
-        f"🚪 `{c.get('expulsion', 0)}` proposé(s)\n"
-        f"-# {c.get('revenus', 0)} retour(s) · "
+
+    #  ⚠️ DEUX BLOCS DISTINCTS, ET C'EST VOLONTAIRE : l'ÉTAT (combien de membres
+    #  sont dans chaque situation) n'est pas l'ACTION (combien ont été touchés
+    #  ce passage). Les confondre est exactement ce qui rendait l'ancien message
+    #  illisible : « 941 » se lisait comme « 941 personnes viennent de perdre
+    #  leurs rôles » alors que rien n'avait été fait.
+    lignes = [
+        tete,
+        f"👥 `{c.get('suivis', 0)}` suivi(s) · `{c.get('actifs', 0)}` à jour",
+        f"**Situation** — 👀 `{c.get('doux', 0)}` trop rares · "
+        f"💤 `{c.get('rappel', 0)}` à étiqueter · "
+        f"🔒 `{c.get('retrait', 0)}` à dépouiller · "
+        f"🚪 `{c.get('expulsion', 0)}` proposé(s)",
+    ]
+
+    if not rap.get("dry_run"):
+        lignes.append(
+            f"**Appliqué** — 💤 `{(a.get('rappels') or {}).get('faits', 0)}` "
+            f"étiquette(s) · 🔒 `{(a.get('retraits') or {}).get('faits', 0)}` "
+            f"dépouillé(s) · 🔙 `{a.get('retours', 0)}` retour(s)")
+
+    if rap.get("quota_atteint"):
+        lignes.append(
+            f"⏳ **{rep.get('retrait', 0) + rep.get('rappel', 0)} reporté(s)** "
+            f"au prochain passage — `{activite.PLAFOND_ACTIONS_PAR_PASSAGE}` "
+            f"maximum à la fois, les plus anciens d'abord. "
+            f"Rien n'est perdu, tout s'écoule.")
+    if rap.get("anormal"):
+        lignes.append("⚠️ Plus de la moitié des membres suivis bascule d'un "
+                      "coup — vérifiez vos seuils avant de laisser filer.")
+
+    lignes.append(
+        f"-# observé depuis {rap.get('observation', 0)} j · "
         f"{a.get('montees', 0)} montée(s) · "
         f"{a.get('messages_envoyes', 0)} message(s) · "
-        f"{masq.get('modifies', 0)} salon(s) masqué(s)"
-    )
+        f"{masq.get('modifies', 0)} salon(s) masqué(s)")
+    return "\n".join(lignes)

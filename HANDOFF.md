@@ -419,3 +419,78 @@ python -m pytest tests/ -q && DISCORD_TOKEN=x python -c "import bot"
 
 L'`import bot` est le contrôle qui compte : il exécute le code de module et attrape les
 `NameError` que `ast.parse` ne voit pas.
+
+---
+
+## 13. INCIDENT DU 12/08/2026 — « 941 actions demandées » (corrigé)
+
+**Symptôme.** Quelques heures après l'activation, le bot postait dans le salon staff, toutes les
+6 h : `941 actions demandées, plafond à 25 — RIEN n'a été appliqué.`
+
+**Cause.** `activite.jours_inactif()` retombe sur `member.joined_at` quand un membre n'a aucune
+ligne d'activité. Sur un serveur existant, allumer le système donnait donc à ~941 membres un
+« silence » égal à leur **ancienneté** (des mois) → tous classés en expulsion dès le premier
+passage. Le garde-fou bloquait — mais **il ne pouvait plus jamais retomber** : ces anciennetés ne
+décroissent pas. Interblocage définitif, et le `return` anticipé sautait aussi les retours de
+membres, le masquage et le rappel hebdomadaire. Le garde-fou bloquait sa propre réparation.
+
+**Correction — trois volets. Ne pas les défaire séparément, ils se tiennent.**
+
+**1. L'ancre d'observation (`activite.observation_jours`).** Nouvelle clé
+`activite_observe_depuis`, posée au premier allumage, **jamais réécrite** (sinon un OFF/ON
+repousserait l'escalade à l'infini). `presence()` plafonne : `silence = min(silence_brut,
+observation)`. `silence_brut` reste exposé pour l'affichage staff.
+
+⚠️ **Propriété structurelle qui remplace le pansement** : `silence ≤ observation` rend le seuil
+d'expulsion **inatteignable** avant autant de jours d'observation réelle. Un test le vérifie sur
+toute la plage 0→20.
+
+**2. Le quota remplace l'avortement (`activite_passage.passage`).**
+
+- On ne compte plus l'**expulsion** : c'est une *proposition*, elle n'applique rien. La compter
+  gonflait le total de non-actions — c'est littéralement d'où venait le « 941 ».
+- On compte `rappel + retrait`, on **tronque** à 25, retrait d'abord, les plus anciens d'abord.
+- ⚠️ **Après troncature, filtrer `cl["groupes"]`** : le rappel hebdo se construit dessus, pas sur
+  les listes globales. Sans ce filtre, un membre *reporté* serait annoncé publiquement comme ayant
+  perdu ses rôles alors qu'on n'y a pas touché.
+- Seul cas de blocage total restant : `suivi_muet` — journal **vide** alors qu'on observe depuis
+  plus de 3 jours. Sur un serveur vivant c'est impossible : les sondes sont cassées.
+
+**3. Les messages d'ÉTAT ne se répètent plus (`bot.py`, `activite_passage_task`).** Un *événement*
+(rôles retirés, rappel parti) est neuf → toujours posté. Un *état* (quota, suivi muet, expulsions
+en attente) est identique à chaque passage → **une fois par jour** (`activite_jour_alerte`).
+C'est ce qui avait transformé le garde-fou en bruit de fond.
+
+**Aussi corrigé au passage :**
+
+- `presence()` — **fail-open** : `anciennete_du_suivi() is None` veut dire « journal vide », pas
+  « borne inconnue, passe ». La borne était *sautée*, donc tout le monde était jugé sur des
+  journées sans aucune trace. Désormais `bornes.append(suivi_jours if not None else 0)`.
+- Panneau aperçu — il imprimait « 🚪 Proposés à l'expulsion » **et** un bouton rouge trois lignes
+  sous la bannière du garde-fou, dans le **même message**. Le staff cliquait et se faisait refuser.
+  Bloc entier conditionné, et expulsion **par lots de 25** : un clic ne doit pas vider 900 membres.
+- Bouton **« Réarmer l'observation »** (écran Aperçu) : réécrit l'ancre à aujourd'hui. Seul geste
+  du système qui va vers la clémence — il ne peut que retarder, donc pas de confirmation.
+
+### ⚠️ Ce qu'il ne faut SURTOUT PAS faire
+
+| tentation | pourquoi c'est faux |
+|---|---|
+| Remonter `PLAFOND_ACTIONS_PAR_PASSAGE` | ne corrige rien et transforme le bug en catastrophe : 941 `add_roles` + dépouillement complet d'un coup |
+| Supprimer le repli sur `joined_at` | `jours_inactif` rendrait `None` → `classer` exclurait **définitivement** tout membre jamais vu |
+| Mettre le plafonnement dans `verdict()` | `verdict` est **pure et juste** — c'est son *entrée* qui mentait. Ça casserait `test_un_silence_prolonge_compte_meme_chez_un_nouveau` |
+| Borner avec `anciennete_du_suivi()` seule | `MIN(jour)` remonte au déploiement du module, pas à l'activation : n'achète rien |
+| Réécrire l'ancre à chaque ON | un OFF/ON deviendrait un moyen de ne jamais être sanctionné |
+
+### Déroulé attendu sur un serveur de 941 fantômes
+
+| | suivis | à étiqueter | à dépouiller | proposés | reporté |
+|---|---|---|---|---|---|
+| J+0 → J+6 | 941 | 0 | 0 | 0 | 0 |
+| J+7 | 941 | 941 | 0 | 0 | 916 |
+| J+14 | 941 | 0 | 941 | 0 | 916 |
+| J+21 | 941 | 0 | 0 | 941 | 0 |
+
+25 par passage × 4 passages/jour = **100/jour**. Le rattrapage de 941 membres prend donc ~10 jours,
+volontairement. Tests : `tests/test_activite_observation.py` (13 tests, dont le cas de production
+verrouillé à l'identique).

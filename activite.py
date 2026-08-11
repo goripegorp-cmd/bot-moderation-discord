@@ -263,6 +263,16 @@ CLES_DEFAUT = {
 
     #  ── Accueil de ceux qui reviennent après une expulsion pour inactivité ───
     "activite_message_retour": True,
+
+    #  ── L'ANCRE D'OBSERVATION — la date à partir de laquelle on a le droit de
+    #  reprocher une absence. Voir `observation_jours()` : sans elle, allumer le
+    #  système sur un serveur existant classait TOUT LE MONDE en expulsion le
+    #  premier soir, puisque le silence d'un membre jamais vu vaut son ancienneté
+    #  sur le serveur. Écrite une seule fois, jamais réécrite par un OFF/ON.
+    "activite_observe_depuis": "",
+    #  Dernier jour où une alerte d'ÉTAT a été postée au staff (quota, suivi
+    #  muet, expulsions en attente). Sert à ne pas la répéter toutes les 6 h.
+    "activite_jour_alerte": "",
 }
 
 
@@ -557,8 +567,51 @@ async def anciennete_du_suivi(guild_id: int) -> int | None:
         return None
 
 
+async def observation_jours(guild_id: int) -> int:
+    """Depuis combien de jours a-t-on le DROIT de reprocher une absence ?
+
+    ═══════════════════════════════════════════════════════════════════════════
+    LE BUG QUE CETTE FONCTION CORRIGE (production, 12/08/2026)
+    ═══════════════════════════════════════════════════════════════════════════
+    Le silence d'un membre jamais vu retombe sur sa date d'ARRIVÉE (voir
+    `jours_inactif`). Sur un serveur existant, allumer le système donnait donc
+    d'un seul coup « 941 actions demandées » : neuf cents membres inscrits
+    depuis des mois, jamais observés, tous classés en expulsion le premier soir.
+    Le garde-fou a bloqué — mais il ne pouvait plus jamais retomber, puisque ces
+    ancienneté-là ne décroissent pas. Interblocage définitif.
+
+    L'ancre referme ça à la racine : on ne peut pas reprocher une journée
+    ANTÉRIEURE à l'allumage. Le silence est plafonné par cette valeur, donc il
+    est structurellement impossible d'atteindre le seuil d'expulsion avant que
+    le système ait réellement observé le serveur pendant autant de jours.
+
+    Écriture PARESSEUSE : si l'ancre manque, on la pose à aujourd'hui et on rend
+    0. C'est ce qui débloque un serveur déjà en panne sans que le propriétaire
+    ait à éteindre puis rallumer — et sans jamais écraser une ancre existante,
+    ce qui ferait d'un OFF/ON un moyen de repousser l'escalade indéfiniment.
+    """
+    try:
+        c = await _cfg(guild_id)
+        depuis = str((c or {}).get("activite_observe_depuis") or "")
+    except Exception as ex:
+        _log(f"[activite observation_jours lecture] {ex}")
+        return 0          # dans le doute, on n'a rien observé : on ne juge pas
+
+    if not depuis:
+        jour = _aujourdhui()
+        try:
+            await _db_set(guild_id, "activite_observe_depuis", jour)
+        except Exception as ex:
+            _log(f"[activite observation_jours écriture] {ex}")
+        return 0
+
+    n = cal.jours_entre(depuis)
+    return max(0, int(n)) if n is not None else 0
+
+
 async def presence(guild_id: int, member, cfg_act: dict,
-                   suivi_jours: int | None = None) -> dict:
+                   suivi_jours: int | None = None,
+                   observation: int | None = None) -> dict:
     """Les DEUX mesures d'un membre, calculées ensemble.
 
     ┌ silence ─── jours consécutifs sans le moindre geste, AUJOURD'HUI COMPRIS.
@@ -579,11 +632,19 @@ async def presence(guild_id: int, member, cfg_act: dict,
     fenetre_voulue = max(1, int(cfg_act.get("activite_fenetre")
                                 or FENETRE_PRESENCE_DEFAUT))
 
-    silence = await jours_inactif(guild_id, member)
+    if observation is None:
+        observation = await observation_jours(guild_id)
+
+    silence_brut = await jours_inactif(guild_id, member)
+    #  ⚠️ LE PLAFONNEMENT — voir `observation_jours`. On garde la valeur brute
+    #  pour l'affichage staff (« absent depuis 2 ans, observé depuis 3 jours »
+    #  est une information utile), mais on ne JUGE que sur ce qu'on a vu.
+    silence = (None if silence_brut is None
+               else min(silence_brut, observation))
 
     #  Combien de journées COMPLÈTES ce membre pouvait-il seulement remplir ?
-    #  On prend la plus contraignante des deux : son arrivée, et l'âge du suivi.
-    bornes = []
+    #  On prend la plus contraignante : son arrivée, l'âge du suivi, l'ancre.
+    bornes = [observation]
     arrivee = getattr(member, "joined_at", None)
     if arrivee is not None:
         depuis_arrivee = cal.jours_entre(cal.jour(arrivee))
@@ -591,8 +652,10 @@ async def presence(guild_id: int, member, cfg_act: dict,
             bornes.append(depuis_arrivee)
     if suivi_jours is None:
         suivi_jours = await anciennete_du_suivi(guild_id)
-    if suivi_jours is not None:
-        bornes.append(suivi_jours)
+    #  ⚠️ FAIL-OPEN CORRIGÉ : `None` veut dire « le journal est VIDE », pas
+    #  « borne inconnue, passe ». L'ignorer faisait juger tout le monde sur des
+    #  journées dont on n'a strictement aucune trace.
+    bornes.append(suivi_jours if suivi_jours is not None else 0)
     observables = min(bornes) if bornes else 0
 
     fenetre = max(1, min(fenetre_voulue, observables))
@@ -601,10 +664,12 @@ async def presence(guild_id: int, member, cfg_act: dict,
     vus = await jours_vus(guild_id, member.id, _jour_decale(fenetre), _jour_decale(1))
     return {
         "silence": silence,
+        "silence_brut": silence_brut,
         "presents": len(set(vus)),
         "fenetre": fenetre,
         "jugeable": jugeable,
         "observables": observables,
+        "observation": observation,
         "jours_vus": sorted(set(vus)),
     }
 

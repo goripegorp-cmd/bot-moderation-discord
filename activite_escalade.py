@@ -61,7 +61,8 @@ async def classer(guild) -> dict:
     """
     cfg_act = await activite.config(guild.id)
     out = {"groupes": {}, "suivis": 0, "actifs": 0, "revenus": [],
-           "doux": [], "rappel": [], "retrait": [], "expulsion": []}
+           "doux": [], "rappel": [], "retrait": [], "expulsion": [],
+           "observation": 0, "suivi_muet": False}
     if not await activite.actif(guild.id):
         return out
 
@@ -69,6 +70,17 @@ async def classer(guild) -> dict:
     #  même requête répétée mille fois est le genre de détail qui transforme un
     #  passage d'une seconde en passage d'une minute.
     suivi_jours = await activite.anciennete_du_suivi(guild.id)
+    #  L'ancre d'observation : on ne reproche pas une journée antérieure à
+    #  l'allumage du système. Lue UNE fois pour la guilde — voir
+    #  `activite.observation_jours`, qui explique le blocage qu'elle corrige.
+    observation = await activite.observation_jours(guild.id)
+    out["observation"] = observation
+    #  Journal totalement vide alors qu'on observe depuis plusieurs jours : sur
+    #  un serveur vivant, c'est impossible. C'est le signe d'un suivi cassé
+    #  (base réinitialisée, hooks débranchés), pas d'un serveur qui dort. On le
+    #  signale et on n'agira sur personne — voir `activite_passage`.
+    out["suivi_muet"] = (suivi_jours is None
+                         and observation > activite.ANCIENNETE_MINIMALE)
     afk_ids = niv.ids_afk(cfg_act)
     #  Alimente le cache qui rend le retour immédiat possible sur chaque message
     #  (voir `activite_niveaux._IDS_CONNUS`).
@@ -91,7 +103,8 @@ async def classer(guild) -> dict:
             out["suivis"] += 1
 
             mesure = await activite.presence(guild.id, member, cfg_act,
-                                             suivi_jours=suivi_jours)
+                                             suivi_jours=suivi_jours,
+                                             observation=observation)
             if mesure["silence"] is None:
                 continue          # ni activité connue ni arrivée : on ne devine pas
 
@@ -109,6 +122,10 @@ async def classer(guild) -> dict:
             palier = activite.verdict(mesure, conf, doux_deja)
 
             fiche = {"member": member, "jours": mesure["silence"],
+                     #  Le silence RÉEL, non plafonné : « absent depuis 2 ans,
+                     #  observé depuis 3 jours » est une information que le
+                     #  staff doit voir, même si on ne juge pas là-dessus.
+                     "jours_reels": mesure.get("silence_brut"),
                      "presents": mesure["presents"], "fenetre": mesure["fenetre"],
                      "role": role, "seuils": conf, "groupe": cle,
                      "doux_deja": doux_deja, "semaine": semaine}
