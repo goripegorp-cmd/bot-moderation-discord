@@ -10703,14 +10703,18 @@ PROTS = [
     ("anti_badwords", "🤬", "Anti-Insultes"),
     ("anti_mass_mention", "📢", "Anti-Mentions"),
     ("anti_newaccount", "👶", "Anti-NewAccount"),
-    ("anti_raid", "⚔️", "Anti-Raid"),
+    # « anti_raid » a quitté cette liste en 08/2026 : l'anti-raid a désormais SA section
+    # dans /configure (⚔️ Anti-Raid → AntiRaidPanelV2, clés antiraid_*). Deux entrées pour
+    # la même protection, chacune avec ses propres seuils, c'est exactement la confusion
+    # qu'on supprime — l'ancienne neutralisait la nouvelle.
     ("anti_compromised", "🔐", "Anti-Compromis"),
     ("anti_qrcode", "📱", "Anti-QRCode"),
     ("anti_alt", "👥", "Anti-MultiCompte")
 ]
 
 # Cache pour l'anti-raid : {guild_id: {'joins': [(user_id, timestamp), ...], 'lockdown': bool}}
-raid_tracker = {}
+# (`raid_tracker` a disparu avec l'ancien anti-raid : le tracker en service est
+#  `_recent_joins`, utilisé par _handle_antiraid_join.)
 
 # Cache pour les détections de comptes secondaires
 alt_account_cache = {}  # {guild_id: {user_id: {'main_account': user_id, 'alts': [user_ids], 'reasons': []}}
@@ -12136,6 +12140,15 @@ class AntiRaidPanelV2(LayoutView):
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="ar_back")
         b_back.callback = self._cb_back
 
+        # Le scan de comptes suspects n'était atteignable que depuis le panneau de
+        # l'ancien anti-raid, supprimé en 08/2026. Capacité de sécurité réelle : elle
+        # est transplantée ici plutôt que perdue avec lui.
+        b_scan = Button(
+            label="Scanner les comptes suspects", emoji="🔍",
+            style=discord.ButtonStyle.secondary, custom_id="arv2_scan",
+        )
+        b_scan.callback = self._cb_scan
+
         pretty_action = {'kick': '👢 Kick auto', 'ban': '🔨 Ban auto', 'lockdown': '🔒 Lockdown serveur'}.get(action, action)
 
         items = [
@@ -12158,7 +12171,7 @@ class AntiRaidPanelV2(LayoutView):
             ),
             v2_divider(),
             discord.ui.ActionRow(log_select),
-            discord.ui.ActionRow(b_toggle, b_thresh, b_action, b_back),
+            discord.ui.ActionRow(b_toggle, b_thresh, b_action, b_scan, b_back),
         ]
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
@@ -12166,6 +12179,25 @@ class AntiRaidPanelV2(LayoutView):
             await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_scan(self, i):
+        # Repris tel quel de l'ancien panneau anti-raid : le scan est long, on acquitte
+        # d'abord (anti-429) puis on rend le résultat en followup.
+        try:
+            await i.response.send_message(
+                "🔍 **Scan en cours…**\n\nAnalyse des membres du serveur…", ephemeral=True)
+            scanner = SuspectScanPanelV2(self.u, self.g)
+            await scanner.scan_members()
+            await scanner.render_after_defer(i)
+        except Exception as ex:
+            print(f"[AntiRaidPanelV2 _cb_scan] {ex}")
+            try:
+                await i.edit_original_response(
+                    content=f"❌ **Erreur scan**\n```{str(ex)[:500]}```",
+                    embed=None, view=None,
+                )
+            except Exception:
+                pass
 
     async def _cb_toggle(self, i):
         try:
@@ -25642,18 +25674,6 @@ class ProtDetailV2(LayoutView):
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
 
-        elif self.key == "anti_raid":
-            raid_cfg = c.get('raid_config', {})
-            lockdown = raid_tracker.get(self.g.id, {}).get('lockdown', False)
-            items.append(v2_body(
-                f"👥 **Seuil détection** · `{raid_cfg.get('join_threshold', 10)}` membres en `{raid_cfg.get('join_interval', 10)}` sec\n"
-                f"📅 **Âge compte min** · `{raid_cfg.get('min_account_age', 7)}` jours\n"
-                f"🤖 **Mode auto** · {'✅' if raid_cfg.get('auto_mode', True) else '❌'}  ·  "
-                f"🔒 **Bloquer invitations** · {'✅' if raid_cfg.get('block_invites', True) else '❌'}\n"
-                f"⚡ **Action** · `{raid_cfg.get('action', 'kick').upper()}`\n"
-                f"🚨 **Lockdown actif** · {'⚠️ **OUI**' if lockdown else '✅ Non'}"
-            ))
-
         elif self.key == "anti_compromised":
             # Ce bloc décrivait `check_compromised_behavior`, une fonction morte, et
             # affichait une ligne « Sanction » construite sur des clés jamais appliquées.
@@ -25802,9 +25822,6 @@ class ProtDetailV2(LayoutView):
         if self.key in ["anti_spam", "anti_caps", "anti_newaccount", "anti_mass_mention"]:
             return await i.response.send_modal(NumberConfigModal(self.g, self.u, self.key))
         # Sub-configs V2 dédiés (suite)
-        if self.key == "anti_raid":
-            v = AntiRaidConfigPanelV2(self.u, self.g)
-            return await v.render_to(i, edit=True)
         if self.key == "anti_alt":
             v = AltConfigPanelV2(self.u, self.g)
             return await v.render_to(i, edit=True)
@@ -25820,9 +25837,6 @@ class ProtDetailV2(LayoutView):
             # lues par _badword_strike. ActionConfigPanelV2 écrirait `badwords_action`,
             # clé qui n'existe nulle part ailleurs dans le fichier.
             return await _BadwordsSanctionActionView(self.u, self.g).render_to(i, edit=True)
-        if self.key == "anti_raid":
-            # La riposte anti-raid vit dans son propre panneau (raid_config.action).
-            return await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
         if self.key == "anti_compromised":
             # Cette protection ne sanctionne pas automatiquement : le panneau doit le dire
             # plutôt que de proposer un réglage qui ne s'appliquerait jamais.
@@ -26748,262 +26762,8 @@ class DurationConfigModal(Modal, title="⏱️ Durée du Mute"):
 #                           ⚔️ ANTI-RAID CONFIG PANEL
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class AntiRaidConfigPanelV2(LayoutView):
-    """Configuration Anti-Raid en V2."""
-
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        c = await cfg(self.g.id)
-        raid_cfg = c.get('raid_config', {})
-
-        join_threshold = raid_cfg.get('join_threshold', 10)
-        join_interval = raid_cfg.get('join_interval', 10)
-        min_age = raid_cfg.get('min_account_age', 7)
-        auto_mode = raid_cfg.get('auto_mode', True)
-        block_invites = raid_cfg.get('block_invites', True)
-        action = raid_cfg.get('action', 'kick')
-        actions_label = {'kick': '👢 Kick', 'ban': '🔨 Ban', 'mute': '🔇 Mute'}.get(action, action)
-        lockdown = raid_tracker.get(self.g.id, {}).get('lockdown', False)
-
-        self.clear_items()
-        b_thresh = Button(label="👥 Seuil", style=discord.ButtonStyle.primary, custom_id="arcv2_thresh")
-        b_thresh.callback = self._cb_thresh
-        b_age = Button(label="📅 Âge", style=discord.ButtonStyle.primary, custom_id="arcv2_age")
-        b_age.callback = self._cb_age
-        b_auto = Button(
-            label=("🤖 Auto ON" if auto_mode else "🤖 Auto OFF"),
-            style=(discord.ButtonStyle.success if auto_mode else discord.ButtonStyle.danger),
-            custom_id="arcv2_auto",
-        )
-        b_auto.callback = self._cb_toggle_auto
-        b_action = Button(label="⚡ Action", style=discord.ButtonStyle.secondary, custom_id="arcv2_action")
-        b_action.callback = self._cb_action
-        b_invites = Button(
-            label=("🔒 Invit. ON" if block_invites else "🔒 Invit. OFF"),
-            style=(discord.ButtonStyle.success if block_invites else discord.ButtonStyle.danger),
-            custom_id="arcv2_invites",
-        )
-        b_invites.callback = self._cb_toggle_invites
-        b_lockdown = Button(
-            label=("🚨 Lockdown ON" if lockdown else "🚨 Lockdown OFF"),
-            style=(discord.ButtonStyle.danger if lockdown else discord.ButtonStyle.secondary),
-            custom_id="arcv2_lockdown",
-        )
-        b_lockdown.callback = self._cb_lockdown
-        b_scan = Button(label="🔍 Scanner", style=discord.ButtonStyle.success, custom_id="arcv2_scan")
-        b_scan.callback = self._cb_scan
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="arcv2_back")
-        b_back.callback = self._cb_back
-
-        # Phase 11 : radio dots cohérents
-        items: list = [
-            v2_title("⚔️ Anti-Raid"),
-            v2_subtitle("Protection contre les attaques massives"),
-            v2_divider(),
-            v2_body(
-                f"👥 **Seuil** · `{join_threshold}` membres en `{join_interval}` sec\n"
-                f"📅 **Âge minimum compte** · `{min_age}` jours\n"
-                f"{'🔘' if auto_mode else '⚪'} **Mode auto**\n"
-                f"{'🔘' if block_invites else '⚪'} **Bloquer invitations**\n"
-                f"⚡ **Action** · `{action.upper()}`\n"
-                f"{'🔴' if lockdown else '⚪'} **Lockdown** · {'⚠️ ACTIF' if lockdown else '_inactif_'}"
-            ),
-            v2_divider(),
-            discord.ui.ActionRow(b_thresh, b_age, b_auto, b_action),
-            discord.ui.ActionRow(b_invites, b_lockdown, b_scan, b_back),
-        ]
-
-        self.add_item(v2_container(*items, color=Palette.DANGER))
-
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _cb_thresh(self, i):
-        await i.response.send_modal(RaidThresholdModal(self.g, self.u))
-
-    async def _cb_age(self, i):
-        await i.response.send_modal(RaidAgeModal(self.g, self.u))
-
-    async def _cb_toggle_auto(self, i):
-        c = await cfg(self.g.id)
-        raid_cfg = c.get('raid_config', {})
-        raid_cfg['auto_mode'] = not raid_cfg.get('auto_mode', True)
-        await db_set(self.g.id, 'raid_config', raid_cfg)
-        await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
-
-    async def _cb_action(self, i):
-        # UI.md §4 : l'ancien RaidActionSelect renvoyait vers AntiRaidConfigPanel V1
-        # (un Embed) — une fuite qui ressuscitait le panneau legacy à chaque clic.
-        try:
-            await RaidActionPanelV2(self.u, self.g).render_to(i, edit=True)
-        except Exception as ex:
-            print(f"[AntiRaidConfigPanelV2 _cb_action] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
-                else:
-                    await i.followup.send(f"❌ Erreur : {ex}", ephemeral=True)
-            except Exception:
-                pass
-
-    async def _cb_toggle_invites(self, i):
-        c = await cfg(self.g.id)
-        raid_cfg = c.get('raid_config', {})
-        raid_cfg['block_invites'] = not raid_cfg.get('block_invites', True)
-        await db_set(self.g.id, 'raid_config', raid_cfg)
-        await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
-
-    async def _cb_lockdown(self, i):
-        guild_id = self.g.id
-        if guild_id not in raid_tracker:
-            raid_tracker[guild_id] = {'joins': [], 'lockdown': False}
-        raid_tracker[guild_id]['lockdown'] = not raid_tracker[guild_id].get('lockdown', False)
-        await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
-
-    async def _cb_scan(self, i):
-        try:
-            await i.response.send_message("🔍 **Scan en cours…**\n\nAnalyse des membres du serveur…", ephemeral=True)
-            scanner = SuspectScanPanelV2(self.u, self.g)
-            await scanner.scan_members()
-            await scanner.render_after_defer(i)
-        except Exception as ex:
-            print(f"[SCANNER V2 ERROR] {ex}")
-            try:
-                await i.edit_original_response(
-                    content=f"❌ **Erreur scan**\n```{str(ex)[:500]}```",
-                    embed=None,
-                    view=None,
-                )
-            except Exception:
-                pass
-
-    async def _cb_back(self, i):
-        prot = next(p for p in PROTS if p[0] == "anti_raid")
-        v = ProtDetailV2(self.u, self.g, prot)
-        await v.render_to(i, edit=True)
 
 
-class RaidActionPanelV2(LayoutView):
-    """Riposte appliquée quand l'anti-raid se déclenche (clé `raid_config.action`).
-
-    Ouvert par AntiRaidConfigPanelV2 · « ⚡ Riposte ». Remplace RaidActionSelect,
-    qui retombait sur le panneau V1 en Embed (UI.md §1 et §4).
-    """
-
-    #  (valeur stockée, emoji, libellé, ce que ça fait concrètement)
-    ACTIONS = [
-        ("kick", "👢", "Expulser", "Le membre est expulsé, il peut revenir avec une invitation."),
-        ("ban", "🔨", "Bannir", "Le membre est banni, il ne peut plus revenir."),
-        ("mute", "🔇", "Rendre muet", "Le membre reste, mais ne peut plus écrire ni parler."),
-    ]
-
-    def __init__(self, u, g):
-        super().__init__(timeout=300)
-        self.u = u
-        self.g = g
-        self._build()
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    def _build(self, actuelle: str | None = None):
-        self.clear_items()
-        items: list = [
-            v2_title("⚡ Riposte anti-raid"),
-            v2_subtitle("Ce que le bot fait aux comptes d'une vague détectée"),
-            v2_divider(),
-        ]
-
-        if actuelle is not None:
-            libelle = next(
-                (f"{e} **{lib}**" for v, e, lib, _ in self.ACTIONS if v == actuelle),
-                "⚪ _aucune_",
-            )
-            items.append(v2_body(f"Riposte actuelle · {libelle}"))
-            items.append(v2_divider())
-
-        items.append(v2_body("\n".join(
-            f"{emoji} **{libelle}** — {aide}" for _, emoji, libelle, aide in self.ACTIONS
-        )))
-        items.append(v2_divider())
-
-        # UI.md §3 : le bouton de l'action ACTIVE est en `success` et désactivé —
-        # l'état se lit sur le bouton, pas dans une case cochée en texte.
-        ligne = []
-        for valeur, emoji, libelle, _ in self.ACTIONS:
-            actif = (valeur == actuelle)
-            b = Button(
-                label=libelle,
-                emoji=emoji,
-                style=discord.ButtonStyle.success if actif else discord.ButtonStyle.secondary,
-                disabled=actif,
-                custom_id=f"raidact_{valeur}",
-            )
-            b.callback = self._faire_callback(valeur)
-            ligne.append(b)
-
-        b_back = Button(
-            label="Retour", emoji="◀️",
-            style=discord.ButtonStyle.secondary, custom_id="raidact_back",
-        )
-        b_back.callback = self._cb_back
-
-        items.append(discord.ui.ActionRow(*ligne))
-        items.append(discord.ui.ActionRow(b_back))
-
-        self.add_item(v2_container(*items, color=Palette.DANGER))
-
-    def _faire_callback(self, valeur: str):
-        async def _cb(i):
-            try:
-                c = await cfg(self.g.id)
-                raid_cfg = dict(c.get('raid_config', {}) or {})
-                raid_cfg['action'] = valeur
-                await db_set(self.g.id, 'raid_config', raid_cfg)
-                await self.render_to(i, edit=True)
-            except Exception as ex:
-                print(f"[RaidActionPanelV2 _cb {valeur}] {ex}")
-                try:
-                    if not i.response.is_done():
-                        await i.response.defer()
-                except Exception:
-                    pass
-        return _cb
-
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        # Disponibilité = fail-open : si la config est illisible, on affiche quand
-        # même le panneau, simplement sans marquer la riposte active.
-        try:
-            c = await cfg(self.g.id)
-            actuelle = (c.get('raid_config', {}) or {}).get('action')
-        except Exception as ex:
-            print(f"[RaidActionPanelV2 render_to cfg] {ex}")
-            actuelle = None
-        self._build(actuelle)
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _cb_back(self, i):
-        try:
-            await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
-        except Exception as ex:
-            print(f"[RaidActionPanelV2 _cb_back] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.defer()
-            except Exception:
-                pass
 
 
 
@@ -27925,50 +27685,7 @@ class ConfirmKickView(View):
     async def cancel(self, i, b):
         await i.response.edit_message(content="❌ Kick annulé", embed=None, view=None)
 
-class RaidThresholdModal(Modal, title="👥 Seuil de détection"):
-    threshold_input = TextInput(label="Nombre de membres", placeholder="10", max_length=3)
-    interval_input = TextInput(label="Intervalle (secondes)", placeholder="10", max_length=3)
-    
-    def __init__(self, g, u):
-        super().__init__()
-        self.g = g
-        self.u = u
-    
-    async def on_submit(self, i):
-        try:
-            threshold = max(3, min(50, int(self.threshold_input.value)))
-            interval = max(5, min(60, int(self.interval_input.value)))
-            c = await cfg(self.g.id)
-            raid_cfg = c.get('raid_config', {})
-            raid_cfg['join_threshold'] = threshold
-            raid_cfg['join_interval'] = interval
-            await db_set(self.g.id, 'raid_config', raid_cfg)
-        except Exception:
-            pass
-        # Phase 3.6 : retour V2
-        v = AntiRaidConfigPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
 
-class RaidAgeModal(Modal, title="📅 Âge minimum du compte"):
-    age_input = TextInput(label="Jours minimum", placeholder="7", max_length=4)
-
-    def __init__(self, g, u):
-        super().__init__()
-        self.g = g
-        self.u = u
-
-    async def on_submit(self, i):
-        try:
-            age = max(0, min(365, int(self.age_input.value)))
-            c = await cfg(self.g.id)
-            raid_cfg = c.get('raid_config', {})
-            raid_cfg['min_account_age'] = age
-            await db_set(self.g.id, 'raid_config', raid_cfg)
-        except Exception:
-            pass
-        # Phase 3.6 : retour V2
-        v = AntiRaidConfigPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -42913,116 +42630,24 @@ async def on_member_join(m):
     except Exception as ex:
         print(f"[UNIFIED LOG member_join] {ex}")
     
+    # ⚠️ ANTI-RAID EN PREMIER — NE PAS REDESCENDRE CET APPEL.
+    # Il était placé en fin de fonction, après plusieurs `return` (anti-raid legacy,
+    # anti_newaccount). Résultat : tout membre traité par l'un de ces chemins était
+    # invisible pour le compteur de raid, qui n'atteignait donc jamais son seuil —
+    # le verrouillage du serveur ne se déclenchait jamais. Le compteur doit voir
+    # CHAQUE arrivée, avant tout traitement susceptible de sortir de la fonction.
+    try:
+        if await _handle_antiraid_join(m):
+            # Le membre vient d'être isolé par l'anti-raid : on s'arrête là plutôt
+            # que de l'expulser derrière (l'isolement conserve les preuves).
+            return
+    except Exception as ex:
+        print(f"[antiraid_join] {ex}")
+
     try:
         c = await cfg(m.guild.id)
         guild_id = m.guild.id
         
-        # ═══════════════ ANTI-RAID SYSTÈME ═══════════════
-        if c.get('anti_raid'):
-            raid_cfg = c.get('raid_config', {})
-            join_threshold = raid_cfg.get('join_threshold', 10)
-            join_interval = raid_cfg.get('join_interval', 10)
-            min_account_age = raid_cfg.get('min_account_age', 7)
-            auto_mode = raid_cfg.get('auto_mode', True)
-            block_invites = raid_cfg.get('block_invites', True)
-            action = raid_cfg.get('action', 'kick')
-            
-            # Initialiser le tracker si nécessaire
-            if guild_id not in raid_tracker:
-                raid_tracker[guild_id] = {'joins': [], 'lockdown': False, 'lockdown_at': None}
-            
-            current_time = now()
-            
-            # Auto-unlock lockdown après 5 minutes
-            lockdown_at = raid_tracker[guild_id].get('lockdown_at')
-            if raid_tracker[guild_id].get('lockdown') and lockdown_at:
-                if (current_time - lockdown_at).total_seconds() > 300:
-                    raid_tracker[guild_id]['lockdown'] = False
-                    raid_tracker[guild_id]['lockdown_at'] = None
-                    # Log auto-unlock
-                    log_ch = m.guild.get_channel(c.get('log_anti_raid', 0))
-                    if log_ch:
-                        e = discord.Embed(
-                            title="✅ Lockdown terminé",
-                            description="Le mode lockdown anti-raid s'est désactivé automatiquement après 5 minutes.",
-                            color=0x57F287
-                        )
-                        e.timestamp = current_time
-                        try: await webhook_send(log_ch, 'raid_alert', embed=e)
-                        except: pass
-            
-            # Nettoyer les anciennes entrées (hors intervalle)
-            cutoff = current_time - timedelta(seconds=join_interval)
-            raid_tracker[guild_id]['joins'] = [
-                (uid, ts) for uid, ts in raid_tracker[guild_id]['joins']
-                if ts > cutoff
-            ]
-            
-            # Ajouter cette arrivée
-            raid_tracker[guild_id]['joins'].append((m.id, current_time))
-            
-            # Vérifier l'âge du compte
-            account_age = (current_time - m.created_at.replace(tzinfo=timezone.utc)).days
-            is_suspicious = account_age < min_account_age
-            
-            # Vérifier si c'est un raid (trop de joins récents)
-            recent_joins = len(raid_tracker[guild_id]['joins'])
-            is_raid = recent_joins >= join_threshold
-            
-            # Si raid détecté → activer lockdown
-            if is_raid and not raid_tracker[guild_id].get('lockdown', False):
-                raid_tracker[guild_id]['lockdown'] = True
-                raid_tracker[guild_id]['lockdown_at'] = current_time
-                
-                # Log + alerte
-                log_ch = m.guild.get_channel(c.get('log_anti_raid', 0))
-                if log_ch:
-                    e = discord.Embed(
-                        title="🚨 RAID DÉTECTÉ !",
-                        description=f"**{recent_joins} membres** ont rejoint en moins de **{join_interval} secondes**\n\n"
-                                    f"⚡ **Action auto:** {'Activée' if auto_mode else 'Désactivée'}\n"
-                                    f"🔒 **Lockdown:** Activé (auto-désactivation dans 5 min)\n"
-                                    f"🎯 **Action:** {action.upper()}",
-                        color=0xFF0000
-                    )
-                    # Lister les derniers joins
-                    recent = raid_tracker[guild_id]['joins'][-10:]
-                    join_list = []
-                    for uid, ts in recent:
-                        member = m.guild.get_member(uid)
-                        name = f"{member.name}" if member else f"ID:{uid}"
-                        age = (current_time - ts).total_seconds()
-                        join_list.append(f"`{name}` — il y a {int(age)}s")
-                    if join_list:
-                        e.add_field(name=f"👥 Derniers joins ({len(recent)})", value="\n".join(join_list[:10]), inline=False)
-                    
-                    e.set_footer(text="🛡️ Anti-Raid • /configure > Protection")
-                    e.timestamp = current_time
-                    await webhook_send(log_ch, 'raid_alert', content="@here" if auto_mode else "", embed=e)
-            
-            # Appliquer l'action si nécessaire
-            should_act = (is_raid or is_suspicious) and (auto_mode or raid_tracker[guild_id].get('lockdown', False))
-            
-            if should_act:
-                reason = f"Anti-Raid: {'Raid détecté' if is_raid else 'Compte suspect'} (âge: {account_age}j)"
-                
-                try:
-                    if action in ('ban', 'kick'):
-                        # owner 2026-06-21 : raid / compte suspect → KICK + DM (JAMAIS ban,
-                        # JAMAIS isolement/mute). Kick direct autorisé pour ces cas (exception
-                        # explicite à la règle founder-only, qui reste valable pour les
-                        # sanctions manuelles via sanction()).
-                        await _kick_young_account(m, reason)
-                    elif action == 'mute':
-                        # Mute avec timeout (uniquement si l'owner a choisi cette action en config)
-                        await m.timeout(timedelta(hours=24), reason=reason)
-
-                    # Log l'action
-                    await send_log(m.guild, 'anti_raid', m, None, reason, f"Action: {action.upper()}")
-                except:
-                    pass
-                
-                return  # Ne pas continuer le traitement
         
         # ═══════════════ ANTI-NEWACCOUNT (standalone) ═══════════════
         if c.get('anti_newaccount'):
@@ -43130,12 +42755,6 @@ async def on_member_join(m):
     except Exception as ex:
         print(f"Erreur on_member_join: {ex}")
 
-    # ═══ Phase 28.2 : Anti-Raid (nouveau système configurable) ═══
-    try:
-        await _handle_antiraid_join(m)
-    except Exception as ex:
-        print(f"[antiraid_join] {ex}")
-
     # ═══ Phase 28.3 : Welcome message ═══
     try:
         await _handle_welcome(m)
@@ -43188,10 +42807,49 @@ async def on_member_join(m):
 
 
 async def _handle_antiraid_join(member):
-    """Phase 28.2 — détecte les raids et applique l'action configurée."""
+    """Détecte les vagues d'arrivées et isole les comptes concernés.
+
+    SEUL système anti-raid depuis 08/2026 : le précédent (clé `anti_raid` +
+    `raid_config`) le neutralisait au lieu de le compléter — voir le commentaire
+    en tête de `on_member_join`.
+
+    Renvoie True si une action a été appliquée AU MEMBRE DÉCLENCHEUR, pour que
+    l'appelant s'arrête et ne le sanctionne pas une seconde fois.
+
+    Le compteur d'arrivées est incrémenté À CHAQUE APPEL, même hors raid : c'est
+    lui qui permet de détecter la vague. Ne jamais sortir avant.
+    """
     c = await cfg(member.guild.id)
+
+    # ── Reprise de l'ancien système, une fois par serveur ────────────────────
+    # Un serveur qui avait configuré l'anti-raid legacy verrait sinon sa protection
+    # tomber en silence. On reprend ses réglages en gardant, pour chaque valeur, la
+    # PLUS PROTECTRICE des deux (seuil le plus bas, fenêtre la plus large, âge de
+    # compte le plus exigeant). On ne peut donc que renforcer, jamais affaiblir.
+    if c.get('anti_raid') and not c.get('antiraid_enabled', False):
+        legacy = c.get('raid_config', {}) or {}
+        try:
+            await db_set(member.guild.id, 'antiraid_join_threshold', min(
+                int(c.get('antiraid_join_threshold', 5) or 5),
+                int(legacy.get('join_threshold', 10) or 10)))
+            await db_set(member.guild.id, 'antiraid_join_window_sec', max(
+                int(c.get('antiraid_join_window_sec', 10) or 10),
+                int(legacy.get('join_interval', 10) or 10)))
+            await db_set(member.guild.id, 'antiraid_min_account_age_days', max(
+                int(c.get('antiraid_min_account_age_days', 7) or 7),
+                int(legacy.get('min_account_age', 7) or 7)))
+            if not int(c.get('antiraid_log_channel', 0) or 0):
+                await db_set(member.guild.id, 'antiraid_log_channel',
+                             int(c.get('log_anti_raid', 0) or 0))
+            await db_set(member.guild.id, 'antiraid_enabled', True)
+            await db_set(member.guild.id, 'anti_raid', 0)
+            print(f"[ANTIRAID] guild={member.guild.id} réglages legacy repris")
+            c = await cfg(member.guild.id)
+        except Exception as ex:
+            print(f"[ANTIRAID migration] {ex}")
+
     if not c.get('antiraid_enabled', False):
-        return
+        return False
 
     threshold = int(c.get('antiraid_join_threshold', 5))
     window = int(c.get('antiraid_join_window_sec', 10))
@@ -43210,7 +42868,7 @@ async def _handle_antiraid_join(member):
     is_suspect = account_age_days < min_age_days
 
     if len(joins) < threshold:
-        return  # Pas encore raid
+        return False  # Pas encore raid : le join est compté, rien à appliquer
 
     # ── Raid détecté ──
     print(f"[ANTIRAID] guild={member.guild.id} {len(joins)} joins en {window}s → RAID")
@@ -43263,6 +42921,18 @@ async def _handle_antiraid_join(member):
         except Exception as ex:
             print(f"[ANTIRAID action] {ex}")
             failed += 1
+
+    # Journal unifié + casier. L'ancien système alimentait send_log('anti_raid'),
+    # pas celui-ci : les raids n'apparaissaient donc ni dans le journal unifié ni
+    # dans l'historique des membres. Capacité reprise ici.
+    try:
+        await send_log(
+            member.guild, 'anti_raid', member, None,
+            f"Raid détecté : {len(joins)} arrivées en {window}s",
+            f"Action: {action.upper()} · {applied}/{len(recent_members)} membre(s)",
+        )
+    except Exception as ex:
+        print(f"[ANTIRAID send_log] {ex}")
 
     # Log dans le salon dédié
     log_ch_id = int(c.get('antiraid_log_channel', 0) or 0)
