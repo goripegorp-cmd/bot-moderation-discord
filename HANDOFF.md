@@ -326,3 +326,96 @@ pour écrire, `ast.parse` avant écriture**.
 
 **Toujours** : un lot = une amélioration vérifiable + CI verte + un message de commit qui explique
 le *pourquoi*, pas seulement le *quoi*.
+
+---
+
+## 12. SYSTÈME D'ACTIVITÉ — REFONTE « RÔLES AFK » (12/08/2026)
+
+Le système de présence a été **entièrement recalculé** sur demande du propriétaire. Ne pas le
+retoucher sans avoir lu ce paragraphe : la règle est contre-intuitive et elle est volontaire.
+
+### Deux mesures, pas une — c'est toute l'astuce
+
+Compter « depuis quand il n'a rien fait » se contourne en une soirée : il suffit de poster un
+message la veille du rappel pour disparaître des listes toute l'année. Le propriétaire a décrit
+lui-même le contournement (« le ping est le vendredi, alors je poste tous les vendredis »).
+On mesure donc **deux choses indépendantes** :
+
+| mesure | ce qu'elle compte | ce qu'elle déclenche |
+|---|---|---|
+| **silence** | jours consécutifs sans rien, **aujourd'hui compris** | les paliers (rôle AFK → retrait → départ) |
+| **présence** | jours vus sur les 7 derniers jours **complets** | le rappel doux |
+
+La journée en cours est **exclue** de la présence : à 9 h personne n'a encore parlé, et la compter
+ferait dépendre le verdict de l'heure du passage. Elle est **incluse** dans le silence, pour qu'un
+retour soit pris en compte à la seconde.
+
+Le posteur du vendredi a un silence minuscule mais une présence de 1/7 : il est nommé chaque
+semaine. Et comme un rappel doux sans suite devient une habitude, **les rappels doux consécutifs
+s'accumulent** : au bout de `doux_max` (défaut 3), il bascule au premier palier. C'est **la seule**
+chose qui l'attrape — le compteur de jours d'absence, lui, ne le voit jamais.
+
+⚠️ La fenêtre est **bornée par l'ancienneté** (arrivée du membre ET âge du suivi). Sans ça, tout
+nouveau venu est « 1 jour sur 7 » dès son inscription.
+
+### Les paliers
+
+| palier | déclencheur | effet |
+|---|---|---|
+| doux | présence < seuil | message léger, **rien de retiré** |
+| 1️⃣ | silence ≥ 7 j | **rôle AFK** → le serveur entier se masque |
+| 2️⃣ | silence ≥ 14 j | 2e rôle AFK + **retrait de TOUS ses rôles**, mémorisés |
+| 3️⃣ | silence ≥ 21 j | **proposé** au staff. Jamais automatique. |
+
+Retour : **immédiat**. `on_message` → `activite_niveaux.porte_une_etiquette` (comparaison
+d'entiers en mémoire, aucun await) → `activite_passage.retour_immediat`. Attendre le passage
+suivant laisserait quelqu'un masqué jusqu'à 6 h après avoir écrit.
+
+### Le masquage — l'action la plus destructrice du bot
+
+`activite_niveaux.appliquer_masquage` pose `view_channel=False` sur **tous** les salons, y compris
+ceux créés plus tard (`on_guild_channel_create`). Restent visibles : le salon d'annonce (en lecture
+seule) et le salon de retour (le seul où l'absent peut écrire).
+
+- **Idempotent** : compare avant d'écrire, un 2e passage ne fait aucun appel réseau.
+- **Annulable** : bouton « Tout rouvrir ». Un masquage qu'on ne peut pas défaire ne s'allume pas.
+- ⚠️ **Piège Discord** : une autorisation *explicite* `view_channel=True` sur un autre rôle du
+  membre **écrase** notre refus. Au palier 2 il n'a plus ces rôles, donc aucun problème ; au
+  palier 1 si. On ne le corrige pas en douce — `niv.conflits()` liste les salons et le panneau
+  les affiche. Le propriétaire tranche.
+
+### Textes membres — courts et bilingues
+
+`activite_textes.py` centralise TOUT ce que les membres lisent, en FR + EN. Deux règles tenues
+**mécaniquement**, pas par bonne volonté :
+- `verifier_longueurs()` échoue si une ligne dépasse 90 caractères (un test la lance) ;
+- un test refuse le jargon (`palier`, `seuil`, `escalade`, `restitution`…) dans les textes membres.
+
+Consigne d'origine : « les gens détestent lire ». Un pavé n'est pas lu, donc n'informe personne.
+
+### Fichiers
+
+| fichier | rôle |
+|---|---|
+| `activite.py` | les deux mesures + `verdict()` (**fonction pure**, testée seule) |
+| `activite_niveaux.py` | rôles AFK, masquage, retrait/restitution de tous les rôles |
+| `activite_textes.py` | FR/EN, garde-fou de longueur |
+| `activite_escalade.py` | classement par rôle, application des paliers, retours |
+| `activite_passage.py` | l'ordre du passage + retour immédiat + accueil des revenants |
+| `activite_message.py` | les 3 messages + règles épinglables + MP de re-bienvenue |
+| `activite_panneau.py` | `ActiviteRolesAfkPanelV2` = rôles, masquage, conflits |
+
+Tests : `tests/test_activite_verdict.py` (les scénarios **du propriétaire**, cités mot pour mot)
+et `tests/test_activite_niveaux.py` (ce que le retrait ne doit **jamais** toucher).
+
+### Vérifier en local — installez les dépendances
+
+Les 3 CI rouges du lot précédent venaient toutes de l'impossibilité de tester en local :
+
+```
+pip install "discord.py>=2.7,<3" aiosqlite aiohttp python-dotenv matplotlib pytest pytest-asyncio
+python -m pytest tests/ -q && DISCORD_TOKEN=x python -c "import bot"
+```
+
+L'`import bot` est le contrôle qui compte : il exécute le code de module et attrape les
+`NameError` que `ast.parse` ne voit pas.

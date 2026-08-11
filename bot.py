@@ -191,6 +191,8 @@ import unified_logger as ulogger2026
 #  que le propriétaire n'a pas activé le système ET désigné une cible.
 import activite as activite_module
 import activite_escalade as activite_esc
+import activite_niveaux as activite_niv
+import activite_message as activite_msg
 import activite_recompenses as activite_rec
 import activite_passage as activite_pass
 import activite_panneau as activite_ui
@@ -23368,6 +23370,8 @@ async def _activite_boot():
     activite_module.setup(get_db=get_db, cfg=cfg, db_set=db_set,
                           est_immunise=est_immunise, log=print)
     activite_esc.setup(log=print)
+    activite_niv.setup(log=print)
+    activite_msg.setup(log=print)
     activite_rec.setup(log=print)
     activite_pass.setup(log=print)
     activite_ui.setup(db_set=db_set, log=print)
@@ -23382,6 +23386,16 @@ async def _activite_boot():
 
     await activite_module.init_db()
     await activite_rec.init_db()
+
+    #  Amorce le cache des rôles d'inactivité pour TOUTES les guildes. Sans lui,
+    #  le retour immédiat sur message ne se déclencherait qu'après le premier
+    #  passage — jusqu'à six heures pendant lesquelles un membre qui revient
+    #  reste masqué et croit le système cassé.
+    for g in bot.guilds:
+        try:
+            activite_niv.memoriser_ids(await activite_module.config(g.id))
+        except Exception as ex:
+            print(f"[activite boot ids {g.id}] {ex}")
 
 
 @bot.event
@@ -26127,6 +26141,18 @@ async def on_member_join(m):
     except Exception:
         pass
 
+    # ── RETOUR APRÈS UNE EXPULSION POUR INACTIVITÉ ──────────────────────────
+    # Quelqu'un qui a été retiré du serveur pour absence et qui revient reçoit un
+    # message privé court : ce qui s'est passé, et la règle. Sans ça, il
+    # redécouvre la règle au moment où elle le frappe une deuxième fois.
+    # En tâche de fond, et volontairement APRÈS l'anti-raid : un message de
+    # confort ne doit jamais retarder une protection.
+    try:
+        if not m.bot:
+            asyncio.create_task(activite_pass.accueillir_revenant(m.guild, m))
+    except Exception as ex:
+        print(f"[on_member_join activite] {ex}")
+
     # AUTO-RÔLE à l'arrivée (quick-win pro) : donne le rôle « Membre » configuré
     # (welcome_autorole) à chaque nouveau. FAIL-SAFE : no-op si non configuré / rôle
     # introuvable / au-dessus du bot / géré par une intégration / perms manquantes.
@@ -27214,6 +27240,16 @@ async def on_guild_channel_create(channel):
                     reason="Radiation totale (/off) — couverture du nouveau salon")
         except Exception as _rex:
             print(f"[radie chan_create] {_rex}")
+        # INACTIVITÉ : même logique pour les rôles AFK. Un salon créé après la
+        # pose du masquage serait visible des absents jusqu'au prochain passage —
+        # et personne ne pense à relancer un masquage après avoir créé un salon.
+        try:
+            _cact = await activite_module.config(channel.guild.id)
+            if _cact.get('activite_enabled'):
+                await activite_niv.masquer_nouveau_salon(
+                    channel.guild, channel, _cact)
+        except Exception as _aex:
+            print(f"[activite chan_create] {_aex}")
         await _log_audited(
             channel.guild, ulogger2026.EventType.CHAN_CREATE,
             discord.AuditLogAction.channel_create, channel.id,
@@ -27843,6 +27879,14 @@ async def on_message(msg):
         if not msg.author.bot:
             await activite_module.marquer_actif(
                 msg.guild.id, msg.author.id, activite_module.SOURCE_MESSAGE)
+            # RETOUR IMMÉDIAT : un membre étiqueté AFK qui écrit récupère ses
+            # rôles et sa vue du serveur MAINTENANT, pas au passage suivant
+            # (jusqu'à 6 h). `porte_une_etiquette` est une comparaison
+            # d'entiers en mémoire, sans await : elle coupe avant tout accès
+            # base ou réseau pour l'immense majorité des messages.
+            if activite_niv.porte_une_etiquette(msg.author):
+                asyncio.create_task(
+                    activite_pass.retour_immediat(msg.guild, msg.author))
     except Exception as _ex_act:
         print(f"[activite on_message] {_ex_act}")
 

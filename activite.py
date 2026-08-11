@@ -22,10 +22,39 @@ micro ou le partage d'écran comptent — des gestes, pas une présence.
 Une seule suffit. La journée va de minuit à minuit **heure de Paris**, et la
 semaine du lundi 00h00 au lundi 00h00 — voir `activite_calendrier.py`.
 
+═══════════════════════════════════════════════════════════════════════════════
+DEUX MESURES, PAS UNE — C'EST TOUTE L'ASTUCE DU SYSTÈME
+═══════════════════════════════════════════════════════════════════════════════
+Compter « depuis quand il n'a rien fait » ne suffit pas, et se contourne en une
+soirée : il suffit de poster UN message la veille du rappel pour remettre le
+compteur à zéro et disparaître des listes toute l'année. C'est exactement le
+scénario décrit par le propriétaire (« le ping est le vendredi, alors je poste
+tous les vendredis »). On mesure donc DEUX choses indépendantes :
+
+  1. LE SILENCE — jours consécutifs sans le moindre geste.
+     Il déclenche les paliers : rôle AFK, retrait des rôles, départ.
+     Il compte AUJOURD'HUI : quelqu'un qui poste maintenant est à 0 tout de
+     suite, et récupère tout dans la foulée.
+
+  2. LA PRÉSENCE — nombre de jours vus sur les 7 derniers jours COMPLETS.
+     Elle déclenche le rappel doux. Le posteur du vendredi a un silence
+     minuscule mais une présence de 1/7 : il est nommé chaque semaine.
+     Elle ne compte QUE des journées terminées — juger la journée en cours
+     punirait un membre parce qu'il n'a pas encore parlé ce matin.
+
+  Et parce qu'un rappel doux sans suite se transforme en habitude, les rappels
+  doux CONSÉCUTIFS s'accumulent : au bout de `doux_max` (défaut 3), le membre
+  bascule au premier palier comme un absent. Le contournement se referme.
+
+⚠️ La fenêtre est BORNÉE par l'ancienneté : arrivé il y a deux jours, on juge
+sur deux jours, pas sur sept. Sans ça, tout nouveau venu est « 1 jour sur 7 »
+dès son inscription et reçoit un rappel avant d'avoir dit bonjour.
+
 L'ESCALADE, par rôle surveillé, avec des seuils propres à chaque rôle :
-  · palier 1 (défaut 7 j)  → rappel public hebdomadaire, le membre garde tout
-  · palier 2 (défaut 14 j) → 2e rappel + RETRAIT DU RÔLE ; pour le récupérer, le
-                             membre doit écrire dans le salon de retour
+  · palier 1 (défaut 7 j)  → rappel public + RÔLE AFK, qui masque tout le serveur
+                             sauf le salon des absents et le salon de retour
+  · palier 2 (défaut 14 j) → 2e rappel + RETRAIT DE TOUS SES RÔLES ; pour tout
+                             récupérer, le membre écrit dans le salon de retour
   · palier 3 (défaut 21 j) → proposé à l'expulsion — JAMAIS automatique, un humain
                              valide dans un panneau dédié
 
@@ -87,6 +116,25 @@ SEUIL_RAPPEL_DEFAUT = 7
 SEUIL_RETRAIT_DEFAUT = 14
 SEUIL_EXPULSION_DEFAUT = 21
 
+#  La fenêtre de présence : sur combien de jours COMPLETS on regarde si le membre
+#  s'est montré. Sept jours = une semaine pleine, quel que soit le jour du rappel.
+#  Volontairement GLISSANTE et non calée sur le lundi : une fenêtre calée serait
+#  contournable en postant toujours le même jour de la semaine.
+FENETRE_PRESENCE_DEFAUT = 7
+
+#  En dessous de ce nombre de jours vus sur la fenêtre, le membre reçoit le
+#  rappel doux — il est venu, mais trop peu pour qu'on parle de présence.
+SEUIL_PRESENCE_DEFAUT = 3
+
+#  Combien de rappels doux CONSÉCUTIFS avant de basculer au premier palier.
+#  C'est ce qui referme le contournement : poster une fois par semaine évite le
+#  silence, mais pas ça.
+DOUX_MAX_DEFAUT = 3
+
+#  Sous cette ancienneté (en jours complets observables), on ne juge PERSONNE sur
+#  sa présence. Un membre arrivé avant-hier n'a pas de semaine à montrer.
+ANCIENNETE_MINIMALE = 3
+
 #  Garde-fou : un passage ne peut jamais toucher plus de membres que ça. Si le
 #  compte dépasse, on n'agit sur PERSONNE et on alerte le staff — c'est le signe
 #  d'un bug de suivi (base vidée, horloge décalée), pas d'un serveur qui dort.
@@ -145,6 +193,31 @@ async def init_db():
             " derniere_alerte TEXT,"
             " PRIMARY KEY(guild_id, user_id))"
         )
+        #  Compteur de rappels doux consécutifs (voir l'en-tête : c'est lui qui
+        #  attrape le posteur du vendredi). Ajouté après coup : `ALTER` toléré en
+        #  échec, la colonne existe déjà sur les serveurs à jour.
+        for colonne, definition in (
+            ("doux", "INTEGER NOT NULL DEFAULT 0"),
+            ("derniere_semaine_doux", "TEXT"),
+        ):
+            try:
+                await db.execute(
+                    f"ALTER TABLE activite_etat ADD COLUMN {colonne} {definition}")
+            except Exception:
+                pass          # colonne déjà présente
+
+        #  Qui est parti pour inactivité, et quand. Sert à accueillir autrement
+        #  quelqu'un qui revient après une expulsion : il ne redécouvre pas la
+        #  règle au moment où elle le frappe une deuxième fois.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS activite_expulses("
+            " guild_id INTEGER NOT NULL,"
+            " user_id INTEGER NOT NULL,"
+            " jour TEXT NOT NULL,"
+            " silence INTEGER NOT NULL DEFAULT 0,"
+            " prevenu INTEGER NOT NULL DEFAULT 0,"
+            " PRIMARY KEY(guild_id, user_id))"
+        )
         await db.commit()
 
 
@@ -172,6 +245,24 @@ CLES_DEFAUT = {
     #  devenir intouchables face aux insultes ou au spam.
     "activite_roles_immunises": [],     # rôles dispensés d'activité
     "activite_membres_immunises": [],   # membres dispensés, un par un
+
+    #  ── Les rôles d'inactivité, portés PAR le membre absent ──────────────────
+    #  Le système ne se contente plus de compter : il ÉTIQUETTE. Le rôle rend
+    #  l'absence visible de tous, y compris de l'intéressé, et c'est lui qui
+    #  porte le masquage des salons (voir `activite_niveaux.py`).
+    "activite_role_niveau1": 0,         # posé au 1er palier — le membre garde tout
+    "activite_role_niveau2": 0,         # posé au 2e — tous ses autres rôles partent
+    #  Masquer TOUT le serveur aux porteurs de ces rôles, sauf les deux salons
+    #  d'activité. Réglable, parce que c'est l'action la plus visible du système.
+    "activite_masquer_salons": True,
+
+    #  ── La mesure de présence (voir l'en-tête du module) ─────────────────────
+    "activite_fenetre": FENETRE_PRESENCE_DEFAUT,
+    "activite_seuil_presence": SEUIL_PRESENCE_DEFAUT,
+    "activite_doux_max": DOUX_MAX_DEFAUT,
+
+    #  ── Accueil de ceux qui reviennent après une expulsion pour inactivité ───
+    "activite_message_retour": True,
 }
 
 
@@ -209,6 +300,10 @@ CLES_ROLE = {
     "rappel": None,          # jours avant le rappel public
     "retrait": None,         # jours avant le retrait du rôle
     "expulsion": None,       # jours avant la proposition d'expulsion
+    #  Exigence de présence PROPRE au rôle : un rôle de clan peut demander d'être
+    #  vu 5 jours sur 7 là où le reste du serveur se contente de 2.
+    "presence": None,        # jours vus mini sur la fenêtre, sinon rappel doux
+    "doux_max": None,        # rappels doux consécutifs tolérés avant le palier 1
     "retirer_role": True,    # retirer effectivement le rôle au palier 2 ?
     #  Comment le rôle revient quand le membre repointe.
     #  True  = rendu automatiquement, dès la première activité.
@@ -250,6 +345,10 @@ def config_du_role(cfg_act: dict, role_id) -> dict:
         "rappel": _n("rappel", SEUIL_RAPPEL_DEFAUT),
         "retrait": _n("retrait", SEUIL_RETRAIT_DEFAUT),
         "expulsion": _n("expulsion", SEUIL_EXPULSION_DEFAUT),
+        "presence": _n("presence", cfg_act.get("activite_seuil_presence")
+                       or SEUIL_PRESENCE_DEFAUT),
+        "doux_max": _n("doux_max", cfg_act.get("activite_doux_max")
+                       or DOUX_MAX_DEFAUT),
         "retirer_role": bool(brut.get("retirer_role", True)),
         "restitution_auto": bool(brut.get("restitution_auto", True)),
         "salon_annonce": int(brut.get("salon_annonce") or
@@ -262,8 +361,9 @@ def config_du_role(cfg_act: dict, role_id) -> dict:
         "dernier_message_rappel": list(brut.get("dernier_message_rappel") or []),
         #  Vrai si le champ a été réglé sur ce rôle : le panneau affiche alors
         #  « propre au rôle » plutôt que « hérité du serveur ».
-        "_propres": {k for k in ("rappel", "retrait", "expulsion",
-                                 "salon_annonce", "salon_retour", "jour_rappel")
+        "_propres": {k for k in ("rappel", "retrait", "expulsion", "presence",
+                                 "doux_max", "salon_annonce", "salon_retour",
+                                 "jour_rappel")
                      if brut.get(k) not in (None, "", 0)},
     }
 
@@ -406,6 +506,143 @@ async def jours_inactif(guild_id: int, member) -> int | None:
     #  que les journées d'activité : sinon un membre arrivé à 23h30 heure de
     #  Paris compterait un jour d'écart de plus.
     return cal.jours_entre(cal.jour(arrivee))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La PRÉSENCE — la mesure qui referme le contournement
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _jour_decale(n: int) -> str:
+    """La journée d'il y a `n` jours, au format base. n=0 → aujourd'hui."""
+    return (cal.debut_du_jour() - timedelta(days=max(0, int(n)))).strftime(JOUR_FMT)
+
+
+async def jours_vus(guild_id: int, user_id: int, depuis: str, jusqu: str) -> list[str]:
+    """Les journées où ce membre a laissé une trace, bornes incluses.
+
+    Comparaison de chaînes `YYYY-MM-DD` : l'ordre lexicographique de ce format
+    est exactement l'ordre chronologique, donc `BETWEEN` fait le bon travail sans
+    conversion — et l'index sur (guild_id, jour) est utilisé tel quel.
+    """
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT jour FROM activite_jours"
+                " WHERE guild_id=? AND user_id=? AND jour BETWEEN ? AND ?"
+                " ORDER BY jour",
+                (guild_id, user_id, depuis, jusqu),
+            ) as cur:
+                return [r[0] for r in await cur.fetchall()]
+    except Exception as ex:
+        _log(f"[activite jours_vus] {ex}")
+        return []
+
+
+async def anciennete_du_suivi(guild_id: int) -> int | None:
+    """Depuis combien de jours cette guilde enregistre-t-elle quelque chose ?
+
+    Sert de plafond à la fenêtre de présence. Un système allumé avant-hier n'a
+    que deux jours d'historique : juger « 1 jour sur 7 » reviendrait à compter
+    comme absences cinq journées que le bot n'a jamais observées.
+    """
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT MIN(jour) FROM activite_jours WHERE guild_id=?", (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        return cal.jours_entre(row[0]) if row and row[0] else None
+    except Exception as ex:
+        _log(f"[activite anciennete_du_suivi] {ex}")
+        return None
+
+
+async def presence(guild_id: int, member, cfg_act: dict,
+                   suivi_jours: int | None = None) -> dict:
+    """Les DEUX mesures d'un membre, calculées ensemble.
+
+    ┌ silence ─── jours consécutifs sans le moindre geste, AUJOURD'HUI COMPRIS.
+    │             C'est lui qui fait monter les paliers. Il tombe à 0 à la
+    │             seconde où le membre reparle, pour que le retour soit immédiat.
+    └ presents ── journées vues sur la fenêtre de jours COMPLETS précédant
+                  aujourd'hui. C'est elle qui attrape celui qui poste une fois
+                  par semaine : son silence reste bas, sa présence reste à 1/7.
+
+    La journée EN COURS est délibérément exclue de `presents` : à 9 h du matin,
+    personne n'a encore parlé, et compter cette journée comme manquée ferait
+    dépendre le verdict de l'heure du passage.
+
+    `jugeable` est faux quand on n'a pas assez de recul — nouveau membre, ou
+    système allumé il y a trois jours. Dans ce cas, AUCUN rappel doux : on ne
+    reproche pas une absence sur des journées qu'on n'a pas observées.
+    """
+    fenetre_voulue = max(1, int(cfg_act.get("activite_fenetre")
+                                or FENETRE_PRESENCE_DEFAUT))
+
+    silence = await jours_inactif(guild_id, member)
+
+    #  Combien de journées COMPLÈTES ce membre pouvait-il seulement remplir ?
+    #  On prend la plus contraignante des deux : son arrivée, et l'âge du suivi.
+    bornes = []
+    arrivee = getattr(member, "joined_at", None)
+    if arrivee is not None:
+        depuis_arrivee = cal.jours_entre(cal.jour(arrivee))
+        if depuis_arrivee is not None:
+            bornes.append(depuis_arrivee)
+    if suivi_jours is None:
+        suivi_jours = await anciennete_du_suivi(guild_id)
+    if suivi_jours is not None:
+        bornes.append(suivi_jours)
+    observables = min(bornes) if bornes else 0
+
+    fenetre = max(1, min(fenetre_voulue, observables))
+    jugeable = observables >= ANCIENNETE_MINIMALE
+
+    vus = await jours_vus(guild_id, member.id, _jour_decale(fenetre), _jour_decale(1))
+    return {
+        "silence": silence,
+        "presents": len(set(vus)),
+        "fenetre": fenetre,
+        "jugeable": jugeable,
+        "observables": observables,
+        "jours_vus": sorted(set(vus)),
+    }
+
+
+def verdict(mesure: dict, conf: dict, doux_deja: int = 0) -> str:
+    """Le palier d'un membre, à partir de ses deux mesures. FONCTION PURE.
+
+    Pure exprès : c'est LA règle du système, et une règle qui ne se teste
+    qu'avec un vrai serveur Discord derrière n'est jamais testée. Elle se vérifie
+    ici avec des dictionnaires, en une milliseconde, sur tous les cas limites.
+
+    Renvoie l'un de : "expulsion", "retrait", "rappel", "doux", "actif".
+    L'ordre du plus grave au moins grave n'est pas cosmétique : un membre ne doit
+    apparaître QUE dans une liste, sinon il reçoit deux messages contradictoires.
+    """
+    silence = mesure.get("silence")
+    if silence is None:
+        return "actif"          # rien de connu : on ne devine pas, on n'agit pas
+
+    if silence >= conf["expulsion"]:
+        return "expulsion"
+    if silence >= conf["retrait"]:
+        return "retrait"
+    if silence >= conf["rappel"]:
+        return "rappel"
+
+    #  Le membre a donné signe récemment. Reste à savoir s'il l'a fait ASSEZ.
+    if not mesure.get("jugeable"):
+        return "actif"          # trop récent pour qu'on lui reproche quoi que ce soit
+
+    if mesure.get("presents", 0) >= conf["presence"]:
+        return "actif"
+
+    #  Présence trop faible. Un rappel doux, sauf s'il en a déjà collectionné :
+    #  poster une fois par semaine ne doit pas être une stratégie viable.
+    if doux_deja + 1 >= conf["doux_max"]:
+        return "rappel"
+    return "doux"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -569,6 +806,124 @@ def diagnostic_texte(d: dict) -> str:
         lignes.append(f"-# Aucune trace pour : {', '.join(muettes)}. "
                       f"Testez-les vous-même, puis rouvrez cet écran.")
     return "\n".join(lignes)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Le compteur de rappels doux — la mémoire qui referme le contournement
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def lire_doux(guild_id: int, user_id: int) -> tuple[int, str]:
+    """(nombre de rappels doux consécutifs, dernière semaine comptée)."""
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT doux, derniere_semaine_doux FROM activite_etat"
+                " WHERE guild_id=? AND user_id=?", (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        return (int(row[0] or 0), str(row[1] or "")) if row else (0, "")
+    except Exception as ex:
+        _log(f"[activite lire_doux] {ex}")
+        return (0, "")
+
+
+async def noter_doux(guild_id: int, user_id: int, semaine: str) -> int:
+    """Compte un rappel doux de plus, UNE SEULE FOIS par semaine.
+
+    Le garde-semaine n'est pas un détail : le passage tourne plusieurs fois par
+    jour. Sans lui, un membre atteindrait `doux_max` en une journée et se
+    retrouverait au palier 1 pour une seule semaine un peu creuse.
+    """
+    try:
+        n, derniere = await lire_doux(guild_id, user_id)
+        if derniere == semaine:
+            return n            # déjà compté cette semaine
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO activite_etat(guild_id, user_id, doux,"
+                " derniere_semaine_doux) VALUES(?,?,?,?)"
+                " ON CONFLICT(guild_id, user_id) DO UPDATE SET"
+                "  doux=?, derniere_semaine_doux=?",
+                (guild_id, user_id, n + 1, semaine, n + 1, semaine),
+            )
+            await db.commit()
+        return n + 1
+    except Exception as ex:
+        _log(f"[activite noter_doux] {ex}")
+        return 0
+
+
+async def remettre_doux(guild_id: int, user_id: int) -> None:
+    """Efface le compteur : le membre a repris une présence normale.
+
+    Appelé quand la présence repasse au-dessus du seuil, PAS à la première
+    activité — sinon un message suffirait à effacer trois semaines de contournement,
+    et le compteur ne servirait plus à rien.
+    """
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE activite_etat SET doux=0, derniere_semaine_doux=NULL"
+                " WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+            await db.commit()
+    except Exception as ex:
+        _log(f"[activite remettre_doux] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Mémoire des départs pour inactivité
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def noter_expulsion(guild_id: int, user_id: int, silence: int) -> None:
+    """Retient qu'un membre est parti pour inactivité.
+
+    Sans cette trace, quelqu'un qui revient six mois plus tard redécouvre la
+    règle au moment où elle le frappe une deuxième fois. Avec elle, on peut
+    l'accueillir en lui rappelant calmement ce qui s'est passé.
+    """
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO activite_expulses(guild_id, user_id, jour, silence,"
+                " prevenu) VALUES(?,?,?,?,0)"
+                " ON CONFLICT(guild_id, user_id) DO UPDATE SET"
+                "  jour=?, silence=?, prevenu=0",
+                (guild_id, user_id, _aujourdhui(), int(silence),
+                 _aujourdhui(), int(silence)),
+            )
+            await db.commit()
+    except Exception as ex:
+        _log(f"[activite noter_expulsion] {ex}")
+
+
+async def etait_expulse(guild_id: int, user_id: int) -> dict | None:
+    """Ce membre est-il déjà parti pour inactivité ? None sinon."""
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT jour, silence, prevenu FROM activite_expulses"
+                " WHERE guild_id=? AND user_id=?", (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        return {"jour": row[0], "silence": int(row[1] or 0),
+                "prevenu": bool(row[2])}
+    except Exception as ex:
+        _log(f"[activite etait_expulse] {ex}")
+        return None
+
+
+async def marquer_prevenu(guild_id: int, user_id: int) -> None:
+    """Le message d'accueil est parti : ne pas le renvoyer au prochain passage."""
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE activite_expulses SET prevenu=1"
+                " WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+            await db.commit()
+    except Exception as ex:
+        _log(f"[activite marquer_prevenu] {ex}")
 
 
 def duree_lisible(jours: int) -> str:

@@ -11,9 +11,11 @@ ARCHITECTURE
   ActivitePanelV2            racine : interrupteur, état, accès aux sections
    ├── ActiviteCiblesPanelV2   qui est surveillé (rôles, ou tout le monde)
    │    └── ActiviteRoleSeuilsPanelV2   seuils PROPRES à un rôle
+   ├── ActiviteRolesAfkPanelV2 les deux rôles d'absence + masquage des salons
    ├── ActiviteSalonsPanelV2   annonce · retour · staff
    ├── ActiviteRecompensesPanelV2  niveaux et VIP
-   └── ActiviteApercuPanelV2   aperçu à blanc + validation des expulsions
+   ├── ActiviteApercuPanelV2   aperçu à blanc + validation des expulsions
+   └── ActiviteDispensesPanelV2  qui est dispensé de présence
 
 Chaque panneau lit son état à l'ouverture (`render_to`) et n'écrit qu'au clic.
 Le module ne connaît pas `bot.py` : tout ce dont il a besoin lui est injecté par
@@ -26,6 +28,7 @@ from discord.ui import Button, ChannelSelect, RoleSelect, Select, UserSelect
 
 import activite
 import activite_escalade as esc
+import activite_niveaux as niv
 import activite_passage as passage
 import activite_recompenses as rec
 from ui_v2 import (
@@ -84,8 +87,16 @@ class _Base(LayoutView):
         self.clear_items()
         self.add_item(v2_container(*items, color=couleur))
         if edit:
-            await i.response.edit_message(content=None, view=self,
-                                          embed=None, attachments=[])
+            #  Un panneau qui a dû répondre avant de travailler (masquage de deux
+            #  cents salons : bien au-delà des 3 secondes accordées) arrive ici
+            #  avec l'interaction déjà consommée. Sans ce cas, son résultat ne
+            #  s'affiche jamais et le bouton paraît sans effet.
+            if i.response.is_done():
+                await i.edit_original_response(content=None, view=self,
+                                               embed=None, attachments=[])
+            else:
+                await i.response.edit_message(content=None, view=self,
+                                              embed=None, attachments=[])
         else:
             await i.response.send_message(view=self, ephemeral=True)
 
@@ -118,6 +129,8 @@ class ActivitePanelV2(_Base):
             ret = self.g.get_channel(int(c["activite_salon_retour"] or 0))
             st = self.g.get_channel(int(c["activite_salon_staff"] or 0))
             vip = self.g.get_role(int(cr["activite_vip_role"] or 0))
+            afk1 = self.g.get_role(int(c["activite_role_niveau1"] or 0))
+            afk2 = self.g.get_role(int(c["activite_role_niveau2"] or 0))
 
             items = [
                 v2_title("📊 Système d'activité"),
@@ -141,11 +154,25 @@ class ActivitePanelV2(_Base):
                     f"niveaux {'actifs' if cr['activite_recompenses_enabled'] else 'éteints'}"
                     f" · VIP {vip.mention if vip else '⚪ _aucun rôle_'}"
                 ),
-                v2_divider(),
                 v2_body(
-                    "**Ce qui se passe, par rôle et selon vos seuils :**\n"
-                    "1️⃣ rappel public — le membre garde tout\n"
-                    "2️⃣ rappel + **retrait du rôle**, rendu automatiquement au retour\n"
+                    f"{_pastille(bool(afk1 and afk2))} **Rôles AFK** · "
+                    f"{afk1.mention if afk1 else '⚪ _niveau 1 manquant_'} → "
+                    f"{afk2.mention if afk2 else '⚪ _niveau 2 manquant_'}\n"
+                    f"{_pastille(c['activite_masquer_salons'])} **Masquage** · "
+                    f"{'les absents ne voient plus que 2 salons' if c['activite_masquer_salons'] else 'désactivé'}"
+                ),
+                v2_divider(),
+                #  La règle telle qu'un membre la vit, pas telle que le code la
+                #  calcule. Les seuils affichés sont ceux du serveur ; un rôle
+                #  qui a les siens le montre dans son propre écran.
+                v2_body(
+                    f"**La règle : être vu au moins "
+                    f"`{c['activite_seuil_presence']}` jour(s) sur "
+                    f"`{c['activite_fenetre']}`.**\n"
+                    f"👀 vu trop rarement → simple rappel, rien de retiré "
+                    f"(`{c['activite_doux_max']}` fois de suite → passe en 1️⃣)\n"
+                    "1️⃣ silence prolongé → **rôle AFK**, le serveur se masque\n"
+                    "2️⃣ **tous ses rôles retirés** — rendus dès son retour\n"
                     "3️⃣ **proposé à l'expulsion** — jamais automatique, vous validez"
                 ),
                 v2_divider(),
@@ -175,9 +202,13 @@ class ActivitePanelV2(_Base):
                             style=discord.ButtonStyle.secondary, custom_id="act_disp")
             b_disp.callback = self._cb_dispenses
 
-            items.append(discord.ui.ActionRow(b_on, b_cibles, b_salons, b_rec))
+            b_afk = Button(label="Rôles AFK & masquage", emoji="💤",
+                           style=discord.ButtonStyle.primary, custom_id="act_afk")
+            b_afk.callback = self._cb_afk
+
+            items.append(discord.ui.ActionRow(b_on, b_cibles, b_salons, b_afk))
             items.append(discord.ui.ActionRow(
-                b_ap, b_disp, _bouton_retour(self._cb_retour, "act_back")))
+                b_rec, b_ap, b_disp, _bouton_retour(self._cb_retour, "act_back")))
             await self._envoyer(i, items, Palette.INFO, edit)
         except Exception as ex:
             await self._secours(i, ex, "racine")
@@ -204,6 +235,9 @@ class ActivitePanelV2(_Base):
 
     async def _cb_dispenses(self, i):
         await ActiviteDispensesPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_afk(self, i):
+        await ActiviteRolesAfkPanelV2(self.u, self.g).render_to(i, edit=True)
 
     async def _cb_retour(self, i):
         #  Injecté par bot.py pour éviter l'import circulaire avec MainPanelV2.
@@ -343,22 +377,34 @@ class ActiviteCiblesPanelV2(_Base):
 
 
 class _SeuilsModal(discord.ui.Modal):
-    """Les trois seuils d'un rôle, en jours."""
+    """Les seuils d'un rôle : trois durées de silence, plus l'exigence de présence.
+
+    Cinq champs — le maximum d'un formulaire Discord, et c'est exactement ce
+    qu'il faut : les trois paliers de silence, le nombre de jours où il faut
+    s'être montré, et le nombre de rappels doux tolérés d'affilée.
+    """
 
     def __init__(self, parent, rid: int, s: dict):
-        super().__init__(title="Seuils d'inactivité (en jours)")
+        super().__init__(title="Seuils d'activité")
         self.parent = parent
         self.rid = rid
         self.rappel = discord.ui.TextInput(
-            label="Rappel public", default=str(s["rappel"]),
+            label="Silence avant le rôle AFK (jours)", default=str(s["rappel"]),
             placeholder="7", max_length=4)
         self.retrait = discord.ui.TextInput(
-            label="Retrait du rôle", default=str(s["retrait"]),
-            placeholder="14", max_length=4)
+            label="Silence avant le retrait des rôles (jours)",
+            default=str(s["retrait"]), placeholder="14", max_length=4)
         self.expulsion = discord.ui.TextInput(
-            label="Proposition d'expulsion", default=str(s["expulsion"]),
-            placeholder="21", max_length=4)
-        for x in (self.rappel, self.retrait, self.expulsion):
+            label="Silence avant proposition d'expulsion (jours)",
+            default=str(s["expulsion"]), placeholder="21", max_length=4)
+        self.presence = discord.ui.TextInput(
+            label="Jours de présence exigés sur la fenêtre",
+            default=str(s["presence"]), placeholder="3", max_length=3)
+        self.doux = discord.ui.TextInput(
+            label="Rappels doux d'affilée avant le rôle AFK",
+            default=str(s["doux_max"]), placeholder="3", max_length=3)
+        for x in (self.rappel, self.retrait, self.expulsion,
+                  self.presence, self.doux):
             self.add_item(x)
 
     async def on_submit(self, i):
@@ -377,9 +423,28 @@ class _SeuilsModal(discord.ui.Modal):
                     "❌ Les seuils doivent être croissants : rappel < retrait < expulsion.",
                     ephemeral=True)
 
+            c = await activite.config(self.parent.g.id)
+            fenetre = int(c.get("activite_fenetre") or activite.FENETRE_PRESENCE_DEFAUT)
+            presence = int(str(self.presence.value).strip())
+            #  Exiger plus de jours que la fenêtre n'en contient rendrait TOUT LE
+            #  MONDE fautif en permanence, y compris les membres présents chaque
+            #  jour. C'est le réglage qui transforme le système en machine à
+            #  expulser : on le refuse net.
+            if not 1 <= presence <= fenetre:
+                return await i.response.send_message(
+                    f"❌ La présence exigée doit être entre 1 et {fenetre} — "
+                    f"la fenêtre ne compte que {fenetre} jour(s).", ephemeral=True)
+
+            doux = int(str(self.doux.value).strip())
+            if not 1 <= doux <= 52:
+                return await i.response.send_message(
+                    "❌ Les rappels doux tolérés doivent être entre 1 et 52.",
+                    ephemeral=True)
+
             await activite.ecrire_config_role(
                 self.parent.g.id, self.rid,
-                rappel=vals[0], retrait=vals[1], expulsion=vals[2])
+                rappel=vals[0], retrait=vals[1], expulsion=vals[2],
+                presence=presence, doux_max=doux)
             await ActiviteRoleSeuilsPanelV2(
                 self.parent.u, self.parent.g, self.rid).render_to(i, edit=True)
         except ValueError:
@@ -439,8 +504,15 @@ class ActiviteRoleSeuilsPanelV2(_Base):
                 ),
                 v2_divider(),
                 v2_body(
-                    f"1️⃣ **Rappel** · `{conf['rappel']}` j{_marque('rappel')}\n"
-                    f"2️⃣ **Retrait du rôle** · `{conf['retrait']}` j{_marque('retrait')}\n"
+                    f"👀 **Présence exigée** · `{conf['presence']}` jour(s) vu(s) "
+                    f"sur `{c['activite_fenetre']}`{_marque('presence')}\n"
+                    f"-# En dessous : rappel doux, rien de retiré. "
+                    f"`{conf['doux_max']}` fois d'affilée{_marque('doux_max')} "
+                    f"et il passe en 1️⃣."
+                ),
+                v2_body(
+                    f"1️⃣ **Rôle AFK** · `{conf['rappel']}` j de silence{_marque('rappel')}\n"
+                    f"2️⃣ **Tous ses rôles retirés** · `{conf['retrait']}` j{_marque('retrait')}\n"
                     f"3️⃣ **Expulsion proposée** · `{conf['expulsion']}` j{_marque('expulsion')}"
                 ),
                 v2_body(
@@ -453,11 +525,11 @@ class ActiviteRoleSeuilsPanelV2(_Base):
                 ),
                 v2_divider(),
                 v2_body(
-                    f"{_pastille(conf['retirer_role'])} **Retirer le rôle au palier 2** · "
-                    + ("oui" if conf["retirer_role"] else "non — le membre le garde")
+                    f"{_pastille(conf['retirer_role'])} **Retirer tous ses rôles au 2️⃣** · "
+                    + ("oui" if conf["retirer_role"] else "non — il garde tout")
                 ),
                 v2_body(
-                    f"{_pastille(conf['restitution_auto'])} **Retour du rôle** · "
+                    f"{_pastille(conf['restitution_auto'])} **Retour des rôles** · "
                     + ("automatique dès la première activité"
                        if conf["restitution_auto"]
                        else "**validé par le staff** — pour un rôle qui a de la valeur")
@@ -604,6 +676,226 @@ class ActiviteRoleSeuilsPanelV2(_Base):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  RÔLES AFK ET MASQUAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ActiviteRolesAfkPanelV2(_Base):
+    """Les deux rôles d'inactivité, et le masquage du serveur qu'ils portent.
+
+    L'écran le plus délicat du système : c'est ici qu'on décide que des membres
+    ne verront plus rien du serveur. Il affiche donc TROIS choses avant tout
+    bouton — quels rôles, si le bot peut réellement les manipuler, et quels
+    salons resteraient visibles malgré le masquage.
+    """
+
+    def __init__(self, u, g):
+        super().__init__(u, g)
+        #  Résultat de la dernière action, affiché en haut. Sans ce retour, un
+        #  bouton qui travaille 90 secondes semble n'avoir rien fait.
+        self._dernier = ""
+
+    async def render_to(self, i, *, edit: bool = True):
+        try:
+            c = await activite.config(self.g.id)
+            r1 = self.g.get_role(int(c["activite_role_niveau1"] or 0))
+            r2 = self.g.get_role(int(c["activite_role_niveau2"] or 0))
+            ouverts = niv.salons_ouverts(self.g, c)
+            confl = niv.conflits(self.g, c) if (r1 or r2) else []
+
+            def _etat(r, niveau: int) -> str:
+                if r is None:
+                    return f"⚪ **Niveau {niveau}** · _aucun rôle_"
+                if not niv.utilisable(self.g, r):
+                    return (f"🔴 **Niveau {niveau}** · {r.mention}\n"
+                            f"-# ⚠️ Le bot ne peut pas le poser : remontez son "
+                            f"propre rôle au-dessus de celui-ci dans les "
+                            f"paramètres du serveur.")
+                return f"🟢 **Niveau {niveau}** · {r.mention} · `{len(r.members)}` membre(s)"
+
+            items = [
+                v2_title("💤 Rôles AFK & masquage"),
+                v2_subtitle("Le rôle rend l'absence visible — et masque le serveur"),
+                v2_divider(),
+                v2_body(f"{_etat(r1, 1)}\n-# Posé au 1er seuil. Le membre garde "
+                        f"tous ses autres rôles."),
+                v2_body(f"{_etat(r2, 2)}\n-# Posé au 2e seuil, en même temps que "
+                        f"le retrait de tous ses rôles."),
+                v2_divider(),
+            ]
+
+            if self._dernier:
+                items.append(v2_body(self._dernier))
+                items.append(v2_divider())
+
+            #  Ce que le masquage laisse ouvert. Affiché AVANT le bouton, parce
+            #  que c'est la seule information qui permet de juger si l'on va
+            #  enfermer les absents ou leur laisser une porte.
+            if ouverts:
+                noms = []
+                for sid in sorted(ouverts):
+                    ch = self.g.get_channel(sid)
+                    noms.append(ch.mention if ch else f"`{sid}` _(introuvable)_")
+                reste = "  ·  ".join(noms)
+            else:
+                reste = "⚠️ **aucun** — les absents seraient enfermés sans issue"
+
+            items.append(v2_body(
+                f"{_pastille(c['activite_masquer_salons'])} **Masquage des salons**\n"
+                f"-# Tous les salons deviennent invisibles aux porteurs de ces "
+                f"rôles, y compris ceux créés plus tard.\n"
+                f"👁️ **Resteraient visibles** · {reste}"))
+
+            #  Le piège des permissions Discord, rendu concret. Voir l'en-tête de
+            #  `activite_niveaux.py` : une autorisation explicite sur un autre
+            #  rôle écrase notre refus, et seul le 2e niveau y échappe.
+            if confl:
+                apercu = ", ".join(f"#{x['salon']}" for x in confl[:5])
+                if len(confl) > 5:
+                    apercu += f" … (+{len(confl) - 5})"
+                items.append(v2_body(
+                    f"⚠️ **`{len(confl)}` salon(s) resteront visibles au niveau 1**\n"
+                    f"-# {apercu}\n"
+                    f"-# Un autre rôle du membre y autorise explicitement la "
+                    f"lecture, ce qui écrase le masquage. Au niveau 2 il n'a "
+                    f"plus ces rôles, donc il ne les verra plus."))
+
+            items.append(v2_divider())
+
+            for niveau, cle in ((1, "activite_role_niveau1"),
+                                (2, "activite_role_niveau2")):
+                sel = RoleSelect(
+                    placeholder=f"Rôle du niveau {niveau}…",
+                    min_values=1, max_values=1, custom_id=f"act_afk_{niveau}")
+                sel.callback = self._faire_role(cle)
+                items.append(discord.ui.ActionRow(sel))
+
+            b_creer = Button(
+                label="Créer les rôles manquants", emoji="✨",
+                style=discord.ButtonStyle.success, custom_id="act_afk_creer",
+                disabled=bool(r1 and r2))
+            b_creer.callback = self._cb_creer
+
+            b_masq = Button(
+                label="Masquage activé" if c["activite_masquer_salons"]
+                else "Masquage désactivé",
+                emoji="🙈" if c["activite_masquer_salons"] else "👁️",
+                style=(discord.ButtonStyle.success if c["activite_masquer_salons"]
+                       else discord.ButtonStyle.secondary),
+                custom_id="act_afk_masq")
+            b_masq.callback = self._cb_masquage
+
+            b_app = Button(
+                label="Appliquer maintenant", emoji="🔒",
+                style=discord.ButtonStyle.primary, custom_id="act_afk_app",
+                disabled=not (r1 or r2) or not c["activite_masquer_salons"])
+            b_app.callback = self._cb_appliquer
+
+            b_def = Button(
+                label="Tout rouvrir", emoji="↩️",
+                style=discord.ButtonStyle.danger, custom_id="act_afk_def",
+                disabled=not (r1 or r2))
+            b_def.callback = self._cb_rouvrir
+
+            items.append(discord.ui.ActionRow(b_creer, b_masq, b_app, b_def))
+            items.append(discord.ui.ActionRow(
+                _bouton_retour(self._cb_retour, "act_afk_back")))
+            await self._envoyer(i, items, Palette.INFO, edit)
+        except Exception as ex:
+            await self._secours(i, ex, "rôles afk")
+
+    def _faire_role(self, cle: str):
+        async def _cb(i):
+            try:
+                await _db_set(self.g.id, cle, int(i.data["values"][0]))
+                #  Le cache du retour immédiat doit connaître ce rôle TOUT DE
+                #  SUITE : sans ça, un membre étiqueté qui écrit ne serait
+                #  débloqué qu'au passage suivant, jusqu'à six heures plus tard.
+                niv.memoriser_ids(await activite.config(self.g.id))
+                self._dernier = ""
+                await self.render_to(i, edit=True)
+            except Exception as ex:
+                await self._secours(i, ex, f"rôle afk {cle}")
+        return _cb
+
+    async def _cb_creer(self, i):
+        """Crée les rôles absents. Ne touche jamais à ceux déjà désignés."""
+        try:
+            await i.response.defer()
+            c = await activite.config(self.g.id)
+            crees = []
+            for niveau, cle in ((1, "activite_role_niveau1"),
+                                (2, "activite_role_niveau2")):
+                if self.g.get_role(int(c.get(cle) or 0)) is not None:
+                    continue
+                r = await niv.creer_role(self.g, niveau)
+                if r is not None:
+                    await _db_set(self.g.id, cle, r.id)
+                    crees.append(r.name)
+            if crees:
+                niv.memoriser_ids(await activite.config(self.g.id))
+            self._dernier = (f"✅ Créé : {', '.join(crees)}" if crees
+                             else "⚠️ Rien à créer, ou permission « Gérer les "
+                                  "rôles » manquante.")
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "création rôles afk")
+
+    async def _cb_masquage(self, i):
+        try:
+            c = await activite.config(self.g.id)
+            await _db_set(self.g.id, "activite_masquer_salons",
+                          not c["activite_masquer_salons"])
+            self._dernier = ""
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "bascule masquage")
+
+    async def _cb_appliquer(self, i):
+        """Pose le masquage sur tous les salons, tout de suite.
+
+        Le passage quotidien le fait déjà, mais l'attendre pour vérifier que la
+        configuration est bonne serait absurde : on veut voir le résultat au
+        moment où on règle, pas le lendemain.
+        """
+        try:
+            await i.response.defer()
+            c = await activite.config(self.g.id)
+            res = await niv.appliquer_masquage(self.g, c)
+            if res.get("raison"):
+                self._dernier = f"⚠️ {res['raison']}"
+            else:
+                self._dernier = (
+                    f"🔒 `{res['modifies']}` salon(s) masqué(s) · "
+                    f"`{res['deja_bons']}` déjà en règle"
+                    + (f" · ⚠️ `{res['ignores']}` hors de portée du bot"
+                       if res["ignores"] else "")
+                    + (f" · ❌ `{res['echecs']}` échec(s)" if res["echecs"] else ""))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "application masquage")
+
+    async def _cb_rouvrir(self, i):
+        """Retire toutes les surcharges posées par le système. Le retour arrière.
+
+        Bouton rouge et volontairement présent : un système de masquage qu'on ne
+        peut pas défaire d'un clic ne devrait jamais être allumé.
+        """
+        try:
+            await i.response.defer()
+            c = await activite.config(self.g.id)
+            res = await niv.retirer_masquage(self.g, c)
+            self._dernier = (f"↩️ `{res['nettoyes']}` salon(s) rouvert(s)"
+                             + (f" · ❌ `{res['echecs']}` échec(s)"
+                                if res["echecs"] else ""))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "réouverture")
+
+    async def _cb_retour(self, i):
+        await ActivitePanelV2(self.u, self.g).render_to(i, edit=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  SALONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -690,8 +982,8 @@ class ActiviteRecompensesPanelV2(_Base):
             cr = await rec.config(self.g.id)
             on = bool(cr["activite_recompenses_enabled"])
             vip = self.g.get_role(int(cr["activite_vip_role"] or 0))
-            niv = int(cr["activite_vip_niveau"] or 6)
-            jours_vip = rec.jours_pour_niveau(niv)
+            niveau_vip = int(cr["activite_vip_niveau"] or 6)
+            jours_vip = rec.jours_pour_niveau(niveau_vip)
 
             echelle = " · ".join(
                 f"n{n}={rec.jours_pour_niveau(n)}j" for n in (1, 3, 6, 9, 12, 15))
@@ -703,7 +995,7 @@ class ActiviteRecompensesPanelV2(_Base):
                 v2_body(
                     f"{_pastille(on)} **Niveaux** · {'actifs' if on else 'éteints'}\n"
                     f"👑 **Rôle VIP** · {vip.mention if vip else '⚪ _aucun_'}\n"
-                    f"🎯 **VIP à partir du** niveau `{niv}` — soit `{jours_vip}` jours actifs"
+                    f"🎯 **VIP à partir du** niveau `{niveau_vip}` — soit `{jours_vip}` jours actifs"
                 ),
                 v2_divider(),
                 v2_body(
@@ -727,7 +1019,7 @@ class ActiviteRecompensesPanelV2(_Base):
                           style=discord.ButtonStyle.success if on else discord.ButtonStyle.secondary,
                           custom_id="act_rec_toggle")
             b_on.callback = self._cb_toggle
-            b_niv = Button(label=f"VIP au niveau {niv}", emoji="🎯",
+            b_niv = Button(label=f"VIP au niveau {niveau_vip}", emoji="🎯",
                            style=discord.ButtonStyle.primary, custom_id="act_rec_niv")
             b_niv.callback = self._cb_niveau
 
@@ -857,6 +1149,11 @@ class ActiviteApercuPanelV2(_Base):
                     epargnes += 1
                     continue
                 try:
+                    #  La trace est écrite AVANT l'expulsion. Après, le membre
+                    #  n'est plus dans la guilde et le moindre échec ferait
+                    #  perdre la raison de son départ — donc l'accueil différent
+                    #  qu'on lui doit s'il revient un jour.
+                    await activite.noter_expulsion(self.g.id, m.id, f["jours"])
                     await m.kick(reason=f"Inactif depuis {f['jours']} jours")
                     faits += 1
                 except Exception as ex:

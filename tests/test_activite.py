@@ -134,15 +134,21 @@ def test_plafond_d_affichage_raisonnable():
 
 
 def test_message_explique_que_ce_n_est_pas_une_sanction():
-    """Exigence explicite du proprietaire : le rappel ne doit pas punir."""
+    """Exigence explicite du proprietaire : le rappel ne doit pas punir.
+
+    La formule vit desormais dans `activite_textes`, et le message l'inclut a
+    chaque palier. Elle a ete RACCOURCIE (le proprietaire a demande des textes
+    courts : « les gens detestent lire ») — on verifie donc la presence de la
+    formule, plus la longue justification d'origine qui n'etait pas lue.
+    """
     import pathlib
+    import activite_textes as txt
+    pied = txt.pas_une_sanction()
+    assert "sanction" in pied and "punishment" in pied
+
     src = pathlib.Path("activite_message.py").read_text(encoding="utf-8")
-    bloc = src.split("def construire(")[1]
-    assert "ni une sanction" in bloc
-    assert "ni un reproche" in bloc
-    for mot in ("message", "vocal", "reagir", "réagir"):
-        pass
-    assert "fantomes" in bloc or "fantômes" in bloc
+    bloc = src.split("def construire(")[1].split("def construire_regles(")[0]
+    assert "pas_une_sanction" in bloc, "chaque rappel doit porter la formule"
 
 
 def test_message_supprime_avant_de_reposter():
