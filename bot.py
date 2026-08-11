@@ -33827,6 +33827,195 @@ def _format_warn_id(infraction_id: int, created_dt=None) -> str:
 
 
 
+@mod_group.command(name="warn", description="⚠️ Avertir un membre (crée une fiche, aucun rôle attribué)")
+@app_commands.describe(membre="Le membre à avertir", raison="La raison de l'avertissement")
+async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
+    # Gardes RAPIDES d'abord (config en cache + tests purs → ~0 ms) : elles gardent leur réponse
+    # ÉPHÉMÈRE d'origine (l'erreur ne doit pas s'afficher en public).
+    if not await check_mod_perm(i, 'mod_warn_role'):
+        return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
+
+    if membre.id == i.user.id:
+        return await i.response.send_message("❌ Vous ne pouvez pas vous warn vous-même", ephemeral=True)
+
+    if membre.bot:
+        return await i.response.send_message("❌ Vous ne pouvez pas warn un bot", ephemeral=True)
+
+    if membre.top_role >= i.user.top_role and i.user.id != i.guild.owner_id:
+        return await i.response.send_message("❌ Vous ne pouvez pas warn ce membre", ephemeral=True)
+
+    # DEFER (owner 2026-07-12 — capture « L'application ne répond plus » sur /mod warn) : à partir
+    # d'ici on écrit en DB, on envoie des MP et on log → ça dépassait la fenêtre de 3 s de Discord
+    # dès que la machine ramait, et la commande mourait SANS rien faire. On acquitte donc AVANT.
+    # 🔒 ÉPHÉMÈRE (owner 2026-07-17) : ce defer était PUBLIC, et une réponse publique fait afficher
+    # par DISCORD LUI-MÊME l'en-tête « <modérateur> a utilisé /mod warn » — le nom du staff fuitait
+    # donc même avec un embed anonyme. La fiche publique part maintenant en message SÉPARÉ du bot
+    # (cf. _announce_sanction_public), qui n'a aucun en-tête d'invocateur.
+    try:
+        if not i.response.is_done():
+            await i.response.defer(ephemeral=True)
+    except Exception:
+        pass
+
+    # Phase 22 : enregistrement dans la fiche d'infractions (aucun rôle attribué)
+    async with get_db() as db:
+        cur = await db.execute(
+            'INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) VALUES(?,?,?,?,?,?)',
+            (i.guild.id, membre.id, i.user.id, 'warn', raison, '')
+        )
+        infraction_id = cur.lastrowid
+        await db.commit()
+        async with db.execute(
+            'SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND type="warn"',
+            (i.guild.id, membre.id),
+        ) as c:
+            warn_count = (await c.fetchone())[0]
+
+    # ID formaté de la fiche
+    warn_id_str = _format_warn_id(infraction_id)
+
+    # Embed propre — fiche d'infraction
+    e = discord.Embed(
+        title=f"⚠️ Avertissement enregistré",
+        description=(
+            f"**Fiche #{warn_id_str}** créée sur le serveur.\n"
+            f"_Aucun rôle attribué — seule la fiche est enregistrée._"
+        ),
+        color=C.YELLOW,
+        timestamp=now(),
+    )
+    # 🔒 PAS de champ « Modérateur » ici : cet embed est PUBLIC (owner 2026-07-17 — seuls les
+    # autres staffs doivent savoir qui a warn qui). Le mod_id est tracé dans `infractions`,
+    # le salon de logs (`send_mod_log`) et `staff_audit_log` — tous réservés au staff.
+    e.add_field(name="👤 Membre fiché", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+    e.add_field(name="📊 Total warns", value=f"`{warn_count}`", inline=True)
+    e.add_field(name="📝 Motif", value=raison, inline=False)
+    e.add_field(
+        name="🆔 ID de la fiche",
+        value=f"`{warn_id_str}` — utilise `/infractions` pour voir la fiche complète",
+        inline=False,
+    )
+    e.set_thumbnail(url=membre.display_avatar.url)
+    e.set_footer(text="Sanction prononcée au nom du serveur")
+
+    # ── ESCALADE AUTOMATIQUE (owner 2026-06-21) : sanction graduée selon le NB de warns ──
+    # 3 → mute 10 min · 4 → 1 h · 5 → 1 semaine · 6+ → mute permanent. Au-delà, le staff tranche
+    # (ban…). Immunisés/staff jamais auto-mutés. Le mute auto est inscrit dans la fiche.
+    _auto_txt = None
+    try:
+        _ecfg = await cfg(i.guild.id)
+    except Exception:
+        _ecfg = {}
+    if _ecfg.get('auto_escalate_warns', 1) and not await is_fully_immune(membre):
+        _esc = None
+        if warn_count == 3:
+            _esc = (timedelta(minutes=10), "10 minutes", "10m")
+        elif warn_count == 4:
+            _esc = (timedelta(hours=1), "1 heure", "1h")
+        elif warn_count == 5:
+            _esc = (timedelta(days=7), "1 semaine", "7j")
+        elif warn_count >= 6:
+            _esc = (None, "permanent", "permanent")
+        if _esc is not None:
+            _delta, _label, _durstr = _esc
+            if _delta is not None:
+                try:
+                    await membre.timeout(_delta, reason=f"Escalade automatique : {warn_count} warns")
+                except Exception:
+                    pass
+            else:
+                # Permanent : rôle Muet (deny send partout) + timeout 28 j natif en filet.
+                try:
+                    _qr = await _ensure_quarantine_role(membre.guild)
+                    if _qr is not None and _qr not in membre.roles:
+                        await membre.add_roles(_qr, reason="Mute permanent (≥6 warns)")
+                except Exception:
+                    pass
+                try:
+                    await membre.timeout(timedelta(days=28), reason="Mute permanent (≥6 warns) — filet natif")
+                except Exception:
+                    pass
+            try:
+                await _record_infraction(i.guild.id, membre.id, 'mute',
+                                         f"Escalade auto ({warn_count} warns)", _durstr)
+            except Exception:
+                pass
+            try:
+                await _dm_sanction(membre, i.guild, f"Mute automatique ({_label})",
+                                   f"{warn_count} avertissements cumulés")
+            except Exception:
+                pass
+            _auto_txt = (f"🔇 **Mute automatique : {_label}** (palier **{warn_count} warns**)."
+                         + (" À vous de décider de la suite (ban ?)." if warn_count >= 6 else ""))
+    if _auto_txt:
+        e.add_field(name="⚖️ Sanction automatique", value=_auto_txt, inline=False)
+    elif warn_count < 3:
+        e.add_field(name="📈 Escalade", value="Prochain palier **auto** au **3ᵉ warn** → mute 10 min.", inline=False)
+
+    # ─── Copie STAFF de la fiche (éphémère, pour l'auteur du warn) ───
+    # 🔒 owner 2026-07-17 : l'embed `e` ci-dessus part en PUBLIC et doit rester anonyme. Tout ce
+    # qui identifie le staff (modérateur, notes internes et LEURS auteurs) vit uniquement ici.
+    _staff_e = discord.Embed.from_dict(e.to_dict())
+    _staff_e.add_field(name="👮 Modérateur", value=f"{i.user.mention}", inline=True)
+    _staff_e.set_footer(text=f"Copie STAFF · DB id: {infraction_id} · le public ne te voit pas")
+
+    # #21 : contexte au moment de sanctionner — affiche les notes de modération RÉCENTES sur
+    # ce membre (lecture seule, n'altère ni l'escalade ni la sanction). Aide à une modération
+    # cohérente entre staffs (un récidiviste noté ne passe plus pour un primo-délinquant).
+    # ⚠️ STAFF UNIQUEMENT : ces notes sont INTERNES et nomment leur auteur — elles étaient
+    # affichées dans l'embed PUBLIC (le membre voyait qui avait écrit quoi sur lui).
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT content, mod_id FROM mod_notes "
+                "WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 3",
+                (i.guild.id, membre.id),
+            ) as _nc:
+                _notes = await _nc.fetchall()
+        if _notes:
+            _lines = []
+            for _content, _mid in _notes:
+                _who = f"<@{int(_mid)}>" if _mid else "?"
+                _txt = (str(_content or "")[:120]).replace("\n", " ")
+                _lines.append(f"• {_txt} — {_who}")
+            _staff_e.add_field(name=f"📝 Notes récentes ({len(_notes)})",
+                               value="\n".join(_lines)[:1024], inline=False)
+    except Exception:
+        pass
+
+    # Confirmation ÉPHÉMÈRE au staff (avec son nom + les notes) …
+    await i.followup.send(embed=_staff_e, ephemeral=True)
+    # … puis la fiche PUBLIQUE, en message SÉPARÉ du bot : aucun en-tête « <mod> a utilisé
+    # /mod warn », donc aucune fuite du nom du modérateur.
+    await _announce_sanction_public(i, e)
+
+    # DM systématique au membre (quick-win pro) : transparence raison + contestation.
+    await _dm_sanction(membre, i.guild, "Avertissement ⚠️", raison)
+
+    # Log unifié
+    await send_mod_log(
+        i.guild, 'warn', i.user, membre, raison,
+        extra=f"Fiche {warn_id_str} · Total warns: {warn_count}",
+    )
+
+    # E1 : audit staff consolidé (QUI a warn QUI).
+    await log_staff_action(i.guild.id, i.user.id, membre.id, "warn",
+                           detail=f"Fiche {warn_id_str} · {raison}", surface="slash")
+
+    # ALERTE escalade — si le membre franchit un palier critique (3/5/10 warns
+    # EXACTEMENT), on le SIGNALE dans le salon de logs de base en nommant la
+    # personne. Égalité exacte = 1 alerte par franchissement (anti-spam).
+    if warn_count in (3, 5, 10):
+        _sev = "moyenne" if warn_count == 3 else ("haute" if warn_count == 5 else "critique")
+        try:
+            await ulogger2026.log_member_escalation(
+                bot, i.guild, membre, warn_count, warn_count,
+                reason=raison, moderator=i.user, severity=_sev,
+            )
+        except Exception as _ex:
+            print(f"[warn escalation] {_ex}")
+
+
 @mod_group.command(name="unwarn", description="✅ Supprimer un avertissement d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez supprimer un warn")
 async def unwarn_cmd(i: discord.Interaction, membre: discord.Member):

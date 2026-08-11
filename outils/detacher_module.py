@@ -43,6 +43,7 @@ SUPERVISEURS = ("_SUPERVISED_LOOP_NAMES", "_SUPERVISED_MODULE_LOOPS")
 #  commit. Un symbole protégé n'est JAMAIS supprimé ; seules les instructions
 #  qui, à l'intérieur de lui, touchent le module condamné sont retirées.
 PROTEGES = {
+    "warn_cmd", "unwarn_cmd", "mute_cmd", "unmute_cmd", "clear_cmd",
     "on_ready", "on_message", "on_member_join", "on_member_update",
     "on_user_update", "on_voice_state_update", "on_raw_reaction_add",
     "on_invite_create", "on_invite_delete", "on_message_edit", "on_message_delete",

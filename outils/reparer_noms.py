@@ -34,6 +34,7 @@ PROTEGES = {
     "check_expired_restrictions", "_record_infraction", "check_badwords",
     "_ocr_scam_check", "_kick_young_account", "_handle_antiraid_join",
     "MainPanelV2", "SuspectScanPanel", "AfkRolePanel", "_build_casier_panel",
+    "warn_cmd", "unwarn_cmd", "mute_cmd", "unmute_cmd", "clear_cmd",
 }
 
 
