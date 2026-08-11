@@ -12577,15 +12577,46 @@ class RgpdPanelV2(LayoutView):
 # NOTE: MainPanel (View V1, ancien /configure) supprime — remplace par MainPanelV2 (LayoutView).
 # Jamais instancie ; aucune vue persistante.
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ⚙️ /configure — PANNEAU RACINE (refonte 2026-08 : périmètre SÉCURITÉ)
+#
+#  Le serveur a été recentré sur la sécurité. Ce panneau n'expose plus QUE le
+#  périmètre gardé : protections, sanctions, immunités, anti-raid, tickets,
+#  logs, AFK, RGPD. Les 10 sections retirées du select (réseaux sociaux, jeux,
+#  délégations, animations, progression, permissions, événements, entraide,
+#  contrôles serveur) n'ont AUCUNE autre porte d'entrée — les retirer d'ici les
+#  rend inatteignables. C'était la dernière racine qui maintenait en vie
+#  ~11 600 lignes de panneaux de configuration.
+#
+#  ⚠️ PIÈGE À NE PAS DÉFAIRE — `_build()` doit rester SYNCHRONE et suffisante.
+#     13 appelants font `MainPanelV2(u, g)` puis `edit_message(view=...)` sans
+#     jamais passer par `render_to()`. Une LayoutView sans composant = erreur
+#     400 côté Discord. Tout ce qui demande la base de données va donc dans
+#     `render_to()`, jamais dans `__init__`.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#  Sections du select, dans l'ordre d'affichage.
+#  Les classes de panneaux sont définies PLUS BAS dans bot.py : impossible de
+#  les référencer ici, la résolution est donc paresseuse (`_module_select`).
+#  Format : (valeur, emoji, libellé, description)
+_CONFIG_SECTIONS = [
+    ("protections", "🛡️", "Protections",       "Insultes · spam · liens · phishing · scam · images · QR"),
+    ("sanctions",   "⚖️", "Sanctions",         "Salon de logs de modération · rôles autorisés"),
+    ("immunites",   "👮", "Staff & immunités", "Qui n'est jamais sanctionné automatiquement"),
+    ("antiraid",    "⚔️", "Anti-Raid",         "Vague d'arrivées · âge de compte minimum · riposte"),
+    ("tickets",     "🎫", "Tickets",           "Panneaux d'ouverture · rôle staff · logs · blacklist"),
+    ("logs",        "📋", "Logs & Audit",      "Un salon · toutes les catégories d'événements"),
+    ("afk",         "💤", "Rôle AFK",          "Rôle automatique pour les membres inactifs"),
+    ("rgpd",        "🔒", "Données & RGPD",    "Droit à l'effacement (art. 17) · rétention"),
+]
+
+
 class MainPanelV2(LayoutView):
-    """Panneau principal de configuration en Components V2 (Phase 4.0 — refonte épurée).
+    """Panneau racine de `/configure` — périmètre sécurité uniquement.
 
-    5 modules essentiels seulement :
-    🛡️ Sécurité · 🎫 Tickets · 📢 Publications · 📋 Logs · 🎮 Jeux
-
-    Tous les autres modules (Stats, Niveaux, Vocaux, Centre, Aide, etc.)
-    restent accessibles via leurs slash commands respectives mais sont
-    retirés du menu central pour rester lisible et focus.
+    Un select de sections (§8 : plus de menus par réactions, plus de murs de
+    texte) + un résumé d'état lisible d'un coup d'œil. Chaque section ouvre son
+    propre panneau, qui revient ici par son bouton « ◀️ Retour ».
     """
 
     def __init__(self, u, g):
@@ -12597,168 +12628,183 @@ class MainPanelV2(LayoutView):
     async def interaction_check(self, i):
         return i.user.id == self.u.id
 
-    def _build(self):
-        # Stats serveur (compact)
-        online = sum(1 for m in self.g.members if m.status != discord.Status.offline and not m.bot)
-        humans = self.g.member_count - sum(1 for m in self.g.members if m.bot)
-        boosts = self.g.premium_subscription_count or 0
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Construction — SYNCHRONE (voir l'avertissement en tête de section)
+    # ─────────────────────────────────────────────────────────────────────────
+    def _build(self, etat: dict | None = None):
+        self.clear_items()
+        items: list = []
 
-        # En-tête avec icône
+        sous_titre = f"**{self.g.name}** · 👑 {self.u.display_name}"
         if self.g.icon:
-            head = v2_section(
-                v2_title(f"⚙️ Configuration"),
-                v2_subtitle(f"**{self.g.name}** · 👑 {self.u.display_name}"),
-                accessory=v2_thumb(self.g.icon.url),
-            )
-            head_items = [head]
-        else:
-            head_items = [
+            items.append(v2_section(
                 v2_title("⚙️ Configuration"),
-                v2_subtitle(f"**{self.g.name}** · 👑 {self.u.display_name}"),
-            ]
+                v2_subtitle(sous_titre),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("⚙️ Configuration"))
+            items.append(v2_subtitle(sous_titre))
 
-        # Stats compactes (1 ligne)
-        stats_block = v2_body(
-            f"👥 `{humans:,}` membres · 🟢 `{online}` en ligne · 💎 `{boosts}` boosts"
-        )
+        items.append(v2_divider())
 
-        # Select des 5 modules essentiels
+        # Résumé d'état — présent uniquement par le chemin async (`render_to`).
+        if etat is not None:
+            items.append(v2_body(
+                f"🛡️ **Protections** · `{etat['prot_on']}/{etat['prot_total']}` actives\n"
+                f"⚖️ **Sanctions** · `{etat['infractions']}` au casier · logs {etat['mod_log']}\n"
+                f"👮 **Immunités** · `{etat['immune_roles']}` rôles · `{etat['immune_users']}` membres\n"
+                f"⚔️ **Anti-Raid** · {etat['antiraid']}\n"
+                f"🎫 **Tickets** · {etat['tickets']}\n"
+                f"📋 **Logs** · {etat['logs']}"
+            ))
+            items.append(v2_divider())
+
         sel = Select(
-            placeholder="📂 Sélectionne un module…",
+            placeholder="Choisis une section à configurer…",
             options=[
-                discord.SelectOption(
-                    label="Modération & Sécurité", value="security", emoji="🛡️",
-                    description="Sanctions · Protection · Immunités · AFK",
-                ),
-                discord.SelectOption(
-                    label="Tickets", value="tickets", emoji="🎫",
-                    description="Système de support du serveur",
-                ),
-                discord.SelectOption(
-                    label="Réseaux Sociaux", value="publications", emoji="📢",
-                    description="YouTube · Twitch · TikTok · Twitter · Roblox",
-                ),
-                discord.SelectOption(
-                    label="Logs & Audit", value="logs", emoji="📋",
-                    description="Un salon · tous les événements",
-                ),
-                discord.SelectOption(
-                    label="Jeux & Concours", value="games", emoji="🎮",
-                    description="Giveaways · Game deals",
-                ),
-                discord.SelectOption(
-                    label="Rôles délégués", value="delegations", emoji="🔑",
-                    description="Confie la gestion d'un rôle à un membre via /manage",
-                ),
-                discord.SelectOption(
-                    label="Animations & Accueil", value="creativite", emoji="🎨",
-                    description="Welcome · Goodbye · Anniversaires · Boost · Reaction Roles · Auto-vocaux · etc.",
-                ),
-                discord.SelectOption(
-                    label="Progression", value="progression", emoji="📈",
-                    description="Niveaux · XP · Pièces · Shop · Récompenses",
-                ),
-                discord.SelectOption(
-                    label="Permissions", value="permissions", emoji="🔐",
-                    description="Qui peut utiliser quelle commande (par rôle ou utilisateur)",
-                ),
-                discord.SelectOption(
-                    label="Événements", value="events", emoji="🎪",
-                    description="Boss Raids · combats communautaires · inventaire · loot · arène temporaire",
-                ),
-                discord.SelectOption(
-                    label="Entraide", value="entraide", emoji="🆘",
-                    description="Relier joueurs qui cherchent/donnent de l'aide · vocal temp · rôle aidant",
-                ),
-                discord.SelectOption(
-                    label="Contrôles serveur", value="controls", emoji="🎛️",
-                    description="Horaires · quotas · accès · mode nuit · statut support",
-                ),
-                discord.SelectOption(
-                    label="Données & RGPD", value="rgpd", emoji="🔒",
-                    description="Effacement des données d'un membre · rétention · diagnostic",
-                ),
+                discord.SelectOption(label=libelle, value=valeur, emoji=emoji, description=description)
+                for valeur, emoji, libelle, description in _CONFIG_SECTIONS
             ],
-            custom_id="mpv2_module",
+            custom_id="cfgv2_section",
         )
         sel.callback = self._module_select
 
-        # Bouton « Configuration guidée » → rend le wizard /setup DÉCOUVRABLE
-        # depuis /configure (sans nouveau slash command).
-        wizard_btn = Button(
-            label="Configuration guidée",
-            emoji="🧭",
-            style=discord.ButtonStyle.secondary,
-            custom_id="mpv2_wizard",
+        b_refresh = Button(
+            label="Actualiser", emoji="🔄",
+            style=discord.ButtonStyle.secondary, custom_id="cfgv2_refresh",
         )
-        wizard_btn.callback = self._open_wizard
+        b_refresh.callback = self._cb_refresh
 
-        # Bouton fermer (avec fix éphémère)
-        close_btn = Button(
-            label="Fermer",
-            emoji="✖️",
-            style=discord.ButtonStyle.danger,
-            custom_id="mpv2_close",
+        b_close = Button(
+            label="Fermer", emoji="✖️",
+            style=discord.ButtonStyle.danger, custom_id="cfgv2_close",
         )
-        close_btn.callback = self._close
+        b_close.callback = self._close
 
-        # Container final — minimal, élégant
-        self.add_item(v2_container(
-            *head_items,
-            v2_divider(),
-            stats_block,
-            v2_divider(),
-            discord.ui.ActionRow(sel),
-            discord.ui.ActionRow(wizard_btn, close_btn),
-            color=Palette.PRIMARY,
-        ))
+        items.append(discord.ui.ActionRow(sel))
+        items.append(discord.ui.ActionRow(b_refresh, b_close))
+
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Lecture d'état — chaque bloc est isolé : une panne de base ne doit
+    #  JAMAIS empêcher le panneau de s'ouvrir (doctrine : dispo = fail-open).
+    # ─────────────────────────────────────────────────────────────────────────
+    async def _collect_etat(self) -> dict:
+        try:
+            c = await cfg(self.g.id)
+        except Exception as ex:
+            print(f"[MainPanelV2 _collect_etat cfg] {ex}")
+            c = {}
+
+        etat = {
+            'prot_total': len(PROTS),
+            'prot_on': sum(1 for k, _, _ in PROTS if c.get(k)),
+            'infractions': 0,
+            'immune_roles': 0,
+            'immune_users': 0,
+        }
+
+        # UI.md §5 : un seul aller-retour au lieu de trois, et du SQL LITTÉRAL —
+        # pas de f-string dans une requête (l'audit d'injection de la CI le refuse,
+        # et une requête construite par formatage est une porte ouverte de principe).
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT '
+                    '  (SELECT COUNT(*) FROM infractions  WHERE guild_id=?), '
+                    '  (SELECT COUNT(*) FROM immune_roles WHERE guild_id=?), '
+                    '  (SELECT COUNT(*) FROM immune_users WHERE guild_id=?)',
+                    (self.g.id, self.g.id, self.g.id),
+                ) as cur:
+                    row = await cur.fetchone()
+                    if row:
+                        etat['infractions'] = row[0] or 0
+                        etat['immune_roles'] = row[1] or 0
+                        etat['immune_users'] = row[2] or 0
+        except Exception as ex:
+            print(f"[MainPanelV2 _collect_etat db] {ex}")
+
+        mod_log = self.g.get_channel(c.get('mod_log_channel', 0))
+        etat['mod_log'] = mod_log.mention if mod_log else "⚪ _non défini_"
+
+        etat['antiraid'] = "🟢 actif" if c.get('antiraid_enabled') else "⚪ désactivé"
+
+        staff = self.g.get_role(c.get('ticket_staff', 0))
+        nb_panels = len(c.get('ticket_panels', {}) or {})
+        if staff:
+            etat['tickets'] = f"`{nb_panels}` panneau(x) · staff {staff.mention}"
+        elif nb_panels:
+            etat['tickets'] = f"`{nb_panels}` panneau(x) · ⚪ _rôle staff non défini_"
+        else:
+            etat['tickets'] = "⚪ _non configuré_"
+
+        try:
+            log_id = await ulogger2026.get_log_channel(self.g.id)
+            log_ch = self.g.get_channel(log_id) if log_id else None
+            etat['logs'] = log_ch.mention if log_ch else "⚪ _non défini_"
+        except Exception as ex:
+            print(f"[MainPanelV2 _collect_etat logs] {ex}")
+            etat['logs'] = "⚪ _indisponible_"
+
+        return etat
+
+    async def refresh(self):
+        """Recharge le résumé d'état sur la vue déjà construite.
+
+        Utile là où `render_to()` ne peut pas répondre parce que
+        l'interaction est déjà acquittée (`/configure` fait un `defer`
+        immédiat anti-429, puis un `followup.send`).
+
+        Ne lève jamais : en cas d'échec, la vue reste celle bâtie par
+        `__init__` — complète, simplement sans le résumé (dispo = fail-open).
+        """
+        try:
+            self._build(await self._collect_etat())
+        except Exception as ex:
+            print(f"[MainPanelV2 refresh] {ex}")
 
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        # Phase 4 : rebuild à chaque render pour stats fraîches
-        self.clear_items()
-        self._build()
+        await self.refresh()
         if edit:
             await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Callbacks
+    # ─────────────────────────────────────────────────────────────────────────
     async def _module_select(self, i):
-        val = i.data['values'][0]
-        # Phase 4 : 5 modules essentiels uniquement
-        v2_panels = {
-            'security':     lambda: SecurityPanelV2(self.u, self.g),
-            'tickets':      lambda: TicketMainPanelV2(self.u, self.g),
-            'publications': lambda: AdsPanelV2(self.u, self.g),
-            'logs':         lambda: LogsPanelV2(self.u, self.g),
-            'games':        lambda: GamesPanelV2(self.u, self.g),
-            'delegations':  lambda: DelegationsPanelV2(self.u, self.g),
-            'creativite':   lambda: CentrePanelV2(self.u, self.g),
-            'progression':  lambda: LevelSystemPanelV2(self.u, self.g),
-            'permissions':  lambda: PermissionsHubPanelV2(self.u, self.g),
-            'events':       lambda: EventsHubPanelV2(self.u, self.g),
-            'entraide':     lambda: EntraidePanelV2(self.u, self.g),
-            'controls':     lambda: ControlsPanelV2(self.u, self.g),
-            'rgpd':         lambda: RgpdPanelV2(self.u, self.g),
+        valeur = i.data['values'][0]
+        # Résolution paresseuse : ces classes sont définies plus bas dans bot.py.
+        panneaux = {
+            'protections': lambda: ProtPanelV2(self.u, self.g),
+            'sanctions':   lambda: ModerationPanelV2(self.u, self.g),
+            'immunites':   lambda: ImmunePanelV2(self.u, self.g),
+            'antiraid':    lambda: AntiRaidPanelV2(self.u, self.g),
+            'tickets':     lambda: TicketMainPanelV2(self.u, self.g),
+            'logs':        lambda: LogsPanelV2(self.u, self.g),
+            'afk':         lambda: AfkRolePanelV2(self.u, self.g),
+            'rgpd':        lambda: RgpdPanelV2(self.u, self.g),
         }
-        if val in v2_panels:
-            v = v2_panels[val]()
-            await v.render_to(i, edit=True)
-        else:
-            # Si pour une raison le select retourne un truc inattendu, ack au minimum
+        fabrique = panneaux.get(valeur)
+        if fabrique is None:
+            # Valeur inattendue : on acquitte au minimum pour ne pas laisser
+            # l'interaction en échec côté client.
             try:
                 await i.response.defer()
             except Exception:
                 pass
-
-    async def _open_wizard(self, i):
-        # Ouvre le wizard /setup directement (le rend découvrable). render_to(edit=True)
-        # remplace le panneau de config par le wizard et fait office d'ACK de l'interaction.
+            return
         try:
-            await wizard2026.WizardStep1(i.user, i.guild).render_to(i, edit=True)
+            await fabrique().render_to(i, edit=True)
         except Exception as ex:
-            print(f"[MainPanelV2 _open_wizard] {ex}")
+            print(f"[MainPanelV2 _module_select {valeur}] {ex}")
+            import traceback
+            traceback.print_exc()
             try:
-                msg = "❌ Wizard indisponible pour le moment."
+                msg = f"❌ Section indisponible : `{type(ex).__name__}: {ex}`"
                 if not i.response.is_done():
                     await i.response.send_message(msg, ephemeral=True)
                 else:
@@ -12766,9 +12812,20 @@ class MainPanelV2(LayoutView):
             except Exception:
                 pass
 
+    async def _cb_refresh(self, i):
+        try:
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[MainPanelV2 _cb_refresh] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.defer()
+            except Exception:
+                pass
+
     async def _close(self, i):
-        # Phase 3.9 fix : i.message.delete() échoue silencieusement sur ephemeral
-        # et cause "Échec de l'interaction". Pattern bulletproof :
+        # Phase 3.9 : `i.message.delete()` échoue silencieusement sur un message
+        # éphémère et provoque « Échec de l'interaction ». Pattern éprouvé :
         try:
             await i.response.edit_message(
                 content="✅ Configuration fermée. Tu peux fermer ce message via *Dismiss*.",
@@ -12788,179 +12845,6 @@ class MainPanelV2(LayoutView):
                 pass
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  🛡️ SÉCURITÉ — Panel V2 unifié (Phase 4.1)
-#
-#  Regroupe Modération + Protection + Immunités en un seul hub propre.
-#  Navigation par boutons vers les sous-sections existantes (réutilise
-#  ModerationPanelV2, ProtPanelV2, ImmunePanelV2 sans les dupliquer).
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class SecurityPanelV2(LayoutView):
-    """Hub Sécurité unifié — accès à Modération, Protection, Immunités."""
-
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        c = await cfg(self.g.id)
-
-        # Stats rapides
-        try:
-            async with get_db() as db:
-                async with db.execute('SELECT COUNT(*) FROM infractions WHERE guild_id=?', (self.g.id,)) as cur:
-                    row = await cur.fetchone()
-                    inf_count = row[0] if row else 0
-        except Exception:
-            inf_count = 0
-
-        # Compteurs protection
-        prot_on = sum(1 for k, _, _ in PROTS if c.get(k))
-        prot_total = len(PROTS)
-
-        # Compteurs immunités
-        try:
-            async with get_db() as db:
-                async with db.execute('SELECT COUNT(*) FROM immune_roles WHERE guild_id=?', (self.g.id,)) as cur:
-                    row = await cur.fetchone()
-                    immune_roles_count = row[0] if row else 0
-                async with db.execute('SELECT COUNT(*) FROM immune_users WHERE guild_id=?', (self.g.id,)) as cur:
-                    row = await cur.fetchone()
-                    immune_users_count = row[0] if row else 0
-        except Exception:
-            immune_roles_count = immune_users_count = 0
-
-        # État rapide salon logs mod
-        log_ch = self.g.get_channel(c.get('mod_log_channel', 0))
-
-        # État AFK (Phase 4.6)
-        afk_cfg = c.get('afk_role_config', {})
-        afk_on = bool(afk_cfg.get('enabled', False))
-        afk_role = self.g.get_role(afk_cfg.get('role', 0) or afk_cfg.get('role_id', 0))
-
-        self.clear_items()
-        items: list = []
-
-        if self.g.icon:
-            items.append(v2_section(
-                v2_title("🛡️ Modération & Sécurité"),
-                v2_subtitle("Sanctions · Protection · Immunités · AFK"),
-                accessory=v2_thumb(self.g.icon.url),
-            ))
-        else:
-            items.append(v2_title("🛡️ Modération & Sécurité"))
-            items.append(v2_subtitle("Sanctions · Protection · Immunités · AFK"))
-
-        # Phase 28.2 : anti-raid
-        antiraid_on = bool(c.get('antiraid_enabled', False))
-
-        items.append(v2_divider())
-        items.append(v2_body(
-            f"🔨 **Modération** · `{inf_count}` infractions · {'🟢' if log_ch else '🔴'} logs\n"
-            f"🚨 **Protection** · `{prot_on}/{prot_total}` filtres actifs\n"
-            f"👑 **Immunités** · `{immune_roles_count}` rôles · `{immune_users_count}` utilisateurs\n"
-            f"💤 **AFK** · {('🔘 actif sur ' + afk_role.mention) if (afk_on and afk_role) else ('🔘 actif' if afk_on else '⚪ désactivé')}\n"
-            f"⚔️ **Anti-Raid** · {'🟢 actif' if antiraid_on else '⚪ désactivé'}"
-        ))
-        items.append(v2_divider())
-
-        # Boutons de navigation
-        b_mod = Button(label="🔨 Modération", style=discord.ButtonStyle.primary, custom_id="secv2_mod")
-        b_mod.callback = self._cb_mod
-        b_prot = Button(label="🚨 Protection", style=discord.ButtonStyle.primary, custom_id="secv2_prot")
-        b_prot.callback = self._cb_prot
-        b_immune = Button(label="👑 Immunités", style=discord.ButtonStyle.primary, custom_id="secv2_immune")
-        b_immune.callback = self._cb_immune
-        b_afk = Button(label="💤 AFK", style=discord.ButtonStyle.primary, custom_id="secv2_afk")
-        b_afk.callback = self._cb_afk
-        b_antiraid = Button(label="⚔️ Anti-Raid", style=discord.ButtonStyle.danger, custom_id="secv2_raid")
-        b_antiraid.callback = self._cb_antiraid
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="secv2_back")
-        b_back.callback = self._cb_back
-
-        items.append(discord.ui.ActionRow(b_mod, b_prot, b_immune, b_afk, b_antiraid))
-        items.append(discord.ui.ActionRow(b_back))
-
-        self.add_item(v2_container(*items, color=Palette.DANGER))
-
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _cb_mod(self, i):
-        try:
-            v = ModerationPanelV2(self.u, self.g)
-            await v.render_to(i, edit=True)
-        except Exception as ex:
-            print(f"[SecurityPanelV2 _cb_mod] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur ouverture Modération : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
-
-    async def _cb_prot(self, i):
-        try:
-            v = ProtPanelV2(self.u, self.g)
-            await v.render_to(i, edit=True)
-        except Exception as ex:
-            print(f"[SecurityPanelV2 _cb_prot] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur ouverture Protection : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
-
-    async def _cb_immune(self, i):
-        try:
-            v = ImmunePanelV2(self.u, self.g)
-            await v.render_to(i, edit=True)
-        except Exception as ex:
-            print(f"[SecurityPanelV2 _cb_immune] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur ouverture Immunités : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
-
-    async def _cb_afk(self, i):
-        # Phase 4.6 : accès au panel AFK depuis le hub Sécurité
-        try:
-            v = AfkRolePanelV2(self.u, self.g)
-            await v.render_to(i, edit=True)
-        except Exception as ex:
-            print(f"[SecurityPanelV2 _cb_afk] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur ouverture AFK : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
-
-    async def _cb_antiraid(self, i):
-        # Phase 28.2 : Anti-Raid panel
-        try:
-            v = AntiRaidPanelV2(self.u, self.g)
-            await v.render_to(i, edit=True)
-        except Exception as ex:
-            print(f"[SecurityPanelV2 _cb_antiraid] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur ouverture Anti-Raid : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
-
-    async def _cb_back(self, i):
-        try:
-            v = MainPanelV2(self.u, self.g)
-            await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
-        except Exception as ex:
-            print(f"[SecurityPanelV2 _cb_back] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -13094,8 +12978,9 @@ class GamesPanelV2(LayoutView):
                 pass
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -13429,8 +13314,9 @@ class PermissionsHubPanelV2(LayoutView):
                 pass
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 class PermissionsCategoryListPanelV2(LayoutView):
@@ -13950,7 +13836,7 @@ class AntiRaidPanelV2(LayoutView):
             print(f"[AntiRaidPanelV2 _cb_log_channel] {ex}")
 
     async def _cb_back(self, i):
-        v = SecurityPanelV2(self.u, self.g)
+        v = MainPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
 
@@ -25771,8 +25657,9 @@ class DelegationsPanelV2(LayoutView):
             print(f"[DelegationsPanelV2 _cb_remove] {ex}")
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 class DelegationCreateModal(Modal):
@@ -26900,8 +26787,9 @@ class LogsPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 class SecurityChannelsPanelV2(LayoutView):
@@ -27888,8 +27776,8 @@ class ProtPanelV2(LayoutView):
         await v.render_to(interaction, edit=True)
 
     async def _cb_back(self, i):
-        # Phase 4 : retour vers SecurityPanelV2 (le hub Sécurité unifié)
-        v = SecurityPanelV2(self.u, self.g)
+        # Refonte 2026-08 : retour direct à la racine /configure (MainPanelV2).
+        v = MainPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
 
@@ -31542,8 +31430,8 @@ class ModerationPanelV2(LayoutView):
         await self._open_role_picker(i, 'mod_clear_role', 'Rôle /mod clear')
 
     async def _cb_back(self, i):
-        # Phase 4 : retour vers SecurityPanelV2
-        v = SecurityPanelV2(self.u, self.g)
+        # Refonte 2026-08 : retour direct à la racine /configure (MainPanelV2).
+        v = MainPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
 
@@ -31892,8 +31780,8 @@ class ImmunePanelV2(LayoutView):
         await new_panel.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        # Phase 4 : retour vers SecurityPanelV2
-        v = SecurityPanelV2(self.u, self.g)
+        # Refonte 2026-08 : retour direct à la racine /configure (MainPanelV2).
+        v = MainPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
 
@@ -32670,8 +32558,9 @@ class CommandsPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -34449,8 +34338,9 @@ class AdsPanelV2(LayoutView):
         await interaction.response.send_message(f"❌ Plateforme inconnue : {val}", ephemeral=True)
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -38051,8 +37941,9 @@ class CentrePanelV2(LayoutView):
                 pass
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -40599,8 +40490,9 @@ class LevelSystemPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 class XPChannelsSelectPanel(View):
@@ -43525,8 +43417,9 @@ class AutoHelpPanelV2(LayoutView):
         await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 class AutoHelpChannelSelect(View):
@@ -45521,8 +45414,9 @@ class StatPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 class AfkRolePanel(View):
@@ -46004,8 +45898,8 @@ class AfkRolePanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        # Phase 4.6 : retour vers SecurityPanelV2 (le hub)
-        v = SecurityPanelV2(self.u, self.g)
+        # Refonte 2026-08 : retour direct à la racine /configure (MainPanelV2).
+        v = MainPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
 
@@ -48017,8 +47911,9 @@ class ChanPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 class _ChanPickerV2(LayoutView):
@@ -48531,8 +48426,9 @@ class TicketMainPanelV2(LayoutView):
         await new_panel.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
+        # sans son résumé d'état (celui-ci est lu en base, donc en async).
+        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 class TkStaffView(View):
@@ -57426,6 +57322,11 @@ async def configure_cmd(i: discord.Interaction):
 
     try:
         v = MainPanelV2(i.user, i.guild)
+        # L'interaction est déjà acquittée (defer anti-429 plus haut) : on ne
+        # peut pas passer par render_to(), on charge donc le résumé d'état à la
+        # main avant l'envoi. refresh() est fail-open, il ne peut pas empêcher
+        # l'ouverture du panneau.
+        await v.refresh()
         await i.followup.send(view=v, ephemeral=True)
     except Exception as ex:
         print(f"[CONFIGURE] erreur build/send MainPanelV2: {ex}")
