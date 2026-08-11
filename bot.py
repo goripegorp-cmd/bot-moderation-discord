@@ -51219,21 +51219,6 @@ async def on_ready():
         await webhook_tracker_module.init_db()
         if not webhook_tracker_module.weekly_scan_task.is_running():
             webhook_tracker_module.weekly_scan_task.start()
-
-        owner_digest_module.setup(
-            bot, get_db, db_get, _v2h,
-            profile_module=profile_module,
-            raid_module=raid_module,
-            webhook_tracker_module=webhook_tracker_module,
-            seasonal_module=season_module,
-            # TASK C.2 : rétro mensuelle — DM au super-owner, agrégats économie réutilisés.
-            coin_economy_module=coin_economy_module,
-            super_owner_id=SUPER_OWNER_ID,
-        )
-        await owner_digest_module.init_db()
-        if not owner_digest_module.owner_digest_task.is_running():
-            owner_digest_module.owner_digest_task.start()
-
         print("[Phase 152] UX/Owner actifs : DM digest + webhook tracker + owner digest")
     except Exception as ex:
         print(f"[on_ready Phase 152 ux/owner] {ex}")
@@ -51311,52 +51296,12 @@ async def on_ready():
 
     # Phase 155 : Roblox / Stream
     try:
-        roblox_stats_module.setup(bot, get_db, db_get, _v2h)
-        await roblox_stats_module.init_db()
-        if not roblox_stats_module.weekly_stats_task.is_running():
-            roblox_stats_module.weekly_stats_task.start()
-
-        stream_party_module.setup(bot, get_db, db_get, _v2h)
-        await stream_party_module.init_db()
-        if not stream_party_module.cleanup_task.is_running():
-            stream_party_module.cleanup_task.start()
-
-        # Phase 165.1 : Stream schedule + countdown
-        stream_schedule_module.setup(bot, get_db, db_get, _v2h)
-        await stream_schedule_module.init_db()
-        if not stream_schedule_module.countdown_task.is_running():
-            stream_schedule_module.countdown_task.start()
-
-        # Phase 165.2 : Activity heatmap (data-driven scheduling)
-        activity_heatmap_module.setup(bot, get_db, db_get, _v2h)
-        await activity_heatmap_module.init_db()
-        if not activity_heatmap_module.weekly_owner_dispatch_task.is_running():
-            activity_heatmap_module.weekly_owner_dispatch_task.start()
-
         # Phase 166.1-4 : token leak / birthday / welcome / spotlight
         anti_token_leak_module.setup(
             bot, get_db, db_get, _v2h,
             staff_sanction_module=staff_sanction_module,
         )
         await anti_token_leak_module.init_db()
-
-        birthday_panel_module.setup(bot, get_db, db_get, _v2h, list_birthdays)
-
-        welcome_ack_module.setup(bot, get_db, db_get, _v2h)
-        await welcome_ack_module.init_db()
-
-        spotlight_quality_module.setup(bot, get_db, db_get, _v2h)
-        await spotlight_quality_module.init_db()
-
-        # Phase 167.1-3 : Status rotator + voice autoclean + risk review
-        status_rotator_module.setup(bot, get_db, db_get, _v2h)
-        if not status_rotator_module.rotator_task.is_running():
-            status_rotator_module.rotator_task.start()
-
-        voice_autoclean_module.setup(bot, get_db, db_get, _v2h)
-        await voice_autoclean_module.init_db()
-        if not voice_autoclean_module.check_task.is_running():
-            voice_autoclean_module.check_task.start()
 
         member_risk_module.setup(bot, get_db, db_get, _v2h)
         await member_risk_module.init_db()
