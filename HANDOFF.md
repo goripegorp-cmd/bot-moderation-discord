@@ -33,8 +33,8 @@ du jour, entraide, zones sociales, hub communautaire…).
 | Élément | Valeur |
 |---|---|
 | Branche | `main` |
-| `bot.py` | **74 923 lignes** (départ : 108 519) |
-| Modules | **123** à la racine (dont 50 gardés) |
+| `bot.py` | **52 555 lignes** (départ : 108 519 — **-52 %**) |
+| Modules | **80** à la racine |
 | Commandes slash | **40** (départ : 148) |
 | Point de restauration | tag git **`avant-purge-mmorpg`** (poussé sur GitHub) |
 | CI | **verte** sur tous les commits livrés |
@@ -59,23 +59,18 @@ du jour, entraide, zones sociales, hub communautaire…).
 - **Runtimes purgés** : fermeture inverse étendue aux FONCTIONS (`outils/purge_runtimes.py`).
 - **Plus aucun nom inconnu dans `bot.py`** (`outils/verif_noms.py` passe au vert).
 
-**Il reste à faire, dans cet ordre :**
+**LA REFONTE EST TERMINÉE.** Les 7 lots sont livrés, chacun CI verte. Ce qui reste
+n'est plus du démontage mais de la construction : le périmètre gardé est propre,
+honnête et opérationnel.
 
-1. **Détacher les 65 modules encore accrochés.** Ils ne le sont plus par le câblage
-   d'`on_ready` (déjà propre : 25 `setup()`, presque tous des modules gardés) mais par des
-   appels DISPERSÉS À L'INTÉRIEUR de symboles survivants — vues de quêtes, hooks de
-   récompense, tâches de fond décorées. `outils/purge_modules.py` les liste avec le nombre
-   de références et les lignes exactes. C'est une coupe CHIRURGICALE, bloc par bloc, pas
-   mécanique : la fermeture transitive ne peut plus rien pour eux.
-   Les plus accrochés : `entraide` (39 réf.), `activity_system` (28), `lore49` (21),
-   `combat_actions` (13), `engagement47` (13), `cosmetics` (10), `community_goals` (10).
-2. Supprimer alors les fichiers de modules (`purge_modules.py --apply` fait le lot sûr).
-3. Base de données : supprimer les tables non-sécurité, puis mettre à jour `gdpr.py` (registre
-   ~290 tables) **et** `backup_lite.CRITICAL_TABLES` **dans le même commit**.
-4. Décision propriétaire en attente : l'AFK lit `activity_tracking`. Conserver les deux seules
-   écritures (`last_message` dans `track_member_message`, `last_vocal` dans
-   `track_member_vocal_join`) comme infra de modération — elles vivent dans le cœur
-   d'événements, pas dans un module supprimable.
+**Deux points à connaître avant de bâtir dessus :**
+1. `gdpr.py` garde volontairement des entrées pour des tables condamnées. Sur les
+   serveurs déjà déployés ces tables EXISTENT ENCORE avec des données de membres :
+   les retirer du registre ferait manquer ces données au droit à l'effacement.
+   Elles sont inoffensives (le registre est fail-safe) et légalement utiles.
+2. Les tables mortes ne sont pas DROP en production. Détruire des données live est
+   une décision du propriétaire, pas la conséquence d'un nettoyage de code. Elles
+   ont simplement cessé d'être recréées.
 
 **⚠️ TROIS CI ROUGES ONT ÉTÉ PAYÉES POUR CES LEÇONS — ne pas les réapprendre :**
 - `ast.parse` valide la SYNTAXE, pas les NOMS. Lancer `outils/verif_noms.py` avant chaque push.
