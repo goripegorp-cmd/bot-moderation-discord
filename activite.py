@@ -187,17 +187,37 @@ def _aujourdhui() -> str:
     return datetime.now(timezone.utc).strftime(JOUR_FMT)
 
 
+#  ⚠️ CACHE INDISPENSABLE — `marquer_actif` tourne sur CHAQUE message du serveur.
+#  Sans lui, un membre bavard déclenche une écriture SQLite par message alors que
+#  la ligne du jour existe déjà : des milliers d'écritures pour rien, sur le
+#  chemin le plus chaud du bot. Le cache retient (guilde, membre, source) déjà
+#  enregistrés aujourd'hui et coupe l'écriture avant même d'ouvrir la base.
+#  Il est vidé au changement de jour : sa taille est donc bornée par le nombre de
+#  membres actifs dans la journée, pas par le nombre de messages.
+_marques_du_jour: set[tuple[int, int, str]] = set()
+_jour_du_cache: str = ""
+
+
 async def marquer_actif(guild_id: int, user_id: int, source: str) -> None:
     """Marque le membre actif pour AUJOURD'HUI.
 
-    Appelé sur chaque message / arrivée en vocal / réaction. Doit donc être le plus
-    léger possible : une seule écriture, idempotente grâce à la clé primaire.
-    `sources` accumule les lettres pour qu'on sache PAR QUOI le membre a été actif —
-    utile pour distinguer un vrai membre d'un bot qui ne fait que réagir.
+    Appelé sur chaque message / arrivée en vocal / réaction. Une seule écriture,
+    idempotente grâce à la clé primaire. `sources` accumule les lettres pour qu'on
+    sache PAR QUOI le membre a été actif — utile pour distinguer un vrai membre
+    d'un compte qui ne fait que réagir.
     """
     if source not in SOURCES:
         return
     jour = _aujourdhui()
+
+    global _jour_du_cache
+    if jour != _jour_du_cache:
+        _marques_du_jour.clear()
+        _jour_du_cache = jour
+    cle = (guild_id, user_id, source)
+    if cle in _marques_du_jour:
+        return                      # déjà enregistré aujourd'hui : rien à faire
+    _marques_du_jour.add(cle)
     try:
         async with _get_db() as db:
             await db.execute(

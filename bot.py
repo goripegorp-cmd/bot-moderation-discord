@@ -186,6 +186,13 @@ import tracking_layer as tracking2026
 # architecture_builder, custom_blueprint, slash_commands_architecture) → libère
 # ~3600 lignes. Le serveur reste géré manuellement par l'owner.
 import unified_logger as ulogger2026
+# ═══ SYSTÈME D'ACTIVITÉ (11/08/2026) — désactivé par défaut ═══
+#  Suivi (3 sources), escalade par paliers, niveaux et VIP. Rien ne tourne tant
+#  que le propriétaire n'a pas activé le système ET désigné une cible.
+import activite as activite_module
+import activite_escalade as activite_esc
+import activite_recompenses as activite_rec
+import activite_passage as activite_pass
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
 import delegations as delegations2026
 import compromised_detector as compromised2026
@@ -15286,6 +15293,46 @@ async def _stale_event_cleanup_wait():
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 203 — SUPERVISEUR DE TÂCHES (anti "bot online mais plus aucun event")
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ⏱️ ACTIVITÉ — le passage quotidien
+#
+#  Toutes les 6 h plutôt qu'une fois par jour : si le bot redémarre au mauvais
+#  moment, un passage sauté ne fait pas perdre une journée entière. Le passage
+#  est idempotent — les paliers sont calculés depuis les dates, pas incrémentés —
+#  donc le repasser dans la même journée ne double rien.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tasks.loop(hours=6)
+async def activite_passage_task():
+    """Applique les paliers d'activité sur chaque serveur. FAIL-SAFE par guilde."""
+    for g in list(bot.guilds):
+        try:
+            if not await activite_module.actif(g.id):
+                continue
+            rap = await activite_pass.passage(g)
+            #  On ne poste au staff QUE s'il s'est passé quelque chose : une
+            #  notification quotidienne « rien à signaler » se fait ignorer, puis
+            #  masquer, et le jour où le garde-fou parle personne ne le voit.
+            a = rap.get("actions", {})
+            interessant = (rap.get("plafond_declenche")
+                           or a.get("messages_envoyes")
+                           or (a.get("retraits") or {}).get("faits")
+                           or a.get("a_expulser"))
+            if not interessant:
+                continue
+            c = await activite_module.config(g.id)
+            salon = g.get_channel(int(c.get("activite_salon_staff", 0) or 0))
+            if salon is not None:
+                await salon.send(activite_pass.resume_texte(rap))
+        except Exception as ex:
+            print(f"[activite_passage_task {g.id}] {ex}")
+
+
+@activite_passage_task.before_loop
+async def _activite_passage_wait():
+    await bot.wait_until_ready()
+
+
 #  Une @tasks.loop qui lève une exception non gérée s'ARRÊTE définitivement
 #  (jusqu'au reboot). Symptôme vécu : tout se tait alors que le bot est en ligne.
 #  Ce superviseur re-démarre toute boucle critique morte, toutes les 5 min.
@@ -15293,6 +15340,7 @@ async def _stale_event_cleanup_wait():
 #  touche qu'à des boucles censées tourner en continu.
 # ═══════════════════════════════════════════════════════════════════════════════
 _SUPERVISED_LOOP_NAMES = [
+    "activite_passage_task",
     "ui_usage_flush_task",
     "event_timeout_checker", "event_auto_scheduler", "stale_event_cleanup",
     "personal_event_dispatcher", "light_events_dispatcher",
@@ -26693,6 +26741,38 @@ _did_boot = False  # audit 2026-07-03 : on_ready peut se re-déclencher (reconne
 #                    la ré-inscription des vues persistantes (nécessaire à chaque reconnexion).
 
 
+async def _activite_boot():
+    """Câble et initialise le système d'activité. Appelé une fois au boot.
+
+    `est_immunise` réunit TOUTES les protections en une seule fonction, pour que
+    le module d'activité n'ait pas à connaître les règles du bot : propriétaire,
+    super-owner, administrateur, immunisé, bot. Fail-CLOSED — si le calcul échoue,
+    on répond « intouchable » plutôt que de risquer de sanctionner un innocent.
+    """
+    async def est_immunise(member) -> bool:
+        try:
+            if member.bot:
+                return True
+            if member.id == member.guild.owner_id:
+                return True
+            if owner_ids_module.is_super_owner(member.id):
+                return True
+            if member.guild_permissions.administrator:
+                return True
+            return bool(await is_fully_immune(member))
+        except Exception as ex:
+            print(f"[activite est_immunise] {ex}")
+            return True          # dans le doute, on protège
+
+    activite_module.setup(get_db=get_db, cfg=cfg, db_set=db_set,
+                          est_immunise=est_immunise, log=print)
+    activite_esc.setup(log=print)
+    activite_rec.setup(log=print)
+    activite_pass.setup(log=print)
+    await activite_module.init_db()
+    await activite_rec.init_db()
+
+
 @bot.event
 async def on_ready():
     global _did_boot
@@ -27207,6 +27287,16 @@ async def on_ready():
     if not check_social_feeds.is_running():
         check_social_feeds.start()
     
+    # ═══ ACTIVITÉ ═══ câblage + tables, puis la boucle. La boucle démarre même
+    # si le système est éteint : elle sort d'elle-même sur chaque guilde inactive.
+    # Ainsi, activer le système depuis le panneau prend effet sans redémarrage.
+    try:
+        await _activite_boot()
+        if not activite_passage_task.is_running():
+            activite_passage_task.start()
+    except Exception as ex:
+        print(f"[on_ready activite] {ex}")
+
     # Lancer la tâche de vérification AFK automatique
     if not check_afk_automatic.is_running():
         check_afk_automatic.start()
@@ -31090,6 +31180,18 @@ async def _check_compromised_account(msg):
 async def on_message(msg):
     if not msg.guild:
         return
+
+    # ═══ ACTIVITÉ — source 1/3 : le message ═══
+    # Placé tout en haut, AVANT toute autre logique : un membre qui écrit est
+    # actif, même si son message est ensuite supprimé par une protection.
+    # `marquer_actif` coupe sur son cache du jour avant d'ouvrir la base : le coût
+    # réel est une lecture de `set` pour tous les messages sauf le premier.
+    try:
+        if not msg.author.bot:
+            await activite_module.marquer_actif(
+                msg.guild.id, msg.author.id, activite_module.SOURCE_MESSAGE)
+    except Exception as _ex_act:
+        print(f"[activite on_message] {_ex_act}")
 
     # « Dernier message » (sticky, owner 2026-06-16) : si le salon a un sticky actif, on
     # le redescend en bas. Garde O(1) mémoire AVANT toute requête (anti-429) + fire-and-
@@ -36091,9 +36193,15 @@ async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
         return
 
-    # owner 2026-07-20 : une RÉACTION DONNÉE compte comme ACTIVITÉ dans le VRAI système d'activité
-    # (activity_tracker, avec historique par jour) — utilisé par le rapport clan. RAW = capte aussi
-    # les réactions sur les ANCIENNES annonces (hors cache). FAIL-SAFE.
+    # ═══ ACTIVITÉ — source 3/3 : la réaction ═══
+    # RAW = capte aussi les réactions sur d'ANCIENS messages (hors cache).
+    try:
+        if payload.guild_id and payload.user_id:
+            await activite_module.marquer_actif(
+                payload.guild_id, payload.user_id, activite_module.SOURCE_REACTION)
+    except Exception as _ex_act:
+        print(f"[activite on_reaction] {_ex_act}")
+
     try:
         if payload.guild_id:
             await activity2026.track_reaction(payload.guild_id, payload.user_id)
@@ -39053,7 +39161,18 @@ _VOICE_HUB_WINDOW = 600.0   # …par fenêtre de 10 min
 async def on_voice_state_update(member, before, after):
     if member.bot:
         return
-    
+
+    # ═══ ACTIVITÉ — source 2/3 : le vocal ═══
+    # On compte l'ARRIVÉE dans un salon (before sans salon, after avec), pas les
+    # changements d'état (micro coupé, sourdine) : rester muet dans un salon vide
+    # ne doit pas suffire à passer pour actif.
+    try:
+        if after.channel is not None and before.channel is None:
+            await activite_module.marquer_actif(
+                member.guild.id, member.id, activite_module.SOURCE_VOCAL)
+    except Exception as _ex_act:
+        print(f"[activite on_voice] {_ex_act}")
+
     guild_id = member.guild.id
     user_id = member.id
     key = (guild_id, user_id)
