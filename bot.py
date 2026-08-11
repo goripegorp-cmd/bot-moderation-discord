@@ -207,22 +207,18 @@ import health_server as health_server_module
 # Phase 127 : helpers V2 communs réutilisables
 import panels_helpers as panels_h
 # Phase 129 : récap hebdomadaire des Boss Raids
-import raid_recap as raid_recap_module
 # Phase 130 : dashboard staff modération
 import mod_dashboard as mod_dashboard_module
 import owner_export as owner_export_module
 # Phase 131 : événements économiques cycliques + /gift
 import economy_events as econ_events_module
 # Phase 132 : paliers de progression (streak / veteran / prestige)
-import progression_milestones as prog_module
 # Phase 134 : wiki + roadmap + weekly highlights
 import community_hub as cmty_hub_module
 # Phase 135 : coffre d'alliance + stats de gestion
-import alliance_vault as av_module
 # Phase 136 : Roblox link verify + game library
 import roblox_link as rblx_link_module
 # Phase 137 : Voice Lounges + paliers vocaux
-import voice_lounges as vlounge_module
 # Phase 138 : Tickets enhancements (priority + templates + auto-close)
 import tickets_enhance as tix_module
 # Phase 139 : Observabilité (daily report + anomalies + retention)
@@ -264,7 +260,6 @@ import owner_digest as owner_digest_module
 # onboarding journey, mentor bonus
 import reputation as reputation_module
 import pet_evolution as pet_evo_module
-import daily_prompt as daily_prompt_module
 import alliance_war as alliance_war_module
 import onboarding_journey as onboarding_module
 import mentor_bonus as mentor_bonus_module
@@ -277,7 +272,6 @@ import roblox_raffle as roblox_raffle_module
 import stream_watch_party as stream_party_module
 # Phase 157 : Community goals + Coin economy (anti-inflation)
 import community_goals as community_goals_module
-import coin_economy as coin_economy_module
 # Phase 161 : Weekly recap + Leaderboards publics
 import weekly_stats as weekly_stats_module
 # Phase 162 : Server Pulse live + Tips Rotator
@@ -305,12 +299,8 @@ import error_logger as error_logger_module
 # Phase 169.1 : Mob Hunts (combat fréquent multi-user)
 import mob_hunts as mob_hunts_module
 # Phase 256 Lot 3 : events COLLABORATIFS (Faille 🟡 / Caravane 🟢)
-import rift_events as rift_events_module
-import caravan_events as caravan_events_module
-import chain_events as chain_events_module
 # Phase 173.2 : Boss du jour, 4×/jour, gating de niveau
 import daily_bosses as daily_bosses_module
-import season_race as season_race_module
 import recidivism as recidivism_module
 import combat_actions as combat_actions_module  # Phase 269 : actions de combat universelles (⚡/📣)
 import activity_rewards as activity_rewards_module
@@ -358,18 +348,12 @@ import dm_notify as dm_notify_module  # Phase 235.31 : notifs d'event en MP (opt
 import i18n as i18n_module  # Socle i18n : préférence de langue par membre + sélecteur (zéro slash)
 import translate as translate_module  # Traduction à la demande (réaction 🌐 → MyMemory, opt-in, fail-safe)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
-import npc_personalities as npc_personalities_module
 import daily_encounters as daily_encounters_module
 # Phase 170.4 : Conseil des Anciens hebdomadaire
-import weekly_council as weekly_council_module
 # Phase 170.5 : Régions du monde + patrouilles
-import regional_state as regional_state_module
 # Phase 170.6 : Indices fragmentés (force la discussion en chat)
-import mystery_investigation as mystery_investigation_module
 # Phase 170.7 : Lettres NPC hebdo en DM (opt-in)
-import npc_letters as npc_letters_module
 # Phase 170.8 : Boss Climax mensuel thématique
-import monthly_climax as monthly_climax_module
 import random
 try:
     from zoneinfo import ZoneInfo

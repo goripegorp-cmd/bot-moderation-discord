@@ -13,7 +13,6 @@ PHASE_163_MODULES = [
     "owner_digest",
     "reputation",
     "pet_evolution",
-    "daily_prompt",
     "onboarding_journey",
     "mentor_bonus",
     "honeypot",
@@ -22,7 +21,6 @@ PHASE_163_MODULES = [
     "roblox_raffle",
     "stream_watch_party",
     "community_goals",
-    "coin_economy",
     "weekly_stats",
     "server_pulse",
     # Phase 165 — nouveaux modules
@@ -53,18 +51,12 @@ PHASE_163_MODULES = [
     "story_engine",
     "codex_chronicle",
     # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
-    "npc_personalities",
     "daily_encounters",
     # Phase 170.4 : Conseil des Anciens hebdomadaire
-    "weekly_council",
     # Phase 170.5 : Régions du monde + patrouilles
-    "regional_state",
     # Phase 170.6 : Indices fragmentés
-    "mystery_investigation",
     # Phase 170.7 : Lettres NPC hebdo en DM
-    "npc_letters",
     # Phase 170.8 : Boss Climax mensuel thématique
-    "monthly_climax",
 ]
 
 
@@ -91,7 +83,6 @@ INIT_DB_MODULES = [
     "owner_digest",
     "reputation",
     "pet_evolution",
-    "daily_prompt",
     "onboarding_journey",
     "mentor_bonus",
     "honeypot",
@@ -100,7 +91,6 @@ INIT_DB_MODULES = [
     "roblox_raffle",
     "stream_watch_party",
     "community_goals",
-    "coin_economy",
     # Phase 165
     "stream_schedule",
     "activity_heatmap",
@@ -121,18 +111,12 @@ INIT_DB_MODULES = [
     # de story_engine)
     "story_engine",
     # Phase 170.2-3 : NPCs mood + encounters log
-    "npc_personalities",
     "daily_encounters",
     # Phase 170.4 : council sessions + votes
-    "weekly_council",
     # Phase 170.5 : regional state + patrols
-    "regional_state",
     # Phase 170.6 : mystery clues + revelations
-    "mystery_investigation",
     # Phase 170.7 : letters subscriptions + sent log
-    "npc_letters",
     # Phase 170.8 : climax events + attackers + titles
-    "monthly_climax",
     # Phase 174.2 : VIP grants + role IDs
     "activity_rewards",
     # Phase 184 : dungeon_runs + dungeon_members
