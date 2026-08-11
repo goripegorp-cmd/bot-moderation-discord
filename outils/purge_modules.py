@@ -106,7 +106,11 @@ def main() -> int:
             refs[m] = sorted(set(hits))
 
     # ── Graphe des imports croisés entre modules locaux ─────────────────────
-    importe_par: dict[str, list[str]] = {}
+    #  On distingue l'import DUR (niveau module, hors try) de l'import PARESSEUX
+    #  (dans un try, ou dans un corps de fonction). Seul le dur casse le boot :
+    #  un `try: import x` avec repli est conçu pour l'absence du module.
+    importe_par: dict[str, list[str]] = {}      # imports DURS uniquement
+    importe_mou: dict[str, list[str]] = {}
     for f in glob.glob("*.py"):
         mod = os.path.splitext(os.path.basename(f))[0]
         if mod == BOT[:-3]:
@@ -115,6 +119,7 @@ def main() -> int:
             a = ast.parse(open(f, encoding="utf-8", errors="replace").read())
         except Exception:
             continue
+        durs = {id(n) for n in a.body if isinstance(n, (ast.Import, ast.ImportFrom))}
         for n in ast.walk(a):
             cibles = []
             if isinstance(n, ast.Import):
@@ -122,15 +127,23 @@ def main() -> int:
             elif isinstance(n, ast.ImportFrom) and n.module and n.level == 0:
                 cibles = [n.module.split(".")[0]]
             for c in cibles:
-                if c in locaux:
-                    importe_par.setdefault(c, []).append(mod)
+                if c not in locaux:
+                    continue
+                (importe_par if id(n) in durs else importe_mou).setdefault(c, []).append(
+                    f"{mod}:{n.lineno}")
 
-    # Un module condamné encore importé par un module GARDÉ ne peut pas partir.
+    #  ⚠️ CORRECTIF : on bloque si un module ENCORE PRÉSENT l'importe en dur — pas
+    #  seulement un module gardé. Un module condamné qui n'est pas encore supprimé
+    #  reste importé par bot.py, donc son propre import cassé tue le boot.
+    #  (C'est exactement ce qui a fait échouer la CI : community_features, condamné
+    #  mais toujours là, importait `engagement` en dur.)
     bloques = {
-        m: sorted({s for s in importe_par.get(m, []) if s in GARDER})
+        m: sorted({s for s in importe_par.get(m, []) if s.split(":")[0] not in condamnes
+                   or s.split(":")[0] in locaux})
         for m in condamnes
-        if any(s in GARDER for s in importe_par.get(m, []))
+        if importe_par.get(m)
     }
+    bloques = {m: v for m, v in bloques.items() if v}
 
     sans_ref = sorted(condamnes - set(refs) - set(bloques))
     avec_ref = sorted(set(refs) - set(bloques))
@@ -145,8 +158,8 @@ def main() -> int:
     for m in sans_ref:
         n = len(open(f"{m}.py", encoding="utf-8", errors="replace").read().splitlines())
         total += n
-        croise = [s for s in importe_par.get(m, []) if s in condamnes]
-        note = f"  ← importé par {', '.join(croise[:3])}" if croise else ""
+        mou = importe_mou.get(m, [])
+        note = f"  ← import PARESSEUX depuis {', '.join(mou[:2])} (try/fonction, sans danger)" if mou else ""
         print(f"      {m:30} {n:5} l.{note}")
     print(f"    total : {total} lignes de module")
 
@@ -161,7 +174,7 @@ def main() -> int:
             print(f"      {m:30} {len(refs[m])} référence(s), l.{refs[m][:6]}")
 
     if bloques:
-        print(f"\n  ⚠️  BLOQUÉS — importés par un module GARDÉ ({len(bloques)}) :")
+        print(f"\n  ⚠️  BLOQUÉS — import DUR depuis un module encore présent ({len(bloques)}) :")
         for m, par in bloques.items():
             print(f"      {m:30} ← {', '.join(par)}")
 
