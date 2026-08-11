@@ -18,7 +18,19 @@ Un membre est actif **sur une journée** s'il fait **au moins une** de ces trois
 Une seule suffit. 200 messages dans la soirée valent exactement une journée,
 comme un seul message : le système mesure la **présence**, pas le volume.
 
-La journée est comptée en **UTC**.
+### Les bornes de temps
+
+| | De | À |
+|---|---|---|
+| **Journée** | minuit | minuit |
+| **Semaine** | **lundi 00h00** | lundi 00h00 suivant |
+| **Mois** | le 1er 00h00 | le 1er du mois suivant |
+
+Tout est en **heure de Paris**, changements d'heure compris — pas en UTC. Quand
+vous dites « lundi 00h00 », c'est minuit chez vous.
+
+Le rappel hebdomadaire part **une seule fois par semaine**, même si le bot
+redémarre ou passe plusieurs fois dans la journée.
 
 ---
 
@@ -117,7 +129,9 @@ Le rappel n'est envoyé **qu'une fois par semaine**, le jour que vous choisissez
 2. **🎯 Qui est surveillé** → choisissez un rôle, ou « tout le serveur »
 3. **⚙️ Seuils** → réglez les trois paliers pour ce rôle
 4. **📢 Salons** → les trois salons + le jour du rappel
-5. **🔎 Aperçu** → vérifiez qui serait concerné, **sans rien appliquer**
+5. **🔎 Aperçu** → il vous dit d'abord **si le suivi capte vraiment** vos
+   messages, votre vocal et vos réactions, puis qui serait concerné —
+   **sans rien appliquer**
 6. Seulement ensuite : allumez l'interrupteur
 
 > **Laissez tourner une semaine avant d'allumer les paliers.** Le système ne
@@ -134,8 +148,9 @@ Le rappel n'est envoyé **qu'une fois par semaine**, le jour que vous choisissez
 | `activite_escalade.py` | Classement par palier, retrait et restitution des rôles |
 | `activite_passage.py` | Le passage quotidien — un seul point d'entrée |
 | `activite_recompenses.py` | Niveaux et VIP |
+| `activite_calendrier.py` | Toutes les bornes de temps : jour, semaine, mois |
 | `activite_panneau.py` | Le panneau de configuration (Components V2) |
-| `tests/test_activite.py` | 25 tests sur la logique de décision |
+| `tests/test_activite.py` | 35 tests : décision, niveaux, calendrier |
 
 **Tables** : `activite_jours` (une ligne par membre et par jour) et
 `activite_etat` (palier, rôles retirés, niveau, VIP).
