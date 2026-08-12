@@ -283,39 +283,14 @@ async def burst_check_task():
             except Exception:
                 pass
 
-            # DM owner de la 1ère guild (= owner principal)
-            try:
-                guild = next(iter(_bot.guilds), None)
-                if guild:
-                    owner = (
-                        guild.owner or
-                        await guild.fetch_member(guild.owner_id)
-                    )
-                    if owner:
-                        text = (
-                            f"🔥 **Burst d'erreurs détecté**\n\n"
-                            f"**Source :** `{source}`\n"
-                            f"**Compteur :** `{count}` erreurs dans la "
-                            f"dernière heure (threshold `{BURST_THRESHOLD_PER_HOUR}`)\n"
-                            f"**Type :** `{sample_type}`\n"
-                            f"**Sample :** _{sample_msg}_\n\n"
-                            f"_Prochaine alerte du même source dans "
-                            f"{BURST_ALERT_COOLDOWN_HOURS}h max._"
-                        )
-                        sent = False
-                        try:
-                            import dm_digest as _dm
-                            if _dm and hasattr(_dm, "send_urgent_now"):
-                                sent = await _dm.send_urgent_now(owner, text)
-                        except Exception:
-                            sent = False
-                        if not sent:
-                            try:
-                                await owner.send(text)
-                            except Exception:
-                                pass
-            except Exception as ex:
-                print(f"[error_logger burst DM] {ex}")
+            # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande.)
+            #
+            # Le bloc contenait DEUX chemins d'envoi — `dm_digest.send_urgent_now`, puis
+            # `owner.send` en repli : couper une seule des deux lignes n'aurait rien coupé.
+            # Le burst reste DÉTECTÉ et journalisé (`error_burst_alerts` juste en dessous,
+            # `error_log` à chaque erreur) ; seule la notification privée disparaît.
+            # ⚠️ Ne pas supprimer le module : `log_error` est câblé une quarantaine de fois
+            # dans bot.py et tests/test_imports.py l'importe.
 
             # Mark alerted
             try:

@@ -299,7 +299,8 @@ import behavior_guard as behavior_guard  # Anti-crash (zalgo/invisible) + spam i
 import ocr_scan as ocr_scan  # OCR anti-scam image (lire le texte DANS l'image, owner 2026-06-27) — fail-safe si tesseract absent
 import grooming_detector as grooming_detector  # Protection mineurs : détection d'approche prédatrice (owner 2026-06-27)
 import nsfw_scan as nsfw_scan  # Protection mineurs : détection d'images sexuelles par IA (owner 2026-06-27) — fail-safe + garde RAM
-import dm_notify as dm_notify_module  # Phase 235.31 : notifs d'event en MP (opt-in strict)
+# (import de `dm_notify` retiré le 12/08/2026 : module d'envoi de MP sans
+#  aucun appelant, dont `send_weekly_recaps` sortait déjà sur un `return 0`.)
 import i18n as i18n_module  # Socle i18n : préférence de langue par membre + sélecteur (zéro slash)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import daily_encounters as daily_encounters_module
@@ -13914,154 +13915,14 @@ async def event_timeout_checker():
 AUCTION_COMMISSION_PCT = 5  # 5% prélevé sur la vente
 
 
-@tasks.loop(minutes=1)
-async def auction_settler_task():
-    """Phase 109 : termine les enchères expirées toutes les minutes."""
-    try:
-        import time as _time
-        now_ts = int(_time.time())
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id, guild_id, seller_id, slot, item_json, current_bid, "
-                "top_bidder_id, bids_count "
-                "FROM auctions WHERE status='active' AND ends_at <= ?",
-                (now_ts,),
-            ) as cur:
-                rows = await cur.fetchall()
+# (auction_settler_task SUPPRIMÉE le 12/08/2026.)
+#
+# La boucle était VIVANTE — démarrée et supervisée — alors qu'il n'existe plus un
+# seul `INSERT INTO auctions` dans tout le dépôt : plus aucune enchère ne peut être
+# créée. Elle tournait donc pour rien, mais une enchère héritée encore `active` en
+# base aurait suffi à envoyer deux MP au vendeur et à l'acheteur. Les enchères font
+# partie du MMORPG, retiré par la refonte.
 
-        for row in rows:
-            ah_id, gid, seller_id, slot, item_json, current_bid, top_bidder_id, bids_count = row
-            try:
-                item = json.loads(item_json) if item_json else {}
-            except Exception:
-                item = {}
-
-            try:
-                if top_bidder_id and bids_count > 0:
-                    # VENDU → top_bidder reçoit l'item, seller reçoit (prix - commission)
-                    commission = max(1, int(current_bid * AUCTION_COMMISSION_PCT / 100))
-                    seller_revenue = current_bid - commission
-
-                    # Crédite le seller
-                    await add_coins(gid, seller_id, seller_revenue)
-                    # Donne l'item au top_bidder
-                    buyer_inv = await _get_or_create_inventory(gid, top_bidder_id)
-                    target_slot = slot if slot in events2026.EQUIPMENT_SLOTS else "weapon"
-                    # Phase 112 : si le slot est occupé, on prévient le buyer en DM
-                    old_item = buyer_inv.get(target_slot) or {}
-                    overwritten = bool(old_item and old_item.get("name"))
-                    buyer_inv[target_slot] = item
-                    await _save_inventory(gid, top_bidder_id, buyer_inv)
-
-                    async with get_db() as db:
-                        await db.execute(
-                            "UPDATE auctions SET status='completed' WHERE id=?",
-                            (ah_id,),
-                        )
-                        await db.commit()
-                    print(
-                        f"[auction_settler] #{ah_id} VENDU à {top_bidder_id} pour {current_bid} "
-                        f"(commission {commission}, seller gain {seller_revenue})"
-                    )
-
-                    # Phase 113 : incr counters seller + buyer
-                    try:
-                        await _incr_phase113_counter(gid, seller_id, "auctions_sold")
-                        await _incr_phase113_counter(gid, top_bidder_id, "auctions_won")
-                        guild_obj = bot.get_guild(gid)
-                        if guild_obj:
-                            await _check_phase113_badges(guild_obj, seller_id)
-                            await _check_phase113_badges(guild_obj, top_bidder_id)
-                    except Exception as ex:
-                        print(f"[auction badge check] {ex}")
-
-                    # Phase 112 : DM au buyer (gain + warning si écrasement)
-                    try:
-                        guild = bot.get_guild(gid)
-                        if guild:
-                            buyer = guild.get_member(top_bidder_id)
-                            if buyer:
-                                item_name = (item or {}).get("name", "?")
-                                item_emoji = (item or {}).get("emoji", "📦")
-                                msg = (
-                                    f"🎉 **Tu as remporté l'enchère #{ah_id} !**\n"
-                                    f"Tu reçois : {item_emoji} **{item_name}** dans ton slot `{target_slot}`.\n"
-                                    f"_Coût : `{current_bid:,}` 🪙_"
-                                )
-                                if overwritten:
-                                    old_emoji = old_item.get("emoji", "⚪")
-                                    old_name = old_item.get("name", "?")
-                                    msg += (
-                                        f"\n\n⚠️ **Ton ancien {old_emoji} {old_name}** "
-                                        f"a été remplacé. _(Garde un slot vide la prochaine fois "
-                                        f"pour éviter ça !)_"
-                                    )
-                                try:
-                                    await buyer.send(msg)
-                                except Exception:
-                                    pass
-                            # Notif seller aussi
-                            seller_m = guild.get_member(seller_id)
-                            if seller_m:
-                                try:
-                                    await seller_m.send(
-                                        f"💰 **Ton enchère #{ah_id} est vendue !**\n"
-                                        f"Tu reçois : `{seller_revenue:,}` 🪙 "
-                                        f"_(commission `{commission:,}` 🪙 retirée)_"
-                                    )
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-                else:
-                    # INVENDU → rend l'item au seller
-                    seller_inv = await _get_or_create_inventory(gid, seller_id)
-                    target_slot = slot if slot in events2026.EQUIPMENT_SLOTS else "weapon"
-                    # Si seller a déjà un item dans ce slot, on n'écrase pas (anti-perte)
-                    if not seller_inv.get(target_slot) or not seller_inv[target_slot].get("name"):
-                        seller_inv[target_slot] = item
-                        await _save_inventory(gid, seller_id, seller_inv)
-                    else:
-                        # On le met dans le premier slot vide
-                        for s in events2026.EQUIPMENT_SLOTS:
-                            if not seller_inv.get(s) or not (seller_inv.get(s) or {}).get("name"):
-                                seller_inv[s] = item
-                                await _save_inventory(gid, seller_id, seller_inv)
-                                break
-
-                    async with get_db() as db:
-                        await db.execute(
-                            "UPDATE auctions SET status='unsold' WHERE id=?",
-                            (ah_id,),
-                        )
-                        await db.commit()
-                    print(f"[auction_settler] #{ah_id} INVENDU → rendu au seller {seller_id}")
-
-                    # Phase 112 : DM seller pour notif unsold
-                    try:
-                        guild = bot.get_guild(gid)
-                        if guild:
-                            seller_m = guild.get_member(seller_id)
-                            if seller_m:
-                                item_name = (item or {}).get("name", "?")
-                                item_emoji = (item or {}).get("emoji", "📦")
-                                try:
-                                    await seller_m.send(
-                                        f"😔 **Ton enchère #{ah_id} n'a pas trouvé preneur.**\n"
-                                        f"{item_emoji} **{item_name}** t'a été rendu.\n"
-                                        f"_Essaie à un prix plus bas la prochaine fois._"
-                                    )
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-            except Exception as ex:
-                print(f"[auction_settler row={ah_id}] {ex}")
-    except Exception as ex:
-        print(f"[auction_settler] {ex}")
-
-
-@auction_settler_task.before_loop
 async def _auction_settler_wait():
     await bot.wait_until_ready()
 
@@ -14934,7 +14795,7 @@ _SUPERVISED_LOOP_NAMES = [
     "voice_spotlight_dispatcher",
     "npc_chatter_task", "missions_runner_task", "daily_studio_tip_task",
     "golden_hour_announce_task", "hub_live_events_refresh_task",
-    "auction_settler_task", "reversibles_failsafe", "persistent_msg_cleaner",
+    "reversibles_failsafe", "persistent_msg_cleaner",
     "marketplace_expire_cleaner", "hub_orphan_cleaner_task", "db_optimizer_task",
     "comeback_dm_task", "combat_channel_sweeper", "welcome_cleanup_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
@@ -14952,10 +14813,10 @@ _SUPERVISED_LOOP_NAMES = [
     #   • temp_voice_watchdog     → les vocaux temporaires s'empilent (plainte owner)
     # Toutes sont lancées INCONDITIONNELLEMENT au boot (garde is_running() seule) →
     # les superviser est sans effet de bord (no-op si déjà vivantes, resurrection sinon).
-    "check_realsy_inactivity", "check_social_feeds",
+    "check_social_feeds",
     "cleanup_old_db_data", "check_giveaways", "check_scheduled_messages",
     "check_expired_roles", "cleanup_deals_task", "check_expired_restrictions",
-    "birthday_announcer", "poll_closer", "weekly_recap_task", "owner_alerts_task",
+    "birthday_announcer", "poll_closer", "weekly_recap_task",
     "narrative_choices_resolver_task", "update_votes_resolver_task", "daily_meta_task",
     "thematic_voice_cleanup_task", "temp_voice_watchdog", "irl_season_check_task",
     "capsule_unlock_task", "npc_whisper_task", "game_night_dispatcher",
@@ -23924,9 +23785,6 @@ async def on_ready():
     except Exception:
         pass
 
-    # Lancer la tâche d'inactivité
-    if not check_realsy_inactivity.is_running():
-        check_realsy_inactivity.start()
     
     # Lancer la tâche des feeds sociaux
     if not check_social_feeds.is_running():
@@ -23997,8 +23855,6 @@ async def on_ready():
     if not task_supervisor.is_running():
         task_supervisor.start()
     # Phase 109 : auction settler — termine les enchères expirées
-    if not auction_settler_task.is_running():
-        auction_settler_task.start()
     # Phase 111 : refresh tuile Live Events sur les hubs configurés
     if not hub_live_events_refresh_task.is_running():
         hub_live_events_refresh_task.start()
@@ -24534,9 +24390,6 @@ async def on_ready():
     # Tâche B.2 : annonce de sortie à l'échéance du countdown (fail-open, no-op sans date)
     if not release_countdown_task.is_running():
         release_countdown_task.start()
-    # Phase 54 : alertes auto owner
-    if not owner_alerts_task.is_running():
-        owner_alerts_task.start()
     # Phase 57 : narrative choices resolver
     if not narrative_choices_resolver_task.is_running():
         narrative_choices_resolver_task.start()
@@ -26087,11 +25940,8 @@ async def _handle_rogue_bot(m):
                                         description=txt, user=m, moderator=(actor or bot.user))
         except Exception:
             pass
-        try:
-            if guild.owner is not None:
-                await guild.owner.send(f"[{guild.name}] {txt}")
-        except Exception:
-            pass
+        # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande. Le même texte
+        #  part déjà dans le journal de sécurité juste au-dessus — rien n'est perdu.)
     except Exception as ex:
         print(f"[_handle_rogue_bot] {ex}")
 
@@ -27317,11 +27167,12 @@ async def _antinuke_respond(guild, actor, kind, count, c):
         await ulogger2026.log_event(bot, guild, ulogger2026.EventType.SEC_ESCALATION, description=txt)
     except Exception:
         pass
-    try:  # DM direct à l'owner = canal le plus fiable pendant un nuke en cours
-        if guild.owner is not None:
-            await guild.owner.send(f"[{guild.name}] {txt}")
-    except Exception:
-        pass
+    # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande. Le même texte part
+    #  déjà dans le journal de sécurité juste au-dessus.
+    #  ⚠️ RÉSERVE ASSUMÉE : pendant un nuke, le salon de logs est la PREMIÈRE cible.
+    #  Le message privé était le seul canal qui y survivait. Le propriétaire a été
+    #  prévenu de ce compromis et l'a accepté ; remettre ce bloc suffit à revenir
+    #  en arrière.)
 
 
 def _has_risky_perms(member) -> bool:
@@ -27387,11 +27238,8 @@ async def _compromised_riposte(msg, reason):
                                         description=txt, user=member, moderator=bot.user)
         except Exception:
             pass
-        try:
-            if guild.owner is not None:
-                await guild.owner.send(f"[{guild.name}] {txt}")
-        except Exception:
-            pass
+        # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande. Le même texte
+        #  part déjà dans le journal de sécurité juste au-dessus — rien n'est perdu.)
     except Exception as ex:
         print(f"[_compromised_riposte] {ex}")
 
@@ -27455,11 +27303,8 @@ async def on_webhooks_update(channel):
             await ulogger2026.log_event(bot, guild, ulogger2026.EventType.SEC_ESCALATION, description=txt)
         except Exception:
             pass
-        try:
-            if guild.owner is not None:
-                await guild.owner.send(f"[{guild.name}] {txt}")
-        except Exception:
-            pass
+        # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande. Le même texte
+        #  part déjà dans le journal de sécurité juste au-dessus — rien n'est perdu.)
     except Exception as ex:
         print(f"[on_webhooks_update] {ex}")
 
@@ -27618,14 +27463,8 @@ async def _perm_escalation_guard(guild, before, after):
             extra={"🔐 Perms ajoutées": ", ".join(added), "🎭 Rôle": after.name})
     except Exception:
         pass
-    try:  # DM owner = canal fiable pendant une attaque
-        if guild.owner is not None:
-            await guild.owner.send(
-                f"[{guild.name}] 🔐 Escalade de permissions : {actor} a tenté d'ajouter "
-                f"{', '.join(added)} au rôle {after.name}. "
-                f"{'Révoqué.' if reverted else 'Révocation impossible — interviens.'}")
-    except Exception:
-        pass
+    # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande. L'escalade est
+    #  déjà journalisée en SEC_ESCALATION juste au-dessus, avec plus de détail.)
 
 
 async def relay_discord_message(msg):
@@ -32020,43 +31859,13 @@ bot.tree.add_command(mod_group)
 # et depuis combien de temps, PING les inactifs, et RAPPELLE que le rôle sera retiré — mais
 # MANUELLEMENT par le staff (le bot ne retire JAMAIS le rôle lui-même). Données = realsy_tracking
 # (last_activity : posé à l'ajout, mis à jour à chaque message via update_realsy_activity).
-CLAN_INACTIVE_DAYS = 7
-
-
-
-
-
-
-async def _dm_clan_inactive(member, guild, role, days_inactive, *, final=False):
-    """MP PRIVÉ (conforme TOS — on écrit à un membre de SON serveur au sujet de SON rôle) à un
-    membre de clan inactif. AUCUN ping public. Cible le NOM du serveur + le NOM du rôle (jamais
-    d'ID brut / hashtag / code / message d'erreur). Incite message/réaction/vocal. FAIL-SAFE :
-    si les MP sont fermés, on n'insiste pas (retourne False)."""
-    try:
-        e = discord.Embed(
-            title=("⏳ Dernier rappel — ton rôle de clan" if final else "🌊 Rappel d'activité — ton clan"),
-            color=(discord.Color(0xE67E22) if final else discord.Color(0x2E6BA8)),
-            timestamp=now())
-        e.description = (
-            f"Salut **{member.display_name}** 👋\n\n"
-            f"Tu fais partie du clan **{role.name}** sur **{guild.name}**, un rôle pour lequel tu "
-            f"t'es porté volontaire — mais tu es inactif depuis **{days_inactive} jours**.\n\n"
-            f"Pour **garder ta place dans le clan**, il te suffit de te manifester dans le serveur :\n"
-            f"• 💬 écrire un message dans le chat\n"
-            f"• ✅ réagir à un message ou à une annonce\n"
-            f"• 🔊 te connecter en vocal\n\n"
-            f"Une seule de ces actions suffit. Sans aucune, ton rôle **{role.name}** te sera retiré "
-            f"et tu perdras l'accès au clan. On compte sur toi — reviens vite ! 💪")
-        try:
-            if getattr(guild, 'icon', None):
-                e.set_thumbnail(url=guild.icon.url)
-        except Exception:
-            pass
-        e.set_footer(text=guild.name)
-        await member.send(embed=e)
-        return True
-    except Exception:
-        return False
+# (CLAN_INACTIVE_DAYS et `_dm_clan_inactive` SUPPRIMÉS le 12/08/2026.)
+#
+# Ce message privé quotidien — « 🌊 Rappel d'activité — ton clan » — faisait DOUBLON avec
+# le système d'activité reconstruit (rappel → rôle AFK → retrait → expulsion), et surtout
+# il MENTAIT : il annonçait au membre que son rôle allait lui être retiré, alors que le
+# commentaire de la boucle disait explicitement que le bot ne le retire JAMAIS lui-même.
+# Le clan Realsy fait partie du périmètre supprimé par la refonte.
 
 
 
@@ -32766,129 +32575,9 @@ async def on_raw_reaction_remove(payload):
     # Suggestions : refresh couleur SANS re-ajouter le rôle
     await _update_suggestion_colors(payload)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#                              🎭 REALSY INACTIVITY TRACKING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@tasks.loop(hours=24)
-async def check_realsy_inactivity():
-    """Vérifie l'inactivité des utilisateurs avec le rôle Realsy chaque jour"""
-    try:
-        async with get_db() as db:
-            async with db.execute('SELECT guild_id, user_id, last_activity, warn_count FROM realsy_tracking') as c:
-                rows = await c.fetchall()
-        
-        for guild_id, user_id, last_activity, warn_count in rows:
-            try:
-                guild = bot.get_guild(guild_id)
-                if not guild:
-                    continue
-                
-                c = await cfg(guild_id)
-                role = guild.get_role(c.get('rellseas_role', 0))
-                if not role:
-                    continue
-                
-                member = guild.get_member(user_id)
-                if not member or role not in member.roles:
-                    # L'utilisateur n'a plus le rôle, supprimer du tracking
-                    async with get_db() as db:
-                        await db.execute('DELETE FROM realsy_tracking WHERE guild_id=? AND user_id=?',
-                            (guild_id, user_id))
-                        await db.commit()
-                    continue
-                
-                # owner 2026-07-23 : COFONDATEURS exemptés → jamais de rappel d'inactivité clan
-                # (ni MP, ni warn). On efface un warn_count résiduel puis on saute.
-                if activity_vip_module.is_activity_exempt(member):
-                    if (warn_count or 0) != 0:
-                        try:
-                            async with get_db() as db:
-                                await db.execute('UPDATE realsy_tracking SET warn_count=0 WHERE guild_id=? AND user_id=?',
-                                    (guild_id, user_id))
-                                await db.commit()
-                        except Exception:
-                            pass
-                    continue
-
-                # owner 2026-07-20 : l'activité est mesurée par le VRAI système (activity_tracker :
-                # message/vocal/réaction sur le serveur, avec historique) — PAS depuis l'obtention
-                # du rôle. `realsy_tracking.last_activity` (obsolète) n'est plus utilisé ici.
-                try:
-                    _d = await activity2026.days_since_active(guild_id, user_id, max_days=30)
-                except Exception:
-                    _d = None
-
-                # ACTIF (activité < 7 j, quelle qu'elle soit) → remise à zéro de l'avertissement.
-                if _d is not None and _d < 7:
-                    if (warn_count or 0) != 0:
-                        try:
-                            async with get_db() as db:
-                                await db.execute('UPDATE realsy_tracking SET warn_count=0 WHERE guild_id=? AND user_id=?',
-                                    (guild_id, user_id))
-                                await db.commit()
-                        except Exception:
-                            pass
-                    continue
-
-                days_inactive = _d if _d is not None else 30
-
-                if days_inactive >= 7:
-                    # owner 2026-07-20 : plus de salon d'avertissement PUBLIC automatique ici — le
-                    # membre est prévenu en MP privé. Seul le log staff reste (pour le suivi).
-                    log_ch = guild.get_channel(c.get('rellseas_log_channel', 0))
-                    
-                    if warn_count == 0:
-                        # Premier warn
-                        async with get_db() as db:
-                            await db.execute('UPDATE realsy_tracking SET warn_count=1 WHERE guild_id=? AND user_id=?',
-                                (guild_id, user_id))
-                            await db.commit()
-
-                        # owner 2026-07-20 : PLUS de ping public automatique. On prévient le membre
-                        # en MP PRIVÉ (TOS-safe). Le ping public n'a lieu QUE via la commande manuelle.
-                        _dm_ok = await _dm_clan_inactive(member, guild, role, days_inactive)
-
-                        if log_ch:
-                            log_e = discord.Embed(title="⚠️ Warn Inactivité #1", color=C.YELLOW, timestamp=now())
-                            log_e.add_field(name="👤 Membre", value=f"{member.mention}\n`{member.id}`", inline=True)
-                            log_e.add_field(name="📅 Inactif depuis", value=f"{days_inactive} jours", inline=True)
-                            log_e.add_field(name="📩 MP", value=("envoyé ✅" if _dm_ok else "fermé/échoué ⚠️"), inline=True)
-                            log_e.set_thumbnail(url=member.display_avatar.url)
-                            await webhook_send(log_ch, 'realsy', embed=log_e)
-                    
-                    elif warn_count == 1 and days_inactive >= 14:
-                        # owner 2026-07-20 : le bot NE RETIRE **JAMAIS** le rôle (retrait MANUEL par
-                        # le staff). Dernier rappel au membre + ALERTE staff « à retirer manuellement ».
-                        # warn_count → 2 pour ne PAS re-spammer chaque jour ensuite. La ligne de
-                        # tracking est CONSERVÉE (le rapport d'inactivité continue de le lister).
-                        # Un retour d'activité remet warn_count=0 (update_realsy_activity).
-                        try:
-                            async with get_db() as db:
-                                await db.execute('UPDATE realsy_tracking SET warn_count=2 WHERE guild_id=? AND user_id=?',
-                                    (guild_id, user_id))
-                                await db.commit()
-                            # MP privé de dernier rappel (aucun ping public automatique).
-                            _dm_ok = await _dm_clan_inactive(member, guild, role, days_inactive, final=True)
-                            if log_ch:
-                                log_e = discord.Embed(title="🚨 À RETIRER MANUELLEMENT — inactivité", color=C.RED, timestamp=now())
-                                log_e.description = "Le bot ne retire **jamais** le rôle. Retrait à faire par le staff si souhaité."
-                                log_e.add_field(name="👤 Membre", value=f"{member.mention}\n`{member.id}`", inline=True)
-                                log_e.add_field(name="🎭 Rôle", value=role.mention, inline=True)
-                                log_e.add_field(name="📅 Inactif depuis", value=f"{days_inactive} jours", inline=True)
-                                log_e.add_field(name="📩 MP (dernier rappel)", value=("envoyé ✅" if _dm_ok else "fermé/échoué ⚠️"), inline=True)
-                                log_e.set_thumbnail(url=member.display_avatar.url)
-                                await webhook_send(log_ch, 'realsy', embed=log_e)
-                        except Exception:
-                            pass
-            except:
-                continue
-    except:
-        pass
-
-@check_realsy_inactivity.before_loop
-async def before_check():
-    await bot.wait_until_ready()
+# (La boucle `check_realsy_inactivity` a été supprimée avec le MP qu'elle servait.
+#  Coupée EN ENTIER plutôt que sur son seul envoi : le reste ne produisait plus que des
+#  journaux staff pour un système mort.)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📢 TÂCHE VÉRIFICATION FEEDS SOCIAUX
@@ -41010,7 +40699,7 @@ async def _community_showcase_wait():
 async def weekly_activity_recap_task():
     """Lundi ~10h Europe/Paris : DM un récap d'activité aux membres OPT-IN MP (📩)
     et ACTIFS cette semaine. Strictement opt-in (réutilise dm_event_optin) → aucun
-    MP de masse. Cappé + throttlé dans dm_notify. Anti-doublon par guild via le
+    MP de masse (le module `dm_notify` qui les envoyait a été retiré le 12/08/2026). Anti-doublon par guild via le
     marqueur cfg 'weekly_recap_last_date'. Fail-open par guild."""
     try:
         from zoneinfo import ZoneInfo as _ZI
@@ -46500,138 +46189,20 @@ async def _weekly_recap_wait():
 
 
 
-# ─── ALERTES AUTO OWNER (DM si perte membres / silence hub) ──────────────────
+# (ALERTES AUTO OWNER SUPPRIMÉES le 12/08/2026, à la demande du propriétaire.)
+#
+# C'est ce bloc qui lui envoyait « 🚨 Perte nette de membres — le serveur a perdu N
+# membres net dans les dernières 24h ». Toutes les 4 heures, en message privé.
+# Il emportait aussi l'alerte « Hub silencieux depuis 24h », même famille.
+#
+# ⚠️ Le message était en plus FAUX : il affichait toujours « 0 arrivés », parce que
+# `on_member_join` n'était enregistrée nulle part et n'incrémentait jamais `new_members`
+# (corrigé le même jour). Sa condition « perte nette ≥ 5 » dégénérait donc en « 5 départs »,
+# et l'alerte partait bien plus souvent que sa formule ne le laissait croire.
+#
+# Supprimés avec : `_send_owner_alert`, `_owner_alert_log`, `_alert_already_sent_today`,
+# `_mark_alert_sent`, `owner_alerts_task` et son `before_loop`.
 
-
-async def _send_owner_alert(guild, title: str, description: str, color: int = 0xE74C3C):
-    """Envoie un DM d'alerte à l'owner du serveur."""
-    try:
-        owner = guild.owner
-        if not owner:
-            return
-        e = discord.Embed(
-            title=f"🚨 {title}",
-            description=description + f"\n\n_Alerte automatique de **{guild.name}**._",
-            color=color,
-            timestamp=datetime.now(timezone.utc),
-        )
-        e.set_footer(text="Phase 54 · Alertes auto owner")
-        try:
-            await owner.send(embed=e)
-            print(f"[owner_alert] guild={guild.id} sent: {title}")
-        except discord.Forbidden:
-            print(f"[owner_alert] DM fermé owner={owner.id}")
-        except Exception as ex:
-            print(f"[owner_alert send] {ex}")
-    except Exception as ex:
-        print(f"[_send_owner_alert] {ex}")
-
-
-# Cache pour ne pas spam la même alerte 2x dans la même journée.
-# Phase 184.x : guard PERSISTANT (DB/config) — sinon, si le bot redémarre
-# souvent (crash loop / redeploys), le cache mémoire est vidé à chaque boot et
-# l'alerte "Hub silencieux 24h" est renvoyée en DM à CHAQUE redémarrage (spam).
-_owner_alert_log: dict = {}  # {(guild_id, alert_key): date_str} — fast path mémoire
-
-
-async def _alert_already_sent_today(guild_id: int, alert_key: str) -> bool:
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    if _owner_alert_log.get((guild_id, alert_key)) == today:
-        return True
-    # Persistant : survit aux redémarrages
-    try:
-        c = await cfg(guild_id)
-        if c.get(f'owner_alert_{alert_key}_date') == today:
-            _owner_alert_log[(guild_id, alert_key)] = today
-            return True
-    except Exception:
-        pass
-    return False
-
-
-async def _mark_alert_sent(guild_id: int, alert_key: str):
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    _owner_alert_log[(guild_id, alert_key)] = today
-    try:
-        await db_set(guild_id, f'owner_alert_{alert_key}_date', today)
-    except Exception:
-        pass
-
-
-@tasks.loop(hours=4)
-async def owner_alerts_task():
-    """Toutes les 4h, check les conditions d'alerte et DM owner si déclenché."""
-    try:
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-
-                # 1) Perte nette ≥5 membres dans les dernières 24h
-                if not await _alert_already_sent_today(guild.id, "member_loss"):
-                    async with get_db() as db:
-                        async with db.execute(
-                            "SELECT SUM(new_members), SUM(left_members) FROM daily_guild_stats "
-                            "WHERE guild_id=? AND date >= date('now', '-1 days')",
-                            (guild.id,),
-                        ) as cur:
-                            r = await cur.fetchone()
-                    if r:
-                        new = int(r[0] or 0)
-                        leaves = int(r[1] or 0)
-                        net = new - leaves
-                        if net <= -5:
-                            await _send_owner_alert(
-                                guild,
-                                "Perte nette de membres",
-                                (
-                                    f"Le serveur a perdu **{abs(net)} membres net** "
-                                    f"dans les dernières 24h ({new} arrivés / {leaves} partis).\n\n"
-                                    f"💡 _Vérifie les logs de modération, les bans récents, "
-                                    f"ou si un raid a été repoussé. C'est peut-être aussi normal "
-                                    f"(post-pic d'audience)._"
-                                ),
-                                color=0xE74C3C,
-                            )
-                            await _mark_alert_sent(guild.id, "member_loss")
-
-                # 2) Silence du hub : aucun message dans hub depuis 24h+
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                if hub_id and not await _alert_already_sent_today(guild.id, "hub_silence"):
-                    hub_ch = guild.get_channel(hub_id)
-                    if hub_ch:
-                        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-                        async with get_db() as db:
-                            async with db.execute(
-                                "SELECT 1 FROM member_activity_daily WHERE guild_id=? AND channel_id=? "
-                                "AND last_ts>? LIMIT 1",
-                                (guild.id, hub_ch.id, cutoff),
-                            ) as cur:
-                                row = await cur.fetchone()
-                        if not row:
-                            await _send_owner_alert(
-                                guild,
-                                "Hub silencieux depuis 24h",
-                                (
-                                    f"Aucun message dans <#{hub_id}> depuis **24h+**.\n\n"
-                                    f"💡 _Tu peux :_\n"
-                                    f"• _Lancer un event manuellement_\n"
-                                    f"• _Vérifier que les tasks d'engagement tournent_\n"
-                                    "• _(commande de forçage retirée)_"
-                                ),
-                                color=0xF39C12,
-                            )
-                            await _mark_alert_sent(guild.id, "hub_silence")
-            except Exception as ex:
-                print(f"[owner_alerts guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[owner_alerts_task] {ex}")
-
-
-@owner_alerts_task.before_loop
-async def _owner_alerts_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -46825,28 +46396,28 @@ async def _check_alt_account(member: discord.Member):
                  f"username similar (ratio={ratio:.2f}) + account < 7 days", ratio),
             )
             await db.commit()
-        # DM owner si confiance > 0.9
+        # ⚠️ EN SALON, PAS EN MP (12/08/2026). Contrairement aux autres alertes,
+        # celle-ci n'était écrite QUE dans `alt_detection_log` : aucun salon ne la
+        # recevait. La supprimer aurait perdu l'information au lieu de la déplacer.
         if ratio >= 0.90:
             try:
-                owner = member.guild.owner
-                if owner:
-                    await owner.send(
+                _c = await cfg(member.guild.id)
+                _lid = int(_c.get('log_anti_alt', 0) or _c.get('mod_log_channel', 0) or 0)
+                _lch = member.guild.get_channel(_lid) if _lid else None
+                if _lch is not None:
+                    await _lch.send(
                         embed=discord.Embed(
-                            title="🚨 Alt detection — Nouveau membre suspect",
+                            title="🚨 Compte secondaire présumé — nouveau membre",
                             description=(
-                                f"**Nouveau :** {member.mention} (`{member.name}`)\n"
-                                f"**Similaire à :** {top.mention} (`{top.name}`)\n"
-                                f"**Similarité :** `{ratio:.2f}` ({int(ratio*100)}%)\n"
-                                f"**Compte créé il y a :** `{(datetime.now(timezone.utc) - member.created_at).days}` jours\n\n"
-                                f"_Pas auto-banni. Vérifie manuellement si besoin._"
+                                f"**Nouveau :** {member.mention} (`{member.name}`)" + chr(10) +
+                                f"**Ressemble à :** {top.mention} (`{top.name}`)" + chr(10) +
+                                f"**Similarité :** `{ratio:.0%}` · compte de moins de 7 jours"
                             ),
-                            color=0xE74C3C,
-                            timestamp=datetime.now(timezone.utc),
-                        ),
+                            color=0xE67E22,
+                        )
                     )
-            except Exception:
-                pass
-        print(f"[ALT DETECT] guild={member.guild.id} new={member.id} similar={top.id} ratio={ratio:.2f}")
+            except Exception as _exalt:
+                print(f"[alt detection salon] {_exalt}")
     except Exception as ex:
         print(f"[_check_alt_account] {ex}")
 

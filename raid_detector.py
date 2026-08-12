@@ -103,6 +103,38 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict):
     _v2 = v2_helpers
 
 
+async def _salon_alerte(guild):
+    """Le salon où poster une alerte de raid. None si aucun n'est configuré.
+
+    ═══════════════════════════════════════════════════════════════════════════
+    POURQUOI CE HELPER EXISTE (12/08/2026)
+    ═══════════════════════════════════════════════════════════════════════════
+    L'alerte de raid partait en MESSAGE PRIVÉ au propriétaire, qui a demandé de
+    ne plus en recevoir. Mais on ne pouvait pas se contenter de la supprimer :
+    elle ne se contente pas d'informer, elle porte les BOUTONS « Lockdown 30 min »
+    et « Ignorer (faux positif) ». La jeter aurait rendu la décision anti-raid
+    inaccessible — le bot aurait détecté des raids sans que personne ne puisse
+    y répondre.
+
+    On la REROUTE donc en salon. `log_antiraid` d'abord, parce qu'un serveur qui
+    l'a réglé veut ses alertes de raid là ; `mod_log_channel` en repli, présent
+    sur presque tous les serveurs configurés.
+    """
+    if _db_get is None:
+        return None
+    try:
+        c = await _db_get(guild.id) or {}
+        for cle in ("log_antiraid", "mod_log_channel"):
+            cid = int(c.get(cle, 0) or 0)
+            if cid:
+                ch = guild.get_channel(cid)
+                if ch is not None:
+                    return ch
+    except Exception as ex:
+        print(f"[raid_detector _salon_alerte] {ex}")
+    return None
+
+
 async def init_db():
     """Crée les tables nécessaires (idempotent)."""
     if _get_db is None:
@@ -340,14 +372,10 @@ async def _create_alert(guild: discord.Guild, suspicious: list[dict]):
             alert_id = cur.lastrowid
             await db.commit()
 
-        # DM owner
-        owner = guild.owner
-        if owner is None:
-            try:
-                owner = await guild.fetch_member(guild.owner_id)
-            except Exception:
-                owner = None
-        if owner:
+        # ⚠️ EN SALON, PAS EN MP (12/08/2026). Voir `_salon_alerte` : cette alerte
+        # porte les boutons de décision, elle ne pouvait pas être simplement supprimée.
+        salon = await _salon_alerte(guild)
+        if salon is not None:
             try:
                 lines = [
                     f"🚨 **ALERTE RAID DÉTECTÉ — {guild.name}**",
@@ -367,22 +395,24 @@ async def _create_alert(guild: discord.Guild, suspicious: list[dict]):
                     )
                 lines.append("")
                 lines.append(
-                    "_Ouvre le panel Sécurité pour décider : "
-                    "Lockdown 30 min ou Ignorer (faux positif)._"
+                    "_Décidez ci-dessous : Lockdown 30 min ou Ignorer (faux positif)._"
                 )
                 lines.append(f"_Alert ID : `{alert_id}`_")
+                await salon.send("\n".join(lines))
 
-                await owner.send("\n".join(lines))
-
-                # Envoyer le panel avec les boutons (DynamicItem persistants)
+                # Les boutons (DynamicItem persistants) : c'est LA raison pour
+                # laquelle cette alerte ne pouvait pas être simplement retirée.
                 try:
                     panel = build_alert_panel(guild, alert_id)
                     if panel:
-                        await owner.send(view=panel)
+                        await salon.send(view=panel)
                 except Exception as ex:
-                    print(f"[raid_detector DM panel] {ex}")
+                    print(f"[raid_detector panel] {ex}")
             except Exception as ex:
-                print(f"[raid_detector DM owner] {ex}")
+                print(f"[raid_detector alerte salon] {ex}")
+        else:
+            print(f"[raid_detector] ⚠️ guild={guild.id} : raid détecté mais AUCUN "
+                  f"salon d'alerte configuré (log_antiraid / mod_log_channel).")
     except Exception as ex:
         print(f"[raid_detector _create_alert] {ex}")
 
@@ -408,13 +438,20 @@ async def run_lockdown(guild: discord.Guild, duration_min: int = 30) -> dict:
                     "PERMS MANQUANTES (manage_roles/manage_channels) — anti-raid INEFFICACE")
                 print(f"[run_lockdown] ⚠️ guild={guild.id} perms bot insuffisantes : "
                       f"manage_roles={gp.manage_roles} manage_channels={gp.manage_channels}")
+                # ⚠️ EN SALON, PAS EN MP (12/08/2026). Cette information n'existe
+                # NULLE PART ailleurs : ni le journal `SEC_ESCALATION` ni le panneau ne
+                # disent que le lockdown a échoué faute de permissions. La jeter aurait
+                # laissé le propriétaire croire son serveur protégé alors que la
+                # quarantaine est inopérante — exactement le scénario qu'un attaquant
+                # provoque en rognant les permissions du bot.
                 try:
-                    if guild.owner is not None:
-                        await guild.owner.send(
+                    _sa = await _salon_alerte(guild)
+                    if _sa is not None:
+                        await _sa.send(
                             f"⚠️ **Alerte sécurité — {guild.name}**\n"
-                            f"Un lockdown anti-raid a été déclenché mais **je n'ai pas les "
-                            f"permissions** `Gérer les rôles` / `Gérer les salons`. La "
-                            f"quarantaine est donc **inopérante**. Vérifie le rôle du bot "
+                            f"Un lockdown anti-raid a été déclenché mais je n'ai pas les "
+                            f"permissions `Gérer les rôles` / `Gérer les salons`. La "
+                            f"quarantaine est donc **inopérante**. Vérifiez le rôle du bot "
                             f"(quelqu'un a peut-être rogné mes permissions)."
                         )
                 except Exception:

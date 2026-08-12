@@ -381,35 +381,11 @@ async def _log_and_alert(member: discord.Member, alert: dict):
         except Exception:
             pass
 
-        # DM owner
-        guild = member.guild
-        owner = guild.owner or await guild.fetch_member(guild.owner_id)
-        if owner:
-            target_id = alert.get("target_staff_id", 0)
-            target_member = guild.get_member(target_id) if target_id else None
-            target_str = (
-                f"{target_member.mention} (`{target_member.name}`)"
-                if target_member else
-                f"keyword `{alert.get('target_value')}`"
-            )
-            msg = (
-                f"🎭 **Tentative d'impersonation détectée — {guild.name}**\n\n"
-                f"**Suspect :** {member.mention} (`{member.name}` · "
-                f"ID `{member.id}`)\n"
-                f"**Type :** `{alert['match_type']}`\n"
-                f"**Champ :** `{alert.get('field', '?')}`\n"
-                f"**Valeur suspecte :** `{alert.get('suspect_value', '')}`\n"
-                f"**Imite :** {target_str}\n"
-                f"**Score similarité :** `{alert.get('score', 0):.2f}`\n\n"
-                + ("✅ _Pseudo usurpateur **réinitialisé** automatiquement (réversible). Si c'est un "
-                   "compte malveillant/de retour, bannis-le._"
-                   if nick_reset else
-                   "_Va voir le profil ou ouvre le salon staff sanctions pour décider._")
-            )
-            try:
-                await owner.send(msg)
-            except Exception:
-                pass
+        # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande : il ne veut plus
+        # de message privé hors sanctions, comptes compromis et retour d'inactivité.
+        # L'alerte reste ENTIÈRE côté staff — l'alerte reste écrite en base, et le pseudo usurpateur est déjà réinitialisé — et le membre, lui, est toujours
+        # prévenu : son MP à lui n'est pas touché.)
+
     except Exception as ex:
         print(f"[impersonation_detector _log_and_alert] {ex}")
 

@@ -254,23 +254,11 @@ async def _handle_hit(message: discord.Message):
             except Exception as ex:
                 print(f"[honeypot notify staff] {ex}")
 
-        # DM owner aussi (critique)
-        try:
-            owner = (
-                message.guild.owner or
-                await message.guild.fetch_member(message.guild.owner_id)
-            )
-            if owner:
-                await owner.send(
-                    f"🍯 **HONEYPOT HIT — {message.guild.name}**\n\n"
-                    f"User : {message.author.mention} "
-                    f"(`{message.author.name}` · ID `{message.author.id}`)\n"
-                    f"A posté dans le salon piège **#{ch_name}**.\n\n"
-                    f"Probablement un **self-bot** ou un **compte piraté**. "
-                    f"Action auto : mute 24h. Panel staff sanction créé."
-                )
-        except Exception:
-            pass
+        # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande : il ne veut plus
+        # de message privé hors sanctions, comptes compromis et retour d'inactivité.
+        # L'alerte reste ENTIÈRE côté staff — le panneau `staff_sanction` créé juste au-dessus porte le même contexte — et le membre, lui, est toujours
+        # prévenu : son MP à lui n'est pas touché.)
+
     except Exception as ex:
         print(f"[honeypot _handle_hit] {ex}")
 

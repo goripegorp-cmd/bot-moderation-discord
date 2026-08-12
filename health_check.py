@@ -298,178 +298,34 @@ async def run_check_now(guild: Optional[discord.Guild] = None) -> dict:
         except Exception as ex:
             print(f"[health_check log] {ex}")
 
-    # DM owner si problèmes critiques
-    if issues_total >= 3 and _bot is not None:
-        try:
-            for g in (_bot.guilds if guild is None else [guild]):
-                gr = next(
-                    (x for x in report["guilds"] if x.get("guild_id") == g.id),
-                    None,
-                )
-                if not gr or not gr.get("issues"):
-                    continue
-                owner = g.owner or await g.fetch_member(g.owner_id)
-                if owner:
-                    lines = [
-                        f"🩺 **Health check — {g.name}**",
-                        f"",
-                        f"Problèmes détectés : `{len(gr['issues'])}`",
-                        "",
-                    ]
-                    for i, iss in enumerate(gr["issues"][:8], 1):
-                        lines.append(f"`{i}.` {iss}")
-                    if len(gr["issues"]) > 8:
-                        lines.append(
-                            f"_+ {len(gr['issues']) - 8} autre(s)..._"
-                        )
-                    try:
-                        await owner.send("\n".join(lines))
-                    except Exception:
-                        pass
-        except Exception as ex:
-            print(f"[health_check DM owner] {ex}")
-
-    # Tâche C : signaler au super-owner les BOUCLES MORTES persistantes (lues depuis le
-    # registre mutualisé). Le DM guild ci-dessus ne porte QUE les soucis per-guild ; les
-    # tasks mortes sont globales → on les remonte ici, en DIRECT au super-owner. Anti-spam :
-    # dédup sur l'ensemble des labels morts (pas de re-DM tant que le même set reste mort).
-    # Fail-safe total : ne lève jamais.
-    try:
-        await _maybe_dm_dead_loops(report.get("tasks", {}))
-    except Exception as ex:
-        print(f"[health_check dead-loops DM] {ex}")
-
-    # D2 : watchdog mémoire (fail-open total ; n'altère pas le rapport per-guild).
-    try:
-        await _maybe_dm_memory_watchdog()
-    except Exception as ex:
-        print(f"[health_check mem-watchdog DM] {ex}")
+    # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande.)
+    #
+    # Il partait à CHAQUE tour de boucle horaire, sans aucune déduplication — jusqu'à
+    # 24 messages privés par jour. Et son déclencheur `issues_total >= 3` était garanti :
+    # `CRITICAL_TABLES` cite `season_drops_log`, une table qui n'est créée nulle part dans
+    # le dépôt, donc au moins un problème remontait à chaque passage, indéfiniment.
+    # Le rapport continue d'être ÉCRIT en base (`health_check_log`) : rien n'est perdu,
+    # seul l'envoi privé disparaît.
 
     return report
 
 
-# État dédup pour le DM « boucles mortes » (anti-spam ; non persistant — reset au reboot,
-# acceptable car un reboot relance tout le filet de résurrection).
-_dead_loops_last_signature = None
-
-
-async def _maybe_dm_dead_loops(tasks_report: dict) -> None:
-    """DM le super-owner UNIQUEMENT si des boucles supervisées sont mortes, et seulement
-    quand l'ensemble change (dédup). Fail-safe : avale toute erreur."""
-    global _dead_loops_last_signature
-    if _bot is None:
-        return
-    dead = list(tasks_report.get("dead") or [])
-    if not dead:
-        _dead_loops_last_signature = None  # tout est revenu vivant → on réarme l'alerte
-        return
-    signature = ",".join(sorted(dead))
-    if signature == _dead_loops_last_signature:
-        return  # même set de morts qu'au dernier check → pas de re-spam
-    _dead_loops_last_signature = signature
-
-    try:
-        import owner_ids as _oids
-        owner_id_set = _oids.SUPER_OWNER_IDS
-    except Exception:
-        owner_id_set = {781205382923288593}  # super-owner unique (fallback fail-safe)
-
-    shown = dead[:15]
-    lines = [
-        "🩺 **Boucles de tâches mortes**",
-        "",
-        f"`{len(dead)}` boucle(s) supervisée(s) ne tournent pas au moment du health check :",
-        "",
-    ]
-    for i, name in enumerate(shown, 1):
-        lines.append(f"`{i}.` `{name}`")
-    if len(dead) > len(shown):
-        lines.append(f"_+ {len(dead) - len(shown)} autre(s)..._")
-    lines.append("")
-    lines.append("_Le superviseur tente de les relancer ; la cause du décès est journalisée._")
-    body = "\n".join(lines)
-
-    for uid in owner_id_set:
-        try:
-            user = _bot.get_user(int(uid)) or await _bot.fetch_user(int(uid))
-            if user is not None:
-                await user.send(body)
-        except Exception:
-            # anti-429 / DM fermés / user introuvable : on n'insiste pas, on ne lève pas.
-            continue
-
-
-# ─── D2 : Watchdog mémoire ───────────────────────────────────────────────────
-# Dédup anti-spam (non persistant) : on ne re-DM pas tant que le même set de seuils
-# reste franchi. Reset au reboot (acceptable).
-_mem_watchdog_last_signature = None
-
-
-async def _maybe_dm_memory_watchdog() -> None:
-    """Mesure légère mémoire (tâches asyncio vivantes + tailles des gros dicts) et
-    alerte le super-owner si un seuil est franchi. But : repérer une FUITE avant
-    l'OOM-kill Railway. FAIL-OPEN : aucune erreur ne casse le health check, et si
-    le callback n'est pas câblé, le watchdog est simplement inactif."""
-    global _mem_watchdog_last_signature
-    if _bot is None or _mem_stats_fn is None:
-        return
-    try:
-        stats = _mem_stats_fn() or {}
-    except Exception as ex:
-        print(f"[health_check mem-watchdog stats] {ex}")
-        return
-
-    breaches = []
-    try:
-        ntasks = int(stats.get("asyncio_tasks", 0) or 0)
-        if ntasks >= _MEM_TASKS_THRESHOLD:
-            breaches.append(f"tâches asyncio = {ntasks} (seuil {_MEM_TASKS_THRESHOLD})")
-        for name, size in (stats.get("dicts") or {}).items():
-            try:
-                if int(size) >= _MEM_DICT_THRESHOLD:
-                    breaches.append(f"`{name}` = {size} (seuil {_MEM_DICT_THRESHOLD})")
-            except Exception:
-                continue
-    except Exception as ex:
-        print(f"[health_check mem-watchdog eval] {ex}")
-        return
-
-    if not breaches:
-        _mem_watchdog_last_signature = None  # tout est rentré dans l'ordre → réarme
-        return
-    signature = "|".join(sorted(breaches))
-    if signature == _mem_watchdog_last_signature:
-        return  # même franchissement qu'au dernier check → pas de re-spam
-    _mem_watchdog_last_signature = signature
-
-    try:
-        import owner_ids as _oids
-        owner_id_set = _oids.SUPER_OWNER_IDS
-    except Exception:
-        owner_id_set = {781205382923288593}
-
-    lines = [
-        "🧠 **Watchdog mémoire — seuil franchi**",
-        "",
-        "Une mesure mémoire dépasse le seuil (possible fuite avant OOM Railway) :",
-        "",
-    ]
-    for i, b in enumerate(breaches[:12], 1):
-        lines.append(f"`{i}.` {b}")
-    if len(breaches) > 12:
-        lines.append(f"_+ {len(breaches) - 12} autre(s)..._")
-    body = "\n".join(lines)
-
-    for uid in owner_id_set:
-        try:
-            user = _bot.get_user(int(uid)) or await _bot.fetch_user(int(uid))
-            if user is not None:
-                await user.send(body)
-        except Exception:
-            continue
+# (Les deux MP au super-owner — « boucles mortes » et « watchdog mémoire » — ont été
+#  SUPPRIMÉS le 12/08/2026 avec les fonctions qui les construisaient. Le propriétaire a
+#  demandé de ne plus recevoir de message privé hors sanctions, comptes compromis et
+#  retour d'inactivité. L'état des boucles reste consultable : il est calculé par
+#  `supervised_loops_status` et journalisé dans `health_check_log`.
+#  ⚠️ La signature de `setup()` est laissée INTACTE : bot.py l'appelle avec 5 arguments
+#  POSITIONNELS — retirer un paramètre ici produirait un TypeError au démarrage.)
 
 
 # ─── Loop task ──────────────────────────────────────────────────────────────
+#
+# ⚠️ NE JAMAIS RETIRER `@tasks.loop` : sans lui, `health_check_task` redevient une
+# fonction ordinaire, `@health_check_task.before_loop` juste en dessous lève un
+# AttributeError À L'IMPORT, et le bot ne démarre plus du tout. C'est exactement ce
+# qui vient d'arriver en supprimant les MP au-dessus : la coupe s'est arrêtée sur
+# `async def` et a emporté le décorateur qui le précédait.
 
 @tasks.loop(hours=1)
 async def health_check_task():

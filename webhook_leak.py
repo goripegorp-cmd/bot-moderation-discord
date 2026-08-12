@@ -225,47 +225,10 @@ async def on_message_hook(message: discord.Message) -> bool:
         except Exception:
             pass
 
-        # 5) DM owner systématiquement (un leak = critique)
-        try:
-            owner = message.guild.owner or await message.guild.fetch_member(
-                message.guild.owner_id
-            )
-            if owner:
-                lines = [
-                    f"🚨 **WEBHOOK LEAK — {message.guild.name}**",
-                    f"",
-                    f"**Membre :** {message.author.mention} "
-                    f"({message.author.id})",
-                    f"**Salon :** {message.channel.mention}",
-                    f"**Nombre de webhooks leakés :** {len(matches)}",
-                    f"",
-                    f"**Revoke automatique :**",
-                ]
-                for url, wid, ok, status in revoke_results:
-                    icon = "✅" if ok else "❌"
-                    lines.append(f"{icon} `{wid}` — {status}")
-                lines.append("")
-                lines.append(
-                    "_Le message a été supprimé. L'auteur a été DM. "
-                    "Voir le panel staff sanction pour décider d'une "
-                    "action supplémentaire._"
-                )
-                # Phase 163.6 : route via dm_digest.send_urgent_now si dispo
-                # (centralise les DMs urgents, fail-open silencieux sinon).
-                payload = "\n".join(lines)
-                sent_via_digest = False
-                try:
-                    import dm_digest as _dm_dig
-                    if _dm_dig and hasattr(_dm_dig, "send_urgent_now"):
-                        sent_via_digest = await _dm_dig.send_urgent_now(
-                            owner, payload,
-                        )
-                except Exception:
-                    sent_via_digest = False
-                if not sent_via_digest:
-                    await owner.send(payload)
-        except Exception:
-            pass
+        # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande : il ne veut plus
+        # de message privé hors sanctions, comptes compromis et retour d'inactivité.
+        # L'alerte reste ENTIÈRE côté staff — le panneau `staff_sanction` juste en dessous porte le même contexte — et le membre, lui, est toujours
+        # prévenu : son MP à lui n'est pas touché.)
 
         # 6) Alerte staff via staff_sanction
         if _staff_sanction is not None:
