@@ -116,15 +116,25 @@ async def _salon_alerte(guild):
     inaccessible — le bot aurait détecté des raids sans que personne ne puisse
     y répondre.
 
-    On la REROUTE donc en salon. `log_antiraid` d'abord, parce qu'un serveur qui
-    l'a réglé veut ses alertes de raid là ; `mod_log_channel` en repli, présent
-    sur presque tous les serveurs configurés.
+    On la REROUTE donc en salon. `log_anti_raid` d'abord, parce qu'un serveur qui
+    l'a réglé veut ses alertes de raid là ; puis les salons voisins de la même
+    famille ; `mod_log_channel` en dernier repli.
+
+    ⚠️ LE NOM DE LA CLÉ EST `log_anti_raid`, AVEC DEUX SÉPARATEURS.
+    Première version écrite `log_antiraid` — une clé qui n'existe NULLE PART dans
+    la configuration. Le repli tombait donc directement sur `mod_log_channel`, et
+    sur un serveur qui ne l'a pas réglé l'alerte de raid était purement jetée…
+    alors que le message privé qui la portait venait d'être supprimé le même jour.
+    Résultat : l'anti-raid détectait toujours, et plus personne n'était prévenu.
+    Une faute de frappe dans un nom de clé ne casse rien de visible — c'est
+    exactement pour ça qu'elle est dangereuse.
     """
     if _db_get is None:
         return None
     try:
         c = await _db_get(guild.id) or {}
-        for cle in ("log_antiraid", "mod_log_channel"):
+        for cle in ("log_anti_raid", "log_anti_newaccount", "log_anti_alt",
+                    "mod_log_channel"):
             cid = int(c.get(cle, 0) or 0)
             if cid:
                 ch = guild.get_channel(cid)

@@ -238,6 +238,22 @@ async def appliquer_masquage(guild, cfg_act: dict, *, dry_run: bool = False) -> 
         return res
 
     ouverts = salons_ouverts(guild, cfg_act)
+    #  ⚠️ GARDE-FOU AJOUTÉ LE 12/08/2026 — NE PAS LE RETIRER.
+    #
+    #  Sans lui, un serveur dont les deux salons d'activité valent 0 se masquait
+    #  ENTIÈREMENT : la liste des exceptions étant vide, l'absent ne voyait plus
+    #  un seul salon, ne pouvait donc plus écrire nulle part, donc ne pouvait plus
+    #  déclencher son propre retour. Un bannissement de fait, réappliqué à chaque
+    #  passage — et l'écran affichait bien un avertissement, mais le bouton
+    #  restait cliquable et le passage automatique l'appliquait quand même.
+    #
+    #  La porte de sortie n'est pas une option du masquage : elle en est la
+    #  condition. Pas de salon de retour, pas de masquage.
+    if not ouverts:
+        res["raison"] = ("aucun salon de retour défini — masquage REFUSÉ : "
+                         "sans lui, un absent ne pourrait plus jamais revenir")
+        return res
+
     salons = list(guild.channels)
     if len(salons) > MAX_SALONS_PAR_PASSAGE:
         res["raison"] = (f"{len(salons)} salons — au-delà de "

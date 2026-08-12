@@ -30896,11 +30896,28 @@ async def direction_cmd(i: discord.Interaction, membre: discord.Member, duree: i
     # Sauvegarder en DB
     import json
     async with get_db() as db:
+        # ⚠️ NE JAMAIS ÉCRASER UNE SAUVEGARDE DE RÔLES EXISTANTE (12/08/2026).
+        #
+        # `INSERT OR REPLACE` remplaçait `roles_backup` sans condition. Relancer
+        # `/mod direction` sur un membre DÉJÀ restreint sauvegardait donc la liste
+        # de ses rôles du moment — c'est-à-dire le seul rôle « Restricted » — par
+        # dessus sa vraie liste. Ses rôles d'origine étaient perdus pour toujours,
+        # et à la levée il restait restreint à vie : plus rien à lui rendre.
+        # Un simple double-clic du staff suffisait.
+        #
+        # On garde donc la PREMIÈRE sauvegarde, et on ne met à jour que la peine
+        # (durée, motif, auteur). C'est aussi ce qu'on veut fonctionnellement :
+        # rallonger une restriction ne doit pas réécrire ce qu'on devra rendre.
+        async with db.execute(
+            "SELECT roles_backup FROM restricted_members WHERE guild_id=? AND user_id=?",
+            (i.guild.id, membre.id)) as _cur:
+            _deja = await _cur.fetchone()
+        _backup = _deja[0] if (_deja and _deja[0] and _deja[0] != '[]') else json.dumps(saved_roles)
         await db.execute('''
             INSERT OR REPLACE INTO restricted_members
             (guild_id, user_id, roles_backup, restricted_at, duration, reason, restricted_by)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (i.guild.id, membre.id, json.dumps(saved_roles), now().isoformat(), duree, raison, i.user.id))
+        ''', (i.guild.id, membre.id, _backup, now().isoformat(), duree, raison, i.user.id))
         await db.commit()
 
     # Embed de confirmation
