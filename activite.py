@@ -331,6 +331,30 @@ CLES_ROLE = {
 }
 
 
+def ids_roles_surveilles(cfg_act: dict) -> set[int]:
+    """Les identifiants NUMÉRIQUES des rôles surveillés, et rien d'autre.
+
+    ⚠️ BUG CORRIGÉ LE 12/08/2026 — ne pas revenir à `{int(r) for r in ...}`.
+
+    `activite_roles` est indexé par identifiant de rôle EN TEXTE, mais il contient
+    aussi la clé `"*"` (ROLE_TOUS), le pseudo-rôle « tout le serveur ». Et cette
+    clé n'est pas hypothétique : le passage hebdomadaire l'écrit lui-même en
+    mémorisant `derniere_semaine` pour ce groupe.
+
+    Résultat mesuré : dès que le propriétaire décochait « Tout le serveur »,
+    `int("*")` levait un ValueError pour CHAQUE membre. `classer` attrapait
+    l'erreur membre par membre, personne n'était classé, et le panneau continuait
+    d'afficher « allumé ». Le système était mort en se disant vivant.
+    """
+    out: set[int] = set()
+    for cle in (cfg_act.get("activite_roles") or {}):
+        try:
+            out.add(int(cle))
+        except (TypeError, ValueError):
+            continue          # ROLE_TOUS, ou une clé abîmée : ce n'est pas un rôle
+    return out
+
+
 def config_du_role(cfg_act: dict, role_id) -> dict:
     """Configuration COMPLÈTE d'un rôle surveillé, réglages globaux en repli.
 
@@ -756,7 +780,7 @@ async def membre_concerne(member, cfg_act: dict) -> bool:
 
     if cfg_act.get("activite_tout_le_monde"):
         return True
-    ids = {int(r) for r in (cfg_act.get("activite_roles") or {})}
+    ids = ids_roles_surveilles(cfg_act)
     return any(r.id in ids for r in member.roles)
 
 
@@ -786,7 +810,7 @@ def role_surveille_du_membre(member, cfg_act: dict):
     C'est lui qui donne les seuils : un membre peut cumuler plusieurs rôles
     surveillés, on applique alors le plus EXIGEANT (seuils les plus courts).
     """
-    ids = {int(r) for r in (cfg_act.get("activite_roles") or {})}
+    ids = ids_roles_surveilles(cfg_act)
     portes = [r for r in member.roles if r.id in ids]
     if not portes:
         return None
@@ -877,19 +901,43 @@ def diagnostic_texte(d: dict) -> str:
 #  Le compteur de rappels doux — la mémoire qui referme le contournement
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def lire_doux(guild_id: int, user_id: int) -> tuple[int, str]:
-    """(nombre de rappels doux consécutifs, dernière semaine comptée)."""
+async def lire_etat(guild_id: int, user_id: int) -> dict:
+    """Tout ce que `classer` doit savoir sur un membre, en UNE requête.
+
+    ⚠️ `roles_retires` est lu ICI et pas ailleurs, exprès. Le classement tourne
+    sur chaque membre de la guilde : une seconde requête par membre doublerait le
+    coût du passage. Comme on interrogeait déjà `activite_etat` pour le compteur
+    de rappels doux, on rapporte les trois informations d'un coup.
+
+    `a_des_roles_retires` est ce qui permet de RENDRE ses rôles à quelqu'un qui
+    ne porte plus d'étiquette AFK — voir le bug corrigé dans `classer`.
+    """
+    vide = {"doux": 0, "semaine": "", "a_des_roles_retires": False}
     try:
         async with _get_db() as db:
             async with db.execute(
-                "SELECT doux, derniere_semaine_doux FROM activite_etat"
+                "SELECT doux, derniere_semaine_doux, roles_retires FROM activite_etat"
                 " WHERE guild_id=? AND user_id=?", (guild_id, user_id),
             ) as cur:
                 row = await cur.fetchone()
-        return (int(row[0] or 0), str(row[1] or "")) if row else (0, "")
+        if not row:
+            return vide
+        gardes = False
+        try:
+            gardes = bool(json.loads(row[2] or "[]"))
+        except Exception:
+            gardes = False
+        return {"doux": int(row[0] or 0), "semaine": str(row[1] or ""),
+                "a_des_roles_retires": gardes}
     except Exception as ex:
-        _log(f"[activite lire_doux] {ex}")
-        return (0, "")
+        _log(f"[activite lire_etat] {ex}")
+        return vide
+
+
+async def lire_doux(guild_id: int, user_id: int) -> tuple[int, str]:
+    """(nombre de rappels doux consécutifs, dernière semaine comptée)."""
+    e = await lire_etat(guild_id, user_id)
+    return (e["doux"], e["semaine"])
 
 
 async def noter_doux(guild_id: int, user_id: int, semaine: str) -> int:

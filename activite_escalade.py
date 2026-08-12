@@ -118,7 +118,8 @@ async def classer(guild) -> dict:
                 out["actifs"] += 1
                 continue
 
-            doux_deja, _ = await activite.lire_doux(guild.id, member.id)
+            etat = await activite.lire_etat(guild.id, member.id)
+            doux_deja = etat["doux"]
             palier = activite.verdict(mesure, conf, doux_deja)
 
             fiche = {"member": member, "jours": mesure["silence"],
@@ -135,8 +136,16 @@ async def classer(guild) -> dict:
                 #  À jour, mais porte-t-il encore une étiquette d'absence ou
                 #  a-t-il des rôles en attente ? C'est ici qu'on le repère, sans
                 #  second balayage de la guilde.
+                #  ⚠️ BUG CORRIGE LE 12/08/2026 — NE PAS RETIRER LA 3e CONDITION.
+                #  On ne detectait le retour QUE sur l'etiquette AFK portee. Or si
+                #  aucun role AFK n'est configure (l'etat PAR DEFAUT), le palier 2
+                #  retirait quand meme tous les roles du membre : il se retrouvait
+                #  depouille, SANS etiquette, donc invisible ici — et ses roles ne
+                #  lui etaient JAMAIS rendus. Perte definitive.
+                #  `a_des_roles_retires` vient de la meme requete que le compteur
+                #  doux : il ne coute aucun acces supplementaire.
                 a_des_roles_afk = any(r.id in afk_ids for r in member.roles)
-                if a_des_roles_afk or doux_deja:
+                if a_des_roles_afk or doux_deja or etat["a_des_roles_retires"]:
                     out["revenus"].append(fiche)
                 continue
 
@@ -255,9 +264,20 @@ async def appliquer_retraits(guild, fiches: list, cfg_act: dict) -> dict:
             res["ignores"] += 1
             continue
         try:
-            #  L'étiquette d'abord : si le retrait des rôles échoue à mi-chemin,
-            #  le membre est au moins correctement signalé et masqué.
-            await niv.poser_niveau(guild, member, 2, cfg_act)
+            #  ⚠️ GARDE-FOU AJOUTE LE 12/08/2026 — NE PAS LE RETIRER.
+            #  `poser_niveau` echoue en silence quand aucun role AFK n'est
+            #  configure, et le retrait de TOUS les roles s'executait quand meme.
+            #  Dans la configuration PAR DEFAUT (les deux ids valent 0), allumer
+            #  le systeme et attendre 14 jours depouillait donc chaque membre sans
+            #  etiquette, sans masquage, et sans rien pour le signaler.
+            #  On refuse : mieux vaut un palier qui n'agit pas qu'un membre
+            #  depouille que personne ne peut rhabiller.
+            if not await niv.poser_niveau(guild, member, 2, cfg_act):
+                _log(f"[activite retrait {member.id}] aucun role AFK posable — "
+                     f"retrait REFUSE (creez les roles dans le panneau Roles AFK)")
+                res["ignores"] += 1
+                res["sans_etiquette"] = res.get("sans_etiquette", 0) + 1
+                continue
             r = await niv.retirer_tous_les_roles(guild, member, cfg_act)
             if r["ok"]:
                 res["faits"] += 1
