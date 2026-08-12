@@ -494,3 +494,84 @@ C'est ce qui avait transformé le garde-fou en bruit de fond.
 25 par passage × 4 passages/jour = **100/jour**. Le rattrapage de 941 membres prend donc ~10 jours,
 volontairement. Tests : `tests/test_activite_observation.py` (13 tests, dont le cas de production
 verrouillé à l'identique).
+
+---
+
+## 14. AUDIT OPÉRATIONNEL DU 12/08 — CE QUI RESTE À RÉPARER
+
+Audit adverse de 73 agents sur les 5 faces du périmètre gardé : **61 constats retenus
+sur 67**, 6 écartés par la contre-expertise. Le propriétaire a donné mandat général :
+« tous les trucs classés comme morts, les systèmes que tu peux réparer, fais-le ».
+
+### Déjà corrigé et poussé le 12/08
+
+| Commit | Ce qui est réparé |
+|---|---|
+| `560ef21` | Activité : dépouillement sans retour possible (config par défaut) · retour indétectable sans étiquette · `int("*")` qui tuait le classement en silence |
+| `af708f2` | `weekly_security_report` n'avait aucun `.start()` — jamais tourné · `/mod active` lisait des minutes comme des secondes |
+
+### ⛔ RESTE À FAIRE — par ordre décidé avec le propriétaire
+
+**1. Le panneau « Gérer le casier » est mort** — *demi-journée*
+- `bot.py:31321` — le menu « retirer une infraction ciblée » est construit en mémoire mais
+  jamais ajouté à la vue, alors que le texte affiche « choisis un élément à retirer ci-dessous »
+- `bot.py:31349` — le bouton rouge « Effacer TOUT le casier » a un corps vide → le staff
+  reçoit « L'interaction a échoué »
+- Tracer qui efface quoi dans le journal staff : même `/mod unwarn` ne laisse aucune trace
+- **Enjeu** : une sanction automatique abusive reste inscrite à vie et continue d'aggraver
+  les escalades futures du membre
+
+**2. Deux sanctions n'arrivent jamais au casier** — *2 heures*
+- `bot.py:30884` — `/mod direction` (tous les rôles retirés + timeout 28 j, la sanction la
+  plus lourde) n'écrit rien au casier et n'envoie aucun MP. La fiche affiche « Casier vierge »
+- `bot.py:30476` et `bot.py:7460` (même défaut dupliqué) — l'escalade automatique des warns
+  inscrit un mute et annonce publiquement « mute appliqué » **même quand Discord a refusé**
+
+**3. Trois commandes de sécurité qui ne commandent rien** — *demi-journée à une journée*
+- `/permissions sanctionable` — la valeur écrite n'est relue nulle part, le rôle reste sanctionné
+- `/protection mode « Soft (log uniquement) »` ne débranche aucune sanction ; `/protection
+  trust_user` ne protège personne
+- `/setup` affiche « Configuration appliquée — erreurs : aucune » alors que ses trois
+  destinations d'écriture sont mortes : 6 écrans, zéro réglage appliqué
+- ⚠️ **Décision du propriétaire attendue** : brancher, ou supprimer ?
+
+**4. « Kick » et « Ban » décrivent une action qui n'arrive jamais** — *demi-journée*
+- `bot.py:10929` (anti-raid), `bot.py:17516` (~10 panneaux de protection), `bot.py:5948`
+  (message public du filtre d'insultes) : les deux options font le même isolement, et le
+  journal écrit « Action : BAN »
+- **Enjeu** : on croit le phisheur parti, il est encore membre
+
+**5. Les journaux : un serveur non réglé ne reçoit rien, en silence** — *demi-journée*
+- `bot.py:7611` — le transcript d'un ticket est perdu pour toujours sans salon de logs :
+  le salon est supprimé 5 s après la fermeture
+- Ajouter une étape « salon de journaux » à `/setup`, prévenir une fois le fondateur
+
+**6. Sanctions incomplètes** — *demi-journée*
+- `bot.py:30774` — `/mod unmute` ne retire que le timeout : au 6e warn le membre garde le
+  rôle de quarantaine et reste muet ; passé 28 jours la commande refuse d'agir
+- `bot.py:31137` — un kick/ban cliqué par un staff devient un isolement, non écrit au casier
+  ni au journal, et le MP annonce « Expulsion » à quelqu'un toujours présent
+- `bot.py:30844` — le rôle « Restricted » ne bloque que les salons existants au moment de sa
+  création ; créé à la main, il ne bloque rien
+
+**7. Le droit à l'effacement est incomplet**
+- Ajouter au registre RGPD les 3 tables créées les 11-12/08 : `activite_jours`,
+  `activite_etat`, `activite_expulses`
+
+### ⚠️ Le détail complet des 61 constats
+
+`C:\Users\GoRipe\AppData\Local\Temp\claude\...\tasks\wctfvcim9.output` (JSON, clé `detail`)
+— chaque constat porte son fichier:ligne, sa preuve, la nuance du réfuteur et l'effort estimé.
+Le fichier est dans un dossier temporaire : **le recopier ailleurs avant de s'y fier**.
+
+### La leçon de la journée, à ne pas réapprendre
+
+Cinq fois en une session, du code parfaitement présent ne s'exécutait jamais :
+`on_member_join` sans décorateur, une réaction dont le handler ne contenait qu'un `pass`,
+des boutons dont la classe n'était plus enregistrée au boot, `weekly_security_report` sans
+`.start()`, et une protection dormante faute de clé réglable.
+
+**Aucun de ces cas n'est attrapé par `ast.parse`, par `import bot`, ni par les tests.**
+`outils/verif_evenements.py` couvre désormais les événements. **Reste à écrire l'équivalent
+pour les `@tasks.loop` sans `.start()` et pour les `DynamicItem` non réenregistrés** — ce
+sont les deux mêmes trous, et ils ont chacun coûté une découverte tardive.
