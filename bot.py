@@ -197,6 +197,11 @@ import activite_message as activite_msg
 import activite_recompenses as activite_rec
 import activite_passage as activite_pass
 import activite_panneau as activite_ui
+#  Veille Roblox (12/08/2026) — voir ROBLOX.md. Reintroduction EXPLICITEMENT
+#  demandee par le proprietaire : le HANDOFF classe « Roblox » dans le perimetre
+#  supprime, ce module n'est donc PAS un reste oublie.
+import roblox_veille as roblox_module
+import roblox_panneau as roblox_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
 import delegations as delegations2026
 import compromised_detector as compromised2026
@@ -10315,6 +10320,7 @@ _CONFIG_SECTIONS = [
     ("tickets",     "🎫", "Tickets",           "Panneaux d'ouverture · rôle staff · logs · blacklist"),
     ("logs",        "📋", "Logs & Audit",      "Un salon · toutes les catégories d'événements"),
     ("activite",    "📊", "Activité",          "Présence exigée · rappels · retrait de rôle · expulsion"),
+    ("roblox",      "🎮", "Veille Roblox",     "Nouveaux accessoires · passages collectionnables · indices"),
     ("rgpd",        "🔒", "Données & RGPD",    "Droit à l'effacement (art. 17) · rétention"),
 ]
 
@@ -10494,6 +10500,7 @@ class MainPanelV2(LayoutView):
             'tickets':     lambda: TicketMainPanelV2(self.u, self.g),
             'logs':        lambda: LogsPanelV2(self.u, self.g),
             'activite':    lambda: activite_ui.ActivitePanelV2(self.u, self.g),
+            'roblox':      lambda: roblox_ui.RobloxPanelV2(self.u, self.g),
             'rgpd':        lambda: RgpdPanelV2(self.u, self.g),
         }
         fabrique = panneaux.get(valeur)
@@ -23268,6 +23275,14 @@ async def _activite_boot():
         await MainPanelV2(u, g).render_to(inter, edit=True)
 
     activite_ui.set_retour(_retour_vers_configure)
+
+    #  Veille Roblox : meme patron que l'activite. `webhook_send` est passe pour
+    #  que les fiches sortent sous un nom propre a chaque flux (exigence ROBLOX.md).
+    roblox_module.setup(get_db=get_db, cfg=cfg, db_set=db_set,
+                        session=None, log=print)
+    roblox_ui.setup(db_set=db_set, webhook_send=webhook_send, log=print)
+    roblox_ui.set_retour(_retour_vers_configure)
+    await roblox_module.init_db()
 
     await activite_module.init_db()
     await activite_rec.init_db()

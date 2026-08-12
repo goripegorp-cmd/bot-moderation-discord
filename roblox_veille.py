@@ -1,0 +1,506 @@
+"""roblox_veille.py — Veille des accessoires Roblox : nouveautés, bascules, indices.
+
+Voir `ROBLOX.md` pour le cahier des charges, et
+`rapports/roblox-veille-items-plan.json` pour la recherche qui fonde ce module
+(137 agents, 86 constats vérifiés par appels réels le 12/08/2026).
+
+═══════════════════════════════════════════════════════════════════════════════
+CE QUE CE MODULE NE FAIT PAS, ET POURQUOI
+═══════════════════════════════════════════════════════════════════════════════
+Le propriétaire a demandé de « prédire » quels accessoires passeront Limited.
+Mesuré sur 339 articles du compte Roblox : le champ de retrait de vente est vide
+partout, le champ de statut est vide 120 fois sur 120, et aucune description ne
+contient « limited » ni « last chance ». **Aucun signal déclaratif n'existe.**
+
+On ne fabrique donc PAS un pourcentage. On publie un INDICE, adossé à des faits
+observables, et on dit toujours sur quoi il repose. Un chiffre inventé avec une
+décimale pour faire sérieux ferait acheter de travers — c'est pire que rien.
+
+═══════════════════════════════════════════════════════════════════════════════
+DEUX PIÈGES QUI EMPOISONNENT EN SILENCE — NE PAS LES ROUVRIR
+═══════════════════════════════════════════════════════════════════════════════
+1. `economy.roblox.com/v1/assets/{id}/resale-data` répond **200 avec des prix
+   gelés à janvier 2025** (mesuré : RAP 276 828 contre 236 906 réel). Un système
+   naïf bâtit toutes ses estimations sur des chiffres vieux de dix-huit mois,
+   sans jamais lever la moindre erreur. On utilise `apis.roblox.com` à la place.
+2. `Category=2` (« Collectibles ») **n'existe plus**. La v1 refuse par un 400 ;
+   la v2, elle, **l'ignore SANS erreur** et renvoie autre chose. On filtre donc
+   sur `SalesTypeFilter`, jamais sur cette catégorie.
+
+═══════════════════════════════════════════════════════════════════════════════
+LE SALON SERA CALME, ET C'EST NORMAL
+═══════════════════════════════════════════════════════════════════════════════
+Le dernier Limited créé par Roblox date du 21/10/2025 : dix mois de silence, et
+36 bascules sur toute l'année 2025. La santé du système se mesure donc sur le
+CODE HTTP des relevés, jamais sur « j'ai trouvé quelque chose » — sinon on ne
+distingue pas un flux mort d'un mois sans nouveauté.
+"""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+
+#  ⚠️ DOMAINES EN DUR. Une URL n'est JAMAIS recopiée depuis une réponse d'API :
+#  elle est reconstruite à partir de ces constantes et d'un identifiant validé
+#  comme entier. C'est l'exigence « liens certifiés » de ROBLOX.md, et c'est une
+#  règle de sécurité : ce bot lutte contre le phishing, il ne peut pas publier
+#  un lien approximatif.
+DOMAINE_ARTICLE = "https://www.roblox.com/catalog/"
+API_CATALOGUE = "https://catalog.roblox.com/v2/search/items/details"
+API_ECONOMIE = "https://economy.roblox.com/v2/assets/{}/details"
+API_FICHE = "https://catalog.roblox.com/v1/catalog/items/{}/details"
+API_VIGNETTE = "https://thumbnails.roblox.com/v1/assets"
+
+#  Le compte officiel Roblox. C'est LA condition du propriétaire : « uniquement
+#  ceux qui sont créés par Roblox ».
+CREATEUR_ROBLOX = 1
+
+#  Débits mesurés le 12/08/2026 dans les en-têtes `x-ratelimit-limit` :
+#  catalogue 12/60 s, fiche 10/60 s (le plus étranglé), économie 1000/60 s.
+#  On reste TRÈS en dessous : un bot banni de l'API ne protège plus personne.
+PAUSE_ENTRE_APPELS = 2.0
+MAX_APPELS_PAR_PASSAGE = 8
+
+#  Combien d'articles on garde en mémoire. Borné : on ne conserve pas
+#  l'historique complet du catalogue dans une base SQLite.
+MAX_ARTICLES_SUIVIS = 3000
+
+_get_db = None
+_cfg = None
+_db_set = None
+_session = None
+_log = print
+
+
+def setup(*, get_db, cfg, db_set, session=None, log=None):
+    """Branche le module. `session` est un aiohttp.ClientSession partagé."""
+    global _get_db, _cfg, _db_set, _session, _log
+    _get_db, _cfg, _db_set, _session = get_db, cfg, db_set, session
+    if log is not None:
+        _log = log
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CLES_DEFAUT = {
+    "roblox_veille_enabled": False,      # OFF par défaut — rien ne tourne
+    "roblox_salon_nouveautes": 0,        # nouveaux articles créés par Roblox
+    "roblox_salon_bascules": 0,          # ceux qui viennent de passer collectionnables
+    "roblox_salon_surveiller": 0,        # les indices — « à surveiller »
+    "roblox_salon_sante": 0,             # où l'on dit qu'une source ne répond plus
+    #  Le propriétaire peut n'en régler qu'UN : les trois flux retombent alors
+    #  dessus. Voir `salon_du_flux`.
+    "roblox_veille_amorcee": "",         # date de la borne posée au 1er allumage
+}
+
+
+async def config(guild_id: int) -> dict:
+    try:
+        c = await _cfg(guild_id)
+    except Exception as ex:
+        _log(f"[roblox_veille config] {ex}")
+        c = {}
+    out = dict(CLES_DEFAUT)
+    for k in out:
+        if k in c:
+            out[k] = c[k]
+    return out
+
+
+def salon_du_flux(cfg_r: dict, flux: str) -> int:
+    """Le salon d'un flux, avec repli sur le premier salon réglé.
+
+    Le propriétaire ne veut pas forcément trois salons. S'il n'en règle qu'un,
+    tout y va — c'est mieux qu'un flux qui se tait parce que sa case est vide.
+    """
+    cle = {"nouveautes": "roblox_salon_nouveautes",
+           "bascules": "roblox_salon_bascules",
+           "surveiller": "roblox_salon_surveiller"}.get(flux)
+    if cle and int(cfg_r.get(cle, 0) or 0):
+        return int(cfg_r[cle])
+    for repli in ("roblox_salon_nouveautes", "roblox_salon_bascules",
+                  "roblox_salon_surveiller"):
+        if int(cfg_r.get(repli, 0) or 0):
+            return int(cfg_r[repli])
+    return 0
+
+
+async def actif(guild_id: int) -> bool:
+    """Le système tourne-t-il vraiment ? Interrupteur ET au moins un salon."""
+    c = await config(guild_id)
+    return bool(c["roblox_veille_enabled"] and salon_du_flux(c, "nouveautes"))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Base
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def init_db():
+    """Crée les tables. Idempotent."""
+    async with _get_db() as db:
+        #  L'état connu de chaque article. C'est la comparaison de deux relevés
+        #  successifs qui fabrique la détection : il n'existe aucun point d'API
+        #  qui annonce « cet article vient de changer ».
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS roblox_articles("
+            " asset_id INTEGER PRIMARY KEY,"
+            " nom TEXT,"
+            " type_article TEXT,"
+            " prix INTEGER,"
+            " collectionnable INTEGER NOT NULL DEFAULT 0,"
+            " hors_vente INTEGER NOT NULL DEFAULT 0,"
+            " favoris INTEGER NOT NULL DEFAULT 0,"
+            " cree_le TEXT,"
+            " vu_le TEXT NOT NULL,"
+            " signature TEXT)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_roblox_articles_vu"
+            " ON roblox_articles(vu_le)")
+        #  Ce qui a DÉJÀ été publié, par guilde et par flux. Persisté : un
+        #  redémarrage ne doit jamais republier ce qui est déjà sorti.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS roblox_publies("
+            " guild_id INTEGER NOT NULL,"
+            " asset_id INTEGER NOT NULL,"
+            " flux TEXT NOT NULL,"
+            " publie_le TEXT NOT NULL,"
+            " PRIMARY KEY(guild_id, asset_id, flux))"
+        )
+        #  La santé des relevés. Sert au garde-fou : un flux mort ressemble à un
+        #  flux calme, il faut donc mesurer le CODE HTTP et pas les trouvailles.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS roblox_sante("
+            " source TEXT PRIMARY KEY,"
+            " dernier_essai TEXT,"
+            " dernier_succes TEXT,"
+            " dernier_code INTEGER,"
+            " echecs_consecutifs INTEGER NOT NULL DEFAULT 0)"
+        )
+        await db.commit()
+
+
+def lien_article(asset_id) -> str | None:
+    """L'URL d'un article, RECONSTRUITE. Jamais recopiée d'une réponse.
+
+    ⚠️ EXIGENCE DE SÉCURITÉ, voir ROBLOX.md §1. Le domaine est une constante du
+    module ; l'identifiant est validé comme entier. Sans entier lisible, on rend
+    None et la fiche part SANS lien — jamais avec un lien approximatif.
+    """
+    try:
+        n = int(asset_id)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    return f"{DOMAINE_ARTICLE}{n}/"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  L'indice — PAS une prédiction
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#  Poids fixes, écrits en clair, recalculables à la main. Les conditions
+#  d'utilisation de Roblox interdisent d'entraîner un modèle sur leur contenu
+#  virtuel : il n'y a donc ici RIEN qui apprenne, et c'est volontaire.
+POIDS = {
+    "hors_vente": 45,       # le signal le plus dur : a précédé les vagues Limited
+    "demande": 30,          # favoris rapportés au prix
+    "prix_bas": 15,         # un prix d'entrée bas élargit le nombre de détenteurs
+    "recent": 10,           # une sortie récente reste dans l'actualité
+}
+
+
+def indice(article: dict) -> dict:
+    """Un indice de 0 à 100, AVEC ses facteurs. Jamais un chiffre nu.
+
+    Retourne {"note", "facteurs": [(libellé, points)], "confiance"}.
+    `confiance` baisse quand une donnée manque : on ne devine pas, on le dit.
+    """
+    facteurs: list[tuple[str, int]] = []
+    note = 0
+    manquants = 0
+
+    if article.get("hors_vente"):
+        note += POIDS["hors_vente"]
+        facteurs.append(("retiré de la vente", POIDS["hors_vente"]))
+
+    prix = article.get("prix")
+    favoris = article.get("favoris")
+    if prix is None or favoris is None:
+        manquants += 1
+    else:
+        #  Favoris par Robux dépensé : une forte demande à prix bas est ce qui
+        #  distingue un article convoité d'un article simplement cher.
+        ratio = favoris / max(1, prix)
+        if ratio >= 5:
+            note += POIDS["demande"]
+            facteurs.append(("très demandé", POIDS["demande"]))
+        elif ratio >= 1:
+            gagne = POIDS["demande"] // 2
+            note += gagne
+            facteurs.append(("demande correcte", gagne))
+        if 0 < prix <= 100:
+            note += POIDS["prix_bas"]
+            facteurs.append(("prix d'entrée bas", POIDS["prix_bas"]))
+
+    cree = article.get("cree_le")
+    if not cree:
+        manquants += 1
+    else:
+        jours = _jours_depuis(cree)
+        if jours is not None and jours <= 30:
+            note += POIDS["recent"]
+            facteurs.append(("sorti ce mois-ci", POIDS["recent"]))
+
+    confiance = "bonne" if manquants == 0 else ("moyenne" if manquants == 1 else "faible")
+    return {"note": min(100, note), "facteurs": facteurs, "confiance": confiance}
+
+
+def _jours_depuis(quand: str) -> int | None:
+    try:
+        d = datetime.fromisoformat(str(quand).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return max(0, (datetime.now(timezone.utc) - d).days)
+    except Exception:
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Relevé
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _noter_sante(source: str, code: int | None) -> int:
+    """Enregistre l'issue d'un relevé et rend le nombre d'échecs consécutifs.
+
+    C'est ce compteur, et lui seul, qui permet de distinguer « rien de neuf »
+    de « la source ne répond plus ». Sans lui, un flux mort passe pour calme.
+    """
+    maintenant = datetime.now(timezone.utc).isoformat()
+    ok = code is not None and 200 <= code < 300
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT echecs_consecutifs FROM roblox_sante WHERE source=?",
+                (source,)) as cur:
+                row = await cur.fetchone()
+            echecs = 0 if ok else (int(row[0]) if row else 0) + 1
+            await db.execute(
+                "INSERT INTO roblox_sante(source, dernier_essai, dernier_succes,"
+                " dernier_code, echecs_consecutifs) VALUES(?,?,?,?,?)"
+                " ON CONFLICT(source) DO UPDATE SET dernier_essai=?,"
+                "  dernier_succes=COALESCE(?, dernier_succes),"
+                "  dernier_code=?, echecs_consecutifs=?",
+                (source, maintenant, maintenant if ok else None, code, echecs,
+                 maintenant, maintenant if ok else None, code, echecs))
+            await db.commit()
+        return echecs
+    except Exception as ex:
+        _log(f"[roblox_veille _noter_sante] {ex}")
+        return 0
+
+
+async def relever_nouveautes(limite: int = 30) -> dict:
+    """Interroge le catalogue pour les articles créés par Roblox.
+
+    Retourne {"articles": [...], "code": int|None, "echecs": int}.
+    Ne lève jamais : une panne de veille ne doit pas gêner la modération.
+    """
+    out = {"articles": [], "code": None, "echecs": 0}
+    if _session is None:
+        out["echecs"] = await _noter_sante("catalogue", None)
+        return out
+    params = {
+        "Category": 1,
+        "SortType": 3,
+        "Limit": min(120, max(10, int(limite))),
+        "CreatorType": "User",
+        "CreatorTargetId": CREATEUR_ROBLOX,
+    }
+    try:
+        async with _session.get(API_CATALOGUE, params=params, timeout=20) as r:
+            out["code"] = r.status
+            if r.status == 200:
+                data = await r.json()
+                out["articles"] = _normaliser(data.get("data") or [])
+    except Exception as ex:
+        _log(f"[roblox_veille relever_nouveautes] {ex}")
+    out["echecs"] = await _noter_sante("catalogue", out["code"])
+    return out
+
+
+def _normaliser(bruts: list) -> list[dict]:
+    """Réduit les réponses du catalogue à ce qu'on sait afficher.
+
+    ⚠️ RETRI OBLIGATOIRE côté bot : le tri « le plus récent » de l'API n'est PAS
+    strictement chronologique (ordre réel mesuré : 15:41 → 15:42 → 15:40).
+    S'y fier ferait rater des articles ou en republier.
+    """
+    out = []
+    for b in bruts:
+        try:
+            aid = int(b.get("id") or 0)
+            if aid <= 0:
+                continue
+            restrictions = b.get("itemRestrictions") or []
+            out.append({
+                "asset_id": aid,
+                "nom": str(b.get("name") or "")[:120],
+                "type_article": str(b.get("assetType") or b.get("itemType") or "")[:40],
+                "prix": b.get("price"),
+                "favoris": int(b.get("favoriteCount") or 0),
+                "collectionnable": int(any(
+                    str(x).lower().startswith(("limited", "collectible"))
+                    for x in restrictions)),
+                "hors_vente": int(b.get("isOffSale") or False),
+                "cree_le": b.get("itemCreatedUtc") or b.get("createdUtc"),
+            })
+        except Exception:
+            continue
+    out.sort(key=lambda a: str(a.get("cree_le") or ""), reverse=True)
+    return out
+
+
+def signature(article: dict) -> str:
+    """Ce qui, en changeant, constitue un événement digne d'être publié.
+
+    Volontairement RESTREINTE : le prix et les favoris bougent en permanence.
+    Les inclure ferait republier le même article tous les quarts d'heure.
+    """
+    return f"{article.get('collectionnable', 0)}|{article.get('hors_vente', 0)}"
+
+
+async def comparer_et_enregistrer(articles: list[dict]) -> dict:
+    """Compare au dernier relevé et rend les événements détectés.
+
+    {"nouveaux": [...], "bascules": [...], "retires": [...]}
+
+    ⚠️ « bascules » n'est PAS « passé Limited le … ». Aucun champ ne donne cette
+    date : on constate un changement entre deux relevés. La fiche dira donc
+    « détecté le … », et c'est la seule formulation honnête.
+    """
+    res = {"nouveaux": [], "bascules": [], "retires": []}
+    if not articles:
+        return res
+    maintenant = datetime.now(timezone.utc).isoformat()
+    try:
+        async with _get_db() as db:
+            for a in articles:
+                async with db.execute(
+                    "SELECT signature, collectionnable, hors_vente FROM"
+                    " roblox_articles WHERE asset_id=?", (a["asset_id"],)) as cur:
+                    row = await cur.fetchone()
+                sig = signature(a)
+                if row is None:
+                    res["nouveaux"].append(a)
+                else:
+                    if not int(row[1]) and a["collectionnable"]:
+                        res["bascules"].append(a)
+                    elif not int(row[2]) and a["hors_vente"]:
+                        res["retires"].append(a)
+                await db.execute(
+                    "INSERT INTO roblox_articles(asset_id, nom, type_article,"
+                    " prix, collectionnable, hors_vente, favoris, cree_le,"
+                    " vu_le, signature) VALUES(?,?,?,?,?,?,?,?,?,?)"
+                    " ON CONFLICT(asset_id) DO UPDATE SET nom=?, prix=?,"
+                    "  collectionnable=?, hors_vente=?, favoris=?, vu_le=?,"
+                    "  signature=?",
+                    (a["asset_id"], a["nom"], a["type_article"], a["prix"],
+                     a["collectionnable"], a["hors_vente"], a["favoris"],
+                     a["cree_le"], maintenant, sig,
+                     a["nom"], a["prix"], a["collectionnable"], a["hors_vente"],
+                     a["favoris"], maintenant, sig))
+            await db.commit()
+    except Exception as ex:
+        _log(f"[roblox_veille comparer] {ex}")
+    return res
+
+
+async def deja_publie(guild_id: int, asset_id: int, flux: str) -> bool:
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM roblox_publies WHERE guild_id=? AND asset_id=?"
+                " AND flux=?", (guild_id, asset_id, flux)) as cur:
+                return bool(await cur.fetchone())
+    except Exception:
+        #  Fail-CLOSED : dans le doute on considère que c'est déjà sorti. Mieux
+        #  vaut rater une publication que noyer le salon de doublons.
+        return True
+
+
+async def marquer_publie(guild_id: int, asset_id: int, flux: str) -> None:
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO roblox_publies(guild_id, asset_id, flux,"
+                " publie_le) VALUES(?,?,?,?)",
+                (guild_id, asset_id, flux, datetime.now(timezone.utc).isoformat()))
+            await db.commit()
+    except Exception as ex:
+        _log(f"[roblox_veille marquer_publie] {ex}")
+
+
+async def amorcer(guild_id: int) -> int:
+    """Pose la borne du premier allumage. Rend le nombre d'articles absorbés.
+
+    ⚠️ SANS CECI, LE PREMIER PASSAGE DÉVERSE TOUT LE CATALOGUE dans le salon.
+    On enregistre l'état courant SANS rien publier : seul ce qui arrive ENSUITE
+    sera annoncé. C'est le §« premier allumage » de ROBLOX.md.
+    """
+    rel = await relever_nouveautes(limite=120)
+    if rel["code"] != 200:
+        return 0
+    await comparer_et_enregistrer(rel["articles"])
+    for a in rel["articles"]:
+        for flux in ("nouveautes", "bascules", "surveiller"):
+            await marquer_publie(guild_id, a["asset_id"], flux)
+    try:
+        await _db_set(guild_id, "roblox_veille_amorcee",
+                      datetime.now(timezone.utc).isoformat())
+    except Exception as ex:
+        _log(f"[roblox_veille amorcer] {ex}")
+    return len(rel["articles"])
+
+
+async def purger(garder: int = MAX_ARTICLES_SUIVIS) -> int:
+    """Borne la table : on ne garde pas l'historique complet du catalogue."""
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "DELETE FROM roblox_articles WHERE asset_id NOT IN ("
+                " SELECT asset_id FROM roblox_articles ORDER BY vu_le DESC LIMIT ?)",
+                (int(garder),))
+            await db.execute(
+                "DELETE FROM roblox_publies WHERE publie_le < ?",
+                ((datetime.now(timezone.utc) - timedelta(days=180)).isoformat(),))
+            await db.commit()
+        return 1
+    except Exception as ex:
+        _log(f"[roblox_veille purger] {ex}")
+        return 0
+
+
+async def diagnostic() -> dict:
+    """L'état des relevés, pour le panneau. Dit si une source ne répond plus."""
+    out = {"sources": [], "articles_connus": 0}
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT source, dernier_essai, dernier_succes, dernier_code,"
+                " echecs_consecutifs FROM roblox_sante") as cur:
+                for s, essai, succes, code, echecs in await cur.fetchall():
+                    out["sources"].append({
+                        "source": s, "dernier_essai": essai,
+                        "dernier_succes": succes, "code": code,
+                        "echecs": int(echecs or 0)})
+            async with db.execute(
+                "SELECT COUNT(*) FROM roblox_articles") as cur:
+                row = await cur.fetchone()
+            out["articles_connus"] = int(row[0] or 0) if row else 0
+    except Exception as ex:
+        _log(f"[roblox_veille diagnostic] {ex}")
+    return out
