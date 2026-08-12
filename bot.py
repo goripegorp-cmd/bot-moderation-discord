@@ -28039,22 +28039,13 @@ async def on_message(msg):
     except Exception:
         pass
 
-    # owner 2026-06-30 : INTERNATIONAL — sur une ANNONCE (ping @everyone/@here ou salon
-    # d'annonces Discord), le bot pose une réaction 🌐 → n'importe qui clique pour la LIRE DANS SA
-    # LANGUE (le handler de traduction 🌐 existant fait le reste). Découvrable sans connaître
-    # l'astuce ; UNIQUEMENT si le serveur est multilingue. Réaction FONCTIONNELLE. FAIL-SAFE.
-    try:
-        if msg.guild is not None and (
-                msg.mention_everyone or (hasattr(msg.channel, 'is_news') and msg.channel.is_news())):
-            _ci = await cfg(msg.guild.id)
-            if (_ci.get('i18n_announce_react', 1)
-                    and len(i18n_module.get_server_languages(_ci)) > 1
-                    and len((msg.content or '').strip()) >= 8):
-                _meg = msg.guild.me
-                if _meg and msg.channel.permissions_for(_meg).add_reactions:
-                    await msg.add_reaction("🌐")
-    except Exception:
-        pass
+    # (Réaction 🌐 sur les annonces SUPPRIMÉE le 12/08/2026, à la demande du propriétaire.)
+    #
+    # Elle était censée offrir une traduction au clic. Mais le module de traduction a été
+    # détaché pendant la refonte : le handler `on_raw_reaction_add` correspondant ne contenait
+    # plus qu'un `pass`. La réaction ne traduisait donc PLUS RIEN — elle se contentait de se
+    # poser sur chaque annonce du serveur. Un bouton qui ment, au sens de UI.md.
+    # Ne pas la remettre sans avoir d'abord rebranché une vraie traduction derrière.
 
     # Relay Discord - Vérifier si ce salon est suivi par d'autres serveurs.
     # PERF (revue totale) : backgroundé (create_task) — relay_discord_message scanne
@@ -28095,7 +28086,6 @@ async def on_message(msg):
             print(f"[bg track_member_message] {ex}")
         for _fn, _lbl in (
             (_track_message_for_missions, '_track_message_for_missions'),
-            (_maybe_greet_user_today, '_maybe_greet_user_today'),
             (_check_easter_eggs, '_check_easter_eggs'),
         ):
             try:
@@ -28179,55 +28169,13 @@ async def on_message(msg):
     except Exception as ex:
         print(f"[CAD] erreur détection : {ex}")
 
-    # ═══════════════ AUTO-RÉACTIONS ═══════════════
-    try:
-        _ar_content = msg.content.lower().strip()
-        if _ar_content and len(_ar_content) < 500:
-            async with get_db() as _ar_db:
-                async with _ar_db.execute(
-                    'SELECT channel_id, trigger_type, trigger_text, emoji FROM auto_reactions WHERE guild_id=? AND enabled=1',
-                    (msg.guild.id,)
-                ) as _ar_cur:
-                    _ar_rows = await _ar_cur.fetchall()
-
-            # owner 2026-06-29 : jamais sur un message du BOT, ni dans un salon où @everyone
-            # ne peut pas écrire (annonce/ticket/staff). Calculé une fois (cache boucle).
-            _ar_chatty = None
-            for _ar_ch, _ar_type, _ar_trigger, _ar_emoji in _ar_rows:
-                if _ar_ch and _ar_ch != msg.channel.id:
-                    continue
-                if msg.author.bot:
-                    continue
-                if _ar_chatty is None:
-                    try:
-                        _ar_chatty = await _is_chatty_channel(msg.channel)
-                    except Exception:
-                        _ar_chatty = False
-                if not _ar_chatty:
-                    continue
-
-                # Supporter les triggers multiples séparés par des virgules
-                _ar_triggers = [t.strip() for t in _ar_trigger.split(',') if t.strip()]
-
-                matched = False
-                for _single_trigger in _ar_triggers:
-                    if _ar_type == 'contains' and _single_trigger in _ar_content:
-                        matched = True
-                        break
-                    elif _ar_type == 'startswith' and _ar_content.startswith(_single_trigger):
-                        matched = True
-                        break
-                    elif _ar_type == 'exact' and _ar_content == _single_trigger:
-                        matched = True
-                        break
-
-                if matched:
-                    try:
-                        await msg.add_reaction(_ar_emoji.strip())
-                    except:
-                        pass
-    except:
-        pass
+    # (AUTO-RÉACTIONS par mot-clé SUPPRIMÉES le 12/08/2026, à la demande du propriétaire.)
+    #
+    # La table `auto_reactions` existait, elle était LUE à chaque message du serveur — mais
+    # aucune commande ni aucun panneau ne permettait plus d'y écrire une seule ligne depuis la
+    # purge des commandes hors périmètre. C'était donc une requête SQLite par message, sur le
+    # chemin le plus chaud du bot, pour une liste qui ne pouvait jamais contenir quoi que ce
+    # soit. Retirer le bloc ne change aucun comportement observable ; il allège on_message.
 
     try:
         c = await cfg(msg.guild.id)
@@ -32822,14 +32770,10 @@ async def on_raw_reaction_add(payload):
     except Exception:
         pass
 
-    # 🌐 Traduction à la demande — CHEMIN CHAUD : test ultra-cheap d'abord (un seul
-    # compare de chaîne). 99,9 % des réactions ne sont pas 🌐 → on ne paie RIEN.
-    # Lancé en tâche détachée pour ne JAMAIS bloquer/casser le reste du handler.
-    if str(payload.emoji) == "🌐":
-        try:
-            pass  # bloc vidé (module détaché)
-        except Exception as ex:
-            print(f"[translate on_reaction schedule] {ex}")
+    # (Traduction au clic sur 🌐 SUPPRIMÉE le 12/08/2026 : le module ayant été détaché
+    #  pendant la refonte, ce bloc ne contenait plus qu'un `pass`. Il testait donc chaque
+    #  réaction du serveur pour ne rien faire. La pose automatique de la 🌐 sur les annonces
+    #  a été retirée en même temps, dans `on_message`.)
 
     # Phase 28.4 : Reaction Roles
     await _handle_reaction_role(payload, add=True)
@@ -48930,62 +48874,13 @@ async def narrative_force_cmd(i: discord.Interaction, choice_id: Optional[str] =
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-async def _maybe_greet_user_today(msg) -> None:
-    """À la 1ère activité du jour d'un user, ajoute une ☀️ réaction (silencieux)."""
-    if not msg.guild or msg.author.bot:
-        return
-    # owner 2026-06-29 : réaction fun UNIQUEMENT dans un salon où @everyone peut écrire
-    # (jamais dans annonce/ticket/staff/logs — interagir là n'a aucun sens). FAIL-SAFE.
-    try:
-        if not await _is_chatty_channel(msg.channel):
-            return
-    except Exception:
-        return
-    try:
-        try:
-            from zoneinfo import ZoneInfo
-            today = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d")
-        except Exception:
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        # Déjà greeté aujourd'hui ?
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT 1 FROM daily_greeting_log WHERE guild_id=? AND user_id=? AND day=?",
-                (msg.guild.id, msg.author.id, today),
-            ) as cur:
-                if await cur.fetchone():
-                    return
-        # Mark + react
-        async with get_db() as db:
-            await db.execute(
-                "INSERT OR IGNORE INTO daily_greeting_log(guild_id, user_id, day) VALUES(?,?,?)",
-                (msg.guild.id, msg.author.id, today),
-            )
-            await db.commit()
-        # Réaction discrète selon l'heure
-        try:
-            from zoneinfo import ZoneInfo
-            h = datetime.now(ZoneInfo("Europe/Paris")).hour
-        except Exception:
-            h = datetime.now(timezone.utc).hour
-        if 5 <= h < 11:
-            emoji = "☀️"
-        elif 11 <= h < 17:
-            emoji = "👋"
-        elif 17 <= h < 22:
-            emoji = "🌆"
-        else:
-            emoji = "🌙"
-        try:
-            await msg.add_reaction(emoji)
-        except Exception:
-            pass
-    except Exception as ex:
-        print(f"[_maybe_greet_user_today] {ex}")
-
-
-
-
+# (_maybe_greet_user_today SUPPRIMÉE le 12/08/2026, à la demande du propriétaire.)
+#
+# Elle posait une réaction ☀️ / 👋 / 🌆 / 🌙 sur le premier message du jour de chaque membre,
+# selon l'heure. Réaction automatique et purement décorative, héritée du système d'engagement
+# qui a été supprimé : elle coûtait deux requêtes SQLite par membre et par jour pour un emoji
+# que personne n'avait demandé. La table `daily_greeting_log` n'est plus alimentée ; elle est
+# laissée en place plutôt que supprimée, parce qu'un DROP en production ne s'annule pas.
 # Phase 120 : enregistrer /owner après toutes ses subcommands
 bot.tree.add_command(owner_group)
 
