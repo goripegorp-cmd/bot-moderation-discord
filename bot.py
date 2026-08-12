@@ -38430,6 +38430,18 @@ async def _post_social_pair(msg, match) -> bool:
     """Propose de RÉUNIR l'auteur de `msg` et un autre joueur (`match`) qui cherche la même chose.
     FRAIS (< FRESH_SEC) → mention des 2 + « Créer le groupe ». PLUS ANCIEN → on demande d'abord à
     l'ancien « tu cherches toujours ? Oui/Non » (clôture des demandes périmées). FAIL-SAFE False."""
+    # ⚠️ NEUTRALISÉE LE 12/08/2026 — NE PAS RETIRER CE RETURN SANS REBRANCHER.
+    #
+    # Cette fonction posait un bouton « Créer un groupe / Proposer l'échange (appariement de deux joueurs) » que PLUS PERSONNE N'ÉCOUTE :
+    # le câblage des zones sociales a été retiré d'on_ready le 11/08 (7b036f8), pas le
+    # message. Résultat mesuré : le clic renvoie « L'interaction a échoué », en public,
+    # dans le salon, et se répète toutes les 30 minutes par membre.
+    #
+    # Le message entier est supprimé, pas seulement le bouton : il promet « en un clic »,
+    # donc sans bouton il ment. Tout le code en dessous est INTACT — `social_zones.py`
+    # (2 789 lignes) n'a jamais été supprimé, seulement débranché. Retirer ce return et
+    # réenregistrer les DynamicItem au boot suffit à tout rallumer.
+    return False
     try:
         guild = msg.guild
         author = msg.author
@@ -38632,6 +38644,18 @@ async def _social_reply_trade_hook(msg):
     d'ouvrir un salon d'échange entre les deux (consentement + résumé + anti-arnaque). FAIL-SAFE.
     owner 2026-07-20 : gère AUSSI le cas inverse — la RÉPONSE elle-même est une question de trade
     (« tu trade ? ») adressée à la personne à qui on répond."""
+    # ⚠️ NEUTRALISÉE LE 12/08/2026 — NE PAS RETIRER CE RETURN SANS REBRANCHER.
+    #
+    # Cette fonction posait un bouton « Proposer l'échange (réponse à un message de trade) » que PLUS PERSONNE N'ÉCOUTE :
+    # le câblage des zones sociales a été retiré d'on_ready le 11/08 (7b036f8), pas le
+    # message. Résultat mesuré : le clic renvoie « L'interaction a échoué », en public,
+    # dans le salon, et se répète toutes les 30 minutes par membre.
+    #
+    # Le message entier est supprimé, pas seulement le bouton : il promet « en un clic »,
+    # donc sans bouton il ment. Tout le code en dessous est INTACT — `social_zones.py`
+    # (2 789 lignes) n'a jamais été supprimé, seulement débranché. Retirer ce return et
+    # réenregistrer les DynamicItem au boot suffit à tout rallumer.
+    return None
     try:
         guild = getattr(msg, "guild", None)
         author = getattr(msg, "author", None)
@@ -38712,6 +38736,18 @@ async def _maybe_suggest_groupe(msg, content_lower: str) -> bool:
 
     Retourne True si un nudge a été posté (ou cooldown actif sur une coordination détectée)
     → l'appelant n'enchaîne PAS sur le nudge d'aide générique (évite le double-nudge)."""
+    # ⚠️ NEUTRALISÉE LE 12/08/2026 — NE PAS RETIRER CE RETURN SANS REBRANCHER.
+    #
+    # Cette fonction posait un bouton « Créer un groupe » que PLUS PERSONNE N'ÉCOUTE :
+    # le câblage des zones sociales a été retiré d'on_ready le 11/08 (7b036f8), pas le
+    # message. Résultat mesuré : le clic renvoie « L'interaction a échoué », en public,
+    # dans le salon, et se répète toutes les 30 minutes par membre.
+    #
+    # Le message entier est supprimé, pas seulement le bouton : il promet « en un clic »,
+    # donc sans bouton il ment. Tout le code en dessous est INTACT — `social_zones.py`
+    # (2 789 lignes) n'a jamais été supprimé, seulement débranché. Retirer ce return et
+    # réenregistrer les DynamicItem au boot suffit à tout rallumer.
+    return False
     try:
         guild = getattr(msg, 'guild', None)
         author = getattr(msg, 'author', None)
@@ -39005,6 +39041,18 @@ async def _trade_autodetect_hook(msg) -> None:
     """Détecte un message de TRADE en chat et poste un bouton « Ouvrir un trade » (salon
     privé à 2, modéré par le bot, auto-fermé à l'inactivité). 100% boutons (owner : « les
     commandes ils ne savent pas faire »). Gardes CHEAP-FIRST, jamais de MP/ping. FAIL-SAFE."""
+    # ⚠️ NEUTRALISÉE LE 12/08/2026 — NE PAS RETIRER CE RETURN SANS REBRANCHER.
+    #
+    # Cette fonction posait un bouton « Proposer l'échange (détection automatique) » que PLUS PERSONNE N'ÉCOUTE :
+    # le câblage des zones sociales a été retiré d'on_ready le 11/08 (7b036f8), pas le
+    # message. Résultat mesuré : le clic renvoie « L'interaction a échoué », en public,
+    # dans le salon, et se répète toutes les 30 minutes par membre.
+    #
+    # Le message entier est supprimé, pas seulement le bouton : il promet « en un clic »,
+    # donc sans bouton il ment. Tout le code en dessous est INTACT — `social_zones.py`
+    # (2 789 lignes) n'a jamais été supprimé, seulement débranché. Retirer ce return et
+    # réenregistrer les DynamicItem au boot suffit à tout rallumer.
+    return None
     try:
         guild = getattr(msg, 'guild', None)
         author = getattr(msg, 'author', None)
@@ -39696,6 +39744,18 @@ def _help_optout_build_panel(guild_id, user_id, header=None):
 async def _nudge_help_on_demand(i: discord.Interaction):
     """« J'ai besoin d'aide » — accessible MÊME en pause. Ouvre l'entrée d'aide existante (bouton
     entr_detect) → l'aide à la demande n'est jamais bloquée par une mise en pause. FAIL-SAFE."""
+    # ⚠️ NEUTRALISÉE LE 12/08/2026 — NE PAS RETIRER CE RETURN SANS REBRANCHER.
+    #
+    # Cette fonction posait un bouton « Plutôt de l'aide » que PLUS PERSONNE N'ÉCOUTE :
+    # le câblage des zones sociales a été retiré d'on_ready le 11/08 (7b036f8), pas le
+    # message. Résultat mesuré : le clic renvoie « L'interaction a échoué », en public,
+    # dans le salon, et se répète toutes les 30 minutes par membre.
+    #
+    # Le message entier est supprimé, pas seulement le bouton : il promet « en un clic »,
+    # donc sans bouton il ment. Tout le code en dessous est INTACT — `social_zones.py`
+    # (2 789 lignes) n'a jamais été supprimé, seulement débranché. Retirer ce return et
+    # réenregistrer les DynamicItem au boot suffit à tout rallumer.
+    return None
     try:
         class _AskHelpView(LayoutView):
             def __init__(self):
