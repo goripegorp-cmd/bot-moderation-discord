@@ -26139,7 +26139,37 @@ async def _age_gate_nsfw(member):
         print(f"[_age_gate_nsfw] {ex}")
 
 
+@bot.event
 async def on_member_join(m):
+    """⚠️ CE DÉCORATEUR A ÉTÉ RÉTABLI LE 12/08/2026. NE JAMAIS LE RETIRER.
+
+    ═══════════════════════════════════════════════════════════════════════════
+    LA PANNE LA PLUS GRAVE TROUVÉE DANS CE DÉPÔT
+    ═══════════════════════════════════════════════════════════════════════════
+    Cette fonction n'avait AUCUN décorateur, et aucun `bot.add_listener` ne la
+    visait — vérifié à l'AST sur les 28 gestionnaires `on_*` du fichier : elle
+    était la SEULE dans ce cas. C'était donc une fonction ordinaire que personne
+    n'appelait jamais. Depuis des mois, il ne se passait littéralement RIEN
+    quand quelqu'un rejoignait un serveur :
+
+      · l'ANTI-RAID ne comptait aucune arrivée — son compteur ne montait jamais,
+        donc le verrouillage du serveur ne pouvait pas se déclencher, jamais ;
+      · l'anti-compte-récent, l'anti-alt et l'empreinte du membre : muets ;
+      · le bot voyou tiers n'était pas neutralisé ;
+      · le rôle d'arrivée n'était pas posé, le gate +18 pas appliqué ;
+      · les statistiques comptaient 0 arrivée — d'où l'alerte « perte nette de
+        membres » qui affichait toujours « 0 arrivés », symptôme visible de la
+        panne que personne n'avait relié à sa cause.
+
+    Le correctif d'ordre de l'anti-raid livré plus tôt dans la refonte était donc
+    juste, mais inerte : il corrigeait la place d'un appel dans une fonction
+    morte.
+
+    ⚠️ `ast.parse` ne voit PAS ce genre de panne, et `import bot` non plus : le
+    fichier est parfaitement valide sans le décorateur. Le contrôle qui l'attrape
+    est `outils/verif_evenements.py`, qui vérifie que chaque `on_*` de Discord
+    est bien enregistrée. À lancer avant tout push touchant aux événements.
+    """
     # ── ANTI-BOT-VOYOU (owner 2026-06-21) : un bot tiers dangereux non approuvé → neutralisé.
     try:
         if getattr(m, 'bot', False):
@@ -26209,65 +26239,15 @@ async def on_member_join(m):
     except Exception as ex:
         print(f"[on_member_join raid_module] {ex}")
 
-    # ═══ Phase 153 : démarre le parcours d'onboarding ═══
-    if not m.bot:
-        try:
-            pass  # bloc vidé (module détaché)
-        except Exception as ex:
-            _logerr("on_member_join.onboarding", ex, guild_id=getattr(m.guild, "id", 0))
-
-    # ═══ Tâche B.1 : PARRAINAGE anti-alt — déduire QUI a invité (suivi d'invites) ═══
-    # Doit tourner TÔT et en AWAIT (pas en create_task) : compare le cache d'uses au
-    # snapshot live AVANT que d'autres handlers (ou une autre arrivée) ne resynchronisent
-    # le cache. Enregistre le parrainage EN ATTENTE ; le crédit est différé (gate anti-alt
-    # ré-évaluée par referral_reward_task). FAIL-SAFE, ZÉRO DM.
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        _logerr("on_member_join.referrals", ex, guild_id=getattr(m.guild, "id", 0))
-
-    # (Badge « Pionnier » et appel au mentorat retirés : ils appelaient
-    #  _maybe_grant_pioneer / _maybe_post_mentor_call, deux fonctions qui n'ont
-    #  JAMAIS existé dans le fichier — vérifié sur tout l'historique. Chaque
-    #  arrivée levait donc un NameError avalé par le try, et les deux
-    #  fonctionnalités relèvent du périmètre supprimé.)
-
-    # ═══ Tâche B.2 : célébration des paliers de membres (anti-doublon DB) ═══
-    try:
-        asyncio.create_task(_maybe_celebrate_member_milestone(m.guild))
-    except Exception as ex:
-        _logerr("on_member_join.milestone", ex, guild_id=getattr(m.guild, "id", 0))
-
-    # ═══ Phase 256 : rôle « 📢 Tous les Événements » OPT-OUT ═══
-    # Chaque nouveau membre est abonné PAR DÉFAUT au rôle de notification des
-    # events → les nouveaux arrivants comprennent tout de suite qu'il se passe
-    # des choses (ils sont ping au 1er event). Opt-out : /notify niveau:🔕 Aucun.
-    if not m.bot:
-        try:
-            # Respecter un opt-out persistant (membre revenu après s'être désabonné
-            # via /notifs). Défaut pour un nouveau venu = True → il est abonné.
-            if await _member_wants_notif(m.guild.id, m.id, 'events'):
-                _ev_role = await _ensure_notify_role(m.guild, 'all')
-                if _ev_role and _ev_role not in m.roles:
-                    await m.add_roles(
-                        _ev_role, reason="Phase 256 : abonnement events par défaut (opt-out)")
-        except Exception as ex:
-            _logerr("on_member_join.events_role", ex, guild_id=getattr(m.guild, "id", 0))
-
-    # ═══ Spotlight UGC (owner 2026-06-30) : rôle « 🛒 Collectionneur UGC » OPT-OUT ═══
-    # Chaque nouveau membre est abonné PAR DÉFAUT → il est ping dès le 1er nouvel accessoire.
-    # Opt-out 1-clic : bouton 🔔 sous une annonce ou message d'info du salon. Respecte un
-    # opt-out persistant (membre revenu après s'être désabonné). FAIL-SAFE.
-    if not m.bot:
-        try:
-            _ucf = await cfg(m.guild.id)
-            if _ucf.get('ugc_fans_default_all', 1) and await _member_wants_notif(m.guild.id, m.id, 'ugc'):
-                _ucre, _ugc_role = await _ensure_ugc_roles(m.guild)
-                if _ugc_role and _ugc_role not in m.roles:
-                    await m.add_roles(
-                        _ugc_role, reason="Abonnement Collectionneur UGC par défaut (opt-out)")
-        except Exception as ex:
-            _logerr("on_member_join.ugc_fans_role", ex, guild_id=getattr(m.guild, "id", 0))
+    # (Blocs SUPPRIMÉS le 12/08/2026 en rebranchant l'événement — voir le décorateur.
+    #  Tous appartenaient à des systèmes retirés par la refonte, et les réveiller d'un
+    #  coup aurait inondé le serveur au lieu de le protéger :
+    #    · parcours d'onboarding et parrainage — déjà vidés, il ne restait que le try ;
+    #    · célébration des paliers de membres — système d'engagement ;
+    #    · rôle « 📢 Tous les Événements » posé d'office — système d'events ;
+    #    · rôle « 🛒 Collectionneur UGC » posé d'office — Roblox UGC.
+    #  Les deux derniers ajoutaient un rôle à CHAQUE arrivée : rebrancher l'événement
+    #  sans les retirer aurait collé deux rôles morts à tous les nouveaux venus.)
 
     # ═══ i18n : restaure le rôle drapeau d'un MEMBRE REVENU (zéro DM, zéro message) ═══
     # Discord n'expose PAS la locale sur un on_member_join → l'auto-détection « vraie »
@@ -26425,49 +26405,16 @@ async def on_member_join(m):
     except Exception as ex:
         print(f"[welcome] {ex}")
 
-    # ═══ Phase 257.1 : ACCUEIL EN SALON (remplace le MP d'onboarding — zéro MP) ═══
-    # Le nouveau venu comprend tout de suite qu'il y a des EVENTS, en salon, avec
-    # boutons hub/parcours. (L'ancien _send_onboarding_dm est neutralisé Phase 257.)
-    try:
-        t = asyncio.create_task(_post_onboarding_welcome(m))
-        _pending_onboardings.add(t)
-        t.add_done_callback(_pending_onboardings.discard)
-    except Exception as ex:
-        print(f"[onboarding_welcome schedule] {ex}")
-
     # ═══ Phase 64 : alt detection heuristic ═══
     try:
         await _check_alt_account(m)
     except Exception as ex:
         print(f"[_check_alt_account] {ex}")
 
-    # ═══ Phase 49 : NPC greeting (proba 30% pour pas spammer) ═══
-    # TASK C.1 : muet pendant une vague de raid (en plus du throttle 6h existant).
-    try:
-        if random.random() < 0.30 and not _welcome_raid_active(m.guild.id):
-            c2 = await cfg(m.guild.id)
-            hub_id2 = int(c2.get('hub_channel', 0) or 0)
-            hub_ch2 = m.guild.get_channel(hub_id2) if hub_id2 else None
-            if hub_ch2 and await _is_chatty_channel(hub_ch2):
-                # pick un NPC qui n'a pas accueilli quelqu'un dans les 6 dernières heures
-                npc_choices = []
-                for npc_id in lore.NPCS:
-                    if not await _npc_recently_posted(m.guild.id, npc_id, hours=6):
-                        npc_choices.append(npc_id)
-                if npc_choices:
-                    chosen = random.choice(npc_choices)
-                    npc = lore.get_npc(chosen)
-                    line = lore.pick_npc_line(chosen, 'new_member')
-                    if npc and line:
-                        # Replace mention "_un nouveau_" par le mention du membre quand cohérent
-                        await _post_npc_line(
-                            hub_ch2, chosen, 'new_member',
-                            line=line,
-                            extra_desc=f"👋 Bienvenue {m.mention} dans la guilde !",
-                            ttl_seconds=2 * 3600,
-                        )
-    except Exception as ex:
-        print(f"[npc greeting member_join] {ex}")
+    # (Accueil « parcours / hub d'events » et salutation par un PNJ SUPPRIMÉS le
+    #  12/08/2026 : le premier poussait le hub d'events, le second faisait parler un
+    #  personnage du lore dans le salon à chaque arrivée. Les deux systèmes ont été
+    #  retirés par la refonte ; rebrancher l'événement les aurait ressuscités.)
 
 
 async def _handle_antiraid_join(member):
