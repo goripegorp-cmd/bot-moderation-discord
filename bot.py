@@ -14782,6 +14782,11 @@ async def _activite_passage_wait():
 # ═══════════════════════════════════════════════════════════════════════════════
 _SUPERVISED_LOOP_NAMES = [
     "activite_passage_task",
+    #  Ajoutée le 12/08/2026 avec son `.start()` : elle n'avait ni l'un ni l'autre,
+    #  donc elle n'a jamais tourné. Sans l'entrée ici, une exception non gérée
+    #  l'arrêterait définitivement jusqu'au prochain redémarrage — et un rapport
+    #  hebdomadaire qui s'arrête ne se remarque qu'une semaine plus tard.
+    "weekly_security_report",
     "ui_usage_flush_task",
     "event_timeout_checker", "event_auto_scheduler", "stale_event_cleanup",
     "personal_event_dispatcher", "light_events_dispatcher",
@@ -24012,6 +24017,15 @@ async def on_ready():
         if not health_module.health_check_task.is_running():
             health_module.health_check_task.start()
 
+        # ⚠️ RAPPORT DE SÉCURITÉ HEBDOMADAIRE — DÉMARRAGE AJOUTÉ LE 12/08/2026.
+        # La boucle `weekly_security_report` était écrite, décorée `@tasks.loop`,
+        # dotée de son `before_loop`… mais aucun `.start()` n'existait nulle part
+        # et son nom n'était pas au registre du superviseur. Elle n'a donc JAMAIS
+        # tourné une seule fois depuis sa création : le récapitulatif hebdomadaire
+        # des sanctions, qui n'existe sous aucune autre forme, n'est jamais parti.
+        if not weekly_security_report.is_running():
+            weekly_security_report.start()
+
         # ⚠️ backup_lite (backup_daily_task) N'EST PLUS LANCÉ — owner 2026-07-12.
         # PREUVE (Metrics Railway) : RAM en dents de scie jusqu'à **5 Go** → conteneur tué (OOM)
         # → redémarrage → re-saturation = BOUCLE DE CRASH → « L'application ne répond plus » sur
@@ -31213,9 +31227,21 @@ async def mod_active_cmd(i: discord.Interaction):
                     if start is not None:
                         if start.tzinfo is None:
                             start = start.replace(tzinfo=timezone.utc)
-                        end = start + timedelta(seconds=dur)
+                        #  ⚠️ MINUTES, PAS SECONDES. `duration` est écrit en minutes par
+                        #  `/mod direction`, et `check_expired_restrictions` le relit bien
+                        #  en minutes (`total_seconds() / 60`). Cet écran, lui, lisait des
+                        #  SECONDES : une restriction d'une heure s'affichait « fin dans
+                        #  1 minute », puis la ligne DISPARAISSAIT au bout de 60 secondes
+                        #  alors que le membre restait puni 59 minutes de plus. La seule
+                        #  surface qui répond à « qui est puni et jusqu'à quand » mentait
+                        #  donc sur les deux. Corrigé le 12/08/2026.
+                        end = start + timedelta(minutes=dur)
                         if end <= now_ts:
-                            continue  # expirée → sera levée par check_expired_restrictions
+                            #  Échue mais pas encore levée : la boucle de nettoyage passe
+                            #  périodiquement. On l'AFFICHE quand même — masquer la ligne
+                            #  laissait croire le membre libre alors qu'il porte encore
+                            #  le rôle de quarantaine.
+                            until_txt = "échue — levée au prochain passage"
                         until_txt = f"<t:{int(end.timestamp())}:R>"
                 except Exception:
                     pass
