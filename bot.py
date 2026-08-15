@@ -19725,6 +19725,14 @@ WEBHOOK_PROFILES = {
     'discord_relay': {'name': 'Discord Relay'},
     'rosocial': {'name': 'RoSocial'},
     'roblox_ugc': {'name': 'Roblox UGC'},
+    # ─── Veille Roblox (12/08/2026) — un profil PAR FLUX, pour qu'on voie d'ou
+    #     vient la fiche sans lire une ligne. Les cles doivent correspondre a
+    #     celles passees par roblox_panneau : sans profil, webhook_send retombe
+    #     sur « Notifications » et les quatre flux deviennent indistinguables.
+    'roblox_nouveautes': {'name': '🆕 Nouveautes Roblox'},
+    'roblox_bascules':   {'name': '💎 Passes collectionnables'},
+    'roblox_surveiller': {'name': '👀 A surveiller'},
+    'roblox_actu':       {'name': '📢 Actualite Roblox'},
     'deals': {'name': 'Bons Plans'},
     'game_updates': {'name': '🎮 Mises à jour'},
     # ─── Modération & Sécurité ───

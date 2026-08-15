@@ -36,6 +36,14 @@ _log = print
 
 #  Le nom affiché par le webhook, par flux. C'est ce qui rend le salon lisible
 #  quand trois flux tombent au même endroit.
+#  La CLE de profil webhook, par flux. Doit correspondre a WEBHOOK_PROFILES
+#  dans bot.py — sans correspondance, tout sort sous « Notifications ».
+PLATEFORME = {
+    "nouveautes": "roblox_nouveautes",
+    "bascules": "roblox_bascules",
+    "surveiller": "roblox_surveiller",
+}
+
 NOMS_FLUX = {
     "nouveautes": "🆕 Nouveautés Roblox",
     "bascules": "💎 Passés collectionnables",
@@ -166,8 +174,14 @@ async def publier(guild, salon, article: dict, flux: str,
     vue = construire_fiche(article, flux, image=image)
     try:
         if _webhook_send is not None:
-            await _webhook_send(salon, "roblox", view=vue,
-                                username=NOMS_FLUX.get(flux, "Roblox"))
+            #  ⚠️ `webhook_send` n'accepte PAS de `username` — sa signature est
+            #  (channel, platform, embed, content, file, files, embeds, view).
+            #  La premiere version le lui passait : chaque publication levait un
+            #  TypeError, tombait dans le repli, et le webhook n'etait JAMAIS
+            #  utilise alors que c'etait la demande. Le nom vient donc du profil
+            #  declare dans WEBHOOK_PROFILES, choisi par la CLE de plateforme.
+            await _webhook_send(salon, PLATEFORME.get(flux, "roblox_nouveautes"),
+                                view=vue)
         else:
             await salon.send(view=vue)
         return True
@@ -218,8 +232,8 @@ async def publier_actu(guild, salon, billet: dict) -> bool:
     vue = construire_actu(billet)
     try:
         if _webhook_send is not None:
-            await _webhook_send(salon, "roblox", view=vue,
-                                username="📢 Actualité Roblox")
+            #  Meme raison que ci-dessus : le nom vient du profil, pas d'un kwarg.
+            await _webhook_send(salon, "roblox_actu", view=vue)
         else:
             await salon.send(view=vue)
         return True
