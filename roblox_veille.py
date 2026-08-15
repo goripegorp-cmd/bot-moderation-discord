@@ -206,9 +206,11 @@ def lien_article(asset_id) -> str | None:
 #  d'utilisation de Roblox interdisent d'entraîner un modèle sur leur contenu
 #  virtuel : il n'y a donc ici RIEN qui apprenne, et c'est volontaire.
 POIDS = {
-    "hors_vente": 45,       # le signal le plus dur : a précédé les vagues Limited
-    "demande": 30,          # favoris rapportés au prix
-    "prix_bas": 15,         # un prix d'entrée bas élargit le nombre de détenteurs
+    "hors_vente": 35,       # le signal le plus dur : a précédé les vagues Limited
+    "stock_fini": 25,       # une quantité bornée est le propre d'un collectionnable
+    "revente": 20,          # une revente déjà ouverte = valeur de marché observable
+    "demande": 20,          # favoris rapportés au prix
+    "prix_bas": 10,         # un prix d'entrée bas élargit le nombre de détenteurs
     "recent": 10,           # une sortie récente reste dans l'actualité
 }
 
@@ -226,6 +228,19 @@ def indice(article: dict) -> dict:
     if article.get("hors_vente"):
         note += POIDS["hors_vente"]
         facteurs.append(("retiré de la vente", POIDS["hors_vente"]))
+
+    #  Une revente DÉJÀ ouverte est un fait, pas une supposition : l'article est
+    #  échangeable, donc il a une valeur de marché observable.
+    if article.get("revendeurs"):
+        note += POIDS["revente"]
+        facteurs.append(("revente déjà ouverte", POIDS["revente"]))
+
+    #  Un stock fini est le propre d'un collectionnable. `totalQuantity` vaut 0
+    #  sur un article à stock illimité : seul un nombre > 0 est un signal.
+    q = article.get("quantite")
+    if q and int(q) > 0:
+        note += POIDS["stock_fini"]
+        facteurs.append((f"stock fini ({q})", POIDS["stock_fini"]))
 
     prix = article.get("prix")
     favoris = article.get("favoris")
@@ -273,6 +288,65 @@ def _jours_depuis(quand: str) -> int | None:
 #  Relevé
 # ═══════════════════════════════════════════════════════════════════════════════
 
+#  ⚠️ VALEURS IMPOSÉES PAR L'API. Mesuré en direct : toute autre valeur renvoie
+#  un HTTP 400 « Allowed values: 10, 28, 30, 60, 120 ». Un simple `min/max` sur
+#  un intervalle produisait donc des requêtes refusées — et comme l'échec était
+#  silencieux, le système paraissait juste « calme ».
+LIMITES_AUTORISEES = (10, 28, 30, 60, 120)
+
+
+def _limite_valide(n) -> int:
+    """La plus petite valeur autorisée qui couvre le besoin demandé."""
+    try:
+        voulu = int(n)
+    except (TypeError, ValueError):
+        voulu = 30
+    for v in LIMITES_AUTORISEES:
+        if v >= voulu:
+            return v
+    return LIMITES_AUTORISEES[-1]
+
+
+def _ouvrir():
+    """Ouvre une session HTTP pour un relevé. À utiliser en `async with`.
+
+    ⚠️ CE MODULE NE DÉPEND PLUS D'UNE SESSION INJECTÉE — c'est un correctif, pas
+    un choix esthétique. La première version exigeait un `aiohttp.ClientSession`
+    passé par `setup()`, et le câblage dans bot.py passait `session=None` : le
+    relevé sortait alors AVANT le moindre appel réseau, en enregistrant
+    silencieusement un échec. Le système entier était mort à la livraison, et
+    seul le registre de santé le montrait.
+
+    Le dépôt n'a pas de session partagée : les autres modules ouvrent la leur au
+    besoin. On fait pareil. Un relevé toutes les 30 minutes ne justifie pas de
+    garder une connexion ouverte en permanence.
+
+    Un `User-Agent` explicite est posé : les points d'API de Roblox répondent
+    mal aux requêtes sans identité, et un agent nommé se diagnostique.
+    """
+    import aiohttp
+    if _session is not None:
+        #  Session fournie par l'appelant : on ne la ferme pas, d'où l'enveloppe.
+        return _SessionEmpruntee(_session)
+    return aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=20),
+        headers={"User-Agent": "BotModerationDiscord/1.0 (veille Roblox)",
+                 "Accept": "application/json"})
+
+
+class _SessionEmpruntee:
+    """Enveloppe une session qu'on n'a pas créée : on ne doit pas la fermer."""
+
+    def __init__(self, session):
+        self._s = session
+
+    async def __aenter__(self):
+        return self._s
+
+    async def __aexit__(self, *a):
+        return False
+
+
 async def _noter_sante(source: str, code: int | None) -> int:
     """Enregistre l'issue d'un relevé et rend le nombre d'échecs consécutifs.
 
@@ -310,24 +384,28 @@ async def relever_nouveautes(limite: int = 30) -> dict:
     Ne lève jamais : une panne de veille ne doit pas gêner la modération.
     """
     out = {"articles": [], "code": None, "echecs": 0}
-    if _session is None:
-        out["echecs"] = await _noter_sante("catalogue", None)
-        return out
     params = {
         "Category": 1,
         "SortType": 3,
-        "Limit": min(120, max(10, int(limite))),
+        "Limit": _limite_valide(limite),
         "CreatorType": "User",
         "CreatorTargetId": CREATEUR_ROBLOX,
     }
     try:
-        async with _session.get(API_CATALOGUE, params=params, timeout=20) as r:
-            out["code"] = r.status
-            if r.status == 200:
-                data = await r.json()
-                out["articles"] = _normaliser(data.get("data") or [])
+        async with _ouvrir() as sess:
+            async with sess.get(API_CATALOGUE, params=params) as r:
+                out["code"] = r.status
+                if r.status == 200:
+                    data = await r.json()
+                    out["articles"] = _normaliser(data.get("data") or [])
+                else:
+                    #  On garde le corps : un 403 du pare-feu et un 429 de débit
+                    #  ne se corrigent pas de la même façon, et sans cette trace
+                    #  on ne saurait pas lequel on a.
+                    _log(f"[roblox_veille catalogue] HTTP {r.status} — "
+                         f"{(await r.text())[:200]}")
     except Exception as ex:
-        _log(f"[roblox_veille relever_nouveautes] {ex}")
+        _log(f"[roblox_veille relever_nouveautes] {type(ex).__name__}: {ex}")
     out["echecs"] = await _noter_sante("catalogue", out["code"])
     return out
 
@@ -349,19 +427,50 @@ def _normaliser(bruts: list) -> list[dict]:
             out.append({
                 "asset_id": aid,
                 "nom": str(b.get("name") or "")[:120],
-                "type_article": str(b.get("assetType") or b.get("itemType") or "")[:40],
-                "prix": b.get("price"),
+                "type_article": _type_lisible(b),
+                "prix": b.get("price") if b.get("price") is not None
+                        else b.get("lowestPrice"),
                 "favoris": int(b.get("favoriteCount") or 0),
                 "collectionnable": int(any(
                     str(x).lower().startswith(("limited", "collectible"))
                     for x in restrictions)),
-                "hors_vente": int(b.get("isOffSale") or False),
+                #  `offSaleDeadline` renseigné = Roblox annonce lui-même la fin
+                #  de vente. C'est le signal le plus dur dont on dispose.
+                "hors_vente": int(bool(b.get("isOffSale"))
+                                  or bool(b.get("offSaleDeadline"))),
                 "cree_le": b.get("itemCreatedUtc") or b.get("createdUtc"),
+                #  Signaux relevés dans la réponse réelle et qu'on aurait ratés
+                #  en se fiant à la documentation : une revente déjà ouverte et
+                #  un stock fini sont des faits, pas des suppositions.
+                "revendeurs": int(bool(b.get("hasResellers"))),
+                "quantite": b.get("totalQuantity") or None,
+                "prix_revente": b.get("lowestResalePrice") or None,
             })
         except Exception:
             continue
     out.sort(key=lambda a: str(a.get("cree_le") or ""), reverse=True)
     return out
+
+
+def _type_lisible(brut: dict) -> str:
+    """Le type d'article, en clair.
+
+    ⚠️ `assetType` est un NUMÉRO (8, 46, 92…), pas un nom. La première version
+    l'affichait tel quel : la fiche annonçait « type 8 · Tricolor Ladoo Hat ».
+    La réponse porte heureusement une `taxonomy` avec un libellé lisible — on la
+    préfère, et on ne retombe sur le numéro que si elle manque, en le nommant
+    pour ce qu'il est plutôt qu'en le faisant passer pour un type.
+    """
+    try:
+        taxo = brut.get("taxonomy") or []
+        if taxo:
+            nom = str(taxo[0].get("taxonomyName") or "").strip()
+            if nom:
+                return nom[:40]
+    except Exception:
+        pass
+    n = brut.get("assetType")
+    return f"type {n}" if n is not None else "—"
 
 
 def signature(article: dict) -> str:
