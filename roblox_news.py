@@ -62,6 +62,25 @@ SOURCES = [
 MAX_BILLETS_PAR_PASSAGE = 5
 MAX_PUBLIES_GARDES = 4000
 
+#  ⚠️ FRAÎCHEUR MAXIMALE — NE PAS RETIRER CE GARDE-FOU.
+#
+#  Mesuré le 12/08/2026 sur les vraies réponses : les catégories lentes portent
+#  en haut de liste des billets de 73, 137, 277 et jusqu'à 337 JOURS. Elles
+#  publient peu, donc leur « dernier billet » peut être très ancien.
+#
+#  La déduplication seule ne suffit PAS à s'en protéger : elle repose sur la
+#  base. Une base neuve, un serveur qui active le système pour la première fois,
+#  une restauration de sauvegarde — et le salon reçoit d'un coup une alerte
+#  vieille d'un an annoncée comme une nouvelle.
+#
+#  Le propriétaire l'a dit mot pour mot : « faut pas que les news soient
+#  dépassées depuis un moment ». Ce plafond est indépendant de la base : un
+#  billet trop vieux n'est JAMAIS publié, quel que soit l'état du reste.
+#
+#  30 jours : mesuré, ça laisse passer le billet le plus récent de CHAQUE
+#  catégorie (le plus lent est à 17 jours) et bloque tous les autres.
+FRAICHEUR_MAX_JOURS = 30
+
 _get_db = None
 _cfg = None
 _db_set = None
@@ -190,6 +209,23 @@ async def relever(source: dict) -> dict:
     return out
 
 
+def _trop_vieux(quand, jours: int = FRAICHEUR_MAX_JOURS) -> bool:
+    """Ce billet est-il trop ancien pour être annoncé comme une nouvelle ?
+
+    Une date ILLISIBLE est traitée comme trop vieille — fail-closed. C'est
+    l'inverse du choix fait pour les articles du catalogue, et c'est délibéré :
+    ici le risque n'est pas de rater une nouveauté, c'est d'annoncer une alerte
+    de sécurité vieille d'un an. Dans le doute, on se tait.
+    """
+    try:
+        d = datetime.fromisoformat(str(quand).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - d).days > int(jours)
+    except Exception:
+        return True
+
+
 def _normaliser(data: dict, domaine: str) -> list[dict]:
     """Réduit une réponse Discourse aux champs qu'on sait afficher.
 
@@ -207,6 +243,12 @@ def _normaliser(data: dict, domaine: str) -> list[dict]:
                 continue
             tid = int(t.get("id") or 0)
             if tid <= 0:
+                continue
+            #  ⚠️ Filtre de fraîcheur appliqué DÈS LA NORMALISATION, donc avant
+            #  la déduplication et avant l'amorce. Un billet trop vieux n'entre
+            #  même pas dans le circuit : c'est la seule garantie qui tienne si
+            #  la base est neuve ou restaurée. Voir FRAICHEUR_MAX_JOURS.
+            if _trop_vieux(t.get("created_at")):
                 continue
             out.append({
                 "topic_id": tid,
