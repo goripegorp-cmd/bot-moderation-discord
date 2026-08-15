@@ -14819,6 +14819,13 @@ async def veille_roblox_task():
             rel = await roblox_module.relever_nouveautes(limite=60)
             if rel["code"] == 200:
                 evts = await roblox_module.comparer_et_enregistrer(rel["articles"])
+                #  Les images en UN SEUL appel pour tout le passage : une
+                #  requete pour cent articles, jamais cent requetes. C'est la
+                #  concurrence que le pare-feu punit, pas le volume.
+                _a_pub = [x for k in ("nouveaux", "bascules", "retires")
+                          for x in (evts.get(k) or [])[:5]]
+                _imgs = await roblox_module.vignettes(
+                    [x["asset_id"] for x in _a_pub])
                 for g in guildes_items:
                     c = await roblox_module.config(g.id)
                     for flux, cle in (("nouveautes", "nouveaux"),
@@ -14826,9 +14833,14 @@ async def veille_roblox_task():
                                       ("surveiller", "retires")):
                         salon = g.get_channel(roblox_module.salon_du_flux(c, flux))
                         for a in (evts.get(cle) or [])[:5]:
+                            #  « A surveiller » ne publie que du solide.
+                            if flux == "surveiller" and roblox_module.indice(a)["note"] \
+                                    < roblox_module.SEUIL_SURVEILLER:
+                                continue
                             if await roblox_module.deja_publie(g.id, a["asset_id"], flux):
                                 continue
-                            if await roblox_ui.publier(g, salon, a, flux):
+                            if await roblox_ui.publier(g, salon, a, flux,
+                                                      image=_imgs.get(a["asset_id"])):
                                 await roblox_module.marquer_publie(g.id, a["asset_id"], flux)
                             await asyncio.sleep(1)
             await roblox_module.purger()

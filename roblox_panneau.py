@@ -62,7 +62,7 @@ def _ou_tiret(v) -> str:
     return str(v)
 
 
-def construire_fiche(article: dict, flux: str) -> LayoutView:
+def construire_fiche(article: dict, flux: str, image: str | None = None) -> LayoutView:
     """La fiche d'un article, en quadrillage fixe.
 
     L'ordre ne change jamais : type et nom, puis créateur et date, puis les
@@ -78,6 +78,21 @@ def construire_fiche(article: dict, flux: str) -> LayoutView:
         v2_title(NOMS_FLUX.get(flux, "Roblox")),
         v2_subtitle(f"{_ou_tiret(article.get('type_article'))} · "
                     f"{_ou_tiret(article.get('nom'))}"),
+    ]
+
+    #  L'IMAGE EN BANNIÈRE, tout en haut — un accessoire se juge d'abord à l'œil.
+    #  `MediaGallery` est le composant V2 fait pour ça ; s'il n'est pas
+    #  disponible dans cette version de discord.py, on n'affiche rien plutôt que
+    #  de tordre la fiche.
+    if image:
+        try:
+            galerie = discord.ui.MediaGallery()
+            galerie.add_item(media=image)
+            items.append(galerie)
+        except Exception as ex:
+            _log(f"[roblox fiche image] {ex}")
+
+    items += [
         v2_divider(),
         v2_body(
             f"**Créateur** · Roblox\n"
@@ -92,17 +107,20 @@ def construire_fiche(article: dict, flux: str) -> LayoutView:
     ]
 
     #  ⚠️ « INDICE », JAMAIS « PRÉDICTION ». Mesuré sur 339 articles : aucun
-    #  signal déclaratif n'annonce un passage en collectionnable. On affiche donc
-    #  les facteurs et leur poids, jamais un pourcentage nu.
-    if ind["facteurs"]:
+    #  signal déclaratif n'annonce un passage en collectionnable.
+    #
+    #  ET SURTOUT : on ne l'affiche QUE s'il dit quelque chose. Demande du
+    #  propriétaire le 12/08 — « quasiment du 100 % ou du 80 %, pas du 20 % ; tu
+    #  dis pas et tu mets pas ce qui sert à rien ». Un « 30/100 » se lit comme un
+    #  verdict faible alors que ce n'est qu'une ABSENCE de signal. Se taire est
+    #  plus honnête que d'afficher un chiffre qui n'apprend rien.
+    if ind["note"] >= veille.SEUIL_INDICE_AFFICHE and ind["facteurs"]:
         detail = " · ".join(f"{lib} +{pts}" for lib, pts in ind["facteurs"])
-    else:
-        detail = "aucun facteur relevé"
-    items.append(v2_body(
-        f"**Indice** · `{ind['note']}/100` — confiance {ind['confiance']}\n"
-        f"-# {detail}\n"
-        f"-# Un indice, pas une prédiction : Roblox n'annonce jamais à l'avance "
-        f"qu'un article passera collectionnable."))
+        items.append(v2_body(
+            f"**Indice** · `{ind['note']}/100`\n"
+            f"-# {detail}\n"
+            f"-# Un indice, pas une prédiction : Roblox n'annonce jamais à "
+            f"l'avance qu'un article passera collectionnable."))
 
     if flux == "bascules":
         #  Aucun champ ne donne la date de bascule. On dit donc « détecté »,
@@ -125,11 +143,17 @@ def construire_fiche(article: dict, flux: str) -> LayoutView:
     return v
 
 
-async def publier(guild, salon, article: dict, flux: str) -> bool:
-    """Publie une fiche, par webhook si possible. Fail-safe."""
+async def publier(guild, salon, article: dict, flux: str,
+                  image: str | None = None) -> bool:
+    """Publie une fiche, par webhook si possible. Fail-safe.
+
+    `image` est passée par l'appelant, qui a demandé les vignettes EN LOT :
+    une requête pour cent articles au lieu de cent requêtes. Aller la chercher
+    ici, article par article, ferait exactement ce que le pare-feu punit.
+    """
     if salon is None:
         return False
-    vue = construire_fiche(article, flux)
+    vue = construire_fiche(article, flux, image=image)
     try:
         if _webhook_send is not None:
             await _webhook_send(salon, "roblox", view=vue,
@@ -392,14 +416,24 @@ class RobloxPanelV2(LayoutView):
             evts = await veille.comparer_et_enregistrer(rel["articles"])
             c = await veille.config(self.g.id)
             envoyes = 0
+            #  Les images en UN SEUL appel pour tout le passage.
+            a_publier = [x for k in ("nouveaux", "bascules", "retires")
+                         for x in (evts.get(k) or [])[:5]]
+            imgs = await veille.vignettes([x["asset_id"] for x in a_publier])
             for flux, cle in (("nouveautes", "nouveaux"),
                               ("bascules", "bascules"),
                               ("surveiller", "retires")):
                 salon = self.g.get_channel(veille.salon_du_flux(c, flux))
                 for a in (evts.get(cle) or [])[:5]:
+                    #  « À surveiller » ne publie que du solide : ce flux doit
+                    #  être rare et sûr, pas un fourre-tout.
+                    if flux == "surveiller" and \
+                            veille.indice(a)["note"] < veille.SEUIL_SURVEILLER:
+                        continue
                     if await veille.deja_publie(self.g.id, a["asset_id"], flux):
                         continue
-                    if await publier(self.g, salon, a, flux):
+                    if await publier(self.g, salon, a, flux,
+                                     image=imgs.get(a["asset_id"])):
                         await veille.marquer_publie(self.g.id, a["asset_id"], flux)
                         envoyes += 1
             await veille.purger()

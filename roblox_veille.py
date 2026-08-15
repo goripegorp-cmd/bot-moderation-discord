@@ -50,6 +50,19 @@ API_CATALOGUE = "https://catalog.roblox.com/v2/search/items/details"
 API_ECONOMIE = "https://economy.roblox.com/v2/assets/{}/details"
 API_FICHE = "https://catalog.roblox.com/v1/catalog/items/{}/details"
 API_VIGNETTE = "https://thumbnails.roblox.com/v1/assets"
+#  Le seul domaine d'où une image a le droit de venir. Voir `vignettes`.
+DOMAINE_IMAGES = "https://tr.rbxcdn.com/"
+
+#  ⚠️ SEUIL DE PUBLICATION DE L'INDICE — demandé le 12/08 : « il faut que ce
+#  soit quasiment du 100 % ou du 80 %, pas du 20 %. Tu dis pas et tu mets pas ce
+#  qui sert à rien. »
+#  En dessous, l'indice n'est PAS affiché du tout : un « 30/100 » se lit comme
+#  un verdict faible alors que ce n'est qu'une absence de signal. Mieux vaut se
+#  taire que d'afficher un chiffre qui n'apprend rien.
+SEUIL_INDICE_AFFICHE = 60
+#  Et le flux « à surveiller » ne publie QUE au-dessus de ça : c'est lui qui
+#  doit être rare et sûr.
+SEUIL_SURVEILLER = 60
 
 #  Le compte officiel Roblox. C'est LA condition du propriétaire : « uniquement
 #  ceux qui sont créés par Roblox ».
@@ -471,6 +484,44 @@ def _type_lisible(brut: dict) -> str:
         pass
     n = brut.get("assetType")
     return f"type {n}" if n is not None else "—"
+
+
+async def vignettes(asset_ids: list) -> dict:
+    """Les images des articles, par lot. {asset_id: url} — vide si rien.
+
+    ⚠️ L'URL de l'image vient de Roblox et n'est PAS reconstructible : elle
+    contient une empreinte. C'est la seule exception à la règle « on ne recopie
+    jamais une URL » — elle est donc filtrée : on n'accepte que le domaine
+    officiel des images, et rien d'autre. Un lien d'image détourné afficherait
+    une image arbitraire dans le salon.
+
+    Le point accepte 100 identifiants au maximum (101 → HTTP 400) et 50 appels
+    par seconde. On découpe donc, et on ne demande que ce qu'on va publier.
+    """
+    out: dict[int, str] = {}
+    ids = [int(a) for a in asset_ids if str(a).lstrip("-").isdigit()][:100]
+    if not ids:
+        return out
+    params = {"assetIds": ",".join(str(i) for i in ids),
+              "size": "420x420", "format": "Png", "returnPolicy": "PlaceHolder"}
+    try:
+        async with _ouvrir() as sess:
+            async with sess.get(API_VIGNETTE, params=params) as r:
+                if r.status != 200:
+                    _log(f"[roblox_veille vignettes] HTTP {r.status}")
+                    return out
+                data = await r.json()
+        for x in (data.get("data") or []):
+            url = str(x.get("imageUrl") or "")
+            #  Filtre de domaine : voir l'avertissement ci-dessus.
+            if x.get("state") == "Completed" and url.startswith(DOMAINE_IMAGES):
+                try:
+                    out[int(x.get("targetId"))] = url
+                except (TypeError, ValueError):
+                    continue
+    except Exception as ex:
+        _log(f"[roblox_veille vignettes] {type(ex).__name__}: {ex}")
+    return out
 
 
 def signature(article: dict) -> str:
