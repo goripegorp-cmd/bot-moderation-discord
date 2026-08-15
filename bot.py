@@ -14833,6 +14833,11 @@ async def veille_roblox_task():
                                       ("surveiller", "retires")):
                         salon = g.get_channel(roblox_module.salon_du_flux(c, flux))
                         for a in (evts.get(cle) or [])[:5]:
+                            #  Trop vieux = plus une nouvelle : on ne republie
+                            #  pas des archives apres une panne ou une remise a
+                            #  zero de la base.
+                            if flux == "nouveautes" and not roblox_module.age_publiable(a):
+                                continue
                             #  « A surveiller » ne publie que du solide.
                             if flux == "surveiller" and roblox_module.indice(a)["note"] \
                                     < roblox_module.SEUIL_SURVEILLER:

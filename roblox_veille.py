@@ -64,6 +64,26 @@ SEUIL_INDICE_AFFICHE = 60
 #  doit être rare et sûr.
 SEUIL_SURVEILLER = 60
 
+#  ⚠️ DEUX BORNES D'ÂGE, ET LA PREMIÈRE EST UN MINIMUM — demandé le 12/08 :
+#  « tu mets les items qui sont sortis MINIMUM il y a une semaine et demie,
+#  voire deux semaines ; au-delà, tu le postes ».
+#
+#  Un article qui vient de sortir n'a rien à raconter : ni revente, ni demande
+#  installée, ni recul sur son stock. On le laisse donc mûrir. C'est ce délai
+#  qui distingue une veille d'échange d'un simple fil de nouveautés.
+AGE_MIN_JOURS = 10
+
+#  Et une borne haute, pour l'autre moitié de la consigne (« s'il est trop
+#  vieux, ça sert à rien de le remettre ») : au-delà, ce n'est plus une
+#  nouvelle, c'est une archive. L'article reste en base pour la détection des
+#  bascules, mais il n'est plus publié.
+AGE_MAX_JOURS = 90
+
+#  La langue des noms officiels. Vérifié : Roblox renvoie « Chapeau Ladoo
+#  tricolore » pour « Tricolor Ladoo Hat » — c'est SA traduction, pas la nôtre.
+#  On ne traduit donc rien nous-mêmes : on demande, et on cite.
+LANGUE_FR = "fr-fr"
+
 #  Le compte officiel Roblox. C'est LA condition du propriétaire : « uniquement
 #  ceux qui sont créés par Roblox ».
 CREATEUR_ROBLOX = 1
@@ -320,6 +340,28 @@ def _limite_valide(n) -> int:
     return LIMITES_AUTORISEES[-1]
 
 
+def trop_vieux(article: dict, jours: int = AGE_MAX_JOURS) -> bool:
+    """Trop ancien pour être encore une nouvelle ? (borne haute)"""
+    d = _jours_depuis(article.get("cree_le"))
+    return d is not None and d > int(jours)
+
+
+def age_publiable(article: dict) -> bool:
+    """L'article a-t-il le bon âge pour être annoncé ?
+
+    Entre `AGE_MIN_JOURS` et `AGE_MAX_JOURS`. Trop jeune, il n'a rien à
+    raconter ; trop vieux, ce n'est plus une nouvelle.
+
+    Une date illisible ne bloque PAS la publication : on ne va pas taire une
+    vraie nouveauté parce qu'un champ manque. Ici le risque d'un faux positif
+    est un message de trop, pas une sanction — l'inverse du fail-closed.
+    """
+    d = _jours_depuis(article.get("cree_le"))
+    if d is None:
+        return True
+    return AGE_MIN_JOURS <= d <= AGE_MAX_JOURS
+
+
 def _ouvrir():
     """Ouvre une session HTTP pour un relevé. À utiliser en `async with`.
 
@@ -411,6 +453,32 @@ async def relever_nouveautes(limite: int = 30) -> dict:
                 if r.status == 200:
                     data = await r.json()
                     out["articles"] = _normaliser(data.get("data") or [])
+                    #  LE NOM FRANÇAIS, par un SECOND appel avec l'en-tête de
+                    #  langue. Vérifié : Roblox renvoie sa propre traduction —
+                    #  « Chapeau Ladoo tricolore ». On ne traduit rien nous-mêmes,
+                    #  on cite. Un coût d'une requête sur les douze autorisées
+                    #  par minute : largement dans le budget.
+                    try:
+                        async with sess.get(
+                            API_CATALOGUE, params=params,
+                            headers={"Accept-Language": LANGUE_FR}) as rf:
+                            if rf.status == 200:
+                                noms = {}
+                                for b in ((await rf.json()).get("data") or []):
+                                    try:
+                                        noms[int(b.get("id"))] = str(b.get("name") or "")
+                                    except (TypeError, ValueError):
+                                        continue
+                                for a in out["articles"]:
+                                    fr = noms.get(a["asset_id"])
+                                    #  On ne garde le nom français que s'il
+                                    #  DIFFÈRE : beaucoup d'articles n'ont pas de
+                                    #  traduction, et afficher deux fois la même
+                                    #  ligne ferait croire à un défaut.
+                                    if fr and fr != a["nom"]:
+                                        a["nom_fr"] = fr[:120]
+                    except Exception as ex:
+                        _log(f"[roblox_veille noms fr] {ex}")
                 else:
                     #  On garde le corps : un 403 du pare-feu et un 429 de débit
                     #  ne se corrigent pas de la même façon, et sans cette trace

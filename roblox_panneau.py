@@ -74,10 +74,19 @@ def construire_fiche(article: dict, flux: str, image: str | None = None) -> Layo
     couleur = {"bascules": Palette.PREMIUM, "surveiller": Palette.WARNING}.get(
         flux, Palette.INFO)
 
+    #  LE NOM, EN DEUX LANGUES quand Roblox en fournit une traduction. Le
+    #  français d'abord — c'est la langue du serveur — l'anglais en dessous,
+    #  parce que c'est celui qu'on retrouve dans le catalogue et sur les sites
+    #  d'échange. Sans traduction officielle, une seule ligne : on ne traduit
+    #  jamais nous-mêmes, et on n'affiche pas deux fois la même chose.
+    nom_en = _ou_tiret(article.get("nom"))
+    nom_fr = article.get("nom_fr")
+    titre = f"{nom_fr}\n-# {nom_en}" if nom_fr else nom_en
+
     items = [
         v2_title(NOMS_FLUX.get(flux, "Roblox")),
-        v2_subtitle(f"{_ou_tiret(article.get('type_article'))} · "
-                    f"{_ou_tiret(article.get('nom'))}"),
+        v2_subtitle(f"{_ou_tiret(article.get('type_article'))}"),
+        v2_body(f"## {titre}"),
     ]
 
     #  L'IMAGE EN BANNIÈRE, tout en haut — un accessoire se juge d'abord à l'œil.
@@ -425,6 +434,10 @@ class RobloxPanelV2(LayoutView):
                               ("surveiller", "retires")):
                 salon = self.g.get_channel(veille.salon_du_flux(c, flux))
                 for a in (evts.get(cle) or [])[:5]:
+                    #  Trop vieux = plus une nouvelle. L'article reste en base
+                    #  pour la détection des bascules, mais on ne le publie pas.
+                    if flux == "nouveautes" and not veille.age_publiable(a):
+                        continue
                     #  « À surveiller » ne publie que du solide : ce flux doit
                     #  être rare et sûr, pas un fourre-tout.
                     if flux == "surveiller" and \
