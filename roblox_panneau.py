@@ -69,7 +69,8 @@ def construire_fiche(article: dict, flux: str, image: str | None = None) -> Layo
     chiffres, puis l'indice et ce qui le justifie, puis le lien.
     """
     ind = veille.indice(article)
-    lien = veille.lien_article(article.get("asset_id"))
+    lien = veille.lien_article(article.get("asset_id"),
+                                article.get("item_type"))
 
     couleur = {"bascules": Palette.PREMIUM, "surveiller": Palette.WARNING}.get(
         flux, Palette.INFO)

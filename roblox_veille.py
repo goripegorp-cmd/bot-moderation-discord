@@ -46,6 +46,8 @@ from datetime import datetime, timedelta, timezone
 #  règle de sécurité : ce bot lutte contre le phishing, il ne peut pas publier
 #  un lien approximatif.
 DOMAINE_ARTICLE = "https://www.roblox.com/catalog/"
+#  Les Bundles ont leur PROPRE chemin — mesure : /catalog/ leur rend un 404.
+DOMAINE_BUNDLE = "https://www.roblox.com/bundles/"
 API_CATALOGUE = "https://catalog.roblox.com/v2/search/items/details"
 API_ECONOMIE = "https://economy.roblox.com/v2/assets/{}/details"
 API_FICHE = "https://catalog.roblox.com/v1/catalog/items/{}/details"
@@ -215,12 +217,24 @@ async def init_db():
         await db.commit()
 
 
-def lien_article(asset_id) -> str | None:
+def lien_article(asset_id, item_type: str | None = None) -> str | None:
     """L'URL d'un article, RECONSTRUITE. Jamais recopiée d'une réponse.
 
     ⚠️ EXIGENCE DE SÉCURITÉ, voir ROBLOX.md §1. Le domaine est une constante du
     module ; l'identifiant est validé comme entier. Sans entier lisible, on rend
     None et la fiche part SANS lien — jamais avec un lien approximatif.
+
+    ⚠️ DEUX CHEMINS, ET C'EST MESURÉ. Un « Bundle » n'habite PAS sous /catalog/ :
+    testé en direct sur le FIFA Football Animation Pack (id 5626295) —
+        /catalog/5626295/  → HTTP 404
+        /bundles/5626295/  → HTTP 302 (redirection vers la vraie page)
+    Or le relevé complet compte 410 Bundles sur 964 articles créés par Roblox.
+    La première version envoyait tout sur /catalog/ : environ QUATRE LIENS SUR
+    DIX menaient à une page d'erreur, sur un bot dont la règle affichée est que
+    l'on clique « sans se poser de questions ».
+
+    Type inconnu → on retombe sur /catalog/, qui couvre la majorité, plutôt que
+    de supprimer le lien : un lien juste six fois sur dix vaut mieux qu'aucun.
     """
     try:
         n = int(asset_id)
@@ -228,7 +242,9 @@ def lien_article(asset_id) -> str | None:
         return None
     if n <= 0:
         return None
-    return f"{DOMAINE_ARTICLE}{n}/"
+    base = DOMAINE_BUNDLE if str(item_type or "").lower() == "bundle" \
+        else DOMAINE_ARTICLE
+    return f"{base}{n}/"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -509,6 +525,9 @@ def _normaliser(bruts: list) -> list[dict]:
                 "asset_id": aid,
                 "nom": str(b.get("name") or "")[:120],
                 "type_article": _type_lisible(b),
+                #  « Asset » ou « Bundle » : commande le CHEMIN du lien, pas
+                #  l'affichage. Voir `lien_article`.
+                "item_type": str(b.get("itemType") or ""),
                 "prix": b.get("price") if b.get("price") is not None
                         else b.get("lowestPrice"),
                 "favoris": int(b.get("favoriteCount") or 0),
