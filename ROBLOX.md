@@ -141,3 +141,73 @@ et **ce qu'il ignore**.
 Ne jamais déverser l'historique dans le salon. À l'activation, on pose une borne
 au moment présent et on ne publie que ce qui sort ensuite. Un rattrapage explicite
 peut être proposé, jamais imposé.
+
+---
+
+## ÉTAT LIVRÉ AU 12/08/2026, ET D'OÙ VIENNENT LES CHIFFRES
+
+Tout est poussé sur `main`, CI verte à chaque lot. Ce qui suit n'est pas une
+intention : c'est ce qui tourne.
+
+### Les fichiers
+
+| Fichier | Rôle |
+|---|---|
+| `roblox_veille.py` | relevé du catalogue, comparaison d'instantanés, indice, images, santé |
+| `roblox_news.py` | 5 sources d'actualité, fraîcheur, déduplication, santé |
+| `roblox_panneau.py` | l'onglet `/configure` et les deux formats de fiche |
+| `bot.py` → `veille_roblox_task` | la boucle, toutes les 30 min |
+
+### Les quatre salons
+
+Réglables séparément dans `/configure` → 🎮 Veille Roblox. Un seul salon réglé →
+tout y tombe.
+
+1. **🆕 Nouveautés** — articles créés par Roblox (`CreatorTargetId=1`)
+2. **💎 Passés collectionnables** — détectés par comparaison de deux relevés
+3. **👀 À surveiller** — indice ≥ 60 uniquement
+4. **📢 Actualité** — 5 sources officielles, étiquetées par domaine
+
+### Les constantes, et leur justification MESURÉE
+
+⚠️ Ne pas les changer sans refaire la mesure. Chacune vient d'un appel réel.
+
+| Constante | Valeur | Pourquoi CE chiffre |
+|---|---|---|
+| `LIMITES_AUTORISEES` | 10, 28, 30, 60, 120 | l'API refuse tout le reste par un HTTP 400 explicite |
+| `AGE_MIN_JOURS` | 10 | un article neuf n'a ni revente, ni demande installée : rien à dire |
+| `AGE_MAX_JOURS` | 90 | au-delà c'est une archive, plus une nouvelle |
+| `SEUIL_INDICE_AFFICHE` | 60 | en dessous, l'indice n'est pas une faiblesse mais une ABSENCE de signal — on se tait |
+| `SEUIL_SURVEILLER` | 60 | ce flux doit être rare et sûr |
+| `FRAICHEUR_MAX_JOURS` | 30 | mesuré : laisse passer le plus récent de chaque catégorie (la plus lente est à 17 j), bloque les billets de 73, 137, 277 et 337 jours |
+| `PAUSE_ENTRE_APPELS` | 2 s | débits mesurés : catalogue 12/60 s, fiche 10/60 s |
+
+### Trois règles de sécurité à ne pas défaire
+
+1. **Les liens sont RECONSTRUITS**, jamais recopiés d'une réponse. Domaine en dur
+   + identifiant validé comme entier. Sans entier, la fiche part **sans lien**.
+   Éprouvé : une chaîne empoisonnée rend `None`.
+2. **Les URL d'images font exception** — elles portent une empreinte et ne sont
+   pas reconstructibles. Elles sont donc **filtrées sur le domaine officiel**.
+3. **Fail-closed sur les dates de news** : une date illisible = trop vieux. Pour
+   un accessoire c'est l'inverse (fail-open) — le risque n'est pas le même :
+   rater une nouveauté d'un côté, annoncer une alerte périmée de l'autre.
+
+### La traduction ne vient pas de nous
+
+L'en-tête `Accept-Language: fr-fr` sur le même point d'API renvoie le nom
+**officiel** de Roblox — « Chapeau Ladoo tricolore ». Mesuré : 26 articles
+traduits sur 28. On ne traduit jamais nous-mêmes ; on demande et on cite. Sans
+traduction officielle, une seule ligne — jamais deux fois la même chose.
+
+⚠️ Les billets du FORUM, eux, n'ont pas de version française. Ils restent en
+anglais. Les traduire à la machine sans le dire serait un mensonge de plus.
+
+### Ce qui reste ouvert
+
+- Les news tombent dans **un seul salon**, étiquetées par domaine. Un salon par
+  domaine est possible — environ une demi-heure.
+- Le modèle de prédiction **par la vitesse** (favoris/jour, écoulement du stock,
+  apparition d'un revendeur) : recherche lancée, pas encore implémenté. C'est le
+  seul terrain où l'on peut dépasser les outils existants — ils publient tous une
+  photographie, personne ne publie la dérivée.
