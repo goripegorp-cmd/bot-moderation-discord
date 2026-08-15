@@ -100,6 +100,28 @@ MAX_APPELS_PAR_PASSAGE = 8
 #  l'historique complet du catalogue dans une base SQLite.
 MAX_ARTICLES_SUIVIS = 3000
 
+#  ⚠️ PLAFOND DUR DE PUBLICATIONS PAR PASSAGE — NE PAS LE RELEVER.
+#
+#  Sans lui, un cas parfaitement banal noie le salon : une base restauree, un
+#  serveur qui active le systeme sans amorce, un flux qui rattrape plusieurs
+#  jours d'un coup. Le classement peut alors presenter des centaines d'articles
+#  d'un seul tenant.
+#
+#  Discord limite un webhook a environ 30 messages par minute, et un salon a 5
+#  messages par 5 secondes. Depasser, c'est se faire etrangler : les envois
+#  suivants echouent en cascade, et on ne sait plus ce qui est sorti.
+#
+#  Douze par passage, toutes les 30 minutes, c'est 576 par jour au maximum —
+#  tres au-dessus du rythme reel de Roblox (36 bascules sur toute l'annee 2025).
+#  Le reste n'est pas perdu : il sort au passage suivant. Un flux qui s'ecoule
+#  vaut mieux qu'un salon qui explose.
+MAX_PUBLICATIONS_PAR_PASSAGE = 12
+
+#  Deux secondes entre deux envois : 12 messages prennent 24 s, tres en dessous
+#  des limites de Discord. Une seconde suffisait en theorie ; deux laissent de
+#  la marge quand plusieurs guildes publient dans le meme passage.
+PAUSE_ENTRE_PUBLICATIONS = 2.0
+
 _get_db = None
 _cfg = None
 _db_set = None

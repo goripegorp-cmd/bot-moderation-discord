@@ -449,6 +449,10 @@ class RobloxPanelV2(LayoutView):
                               ("surveiller", "retires")):
                 salon = self.g.get_channel(veille.salon_du_flux(c, flux))
                 for a in (evts.get(cle) or [])[:5]:
+                    #  Meme plafond que la boucle : le bouton ne doit pas etre
+                    #  un moyen de contourner la protection de debit.
+                    if envoyes >= veille.MAX_PUBLICATIONS_PAR_PASSAGE:
+                        break
                     #  Trop vieux = plus une nouvelle. L'article reste en base
                     #  pour la détection des bascules, mais on ne le publie pas.
                     if flux == "nouveautes" and not veille.age_publiable(a):

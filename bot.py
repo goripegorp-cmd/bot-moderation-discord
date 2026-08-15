@@ -14801,6 +14801,11 @@ async def veille_roblox_task():
     ouvrir la moindre connexion.
     """
     try:
+        #  Compteur PARTAGE par tous les flux et toutes les guildes du passage.
+        #  C'est le seul garde-fou qui tienne si plusieurs guildes rattrapent
+        #  du retard en meme temps.
+        _budget = roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE
+        _reporte = 0
         guildes_items = []
         guildes_news = []
         for g in list(bot.guilds):
@@ -14844,10 +14849,14 @@ async def veille_roblox_task():
                                 continue
                             if await roblox_module.deja_publie(g.id, a["asset_id"], flux):
                                 continue
+                            if _budget <= 0:
+                                _reporte += 1
+                                continue
                             if await roblox_ui.publier(g, salon, a, flux,
                                                       image=_imgs.get(a["asset_id"])):
                                 await roblox_module.marquer_publie(g.id, a["asset_id"], flux)
-                            await asyncio.sleep(1)
+                                _budget -= 1
+                            await asyncio.sleep(roblox_module.PAUSE_ENTRE_PUBLICATIONS)
             await roblox_module.purger()
 
         # ── L'actualite ─────────────────────────────────────────────────────
@@ -14863,12 +14872,20 @@ async def veille_roblox_task():
                     for b in rel["billets"][:roblox_news_module.MAX_BILLETS_PAR_PASSAGE]:
                         if await roblox_news_module.deja_publie(g.id, b["topic_id"]):
                             continue
+                        if _budget <= 0:
+                            _reporte += 1
+                            continue
                         if await roblox_ui.publier_actu(g, salon, b):
                             await roblox_news_module.marquer_publie(g.id, b["topic_id"])
-                        await asyncio.sleep(1)
+                            _budget -= 1
+                        await asyncio.sleep(roblox_module.PAUSE_ENTRE_PUBLICATIONS)
                 #  Pause ENTRE LES SOURCES : c'est elle qui evite le pare-feu.
                 await asyncio.sleep(2)
             await roblox_news_module.purger()
+
+        if _reporte:
+            print(f"[veille_roblox_task] plafond atteint — {_reporte} publication(s) "
+                  f"reportee(s) au prochain passage (dans 30 min). Rien n'est perdu.")
     except Exception as ex:
         print(f"[veille_roblox_task] {ex}")
 
