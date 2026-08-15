@@ -12,6 +12,7 @@ PHASE_163_MODULES = [
     "activite_message",
     "activite_niveaux",
     "roblox_veille",
+    "roblox_news",
     "roblox_panneau",
     "activite_recompenses",
     "dm_digest",

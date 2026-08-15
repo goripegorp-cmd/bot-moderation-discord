@@ -23,6 +23,7 @@ from __future__ import annotations
 import discord
 from discord.ui import Button, ChannelSelect
 
+import roblox_news as news
 import roblox_veille as veille
 from ui_v2 import (
     LayoutView, Palette, body as v2_body, container as v2_container,
@@ -147,6 +148,57 @@ async def publier(guild, salon, article: dict, flux: str) -> bool:
             return False
 
 
+def construire_actu(billet: dict) -> LayoutView:
+    """La fiche d'un billet d'actualité — même quadrillage que les articles.
+
+    Le DOMAINE est en titre, pas le titre du billet : dans un salon où tombent
+    Studio, UGC, politique et événements, c'est la première chose qu'on cherche.
+    """
+    lien = news.lien_billet(billet.get("topic_id"))
+    items = [
+        v2_title(f"📢 {_ou_tiret(billet.get('domaine'))}"),
+        v2_subtitle(_ou_tiret(billet.get("titre"))),
+        v2_divider(),
+        v2_body(
+            f"**Publié le** · {_ou_tiret((billet.get('cree_le') or '')[:10])}\n"
+            f"**Sujets** · {_ou_tiret(', '.join(billet.get('tags') or []))}"),
+    ]
+    if billet.get("extrait"):
+        items.append(v2_body(f"-# {billet['extrait']}"))
+    if lien:
+        items.append(v2_divider())
+        items.append(discord.ui.ActionRow(Button(
+            label="Lire l'annonce", emoji="🔗",
+            style=discord.ButtonStyle.link, url=lien)))
+    else:
+        items.append(v2_body("-# Lien indisponible (identifiant illisible)."))
+    v = LayoutView(timeout=None)
+    v.add_item(v2_container(*items, color=Palette.PRIMARY))
+    return v
+
+
+async def publier_actu(guild, salon, billet: dict) -> bool:
+    """Publie un billet, par webhook si possible. Fail-safe."""
+    if salon is None:
+        return False
+    vue = construire_actu(billet)
+    try:
+        if _webhook_send is not None:
+            await _webhook_send(salon, "roblox", view=vue,
+                                username="📢 Actualité Roblox")
+        else:
+            await salon.send(view=vue)
+        return True
+    except Exception as ex:
+        _log(f"[roblox publier_actu webhook] {ex}")
+        try:
+            await salon.send(view=vue)
+            return True
+        except Exception as ex2:
+            _log(f"[roblox publier_actu] {ex2}")
+            return False
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Le panneau
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -169,6 +221,8 @@ class RobloxPanelV2(LayoutView):
          "Détectés en comparant deux relevés."),
         ("roblox_salon_surveiller", "👀 À surveiller",
          "Retirés de la vente, ou fortement demandés."),
+        ("roblox_news_salon", "📢 Actualité Roblox",
+         "Studio · UGC · développeurs · événements · politique."),
     ]
 
     def __init__(self, u, g):

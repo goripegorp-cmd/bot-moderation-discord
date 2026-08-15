@@ -201,6 +201,7 @@ import activite_panneau as activite_ui
 #  demandee par le proprietaire : le HANDOFF classe « Roblox » dans le perimetre
 #  supprime, ce module n'est donc PAS un reste oublie.
 import roblox_veille as roblox_module
+import roblox_news as roblox_news_module
 import roblox_panneau as roblox_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
 import delegations as delegations2026
@@ -14787,6 +14788,79 @@ async def _activite_passage_wait():
 #  Sûr : .start() est ignoré si la boucle tourne déjà (garde is_running) ; on ne
 #  touche qu'à des boucles censées tourner en continu.
 # ═══════════════════════════════════════════════════════════════════════════════
+@tasks.loop(minutes=30)
+async def veille_roblox_task():
+    """Veille Roblox : nouveautes du catalogue, bascules, et actualite.
+
+    ⚠️ UNE SOURCE A LA FOIS, JAMAIS DE RAFALE. Mesure du 12/08 : c'est la
+    CONCURRENCE qui declenche le pare-feu d'AWS, pas le volume. 60 requetes en
+    parallele passent ; 200 en salves rendent des reponses vides et collent
+    21 a 41 secondes sur l'IP. On enchaine donc en serie, avec une pause.
+
+    REPOS ABSOLU : si aucune guilde n'a allume quoi que ce soit, on sort sans
+    ouvrir la moindre connexion.
+    """
+    try:
+        guildes_items = []
+        guildes_news = []
+        for g in list(bot.guilds):
+            try:
+                if await roblox_module.actif(g.id):
+                    guildes_items.append(g)
+                if await roblox_news_module.actif(g.id):
+                    guildes_news.append(g)
+            except Exception:
+                continue
+        if not guildes_items and not guildes_news:
+            return
+
+        # ── Les articles ────────────────────────────────────────────────────
+        if guildes_items:
+            rel = await roblox_module.relever_nouveautes(limite=60)
+            if rel["code"] == 200:
+                evts = await roblox_module.comparer_et_enregistrer(rel["articles"])
+                for g in guildes_items:
+                    c = await roblox_module.config(g.id)
+                    for flux, cle in (("nouveautes", "nouveaux"),
+                                      ("bascules", "bascules"),
+                                      ("surveiller", "retires")):
+                        salon = g.get_channel(roblox_module.salon_du_flux(c, flux))
+                        for a in (evts.get(cle) or [])[:5]:
+                            if await roblox_module.deja_publie(g.id, a["asset_id"], flux):
+                                continue
+                            if await roblox_ui.publier(g, salon, a, flux):
+                                await roblox_module.marquer_publie(g.id, a["asset_id"], flux)
+                            await asyncio.sleep(1)
+            await roblox_module.purger()
+
+        # ── L'actualite ─────────────────────────────────────────────────────
+        if guildes_news:
+            for src in roblox_news_module.SOURCES:
+                rel = await roblox_news_module.relever(src)
+                if rel["code"] != 200:
+                    await asyncio.sleep(2)
+                    continue
+                for g in guildes_news:
+                    c = await roblox_news_module.config(g.id)
+                    salon = g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
+                    for b in rel["billets"][:roblox_news_module.MAX_BILLETS_PAR_PASSAGE]:
+                        if await roblox_news_module.deja_publie(g.id, b["topic_id"]):
+                            continue
+                        if await roblox_ui.publier_actu(g, salon, b):
+                            await roblox_news_module.marquer_publie(g.id, b["topic_id"])
+                        await asyncio.sleep(1)
+                #  Pause ENTRE LES SOURCES : c'est elle qui evite le pare-feu.
+                await asyncio.sleep(2)
+            await roblox_news_module.purger()
+    except Exception as ex:
+        print(f"[veille_roblox_task] {ex}")
+
+
+@veille_roblox_task.before_loop
+async def _veille_roblox_wait():
+    await bot.wait_until_ready()
+
+
 _SUPERVISED_LOOP_NAMES = [
     "activite_passage_task",
     #  Ajoutée le 12/08/2026 avec son `.start()` : elle n'avait ni l'un ni l'autre,
@@ -14794,6 +14868,7 @@ _SUPERVISED_LOOP_NAMES = [
     #  l'arrêterait définitivement jusqu'au prochain redémarrage — et un rapport
     #  hebdomadaire qui s'arrête ne se remarque qu'une semaine plus tard.
     "weekly_security_report",
+    "veille_roblox_task",
     "ui_usage_flush_task",
     "event_timeout_checker", "event_auto_scheduler", "stale_event_cleanup",
     "personal_event_dispatcher", "light_events_dispatcher",
@@ -23283,6 +23358,8 @@ async def _activite_boot():
     roblox_ui.setup(db_set=db_set, webhook_send=webhook_send, log=print)
     roblox_ui.set_retour(_retour_vers_configure)
     await roblox_module.init_db()
+    roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
+    await roblox_news_module.init_db()
 
     await activite_module.init_db()
     await activite_rec.init_db()
@@ -24040,6 +24117,11 @@ async def on_ready():
         # des sanctions, qui n'existe sous aucune autre forme, n'est jamais parti.
         if not weekly_security_report.is_running():
             weekly_security_report.start()
+
+        # Veille Roblox (items + actualite). Elle sort immediatement si aucune
+        # guilde n'a rien allume : cout nul au repos.
+        if not veille_roblox_task.is_running():
+            veille_roblox_task.start()
 
         # ⚠️ backup_lite (backup_daily_task) N'EST PLUS LANCÉ — owner 2026-07-12.
         # PREUVE (Metrics Railway) : RAM en dents de scie jusqu'à **5 Go** → conteneur tué (OOM)
