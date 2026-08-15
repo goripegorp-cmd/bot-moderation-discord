@@ -284,7 +284,16 @@ class RobloxPanelV2(LayoutView):
 
     async def render_to(self, i, *, edit: bool = True):
         try:
-            c = await veille.config(self.g.id)
+            #  ⚠️ DEUX MODULES, DEUX CONFIGURATIONS — LES FUSIONNER ICI.
+            #
+            #  `roblox_news_salon` appartient à `roblox_news`, pas à `roblox_veille`.
+            #  L'écran le lisait dans la config des articles, qui ne contient pas
+            #  cette clé : le salon était bien ENREGISTRÉ par le select, mais
+            #  l'écran affichait « non défini » pour toujours. Défaut signalé par
+            #  le propriétaire — « il détecte bien le salon, mais il veut pas
+            #  l'afficher », et c'était exactement ça.
+            c = dict(await veille.config(self.g.id))
+            c.update(await news.config(self.g.id))
             diag = await veille.diagnostic()
             en_marche = await veille.actif(self.g.id)
 
@@ -413,9 +422,11 @@ class RobloxPanelV2(LayoutView):
             if allume and not c.get("roblox_veille_amorcee"):
                 n = await veille.amorcer(self.g.id)
                 self._dernier = (
-                    f"✅ Allumé. `{n}` article(s) déjà en ligne ont été "
-                    f"enregistrés SANS être publiés — seules les nouveautés à "
-                    f"venir sortiront dans le salon.")
+                    f"✅ Allumé. `{n}` article(s) hors fenêtre d'âge ont été "
+                    f"absorbés sans être publiés.\n"
+                    f"-# Les articles récents, eux, sortiront au prochain "
+                    f"relevé — cliquez « Relever maintenant » pour ne pas "
+                    f"attendre.")
             else:
                 self._dernier = "✅ Allumé." if allume else "⚪ Éteint."
             await self.render_to(i, edit=True)

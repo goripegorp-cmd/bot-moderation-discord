@@ -724,15 +724,36 @@ async def amorcer(guild_id: int) -> int:
     if rel["code"] != 200:
         return 0
     await comparer_et_enregistrer(rel["articles"])
+
+    #  ⚠️ ON N'ABSORBE QUE CE QUI N'ÉTAIT DE TOUTE FAÇON PAS PUBLIABLE.
+    #
+    #  La première version marquait TOUT le catalogue comme déjà sorti. Résultat
+    #  mesuré chez le propriétaire : il allume, clique « Relever maintenant », et
+    #  lit « 30 articles lus, 0 fiche publiée » — alors que 17 articles du relevé
+    #  entraient parfaitement dans sa fenêtre d'âge. Il aurait fallu attendre que
+    #  Roblox crée quelque chose de neuf, c'est-à-dire des semaines, pour voir
+    #  une seule fiche. Le message « c'est normal, Roblox publie peu » était donc
+    #  exact sur les faits et trompeur sur la cause.
+    #
+    #  L'amorce sert à ne pas déverser des ARCHIVES, pas à museler le système.
+    #  On absorbe donc les articles hors fenêtre — trop vieux, ou trop jeunes
+    #  pour avoir quoi que ce soit à raconter — et on laisse les autres sortir au
+    #  premier passage, bornés par le plafond de publications.
+    absorbes = 0
     for a in rel["articles"]:
+        if age_publiable(a):
+            continue                      # celui-là a le droit de sortir
         for flux in ("nouveautes", "bascules", "surveiller"):
             await marquer_publie(guild_id, a["asset_id"], flux)
+        absorbes += 1
     try:
         await _db_set(guild_id, "roblox_veille_amorcee",
                       datetime.now(timezone.utc).isoformat())
     except Exception as ex:
         _log(f"[roblox_veille amorcer] {ex}")
-    return len(rel["articles"])
+    #  On rend ce qui a ete ABSORBE, pas le total lu : c'est le chiffre qui a du
+    #  sens pour le proprietaire — « voila ce que je ne te publierai pas ».
+    return absorbes
 
 
 async def purger(garder: int = MAX_ARTICLES_SUIVIS) -> int:
