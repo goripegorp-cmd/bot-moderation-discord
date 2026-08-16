@@ -17,12 +17,8 @@ PHASE_163_MODULES = [
     "activite_recompenses",
     "dm_digest",
     "webhook_tracker",
-    "reputation",
-    "mentor_bonus",
     "honeypot",
     "behavior_anomaly",
-    "weekly_stats",
-    "server_pulse",
     # Phase 165 — nouveaux modules
     "stream_schedule",
     # Phase 166 — anti-token-leak, birthday, welcome, spotlight
@@ -37,7 +33,6 @@ PHASE_163_MODULES = [
     # Phase 174.2 — Récompenses VIP des plus actifs (messages + vocal)
     # Phase 184 — Donjons instanciés (lobby groupe + salons dédiés)
     # Phase 170 — Chronique d'Abylumis (récit collectif persistant)
-    "codex_chronicle",
     # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
     # Phase 170.4 : Conseil des Anciens hebdomadaire
     # Phase 170.5 : Régions du monde + patrouilles
@@ -67,8 +62,6 @@ def test_module_has_setup(mod_name):
 INIT_DB_MODULES = [
     "dm_digest",
     "webhook_tracker",
-    "reputation",
-    "mentor_bonus",
     "honeypot",
     "behavior_anomaly",
     # Phase 165

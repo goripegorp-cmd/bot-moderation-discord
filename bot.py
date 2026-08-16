@@ -169,16 +169,11 @@ import permissions as perms2026
 import vocabulary as vocab2026
 import social_media as social2026
 # Phase 41 : moteur d'engagement quotidien (quests, achievements, pets, wheel, confessions)
-import engagement41 as eng41
 # Phase 42 : nouveaux events (world boss, voice chaos, daily riddles)
 # Phase 47 : moteur long terme (saisons, prestige, factions, weekly/monthly)
-import lore49 as lore  # Phase 49 : lore évolutif + NPCs + missions
-import ambient53 as amb  # Phase 53 : heures dorées + recap DM + conversation starters
 import protection_guards as guards2026
-import community_features as comm2026
 import admin_panels_v2 as panels2026  # (set_social_manager uniquement ; /admin retiré)
 import antiscam as antiscam2026
-import activity_tracker as activity2026
 import setup_wizard as wizard2026
 import slash_commands_2026 as slashcmds2026
 import tracking_layer as tracking2026
@@ -252,17 +247,13 @@ import dm_digest as dm_digest_module
 import webhook_tracker as webhook_tracker_module
 # Phase 153 : Engagement long terme — reputation, pet evo, daily prompt,
 # onboarding journey, mentor bonus
-import reputation as reputation_module
-import mentor_bonus as mentor_bonus_module
 # Phase 154 : Sécurité 2026++ — honeypot + behavior anomaly
 import honeypot as honeypot_module
 import behavior_anomaly as behavior_anomaly_module
 # Phase 155 : Roblox / Stream — game stats, raffle, watch party
 # Phase 157 : Community goals + Coin economy (anti-inflation)
 # Phase 161 : Weekly recap + Leaderboards publics
-import weekly_stats as weekly_stats_module
 # Phase 162 : Server Pulse live + Tips Rotator
-import server_pulse as server_pulse_module
 # Phase 165.1 : Stream schedule + countdown auto
 import stream_schedule as stream_schedule_module
 # Phase 165.2 : Activity heatmap (quand le serveur est actif)
@@ -290,8 +281,6 @@ import transcript_store  # Phase 281 : stockage + service web des transcripts de
 # Phase 169.2 : Marchand itinérant quotidien
 # Phase 169.3 : World Invasion mensuelle
 # Phase 170.1 : La Chronique d'Abylumis — récit narratif persistant 9 mois
-import codex_chronicle as codex_chronicle_module
-import seasonal_titles as seasonal_titles_module  # Phase 242 : champion d'activité du mois
 import sticky_messages as sticky_messages_module  # « Dernier message » sticky en bas de salon (owner 2026-06-16)
 import insult_filter as insult_filter  # Filtre insultes/haine GRADUÉ multilingue (owner 2026-06-21, lexique vérifié anti-FP)
 import offtopic_filter as offtopic_filter  # Filtre politique/religion/militantisme (owner 2026-06-21, slogans + slugs de GIF, anti-FP gaming)
@@ -12865,69 +12854,8 @@ class HubLiveEventsLayoutV2(LayoutView):
         self.add_item(v2_container(*items, color=0xE74C3C if event_lines else 0x95A5A6))
 
 
-@tasks.loop(minutes=1)
-async def hub_live_events_refresh_task():
-    """Phase 111 : refresh la tuile Live Events de chaque guild dont le hub
-    est installé. Anti-spam : edit seulement si la signature a changé."""
-    try:
-        import time as _time
-        for guild in bot.guilds:
-            try:
-                cfg_d = await db_get(guild.id)
-                hub_ch_id = int(cfg_d.get("hub_channel", 0) or 0)
-                if not hub_ch_id:
-                    continue
-                channel = guild.get_channel(hub_ch_id)
-                if not channel:
-                    continue
-
-                # Collecter les events actifs
-                lines = await _collect_live_events(guild.id)
-                sig = "|".join(lines) if lines else "_empty_"
-
-                # Anti-spam edit : si la signature n'a pas changé, on skip
-                if _hub_live_events_sig_cache.get(guild.id) == sig:
-                    continue
-
-                live_msg_id = int(cfg_d.get("hub_live_events_msg_id", 0) or 0)
-                now_ts = int(_time.time())
-                view = HubLiveEventsLayoutV2(lines, now_ts)
-
-                if live_msg_id:
-                    # Edit existing
-                    try:
-                        # Phase 263 anti-429 : PATCH SEUL via get_partial_message (zéro GET)
-                        # — cette loop tourne 1×/min sur TOUS les serveurs (règle anti-429).
-                        await channel.get_partial_message(live_msg_id).edit(view=view)
-                        _hub_live_events_sig_cache[guild.id] = sig
-                    except (discord.NotFound, discord.Forbidden):
-                        # Re-poste
-                        try:
-                            msg = await channel.send(view=view)
-                            await db_set(guild.id, "hub_live_events_msg_id", msg.id)
-                            _hub_live_events_sig_cache[guild.id] = sig
-                        except Exception as ex:
-                            print(f"[hub_live_events guild={guild.id} resend] {ex}")
-                    except Exception as ex:
-                        print(f"[hub_live_events guild={guild.id} edit] {ex}")
-                else:
-                    # Premier post
-                    try:
-                        msg = await channel.send(view=view)
-                        await db_set(guild.id, "hub_live_events_msg_id", msg.id)
-                        _hub_live_events_sig_cache[guild.id] = sig
-                    except Exception as ex:
-                        print(f"[hub_live_events guild={guild.id} first post] {ex}")
-                await asyncio.sleep(0.4)  # throttle anti-429 (espace les edits hub entre guildes ; n'arrive qu'en cas de changement réel)
-            except Exception as ex:
-                print(f"[hub_live_events_refresh_task guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[hub_live_events_refresh_task] {ex}")
 
 
-@hub_live_events_refresh_task.before_loop
-async def _hub_live_events_refresh_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -13171,17 +13099,7 @@ _SUPERVISED_LOOP_NAMES = [
     #  NOMS restaient. Sans effet ici (`globals().get()` rend None), mais c'est
     #  la moitié exacte du piège n°2 du dépôt, dans l'autre sens — et une liste
     #  qui ment sur ce qu'elle surveille finit par tromper une relecture.
-    "voice_chaos_dispatcher", "daily_riddle_dispatcher", "daily_agenda_dispatcher",
-    "weekly_herald_dispatcher", "community_showcase_dispatcher",
-    "ugc_creator_of_month_task", "member_milestone_task", "ugc_coup_de_coeur_task",
-    "evening_ritual_dispatcher",
-    "server_anniversary_checker",
-    "daily_quest_push_dispatcher", "channel_camouflage_dispatcher",
-    "voice_spotlight_dispatcher",
-    "npc_chatter_task", "missions_runner_task", "daily_studio_tip_task",
-    "golden_hour_announce_task", "hub_live_events_refresh_task",
-    "reversibles_failsafe", "persistent_msg_cleaner",
-    "marketplace_expire_cleaner", "hub_orphan_cleaner_task", "db_optimizer_task",
+    "db_optimizer_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -13199,13 +13117,8 @@ _SUPERVISED_LOOP_NAMES = [
     "check_social_feeds",
     "cleanup_old_db_data", "check_scheduled_messages",
     "check_expired_roles", "cleanup_deals_task", "check_expired_restrictions",
-    "birthday_announcer", "poll_closer", "weekly_recap_task",
-    "narrative_choices_resolver_task", "update_votes_resolver_task", "daily_meta_task",
-    "thematic_voice_cleanup_task", "temp_voice_watchdog", "irl_season_check_task",
-    "npc_whisper_task",
-    # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
+    "birthday_announcer", "poll_closer",     "thematic_voice_cleanup_task", "temp_voice_watchdog",     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
     # que la date n'est pas configurée/atteinte.
-    "release_countdown_task",
     # Entraide : édite les posts des demandes expirées + supprime les vocaux temp
     # orphelins (vides) de la catégorie configurée. Fail-open, no-op si non configuré.
     # C3 — Entraide : décerne le titre cosmétique « Pilier de l'entraide » aux meilleurs
@@ -21785,7 +21698,6 @@ async def on_ready():
                 rows = await cur.fetchall()
         for mid, tid, step_idx in rows:
             try:
-                tmpl = lore.get_mission_template(tid)
                 if not tmpl:
                     continue
                 if step_idx >= len(tmpl["steps"]):
@@ -22253,8 +22165,6 @@ async def on_ready():
         task_supervisor.start()
     # Phase 109 : auction settler — termine les enchères expirées
     # Phase 111 : refresh tuile Live Events sur les hubs configurés
-    if not hub_live_events_refresh_task.is_running():
-        hub_live_events_refresh_task.start()
     # Phase 126 : DB backup quotidien automatique (rotation 7 jours)
     try:
         if not db_backup_module.backup_task.is_running():
@@ -22708,41 +22618,19 @@ async def on_ready():
     #  une SyntaxError au boot.
 
     # (Le planificateur de World Boss est parti avec les événements.)
-    if not voice_chaos_dispatcher.is_running():
-        voice_chaos_dispatcher.start()
-    if not daily_riddle_dispatcher.is_running():
-        daily_riddle_dispatcher.start()
     # Phase 195 : Programme du jour (annonce quotidienne calme du planning combat)
-    if not daily_agenda_dispatcher.is_running():
-        daily_agenda_dispatcher.start()
-    if not weekly_herald_dispatcher.is_running():
-        weekly_herald_dispatcher.start()
     # Vitrine communautaire hebdo (dimanche 19h, salon hub, zéro ping)
-    if not community_showcase_dispatcher.is_running():
-        community_showcase_dispatcher.start()
     # Phase 238 : récap hebdo en MP (opt-in strict)
     if not weekly_activity_recap_task.is_running():
         weekly_activity_recap_task.start()
 
     # Phase 43 : Trésor Flash + Rituel du Soir + Tag Royale + Anniversaire
-    if not evening_ritual_dispatcher.is_running():
-        evening_ritual_dispatcher.start()
-    if not server_anniversary_checker.is_running():
-        server_anniversary_checker.start()
 
     # Phase 44 : Daily Quest push proactif + DB optimizer
-    if not daily_quest_push_dispatcher.is_running():
-        daily_quest_push_dispatcher.start()
     if not db_optimizer_task.is_running():
         db_optimizer_task.start()
 
     # Phase 45 : Camouflage de salon + Vocal Spotlight + Compliment + failsafe
-    if not channel_camouflage_dispatcher.is_running():
-        channel_camouflage_dispatcher.start()
-    if not voice_spotlight_dispatcher.is_running():
-        voice_spotlight_dispatcher.start()
-    if not reversibles_failsafe.is_running():
-        reversibles_failsafe.start()
     # Phase 48 : Compliment du jour DÉSACTIVÉ (système Saint-Valentin retiré)
     # if not compliment_dispatcher.is_running():
     #     compliment_dispatcher.start()
@@ -22753,40 +22641,16 @@ async def on_ready():
         print(f"[on_ready _run_failsafe_once boot] {ex}")
 
     # Phase 47.3 : persistent cleanup des messages d'events expirés
-    if not persistent_msg_cleaner.is_running():
-        persistent_msg_cleaner.start()
     # Phase 55 : safety net hub orphan cleaner (loop 6h)
-    if not hub_orphan_cleaner_task.is_running():
-        hub_orphan_cleaner_task.start()
 
     # (auto-promote des events retiré avec les événements.)
-    if not marketplace_expire_cleaner.is_running():
-        marketplace_expire_cleaner.start()
     # Phase 49 : NPC chatter (toutes les 6h) + missions runner (daily)
-    if not npc_chatter_task.is_running():
-        npc_chatter_task.start()
-    if not missions_runner_task.is_running():
-        missions_runner_task.start()
     # Phase 50 : Studio Tip daily (9h FR)
-    if not daily_studio_tip_task.is_running():
-        daily_studio_tip_task.start()
     # Phase 53 : ambiance passive
-    if not golden_hour_announce_task.is_running():
-        golden_hour_announce_task.start()
-    if not weekly_recap_task.is_running():
-        weekly_recap_task.start()
     # Tâche B.2 : annonce de sortie à l'échéance du countdown (fail-open, no-op sans date)
-    if not release_countdown_task.is_running():
-        release_countdown_task.start()
     # Phase 57 : narrative choices resolver
-    if not narrative_choices_resolver_task.is_running():
-        narrative_choices_resolver_task.start()
     # Phase 58 : update votes resolver
-    if not update_votes_resolver_task.is_running():
-        update_votes_resolver_task.start()
     # Phase 61 : daily meta (streak collectif + météo)
-    if not daily_meta_task.is_running():
-        daily_meta_task.start()
     # Phase 62 : vocaux thématiques cleanup + IRL season check
     if not thematic_voice_cleanup_task.is_running():
         thematic_voice_cleanup_task.start()
@@ -22801,23 +22665,11 @@ async def on_ready():
         if not bump_reminder_task.is_running():
             bump_reminder_task.start()
         # UGC : créateur du mois (votes ❤️) + paliers de membres (owner 2026-06-29)
-        if not ugc_creator_of_month_task.is_running():
-            ugc_creator_of_month_task.start()
-        if not member_milestone_task.is_running():
-            member_milestone_task.start()
-        if not ugc_coup_de_coeur_task.is_running():
-            ugc_coup_de_coeur_task.start()
         print("[bump_reminder] OK (rappel /bump si bump_reminder_channel configuré)")
     except Exception as ex:
         print(f"[on_ready bump_reminder] {ex}")
 
-    if not irl_season_check_task.is_running():
-        irl_season_check_task.start()
     # Phase 63 : capsule unlock + npc whisper + anniversary
-    if not npc_whisper_task.is_running():
-        npc_whisper_task.start()
-    if not server_anniversary_task.is_running():
-        server_anniversary_task.start()
     # Phase 61 : AdventClaimView persistante (custom_id stable)
     try:
         bot.add_view(AdventClaimView())
@@ -30924,7 +30776,7 @@ async def on_raw_reaction_add(payload):
 
     try:
         if payload.guild_id:
-            await activity2026.track_reaction(payload.guild_id, payload.user_id)
+            pass  # bloc vidé (module détaché)
     except Exception:
         pass
 
@@ -32665,199 +32517,17 @@ async def _ugc_votes_for_message(guild, channel_id, message_id) -> int:
         return 0
 
 
-@tasks.loop(hours=6)
-async def ugc_creator_of_month_task():
-    """#1 CRÉATEUR DU MOIS : le 1er du mois, agrège les ❤️ des annonces UGC du mois par créateur
-    → élit le gagnant, pose le rôle 🏆 (retire l'ancien), annonce + top accessoires (#4 intérêt).
-    Anti-doublon cfg `ugc_month_last`. FAIL-OPEN par guild."""
-    try:
-        from zoneinfo import ZoneInfo as _ZI
-        tz = _ZI('Europe/Paris')
-    except Exception:
-        tz = timezone.utc
-    if datetime.now(tz).day != 1:
-        return
-    tag = datetime.now(tz).strftime('%Y-%m')
-    for guild in list(bot.guilds):
-        try:
-            c = await cfg(guild.id)
-            if str(c.get('ugc_month_last', '') or '') == tag:
-                continue
-            channel = guild.get_channel(int(c.get('ads_roblox_channel', 0) or 0))
-            if not channel:
-                continue
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT message_id, channel_id, item_name, item_url, creator_name, creator_id "
-                    "FROM ugc_spotlights WHERE guild_id=? AND datetime(posted_at) > datetime('now','-31 days')",
-                    (guild.id,)) as cur:
-                    rows = await cur.fetchall()
-            await db_set(guild.id, 'ugc_month_last', tag)  # marqueur AVANT (anti double-post)
-            if not rows:
-                continue
-            by_creator: dict = {}
-            scored = []
-            for mid, cid, nm, url, cn, crid in rows:
-                v = await _ugc_votes_for_message(guild, cid, mid)
-                scored.append((v, nm or 'Accessoire', cn or ''))
-                key = (cn or str(crid or '?'))
-                by_creator[key] = by_creator.get(key, 0) + v
-            if not by_creator or max(by_creator.values()) <= 0:
-                continue  # aucun vote → pas d'élection ce mois
-            winner = max(by_creator.items(), key=lambda kv: kv[1])
-            scored.sort(key=lambda x: x[0], reverse=True)
-            medals = ['🥇', '🥈', '🥉']
-            top_lines = "\n".join(
-                f"{medals[i]} **{nm[:50]}** — ❤️ {v}" + (f" · _{cn}_" if cn else "")
-                for i, (v, nm, cn) in enumerate(scored[:3]) if v > 0)
-            # Rôle 🏆 (retire l'ancien porteur, donne au gagnant si on le retrouve)
-            try:
-                rid = int(c.get('ugc_creator_month_role', 0) or 0)
-                role = guild.get_role(rid) if rid else None
-                me = guild.me
-                if role is None and me and me.guild_permissions.manage_roles:
-                    role = await guild.create_role(name="🏆 Créateur UGC du Mois", mentionable=False,
-                                                   hoist=True, reason="Créateur UGC du mois")
-                    await db_set(guild.id, 'ugc_creator_month_role', role.id)
-                if role is not None:
-                    for m in list(getattr(role, 'members', [])):
-                        try:
-                            await m.remove_roles(role, reason="Nouveau mois UGC")
-                        except Exception:
-                            pass
-                    win_m = discord.utils.find(
-                        lambda x: x.display_name == winner[0] or x.name == winner[0], guild.members)
-                    if win_m:
-                        try:
-                            await win_m.add_roles(role, reason="Créateur UGC du mois")
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-            e = discord.Embed(
-                title="🏆 Créateur UGC du Mois !",
-                description=(f"Bravo à **{winner[0]}** — ses accessoires ont récolté le plus de ❤️ "
-                            f"ce mois-ci (**{winner[1]}** au total) ! 💛\n\n"
-                            f"**Top accessoires du mois :**\n{top_lines or '_—_'}"),
-                color=0xFFD700)
-            e.set_footer(text="Merci à tous nos créateurs — continuez à créer ! 🎨")
-            try:
-                await channel.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[ugc_creator_of_month_task guild={guild.id}] {ex}")
 
 
 _MEMBER_MILESTONES = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000]
 
 
-@tasks.loop(minutes=30)
-async def member_milestone_task():
-    """#3 PALIERS SERVEUR : annonce festive quand le serveur franchit un palier de membres.
-    Une seule fois par palier (cfg `last_member_milestone`). FAIL-OPEN par guild."""
-    for guild in list(bot.guilds):
-        try:
-            c = await cfg(guild.id)
-            if not c.get('member_milestone_enabled', 1):
-                continue
-            total = int(getattr(guild, 'member_count', 0) or 0)
-            last = int(c.get('last_member_milestone', 0) or 0)
-            crossed = [m for m in _MEMBER_MILESTONES if last < m <= total]
-            if not crossed:
-                continue
-            milestone = max(crossed)
-            await db_set(guild.id, 'last_member_milestone', milestone)  # AVANT (anti-doublon)
-            if last == 0:
-                continue  # 1er passage = baseline SILENCIEUSE (pas d'annonce d'un palier déjà atteint)
-            ch = guild.get_channel(int(c.get('member_milestone_channel', 0) or 0)) or guild.system_channel
-            if ch is None:
-                try:
-                    ch = next((x for x in guild.text_channels
-                               if x.permissions_for(guild.me).send_messages), None)
-                except Exception:
-                    ch = None
-            if ch is None:
-                continue
-            e = discord.Embed(
-                title=f"🎉 {milestone:,} membres !".replace(",", " "),
-                description=(f"On vient de franchir la barre des **{str(milestone).replace(chr(44),' ')} "
-                            f"membres** sur **{guild.name}** ! 🥳\n\nMerci à chacune et chacun de faire "
-                            f"vivre la communauté. En route pour la suite ! 🚀"),
-                color=0x00D26A)
-            try:
-                if guild.icon:
-                    e.set_thumbnail(url=guild.icon.url)
-            except Exception:
-                pass
-            try:
-                await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[member_milestone_task guild={guild.id}] {ex}")
 
 
 
 
 
 
-@tasks.loop(hours=6)
-async def ugc_coup_de_coeur_task():
-    """#3 COUP DE CŒUR : dimanche ~20h Paris, met en avant l'accessoire UGC le plus voté ❤️ de
-    la semaine (texte éditorial). Anti-doublon semaine ISO cfg `ugc_coup_last`. FAIL-OPEN."""
-    try:
-        from zoneinfo import ZoneInfo as _ZI
-        tz = _ZI('Europe/Paris')
-    except Exception:
-        tz = timezone.utc
-    nowp = datetime.now(tz)
-    if nowp.weekday() != 6 or nowp.hour not in (20, 21):
-        return
-    wk = nowp.strftime('%G-W%V')
-    for guild in list(bot.guilds):
-        try:
-            c = await cfg(guild.id)
-            if not c.get('ugc_spotlight_enabled', 1):
-                continue
-            if str(c.get('ugc_coup_last', '') or '') == wk:
-                continue
-            channel = guild.get_channel(int(c.get('ads_roblox_channel', 0) or 0))
-            if not channel:
-                continue
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT message_id, channel_id, item_name, item_url, image_url, creator_name "
-                    "FROM ugc_spotlights WHERE guild_id=? AND datetime(posted_at) > datetime('now','-8 days')",
-                    (guild.id,)) as cur:
-                    rows = await cur.fetchall()
-            await db_set(guild.id, 'ugc_coup_last', wk)
-            if not rows:
-                continue
-            best = None
-            for mid, cid, nm, url, img, cn in rows:
-                v = await _ugc_votes_for_message(guild, cid, mid)
-                if best is None or v > best[0]:
-                    best = (v, nm or 'Accessoire', url, img, cn or '')
-            if best is None or best[0] <= 0:
-                continue
-            e = discord.Embed(
-                title=f"💖 Coup de cœur de la semaine — {best[1][:60]}", url=best[2] or None,
-                description=(f"Cette semaine, la communauté a craqué pour **{best[1][:80]}**"
-                            + (f" de **{best[4]}**" if best[4] else "")
-                            + f" — **❤️ {best[0]}** votes ! Bravo au créateur. 🎨"),
-                color=0xFF2D78)
-            if best[3]:
-                e.set_image(url=best[3])
-            if best[2]:
-                e.add_field(name="🛒 Roblox", value=f"[**Voir l'accessoire**]({best[2]})", inline=False)
-            e.set_footer(text="💖 Coup de cœur hebdo · soutiens nos créateurs !")
-            try:
-                await channel.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[ugc_coup_de_coeur_task guild={guild.id}] {ex}")
 
 
 
@@ -34939,40 +34609,10 @@ bot.add_listener(_2026_on_ready_addon, "on_ready")
 # ─── Activity tracking (listeners non-invasifs) ───
 
 
-async def _2026_on_voice_state_track(member, before, after):
-    """Tracke les join/leave vocaux pour le calcul du voice time."""
-    if member.bot:
-        return
-    try:
-        if before.channel is None and after.channel is not None:
-            # Joined
-            await activity2026.track_voice_join(member.guild.id, member.id)
-        elif before.channel is not None and after.channel is None:
-            # Left
-            await activity2026.track_voice_leave(member.guild.id, member.id)
-    except Exception:
-        pass
     # owner 2026-07-20 : le JOIN vocal est désormais compté dans activity_tracker.track_voice_join
     # (voice_joins) → activité clan captée par le vrai système d'activité (avec historique).
 
 
-async def _2026_on_reaction_add_track(reaction, user):
-    """Tracke les reactions helpful sur les messages d'autres."""
-    if user.bot or reaction.message.author.bot:
-        return
-    if user.id == reaction.message.author.id:
-        return  # pas de self-reaction
-    if reaction.message.guild is None:
-        return
-    emoji_str = str(reaction.emoji)
-    if not activity2026.is_helpful_reaction(emoji_str):
-        return
-    try:
-        await activity2026.track_helpful_reaction(
-            reaction.message.guild.id, reaction.message.author.id,
-        )
-    except Exception:
-        pass
 
 
 async def _voice_log_listener(member, before, after):
@@ -35137,10 +34777,8 @@ async def _role_mentionable_guard(*args):
         pass
 
 
-bot.add_listener(_2026_on_voice_state_track, "on_voice_state_update")
 bot.add_listener(_voice_log_listener, "on_voice_state_update")
 bot.add_listener(_voice_hop_listener, "on_voice_state_update")
-bot.add_listener(_2026_on_reaction_add_track, "on_reaction_add")
 bot.add_listener(_role_mentionable_guard, "on_guild_role_create")
 bot.add_listener(_role_mentionable_guard, "on_guild_role_update")
 bot.add_listener(_bump_detect_listener, "on_message")  # réarme le rappel de bump (Disboard)
@@ -35169,24 +34807,13 @@ bot.add_listener(_2026_start_cleanup_loop, "on_ready")
 _2026_flush_task = None
 
 
-async def _2026_activity_flush_loop():
-    """Flush l'activity_tracker toutes les 60s vers le disque."""
-    while not bot.is_closed():
-        try:
-            written = await activity2026.flush_buffer()
-            if written > 0:
-                # Log seulement si on a vraiment ecrit (debug)
-                pass
-        except Exception as ex:
-            print(f"[ACTIVITY FLUSH] erreur: {ex}")
-        await asyncio.sleep(60)
 
 
 async def _2026_start_activity_flush():
     """Lance la boucle de flush activity (idempotent)."""
     global _2026_flush_task
     if _2026_flush_task is None or _2026_flush_task.done():
-        _2026_flush_task = asyncio.create_task(_2026_activity_flush_loop())
+        pass  # bloc vidé (module détaché)
 
 
 bot.add_listener(_2026_start_activity_flush, "on_ready")
@@ -35277,48 +34904,6 @@ async def _get_user_stats41(guild_id: int, user_id: int) -> dict:
 # ─── HELPERS QUESTS ────────────────────────────────────────────────────────────
 
 
-async def _ensure_today_quests(guild_id: int, user_id: int) -> list:
-    """S'assure que les 3 quêtes du jour existent en DB. Retourne la liste."""
-    today = _today_str_p41()
-    async with get_db() as db:
-        async with db.execute(
-            'SELECT quest_id, metric, target, progress, completed, claimed '
-            'FROM daily_quest_progress WHERE guild_id=? AND user_id=? AND day=?',
-            (guild_id, user_id, today),
-        ) as cur:
-            rows = await cur.fetchall()
-        if rows:
-            # Quêtes existantes : reconstituer en injectant les titres depuis le catalogue
-            out = []
-            for q_id, metric, target, progress, completed, claimed in rows:
-                tmpl = next((t for t in eng41.DAILY_QUEST_TEMPLATES if t.id == q_id), None)
-                if not tmpl:
-                    continue
-                out.append({
-                    'id': q_id, 'metric': metric, 'target': target,
-                    'progress': progress, 'completed': bool(completed),
-                    'claimed': bool(claimed),
-                    'title': tmpl.title,
-                    'description': tmpl.description.format(target=target),
-                    'emoji': tmpl.emoji, 'difficulty': tmpl.difficulty,
-                    'reward_coins': tmpl.reward_coins, 'reward_xp': tmpl.reward_xp,
-                })
-            return out
-
-        # Générer 3 quêtes
-        quests = eng41.generate_daily_quests(guild_id, user_id, today, count=3)
-        for q in quests:
-            await db.execute(
-                'INSERT OR IGNORE INTO daily_quest_progress(guild_id, user_id, day, quest_id, metric, target) '
-                'VALUES(?,?,?,?,?,?)',
-                (guild_id, user_id, today, q['id'], q['metric'], q['target']),
-            )
-        await db.commit()
-        for q in quests:
-            q['progress'] = 0
-            q['completed'] = False
-            q['claimed'] = False
-        return quests
 
 
 
@@ -35706,90 +35291,15 @@ async def _run_persistent_cleanup_once() -> dict:
     return stats
 
 
-@tasks.loop(minutes=2)
-async def persistent_msg_cleaner():
-    """Loop persistente : nettoie les messages d'events expirés toutes les 2 min.
-
-    Phase 55 : passé de 5min à 2min pour réduire la dérive max post-restart.
-    """
-    await _run_persistent_cleanup_once()
 
 
 # ─── Phase 55 : SAFETY NET — purge messages bot vieux dans hub (orphelins) ───
 
 
-@tasks.loop(hours=6)
-async def hub_orphan_cleaner_task():
-    """Toutes les 6h, purge les messages du bot >48h dans le hub_channel
-    qui n'ont PAS été épinglés et qui ne sont PLUS attachés à event actif.
-
-    Filet de sécurité : capture les messages dont l'entrée DB de cleanup a été
-    perdue (rare mais possible). Skip pinned + skip messages avec components
-    actifs (views persistantes type EngagementHubView).
-    """
-    try:
-        cutoff_48h = datetime.now(timezone.utc) - timedelta(hours=48)
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                if not hub_id:
-                    continue
-                hub_ch = guild.get_channel(hub_id)
-                if not hub_ch:
-                    continue
-                # Trouver les pinned IDs pour les exclure
-                # Phase 151 : utilise l'iterator async (l'API .pins() awaitable
-                # est deprecated en discord.py 2.7+)
-                pinned_ids = set()
-                try:
-                    async for p in hub_ch.pins():
-                        pinned_ids.add(p.id)
-                except Exception:
-                    pass
-                deleted = 0
-                # Scanner historique 48h+ (limit 100 pour pas trop charger)
-                try:
-                    async for msg in hub_ch.history(limit=100, before=cutoff_48h):
-                        if msg.author.id != bot.user.id:
-                            continue
-                        if msg.id in pinned_ids:
-                            continue
-                        # Skip si message contient un composant persistent (= View attachée)
-                        # Reconnaissance via embeds.footer text contenant "Hub d'engagement"
-                        if msg.embeds and any(
-                            "Hub d'engagement" in (e.footer.text or "") if e.footer else False
-                            for e in msg.embeds
-                        ):
-                            continue
-                        try:
-                            await msg.delete()
-                            deleted += 1
-                            await asyncio.sleep(0.5)  # rate-limit
-                        except (discord.NotFound, discord.Forbidden):
-                            pass
-                        except Exception:
-                            pass
-                except Exception as ex:
-                    print(f"[hub_orphan_cleaner guild={guild.id} history] {ex}")
-                if deleted:
-                    print(f"[HUB ORPHAN CLEAN] guild={guild.id} deleted={deleted}")
-            except Exception as ex:
-                print(f"[hub_orphan_cleaner guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[hub_orphan_cleaner_task] {ex}")
 
 
-@hub_orphan_cleaner_task.before_loop
-async def _hub_orphan_wait():
-    await bot.wait_until_ready()
 
 
-@persistent_msg_cleaner.before_loop
-async def _persistent_cleanup_wait():
-    await bot.wait_until_ready()
 
 
 
@@ -38585,35 +38095,8 @@ _WORLD_BOSS_DEFAULT_HOUR = 21     # 21h heure locale (Europe/Paris)
 
 
 
-@tasks.loop(minutes=45)
-async def voice_chaos_dispatcher():
-    """Phase 42 : chaque 45min entre 19h-23h FR, ~40% de chance de chaos vocal.
-
-    Concrètement : 1-2 chaos par soirée en moyenne.
-    """
-    try:
-        from zoneinfo import ZoneInfo as _ZI
-        tz = _ZI('Europe/Paris')
-    except Exception:
-        tz = timezone.utc
-    h = datetime.now(tz).hour
-    if not (19 <= h < 23):
-        return
-    if random.random() > 0.4:
-        return
-    try:
-        for guild in bot.guilds:
-            try:
-                pass  # bloc vidé (module détaché)
-            except Exception as ex:
-                print(f"[voice_chaos_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[voice_chaos_dispatcher] {ex}")
 
 
-@voice_chaos_dispatcher.before_loop
-async def _voice_chaos_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -38625,30 +38108,8 @@ async def _voice_chaos_wait():
 
 
 
-@tasks.loop(minutes=30)
-async def daily_riddle_dispatcher():
-    """Phase 42 : poste l'énigme du jour entre 10h-11h Europe/Paris."""
-    try:
-        from zoneinfo import ZoneInfo as _ZI
-        tz = _ZI('Europe/Paris')
-    except Exception:
-        tz = timezone.utc
-    h = datetime.now(tz).hour
-    if h != 10:
-        return
-    try:
-        for guild in bot.guilds:
-            try:
-                pass  # bloc vidé (module détaché)
-            except Exception as ex:
-                print(f"[daily_riddle_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[daily_riddle_dispatcher] {ex}")
 
 
-@daily_riddle_dispatcher.before_loop
-async def _daily_riddle_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -38727,30 +38188,6 @@ async def _post_daily_agenda(guild) -> bool:
         return False
 
 
-@tasks.loop(minutes=30)
-async def daily_agenda_dispatcher():
-    """Phase 195 : poste « Programme du jour » à 8h Europe/Paris (juste avant le
-    boss accessible de 9h). Skip les serveurs abandonnés (fenêtre généreuse de
-    3 jours). Try/except par guild : l'échec d'un guild ne casse jamais le loop."""
-    try:
-        from zoneinfo import ZoneInfo as _ZI
-        tz = _ZI('Europe/Paris')
-    except Exception:
-        tz = timezone.utc
-    h = datetime.now(tz).hour
-    if h != 8:
-        return
-    try:
-        for guild in bot.guilds:
-            try:
-                # Serveur réellement abandonné (aucune activité humaine sur 3 jours) → skip.
-                if not await _guild_recently_active(guild.id, minutes=4320, min_users=1):
-                    continue
-                await _post_daily_agenda(guild)
-            except Exception as ex:
-                print(f"[daily_agenda_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[daily_agenda_dispatcher] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -38765,34 +38202,8 @@ async def daily_agenda_dispatcher():
 
 
 
-@tasks.loop(minutes=30)
-async def weekly_herald_dispatcher():
-    """Phase 266 : poste le Héraut hebdo le DIMANCHE 18h Europe/Paris (créneau calme,
-    hors des autres tâches : daily_agenda 8h, recap perso 10h lundi, VIP 11h lundi,
-    lettres NPC 18h dimanche restent en DM). Skip serveurs abandonnés. Try/except
-    par guild : l'échec d'un guild ne casse jamais le loop."""
-    try:
-        from zoneinfo import ZoneInfo as _ZI
-        tz = _ZI('Europe/Paris')
-    except Exception:
-        tz = timezone.utc
-    nowp = datetime.now(tz)
-    if nowp.weekday() != 6 or nowp.hour != 18:  # dimanche 18h
-        return
-    try:
-        for guild in bot.guilds:
-            try:
-                if not await _guild_recently_active(guild.id, minutes=4320, min_users=1):
-                    continue
-            except Exception as ex:
-                print(f"[weekly_herald_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[weekly_herald_dispatcher] {ex}")
 
 
-@daily_agenda_dispatcher.before_loop
-async def _daily_agenda_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -38999,39 +38410,8 @@ async def _post_community_showcase(guild) -> bool:
         return False
 
 
-@tasks.loop(minutes=30)
-async def community_showcase_dispatcher():
-    """Poste la Vitrine communautaire le DIMANCHE 19h Europe/Paris (1h après le
-    Héraut combat à 18h → les deux recaps hebdo ne se chevauchent pas). Skip les
-    serveurs abandonnés. Try/except par guild : l'échec d'un guild ne casse jamais
-    le loop. Tâche supervisée (superviseur la relance si elle meurt)."""
-    # ⛔ DÉSACTIVÉ (owner 2026-06-29) : la Vitrine est désormais INTÉGRÉE au Héraut (récap
-    # dominical UNIQUE à 18h). On ne poste plus un 2e message à 19h. `_post_community_showcase`
-    # reste appelable (le Héraut réutilise `_gather_community_showcase`).
-    return
-    try:
-        from zoneinfo import ZoneInfo as _ZI
-        tz = _ZI('Europe/Paris')
-    except Exception:
-        tz = timezone.utc
-    nowp = datetime.now(tz)
-    if nowp.weekday() != 6 or nowp.hour != 19:  # dimanche 19h
-        return
-    try:
-        for guild in bot.guilds:
-            try:
-                if not await _guild_recently_active(guild.id, minutes=4320, min_users=1):
-                    continue
-                await _post_community_showcase(guild)
-            except Exception as ex:
-                print(f"[community_showcase_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[community_showcase_dispatcher] {ex}")
 
 
-@community_showcase_dispatcher.before_loop
-async def _community_showcase_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -39597,35 +38977,8 @@ async def _post_morning_recap(guild) -> bool:
         return False
 
 
-@tasks.loop(minutes=30)
-async def evening_ritual_dispatcher():
-    """22h FR : rituel du soir | 9h FR : récap d'hier."""
-    try:
-        try:
-            from zoneinfo import ZoneInfo as _ZI
-            tz = _ZI('Europe/Paris')
-        except Exception:
-            tz = timezone.utc
-        h = datetime.now(tz).hour
-        if h == 22:
-            for guild in bot.guilds:
-                try:
-                    await _post_evening_ritual(guild)
-                except Exception as ex:
-                    print(f"[ritual evening guild={guild.id}] {ex}")
-        elif h == 9:
-            for guild in bot.guilds:
-                try:
-                    await _post_morning_recap(guild)
-                except Exception as ex:
-                    print(f"[ritual morning guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[evening_ritual_dispatcher] {ex}")
 
 
-@evening_ritual_dispatcher.before_loop
-async def _ritual_wait():
-    await bot.wait_until_ready()
 
 
 # ─── TAG ROYALE (chaîne d'invitation hebdo) ────────────────────────────────────
@@ -39845,109 +39198,8 @@ async def _check_tag_royale_chain(msg):
 # ─── ANNIVERSAIRE DU SERVEUR ───────────────────────────────────────────────────
 
 
-@tasks.loop(hours=6)
-async def server_anniversary_checker():
-    """Toutes les 6h, check si c'est l'anniversaire d'un serveur → mega event."""
-    try:
-        try:
-            from zoneinfo import ZoneInfo as _ZI
-            tz = _ZI('Europe/Paris')
-        except Exception:
-            tz = timezone.utc
-        today = datetime.now(tz).date()
-        for guild in bot.guilds:
-            try:
-                # Date de création du serveur
-                created = guild.created_at.date()
-                if created.month != today.month or created.day != today.day:
-                    continue
-                years_old = today.year - created.year
-                if years_old < 1:
-                    continue
-                # Déjà célébré cette année ?
-                async with get_db() as db:
-                    async with db.execute(
-                        'SELECT 1 FROM server_anniversaries WHERE guild_id=? AND year_celebrated=?',
-                        (guild.id, today.year),
-                    ) as cur:
-                        if await cur.fetchone():
-                            continue
-                # Célébrer !
-                ch = None
-                hub_id = int((await cfg(guild.id)).get('hub_channel', 0) or 0)
-                if hub_id:
-                    cand = guild.get_channel(hub_id)
-                    if cand and await _is_chatty_channel(cand):
-                        ch = cand
-                if not ch:
-                    for cand in guild.text_channels:
-                        if await _is_chatty_channel(cand):
-                            ch = cand
-                            break
-                if not ch:
-                    continue
-
-                # Annonce anniversaire visible 24h puis se purge proprement
-                LIFETIME_ANNIV = 24 * 3600
-                e = discord.Embed(
-                    title=f"🎂 JOYEUX ANNIVERSAIRE {guild.name} !",
-                    description=(
-                        f"**{guild.name}** fête ses **{years_old} an{'s' if years_old > 1 else ''}** aujourd'hui !\n\n"
-                        f"🎉 Pour célébrer :\n"
-                        f"💰 **+500 🪙 offerts à tous les membres**\n"
-                        f"💎 **Trésors flash boostés** (x3 fréquence pendant 24h)\n"
-                        f"🌟 **Achievement spécial** débloqué : Survivant de l'an {years_old}\n\n"
-                        f"_Merci d'être là._\n\n"
-                        f"{_chrono_footer(LIFETIME_ANNIV)}"
-                    ),
-                    color=0xFFD700,
-                    timestamp=datetime.now(timezone.utc),
-                )
-                e.set_footer(text=f"Anniversaire {today.year}")
-
-                try:
-                    msg_anniv = await ch.send(
-                        embed=e,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME_ANNIV,
-                    )
-                    await _register_for_cleanup(msg_anniv, LIFETIME_ANNIV, 'anniversary')
-                except Exception:
-                    pass
-
-                # Donner 500 🪙 à tous les membres humains actifs des 30 derniers jours
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT DISTINCT user_id FROM activity_tracking "
-                        "WHERE guild_id=? AND datetime(last_message) > datetime('now', '-30 days')",
-                        (guild.id,),
-                    ) as cur:
-                        active_rows = await cur.fetchall()
-                bonus = 500
-                for (uid,) in active_rows:
-                    try:
-                        await add_coins(guild.id, int(uid), bonus)
-                    except Exception:
-                        pass
-
-                # Marquer en DB
-                async with get_db() as db:
-                    await db.execute(
-                        'INSERT OR IGNORE INTO server_anniversaries(guild_id, year_celebrated) VALUES(?,?)',
-                        (guild.id, today.year),
-                    )
-                    await db.commit()
-
-                print(f"[ANNIVERSARY] guild={guild.id} year={today.year} bonus={bonus} members={len(active_rows)}")
-            except Exception as ex:
-                print(f"[server_anniversary_checker guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[server_anniversary_checker] {ex}")
 
 
-@server_anniversary_checker.before_loop
-async def _anniv_wait():
-    await bot.wait_until_ready()
 
 
 # ─── HUB BUTTON : Events en cours (6ème bouton hub) ───────────────────────────
@@ -40038,7 +39290,6 @@ class DailyQuestPushView(View):
                 await db.commit()
             # Réutiliser _p41_open_daily : il a besoin d'un interaction avec guild context.
             # En DM, i.guild est None. On bricole : on construit un message inline.
-            quests = await _ensure_today_quests(guild_id, i.user.id)
             guild = bot.get_guild(guild_id)
             guild_name = guild.name if guild else "le serveur"
 
@@ -40168,7 +39419,6 @@ async def _push_daily_quest_to_member(guild, member) -> bool:
             return False
 
         # Ensure quests exist
-        quests = await _ensure_today_quests(guild.id, member.id)
         if not quests:
             return False
         # Skip si TOUTES déjà claim
@@ -40225,73 +39475,8 @@ async def _push_daily_quest_to_member(guild, member) -> bool:
         return False
 
 
-@tasks.loop(hours=2)
-async def daily_quest_push_dispatcher():
-    """Toutes les 2h en heures actives FR, push DM à quelques actifs sans
-    quêtes ouvertes.
-
-    Cap: max 30 pushes/guild/tick pour éviter le rate-limit Discord.
-    Cible : membres avec total_messages >= 3, dernière activité < 7j, pas déjà push aujourd'hui.
-    """
-    try:
-        try:
-            from zoneinfo import ZoneInfo as _ZI
-            tz = _ZI('Europe/Paris')
-        except Exception:
-            tz = timezone.utc
-        h = datetime.now(tz).hour
-        if h < 10 or h >= 22:
-            return
-
-        day = _today_str_p41()
-        MAX_PUSHES_PER_GUILD_PER_TICK = 30
-
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                if not c.get('daily_quest_push_enabled', True):
-                    continue
-
-                # Trouver les membres actifs récents sans push aujourd'hui
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT a.user_id FROM activity_tracking a "
-                        "WHERE a.guild_id=? AND a.total_messages >= 3 "
-                        "AND datetime(a.last_message) > datetime('now', '-7 days') "
-                        "AND NOT EXISTS ("
-                        "  SELECT 1 FROM daily_quest_pushes p "
-                        "  WHERE p.guild_id=a.guild_id AND p.user_id=a.user_id AND p.day=? "
-                        "  AND (p.status IN ('opened','done') OR "
-                        "       (p.status='later' AND p.retry_after > datetime('now')) OR "
-                        "       (p.status='pushed'))"
-                        ") "
-                        "ORDER BY RANDOM() LIMIT ?",
-                        (guild.id, day, MAX_PUSHES_PER_GUILD_PER_TICK),
-                    ) as cur:
-                        rows = await cur.fetchall()
-                count_sent = 0
-                for (uid,) in rows:
-                    member = guild.get_member(int(uid))
-                    if not member or member.bot:
-                        continue
-                    sent = await _push_daily_quest_to_member(guild, member)
-                    if sent:
-                        count_sent += 1
-                    # Petite pause pour éviter rate-limit DM
-                    await asyncio.sleep(0.5)
-                if count_sent:
-                    print(f"[daily_quest_push_dispatcher] guild={guild.id} sent={count_sent}")
-            except Exception as ex:
-                print(f"[daily_quest_push_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[daily_quest_push_dispatcher] {ex}")
 
 
-@daily_quest_push_dispatcher.before_loop
-async def _qpush_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -40628,32 +39813,8 @@ async def _apply_camouflage(guild) -> bool:
         return False
 
 
-@tasks.loop(hours=4)
-async def channel_camouflage_dispatcher():
-    """Toutes les 4h en heures actives FR, ~50% chance de camoufler 1 salon."""
-    try:
-        try:
-            from zoneinfo import ZoneInfo as _ZI
-            tz = _ZI('Europe/Paris')
-        except Exception:
-            tz = timezone.utc
-        h = datetime.now(tz).hour
-        if h < 9 or h >= 23:
-            return
-        if random.random() > 0.5:
-            return
-        for guild in bot.guilds:
-            try:
-                await _apply_camouflage(guild)
-            except Exception as ex:
-                print(f"[channel_camouflage_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[channel_camouflage_dispatcher] {ex}")
 
 
-@channel_camouflage_dispatcher.before_loop
-async def _camouflage_wait():
-    await bot.wait_until_ready()
 
 
 # ─── VOCAL SUR SCÈNE ───────────────────────────────────────────────────────────
@@ -40792,32 +39953,8 @@ async def _apply_voice_spotlight(guild) -> bool:
         return False
 
 
-@tasks.loop(hours=3)
-async def voice_spotlight_dispatcher():
-    """Toutes les 3h en soirée FR (17h-23h), ~40% chance de mettre 1 vocal en scène."""
-    try:
-        try:
-            from zoneinfo import ZoneInfo as _ZI
-            tz = _ZI('Europe/Paris')
-        except Exception:
-            tz = timezone.utc
-        h = datetime.now(tz).hour
-        if h < 17 or h >= 23:
-            return
-        if random.random() > 0.4:
-            return
-        for guild in bot.guilds:
-            try:
-                await _apply_voice_spotlight(guild)
-            except Exception as ex:
-                print(f"[voice_spotlight_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[voice_spotlight_dispatcher] {ex}")
 
 
-@voice_spotlight_dispatcher.before_loop
-async def _spotlight_wait():
-    await bot.wait_until_ready()
 
 
 # ─── FAILSAFE LOOP : revert tout orphelin (crash recovery, restart) ───────────
@@ -40849,17 +39986,8 @@ async def _run_failsafe_once():
         print(f"[_run_failsafe_once] {ex}")
 
 
-@tasks.loop(minutes=10)
-async def reversibles_failsafe():
-    """Toutes les 10 min, scan tous les camouflage/spotlight expirés non-revert
-    et les restaure. Couvre crash, restart, edge cases.
-    """
-    await _run_failsafe_once()
 
 
-@reversibles_failsafe.before_loop
-async def _failsafe_wait():
-    await bot.wait_until_ready()
 
 
 # ─── COMPLIMENT DU JOUR : SUPPRIMÉ (système Saint-Valentin retiré) ────────────
@@ -42242,23 +41370,8 @@ _EVENT_KIND_TO_METRICS = {
 # ─── Cleanup auto des listings expirés ────────────────────────────────────────
 
 
-@tasks.loop(hours=12)
-async def marketplace_expire_cleaner():
-    """Marque comme 'expired' les listings actifs > 7 jours."""
-    try:
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE marketplace_listings SET status='expired' "
-                "WHERE status='active' AND datetime(expires_at) < datetime('now')",
-            )
-            await db.commit()
-    except Exception as ex:
-        print(f"[marketplace_expire_cleaner] {ex}")
 
 
-@marketplace_expire_cleaner.before_loop
-async def _mkt_expire_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -42366,34 +41479,6 @@ _RAINBOW_COLORS = [0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x0000FF, 0x4B0082, 0
 # ─── HELPERS LORE STATE ──────────────────────────────────────────────────────
 
 
-async def _get_lore_state(guild_id: int) -> dict:
-    """Retourne {chapter_order, chapter, last_advanced_at}. Auto-init si absent."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT current_chapter_order, last_advanced_at FROM lore_state WHERE guild_id=?",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            # Auto-init au chapitre 1
-            async with get_db() as db:
-                await db.execute(
-                    "INSERT INTO lore_state(guild_id, current_chapter_order) VALUES(?, 1) "
-                    "ON CONFLICT(guild_id) DO NOTHING",
-                    (guild_id,),
-                )
-                await db.commit()
-            order = 1
-            last_at = datetime.now(timezone.utc).isoformat()
-        else:
-            order = int(row[0]) if row[0] else 1
-            last_at = row[1]
-        chapter = lore.get_chapter_by_order(order) or lore.get_first_chapter()
-        return {"chapter_order": order, "chapter": chapter, "last_advanced_at": last_at}
-    except Exception as ex:
-        print(f"[_get_lore_state] {ex}")
-        return {"chapter_order": 1, "chapter": lore.get_first_chapter(), "last_advanced_at": None}
 
 
 
@@ -42416,56 +41501,8 @@ async def _npc_recently_posted(guild_id: int, npc_id: str, hours: int = 24) -> b
         return False
 
 
-async def _log_npc_post(guild_id: int, npc_id: str, context: str):
-    try:
-        async with get_db() as db:
-            await db.execute(
-                "INSERT INTO npc_posts_log(guild_id, npc_id, context) VALUES(?,?,?)",
-                (guild_id, npc_id, context),
-            )
-            await db.commit()
-    except Exception as ex:
-        print(f"[_log_npc_post] {ex}")
 
 
-async def _post_npc_line(channel, npc_id: str, context: str, line: Optional[str] = None,
-                         extra_desc: str = "", ttl_seconds: int = 30 * 60) -> bool:
-    """Poste un embed signé par un NPC. Retourne True si envoyé.
-
-    Si `line` est None, on pick au random selon le context.
-    """
-    if not channel or not channel.guild:
-        return False
-    npc = lore.get_npc(npc_id)
-    if not npc:
-        return False
-    if line is None:
-        line = lore.pick_npc_line(npc_id, context)
-        if not line:
-            return False
-    try:
-        e = discord.Embed(
-            title=f"{npc['emoji']} {npc['name']}",
-            description=f"_{line}_" + (f"\n\n{extra_desc}" if extra_desc else ""),
-            color=npc.get("color", 0x95A5A6),
-            timestamp=datetime.now(timezone.utc),
-        )
-        e.set_footer(text=npc.get("footer", npc["name"]))
-        msg = await channel.send(
-            embed=e,
-            allowed_mentions=discord.AllowedMentions.none(),
-            delete_after=ttl_seconds,
-        )
-        # Persistent cleanup (survit aux restarts)
-        try:
-            await _register_for_cleanup(msg, ttl_seconds, f"npc_{npc_id}")
-        except Exception:
-            pass
-        await _log_npc_post(channel.guild.id, npc_id, context)
-        return True
-    except Exception as ex:
-        print(f"[_post_npc_line {npc_id} {context}] {ex}")
-        return False
 
 
 def _npc_context_for_time() -> str:
@@ -42485,60 +41522,8 @@ def _npc_context_for_time() -> str:
 # ─── TASK : NPC CHATTER (un NPC parle 1x toutes les 6h dans le hub) ─────────
 
 
-@tasks.loop(hours=6)
-async def npc_chatter_task():
-    """Chaque 6h, un NPC random poste une phrase contextuelle dans le hub."""
-    try:
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                # Respect quiet hours
-                if not await _is_event_active_hour(guild.id):
-                    continue
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                if not hub_id:
-                    continue
-                hub_ch = guild.get_channel(hub_id)
-                if not hub_ch or not await _is_chatty_channel(hub_ch):
-                    continue
-                # Détection silence : si pas de message dans le hub depuis 6h+ → context "silence"
-                ctx = _npc_context_for_time()
-                try:
-                    cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
-                    async with get_db() as db:
-                        async with db.execute(
-                            "SELECT 1 FROM member_activity_daily WHERE guild_id=? AND channel_id=? "
-                            "AND last_ts>? LIMIT 1",
-                            (guild.id, hub_ch.id, cutoff),
-                        ) as cur:
-                            row = await cur.fetchone()
-                    if not row:
-                        ctx = "silence"
-                except Exception:
-                    pass
-
-                # Pick un NPC qui n'a pas parlé depuis 24h
-                available = []
-                for npc_id in lore.NPCS:
-                    if not await _npc_recently_posted(guild.id, npc_id, hours=24):
-                        if lore.NPC_LINES.get(npc_id, {}).get(ctx):
-                            available.append(npc_id)
-                if not available:
-                    continue
-                chosen_npc = random.choice(available)
-                await _post_npc_line(hub_ch, chosen_npc, ctx, ttl_seconds=4 * 3600)
-                print(f"[npc_chatter] guild={guild.id} npc={chosen_npc} ctx={ctx}")
-            except Exception as ex:
-                print(f"[npc_chatter guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[npc_chatter_task] {ex}")
 
 
-@npc_chatter_task.before_loop
-async def _npc_chatter_wait():
-    await bot.wait_until_ready()
 
 
 # ─── HOOK NPC REACTION APRÈS WORLD BOSS ──────────────────────────────────────
@@ -42549,38 +41534,6 @@ async def _npc_chatter_wait():
 # ─── MISSIONS — HELPERS DB ───────────────────────────────────────────────────
 
 
-async def _get_active_mission(guild_id: int) -> Optional[dict]:
-    """Retourne la mission active (status='active') ou None."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id, template_id, current_step, started_at, step_message_id, "
-                "step_channel_id, step_started_at, current_progress "
-                "FROM missions WHERE guild_id=? AND status='active' "
-                "ORDER BY started_at DESC LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            return None
-        template = lore.get_mission_template(row[1])
-        if not template:
-            return None
-        return {
-            "id": int(row[0]),
-            "template_id": row[1],
-            "template": template,
-            "current_step": int(row[2]),
-            "started_at": row[3],
-            "step_message_id": int(row[4]) if row[4] else None,
-            "step_channel_id": int(row[5]) if row[5] else None,
-            "step_started_at": row[6],
-            "current_progress": int(row[7] or 0),
-            "current_step_def": template["steps"][int(row[2])] if int(row[2]) < len(template["steps"]) else None,
-        }
-    except Exception as ex:
-        print(f"[_get_active_mission] {ex}")
-        return None
 
 
 async def _add_mission_participant(mission_id: int, step_index: int, user_id: int) -> bool:
@@ -42628,14 +41581,12 @@ async def _count_mission_participants(mission_id: int, step_index: int) -> int:
 async def _advance_mission_step(mission_id: int) -> Optional[dict]:
     """Passe à l'étape suivante. Retourne la nouvelle étape ou None si mission finie."""
     try:
-        mission = await _get_active_mission_by_id(mission_id)
         if not mission:
             return None
         template = mission["template"]
         next_idx = mission["current_step"] + 1
         if next_idx >= len(template["steps"]):
             # Mission terminée — finalize
-            await _finalize_mission(mission_id)
             return None
         async with get_db() as db:
             await db.execute(
@@ -42651,251 +41602,12 @@ async def _advance_mission_step(mission_id: int) -> Optional[dict]:
         return None
 
 
-async def _get_active_mission_by_id(mission_id: int) -> Optional[dict]:
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id, template_id, current_step, guild_id FROM missions "
-                "WHERE id=? AND status='active'",
-                (mission_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            return None
-        template = lore.get_mission_template(row[1])
-        return {
-            "id": int(row[0]),
-            "template_id": row[1],
-            "template": template,
-            "current_step": int(row[2]),
-            "guild_id": int(row[3]),
-        }
-    except Exception:
-        return None
 
 
-async def _finalize_mission(mission_id: int):
-    """Mission terminée — distribuer final_reward, marquer status='completed'."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT template_id, guild_id FROM missions WHERE id=?",
-                (mission_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            return
-        template = lore.get_mission_template(row[0])
-        guild_id = int(row[1])
-        if not template:
-            return
-        final = template.get("final_reward", {})
-        min_steps = int(final.get("min_steps_participated", 4))
-
-        # Trouver les users qui ont participé à au moins min_steps étapes
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT user_id, COUNT(DISTINCT step_index) AS steps "
-                "FROM mission_step_progress WHERE mission_id=? "
-                "GROUP BY user_id HAVING steps >= ?",
-                (mission_id, min_steps),
-            ) as cur:
-                eligible = await cur.fetchall()
-
-        # Distribuer le final reward
-        coins = int(final.get("coins", 0))
-        for uid, _ in eligible:
-            if coins > 0:
-                try:
-                    await add_coins(guild_id, int(uid), coins)
-                except Exception:
-                    pass
-
-        # Marquer la mission terminée
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE missions SET status='completed', ended_at=CURRENT_TIMESTAMP WHERE id=?",
-                (mission_id,),
-            )
-            await db.commit()
-
-        # Annoncer la fin dans le hub
-        try:
-            guild = bot.get_guild(guild_id)
-            if guild:
-                c = await cfg(guild_id)
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                hub_ch = guild.get_channel(hub_id) if hub_id else None
-                if hub_ch and await _is_chatty_channel(hub_ch):
-                    e = discord.Embed(
-                        title=f"🏆 Mission terminée : {template['title']}",
-                        description=(
-                            f"**Récompense bonus distribuée à `{len(eligible)}` héros** "
-                            f"(participants à au moins {min_steps}/{len(template['steps'])} étapes) :\n"
-                            f"💰 **+{coins:,} 🪙** chacun\n"
-                            f"🎖️ Badge : **{final.get('badge', 'Héros de Mission')}**\n\n"
-                            f"_Une nouvelle mission arrivera bientôt…_"
-                        ),
-                        color=0xF1C40F,
-                        timestamp=datetime.now(timezone.utc),
-                    )
-                    e.set_footer(text=f"Mission · {template['id']}")
-                    LIFETIME = 24 * 3600
-                    msg = await hub_ch.send(
-                        embed=e,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME,
-                    )
-                    try:
-                        await _register_for_cleanup(msg, LIFETIME, 'mission_complete')
-                    except Exception:
-                        pass
-        except Exception as ex:
-            print(f"[_finalize_mission announce] {ex}")
-        print(f"[MISSION COMPLETE] mid={mission_id} eligible={len(eligible)}")
-    except Exception as ex:
-        print(f"[_finalize_mission] {ex}")
 
 
-async def _post_mission_step(guild, mission: dict, step_index: int):
-    """Poste/repost l'étape en cours dans le hub, avec view si button_click."""
-    try:
-        c = await cfg(guild.id)
-        hub_id = int(c.get('hub_channel', 0) or 0)
-        hub_ch = guild.get_channel(hub_id) if hub_id else None
-        if not hub_ch or not await _is_chatty_channel(hub_ch):
-            return
-
-        template = mission["template"]
-        step = template["steps"][step_index]
-        progress_count = await _count_mission_participants(mission["id"], step_index)
-
-        # Pour goal_kind = messages_total / messages_keyword on utilise current_progress
-        # Pour les autres kinds (unique_participants, button_click, reactions_unique, event_wins,
-        # event_participations) on compte les participants uniques
-        gk = step.get("goal_kind", "")
-        goal = int(step.get("goal_count", 1))
-        if gk in ("messages_total", "messages_keyword", "event_wins", "event_participations"):
-            # current_progress (compteur cumulatif)
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT current_progress FROM missions WHERE id=?",
-                    (mission["id"],),
-                ) as cur:
-                    row = await cur.fetchone()
-            current = int(row[0]) if row and row[0] else 0
-        else:
-            # unique_participants / button_click / reactions_unique → count distinct user_id
-            current = progress_count
-
-        bar_filled = int((min(current, goal) / max(goal, 1)) * 20)
-        bar = "█" * bar_filled + "░" * (20 - bar_filled)
-        pct = int((min(current, goal) / max(goal, 1)) * 100)
-
-        chapter_link_str = ""
-        if template.get("lore_link"):
-            ch = lore.get_chapter_by_id(template["lore_link"])
-            if ch:
-                chapter_link_str = f"\n📖 _Lié au chapitre : {ch['emoji']} **{ch['title']}**_"
-
-        e = discord.Embed(
-            title=f"🎯 {template['title']} — Étape {step_index + 1}/{len(template['steps'])}",
-            description=(
-                f"**{step['title']}**\n\n"
-                f"{step['description']}\n\n"
-                f"**Progression :** `{current}/{goal}` `{pct}%`\n"
-                f"`{bar}`\n\n"
-                f"💰 Récompense par participant : **{step.get('reward_coins_per_user', 0)} 🪙**"
-                f"{chapter_link_str}"
-            ),
-            color=0x3498DB,
-            timestamp=datetime.now(timezone.utc),
-        )
-        e.set_footer(text=f"Mission · {template['title']}")
-
-        view = None
-        if gk == "button_click":
-            view = MissionStepClickView(mission["id"], step_index, step.get("button_label", "Participer"))
-
-        try:
-            sent = await hub_ch.send(
-                embed=e,
-                view=view,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
-            # Update mission DB with new step_message_id pour edit ultérieur
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE missions SET step_message_id=?, step_channel_id=? WHERE id=?",
-                    (sent.id, hub_ch.id, mission["id"]),
-                )
-                await db.commit()
-        except Exception as ex:
-            print(f"[_post_mission_step send] {ex}")
-    except Exception as ex:
-        print(f"[_post_mission_step] {ex}")
 
 
-async def _start_new_mission(guild) -> Optional[int]:
-    """Lance une nouvelle mission liée au chapitre actuel. Retourne mission_id ou None."""
-    try:
-        # 1 seule mission active à la fois
-        existing = await _get_active_mission(guild.id)
-        if existing:
-            print(f"[_start_new_mission] mission déjà active gid={guild.id} mid={existing['id']}")
-            return None
-
-        state = await _get_lore_state(guild.id)
-        template = lore.pick_random_mission_for_chapter(state["chapter"]["id"])
-        async with get_db() as db:
-            cur = await db.execute(
-                "INSERT INTO missions(guild_id, template_id, current_step, status) "
-                "VALUES(?, ?, 0, 'active')",
-                (guild.id, template["id"]),
-            )
-            mid = cur.lastrowid
-            await db.commit()
-
-        # Annonce intro de la mission
-        c = await cfg(guild.id)
-        hub_id = int(c.get('hub_channel', 0) or 0)
-        hub_ch = guild.get_channel(hub_id) if hub_id else None
-        if hub_ch and await _is_chatty_channel(hub_ch):
-            chapter_link_str = ""
-            if template.get("lore_link"):
-                ch = lore.get_chapter_by_id(template["lore_link"])
-                if ch:
-                    chapter_link_str = f"\n\n📖 _Cette mission est liée au chapitre **{ch['emoji']} {ch['title']}**._"
-            e = discord.Embed(
-                title=f"🎯 NOUVELLE MISSION : {template['title']}",
-                description=(
-                    f"{template['intro']}\n\n"
-                    f"**5 étapes à compléter ensemble.**\n"
-                    f"Chaque étape débloque la suivante quand l'objectif collectif est atteint.\n"
-                    f"_Plus tu participes, plus tu gagnes._\n"
-                    f"{chapter_link_str}"
-                ),
-                color=0x9B59B6,
-                timestamp=datetime.now(timezone.utc),
-            )
-            e.set_footer(text=f"Mission lancée · ID #{mid}")
-            try:
-                intro_msg = await hub_ch.send(
-                    embed=e,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
-            except Exception as ex:
-                print(f"[_start_new_mission intro] {ex}")
-
-        # Poster la première étape
-        mission_full = await _get_active_mission(guild.id)
-        if mission_full:
-            await _post_mission_step(guild, mission_full, 0)
-        print(f"[MISSION START] guild={guild.id} mid={mid} template={template['id']}")
-        return int(mid)
-    except Exception as ex:
-        print(f"[_start_new_mission] {ex}")
-        return None
 
 
 # ─── MISSION TRACKING (on_message hook) ──────────────────────────────────────
@@ -42906,7 +41618,6 @@ async def _track_message_for_missions(msg):
     try:
         if not msg.guild or msg.author.bot:
             return
-        mission = await _get_active_mission(msg.guild.id)
         if not mission or not mission.get("current_step_def"):
             return
         step = mission["current_step_def"]
@@ -42947,7 +41658,6 @@ async def _track_reaction_for_missions(payload):
         guild = bot.get_guild(payload.guild_id)
         if not guild:
             return
-        mission = await _get_active_mission(guild.id)
         if not mission or not mission.get("current_step_def"):
             return
         step = mission["current_step_def"]
@@ -42967,7 +41677,6 @@ async def _track_reaction_for_missions(payload):
 async def _check_mission_step_advance(guild, mission_id: int):
     """Check si l'étape actuelle est complète. Si oui : distribute rewards + advance."""
     try:
-        mission = await _get_active_mission(guild.id)
         if not mission or mission["id"] != mission_id or not mission.get("current_step_def"):
             return
         step = mission["current_step_def"]
@@ -43035,10 +41744,8 @@ async def _check_mission_step_advance(guild, mission_id: int):
         # Avancer
         next_step = await _advance_mission_step(mission_id)
         if next_step:
-            mission_after = await _get_active_mission(guild.id)
             if mission_after:
                 await asyncio.sleep(3)
-                await _post_mission_step(guild, mission_after, mission_after["current_step"])
         # Si next_step None, _advance_mission_step a appelé _finalize_mission
     except Exception as ex:
         print(f"[_check_mission_step_advance] {ex}")
@@ -43071,7 +41778,6 @@ class MissionStepClickView(View):
         try:
             if not i.guild:
                 return await _safe_followup(i, content="❌ Serveur uniquement.")
-            mission = await _get_active_mission(i.guild.id)
             if not mission or mission["id"] != self.mission_id:
                 return await _safe_followup(i, content="⏱️ Cette mission n'est plus active.")
             if mission["current_step"] != self.step_index:
@@ -43092,70 +41798,8 @@ class MissionStepClickView(View):
 # ─── TASK : MISSIONS RUNNER (1x/jour, lance une nouvelle mission si conditions) ─
 
 
-@tasks.loop(hours=24)
-async def missions_runner_task():
-    """Chaque jour, vérifie si on doit lancer une nouvelle mission.
-
-    Condition : pas de mission active ET (1er du mois OU dernière mission > 30j).
-    """
-    try:
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                if not hub_id:
-                    continue
-                hub_ch = guild.get_channel(hub_id)
-                if not hub_ch or not await _is_chatty_channel(hub_ch):
-                    continue
-
-                # Si une mission est déjà active, on ne fait rien
-                existing = await _get_active_mission(guild.id)
-                if existing:
-                    continue
-
-                # On lance le 1er du mois OU si dernière mission > 30j
-                try:
-                    from zoneinfo import ZoneInfo
-                    now_fr = datetime.now(ZoneInfo("Europe/Paris"))
-                except Exception:
-                    now_fr = datetime.now(timezone.utc)
-                is_first_of_month = now_fr.day == 1
-                should_start = is_first_of_month
-                if not should_start:
-                    try:
-                        async with get_db() as db:
-                            async with db.execute(
-                                "SELECT ended_at FROM missions WHERE guild_id=? AND status='completed' "
-                                "ORDER BY ended_at DESC LIMIT 1",
-                                (guild.id,),
-                            ) as cur:
-                                row = await cur.fetchone()
-                        if row and row[0]:
-                            last_end = datetime.fromisoformat(row[0].replace('Z', '+00:00')) \
-                                if 'T' in str(row[0]) \
-                                else datetime.strptime(row[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                            if (datetime.now(timezone.utc) - last_end).days >= 30:
-                                should_start = True
-                        else:
-                            # Aucune mission complétée encore → lancer une première après 7j d'activité du serveur
-                            should_start = True
-                    except Exception:
-                        pass
-
-                if should_start:
-                    await _start_new_mission(guild)
-            except Exception as ex:
-                print(f"[missions_runner guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[missions_runner_task] {ex}")
 
 
-@missions_runner_task.before_loop
-async def _missions_runner_wait():
-    await bot.wait_until_ready()
 
 
 # ─── HUB BUTTONS : 📖 Histoire + 🎯 Mission ──────────────────────────────────
@@ -43194,7 +41838,6 @@ async def npc_force_post_cmd(i: discord.Interaction, npc: str, context: str = "i
         hub_ch = i.guild.get_channel(hub_id) if hub_id else None
         if not hub_ch:
             return await _safe_followup(i, content="❌ Hub non configuré.")
-        ok = await _post_npc_line(hub_ch, npc, context, ttl_seconds=2 * 3600)
         if ok:
             await _safe_followup(i, content=f"✅ {npc} a parlé ({context}).")
         else:
@@ -43222,40 +41865,8 @@ async def _post_studio_tip(channel) -> bool:
         return False
 
 
-@tasks.loop(hours=24)
-async def daily_studio_tip_task():
-    """Une fois par jour à 9h FR, poste un tip Studio dans le hub."""
-    try:
-        # Check timing : ne poster qu'entre 8h et 11h FR
-        try:
-            from zoneinfo import ZoneInfo
-            h = datetime.now(ZoneInfo("Europe/Paris")).hour
-        except Exception:
-            h = datetime.now(timezone.utc).hour
-        if not (8 <= h < 11):
-            return
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                if not hub_id:
-                    continue
-                hub_ch = guild.get_channel(hub_id)
-                if not hub_ch or not await _is_chatty_channel(hub_ch):
-                    continue
-                await _post_studio_tip(hub_ch)
-                print(f"[daily_studio_tip] guild={guild.id} posted")
-            except Exception as ex:
-                print(f"[daily_studio_tip guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[daily_studio_tip_task] {ex}")
 
 
-@daily_studio_tip_task.before_loop
-async def _studio_tip_wait():
-    await bot.wait_until_ready()
 
 
 # ─── SPEEDRUN — Helpers + Modal + Views ──────────────────────────────────────
@@ -44039,63 +42650,6 @@ def _release_ts(c: dict) -> int:
 
 
 
-@tasks.loop(minutes=10)
-async def release_countdown_task():
-    """À l'échéance de la sortie : poste UNE annonce festive dans un salon chatty
-    (allowed_mentions=none) et marque release_announced=1 (anti-doublon persistant).
-    FAIL-OPEN, supervisée. No-op tant que la date n'est pas atteinte / pas configurée."""
-    try:
-        for guild in list(bot.guilds):
-            try:
-                c = await cfg(guild.id)
-                ts = _release_ts(c)
-                if ts <= 0:
-                    continue  # pas de sortie configurée
-                if int(c.get('release_announced', 0) or 0):
-                    continue  # annonce déjà postée
-                if int(now().timestamp()) < ts:
-                    continue  # pas encore l'heure
-                # Marque AVANT de poster (anti-doublon même si l'envoi échoue/relance).
-                try:
-                    await db_set(guild.id, 'release_announced', 1)
-                except Exception:
-                    continue  # si on ne peut pas marquer, on ne risque pas de spammer
-
-                ch = None
-                ch_id = int(c.get('release_announce_channel', 0) or 0)
-                if ch_id:
-                    cand = guild.get_channel(ch_id)
-                    if cand and await _is_chatty_channel(cand, allow_announce=True):
-                        ch = cand
-                if ch is None:
-                    ch = await _find_event_recap_channel(guild)
-                if ch is None:
-                    continue
-
-                label = str(c.get('release_countdown_label', 'la sortie') or 'la sortie')[:80]
-                embed = discord.Embed(
-                    title="🚀 C'EST LE GRAND JOUR !",
-                    description=(
-                        f"**{label}** est enfin là ! 🎉\n\n"
-                        f"Merci à toute la communauté d'avoir patienté. "
-                        f"Les membres présents avant aujourd'hui gardent leur titre "
-                        f"**🏆 Pionnier** — visible dans la boutique de titres.\n\n"
-                        f"_On se retrouve en jeu !_"
-                    ),
-                    color=0x2ECC71,
-                    timestamp=now(),
-                )
-                try:
-                    await ch.send(
-                        embed=embed,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-                except Exception as ex:
-                    print(f"[release_countdown_task send] {ex}")
-            except Exception as ex:
-                print(f"[release_countdown_task guild] {ex}")
-    except Exception as ex:
-        print(f"[release_countdown_task] {ex}")
 
 
 
@@ -44126,87 +42680,8 @@ async def release_countdown_task():
 
 
 
-@tasks.loop(minutes=15)
-async def golden_hour_announce_task():
-    """Au début et à la fin de la golden hour, annonce dans le hub."""
-    try:
-        try:
-            from zoneinfo import ZoneInfo
-            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
-        except Exception:
-            now_fr = datetime.now(timezone.utc)
-        if now_fr.weekday() != amb.GOLDEN_HOUR_DEFAULT_DAY:
-            return
-        # Détection précise : entre 18:00-18:14 → annonce début ;
-        # entre 19:45-19:59 → annonce fin
-        is_start_window = (now_fr.hour == amb.GOLDEN_HOUR_DEFAULT_START and now_fr.minute < 15)
-        is_end_window = (now_fr.hour == amb.GOLDEN_HOUR_DEFAULT_END - 1 and now_fr.minute >= 45)
-        if not is_start_window and not is_end_window:
-            return
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                if not hub_id:
-                    continue
-                hub_ch = guild.get_channel(hub_id)
-                if not hub_ch or not await _is_chatty_channel(hub_ch):
-                    continue
-                if is_start_window:
-                    LIFETIME = 2 * 3600
-                    e = discord.Embed(
-                        title="🌅 LES HEURES DORÉES COMMENCENT !",
-                        description=(
-                            f"_Pendant les 2 prochaines heures, **tout ce que vous faites compte double**._\n\n"
-                            f"• Coins gagnés ×{amb.GOLDEN_HOUR_MULTIPLIER}\n"
-                            f"• XP gagnée ×{amb.GOLDEN_HOUR_MULTIPLIER}\n"
-                            f"• Bonus mentor ×{amb.GOLDEN_HOUR_MULTIPLIER}\n\n"
-                            f"_Active sur tous les events qui démarrent maintenant._\n"
-                            f"_Profitez-en !_"
-                        ),
-                        color=0xFFD700,
-                        timestamp=datetime.now(timezone.utc),
-                    )
-                    e.set_footer(text=f"Heures dorées · Termine à {amb.GOLDEN_HOUR_DEFAULT_END}h FR")
-                    try:
-                        msg = await hub_ch.send(
-                            embed=e,
-                            allowed_mentions=discord.AllowedMentions.none(),
-                            delete_after=LIFETIME,
-                        )
-                        await _register_for_cleanup(msg, LIFETIME, 'golden_hour_start')
-                    except Exception:
-                        pass
-                elif is_end_window:
-                    LIFETIME = 30 * 60
-                    e = discord.Embed(
-                        title="🌇 Les heures dorées se terminent dans 15 min",
-                        description=(
-                            "_Profitez encore du multiplicateur ×2 pendant ce quart d'heure._\n\n"
-                            "_La prochaine session sera dimanche prochain._"
-                        ),
-                        color=0xF39C12,
-                    )
-                    try:
-                        msg = await hub_ch.send(
-                            embed=e,
-                            allowed_mentions=discord.AllowedMentions.none(),
-                            delete_after=LIFETIME,
-                        )
-                        await _register_for_cleanup(msg, LIFETIME, 'golden_hour_end')
-                    except Exception:
-                        pass
-            except Exception as ex:
-                print(f"[golden_hour guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[golden_hour_announce_task] {ex}")
 
 
-@golden_hour_announce_task.before_loop
-async def _golden_hour_wait():
-    await bot.wait_until_ready()
 
 
 # ─── RECAP HEBDO DM (dimanche 21h FR) ────────────────────────────────────────
@@ -44309,89 +42784,8 @@ async def _build_user_recap_dm(guild_id: int, user_id: int) -> Optional[discord.
         return None
 
 
-@tasks.loop(hours=1)
-async def weekly_recap_task():
-    """Dimanche entre 21h-22h FR, envoie un recap DM à chaque actif de la semaine."""
-    # Phase 257 : RÉCAP HEBDO EN MP DÉSACTIVÉ (directive owner — zéro MP membre).
-    # Le récap reste consultable dans le hub (panneau « Mon activité »).
-    return
-    try:
-        try:
-            from zoneinfo import ZoneInfo
-            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
-        except Exception:
-            now_fr = datetime.now(timezone.utc)
-        if now_fr.weekday() != 6:  # dimanche
-            return
-        if now_fr.hour != 21:
-            return
-        week_key = _current_week_key()
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                # Trouve tous les users actifs cette semaine
-                cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT DISTINCT user_id FROM member_activity_daily WHERE guild_id=? "
-                        "AND last_ts>?",
-                        (guild.id, cutoff),
-                    ) as cur:
-                        active_uids = [int(r[0]) for r in await cur.fetchall()]
-                count = 0
-                for uid in active_uids:
-                    try:
-                        # Anti-dup : déjà envoyé cette semaine ?
-                        async with get_db() as db:
-                            async with db.execute(
-                                "SELECT 1 FROM weekly_recap_log WHERE guild_id=? AND user_id=? AND week_key=?",
-                                (guild.id, uid, week_key),
-                            ) as cur:
-                                if await cur.fetchone():
-                                    continue
-                        # Respect notif prefs (catégorie 'recap')
-                        # On utilise la cat 'alliance' comme fallback recap (toujours actif) car pas de cat 'recap'
-                        member = guild.get_member(uid)
-                        if not member or member.bot:
-                            continue
-                        # Build + envoyer DM
-                        e = await _build_user_recap_dm(guild.id, uid)
-                        if not e:
-                            continue
-                        try:
-                            await member.send(embed=e)
-                            async with get_db() as db:
-                                await db.execute(
-                                    "INSERT OR IGNORE INTO weekly_recap_log(guild_id, user_id, week_key) "
-                                    "VALUES(?, ?, ?)",
-                                    (guild.id, uid, week_key),
-                                )
-                                await db.commit()
-                            count += 1
-                            await asyncio.sleep(1)  # rate-limit DM
-                        except discord.Forbidden:
-                            # DM fermé, on log juste
-                            async with get_db() as db:
-                                await db.execute(
-                                    "INSERT OR IGNORE INTO weekly_recap_log(guild_id, user_id, week_key) "
-                                    "VALUES(?, ?, ?)",
-                                    (guild.id, uid, week_key),
-                                )
-                                await db.commit()
-                    except Exception as ex:
-                        print(f"[weekly_recap user={uid}] {ex}")
-                print(f"[weekly_recap] guild={guild.id} sent={count}")
-            except Exception as ex:
-                print(f"[weekly_recap guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[weekly_recap_task] {ex}")
 
 
-@weekly_recap_task.before_loop
-async def _weekly_recap_wait():
-    await bot.wait_until_ready()
 
 
 # ─── CONVERSATION STARTERS (anti-silence dans le hub) ────────────────────────
@@ -44543,29 +42937,8 @@ class NarrativeChoiceView(View):
 
 
 
-@tasks.loop(hours=1)
-async def narrative_choices_resolver_task():
-    """Toutes les heures, résout les votes narratifs dont la deadline est passée."""
-    try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id FROM narrative_votes WHERE status='open' AND deadline < ?",
-                (now_iso,),
-            ) as cur:
-                rows = await cur.fetchall()
-        for r in rows:
-            try:
-                await asyncio.sleep(2)
-            except Exception as ex:
-                print(f"[narrative resolver nv={r[0]}] {ex}")
-    except Exception as ex:
-        print(f"[narrative_choices_resolver_task] {ex}")
 
 
-@narrative_choices_resolver_task.before_loop
-async def _narrative_resolver_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -44948,149 +43321,15 @@ NPC_WHISPERS = [
 ]
 
 
-@tasks.loop(hours=24)
-async def npc_whisper_task():
-    """Une fois par semaine (mercredi 22h FR), un NPC chuchote un teaser."""
-    try:
-        try:
-            from zoneinfo import ZoneInfo
-            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
-        except Exception:
-            now_fr = datetime.now(timezone.utc)
-        # Mercredi (2) à 22h FR
-        if now_fr.weekday() != 2 or now_fr.hour != 22:
-            return
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                if not hub_id:
-                    continue
-                hub_ch = guild.get_channel(hub_id)
-                if not hub_ch or not await _is_chatty_channel(hub_ch):
-                    continue
-                whisper = random.choice(NPC_WHISPERS)
-                npc_id = random.choice(list(lore.NPCS.keys()))
-                npc = lore.get_npc(npc_id)
-                if not npc:
-                    continue
-                LIFETIME = 48 * 3600
-                e = discord.Embed(
-                    description=f"{npc['emoji']} **{npc['name']} chuchote :**\n\n{whisper}",
-                    color=npc.get("color", 0x95A5A6),
-                    timestamp=datetime.now(timezone.utc),
-                )
-                e.set_footer(text=f"Whisper · {npc['name']}")
-                try:
-                    msg = await hub_ch.send(
-                        embed=e,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME,
-                    )
-                    await _register_for_cleanup(msg, LIFETIME, 'npc_whisper')
-                    await _log_npc_post(guild.id, npc_id, 'whisper')
-                except Exception:
-                    pass
-                print(f"[NPC WHISPER] guild={guild.id} npc={npc_id}")
-            except Exception as ex:
-                print(f"[npc_whisper guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[npc_whisper_task] {ex}")
 
 
-@npc_whisper_task.before_loop
-async def _npc_whisper_wait():
-    await bot.wait_until_ready()
 
 
 # ─── ANNIVERSAIRE SERVEUR ────────────────────────────────────────────────────
 
 
-@tasks.loop(hours=24)
-async def server_anniversary_task():
-    """Vérifie chaque jour si c'est l'anniversaire d'un serveur (guild.created_at)."""
-    try:
-        try:
-            from zoneinfo import ZoneInfo
-            today = datetime.now(ZoneInfo("Europe/Paris"))
-        except Exception:
-            today = datetime.now(timezone.utc)
-        if today.hour != 10:  # check à 10h
-            return
-        for guild in bot.guilds:
-            try:
-                if not guild.created_at:
-                    continue
-                ca = guild.created_at
-                if today.month != ca.month or today.day != ca.day:
-                    continue
-                years = today.year - ca.year
-                if years < 1:
-                    continue
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                hub_ch = guild.get_channel(hub_id) if hub_id else None
-                if not hub_ch or not await _is_chatty_channel(hub_ch):
-                    continue
-                LIFETIME = 24 * 3600
-                # Count actifs cette année
-                year_start = today.replace(month=1, day=1, hour=0, minute=0, second=0).isoformat()
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT COUNT(*) FROM activity_tracking "
-                        "WHERE guild_id=? AND last_message>?",
-                        (guild.id, year_start),
-                    ) as cur:
-                        active_count = int((await cur.fetchone() or [0])[0])
-                e = discord.Embed(
-                    title=f"🎂 ANNIVERSAIRE DU SERVEUR — {years} an{'s' if years > 1 else ''} !",
-                    description=(
-                        f"**{guild.name}** fête ses **{years} an{'s' if years > 1 else ''}** aujourd'hui.\n\n"
-                        f"📊 Cette année :\n"
-                        f"• `{active_count}` membres actifs\n"
-                        f"• `{guild.member_count}` membres au total\n\n"
-                        f"_Merci à chacun d'être là. Sans vous, ce serveur n'existerait pas._"
-                    ),
-                    color=0xFFD700,
-                    timestamp=datetime.now(timezone.utc),
-                )
-                e.set_footer(text=f"Anniversaire · {guild.created_at.strftime('%Y-%m-%d')}")
-                try:
-                    msg = await hub_ch.send(
-                        embed=e,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME,
-                    )
-                    await _register_for_cleanup(msg, LIFETIME, 'anniversary')
-                except Exception:
-                    pass
-                # Add HoF record automatique
-                try:
-                    async with get_db() as db:
-                        await db.execute(
-                            "INSERT INTO hall_of_fame_records"
-                            "(guild_id, category, record, user_id, detail, added_by) "
-                            "VALUES(?, 'anniversary', ?, ?, ?, ?)",
-                            (guild.id, f"An {years}", guild.owner_id or 0,
-                             f"{active_count} actifs / {guild.member_count} membres", 0),
-                        )
-                        await db.commit()
-                except Exception:
-                    pass
-                print(f"[ANNIVERSARY] guild={guild.id} {years} ans")
-            except Exception as ex:
-                print(f"[anniversary guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[server_anniversary_task] {ex}")
 
 
-@server_anniversary_task.before_loop
-async def _anniversary_wait():
-    await bot.wait_until_ready()
 
 
 # ─── EASTER EGGS (mots magiques cachés) ──────────────────────────────────────
@@ -45288,102 +43527,8 @@ def _current_irl_season(now_dt: datetime) -> Optional[dict]:
     return None
 
 
-@tasks.loop(hours=24)
-async def irl_season_check_task():
-    """Une fois par jour, check si on entre/sort d'une saison IRL et notifie."""
-    try:
-        try:
-            from zoneinfo import ZoneInfo
-            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
-        except Exception:
-            now_fr = datetime.now(timezone.utc)
-        if now_fr.hour != 9:  # check à 9h
-            return
-        cur_season = _current_irl_season(now_fr)
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                # End : toutes les saisons actives qui ne sont plus actuelles
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT season_id FROM irl_seasons_active WHERE guild_id=? AND ended_at IS NULL",
-                        (guild.id,),
-                    ) as cur:
-                        active = [r[0] for r in await cur.fetchall()]
-                # Fermer les saisons qui ne sont plus actuelles
-                for sid in active:
-                    if not cur_season or cur_season["id"] != sid:
-                        async with get_db() as db:
-                            await db.execute(
-                                "UPDATE irl_seasons_active SET ended_at=CURRENT_TIMESTAMP "
-                                "WHERE guild_id=? AND season_id=?",
-                                (guild.id, sid),
-                            )
-                            await db.commit()
-                        # Annonce fin
-                        ended_def = next((s for s in IRL_SEASONS if s["id"] == sid), None)
-                        if ended_def:
-                            hub_id = int(c.get('hub_channel', 0) or 0)
-                            hub_ch = guild.get_channel(hub_id) if hub_id else None
-                            if hub_ch:
-                                LIFETIME = 12 * 3600
-                                try:
-                                    msg = await hub_ch.send(
-                                        embed=discord.Embed(
-                                            title=f"📅 Fin de la saison : {ended_def['name']}",
-                                            description="_Une saison se termine. Une autre arrivera bientôt._",
-                                            color=ended_def["color"],
-                                        ),
-                                        delete_after=LIFETIME,
-                                        allowed_mentions=discord.AllowedMentions.none(),
-                                    )
-                                    await _register_for_cleanup(msg, LIFETIME, 'season_end')
-                                except Exception:
-                                    pass
-                # Start : nouvelle saison qui n'était pas dans active
-                if cur_season and cur_season["id"] not in active:
-                    async with get_db() as db:
-                        await db.execute(
-                            "INSERT INTO irl_seasons_active(guild_id, season_id) VALUES(?, ?) "
-                            "ON CONFLICT(guild_id, season_id) DO NOTHING",
-                            (guild.id, cur_season["id"]),
-                        )
-                        await db.commit()
-                    # Annonce début
-                    hub_id = int(c.get('hub_channel', 0) or 0)
-                    hub_ch = guild.get_channel(hub_id) if hub_id else None
-                    if hub_ch:
-                        LIFETIME = 12 * 3600
-                        try:
-                            msg = await hub_ch.send(
-                                embed=discord.Embed(
-                                    title=f"📅 NOUVELLE SAISON : {cur_season['name']}",
-                                    description=f"_{cur_season['intro']}_\n\n_La saison court jusqu'à la date de fin._",
-                                    color=cur_season["color"],
-                                    timestamp=datetime.now(timezone.utc),
-                                ),
-                                delete_after=LIFETIME,
-                                allowed_mentions=discord.AllowedMentions.none(),
-                            )
-                            await _register_for_cleanup(msg, LIFETIME, 'season_start')
-                        except Exception:
-                            pass
-                        # Add lore memory
-                        try:
-                            await _add_lore_memory(guild.id, "season_ended", cur_season["name"])
-                        except Exception:
-                            pass
-            except Exception as ex:
-                print(f"[irl_season guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[irl_season_check_task] {ex}")
 
 
-@irl_season_check_task.before_loop
-async def _irl_season_check_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -45391,149 +43536,8 @@ async def _irl_season_check_wait():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@tasks.loop(hours=24)
-async def daily_meta_task():
-    """Une fois par jour à 8h FR : update streak collectif + post météo + reset badges hebdo."""
-    try:
-        try:
-            from zoneinfo import ZoneInfo
-            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
-        except Exception:
-            now_fr = datetime.now(timezone.utc)
-        if now_fr.hour != 8:
-            return
-        today = now_fr.strftime("%Y-%m-%d")
-        yesterday = (now_fr - timedelta(days=1)).strftime("%Y-%m-%d")
-
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                if not hub_id:
-                    continue
-                hub_ch = guild.get_channel(hub_id)
-                if not hub_ch or not await _is_chatty_channel(hub_ch):
-                    continue
-
-                # ── 1. Compter messages d'hier
-                day_start = (now_fr - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-                day_end = now_fr.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT COALESCE(SUM(hits),0) FROM member_activity_daily WHERE guild_id=? "
-                        "AND last_ts>=? AND last_ts<?",
-                        (guild.id, day_start, day_end),
-                    ) as cur:
-                        msgs_yesterday = int((await cur.fetchone() or [0])[0])
-
-                # ── 2. Update streak
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT current_streak, best_streak, last_active_day FROM server_streak WHERE guild_id=?",
-                        (guild.id,),
-                    ) as cur:
-                        row = await cur.fetchone()
-                cur_streak = int(row[0]) if row else 0
-                best_streak = int(row[1]) if row else 0
-                last_day = row[2] if row else None
-
-                if msgs_yesterday > 0:
-                    # Streak continue
-                    if last_day == (now_fr - timedelta(days=2)).strftime("%Y-%m-%d") or last_day is None:
-                        cur_streak += 1
-                    elif last_day == yesterday:
-                        # Déjà compté
-                        pass
-                    else:
-                        cur_streak = 1
-                    if cur_streak > best_streak:
-                        best_streak = cur_streak
-                    async with get_db() as db:
-                        await db.execute(
-                            "INSERT INTO server_streak(guild_id, current_streak, best_streak, last_active_day) "
-                            "VALUES(?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET "
-                            "current_streak=?, best_streak=?, last_active_day=?, updated_at=CURRENT_TIMESTAMP",
-                            (guild.id, cur_streak, best_streak, yesterday,
-                             cur_streak, best_streak, yesterday),
-                        )
-                        await db.commit()
-                else:
-                    # Pas de message hier = streak cassé
-                    if cur_streak > 0:
-                        async with get_db() as db:
-                            await db.execute(
-                                "UPDATE server_streak SET current_streak=0 WHERE guild_id=?",
-                                (guild.id,),
-                            )
-                            await db.commit()
-                        cur_streak = 0
-
-                # ── 3. Météo du serveur
-                if msgs_yesterday >= 200:
-                    weather = "🔥 Brûlant"
-                elif msgs_yesterday >= 100:
-                    weather = "☀️ Vivant"
-                elif msgs_yesterday >= 50:
-                    weather = "🌤️ Doux"
-                elif msgs_yesterday >= 20:
-                    weather = "🌥️ Calme"
-                elif msgs_yesterday >= 5:
-                    weather = "🌧️ Pluvieux"
-                else:
-                    weather = "❄️ Glacial"
-
-                async with get_db() as db:
-                    await db.execute(
-                        "INSERT INTO server_weather_log(guild_id, day, weather, activity_score) "
-                        "VALUES(?,?,?,?) ON CONFLICT(guild_id, day) DO NOTHING",
-                        (guild.id, yesterday, weather, msgs_yesterday),
-                    )
-                    await db.commit()
-
-                # ── 4. Post météo + streak
-                LIFETIME = 22 * 3600
-                streak_milestone = ""
-                if cur_streak == 30:
-                    streak_milestone = "\n\n🎉 **30 jours d'affilée !** La guilde a débloqué un palier."
-                elif cur_streak == 100:
-                    streak_milestone = "\n\n🌟 **100 JOURS !** La guilde entre dans la légende."
-                elif cur_streak == 365:
-                    streak_milestone = "\n\n👑 **1 AN COMPLET !** Statut mythique."
-
-                e = discord.Embed(
-                    title=f"📅 Météo du serveur — {today}",
-                    description=(
-                        f"## {weather}\n\n"
-                        f"_Hier : `{msgs_yesterday}` messages._\n\n"
-                        f"🔥 **Streak collectif :** `{cur_streak}` jours consécutifs "
-                        f"(record : `{best_streak}`)"
-                        + streak_milestone
-                    ),
-                    color=0x3498DB if cur_streak > 0 else 0x95A5A6,
-                    timestamp=datetime.now(timezone.utc),
-                )
-                e.set_footer(text="Météo daily · Continuez à parler pour garder le streak")
-                try:
-                    msg = await hub_ch.send(
-                        embed=e,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME,
-                    )
-                    await _register_for_cleanup(msg, LIFETIME, 'weather_daily')
-                except Exception:
-                    pass
-                print(f"[DAILY META] guild={guild.id} weather={weather} streak={cur_streak} msgs={msgs_yesterday}")
-            except Exception as ex:
-                print(f"[daily_meta guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[daily_meta_task] {ex}")
 
 
-@daily_meta_task.before_loop
-async def _daily_meta_wait():
-    await bot.wait_until_ready()
 
 
 
@@ -46519,30 +44523,8 @@ async def _resolve_update_vote(uv_id: int):
         print(f"[_resolve_update_vote] {ex}")
 
 
-@tasks.loop(hours=1)
-async def update_votes_resolver_task():
-    """Résout les update votes dont la deadline est passée."""
-    try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id FROM update_votes WHERE status='open' AND deadline < ?",
-                (now_iso,),
-            ) as cur:
-                rows = await cur.fetchall()
-        for r in rows:
-            try:
-                await _resolve_update_vote(int(r[0]))
-                await asyncio.sleep(2)
-            except Exception as ex:
-                print(f"[update votes resolver uv={r[0]}] {ex}")
-    except Exception as ex:
-        print(f"[update_votes_resolver_task] {ex}")
 
 
-@update_votes_resolver_task.before_loop
-async def _update_votes_resolver_wait():
-    await bot.wait_until_ready()
 
 
 # Phase 120 : retiré (debug inutilisé, ex-/narrative_force)

@@ -5,17 +5,20 @@ Tous les panneaux sont owner-only (interaction_check) et utilisent les helpers
 de ui_v2 pour rester coherents avec le design existant.
 
 Panneaux fournis :
-    - AdminMasterPanelV2     - Dashboard d'entree avec acces a chaque module
     - PermissionsPanelV2     - Permissions granulaires
-    - SocialMediaPanelV2     - Abonnements reseaux sociaux
+    - SocialMediaPanelV2     - Abonnements reseaux sociaux (onglet /configure)
     - ProtectionPanelV2      - Politique de protection (soft/review/thresholds)
-    - CommunityPanelV2       - Features communautaires (toggles)
 
 Integration dans bot.py :
-    from admin_panels_v2 import setup_admin_command, AdminMasterPanelV2
-    setup_admin_command(bot)  # ajoute /admin
+    import admin_panels_v2 as panels2026
+    panels2026.set_social_manager(mgr)          # le vrai manager, au boot
+    panels2026.set_retour(_retour_vers_configure)
 
-Le slash /admin ouvre le master panneau, qui dispatch vers les sous-panneaux.
+⚠️ IL N'Y A PLUS DE `/admin`. La commande a ete retiree, et avec elle
+`AdminMasterPanelV2` et `setup_admin_command` (purge du 16/08/2026).
+`CommunityPanelV2` est parti au meme moment avec le systeme d'animation.
+Les panneaux restants s'ouvrent depuis `/configure`, et leur bouton « Retour »
+passe par `_revenir()` — jamais par une classe supprimee.
 """
 from __future__ import annotations
 
@@ -38,12 +41,6 @@ import protection_guards
 from protection_guards import (
     load_policy, save_policy,
     ProtectionPolicy, AutoEventType,
-)
-import community_features
-from community_features import (
-    load_config as load_community_config,
-    save_config as save_community_config,
-    CommunityConfig,
 )
 # Design system
 from ui_v2 import Palette
@@ -106,120 +103,8 @@ class _OwnerView(ui.LayoutView):
 # MASTER PANEL
 # =============================================================================
 
-class AdminMasterPanelV2(_OwnerView):
-    """Dashboard principal owner : acces a chacun des 6 modules."""
-
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        # Snapshot rapide pour l'apercu
-        perms = await load_permissions(self.guild.id)
-        cmd_count = len(perms.commands)
-        cat_count = len(perms.categories)
-
-        social_subs = []
-        try:
-            mgr = _get_or_create_manager()
-            social_subs = await mgr.list_subscriptions(self.guild.id)
-        except Exception:
-            pass
-
-        policy = await load_policy(self.guild.id)
-        comm_cfg = await load_community_config(self.guild.id)
-
-        self.clear_items()
-
-        b_perms = ui.Button(label=f"🔐 {Mod.PERMISSIONS}", style=discord.ButtonStyle.primary, custom_id="adm_perms")
-        b_perms.callback = self._cb_perms
-        b_social = ui.Button(label="📡 Reseaux sociaux", style=discord.ButtonStyle.primary, custom_id="adm_social")
-        b_social.callback = self._cb_social
-        b_prot = ui.Button(label=f"🛡️ {Mod.PROTECTION}", style=discord.ButtonStyle.primary, custom_id="adm_prot")
-        b_prot.callback = self._cb_prot
-        b_comm = ui.Button(label=f"💬 {Mod.ENGAGEMENT}", style=discord.ButtonStyle.primary, custom_id="adm_comm")
-        b_comm.callback = self._cb_comm
-        b_close = ui.Button(label=A.CLOSE_ICON, style=discord.ButtonStyle.secondary, custom_id="adm_close")
-        b_close.callback = self._cb_close
-
-        protection_status = []
-        if policy.soft_mode:
-            protection_status.append("Soft mode activé")
-        if policy.review_mode:
-            protection_status.append("Review mode activé")
-        if not protection_status:
-            protection_status.append(f"{len(policy.confidence_thresholds)} types d'événements configurés")
-
-        items = [
-            _title(f"⚙️ Tableau de bord — {self.guild.name}"),
-            _subtitle("Configuration centralisée des nouveaux modules 2026"),
-            _divider(),
-            _title("📊 Aperçu", level=3),
-            _kv([
-                ("🔐 Permissions", f"{cmd_count} commande(s), {cat_count} catégorie(s) personnalisées"),
-                ("📡 Réseaux sociaux", f"{len(social_subs)} abonnement(s) actif(s)"),
-                ("🛡️ Protection", " · ".join(protection_status)),
-                ("💬 Engagement", _summary_community(comm_cfg)),
-            ]),
-            _divider(),
-            ui.ActionRow(b_perms, b_social, b_prot),
-            ui.ActionRow(b_comm, b_close),
-        ]
-        self.add_item(_container(*items, color=Palette.PRIMARY))
-
-        if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _cb_perms(self, i: discord.Interaction):
-        await PermissionsPanelV2(self.owner, self.guild).render_to(i)
-
-    async def _cb_social(self, i: discord.Interaction):
-        await SocialMediaPanelV2(self.owner, self.guild).render_to(i)
-
-    async def _cb_prot(self, i: discord.Interaction):
-        await ProtectionPanelV2(self.owner, self.guild).render_to(i)
-
-    async def _cb_comm(self, i: discord.Interaction):
-        await CommunityPanelV2(self.owner, self.guild).render_to(i)
-
-    async def _cb_close(self, i: discord.Interaction):
-        # Phase 3.9 fix : i.message.delete() sur ephemeral échoue silencieusement
-        # ET ne ack pas l'interaction → "Échec de l'interaction" en rouge.
-        # Pattern bulletproof : edit_message (ack + clear UI) en premier.
-        try:
-            await i.response.edit_message(
-                content="✅ Configuration fermée. Tu peux fermer ce message via *Dismiss*.",
-                embed=None, embeds=[], view=None, attachments=[],
-            )
-        except discord.InteractionResponded:
-            try:
-                await i.edit_original_response(content="✅ Fermé", embed=None, view=None)
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[AdminMasterPanelV2 _cb_close] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.defer()
-            except Exception:
-                pass
 
 
-def _summary_community(cfg: CommunityConfig) -> str:
-    enabled = []
-    if cfg.daily_conversation_enabled:
-        enabled.append("daily")
-    if cfg.member_spotlight_enabled:
-        enabled.append("spotlight")
-    if cfg.welcome_quickstart_enabled:
-        enabled.append("welcome")
-    if cfg.activity_recognition_enabled:
-        enabled.append("réactions")
-    if cfg.inactivity_nudge_enabled:
-        enabled.append("nudge")
-    if cfg.theme_days_enabled:
-        enabled.append("thèmes")
-    if cfg.weekly_digest_enabled:
-        enabled.append("digest")
-    return ", ".join(enabled) if enabled else "rien d'activé"
 
 
 # =============================================================================
@@ -314,7 +199,7 @@ class PermissionsPanelV2(_OwnerView):
         await self.render_to(i, edit=False)
 
     async def _cb_back(self, i: discord.Interaction):
-        await AdminMasterPanelV2(self.owner, self.guild).render_to(i)
+        await _revenir(self.owner, self.guild, i)
 
 
 class PermissionsCategoriesPanel(_OwnerView):
@@ -664,10 +549,21 @@ def set_retour(fn) -> None:
 
 
 async def _revenir(owner, guild, interaction) -> None:
-    """Retour au panneau parent — `/configure` s'il est injecté."""
+    """Retour au panneau parent — `/configure`, injecté par bot.py.
+
+    ⚠️ IL N'Y A PLUS DE REPLI. Le repli était `AdminMasterPanelV2`, ouvert par
+    `/admin` — commande retirée, panneau supprimé avec la purge d'animation du
+    16/08. Sans injection, on le DIT plutôt que d'ouvrir un écran mort ou de
+    laisser l'interaction en échec.
+    """
     if _retour_configure is not None:
         return await _retour_configure(owner, guild, interaction)
-    await AdminMasterPanelV2(owner, guild).render_to(interaction)
+    try:
+        await interaction.response.send_message(
+            "⚠️ Retour indisponible — rouvrez `/configure`.", ephemeral=True)
+    except discord.InteractionResponded:
+        await interaction.followup.send(
+            "⚠️ Retour indisponible — rouvrez `/configure`.", ephemeral=True)
 
 
 async def _rendre(vue, interaction: discord.Interaction, edit: bool) -> None:
@@ -1047,7 +943,7 @@ class ProtectionPanelV2(_OwnerView):
 
         b_back = ui.Button(label=A.BACK_ICON, style=discord.ButtonStyle.secondary, custom_id="prot_back")
         async def _back(i: discord.Interaction):
-            await AdminMasterPanelV2(self.owner, self.guild).render_to(i)
+            await _revenir(self.owner, self.guild, i)
         b_back.callback = _back
 
         items = [
@@ -1186,109 +1082,17 @@ class ProtectionWhitelistPanel(_OwnerView):
 # COMMUNITY PANEL
 # =============================================================================
 
-class CommunityPanelV2(_OwnerView):
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        cfg = await load_community_config(self.guild.id)
-
-        self.clear_items()
-
-        def _toggle_btn(label: str, attr: str, custom_id: str):
-            current = getattr(cfg, attr)
-            btn = ui.Button(
-                label=f"{'✅' if current else '⬜'} {label}",
-                style=discord.ButtonStyle.success if current else discord.ButtonStyle.secondary,
-                custom_id=custom_id,
-            )
-            async def _cb(i: discord.Interaction):
-                setattr(cfg, attr, not current)
-                await save_community_config(self.guild.id, cfg)
-                await self.render_to(i)
-            btn.callback = _cb
-            return btn
-
-        b1 = _toggle_btn("Daily question", "daily_conversation_enabled", "comm_daily")
-        b2 = _toggle_btn("Member spotlight", "member_spotlight_enabled", "comm_spot")
-        b3 = _toggle_btn("Welcome quickstart", "welcome_quickstart_enabled", "comm_welc")
-        b4 = _toggle_btn("Reactions activité", "activity_recognition_enabled", "comm_act")
-        b5 = _toggle_btn("Inactivity nudge", "inactivity_nudge_enabled", "comm_nudge")
-        b6 = _toggle_btn("Theme days", "theme_days_enabled", "comm_theme")
-        b7 = _toggle_btn("Weekly digest", "weekly_digest_enabled", "comm_digest")
-
-        b_back = ui.Button(label=A.BACK_ICON, style=discord.ButtonStyle.secondary, custom_id="comm_back")
-        async def _back(i: discord.Interaction):
-            await AdminMasterPanelV2(self.owner, self.guild).render_to(i)
-        b_back.callback = _back
-
-        items = [
-            _title("💬 Engagement communautaire"),
-            _subtitle("Active les features qui font vivre ton serveur — sans spammer de pings."),
-            _divider(),
-            _body(
-                "Toutes les features respectent un **budget d'attention** : le bot ne peut pas dépasser "
-                "5 réponses subtiles/jour, 1 ping de rôle/semaine, etc. Impossible de saouler les membres."
-            ),
-            _divider(),
-            _title("Features", level=3),
-            _kv([
-                ("📅 Daily question", "Une question/jour dans un salon"),
-                ("⭐ Member spotlight", "Mise en avant hebdo d'un membre actif"),
-                ("👋 Welcome quickstart", "Accueil personnalisé avec liens utiles"),
-                ("🔥 Reactions activité", "Le bot ajoute 🔥 sur les threads dynamiques"),
-                ("💭 Inactivity nudge", "Relance subtile sur un salon silencieux"),
-                ("🎯 Theme days", "Jour à thème (Music Monday, etc.)"),
-                ("📊 Weekly digest", "Bilan hebdo des stats serveur"),
-            ]),
-            _divider(),
-            ui.ActionRow(b1, b2, b3),
-            ui.ActionRow(b4, b5, b6),
-            ui.ActionRow(b7, b_back),
-        ]
-        self.add_item(_container(*items, color=Palette.ACCENT))
-
-        if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
 
 
 # =============================================================================
 # COMMAND SETUP (a appeler depuis bot.py)
 # =============================================================================
 
-def setup_admin_command(bot: discord.Client) -> None:
-    """Enregistre le slash command /admin sur le bot.
-
-    Usage dans bot.py :
-        from admin_panels_v2 import setup_admin_command
-        setup_admin_command(bot)
-    """
-    tree = getattr(bot, "tree", None)
-    if tree is None:
-        return
-
-    @tree.command(
-        name="admin",
-        description="Tableau de bord owner (modules 2026)",
-    )
-    async def _admin_cmd(interaction: discord.Interaction):
-        if interaction.guild is None:
-            return await interaction.response.send_message(
-                "Cette commande est réservée aux serveurs.", ephemeral=True,
-            )
-        if interaction.user.id != interaction.guild.owner_id:
-            return await interaction.response.send_message(
-                Msg.NOT_OWNER, ephemeral=True,
-            )
-        view = AdminMasterPanelV2(interaction.user, interaction.guild)
-        await view.render_to(interaction, edit=False)
 
 
 __all__ = [
-    "AdminMasterPanelV2",
     "PermissionsPanelV2",
     "SocialMediaPanelV2",
     "ProtectionPanelV2",
-    "CommunityPanelV2",
     "set_social_manager",
-    "setup_admin_command",
 ]

@@ -25,7 +25,6 @@ from discord.ext import commands
 
 import permissions as perms_mod
 import protection_guards as guards_mod
-import community_features as comm_mod
 import social_media as social_mod
 from vocabulary import Message as Msg, Status as S
 
@@ -406,60 +405,12 @@ async def prot_audit(interaction: discord.Interaction, limit: int = 10):
 # /community
 # =============================================================================
 
-community_group = app_commands.Group(
-    name="community",
-    description="Configurer les features communautaires (owner only)",
-)
 
 
-_FEATURE_CHOICES = [
-    app_commands.Choice(name="Daily question",      value="daily_conversation_enabled"),
-    app_commands.Choice(name="Member spotlight",    value="member_spotlight_enabled"),
-    app_commands.Choice(name="Welcome quickstart",  value="welcome_quickstart_enabled"),
-    app_commands.Choice(name="Activity reactions",  value="activity_recognition_enabled"),
-    app_commands.Choice(name="Inactivity nudge",    value="inactivity_nudge_enabled"),
-    app_commands.Choice(name="Theme days",          value="theme_days_enabled"),
-    app_commands.Choice(name="Weekly digest",       value="weekly_digest_enabled"),
-]
 
 
-@community_group.command(name="toggle", description="Active/désactive une feature communautaire")
-@_is_owner_check()
-@app_commands.describe(feature="Feature à toggle")
-@app_commands.choices(feature=_FEATURE_CHOICES)
-async def comm_toggle(
-    interaction: discord.Interaction,
-    feature: app_commands.Choice[str],
-):
-    cfg = await comm_mod.load_config(interaction.guild.id)
-    new_state = not getattr(cfg, feature.value)
-    setattr(cfg, feature.value, new_state)
-    await comm_mod.save_config(interaction.guild.id, cfg)
-    await interaction.response.send_message(
-        f"{S.DONE_ICON} **{feature.name}** : {'✅ activée' if new_state else '❌ désactivée'}.",
-        ephemeral=True,
-    )
 
 
-@community_group.command(name="show", description="Affiche l'état des features communautaires")
-@_is_owner_check()
-async def comm_show(interaction: discord.Interaction):
-    cfg = await comm_mod.load_config(interaction.guild.id)
-    lines = ["**💬 Features communautaires** :", ""]
-    pairs = [
-        ("Daily question",      cfg.daily_conversation_enabled, cfg.daily_conversation_channel_id),
-        ("Member spotlight",    cfg.member_spotlight_enabled, cfg.member_spotlight_channel_id),
-        ("Welcome quickstart",  cfg.welcome_quickstart_enabled, cfg.welcome_quickstart_channel_id),
-        ("Activity reactions",  cfg.activity_recognition_enabled, None),
-        ("Inactivity nudge",    cfg.inactivity_nudge_enabled, None),
-        ("Theme days",          cfg.theme_days_enabled, cfg.theme_days_channel_id),
-        ("Weekly digest",       cfg.weekly_digest_enabled, cfg.weekly_digest_channel_id),
-    ]
-    for name, enabled, chan_id in pairs:
-        chan_str = f"<#{chan_id}>" if chan_id else "—"
-        state = "✅" if enabled else "❌"
-        lines.append(f"{state} **{name}** · salon : {chan_str}")
-    await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
 # =============================================================================
@@ -471,7 +422,7 @@ def setup_all_commands(bot: discord.Client) -> None:
     tree = getattr(bot, "tree", None)
     if tree is None:
         return
-    for grp in (permissions_group, social_group, protection_group, community_group):
+    for grp in (permissions_group, social_group, protection_group):
         try:
             tree.add_command(grp)
         except discord.app_commands.CommandAlreadyRegistered:
@@ -482,6 +433,5 @@ __all__ = [
     "permissions_group",
     "social_group",
     "protection_group",
-    "community_group",
     "setup_all_commands",
 ]

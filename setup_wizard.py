@@ -37,7 +37,6 @@ from vocabulary import Action as A, Status as S, Message as Msg
 
 import permissions as perms_mod
 import protection_guards as guards_mod
-import community_features as comm_mod
 
 
 DATA_DIR = module_dir("setup")
@@ -201,44 +200,6 @@ async def apply_wizard_config(state: WizardState, guild: discord.Guild) -> dict:
     except Exception as ex:
         report["errors"].append(f"protection: {ex}")
 
-    # 3. Community features
-    try:
-        cfg = await comm_mod.load_config(guild.id)
-        if state.welcome_channel_id:
-            cfg.welcome_quickstart_channel_id = state.welcome_channel_id
-            cfg.welcome_quickstart_enabled = True
-        if state.rules_channel_id:
-            cfg.welcome_quickstart_rules_channel_id = state.rules_channel_id
-        if state.help_channel_id:
-            cfg.welcome_quickstart_help_channel_id = state.help_channel_id
-
-        feature_to_attr = {
-            "daily": "daily_conversation_enabled",
-            "spotlight": "member_spotlight_enabled",
-            "welcome": "welcome_quickstart_enabled",
-            "activity": "activity_recognition_enabled",
-            "nudge": "inactivity_nudge_enabled",
-            "themes": "theme_days_enabled",
-            "digest": "weekly_digest_enabled",
-        }
-        for f in state.enabled_features:
-            attr = feature_to_attr.get(f)
-            if attr:
-                setattr(cfg, attr, True)
-
-        # Salons par defaut pour features qui ont besoin d'un salon
-        if state.announcements_channel_id:
-            if cfg.daily_conversation_enabled and not cfg.daily_conversation_channel_id:
-                cfg.daily_conversation_channel_id = state.announcements_channel_id
-            if cfg.member_spotlight_enabled and not cfg.member_spotlight_channel_id:
-                cfg.member_spotlight_channel_id = state.announcements_channel_id
-            if cfg.weekly_digest_enabled and not cfg.weekly_digest_channel_id:
-                cfg.weekly_digest_channel_id = state.announcements_channel_id
-
-        await comm_mod.save_config(guild.id, cfg)
-        report["applied"].append("community")
-    except Exception as ex:
-        report["errors"].append(f"community: {ex}")
 
     state.completed = True
     save_state(state)
