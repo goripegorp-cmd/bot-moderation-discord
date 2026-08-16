@@ -439,7 +439,7 @@ async def test_le_panneau_de_gestion_se_serialise():
     await vue.render_to(i)
 
     assert vue.to_components(), "une vue sans composant est refusée par Discord"
-    assert vue.has_components_v2
+    assert vue.has_components_v2()
     assert i.response.appels
 
 

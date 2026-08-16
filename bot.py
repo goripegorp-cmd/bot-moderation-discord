@@ -9969,6 +9969,35 @@ class _RgpdPurgeModal(Modal, title="🔒 Effacement RGPD d'un membre"):
             pass
 
 
+async def _afficher_panneau(vue, interaction, edit: bool) -> None:
+    """Affiche un panneau — et supporte une interaction DÉJÀ acquittée.
+
+    ⚠️ PIÈGE À NE PAS DÉFAIRE — « L'INTERACTION A ÉCHOUÉ », SIGNALÉ EN PROD.
+    Discord laisse 3 secondes pour acquitter. Les panneaux lisent la base avant
+    de répondre ; l'onglet Veille Roblox fait quatre lectures. Au-delà des 3 s,
+    Discord affiche « L'interaction a échoué » et refuse tout.
+
+    `_module_select` fait donc `defer()` d'abord. Mais `defer()` consomme la
+    réponse : `response.edit_message()` lève ensuite `InteractionResponded`.
+    D'où ce point de passage unique, qui choisit le bon appel selon l'état.
+
+    Ne PAS revenir à `interaction.response.edit_message()` en direct : le
+    chemin nominal est identique, seul le cas « déjà acquitté » change.
+    """
+    if edit:
+        if interaction.response.is_done():
+            await interaction.edit_original_response(
+                content=None, view=vue, embed=None, attachments=[])
+        else:
+            await interaction.response.edit_message(
+                content=None, view=vue, embed=None, attachments=[])
+    else:
+        if interaction.response.is_done():
+            await interaction.followup.send(view=vue, ephemeral=True)
+        else:
+            await interaction.response.send_message(view=vue, ephemeral=True)
+
+
 class RgpdPanelV2(LayoutView):
     """🔒 Données & RGPD (owner/admin via /configure). Droit à l'effacement (art. 17) :
     purge/anonymise toutes les données d'un membre + diagnostic de la carte RGPD."""
@@ -10011,10 +10040,7 @@ class RgpdPanelV2(LayoutView):
             discord.ui.ActionRow(b_purge, b_check, b_back),
             color=Palette.PRIMARY,
         ))
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _open_purge(self, i):
         try:
@@ -10252,16 +10278,31 @@ class MainPanelV2(LayoutView):
 
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
         await self.refresh()
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Callbacks
     # ─────────────────────────────────────────────────────────────────────────
     async def _module_select(self, i):
         valeur = i.data['values'][0]
+
+        #  ⚠️ DEFER D'ABORD — SANS ÇA, « L'INTERACTION A ÉCHOUÉ ».
+        #  Discord laisse 3 secondes pour acquitter. Chaque panneau ouvre la
+        #  base avant de répondre, et l'onglet Veille Roblox fait QUATRE
+        #  lectures (config veille, config news, diagnostic, actif). Sur un
+        #  démarrage à froid, les 3 secondes tombent et Discord refuse tout —
+        #  défaut constaté en production le 16/08 par le propriétaire.
+        #
+        #  `defer()` acquitte immédiatement et laisse 15 minutes pour éditer.
+        #  Il consomme la réponse, d'où `_afficher_panneau()` côté panneaux :
+        #  ces deux moitiés ne se séparent pas.
+        try:
+            await i.response.defer()
+        except Exception as ex:
+            #  Déjà acquittée, ou expirée : on continue quand même, les
+            #  panneaux savent éditer une réponse existante.
+            print(f"[MainPanelV2 _module_select defer] {ex}")
+
         # Résolution paresseuse : ces classes sont définies plus bas dans bot.py.
         panneaux = {
             'protections': lambda: ProtPanelV2(self.u, self.g),
@@ -10587,10 +10628,7 @@ class AntiRaidPanelV2(LayoutView):
         ]
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_scan(self, i):
         # Repris tel quel de l'ancien panneau anti-raid : le scan est long, on acquitte
@@ -10720,10 +10758,7 @@ class _AntiRaidActionPickerV2(LayoutView):
         ]
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _set(self, i, action):
         try:
@@ -13449,10 +13484,7 @@ class LogsPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.INFO if log_ch else Palette.NEUTRAL))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_set_channel(self, i):
         async def _save_log_channel(guild_id: int, channel_id: int):
@@ -13766,10 +13798,7 @@ class LogsRoutingPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.INFO))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_event_routing(self, i):
         v = LogsEventRoutingPanelV2(self.u, self.g)
@@ -13865,10 +13894,7 @@ class LogLevelPanelV2(LayoutView):
         b_back.callback = self._cb_back
         items.append(discord.ui.ActionRow(b_ch, b_tog, b_back))
         self.add_item(v2_container(*items, color=Palette.INFO))
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_pick_channel(self, i):
         cats = self._LEVELS[self.level_key]['cats']
@@ -13976,10 +14002,7 @@ class LogsEventRoutingPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.INFO))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_cat(self, i):
         try:
@@ -14086,10 +14109,7 @@ class LogsCategoriesPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_select(self, i):
         try:
@@ -14196,10 +14216,7 @@ class LogsEventsPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_pick_cat(self, i):
         try:
@@ -14330,10 +14347,7 @@ class LogsExclusionsPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_pick_event(self, i):
         try:
@@ -14431,10 +14445,7 @@ class ProtPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.INFO))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_sel(self, interaction):
         val = interaction.data['values'][0]
@@ -14667,10 +14678,7 @@ class ProtDetailV2(LayoutView):
         color = Palette.SUCCESS if on else Palette.DANGER
         self.add_item(v2_container(*items, color=color))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_toggle(self, i):
         c = await cfg(self.g.id)
@@ -14815,10 +14823,7 @@ class ImageConfigPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.INFO))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_select(self, i):
         await db_set(self.g.id, 'image_allowed', i.data.get('values', []))
@@ -14954,10 +14959,7 @@ class BadwordsConfigPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.INFO))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     # ─────────── Callbacks Mots interdits ───────────
 
@@ -15185,10 +15187,7 @@ class _BadwordsSanctionActionView(LayoutView):
         ]
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _set(self, i, action: str):
         if action not in ('mute', 'kick', 'ban'):
@@ -15253,10 +15252,7 @@ class LinkConfigPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.INFO))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_add_dom(self, i):
         modal = AddDomainModal(self.g, self.u)
@@ -15576,10 +15572,7 @@ class ActionConfigPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.INFO))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _set(self, i, act):
         ak = self._get_action_key()
@@ -15720,10 +15713,7 @@ class AltConfigPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_toggle(self, i):
         c = await cfg(self.g.id)
@@ -15889,10 +15879,7 @@ class AltScanResultsPanelV2(LayoutView):
 
     async def render_to(self, interaction, *, edit=True):
         self._build()
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def render_after_defer(self, interaction):
         self._build()
@@ -16061,10 +16048,7 @@ class AltDetectionsPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_prev(self, i):
         if self.page > 0:
@@ -16182,10 +16166,7 @@ class SuspectScanPanelV2(LayoutView):
 
     async def render_to(self, interaction, *, edit=True):
         self._build()
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def render_after_defer(self, interaction):
         self._build()
@@ -16732,10 +16713,7 @@ class ModerationPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.WARNING))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _open_channel_picker(self, interaction, key, label):
         """Phase 3.0k : V2 native picker (plus de transition V2->V1 qui plantait)."""
@@ -16868,10 +16846,7 @@ class ImmunePanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.PREMIUM))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_add_role(self, i):
         # Phase 21 : RoleSelect natif (affiche TOUS les rôles via Discord)
@@ -17173,10 +17148,7 @@ class ImmuneRemoveViewV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_role(self, i):
         # Phase 3.0d : pagination, plus de truncation a 25
@@ -18094,10 +18066,7 @@ class V2GenericChannelPicker(LayoutView):
         self.add_item(v2_container(*items, color=discord.Color(self.color)))
 
     async def render_to(self, interaction, *, edit=True):
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
 
 
@@ -18215,10 +18184,7 @@ class V2GenericRolePicker(LayoutView):
         self.add_item(v2_container(*items, color=discord.Color(self.color)))
 
     async def render_to(self, interaction, *, edit=True):
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
 
 
@@ -19272,10 +19238,7 @@ class ChanPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.WARNING))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_add(self, i):
         # Phase 3.0k : V2 native picker - on select va vers EditChanCfgV2
@@ -19346,10 +19309,7 @@ class _ChanPickerV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.WARNING))
 
     async def render_to(self, interaction, *, edit=True):
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
 
 class ChanSelectPaginatedView(View):
@@ -19496,10 +19456,7 @@ class EditChanCfgV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.WARNING))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _toggle(self, i, key, default=True):
         conf = await self._get_conf()
@@ -19596,10 +19553,7 @@ class TicketMainPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_staff(self, i):
         # Phase 3.0k : V2 native picker
@@ -19785,10 +19739,7 @@ class EditPanelSelectViewV2(LayoutView):
 
     async def render_to(self, interaction, *, edit=True):
         self._build()
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _cb_select(self, i):
         pid = i.data['values'][0]
@@ -19903,10 +19854,7 @@ class PanelEditViewV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     # Phase 16 : Helper de fallback erreur pour TOUS les boutons (pattern robuste)
     async def _safe_error(self, i, ex):
@@ -20642,10 +20590,7 @@ class SendPanelPaginatedView(LayoutView):
 
     async def render_to(self, interaction, *, edit=True):
         """V2 render — sans embed (V2 messages ne peuvent pas avoir d'embed)."""
-        if edit:
-            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _afficher_panneau(self, interaction, edit)
 
     async def _prev(self, i):
         try:
@@ -21642,6 +21587,9 @@ async def on_ready():
     # On ne re-sync QUE si l'ensemble des commandes a changé depuis le dernier
     # boot (gain quota Discord + boot plus rapide). FORCE_SYNC=1 force le sync.
     # FAIL-SAFE : tout doute/erreur de hash → on SYNC (comportement préservé).
+    #  Vrai dès qu'un sync global a réellement eu lieu : c'est LUI qui décide
+    #  si la propagation par guilde (instantanée) vaut le coup juste après.
+    _sync_effectue = False
     try:
         _force_sync = os.getenv("FORCE_SYNC", "0").strip() == "1"
         _new_hash = None
@@ -21662,6 +21610,7 @@ async def on_ready():
             print("✅ Commandes inchangées (hash identique) — sync global SKIPPÉ")
         else:
             synced = await bot.tree.sync()
+            _sync_effectue = True
             print(f"✅ {len(synced)} commandes synchronisées:")
             for cmd in synced:
                 print(f"   - /{cmd.name}")
@@ -21678,12 +21627,41 @@ async def on_ready():
         print(f"❌ Erreur sync global: {ex}")
         try:
             synced = await bot.tree.sync()
+            _sync_effectue = True
             print(f"✅ {len(synced)} commandes synchronisées (fallback):")
             for cmd in synced:
                 print(f"   - /{cmd.name}")
         except Exception as ex2:
             print(f"❌ Erreur sync global (fallback): {ex2}")
-    
+
+    # ═══════════════ SYNC PAR GUILDE — PROPAGATION IMMÉDIATE ═══════════════
+    #
+    #  ⚠️ POURQUOI CE BLOC EXISTE. Le sync ci-dessus est GLOBAL : Discord met
+    #  jusqu'à UNE HEURE à propager une commande globale. Le propriétaire a
+    #  signalé le 16/08 ne pas voir `/rellseas` en tapant `/` — la commande
+    #  était pourtant bien dans l'arbre (vérifié à l'exécution). C'était la
+    #  propagation, pas le code.
+    #
+    #  Un sync PAR GUILDE est instantané. Discord fait primer la copie de
+    #  guilde sur la globale du même nom : aucun doublon à l'affichage.
+    #
+    #  Fait uniquement quand le hash a changé — c'est-à-dire quand une commande
+    #  a réellement bougé — pour ne pas brûler le quota à chaque redémarrage.
+    #  Fail-open par guilde : une guilde qui refuse n'empêche pas les autres.
+    try:
+        if _sync_effectue:
+            _ok = 0
+            for _g in list(bot.guilds):
+                try:
+                    bot.tree.copy_global_to(guild=_g)
+                    await bot.tree.sync(guild=_g)
+                    _ok += 1
+                except Exception as _gex:
+                    print(f"⚠️ sync guilde {_g.id} échouée (non bloquant): {_gex}")
+            print(f"✅ Commandes propagées immédiatement sur {_ok}/{len(bot.guilds)} serveur(s)")
+    except Exception as _sgex:
+        print(f"⚠️ sync par guilde indisponible (non bloquant): {_sgex}")
+
     # ═══════════════ INITIALISER LE TRACKING VOCAL ═══════════════
     # Tracker tous les membres déjà en vocal au démarrage
     vocal_count = 0

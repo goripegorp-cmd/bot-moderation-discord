@@ -241,7 +241,7 @@ async def test_le_panneau_social_se_construit_et_se_serialise():
 
     payload = vue.to_components()
     assert payload, "une vue sans composant est refusée par Discord"
-    assert vue.has_components_v2, "Components V2 attendu"
+    assert vue.has_components_v2(), "Components V2 attendu"
     assert i.response.appels, "le panneau devait s'afficher"
 
 

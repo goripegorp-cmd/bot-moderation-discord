@@ -264,7 +264,7 @@ def test_la_fiche_se_serialise_sous_les_limites_de_lapi(flux):
 
     assert payload, "une vue sans aucun composant est refusée par Discord"
     assert _compter(payload) <= 40, "40 composants maximum par message"
-    assert vue.has_components_v2, "Components V2 attendu, jamais un embed hérité"
+    assert vue.has_components_v2(), "Components V2 attendu, jamais un embed hérité"
 
 
 def test_le_lien_de_la_fiche_est_reconstruit_pas_recopie():
@@ -286,4 +286,4 @@ def test_la_fiche_dactualite_se_serialise_aussi():
     vue = roblox_panneau.construire_actu(billet)
 
     assert _compter(vue.to_components()) <= 40
-    assert vue.has_components_v2
+    assert vue.has_components_v2()
