@@ -71,9 +71,44 @@ pip install "discord.py>=2.7,<3" aiosqlite aiohttp python-dotenv matplotlib pyte
 | # | Chantier | État |
 |---|---|---|
 | 1 | Effacer les marques de publication Roblox | ✅ **LIVRÉ** — bouton ♻️ |
-| 2 | Onglet « Réseaux sociaux » dans `/configure` | ⛔ à écrire |
-| 3 | Purger cadeaux, boss, salons d'événements | ⛔ à faire |
-| 4 | Remettre `/rellseas`, configurable | ⛔ à écrire |
+| 2 | Onglet « Réseaux sociaux » dans `/configure` | ✅ **LIVRÉ** le 16/08 |
+| 3 | Purger cadeaux, boss, salons d'événements | ✅ **LIVRÉ** le 16/08 — périmètre nommé |
+| 4 | Remettre `/rellseas`, configurable | ✅ **LIVRÉ** le 16/08 |
+
+### ⚠️ CE QUI A ÉTÉ TROUVÉ EN CHEMIN LE 16/08 — à ne pas réapprendre
+
+**1. L'envoi Roblox annonçait des publications fantômes.** `publier()` appelait
+`webhook_send()` puis rendait `True` sans regarder le retour. Or `webhook_send`
+n'a aucun chemin qui lève : elle avale tout et rend `None`. Le bouton annonçait
+« 3 fiches publiées » sur un salon qui n'avait rien reçu — **et `marquer_publie`
+écrivait la marque, donc l'article était perdu pour toujours.** C'était bien le
+maillon que ce fichier déclarait non observé. Corrigé, 16 tests l'enferment.
+
+**2. `outils/purge_modules.py` allait détruire ce qu'il fallait garder.** Sa
+liste `GARDER` datait d'avant la réintroduction de Roblox, du social et de
+l'activité : l'aperçu proposait de supprimer `roblox_veille`, `roblox_panneau`,
+`roblox_news`, `social_media`, `admin_panels_v2` et les neuf `activite_*`.
+**Liste corrigée**, mais relire l'aperçu avant tout `--apply` reste la règle.
+
+**3. Le panneau social existait déjà.** Pas dans `bot.py` — dans
+`admin_panels_v2.py`, complet et branché sur le vrai manager. Il était devenu
+inatteignable au retrait de `/admin`. Rebranché, pas réécrit.
+
+**4. Le piège n°2 est plus large qu'écrit.** `_iter_supervised_loops` a un
+BALAYAGE AUTO qui ramasse tout `tasks.Loop` déjà démarré, même absent de
+`_SUPERVISED_LOOP_NAMES`. **Retirer le nom de la liste ne débranche rien** : il
+faut supprimer la boucle. `outils/couper_symboles.py` le fait proprement.
+
+### Ce qui reste, et qui demande un arbitrage
+
+La purge a retiré le périmètre **nommé** par le propriétaire (cadeaux, boss,
+salons d'événements) : 7 modules et ~2 200 lignes de `bot.py`, 17 boucles.
+Restent **16 boucles d'animation communautaire** et 14 modules du même
+registre — énigme du jour, héraut hebdomadaire, vitrine, rituel du soir,
+anniversaire, camouflage de salon, projecteur vocal, PNJ, missions, heure
+dorée, UGC, jalons. Ce n'est plus « cadeaux, boss, événements » : c'est la zone
+grise. `PYTHONIOENCODING=utf-8 python outils/inventaire_evenements.py` en donne
+la carte à jour.
 
 ### Sur le n°2 — ne pas se tromper de travail
 
