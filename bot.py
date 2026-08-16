@@ -21637,9 +21637,31 @@ async def _activite_boot():
     #  RETIRÉE. Le bouton menait donc à un écran que plus rien n'atteint.
     panels2026.set_retour(_retour_vers_configure)
 
-    #  Rellseas : le panneau ne fait que RÉGLER qui a le droit ; la garde vit
-    #  dans `/rellseas` elle-même (`_rellseas_autorise`).
-    rellseas_ui.setup(cfg=cfg, db_set=db_set, log=print)
+    #  Rellseas : le panneau de /configure ne fait que RÉGLER qui a le droit ;
+    #  la garde vit dans `/rellseas` elle-même (`_rellseas_autorise`).
+    #
+    #  ⚠️ LA MESURE EST INJECTÉE, PAS RÉÉCRITE. `rellseas_panneau` ne connaît
+    #  ni la base ni le système d'activité : il appelle ce qu'on lui donne.
+    #  C'est ce qui garantit qu'il n'existe pas de second compteur — celui
+    #  retiré le 12/08 annonçait un retrait de rôle que le bot ne faisait pas.
+    async def _rellseas_mesurer(guild_id, membre):
+        conf = dict(await activite_module.config(guild_id))
+        #  « Sur une semaine au propre » — fenêtre forcée à 7 jours, sans
+        #  toucher au réglage du serveur.
+        conf["activite_fenetre"] = 7
+        return await activite_module.presence(guild_id, membre, conf)
+
+    async def _rellseas_marquer_suivi(guild_id, user_id):
+        async with get_db() as db:
+            await db.execute(
+                'INSERT OR REPLACE INTO realsy_tracking(guild_id, user_id, '
+                'last_activity, warn_count) VALUES(?,?,?,0)',
+                (guild_id, user_id, datetime.now(timezone.utc).isoformat()))
+            await db.commit()
+
+    rellseas_ui.setup(cfg=cfg, db_set=db_set, get_db=get_db,
+                      mesurer=_rellseas_mesurer,
+                      marquer_suivi=_rellseas_marquer_suivi, log=print)
     rellseas_ui.set_retour(_retour_vers_configure)
     await roblox_module.init_db()
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
@@ -30162,9 +30184,11 @@ bot.tree.add_command(mod_group)
 #  doublon, et son message privé annonçait un retrait de rôle que le bot ne
 #  faisait jamais. On mesure au même endroit que tout le reste, ou on ment.
 
-rellseas_group = app_commands.Group(
-    name="rellseas",
-    description="🎭 Donner, retirer, ou vérifier l'activité pour le rôle Rellseas")
+#  ⚠️ UNE SEULE COMMANDE, PAS UN GROUPE. Demandé le 16/08 : « je veux que
+#  l'utilisateur utilise la commande officielle, et qu'à l'intérieur il y ait
+#  un panneau ». Les sous-commandes `donner` / `retirer` / `activite` ont donc
+#  été retirées : elles traitaient UN membre par appel, là où le travail réel
+#  est un lot. Tout se fait maintenant dans `RellseasGestionV2`.
 
 
 async def _rellseas_autorise(i) -> bool:
@@ -30192,169 +30216,43 @@ async def _rellseas_autorise(i) -> bool:
     return any(r.id in permis for r in getattr(i.user, "roles", []))
 
 
-async def _rellseas_role_cible(i):
-    """Le rôle que la commande pose et enlève, ou `None` s'il n'est pas réglé."""
-    try:
-        c = await cfg(i.guild.id)
-    except Exception as ex:
-        print(f"[_rellseas_role_cible cfg] {ex}")
-        return None
-    return i.guild.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
 
 
-async def _rellseas_journal(i, texte: str) -> None:
-    """Trace nominative du geste. Fail-open : jamais bloquant."""
-    try:
-        c = await cfg(i.guild.id)
-        salon = i.guild.get_channel(int(c.get(rellseas_ui.CLE_SALON_LOG, 0) or 0))
-        if salon is not None:
-            await salon.send(texte)
-    except Exception as ex:
-        print(f"[_rellseas_journal] {ex}")
 
 
-@rellseas_group.command(name="donner", description="🎭 Donner le rôle Rellseas à un membre")
-@app_commands.describe(membre="Le membre qui reçoit le rôle")
-async def rellseas_donner(i: discord.Interaction, membre: discord.Member):
+
+
+
+
+
+
+@bot.tree.command(
+    name="rellseas",
+    description="🎭 Panneau de gestion Rellseas — donner et retirer le rôle par lots")
+async def rellseas_cmd(i: discord.Interaction):
+    """Ouvre le panneau. C'est le SEUL point d'entrée.
+
+    ⚠️ LA GARDE EST ICI, ET AUSSI DANS LE PANNEAU. Ici, parce qu'une commande
+    doit refuser d'elle-même — le propriétaire l'a posé comme condition :
+    « contrôler la permission DANS la commande, pas seulement à l'affichage ».
+    Dans le panneau (`interaction_check`), parce qu'une vue vit dix minutes et
+    qu'un droit peut être retiré entre l'ouverture et le clic.
+
+    ⚠️ PLUSIEURS RÔLES PEUVENT ÊTRE AUTORISÉS. `_rellseas_autorise` lit une
+    LISTE, pas une clé unique — contrairement à `check_mod_perm`, qui ne
+    connaît qu'un rôle et sert au reste du bot.
+    """
+    if i.guild is None:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     if not await _rellseas_autorise(i):
         return await i.response.send_message(
             "❌ Vous n'avez pas la permission d'utiliser `/rellseas`.\n"
-            "-# Elle se règle dans `/configure` → 🎭 Rellseas.", ephemeral=True)
-    role = await _rellseas_role_cible(i)
-    if role is None:
-        return await i.response.send_message(
-            "❌ Aucun rôle Rellseas n'est réglé — `/configure` → 🎭 Rellseas.",
-            ephemeral=True)
-    if role in membre.roles:
-        return await i.response.send_message(
-            f"⚪ {membre.mention} a déjà {role.mention}.", ephemeral=True)
-    try:
-        await membre.add_roles(role, reason=f"/rellseas donner par {i.user} ({i.user.id})")
-    except discord.Forbidden:
-        #  Ne JAMAIS annoncer un geste que Discord a refusé : c'est exactement
-        #  le défaut qui avait fait retirer l'ancienne escalade.
-        return await i.response.send_message(
-            f"❌ Discord a refusé : le rôle {role.mention} est probablement "
-            f"au-dessus du mien, ou il me manque « Gérer les rôles ». "
-            f"**Rien n'a été fait.**", ephemeral=True)
-    except Exception as ex:
-        print(f"[rellseas donner] {ex}")
-        return await i.response.send_message(
-            f"❌ Échec : `{type(ex).__name__}`. **Rien n'a été fait.**", ephemeral=True)
-
-    #  Le tracking d'activité démarre au moment de l'attribution : sans cette
-    #  ligne, `last_activity` reste vide et le membre paraît inactif d'emblée.
-    try:
-        async with get_db() as db:
-            await db.execute(
-                'INSERT OR REPLACE INTO realsy_tracking(guild_id, user_id, '
-                'last_activity, warn_count) VALUES(?,?,?,0)',
-                (i.guild.id, membre.id, datetime.now(timezone.utc).isoformat()))
-            await db.commit()
-    except Exception as ex:
-        print(f"[rellseas donner tracking] {ex}")
-
-    #  Réponse ÉPHÉMÈRE : une réponse publique afficherait « X a utilisé
-    #  /rellseas » et trahirait qui a agi (UI.md §6).
-    await i.response.send_message(
-        f"✅ {role.mention} donné à {membre.mention}.", ephemeral=True)
-    await _rellseas_journal(
-        i, f"🎭 **Rôle donné** · {membre.mention} (`{membre.id}`) "
-           f"par {i.user.mention}")
-
-
-@rellseas_group.command(name="retirer", description="🎭 Retirer le rôle Rellseas à un membre")
-@app_commands.describe(membre="Le membre qui perd le rôle")
-async def rellseas_retirer(i: discord.Interaction, membre: discord.Member):
-    if not await _rellseas_autorise(i):
-        return await i.response.send_message(
-            "❌ Vous n'avez pas la permission d'utiliser `/rellseas`.\n"
-            "-# Elle se règle dans `/configure` → 🎭 Rellseas.", ephemeral=True)
-    role = await _rellseas_role_cible(i)
-    if role is None:
-        return await i.response.send_message(
-            "❌ Aucun rôle Rellseas n'est réglé — `/configure` → 🎭 Rellseas.",
-            ephemeral=True)
-    if role not in membre.roles:
-        return await i.response.send_message(
-            f"⚪ {membre.mention} n'a pas {role.mention}.", ephemeral=True)
-    try:
-        await membre.remove_roles(role, reason=f"/rellseas retirer par {i.user} ({i.user.id})")
-    except discord.Forbidden:
-        return await i.response.send_message(
-            f"❌ Discord a refusé : le rôle {role.mention} est probablement "
-            f"au-dessus du mien, ou il me manque « Gérer les rôles ». "
-            f"**Rien n'a été fait.**", ephemeral=True)
-    except Exception as ex:
-        print(f"[rellseas retirer] {ex}")
-        return await i.response.send_message(
-            f"❌ Échec : `{type(ex).__name__}`. **Rien n'a été fait.**", ephemeral=True)
-
-    await i.response.send_message(
-        f"✅ {role.mention} retiré à {membre.mention}.", ephemeral=True)
-    await _rellseas_journal(
-        i, f"🎭 **Rôle retiré** · {membre.mention} (`{membre.id}`) "
-           f"par {i.user.mention}")
-
-
-@rellseas_group.command(name="activite",
-                        description="🎭 Vérifier l'activité d'un membre sur la dernière semaine")
-@app_commands.describe(membre="Le membre à examiner")
-async def rellseas_activite(i: discord.Interaction, membre: discord.Member):
-    if not await _rellseas_autorise(i):
-        return await i.response.send_message(
-            "❌ Vous n'avez pas la permission d'utiliser `/rellseas`.\n"
-            "-# Elle se règle dans `/configure` → 🎭 Rellseas.", ephemeral=True)
-    await i.response.defer(ephemeral=True)
-    try:
-        conf = await activite_module.config(i.guild.id)
-        #  ⚠️ UNE SEMAINE, ET C'EST LA DEMANDE : « le même système d'activité
-        #  dans le serveur, sauf que ce sera sur une semaine au propre ». On
-        #  force la fenêtre à 7 jours SANS toucher au réglage du serveur —
-        #  `presence` lit `activite_fenetre` dans le dict qu'on lui passe.
-        conf = dict(conf)
-        conf["activite_fenetre"] = 7
-        mesure = await activite_module.presence(i.guild.id, membre, conf)
-    except Exception as ex:
-        print(f"[rellseas activite] {ex}")
-        return await i.followup.send(
-            f"❌ Mesure impossible : `{type(ex).__name__}`.", ephemeral=True)
-
-    silence = mesure.get("silence")
-    presents = mesure.get("presents", 0)
-    fenetre = mesure.get("fenetre", 7)
-
-    if not mesure.get("jugeable"):
-        #  Pas assez de recul : on le DIT, on ne rend pas un verdict fabriqué.
-        #  C'est la différence entre « inactif » et « pas observé ».
-        verdict = ("⚪ **Pas encore jugeable** — trop peu de recul "
-                   f"(`{mesure.get('observables', 0)}` jour(s) observé(s)).")
-    elif silence is None:
-        verdict = "⚪ **Aucune trace** — ce membre n'a jamais été vu par le suivi."
-    elif presents == 0:
-        verdict = f"🔴 **Absent** sur les `{fenetre}` derniers jours."
-    elif presents <= 2:
-        verdict = f"🟠 **Peu présent** — `{presents}` jour(s) sur `{fenetre}`."
-    else:
-        verdict = f"🟢 **Actif** — `{presents}` jour(s) sur `{fenetre}`."
-
-    brut = mesure.get("silence_brut")
-    ligne_silence = "—" if silence is None else f"`{silence}` jour(s)"
-    if brut is not None and silence is not None and brut > silence:
-        #  « absent depuis 2 ans, observé depuis 3 jours » est une information
-        #  utile pour le staff : on ne la cache pas derrière le plafonnement.
-        ligne_silence += f" _(brut : `{brut}`, plafonné à l'observation)_"
-
-    await i.followup.send(
-        f"🎭 **Activité de {membre.mention}**\n"
-        f"{verdict}\n"
-        f"-# Silence · {ligne_silence}\n"
-        f"-# Journées vues · `{presents}` sur une fenêtre de `{fenetre}` jour(s)\n"
-        f"-# Mesuré par le système d'activité du serveur — aucun compteur "
-        f"séparé.", ephemeral=True)
-
-
-bot.tree.add_command(rellseas_group)
+            "-# Elle se règle dans `/configure` → 🎭 Rellseas — **plusieurs "
+            "rôles** peuvent y être autorisés.", ephemeral=True)
+    #  Éphémère : chacun ouvre le sien, donc plusieurs membres du staff peuvent
+    #  s'en servir en même temps sans se marcher dessus.
+    vue = rellseas_ui.RellseasGestionV2(i.user, i.guild, autorise=_rellseas_autorise)
+    await vue.render_to(i, edit=False)
 
 
 # ═══════════════ RAPPORT D'INACTIVITÉ DU CLAN (owner 2026-07-20) ═══════════════
