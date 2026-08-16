@@ -466,7 +466,7 @@ class RobloxPanelV2(LayoutView):
                         break
                     #  Trop vieux = plus une nouvelle. L'article reste en base
                     #  pour la détection des bascules, mais on ne le publie pas.
-                    if flux == "nouveautes" and not veille.age_publiable(a):
+                    if not veille.age_publiable(a, flux):
                         continue
                     #  « À surveiller » ne publie que du solide : ce flux doit
                     #  être rare et sûr, pas un fourre-tout.

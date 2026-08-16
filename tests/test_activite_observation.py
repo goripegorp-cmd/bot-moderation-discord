@@ -163,6 +163,17 @@ class _Guild:
     def get_role(self, rid):
         return None
 
+    def get_channel(self, cid):
+        """⚠️ Indispensable, et l'absence etait une bombe a retardement.
+
+        Le rappel hebdomadaire n'appelle `get_channel` que le JOUR choisi. Les
+        tests passaient donc les six autres jours de la semaine et tombaient le
+        septieme — une CI rouge sans qu'une seule ligne de production ait bouge.
+        Un faux objet doit porter TOUT ce que le vrai porte, meme ce qu'on ne
+        croit pas atteindre.
+        """
+        return None
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  L'ancre elle-meme

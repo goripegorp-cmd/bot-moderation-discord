@@ -384,19 +384,32 @@ def trop_vieux(article: dict, jours: int = AGE_MAX_JOURS) -> bool:
     return d is not None and d > int(jours)
 
 
-def age_publiable(article: dict) -> bool:
-    """L'article a-t-il le bon âge pour être annoncé ?
+def age_publiable(article: dict, flux: str = "surveiller") -> bool:
+    """L'article a-t-il le bon âge pour être annoncé ? DÉPEND DU FLUX.
 
-    Entre `AGE_MIN_JOURS` et `AGE_MAX_JOURS`. Trop jeune, il n'a rien à
-    raconter ; trop vieux, ce n'est plus une nouvelle.
+    ⚠️ DEUX RÈGLES DIFFÉRENTES, ET C'EST LE PROPRIÉTAIRE QUI A TRANCHÉ (15/08) :
+    « les nouveaux accessoires sous la nouvelle création de Roblox, faut que tu
+    le mettes SANS PITIÉ, sans chance, rien. Tu mets tout ce que Roblox crée. »
+
+    · flux « nouveautes » — AUCUN âge minimum. Une nouveauté est une nouveauté
+      le jour même ; la faire mûrir dix jours la transforme en vieille nouvelle.
+      Seule la borne haute s'applique, pour ne pas déverser d'archives.
+      C'est ce minimum, appliqué à tort ici, qui faisait afficher « 30 articles
+      lus, 0 fiche publiée » alors que le catalogue en contenait des dizaines.
+
+    · flux « surveiller » — le minimum GARDE tout son sens. Un article qui vient
+      de sortir n'a ni revente, ni demande installée, ni recul sur son stock :
+      il n'y a rien à surveiller, et l'indice serait du bruit.
 
     Une date illisible ne bloque PAS la publication : on ne va pas taire une
-    vraie nouveauté parce qu'un champ manque. Ici le risque d'un faux positif
-    est un message de trop, pas une sanction — l'inverse du fail-closed.
+    vraie nouveauté parce qu'un champ manque. Le risque est un message de trop,
+    pas une sanction — l'inverse du fail-closed appliqué aux actualités.
     """
     d = _jours_depuis(article.get("cree_le"))
     if d is None:
         return True
+    if flux == "nouveautes":
+        return d <= AGE_MAX_JOURS
     return AGE_MIN_JOURS <= d <= AGE_MAX_JOURS
 
 
@@ -741,7 +754,9 @@ async def amorcer(guild_id: int) -> int:
     #  premier passage, bornés par le plafond de publications.
     absorbes = 0
     for a in rel["articles"]:
-        if age_publiable(a):
+        #  Le flux « nouveautes » est le plus permissif : si un article y a sa
+        #  place, il ne doit surtout pas etre absorbe par l'amorce.
+        if age_publiable(a, "nouveautes"):
             continue                      # celui-là a le droit de sortir
         for flux in ("nouveautes", "bascules", "surveiller"):
             await marquer_publie(guild_id, a["asset_id"], flux)

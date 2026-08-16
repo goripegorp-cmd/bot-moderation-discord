@@ -14841,7 +14841,7 @@ async def veille_roblox_task():
                             #  Trop vieux = plus une nouvelle : on ne republie
                             #  pas des archives apres une panne ou une remise a
                             #  zero de la base.
-                            if flux == "nouveautes" and not roblox_module.age_publiable(a):
+                            if not roblox_module.age_publiable(a, flux):
                                 continue
                             #  « A surveiller » ne publie que du solide.
                             if flux == "surveiller" and roblox_module.indice(a)["note"] \
