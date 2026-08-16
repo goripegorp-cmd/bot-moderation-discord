@@ -37,6 +37,7 @@ distingue pas un flux mort d'un mois sans nouveauté.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -80,6 +81,18 @@ AGE_MIN_JOURS = 10
 #  nouvelle, c'est une archive. L'article reste en base pour la détection des
 #  bascules, mais il n'est plus publié.
 AGE_MAX_JOURS = 90
+
+#  ⚠️ FENÊTRE DU FLUX « BASCULES », ET D'OÙ VIENT CE CHIFFRE.
+#  Demande du propriétaire : « uniquement les items RÉCEMMENT devenus limited,
+#  pas des items qui datent d'il y a des années ».
+#  Roblox crée ses Limiteds modernes DÉJÀ collectionnables (écart création →
+#  modification mesuré : 0 à 9 jours), donc leur date de création vaut date de
+#  bascule. Relevé réel du 16/08 : le plus récent avait 152 jours, le plus
+#  ancien du flux 411 jours, et l'historique Valkyrie Helm remonte à 2008.
+#  400 jours laissent passer toute la vague récente (2025-2026) et coupent net
+#  les historiques. Ne pas descendre sous ~180 : le flux se viderait, Roblox
+#  ne sortant que quelques Limiteds par an.
+FRAICHEUR_BASCULE_JOURS = 400
 
 #  La langue des noms officiels. Vérifié : Roblox renvoie « Chapeau Ladoo
 #  tricolore » pour « Tricolor Ladoo Hat » — c'est SA traduction, pas la nôtre.
@@ -281,9 +294,25 @@ POIDS = {
     "stock_fini": 25,       # une quantité bornée est le propre d'un collectionnable
     "revente": 20,          # une revente déjà ouverte = valeur de marché observable
     "demande": 20,          # favoris rapportés au prix
+    "multiplicateur": 15,   # revente / prix d'origine — bonus SI ≥2, MALUS si <1
     "prix_bas": 10,         # un prix d'entrée bas élargit le nombre de détenteurs
     "recent": 10,           # une sortie récente reste dans l'actualité
 }
+
+#  ⚠️ CE QUE CET INDICE N'EST PAS, ET NE SERA PAS.
+#  Le propriétaire a demandé le 16/08 « savoir si un item deviendra limited, et
+#  être sûr de toi ». La réponse honnête est : c'est impossible, et le dépôt le
+#  documente depuis le 12/08 — mesuré sur 964 articles, `offSaleDeadline` était
+#  renseigné 0 fois et `itemStatus` vide 962 fois. La sonde du 16/08 a rouvert
+#  tous les points d'API accessibles (catalogue, économie, reventes,
+#  revendeurs) : aucun ne porte d'annonce de passage en collectionnable.
+#  Roblox ne publie pas cette information AVANT de la faire.
+#
+#  Ce que ces poids produisent est donc un INDICE DE FAITS OBSERVÉS — retiré de
+#  la vente, stock fini, revente ouverte, multiplicateur constaté — jamais une
+#  prédiction. Il se tait sous 60/100 parce qu'en dessous il n'y a pas de
+#  signal, et non un signal faible. Aucun modèle entraîné (CGU Roblox), et
+#  Rolimons reste interdit (ses CGU proscrivent l'accès automatisé).
 
 
 def indice(article: dict) -> dict:
@@ -302,16 +331,40 @@ def indice(article: dict) -> dict:
 
     #  Une revente DÉJÀ ouverte est un fait, pas une supposition : l'article est
     #  échangeable, donc il a une valeur de marché observable.
-    if article.get("revendeurs"):
+    #  `revente` vient de `enrichir()` (economy), `revendeurs` du catalogue :
+    #  l'un ou l'autre suffit, et le premier est le plus fiable.
+    if article.get("revente") or article.get("revendeurs"):
         note += POIDS["revente"]
-        facteurs.append(("revente déjà ouverte", POIDS["revente"]))
+        prix_rev = article.get("revente")
+        facteurs.append((f"revente ouverte ({prix_rev} R$)" if prix_rev
+                         else "revente déjà ouverte", POIDS["revente"]))
 
     #  Un stock fini est le propre d'un collectionnable. `totalQuantity` vaut 0
     #  sur un article à stock illimité : seul un nombre > 0 est un signal.
-    q = article.get("quantite")
+    #  `stock` vient d'`enrichir()`, `quantite` du catalogue.
+    q = article.get("stock") or article.get("quantite")
     if q and int(q) > 0:
         note += POIDS["stock_fini"]
-        facteurs.append((f"stock fini ({q})", POIDS["stock_fini"]))
+        facteurs.append((f"stock fini ({int(q):,}".replace(",", " ") + ")",
+                         POIDS["stock_fini"]))
+
+    #  ⚠️ LE MULTIPLICATEUR EST UN FAIT, PAS UNE PROMESSE.
+    #  Mesuré le 16/08 : The Requiem ×4,5 · Bandana From Beyond ×1,0 ·
+    #  Specter Time Fedora ×0,6 — ce dernier fait PERDRE de l'argent à qui l'a
+    #  payé plein tarif. C'est précisément pour ne pas se faire avoir que le
+    #  chiffre est affiché tel quel, y compris quand il est mauvais.
+    mult = article.get("multiplicateur")
+    if mult is not None:
+        if mult >= 2:
+            note += POIDS["multiplicateur"]
+            facteurs.append((f"revente à ×{mult} du prix d'origine",
+                             POIDS["multiplicateur"]))
+        elif mult < 1:
+            #  Un malus, et il est dit : une revente SOUS le prix d'origine est
+            #  un signal négatif franc, pas une absence de signal.
+            note -= POIDS["multiplicateur"]
+            facteurs.append((f"⚠️ revente SOUS le prix d'origine (×{mult})",
+                             -POIDS["multiplicateur"]))
 
     prix = article.get("prix")
     favoris = article.get("favoris")
@@ -401,26 +454,39 @@ def age_publiable(article: dict, flux: str = "surveiller") -> bool:
       de sortir n'a ni revente, ni demande installée, ni recul sur son stock :
       il n'y a rien à surveiller, et l'indice serait du bruit.
 
-    · flux « bascules » — AUCUNE BORNE. Tranché par le propriétaire le 16/08 :
-      « même s'ils sont passés, j'aimerais que tu les affiches car ils sont
-      encore d'actualité ».
-      ⚠️ CE N'EST PAS UN ASSOUPLISSEMENT COSMÉTIQUE, C'EST LA CORRECTION D'UN
-      DÉFAUT. La borne haute mesure l'âge de la CRÉATION de l'article, alors
-      qu'une bascule est un événement d'AUJOURD'HUI. Mesuré le 16/08 : le
-      Limited officiel le plus récent (« Lord of the Buxeration ») datait de
-      153 jours — au-delà des 90 autorisés. Autrement dit, même une fois le
-      relevé réparé, PAS UN SEUL Limited n'aurait pu sortir. Un accessoire
-      devenu collectionnable garde sa valeur d'information des mois durant :
-      c'est le cœur du système de trading demandé.
-      Le dédoublonnage par `roblox_publies` empêche la répétition ; le plafond
-      par passage empêche le déversement.
+    · flux « bascules » — RÉCEMMENT devenu collectionnable, et seulement.
+      Deux demandes du propriétaire qui semblent se contredire, et ne se
+      contredisent pas :
+        « même s'ils sont passés, affiche-les, ils sont encore d'actualité »
+        « uniquement les items RÉCEMMENT devenus limited, pas des items qui
+         datent d'il y a des années »
+      La première dit : ne pas exiger d'avoir vu la bascule en direct.
+      La seconde dit : ne pas remonter les Limiteds historiques.
 
-    Une date illisible ne bloque PAS la publication : on ne va pas taire une
-    vraie nouveauté parce qu'un champ manque. Le risque est un message de trop,
-    pas une sanction — l'inverse du fail-closed appliqué aux actualités.
+      ⚠️ POURQUOI LA DATE DE CRÉATION FAIT OFFICE DE DATE DE BASCULE.
+      L'API ne donne AUCUNE date de passage en collectionnable — vérifié sur
+      tous les points d'API accessibles (`outils/sonde_signaux_limited.py`).
+      Mais l'écart création → dernière modification le trahit, mesuré le 16/08 :
+          The Requiem, Specter Time Fedora, Bandana From Beyond  →  0 jour
+          Helsworn Valkyrie                                      →  9 jours
+          Valkyrie Helm (Limited historique)                     →  3 217 jours
+      Les Limiteds modernes de Roblox NAISSENT Limited : leur date de création
+      EST leur date de bascule. Les historiques, eux, ont été créés des années
+      avant. Une borne sur la création sépare donc exactement les deux — c'est
+      un proxy mesuré, pas une approximation de confort.
+
+      ⚠️ EXCEPTION : une bascule VUE EN DIRECT (article connu non
+      collectionnable qui le devient) est un événement d'aujourd'hui, quel que
+      soit l'âge de l'article. Elle passe toujours. C'est `bascule_detectee`.
     """
     if flux == "bascules":
-        return True
+        #  Bascule observée entre deux relevés : c'est arrivé aujourd'hui.
+        if article.get("bascule_detectee"):
+            return True
+        d = _jours_depuis(article.get("cree_le"))
+        #  Date illisible : on publie. Rater une vraie bascule coûte plus cher
+        #  qu'une fiche de trop, et le dédoublonnage empêche la répétition.
+        return True if d is None else d <= FRAICHEUR_BASCULE_JOURS
     d = _jours_depuis(article.get("cree_le"))
     if d is None:
         return True
@@ -651,6 +717,73 @@ def _normaliser(bruts: list) -> list[dict]:
     return out
 
 
+async def enrichir(articles: list[dict]) -> None:
+    """Complète les articles avec les chiffres d'ÉCONOMIE. Modifie sur place.
+
+    ⚠️ UN APPEL PAR ARTICLE — donc réservé à ceux qu'on va VRAIMENT publier.
+    Le catalogue donne le nom, le prix et les favoris ; il ne donne ni le stock
+    émis, ni le prix de revente. Ces deux-là sont le cœur d'une décision de
+    trading, et ils vivent sur `economy.roblox.com`.
+
+    Ce que la sonde du 16/08 a établi sur ce point d'API :
+      · `CollectiblesItemDetails.TotalQuantity`            → stock ÉMIS
+      · `CollectiblesItemDetails.CollectibleLowestResalePrice` → revente la
+        plus basse, c'est-à-dire le prix réel du marché secondaire
+      · `PriceInRobux`                                     → prix d'origine
+      · `IsForSale`                                        → encore en vente ?
+    Le rapport revente / prix d'origine est le seul multiplicateur FACTUEL
+    disponible. Mesuré : The Requiem ×4,5 · Bandana ×1,0 · Specter Time
+    Fedora ×0,6 (donc une PERTE pour qui l'a acheté plein tarif).
+
+    ⚠️ `economy.roblox.com/v1/assets/{id}/resale-data` n'a pas été retenu :
+    HTTP 400 sur les articles récents (système « collectible » moderne), il ne
+    répond que pour les Limiteds historiques. Le brancher donnerait un champ
+    renseigné pour les vieux et vide pour les neufs — soit l'inverse de ce
+    qu'on veut suivre. Et `/resellers` demande une authentification (401).
+
+    Ne lève jamais, et laisse l'article intact en cas d'échec : une fiche sans
+    chiffres de revente reste une fiche utile, une exception ferait taire tout
+    le passage.
+    """
+    if not articles:
+        return
+    try:
+        async with _ouvrir() as sess:
+            for a in articles:
+                try:
+                    async with sess.get(
+                            API_ECONOMIE.format(int(a["asset_id"]))) as r:
+                        if r.status != 200:
+                            continue
+                        d = await r.json()
+                except Exception as ex:
+                    _log(f"[roblox_veille enrichir {a.get('asset_id')}] {ex}")
+                    continue
+                finally:
+                    #  La pause va DANS la boucle : c'est la concurrence que le
+                    #  pare-feu punit, pas le volume.
+                    await asyncio.sleep(PAUSE_ENTRE_APPELS)
+
+                det = d.get("CollectiblesItemDetails") or {}
+                a["stock"] = det.get("TotalQuantity") or None
+                a["revente"] = det.get("CollectibleLowestResalePrice") or None
+                a["en_vente"] = bool(d.get("IsForSale"))
+                prix_origine = d.get("PriceInRobux")
+                if prix_origine is not None:
+                    a["prix"] = prix_origine
+                #  Le multiplicateur ne se calcule que s'il veut dire quelque
+                #  chose : un prix d'origine nul (article offert) rendrait une
+                #  division par zéro, et « ×∞ » n'informe personne.
+                try:
+                    if a["revente"] and prix_origine and int(prix_origine) > 0:
+                        a["multiplicateur"] = round(
+                            float(a["revente"]) / float(prix_origine), 2)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+    except Exception as ex:
+        _log(f"[roblox_veille enrichir] {ex}")
+
+
 def ordonner_publication(articles: list[dict], tranche: int) -> list[dict]:
     """Choisit les `tranche` plus RÉCENTS, puis les rend du plus ANCIEN au plus récent.
 
@@ -777,6 +910,12 @@ async def comparer_et_enregistrer(articles: list[dict]) -> dict:
                     res["nouveaux"].append(a)
                 else:
                     if not int(row[1]) and a["collectionnable"]:
+                        #  ⚠️ VUE EN DIRECT : l'article était connu NON
+                        #  collectionnable, il l'est devenu. C'est un événement
+                        #  d'aujourd'hui, quel que soit l'âge de l'article —
+                        #  `age_publiable` s'appuie sur ce marqueur pour le
+                        #  laisser passer même hors fenêtre de fraîcheur.
+                        a["bascule_detectee"] = True
                         res["bascules"].append(a)
                     elif not int(row[2]) and a["hors_vente"]:
                         res["retires"].append(a)

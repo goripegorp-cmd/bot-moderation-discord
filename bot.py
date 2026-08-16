@@ -12875,6 +12875,15 @@ async def veille_roblox_task():
                 _a_pub = [x for k in ("nouveaux", "bascules", "retires")
                           for x in roblox_module.ordonner_publication(
                               evts.get(k) or [], _TRANCHE_FLUX.get(k, 5))]
+
+                #  ⚠️ LES CHIFFRES DE TRADING — UN APPEL PAR ARTICLE.
+                #  Stock émis et prix de revente ne sont PAS dans le catalogue :
+                #  ils vivent sur `economy.roblox.com`. On n'enrichit donc que
+                #  ce qu'on va réellement publier, borné par le plafond du
+                #  passage — sinon 60 articles feraient 60 requêtes pour 12
+                #  fiches. `enrichir` pose sa propre pause entre les appels.
+                await roblox_module.enrichir(
+                    _a_pub[:roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE])
                 _imgs = await roblox_module.vignettes(
                     [x["asset_id"] for x in _a_pub])
                 for g in guildes_items:

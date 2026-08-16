@@ -99,15 +99,48 @@ def _article(jours: int) -> dict:
             "collectionnable": 1, "hors_vente": 0, "favoris": 10}
 
 
-@pytest.mark.parametrize("jours", [0, 91, 152, 298, 341, 900])
-def test_une_bascule_est_publiable_quel_que_soit_lage(jours):
-    """AUCUNE borne sur « bascules » — tranché le 16/08.
+@pytest.mark.parametrize("jours", [0, 91, 152, 211, 298, 341, 399])
+def test_un_limited_recent_est_publiable(jours):
+    """La borne des 90 jours ne s'applique PAS ici.
 
-    Les vrais chiffres mesurés ce jour-là : le Limited officiel le plus récent
-    avait 152 jours, le plus ancien du relevé 341. Avec la borne à 90 jours,
-    PAS UN SEUL n'aurait pu sortir, même le relevé réparé.
+    Chiffres réels du 16/08 : le Limited officiel le plus récent avait
+    152 jours, le plus ancien retenu 341. Avec la borne de 90 jours, pas un
+    seul n'aurait pu sortir — même le relevé réparé.
     """
     assert veille.age_publiable(_article(jours), "bascules") is True
+
+
+@pytest.mark.parametrize("jours", [401, 411, 415, 3000, 6800])
+def test_un_limited_ANCIEN_est_ecarte(jours):
+    """« Pas des items qui datent d'il y a des années » — demande du 16/08.
+
+    Mesuré sur le flux réel : 58 Limiteds relevés, 11 retenus (2025-09 à
+    2026-03) et 47 écartés, dont toute la vague de 2025-06 (411 j) et les
+    historiques jusqu'à 2008.
+    """
+    assert veille.age_publiable(_article(jours), "bascules") is False
+
+
+def test_la_coupure_tombe_a_la_fenetre_annoncee():
+    limite = veille.FRAICHEUR_BASCULE_JOURS
+    assert veille.age_publiable(_article(limite - 1), "bascules") is True
+    assert veille.age_publiable(_article(limite + 1), "bascules") is False
+
+
+def test_une_bascule_VUE_EN_DIRECT_passe_quel_que_soit_lage():
+    """Un article connu non collectionnable qui le devient est un événement
+    d'AUJOURD'HUI, même si l'article a quinze ans. C'est la seule exception,
+    et elle est portée par `bascule_detectee`."""
+    vieux = _article(6800)
+    assert veille.age_publiable(vieux, "bascules") is False
+    vieux["bascule_detectee"] = True
+    assert veille.age_publiable(vieux, "bascules") is True
+
+
+def test_une_date_illisible_ne_fait_pas_taire_une_bascule():
+    """Rater une vraie bascule coûte plus cher qu'une fiche de trop."""
+    assert veille.age_publiable(
+        {"asset_id": 1, "cree_le": None}, "bascules") is True
 
 
 def test_les_autres_flux_gardent_leurs_bornes():

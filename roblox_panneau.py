@@ -72,6 +72,35 @@ def _ou_tiret(v) -> str:
     return str(v)
 
 
+def _fmt_nombre(v) -> str:
+    """Un grand nombre se lit par milliers séparés : `107 687`, pas `107687`.
+
+    Un stock est le chiffre que l'œil compare le plus souvent d'une fiche à
+    l'autre — collé, il se lit de travers.
+    """
+    if v is None or v == "":
+        return "—"
+    try:
+        return f"{int(v):,}".replace(",", " ")
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _fmt_robux(v) -> str:
+    """Un prix, avec son unité. `0` veut dire GRATUIT, pas « inconnu ».
+
+    La distinction compte : un article offert et un article au prix inconnu ne
+    se traitent pas pareil quand on décide d'acheter.
+    """
+    if v is None or v == "":
+        return "—"
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return str(v)
+    return "gratuit" if n == 0 else f"{n:,}".replace(",", " ") + " R$"
+
+
 def construire_fiche(article: dict, flux: str, image: str | None = None) -> LayoutView:
     """La fiche d'un article, en quadrillage fixe.
 
@@ -94,37 +123,76 @@ def construire_fiche(article: dict, flux: str, image: str | None = None) -> Layo
     nom_fr = article.get("nom_fr")
     titre = f"{nom_fr}\n-# {nom_en}" if nom_fr else nom_en
 
+    #  Le nom vient JUSTE APRÈS, porté soit par la section à vignette, soit
+    #  seul — il ne doit pas être ajouté ici, sinon il s'affiche deux fois.
     items = [
         v2_title(NOMS_FLUX.get(flux, "Roblox")),
         v2_subtitle(f"{_ou_tiret(article.get('type_article'))}"),
-        v2_body(f"## {titre}"),
     ]
 
-    #  L'IMAGE EN BANNIÈRE, tout en haut — un accessoire se juge d'abord à l'œil.
-    #  `MediaGallery` est le composant V2 fait pour ça ; s'il n'est pas
-    #  disponible dans cette version de discord.py, on n'affiche rien plutôt que
-    #  de tordre la fiche.
+    #  ⚠️ L'IMAGE EN VIGNETTE, PAS EN BANNIÈRE.
+    #  `MediaGallery` affichait l'image sur toute la largeur du salon : trois
+    #  fiches et l'écran était rempli. Demande du propriétaire le 16/08 —
+    #  « un post propre, l'image pas trop grande sur le serveur Discord ».
+    #  `Section` + `Thumbnail` place la même image en petit à droite du texte,
+    #  et c'est le composant V2 prévu pour ça (UI.md §2). Repli sur le titre
+    #  seul si l'accessoire est refusé : une fiche sans image reste lisible.
     if image:
         try:
-            galerie = discord.ui.MediaGallery()
-            galerie.add_item(media=image)
-            items.append(galerie)
+            items.append(discord.ui.Section(
+                v2_body(f"## {titre}"),
+                accessory=discord.ui.Thumbnail(media=image)))
         except Exception as ex:
             _log(f"[roblox fiche image] {ex}")
+            items.append(v2_body(f"## {titre}"))
+    else:
+        items.append(v2_body(f"## {titre}"))
+
+    #  ── LE QUADRILLAGE, EN DEUX COLONNES DE FAITS ────────────────────────
+    #  Ordre fixe, champs jamais masqués : une fiche à géométrie variable ne se
+    #  lit plus en diagonale (ROBLOX.md §3). Un champ inconnu affiche « — ».
+    stock = article.get("stock") or article.get("quantite")
+    revente = article.get("revente")
+    mult = article.get("multiplicateur")
+
+    if article.get("collectionnable"):
+        statut = "🔷 collectionnable (Limited)"
+    elif article.get("hors_vente"):
+        statut = "🔴 retiré de la vente"
+    elif article.get("en_vente") is False:
+        statut = "⚪ plus en vente"
+    else:
+        statut = "🟢 en vente"
 
     items += [
         v2_divider(),
         v2_body(
+            f"**Statut** · {statut}\n"
             f"**Créateur** · Roblox\n"
-            f"**Créé le** · {_ou_tiret((article.get('cree_le') or '')[:10])}\n"
-            f"**Prix** · {_ou_tiret(article.get('prix'))}\n"
-            f"**Favoris** · {_ou_tiret(article.get('favoris'))}\n"
-            f"**Statut** · "
-            + ("collectionnable" if article.get("collectionnable")
-               else ("retiré de la vente" if article.get("hors_vente") else "en vente"))
-        ),
-        v2_divider(),
+            f"**Créé le** · {_ou_tiret((article.get('cree_le') or '')[:10])}"),
+        v2_body(
+            f"**Prix d'origine** · {_fmt_robux(article.get('prix'))}\n"
+            f"**Revente la plus basse** · {_fmt_robux(revente)}\n"
+            f"**Stock émis** · {_fmt_nombre(stock)}\n"
+            f"**Favoris** · {_fmt_nombre(article.get('favoris'))}"),
     ]
+
+    #  ⚠️ LE MULTIPLICATEUR EST AFFICHÉ MÊME QUAND IL EST MAUVAIS.
+    #  C'est tout l'objet de la demande « pour qu'on soit sûr de ne pas se faire
+    #  avoir ». Mesuré le 16/08 : Specter Time Fedora se revend ×0,6 de son prix
+    #  d'origine — qui l'a payé plein tarif a perdu. Masquer ce cas rendrait la
+    #  fiche flatteuse et inutile.
+    if mult is not None:
+        if mult >= 2:
+            lecture = f"🟢 **×{mult}** — la revente vaut {mult} fois le prix d'origine"
+        elif mult >= 1:
+            lecture = f"🟠 **×{mult}** — la revente couvre à peine le prix d'origine"
+        else:
+            lecture = (f"🔴 **×{mult}** — la revente est SOUS le prix d'origine : "
+                       f"à ce prix, l'acheteur d'origine perd")
+        items.append(v2_body(f"**Revente / prix d'origine** · {lecture}"))
+
+    items.append(v2_divider())
 
     #  ⚠️ « INDICE », JAMAIS « PRÉDICTION ». Mesuré sur 339 articles : aucun
     #  signal déclaratif n'annonce un passage en collectionnable.
@@ -521,6 +589,11 @@ class RobloxPanelV2(LayoutView):
             a_publier = [x for k in ("nouveaux", "bascules", "retires")
                          for x in veille.ordonner_publication(
                              evts.get(k) or [], 30 if k == "bascules" else 5)]
+            #  Mêmes chiffres de trading que la boucle : stock et revente
+            #  viennent d'un point d'API distinct, un appel par article. Borné
+            #  au plafond du passage pour ne pas faire attendre le staff.
+            await veille.enrichir(
+                a_publier[:veille.MAX_PUBLICATIONS_PAR_PASSAGE])
             imgs = await veille.vignettes([x["asset_id"] for x in a_publier])
             for flux, cle in (("nouveautes", "nouveaux"),
                               ("bascules", "bascules"),
