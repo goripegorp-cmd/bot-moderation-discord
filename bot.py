@@ -12839,7 +12839,7 @@ async def veille_roblox_task():
 
         # ── Les articles ────────────────────────────────────────────────────
         if guildes_items:
-            rel = await roblox_module.relever_nouveautes(limite=60)
+            rel = await roblox_module.relever_nouveautes(limite=120)
             if rel["code"] == 200:
                 evts = await roblox_module.comparer_et_enregistrer(rel["articles"])
 
@@ -12856,8 +12856,8 @@ async def veille_roblox_task():
                 #  veut aussi ceux déjà passés (« ils sont encore d'actualité »).
                 #  `deja_publie` empêche la répétition, le plafond empêche le
                 #  déversement.
-                await asyncio.sleep(roblox_module.PAUSE_ENTRE_APPELS)
-                relc = await roblox_module.relever_collectionnables(limite=60)
+                await asyncio.sleep(roblox_module.PAUSE_ENTRE_RELEVES)
+                relc = await roblox_module.relever_collectionnables(limite=120)
                 if relc["code"] == 200:
                     await roblox_module.comparer_et_enregistrer(relc["articles"])
                     _vus = {x["asset_id"] for x in (evts.get("bascules") or [])}
@@ -12882,15 +12882,25 @@ async def veille_roblox_task():
                 #  ce qu'on va réellement publier, borné par le plafond du
                 #  passage — sinon 60 articles feraient 60 requêtes pour 12
                 #  fiches. `enrichir` pose sa propre pause entre les appels.
-                await roblox_module.enrichir(
-                    _a_pub[:roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE])
+                _lot = _a_pub[:roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE]
+                await roblox_module.enrichir(_lot)
+                #  Le nom français officiel, en UN appel pour tout le lot.
+                #  ⚠️ Il ne se pose plus pendant le relevé : avec la pagination,
+                #  redemander chaque page en français doublait les requêtes et
+                #  déclenchait le HTTP 429 mesuré le 16/08.
+                await roblox_module.traduire(_lot)
                 _imgs = await roblox_module.vignettes(
                     [x["asset_id"] for x in _a_pub])
                 for g in guildes_items:
                     c = await roblox_module.config(g.id)
-                    for flux, cle in (("nouveautes", "nouveaux"),
-                                      ("bascules", "bascules"),
-                                      ("surveiller", "retires")):
+                    #  ⚠️ ORDRE DE PRIORITÉ, PAS ORDRE ALPHABÉTIQUE.
+                    #  Les bascules passent EN PREMIER : un article traité ici
+                    #  ne pourra plus sortir dans un flux plus faible au même
+                    #  passage (voir `publiable_dans`). L'inverse laisserait
+                    #  une nouveauté « griller » sa propre bascule.
+                    for flux, cle in (("bascules", "bascules"),
+                                      ("surveiller", "retires"),
+                                      ("nouveautes", "nouveaux")):
                         salon = g.get_channel(roblox_module.salon_du_flux(c, flux))
                         #  Du plus ANCIEN au plus récent : Discord empile vers
                         #  le bas, donc envoyer l'ancien d'abord fait un salon
@@ -12906,7 +12916,10 @@ async def veille_roblox_task():
                             if flux == "surveiller" and roblox_module.indice(a)["note"] \
                                     < roblox_module.SEUIL_SURVEILLER:
                                 continue
-                            if await roblox_module.deja_publie(g.id, a["asset_id"], flux):
+                            #  Déjà sorti ici, OU déjà sorti dans un flux plus
+                            #  fort : on ne le republie pas ailleurs.
+                            if not await roblox_module.publiable_dans(
+                                    g.id, a["asset_id"], flux):
                                 continue
                             if _budget <= 0:
                                 _reporte += 1

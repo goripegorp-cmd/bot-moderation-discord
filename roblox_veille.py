@@ -113,6 +113,25 @@ MAX_APPELS_PAR_PASSAGE = 8
 #  l'historique complet du catalogue dans une base SQLite.
 MAX_ARTICLES_SUIVIS = 3000
 
+#  ⚠️ LA PAGINATION — SANS ELLE, LE BOT NE VOYAIT QUE 6 % DU CATALOGUE.
+#  Le relevé s'arrêtait à une seule requête de 60 articles. Mesuré le 16/08 :
+#  le catalogue complet des accessoires créés par Roblox fait **964 articles,
+#  en 9 pages de 120**. Le bot en voyait donc 60 sur 964.
+#  12 pages laissent de la marge si Roblox en publie davantage, sans ouvrir la
+#  porte à une boucle infinie si l'API rendait un curseur qui ne s'épuise pas.
+#  ⚠️ Le débit est RÉEL : un HTTP 429 est tombé à la 13ᵉ requête pendant la
+#  mesure. `PAUSE_ENTRE_APPELS` sépare chaque page, et un 429 en cours de
+#  route conserve les pages déjà obtenues au lieu de tout jeter.
+MAX_PAGES_PAR_RELEVE = 12
+
+#  ⚠️ LA PAUSE ENTRE LES DEUX RELEVÉS, ET POURQUOI ELLE EST SI LONGUE.
+#  Le catalogue complet fait 9 pages, le flux des Limiteds 7 : enchaînés avec
+#  seulement 2 s d'écart, cela fait 16 requêtes en une demi-minute et l'API
+#  répond HTTP 429 — mesuré le 16/08, le second relevé s'arrêtait à la page 7.
+#  15 secondes laissent la fenêtre de débit se vider. La boucle tourne toutes
+#  les 30 minutes : ce délai ne coûte rien, et il évite un relevé tronqué.
+PAUSE_ENTRE_RELEVES = 15.0
+
 #  ⚠️ PLAFOND DUR DE PUBLICATIONS PAR PASSAGE — NE PAS LE RELEVER.
 #
 #  Sans lui, un cas parfaitement banal noie le salon : une base restauree, un
@@ -626,50 +645,103 @@ async def _relever_catalogue(params: dict, source: str) -> dict:
     marchent, un compteur commun le masquerait — et un flux mort ressemble
     exactement à un flux calme.
     """
-    out = {"articles": [], "code": None, "echecs": 0}
+    out = {"articles": [], "code": None, "echecs": 0, "pages": 0,
+           "complet": False}
+    vus: set[int] = set()
+    curseur = None
     try:
         async with _ouvrir() as sess:
-            async with sess.get(API_CATALOGUE, params=params) as r:
-                out["code"] = r.status
-                if r.status == 200:
+            for page in range(MAX_PAGES_PAR_RELEVE):
+                p = dict(params)
+                if curseur:
+                    p["Cursor"] = curseur
+                async with sess.get(API_CATALOGUE, params=p) as r:
+                    out["code"] = r.status
+                    if r.status != 200:
+                        #  On garde le corps : un 403 du pare-feu et un 429 de
+                        #  débit ne se corrigent pas de la même façon, et sans
+                        #  cette trace on ne saurait pas lequel on a.
+                        _log(f"[roblox_veille {source}] HTTP {r.status} à la "
+                             f"page {page + 1} — {(await r.text())[:200]}")
+                        #  ⚠️ UN 429 N'EST PAS UNE PANNE : c'est notre propre
+                        #  débit. On garde les pages déjà obtenues et on
+                        #  reprendra au prochain passage. Les jeter ferait
+                        #  perdre un relevé presque complet pour rien.
+                        if r.status == 429 and out["articles"]:
+                            out["code"] = 200
+                        break
                     data = await r.json()
-                    out["articles"] = _normaliser(data.get("data") or [])
-                    #  LE NOM FRANÇAIS, par un SECOND appel avec l'en-tête de
-                    #  langue. Vérifié : Roblox renvoie sa propre traduction —
-                    #  « Chapeau Ladoo tricolore ». On ne traduit rien nous-mêmes,
-                    #  on cite. Un coût d'une requête sur les douze autorisées
-                    #  par minute : largement dans le budget.
-                    try:
-                        async with sess.get(
-                            API_CATALOGUE, params=params,
-                            headers={"Accept-Language": LANGUE_FR}) as rf:
-                            if rf.status == 200:
-                                noms = {}
-                                for b in ((await rf.json()).get("data") or []):
-                                    try:
-                                        noms[int(b.get("id"))] = str(b.get("name") or "")
-                                    except (TypeError, ValueError):
-                                        continue
-                                for a in out["articles"]:
-                                    fr = noms.get(a["asset_id"])
-                                    #  On ne garde le nom français que s'il
-                                    #  DIFFÈRE : beaucoup d'articles n'ont pas de
-                                    #  traduction, et afficher deux fois la même
-                                    #  ligne ferait croire à un défaut.
-                                    if fr and fr != a["nom"]:
-                                        a["nom_fr"] = fr[:120]
-                    except Exception as ex:
-                        _log(f"[roblox_veille noms fr] {ex}")
-                else:
-                    #  On garde le corps : un 403 du pare-feu et un 429 de débit
-                    #  ne se corrigent pas de la même façon, et sans cette trace
-                    #  on ne saurait pas lequel on a.
-                    _log(f"[roblox_veille {source}] HTTP {r.status} — "
-                         f"{(await r.text())[:200]}")
+
+                lot = _normaliser(data.get("data") or [])
+                if not lot:
+                    out["complet"] = True
+                    break
+                for a in lot:
+                    #  Dédoublonnage : l'API renvoie parfois deux fois le même
+                    #  article à cheval sur deux pages (son tri n'est pas
+                    #  strictement chronologique — voir `_normaliser`).
+                    if a["asset_id"] not in vus:
+                        vus.add(a["asset_id"])
+                        out["articles"].append(a)
+                out["pages"] = page + 1
+
+                curseur = data.get("nextPageCursor")
+                if not curseur:
+                    out["complet"] = True
+                    break
+                await asyncio.sleep(PAUSE_ENTRE_APPELS)
     except Exception as ex:
         _log(f"[roblox_veille {source}] {type(ex).__name__}: {ex}")
     out["echecs"] = await _noter_sante(source, out["code"])
     return out
+
+
+async def traduire(articles: list[dict]) -> None:
+    """Pose le nom FRANÇAIS OFFICIEL de Roblox. Modifie sur place.
+
+    ⚠️ POURQUOI CE N'EST PLUS FAIT PENDANT LE RELEVÉ.
+    La version précédente redemandait chaque PAGE en français : avec la
+    pagination, cela doublait le nombre d'appels (9 pages → 18 requêtes), et
+    c'est exactement ce qui a produit le HTTP 429 mesuré le 16/08 à la 13ᵉ
+    requête. Or on ne publie que douze fiches par passage : traduire 964
+    articles pour en afficher douze était du gaspillage pur.
+
+    On traduit donc À LA FIN, uniquement les articles retenus, en UN SEUL appel
+    ciblé par leurs identifiants.
+
+    On ne traduit jamais nous-mêmes : on demande à Roblox avec l'en-tête de
+    langue, et on cite. Sans traduction officielle, l'article garde son nom
+    anglais — les billets du forum, eux, n'en ont pas du tout.
+    """
+    if not articles:
+        return
+    ids = [a["asset_id"] for a in articles]
+    try:
+        async with _ouvrir() as sess:
+            #  `Keyword` ne permet pas de cibler des identifiants ; on repasse
+            #  donc par le même relevé, borné à la taille du lot.
+            params = {"Category": 1, "SortType": 3,
+                      "Limit": _limite_valide(len(ids) + 10),
+                      "CreatorType": "User", "CreatorTargetId": CREATEUR_ROBLOX}
+            async with sess.get(API_CATALOGUE, params=params,
+                                headers={"Accept-Language": LANGUE_FR}) as r:
+                if r.status != 200:
+                    return
+                noms = {}
+                for b in ((await r.json()).get("data") or []):
+                    try:
+                        noms[int(b.get("id"))] = str(b.get("name") or "")
+                    except (TypeError, ValueError):
+                        continue
+        for a in articles:
+            fr = noms.get(a["asset_id"])
+            #  On ne garde le nom français que s'il DIFFÈRE : beaucoup
+            #  d'articles n'ont pas de traduction, et afficher deux fois la
+            #  même ligne ferait croire à un défaut.
+            if fr and fr != a.get("nom"):
+                a["nom_fr"] = fr[:120]
+    except Exception as ex:
+        _log(f"[roblox_veille traduire] {ex}")
 
 
 def _normaliser(bruts: list) -> list[dict]:
@@ -935,6 +1007,52 @@ async def comparer_et_enregistrer(articles: list[dict]) -> dict:
     except Exception as ex:
         _log(f"[roblox_veille comparer] {ex}")
     return res
+
+
+#  ⚠️ LA SÉPARATION DES FLUX — demande du propriétaire le 16/08 :
+#  « sépare bien les uns des autres ».
+#  Un même article peut satisfaire plusieurs flux à la fois : un Limited retiré
+#  de la vente coche « devenu collectionnable » ET « à surveiller ». Sans règle,
+#  il sortait dans les deux salons — et si un seul salon est réglé, deux fois
+#  dans le même, à la suite.
+#
+#  La priorité dit ce qu'un article est AVANT TOUT :
+#    · il EST devenu collectionnable      → l'information la plus forte
+#    · il POURRAIT le devenir             → une hypothèse, plus faible
+#    · il vient d'être créé               → un fait neutre
+#  Un article déjà sorti dans un flux ne ressort donc pas dans un flux de
+#  priorité inférieure. L'inverse reste permis, et c'est voulu : une nouveauté
+#  annoncée en janvier qui passe Limited en mars est une VRAIE nouvelle.
+PRIORITE_FLUX = {"bascules": 3, "surveiller": 2, "nouveautes": 1}
+
+
+async def flux_deja_sortis(guild_id: int, asset_id: int) -> set[str]:
+    """Les flux dans lesquels cet article est déjà sorti sur ce serveur."""
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT flux FROM roblox_publies WHERE guild_id=? AND asset_id=?",
+                (guild_id, asset_id)) as cur:
+                return {str(r[0]) for r in await cur.fetchall()}
+    except Exception as ex:
+        _log(f"[roblox_veille flux_deja_sortis] {ex}")
+        #  Fail-CLOSED comme `deja_publie` : dans le doute, on considère que
+        #  tout est déjà sorti. Mieux vaut rater une publication que noyer le
+        #  salon de doublons.
+        return set(PRIORITE_FLUX)
+
+
+async def publiable_dans(guild_id: int, asset_id: int, flux: str) -> bool:
+    """Cet article a-t-il sa place dans CE flux, sur ce serveur ?
+
+    Non s'il y est déjà sorti, et non s'il est déjà sorti dans un flux plus
+    fort — voir `PRIORITE_FLUX`.
+    """
+    sortis = await flux_deja_sortis(guild_id, asset_id)
+    if flux in sortis:
+        return False
+    mien = PRIORITE_FLUX.get(flux, 0)
+    return not any(PRIORITE_FLUX.get(f, 0) > mien for f in sortis)
 
 
 async def deja_publie(guild_id: int, asset_id: int, flux: str) -> bool:

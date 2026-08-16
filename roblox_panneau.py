@@ -549,7 +549,7 @@ class RobloxPanelV2(LayoutView):
         """
         try:
             await i.response.defer()
-            rel = await veille.relever_nouveautes(limite=30)
+            rel = await veille.relever_nouveautes(limite=120)
             if rel["code"] != 200:
                 self._dernier = (
                     f"🔴 Relevé en échec — code `{_ou_tiret(rel['code'])}`, "
@@ -564,8 +564,8 @@ class RobloxPanelV2(LayoutView):
             #  collectionnables (mesuré le 16/08 : 0 sur 10, contre 10 sur 10
             #  avec `SalesTypeFilter=2`). Sans lui, ce bouton cherchait au seul
             #  endroit où les Limiteds ne sont pas.
-            await asyncio.sleep(veille.PAUSE_ENTRE_APPELS)
-            relc = await veille.relever_collectionnables(limite=30)
+            await asyncio.sleep(veille.PAUSE_ENTRE_RELEVES)
+            relc = await veille.relever_collectionnables(limite=120)
             if relc["code"] == 200:
                 await veille.comparer_et_enregistrer(relc["articles"])
                 vus = {x["asset_id"] for x in (evts.get("bascules") or [])}
@@ -592,12 +592,17 @@ class RobloxPanelV2(LayoutView):
             #  Mêmes chiffres de trading que la boucle : stock et revente
             #  viennent d'un point d'API distinct, un appel par article. Borné
             #  au plafond du passage pour ne pas faire attendre le staff.
-            await veille.enrichir(
-                a_publier[:veille.MAX_PUBLICATIONS_PAR_PASSAGE])
+            lot = a_publier[:veille.MAX_PUBLICATIONS_PAR_PASSAGE]
+            await veille.enrichir(lot)
+            #  Le nom français officiel, en un appel pour tout le lot.
+            await veille.traduire(lot)
             imgs = await veille.vignettes([x["asset_id"] for x in a_publier])
-            for flux, cle in (("nouveautes", "nouveaux"),
-                              ("bascules", "bascules"),
-                              ("surveiller", "retires")):
+            #  Même ordre de priorité que la boucle : bascules d'abord, pour
+            #  qu'un article ne « grille » pas sa propre bascule dans un flux
+            #  plus faible au même passage.
+            for flux, cle in (("bascules", "bascules"),
+                              ("surveiller", "retires"),
+                              ("nouveautes", "nouveaux")):
                 #  « bascules » regarde plus loin : c'est ce flux qui rattrape
                 #  les Limiteds jamais sortis. Le plafond de publications reste
                 #  le vrai garde-fou — la tranche ne décide que du REGARD.
@@ -635,7 +640,10 @@ class RobloxPanelV2(LayoutView):
                             veille.indice(a)["note"] < veille.SEUIL_SURVEILLER:
                         motifs["seuil"] += 1
                         continue
-                    if await veille.deja_publie(self.g.id, a["asset_id"], flux):
+                    #  Déjà sorti ici, OU dans un flux plus fort : les salons
+                    #  restent séparés (voir `PRIORITE_FLUX`).
+                    if not await veille.publiable_dans(
+                            self.g.id, a["asset_id"], flux):
                         motifs["deja"] += 1
                         continue
                     if await publier(self.g, salon, a, flux,
