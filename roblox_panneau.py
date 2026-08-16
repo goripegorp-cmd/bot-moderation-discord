@@ -161,17 +161,26 @@ def construire_fiche(article: dict, flux: str, image: str | None = None) -> Layo
     return v
 
 
-async def publier(guild, salon, article: dict, flux: str,
-                  image: str | None = None) -> bool:
-    """Publie une fiche, par webhook si possible. Fail-safe.
+async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str) -> bool:
+    """L'envoi réel. Rend `True` UNIQUEMENT si un message est parti.
 
-    `image` est passée par l'appelant, qui a demandé les vignettes EN LOT :
-    une requête pour cent articles au lieu de cent requêtes. Aller la chercher
-    ici, article par article, ferait exactement ce que le pare-feu punit.
+    ⚠️ PIÈGE À NE PAS DÉFAIRE — LE RETOUR DE `webhook_send` COMPTE.
+    `webhook_send` (bot.py) n'a AUCUN chemin qui lève : elle attrape Forbidden,
+    HTTPException et tout le reste, journalise, tente son propre repli
+    `channel.send`, et rend `None` quand plus rien n'est possible. La version
+    précédente appelait donc `await _webhook_send(...)` puis rendait `True` sans
+    regarder — ce qui produisait DEUX mensonges :
+
+      · le bouton « Relever maintenant » annonçait « 3 fiches publiées » alors
+        que le salon n'avait rien reçu (permission manquante, par exemple) ;
+      · pire, l'appelant enchaînait sur `marquer_publie()`, et l'article était
+        marqué SORTI POUR TOUJOURS sans jamais avoir été vu.
+
+    `None` ⇔ rien n'est parti : avec `wait=True` un webhook rend un
+    `WebhookMessage`, et le repli `channel.send` rend un `Message`.
+    Pas de nouvelle tentative ici quand elle rend `None` : `webhook_send` a
+    déjà essayé `channel.send` de son côté, la refaire échouerait pareil.
     """
-    if salon is None:
-        return False
-    vue = construire_fiche(article, flux, image=image)
     try:
         if _webhook_send is not None:
             #  ⚠️ `webhook_send` n'accepte PAS de `username` — sa signature est
@@ -180,20 +189,43 @@ async def publier(guild, salon, article: dict, flux: str,
             #  TypeError, tombait dans le repli, et le webhook n'etait JAMAIS
             #  utilise alors que c'etait la demande. Le nom vient donc du profil
             #  declare dans WEBHOOK_PROFILES, choisi par la CLE de plateforme.
-            await _webhook_send(salon, PLATEFORME.get(flux, "roblox_nouveautes"),
-                                view=vue)
-        else:
-            await salon.send(view=vue)
+            res = await _webhook_send(salon, profil, view=vue)
+            if res is None:
+                _log(f"[roblox {etiquette}] webhook_send a rendu None — RIEN "
+                     f"n'est parti dans #{getattr(salon, 'name', '?')} "
+                     f"({getattr(salon, 'id', '?')}). Cause journalisée par "
+                     f"[webhook_send] juste au-dessus.")
+                return False
+            return True
+        await salon.send(view=vue)
         return True
     except Exception as ex:
         #  Repli : un défaut de webhook ne doit pas faire taire le flux.
-        _log(f"[roblox publier webhook] {ex}")
+        _log(f"[roblox {etiquette} webhook] {ex}")
         try:
             await salon.send(view=vue)
             return True
         except Exception as ex2:
-            _log(f"[roblox publier] {ex2}")
+            _log(f"[roblox {etiquette}] {ex2}")
             return False
+
+
+async def publier(guild, salon, article: dict, flux: str,
+                  image: str | None = None) -> bool:
+    """Publie une fiche, par webhook si possible. Fail-safe.
+
+    Rend `True` seulement si le message est REELLEMENT parti — l'appelant
+    s'appuie dessus pour écrire la marque « déjà publié », qui est définitive.
+
+    `image` est passée par l'appelant, qui a demandé les vignettes EN LOT :
+    une requête pour cent articles au lieu de cent requêtes. Aller la chercher
+    ici, article par article, ferait exactement ce que le pare-feu punit.
+    """
+    if salon is None:
+        return False
+    vue = construire_fiche(article, flux, image=image)
+    return await _envoyer(salon, PLATEFORME.get(flux, "roblox_nouveautes"),
+                          vue, "publier")
 
 
 def construire_actu(billet: dict) -> LayoutView:
@@ -226,25 +258,15 @@ def construire_actu(billet: dict) -> LayoutView:
 
 
 async def publier_actu(guild, salon, billet: dict) -> bool:
-    """Publie un billet, par webhook si possible. Fail-safe."""
+    """Publie un billet, par webhook si possible. Fail-safe.
+
+    Même contrat que `publier` : `True` seulement si le message est parti.
+    """
     if salon is None:
         return False
-    vue = construire_actu(billet)
-    try:
-        if _webhook_send is not None:
-            #  Meme raison que ci-dessus : le nom vient du profil, pas d'un kwarg.
-            await _webhook_send(salon, "roblox_actu", view=vue)
-        else:
-            await salon.send(view=vue)
-        return True
-    except Exception as ex:
-        _log(f"[roblox publier_actu webhook] {ex}")
-        try:
-            await salon.send(view=vue)
-            return True
-        except Exception as ex2:
-            _log(f"[roblox publier_actu] {ex2}")
-            return False
+    #  Meme raison que ci-dessus : le nom vient du profil, pas d'un kwarg.
+    return await _envoyer(salon, "roblox_actu", construire_actu(billet),
+                          "publier_actu")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -446,6 +468,14 @@ class RobloxPanelV2(LayoutView):
 
         Le bouton dit ce qu'il a VU, y compris quand il n'a rien trouvé : c'est
         la seule façon de distinguer « rien de neuf » de « ça ne marche pas ».
+
+        ⚠️ PIÈGE À NE PAS DÉFAIRE — « 0 PUBLIÉE » A CINQ CAUSES.
+        Salon non réglé · salon introuvable · article hors fenêtre d'âge ·
+        indice sous le seuil · déjà sorti · envoi refusé par Discord. Toutes
+        donnaient le même texte : « Rien de neuf : c'est normal, Roblox publie
+        peu. » Un compte-rendu qui range une panne de permission sous « c'est
+        normal » est un bouton qui ment — on compte donc chaque cause, et on
+        nomme celle qui a réellement bloqué.
         """
         try:
             await i.response.defer()
@@ -459,6 +489,11 @@ class RobloxPanelV2(LayoutView):
             evts = await veille.comparer_et_enregistrer(rel["articles"])
             c = await veille.config(self.g.id)
             envoyes = 0
+            #  Le décompte des refus, par cause. C'est lui qui rend le
+            #  compte-rendu honnête.
+            motifs = {"sans_salon": 0, "salon_introuvable": 0, "age": 0,
+                      "seuil": 0, "deja": 0, "envoi": 0}
+            salons_absents = []
             #  Les images en UN SEUL appel pour tout le passage.
             a_publier = [x for k in ("nouveaux", "bascules", "retires")
                          for x in (evts.get(k) or [])[:5]]
@@ -466,8 +501,22 @@ class RobloxPanelV2(LayoutView):
             for flux, cle in (("nouveautes", "nouveaux"),
                               ("bascules", "bascules"),
                               ("surveiller", "retires")):
-                salon = self.g.get_channel(veille.salon_du_flux(c, flux))
-                for a in (evts.get(cle) or [])[:5]:
+                candidats = (evts.get(cle) or [])[:5]
+                #  ⚠️ L'identifiant AVANT le salon : `get_channel(0)` et
+                #  `get_channel(1234)` rendent tous les deux `None`, mais l'un
+                #  veut dire « case vide » et l'autre « salon supprimé ou
+                #  invisible au bot ». Deux pannes différentes, deux corrections
+                #  différentes — les confondre coûterait une heure de recherche.
+                salon_id = veille.salon_du_flux(c, flux)
+                salon = self.g.get_channel(salon_id) if salon_id else None
+                if candidats and salon is None:
+                    if salon_id:
+                        motifs["salon_introuvable"] += len(candidats)
+                        salons_absents.append(str(salon_id))
+                    else:
+                        motifs["sans_salon"] += len(candidats)
+                    continue
+                for a in candidats:
                     #  Meme plafond que la boucle : le bouton ne doit pas etre
                     #  un moyen de contourner la protection de debit.
                     if envoyes >= veille.MAX_PUBLICATIONS_PAR_PASSAGE:
@@ -475,32 +524,79 @@ class RobloxPanelV2(LayoutView):
                     #  Trop vieux = plus une nouvelle. L'article reste en base
                     #  pour la détection des bascules, mais on ne le publie pas.
                     if not veille.age_publiable(a, flux):
+                        motifs["age"] += 1
                         continue
                     #  « À surveiller » ne publie que du solide : ce flux doit
                     #  être rare et sûr, pas un fourre-tout.
                     if flux == "surveiller" and \
                             veille.indice(a)["note"] < veille.SEUIL_SURVEILLER:
+                        motifs["seuil"] += 1
                         continue
                     if await veille.deja_publie(self.g.id, a["asset_id"], flux):
+                        motifs["deja"] += 1
                         continue
                     if await publier(self.g, salon, a, flux,
                                      image=imgs.get(a["asset_id"])):
+                        #  La marque est DÉFINITIVE : on ne l'écrit que sur un
+                        #  envoi réellement abouti (voir `_envoyer`).
                         await veille.marquer_publie(self.g.id, a["asset_id"], flux)
                         envoyes += 1
+                    else:
+                        motifs["envoi"] += 1
             await veille.purger()
-            self._dernier = (
-                f"🟢 Relevé réussi — `{len(rel['articles'])}` article(s) lus, "
-                f"`{envoyes}` fiche(s) publiée(s)."
-                + ("" if envoyes else " Rien de neuf : c'est normal, Roblox "
-                   "publie peu."))
+            self._dernier = self._compte_rendu(len(rel["articles"]), envoyes,
+                                               motifs, salons_absents)
             await self.render_to(i, edit=True)
         except Exception as ex:
             _log(f"[roblox relever] {ex}")
-            self._dernier = f"❌ Erreur : `{type(ex).__name__}`"
+            self._dernier = f"❌ Erreur : `{type(ex).__name__}` — {ex}"
             try:
                 await self.render_to(i, edit=True)
             except Exception:
                 pass
+
+    @staticmethod
+    def _compte_rendu(lus: int, envoyes: int, motifs: dict,
+                      salons_absents: list) -> str:
+        """Le texte du relevé — il nomme la cause, il ne la range pas.
+
+        Séparé de `_cb_relever` pour être testable sans Discord : c'est ce
+        texte, et lui seul, qui dit au propriétaire si la chaîne marche.
+        """
+        detail = []
+        if motifs["sans_salon"]:
+            detail.append(f"`{motifs['sans_salon']}` bloquée(s) : **aucun salon "
+                          f"réglé** pour ce flux — réglez-le ci-dessus")
+        if motifs["salon_introuvable"]:
+            detail.append(
+                f"`{motifs['salon_introuvable']}` bloquée(s) : **salon "
+                f"introuvable** (`{'`, `'.join(salons_absents)}`) — supprimé, "
+                f"ou le bot n'y a pas accès")
+        if motifs["envoi"]:
+            detail.append(f"`{motifs['envoi']}` **refusée(s) par Discord** — "
+                          f"permissions du salon (voir les journaux). Ces "
+                          f"articles ressortiront au prochain relevé")
+        if motifs["deja"]:
+            detail.append(f"`{motifs['deja']}` déjà publié(e)(s) — « ♻️ Tout "
+                          f"republier » les libère")
+        if motifs["age"]:
+            detail.append(f"`{motifs['age']}` hors fenêtre d'âge")
+        if motifs["seuil"]:
+            detail.append(f"`{motifs['seuil']}` sous le seuil d'indice "
+                          f"(`{veille.SEUIL_SURVEILLER}`)")
+
+        #  Une panne se voit au premier coup d'œil : icône rouge, pas verte.
+        panne = bool(motifs["sans_salon"] or motifs["salon_introuvable"]
+                     or motifs["envoi"])
+        icone = "🔴" if panne else ("🟢" if envoyes else "⚪")
+        txt = (f"{icone} Relevé — `{lus}` article(s) lus, `{envoyes}` "
+               f"fiche(s) **réellement publiée(s)**.")
+        if detail:
+            txt += "\n" + "\n".join(f"-# • {d}." for d in detail)
+        elif not envoyes:
+            txt += ("\n-# • Aucun article nouveau dans ce relevé : rien à "
+                    "publier, et c'est normal — Roblox publie peu.")
+        return txt
 
     async def _cb_oublier(self, i):
         """Efface la mémoire des publications de cette guilde.
