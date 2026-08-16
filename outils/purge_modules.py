@@ -56,6 +56,20 @@ GARDER = {
     "impersonation_detector",  # usurpation de staff : nommée explicitement par l'owner
     "member_risk",             # score de risque des nouvelles arrivées
     "i18n",                    # socle de traduction, utilisé par les MP de sanction
+    # ⚠️⚠️ AJOUTS 16/08/2026 — SANS EUX, CET OUTIL DÉTRUIT CE QUE LE PROPRIÉTAIRE
+    #    A EXPLICITEMENT DEMANDÉ DE GARDER. Vérifié en aperçu ce jour-là :
+    #    `--apply` proposait de supprimer la veille Roblox, le système social et
+    #    les neuf modules d'activité. La liste ci-dessus datait d'AVANT leur
+    #    réintroduction ; le HANDOFF classe même « Roblox » dans le périmètre
+    #    supprimé, et ROBLOX.md dit noir sur blanc « ne pas les purger en croyant
+    #    bien faire ». Un outil de suppression qui a raison sur 90 % des modules
+    #    est plus dangereux qu'un outil qui n'existe pas.
+    "roblox_veille", "roblox_news", "roblox_panneau",   # ROBLOX.md, réintroduction demandée
+    "social_media", "social_zones", "social_match",     # /social + onglet /configure
+    "activite", "activite_calendrier", "activite_escalade", "activite_message",
+    "activite_niveaux", "activite_panneau", "activite_passage",
+    "activite_recompenses", "activite_textes",          # système d'activité (11-12/08)
+    "vocabulary",                                        # importé DUR par 3 modules gardés
     # Divers infra encore câblés
     "setup_wizard", "slash_commands_2026", "admin_panels_v2", "ui_usage",
     # Outillage : régénère INDEX.md (carte des symboles) — appelé par le workflow

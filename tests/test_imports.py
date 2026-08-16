@@ -21,7 +21,6 @@ PHASE_163_MODULES = [
     "mentor_bonus",
     "honeypot",
     "behavior_anomaly",
-    "roblox_raffle",
     "weekly_stats",
     "server_pulse",
     # Phase 165 — nouveaux modules
@@ -40,7 +39,6 @@ PHASE_163_MODULES = [
     # Phase 170 — Chronique d'Abylumis (récit collectif persistant)
     "codex_chronicle",
     # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
-    "daily_encounters",
     # Phase 170.4 : Conseil des Anciens hebdomadaire
     # Phase 170.5 : Régions du monde + patrouilles
     # Phase 170.6 : Indices fragmentés
@@ -73,7 +71,6 @@ INIT_DB_MODULES = [
     "mentor_bonus",
     "honeypot",
     "behavior_anomaly",
-    "roblox_raffle",
     # Phase 165
     "stream_schedule",
     # Phase 166 (birthday_panel n'a pas d'init_db, lit cfg directement)
@@ -86,7 +83,6 @@ INIT_DB_MODULES = [
     # Phase 170 — story_engine (codex_chronicle n'a pas d'init_db, lit DB
     # de story_engine)
     # Phase 170.2-3 : NPCs mood + encounters log
-    "daily_encounters",
     # Phase 170.4 : council sessions + votes
     # Phase 170.5 : regional state + patrols
     # Phase 170.6 : mystery clues + revelations

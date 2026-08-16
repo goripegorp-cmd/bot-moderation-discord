@@ -206,7 +206,6 @@ import roblox_panneau as roblox_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
 import delegations as delegations2026
 import compromised_detector as compromised2026
-import events_engine as events2026
 # Phase 126 : modules backend infrastructure
 import db_backup as db_backup_module
 import health_server as health_server_module
@@ -233,7 +232,6 @@ import data_cleanup as cleanup_module
 # Phase 144 : Saisons thématiques qui transforment les events sur l'année
 # Phase 145 : Réveil intelligent des membres dormants (DM + reward comeback)
 # Phase 146 : Boutons de suivi après chaque event (zéro commande à mémoriser)
-import event_followup as followup_module
 # Phase 147 : Sécurité moderne 2026 — anti-raid, anti-phishing, anti-impersonation
 import raid_detector as raid_module
 import owner_ids as owner_ids_module  # SOURCE UNIQUE du/des super-owner(s) (founder-only)
@@ -247,7 +245,6 @@ import rate_limiter as ratelimit_module
 import health_check as health_module
 import backup_lite as backup_module
 # Phase 149 : Events MMO — sagas multi-jours, profil joueur, FAQ navigable
-import saga_engine as saga_module
 import help_faq as faq_module
 # Phase 152 : UX/Owner — DM digest, owner digest, webhook tracker
 import dm_digest as dm_digest_module
@@ -255,13 +252,11 @@ import webhook_tracker as webhook_tracker_module
 # Phase 153 : Engagement long terme — reputation, pet evo, daily prompt,
 # onboarding journey, mentor bonus
 import reputation as reputation_module
-import alliance_war as alliance_war_module
 import mentor_bonus as mentor_bonus_module
 # Phase 154 : Sécurité 2026++ — honeypot + behavior anomaly
 import honeypot as honeypot_module
 import behavior_anomaly as behavior_anomaly_module
 # Phase 155 : Roblox / Stream — game stats, raffle, watch party
-import roblox_raffle as roblox_raffle_module
 # Phase 157 : Community goals + Coin economy (anti-inflation)
 # Phase 161 : Weekly recap + Leaderboards publics
 import weekly_stats as weekly_stats_module
@@ -295,7 +290,6 @@ import transcript_store  # Phase 281 : stockage + service web des transcripts de
 # Phase 169.3 : World Invasion mensuelle
 # Phase 170.1 : La Chronique d'Abylumis — récit narratif persistant 9 mois
 import codex_chronicle as codex_chronicle_module
-import combat_recall as combat_recall_module  # Phase 235.25c : rappel des participants aux combats
 import seasonal_titles as seasonal_titles_module  # Phase 242 : champion d'activité du mois
 import sticky_messages as sticky_messages_module  # « Dernier message » sticky en bas de salon (owner 2026-06-16)
 import insult_filter as insult_filter  # Filtre insultes/haine GRADUÉ multilingue (owner 2026-06-21, lexique vérifié anti-FP)
@@ -309,7 +303,6 @@ import nsfw_scan as nsfw_scan  # Protection mineurs : détection d'images sexuel
 #  aucun appelant, dont `send_weekly_recaps` sortait déjà sur un `return 0`.)
 import i18n as i18n_module  # Socle i18n : préférence de langue par membre + sélecteur (zéro slash)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
-import daily_encounters as daily_encounters_module
 # Phase 170.4 : Conseil des Anciens hebdomadaire
 # Phase 170.5 : Régions du monde + patrouilles
 # Phase 170.6 : Indices fragmentés (force la discussion en chat)
@@ -11087,13 +11080,6 @@ def _in_night_window(c: dict) -> bool:
         return False
 
 
-def _is_night_now(c: dict) -> bool:
-    """#1 MODE NUIT : True si on doit COUPER les pings d'event (night_mode_enabled ON ET
-    dans la fenêtre nocturne). FAIL-SAFE → False (on ne coupe rien par défaut)."""
-    try:
-        return bool(c.get('night_mode_enabled', False)) and _in_night_window(c)
-    except Exception:
-        return False
 
 
 async def _is_event_active_hour(guild_id: int) -> bool:
@@ -11107,62 +11093,6 @@ async def _is_event_active_hour(guild_id: int) -> bool:
         return True  # fail-open
 
 
-async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
-    """Retourne l'inventaire d'un joueur (en crée un par défaut si absent).
-
-    Phase 102 : ajout des slots Helmet/Boots/Accessory/Trinket.
-    Try/except sur la SELECT étendue pour fallback graceful si ALTER TABLE
-    n'a pas encore migré (premier boot après deploy).
-    """
-    async with get_db() as db:
-        # Tenter SELECT avec les nouveaux slots ; fallback sur l'ancien schema
-        try:
-            async with db.execute(
-                'SELECT hp, max_hp, weapon_json, armor_json, kills, total_damage, '
-                'helmet_json, boots_json, accessory_json, trinket_json, legs_json '
-                'FROM player_inventory WHERE guild_id=? AND user_id=?',
-                (guild_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-            if row:
-                return {
-                    'hp': row[0], 'max_hp': row[1],
-                    'weapon': json.loads(row[2]) if row[2] else {},
-                    'armor': json.loads(row[3]) if row[3] else {},
-                    'kills': row[4], 'total_damage': row[5],
-                    'helmet': json.loads(row[6]) if row[6] else {},
-                    'boots': json.loads(row[7]) if row[7] else {},
-                    'accessory': json.loads(row[8]) if row[8] else {},
-                    'trinket': json.loads(row[9]) if row[9] else {},
-                    'legs': json.loads(row[10]) if len(row) > 10 and row[10] else {},
-                }
-        except Exception:
-            # Fallback : ALTER TABLE pas encore appliquée → utiliser ancien schema
-            async with db.execute(
-                'SELECT hp, max_hp, weapon_json, armor_json, kills, total_damage '
-                'FROM player_inventory WHERE guild_id=? AND user_id=?',
-                (guild_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-            if row:
-                return {
-                    'hp': row[0], 'max_hp': row[1],
-                    'weapon': json.loads(row[2]) if row[2] else {},
-                    'armor': json.loads(row[3]) if row[3] else {},
-                    'kills': row[4], 'total_damage': row[5],
-                    'helmet': {}, 'boots': {}, 'accessory': {}, 'trinket': {}, 'legs': {},
-                }
-        # Création par défaut
-        await db.execute(
-            'INSERT INTO player_inventory(guild_id, user_id, hp, max_hp, weapon_json, armor_json) VALUES(?,?,?,?,?,?)',
-            (guild_id, user_id, 100, 100, '{}', '{}'),
-        )
-        await db.commit()
-    return {
-        'hp': 100, 'max_hp': 100, 'weapon': {}, 'armor': {},
-        'kills': 0, 'total_damage': 0,
-        'helmet': {}, 'boots': {}, 'accessory': {}, 'trinket': {}, 'legs': {},
-    }
 
 
 
@@ -11625,568 +11555,18 @@ _personal_event_last: dict[tuple[int, int], float] = {}
 _personal_event_hourly: dict[int, list[float]] = {}
 
 
-async def _delete_personal_event_message(log_id: int):
-    """Supprime le message original (DM ou channel) d'un event personnel terminé."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT dm_channel_id, dm_message_id, channel_id, channel_message_id FROM personal_events_log WHERE id=?',
-                (log_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            return
-        dm_ch_id, dm_msg_id, ch_id, ch_msg_id = row
-
-        # DM en priorité
-        if dm_ch_id and dm_msg_id:
-            try:
-                dm_ch = bot.get_channel(int(dm_ch_id)) or await bot.fetch_channel(int(dm_ch_id))
-                if dm_ch:
-                    msg = await dm_ch.fetch_message(int(dm_msg_id))
-                    await msg.delete()
-                    return
-            except Exception as ex:
-                print(f"[_delete_personal_event_message DM] {ex}")
-
-        # Fallback channel
-        if ch_id and ch_msg_id:
-            try:
-                ch = bot.get_channel(int(ch_id))
-                if ch:
-                    msg = await ch.fetch_message(int(ch_msg_id))
-                    await msg.delete()
-            except Exception as ex:
-                print(f"[_delete_personal_event_message channel] {ex}")
-    except Exception as ex:
-        print(f"[_delete_personal_event_message] {ex}")
 
 
-async def _mark_personal_event_completed(guild_id: int, user_id: int, log_id: int):
-    """Marque l'event comme terminé + incrémente stats."""
-    try:
-        async with get_db() as db:
-            await db.execute('UPDATE personal_events_log SET claimed=1 WHERE id=?', (log_id,))
-            await db.execute(
-                'INSERT INTO player_event_stats(guild_id, user_id, personal_events_completed) VALUES(?,?,1) '
-                'ON CONFLICT(guild_id, user_id) DO UPDATE SET personal_events_completed = personal_events_completed + 1',
-                (guild_id, user_id),
-            )
-            await db.commit()
-    except Exception as ex:
-        print(f"[_mark_personal_event_completed] {ex}")
 
 
-async def _claim_personal_event(log_id: int) -> bool:
-    """Phase 251.4 — CLAIM ATOMIQUE d'un event perso (anti argent-infini).
-    Passe `claimed` 0→1 en UNE requête conditionnelle et renvoie True UNIQUEMENT si
-    ce claim a réussi (= 1re fois). Empêche : ré-ouverture du même event, double-clic,
-    re-réponse après reboot — tout vit en DB, pas en RAM. À appeler AVANT toute
-    distribution de pièces. FAIL-CLOSED : en cas d'erreur on renvoie False (on ne
-    distribue PAS — mieux vaut rater une récompense que créer de l'argent infini)."""
-    try:
-        async with get_db() as db:
-            cur = await db.execute(
-                'UPDATE personal_events_log SET claimed=1 WHERE id=? AND claimed=0',
-                (int(log_id),),
-            )
-            await db.commit()
-            return getattr(cur, "rowcount", 0) == 1
-    except Exception as ex:
-        _logerr("economy.claim_personal_event", ex, context={"log_id": log_id})
-        return False
 
 
-class PersonalEventOpenView(View):
-    """View PERSISTANTE (timeout=None) pour les événements personnels.
-
-    Persistance complète :
-    - custom_id contient le log_id qui suffit à reconstruire l'event
-    - À chaque clic, on relit la DB pour obtenir le contenu
-    - Survit aux restarts du bot
-    """
-
-    def __init__(self, event_log_id: int = 0):
-        super().__init__(timeout=None)
-        self.event_log_id = event_log_id
-        b = Button(
-            label="🎯 Ouvrir mon événement",
-            style=discord.ButtonStyle.success,
-            custom_id=f"pe_open_{event_log_id}",
-        )
-        b.callback = self._on_open
-        self.add_item(b)
-
-    async def _on_open(self, i: discord.Interaction):
-        # ACK immédiat avec defer pour éviter timeout (DB queries après)
-        try:
-            await i.response.defer(ephemeral=True)
-        except Exception:
-            pass
-
-        try:
-            # Récupérer event depuis DB
-            async with get_db() as db:
-                async with db.execute(
-                    'SELECT user_id, event_type, event_data_json, claimed FROM personal_events_log WHERE id=?',
-                    (self.event_log_id,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row:
-                return await i.followup.send("❌ Cet événement n'existe plus.", ephemeral=True)
-            target_uid, ev_type, ev_data_json, claimed = row
-
-            if i.user.id != int(target_uid):
-                return await i.followup.send(
-                    "🔒 Cet événement personnel n'est pas pour toi !",
-                    ephemeral=True,
-                )
-            if claimed:
-                return await i.followup.send(
-                    "⚠️ Tu as déjà récupéré cet événement.",
-                    ephemeral=True,
-                )
-
-            try:
-                ev_data = json.loads(ev_data_json) if ev_data_json else {}
-            except Exception:
-                ev_data = {}
-
-            # Détecter si on est en DM ou en channel guild
-            in_dm = (i.guild is None)
-            guild_id = i.user.mutual_guilds[0].id if (in_dm and i.user.mutual_guilds) else (i.guild.id if i.guild else 0)
-            if in_dm:
-                # Récupérer le guild_id depuis la DB
-                async with get_db() as db:
-                    async with db.execute(
-                        'SELECT guild_id FROM personal_events_log WHERE id=?', (self.event_log_id,),
-                    ) as cur:
-                        r2 = await cur.fetchone()
-                    if r2:
-                        guild_id = int(r2[0])
-
-            # Type : gift et tip → reward direct
-            if ev_type == 'gift':
-                # CLAIM ATOMIQUE avant de payer (anti double-clic / ré-ouverture).
-                if not await _claim_personal_event(self.event_log_id):
-                    return await i.followup.send(
-                        "⚠️ Tu as déjà récupéré cet événement.", ephemeral=True)
-                coins = int(ev_data.get('coins', 50))
-                try:
-                    await add_coins(guild_id, i.user.id, coins)
-                except Exception:
-                    pass
-                e = discord.Embed(
-                    title=ev_data.get('title', '🎁 Cadeau'),
-                    description=f"🎉 **Tu reçois `{coins}` 🪙 !**",
-                    color=0x57F287,
-                )
-                e.set_footer(text=events2026.get_help_footer("event_end"))
-                await i.followup.send(embed=e, ephemeral=True)
-                await _mark_personal_event_completed(guild_id, i.user.id, self.event_log_id)
-                # Supprime le message original (DM ou channel)
-                asyncio.create_task(_delete_personal_event_message(self.event_log_id))
-                return
-
-            if ev_type == 'tip':
-                # CLAIM ATOMIQUE avant de payer (anti double-clic / ré-ouverture).
-                if not await _claim_personal_event(self.event_log_id):
-                    return await i.followup.send(
-                        "⚠️ Tu as déjà récupéré cet événement.", ephemeral=True)
-                coins = int(ev_data.get('coins', 50))
-                try:
-                    await add_coins(guild_id, i.user.id, coins)
-                except Exception:
-                    pass
-                e = discord.Embed(
-                    title=ev_data.get('title', '💡 Conseil'),
-                    description=(
-                        f"{ev_data.get('description', '')}\n\n"
-                        f"_Merci d'avoir lu !_ **+`{coins}` 🪙**"
-                    ),
-                    color=0x3498DB,
-                )
-                e.set_footer(text=events2026.get_help_footer("event_end"))
-                await i.followup.send(embed=e, ephemeral=True)
-                await _mark_personal_event_completed(guild_id, i.user.id, self.event_log_id)
-                asyncio.create_task(_delete_personal_event_message(self.event_log_id))
-                return
-
-            if ev_type in ('math', 'riddle'):
-                answers = ev_data.get('answers', [])
-                correct_idx = int(ev_data.get('correct_idx', 0))
-                reward = int(ev_data.get('reward', 100))
-                v = _PersonalQuestionView(
-                    log_id=self.event_log_id,
-                    target_user_id=i.user.id,
-                    guild_id=guild_id,
-                    answers=answers,
-                    correct_idx=correct_idx,
-                    reward=reward,
-                )
-                e = discord.Embed(
-                    title=ev_data.get('title', '❓'),
-                    description=(
-                        f"**{ev_data.get('description', '')}**\n\n"
-                        f"_Choisis la bonne réponse. Récompense : `{reward}` 🪙_"
-                    ),
-                    color=0xF1C40F,
-                )
-                await i.followup.send(embed=e, view=v, ephemeral=True)
-                return
-
-            await i.followup.send("❌ Type d'événement inconnu.", ephemeral=True)
-        except Exception as ex:
-            print(f"[PersonalEventOpenView _on_open] {ex}")
-            import traceback; traceback.print_exc()
-            try:
-                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
 
 
-class _PersonalQuestionView(View):
-    """View pour répondre aux questions math/riddle (timeout court car ephemeral)."""
-
-    def __init__(self, log_id: int, target_user_id: int, guild_id: int, answers: list, correct_idx: int, reward: int):
-        super().__init__(timeout=180)  # 3 min pour répondre
-        self.log_id = log_id
-        self.target_user_id = target_user_id
-        self.guild_id = guild_id
-        self.correct_idx = correct_idx
-        self.reward = reward
-        self.answered = False
-        for idx, ans in enumerate(answers[:4]):
-            b = Button(
-                label=f"{chr(ord('A') + idx)}. {str(ans)[:60]}",
-                style=discord.ButtonStyle.secondary,
-                custom_id=f"peq_{log_id}_{idx}",
-            )
-            b.callback = (lambda ix, idx_local=idx: self._on_answer(ix, idx_local))
-            self.add_item(b)
-
-    async def _on_answer(self, i: discord.Interaction, idx: int):
-        try:
-            if i.user.id != self.target_user_id:
-                return await i.response.send_message("🔒 Pas pour toi !", ephemeral=True)
-            if self.answered:
-                return await i.response.send_message("⚠️ Tu as déjà répondu.", ephemeral=True)
-            self.answered = True
-            # CLAIM ATOMIQUE en DB (anti argent-infini) : le flag self.answered ne vit
-            # qu'en RAM → perdu si la vue est recréée en RÉ-OUVRANT l'event (le bug).
-            # Le claim DB sur le log_id est la VRAIE garde : 1 récompense / event, à vie.
-            if not await _claim_personal_event(self.log_id):
-                return await i.response.send_message(
-                    "⚠️ Tu as déjà fait cet événement.", ephemeral=True)
-
-            if idx == self.correct_idx:
-                try:
-                    await add_coins(self.guild_id, i.user.id, self.reward)
-                except Exception:
-                    pass
-                for c_idx, child in enumerate(self.children):
-                    child.disabled = True
-                    if c_idx == self.correct_idx:
-                        child.style = discord.ButtonStyle.success
-                        child.label = f"{chr(ord('A') + c_idx)} ✓"
-
-                e = discord.Embed(
-                    title="✅ Bonne réponse !",
-                    description=(
-                        f"Tu remportes **`{self.reward}` 🪙** !\n\n"
-                        f"{events2026.get_help_footer('event_end')}"
-                    ),
-                    color=0x57F287,
-                )
-                await i.response.edit_message(embed=e, view=self)
-            else:
-                consolation = 25
-                try:
-                    await add_coins(self.guild_id, i.user.id, consolation)
-                except Exception:
-                    pass
-                for c_idx, child in enumerate(self.children):
-                    child.disabled = True
-                    if c_idx == idx:
-                        child.style = discord.ButtonStyle.danger
-                        child.label = f"{chr(ord('A') + c_idx)} ✗"
-                    elif c_idx == self.correct_idx:
-                        child.style = discord.ButtonStyle.success
-                        child.label = f"{chr(ord('A') + c_idx)} ✓"
-
-                e = discord.Embed(
-                    title="❌ Mauvaise réponse",
-                    description=(
-                        f"Mais merci d'avoir participé ! Tu reçois `{consolation}` 🪙 quand même.\n\n"
-                        f"{events2026.get_help_footer('event_end')}"
-                    ),
-                    color=0xED4245,
-                )
-                await i.response.edit_message(embed=e, view=self)
-
-            # Mark completed + delete original message
-            await _mark_personal_event_completed(self.guild_id, i.user.id, self.log_id)
-            asyncio.create_task(_delete_personal_event_message(self.log_id))
-        except Exception as ex:
-            print(f"[_PersonalQuestionView _on_answer] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
 
 
-@tasks.loop(minutes=10)
-async def personal_event_dispatcher():
-    """Phase 33 — toutes les 10 min, possibilité d'envoyer un event perso.
-
-    Choisit un membre actif récent et lui propose un événement personnel.
-    Phase 35 : passé de 15min → 10min checks pour plus de fréquence.
-    """
-    # Phase 257 : ÉVÉNEMENTS PERSO (MP + ping individuel en salon) DÉSACTIVÉS
-    # (directive owner — zéro MP membre, zéro mention individuelle). Les events
-    # publics (boss/trésor/quiz/world boss…) font vivre le serveur sans déranger.
-    return
-    try:
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('personal_events_enabled', True):
-                    continue
-                # Phase 35 : respecter les heures actives (pas la nuit)
-                if not _is_event_active_time(c):
-                    continue
-                interval_min = int(c.get('personal_events_interval_min', 20) or 20)
-                # Probabilité : sur 10min, on lance une fois tous les `interval_min` min
-                if interval_min <= 0:
-                    continue
-                # Décide si on tire cet event maintenant (probabiliste)
-                if random.random() > (10 / interval_min):
-                    continue
-
-                # Rate limit serveur
-                max_per_hour = int(c.get('personal_events_max_per_hour', 10) or 10)
-                hourly = _personal_event_hourly.setdefault(guild.id, [])
-                now_ts = time.time()
-                hourly[:] = [t for t in hourly if (now_ts - t) < 3600]
-                if len(hourly) >= max_per_hour:
-                    continue
-
-                # Trouver un membre actif (dernier message < 30 min)
-                async with get_db() as db:
-                    async with db.execute(
-                        'SELECT user_id, last_message FROM activity_tracking '
-                        'WHERE guild_id=? AND last_message IS NOT NULL '
-                        'ORDER BY last_message DESC LIMIT 30',
-                        (guild.id,),
-                    ) as cur:
-                        rows = await cur.fetchall()
-
-                # Phase 36 : CIBLAGE INTELLIGENT
-                # On collecte TOUS les membres avec leur catégorie d'activité,
-                # puis on tire pondéré (dormant > actif > endormi > très actif).
-                # Cela permet de RÉVEILLER les membres qui dorment au lieu de
-                # spammer les actifs.
-                # On élargit aussi à 24h au lieu de 30min pour pouvoir cibler les dormants.
-                async with get_db() as db:
-                    async with db.execute(
-                        'SELECT user_id, last_message FROM activity_tracking '
-                        'WHERE guild_id=? AND last_message IS NOT NULL '
-                        'ORDER BY last_message DESC LIMIT 200',
-                        (guild.id,),
-                    ) as cur:
-                        all_rows = await cur.fetchall()
-
-                # Build weighted candidate pool
-                weighted_candidates = []
-                cooldown_h = int(c.get('personal_events_per_user_cooldown_h', 4) or 4)
-                cooldown_s = cooldown_h * 3600
-                for user_id, last_msg in all_rows:
-                    try:
-                        # Cooldown user
-                        last_pe = _personal_event_last.get((guild.id, user_id), 0)
-                        if now_ts - last_pe < cooldown_s:
-                            continue
-                        member = guild.get_member(user_id)
-                        if not member or member.bot:
-                            continue
-                        # Catégoriser
-                        cat = events2026.categorize_member_activity(last_msg)
-                        # On ne cible PAS les "asleep" en DM-only pour rien
-                        # (sauf si on a la possibilité de fallback channel)
-                        weight = events2026.targeting_weight(cat)
-                        weighted_candidates.append((member, cat, weight))
-                    except Exception:
-                        continue
-
-                if not weighted_candidates:
-                    continue
-
-                # Tirage pondéré
-                total_weight = sum(w for _, _, w in weighted_candidates)
-                r = random.uniform(0, total_weight)
-                acc = 0
-                target = None
-                target_cat = 'active'
-                for member, cat, w in weighted_candidates:
-                    acc += w
-                    if r <= acc:
-                        target = member
-                        target_cat = cat
-                        break
-                if not target:
-                    target, target_cat, _ = weighted_candidates[0]
-
-                # Type d'event adapté au profil
-                ev_type_hint = events2026.random_event_intent(target_cat)
-                ev_data = events2026.random_personal_event()
-                # Si on a une préférence, regénère jusqu'à 3 fois pour matcher (ou tant pis)
-                for _ in range(3):
-                    if ev_data.get('type') == ev_type_hint:
-                        break
-                    ev_data = events2026.random_personal_event()
-
-                # Pour les dormants/asleep : bonus coins motivationnel
-                if target_cat in ('dormant', 'asleep') and ev_data.get('type') == 'gift':
-                    ev_data['coins'] = int(ev_data.get('coins', 100) * 1.5)
-                    ev_data['title'] = "🌟 Le serveur t'attend !"
-                    ev_data['description'] = (
-                        f"Ça fait un moment qu'on ne t'a pas vu ! Le serveur t'a préparé "
-                        f"un cadeau de bienvenue. Reviens nous parler quand tu peux !"
-                    )
-
-                # Log en DB avec event_data_json (pour persistance)
-                async with get_db() as db:
-                    cur = await db.execute(
-                        'INSERT INTO personal_events_log(guild_id, user_id, event_type, event_data_json) VALUES(?,?,?,?)',
-                        (guild.id, target.id, ev_data.get('type', 'gift'), json.dumps(ev_data)),
-                    )
-                    log_id = cur.lastrowid
-                    await db.commit()
-
-                # Construire l'embed d'intro (envoyé en DM ou channel)
-                intro_embed = discord.Embed(
-                    title=ev_data.get('title', '🎯 Événement personnel'),
-                    description=(
-                        f"Bonjour {target.mention} ! Tu as été choisi pour un événement personnel sur **{guild.name}**.\n\n"
-                        f"_{ev_data.get('description', '')[:200]}_\n\n"
-                        f"Clique sur **🎯 Ouvrir mon événement** pour participer !"
-                    ),
-                    color=0x5865F2,
-                )
-                intro_embed.set_footer(text=f"💡 Cet événement n'apparaît qu'ici — il disparaîtra une fois terminé.")
-
-                v = PersonalEventOpenView(log_id)
-                # Enregistrer la view persistante pour qu'elle survive aux restarts
-                try:
-                    bot.add_view(v)
-                except Exception:
-                    pass
-
-                # ── 1. Essayer en DM (privé, propre) ──
-                sent_dm = False
-                try:
-                    dm_msg = await target.send(embed=intro_embed, view=v)
-                    # Stocker l'ID du DM en base
-                    async with get_db() as db:
-                        await db.execute(
-                            'UPDATE personal_events_log SET dm_channel_id=?, dm_message_id=? WHERE id=?',
-                            (dm_msg.channel.id, dm_msg.id, log_id),
-                        )
-                        await db.commit()
-                    sent_dm = True
-                    _personal_event_last[(guild.id, target.id)] = now_ts
-                    _evict_if_big(_personal_event_last)  # audit 2026-07-03 : borne mémoire
-                    hourly.append(now_ts)
-                    print(f"[PERSONAL EVENT DM] guild={guild.id} user={target.id} type={ev_data.get('type')}")
-                except discord.Forbidden:
-                    pass  # DMs fermées — fallback en channel
-                except Exception as ex:
-                    print(f"[personal event DM] {ex}")
-
-                # ── 2. Fallback channel SI DM fermé (avec auto-delete) ──
-                if not sent_dm:
-                    # Phase 41.2 : on cherche LE PLUS RÉCENT salon CHATTY où target a posté
-                    target_channel = None
-                    async with get_db() as db:
-                        async with db.execute(
-                            'SELECT channel_id FROM member_activity_daily '
-                            'WHERE guild_id=? AND user_id=? '
-                            'GROUP BY channel_id ORDER BY MAX(last_ts) DESC LIMIT 10',
-                            (guild.id, target.id),
-                        ) as cur:
-                            recent_rows = await cur.fetchall()
-                    # Prendre le 1er chatty channel de la liste
-                    for rr in recent_rows:
-                        ch_cand = guild.get_channel(int(rr[0]))
-                        if ch_cand and await _is_chatty_channel(ch_cand):
-                            target_channel = ch_cand
-                            break
-                    if not target_channel:
-                        # Fallback : 1er salon CHATTY du serveur où target peut écrire
-                        for ch in guild.text_channels:
-                            if not await _is_chatty_channel(ch):
-                                continue
-                            # En plus : target doit pouvoir écrire (rôle non muté etc.)
-                            try:
-                                tperms = ch.permissions_for(target)
-                                if tperms.view_channel and tperms.send_messages:
-                                    target_channel = ch
-                                    break
-                            except Exception:
-                                continue
-                    if not target_channel:
-                        continue
-
-                    # Phase 38 : dé-masquer le salon temporairement si raid actif
-                    unmasked = await _temporarily_unmask_channel(guild, target_channel.id)
-
-                    try:
-                        ch_msg = await target_channel.send(
-                            content=(
-                                f"🎯 {target.mention} — un événement personnel t'attend !\n"
-                                f"-# {_chrono_footer(600, prefix='🗑️ Ce message se supprime')} "
-                                f"· 💡 Active tes DMs pour recevoir ces événements en privé."
-                            ),
-                            embed=intro_embed,
-                            view=v,
-                            allowed_mentions=discord.AllowedMentions(users=[target], roles=False, everyone=False),
-                            delete_after=600,  # 10 min (natif)
-                        )
-                        # Phase 47.3 : backup persistant DB pour survivre aux restarts bot
-                        try:
-                            await _register_for_cleanup(ch_msg, 600, 'personal_event')
-                        except Exception as _ex:
-                            print(f"[personal event register cleanup] {_ex}")
-                        async with get_db() as db:
-                            await db.execute(
-                                'UPDATE personal_events_log SET channel_id=?, channel_message_id=? WHERE id=?',
-                                (target_channel.id, ch_msg.id, log_id),
-                            )
-                            await db.commit()
-                        _personal_event_last[(guild.id, target.id)] = now_ts
-                        _evict_if_big(_personal_event_last)  # audit 2026-07-03 : borne mémoire
-                        hourly.append(now_ts)
-                        # Programmer le re-mask après les 10 min de delete_after
-                        if unmasked:
-                            async def _re_mask_personal():
-                                await asyncio.sleep(610)  # 10min + 10s buffer
-                                await _re_mask_channel_after_light_event(guild, target_channel.id)
-                            asyncio.create_task(_re_mask_personal())
-                        print(f"[PERSONAL EVENT CHAN] guild={guild.id} user={target.id} type={ev_data.get('type')}{' (temp unmask)' if unmasked else ''}")
-                    except Exception as ex:
-                        print(f"[personal event channel send] {ex}")
-                        if unmasked:
-                            await _re_mask_channel_after_light_event(guild, target_channel.id)
-            except Exception as ex:
-                print(f"[personal_event_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[personal_event_dispatcher] {ex}")
 
 
-@personal_event_dispatcher.before_loop
-async def _personal_event_dispatcher_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -12418,127 +11798,10 @@ _ROLE_PING_TYPE_HOURS = 24      # défaut : un même TYPE ne re-ping @Tous qu'1�
 _ROLE_PING_GLOBAL_MIN = 360     # défaut : ≥6 h entre 2 pings @Tous tous types confondus (réglable)
 
 
-async def _role_ping_allowed(guild_id, event_type: str) -> bool:
-    """Phase 258 : CADENCE intelligente du ping @Événements (qui touche tout le monde).
-    TOUS les events peuvent pinger le rôle, MAIS : (a) un même TYPE au plus 1×/4 h,
-    (b) plancher global de 45 min entre 2 pings tous types confondus → on touche tout
-    le monde pour une VARIÉTÉ d'events sans matraquer. Claim lecture→écriture en cfg.
-    FAIL-OPEN : sur erreur → on autorise (mieux vaut prévenir que rater)."""
-    try:
-        et = (event_type or 'event').lower()
-        c = await cfg(guild_id)
-        nowdt = datetime.now(timezone.utc)
-
-        def _too_recent(key, seconds):
-            v = c.get(key)
-            if not v:
-                return False
-            try:
-                d = datetime.fromisoformat(str(v))
-                if d.tzinfo is None:
-                    d = d.replace(tzinfo=timezone.utc)
-                return (nowdt - d).total_seconds() < seconds
-            except Exception:
-                return False
-
-        _gmin = int(c.get('event_ping_global_min', _ROLE_PING_GLOBAL_MIN) or 0)
-        _thrs = float(c.get('event_ping_type_hours', _ROLE_PING_TYPE_HOURS) or 0)
-        if _gmin > 0 and _too_recent('last_role_ping_global', _gmin * 60):
-            return False
-        if _thrs > 0 and _too_recent(f'last_role_ping_{et}', _thrs * 3600):
-            return False
-        await db_set(guild_id, 'last_role_ping_global', nowdt.isoformat())
-        await db_set(guild_id, f'last_role_ping_{et}', nowdt.isoformat())
-        return True
-    except Exception:
-        return True
 
 
-async def _notify_ping_allowed(guild_id, cat: str) -> bool:
-    """owner 2026-06-30 : cadence LÉGÈRE du ping 🔔 par-type (opt-in) — même les intéressés ne
-    doivent pas être matraqués. Un même 🔔 ne re-ping qu'1×/`event_notify_min_minutes` (déf 60).
-    L'event se déroule quand même ; il ne re-mentionne juste pas. FAIL-OPEN."""
-    try:
-        c = await cfg(guild_id)
-        mins = int(c.get('event_notify_min_minutes', 60) or 0)
-        if mins <= 0:
-            return True
-        key = f'last_notify_ping_{cat}'
-        v = c.get(key)
-        nowdt = datetime.now(timezone.utc)
-        if v:
-            try:
-                d = datetime.fromisoformat(str(v))
-                if d.tzinfo is None:
-                    d = d.replace(tzinfo=timezone.utc)
-                if (nowdt - d).total_seconds() < mins * 60:
-                    return False
-            except Exception:
-                pass
-        await db_set(guild_id, key, nowdt.isoformat())
-        return True
-    except Exception:
-        return True
 
 
-async def _get_event_mention(guild, event_type: str) -> str:
-    """Phase 258 : mention de spawn — touche TOUT LE MONDE (rôle opt-out) pour TOUS
-    les events, à cadence intelligente (cf. _role_ping_allowed). + rôle 🔔 par-type
-    pour les volontaires. AUCUNE mention individuelle de membre."""
-    try:
-        # #1 MODE NUIT (owner) : la nuit (heure FR), AUCUN ping de rôle/event ne part
-        # (l'event peut se dérouler quand même ; il ne dérange juste personne). Fail-open.
-        try:
-            if _is_night_now(await cfg(guild.id)):
-                return ""
-        except Exception:
-            pass
-        mentions = []
-        et = (event_type or '').lower()
-
-        # (1) Rôle 🔔 par-type (opt-in) — create=False → n'existe que si ≥1 abonné.
-        #     Pas soumis à la cadence : ces gens l'ont explicitement voulu. On NE
-        #     mentionne PAS un rôle VIDE (tous désabonnés) → évite un ping fantôme
-        #     qui ne touche personne mais affiche un nom de rôle confus.
-        try:
-            _cat = _EVENT_TYPE_TO_NOTIFY.get(et)
-            if _cat:
-                _tr = await _event_notify_role(guild, _cat, create=False)
-                if (_tr and any(not m.bot for m in _tr.members)
-                        and _tr.mention not in mentions
-                        and await _notify_ping_allowed(guild.id, _cat)):   # cadence anti-surping même sur le 🔔
-                    mentions.append(_tr.mention)
-        except Exception:
-            pass
-
-        # (2) Rôle @Tous (opt-out, touche tout le monde) → RÉSERVÉ AUX GROS ÉVÉNEMENTS
-        #     (Phase 260.1 — directive owner : un lambda ne doit PAS recevoir 30 pings
-        #     pour 30 events). Les events FRÉQUENTS (mob, trésor, quiz, boîte, boss du
-        #     jour, énigme…) ne pingent QUE le 🔔 par-type ci-dessus + l'écho silencieux ;
-        #     ils n'atteignent JAMAIS @Tous. Les events RARES/MAJEURS (boss raid, world
-        #     boss, climax, invasion, faille/caravane/chaîne) pingent @Tous, à cadence.
-        try:
-            if et in _BIG_EVENT_TYPES:
-                c = await cfg(guild.id)
-                all_role = guild.get_role(int(c.get('notify_role_all_id', 0) or 0))
-                imp_role = guild.get_role(int(c.get('notify_role_important_id', 0) or 0))
-                if all_role and await _role_ping_allowed(guild.id, et):
-                    if imp_role and imp_role.mention not in mentions:
-                        mentions.append(imp_role.mention)
-                    if all_role.mention not in mentions:
-                        mentions.append(all_role.mention)
-        except Exception:
-            pass
-
-        if not mentions:
-            return ""
-        # Rappel DISCRET : 1 clic sur le bouton 🔕 sous le ping pour se désabonner (zéro commande).
-        return (" ".join(mentions)
-                + "\n-# 🔕 Trop de pings ? Clique le bouton **🔕** sous l'event "
-                  "→ tu ne seras plus notifié.")
-    except Exception as ex:
-        print(f"[_get_event_mention] {ex}")
-        return ""
 
 
 
@@ -13114,219 +12377,10 @@ async def _post_onboarding_welcome(member):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class ComebackClaimView(View):
-    """View persistante pour réclamer le bonus comeback en DM."""
-
-    def __init__(self, guild_id: int = 0, user_id: int = 0, bonus: int = 200):
-        super().__init__(timeout=None)
-        self.guild_id = guild_id
-        self.user_id = user_id
-        self.bonus = bonus
-        b = Button(
-            label=f"🎁 Récupérer mon bonus (+{bonus} 🪙)",
-            style=discord.ButtonStyle.success,
-            custom_id=f"comeback_{guild_id}_{user_id}",
-        )
-        b.callback = self._on_claim
-        self.add_item(b)
-
-    async def _on_claim(self, i: discord.Interaction):
-        try:
-            await i.response.defer(ephemeral=True)
-            # Check DB
-            async with get_db() as db:
-                async with db.execute(
-                    'SELECT bonus_amount, claimed FROM comeback_dms WHERE guild_id=? AND user_id=?',
-                    (self.guild_id, self.user_id),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row:
-                return await i.followup.send(
-                    "❌ Cette offre n'existe plus.",
-                    ephemeral=True,
-                )
-            bonus, claimed = row
-            if claimed:
-                return await i.followup.send(
-                    "⚠️ Tu as déjà réclamé ce bonus.",
-                    ephemeral=True,
-                )
-            if i.user.id != self.user_id:
-                return await i.followup.send(
-                    "🔒 Ce bonus n'est pas pour toi.",
-                    ephemeral=True,
-                )
-
-            # ⚠️ AUDIT fix : marquer claimed AVANT add_coins pour éviter double-claim
-            # en cas de crash entre les 2 opérations. UPDATE conditionnel (claimed=0)
-            # garantit qu'un seul claim passe même en race.
-            async with get_db() as db:
-                cur = await db.execute(
-                    'UPDATE comeback_dms SET claimed=1, claimed_at=CURRENT_TIMESTAMP '
-                    'WHERE guild_id=? AND user_id=? AND claimed=0',
-                    (self.guild_id, self.user_id),
-                )
-                await db.commit()
-                rowcount = cur.rowcount
-            if rowcount == 0:
-                # Quelqu'un (ou un retry) a déjà claim entre temps
-                return await i.followup.send(
-                    "⚠️ Bonus déjà réclamé (ou expiré).",
-                    ephemeral=True,
-                )
-
-            # Donner les coins APRÈS le marquage
-            try:
-                await add_coins(self.guild_id, self.user_id, int(bonus))
-            except Exception as ex:
-                _logerr("economy.comeback_add_coins", ex,
-                        context={"user": self.user_id, "bonus": bonus}, guild_id=self.guild_id)
-
-            # Désactiver le bouton
-            for child in self.children:
-                child.disabled = True
-                child.label = f"✅ Réclamé · +{bonus} 🪙"
-            try:
-                await i.message.edit(view=self)
-            except Exception:
-                pass
-
-            guild = bot.get_guild(self.guild_id)
-            guild_name = guild.name if guild else "le serveur"
-            await i.followup.send(
-                f"🎉 **Bienvenue de retour sur {guild_name} !**\n"
-                f"+`{bonus}` 🪙 ajoutés à ton solde.\n\n"
-                f"_{events2026.get_help_footer('event_end')}_",
-                ephemeral=True,
-            )
-        except Exception as ex:
-            _logerr("economy.comeback_claim", ex, guild_id=self.guild_id)
-            try:
-                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
 
 
-@tasks.loop(hours=24)
-async def comeback_dm_task():
-    """Phase 40 : 1 fois par jour, envoie des DMs de comeback aux dormants.
-
-    Cible les membres :
-    - Inactifs 7-30 jours
-    - Pas reçu de comeback DM dans les 7 derniers jours
-    - Étaient un peu actifs avant (au moins 5 messages cumulés)
-    """
-    # Phase 257 : COMEBACK EN MP DÉSACTIVÉ (directive owner — zéro MP membre). Les
-    # dormants sont ramenés par la vie du serveur (events visibles), pas par MP.
-    return
-    try:
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                # Respecter les heures actives
-                if not _is_event_active_time(c):
-                    continue
-
-                # Limite : max 5 comebacks par jour par serveur (anti-flood)
-                sent_today = 0
-                MAX_PER_DAY = 5
-
-                async with get_db() as db:
-                    # Récupérer membres avec activité + total messages connu
-                    async with db.execute(
-                        'SELECT user_id, last_message, total_messages FROM activity_tracking '
-                        'WHERE guild_id=? AND last_message IS NOT NULL '
-                        'AND total_messages >= 5 '
-                        'ORDER BY total_messages DESC LIMIT 100',
-                        (guild.id,),
-                    ) as cur:
-                        rows = await cur.fetchall()
-
-                    # Récupérer comeback_dms récents
-                    async with db.execute(
-                        'SELECT user_id, last_dm_at FROM comeback_dms WHERE guild_id=?',
-                        (guild.id,),
-                    ) as cur:
-                        comeback_rows = {r[0]: r[1] for r in await cur.fetchall()}
-
-                now_dt = datetime.now(timezone.utc)
-                seven_days_ago = now_dt - timedelta(days=7)
-
-                for user_id, last_msg, total_msgs in rows:
-                    if sent_today >= MAX_PER_DAY:
-                        break
-                    try:
-                        cat = events2026.categorize_member_activity(last_msg)
-                        if cat != 'dormant':  # uniquement les dormants
-                            continue
-
-                        # Cooldown 7j
-                        last_dm = comeback_rows.get(user_id)
-                        if last_dm:
-                            try:
-                                last_dm_dt = (
-                                    datetime.fromisoformat(last_dm)
-                                    if 'T' in str(last_dm)
-                                    else datetime.strptime(last_dm, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                                )
-                                if last_dm_dt > seven_days_ago:
-                                    continue
-                            except Exception:
-                                pass
-
-                        member = guild.get_member(user_id)
-                        if not member or member.bot:
-                            continue
-
-                        # Bonus proportionnel à l'activité passée (entre 200 et 500)
-                        bonus = min(500, max(200, int(total_msgs * 2)))
-
-                        # Enregistrer en DB
-                        async with get_db() as db:
-                            await db.execute(
-                                'INSERT INTO comeback_dms(guild_id, user_id, last_dm_at, bonus_amount, claimed) '
-                                'VALUES(?,?,CURRENT_TIMESTAMP,?,0) '
-                                'ON CONFLICT(guild_id, user_id) DO UPDATE SET '
-                                'last_dm_at=CURRENT_TIMESTAMP, bonus_amount=?, claimed=0, claimed_at=NULL',
-                                (guild.id, user_id, bonus, bonus),
-                            )
-                            await db.commit()
-
-                        # Envoyer le DM
-                        embed = discord.Embed(
-                            title=f"💙 Tu nous manques sur {guild.name} !",
-                            description=(
-                                f"Hey {member.mention} ! Ça fait un moment qu'on ne t'a pas vu.\n"
-                                f"On t'a réservé un cadeau de retour : 🎁 **+`{bonus}` 🪙**."
-                            ),
-                            color=0x5865F2,
-                        )
-                        embed.set_footer(text="💙 À bientôt")
-
-                        view = ComebackClaimView(guild.id, user_id, bonus)
-                        try:
-                            await member.send(embed=embed, view=view)
-                            bot.add_view(view)
-                            sent_today += 1
-                            print(f"[COMEBACK DM] guild={guild.id} user={user_id} bonus={bonus}")
-                        except discord.Forbidden:
-                            pass  # DMs fermés
-                        except Exception as ex:
-                            print(f"[comeback DM send] {ex}")
-                    except Exception as ex:
-                        print(f"[comeback DM user_id={user_id}] {ex}")
-                        continue
-            except Exception as ex:
-                print(f"[comeback_dm_task guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[comeback_dm_task] {ex}")
 
 
-@comeback_dm_task.before_loop
-async def _comeback_dm_wait():
-    await bot.wait_until_ready()
 
 
 async def restore_active_comebacks():
@@ -13340,7 +12394,6 @@ async def restore_active_comebacks():
                 rows = await cur.fetchall()
         for guild_id, user_id, bonus in rows:
             try:
-                v = ComebackClaimView(int(guild_id), int(user_id), int(bonus))
                 bot.add_view(v)
             except Exception:
                 pass
@@ -13461,122 +12514,8 @@ _mystery_boxes: dict[int, dict] = {}
 _light_event_visible: dict[tuple[int, int], int] = {}
 
 
-async def _temporarily_unmask_channel(guild, channel_id: int) -> bool:
-    """Phase 38 : pendant un raid actif, restaure les perms @everyone d'origine
-    d'un salon (depuis le snapshot DB) pour qu'un light event y soit visible.
-
-    Retourne True si l'unmask a été appliqué, False sinon (pas de raid actif
-    ou snapshot introuvable).
-    """
-    try:
-        cache = _active_events_cache.get(guild.id, {})
-        event_id = cache.get('event_id')
-        if not event_id:
-            return False  # pas de raid actif
-
-        key = (guild.id, int(channel_id))
-        # Refcount : si déjà unmasked, juste incrémenter
-        _light_event_visible[key] = _light_event_visible.get(key, 0) + 1
-        if _light_event_visible[key] > 1:
-            return True  # déjà visible, refcount only
-
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT had_overwrite, allow_value, deny_value FROM event_channel_snapshots '
-                'WHERE event_id=? AND channel_id=?',
-                (event_id, channel_id),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            # Pas de snapshot → on tente quand même de unmask en supprimant view_channel=False
-            ch = guild.get_channel(int(channel_id))
-            if ch:
-                try:
-                    overw = ch.overwrites_for(guild.default_role)
-                    overw.view_channel = None  # neutre
-                    await ch.set_permissions(guild.default_role, overwrite=overw,
-                                              reason=f"Light event temp unmask (no snapshot)")
-                    return True
-                except Exception:
-                    pass
-            return False
-
-        had_overwrite, allow_v, deny_v = row
-        ch = guild.get_channel(int(channel_id))
-        if not ch:
-            return False
-
-        try:
-            if had_overwrite:
-                perm = discord.PermissionOverwrite.from_pair(
-                    discord.Permissions(int(allow_v)),
-                    discord.Permissions(int(deny_v)),
-                )
-                await ch.set_permissions(guild.default_role, overwrite=perm,
-                                          reason=f"Light event temp unmask")
-            else:
-                await ch.set_permissions(guild.default_role, overwrite=None,
-                                          reason=f"Light event temp unmask")
-            return True
-        except discord.Forbidden:
-            return False
-        except Exception as ex:
-            print(f"[_temporarily_unmask_channel] {ex}")
-            return False
-    except Exception as ex:
-        print(f"[_temporarily_unmask_channel outer] {ex}")
-        return False
 
 
-async def _re_mask_channel_after_light_event(guild, channel_id: int):
-    """Phase 38 : après qu'un light event finit, re-applique view_channel=False
-    sur @everyone si un raid est toujours actif ET si le refcount tombe à 0.
-
-    Phase 235.28 : DÉSACTIVÉ (no-op). Directive owner — on ne masque PLUS JAMAIS
-    les salons @everyone, ils restent toujours visibles. C'était la cause du
-    « tous les salons disparaissent » (re-mask en boucle après chaque trésor /
-    boîte mystère pendant qu'un raid tournait).
-    """
-    return
-    try:
-        key = (guild.id, int(channel_id))
-        current = _light_event_visible.get(key, 0)
-        if current <= 0:
-            return  # rien à faire
-        _light_event_visible[key] = current - 1
-        if _light_event_visible[key] > 0:
-            return  # encore des events actifs dans ce salon
-
-        # Refcount à 0 → cleanup et re-mask
-        _light_event_visible.pop(key, None)
-
-        cache = _active_events_cache.get(guild.id, {})
-        if not cache.get('event_id'):
-            return  # pas de raid actif, pas besoin de re-masquer
-
-        ch = guild.get_channel(int(channel_id))
-        if not ch:
-            return
-
-        # Vérifier qu'on ne touche pas un salon spécial du raid (arène, voice zones)
-        arena_id = int(cache.get('arena_channel_id', 0) or 0)
-        if int(channel_id) == arena_id:
-            return
-        voice_zones = cache.get('voice_zones', {}) or {}
-        if int(channel_id) in [int(v) for v in voice_zones.values()]:
-            return
-
-        try:
-            overw = ch.overwrites_for(guild.default_role)
-            overw.view_channel = False
-            await ch.set_permissions(guild.default_role, overwrite=overw,
-                                      reason=f"Light event ended — re-mask during raid")
-        except discord.Forbidden:
-            pass
-        except Exception as ex:
-            print(f"[_re_mask_channel_after_light_event] {ex}")
-    except Exception as ex:
-        print(f"[_re_mask_channel_after_light_event outer] {ex}")
 
 
 
@@ -13585,339 +12524,17 @@ _last_chat_announce: dict = {}  # {guild_id: epoch} — anti-remplissage du chat
 _CHAT_ANNOUNCE_GAP_SEC = 900    # ≥ 15 min entre 2 accroches AUTO du bot dans le chat général
 
 
-def _chat_announce_gate(guild_id: int, stamp: bool = True) -> bool:
-    """True si assez de temps s'est écoulé depuis la dernière ACCROCHE auto du bot dans le chat
-    de ce serveur (sinon False → on saute l'accroche pour ne pas remplir le chat). L'ÉVÉNEMENT
-    lui-même (panneau dans son salon dédié) n'est PAS bloqué — seule la pub en chat général est
-    throttlée. Partagé entre box/mob/trésor → au plus 1 accroche / fenêtre. FAIL-OPEN."""
-    try:
-        now = datetime.now(timezone.utc).timestamp()
-        if now - _last_chat_announce.get(int(guild_id), 0) < _CHAT_ANNOUNCE_GAP_SEC:
-            return False
-        if stamp:
-            _last_chat_announce[int(guild_id)] = now
-            if len(_last_chat_announce) > 5000:
-                _last_chat_announce.clear()
-        return True
-    except Exception:
-        return True  # au pire une accroche, jamais une erreur
 
 
-async def _drop_mystery_box(guild) -> bool:
-    """Drop une mystery box. Le PANNEAU (bouton Ouvrir) va dans le salon partagé
-    ⚔️-combat ; une accroche 1-ligne pointe vers lui depuis un salon chatty actif.
-
-    Phase 41.2 : filtre strict — l'accroche n'est JAMAIS dans un ticket / annonce / RO / thread.
-    Phase 69 : ANTI-SPAM SAME TYPE — si une mystery box est DÉJÀ active dans
-    cette guild, on n'en spawne pas une 2e (éviter doublons dans le chat).
-    """
-    try:
-        # Phase 69 : check anti-doublon même type
-        # Si une mystery box est encore dans _mystery_boxes pour CETTE guild → skip
-        for active_msg_id, box_data in list(_mystery_boxes.items()):
-            try:
-                # Vérifier que la box est dans cette guild via fetch
-                # Optim : on stocke guild_id dans box_data au prochain spawn (voir below)
-                if box_data.get('guild_id') == guild.id:
-                    print(f"[mystery_box anti-doublon] guild={guild.id} skip (box {active_msg_id} déjà active)")
-                    return False
-            except Exception:
-                continue
-
-        # Phase 174.1 : fenêtre élargie 2h -> 24h (sur serveur calme, l'ancienne
-        # fenêtre de 2h faisait que la box ne spawnait quasi jamais).
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT channel_id, MAX(last_ts) as last_active FROM member_activity_daily '
-                'WHERE guild_id=? '
-                'AND datetime(last_ts) > datetime("now", "-24 hours") '
-                'GROUP BY channel_id ORDER BY last_active DESC LIMIT 15',
-                (guild.id,),
-            ) as cur:
-                rows = await cur.fetchall()
-
-        # Phase 41.2 : filtrer via _is_chatty_channel (tickets/annonces/RO out)
-        candidates = []
-        for row in rows:
-            try:
-                ch = guild.get_channel(int(row[0]))
-                if ch and await _is_chatty_channel(ch):
-                    candidates.append(ch)
-            except Exception:
-                continue
-
-        # Phase 174.1 : fallback si aucune activité récente — on prend le hub
-        # configuré, sinon le premier salon "chatty" écrivable.
-        if not candidates:
-            try:
-                _cfg = await cfg(guild.id)
-                hub_id = int(_cfg.get('hub_channel', 0) or 0)
-                hub_ch = guild.get_channel(hub_id) if hub_id else None
-                if hub_ch and await _is_chatty_channel(hub_ch):
-                    candidates.append(hub_ch)
-            except Exception:
-                pass
-            if not candidates:
-                for ch in guild.text_channels:
-                    try:
-                        if await _is_chatty_channel(ch):
-                            candidates.append(ch)
-                            break
-                    except Exception:
-                        continue
-        if not candidates:
-            print(f"[mystery_box] pas de salon dispo, spawn annulé guild={guild.id}")
-            return False
-
-        # Tirer un salon CHATTY parmi les actifs
-        chatty_ch = ch = random.choice(candidates)
-        # FIX salons (2026-06) : le PANNEAU (bouton Ouvrir) va dans le salon DÉDIÉ de la
-        # caisse « 📦-mystere » (kind='mystery'), plus jamais le « ⚔️-combat » fourre-tout
-        # (plainte owner « la boîte mystère apparaît dans un salon combat »). chatty_ch ne
-        # sert plus qu'à l'accroche 1-ligne plus bas. Fail-open : si le salon dédié ne peut
-        # être créé (None) → on retombe sur le chatty (on ne perd jamais l'event). Le salon
-        # est supprimé dès la fin de la caisse (garde-vie _has_active_light_crate(
-        # kind='mystery') + sweeper).
-        panel_ch = await _ensure_combat_channel(guild, kind='mystery')
-        if panel_ch is None:
-            panel_ch = chatty_ch
-
-        # Générer la box
-        box = events2026.random_mystery_box()
-
-        # Phase 94 AMPLIFY : Jackpot Mythique 1/100 → ×5 reward + rendu spécial
-        is_jackpot = random.random() < 0.01  # 1% chance
-        if is_jackpot:
-            box['coins'] = int(box.get('coins', 100)) * 5
-            box['emoji'] = '🌌'
-            box['name'] = 'Boîte MYTHIQUE du Cosmos'
-            box['color'] = 0xFFD700  # gold
-            # Upgrade gear si présent
-            if box.get('gear'):
-                box['gear']['rarity'] = 'mythique'
-
-        # Phase 38 : si un raid est actif, dé-masquer temporairement le salon du PANNEAU.
-        # Refonte : le panneau vit dans ⚔️-combat (panel_ch), salon partagé public jamais
-        # masqué par l'onboarding/raid → en pratique unmasked sera False (no-op). On garde
-        # la mécanique pour le cas fallback (panel_ch == chatty_ch). Les 3 références de
-        # (dé)masquage ci-dessous DOIVENT rester sur panel_ch.id pour rester cohérentes.
-        unmasked = await _temporarily_unmask_channel(guild, panel_ch.id)
-
-        # Phase 77 + Phase 88 fix : LayoutView V2 — button INDÉPENDANT + delegate.
-        # Phase 86 extrayait depuis MysteryBoxView → double-parenting → SEND échouait.
-        # owner 2026-07-02 : le « coffre » (boîte mystère) restait 5 min → salon 📦-mystere qui
-        # traîne. On raccourcit (défaut 180 s = 3 min, tunable mystery_box_lifetime_sec) : assez
-        # pour que plusieurs personnes l'ouvrent, mais le salon part bien plus vite ensuite.
-        try:
-            LIFETIME = int((await cfg(guild.id)).get('mystery_box_lifetime_sec', 180) or 180)
-        except Exception:
-            LIFETIME = 180
-        LIFETIME = max(60, min(600, LIFETIME))
-        box_emoji = box.get('emoji', '📦')
-        box_name = box['name']
-        box_color = box.get('color', 0x95A5A6)
-        # Phase 94 : rarity tier visible (basé sur coins range)
-        _box_coins_val = int(box.get('coins', 100))
-        if is_jackpot:
-            rarity_label = "🌌 **MYTHIQUE** — ×5 multiplier !"
-        elif _box_coins_val >= 500:
-            rarity_label = "⭐ **Légendaire**"
-        elif _box_coins_val >= 250:
-            rarity_label = "💜 **Épique**"
-        elif _box_coins_val >= 150:
-            rarity_label = "💎 **Rare**"
-        else:
-            rarity_label = "📦 Commune"
-        try:
-            class _MysteryLayout(LayoutView):
-                def __init__(self):
-                    super().__init__(timeout=None)
-                    title_prefix = "🌌 ✨ MYTHIQUE ✨ " if is_jackpot else ""
-                    items = [
-                        v2_title(f"{title_prefix}{box_emoji} {box_name}"),
-                        v2_subtitle(
-                            "🎰 ÉVÉNEMENT 1 SUR 100 — Loot massif !" if is_jackpot
-                            else "Quelqu'un a laissé tomber un cadeau dans ce salon..."
-                        ),
-                        v2_divider(),
-                        v2_body(f"**Rareté :** {rarity_label}"),
-                        v2_body("🔊 En vocal = **+50 % 🪙** sur ta récompense !"),
-                    ]
-                    # Phase 88 : button indépendant avec callback délégué
-                    open_btn = Button(
-                        label="🌌 OUVRIR LA MYTHIQUE !" if is_jackpot else "📦 Ouvrir la boîte !",
-                        style=discord.ButtonStyle.success if is_jackpot else discord.ButtonStyle.success,
-                        custom_id="mbox_open",
-                    )
-                    items.append(_section_with_button(
-                        "⚡ Premier ouvreur = jackpot complet",
-                        "Les suivants : petite consolation\nFenêtre : **5 minutes**",
-                        open_btn,
-                    ))
-                    self.add_item(v2_container(*items, color=box_color))
-
-            # Phase 39 : ping le rôle "all" si configuré
-            ping_str = await _get_event_mention(guild, 'mystery_box')
-            send_content = ping_str if ping_str else None
-            # Phase 175 : V2 + content interdit → ping séparé puis panneau V2.
-            # Refonte : panneau + son ping postés dans le salon partagé ⚔️-combat (panel_ch).
-            # Phase 69 : register persistent — survit au reboot
-            try:
-                await _register_for_cleanup(msg, LIFETIME, 'mystery_box')
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[MysteryBox send V2] {ex}")
-            # En cas d'erreur, on déférence l'unmask (panel_ch — cohérent avec l'unmask ci-dessus)
-            if unmasked:
-                await _re_mask_channel_after_light_event(guild, panel_ch.id)
-            # FIX salons (anti-salon-vide) : le panneau n'a pas pu être posté → on
-            # supprime le salon dédié « 📦-mystere » fraîchement créé (jamais le
-            # fallback chatty). Sinon il traînait vide. Box pas encore en RAM → aucune
-            # garde-vie ne le protège, suppression sûre.
-            await _discard_empty_crate_channel(guild, panel_ch, chatty_ch)
-            return False
-
-        # Phase 77 : pas de rebuild custom_id (déjà stable "mbox_open")
-        # MysteryBoxView est enregistrée globalement au boot.
-        _mystery_boxes[msg.id] = {
-            'box_name': box['name'],
-            'box_emoji': box_emoji,
-            'box_color': box_color,
-            'coins': box['coins'],
-            'gear': box.get('gear'),
-            'opened_by': [],
-            'guild_id': guild.id,  # Phase 69 : anti-doublon check
-            'channel_id': panel_ch.id,   # Phase 89 : stale cleanup (salon RÉEL du panneau)
-        }
-
-        # Refonte : accroche 1-ligne dans le salon chatty, pointant vers le panneau.
-        # Postée SEULEMENT si chatty_ch est distinct du panel (sinon fallback = double post) ET si
-        # le throttle d'annonces l'autorise (owner 2026-07-02 : ne pas remplir le chat général).
-        # La box existe déjà (panneau dans son salon) — on ne saute QUE la pub en chat.
-        if chatty_ch is not None and chatty_ch.id != panel_ch.id and _chat_announce_gate(guild.id):
-            try:
-                await chatty_ch.send(
-                    f"{box_emoji} **Boîte mystère** ouverte dans {panel_ch.mention} — viens tenter ta chance !",
-                    allowed_mentions=discord.AllowedMentions.none(),
-                    delete_after=LIFETIME,
-                )
-            except Exception:
-                pass
-
-        # Auto-cleanup state dict après 5 min (le message est supprimé par delete_after)
-        async def _cleanup_state():
-            await asyncio.sleep(LIFETIME + 5)
-            try:
-                _mystery_boxes.pop(msg.id, None)
-            except Exception:
-                pass
-            if unmasked:
-                try:
-                    # Re-masque le salon RÉELLEMENT démasqué (panel_ch — cohérent avec l'unmask)
-                    await _re_mask_channel_after_light_event(guild, panel_ch.id)
-                except Exception:
-                    pass
-            # FIX salons : la garde-vie de « 📦-mystere » est levée (box retirée du RAM)
-            # → on supprime le salon dédié maintenant (sans attendre le sweeper 7 min).
-            # idle-safe + fail-open (ne touche rien si un event/caisse vit encore).
-            try:
-                await _maybe_delete_idle_combat_channel(guild)
-            except Exception:
-                pass
-        asyncio.create_task(_cleanup_state())
-
-        try: await _track_event_engagement(guild.id, 'mystery_box', 'start')
-        except Exception: pass
-        print(f"[MYSTERY BOX] guild={guild.id} panel=#{panel_ch.name} teaser=#{chatty_ch.name}{' (temp unmask)' if unmasked else ''}")
-        return True
-    except Exception as ex:
-        print(f"[_drop_mystery_box] {ex}")
-        return False
 
 
 _light_events_first_tick = True  # audit 2026-07-02 : saute le 1er tick (boot)
 
 
-@tasks.loop(minutes=25)
-async def light_events_dispatcher():
-    """Phase 36 — lance des événements légers (mystery box) toutes les ~25 min
-    dans les serveurs actifs avec event_enabled=True."""
-    global _light_events_first_tick
-    # Un @tasks.loop s'exécute IMMÉDIATEMENT au boot ; comme l'anti-doublon des box est en RAM
-    # (vidée à chaque redémarrage), droper une box à chaque boot/redéploiement créait des DOUBLONS
-    # et remplissait le chat (owner 2026-07-02). On saute donc le 1er tick : 1re box ~25 min après boot.
-    if _light_events_first_tick:
-        _light_events_first_tick = False
-        return
-    try:
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                # Caisse légère = loot « fun » DÉCOUPLÉ du moteur de combat (event_enabled) :
-                # elle suit son PROPRE interrupteur (mystery_box_enabled, défaut True) pour que
-                # le serveur ne soit JAMAIS vide, même quand les gros events de combat sont off.
-                if not bool(c.get('mystery_box_enabled', True)):
-                    continue
-                if not _is_event_active_time(c):
-                    continue
-                # owner 2026-07-02 (moins de messages) : ~45 % de drop par tick (25 min) → une
-                # caisse toutes les ~55 min en heures actives. L'anti-doublon (1 box/fois) + le
-                # throttle d'accroche évitent tout spam du chat.
-                if random.random() > 0.45:
-                    continue
-                await _drop_mystery_box(guild)
-            except Exception as ex:
-                print(f"[light_events_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[light_events_dispatcher] {ex}")
 
 
-@light_events_dispatcher.before_loop
-async def _light_events_wait():
-    await bot.wait_until_ready()
 
 
-@tasks.loop(minutes=2)
-async def event_timeout_checker():
-    """Vérifie toutes les 2 min si un event a dépassé sa durée → end.
-
-    Phase 91 HOTFIX : marque ended=1 par event_id SPÉCIFIQUE au lieu d'appeler
-    _end_active_event(guild) qui kill le LATEST event (ORDER BY id DESC LIMIT 1)
-    → bug : tuait les nouveaux events spawnés pendant qu'un vieux était timed-out.
-    """
-    try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT id, guild_id FROM events WHERE ended=0 AND ends_at IS NOT NULL AND ends_at < ?',
-                (now_iso,),
-            ) as cur:
-                rows = await cur.fetchall()
-        for event_id, guild_id in rows:
-            try:
-                # Phase 251.11 : TEARDOWN COMPLET ciblé par event_id (supprime salon +
-                # catégorie d'arène + warm-up + récap, claim atomique). Avant (hotfix
-                # Phase 91), on se contentait de ended=1 → le salon « 💎-chasse-au-trésor »
-                # / l'arène + son warm-up + les trésors RESTAIENT = « l'event ne se termine
-                # pas » (bug owner). On cible event_id → aucun risque de tuer un autre
-                # event. FAIL-OPEN : filet ended=1 ci-dessous si _end_active_event no-op.
-                guild = bot.get_guild(int(guild_id)) if guild_id else None
-                if guild:
-                    try:
-                        pass  # bloc vidé (module détaché)
-                    except Exception as ex2:
-                        print(f"[event_timeout_checker teardown ev={event_id}] {ex2}")
-                async with get_db() as db:
-                    await db.execute(
-                        'UPDATE events SET ended=1 WHERE id=?', (event_id,),
-                    )
-                    await db.commit()
-                print(f"[event_timeout_checker] event {event_id} timed out → teardown + ended")
-            except Exception as ex:
-                print(f"[event_timeout_checker row={event_id}] {ex}")
-    except Exception as ex:
-        _logerr("task.event_timeout_checker", ex)
 
 
 # ─── Phase 109 : Auction Settler ─────────────────────────────────────────
@@ -14360,372 +12977,8 @@ async def _restore_event_masks(guild, event_id):
     return restored
 
 
-@tasks.loop(minutes=3)
-async def stale_event_cleanup():
-    """Phase 89 : pour chaque event actif (DB + in-memory), tente de fetch le
-    message. Si NotFound → suppression manuelle détectée → cleanup state.
-
-    Couverture :
-    - DB events (Boss Raid + Treasure + Quiz) → arena_message_id
-    - DB world_bosses → arena_message_id
-    - DB flash_treasures → message_id
-    - _mystery_boxes dict (in-mem) → msg.id + channel_id
-    - _gn_event_state dict (in-mem) → msg.id + channel_id
-    """
-    try:
-        # ─── 0. WATCHDOG (Phase 202) : events EXPIRÉS ou FANTÔMES bloqués ───
-        # Cause racine du "serveur mort" : un event reste ended=0 alors que son
-        # timer est dépassé (ends_at < maintenant) OU qu'il n'a jamais fini son
-        # setup (arena_message_id NULL). Il garde alors les salons MASQUÉS et
-        # bloque le combat — jusqu'au prochain reboot seulement. Ici on AUTO-
-        # SOIGNE toutes les 3 min, sans attendre un restart.
-        # SÛRETÉ : on ne termine QUE des events que la garde Phase 201 considère
-        # DÉJÀ inactifs (ends_at dépassé) ou des fantômes sans message vieux de
-        # 30 min → ZÉRO risque pour un event réellement en cours.
-        try:
-            # julianday() parse l'ISO avec fuseau (+00:00) et microsecondes de façon
-            # FIABLE — contrairement à datetime() qui pouvait renvoyer NULL sur certains
-            # formats → l'event n'expirait jamais (cause du « ça ne se termine pas »).
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT id, guild_id FROM events WHERE ended=0 AND ("
-                    "(ends_at IS NOT NULL AND julianday(ends_at) <= julianday('now')) "
-                    "OR (arena_message_id IS NULL AND julianday(started_at) <= julianday('now','-30 minutes'))"
-                    ") LIMIT 50"
-                ) as cur:
-                    dead_rows = await cur.fetchall()
-            for ev_id, g_id in dead_rows:
-                guild = bot.get_guild(int(g_id)) if g_id else None
-                # Phase 251.11 : TEARDOWN COMPLET (pas juste ended=1). Avant, le watchdog
-                # se contentait de marquer ended → le salon dédié (« 💎-chasse-au-trésor »
-                # / arène) + son message de warm-up + les trésors RESTAIENT visibles =
-                # « la chasse ne se termine pas ». _end_active_event supprime salon +
-                # catégorie + panneau, poste le récap, et claim ATOMIQUE (zéro double
-                # récompense). Il termine le DERNIER event actif du guild = celui-ci
-                # (verrou 1 event/guild). FAIL-OPEN : on garde le filet ended=1 ci-dessous.
-                if guild:
-                    try:
-                        pass  # bloc vidé (module détaché)
-                    except Exception as ex2:
-                        print(f"[stale_cleanup WATCHDOG teardown ev={ev_id}] {ex2}")
-                n = await _restore_event_masks(guild, ev_id) if guild else 0
-                async with get_db() as db:
-                    await db.execute('UPDATE events SET ended=1 WHERE id=?', (ev_id,))
-                    await db.commit()
-                print(f"[stale_cleanup WATCHDOG] event {ev_id} expiré/fantôme → teardown + ended + {n} salon(s)")
-        except Exception as ex:
-            print(f"[stale_cleanup watchdog block] {ex}")
-
-        # ─── 0.a2 SALONS D'ARÈNE d'events DÉJÀ terminés mais NON supprimés ──
-        # Phase 251.11 : FILET pour les arènes laissées par l'ANCIEN bug (event marqué
-        # ended SANS teardown → « la chasse ne se termine pas », salon + warm-up à vie).
-        # On reprend l'arena_channel_id STOCKÉ des events terminés récemment : si le
-        # salon existe ENCORE, on le supprime (+ sa catégorie « ⚔️ … » éphémère), puis
-        # on remet arena_channel_id=0 pour ne pas re-balayer. PRÉCIS (par id, zéro
-        # devinette de nom). Le salon PERMANENT « ⚔️-combat » (== combat_channel_id) est
-        # épargné. Un event proprement terminé a déjà son salon supprimé → get_channel
-        # renvoie None → no-op : ça n'agit QUE sur un vrai résidu.
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT id, guild_id, arena_channel_id FROM events "
-                    "WHERE ended=1 AND arena_channel_id IS NOT NULL AND arena_channel_id>0 "
-                    "AND julianday('now') - julianday(COALESCE(ends_at, started_at)) < 2 "
-                    "LIMIT 50"
-                ) as cur:
-                    ended_rows = await cur.fetchall()
-            for ev_id, g_id, ach_id in ended_rows:
-                guild = bot.get_guild(int(g_id)) if g_id else None
-                if not guild:
-                    continue
-                ch = guild.get_channel(int(ach_id)) if ach_id else None
-                if ch is None:
-                    # déjà supprimé (fin normale) → on solde le champ et on passe
-                    async with get_db() as db:
-                        await db.execute('UPDATE events SET arena_channel_id=0 WHERE id=?', (ev_id,))
-                        await db.commit()
-                    continue
-                try:
-                    perm_id = int((await cfg(guild.id)).get('combat_channel_id', 0) or 0)
-                except Exception:
-                    perm_id = 0
-                if perm_id and int(ach_id) == perm_id:
-                    continue  # salon de combat PERMANENT : jamais supprimé
-                cat = ch.category
-                try:
-                    await ch.delete(reason=f"Arène event {ev_id} terminé — résidu nettoyé")
-                except Exception:
-                    pass
-                await asyncio.sleep(0.3)  # throttle anti-429 (entre arènes d'events)
-                if cat is not None and str(getattr(cat, 'name', '') or '').startswith("⚔️ "):
-                    try:
-                        for _c in list(getattr(cat, 'channels', [])):
-                            try:
-                                await _c.delete(reason="Résidu arène")
-                                await asyncio.sleep(0.3)  # throttle anti-429 entre suppressions
-                            except Exception:
-                                pass
-                        await cat.delete(reason=f"Catégorie arène event {ev_id} — résidu")
-                    except Exception:
-                        pass
-                async with get_db() as db:
-                    await db.execute('UPDATE events SET arena_channel_id=0 WHERE id=?', (ev_id,))
-                    await db.commit()
-                print(f"[stale_cleanup ORPHAN ARENA] event {ev_id} terminé → salon arène résiduel supprimé")
-        except Exception as ex:
-            print(f"[stale_cleanup orphan ended-arena block] {ex}")
-
-        # ─── 0.b ARÈNES DE COMBAT ORPHELINES (Phase 210) ───────────────────
-        # Catégorie+salons d'un boss/invasion dont la résolution n'a jamais
-        # tourné (ex. reboot). > 3h = forcément terminé (lifetime boss max ~2h).
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT guild_id, category_id, text_channel_id FROM combat_arenas "
-                    "WHERE datetime(created_at) <= datetime('now','-3 hours') LIMIT 25"
-                ) as cur:
-                    arena_rows = await cur.fetchall()
-            for g_id, cat_id, txt_id in arena_rows:
-                g = bot.get_guild(int(g_id)) if g_id else None
-                if g and cat_id:
-                    cat = g.get_channel(int(cat_id))
-                    if isinstance(cat, discord.CategoryChannel):
-                        for ch in list(cat.channels):
-                            try:
-                                await ch.delete(reason="Arène combat orpheline")
-                                await asyncio.sleep(0.3)  # throttle anti-429
-                            except Exception:
-                                pass
-                        try:
-                            await cat.delete(reason="Arène combat orpheline")
-                        except Exception:
-                            pass
-                await asyncio.sleep(0.3)  # throttle anti-429 (entre arènes orphelines)
-                async with get_db() as db:
-                    await db.execute(
-                        "DELETE FROM combat_arenas WHERE guild_id=? AND text_channel_id=?",
-                        (g_id, txt_id))
-                    await db.commit()
-        except Exception as ex:
-            print(f"[stale_cleanup combat_arenas] {ex}")
-
-        # ─── 1. DB events (Boss Raid + Treasure + Quiz) ────────────────────
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    'SELECT id, guild_id, arena_channel_id, arena_message_id, event_type '
-                    'FROM events WHERE ended=0 AND arena_message_id IS NOT NULL'
-                ) as cur:
-                    rows = await cur.fetchall()
-            for event_id, guild_id, ch_id, msg_id, etype in rows:
-                try:
-                    guild = bot.get_guild(int(guild_id))
-                    if not guild:
-                        async with get_db() as db:
-                            await db.execute('UPDATE events SET ended=1 WHERE id=?', (event_id,))
-                            await db.commit()
-                        continue
-                    ch = guild.get_channel(int(ch_id)) if ch_id else None
-                    if not ch:
-                        async with get_db() as db:
-                            await db.execute('UPDATE events SET ended=1 WHERE id=?', (event_id,))
-                            await db.commit()
-                        continue
-                    try:
-                        await ch.fetch_message(int(msg_id))
-                    except discord.NotFound:
-                        # Phase 91 HOTFIX : UPDATE direct par event_id.
-                        # NE PAS appeler _end_active_event(guild) qui kill le
-                        # LATEST event (ORDER BY id DESC LIMIT 1) — donc tue
-                        # le NOUVEAU event qui vient de spawn !
-                        print(f"[stale_cleanup] event {event_id} ({etype}) msg supprimé → mark ended")
-                        async with get_db() as db:
-                            await db.execute(
-                                'UPDATE events SET ended=1 WHERE id=?', (event_id,),
-                            )
-                            await db.commit()
-                    except discord.Forbidden:
-                        pass  # Pas la perm de fetch → laisser tel quel
-                    except Exception:
-                        pass
-                except Exception as ex:
-                    print(f"[stale_cleanup events row={event_id}] {ex}")
-        except Exception as ex:
-            print(f"[stale_cleanup events block] {ex}")
-
-        # ─── 2. DB world_bosses ────────────────────────────────────────────
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    'SELECT id, guild_id, arena_channel_id, arena_message_id '
-                    'FROM world_bosses WHERE ended=0 AND arena_message_id IS NOT NULL'
-                ) as cur:
-                    rows = await cur.fetchall()
-            for wb_id, guild_id, ch_id, msg_id in rows:
-                try:
-                    guild = bot.get_guild(int(guild_id))
-                    if not guild:
-                        async with get_db() as db:
-                            await db.execute('UPDATE world_bosses SET ended=1 WHERE id=?', (wb_id,))
-                            await db.commit()
-                        continue
-                    ch = guild.get_channel(int(ch_id)) if ch_id else None
-                    if not ch:
-                        async with get_db() as db:
-                            await db.execute('UPDATE world_bosses SET ended=1 WHERE id=?', (wb_id,))
-                            await db.commit()
-                        continue
-                    try:
-                        await ch.fetch_message(int(msg_id))
-                    except discord.NotFound:
-                        # Phase 91 HOTFIX : UPDATE direct (skip _end_world_boss
-                        # qui distribuerait des rewards pour un event abandonné).
-                        print(f"[stale_cleanup] world_boss {wb_id} msg supprimé → mark ended")
-                        async with get_db() as db:
-                            await db.execute(
-                                'UPDATE world_bosses SET ended=1 WHERE id=?', (wb_id,),
-                            )
-                            await db.commit()
-                        # Phase 235.8 : si l'arène était le salon de SECOURS
-                        # « 🌍-world-boss-… » (créé quand _create_combat_arena a
-                        # échoué → PAS de ligne combat_arenas), il n'était nettoyé
-                        # nulle part au reboot → orphelin en bas du serveur. On le
-                        # supprime ici. GARDE sur le nom dédié : jamais un salon
-                        # partagé/permanent.
-                        try:
-                            if ch is not None and str(getattr(ch, 'name', '')).startswith('🌍-world-boss'):
-                                await ch.delete(reason="Salon world-boss de secours orphelin")
-                        except Exception:
-                            pass
-                    except discord.Forbidden:
-                        pass
-                    except Exception:
-                        pass
-                except Exception as ex:
-                    print(f"[stale_cleanup wb row={wb_id}] {ex}")
-        except Exception as ex:
-            print(f"[stale_cleanup wb block] {ex}")
-
-        # ─── 3. DB flash_treasures ─────────────────────────────────────────
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    'SELECT id, guild_id, channel_id, message_id '
-                    'FROM flash_treasures WHERE ended=0'
-                ) as cur:
-                    rows = await cur.fetchall()
-            for ft_id, guild_id, ch_id, msg_id in rows:
-                try:
-                    guild = bot.get_guild(int(guild_id))
-                    if not guild:
-                        async with get_db() as db:
-                            await db.execute(
-                                'UPDATE flash_treasures SET ended=1 WHERE id=?', (ft_id,),
-                            )
-                            await db.commit()
-                        continue
-                    ch = guild.get_channel(int(ch_id)) if ch_id else None
-                    if not ch:
-                        async with get_db() as db:
-                            await db.execute(
-                                'UPDATE flash_treasures SET ended=1 WHERE id=?', (ft_id,),
-                            )
-                            await db.commit()
-                        continue
-                    try:
-                        await ch.fetch_message(int(msg_id))
-                    except discord.NotFound:
-                        print(f"[stale_cleanup] flash_treasure {ft_id} msg supprimé → end")
-                        async with get_db() as db:
-                            await db.execute(
-                                'UPDATE flash_treasures SET ended=1 WHERE id=?', (ft_id,),
-                            )
-                            await db.commit()
-                    except discord.Forbidden:
-                        pass
-                    except Exception:
-                        pass
-                except Exception as ex:
-                    print(f"[stale_cleanup ft row={ft_id}] {ex}")
-        except Exception as ex:
-            print(f"[stale_cleanup ft block] {ex}")
-
-        # ─── 4. _mystery_boxes dict (in-memory) ───────────────────────────
-        try:
-            for msg_id in list(_mystery_boxes.keys()):
-                try:
-                    box = _mystery_boxes.get(msg_id)
-                    if not box:
-                        continue
-                    guild_id = box.get('guild_id')
-                    ch_id = box.get('channel_id')
-                    if not guild_id:
-                        _mystery_boxes.pop(msg_id, None)
-                        continue
-                    guild = bot.get_guild(int(guild_id))
-                    if not guild:
-                        _mystery_boxes.pop(msg_id, None)
-                        continue
-                    ch = guild.get_channel(int(ch_id)) if ch_id else None
-                    if not ch:
-                        _mystery_boxes.pop(msg_id, None)
-                        continue
-                    try:
-                        await ch.fetch_message(int(msg_id))
-                    except discord.NotFound:
-                        print(f"[stale_cleanup] mystery_box msg={msg_id} supprimé → pop")
-                        _mystery_boxes.pop(msg_id, None)
-                    except discord.Forbidden:
-                        pass
-                    except Exception:
-                        pass
-                except Exception as ex:
-                    print(f"[stale_cleanup mbox msg={msg_id}] {ex}")
-        except Exception as ex:
-            print(f"[stale_cleanup mbox block] {ex}")
-
-        # ─── 5. _gn_event_state dict (in-memory) ──────────────────────────
-        try:
-            for msg_id in list(_gn_event_state.keys()):
-                try:
-                    state = _gn_event_state.get(msg_id)
-                    if not state:
-                        continue
-                    ch_id = state.get('channel_id') or 0
-                    if not ch_id:
-                        # Pas de channel_id stocké → impossible de vérifier
-                        # On laisse tel quel (les game night events ont leur propre cleanup)
-                        continue
-                    channel = None
-                    for g in bot.guilds:
-                        c = g.get_channel(int(ch_id))
-                        if c:
-                            channel = c
-                            break
-                    if not channel:
-                        _gn_event_state.pop(msg_id, None)
-                        continue
-                    try:
-                        await channel.fetch_message(int(msg_id))
-                    except discord.NotFound:
-                        print(f"[stale_cleanup] gn_event msg={msg_id} supprimé → pop")
-                        _gn_event_state.pop(msg_id, None)
-                    except discord.Forbidden:
-                        pass
-                    except Exception:
-                        pass
-                except Exception as ex:
-                    print(f"[stale_cleanup gn msg={msg_id}] {ex}")
-        except Exception as ex:
-            print(f"[stale_cleanup gn block] {ex}")
-
-    except Exception as ex:
-        print(f"[stale_event_cleanup] {ex}")
 
 
-@stale_event_cleanup.before_loop
-async def _stale_event_cleanup_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -14910,21 +13163,22 @@ _SUPERVISED_LOOP_NAMES = [
     "weekly_security_report",
     "veille_roblox_task",
     "ui_usage_flush_task",
-    "event_timeout_checker", "event_auto_scheduler", "stale_event_cleanup",
-    "personal_event_dispatcher", "light_events_dispatcher",
-    "world_boss_scheduler", "world_boss_timeout_checker",
+    #  ⚠️ `event_auto_scheduler` et `world_boss_scheduler` retirés le 16/08/2026 :
+    #  les fonctions n'existaient plus depuis une purge antérieure, seuls les
+    #  NOMS restaient. Sans effet ici (`globals().get()` rend None), mais c'est
+    #  la moitié exacte du piège n°2 du dépôt, dans l'autre sens — et une liste
+    #  qui ment sur ce qu'elle surveille finit par tromper une relecture.
     "voice_chaos_dispatcher", "daily_riddle_dispatcher", "daily_agenda_dispatcher",
     "weekly_herald_dispatcher", "community_showcase_dispatcher",
     "ugc_creator_of_month_task", "member_milestone_task", "ugc_coup_de_coeur_task",
-    "flash_treasure_dispatcher", "evening_ritual_dispatcher",
-    "tag_royale_starter", "tag_royale_timeout_checker", "server_anniversary_checker",
+    "evening_ritual_dispatcher",
+    "server_anniversary_checker",
     "daily_quest_push_dispatcher", "channel_camouflage_dispatcher",
     "voice_spotlight_dispatcher",
     "npc_chatter_task", "missions_runner_task", "daily_studio_tip_task",
     "golden_hour_announce_task", "hub_live_events_refresh_task",
     "reversibles_failsafe", "persistent_msg_cleaner",
     "marketplace_expire_cleaner", "hub_orphan_cleaner_task", "db_optimizer_task",
-    "comeback_dm_task", "combat_channel_sweeper", "welcome_cleanup_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -14932,7 +13186,6 @@ _SUPERVISED_LOOP_NAMES = [
     # FIX fiabilité (Lot 3) : ces boucles bot.py étaient lancées au boot (on_ready)
     # mais ABSENTES du superviseur → une seule exception non gérée les tuait À VIE
     # (jusqu'au reboot). Plusieurs sont CRITIQUES côté utilisateur/sécurité :
-    #   • check_giveaways         → un giveaway ne se clôture jamais
     #   • check_expired_roles     → un rôle boutique temporaire ne s'enlève jamais
     #   • check_expired_restrictions → une sanction temporaire ne se lève jamais (SÉCU)
     #   • check_scheduled_messages → un message programmé ne part jamais
@@ -14941,13 +13194,12 @@ _SUPERVISED_LOOP_NAMES = [
     # Toutes sont lancées INCONDITIONNELLEMENT au boot (garde is_running() seule) →
     # les superviser est sans effet de bord (no-op si déjà vivantes, resurrection sinon).
     "check_social_feeds",
-    "cleanup_old_db_data", "check_giveaways", "check_scheduled_messages",
+    "cleanup_old_db_data", "check_scheduled_messages",
     "check_expired_roles", "cleanup_deals_task", "check_expired_restrictions",
     "birthday_announcer", "poll_closer", "weekly_recap_task",
     "narrative_choices_resolver_task", "update_votes_resolver_task", "daily_meta_task",
     "thematic_voice_cleanup_task", "temp_voice_watchdog", "irl_season_check_task",
-    "capsule_unlock_task", "npc_whisper_task", "game_night_dispatcher",
-    "game_night_failsafe",
+    "npc_whisper_task",
     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
     # que la date n'est pas configurée/atteinte.
     "release_countdown_task",
@@ -14962,33 +13214,8 @@ _SUPERVISED_LOOP_NAMES = [
 ]
 
 
-@tasks.loop(minutes=3)
-async def combat_channel_sweeper():
-    """Phase 235.17 : FILET DE SÉCURITÉ — garantit que le salon « ⚔️-combat »
-    ÉPHÉMÈRE finit TOUJOURS par DISPARAÎTRE dès que plus aucun event ne tourne, MÊME
-    si la fin normale a été ratée : mob qui despawn (pas tué), cleanup par le watchdog,
-    reboot, ou event abandonné. Sans ce balayage, le salon pouvait traîner (plainte
-    récurrente owner « les salons ne disparaissent pas »). Idle-safe : ne supprime
-    JAMAIS pendant un combat (garde `_has_any_major_event_running(include_mobs=True)`
-    dans `_maybe_delete_idle_combat_channel`). Fail-open.
-
-    Cadence 7 min → 3 min (owner 2026-06-18) : sur un serveur qui redéploie souvent
-    (Railway), une tâche de cleanup différée (grace_seconds) perdue au reboot laissait
-    un salon vide traîner jusqu'au prochain balayage — pénible sur mobile (on reste
-    « coincé » dedans). 3 min resserre le filet (coût négligeable : 1 guilde, idle-safe)."""
-    try:
-        for g in list(bot.guilds):
-            try:
-                await _maybe_delete_idle_combat_channel(g)
-            except Exception:
-                continue
-    except Exception as ex:
-        print(f"[combat_channel_sweeper] {ex}")
 
 
-@combat_channel_sweeper.before_loop
-async def _combat_channel_sweeper_wait():
-    await bot.wait_until_ready()
 
 
 _supervisor_did_first_pass = False  # FIX logs : 1er tour = démarrage au boot → silencieux
@@ -15346,9 +13573,6 @@ async def _guild_recently_active(guild_id, minutes: int = 120, min_users: int = 
 
 
 
-@event_timeout_checker.before_loop
-async def _evt_timeout_wait():
-    await bot.wait_until_ready()
 
 
 
@@ -15389,7 +13613,6 @@ async def restore_active_personal_events():
         count = 0
         for (log_id,) in rows:
             try:
-                v = PersonalEventOpenView(int(log_id))
                 bot.add_view(v)
                 count += 1
             except Exception as ex:
@@ -23958,8 +22181,6 @@ async def on_ready():
         _nudge_stats_flusher.start()
 
     # Lancer la tâche des giveaways
-    if not check_giveaways.is_running():
-        check_giveaways.start()
     
     # Lancer la tâche des messages automatiques
     if not check_scheduled_messages.is_running():
@@ -23995,11 +22216,7 @@ async def on_ready():
         ui_usage_flush_task.start()
 
     # Phase 30 : events — timeout checker + auto scheduler + restore active
-    if not event_timeout_checker.is_running():
-        event_timeout_checker.start()
     # Phase 89 : stale event cleanup (events supprimés manuellement)
-    if not stale_event_cleanup.is_running():
-        stale_event_cleanup.start()
 
     # Phase 203 — superviseur : ressuscite toute boucle critique morte
     if not task_supervisor.is_running():
@@ -24452,32 +22669,15 @@ async def on_ready():
 
 
 
-    # Phase 33 : événements personnels aléatoires
-    if not personal_event_dispatcher.is_running():
-        personal_event_dispatcher.start()
-    # Phase 36 : événements légers (mystery box) dans salons actifs
-    if not light_events_dispatcher.is_running():
-        light_events_dispatcher.start()
-    try:
-        await restore_active_events()
-    except Exception as ex:
-        print(f"[on_ready restore_active_events] {ex}")
-    try:
-        await restore_active_personal_events()
-    except Exception as ex:
-        print(f"[on_ready restore_active_personal_events] {ex}")
-
-    # Phase 40 : Smart engagement — comeback DM hebdo + restauration des views
-    if not comeback_dm_task.is_running():
-        comeback_dm_task.start()
-    try:
-        await restore_active_comebacks()
-    except Exception as ex:
-        print(f"[on_ready restore_active_comebacks] {ex}")
+    #  Purge 16/08/2026 — événements personnels, événements légers (boîtes
+    #  mystère) et MP de retour avec bonus à réclamer : retirés sur demande du
+    #  propriétaire (« les gens peuvent gagner des cadeaux […] t'enlèves
+    #  absolument tout »). Les gardes `is_running()` partent AVEC leur
+    #  `.start()` : `detacher_module.py` refuse de couper une ligne qu'il ne
+    #  peut pas retirer seule, et il a raison — un `if` orphelin sans corps est
+    #  une SyntaxError au boot.
 
     # (Le planificateur de World Boss est parti avec les événements.)
-    if not world_boss_timeout_checker.is_running():
-        world_boss_timeout_checker.start()
     if not voice_chaos_dispatcher.is_running():
         voice_chaos_dispatcher.start()
     if not daily_riddle_dispatcher.is_running():
@@ -24495,14 +22695,8 @@ async def on_ready():
         weekly_activity_recap_task.start()
 
     # Phase 43 : Trésor Flash + Rituel du Soir + Tag Royale + Anniversaire
-    if not flash_treasure_dispatcher.is_running():
-        flash_treasure_dispatcher.start()
     if not evening_ritual_dispatcher.is_running():
         evening_ritual_dispatcher.start()
-    if not tag_royale_starter.is_running():
-        tag_royale_starter.start()
-    if not tag_royale_timeout_checker.is_running():
-        tag_royale_timeout_checker.start()
     if not server_anniversary_checker.is_running():
         server_anniversary_checker.start()
 
@@ -24590,8 +22784,6 @@ async def on_ready():
     if not irl_season_check_task.is_running():
         irl_season_check_task.start()
     # Phase 63 : capsule unlock + npc whisper + anniversary
-    if not capsule_unlock_task.is_running():
-        capsule_unlock_task.start()
     if not npc_whisper_task.is_running():
         npc_whisper_task.start()
     if not server_anniversary_task.is_running():
@@ -24615,8 +22807,6 @@ async def on_ready():
         print(f"[on_ready boot cleanup] {ex}")
 
     # (Game Night retiré avec les événements.)
-    if not game_night_failsafe.is_running():
-        game_night_failsafe.start()
 
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
@@ -30174,100 +28364,6 @@ _PHASE117_SWAP_SLOT_CHOICES = [
 # Vérifie + débloque les badges Phase 113 (Swap/Auction/Craft) après une
 # action utilisateur. Idempotent : INSERT OR IGNORE sur player_badges.
 
-async def _check_phase113_badges(guild: discord.Guild, user_id: int):
-    """Phase 113 : check + unlock + DM badges Swap/Auction/Craft.
-
-    Appelé après chaque action :
-    - swap completed → incr swaps_done
-    - auction sold (seller) → incr auctions_sold
-    - auction won (buyer) → incr auctions_won
-    - refine success → incr refines_success
-    """
-    try:
-        # Charger les compteurs
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT swaps_done, auctions_sold, auctions_won, refines_success "
-                "FROM player_event_stats WHERE guild_id=? AND user_id=?",
-                (guild.id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-        swaps = (row[0] if row else 0) or 0
-        a_sold = (row[1] if row else 0) or 0
-        a_won = (row[2] if row else 0) or 0
-        r_ok = (row[3] if row else 0) or 0
-
-        # Check has_divine : un item équipé de rareté divine ?
-        inv = await _get_or_create_inventory(guild.id, user_id)
-        has_divine = False
-        for slot_key in ("weapon", "armor", "helmet", "legs", "boots", "accessory", "trinket"):
-            it = inv.get(slot_key) or {}
-            if (it.get("rarity") or "").lower() in ("divine", "céleste", "celeste", "primordial"):
-                has_divine = True
-                break
-
-        # Badges déjà débloqués
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT badge_id FROM player_badges WHERE guild_id=? AND user_id=?",
-                (guild.id, user_id),
-            ) as cur:
-                already = {r[0] for r in await cur.fetchall()}
-
-        stats = {
-            "swaps_done": swaps,
-            "auctions_sold": a_sold,
-            "auctions_won": a_won,
-            "refines_success": r_ok,
-            "has_divine": has_divine,
-        }
-        new_badges = events2026.check_badge_unlocks(stats, already)
-
-        if not new_badges:
-            return
-
-        # Filtrer aux badges Phase 113 uniquement
-        phase113_ids = {
-            "first_swap", "merchant", "first_auction", "tycoon",
-            "first_bid_won", "auction_baron", "first_refine",
-            "master_smith", "the_divine",
-        }
-        new_badges = [b for b in new_badges if b in phase113_ids]
-        if not new_badges:
-            return
-
-        # Persister
-        async with get_db() as db:
-            for bid in new_badges:
-                try:
-                    await db.execute(
-                        "INSERT OR IGNORE INTO player_badges(guild_id, user_id, badge_id) VALUES(?,?,?)",
-                        (guild.id, user_id, bid),
-                    )
-                except Exception:
-                    pass
-            await db.commit()
-
-        # DM le joueur
-        try:
-            member = guild.get_member(user_id)
-            if member:
-                lines = []
-                for bid in new_badges:
-                    b = events2026.get_badge_by_id(bid)
-                    if b:
-                        lines.append(f"{b['emoji']} **{b['name']}** — _{b['desc']}_")
-                if lines:
-                    try:
-                        # Phase 257 : DM de badges DÉSACTIVÉ (directive owner — zéro
-                        # MP membre). Les badges restent visibles via /achievements.
-                        pass
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-    except Exception as ex:
-        print(f"[_check_phase113_badges] {ex}")
 
 
 async def _incr_phase113_counter(guild_id: int, user_id: int, column: str, by: int = 1):
@@ -36326,105 +34422,7 @@ async def restore_activity_role(member):
 #                           🎁 TÂCHE AUTOMATIQUE GIVEAWAYS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@tasks.loop(seconds=30)
-async def check_giveaways():
-    """Vérifie et termine les giveaways expirés"""
-    try:
-        now_dt = now()
-        
-        async with get_db() as db:
-            # Récupérer les giveaways à terminer
-            async with db.execute(
-                'SELECT id, guild_id, channel_id, message_id, title, prize, participants FROM giveaways WHERE ended=0 AND end_time <= ?',
-                (now_dt.isoformat(),)
-            ) as cursor:
-                giveaways_to_end = []
-                async for row in cursor:
-                    giveaways_to_end.append(row)
-            
-            # Terminer chaque giveaway
-            for gw_id, guild_id, channel_id, message_id, title, prize, participants_str in giveaways_to_end:
-                try:
-                    guild = bot.get_guild(guild_id)
-                    if not guild:
-                        continue
-                    
-                    channel = guild.get_channel(channel_id)
-                    if not channel:
-                        continue
-                    
-                    participants = json.loads(participants_str) if participants_str else []
-                    
-                    # Marquer comme terminé
-                    await db.execute('UPDATE giveaways SET ended=1 WHERE id=?', (gw_id,))
-                    
-                    if not participants:
-                        # Pas de participants
-                        e = discord.Embed(color=0xE74C3C)
-                        e.set_author(name="🎁 GIVEAWAY TERMINÉ", icon_url=guild.icon.url if guild.icon else None)
-                        e.title = title
-                        e.description = (
-                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                            f"❌ **Aucun participant !**\n"
-                            f"Le cadeau n'a pas pu être attribué.\n"
-                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                        )
-                        e.set_footer(text="Giveaway terminé")
-                        e.timestamp = now()
-                        
-                        try:
-                            await webhook_edit(channel, 'giveaway', message_id, embed=e, view=None)
-                        except:
-                            pass
-                    else:
-                        # Tirer un gagnant
-                        import random
-                        winner_id = random.choice(participants)
-                        winner = guild.get_member(winner_id)
-                        winner_txt = winner.mention if winner else f'<@{winner_id}>'
-                        
-                        e = discord.Embed(color=0xF1C40F)
-                        e.set_author(name="🎁 GIVEAWAY TERMINÉ", icon_url=guild.icon.url if guild.icon else None)
-                        e.title = title
-                        e.description = (
-                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                            f"🏆 **Gagnant :** {winner_txt}\n"
-                            f"🎁 **Prix :** `{prize}`\n"
-                            f"👥 **Participants :** `{len(participants)}`\n"
-                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                        )
-                        e.set_footer(text="🎉 Félicitations au gagnant !")
-                        e.timestamp = now()
-                        
-                        try:
-                            await webhook_edit(channel, 'giveaway', message_id, embed=e, view=None)
-                            
-                            win_e = discord.Embed(color=0xF1C40F)
-                            win_e.set_author(name="🎉 GAGNANT ANNONCÉ !", icon_url=guild.icon.url if guild.icon else None)
-                            win_e.description = (
-                                f"Félicitations {winner_txt} !\n\n"
-                                f"Tu as gagné **{title}** 🏆\n"
-                                f"Prix : `{prize}`"
-                            )
-                            if winner and winner.display_avatar:
-                                win_e.set_thumbnail(url=winner.display_avatar.url)
-                            win_e.set_footer(text=f"Merci aux {len(participants)} participants !")
-                            win_e.timestamp = now()
-                            await webhook_send(channel, 'giveaway', embed=win_e)
-                        except:
-                            pass
-                    
-                except Exception as ex:
-                    print(f"Erreur fin giveaway {gw_id}: {ex}")
-            
-            await db.commit()
-            
-    except Exception as ex:
-        print(f"Erreur tâche giveaways: {ex}")
 
-@check_giveaways.before_loop
-async def before_check_giveaways():
-    await bot.wait_until_ready()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📨 TÂCHE AUTOMATIQUE MESSAGES PROGRAMMÉS
@@ -40463,28 +38461,8 @@ _WORLD_BOSS_DEFAULT_HOUR = 21     # 21h heure locale (Europe/Paris)
 
 
 
-@tasks.loop(minutes=5)
-async def world_boss_timeout_checker():
-    """Termine les world boss expirés (90 min)."""
-    try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT id, guild_id FROM world_bosses WHERE ended=0 AND ends_at < ?',
-                (now_iso,),
-            ) as cur:
-                rows = await cur.fetchall()
-        for wb_id, gid in rows:
-            guild = bot.get_guild(int(gid))
-            if guild:
-                pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[world_boss_timeout_checker] {ex}")
 
 
-@world_boss_timeout_checker.before_loop
-async def _wb_timeout_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41252,33 +39230,8 @@ async def _spawn_flash_treasure(guild) -> bool:
         return False
 
 
-@tasks.loop(minutes=45)
-async def flash_treasure_dispatcher():
-    """Toutes les 45 min, 70% chance de pop un trésor flash quelque part."""
-    try:
-        # Heures actives Europe/Paris
-        try:
-            from zoneinfo import ZoneInfo as _ZI
-            tz = _ZI('Europe/Paris')
-        except Exception:
-            tz = timezone.utc
-        h = datetime.now(tz).hour
-        if h < 9 or h >= 23:
-            return
-        if random.random() > 0.7:
-            return
-        for guild in bot.guilds:
-            try:
-                await _spawn_flash_treasure(guild)
-            except Exception as ex:
-                print(f"[flash_treasure_dispatcher guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[flash_treasure_dispatcher] {ex}")
 
 
-@flash_treasure_dispatcher.before_loop
-async def _flash_treasure_wait():
-    await bot.wait_until_ready()
 
 
 # ─── RITUEL DU SOIR ────────────────────────────────────────────────────────────
@@ -41768,79 +39721,12 @@ async def _check_tag_royale_chain(msg):
         print(f"[_check_tag_royale_chain] {ex}")
 
 
-@tasks.loop(minutes=15)
-async def tag_royale_timeout_checker():
-    """Vérifie les chaînes Tag Royale et coupe celles inactives > 1h."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id, guild_id, channel_id FROM tag_royale "
-                "WHERE ended=0 AND datetime(last_action_at) < datetime('now', '-1 hour')"
-            ) as cur:
-                rows = await cur.fetchall()
-        for tr_id, gid, ch_id in rows:
-            async with get_db() as db:
-                await db.execute(
-                    'UPDATE tag_royale SET ended=1, success=0 WHERE id=?',
-                    (tr_id,),
-                )
-                await db.commit()
-            guild = bot.get_guild(int(gid))
-            ch = guild.get_channel(int(ch_id)) if guild else None
-            if ch:
-                try:
-                    # Reste affiché 30 min puis se purge
-                    LIFETIME_BROKEN = 30 * 60
-                    broken_msg = await ch.send(
-                        embed=discord.Embed(
-                            title="💔 Tag Royale — Chaîne brisée",
-                            description=(
-                                f"Personne n'a relancé la chaîne dans l'heure. Le jackpot s'envole !\n"
-                                f"_Rendez-vous la semaine prochaine._\n\n"
-                                f"{_chrono_footer(LIFETIME_BROKEN)}"
-                            ),
-                            color=0x95A5A6,
-                        ),
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME_BROKEN,
-                    )
-                    await _register_for_cleanup(broken_msg, LIFETIME_BROKEN, 'tag_royale_broken')
-                except Exception:
-                    pass
-    except Exception as ex:
-        print(f"[tag_royale_timeout_checker] {ex}")
 
 
-@tag_royale_timeout_checker.before_loop
-async def _tag_royale_timeout_wait():
-    await bot.wait_until_ready()
 
 
-@tasks.loop(hours=1)
-async def tag_royale_starter():
-    """1× par semaine (dimanche 18h FR), lance un nouveau Tag Royale."""
-    try:
-        try:
-            from zoneinfo import ZoneInfo as _ZI
-            tz = _ZI('Europe/Paris')
-        except Exception:
-            tz = timezone.utc
-        now_local = datetime.now(tz)
-        # Dimanche (weekday=6) à 18h
-        if now_local.weekday() != 6 or now_local.hour != 18:
-            return
-        for guild in bot.guilds:
-            try:
-                await _start_tag_royale(guild)
-            except Exception as ex:
-                print(f"[tag_royale_starter guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[tag_royale_starter] {ex}")
 
 
-@tag_royale_starter.before_loop
-async def _tag_royale_starter_wait():
-    await bot.wait_until_ready()
 
 
 # ─── ANNIVERSAIRE DU SERVEUR ───────────────────────────────────────────────────
@@ -44012,26 +41898,8 @@ async def _check_game_night_sync_react(payload):
 
 
 
-@tasks.loop(hours=1)
-async def game_night_failsafe():
-    """Failsafe : si une Game Night n'a pas été terminée (>3h), force end."""
-    try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id FROM game_nights WHERE ended=0 AND ends_at < ?",
-                (now_iso,),
-            ) as cur:
-                rows = await cur.fetchall()
-        for (gn_id,) in rows:
-            await _end_game_night(int(gn_id))
-    except Exception as ex:
-        print(f"[game_night_failsafe] {ex}")
 
 
-@game_night_failsafe.before_loop
-async def _gn_failsafe_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -46941,71 +44809,8 @@ async def admin_journey_cmd(i: discord.Interaction, membre: discord.Member):
 
 
 
-@tasks.loop(hours=12)
-async def capsule_unlock_task():
-    """Toutes les 12h, ouvre les capsules dont la date est atteinte."""
-    try:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id, guild_id, author_id, message, channel_id, created_at "
-                "FROM time_capsules WHERE status='sealed' AND unlock_date <= ?",
-                (today,),
-            ) as cur:
-                rows = await cur.fetchall()
-        for cid, gid, author_id, message, ch_id, created_at in rows:
-            try:
-                guild = bot.get_guild(int(gid))
-                ch = guild.get_channel(int(ch_id)) if guild else None
-                if not ch:
-                    async with get_db() as db:
-                        await db.execute(
-                            "UPDATE time_capsules SET status='expired', opened_at=CURRENT_TIMESTAMP WHERE id=?",
-                            (cid,),
-                        )
-                        await db.commit()
-                    continue
-                author = guild.get_member(int(author_id))
-                aname = author.display_name if author else f"User {author_id}"
-                LIFETIME = 7 * 24 * 3600  # 7 jours visible
-                e = discord.Embed(
-                    title=f"📦 CAPSULE TEMPORELLE OUVERTE — #{cid}",
-                    description=(
-                        f"_Scellée par **{aname}** le `{created_at}`._\n\n"
-                        f"# Message :\n\n{message}\n\n"
-                        f"_— Voici ce que {aname} disait à ce moment-là. Le temps passe vite._"
-                    ),
-                    color=0xE91E63,
-                    timestamp=datetime.now(timezone.utc),
-                )
-                e.set_footer(text=f"Time Capsule #{cid} · Visible 7 jours")
-                if author and author.display_avatar:
-                    e.set_thumbnail(url=author.display_avatar.url)
-                try:
-                    msg = await ch.send(
-                        embed=e,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME,
-                    )
-                    await _register_for_cleanup(msg, LIFETIME, 'capsule_opened')
-                except Exception:
-                    pass
-                async with get_db() as db:
-                    await db.execute(
-                        "UPDATE time_capsules SET status='opened', opened_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (cid,),
-                    )
-                    await db.commit()
-                print(f"[CAPSULE OPENED] cid={cid} gid={gid} author={author_id}")
-            except Exception as ex:
-                print(f"[capsule unlock id={cid}] {ex}")
-    except Exception as ex:
-        print(f"[capsule_unlock_task] {ex}")
 
 
-@capsule_unlock_task.before_loop
-async def _capsule_unlock_wait():
-    await bot.wait_until_ready()
 
 
 # ─── HALL OF FAME ────────────────────────────────────────────────────────────
