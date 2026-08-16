@@ -20,6 +20,8 @@ pour un défaut de droits.
 """
 from __future__ import annotations
 
+import asyncio
+
 import discord
 from discord.ui import Button, ChannelSelect
 
@@ -487,6 +489,25 @@ class RobloxPanelV2(LayoutView):
                 return await self.render_to(i, edit=True)
 
             evts = await veille.comparer_et_enregistrer(rel["articles"])
+
+            #  ⚠️ LE SECOND RELEVÉ — celui qui voit les Limiteds.
+            #  Le relevé ci-dessus trie par date de CRÉATION : il ne contient
+            #  que des articles récents, et JAMAIS les accessoires passés
+            #  collectionnables (mesuré le 16/08 : 0 sur 10, contre 10 sur 10
+            #  avec `SalesTypeFilter=2`). Sans lui, ce bouton cherchait au seul
+            #  endroit où les Limiteds ne sont pas.
+            await asyncio.sleep(veille.PAUSE_ENTRE_APPELS)
+            relc = await veille.relever_collectionnables(limite=30)
+            if relc["code"] == 200:
+                await veille.comparer_et_enregistrer(relc["articles"])
+                vus = {x["asset_id"] for x in (evts.get("bascules") or [])}
+                for x in relc["articles"]:
+                    if x.get("collectionnable") and x["asset_id"] not in vus:
+                        evts.setdefault("bascules", []).append(x)
+                        vus.add(x["asset_id"])
+            else:
+                _log(f"[roblox relever collectionnables] code {relc['code']}")
+
             c = await veille.config(self.g.id)
             envoyes = 0
             #  Le décompte des refus, par cause. C'est lui qui rend le
@@ -501,7 +522,10 @@ class RobloxPanelV2(LayoutView):
             for flux, cle in (("nouveautes", "nouveaux"),
                               ("bascules", "bascules"),
                               ("surveiller", "retires")):
-                candidats = (evts.get(cle) or [])[:5]
+                #  « bascules » regarde plus loin : c'est ce flux qui rattrape
+                #  les Limiteds jamais sortis. Le plafond de publications reste
+                #  le vrai garde-fou — la tranche ne décide que du REGARD.
+                candidats = (evts.get(cle) or [])[:30 if cle == "bascules" else 5]
                 #  ⚠️ L'identifiant AVANT le salon : `get_channel(0)` et
                 #  `get_channel(1234)` rendent tous les deux `None`, mais l'un
                 #  veut dire « case vide » et l'autre « salon supprimé ou

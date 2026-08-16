@@ -12798,6 +12798,14 @@ async def _activite_passage_wait():
 #  Sûr : .start() est ignoré si la boucle tourne déjà (garde is_running) ; on ne
 #  touche qu'à des boucles censées tourner en continu.
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Combien d'articles au plus on examine par flux et par passage.
+#  « bascules » a une tranche large parce que c'est LUI qui rattrape les
+#  Limiteds passés inaperçus : cinq à la fois auraient mis des semaines à
+#  rattraper le retard. Le plafond réel reste `MAX_PUBLICATIONS_PAR_PASSAGE`,
+#  partagé par tous les flux — la tranche décide seulement de ce qu'on REGARDE.
+_TRANCHE_FLUX = {"nouveaux": 5, "bascules": 30, "retires": 5}
+
+
 @tasks.loop(minutes=30)
 async def veille_roblox_task():
     """Veille Roblox : nouveautes du catalogue, bascules, et actualite.
@@ -12834,11 +12842,35 @@ async def veille_roblox_task():
             rel = await roblox_module.relever_nouveautes(limite=60)
             if rel["code"] == 200:
                 evts = await roblox_module.comparer_et_enregistrer(rel["articles"])
+
+                #  ⚠️ SECOND RELEVE, ET IL EST INDISPENSABLE.
+                #  Le relevé ci-dessus trie par date de CREATION : il rend les
+                #  60 derniers articles créés par Roblox. Un accessoire créé il
+                #  y a six mois qui passe Limited aujourd'hui n'y est pas —
+                #  donc sa bascule n'était JAMAIS détectée. Défaut signalé par
+                #  le propriétaire le 16/08 (« des items deviennent limited
+                #  mais sont pas affichés ») et mesuré : sur les 10 articles
+                #  les plus récemment créés, ZERO Limited ; sur les 10 du flux
+                #  `SalesTypeFilter=2`, DIX.
+                #  On ne filtre pas sur « bascule détectée » : le propriétaire
+                #  veut aussi ceux déjà passés (« ils sont encore d'actualité »).
+                #  `deja_publie` empêche la répétition, le plafond empêche le
+                #  déversement.
+                await asyncio.sleep(roblox_module.PAUSE_ENTRE_APPELS)
+                relc = await roblox_module.relever_collectionnables(limite=60)
+                if relc["code"] == 200:
+                    await roblox_module.comparer_et_enregistrer(relc["articles"])
+                    _vus = {x["asset_id"] for x in (evts.get("bascules") or [])}
+                    for _a in relc["articles"]:
+                        if _a.get("collectionnable") and _a["asset_id"] not in _vus:
+                            evts.setdefault("bascules", []).append(_a)
+                            _vus.add(_a["asset_id"])
+
                 #  Les images en UN SEUL appel pour tout le passage : une
                 #  requete pour cent articles, jamais cent requetes. C'est la
                 #  concurrence que le pare-feu punit, pas le volume.
                 _a_pub = [x for k in ("nouveaux", "bascules", "retires")
-                          for x in (evts.get(k) or [])[:5]]
+                          for x in (evts.get(k) or [])[:_TRANCHE_FLUX.get(k, 5)]]
                 _imgs = await roblox_module.vignettes(
                     [x["asset_id"] for x in _a_pub])
                 for g in guildes_items:
@@ -12847,7 +12879,7 @@ async def veille_roblox_task():
                                       ("bascules", "bascules"),
                                       ("surveiller", "retires")):
                         salon = g.get_channel(roblox_module.salon_du_flux(c, flux))
-                        for a in (evts.get(cle) or [])[:5]:
+                        for a in (evts.get(cle) or [])[:_TRANCHE_FLUX.get(cle, 5)]:
                             #  Trop vieux = plus une nouvelle : on ne republie
                             #  pas des archives apres une panne ou une remise a
                             #  zero de la base.

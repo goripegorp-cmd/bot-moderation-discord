@@ -401,10 +401,26 @@ def age_publiable(article: dict, flux: str = "surveiller") -> bool:
       de sortir n'a ni revente, ni demande installée, ni recul sur son stock :
       il n'y a rien à surveiller, et l'indice serait du bruit.
 
+    · flux « bascules » — AUCUNE BORNE. Tranché par le propriétaire le 16/08 :
+      « même s'ils sont passés, j'aimerais que tu les affiches car ils sont
+      encore d'actualité ».
+      ⚠️ CE N'EST PAS UN ASSOUPLISSEMENT COSMÉTIQUE, C'EST LA CORRECTION D'UN
+      DÉFAUT. La borne haute mesure l'âge de la CRÉATION de l'article, alors
+      qu'une bascule est un événement d'AUJOURD'HUI. Mesuré le 16/08 : le
+      Limited officiel le plus récent (« Lord of the Buxeration ») datait de
+      153 jours — au-delà des 90 autorisés. Autrement dit, même une fois le
+      relevé réparé, PAS UN SEUL Limited n'aurait pu sortir. Un accessoire
+      devenu collectionnable garde sa valeur d'information des mois durant :
+      c'est le cœur du système de trading demandé.
+      Le dédoublonnage par `roblox_publies` empêche la répétition ; le plafond
+      par passage empêche le déversement.
+
     Une date illisible ne bloque PAS la publication : on ne va pas taire une
     vraie nouveauté parce qu'un champ manque. Le risque est un message de trop,
     pas une sanction — l'inverse du fail-closed appliqué aux actualités.
     """
+    if flux == "bascules":
+        return True
     d = _jours_depuis(article.get("cree_le"))
     if d is None:
         return True
@@ -488,15 +504,63 @@ async def relever_nouveautes(limite: int = 30) -> dict:
 
     Retourne {"articles": [...], "code": int|None, "echecs": int}.
     Ne lève jamais : une panne de veille ne doit pas gêner la modération.
+
+    ⚠️ CE RELEVÉ NE VOIT QUE LES CRÉATIONS RÉCENTES — voir
+    `relever_collectionnables` pour les Limiteds, qu'il ne peut PAS attraper.
     """
-    out = {"articles": [], "code": None, "echecs": 0}
-    params = {
+    return await _relever_catalogue({
         "Category": 1,
         "SortType": 3,
         "Limit": _limite_valide(limite),
         "CreatorType": "User",
         "CreatorTargetId": CREATEUR_ROBLOX,
-    }
+    }, "catalogue")
+
+
+async def relever_collectionnables(limite: int = 30) -> dict:
+    """Les articles COLLECTIONNABLES de Roblox — le flux que le bot ne voyait pas.
+
+    ⚠️ POURQUOI CETTE FONCTION EXISTE, ET CE QU'ELLE RÉPARE.
+    Le propriétaire a signalé le 16/08 que des accessoires passés Limited ne
+    sortaient jamais. La cause était structurelle : `relever_nouveautes` trie
+    par date de CRÉATION (`SortType=3`) et rend les N derniers articles créés
+    par Roblox. Or `comparer_et_enregistrer` ne peut détecter une bascule que
+    pour un article PRÉSENT dans le relevé. Un accessoire créé il y a six mois
+    qui passe Limited aujourd'hui n'est pas dans « les 60 derniers créés » : il
+    n'est jamais relevé, donc sa bascule n'est jamais vue.
+
+    MESURÉ, PAS SUPPOSÉ (sonde du 16/08, `outils/sonde_limiteds.py`) :
+      · les 10 articles les plus récemment créés par Roblox → **0 Limited** ;
+      · les 10 mêmes avec `SalesTypeFilter=2`               → **10 Limited**,
+        dont aucun n'apparaissait dans le premier relevé.
+
+    Le paramètre `SalesTypeFilter=2` est donc le seul moyen de les atteindre.
+    `SalesTypeFilter=3` a été essayé : il ne filtre RIEN (résultats identiques
+    au relevé de référence) — ne pas le réintroduire en croyant mieux faire.
+
+    ⚠️ Garder `CreatorTargetId=1` : sans lui, le flux se remplit d'UGC de
+    créateurs tiers, hors du périmètre demandé (« uniquement ceux qui sont
+    créés par Roblox »).
+    """
+    return await _relever_catalogue({
+        "Category": 1,
+        "SortType": 3,
+        "Limit": _limite_valide(limite),
+        "SalesTypeFilter": 2,          # 2 = Limited. Mesuré le 16/08.
+        "CreatorType": "User",
+        "CreatorTargetId": CREATEUR_ROBLOX,
+    }, "collectionnables")
+
+
+async def _relever_catalogue(params: dict, source: str) -> dict:
+    """L'appel au catalogue, partagé par les deux relevés.
+
+    `source` sert au suivi de santé : un flux muet doit se voir SÉPARÉMENT.
+    Si les collectionnables tombent en panne pendant que les nouveautés
+    marchent, un compteur commun le masquerait — et un flux mort ressemble
+    exactement à un flux calme.
+    """
+    out = {"articles": [], "code": None, "echecs": 0}
     try:
         async with _ouvrir() as sess:
             async with sess.get(API_CATALOGUE, params=params) as r:
@@ -534,11 +598,11 @@ async def relever_nouveautes(limite: int = 30) -> dict:
                     #  On garde le corps : un 403 du pare-feu et un 429 de débit
                     #  ne se corrigent pas de la même façon, et sans cette trace
                     #  on ne saurait pas lequel on a.
-                    _log(f"[roblox_veille catalogue] HTTP {r.status} — "
+                    _log(f"[roblox_veille {source}] HTTP {r.status} — "
                          f"{(await r.text())[:200]}")
     except Exception as ex:
-        _log(f"[roblox_veille relever_nouveautes] {type(ex).__name__}: {ex}")
-    out["echecs"] = await _noter_sante("catalogue", out["code"])
+        _log(f"[roblox_veille {source}] {type(ex).__name__}: {ex}")
+    out["echecs"] = await _noter_sante(source, out["code"])
     return out
 
 
