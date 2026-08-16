@@ -12869,8 +12869,12 @@ async def veille_roblox_task():
                 #  Les images en UN SEUL appel pour tout le passage : une
                 #  requete pour cent articles, jamais cent requetes. C'est la
                 #  concurrence que le pare-feu punit, pas le volume.
+                #  Même sélection que la publication : les vignettes doivent
+                #  couvrir exactement les articles qui vont sortir, ni plus
+                #  (requête gâchée) ni moins (fiche sans image).
                 _a_pub = [x for k in ("nouveaux", "bascules", "retires")
-                          for x in (evts.get(k) or [])[:_TRANCHE_FLUX.get(k, 5)]]
+                          for x in roblox_module.ordonner_publication(
+                              evts.get(k) or [], _TRANCHE_FLUX.get(k, 5))]
                 _imgs = await roblox_module.vignettes(
                     [x["asset_id"] for x in _a_pub])
                 for g in guildes_items:
@@ -12879,7 +12883,11 @@ async def veille_roblox_task():
                                       ("bascules", "bascules"),
                                       ("surveiller", "retires")):
                         salon = g.get_channel(roblox_module.salon_du_flux(c, flux))
-                        for a in (evts.get(cle) or [])[:_TRANCHE_FLUX.get(cle, 5)]:
+                        #  Du plus ANCIEN au plus récent : Discord empile vers
+                        #  le bas, donc envoyer l'ancien d'abord fait un salon
+                        #  qui se lit dans l'ordre en scrollant.
+                        for a in roblox_module.ordonner_publication(
+                                evts.get(cle) or [], _TRANCHE_FLUX.get(cle, 5)):
                             #  Trop vieux = plus une nouvelle : on ne republie
                             #  pas des archives apres une panne ou une remise a
                             #  zero de la base.
@@ -12911,7 +12919,14 @@ async def veille_roblox_task():
                 for g in guildes_news:
                     c = await roblox_news_module.config(g.id)
                     salon = g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
-                    for b in rel["billets"][:roblox_news_module.MAX_BILLETS_PAR_PASSAGE]:
+                    #  Même règle que les articles : les plus récents sont
+                    #  SÉLECTIONNÉS, mais ENVOYÉS du plus ancien au plus
+                    #  récent — un salon d'actualité se lit aussi de haut en
+                    #  bas. `ordonner_publication` trie sur `cree_le`, que les
+                    #  billets portent comme les articles.
+                    for b in roblox_module.ordonner_publication(
+                            rel["billets"],
+                            roblox_news_module.MAX_BILLETS_PAR_PASSAGE):
                         if await roblox_news_module.deja_publie(g.id, b["topic_id"]):
                             continue
                         if _budget <= 0:

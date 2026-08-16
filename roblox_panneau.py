@@ -516,8 +516,11 @@ class RobloxPanelV2(LayoutView):
                       "seuil": 0, "deja": 0, "envoi": 0}
             salons_absents = []
             #  Les images en UN SEUL appel pour tout le passage.
+            #  Même sélection que la publication, sinon une fiche sort sans son
+            #  image (ou on demande des vignettes pour rien).
             a_publier = [x for k in ("nouveaux", "bascules", "retires")
-                         for x in (evts.get(k) or [])[:5]]
+                         for x in veille.ordonner_publication(
+                             evts.get(k) or [], 30 if k == "bascules" else 5)]
             imgs = await veille.vignettes([x["asset_id"] for x in a_publier])
             for flux, cle in (("nouveautes", "nouveaux"),
                               ("bascules", "bascules"),
@@ -525,7 +528,10 @@ class RobloxPanelV2(LayoutView):
                 #  « bascules » regarde plus loin : c'est ce flux qui rattrape
                 #  les Limiteds jamais sortis. Le plafond de publications reste
                 #  le vrai garde-fou — la tranche ne décide que du REGARD.
-                candidats = (evts.get(cle) or [])[:30 if cle == "bascules" else 5]
+                #  Ordre d'ENVOI : du plus ancien au plus récent, pour que le
+                #  salon se lise de haut en bas en scrollant.
+                candidats = veille.ordonner_publication(
+                    evts.get(cle) or [], 30 if cle == "bascules" else 5)
                 #  ⚠️ L'identifiant AVANT le salon : `get_channel(0)` et
                 #  `get_channel(1234)` rendent tous les deux `None`, mais l'un
                 #  veut dire « case vide » et l'autre « salon supprimé ou

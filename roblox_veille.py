@@ -651,6 +651,39 @@ def _normaliser(bruts: list) -> list[dict]:
     return out
 
 
+def ordonner_publication(articles: list[dict], tranche: int) -> list[dict]:
+    """Choisit les `tranche` plus RÉCENTS, puis les rend du plus ANCIEN au plus récent.
+
+    ⚠️ DEUX TRIS OPPOSÉS, ET LES CONFONDRE CASSE L'UN OU L'AUTRE.
+    Demande du propriétaire (16/08) : « mets le plus ancien posté en premier
+    jusqu'au plus récent, comme ça quand on scroll on voit pas un vieil item
+    avec un nouveau ».
+
+    Discord empile les messages du plus ancien EN HAUT au plus récent EN BAS.
+    Pour qu'un salon se lise de haut en bas dans l'ordre, il faut donc ENVOYER
+    le plus ancien d'abord. Or le relevé, lui, doit rester trié du plus récent
+    au plus ancien : c'est ce tri-là qui décide QUELS articles entrent dans la
+    tranche. Prendre les 30 premiers d'une liste croissante donnerait les 30
+    plus VIEUX du catalogue — l'exact contraire de ce qu'on veut suivre.
+
+    D'où l'ordre des opérations, qui n'est pas interchangeable :
+      1. sélectionner sur la liste DÉCROISSANTE (les plus récents) ;
+      2. inverser la tranche retenue pour l'envoi.
+
+    Une date illisible ne fait pas tomber l'article : il part en tête, avec les
+    plus anciens. Le taire pour un champ manquant serait pire qu'un ordre
+    approximatif sur une seule fiche.
+    """
+    if not articles:
+        return []
+    #  Le relevé arrive déjà décroissant (`_normaliser`), mais on ne s'appuie
+    #  pas dessus : cette fonction est appelée sur des listes FUSIONNÉES
+    #  (nouveautés + collectionnables), dont l'ordre n'est plus garanti.
+    recents = sorted(articles, key=lambda a: str(a.get("cree_le") or ""),
+                     reverse=True)[:max(0, int(tranche))]
+    return list(reversed(recents))
+
+
 def _type_lisible(brut: dict) -> str:
     """Le type d'article, en clair.
 
