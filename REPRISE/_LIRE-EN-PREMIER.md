@@ -99,16 +99,68 @@ BALAYAGE AUTO qui ramasse tout `tasks.Loop` déjà démarré, même absent de
 `_SUPERVISED_LOOP_NAMES`. **Retirer le nom de la liste ne débranche rien** : il
 faut supprimer la boucle. `outils/couper_symboles.py` le fait proprement.
 
-### Ce qui reste, et qui demande un arbitrage
+### La purge est TERMINÉE — plus de zone grise
 
-La purge a retiré le périmètre **nommé** par le propriétaire (cadeaux, boss,
-salons d'événements) : 7 modules et ~2 200 lignes de `bot.py`, 17 boucles.
-Restent **16 boucles d'animation communautaire** et 14 modules du même
-registre — énigme du jour, héraut hebdomadaire, vitrine, rituel du soir,
-anniversaire, camouflage de salon, projecteur vocal, PNJ, missions, heure
-dorée, UGC, jalons. Ce n'est plus « cadeaux, boss, événements » : c'est la zone
-grise. `PYTHONIOENCODING=utf-8 python outils/inventaire_evenements.py` en donne
-la carte à jour.
+Le propriétaire a tranché le 16/08 : « toutes les animations du serveur, tu les
+cut, tous les événements tu peux les enlever ». C'est fait, en trois lots.
+
+**Il reste ZÉRO boucle d'animation et ZÉRO entrée d'animation au superviseur.**
+Vérifiable en une commande :
+
+```bash
+PYTHONIOENCODING=utf-8 python outils/inventaire_evenements.py
+```
+
+`bot.py` : **48 994 → 42 957 lignes**. Modules : **85 → 73**.
+
+**Retiré** : cadeaux (giveaways, boîtes mystère, trésors, capsules) · boss
+(world boss, arènes, tag royale, saga, guerre d'alliance) · événements
+(personnels, légers, soirées jeu, salons éphémères) · animations (énigme,
+héraut, vitrine, rituel, anniversaire de serveur ×2 — c'était un doublon,
+camouflage, projecteur vocal, PNJ ×2, missions, tip Studio, heure dorée, méta,
+votes narratifs, saisons IRL, UGC, jalons, marketplace) · 12 modules · 26
+tables mortes.
+
+**Gardé et vérifié** : activité · Roblox · social · rellseas · sécurité ·
+sanctions · logs · tickets · RGPD · sondages · messages programmés · rôles et
+restrictions expirés · vocaux temporaires · anniversaires **des membres** ·
+bons plans · rappel `/bump` · nettoyage d'accueil · infra base.
+
+⚠️ **`activity_tracker` était un SECOND système de suivi** (projecteurs,
+digests). Vérifié avant de couper : le système d'activité gardé passe par
+`activite_module.marquer_actif`, `SOURCE_VOCAL` comprise, et n'en dépendait
+pas. Le comptage vocal est intact.
+
+⚠️ **Un seul effet visible côté serveur** : la restauration au boot des
+camouflages et projecteurs est partie avec eux. Un salon camouflé au moment du
+déploiement le restera — à remettre à la main s'il en traîne.
+
+⚠️ **Les tables ne sont pas supprimées, seulement leurs `CREATE TABLE`.** Les
+données de production restent intactes ; les effacer demande une décision
+explicite.
+
+### Deux défauts trouvés PAR la purge
+
+**1. Un `NameError` que personne ne pouvait voir.** Après le retrait des
+boucles, `verif_noms.py` a signalé `mission_after` — une variable jamais
+définie dans `_check_mission_step_advance`, avalée par le `try` englobant.
+Lancer `verif_noms.py` après CHAQUE coupe, pas seulement à la fin.
+
+**2. Un patch qui allait créer un écran menteur.** La première version du
+détachement de `community_features` retirait de `setup_wizard.py` les trois
+lignes contenant `comm_mod` — dont `cfg = await comm_mod.load_config(...)`,
+alors que `cfg.` servait trente lignes plus bas. `NameError` avalé par le
+`try`, rangé dans `report["errors"]` : un assistant qui dit « appliqué » sans
+rien appliquer. **Toujours borner sur deux ancres textuelles exactes.**
+
+### L'outillage laissé derrière
+
+| Outil | Ce qu'il fait |
+|---|---|
+| `outils/inventaire_evenements.py` | la carte du registre, à relancer avant toute coupe |
+| `outils/couper_symboles.py` | supprime des symboles de `bot.py` + `.start()` + gardes + superviseur, bornés par `ast` |
+| `outils/patch_debrancher_animation.py` | retire les appels enfouis dans `on_ready`/`on_message`, par ancres exactes |
+| `outils/patch_tables_mortes.py` | retire les `CREATE TABLE` orphelines, sans toucher aux données |
 
 ### Sur le n°2 — ne pas se tromper de travail
 
