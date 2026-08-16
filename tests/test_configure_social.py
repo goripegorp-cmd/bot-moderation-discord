@@ -31,13 +31,19 @@ RACINE = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(autouse=True)
-def _restaurer_etat_global():
+def _restaurer_etat_global(tmp_path, monkeypatch):
     """Le manager et le retour sont des globales du module : on les rend.
 
     Sans ça, un test qui installe un manager manuel le laisse en place pour
     toute la session pytest — et le suivant teste autre chose que ce qu'il
     croit.
+
+    ⚠️ ET SURTOUT : `add_subscription` ÉCRIT SUR LE DISQUE. Sans la redirection
+    de `DATA_DIR`, ce fichier de test crée un vrai `data/social/1234_subs.json`
+    dans le dépôt — un abonnement fictif déposé au milieu des données du bot,
+    qui part au commit suivant. C'est arrivé une fois ; d'où cette ligne.
     """
+    monkeypatch.setattr(social_media, "DATA_DIR", tmp_path)
     manager, retour = panels._global_manager, panels._retour_configure
     yield
     panels._global_manager, panels._retour_configure = manager, retour

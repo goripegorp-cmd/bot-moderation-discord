@@ -33,3 +33,10 @@ Thumbs.db
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# ─── Données d'exécution ───
+# Les modules à stockage JSON (social, …) écrivent ici. Rien de tout cela
+# n'appartient au dépôt : ce sont les données vivantes du bot. Un test mal
+# isolé y a déjà déposé un abonnement fictif, parti au commit suivant.
+data/
+
