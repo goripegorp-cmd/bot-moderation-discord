@@ -244,7 +244,17 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
         #  Trois messages distincts, jamais fusionnés : « tu es un peu juste » et
         #  « tu as perdu tes rôles » lus dans le même bloc, et tout le monde
         #  retient le mauvais des deux.
-        vues = [msgs.construire(g[p], palier=p, salon_retour=salon_retour)
+        #  ⚠️ CHAQUE PALIER MENTIONNE SON PROPRE RÔLE.
+        #  Le palier « rappel » vise les porteurs du 1er rôle d'absence, le
+        #  palier « retrait » ceux du 2e. Le palier « doux » n'en a AUCUN : ces
+        #  membres-là sont venus, on ne leur a rien posé, et les mentionner par
+        #  un rôle qu'ils ne portent pas ne toucherait personne. Ils sont donc
+        #  listés — ils sont peu nombreux par construction.
+        _r1 = guild.get_role(int(cfg_act.get("activite_role_niveau1", 0) or 0))
+        _r2 = guild.get_role(int(cfg_act.get("activite_role_niveau2", 0) or 0))
+        _roles = {"doux": None, "rappel": _r1, "retrait": _r2}
+        vues = [msgs.construire(g[p], palier=p, salon_retour=salon_retour,
+                                role_ping=_roles.get(p))
                 for p in ("doux", "rappel", "retrait")]
         try:
             envoyes += await msgs.remplacer(guild, salon, cle, vues, cfg_act)

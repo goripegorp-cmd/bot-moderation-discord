@@ -83,7 +83,8 @@ def _liste(fiches: list, palier: str) -> list[str]:
 #  Les trois messages
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def construire(fiches: list, *, palier: str, salon_retour=None) -> LayoutView | None:
+def construire(fiches: list, *, palier: str, salon_retour=None,
+               role_ping=None) -> LayoutView | None:
     """Le message d'un palier, en Components V2. None s'il n'y a personne.
 
     `palier` vaut "doux", "rappel" ou "retrait". Trois messages distincts et
@@ -106,9 +107,26 @@ def construire(fiches: list, *, palier: str, salon_retour=None) -> LayoutView | 
         titre, couleur = txt.T_ABSENTS, Palette.INFO
         action = txt.revenir()
 
+    #  ⚠️ ON MENTIONNE LE RÔLE, PAS LES GENS — demandé le 15/08.
+    #
+    #  L'ancienne version listait chaque membre. Mesuré chez le propriétaire :
+    #  950 mentions dans un seul message, suivies d'un « +923 ». Illisible,
+    #  et Discord plafonne de toute façon les mentions d'un message.
+    #
+    #  Le rôle d'absence est DÉJÀ posé sur chacun d'eux par le palier (voir
+    #  `activite_niveaux.poser_niveau`). Le mentionner touche donc exactement les
+    #  mêmes personnes, en une ligne, sans mur de pseudos. Le compte reste
+    #  affiché : c'est lui qui donne la mesure du problème.
+    if role_ping is not None:
+        corps = (f"{role_ping.mention}\n"
+                 f"-# `{len(fiches)}` membre(s) concerné(s)")
+    else:
+        #  Repli quand aucun rôle n'est configuré : on liste, mais borné.
+        corps = "\n".join(_liste(fiches, palier))
+
     items = [
         v2_title(titre),
-        v2_body("\n".join(_liste(fiches, palier))),
+        v2_body(corps),
         v2_divider(),
         v2_body(action),
     ]
@@ -199,12 +217,18 @@ async def remplacer(guild, salon, cle_role, vues: list, cfg_act: dict) -> int:
         if v is None:
             continue
         try:
-            #  Les mentions doivent NOTIFIER : c'est tout l'intérêt du rappel.
-            #  On autorise explicitement les utilisateurs, et on interdit
-            #  @everyone et les rôles — un rappel d'inactivité ne doit jamais
-            #  réveiller tout le serveur.
+            #  ⚠️ LES RÔLES SONT MAINTENANT AUTORISÉS, ET C'EST INDISPENSABLE.
+            #
+            #  Le rappel mentionne désormais le RÔLE d'absence au lieu des
+            #  membres un par un. Avec `roles=False`, la mention s'afficherait
+            #  sans notifier personne : un rappel que personne ne reçoit ne sert
+            #  à rien. On autorise donc les rôles.
+            #
+            #  @everyone reste INTERDIT : le rôle ne touche que les absents,
+            #  jamais le serveur entier. C'est toute la différence entre relancer
+            #  ceux qui sont concernés et réveiller tout le monde.
             msg = await salon.send(view=v, allowed_mentions=discord.AllowedMentions(
-                users=True, roles=False, everyone=False))
+                users=True, roles=True, everyone=False))
             envoyes.append(msg.id)
         except Exception as ex:
             _log(f"[activite_message envoi] {ex}")
