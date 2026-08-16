@@ -12883,14 +12883,22 @@ async def veille_roblox_task():
                 #  passage — sinon 60 articles feraient 60 requêtes pour 12
                 #  fiches. `enrichir` pose sa propre pause entre les appels.
                 _lot = _a_pub[:roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE]
+                #  ⚠️ RESPIRER AVANT LA PHASE « FICHES ». Les deux relevés
+                #  paginés viennent de consommer ~18 requêtes ; enchaîner
+                #  ici tombait en plein 429 et les fiches partaient sans
+                #  chiffres ni image, SANS BRUIT. Mesuré le 16/08.
+                if _lot:
+                    await asyncio.sleep(roblox_module.PAUSE_AVANT_FICHES)
                 await roblox_module.enrichir(_lot)
                 #  Le nom français officiel, en UN appel pour tout le lot.
                 #  ⚠️ Il ne se pose plus pendant le relevé : avec la pagination,
                 #  redemander chaque page en français doublait les requêtes et
                 #  déclenchait le HTTP 429 mesuré le 16/08.
                 await roblox_module.traduire(_lot)
-                _imgs = await roblox_module.vignettes(
-                    [x["asset_id"] for x in _a_pub])
+                #  On passe les ARTICLES : `item_type` décide du point
+                #  d'API (assets ou bundles). Avec des identifiants nus,
+                #  les bundles revenaient sans image.
+                _imgs = await roblox_module.vignettes(_a_pub)
                 for g in guildes_items:
                     c = await roblox_module.config(g.id)
                     #  ⚠️ ORDRE DE PRIORITÉ, PAS ORDRE ALPHABÉTIQUE.

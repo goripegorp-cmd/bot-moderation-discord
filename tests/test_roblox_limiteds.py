@@ -47,9 +47,10 @@ def params_captures(monkeypatch):
     """Capture les paramètres, sans toucher au réseau."""
     vus = {}
 
-    async def _faux(params, source):
+    async def _faux(params, source, arret_hors_fenetre=False):
         vus["params"] = dict(params)
         vus["source"] = source
+        vus["arret_hors_fenetre"] = arret_hors_fenetre
         return {"articles": [], "code": 200, "echecs": 0}
 
     monkeypatch.setattr(veille, "_relever_catalogue", _faux)
@@ -68,6 +69,20 @@ async def test_le_releve_des_collectionnables_filtre_sur_les_limiteds(params_cap
         "sans le filtre de créateur, le flux se remplit d'UGC tiers — hors du "
         "périmètre demandé (« uniquement ceux créés par Roblox »)")
     assert p.get("SortType") == 3, "les plus récents d'abord"
+    #  ⚠️ L'arrêt anticipé n'est pas un détail de performance : sans lui, ce
+    #  relevé ramenait 998 articles pour en écarter 892, et ces 7 pages de
+    #  requêtes inutiles épuisaient le débit — si bien que les appels SUIVANTS
+    #  (stock, revente, vignettes) tombaient en 429 et que les fiches
+    #  partaient sans chiffres ni image.
+    assert params_captures["arret_hors_fenetre"] is True
+
+
+@pytest.mark.asyncio
+async def test_le_catalogue_general_ne_sarrete_PAS_a_la_fenetre(params_captures):
+    """Le tri « bascules » n'a pas de sens pour les créations : une nouveauté
+    du jour et un article de deux ans se suivent dans ce flux."""
+    await veille.relever_nouveautes(limite=30)
+    assert params_captures["arret_hors_fenetre"] is False
 
 
 @pytest.mark.asyncio

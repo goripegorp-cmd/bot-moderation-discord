@@ -152,7 +152,10 @@ def construire_fiche(article: dict, flux: str, image: str | None = None) -> Layo
     #  Ordre fixe, champs jamais masqués : une fiche à géométrie variable ne se
     #  lit plus en diagonale (ROBLOX.md §3). Un champ inconnu affiche « — ».
     stock = article.get("stock") or article.get("quantite")
-    revente = article.get("revente")
+    #  Les BUNDLES n'ont pas de fiche économie : leurs chiffres viennent
+    #  du catalogue (`prix_revente`). Sans ce repli, la moitié du flux
+    #  Limited affichait « — » alors que la donnée existait.
+    revente = article.get("revente") or article.get("prix_revente")
     mult = article.get("multiplicateur")
 
     if article.get("collectionnable"):
@@ -593,10 +596,15 @@ class RobloxPanelV2(LayoutView):
             #  viennent d'un point d'API distinct, un appel par article. Borné
             #  au plafond du passage pour ne pas faire attendre le staff.
             lot = a_publier[:veille.MAX_PUBLICATIONS_PAR_PASSAGE]
+            #  Même respiration que la boucle : sans elle, les chiffres et
+            #  les images manquent après les deux relevés paginés.
+            if lot:
+                await asyncio.sleep(veille.PAUSE_AVANT_FICHES)
             await veille.enrichir(lot)
             #  Le nom français officiel, en un appel pour tout le lot.
             await veille.traduire(lot)
-            imgs = await veille.vignettes([x["asset_id"] for x in a_publier])
+            #  Les ARTICLES, pas les identifiants : voir `vignettes`.
+            imgs = await veille.vignettes(a_publier)
             #  Même ordre de priorité que la boucle : bascules d'abord, pour
             #  qu'un article ne « grille » pas sa propre bascule dans un flux
             #  plus faible au même passage.

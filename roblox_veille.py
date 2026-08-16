@@ -53,6 +53,9 @@ API_CATALOGUE = "https://catalog.roblox.com/v2/search/items/details"
 API_ECONOMIE = "https://economy.roblox.com/v2/assets/{}/details"
 API_FICHE = "https://catalog.roblox.com/v1/catalog/items/{}/details"
 API_VIGNETTE = "https://thumbnails.roblox.com/v1/assets"
+#  ⚠️ Les BUNDLES ont leur propre point de vignette. `/v1/assets` leur répond
+#  HTTP 200 avec `state: "Error"` — un échec déguisé en succès. Mesuré le 16/08.
+API_VIGNETTE_BUNDLE = "https://thumbnails.roblox.com/v1/bundles/thumbnails"
 #  Le seul domaine d'où une image a le droit de venir. Voir `vignettes`.
 DOMAINE_IMAGES = "https://tr.rbxcdn.com/"
 
@@ -131,6 +134,29 @@ MAX_PAGES_PAR_RELEVE = 12
 #  15 secondes laissent la fenêtre de débit se vider. La boucle tourne toutes
 #  les 30 minutes : ce délai ne coûte rien, et il évite un relevé tronqué.
 PAUSE_ENTRE_RELEVES = 15.0
+
+#  ⚠️ LE PIÈGE LE PLUS COÛTEUX DE CE MODULE, TROUVÉ LE 16/08 EN VÉRIFIANT.
+#  Les deux relevés paginés consomment ~18 requêtes. Les appels QUI SUIVENT —
+#  stock, prix de revente, vignettes — tombaient donc en plein HTTP 429, et
+#  `enrichir`/`vignettes` échouent SANS BRUIT : les fiches partaient sans
+#  chiffres et sans image, et rien ne le disait.
+#  Mesuré : à froid, 3 articles sur 3 enrichis ; juste après deux relevés
+#  complets, 0 sur 3.
+#  Deux réponses, et il faut les deux : une pause avant la phase « fiches »,
+#  et une reprise sur 429 (`_appel_avec_reprise`).
+#  ⚠️ 60 SECONDES, ET PAS MOINS — LA FENÊTRE EST GLISSANTE.
+#  Le débit mesuré est de ~12 requêtes par 60 secondes. Les deux relevés
+#  paginés en consomment bien plus : attendre 20 s ne vidait qu'un tiers de la
+#  fenêtre, et les appels suivants tombaient encore en 429 (essayé, mesuré,
+#  0 article enrichi sur 3). Une minute pleine garantit une fenêtre vide.
+#  La boucle tourne toutes les 30 minutes : cette minute ne coûte rien, et
+#  c'est elle qui fait la différence entre une fiche complète et une fiche
+#  muette.
+PAUSE_AVANT_FICHES = 60.0
+
+#  Attente après un 429 avant de retenter. Une seule reprise : si la fenêtre
+#  est encore fermée après ça, insister ne ferait qu'aggraver le blocage.
+ATTENTE_APRES_429 = 25.0
 
 #  ⚠️ PLAFOND DUR DE PUBLICATIONS PAR PASSAGE — NE PAS LE RELEVER.
 #
@@ -352,9 +378,10 @@ def indice(article: dict) -> dict:
     #  échangeable, donc il a une valeur de marché observable.
     #  `revente` vient de `enrichir()` (economy), `revendeurs` du catalogue :
     #  l'un ou l'autre suffit, et le premier est le plus fiable.
-    if article.get("revente") or article.get("revendeurs"):
+    if (article.get("revente") or article.get("prix_revente")
+            or article.get("revendeurs")):
         note += POIDS["revente"]
-        prix_rev = article.get("revente")
+        prix_rev = article.get("revente") or article.get("prix_revente")
         facteurs.append((f"revente ouverte ({prix_rev} R$)" if prix_rev
                          else "revente déjà ouverte", POIDS["revente"]))
 
@@ -634,10 +661,11 @@ async def relever_collectionnables(limite: int = 30) -> dict:
         "SalesTypeFilter": 2,          # 2 = Limited. Mesuré le 16/08.
         "CreatorType": "User",
         "CreatorTargetId": CREATEUR_ROBLOX,
-    }, "collectionnables")
+    }, "collectionnables", arret_hors_fenetre=True)
 
 
-async def _relever_catalogue(params: dict, source: str) -> dict:
+async def _relever_catalogue(params: dict, source: str,
+                             arret_hors_fenetre: bool = False) -> dict:
     """L'appel au catalogue, partagé par les deux relevés.
 
     `source` sert au suivi de santé : un flux muet doit se voir SÉPARÉMENT.
@@ -684,6 +712,24 @@ async def _relever_catalogue(params: dict, source: str) -> dict:
                         vus.add(a["asset_id"])
                         out["articles"].append(a)
                 out["pages"] = page + 1
+
+                #  ⚠️ ARRÊT ANTICIPÉ — LE CORRECTIF QUI A SAUVÉ LES FICHES.
+                #  Le flux des Limiteds est trié par date de création
+                #  décroissante : les récents sont dans les PREMIÈRES pages.
+                #  Paginer jusqu'au bout ramenait 998 articles pour en écarter
+                #  892 par la fenêtre de fraîcheur — 7 pages de requêtes pour
+                #  rien. Et ces requêtes n'étaient pas gratuites : cumulées aux
+                #  9 pages du catalogue, elles épuisaient le débit, si bien que
+                #  les appels SUIVANTS (stock, revente, vignettes) tombaient en
+                #  429 et que les fiches partaient sans chiffres ni image.
+                #  Mesuré le 16/08 : après UN relevé, 3 articles sur 3 enrichis ;
+                #  après DEUX relevés complets, 0 sur 3.
+                #  Dès qu'une page entière est hors fenêtre, la suite l'est
+                #  aussi — le tri le garantit.
+                if arret_hors_fenetre and not any(
+                        age_publiable(a, "bascules") for a in lot):
+                    out["complet"] = True
+                    break
 
                 curseur = data.get("nextPageCursor")
                 if not curseur:
@@ -789,6 +835,37 @@ def _normaliser(bruts: list) -> list[dict]:
     return out
 
 
+async def _appel_avec_reprise(sess, url: str, params: dict | None = None):
+    """Un GET qui ne se laisse pas tuer par notre propre débit.
+
+    Rend `(code, données)` — `données` vaut `None` si la réponse n'est pas
+    exploitable. Sur HTTP 429, attend puis retente UNE fois : c'est notre
+    cadence qui est en cause, pas une panne, et la fenêtre se rouvre d'
+    elle-même. Insister davantage ne ferait qu'allonger le blocage.
+
+    ⚠️ Sans cette reprise, les appels de fin de passage (stock, revente,
+    vignettes) échouaient en silence après les deux relevés paginés — mesuré
+    le 16/08 : 0 article enrichi sur 3, alors que les mêmes appels rendaient
+    3 sur 3 à froid.
+    """
+    for tentative in (1, 2):
+        try:
+            async with sess.get(url, params=params) as r:
+                if r.status == 429 and tentative == 1:
+                    _log(f"[roblox_veille] HTTP 429 sur {url.split('/')[-1]} — "
+                         f"attente {ATTENTE_APRES_429:.0f} s puis reprise")
+                    await asyncio.sleep(ATTENTE_APRES_429)
+                    continue
+                if r.status != 200:
+                    return r.status, None
+                return 200, await r.json()
+        except Exception as ex:
+            _log(f"[roblox_veille appel {url.split('/')[-1]}] "
+                 f"{type(ex).__name__}: {ex}")
+            return None, None
+    return 429, None
+
+
 async def enrichir(articles: list[dict]) -> None:
     """Complète les articles avec les chiffres d'ÉCONOMIE. Modifie sur place.
 
@@ -822,19 +899,27 @@ async def enrichir(articles: list[dict]) -> None:
     try:
         async with _ouvrir() as sess:
             for a in articles:
-                try:
-                    async with sess.get(
-                            API_ECONOMIE.format(int(a["asset_id"]))) as r:
-                        if r.status != 200:
-                            continue
-                        d = await r.json()
-                except Exception as ex:
-                    _log(f"[roblox_veille enrichir {a.get('asset_id')}] {ex}")
+                #  ⚠️ LES BUNDLES N'ONT PAS DE FICHE ÉCONOMIE.
+                #  `economy/v2/assets/{id}/details` leur rend HTTP 400 « No
+                #  Product Info found », et `economy/v1/bundles/{id}/details`
+                #  n'existe pas (404). Vérifié le 16/08 sur trois bundles du
+                #  flux réel.
+                #  Ce n'est pas grave : le catalogue porte DÉJÀ leur stock
+                #  (`quantite`) et leur revente (`prix_revente`), et la fiche
+                #  retombe dessus. Les appeler pour rien coûterait une requête
+                #  par bundle et brûlerait le débit des articles qui, eux, ont
+                #  une fiche.
+                if str(a.get("item_type") or "").lower() == "bundle":
                     continue
-                finally:
-                    #  La pause va DANS la boucle : c'est la concurrence que le
-                    #  pare-feu punit, pas le volume.
-                    await asyncio.sleep(PAUSE_ENTRE_APPELS)
+                code, d = await _appel_avec_reprise(
+                    sess, API_ECONOMIE.format(int(a["asset_id"])))
+                #  La pause va DANS la boucle : c'est la concurrence que le
+                #  pare-feu punit, pas le volume.
+                await asyncio.sleep(PAUSE_ENTRE_APPELS)
+                if not d:
+                    _log(f"[roblox_veille enrichir {a.get('asset_id')}] "
+                         f"HTTP {code} — fiche publiée sans ses chiffres")
+                    continue
 
                 det = d.get("CollectiblesItemDetails") or {}
                 a["stock"] = det.get("TotalQuantity") or None
@@ -910,39 +995,73 @@ def _type_lisible(brut: dict) -> str:
     return f"type {n}" if n is not None else "—"
 
 
-async def vignettes(asset_ids: list) -> dict:
+async def vignettes(articles_ou_ids: list) -> dict:
     """Les images des articles, par lot. {asset_id: url} — vide si rien.
+
+    Accepte une liste d'articles (dictionnaires) ou d'identifiants nus.
+
+    ⚠️ DEUX POINTS D'API, PARCE QU'IL Y A DEUX SORTES D'ARTICLES.
+    Défaut trouvé le 16/08 en vérifiant : les fiches sortaient sans image, et
+    ce n'était PAS un problème de débit — c'est que la moitié du flux Limited
+    de Roblox est faite de **Bundles** (les visages, les têtes dynamiques),
+    pas d'Assets. Or `/v1/assets` leur répond HTTP 200 avec `state: "Error"`
+    et une image vide : un échec qui se déguise en succès.
+    Mesuré sur un lot réel : Snow Queen Smile, Bacon Face et Friendly Trusting
+    Smile — trois Bundles, trois images manquantes, aucun message d'erreur.
+    Le bon point est `/v1/bundles/thumbnails?bundleIds=…`, qui rend
+    `state: "Completed"`.
 
     ⚠️ L'URL de l'image vient de Roblox et n'est PAS reconstructible : elle
     contient une empreinte. C'est la seule exception à la règle « on ne recopie
     jamais une URL » — elle est donc filtrée : on n'accepte que le domaine
-    officiel des images, et rien d'autre. Un lien d'image détourné afficherait
-    une image arbitraire dans le salon.
+    officiel des images. Un lien détourné afficherait une image arbitraire.
 
-    Le point accepte 100 identifiants au maximum (101 → HTTP 400) et 50 appels
-    par seconde. On découpe donc, et on ne demande que ce qu'on va publier.
+    Les points acceptent 100 identifiants au maximum (101 → HTTP 400).
     """
     out: dict[int, str] = {}
-    ids = [int(a) for a in asset_ids if str(a).lstrip("-").isdigit()][:100]
-    if not ids:
+    if not articles_ou_ids:
         return out
-    params = {"assetIds": ",".join(str(i) for i in ids),
-              "size": "420x420", "format": "Png", "returnPolicy": "PlaceHolder"}
-    try:
-        async with _ouvrir() as sess:
-            async with sess.get(API_VIGNETTE, params=params) as r:
-                if r.status != 200:
-                    _log(f"[roblox_veille vignettes] HTTP {r.status}")
-                    return out
-                data = await r.json()
+
+    #  Séparer les deux familles. Sans `item_type` (identifiant nu), on tente
+    #  la voie « asset » : c'est le cas majoritaire hors Limiteds.
+    assets, bundles = [], []
+    for x in articles_ou_ids:
+        if isinstance(x, dict):
+            aid, genre = x.get("asset_id"), str(x.get("item_type") or "")
+        else:
+            aid, genre = x, ""
+        if not str(aid).lstrip("-").isdigit():
+            continue
+        (bundles if genre.lower() == "bundle" else assets).append(int(aid))
+
+    async def _demander(sess, url, cle, ids):
+        if not ids:
+            return
+        params = {cle: ",".join(str(i) for i in ids[:100]),
+                  "size": "420x420", "format": "Png",
+                  "returnPolicy": "PlaceHolder"}
+        code, data = await _appel_avec_reprise(sess, url, params)
+        if not data:
+            _log(f"[roblox_veille vignettes {cle}] HTTP {code} — "
+                 f"fiches publiées sans image")
+            return
         for x in (data.get("data") or []):
-            url = str(x.get("imageUrl") or "")
-            #  Filtre de domaine : voir l'avertissement ci-dessus.
-            if x.get("state") == "Completed" and url.startswith(DOMAINE_IMAGES):
+            url_img = str(x.get("imageUrl") or "")
+            #  ⚠️ `state` DOIT valoir « Completed ». Un « Error » vient avec
+            #  une URL d'image de remplacement : la garder afficherait un
+            #  visuel qui n'est pas l'article.
+            if x.get("state") == "Completed" and url_img.startswith(DOMAINE_IMAGES):
                 try:
-                    out[int(x.get("targetId"))] = url
+                    out[int(x.get("targetId"))] = url_img
                 except (TypeError, ValueError):
                     continue
+
+    try:
+        async with _ouvrir() as sess:
+            await _demander(sess, API_VIGNETTE, "assetIds", assets)
+            if assets and bundles:
+                await asyncio.sleep(PAUSE_ENTRE_APPELS)
+            await _demander(sess, API_VIGNETTE_BUNDLE, "bundleIds", bundles)
     except Exception as ex:
         _log(f"[roblox_veille vignettes] {type(ex).__name__}: {ex}")
     return out
