@@ -369,12 +369,20 @@ class RobloxPanelV2(LayoutView):
                             custom_id="rblx_test")
             b_test.callback = self._cb_relever
 
+            #  Efface la mémoire des publications. Rouge : il peut faire
+            #  ressortir des articles déjà vus — c'est justement à ça qu'il sert,
+            #  mais on ne le déclenche pas par mégarde.
+            b_reset = Button(label="Tout republier", emoji="♻️",
+                             style=discord.ButtonStyle.danger,
+                             custom_id="rblx_reset")
+            b_reset.callback = self._cb_oublier
+
             b_back = Button(label="Retour", emoji="◀️",
                             style=discord.ButtonStyle.secondary,
                             custom_id="rblx_back")
             b_back.callback = self._cb_retour
 
-            items.append(discord.ui.ActionRow(b_on, b_test, b_back))
+            items.append(discord.ui.ActionRow(b_on, b_test, b_reset, b_back))
 
             self.clear_items()
             self.add_item(v2_container(*items, color=Palette.INFO))
@@ -493,6 +501,25 @@ class RobloxPanelV2(LayoutView):
                 await self.render_to(i, edit=True)
             except Exception:
                 pass
+
+    async def _cb_oublier(self, i):
+        """Efface la mémoire des publications de cette guilde.
+
+        Nécessaire parce qu'un correctif de code ne répare pas des données déjà
+        écrites : la première amorce avait marqué tout le catalogue comme sorti,
+        et ces marques survivaient au correctif.
+        """
+        try:
+            await i.response.defer()
+            n = await veille.oublier_publies(self.g.id)
+            self._dernier = (
+                f"♻️ `{n}` marque(s) effacée(s). Les articles déjà connus "
+                f"peuvent de nouveau sortir.\n"
+                f"-# Cliquez « Relever maintenant » — ils sortiront par paquets "
+                f"de `{veille.MAX_PUBLICATIONS_PAR_PASSAGE}`, jamais d'un bloc.")
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            _log(f"[roblox oublier] {ex}")
 
     async def _cb_retour(self, i):
         if _retour_configure is not None:

@@ -575,3 +575,86 @@ des boutons dont la classe n'était plus enregistrée au boot, `weekly_security_
 `outils/verif_evenements.py` couvre désormais les événements. **Reste à écrire l'équivalent
 pour les `@tasks.loop` sans `.start()` et pour les `DynamicItem` non réenregistrés** — ce
 sont les deux mêmes trous, et ils ont chacun coûté une découverte tardive.
+
+---
+
+## 15. CE QUI RESTE, COMMANDÉ LE 15/08 — SPÉCIFIÉ, PAS ENCORE FAIT
+
+Quatre chantiers demandés. **Le premier est livré**, les trois autres sont
+spécifiés ici mot pour mot pour qu'ils ne se perdent pas.
+
+### ✅ 1. Effacer les marques de publication Roblox — FAIT
+
+Bouton rouge **♻️ Tout republier** dans `/configure` → 🎮 Veille Roblox.
+
+⚠️ **Pourquoi il a fallu ce bouton** : la première amorce marquait TOUT le
+catalogue comme déjà publié à l'allumage. Le correctif a rendu l'amorce
+raisonnable, mais **un correctif de code ne répare pas des données déjà
+écrites**. Sur le serveur du propriétaire, 15 articles de moins de 30 jours
+restaient invisibles pour toujours. Mesuré, pas supposé.
+
+### ⛔ 2. Remettre l'onglet « Réseaux sociaux » dans /configure
+
+**Le système FONCTIONNE déjà** — le log de démarrage le prouve :
+
+```
+[social] YouTube : RSS auto ✅ (vidéos + lives, sans clé)
+         Twitter/X · TikTok · Instagram : via RSSHub ✅
+         RSSHUB_BASE_URL = https://rsshub-production-7128.up.railway.app
+```
+
+Ce n'est donc **pas** à reconstruire : seul l'**onglet** a été retiré pendant la
+purge. Les commandes `/social add|list|remove|toggle|poll_now` existent toujours
+(vérifié dans les 55 commandes enregistrées).
+
+À faire : une entrée dans `_CONFIG_SECTIONS` + la résolution dans
+`_module_select`, sur le modèle de l'entrée `roblox`. Chercher un panneau social
+existant avant d'en écrire un.
+
+### ⛔ 3. Purger cadeaux, boss et salons d'événements
+
+> « Les gens peuvent gagner des cadeaux, y a des salons qui apparaissent avec des
+> événements comme gagner des cadeaux, combattre des boss. Je veux que tu
+> m'assures que tu m'enlèves bien tout ça. On s'en fout, t'enlèves absolument
+> tout. »
+
+Pistes relevées en chemin : `auction_settler_task` (déjà retirée),
+`_is_sweepable_event_channel`, les salons `🆘`, restes de quêtes et de boss.
+⚠️ Passer par `outils/purge_modules.py` et `outils/detacher_module.py`, qui
+connaissent le piège des imports durs et la liste `PROTEGES`.
+
+### ⛔ 4. Remettre `/rellseas`, configurable
+
+> « Je veux que tu me la remettes. Et que moi, dans le slash configure, je peux
+> configurer cette commande pour savoir qui va l'utiliser. Celui qui utilisera
+> cette commande pourra donner un rôle ou retirer un rôle, ou vérifier
+> l'activité de la personne. Le même système d'activité dans le serveur, sauf
+> que ce sera sur une semaine au propre. »
+
+**Ce qui SUBSISTE et ne doit pas être réécrit :**
+
+| Élément | État |
+|---|---|
+| `realsy_tracking` (table) | intacte, les données sont là |
+| `update_realsy_activity` | appelée à chaque message |
+| `RellseasQuizAnswerView` / `RellseasExamineResponseView` | existent, rechargées au boot |
+| `rellseas_quizzes` (table) | intacte |
+| La commande `/rellseas` | **absente** — purgée avant le 12/08 |
+| `check_realsy_inactivity` | **retirée le 12/08** (doublon + son MP mentait) |
+
+**Ce qu'il faut écrire :**
+
+1. Une commande `/rellseas` avec trois actions : **donner** un rôle, **retirer**
+   un rôle, **vérifier** l'activité d'un membre.
+2. Un réglage dans `/configure` : **quels rôles ont le droit de l'utiliser**.
+   ⚠️ Contrôler la permission dans la commande elle-même, pas seulement à
+   l'affichage — un panneau n'est pas une garde.
+3. La vérification d'activité **réutilise `activite.presence()`**, avec une
+   fenêtre d'**une semaine**. Ne PAS réécrire un second compteur : le système
+   d'activité gère déjà des seuils propres à chaque rôle (`CLES_ROLE`), c'est
+   exactement le cas d'usage prévu le 11/08 pour les clans.
+
+⚠️ **Ne pas rebrancher l'ancienne escalade Realsy.** Elle faisait doublon avec
+le système d'activité et son message privé annonçait un retrait de rôle que le
+bot ne faisait jamais. Le nouveau système couvre le besoin, avec le réglage
+« retour validé par le staff » fait pour les rôles qui ont de la valeur.

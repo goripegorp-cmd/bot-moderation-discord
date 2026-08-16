@@ -771,6 +771,39 @@ async def amorcer(guild_id: int) -> int:
     return absorbes
 
 
+async def oublier_publies(guild_id: int) -> int:
+    """Efface les marques « déjà publié » d'une guilde. Rend le nombre effacé.
+
+    ⚠️ POURQUOI CE BOUTON EXISTE. La première amorce marquait TOUT le catalogue
+    comme déjà sorti à l'allumage. Le correctif a rendu l'amorce raisonnable —
+    mais les marques posées AVANT sont toujours en base. Le système est propre,
+    la base ne l'est pas : sur le serveur du propriétaire, 15 articles de moins
+    de 30 jours restaient invisibles pour toujours.
+
+    Un correctif de code ne répare pas des données déjà écrites. Il fallait donc
+    un geste explicite, et il est réservé au propriétaire : effacer ces marques
+    peut faire ressortir des articles déjà vus, ce qui est exactement ce qu'on
+    veut ici mais qu'on ne doit jamais déclencher par accident.
+
+    Le plafond de publications par passage limite la casse dans tous les cas :
+    au pire, ça ressort par paquets de 12 toutes les 30 minutes.
+    """
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM roblox_publies WHERE guild_id=?",
+                (guild_id,)) as cur:
+                row = await cur.fetchone()
+            n = int(row[0] or 0) if row else 0
+            await db.execute("DELETE FROM roblox_publies WHERE guild_id=?",
+                             (guild_id,))
+            await db.commit()
+        return n
+    except Exception as ex:
+        _log(f"[roblox_veille oublier_publies] {ex}")
+        return 0
+
+
 async def purger(garder: int = MAX_ARTICLES_SUIVIS) -> int:
     """Borne la table : on ne garde pas l'historique complet du catalogue."""
     try:
