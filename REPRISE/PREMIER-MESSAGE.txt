@@ -1,0 +1,29 @@
+─────────────────────────────────────────────────────────────────────────────
+ À COLLER TEL QUEL DANS UNE NOUVELLE CONVERSATION CLAUDE CODE
+─────────────────────────────────────────────────────────────────────────────
+
+Lis REPRISE/_LIRE-EN-PREMIER.md à la racine de
+C:\Users\GoRipe\Desktop\bot-moderation-discord, en entier, avant tout autre
+fichier. Puis HANDOFF.md sections 14 et 15, puis ROBLOX.md et UI.md.
+
+On reste sur CE projet uniquement — le bot Discord. Si je me mets à parler de
+Roblox Studio (OPSIDRAX) ou du site MTO, dis-le-moi et coupe : c'est que je me
+suis trompé de fenêtre.
+
+Installe d'abord de quoi vérifier en local :
+  pip install "discord.py>=2.7,<3" aiosqlite aiohttp python-dotenv matplotlib pytest pytest-asyncio
+
+Puis attaque la section 15 du HANDOFF, dans cet ordre :
+  1. l'onglet « Réseaux sociaux » dans /configure  (le système tourne déjà,
+     seul le panneau manque — il est à ÉCRIRE, pas à rebrancher)
+  2. la purge des cadeaux, boss et salons d'événements
+  3. la commande /rellseas, avec son réglage de permission dans /configure
+
+Règle non négociable, elle a coûté sept découvertes tardives en une session :
+ne me dis jamais qu'une chose est faite sans avoir suivi la chaîne jusqu'à un
+effet RÉEL — un envoi Discord, une écriture en base, une réponse HTTP 200.
+Une fonction non appelée, une boucle sans .start(), une vue non réenregistrée
+au démarrage : ce n'est PAS opérationnel, même si le code est parfait.
+
+Pousse sur main, CI verte obligatoire, et `gh auth switch --user goripegorp-cmd`
+avant tout push.
