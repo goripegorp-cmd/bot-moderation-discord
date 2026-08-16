@@ -10322,6 +10322,7 @@ _CONFIG_SECTIONS = [
     ("logs",        "📋", "Logs & Audit",      "Un salon · toutes les catégories d'événements"),
     ("activite",    "📊", "Activité",          "Présence exigée · rappels · retrait de rôle · expulsion"),
     ("roblox",      "🎮", "Veille Roblox",     "Nouveaux accessoires · passages collectionnables · indices"),
+    ("social",      "📡", "Réseaux sociaux",   "YouTube · Twitch · X · TikTok · Instagram → salon d'annonces"),
     ("rgpd",        "🔒", "Données & RGPD",    "Droit à l'effacement (art. 17) · rétention"),
 ]
 
@@ -10502,6 +10503,11 @@ class MainPanelV2(LayoutView):
             'logs':        lambda: LogsPanelV2(self.u, self.g),
             'activite':    lambda: activite_ui.ActivitePanelV2(self.u, self.g),
             'roblox':      lambda: roblox_ui.RobloxPanelV2(self.u, self.g),
+            #  Le panneau social n'était PAS à écrire : il existait déjà,
+            #  complet et branché sur le vrai manager par `set_social_manager`.
+            #  Il était seulement devenu inatteignable quand `/admin` a été
+            #  retiré — un panneau orphelin, pas un panneau manquant.
+            'social':      lambda: panels2026.SocialMediaPanelV2(self.u, self.g),
             'rgpd':        lambda: RgpdPanelV2(self.u, self.g),
         }
         fabrique = panneaux.get(valeur)
@@ -23399,6 +23405,11 @@ async def _activite_boot():
                         session=None, log=print)
     roblox_ui.setup(db_set=db_set, webhook_send=webhook_send, log=print)
     roblox_ui.set_retour(_retour_vers_configure)
+
+    #  Réseaux sociaux : même injection. Sans elle, le « ◀️ Retour » du panneau
+    #  social ramène vers `AdminMasterPanelV2`, ouvert par `/admin` — commande
+    #  RETIRÉE. Le bouton menait donc à un écran que plus rien n'atteint.
+    panels2026.set_retour(_retour_vers_configure)
     await roblox_module.init_db()
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()

@@ -1,0 +1,18 @@
+[
+  {
+    "sub_id": "53de68f72170",
+    "guild_id": 1234,
+    "platform": "youtube",
+    "handle": "MrBeast",
+    "display_name": "MrBeast",
+    "target_channel_id": 99,
+    "role_to_ping": null,
+    "track_lives": true,
+    "track_videos": true,
+    "track_shorts": false,
+    "track_posts": false,
+    "template": null,
+    "enabled": true,
+    "created_at": "2026-08-16T10:53:35.372161+00:00"
+  }
+]

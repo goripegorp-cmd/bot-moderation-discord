@@ -636,7 +636,73 @@ def set_social_manager(mgr: SocialMediaManager) -> None:
     _global_manager = mgr
 
 
+def manager_injecte() -> bool:
+    """Le manager en place est-il celui du bot, ou une coquille de secours ?
+
+    ⚠️ PIÈGE À NE PAS DÉFAIRE — UN PANNEAU QUI MENT SANS EN AVOIR L'AIR.
+    `_get_or_create_manager()` fabrique, si personne n'a injecté, un manager
+    garni de `ManualAdapter` seulement. Il liste alors des abonnements que rien
+    ne relève : l'écran a l'air normal, et il est faux. Ça n'arrive que si
+    `on_ready_addon` a échoué (bot.py journalise « Erreur init
+    SocialMediaManager »), mais ce jour-là l'écran doit le DIRE.
+    """
+    mgr = _get_or_create_manager()
+    return any(not isinstance(mgr.get_adapter(p), ManualAdapter)
+               for p in Platform if mgr.get_adapter(p) is not None)
+
+
+#  Le « ◀️ Retour » de ces panneaux ramenait vers `AdminMasterPanelV2`, ouvert
+#  par `/admin` — commande RETIRÉE. Le bouton menait donc à un panneau que plus
+#  rien n'atteint. bot.py injecte ici le retour vers `/configure`, exactement
+#  comme il le fait pour l'activité et la veille Roblox.
+_retour_configure = None
+
+
+def set_retour(fn) -> None:
+    global _retour_configure
+    _retour_configure = fn
+
+
+async def _revenir(owner, guild, interaction) -> None:
+    """Retour au panneau parent — `/configure` s'il est injecté."""
+    if _retour_configure is not None:
+        return await _retour_configure(owner, guild, interaction)
+    await AdminMasterPanelV2(owner, guild).render_to(interaction)
+
+
+async def _rendre(vue, interaction: discord.Interaction, edit: bool) -> None:
+    """Affiche une vue — et supporte une interaction DÉJÀ répondue.
+
+    ⚠️ PIÈGE À NE PAS DÉFAIRE — « L'INTERACTION A ÉCHOUÉ », EN PUBLIC.
+    `response.edit_message` et `response.send_message` ne peuvent servir
+    qu'UNE fois par interaction. Deux chemins de ces panneaux envoyaient une
+    confirmation PUIS réaffichaient l'écran sur la même interaction : le second
+    appel levait `InteractionResponded`, et l'écran ne revenait jamais après un
+    ajout ou une suppression d'abonnement. Passé la première réponse, la suite
+    doit passer par `edit_original_response` / `followup`.
+    """
+    if edit:
+        if interaction.response.is_done():
+            await interaction.edit_original_response(
+                content=None, view=vue, embed=None, attachments=[])
+        else:
+            await interaction.response.edit_message(
+                view=vue, embed=None, attachments=[])
+    else:
+        if interaction.response.is_done():
+            await interaction.followup.send(view=vue, ephemeral=True)
+        else:
+            await interaction.response.send_message(view=vue, ephemeral=True)
+
+
 class SocialMediaPanelV2(_OwnerView):
+    """L'onglet « Réseaux sociaux » de `/configure`.
+
+    Ouvert par le propriétaire du serveur depuis le select de sections. Le
+    système lui-même (YouTube RSS, RSSHub pour X/TikTok/Instagram) tourne
+    indépendamment : ce panneau règle QUI est suivi et OÙ ça tombe.
+    """
+
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
         mgr = _get_or_create_manager()
         subs = await mgr.list_subscriptions(self.guild.id)
@@ -657,21 +723,37 @@ class SocialMediaPanelV2(_OwnerView):
             subs_lines.append(f"{on_off} {icon} **{s.display_name}** ({s.handle}) → {chan_str}")
         subs_block = "\n".join(subs_lines) if subs_lines else "_Aucun abonnement configuré_"
 
-        b_add = ui.Button(label=A.ADD_ICON + " Abonnement", style=discord.ButtonStyle.success, custom_id="soc_add")
+        b_add = ui.Button(label="➕ Ajouter un abonnement", style=discord.ButtonStyle.success, custom_id="soc_add")
         b_add.callback = self._cb_add
+        #  `disabled` plutôt qu'absent : sans abonnement, « Gérer » n'a rien à
+        #  gérer, et l'utilisateur doit voir POURQUOI il ne peut pas cliquer.
         b_manage = ui.Button(label="📋 Gérer", style=discord.ButtonStyle.primary, custom_id="soc_manage", disabled=(not subs))
         b_manage.callback = self._cb_manage
         b_back = ui.Button(label=A.BACK_ICON, style=discord.ButtonStyle.secondary, custom_id="soc_back")
         b_back.callback = self._cb_back
 
+        actifs = sum(1 for s in subs if s.enabled)
         items = [
             _title("📡 Réseaux sociaux"),
             _subtitle("Annonce les lives / vidéos / posts dans des salons Discord."),
             _divider(),
             _kv([
                 ("Adapters API actifs", configured_names),
-                ("Abonnements", str(len(subs))),
+                ("Abonnements", f"{len(subs)} · {actifs} actif(s)"),
             ]),
+        ]
+
+        #  Le seul cas où l'écran serait faux : on le dit, en rouge, au lieu de
+        #  laisser croire que la liste ci-dessous est surveillée.
+        if not manager_injecte():
+            items.append(_body(
+                "🔴 **Le relevé n'est pas branché.** Les abonnements listés ici "
+                "ne sont interrogés par personne.\n"
+                "-# `on_ready_addon` a échoué au démarrage — voir « Erreur init "
+                "SocialMediaManager » dans les journaux. Un redémarrage du bot "
+                "rebranche le relevé."))
+
+        items += [
             _divider(),
             _title("Abonnements (10 premiers)", level=3),
             _body(subs_block),
@@ -682,10 +764,7 @@ class SocialMediaPanelV2(_OwnerView):
         ]
         self.add_item(_container(*items, color=Palette.ACCENT))
 
-        if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _rendre(self, interaction, edit)
 
     async def _cb_add(self, i: discord.Interaction):
         await SocialAddPanel(self.owner, self.guild).render_to(i)
@@ -694,7 +773,7 @@ class SocialMediaPanelV2(_OwnerView):
         await SocialManagePanel(self.owner, self.guild).render_to(i)
 
     async def _cb_back(self, i: discord.Interaction):
-        await AdminMasterPanelV2(self.owner, self.guild).render_to(i)
+        await _revenir(self.owner, self.guild, i)
 
 
 class SocialAddPanel(_OwnerView):
@@ -757,11 +836,15 @@ class SocialAddPanel(_OwnerView):
                     target_channel_id=chan.id,
                     display_name=self._display_name or self._handle,
                 )
-                await i.response.send_message(
+                #  ⚠️ L'ÉCRAN D'ABORD, LA CONFIRMATION ENSUITE. L'inverse
+                #  consommait la réponse de l'interaction, et le réaffichage
+                #  levait `InteractionResponded` : l'abonnement était bien créé,
+                #  mais le panneau ne revenait jamais.
+                await SocialMediaPanelV2(self.owner, self.guild).render_to(i)
+                await i.followup.send(
                     Msg.SAVED_DETAIL.format(item=f"abonnement {self.platform.value} {self._handle}"),
                     ephemeral=True,
                 )
-                await SocialMediaPanelV2(self.owner, self.guild).render_to(i, edit=False)
             chan_select.callback = _on_chan
 
             items = [
@@ -778,10 +861,7 @@ class SocialAddPanel(_OwnerView):
             ]
             self.add_item(_container(*items, color=Palette.ACCENT))
 
-        if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _rendre(self, interaction, edit)
 
 
 class _SocialHandleModal(ui.Modal, title="Compte à tracker"):
@@ -846,10 +926,7 @@ class SocialManagePanel(_OwnerView):
         items.append(ui.ActionRow(b_back))
         self.add_item(_container(*items, color=Palette.ACCENT))
 
-        if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _rendre(self, interaction, edit)
 
 
 class SocialEditPanel(_OwnerView):
@@ -881,8 +958,9 @@ class SocialEditPanel(_OwnerView):
         async def _del(i: discord.Interaction):
             mgr = _get_or_create_manager()
             await mgr.remove_subscription(self.guild.id, self.sub.sub_id)
-            await i.response.send_message(Msg.DELETED.format(item="abonnement"), ephemeral=True)
-            await SocialMediaPanelV2(self.owner, self.guild).render_to(i, edit=False)
+            #  Même ordre que pour l'ajout, et pour la même raison.
+            await SocialMediaPanelV2(self.owner, self.guild).render_to(i)
+            await i.followup.send(Msg.DELETED.format(item="abonnement"), ephemeral=True)
         b_del.callback = _del
 
         b_back = ui.Button(label=A.BACK_ICON, style=discord.ButtonStyle.secondary, custom_id="socedit_back")
@@ -911,10 +989,7 @@ class SocialEditPanel(_OwnerView):
         ]
         self.add_item(_container(*items, color=Palette.ACCENT))
 
-        if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
+        await _rendre(self, interaction, edit)
 
 
 # =============================================================================
