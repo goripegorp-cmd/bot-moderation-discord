@@ -69,8 +69,17 @@ SOURCES = [
      "minutes": 120},
     #  ── Sources OFFICIELLES hors forum — ajoutées le 16/08/2026, chacune
     #     ouverte et lue ce jour-là (HTTP 200, extrait réel à l'appui).
-    {"cle": "presse", "domaine": "Communiqués officiels", "format": "rss",
-     "url": f"{DOMAINE_PRESSE}/rss/pressrelease.aspx", "minutes": 120},
+    #
+    #  ⚠️ « presse » (ir.roblox.com/rss/pressrelease.aspx) A ÉTÉ RETIRÉE le
+    #  18/08 : le site est derrière Cloudflare, qui bloque les IP d'hébergeur.
+    #  Mesuré : HTTP 200 depuis un poste résidentiel quel que soit le
+    #  User-Agent, HTTP 403 ×3 depuis Railway (capture du propriétaire). Une
+    #  source structurellement injoignable en production n'est pas une source :
+    #  elle est un voyant rouge permanent qui finit par masquer les vraies
+    #  pannes. Le lecteur RSS reste dans ce module (`_relever_rss`,
+    #  `lien_presse`, testé) pour le jour où l'IP passerait, ou pour un autre
+    #  flux RSS officiel. Les annonces produit sont couvertes par le newsroom ;
+    #  les résultats financiers sont hors du périmètre créateurs.
     #  ⚠️ LA SOURCE FRANÇAISE OFFICIELLE — AVANT la version anglaise, exprès :
     #  même clé de dédup, donc la première servie gagne, et c'est le français. « Salle de presse | Roblox » — même
     #  contenu que le newsroom, traduit par Roblox. On ne traduit rien : on

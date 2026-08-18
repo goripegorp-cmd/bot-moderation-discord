@@ -198,7 +198,7 @@ async def main() -> int:
     note("une nouveauté n'empêche pas une bascule plus tard",
          await veille.publiable_dans(1, 4243, "bascules"))
 
-    # ── 8 bis. Les ACTUALITÉS — les 8 sources, forcées ────────────────────
+    # ── 8 bis. Les ACTUALITÉS — toutes les sources, forcées ───────────────
     print("\n═══ 8 bis. ACTUALITÉS — 8 sources officielles ═══")
     total_frais, en_panne, fr_titres = 0, [], 0
     for src in news.SOURCES:
@@ -212,7 +212,7 @@ async def main() -> int:
         print(f"      {src['cle']:<12} {src['format']:<9} HTTP {rel['code']}  "
               f"{len(rel['billets']):>2} frais")
         await asyncio.sleep(2)
-    note("les 8 sources répondent", not en_panne,
+    note(f"les {len(news.SOURCES)} sources répondent", not en_panne,
          "toutes en HTTP 200" if not en_panne else "en panne : " + ", ".join(en_panne))
     note("il y a des actualités fraîches à publier", total_frais > 0,
          f"{total_frais} billet(s) de moins de {news.FRAICHEUR_MAX_JOURS} jours")

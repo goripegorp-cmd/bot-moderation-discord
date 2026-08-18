@@ -12844,6 +12844,25 @@ async def veille_roblox_task():
             print(f"[veille_roblox_task] passage sans travail — aucun des "
                   f"{len(bot.guilds)} serveur(s) n'a allumé accessoires ni "
                   f"actualités (interrupteur + salon requis)")
+            #  ⚠️ DIRE QUOI, PAR SERVEUR. « Aucun n'a allumé » a fait deviner
+            #  le propriétaire le 18/08 : interrupteur éteint, ou salon
+            #  manquant ? Une ligne par serveur tranche sans ouvrir /configure.
+            for g in list(bot.guilds)[:10]:
+                try:
+                    _ca = await roblox_module.config(g.id)
+                    _cn = await roblox_news_module.config(g.id)
+                    _acc = ("OK" if _ca.get("roblox_veille_enabled")
+                            and roblox_module.salon_du_flux(_ca, "nouveautes")
+                            else ("éteint" if not _ca.get("roblox_veille_enabled")
+                                  else "allumé mais AUCUN salon"))
+                    _act = ("OK" if _cn.get("roblox_news_enabled")
+                            and int(_cn.get("roblox_news_salon") or 0)
+                            else ("éteintes" if not _cn.get("roblox_news_enabled")
+                                  else "allumées mais AUCUN salon"))
+                    print(f"[veille_roblox_task]   {g.name} ({g.id}) : "
+                          f"accessoires={_acc} · actualités={_act}")
+                except Exception as _dex:
+                    print(f"[veille_roblox_task]   {getattr(g, 'id', '?')} : {_dex}")
             return
         _publies = 0
 

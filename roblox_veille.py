@@ -161,7 +161,11 @@ MAX_PAGES_PAR_RELEVE = 12
 #  répond HTTP 429 — mesuré le 16/08, le second relevé s'arrêtait à la page 7.
 #  15 secondes laissent la fenêtre de débit se vider. La boucle tourne toutes
 #  les 30 minutes : ce délai ne coûte rien, et il évite un relevé tronqué.
-PAUSE_ENTRE_RELEVES = 15.0
+#  ⚠️ 30 s depuis le 18/08 (était 15). La sortie Railway est une IP PARTAGÉE
+#  entre applications : le budget de débit n'est pas le nôtre seul. Capture du
+#  propriétaire : 429 sur le flux Limited juste après les 9 pages du catalogue,
+#  malgré les 15 s. La boucle passe toutes les 30 min — 30 s ne coûtent rien.
+PAUSE_ENTRE_RELEVES = 30.0
 
 #  ⚠️ LE PIÈGE LE PLUS COÛTEUX DE CE MODULE, TROUVÉ LE 16/08 EN VÉRIFIANT.
 #  Les deux relevés paginés consomment ~18 requêtes. Les appels QUI SUIVENT —
@@ -726,22 +730,23 @@ async def _relever_catalogue(params: dict, source: str,
                 p = dict(params)
                 if curseur:
                     p["Cursor"] = curseur
-                async with sess.get(API_CATALOGUE, params=p) as r:
-                    out["code"] = r.status
-                    if r.status != 200:
-                        #  On garde le corps : un 403 du pare-feu et un 429 de
-                        #  débit ne se corrigent pas de la même façon, et sans
-                        #  cette trace on ne saurait pas lequel on a.
-                        _log(f"[roblox_veille {source}] HTTP {r.status} à la "
-                             f"page {page + 1} — {(await r.text())[:200]}")
-                        #  ⚠️ UN 429 N'EST PAS UNE PANNE : c'est notre propre
-                        #  débit. On garde les pages déjà obtenues et on
-                        #  reprendra au prochain passage. Les jeter ferait
-                        #  perdre un relevé presque complet pour rien.
-                        if r.status == 429 and out["articles"]:
-                            out["code"] = 200
-                        break
-                    data = await r.json()
+                #  ⚠️ REPRISE SUR 429, ICI AUSSI. La sortie Railway est une IP
+                #  PARTAGÉE : d'autres applications tapent les mêmes API, le
+                #  budget est moins prévisible que depuis un poste. Capture du
+                #  propriétaire (18/08) : « collectionnables · 429 · 1 échec »
+                #  dès la première page. Une seule reprise, après attente —
+                #  comme pour les fiches (`_appel_avec_reprise`).
+                code, data = await _appel_avec_reprise(sess, API_CATALOGUE, p)
+                out["code"] = code
+                if code != 200 or data is None:
+                    _log(f"[roblox_veille {source}] HTTP {code} à la page {page + 1}")
+                    #  ⚠️ UN 429 N'EST PAS UNE PANNE : c'est notre propre
+                    #  débit. On garde les pages déjà obtenues et on
+                    #  reprendra au prochain passage. Les jeter ferait
+                    #  perdre un relevé presque complet pour rien.
+                    if code == 429 and out["articles"]:
+                        out["code"] = 200
+                    break
 
                 lot = _normaliser(data.get("data") or [])
                 if not lot:
