@@ -12835,7 +12835,15 @@ async def veille_roblox_task():
             except Exception:
                 continue
         if not guildes_items and not guildes_news:
+            #  ⚠️ LE DIRE. Cette boucle était muette : elle sortait sans un mot,
+            #  et depuis les logs Railway rien ne distinguait « personne n'a
+            #  allumé » de « la boucle est morte ». Une ligne toutes les 30 min
+            #  ne coûte rien et répond à la question avant qu'on la pose.
+            print(f"[veille_roblox_task] passage sans travail — aucun des "
+                  f"{len(bot.guilds)} serveur(s) n'a allumé accessoires ni "
+                  f"actualités (interrupteur + salon requis)")
             return
+        _publies = 0
 
         # ── Les articles ────────────────────────────────────────────────────
         if guildes_items:
@@ -12936,6 +12944,7 @@ async def veille_roblox_task():
                                                       image=_imgs.get(a["asset_id"])):
                                 await roblox_module.marquer_publie(g.id, a["asset_id"], flux)
                                 _budget -= 1
+                                _publies += 1
                             await asyncio.sleep(roblox_module.PAUSE_ENTRE_PUBLICATIONS)
             await roblox_module.purger()
 
@@ -12965,11 +12974,18 @@ async def veille_roblox_task():
                         if await roblox_ui.publier_actu(g, salon, b):
                             await roblox_news_module.marquer_publie(g.id, b["topic_id"])
                             _budget -= 1
+                            _publies += 1
                         await asyncio.sleep(roblox_module.PAUSE_ENTRE_PUBLICATIONS)
                 #  Pause ENTRE LES SOURCES : c'est elle qui evite le pare-feu.
                 await asyncio.sleep(2)
             await roblox_news_module.purger()
 
+        #  Le bilan, TOUJOURS — pas seulement quand quelque chose déborde.
+        #  C'est cette ligne qu'on cherche dans Railway quand « rien ne sort ».
+        print(f"[veille_roblox_task] passage terminé — accessoires sur "
+              f"{len(guildes_items)} serveur(s), actualités sur "
+              f"{len(guildes_news)} · {_publies} publication(s) réelle(s) · "
+              f"{_reporte} reportée(s)")
         if _reporte:
             print(f"[veille_roblox_task] plafond atteint — {_reporte} publication(s) "
                   f"reportee(s) au prochain passage (dans 30 min). Rien n'est perdu.")

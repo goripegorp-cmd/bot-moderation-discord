@@ -391,6 +391,19 @@ class RobloxPanelV2(LayoutView):
             c.update(await news.config(self.g.id))
             diag = await veille.diagnostic()
             en_marche = await veille.actif(self.g.id)
+            #  ⚠️ La santé des ACTUALITÉS était calculée (`news.diagnostic`)
+            #  mais affichée NULLE PART. Une source muette ressemble à une
+            #  source calme — c'est le défaut n°4 de ROBLOX.md, et il était là.
+            try:
+                diag_news = await news.diagnostic()
+            except Exception as ex:
+                _log(f"[RobloxPanelV2 diag news] {ex}")
+                diag_news = []
+            try:
+                news_en_marche = await news.actif(self.g.id)
+            except Exception as ex:
+                _log(f"[RobloxPanelV2 news.actif] {ex}")
+                news_en_marche = False
 
             lignes = []
             for cle, nom, aide in self.CHAMPS:
@@ -414,21 +427,45 @@ class RobloxPanelV2(LayoutView):
             else:
                 sante_txt = "⚪ aucun relevé effectué pour l'instant"
 
+            if diag_news:
+                sante_news = []
+                for s_ in diag_news:
+                    icone = "🟢" if s_["echecs"] == 0 else "🔴"
+                    sante_news.append(f"{icone} `{s_['cle']}` · code "
+                                      f"`{_ou_tiret(s_['code'])}`"
+                                      + (f" · {s_['echecs']} échec(s) d'affilée"
+                                         if s_["echecs"] else ""))
+                sante_news_txt = "\n".join(sante_news)
+            else:
+                sante_news_txt = "⚪ aucun relevé d'actualité pour l'instant"
+
             items = [
                 v2_title("🎮 Veille Roblox"),
                 v2_subtitle("Nouveaux accessoires de Roblox · passages en "
                             "collectionnable · indices"),
                 v2_divider(),
                 v2_body(
-                    f"{'🟢' if c['roblox_veille_enabled'] else '⚪'} **Système** · "
-                    + ("allumé" if c["roblox_veille_enabled"] else "éteint")
+                    f"{'🟢' if c['roblox_veille_enabled'] else '⚪'} **Accessoires** · "
+                    + ("allumés" if c["roblox_veille_enabled"] else "éteints")
                     + ("" if en_marche or not c["roblox_veille_enabled"]
-                       else "  ⚠️ _aucun salon défini, rien ne sortira_")),
+                       else "  ⚠️ _aucun salon défini, rien ne sortira_")
+                    + "\n"
+                    #  ⚠️ CET INTERRUPTEUR N'EXISTAIT PAS. `roblox_news_enabled`
+                    #  n'était écrit nulle part — ni bouton, ni commande — donc
+                    #  `actif()` rendait toujours faux et le bloc actualité de
+                    #  la boucle ne s'exécutait JAMAIS. Le salon se réglait, la
+                    #  santé se calculait, et rien ne sortait. Constaté par le
+                    #  propriétaire le 16/08 : « 0 fond sur les actus ».
+                    + f"{'🟢' if c.get('roblox_news_enabled') else '⚪'} **Actualités** · "
+                    + ("allumées" if c.get("roblox_news_enabled") else "éteintes")
+                    + ("" if news_en_marche or not c.get("roblox_news_enabled")
+                       else "  ⚠️ _aucun salon d'actualité défini, rien ne sortira_")),
                 v2_divider(),
                 v2_body("\n\n".join(lignes)),
                 v2_divider(),
-                v2_body(f"**État des relevés**\n{sante_txt}\n"
+                v2_body(f"**État des relevés — accessoires**\n{sante_txt}\n"
                         f"-# `{diag['articles_connus']}` article(s) connu(s)"),
+                v2_body(f"**État des relevés — actualités**\n{sante_news_txt}"),
             ]
 
             if self._dernier:
@@ -459,6 +496,14 @@ class RobloxPanelV2(LayoutView):
                 custom_id="rblx_toggle")
             b_on.callback = self._cb_toggle
 
+            b_news = Button(
+                label="Actus allumées" if c.get("roblox_news_enabled") else "Actus éteintes",
+                emoji="🟢" if c.get("roblox_news_enabled") else "⚪",
+                style=(discord.ButtonStyle.success if c.get("roblox_news_enabled")
+                       else discord.ButtonStyle.secondary),
+                custom_id="rblx_toggle_news")
+            b_news.callback = self._cb_toggle_news
+
             b_test = Button(label="Relever maintenant", emoji="🔄",
                             style=discord.ButtonStyle.primary,
                             custom_id="rblx_test")
@@ -477,7 +522,10 @@ class RobloxPanelV2(LayoutView):
                             custom_id="rblx_back")
             b_back.callback = self._cb_retour
 
-            items.append(discord.ui.ActionRow(b_on, b_test, b_reset, b_back))
+            #  Deux rangées : Discord refuse plus de 5 boutons par ligne, et
+            #  regrouper les deux interrupteurs ensemble se lit mieux.
+            items.append(discord.ui.ActionRow(b_on, b_news))
+            items.append(discord.ui.ActionRow(b_test, b_reset, b_back))
 
             self.clear_items()
             self.add_item(v2_container(*items, color=Palette.INFO))
@@ -535,6 +583,32 @@ class RobloxPanelV2(LayoutView):
             await self.render_to(i, edit=True)
         except Exception as ex:
             _log(f"[roblox toggle] {ex}")
+
+    async def _cb_toggle_news(self, i):
+        """Allume ou éteint les ACTUALITÉS. Amorce raisonnable au premier
+        allumage : la semaine écoulée sort, le reste est absorbé.
+
+        Voir `news.amorcer` — la première version de l'amorce absorbait TOUT et
+        le propriétaire devait attendre le prochain billet du forum.
+        """
+        try:
+            await i.response.defer()
+            c = await news.config(self.g.id)
+            allume = not c.get("roblox_news_enabled")
+            await _db_set(self.g.id, "roblox_news_enabled", allume)
+            if allume and not c.get("roblox_news_amorcee"):
+                n = await news.amorcer(self.g.id)
+                self._dernier = (
+                    f"✅ Actualités allumées. `{n}` billet(s) de plus de "
+                    f"`{news.AMORCE_GARDE_JOURS}` jours absorbé(s) sans être publiés.\n"
+                    f"-# Ceux de la semaine écoulée sortiront au prochain "
+                    f"relevé — cliquez « Relever maintenant » pour ne pas attendre.")
+            else:
+                self._dernier = ("✅ Actualités allumées." if allume
+                                 else "⚪ Actualités éteintes.")
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            _log(f"[roblox toggle news] {ex}")
 
     async def _cb_relever(self, i):
         """Un relevé immédiat, pour vérifier que la chaîne fonctionne.
@@ -663,8 +737,16 @@ class RobloxPanelV2(LayoutView):
                     else:
                         motifs["envoi"] += 1
             await veille.purger()
-            self._dernier = self._compte_rendu(len(rel["articles"]), envoyes,
-                                               motifs, salons_absents)
+            compte_rendu = self._compte_rendu(len(rel["articles"]), envoyes,
+                                              motifs, salons_absents)
+
+            #  ── LES ACTUALITÉS, dans le même geste ───────────────────────
+            #  ⚠️ Sans ce bloc, le bouton ne prouvait RIEN sur ce flux : il
+            #  relevait le catalogue et les Limiteds, jamais le forum. Le
+            #  propriétaire lisait « relevé réussi » et les actualités
+            #  restaient muettes, sans qu'une ligne ne le dise.
+            compte_rendu += "\n" + await self._relever_actualites()
+            self._dernier = compte_rendu
             await self.render_to(i, edit=True)
         except Exception as ex:
             _log(f"[roblox relever] {ex}")
@@ -673,6 +755,70 @@ class RobloxPanelV2(LayoutView):
                 await self.render_to(i, edit=True)
             except Exception:
                 pass
+
+    async def _relever_actualites(self) -> str:
+        """Relève les 5 sources d'actualité et publie ce qui doit sortir.
+
+        Rend un compte-rendu qui NOMME la cause quand rien ne sort. Une source
+        à la fois, avec pause — c'est la concurrence que le pare-feu punit.
+        """
+        try:
+            c = await news.config(self.g.id)
+            if not c.get("roblox_news_enabled"):
+                return ("📢 Actualités — ⚪ **éteintes**, rien n'a été relevé. "
+                        "Allumez-les avec le bouton « Actus ».")
+            salon = self.g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
+            if salon is None:
+                return ("📢 Actualités — 🔴 **aucun salon réglé**, rien ne peut "
+                        "sortir. Réglez « 📢 Actualité Roblox » ci-dessus.")
+
+            lus, envoyes, deja, refuses, en_panne = 0, 0, 0, 0, []
+            for src in news.SOURCES:
+                rel = await news.relever(src)
+                if rel["code"] != 200:
+                    en_panne.append(f"`{src['cle']}` ({_ou_tiret(rel['code'])})")
+                    await asyncio.sleep(1.5)
+                    continue
+                lus += len(rel["billets"])
+                #  Même ordre que la boucle : du plus ancien au plus récent,
+                #  et le même plafond par source.
+                for b in veille.ordonner_publication(
+                        rel["billets"], news.MAX_BILLETS_PAR_PASSAGE):
+                    if envoyes >= veille.MAX_PUBLICATIONS_PAR_PASSAGE:
+                        break
+                    if await news.deja_publie(self.g.id, b["topic_id"]):
+                        deja += 1
+                        continue
+                    if await publier_actu(self.g, salon, b):
+                        await news.marquer_publie(self.g.id, b["topic_id"])
+                        envoyes += 1
+                    else:
+                        refuses += 1
+                await asyncio.sleep(1.5)
+            await news.purger()
+
+            detail = []
+            if en_panne:
+                detail.append(f"source(s) en panne : {', '.join(en_panne)}")
+            if refuses:
+                detail.append(f"`{refuses}` **refusée(s) par Discord** — permissions "
+                              f"du salon (voir les journaux)")
+            if deja:
+                detail.append(f"`{deja}` déjà publiée(s) — « ♻️ Tout republier » "
+                              f"les libère")
+            panne = bool(en_panne or refuses)
+            icone = "🔴" if panne else ("🟢" if envoyes else "⚪")
+            txt = (f"📢 Actualités — {icone} `{lus}` billet(s) frais lus, "
+                   f"`{envoyes}` **réellement publié(s)**.")
+            if detail:
+                txt += "\n" + "\n".join(f"-# • {d}." for d in detail)
+            elif not envoyes:
+                txt += ("\n-# • Rien de neuf depuis le dernier passage : "
+                        "c'est normal, le forum publie environ un billet par jour.")
+            return txt
+        except Exception as ex:
+            _log(f"[roblox relever actualites] {ex}")
+            return f"📢 Actualités — ❌ erreur : `{type(ex).__name__}`"
 
     @staticmethod
     def _compte_rendu(lus: int, envoyes: int, motifs: dict,
@@ -727,9 +873,14 @@ class RobloxPanelV2(LayoutView):
         try:
             await i.response.defer()
             n = await veille.oublier_publies(self.g.id)
+            #  Les actualités ont leur propre table de marques : sans cette
+            #  ligne, le bouton disait « tout republier » et n'effaçait que
+            #  la moitié.
+            n_news = await news.oublier_publies(self.g.id)
             self._dernier = (
-                f"♻️ `{n}` marque(s) effacée(s). Les articles déjà connus "
-                f"peuvent de nouveau sortir.\n"
+                f"♻️ `{n}` marque(s) d'article et `{n_news}` marque(s) "
+                f"d'actualité effacée(s). Ce qui est déjà connu peut de nouveau "
+                f"sortir.\n"
                 f"-# Cliquez « Relever maintenant » — ils sortiront par paquets "
                 f"de `{veille.MAX_PUBLICATIONS_PAR_PASSAGE}`, jamais d'un bloc.")
             await self.render_to(i, edit=True)

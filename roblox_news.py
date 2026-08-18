@@ -30,6 +30,7 @@ source porte sa propre échéance ; un passage n'en interroge qu'une poignée.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 #  ⚠️ DOMAINES EN DUR — même règle que roblox_veille : un lien publié par ce bot
@@ -116,7 +117,10 @@ async def config(guild_id: int) -> dict:
 
 async def actif(guild_id: int) -> bool:
     c = await config(guild_id)
-    return bool(c["roblox_news_enabled"] and int(c["roblox_news_salon"] or 0))
+    #  `.get` : une config partielle ne doit jamais faire tomber la garde,
+    #  elle doit rendre « éteint » — fail-closed sur le doute.
+    return bool(c.get("roblox_news_enabled")
+                and int(c.get("roblox_news_salon") or 0))
 
 
 async def init_db():
@@ -289,23 +293,62 @@ async def marquer_publie(guild_id: int, topic_id: int) -> None:
         _log(f"[roblox_news marquer_publie] {ex}")
 
 
-async def amorcer(guild_id: int) -> int:
-    """Pose la borne du premier allumage : on absorbe l'existant SANS publier.
+#  ⚠️ CE QUE L'AMORCE LAISSE PASSER, ET POURQUOI.
+#  La première version absorbait TOUT ce que la fenêtre de 30 jours laissait
+#  entrer : le propriétaire allumait, et devait attendre le PROCHAIN billet du
+#  forum pour voir une seule fiche — c'est exactement le défaut qui avait été
+#  corrigé côté articles le 15/08 (« 30 articles lus, 0 fiche publiée »).
+#  Demande du 16/08 : « je veux les dernières news partout ». La dernière
+#  semaine sort donc au premier passage, bornée par le plafond de publications ;
+#  ce qui est plus vieux est absorbé sans bruit. Sept jours = « les dernières »
+#  sans déverser un mois d'archives — c'est le §« premier allumage » de
+#  ROBLOX.md : une borne, jamais un mur.
+AMORCE_GARDE_JOURS = 7
 
-    Sans ceci, le premier passage déverserait des mois d'archives dans le salon.
+
+async def amorcer(guild_id: int) -> int:
+    """Pose la borne du premier allumage. Rend le nombre de billets ABSORBÉS.
+
+    Absorbe (marque comme déjà sortis) les billets plus vieux que
+    `AMORCE_GARDE_JOURS` ; laisse les autres sortir au premier passage.
+    Sans amorce du tout, le premier passage déverserait un mois d'archives.
     """
     n = 0
     for src in SOURCES:
         rel = await relever(src)
         for b in rel["billets"]:
-            await marquer_publie(guild_id, b["topic_id"])
-            n += 1
+            if _trop_vieux(b.get("cree_le"), AMORCE_GARDE_JOURS):
+                await marquer_publie(guild_id, b["topic_id"])
+                n += 1
+        #  Une source à la fois, jamais de rafale — voir l'en-tête du module.
+        await asyncio.sleep(1.5)
     try:
         await _db_set(guild_id, "roblox_news_amorcee",
                       datetime.now(timezone.utc).isoformat())
     except Exception as ex:
         _log(f"[roblox_news amorcer] {ex}")
     return n
+
+
+async def oublier_publies(guild_id: int) -> int:
+    """Efface les marques « déjà publié » des actualités d'une guilde.
+
+    Le pendant du bouton ♻️ des articles : un correctif de code ne répare pas
+    des données déjà écrites. Rend le nombre de marques effacées.
+    """
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM roblox_news_publies WHERE guild_id=?",
+                (guild_id,)) as cur:
+                n = int((await cur.fetchone())[0])
+            await db.execute(
+                "DELETE FROM roblox_news_publies WHERE guild_id=?", (guild_id,))
+            await db.commit()
+        return n
+    except Exception as ex:
+        _log(f"[roblox_news oublier_publies] {ex}")
+        return 0
 
 
 async def purger() -> None:
