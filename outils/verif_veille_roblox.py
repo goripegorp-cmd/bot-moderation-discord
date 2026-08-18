@@ -226,9 +226,10 @@ async def main() -> int:
     # ── 9. Le maillon qu'on ne peut PAS prouver ici ────────────────────────
     print("\n═══ 9. L'ENVOI DISCORD ═══")
     note("un message atterrit dans un salon", None,
-         "NON VÉRIFIABLE hors du serveur. Le chemin d'appel est éprouvé "
-         "(publier → webhook_send → wh.send) et rend désormais le VRAI "
-         "résultat, mais seul un test en jeu le confirme.")
+         "NON VÉRIFIABLE d'ici — mais OBSERVÉ le 18/08/2026 : le propriétaire "
+         "a envoyé une capture du salon avec les fiches « Salle de presse (FR) » "
+         "et « Newsroom Roblox » publiées par le bot. Le maillon que le HANDOFF "
+         "déclarait jamais vu l'a été. Ce script ne peut que le rappeler.")
 
     # ── Verdict ────────────────────────────────────────────────────────────
     print(f"\n{'═' * 68}")

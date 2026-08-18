@@ -33,6 +33,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import roblox_news_contenu as contenu
+
 #  ⚠️ DOMAINES EN DUR — même règle que roblox_veille : un lien publié par ce bot
 #  est RECONSTRUIT, jamais recopié d'une réponse. Voir ROBLOX.md §1.
 DOMAINE_FORUM = "https://devforum.roblox.com"
@@ -90,6 +92,18 @@ MAX_ARTICLES_NEWSROOM_PAR_RELEVE = 6
 #  qu'une fois par vie du processus. Borné pour ne pas grossir sans fin.
 _cache_newsroom: dict[str, dict] = {}
 MAX_CACHE_NEWSROOM = 400
+
+#  Cache des CORPS de billets du forum : {topic_id: billet enrichi}. Même
+#  logique — une page `/t/{id}.json` par billet, une fois, puis traduction une
+#  fois. Sans ce cache, chaque passage retraduirait les mêmes billets.
+_cache_forum: dict[int, dict] = {}
+MAX_CACHE_FORUM = 400
+
+
+def _memoriser(cache: dict, cle, valeur, maximum: int) -> None:
+    if len(cache) >= maximum:
+        cache.pop(next(iter(cache)))
+    cache[cle] = valeur
 
 MAX_BILLETS_PAR_PASSAGE = 5
 MAX_PUBLIES_GARDES = 4000
@@ -281,11 +295,49 @@ async def _relever_discourse(source: dict, out: dict) -> None:
     async with _ouvrir() as sess:
         async with sess.get(source["url"]) as r:
             out["code"] = r.status
-            if r.status == 200:
-                data = await r.json()
-                out["billets"] = _normaliser(data, source["domaine"])
-            else:
+            if r.status != 200:
                 _log(f"[roblox_news {source['cle']}] HTTP {r.status}")
+                return
+            data = await r.json()
+            frais = _normaliser(data, source["domaine"])
+
+        #  ⚠️ LE CORPS, BILLET PAR BILLET — c'est ce qui rend la fiche complète.
+        #  `/t/{id}.json` porte le premier post en HTML (`cooked`) : texte,
+        #  images pleine taille, vidéos. On ne lit que les plus récents, dans
+        #  la limite du plafond par passage, avec cache et pause. Un billet
+        #  dont le corps n'est pas encore lu ATTEND le passage suivant : mieux
+        #  vaut une fiche complète dans 30 min qu'une fiche vide maintenant.
+        billets, pointeurs, lus = [], 0, 0
+        for b in frais:
+            enrichi = _cache_forum.get(b["topic_id"])
+            if enrichi is None:
+                if lus >= MAX_BILLETS_PAR_PASSAGE:
+                    break
+                lus += 1
+                try:
+                    async with sess.get(
+                            f"{DOMAINE_FORUM}/t/{int(b['topic_id'])}.json") as rt:
+                        if rt.status != 200:
+                            _log(f"[roblox_news {source['cle']} corps "
+                                 f"{b['topic_id']}] HTTP {rt.status}")
+                            continue
+                        tj = await rt.json()
+                    posts = ((tj.get("post_stream") or {}).get("posts") or [])
+                    cooked = str((posts[0] if posts else {}).get("cooked") or "")
+                except Exception as ex:
+                    _log(f"[roblox_news {source['cle']} corps {b['topic_id']}] {ex}")
+                    continue
+                finally:
+                    await asyncio.sleep(1.5)
+                enrichi = await contenu.enrichir_billet(dict(b), cooked, "en")
+                _memoriser(_cache_forum, b["topic_id"], enrichi, MAX_CACHE_FORUM)
+            if enrichi.get("pointeur"):
+                #  « Allez voir ce lien » : écarté, et compté pour le dire.
+                pointeurs += 1
+                continue
+            billets.append(enrichi)
+        out["billets"] = billets
+        out["pointeurs"] = pointeurs
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -356,9 +408,9 @@ def _normaliser_rss(texte: str, domaine: str) -> list[dict]:
             slug = m_slug.group(1) if m_slug else None
             if not slug:
                 continue
-            desc = (item.findtext("description") or "").strip()
+            desc_html = (item.findtext("description") or "").strip()
             import re
-            desc = re.sub(r"<[^>]+>", " ", desc)
+            desc = re.sub(r"<[^>]+>", " ", desc_html)
             desc = re.sub(r"\s+", " ", desc).strip()
             out.append({
                 "topic_id": f"presse:{slug}",
@@ -368,6 +420,10 @@ def _normaliser_rss(texte: str, domaine: str) -> list[dict]:
                 "extrait": (desc[:300] or None),
                 "tags": [],
                 "lien": lien,
+                #  Le communiqué ENTIER : `enrichir_billet` en tirera
+                #  l'essentiel et la traduction. Gardé ici, consommé par
+                #  `_relever_rss`, jamais publié tel quel.
+                "_html": desc_html,
             })
         except Exception:
             continue
@@ -379,10 +435,23 @@ async def _relever_rss(source: dict, out: dict) -> None:
     async with _ouvrir() as sess:
         async with sess.get(source["url"]) as r:
             out["code"] = r.status
-            if r.status == 200:
-                out["billets"] = _normaliser_rss(await r.text(), source["domaine"])
-            else:
+            if r.status != 200:
                 _log(f"[roblox_news {source['cle']}] HTTP {r.status}")
+                return
+            bruts = _normaliser_rss(await r.text(), source["domaine"])
+    billets, pointeurs = [], 0
+    for b in bruts[:MAX_BILLETS_PAR_PASSAGE]:
+        enrichi = _cache_forum.get(b["topic_id"])
+        if enrichi is None:
+            enrichi = await contenu.enrichir_billet(dict(b), b.pop("_html", ""), "en")
+            enrichi.pop("_html", None)
+            _memoriser(_cache_forum, b["topic_id"], enrichi, MAX_CACHE_FORUM)
+        if enrichi.get("pointeur"):
+            pointeurs += 1
+            continue
+        billets.append(enrichi)
+    out["billets"] = billets
+    out["pointeurs"] = pointeurs
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -435,9 +504,18 @@ def _lire_page_article(html: str) -> dict:
         m = (re.search(r'property="' + prop + r'"\s+content="([^"]*)"', html)
              or re.search(r'content="([^"]*)"\s+property="' + prop + r'"', html))
         return _html.unescape(m.group(1)).strip() if m else None
+    titre = meta("og:title") or ""
+    #  ⚠️ « … | Roblox » : le suffixe du site, pas le titre. Il s'affichait
+    #  sur chaque fiche — vu sur la capture du propriétaire.
+    titre = re.sub(r"\s*\|\s*Roblox\s*$", "", titre).strip()
+    art = re.search(r"<article[^>]*>(.*?)</article>", html, re.S | re.I)
     return {"date": meta("article:published_time"),
-            "titre": meta("og:title"),
-            "extrait": meta("og:description")}
+            "titre": titre or None,
+            "extrait": meta("og:description"),
+            "image": meta("og:image"),
+            #  Le corps de l'article : c'est lui qui donne l'essentiel et les
+            #  images du texte. Sans balise <article>, on ne devine rien.
+            "corps_html": art.group(1) if art else ""}
 
 
 async def _relever_newsroom(source: dict, out: dict) -> None:
@@ -493,6 +571,15 @@ async def _relever_newsroom(source: dict, out: dict) -> None:
                     "tags": [],
                     "lien": lien,
                 }
+                #  L'essentiel, les images (og:image en tête, puis celles du
+                #  texte), la langue. La salle de presse FR est en français
+                #  PAR ROBLOX : elle n'est jamais traduite, on cite.
+                langue = "fr" if prefixe.startswith("/fr/") else "en"
+                b = await contenu.enrichir_billet(b, page.get("corps_html") or "", langue)
+                if page.get("image") and contenu._domaine_autorise(page["image"]):
+                    b["images"] = ([page["image"]]
+                                   + [i for i in b.get("images", []) if i != page["image"]]
+                                   )[:contenu.MAX_IMAGES]
                 if len(_cache_newsroom) >= MAX_CACHE_NEWSROOM:
                     _cache_newsroom.pop(next(iter(_cache_newsroom)))
                 _cache_newsroom[cle_cache] = b

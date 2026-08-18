@@ -301,35 +301,159 @@ async def publier(guild, salon, article: dict, flux: str,
                           vue, "publier")
 
 
-def construire_actu(billet: dict) -> LayoutView:
-    """La fiche d'un billet d'actualité — même quadrillage que les articles.
+#  ⚠️ LIMITE DURE : 4 000 caractères de texte au total dans un message V2
+#  (somme de tous les TextDisplay). Dépasser = HTTP 400, la fiche ne part pas.
+#  On calcule, on ne coupe pas au hasard.
+BUDGET_TEXTE_ACTU = 3900
+#  Part réservée aux méta (titre, en-tête, mention, date). Le reste va aux
+#  corps, français d'abord.
+RESERVE_META = 500
+#  L'original anglais, abrégé : il est là pour vérifier, pas pour tout relire.
+BUDGET_ORIGINAL = 900
 
-    Le DOMAINE est en titre, pas le titre du billet : dans un salon où tombent
-    Studio, UGC, politique et événements, c'est la première chose qu'on cherche.
+#  Une couleur et une pastille par domaine : on reconnaît le genre de nouvelle
+#  avant de lire — c'était la force de l'ancienne fiche (« 🟢 »).
+STYLE_DOMAINE = {
+    "Annonces":               ("🟢", Palette.SUCCESS,  "MISE À JOUR"),
+    "Studio & moteur":        ("🔵", Palette.INFO,     "STUDIO & MOTEUR"),
+    "Politique & sécurité":   ("🔴", Palette.DANGER,   "POLITIQUE & SÉCURITÉ"),
+    "Événements":             ("🟣", Palette.ACCENT,   "ÉVÉNEMENT"),
+    "Développeurs":           ("🟠", Palette.WARNING,  "DÉVELOPPEURS"),
+    "Communiqués officiels":  ("⚪", Palette.NEUTRAL,  "COMMUNIQUÉ OFFICIEL"),
+    "Newsroom Roblox":        ("🟡", Palette.PREMIUM,  "NEWSROOM"),
+    "Salle de presse (FR)":   ("🟡", Palette.PREMIUM,  "SALLE DE PRESSE"),
+}
+
+
+def _horodatage(iso) -> str:
+    """`<t:UNIX:f>` — Discord l'affiche dans le fuseau du LECTEUR.
+
+    L'ancienne fiche écrivait « 04/08/2026 18:11 » en dur : juste pour un
+    lecteur, faux pour tous les autres. Une date illisible rend « — ».
     """
-    #  Le lien vient de la SOURCE quand elle l'a reconstruit et validé
-    #  (presse, newsroom) ; le forum n'a qu'un identifiant entier, d'où le
-    #  repli sur `lien_billet`. Jamais une URL recopiée telle quelle.
+    try:
+        from datetime import datetime, timezone
+        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return f"<t:{int(d.timestamp())}:f>"
+    except Exception:
+        return "—"
+
+
+def _tronquer_propre(texte: str, budget: int) -> str:
+    """Coupe à une frontière de paragraphe, sinon de phrase — jamais au milieu
+    d'un mot. Une fiche tronquée en pleine phrase se lit comme un défaut."""
+    t = (texte or "").strip()
+    if len(t) <= budget:
+        return t
+    coupe = t[:budget]
+    for sep in ("\n\n", ". ", "! ", "? ", "\n"):
+        i = coupe.rfind(sep)
+        if i > budget // 2:
+            return coupe[:i + (1 if sep.strip() else 0)].rstrip() + " …"
+    return coupe.rsplit(" ", 1)[0].rstrip() + " …"
+
+
+def construire_actu(billet: dict) -> LayoutView:
+    """La fiche d'une actualité : français d'abord, l'original ensuite, les
+    médias, la date, le lien. Complète, ou elle ne part pas.
+
+    Structure (ordre fixe, on la lit en diagonale) :
+      EN-TÊTE       MISE À JOUR · domaine
+      TITRE         🟢 titre en français
+      CORPS FR      l'essentiel, traduit — ou écrit en français par Roblox
+      ORIGINAL      🇬🇧 titre + début du texte anglais (si traduit)
+      MÉDIAS        galerie (images pleine taille, vidéos du forum) · boutons YouTube
+      PIED          mention de traduction · date native · lien complet
+    """
     lien = billet.get("lien") or news.lien_billet(billet.get("topic_id"))
-    items = [
-        v2_title(f"📢 {_ou_tiret(billet.get('domaine'))}"),
-        v2_subtitle(_ou_tiret(billet.get("titre"))),
-        v2_divider(),
-        v2_body(
-            f"**Publié le** · {_ou_tiret((billet.get('cree_le') or '')[:10])}\n"
-            f"**Sujets** · {_ou_tiret(', '.join(billet.get('tags') or []))}"),
-    ]
-    if billet.get("extrait"):
-        items.append(v2_body(f"-# {billet['extrait']}"))
-    if lien:
-        items.append(v2_divider())
-        items.append(discord.ui.ActionRow(Button(
-            label="Lire l'annonce", emoji="🔗",
-            style=discord.ButtonStyle.link, url=lien)))
+    domaine = _ou_tiret(billet.get("domaine"))
+    pastille, couleur, etiquette = STYLE_DOMAINE.get(
+        domaine, ("📢", Palette.PRIMARY, "ACTUALITÉ"))
+
+    langue = billet.get("langue") or "en"
+    traduit_par = billet.get("traduit_par")
+    titre_orig = _ou_tiret(billet.get("titre"))
+    corps_orig = (billet.get("corps") or billet.get("extrait") or "").strip()
+
+    if langue == "fr":
+        titre_fr, corps_fr, montrer_original = titre_orig, corps_orig, False
+    elif traduit_par and billet.get("corps_fr"):
+        titre_fr = billet.get("titre_fr") or titre_orig
+        corps_fr = billet["corps_fr"]
+        montrer_original = True
     else:
+        #  Traduction indisponible : l'original tient lieu de corps, et la
+        #  mention le DIT. On ne tait pas une actualité pour ça.
+        titre_fr, corps_fr, montrer_original = titre_orig, corps_orig, False
+
+    # ── Le budget de texte, calculé ────────────────────────────────────────
+    disponible = BUDGET_TEXTE_ACTU - RESERVE_META - len(titre_fr) - len(titre_orig)
+    if montrer_original:
+        budget_orig = min(BUDGET_ORIGINAL, max(300, disponible // 3))
+        budget_fr = max(400, disponible - budget_orig)
+    else:
+        budget_orig, budget_fr = 0, max(400, disponible)
+    corps_fr = _tronquer_propre(corps_fr, budget_fr)
+    corps_orig_court = _tronquer_propre(corps_orig, budget_orig) if montrer_original else ""
+
+    items = [
+        v2_title(f"{etiquette} · {domaine}", level=3),
+        v2_body(f"## {pastille} {titre_fr}"),
+    ]
+    if corps_fr:
+        items.append(v2_body(corps_fr))
+    else:
+        items.append(v2_body("-# _Le corps de ce billet n'a pas pu être lu — "
+                             "voir l'article complet._"))
+
+    if montrer_original and corps_orig_court:
+        items.append(v2_divider())
+        items.append(v2_body(f"**🇬🇧 Original (English)**\n**{titre_orig}**\n"
+                             f"{corps_orig_court}"))
+
+    # ── Les médias : galerie pleine largeur, comme le billet d'origine ────
+    medias = list(billet.get("images") or []) + list(billet.get("videos_fichiers") or [])
+    if medias:
+        try:
+            galerie = discord.ui.MediaGallery()
+            for u in medias[:10]:
+                galerie.add_item(media=u)
+            items.append(v2_divider())
+            items.append(galerie)
+        except Exception as ex:
+            _log(f"[roblox fiche actu galerie] {ex}")
+
+    # ── Le pied : mention, date, source ────────────────────────────────────
+    if langue == "fr":
+        mention = "🇫🇷 Rédigé en français par Roblox"
+    elif traduit_par:
+        mention = f"🇫🇷 Traduction automatique ({traduit_par}) — original anglais ci-dessus"
+    else:
+        mention = "🇬🇧 Texte original — traduction indisponible pour ce passage"
+    items.append(v2_divider())
+    items.append(v2_body(
+        f"-# {mention}\n"
+        f"-# 📅 Publié {_horodatage(billet.get('cree_le'))} · "
+        f"{'DevForum' if isinstance(billet.get('topic_id'), int) else 'Roblox'}"))
+
+    # ── Les boutons : article complet, vidéos YouTube ──────────────────────
+    boutons = []
+    if lien:
+        boutons.append(Button(label="Lire l'article complet", emoji="🔗",
+                              style=discord.ButtonStyle.link, url=lien))
+    for k, v in enumerate((billet.get("videos") or [])[:2], 1):
+        boutons.append(Button(label=f"Vidéo {k}" if k > 1 or len(billet.get("videos") or []) > 1
+                              else "Vidéo", emoji="▶️",
+                              style=discord.ButtonStyle.link, url=v))
+    if boutons:
+        items.append(discord.ui.ActionRow(*boutons[:5]))
+    elif not lien:
         items.append(v2_body("-# Lien indisponible (identifiant illisible)."))
+
     v = LayoutView(timeout=None)
-    v.add_item(v2_container(*items, color=Palette.PRIMARY))
+    v.add_item(v2_container(*items, color=couleur))
     return v
 
 
@@ -775,7 +899,7 @@ class RobloxPanelV2(LayoutView):
                 return ("📢 Actualités — 🔴 **aucun salon réglé**, rien ne peut "
                         "sortir. Réglez « 📢 Actualité Roblox » ci-dessus.")
 
-            lus, envoyes, deja, refuses, en_panne = 0, 0, 0, 0, []
+            lus, envoyes, deja, refuses, en_panne, pointeurs = 0, 0, 0, 0, [], 0
             for src in news.SOURCES:
                 #  ⚠️ `forcer=True` : un bouton de vérification qui respecterait
                 #  la cadence dirait « 0 lu » sur une source relevée dix minutes
@@ -786,6 +910,7 @@ class RobloxPanelV2(LayoutView):
                     await asyncio.sleep(1.5)
                     continue
                 lus += len(rel["billets"])
+                pointeurs += int(rel.get("pointeurs") or 0)
                 #  Même ordre que la boucle : du plus ancien au plus récent,
                 #  et le même plafond par source.
                 for b in veille.ordonner_publication(
@@ -812,6 +937,9 @@ class RobloxPanelV2(LayoutView):
             if deja:
                 detail.append(f"`{deja}` déjà publiée(s) — « ♻️ Tout republier » "
                               f"les libère")
+            if pointeurs:
+                detail.append(f"`{pointeurs}` billet(s) « allez voir ce lien » "
+                              f"écarté(s) — sans contenu propre, ils n'apprennent rien")
             panne = bool(en_panne or refuses)
             icone = "🔴" if panne else ("🟢" if envoyes else "⚪")
             txt = (f"📢 Actualités — {icone} `{lus}` billet(s) frais lus, "
