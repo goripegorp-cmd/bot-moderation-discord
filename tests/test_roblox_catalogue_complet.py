@@ -168,13 +168,19 @@ async def test_les_doublons_entre_pages_sont_ecartes(api_simulee):
 @pytest.mark.asyncio
 async def test_les_deux_releves_sont_distincts_et_pagines(api_simulee):
     """Ils ne se remplacent pas : 543 Limiteds sont absents du catalogue
-    général (mesuré le 16/08)."""
+    général (mesuré le 16/08). Mais ils ne paginent pas pareil : le général
+    va au BOUT (c'est là que se voient les bascules) ; le flux Limited, non
+    trié par date et réservé à la détection, s'arrête à
+    `MAX_PAGES_COLLECTIONNABLES` (18/08)."""
     api_simulee(FausseAPI(total=300))
     a = await veille.relever_nouveautes(limite=120)
-    b = await veille.relever_collectionnables(limite=120)
+    assert a["pages"] == 3 and len(a["articles"]) == 300 and a["complet"]
 
-    assert a["pages"] == b["pages"] == 3
-    assert len(a["articles"]) == len(b["articles"]) == 300
+    api_simulee(FausseAPI(total=300))
+    b = await veille.relever_collectionnables(limite=120)
+    assert b["pages"] == veille.MAX_PAGES_COLLECTIONNABLES
+    assert len(b["articles"]) == 120 * veille.MAX_PAGES_COLLECTIONNABLES
+    assert b["complet"] is False, "il reste des pages, et le relevé le DIT"
 
 
 def test_la_pause_entre_releves_est_plus_longue_que_celle_entre_pages():

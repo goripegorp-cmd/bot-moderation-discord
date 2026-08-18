@@ -300,6 +300,10 @@ async def _relever_discourse(source: dict, out: dict) -> None:
                 return
             data = await r.json()
             frais = _normaliser(data, source["domaine"])
+            #  Tous les titres frais — corps ou pas — servent à relier les
+            #  accessoires à leur annonce (voir `billets_lies`).
+            for b in frais:
+                _memoriser_recent(b)
 
         #  ⚠️ LE CORPS, BILLET PAR BILLET — c'est ce qui rend la fiche complète.
         #  `/t/{id}.json` porte le premier post en HTML (`cooked`) : texte,
@@ -331,6 +335,8 @@ async def _relever_discourse(source: dict, out: dict) -> None:
                     await asyncio.sleep(1.5)
                 enrichi = await contenu.enrichir_billet(dict(b), cooked, "en")
                 _memoriser(_cache_forum, b["topic_id"], enrichi, MAX_CACHE_FORUM)
+                #  Avec le corps, la mise en relation devient bien plus sûre.
+                _memoriser_recent(enrichi)
             if enrichi.get("pointeur"):
                 #  « Allez voir ce lien » : écarté, et compté pour le dire.
                 pointeurs += 1
@@ -446,6 +452,7 @@ async def _relever_rss(source: dict, out: dict) -> None:
             enrichi = await contenu.enrichir_billet(dict(b), b.pop("_html", ""), "en")
             enrichi.pop("_html", None)
             _memoriser(_cache_forum, b["topic_id"], enrichi, MAX_CACHE_FORUM)
+        _memoriser_recent(enrichi)
         if enrichi.get("pointeur"):
             pointeurs += 1
             continue
@@ -587,6 +594,7 @@ async def _relever_newsroom(source: dict, out: dict) -> None:
             #  illisible — une page sans `article:published_time` ne sort pas.
             if _trop_vieux(b.get("cree_le")):
                 continue
+            _memoriser_recent(b)
             billets.append(b)
     billets.sort(key=lambda x: str(x.get("cree_le") or ""), reverse=True)
     out["billets"] = billets
@@ -728,6 +736,76 @@ async def oublier_publies(guild_id: int) -> int:
     except Exception as ex:
         _log(f"[roblox_news oublier_publies] {ex}")
         return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Le lien entre un ACCESSOIRE et l'actualité qui en parle
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Demande du propriétaire (18/08) : « pour les accessoires aussi, un affichage
+#  concernant les infos de presse et les news ». Roblox annonce souvent ses
+#  Limiteds et ses sorties sur le forum ou dans le newsroom. On ne CHERCHE pas
+#  sur le réseau à chaque accessoire (douze requêtes par passage, pour rien la
+#  plupart du temps) : on regarde ce que la veille d'actualité a DÉJÀ lu — les
+#  titres de tous les billets frais, et le corps de ceux qu'elle a ouverts.
+#  Rien trouvé = rien affiché. On ne fabrique pas un lien.
+
+#  {cle: {"titre", "lien", "cree_le", "domaine", "texte"}} — alimenté à chaque
+#  relevé, borné.
+_recents: dict = {}
+MAX_RECENTS = 300
+
+_MOTS_VIDES = {"the", "and", "for", "with", "hat", "cap", "of", "les", "des",
+               "une", "un", "le", "la", "et", "roblox", "limited", "ugc"}
+
+
+def _memoriser_recent(b: dict) -> None:
+    """Retient un billet pour la mise en relation avec les accessoires."""
+    try:
+        cle = b.get("topic_id")
+        lien = b.get("lien") or lien_billet(cle)
+        if not lien:
+            return
+        texte = " ".join(str(b.get(k) or "") for k in
+                         ("titre", "titre_fr", "corps", "corps_fr", "extrait"))
+        if len(_recents) >= MAX_RECENTS:
+            _recents.pop(next(iter(_recents)))
+        _recents[cle] = {"titre": b.get("titre_fr") or b.get("titre") or "",
+                         "lien": lien, "cree_le": b.get("cree_le"),
+                         "domaine": b.get("domaine"), "texte": texte.lower()}
+    except Exception:
+        pass
+
+
+def _mots_cles(nom: str) -> list[str]:
+    import re
+    mots = [m for m in re.findall(r"[a-zà-ÿ0-9']{3,}", (nom or "").lower())
+            if m not in _MOTS_VIDES]
+    #  Les mots courts et génériques ne discriminent rien : « Red Hat » ne doit
+    #  pas coller à toute annonce qui contient « red ».
+    return [m for m in mots if len(m) >= 4] or mots
+
+
+def billets_lies(nom: str, maximum: int = 2) -> list[dict]:
+    """Les billets d'actualité récents qui parlent de cet accessoire.
+
+    Un billet est retenu si TOUS les mots significatifs du nom (≥ 4 lettres,
+    hors mots vides) apparaissent dans son titre ou son corps. Deux mots au
+    moins pour éviter les faux amis — OU un seul mot s'il est long (≥ 6
+    lettres, « requiem », « buxeration ») : « The Requiem » est un vrai
+    Limited, et « the » ne compte pas. Un nom sans mot distinctif ne relie
+    rien : on préfère se taire qu'annoncer un rapport qui n'existe pas.
+    Rend [{"titre", "lien", "domaine"}], du plus récent au plus ancien.
+    """
+    mots = _mots_cles(nom)
+    if not mots or (len(mots) < 2 and len(mots[0]) < 6):
+        return []
+    trouves = []
+    for r in _recents.values():
+        if all(m in r["texte"] for m in mots):
+            trouves.append(r)
+    trouves.sort(key=lambda r: str(r.get("cree_le") or ""), reverse=True)
+    return [{"titre": r["titre"], "lien": r["lien"], "domaine": r["domaine"]}
+            for r in trouves[:maximum]]
 
 
 async def purger() -> None:

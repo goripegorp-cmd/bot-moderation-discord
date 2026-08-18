@@ -101,18 +101,30 @@ def _fmt_robux(v) -> str:
     return "gratuit" if n == 0 else f"{n:,}".replace(",", " ") + " R$"
 
 
-def construire_fiche(article: dict, flux: str, image: str | None = None) -> LayoutView:
-    """La fiche d'un article, en quadrillage fixe.
+def construire_fiche(article: dict, flux: str, image: str | None = None,
+                     lies: list | None = None) -> LayoutView:
+    """La fiche d'un accessoire — légère, et elle dit ce qui VIENT d'arriver.
 
-    L'ordre ne change jamais : type et nom, puis créateur et date, puis les
-    chiffres, puis l'indice et ce qui le justifie, puis le lien.
+    Ordre fixe (on la lit en diagonale) :
+      EN-TÊTE      « VIENT DE PASSER LIMITED » · « NOUVEL ACCESSOIRE ROBLOX »
+      NOM          français (Roblox) puis anglais · vignette à droite
+      DESCRIPTION  courte, celle de Roblox
+      CHIFFRES     prix d'origine · pour un Limited : revente, stock, rapport
+      DATE         création (ou détection de la bascule) — horodatage natif
+      BOUTONS      voir l'accessoire · 📰 annonce liée
+
+    `lies` : les billets d'actualité qui parlent de cet accessoire (voir
+    `roblox_news.billets_lies`). Un bouton, pas un pavé.
     """
-    ind = veille.indice(article)
     lien = veille.lien_article(article.get("asset_id"),
                                 article.get("item_type"))
-
-    couleur = {"bascules": Palette.PREMIUM, "surveiller": Palette.WARNING}.get(
-        flux, Palette.INFO)
+    limited_u = bool(article.get("limited_u"))
+    if flux == "bascules":
+        etiquette = ("VIENT DE PASSER LIMITED U" if limited_u
+                     else "VIENT DE PASSER LIMITED")
+        pastille, couleur = "🔷", Palette.PREMIUM
+    else:
+        etiquette, pastille, couleur = "NOUVEL ACCESSOIRE ROBLOX", "🆕", Palette.INFO
 
     #  LE NOM, EN DEUX LANGUES quand Roblox en fournit une traduction. Le
     #  français d'abord — c'est la langue du serveur — l'anglais en dessous,
@@ -123,108 +135,70 @@ def construire_fiche(article: dict, flux: str, image: str | None = None) -> Layo
     nom_fr = article.get("nom_fr")
     titre = f"{nom_fr}\n-# {nom_en}" if nom_fr else nom_en
 
-    #  Le nom vient JUSTE APRÈS, porté soit par la section à vignette, soit
-    #  seul — il ne doit pas être ajouté ici, sinon il s'affiche deux fois.
-    items = [
-        v2_title(NOMS_FLUX.get(flux, "Roblox")),
-        v2_subtitle(f"{_ou_tiret(article.get('type_article'))}"),
-    ]
+    items = [v2_title(f"{etiquette} · {_ou_tiret(article.get('type_article'))}", level=3)]
 
-    #  ⚠️ L'IMAGE EN VIGNETTE, PAS EN BANNIÈRE.
-    #  `MediaGallery` affichait l'image sur toute la largeur du salon : trois
-    #  fiches et l'écran était rempli. Demande du propriétaire le 16/08 —
-    #  « un post propre, l'image pas trop grande sur le serveur Discord ».
-    #  `Section` + `Thumbnail` place la même image en petit à droite du texte,
-    #  et c'est le composant V2 prévu pour ça (UI.md §2). Repli sur le titre
-    #  seul si l'accessoire est refusé : une fiche sans image reste lisible.
+    #  ⚠️ L'IMAGE EN VIGNETTE, PAS EN BANNIÈRE — « l'image pas trop grande »,
+    #  demandé le 16/08 pour les accessoires. `Section` + `Thumbnail` la met à
+    #  droite du nom. Repli sur le nom seul si l'accessoire est refusé.
     if image:
         try:
             items.append(discord.ui.Section(
-                v2_body(f"## {titre}"),
+                v2_body(f"## {pastille} {titre}"),
                 accessory=discord.ui.Thumbnail(media=image)))
         except Exception as ex:
             _log(f"[roblox fiche image] {ex}")
-            items.append(v2_body(f"## {titre}"))
+            items.append(v2_body(f"## {pastille} {titre}"))
     else:
-        items.append(v2_body(f"## {titre}"))
+        items.append(v2_body(f"## {pastille} {titre}"))
 
-    #  ── LE QUADRILLAGE, EN DEUX COLONNES DE FAITS ────────────────────────
-    #  Ordre fixe, champs jamais masqués : une fiche à géométrie variable ne se
-    #  lit plus en diagonale (ROBLOX.md §3). Un champ inconnu affiche « — ».
+    #  La « légère description » : celle de Roblox, en français si elle existe.
+    desc = (article.get("description_fr") or article.get("description") or "").strip()
+    if desc:
+        items.append(v2_body(_tronquer_propre(desc, 280)))
+
+    # ── Les chiffres, sans pavé ─────────────────────────────────────────────
     stock = article.get("stock") or article.get("quantite")
-    #  Les BUNDLES n'ont pas de fiche économie : leurs chiffres viennent
-    #  du catalogue (`prix_revente`). Sans ce repli, la moitié du flux
-    #  Limited affichait « — » alors que la donnée existait.
+    #  Les BUNDLES n'ont pas de fiche économie : leurs chiffres viennent du
+    #  catalogue (`prix_revente`).
     revente = article.get("revente") or article.get("prix_revente")
     mult = article.get("multiplicateur")
-
-    if article.get("collectionnable"):
-        statut = "🔷 collectionnable (Limited)"
-    elif article.get("hors_vente"):
-        statut = "🔴 retiré de la vente"
-    elif article.get("en_vente") is False:
-        statut = "⚪ plus en vente"
-    else:
-        statut = "🟢 en vente"
-
-    items += [
-        v2_divider(),
-        v2_body(
-            f"**Statut** · {statut}\n"
-            f"**Créateur** · Roblox\n"
-            f"**Créé le** · {_ou_tiret((article.get('cree_le') or '')[:10])}"),
-        v2_body(
-            f"**Prix d'origine** · {_fmt_robux(article.get('prix'))}\n"
-            f"**Revente la plus basse** · {_fmt_robux(revente)}\n"
-            f"**Stock émis** · {_fmt_nombre(stock)}\n"
-            f"**Favoris** · {_fmt_nombre(article.get('favoris'))}"),
-    ]
-
-    #  ⚠️ LE MULTIPLICATEUR EST AFFICHÉ MÊME QUAND IL EST MAUVAIS.
-    #  C'est tout l'objet de la demande « pour qu'on soit sûr de ne pas se faire
-    #  avoir ». Mesuré le 16/08 : Specter Time Fedora se revend ×0,6 de son prix
-    #  d'origine — qui l'a payé plein tarif a perdu. Masquer ce cas rendrait la
-    #  fiche flatteuse et inutile.
-    if mult is not None:
-        if mult >= 2:
-            lecture = f"🟢 **×{mult}** — la revente vaut {mult} fois le prix d'origine"
-        elif mult >= 1:
-            lecture = f"🟠 **×{mult}** — la revente couvre à peine le prix d'origine"
-        else:
-            lecture = (f"🔴 **×{mult}** — la revente est SOUS le prix d'origine : "
-                       f"à ce prix, l'acheteur d'origine perd")
-        items.append(v2_body(f"**Revente / prix d'origine** · {lecture}"))
-
+    lignes = [f"**Prix d'origine** · {_fmt_robux(article.get('prix'))}"]
+    if flux == "bascules" or article.get("collectionnable"):
+        lignes.append(f"**Revente la plus basse** · {_fmt_robux(revente)}")
+        lignes.append(f"**Stock émis** · {_fmt_nombre(stock)}")
+        #  ⚠️ LE RAPPORT EST AFFICHÉ MÊME QUAND IL EST MAUVAIS — c'est ce qui
+        #  évite de se faire avoir. Mesuré : Specter Time Fedora ×0,6.
+        if mult is not None:
+            if mult >= 2:
+                lignes.append(f"**Revente / prix** · 🟢 ×{mult}")
+            elif mult >= 1:
+                lignes.append(f"**Revente / prix** · 🟠 ×{mult}")
+            else:
+                lignes.append(f"**Revente / prix** · 🔴 ×{mult} — sous le prix d'origine")
     items.append(v2_divider())
+    items.append(v2_body("\n".join(lignes)))
 
-    #  ⚠️ « INDICE », JAMAIS « PRÉDICTION ». Mesuré sur 339 articles : aucun
-    #  signal déclaratif n'annonce un passage en collectionnable.
-    #
-    #  ET SURTOUT : on ne l'affiche QUE s'il dit quelque chose. Demande du
-    #  propriétaire le 12/08 — « quasiment du 100 % ou du 80 %, pas du 20 % ; tu
-    #  dis pas et tu mets pas ce qui sert à rien ». Un « 30/100 » se lit comme un
-    #  verdict faible alors que ce n'est qu'une ABSENCE de signal. Se taire est
-    #  plus honnête que d'afficher un chiffre qui n'apprend rien.
-    if ind["note"] >= veille.SEUIL_INDICE_AFFICHE and ind["facteurs"]:
-        detail = " · ".join(f"{lib} +{pts}" for lib, pts in ind["facteurs"])
-        items.append(v2_body(
-            f"**Indice** · `{ind['note']}/100`\n"
-            f"-# {detail}\n"
-            f"-# Un indice, pas une prédiction : Roblox n'annonce jamais à "
-            f"l'avance qu'un article passera collectionnable."))
-
+    #  La date : création pour une nouveauté ; pour une bascule, on la DIT
+    #  détectée — Roblox ne publie pas la date de passage en Limited.
     if flux == "bascules":
-        #  Aucun champ ne donne la date de bascule. On dit donc « détecté »,
-        #  et c'est la seule formulation honnête.
-        items.append(v2_body("-# Détecté par comparaison de deux relevés — "
-                             "Roblox ne publie pas la date de bascule."))
-
-    if lien:
-        items.append(v2_divider())
-        b = Button(label="Voir l'article", emoji="🔗",
-                   style=discord.ButtonStyle.link, url=lien)
-        items.append(discord.ui.ActionRow(b))
+        pied = "-# 🔷 Passage en Limited **détecté à l'instant** par comparaison de deux relevés"
     else:
+        pied = f"-# 📅 Créé {_horodatage(article.get('cree_le'))} · Roblox"
+    items.append(v2_body(pied))
+
+    # ── Les boutons ────────────────────────────────────────────────────────
+    boutons = []
+    if lien:
+        boutons.append(Button(label="Voir l'accessoire", emoji="🔗",
+                              style=discord.ButtonStyle.link, url=lien))
+    for k, l_ in enumerate((lies or [])[:2], 1):
+        if l_.get("lien"):
+            boutons.append(Button(label="Annonce" if k == 1 else f"Annonce {k}",
+                                  emoji="📰", style=discord.ButtonStyle.link,
+                                  url=l_["lien"]))
+    if boutons:
+        items.append(discord.ui.ActionRow(*boutons[:5]))
+    elif not lien:
         #  Identifiant illisible : on publie SANS lien plutôt qu'avec un lien
         #  approximatif. Voir ROBLOX.md §1 — c'est une règle de sécurité.
         items.append(v2_body("-# Lien indisponible (identifiant illisible)."))
@@ -284,7 +258,7 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str) -> bool:
 
 
 async def publier(guild, salon, article: dict, flux: str,
-                  image: str | None = None) -> bool:
+                  image: str | None = None, lies: list | None = None) -> bool:
     """Publie une fiche, par webhook si possible. Fail-safe.
 
     Rend `True` seulement si le message est REELLEMENT parti — l'appelant
@@ -293,10 +267,11 @@ async def publier(guild, salon, article: dict, flux: str,
     `image` est passée par l'appelant, qui a demandé les vignettes EN LOT :
     une requête pour cent articles au lieu de cent requêtes. Aller la chercher
     ici, article par article, ferait exactement ce que le pare-feu punit.
+    `lies` : les annonces d'actualité qui parlent de l'accessoire.
     """
     if salon is None:
         return False
-    vue = construire_fiche(article, flux, image=image)
+    vue = construire_fiche(article, flux, image=image, lies=lies)
     return await _envoyer(salon, PLATEFORME.get(flux, "roblox_nouveautes"),
                           vue, "publier")
 
@@ -308,8 +283,19 @@ BUDGET_TEXTE_ACTU = 3900
 #  Part réservée aux méta (titre, en-tête, mention, date). Le reste va aux
 #  corps, français d'abord.
 RESERVE_META = 500
-#  L'original anglais, abrégé : il est là pour vérifier, pas pour tout relire.
-BUDGET_ORIGINAL = 900
+
+#  ⚠️ L'ESSENTIEL, PAS LE BILLET. Retour du propriétaire (18/08) sur la
+#  première version : « tu mets énormément d'informations, ça fait des très
+#  très gros pavés ». Elle affichait jusqu'à 2 300 caractères de français et
+#  900 d'anglais — 3 250 au total, mesuré. Une fiche se lit en dix secondes ;
+#  le bouton « Lire l'article complet » mène au forum pour tout le reste, et
+#  c'est ce que le propriétaire veut : « quand l'utilisateur clique dessus, il
+#  va sur devforum, il aura toutes les informations ».
+#  Les « Key Takeaways » de Roblox font 250 à 400 caractères : 800 laisse la
+#  place aux points clés ET à une phrase d'intro. 400 d'original suffisent à
+#  vérifier la traduction, pas à relire.
+BUDGET_FR_AFFICHE = 800
+BUDGET_ORIGINAL = 400
 
 #  Une couleur et une pastille par domaine : on reconnaît le genre de nouvelle
 #  avant de lire — c'était la force de l'ancienne fiche (« 🟢 »).
@@ -390,11 +376,10 @@ def construire_actu(billet: dict) -> LayoutView:
 
     # ── Le budget de texte, calculé ────────────────────────────────────────
     disponible = BUDGET_TEXTE_ACTU - RESERVE_META - len(titre_fr) - len(titre_orig)
-    if montrer_original:
-        budget_orig = min(BUDGET_ORIGINAL, max(300, disponible // 3))
-        budget_fr = max(400, disponible - budget_orig)
-    else:
-        budget_orig, budget_fr = 0, max(400, disponible)
+    #  Le plafond dur (4 000) reste une garde ; la lisibilité impose des budgets
+    #  bien plus bas — voir BUDGET_FR_AFFICHE / BUDGET_ORIGINAL.
+    budget_fr = min(BUDGET_FR_AFFICHE, max(300, disponible))
+    budget_orig = min(BUDGET_ORIGINAL, max(200, disponible - budget_fr)) if montrer_original else 0
     corps_fr = _tronquer_propre(corps_fr, budget_fr)
     corps_orig_court = _tronquer_propre(corps_orig, budget_orig) if montrer_original else ""
 
@@ -484,13 +469,15 @@ def set_retour(fn):
 class RobloxPanelV2(LayoutView):
     """L'onglet Roblox. Réglages, état des relevés, et un relevé à la demande."""
 
+    #  ⚠️ Deux flux d'accessoires, et c'est tout — tranché le 18/08 : « ce sera
+    #  tout pour les accessoires ». Le salon « à surveiller » a été retiré du
+    #  panneau : proposer un réglage pour un flux qui ne publie plus serait un
+    #  menu qui ment (UI.md).
     CHAMPS = [
-        ("roblox_salon_nouveautes", "🆕 Nouveautés",
-         "Les articles que Roblox vient de créer."),
-        ("roblox_salon_bascules", "💎 Passés collectionnables",
-         "Détectés en comparant deux relevés."),
-        ("roblox_salon_surveiller", "👀 À surveiller",
-         "Retirés de la vente, ou fortement demandés."),
+        ("roblox_salon_nouveautes", "🆕 Nouveaux accessoires",
+         "Créés par Roblox à partir de maintenant."),
+        ("roblox_salon_bascules", "🔷 Vient de passer Limited",
+         "Limited ou Limited U — détecté en direct entre deux relevés."),
         ("roblox_news_salon", "📢 Actualité Roblox",
          "Studio · UGC · développeurs · événements · politique."),
     ]
@@ -771,10 +758,12 @@ class RobloxPanelV2(LayoutView):
             await asyncio.sleep(veille.PAUSE_ENTRE_RELEVES)
             relc = await veille.relever_collectionnables(limite=120)
             if relc["code"] == 200:
-                await veille.comparer_et_enregistrer(relc["articles"])
+                #  Ce relevé DÉTECTE, il ne publie plus par lui-même (18/08) :
+                #  seules les bascules vues en direct sortent.
+                evts_c = await veille.comparer_et_enregistrer(relc["articles"])
                 vus = {x["asset_id"] for x in (evts.get("bascules") or [])}
-                for x in relc["articles"]:
-                    if x.get("collectionnable") and x["asset_id"] not in vus:
+                for x in (evts_c.get("bascules") or []):
+                    if x["asset_id"] not in vus:
                         evts.setdefault("bascules", []).append(x)
                         vus.add(x["asset_id"])
             else:
@@ -790,9 +779,9 @@ class RobloxPanelV2(LayoutView):
             #  Les images en UN SEUL appel pour tout le passage.
             #  Même sélection que la publication, sinon une fiche sort sans son
             #  image (ou on demande des vignettes pour rien).
-            a_publier = [x for k in ("nouveaux", "bascules", "retires")
+            a_publier = [x for k in ("nouveaux", "bascules")
                          for x in veille.ordonner_publication(
-                             evts.get(k) or [], 30 if k == "bascules" else 5)]
+                             evts.get(k) or [], 10 if k == "bascules" else 5)]
             #  Mêmes chiffres de trading que la boucle : stock et revente
             #  viennent d'un point d'API distinct, un appel par article. Borné
             #  au plafond du passage pour ne pas faire attendre le staff.
@@ -809,16 +798,14 @@ class RobloxPanelV2(LayoutView):
             #  Même ordre de priorité que la boucle : bascules d'abord, pour
             #  qu'un article ne « grille » pas sa propre bascule dans un flux
             #  plus faible au même passage.
+            #  Deux flux, et c'est tout (18/08) : « ce sera tout pour les
+            #  accessoires ». Le flux « à surveiller » ne publie plus.
             for flux, cle in (("bascules", "bascules"),
-                              ("surveiller", "retires"),
                               ("nouveautes", "nouveaux")):
-                #  « bascules » regarde plus loin : c'est ce flux qui rattrape
-                #  les Limiteds jamais sortis. Le plafond de publications reste
-                #  le vrai garde-fou — la tranche ne décide que du REGARD.
                 #  Ordre d'ENVOI : du plus ancien au plus récent, pour que le
                 #  salon se lise de haut en bas en scrollant.
                 candidats = veille.ordonner_publication(
-                    evts.get(cle) or [], 30 if cle == "bascules" else 5)
+                    evts.get(cle) or [], 10 if cle == "bascules" else 5)
                 #  ⚠️ L'identifiant AVANT le salon : `get_channel(0)` et
                 #  `get_channel(1234)` rendent tous les deux `None`, mais l'un
                 #  veut dire « case vide » et l'autre « salon supprimé ou
@@ -838,16 +825,11 @@ class RobloxPanelV2(LayoutView):
                     #  un moyen de contourner la protection de debit.
                     if envoyes >= veille.MAX_PUBLICATIONS_PAR_PASSAGE:
                         break
-                    #  Trop vieux = plus une nouvelle. L'article reste en base
-                    #  pour la détection des bascules, mais on ne le publie pas.
+                    #  Pas assez récent : « à partir de maintenant », tranché
+                    #  le 18/08. L'article reste en base pour la détection des
+                    #  bascules, mais on ne le publie pas.
                     if not veille.age_publiable(a, flux):
                         motifs["age"] += 1
-                        continue
-                    #  « À surveiller » ne publie que du solide : ce flux doit
-                    #  être rare et sûr, pas un fourre-tout.
-                    if flux == "surveiller" and \
-                            veille.indice(a)["note"] < veille.SEUIL_SURVEILLER:
-                        motifs["seuil"] += 1
                         continue
                     #  Déjà sorti ici, OU dans un flux plus fort : les salons
                     #  restent séparés (voir `PRIORITE_FLUX`).
@@ -855,8 +837,9 @@ class RobloxPanelV2(LayoutView):
                             self.g.id, a["asset_id"], flux):
                         motifs["deja"] += 1
                         continue
+                    lies = news.billets_lies(a.get("nom") or "")
                     if await publier(self.g, salon, a, flux,
-                                     image=imgs.get(a["asset_id"])):
+                                     image=imgs.get(a["asset_id"]), lies=lies):
                         #  La marque est DÉFINITIVE : on ne l'écrit que sur un
                         #  envoi réellement abouti (voir `_envoyer`).
                         await veille.marquer_publie(self.g.id, a["asset_id"], flux)
@@ -979,10 +962,11 @@ class RobloxPanelV2(LayoutView):
             detail.append(f"`{motifs['deja']}` déjà publié(e)(s) — « ♻️ Tout "
                           f"republier » les libère")
         if motifs["age"]:
-            detail.append(f"`{motifs['age']}` hors fenêtre d'âge")
-        if motifs["seuil"]:
-            detail.append(f"`{motifs['seuil']}` sous le seuil d'indice "
-                          f"(`{veille.SEUIL_SURVEILLER}`)")
+            detail.append(f"`{motifs['age']}` pas assez récent(s) — seuls ce qui "
+                          f"est créé ou passe Limited depuis moins de "
+                          f"`{veille.FENETRE_DIRECTE_HEURES}` h est publié")
+        if motifs.get("seuil"):
+            detail.append(f"`{motifs['seuil']}` sous le seuil d'indice")
 
         #  Une panne se voit au premier coup d'œil : icône rouge, pas verte.
         panne = bool(motifs["sans_salon"] or motifs["salon_introuvable"]

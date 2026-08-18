@@ -45,7 +45,13 @@ def _texte(p):
 def _afficher(p, ind=""):
     for x in p:
         ty = x.get("type")
-        if ty == 10:
+        if ty == 9:
+            #  Section : ses textes, puis son accessoire (vignette ou bouton).
+            _afficher(x.get("components", []) or [], ind)
+            acc = x.get("accessory") or {}
+            if acc.get("type") == 11:
+                print(ind + f"   [VIGNETTE à droite] {acc.get('media', {}).get('url', '')[:70]}")
+        elif ty == 10:
             print(ind + x["content"])
         elif ty == 14:
             print(ind + "─" * 60)
@@ -84,6 +90,46 @@ async def main() -> int:
     contenu.setup(log=print)
     panneau.setup(db_set=None, webhook_send=None, log=print)
     await news.init_db()
+
+    if sys.argv[1] in ("accessoire", "limited"):
+        #  La fiche d'ACCESSOIRE, sur un article réel du catalogue : le plus
+        #  récent créé (mode « accessoire ») ou le Limited le plus récent en
+        #  simulant sa bascule (mode « limited »). Même chaîne que la boucle :
+        #  enrichir → traduire → vignettes → annonces liées → fiche.
+        import roblox_veille as veille
+        veille.setup(get_db=get_db, cfg=cfg, db_set=db_set, session=None, log=print)
+        await veille.init_db()
+        if sys.argv[1] == "limited":
+            rel = await veille.relever_collectionnables(limite=30)
+            flux = "bascules"
+        else:
+            rel = await veille.relever_nouveautes(limite=30)
+            flux = "nouveautes"
+        if not rel["articles"]:
+            print("relevé vide, HTTP", rel["code"])
+            return 1
+        a = rel["articles"][0]
+        if flux == "bascules":
+            a["bascule_detectee"] = True     # on SIMULE la bascule pour l'aperçu
+        await asyncio.sleep(2)
+        await veille.enrichir([a])
+        await veille.traduire([a])
+        imgs = await veille.vignettes([a])
+        #  Les annonces liées : on lit d'abord une source d'actualité pour
+        #  remplir le registre, comme le ferait un vrai passage.
+        src = next(s for s in news.SOURCES if s["cle"] == "annonces")
+        await news.relever(src, forcer=True)
+        lies = news.billets_lies(a.get("nom") or "")
+        p = panneau.construire_fiche(a, flux, image=imgs.get(a["asset_id"]),
+                                     lies=lies).to_components()
+        print("═" * 60)
+        _afficher(p)
+        print("═" * 60)
+        print(f"{_compter(p)} composants · {_texte(p)} caractères · image "
+              f"{'oui' if imgs.get(a['asset_id']) else 'non'} · annonces liées {len(lies)} · "
+              f"nom_fr {'oui' if a.get('nom_fr') else 'non'} · description "
+              f"{'fr' if a.get('description_fr') else ('en' if a.get('description') else 'non')}")
+        return 0
 
     if sys.argv[1] == "forum" and len(sys.argv) > 2:
         import aiohttp

@@ -85,6 +85,34 @@ AGE_MIN_JOURS = 10
 #  bascules, mais il n'est plus publié.
 AGE_MAX_JOURS = 90
 
+#  ⚠️ « À PARTIR DE MAINTENANT » — LA RÈGLE DU 18/08, ET COMMENT ELLE SE CODE.
+#  Le propriétaire : « tu dis bien qu'il VIENT de passer Limited, pas il y a un
+#  jour, deux jours. Pareil pour les nouveaux accessoires : que ceux créés à
+#  partir de maintenant. »
+#  Deux garanties, une seule fenêtre :
+#    · une bascule n'est « vient de passer » que si on avait VU l'article non
+#      collectionnable il y a moins de FENETRE_DIRECTE_HEURES. Sinon — bot
+#      redémarré, base ancienne, premier passage après déploiement — la
+#      bascule a pu se produire il y a des jours : on l'ENREGISTRE (la base se
+#      met à jour) et on ne la publie PAS ;
+#    · une nouveauté n'est publiée que si Roblox l'a CRÉÉE il y a moins de
+#      FENETRE_DIRECTE_HEURES. Les 850 articles que la pagination a découverts
+#      d'un coup ne sont pas « nouveaux » : ils sont absorbés.
+#  Six heures : la boucle passe toutes les 30 min, un redémarrage Railway en
+#  prend quelques-unes ; au-delà, on ne peut plus dire « vient de ».
+FENETRE_DIRECTE_HEURES = 6
+
+
+def _heures_depuis(quand) -> float | None:
+    """Heures écoulées depuis un instant ISO. `None` si illisible."""
+    try:
+        d = datetime.fromisoformat(str(quand).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - d).total_seconds() / 3600)
+    except Exception:
+        return None
+
 #  ⚠️ FENÊTRE DU FLUX « BASCULES », ET D'OÙ VIENT CE CHIFFRE.
 #  Demande du propriétaire : « uniquement les items RÉCEMMENT devenus limited,
 #  pas des items qui datent d'il y a des années ».
@@ -500,44 +528,43 @@ def age_publiable(article: dict, flux: str = "surveiller") -> bool:
       de sortir n'a ni revente, ni demande installée, ni recul sur son stock :
       il n'y a rien à surveiller, et l'indice serait du bruit.
 
-    · flux « bascules » — RÉCEMMENT devenu collectionnable, et seulement.
-      Deux demandes du propriétaire qui semblent se contredire, et ne se
-      contredisent pas :
-        « même s'ils sont passés, affiche-les, ils sont encore d'actualité »
-        « uniquement les items RÉCEMMENT devenus limited, pas des items qui
-         datent d'il y a des années »
-      La première dit : ne pas exiger d'avoir vu la bascule en direct.
-      La seconde dit : ne pas remonter les Limiteds historiques.
+    · flux « bascules » — UNIQUEMENT ce qui DEVIENT collectionnable sous nos
+      yeux. Tranché par le propriétaire le 18/08, et c'est un revirement
+      assumé par rapport au 16/08 :
+        « uniquement les accessoires qui deviennent limited ou limited U, pas
+         ceux qui le sont déjà devenus »
+      Un article est publié ici si, et seulement si, il était connu NON
+      collectionnable et l'est devenu entre deux relevés — `bascule_detectee`,
+      posé par `comparer_et_enregistrer`. Un Limited vu pour la première fois
+      déjà collectionnable n'est PAS une bascule : il est enregistré, jamais
+      publié. Quel que soit son âge.
 
-      ⚠️ POURQUOI LA DATE DE CRÉATION FAIT OFFICE DE DATE DE BASCULE.
-      L'API ne donne AUCUNE date de passage en collectionnable — vérifié sur
-      tous les points d'API accessibles (`outils/sonde_signaux_limited.py`).
-      Mais l'écart création → dernière modification le trahit, mesuré le 16/08 :
-          The Requiem, Specter Time Fedora, Bandana From Beyond  →  0 jour
-          Helsworn Valkyrie                                      →  9 jours
-          Valkyrie Helm (Limited historique)                     →  3 217 jours
-      Les Limiteds modernes de Roblox NAISSENT Limited : leur date de création
-      EST leur date de bascule. Les historiques, eux, ont été créés des années
-      avant. Une borne sur la création sépare donc exactement les deux — c'est
-      un proxy mesuré, pas une approximation de confort.
+      ⚠️ Le relevé `relever_collectionnables` reste INDISPENSABLE, mais son
+      rôle change : il n'alimente plus la publication, il alimente la
+      DÉTECTION. 183 Limiteds sont absents du catalogue général (mesuré) : sans
+      ce second relevé, leur passage en collectionnable ne serait jamais vu.
 
-      ⚠️ EXCEPTION : une bascule VUE EN DIRECT (article connu non
-      collectionnable qui le devient) est un événement d'aujourd'hui, quel que
-      soit l'âge de l'article. Elle passe toujours. C'est `bascule_detectee`.
+      La fenêtre `FRAICHEUR_BASCULE_JOURS` ne sert plus qu'à l'arrêt anticipé
+      de la pagination de ce relevé (voir `_relever_catalogue`) — pas à la
+      publication.
     """
     if flux == "bascules":
-        #  Bascule observée entre deux relevés : c'est arrivé aujourd'hui.
-        if article.get("bascule_detectee"):
-            return True
-        d = _jours_depuis(article.get("cree_le"))
-        #  Date illisible : on publie. Rater une vraie bascule coûte plus cher
-        #  qu'une fiche de trop, et le dédoublonnage empêche la répétition.
-        return True if d is None else d <= FRAICHEUR_BASCULE_JOURS
+        #  Seule une bascule OBSERVÉE entre deux relevés sort. Le reste est
+        #  « déjà devenu », donc hors périmètre.
+        return bool(article.get("bascule_detectee"))
+    if flux == "nouveautes":
+        #  ⚠️ « CRÉÉS À PARTIR DE MAINTENANT » (18/08). Une nouveauté n'est
+        #  publiée que si Roblox l'a créée il y a moins de
+        #  FENETRE_DIRECTE_HEURES. Les 850 articles que la pagination découvre
+        #  d'un coup — créés il y a des semaines — sont ENREGISTRÉS, pas
+        #  publiés. Date illisible = on ne peut pas prouver « récent » = on
+        #  se tait (fail-closed, à l'inverse de la règle du 15/08 : la
+        #  consigne a changé, la garde suit).
+        h = _heures_depuis(article.get("cree_le"))
+        return h is not None and h <= FENETRE_DIRECTE_HEURES
     d = _jours_depuis(article.get("cree_le"))
     if d is None:
         return True
-    if flux == "nouveautes":
-        return d <= AGE_MAX_JOURS
     return AGE_MIN_JOURS <= d <= AGE_MAX_JOURS
 
 
@@ -653,6 +680,17 @@ async def relever_collectionnables(limite: int = 30) -> dict:
     ⚠️ Garder `CreatorTargetId=1` : sans lui, le flux se remplit d'UGC de
     créateurs tiers, hors du périmètre demandé (« uniquement ceux qui sont
     créés par Roblox »).
+
+    ⚠️ DEPUIS LE 18/08 : DEUX PAGES, PAS PLUS. Ce flux ne publie plus rien
+    par lui-même (seules les bascules vues en direct sortent), il ne sert qu'à
+    DÉTECTER. Or il n'est PAS trié par date — mesuré ce jour-là : la page 1
+    va de 154 à 6 955 jours d'âge — donc aucun arrêt anticipé « par date »
+    n'est possible, et le paginer en entier coûtait 8 requêtes par passage,
+    celles qui faisaient tomber en 429 les appels de fiche. Presque toutes les
+    bascules qui nous intéressent sont visibles dans le catalogue GÉNÉRAL (les
+    964 plus récents, où l'article a déjà sa ligne « non collectionnable ») ;
+    ces deux pages attrapent le reste au meilleur coût. Un article de plus de
+    deux ans qui repasserait Limited peut nous échapper — cas rare, assumé.
     """
     return await _relever_catalogue({
         "Category": 1,
@@ -661,11 +699,16 @@ async def relever_collectionnables(limite: int = 30) -> dict:
         "SalesTypeFilter": 2,          # 2 = Limited. Mesuré le 16/08.
         "CreatorType": "User",
         "CreatorTargetId": CREATEUR_ROBLOX,
-    }, "collectionnables", arret_hors_fenetre=True)
+    }, "collectionnables", max_pages=MAX_PAGES_COLLECTIONNABLES)
+
+
+#  Voir la docstring de `relever_collectionnables` : ce flux n'est pas trié par
+#  date, il ne sert qu'à détecter, deux pages suffisent.
+MAX_PAGES_COLLECTIONNABLES = 2
 
 
 async def _relever_catalogue(params: dict, source: str,
-                             arret_hors_fenetre: bool = False) -> dict:
+                             max_pages: int | None = None) -> dict:
     """L'appel au catalogue, partagé par les deux relevés.
 
     `source` sert au suivi de santé : un flux muet doit se voir SÉPARÉMENT.
@@ -713,22 +756,18 @@ async def _relever_catalogue(params: dict, source: str,
                         out["articles"].append(a)
                 out["pages"] = page + 1
 
-                #  ⚠️ ARRÊT ANTICIPÉ — LE CORRECTIF QUI A SAUVÉ LES FICHES.
-                #  Le flux des Limiteds est trié par date de création
-                #  décroissante : les récents sont dans les PREMIÈRES pages.
-                #  Paginer jusqu'au bout ramenait 998 articles pour en écarter
-                #  892 par la fenêtre de fraîcheur — 7 pages de requêtes pour
-                #  rien. Et ces requêtes n'étaient pas gratuites : cumulées aux
-                #  9 pages du catalogue, elles épuisaient le débit, si bien que
-                #  les appels SUIVANTS (stock, revente, vignettes) tombaient en
-                #  429 et que les fiches partaient sans chiffres ni image.
-                #  Mesuré le 16/08 : après UN relevé, 3 articles sur 3 enrichis ;
-                #  après DEUX relevés complets, 0 sur 3.
-                #  Dès qu'une page entière est hors fenêtre, la suite l'est
-                #  aussi — le tri le garantit.
-                if arret_hors_fenetre and not any(
-                        age_publiable(a, "bascules") for a in lot):
-                    out["complet"] = True
+                #  ⚠️ IL N'Y A PLUS D'ARRÊT ANTICIPÉ « PAR DATE » — la prémisse
+                #  était fausse. Une première version s'arrêtait dès qu'une page
+                #  entière du flux Limited dépassait la fenêtre de fraîcheur, en
+                #  supposant ce flux trié par date de création. Mesuré le 18/08 :
+                #  la page 1 va de 154 à 6 955 jours d'âge — l'arrêt ne se
+                #  déclenchait JAMAIS, et le flux paginait ses 8 pages à chaque
+                #  passage, exactement ce qui faisait tomber en 429 les appels de
+                #  fiche (stock, revente, vignettes). Le plafond est désormais un
+                #  NOMBRE DE PAGES par relevé (`max_pages`), qui ne dépend
+                #  d'aucun tri.
+                if max_pages is not None and page + 1 >= max_pages:
+                    out["complet"] = not data.get("nextPageCursor")
                     break
 
                 curseur = data.get("nextPageCursor")
@@ -742,50 +781,92 @@ async def _relever_catalogue(params: dict, source: str,
     return out
 
 
+#  Le point de détails PAR IDENTIFIANT — le seul qui rende le nom français d'un
+#  article quel que soit son âge, Assets et Bundles confondus.
+API_DETAILS = "https://catalog.roblox.com/v1/catalog/items/details"
+#  Jeton XSRF du point ci-dessus. Obtenu par un premier POST (403 attendu),
+#  gardé, rafraîchi sur 403. Jamais une authentification : c'est public.
+_jeton_xsrf: str | None = None
+
+
+async def _details_fr(sess, articles: list[dict]) -> dict:
+    """{(itemType, id): {"name", "description"}} en français, ou {} si rien.
+
+    Ne lève pas. Journalise chaque non-200 : un nom français qui disparaît
+    en silence est exactement le défaut qu'on répare.
+    """
+    global _jeton_xsrf
+    items = []
+    for a in articles:
+        try:
+            genre = "Bundle" if str(a.get("item_type") or "").lower() == "bundle" else "Asset"
+            items.append({"itemType": genre, "id": int(a["asset_id"])})
+        except (TypeError, ValueError, KeyError):
+            continue
+    if not items:
+        return {}
+    corps = {"items": items[:120]}
+    for tentative in (1, 2):
+        entetes = {"Accept-Language": LANGUE_FR}
+        if _jeton_xsrf:
+            entetes["X-CSRF-TOKEN"] = _jeton_xsrf
+        try:
+            async with sess.post(API_DETAILS, json=corps, headers=entetes) as r:
+                if r.status == 403 and tentative == 1:
+                    #  La danse XSRF : le 403 PORTE le jeton. On le prend et
+                    #  on rejoue une fois.
+                    _jeton_xsrf = r.headers.get("x-csrf-token") or _jeton_xsrf
+                    continue
+                if r.status != 200:
+                    _log(f"[roblox_veille traduire] HTTP {r.status} sur "
+                         f"{API_DETAILS.rsplit('/', 1)[-1]} — fiches en anglais")
+                    return {}
+                data = await r.json()
+        except Exception as ex:
+            _log(f"[roblox_veille traduire] {type(ex).__name__}: {ex}")
+            return {}
+        out = {}
+        for x in (data.get("data") or []):
+            try:
+                out[(str(x.get("itemType") or "Asset"), int(x.get("id")))] = {
+                    "name": str(x.get("name") or ""),
+                    "description": str(x.get("description") or "").strip()}
+            except (TypeError, ValueError):
+                continue
+        return out
+    return {}
+
+
 async def traduire(articles: list[dict]) -> None:
-    """Pose le nom FRANÇAIS OFFICIEL de Roblox. Modifie sur place.
-
-    ⚠️ POURQUOI CE N'EST PLUS FAIT PENDANT LE RELEVÉ.
-    La version précédente redemandait chaque PAGE en français : avec la
-    pagination, cela doublait le nombre d'appels (9 pages → 18 requêtes), et
-    c'est exactement ce qui a produit le HTTP 429 mesuré le 16/08 à la 13ᵉ
-    requête. Or on ne publie que douze fiches par passage : traduire 964
-    articles pour en afficher douze était du gaspillage pur.
-
-    On traduit donc À LA FIN, uniquement les articles retenus, en UN SEUL appel
-    ciblé par leurs identifiants.
+    """Pose le nom et la description FRANÇAIS OFFICIELS de Roblox. Sur place.
 
     On ne traduit jamais nous-mêmes : on demande à Roblox avec l'en-tête de
-    langue, et on cite. Sans traduction officielle, l'article garde son nom
-    anglais — les billets du forum, eux, n'en ont pas du tout.
+    langue, et on cite. Sans traduction officielle, l'article garde son
+    anglais. Un appel pour tout le lot, par identifiants — voir `_details_fr`.
+
+    ⚠️ Deux défauts de la version précédente, corrigés le 18/08 :
+      · elle cherchait dans « les N derniers créés » — un Limited ancien qui
+        vient de basculer n'y était jamais, sa fiche partait en anglais ;
+      · sur un non-200 elle rendait sans un mot, et le français disparaissait
+        en silence.
     """
     if not articles:
         return
-    ids = [a["asset_id"] for a in articles]
     try:
         async with _ouvrir() as sess:
-            #  `Keyword` ne permet pas de cibler des identifiants ; on repasse
-            #  donc par le même relevé, borné à la taille du lot.
-            params = {"Category": 1, "SortType": 3,
-                      "Limit": _limite_valide(len(ids) + 10),
-                      "CreatorType": "User", "CreatorTargetId": CREATEUR_ROBLOX}
-            async with sess.get(API_CATALOGUE, params=params,
-                                headers={"Accept-Language": LANGUE_FR}) as r:
-                if r.status != 200:
-                    return
-                noms = {}
-                for b in ((await r.json()).get("data") or []):
-                    try:
-                        noms[int(b.get("id"))] = str(b.get("name") or "")
-                    except (TypeError, ValueError):
-                        continue
+            fr = await _details_fr(sess, articles)
         for a in articles:
-            fr = noms.get(a["asset_id"])
-            #  On ne garde le nom français que s'il DIFFÈRE : beaucoup
-            #  d'articles n'ont pas de traduction, et afficher deux fois la
-            #  même ligne ferait croire à un défaut.
-            if fr and fr != a.get("nom"):
-                a["nom_fr"] = fr[:120]
+            genre = "Bundle" if str(a.get("item_type") or "").lower() == "bundle" else "Asset"
+            d = fr.get((genre, int(a["asset_id"])))
+            if not d:
+                continue
+            #  On ne garde le français que s'il DIFFÈRE : beaucoup d'articles
+            #  n'ont pas de traduction, et afficher deux fois la même ligne
+            #  ferait croire à un défaut.
+            if d["name"] and d["name"] != a.get("nom"):
+                a["nom_fr"] = d["name"][:120]
+            if d["description"] and d["description"] != (a.get("description") or ""):
+                a["description_fr"] = d["description"][:400]
     except Exception as ex:
         _log(f"[roblox_veille traduire] {ex}")
 
@@ -828,6 +909,15 @@ def _normaliser(bruts: list) -> list[dict]:
                 "revendeurs": int(bool(b.get("hasResellers"))),
                 "quantite": b.get("totalQuantity") or None,
                 "prix_revente": b.get("lowestResalePrice") or None,
+                #  « Limited U » (LimitedUnique) se distingue de « Limited » :
+                #  demande du 18/08 — les deux sortent, mais on dit lequel.
+                "limited_u": int(any(
+                    "unique" in str(x).lower() for x in restrictions)),
+                #  La « légère description » demandée pour la fiche : celle de
+                #  Roblox, jamais la nôtre. Bornée, elle se traduit avec le nom
+                #  (voir `traduire`).
+                "description": (str(b.get("description") or "").strip()[:400]
+                                or None),
             })
         except Exception:
             continue
@@ -1093,7 +1183,7 @@ async def comparer_et_enregistrer(articles: list[dict]) -> dict:
         async with _get_db() as db:
             for a in articles:
                 async with db.execute(
-                    "SELECT signature, collectionnable, hors_vente FROM"
+                    "SELECT signature, collectionnable, hors_vente, vu_le FROM"
                     " roblox_articles WHERE asset_id=?", (a["asset_id"],)) as cur:
                     row = await cur.fetchone()
                 sig = signature(a)
@@ -1101,13 +1191,21 @@ async def comparer_et_enregistrer(articles: list[dict]) -> dict:
                     res["nouveaux"].append(a)
                 else:
                     if not int(row[1]) and a["collectionnable"]:
-                        #  ⚠️ VUE EN DIRECT : l'article était connu NON
-                        #  collectionnable, il l'est devenu. C'est un événement
-                        #  d'aujourd'hui, quel que soit l'âge de l'article —
-                        #  `age_publiable` s'appuie sur ce marqueur pour le
-                        #  laisser passer même hors fenêtre de fraîcheur.
-                        a["bascule_detectee"] = True
-                        res["bascules"].append(a)
+                        #  ⚠️ « VIENT DE PASSER » — SEULEMENT SI ON L'A VU AVANT.
+                        #  L'article était connu NON collectionnable et l'est
+                        #  devenu. Mais depuis QUAND ? Si notre dernière
+                        #  observation (`vu_le`) date de plus de
+                        #  FENETRE_DIRECTE_HEURES — bot arrêté, premier passage
+                        #  après déploiement — la bascule a pu avoir lieu il y a
+                        #  deux jours, et « vient de passer » serait un
+                        #  mensonge. Tranché le 18/08 : on met la base à jour,
+                        #  on ne publie pas.
+                        depuis = _heures_depuis(row[3])
+                        if depuis is not None and depuis <= FENETRE_DIRECTE_HEURES:
+                            a["bascule_detectee"] = True
+                            res["bascules"].append(a)
+                        else:
+                            res.setdefault("bascules_anciennes", []).append(a)
                     elif not int(row[2]) and a["hors_vente"]:
                         res["retires"].append(a)
                 await db.execute(

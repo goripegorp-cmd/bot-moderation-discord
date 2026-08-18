@@ -47,10 +47,10 @@ def params_captures(monkeypatch):
     """Capture les paramètres, sans toucher au réseau."""
     vus = {}
 
-    async def _faux(params, source, arret_hors_fenetre=False):
+    async def _faux(params, source, max_pages=None):
         vus["params"] = dict(params)
         vus["source"] = source
-        vus["arret_hors_fenetre"] = arret_hors_fenetre
+        vus["max_pages"] = max_pages
         return {"articles": [], "code": 200, "echecs": 0}
 
     monkeypatch.setattr(veille, "_relever_catalogue", _faux)
@@ -69,20 +69,20 @@ async def test_le_releve_des_collectionnables_filtre_sur_les_limiteds(params_cap
         "sans le filtre de créateur, le flux se remplit d'UGC tiers — hors du "
         "périmètre demandé (« uniquement ceux créés par Roblox »)")
     assert p.get("SortType") == 3, "les plus récents d'abord"
-    #  ⚠️ L'arrêt anticipé n'est pas un détail de performance : sans lui, ce
-    #  relevé ramenait 998 articles pour en écarter 892, et ces 7 pages de
-    #  requêtes inutiles épuisaient le débit — si bien que les appels SUIVANTS
-    #  (stock, revente, vignettes) tombaient en 429 et que les fiches
-    #  partaient sans chiffres ni image.
-    assert params_captures["arret_hors_fenetre"] is True
+    #  ⚠️ Ce flux N'EST PAS trié par date (mesuré le 18/08 : la page 1 va de
+    #  154 à 6 955 jours) — donc pas d'arrêt anticipé « par date ». Il ne sert
+    #  qu'à détecter : deux pages, pas plus, sinon les 8 pages épuisent le
+    #  débit et les appels de fiche (stock, revente, vignettes) tombent en 429.
+    assert params_captures["max_pages"] == veille.MAX_PAGES_COLLECTIONNABLES
+    assert 1 <= veille.MAX_PAGES_COLLECTIONNABLES <= 3
 
 
 @pytest.mark.asyncio
-async def test_le_catalogue_general_ne_sarrete_PAS_a_la_fenetre(params_captures):
-    """Le tri « bascules » n'a pas de sens pour les créations : une nouveauté
-    du jour et un article de deux ans se suivent dans ce flux."""
+async def test_le_catalogue_general_va_au_bout(params_captures):
+    """Lui est trié par création et doit être COMPLET (964 articles, 9 pages) :
+    c'est là que se voient presque toutes les bascules."""
     await veille.relever_nouveautes(limite=30)
-    assert params_captures["arret_hors_fenetre"] is False
+    assert params_captures["max_pages"] is None
 
 
 @pytest.mark.asyncio
@@ -104,67 +104,144 @@ async def test_le_releve_des_nouveautes_ne_filtre_PAS_sur_les_limiteds(params_ca
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  2. La règle d'âge — un Limited reste d'actualité
+#  2. La règle de publication — « VIENT de passer », « créé À PARTIR DE
+#     MAINTENANT » (tranché par le propriétaire le 18/08)
+#
+#  ⚠️ Ces tests REMPLACENT ceux du 16/08, qui verrouillaient un rattrapage des
+#  Limiteds récents (≤ 400 jours). Le propriétaire a tranché contre deux jours
+#  plus tard : « uniquement les accessoires qui deviennent limited, pas ceux
+#  qui le sont déjà devenus ; tu dis bien qu'il VIENT de passer, pas il y a un
+#  jour, deux jours ». La consigne a changé, la garde suit.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _article(jours: int) -> dict:
+def _article(jours: int = 0, heures: float = 0) -> dict:
     from datetime import datetime, timedelta, timezone
-    quand = datetime.now(timezone.utc) - timedelta(days=jours)
+    quand = datetime.now(timezone.utc) - timedelta(days=jours, hours=heures)
     return {"asset_id": 1, "nom": "X", "cree_le": quand.isoformat(),
             "collectionnable": 1, "hors_vente": 0, "favoris": 10}
 
 
-@pytest.mark.parametrize("jours", [0, 91, 152, 211, 298, 341, 399])
-def test_un_limited_recent_est_publiable(jours):
-    """La borne des 90 jours ne s'applique PAS ici.
-
-    Chiffres réels du 16/08 : le Limited officiel le plus récent avait
-    152 jours, le plus ancien retenu 341. Avec la borne de 90 jours, pas un
-    seul n'aurait pu sortir — même le relevé réparé.
-    """
-    assert veille.age_publiable(_article(jours), "bascules") is True
-
-
-@pytest.mark.parametrize("jours", [401, 411, 415, 3000, 6800])
-def test_un_limited_ANCIEN_est_ecarte(jours):
-    """« Pas des items qui datent d'il y a des années » — demande du 16/08.
-
-    Mesuré sur le flux réel : 58 Limiteds relevés, 11 retenus (2025-09 à
-    2026-03) et 47 écartés, dont toute la vague de 2025-06 (411 j) et les
-    historiques jusqu'à 2008.
-    """
+@pytest.mark.parametrize("jours", [0, 91, 152, 341, 399, 401, 3000, 6800])
+def test_un_limited_deja_collectionnable_nest_JAMAIS_publie_par_son_age(jours):
+    """Sans le marqueur `bascule_detectee`, un Limited est « déjà devenu » —
+    hors périmètre, quel que soit son âge. Le 16/08 laissait passer jusqu'à
+    400 jours ; c'est fini."""
     assert veille.age_publiable(_article(jours), "bascules") is False
 
 
-def test_la_coupure_tombe_a_la_fenetre_annoncee():
+@pytest.mark.parametrize("jours", [0, 152, 6800])
+def test_une_bascule_VUE_EN_DIRECT_passe_quel_que_soit_lage(jours):
+    """Un article connu non collectionnable qui le devient sous nos yeux est
+    un événement d'AUJOURD'HUI, même si l'article a quinze ans. C'est le SEUL
+    chemin vers le flux « bascules », porté par `bascule_detectee`."""
+    a = _article(jours)
+    a["bascule_detectee"] = True
+    assert veille.age_publiable(a, "bascules") is True
+
+
+def test_la_fenetre_de_fraicheur_ne_gouverne_plus_la_publication():
+    """Elle borne la PAGINATION du relevé des Limiteds (détection), pas ce
+    qui sort : sous ou au-dessus de la fenêtre, sans marqueur, rien ne sort."""
     limite = veille.FRAICHEUR_BASCULE_JOURS
-    assert veille.age_publiable(_article(limite - 1), "bascules") is True
+    assert veille.age_publiable(_article(limite - 1), "bascules") is False
     assert veille.age_publiable(_article(limite + 1), "bascules") is False
 
 
-def test_une_bascule_VUE_EN_DIRECT_passe_quel_que_soit_lage():
-    """Un article connu non collectionnable qui le devient est un événement
-    d'AUJOURD'HUI, même si l'article a quinze ans. C'est la seule exception,
-    et elle est portée par `bascule_detectee`."""
-    vieux = _article(6800)
-    assert veille.age_publiable(vieux, "bascules") is False
-    vieux["bascule_detectee"] = True
-    assert veille.age_publiable(vieux, "bascules") is True
-
-
-def test_une_date_illisible_ne_fait_pas_taire_une_bascule():
-    """Rater une vraie bascule coûte plus cher qu'une fiche de trop."""
+def test_une_date_illisible_ne_change_rien_pour_une_bascule():
+    """Seul le marqueur compte : la date de création n'entre plus en jeu."""
+    assert veille.age_publiable({"asset_id": 1, "cree_le": None}, "bascules") is False
     assert veille.age_publiable(
-        {"asset_id": 1, "cree_le": None}, "bascules") is True
+        {"asset_id": 1, "cree_le": None, "bascule_detectee": True}, "bascules") is True
 
 
-def test_les_autres_flux_gardent_leurs_bornes():
-    """Le correctif ne doit pas déverser d'archives dans les autres salons."""
-    assert veille.age_publiable(_article(200), "nouveautes") is False
-    assert veille.age_publiable(_article(5), "nouveautes") is True
+@pytest.mark.parametrize("heures", [0, 1, 5.5])
+def test_une_nouveaute_creee_il_y_a_moins_de_six_heures_est_publiee(heures):
+    """« Que les nouveaux créés à partir de maintenant »."""
+    assert veille.age_publiable(_article(heures=heures), "nouveautes") is True
+
+
+@pytest.mark.parametrize("heures", [6.5, 24, 24 * 5, 24 * 200])
+def test_une_nouveaute_plus_ancienne_est_absorbee_pas_publiee(heures):
+    """Les 850 articles que la pagination découvre d'un coup — créés il y a
+    des semaines — ne sont pas « nouveaux ». Et « il y a un jour, deux
+    jours » non plus : c'est le mot du propriétaire."""
+    assert veille.age_publiable(_article(heures=heures), "nouveautes") is False
+
+
+def test_une_nouveaute_sans_date_ne_sort_pas():
+    """Fail-closed : on ne peut pas prouver « récent », on se tait. C'est
+    l'inverse de la règle du 15/08 — la consigne a changé."""
+    assert veille.age_publiable({"asset_id": 1, "cree_le": None}, "nouveautes") is False
+
+
+def test_le_flux_surveiller_garde_ses_bornes_meme_sil_ne_publie_plus():
+    """La fonction existe encore (indice) ; ses bornes restent cohérentes."""
     assert veille.age_publiable(_article(200), "surveiller") is False
     assert veille.age_publiable(_article(2), "surveiller") is False
     assert veille.age_publiable(_article(30), "surveiller") is True
+
+
+# ── La détection elle-même : « vient de » exige de l'avoir VU avant ──────────
+
+@pytest.mark.asyncio
+async def test_une_bascule_nest_detectee_que_si_on_a_vu_larticle_recemment(monkeypatch):
+    """Si notre dernière observation date de plus de FENETRE_DIRECTE_HEURES —
+    bot arrêté, premier passage après déploiement — la bascule a pu avoir lieu
+    il y a deux jours : on met la base à jour, on ne publie pas."""
+    import contextlib
+    from datetime import datetime, timedelta, timezone
+
+    def _faux_get_db(vu_le_iso):
+        class _Cur:
+            async def fetchone(self):
+                return ("0|0", 0, 0, vu_le_iso)   # connu NON collectionnable
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            def __await__(self):
+                async def _r():
+                    return self
+                return _r().__await__()
+
+        class _DB:
+            def execute(self, q, p=()):
+                return _Cur()
+
+            async def commit(self):
+                return None
+
+        @contextlib.asynccontextmanager
+        async def _get_db():
+            yield _DB()
+
+        return _get_db
+
+    art = dict(_article(200), collectionnable=1)   # aujourd'hui collectionnable
+
+    #  Vu il y a 1 h non collectionnable → il VIENT de passer.
+    recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    monkeypatch.setattr(veille, "_get_db", _faux_get_db(recent))
+    res = await veille.comparer_et_enregistrer([dict(art)])
+    assert len(res["bascules"]) == 1 and res["bascules"][0].get("bascule_detectee") is True
+
+    #  Vu il y a 3 jours → la bascule a pu se produire n'importe quand depuis :
+    #  enregistrée comme ancienne, PAS publiée.
+    vieux = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+    monkeypatch.setattr(veille, "_get_db", _faux_get_db(vieux))
+    res = await veille.comparer_et_enregistrer([dict(art)])
+    assert res["bascules"] == []
+    assert len(res.get("bascules_anciennes") or []) == 1
+
+
+def test_la_fenetre_directe_est_courte_mais_survit_a_un_redemarrage():
+    """La boucle passe toutes les 30 min ; un redémarrage Railway prend
+    quelques minutes. Six heures : assez pour ça, pas assez pour « il y a un
+    jour »."""
+    assert 1 <= veille.FENETRE_DIRECTE_HEURES <= 12
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

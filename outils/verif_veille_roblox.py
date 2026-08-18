@@ -96,29 +96,35 @@ async def main() -> int:
     note("ce flux voit ce que le catalogue ne voit pas", bool(invisibles),
          f"{len(invisibles)} Limited(s) absents du catalogue général")
 
-    # ── 3. Le tri « récemment devenu Limited » ─────────────────────────────
-    print("\n═══ 3. FILTRE DE FRAÎCHEUR ═══")
-    publiables = [a for a in lim["articles"]
-                  if veille.age_publiable(a, "bascules")]
-    ecartes = [a for a in lim["articles"]
-               if not veille.age_publiable(a, "bascules")]
-    note("les Limiteds récents passent", bool(publiables),
-         f"{len(publiables)} retenus")
-    note("les Limiteds anciens sont écartés", bool(ecartes),
-         f"{len(ecartes)} écartés (au-delà de "
-         f"{veille.FRAICHEUR_BASCULE_JOURS} jours)")
-    if publiables:
-        ages = [veille._jours_depuis(a.get("cree_le")) or 0 for a in publiables]
-        note("aucun retenu ne dépasse la fenêtre",
-             max(ages) <= veille.FRAICHEUR_BASCULE_JOURS,
-             f"le plus ancien retenu : {max(ages)} jours")
+    # ── 3. La règle « VIENT de passer » (18/08) ────────────────────────────
+    print("\n═══ 3. RÈGLE DE PUBLICATION — « vient de passer », « créé à partir "
+          "de maintenant » ═══")
+    #  Un Limited vu déjà collectionnable n'est PAS une bascule : il ne sort
+    #  pas, quel que soit son âge. Seul `bascule_detectee` fait sortir.
+    republies = [a for a in lim["articles"] if veille.age_publiable(a, "bascules")]
+    note("aucun Limited déjà collectionnable n'est republié", not republies,
+         f"{len(lim['articles'])} Limited(s) relevés, {len(republies)} publiable(s) "
+         f"— tous enregistrés, aucun publié : ils sont « déjà devenus »")
+    if lim["articles"]:
+        simule = dict(lim["articles"][0], bascule_detectee=True)
+        note("une bascule vue en direct passe, elle", veille.age_publiable(simule, "bascules"),
+             "marqueur `bascule_detectee` posé par comparer_et_enregistrer")
+    #  Les nouveautés : créées il y a moins de FENETRE_DIRECTE_HEURES seulement.
+    recentes = [a for a in cat["articles"] if veille.age_publiable(a, "nouveautes")]
+    plus_recent_h = min((veille._heures_depuis(a.get("cree_le")) or 1e9
+                         for a in cat["articles"]), default=None)
+    note("les nouveautés ne passent que si créées à l'instant",
+         all((veille._heures_depuis(a.get("cree_le")) or 1e9) <= veille.FENETRE_DIRECTE_HEURES
+             for a in recentes),
+         f"{len(recentes)} publiable(s) sur {len(cat['articles'])} · le plus récent du "
+         f"catalogue date de {plus_recent_h:.1f} h" if plus_recent_h is not None else "—")
 
     # ── 4. L'ordre de publication ──────────────────────────────────────────
     print("\n═══ 4. ORDRE DE PUBLICATION ═══")
-    lot = veille.ordonner_publication(publiables, 12)
+    lot = veille.ordonner_publication(lim["articles"], 12)
     dates = [str(a.get("cree_le") or "") for a in lot]
     note("l'envoi va du plus ancien au plus récent", dates == sorted(dates),
-         f"{len(lot)} fiche(s) dans le prochain paquet")
+         f"{len(lot)} fiche(s) dans un paquet d'essai")
 
     # ── 5. Les chiffres de trading ─────────────────────────────────────────
     print("\n═══ 5. ENRICHISSEMENT (stock, revente, multiplicateur) ═══")

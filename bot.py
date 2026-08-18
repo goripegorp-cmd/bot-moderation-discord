@@ -12803,7 +12803,9 @@ async def _activite_passage_wait():
 #  Limiteds passés inaperçus : cinq à la fois auraient mis des semaines à
 #  rattraper le retard. Le plafond réel reste `MAX_PUBLICATIONS_PAR_PASSAGE`,
 #  partagé par tous les flux — la tranche décide seulement de ce qu'on REGARDE.
-_TRANCHE_FLUX = {"nouveaux": 5, "bascules": 30, "retires": 5}
+#  ⚠️ 18/08 : plus de rattrapage des Limiteds déjà collectionnables — seules
+#  les bascules VUES EN DIRECT sortent, et elles sont rares. 10 suffit.
+_TRANCHE_FLUX = {"nouveaux": 5, "bascules": 10}
 
 
 @tasks.loop(minutes=30)
@@ -12851,26 +12853,28 @@ async def veille_roblox_task():
             if rel["code"] == 200:
                 evts = await roblox_module.comparer_et_enregistrer(rel["articles"])
 
-                #  ⚠️ SECOND RELEVE, ET IL EST INDISPENSABLE.
-                #  Le relevé ci-dessus trie par date de CREATION : il rend les
-                #  60 derniers articles créés par Roblox. Un accessoire créé il
-                #  y a six mois qui passe Limited aujourd'hui n'y est pas —
-                #  donc sa bascule n'était JAMAIS détectée. Défaut signalé par
-                #  le propriétaire le 16/08 (« des items deviennent limited
-                #  mais sont pas affichés ») et mesuré : sur les 10 articles
-                #  les plus récemment créés, ZERO Limited ; sur les 10 du flux
-                #  `SalesTypeFilter=2`, DIX.
-                #  On ne filtre pas sur « bascule détectée » : le propriétaire
-                #  veut aussi ceux déjà passés (« ils sont encore d'actualité »).
-                #  `deja_publie` empêche la répétition, le plafond empêche le
-                #  déversement.
+                #  ⚠️ SECOND RELEVE, ET IL EST INDISPENSABLE — POUR DETECTER.
+                #  Le relevé ci-dessus trie par date de CREATION. Un accessoire
+                #  créé il y a six mois qui passe Limited aujourd'hui peut en
+                #  être absent (183 Limiteds hors du catalogue général, mesuré
+                #  le 16/08) : sans ce second relevé, sa bascule ne serait
+                #  jamais VUE.
+                #  ⚠️ Depuis le 18/08, il ne PUBLIE plus rien par lui-même :
+                #  « uniquement les accessoires qui deviennent limited, pas ceux
+                #  qui le sont déjà devenus ». Il nourrit
+                #  `comparer_et_enregistrer`, qui pose `bascule_detectee` sur un
+                #  article connu non collectionnable devenu collectionnable —
+                #  et SEUL ce marqueur fait sortir une fiche « bascules ». Un
+                #  Limited vu pour la première fois déjà Limited est enregistré,
+                #  jamais publié. La première version rattrapait tous les
+                #  Limiteds récents ; le propriétaire a tranché contre.
                 await asyncio.sleep(roblox_module.PAUSE_ENTRE_RELEVES)
                 relc = await roblox_module.relever_collectionnables(limite=120)
                 if relc["code"] == 200:
-                    await roblox_module.comparer_et_enregistrer(relc["articles"])
+                    evts_c = await roblox_module.comparer_et_enregistrer(relc["articles"])
                     _vus = {x["asset_id"] for x in (evts.get("bascules") or [])}
-                    for _a in relc["articles"]:
-                        if _a.get("collectionnable") and _a["asset_id"] not in _vus:
+                    for _a in (evts_c.get("bascules") or []):
+                        if _a["asset_id"] not in _vus:
                             evts.setdefault("bascules", []).append(_a)
                             _vus.add(_a["asset_id"])
 
@@ -12880,7 +12884,10 @@ async def veille_roblox_task():
                 #  Même sélection que la publication : les vignettes doivent
                 #  couvrir exactement les articles qui vont sortir, ni plus
                 #  (requête gâchée) ni moins (fiche sans image).
-                _a_pub = [x for k in ("nouveaux", "bascules", "retires")
+                #  Deux flux, et c'est tout — tranché le 18/08 : « ce sera tout
+                #  pour les accessoires ». Le flux « à surveiller » (indice) ne
+                #  publie plus.
+                _a_pub = [x for k in ("nouveaux", "bascules")
                           for x in roblox_module.ordonner_publication(
                               evts.get(k) or [], _TRANCHE_FLUX.get(k, 5))]
 
@@ -12915,7 +12922,6 @@ async def veille_roblox_task():
                     #  passage (voir `publiable_dans`). L'inverse laisserait
                     #  une nouveauté « griller » sa propre bascule.
                     for flux, cle in (("bascules", "bascules"),
-                                      ("surveiller", "retires"),
                                       ("nouveautes", "nouveaux")):
                         salon = g.get_channel(roblox_module.salon_du_flux(c, flux))
                         #  Du plus ANCIEN au plus récent : Discord empile vers
@@ -12925,12 +12931,9 @@ async def veille_roblox_task():
                                 evts.get(cle) or [], _TRANCHE_FLUX.get(cle, 5)):
                             #  Trop vieux = plus une nouvelle : on ne republie
                             #  pas des archives apres une panne ou une remise a
-                            #  zero de la base.
+                            #  zero de la base. Pour « bascules » : seule une
+                            #  bascule VUE EN DIRECT passe.
                             if not roblox_module.age_publiable(a, flux):
-                                continue
-                            #  « A surveiller » ne publie que du solide.
-                            if flux == "surveiller" and roblox_module.indice(a)["note"] \
-                                    < roblox_module.SEUIL_SURVEILLER:
                                 continue
                             #  Déjà sorti ici, OU déjà sorti dans un flux plus
                             #  fort : on ne le republie pas ailleurs.
@@ -12940,8 +12943,12 @@ async def veille_roblox_task():
                             if _budget <= 0:
                                 _reporte += 1
                                 continue
+                            #  L'annonce du forum ou du newsroom qui parle de
+                            #  cet accessoire, si la veille d'actualité l'a lue.
+                            _lies = roblox_news_module.billets_lies(a.get("nom") or "")
                             if await roblox_ui.publier(g, salon, a, flux,
-                                                      image=_imgs.get(a["asset_id"])):
+                                                      image=_imgs.get(a["asset_id"]),
+                                                      lies=_lies):
                                 await roblox_module.marquer_publie(g.id, a["asset_id"], flux)
                                 _budget -= 1
                                 _publies += 1

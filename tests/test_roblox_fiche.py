@@ -110,11 +110,51 @@ def test_la_fiche_reste_lisible_sans_image():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_la_fiche_porte_les_chiffres_de_trading():
+    """La fiche « légère » du 18/08 : prix d'origine, et pour un Limited la
+    revente la plus basse et le stock. Plus de favoris, plus d'indice — « ce
+    sera tout pour les accessoires »."""
     brut = _texte(rp.construire_fiche(REQUIEM, "bascules", image=IMAGE))
 
-    for attendu in ("Stock émis", "Revente la plus basse", "Prix d'origine",
-                    "Favoris", "Statut", "Créé le"):
+    for attendu in ("Prix d'origine", "Revente la plus basse", "Stock émis"):
         assert attendu in brut, f"champ manquant : {attendu}"
+    assert "Indice" not in brut, "le bloc indice a disparu avec le flux « à surveiller »"
+
+
+def test_la_fiche_dit_quil_VIENT_de_passer_limited():
+    """« Tu dis bien qu'il vient de passer Limited » — mot pour mot."""
+    brut = _texte(rp.construire_fiche(REQUIEM, "bascules", image=IMAGE))
+    assert "VIENT DE PASSER LIMITED" in brut
+    assert "détecté à l'instant" in brut
+
+
+def test_la_fiche_distingue_limited_u():
+    brut = _texte(rp.construire_fiche(dict(REQUIEM, limited_u=1), "bascules"))
+    assert "VIENT DE PASSER LIMITED U" in brut
+
+
+def test_la_fiche_dune_nouveaute_le_dit_et_date_la_creation():
+    brut = _texte(rp.construire_fiche(dict(REQUIEM, collectionnable=0), "nouveautes"))
+    assert "NOUVEL ACCESSOIRE ROBLOX" in brut
+    assert "<t:" in brut, "horodatage natif de la création"
+    assert "Revente la plus basse" not in brut, (
+        "une nouveauté n'est pas un Limited : pas de chiffres de revente")
+
+
+def test_la_fiche_porte_la_description_de_roblox_courte():
+    a = dict(REQUIEM, description="A haunting melody carved in bone. " * 20,
+             description_fr="Une mélodie obsédante gravée dans l'os. " * 20)
+    brut = _texte(rp.construire_fiche(a, "bascules"))
+    assert "Une mélodie obsédante" in brut, "le français de Roblox d'abord"
+    assert "A haunting melody" not in brut, "pas les deux langues pour la description"
+    assert " …" in brut, "coupée proprement, jamais un pavé"
+
+
+def test_la_fiche_relie_lannonce_qui_parle_de_laccessoire():
+    lies = [{"titre": "New Limited: The Requiem", "lien": "https://devforum.roblox.com/t/1",
+             "domaine": "Annonces"}]
+    p = rp.construire_fiche(REQUIEM, "bascules", lies=lies).to_components()
+    brut = str(p)
+    assert "devforum.roblox.com/t/1" in brut, "le bouton 📰 Annonce mène au billet"
 
 
 def test_les_grands_nombres_sont_lisibles():
@@ -163,8 +203,8 @@ def test_un_multiplicateur_PERDANT_est_affiche_quand_meme():
     brut = _texte(rp.construire_fiche(FEDORA_PERDANT, "bascules", image=IMAGE))
 
     assert "×0.6" in brut
-    assert "SOUS le prix d'origine" in brut
-    assert "perd" in brut, "la conséquence doit être dite en clair"
+    assert "sous le prix d'origine" in brut, "la conséquence doit être dite en clair"
+    assert "🔴" in brut, "et en rouge — pas rangée dans le décor"
 
 
 def test_le_statut_collectionnable_se_voit():
