@@ -164,6 +164,18 @@ l'anglais sinon, jamais les deux. Détail dans le commit du 18/08.
 `outils/verif_veille_roblox.py` couvre aussi ce flux (section 8 bis) :
 **21 vérifiés, 0 en échec**.
 
+**Le 18/08, la fiche d'actualité a été refaite** (`roblox_news_contenu.py`) :
+essentiel du billet (la section « Key Takeaways » de Roblox), **traduit en
+français avec la mention du fournisseur** (DeepL si clé, sinon Google, sinon
+MyMemory — jamais bloquant), original anglais abrégé dessous, images pleine
+taille en galerie, vidéos, horodatage natif. Les billets « allez voir ce
+lien » sont écartés et comptés. `outils/apercu_fiche_actu.py forum <id>` montre
+une fiche réelle avant publication.
+
+⚠️ **Le maillon « un message atterrit dans un salon » a été OBSERVÉ** le 18/08 :
+capture du propriétaire, fiches publiées par le bot. Le HANDOFF peut cesser de
+le dire non vérifié.
+
 ### Deux défauts trouvés PAR la purge
 
 **1. Un `NameError` que personne ne pouvait voir.** Après le retrait des
