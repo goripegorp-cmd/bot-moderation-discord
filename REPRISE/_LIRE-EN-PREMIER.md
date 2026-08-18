@@ -139,6 +139,31 @@ déploiement le restera — à remettre à la main s'il en traîne.
 données de production restent intactes ; les effacer demande une décision
 explicite.
 
+### ⚠️ LE 8ᵉ CAS — les actualités Roblox n'ont JAMAIS pu démarrer (18/08)
+
+Constat du propriétaire : « rien n'est annoncé, absolument rien ». Cause :
+**`roblox_news_enabled` n'était écrit nulle part** — ni bouton, ni commande.
+`actif()` rendait toujours faux, le bloc actualité de la boucle ne s'exécutait
+jamais. Le salon se réglait, la santé se calculait, et rien ne sortait. Les
+sources, elles, étaient vivantes : 5/5 en HTTP 200, 29 billets frais le jour
+du constat.
+
+C'est mot pour mot le cas n°5 du tableau du §2 : « clé sans interface,
+dormante sur 100 % des serveurs ». **Réparé** : bouton « Actus » dans le
+panneau, santé affichée, « Relever maintenant » relève aussi le forum, ♻️
+efface aussi ces marques, la boucle journalise chaque passage.
+
+⚠️ **CE QUE ÇA IMPLIQUE POUR LE PROPRIÉTAIRE** : la valeur par défaut reste
+`False`. Après déploiement, il faut **cliquer une fois « Actus éteintes »**
+dans `/configure → 🎮 Veille Roblox` pour l'allumer. Sinon, rien ne change.
+
+Et **8 sources** désormais, dont la **salle de presse française officielle**
+(`about.roblox.com/fr/newsroom`) — le français quand Roblox l'a traduit,
+l'anglais sinon, jamais les deux. Détail dans le commit du 18/08.
+
+`outils/verif_veille_roblox.py` couvre aussi ce flux (section 8 bis) :
+**21 vérifiés, 0 en échec**.
+
 ### Deux défauts trouvés PAR la purge
 
 **1. Un `NameError` que personne ne pouvait voir.** Après le retrait des
