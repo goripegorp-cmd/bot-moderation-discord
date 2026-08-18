@@ -176,6 +176,30 @@ une fiche réelle avant publication.
 capture du propriétaire, fiches publiées par le bot. Le HANDOFF peut cesser de
 le dire non vérifié.
 
+### ⚠️ RÈGLE DES ACCESSOIRES — tranchée le 18/08, NE PAS « CORRIGER » À L'ENVERS
+
+Le 16/08 le propriétaire disait « même s'ils sont passés, affiche-les ». Le
+18/08 il a **inversé** : « uniquement les accessoires qui **deviennent** Limited
+ou Limited U, pas ceux qui le sont déjà devenus ; tu dis bien qu'il **vient** de
+passer, pas il y a un jour, deux jours ; les nouveaux **créés à partir de
+maintenant** ». C'est la règle en vigueur, et les tests du 16/08 ont été
+remplacés par ceux du 18/08 (`tests/test_roblox_limiteds.py`, section 2).
+
+- **bascules** : seul `bascule_detectee` fait sortir une fiche — posé par
+  `comparer_et_enregistrer` **uniquement si** notre dernière observation de
+  l'article (`vu_le`) date de moins de `FENETRE_DIRECTE_HEURES = 6` h. Un
+  Limited vu déjà Limited est enregistré, jamais publié, quel que soit son âge.
+- **nouveautés** : publiées seulement si créées il y a moins de 6 h.
+- **« à surveiller »** : ne publie plus (retiré de la boucle, du bouton, du
+  panneau).
+- **Le flux `SalesTypeFilter=2` n'est PAS trié par date** (mesuré : page 1 de
+  154 à 6 955 jours). Il ne sert qu'à détecter, **2 pages** par passage.
+- **Le français par identifiant** : `POST catalog.roblox.com/v1/catalog/items/details`
+  + `Accept-Language: fr-fr` (danse XSRF) rend nom et description FR pour
+  Assets et Bundles de tout âge. Remplace l'ancien `traduire()`.
+
+Aperçu réel avant publication : `outils/apercu_fiche_actu.py limited|accessoire|forum <id>`.
+
 ### Deux défauts trouvés PAR la purge
 
 **1. Un `NameError` que personne ne pouvait voir.** Après le retrait des
