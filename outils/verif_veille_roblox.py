@@ -26,6 +26,7 @@ import aiosqlite  # noqa: E402
 
 import roblox_panneau as panneau  # noqa: E402
 import roblox_veille as veille  # noqa: E402
+import roblox_news as news  # noqa: E402
 
 RESULTATS: list[tuple[str, bool | None, str]] = []
 
@@ -67,7 +68,9 @@ async def main() -> int:
     veille.setup(get_db=get_db, cfg=cfg, db_set=db_set, session=None,
                  log=lambda *a: None)
     panneau.setup(db_set=None, webhook_send=None, log=lambda *a: None)
+    news.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=lambda *a: None)
     await veille.init_db()
+    await news.init_db()
 
     # ── 1. Le catalogue complet ────────────────────────────────────────────
     print("\n═══ 1. RELEVÉ DU CATALOGUE (accessoires créés par Roblox) ═══")
@@ -188,6 +191,37 @@ async def main() -> int:
     await veille.marquer_publie(1, 4243, "nouveautes")
     note("une nouveauté n'empêche pas une bascule plus tard",
          await veille.publiable_dans(1, 4243, "bascules"))
+
+    # ── 8 bis. Les ACTUALITÉS — les 8 sources, forcées ────────────────────
+    print("\n═══ 8 bis. ACTUALITÉS — 8 sources officielles ═══")
+    total_frais, en_panne, fr_titres = 0, [], 0
+    for src in news.SOURCES:
+        rel = await news.relever(src, forcer=True)
+        if rel["code"] != 200:
+            en_panne.append(f"{src['cle']} ({rel['code']})")
+        total_frais += len(rel["billets"])
+        if src["cle"] == "newsroom_fr":
+            fr_titres = sum(1 for b in rel["billets"]
+                            if any(ch in (b.get("titre") or "") for ch in "éèàçêù"))
+        print(f"      {src['cle']:<12} {src['format']:<9} HTTP {rel['code']}  "
+              f"{len(rel['billets']):>2} frais")
+        await asyncio.sleep(2)
+    note("les 8 sources répondent", not en_panne,
+         "toutes en HTTP 200" if not en_panne else "en panne : " + ", ".join(en_panne))
+    note("il y a des actualités fraîches à publier", total_frais > 0,
+         f"{total_frais} billet(s) de moins de {news.FRAICHEUR_MAX_JOURS} jours")
+    note("la salle de presse FRANÇAISE rend des titres en français", fr_titres > 0,
+         f"{fr_titres} titre(s) accentué(s) — Roblox traduit, on cite")
+    #  Une fiche d'actualité se sérialise aussi sous les limites.
+    src_fr = next(s_ for s_ in news.SOURCES if s_["cle"] == "newsroom_fr")
+    rel_fr = await news.relever(src_fr, forcer=True)
+    if rel_fr["billets"]:
+        v = panneau.construire_actu(rel_fr["billets"][0])
+        note("la fiche d'actualité se sérialise sous les limites",
+             bool(v.to_components()) and _compter(v.to_components()) <= 40
+             and v.has_components_v2(),
+             f"{_compter(v.to_components())} composants · lien "
+             f"{(rel_fr['billets'][0].get('lien') or '—')[:60]}")
 
     # ── 9. Le maillon qu'on ne peut PAS prouver ici ────────────────────────
     print("\n═══ 9. L'ENVOI DISCORD ═══")

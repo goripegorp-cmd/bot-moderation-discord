@@ -12952,6 +12952,10 @@ async def veille_roblox_task():
         if guildes_news:
             for src in roblox_news_module.SOURCES:
                 rel = await roblox_news_module.relever(src)
+                #  Source non échue selon son propre rythme : on passe, sans
+                #  la compter en panne et sans dormir pour rien.
+                if rel.get("sautee"):
+                    continue
                 if rel["code"] != 200:
                     await asyncio.sleep(2)
                     continue

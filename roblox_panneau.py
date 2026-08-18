@@ -307,7 +307,10 @@ def construire_actu(billet: dict) -> LayoutView:
     Le DOMAINE est en titre, pas le titre du billet : dans un salon où tombent
     Studio, UGC, politique et événements, c'est la première chose qu'on cherche.
     """
-    lien = news.lien_billet(billet.get("topic_id"))
+    #  Le lien vient de la SOURCE quand elle l'a reconstruit et validé
+    #  (presse, newsroom) ; le forum n'a qu'un identifiant entier, d'où le
+    #  repli sur `lien_billet`. Jamais une URL recopiée telle quelle.
+    lien = billet.get("lien") or news.lien_billet(billet.get("topic_id"))
     items = [
         v2_title(f"📢 {_ou_tiret(billet.get('domaine'))}"),
         v2_subtitle(_ou_tiret(billet.get("titre"))),
@@ -774,7 +777,10 @@ class RobloxPanelV2(LayoutView):
 
             lus, envoyes, deja, refuses, en_panne = 0, 0, 0, 0, []
             for src in news.SOURCES:
-                rel = await news.relever(src)
+                #  ⚠️ `forcer=True` : un bouton de vérification qui respecterait
+                #  la cadence dirait « 0 lu » sur une source relevée dix minutes
+                #  plus tôt, et on la croirait morte.
+                rel = await news.relever(src, forcer=True)
                 if rel["code"] != 200:
                     en_panne.append(f"`{src['cle']}` ({_ou_tiret(rel['code'])})")
                     await asyncio.sleep(1.5)

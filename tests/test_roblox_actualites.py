@@ -97,7 +97,7 @@ async def test_lamorce_absorbe_le_vieux_et_laisse_sortir_la_semaine(monkeypatch)
     attendait le prochain billet du forum pour voir une seule fiche."""
     marques = []
 
-    async def _relever(src):
+    async def _relever(src, forcer=False):   # même signature que le vrai
         return {"billets": [_billet(1, 2), _billet(2, 6), _billet(3, 12),
                             _billet(4, 25)], "code": 200}
 
@@ -248,7 +248,7 @@ async def test_relever_actualites_publie_et_compte(monkeypatch):
     async def _cfg(gid):
         return {"roblox_news_enabled": True, "roblox_news_salon": 14}
 
-    async def _relever(src):
+    async def _relever(src, forcer=False):   # même signature que le vrai
         return {"billets": [_billet(10, 1), _billet(11, 2)], "code": 200}
 
     deja = {11}
@@ -297,7 +297,7 @@ async def test_relever_actualites_ne_marque_pas_un_envoi_refuse(monkeypatch):
     async def _cfg(gid):
         return {"roblox_news_enabled": True, "roblox_news_salon": 14}
 
-    async def _relever(src):
+    async def _relever(src, forcer=False):   # même signature que le vrai
         return {"billets": [_billet(10, 1)], "code": 200}
 
     marques = []
