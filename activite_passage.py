@@ -256,18 +256,31 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
         vues = [msgs.construire(g[p], palier=p, salon_retour=salon_retour,
                                 role_ping=_roles.get(p))
                 for p in ("doux", "rappel", "retrait")]
+        #  ⚠️ ON NE BRÛLE LA SEMAINE QUE SI L'ENVOI A ABOUTI.
+        #  La version précédente marquait la semaine dans TOUS les cas, y
+        #  compris quand `remplacer` levait (salon interdit, message trop
+        #  long, Discord en vrac) : l'exception était journalisée puis avalée,
+        #  la semaine passait pour faite, et le rappel ne partait JAMAIS —
+        #  chaque semaine, indéfiniment. Trouvé le 19/08 par un audit adverse.
+        #
+        #  ⚠️ « Aucun message envoyé » N'EST PAS un échec : quand personne
+        #  n'est absent, `remplacer` rend 0 et c'est un succès — on marque,
+        #  sinon on retenterait à chaque passage de la journée. C'est la
+        #  distinction que l'ancien code ne faisait pas.
+        abouti = False
         try:
             envoyes += await msgs.remplacer(guild, salon, cle, vues, cfg_act)
+            abouti = True
         except Exception as ex:
-            _log(f"[activite passage rappel {nom}] {ex}")
+            _log(f"[activite passage rappel {nom}] {ex} — semaine NON marquée, "
+                 f"nouvelle tentative au prochain passage du jour")
 
-        #  Marquer la semaine MÊME si aucun message n'est parti (personne
-        #  d'absent) : sinon on retenterait à chaque passage de la journée.
-        try:
-            await activite.ecrire_config_role(
-                guild.id, cle, derniere_semaine=semaine_courante)
-        except Exception as ex:
-            _log(f"[activite passage marque semaine {nom}] {ex}")
+        if abouti:
+            try:
+                await activite.ecrire_config_role(
+                    guild.id, cle, derniere_semaine=semaine_courante)
+            except Exception as ex:
+                _log(f"[activite passage marque semaine {nom}] {ex}")
 
     rap["actions"]["messages_envoyes"] = envoyes
     rap["actions"]["semaine"] = semaine_courante

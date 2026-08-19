@@ -12761,8 +12761,44 @@ async def activite_passage_task():
     for g in list(bot.guilds):
         try:
             if not await activite_module.actif(g.id):
+                #  ⚠️ LE DIRE. Sans cette ligne, « éteint », « allumé et
+                #  parfait » et « allumé mais inerte » donnaient EXACTEMENT
+                #  les mêmes logs Railway : aucun. Le propriétaire a dû
+                #  demander « est-ce que le système AFK est opérationnel ? »
+                #  parce que rien, nulle part, ne permettait d'y répondre
+                #  (19/08/2026). Le système est opt-in strict : interrupteur
+                #  ET cible. On dit lequel des deux manque.
+                try:
+                    _ca = await activite_module.config(g.id)
+                    _pourquoi = ("interrupteur éteint"
+                                 if not _ca.get("activite_enabled")
+                                 else "allumé mais AUCUNE cible "
+                                      "(ni « tout le monde », ni rôle surveillé)")
+                except Exception:
+                    _pourquoi = "configuration illisible"
+                print(f"[activite_passage_task] {g.name} ({g.id}) : inactif — {_pourquoi}")
                 continue
             rap = await activite_pass.passage(g)
+            #  ⚠️ LE BILAN, TOUJOURS — même quand rien ne bouge. C'est la seule
+            #  chose qui distingue « personne n'est absent » de « les sondes ne
+            #  captent rien ». `observation` dit depuis combien de jours le bot
+            #  observe : sous le seuil, il REFUSE de juger, et c'est normal.
+            _cl = rap.get("classement") or {}
+            _ac = rap.get("actions") or {}
+            _sans = int((_ac.get("retraits") or {}).get("sans_etiquette", 0) or 0)
+            print(f"[activite_passage_task] {g.name} ({g.id}) : "
+                  f"suivis={_cl.get('suivis', 0)} · actifs={_cl.get('actifs', 0)} · "
+                  f"doux={_cl.get('doux', 0)} · rappel={_cl.get('rappel', 0)} · "
+                  f"retrait={_cl.get('retrait', 0)} · revenus={_cl.get('revenus', 0)} · "
+                  f"observation={rap.get('observation', 0)} j"
+                  + (" · ⚠️ suivi MUET (aucune activité mesurée)"
+                     if rap.get("suivi_muet") else "")
+                  #  ⚠️ CE COMPTEUR ÉTAIT ÉCRIT ET LU NULLE PART. Le résumé au
+                  #  staff annonçait « N à dépouiller » puis « 0 dépouillé(s) »
+                  #  sans jamais dire pourquoi — la faute exacte qui avait fait
+                  #  retirer le second compteur le 12/08.
+                  + (f" · ⚠️ {_sans} dépouillement(s) REFUSÉ(S) : rôle AFK de "
+                     f"palier 2 absent ou au-dessus du bot" if _sans else ""))
             #  On ne poste au staff QUE s'il s'est passé quelque chose : une
             #  notification quotidienne « rien à signaler » se fait ignorer, puis
             #  masquer, et le jour où le garde-fou parle personne ne le voit.

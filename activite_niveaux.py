@@ -377,7 +377,24 @@ async def poser_niveau(guild, member, niveau: int, cfg_act: dict) -> bool:
     for i, r in enumerate(voulus, start=1):
         if int(cfg_act.get(f"activite_role_niveau{niveau}") or 0) == r.id:
             cible = r
-    a_retirer = [r for r in voulus if cible is None or r.id != cible.id]
+    #  ⚠️ SANS ÉTIQUETTE POSABLE, ON REFUSE — ET ON NE TOUCHE À RIEN.
+    #  Le garde-fou du 12/08 (activite_escalade.py) refuse le dépouillement
+    #  quand `poser_niveau` rend False. Il était CONTOURNABLE : si le rôle de
+    #  CE palier n'est pas configuré (id 0), a été supprimé, ou est passé
+    #  au-dessus du bot, `cible` restait None — mais `a_retirer` contenait
+    #  alors le rôle de l'AUTRE palier, que le membre PORTE déjà. Le
+    #  `remove_roles` réussissait, `fait` passait à True, la fonction rendait
+    #  True, et le garde-fou laissait passer : le membre perdait TOUS ses
+    #  rôles sans étiquette AFK ni masquage. Exactement l'accident que le
+    #  commentaire du 12/08 déclare interdit — trouvé le 19/08 par un audit
+    #  adverse, jamais par un test.
+    #
+    #  Retirer l'étiquette du palier précédent sans pouvoir poser la nouvelle
+    #  laisserait de toute façon le membre non étiqueté : il n'y a aucun cas
+    #  où continuer est le bon choix.
+    if cible is None:
+        return False
+    a_retirer = [r for r in voulus if r.id != cible.id]
     a_retirer = [r for r in a_retirer if r in member.roles and utilisable(guild, r)]
 
     fait = False
