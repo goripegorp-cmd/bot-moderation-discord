@@ -12172,6 +12172,17 @@ async def _post_onboarding_welcome(member):
             color=0x5865F2,
         )
         try:
+            #  ⚠️ L'ENVOI AVAIT DISPARU — RÉTABLI LE 19/08/2026.
+            #  Le message d'accueil était CONSTRUIT (`embed`) puis jamais
+            #  envoyé : la ligne `_ow = await ch.send(...)` portait une vue de
+            #  boutons d'animation (Parcours / hub / notifications) et est
+            #  partie avec eux à la purge. Restait `getattr(_ow, 'id', 0)`,
+            #  donc un `NameError` avalé par le `except` — et AUCUN nouveau
+            #  membre n'a été accueilli depuis. Trouvé par
+            #  `outils/verif_portees.py`, que `verif_noms.py` ne pouvait pas
+            #  voir (il ignore les portées).
+            #  L'accueil n'est pas de l'animation : il reste. Sans les boutons.
+            _ow = await ch.send(embed=embed)
             # owner 2026-06-30 : la carte RESTE visible puis est purgée par welcome_cleanup_task.
             try:
                 await _track_welcome_msg(guild.id, ch.id, getattr(_ow, 'id', 0))
@@ -21503,10 +21514,16 @@ async def on_ready():
     # (Les giveaways sont partis avec le périmètre supprimé : plus de vue à
     #  réenregistrer. La classe avait survécu à la purge par cet unique appel.)
     # Phase 40 — views persistantes (custom_ids stables, callbacks utilisent i.user.id)
+    #  ⚠️ SANS CETTE LIGNE, LE BOUTON LANGUE DE L'ACCUEIL NE RÉPOND PAS.
+    #  La purge d'animation avait remplacé ce `bot.add_view` par un `pass` en
+    #  emportant `OnboardingView` : le bouton `onb_lang` restait posé sur chaque
+    #  carte d'accueil, plus personne ne l'écoutait, et Discord affichait « n'a
+    #  pas répondu à temps » après trois secondes, devant chaque nouveau membre.
+    #  Constaté par le propriétaire le 19/08/2026, capture à l'appui.
     try:
-        pass  # bloc vidé (module détaché)
+        bot.add_view(AccueilLangueView())
     except Exception as ex:
-        print(f"[on_ready add_view OnboardingView] {ex}")
+        print(f"[on_ready add_view AccueilLangueView] {ex}")
     # (Confessions retirées : plus de vue persistante à réenregistrer.)
     # (Hub d'engagement retiré : /hub et ses commandes sont supprimés, cette vue
     #  persistante était le dernier fil qui le maintenait vivant au boot.)
@@ -22455,9 +22472,10 @@ async def on_ready():
     # (Le planificateur de World Boss est parti avec les événements.)
     # Phase 195 : Programme du jour (annonce quotidienne calme du planning combat)
     # Vitrine communautaire hebdo (dimanche 19h, salon hub, zéro ping)
-    # Phase 238 : récap hebdo en MP (opt-in strict)
-    if not weekly_activity_recap_task.is_running():
-        weekly_activity_recap_task.start()
+    #  (Récap hebdo en MP retiré le 19/08/2026 : le module `dm_notify` qui
+    #   envoyait les MP, et l'opt-in `dm_event_optin` dont il dépendait, sont
+    #   partis à la purge. Il ne restait qu'une boucle qui se réveillait toutes
+    #   les heures pour écrire un marqueur puis lever un NameError.)
 
     # Phase 43 : Trésor Flash + Rituel du Soir + Tag Royale + Anniversaire
 
@@ -24517,9 +24535,12 @@ def _welcome_quick_buttons(guild):
         v = discord.ui.View(timeout=None)
         for b in btns[:4]:   # max 4 liens → on laisse la place au bouton langue (≤5/rangée)
             v.add_item(b)
-        # owner 2026-06-30 : INTERNATIONAL — bouton « 🌍 Ma langue » TOUJOURS présent à l'accueil
-        # (custom_id onb_lang matché globalement par OnboardingView, enregistrée au boot). Le
-        # nouveau membre choisit sa langue tout de suite. Bilingue.
+        # owner 2026-06-30 : INTERNATIONAL — bouton « 🌍 Ma langue » TOUJOURS présent à l'accueil.
+        # Le nouveau membre choisit sa langue tout de suite. Bilingue.
+        #  ⚠️ custom_id `onb_lang` capté par AccueilLangueView, réenregistrée au boot
+        #  (on_ready, Phase 40). Si ce `bot.add_view` disparaît, CE BOUTON MENT : il
+        #  s'affiche et ne répond pas. C'est arrivé — la purge d'animation avait
+        #  emporté l'ancienne OnboardingView en laissant le bouton ici (19/08/2026).
         v.add_item(discord.ui.Button(label="🌍 Ma langue / My language",
                                      style=discord.ButtonStyle.secondary, custom_id="onb_lang"))
         return v
@@ -25862,25 +25883,15 @@ async def on_message(msg):
     if msg.author.id != bot.user.id:
         asyncio.create_task(handle_auto_help(msg))
 
-    # Phase 145 : reward "comeback" pour dormants qui reviennent poster.
-    # audit 2026-07-03 : BACKGROUNDÉ — faisait un hit DB (+reply) AWAITÉ sur CHAQUE message d'un
-    # membre. Aucune dépendance d'ordre avec la suite → hors du chemin bloquant on_message.
-    if (msg.author and not msg.author.bot and isinstance(msg.author, discord.Member)):
-        async def _bg_comeback(m):
-            try:
-                if ok and amount > 0:
-                    try:
-                        await m.reply(
-                            f"🎉 **Bon retour, {m.author.mention} !** "
-                            f"Tu reçois `+{amount:,}` coins de bienvenue.",
-                            mention_author=False,
-                        )
-                    except Exception:
-                        pass
-            except Exception as ex:
-                print(f"[on_message dormant_comeback] {ex}")
-        asyncio.create_task(_bg_comeback(msg))
-    
+    #  ⚠️ RÉCOMPENSE « COMEBACK » RETIRÉE — VESTIGE DE PURGE, 19/08/2026.
+    #  Le bloc annonçait « +N coins de bienvenue » à un dormant qui revient.
+    #  Le calcul de `ok` et `amount` vivait dans le système de coins, purgé
+    #  avec l'animation ; l'ANNONCE, elle, était restée. Résultat mesuré en
+    #  production : `NameError: name 'ok' is not defined` à CHAQUE message de
+    #  membre, une dizaine de fois par jour dans les logs Railway, avalé par
+    #  le `except` — donc invisible autrement que par cette ligne.
+    #  Les coins n'existent plus : on ne peut pas en promettre. Le bloc part.
+
     # Ignorer les bots pour le reste du traitement
     if msg.author.bot:
         return
@@ -37716,6 +37727,63 @@ class LangSelectButton(
 
 
 
+class AccueilLangueView(discord.ui.View):
+    """Le bouton « 🌍 Ma langue / My language » de la carte d'accueil.
+
+    ⚠️ VUE PERSISTANTE — `timeout=None` + custom_id stable, réenregistrée au
+    boot par `bot.add_view(AccueilLangueView())`. SANS ce réenregistrement,
+    personne n'écoute le custom_id `onb_lang` : Discord attend trois secondes
+    puis affiche « n'a pas répondu à temps ». C'est exactement ce qui est
+    arrivé quand la purge a emporté `OnboardingView` en laissant le bouton
+    posé sur chaque carte d'accueil (constaté par le propriétaire le 19/08).
+
+    ⚠️ ELLE NE DÉCIDE RIEN. Elle ouvre le sélecteur qui existe déjà —
+    `LangSelectButton` → `_i18n_apply_lang` (préférence + rôle drapeau +
+    confirmation traduite). Un second chemin de choix de langue divergerait du
+    premier au premier correctif. Ne PAS en écrire un ici.
+
+    Ne porte QUE la langue : les anciens boutons hub / parcours / notifications
+    appartenaient à l'animation retirée, ils ne reviennent pas.
+    """
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🌍 Ma langue / My language",
+                       style=discord.ButtonStyle.secondary,
+                       custom_id="onb_lang")
+    async def _cb_langue(self, i: discord.Interaction, _b: discord.ui.Button):
+        #  ⚠️ ACQUITTER AVANT TOUTE LECTURE : `lang_of` touche la base, et un
+        #  démarrage à froid dépasserait les trois secondes de Discord.
+        if not await _safe_defer(i, ephemeral=True):
+            return
+        try:
+            actuelle = await i18n_module.lang_of(
+                user_id=getattr(getattr(i, "user", None), "id", None),
+                interaction=i,
+                guild_id=(i.guild.id if getattr(i, "guild", None) else None))
+        except Exception as ex:
+            print(f"[AccueilLangueView lang_of] {ex}")
+            actuelle = "fr"
+        try:
+            v = discord.ui.View(timeout=None)
+            #  Les SIX langues supportées, pas seulement celles du serveur : la
+            #  préférence est personnelle (elle suit le membre d'un serveur à
+            #  l'autre) et le catalogue les traduit toutes.
+            for _l in i18n_module.SUPPORTED_LANGS:
+                v.add_item(LangSelectButton(_l))
+            entete = i18n_module.t("lang.choose", actuelle)
+            await _safe_followup(
+                i,
+                content=(f"🌍 **{entete}**\n"
+                         f"— {i18n_module.lang_choice_label(actuelle)}"),
+                view=v)
+        except Exception as ex:
+            print(f"[AccueilLangueView] {ex}")
+            await _safe_followup(
+                i, content="❌ Sélecteur de langue indisponible — réessaie dans un instant.")
+
+
 # ─── HUB D'ENGAGEMENT (5 boutons persistants, custom_ids stables) ─────────────
 
 
@@ -37944,71 +38012,6 @@ _WORLD_BOSS_DEFAULT_HOUR = 21     # 21h heure locale (Europe/Paris)
 
 
 
-async def _post_daily_agenda(guild) -> bool:
-    """Poste l'annonce « Programme du jour » du guild (au plus une fois/jour).
-
-    Salon (best-effort, helpers existants) : salon d'annonce/recap configuré
-    (event_log_channel → hub_channel) → salon de la catégorie Événements →
-    1er salon « chatty ». JAMAIS de ticket/log/RO (filtres déjà inclus dans les
-    helpers). Sans ping (allowed_mentions=none), sans bouton (v2_recap_view),
-    auto-supprimée en fin de journée via le cleanup persistant."""
-    try:
-        c = await cfg(guild.id)
-        if not c.get('daily_agenda_enabled', True):
-            return False
-
-        # Anti-doublon par jour : marqueur cfg 'daily_agenda_last_date' (YYYY-MM-DD FR).
-        day = _today_str_p41()
-        if str(c.get('daily_agenda_last_date', '') or '') == day:
-            return False
-
-        # Salon : annonce/recap configuré → catégorie Événements → chatty.
-        ch = await _find_event_recap_channel(guild)
-        if not ch:
-            try:
-                cat = await _ensure_events_category(guild)
-                me = guild.me
-                if cat:
-                    for cand in cat.text_channels:
-                        try:
-                            if me and cand.permissions_for(me).send_messages:
-                                ch = cand
-                                break
-                        except Exception:
-                            continue
-            except Exception:
-                pass
-        if not ch:
-            return False
-
-        now = datetime.now(_TZ_P41)
-        # I3 : accroche multilingue (langues officielles du serveur, compacte).
-        _lead = await _i18n_server_lines(guild, "agenda.lead")
-        # Durée de vie : reste jusqu'à ~minuit puis se purge (au moins 1h).
-        secs_until_eod = max(3600, (23 - now.hour) * 3600 + (59 - now.minute) * 60)
-        panel = v2_recap_view(
-            "📅 Programme du jour",
-            body,
-            color=Palette.INFO,
-            footer=f"Programme du {day} · se supprime en fin de journée",
-        )
-        try:
-            msg = await ch.send(view=panel, allowed_mentions=discord.AllowedMentions.none())
-            await _register_for_cleanup(msg, secs_until_eod, 'daily_agenda')
-        except Exception as ex:
-            print(f"[_post_daily_agenda send] {ex}")
-            return False
-
-        # Marqueur anti-doublon (db_set invalide le cache cfg → relu au prochain tour).
-        try:
-            await db_set(guild.id, 'daily_agenda_last_date', day)
-        except Exception as ex:
-            print(f"[_post_daily_agenda mark] {ex}")
-        print(f"[DAILY AGENDA] guild={guild.id} ch={ch.id} day={day}")
-        return True
-    except Exception as ex:
-        print(f"[_post_daily_agenda] {ex}")
-        return False
 
 
 
@@ -38054,37 +38057,8 @@ async def _post_daily_agenda(guild) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@tasks.loop(hours=1)
-async def weekly_activity_recap_task():
-    """Lundi ~10h Europe/Paris : DM un récap d'activité aux membres OPT-IN MP (📩)
-    et ACTIFS cette semaine. Strictement opt-in (réutilise dm_event_optin) → aucun
-    MP de masse (le module `dm_notify` qui les envoyait a été retiré le 12/08/2026). Anti-doublon par guild via le
-    marqueur cfg 'weekly_recap_last_date'. Fail-open par guild."""
-    try:
-        from zoneinfo import ZoneInfo as _ZI
-        tz = _ZI('Europe/Paris')
-    except Exception:
-        tz = timezone.utc
-    nowp = datetime.now(tz)
-    if nowp.weekday() != 0 or nowp.hour != 10:
-        return
-    day = nowp.strftime('%Y-%m-%d')
-    for guild in list(bot.guilds):
-        try:
-            c = await cfg(guild.id)
-            if str(c.get('weekly_recap_last_date', '') or '') == day:
-                continue
-            # Marqueur AVANT envoi (anti double-DM si le loop repasse dans l'heure).
-            await db_set(guild.id, 'weekly_recap_last_date', day)
-            if sent:
-                print(f"[WEEKLY RECAP] guild={guild.id} sent={sent}")
-        except Exception as ex:
-            print(f"[weekly_activity_recap_task guild={guild.id}] {ex}")
 
 
-@weekly_activity_recap_task.before_loop
-async def _weekly_recap_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41421,8 +41395,10 @@ async def admin_journey_cmd(i: discord.Interaction, membre: discord.Member):
                 (gid, membre.id),
             ) as cur:
                 ach_count = int((await cur.fetchone() or [0])[0])
-        # Class
-        cls_str = f"{cls['emoji']} {cls['name']}" if cls else "_Aucune_"
+        #  ⚠️ « Classe RP » retirée le 19/08/2026 : le système de classes est
+        #  parti à la purge, mais la ligne qui le LISAIT était restée. Elle
+        #  levait `NameError: name 'cls' is not defined` À CHAQUE APPEL — la
+        #  commande entière rendait « ❌ Erreur » au lieu de la fiche membre.
         # Titles
         titles = await _get_user_titles(gid, membre.id)
         # Ladder
@@ -41459,7 +41435,6 @@ async def admin_journey_cmd(i: discord.Interaction, membre: discord.Member):
                 f"🏅 Achievements : `{ach_count}`\n"
                 f"💝 Shoutouts reçus : `{shouts}`\n\n"
                 f"## ⚔️ Profil\n"
-                f"**Classe RP :** {cls_str}\n"
                 f"**Titres :** `{len(titles)}` ({', '.join(t['title'][:30] for t in titles[:3])})\n"
                 f"**Ladder :** {_rating_division(ladder['rating'])} `{ladder['rating']}` "
                 f"(W:{ladder['wins']} L:{ladder['losses']})\n\n"
@@ -42523,109 +42498,6 @@ async def achievement_post_cmd(i: discord.Interaction, membre: discord.Member,
 
 
 # Phase 120 : retiré (debug inutilisé, ex-/game_stats_set)
-@app_commands.describe(
-    game_id="ID du jeu (depuis /game_add)",
-    players_online="Nb joueurs en ligne",
-    visits_total="Total visites",
-    favorites="Nb favorites",
-)
-async def game_stats_set_cmd(i: discord.Interaction, game_id: str,
-                              players_online: int = 0, visits_total: int = 0,
-                              favorites: int = 0):
-    if not i.guild:
-        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
-        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
-    if not await _safe_defer(i):
-        return
-    try:
-        c = await cfg(i.guild.id)
-        hub_id = int(c.get('hub_channel', 0) or 0)
-        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
-        if not hub_ch:
-            return await _safe_followup(i, content="❌ Hub non configuré.")
-        # Get game
-        game = next((g for g in games if g["id"] == game_id), None)
-        game_name = game["name"] if game else game_id
-        # Get existing panel or create
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT channel_id, message_id FROM game_stats_panels "
-                "WHERE guild_id=? AND game_id=?",
-                (i.guild.id, game_id),
-            ) as cur:
-                row = await cur.fetchone()
-        # Phase 84 : LayoutView V2 — stats live avec thumb game image
-        _gs_name = game_name
-        _gs_online = players_online
-        _gs_visits = visits_total
-        _gs_favs = favorites
-        _gs_image = game.get("image_url") if game else None
-        _gs_place = game.get("place_id") if game else None
-        _gs_play_url = (
-            f"https://www.roblox.com/games/{_gs_place}" if _gs_place else None
-        )
-        _gs_now_ts = int(datetime.now(timezone.utc).timestamp())
-
-        class _GameStatsLayout(LayoutView):
-            def __init__(self):
-                super().__init__(timeout=None)
-                items = [
-                    v2_title(f"📊 Stats live — {_gs_name}"),
-                    v2_subtitle(f"Mis à jour <t:{_gs_now_ts}:R>"),
-                    v2_divider(),
-                ]
-                # Stats détail avec thumb game image si dispo
-                stats_text = (
-                    f"🟢 **Joueurs en ligne :** `{_gs_online}`\n"
-                    f"👁️ **Visites totales :** `{_gs_visits:,}`\n"
-                    f"⭐ **Favorites :** `{_gs_favs:,}`"
-                )
-                if _gs_image:
-                    items.append(v2_section(
-                        v2_body(stats_text),
-                        accessory=v2_thumb(_gs_image),
-                    ))
-                else:
-                    items.append(v2_body(stats_text))
-                if _gs_play_url:
-                    items.append(v2_divider())
-                    items.append(v2_body(f"🔗 [Jouer maintenant]({_gs_play_url})"))
-                self.add_item(v2_container(*items, color=0x00A2FF))
-
-        layout = _GameStatsLayout()
-        # Edit existing OR send new
-        msg = None
-        if row and row[1]:
-            try:
-                old_ch = i.guild.get_channel(int(row[0]))
-                if old_ch:
-                    old_msg = await old_ch.fetch_message(int(row[1]))
-                    await old_msg.edit(view=layout)
-                    msg = old_msg
-            except Exception:
-                msg = None
-        if not msg:
-            msg = await hub_ch.send(view=layout, allowed_mentions=discord.AllowedMentions.none())
-            try:
-                await msg.pin()
-            except Exception:
-                pass
-        async with get_db() as db:
-            await db.execute(
-                "INSERT INTO game_stats_panels"
-                "(guild_id, game_id, channel_id, message_id, players_online, visits_total, favorites) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(guild_id, game_id) DO UPDATE SET "
-                "channel_id=?, message_id=?, players_online=?, visits_total=?, favorites=?, "
-                "updated_at=CURRENT_TIMESTAMP",
-                (i.guild.id, game_id, msg.channel.id, msg.id, players_online, visits_total, favorites,
-                 msg.channel.id, msg.id, players_online, visits_total, favorites),
-            )
-            await db.commit()
-        await _safe_followup(i, content=f"✅ Panel `{game_id}` mis à jour.")
-    except Exception as ex:
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 async def _resolve_update_vote(uv_id: int):
