@@ -12896,7 +12896,7 @@ async def veille_roblox_task():
         _sa = {"lus": 0, "candidats": 0, "hors_fenetre": 0, "deja": 0,
                "echecs": 0, "plafonnes": 0}
         _sn = {"lus": 0, "sautees": 0, "pannes": 0, "deja": 0,
-               "echecs": 0, "plafonnes": 0}
+               "echecs": 0, "plafonnes": 0, "absorbes": 0}
 
         # ── Les articles ────────────────────────────────────────────────────
         if guildes_items:
@@ -13042,23 +13042,44 @@ async def veille_roblox_task():
                     #  récent — un salon d'actualité se lit aussi de haut en
                     #  bas. `ordonner_publication` trie sur `cree_le`, que les
                     #  billets portent comme les articles.
-                    #  ⚠️ LE PLAFOND SE COMPTE, IL NE SE TAIT PAS.
-                    #  `ordonner_publication` ne garde que les N plus récents
-                    #  de CETTE source. Les autres ne passent devant aucune
-                    #  des portes ci-dessous : ils n'étaient donc comptés
-                    #  nulle part, et le bilan ne s'additionnait plus.
-                    #  Mesuré sur Railway le 19/08 : « 11 lus · 6 déjà publiés
-                    #  · 0 publication » — cinq billets semblaient disparaître.
-                    #  Ils ne disparaissent pas (ils repassent au tour suivant),
-                    #  mais un bilan qui ne se boucle pas fait chercher une
-                    #  panne là où il n'y en a pas.
-                    _lot_b = roblox_module.ordonner_publication(
-                        rel["billets"], roblox_news_module.MAX_BILLETS_PAR_PASSAGE)
-                    _sn["plafonnes"] += max(0, len(rel.get("billets") or []) - len(_lot_b))
-                    for b in _lot_b:
+                    #  ⚠️ L'ORDRE DES TROIS ÉTAPES EST LE CORRECTIF LUI-MÊME.
+                    #  Avant le 19/08, on TRONQUAIT puis on déduplifiait : un
+                    #  billet déjà sorti occupait une des cinq places à chaque
+                    #  passage, indéfiniment, et un billet tombé au rang 6 n'y
+                    #  remontait JAMAIS (la sélection est déterministe — tri
+                    #  par date, `[:5]` — et les deux seuls retraits du lot,
+                    #  épinglage et 30 jours, frappent le plus VIEUX d'abord).
+                    #  Il n'existe aucune file d'attente dans le dépôt : le
+                    #  billet affamé était perdu, et le journal affirmait le
+                    #  contraire. Enquête à trois angles + réfutation adverse,
+                    #  19/08/2026.
+                    #
+                    #  1. DÉDUPLIQUER D'ABORD, sur TOUT le lot : ce qui est
+                    #     déjà sorti ne consomme plus de place.
+                    _neufs = []
+                    for b in (rel.get("billets") or []):
                         if await roblox_news_module.deja_publie(g.id, b["topic_id"]):
                             _sn["deja"] += 1
-                            continue
+                        else:
+                            _neufs.append(b)
+                    #  2. ABSORBER LES TROP VIEUX. Une fois la déduplication
+                    #     faite en premier, tout ce qui reste est publiable —
+                    #     y compris des billets de trois semaines jamais
+                    #     sortis. Les envoyer serait « déverser l'historique
+                    #     dans le salon », interdit (ROBLOX.md). On les marque
+                    #     sortis sans les envoyer : ils quittent le circuit et
+                    #     libèrent la place aux billets frais.
+                    _frais_b, _abs = await roblox_news_module.absorber_vieux(
+                        g.id, _neufs)
+                    _sn["absorbes"] += _abs
+                    #  3. TRONQUER EN DERNIER — et le plafond devient enfin
+                    #     ce que le journal prétendait : les écartés sont des
+                    #     billets FRAIS et NON PUBLIÉS, donc les cinq publiés
+                    #     de ce passage leur laisseront la place au suivant.
+                    _lot_b = roblox_module.ordonner_publication(
+                        _frais_b, roblox_news_module.MAX_BILLETS_PAR_PASSAGE)
+                    _sn["plafonnes"] += max(0, len(_frais_b) - len(_lot_b))
+                    for b in _lot_b:
                         if _budget <= 0:
                             _reporte += 1
                             continue
@@ -13095,12 +13116,19 @@ async def veille_roblox_task():
                   f"{_sa['deja']} déjà sorti(s) · {_sa['plafonnes']} au-delà du "
                   f"quota du passage · {_sa['echecs']} échec(s) d'envoi")
         if guildes_news:
+            #  ⚠️ « repris au prochain passage » N'EST VRAI QUE DEPUIS LE
+            #  CORRECTIF DU 19/08. Tant que la troncature précédait la
+            #  déduplication, un billet plafonné était perdu — le journal
+            #  affirmait exactement l'inverse de ce que faisait le code.
             print(f"[veille_roblox_task]   actualités : {_sn['lus']} billet(s) lu(s) · "
                   f"{_sn['sautees']} source(s) sautée(s) (cadence) · "
                   f"{_sn['pannes']} source(s) en panne · {_sn['deja']} déjà "
-                  f"publié(s) · {_sn['plafonnes']} au-delà du quota "
-                  f"({roblox_news_module.MAX_BILLETS_PAR_PASSAGE}/source, repris au "
-                  f"prochain passage) · {_sn['echecs']} échec(s) d'envoi")
+                  f"publié(s) · {_sn['absorbes']} absorbé(s) (trop vieux, "
+                  f"> {roblox_news_module.AMORCE_GARDE_JOURS} j) · "
+                  f"{_sn['plafonnes']} au-delà du quota "
+                  f"({roblox_news_module.MAX_BILLETS_PAR_PASSAGE}/source, frais et non "
+                  f"publiés — repris au prochain passage) · "
+                  f"{_sn['echecs']} échec(s) d'envoi")
         #  ⚠️ ZÉRO PUBLICATION → ON DIT L'ÉTAT DE CHAQUE SERVEUR. Le cas qui a
         #  coûté onze heures au propriétaire : un flux allumé, l'autre éteint,
         #  et un bilan qui ne montrait que le total.

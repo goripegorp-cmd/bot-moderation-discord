@@ -967,6 +967,7 @@ class RobloxPanelV2(LayoutView):
                         "sortir. Réglez « 📢 Actualité Roblox » ci-dessus.")
 
             lus, envoyes, deja, refuses, en_panne, pointeurs = 0, 0, 0, 0, [], 0
+            absorbes = 0
             for src in news.SOURCES:
                 #  ⚠️ `forcer=True` : un bouton de vérification qui respecterait
                 #  la cadence dirait « 0 lu » sur une source relevée dix minutes
@@ -978,15 +979,26 @@ class RobloxPanelV2(LayoutView):
                     continue
                 lus += len(rel["billets"])
                 pointeurs += int(rel.get("pointeurs") or 0)
-                #  Même ordre que la boucle : du plus ancien au plus récent,
-                #  et le même plafond par source.
-                for b in veille.ordonner_publication(
-                        rel["billets"], news.MAX_BILLETS_PAR_PASSAGE):
-                    if envoyes >= veille.MAX_PUBLICATIONS_PAR_PASSAGE:
-                        break
+                #  ⚠️ MÊME ORDRE QUE LA BOUCLE, ET C'EST OBLIGATOIRE :
+                #  dédupliquer, absorber les trop vieux, PUIS tronquer. La
+                #  version précédente tronquait en premier — un billet déjà
+                #  sorti gardait une des cinq places à chaque relevé, et le
+                #  rang 6 n'y remontait jamais (voir `news.absorber_vieux`).
+                #  Deux chemins de publication qui divergent, c'est un défaut
+                #  corrigé d'un côté et vivant de l'autre.
+                _neufs = []
+                for b in (rel.get("billets") or []):
                     if await news.deja_publie(self.g.id, b["topic_id"]):
                         deja += 1
-                        continue
+                    else:
+                        _neufs.append(b)
+                _frais_b, _abs = await news.absorber_vieux(self.g.id, _neufs)
+                absorbes += _abs
+                #  Du plus ancien au plus récent, et le même plafond par source.
+                for b in veille.ordonner_publication(
+                        _frais_b, news.MAX_BILLETS_PAR_PASSAGE):
+                    if envoyes >= veille.MAX_PUBLICATIONS_PAR_PASSAGE:
+                        break
                     if await publier_actu(self.g, salon, b):
                         await news.marquer_publie(self.g.id, b["topic_id"])
                         envoyes += 1
@@ -1004,6 +1016,13 @@ class RobloxPanelV2(LayoutView):
             if deja:
                 detail.append(f"`{deja}` déjà publiée(s) — « ♻️ Tout republier » "
                               f"les libère")
+            if absorbes:
+                #  ⚠️ LE DIRE PLUTÔT QUE DE LE TAIRE. Ces billets ne sortiront
+                #  jamais : ils sont marqués sortis sans avoir été envoyés,
+                #  parce qu'au-delà de la garde ce n'est plus une nouvelle.
+                #  Un compteur muet ferait croire qu'ils vont venir.
+                detail.append(f"`{absorbes}` trop vieux (> {news.AMORCE_GARDE_JOURS} j) — "
+                              f"absorbé(s) sans envoi, ils ne reviendront pas")
             if pointeurs:
                 detail.append(f"`{pointeurs}` billet(s) « allez voir ce lien » "
                               f"écarté(s) — sans contenu propre, ils n'apprennent rien")

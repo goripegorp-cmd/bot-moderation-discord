@@ -726,6 +726,54 @@ async def amorcer(guild_id: int) -> int:
     return n
 
 
+async def absorber_vieux(guild_id: int, billets: list,
+                         jours: int = AMORCE_GARDE_JOURS) -> tuple[list, int]:
+    """Marque les billets trop vieux comme sortis SANS les envoyer.
+
+    Rend `(les billets restants, combien ont été absorbés)`.
+
+    ⚠️ POURQUOI ÇA EXISTE — LA FAMINE DU RANG 6, MESURÉE LE 19/08/2026.
+    La publication tronquait AVANT de déduplifier : `ordonner_publication`
+    gardait les 5 plus récents du lot, puis on écartait ceux déjà publiés. Un
+    billet déjà sorti occupait donc une des cinq places à CHAQUE passage,
+    indéfiniment, et un billet tombé au rang 6 n'y remontait jamais — la
+    sélection est purement déterministe (tri par date, `[:5]`), et les deux
+    seuls retraits du lot (épinglage, 30 jours) frappent toujours le plus
+    VIEUX d'abord. Aucune file d'attente, aucun rattrapage dans le dépôt.
+
+    En régime calme le défaut ne se voyait pas : un billet neuf est rang 1 au
+    relevé suivant sa création, donc il passait. Il mordait dans quatre cas
+    réels : rafale de plus de cinq sujets d'une même source dans un créneau de
+    cadence, bot arrêté le temps que cinq sujets s'accumulent, budget de
+    publication épuisé, et archives de 8 à 30 jours jamais absorbées par
+    `amorcer` (qui appelle `relever` sans `forcer` : une source non échue est
+    sautée, zéro billet absorbé, et la marque d'amorce est quand même posée).
+
+    ⚠️ CE QUE CETTE FONCTION PROTÈGE. Une fois la déduplication faite AVANT la
+    troncature, tout ce qui reste est publiable — y compris des billets de
+    trois semaines qu'on n'a jamais sortis. Les publier serait « déverser
+    l'historique dans le salon », interdit par le propriétaire (ROBLOX.md, LE
+    PREMIER ALLUMAGE). On les marque donc sortis sans les envoyer : ils
+    quittent le circuit pour de bon, et ils libèrent la place aux billets
+    frais. Même seuil que l'amorce — `AMORCE_GARDE_JOURS` — parce que c'est
+    la même décision : au-delà, ce n'est plus une nouvelle.
+    """
+    frais, absorbes = [], 0
+    for b in (billets or []):
+        try:
+            if _trop_vieux(b.get("cree_le"), jours):
+                await marquer_publie(guild_id, b["topic_id"])
+                absorbes += 1
+            else:
+                frais.append(b)
+        except Exception as ex:
+            _log(f"[roblox_news absorber_vieux] {ex}")
+            #  Dans le doute on GARDE : rater une publication est réparable,
+            #  marquer sorti à tort est définitif.
+            frais.append(b)
+    return frais, absorbes
+
+
 async def oublier_publies(guild_id: int) -> int:
     """Efface les marques « déjà publié » des actualités d'une guilde.
 
