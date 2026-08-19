@@ -132,14 +132,18 @@ def test_lentete_du_selecteur_est_traduite():
 OUTIL = RACINE / "outils" / "verif_boutons_persistants.py"
 
 
-def _lancer(cible: Path):
-    return subprocess.run([sys.executable, str(OUTIL), str(cible)],
+def _lancer(*cibles: Path):
+    return subprocess.run([sys.executable, str(OUTIL), *[str(c) for c in cibles]],
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", cwd=str(RACINE))
 
 
 def test_aucun_bouton_persistant_orphelin_dans_bot():
-    r = _lancer(RACINE / "bot.py")
+    """⚠️ LES DEUX FICHIERS ENSEMBLE. Les fiches de la veille Roblox posent
+    leurs boutons dans `roblox_panneau.py`, mais c'est `bot.py` qui les
+    enregistre au boot. Juger `bot.py` seul déclarerait orphelin tout ce qui
+    est capté depuis l'autre."""
+    r = _lancer(RACINE / "bot.py", RACINE / "roblox_panneau.py")
     assert r.returncode == 0, (
         "un bouton persistant n'a plus de capteur enregistré au boot :\n"
         + (r.stdout or "") + (r.stderr or ""))

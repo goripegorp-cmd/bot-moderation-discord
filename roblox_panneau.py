@@ -26,6 +26,7 @@ import discord
 from discord.ui import Button, ChannelSelect
 
 import roblox_news as news
+import roblox_pings as pings
 import roblox_veille as veille
 from ui_v2 import (
     LayoutView, Palette, body as v2_body, container as v2_container,
@@ -101,8 +102,39 @@ def _fmt_robux(v) -> str:
     return "gratuit" if n == 0 else f"{n:,}".replace(",", " ") + " R$"
 
 
+def _bouton_ping(cle: str | None):
+    """Le bouton d'abonnement aux notifications de cette catégorie.
+
+    ⚠️ SON LIBELLÉ EST NEUTRE, ET C'EST VOULU. Un message est le MÊME pour tout
+    le monde : la moitié du salon a déjà le rôle, l'autre non. Un bouton
+    « S'abonner » mentirait à ceux qui sont déjà abonnés, et « Se désabonner »
+    aux autres. On dit donc ce que fait le clic — il bascule — et la réponse
+    ÉPHÉMÈRE annonce l'état réel de celui qui a cliqué. C'est la règle
+    « aucun bouton qui ment » (UI.md), appliquée à un cas où l'état n'est pas
+    partagé.
+
+    ⚠️ LE BOUTON EST POSÉ MÊME SANS RÔLE EXISTANT : si le bot manque de la
+    permission « Gérer les rôles », le clic le DIT au membre. Cacher le bouton
+    laisserait croire que la fonction n'existe pas.
+    """
+    if not cle or cle not in pings.CATEGORIES:
+        return None
+    return Button(label="Me prévenir · arrêter", emoji="🔔",
+                  style=discord.ButtonStyle.secondary,
+                  custom_id=pings.custom_id(cle))
+
+
+def _ligne_mention(ping_role) -> str | None:
+    """La ligne discrète qui porte le vrai ping. `None` s'il n'y a pas de rôle
+    — on n'écrit JAMAIS un faux « @rôle » en texte : ça ne notifie personne et
+    ça donne l'illusion du contraire."""
+    m = pings.mention(ping_role)
+    return f"-# 🔔 {m}" if m else None
+
+
 def construire_fiche(article: dict, flux: str, image: str | None = None,
-                     lies: list | None = None) -> LayoutView:
+                     lies: list | None = None, ping_cle: str | None = None,
+                     ping_role=None) -> LayoutView:
     """La fiche d'un accessoire — légère, et elle dit ce qui VIENT d'arriver.
 
     Ordre fixe (on la lit en diagonale) :
@@ -196,6 +228,16 @@ def construire_fiche(article: dict, flux: str, image: str | None = None,
             boutons.append(Button(label="Annonce" if k == 1 else f"Annonce {k}",
                                   emoji="📰", style=discord.ButtonStyle.link,
                                   url=l_["lien"]))
+    #  ⚠️ LE BOUTON DE NOTIFICATION N'EST JAMAIS SACRIFIÉ AU PLAFOND DE 5.
+    #  On tronque les liens à 4 pour lui garder sa place : une annonce liée en
+    #  moins se remplace par un clic sur le forum, un bouton d'abonnement
+    #  manquant ne se remplace par rien.
+    b_ping = _bouton_ping(ping_cle)
+    if b_ping is not None:
+        boutons = boutons[:4] + [b_ping]
+        ligne = _ligne_mention(ping_role)
+        if ligne:
+            items.append(v2_body(ligne))
     if boutons:
         items.append(discord.ui.ActionRow(*boutons[:5]))
     elif not lien:
@@ -208,7 +250,26 @@ def construire_fiche(article: dict, flux: str, image: str | None = None,
     return v
 
 
-async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str) -> bool:
+def _autorisation_mention(ping_role):
+    """⚠️ SANS CECI, LE PING NE PART PAS. Les rôles de notification sont créés
+    `mentionable=False` — un membre ne doit pas pouvoir s'en servir pour
+    réveiller tout le serveur. La contrepartie est que le bot doit autoriser
+    EXPLICITEMENT ce rôle-là à chaque envoi : `everyone` et `users` restent
+    fermés, seul le rôle concerné passe.
+
+    Écrire `<@&id>` sans cette autorisation afficherait une jolie pastille de
+    rôle qui ne notifierait personne — le genre d'échec qu'on ne voit pas."""
+    try:
+        import discord as _d
+        if ping_role is None:
+            return _d.AllowedMentions.none()
+        return _d.AllowedMentions(everyone=False, users=False, roles=[ping_role])
+    except Exception:
+        return None
+
+
+async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
+                   ping_role=None) -> bool:
     """L'envoi réel. Rend `True` UNIQUEMENT si un message est parti.
 
     ⚠️ PIÈGE À NE PAS DÉFAIRE — LE RETOUR DE `webhook_send` COMPTE.
@@ -236,7 +297,8 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str) -> bool:
             #  TypeError, tombait dans le repli, et le webhook n'etait JAMAIS
             #  utilise alors que c'etait la demande. Le nom vient donc du profil
             #  declare dans WEBHOOK_PROFILES, choisi par la CLE de plateforme.
-            res = await _webhook_send(salon, profil, view=vue)
+            res = await _webhook_send(salon, profil, view=vue,
+                                      allowed_mentions=_autorisation_mention(ping_role))
             if res is None:
                 _log(f"[roblox {etiquette}] webhook_send a rendu None — RIEN "
                      f"n'est parti dans #{getattr(salon, 'name', '?')} "
@@ -244,7 +306,8 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str) -> bool:
                      f"[webhook_send] juste au-dessus.")
                 return False
             return True
-        await salon.send(view=vue)
+        await salon.send(view=vue,
+                         allowed_mentions=_autorisation_mention(ping_role))
         return True
     except Exception as ex:
         #  Repli : un défaut de webhook ne doit pas faire taire le flux.
@@ -271,9 +334,15 @@ async def publier(guild, salon, article: dict, flux: str,
     """
     if salon is None:
         return False
-    vue = construire_fiche(article, flux, image=image, lies=lies)
+    #  Le rôle de notification de ce flux — créé à la première annonce du
+    #  genre, jamais au démarrage (un serveur qui n'active rien ne voit pas
+    #  huit rôles apparaître).
+    cle = pings.cle_du_flux(flux)
+    role = await pings.role_de(guild, cle) if cle else None
+    vue = construire_fiche(article, flux, image=image, lies=lies,
+                           ping_cle=cle, ping_role=role)
     return await _envoyer(salon, PLATEFORME.get(flux, "roblox_nouveautes"),
-                          vue, "publier")
+                          vue, "publier", ping_role=role)
 
 
 #  ⚠️ LIMITE DURE : 4 000 caractères de texte au total dans un message V2
@@ -341,7 +410,8 @@ def _tronquer_propre(texte: str, budget: int) -> str:
     return coupe.rsplit(" ", 1)[0].rstrip() + " …"
 
 
-def construire_actu(billet: dict) -> LayoutView:
+def construire_actu(billet: dict, ping_cle: str | None = None,
+                    ping_role=None) -> LayoutView:
     """La fiche d'une actualité : français d'abord, l'original ensuite, les
     médias, la date, le lien. Complète, ou elle ne part pas.
 
@@ -432,6 +502,14 @@ def construire_actu(billet: dict) -> LayoutView:
         boutons.append(Button(label=f"Vidéo {k}" if k > 1 or len(billet.get("videos") or []) > 1
                               else "Vidéo", emoji="▶️",
                               style=discord.ButtonStyle.link, url=v))
+    #  Même règle que sur la fiche d'accessoire : le bouton d'abonnement garde
+    #  sa place, quitte à laisser tomber une vidéo (elle reste dans l'article).
+    b_ping = _bouton_ping(ping_cle)
+    if b_ping is not None:
+        boutons = boutons[:4] + [b_ping]
+        ligne = _ligne_mention(ping_role)
+        if ligne:
+            items.append(v2_body(ligne))
     if boutons:
         items.append(discord.ui.ActionRow(*boutons[:5]))
     elif not lien:
@@ -449,9 +527,15 @@ async def publier_actu(guild, salon, billet: dict) -> bool:
     """
     if salon is None:
         return False
+    #  La catégorie vient du DOMAINE du billet — « Studio & moteur » n'a pas le
+    #  même public que « Événements ». Domaine inconnu = pas de ping plutôt
+    #  qu'un ping au mauvais rôle.
+    cle = pings.cle_du_billet(billet)
+    role = await pings.role_de(guild, cle) if cle else None
     #  Meme raison que ci-dessus : le nom vient du profil, pas d'un kwarg.
-    return await _envoyer(salon, "roblox_actu", construire_actu(billet),
-                          "publier_actu")
+    return await _envoyer(salon, "roblox_actu",
+                          construire_actu(billet, ping_cle=cle, ping_role=role),
+                          "publier_actu", ping_role=role)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

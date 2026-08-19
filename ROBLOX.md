@@ -144,6 +144,55 @@ peut être proposé, jamais imposé.
 
 ---
 
+## LES NOTIFICATIONS — UN RÔLE PAR TYPE (owner 19/08/2026)
+
+> « Sous chacune des annonces Roblox […] un petit rôle pour le ping […] ils ont
+> juste à cliquer une fois sur le bouton […] Ils auront juste à rappuyer dessus
+> pour ne plus recevoir les notifications. »
+
+Huit catégories, définies dans `roblox_pings.py`. Elles ne sont pas inventées :
+elles reprennent les `domaine` réels de `roblox_news.SOURCES` et les deux flux
+d'accessoires. Un test compare les deux tables — un domaine renommé sans être
+répercuté ici publierait **sans ping, sans erreur**.
+
+| Bouton | Rôle créé | Ce qu'il notifie |
+|---|---|---|
+| `rbxping:annonces` | 🟢 Annonces Roblox | les mises à jour officielles |
+| `rbxping:studio` | 🔵 Roblox Studio | les notes de version de Studio et du moteur |
+| `rbxping:securite` | 🔴 Sécurité Roblox | règles, sécurité, modération |
+| `rbxping:evenements` | 🟣 Événements Roblox | événements et concours |
+| `rbxping:devs` | 🟠 Développeurs Roblox | ressources du staff Roblox |
+| `rbxping:presse` | 🟡 Presse Roblox | la salle de presse (FR **et** EN : même contenu, un seul rôle) |
+| `rbxping:limited` | 💎 Passages Limited | les accessoires qui **viennent** de passer Limited |
+| `rbxping:nouveaux` | 🆕 Nouveaux accessoires | les accessoires que Roblox vient de créer |
+
+**Les quatre règles à ne pas défaire.**
+
+1. **Rôles non mentionnables.** Créés `mentionable=False` : un membre ne doit
+   pas pouvoir réveiller le serveur avec. Le bot ping quand même, en passant
+   `allowed_mentions(roles=[role])` à chaque envoi. **Sans cette autorisation,
+   le `<@&id>` s'affiche en pastille et ne notifie personne** — un ping
+   silencieux est indiscernable d'un ping réussi.
+2. **Création paresseuse.** Aucun rôle au démarrage : un serveur qui n'active
+   jamais la veille ne verra pas huit rôles apparaître. Le rôle naît à la
+   première annonce de sa catégorie, ou au premier clic.
+3. **Libellé neutre sur le bouton.** Un message est le même pour tout le monde :
+   la moitié du salon est déjà abonnée. « S'abonner » mentirait aux uns,
+   « Se désabonner » aux autres. Le bouton dit ce que fait le clic — il bascule
+   — et la réponse **éphémère** annonce l'état réel de celui qui a cliqué.
+4. **Les échecs ne se déguisent jamais en succès.** Permission « Gérer les
+   rôles » absente et rôle placé au-dessus du bot sont deux échecs **distincts**,
+   chacun avec sa phrase. Le second est le plus vicieux : le rôle existe, tout a
+   l'air normal, et l'attribution échoue.
+
+⚠️ Le bouton est un `DynamicItem` (`RobloxPingButton`) réenregistré au boot par
+`bot.add_dynamic_items`. **Sans ce réenregistrement, tous les boutons déjà posés
+dans l'historique du salon deviennent muets.** `outils/verif_boutons_persistants.py
+bot.py roblox_panneau.py` le vérifie — les deux fichiers ensemble, le bouton
+étant posé dans l'un et enregistré dans l'autre.
+
+---
+
 ## ÉTAT LIVRÉ AU 12/08/2026, ET D'OÙ VIENNENT LES CHIFFRES
 
 Tout est poussé sur `main`, CI verte à chaque lot. Ce qui suit n'est pas une

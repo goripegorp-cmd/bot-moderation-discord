@@ -118,21 +118,52 @@ def _gabarits_dynamiques(cls: ast.ClassDef) -> list:
 #  Les émissions : custom_id posés sur une View(timeout=None)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+#  Les constructeurs de vue dont `timeout=None` déclare une intention de
+#  persistance. `LayoutView` est le patron des Components V2 : les fiches de la
+#  veille Roblox en sont, et leurs boutons vivent dans un `ActionRow` glissé
+#  dans un conteneur — jamais en `v.add_item(Button(...))` direct.
+VUES = ("View", "LayoutView")
+
+
 def _emissions_persistantes(arbre, classes: dict) -> list:
-    """(custom_id|None, ligne, contexte) pour chaque item ajouté à une vue dont
-    l'auteur a déclaré `timeout=None`."""
+    """(custom_id|None, ligne, contexte) pour chaque composant cliquable d'une
+    vue dont l'auteur a déclaré `timeout=None`.
+
+    ⚠️ DEUX FORMES, ET IL FAUT LES DEUX.
+      · classique  : `v = View(timeout=None)` puis `v.add_item(Button(...))` ;
+      · V2         : `v = LayoutView(timeout=None)` puis
+                     `v.add_item(container(*items))`, où `items` contient un
+                     `ActionRow(*boutons)`. Les boutons ne passent JAMAIS par
+                     `v.add_item` — les chercher là ne trouverait rien.
+    Pour la seconde, on considère que TOUT `custom_id` littéral construit dans
+    une fonction qui fabrique une vue persistante finira sur cette vue. C'est
+    volontairement large : rater un bouton persistant coûte « n'a pas répondu
+    à temps » en public, en signaler un de trop coûte une ligne à lire.
+    """
     out = []
 
     def scanner_portee(noeud, nom_portee: str):
-        #  Les variables de cette portée qui tiennent une View(timeout=None).
-        persistantes = set()
+        persistantes = set()      # variables tenant une vue persistante
+        callback_lie = set()      # variables recevant `.callback = …`
+        calls_nommes = {}         # id(Call) → nom de la variable assignée
+
         for n in ast.walk(noeud):
-            if not isinstance(n, ast.Assign) or not isinstance(n.value, ast.Call):
+            if not isinstance(n, ast.Assign):
                 continue
+            #  `btn.callback = …` → ce bouton porte son propre gestionnaire.
+            for t in n.targets:
+                if (isinstance(t, ast.Attribute) and t.attr == "callback"
+                        and isinstance(t.value, ast.Name)):
+                    callback_lie.add(t.value.id)
+            if not isinstance(n.value, ast.Call):
+                continue
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    calls_nommes[id(n.value)] = t.id
             f = n.value.func
-            appel_vue = (isinstance(f, ast.Attribute) and f.attr == "View") or (
-                isinstance(f, ast.Name) and f.id == "View")
-            if not appel_vue:
+            nom = f.attr if isinstance(f, ast.Attribute) else (
+                f.id if isinstance(f, ast.Name) else None)
+            if nom not in VUES:
                 continue
             to = _kw(n.value, "timeout")
             if isinstance(to, ast.Constant) and to.value is None:
@@ -141,7 +172,24 @@ def _emissions_persistantes(arbre, classes: dict) -> list:
                         persistantes.add(t.id)
         if not persistantes:
             return
-        #  Les `X.add_item(...)` sur ces variables.
+
+        def retenir(appel):
+            cid = _kw(appel, "custom_id")
+            if cid is None:
+                return  # bouton lien (url=) → aucun dispatch, sain
+            #  ⚠️ EXEMPTION — LE CALLBACK ATTACHÉ EN DIRECT.
+            #  `btn = Button(custom_id=…)` puis `btn.callback = …` : le bouton
+            #  porte son gestionnaire, la vue n'a rien à faire enregistrer au
+            #  boot. C'est le patron des panneaux ÉPHÉMÈRES (réponse de slash
+            #  command), et il est légitime. Sans cette exemption l'outil criait
+            #  sur les cinq boutons de `/infractions`, tous corrects et
+            #  documentés comme tels.
+            if calls_nommes.get(id(appel)) in callback_lie:
+                return
+            out.append((_litteral(cid), appel.lineno, nom_portee))
+
+        vus = set()
+        #  Forme classique : `X.add_item(Button(custom_id=…))`.
         for n in ast.walk(noeud):
             if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                     and n.func.attr == "add_item"
@@ -149,10 +197,12 @@ def _emissions_persistantes(arbre, classes: dict) -> list:
                     and n.func.value.id in persistantes):
                 for a in n.args:
                     if isinstance(a, ast.Call):
-                        cid = _kw(a, "custom_id")
-                        if cid is None:
-                            continue  # bouton lien (url=) → pas de dispatch, sain
-                        out.append((_litteral(cid), a.lineno, nom_portee))
+                        vus.add(id(a))
+                        retenir(a)
+        #  Forme V2 : tout `custom_id=` construit dans cette fonction.
+        for n in ast.walk(noeud):
+            if isinstance(n, ast.Call) and id(n) not in vus:
+                retenir(n)
 
     for n in ast.walk(arbre):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -162,39 +212,46 @@ def _emissions_persistantes(arbre, classes: dict) -> list:
 
 
 def main() -> int:
-    fichier = sys.argv[1] if len(sys.argv) > 1 else "bot.py"
-    src = open(fichier, encoding="utf-8").read()
-    arbre = ast.parse(src)
+    #  ⚠️ PLUSIEURS FICHIERS, ET C'EST NÉCESSAIRE. Un bouton peut être POSÉ dans
+    #  un module (les fiches de la veille vivent dans `roblox_panneau.py`) et
+    #  ENREGISTRÉ dans un autre (`bot.py`). Juger un fichier seul déclarerait
+    #  orphelin tout ce qui est capté ailleurs — un faux positif garanti.
+    fichiers = sys.argv[1:] or ["bot.py"]
+    sources, arbres = {}, {}
+    for f in fichiers:
+        sources[f] = open(f, encoding="utf-8").read()
+        arbres[f] = ast.parse(sources[f])
 
-    classes = _classes(arbre)
-    vues, dynamiques = _enregistrees(arbre)
-
-    captes = set()
-    for nom in vues:
-        cls = classes.get(nom)
-        if cls is not None:
-            captes |= _custom_ids_de_classe(cls)
-    gabarits = []
-    for nom in dynamiques:
-        cls = classes.get(nom)
-        if cls is not None:
-            gabarits += _gabarits_dynamiques(cls)
+    #  Les capteurs sont mis EN COMMUN sur tous les fichiers donnés.
+    captes, gabarits = set(), []
+    for f, arbre in arbres.items():
+        classes = _classes(arbre)
+        vues, dynamiques = _enregistrees(arbre)
+        for nom in vues:
+            cls = classes.get(nom)
+            if cls is not None:
+                captes |= _custom_ids_de_classe(cls)
+        for nom in dynamiques:
+            cls = classes.get(nom)
+            if cls is not None:
+                gabarits += _gabarits_dynamiques(cls)
+        arbres[f] = (arbre, classes)
 
     orphelins, incalculables = [], []
-    for cid, ligne, portee in _emissions_persistantes(arbre, classes):
-        if cid is None:
-            incalculables.append((ligne, portee))
-            continue
-        if cid in captes or any(g.fullmatch(cid) or g.match(cid) for g in gabarits):
-            continue
-        orphelins.append((cid, ligne, portee))
+    for f, (arbre, classes) in arbres.items():
+        for cid, ligne, portee in _emissions_persistantes(arbre, classes):
+            if cid is None:
+                incalculables.append((f, ligne, portee))
+                continue
+            if cid in captes or any(g.fullmatch(cid) or g.match(cid) for g in gabarits):
+                continue
+            orphelins.append((cid, f, ligne, portee))
 
-    print(f"  {fichier}")
-    print(f"    vues réenregistrées au boot   : {len(vues)}")
-    print(f"    gabarits dynamiques           : {len(gabarits)}")
-    print(f"    custom_id captés              : {len(captes)}")
+    print(f"  {' · '.join(fichiers)}")
+    print(f"    custom_id captés par une vue   : {len(captes)}")
+    print(f"    gabarits dynamiques            : {len(gabarits)}")
     if incalculables:
-        print(f"    custom_id calculés (non jugés): {len(incalculables)}")
+        print(f"    custom_id calculés (non jugés) : {len(incalculables)}")
 
     if not orphelins:
         print("    ✅ aucun bouton persistant orphelin.")
@@ -202,10 +259,9 @@ def main() -> int:
 
     print(f"\n  ❌ {len(orphelins)} bouton(s) PERSISTANT(S) SANS CAPTEUR — "
           f"ils s'afficheront et ne répondront pas :\n")
-    lignes = src.splitlines()
-    for cid, ligne, portee in sorted(orphelins, key=lambda x: x[1]):
-        print(f"    custom_id « {cid} »  —  l.{ligne} dans {portee}()")
-        print(f"        {lignes[ligne - 1].strip()[:88]}")
+    for cid, f, ligne, portee in sorted(orphelins, key=lambda x: (x[1], x[2])):
+        print(f"    custom_id « {cid} »  —  {f}:{ligne} dans {portee}()")
+        print(f"        {sources[f].splitlines()[ligne - 1].strip()[:88]}")
     print("\n  → soit une classe de vue réenregistrée par bot.add_view(...) au boot,")
     print("    soit un DynamicItem passé à bot.add_dynamic_items(...).")
     return 1

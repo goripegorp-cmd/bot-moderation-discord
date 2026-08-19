@@ -14,6 +14,7 @@ PHASE_163_MODULES = [
     "roblox_veille",
     "roblox_news",
     "roblox_panneau",
+    "roblox_pings",          # 19/08 : un rôle de notification par type d'annonce
     "roblox_news_contenu",   # 18/08 : essentiel, médias, traduction des actualités
     "rellseas_panneau",      # 16/08 : /rellseas et son réglage
     "activite_recompenses",

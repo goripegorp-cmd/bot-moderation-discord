@@ -197,6 +197,7 @@ import activite_panneau as activite_ui
 #  supprime, ce module n'est donc PAS un reste oublie.
 import roblox_veille as roblox_module
 import roblox_news as roblox_news_module
+import roblox_pings as roblox_pings_module
 import roblox_panneau as roblox_ui
 import rellseas_panneau as rellseas_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
@@ -17883,12 +17884,20 @@ async def get_webhook(channel, platform: str):
         print(f"Erreur webhook {platform} dans #{channel.name}: {ex}")
         return None
 
-async def webhook_send(channel, platform: str, embed=None, content=None, file=None, files=None, embeds=None, view=None):
+async def webhook_send(channel, platform: str, embed=None, content=None, file=None, files=None, embeds=None, view=None,
+                       allowed_mentions=None):
     """Envoie un message via webhook avec le profil de la plateforme.
-    Supporte: content, embed, embeds, file, files, view
+    Supporte: content, embed, embeds, file, files, view, allowed_mentions
     Fallback automatique sur channel.send si webhook impossible.
 
     Phase 3.8 : logging exhaustif des échecs pour traquer les publications fantômes.
+
+    ⚠️ `allowed_mentions` AJOUTÉ LE 19/08/2026, ET IL EST INDISPENSABLE AU PING.
+    Les rôles de notification de la veille Roblox sont créés `mentionable=False`
+    (un membre ne doit pas pouvoir réveiller le serveur avec). La contrepartie :
+    l'expéditeur doit autoriser explicitement ce rôle, sinon le `<@&id>` du
+    message s'affiche en pastille et ne notifie PERSONNE. Un ping silencieux
+    est indiscernable d'un ping réussi — d'où ce paramètre plutôt qu'un défaut.
     """
     chan_info = f"#{getattr(channel, 'name', '?')}/{getattr(channel, 'id', '?')}"
 
@@ -17900,6 +17909,10 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
         if file: kw['file'] = file
         if files: kw['files'] = files
         if view: kw['view'] = view
+        #  `is not None` : on distingue « rien de demandé » (on laisse le défaut
+        #  de discord.py) de « fermeture explicite » (AllowedMentions.none()),
+        #  qui doit être transmise telle quelle.
+        if allowed_mentions is not None: kw['allowed_mentions'] = allowed_mentions
         if include_profile:
             profile = WEBHOOK_PROFILES.get(platform, {'name': '📢 Notifications'})
             kw['username'] = profile['name']
@@ -21461,6 +21474,12 @@ async def _activite_boot():
     roblox_ui.setup(db_set=db_set, webhook_send=webhook_send, log=print)
     roblox_ui.set_retour(_retour_vers_configure)
 
+    #  ⚠️ LES RÔLES DE PING SONT INJECTÉS, PAS DEVINÉS. `roblox_pings` ne
+    #  connaît ni la base ni la config : sans ce `setup`, `role_de` planterait
+    #  sur `_cfg = None` et chaque annonce sortirait SANS ping, en silence —
+    #  la fiche partirait quand même, donc personne ne verrait le défaut.
+    roblox_pings_module.setup(cfg=cfg, db_set=db_set, log=print)
+
     #  Réseaux sociaux : même injection. Sans elle, le « ◀️ Retour » du panneau
     #  social ramène vers `AdminMasterPanelV2`, ouvert par `/admin` — commande
     #  RETIRÉE. Le bouton menait donc à un écran que plus rien n'atteint.
@@ -21576,6 +21595,13 @@ async def on_ready():
         bot.add_view(AccueilLangueView())
     except Exception as ex:
         print(f"[on_ready add_view AccueilLangueView] {ex}")
+    #  ⚠️ SANS CETTE LIGNE, TOUS LES BOUTONS « 🔔 Me prévenir » DÉJÀ POSÉS DANS
+    #  L'HISTORIQUE DU SALON DEVIENNENT MUETS. Une annonce Roblox reste
+    #  indéfiniment dans le salon : son bouton doit répondre des mois plus tard.
+    try:
+        bot.add_dynamic_items(RobloxPingButton)
+    except Exception as ex:
+        print(f"[on_ready add_dynamic_items RobloxPingButton] {ex}")
     # (Confessions retirées : plus de vue persistante à réenregistrer.)
     # (Hub d'engagement retiré : /hub et ses commandes sont supprimés, cette vue
     #  persistante était le dernier fil qui le maintenait vivant au boot.)
@@ -37777,6 +37803,58 @@ class LangSelectButton(
 
 
 
+
+
+class RobloxPingButton(discord.ui.DynamicItem[discord.ui.Button],
+                       template=r"rbxping:(?P<cle>[a-z_]+)"):
+    """Le bouton « 🔔 Me prévenir · arrêter » sous chaque annonce Roblox.
+
+    Demande du propriétaire (19/08/2026) : un rôle de ping par TYPE d'annonce,
+    pris et rendu d'un seul clic sur le bouton posé sous la fiche.
+
+    ⚠️ `DynamicItem`, pas une View fixe. Le `custom_id` porte la catégorie
+    (`rbxping:studio`, `rbxping:limited`…) : une seule classe couvre les huit,
+    et le clic reste capté après un redémarrage parce que
+    `bot.add_dynamic_items(RobloxPingButton)` la réenregistre au boot. Sans ce
+    réenregistrement, TOUS les boutons déjà posés dans l'historique du salon
+    deviendraient muets — c'est exactement ce qui est arrivé au bouton langue
+    de l'accueil, réparé le matin même.
+
+    ⚠️ ACQUITTER D'ABORD. La bascule touche la base ET l'API des rôles ; sans
+    `defer` immédiat, un démarrage à froid dépasse les trois secondes de
+    Discord et le membre voit « n'a pas répondu à temps ».
+
+    Réponse ÉPHÉMÈRE : l'abonnement d'un membre ne regarde personne d'autre, et
+    un salon d'actualités ne doit pas se remplir de confirmations.
+    """
+
+    def __init__(self, cle: str):
+        self.cle = cle
+        super().__init__(discord.ui.Button(
+            label="Me prévenir · arrêter", emoji="🔔",
+            style=discord.ButtonStyle.secondary,
+            custom_id=roblox_pings_module.custom_id(cle)))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["cle"])
+
+    async def callback(self, i: discord.Interaction):
+        if not await _safe_defer(i, ephemeral=True):
+            return
+        try:
+            if i.guild is None:
+                await _safe_followup(i, content="❌ Serveur uniquement.")
+                return
+            etat, _role = await roblox_pings_module.basculer(
+                i.guild, i.user, self.cle)
+            #  `phrase` dit l'état RÉEL, y compris les deux échecs distincts
+            #  (permission manquante / rôle trop haut). On ne répond jamais
+            #  « c'est fait » sans que ce soit fait.
+            await _safe_followup(i, content=roblox_pings_module.phrase(etat, self.cle))
+        except Exception as ex:
+            print(f"[RobloxPingButton {self.cle}] {ex}")
+            await _safe_followup(i, content="❌ Impossible pour le moment.")
 
 
 class AccueilLangueView(discord.ui.View):
