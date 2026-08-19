@@ -279,6 +279,10 @@ pour écrire, `ast.parse` avant écriture**.
 | `sonde_panneaux.py` | Pour une classe de panneau : signatures `__init__`/`render_to`, boutons « Retour », et **tous ses appelants** (par AST). |
 | `purge_morts.py` | **Fermeture transitive inverse à point fixe.** Trouve les classes que plus rien de vivant n'atteint. Épargne automatiquement tout nom cité dans une chaîne (le hub V2 résout par nom) et tout nom utilisé hors `bot.py`. Bloque sur une référence en **code**, signale seulement celles en commentaire. |
 | `verif_noms.py` | **Détecteur de NameError avant le boot.** Fait en 5 s ce que la CI met 3 min à trouver : liste les noms utilisés mais jamais définis. À lancer avant CHAQUE push. |
+| `verif_portees.py` | **Ce que `verif_noms` ne peut PAS voir.** `verif_noms` aplatit toutes les portées dans un seul ensemble : un nom assigné n'importe où passe pour connu partout. Celui-ci fait une portée à la fois, comme Python. Il a trouvé `name 'ok' is not defined`, qui tournait une dizaine de fois par jour dans les logs Railway pendant que `verif_noms` restait vert. **Les deux, pas l'un ou l'autre.** |
+| `verif_boutons_persistants.py` | Tout `custom_id` posé sur une `View(timeout=None)` doit être capté par un `bot.add_view` ou un `add_dynamic_items`. Sinon le bouton s'affiche, se clique, et Discord répond « n'a pas répondu à temps » — en public. |
+| `verif_boucles.py` | `.start()` sur une fonction qui a perdu son `@tasks.loop` (piège n°1), et boucles condamnées par la deny-list. |
+| `sonde_pourquoi_zero.py` | Appelle les VRAIES sources Roblox (réseau réel) et compte à chaque étage : sources joignables, billets publiables, pointeurs écartés, articles dans la fenêtre. Répond à « pourquoi 0 publication » sans deviner. |
 | `purge_runtimes.py` | Fermeture inverse étendue aux **fonctions** de niveau module. Protège d'office les `on_*`, les fonctions décorées, les noms cités en chaîne, les noms utilisés hors `bot.py`. |
 | `purge_commandes.py` | Purge des slash commands par identifiant **qualifié** (`/mod warn`, jamais `warn`). Refuse un nom nu. Gère les commandes imbriquées dans un `try` et les `add_command` enveloppés. |
 | `purge_modules.py` | Suppression atomique d'un module : fichier + import + entrée de test. Distingue import DUR et import PARESSEUX, refuse de casser un importeur encore présent. |
@@ -572,9 +576,24 @@ des boutons dont la classe n'était plus enregistrée au boot, `weekly_security_
 `.start()`, et une protection dormante faute de clé réglable.
 
 **Aucun de ces cas n'est attrapé par `ast.parse`, par `import bot`, ni par les tests.**
-`outils/verif_evenements.py` couvre désormais les événements. **Reste à écrire l'équivalent
-pour les `@tasks.loop` sans `.start()` et pour les `DynamicItem` non réenregistrés** — ce
-sont les deux mêmes trous, et ils ont chacun coûté une découverte tardive.
+
+**Les trois trous sont désormais fermés** (19/08/2026) — chaque détecteur a été
+PROUVÉ sur une copie du dépôt où l'on réintroduit le vrai défaut, et refuse de
+sortir en vert :
+
+| Détecteur | Le défaut qu'il voit | Preuve |
+|---|---|---|
+| `verif_evenements.py` | `on_*` sans décorateur, handler vide | déjà en place |
+| `verif_boutons_persistants.py` | custom_id posé sur une `View(timeout=None)` que plus aucun `add_view`/`add_dynamic_items` ne capte | remet le `pass` du 19/08 → ressort `onb_lang, l.24543` |
+| `verif_boucles.py` | `.start()` sur une fonction qui a perdu son `@tasks.loop` ; boucle sans `.start()` ET exclue du balayage | recolle le décorateur au helper → ressort `veille_roblox_task` |
+| `verif_portees.py` | nom utilisé hors de sa portée — le NameError que `verif_noms` ne peut pas voir | a trouvé les 5 résidus de purge, dont `ok` en production |
+
+⚠️ `verif_boucles.py` ne crie PAS sur une boucle sans `.start()` explicite :
+`_iter_supervised_loops` balaie automatiquement tous les objets `tasks.Loop`
+des globals et relance ce qui ne tourne pas. Ce serait un faux positif — et
+c'est précisément le filet posé après l'affaire `weekly_security_report`. Il
+n'est fatal que si la boucle est aussi dans `_SUPERVISOR_DENY`, qui exclut de
+toutes les sources, balayage compris.
 
 ---
 

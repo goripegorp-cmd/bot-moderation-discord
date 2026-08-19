@@ -100,6 +100,23 @@ AGE_MAX_JOURS = 90
 #      d'un coup ne sont pas « nouveaux » : ils sont absorbés.
 #  Six heures : la boucle passe toutes les 30 min, un redémarrage Railway en
 #  prend quelques-unes ; au-delà, on ne peut plus dire « vient de ».
+#
+#  ⚠️ NE PAS ÉLARGIR CETTE FENÊTRE. Tentative du 19/08/2026 : la porter à 24 h
+#  pour survivre à une panne de nuit. Refusée — le propriétaire avait déjà
+#  tranché, mot pour mot : « pas qui est passé limited d'il y a un jour, 2
+#  jours, à partir d'aujourd'hui […] faut vraiment que ça passe là bientôt ».
+#  Vingt-quatre heures, c'est « il y a un jour ». `test_une_nouveaute_plus_
+#  ancienne_est_absorbee_pas_publiee[24]` verrouille ce refus.
+#
+#  LE COMPROMIS ASSUMÉ, POUR QU'ON NE LE REDÉCOUVRE PAS : si la boucle reste
+#  muette plus de six heures (redéploiement + tempête de 429), une fournée
+#  d'accessoires tombée dans ce trou est perdue définitivement. C'est le prix
+#  de la fraîcheur, et c'est le choix du propriétaire — pas un oubli.
+#
+#  Mesure du 19/08 (outils/sonde_pourquoi_zero.py) : sur les 964 accessoires
+#  Roblox du catalogue, le PLUS RÉCENT avait 670 h — 28 jours. Les fournées
+#  sont espacées de semaines. « 0 publication » côté accessoires est donc la
+#  RÉPONSE NORMALE la plupart du temps, pas une panne.
 FENETRE_DIRECTE_HEURES = 6
 
 

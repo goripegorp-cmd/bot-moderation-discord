@@ -12819,6 +12819,36 @@ async def _activite_passage_wait():
 _TRANCHE_FLUX = {"nouveaux": 5, "bascules": 10}
 
 
+async def _diag_veille_serveurs(limite: int = 10) -> None:
+    """Dit, SERVEUR PAR SERVEUR, ce qui est allumé et ce qui manque.
+
+    ⚠️ « Aucun serveur n'a allumé » a fait deviner le propriétaire le 18/08 :
+    interrupteur éteint, ou salon manquant ? Une ligne par serveur tranche
+    sans ouvrir /configure.
+
+    ⚠️ Ce diagnostic était ENFERMÉ dans le cas « personne n'a rien allumé ».
+    Or le cas qui fait mal est l'autre : un flux allumé, l'autre éteint, un
+    passage qui se termine à zéro publication — et là, rien ne sortait. Il est
+    donc appelé aussi depuis le bilan quand le passage n'a rien publié.
+    """
+    for g in list(bot.guilds)[:limite]:
+        try:
+            _ca = await roblox_module.config(g.id)
+            _cn = await roblox_news_module.config(g.id)
+            _acc = ("OK" if _ca.get("roblox_veille_enabled")
+                    and roblox_module.salon_du_flux(_ca, "nouveautes")
+                    else ("éteint" if not _ca.get("roblox_veille_enabled")
+                          else "allumé mais AUCUN salon"))
+            _act = ("OK" if _cn.get("roblox_news_enabled")
+                    and int(_cn.get("roblox_news_salon") or 0)
+                    else ("éteintes" if not _cn.get("roblox_news_enabled")
+                          else "allumées mais AUCUN salon"))
+            print(f"[veille_roblox_task]   {g.name} ({g.id}) : "
+                  f"accessoires={_acc} · actualités={_act}")
+        except Exception as _dex:
+            print(f"[veille_roblox_task]   {getattr(g, 'id', '?')} : {_dex}")
+
+
 @tasks.loop(minutes=30)
 async def veille_roblox_task():
     """Veille Roblox : nouveautes du catalogue, bascules, et actualite.
@@ -12855,31 +12885,20 @@ async def veille_roblox_task():
             print(f"[veille_roblox_task] passage sans travail — aucun des "
                   f"{len(bot.guilds)} serveur(s) n'a allumé accessoires ni "
                   f"actualités (interrupteur + salon requis)")
-            #  ⚠️ DIRE QUOI, PAR SERVEUR. « Aucun n'a allumé » a fait deviner
-            #  le propriétaire le 18/08 : interrupteur éteint, ou salon
-            #  manquant ? Une ligne par serveur tranche sans ouvrir /configure.
-            for g in list(bot.guilds)[:10]:
-                try:
-                    _ca = await roblox_module.config(g.id)
-                    _cn = await roblox_news_module.config(g.id)
-                    _acc = ("OK" if _ca.get("roblox_veille_enabled")
-                            and roblox_module.salon_du_flux(_ca, "nouveautes")
-                            else ("éteint" if not _ca.get("roblox_veille_enabled")
-                                  else "allumé mais AUCUN salon"))
-                    _act = ("OK" if _cn.get("roblox_news_enabled")
-                            and int(_cn.get("roblox_news_salon") or 0)
-                            else ("éteintes" if not _cn.get("roblox_news_enabled")
-                                  else "allumées mais AUCUN salon"))
-                    print(f"[veille_roblox_task]   {g.name} ({g.id}) : "
-                          f"accessoires={_acc} · actualités={_act}")
-                except Exception as _dex:
-                    print(f"[veille_roblox_task]   {getattr(g, 'id', '?')} : {_dex}")
+            await _diag_veille_serveurs()
             return
         _publies = 0
+        #  ⚠️ COMPTER À CHAQUE ÉTAGE. « 0 publication » recouvrait six
+        #  situations dont une seule est une panne (mesuré le 19/08) : le
+        #  propriétaire ne pouvait pas trancher, donc il supposait la panne.
+        #  Ces compteurs nomment l'étage exact où le passage s'est arrêté.
+        _sa = {"lus": 0, "candidats": 0, "hors_fenetre": 0, "deja": 0, "echecs": 0}
+        _sn = {"lus": 0, "sautees": 0, "pannes": 0, "deja": 0, "echecs": 0}
 
         # ── Les articles ────────────────────────────────────────────────────
         if guildes_items:
             rel = await roblox_module.relever_nouveautes(limite=120)
+            _sa["lus"] = len(rel.get("articles") or [])
             if rel["code"] == 200:
                 evts = await roblox_module.comparer_et_enregistrer(rel["articles"])
 
@@ -12963,12 +12982,15 @@ async def veille_roblox_task():
                             #  pas des archives apres une panne ou une remise a
                             #  zero de la base. Pour « bascules » : seule une
                             #  bascule VUE EN DIRECT passe.
+                            _sa["candidats"] += 1
                             if not roblox_module.age_publiable(a, flux):
+                                _sa["hors_fenetre"] += 1
                                 continue
                             #  Déjà sorti ici, OU déjà sorti dans un flux plus
                             #  fort : on ne le republie pas ailleurs.
                             if not await roblox_module.publiable_dans(
                                     g.id, a["asset_id"], flux):
+                                _sa["deja"] += 1
                                 continue
                             if _budget <= 0:
                                 _reporte += 1
@@ -12982,6 +13004,11 @@ async def veille_roblox_task():
                                 await roblox_module.marquer_publie(g.id, a["asset_id"], flux)
                                 _budget -= 1
                                 _publies += 1
+                            else:
+                                #  ⚠️ `publier` avale ses erreurs et rend None.
+                                #  Sans ce compteur, un salon devenu interdit
+                                #  ressemblerait à « rien à publier ».
+                                _sa["echecs"] += 1
                             await asyncio.sleep(roblox_module.PAUSE_ENTRE_PUBLICATIONS)
             await roblox_module.purger()
 
@@ -12992,10 +13019,13 @@ async def veille_roblox_task():
                 #  Source non échue selon son propre rythme : on passe, sans
                 #  la compter en panne et sans dormir pour rien.
                 if rel.get("sautee"):
+                    _sn["sautees"] += 1
                     continue
                 if rel["code"] != 200:
+                    _sn["pannes"] += 1
                     await asyncio.sleep(2)
                     continue
+                _sn["lus"] += len(rel.get("billets") or [])
                 for g in guildes_news:
                     c = await roblox_news_module.config(g.id)
                     salon = g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
@@ -13008,6 +13038,7 @@ async def veille_roblox_task():
                             rel["billets"],
                             roblox_news_module.MAX_BILLETS_PAR_PASSAGE):
                         if await roblox_news_module.deja_publie(g.id, b["topic_id"]):
+                            _sn["deja"] += 1
                             continue
                         if _budget <= 0:
                             _reporte += 1
@@ -13016,6 +13047,11 @@ async def veille_roblox_task():
                             await roblox_news_module.marquer_publie(g.id, b["topic_id"])
                             _budget -= 1
                             _publies += 1
+                        else:
+                            #  Un salon supprimé ou interdit se voit ICI, et
+                            #  nulle part ailleurs : `publier_actu` rend None
+                            #  sans lever.
+                            _sn["echecs"] += 1
                         await asyncio.sleep(roblox_module.PAUSE_ENTRE_PUBLICATIONS)
                 #  Pause ENTRE LES SOURCES : c'est elle qui evite le pare-feu.
                 await asyncio.sleep(2)
@@ -13027,6 +13063,22 @@ async def veille_roblox_task():
               f"{len(guildes_items)} serveur(s), actualités sur "
               f"{len(guildes_news)} · {_publies} publication(s) réelle(s) · "
               f"{_reporte} reportée(s)")
+        #  ⚠️ LE DÉTAIL, TOUJOURS. C'est lui qui répond à « pourquoi zéro ».
+        if guildes_items:
+            print(f"[veille_roblox_task]   accessoires : {_sa['lus']} lu(s) · "
+                  f"{_sa['candidats']} candidat(s) · {_sa['hors_fenetre']} hors "
+                  f"fenêtre ({roblox_module.FENETRE_DIRECTE_HEURES} h) · "
+                  f"{_sa['deja']} déjà sorti(s) · {_sa['echecs']} échec(s) d'envoi")
+        if guildes_news:
+            print(f"[veille_roblox_task]   actualités : {_sn['lus']} billet(s) lu(s) · "
+                  f"{_sn['sautees']} source(s) sautée(s) (cadence) · "
+                  f"{_sn['pannes']} source(s) en panne · {_sn['deja']} déjà "
+                  f"publié(s) · {_sn['echecs']} échec(s) d'envoi")
+        #  ⚠️ ZÉRO PUBLICATION → ON DIT L'ÉTAT DE CHAQUE SERVEUR. Le cas qui a
+        #  coûté onze heures au propriétaire : un flux allumé, l'autre éteint,
+        #  et un bilan qui ne montrait que le total.
+        if _publies == 0:
+            await _diag_veille_serveurs()
         if _reporte:
             print(f"[veille_roblox_task] plafond atteint — {_reporte} publication(s) "
                   f"reportee(s) au prochain passage (dans 30 min). Rien n'est perdu.")
