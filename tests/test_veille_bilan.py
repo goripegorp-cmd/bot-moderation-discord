@@ -68,6 +68,27 @@ def test_un_envoi_rate_est_compte_et_pas_confondu_avec_rien_a_publier():
         "les échecs d'envoi doivent être comptés des DEUX côtés")
 
 
+def test_le_quota_par_source_est_compte_pas_tu():
+    """⚠️ LE BILAN DOIT S'ADDITIONNER. `ordonner_publication` ne garde que les
+    N plus récents de chaque source ; les autres ne passent devant AUCUNE des
+    portes comptées, donc ils n'apparaissaient nulle part. Mesuré sur Railway
+    le 19/08 : « 11 lus · 6 déjà publiés · 0 publication » — cinq billets
+    semblaient s'évaporer. Ils ne s'évaporent pas (ils repassent au tour
+    suivant), mais un bilan qui ne se boucle pas fait chercher une panne là où
+    il n'y en a pas."""
+    assert BOUCLE.count("plafonnes'] += ") + BOUCLE.count('plafonnes"] += ') >= 2, (
+        "le quota doit être compté des DEUX côtés (accessoires et actualités)")
+    bilan = BOUCLE.split("passage terminé")[-1]
+    assert "quota" in bilan, "le quota doit apparaître dans le bilan imprimé"
+
+
+def test_le_lot_est_calcule_une_seule_fois():
+    """Rappeler `ordonner_publication` pour compter donnerait deux listes
+    potentiellement différentes — et un compteur faux."""
+    for cle in ("_lot_a", "_lot_b"):
+        assert BOUCLE.count(f"{cle} = ") == 1, f"{cle} doit être calculé une fois"
+
+
 def test_le_bilan_sort_le_detail_meme_quand_rien_ne_deborde():
     """Le détail ne doit pas être conditionné à un débordement : c'est quand
     RIEN ne sort qu'on en a besoin."""

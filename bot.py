@@ -12893,8 +12893,10 @@ async def veille_roblox_task():
         #  situations dont une seule est une panne (mesuré le 19/08) : le
         #  propriétaire ne pouvait pas trancher, donc il supposait la panne.
         #  Ces compteurs nomment l'étage exact où le passage s'est arrêté.
-        _sa = {"lus": 0, "candidats": 0, "hors_fenetre": 0, "deja": 0, "echecs": 0}
-        _sn = {"lus": 0, "sautees": 0, "pannes": 0, "deja": 0, "echecs": 0}
+        _sa = {"lus": 0, "candidats": 0, "hors_fenetre": 0, "deja": 0,
+               "echecs": 0, "plafonnes": 0}
+        _sn = {"lus": 0, "sautees": 0, "pannes": 0, "deja": 0,
+               "echecs": 0, "plafonnes": 0}
 
         # ── Les articles ────────────────────────────────────────────────────
         if guildes_items:
@@ -12977,8 +12979,13 @@ async def veille_roblox_task():
                         #  Du plus ANCIEN au plus récent : Discord empile vers
                         #  le bas, donc envoyer l'ancien d'abord fait un salon
                         #  qui se lit dans l'ordre en scrollant.
-                        for a in roblox_module.ordonner_publication(
-                                evts.get(cle) or [], _TRANCHE_FLUX.get(cle, 5)):
+                        #  Même règle que côté actualités : ce que la tranche
+                        #  laisse dehors est COMPTÉ, pas tu. Un plafond muet se
+                        #  lit comme « il n'y avait rien d'autre ».
+                        _lot_a = roblox_module.ordonner_publication(
+                            evts.get(cle) or [], _TRANCHE_FLUX.get(cle, 5))
+                        _sa["plafonnes"] += max(0, len(evts.get(cle) or []) - len(_lot_a))
+                        for a in _lot_a:
                             #  Trop vieux = plus une nouvelle : on ne republie
                             #  pas des archives apres une panne ou une remise a
                             #  zero de la base. Pour « bascules » : seule une
@@ -13035,9 +13042,20 @@ async def veille_roblox_task():
                     #  récent — un salon d'actualité se lit aussi de haut en
                     #  bas. `ordonner_publication` trie sur `cree_le`, que les
                     #  billets portent comme les articles.
-                    for b in roblox_module.ordonner_publication(
-                            rel["billets"],
-                            roblox_news_module.MAX_BILLETS_PAR_PASSAGE):
+                    #  ⚠️ LE PLAFOND SE COMPTE, IL NE SE TAIT PAS.
+                    #  `ordonner_publication` ne garde que les N plus récents
+                    #  de CETTE source. Les autres ne passent devant aucune
+                    #  des portes ci-dessous : ils n'étaient donc comptés
+                    #  nulle part, et le bilan ne s'additionnait plus.
+                    #  Mesuré sur Railway le 19/08 : « 11 lus · 6 déjà publiés
+                    #  · 0 publication » — cinq billets semblaient disparaître.
+                    #  Ils ne disparaissent pas (ils repassent au tour suivant),
+                    #  mais un bilan qui ne se boucle pas fait chercher une
+                    #  panne là où il n'y en a pas.
+                    _lot_b = roblox_module.ordonner_publication(
+                        rel["billets"], roblox_news_module.MAX_BILLETS_PAR_PASSAGE)
+                    _sn["plafonnes"] += max(0, len(rel.get("billets") or []) - len(_lot_b))
+                    for b in _lot_b:
                         if await roblox_news_module.deja_publie(g.id, b["topic_id"]):
                             _sn["deja"] += 1
                             continue
@@ -13065,16 +13083,24 @@ async def veille_roblox_task():
               f"{len(guildes_news)} · {_publies} publication(s) réelle(s) · "
               f"{_reporte} reportée(s)")
         #  ⚠️ LE DÉTAIL, TOUJOURS. C'est lui qui répond à « pourquoi zéro ».
+        #  ⚠️ CES LIGNES DOIVENT S'ADDITIONNER. `candidats` = hors fenêtre +
+        #  déjà sortis + publiés + échecs + reportés ; et lus = candidats +
+        #  plafonnés + tout ce que la détection n'a pas retenu. Un bilan qui ne
+        #  se boucle pas fait chercher une panne là où il n'y en a pas — c'est
+        #  arrivé le 19/08 avec « 11 lus · 6 déjà publiés · 0 publication ».
         if guildes_items:
             print(f"[veille_roblox_task]   accessoires : {_sa['lus']} lu(s) · "
                   f"{_sa['candidats']} candidat(s) · {_sa['hors_fenetre']} hors "
                   f"fenêtre ({roblox_module.FENETRE_DIRECTE_HEURES} h) · "
-                  f"{_sa['deja']} déjà sorti(s) · {_sa['echecs']} échec(s) d'envoi")
+                  f"{_sa['deja']} déjà sorti(s) · {_sa['plafonnes']} au-delà du "
+                  f"quota du passage · {_sa['echecs']} échec(s) d'envoi")
         if guildes_news:
             print(f"[veille_roblox_task]   actualités : {_sn['lus']} billet(s) lu(s) · "
                   f"{_sn['sautees']} source(s) sautée(s) (cadence) · "
                   f"{_sn['pannes']} source(s) en panne · {_sn['deja']} déjà "
-                  f"publié(s) · {_sn['echecs']} échec(s) d'envoi")
+                  f"publié(s) · {_sn['plafonnes']} au-delà du quota "
+                  f"({roblox_news_module.MAX_BILLETS_PAR_PASSAGE}/source, repris au "
+                  f"prochain passage) · {_sn['echecs']} échec(s) d'envoi")
         #  ⚠️ ZÉRO PUBLICATION → ON DIT L'ÉTAT DE CHAQUE SERVEUR. Le cas qui a
         #  coûté onze heures au propriétaire : un flux allumé, l'autre éteint,
         #  et un bilan qui ne montrait que le total.
