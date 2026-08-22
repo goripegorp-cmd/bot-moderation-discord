@@ -12791,11 +12791,28 @@ async def activite_passage_task():
             #  avance ou s'il est bloqué. `reportes` doit tomber à 0 en quelques
             #  passages ; s'il stagne, c'est que les poses échouent.
             _et = _ac.get("etiquettes") or {}
+            #  ⚠️ L'ANCRE D'OBSERVATION, EN CLAIR. `observation=0 j` fait croire
+            #  à une panne alors que c'est le garde-fou anti-faux-positif : sous
+            #  ANCIENNETE_MINIMALE jours, le bot REFUSE de juger qui que ce soit
+            #  et tout le monde ressort « actif ». Sans la date, impossible de
+            #  distinguer « le suivi vient de démarrer » de « quelqu'un a
+            #  réarmé l'observation » — deux causes très différentes pour le
+            #  même zéro, et la seconde est un geste volontaire du staff.
+            try:
+                _ancre = str((await activite_module.config(g.id)).get(
+                    "activite_observe_depuis") or "?")
+            except Exception:
+                _ancre = "?"
             print(f"[activite_passage_task] {g.name} ({g.id}) : "
                   f"suivis={_cl.get('suivis', 0)} · actifs={_cl.get('actifs', 0)} · "
                   f"doux={_cl.get('doux', 0)} · rappel={_cl.get('rappel', 0)} · "
                   f"retrait={_cl.get('retrait', 0)} · revenus={_cl.get('revenus', 0)} · "
                   f"observation={rap.get('observation', 0)} j"
+                  + f" (depuis {_ancre})"
+                  + (f" · ⏳ sous le seuil de {activite_module.ANCIENNETE_MINIMALE} j "
+                     f"— personne n'est jugé, c'est voulu"
+                     if rap.get("observation", 0) < activite_module.ANCIENNETE_MINIMALE
+                     else "")
                   + (" · ⚠️ suivi MUET (aucune activité mesurée)"
                      if rap.get("suivi_muet") else "")
                   #  ⚠️ CE COMPTEUR ÉTAIT ÉCRIT ET LU NULLE PART. Le résumé au
