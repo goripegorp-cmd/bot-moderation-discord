@@ -735,25 +735,47 @@ class ActiviteRolesAfkPanelV2(_Base):
     async def render_to(self, i, *, edit: bool = True):
         try:
             c = await activite.config(self.g.id)
+            r0 = self.g.get_role(int(c["activite_role_doux"] or 0))
             r1 = self.g.get_role(int(c["activite_role_niveau1"] or 0))
             r2 = self.g.get_role(int(c["activite_role_niveau2"] or 0))
             ouverts = niv.salons_ouverts(self.g, c)
             confl = niv.conflits(self.g, c) if (r1 or r2) else []
 
+            def _nom_palier(niveau: int) -> str:
+                #  Le palier 0 n'est pas un « niveau » de sanction : l'appeler
+                #  ainsi laisserait croire à une punition graduée alors qu'il
+                #  ne retire rien et ne masque rien.
+                return "Peu actif" if niveau == 0 else f"Niveau {niveau}"
+
             def _etat(r, niveau: int) -> str:
                 if r is None:
-                    return f"⚪ **Niveau {niveau}** · _aucun rôle_"
+                    return f"⚪ **{_nom_palier(niveau)}** · _aucun rôle_"
                 if not niv.utilisable(self.g, r):
-                    return (f"🔴 **Niveau {niveau}** · {r.mention}\n"
+                    return (f"🔴 **{_nom_palier(niveau)}** · {r.mention}\n"
                             f"-# ⚠️ Le bot ne peut pas le poser : remontez son "
                             f"propre rôle au-dessus de celui-ci dans les "
                             f"paramètres du serveur.")
-                return f"🟢 **Niveau {niveau}** · {r.mention} · `{len(r.members)}` membre(s)"
+                return (f"🟢 **{_nom_palier(niveau)}** · {r.mention} · "
+                        f"`{len(r.members)}` membre(s)")
 
             items = [
                 v2_title("💤 Rôles AFK & masquage"),
                 v2_subtitle("Le rôle rend l'absence visible — et masque le serveur"),
                 v2_divider(),
+                #  ⚠️ LA PERMISSION DE MENTIONNER EST AFFICHÉE ICI, EN CLAIR.
+                #  Sans « Mentionner tous les rôles », la mention du rôle
+                #  s'affiche et ne notifie PERSONNE — exactement le symptôme
+                #  que ce rôle doit corriger, mais en silencieux.
+                v2_body(
+                    f"{_etat(r0, 0)}\n"
+                    f"-# Posé dès qu'un membre se montre trop peu. **Aucune "
+                    f"sanction, aucun masquage** : il ne sert qu'à être "
+                    f"mentionné, pour ne pas citer des centaines de pseudos.\n"
+                    + ("-# 🟢 Le bot peut mentionner les rôles."
+                       if self.g.me.guild_permissions.mention_everyone
+                       else "-# 🔴 **Il manque « Mentionner tous les rôles » "
+                            "au bot** : la mention s'affichera sans notifier "
+                            "personne.")),
                 v2_body(f"{_etat(r1, 1)}\n-# Posé au 1er seuil. Le membre garde "
                         f"tous ses autres rôles."),
                 v2_body(f"{_etat(r2, 2)}\n-# Posé au 2e seuil, en même temps que "
@@ -799,10 +821,16 @@ class ActiviteRolesAfkPanelV2(_Base):
 
             items.append(v2_divider())
 
-            for niveau, cle in ((1, "activite_role_niveau1"),
+            #  ⚠️ LE PALIER 0 EST DANS LA MÊME BOUCLE, exprès. Le rôle qui
+            #  touche le plus de monde (des centaines) doit se régler au même
+            #  endroit que les deux autres, sinon il reste introuvable.
+            for niveau, cle in ((0, "activite_role_doux"),
+                                (1, "activite_role_niveau1"),
                                 (2, "activite_role_niveau2")):
                 sel = RoleSelect(
-                    placeholder=f"Rôle du niveau {niveau}…",
+                    placeholder=("Rôle « peu actif » (aucune sanction)…"
+                                 if niveau == 0
+                                 else f"Rôle du niveau {niveau}…"),
                     min_values=1, max_values=1, custom_id=f"act_afk_{niveau}")
                 sel.callback = self._faire_role(cle)
                 items.append(discord.ui.ActionRow(sel))
@@ -810,7 +838,7 @@ class ActiviteRolesAfkPanelV2(_Base):
             b_creer = Button(
                 label="Créer les rôles manquants", emoji="✨",
                 style=discord.ButtonStyle.success, custom_id="act_afk_creer",
-                disabled=bool(r1 and r2))
+                disabled=bool(r0 and r1 and r2))
             b_creer.callback = self._cb_creer
 
             b_masq = Button(
@@ -861,7 +889,8 @@ class ActiviteRolesAfkPanelV2(_Base):
             await i.response.defer()
             c = await activite.config(self.g.id)
             crees = []
-            for niveau, cle in ((1, "activite_role_niveau1"),
+            for niveau, cle in ((0, "activite_role_doux"),
+                                (1, "activite_role_niveau1"),
                                 (2, "activite_role_niveau2")):
                 if self.g.get_role(int(c.get(cle) or 0)) is not None:
                     continue

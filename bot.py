@@ -12786,6 +12786,11 @@ async def activite_passage_task():
             _cl = rap.get("classement") or {}
             _ac = rap.get("actions") or {}
             _sans = int((_ac.get("retraits") or {}).get("sans_etiquette", 0) or 0)
+            #  ⚠️ L'ÉTIQUETTE « PEU ACTIF » SE POSE PAR TRANCHES (budget de
+            #  débit) : sans ces chiffres, on ne peut pas savoir si l'écoulement
+            #  avance ou s'il est bloqué. `reportes` doit tomber à 0 en quelques
+            #  passages ; s'il stagne, c'est que les poses échouent.
+            _et = _ac.get("etiquettes") or {}
             print(f"[activite_passage_task] {g.name} ({g.id}) : "
                   f"suivis={_cl.get('suivis', 0)} · actifs={_cl.get('actifs', 0)} · "
                   f"doux={_cl.get('doux', 0)} · rappel={_cl.get('rappel', 0)} · "
@@ -12797,6 +12802,9 @@ async def activite_passage_task():
                   #  staff annonçait « N à dépouiller » puis « 0 dépouillé(s) »
                   #  sans jamais dire pourquoi — la faute exacte qui avait fait
                   #  retirer le second compteur le 12/08.
+                  + (f" · étiquettes +{_et.get('faits', 0)}"
+                     f"/{_et.get('reportes', 0)} en attente"
+                     if (_et.get("faits") or _et.get("reportes")) else "")
                   + (f" · ⚠️ {_sans} dépouillement(s) REFUSÉ(S) : rôle AFK de "
                      f"palier 2 absent ou au-dessus du bot" if _sans else ""))
             #  On ne poste au staff QUE s'il s'est passé quelque chose : une

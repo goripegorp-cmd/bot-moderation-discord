@@ -54,8 +54,23 @@ PAUSE_ENTRE_SALONS = 0.35
 #  demande un traitement étalé, pas un passage en force qui bloque le bot.
 MAX_SALONS_PAR_PASSAGE = 250
 
+NOM_DOUX = "👀 Peu actif"
 NOM_NIVEAU1 = "💤 AFK"
 NOM_NIVEAU2 = "💤 AFK · rôles retirés"
+
+#  ⚠️ LA CLÉ SE LIT DANS UNE TABLE, JAMAIS PAR f-STRING.
+#  L'ancien code faisait `cfg_act.get(f"activite_role_niveau{niveau}")` : pour
+#  un niveau hors {1, 2} il rendait None sans le dire, donc `cible is None`,
+#  donc un refus silencieux. Une table lève l'ambiguïté et rend le palier 0
+#  possible.
+_CLE_PAR_NIVEAU = {
+    0: "activite_role_doux",
+    1: "activite_role_niveau1",
+    2: "activite_role_niveau2",
+}
+
+_NOM_PAR_NIVEAU = {0: NOM_DOUX, 1: NOM_NIVEAU1, 2: NOM_NIVEAU2}
+_COULEUR_PAR_NIVEAU = {0: 0x5865F2, 1: 0x4E5058, 2: 0x4E5058}
 
 _log = print
 
@@ -115,14 +130,51 @@ def porte_une_etiquette(member) -> bool:
 
 
 def ids_afk(cfg_act: dict) -> set[int]:
-    """Les identifiants des rôles d'inactivité, même si les rôles ont disparu.
+    """Les identifiants des rôles d'inactivité MASQUANTS, même s'ils ont disparu.
 
     Version « sans guilde » : sert à exclure ces rôles d'une liste à mémoriser
     sans avoir à les résoudre. Un rôle supprimé côté Discord doit tout de même
     être exclu, sinon on le mémoriserait comme un rôle du membre à restituer.
+
+    ⚠️ DEUX RÔLES, ET PAS TROIS — NE PAS Y AJOUTER L'ÉTIQUETTE DOUCE.
+    Cette fonction et `roles_afk` pilotent le MASQUAGE des salons et le cache
+    du retour immédiat. Y verser le rôle « peu actif » ferait deux dégâts :
+      · `appliquer_masquage` poserait `view_channel=False` sur tous les salons
+        pour des centaines de membres qui viennent justement d'écrire ;
+      · `_IDS_CONNUS` déclencherait `retour_immediat` à leur premier message,
+        donc `remettre_doux()`, donc le compteur de rappels doux retomberait à
+        zéro — et le contournement « je poste une fois par semaine » que
+        `doux_max` referme se rouvrirait entièrement.
+    Pour la liste des ÉTIQUETTES (les trois), voir `ids_etiquettes`.
     """
     return {int(cfg_act.get(c) or 0) for c in
             ("activite_role_niveau1", "activite_role_niveau2")} - {0}
+
+
+def ids_etiquettes(cfg_act: dict) -> set[int]:
+    """Les identifiants des TROIS étiquettes, masquantes ou non.
+
+    C'est la liste qu'il faut partout où l'on demande « ce membre porte-t-il
+    une étiquette du système ? » — retrait d'étiquette, sauvegarde des rôles
+    avant dépouillement, détection de conflit. Jamais pour le masquage.
+    """
+    return {int(cfg_act.get(c) or 0) for c in _CLE_PAR_NIVEAU.values()} - {0}
+
+
+def roles_etiquettes(guild, cfg_act: dict) -> list:
+    """Les objets rôle des trois étiquettes, DANS L'ORDRE des paliers (0, 1, 2).
+
+    L'ordre compte : `poser_niveau` s'en sert pour savoir quelles étiquettes
+    retirer quand il en pose une autre.
+    """
+    out = []
+    for cle in _CLE_PAR_NIVEAU.values():
+        rid = int(cfg_act.get(cle) or 0)
+        if rid:
+            r = guild.get_role(rid)
+            if r is not None:
+                out.append(r)
+    return out
 
 
 async def creer_role(guild, niveau: int) -> discord.Role | None:
@@ -132,12 +184,19 @@ async def creer_role(guild, niveau: int) -> discord.Role | None:
     qu'à porter des REFUS dans les salons. Un rôle créé avec les permissions par
     défaut du serveur accorderait au contraire des droits à des absents.
     """
-    nom = NOM_NIVEAU1 if niveau == 1 else NOM_NIVEAU2
+    #  Table plutôt que ternaire : avec trois paliers, `NOM_NIVEAU1 if
+    #  niveau == 1 else NOM_NIVEAU2` donnait au palier 0 le nom du palier 2.
+    nom = _NOM_PAR_NIVEAU.get(niveau, NOM_NIVEAU2)
     try:
         return await guild.create_role(
             name=nom,
             permissions=discord.Permissions.none(),
-            colour=discord.Colour(0x4E5058),
+            colour=discord.Colour(_COULEUR_PAR_NIVEAU.get(niveau, 0x4E5058)),
+            #  ⚠️ `hoist=False` : ce rôle touche des centaines de membres, les
+            #  afficher séparément dans la barre latérale la rendrait illisible.
+            #  ⚠️ `mentionable=False` : personne d'autre que le bot ne doit
+            #  pouvoir réveiller des centaines de gens. Le bot, lui, ping en
+            #  passant `allowed_mentions(roles=True)` explicitement.
             hoist=False, mentionable=False,
             reason="Système d'activité : rôle d'inactivité",
         )
@@ -370,12 +429,15 @@ async def poser_niveau(guild, member, niveau: int, cfg_act: dict) -> bool:
     Un seul rôle d'inactivité à la fois. En porter deux afficherait deux états
     contradictoires sur le même membre et fausserait tous les comptages.
     """
-    voulus = roles_afk(guild, cfg_act)
+    #  ⚠️ LES TROIS ÉTIQUETTES, pas seulement les deux masquantes : sans ça le
+    #  palier 0 ne trouverait jamais sa cible, et le passage doux → palier 1
+    #  laisserait les deux étiquettes sur le même membre.
+    voulus = roles_etiquettes(guild, cfg_act)
     if not voulus:
         return False
     cible = None
-    for i, r in enumerate(voulus, start=1):
-        if int(cfg_act.get(f"activite_role_niveau{niveau}") or 0) == r.id:
+    for r in voulus:
+        if int(cfg_act.get(_CLE_PAR_NIVEAU.get(niveau, "")) or 0) == r.id:
             cible = r
     #  ⚠️ SANS ÉTIQUETTE POSABLE, ON REFUSE — ET ON NE TOUCHE À RIEN.
     #  Le garde-fou du 12/08 (activite_escalade.py) refuse le dépouillement
@@ -394,25 +456,49 @@ async def poser_niveau(guild, member, niveau: int, cfg_act: dict) -> bool:
     #  où continuer est le bon choix.
     if cible is None:
         return False
+    #  ⚠️ ON VÉRIFIE QU'ELLE EST POSABLE AVANT D'ÉCRIRE QUOI QUE CE SOIT.
+    #  Un rôle passé au-dessus du bot dans la hiérarchie est intouchable : sans
+    #  ce contrôle, on retirerait l'étiquette précédente puis on échouerait à
+    #  poser la nouvelle, laissant le membre sans étiquette du tout.
+    if not utilisable(guild, cible):
+        return False
     a_retirer = [r for r in voulus if r.id != cible.id]
     a_retirer = [r for r in a_retirer if r in member.roles and utilisable(guild, r)]
 
-    fait = False
+    #  ⚠️ LE RETOUR REFLÈTE LA POSE, JAMAIS LE RETRAIT — corrigé le 20/08/2026.
+    #  L'ancien code mettait `fait = True` sur le simple `remove_roles`. Le
+    #  garde-fou du 12/08 (activite_escalade) lit ce retour pour décider s'il a
+    #  le droit de dépouiller un membre de tous ses rôles. Avec une étiquette
+    #  douce portée par des centaines de membres, `a_retirer` est presque
+    #  toujours non vide : le garde-fou aurait laissé passer le dépouillement
+    #  de membres qu'on n'a pas réussi à étiqueter. On rend donc l'état de
+    #  l'ÉTIQUETTE, seule chose que le garde-fou cherche à garantir.
+    pose = cible in member.roles
     try:
-        if cible is not None and utilisable(guild, cible) and cible not in member.roles:
+        if not pose:
             await member.add_roles(cible, reason=f"Inactivité — palier {niveau}")
-            fait = True
+            pose = True
         if a_retirer:
-            await member.remove_roles(*a_retirer, reason="Inactivité — changement de palier")
-            fait = True
+            await member.remove_roles(*a_retirer,
+                                      reason="Inactivité — changement de palier")
     except Exception as ex:
         _log(f"[activite_niveaux poser_niveau {member.id}] {ex}")
-    return fait
+        #  L'ajout a pu échouer APRÈS qu'on l'ait cru posé : on ne ment pas.
+        pose = cible in member.roles
+    return pose
 
 
 async def retirer_niveaux(guild, member, cfg_act: dict) -> bool:
-    """Enlève tout rôle d'inactivité : le membre est de retour."""
-    a_retirer = [r for r in roles_afk(guild, cfg_act)
+    """Enlève tout rôle d'inactivité : le membre est de retour.
+
+    ⚠️ LES TROIS ÉTIQUETTES, pas les deux masquantes. C'est l'UNIQUE sortie
+    d'étiquette du système (seul appelant : `activite_escalade.traiter_retour`).
+    Lire `roles_afk` ici transformerait le rôle « peu actif » en cliquet : posé
+    une fois, jamais retiré, il s'accumulerait semaine après semaine sur des
+    gens redevenus actifs — et le ping finirait par mentionner tout le serveur,
+    exactement ce que ce rôle était censé éviter.
+    """
+    a_retirer = [r for r in roles_etiquettes(guild, cfg_act)
                  if r in member.roles and utilisable(guild, r)]
     if not a_retirer:
         return False
@@ -442,7 +528,15 @@ async def retirer_tous_les_roles(guild, member, cfg_act: dict) -> dict:
     retrait dont on a perdu la liste — celui-là, personne ne peut le défaire.
     """
     res = {"retires": [], "gardes": [], "ok": False}
-    afk = ids_afk(cfg_act)
+    #  ⚠️ LES TROIS ÉTIQUETTES, pas les deux masquantes. Un membre qui passe de
+    #  « peu actif » au palier 2 porte encore l'étiquette douce dans le cache
+    #  `member.roles` (la passerelle Discord met à jour de façon différée).
+    #  Avec `ids_afk`, elle serait donc RETIRÉE avec les autres — et surtout
+    #  MÉMORISÉE dans la liste des rôles à rendre. Le jour où le membre revient,
+    #  on lui rendrait son étiquette « peu actif » comme si c'était un de ses
+    #  rôles. C'est le seul endroit du système où une étiquette peut être
+    #  confondue avec un vrai rôle du membre.
+    afk = ids_etiquettes(cfg_act)
     try:
         garder, retirer = [], []
         for r in member.roles:

@@ -140,6 +140,26 @@ ANCIENNETE_MINIMALE = 3
 #  d'un bug de suivi (base vidée, horloge décalée), pas d'un serveur qui dort.
 PLAFOND_ACTIONS_PAR_PASSAGE = 25
 
+#  ⚠️ LES ÉTIQUETTES ONT LEUR PROPRE BUDGET, ET IL EST EN SECONDES.
+#  Le plafond ci-dessus borne les actions DESTRUCTRICES (retirer tous les rôles
+#  d'un membre) : 25 par passage, exprès, pour qu'un réglage malheureux ne
+#  dépouille pas un serveur entier avant qu'on s'en aperçoive.
+#
+#  Poser une étiquette est l'inverse : réversible, sans effet sur les
+#  permissions, et il faut la poser sur BEAUCOUP de monde d'un coup (959 chez
+#  le propriétaire). À 25 par passage de 6 h, il aurait fallu dix jours.
+#
+#  Discord n'a AUCUNE API d'attribution de rôle en masse : c'est un appel par
+#  membre. On cadence donc SOUS le seau plutôt que de le saturer, et on borne
+#  en TEMPS et non en nombre — le débit réel de Discord n'est pas prouvable,
+#  mais un budget de 240 s garantit par construction que le corps de la tâche
+#  reste très loin des 6 h, quel que soit ce débit.
+#
+#  ⚠️ SEUL LE PREMIER BALAYAGE COÛTE. Un membre qui porte déjà l'étiquette ne
+#  consomme ni appel ni pause : en régime établi, ce budget n'est jamais entamé.
+PAUSE_ENTRE_ETIQUETTES = 1.0          # secondes entre deux écritures de rôle
+BUDGET_ETIQUETTES_PAR_PASSAGE = 240.0  # secondes, partagé pose ET retrait
+
 #  Injectés par bot.py au démarrage (setup) : on ne l'importe pas, sinon boucle.
 _get_db = None
 _cfg = None
@@ -250,6 +270,15 @@ CLES_DEFAUT = {
     #  Le système ne se contente plus de compter : il ÉTIQUETTE. Le rôle rend
     #  l'absence visible de tous, y compris de l'intéressé, et c'est lui qui
     #  porte le masquage des salons (voir `activite_niveaux.py`).
+    #  ⚠️ AJOUTÉ LE 20/08/2026 — L'ÉTIQUETTE QUI REMPLACE 959 MENTIONS.
+    #  Le palier « doux » n'avait AUCUN rôle : le message listait donc les
+    #  membres un par un. Le code supposait « ils sont peu nombreux par
+    #  construction » ; chez le propriétaire ils étaient 959, affichés en
+    #  30 mentions suivies d'un « +929 ». Sa demande : « au lieu de mentionner
+    #  900 ou 1000 personnes, tu mentionnes un rôle ».
+    #  ⚠️ CE RÔLE NE MASQUE RIEN. Il ne sert qu'à être porté et mentionné —
+    #  voir `roles_afk` vs `roles_etiquettes` dans activite_niveaux.py.
+    "activite_role_doux": 0,            # posé au palier « doux » — aucune sanction
     "activite_role_niveau1": 0,         # posé au 1er palier — le membre garde tout
     "activite_role_niveau2": 0,         # posé au 2e — tous ses autres rôles partent
     #  Masquer TOUT le serveur aux porteurs de ces rôles, sauf les deux salons
@@ -691,11 +720,42 @@ async def presence(guild_id: int, member, cfg_act: dict,
         "silence_brut": silence_brut,
         "presents": len(set(vus)),
         "fenetre": fenetre,
+        #  ⚠️ LA FENÊTRE DEMANDÉE, À CÔTÉ DE LA FENÊTRE RÉELLE.
+        #  `fenetre` est plafonnée par ce qu'on a pu observer ; `verdict` a
+        #  besoin des deux pour mettre le seuil à l'échelle. Sans elle, un
+        #  serveur observé depuis 3 jours exige 3 présences sur 3 — la
+        #  perfection — pour échapper au palier doux.
+        "fenetre_voulue": fenetre_voulue,
         "jugeable": jugeable,
         "observables": observables,
         "observation": observation,
         "jours_vus": sorted(set(vus)),
     }
+
+
+def presence_exigee(mesure: dict, conf: dict) -> int:
+    """Combien de journées le membre doit avoir montrées, SUR LA FENÊTRE RÉELLE.
+
+    ⚠️ UNE SEULE SOURCE POUR CE CHIFFRE — et c'est la raison d'être de cette
+    fonction. `verdict` s'en sert pour trancher, le message d'avertissement
+    pour l'annoncer. La première version calculait la mise à l'échelle dans
+    `verdict` seulement : le message affichait alors « au moins 3 jours sur 3 »
+    pendant que le code n'en exigeait qu'un. Un message qui annonce une règle
+    que le code n'applique pas est pire que pas de message du tout.
+
+    ⚠️ POURQUOI UNE MISE À L'ÉCHELLE. `fenetre` est plafonnée par l'ancienneté
+    du suivi (voir `presence`). Comparer une présence mesurée sur 3 jours à un
+    seuil pensé pour 7 exige une présence PARFAITE : sur le serveur du
+    propriétaire, observé depuis trois jours, il fallait être venu 3 jours sur
+    3 pour échapper au palier doux. Un membre venu deux jours sur trois — très
+    présent — était donc étiqueté « peu actif ». Étiqueter des gens actifs
+    discrédite le système entier dès le premier ping.
+
+    Plancher à 1 : tant qu'on n'observe qu'un jour, être venu ce jour-là suffit.
+    """
+    fenetre = mesure.get("fenetre", 1) or 1
+    voulue = mesure.get("fenetre_voulue") or fenetre
+    return max(1, round(conf["presence"] * fenetre / max(1, voulue)))
 
 
 def verdict(mesure: dict, conf: dict, doux_deja: int = 0) -> str:
@@ -724,7 +784,8 @@ def verdict(mesure: dict, conf: dict, doux_deja: int = 0) -> str:
     if not mesure.get("jugeable"):
         return "actif"          # trop récent pour qu'on lui reproche quoi que ce soit
 
-    if mesure.get("presents", 0) >= conf["presence"]:
+    exige = presence_exigee(mesure, conf)
+    if mesure.get("presents", 0) >= exige:
         return "actif"
 
     #  Présence trop faible. Un rappel doux, sauf s'il en a déjà collectionné :

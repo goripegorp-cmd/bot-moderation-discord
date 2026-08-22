@@ -84,6 +84,22 @@ def vu_trop_peu(presents: int, fenetre: int) -> str:
                f"Seen {presents} day out of {fenetre}. Try a bit more.")
 
 
+def presence_demandee(exige: int, fenetre: int) -> str:
+    """La RÈGLE, quand le message s'adresse à un rôle et non à des personnes.
+
+    ⚠️ Ne jamais utiliser les chiffres d'UN membre ici. Le palier « doux »
+    couvre aussi bien 0 jour vu que 2 : afficher « Vu 0 jour sur 3 » à des
+    centaines de personnes serait faux pour la plupart, et il n'y a plus de
+    ligne par membre pour rétablir la vérité. On annonce donc le seuil.
+    """
+    j = "jour" if exige <= 1 else "jours"
+    d = "day" if exige <= 1 else "days"
+    return duo(f"Il faut se montrer au moins {exige} {j} sur {fenetre}. "
+               f"Un message suffit.",
+               f"You need to show up at least {exige} {d} out of {fenetre}. "
+               f"One message is enough.")
+
+
 def apres_expulsion() -> str:
     """Message privé au membre expulsé pour inactivité qui revient.
 
@@ -145,6 +161,9 @@ def verifier_longueurs() -> list[str]:
     echantillons = [
         revenir(), revenir("#retour"), vu_trop_peu(1, 7), apres_expulsion(),
         pas_une_sanction(), retour_tout_revient(), *regles(7, 14, 21),
+        #  Le texte du palier doux quand il s'adresse au RÔLE : il remplace la
+        #  liste de centaines de pseudos, il doit tenir sur une ligne.
+        presence_demandee(1, 7), presence_demandee(3, 7),
     ]
     trop_longues = []
     for bloc in echantillons:

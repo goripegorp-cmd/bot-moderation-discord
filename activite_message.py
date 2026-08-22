@@ -96,10 +96,25 @@ def construire(fiches: list, *, palier: str, salon_retour=None,
 
     if palier == "doux":
         titre, couleur = txt.T_PRESQUE, Palette.INFO
-        #  Un seul chiffre pour l'en-tête, celui du premier de la liste : le
-        #  détail par personne est déjà sur chaque ligne, et répéter la fenêtre
-        #  autant de fois qu'il y a de membres rallongerait pour rien.
-        action = txt.vu_trop_peu(fiches[0]["presents"], fiches[0]["fenetre"])
+        if role_ping is not None:
+            #  ⚠️ AVEC UN RÔLE, ON ANNONCE LA RÈGLE, PAS LE CHIFFRE D'UN SEUL.
+            #  Le palier doux couvre 0/3, 1/3 et 2/3. Afficher les chiffres du
+            #  premier de la liste ferait lire « Vu 0 jour sur 3 » à des
+            #  centaines de membres pour qui c'est faux — et il n'y a plus de
+            #  ligne par personne pour rétablir la vérité.
+            #  ⚠️ LE SEUIL VIENT DE `activite.presence_exigee`, PAS DE LA CONF
+            #  BRUTE. La fenêtre réelle est plafonnée par l'ancienneté du
+            #  suivi : afficher le seuil de la conf annoncerait « au moins
+            #  3 jours sur 3 » alors que le code n'en exige qu'un. Une seule
+            #  source pour ce chiffre, sinon le message ment.
+            action = txt.presence_demandee(
+                activite.presence_exigee(fiches[0], fiches[0]["seuils"]),
+                fiches[0]["fenetre"])
+        else:
+            #  Un seul chiffre pour l'en-tête, celui du premier de la liste : le
+            #  détail par personne est déjà sur chaque ligne, et répéter la
+            #  fenêtre autant de fois qu'il y a de membres rallongerait pour rien.
+            action = txt.vu_trop_peu(fiches[0]["presents"], fiches[0]["fenetre"])
     elif palier == "retrait":
         titre, couleur = txt.T_ROLES_RETIRES, Palette.WARNING
         action = txt.revenir(salon_retour.mention if salon_retour is not None else None)
@@ -118,8 +133,14 @@ def construire(fiches: list, *, palier: str, salon_retour=None,
     #  mêmes personnes, en une ligne, sans mur de pseudos. Le compte reste
     #  affiché : c'est lui qui donne la mesure du problème.
     if role_ping is not None:
+        #  ⚠️ ON ANNONCE CE QUE LE RÔLE TOUCHE, PAS CE QU'ON A CLASSÉ.
+        #  L'étiquette se pose par tranches (budget de débit) : au premier
+        #  passage, le rôle peut porter 240 membres alors que 959 sont classés.
+        #  Afficher `len(fiches)` annoncerait plus de monde que la mention n'en
+        #  notifie — le message mentirait sur sa propre portée.
+        _touches = len(getattr(role_ping, "members", None) or []) or len(fiches)
         corps = (f"{role_ping.mention}\n"
-                 f"-# `{len(fiches)}` membre(s) concerné(s)")
+                 f"-# `{_touches}` membre(s) concerné(s)")
     else:
         #  Repli quand aucun rôle n'est configuré : on liste, mais borné.
         corps = "\n".join(_liste(fiches, palier))

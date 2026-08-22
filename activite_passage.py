@@ -24,6 +24,8 @@ L'ORDRE, ET POURQUOI IL EST AINSI
 """
 from __future__ import annotations
 
+import asyncio
+
 import activite
 import activite_calendrier as cal
 import activite_escalade as esc
@@ -148,12 +150,22 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
 
     # ── 4. Les retours, avant tout le reste ──
     rendus, attentes = 0, []
+    #  ⚠️ UN SEUL BUDGET EN SECONDES POUR LES DEUX SENS.
+    #  Poser et retirer une étiquette tapent le MÊME seau de débit Discord
+    #  (même route, même guilde). Budgéter la pose et laisser le retrait libre
+    #  reviendrait à ne rien budgéter du tout. Les retraits passent EN PREMIER :
+    #  libérer quelqu'un prime toujours sur étiqueter quelqu'un d'autre.
+    budget = activite.BUDGET_ETIQUETTES_PAR_PASSAGE
     if not dry_run:
         for f in cl["revenus"]:
             try:
                 r = await esc.traiter_retour(guild, f, cfg_act)
                 if r["rendus"] or r["etiquette"]:
                     rendus += 1
+                    #  Seul un retour qui a VRAIMENT écrit coûte une pause : un
+                    #  membre sans rien à changer ne consomme pas de budget.
+                    await asyncio.sleep(activite.PAUSE_ENTRE_ETIQUETTES)
+                    budget -= activite.PAUSE_ENTRE_ETIQUETTES
                 if r["a_valider"]:
                     attentes.append(f["member"])
             except Exception as ex:
@@ -193,7 +205,16 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
             guild, cl["rappel"], cfg_act)
         rap["actions"]["retraits"] = await esc.appliquer_retraits(
             guild, cl["retrait"], cfg_act)
+        #  ⚠️ LE COMPTEUR DOUX REÇOIT LA LISTE COMPLÈTE, TOUJOURS.
+        #  C'est l'horloge de l'escalade (trois rappels doux → palier 1). La
+        #  faire dépendre d'un budget d'appels réseau ferait avancer l'escalade
+        #  à des vitesses différentes selon le nombre de membres.
         rap["actions"]["doux"] = await esc.noter_rappels_doux(guild, cl["doux"])
+        #  L'étiquette « peu actif », elle, coûte un appel par membre : elle
+        #  prend ce qui reste du budget, et le reste attend le passage suivant.
+        _et = await esc.appliquer_doux(guild, cl["doux"], cfg_act, budget)
+        rap["actions"]["etiquettes"] = _et
+        rap["reporte"]["etiquettes"] = _et.get("reportes", 0)
 
     # ── 6. Le masquage des salons ──
     #  Relancé à chaque passage exprès : un salon créé entre-temps, une
@@ -250,9 +271,16 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
         #  membres-là sont venus, on ne leur a rien posé, et les mentionner par
         #  un rôle qu'ils ne portent pas ne toucherait personne. Ils sont donc
         #  listés — ils sont peu nombreux par construction.
+        _r0 = guild.get_role(int(cfg_act.get("activite_role_doux", 0) or 0))
         _r1 = guild.get_role(int(cfg_act.get("activite_role_niveau1", 0) or 0))
         _r2 = guild.get_role(int(cfg_act.get("activite_role_niveau2", 0) or 0))
-        _roles = {"doux": None, "rappel": _r1, "retrait": _r2}
+        #  ⚠️ LE PALIER DOUX A DÉSORMAIS SON RÔLE — corrigé le 20/08/2026.
+        #  Il était câblé à `None`, avec ce commentaire : « le palier doux n'en
+        #  a AUCUN […] ils sont peu nombreux par construction ». L'hypothèse
+        #  était fausse : chez le propriétaire ils étaient 959, affichés en
+        #  30 mentions suivies d'un « +929 ». Sa demande, mot pour mot : « au
+        #  lieu de mentionner 900 ou 1000 personnes, tu mentionnes un rôle ».
+        _roles = {"doux": _r0, "rappel": _r1, "retrait": _r2}
         vues = [msgs.construire(g[p], palier=p, salon_retour=salon_retour,
                                 role_ping=_roles.get(p))
                 for p in ("doux", "rappel", "retrait")]

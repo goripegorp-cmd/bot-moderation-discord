@@ -22,6 +22,7 @@ et rendus dès le retour. Le retrait n'est pas une punition, c'est une veille.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 import activite
@@ -81,7 +82,14 @@ async def classer(guild) -> dict:
     #  signale et on n'agira sur personne — voir `activite_passage`.
     out["suivi_muet"] = (suivi_jours is None
                          and observation > activite.ANCIENNETE_MINIMALE)
+    #  ⚠️ DEUX ENSEMBLES, ET LA DIFFÉRENCE COMPTE.
+    #  `afk_ids` = les deux étiquettes MASQUANTES : « ce membre est-il masqué,
+    #  dépouillé ? ». `etiq_ids` = les trois étiquettes : « porte-t-il une
+    #  étiquette du système qu'il faut lui retirer ? ». Confondre les deux, soit
+    #  masque le serveur à des centaines de présents, soit rend l'étiquette
+    #  douce indélébile.
     afk_ids = niv.ids_afk(cfg_act)
+    etiq_ids = niv.ids_etiquettes(cfg_act)
     #  Alimente le cache qui rend le retour immédiat possible sur chaque message
     #  (voir `activite_niveaux._IDS_CONNUS`).
     niv.memoriser_ids(cfg_act)
@@ -128,7 +136,19 @@ async def classer(guild) -> dict:
                      #  staff doit voir, même si on ne juge pas là-dessus.
                      "jours_reels": mesure.get("silence_brut"),
                      "presents": mesure["presents"], "fenetre": mesure["fenetre"],
+                     #  ⚠️ INDISPENSABLE AU MESSAGE. `presence_exigee` met le
+                     #  seuil à l'échelle de la fenêtre réellement observée ;
+                     #  sans cette valeur, le message annoncerait le seuil brut
+                     #  de la configuration — « au moins 3 jours sur 3 » — alors
+                     #  que le code n'en exige qu'un. Le message mentirait.
+                     "fenetre_voulue": mesure.get("fenetre_voulue"),
                      "role": role, "seuils": conf, "groupe": cle,
+                     #  Le palier voyage AVEC la fiche : `traiter_retour` doit
+                     #  savoir s'il traite un membre redevenu ACTIF ou un membre
+                     #  encore « doux » qu'on libère seulement d'un masquage.
+                     #  Effacer l'ardoise du second rouvrirait le contournement
+                     #  « je poste une fois par semaine ».
+                     "palier": palier,
                      "doux_deja": doux_deja, "semaine": semaine}
 
             if palier == "actif":
@@ -144,10 +164,23 @@ async def classer(guild) -> dict:
                 #  lui etaient JAMAIS rendus. Perte definitive.
                 #  `a_des_roles_retires` vient de la meme requete que le compteur
                 #  doux : il ne coute aucun acces supplementaire.
-                a_des_roles_afk = any(r.id in afk_ids for r in member.roles)
+                #  ⚠️ LES TROIS ÉTIQUETTES ICI. Un membre redevenu actif doit
+                #  perdre AUSSI l'étiquette « peu actif », sinon elle devient un
+                #  cliquet et le rôle finit par mentionner tout le serveur.
+                a_des_roles_afk = any(r.id in etiq_ids for r in member.roles)
                 if a_des_roles_afk or doux_deja or etat["a_des_roles_retires"]:
                     out["revenus"].append(fiche)
                 continue
+
+            #  ⚠️ UN EX-PALIER 2 QUI REVIENT UN PEU N'EST PAS « ACTIF ».
+            #  S'il poste une seule fois, son verdict est « doux » — donc il ne
+            #  passe pas par la branche ci-dessus, et il resterait MASQUÉ et
+            #  DÉPOUILLÉ sous une étiquette « peu actif ». On le verse aussi
+            #  dans `revenus` pour qu'on lui rende ce qu'on lui a pris ; son
+            #  étiquette douce, elle, sera reposée par `appliquer_doux`.
+            if palier == "doux" and (any(r.id in afk_ids for r in member.roles)
+                                     or etat["a_des_roles_retires"]):
+                out["revenus"].append(fiche)
 
             g[palier].append(fiche)
             out[palier].append(fiche)
@@ -195,7 +228,12 @@ async def traiter_retour(guild, fiche, cfg_act: dict) -> dict:
             #  et finirait par faire ignorer les vraies demandes.
             res["a_valider"] = await _a_des_roles_en_attente(guild, member)
 
-        if fiche.get("doux_deja"):
+        #  ⚠️ ON N'EFFACE L'ARDOISE QUE D'UN MEMBRE REDEVENU ACTIF.
+        #  `revenus` contient désormais aussi des membres encore « doux » qu'on
+        #  vient seulement de démasquer. Leur remettre le compteur à zéro
+        #  rouvrirait exactement le contournement que `doux_max` referme :
+        #  poster une fois par semaine suffirait à ne jamais monter d'un palier.
+        if fiche.get("palier", "actif") == "actif" and fiche.get("doux_deja"):
             await activite.remettre_doux(guild.id, member.id)
             res["doux_efface"] = True
     except Exception as ex:
@@ -220,6 +258,59 @@ async def _a_des_roles_en_attente(guild, member) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Application des paliers
 # ═══════════════════════════════════════════════════════════════════════════════
+
+async def appliquer_doux(guild, fiches: list, cfg_act: dict,
+                         budget: float) -> dict:
+    """Palier « doux » : pose l'étiquette « peu actif ». AUCUNE sanction.
+
+    ⚠️ POURQUOI CETTE ÉTIQUETTE EXISTE. Le message de ce palier listait les
+    membres un par un : 30 mentions puis « +929 » chez le propriétaire, pour
+    959 personnes. Sa demande du 20/08 : « au lieu de mentionner 900 ou 1000
+    personnes, tu mentionnes un rôle ». Un rôle porté par tout le monde se
+    mentionne en un caractère et touche exactement les mêmes gens.
+
+    ⚠️ CE RÔLE NE MASQUE RIEN et ne retire rien. Il ne change pas les
+    permissions du membre — c'est une étiquette, pas une punition.
+
+    ⚠️ LE BUDGET EST EN SECONDES, ET IL EST PARTAGÉ AVEC LES RETRAITS.
+    Discord n'a aucune API d'attribution en masse : c'est un appel par membre.
+    On cadence sous le seau (`PAUSE_ENTRE_ETIQUETTES`) plutôt que de le
+    saturer, et on s'arrête quand le budget est épuisé — le reste attend le
+    passage suivant. Rend le budget restant dans `res["budget"]`.
+
+    ⚠️ UN MEMBRE QUI PORTE DÉJÀ L'ÉTIQUETTE NE COÛTE NI APPEL NI PAUSE. C'est
+    ce qui fait que seul le premier balayage est cher : en régime établi, ce
+    budget n'est jamais entamé.
+    """
+    res = {"faits": 0, "echecs": 0, "ignores": 0, "reportes": 0,
+           "budget": float(budget)}
+    deja = {int(cfg_act.get("activite_role_doux") or 0)}
+    for f in fiches:
+        member = f["member"]
+        #  Déjà étiqueté : rien à faire, et surtout aucun appel réseau.
+        if any(r.id in deja for r in getattr(member, "roles", []) if r.id):
+            res["ignores"] += 1
+            continue
+        if res["budget"] <= 0:
+            res["reportes"] += 1
+            continue
+        #  Re-vérification de l'immunité JUSTE AVANT d'agir, comme les autres
+        #  paliers : le classement peut dater de quelques secondes.
+        if not await activite.membre_concerne(member, cfg_act):
+            res["ignores"] += 1
+            continue
+        try:
+            if await niv.poser_niveau(guild, member, 0, cfg_act):
+                res["faits"] += 1
+            else:
+                res["ignores"] += 1
+        except Exception as ex:
+            _log(f"[activite doux {member.id}] {ex}")
+            res["echecs"] += 1
+        await asyncio.sleep(activite.PAUSE_ENTRE_ETIQUETTES)
+        res["budget"] -= activite.PAUSE_ENTRE_ETIQUETTES
+    return res
+
 
 async def appliquer_rappels(guild, fiches: list, cfg_act: dict) -> dict:
     """Palier 1 : pose le rôle AFK. Le membre garde tout le reste.
