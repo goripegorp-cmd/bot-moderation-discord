@@ -3337,7 +3337,49 @@ async def db_set(gid, key, val):
         # même guilde se perdaient mutuellement une clé (lost-update). Le lock
         # est local à la guilde → aucune contention inter-guildes.
         async with _get_config_lock(gid):
-            data = await db_get(gid)
+            #  ⚠️ ON RELIT LA BASE, JAMAIS LE CACHE — corrigé le 23/08/2026.
+            #
+            #  LE DÉFAUT, REPRODUIT DE FAÇON DÉTERMINISTE : cette ligne faisait
+            #  `data = await db_get(gid)`, c'est-à-dire une lecture du CACHE.
+            #  Or `db_get` remplit le cache APRÈS ses `await` (pool, puis
+            #  SELECT). Une tâche qui lit en parallèle peut donc reposer dans
+            #  le cache un instantané ANTÉRIEUR à notre écriture — horodaté
+            #  « maintenant », donc servi comme frais pendant 30 secondes.
+            #  Le verrou ci-dessus ne protège que `db_set` contre `db_set` : il
+            #  ne voit pas passer cette repopulation.
+            #
+            #  Conséquence : toute la config d'une guilde vit dans UN SEUL blob
+            #  JSON réécrit en entier à chaque `db_set`. La clé écrite juste
+            #  avant disparaissait donc à l'écriture suivante, en silence.
+            #  Constaté en production sur `activite_observe_depuis` : posée à
+            #  chaque démarrage, effacée dans la foulée, donc l'ancre
+            #  d'observation ne pouvait JAMAIS vieillir — et le système
+            #  d'activité entier restait inerte sur 974 membres.
+            #  ⚠️ CE N'ÉTAIT PAS UN DÉFAUT DE L'ACTIVITÉ : n'importe quelle clé
+            #  récemment écrite pouvait partir de la même façon — un salon de
+            #  logs, un rôle de sanction, un interrupteur anti-raid.
+            #
+            #  Relire la ligne ici coûte une requête par écriture de config —
+            #  quelques dizaines par heure — et c'est la seule façon d'avoir la
+            #  version réellement en base au moment où on la modifie.
+            #  Effet de bord bienvenu : `cfg()` mute le dictionnaire rendu par
+            #  `db_get` pour y poser ses défauts ; en passant par le cache, ces
+            #  228 clés finissaient RECOPIÉES en base et gonflaient le blob
+            #  vers le plafond de 100 ko, au-delà duquel toute écriture est
+            #  refusée sans un mot. Ce chemin-là se referme aussi.
+            data = {}
+            async with get_db() as _db:
+                async with _db.execute(
+                        'SELECT data FROM guild_config WHERE guild_id=?',
+                        (gid,)) as _c:
+                    _r = await _c.fetchone()
+            if _r and _r[0]:
+                try:
+                    data = json.loads(_r[0])
+                except json.JSONDecodeError:
+                    print(f"[DB SET] JSON invalide pour guild {gid} — "
+                          f"config repartie de zéro pour ne pas bloquer l'écriture")
+                    data = {}
             data[key] = val
 
             # Limiter la taille totale de la config

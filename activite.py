@@ -660,7 +660,15 @@ async def observation_jours(guild_id: int) -> int:
     if not depuis:
         jour = _aujourdhui()
         try:
-            await _db_set(guild_id, "activite_observe_depuis", jour)
+            #  ⚠️ ON REGARDE LE RETOUR. `db_set` rend `False` sans lever quand
+            #  elle refuse d'écrire (config au-delà de 100 ko, identifiant
+            #  invalide, clé suspecte). Le jeter rendait « jamais écrite »
+            #  indiscernable de « écrite puis effacée » — et c'est exactement
+            #  la question qu'on s'est posée trois jours durant en voyant
+            #  `observation=0 j` revenir à chaque démarrage.
+            _ok = await _db_set(guild_id, "activite_observe_depuis", jour)
+            _log(f"[activite ancre] guilde={guild_id} posée au {jour} "
+                 f"(écriture {'OK' if _ok else '❌ REFUSÉE'})")
         except Exception as ex:
             _log(f"[activite observation_jours écriture] {ex}")
         return 0

@@ -1373,6 +1373,12 @@ class ActiviteApercuPanelV2(_Base):
                 await i.response.defer()
             jour = cal.jour()
             await _db_set(self.g.id, "activite_observe_depuis", jour)
+            #  ⚠️ ON JOURNALISE QUI, ET QUAND. C'est le SEUL geste volontaire
+            #  qui remet cette ancre à aujourd'hui. Sans cette ligne, un clic
+            #  du staff et une perte accidentelle en base donnent exactement le
+            #  même symptôme — « observation=0 j » — et on ne peut pas trancher.
+            _log(f"[activite RÉARMEMENT] guilde={self.g.id} par {self.u} "
+                 f"({self.u.id}) → ancre remise au {jour}")
             await i.followup.send(
                 f"🕐 Observation réarmée au `{jour}`. Le silence de chacun "
                 f"repart de 0 : aucune absence antérieure ne sera reprochée.",
