@@ -12881,6 +12881,28 @@ async def _activite_passage_wait():
 _TRANCHE_FLUX = {"nouveaux": 5, "bascules": 10}
 
 
+def _budget_veille(stats: dict, releve: dict) -> None:
+    """Cumule les compteurs de débit d'un relevé dans le bilan du passage.
+
+    ⚠️ POURQUOI ON MESURE ÇA. Un `HTTP 429` tombait à CHAQUE passage (48 fois
+    par jour, 25 s de pénalité chacun) et rien ne permettait de dire si c'était
+    notre cadence ou un voisin : la sortie Railway est une IP PARTAGÉE, le
+    budget de 12 requêtes/60 s sur le chemin catalogue n'est pas le nôtre seul.
+    `reste_min` — le plus petit `x-ratelimit-remaining` du passage — est la
+    seule chose qui tranche entre les deux, et personne ne la regardait.
+
+    `n429` est le CRITÈRE DE RÉUSSITE du correctif du 20/08 : avant, 48
+    passages sur 48 à `429=1`. Un `grep '429=0'` sur les logs du jour donne la
+    mesure directement.
+    """
+    stats["req"] = int(stats.get("req") or 0) + int(releve.get("req") or 0)
+    stats["n429"] = int(stats.get("n429") or 0) + int(releve.get("n429") or 0)
+    r = releve.get("reste_min")
+    if r is not None:
+        actuel = stats.get("reste_min")
+        stats["reste_min"] = r if actuel is None else min(actuel, r)
+
+
 async def _diag_veille_serveurs(limite: int = 10) -> None:
     """Dit, SERVEUR PAR SERVEUR, ce qui est allumé et ce qui manque.
 
@@ -12955,7 +12977,8 @@ async def veille_roblox_task():
         #  propriétaire ne pouvait pas trancher, donc il supposait la panne.
         #  Ces compteurs nomment l'étage exact où le passage s'est arrêté.
         _sa = {"lus": 0, "candidats": 0, "hors_fenetre": 0, "deja": 0,
-               "echecs": 0, "plafonnes": 0}
+               "echecs": 0, "plafonnes": 0, "pages": 0, "tronque": False,
+               "req": 0, "n429": 0, "reste_min": None}
         _sn = {"lus": 0, "sautees": 0, "pannes": 0, "deja": 0,
                "echecs": 0, "plafonnes": 0, "absorbes": 0}
 
@@ -12963,6 +12986,9 @@ async def veille_roblox_task():
         if guildes_items:
             rel = await roblox_module.relever_nouveautes(limite=120)
             _sa["lus"] = len(rel.get("articles") or [])
+            _sa["pages"] = rel.get("pages", 0)
+            _sa["tronque"] = bool(rel.get("tronque"))
+            _budget_veille(_sa, rel)
             if rel["code"] == 200:
                 evts = await roblox_module.comparer_et_enregistrer(rel["articles"])
 
@@ -12983,6 +13009,8 @@ async def veille_roblox_task():
                 #  Limiteds récents ; le propriétaire a tranché contre.
                 await asyncio.sleep(roblox_module.PAUSE_ENTRE_RELEVES)
                 relc = await roblox_module.relever_collectionnables(limite=120)
+                _sa["tronque"] = _sa.get("tronque") or bool(relc.get("tronque"))
+                _budget_veille(_sa, relc)
                 if relc["code"] == 200:
                     evts_c = await roblox_module.comparer_et_enregistrer(relc["articles"])
                     _vus = {x["asset_id"] for x in (evts.get("bascules") or [])}
@@ -13171,6 +13199,28 @@ async def veille_roblox_task():
         #  se boucle pas fait chercher une panne là où il n'y en a pas — c'est
         #  arrivé le 19/08 avec « 11 lus · 6 déjà publiés · 0 publication ».
         if guildes_items:
+            #  ⚠️ UN RELEVÉ TRONQUÉ NE DOIT PAS RESSEMBLER À UN RELEVÉ ENTIER.
+            #  Sur 429, la pagination s'arrête et garde ce qu'elle a — le bon
+            #  choix — mais rien ne le disait : « 964 lus » et « 720 lus »
+            #  s'affichaient pareil, alors que le second signifie qu'un quart
+            #  du catalogue n'a pas été comparé et qu'une nouveauté a pu passer
+            #  inaperçue.
+            if _sa.get("tronque"):
+                print(f"[veille_roblox_task]   ⚠️ relevé TRONQUÉ par un 429 "
+                      f"({_sa.get('pages', 0)} page(s) lues) — une nouveauté a "
+                      f"pu être manquée, reprise au prochain passage")
+            #  ⚠️ LA LIGNE QUI DIT SI LE CORRECTIF DU 20/08 TIENT.
+            #  `429=0` est le critère de réussite : avant, 48 passages sur 48
+            #  portaient `429=1`. `reste_min` dit s'il reste du budget — c'est
+            #  la seule chose qui distingue « notre cadence est trop rapide »
+            #  de « un voisin de l'IP Railway partagée a mangé le budget ».
+            _rm = _sa.get("reste_min")
+            print(f"[veille_roblox_task]   débit catalogue : {_sa.get('req', 0)} "
+                  f"requête(s) · 429={_sa.get('n429', 0)} · "
+                  f"pause {roblox_module.PAUSE_ENTRE_APPELS_CATALOGUE:.0f} s/page · "
+                  f"reste_min="
+                  + (f"{_rm}/12" if _rm is not None
+                     else "inconnu (en-têtes absents)"))
             print(f"[veille_roblox_task]   accessoires : {_sa['lus']} lu(s) · "
                   f"{_sa['candidats']} candidat(s) · {_sa['hors_fenetre']} hors "
                   f"fenêtre ({roblox_module.FENETRE_DIRECTE_HEURES} h) · "

@@ -155,7 +155,28 @@ CREATEUR_ROBLOX = 1
 #  catalogue 12/60 s, fiche 10/60 s (le plus étranglé), économie 1000/60 s.
 #  On reste TRÈS en dessous : un bot banni de l'API ne protège plus personne.
 PAUSE_ENTRE_APPELS = 2.0
-MAX_APPELS_PAR_PASSAGE = 8
+
+#  ⚠️ LE CATALOGUE A SA PROPRE CADENCE, ET C'EST LE POINT DU CORRECTIF 20/08.
+#  Une seule constante servait TROIS budgets différents : la pagination du
+#  catalogue (12/60 s), `enrichir` sur economy.roblox.com (1000/60 s) et les
+#  vignettes. Le seau est PAR CHEMIN — seul celui du catalogue est étroit.
+#  Ralentir les trois aurait allongé un passage avec publications de plusieurs
+#  minutes pour un budget consommé à 1,2 %.
+#
+#  POURQUOI 8 SECONDES, ET PAS 5 NI 6. Le nombre maximal de requêtes qu'une
+#  cadence de `s` secondes peut placer dans une fenêtre de 60 s vaut
+#  floor(60/s) + 1 :
+#      s = 2 → 31    s = 5 → 13    s = 6 → 11    s = 7 → 9    s = 8 → 8
+#  Les 9 pages du relevé tiennent dans UNE SEULE fenêtre tant que s < 7,5 :
+#  passer à 5 ou 6 s ne retire donc pas une seule requête du pic. 8 s est le
+#  premier seuil qui borne réellement à 8 requêtes par fenêtre, soit 8/12 du
+#  budget, et laisse 4 places aux autres applications de l'IP Railway partagée.
+#
+#  ⚠️ EFFET DE BORD VOULU : ce plafond de 8 ne dépend PAS du nombre de pages.
+#  Il désamorce donc la bombe à retardement de `MAX_PAGES_PAR_RELEVE` — à ~1320
+#  accessoires le relevé aurait atteint 11 à 12 requêtes à lui seul et se
+#  serait mis en 429 tout seul, en tronquant en silence.
+PAUSE_ENTRE_APPELS_CATALOGUE = 8.0
 
 #  Combien d'articles on garde en mémoire. Borné : on ne conserve pas
 #  l'historique complet du catalogue dans une base SQLite.
@@ -172,17 +193,28 @@ MAX_ARTICLES_SUIVIS = 3000
 #  route conserve les pages déjà obtenues au lieu de tout jeter.
 MAX_PAGES_PAR_RELEVE = 12
 
-#  ⚠️ LA PAUSE ENTRE LES DEUX RELEVÉS, ET POURQUOI ELLE EST SI LONGUE.
-#  Le catalogue complet fait 9 pages, le flux des Limiteds 7 : enchaînés avec
-#  seulement 2 s d'écart, cela fait 16 requêtes en une demi-minute et l'API
-#  répond HTTP 429 — mesuré le 16/08, le second relevé s'arrêtait à la page 7.
-#  15 secondes laissent la fenêtre de débit se vider. La boucle tourne toutes
-#  les 30 minutes : ce délai ne coûte rien, et il évite un relevé tronqué.
-#  ⚠️ 30 s depuis le 18/08 (était 15). La sortie Railway est une IP PARTAGÉE
-#  entre applications : le budget de débit n'est pas le nôtre seul. Capture du
-#  propriétaire : 429 sur le flux Limited juste après les 9 pages du catalogue,
-#  malgré les 15 s. La boucle passe toutes les 30 min — 30 s ne coûtent rien.
-PAUSE_ENTRE_RELEVES = 30.0
+#  ⚠️ LA PAUSE ENTRE LES DEUX RELEVÉS — C'EST ELLE QUI CAUSAIT LE 429.
+#
+#  ⚠️ LE RAISONNEMENT PRÉCÉDENT ÉTAIT ARITHMÉTIQUEMENT FAUX, ET IL A COÛTÉ
+#  DEUX CORRECTIFS RATÉS. Il disait « 15 secondes laissent la fenêtre de débit
+#  se vider », puis 30 s. Pour une fenêtre de 60 secondes, c'est faux par
+#  construction : 30 s, c'est la MOITIÉ de la fenêtre. Les 9 pages du premier
+#  relevé (t = 0 à 16 s) sont donc TOUJOURS comptées quand le second relevé
+#  tire à t = 46 s et t = 48 s — pic de 10 puis 11 requêtes sur un budget de
+#  12. C'est exactement la capture du propriétaire du 18/08 : « 429 sur le flux
+#  Limited juste après les 9 pages du catalogue », symptôme qui a survécu au
+#  passage de 15 à 30 s parce qu'on traitait la mauvaise cause.
+#
+#  Il faut P > 60 s pour que le second relevé démarre sur une fenêtre VIDE,
+#  quelle que soit la cadence des pages. 65 s donne cinq secondes de marge sur
+#  la dérive d'horloge. Coût : +35 s sur une boucle de 1800 s, soit 1,9 %.
+#
+#  ⚠️ LE SEUL PRIX RÉEL DE CE CORRECTIF n'est pas la durée : c'est que la
+#  fenêtre pendant laquelle une bascule peut être perdue s'allonge (~95 s →
+#  ~160 s). `comparer_et_enregistrer` valide le nouvel état AVANT publication ;
+#  un arrêt entre les deux perd la bascule. Assumé : un arrêt pile dans cette
+#  fenêtre est rare, un 429 à chaque passage était certain.
+PAUSE_ENTRE_RELEVES = 65.0
 
 #  ⚠️ LE PIÈGE LE PLUS COÛTEUX DE CE MODULE, TROUVÉ LE 16/08 EN VÉRIFIANT.
 #  Les deux relevés paginés consomment ~18 requêtes. Les appels QUI SUIVENT —
@@ -205,7 +237,22 @@ PAUSE_AVANT_FICHES = 60.0
 
 #  Attente après un 429 avant de retenter. Une seule reprise : si la fenêtre
 #  est encore fermée après ça, insister ne ferait qu'aggraver le blocage.
+#
+#  ⚠️ CE 25 EST UN PARI, PAS UNE MESURE — et il ne sert plus que de REPLI.
+#  Le 429 mesuré porte `retry-after: 5` ET `x-ratelimit-reset: 49` : 25 s sont
+#  à la fois cinq fois trop longues par rapport au premier et deux fois trop
+#  courtes par rapport au second. C'est ce qui expliquait le « 1 échec » vu le
+#  18/08, quand la reprise retombait dans une fenêtre encore fermée.
+#  On lit donc désormais ce que Roblox nous DIT (voir `_attente_429`), et on ne
+#  garde cette valeur que si les en-têtes manquent — rien ne prouve qu'ils
+#  survivent au proxy de Railway.
 ATTENTE_APRES_429 = 25.0
+
+#  Bornes de l'attente lue dans les en-têtes. Le haut est la taille de la
+#  fenêtre : au-delà, attendre n'apporte plus rien. Le bas protège d'un en-tête
+#  à 0 qui ferait retenter immédiatement.
+ATTENTE_429_MIN = 5.0
+ATTENTE_429_MAX = 60.0
 
 #  ⚠️ PLAFOND DUR DE PUBLICATIONS PAR PASSAGE — NE PAS LE RELEVER.
 #
@@ -738,7 +785,12 @@ async def _relever_catalogue(params: dict, source: str,
     exactement à un flux calme.
     """
     out = {"articles": [], "code": None, "echecs": 0, "pages": 0,
-           "complet": False}
+           "complet": False, "tronque": False,
+           #  Compteurs de DEBIT — ils remplacent la constante morte
+           #  MAX_APPELS_PAR_PASSAGE, qui annoncait 8 alors que le passage
+           #  reel en fait 11. Un chiffre mesure vaut mieux qu'un plafond
+           #  declare que le code ne respecte pas.
+           "req": 0, "n429": 0, "reste_min": None}
     vus: set[int] = set()
     curseur = None
     try:
@@ -753,7 +805,9 @@ async def _relever_catalogue(params: dict, source: str,
                 #  propriétaire (18/08) : « collectionnables · 429 · 1 échec »
                 #  dès la première page. Une seule reprise, après attente —
                 #  comme pour les fiches (`_appel_avec_reprise`).
-                code, data = await _appel_avec_reprise(sess, API_CATALOGUE, p)
+                code, data = await _appel_avec_reprise(
+                    sess, API_CATALOGUE, p,
+                    etiquette=f"{source} page {page + 1}", stats=out)
                 out["code"] = code
                 if code != 200 or data is None:
                     _log(f"[roblox_veille {source}] HTTP {code} à la page {page + 1}")
@@ -763,6 +817,14 @@ async def _relever_catalogue(params: dict, source: str,
                     #  perdre un relevé presque complet pour rien.
                     if code == 429 and out["articles"]:
                         out["code"] = 200
+                        #  ⚠️ ON GARDE LA TRACE DE LA TRONCATURE.
+                        #  Requalifier le 429 en 200 est le bon choix — un
+                        #  relevé presque complet vaut mieux que rien — mais
+                        #  l'appelant ne pouvait plus savoir qu'il lisait une
+                        #  liste incomplète : `complet` et `pages` étaient
+                        #  calculés et lus NULLE PART. Un relevé tronqué
+                        #  ressemblait trait pour trait à un relevé entier.
+                        out["tronque"] = True
                     break
 
                 lot = _normaliser(data.get("data") or [])
@@ -796,7 +858,7 @@ async def _relever_catalogue(params: dict, source: str,
                 if not curseur:
                     out["complet"] = True
                     break
-                await asyncio.sleep(PAUSE_ENTRE_APPELS)
+                await asyncio.sleep(PAUSE_ENTRE_APPELS_CATALOGUE)
     except Exception as ex:
         _log(f"[roblox_veille {source}] {type(ex).__name__}: {ex}")
     out["echecs"] = await _noter_sante(source, out["code"])
@@ -947,7 +1009,54 @@ def _normaliser(bruts: list) -> list[dict]:
     return out
 
 
-async def _appel_avec_reprise(sess, url: str, params: dict | None = None):
+def _attente_429(entetes) -> float:
+    """Combien attendre après un 429 — d'après ce que Roblox ANNONCE.
+
+    On lit `Retry-After` puis, à défaut, `x-ratelimit-reset`. La valeur est
+    bornée par `ATTENTE_429_MIN`/`MAX`. Si aucun en-tête n'est exploitable, on
+    retombe sur `ATTENTE_APRES_429` — le repli DOIT rester, rien ne prouve que
+    ces en-têtes traversent le proxy de Railway.
+    """
+    for cle in ("Retry-After", "retry-after", "x-ratelimit-reset"):
+        try:
+            brut = (entetes or {}).get(cle)
+            if brut is None:
+                continue
+            v = float(str(brut).strip())
+            if v <= 0:
+                continue
+            return max(ATTENTE_429_MIN, min(ATTENTE_429_MAX, v + 2.0))
+        except Exception:
+            continue
+    return ATTENTE_APRES_429
+
+
+def _noter_budget(stats, entetes) -> None:
+    """Retient le plus petit `x-ratelimit-remaining` vu du passage.
+
+    ⚠️ C'EST LA SEULE MESURE QUI DIRA SI L'IP PARTAGÉE EST LE PROBLÈME.
+    Le budget de 12 requêtes n'est pas le nôtre seul : d'autres applications
+    sortent par la même adresse. Tant qu'on ne voyait pas ce qu'il RESTE, on ne
+    pouvait pas distinguer « notre cadence est trop rapide » de « un voisin a
+    mangé le budget ». Absent des en-têtes ⇒ on ne note rien, pas de zéro
+    trompeur.
+    """
+    if stats is None:
+        return
+    try:
+        brut = (entetes or {}).get("x-ratelimit-remaining")
+        if brut is None:
+            return
+        v = int(str(brut).strip())
+        actuel = stats.get("reste_min")
+        stats["reste_min"] = v if actuel is None else min(actuel, v)
+    except Exception:
+        pass
+
+
+async def _appel_avec_reprise(sess, url: str, params: dict | None = None,
+                              etiquette: str | None = None,
+                              stats: dict | None = None):
     """Un GET qui ne se laisse pas tuer par notre propre débit.
 
     Rend `(code, données)` — `données` vaut `None` si la réponse n'est pas
@@ -962,11 +1071,24 @@ async def _appel_avec_reprise(sess, url: str, params: dict | None = None):
     """
     for tentative in (1, 2):
         try:
+            if stats is not None:
+                stats["req"] = int(stats.get("req") or 0) + 1
             async with sess.get(url, params=params) as r:
+                _noter_budget(stats, r.headers)
                 if r.status == 429 and tentative == 1:
-                    _log(f"[roblox_veille] HTTP 429 sur {url.split('/')[-1]} — "
-                         f"attente {ATTENTE_APRES_429:.0f} s puis reprise")
-                    await asyncio.sleep(ATTENTE_APRES_429)
+                    if stats is not None:
+                        stats["n429"] = int(stats.get("n429") or 0) + 1
+                    _attente = _attente_429(r.headers)
+                    #  ⚠️ DIRE QUOI, PAS SEULEMENT « details ».
+                    #  Les DEUX relevés paginés tapent la même URL, qui finit
+                    #  par « details » : le journal disait donc « HTTP 429 sur
+                    #  details » sans qu'on puisse savoir lequel des deux était
+                    #  en cause — ni à quelle page. Constaté le 20/08 en
+                    #  cherchant l'origine d'un 429 systématique.
+                    _log(f"[roblox_veille] HTTP 429 sur "
+                         f"{etiquette or url.split('/')[-1]} — "
+                         f"attente {_attente:.0f} s puis reprise")
+                    await asyncio.sleep(_attente)
                     continue
                 if r.status != 200:
                     return r.status, None

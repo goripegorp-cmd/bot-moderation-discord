@@ -68,9 +68,21 @@ def api_simulee(monkeypatch):
         etat["api"] = faux
 
         class _Reponse:
-            def __init__(self, code, data):
+            #  ⚠️ Piège n°6 du dépôt : une doublure doit porter TOUT ce que
+            #  porte l'objet réel. Une réponse aiohttp a TOUJOURS `.headers` ;
+            #  sans eux, le jour où le code a commencé à lire le budget de
+            #  débit (`x-ratelimit-remaining`, `Retry-After`), ces quatre tests
+            #  sont tombés sur un AttributeError avalé par le `except` de
+            #  `_appel_avec_reprise` — le relevé rendait 0 article et l'échec
+            #  ressemblait à une régression de la pagination.
+            def __init__(self, code, data, entetes=None):
                 self.status = code
                 self._data = data
+                self.headers = dict(entetes or {
+                    "x-ratelimit-limit": "12, 12;w=60",
+                    "x-ratelimit-remaining": "9",
+                    "x-ratelimit-reset": "42",
+                })
 
             async def json(self):
                 return self._data
