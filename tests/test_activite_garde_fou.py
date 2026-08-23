@@ -188,27 +188,50 @@ async def test_le_garde_fou_de_lescalade_lit_bien_ce_retour():
 #  3. La semaine ne se brûle que si l'envoi a abouti
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _corps_envoyer_rappels() -> str:
+    """Le corps de `envoyer_rappels`, isolé par l'AST."""
+    for n in ast.walk(ast.parse(SRC_PASS)):
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "envoyer_rappels":
+            return ast.unparse(n)
+    raise AssertionError("envoyer_rappels introuvable dans activite_passage.py")
+
+
 def test_la_semaine_nest_marquee_que_si_lenvoi_a_abouti():
-    """⚠️ Marquer la semaine après un envoi qui a LEVÉ la fait passer pour
-    faite : le rappel ne part jamais, et ça se répète chaque semaine."""
-    assert "abouti = False" in SRC_PASS
-    bloc = SRC_PASS.split("abouti = False")[1][:900]
-    assert "abouti = True" in bloc
-    assert "if abouti:" in bloc
-    i_garde = bloc.index("if abouti:")
+    """⚠️ Marquer la semaine après un envoi raté la fait passer pour faite : le
+    rappel ne part jamais, et ça se répète chaque semaine.
+
+    ⚠️ LA GARANTIE S'EST RENFORCÉE LE 20/08. La première version ne mettait
+    `abouti = False` que si `remplacer` LEVAIT. Or elle avalait ses exceptions
+    et rendait un simple entier : un envoi refusé à 100 % (salon interdit)
+    passait donc pour un succès. Elle rend désormais ses échecs, et `abouti`
+    les lit."""
+    #  ⚠️ PAR L'AST, PAS PAR DÉCOUPE DE CHAÎNE. La première version prenait
+    #  1200 caractères après le `abouti = False` : les commentaires du bloc les
+    #  mangeaient et le test échouait pour une raison qui n'était pas la sienne.
+    bloc = _corps_envoyer_rappels()
+    assert "abouti = not _res['echecs']" in bloc.replace('"', "'"), (
+        "un envoi refusé doit compter comme un échec, pas seulement une exception")
+    i_garde = bloc.index("if abouti and")
     i_ecrit = bloc.index("derniere_semaine=semaine_courante")
     assert i_garde < i_ecrit, (
-        "l'écriture du marqueur doit être SOUS la garde `if abouti:`")
+        "l'écriture du marqueur doit être SOUS la garde `abouti`")
 
 
 def test_zero_message_envoye_reste_un_succes():
-    """« Personne n'est absent » n'est pas un échec : `remplacer` rend 0 et on
-    marque la semaine, sinon on retenterait à chaque passage de la journée."""
-    bloc = SRC_PASS.split("abouti = False")[1][:900]
-    #  `abouti` passe à True juste après l'appel, sans condition sur `envoyes`.
-    apres_appel = bloc.split("msgs.remplacer")[1][:200]
-    assert "abouti = True" in apres_appel
-    assert "if envoyes" not in apres_appel
+    """« Personne n'est absent » n'est pas un échec : `remplacer` rend une
+    liste vide SANS échec, et on marque la semaine — sinon on retenterait à
+    chaque passage de la journée."""
+    apres = _corps_envoyer_rappels().split("msgs.remplacer")[1][:400]
+    assert "abouti = not _res['echecs']" in apres.replace('"', "'")
+    assert "if envoyes" not in apres, (
+        "le nombre d'envois ne doit pas décider du succès")
+
+
+def test_un_renvoi_manuel_ne_consomme_pas_le_rappel_du_dimanche():
+    """⚠️ Sinon cliquer « renvoyer » un mercredi ferait sauter le rappel
+    automatique de la semaine."""
+    bloc = _corps_envoyer_rappels().replace('"', "'")
+    assert "maintenant.weekday() == conf['jour_rappel']" in bloc
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

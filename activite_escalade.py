@@ -312,6 +312,68 @@ async def appliquer_doux(guild, fiches: list, cfg_act: dict,
     return res
 
 
+async def appliquer_abandon(guild, fiches: list, cfg_act: dict,
+                            budget: float) -> dict:
+    """Palier 3 : pose l'étiquette « compte abandonné ». N'EXPULSE JAMAIS.
+
+    Demande du propriétaire (20/08) : « le 3e, ça va être qu'ils sont
+    considérés comme des comptes abandonnés […] plus aucune activité ». Cette
+    phase n'avait aucun rôle, donc aucun moyen d'être mentionnée.
+
+    ⚠️ CETTE ÉTIQUETTE MASQUE — c'est une action qui retire l'accès au serveur,
+    pas une simple pastille comme « peu actif ». D'où le garde ci-dessous.
+
+    ⚠️ ON NE MASQUE PAS QUELQU'UN QUI N'A JAMAIS ÉTÉ PRÉVENU.
+    `verdict` est exclusif et teste l'expulsion EN PREMIER : un membre peut
+    atterrir au palier 3 sans être jamais passé par les paliers 1 ou 2 — il
+    suffit que le rationnement à 25 actions par passage l'ait fait franchir
+    14 puis 21 jours sans qu'on le traite. Il n'a alors reçu aucun rappel, et
+    lui retirer tout le serveur serait une sanction sans avertissement.
+    On exige donc qu'il porte DÉJÀ une étiquette masquante. Les autres sont
+    comptés dans `jamais_prevenus` — et ce compteur DOIT être affiché, sinon on
+    remplace un masquage silencieux par un refus silencieux.
+
+    Même budget en secondes que `appliquer_doux`, et il est CHAÎNÉ : cette
+    fonction rend le reste dans `res["budget"]`, que l'appelant passe à
+    `appliquer_doux`. Sans ce chaînage, chaque fonction repartirait de zéro et
+    le budget réel du passage doublerait.
+    """
+    res = {"faits": 0, "echecs": 0, "ignores": 0, "reportes": 0,
+           "jamais_prevenus": 0, "budget": float(budget)}
+    cible_id = int(cfg_act.get("activite_role_abandon") or 0)
+    if not cible_id:
+        res["ignores"] = len(fiches)
+        return res
+    prealables = {int(cfg_act.get("activite_role_niveau1") or 0),
+                  int(cfg_act.get("activite_role_niveau2") or 0)} - {0}
+    for f in fiches:
+        member = f["member"]
+        roles = getattr(member, "roles", [])
+        if any(r.id == cible_id for r in roles):
+            res["ignores"] += 1           # déjà étiqueté : aucun appel réseau
+            continue
+        if prealables and not any(r.id in prealables for r in roles):
+            res["jamais_prevenus"] += 1
+            continue
+        if res["budget"] <= 0:
+            res["reportes"] += 1
+            continue
+        if not await activite.membre_concerne(member, cfg_act):
+            res["ignores"] += 1
+            continue
+        try:
+            if await niv.poser_niveau(guild, member, 3, cfg_act):
+                res["faits"] += 1
+            else:
+                res["ignores"] += 1
+        except Exception as ex:
+            _log(f"[activite abandon {member.id}] {ex}")
+            res["echecs"] += 1
+        await asyncio.sleep(activite.PAUSE_ENTRE_ETIQUETTES)
+        res["budget"] -= activite.PAUSE_ENTRE_ETIQUETTES
+    return res
+
+
 async def appliquer_rappels(guild, fiches: list, cfg_act: dict) -> dict:
     """Palier 1 : pose le rôle AFK. Le membre garde tout le reste.
 

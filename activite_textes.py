@@ -54,6 +54,10 @@ GESTES = "💬 message  ·  🎤 vocal  ·  👍 réaction"
 T_ABSENTS = "💤 Absents · Away"
 T_PRESQUE = "👀 Presque · Almost"
 T_ROLES_RETIRES = "🔒 Rôles retirés · Roles removed"
+#  ⚠️ La phase 3 n'avait AUCUN titre : elle serait tombée dans le repli de
+#  `construire` et se serait affichée sous « 💤 Absents · Away » — le titre
+#  d'une autre phase, donc un message qui ment sur ce qu'il annonce.
+T_ABANDON = "🚪 Comptes abandonnés · Abandoned"
 T_BIENVENUE = "👋 Re-bienvenue · Welcome back"
 T_REGLES = "📋 Comment rester · How to stay"
 

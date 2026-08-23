@@ -84,7 +84,7 @@ def _liste(fiches: list, palier: str) -> list[str]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def construire(fiches: list, *, palier: str, salon_retour=None,
-               role_ping=None) -> LayoutView | None:
+               role_ping=None, muet: bool = False) -> LayoutView | None:
     """Le message d'un palier, en Components V2. None s'il n'y a personne.
 
     `palier` vaut "doux", "rappel" ou "retrait". Trois messages distincts et
@@ -118,6 +118,11 @@ def construire(fiches: list, *, palier: str, salon_retour=None,
     elif palier == "retrait":
         titre, couleur = txt.T_ROLES_RETIRES, Palette.WARNING
         action = txt.revenir(salon_retour.mention if salon_retour is not None else None)
+    elif palier == "abandon":
+        #  ⚠️ SANS CETTE BRANCHE, la phase 3 tombait dans le repli et
+        #  s'affichait sous « 💤 Absents » — le titre d'une autre phase.
+        titre, couleur = txt.T_ABANDON, Palette.DANGER
+        action = txt.revenir(salon_retour.mention if salon_retour is not None else None)
     else:
         titre, couleur = txt.T_ABSENTS, Palette.INFO
         action = txt.revenir()
@@ -132,7 +137,20 @@ def construire(fiches: list, *, palier: str, salon_retour=None,
     #  `activite_niveaux.poser_niveau`). Le mentionner touche donc exactement les
     #  mêmes personnes, en une ligne, sans mur de pseudos. Le compte reste
     #  affiché : c'est lui qui donne la mesure du problème.
-    if role_ping is not None:
+    if muet:
+        #  ⚠️ LE MODE MUET EXISTE POUR NE PAS PINGUER DEUX FOIS LES MÊMES GENS.
+        #  Les étiquettes sont GLOBALES au serveur, mais la boucle d'envoi
+        #  tourne PAR RÔLE SURVEILLÉ : avec deux rôles surveillés, le même
+        #  rôle « peu actif » serait mentionné deux fois le même dimanche, et
+        #  les deux marqueurs anti-doublon resteraient verts — ils sont par
+        #  groupe, la mention ne l'est pas.
+        #
+        #  ⚠️ IL NE SUFFIT PAS DE PASSER `role_ping=None` : on retomberait sur
+        #  la liste, qui mentionne jusqu'à 30 membres NOMMÉMENT, avec
+        #  `users=True` à l'envoi. On remplacerait un ping de rôle par trente
+        #  pings de personnes.
+        corps = f"-# `{len(fiches)}` membre(s) concerné(s)"
+    elif role_ping is not None:
         #  ⚠️ ON ANNONCE CE QUE LE RÔLE TOUCHE, PAS CE QU'ON A CLASSÉ.
         #  L'étiquette se pose par tranches (budget de débit) : au premier
         #  passage, le rôle peut porter 240 membres alors que 959 sont classés.
@@ -212,15 +230,52 @@ def construire_bienvenue(conf: dict, salon_retour=None) -> LayoutView:
 #  Le remplacement hebdomadaire
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def remplacer(guild, salon, cle_role, vues: list, cfg_act: dict) -> int:
+async def remplacer(guild, salon, cle_role, vues: list, cfg_act: dict, *,
+                    purger_si_vide: bool = True) -> dict:
     """Supprime les rappels de la semaine passée, puis poste les nouveaux.
+
+    Rend `{"envoyes": [ids], "echecs": [str], "raison": str}`.
 
     L'ordre compte : on supprime D'ABORD. Si l'on postait avant, une panne entre
     les deux laisserait deux listes contradictoires dans le salon — et c'est
     justement le mur de messages périmés qu'on veut éviter.
     La suppression est fail-safe : un message déjà effacé à la main, ou trop
     ancien pour l'API, ne doit pas empêcher le nouveau de partir.
+
+    ⚠️ ON NE DÉTRUIT JAMAIS CE QU'ON NE PEUT PAS REMPLACER — ajouté le 20/08.
+    Tant que cette fonction ne tournait qu'une fois par semaine derrière les
+    deux gardes du passage, supprimer d'abord était de l'hygiène. Le bouton de
+    renvoi manuel court-circuite ces gardes : deux cas ORDINAIRES vidaient
+    alors le salon en rapportant « 0 envoyé » —
+      · aucun absent classé : `construire` rend `None` pour les trois vues, on
+        supprimait quand même et on ne postait rien ;
+      · salon interdit au bot : la suppression passe (elle est fail-safe),
+        l'envoi échoue, et l'échec était avalé.
+    D'où le pré-test des permissions et `purger_si_vide=False` pour le bouton.
+
+    ⚠️ ET ELLE NE REND PLUS UN ENTIER. Elle avalait ses exceptions et rendait
+    `len(envoyes)` : un envoi refusé à 100 % était indiscernable de « personne
+    à relancer ». L'appelant a besoin de la différence pour ne pas marquer la
+    semaine comme faite.
     """
+    res = {"envoyes": [], "echecs": [], "raison": ""}
+    a_poster = [v for v in vues if v is not None]
+
+    #  Le bot peut-il seulement poster ici ? On le demande AVANT de supprimer.
+    try:
+        perms = salon.permissions_for(guild.me)
+        if not (perms.view_channel and perms.send_messages):
+            res["echecs"].append("salon interdit au bot")
+            res["raison"] = ("le bot ne peut pas écrire dans ce salon — "
+                             "RIEN n'a été supprimé")
+            return res
+    except Exception as ex:
+        _log(f"[activite_message permissions] {ex}")
+
+    if not a_poster and not purger_si_vide:
+        res["raison"] = "personne à relancer — les messages en place sont gardés"
+        return res
+
     conf = activite.config_du_role(cfg_act, cle_role)
     anciens = conf.get("dernier_message_rappel") or []
     if isinstance(anciens, (int, str)):
@@ -253,13 +308,24 @@ async def remplacer(guild, salon, cle_role, vues: list, cfg_act: dict) -> int:
             envoyes.append(msg.id)
         except Exception as ex:
             _log(f"[activite_message envoi] {ex}")
+            #  ⚠️ L'ÉCHEC REMONTE. Avalé, il rendait un envoi 100 % refusé
+            #  indiscernable de « personne à relancer » — et l'appelant
+            #  marquait la semaine comme faite.
+            res["echecs"].append(str(ex)[:120])
 
-    try:
-        await activite.ecrire_config_role(
-            guild.id, cle_role, dernier_message_rappel=envoyes)
-    except Exception as ex:
-        _log(f"[activite_message mémorisation] {ex}")
-    return len(envoyes)
+    #  On ne réécrit la mémoire que s'il y a quelque chose à mémoriser ou à
+    #  oublier : l'écraser avec une liste vide après un envoi refusé ferait
+    #  perdre la trace des messages encore en place.
+    if envoyes or anciens:
+        try:
+            await activite.ecrire_config_role(
+                guild.id, cle_role, dernier_message_rappel=envoyes)
+        except Exception as ex:
+            _log(f"[activite_message mémorisation] {ex}")
+    res["envoyes"] = envoyes
+    if not envoyes and not res["echecs"]:
+        res["raison"] = "aucun palier à annoncer"
+    return res
 
 
 async def accueillir(member, conf: dict, salon_retour=None) -> bool:

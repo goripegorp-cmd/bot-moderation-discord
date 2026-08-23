@@ -210,11 +210,20 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
         #  faire dépendre d'un budget d'appels réseau ferait avancer l'escalade
         #  à des vitesses différentes selon le nombre de membres.
         rap["actions"]["doux"] = await esc.noter_rappels_doux(guild, cl["doux"])
+        #  ⚠️ L'ABANDON D'ABORD, ET LE BUDGET EST CHAÎNÉ.
+        #  L'ordre compte : si le palier « doux » passait en premier, il
+        #  brûlerait les 240 s sur des centaines de membres au premier
+        #  balayage et l'étiquette d'abandon ne serait jamais posée. Et le
+        #  budget doit être TRANSMIS : deux appels partant chacun de 240 s
+        #  doubleraient le débit réel du passage.
+        _ab = await esc.appliquer_abandon(guild, cl["expulsion"], cfg_act, budget)
+        rap["actions"]["abandon"] = _ab
         #  L'étiquette « peu actif », elle, coûte un appel par membre : elle
         #  prend ce qui reste du budget, et le reste attend le passage suivant.
-        _et = await esc.appliquer_doux(guild, cl["doux"], cfg_act, budget)
+        _et = await esc.appliquer_doux(guild, cl["doux"], cfg_act, _ab["budget"])
         rap["actions"]["etiquettes"] = _et
-        rap["reporte"]["etiquettes"] = _et.get("reportes", 0)
+        rap["reporte"]["etiquettes"] = (_et.get("reportes", 0)
+                                        + _ab.get("reportes", 0))
 
     # ── 6. Le masquage des salons ──
     #  Relancé à chaque passage exprès : un salon créé entre-temps, une
@@ -235,18 +244,68 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
     #  ⚠️ Le marqueur par rôle n'est pas un luxe : la boucle passe toutes les 6 h.
     #  Sans lui, le rappel partirait QUATRE fois le jour choisi. Et un marqueur
     #  global ferait qu'un rôle relancé le dimanche empêcherait celui du mercredi.
+    _rap_env = await envoyer_rappels(guild, cfg_act, cl, dry_run=dry_run)
+    rap["actions"]["messages_envoyes"] = _rap_env["envoyes"]
+    rap["actions"]["semaine"] = _rap_env["semaine"]
+    rap["actions"]["rappels_par_role"] = _rap_env["detail"]
+
+    # ── 8. Expulsions : PROPOSITION seulement ──
+    # Le propriétaire a explicitement refusé l'expulsion automatique. Le bot ne
+    # fait que signaler ; le panneau staff porte le bouton qui, lui, agit.
+    #  ⚠️ Depuis le 20/08, ces membres reçoivent tout de même l'étiquette
+    #  « compte abandonné » (étape 5) : c'est une étiquette mentionnable, pas
+    #  une expulsion. Le bot ne met toujours personne dehors tout seul.
+    rap["actions"]["a_expulser"] = len(cl["expulsion"])
+    return rap
+
+
+async def envoyer_rappels(guild, cfg_act: dict, cl: dict, *,
+                          forcer: bool = False, dry_run: bool = False,
+                          muet_force: bool = False) -> dict:
+    """Poste les rappels d'un serveur. UN SEUL CHEMIN, boucle ET bouton.
+
+    `forcer=True` ignore le jour de la semaine et le marqueur « déjà fait » —
+    c'est le bouton de renvoi manuel. Il n'ignore JAMAIS `conf["actif"]` : un
+    rôle suspendu reste suspendu, et le motif est affiché.
+
+    `muet_force=True` poste les mêmes messages sans AUCUNE mention. C'est le
+    bouton « Envoyer sans mentionner », à utiliser quand le rôle a déjà été
+    mentionné cette semaine.
+
+    ⚠️ IL REÇOIT `cl` DÉJÀ CLASSÉ, il ne reclasse pas. Le filtre de cohérence
+    des groupes s'applique APRÈS le rationnement du quota : reclasser ici
+    enverrait des membres qu'on a explicitement REPORTÉS, et le message
+    annoncerait une action qui n'a pas eu lieu.
+
+    Rend `{"envoyes": int, "detail": [str], "semaine": str, "pingues": int}`.
+    """
     maintenant = cal.maintenant()
     semaine_courante = cal.semaine(maintenant)
     envoyes = 0
     detail_rappels = []
 
+    #  ⚠️ LES DEUX VERROUS ANTI-DOUBLE-PING. Voir l'en-tête du correctif :
+    #  l'étiquette est globale, la boucle et son marqueur sont par groupe.
+    _pingues: set[int] = set()
+    _deja_semaine = (str(cfg_act.get("activite_derniere_semaine") or "")
+                     == semaine_courante)
+    if _deja_semaine or muet_force:
+        #  Déjà mentionnés cette semaine (par la boucle OU par le bouton) :
+        #  on poste, on compte, on ne notifie personne.
+        for _c in ("activite_role_doux", "activite_role_niveau1",
+                   "activite_role_niveau2", "activite_role_abandon"):
+            _id = int(cfg_act.get(_c) or 0)
+            if _id:
+                _pingues.add(_id)
+
     for cle, g in (cl.get("groupes") or {}).items():
         conf = g["conf"]
         if not conf["actif"]:
+            detail_rappels.append(f"{cle} : rôle suspendu")
             continue
-        if maintenant.weekday() != conf["jour_rappel"]:
+        if not forcer and maintenant.weekday() != conf["jour_rappel"]:
             continue
-        if conf["derniere_semaine"] == semaine_courante:
+        if not forcer and conf["derniere_semaine"] == semaine_courante:
             continue          # déjà relancé cette semaine pour CE rôle
 
         salon = guild.get_channel(int(conf["salon_annonce"] or 0))
@@ -274,16 +333,30 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
         _r0 = guild.get_role(int(cfg_act.get("activite_role_doux", 0) or 0))
         _r1 = guild.get_role(int(cfg_act.get("activite_role_niveau1", 0) or 0))
         _r2 = guild.get_role(int(cfg_act.get("activite_role_niveau2", 0) or 0))
+        _r3 = guild.get_role(int(cfg_act.get("activite_role_abandon", 0) or 0))
         #  ⚠️ LE PALIER DOUX A DÉSORMAIS SON RÔLE — corrigé le 20/08/2026.
         #  Il était câblé à `None`, avec ce commentaire : « le palier doux n'en
         #  a AUCUN […] ils sont peu nombreux par construction ». L'hypothèse
         #  était fausse : chez le propriétaire ils étaient 959, affichés en
         #  30 mentions suivies d'un « +929 ». Sa demande, mot pour mot : « au
         #  lieu de mentionner 900 ou 1000 personnes, tu mentionnes un rôle ».
-        _roles = {"doux": _r0, "rappel": _r1, "retrait": _r2}
-        vues = [msgs.construire(g[p], palier=p, salon_retour=salon_retour,
-                                role_ping=_roles.get(p))
-                for p in ("doux", "rappel", "retrait")]
+        _roles = {"doux": _r0, "rappel": _r1, "retrait": _r2,
+                  "expulsion": _r3}
+        #  ⚠️ UN RÔLE N'EST MENTIONNÉ QU'UNE FOIS PAR SEMAINE ET PAR SERVEUR,
+        #  quel que soit le nombre de rôles surveillés et quel que soit le
+        #  déclencheur. Au deuxième groupe, le même rôle repasse en MUET.
+        vues = []
+        for p in ("doux", "rappel", "retrait", "expulsion"):
+            _r = _roles.get(p)
+            _muet = bool(_r is None or _r.id in _pingues)
+            #  Le palier « expulsion » s'affiche sous le titre « comptes
+            #  abandonnés » : c'est une étiquette, jamais une expulsion.
+            _pal = "abandon" if p == "expulsion" else p
+            vues.append(msgs.construire(
+                g[p], palier=_pal, salon_retour=salon_retour,
+                role_ping=(None if _muet else _r), muet=_muet))
+            if _r is not None and g[p] and not _muet:
+                _pingues.add(_r.id)
         #  ⚠️ ON NE BRÛLE LA SEMAINE QUE SI L'ENVOI A ABOUTI.
         #  La version précédente marquait la semaine dans TOUS les cas, y
         #  compris quand `remplacer` levait (salon interdit, message trop
@@ -297,28 +370,45 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
         #  distinction que l'ancien code ne faisait pas.
         abouti = False
         try:
-            envoyes += await msgs.remplacer(guild, salon, cle, vues, cfg_act)
-            abouti = True
+            #  ⚠️ `purger_si_vide=False` SUR UN RENVOI MANUEL. `remplacer`
+            #  supprime avant de poster : sans ce garde, cliquer « renvoyer »
+            #  un jour où personne n'est absent VIDERAIT le salon en
+            #  rapportant « 0 envoyé ».
+            _res = await msgs.remplacer(guild, salon, cle, vues, cfg_act,
+                                        purger_si_vide=not forcer)
+            envoyes += len(_res["envoyes"])
+            abouti = not _res["echecs"]
+            if _res.get("raison"):
+                detail_rappels.append(f"{nom} : {_res['raison']}")
+            elif _res["echecs"]:
+                detail_rappels.append(f"{nom} : envoi refusé — {_res['echecs'][0]}")
+            else:
+                detail_rappels.append(f"{nom} : {len(_res['envoyes'])} message(s)")
         except Exception as ex:
             _log(f"[activite passage rappel {nom}] {ex} — semaine NON marquée, "
                  f"nouvelle tentative au prochain passage du jour")
 
-        if abouti:
+        #  ⚠️ ON NE MARQUE LA SEMAINE DU GROUPE QUE LE JOUR PRÉVU. Un renvoi
+        #  manuel un mercredi ne doit pas consommer le rappel du dimanche.
+        if abouti and maintenant.weekday() == conf["jour_rappel"]:
             try:
                 await activite.ecrire_config_role(
                     guild.id, cle, derniere_semaine=semaine_courante)
             except Exception as ex:
                 _log(f"[activite passage marque semaine {nom}] {ex}")
 
-    rap["actions"]["messages_envoyes"] = envoyes
-    rap["actions"]["semaine"] = semaine_courante
-    rap["actions"]["rappels_par_role"] = detail_rappels
+    #  ⚠️ LE MARQUEUR DE GUILDE — il ferme le double ping entre déclencheurs.
+    #  Sans lui, un renvoi manuel le mercredi puis le rappel automatique du
+    #  dimanche mentionnent deux fois les mêmes centaines de personnes.
+    if _pingues and not dry_run:
+        try:
+            await activite._db_set(guild.id, "activite_derniere_semaine",
+                                   semaine_courante)
+        except Exception as ex:
+            _log(f"[activite marque semaine guilde] {ex}")
 
-    # ── 8. Expulsions : PROPOSITION seulement ──
-    # Le propriétaire a explicitement refusé l'expulsion automatique. Le bot ne
-    # fait que signaler ; le panneau staff porte le bouton qui, lui, agit.
-    rap["actions"]["a_expulser"] = len(cl["expulsion"])
-    return rap
+    return {"envoyes": envoyes, "detail": detail_rappels,
+            "semaine": semaine_courante, "pingues": len(_pingues)}
 
 
 #  Retours déjà en cours de traitement, pour ne pas les relancer à chaque

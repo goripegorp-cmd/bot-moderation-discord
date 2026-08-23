@@ -103,6 +103,120 @@ class _Base(LayoutView):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  RENVOI MANUEL DES RAPPELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ActiviteRenvoiPanelV2(_Base):
+    """Renvoyer les messages d'inactivité, sans attendre le jour du rappel.
+
+    Montre D'ABORD ce qui partirait, puis demande le clic. Le calcul est un
+    `dry_run` du VRAI passage : ce qui est affiché est exactement ce qui sera
+    envoyé, rationnement du quota compris.
+    """
+
+    async def render_to(self, i, edit: bool = False):
+        try:
+            #  ⚠️ ACQUITTER D'ABORD : le classement balaie tous les membres du
+            #  serveur avec une lecture en base chacun — très au-delà des trois
+            #  secondes de Discord sur un millier de membres.
+            if not i.response.is_done():
+                await i.response.defer()
+            c = await activite.config(self.g.id)
+            rap = await passage.passage(self.g, dry_run=True)
+            cl = rap.get("fiches") or {}
+            semaine = cal.semaine()
+            deja = str(c.get("activite_derniere_semaine") or "") == semaine
+
+            items = [
+                v2_title("📣 Renvoyer le message aux inactifs"),
+                v2_subtitle("Ce qui partirait maintenant, avant de cliquer"),
+                v2_divider(),
+            ]
+
+            if not rap.get("actif"):
+                items.append(v2_body(
+                    f"⚪ **Rien ne partira** — {rap.get('raison') or 'système éteint'}."))
+            elif rap.get("suivi_muet"):
+                items.append(v2_body(
+                    "🔴 **Rien ne partira** — aucune activité n'est enregistrée "
+                    "alors que le suivi tourne. Les sondes ne captent rien ; "
+                    "relancer maintenant accuserait tout le monde à tort."))
+            else:
+                cls = rap.get("classement") or {}
+                items.append(v2_body(
+                    f"👀 `{cls.get('doux', 0)}` peu actifs · "
+                    f"💤 `{cls.get('rappel', 0)}` absents · "
+                    f"🔒 `{cls.get('retrait', 0)}` rôles retirés · "
+                    f"🚪 `{cls.get('expulsion', 0)}` abandonnés"))
+                detail = (rap.get("actions") or {}).get("rappels_par_role") or []
+                if detail:
+                    items.append(v2_body("\n".join(f"-# {d}" for d in detail[:6])))
+
+            #  ⚠️ LA PERMISSION DE MENTIONNER, DITE AVANT LE CLIC. Sans elle la
+            #  mention s'affiche et ne notifie personne — le bouton semblerait
+            #  marcher alors que personne n'est prévenu.
+            if not self.g.me.guild_permissions.mention_everyone:
+                items.append(v2_body(
+                    "-# 🔴 Il manque au bot **« Mentionner tous les rôles »** : "
+                    "la mention s'affichera sans notifier personne."))
+            if deja:
+                items.append(v2_body(
+                    "-# ⚠️ Les rôles ont **déjà été mentionnés cette semaine**. "
+                    "Un nouvel envoi les notifierait une seconde fois : "
+                    "préférez « Envoyer sans mentionner »."))
+
+            b_go = Button(
+                label="Mentionner quand même" if deja else "Envoyer maintenant",
+                emoji="📣",
+                style=(discord.ButtonStyle.danger if deja
+                       else discord.ButtonStyle.primary),
+                custom_id="act_rv_go",
+                disabled=not rap.get("actif") or bool(rap.get("suivi_muet")))
+            b_go.callback = self._cb_envoyer(muet=False)
+            b_muet = Button(label="Envoyer sans mentionner", emoji="🔕",
+                            style=discord.ButtonStyle.secondary,
+                            custom_id="act_rv_muet",
+                            disabled=not rap.get("actif"))
+            b_muet.callback = self._cb_envoyer(muet=True)
+
+            items.append(discord.ui.ActionRow(
+                b_go, b_muet, _bouton_retour(self._cb_retour, "act_rv_back")))
+            await self._envoyer(i, items, Palette.INFO, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "renvoi")
+
+    def _cb_envoyer(self, *, muet: bool):
+        async def _cb(i):
+            try:
+                if not i.response.is_done():
+                    await i.response.defer()
+                c = await activite.config(self.g.id)
+                rap = await passage.passage(self.g, dry_run=True)
+                cl = rap.get("fiches") or {}
+                #  ⚠️ LE MÊME CHEMIN QUE LA BOUCLE. Une seconde implémentation
+                #  d'envoi divergerait au premier correctif.
+                res = await passage.envoyer_rappels(
+                    self.g, c, cl, forcer=True, muet_force=muet)
+                n = res["envoyes"]
+                if n:
+                    txt_ = (f"✅ `{n}` message(s) envoyé(s)"
+                            + ("" if muet else " · les rôles ont été mentionnés"))
+                else:
+                    #  ⚠️ ON DIT POURQUOI ZÉRO. « 0 envoyé » sans motif ferait
+                    #  chercher une panne là où il n'y a personne à relancer.
+                    motifs = " · ".join((res.get("detail") or [])[:3])
+                    txt_ = f"⚪ Aucun message envoyé — {motifs or 'personne à relancer'}"
+                await i.followup.send(txt_, ephemeral=True)
+                await self.render_to(i, edit=True)
+            except Exception as ex:
+                await self._secours(i, ex, "renvoi envoi")
+        return _cb
+
+    async def _cb_retour(self, i):
+        await ActivitePanelV2(self.u, self.g).render_to(i, edit=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  RACINE
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -235,9 +349,20 @@ class ActivitePanelV2(_Base):
                            style=discord.ButtonStyle.primary, custom_id="act_afk")
             b_afk.callback = self._cb_afk
 
-            items.append(discord.ui.ActionRow(b_on, b_cibles, b_salons, b_afk))
+            #  ⚠️ DEUX RANGÉES, DEUX INTENTIONS — refait le 20/08 à la
+            #  demande du propriétaire (« gardez que les boutons les plus
+            #  efficaces »). En haut on RÈGLE, en bas on AGIT. Le bouton de
+            #  renvoi est le premier de la rangée du bas : c'est celui qu'il
+            #  vient chercher.
+            #  « Dispenses » quitte la racine — une ActionRow tient 5
+            #  composants, et il n'est utile qu'une fois, au réglage.
+            b_rv = Button(label="Renvoyer le message aux inactifs", emoji="📣",
+                          style=discord.ButtonStyle.primary, custom_id="act_renvoi")
+            b_rv.callback = self._cb_renvoi
+            items.append(discord.ui.ActionRow(b_on, b_cibles, b_salons, b_afk,
+                                              b_rec))
             items.append(discord.ui.ActionRow(
-                b_rec, b_ap, b_disp, _bouton_retour(self._cb_retour, "act_back")))
+                b_rv, b_ap, b_disp, _bouton_retour(self._cb_retour, "act_back")))
             await self._envoyer(i, items, Palette.INFO, edit)
         except Exception as ex:
             await self._secours(i, ex, "racine")
@@ -267,6 +392,10 @@ class ActivitePanelV2(_Base):
 
     async def _cb_rec(self, i):
         await ActiviteRecompensesPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_renvoi(self, i):
+        """Ouvre l'écran de renvoi. Demande n°1 du propriétaire le 20/08."""
+        await ActiviteRenvoiPanelV2(self.u, self.g).render_to(i, edit=True)
 
     async def _cb_apercu(self, i):
         await ActiviteApercuPanelV2(self.u, self.g).render_to(i, edit=True)
@@ -736,6 +865,7 @@ class ActiviteRolesAfkPanelV2(_Base):
         try:
             c = await activite.config(self.g.id)
             r0 = self.g.get_role(int(c["activite_role_doux"] or 0))
+            r3 = self.g.get_role(int(c["activite_role_abandon"] or 0))
             r1 = self.g.get_role(int(c["activite_role_niveau1"] or 0))
             r2 = self.g.get_role(int(c["activite_role_niveau2"] or 0))
             ouverts = niv.salons_ouverts(self.g, c)
@@ -745,7 +875,10 @@ class ActiviteRolesAfkPanelV2(_Base):
                 #  Le palier 0 n'est pas un « niveau » de sanction : l'appeler
                 #  ainsi laisserait croire à une punition graduée alors qu'il
                 #  ne retire rien et ne masque rien.
-                return "Peu actif" if niveau == 0 else f"Niveau {niveau}"
+                #  Ni « Niveau 0 » ni « Niveau 3 » : ces deux-la ne sont
+                #  pas des crans de sanction graduee.
+                return {0: "Peu actif", 3: "Abandonne"}.get(
+                    niveau, f"Niveau {niveau}")
 
             def _etat(r, niveau: int) -> str:
                 if r is None:
@@ -778,6 +911,12 @@ class ActiviteRolesAfkPanelV2(_Base):
                             "personne.")),
                 v2_body(f"{_etat(r1, 1)}\n-# Posé au 1er seuil. Le membre garde "
                         f"tous ses autres rôles."),
+                v2_body(f"{_etat(r3, 3)}\n-# Posé au 3e seuil : plus aucune "
+                        f"activité. **Mentionnable, masquant, mais le bot "
+                        f"n'expulse JAMAIS tout seul** — l'expulsion reste un "
+                        f"bouton du staff.\n"
+                        f"-# Jamais posé sur quelqu'un qui n'a pas déjà été "
+                        f"prévenu par un palier précédent."),
                 v2_body(f"{_etat(r2, 2)}\n-# Posé au 2e seuil, en même temps que "
                         f"le retrait de tous ses rôles."),
                 v2_divider(),
@@ -826,7 +965,8 @@ class ActiviteRolesAfkPanelV2(_Base):
             #  endroit que les deux autres, sinon il reste introuvable.
             for niveau, cle in ((0, "activite_role_doux"),
                                 (1, "activite_role_niveau1"),
-                                (2, "activite_role_niveau2")):
+                                (2, "activite_role_niveau2"),
+                                (3, "activite_role_abandon")):
                 sel = RoleSelect(
                     placeholder=("Rôle « peu actif » (aucune sanction)…"
                                  if niveau == 0
@@ -838,7 +978,7 @@ class ActiviteRolesAfkPanelV2(_Base):
             b_creer = Button(
                 label="Créer les rôles manquants", emoji="✨",
                 style=discord.ButtonStyle.success, custom_id="act_afk_creer",
-                disabled=bool(r0 and r1 and r2))
+                disabled=bool(r0 and r1 and r2 and r3))
             b_creer.callback = self._cb_creer
 
             b_masq = Button(
@@ -891,7 +1031,8 @@ class ActiviteRolesAfkPanelV2(_Base):
             crees = []
             for niveau, cle in ((0, "activite_role_doux"),
                                 (1, "activite_role_niveau1"),
-                                (2, "activite_role_niveau2")):
+                                (2, "activite_role_niveau2"),
+                                (3, "activite_role_abandon")):
                 if self.g.get_role(int(c.get(cle) or 0)) is not None:
                     continue
                 r = await niv.creer_role(self.g, niveau)

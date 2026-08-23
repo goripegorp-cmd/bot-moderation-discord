@@ -281,6 +281,13 @@ CLES_DEFAUT = {
     "activite_role_doux": 0,            # posé au palier « doux » — aucune sanction
     "activite_role_niveau1": 0,         # posé au 1er palier — le membre garde tout
     "activite_role_niveau2": 0,         # posé au 2e — tous ses autres rôles partent
+    #  ⚠️ LA PHASE 3, AJOUTÉE LE 20/08/2026 — « comptes abandonnés ».
+    #  Elle n'avait aucun rôle, donc elle ne pouvait pas être mentionnée : le
+    #  propriétaire demandait que « tout le monde ait bien un rôle spécifique
+    #  qui puisse être mentionné quand ils sont inactifs ». Elle MASQUE comme
+    #  les paliers 1 et 2 — voir `roles_afk`. L'expulsion, elle, reste une
+    #  proposition au staff et n'est JAMAIS automatique.
+    "activite_role_abandon": 0,         # posé au 3e — plus aucune activité
     #  Masquer TOUT le serveur aux porteurs de ces rôles, sauf les deux salons
     #  d'activité. Réglable, parce que c'est l'action la plus visible du système.
     "activite_masquer_salons": True,

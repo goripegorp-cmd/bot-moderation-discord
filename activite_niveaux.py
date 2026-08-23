@@ -57,6 +57,7 @@ MAX_SALONS_PAR_PASSAGE = 250
 NOM_DOUX = "👀 Peu actif"
 NOM_NIVEAU1 = "💤 AFK"
 NOM_NIVEAU2 = "💤 AFK · rôles retirés"
+NOM_ABANDON = "🚪 Compte abandonné"
 
 #  ⚠️ LA CLÉ SE LIT DANS UNE TABLE, JAMAIS PAR f-STRING.
 #  L'ancien code faisait `cfg_act.get(f"activite_role_niveau{niveau}")` : pour
@@ -67,10 +68,15 @@ _CLE_PAR_NIVEAU = {
     0: "activite_role_doux",
     1: "activite_role_niveau1",
     2: "activite_role_niveau2",
+    3: "activite_role_abandon",
 }
 
-_NOM_PAR_NIVEAU = {0: NOM_DOUX, 1: NOM_NIVEAU1, 2: NOM_NIVEAU2}
-_COULEUR_PAR_NIVEAU = {0: 0x5865F2, 1: 0x4E5058, 2: 0x4E5058}
+#  ⚠️ UN NIVEAU ABSENT DE CES DEUX TABLES CRÉE UN DOUBLON EN SILENCE.
+#  `creer_role` retombait sur `NOM_NIVEAU2` : ajouter le palier 3 sans son nom
+#  aurait fabriqué un second rôle appelé « 💤 AFK · rôles retirés », impossible
+#  à distinguer du vrai dans la liste du serveur.
+_NOM_PAR_NIVEAU = {0: NOM_DOUX, 1: NOM_NIVEAU1, 2: NOM_NIVEAU2, 3: NOM_ABANDON}
+_COULEUR_PAR_NIVEAU = {0: 0x5865F2, 1: 0x4E5058, 2: 0x4E5058, 3: 0x992D22}
 
 _log = print
 
@@ -86,9 +92,18 @@ def setup(*, log=None):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def roles_afk(guild, cfg_act: dict) -> list:
-    """Les rôles d'inactivité qui existent réellement, dans l'ordre des paliers."""
+    """Les rôles d'inactivité MASQUANTS qui existent réellement, par palier.
+
+    ⚠️ TROIS SUR QUATRE. C'est cette liste que lit `appliquer_masquage` : seul
+    ce qui y figure reçoit `view_channel=False`. L'étiquette « peu actif » en
+    est volontairement absente — ces membres-là VIENNENT d'écrire, leur
+    masquer le serveur serait absurde. L'abandon, lui, y est : sinon poser le
+    palier 3 (qui retire l'étiquette du palier 2) rendrait l'accès au serveur
+    au membre le plus inactif.
+    """
     out = []
-    for cle in ("activite_role_niveau1", "activite_role_niveau2"):
+    for cle in ("activite_role_niveau1", "activite_role_niveau2",
+                "activite_role_abandon"):
         rid = int(cfg_act.get(cle) or 0)
         if rid:
             r = guild.get_role(rid)
@@ -147,8 +162,17 @@ def ids_afk(cfg_act: dict) -> set[int]:
         `doux_max` referme se rouvrirait entièrement.
     Pour la liste des ÉTIQUETTES (les trois), voir `ids_etiquettes`.
     """
+    #  ⚠️ L'ABANDON EST ICI, LE DOUX NON — ET LA DIFFÉRENCE EST DÉLIBÉRÉE.
+    #  `poser_niveau` n'autorise QU'UNE étiquette à la fois : passer un membre
+    #  au palier 3 lui RETIRE celle du palier 2. Si l'abandon n'était pas dans
+    #  cette liste, le membre le plus inactif du serveur — déjà dépouillé de
+    #  tous ses rôles — serait le seul à retrouver l'accès complet.
+    #  Second motif : `_IDS_CONNUS` est alimenté par cette même liste, et c'est
+    #  lui qui déclenche le retour immédiat. Hors d'ici, un abandonné qui
+    #  revient resterait bloqué jusqu'à six heures.
     return {int(cfg_act.get(c) or 0) for c in
-            ("activite_role_niveau1", "activite_role_niveau2")} - {0}
+            ("activite_role_niveau1", "activite_role_niveau2",
+             "activite_role_abandon")} - {0}
 
 
 def ids_etiquettes(cfg_act: dict) -> set[int]:
