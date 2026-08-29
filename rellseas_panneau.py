@@ -352,6 +352,48 @@ def _poser(i, ids: list[int]) -> None:
     _SELECTIONS[_cle(i)] = propre
 
 
+def _membres_du_salon(i) -> list:
+    """Les membres qui voient le salon où la commande a été tapée.
+
+    ⚠️ POURQUOI CE RACCOURCI EXISTE. Demande du propriétaire (24/08) : « si on
+    exécute la commande dans un salon où il y a uniquement les joueurs affichés
+    à droite […] par exemple si un jour crée un ticket et que dans le ticket on
+    est 5, ça te permettra d'afficher aussi le membre qui a créé le ticket ».
+    Dans un ticket, les gens concernés sont déjà là : les retrouver à la main
+    dans un serveur de mille membres n'a aucun sens.
+
+    Les tickets de ce bot sont des SALONS TEXTE avec permissions
+    (`create_text_channel(..., overwrites=ow)`), donc `channel.members` rend
+    exactement les participants.
+
+    ⚠️ TROIS TYPES, TROIS COMPORTEMENTS — et un seul rend des `Member` :
+      · `TextChannel.members`  → les membres qui PEUVENT VOIR le salon ;
+      · `VoiceChannel.members` → ceux actuellement CONNECTÉS dedans ;
+      · `Thread.members`       → des `ThreadMember`, PAS des `Member` : pas de
+        `.display_name`, pas de `.bot`. On repasse donc par
+        `guild.get_member` dans tous les cas.
+
+    Rend `[]` si le salon est public : `channel.members` y vaut presque tout le
+    serveur, et proposer neuf cents personnes ne rendrait service à personne.
+    C'est ce plafond qui fait que le raccourci n'apparaît QUE là où il aide.
+    """
+    g, salon = i.guild, getattr(i, "channel", None)
+    if g is None or salon is None:
+        return []
+    try:
+        bruts = list(getattr(salon, "members", []) or [])
+    except Exception:
+        return []
+    if not bruts or len(bruts) > MAX_RESULTATS:
+        return []
+    out = []
+    for x in bruts:
+        m = x if hasattr(x, "display_name") else g.get_member(getattr(x, "id", 0))
+        if m is not None and not getattr(m, "bot", False):
+            out.append(m)
+    return out
+
+
 def _sans_accents(s: str) -> str:
     """Pour que « rené » se trouve en tapant « rene ». Fonction pure."""
     import unicodedata
@@ -359,26 +401,94 @@ def _sans_accents(s: str) -> str:
                    if not unicodedata.combining(c)).casefold()
 
 
-class _ChercheModal(discord.ui.Modal, title="Chercher un membre"):
-    """Quelques lettres suffisent — la recherche est faite PAR LE BOT.
+def _extraire_id(texte: str) -> int | None:
+    """Un identifiant Discord, collé sous n'importe quelle forme.
 
-    ⚠️ POURQUOI UNE RECHERCHE CÔTÉ BOT. Le menu natif de Discord propose bien
-    une liste de membres, mais rien dans la bibliothèque ni dans la
-    documentation ne garantit qu'il cherche dans TOUT le serveur : on ne parie
-    pas là-dessus. Ici, on balaie `guild.members` nous-mêmes, on cherche dans
-    le pseudo du serveur, le nom global et le nom de compte, sans accents et
-    sans casse — et on rend des noms lisibles, pas des identifiants.
+    ⚠️ AJOUTÉ LE 24/08 À LA DEMANDE DU PROPRIÉTAIRE : « fais en sorte qu'on
+    puisse mettre l'ID de l'utilisateur, que ce soit plus simple comme ça ».
+    Un identifiant est EXACT — il ne dépend ni du pseudo affiché, ni des
+    accents, ni du cache des membres. C'est le chemin qui marche toujours,
+    et c'est pour ça qu'il est essayé EN PREMIER.
+
+    Accepte `123456789012345678`, `<@123…>` et `<@!123…>` : on colle ce qu'on a
+    sous la main, on ne nettoie pas à la main.
+    """
+    brut = str(texte or "").strip()
+    for prefixe, suffixe in (("<@!", ">"), ("<@", ">")):
+        if brut.startswith(prefixe) and brut.endswith(suffixe):
+            brut = brut[len(prefixe):-len(suffixe)].strip()
+            break
+    if brut.isdigit() and 15 <= len(brut) <= 21:
+        try:
+            return int(brut)
+        except Exception:
+            return None
+    return None
+
+
+class _ChercheModal(discord.ui.Modal, title="Trouver un membre"):
+    """Un identifiant, ou quelques lettres. La recherche est faite PAR LE BOT.
+
+    ⚠️ DEUX CHEMINS, ET L'IDENTIFIANT PASSE EN PREMIER.
+    Le propriétaire a signalé le 24/08 que la recherche par lettres « ne marche
+    pas du tout » et a demandé de pouvoir coller un identifiant. Un identifiant
+    ne dépend de rien : ni du pseudo, ni des accents, ni du cache. S'il est
+    fourni, on l'utilise et on ne cherche pas.
+
+    ⚠️ ET ON VA LE CHERCHER SUR DISCORD SI BESOIN. `guild.get_member` ne lit
+    que le cache : un membre absent du cache serait « introuvable » alors qu'il
+    existe. On retombe donc sur `fetch_member`, un appel réseau, qui tranche
+    pour de bon.
+
+    ⚠️ POURQUOI LA RECHERCHE PAR NOM EST FAITE CÔTÉ BOT. Le menu natif de
+    Discord propose une liste de membres, mais rien dans la bibliothèque ni
+    dans la documentation ne garantit qu'il cherche dans TOUT le serveur : on
+    ne parie pas là-dessus. On balaie `guild.members` nous-mêmes, dans le
+    pseudo du serveur, le nom global et le nom de compte, sans accents ni
+    casse — et on rend des noms lisibles.
     """
 
     lettres = discord.ui.TextInput(
-        label="Quelques lettres du pseudo",
-        placeholder="ex. « rell » — 2 lettres suffisent",
-        min_length=2, max_length=40, required=True)
+        label="Identifiant, ou quelques lettres du pseudo",
+        placeholder="123456789012345678  —  ou bien : rell",
+        min_length=2, max_length=60, required=True)
 
     async def on_submit(self, i: discord.Interaction):
-        besoin = _sans_accents(str(self.lettres.value))
+        saisie = str(self.lettres.value).strip()
+        k = _cle(i)
+        g = i.guild
+
+        #  ── 1. Un identifiant ? C'est exact, on ne cherche pas plus loin. ──
+        uid = _extraire_id(saisie)
+        if uid is not None:
+            m = g.get_member(uid) if g else None
+            if m is None and g is not None:
+                #  Hors cache : on demande à Discord. C'est la différence entre
+                #  « introuvable » et « pas encore chargé ».
+                try:
+                    m = await g.fetch_member(uid)
+                except Exception as ex:
+                    _log(f"[rellseas recherche id {uid}] {type(ex).__name__}: {ex}")
+                    m = None
+            if m is None:
+                _RECHERCHES.pop(k, None)
+                _DERNIER[k] = (
+                    f"🔎 Aucun membre avec l'identifiant `{uid}` sur ce serveur.\n"
+                    f"-# Vérifiez l'identifiant, ou collez la mention du membre.")
+            else:
+                ids = list(_sel(i))
+                if m.id not in ids:
+                    ids.append(m.id)
+                _poser(i, ids)
+                _RECHERCHES.pop(k, None)
+                _DERNIER[k] = (f"✅ {m.mention} ajouté à la sélection "
+                               f"(`{len(ids)}` au total).")
+            return await self._rendre(i)
+
+        #  ── 2. Sinon, recherche par lettres. ──
+        besoin = _sans_accents(saisie)
         trouves = []
-        for m in (i.guild.members if i.guild else []):
+        for m in (g.members if g else []):
             if m.bot:
                 continue
             for champ in (m.display_name, getattr(m, "global_name", None), m.name):
@@ -387,21 +497,47 @@ class _ChercheModal(discord.ui.Modal, title="Chercher un membre"):
                     break
             if len(trouves) >= MAX_RESULTATS:
                 break
-        _RECHERCHES[_cle(i)] = (str(self.lettres.value), trouves)
+        _RECHERCHES[k] = (saisie, trouves)
+        #  ⚠️ ON DIT COMBIEN DE MEMBRES ONT ÉTÉ FOUILLÉS. Un serveur dont le
+        #  cache est vide rendrait « aucun résultat » pour TOUT — et on
+        #  chercherait la panne dans la recherche au lieu du cache.
+        vus = len(g.members) if g else 0
+        _log(f"[rellseas recherche] « {saisie} » → {len(trouves)} sur {vus} membres")
         if not trouves:
-            _DERNIER[_cle(i)] = (
-                f"🔎 Aucun membre ne correspond à « {self.lettres.value} ».\n"
-                f"-# Essayez moins de lettres, ou une autre partie du pseudo.")
-        await RellseasGestionV2().render_to(i, edit=True)
+            _DERNIER[k] = (
+                f"🔎 Aucun membre ne correspond à « {saisie} » "
+                f"(`{vus}` membres fouillés).\n"
+                f"-# Essayez moins de lettres, ou **collez son identifiant** — "
+                f"c'est le chemin le plus sûr.")
+        return await self._rendre(i)
+
+    async def _rendre(self, i: discord.Interaction):
+        """Réaffiche le panneau. ⚠️ Avec un repli : une soumission de modale
+        n'a pas toujours le droit d'éditer le message d'origine, et un échec
+        silencieux ici donnerait l'impression que la recherche « ne fait
+        rien » — exactement la plainte du 24/08."""
+        try:
+            await RellseasGestionV2().render_to(i, edit=True)
+        except Exception as ex:
+            _log(f"[rellseas recherche rendu] {type(ex).__name__}: {ex}")
+            try:
+                await i.followup.send(
+                    _DERNIER.get(_cle(i))
+                    or "🔎 Recherche effectuée — rouvrez le panneau pour voir "
+                       "le résultat.", ephemeral=True)
+            except Exception:
+                pass
 
     async def on_error(self, i: discord.Interaction, ex: Exception):
         #  Une modale a son propre filet : sans lui, une erreur ici laisse
-        #  l'utilisateur devant un formulaire figé.
+        #  l'utilisateur devant un formulaire figé, sans un mot.
         _log(f"[rellseas recherche] {type(ex).__name__}: {ex}")
         try:
-            await i.response.send_message(
-                "❌ La recherche a échoué. Réessayez avec d'autres lettres.",
-                ephemeral=True)
+            envoi = (i.followup.send if i.response.is_done()
+                     else i.response.send_message)
+            await envoi(f"❌ La recherche a échoué (`{type(ex).__name__}`).\n"
+                        f"-# Réessayez, ou collez directement l'identifiant du "
+                        f"membre.", ephemeral=True)
         except Exception:
             pass
 
@@ -435,6 +571,14 @@ class RellseasGestionV2(LayoutView):
                                 options=[discord.SelectOption(label="—", value="0")],
                                 custom_id="rellseas_resultats")
         res.callback = v._cb_resultat
+        #  ⚠️ SANS CETTE INSCRIPTION, LE RACCOURCI « CE SALON » EST MUET.
+        #  `add_view` n'enregistre que les composants présents à cet instant :
+        #  un custom_id absent du squelette ne sera jamais capté après un
+        #  redéploiement — le défaut même qu'on vient de corriger.
+        ici = discord.ui.Select(placeholder="Ce salon…",
+                                options=[discord.SelectOption(label="—", value="0")],
+                                custom_id="rellseas_salon")
+        ici.callback = v._cb_salon
         boutons = []
         for cid, cb in (("rellseas_g_chercher", v._cb_chercher),
                         ("rellseas_g_donner", v._cb_donner),
@@ -445,6 +589,7 @@ class RellseasGestionV2(LayoutView):
             b.callback = cb
             boutons.append(b)
         v.add_item(v2_container(discord.ui.ActionRow(sel),
+                                discord.ui.ActionRow(ici),
                                 discord.ui.ActionRow(res),
                                 discord.ui.ActionRow(*boutons),
                                 color=Palette.INFO))
@@ -545,6 +690,25 @@ class RellseasGestionV2(LayoutView):
         sel.callback = self._cb_membres
         lignes = [discord.ui.ActionRow(sel)]
 
+        #  ⚠️ LE RACCOURCI « CE SALON » — demandé le 24/08. Dans un ticket, les
+        #  gens concernés sont déjà là : les retrouver à la main dans un
+        #  serveur de mille membres n'a aucun sens. Il n'apparaît QUE si le
+        #  salon a peu de monde (voir `_membres_du_salon`), donc jamais dans un
+        #  salon public où il listerait tout le serveur.
+        ici = _membres_du_salon(i)
+        if ici:
+            opts = [discord.SelectOption(
+                label=m.display_name[:100], description=f"@{m.name}"[:100],
+                value=str(m.id), emoji="✅" if m.id in ids else None)
+                for m in ici[:MAX_RESULTATS]]
+            s_ici = discord.ui.Select(
+                placeholder=(f"👥 Les {len(opts)} membres de ce salon — "
+                             f"cliquez pour ajouter ou retirer"),
+                options=opts, min_values=1, max_values=1,
+                custom_id="rellseas_salon")
+            s_ici.callback = self._cb_salon
+            lignes.append(discord.ui.ActionRow(s_ici))
+
         recherche = _RECHERCHES.get(k)
         if recherche and recherche[1]:
             mots, trouves = recherche
@@ -629,7 +793,13 @@ class RellseasGestionV2(LayoutView):
 
     async def _cb_resultat(self, i):
         """Un résultat de recherche : on l'ajoute, ou on l'enlève s'il y est."""
-        uid = int((i.data.get("values") or ["0"])[0])
+        await self._basculer(i, int((i.data.get("values") or ["0"])[0]))
+
+    async def _cb_salon(self, i):
+        """Un membre du salon courant : on l'ajoute, ou on l'enlève s'il y est."""
+        await self._basculer(i, int((i.data.get("values") or ["0"])[0]))
+
+    async def _basculer(self, i, uid: int):
         ids = list(_sel(i))
         if uid in ids:
             ids.remove(uid)

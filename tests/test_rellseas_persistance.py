@@ -222,3 +222,145 @@ def test_la_recherche_regarde_les_trois_noms():
     corps = _corps("_ChercheModal")
     for champ in ("display_name", "global_name", "m.name"):
         assert champ in corps, f"la recherche ignore {champ}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  6. Coller un identifiant — le chemin qui marche toujours (24/08)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize("saisie", [
+    "123456789012345678",
+    " 123456789012345678 ",
+    "<@123456789012345678>",
+    "<@!123456789012345678>",
+])
+def test_un_identifiant_est_reconnu_sous_toutes_ses_formes(saisie):
+    """⚠️ On colle ce qu'on a sous la main. Exiger un nettoyage manuel, c'est
+    remplacer une recherche qui échoue par une saisie qui échoue."""
+    assert panneau._extraire_id(saisie) == 123456789012345678
+
+
+@pytest.mark.parametrize("saisie", ["rell", "", "12", "abc123", "<@rell>"])
+def test_ce_qui_nest_pas_un_identifiant_part_en_recherche(saisie):
+    """Sinon « 12 » serait pris pour un identifiant et ne chercherait rien."""
+    assert panneau._extraire_id(saisie) is None
+
+
+def test_lidentifiant_est_essaye_avant_la_recherche():
+    """Un identifiant est EXACT : il ne dépend ni du pseudo, ni des accents,
+    ni du cache. C'est pour ça qu'il passe en premier."""
+    corps = _corps("_ChercheModal")
+    i_id = corps.index("_extraire_id")
+    i_nom = corps.index("_sans_accents")
+    assert i_id < i_nom
+
+
+def test_un_membre_hors_cache_est_cherche_sur_discord():
+    """⚠️ `get_member` ne lit QUE le cache : sans ce repli, un membre existant
+    mais non chargé serait déclaré introuvable."""
+    corps = _corps("_ChercheModal")
+    assert "fetch_member" in corps
+
+
+def test_la_recherche_dit_combien_de_membres_elle_a_fouilles():
+    """Un cache vide rendrait « aucun résultat » pour TOUT — et on chercherait
+    la panne dans la recherche au lieu du cache."""
+    corps = _corps("_ChercheModal")
+    assert "membres fouillés" in corps or "vus" in corps
+
+
+def test_le_rendu_a_un_repli_si_ledition_echoue():
+    """Un échec silencieux ici donne l'impression que la recherche « ne fait
+    rien » — exactement la plainte du 24/08."""
+    corps = _corps("_ChercheModal")
+    assert "followup.send" in corps
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  7. Le raccourci « membres de ce salon » — les tickets (24/08)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class _FauxSalon:
+    def __init__(self, membres):
+        self.members = list(membres)
+
+
+class _FauxM:
+    def __init__(self, uid, bot=False):
+        self.id, self.bot = uid, bot
+        self.display_name = f"Membre{uid}"
+        self.name = f"m{uid}"
+
+
+class _FauxG:
+    id = 1
+
+    def get_member(self, uid):
+        return _FauxM(uid)
+
+
+class _FauxI:
+    def __init__(self, salon):
+        self.guild, self.channel = _FauxG(), salon
+        self.user = type("U", (), {"id": 9})()
+
+
+def test_un_ticket_propose_ses_participants():
+    """⚠️ LA DEMANDE. Dans un ticket, les gens concernés sont déjà là."""
+    i = _FauxI(_FauxSalon([_FauxM(1), _FauxM(2), _FauxM(3)]))
+    assert [m.id for m in panneau._membres_du_salon(i)] == [1, 2, 3]
+
+
+def test_les_bots_ne_sont_pas_proposes():
+    i = _FauxI(_FauxSalon([_FauxM(1), _FauxM(2, bot=True)]))
+    assert [m.id for m in panneau._membres_du_salon(i)] == [1]
+
+
+def test_un_salon_public_ne_propose_rien():
+    """⚠️ Sans ce plafond, le raccourci listerait tout le serveur et
+    n'aiderait personne. Il n'apparaît QUE là où il sert."""
+    i = _FauxI(_FauxSalon([_FauxM(x) for x in range(60)]))
+    assert panneau._membres_du_salon(i) == []
+
+
+def test_un_fil_rend_des_thread_members_et_on_les_resout():
+    """⚠️ `Thread.members` rend des `ThreadMember`, PAS des `Member` : pas de
+    `.display_name`, pas de `.bot`. On repasse par `guild.get_member`."""
+    class _TM:
+        def __init__(self, uid):
+            self.id = uid
+    i = _FauxI(_FauxSalon([_TM(4), _TM(5)]))
+    trouves = panneau._membres_du_salon(i)
+    assert [m.id for m in trouves] == [4, 5]
+    assert all(hasattr(m, "display_name") for m in trouves)
+
+
+def test_sans_salon_on_ne_plante_pas():
+    i = _FauxI(None)
+    assert panneau._membres_du_salon(i) == []
+
+
+def test_le_raccourci_salon_est_enregistre_au_boot():
+    """⚠️ Un custom_id absent du squelette n'est jamais capté après un
+    redéploiement — le défaut qu'on vient de corriger."""
+    v = panneau.RellseasGestionV2.squelette()
+    trouves = set()
+
+    def descendre(o):
+        cid = getattr(o, "custom_id", None)
+        if isinstance(cid, str):
+            trouves.add(cid)
+        for e in (getattr(o, "children", None) or []):
+            descendre(e)
+    descendre(v)
+    assert "rellseas_salon" in trouves
+
+
+def test_une_seule_mecanique_de_bascule():
+    """Résultats de recherche et membres du salon doivent se comporter
+    pareil : deux mécaniques divergeraient au premier correctif."""
+    corps = _corps("RellseasGestionV2")
+    assert corps.count("async def _basculer") == 1
+    for cb in ("_cb_resultat", "_cb_salon"):
+        bloc = corps.split(f"async def {cb}")[1].split("async def")[0]
+        assert "_basculer" in bloc
