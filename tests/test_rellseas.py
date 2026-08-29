@@ -80,9 +80,17 @@ def test_les_anciennes_sous_commandes_ont_disparu():
 
 
 def test_le_panneau_recoit_la_garde_pour_la_revverifier():
-    """Une vue vit 10 minutes ; un droit peut être retiré entre-temps."""
+    """Un droit peut être retiré entre l'ouverture du panneau et le clic.
+
+    ⚠️ LA GARDE A CHANGÉ DE CHEMIN LE 23/08. Elle passait par le constructeur
+    de la vue ; depuis que le panneau est PERSISTANT — construit au démarrage,
+    sans savoir qui l'ouvrira — elle est injectée dans `setup()`. Elle est
+    toujours revérifiée à CHAQUE clic, c'est ce qui compte.
+    """
+    assert "autorise=_rellseas_autorise" in SRC
     corps = ast.unparse(_fonction("rellseas_cmd"))
-    assert "autorise=_rellseas_autorise" in corps
+    assert "_rellseas_autorise(i)" in corps, (
+        "la commande doit refuser d'elle-même, pas seulement à l'affichage")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -225,13 +233,32 @@ class FausseReponse:
 
 
 class FausseInteraction:
-    def __init__(self, values=None):
+    #  ⚠️ Piège n°6 du dépôt : la doublure doit porter TOUT ce que porte
+    #  l'objet réel. Depuis que le panneau est PERSISTANT, il ne connaît plus
+    #  ni serveur ni utilisateur par son constructeur — il les lit dans
+    #  l'interaction. Sans `.guild`, tous les callbacks lèveraient.
+    def __init__(self, values=None, guild=None):
         self.response = FausseReponse()
         self.data = {"values": list(values or [])}
         self.user = FauxUser()
+        self.guild = guild
 
     async def edit_original_response(self, **kw):
         self.response.appels.append(kw)
+
+
+def _selection(g, ids):
+    """Pose la sélection là où elle vit désormais : hors de la vue.
+
+    ⚠️ Elle a quitté `self` parce qu'une vue persistante est UNE instance
+    partagée par tout le staff — la sélection de l'un aurait écrasé celle de
+    l'autre.
+    """
+    panneau._SELECTIONS[(g.id, FauxUser.id)] = list(ids)
+
+
+def _dernier(g) -> str:
+    return panneau._DERNIER.get((g.id, FauxUser.id), "")
 
 
 def _brancher(role=None, mesurer=None, suivi=None):
@@ -249,13 +276,13 @@ async def test_donner_agit_sur_TOUT_le_lot():
     g = FauxGuild(membres, role)
     _brancher(role)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    vue._membres = [1, 2, 3]
-    await vue._agir(FausseInteraction(), donner=True)
+    vue = panneau.RellseasGestionV2()
+    _selection(g, [1, 2, 3])
+    await vue._agir(FausseInteraction(guild=g), donner=True)
 
     assert all(m.gestes == [("add", 7)] for m in membres), (
         "les trois membres devaient recevoir le rôle")
-    assert "`3`" in vue._dernier
+    assert "`3`" in _dernier(g)
 
 
 @pytest.mark.asyncio
@@ -265,9 +292,9 @@ async def test_retirer_agit_sur_TOUT_le_lot():
     g = FauxGuild(membres, role)
     _brancher(role)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    vue._membres = [1, 2]
-    await vue._agir(FausseInteraction(), donner=False)
+    vue = panneau.RellseasGestionV2()
+    _selection(g, [1, 2])
+    await vue._agir(FausseInteraction(guild=g), donner=False)
 
     assert all(m.gestes == [("remove", 7)] for m in membres)
 
@@ -280,14 +307,14 @@ async def test_un_refus_de_discord_est_dit_et_nempeche_pas_les_autres():
     g = FauxGuild([ok1, ko, ok2], role)
     _brancher(role)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    vue._membres = [1, 2, 3]
-    await vue._agir(FausseInteraction(), donner=True)
+    vue = panneau.RellseasGestionV2()
+    _selection(g, [1, 2, 3])
+    await vue._agir(FausseInteraction(guild=g), donner=True)
 
     assert ok1.gestes and ok2.gestes, "un échec ne doit pas arrêter le lot"
     assert ko.gestes == []
-    assert "`2`" in vue._dernier and "refusé par Discord" in vue._dernier
-    assert "`1`" in vue._dernier, "l'échec doit être compté, pas masqué"
+    assert "`2`" in _dernier(g) and "refusé par Discord" in _dernier(g)
+    assert "`1`" in _dernier(g), "l'échec doit être compté, pas masqué"
 
 
 @pytest.mark.asyncio
@@ -297,12 +324,12 @@ async def test_membre_qui_avait_deja_le_role_est_signale_pas_compte_comme_fait()
     g = FauxGuild([deja], role)
     _brancher(role)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    vue._membres = [1]
-    await vue._agir(FausseInteraction(), donner=True)
+    vue = panneau.RellseasGestionV2()
+    _selection(g, [1])
+    await vue._agir(FausseInteraction(guild=g), donner=True)
 
     assert deja.gestes == []
-    assert "l'avait déjà" in vue._dernier
+    assert "l'avait déjà" in _dernier(g)
 
 
 @pytest.mark.asyncio
@@ -313,13 +340,13 @@ async def test_rien_nest_tente_si_le_role_est_au_dessus_du_bot():
     g = FauxGuild([m], role, moi=FauxMoi(position=100))
     _brancher(role)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    vue._membres = [1]
-    await vue._agir(FausseInteraction(), donner=True)
+    vue = panneau.RellseasGestionV2()
+    _selection(g, [1])
+    await vue._agir(FausseInteraction(guild=g), donner=True)
 
     assert m.gestes == [], "aucune tentative ne devait partir"
-    assert "Rien n'a été fait" in vue._dernier
-    assert "au-dessus" in vue._dernier
+    assert "Rien n'a été fait" in _dernier(g)
+    assert "au-dessus" in _dernier(g)
 
 
 @pytest.mark.asyncio
@@ -329,12 +356,12 @@ async def test_rien_nest_tente_sans_permission_gerer_les_roles():
     g = FauxGuild([m], role, moi=FauxMoi(manage_roles=False))
     _brancher(role)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    vue._membres = [1]
-    await vue._agir(FausseInteraction(), donner=True)
+    vue = panneau.RellseasGestionV2()
+    _selection(g, [1])
+    await vue._agir(FausseInteraction(guild=g), donner=True)
 
     assert m.gestes == []
-    assert "Gérer les rôles" in vue._dernier
+    assert "Gérer les rôles" in _dernier(g)
 
 
 @pytest.mark.asyncio
@@ -343,12 +370,12 @@ async def test_sans_role_cible_le_lot_ne_pretend_rien():
     g = FauxGuild([m], None)
     _brancher(None)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    vue._membres = [1]
-    await vue._agir(FausseInteraction(), donner=True)
+    vue = panneau.RellseasGestionV2()
+    _selection(g, [1])
+    await vue._agir(FausseInteraction(guild=g), donner=True)
 
     assert m.gestes == []
-    assert "Rien n'a été fait" in vue._dernier
+    assert "Rien n'a été fait" in _dernier(g)
 
 
 @pytest.mark.asyncio
@@ -363,9 +390,9 @@ async def test_le_suivi_dactivite_demarre_a_lattribution():
     g = FauxGuild([FauxMembre(1), FauxMembre(2)], role)
     _brancher(role, suivi=_suivi)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    vue._membres = [1, 2]
-    await vue._agir(FausseInteraction(), donner=True)
+    vue = panneau.RellseasGestionV2()
+    _selection(g, [1, 2])
+    await vue._agir(FausseInteraction(guild=g), donner=True)
 
     assert vus == [(1234, 1), (1234, 2)]
 
@@ -393,12 +420,12 @@ async def test_le_panneau_nappelle_aucun_compteur_a_lui():
     g = FauxGuild([FauxMembre(1), FauxMembre(2)], role)
     _brancher(role, mesurer=_mesurer)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    vue._membres = [1, 2]
-    await vue._cb_activite(FausseInteraction())
+    vue = panneau.RellseasGestionV2()
+    _selection(g, [1, 2])
+    await vue._cb_activite(FausseInteraction(guild=g))
 
     assert appels == [1, 2]
-    assert "compteur séparé" in vue._dernier
+    assert "compteur séparé" in _dernier(g)
 
 
 @pytest.mark.parametrize("mesure,attendu", [
@@ -433,9 +460,9 @@ async def test_le_panneau_de_gestion_se_serialise():
     g = FauxGuild([FauxMembre(1)], role)
     _brancher(role)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    vue._membres = [1]
-    i = FausseInteraction()
+    vue = panneau.RellseasGestionV2()
+    _selection(g, [1])
+    i = FausseInteraction(guild=g)
     await vue.render_to(i)
 
     assert vue.to_components(), "une vue sans composant est refusée par Discord"
@@ -450,8 +477,8 @@ async def test_les_boutons_daction_sont_desactives_sans_selection():
     g = FauxGuild([], role)
     _brancher(role)
 
-    vue = panneau.RellseasGestionV2(FauxUser(), g)
-    await vue.render_to(FausseInteraction())
+    vue = panneau.RellseasGestionV2()
+    await vue.render_to(FausseInteraction(guild=g))
     texte = str(vue.to_components())
 
     assert "'disabled': True" in texte or '"disabled": true' in texte.lower()
@@ -464,8 +491,9 @@ async def test_le_panneau_de_reglage_souvre_meme_si_la_config_est_cassee():
         raise RuntimeError("base indisponible")
 
     panneau.setup(cfg=_cfg, db_set=None, log=lambda *a: None)
-    vue = panneau.RellseasPanelV2(FauxUser(), FauxGuild())
-    i = FausseInteraction()
+    g = FauxGuild()
+    vue = panneau.RellseasPanelV2(FauxUser(), g)
+    i = FausseInteraction(guild=g)
     await vue.render_to(i)
 
     assert i.response.appels, "le panneau devait s'ouvrir malgré la panne"

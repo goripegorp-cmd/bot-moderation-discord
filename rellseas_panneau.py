@@ -34,6 +34,9 @@ _log = print
 #  d'activité, il ne fait que les appeler.
 _mesurer = None        # (guild_id, member) -> dict, via activite.presence()
 _marquer_suivi = None  # (guild_id, user_id) -> None, écrit realsy_tracking
+#  ⚠️ La garde ne peut plus passer par le constructeur : la vue est
+#  PERSISTANTE et partagée, elle est construite au boot sans contexte.
+_autorise = None       # (interaction) -> bool
 
 #  La clé qui portait le réglage manquant. Les trois autres existaient déjà et
 #  sont écrites par les vues de questionnaire — on les affiche, on ne les
@@ -54,11 +57,13 @@ MAX_ROLES = 25
 MAX_MEMBRES = 25
 
 
-def setup(*, cfg, db_set, get_db=None, mesurer=None, marquer_suivi=None, log=None):
-    global _cfg, _db_set, _log, _mesurer, _marquer_suivi
+def setup(*, cfg, db_set, get_db=None, mesurer=None, marquer_suivi=None,
+          autorise=None, log=None):
+    global _cfg, _db_set, _log, _mesurer, _marquer_suivi, _autorise
     _cfg, _db_set = cfg, db_set
     _mesurer = mesurer
     _marquer_suivi = marquer_suivi
+    _autorise = autorise
     if log is not None:
         _log = log
 
@@ -285,194 +290,375 @@ def _bilan(titre: str, faits: list[str], echecs: list[str]) -> str:
     return "\n".join(lignes)
 
 
-class RellseasGestionV2(LayoutView):
-    """Le panneau de `/rellseas` : donner et retirer le rôle, par lots.
+#  ═══════════════════════════════════════════════════════════════════════════
+#  LE PANNEAU DE GESTION — PERSISTANT
+#  ═══════════════════════════════════════════════════════════════════════════
+#
+#  ⚠️ POURQUOI CETTE CLASSE A ÉTÉ REFAITE LE 23/08/2026.
+#  Plainte du propriétaire, capture à l'appui : « quand on interagit avec les
+#  boutons, ça ne marche pas. Il nous met échec de l'interaction, on peut rien
+#  faire dans ce menu ».
+#
+#  CAUSE, PROUVÉE DANS LE CODE DE discord.py 2.7.1 :
+#  la vue n'était enregistrée nulle part. Elle naissait avec `timeout=600` et
+#  ne vivait que dans la mémoire du processus. `ViewStore.dispatch_view`
+#  (view.py:1076) cherche l'item, ne le trouve pas, et fait `return` — AUCUN
+#  accusé de réception n'est envoyé. Discord attend trois secondes et affiche
+#  « Échec de l'interaction ». Aucune ligne de journal, aucune trace.
+#  Deux chemins y menaient : un redéploiement (le propriétaire en fait
+#  plusieurs par jour) et les 600 secondes d'inactivité.
+#
+#  ⚠️ `timeout=None` NE SUFFIT PAS, ET C'EST CONTRE-INTUITIF.
+#  `InteractionResponse.send_message` (interactions.py) contient :
+#      if ephemeral and view.timeout is None:
+#          view.timeout = 15 * 60.0
+#  Toute vue ÉPHÉMÈRE se voit donc imposer quinze minutes. Seul
+#  `bot.add_view(...)` — qui range la vue dans le créneau `message_id=None`,
+#  jamais purgé — survit à un redémarrage.
+#
+#  CE QUE CELA IMPOSE : une vue enregistrée est UNE SEULE instance partagée par
+#  tout le staff. Rien de personnel ne peut vivre sur `self` — la sélection de
+#  l'un écraserait celle de l'autre. L'état est donc sorti de l'objet, dans des
+#  dictionnaires de module indexés par (serveur, utilisateur).
 
-    Ouvert par quiconque porte un des rôles autorisés (ou par un
-    administrateur). Éphémère : chacun ouvre le sien, et plusieurs personnes
-    peuvent donc s'en servir en même temps sans se marcher dessus.
+#  La sélection en cours, par (guild_id, user_id). En mémoire : elle est perdue
+#  au redémarrage, et le panneau le DIT au lieu de faire semblant.
+_SELECTIONS: dict[tuple[int, int], list[int]] = {}
+_DERNIER: dict[tuple[int, int], str] = {}
+#  La dernière recherche, pour réafficher ses résultats après un clic.
+_RECHERCHES: dict[tuple[int, int], tuple[str, list[int]]] = {}
+
+#  Combien de résultats on montre au plus. Limite dure d'un Select Discord.
+MAX_RESULTATS = 25
+
+
+def _cle(i) -> tuple[int, int]:
+    return (i.guild.id if i.guild else 0, i.user.id)
+
+
+def _sel(i) -> list[int]:
+    return _SELECTIONS.get(_cle(i), [])
+
+
+def _poser(i, ids: list[int]) -> None:
+    #  Dédoublonnage en gardant l'ordre : deux passes de recherche peuvent
+    #  proposer la même personne, et la compter deux fois fausserait le compte
+    #  affiché sur les boutons.
+    vus, propre = set(), []
+    for x in ids:
+        if x not in vus:
+            vus.add(x)
+            propre.append(x)
+    _SELECTIONS[_cle(i)] = propre
+
+
+def _sans_accents(s: str) -> str:
+    """Pour que « rené » se trouve en tapant « rene ». Fonction pure."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFKD", str(s or ""))
+                   if not unicodedata.combining(c)).casefold()
+
+
+class _ChercheModal(discord.ui.Modal, title="Chercher un membre"):
+    """Quelques lettres suffisent — la recherche est faite PAR LE BOT.
+
+    ⚠️ POURQUOI UNE RECHERCHE CÔTÉ BOT. Le menu natif de Discord propose bien
+    une liste de membres, mais rien dans la bibliothèque ni dans la
+    documentation ne garantit qu'il cherche dans TOUT le serveur : on ne parie
+    pas là-dessus. Ici, on balaie `guild.members` nous-mêmes, on cherche dans
+    le pseudo du serveur, le nom global et le nom de compte, sans accents et
+    sans casse — et on rend des noms lisibles, pas des identifiants.
     """
 
-    def __init__(self, u, g, *, autorise=None):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-        #  ⚠️ LA GARDE EST REVÉRIFIÉE À CHAQUE CLIC, pas seulement à
-        #  l'ouverture. Un panneau vit 10 minutes ; un droit peut être retiré
-        #  entre-temps, et une vue ouverte ne doit pas devenir un laissez-passer.
-        self._autorise = autorise
-        self._membres: list[int] = []
-        self._dernier = ""
+    lettres = discord.ui.TextInput(
+        label="Quelques lettres du pseudo",
+        placeholder="ex. « rell » — 2 lettres suffisent",
+        min_length=2, max_length=40, required=True)
 
-    async def interaction_check(self, i):
-        if i.user.id != self.u.id:
-            return False
-        if self._autorise is None:
+    async def on_submit(self, i: discord.Interaction):
+        besoin = _sans_accents(str(self.lettres.value))
+        trouves = []
+        for m in (i.guild.members if i.guild else []):
+            if m.bot:
+                continue
+            for champ in (m.display_name, getattr(m, "global_name", None), m.name):
+                if champ and besoin in _sans_accents(champ):
+                    trouves.append(m.id)
+                    break
+            if len(trouves) >= MAX_RESULTATS:
+                break
+        _RECHERCHES[_cle(i)] = (str(self.lettres.value), trouves)
+        if not trouves:
+            _DERNIER[_cle(i)] = (
+                f"🔎 Aucun membre ne correspond à « {self.lettres.value} ».\n"
+                f"-# Essayez moins de lettres, ou une autre partie du pseudo.")
+        await RellseasGestionV2().render_to(i, edit=True)
+
+    async def on_error(self, i: discord.Interaction, ex: Exception):
+        #  Une modale a son propre filet : sans lui, une erreur ici laisse
+        #  l'utilisateur devant un formulaire figé.
+        _log(f"[rellseas recherche] {type(ex).__name__}: {ex}")
+        try:
+            await i.response.send_message(
+                "❌ La recherche a échoué. Réessayez avec d'autres lettres.",
+                ephemeral=True)
+        except Exception:
+            pass
+
+
+class RellseasGestionV2(LayoutView):
+    """Donner, retirer, examiner — par lots. VUE PERSISTANTE.
+
+    ⚠️ AUCUN ÉTAT SUR `self`. Voir l'en-tête de section : l'instance
+    enregistrée au démarrage est partagée par tout le staff. Serveur et
+    utilisateur se lisent dans l'interaction, la sélection dans `_SELECTIONS`.
+    """
+
+    def __init__(self):
+        #  `timeout=None` + `bot.add_view` : le seul couple qui survit à un
+        #  redéploiement. Voir l'en-tête.
+        super().__init__(timeout=None)
+
+    @classmethod
+    def squelette(cls) -> "RellseasGestionV2":
+        """L'instance enregistrée au boot, avec les custom_id FIXES.
+
+        `bot.add_view` ne peut inscrire que les composants présents à l'instant
+        de l'appel : ce squelette les porte tous, sans état ni `disabled`.
+        """
+        v = cls()
+        sel = UserSelect(placeholder="Choisir des membres…",
+                         min_values=0, max_values=MAX_MEMBRES,
+                         custom_id="rellseas_membres")
+        sel.callback = v._cb_membres
+        res = discord.ui.Select(placeholder="Résultats…",
+                                options=[discord.SelectOption(label="—", value="0")],
+                                custom_id="rellseas_resultats")
+        res.callback = v._cb_resultat
+        boutons = []
+        for cid, cb in (("rellseas_g_chercher", v._cb_chercher),
+                        ("rellseas_g_donner", v._cb_donner),
+                        ("rellseas_g_retirer", v._cb_retirer),
+                        ("rellseas_g_activite", v._cb_activite),
+                        ("rellseas_g_vider", v._cb_vider)):
+            b = Button(label="—", custom_id=cid)
+            b.callback = cb
+            boutons.append(b)
+        v.add_item(v2_container(discord.ui.ActionRow(sel),
+                                discord.ui.ActionRow(res),
+                                discord.ui.ActionRow(*boutons),
+                                color=Palette.INFO))
+        return v
+
+    async def interaction_check(self, i) -> bool:
+        """⚠️ ON RÉPOND TOUJOURS AVANT DE REFUSER.
+
+        `View._scheduled_task` fait `if not allow: return` sans rien envoyer, et
+        n'appelle PAS `on_error` : un refus muet produit littéralement « Échec
+        de l'interaction ». C'était l'un des chemins du défaut du 23/08.
+
+        Il n'y a plus de test d'identité : la vue est partagée, et le message
+        est éphémère — seul celui qui a tapé la commande le voit.
+        """
+        if _autorise is None:
             return True
         try:
-            if await self._autorise(i):
+            if await _autorise(i):
                 return True
         except Exception as ex:
             _log(f"[RellseasGestionV2 garde] {ex}")
-        #  Fail-closed, et on le DIT : un bouton qui ne fait rien sans expliquer
-        #  est un bouton qui ment.
         try:
             await i.response.send_message(
-                "❌ Votre permission d'utiliser `/rellseas` a été retirée "
-                "depuis l'ouverture de ce panneau.", ephemeral=True)
+                "❌ Vous n'avez plus la permission d'utiliser ce panneau.\n"
+                "-# Elle se règle dans `/configure` → 🎭 Rellseas.",
+                ephemeral=True)
         except Exception:
             pass
         return False
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  Construction
+    #  Rendu
     # ─────────────────────────────────────────────────────────────────────────
 
     async def render_to(self, i, *, edit: bool = True):
-        try:
-            try:
-                c = await _cfg(self.g.id)
-            except Exception as ex:
-                _log(f"[RellseasGestionV2 cfg] {ex}")
-                c = {}
+        g, k = i.guild, _cle(i)
+        c = await _cfg(g.id)
+        role = g.get_role(int(c.get(CLE_ROLE_CIBLE, 0) or 0))
+        ids = _SELECTIONS.get(k, [])
+        choisis = [m for m in (g.get_member(x) for x in ids) if m is not None]
+        n = len(choisis)
 
-            role = self.g.get_role(int(c.get(CLE_ROLE_CIBLE, 0) or 0))
-            choisis = [self.g.get_member(m) for m in self._membres]
-            choisis = [m for m in choisis if m is not None]
+        items = [
+            v2_title("🎭 Rellseas · Gestion du rôle"),
+            v2_subtitle("Donner ou retirer le rôle à plusieurs membres d'un coup"),
+            v2_divider(),
+        ]
 
-            items = [
-                v2_title("🎭 Rellseas"),
-                v2_subtitle("Donner, retirer, examiner — par lots"),
-                v2_divider(),
-            ]
+        if role is None:
+            items.append(v2_body(
+                "🔴 **Aucun rôle n'est réglé.**\n"
+                "-# `/configure` → 🎭 Rellseas → « Rôle attribué ». Tant qu'il "
+                "manque, donner et retirer sont impossibles."))
+        else:
+            items.append(v2_body(
+                f"**Rôle donné par ce panneau** · {role.mention}\n"
+                f"-# `{len(getattr(role, 'members', []) or [])}` membre(s) le "
+                f"portent · se change dans `/configure` → 🎭 Rellseas"))
 
-            if role is None:
-                #  Sans rôle cible, deux boutons sur trois n'ont aucun sens :
-                #  on le dit franchement plutôt que de les laisser échouer.
+        items.append(v2_divider())
+
+        if choisis:
+            apercu = " ".join(m.mention for m in choisis[:10])
+            if n > 10:
+                apercu += f" -# … et {n - 10} autre(s)"
+            items.append(v2_body(f"**Sélection** · `{n}` membre(s)\n{apercu}"))
+            if n > MAX_MEMBRES:
+                #  ⚠️ ON LE DIT. Au-delà de 25, les suivants ne sont plus dans
+                #  le menu : les décocher paraîtrait sans effet.
                 items.append(v2_body(
-                    "🔴 **Aucun rôle Rellseas n'est réglé.**\n"
-                    "-# `/configure` → 🎭 Rellseas → « Rôle attribué ». "
-                    "Tant qu'il manque, donner et retirer sont impossibles."))
-            else:
-                porteurs = len(getattr(role, "members", []) or [])
-                items.append(v2_body(
-                    f"**Rôle géré** · {role.mention}\n"
-                    f"-# `{porteurs}` membre(s) le portent actuellement."))
+                    f"-# Les `{MAX_MEMBRES}` premiers sont dans le menu "
+                    f"ci-dessous. Pour tout enlever d'un coup : 🧹."))
+        else:
+            items.append(v2_body(
+                "**Sélection** · ⚪ _aucun membre_\n"
+                "-# Ouvrez le menu ci-dessous, **ou** cliquez 🔎 et tapez "
+                "quelques lettres d'un pseudo."))
 
+        dernier = _DERNIER.get(k)
+        if dernier:
             items.append(v2_divider())
+            items.append(v2_body(dernier))
 
-            if choisis:
-                #  Qui est sélectionné, et qui a déjà le rôle : c'est ce qui
-                #  rend l'action prévisible avant le clic.
-                lignes = []
-                for m in choisis[:MAX_MEMBRES]:
-                    marque = "🟢" if (role and role in m.roles) else "⚪"
-                    lignes.append(f"{marque} {m.mention}")
-                items.append(v2_body(
-                    f"**Sélection · `{len(choisis)}` membre(s)**\n"
-                    + " ".join(lignes)
-                    + "\n-# 🟢 porte déjà le rôle · ⚪ ne l'a pas"))
-            else:
-                items.append(v2_body(
-                    "**Sélection** · ⚪ _aucun membre_\n"
-                    "-# Choisissez jusqu'à "
-                    f"`{MAX_MEMBRES}` membres ci-dessous, puis agissez."))
+        items.append(v2_divider())
 
-            if self._dernier:
-                items.append(v2_divider())
-                items.append(v2_body(self._dernier))
+        sel = UserSelect(
+            placeholder=f"Choisir des membres — {MAX_MEMBRES} par passe…",
+            min_values=0, max_values=MAX_MEMBRES,
+            custom_id="rellseas_membres",
+            #  ⚠️ SANS `default_values`, LE CUMUL EST IMPOSSIBLE. Le client
+            #  renvoie UNIQUEMENT ce qui est coché dans le menu : un menu
+            #  rouvert vide écrasait la sélection précédente. C'est la cause
+            #  exacte de « au lieu d'ajouter un par un ».
+            #  ⚠️ TRONQUÉ À 25 : au-delà, Discord refuse le message entier
+            #  (HTTP 400) et le panneau ne s'affiche plus du tout.
+            default_values=[discord.Object(id=x) for x in ids[:MAX_MEMBRES]])
+        sel.callback = self._cb_membres
+        lignes = [discord.ui.ActionRow(sel)]
 
-            sel = UserSelect(
-                placeholder=f"Choisir des membres ({MAX_MEMBRES} max)…",
-                min_values=0, max_values=MAX_MEMBRES,
-                custom_id="rellseas_membres")
-            sel.callback = self._cb_membres
+        recherche = _RECHERCHES.get(k)
+        if recherche and recherche[1]:
+            mots, trouves = recherche
+            options = []
+            for uid in trouves[:MAX_RESULTATS]:
+                m = g.get_member(uid)
+                if m is None:
+                    continue
+                deja = uid in ids
+                options.append(discord.SelectOption(
+                    label=m.display_name[:100],
+                    description=f"@{m.name}"[:100],
+                    value=str(uid),
+                    emoji="✅" if deja else None))
+            if options:
+                res = discord.ui.Select(
+                    placeholder=(f"{len(options)} trouvé(s) pour « {mots} » — "
+                                 f"cliquez pour ajouter ou retirer"),
+                    options=options, min_values=1, max_values=1,
+                    custom_id="rellseas_resultats")
+                res.callback = self._cb_resultat
+                lignes.append(discord.ui.ActionRow(res))
 
-            #  Un bouton sans effet possible est `disabled`, pas absent :
-            #  l'utilisateur doit comprendre POURQUOI il ne peut pas cliquer
-            #  (UI.md §3).
-            pret = bool(choisis) and role is not None
-            b_donner = Button(label="Donner le rôle", emoji="✅",
-                              style=discord.ButtonStyle.success,
-                              disabled=not pret, custom_id="rellseas_g_donner")
-            b_donner.callback = self._cb_donner
+        pret = bool(choisis) and role is not None
+        b_chercher = Button(label="Chercher un membre", emoji="🔎",
+                            style=discord.ButtonStyle.secondary,
+                            custom_id="rellseas_g_chercher")
+        b_chercher.callback = self._cb_chercher
+        b_donner = Button(
+            label=(f"Donner le rôle à {n}" if pret else "Donner le rôle"),
+            emoji="✅", style=discord.ButtonStyle.success,
+            disabled=not pret, custom_id="rellseas_g_donner")
+        b_donner.callback = self._cb_donner
+        b_retirer = Button(
+            label=(f"Retirer le rôle à {n}" if pret else "Retirer le rôle"),
+            emoji="🚫", style=discord.ButtonStyle.danger,
+            disabled=not pret, custom_id="rellseas_g_retirer")
+        b_retirer.callback = self._cb_retirer
+        b_activite = Button(
+            label=(f"Activité 7 j de {n}" if choisis else "Activité 7 jours"),
+            emoji="📊", style=discord.ButtonStyle.primary,
+            disabled=not choisis, custom_id="rellseas_g_activite")
+        b_activite.callback = self._cb_activite
+        b_vider = Button(label="Tout désélectionner", emoji="🧹",
+                         style=discord.ButtonStyle.secondary,
+                         disabled=not choisis, custom_id="rellseas_g_vider")
+        b_vider.callback = self._cb_vider
+        lignes.append(discord.ui.ActionRow(
+            b_chercher, b_donner, b_retirer, b_activite, b_vider))
 
-            b_retirer = Button(label="Retirer le rôle", emoji="🚫",
-                               style=discord.ButtonStyle.danger,
-                               disabled=not pret, custom_id="rellseas_g_retirer")
-            b_retirer.callback = self._cb_retirer
+        items += lignes
+        self.clear_items()
+        self.add_item(v2_container(*items, color=Palette.INFO))
 
-            b_activite = Button(label="Vérifier l'activité", emoji="📊",
-                                style=discord.ButtonStyle.primary,
-                                disabled=not choisis,
-                                custom_id="rellseas_g_activite")
-            b_activite.callback = self._cb_activite
-
-            b_vider = Button(label="Vider la sélection", emoji="🧹",
-                             style=discord.ButtonStyle.secondary,
-                             disabled=not choisis, custom_id="rellseas_g_vider")
-            b_vider.callback = self._cb_vider
-
-            items += [
-                v2_divider(),
-                discord.ui.ActionRow(sel),
-                discord.ui.ActionRow(b_donner, b_retirer, b_activite, b_vider),
-            ]
-
-            self.clear_items()
-            self.add_item(v2_container(*items, color=Palette.INFO))
-
-            if edit:
-                if i.response.is_done():
-                    await i.edit_original_response(content=None, view=self,
-                                                   embed=None, attachments=[])
-                else:
-                    await i.response.edit_message(content=None, view=self,
-                                                  embed=None, attachments=[])
-            else:
-                await i.response.send_message(view=self, ephemeral=True)
-        except Exception as ex:
-            _log(f"[RellseasGestionV2] {ex}")
-            try:
-                msg = f"❌ Erreur : `{type(ex).__name__}`"
-                if not i.response.is_done():
-                    await i.response.send_message(msg, ephemeral=True)
-                else:
-                    await i.followup.send(msg, ephemeral=True)
-            except Exception:
-                pass
+        if not edit:
+            return await i.response.send_message(view=self, ephemeral=True)
+        if i.response.is_done():
+            await i.edit_original_response(content=None, view=self,
+                                           embed=None, attachments=[])
+        else:
+            await i.response.edit_message(content=None, view=self,
+                                          embed=None, attachments=[])
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Callbacks
+    #
+    #  ⚠️ AUCUN `except` MUET ICI. L'ancienne version enveloppait chaque
+    #  callback dans un `try/except` qui se contentait de journaliser : elle
+    #  court-circuitait le filet `on_error` d'ui_v2, qui répond « ⚠️ Un souci
+    #  est survenu », et transformait chaque incident en bouton muet de plus.
     # ─────────────────────────────────────────────────────────────────────────
 
     async def _cb_membres(self, i):
-        try:
-            self._membres = [int(v) for v in (i.data.get("values") or [])]
-            self._dernier = ""
-            await self.render_to(i, edit=True)
-        except Exception as ex:
-            _log(f"[rellseas gestion membres] {ex}")
+        """⚠️ ON FUSIONNE, ON N'ÉCRASE PAS. Le client ne renvoie que ce qui est
+        coché dans le menu ; les membres au-delà des 25 affichés n'y sont pas
+        et seraient perdus à chaque passe."""
+        choisis = [int(v) for v in (i.data.get("values") or [])]
+        hors_menu = _sel(i)[MAX_MEMBRES:]
+        _poser(i, choisis + [x for x in hors_menu if x not in choisis])
+        _DERNIER.pop(_cle(i), None)
+        await RellseasGestionV2().render_to(i, edit=True)
+
+    async def _cb_resultat(self, i):
+        """Un résultat de recherche : on l'ajoute, ou on l'enlève s'il y est."""
+        uid = int((i.data.get("values") or ["0"])[0])
+        ids = list(_sel(i))
+        if uid in ids:
+            ids.remove(uid)
+        else:
+            ids.append(uid)
+        _poser(i, ids)
+        _DERNIER.pop(_cle(i), None)
+        await RellseasGestionV2().render_to(i, edit=True)
+
+    async def _cb_chercher(self, i):
+        await i.response.send_modal(_ChercheModal())
 
     async def _cb_vider(self, i):
-        try:
-            self._membres = []
-            self._dernier = ""
-            await self.render_to(i, edit=True)
-        except Exception as ex:
-            _log(f"[rellseas gestion vider] {ex}")
+        _SELECTIONS.pop(_cle(i), None)
+        _RECHERCHES.pop(_cle(i), None)
+        _DERNIER.pop(_cle(i), None)
+        await RellseasGestionV2().render_to(i, edit=True)
 
-    async def _role_utilisable(self, c: dict):
+    async def _role_utilisable(self, g, c: dict):
         """Le rôle cible, et si le bot peut réellement le manipuler.
 
         Rendre `(role, raison)` : `raison` non vide = on ne tente RIEN. Vérifier
         AVANT le lot évite 25 refus identiques et un compte-rendu illisible.
         """
-        role = self.g.get_role(int(c.get(CLE_ROLE_CIBLE, 0) or 0))
+        role = g.get_role(int(c.get(CLE_ROLE_CIBLE, 0) or 0))
         if role is None:
             return None, ("Aucun rôle Rellseas réglé — `/configure` → "
                           "🎭 Rellseas.")
-        moi = self.g.me
+        moi = g.me
         if moi is None:
             return role, "Je ne me vois pas sur ce serveur."
         if not moi.guild_permissions.manage_roles:
@@ -485,20 +671,16 @@ class RellseasGestionV2(LayoutView):
     async def _agir(self, i, donner: bool):
         """Le lot. Une seule mécanique pour donner et pour retirer."""
         await i.response.defer()
-        try:
-            c = await _cfg(self.g.id)
-        except Exception as ex:
-            _log(f"[rellseas agir cfg] {ex}")
-            c = {}
-
-        role, raison = await self._role_utilisable(c)
+        g, u, k = i.guild, i.user, _cle(i)
+        c = await _cfg(g.id)
+        role, raison = await self._role_utilisable(g, c)
         if raison:
-            self._dernier = f"🔴 **Rien n'a été fait.** {raison}"
-            return await self.render_to(i, edit=True)
+            _DERNIER[k] = f"🔴 **Rien n'a été fait.** {raison}"
+            return await RellseasGestionV2().render_to(i, edit=True)
 
         faits, echecs = [], []
-        for uid in self._membres:
-            m = self.g.get_member(uid)
+        for uid in _SELECTIONS.get(k, []):
+            m = g.get_member(uid)
             if m is None:
                 echecs.append(f"`{uid}` — membre introuvable (parti ?)")
                 continue
@@ -511,7 +693,7 @@ class RellseasGestionV2(LayoutView):
                 continue
             try:
                 geste = m.add_roles if donner else m.remove_roles
-                await geste(role, reason=f"/rellseas par {self.u} ({self.u.id})")
+                await geste(role, reason=f"/rellseas par {u} ({u.id})")
             except discord.Forbidden:
                 echecs.append(f"{m.mention} — refusé par Discord (hiérarchie)")
                 continue
@@ -525,31 +707,24 @@ class RellseasGestionV2(LayoutView):
                 #  `last_activity` reste vide et le membre paraît inactif
                 #  dès le lendemain.
                 try:
-                    await _marquer_suivi(self.g.id, m.id)
+                    await _marquer_suivi(g.id, m.id)
                 except Exception as ex:
                     _log(f"[rellseas suivi {uid}] {ex}")
 
         verbe = "donné" if donner else "retiré"
-        self._dernier = _bilan(f"**Rôle {verbe}** · {role.mention}", faits, echecs)
+        _DERNIER[k] = _bilan(f"**Rôle {verbe}** · {role.mention}", faits, echecs)
         await self._journal(
-            f"🎭 **Rôle {verbe}** · `{len(faits)}` membre(s) "
-            f"par {self.u.mention}"
-            + (f" — {' '.join(faits)}" if faits else ""))
+            g, f"🎭 **Rôle {verbe}** · `{len(faits)}` membre(s) "
+               f"par {u.mention}" + (f" — {' '.join(faits)}" if faits else ""))
         #  La sélection est conservée : enchaîner « donner » puis « vérifier »
         #  sur le même lot est le geste courant.
-        await self.render_to(i, edit=True)
+        await RellseasGestionV2().render_to(i, edit=True)
 
     async def _cb_donner(self, i):
-        try:
-            await self._agir(i, donner=True)
-        except Exception as ex:
-            _log(f"[rellseas donner] {ex}")
+        await self._agir(i, donner=True)
 
     async def _cb_retirer(self, i):
-        try:
-            await self._agir(i, donner=False)
-        except Exception as ex:
-            _log(f"[rellseas retirer] {ex}")
+        await self._agir(i, donner=False)
 
     async def _cb_activite(self, i):
         """L'activité de tout le lot, mesurée par le système d'activité.
@@ -558,41 +733,40 @@ class RellseasGestionV2(LayoutView):
         fenêtre d'une semaine. Un second compteur avait déjà été écrit puis
         retiré le 12/08 : il faisait doublon et mentait.
         """
-        try:
-            await i.response.defer()
-            if _mesurer is None:
-                self._dernier = "🔴 La mesure d'activité n'est pas branchée."
-                return await self.render_to(i, edit=True)
+        await i.response.defer()
+        g, k = i.guild, _cle(i)
+        if _mesurer is None:
+            _DERNIER[k] = "🔴 La mesure d'activité n'est pas branchée."
+            return await RellseasGestionV2().render_to(i, edit=True)
 
-            lignes = []
-            for uid in self._membres:
-                m = self.g.get_member(uid)
-                if m is None:
-                    lignes.append(f"❔ `{uid}` — membre introuvable")
-                    continue
-                try:
-                    mes = await _mesurer(self.g.id, m)
-                except Exception as ex:
-                    _log(f"[rellseas activite {uid}] {ex}")
-                    lignes.append(f"❔ {m.mention} — mesure impossible")
-                    continue
-                lignes.append(f"{_etiquette_activite(mes)} {m.mention}")
+        lignes = []
+        for uid in _SELECTIONS.get(k, []):
+            m = g.get_member(uid)
+            if m is None:
+                lignes.append(f"❔ `{uid}` — membre introuvable")
+                continue
+            try:
+                mes = await _mesurer(g.id, m)
+            except Exception as ex:
+                _log(f"[rellseas activite {uid}] {ex}")
+                lignes.append(f"❔ {m.mention} — mesure impossible")
+                continue
+            lignes.append(f"{_etiquette_activite(mes)} {m.mention}")
 
-            self._dernier = (
-                "**Activité sur les 7 derniers jours**\n" + "\n".join(lignes)
-                + "\n-# 🟢 actif · 🟠 peu présent · 🔴 absent · ⚪ pas assez de "
-                  "recul pour juger\n"
-                  "-# Mesuré par le système d'activité du serveur — aucun "
-                  "compteur séparé.")
-            await self.render_to(i, edit=True)
-        except Exception as ex:
-            _log(f"[rellseas activite] {ex}")
+        _DERNIER[k] = (
+            "**Activité sur les 7 derniers jours** · lecture seule, personne "
+            "n'est prévenu\n" + "\n".join(lignes)
+            + "\n-# 🟢 actif · 🟠 peu présent · 🔴 absent · ⚪ pas assez de "
+              "recul pour juger\n"
+              "-# Mesuré par le système d'activité du serveur — aucun "
+              "compteur séparé.")
+        await RellseasGestionV2().render_to(i, edit=True)
 
-    async def _journal(self, texte: str) -> None:
+    async def _journal(self, g, texte: str) -> None:
         """Trace nominative. Fail-open : jamais bloquant."""
         try:
-            c = await _cfg(self.g.id)
-            salon = self.g.get_channel(int(c.get(CLE_SALON_LOG, 0) or 0))
+            c = await _cfg(g.id)
+            salon = g.get_channel(int(c.get(CLE_SALON_LOG, 0) or 0))
             if salon is not None:
                 await salon.send(texte)
         except Exception as ex:

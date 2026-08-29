@@ -21716,7 +21716,11 @@ async def _activite_boot():
 
     rellseas_ui.setup(cfg=cfg, db_set=db_set, get_db=get_db,
                       mesurer=_rellseas_mesurer,
-                      marquer_suivi=_rellseas_marquer_suivi, log=print)
+                      marquer_suivi=_rellseas_marquer_suivi,
+                      #  ⚠️ La garde passe par le setup, plus par le
+                      #  constructeur : le panneau est PERSISTANT, il est
+                      #  construit au démarrage sans savoir qui l'ouvrira.
+                      autorise=_rellseas_autorise, log=print)
     rellseas_ui.set_retour(_retour_vers_configure)
     await roblox_module.init_db()
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
@@ -21809,6 +21813,20 @@ async def on_ready():
         bot.add_dynamic_items(RobloxPingButton)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items RobloxPingButton] {ex}")
+    #  ⚠️ SANS CETTE LIGNE, /rellseas RÉPOND « ÉCHEC DE L'INTERACTION ».
+    #  Le panneau était une vue éphémère non enregistrée : après un
+    #  redéploiement — plusieurs par jour ici — ou dix minutes d'inactivité,
+    #  `ViewStore.dispatch_view` ne trouvait plus l'item et faisait `return`
+    #  SANS accuser réception. Discord affichait l'échec, aucun journal ne
+    #  disait rien. Constaté par le propriétaire le 23/08, capture à l'appui.
+    #  ⚠️ `timeout=None` NE SUFFIT PAS : discord.py impose 15 minutes à toute
+    #  vue ÉPHÉMÈRE (`interactions.py` : `if ephemeral and view.timeout is
+    #  None: view.timeout = 15 * 60.0`). Seul ce `add_view`, qui range la vue
+    #  dans le créneau `message_id=None` jamais purgé, la rend immortelle.
+    try:
+        bot.add_view(rellseas_ui.RellseasGestionV2.squelette())
+    except Exception as ex:
+        print(f"[on_ready add_view RellseasGestionV2] {ex}")
     # (Confessions retirées : plus de vue persistante à réenregistrer.)
     # (Hub d'engagement retiré : /hub et ses commandes sont supprimés, cette vue
     #  persistante était le dernier fil qui le maintenait vivant au boot.)
@@ -30227,7 +30245,9 @@ async def rellseas_cmd(i: discord.Interaction):
             "rôles** peuvent y être autorisés.", ephemeral=True)
     #  Éphémère : chacun ouvre le sien, donc plusieurs membres du staff peuvent
     #  s'en servir en même temps sans se marcher dessus.
-    vue = rellseas_ui.RellseasGestionV2(i.user, i.guild, autorise=_rellseas_autorise)
+    #  Plus d'identité dans le constructeur : la vue est partagée et
+    #  persistante. Serveur et utilisateur se lisent dans l'interaction.
+    vue = rellseas_ui.RellseasGestionV2()
     await vue.render_to(i, edit=False)
 
 
