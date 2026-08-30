@@ -479,6 +479,40 @@ async def init_db():
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_roblox_transitions_attente"
             " ON roblox_transitions(guild_id, envoye_le, detecte_le)")
+        #  ⚠️ LA SÉRIE TEMPORELLE — la seule chose qui rendra un jour une
+        #  prédiction POSSIBLE, et elle n'existait pas.
+        #
+        #  Mesuré le 30/08 : sept points d'API testés ne donnent AUCUNE date de
+        #  passage en Limited. Il n'existe donc aucune vérité terrain, donc
+        #  rien à calibrer, donc aucune probabilité honnête — et on refuse d'en
+        #  fabriquer une (voir `tests/test_veille_transitions.py`).
+        #  MAIS la spécification a raison sur un point : « le système doit
+        #  construire ses propres séries temporelles à partir de snapshots ».
+        #  Tant que personne ne les enregistre, l'attente est infinie. Cette
+        #  table est le seul moyen que « dans six mois » devienne un jour.
+        #
+        #  ⚠️ CADENCE : UNE MESURE PAR ARTICLE ET PAR JOUR, pas une par passage.
+        #  48 passages par jour × 964 articles = 46 000 lignes quotidiennes,
+        #  ingérable sur SQLite au bout de quelques mois. Une mesure par jour
+        #  suffit très largement à « croissance des favoris sur 1, 7 et 30
+        #  jours ». On écrit AUSSI hors cadence quand un champ STRUCTUREL
+        #  bouge (prix, mise hors vente, passage collectionnable) : ce sont
+        #  précisément les instants qu'un modèle devra pouvoir dater.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS roblox_mesures("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " asset_id INTEGER NOT NULL,"
+            " mesure_le TEXT NOT NULL,"
+            " prix INTEGER,"
+            " favoris INTEGER,"
+            " hors_vente INTEGER NOT NULL DEFAULT 0,"
+            " collectionnable INTEGER NOT NULL DEFAULT 0,"
+            " classe TEXT,"
+            " quantite INTEGER)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_roblox_mesures_article"
+            " ON roblox_mesures(asset_id, mesure_le)")
         #  Où reprendre la pagination d'un relevé au passage suivant. Une seule
         #  ligne par source. Voir `relever_collectionnables`.
         await db.execute(
@@ -1183,6 +1217,83 @@ async def _details_fr(sess, articles: list[dict]) -> dict:
     return {}
 
 
+async def fiche_par_id(asset_id: int, item_type: str = "Asset") -> dict | None:
+    """L'état ACTUEL d'un article, redemandé à Roblox. `None` si introuvable.
+
+    ⚠️ POURQUOI ON REDEMANDE PLUTÔT QUE DE LIRE LA BASE. La spécification est
+    explicite : « /item doit forcer une actualisation raisonnable de l'article
+    avant de répondre ». Servir la ligne en base ferait afficher l'état du
+    dernier relevé — jusqu'à trente minutes de retard, et bien plus si
+    l'article est sorti du catalogue général. Sur une commande qu'on tape
+    précisément pour VÉRIFIER quelque chose, ce serait le pire moment pour
+    répondre de mémoire.
+
+    ⚠️ Le point de détails par lot est le SEUL qui rende un article quel que
+    soit son âge — la recherche, elle, ne voit que ce qui est dans ses pages.
+    """
+    global _jeton_xsrf
+    try:
+        aid = int(asset_id)
+    except (TypeError, ValueError):
+        return None
+    if aid <= 0:
+        return None
+    genre = "Bundle" if str(item_type or "").lower() == "bundle" else "Asset"
+    corps = {"items": [{"itemType": genre, "id": aid}]}
+    try:
+        async with _ouvrir() as sess:
+            for tentative in (1, 2):
+                entetes = {"Accept-Language": LANGUE_FR}
+                if _jeton_xsrf:
+                    entetes["X-CSRF-TOKEN"] = _jeton_xsrf
+                async with sess.post(API_DETAILS, json=corps,
+                                     headers=entetes) as r:
+                    if r.status == 403 and tentative == 1:
+                        _jeton_xsrf = r.headers.get("x-csrf-token") or _jeton_xsrf
+                        continue
+                    if r.status != 200:
+                        _log(f"[roblox_veille fiche_par_id] HTTP {r.status} "
+                             f"pour {aid}")
+                        return None
+                    data = await r.json()
+                bruts = data.get("data") or []
+                if not bruts:
+                    return None
+                lot = _normaliser(bruts)
+                return lot[0] if lot else None
+    except Exception as ex:
+        _log(f"[roblox_veille fiche_par_id] {type(ex).__name__}: {ex}")
+    return None
+
+
+async def derniers_evenements(guild_id: int, flux: str,
+                              limite: int = 10) -> list[dict]:
+    """Les dernières fiches SORTIES de ce flux, la plus récente d'abord.
+
+    Lit la file d'envoi : c'est la seule table qui garde ce qui a réellement
+    été annoncé, avec sa date et son identifiant de message.
+    """
+    out = []
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT charge, envoye_le, message_id, de, vers"
+                " FROM roblox_transitions WHERE guild_id=? AND flux=?"
+                " AND envoye_le IS NOT NULL"
+                " ORDER BY envoye_le DESC LIMIT ?",
+                (int(guild_id), str(flux), int(limite))) as cur:
+                for r in await cur.fetchall():
+                    try:
+                        out.append({"article": json.loads(r[0]),
+                                    "envoye_le": r[1], "message_id": r[2],
+                                    "de": r[3], "vers": r[4]})
+                    except Exception:
+                        continue
+    except Exception as ex:
+        _log(f"[roblox_veille derniers_evenements] {ex}")
+    return out
+
+
 async def traduire(articles: list[dict]) -> None:
     """Pose le nom et la description FRANÇAIS OFFICIELS de Roblox. Sur place.
 
@@ -1721,7 +1832,141 @@ async def comparer_et_enregistrer(articles: list[dict]) -> dict:
             await db.commit()
     except Exception as ex:
         _log(f"[roblox_veille comparer] {ex}")
+    #  ⚠️ HORS DU `try` PRÉCÉDENT, ET APRÈS SON `commit`. Une panne
+    #  d'enregistrement de la série temporelle ne doit JAMAIS faire perdre une
+    #  détection : la série est un bonus pour plus tard, la détection est le
+    #  produit. `enregistrer_mesures` avale d'ailleurs ses propres erreurs.
+    await enregistrer_mesures(articles)
     return res
+
+
+#  Une mesure par article et par jour suffit — voir le commentaire de la table.
+HEURES_ENTRE_MESURES = 24.0
+
+
+async def enregistrer_mesures(articles: list[dict]) -> int:
+    """Alimente la série temporelle. Rend le nombre de mesures écrites.
+
+    Écrit si, et seulement si : plus de `HEURES_ENTRE_MESURES` depuis la
+    dernière mesure de cet article, OU un champ STRUCTUREL a bougé depuis
+    elle (prix, mise hors vente, passage collectionnable, classe). Les favoris
+    seuls ne déclenchent pas — ils bougent en permanence et feraient écrire à
+    chaque passage.
+    """
+    if not articles:
+        return 0
+    ecrites = 0
+    try:
+        async with _get_db() as db:
+            #  UNE requête pour tout le lot : 964 requêtes individuelles
+            #  coûteraient plus cher que la détection elle-même.
+            derniers: dict[int, tuple] = {}
+            async with db.execute(
+                "SELECT m.asset_id, m.mesure_le, m.prix, m.hors_vente,"
+                " m.collectionnable, m.classe FROM roblox_mesures m"
+                " JOIN (SELECT asset_id, MAX(id) AS mid FROM roblox_mesures"
+                "       GROUP BY asset_id) d ON d.mid = m.id") as cur:
+                for r in await cur.fetchall():
+                    derniers[int(r[0])] = tuple(r[1:])
+            maintenant = datetime.now(timezone.utc).isoformat()
+            for a in articles:
+                try:
+                    aid = int(a["asset_id"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                prec = derniers.get(aid)
+                if prec is not None:
+                    h = _heures_depuis(prec[0])
+                    structure = (a.get("prix"), int(a.get("hors_vente") or 0),
+                                 int(a.get("collectionnable") or 0),
+                                 a.get("classe") or "")
+                    inchange = structure == (prec[1], int(prec[2] or 0),
+                                             int(prec[3] or 0), prec[4] or "")
+                    if inchange and h is not None and h < HEURES_ENTRE_MESURES:
+                        continue
+                await db.execute(
+                    "INSERT INTO roblox_mesures(asset_id, mesure_le, prix,"
+                    " favoris, hors_vente, collectionnable, classe, quantite)"
+                    " VALUES(?,?,?,?,?,?,?,?)",
+                    (aid, maintenant, a.get("prix"), a.get("favoris"),
+                     int(a.get("hors_vente") or 0),
+                     int(a.get("collectionnable") or 0),
+                     a.get("classe") or "", a.get("quantite")))
+                ecrites += 1
+            await db.commit()
+    except Exception as ex:
+        _log(f"[roblox_veille enregistrer_mesures] {ex}")
+    return ecrites
+
+
+async def croissance_favoris(asset_id: int, jours: int) -> int | None:
+    """Favoris gagnés sur `jours`, ou None si la série ne remonte pas si loin.
+
+    ⚠️ REND `None` PLUTÔT QU'UN ZÉRO. « Pas de croissance » et « je ne sais
+    pas encore » sont deux choses différentes, et les confondre serait le
+    premier pas vers un chiffre fabriqué.
+    """
+    try:
+        borne = (datetime.now(timezone.utc) - timedelta(days=int(jours))).isoformat()
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT favoris FROM roblox_mesures WHERE asset_id=?"
+                " AND mesure_le <= ? ORDER BY mesure_le DESC LIMIT 1",
+                (int(asset_id), borne)) as cur:
+                avant = await cur.fetchone()
+            if not avant or avant[0] is None:
+                return None
+            async with db.execute(
+                "SELECT favoris FROM roblox_mesures WHERE asset_id=?"
+                " ORDER BY mesure_le DESC LIMIT 1", (int(asset_id),)) as cur:
+                apres = await cur.fetchone()
+        if not apres or apres[0] is None:
+            return None
+        return int(apres[0]) - int(avant[0])
+    except Exception as ex:
+        _log(f"[roblox_veille croissance_favoris] {ex}")
+        return None
+
+
+async def etat_serie() -> dict:
+    """De quoi la série dispose. Sert à `/roblox modele` — et à dire NON.
+
+    ⚠️ C'EST CE DICTIONNAIRE QUI JUSTIFIE LE REFUS DE PRÉDIRE. Tant que
+    `transitions_observees` reste sous le seuil, aucun modèle ne peut être
+    calibré, et l'afficher noir sur blanc vaut mieux qu'un « bientôt ».
+    """
+    out = {"mesures": 0, "articles": 0, "depuis": None,
+           "transitions_observees": 0}
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT asset_id), MIN(mesure_le)"
+                " FROM roblox_mesures") as cur:
+                r = await cur.fetchone()
+            if r:
+                out["mesures"] = int(r[0] or 0)
+                out["articles"] = int(r[1] or 0)
+                out["depuis"] = r[2]
+            #  Une transition OBSERVÉE — c'est-à-dire vue passer entre deux
+            #  relevés, la seule qui vaille comme exemple d'entraînement.
+            async with db.execute(
+                "SELECT COUNT(*) FROM roblox_transitions WHERE de='normal'"
+            ) as cur:
+                r = await cur.fetchone()
+            out["transitions_observees"] = int(r[0] or 0) if r else 0
+    except Exception as ex:
+        _log(f"[roblox_veille etat_serie] {ex}")
+    return out
+
+
+#  ⚠️ LE SEUIL EN DESSOUS DUQUEL ON REFUSE DE PRÉDIRE, ET IL EST ASSUMÉ.
+#  Un modèle de classification déséquilibrée n'a rien à dire avec moins de
+#  quelques dizaines de cas positifs : en dessous, la « probabilité » ne
+#  mesurerait que le bruit de l'échantillon. Roblox a fait 36 bascules sur
+#  toute l'année 2025 — atteindre ce seuil prendra des mois, et c'est
+#  exactement l'information que le propriétaire doit avoir plutôt qu'un
+#  pourcentage inventé.
+MIN_TRANSITIONS_POUR_MODELE = 30
 
 
 #  ⚠️ LA SÉPARATION DES FLUX — demande du propriétaire le 16/08 :
@@ -2131,6 +2376,13 @@ async def purger(garder: int = MAX_ARTICLES_SUIVIS) -> int:
                 "DELETE FROM roblox_transitions WHERE envoye_le IS NULL"
                 " AND essais >= ? AND detecte_le < ?",
                 (MAX_ESSAIS_ENVOI, _vieux))
+            #  La série temporelle : on garde plus longtemps que le reste,
+            #  parce que c'est justement son ancienneté qui fait sa valeur —
+            #  mais pas indéfiniment. 400 jours couvrent l'horizon de 90 jours
+            #  demandé, avec la marge d'un cycle annuel complet.
+            await db.execute(
+                "DELETE FROM roblox_mesures WHERE mesure_le < ?",
+                ((datetime.now(timezone.utc) - timedelta(days=400)).isoformat(),))
             await db.commit()
         return 1
     except Exception as ex:

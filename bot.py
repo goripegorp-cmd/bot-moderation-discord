@@ -199,6 +199,7 @@ import roblox_veille as roblox_module
 import roblox_news as roblox_news_module
 import roblox_pings as roblox_pings_module
 import roblox_panneau as roblox_ui
+import roblox_commandes as roblox_cmds
 import rellseas_panneau as rellseas_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
 import delegations as delegations2026
@@ -12269,6 +12270,33 @@ async def restore_active_comebacks():
         print(f"[restore_active_comebacks] {ex}")
 
 
+
+
+async def _roblox_cmds_autorise(i) -> bool:
+    """Qui a le droit d'interroger la veille Roblox.
+
+    ⚠️ FAIL-CLOSED, ET LA GARDE EST DANS LA COMMANDE. Ces réponses exposent la
+    configuration du serveur (salons réglés, interrupteurs, état de la base) :
+    ce n'est pas de l'information publique. Masquer une commande n'empêche
+    personne de la taper — c'est la règle posée pour `/rellseas`, elle vaut ici.
+    """
+    if i.guild is None:
+        return False
+    try:
+        p = i.user.guild_permissions
+        return bool(p.administrator or p.manage_guild
+                    or i.user.id == i.guild.owner_id)
+    except Exception as ex:
+        print(f"[_roblox_cmds_autorise] {ex}")
+        return False
+
+
+roblox_cmds.setup(autorise=_roblox_cmds_autorise, log=print)
+#  ⚠️ AU NIVEAU MODULE, comme les autres commandes. Ajouter le groupe depuis
+#  `on_ready` le ferait arriver APRÈS `tree.sync()` selon l'ordre de démarrage :
+#  la commande existerait dans le code et pas chez Discord — le pire des deux
+#  mondes, parce que rien ne le signalerait.
+bot.tree.add_command(roblox_cmds.groupe)
 
 
 @bot.tree.command(name="help", description="❓ Voir ce que le bot sait faire")
