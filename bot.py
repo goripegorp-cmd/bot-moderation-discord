@@ -350,6 +350,7 @@ View.on_error = _global_view_on_error
 Modal.on_error = _global_modal_on_error
 import aiosqlite, os, re, json, asyncio, unicodedata, io, time, aiohttp, hashlib, secrets
 from datetime import datetime, timedelta, timezone
+from datetime import time as _dtime
 from dotenv import load_dotenv
 import xml.etree.ElementTree as ET
 import matplotlib
@@ -12823,9 +12824,32 @@ async def _restore_event_masks(guild, event_id):
 #  moment, un passage sauté ne fait pas perdre une journée entière. Le passage
 #  est idempotent — les paliers sont calculés depuis les dates, pas incrémentés —
 #  donc le repasser dans la même journée ne double rien.
-# ═══════════════════════════════════════════════════════════════════════════════
+#
+#  ⚠️ ANCRÉ SUR L'HORLOGE, PLUS SUR LE DÉMARRAGE — corrigé le 30/08/2026.
+#  `@tasks.loop(hours=6)` compte à partir du lancement du bot : sur Railway, où
+#  un redéploiement peut tomber n'importe quand, les quatre passages du jour
+#  glissaient à 03 h 17, 09 h 17… Le rappel hebdomadaire, lui, ne part que le
+#  dimanche — il partait donc « un moment le dimanche », jusqu'à six heures
+#  après minuit. Le propriétaire, mot pour mot : « à partir du dimanche pile à
+#  00h00. Dès qu'il est dimanche 00h00 pile, tu détectes, en horaires
+#  français ». Des heures FIXES en Europe/Paris répondent exactement à ça, sans
+#  augmenter le nombre de passages : toujours quatre par jour.
+#  ⚠️ 00 h 02 et non 00 h 00 : à minuit pile, `cal.jour()` et le changement de
+#  semaine ISO se jouent à la seconde près. Deux minutes de marge évitent de
+#  classer un dimanche naissant comme un samedi finissant.
+#  ⚠️ REPLI SI `zoneinfo` MANQUE : on retombe sur l'ancien rythme relatif
+#  plutôt que de laisser la boucle non décorée — une boucle sans décorateur ne
+#  tourne JAMAIS, et c'est le piège n°1 de ce dépôt.
+if ZoneInfo is not None:
+    _HEURES_PASSAGE_ACTIVITE = [
+        _dtime(hour=h, minute=2, tzinfo=ZoneInfo("Europe/Paris"))
+        for h in (0, 6, 12, 18)]
+else:
+    _HEURES_PASSAGE_ACTIVITE = None
 
-@tasks.loop(hours=6)
+
+@tasks.loop(**({"time": _HEURES_PASSAGE_ACTIVITE}
+               if _HEURES_PASSAGE_ACTIVITE else {"hours": 6}))
 async def activite_passage_task():
     """Applique les paliers d'activité sur chaque serveur. FAIL-SAFE par guilde."""
     for g in list(bot.guilds):

@@ -283,6 +283,7 @@ async def envoyer_rappels(guild, cfg_act: dict, cl: dict, *,
     semaine_courante = cal.semaine(maintenant)
     envoyes = 0
     detail_rappels = []
+    _mention_muette = False
 
     #  ⚠️ LES DEUX VERROUS ANTI-DOUBLE-PING. Voir l'en-tête du correctif :
     #  l'étiquette est globale, la boucle et son marqueur sont par groupe.
@@ -330,10 +331,23 @@ async def envoyer_rappels(guild, cfg_act: dict, cl: dict, *,
         #  membres-là sont venus, on ne leur a rien posé, et les mentionner par
         #  un rôle qu'ils ne portent pas ne toucherait personne. Ils sont donc
         #  listés — ils sont peu nombreux par construction.
-        _r0 = guild.get_role(int(cfg_act.get("activite_role_doux", 0) or 0))
-        _r1 = guild.get_role(int(cfg_act.get("activite_role_niveau1", 0) or 0))
-        _r2 = guild.get_role(int(cfg_act.get("activite_role_niveau2", 0) or 0))
-        _r3 = guild.get_role(int(cfg_act.get("activite_role_abandon", 0) or 0))
+        #  ⚠️ ON CRÉE LE RÔLE MANQUANT ICI, AU LIEU D'ATTENDRE UN CLIC.
+        #  Constaté sur capture du propriétaire le 30/08 : la carte « Presque »
+        #  affichait « 39 membre(s) concerné(s) » SANS mentionner personne,
+        #  pendant que « Absents » mentionnait bien son rôle. La cause n'était
+        #  pas le rendu mais l'absence du rôle : `_muet` vaut vrai dès que le
+        #  rôle est `None`, et la carte retombe alors sur le compte seul.
+        #  `creer_role` n'était appelé QUE depuis un bouton du panneau — un
+        #  serveur où personne ne clique n'a donc jamais ses étiquettes, et le
+        #  système paraît cassé alors qu'il attend un geste que rien ne
+        #  réclame. Sa demande est sans ambiguïté : « assure-toi que tout le
+        #  monde ait bien un rôle ».
+        _r0, _r1, _r2, _r3 = [
+            await _role_ou_creer(guild, cfg_act, cle, niveau)
+            for cle, niveau in (("activite_role_doux", 0),
+                                ("activite_role_niveau1", 1),
+                                ("activite_role_niveau2", 2),
+                                ("activite_role_abandon", 3))]
         #  ⚠️ LE PALIER DOUX A DÉSORMAIS SON RÔLE — corrigé le 20/08/2026.
         #  Il était câblé à `None`, avec ce commentaire : « le palier doux n'en
         #  a AUCUN […] ils sont peu nombreux par construction ». L'hypothèse
@@ -345,6 +359,28 @@ async def envoyer_rappels(guild, cfg_act: dict, cl: dict, *,
         #  ⚠️ UN RÔLE N'EST MENTIONNÉ QU'UNE FOIS PAR SEMAINE ET PAR SERVEUR,
         #  quel que soit le nombre de rôles surveillés et quel que soit le
         #  déclencheur. Au deuxième groupe, le même rôle repasse en MUET.
+        #  ⚠️ « EST-CE QUE ÇA MENTIONNE VRAIMENT LES GENS ? » — la question du
+        #  propriétaire, le 30/08, et la réponse n'est pas dans le message.
+        #  Ces rôles sont créés `mentionable=False` À DESSEIN : personne d'autre
+        #  que le bot ne doit pouvoir réveiller des centaines de gens. Mais
+        #  alors `allowed_mentions(roles=True)` NE SUFFIT PAS — il faut que le
+        #  bot porte « Mentionner @everyone, @here et tous les rôles ». Sans
+        #  elle, la mention S'AFFICHE exactement pareil et NE NOTIFIE PERSONNE.
+        #  Un rappel que personne ne reçoit, et rien à l'écran ne le disait.
+        if not await peut_mentionner_un_role(guild):
+            _log(f"[activite rappel] ⚠️ {guild.name} : il manque au bot la "
+                 f"permission « Mentionner tous les rôles ». Les cartes vont "
+                 f"AFFICHER la mention du rôle mais NE NOTIFIERONT PERSONNE. "
+                 f"C'est la seule chose qui empêche le rappel d'atteindre les "
+                 f"absents.")
+            #  ⚠️ ET ON LE REMONTE AU STAFF, pas seulement dans les journaux.
+            #  Une permission manquante qui ne se voit que dans Railway
+            #  n'est jamais vue : le rappel a l'air parfait à l'écran.
+            _mention_muette = True
+            detail_rappels.append(
+                "⚠️ mention MUETTE — il manque au bot « Mentionner tous les "
+                "rôles » : les cartes s'affichent mais ne notifient personne")
+
         vues = []
         for p in ("doux", "rappel", "retrait", "expulsion"):
             _r = _roles.get(p)
@@ -408,6 +444,7 @@ async def envoyer_rappels(guild, cfg_act: dict, cl: dict, *,
             _log(f"[activite marque semaine guilde] {ex}")
 
     return {"envoyes": envoyes, "detail": detail_rappels,
+            "mention_muette": _mention_muette,
             "semaine": semaine_courante, "pingues": len(_pingues)}
 
 
@@ -632,4 +669,85 @@ async def nettoyer_message_afk(message) -> bool:
                 await accuse.delete()
             except Exception:
                 pass
+        return False
+
+
+async def _role_ou_creer(guild, cfg_act: dict, cle: str, niveau: int):
+    """Le rôle d'un palier, CRÉÉ s'il manque. `None` si c'est impossible.
+
+    ⚠️ POURQUOI CETTE FONCTION EXISTE — CAPTURE DU PROPRIÉTAIRE, 30/08/2026.
+    Sa carte « 👀 Presque » annonçait « 39 membre(s) concerné(s) » sans
+    mentionner personne, pendant que « 💤 Absents » mentionnait bien son rôle.
+    Le rendu n'y était pour rien : `construire` passe en mode muet dès que le
+    rôle vaut `None`, et affiche alors le compte seul. Le rôle « peu actif »
+    n'existait tout simplement pas sur son serveur — parce que `creer_role`
+    n'était appelé QUE depuis un bouton du panneau.
+    Un système qui attend un clic que rien ne réclame paraît cassé. On crée
+    donc à la demande, une seule fois, et on mémorise l'identifiant.
+
+    ⚠️ ON N'ÉCRIT LA CONFIG QU'APRÈS UNE CRÉATION RÉUSSIE. Poser l'identifiant
+    avant ferait pointer la config vers un rôle inexistant au prochain passage,
+    et `get_role` rendrait `None` pour toujours sans jamais retenter.
+    """
+    try:
+        rid = int(cfg_act.get(cle, 0) or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    if rid:
+        r = guild.get_role(rid)
+        if r is not None:
+            return r
+        #  L'identifiant est en config mais le rôle a été supprimé à la main :
+        #  on repart de zéro plutôt que de rester muet indéfiniment.
+        _log(f"[activite roles] le rôle {cle}={rid} n'existe plus sur "
+             f"{guild.name} — recréation")
+
+    #  ⚠️ SANS « Gérer les rôles », inutile d'essayer : l'API refusera et on
+    #  écrirait une ligne d'erreur à chaque passage. On le dit UNE fois, avec
+    #  la cause exacte.
+    try:
+        if not guild.me.guild_permissions.manage_roles:
+            _log(f"[activite roles] ⚠️ il manque « Gérer les rôles » sur "
+                 f"{guild.name} : l'étiquette « {cle} » ne peut pas être "
+                 f"créée, et les absents concernés ne seront donc PAS "
+                 f"mentionnés — seulement comptés.")
+            return None
+    except Exception:
+        pass
+
+    r = await niv.creer_role(guild, niveau)
+    if r is None:
+        return None
+    try:
+        await activite._db_set(guild.id, cle, r.id)
+    except Exception as ex:
+        #  Le rôle existe mais la config ne le sait pas : au prochain passage
+        #  on en créerait un second. Mieux vaut le supprimer et retenter.
+        _log(f"[activite roles] config non écrite pour {cle} : {ex} — "
+             f"le rôle créé est retiré pour éviter les doublons")
+        try:
+            await r.delete(reason="Système d'activité : config non écrite")
+        except Exception:
+            pass
+        return None
+    _log(f"[activite roles] rôle « {r.name} » créé sur {guild.name} "
+         f"({cle}={r.id})")
+    return r
+
+
+async def peut_mentionner_un_role(guild) -> bool:
+    """Le bot peut-il RÉELLEMENT notifier un rôle non mentionnable ?
+
+    ⚠️ LA QUESTION EXACTE DU PROPRIÉTAIRE : « est-ce que ça mentionne vraiment
+    les gens ? » La réponse n'est pas dans le message, elle est dans une
+    permission. Les rôles d'inactivité sont créés `mentionable=False` — à
+    dessein, pour que personne d'autre que le bot ne puisse réveiller des
+    centaines de gens. Dans ce cas, `allowed_mentions(roles=True)` ne suffit
+    PAS : il faut que le bot porte « Mentionner @everyone, @here et tous les
+    rôles ». Sans elle, la mention S'AFFICHE et NE NOTIFIE PERSONNE — un
+    rappel que personne ne reçoit, et rien à l'écran ne le dit.
+    """
+    try:
+        return bool(guild.me.guild_permissions.mention_everyone)
+    except Exception:
         return False

@@ -288,6 +288,37 @@ async def remplacer(guild, salon, cle_role, vues: list, cfg_act: dict, *,
         except Exception:
             pass          # déjà supprimé, introuvable, ou hors de portée
 
+    #  ⚠️ ET ON NETTOIE CE QUE LA MÉMOIRE NE CONNAÎT PAS — ajouté le 30/08/2026.
+    #  Le propriétaire, capture à l'appui : « tu m'as posté 2 images de
+    #  2 annonces, fais en sorte que quand il y a le prochain dimanche qui
+    #  arrive, tu supprimes tout ce qu'il y a dans le salon, au propre, et tu
+    #  remets des nouveaux systèmes d'inactivité ».
+    #  La liste `anciens` ne couvre QUE le dernier envoi mémorisé pour CE rôle
+    #  surveillé. Tout le reste survivait : envois d'un autre rôle, cartes d'un
+    #  redémarrage qui a perdu la mémoire, essais du bouton manuel. Le salon
+    #  accumulait des semaines d'annonces contradictoires.
+    #
+    #  ⚠️ ON N'EFFACE QUE NOS PROPRES MESSAGES, ET SEULEMENT S'IL Y A QUELQUE
+    #  CHOSE À REMETTRE. Vider un salon dont on ne republiera rien laisserait
+    #  le staff devant une page blanche sans explication — et un `purge()`
+    #  aveugle emporterait les consignes humaines épinglées ou non.
+    if a_poster:
+        try:
+            if salon.permissions_for(guild.me).manage_messages:
+                await salon.purge(
+                    limit=100, check=lambda m: (
+                        m.author.id == guild.me.id and not m.pinned),
+                    reason="Système d'activité : rappel hebdomadaire remis au propre")
+            else:
+                _log(f"[activite_message] ⚠️ il manque « Gérer les messages » "
+                     f"dans #{getattr(salon, 'name', '?')} : les anciennes "
+                     f"annonces ne seront pas nettoyées, le salon va "
+                     f"s'accumuler.")
+        except Exception as ex:
+            #  Un nettoyage raté ne doit JAMAIS empêcher le rappel de partir :
+            #  mieux vaut un salon en désordre qu'un salon muet.
+            _log(f"[activite_message nettoyage] {type(ex).__name__}: {ex}")
+
     envoyes = []
     for v in vues:
         if v is None:
