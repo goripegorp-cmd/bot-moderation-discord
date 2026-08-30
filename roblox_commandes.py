@@ -42,6 +42,7 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 
+import roblox_marche as marche
 import roblox_veille as veille
 from ui_v2 import (Palette, body, container, divider, subtitle, title)
 
@@ -416,5 +417,88 @@ async def modele(i: discord.Interaction):
         await _repondre(i, *_refus_de_predire(serie), couleur=Palette.NEUTRAL)
     except Exception as ex:
         _log(f"[roblox_commandes modele] {type(ex).__name__}: {ex}")
+        await i.followup.send(f"❌ Erreur : `{type(ex).__name__}`",
+                              ephemeral=True)
+
+
+@groupe.command(
+    name="marche",
+    description="🏪 Le classement officiel « Publié récemment » du Marketplace")
+@app_commands.describe(combien="Combien de rangs afficher (1 à 20, défaut 20)")
+async def marche_cmd(i: discord.Interaction, combien: int = 20):
+    """Le `/debug-marketplace-recent` demandé le 30/08.
+
+    ⚠️ POURQUOI CETTE COMMANDE EXISTE. Un filtre trop strict fait disparaître
+    une famille entière d'articles SANS UN MOT : c'est arrivé avec les cheveux,
+    et « Medusa Snakes » — deuxième du classement officiel — était invisible.
+    Ce tableau montre les rangs dans l'ordre EXACT de l'API, acceptés ET
+    rejetés, chacun avec son motif. C'est le seul moyen de voir un filtre qui
+    se trompe.
+    """
+    if await _refuse(i):
+        return
+    await i.response.defer(ephemeral=True)
+    try:
+        combien = max(1, min(int(combien), 20))
+        tab = await marche.tableau_diagnostic(combien)
+        if not tab:
+            #  ⚠️ REPLI SUR LE DERNIER CONFIRMÉ. « Une erreur API conserve le
+            #  dernier résultat confirmé » — afficher « inconnu » parce que
+            #  Roblox a hoqueté serait pire que de dire ce qu'on savait.
+            garde = await marche.tete_memorisee()
+            return await _repondre(
+                i, title("🏪 Marketplace injoignable", level=2),
+                body("Roblox n'a pas répondu. "
+                     + (f"Dernier premier confirmé : **{garde['nom']}** "
+                        f"(`{garde['asset_id']}`), vu {_quand(garde['vu_le'])}."
+                        if garde else "Aucun classement confirmé en mémoire.")),
+                couleur=Palette.WARNING)
+
+        lignes = []
+        for it in tab:
+            marque = "✅" if it["accepte"] else "❌"
+            lignes.append(
+                f"`#{it['rang_marche']:<2}` {marque} **{_ou(it['nom'])}**\n"
+                f"-# `{it['asset_id']}` · type `{_ou(it['asset_type'])}` · "
+                f"{it['motif']} · "
+                + ("🟢 en vente" if it["en_vente"] else "🔴 hors vente"))
+
+        tete = next((x for x in tab if x["accepte"]), None)
+        recent = None
+        for x in tab:
+            if x["accepte"] and x["cree_le"] and (
+                    recent is None or str(x["cree_le"]) > str(recent["cree_le"])):
+                recent = x
+
+        entete = [
+            title("🏪 « Publié récemment » — classement officiel", level=2),
+            subtitle("Tous · Par Roblox · Publié récemment · items "
+                     "indisponibles inclus — ordre RENDU PAR L'API, jamais "
+                     "retrié"),
+            divider(),
+        ]
+        if tete is not None:
+            #  ⚠️ LES DEUX INDICATEURS CÔTE À CÔTE. C'est leur DIVERGENCE qui
+            #  explique pourquoi deux systèmes donnent des réponses
+            #  différentes — le propriétaire a demandé de les voir ensemble.
+            entete.append(body(
+                f"**Dernier publié selon le Marketplace**\n"
+                f"→ **{_ou(tete['nom'])}** · rang `1` · `{tete['asset_id']}`\n"
+                f"-# date technique de création : {_quand(tete['cree_le'])} · "
+                f"dernière modification : {_quand(tete['maj_le'])} · "
+                + ("🟢 en vente" if tete["en_vente"] else "🔴 hors vente")))
+        if recent is not None and (tete is None
+                                   or recent["asset_id"] != tete["asset_id"]):
+            entete.append(body(
+                f"**Dernier par date technique de création**\n"
+                f"→ **{_ou(recent['nom'])}** · rang "
+                f"`{recent['rang_marche']}` · créé {_quand(recent['cree_le'])}\n"
+                f"-# Ce n'est PAS la même question : un objet peut être créé "
+                f"des semaines avant d'être publié sur le Marketplace."))
+        entete.append(divider())
+        await _repondre(i, *entete, body("\n".join(lignes)),
+                        couleur=Palette.PREMIUM)
+    except Exception as ex:
+        _log(f"[roblox_commandes marche] {type(ex).__name__}: {ex}")
         await i.followup.send(f"❌ Erreur : `{type(ex).__name__}`",
                               ephemeral=True)

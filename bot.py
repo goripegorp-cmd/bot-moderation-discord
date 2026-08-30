@@ -200,6 +200,7 @@ import roblox_news as roblox_news_module
 import roblox_pings as roblox_pings_module
 import roblox_panneau as roblox_ui
 import roblox_commandes as roblox_cmds
+import roblox_marche as roblox_marche_module
 import rellseas_panneau as rellseas_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
 import delegations as delegations2026
@@ -13738,6 +13739,64 @@ async def _veille_roblox_wait():
     await bot.wait_until_ready()
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🏪 LA TÊTE DU CLASSEMENT « PUBLIÉ RÉCEMMENT »
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Demandé le 30/08 : « toutes les 2 à 5 minutes, exécuter la requête
+#  officielle, trouver le premier accessoire valide, enregistrer les 20
+#  premiers et leur ordre, déclencher une mise à jour uniquement si la tête du
+#  classement change ».
+#
+#  ⚠️ POURQUOI CETTE BOUCLE PEUT ÊTRE SI RAPIDE, alors que la veille tourne
+#  toutes les 30 minutes : elle ne coûte UNE SEULE REQUÊTE. Le budget mesuré
+#  est de ~8 requêtes par fenêtre de 60 s sur ce chemin ; une requête toutes
+#  les quatre minutes en consomme un huitième de pour-cent. C'est la
+#  différence entre surveiller une tête de liste et paginer un catalogue.
+#
+#  ⚠️ ET ELLE N'ENVOIE RIEN. Elle observe et mémorise. Publier depuis ici
+#  doublerait le chemin d'envoi des accessoires, et deux chemins qui font la
+#  même chose divergent au premier correctif.
+@tasks.loop(minutes=4)
+async def veille_marche_task():
+    """Suit le premier du classement officiel. Ne publie rien : il observe."""
+    try:
+        #  Aucun serveur n'a allumé la veille → rien à observer, on ne tape pas
+        #  l'API pour rien. C'est la consigne « ne pas spammer une recherche
+        #  qui sert à rien », appliquée à la lettre.
+        _actifs = False
+        for g in list(bot.guilds):
+            try:
+                if await roblox_module.actif(g.id):
+                    _actifs = True
+                    break
+            except Exception:
+                continue
+        if not _actifs:
+            return
+
+        rep = await roblox_marche_module.relever_page(limite=120)
+        if rep["code"] != 200:
+            #  ⚠️ ON GARDE LE DERNIER CONFIRMÉ. « Une erreur API conserve le
+            #  dernier résultat confirmé » — on ne remplace pas une vérité
+            #  connue par un trou.
+            print(f"[veille_marche_task] classement injoignable — HTTP "
+                  f"{rep['code']} · le dernier confirmé est conservé")
+            return
+        chg = await roblox_marche_module.noter_tete(rep["items"])
+        if chg["change"]:
+            _tete = next((x for x in rep["items"] if x["accepte"]), None)
+            print(f"[veille_marche_task] 🏪 LA TÊTE DU CLASSEMENT A CHANGÉ — "
+                  f"{chg['avant']} → {chg['maintenant']}"
+                  + (f" « {_tete['nom']} » ({_tete['motif']})" if _tete else ""))
+    except Exception as ex:
+        print(f"[veille_marche_task] {type(ex).__name__}: {ex}")
+
+
+@veille_marche_task.before_loop
+async def _veille_marche_wait():
+    await bot.wait_until_ready()
+
+
 _SUPERVISED_LOOP_NAMES = [
     "activite_passage_task",
     #  Ajoutée le 12/08/2026 avec son `.start()` : elle n'avait ni l'un ni l'autre,
@@ -13746,6 +13805,11 @@ _SUPERVISED_LOOP_NAMES = [
     #  hebdomadaire qui s'arrête ne se remarque qu'une semaine plus tard.
     "weekly_security_report",
     "veille_roblox_task",
+    #  ⚠️ PIÈGE N°2 DU DÉPÔT : le superviseur relance les boucles PAR LEUR NOM.
+    #  Ajouter une boucle sans l'inscrire ici la laisse morte à la première
+    #  exception non gérée, jusqu'au prochain redémarrage — et une tête de
+    #  classement qui cesse d'être suivie ne se remarque pas.
+    "veille_marche_task",
     "ui_usage_flush_task",
     #  ⚠️ `event_auto_scheduler` et `world_boss_scheduler` retirés le 16/08/2026 :
     #  les fonctions n'existaient plus depuis une purge antérieure, seuls les
@@ -22118,6 +22182,13 @@ async def _activite_boot():
     roblox_module.setup(get_db=get_db, cfg=cfg, db_set=db_set,
                         session=None, log=print)
     roblox_ui.setup(db_set=db_set, webhook_send=webhook_send, log=print)
+    #  ⚠️ LE FILTRE OFFICIEL « PUBLIÉ RÉCEMMENT » — module à part, exprès.
+    #  Il répond à une question DIFFÉRENTE de `roblox_veille` : « qui est en
+    #  tête du Marketplace » et non « qui a la date de création la plus
+    #  récente ». Les mélanger conduirait à retrier l'un avec l'autre, ce qui
+    #  est exactement l'erreur signalée par le propriétaire le 30/08.
+    roblox_marche_module.setup(session=None, log=print)
+    roblox_marche_module.brancher_base(get_db)
     roblox_ui.set_retour(_retour_vers_configure)
 
     #  ⚠️ LES RÔLES DE PING SONT INJECTÉS, PAS DEVINÉS. `roblox_pings` ne
@@ -22162,6 +22233,7 @@ async def _activite_boot():
                       autorise=_rellseas_autorise, log=print)
     rellseas_ui.set_retour(_retour_vers_configure)
     await roblox_module.init_db()
+    await roblox_marche_module.init_db()
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()
 
@@ -22933,6 +23005,8 @@ async def on_ready():
         # guilde n'a rien allume : cout nul au repos.
         if not veille_roblox_task.is_running():
             veille_roblox_task.start()
+        if not veille_marche_task.is_running():
+            veille_marche_task.start()
 
         # ⚠️ backup_lite (backup_daily_task) N'EST PLUS LANCÉ — owner 2026-07-12.
         # PREUVE (Metrics Railway) : RAM en dents de scie jusqu'à **5 Go** → conteneur tué (OOM)
