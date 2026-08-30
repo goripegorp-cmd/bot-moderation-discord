@@ -473,12 +473,49 @@ async def enrichir_billet(billet: dict, html_corps: str, langue: str = "en") -> 
     """
     try:
         corps = extraire_essentiel(html_corps, titre=billet.get("titre"))
+        #  ⚠️ LES NOTES DE VERSION NE SORTAIENT JAMAIS — mesuré sur TROIS
+        #  semaines consécutives le 30/08/2026, et c'est exactement ce que le
+        #  propriétaire réclamait (« même des mises à jour et tout ») :
+        #    · 11/08 « Release Notes for 734 » → 70 caractères  → JETÉ
+        #    · 20/08 « Release Notes for 735 » → 320 caractères → fiche vide
+        #    · 27/08 « Release Notes for 736 » → 424 caractères → fiche vide
+        #  Le billet du forum ne contient qu'une phrase et un lien : tout le
+        #  contenu vit sur `create.roblox.com/docs`. On va donc le chercher.
+        #  Aucune source périodique n'est ajoutée : la requête ne part que
+        #  lorsqu'un billet pointe vraiment là-bas, soit ~1 fois par semaine.
+        _repris_des_docs = False
+        if len((corps or "").strip()) < SEUIL_POINTEUR:
+            #  ⚠️ SON PROPRE FILET, ET C'EST INDISPENSABLE. Le `try` qui
+            #  englobe toute cette fonction rend le billet EN L'ÉTAT quand il
+            #  attrape : une panne ici sortait donc un billet sans `corps`,
+            #  sans `images` et SANS la clé `pointeur` — que l'appelant lit en
+            #  `.get()`, donc le billet passait, amputé, au lieu d'être écarté.
+            #  Une source annexe injoignable ne doit jamais dégrader le billet
+            #  au-delà de « il n'a pas de corps enrichi ».
+            try:
+                _docs = await corps_documentation(
+                    html_corps,
+                    date_iso=billet.get("cree_le") or billet.get("date"))
+            except Exception as ex:
+                _log(f"[roblox_news_contenu docs] {type(ex).__name__}: {ex}")
+                _docs = None
+            if _docs:
+                corps = _docs
+                billet["source_corps"] = "documentation Roblox"
+                _repris_des_docs = True
         billet["corps"] = corps
         billet["images"] = extraire_images(html_corps)
         billet["videos"] = extraire_videos(html_corps)
         billet["videos_fichiers"] = extraire_videos_fichiers(html_corps)
         billet["langue"] = langue
-        billet["pointeur"] = est_pointeur(corps, html_corps)
+        #  ⚠️ SI ON EST ALLÉ CHERCHER LE CONTENU, CE N'EST PLUS UN POINTEUR.
+        #  `est_pointeur` juge sur le HTML D'ORIGINE — celui du forum, resté
+        #  court. Sans cette ligne, on paierait la requête vers la
+        #  documentation, on obtiendrait le vrai contenu, et on jetterait le
+        #  billet quand même. C'est le défaut à deux étages qui a fait
+        #  disparaître trois semaines de notes de version.
+        billet["pointeur"] = (False if _repris_des_docs
+                              else est_pointeur(corps, html_corps))
         billet["traduit_par"] = None
         if langue == "fr":
             billet["corps_fr"] = corps
@@ -504,3 +541,158 @@ async def enrichir_billet(billet: dict, html_corps: str, langue: str = "en") -> 
     except Exception as ex:
         _log(f"[roblox_news_contenu enrichir_billet] {type(ex).__name__}: {ex}")
     return billet
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Le contenu réel des notes de version — sur la documentation, pas sur le forum
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#  ⚠️ DOMAINE EN DUR. Même règle que partout dans ce dépôt : une URL suivie par
+#  le bot est RECONSTRUITE à partir d'une constante et d'un chemin validé,
+#  jamais recopiée telle quelle depuis une réponse. Ce bot lutte contre le
+#  phishing — il ne peut pas suivre un lien approximatif.
+DOMAINE_DOCS = "https://create.roblox.com"
+
+#  Les chemins de documentation qu'on accepte de suivre. Tout le reste est
+#  ignoré : on ne va pas chercher une page de marketing ou un profil.
+CHEMINS_DOCS = ("/docs/updates/", "/docs/release-notes/")
+
+#  Combien de caractères on retient de la page de documentation. Aligné sur ce
+#  que la fiche affiche réellement — inutile de traduire ce qu'on coupera.
+MAX_CORPS_DOCS = 2400
+
+
+def lien_documentation(html: str) -> str | None:
+    """Le chemin de documentation cité par ce billet, ou None.
+
+    Rend un CHEMIN (`/docs/updates/2026-08-24`), jamais une URL complète :
+    c'est l'appelant qui la reconstruit à partir de `DOMAINE_DOCS`.
+    """
+    if not html:
+        return None
+    for m in re.finditer(r'href="(https?://[^"]+)"', html):
+        u = m.group(1)
+        if not u.startswith(DOMAINE_DOCS + "/"):
+            continue
+        chemin = u[len(DOMAINE_DOCS):].split("?")[0].split("#")[0]
+        #  ⚠️ ON VALIDE LE CHEMIN, on ne fait pas confiance à l'URL. Un billet
+        #  peut citer n'importe quoi ; on ne suit que deux familles connues.
+        if any(chemin.startswith(p) for p in CHEMINS_DOCS):
+            return chemin.rstrip("/")
+    return None
+
+
+def _chemin_du_lundi(date_iso) -> str | None:
+    """Le chemin `/docs/updates/AAAA-MM-JJ` du lundi de cette date.
+
+    ⚠️ POURQUOI CE REPLI EXISTE, ET IL N'EST PAS THÉORIQUE. Mesuré le 30/08 sur
+    les trois dernières notes de version : le lien du billet mène tantôt à
+    `/docs/updates/2026-08-24` (qui répond), tantôt à
+    `/docs/release-notes/release-notes-735` (dont la version `.md` rend 404).
+    Deux semaines sur trois, suivre le lien seul aurait échoué. Le lundi de la
+    date du billet, lui, a fonctionné pour les trois.
+    """
+    if not date_iso:
+        return None
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        d = _dt.fromisoformat(str(date_iso).replace("Z", "+00:00"))
+    except Exception:
+        return None
+    lundi = d - _td(days=d.weekday())
+    return f"/docs/updates/{lundi.strftime('%Y-%m-%d')}"
+
+
+async def corps_documentation(html: str, date_iso=None) -> str | None:
+    """Le texte de la page de documentation citée par ce billet. None si rien.
+
+    ⚠️ POURQUOI `.md` ET PAS LA PAGE HTML. Mesuré le 30/08 : ajouter `.md` au
+    chemin rend le markdown source — 474 à 1 340 octets, `text/markdown`, avec
+    un ETag et un HTTP 304 sur `If-None-Match`. La page HTML, elle, est une
+    application JavaScript dont le texte utile n'est pas dans le document.
+
+    ⚠️ DEUX PIÈGES MESURÉS CE JOUR-LÀ, ET ILS COÛTENT CHER :
+     1. `last_updated` du front-matter est un horodatage de BUILD : les
+        semaines du 10, 17 et 24 août portent toutes `2026-08-28T18:00:06Z`, à
+        la seconde près. Ne JAMAIS s'en servir comme date de publication.
+     2. Un 404 rend du HTML avec un code 200-like côté taille (2 599 octets ce
+        jour-là, 15 792 lors d'une autre mesure). On teste donc le code ET le
+        type de contenu, jamais la taille.
+    """
+    #  Le lien du billet d'abord ; le lundi de sa date en repli. Les doublons
+    #  sont écartés pour ne pas faire deux fois la même requête.
+    chemins = []
+    for c in (lien_documentation(html), _chemin_du_lundi(date_iso)):
+        if c and c not in chemins:
+            chemins.append(c)
+    if not chemins:
+        return None
+    #  ⚠️ ON N'ESSAIE LE REPLI QUE SI LE BILLET POINTE DÉJÀ VERS LA
+    #  DOCUMENTATION. Sinon toute annonce courte du forum déclencherait une
+    #  requête inutile chaque semaine — exactement le « spam d'une recherche
+    #  qui sert à rien » que le propriétaire a interdit.
+    if lien_documentation(html) is None:
+        return None
+    try:
+        async with _ouvrir_contenu() as sess:
+            for chemin in chemins:
+                url = f"{DOMAINE_DOCS}{chemin}.md"
+                async with sess.get(url) as r:
+                    if r.status != 200:
+                        _log(f"[roblox_news_contenu docs] HTTP {r.status} sur "
+                             f"{chemin}.md")
+                        continue
+                    type_contenu = str(r.headers.get("Content-Type") or "").lower()
+                    if not type_contenu.startswith("text/markdown"):
+                        #  La page d'erreur déguisée : elle rend 200, en HTML.
+                        _log(f"[roblox_news_contenu docs] {chemin}.md répond "
+                             f"en « {type_contenu} » et non en markdown")
+                        continue
+                    brut = await r.text()
+                texte = _markdown_en_texte(brut)
+                if texte:
+                    return texte
+    except Exception as ex:
+        _log(f"[roblox_news_contenu docs] {type(ex).__name__}: {ex}")
+    return None
+
+
+def _markdown_en_texte(brut: str) -> str | None:
+    """Réduit le markdown de la documentation à ce que la fiche sait afficher.
+
+    On garde les titres de section et les puces — c'est la structure même des
+    notes de version (« ## Improvements », « ## Fixes ») — et on jette le
+    front-matter YAML, qui ne contient que des métadonnées de build.
+    """
+    if not brut:
+        return None
+    texte = brut.strip()
+    #  Front-matter YAML : `---\n…\n---` en tête. Il porte `last_updated`, qui
+    #  est un horodatage de build — le publier ferait dater toutes les notes du
+    #  même jour.
+    if texte.startswith("---"):
+        fin = texte.find("\n---", 3)
+        if fin != -1:
+            texte = texte[fin + 4:].lstrip()
+    lignes = []
+    for ligne in texte.splitlines():
+        l = ligne.strip()
+        if not l:
+            continue
+        if l.startswith("#"):
+            lignes.append(f"**{l.lstrip('#').strip()}**")
+        elif l.startswith(("- ", "* ")):
+            lignes.append(f"• {l[2:].strip()}")
+        else:
+            lignes.append(l)
+    out = "\n".join(lignes).strip()
+    return out[:MAX_CORPS_DOCS] if out else None
+
+
+def _ouvrir_contenu():
+    """Une session HTTP pour aller lire la documentation. Voir `corps_documentation`."""
+    import aiohttp
+    return aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=20),
+        headers={"User-Agent": "GoRp-Discord-Bot/1.0 (veille actualités)",
+                 "Accept": "text/markdown, text/plain"})
