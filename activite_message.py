@@ -156,9 +156,22 @@ def construire(fiches: list, *, palier: str, salon_retour=None,
         #  passage, le rôle peut porter 240 membres alors que 959 sont classés.
         #  Afficher `len(fiches)` annoncerait plus de monde que la mention n'en
         #  notifie — le message mentirait sur sa propre portée.
-        _touches = len(getattr(role_ping, "members", None) or []) or len(fiches)
+        #  ⚠️ `or len(fiches)` A ÉTÉ RETIRÉ LE 30/08 — il produisait exactement
+        #  le mensonge que le commentaire ci-dessus interdit. Un rôle
+        #  FRAÎCHEMENT CRÉÉ par `_role_ou_creer` (livraison du même jour) porte
+        #  ZÉRO membre : `len([])` est faux au sens booléen, donc on retombait
+        #  sur `len(fiches)` et la carte annonçait « 39 membre(s) concerné(s) »
+        #  alors que la mention n'en notifiait aucun. Le défaut a été CRÉÉ par
+        #  la livraison du jour : avant elle, aucun rôle neuf n'existait.
+        _porteurs = getattr(role_ping, "members", None)
+        _touches = len(_porteurs) if _porteurs is not None else len(fiches)
         corps = (f"{role_ping.mention}\n"
-                 f"-# `{_touches}` membre(s) concerné(s)")
+                 f"-# `{_touches}` membre(s) concerné(s)"
+                 #  Un rôle qui ne porte encore personne se DIT : sinon
+                 #  « 0 membre concerné » sous une mention passe pour un bug.
+                 + ("\n-# _l'étiquette vient d'être créée : elle se posera au "
+                    "fil des passages, la mention grandira avec elle_"
+                    if _touches == 0 else ""))
     else:
         #  Repli quand aucun rôle n'est configuré : on liste, mais borné.
         corps = "\n".join(_liste(fiches, palier))

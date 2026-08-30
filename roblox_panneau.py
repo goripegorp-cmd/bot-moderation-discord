@@ -1002,6 +1002,12 @@ class RobloxPanelV2(LayoutView):
                 await self.render_to(i, edit=True)
             except Exception:
                 pass          # l'affichage d'attente est un confort, pas le travail
+            #  ⚠️ ON PREND LE VERROU DU CHEMIN CATALOGUE. Ce bouton emet 13
+            #  requetes sur le meme seau que la boucle (12 par fenetre de
+            #  60 s, deja mesure a `reste_min=2/12`). Sans verrou, un clic
+            #  pendant un passage doublait la charge. Voir
+            #  `roblox_veille.catalogue_occupe`.
+            veille.catalogue_occupe(True)
             rel = await veille.relever_nouveautes(limite=120)
             if rel["code"] != 200:
                 self._dernier = (
@@ -1031,6 +1037,28 @@ class RobloxPanelV2(LayoutView):
             else:
                 _log(f"[roblox relever collectionnables] code {relc['code']}")
 
+            # ── LE TROISIÈME RELEVÉ, celui des créations HORS VENTE ──────────
+            #  ⚠️ CE BOUTON ÉTAIT AVEUGLE À CE QU'IL EXISTE POUR MONTRER.
+            #  Trouvé en réfutation le 30/08 : il ne faisait que deux relevés
+            #  sur trois, donc il ne voyait AUCUNE création retirée de la
+            #  vente — alors que les vingt premiers du classement « Publié
+            #  récemment » le sont tous — puis concluait « Aucun article
+            #  nouveau dans ce relevé : c'est normal, Roblox publie peu ».
+            #  Un bouton qui ment sur ce qu'il a cherché est pire qu'un bouton
+            #  absent. Deux pages, deux requêtes.
+            await asyncio.sleep(veille.PAUSE_ENTRE_APPELS_CATALOGUE)
+            relhv = await veille.relever_hors_vente(limite=120)
+            if relhv["code"] == 200:
+                evts_h = await veille.comparer_et_enregistrer(relhv["articles"])
+                for _cle in ("nouveaux", "bascules"):
+                    _deja_vus = {x["asset_id"] for x in (evts.get(_cle) or [])}
+                    for x in (evts_h.get(_cle) or []):
+                        if x["asset_id"] not in _deja_vus:
+                            evts.setdefault(_cle, []).append(x)
+                            _deja_vus.add(x["asset_id"])
+            else:
+                _log(f"[roblox relever hors_vente] code {relhv['code']}")
+
             c = await veille.config(self.g.id)
             envoyes = 0
             #  Le décompte des refus, par cause. C'est lui qui rend le
@@ -1058,7 +1086,12 @@ class RobloxPanelV2(LayoutView):
                             self.g.id, a_e["asset_id"], flux_e):
                         motifs["deja"] += 1
                         continue
-                    await veille.enfiler(self.g.id, a_e, flux_e)
+                    #  ⚠️ ON LIT LE RETOUR. Un refus d'unicite — la fiche est
+                    #  deja en file — disparaissait sans compteur, et le
+                    #  compte rendu laissait croire qu'elle n'avait pas ete
+                    #  retenue.
+                    if not await veille.enfiler(self.g.id, a_e, flux_e):
+                        motifs["deja"] += 1
 
             #  Les images en UN SEUL appel pour tout le passage.
             #  Même sélection que la publication, sinon une fiche sort sans son
@@ -1162,6 +1195,12 @@ class RobloxPanelV2(LayoutView):
                 await self.render_to(i, edit=True)
             except Exception:
                 pass
+        finally:
+            #  ⚠️ TOUJOURS RENDRE LE VERROU. Le garder sur une exception
+            #  ferait s'effacer le suivi du classement à CHAQUE tick, pour
+            #  toujours et en silence — une boucle vivante qui ne fait plus
+            #  rien est le pire des deux mondes.
+            veille.catalogue_occupe(False)
 
     async def _relever_actualites(self) -> str:
         """Relève les 5 sources d'actualité et publie ce qui doit sortir.
@@ -1182,6 +1221,7 @@ class RobloxPanelV2(LayoutView):
             lus, envoyes, deja, refuses, en_panne, pointeurs = 0, 0, 0, 0, [], 0
             absorbes = 0
             simules = 0
+            enfiles = 0
             #  La simulation est un réglage de la VEILLE, pas des actualités :
             #  un seul interrupteur pour les deux flux, comme le panneau
             #  l'annonce (« rien ne partira dans un salon »).
@@ -1213,27 +1253,48 @@ class RobloxPanelV2(LayoutView):
                         _neufs.append(b)
                 _frais_b, _abs = await news.absorber_vieux(self.g.id, _neufs)
                 absorbes += _abs
-                #  Du plus ancien au plus récent, et le même plafond par source.
-                for b in veille.ordonner_publication(
-                        _frais_b, news.MAX_BILLETS_PAR_PASSAGE):
-                    if envoyes >= veille.MAX_PUBLICATIONS_PAR_PASSAGE:
-                        break
-                    #  ⚠️ LA SIMULATION COUVRE AUSSI LES ACTUALITÉS. Elle ne
-                    #  gardait que les accessoires, pendant que ce panneau
-                    #  affirmait « rien ne partira dans un salon » : un clic
-                    #  sur « Relever maintenant », simulation allumée, et les
-                    #  billets partaient quand même. On ne les marque pas
-                    #  publiés : ils ressortiront à l'extinction.
-                    if _simu_actu:
-                        simules += 1
-                        continue
-                    if await publier_actu(self.g, salon, b):
-                        await news.marquer_publie(self.g.id, b["topic_id"])
-                        envoyes += 1
-                    else:
-                        refuses += 1
+                #  ⚠️ ON ENFILE, ON NE PUBLIE PLUS ICI — CORRIGÉ LE 30/08 APRÈS
+                #  RÉFUTATION. Ce bouton appelait `publier_actu` DIRECTEMENT,
+                #  hors de la file, pendant que la boucle publiait depuis la
+                #  file sans revérifier `deja_publie`. Les deux chemins
+                #  envoyaient donc les mêmes billets : mesuré, **3 doublons sur
+                #  8 billets frais**.
+                #  Le bouton des ACCESSOIRES avait été corrigé le matin même
+                #  (« les deux chemins partagent la même file : cliquer ici ne
+                #  double plus rien ») — la correction n'avait pas été portée
+                #  côté actualités. Deux chemins qui font la même chose
+                #  divergent toujours au premier correctif.
+                for b in veille.ordonner_publication(_frais_b, len(_frais_b)):
+                    if await news.enfiler_actu(self.g.id, b):
+                        enfiles += 1
                 await asyncio.sleep(1.5)
+
+            #  ⚠️ L'ENVOI, UNE SEULE FOIS, DEPUIS LA FILE — exactement comme la
+            #  boucle. C'est le seul moyen que « cliquer ne double rien » soit
+            #  vrai et le reste.
+            attente_n = await news.actus_a_envoyer(
+                self.g.id, limite=news.MAX_BILLETS_PAR_PASSAGE)
+            for _e in attente_n:
+                b = _e["billet"]
+                #  ⚠️ LA SIMULATION COUVRE AUSSI LES ACTUALITÉS. Elle ne
+                #  gardait que les accessoires, pendant que ce panneau
+                #  affirmait « rien ne partira dans un salon ». On ne marque
+                #  rien : elles ressortiront à l'extinction.
+                if _simu_actu:
+                    simules += 1
+                    continue
+                if not await news.reserver_actu(_e["id"], _e["essais"]):
+                    continue          # la boucle l'a prise : ce n'est pas un échec
+                if await publier_actu(self.g, salon, b):
+                    await news.marquer_actu_envoyee(_e["id"])
+                    await news.marquer_publie(self.g.id, b["topic_id"])
+                    envoyes += 1
+                else:
+                    await news.noter_echec_actu(
+                        _e["id"], "bouton : publier_actu a rendu False")
+                    refuses += 1
             await news.purger()
+            await news.purger_file_actu()
 
             detail = []
             if simules:

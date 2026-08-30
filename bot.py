@@ -13123,8 +13123,7 @@ async def veille_roblox_task():
             #  commentaire. Il est abaissé dans le `finally` en fin de bloc :
             #  le laisser levé sur une exception tuerait le suivi jusqu'au
             #  prochain redémarrage, en silence.
-            global _veille_catalogue_en_cours
-            _veille_catalogue_en_cours = True
+            roblox_module.catalogue_occupe(True)
             rel = await roblox_module.relever_nouveautes(limite=120)
             _sa["lus"] = len(rel.get("articles") or [])
             _sa["pages"] = rel.get("pages", 0)
@@ -13433,8 +13432,8 @@ async def veille_roblox_task():
             _sa["file"] = await roblox_module.etat_file()
             await roblox_module.purger()
             #  Le chemin du catalogue est rendu au suivi de la tête de
-            #  classement. Voir `_veille_catalogue_en_cours`.
-            _veille_catalogue_en_cours = False
+            #  classement. Voir `roblox_veille.catalogue_occupe`.
+            roblox_module.catalogue_occupe(False)
 
         # ── L'actualite ─────────────────────────────────────────────────────
         if guildes_news:
@@ -13747,7 +13746,7 @@ async def veille_roblox_task():
         #  l'abaissement du drapeau laisserait `veille_marche_task` s'effacer
         #  À CHAQUE passage, pour toujours, et EN SILENCE — c'est-à-dire une
         #  boucle vivante qui ne fait plus rien. Le `finally` ferme ce trou.
-        _veille_catalogue_en_cours = False
+        roblox_module.catalogue_occupe(False)
 
 
 @veille_roblox_task.before_loop
@@ -13780,13 +13779,15 @@ async def _veille_roblox_wait():
 #  Le suivi s'efface donc pendant le passage : il repassera quatre minutes plus
 #  tard, ce qui ne coûte rien à une tête de classement qui bouge de loin en
 #  loin.
-_veille_catalogue_en_cours = False
+#  (Le drapeau lui-même vit dans `roblox_veille` : voir `catalogue_occupe`.
+#   Il y a été déplacé le 30/08 pour que le bouton « Relever maintenant » du
+#   panneau puisse le lever lui aussi — il ne le pouvait pas depuis ici.)
 
 
 @tasks.loop(minutes=4)
 async def veille_marche_task():
     """Suit le premier du classement officiel. Ne publie rien : il observe."""
-    if _veille_catalogue_en_cours:
+    if roblox_module.catalogue_est_occupe():
         #  Silencieux à dessein : ce n'est pas un incident, c'est une priorité.
         return
     try:

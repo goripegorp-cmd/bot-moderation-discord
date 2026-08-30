@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -353,12 +354,23 @@ def test_le_suivi_du_marche_s_efface_pendant_le_passage_de_la_veille():
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "bot.py").read_text(
         encoding="utf-8")
-    assert "_veille_catalogue_en_cours" in src
+    #  ⚠️ LE DRAPEAU A DÉMÉNAGÉ dans `roblox_veille` le 30/08 : le bouton
+    #  « Relever maintenant » émet lui aussi 13 requêtes sur ce chemin et ne
+    #  pouvait pas lever un drapeau vivant dans `bot.py`. On vérifie donc le
+    #  verrou PARTAGÉ, pas l'ancien nom.
+    import roblox_veille as _v
+    assert hasattr(_v, "catalogue_occupe") and hasattr(_v, "catalogue_est_occupe")
     corps = next(ast.unparse(n) for n in ast.walk(ast.parse(src))
                  if isinstance(n, ast.AsyncFunctionDef)
                  and n.name == "veille_marche_task")
-    assert "if _veille_catalogue_en_cours" in corps, (
+    assert "catalogue_est_occupe()" in corps, (
         "le suivi ne s'efface pas pendant le passage : collision de débit")
+    #  Et le bouton manuel doit le lever aussi, sinon un clic double la charge.
+    pan = (Path(__file__).resolve().parent.parent
+           / "roblox_panneau.py").read_text(encoding="utf-8")
+    assert "veille.catalogue_occupe(True)" in pan, (
+        "le bouton « Relever maintenant » ne prend pas le verrou : ses 13 "
+        "requêtes tombent sur le même seau que la boucle")
 
 
 def test_le_drapeau_est_toujours_rendu_meme_sur_exception():
@@ -373,6 +385,14 @@ def test_le_drapeau_est_toujours_rendu_meme_sur_exception():
                  and n.name == "veille_roblox_task")
     #  Le dernier bloc de la fonction doit remettre le drapeau à faux.
     fin = corps.split("except Exception as ex:")[-1]
-    assert "_veille_catalogue_en_cours = False" in fin, (
-        "le drapeau n'est pas rendu en cas d'exception")
+    assert "catalogue_occupe(False)" in fin, (
+        "le verrou n'est pas rendu en cas d'exception")
     assert "finally:" in corps
+    #  Même exigence côté bouton manuel.
+    pan_src = (Path(__file__).resolve().parent.parent
+               / "roblox_panneau.py").read_text(encoding="utf-8")
+    cb = next(ast.unparse(n) for n in ast.walk(ast.parse(pan_src))
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "_cb_relever")
+    assert "finally" in cb and "catalogue_occupe(False)" in cb, (
+        "le bouton garderait le verrou sur une exception, et le suivi "
+        "s'effacerait pour toujours en silence")

@@ -241,6 +241,64 @@ async def test_relever_actualites_dit_quand_le_salon_manque():
     assert "aucun salon" in txt.lower()
 
 
+
+def _file_en_memoire(monkeypatch, news):
+    """Une file d'attente en memoire, avec TOUTES les protections de la vraie.
+
+    ⚠️ ELLE DOIT PORTER CE QUE PORTE LA VRAIE : unicite sur (guild, topic),
+    reservation par jeton d'essais, marquage apres envoi, comptage des echecs.
+    Une doublure plus permissive que l'original ferait passer un test sur du
+    code casse — c'est exactement ce qui a laisse passer la regression des
+    identifiants textuels.
+    """
+    lignes = {}
+    suivant = {"id": 0}
+
+    async def _enfiler(gid, billet):
+        tid = str(billet.get("topic_id") or "").strip()
+        if not tid or (gid, tid) in lignes:
+            return False
+        suivant["id"] += 1
+        lignes[(gid, tid)] = {"id": suivant["id"], "billet": billet,
+                              "essais": 0, "envoye": False}
+        return True
+
+    async def _a_envoyer(gid, limite=5):
+        out = [dict(v) for k, v in sorted(lignes.items(), key=lambda x: x[1]["id"])
+               if k[0] == gid and not v["envoye"] and v["essais"] < 5]
+        return out[:limite]
+
+    async def _reserver(lid, essais_vus):
+        for v in lignes.values():
+            if v["id"] == lid and not v["envoye"] and v["essais"] == essais_vus:
+                v["essais"] = essais_vus + 1
+                return True
+        return False
+
+    async def _marquer_envoyee(lid, message_id=None):
+        for v in lignes.values():
+            if v["id"] == lid:
+                v["envoye"] = True
+                return True
+        return False
+
+    async def _noter_echec(lid, motif):
+        for v in lignes.values():
+            if v["id"] == lid:
+                v["essais"] += 1
+
+    async def _purger_file():
+        return 0
+
+    monkeypatch.setattr(news, "enfiler_actu", _enfiler)
+    monkeypatch.setattr(news, "actus_a_envoyer", _a_envoyer)
+    monkeypatch.setattr(news, "reserver_actu", _reserver)
+    monkeypatch.setattr(news, "marquer_actu_envoyee", _marquer_envoyee)
+    monkeypatch.setattr(news, "noter_echec_actu", _noter_echec)
+    monkeypatch.setattr(news, "purger_file_actu", _purger_file)
+    return lignes
+
+
 @pytest.mark.asyncio
 async def test_relever_actualites_publie_et_compte(monkeypatch):
     """La chaîne complète, sur des doublures : relever → dédup → publier →
@@ -279,14 +337,20 @@ async def test_relever_actualites_publie_et_compte(monkeypatch):
     monkeypatch.setattr(news, "purger", _purger)
     monkeypatch.setattr(panneau, "publier_actu", _publier_actu)
     monkeypatch.setattr(panneau.asyncio, "sleep", _dodo)
+    _file_en_memoire(monkeypatch, news)
 
     vue = panneau.RobloxPanelV2(_FauxUser(), _FauxGuild(_FauxSalon()))
     txt = await vue._relever_actualites()
 
-    n_src = len(news.SOURCES)
-    assert envois == [10] * n_src, "seul le billet non publié part, par source"
-    assert marques == [10] * n_src, "et il est marqué UNIQUEMENT après l'envoi"
-    assert f"`{n_src}` **réellement publié(s)**" in txt
+    #  ⚠️ UN SEUL ENVOI, ET C'EST LA CORRECTION DU 30/08.
+    #  L'ancienne attente etait `[10] * len(SOURCES)` : le meme billet publie
+    #  SEPT fois, une par source. Elle ne tenait que parce que la doublure
+    #  `_marquer` n'alimentait pas `deja` — en production, la deuxieme source
+    #  l'aurait deduplique. Avec la file, un topic_id n'entre qu'une fois et ne
+    #  part qu'une fois, quel que soit le nombre de sources qui le remontent.
+    assert envois == [10], "le billet non publie part UNE fois, pas une par source"
+    assert marques == [10], "et il est marque UNIQUEMENT apres l'envoi"
+    assert "**réellement publié(s)**" in txt
     assert "déjà publiée(s)" in txt
 
 
@@ -325,6 +389,7 @@ async def test_relever_actualites_ne_marque_pas_un_envoi_refuse(monkeypatch):
     monkeypatch.setattr(news, "purger", _purger)
     monkeypatch.setattr(panneau, "publier_actu", _publier_refuse)
     monkeypatch.setattr(panneau.asyncio, "sleep", _dodo)
+    _file_en_memoire(monkeypatch, news)
 
     vue = panneau.RobloxPanelV2(_FauxUser(), _FauxGuild(_FauxSalon()))
     txt = await vue._relever_actualites()

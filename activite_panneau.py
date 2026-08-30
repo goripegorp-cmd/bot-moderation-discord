@@ -199,8 +199,33 @@ class ActiviteRenvoiPanelV2(_Base):
                     self.g, c, cl, forcer=True, muet_force=muet)
                 n = res["envoyes"]
                 if n:
-                    txt_ = (f"✅ `{n}` message(s) envoyé(s)"
-                            + ("" if muet else " · les rôles ont été mentionnés"))
+                    #  ⚠️ ON N'AFFIRME LA MENTION QUE SI ELLE A EU LIEU.
+                    #  Trouvé en réfutation le 30/08 : cette phrase s'affichait
+                    #  dès que `muet` était faux, alors que DEUX mécanismes
+                    #  peuvent l'annuler en silence —
+                    #   · la permission « Mentionner tous les rôles » manquante
+                    #     (`mention_muette`, qui n'avait AUCUN lecteur) ;
+                    #   · le marqueur de semaine déjà consommé, qui repasse
+                    #     TOUS les paliers en muet. Or c'est exactement la
+                    #     condition qui fait apparaître le bouton rouge
+                    #     « Mentionner quand même » — lequel ne mentionnait
+                    #     donc jamais personne, et le confirmait.
+                    _mentionne = (not muet
+                                  and not res.get("mention_muette")
+                                  and res.get("mentions", 0) > 0)
+                    txt_ = f"✅ `{n}` message(s) envoyé(s)"
+                    if _mentionne:
+                        txt_ += " · les rôles ont été mentionnés"
+                    elif res.get("mention_muette"):
+                        txt_ += ("\n⚠️ **Aucune mention n'est partie** : il "
+                                 "manque au bot « Mentionner @everyone, @here "
+                                 "et tous les rôles » dans le salon d'annonce. "
+                                 "Les cartes s'affichent, elles ne notifient "
+                                 "personne.")
+                    elif not muet:
+                        txt_ += ("\n-# Aucune mention : ces rôles ont déjà été "
+                                 "mentionnés cette semaine, on ne pingue pas "
+                                 "deux fois les mêmes membres.")
                 else:
                     #  ⚠️ ON DIT POURQUOI ZÉRO. « 0 envoyé » sans motif ferait
                     #  chercher une panne là où il n'y a personne à relancer.

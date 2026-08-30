@@ -320,3 +320,91 @@ def test_le_corps_original_reste_entier():
     avec les accessoires et à l'extrait de vérification. Le réduire ferait
     perdre des rapprochements."""
     assert contenu.BUDGET_CORPS >= 2400
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LA RÉGRESSION DU 30/08 — deux sources sur sept ne pouvaient plus rien publier
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+#  `enfiler_actu` faisait `int(billet["topic_id"])`. Or DEUX des sept sources
+#  n'ont pas d'identifiant numérique : le newsroom fabrique « newsroom:{slug} »
+#  (roblox_news.py:605) et la presse « presse:{slug} » (:454). Le `int()`
+#  levait, on rendait False EN SILENCE, et la boucle — qui depuis le matin
+#  n'envoie plus QUE depuis la file — ne les publiait jamais. Huit jours plus
+#  tard `absorber_vieux` les marquait publiées sans les envoyer : perdues POUR
+#  TOUJOURS, sans une ligne de journal.
+#
+#  ⚠️ LA SOURCE FRANÇAISE OFFICIELLE ÉTAIT LA PREMIÈRE TOUCHÉE — elle est
+#  placée en tête de `SOURCES` exprès, pour gagner la déduplication.
+#  ⚠️ ET LA COLONNE ÉTAIT DÉJÀ `TEXT` : le code contredisait son propre schéma.
+#
+#  Aucun test ne l'a vu : `_billet()` de ce fichier utilisait `tid="4833635"`,
+#  une chaîne NUMÉRIQUE, qui passe `int()` sans broncher.
+
+@pytest.mark.asyncio
+async def test_un_identifiant_TEXTUEL_entre_bien_en_file(banc):
+    """Le cas exact des sources hors forum. C'est le test qui manquait."""
+    await news.init_db()
+    for tid in ("newsroom:roblox-annonce-quelque-chose",
+                "presse:resultats-du-trimestre",
+                "4833635"):
+        assert await news.enfiler_actu(GUILDE, _billet(tid=tid)) is True, tid
+    assert (await news.etat_file_actu(GUILDE))["attente"] == 3
+
+    #  Et ils ressortent intacts : un identifiant tronqué ou converti ferait
+    #  échouer `marquer_publie` plus loin, sans un mot.
+    lus = {e["billet"]["topic_id"] for e in await news.actus_a_envoyer(GUILDE)}
+    assert "newsroom:roblox-annonce-quelque-chose" in lus
+
+
+@pytest.mark.asyncio
+async def test_un_billet_sans_identifiant_est_refuse_ET_journalise(banc, monkeypatch):
+    """⚠️ UN REFUS MUET EST CE QUI A RENDU CE DÉFAUT INVISIBLE PENDANT UNE
+    JOURNÉE ENTIÈRE DE LIVRAISONS. Le refus doit laisser une trace."""
+    await news.init_db()
+    dits = []
+    monkeypatch.setattr(news, "_log", lambda m: dits.append(str(m)))
+    assert await news.enfiler_actu(GUILDE, {"titre": "Sans identifiant"}) is False
+    assert dits, "le refus n'a laissé aucune trace"
+    assert (await news.etat_file_actu(GUILDE))["attente"] == 0
+
+
+@pytest.mark.asyncio
+async def test_les_slugs_de_deux_sources_ne_se_telescopent_pas(banc):
+    """Les préfixes « newsroom: » et « presse: » existent précisément pour ça.
+    Sans eux, un même slug publié des deux côtés n'entrerait qu'une fois."""
+    await news.init_db()
+    assert await news.enfiler_actu(GUILDE, _billet(tid="newsroom:meme-slug")) is True
+    assert await news.enfiler_actu(GUILDE, _billet(tid="presse:meme-slug")) is True
+    assert (await news.etat_file_actu(GUILDE))["attente"] == 2
+
+
+def test_les_sources_hors_forum_fabriquent_bien_des_identifiants_textuels():
+    """Si un jour elles passaient au numérique, ces tests deviendraient
+    trompeurs : ils prouveraient une robustesse dont plus personne n'aurait
+    besoin, en laissant croire que le vrai cas est couvert."""
+    src = (RACINE / "roblox_news.py").read_text(encoding="utf-8")
+    assert 'f"newsroom:{slug}"' in src or "newsroom:{slug}" in src
+    assert 'f"presse:{slug}"' in src or "presse:{slug}" in src
+    #  Et la colonne doit rester TEXT, sinon SQLite convertirait en silence.
+    assert "topic_id TEXT NOT NULL" in src
+
+
+def test_le_bouton_manuel_ne_publie_plus_hors_file():
+    """⚠️ MESURÉ EN RÉFUTATION : 3 doublons sur 8 billets frais. Le bouton
+    appelait `publier_actu` directement pendant que la boucle publiait depuis
+    la file sans revérifier `deja_publie`. Le bouton des ACCESSOIRES avait été
+    corrigé le matin même — la correction n'avait pas été portée ici."""
+    import ast as _ast
+    pan = (RACINE / "roblox_panneau.py").read_text(encoding="utf-8")
+    corps = next(_ast.unparse(n) for n in _ast.walk(_ast.parse(pan))
+                 if isinstance(n, _ast.AsyncFunctionDef)
+                 and n.name == "_relever_actualites")
+    assert "news.enfiler_actu(" in corps, "le bouton n'enfile pas"
+    assert "news.reserver_actu(" in corps, (
+        "le bouton publie sans réserver : il doublera la boucle")
+    #  L'envoi doit venir de la file, pas de la liste fraîche.
+    assert "news.actus_a_envoyer(" in corps
+    i_enfile = corps.index("news.enfiler_actu(")
+    i_tire = corps.index("news.actus_a_envoyer(")
+    assert i_enfile < i_tire, "on enfile d'abord, on tire ensuite"

@@ -212,11 +212,30 @@ def test_la_boucle_absorbe_les_trop_vieux():
 def test_le_bouton_relever_maintenant_applique_le_meme_ordre():
     """⚠️ DEUX CHEMINS QUI DIVERGENT = un défaut corrigé d'un côté et vivant
     de l'autre. Le bouton manuel doit suivre exactement la même règle."""
-    assert "absorber_vieux" in SRC_PAN
-    bloc = SRC_PAN.split("_neufs = []")[-1][:900]
-    i_dedup = bloc.index("deja_publie")
-    i_tronque = bloc.index("ordonner_publication")
-    assert i_dedup < i_tronque
+    #  ⚠️ TRANCHE DE 900 CARACTÈRES SUPPRIMÉE. Elle a cassé dès que le bloc a
+    #  grandi (ajout de la mise en file le 30/08) — et une tranche fixe casse
+    #  toujours pour une raison qui n'a rien à voir avec la propriété testée.
+    #  On borne désormais sur la FONCTION, par l'arbre syntaxique.
+    import ast as _ast
+    corps = None
+    for n in _ast.walk(_ast.parse(SRC_PAN)):
+        if isinstance(n, _ast.AsyncFunctionDef) and n.name == "_relever_actualites":
+            corps = _ast.unparse(n)
+            break
+    assert corps, "_relever_actualites introuvable"
+    assert "absorber_vieux" in corps
+    #  La propriété, inchangée : on DÉDUPLIQUE d'abord, on absorbe, on ordonne
+    #  ensuite. L'inverse faisait qu'un billet déjà sorti occupait une place à
+    #  chaque relevé, et que le rang 6 n'y remontait jamais.
+    i_dedup = corps.index("deja_publie")
+    i_abs = corps.index("absorber_vieux")
+    i_ordre = corps.index("ordonner_publication")
+    assert i_dedup < i_abs < i_ordre, (
+        "l'ordre dédupliquer → absorber → ordonner est le correctif lui-même")
+    #  Et depuis le 30/08, le bouton ENFILE au lieu de publier : c'est ce qui
+    #  l'empêche de doubler la boucle (3 doublons sur 8 billets, mesuré).
+    assert "enfiler_actu" in corps, (
+        "le bouton publie hors file : il doublera la boucle")
 
 
 def test_le_journal_ne_promet_le_retour_que_pour_ce_qui_revient():

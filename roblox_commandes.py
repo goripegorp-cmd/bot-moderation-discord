@@ -146,7 +146,12 @@ async def sante(i: discord.Interaction):
         for s in (diag.get("sources") or []):
             icone = "🟢" if not s.get("echecs") else "🔴"
             sources.append(
-                f"{icone} `{s.get('cle', '?')}` · code `{_ou(s.get('code'))}` · "
+                #  ⚠️ `roblox_veille.diagnostic()` rend la cle « source »,
+                #  `roblox_news.diagnostic()` rend « cle ». Cette commande
+                #  copiait la seconde : elle affichait « ? » pour TOUTES les
+                #  sources d'accessoires. Deux chemins qui ont diverge.
+                f"{icone} `{s.get('source') or s.get('cle') or '?'}` · "
+                f"code `{_ou(s.get('code'))}` · "
                 f"dernier succès {_quand(s.get('dernier_succes'))}"
                 + (f" · **{s['echecs']} échec(s) d'affilée**"
                    if s.get("echecs") else ""))
@@ -155,7 +160,11 @@ async def sante(i: discord.Interaction):
 
         #  ⚠️ ON DIT L'ÉTAT DE L'INTERRUPTEUR AVANT TOUT LE RESTE. Un système
         #  éteint et un système en panne produisent les mêmes zéros partout.
-        allume = bool(cfg.get("roblox_veille_enabled"))
+        #  ⚠️ `actif()` EXIGE L'INTERRUPTEUR *ET* UN SALON. Lire la seule cle
+        #  affichait « Allumee » en vert sur un serveur ou rien ne peut sortir
+        #  — le cas exact qui a coute onze heures au proprietaire, deux lignes
+        #  sous un commentaire qui promet de dire l'etat avant tout le reste.
+        allume = await veille.actif(i.guild.id)
         simu = bool(cfg.get("roblox_veille_simulation"))
 
         blocs = [

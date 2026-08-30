@@ -1018,10 +1018,30 @@ def test_la_boucle_fusionne_les_NOUVEAUTES_pas_seulement_les_bascules():
     assert "roblox_module.relever_hors_vente(" in corps, (
         "le troisième relevé n'est pas branché : le bot montre encore les "
         "derniers accessoires du marché, pas les derniers créés")
-    bloc = corps.split("relever_hors_vente(")[1].split("CE QUE LA DÉTECTION")[0]
-    assert "'nouveaux'" in bloc or '"nouveaux"' in bloc, (
+
+    #  ⚠️ CE TEST ÉTAIT VIDE, ET UNE MUTATION L'A PROUVÉ.
+    #  Il découpait sur « CE QUE LA DÉTECTION », qui est un COMMENTAIRE :
+    #  `ast.unparse` les supprime tous. Le « bloc » examiné faisait donc 13 000
+    #  caractères — tout le corps de la boucle — et contenait « nouveaux »
+    #  quoi qu'il arrive. Mutation posée le 30/08 (retirer « nouveaux » de la
+    #  boucle de fusion) : **731 tests verts**. Un test qui ne peut pas
+    #  échouer est pire qu'un test absent : il fabrique de la confiance.
+    #
+    #  On lit donc le VRAI nœud : la boucle `for _cle in (...)`.
+    boucles = [n for n in _ast.walk(_ast.parse(src))
+               if isinstance(n, _ast.For)
+               and getattr(n.target, "id", None) == "_cle"]
+    assert boucles, "la boucle de fusion `for _cle in (...)` a disparu"
+    cles = set()
+    for b in boucles:
+        try:
+            cles |= set(_ast.literal_eval(b.iter))
+        except Exception:
+            pass
+    assert "nouveaux" in cles, (
         "seules les bascules sont fusionnées : les créations hors vente "
-        "resteraient invisibles")
+        "resteraient invisibles, et la requête serait payée pour rien")
+    assert "bascules" in cles
 
 
 def test_l_age_du_plus_recent_est_calcule_sur_les_DEUX_releves():

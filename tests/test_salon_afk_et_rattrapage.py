@@ -407,11 +407,64 @@ def test_le_bouton_annonce_qu_il_va_etre_long():
     que le propriétaire a conclu. Les pauses sont obligatoires (deux relevés
     paginés, la pause entre eux, la respiration avant les fiches) : on ne les
     raccourcit pas, on prévient."""
+    #  ⚠️ TRANCHE DE 2500 CARACTÈRES SUPPRIMÉE. Elle a cassé dès que le corps
+    #  a grandi (ajout du troisième relevé le 30/08) — une tranche fixe casse
+    #  toujours pour une raison étrangère à la propriété testée. On borne sur
+    #  la FONCTION, par l'arbre syntaxique.
     src = (RACINE / "roblox_panneau.py").read_text(encoding="utf-8")
-    bloc = src.split("async def _cb_relever")[1][:2500]
+    bloc = next(ast.unparse(n) for n in ast.walk(ast.parse(src))
+                if isinstance(n, ast.AsyncFunctionDef)
+                and n.name == "_cb_relever")
     assert "Relevé en cours" in bloc, (
         "le bouton ne dit pas qu'il travaille : le panneau reste figé")
     i_attente = bloc.index("Relevé en cours")
     i_travail = bloc.index("veille.relever_nouveautes(")
     assert i_attente < i_travail, (
         "le message d'attente est affiché APRÈS le travail : il ne sert à rien")
+    #  Et il fait bien les TROIS relevés : sans le troisième il serait aveugle
+    #  aux créations hors vente — celles-là mêmes qu'il existe pour montrer —
+    #  puis conclurait « rien à publier, c'est normal ».
+    assert "veille.relever_hors_vente(" in bloc, (
+        "le bouton ne fait que deux relevés sur trois : il ne verra aucune "
+        "création retirée de la vente")
+
+
+@pytest.mark.asyncio
+async def test_le_delai_est_reellement_applique(monkeypatch):
+    """⚠️ MUTATION SURVÉCUE LE 30/08 : retirer `delete_after` ET le `sleep` du
+    nettoyage AFK ne faisait échouer aucun test — l'accusé de réception serait
+    resté dans le salon POUR TOUJOURS, soit l'inverse exact de ce que ce salon
+    existe pour faire. Les tests existants passaient un délai de ZÉRO, qui
+    n'exerce ni l'un ni l'autre. Un banc qui neutralise le paramètre qu'il
+    devrait éprouver ne prouve rien."""
+    async def _cfg(_g):
+        return dict(activite.CLES_DEFAUT, activite_afk_secondes=6)
+
+    monkeypatch.setattr(activite, "config", _cfg)
+    dormi = []
+
+    async def _faux_sleep(n):
+        dormi.append(n)
+
+    monkeypatch.setattr(passage.asyncio, "sleep", _faux_sleep)
+
+    class _SalonTrace(_Salon):
+        def __init__(self):
+            super().__init__()
+            self.kw = None
+
+        async def send(self, contenu, **kw):
+            self.kw = kw
+            self.envoyes.append(contenu)
+            return _Message(self, "accuse")
+
+    salon = _SalonTrace()
+    msg = _Message(salon)
+    assert await passage.nettoyer_message_afk(msg) is True
+
+    assert dormi == [6], (
+        "le message est effacé sans laisser le temps de le lire : le membre "
+        "réécrira, et le salon se remplira — l'inverse du but")
+    assert salon.kw.get("delete_after") == 6.0, (
+        "l'accusé de réception n'a pas de `delete_after` : il resterait dans "
+        "le salon pour toujours")

@@ -916,6 +916,26 @@ async def _noter_sante(source: str, code: int | None) -> int:
         return 0
 
 
+#  ⚠️ LE VERROU DE DEBIT DU CHEMIN CATALOGUE, PARTAGE PAR TOUS SES USAGERS.
+#  Il vivait dans `bot.py`, donc le bouton « Relever maintenant » ne pouvait
+#  pas le lever : ses 13 requetes tombaient sur le meme seau que la boucle,
+#  sans aucun verrou. Deux clics, ou un clic pendant un passage, et c'etaient
+#  24 requetes sur un budget de 12 par fenetre de 60 s — la production etait
+#  deja a `reste_min=2/12`. Trouve en refutation le 30/08.
+#  Il vit desormais ICI, dans le module que TOUS les appelants importent.
+_catalogue_occupe = False
+
+
+def catalogue_occupe(valeur: bool) -> None:
+    """Prend ou rend le chemin du catalogue. Voir `_catalogue_occupe`."""
+    global _catalogue_occupe
+    _catalogue_occupe = bool(valeur)
+
+
+def catalogue_est_occupe() -> bool:
+    return _catalogue_occupe
+
+
 async def relever_nouveautes(limite: int = 30) -> dict:
     """Interroge le catalogue pour les articles créés par Roblox.
 
@@ -1332,6 +1352,26 @@ async def fiches_par_ids(ids: list, item_type: str = "Asset") -> list[dict]:
     return []
 
 
+async def _en_file(guild_id: int, asset_id: int, flux: str) -> bool:
+    """Cette fiche a-t-elle une ligne en file, envoyée ou non ?
+
+    Sert à distinguer « `enfiler` a échoué » de « elle y était déjà » — deux
+    situations que `INSERT OR IGNORE` rend identiques (rowcount 0), et que
+    confondre fait soit perdre une garde, soit annoncer un succès imaginaire.
+    """
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM roblox_transitions WHERE guild_id=?"
+                " AND asset_id=? AND flux=? LIMIT 1",
+                (int(guild_id), int(asset_id), str(flux))) as cur:
+                return bool(await cur.fetchone())
+    except Exception as ex:
+        _log(f"[roblox_veille _en_file] {ex}")
+        #  Fail-CLOSED : dans le doute on ne lève pas la garde.
+        return False
+
+
 async def _deja_reellement_envoye(guild_id: int, asset_id: int,
                                   flux: str) -> bool:
     """Une fiche est-elle DÉJÀ PARTIE dans un salon pour cet article ?
@@ -1437,19 +1477,40 @@ async def rattraper_nouveautes(guild_id: int, combien: int = 12) -> dict:
             return out
         #  Du plus ANCIEN au plus récent : même règle de lecture que partout.
         retenus = ordonner_publication(retenus, len(retenus))
-        async with _get_db() as db:
-            for a in retenus:
-                #  On lève la marque posée par l'amorce — sans elle, la fiche
-                #  entrerait en file et serait refusée à la sortie.
-                await db.execute(
-                    "DELETE FROM roblox_publies WHERE guild_id=? AND asset_id=?"
-                    " AND flux='nouveautes'", (int(guild_id), a["asset_id"]))
-            await db.commit()
+        #  ⚠️ ON ENFILE D'ABORD, ON LÈVE LA GARDE ENSUITE — CORRIGÉ LE 30/08
+        #  APRÈS RÉFUTATION. L'ordre inverse effaçait la marque
+        #  `roblox_publies` puis enfilait dans une SECONDE transaction : si
+        #  `enfiler` échouait (il avale ses exceptions et rend `False`), la
+        #  garde était perdue ET la file restait vide. Mesuré : « marques et
+        #  file après : (0, 0) », pendant que le panneau annonçait
+        #  « 6 déjà en file ». On avait remplacé un compteur qui accusait le
+        #  code à tort par un compteur qui l'innocentait à tort.
+        #  Désormais : la marque ne tombe QUE pour une fiche réellement en
+        #  file. Au pire on ne rattrape rien — jamais on ne perd la garde.
+        a_liberer = []
         for a in retenus:
-            if await enfiler(guild_id, a, "nouveautes"):
+            entre = await enfiler(guild_id, a, "nouveautes")
+            if entre:
                 out["enfiles"] += 1
-            else:
+                a_liberer.append(a["asset_id"])
+            elif await _en_file(guild_id, a["asset_id"], "nouveautes"):
+                #  Déjà en file d'un clic précédent : c'est un succès, pas un
+                #  échec — et sa garde doit tomber aussi, sinon la fiche sera
+                #  refusée à la sortie.
                 out["deja_en_file"] += 1
+                a_liberer.append(a["asset_id"])
+            else:
+                #  Ni entrée, ni présente : `enfiler` a vraiment échoué. On
+                #  NE TOUCHE PAS à sa garde.
+                out["echecs"] = out.get("echecs", 0) + 1
+        if a_liberer:
+            async with _get_db() as db:
+                for aid in a_liberer:
+                    await db.execute(
+                        "DELETE FROM roblox_publies WHERE guild_id=?"
+                        " AND asset_id=? AND flux='nouveautes'",
+                        (int(guild_id), int(aid)))
+                await db.commit()
         vieux = [_jours_depuis(a.get("cree_le")) for a in retenus]
         vieux = [v for v in vieux if v is not None]
         out["plus_vieux_j"] = max(vieux) if vieux else None
@@ -2141,8 +2202,15 @@ async def etat_serie() -> dict:
                 out["depuis"] = r[2]
             #  Une transition OBSERVÉE — c'est-à-dire vue passer entre deux
             #  relevés, la seule qui vaille comme exemple d'entraînement.
+            #  ⚠️ `DISTINCT asset_id`, ET C'EST TOUT LE SUJET. La cle est
+            #  UNIQUE(guild_id, asset_id, de, vers) : une bascule REELLE sur
+            #  trois serveurs fait TROIS lignes. Un COUNT(*) nu aurait atteint
+            #  le seuil de 30 avec cinq a dix bascules reelles, et le refus de
+            #  predire — la meilleure decision de la journee — se serait leve
+            #  sur du bruit duplique. Trouve en refutation le 30/08.
             async with db.execute(
-                "SELECT COUNT(*) FROM roblox_transitions WHERE de='normal'"
+                "SELECT COUNT(DISTINCT asset_id) FROM roblox_transitions"
+                " WHERE de='normal'"
             ) as cur:
                 r = await cur.fetchone()
             out["transitions_observees"] = int(r[0] or 0) if r else 0

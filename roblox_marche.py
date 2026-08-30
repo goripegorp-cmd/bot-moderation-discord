@@ -57,8 +57,39 @@ classement officiel — disparaissait.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import random
 from datetime import datetime, timezone
+
+#  Bornes de l'attente après un 429. Mêmes valeurs que `roblox_veille` : c'est
+#  le MÊME seau, il n'y a aucune raison d'y répondre différemment.
+ATTENTE_429_MIN = 5.0
+ATTENTE_429_MAX = 60.0
+ATTENTE_429_DEFAUT = 25.0
+
+
+def _attente_429(entetes) -> float:
+    """Combien attendre après un 429 — d'après ce que Roblox ANNONCE.
+
+    ⚠️ LE PLUS GRAND DES DEUX EN-TÊTES, pas le premier trouvé : mesuré le
+    30/08, `retry-after: 5` et `x-ratelimit-reset: 12` se contredisent sur la
+    même réponse. Prendre le premier faisait repartir dans le mur.
+    ⚠️ Et un peu d'aléa, JAMAIS À LA BAISSE : Railway sort par une IP partagée,
+    deux applications qui repartent à la même seconde se refont refuser
+    ensemble.
+    """
+    annonces = []
+    for cle in ("Retry-After", "retry-after", "x-ratelimit-reset"):
+        try:
+            v = float(str((entetes or {}).get(cle)).strip())
+            if v > 0:
+                annonces.append(v)
+        except Exception:
+            continue
+    base = (max(annonces) + 2.0) if annonces else ATTENTE_429_DEFAUT
+    return max(ATTENTE_429_MIN,
+               min(ATTENTE_429_MAX, base * random.uniform(1.0, 1.3)))
 
 #  ⚠️ DOMAINE EN DUR — règle du dépôt : une URL suivie par ce bot est
 #  RECONSTRUITE, jamais recopiée d'une réponse.
@@ -198,16 +229,33 @@ async def relever_page(curseur: str | None = None, limite: int = 120) -> dict:
     signalée par le propriétaire.
     """
     out = {"items": [], "curseur": None, "code": None}
+    #  ⚠️ CE MODULE TAPE LE SEAU LE PLUS ÉTROIT DU BOT, TOUTES LES 4 MINUTES.
+    #  Même route que `roblox_veille` (`/v2/search/items/details`), budget
+    #  mesuré `12, 12;w=60`, et la production est déjà descendue à
+    #  `reste_min=2/12`. La première version n'avait AUCUNE gestion du 429 :
+    #  elle repartait aveuglément quatre minutes plus tard, ce qui est la
+    #  meilleure façon de rester bloqué. Trouvé en réfutation le 30/08.
     try:
         async with _ouvrir() as sess:
-            async with sess.get(API_RECHERCHE,
-                                params=parametres(limite, curseur)) as r:
-                out["code"] = r.status
-                if r.status != 200:
-                    _log(f"[roblox_marche] HTTP {r.status} sur le filtre "
-                         f"« Publié récemment »")
-                    return out
-                data = await r.json()
+            for tentative in (1, 2):
+                async with sess.get(
+                        API_RECHERCHE,
+                        params=parametres(limite, curseur)) as r:
+                    out["code"] = r.status
+                    if r.status == 429 and tentative == 1:
+                        attente = _attente_429(r.headers)
+                        _log(f"[roblox_marche] HTTP 429 — attente "
+                             f"{attente:.0f} s puis une reprise")
+                        await asyncio.sleep(attente)
+                        continue
+                    if r.status != 200:
+                        _log(f"[roblox_marche] HTTP {r.status} sur le filtre "
+                             f"« Publié récemment »")
+                        return out
+                    data = await r.json()
+                    break
+            else:
+                return out
     except Exception as ex:
         _log(f"[roblox_marche relever_page] {type(ex).__name__}: {ex}")
         return out
@@ -342,6 +390,23 @@ async def init_db() -> None:
             " parametres TEXT,"
             " empreinte TEXT)"
         )
+        #  ⚠️ LA TETE RETENUE, SEULE ET UNIQUE. Une ligne, id=1. Elle designe
+        #  le premier ACCEPTE — pas le rang 1 brut, qui peut etre un vetement
+        #  ou un Bundle. Confondre les deux faisait crier « la tete a change »
+        #  toutes les quatre minutes sur une liste immobile.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS roblox_marche_retenue("
+            " id INTEGER PRIMARY KEY CHECK(id = 1),"
+            " asset_id INTEGER NOT NULL,"
+            " nom TEXT,"
+            " asset_type INTEGER,"
+            " rang_marche INTEGER,"
+            " cree_le TEXT,"
+            " maj_le TEXT,"
+            " statut_prix TEXT,"
+            " en_vente INTEGER,"
+            " vu_le TEXT NOT NULL)"
+        )
         await db.commit()
 
 
@@ -372,9 +437,20 @@ async def noter_tete(items: list[dict]) -> dict:
     maintenant = datetime.now(timezone.utc).isoformat()
     try:
         async with _get_db() as db:
+            #  ⚠️ ON COMPARE LA TÊTE ACCEPTÉE, PAS LE RANG 1 BRUT — corrigé le
+            #  30/08 après réfutation. `rang_marche` est écrit sur les vingt
+            #  premiers, acceptés ET rejetés. Or `tete` est le premier ACCEPTÉ.
+            #  Dès qu'un article rejeté (vêtement, Bundle, arrière-plan) occupe
+            #  le rang 1 — et 28 des 119 items de la page 1 sont rejetés —
+            #  `avant` et `tete` ne pouvaient plus jamais coïncider :
+            #  « LA TÊTE DU CLASSEMENT A CHANGÉ » se serait imprimé toutes les
+            #  quatre minutes sur une liste immobile. Et `tete_memorisee`, que
+            #  `/roblox marche` présente comme « dernier premier confirmé »,
+            #  aurait rendu un article que le filtre rejette.
+            #  On garde donc une ligne dédiée, `rang_marche = 0`, qui désigne
+            #  LA TÊTE RETENUE et rien d'autre.
             async with db.execute(
-                "SELECT asset_id FROM roblox_marche_tete"
-                " WHERE rang_marche=1 ORDER BY vu_la_derniere_fois DESC LIMIT 1"
+                "SELECT asset_id FROM roblox_marche_retenue WHERE id=1"
             ) as cur:
                 row = await cur.fetchone()
             res["avant"] = int(row[0]) if row else None
@@ -384,6 +460,28 @@ async def noter_tete(items: list[dict]) -> dict:
             #  de dire plus tard « il est monté de la 7e à la 1re place ».
             emp = empreinte(items)
             params = json.dumps(parametres(), ensure_ascii=False)
+            #  La tête RETENUE porte le rang 0 : c'est elle, et elle seule, que
+            #  `tete_memorisee` doit rendre. Les vingt bruts gardent leur rang
+            #  réel, pour pouvoir dire plus tard « il est monté de la 7e à la
+            #  1re place ».
+            #  ⚠️ LA TÊTE RETENUE VIT DANS SA PROPRE TABLE, PAS DANS UN RANG 0.
+            #  `asset_id` est la clé primaire de `roblox_marche_tete` : une
+            #  ligne « rang 0 » serait écrasée par la ligne du même article
+            #  dans le top 20, quelques itérations plus loin. Deux rôles
+            #  différents, deux tables.
+            await db.execute(
+                "INSERT INTO roblox_marche_retenue(id, asset_id, nom,"
+                " asset_type, rang_marche, cree_le, maj_le, statut_prix,"
+                " en_vente, vu_le) VALUES(1,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(id) DO UPDATE SET asset_id=?, nom=?,"
+                "  asset_type=?, rang_marche=?, cree_le=?, maj_le=?,"
+                "  statut_prix=?, en_vente=?, vu_le=?",
+                (tete["asset_id"], tete["nom"], tete["asset_type"],
+                 tete["rang_marche"], tete["cree_le"], tete["maj_le"],
+                 tete["statut_prix"], int(bool(tete["en_vente"])), maintenant,
+                 tete["asset_id"], tete["nom"], tete["asset_type"],
+                 tete["rang_marche"], tete["cree_le"], tete["maj_le"],
+                 tete["statut_prix"], int(bool(tete["en_vente"])), maintenant))
             for i, it in enumerate(items[:20], start=1):
                 await db.execute(
                     "INSERT INTO roblox_marche_tete(asset_id, nom, item_type,"
@@ -419,15 +517,17 @@ async def tete_memorisee() -> dict | None:
         async with _get_db() as db:
             async with db.execute(
                 "SELECT asset_id, nom, asset_type, cree_le, maj_le,"
-                " statut_prix, en_vente, vu_la_derniere_fois"
-                " FROM roblox_marche_tete WHERE rang_marche=1"
-                " ORDER BY vu_la_derniere_fois DESC LIMIT 1") as cur:
+                " statut_prix, en_vente, vu_le, rang_marche"
+                " FROM roblox_marche_retenue WHERE id=1") as cur:
                 row = await cur.fetchone()
         if not row:
             return None
         return {"asset_id": int(row[0]), "nom": row[1], "asset_type": row[2],
                 "cree_le": row[3], "maj_le": row[4], "statut_prix": row[5],
-                "en_vente": bool(row[6]), "vu_le": row[7], "rang_marche": 1}
+                "en_vente": bool(row[6]), "vu_le": row[7],
+                #  Le rang REEL de la tete retenue, pas un « 1 » en dur : elle
+                #  peut tres bien etre 3e si les deux premiers sont rejetes.
+                "rang_marche": row[8]}
     except Exception as ex:
         _log(f"[roblox_marche tete_memorisee] {ex}")
         return None

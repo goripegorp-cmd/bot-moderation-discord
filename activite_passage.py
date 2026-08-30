@@ -284,6 +284,7 @@ async def envoyer_rappels(guild, cfg_act: dict, cl: dict, *,
     envoyes = 0
     detail_rappels = []
     _mention_muette = False
+    _mentions = 0
 
     #  ⚠️ LES DEUX VERROUS ANTI-DOUBLE-PING. Voir l'en-tête du correctif :
     #  l'étiquette est globale, la boucle et son marqueur sont par groupe.
@@ -367,7 +368,7 @@ async def envoyer_rappels(guild, cfg_act: dict, cl: dict, *,
         #  bot porte « Mentionner @everyone, @here et tous les rôles ». Sans
         #  elle, la mention S'AFFICHE exactement pareil et NE NOTIFIE PERSONNE.
         #  Un rappel que personne ne reçoit, et rien à l'écran ne le disait.
-        if not await peut_mentionner_un_role(guild):
+        if not await peut_mentionner_un_role(guild, salon):
             _log(f"[activite rappel] ⚠️ {guild.name} : il manque au bot la "
                  f"permission « Mentionner tous les rôles ». Les cartes vont "
                  f"AFFICHER la mention du rôle mais NE NOTIFIERONT PERSONNE. "
@@ -393,6 +394,13 @@ async def envoyer_rappels(guild, cfg_act: dict, cl: dict, *,
                 role_ping=(None if _muet else _r), muet=_muet))
             if _r is not None and g[p] and not _muet:
                 _pingues.add(_r.id)
+                #  ⚠️ ON COMPTE LES MENTIONS REELLEMENT POSEES. Sans ce
+                #  compteur, le panneau affirmait « les roles ont ete
+                #  mentionnes » des que `muet` etait faux — y compris quand
+                #  TOUS les paliers etaient repasses en muet par le marqueur
+                #  de semaine. Le bouton « Mentionner quand meme » confirmait
+                #  alors une mention qui n avait jamais eu lieu.
+                _mentions += 1
         #  ⚠️ ON NE BRÛLE LA SEMAINE QUE SI L'ENVOI A ABOUTI.
         #  La version précédente marquait la semaine dans TOUS les cas, y
         #  compris quand `remplacer` levait (salon interdit, message trop
@@ -445,6 +453,8 @@ async def envoyer_rappels(guild, cfg_act: dict, cl: dict, *,
 
     return {"envoyes": envoyes, "detail": detail_rappels,
             "mention_muette": _mention_muette,
+            #  Combien de roles ont REELLEMENT ete mentionnes.
+            "mentions": _mentions,
             "semaine": semaine_courante, "pingues": len(_pingues)}
 
 
@@ -735,7 +745,7 @@ async def _role_ou_creer(guild, cfg_act: dict, cle: str, niveau: int):
     return r
 
 
-async def peut_mentionner_un_role(guild) -> bool:
+async def peut_mentionner_un_role(guild, salon=None) -> bool:
     """Le bot peut-il RÉELLEMENT notifier un rôle non mentionnable ?
 
     ⚠️ LA QUESTION EXACTE DU PROPRIÉTAIRE : « est-ce que ça mentionne vraiment
@@ -748,6 +758,13 @@ async def peut_mentionner_un_role(guild) -> bool:
     rappel que personne ne reçoit, et rien à l'écran ne le dit.
     """
     try:
+        #  ⚠️ AU NIVEAU DU SALON, PAS DU SERVEUR — corrige le 30/08 apres
+        #  refutation. `mention_everyone` est surchargeable par salon : un
+        #  `deny` sur le salon d'annonce laissait l'agregat serveur rendre
+        #  True pendant que la mention restait muette. C'est-a-dire le
+        #  scenario EXACT que cette fonction existe pour detecter.
+        if salon is not None:
+            return bool(salon.permissions_for(guild.me).mention_everyone)
         return bool(guild.me.guild_permissions.mention_everyone)
     except Exception:
         return False

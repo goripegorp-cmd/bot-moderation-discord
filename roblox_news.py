@@ -950,9 +950,24 @@ MAX_ESSAIS_ACTU = 5
 
 async def enfiler_actu(guild_id: int, billet: dict) -> bool:
     """Met un billet en file. True s'il y entre pour la première fois."""
-    try:
-        tid = int(billet["topic_id"])
-    except (KeyError, TypeError, ValueError):
+    #  ⚠️ LE `topic_id` EST UNE CHAÎNE, PAS UN ENTIER — RÉGRESSION DU 30/08,
+    #  TROUVÉE EN RÉFUTATION LE JOUR MÊME.
+    #  Cette fonction faisait `int(billet["topic_id"])`. Or DEUX des sept
+    #  sources n'ont pas d'identifiant numérique : le newsroom fabrique
+    #  « newsroom:{slug} » et la presse « presse:{slug} ». Le `int()` levait,
+    #  on rendait False EN SILENCE, et la boucle — qui depuis ce matin
+    #  n'envoie plus QUE depuis la file — ne les publiait jamais. Huit jours
+    #  plus tard `absorber_vieux` les marquait publiés sans les envoyer : elles
+    #  étaient perdues POUR TOUJOURS, sans une ligne de journal.
+    #  Le comble : c'est la source FRANÇAISE officielle, placée en premier
+    #  exprès, qui tombait en premier. Et la colonne était DÉJÀ `TEXT` — le
+    #  code contredisait son propre schéma.
+    tid = str(billet.get("topic_id") or "").strip()
+    if not tid:
+        #  ⚠️ ET ON LE DIT. Un refus muet est ce qui a rendu ce défaut
+        #  invisible pendant toute une journée de livraisons.
+        _log(f"[roblox_news enfiler_actu] billet sans identifiant, ignoré : "
+             f"{str(billet.get('titre'))[:60]!r}")
         return False
     try:
         async with _get_db() as db:
