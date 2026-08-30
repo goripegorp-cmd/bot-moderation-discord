@@ -13107,7 +13107,11 @@ async def veille_roblox_task():
                #  repartiront. C'est la seule trace d'un doublon à venir.
                "non_marquees": 0}
         _sn = {"lus": 0, "sautees": 0, "pannes": 0, "deja": 0,
-               "echecs": 0, "plafonnes": 0, "absorbes": 0, "simules": 0}
+               "echecs": 0, "plafonnes": 0, "absorbes": 0, "simules": 0,
+               #  La file d'attente des actualités — même dessin que celle des
+               #  accessoires. `enfiles` = ce qui y entre à ce passage.
+               "enfiles": 0, "file": None, "non_marquees": 0,
+               "pointeurs": 0}
 
         # ── Les articles ────────────────────────────────────────────────────
         if guildes_items:
@@ -13396,6 +13400,12 @@ async def veille_roblox_task():
                     await asyncio.sleep(2)
                     continue
                 _sn["lus"] += len(rel.get("billets") or [])
+                #  ⚠️ LE COMPTEUR EXISTAIT, PERSONNE NE LE LISAIT. `relever`
+                #  rend `pointeurs` depuis le 18/08 ; la boucle ne le
+                #  ramassait pas. Résultat : trois semaines de notes de version
+                #  écartées sans qu'une seule ligne de journal le dise.
+                _sn["pointeurs"] = _sn.get("pointeurs", 0) + int(
+                    rel.get("pointeurs") or 0)
                 for g in guildes_news:
                     c = await roblox_news_module.config(g.id)
                     salon = g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
@@ -13438,6 +13448,19 @@ async def veille_roblox_task():
                     #     ce que le journal prétendait : les écartés sont des
                     #     billets FRAIS et NON PUBLIÉS, donc les cinq publiés
                     #     de ce passage leur laisseront la place au suivant.
+                    #  ⚠️ ON ENFILE AVANT DE TRONQUER — corrigé le 30/08/2026.
+                    #  `absorber_vieux` marque « publié » SANS envoyer au-delà
+                    #  de huit jours. Sans étape entre « détecté » et
+                    #  « absorbé », une source en panne huit jours, un bot
+                    #  arrêté huit jours ou un salon interdit huit jours
+                    #  perdaient l'actualité POUR TOUJOURS — et le bouton
+                    #  « ♻️ Tout republier » promettait le contraire.
+                    #  Désormais tout billet frais est PERSISTÉ tout de suite :
+                    #  il n'a plus besoin d'être re-relevé pour sortir.
+                    for _b in roblox_module.ordonner_publication(
+                            _frais_b, len(_frais_b)):
+                        if await roblox_news_module.enfiler_actu(g.id, _b):
+                            _sn["enfiles"] = _sn.get("enfiles", 0) + 1
                     _lot_b = roblox_module.ordonner_publication(
                         _frais_b, roblox_news_module.MAX_BILLETS_PAR_PASSAGE)
                     _sn["plafonnes"] += max(0, len(_frais_b) - len(_lot_b))
@@ -13447,31 +13470,63 @@ async def veille_roblox_task():
                     #  simulation allumée, les billets partaient quand même.
                     #  Un interrupteur qui ment sur ce qu'il retient est pire
                     #  que pas d'interrupteur. Trouvé en réfutation le 30/08.
-                    #  ⚠️ Les billets N'ONT PAS de file : on ne les marque donc
-                    #  pas publiés, et ils ressortiront à l'extinction — comme
-                    #  les accessoires, par un chemin différent.
-                    _simu_n = bool((await roblox_module.config(g.id))
-                                   .get("roblox_veille_simulation"))
-                    for b in _lot_b:
-                        if _budget <= 0:
-                            _reporte_n += 1
-                            continue
-                        if _simu_n:
-                            _sn["simules"] = _sn.get("simules", 0) + 1
-                            continue
-                        if await roblox_ui.publier_actu(g, salon, b):
-                            await roblox_news_module.marquer_publie(g.id, b["topic_id"])
-                            _budget -= 1
-                            _publies_n += 1
-                        else:
-                            #  Un salon supprimé ou interdit se voit ICI, et
-                            #  nulle part ailleurs : `publier_actu` rend None
-                            #  sans lever.
-                            _sn["echecs"] += 1
-                        await asyncio.sleep(roblox_module.PAUSE_ENTRE_PUBLICATIONS)
+                    #  ⚠️ `_lot_b` ne sert PLUS à envoyer — c'est la file qui
+                    #  décide, plus bas. Il ne mesure que ce qui ne sortira pas
+                    #  à ce passage, pour que le plafond reste visible.
                 #  Pause ENTRE LES SOURCES : c'est elle qui evite le pare-feu.
                 await asyncio.sleep(2)
+
+            # ═══════════════════════════════════════════════════════════════
+            #  L'ENVOI DES ACTUALITÉS — une fois par serveur, sur SON budget
+            # ═══════════════════════════════════════════════════════════════
+            #  ⚠️ UN BUDGET PROPRE, ET C'EST LE CORRECTIF DE LA FAMINE.
+            #  Les deux flux se partageaient `MAX_PUBLICATIONS_PAR_PASSAGE`,
+            #  et les accessoires passaient EN PREMIER : douze fiches
+            #  d'accessoires en file, et les actualités recevaient ZÉRO
+            #  publication — passage après passage, sans que rien ne le dise.
+            #  L'envoi vit aussi HORS de la boucle des sources : il ne dépend
+            #  plus qu'une source réponde pour vider ce qui attend déjà.
+            for g in guildes_news:
+                c = await roblox_news_module.config(g.id)
+                salon = g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
+                _simu_n = bool((await roblox_module.config(g.id))
+                               .get("roblox_veille_simulation"))
+                _attente_n = await roblox_news_module.actus_a_envoyer(
+                    g.id, limite=roblox_news_module.MAX_BILLETS_PAR_PASSAGE)
+                for _e in _attente_n:
+                    b = _e["billet"]
+                    if _simu_n:
+                        _sn["simules"] = _sn.get("simules", 0) + 1
+                        continue
+                    if salon is None:
+                        #  Compter l'échec, sinon la file se fige sur les mêmes
+                        #  billets et plus rien d'autre ne sort jamais.
+                        await roblox_news_module.noter_echec_actu(
+                            _e["id"], "aucun salon d'actualité réglé")
+                        _sn["echecs"] += 1
+                        continue
+                    #  Réserver avant d'envoyer : la boucle et le bouton
+                    #  « Relever maintenant » peuvent tirer la même ligne.
+                    if not await roblox_news_module.reserver_actu(
+                            _e["id"], _e["essais"]):
+                        continue
+                    if await roblox_ui.publier_actu(g, salon, b):
+                        if not await roblox_news_module.marquer_actu_envoyee(
+                                _e["id"]):
+                            _sn["non_marquees"] = _sn.get("non_marquees", 0) + 1
+                        await roblox_news_module.marquer_publie(
+                            g.id, b["topic_id"])
+                        _publies_n += 1
+                    else:
+                        #  Un salon supprimé ou interdit se voit ICI, et nulle
+                        #  part ailleurs : `publier_actu` rend None sans lever.
+                        await roblox_news_module.noter_echec_actu(
+                            _e["id"], "publier_actu a rendu False")
+                        _sn["echecs"] += 1
+                    await asyncio.sleep(roblox_module.PAUSE_ENTRE_PUBLICATIONS)
+                _sn["file"] = await roblox_news_module.etat_file_actu(g.id)
             await roblox_news_module.purger()
+            await roblox_news_module.purger_file_actu()
 
         #  Le bilan, TOUJOURS — pas seulement quand quelque chose déborde.
         #  C'est cette ligne qu'on cherche dans Railway quand « rien ne sort ».
@@ -13589,7 +13644,26 @@ async def veille_roblox_task():
                   f"{_sn['plafonnes']} au-delà du quota "
                   f"({roblox_news_module.MAX_BILLETS_PAR_PASSAGE}/source, frais et non "
                   f"publiés — repris au prochain passage) · "
-                  f"{_sn['echecs']} échec(s) d'envoi")
+                  f"{_sn['echecs']} échec(s) d'envoi · "
+                  #  ⚠️ LES « POINTEURS » N'ÉTAIENT IMPRIMÉS NULLE PART.
+                  #  `grep -c pointeur bot.py` rendait 0 : le compteur existait
+                  #  dans le module, n'était lu que par le bouton manuel, et le
+                  #  bilan automatique n'en disait rien. Trois semaines de notes
+                  #  de version ont ainsi disparu sans laisser une ligne.
+                  f"{_sn.get('pointeurs', 0)} écarté(s) comme « allez voir ce "
+                  f"lien » · {_sn.get('enfiles', 0)} mise(s) en file")
+            _fn = _sn.get("file") or {}
+            if _fn:
+                print(f"[veille_roblox_task]   file d'actualités : "
+                      f"{_fn.get('attente', 0)} en attente · "
+                      f"{_fn.get('envoyees', 0)} envoyée(s) au total"
+                      + (f" · ⚠️ {_fn['abandonnees']} abandonnée(s) après "
+                         f"{roblox_news_module.MAX_ESSAIS_ACTU} essais"
+                         if _fn.get("abandonnees") else ""))
+            if _sn.get("non_marquees"):
+                print(f"[veille_roblox_task]   ⚠️ {_sn['non_marquees']} "
+                      f"actualité(s) PARTIE(S) que la base n'a pas pu marquer "
+                      f"— elles repartiront, donc un doublon est probable.")
         #  ⚠️ ZÉRO PUBLICATION → ON DIT L'ÉTAT DE CHAQUE SERVEUR. Le cas qui a
         #  coûté onze heures au propriétaire : un flux allumé, l'autre éteint,
         #  et un bilan qui ne montrait que le total.

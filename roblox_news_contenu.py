@@ -69,6 +69,22 @@ def setup(*, log=None):
 #  prend la part du lion ; titre, méta et mention se partagent le reste.
 BUDGET_CORPS = 2400
 BUDGET_TITRE = 200
+
+#  ⚠️ CE QU'ON ENVOIE À TRADUIRE, ET C'EST BIEN PLUS PETIT — corrigé le
+#  30/08/2026. On traduisait `BUDGET_CORPS` = 2 400 caractères alors que la
+#  fiche n'en affiche jamais plus de 800 (`roblox_panneau.BUDGET_FR_AFFICHE`).
+#  Mesuré bout en bout : 2 902 caractères traduits, 687 affichés — **77 % du
+#  texte payé et traduit n'atteignait jamais le lecteur**, à chaque billet et
+#  à chaque relevé. Sur DeepL c'est du quota jeté ; sur MyMemory c'est du
+#  débit gaspillé vers un service gratuit qui finit par refuser.
+#
+#  1 000 et non 800 : le français est plus long que l'anglais (de 15 à 20 %
+#  selon les textes). Traduire 1 000 caractères d'anglais en rend ~1 150 en
+#  français, dont 800 seront montrés — la marge couvre l'expansion sans
+#  couper une phrase au milieu, et le reste est coupé PROPREMENT à l'affichage.
+#  `BUDGET_CORPS` reste à 2 400 : il borne le corps ORIGINAL, qui sert à la
+#  mise en relation avec les accessoires et à l'extrait de vérification.
+BUDGET_CORPS_TRADUIT = 1000
 #  MediaGallery accepte 10. Six : le billet 4779420 (mesuré) porte cinq
 #  captures et UN GIF animé de démonstration en cinquième position — à quatre,
 #  le média le plus parlant sautait. Au-delà de six, la grille ne se lit plus.
@@ -78,6 +94,22 @@ MAX_VIDEOS = 2
 #  est un « pointeur ». 300 caractères : « Release notes for 734 is here! »
 #  en fait 70 ; le plus court billet de fond mesuré en fait 900+.
 SEUIL_POINTEUR = 300
+
+#  En dessous de ça, un billet ne peut RIEN énoncer : c'est une phrase de
+#  politesse et un lien. Mesuré : « Hi all, release notes for 734 is here! Have
+#  a great rest of your week. » = 70 caractères.
+SEUIL_RIEN_A_DIRE = 100
+
+#  ⚠️ LES TOURNURES QUI RENVOIENT AILLEURS, et elles seules. Un billet court
+#  qui n'en contient AUCUNE énonce quelque chose par lui-même — c'est le cas
+#  des alertes de plateforme, qu'on jetait à tort avant le 30/08/2026.
+_MOTIF_RENVOI = re.compile(
+    r"\b(?:is|are)\s+(?:now\s+)?(?:here|live|available|out)\b"
+    r"|\b(?:click|read|see|check\s+(?:it\s+)?out|find\s+(?:it|them)|learn\s+more"
+    r"|more\s+(?:info|details)|full\s+(?:details|notes|list)|details\s+here)\b"
+    r"|\b(?:voir|consulter|retrouvez|d[ée]couvrez|plus\s+de\s+d[ée]tails"
+    r"|disponibles?\s+ici|c'est\s+par\s+ici)\b",
+    re.I)
 
 #  ── Domaines d'images autorisés ────────────────────────────────────────────
 DOMAINES_IMAGES = (
@@ -349,9 +381,25 @@ def est_pointeur(texte: str, html: str) -> bool:
     un test. `texte` ne sert plus que de repli quand `html` est vide.
     """
     complet = _texte(html) if html else (texte or "")
-    if len(complet.strip()) >= SEUIL_POINTEUR:
+    n = len(complet.strip())
+    if n >= SEUIL_POINTEUR:
         return False
-    return bool(re.search(r'<a[^>]+href="https?://', html or ""))
+    if not re.search(r'<a[^>]+href="https?://', html or ""):
+        return False
+    #  ⚠️ « COURT + UN LIEN » NE SUFFIT PAS — CORRIGÉ LE 30/08/2026.
+    #  Cette règle jetait une alerte de plateforme COMPLÈTE :
+    #    « We are aware of an issue preventing some users from logging in… »
+    #    127 caractères, un lien vers la page d'état → écartée, sans un mot.
+    #  C'est exactement le billet qu'on a le plus besoin de voir VITE.
+    #
+    #  Ce qui sépare les deux cas n'est pas la longueur, c'est ce que le texte
+    #  FAIT. « Release notes for 734 is here! » annonce l'existence d'un
+    #  contenu ailleurs ; l'alerte, elle, énonce un fait. On écarte donc
+    #  seulement si le billet RENVOIE explicitement — ou s'il est si court
+    #  qu'il ne peut rien énoncer du tout.
+    if n < SEUIL_RIEN_A_DIRE:
+        return True
+    return bool(_MOTIF_RENVOI.search(complet))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -529,7 +577,7 @@ async def enrichir_billet(billet: dict, html_corps: str, langue: str = "en") -> 
         #  Titre et corps dans UN appel : moins de requêtes, et le titre reste
         #  cohérent avec le texte.
         bloc = f"{billet.get('titre') or ''}\n\n{corps}".strip()
-        fr, par = await traduire(bloc[:BUDGET_TITRE + BUDGET_CORPS + 4])
+        fr, par = await traduire(bloc[:BUDGET_TITRE + BUDGET_CORPS_TRADUIT + 4])
         if fr:
             titre_fr, _, corps_fr = fr.partition("\n\n")
             billet["titre_fr"] = titre_fr.strip()[:BUDGET_TITRE] or None

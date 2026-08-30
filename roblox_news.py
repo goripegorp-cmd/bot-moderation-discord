@@ -31,6 +31,7 @@ source porte sa propre échéance ; un passage n'en interroge qu'une poignée.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
 import roblox_news_contenu as contenu
@@ -190,6 +191,28 @@ async def init_db():
             " cle TEXT PRIMARY KEY,"
             " dernier_essai TEXT, dernier_succes TEXT,"
             " dernier_code INTEGER, echecs INTEGER NOT NULL DEFAULT 0)")
+        #  La file d'attente d'envoi — voir le bloc « La file d'attente des
+        #  actualités » plus bas pour ce qu'elle répare exactement.
+        #  ⚠️ `topic_id` EST TEXT ICI alors qu'il est INTEGER dans
+        #  `roblox_news_publies`. Les sources hors forum (newsroom) n'ont pas
+        #  d'identifiant numérique : leur clé est un slug. La contrainte
+        #  d'unicité doit couvrir les deux, sinon deux billets de sources
+        #  différentes pourraient se télescoper.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS roblox_news_file("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " guild_id INTEGER NOT NULL,"
+            " topic_id TEXT NOT NULL,"
+            " charge TEXT NOT NULL,"
+            " detecte_le TEXT NOT NULL,"
+            " message_id INTEGER,"
+            " envoye_le TEXT,"
+            " essais INTEGER NOT NULL DEFAULT 0,"
+            " dernier_echec TEXT,"
+            " UNIQUE(guild_id, topic_id))")
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_roblox_news_file_attente"
+            " ON roblox_news_file(guild_id, envoye_le, detecte_le)")
         await db.commit()
 
 
@@ -890,3 +913,195 @@ async def diagnostic() -> list[dict]:
     except Exception as ex:
         _log(f"[roblox_news diagnostic] {ex}")
     return out
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La file d'attente des actualités
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+#  ⚠️ CE QU'ELLE RÉPARE, ET C'EST MESURÉ (audit du 30/08/2026).
+#
+#  1. LA PERTE DÉFINITIVE À HUIT JOURS. `absorber_vieux` marque un billet
+#     « publié » SANS l'envoyer dès qu'il dépasse `AMORCE_GARDE_JOURS`. C'est
+#     le bon geste pour ne pas déverser l'historique — mais il n'y avait aucune
+#     étape entre « détecté » et « absorbé ». Une source en 403 pendant huit
+#     jours, un bot arrêté huit jours, un salon interdit huit jours, et
+#     l'actualité était perdue POUR TOUJOURS. Pire, le bouton « ♻️ Tout
+#     republier » promet mot pour mot « ce qui est déjà connu peut de nouveau
+#     sortir » : c'est FAUX au-delà de huit jours, puisque le relevé suivant
+#     repose la marque sans rien envoyer.
+#     Avec la file, un billet détecté est PERSISTÉ tout de suite. Il n'a plus
+#     besoin d'être re-relevé pour sortir.
+#
+#  2. LA FAMINE PAR BUDGET PARTAGÉ. Les accessoires et les actualités se
+#     partageaient `MAX_PUBLICATIONS_PAR_PASSAGE` = 12, et les accessoires
+#     passaient EN PREMIER. Douze fiches d'accessoires en file, et les
+#     actualités recevaient zéro publication — passage après passage.
+#
+#  3. AUCUN RÉESSAI BORNÉ. Un envoi Discord refusé se recomptait à chaque
+#     relevé jusqu'à ce que le billet ait huit jours, puis disparaissait.
+#
+#  Même dessin que `roblox_veille.roblox_transitions`, éprouvé le même jour :
+#  contrainte d'unicité pour ne jamais enfiler deux fois, réservation avant
+#  envoi pour ne jamais publier deux fois, marquage APRÈS l'envoi réussi.
+
+MAX_ESSAIS_ACTU = 5
+
+
+async def enfiler_actu(guild_id: int, billet: dict) -> bool:
+    """Met un billet en file. True s'il y entre pour la première fois."""
+    try:
+        tid = int(billet["topic_id"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    try:
+        async with _get_db() as db:
+            cur = await db.execute(
+                "INSERT OR IGNORE INTO roblox_news_file(guild_id, topic_id,"
+                " charge, detecte_le) VALUES(?,?,?,?)",
+                (int(guild_id), tid,
+                 json.dumps(billet, ensure_ascii=False, default=str),
+                 datetime.now(timezone.utc).isoformat()))
+            await db.commit()
+            return bool(cur.rowcount)
+    except Exception as ex:
+        _log(f"[roblox_news enfiler_actu] {ex}")
+        return False
+
+
+async def actus_a_envoyer(guild_id: int, limite: int = 5) -> list[dict]:
+    """Les billets en attente, le plus ancien d'abord."""
+    out = []
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT id, charge, essais FROM roblox_news_file"
+                " WHERE guild_id=? AND envoye_le IS NULL AND essais<?"
+                " ORDER BY detecte_le ASC, id ASC LIMIT ?",
+                (int(guild_id), MAX_ESSAIS_ACTU, int(limite))) as cur:
+                for r in await cur.fetchall():
+                    try:
+                        out.append({"id": int(r[0]),
+                                    "billet": json.loads(r[1]),
+                                    "essais": int(r[2] or 0)})
+                    except Exception:
+                        await noter_echec_actu(int(r[0]), "charge illisible")
+    except Exception as ex:
+        _log(f"[roblox_news actus_a_envoyer] {ex}")
+    return out
+
+
+async def reserver_actu(ligne_id: int, essais_vus: int) -> bool:
+    """Réserve avant d'envoyer. Voir `roblox_veille.reserver` pour le pourquoi.
+
+    ⚠️ La boucle et le bouton « Relever maintenant » peuvent tirer la même
+    ligne. `essais` sert de jeton : un seul des deux réussit son UPDATE.
+    """
+    try:
+        async with _get_db() as db:
+            cur = await db.execute(
+                "UPDATE roblox_news_file SET essais=?"
+                " WHERE id=? AND envoye_le IS NULL AND essais=?",
+                (int(essais_vus) + 1, int(ligne_id), int(essais_vus)))
+            await db.commit()
+            return bool(cur.rowcount)
+    except Exception as ex:
+        _log(f"[roblox_news reserver_actu] {ex}")
+        return False          # fail-closed : dans le doute, on n'envoie pas
+
+
+async def marquer_actu_envoyee(ligne_id: int, message_id=None) -> bool:
+    """Le billet est parti. Rend False si la base n'a pas pris la marque —
+    auquel cas il repartira, et l'appelant doit pouvoir le dire."""
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE roblox_news_file SET envoye_le=?, message_id=?"
+                " WHERE id=?",
+                (datetime.now(timezone.utc).isoformat(),
+                 int(message_id) if message_id else None, int(ligne_id)))
+            await db.commit()
+        return True
+    except Exception as ex:
+        _log(f"[roblox_news marquer_actu_envoyee] ⚠️ le billet {ligne_id} est "
+             f"PARTI mais n'a pas pu être marqué — il repartira : {ex}")
+        return False
+
+
+async def noter_echec_actu(ligne_id: int, motif: str) -> None:
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE roblox_news_file SET essais=essais+1, dernier_echec=?"
+                " WHERE id=?", (str(motif)[:200], int(ligne_id)))
+            await db.commit()
+    except Exception as ex:
+        _log(f"[roblox_news noter_echec_actu] {ex}")
+
+
+async def relancer_actus_abandonnees(guild_id: int) -> int:
+    """Remet à zéro les essais des billets abandonnés. Rend le nombre.
+
+    Sans ce chemin, un salon interdit cinq passages d'affilée condamnait le
+    billet : `enfiler_actu` refuse de le réinsérer (unicité) et
+    `oublier_publies` ne touche pas cette table.
+    """
+    try:
+        async with _get_db() as db:
+            cur = await db.execute(
+                "UPDATE roblox_news_file SET essais=0, dernier_echec=NULL"
+                " WHERE guild_id=? AND envoye_le IS NULL AND essais>=?",
+                (int(guild_id), MAX_ESSAIS_ACTU))
+            await db.commit()
+            return int(cur.rowcount or 0)
+    except Exception as ex:
+        _log(f"[roblox_news relancer_actus_abandonnees] {ex}")
+        return 0
+
+
+async def etat_file_actu(guild_id: int | None = None) -> dict:
+    """Ce que contient la file d'actualités. Pour le bilan et `/roblox sante`."""
+    out = {"attente": 0, "envoyees": 0, "abandonnees": 0, "plus_vieille": None}
+    ou, args = "", []
+    if guild_id is not None:
+        ou, args = " WHERE guild_id=?", [int(guild_id)]
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT"
+                "  SUM(CASE WHEN envoye_le IS NULL AND essais<? THEN 1 ELSE 0 END),"
+                "  SUM(CASE WHEN envoye_le IS NOT NULL THEN 1 ELSE 0 END),"
+                "  SUM(CASE WHEN envoye_le IS NULL AND essais>=? THEN 1 ELSE 0 END),"
+                "  MIN(CASE WHEN envoye_le IS NULL THEN detecte_le END)"
+                " FROM roblox_news_file" + ou,
+                    [MAX_ESSAIS_ACTU, MAX_ESSAIS_ACTU] + args) as cur:
+                row = await cur.fetchone()
+        if row:
+            out["attente"] = int(row[0] or 0)
+            out["envoyees"] = int(row[1] or 0)
+            out["abandonnees"] = int(row[2] or 0)
+            out["plus_vieille"] = row[3]
+    except Exception as ex:
+        _log(f"[roblox_news etat_file_actu] {ex}")
+    return out
+
+
+async def purger_file_actu(jours: int = 180) -> int:
+    """Borne la file. ⚠️ ON N'EFFACE QUE CE QUI EST PARTI, JAMAIS CE QUI ATTEND —
+    supprimer une ligne en attente la remettrait en file, donc la republierait.
+    Les abandonnées partent au même âge : elles sont perdues de toute façon,
+    autant que la table ne le soit pas."""
+    n = 0
+    try:
+        vieux = (datetime.now(timezone.utc) - timedelta(days=int(jours))).isoformat()
+        async with _get_db() as db:
+            cur = await db.execute(
+                "DELETE FROM roblox_news_file WHERE"
+                " (envoye_le IS NOT NULL AND envoye_le < ?)"
+                " OR (envoye_le IS NULL AND essais >= ? AND detecte_le < ?)",
+                (vieux, MAX_ESSAIS_ACTU, vieux))
+            await db.commit()
+            n = int(cur.rowcount or 0)
+    except Exception as ex:
+        _log(f"[roblox_news purger_file_actu] {ex}")
+    return n

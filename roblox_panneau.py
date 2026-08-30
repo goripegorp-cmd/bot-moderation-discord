@@ -1300,6 +1300,14 @@ class RobloxPanelV2(LayoutView):
             #  réparait la permission et rien ne revenait. C'est ici que le
             #  chemin de retour a sa place : c'est LE bouton « débloque tout ».
             n_file = await veille.relancer_abandonnees(self.g.id)
+            #  ⚠️ ET CELLES DES ACTUALITÉS. Le texte de ce bouton promet mot
+            #  pour mot « ce qui est déjà connu peut de nouveau sortir ».
+            #  C'était FAUX côté actualités : `oublier_publies` efface la marque
+            #  de publication, mais un billet abandonné après cinq échecs
+            #  d'envoi restait hors de la file, et `enfiler_actu` refusait de le
+            #  réinsérer (contrainte d'unicité). La panne réparée, le billet
+            #  restait mort.
+            n_file += await news.relancer_actus_abandonnees(self.g.id)
             self._dernier = (
                 f"♻️ `{n}` marque(s) d'article et `{n_news}` marque(s) "
                 f"d'actualité effacée(s). Ce qui est déjà connu peut de nouveau "
