@@ -1330,7 +1330,16 @@ async def rattraper_nouveautes(guild_id: int, combien: int = 12) -> dict:
 
     Rend `{"candidats", "enfiles", "plus_vieux_j"}`.
     """
-    out = {"candidats": 0, "enfiles": 0, "plus_vieux_j": None}
+    #  ⚠️ `deja_en_file` EXISTE PARCE QUE LE MESSAGE MENTAIT. Au deuxième clic,
+    #  `enfiler` rend False sur toute la ligne (contrainte d'unicité : elles
+    #  sont déjà en file) et le panneau affichait « 0 accessoire(s) remis en
+    #  file sur 12 retenu(s) ». Le propriétaire l'a lu comme une panne — c'était
+    #  au contraire la preuve que le premier clic avait marché. Rejoué le
+    #  30/08 : clic 1 → 12 enfilées ; clic 2 → 0 enfilées, 12 EN ATTENTE.
+    #  Un compteur qui ne distingue pas « échoué » de « déjà fait » est un
+    #  compteur qui accuse le code à tort.
+    out = {"candidats": 0, "enfiles": 0, "deja_en_file": 0,
+           "plus_vieux_j": None}
     try:
         combien = max(1, min(int(combien), 30))
     except (TypeError, ValueError):
@@ -1393,6 +1402,8 @@ async def rattraper_nouveautes(guild_id: int, combien: int = 12) -> dict:
         for a in retenus:
             if await enfiler(guild_id, a, "nouveautes"):
                 out["enfiles"] += 1
+            else:
+                out["deja_en_file"] += 1
         vieux = [_jours_depuis(a.get("cree_le")) for a in retenus]
         vieux = [v for v in vieux if v is not None]
         out["plus_vieux_j"] = max(vieux) if vieux else None

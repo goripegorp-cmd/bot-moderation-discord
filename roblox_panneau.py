@@ -827,23 +827,43 @@ class RobloxPanelV2(LayoutView):
         try:
             await i.response.defer()
             r = await veille.rattraper_nouveautes(self.g.id, combien=12)
+            _file = await veille.etat_file(self.g.id)
             if not r["candidats"]:
                 self._dernier = (
                     "⚪ Rien à rattraper — tous les accessoires récents sont "
                     "déjà sortis, ou aucun n'a moins de "
                     f"`{veille.AGE_MAX_JOURS}` jours.")
+            elif r["enfiles"] == 0 and r["deja_en_file"]:
+                #  ⚠️ CE CAS N'ÉTAIT PAS DISTINGUÉ, ET IL A FAIT CROIRE À UNE
+                #  PANNE. « 0 remis en file sur 12 retenu(s) » se lit comme un
+                #  échec ; c'est en réalité la preuve que le clic précédent a
+                #  réussi et que les fiches attendent leur tour.
+                self._dernier = (
+                    f"✅ Déjà fait — les `{r['deja_en_file']}` accessoire(s) "
+                    f"sont **déjà en file** depuis un clic précédent, rien "
+                    f"n'a été perdu.\n"
+                    f"-# `{_file.get('attente', 0)}` fiche(s) attendent en "
+                    f"base. Elles partent toutes seules au prochain passage "
+                    f"(dans 30 min au plus), ou tout de suite avec "
+                    f"« Relever maintenant » — qui prend environ **4 minutes**, "
+                    f"le temps des pauses anti-blocage de Roblox.")
             else:
                 self._dernier = (
-                    f"📦 `{r['enfiles']}` accessoire(s) remis en file sur "
-                    f"`{r['candidats']}` retenu(s).\n"
+                    f"📦 `{r['enfiles']}` accessoire(s) remis en file"
+                    + (f" (`{r['deja_en_file']}` y étaient déjà)"
+                       if r["deja_en_file"] else "")
+                    + f", sur `{r['candidats']}` retenu(s).\n"
                     + (f"-# ⚠️ Le plus ancien du lot a `{r['plus_vieux_j']}` "
                        f"jours : ce sont les DERNIÈRES créations de Roblox, "
                        f"pas des nouveautés du jour. Roblox n'a rien créé "
                        f"depuis.\n" if r.get("plus_vieux_j") else "")
                     + f"-# Ils partiront par paquets de "
-                      f"`{veille.MAX_PUBLICATIONS_PAR_PASSAGE}`, du plus "
-                      f"ancien au plus récent. Cliquez « Relever maintenant » "
-                      f"pour ne pas attendre.")
+                      f"`{veille.MAX_PUBLICATIONS_PAR_PASSAGE}`, **du plus "
+                      f"ancien au plus récent** — la dernière fiche du salon "
+                      f"sera donc la création la plus récente.\n"
+                      f"-# Au prochain passage (30 min au plus), ou tout de "
+                      f"suite avec « Relever maintenant » — comptez environ "
+                      f"**4 minutes**, le temps des pauses anti-blocage.")
             await self.render_to(i, edit=True)
         except Exception as ex:
             _log(f"[roblox rattraper] {ex}")
@@ -952,6 +972,27 @@ class RobloxPanelV2(LayoutView):
         """
         try:
             await i.response.defer()
+            #  ⚠️ ON DIT QU'ON TRAVAILLE, AVANT DE TRAVAILLER.
+            #  Ce bouton met plus de QUATRE MINUTES : deux relevés paginés
+            #  (~90 s), la pause obligatoire entre eux (65 s), la respiration
+            #  avant les fiches (60 s), un appel d'économie par article, puis
+            #  deux secondes entre chaque publication. Toutes ces pauses
+            #  existent pour ne pas se faire bloquer par Roblox — on ne les
+            #  raccourcit pas. Mais sans un mot, le panneau reste figé et le
+            #  propriétaire en conclut que le bouton est cassé. Il l'a conclu
+            #  le 30/08, et il avait toutes les raisons de le croire.
+            _att = (await veille.etat_file(self.g.id)).get("attente", 0)
+            self._dernier = (
+                "⏳ **Relevé en cours…** comptez environ **4 minutes**.\n"
+                "-# Le bot enchaîne deux relevés paginés du catalogue, puis "
+                "les pauses obligatoires pour ne pas se faire bloquer par "
+                "Roblox. Ce message sera remplacé par le compte rendu."
+                + (f"\n-# `{_att}` fiche(s) attendent déjà en file : elles "
+                   f"partiront pendant ce relevé." if _att else ""))
+            try:
+                await self.render_to(i, edit=True)
+            except Exception:
+                pass          # l'affichage d'attente est un confort, pas le travail
             rel = await veille.relever_nouveautes(limite=120)
             if rel["code"] != 200:
                 self._dernier = (

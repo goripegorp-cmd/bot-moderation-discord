@@ -334,3 +334,84 @@ def test_les_fiches_sont_redemandees_en_UN_appel():
         "le rattrapage interroge Roblox article par article")
     lot = inspect.getsource(veille.fiches_par_ids)
     assert "propres[:120]" in lot
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Le second clic, et l'ordre de sortie — signalés par le propriétaire le 30/08
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_le_second_clic_dit_DEJA_FAIT_et_pas_un_echec(banc, monkeypatch):
+    """⚠️ LE MESSAGE ACCUSAIT LE CODE À TORT. Capture du propriétaire :
+    « 0 accessoire(s) remis en file sur 12 retenu(s) », qu'il a lu comme une
+    panne. C'était l'inverse : son premier clic avait réussi, les douze fiches
+    attendaient en file, et `enfiler` les ignorait — c'est le rôle de la
+    contrainte d'unicité. Un compteur qui ne distingue pas « échoué » de
+    « déjà fait » fait chercher un défaut là où il n'y en a pas."""
+    await veille.init_db()
+    arts = [_brut(i, 38) for i in range(1, 6)]
+    await veille.comparer_et_enregistrer(veille._normaliser(arts))
+
+    async def _faux_fiches(ids, item_type="Asset"):
+        return veille._normaliser([a for a in arts if a["id"] in set(ids)])
+
+    monkeypatch.setattr(veille, "fiches_par_ids", _faux_fiches)
+
+    r1 = await veille.rattraper_nouveautes(1, combien=12)
+    assert r1["enfiles"] == 5 and r1["deja_en_file"] == 0
+
+    r2 = await veille.rattraper_nouveautes(1, combien=12)
+    assert r2["candidats"] == 5, "les articles restent des candidats"
+    assert r2["enfiles"] == 0
+    assert r2["deja_en_file"] == 5, (
+        "le second clic doit dire « déjà en file », pas laisser croire à un "
+        "échec")
+    #  Et rien n'a été perdu ni dupliqué.
+    assert (await veille.etat_file(1))["attente"] == 5
+
+
+@pytest.mark.asyncio
+async def test_la_file_sort_du_plus_VIEUX_au_plus_RECENT(banc, monkeypatch):
+    """⚠️ DEMANDE EXPLICITE DU PROPRIÉTAIRE, 30/08 : « il publie du plus vieux
+    au plus récent, ça veut dire qu'on a vraiment à la fin le dernier des
+    derniers ». Discord empile vers le bas : envoyer le plus ancien d'abord
+    fait que la DERNIÈRE fiche du salon est la création la plus récente.
+
+    ⚠️ CE TEST A DÛ ÊTRE REFAIT. La première version donnait la MÊME date à
+    tous les articles : `dates == sorted(dates)` passait alors trivialement et
+    n'éprouvait rien du tout."""
+    await veille.init_db()
+    #  Dates DISTINCTES : l'article 1 est le plus vieux, le 12 le plus récent.
+    arts = [_brut(i, 40 - i) for i in range(1, 13)]
+    await veille.comparer_et_enregistrer(veille._normaliser(arts))
+
+    async def _faux_fiches(ids, item_type="Asset"):
+        return veille._normaliser([a for a in arts if a["id"] in set(ids)])
+
+    monkeypatch.setattr(veille, "fiches_par_ids", _faux_fiches)
+    await veille.rattraper_nouveautes(1, combien=12)
+
+    lot = await veille.a_envoyer(1, limite=12)
+    dates = [e["article"]["cree_le"] for e in lot]
+    assert len(set(dates)) == len(dates), (
+        "le banc doit donner des dates DISTINCTES, sinon il ne prouve rien")
+    assert dates == sorted(dates), (
+        "la file ne sort pas du plus ancien au plus récent : la dernière fiche "
+        "du salon ne serait pas la création la plus récente")
+    assert lot[-1]["article"]["asset_id"] == 12, (
+        "le dernier envoyé doit être l'article le plus récemment créé")
+
+
+def test_le_bouton_annonce_qu_il_va_etre_long():
+    """⚠️ QUATRE MINUTES SANS UN MOT SE LISENT COMME UNE PANNE — et c'est ce
+    que le propriétaire a conclu. Les pauses sont obligatoires (deux relevés
+    paginés, la pause entre eux, la respiration avant les fiches) : on ne les
+    raccourcit pas, on prévient."""
+    src = (RACINE / "roblox_panneau.py").read_text(encoding="utf-8")
+    bloc = src.split("async def _cb_relever")[1][:2500]
+    assert "Relevé en cours" in bloc, (
+        "le bouton ne dit pas qu'il travaille : le panneau reste figé")
+    i_attente = bloc.index("Relevé en cours")
+    i_travail = bloc.index("veille.relever_nouveautes(")
+    assert i_attente < i_travail, (
+        "le message d'attente est affiché APRÈS le travail : il ne sert à rien")
