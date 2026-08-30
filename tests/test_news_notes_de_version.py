@@ -247,3 +247,132 @@ async def test_une_panne_de_la_doc_ne_fait_pas_tomber_le_billet(monkeypatch):
     monkeypatch.setattr(contenu, "traduire", _pas_de_traduction)
     b = await contenu.enrichir_billet({"titre": "T"}, "<p>court</p>", "en")
     assert isinstance(b, dict) and "pointeur" in b
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Deux défauts vus dans les JOURNAUX DE PRODUCTION du 30/08
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_un_repli_qui_reussit_ne_journalise_pas_d_echec(monkeypatch):
+    """⚠️ VU EN PRODUCTION : deux lignes « HTTP 404 sur
+    /docs/release-notes/release-notes-734.md » alors que le repli par le lundi
+    réussissait juste après, en silence. Deux lignes rouges pour un
+    fonctionnement NORMAL — et c'est exactement ce qui fait chercher un défaut
+    là où il n'y en a pas."""
+    dits = []
+
+    class _Rep:
+        def __init__(self, statut, corps=""):
+            self.status = statut
+            self.headers = {"Content-Type": "text/markdown; charset=utf-8"}
+            self._c = corps
+
+        async def text(self):
+            return self._c
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Sess:
+        def get(self, url):
+            #  Le premier chemin échoue, le repli réussit — le cas réel.
+            if "release-notes" in url:
+                return _Rep(404)
+            return _Rep(200, "## Fixes\n- Une correction.")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(contenu, "_ouvrir_contenu", lambda: _Sess())
+    monkeypatch.setattr(contenu, "_log", lambda m: dits.append(str(m)))
+
+    html = ('<a href="https://create.roblox.com/docs/release-notes/'
+            'release-notes-734">ici</a>')
+    corps = await contenu.corps_documentation(
+        html, date_iso="2026-08-11T18:00:00Z")
+
+    assert corps and "correction" in corps
+    assert dits == [], (
+        "un repli qui réussit ne doit RIEN journaliser : le journal criait à "
+        "la panne sur un fonctionnement normal")
+
+
+@pytest.mark.asyncio
+async def test_un_echec_TOTAL_est_journalise_avec_toutes_les_tentatives(monkeypatch):
+    """La contre-épreuve : sans elle, on aurait rendu le module muet, ce qui
+    est pire que trop bavard."""
+    dits = []
+
+    class _Rep:
+        status = 404
+        headers = {}
+
+        async def text(self):
+            return ""
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Sess:
+        def get(self, url):
+            return _Rep()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(contenu, "_ouvrir_contenu", lambda: _Sess())
+    monkeypatch.setattr(contenu, "_log", lambda m: dits.append(str(m)))
+    html = ('<a href="https://create.roblox.com/docs/release-notes/'
+            'release-notes-734">ici</a>')
+    assert await contenu.corps_documentation(
+        html, date_iso="2026-08-11T18:00:00Z") is None
+    assert len(dits) == 1, "un seul message, pas un par tentative"
+    #  Et il nomme LES DEUX chemins essayés : sans ça, on ne sait pas si le
+    #  repli a seulement été tenté.
+    assert "release-notes-734" in dits[0] and "updates/2026-08-10" in dits[0]
+
+
+def test_le_suivi_du_marche_s_efface_pendant_le_passage_de_la_veille():
+    """⚠️ MESURE DE PRODUCTION : `reste_min=2/12` sur le chemin du catalogue,
+    après l'ajout du relevé hors vente (13 requêtes). Les deux boucles tapent
+    la MÊME route : une requête de suivi tombant dans cette fenêtre serait
+    celle de trop."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "bot.py").read_text(
+        encoding="utf-8")
+    assert "_veille_catalogue_en_cours" in src
+    corps = next(ast.unparse(n) for n in ast.walk(ast.parse(src))
+                 if isinstance(n, ast.AsyncFunctionDef)
+                 and n.name == "veille_marche_task")
+    assert "if _veille_catalogue_en_cours" in corps, (
+        "le suivi ne s'efface pas pendant le passage : collision de débit")
+
+
+def test_le_drapeau_est_toujours_rendu_meme_sur_exception():
+    """⚠️ SANS `finally`, une exception laisserait le drapeau levé pour
+    toujours : `veille_marche_task` s'effacerait à CHAQUE passage, en silence.
+    Une boucle vivante qui ne fait plus rien est le pire des deux mondes."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "bot.py").read_text(
+        encoding="utf-8")
+    corps = next(ast.unparse(n) for n in ast.walk(ast.parse(src))
+                 if isinstance(n, ast.AsyncFunctionDef)
+                 and n.name == "veille_roblox_task")
+    #  Le dernier bloc de la fonction doit remettre le drapeau à faux.
+    fin = corps.split("except Exception as ex:")[-1]
+    assert "_veille_catalogue_en_cours = False" in fin, (
+        "le drapeau n'est pas rendu en cas d'exception")
+    assert "finally:" in corps

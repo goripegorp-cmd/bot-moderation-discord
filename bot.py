@@ -13118,6 +13118,13 @@ async def veille_roblox_task():
 
         # ── Les articles ────────────────────────────────────────────────────
         if guildes_items:
+            #  ⚠️ ON RÉSERVE LE BUDGET DU CHEMIN. `veille_marche_task` tape la
+            #  même route et s'efface tant que ce drapeau est levé — voir son
+            #  commentaire. Il est abaissé dans le `finally` en fin de bloc :
+            #  le laisser levé sur une exception tuerait le suivi jusqu'au
+            #  prochain redémarrage, en silence.
+            global _veille_catalogue_en_cours
+            _veille_catalogue_en_cours = True
             rel = await roblox_module.relever_nouveautes(limite=120)
             _sa["lus"] = len(rel.get("articles") or [])
             _sa["pages"] = rel.get("pages", 0)
@@ -13425,6 +13432,9 @@ async def veille_roblox_task():
             #  compteur « plafonnés » d'avant, et il ne ment pas.
             _sa["file"] = await roblox_module.etat_file()
             await roblox_module.purger()
+            #  Le chemin du catalogue est rendu au suivi de la tête de
+            #  classement. Voir `_veille_catalogue_en_cours`.
+            _veille_catalogue_en_cours = False
 
         # ── L'actualite ─────────────────────────────────────────────────────
         if guildes_news:
@@ -13732,6 +13742,12 @@ async def veille_roblox_task():
                      if _att is not None else ""))
     except Exception as ex:
         print(f"[veille_roblox_task] {ex}")
+    finally:
+        #  ⚠️ TOUJOURS RENDRE LE CHEMIN. Une exception entre la levée et
+        #  l'abaissement du drapeau laisserait `veille_marche_task` s'effacer
+        #  À CHAQUE passage, pour toujours, et EN SILENCE — c'est-à-dire une
+        #  boucle vivante qui ne fait plus rien. Le `finally` ferme ce trou.
+        _veille_catalogue_en_cours = False
 
 
 @veille_roblox_task.before_loop
@@ -13756,9 +13772,23 @@ async def _veille_roblox_wait():
 #  ⚠️ ET ELLE N'ENVOIE RIEN. Elle observe et mémorise. Publier depuis ici
 #  doublerait le chemin d'envoi des accessoires, et deux chemins qui font la
 #  même chose divergent au premier correctif.
+#  ⚠️ LE DRAPEAU QUI ÉVITE LA COLLISION DE DÉBIT. Les deux boucles tapent le
+#  MÊME chemin (`/v2/search/items/details`), dont le budget mesuré est de
+#  12 requêtes par fenêtre de 60 s. Le passage de la veille en consomme 13 sur
+#  environ trois minutes, et le relevé du 30/08 est descendu à `reste_min=2`.
+#  Une requête de suivi tombant dans cette fenêtre-là serait celle de trop.
+#  Le suivi s'efface donc pendant le passage : il repassera quatre minutes plus
+#  tard, ce qui ne coûte rien à une tête de classement qui bouge de loin en
+#  loin.
+_veille_catalogue_en_cours = False
+
+
 @tasks.loop(minutes=4)
 async def veille_marche_task():
     """Suit le premier du classement officiel. Ne publie rien : il observe."""
+    if _veille_catalogue_en_cours:
+        #  Silencieux à dessein : ce n'est pas un incident, c'est une priorité.
+        return
     try:
         #  Aucun serveur n'a allumé la veille → rien à observer, on ne tape pas
         #  l'API pour rien. C'est la consigne « ne pas spammer une recherche

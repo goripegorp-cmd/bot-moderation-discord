@@ -681,27 +681,38 @@ async def corps_documentation(html: str, date_iso=None) -> str | None:
     #  qui sert à rien » que le propriétaire a interdit.
     if lien_documentation(html) is None:
         return None
+    #  ⚠️ ON NE CRIE PAS À LA PANNE SUR UN REPLI QUI MARCHE.
+    #  Constaté en production le 30/08 : le journal affichait
+    #  « HTTP 404 sur /docs/release-notes/release-notes-734.md » alors que le
+    #  repli par le lundi réussissait juste après, en silence. Deux lignes
+    #  rouges pour un fonctionnement NORMAL — et c'est exactement ce qui fait
+    #  chercher un défaut là où il n'y en a pas. On accumule les tentatives et
+    #  on ne journalise QUE si toutes échouent.
+    echecs = []
     try:
         async with _ouvrir_contenu() as sess:
             for chemin in chemins:
                 url = f"{DOMAINE_DOCS}{chemin}.md"
                 async with sess.get(url) as r:
                     if r.status != 200:
-                        _log(f"[roblox_news_contenu docs] HTTP {r.status} sur "
-                             f"{chemin}.md")
+                        echecs.append(f"{chemin}.md → HTTP {r.status}")
                         continue
                     type_contenu = str(r.headers.get("Content-Type") or "").lower()
                     if not type_contenu.startswith("text/markdown"):
                         #  La page d'erreur déguisée : elle rend 200, en HTML.
-                        _log(f"[roblox_news_contenu docs] {chemin}.md répond "
-                             f"en « {type_contenu} » et non en markdown")
+                        echecs.append(f"{chemin}.md → « {type_contenu} » "
+                                      f"au lieu de markdown")
                         continue
                     brut = await r.text()
                 texte = _markdown_en_texte(brut)
                 if texte:
                     return texte
+                echecs.append(f"{chemin}.md → markdown vide")
     except Exception as ex:
-        _log(f"[roblox_news_contenu docs] {type(ex).__name__}: {ex}")
+        echecs.append(f"{type(ex).__name__}: {ex}")
+    if echecs:
+        _log(f"[roblox_news_contenu docs] aucune page de documentation "
+             f"lisible — {' · '.join(echecs)}")
     return None
 
 
