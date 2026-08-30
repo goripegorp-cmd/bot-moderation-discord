@@ -152,8 +152,16 @@ def construire_fiche(article: dict, flux: str, image: str | None = None,
                                 article.get("item_type"))
     limited_u = bool(article.get("limited_u"))
     if flux == "bascules":
-        etiquette = ("VIENT DE PASSER LIMITED U" if limited_u
-                     else "VIENT DE PASSER LIMITED")
+        #  ⚠️ TROIS CLASSES, PAS DEUX — exigence de la spécification du 30/08 :
+        #  « Limited / LimitedUnique / Collectible ; le système doit distinguer
+        #  ces trois catégories ». Un `Collectible` est un UGC Limited : dire
+        #  « VIENT DE PASSER LIMITED » d'un UGC serait faux, et ce sont deux
+        #  marchés différents pour qui échange.
+        #  Repli sur `limited_u` pour les fiches mises en file AVANT ce
+        #  correctif : leur charge JSON n'a pas de champ `classe`.
+        _classe = article.get("classe") or (
+            veille.CLASSE_LIMITED_U if limited_u else veille.CLASSE_LIMITED)
+        etiquette = f"VIENT DE PASSER {veille.libelle_classe(_classe)}"
         pastille, couleur = "🔷", Palette.PREMIUM
     else:
         etiquette, pastille, couleur = "NOUVEL ACCESSOIRE ROBLOX", "🆕", Palette.INFO
@@ -269,7 +277,7 @@ def _autorisation_mention(ping_role):
 
 
 async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
-                   ping_role=None) -> bool:
+                   ping_role=None, trace: dict | None = None) -> bool:
     """L'envoi réel. Rend `True` UNIQUEMENT si un message est parti.
 
     ⚠️ PIÈGE À NE PAS DÉFAIRE — LE RETOUR DE `webhook_send` COMPTE.
@@ -305,9 +313,18 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
                      f"({getattr(salon, 'id', '?')}). Cause journalisée par "
                      f"[webhook_send] juste au-dessus.")
                 return False
+            #  ⚠️ LE TYPE DE RETOUR NE CHANGE PAS. Deux tests exigent
+            #  `is False` sur les chemins d'échec, et tous les appelants font
+            #  `if await publier(...)`. L'identifiant du message — que la
+            #  spécification du 30/08 demande d'enregistrer pour la file
+            #  d'attente — voyage donc par ce dictionnaire, pas par le retour.
+            if trace is not None:
+                trace["message_id"] = getattr(res, "id", None)
             return True
-        await salon.send(view=vue,
-                         allowed_mentions=_autorisation_mention(ping_role))
+        _msg = await salon.send(
+            view=vue, allowed_mentions=_autorisation_mention(ping_role))
+        if trace is not None:
+            trace["message_id"] = getattr(_msg, "id", None)
         return True
     except Exception as ex:
         #  Repli : un défaut de webhook ne doit pas faire taire le flux.
@@ -321,7 +338,8 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
 
 
 async def publier(guild, salon, article: dict, flux: str,
-                  image: str | None = None, lies: list | None = None) -> bool:
+                  image: str | None = None, lies: list | None = None,
+                  trace: dict | None = None) -> bool:
     """Publie une fiche, par webhook si possible. Fail-safe.
 
     Rend `True` seulement si le message est REELLEMENT parti — l'appelant
@@ -342,7 +360,7 @@ async def publier(guild, salon, article: dict, flux: str,
     vue = construire_fiche(article, flux, image=image, lies=lies,
                            ping_cle=cle, ping_role=role)
     return await _envoyer(salon, PLATEFORME.get(flux, "roblox_nouveautes"),
-                          vue, "publier", ping_role=role)
+                          vue, "publier", ping_role=role, trace=trace)
 
 
 #  ⚠️ LIMITE DURE : 4 000 caractères de texte au total dans un message V2
@@ -637,6 +655,10 @@ class RobloxPanelV2(LayoutView):
             else:
                 sante_news_txt = "⚪ aucun relevé d'actualité pour l'instant"
 
+            #  La file d'envoi de CE serveur. C'est le seul chiffre qui
+            #  distingue « rien à publier » de « tout est bloqué à l'envoi ».
+            _file = await veille.etat_file(self.g.id)
+
             items = [
                 v2_title("🎮 Veille Roblox"),
                 v2_subtitle("Nouveaux accessoires de Roblox · passages en "
@@ -657,12 +679,24 @@ class RobloxPanelV2(LayoutView):
                     + f"{'🟢' if c.get('roblox_news_enabled') else '⚪'} **Actualités** · "
                     + ("allumées" if c.get("roblox_news_enabled") else "éteintes")
                     + ("" if news_en_marche or not c.get("roblox_news_enabled")
-                       else "  ⚠️ _aucun salon d'actualité défini, rien ne sortira_")),
+                       else "  ⚠️ _aucun salon d'actualité défini, rien ne sortira_")
+                    #  ⚠️ UN MODE QUI RETIENT LES ENVOIS DOIT SE VOIR AU
+                    #  PREMIER COUP D'ŒIL. Oublié allumé, il ressemblerait
+                    #  trait pour trait à une panne — et c'est exactement le
+                    #  genre de confusion qui coûte des heures.
+                    + ("\n🧪 **Simulation ACTIVE** · rien ne part dans un "
+                       "salon, les fiches attendent en file"
+                       if c.get("roblox_veille_simulation") else "")),
                 v2_divider(),
                 v2_body("\n\n".join(lignes)),
                 v2_divider(),
                 v2_body(f"**État des relevés — accessoires**\n{sante_txt}\n"
-                        f"-# `{diag['articles_connus']}` article(s) connu(s)"),
+                        f"-# `{diag['articles_connus']}` article(s) connu(s)"
+                        f" · file d'envoi : `{_file.get('attente', 0)}` en "
+                        f"attente, `{_file.get('envoyees', 0)}` envoyée(s)"
+                        + (f", ⚠️ `{_file['abandonnees']}` abandonnée(s) après "
+                           f"`{veille.MAX_ESSAIS_ENVOI}` essais"
+                           if _file.get("abandonnees") else "")),
                 v2_body(f"**État des relevés — actualités**\n{sante_news_txt}"),
             ]
 
@@ -715,14 +749,27 @@ class RobloxPanelV2(LayoutView):
                              custom_id="rblx_reset")
             b_reset.callback = self._cb_oublier
 
+            #  ⚠️ LE MODE SIMULATION A BESOIN D'UN BOUTON, SINON IL N'EXISTE
+            #  PAS. Une clé de configuration que personne ne peut basculer est
+            #  du code mort : « une fonction non appelée n'est pas
+            #  opérationnelle, même parfaite ».
+            _simu = bool(c.get("roblox_veille_simulation"))
+            b_simu = Button(
+                label="Simulation" if _simu else "Simulation",
+                emoji="🧪" if _simu else "⚪",
+                style=(discord.ButtonStyle.danger if _simu
+                       else discord.ButtonStyle.secondary),
+                custom_id="rblx_toggle_simu")
+            b_simu.callback = self._cb_toggle_simulation
+
             b_back = Button(label="Retour", emoji="◀️",
                             style=discord.ButtonStyle.secondary,
                             custom_id="rblx_back")
             b_back.callback = self._cb_retour
 
             #  Deux rangées : Discord refuse plus de 5 boutons par ligne, et
-            #  regrouper les deux interrupteurs ensemble se lit mieux.
-            items.append(discord.ui.ActionRow(b_on, b_news))
+            #  regrouper les trois interrupteurs ensemble se lit mieux.
+            items.append(discord.ui.ActionRow(b_on, b_news, b_simu))
             items.append(discord.ui.ActionRow(b_test, b_reset, b_back))
 
             self.clear_items()
@@ -756,6 +803,38 @@ class RobloxPanelV2(LayoutView):
             except Exception as ex:
                 _log(f"[roblox salon {cle}] {ex}")
         return _cb
+
+    async def _cb_toggle_simulation(self, i):
+        """Allume ou éteint le mode simulation.
+
+        ⚠️ CE QU'IL FAIT, EXACTEMENT — et il faut le dire au staff, sinon le
+        bouton devient un piège. Tout tourne : relevés, détection, mise en
+        file. Seul l'ENVOI est retenu. Les fiches restent en file et ne sont
+        pas marquées envoyées : éteindre l'interrupteur les fait partir pour de
+        bon, dans l'ordre où elles sont entrées. C'est ce qui permet d'éprouver
+        la chaîne complète sur un vrai serveur sans mentir à ses membres.
+        """
+        try:
+            await i.response.defer()
+            c = await veille.config(self.g.id)
+            allume = not bool(c.get("roblox_veille_simulation"))
+            await _db_set(self.g.id, "roblox_veille_simulation", allume)
+            file = await veille.etat_file(self.g.id)
+            if allume:
+                self._dernier = (
+                    "🧪 **Simulation allumée.** Le bot relève, détecte et met "
+                    "en file — mais **rien ne partira dans un salon**.\n"
+                    f"-# `{file.get('attente', 0)}` fiche(s) attendent déjà. "
+                    f"Elles sortiront, dans l'ordre, dès que vous éteindrez.")
+            else:
+                self._dernier = (
+                    "✅ **Simulation éteinte.** Les publications reprennent.\n"
+                    f"-# `{file.get('attente', 0)}` fiche(s) en file vont "
+                    f"sortir au rythme de "
+                    f"`{veille.MAX_PUBLICATIONS_PAR_PASSAGE}` par passage.")
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            _log(f"[roblox toggle simulation] {ex}")
 
     async def _cb_toggle(self, i):
         """Allume ou éteint. À l'allumage, pose la borne du premier relevé.
@@ -858,18 +937,39 @@ class RobloxPanelV2(LayoutView):
             #  Le décompte des refus, par cause. C'est lui qui rend le
             #  compte-rendu honnête.
             motifs = {"sans_salon": 0, "salon_introuvable": 0, "age": 0,
-                      "seuil": 0, "deja": 0, "envoi": 0}
+                      "seuil": 0, "deja": 0, "envoi": 0, "simulation": 0}
             salons_absents = []
+            #  ⚠️ MÊME MISE EN FILE QUE LA BOUCLE — CORRECTIF DU 30/08.
+            #  Ce bouton avait EXACTEMENT la même famine : il tronquait à 10 et
+            #  5 alors que `comparer_et_enregistrer`, deux lignes plus haut,
+            #  venait d'écrire les articles en base. Ce que la tranche laissait
+            #  dehors n'était plus « jamais vu » et ne pouvait plus JAMAIS
+            #  revenir — ni par ce bouton, ni par la boucle.
+            #  On enfile donc TOUT ce qui passe les filtres, et on ne tire
+            #  ensuite que ce que le plafond permet. Les deux chemins partagent
+            #  la même file : cliquer ici ne double plus rien.
+            for flux_e, cle_e in (("bascules", "bascules"),
+                                  ("nouveautes", "nouveaux")):
+                brut_e = evts.get(cle_e) or []
+                for a_e in veille.ordonner_publication(brut_e, len(brut_e)):
+                    if not veille.age_publiable(a_e, flux_e):
+                        motifs["age"] += 1
+                        continue
+                    if not await veille.publiable_dans(
+                            self.g.id, a_e["asset_id"], flux_e):
+                        motifs["deja"] += 1
+                        continue
+                    await veille.enfiler(self.g.id, a_e, flux_e)
+
             #  Les images en UN SEUL appel pour tout le passage.
             #  Même sélection que la publication, sinon une fiche sort sans son
             #  image (ou on demande des vignettes pour rien).
-            a_publier = [x for k in ("nouveaux", "bascules")
-                         for x in veille.ordonner_publication(
-                             evts.get(k) or [], 10 if k == "bascules" else 5)]
+            attente = await veille.a_envoyer(
+                self.g.id, limite=veille.MAX_PUBLICATIONS_PAR_PASSAGE)
+            a_publier = [e["article"] for e in attente]
             #  Mêmes chiffres de trading que la boucle : stock et revente
-            #  viennent d'un point d'API distinct, un appel par article. Borné
-            #  au plafond du passage pour ne pas faire attendre le staff.
-            lot = a_publier[:veille.MAX_PUBLICATIONS_PAR_PASSAGE]
+            #  viennent d'un point d'API distinct, un appel par article.
+            lot = a_publier
             #  Même respiration que la boucle : sans elle, les chiffres et
             #  les images manquent après les deux relevés paginés.
             if lot:
@@ -884,12 +984,12 @@ class RobloxPanelV2(LayoutView):
             #  plus faible au même passage.
             #  Deux flux, et c'est tout (18/08) : « ce sera tout pour les
             #  accessoires ». Le flux « à surveiller » ne publie plus.
-            for flux, cle in (("bascules", "bascules"),
-                              ("nouveautes", "nouveaux")):
-                #  Ordre d'ENVOI : du plus ancien au plus récent, pour que le
-                #  salon se lise de haut en bas en scrollant.
-                candidats = veille.ordonner_publication(
-                    evts.get(cle) or [], 10 if cle == "bascules" else 5)
+            #  ⚠️ ON VIDE LA FILE, dans l'ordre où elle s'est remplie — donc du
+            #  plus ancien au plus récent (`a_envoyer` trie sur `detecte_le`),
+            #  pour que le salon se lise de haut en bas en scrollant.
+            simulation = bool(c.get("roblox_veille_simulation"))
+            for entree in attente:
+                a, flux = entree["article"], entree["flux"]
                 #  ⚠️ L'identifiant AVANT le salon : `get_channel(0)` et
                 #  `get_channel(1234)` rendent tous les deux `None`, mais l'un
                 #  veut dire « case vide » et l'autre « salon supprimé ou
@@ -897,39 +997,53 @@ class RobloxPanelV2(LayoutView):
                 #  différentes — les confondre coûterait une heure de recherche.
                 salon_id = veille.salon_du_flux(c, flux)
                 salon = self.g.get_channel(salon_id) if salon_id else None
-                if candidats and salon is None:
+                if salon is None:
                     if salon_id:
-                        motifs["salon_introuvable"] += len(candidats)
-                        salons_absents.append(str(salon_id))
+                        motifs["salon_introuvable"] += 1
+                        if str(salon_id) not in salons_absents:
+                            salons_absents.append(str(salon_id))
                     else:
-                        motifs["sans_salon"] += len(candidats)
+                        motifs["sans_salon"] += 1
+                    #  ⚠️ COMPTER L'ÉCHEC, SINON LA FILE SE FIGE. Sans cette
+                    #  ligne, `essais` ne bougeait jamais et `a_envoyer` —
+                    #  qui trie par date — re-tirait éternellement les mêmes
+                    #  douze fiches bloquées : plus rien d'autre ne sortait,
+                    #  jamais. Un salon supprimé gelait la file entière.
+                    #  La boucle, elle, le faisait déjà : les deux chemins
+                    #  divergeaient. Trouvé en réfutation le 30/08.
+                    await veille.noter_echec_envoi(
+                        entree["id"],
+                        f"salon introuvable ({salon_id})" if salon_id
+                        else "aucun salon réglé pour ce flux")
                     continue
-                for a in candidats:
-                    #  Meme plafond que la boucle : le bouton ne doit pas etre
-                    #  un moyen de contourner la protection de debit.
-                    if envoyes >= veille.MAX_PUBLICATIONS_PAR_PASSAGE:
-                        break
-                    #  Pas assez récent : « à partir de maintenant », tranché
-                    #  le 18/08. L'article reste en base pour la détection des
-                    #  bascules, mais on ne le publie pas.
-                    if not veille.age_publiable(a, flux):
-                        motifs["age"] += 1
-                        continue
-                    #  Déjà sorti ici, OU dans un flux plus fort : les salons
-                    #  restent séparés (voir `PRIORITE_FLUX`).
-                    if not await veille.publiable_dans(
-                            self.g.id, a["asset_id"], flux):
-                        motifs["deja"] += 1
-                        continue
-                    lies = news.billets_lies(a.get("nom") or "")
-                    if await publier(self.g, salon, a, flux,
-                                     image=imgs.get(a["asset_id"]), lies=lies):
-                        #  La marque est DÉFINITIVE : on ne l'écrit que sur un
-                        #  envoi réellement abouti (voir `_envoyer`).
-                        await veille.marquer_publie(self.g.id, a["asset_id"], flux)
-                        envoyes += 1
-                    else:
-                        motifs["envoi"] += 1
+                #  Mode simulation : on va jusqu'ici et pas plus loin. La fiche
+                #  reste en file et partira le jour où l'interrupteur retombe.
+                if simulation:
+                    motifs["simulation"] += 1
+                    continue
+                #  ⚠️ RÉSERVER AVANT D'ENVOYER — voir `veille.reserver`. Sans
+                #  ce verrou, ce bouton et la boucle pouvaient tirer les MÊMES
+                #  lignes pendant les ~2 min où la boucle enrichit et publie,
+                #  et le salon recevait tout en double. Rejoué en réfutation :
+                #  6 messages pour une file de 3.
+                if not await veille.reserver(entree["id"], entree["essais"]):
+                    continue
+                lies = news.billets_lies(a.get("nom") or "")
+                trace = {}
+                if await publier(self.g, salon, a, flux,
+                                 image=imgs.get(a["asset_id"]), lies=lies,
+                                 trace=trace):
+                    #  La marque est DÉFINITIVE : on ne l'écrit que sur un
+                    #  envoi réellement abouti (voir `_envoyer`). Et on sort de
+                    #  la file APRÈS l'envoi, jamais avant.
+                    await veille.marquer_envoye(entree["id"],
+                                                trace.get("message_id"))
+                    await veille.marquer_publie(self.g.id, a["asset_id"], flux)
+                    envoyes += 1
+                else:
+                    await veille.noter_echec_envoi(entree["id"],
+                                                   "bouton : publier a rendu False")
+                    motifs["envoi"] += 1
             await veille.purger()
             compte_rendu = self._compte_rendu(len(rel["articles"]), envoyes,
                                               motifs, salons_absents)
@@ -968,6 +1082,12 @@ class RobloxPanelV2(LayoutView):
 
             lus, envoyes, deja, refuses, en_panne, pointeurs = 0, 0, 0, 0, [], 0
             absorbes = 0
+            simules = 0
+            #  La simulation est un réglage de la VEILLE, pas des actualités :
+            #  un seul interrupteur pour les deux flux, comme le panneau
+            #  l'annonce (« rien ne partira dans un salon »).
+            _simu_actu = bool((await veille.config(self.g.id))
+                              .get("roblox_veille_simulation"))
             for src in news.SOURCES:
                 #  ⚠️ `forcer=True` : un bouton de vérification qui respecterait
                 #  la cadence dirait « 0 lu » sur une source relevée dix minutes
@@ -999,6 +1119,15 @@ class RobloxPanelV2(LayoutView):
                         _frais_b, news.MAX_BILLETS_PAR_PASSAGE):
                     if envoyes >= veille.MAX_PUBLICATIONS_PAR_PASSAGE:
                         break
+                    #  ⚠️ LA SIMULATION COUVRE AUSSI LES ACTUALITÉS. Elle ne
+                    #  gardait que les accessoires, pendant que ce panneau
+                    #  affirmait « rien ne partira dans un salon » : un clic
+                    #  sur « Relever maintenant », simulation allumée, et les
+                    #  billets partaient quand même. On ne les marque pas
+                    #  publiés : ils ressortiront à l'extinction.
+                    if _simu_actu:
+                        simules += 1
+                        continue
                     if await publier_actu(self.g, salon, b):
                         await news.marquer_publie(self.g.id, b["topic_id"])
                         envoyes += 1
@@ -1008,6 +1137,10 @@ class RobloxPanelV2(LayoutView):
             await news.purger()
 
             detail = []
+            if simules:
+                detail.append(f"`{simules}` retenue(s) : **mode simulation "
+                              f"actif** — rien n'est parti, elles ressortiront "
+                              f"quand vous l'éteindrez")
             if en_panne:
                 detail.append(f"source(s) en panne : {', '.join(en_panne)}")
             if refuses:
@@ -1057,10 +1190,22 @@ class RobloxPanelV2(LayoutView):
                 f"`{motifs['salon_introuvable']}` bloquée(s) : **salon "
                 f"introuvable** (`{'`, `'.join(salons_absents)}`) — supprimé, "
                 f"ou le bot n'y a pas accès")
+        if motifs.get("simulation"):
+            detail.append(f"`{motifs['simulation']}` retenue(s) : **mode "
+                          f"simulation actif** — rien n'est parti, les fiches "
+                          f"attendent en file et sortiront quand vous "
+                          f"l'éteindrez")
         if motifs["envoi"]:
+            #  ⚠️ « ressortiront au prochain relevé » N'ÉTAIT PAS VRAI avant la
+            #  file d'attente : l'article était déjà en base, la tranche
+            #  l'écartait, et il ne revenait jamais. Depuis le 30/08 la ligne
+            #  reste en file et l'affirmation est exacte — bornée par
+            #  `MAX_ESSAIS_ENVOI`, sinon un salon supprimé la ferait grossir
+            #  sans fin.
             detail.append(f"`{motifs['envoi']}` **refusée(s) par Discord** — "
                           f"permissions du salon (voir les journaux). Ces "
-                          f"articles ressortiront au prochain relevé")
+                          f"fiches restent en file et seront réessayées "
+                          f"(`{veille.MAX_ESSAIS_ENVOI}` essais au plus)")
         if motifs["deja"]:
             detail.append(f"`{motifs['deja']}` déjà publié(e)(s) — « ♻️ Tout "
                           f"republier » les libère")
@@ -1098,12 +1243,24 @@ class RobloxPanelV2(LayoutView):
             #  ligne, le bouton disait « tout republier » et n'effaçait que
             #  la moitié.
             n_news = await news.oublier_publies(self.g.id)
+            #  ⚠️ ET LES FICHES ABANDONNÉES, QUE CE BOUTON NE TOUCHAIT PAS.
+            #  Une fiche ayant échoué `MAX_ESSAIS_ENVOI` fois — salon supprimé,
+            #  permission retirée — sortait de la file pour toujours :
+            #  `enfiler` refuse de la réinsérer (contrainte d'unicité) et
+            #  `oublier_publies` n'efface que `roblox_publies`. Le staff
+            #  réparait la permission et rien ne revenait. C'est ici que le
+            #  chemin de retour a sa place : c'est LE bouton « débloque tout ».
+            n_file = await veille.relancer_abandonnees(self.g.id)
             self._dernier = (
                 f"♻️ `{n}` marque(s) d'article et `{n_news}` marque(s) "
                 f"d'actualité effacée(s). Ce qui est déjà connu peut de nouveau "
                 f"sortir.\n"
-                f"-# Cliquez « Relever maintenant » — ils sortiront par paquets "
-                f"de `{veille.MAX_PUBLICATIONS_PAR_PASSAGE}`, jamais d'un bloc.")
+                + (f"-# `{n_file}` fiche(s) abandonnée(s) après "
+                   f"`{veille.MAX_ESSAIS_ENVOI}` échecs d'envoi ont été "
+                   f"remises en file.\n" if n_file else "")
+                + f"-# Cliquez « Relever maintenant » — ils sortiront par "
+                  f"paquets de `{veille.MAX_PUBLICATIONS_PAR_PASSAGE}`, jamais "
+                  f"d'un bloc.")
             await self.render_to(i, edit=True)
         except Exception as ex:
             _log(f"[roblox oublier] {ex}")

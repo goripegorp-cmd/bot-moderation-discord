@@ -28,6 +28,45 @@ DEUX PIÈGES QUI EMPOISONNENT EN SILENCE — NE PAS LES ROUVRIR
    sur `SalesTypeFilter`, jamais sur cette catégorie.
 
 ═══════════════════════════════════════════════════════════════════════════════
+LES DEUX PANNES DU 30/08/2026 — CAUSES DIFFÉRENTES, NE PAS LES CONFONDRE
+═══════════════════════════════════════════════════════════════════════════════
+Le propriétaire : « les accessoires qui sont nouveaux et les accessoires qui
+viennent de passer Limited ne marchent pas ». Deux symptômes, deux causes.
+
+1. LES BASCULES NE SORTAIENT PAS — C'ÉTAIT UN VRAI DÉFAUT, ET IL ÉTAIT ICI.
+   `amorcer()` marquait les TROIS flux « déjà publié » au premier allumage,
+   `bascules` compris. Or elle n'épargne que les articles de moins de six
+   heures, et Roblox n'avait rien créé depuis 38 jours : les 964 articles du
+   catalogue étaient donc marqués, et `publiable_dans(..., "bascules")` les
+   refusait TOUS pendant 180 jours (la purge de `roblox_publies`). La porte
+   était condamnée avant que le premier Limited n'existe. Pire, la bascule
+   était comptée `_sa["deja"]` — rangée sous « déjà publié », le libellé le
+   plus trompeur possible.
+   → `amorcer` ne marque plus que les flux d'ÉTAT ; `_migrer_amorce_bascules`
+     efface les marques déjà écrites.
+
+2. LES NOUVEAUTÉS — LA SOURCE EST MUETTE, ET CE N'EST PAS UNE PANNE.
+   Mesuré ce jour-là sur les 964 articles du compte Roblox : le plus récent
+   avait **38,3 jours**. Sous la fenêtre de six heures : 0 sur 964. Sous
+   30 JOURS : encore 0 sur 964. Sur un an, 14 journées de création seulement,
+   soit ~1,2 occasion de publier par mois — et les fournées durent quelques
+   minutes (les 12 articles du 22/07 sont tombés en 6,1 min).
+   ⚠️ Un défaut RÉEL se cachait quand même derrière : la tranche
+   `_TRANCHE_FLUX` coupait le lot AVANT publication alors que
+   `comparer_et_enregistrer` venait d'écrire l'article en base — l'écarté
+   n'était plus « jamais vu » et ne revenait JAMAIS. Rejoué : 20 nouveautés
+   éligibles → 5 publiées, puis 0, puis 0. → file d'attente en base.
+
+⚠️ TROIS FAUSSES PISTES, MESURÉES ET ÉCARTÉES — NE PAS LES REPRENDRE.
+  · `Category` est un paramètre MORT sur `v2/search/items/details` : 1, 3, 11,
+    13, absent et même 9999 rendent les MÊMES identifiants et le même curseur.
+    Passer à `Category=11` ne change rien.
+  · `SortType=3` reste le bon choix : aucune valeur ne trie strictement par
+    date, mais c'est la seule qui met le plus récent en tête.
+  · La pagination du catalogue va bien au bout : 964/964, curseur épuisé,
+    0 doublon, 0 × 429.
+
+═══════════════════════════════════════════════════════════════════════════════
 LE SALON SERA CALME, ET C'EST NORMAL
 ═══════════════════════════════════════════════════════════════════════════════
 Le dernier Limited créé par Roblox date du 21/10/2025 : dix mois de silence, et
@@ -39,6 +78,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from datetime import datetime, timedelta, timezone
 
 #  ⚠️ DOMAINES EN DUR. Une URL n'est JAMAIS recopiée depuis une réponse d'API :
@@ -304,6 +344,15 @@ CLES_DEFAUT = {
     #  Le propriétaire peut n'en régler qu'UN : les trois flux retombent alors
     #  dessus. Voir `salon_du_flux`.
     "roblox_veille_amorcee": "",         # date de la borne posée au 1er allumage
+    #  ⚠️ MODE SIMULATION — demandé par la spécification du 30/08 : « un mode
+    #  simulation permettant de tester une transition sans publier de fausse
+    #  annonce publique ».
+    #  Quand il est allumé, TOUT tourne — relevés, détection, mise en file —
+    #  mais RIEN ne part dans un salon. Les fiches restent en file et ne sont
+    #  pas marquées envoyées : éteindre l'interrupteur les fait partir pour de
+    #  bon, dans l'ordre. C'est ce qui permet d'éprouver la chaîne complète sur
+    #  un vrai serveur sans mentir à ses membres.
+    "roblox_veille_simulation": False,
 }
 
 
@@ -390,7 +439,134 @@ async def init_db():
             " dernier_code INTEGER,"
             " echecs_consecutifs INTEGER NOT NULL DEFAULT 0)"
         )
+        #  ⚠️ LA FILE D'ATTENTE D'ENVOI — « outbox », exigée par la
+        #  spécification du 30/08 et par deux défauts mesurés du dépôt.
+        #
+        #  CE QU'ELLE RÉPARE, ET C'EST MESURÉ.
+        #  1. LA FAMINE. `_TRANCHE_FLUX["nouveaux"] = 5` tronque le lot AVANT
+        #     que quoi que ce soit ne soit publié, mais `comparer_et_enregistrer`
+        #     a DÉJÀ écrit l'article en base au même passage. Au passage
+        #     suivant, l'article n'est plus « jamais vu » : il ne peut plus
+        #     JAMAIS réapparaître. Rejoué en exécution le 30/08 : 20 nouveautés
+        #     toutes dans la fenêtre → 5 publiées au passage 1, puis 0, puis 0.
+        #     **15 sur 20 perdues définitivement**, pendant que le journal
+        #     imprimait « Rien n'est perdu. »
+        #  2. LA PERTE AU REDÉMARRAGE. Railway redéploie ; ce qui était détecté
+        #     mais pas encore envoyé disparaissait avec le processus.
+        #
+        #  LA CONTRAINTE D'UNICITÉ EST LE CŒUR : une même transition
+        #  (serveur, article, de → vers) ne peut pas être mise en file deux
+        #  fois, donc ne peut pas produire deux annonces — même si la détection
+        #  la revoit à chaque passage, même après un redémarrage.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS roblox_transitions("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " guild_id INTEGER NOT NULL,"
+            " asset_id INTEGER NOT NULL,"
+            " flux TEXT NOT NULL,"
+            " de TEXT NOT NULL,"
+            " vers TEXT NOT NULL,"
+            " detecte_le TEXT NOT NULL,"
+            #  L'article entier, en JSON : c'est ce qui permet de publier
+            #  APRÈS un redémarrage, sans redemander quoi que ce soit à Roblox.
+            " charge TEXT NOT NULL,"
+            " message_id INTEGER,"
+            " envoye_le TEXT,"
+            " essais INTEGER NOT NULL DEFAULT 0,"
+            " dernier_echec TEXT,"
+            " UNIQUE(guild_id, asset_id, de, vers))"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_roblox_transitions_attente"
+            " ON roblox_transitions(guild_id, envoye_le, detecte_le)")
+        #  Où reprendre la pagination d'un relevé au passage suivant. Une seule
+        #  ligne par source. Voir `relever_collectionnables`.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS roblox_curseurs("
+            " source TEXT PRIMARY KEY,"
+            " curseur TEXT,"
+            " tours INTEGER NOT NULL DEFAULT 0,"
+            " maj_le TEXT NOT NULL)"
+        )
+        #  Les réparations de DONNÉES déjà écrites, faites une seule fois.
+        #  Un correctif de code ne répare pas une base : c'est la leçon de
+        #  `oublier_publies`, et elle a coûté au propriétaire des semaines
+        #  d'articles invisibles.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS roblox_migrations("
+            " cle TEXT PRIMARY KEY,"
+            " fait_le TEXT NOT NULL,"
+            " lignes INTEGER NOT NULL DEFAULT 0)"
+        )
         await db.commit()
+    await _migrer_amorce_bascules()
+
+
+#  ═══════════════════════════════════════════════════════════════════════════
+#  Réparations de données — une fois, et jamais deux
+#  ═══════════════════════════════════════════════════════════════════════════
+
+MIGRATION_AMORCE_BASCULES = "amorce_ne_marque_plus_bascules_2026_08_30"
+
+
+async def _migrer_amorce_bascules() -> int:
+    """Efface les marques « déjà publié » posées à tort dans le flux bascules.
+
+    ⚠️ POURQUOI C'EST SANS RISQUE — ET LA PREMIÈRE VERSION DE CETTE DÉFENSE
+    ÉTAIT FAUSSE, corrigée après réfutation adverse le 30/08.
+
+    Elle disait : « publier une bascule exige aussi `bascule_detectee`, donc
+    effacer ces marques ne peut RIEN republier ». C'est vrai POUR LE FLUX
+    `bascules`, et seulement pour lui. Ce que la phrase oubliait, c'est que la
+    marque `bascules` sert AUSSI de bouclier de priorité (`publiable_dans` :
+    un article sorti en `bascules` ne peut plus sortir dans un flux plus
+    faible). L'effacer rouvre donc, en droit, une republication en
+    `nouveautes`.
+
+    CE QUI FERME QUAND MÊME LE RISQUE, ET C'EST MESURABLE :
+      · l'article garde sa marque `nouveautes`, que cette migration ne touche
+        pas — `publiable_dans(..., "nouveautes")` refuse toujours ;
+      · pour redevenir « jamais vu », il faudrait qu'il soit évincé de
+        `roblox_articles` par le plafond LRU. Mesuré le 30/08 :
+        `MAX_ARTICLES_SUIVIS = 3000` contre 964 (catalogue général) + 998
+        (flux Limited) ≈ 1 962 suivis. **Le LRU n'évince rien.**
+
+    ⚠️ CETTE DÉFENSE A DONC UNE DATE DE PÉREMPTION : le jour où le catalogue
+    Roblox dépassera 3 000 articles suivis, ou si le flux `surveiller` est
+    réactivé, il faudra la reprendre. On ne la laisse pas passer pour une
+    vérité éternelle.
+
+    Rend le nombre de lignes effacées ; 0 si la migration a déjà été faite.
+    """
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM roblox_migrations WHERE cle=?",
+                (MIGRATION_AMORCE_BASCULES,)) as cur:
+                if await cur.fetchone():
+                    return 0
+            async with db.execute(
+                "SELECT COUNT(*) FROM roblox_publies WHERE flux='bascules'"
+            ) as cur:
+                row = await cur.fetchone()
+            n = int(row[0] or 0) if row else 0
+            await db.execute("DELETE FROM roblox_publies WHERE flux='bascules'")
+            await db.execute(
+                "INSERT OR REPLACE INTO roblox_migrations(cle, fait_le, lignes)"
+                " VALUES(?,?,?)",
+                (MIGRATION_AMORCE_BASCULES,
+                 datetime.now(timezone.utc).isoformat(), n))
+            await db.commit()
+        #  ⚠️ LE DIRE DANS LES JOURNAUX. Une réparation muette est
+        #  indiscernable d'une réparation qui n'a pas eu lieu — et c'est
+        #  précisément la question que le propriétaire posera.
+        _log(f"[roblox_veille migration] amorce/bascules : {n} marque(s) "
+             f"posée(s) à tort effacée(s) — les passages en Limited peuvent "
+             f"de nouveau sortir")
+        return n
+    except Exception as ex:
+        _log(f"[roblox_veille _migrer_amorce_bascules] {ex}")
+        return 0
 
 
 def lien_article(asset_id, item_type: str | None = None) -> str | None:
@@ -760,14 +936,73 @@ async def relever_collectionnables(limite: int = 30) -> dict:
     ces deux pages attrapent le reste au meilleur coût. Un article de plus de
     deux ans qui repasserait Limited peut nous échapper — cas rare, assumé.
     """
-    return await _relever_catalogue({
+    #  ⚠️ ROTATION DU CURSEUR — CORRECTIF DU 30/08/2026.
+    #  Deux pages restent le plafond (c'est le débit qui est en jeu, mesuré :
+    #  12 requêtes/60 s par chemin, `reste_min` descendu à 2). Mais on ne relit
+    #  plus les deux MÊMES pages : on reprend là où le passage précédent s'est
+    #  arrêté. Mesuré le 30/08 : le flux compte 998 articles en 9 pages, donc
+    #  238 lus sur 998 — 24 %. Les 76 % restants n'étaient JAMAIS comparés à
+    #  leur état antérieur, et leur passage en Limited ne pouvait pas être vu.
+    #  Avec la rotation, les 998 sont couverts en 5 passages, soit 2 h 30 — ce
+    #  qui tient dans la fenêtre de six heures de `vu_le`, la condition même de
+    #  « vient de passer Limited ».
+    depart, tours = await _curseur_lu("collectionnables")
+    out = await _relever_catalogue({
         "Category": 1,
         "SortType": 3,
         "Limit": _limite_valide(limite),
         "SalesTypeFilter": 2,          # 2 = Limited. Mesuré le 16/08.
         "CreatorType": "User",
         "CreatorTargetId": CREATEUR_ROBLOX,
-    }, "collectionnables", max_pages=MAX_PAGES_COLLECTIONNABLES)
+    }, "collectionnables", max_pages=MAX_PAGES_COLLECTIONNABLES,
+        curseur_depart=depart)
+    if out.get("curseur_refuse"):
+        #  Curseur périmé : on repart du début plutôt que de rester coincé.
+        _log("[roblox_veille collectionnables] curseur périmé — on repart du "
+             "début du flux")
+        await _curseur_ecrit("collectionnables", None, tours + 1)
+    elif out["code"] == 200:
+        suivant = out.get("curseur_suivant")
+        #  ⚠️ UN RELEVÉ TRONQUÉ N'EST PAS UN TOUR TERMINÉ. Le 429 est
+        #  requalifié en 200 plus haut (à raison : un relevé presque complet
+        #  vaut mieux que rien), mais le compter comme un tour ferait croire
+        #  qu'on a couvert les 998 articles alors qu'on s'est arrêté en route.
+        fini = not suivant and not out.get("tronque")
+        await _curseur_ecrit("collectionnables", suivant,
+                             tours + (1 if fini else 0))
+        out["tour"] = tours + (1 if fini else 0)
+    return out
+
+
+async def _curseur_lu(source: str) -> tuple[str | None, int]:
+    """Le curseur mémorisé pour cette source, et le nombre de tours complets."""
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT curseur, tours FROM roblox_curseurs WHERE source=?",
+                (source,)) as cur:
+                row = await cur.fetchone()
+        if row:
+            return (str(row[0]) if row[0] else None), int(row[1] or 0)
+    except Exception as ex:
+        _log(f"[roblox_veille _curseur_lu] {ex}")
+    return None, 0
+
+
+async def _curseur_ecrit(source: str, curseur: str | None, tours: int) -> None:
+    """Mémorise où reprendre. `None` = le prochain passage repart du début."""
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO roblox_curseurs(source, curseur, tours, maj_le)"
+                " VALUES(?,?,?,?) ON CONFLICT(source) DO UPDATE SET"
+                " curseur=?, tours=?, maj_le=?",
+                (source, curseur, int(tours),
+                 datetime.now(timezone.utc).isoformat(),
+                 curseur, int(tours), datetime.now(timezone.utc).isoformat()))
+            await db.commit()
+    except Exception as ex:
+        _log(f"[roblox_veille _curseur_ecrit] {ex}")
 
 
 #  Voir la docstring de `relever_collectionnables` : ce flux n'est pas trié par
@@ -776,7 +1011,8 @@ MAX_PAGES_COLLECTIONNABLES = 2
 
 
 async def _relever_catalogue(params: dict, source: str,
-                             max_pages: int | None = None) -> dict:
+                             max_pages: int | None = None,
+                             curseur_depart: str | None = None) -> dict:
     """L'appel au catalogue, partagé par les deux relevés.
 
     `source` sert au suivi de santé : un flux muet doit se voir SÉPARÉMENT.
@@ -790,9 +1026,13 @@ async def _relever_catalogue(params: dict, source: str,
            #  MAX_APPELS_PAR_PASSAGE, qui annoncait 8 alors que le passage
            #  reel en fait 11. Un chiffre mesure vaut mieux qu'un plafond
            #  declare que le code ne respecte pas.
-           "req": 0, "n429": 0, "reste_min": None}
+           "req": 0, "n429": 0, "reste_min": None,
+           #  Où reprendre au prochain passage. `None` = recommencer du début.
+           #  Voir `relever_collectionnables` : c'est ce qui transforme deux
+           #  pages figées en une lecture COMPLÈTE étalée dans le temps.
+           "curseur_suivant": None, "curseur_refuse": False}
     vus: set[int] = set()
-    curseur = None
+    curseur = curseur_depart or None
     try:
         async with _ouvrir() as sess:
             for page in range(MAX_PAGES_PAR_RELEVE):
@@ -811,12 +1051,28 @@ async def _relever_catalogue(params: dict, source: str,
                 out["code"] = code
                 if code != 200 or data is None:
                     _log(f"[roblox_veille {source}] HTTP {code} à la page {page + 1}")
+                    #  ⚠️ UN CURSEUR MÉMORISÉ PÉRIME. Roblox le refuse alors
+                    #  par un 400, et sans ce drapeau le relevé resterait
+                    #  bloqué sur ce curseur mort à CHAQUE passage, muet pour
+                    #  toujours. On le signale ; l'appelant repart du début.
+                    if page == 0 and curseur_depart and code in (400, 404):
+                        out["curseur_refuse"] = True
                     #  ⚠️ UN 429 N'EST PAS UNE PANNE : c'est notre propre
                     #  débit. On garde les pages déjà obtenues et on
                     #  reprendra au prochain passage. Les jeter ferait
                     #  perdre un relevé presque complet pour rien.
                     if code == 429 and out["articles"]:
                         out["code"] = 200
+                        #  ⚠️ ET ON REJOUE LA PAGE RATÉE AU PROCHAIN PASSAGE.
+                        #  Sans cette ligne, la sortie par 429 laissait
+                        #  `curseur_suivant` à None, ce que l'appelant lisait
+                        #  comme « tour terminé » : la rotation REMBOBINAIT au
+                        #  début du flux, et les pages suivantes n'étaient
+                        #  jamais atteintes tant que le 429 retombait au même
+                        #  rang. Le bilan imprimait pourtant « reprise au
+                        #  prochain passage » — l'inverse exact de ce qui se
+                        #  produisait. Trouvé en réfutation adverse le 30/08.
+                        out["curseur_suivant"] = curseur
                         #  ⚠️ ON GARDE LA TRACE DE LA TRONCATURE.
                         #  Requalifier le 429 en 200 est le bon choix — un
                         #  relevé presque complet vaut mieux que rien — mais
@@ -852,6 +1108,12 @@ async def _relever_catalogue(params: dict, source: str,
                 #  d'aucun tri.
                 if max_pages is not None and page + 1 >= max_pages:
                     out["complet"] = not data.get("nextPageCursor")
+                    #  ⚠️ ON MÉMORISE OÙ ON S'ARRÊTE. Sans cette ligne, le
+                    #  relevé relisait éternellement les deux MÊMES pages :
+                    #  mesuré le 30/08, 238 articles sur 998, soit 24 % du flux
+                    #  Limited — les 76 % restants n'étaient jamais comparés,
+                    #  donc leur passage en Limited ne pouvait pas être vu.
+                    out["curseur_suivant"] = data.get("nextPageCursor") or None
                     break
 
                 curseur = data.get("nextPageCursor")
@@ -955,6 +1217,40 @@ async def traduire(articles: list[dict]) -> None:
         _log(f"[roblox_veille traduire] {ex}")
 
 
+#  Les trois classes de collection, de la plus forte à la plus faible. L'ordre
+#  compte : un article peut porter plusieurs restrictions à la fois, et c'est
+#  la plus spécifique qui le nomme.
+CLASSE_LIMITED_U = "LimitedUnique"
+CLASSE_LIMITED = "Limited"
+CLASSE_COLLECTIBLE = "Collectible"        # « UGC Limited » côté joueur
+
+
+def _classe_collection(restrictions) -> str:
+    """Laquelle des trois classes, ou "" si l'article n'est pas collectionnable.
+
+    ⚠️ L'ORDRE DES TESTS EST LA RÈGLE. `LimitedUnique` contient « limited » :
+    tester « Limited » d'abord classerait tous les Limited U comme de simples
+    Limited, silencieusement.
+    """
+    bas = [str(x).lower() for x in (restrictions or [])]
+    if any("unique" in x for x in bas):
+        return CLASSE_LIMITED_U
+    if any(x.startswith("limited") for x in bas):
+        return CLASSE_LIMITED
+    if any(x.startswith("collectible") for x in bas):
+        return CLASSE_COLLECTIBLE
+    return ""
+
+
+def libelle_classe(classe: str) -> str:
+    """Ce qu'on écrit au joueur. `Collectible` n'est PAS un Limited Roblox."""
+    return {
+        CLASSE_LIMITED_U: "LIMITED U",
+        CLASSE_LIMITED: "LIMITED",
+        CLASSE_COLLECTIBLE: "UGC LIMITED",
+    }.get(classe or "", "COLLECTIONNABLE")
+
+
 def _normaliser(bruts: list) -> list[dict]:
     """Réduit les réponses du catalogue à ce qu'on sait afficher.
 
@@ -997,6 +1293,19 @@ def _normaliser(bruts: list) -> list[dict]:
                 #  demande du 18/08 — les deux sortent, mais on dit lequel.
                 "limited_u": int(any(
                     "unique" in str(x).lower() for x in restrictions)),
+                #  ⚠️ TROIS CLASSES, PAS DEUX — exigence de la spécification du
+                #  30/08 : « Limited : Roblox Limited ; LimitedUnique : Roblox
+                #  Limited Unique ; Collectible : UGC Limited. Le système doit
+                #  distinguer ces trois catégories. »
+                #  `collectionnable` ci-dessus les fond en un seul booléen, ce
+                #  qui reste juste pour la détection, mais faisait annoncer un
+                #  UGC Limited comme un Limited Roblox. Mesuré le 30/08 :
+                #  `Collectible` existe réellement dans ce flux (2 articles en
+                #  page 1, 10 sur 159 détaillés).
+                #  ⚠️ NE PAS ARBITRER VIA `economy.roblox.com` : mesuré, il
+                #  CONTREDIT le catalogue (`IsLimitedUnique: true` sur un
+                #  article que le catalogue classe `Collectible`).
+                "classe": _classe_collection(restrictions),
                 #  La « légère description » demandée pour la fiche : celle de
                 #  Roblox, jamais la nôtre. Bornée, elle se traduit avec le nom
                 #  (voir `traduire`).
@@ -1009,6 +1318,13 @@ def _normaliser(bruts: list) -> list[dict]:
     return out
 
 
+#  Combien de fois on frappe avant d'abandonner, 429 compris. Trois : la
+#  première tentative, puis DEUX reprises espacées exponentiellement. Au-delà,
+#  on n'aide plus personne — on garde l'IP partagée de Railway sous le mur, et
+#  le passage suivant arrive de toute façon dans trente minutes.
+MAX_TENTATIVES_429 = 3
+
+
 def _attente_429(entetes) -> float:
     """Combien attendre après un 429 — d'après ce que Roblox ANNONCE.
 
@@ -1017,18 +1333,51 @@ def _attente_429(entetes) -> float:
     retombe sur `ATTENTE_APRES_429` — le repli DOIT rester, rien ne prouve que
     ces en-têtes traversent le proxy de Railway.
     """
+    #  ⚠️ LE PLUS GRAND DES DEUX, PAS LE PREMIER TROUVÉ — mesuré le 30/08 sur
+    #  `catalog/v1/catalog/items/details` : `retry-after: 5` et
+    #  `x-ratelimit-reset: 12` CONTREDISENT l'un l'autre sur la même réponse,
+    #  et le corps du 429 est vide. Prendre le premier (5 s) ne suffisait pas :
+    #  la reprise retombait dans le mur. On prend donc le plus prudent.
+    annonces = []
     for cle in ("Retry-After", "retry-after", "x-ratelimit-reset"):
         try:
             brut = (entetes or {}).get(cle)
             if brut is None:
                 continue
             v = float(str(brut).strip())
-            if v <= 0:
-                continue
-            return max(ATTENTE_429_MIN, min(ATTENTE_429_MAX, v + 2.0))
+            if v > 0:
+                annonces.append(v)
         except Exception:
             continue
+    if annonces:
+        return max(ATTENTE_429_MIN,
+                   min(ATTENTE_429_MAX, max(annonces) + 2.0))
     return ATTENTE_APRES_429
+
+
+def _attente_429_progressive(entetes, tentative: int) -> float:
+    """L'attente de la n-ième reprise : exponentielle, avec une part aléatoire.
+
+    ⚠️ POURQUOI L'ALÉA — exigence de la spécification du 30/08, et raison
+    concrète : Railway sort par une IP PARTAGÉE. Si deux applications prennent
+    le même 429 à la même seconde et attendent exactement la même durée, elles
+    repartent ENSEMBLE et se refont refuser ensemble. Un peu de dispersion
+    suffit à casser cette synchronisation.
+
+    La base reste ce que Roblox ANNONCE (`_attente_429`) : on ne l'allonge que
+    si l'annonce n'a pas suffi, ce que prouve une seconde reprise.
+    """
+    base = _attente_429(entetes)
+    facteur = 2 ** max(0, int(tentative) - 1)
+    #  ⚠️ L'ALÉA N'ALLONGE, IL NE RACCOURCIT JAMAIS. La première version tirait
+    #  entre 0,75 et 1,25 : au-delà d'une annonce de 6 s, le tirage bas rendait
+    #  une attente PLUS COURTE que ce que Roblox venait d'exiger — on repartait
+    #  droit dans le mur, en croyant faire mieux. Le commentaire disait
+    #  d'ailleurs l'inverse de ce que faisait le code.
+    #  De 1,0 à 1,3 : la dispersion suffit à désynchroniser deux applications
+    #  qui partagent l'IP de Railway, sans jamais désobéir à l'annonce.
+    alea = random.uniform(1.0, 1.3)
+    return max(ATTENTE_429_MIN, min(ATTENTE_429_MAX, base * facteur * alea))
 
 
 def _noter_budget(stats, entetes) -> None:
@@ -1069,16 +1418,20 @@ async def _appel_avec_reprise(sess, url: str, params: dict | None = None,
     le 16/08 : 0 article enrichi sur 3, alors que les mêmes appels rendaient
     3 sur 3 à froid.
     """
-    for tentative in (1, 2):
+    for tentative in range(1, MAX_TENTATIVES_429 + 1):
         try:
             if stats is not None:
                 stats["req"] = int(stats.get("req") or 0) + 1
             async with sess.get(url, params=params) as r:
                 _noter_budget(stats, r.headers)
-                if r.status == 429 and tentative == 1:
-                    if stats is not None:
-                        stats["n429"] = int(stats.get("n429") or 0) + 1
-                    _attente = _attente_429(r.headers)
+                #  ⚠️ ON COMPTE TOUS LES 429, Y COMPRIS LE DERNIER. L'incrément
+                #  vivait sous la condition de reprise : le 429 terminal — le
+                #  seul qui coûte vraiment une page — n'était jamais compté, et
+                #  `429=0` pouvait s'afficher sur un passage tronqué.
+                if r.status == 429 and stats is not None:
+                    stats["n429"] = int(stats.get("n429") or 0) + 1
+                if r.status == 429 and tentative < MAX_TENTATIVES_429:
+                    _attente = _attente_429_progressive(r.headers, tentative)
                     #  ⚠️ DIRE QUOI, PAS SEULEMENT « details ».
                     #  Les DEUX relevés paginés tapent la même URL, qui finit
                     #  par « details » : le journal disait donc « HTTP 429 sur
@@ -1087,7 +1440,8 @@ async def _appel_avec_reprise(sess, url: str, params: dict | None = None,
                     #  cherchant l'origine d'un 429 systématique.
                     _log(f"[roblox_veille] HTTP 429 sur "
                          f"{etiquette or url.split('/')[-1]} — "
-                         f"attente {_attente:.0f} s puis reprise")
+                         f"attente {_attente:.0f} s puis reprise "
+                         f"({tentative}/{MAX_TENTATIVES_429 - 1})")
                     await asyncio.sleep(_attente)
                     continue
                 if r.status != 200:
@@ -1441,6 +1795,213 @@ async def marquer_publie(guild_id: int, asset_id: int, flux: str) -> None:
         _log(f"[roblox_veille marquer_publie] {ex}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La file d'attente d'envoi
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#  Combien d'essais avant d'abandonner une fiche. Au-delà, ce n'est plus un
+#  incident réseau : c'est un salon supprimé ou une permission retirée, et
+#  réessayer indéfiniment ferait grossir la file sans fin.
+MAX_ESSAIS_ENVOI = 5
+
+
+def etat_transition(article: dict) -> tuple[str, str]:
+    """(de, vers) — ce que cette fiche annonce. Sert de clé d'unicité.
+
+    Volontairement GROSSIER : ce couple doit rester stable d'un passage à
+    l'autre, sinon la contrainte d'unicité ne protège plus de rien. Le prix ou
+    les favoris n'y entrent donc pas.
+    """
+    if article.get("bascule_detectee"):
+        return "normal", (article.get("classe") or CLASSE_LIMITED)
+    return "absent", "nouveau"
+
+
+async def enfiler(guild_id: int, article: dict, flux: str) -> bool:
+    """Met une fiche en file. Rend True si elle y entre pour la première fois.
+
+    ⚠️ C'EST ICI QUE SE JOUE « JAMAIS DEUX FOIS ». L'`INSERT OR IGNORE` sur la
+    contrainte UNIQUE(guild_id, asset_id, de, vers) fait qu'une transition
+    revue à chaque passage — ce qui arrive tout le temps, la détection étant
+    rejouée — n'ajoute rien. Pas de compteur, pas de cache mémoire : la base.
+    """
+    de, vers = etat_transition(article)
+    try:
+        async with _get_db() as db:
+            cur = await db.execute(
+                "INSERT OR IGNORE INTO roblox_transitions(guild_id, asset_id,"
+                " flux, de, vers, detecte_le, charge) VALUES(?,?,?,?,?,?,?)",
+                (int(guild_id), int(article["asset_id"]), str(flux), de, vers,
+                 datetime.now(timezone.utc).isoformat(),
+                 json.dumps(article, ensure_ascii=False)))
+            await db.commit()
+            return bool(cur.rowcount)
+    except Exception as ex:
+        _log(f"[roblox_veille enfiler] {ex}")
+        return False
+
+
+async def a_envoyer(guild_id: int, limite: int = 12) -> list[dict]:
+    """Les fiches en attente, la plus ancienne d'abord.
+
+    Rend des dicts `{"id", "flux", "article"}`. La charge est relue depuis la
+    base : après un redémarrage, elle suffit à publier sans rappeler Roblox.
+    """
+    out = []
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                #  ⚠️ LES BASCULES D'ABORD, quel que soit leur âge en file.
+                #  `PRIORITE_FLUX` dit qu'une bascule est l'information la plus
+                #  forte ; un tri purement chronologique la faisait attendre
+                #  derrière un arriéré de nouveautés — mesuré en réfutation :
+                #  49 fiches devant elle, soit 2 h 30 de retard sur un
+                #  événement dont tout l'intérêt est d'être frais.
+                "SELECT id, flux, charge, essais FROM roblox_transitions"
+                " WHERE guild_id=? AND envoye_le IS NULL AND essais<?"
+                " ORDER BY CASE flux WHEN 'bascules' THEN 0 ELSE 1 END,"
+                "  detecte_le ASC, id ASC LIMIT ?",
+                (int(guild_id), MAX_ESSAIS_ENVOI, int(limite))) as cur:
+                for row in await cur.fetchall():
+                    try:
+                        out.append({"id": int(row[0]), "flux": str(row[1]),
+                                    "article": json.loads(row[2]),
+                                    #  Sert de jeton de réservation : voir
+                                    #  `reserver`.
+                                    "essais": int(row[3] or 0)})
+                    except Exception:
+                        #  Une charge illisible ne doit pas bloquer la file
+                        #  entière : on la compte comme un essai raté.
+                        await noter_echec_envoi(int(row[0]), "charge illisible")
+    except Exception as ex:
+        _log(f"[roblox_veille a_envoyer] {ex}")
+    return out
+
+
+async def reserver(ligne_id: int, essais_vus: int) -> bool:
+    """Réserve la fiche AVANT de l'envoyer. Rend True si on l'a bien prise.
+
+    ⚠️ POURQUOI CETTE FONCTION EXISTE — J'AVAIS ÉCRIT LE CONTRAIRE, ET C'ÉTAIT
+    FAUX. Un commentaire affirmait que la contrainte UNIQUE de
+    `roblox_transitions` garantissait « jamais deux annonces ». Elle ne
+    garantit rien de tel : elle empêche d'ENFILER deux fois, pas d'ENVOYER deux
+    fois. `a_envoyer` n'était qu'un SELECT, sans réservation — la boucle et le
+    bouton « Relever maintenant » pouvaient tirer les MÊMES lignes et publier
+    deux fois. Réfutation du 30/08, rejouée en exécution : 6 messages pour une
+    file de 3.
+
+    LE MÉCANISME. `essais` sert de jeton : on ne prend la ligne que si elle
+    porte encore la valeur qu'on a lue. Deux tireurs concurrents lisent la même
+    valeur, un seul réussit son UPDATE — l'autre voit `rowcount == 0` et passe.
+
+    ⚠️ CE QUE ÇA NE GARANTIT PAS, ET IL FAUT LE DIRE. Le compteur monte AVANT
+    l'envoi. Une coupure entre un envoi réussi et son enregistrement laisse
+    donc la fiche non marquée : elle repartira, et il y aura UN doublon. C'est
+    le prix d'une file « au moins une fois », et il est borné par
+    `MAX_ESSAIS_ENVOI`. L'inverse — marquer avant d'envoyer — perdrait la fiche
+    en silence, ce qui est pire : un doublon se voit, une perte non.
+    """
+    try:
+        async with _get_db() as db:
+            cur = await db.execute(
+                "UPDATE roblox_transitions SET essais=?"
+                " WHERE id=? AND envoye_le IS NULL AND essais=?",
+                (int(essais_vus) + 1, int(ligne_id), int(essais_vus)))
+            await db.commit()
+            return bool(cur.rowcount)
+    except Exception as ex:
+        _log(f"[roblox_veille reserver] {ex}")
+        #  Fail-CLOSED : dans le doute on n'envoie pas. Mieux vaut une fiche
+        #  retardée d'un passage qu'un doublon.
+        return False
+
+
+async def marquer_envoye(ligne_id: int, message_id: int | None) -> bool:
+    """La fiche est partie. On garde l'identifiant du message Discord.
+
+    ⚠️ REND UN BOOLÉEN, ET L'APPELANT DOIT LE REGARDER. La version précédente
+    avalait son exception et rendait `None` : une base verrouillée laissait la
+    ligne non marquée pendant que le bilan comptait « 1 publication réelle » —
+    et la fiche repartait au passage suivant. Un échec ici est la SEULE trace
+    d'un doublon à venir, il ne doit pas être muet.
+    """
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE roblox_transitions SET envoye_le=?, message_id=?"
+                " WHERE id=?",
+                (datetime.now(timezone.utc).isoformat(),
+                 int(message_id) if message_id else None, int(ligne_id)))
+            await db.commit()
+        return True
+    except Exception as ex:
+        _log(f"[roblox_veille marquer_envoye] ⚠️ la fiche {ligne_id} est PARTIE "
+             f"mais n'a pas pu être marquée — elle repartira au prochain "
+             f"passage (doublon) : {ex}")
+        return False
+
+
+async def noter_echec_envoi(ligne_id: int, motif: str) -> None:
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE roblox_transitions SET essais=essais+1, dernier_echec=?"
+                " WHERE id=?", (str(motif)[:200], int(ligne_id)))
+            await db.commit()
+    except Exception as ex:
+        _log(f"[roblox_veille noter_echec_envoi] {ex}")
+
+
+async def relancer_abandonnees(guild_id: int) -> int:
+    """Remet à zéro le compteur d'essais des fiches abandonnées. Rend le nombre.
+
+    ⚠️ POURQUOI CE GESTE EXISTE. Une fiche qui a échoué `MAX_ESSAIS_ENVOI` fois
+    — salon supprimé, permission retirée, Discord indisponible deux heures —
+    sort définitivement de `a_envoyer`, et RIEN dans le dépôt ne la ramenait :
+    `enfiler` refuse de la réinsérer (contrainte d'unicité) et
+    « ♻️ Tout republier » n'efface que `roblox_publies`. La panne réparée, la
+    fiche restait morte. C'est le seul chemin de retour.
+    """
+    try:
+        async with _get_db() as db:
+            cur = await db.execute(
+                "UPDATE roblox_transitions SET essais=0, dernier_echec=NULL"
+                " WHERE guild_id=? AND envoye_le IS NULL AND essais>=?",
+                (int(guild_id), MAX_ESSAIS_ENVOI))
+            await db.commit()
+            return int(cur.rowcount or 0)
+    except Exception as ex:
+        _log(f"[roblox_veille relancer_abandonnees] {ex}")
+        return 0
+
+
+async def etat_file(guild_id: int | None = None) -> dict:
+    """Ce que contient la file. Sert au bilan et à la commande de santé."""
+    out = {"attente": 0, "envoyees": 0, "abandonnees": 0, "plus_vieille": None}
+    ou, args = "", []
+    if guild_id is not None:
+        ou, args = " WHERE guild_id=?", [int(guild_id)]
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT"
+                "  SUM(CASE WHEN envoye_le IS NULL AND essais<? THEN 1 ELSE 0 END),"
+                "  SUM(CASE WHEN envoye_le IS NOT NULL THEN 1 ELSE 0 END),"
+                "  SUM(CASE WHEN envoye_le IS NULL AND essais>=? THEN 1 ELSE 0 END),"
+                "  MIN(CASE WHEN envoye_le IS NULL THEN detecte_le END)"
+                " FROM roblox_transitions" + ou,
+                    [MAX_ESSAIS_ENVOI, MAX_ESSAIS_ENVOI] + args) as cur:
+                row = await cur.fetchone()
+        if row:
+            out["attente"] = int(row[0] or 0)
+            out["envoyees"] = int(row[1] or 0)
+            out["abandonnees"] = int(row[2] or 0)
+            out["plus_vieille"] = row[3]
+    except Exception as ex:
+        _log(f"[roblox_veille etat_file] {ex}")
+    return out
+
+
 async def amorcer(guild_id: int) -> int:
     """Pose la borne du premier allumage. Rend le nombre d'articles absorbés.
 
@@ -1473,7 +2034,29 @@ async def amorcer(guild_id: int) -> int:
         #  place, il ne doit surtout pas etre absorbe par l'amorce.
         if age_publiable(a, "nouveautes"):
             continue                      # celui-là a le droit de sortir
-        for flux in ("nouveautes", "bascules", "surveiller"):
+        #  ⚠️ « bascules » EST EXCLU, ET C'EST LE CORRECTIF DU 30/08/2026.
+        #
+        #  LE DÉFAUT. Cette boucle marquait les TROIS flux. Or `age_publiable`
+        #  ci-dessus n'épargne que ce qui a moins de six heures — mesuré le
+        #  30/08 : ZÉRO article sur 964, le compte Roblox n'ayant rien créé
+        #  depuis 38 jours. Donc les 964 articles du catalogue étaient marqués
+        #  « déjà publié » dans `bascules` dès l'allumage, et `publiable_dans`
+        #  les refusait TOUS pendant 180 jours (la purge de `roblox_publies`).
+        #  Le propriétaire : « les accessoires qui viennent de passer Limited
+        #  ne marchent pas ». Ils ne pouvaient pas : la porte était condamnée
+        #  avant que le premier Limited n'existe.
+        #
+        #  POURQUOI L'EXCLUSION EST LA BONNE FORME. Une amorce sert à ne pas
+        #  déverser un ÉTAT existant (« ces 964 articles existent déjà »). Une
+        #  bascule n'est pas un état, c'est un ÉVÉNEMENT FUTUR : elle ne peut
+        #  pas être « déjà sortie » avant de s'être produite. Et elle n'a pas
+        #  besoin d'être protégée ici, parce qu'`age_publiable(a, "bascules")`
+        #  n'accepte QUE `bascule_detectee`, posé uniquement quand un article
+        #  connu non collectionnable le devient sous nos yeux. Un Limited
+        #  présent au premier relevé n'obtient jamais ce marqueur.
+        #
+        #  `surveiller` reste marqué : c'est bien un état, comme `nouveautes`.
+        for flux in ("nouveautes", "surveiller"):
             await marquer_publie(guild_id, a["asset_id"], flux)
         absorbes += 1
     try:
@@ -1530,6 +2113,24 @@ async def purger(garder: int = MAX_ARTICLES_SUIVIS) -> int:
             await db.execute(
                 "DELETE FROM roblox_publies WHERE publie_le < ?",
                 ((datetime.now(timezone.utc) - timedelta(days=180)).isoformat(),))
+            #  ⚠️ ON NE PURGE QUE CE QUI EST PARTI, JAMAIS CE QUI ATTEND.
+            #  Effacer une ligne en attente la ferait remettre en file au
+            #  passage suivant — donc republier. La contrainte d'unicité ne
+            #  protège que tant que la ligne existe.
+            _vieux = (datetime.now(timezone.utc) - timedelta(days=180)).isoformat()
+            await db.execute(
+                "DELETE FROM roblox_transitions WHERE envoye_le IS NOT NULL"
+                " AND envoye_le < ?", (_vieux,))
+            #  ⚠️ ET LES ABANDONNÉES, QUI FUYAIENT POUR TOUJOURS. Une ligne à
+            #  `essais >= MAX_ESSAIS_ENVOI` n'est ni partie ni en attente :
+            #  aucune requête ne la touchait, aucune fonction ne remettait son
+            #  compteur à zéro. Mesuré en réfutation : encore là après dix ans
+            #  simulés. On les efface au même âge que le reste — la fiche est
+            #  perdue de toute façon, autant que la table ne le soit pas.
+            await db.execute(
+                "DELETE FROM roblox_transitions WHERE envoye_le IS NULL"
+                " AND essais >= ? AND detecte_le < ?",
+                (MAX_ESSAIS_ENVOI, _vieux))
             await db.commit()
         return 1
     except Exception as ex:

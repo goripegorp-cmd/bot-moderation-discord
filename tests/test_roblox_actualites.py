@@ -366,9 +366,18 @@ def test_la_boucle_dit_quand_elle_na_rien_a_faire():
 def test_la_boucle_fait_un_bilan_a_chaque_passage():
     corps = _boucle()
     assert "passage terminé" in corps
-    assert "_publies" in corps, "le nombre de publications RÉELLES doit être tenu"
-    assert corps.count("_publies += 1") == 2, (
-        "articles ET actualités doivent incrémenter le compteur")
+    #  ⚠️ DEUX COMPTEURS DEPUIS LE 30/08, ET C'EST PLUS STRICT, PAS MOINS.
+    #  Un compteur commun laissait un billet d'actualite eteindre le
+    #  diagnostic par serveur des accessoires — le cas qui a coute onze heures
+    #  au proprietaire. On exige donc que CHAQUE flux tienne le sien.
+    assert corps.count("_publies_a += 1") == 1, (
+        "les accessoires doivent tenir leur propre compteur")
+    assert corps.count("_publies_n += 1") == 1, (
+        "les actualites doivent tenir leur propre compteur")
+    assert "_publies +=" not in corps, (
+        "le compteur commun est revenu : voir le defaut G5 du 30/08")
+    assert "_publies_a" in corps and "_publies_n" in corps, (
+        "le bilan doit citer les deux, sinon on ne sait pas lequel est a zero")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

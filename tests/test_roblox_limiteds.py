@@ -47,13 +47,33 @@ def params_captures(monkeypatch):
     """Capture les paramètres, sans toucher au réseau."""
     vus = {}
 
-    async def _faux(params, source, max_pages=None):
+    #  ⚠️ CE FAUX DOIT PORTER TOUT CE QUE PORTE LE VRAI. Le 30/08, l'ajout de
+    #  `curseur_depart` au vrai relevé a fait éclater ce test avec un
+    #  `TypeError` — le faux avait une signature plus étroite que l'original,
+    #  donc il ne prouvait plus rien sur le code réel. Même règle pour les clés
+    #  du dictionnaire rendu : `relever_collectionnables` lit maintenant
+    #  `curseur_suivant` et `curseur_refuse`.
+    async def _faux(params, source, max_pages=None, curseur_depart=None):
         vus["params"] = dict(params)
         vus["source"] = source
         vus["max_pages"] = max_pages
-        return {"articles": [], "code": 200, "echecs": 0}
+        vus["curseur_depart"] = curseur_depart
+        return {"articles": [], "code": 200, "echecs": 0,
+                "curseur_suivant": None, "curseur_refuse": False}
+
+    #  La mémoire du curseur vit en base ; ces tests ne parlent pas à la base.
+    #  On la remplace par un couple de fonctions qui note ce qu'on lui écrit —
+    #  c'est aussi ce qui permet d'affirmer que la rotation a bien lieu.
+    async def _faux_lu(source):
+        return vus.get("curseur_memorise"), int(vus.get("tours", 0))
+
+    async def _faux_ecrit(source, curseur, tours):
+        vus["curseur_memorise"] = curseur
+        vus["tours"] = tours
 
     monkeypatch.setattr(veille, "_relever_catalogue", _faux)
+    monkeypatch.setattr(veille, "_curseur_lu", _faux_lu)
+    monkeypatch.setattr(veille, "_curseur_ecrit", _faux_ecrit)
     return vus
 
 
@@ -280,18 +300,48 @@ def test_la_boucle_reste_declaree_et_supervisee():
     assert '"veille_roblox_task"' in SRC_BOT, "absente du superviseur"
 
 
-def test_la_tranche_des_bascules_permet_le_rattrapage():
-    """Cinq par passage auraient mis des semaines à rattraper le retard."""
-    assert "_TRANCHE_FLUX" in SRC_BOT
+def test_rien_n_est_tronque_avant_d_etre_mis_en_file():
+    """⚠️ CE TEST REMPLACE `test_la_tranche_des_bascules_permet_le_rattrapage`.
+
+    L'ancien verrouillait `_TRANCHE_FLUX = {"nouveaux": 5, "bascules": 10}` en
+    exigeant seulement que la seconde tranche soit plus large que la première.
+    Il gardait donc en place LE défaut : tronquer AVANT de publier, alors que
+    `comparer_et_enregistrer` a déjà écrit l'article en base au même passage.
+    Un article coupé par la tranche n'était plus « jamais vu » au passage
+    suivant — perdu pour toujours. Mesuré le 30/08 : 20 nouveautés dans la
+    fenêtre, 5 publiées, puis 0, puis 0.
+
+    La propriété à tenir est plus forte : la mise en file ne connaît AUCUN
+    plafond. Le seul plafond est à la sortie, et ce qui déborde reste en base.
+    """
     arbre = ast.parse(SRC_BOT)
+    for n in ast.walk(arbre):
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "veille_roblox_task":
+            corps = ast.unparse(n)
+            break
+    else:
+        raise AssertionError("veille_roblox_task introuvable")
+
+    #  ⚠️ ON CHERCHE UNE AFFECTATION, PAS UNE CHAÎNE. Le nom subsiste dans le
+    #  commentaire qui explique pourquoi la constante a disparu — un simple
+    #  `not in SRC_BOT` échouerait donc sur sa propre note de suppression.
     for n in ast.walk(arbre):
         if (isinstance(n, ast.Assign) and n.targets
                 and getattr(n.targets[0], "id", "") == "_TRANCHE_FLUX"):
-            tranches = ast.literal_eval(n.value)
-            assert tranches["bascules"] > tranches["nouveaux"], (
-                "le flux de rattrapage doit regarder plus loin que les autres")
-            return
-    raise AssertionError("_TRANCHE_FLUX introuvable")
+            raise AssertionError(
+                "la tranche est revenue : elle coupe la détection avant la "
+                "mise en file, et rouvre la famine du 30/08")
+    assert "roblox_module.enfiler(" in corps, (
+        "la boucle doit mettre en file ce qu'elle détecte, sinon rien ne "
+        "survit à un redémarrage ni au plafond du passage")
+    assert "roblox_module.a_envoyer(" in corps, (
+        "le plafond doit être appliqué au TIRAGE, pas à la détection")
+
+    #  Et l'ordre : enfiler AVANT de tirer. L'inverse publierait d'abord et
+    #  n'enregistrerait qu'ensuite — soit exactement la perte qu'on répare.
+    assert corps.index("roblox_module.enfiler(") < corps.index(
+        "roblox_module.a_envoyer("), (
+        "on met en file d'abord, on tire ensuite")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

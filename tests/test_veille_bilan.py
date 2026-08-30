@@ -75,18 +75,42 @@ def test_le_quota_par_source_est_compte_pas_tu():
     le 19/08 : « 11 lus · 6 déjà publiés · 0 publication » — cinq billets
     semblaient s'évaporer. Ils ne s'évaporent pas (ils repassent au tour
     suivant), mais un bilan qui ne se boucle pas fait chercher une panne là où
-    il n'y en a pas."""
-    assert BOUCLE.count("plafonnes'] += ") + BOUCLE.count('plafonnes"] += ') >= 2, (
-        "le quota doit être compté des DEUX côtés (accessoires et actualités)")
+    il n'y en a pas.
+
+    ⚠️ LES DEUX CÔTÉS NE COMPTENT PLUS LA MÊME CHOSE DEPUIS LE 30/08, ET
+    C'EST VOULU. Côté ACTUALITÉS, le quota écarte des billets qui repasseront
+    au tour suivant : `plafonnes` reste le bon mot. Côté ACCESSOIRES, il n'y a
+    plus de quota d'entrée du tout — tout ce qui est détecté entre en file, et
+    ce qui ne part pas ce passage-ci RESTE EN BASE. Le compteur équivalent est
+    donc la profondeur de la file, imprimée telle quelle.
+    Ce qui reste exigé des deux côtés est la propriété, pas le mot : ce qui ne
+    sort pas doit être VISIBLE dans le bilan, jamais tu."""
+    #  Actualités : le quota, toujours compté.
+    assert BOUCLE.count("plafonnes'] += ") + BOUCLE.count('plafonnes"] += ') >= 1, (
+        "le quota des actualités doit rester compté")
     bilan = BOUCLE.split("passage terminé")[-1]
     assert "quota" in bilan, "le quota doit apparaître dans le bilan imprimé"
+    #  Accessoires : la file, relevée puis imprimée.
+    assert 'roblox_module.etat_file()' in BOUCLE, (
+        "la profondeur de la file doit être relevée à chaque passage")
+    assert "file d'envoi" in bilan and "en attente" in bilan, (
+        "ce qui reste en file doit apparaître dans le bilan : sans ce nombre, "
+        "« reporté » redevient un mot pour « perdu »")
 
 
 def test_le_lot_est_calcule_une_seule_fois():
     """Rappeler `ordonner_publication` pour compter donnerait deux listes
-    potentiellement différentes — et un compteur faux."""
-    for cle in ("_lot_a", "_lot_b"):
-        assert BOUCLE.count(f"{cle} = ") == 1, f"{cle} doit être calculé une fois"
+    potentiellement différentes — et un compteur faux.
+
+    ⚠️ `_lot_a` A DISPARU LE 30/08 avec la tranche des accessoires : le lot
+    d'envoi ne se calcule plus par troncature mais par tirage en base
+    (`a_envoyer`), qui est déjà un appel unique par serveur. `_lot_b` (les
+    actualités) garde l'ancienne forme, donc l'ancienne exigence."""
+    assert BOUCLE.count("_lot_b = ") == 1, "_lot_b doit être calculé une fois"
+    assert BOUCLE.count("_lot_a") == 0, (
+        "la tranche des accessoires est revenue — voir la famine du 30/08")
+    assert BOUCLE.count("roblox_module.a_envoyer(") == 1, (
+        "le tirage de la file doit être fait une seule fois par serveur")
 
 
 def test_le_bilan_sort_le_detail_meme_quand_rien_ne_deborde():
@@ -114,13 +138,21 @@ def test_le_diagnostic_par_serveur_est_une_fonction_reutilisable():
 def test_zero_publication_declenche_le_diagnostic_par_serveur():
     """⚠️ LA LIGNE QUI A COÛTÉ ONZE HEURES. Sans elle, le propriétaire lit
     « 0 publication » et ne peut pas savoir qu'un flux est simplement éteint."""
-    assert "_publies == 0" in BOUCLE
-    apres = BOUCLE.split("_publies == 0")[-1][:200]
+    #  ⚠️ SUR LES ACCESSOIRES SEULS DEPUIS LE 30/08. Le compteur etait
+    #  partage avec les actualites : UN SEUL billet publie supprimait ce
+    #  diagnostic, dans le cas meme qu'il existe pour eclairer. Exiger
+    #  `_publies == 0` reintroduirait le defaut.
+    assert "_publies_a == 0" in BOUCLE, (
+        "le diagnostic doit se declencher sur les accessoires seuls")
+    assert "_publies == 0" not in BOUCLE, (
+        "le compteur commun est revenu : un billet d'actualite suffirait a "
+        "eteindre le diagnostic des accessoires")
+    apres = BOUCLE.split("_publies_a == 0")[-1][:200]
     assert "_diag_veille_serveurs" in apres
 
 
 def test_le_diagnostic_sort_aussi_quand_personne_na_rien_allume():
-    avant = BOUCLE.split("_publies = 0")[0]
+    avant = BOUCLE.split("_publies_a = _publies_n = 0")[0]
     assert "_diag_veille_serveurs" in avant
 
 

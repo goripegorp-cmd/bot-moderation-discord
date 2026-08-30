@@ -109,8 +109,24 @@ def test_la_boucle_publie_dans_lordre():
     for n in ast.walk(arbre):
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "veille_roblox_task":
             corps = ast.unparse(n)
-            assert corps.count("ordonner_publication") >= 3, (
-                "articles, vignettes ET actualités doivent passer par l'ordre")
+            #  ⚠️ SEUIL RAMENÉ DE 3 À 2 LE 30/08 — ET LA DOCTRINE EST PLUS
+            #  FORTE, PAS PLUS FAIBLE. Le troisième appel ordonnait le lot des
+            #  VIGNETTES, dont l'ordre n'a jamais rien produit de visible : ce
+            #  lot ne sert qu'à demander des images en un seul appel. Depuis la
+            #  file d'attente, il ne regroupe même plus que les articles qu'on
+            #  va réellement envoyer, dédoublonnés — l'ordonner n'aurait aucun
+            #  sens. Restent les deux appels qui décident d'un salon : les
+            #  articles (à l'entrée en file) et les actualités.
+            assert corps.count("ordonner_publication") >= 2, (
+                "articles ET actualités doivent passer par l'ordre")
+            #  Et la propriété que l'ancien seuil ne vérifiait pas : c'est
+            #  l'ENTRÉE en file qui est ordonnée, donc l'ordre survit au
+            #  plafond du passage et au redémarrage.
+            i_ordre = corps.index("ordonner_publication")
+            i_enfiler = corps.index("roblox_module.enfiler(")
+            assert i_ordre < i_enfiler, (
+                "on ordonne AVANT de mettre en file : la file se vide dans "
+                "l'ordre d'entrée, donc l'ordonner après ne servirait à rien")
             return
     raise AssertionError("veille_roblox_task introuvable")
 

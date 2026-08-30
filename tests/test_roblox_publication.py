@@ -220,8 +220,13 @@ def test_compte_rendu_dit_quand_discord_a_refuse():
     txt = roblox_panneau.RobloxPanelV2._compte_rendu(30, 1, _motifs(envoi=2), [])
 
     assert "refusée" in txt.lower() and "permission" in txt.lower()
-    assert "ressortiront" in txt.lower(), (
-        "l'utilisateur doit savoir que rien n'est perdu")
+    #  ⚠️ LE MOT A CHANGÉ LE 30/08, LA GARANTIE S'EST RENFORCÉE.
+    #  Le texte promettait « ces articles ressortiront au prochain relevé ».
+    #  C'était FAUX : l'article était déjà écrit en base, la tranche l'écartait,
+    #  et il ne revenait jamais. Depuis la file d'attente, la ligne survit à
+    #  l'échec et au redémarrage — on exige donc la promesse, pas le mot.
+    assert "file" in txt.lower() and "réessay" in txt.lower(), (
+        "l'utilisateur doit savoir que la fiche est conservée et retentée")
     assert txt.startswith("🔴")
 
 
