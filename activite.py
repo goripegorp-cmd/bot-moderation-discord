@@ -112,9 +112,29 @@ SOURCES = {
 
 #  Seuils par défaut, en JOURS d'inactivité. Chaque rôle surveillé peut avoir les
 #  siens ; ceux-ci ne servent que de point de départ dans le panneau.
-SEUIL_RAPPEL_DEFAUT = 7
-SEUIL_RETRAIT_DEFAUT = 14
-SEUIL_EXPULSION_DEFAUT = 21
+#
+#  ⚠️ DÉCALÉS D'UNE SEMAINE LE 30/08/2026, sur description explicite du
+#  propriétaire, et le changement ne peut qu'ADOUCIR le système.
+#  Ses mots : « Si y a aucun message dans la semaine, on leur dira d'être
+#  actif ; au bout de la 2e semaine, pas de messages, et ben on les met AFK
+#  avec le système de rôle. »
+#  Autrement dit : la PREMIÈRE semaine de silence n'est qu'un avertissement,
+#  et le rôle AFK — celui qui MASQUE tout le serveur — n'arrive qu'à la
+#  deuxième. L'ancienne échelle posait ce rôle dès 7 jours.
+#      avertissement  → le rappel doux, qui ne masque rien (voir ci-dessous)
+#      14 j de silence → rôle AFK (masque)
+#      21 j            → retrait de tous les rôles
+#      28 j            → proposé à l'expulsion, jamais automatique
+#  Un membre silencieux entre 7 et 13 jours n'est pas oublié pour autant : sa
+#  présence tombe à 0 sur 7, il passe donc par le rappel doux — l'avertissement
+#  que le propriétaire décrit, sans le masquage.
+#
+#  ⚠️ CES VALEURS SONT DES DÉFAUTS. Un serveur qui a déjà réglé ses seuils dans
+#  le panneau garde les siens : les changer ici ne le touche PAS. Il faut le
+#  vérifier dans « Seuils », et c'est dit au propriétaire.
+SEUIL_RAPPEL_DEFAUT = 14
+SEUIL_RETRAIT_DEFAUT = 21
+SEUIL_EXPULSION_DEFAUT = 28
 
 #  La fenêtre de présence : sur combien de jours COMPLETS on regarde si le membre
 #  s'est montré. Sept jours = une semaine pleine, quel que soit le jour du rappel.
@@ -257,6 +277,24 @@ CLES_DEFAUT = {
     "activite_salon_annonce": 0,        # où poster le rappel hebdomadaire
     "activite_salon_retour": 0,         # où un membre écrit pour récupérer son rôle
     "activite_salon_staff": 0,          # où poster la liste des expulsables
+    #  ⚠️ LE SALON AFK — demandé le 30/08/2026, et il ne fait PAS ce qu'on
+    #  croit. Écrire n'importe où marque déjà l'activité ET rend ses rôles à
+    #  un membre étiqueté (voir `on_message` dans bot.py, et
+    #  `retour_immediat`). Ce salon n'ajoute donc AUCUN pouvoir de retour : il
+    #  ajoute un ENDROIT PRÉVU pour le faire, qui ne se remplit jamais.
+    #  Le propriétaire : « le message s'auto supprime automatiquement comme ça,
+    #  ça évite de laisser des pavés de messages. Ça permet à l'utilisateur
+    #  d'envoyer un message. Le message supprime, OK, il est redevenu actif. »
+    #  ⚠️ ET IL NE DONNE AUCUNE IMMUNITÉ. Un message aujourd'hui ne dispense
+    #  pas de la semaine prochaine : « s'il devient inactif parce qu'il a été
+    #  juste actif un jour, mais qu'il est inactif sur 34 jours, forcément on
+    #  va le redétecter comme inactif ». La présence exigée reste
+    #  `activite_seuil_presence` jours par fenêtre, quel que soit le salon.
+    "activite_salon_afk": 0,            # salon « je suis là », auto-nettoyé
+    #  Combien de secondes le message reste visible avant d'être effacé. Zéro
+    #  n'est PAS un bon réglage : le membre doit voir que c'est parti, sinon il
+    #  réécrit — et on obtient l'inverse du salon propre recherché.
+    "activite_afk_secondes": 8,
     "activite_jour_rappel": 6,          # 0 = lundi … 6 = DIMANCHE (fin de semaine)
     "activite_derniere_semaine": "",    # semaine ISO du dernier rappel envoyé
     #  Immunité PROPRE au système d'activité : dispenser quelqu'un de présence

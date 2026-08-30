@@ -534,3 +534,102 @@ def resume_texte(rap: dict) -> str:
         f"{a.get('messages_envoyes', 0)} message(s) · "
         f"{masq.get('modifies', 0)} salon(s) masqué(s)")
     return "\n".join(lignes)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Le salon AFK — « je suis là », et le salon reste propre
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def est_salon_afk(guild_id: int, salon_id: int) -> bool:
+    """Ce salon est-il LE salon AFK de ce serveur ?
+
+    Volontairement bon marché : c'est appelé sur CHAQUE message du serveur.
+    `activite.config` passe par le cache de configuration, donc pas d'accès
+    base dans le cas courant.
+    """
+    if not salon_id:
+        return False
+    try:
+        c = await activite.config(guild_id)
+        return int(c.get("activite_salon_afk", 0) or 0) == int(salon_id)
+    except Exception:
+        return False
+
+
+async def nettoyer_message_afk(message) -> bool:
+    """Efface le message d'un membre dans le salon AFK. Rend True si effacé.
+
+    ⚠️ CE QUE CETTE FONCTION NE FAIT PAS, ET IL FAUT LE SAVOIR.
+    Elle ne marque PAS l'activité et ne rend PAS les rôles : `on_message` le
+    fait déjà pour TOUS les salons, avant d'arriver ici (voir `marquer_actif`
+    et `retour_immediat`). Un salon AFK qui « rendrait actif » serait donc une
+    fonction en double — et deux chemins qui font la même chose finissent
+    toujours par diverger. Ici, on ne fait qu'une chose : garder le salon
+    propre.
+
+    ⚠️ ON RÉPOND AVANT D'EFFACER. Effacer sans un mot donnerait l'impression
+    que le message n'est pas passé, et le membre réécrirait — soit exactement
+    les « pavés de messages » que ce salon existe pour éviter. La confirmation
+    s'efface elle aussi.
+
+    Ne lève jamais : un défaut de permission ne doit pas casser `on_message`,
+    qui traite TOUS les messages du serveur. Mais il est JOURNALISÉ — un salon
+    AFK qui ne se nettoie pas en silence se remplirait pendant des semaines
+    sans que personne ne sache pourquoi.
+    """
+    salon = getattr(message, "channel", None)
+    guild = getattr(message, "guild", None)
+    if salon is None or guild is None:
+        return False
+    #  Un message épinglé est une consigne du staff : on n'y touche pas.
+    if getattr(message, "pinned", False):
+        return False
+    try:
+        c = await activite.config(guild.id)
+        delai = max(0, int(c.get("activite_afk_secondes", 8) or 0))
+    except Exception:
+        delai = 8
+
+    #  ⚠️ LA PERMISSION SE VÉRIFIE AVANT, PAS APRÈS L'ÉCHEC. Sans ce contrôle,
+    #  chaque message du salon lèverait un Forbidden attrapé plus bas, et le
+    #  journal se remplirait d'une erreur par message au lieu d'un diagnostic.
+    try:
+        moi = guild.me
+        if moi is not None and not salon.permissions_for(moi).manage_messages:
+            _log(f"[activite salon_afk] ⚠️ il manque « Gérer les messages » "
+                 f"dans #{getattr(salon, 'name', '?')} ({salon.id}) : les "
+                 f"messages AFK ne seront PAS effacés et le salon va se "
+                 f"remplir.")
+            return False
+    except Exception:
+        pass
+
+    accuse = None
+    try:
+        accuse = await salon.send(
+            f"✅ {message.author.mention} — noté, tu es compté comme **actif**."
+            f"\n-# Ce message et le tien s'effacent dans "
+            f"{delai} seconde(s), pour garder le salon propre.",
+            delete_after=float(delai) if delai else None)
+    except Exception as ex:
+        #  Pas d'accusé de réception possible : on efface quand même, c'est le
+        #  cœur de la demande. Mais on le dit.
+        _log(f"[activite salon_afk] accusé impossible dans "
+             f"#{getattr(salon, 'name', '?')} : {type(ex).__name__}: {ex}")
+
+    try:
+        if delai:
+            await asyncio.sleep(delai)
+        await message.delete()
+        return True
+    except Exception as ex:
+        _log(f"[activite salon_afk] suppression refusée dans "
+             f"#{getattr(salon, 'name', '?')} ({getattr(salon, 'id', '?')}) : "
+             f"{type(ex).__name__}: {ex}")
+        #  L'accusé, lui, doit partir : le laisser seul serait pire que rien.
+        if accuse is not None and not delai:
+            try:
+                await accuse.delete()
+            except Exception:
+                pass
+        return False

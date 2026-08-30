@@ -762,6 +762,17 @@ class RobloxPanelV2(LayoutView):
                 custom_id="rblx_toggle_simu")
             b_simu.callback = self._cb_toggle_simulation
 
+            #  ⚠️ LE RATTRAPAGE — demandé le 30/08 : « assure-toi que les
+            #  derniers accessoires soient bien publiés sur le serveur ».
+            #  Mesuré ce jour-là : les huit derniers articles créés par Roblox
+            #  ont 38,4 jours, pour une fenêtre de six heures. Ils ne PEUVENT
+            #  pas sortir tout seuls. Ce bouton est le seul chemin honnête :
+            #  borné, volontaire, et il ne change pas la règle.
+            b_rattrap = Button(label="Publier les derniers", emoji="📦",
+                               style=discord.ButtonStyle.primary,
+                               custom_id="rblx_rattraper")
+            b_rattrap.callback = self._cb_rattraper
+
             b_back = Button(label="Retour", emoji="◀️",
                             style=discord.ButtonStyle.secondary,
                             custom_id="rblx_back")
@@ -770,7 +781,8 @@ class RobloxPanelV2(LayoutView):
             #  Deux rangées : Discord refuse plus de 5 boutons par ligne, et
             #  regrouper les trois interrupteurs ensemble se lit mieux.
             items.append(discord.ui.ActionRow(b_on, b_news, b_simu))
-            items.append(discord.ui.ActionRow(b_test, b_reset, b_back))
+            items.append(discord.ui.ActionRow(b_test, b_rattrap, b_reset,
+                                              b_back))
 
             self.clear_items()
             self.add_item(v2_container(*items, color=Palette.INFO))
@@ -803,6 +815,43 @@ class RobloxPanelV2(LayoutView):
             except Exception as ex:
                 _log(f"[roblox salon {cle}] {ex}")
         return _cb
+
+    async def _cb_rattraper(self, i):
+        """Remet en file les derniers accessoires jamais annoncés.
+
+        ⚠️ IL DIT L'ÂGE DE CE QU'IL VA PUBLIER. Le propriétaire a interdit de
+        présenter comme « nouveau » ce qui a des semaines : si le bouton
+        publiait 38 jours d'archives en silence, il romprait sa propre règle.
+        On annonce donc le chiffre avant que les fiches ne sortent.
+        """
+        try:
+            await i.response.defer()
+            r = await veille.rattraper_nouveautes(self.g.id, combien=12)
+            if not r["candidats"]:
+                self._dernier = (
+                    "⚪ Rien à rattraper — tous les accessoires récents sont "
+                    "déjà sortis, ou aucun n'a moins de "
+                    f"`{veille.AGE_MAX_JOURS}` jours.")
+            else:
+                self._dernier = (
+                    f"📦 `{r['enfiles']}` accessoire(s) remis en file sur "
+                    f"`{r['candidats']}` retenu(s).\n"
+                    + (f"-# ⚠️ Le plus ancien du lot a `{r['plus_vieux_j']}` "
+                       f"jours : ce sont les DERNIÈRES créations de Roblox, "
+                       f"pas des nouveautés du jour. Roblox n'a rien créé "
+                       f"depuis.\n" if r.get("plus_vieux_j") else "")
+                    + f"-# Ils partiront par paquets de "
+                      f"`{veille.MAX_PUBLICATIONS_PAR_PASSAGE}`, du plus "
+                      f"ancien au plus récent. Cliquez « Relever maintenant » "
+                      f"pour ne pas attendre.")
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            _log(f"[roblox rattraper] {ex}")
+            self._dernier = f"❌ Erreur : `{type(ex).__name__}` — {ex}"
+            try:
+                await self.render_to(i, edit=True)
+            except Exception:
+                pass
 
     async def _cb_toggle_simulation(self, i):
         """Allume ou éteint le mode simulation.

@@ -1238,8 +1238,31 @@ async def fiche_par_id(asset_id: int, item_type: str = "Asset") -> dict | None:
         return None
     if aid <= 0:
         return None
+    lot = await fiches_par_ids([aid], item_type=item_type)
+    return lot[0] if lot else None
+
+
+async def fiches_par_ids(ids: list, item_type: str = "Asset") -> list[dict]:
+    """Jusqu'à 120 articles en UNE requête. Liste vide si rien.
+
+    ⚠️ UNE REQUÊTE POUR CENT, JAMAIS CENT REQUÊTES. Le propriétaire, le
+    30/08 : « assure-toi de ne pas spammer en boucle une recherche qui sert à
+    rien, ça évite de spammer la plateforme, de spammer l'API et qu'elle ne
+    marche plus. » Ce point accepte un lot ; s'en priver serait gaspiller.
+    """
+    global _jeton_xsrf
+    propres = []
+    for x in (ids or []):
+        try:
+            v = int(x)
+            if v > 0:
+                propres.append(v)
+        except (TypeError, ValueError):
+            continue
+    if not propres:
+        return []
     genre = "Bundle" if str(item_type or "").lower() == "bundle" else "Asset"
-    corps = {"items": [{"itemType": genre, "id": aid}]}
+    corps = {"items": [{"itemType": genre, "id": v} for v in propres[:120]]}
     try:
         async with _ouvrir() as sess:
             for tentative in (1, 2):
@@ -1249,21 +1272,133 @@ async def fiche_par_id(asset_id: int, item_type: str = "Asset") -> dict | None:
                 async with sess.post(API_DETAILS, json=corps,
                                      headers=entetes) as r:
                     if r.status == 403 and tentative == 1:
+                        #  La danse XSRF : le 403 PORTE le jeton.
                         _jeton_xsrf = r.headers.get("x-csrf-token") or _jeton_xsrf
                         continue
                     if r.status != 200:
-                        _log(f"[roblox_veille fiche_par_id] HTTP {r.status} "
-                             f"pour {aid}")
-                        return None
+                        _log(f"[roblox_veille fiches_par_ids] HTTP {r.status} "
+                             f"pour {len(propres)} identifiant(s)")
+                        return []
                     data = await r.json()
-                bruts = data.get("data") or []
-                if not bruts:
-                    return None
-                lot = _normaliser(bruts)
-                return lot[0] if lot else None
+                return _normaliser(data.get("data") or [])
     except Exception as ex:
-        _log(f"[roblox_veille fiche_par_id] {type(ex).__name__}: {ex}")
-    return None
+        _log(f"[roblox_veille fiches_par_ids] {type(ex).__name__}: {ex}")
+    return []
+
+
+async def _deja_reellement_envoye(guild_id: int, asset_id: int,
+                                  flux: str) -> bool:
+    """Une fiche est-elle DÉJÀ PARTIE dans un salon pour cet article ?
+
+    Distinct de `deja_publie` : celui-ci lit `roblox_publies`, qui contient
+    aussi tout ce que l'amorce a absorbé SANS l'envoyer. Ici on lit la file
+    d'envoi, seule table qui porte la date d'envoi et l'identifiant du message.
+    """
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM roblox_transitions WHERE guild_id=?"
+                " AND asset_id=? AND flux=? AND envoye_le IS NOT NULL LIMIT 1",
+                (int(guild_id), int(asset_id), str(flux))) as cur:
+                return bool(await cur.fetchone())
+    except Exception as ex:
+        _log(f"[roblox_veille _deja_reellement_envoye] {ex}")
+        #  Fail-CLOSED : dans le doute, on ne republie pas.
+        return True
+
+
+async def rattraper_nouveautes(guild_id: int, combien: int = 12) -> dict:
+    """Remet en file les N accessoires Roblox les plus récents jamais annoncés.
+
+    ⚠️ POURQUOI CE GESTE EXISTE, ET POURQUOI IL N'EST PAS AUTOMATIQUE.
+    Le propriétaire, le 30/08 : « assure-toi que les derniers accessoires
+    soient bien publiés sur le serveur ». Mesuré le même jour : les huit
+    derniers articles créés par Roblox ont TOUS 38,4 jours, pour une fenêtre
+    de publication de six heures (`FENETRE_DIRECTE_HEURES`, imposée le 18/08).
+    Ils ne peuvent donc PAS sortir — et l'amorce les a en plus marqués « déjà
+    publiés ». La réponse honnête à sa demande n'était pas « c'est fait », mais
+    « voici le geste qui le fait ».
+
+    ⚠️ CE GESTE NE TOUCHE PAS À LA FENÊTRE. Élargir `FENETRE_DIRECTE_HEURES`
+    changerait la règle pour toujours, alors que le propriétaire l'a posée
+    explicitement (« pas d'il y a un jour, deux jours »). On ne discute pas sa
+    règle : on lui donne un rattrapage BORNÉ et volontaire, qu'il déclenche.
+
+    Ce qu'on rattrape : les articles les plus récemment CRÉÉS, jamais sortis
+    dans aucun flux, et pas plus vieux que `AGE_MAX_JOURS` — au-delà ce n'est
+    plus une nouvelle, c'est une archive, et ROBLOX.md l'interdit.
+
+    Rend `{"candidats", "enfiles", "plus_vieux_j"}`.
+    """
+    out = {"candidats": 0, "enfiles": 0, "plus_vieux_j": None}
+    try:
+        combien = max(1, min(int(combien), 30))
+    except (TypeError, ValueError):
+        combien = 12
+    borne = (datetime.now(timezone.utc)
+             - timedelta(days=AGE_MAX_JOURS)).isoformat()
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT asset_id FROM roblox_articles"
+                " WHERE cree_le IS NOT NULL AND cree_le >= ?"
+                " ORDER BY cree_le DESC LIMIT ?",
+                (borne, combien * 3)) as cur:
+                ids = [int(r[0]) for r in await cur.fetchall()]
+        if not ids:
+            return out
+        #  ⚠️ ON REDEMANDE LES FICHES À ROBLOX, en UNE requête. La ligne en
+        #  base ne porte ni le type d'objet (Asset/Bundle, qui commande le
+        #  lien et la vignette), ni la classe, ni la description : publier
+        #  depuis elle donnerait des fiches amputées.
+        fiches = {a["asset_id"]: a for a in await fiches_par_ids(ids)}
+        retenus = []
+        for aid in ids:
+            if len(retenus) >= combien:
+                break
+            a = fiches.get(aid)
+            if a is None:
+                continue
+            #  ⚠️ LA MARQUE « nouveautes » NE COMPTE PAS ICI — c'est ELLE qu'on
+            #  vient lever. L'amorce l'a posée sur les 964 articles du
+            #  catalogue sans qu'aucune fiche ne soit jamais partie : s'en
+            #  servir comme filtre ferait que ce bouton ne rattrape RIEN, ce
+            #  qui est précisément le défaut qu'il répare.
+            #  On écarte donc sur deux critères, et deux seulement :
+            if "bascules" in await flux_deja_sortis(guild_id, aid):
+                #  Déjà annoncé comme passé Limited : le ressortir en
+                #  « nouveauté » serait un doublon ET une régression de flux.
+                continue
+            if await _deja_reellement_envoye(guild_id, aid, "nouveautes"):
+                #  ⚠️ LE SEUL REGISTRE FIABLE DE CE QUI EST SORTI. La file
+                #  d'envoi garde la date et l'identifiant du message Discord ;
+                #  `roblox_publies`, lui, contient aussi tout ce que l'amorce a
+                #  absorbé sans jamais l'envoyer. Confondre les deux, c'est
+                #  soit republier, soit ne rien rattraper.
+                continue
+            retenus.append(a)
+        out["candidats"] = len(retenus)
+        if not retenus:
+            return out
+        #  Du plus ANCIEN au plus récent : même règle de lecture que partout.
+        retenus = ordonner_publication(retenus, len(retenus))
+        async with _get_db() as db:
+            for a in retenus:
+                #  On lève la marque posée par l'amorce — sans elle, la fiche
+                #  entrerait en file et serait refusée à la sortie.
+                await db.execute(
+                    "DELETE FROM roblox_publies WHERE guild_id=? AND asset_id=?"
+                    " AND flux='nouveautes'", (int(guild_id), a["asset_id"]))
+            await db.commit()
+        for a in retenus:
+            if await enfiler(guild_id, a, "nouveautes"):
+                out["enfiles"] += 1
+        vieux = [_jours_depuis(a.get("cree_le")) for a in retenus]
+        vieux = [v for v in vieux if v is not None]
+        out["plus_vieux_j"] = max(vieux) if vieux else None
+    except Exception as ex:
+        _log(f"[roblox_veille rattraper_nouveautes] {ex}")
+    return out
 
 
 async def derniers_evenements(guild_id: int, flux: str,

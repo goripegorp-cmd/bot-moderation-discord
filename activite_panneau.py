@@ -1117,6 +1117,17 @@ class ActiviteSalonsPanelV2(_Base):
          "Où un membre écrit pour récupérer son rôle mis en veille."),
         ("activite_salon_staff", "🛡️ Staff",
          "Où le bot vous rend compte et propose les expulsions. Réservé au staff."),
+        #  ⚠️ AJOUTÉ LE 30/08/2026. Sans cette ligne, la clé de configuration
+        #  existerait sans que personne puisse la régler : du code mort.
+        #  ⚠️ ET LE LIBELLÉ DOIT DIRE LA VÉRITÉ. Écrire n'importe où rend déjà
+        #  actif et rend déjà les rôles — ce salon n'ajoute pas ce pouvoir, il
+        #  ajoute un endroit prévu pour ça, qui s'efface tout seul. Promettre
+        #  autre chose ferait croire qu'écrire ailleurs ne compte pas.
+        ("activite_salon_afk", "💤 AFK",
+         "Où un membre écrit « je suis là ». Son message et l'accusé "
+         "s'effacent tout seuls, le salon reste propre. Écrire ailleurs "
+         "compte tout autant — ce salon ne donne aucune immunité. "
+         "Le bot a besoin de « Gérer les messages » ici."),
     ]
 
     async def render_to(self, i, *, edit: bool = True):

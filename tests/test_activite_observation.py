@@ -261,13 +261,20 @@ def test_a_j21_l_escalade_reprend_vraiment(socle):
     """Le plafonnement retarde, il n'annule pas. Sinon le systeme ne servirait
     a rien sur un serveur reellement endormi."""
     socle.config["activite_enabled"] = True
-    socle.config["activite_observe_depuis"] = _il_y_a(21)
+    #  ⚠️ ON LIT LA CONSTANTE, ON NE CODE PLUS 21 EN DUR. Les seuils par
+    #  defaut ont ete decales d une semaine le 30/08 (7/14/21 → 14/21/28)
+    #  sur description du proprietaire : le role AFK, qui MASQUE tout le
+    #  serveur, ne doit arriver qu a la DEUXIEME semaine de silence. Un
+    #  test qui fige la valeur casse a chaque reglage et n eprouve rien
+    #  de plus — ce qui compte est la PROPRIETE, pas le chiffre.
+    _EXP = activite.SEUIL_EXPULSION_DEFAUT
+    socle.config["activite_observe_depuis"] = _il_y_a(_EXP)
     socle.journal[5000] = {_il_y_a(1)}          # un membre actif : journal non vide
     g = _Guild([_Membre(i, arrive_il_y_a=300) for i in range(30)])
 
     cl = _run(esc.classer(g))
     assert len(cl["expulsion"]) == 30
-    assert all(f["jours"] == 21 for f in cl["expulsion"])
+    assert all(f["jours"] == _EXP for f in cl["expulsion"])
     assert all(f["jours_reels"] == 300 for f in cl["expulsion"])
 
 
@@ -279,7 +286,8 @@ def test_le_quota_rationne_au_lieu_de_tout_bloquer(socle, monkeypatch):
     """Avant : `return` anticipe, donc retours / masquage / rappel sautes, et
     plus rien ne se debloquait jamais. Apres : 25 par passage, le reste suit."""
     socle.config["activite_enabled"] = True
-    socle.config["activite_observe_depuis"] = _il_y_a(21)
+    socle.config["activite_observe_depuis"] = _il_y_a(
+        activite.SEUIL_EXPULSION_DEFAUT)
     socle.journal[5000] = {_il_y_a(1)}
     g = _Guild([_Membre(i, arrive_il_y_a=300) for i in range(100)])
 
@@ -296,7 +304,7 @@ def test_le_quota_rationne_au_lieu_de_tout_bloquer(socle, monkeypatch):
     rap = _run(passage.passage(g, dry_run=True))
     assert rap["actif"] is True
     assert rap["suivi_muet"] is False
-    #  100 membres a 21 j → tous en expulsion, qui n'est PAS soumise au quota :
+    #  100 membres au seuil d expulsion → tous en expulsion, qui n'est PAS soumise au quota :
     #  c'est une proposition, elle n'applique rien.
     assert rap["actions"]["a_expulser"] == 100
     assert rap["quota_atteint"] is False
@@ -309,11 +317,18 @@ def test_le_quota_sert_les_plus_anciens_d_abord(socle):
     socle.config["activite_enabled"] = True
     socle.config["activite_observe_depuis"] = _il_y_a(200)
     socle.journal[5000] = {_il_y_a(1)}
-    #  60 membres au palier « retrait » (silence 14 a 20 j), tous distincts.
+    #  ⚠️ LES JOURS VIENNENT DES CONSTANTES, PAS DE CHIFFRES EN DUR. Les
+    #  seuils ont ete decales d une semaine le 30/08 (7/14/21 → 14/21/28) : un
+    #  test qui ecrit « 14 a 20 j » eprouve le chiffre d hier, pas la propriete
+    #  « le quota sert les plus anciens d abord ».
+    _RET = activite.SEUIL_RETRAIT_DEFAUT
+    _EXP = activite.SEUIL_EXPULSION_DEFAUT
+    _LARGEUR = max(1, _EXP - _RET)
+    #  60 membres au palier « retrait », silences distincts dans sa plage.
     membres = []
     for i in range(60):
         m = _Membre(i, arrive_il_y_a=300)
-        socle.journal[i] = {_il_y_a(14 + (i % 7))}
+        socle.journal[i] = {_il_y_a(_RET + (i % _LARGEUR))}
         membres.append(m)
     g = _Guild(membres)
 
@@ -325,7 +340,7 @@ def test_le_quota_sert_les_plus_anciens_d_abord(socle):
     #  Les plus anciens d'abord : le silence minimal des retenus est >= le
     #  silence maximal de ceux qu'on reporte.
     retenus = [f["jours"] for f in cl["retrait"]]
-    assert min(retenus) >= 20 - 6
+    assert min(retenus) >= _RET
 
 
 def test_un_membre_reporte_n_est_jamais_annonce_publiquement(socle):
@@ -335,15 +350,18 @@ def test_un_membre_reporte_n_est_jamais_annonce_publiquement(socle):
     socle.config["activite_enabled"] = True
     socle.config["activite_observe_depuis"] = _il_y_a(200)
     socle.journal[5000] = {_il_y_a(1)}
+    #  ⚠️ SILENCE DERIVE DU SEUIL, pas ecrit en dur : le palier « retrait »
+    #  est passe de 14 a 21 jours le 30/08, et « 15 » ne le visait plus.
     membres = []
     for i in range(60):
         m = _Membre(i, arrive_il_y_a=300)
-        socle.journal[i] = {_il_y_a(15)}
+        socle.journal[i] = {_il_y_a(activite.SEUIL_RETRAIT_DEFAUT + 1)}
         membres.append(m)
     g = _Guild(membres)
 
     rap = _run(passage.passage(g, dry_run=True))
     cl = rap["fiches"]
+    assert cl["retrait"], "le banc ne construit plus de palier « retrait »"
     retenus = {f["member"].id for f in cl["retrait"]}
     dans_les_groupes = set()
     for gr in cl["groupes"].values():

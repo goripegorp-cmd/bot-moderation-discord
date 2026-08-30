@@ -26388,6 +26388,17 @@ async def on_message(msg):
             if activite_niv.porte_une_etiquette(msg.author):
                 asyncio.create_task(
                     activite_pass.retour_immediat(msg.guild, msg.author))
+            # ═══ LE SALON AFK — demandé le 30/08/2026 ═══
+            # ⚠️ APRÈS `marquer_actif`, ET C'EST L'ORDRE QUI COMPTE. Le membre
+            # doit être compté actif AVANT qu'on efface sa preuve : l'inverse
+            # perdrait exactement le message qui vient de le sauver.
+            # ⚠️ EN TÂCHE DÉTACHÉE : la suppression attend quelques secondes
+            # pour que le membre voie l'accusé de réception. Bloquer
+            # `on_message` pendant ce temps gèlerait le traitement de tous les
+            # autres messages du serveur.
+            if await activite_pass.est_salon_afk(msg.guild.id, msg.channel.id):
+                asyncio.create_task(
+                    activite_pass.nettoyer_message_afk(msg))
     except Exception as _ex_act:
         print(f"[activite on_message] {_ex_act}")
 
