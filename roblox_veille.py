@@ -934,6 +934,52 @@ async def relever_nouveautes(limite: int = 30) -> dict:
     }, "catalogue")
 
 
+#  Deux pages suffisent : ce flux EST trié par date utile (mesuré le 30/08, sa
+#  page 1 porte la création la plus récente du compte Roblox). On ne le pagine
+#  pas en entier — il recouvre à 95 % le relevé général, qui lui va au bout.
+MAX_PAGES_HORS_VENTE = 2
+
+
+async def relever_hors_vente(limite: int = 120) -> dict:
+    """Les articles Roblox HORS VENTE, que le relevé général ne montre pas.
+
+    ⚠️ POURQUOI CE TROISIÈME RELEVÉ EXISTE — DEMANDE DU PROPRIÉTAIRE, 30/08 :
+    « il y a des accessoires qui sont en vente et d'autres qui ne sont pas en
+    vente […] ce ne sont pas les derniers accessoires qui sont créés sur la
+    plateforme. Assure-toi que ton calcul soit vraiment très très bon et qu'il
+    affiche bien les derniers créés. »
+
+    IL AVAIT RAISON, ET C'EST MESURÉ CE JOUR-LÀ :
+      · relevé actuel du bot          → 964 articles, le plus récent du 22/07
+      · avec `IncludeNotForSale=true` → 952 articles, le plus récent du **12/08**
+    Les deux dernières créations de Roblox — « Sakura Antlers » (18 j) et
+    « Gold Crown of Ozymandias » (19 j) — sont HORS VENTE. Le bot ne pouvait
+    pas les voir : il montrait les derniers accessoires DU MARCHÉ, pas les
+    derniers CRÉÉS. Sur les articles de moins de trente jours : **0 sans le
+    drapeau, 2 avec**.
+
+    ⚠️ LE DRAPEAU N'AJOUTE PAS, IL REMPLACE. 952 contre 964 : ce n'est pas un
+    sur-ensemble. Aucun des deux relevés ne voit tout — il faut donc les DEUX,
+    et c'est pour ça que celui-ci ne remplace pas l'autre.
+
+    ⚠️ ET IL NE COÛTE QUE DEUX REQUÊTES. Paginer ce flux en entier doublerait
+    le relevé du catalogue (9 pages de plus toutes les 30 min) pour un
+    recouvrement de 95 % avec ce qu'on lit déjà. Or ce qu'on vient chercher
+    ici, ce sont les CRÉATIONS RÉCENTES, et elles sont en tête de la page 1.
+    C'est la réponse à « ne pas spammer une recherche qui sert à rien ».
+    """
+    return await _relever_catalogue({
+        "Category": 1,
+        "SortType": 3,
+        "Limit": _limite_valide(limite),
+        #  Mesuré : c'est CE paramètre qui fait apparaître les créations
+        #  récentes retirées de la vente. Sans lui, elles n'existent pas.
+        "IncludeNotForSale": "true",
+        "CreatorType": "User",
+        "CreatorTargetId": CREATEUR_ROBLOX,
+    }, "hors_vente", max_pages=MAX_PAGES_HORS_VENTE)
+
+
 async def relever_collectionnables(limite: int = 30) -> dict:
     """Les articles COLLECTIONNABLES de Roblox — le flux que le bot ne voyait pas.
 

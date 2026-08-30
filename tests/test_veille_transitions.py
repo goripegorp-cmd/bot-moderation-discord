@@ -28,6 +28,7 @@ Une doublure en mémoire prouverait seulement que la doublure fonctionne.
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import json
 from datetime import datetime, timedelta, timezone
@@ -149,7 +150,7 @@ async def test_2_normal_puis_limited_produit_exactement_une_annonce(banc):
 
 
 @pytest.mark.asyncio
-async def test_2bis_lamorce_ne_condamne_plus_le_flux_des_bascules(banc):
+async def test_2bis_lamorce_ne_condamne_plus_le_flux_des_bascules(banc, monkeypatch):
     """⚠️ LA PREUVE DU DÉFAUT PRINCIPAL, ET DE SA RÉPARATION.
 
     Sans ce test, le correctif ne prouve rien. On rejoue exactement la
@@ -163,11 +164,14 @@ async def test_2bis_lamorce_ne_condamne_plus_le_flux_des_bascules(banc):
         return {"articles": veille._normaliser(catalogue), "code": 200,
                 "echecs": 0}
 
-    veille.relever_nouveautes = _faux_releve       # noqa: le banc, pas le code
-    try:
-        absorbes = await veille.amorcer(GUILDE)
-    finally:
-        del veille.relever_nouveautes              # rend la vraie fonction
+    #  ⚠️ `monkeypatch`, PAS UNE AFFECTATION SUIVIE D'UN `del`. La version
+    #  précédente faisait `veille.relever_nouveautes = _faux` puis
+    #  `del veille.relever_nouveautes` : le `del` supprime le nom du MODULE,
+    #  donc la vraie fonction disparaissait pour tout le reste de la session
+    #  de test. Le défaut est resté invisible jusqu'à ce qu'un test suivant
+    #  la référence — il a alors levé un AttributeError sur du code sain.
+    monkeypatch.setattr(veille, "relever_nouveautes", _faux_releve)
+    absorbes = await veille.amorcer(GUILDE)
 
     #  Tous absorbés : aucun n'a moins de six heures.
     assert absorbes == 5
@@ -948,3 +952,112 @@ def test_B5_la_simulation_couvre_aussi_les_actualites():
         "if await publier_actu("), (
         "le bouton « Relever maintenant » publie les actualités malgré la "
         "simulation")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Les créations RETIRÉES DE LA VENTE — signalées par le propriétaire le 30/08
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+#  Ses mots : « il y a des accessoires qui sont en vente et d'autres qui ne sont
+#  pas en vente […] ce ne sont pas les derniers accessoires qui sont créés sur
+#  la plateforme. Assure-toi que ton calcul soit vraiment très très bon et qu'il
+#  affiche bien les derniers créés. »
+#
+#  IL AVAIT RAISON, ET C'EST MESURÉ CONTRE L'API RÉELLE LE MÊME JOUR :
+#    · relevé du bot                 → 964 articles, le plus récent du 22/07
+#    · avec `IncludeNotForSale=true` → 952 articles, le plus récent du **12/08**
+#    · articles de moins de 30 jours → **0 sans le drapeau, 2 avec**
+#  Les deux dernières créations de Roblox — « Sakura Antlers » (18 j) et
+#  « Gold Crown of Ozymandias » (19 j) — sont HORS VENTE. Le bot montrait les
+#  derniers accessoires DU MARCHÉ, pas les derniers CRÉÉS.
+
+def test_le_releve_hors_vente_demande_le_bon_drapeau():
+    """C'est CE paramètre, et lui seul, qui fait apparaître les créations
+    récentes retirées de la vente. Sans lui, elles n'existent pas."""
+    import inspect
+    src = inspect.getsource(veille.relever_hors_vente)
+    ast.parse(src.lstrip())
+    assert '"IncludeNotForSale": "true"' in src
+    assert '"CreatorTargetId": CREATEUR_ROBLOX' in src, (
+        "sans le filtre de créateur, le flux se remplirait d'UGC tiers")
+    assert "SortType" in src
+
+
+@pytest.mark.asyncio
+async def test_le_releve_hors_vente_reste_a_deux_pages(monkeypatch):
+    """⚠️ « NE PAS SPAMMER UNE RECHERCHE QUI SERT À RIEN. » Paginer ce flux en
+    entier doublerait le relevé du catalogue (9 pages de plus toutes les
+    30 min) pour un recouvrement de 95 % avec ce qu'on lit déjà. Les créations
+    récentes sont en tête de la page 1 — mesuré."""
+    vu = {}
+
+    async def _faux(params, source, max_pages=None, curseur_depart=None):
+        vu["params"], vu["source"], vu["max_pages"] = params, source, max_pages
+        return {"articles": [], "code": 200, "echecs": 0,
+                "curseur_suivant": None, "curseur_refuse": False}
+
+    monkeypatch.setattr(veille, "_relever_catalogue", _faux)
+    await veille.relever_hors_vente(limite=120)
+    assert vu["max_pages"] == veille.MAX_PAGES_HORS_VENTE == 2
+    assert vu["source"] == "hors_vente", (
+        "la santé de ce relevé doit être suivie SÉPARÉMENT : un flux mort "
+        "ressemble à un flux calme")
+
+
+def test_la_boucle_fusionne_les_NOUVEAUTES_pas_seulement_les_bascules():
+    """⚠️ LE POINT QUI COMPTE. C'est précisément dans ce relevé que vivent les
+    créations récentes que l'autre ne voit pas : ne fusionner que les bascules
+    laisserait « Sakura Antlers » invisible malgré la requête payée."""
+    import ast as _ast
+    import pathlib as _pl
+    src = (_pl.Path(__file__).resolve().parent.parent / "bot.py").read_text(
+        encoding="utf-8")
+    corps = next(_ast.unparse(n) for n in _ast.walk(_ast.parse(src))
+                 if isinstance(n, _ast.AsyncFunctionDef)
+                 and n.name == "veille_roblox_task")
+    assert "roblox_module.relever_hors_vente(" in corps, (
+        "le troisième relevé n'est pas branché : le bot montre encore les "
+        "derniers accessoires du marché, pas les derniers créés")
+    bloc = corps.split("relever_hors_vente(")[1].split("CE QUE LA DÉTECTION")[0]
+    assert "'nouveaux'" in bloc or '"nouveaux"' in bloc, (
+        "seules les bascules sont fusionnées : les créations hors vente "
+        "resteraient invisibles")
+
+
+def test_l_age_du_plus_recent_est_calcule_sur_les_DEUX_releves():
+    """⚠️ Le calculer sur le seul relevé général annoncerait « 38 jours » alors
+    qu'une création de 18 jours existe, retirée de la vente — soit exactement
+    le mensonge que le propriétaire a repéré."""
+    import ast as _ast
+    import pathlib as _pl
+    src = (_pl.Path(__file__).resolve().parent.parent / "bot.py").read_text(
+        encoding="utf-8")
+    corps = next(_ast.unparse(n) for n in _ast.walk(_ast.parse(src))
+                 if isinstance(n, _ast.AsyncFunctionDef)
+                 and n.name == "veille_roblox_task")
+    bloc = corps.split("_sa['plus_frais_h']")[0][-500:]
+    assert "relhv" in bloc, (
+        "l'âge du plus récent ignore le relevé hors vente : le bilan mentira")
+
+
+def test_la_fiche_dit_si_l_article_est_achetable():
+    """Depuis que le bot voit les créations retirées de la vente, une fiche
+    sans cette ligne enverrait le lecteur sur une page où il ne peut rien
+    acheter, sans l'avoir prévenu. Le prix seul ne le dit pas : un article
+    hors vente garde son prix affiché."""
+    import pathlib as _pl
+    pan = (_pl.Path(__file__).resolve().parent.parent
+           / "roblox_panneau.py").read_text(encoding="utf-8")
+    assert "**Disponibilité**" in pan
+    assert "retiré de la vente" in pan
+
+
+def test_les_trois_releves_ont_des_sources_de_sante_distinctes():
+    """Un flux mort ressemble trait pour trait à un flux calme. Trois relevés
+    qui partagent un compteur masqueraient la panne de l'un des trois."""
+    import inspect
+    for fn, attendu in ((veille.relever_nouveautes, "catalogue"),
+                        (veille.relever_collectionnables, "collectionnables"),
+                        (veille.relever_hors_vente, "hors_vente")):
+        src = inspect.getsource(fn)
+        assert f'"{attendu}"' in src, f"{fn.__name__} n'étiquette pas sa santé"

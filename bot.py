@@ -13098,6 +13098,8 @@ async def veille_roblox_task():
                #  Ce que la DÉTECTION a vu, avant le moindre filtre — voir le
                #  commentaire à l'endroit où ils sont posés.
                "detectes": 0, "bascules": 0, "bascules_anciennes": 0,
+               #  Ce que le troisieme releve (hors vente) a rendu.
+               "lus_hors_vente": 0,
                "plus_frais_h": None,
                #  La file d'attente d'envoi : ce qui y entre à ce passage, et
                #  ce qu'elle contient à la fin. Remplace « plafonnés », qui
@@ -13160,6 +13162,38 @@ async def veille_roblox_task():
                             evts.setdefault("bascules_anciennes", []).append(_a)
                             _anc.add(_a["asset_id"])
 
+                # ═══════════════════════════════════════════════════════════
+                #  TROISIÈME RELEVÉ — LES CRÉATIONS RETIRÉES DE LA VENTE
+                # ═══════════════════════════════════════════════════════════
+                #  ⚠️ SANS LUI, LE BOT MONTRE LES DERNIERS ACCESSOIRES DU
+                #  MARCHÉ, PAS LES DERNIERS CRÉÉS. Signalé par le propriétaire
+                #  le 30/08, et mesuré le jour même :
+                #    · relevé général              → plus récent du 22/07
+                #    · avec `IncludeNotForSale`    → plus récent du **12/08**
+                #  Les deux dernières créations de Roblox sont hors vente, donc
+                #  invisibles. Sur les articles de moins de 30 jours : 0 sans
+                #  le drapeau, 2 avec.
+                #  Deux pages seulement : les créations récentes sont en tête,
+                #  et paginer ce flux en entier doublerait le relevé pour un
+                #  recouvrement de 95 %.
+                await asyncio.sleep(roblox_module.PAUSE_ENTRE_APPELS_CATALOGUE)
+                relhv = await roblox_module.relever_hors_vente(limite=120)
+                _sa["tronque"] = _sa.get("tronque") or bool(relhv.get("tronque"))
+                _budget_veille(_sa, relhv)
+                if relhv["code"] == 200:
+                    _sa["lus_hors_vente"] = len(relhv.get("articles") or [])
+                    evts_h = await roblox_module.comparer_et_enregistrer(
+                        relhv["articles"])
+                    #  ⚠️ ON FUSIONNE LES NOUVEAUTÉS AUSSI, pas seulement les
+                    #  bascules : c'est précisément ICI que vivent les
+                    #  créations récentes que l'autre relevé ne voit pas.
+                    for _cle in ("nouveaux", "bascules", "bascules_anciennes"):
+                        _deja = {x["asset_id"] for x in (evts.get(_cle) or [])}
+                        for _a in (evts_h.get(_cle) or []):
+                            if _a["asset_id"] not in _deja:
+                                evts.setdefault(_cle, []).append(_a)
+                                _deja.add(_a["asset_id"])
+
                 #  ⚠️ CE QUE LA DÉTECTION A TROUVÉ, AVANT TOUT FILTRE.
                 #  Le bilan ne l'imprimait nulle part : « 964 lu(s) · 0
                 #  candidat(s) » s'affichait à l'identique que la détection
@@ -13175,8 +13209,13 @@ async def veille_roblox_task():
                 #  L'âge de l'article le plus récent du catalogue Roblox. C'est
                 #  LA réponse à « est-ce cassé, ou Roblox ne crée rien ? » —
                 #  mesuré le 30/08 : 38 jours depuis la dernière création.
+                #  ⚠️ SUR LES DEUX RELEVÉS, PAS SUR UN SEUL. Le calculer sur le
+                #  seul relevé général annoncerait « 38 jours » alors qu'une
+                #  création de 18 jours existe, retirée de la vente — soit
+                #  exactement le mensonge que le propriétaire a repéré.
                 _frais = [roblox_module._heures_depuis(x.get("cree_le"))
-                          for x in (rel.get("articles") or [])]
+                          for x in ((rel.get("articles") or [])
+                                    + (relhv.get("articles") or []))]
                 _frais = [h for h in _frais if h is not None]
                 _sa["plus_frais_h"] = min(_frais) if _frais else None
 
@@ -13590,7 +13629,8 @@ async def veille_roblox_task():
                          else ", donc AUCUNE nouveauté n'est publiable "
                               "aujourd'hui, et c'est la source qui est calme, "
                               "pas le bot"))
-            print(f"[veille_roblox_task]   accessoires : {_sa['lus']} lu(s) · "
+            print(f"[veille_roblox_task]   accessoires : {_sa['lus']} lu(s) "
+                  f"(+{_sa.get('lus_hors_vente', 0)} hors vente) · "
                   f"{_sa['candidats']} candidat(s) · {_sa['hors_fenetre']} hors "
                   f"fenêtre ({roblox_module.FENETRE_DIRECTE_HEURES} h) · "
                   f"{_sa['deja']} déjà sorti(s) · {_sa['enfiles']} mise(s) en "

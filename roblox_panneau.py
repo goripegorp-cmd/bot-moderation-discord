@@ -203,6 +203,15 @@ def construire_fiche(article: dict, flux: str, image: str | None = None,
     revente = article.get("revente") or article.get("prix_revente")
     mult = article.get("multiplicateur")
     lignes = [f"**Prix d'origine** · {_fmt_robux(article.get('prix'))}"]
+    #  ⚠️ DIRE S'IL EST ACHETABLE — demandé le 30/08 : « il y a des accessoires
+    #  qui sont en vente et d'autres qui ne sont pas en vente ». Depuis que le
+    #  bot voit AUSSI les créations retirées de la vente (troisième relevé),
+    #  une fiche sans cette ligne enverrait le lecteur sur une page où il ne
+    #  peut rien acheter, sans l'avoir prévenu. Le prix d'origine seul ne le
+    #  dit pas : un article hors vente garde son prix affiché.
+    lignes.append("**Disponibilité** · "
+                  + ("🔴 **retiré de la vente**" if article.get("hors_vente")
+                     else "🟢 en vente"))
     if flux == "bascules" or article.get("collectionnable"):
         lignes.append(f"**Revente la plus basse** · {_fmt_robux(revente)}")
         lignes.append(f"**Stock émis** · {_fmt_nombre(stock)}")
