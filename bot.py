@@ -43912,6 +43912,69 @@ _rate_limit_buckets: dict = {}
 
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La tempête de reconnexions : une ligne au lieu de cent
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+#  ⚠️ CE QU'ON A VU LE 31/08 À 22 h 01. La passerelle Discord a rendu des
+#  HTTP 503 pendant une minute. `discord.py` a fait EXACTEMENT ce qu'il doit
+#  faire — réessayer avec un délai croissant (1,6 s · 2,3 s · 5,4 s · 10,1 s) —
+#  mais chaque tentative a craché une pile complète de quinze lignes. Résultat :
+#  **116 lignes pour un seul incident**, entrelacées au point d'être illisibles,
+#  et rien nulle part ne disait « c'est Discord, pas toi ».
+#
+#  ⚠️ ON NE MASQUE PAS L'ERREUR, ON LA RÉSUME. Le compte des tentatives est
+#  affiché : une reconnexion isolée est la vie normale d'un bot, cinquante en
+#  une minute sont un incident. C'est la DIFFÉRENCE qu'il faut voir, et une
+#  pile de traceback la noie.
+#
+#  ⚠️ ET SEULEMENT POUR L'ÉCHEC DE POIGNÉE DE MAIN. Toute autre exception garde
+#  sa pile entière : c'est là qu'on cherche un vrai défaut du bot.
+
+class _ResumeurPasserelle(logging.Filter):
+    """Condense les échecs de connexion à la passerelle Discord."""
+
+    def __init__(self):
+        super().__init__()
+        self._n = 0
+        self._depuis = None
+
+    def filter(self, record):
+        exc = record.exc_info[1] if record.exc_info else None
+        nom = type(exc).__name__ if exc is not None else ""
+        if nom not in ("WSServerHandshakeError", "ClientConnectorError",
+                       "ServerDisconnectedError", "ConnectionClosed"):
+            return True          # tout le reste garde sa pile, intacte
+        self._n += 1
+        maintenant = datetime.now(timezone.utc)
+        if self._depuis is None:
+            self._depuis = maintenant
+        secondes = max(1, int((maintenant - self._depuis).total_seconds()))
+        statut = getattr(exc, "status", None)
+        #  On garde le message d'origine (il porte le délai de reprise), on lui
+        #  ajoute ce qui manquait, et on jette la pile.
+        record.msg = (
+            f"passerelle Discord injoignable"
+            + (f" (HTTP {statut})" if statut else f" ({nom})")
+            + f" — {record.getMessage()} · {self._n} tentative(s) en "
+              f"{secondes} s. Côté DISCORD, pas côté bot : rien à corriger "
+              f"ici, la reconnexion est automatique.")
+        record.args = ()
+        record.exc_info = None
+        record.exc_text = None
+        return True
+
+
+def _installer_resumeur_passerelle():
+    """À appeler AVANT `bot.run`. Ne lève jamais."""
+    try:
+        logging.getLogger("discord.client").addFilter(_ResumeurPasserelle())
+        logging.getLogger("discord.gateway").addFilter(_ResumeurPasserelle())
+    except Exception as ex:
+        print(f"[logs] résumeur de passerelle non installé : {ex}")
+
+
 if __name__ == "__main__":
     print("🚀 Bot v32 - Démarrage...")
     print("🔒 Système de sécurité activé")
@@ -43933,4 +43996,15 @@ if __name__ == "__main__":
     # Logs propres : discord.py en WARNING (supprime les [INFO] discord.client /
     # gateway de routine ; garde warnings + erreurs). VERBOSE_LOGS=1 → INFO complet.
     _dlevel = logging.INFO if _os.getenv('VERBOSE_LOGS', '0') == '1' else logging.WARNING
+    #  ⚠️ L'IDENTITÉ DE CE PROCESSUS, IMPRIMÉE AVANT TOUTE CONNEXION.
+    #  La sentinelle de `veille_roblox_task` ne peut rien dire tant que le bot
+    #  n'est pas connecté : le 31/08, la passerelle a rendu des 503 pendant une
+    #  minute, et pendant ce temps la question « y a-t-il deux instances ? »
+    #  restait sans réponse. Cette ligne, elle, sort TOUJOURS. Deux blocs de
+    #  démarrage avec deux identifiants différents dans le même flux de
+    #  journaux, et la question est tranchée sans discussion.
+    print(f"🆔 Instance {_INSTANCE_ID} — si vous voyez DEUX identifiants "
+          f"différents dans ces journaux, deux conteneurs tournent en même "
+          f"temps (problème de déploiement, pas de code).")
+    _installer_resumeur_passerelle()
     bot.run(TOKEN, log_level=_dlevel)

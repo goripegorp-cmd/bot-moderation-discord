@@ -105,3 +105,91 @@ def test_seules_les_instances_RECENTES_comptent():
                 "morte ; trop long : une instance éteinte alarmerait encore")
             return
     raise AssertionError("SENTINELLE_FRAICHEUR_S introuvable")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La tempête de reconnexions du 31/08 — 116 lignes pour un seul incident
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _classe_resumeur():
+    """Extrait `_ResumeurPasserelle` de bot.py SANS l'importer.
+
+    ⚠️ LA CI N'A PAS DE JETON DISCORD, et `import bot` s'y comporte de façon
+    imprévisible — c'est pourquoi AUCUN test du dépôt ne l'importe. On reprend
+    donc le motif déjà éprouvé (`test_config_lost_update.py`) : on lit la
+    classe dans l'arbre syntaxique et on l'exécute dans un espace de noms
+    minimal. Le code testé reste EXACTEMENT celui du dépôt.
+    """
+    import logging as _l
+    from datetime import datetime as _dt, timezone as _tz
+    for n in ast.walk(ast.parse(SRC)):
+        if isinstance(n, ast.ClassDef) and n.name == "_ResumeurPasserelle":
+            ns = {"logging": _l, "datetime": _dt, "timezone": _tz}
+            exec(ast.unparse(n), ns)          # noqa: S102 — code du dépôt
+            return ns["_ResumeurPasserelle"]
+    raise AssertionError("_ResumeurPasserelle introuvable dans bot.py")
+
+
+def _fabriquer_record(exc, message="Attempting a reconnect in 1.61s"):
+    import logging as _l
+    try:
+        raise exc
+    except Exception:
+        import sys
+        return _l.LogRecord("discord.client", _l.ERROR, __file__, 1, message,
+                            (), sys.exc_info())
+
+
+def test_un_echec_de_passerelle_perd_sa_pile_et_gagne_un_compteur():
+    """⚠️ MESURÉ LE 31/08 : la passerelle Discord a rendu des 503 pendant une
+    minute. `discord.py` a réessayé correctement (1,6 · 2,3 · 5,4 · 10,1 s),
+    mais chaque tentative crachait quinze lignes de pile — **116 lignes pour un
+    seul incident**, entrelacées au point d'être illisibles, et rien nulle part
+    ne disait que la cause était chez Discord."""
+    class _Handshake(Exception):
+        status = 503
+    _Handshake.__name__ = "WSServerHandshakeError"
+
+    f = _classe_resumeur()()
+    r1 = _fabriquer_record(_Handshake("Invalid response status"))
+    assert f.filter(r1) is True, "l'événement ne doit pas être MASQUÉ, résumé"
+    assert r1.exc_info is None, "la pile de quinze lignes est toujours là"
+    assert "503" in r1.msg and "1 tentative" in r1.msg
+    assert "DISCORD, pas côté bot" in r1.msg, (
+        "sans cette phrase, on cherche le défaut dans le bot pendant une heure")
+
+    #  Le compteur monte : une reconnexion isolée est la vie normale d'un bot,
+    #  cinquante en une minute sont un incident. C'est la DIFFÉRENCE qui doit
+    #  se voir, et une pile de traceback la noie.
+    r2 = _fabriquer_record(_Handshake("Invalid response status"))
+    f.filter(r2)
+    assert "2 tentative" in r2.msg
+
+
+def test_une_VRAIE_erreur_garde_sa_pile_entiere():
+    """⚠️ LA CONTRE-ÉPREUVE, ET ELLE COMPTE PLUS QUE L'AUTRE. Un résumeur trop
+    large avalerait le défaut qu'on cherche. Tout ce qui n'est pas un échec de
+    poignée de main garde sa pile."""
+    f = _classe_resumeur()()
+    r = _fabriquer_record(ValueError("un vrai défaut du bot"), "autre chose")
+    assert f.filter(r) is True
+    assert r.exc_info is not None, "la pile d'un vrai défaut a été jetée"
+    assert r.msg == "autre chose", "le message d'un vrai défaut a été réécrit"
+
+
+def test_l_identite_est_imprimee_AVANT_la_connexion():
+    """⚠️ LA SENTINELLE NE PEUT RIEN DIRE TANT QUE LE BOT N'EST PAS CONNECTÉ :
+    elle bat dans `veille_roblox_task`, qui attend `wait_until_ready`. Le
+    31/08, pendant la minute de 503, la question « y a-t-il deux instances ? »
+    est restée sans réponse. Cette ligne-ci sort TOUJOURS."""
+    bloc = SRC.split('if __name__ == "__main__":')[-1]
+    assert "_INSTANCE_ID" in bloc, (
+        "l'identité n'est pas imprimée au démarrage : en cas de panne de "
+        "connexion, on ne peut pas trancher")
+    i_id = bloc.index("_INSTANCE_ID")
+    i_run = bloc.index("bot.run(")
+    assert i_id < i_run, "l'identité est imprimée après la connexion"
+    assert "_installer_resumeur_passerelle()" in bloc
+    assert bloc.index("_installer_resumeur_passerelle()") < i_run, (
+        "le résumeur est installé après `bot.run` : la tempête serait déjà "
+        "passée en clair")
