@@ -352,6 +352,7 @@ Modal.on_error = _global_modal_on_error
 import aiosqlite, os, re, json, asyncio, unicodedata, io, time, aiohttp, hashlib, secrets
 from datetime import datetime, timedelta, timezone
 from datetime import time as _dtime
+import uuid
 from dotenv import load_dotenv
 import xml.etree.ElementTree as ET
 import matplotlib
@@ -13040,6 +13041,83 @@ async def _diag_veille_serveurs(limite: int = 10) -> None:
             print(f"[veille_roblox_task]   {getattr(g, 'id', '?')} : {_dex}")
 
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La sentinelle d'instance — « sommes-nous seuls à tourner ? »
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+#  ⚠️ POURQUOI ELLE EXISTE. Journaux Railway du 31/08 : l'âge de la création la
+#  plus récente apparaît DEUX FOIS pour chaque valeur —
+#      465 · 466 · 466 · 467 · 467 · 468 · 468 · 469 · 469 · 470 · 470 h
+#  — et deux lignes « actualités : … » se suivent sans « passage terminé »
+#  entre elles. Deux passages entrelacés, alors que `tasks.loop` n'en lance
+#  jamais deux à la fois : c'est donc DEUX PROCESSUS.
+#
+#  Conséquence directe et mesurable : le débit du catalogue est doublé, et
+#  `reste_min` reste collé à 2-3/12 au lieu de remonter à 5.
+#
+#  ⚠️ ON MESURE, ON NE DEVINE PAS. Cette sentinelle ne corrige rien — elle ne
+#  le peut pas, la cause est côté déploiement. Elle remplace une inférence de
+#  ma part par un FAIT que le bot constate lui-même et écrit dans son journal.
+#  Sans elle, on discuterait de cette hypothèse pendant des jours.
+
+#  Identité de CE processus. Elle change à chaque démarrage : c'est exactement
+#  ce qu'on veut — deux conteneurs, deux identités.
+_INSTANCE_ID = uuid.uuid4().hex[:12]
+
+#  En dessous de ce délai, une autre instance est considérée VIVANTE. Deux
+#  minutes : la boucle bat toutes les 30 min, mais un battement est aussi
+#  écrit à chaque passage — voir `_battre_sentinelle`.
+SENTINELLE_FRAICHEUR_S = 180
+
+
+async def _init_sentinelle():
+    """Crée la table des instances. Idempotent, jamais bloquant."""
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS bot_instances("
+                " id TEXT PRIMARY KEY,"
+                " vu_le TEXT NOT NULL,"
+                " demarre_le TEXT NOT NULL)")
+            await db.commit()
+    except Exception as ex:
+        print(f"[sentinelle] init impossible : {type(ex).__name__}: {ex}")
+
+
+async def _battre_sentinelle() -> list[str]:
+    """Signe sa présence et rend les AUTRES instances vues récemment.
+
+    ⚠️ NE LÈVE JAMAIS. Une sentinelle qui casse le passage qu'elle surveille
+    serait pire que pas de sentinelle du tout.
+    """
+    autres = []
+    try:
+        maintenant = datetime.now(timezone.utc)
+        iso = maintenant.isoformat()
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO bot_instances(id, vu_le, demarre_le)"
+                " VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET vu_le=?",
+                (_INSTANCE_ID, iso, iso, iso))
+            await db.commit()
+            borne = (maintenant - timedelta(seconds=SENTINELLE_FRAICHEUR_S)).isoformat()
+            async with db.execute(
+                "SELECT id, vu_le FROM bot_instances"
+                " WHERE id<>? AND vu_le>=?", (_INSTANCE_ID, borne)) as cur:
+                autres = [f"{r[0]} (vu {r[1][11:19]})" for r in await cur.fetchall()]
+            #  On oublie les instances mortes depuis longtemps, sinon la table
+            #  garde une ligne par redéploiement, pour toujours.
+            await db.execute(
+                "DELETE FROM bot_instances WHERE vu_le < ?",
+                ((maintenant - timedelta(days=2)).isoformat(),))
+            await db.commit()
+    except Exception as ex:
+        print(f"[sentinelle] {type(ex).__name__}: {ex}")
+    return autres
+
+
 @tasks.loop(minutes=30)
 async def veille_roblox_task():
     """Veille Roblox : nouveautes du catalogue, bascules, et actualite.
@@ -13053,6 +13131,22 @@ async def veille_roblox_task():
     ouvrir la moindre connexion.
     """
     try:
+        #  ⚠️ D'ABORD : SOMMES-NOUS SEULS À TOURNER ?
+        #  Si deux conteneurs tournent, TOUT ce que dit ce bilan est faux d'un
+        #  facteur deux — le débit, les tours de rotation, le nombre de
+        #  passages — et on chercherait la cause dans le code pendant des
+        #  jours. Cette ligne coûte une écriture et répond une fois pour
+        #  toutes. Voir `_battre_sentinelle`.
+        await _init_sentinelle()
+        _autres = await _battre_sentinelle()
+        if _autres:
+            print(f"[veille_roblox_task] 🚨 UNE AUTRE INSTANCE DU BOT TOURNE "
+                  f"EN MÊME TEMPS : {', '.join(_autres)} — cette instance est "
+                  f"{_INSTANCE_ID}. Le débit vers Roblox est DOUBLÉ, les "
+                  f"compteurs de ce bilan comptent deux fois, et un doublon "
+                  f"de publication devient possible. C'est un problème de "
+                  f"DÉPLOIEMENT (deux conteneurs actifs), pas de code.")
+
         #  Compteur PARTAGE par tous les flux et toutes les guildes du passage.
         #  C'est le seul garde-fou qui tienne si plusieurs guildes rattrapent
         #  du retard en meme temps.
