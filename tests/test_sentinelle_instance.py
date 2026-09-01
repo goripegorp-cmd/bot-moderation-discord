@@ -1,28 +1,38 @@
 """Deux instances du bot tournent-elles en même temps ?
 
 ═══════════════════════════════════════════════════════════════════════════════
-CE QUE LES JOURNAUX DU 31/08 MONTRENT
+⚠️ LA RÉPÉTITION DES ÂGES NE PROUVAIT RIEN — MON DIAGNOSTIC DU 31/08 ÉTAIT FAUX
 ═══════════════════════════════════════════════════════════════════════════════
-L'âge de la création Roblox la plus récente, dans l'ordre des passages :
+J'avais écrit ici : « l'âge de la création la plus récente apparaît DEUX FOIS à
+chaque valeur (465 · 466 · 466 · 467 · 467 …), or `tasks.loop` n'exécute jamais
+deux itérations à la fois : il ne reste qu'une explication, DEUX PROCESSUS. »
 
-    465 · 466 · 466 · 467 · 467 · 468 · 468 · 469 · 469 · 470 · 470 h
+C'est faux, et il existait une explication innocente que je n'ai pas cherchée.
 
-Chaque valeur apparaît DEUX FOIS. Et deux lignes « actualités : … » se suivent
-sans « passage terminé » entre elles, avec des compteurs différents (12 puis
-14). Or `tasks.loop` n'exécute jamais deux itérations à la fois, et le
-superviseur ne relance que les boucles ARRÊTÉES (`if not lo.is_running()`).
-Il ne reste qu'une explication : DEUX PROCESSUS.
+    `veille_roblox_task` tourne toutes les 30 MINUTES.
+    L'âge est imprimé en HEURES ENTIÈRES (`f"{_pf:.0f} h"`).
 
-⚠️ CONSÉQUENCE MESURABLE : le débit vers le catalogue est doublé, ce qui colle
-`reste_min` à 2-3/12 au lieu de 5. Et tous les compteurs du bilan comptent en
-double, ce qui fausse chaque diagnostic bâti dessus.
+Une valeur qui monte de 0,5 par passage et qu'on arrondit à l'entier répète
+donc EXACTEMENT deux fois chaque nombre. Ce n'est pas une anomalie : c'est de
+l'arithmétique. Vérifié sur les journaux du 01/09, 11 valeurs sur 11 :
 
-⚠️ CE MODULE NE CORRIGE RIEN, ET C'EST VOULU. La cause est côté déploiement —
-deux conteneurs actifs — et le bot ne peut pas s'en occuper. Ce qu'il peut
-faire, et qui vaut bien plus qu'une hypothèse de ma part, c'est le CONSTATER
-et le dire. « Ne me dis jamais qu'une chose marche sans avoir suivi la chaîne
-jusqu'à un effet réel » vaut aussi pour les diagnostics : celui-ci s'écrit
-tout seul, dans les journaux, la prochaine fois que ça se produit.
+    attendu (une seule instance) : 422 423 423 424 424 425 425 426 426 427 427
+    observé en production        : 422 423 423 424 424 425 425 426 426 427 427
+
+Et le 01/09 confirme le reste : UN seul identifiant d'instance, la sentinelle
+muette. `test_la_repetition_des_ages_ne_prouve_rien` fige ce calcul pour que
+personne — moi le premier — ne refasse la même déduction hâtive.
+
+⚠️ CE QUE ÇA COÛTE, ET POURQUOI ON GARDE LE MODULE. Un diagnostic faux laissé
+dans un dépôt fait perdre plus de temps qu'une absence de diagnostic : on part
+chercher un problème de déploiement qui n'existe pas. Mais la SENTINELLE, elle,
+reste juste et utile — elle ne déduit rien, elle CONSTATE. C'est précisément la
+différence entre les deux qui justifie de garder l'une et d'effacer l'autre :
+un fait mesuré vaut mieux qu'une inférence, même élégante.
+
+(`reste_min` collé à 2-3/12 le 31/08 puis remonté à 5/12 le 01/09 reste
+inexpliqué. Le 31/08, le propriétaire cliquait « Relever maintenant », qui
+puise au même quota — c'est une hypothèse, et elle est notée comme telle.)
 """
 from __future__ import annotations
 
@@ -193,3 +203,90 @@ def test_l_identite_est_imprimee_AVANT_la_connexion():
     assert bloc.index("_installer_resumeur_passerelle()") < i_run, (
         "le résumeur est installé après `bot.run` : la tempête serait déjà "
         "passée en clair")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La réfutation, exécutable
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_la_repetition_des_ages_ne_prouve_rien():
+    """⚠️ FIGE LE CALCUL QUI M'A FAIT ANNONCER UN FAUX DIAGNOSTIC.
+
+    Tant que la boucle tourne toutes les 30 min et que l'âge est imprimé en
+    heures entières, chaque valeur SORT DEUX FOIS avec une seule instance. Si
+    un jour la cadence ou le format change, ce test tombe — et c'est voulu :
+    le raisonnement de la docstring devra être refait, pas recopié.
+    """
+    import re
+    m = re.search(r"@tasks\.loop\(minutes=(\d+)\)\s*\nasync def veille_roblox_task",
+                  SRC)
+    assert m, "cadence de veille_roblox_task introuvable"
+    minutes = int(m.group(1))
+    assert "f'{_pf:.0f} h'" in SRC or 'f"{_pf:.0f} h"' in SRC or "{_pf:.0f} h" in SRC, (
+        "l'âge n'est plus imprimé en heures entières : le calcul ci-dessous "
+        "ne vaut plus")
+
+    pas = minutes / 60.0
+    depart = 422.13                      # âge réel au premier passage du 01/09
+    rendu = [f"{depart + pas * k:.0f}" for k in range(11)]
+    observe = ["422", "423", "423", "424", "424", "425",
+               "425", "426", "426", "427", "427"]
+    assert rendu == observe, (
+        "la suite observée en production ne s'explique plus par une seule "
+        f"instance : {rendu} != {observe}")
+
+    #  Le cœur de la réfutation : des doublons SANS second processus.
+    assert len(rendu) > len(set(rendu)), (
+        "sans répétition, la déduction « doublons donc deux instances » "
+        "n'aurait jamais eu lieu — ce test ne garde plus rien")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  `veille_marche_task` doit pouvoir prouver qu'elle vit
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_le_bilan_dit_ou_en_est_la_tete_du_marche():
+    """⚠️ CINQ HEURES DE JOURNAUX (01/09), ZÉRO LIGNE `[veille_marche_task]`.
+
+    La boucle ne parle que si la tête du classement CHANGE. Silence normal et
+    boucle morte étaient donc indistinguables — et une fonctionnalité qui ne
+    peut pas prouver qu'elle tourne n'est pas livrée. Le bilan de 30 min dit
+    maintenant ce que le marché retient, et depuis quand.
+    """
+    corps = _fonction("veille_roblox_task")
+    assert "tete_memorisee()" in corps, (
+        "le bilan ne lit pas la tête du marché : rien ne prouve que la boucle "
+        "de 4 minutes tourne")
+    assert "Publié récemment" in corps
+
+
+def test_une_tete_jamais_confirmee_est_dite_FORT():
+    """Le cas qui compte : la boucle n'a jamais abouti. Un affichage vide
+    passerait pour « rien de neuf » alors que rien ne fonctionne."""
+    corps = _fonction("veille_roblox_task")
+    assert "JAMAIS été confirmée" in corps
+    assert "veille_marche_task" in corps, (
+        "l'avertissement ne nomme pas la boucle en cause : on chercherait au "
+        "mauvais endroit")
+
+
+def test_une_tete_perimee_ne_passe_pas_pour_une_mesure_fraiche():
+    """⚠️ LE PIÈGE DU REPLI. `tete_memorisee` rend le dernier confirmé même
+    très vieux — c'est voulu (une panne d'API ne doit pas effacer ce qu'on
+    savait). Mais l'afficher sans son âge la ferait passer pour une mesure du
+    jour."""
+    corps = _fonction("veille_roblox_task")
+    assert "MARCHÉ MUET" in corps
+    assert "souvenir, pas une mesure" in corps
+    assert "MARCHE_FRAICHEUR_MIN" in corps
+
+    for ligne in SRC.splitlines():
+        if ligne.startswith("MARCHE_FRAICHEUR_MIN"):
+            valeur = int(ligne.split("=")[1].split("#")[0].strip())
+            #  La boucle passe toutes les 4 min mais s'efface pendant un
+            #  passage de veille (~4 min mesurées). Trop court : l'alerte
+            #  crierait à chaque relevé. Trop long : une boucle morte
+            #  passerait une demi-journée inaperçue.
+            assert 15 <= valeur <= 120, "seuil de fraîcheur du marché absurde"
+            return
+    raise AssertionError("MARCHE_FRAICHEUR_MIN introuvable")

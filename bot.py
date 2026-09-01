@@ -13087,6 +13087,13 @@ _INSTANCE_ID = uuid.uuid4().hex[:12]
 #  En dessous de ce délai, une autre instance est considérée VIVANTE. Deux
 #  minutes : la boucle bat toutes les 30 min, mais un battement est aussi
 #  écrit à chaque passage — voir `_battre_sentinelle`.
+#  ⚠️ AU-DELÀ DE CE DÉLAI, LA BOUCLE DU MARCHÉ EST CONSIDÉRÉE COMME
+#  MUETTE. Elle tourne toutes les 4 minutes ; elle s'efface pendant un
+#  passage de veille (priorité au budget de requêtes), et un passage
+#  mesuré dure ~4 min. Trente minutes lui laissent donc ~7 tours pour
+#  se manifester : si rien n'a été confirmé depuis, ce n'est plus de
+#  l'effacement, c'est une panne.
+MARCHE_FRAICHEUR_MIN = 30
 SENTINELLE_FRAICHEUR_S = 180
 
 
@@ -13757,6 +13764,46 @@ async def veille_roblox_task():
                   f"fenêtre ({roblox_module.FENETRE_DIRECTE_HEURES} h) · "
                   f"{_sa['deja']} déjà sorti(s) · {_sa['enfiles']} mise(s) en "
                   f"file · {_sa['echecs']} échec(s) d'envoi")
+
+            #  ⚠️ LA PREUVE DE VIE DE `veille_marche_task`. Elle ne parle que
+            #  quand la tête du classement CHANGE : sur cinq heures de journaux
+            #  du 01/09, zéro ligne. Silence normal et boucle morte étaient
+            #  indistinguables. Cette ligne-ci tranche, sans une seule requête
+            #  de plus vers Roblox (elle lit la base).
+            try:
+                _tete = await roblox_marche_module.tete_memorisee()
+            except Exception as _ex_tete:
+                _tete = None
+                print(f"[veille_roblox_task]   ⚠️ tête du marché illisible : "
+                      f"{type(_ex_tete).__name__}: {_ex_tete}")
+            if _tete is None:
+                print("[veille_roblox_task]   ⚠️ MARCHÉ : aucune tête de "
+                      "classement n'a JAMAIS été confirmée. La boucle "
+                      "`veille_marche_task` n'a pas encore abouti une seule "
+                      "fois — vérifiez qu'elle est démarrée et que le "
+                      "catalogue répond.")
+            else:
+                _age_min = None
+                try:
+                    _vu = datetime.fromisoformat(_tete["vu_le"])
+                    if _vu.tzinfo is None:
+                        _vu = _vu.replace(tzinfo=timezone.utc)
+                    _age_min = (datetime.now(timezone.utc)
+                                - _vu).total_seconds() / 60.0
+                except Exception:
+                    pass
+                print(f"[veille_roblox_task]   marché « Publié récemment » : "
+                      f"tête = « {_tete['nom']} » (#{_tete['asset_id']}, rang "
+                      f"{_tete['rang_marche']}, "
+                      f"{'en vente' if _tete['en_vente'] else 'hors vente'})"
+                      + (f" · confirmée il y a {_age_min:.0f} min"
+                         if _age_min is not None else " · date de contrôle illisible"))
+                if _age_min is not None and _age_min > MARCHE_FRAICHEUR_MIN:
+                    print(f"[veille_roblox_task]   ⚠️ MARCHÉ MUET depuis "
+                          f"{_age_min:.0f} min alors que la boucle passe "
+                          f"toutes les 4 min : `veille_marche_task` ne "
+                          f"confirme plus rien. La tête ci-dessus est un "
+                          f"souvenir, pas une mesure fraîche.")
             #  ⚠️ LA FILE, TOUJOURS. Une fiche en attente est une fiche vivante :
             #  tant que cette ligne existe, « reporté » n'est plus un
             #  euphémisme pour « perdu » — c'est vérifiable en base.

@@ -49,6 +49,18 @@ import ast
 import re
 import sys
 
+#  ⚠️ SANS CECI, CET OUTIL ÉCHOUE EN ANNONÇANT SA RÉUSSITE. Ses messages
+#  portent des emojis (✅, ⚠️) ; la console Windows par défaut est en cp1252 et
+#  lève `UnicodeEncodeError` à l'impression, donc code de retour 1 — que
+#  `test_bouton_langue.py` lit comme « un bouton persistant est orphelin ».
+#  La CI tourne en UTF-8 et ne l'a jamais vu.
+for _flux in (sys.stdout, sys.stderr):
+    try:
+        _flux.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass          # Python < 3.7 ou flux déjà redirigé : sans conséquence
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Lecture de l'arbre
