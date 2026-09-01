@@ -12887,6 +12887,9 @@ async def activite_passage_task():
             #  avance ou s'il est bloqué. `reportes` doit tomber à 0 en quelques
             #  passages ; s'il stagne, c'est que les poses échouent.
             _et = _ac.get("etiquettes") or {}
+            #  Ce que le bot a REELLEMENT applique aux paliers.
+            _rp = _ac.get("rappels") or {}
+            _rt = _ac.get("retraits") or {}
             #  ⚠️ L'ANCRE D'OBSERVATION, EN CLAIR. `observation=0 j` fait croire
             #  à une panne alors que c'est le garde-fou anti-faux-positif : sous
             #  ANCIENNETE_MINIMALE jours, le bot REFUSE de juger qui que ce soit
@@ -12918,6 +12921,21 @@ async def activite_passage_task():
                   + (f" · étiquettes +{_et.get('faits', 0)}"
                      f"/{_et.get('reportes', 0)} en attente"
                      if (_et.get("faits") or _et.get("reportes")) else "")
+                  #  ⚠️ L'ACTION LA PLUS VISIBLE DU SYSTÈME N'ÉTAIT PAS DANS
+                  #  CETTE LIGNE. Journaux du 01/09 : « rappel=928 » — 928
+                  #  membres CLASSÉS au palier qui pose le rôle AFK, celui qui
+                  #  MASQUE TOUT LE SERVEUR — et pas un mot sur combien l'ont
+                  #  réellement reçu. Le propriétaire pouvait lire ce nombre
+                  #  quatre fois par jour sans savoir si son serveur était en
+                  #  train de se faire masquer membre par membre.
+                  #  `rappel=` compte ce que la classification a TROUVÉ,
+                  #  `posés` compte ce que le bot a FAIT. Les confondre est la
+                  #  différence entre un avertissement et un fait accompli.
+                  + (f" · 💤 rôle AFK posé sur {_rp.get('faits', 0)}"
+                     + (f", {_rp['echecs']} échec(s)" if _rp.get("echecs") else "")
+                     if _rp.get("faits") or _rp.get("echecs") else "")
+                  + (f" · 🔒 rôles retirés à {_rt.get('faits', 0)}"
+                     if _rt.get("faits") else "")
                   + (f" · ⚠️ {_sans} dépouillement(s) REFUSÉ(S) : rôle AFK de "
                      f"palier 2 absent ou au-dessus du bot" if _sans else ""))
             #  On ne poste au staff QUE s'il s'est passé quelque chose : une

@@ -272,3 +272,53 @@ def test_un_nettoyage_rate_nempeche_pas_le_rappel():
     src = inspect.getsource(msgs.remplacer)
     apres = src[src.index("salon.purge("):]
     assert "except Exception" in apres[:900]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Le bilan d'activité doit dire ce que le bot A FAIT, pas seulement ce qu'il
+#  a TROUVÉ — journaux de production du 01/09
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _boucle_activite() -> str:
+    import ast as _ast
+    for n in _ast.walk(_ast.parse(SRC_BOT)):
+        if (isinstance(n, _ast.AsyncFunctionDef)
+                and n.name == "activite_passage_task"):
+            return _ast.unparse(n)
+    raise AssertionError("activite_passage_task introuvable")
+
+
+def test_le_bilan_dit_combien_de_roles_AFK_ont_ete_POSES():
+    """⚠️ JOURNAUX DU 01/09 : « suivis=991 · actifs=57 · doux=6 · rappel=928 ».
+
+    928 membres CLASSÉS au palier qui pose le rôle AFK — celui qui MASQUE TOUT
+    LE SERVEUR — et pas un mot sur combien l'ont réellement reçu. Le
+    propriétaire pouvait lire ce nombre quatre fois par jour sans savoir si son
+    serveur était en train de se faire masquer membre par membre.
+
+    `rappel=` compte ce que la classification a TROUVÉ. `posé` compte ce que le
+    bot a FAIT. Les confondre, c'est la différence entre un avertissement et un
+    fait accompli.
+    """
+    corps = _boucle_activite()
+    assert "rôle AFK posé sur" in corps, (
+        "le bilan ne dit pas combien de membres ont reçu le rôle qui masque "
+        "tout le serveur")
+    assert "_ac.get('rappels')" in corps or '_ac.get("rappels")' in corps, (
+        "le compteur des rappels APPLIQUÉS n'est pas lu")
+
+
+def test_le_bilan_distingue_le_classe_de_l_applique():
+    """Les deux nombres doivent coexister : l'un sans l'autre ment par
+    omission. « rappel=928 » seul fait croire à 928 actions ; « posé sur 25 »
+    seul cache l'ampleur de ce qui reste à venir."""
+    corps = _boucle_activite()
+    assert "rappel={" in corps.replace(" ", "") or "rappel=" in corps
+    assert "posé sur" in corps
+
+
+def test_les_echecs_de_pose_sont_dits():
+    """Un rôle AFK qui ne se pose pas — hiérarchie, permission — laisse le
+    membre visible alors que le bilan le compte comme traité."""
+    corps = _boucle_activite()
+    assert "échec(s)" in corps
