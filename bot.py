@@ -12959,13 +12959,29 @@ async def activite_passage_task():
 
             c = await activite_module.config(g.id)
             aujourdhui = activite_cal.jour()
-            if not evenement:
-                if not etat:
-                    continue
-                if str(c.get("activite_jour_alerte") or "") == aujourdhui:
-                    continue          # cet état a déjà été signalé aujourd'hui
-            if etat:
-                await db_set(g.id, "activite_jour_alerte", aujourdhui)
+            #  ⚠️ UN SEUL MESSAGE PAR SEMAINE — demandé le 03/09/2026.
+            #  La carte partait à CHAQUE passage, soit quatre fois par jour,
+            #  parce que `evenement` était toujours vrai : `rappels.faits`
+            #  valait 25 à tous les coups (le tapis roulant corrigé le même
+            #  jour dans `activite_passage`). Même corrigé, une carte toutes
+            #  les six heures pendant que 900 membres s'écoulent reste du
+            #  harcèlement. Le TRAVAIL garde sa cadence, l'ANNONCE devient
+            #  hebdomadaire, le jour de bilan déjà configuré.
+            #
+            #  ⚠️ SAUF SI LE SUIVI EST MORT. `suivi_muet` = les sondes ne
+            #  captent plus rien. Attendre dimanche pour le dire laisserait un
+            #  système en panne passer pour un serveur calme pendant six jours.
+            #  C'est la seule urgence, et elle reste à une fois par jour.
+            _casse = bool(rap.get("suivi_muet"))
+            _jour_bilan = int(c.get("activite_jour_rappel") or 6)
+            _est_jour_bilan = activite_cal.maintenant().weekday() == _jour_bilan
+            if not _casse and not _est_jour_bilan:
+                continue
+            #  Quatre passages tombent le jour du bilan : un seul parle.
+            if str(c.get("activite_jour_alerte") or "") == aujourdhui:
+                continue
+            await db_set(g.id, "activite_jour_alerte", aujourdhui)
+            await db_set(g.id, "activite_jour_bilan", aujourdhui)
 
             salon = g.get_channel(int(c.get("activite_salon_staff", 0) or 0))
             if salon is not None:

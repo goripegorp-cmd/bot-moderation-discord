@@ -117,6 +117,31 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
         cl["doux"], cl["rappel"] = [], []
         cl["retrait"], cl["expulsion"] = [], []
 
+    #  ── LE TAPIS ROULANT, CASSÉ ICI (03/09/2026) ────────────────────────
+    #  ⚠️ `classer` trie par ancienneté et n'écarte PAS ceux qui portent déjà
+    #  l'étiquette de leur palier. Le quota prenait donc `cl[...][:25]` : les
+    #  25 MÊMES membres à chaque passage, pour lesquels `poser_niveau` n'a
+    #  rien à faire mais rend True — d'où « 25 étiquette(s) appliquées »
+    #  toutes les six heures sur un compte de « 919 à étiqueter » qui ne
+    #  bougeait jamais, et 894 membres qui n'auraient JAMAIS eu leur tour.
+    #  Mesuré sur deux cartes consécutives du 03/09, chiffres identiques.
+    #
+    #  Ils restent COMPTÉS (`deja_au_palier`) : ils sont bien à ce palier, la
+    #  carte doit le dire, et le rappel hebdomadaire doit continuer à les
+    #  nommer. Ils ne consomment simplement plus le tour de quelqu'un d'autre.
+    deja_au_palier = {"rappel": 0, "retrait": 0}
+    ids_deja = set()
+    for _cle, _niveau in (("rappel", 1), ("retrait", 2)):
+        _restants = []
+        for _f in cl[_cle]:
+            if niv.reste_a_faire(guild, _f["member"], _niveau, cfg_act):
+                _restants.append(_f)
+            else:
+                deja_au_palier[_cle] += 1
+                ids_deja.add(_f["member"].id)
+        cl[_cle] = _restants
+    rap["deja_au_palier"] = deja_au_palier
+
     quota = activite.PLAFOND_ACTIONS_PAR_PASSAGE
     #  Seuls les paliers qui APPLIQUENT quelque chose entrent dans le quota.
     applicables = len(cl["retrait"]) + len(cl["rappel"])
@@ -136,7 +161,12 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
         #  construit à partir de `cl["groupes"]`, pas des listes globales. Sans
         #  ce filtre, un membre REPORTÉ serait annoncé publiquement comme ayant
         #  perdu ses rôles alors qu'on n'y a pas touché.
-        gardes = {f["member"].id for f in garde_retrait + garde_rappel}
+        #  ⚠️ `ids_deja` EN PLUS : un membre déjà étiqueté n'a pas été
+        #  « reporté », il est à son palier. L'exclure des groupes le
+        #  ferait disparaître du rappel hebdomadaire — celui-là même qui
+        #  doit nommer les absents.
+        gardes = ({f["member"].id for f in garde_retrait + garde_rappel}
+                  | ids_deja)
         for g in (cl.get("groupes") or {}).values():
             for k in ("rappel", "retrait"):
                 g[k] = [f for f in g[k] if f["member"].id in gardes]
@@ -564,6 +594,17 @@ def resume_texte(rap: dict) -> str:
             f"**Appliqué** — 💤 `{(a.get('rappels') or {}).get('faits', 0)}` "
             f"étiquette(s) · 🔒 `{(a.get('retraits') or {}).get('faits', 0)}` "
             f"dépouillé(s) · 🔙 `{a.get('retours', 0)}` retour(s)")
+        #  ⚠️ SANS CETTE LIGNE, « Appliqué — 25 » ÉTAIT INDISTINGUABLE DE
+        #  « 25 personnes viennent d'être étiquetées ». Pendant des jours,
+        #  c'étaient les 25 mêmes, déjà étiquetées, recomptées à chaque
+        #  passage. Les déjà-en-place se comptent à part, et ils ne prennent
+        #  plus le tour de personne.
+        _dej = rap.get("deja_au_palier") or {}
+        if _dej.get("rappel") or _dej.get("retrait"):
+            lignes.append(
+                f"✔️ **Déjà en place** — 💤 `{_dej.get('rappel', 0)}` "
+                f"étiqueté(s) · 🔒 `{_dej.get('retrait', 0)}` dépouillé(s). "
+                f"Rien à refaire pour eux.")
 
     if rap.get("quota_atteint"):
         lignes.append(

@@ -447,6 +447,60 @@ def conflits(guild, cfg_act: dict) -> list[dict]:
 #  Poser et retirer les paliers sur un membre
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def role_du_niveau(guild, niveau: int, cfg_act: dict):
+    """L'étiquette configurée pour ce palier, ou None. Aucun accès réseau."""
+    cle = _CLE_PAR_NIVEAU.get(niveau, "")
+    rid = int(cfg_act.get(cle) or 0) if cle else 0
+    if not rid:
+        return None
+    return guild.get_role(rid)
+
+
+def reste_a_faire(guild, member, niveau: int, cfg_act: dict) -> bool:
+    """Reste-t-il quelque chose à APPLIQUER à ce membre, à ce palier ?
+
+    ⚠️ CE PRÉDICAT EXISTE POUR CASSER UN TAPIS ROULANT. Sans lui, les 25 plus
+    anciens absents étaient « ré-appliqués » toutes les six heures — étiquette
+    déjà posée, donc aucune écriture — pendant que 894 autres attendaient un
+    tour qui ne venait jamais. Mesuré le 03/09 : deux passages consécutifs,
+    « 919 à étiqueter » puis « 919 à étiqueter ».
+
+    Il reproduit EXACTEMENT ce que feraient `poser_niveau` et, au palier 2,
+    `retirer_tous_les_roles` — sinon on écarterait du quota un membre pour qui
+    il restait du travail, ce qui est le défaut inverse et bien pire.
+
+    En cas de doute il rend True : on préfère un passage inutile à un membre
+    oublié.
+    """
+    try:
+        cible = role_du_niveau(guild, niveau, cfg_act)
+        #  Aucune étiquette posable : on laisse le palier décider et refuser
+        #  lui-même (c'est lui qui journalise la cause).
+        if cible is None or not utilisable(guild, cible):
+            return True
+        if cible not in member.roles:
+            return True
+        #  L'étiquette est là, mais celle d'un autre palier peut traîner :
+        #  `poser_niveau` doit encore la retirer.
+        for r in roles_etiquettes(guild, cfg_act):
+            if r.id != cible.id and r in member.roles and utilisable(guild, r):
+                return True
+        #  Palier 2 : le dépouillement est le vrai travail. Il reste à faire
+        #  tant qu'un rôle retirable subsiste — même critère que
+        #  `retirer_tous_les_roles`, à la ligne près.
+        if niveau == 2:
+            afk = ids_etiquettes(cfg_act)
+            for r in member.roles:
+                if r.is_default() or r.managed or r.id in afk:
+                    continue
+                if utilisable(guild, r):
+                    return True
+        return False
+    except Exception as ex:
+        _log(f"[activite_niveaux reste_a_faire {getattr(member, 'id', '?')}] {ex}")
+        return True
+
+
 async def poser_niveau(guild, member, niveau: int, cfg_act: dict) -> bool:
     """Met le membre au palier demandé : ajoute son rôle, enlève celui de l'autre.
 
