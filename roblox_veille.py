@@ -353,6 +353,23 @@ CLES_DEFAUT = {
     #  bon, dans l'ordre. C'est ce qui permet d'éprouver la chaîne complète sur
     #  un vrai serveur sans mentir à ses membres.
     "roblox_veille_simulation": False,
+    #  ═══ LE FLUX UGC (03/09/2026) ═══════════════════════════════════════
+    #  Les accessoires créés par les AUTRES joueurs. Séparé du flux officiel
+    #  parce que ce sont deux catalogues, deux débits et deux exigences.
+    "roblox_ugc_enabled": False,          # OFF par défaut
+    #  ⚠️ AUCUN REPLI POUR CE SALON, contrairement aux trois autres. Un flux
+    #  qui retomberait sur le salon des nouveautés officielles y déverserait
+    #  l'UGC du monde entier à la première activation — l'inverse exact de ce
+    #  que le propriétaire a demandé en gardant `CreatorTargetId=1`.
+    "roblox_salon_ugc": 0,
+    #  Prix plancher en R$. 0 = pas de plancher (mais l'article doit tout de
+    #  même être EN VENTE et porter un prix : c'est le filtre qui sépare un
+    #  produit publié d'un dépôt de test).
+    "roblox_ugc_prix_min": 1,
+    #  Le badge de créateur vérifié est le signal le plus sélectif disponible
+    #  À LA CRÉATION (17/99 mesuré). Réglable, parce que 17 % peut être trop
+    #  strict selon le goût du propriétaire — le compte rendu lui dira.
+    "roblox_ugc_verifie_seul": True,
 }
 
 
@@ -375,6 +392,13 @@ def salon_du_flux(cfg_r: dict, flux: str) -> int:
     Le propriétaire ne veut pas forcément trois salons. S'il n'en règle qu'un,
     tout y va — c'est mieux qu'un flux qui se tait parce que sa case est vide.
     """
+    #  ⚠️ « ugc » SORT AVANT LE REPLI. Les trois flux officiels peuvent
+    #  partager un salon ; l'UGC, non. Le laisser retomber sur le salon des
+    #  nouveautés Roblox y déverserait le catalogue entier — des milliers
+    #  d'articles par jour dans le salon que le propriétaire a réservé aux
+    #  créations officielles. Pas de salon réglé = flux muet, à dessein.
+    if flux == "ugc":
+        return int(cfg_r.get("roblox_salon_ugc", 0) or 0)
     cle = {"nouveautes": "roblox_salon_nouveautes",
            "bascules": "roblox_salon_bascules",
            "surveiller": "roblox_salon_surveiller"}.get(flux)
@@ -391,6 +415,24 @@ async def actif(guild_id: int) -> bool:
     """Le système tourne-t-il vraiment ? Interrupteur ET au moins un salon."""
     c = await config(guild_id)
     return bool(c["roblox_veille_enabled"] and salon_du_flux(c, "nouveautes"))
+
+
+async def actif_ugc(guild_id: int) -> bool:
+    """Le flux UGC tourne-t-il ? Son propre interrupteur ET son propre salon.
+
+    ⚠️ INDÉPENDANT DE `actif`. Le propriétaire peut vouloir l'UGC sans le flux
+    officiel, ou l'inverse. Les lier ferait qu'éteindre l'un couperait l'autre
+    sans que rien ne le dise.
+    """
+    c = await config(guild_id)
+    #  ⚠️ LA VEILLE MAÎTRESSE EST EXIGÉE, ET C'EST UNE LIMITE ASSUMÉE. Le
+    #  relevé UGC est greffé dans le passage de la veille : un serveur qui
+    #  n'aurait QUE l'UGC ne serait dans aucune boucle, et son salon resterait
+    #  muet sans que rien ne le dise. Mieux vaut un couplage écrit ici, que
+    #  cette fonction rende True et que rien ne se passe.
+    return bool(c.get("roblox_veille_enabled")
+                and c.get("roblox_ugc_enabled")
+                and salon_du_flux(c, "ugc"))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -830,7 +872,9 @@ def age_publiable(article: dict, flux: str = "surveiller") -> bool:
         #  Seule une bascule OBSERVÉE entre deux relevés sort. Le reste est
         #  « déjà devenu », donc hors périmètre.
         return bool(article.get("bascule_detectee"))
-    if flux == "nouveautes":
+    if flux in ("nouveautes", "ugc"):
+        #  Même fenêtre de 6 h pour l'UGC : sur un catalogue qui produit
+        #  en continu, publier un article de la veille n'a aucun sens.
         #  ⚠️ « CRÉÉS À PARTIR DE MAINTENANT » (18/08). Une nouveauté n'est
         #  publiée que si Roblox l'a créée il y a moins de
         #  FENETRE_DIRECTE_HEURES. Les 850 articles que la pagination découvre
@@ -998,6 +1042,92 @@ async def relever_hors_vente(limite: int = 120) -> dict:
         "CreatorType": "User",
         "CreatorTargetId": CREATEUR_ROBLOX,
     }, "hors_vente", max_pages=MAX_PAGES_HORS_VENTE)
+
+
+#  ⚠️ UNE SEULE PAGE, ET C'EST MESURÉ. Le tri « récemment créé » n'est pas
+#  chronologique D'UNE PAGE À L'AUTRE : le 03/09, la page 1 portait des
+#  articles de 1,2 h et les pages 2-3 des articles de 271 h. Paginer ce flux
+#  ne rapporte donc AUCUN article plus frais — ça ne fait que brûler du quota
+#  sur un catalogue qui produit en continu. C'est « ne pas spammer une
+#  recherche qui sert à rien », appliqué à un cas où c'était tentant.
+MAX_PAGES_UGC = 1
+
+
+async def relever_ugc(limite: int = 30) -> dict:
+    """Les accessoires les plus récents du catalogue ENTIER, tous créateurs.
+
+    Exactement la requête des nouveautés officielles, MOINS `CreatorTargetId`.
+    C'est le seul paramètre qui change, et il change tout : 19,8 jours d'un
+    côté, 1,2 heure de l'autre (mesuré le 03/09).
+
+    Ne filtre RIEN : le tri est la seule chose qu'on demande à l'API. La
+    qualité se juge ensuite, dans `qualite_ugc`, où le motif de chaque refus
+    est nommé et comptable.
+    """
+    return await _relever_catalogue({
+        "Category": 1,
+        "SortType": 3,
+        "Limit": _limite_valide(limite),
+        #  `IncludeNotForSale` reste : un article peut être créé puis mis en
+        #  vente quelques minutes plus tard. Sans lui on ne verrait pas passer
+        #  celui qui compte, on verrait son état d'après.
+        "IncludeNotForSale": "true",
+    }, "ugc", max_pages=MAX_PAGES_UGC)
+
+
+#  Les types d'accessoire portable — mêmes valeurs que `roblox_marche`.
+TYPES_ACCESSOIRE_UGC = {8, 41, 42, 43, 44, 45, 46, 47}
+
+
+def qualite_ugc(article: dict, cfg_r: dict) -> tuple[bool, str]:
+    """Cet article UGC mérite-t-il une annonce ? Rend TOUJOURS un motif.
+
+    ⚠️ UN MOTIF MÊME QUAND ON ACCEPTE. Sans lui, un flux devenu muet est
+    indiscernable d'un catalogue calme — c'est exactement le trou qui a rendu
+    invisible pendant des semaines le blocage de l'amorce. Le compte rendu
+    additionne ces motifs à chaque passage : le propriétaire voit où ses
+    articles tombent, et desserre le bon réglage.
+
+    Trois critères, tous MESURÉS le 03/09 sur les 120 plus récents :
+      · accessoire portable (99/120 le sont) ;
+      · EN VENTE avec un prix (75/99 — mais 1/12 seulement parmi les plus
+        frais : c'est ce qui sépare un produit publié d'un dépôt de test) ;
+      · créateur au badge vérifié (17/99), désactivable.
+
+    ⚠️ AUCUN FILTRE SUR LES FAVORIS, JAMAIS. Ils valent 0 sur 99/99 articles
+    fraîchement créés : le seuil le plus modeste viderait ce flux pour de bon.
+    """
+    try:
+        t = article.get("asset_type")
+        if t is None:
+            t = article.get("assetType")
+        if t is not None and int(t) not in TYPES_ACCESSOIRE_UGC:
+            return False, "pas un accessoire portable"
+        if t is None and not article.get("type_article"):
+            return False, "type inconnu"
+
+        if article.get("hors_vente"):
+            return False, "hors vente"
+        prix = article.get("prix")
+        if prix is None:
+            return False, "sans prix (dépôt non publié)"
+        try:
+            prix = int(prix)
+        except (TypeError, ValueError):
+            return False, "prix illisible"
+        seuil = int(cfg_r.get("roblox_ugc_prix_min", 1) or 0)
+        if prix < seuil:
+            return False, f"prix {prix} < {seuil} R$"
+
+        if cfg_r.get("roblox_ugc_verifie_seul"):
+            if not article.get("createur_verifie"):
+                return False, "créateur non vérifié"
+        return True, "retenu"
+    except Exception as ex:
+        _log(f"[roblox_veille qualite_ugc] {ex}")
+        #  ⚠️ FAIL-CLOSED. Un défaut ici ne doit pas ouvrir les vannes sur un
+        #  catalogue de plusieurs milliers d'articles par jour.
+        return False, f"erreur de filtre ({type(ex).__name__})"
 
 
 async def relever_collectionnables(limite: int = 30) -> dict:
@@ -1647,6 +1777,17 @@ def _normaliser(bruts: list) -> list[dict]:
                 "hors_vente": int(bool(b.get("isOffSale"))
                                   or bool(b.get("offSaleDeadline"))),
                 "cree_le": b.get("itemCreatedUtc") or b.get("createdUtc"),
+                #  ⚠️ LE CRÉATEUR — indispensable au flux UGC, et mesuré
+                #  présent sur 120/120 réponses. `creatorHasVerifiedBadge` est
+                #  le SEUL signal de qualité disponible à la création : les
+                #  favoris valent 0 sur 99/99 articles frais.
+                #  Le type NUMERIQUE brut (8, 41, 46, 92...), en plus du
+                #  libelle : `qualite_ugc` doit pouvoir refuser un fond
+                #  d'ecran ou un Bundle sans dependre d'une traduction.
+                "asset_type": b.get("assetType"),
+                "createur_nom": str(b.get("creatorName") or "")[:60],
+                "createur_id": int(b.get("creatorTargetId") or 0),
+                "createur_verifie": int(bool(b.get("creatorHasVerifiedBadge"))),
                 #  Signaux relevés dans la réponse réelle et qu'on aurait ratés
                 #  en se fiant à la documentation : une revente déjà ouverte et
                 #  un stock fini sont des faits, pas des suppositions.

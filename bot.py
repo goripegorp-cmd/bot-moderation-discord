@@ -13244,6 +13244,13 @@ async def veille_roblox_task():
                #  Fiches PARTIES dont la base n'a pas pris la marque : elles
                #  repartiront. C'est la seule trace d'un doublon à venir.
                "non_marquees": 0}
+        #  ⚠️ L'ENTONNOIR DU FLUX UGC, ÉTAGE PAR ÉTAGE. Sans lui, un seuil
+        #  trop strict rend un salon muet qu'on ne diagnostique que des
+        #  semaines plus tard — c'est exactement ce qui est arrivé au flux des
+        #  bascules. `refus` nomme la marche où chaque article est tombé, donc
+        #  le réglage exact à desserrer.
+        _sug = {"actif": False, "lus": 0, "retenus": 0, "hors_fenetre": 0,
+                "deja": 0, "enfiles": 0, "refus": {}, "code": None}
         _sn = {"lus": 0, "sautees": 0, "pannes": 0, "deja": 0,
                "echecs": 0, "plafonnes": 0, "absorbes": 0, "simules": 0,
                #  La file d'attente des actualités — même dessin que celle des
@@ -13420,6 +13427,59 @@ async def veille_roblox_task():
                             #  un redémarrage.
                             if await roblox_module.enfiler(g.id, a, flux):
                                 _sa["enfiles"] += 1
+
+            # ═══════════════════════════════════════════════════════════
+            #  ÉTAPE 1 bis — LE FLUX UGC (03/09/2026)
+            # ═══════════════════════════════════════════════════════════
+            #  ⚠️ POURQUOI CE FLUX EXISTE. Mesuré le 03/09 en posant deux fois
+            #  la même question au catalogue, en ne changeant QUE le créateur :
+            #    · CreatorTargetId=1 (le flux officiel) → plus récent 19,8 JOURS
+            #    · sans CreatorTargetId (tous créateurs) → plus récent 1,2 HEURE
+            #  Le propriétaire voyait arriver des accessoires ; le bot n'en
+            #  voyait aucun. Les deux avaient raison : ce sont DEUX CATALOGUES.
+            #
+            #  ⚠️ IL NE PASSE PAS PAR `comparer_et_enregistrer`, ET C'EST
+            #  DÉLIBÉRÉ. Y verser des milliers d'articles UGC par jour
+            #  polluerait `roblox_articles`, fausserait la détection de
+            #  bascules et surtout ferait mentir la ligne « création la plus
+            #  récente », qui répond à « Roblox est-il calme ? ». Ce flux vit
+            #  seul : relevé → filtre → file.
+            _g_ugc = []
+            for g in guildes_items:
+                try:
+                    if await roblox_module.actif_ugc(g.id):
+                        _g_ugc.append(g)
+                except Exception:
+                    continue
+            if _g_ugc:
+                _sug["actif"] = True
+                await asyncio.sleep(roblox_module.PAUSE_ENTRE_APPELS_CATALOGUE)
+                _relu = await roblox_module.relever_ugc(limite=30)
+                _budget_veille(_sa, _relu)
+                _sug["code"] = _relu.get("code")
+                _arts_ugc = _relu.get("articles") or []
+                _sug["lus"] = len(_arts_ugc)
+                for g in _g_ugc:
+                    _cfg_ugc = await roblox_module.config(g.id)
+                    #  Du plus ANCIEN au plus récent : la file sort dans son
+                    #  ordre d'entrée, et le propriétaire a demandé (16/08)
+                    #  qu'on ne mélange pas un vieil article à un neuf.
+                    for a in roblox_module.ordonner_publication(
+                            _arts_ugc, len(_arts_ugc)):
+                        _ok, _motif = roblox_module.qualite_ugc(a, _cfg_ugc)
+                        if not _ok:
+                            _sug["refus"][_motif] = _sug["refus"].get(_motif, 0) + 1
+                            continue
+                        _sug["retenus"] += 1
+                        if not roblox_module.age_publiable(a, "ugc"):
+                            _sug["hors_fenetre"] += 1
+                            continue
+                        if not await roblox_module.publiable_dans(
+                                g.id, a["asset_id"], "ugc"):
+                            _sug["deja"] += 1
+                            continue
+                        if await roblox_module.enfiler(g.id, a, "ugc"):
+                            _sug["enfiles"] += 1
 
             # ═══════════════════════════════════════════════════════════
             #  ÉTAPE 2 — TIRER DE LA FILE ce que le budget permet
@@ -13774,6 +13834,29 @@ async def veille_roblox_task():
                          else ", donc AUCUNE nouveauté n'est publiable "
                               "aujourd'hui, et c'est la source qui est calme, "
                               "pas le bot"))
+            #  ⚠️ L'ENTONNOIR, EN CLAIR. Le propriétaire doit pouvoir lire
+            #  « 30 lus → 2 retenus » et savoir SUR QUELLE MARCHE les 28
+            #  autres sont tombés. Un flux muet sans cette ligne est
+            #  indiscernable d'un catalogue calme — le défaut le plus coûteux
+            #  de ce dépôt, deux fois.
+            if _sug.get("actif"):
+                _det = " · ".join(f"{n} {m}" for m, n in
+                                  sorted(_sug["refus"].items(),
+                                         key=lambda kv: -kv[1]))
+                print(f"[veille_roblox_task]   UGC (tous créateurs) : "
+                      f"{_sug['lus']} lu(s) · {_sug['retenus']} retenu(s) par "
+                      f"le filtre · {_sug['hors_fenetre']} hors fenêtre "
+                      f"({roblox_module.FENETRE_DIRECTE_HEURES} h) · "
+                      f"{_sug['deja']} déjà sorti(s) · {_sug['enfiles']} "
+                      f"mise(s) en file"
+                      + (f" — écartés : {_det}" if _det else ""))
+                if _sug["lus"] and not _sug["retenus"]:
+                    print("[veille_roblox_task]   ⚠️ UGC : le filtre a tout "
+                          "écarté. Ce n'est PAS forcément une panne (les "
+                          "dépôts sans prix dominent le catalogue), mais si "
+                          "cette ligne se répète des jours, desserrez "
+                          "« créateur vérifié seulement » ou le prix plancher "
+                          "dans le panneau Roblox.")
             print(f"[veille_roblox_task]   accessoires : {_sa['lus']} lu(s) "
                   f"(+{_sa.get('lus_hors_vente', 0)} hors vente) · "
                   f"{_sa['candidats']} candidat(s) · {_sa['hors_fenetre']} hors "

@@ -45,12 +45,18 @@ PLATEFORME = {
     "nouveautes": "roblox_nouveautes",
     "bascules": "roblox_bascules",
     "surveiller": "roblox_surveiller",
+    #  ⚠️ SANS CETTE LIGNE, `PLATEFORME.get(flux, "roblox_nouveautes")` fait
+    #  sortir un accessoire fabriqué par un joueur quelconque sous l'identité
+    #  réservée aux créations OFFICIELLES de Roblox. Le repli est utile
+    #  ailleurs ; ici il ment.
+    "ugc": "roblox_ugc",
 }
 
 NOMS_FLUX = {
     "nouveautes": "🆕 Nouveautés Roblox",
     "bascules": "💎 Passés collectionnables",
     "surveiller": "👀 À surveiller",
+    "ugc": "🎨 Nouveautés UGC (tous créateurs)",
 }
 
 
@@ -591,6 +597,11 @@ class RobloxPanelV2(LayoutView):
          "Limited ou Limited U — détecté en direct entre deux relevés."),
         ("roblox_news_salon", "📢 Actualité Roblox",
          "Studio · UGC · développeurs · événements · politique."),
+        #  ⚠️ SON PROPRE SALON, SANS REPLI POSSIBLE — voir `salon_du_flux`.
+        #  Le laisser retomber sur celui des nouveautés officielles y
+        #  déverserait le catalogue entier à la première activation.
+        ("roblox_salon_ugc", "🎨 Nouveautés UGC (tous créateurs)",
+         "Créés par les autres joueurs. Filtré : en vente, prix, créateur."),
     ]
 
     def __init__(self, u, g):
@@ -782,6 +793,27 @@ class RobloxPanelV2(LayoutView):
                                custom_id="rblx_rattraper")
             b_rattrap.callback = self._cb_rattraper
 
+            #  ⚠️ LE FLUX UGC — mesuré le 03/09 : le compte Roblox n'avait
+            #  rien créé depuis 19,8 jours pendant que le catalogue entier
+            #  produisait un accessoire toutes les quelques minutes. Deux
+            #  catalogues, donc deux interrupteurs.
+            _ugc = bool(c.get("roblox_ugc_enabled"))
+            b_ugc = Button(
+                label="UGC", emoji="🎨" if _ugc else "⚪",
+                style=(discord.ButtonStyle.success if _ugc
+                       else discord.ButtonStyle.secondary),
+                custom_id="rblx_toggle_ugc")
+            b_ugc.callback = self._cb_toggle_ugc
+
+            #  ⚠️ LES SEUILS DOIVENT ÊTRE ATTEIGNABLES. Le compte rendu de la
+            #  veille dit « desserrez le prix plancher ou le créateur
+            #  vérifié » : sans ce bouton, cette phrase serait un mensonge.
+            b_ugc_seuils = Button(
+                label="Seuils UGC", emoji="🎚️",
+                style=discord.ButtonStyle.secondary,
+                custom_id="rblx_seuils_ugc")
+            b_ugc_seuils.callback = self._cb_seuils_ugc
+
             b_back = Button(label="Retour", emoji="◀️",
                             style=discord.ButtonStyle.secondary,
                             custom_id="rblx_back")
@@ -789,7 +821,9 @@ class RobloxPanelV2(LayoutView):
 
             #  Deux rangées : Discord refuse plus de 5 boutons par ligne, et
             #  regrouper les trois interrupteurs ensemble se lit mieux.
-            items.append(discord.ui.ActionRow(b_on, b_news, b_simu))
+            #  Cinq boutons : le maximum que Discord accepte par rangée.
+            items.append(discord.ui.ActionRow(b_on, b_news, b_simu, b_ugc,
+                                              b_ugc_seuils))
             items.append(discord.ui.ActionRow(b_test, b_rattrap, b_reset,
                                               b_back))
 
@@ -913,6 +947,104 @@ class RobloxPanelV2(LayoutView):
             await self.render_to(i, edit=True)
         except Exception as ex:
             _log(f"[roblox toggle simulation] {ex}")
+
+    async def _cb_toggle_ugc(self, i):
+        """Allume ou éteint le flux des nouveautés UGC.
+
+        ⚠️ ON DIT CE QU'ON ALLUME. Le catalogue entier produit un accessoire
+        toutes les quelques minutes, contre un tous les vingt jours pour le
+        compte Roblox. Sans le filtre, ce salon deviendrait illisible en une
+        heure — le staff doit savoir que le filtre est ce qui rend ce flux
+        tenable, et où le régler.
+        """
+        try:
+            await i.response.defer()
+            c = await veille.config(self.g.id)
+            allume = not bool(c.get("roblox_ugc_enabled"))
+            await _db_set(self.g.id, "roblox_ugc_enabled", allume)
+            if allume and not int(c.get("roblox_salon_ugc", 0) or 0):
+                #  ⚠️ UN INTERRUPTEUR SANS SALON NE PUBLIE RIEN, ET IL FAUT LE
+                #  DIRE MAINTENANT. Ce flux n'a AUCUN repli : il resterait
+                #  muet, et « allumé » à l'écran.
+                self._dernier = (
+                    "🎨 **Flux UGC allumé — mais aucun salon n'est réglé.**\n"
+                    "-# Choisissez « 🎨 Nouveautés UGC » ci-dessus : ce flux "
+                    "n'a pas de salon de repli, exprès, pour ne jamais "
+                    "déverser l'UGC du monde entier dans vos nouveautés "
+                    "officielles.")
+            elif allume:
+                _pm = int(c.get("roblox_ugc_prix_min", 1) or 0)
+                _vs = bool(c.get("roblox_ugc_verifie_seul"))
+                self._dernier = (
+                    "🎨 **Flux UGC allumé.** Les accessoires créés par les "
+                    "autres joueurs, filtrés.\n"
+                    f"-# Filtre actuel : en vente · prix ≥ `{_pm}` R$"
+                    + (" · **créateur vérifié seulement**" if _vs else "")
+                    + ". Le compte rendu de chaque passage dit combien "
+                      "d'articles sont tombés à chaque marche.")
+            else:
+                self._dernier = ("⚪ **Flux UGC éteint.** Les nouveautés "
+                                 "officielles Roblox continuent.")
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            _log(f"[roblox toggle ugc] {ex}")
+
+    async def _cb_seuils_ugc(self, i):
+        """Ouvre les deux seuils du filtre UGC.
+
+        ⚠️ DEUX RÉGLAGES, PAS DIX. Les favoris n'y sont PAS, et c'est mesuré :
+        ils valent 0 sur 99/99 accessoires fraîchement créés. Offrir ce
+        réglage donnerait un moyen simple de vider le flux pour toujours en
+        croyant l'affiner.
+        """
+        try:
+            c = await veille.config(self.g.id)
+            parent = self
+
+            class _Seuils(discord.ui.Modal, title="Seuils du flux UGC"):
+                prix = discord.ui.TextInput(
+                    label="Prix plancher en R$ (0 = aucun)",
+                    default=str(int(c.get("roblox_ugc_prix_min", 1) or 0)),
+                    required=True, max_length=6)
+                verifie = discord.ui.TextInput(
+                    label="Créateurs vérifiés seulement ? (oui / non)",
+                    default=("oui" if c.get("roblox_ugc_verifie_seul")
+                             else "non"),
+                    required=True, max_length=3)
+
+                async def on_submit(self, i2):
+                    try:
+                        await i2.response.defer()
+                        try:
+                            _p = max(0, min(int(str(self.prix).strip()), 100000))
+                        except (TypeError, ValueError):
+                            #  ⚠️ ON NE DEVINE PAS. Une saisie illisible garde
+                            #  la valeur en place et le dit : la remplacer par
+                            #  un défaut silencieux changerait le filtre sans
+                            #  que personne ne l'ait demandé.
+                            _p = int(c.get("roblox_ugc_prix_min", 1) or 0)
+                            parent._dernier = (
+                                "⚠️ Prix illisible — l'ancienne valeur est "
+                                "conservée.")
+                        _v = str(self.verifie).strip().lower() in (
+                            "oui", "o", "yes", "y", "1", "true", "vrai")
+                        await _db_set(parent.g.id, "roblox_ugc_prix_min", _p)
+                        await _db_set(parent.g.id, "roblox_ugc_verifie_seul", _v)
+                        if not parent._dernier.startswith("⚠️ Prix"):
+                            parent._dernier = (
+                                f"🎚️ **Seuils UGC enregistrés.** Prix ≥ "
+                                f"`{_p}` R$"
+                                + (" · créateurs vérifiés seulement" if _v
+                                   else " · tous les créateurs")
+                                + ".\n-# Le prochain passage dira combien "
+                                  "d'articles passent ce filtre.")
+                        await parent.render_to(i2, edit=True)
+                    except Exception as ex2:
+                        _log(f"[roblox seuils ugc submit] {ex2}")
+
+            await i.response.send_modal(_Seuils())
+        except Exception as ex:
+            _log(f"[roblox seuils ugc] {ex}")
 
     async def _cb_toggle(self, i):
         """Allume ou éteint. À l'allumage, pose la borne du premier relevé.

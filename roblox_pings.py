@@ -91,6 +91,14 @@ CATEGORIES: dict[str, dict] = {
         "role": "🆕 Nouveaux accessoires", "couleur": 0x3498DB,
         "quoi": "les accessoires que Roblox vient de créer",
     },
+    #  ⚠️ SA PROPRE CATÉGORIE. Le débit et le public ne sont pas les mêmes :
+    #  Roblox crée par fournées espacées de semaines, les joueurs en continu.
+    #  Partager le rôle « Nouveaux accessoires » notifierait pour de l UGC des
+    #  membres qui n avaient demandé que l officiel.
+    "ugc": {
+        "role": "🎨 Nouveautés UGC", "couleur": 0xE67E22,
+        "quoi": "les accessoires créés par les autres joueurs, filtrés",
+    },
 }
 
 #  ⚠️ CES CLÉS SONT LES `domaine` RÉELS DE `roblox_news.SOURCES`, pas des noms
@@ -113,6 +121,10 @@ CLE_PAR_DOMAINE: dict[str, str] = {
 CLE_PAR_FLUX: dict[str, str] = {
     "bascules": "limited",
     "nouveautes": "nouveaux",
+    #  ⚠️ SA PROPRE CLÉ, PAS CELLE DES NOUVEAUTÉS. Les deux flux n'ont ni le
+    #  même débit ni le même public : partager le rôle ferait notifier pour de
+    #  l'UGC les membres qui n'ont demandé que les créations officielles.
+    "ugc": "ugc",
 }
 
 #  Le préfixe du `custom_id`. Partagé avec `bot.py` (le DynamicItem qui capte le
