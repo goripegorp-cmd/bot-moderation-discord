@@ -8012,77 +8012,344 @@ class TicketConfirmCreateView(View):
             pass
 
 
-class TicketCreateButton(Button):
-    def __init__(self, pid):
-        super().__init__(label="📩 Créer un ticket", style=discord.ButtonStyle.success, custom_id=f"ticket_create_{pid}")
-        self.pid = pid
-    
-    async def callback(self, i):
+async def _ticket_ouvrir(i, pid):
+    """LE chemin d'ouverture d'un ticket. Un seul corps, plusieurs portes.
+
+    ⚠️ IL Y A MAINTENANT TROIS FAÇONS D'ARRIVER ICI : le bouton d'un
+    panneau par type (historique), le menu du panneau unifié, et le
+    raccourci quand un seul type existe. Les trois DOIVENT appliquer
+    exactement les mêmes règles — désactivation, blacklist, fenêtre
+    horaire, maximum simultané. Dupliquer ce corps les ferait diverger, et
+    c'est la blacklist qui se contournerait en premier.
+
+    ⚠️ ON RÉPOND TOUJOURS, MÊME EN PANNE. Sans réponse sous trois
+    secondes, Discord affiche « Cette interaction a échoué » et le bouton
+    passe pour cassé alors que le défaut est ailleurs.
+    """
+    try:
+        c = await cfg(i.guild.id)
+        pnl = c.get('ticket_panels', {}).get(pid, {})
+        if not pnl:
+            return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
+
+        # ⏸️ DÉSACTIVATION TEMPORAIRE (fondateur) : si le panneau est désactivé, on
+        # refuse la création avec un message clair (le fondateur a coupé via le toggle).
+        if pnl.get('disabled'):
+            return await i.response.send_message(
+                "⏸️ **Ce ticket est désactivé temporairement.**\nVeuillez revenir plus tard.",
+                ephemeral=True)
+
+        # ═══════════════════════════════════════════════════════════════════════════════
+        #                    🚫 VÉRIFICATION BLACKLIST
+        # ═══════════════════════════════════════════════════════════════════════════════
+        blacklist = pnl.get('blacklist', [])
+        if i.user.id in blacklist:
+            return await i.response.send_message(
+                "🚫 **Accès refusé**\n\nVous avez été blacklisté de ce panel de tickets.\nContactez un administrateur si vous pensez que c'est une erreur.",
+                ephemeral=True
+            )
+
+        # ⏰ FENÊTRE HORAIRE (owner) : refus hors 07h–12h / 13h–22h30 (Paris) — feedback
+        # IMMÉDIAT avant le modal/la création (pour ne pas faire remplir un formulaire
+        # pour rien). Le filet dans create_ticket reste l'enforcement autoritatif.
+        _ok_h, _msg_h = await _ticket_hours_allows(i.user.id, i.guild)
+        if not _ok_h:
+            return await i.response.send_message(_msg_h, ephemeral=True)
+
+        qs = pnl.get('questions', [])
+        mx = pnl.get('max', 1)
+        if await count_user_tickets(i.guild, i.user.id, pid) >= mx:
+            return await i.response.send_message(f"❌ Max {mx} ticket(s)", ephemeral=True)
+        if qs:
+            await i.response.send_modal(TicketQuestionnaireModal(pid, qs))
+        else:
+            # owner 2026-06-29 (audit) : sur le chemin SANS formulaire, on demande une
+            # CONFIRMATION (récap du type) AVANT de créer — évite les tickets ouverts par
+            # erreur. Le chemin AVEC formulaire est déjà une saisie volontaire (inchangé).
+            _nm = (pnl.get('name') or 'Support').strip()
+            _dsc = (pnl.get('embed_description') or '').strip()
+            _recap = (f"📩 Tu vas ouvrir un ticket **« {_nm} »**."
+                      + (f"\n> _{_dsc[:200]}_" if _dsc else "")
+                      + "\n\nUn **salon privé** sera créé et le **staff prévenu**. "
+                        "Confirme si c'est bien ce que tu veux 👇")
+            await i.response.send_message(
+                _recap, view=TicketConfirmCreateView(pid), ephemeral=True)
+    except Exception as ex:
+        # Phase 263 : TOUJOURS accuser réception même si cfg/DB plante AVANT l'ack,
+        # sinon « Échec de l'interaction » et le bouton paraît cassé.
+        _logerr("ticket.create_button", ex)
         try:
-            c = await cfg(i.guild.id)
-            pnl = c.get('ticket_panels', {}).get(self.pid, {})
-            if not pnl:
-                return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
-
-            # ⏸️ DÉSACTIVATION TEMPORAIRE (fondateur) : si le panneau est désactivé, on
-            # refuse la création avec un message clair (le fondateur a coupé via le toggle).
-            if pnl.get('disabled'):
-                return await i.response.send_message(
-                    "⏸️ **Ce ticket est désactivé temporairement.**\nVeuillez revenir plus tard.",
-                    ephemeral=True)
-
-            # ═══════════════════════════════════════════════════════════════════════════════
-            #                    🚫 VÉRIFICATION BLACKLIST
-            # ═══════════════════════════════════════════════════════════════════════════════
-            blacklist = pnl.get('blacklist', [])
-            if i.user.id in blacklist:
-                return await i.response.send_message(
-                    "🚫 **Accès refusé**\n\nVous avez été blacklisté de ce panel de tickets.\nContactez un administrateur si vous pensez que c'est une erreur.",
-                    ephemeral=True
-                )
-
-            # ⏰ FENÊTRE HORAIRE (owner) : refus hors 07h–12h / 13h–22h30 (Paris) — feedback
-            # IMMÉDIAT avant le modal/la création (pour ne pas faire remplir un formulaire
-            # pour rien). Le filet dans create_ticket reste l'enforcement autoritatif.
-            _ok_h, _msg_h = await _ticket_hours_allows(i.user.id, i.guild)
-            if not _ok_h:
-                return await i.response.send_message(_msg_h, ephemeral=True)
-
-            qs = pnl.get('questions', [])
-            mx = pnl.get('max', 1)
-            if await count_user_tickets(i.guild, i.user.id, self.pid) >= mx:
-                return await i.response.send_message(f"❌ Max {mx} ticket(s)", ephemeral=True)
-            if qs:
-                await i.response.send_modal(TicketQuestionnaireModal(self.pid, qs))
+            _msg = "❌ Erreur lors de la création du ticket. Réessaie dans un instant."
+            if not i.response.is_done():
+                await i.response.send_message(_msg, ephemeral=True)
             else:
-                # owner 2026-06-29 (audit) : sur le chemin SANS formulaire, on demande une
-                # CONFIRMATION (récap du type) AVANT de créer — évite les tickets ouverts par
-                # erreur. Le chemin AVEC formulaire est déjà une saisie volontaire (inchangé).
-                _nm = (pnl.get('name') or 'Support').strip()
-                _dsc = (pnl.get('embed_description') or '').strip()
-                _recap = (f"📩 Tu vas ouvrir un ticket **« {_nm} »**."
-                          + (f"\n> _{_dsc[:200]}_" if _dsc else "")
-                          + "\n\nUn **salon privé** sera créé et le **staff prévenu**. "
-                            "Confirme si c'est bien ce que tu veux 👇")
-                await i.response.send_message(
-                    _recap, view=TicketConfirmCreateView(self.pid), ephemeral=True)
-        except Exception as ex:
-            # Phase 263 : TOUJOURS accuser réception même si cfg/DB plante AVANT l'ack,
-            # sinon « Échec de l'interaction » et le bouton paraît cassé.
-            _logerr("ticket.create_button", ex)
-            try:
-                _msg = "❌ Erreur lors de la création du ticket. Réessaie dans un instant."
-                if not i.response.is_done():
-                    await i.response.send_message(_msg, ephemeral=True)
-                else:
-                    await i.followup.send(_msg, ephemeral=True)
-            except Exception:
-                pass
+                await i.followup.send(_msg, ephemeral=True)
+        except Exception:
+            pass
+
+
+class TicketCreateButton(Button):
+    """Le bouton des panneaux PAR TYPE (historique). Il reste, et il remarche.
+
+    ⚠️ SON `custom_id` EST PERSISTANT ET N'AVAIT AUCUN CAPTEUR AU BOOT —
+    voir `TicketCreateDynamic`. C'est la cause de « Cette interaction a
+    échoué » après chaque redéploiement.
+    """
+    def __init__(self, pid):
+        super().__init__(label="📩 Créer un ticket",
+                         style=discord.ButtonStyle.success,
+                         custom_id=f"ticket_create_{pid}")
+        self.pid = pid
+
+    async def callback(self, i):
+        await _ticket_ouvrir(i, self.pid)
+
+
+class TicketCreateDynamic(discord.ui.DynamicItem[Button],
+                          template=r"ticket_create_(?P<pid>.+)"):
+    """LE CAPTEUR QUI MANQUAIT.
+
+    Sans lui, tout panneau posté avant le dernier redémarrage a un bouton
+    MORT : la vue en mémoire a disparu, aucune vue persistante ne porte ce
+    `custom_id`, Discord attend trois secondes puis affiche « Cette
+    interaction a échoué ». Railway redémarre à chaque déploiement.
+
+    ⚠️ Le vérificateur du dépôt ne pouvait pas le voir : un `custom_id` en
+    f-string est classé « non jugé » (11 dans son rapport). Angle mort de
+    l'outil, pas oubli de sa part.
+    """
+    def __init__(self, pid):
+        super().__init__(Button(label="📩 Créer un ticket",
+                                style=discord.ButtonStyle.success,
+                                custom_id=f"ticket_create_{pid}"))
+        self.pid = pid
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["pid"])
+
+    async def callback(self, i):
+        await _ticket_ouvrir(i, self.pid)
 
 class TicketCreateView(View):
     def __init__(self, pid):
         super().__init__(timeout=None)
         self.add_item(TicketCreateButton(pid))
+
+
+#  ═══════════════════════════════════════════════════════════════════════════
+#  LE PANNEAU UNIFIÉ — demande du propriétaire (06/09/2026)
+#  ═══════════════════════════════════════════════════════════════════════════
+#  « au lieu de mettre plusieurs panels de tickets […] on va tout regrouper en
+#   un seul. Quand ils vont cliquer sur le bouton, ça va leur demander quel
+#   type de ticket ils vont créer. »
+#
+#  ⚠️ ON N'A RIEN SUPPRIMÉ. Les panneaux par type restent postables et
+#  fonctionnels : certains serveurs veulent un bouton dédié dans un salon
+#  dédié. Le hub est une PORTE D'ENTRÉE de plus vers `_ticket_ouvrir`, pas un
+#  second système. Un jour où les deux existeraient côte à côte, ils
+#  ouvriraient rigoureusement le même ticket, avec les mêmes règles.
+HUB_PID = "__hub__"          # sentinelle : « le panneau unifié », pas un type
+
+
+def _types_tickets(cfg_guild) -> list:
+    """Les types proposables, dans un ordre STABLE, désactivés exclus.
+
+    ⚠️ L'ORDRE VIENT DU DICTIONNAIRE DE CONFIGURATION, PAS D'UN TRI. Un tri
+    par nom ferait sauter les entrées d'un menu à l'autre dès qu'un panneau est
+    renommé — et un membre qui clique de mémoire ouvrirait le mauvais type.
+    """
+    out = []
+    for pid, pnl in (cfg_guild.get('ticket_panels', {}) or {}).items():
+        if not isinstance(pnl, dict):
+            continue
+        if pnl.get('disabled'):
+            continue
+        out.append((pid, pnl))
+    return out
+
+
+def _resume_type(pnl) -> str:
+    """Une ligne de description, jamais vide : un menu muet ne s'utilise pas."""
+    d = (pnl.get('embed_description') or '').strip().replace('\n', ' ')
+    if not d:
+        d = "Ouvrir un ticket de ce type."
+    return d[:95]
+
+
+async def _build_ticket_hub_view(guild):
+    """Le panneau PUBLIC unifié : un seul message pour tous les types.
+
+    ⚠️ LE BOUTON EST UN `DynamicItem`, DONC IL SURVIT AUX REDÉMARRAGES. C'est
+    tout l'objet de la demande « pas d'échec de l'interaction » : l'ancien
+    bouton par type était persistant SANS capteur au boot, et Railway
+    redémarre à chaque déploiement.
+    """
+    c = await cfg(guild.id)
+    types = _types_tickets(c)
+    total = len(c.get('ticket_panels', {}) or {})
+
+    items = [v2_title("🎫 Création de tickets"),
+             v2_subtitle("Un seul endroit pour toutes vos demandes"),
+             v2_divider()]
+
+    if types:
+        lignes = "\n".join(f"**{(p.get('name') or pid)[:32]}** — {_resume_type(p)}"
+                            for pid, p in types[:10])
+        items.append(_section_with_button(
+            "📩 Ouvrir un ticket",
+            "Clique sur le bouton, puis **choisis le type** de ta demande.\n"
+            "Un salon privé sera créé et l'équipe prévenue.",
+            TicketHubOpenDynamic().item))
+        items.append(v2_divider())
+        items.append(v2_title("Types disponibles", level=3))
+        items.append(v2_body(lignes))
+        if len(types) > 10:
+            items.append(v2_body(f"_… et {len(types) - 10} autre(s)_"))
+    else:
+        #  ⚠️ ON LE DIT, ON NE MET PAS UN BOUTON MORT. Un bouton qui répond
+        #  « aucun type » à chaque clic est exactement le « menu qui ment »
+        #  qu'UI.md interdit.
+        items.append(v2_body(
+            "🔴 **Aucun type de ticket n'est disponible pour le moment.**\n"
+            + ("_Tous les types ont été désactivés temporairement._"
+               if total else
+               "_Aucun type n'a encore été créé par l'équipe._")))
+
+    accent = C.BLURPLE if types else 0xED4245
+
+    class _TicketHubLayout(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=None)
+            self.add_item(v2_container(*items, color=accent))
+    return _TicketHubLayout()
+
+
+class TicketHubOpenDynamic(discord.ui.DynamicItem[Button],
+                           template=r"tickethub:open"):
+    """Le bouton unique du panneau unifié. Persistant, recapté au boot.
+
+    ⚠️ DOUBLE AIGUILLAGE — LA RAISON POUR LAQUELLE LES VUES PORTENT `.item`
+    (le composant NU) ET NON CE `DynamicItem`. Dans discord.py 2.7,
+    `ViewStore.dispatch_view` appelle `dispatch_dynamic_items(...)` PUIS
+    cherche l'item dans la vue en mémoire : les deux chemins partent. Mettre
+    ce DynamicItem dans la vue ferait donc exécuter ce `callback` DEUX FOIS —
+    deux formulaires, ou une réponse suivie d'une « interaction déjà
+    répondue ». Avec le composant nu, le doublon retombe sur le `callback` par
+    défaut, qui ne fait rien. C'est aussi le montage déjà utilisé par
+    `ticket_toggle` dans ce fichier.
+    """
+    def __init__(self):
+        super().__init__(Button(label="📩 Créer un ticket",
+                                style=discord.ButtonStyle.success,
+                                custom_id="tickethub:open"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, i):
+        try:
+            c = await cfg(i.guild.id)
+            types = _types_tickets(c)
+
+            if not types:
+                return await i.response.send_message(
+                    "🔴 **Aucun type de ticket n'est disponible pour le "
+                    "moment.**\nReviens un peu plus tard — l'équipe les "
+                    "rouvrira bientôt.", ephemeral=True)
+
+            #  ⚠️ UN SEUL TYPE = PAS DE MENU. Faire choisir entre une seule
+            #  option est un clic pour rien, et un clic de plus est un risque
+            #  d'expiration de plus. On file droit au chemin d'ouverture, qui
+            #  peut ouvrir un formulaire (donc PAS de defer avant).
+            if len(types) == 1:
+                return await _ticket_ouvrir(i, types[0][0])
+
+            await i.response.send_message(
+                "🎫 **Quel type de ticket veux-tu ouvrir ?**\n"
+                "-# Choisis ci-dessous — ce message n'est visible que par toi.",
+                view=TicketHubTypeView(types), ephemeral=True)
+        except Exception as ex:
+            _logerr("ticket.hub_open", ex)
+            try:
+                _m = ("❌ Erreur à l'ouverture du menu. Réessaie dans un "
+                      "instant.")
+                if not i.response.is_done():
+                    await i.response.send_message(_m, ephemeral=True)
+                else:
+                    await i.followup.send(_m, ephemeral=True)
+            except Exception:
+                pass
+
+
+class TicketHubTypeDynamic(discord.ui.DynamicItem[discord.ui.Select],
+                           template=r"tickethub:type"):
+    """Le menu de choix du type. Persistant, donc utilisable même après un
+    redémarrage survenu entre l'affichage et le clic.
+
+    ⚠️ LES OPTIONS NE SERVENT PAS AU ROUTAGE. Discord renvoie la valeur
+    choisie dans la charge de l'interaction ; on la relit et on va chercher le
+    panneau dans la configuration du serveur AU MOMENT DU CLIC. C'est ce qui
+    permet à un menu affiché il y a dix minutes de rester juste — et à un type
+    supprimé entre-temps d'être refusé proprement plutôt que d'ouvrir un
+    ticket fantôme.
+    """
+    def __init__(self, types=None):
+        options = [
+            discord.SelectOption(
+                label=(p.get('name') or pid)[:100],
+                value=str(pid)[:100],
+                description=_resume_type(p),
+                emoji="🎫")
+            for pid, p in (types or [])[:25]
+        ] or [discord.SelectOption(label="—", value="__vide__")]
+        super().__init__(discord.ui.Select(
+            custom_id="tickethub:type",
+            placeholder="Choisis le type de ton ticket…",
+            min_values=1, max_values=1, options=options))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, i):
+        try:
+            #  On lit la charge de l'interaction plutôt que `self.item.values` :
+            #  sur le chemin « recapté au boot », l'instance vient d'être
+            #  fabriquée et ses options sont factices.
+            vals = (i.data or {}).get('values') or []
+            pid = str(vals[0]) if vals else ""
+            if not pid or pid == "__vide__":
+                return await i.response.send_message(
+                    "❌ Aucun type sélectionné.", ephemeral=True)
+
+            c = await cfg(i.guild.id)
+            if pid not in (c.get('ticket_panels', {}) or {}):
+                #  Le type a disparu entre l'affichage du menu et le clic.
+                return await i.response.send_message(
+                    "❌ **Ce type de ticket n'existe plus.**\nRouvre le menu "
+                    "depuis le panneau pour voir la liste à jour.",
+                    ephemeral=True)
+            await _ticket_ouvrir(i, pid)
+        except Exception as ex:
+            _logerr("ticket.hub_type", ex)
+            try:
+                _m = "❌ Erreur. Réessaie dans un instant."
+                if not i.response.is_done():
+                    await i.response.send_message(_m, ephemeral=True)
+                else:
+                    await i.followup.send(_m, ephemeral=True)
+            except Exception:
+                pass
+
+
+class TicketHubTypeView(View):
+    """Le porteur éphémère du menu. `timeout=None` : c'est le `DynamicItem`
+    qui garantit la reprise, pas cette instance."""
+    def __init__(self, types):
+        super().__init__(timeout=None)
+        self.add_item(TicketHubTypeDynamic(types).item)
 
 
 async def _build_ticket_panel_view(guild, pid):
@@ -20724,6 +20991,13 @@ class TicketMainPanelV2(LayoutView):
         b_edit.callback = self._cb_edit
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tmpv2_back")
         b_back.callback = self._cb_back
+        #  ⚠️ LE PANNEAU UNIFIÉ — demande du 06/09/2026. Un seul message public
+        #  pour TOUS les types : le membre clique, puis choisit. Désactivé s'il
+        #  n'y a aucun type, parce qu'un panneau sans type est un bouton qui
+        #  répond « rien à proposer » à chaque clic.
+        b_hub = Button(label="🎫 Panneau unifié", style=discord.ButtonStyle.success,
+                       disabled=(not panels), custom_id="tmpv2_hub")
+        b_hub.callback = self._cb_hub
 
         items: list = []
         if self.g.icon:
@@ -20747,11 +21021,32 @@ class TicketMainPanelV2(LayoutView):
         items.append(v2_body(panels_block))
         items.append(v2_divider())
         items.append(discord.ui.ActionRow(b_staff, b_logs, b_blacklist))
-        items.append(discord.ui.ActionRow(b_new, b_edit, b_back))
+        items.append(discord.ui.ActionRow(b_new, b_edit, b_hub, b_back))
 
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         await _afficher_panneau(self, interaction, edit)
+
+    async def _cb_hub(self, i):
+        """Poste le panneau UNIFIÉ : un message, un bouton, tous les types.
+
+        ⚠️ ON RÉUTILISE LE MÊME SÉLECTEUR DE SALON que les panneaux par type
+        (`SendPanelPaginatedView`), avec `HUB_PID` comme sentinelle. Deux
+        sélecteurs de salon côte à côte diverge­raient à la première correction
+        de permissions — et c'est celui-là qui vérifie que le bot peut écrire.
+        """
+        try:
+            v = SendPanelPaginatedView(self.u, self.g, HUB_PID)
+            await i.response.edit_message(content=None, view=v, embed=None,
+                                          attachments=[])
+        except Exception as ex:
+            print(f"[TicketMainPanelV2 _cb_hub] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_staff(self, i):
         # Phase 3.0k : V2 native picker
@@ -21818,6 +22113,11 @@ class SendPanelPaginatedView(LayoutView):
 
     async def _back(self, i):
         try:
+            #  ⚠️ `HUB_PID` N'EST PAS UN PANNEAU. Ouvrir son éditeur afficherait
+            #  une fiche vide et des boutons sans effet — un menu qui ment.
+            if self.pid == HUB_PID:
+                v = TicketMainPanelV2(self.u, self.g)
+                return await v.render_to(i, edit=True)
             v = PanelEditViewV2(self.u, self.g, self.pid)
             await v.render_to(i, edit=True)
         except Exception as ex:
@@ -21852,7 +22152,11 @@ class SendPanelPaginatedView(LayoutView):
 
             # Refonte (owner 2026-06-16) : le rendu du panneau est centralisé dans
             # _build_ticket_panel_view (réutilisé au re-render du toggle fondateur).
-            sent_msg = await ch.send(view=await _build_ticket_panel_view(i.guild, self.pid))
+            #  Le hub n'est pas un type : il les rassemble tous.
+            _vue = (await _build_ticket_hub_view(i.guild)
+                    if self.pid == HUB_PID
+                    else await _build_ticket_panel_view(i.guild, self.pid))
+            sent_msg = await ch.send(view=_vue)
             jump_url = f"https://discord.com/channels/{i.guild.id}/{ch.id}/{sent_msg.id}"
             await i.followup.send(
                 f"✅ Panel envoyé dans {ch.mention} !\n[Voir le message]({jump_url})",
@@ -22640,6 +22944,14 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready add_dynamic_items MentorVolunteerButton] {ex}")
     try:
+        #  ⚠️ LES TROIS CAPTEURS DU SYSTÈME DE TICKETS. `TicketCreateDynamic`
+        #  RÉPARE une panne existante : le bouton « Créer un ticket » des
+        #  panneaux par type porte un custom_id persistant qui n'avait AUCUN
+        #  capteur au boot — donc « Cette interaction a échoué » après chaque
+        #  redéploiement Railway. Les deux autres servent le panneau unifié.
+        bot.add_dynamic_items(TicketCreateDynamic)
+        bot.add_dynamic_items(TicketHubOpenDynamic)
+        bot.add_dynamic_items(TicketHubTypeDynamic)
         bot.add_dynamic_items(TicketFeedbackButton)  # #16 : notes de satisfaction de ticket (MP persistant)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items TicketFeedbackButton] {ex}")

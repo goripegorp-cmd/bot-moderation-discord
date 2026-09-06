@@ -20,6 +20,8 @@ l'écriture :
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 import roblox_news as news
@@ -139,6 +141,15 @@ PAGE_FR = '''<html><head>
 <meta property="article:published_time" content="2026-08-04T12:00:00.000Z" />
 </head></html>'''
 
+#  ⚠️ LA DATE DE LA FIXTURE SUIT L'HORLOGE, elle n'est pas écrite en dur.
+#  Avec `2026-08-04` figé et `FRAICHEUR_MAX_JOURS = 30`, ce test a cessé de
+#  passer tout seul le 03/09/2026 — sans qu'une ligne de code change, et
+#  pour une raison (la fraîcheur) étrangère à ce qu'il vérifie (la clé de
+#  déduplication partagée entre les deux salles de presse).
+_DATE_FIXTURE = (datetime.now(timezone.utc)
+                 - timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+PAGE_FR = PAGE_FR.replace("2026-08-04T12:00:00.000Z", _DATE_FIXTURE)
+
 
 def test_la_liste_donne_les_chemins_dedoublonnes_dans_lordre():
     chemins = news._slugs_newsroom(LISTE_FR, "/fr/newsroom/")
@@ -151,7 +162,10 @@ def test_la_liste_donne_les_chemins_dedoublonnes_dans_lordre():
 def test_la_page_article_donne_date_titre_et_resume_desechappes():
     """`og:title` porte « l&#x27;âge » : il doit ressortir « l'âge »."""
     p = news._lire_page_article(PAGE_FR)
-    assert p["date"] == "2026-08-04T12:00:00.000Z"
+    #  La fixture est datée relativement à maintenant (voir _DATE_FIXTURE) :
+    #  ce test vérifie que la date est EXTRAITE, pas qu'elle vaut un jour
+    #  précis d'août 2026.
+    assert p["date"] == _DATE_FIXTURE
     assert p["titre"].startswith("Au-delà du selfie : comment le système de vérification de l'âge")
     assert p["extrait"] == "Un résumé."
 
