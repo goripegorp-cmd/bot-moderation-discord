@@ -4102,6 +4102,31 @@ def _is_sensitive_role(role) -> bool:
 _RADIE_ROLE_NAME = "🚫 Radié"
 
 
+#  ⚠️ NOIR, PAS 0x000000. Discord traite le noir pur comme « aucune couleur » :
+#  le pseudo reprendrait la couleur du rôle suivant. 0x010101 est visuellement
+#  noir ET compte comme une vraie couleur. Comme la radiation retire tous les
+#  autres rôles, c'est LA couleur du membre : son nom s'affiche en noir.
+_RADIE_COULEUR = 0x010101
+
+
+def _radie_pseudo(membre) -> str:
+    """Le pseudo de serveur d'un radié. Détruit l'identité, garde une trace.
+
+    ⚠️ CE QUE ÇA FAIT ET CE QUE ÇA NE FAIT PAS. Le pseudo de SERVEUR disparaît
+    de la liste des membres, des mentions et de la recherche par surnom. Le nom
+    de compte Discord, lui, n'appartient pas au serveur : aucun bot ne peut le
+    changer, et une recherche par `@identifiant` le retrouvera toujours. Le
+    dire est plus utile que de laisser croire à un effacement total.
+
+    Les quatre derniers chiffres de l'identifiant restent pour que le staff
+    distingue deux radiés dans la liste — sinon ils portent tous le même nom.
+    """
+    return f"⛔ RADIÉ-{int(getattr(membre, 'id', 0)) % 10000:04d}"[:32]
+
+
+_RADIE_PSEUDO = _radie_pseudo
+
+
 def _radie_overwrite():
     """DENY TOTAL appliqué au rôle « 🚫 Radié » (vue/écriture/réactions/threads/vocal/
     historique/slash). Factorisé pour que _ensure_radie_role ET on_guild_channel_create
@@ -4200,7 +4225,8 @@ async def _radier_membre(guild, membre, auteur, raison: str) -> dict:
     serait pire. On fait tout ce qu'on peut, et on DIT ce qui a manqué.
     """
     res = {"timeout": False, "roles_retires": 0, "role_pose": False,
-           "sauvegarde": False, "verrou": False, "manques": []}
+           "sauvegarde": False, "verrou": False, "pseudo_detruit": False,
+           "recours_envoye": False, "manques": []}
     me = guild.me
 
     # ── 1. LE COUP D'ARRÊT, EN PREMIER — un appel, immédiat ──────────────
@@ -4232,14 +4258,29 @@ async def _radier_membre(guild, membre, auteur, raison: str) -> dict:
                 "user_id INTEGER, saved_roles TEXT, reason TEXT, "
                 "by_user_id INTEGER, radiated_at DATETIME DEFAULT "
                 "CURRENT_TIMESTAMP, PRIMARY KEY (guild_id, user_id))")
+            #  ⚠️ DEUX COLONNES AJOUTÉES APRÈS COUP. `ALTER TABLE` échoue si la
+            #  colonne existe déjà : c'est attendu, on avale l'erreur. Sans ce
+            #  rattrapage, une base créée par une version antérieure n'aurait
+            #  jamais ces colonnes et le pseudo ne serait jamais rendu.
+            for _sql in (
+                "ALTER TABLE radiated_members ADD COLUMN saved_nick TEXT",
+                "ALTER TABLE radiated_members ADD COLUMN appel_utilise INTEGER DEFAULT 0",
+            ):
+                try:
+                    await db.execute(_sql)
+                except Exception:
+                    pass
             await db.execute(
                 "INSERT INTO radiated_members(guild_id, user_id, saved_roles, "
-                "reason, by_user_id) VALUES(?,?,?,?,?) "
+                "reason, by_user_id, saved_nick, appel_utilise) "
+                "VALUES(?,?,?,?,?,?,0) "
                 "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
                 "saved_roles=excluded.saved_roles, reason=excluded.reason, "
-                "by_user_id=excluded.by_user_id",
+                "by_user_id=excluded.by_user_id, "
+                "saved_nick=excluded.saved_nick, appel_utilise=0",
                 (guild.id, membre.id, json.dumps(saved_ids),
-                 str(raison or "")[:300], auteur.id))
+                 str(raison or "")[:300], auteur.id,
+                 (membre.nick or "")[:32]))
             await db.commit()
         res["sauvegarde"] = True
     except Exception as ex:
@@ -4254,8 +4295,19 @@ async def _radier_membre(guild, membre, auteur, raison: str) -> dict:
         role = discord.utils.get(guild.roles, name=_RADIE_ROLE_NAME)
         if role is None:
             role = await guild.create_role(
-                name=_RADIE_ROLE_NAME, color=discord.Color.dark_red(),
+                name=_RADIE_ROLE_NAME, colour=discord.Colour(_RADIE_COULEUR),
+                hoist=False, mentionable=False,
                 reason="Radiation totale (/off)")
+        elif role.colour.value != _RADIE_COULEUR:
+            #  Le rôle existait déjà (créé avant cette version, ou recoloré à la
+            #  main) : on le remet en noir, sinon les anciens radiés gardent la
+            #  couleur d'origine et rien ne les distingue à l'œil.
+            try:
+                await role.edit(colour=discord.Colour(_RADIE_COULEUR),
+                                hoist=False, mentionable=False,
+                                reason="Radiation : nom en noir")
+            except Exception:
+                pass
     except Exception as ex:
         res["manques"].append(f"rôle « Radié » indisponible ({ex})")
 
@@ -4267,12 +4319,35 @@ async def _radier_membre(guild, membre, auteur, raison: str) -> dict:
                   if r.is_default() or r.managed or not (me.top_role > r)]
         if role is not None and role not in garder:
             garder.append(role)
-        await membre.edit(roles=garder,
-                          reason=f"/off radiation — {raison}"[:400])
+        #  ⚠️ PSEUDO ET RÔLES DANS LE MÊME APPEL. Deux `edit` séparés, c'est
+        #  deux entrées d'audit, deux occasions d'échouer à moitié, et un
+        #  instant où le membre est dépouillé mais porte encore son nom.
+        _nick = _radie_pseudo(membre)
+        try:
+            await membre.edit(roles=garder, nick=_nick,
+                              reason=f"/off radiation — {raison}"[:400])
+            res["pseudo_detruit"] = True
+        except Exception:
+            #  Le pseudo peut échouer seul (permission « Gérer les pseudos »
+            #  manquante). Le retrait des rôles, lui, ne doit PAS être perdu
+            #  pour autant : on réessaie sans le pseudo.
+            await membre.edit(roles=garder,
+                              reason=f"/off radiation — {raison}"[:400])
+            res["manques"].append("pseudo de serveur non modifié (permission "
+                                  "« Gérer les pseudos » ?)")
         res["roles_retires"] = len(removable)
         res["role_pose"] = role is not None
     except Exception as ex:
         res["manques"].append(f"retrait des rôles échoué ({ex})")
+
+    # ── 4. Le droit de recours, par message privé ────────────────────────
+    #  ⚠️ APRÈS LA NEUTRALISATION, JAMAIS AVANT. Prévenir quelqu'un qu'on va le
+    #  radier lui laisse le temps de faire des dégâts. Et si le message ne part
+    #  pas (MP fermés), le compte rendu le DIT : cette personne n'a alors
+    #  AUCUN autre chemin, puisqu'elle ne voit plus aucun salon.
+    res["recours_envoye"] = await _envoyer_recours_radie(guild, membre, raison)
+    if not res["recours_envoye"]:
+        res["manques"].append("message privé de recours non remis (MP fermés)")
 
     # ── 4. Le verrouillage des salons, EN FOND ───────────────────────────
     if role is not None:
@@ -4339,9 +4414,20 @@ def _compte_rendu_radiation(membre, res: dict) -> str:
         detail.append("rôles sauvegardés")
     if detail:
         lignes.append("-# " + " · ".join(detail))
+    if res.get("pseudo_detruit"):
+        lignes.append("-# 🏷️ Pseudo de serveur détruit · nom affiché en noir.")
     if res["verrou"]:
         lignes.append("-# 🔒 Verrouillage des salons en cours (quelques "
                       "secondes) — la personne ne peut déjà plus rien faire.")
+    if res.get("recours_envoye"):
+        lignes.append("-# 📩 Droit de recours envoyé en message privé — **un "
+                      "seul**, par formulaire.")
+    else:
+        #  ⚠️ SANS CE MESSAGE, ON CROIRAIT LUI AVOIR LAISSÉ UNE PORTE. Elle ne
+        #  voit aucun salon : le MP était son unique chemin.
+        lignes.append("⚠️ **Message privé non remis** — cette personne n'a "
+                      "donc **aucun chemin pour se défendre**. Si vous voulez "
+                      "lui laisser un recours, contactez-la autrement.")
     if res["manques"]:
         lignes.append("⚠️ **Incomplet :** " + " · ".join(res["manques"])[:600])
     if not res["sauvegarde"]:
@@ -4371,6 +4457,359 @@ async def _journal_radiation(guild, membre, auteur, raison, res):
                                detail=str(raison or "")[:200], surface="slash")
     except Exception:
         pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LE RECOURS D'UN RADIÉ — un seul, par formulaire privé
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+#  ⚠️ POURQUOI UN FORMULAIRE ET PAS UN SALON. Le propriétaire veut les deux :
+#  « ils ne voient plus AUCUN salon, mais vraiment plus aucun » ET « ils peuvent
+#  créer un ticket pour s'expliquer ». Or la radiation applique un `timeout`
+#  Discord — c'est lui qui coupe l'attaque en une seconde — et un membre en
+#  timeout NE PEUT PAS ÉCRIRE, même dans un salon qu'on lui ouvrirait. Un salon
+#  de recours serait une porte peinte sur un mur.
+#
+#  Le formulaire privé résout les deux : aucun salon visible, aucune écriture
+#  possible dans le serveur, et pourtant l'explication arrive — le bot la
+#  dépose dans un vrai ticket côté staff.
+#
+#  ⚠️ UN SEUL RECOURS, JAMAIS DEUX. La marque vit en base (`appel_utilise`),
+#  pas en mémoire : un redémarrage ne doit pas rouvrir le droit.
+
+
+async def _panneau_ticket_serveur(guild):
+    """(pid, panneau) du ticket « serveur », ou (None, {}) — sans réseau.
+
+    Le propriétaire a dit « un ticket de type serveur ». On cherche donc CE
+    type-là ; à défaut, le premier panneau configuré, parce qu'un recours qui
+    n'arrive nulle part est pire qu'un recours mal rangé.
+    """
+    try:
+        c = await cfg(guild.id)
+        panels = c.get('ticket_panels', {}) or {}
+        for pid, pnl in panels.items():
+            if "serv" in str(pnl.get('name', '')).lower():
+                return pid, pnl
+        for pid, pnl in panels.items():
+            return pid, pnl
+    except Exception as ex:
+        print(f"[radie recours panneau] {ex}")
+    return None, {}
+
+
+async def _recours_deja_utilise(guild_id: int, user_id: int) -> bool:
+    """Fail-CLOSED : si la base ne répond pas, on considère le recours utilisé.
+
+    ⚠️ LE SENS COMPTE. Fail-open laisserait un radié rouvrir un recours à
+    chaque panne de base — donc autant de tickets qu'il veut, ce qui est
+    exactement ce qu'on interdit.
+    """
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT appel_utilise FROM radiated_members "
+                "WHERE guild_id=? AND user_id=?", (guild_id, user_id)) as cur:
+                row = await cur.fetchone()
+        if row is None:
+            return True          # pas radié → aucun recours à ouvrir
+        return bool(row[0])
+    except Exception as ex:
+        print(f"[radie recours lecture] {ex}")
+        return True
+
+
+class _RadieAppelModal(discord.ui.Modal, title="Recours — expliquez-vous"):
+    """⚠️ DEUX CHAMPS, PAS DIX. C'est la seule fenêtre d'expression d'une
+    personne déjà neutralisée : elle doit pouvoir tout dire sans se heurter à
+    un questionnaire."""
+
+    pourquoi = discord.ui.TextInput(
+        label="Pourquoi avez-vous été sanctionné ?",
+        style=discord.TextStyle.paragraph, required=True, max_length=1000,
+        placeholder="Décrivez ce qui s'est passé, de votre point de vue.")
+    conteste = discord.ui.TextInput(
+        label="Que contestez-vous, et pourquoi ?",
+        style=discord.TextStyle.paragraph, required=False, max_length=1000,
+        placeholder="Facultatif — éléments concrets, preuves, contexte.")
+
+    def __init__(self, guild):
+        super().__init__(timeout=900)
+        self._guild = guild
+
+    async def on_submit(self, i):
+        try:
+            await i.response.defer(ephemeral=True, thinking=True)
+        except Exception:
+            pass
+        try:
+            ok = await _ouvrir_ticket_recours(
+                self._guild, i.user, str(self.pourquoi), str(self.conteste))
+            await i.followup.send(ok, ephemeral=True)
+        except Exception as ex:
+            _logerr("radie.appel_submit", ex)
+            try:
+                await i.followup.send(
+                    "❌ Votre recours n'a pas pu être transmis. Réessayez dans "
+                    "un instant — votre droit de recours n'est PAS consommé.",
+                    ephemeral=True)
+            except Exception:
+                pass
+
+
+class RadieAppelButton(discord.ui.DynamicItem[Button],
+                       template=r"radieappel:(?P<gid>\d+)"):
+    """Le bouton du message privé. Persistant : le radié peut cliquer des
+    heures plus tard, après n'importe quel redémarrage."""
+
+    def __init__(self, gid: int):
+        super().__init__(Button(label="📩 Faire mon recours (1 seul)",
+                                style=discord.ButtonStyle.primary,
+                                custom_id=f"radieappel:{gid}"))
+        self.gid = int(gid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["gid"]))
+
+    async def callback(self, i):
+        try:
+            guild = bot.get_guild(self.gid)
+            if guild is None:
+                return await i.response.send_message(
+                    "❌ Serveur introuvable.", ephemeral=True)
+            if await _recours_deja_utilise(guild.id, i.user.id):
+                #  ⚠️ ON REFUSE AVANT LE FORMULAIRE. Laisser remplir puis
+                #  refuser à l'envoi serait cruel et inutile.
+                return await i.response.send_message(
+                    "⛔ **Votre recours a déjà été utilisé.**\n"
+                    "Il n'y en a qu'un. L'équipe examine votre message ; "
+                    "vous serez prévenu de sa décision ici même.",
+                    ephemeral=True)
+            await i.response.send_modal(_RadieAppelModal(guild))
+        except Exception as ex:
+            _logerr("radie.appel_bouton", ex)
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        "❌ Erreur. Réessayez dans un instant.", ephemeral=True)
+            except Exception:
+                pass
+
+
+async def _ouvrir_ticket_recours(guild, membre, pourquoi: str,
+                                 conteste: str) -> str:
+    """Crée le ticket de recours et y dépose l'explication. Rend le message
+    à afficher au radié.
+
+    ⚠️ LE SALON N'EST PAS VISIBLE PAR LE RADIÉ, ET C'EST VOULU. Il ne voit
+    aucun salon — c'est la consigne — et il n'aurait de toute façon pas pu y
+    écrire (timeout). Son texte est déjà là ; la suite se joue entre le staff
+    et lui, par message privé.
+
+    ⚠️ ON MARQUE LE RECOURS CONSOMMÉ *APRÈS* LA CRÉATION RÉUSSIE. L'inverse
+    ferait perdre le droit de recours sur une simple panne de salon.
+    """
+    pid, pnl = await _panneau_ticket_serveur(guild)
+    c = await cfg(guild.id)
+    staff = guild.get_role(int(c.get('ticket_staff', 0) or 0))
+    cat = guild.get_channel(int((pnl or {}).get('category', 0) or 0))
+
+    ow = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        guild.me: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, manage_channels=True,
+            manage_permissions=True),
+    }
+    if staff:
+        ow[staff] = discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True,
+            attach_files=True, embed_links=True)
+    if guild.owner:
+        ow[guild.owner] = discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True,
+            manage_channels=True)
+
+    ch = await guild.create_text_channel(
+        f"recours-{membre.name}"[:50], category=cat, overwrites=ow,
+        reason=f"Recours de radiation — {membre.id}")
+
+    tid = 0
+    try:
+        async with get_db() as db:
+            await db.execute(
+                'INSERT INTO tickets(guild_id, channel_id, user_id, panel_id, '
+                'claimed_by, status, answers) VALUES(?,?,?,?,0,"open",?)',
+                (guild.id, ch.id, membre.id, str(pid or "recours"),
+                 json.dumps({"recours": True}, ensure_ascii=False)))
+            await db.commit()
+            async with db.execute(
+                'SELECT id FROM tickets WHERE channel_id=?', (ch.id,)) as cur:
+                row = await cur.fetchone()
+                tid = row[0] if row else 0
+    except Exception as ex:
+        #  Le salon existe : le recours n'est PAS perdu. On le dit et on
+        #  continue — un ticket non enregistré reste lisible par le staff.
+        print(f"[radie recours enregistrement] {ex}")
+
+    e = discord.Embed(color=0x010101, timestamp=now())
+    e.set_author(name=f"⛔ RECOURS DE RADIATION · ticket #{tid}",
+                 icon_url=membre.display_avatar.url)
+    e.description = (f"{membre.mention} · `{membre.id}`\n"
+                     f"Compte Discord : `{membre}`\n"
+                     f"-# Cette personne est radiée : elle ne voit aucun salon "
+                     f"et ne peut écrire nulle part. Ce texte est son UNIQUE "
+                     f"prise de parole.")
+    e.add_field(name="Pourquoi avez-vous été sanctionné ?",
+                value=(pourquoi or "—")[:1024], inline=False)
+    if (conteste or "").strip():
+        e.add_field(name="Ce qu'il conteste", value=conteste[:1024],
+                    inline=False)
+    e.set_footer(text="Décision : lever la radiation, ou bannir définitivement.")
+
+    vue = View(timeout=None)
+    vue.add_item(RadieDecisionButton("lever", membre.id).item)
+    vue.add_item(RadieDecisionButton("bannir", membre.id).item)
+    await ch.send(content=(staff.mention if staff else None), embed=e, view=vue,
+                  allowed_mentions=discord.AllowedMentions(roles=True))
+
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE radiated_members SET appel_utilise=1 "
+                "WHERE guild_id=? AND user_id=?", (guild.id, membre.id))
+            await db.commit()
+    except Exception as ex:
+        print(f"[radie recours marque] {ex}")
+
+    return ("✅ **Votre recours a été transmis à l'équipe.**\n"
+            "-# C'était votre seule demande possible. Vous recevrez la "
+            "décision ici même, en message privé.")
+
+
+class RadieDecisionButton(discord.ui.DynamicItem[Button],
+                          template=r"radiedec:(?P<act>lever|bannir):(?P<uid>\d+)"):
+    """La décision du staff, sur le ticket de recours. Persistante.
+
+    ⚠️ AUCUNE DÉCISION AUTOMATIQUE. Le propriétaire l'a posé comme règle pour
+    l'inactivité, et ça vaut ici : « c'est pas le bot qui va décider de les
+    expulser, c'est moi ». Le bot instruit le dossier ; un humain tranche.
+    """
+
+    def __init__(self, act: str, uid: int):
+        lever = act == "lever"
+        super().__init__(Button(
+            label=("✅ Lever la radiation" if lever
+                   else "⛔ Bannir définitivement"),
+            style=(discord.ButtonStyle.success if lever
+                   else discord.ButtonStyle.danger),
+            custom_id=f"radiedec:{act}:{uid}"))
+        self.act = act
+        self.uid = int(uid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["act"], int(match["uid"]))
+
+    async def callback(self, i):
+        try:
+            await i.response.defer(ephemeral=True, thinking=True)
+        except Exception:
+            pass
+        try:
+            c = await cfg(i.guild.id)
+            staff_id = int(c.get('ticket_staff', 0) or 0)
+            autorise = (i.user.guild_permissions.administrator
+                        or i.user.id == i.guild.owner_id
+                        or owner_ids_module.is_super_owner(i.user.id)
+                        or any(r.id == staff_id for r in i.user.roles))
+            if not autorise:
+                return await i.followup.send(
+                    "⛔ Décision réservée au staff.", ephemeral=True)
+
+            membre = i.guild.get_member(self.uid)
+            if self.act == "lever":
+                if membre is None:
+                    return await i.followup.send(
+                        "❌ Ce membre n'est plus sur le serveur.",
+                        ephemeral=True)
+                await i.followup.send(
+                    f"✅ Radiation levée — utilisez `/off off membre:` pour "
+                    f"restaurer {membre.mention} proprement (rôles et pseudo).",
+                    ephemeral=True)
+                await _prevenir_radie(
+                    i.guild, self.uid,
+                    "✅ **Votre recours a été accepté.** L'équipe lève votre "
+                    "radiation.")
+            else:
+                #  ⚠️ LE BANNISSEMENT EST DÉFINITIF ET IRRÉVERSIBLE CÔTÉ MEMBRE :
+                #  on le prévient AVANT de bannir, sinon le message ne part
+                #  jamais (on ne peut plus écrire à quelqu'un qui n'a plus
+                #  aucun serveur en commun).
+                await _prevenir_radie(
+                    i.guild, self.uid,
+                    "⛔ **Votre recours a été rejeté.** Vous êtes banni "
+                    "définitivement du serveur.")
+                await i.guild.ban(
+                    discord.Object(id=self.uid),
+                    reason=f"Recours rejeté — décision de {i.user} ({i.user.id})",
+                    delete_message_days=0)
+                await i.followup.send(
+                    f"⛔ <@{self.uid}> est **banni définitivement**.",
+                    ephemeral=True)
+
+            try:
+                await i.message.edit(view=None)
+            except Exception:
+                pass
+        except Exception as ex:
+            _logerr("radie.decision", ex, guild_id=getattr(i.guild, "id", 0))
+            try:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+async def _prevenir_radie(guild, user_id: int, texte: str) -> bool:
+    """Message privé au radié. Ne lève jamais : des MP fermés ne doivent pas
+    faire échouer une décision de staff."""
+    try:
+        u = bot.get_user(user_id) or await bot.fetch_user(user_id)
+        await u.send(f"**{guild.name}** — {texte}")
+        return True
+    except Exception:
+        return False
+
+
+async def _envoyer_recours_radie(guild, membre, raison: str) -> bool:
+    """Le message privé qui ouvre le droit de recours. Rend True s'il est parti.
+
+    ⚠️ S'IL NE PART PAS, IL FAUT LE DIRE AU MODÉRATEUR. Un radié aux messages
+    privés fermés n'a AUCUN autre chemin — il ne voit aucun salon. Sans cette
+    remontée, on croirait lui avoir laissé une porte de sortie qui n'existe
+    pas.
+    """
+    try:
+        e = discord.Embed(color=0x010101, timestamp=now())
+        e.set_author(name=f"⛔ Vous avez été radié de {guild.name}",
+                     icon_url=guild.icon.url if guild.icon else None)
+        e.description = (
+            f"**Motif indiqué :** {str(raison or 'non précisé')[:500]}\n\n"
+            f"Vous ne voyez plus aucun salon et ne pouvez plus écrire sur le "
+            f"serveur.\n\n"
+            f"**Vous avez droit à UN recours, un seul.** Cliquez ci-dessous et "
+            f"expliquez pourquoi vous pensez avoir été sanctionné, et ce que "
+            f"vous contestez. L'équipe lira votre message et tranchera.\n"
+            f"-# Si la sanction est confirmée, elle devient un bannissement "
+            f"définitif.")
+        v = View(timeout=None)
+        v.add_item(RadieAppelButton(guild.id).item)
+        u = bot.get_user(membre.id) or await bot.fetch_user(membre.id)
+        await u.send(embed=e, view=v)
+        return True
+    except Exception as ex:
+        print(f"[radie recours dm] {ex}")
+        return False
 
 
 @off_group.command(name="on", description="🚫 Radier TOTALEMENT un membre (retire tout, bloque partout)")
@@ -4479,6 +4918,25 @@ async def off_off_cmd(i: discord.Interaction, membre: discord.Member, raison: st
                 await membre.timeout(None, reason="/off levée")
             except Exception:
                 pass
+            #  ⚠️ RENDRE LE PSEUDO, SINON LA LEVÉE EST INCOMPLÈTE. On a détruit
+            #  le pseudo de serveur à la radiation ; laisser « ⛔ RADIÉ-1234 »
+            #  sur quelqu'un dont on vient de reconnaître le bon droit serait
+            #  une sanction qui survit à sa levée.
+            #  `None` remet le nom de compte : c'est le bon repli quand la
+            #  personne n'avait pas de pseudo avant.
+            try:
+                _ancien = None
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT saved_nick FROM radiated_members "
+                        "WHERE guild_id=? AND user_id=?",
+                        (guild.id, membre.id)) as _c2:
+                        _r2 = await _c2.fetchone()
+                if _r2 and (_r2[0] or "").strip():
+                    _ancien = _r2[0]
+                await membre.edit(nick=_ancien, reason="/off levée — pseudo rendu")
+            except Exception as _exn:
+                print(f"[off levee pseudo] {_exn}")
         except Exception as _ex:
             return await i.followup.send(f"❌ Échec : `{_ex}`", ephemeral=True)
         try:
@@ -23202,6 +23660,12 @@ async def on_ready():
         #  panneaux par type porte un custom_id persistant qui n'avait AUCUN
         #  capteur au boot — donc « Cette interaction a échoué » après chaque
         #  redéploiement Railway. Les deux autres servent le panneau unifié.
+        #  ⚠️ LE RECOURS D'UN RADIÉ VIT EN MESSAGE PRIVÉ, parfois pendant des
+        #  jours. Sans ces deux capteurs, son bouton meurt au premier
+        #  redémarrage — et la personne n'a plus AUCUN moyen de se défendre,
+        #  puisqu'elle ne voit aucun salon.
+        bot.add_dynamic_items(RadieAppelButton)
+        bot.add_dynamic_items(RadieDecisionButton)
         bot.add_dynamic_items(TicketCreateDynamic)
         bot.add_dynamic_items(TicketHubOpenDynamic)
         bot.add_dynamic_items(TicketHubTypeDynamic)

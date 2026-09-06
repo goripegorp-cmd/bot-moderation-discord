@@ -74,14 +74,22 @@ class FauxMembre:
     def __init__(self, roles, journal):
         self.id = 4242
         self.roles = list(roles)
+        self.nick = "AncienPseudo"
+        self.name = "cible"
         self._j = journal
 
     async def timeout(self, duree, reason=None):
         self._j.append("timeout")
 
-    async def edit(self, roles=None, reason=None):
+    #  ⚠️ `nick` FAIT PARTIE DE LA VRAIE SIGNATURE. Sans lui, l appel reel
+    #  levait un TypeError, le code retombait sur son repli sans pseudo, et le
+    #  test mesurait le CHEMIN DE SECOURS en croyant mesurer le chemin normal.
+    async def edit(self, roles=None, nick=..., reason=None):
         self._j.append("edit_roles")
         self.roles = list(roles or [])
+        if nick is not ...:
+            self.nick = nick
+            self._j.append("nick")
 
 
 class FauxGuild:
@@ -125,7 +133,14 @@ class FauxAuteur:
     id = 7
 
 
-def _espace(journal, db_ok=True):
+def _faux_recours(journal, ok=True):
+    async def _f(guild, membre, raison):
+        journal.append("dm_recours")
+        return ok
+    return _f
+
+
+def _espace(journal, db_ok=True, dm_ok=True):
     """L'espace de noms minimal pour exécuter le VRAI code du dépôt."""
     @contextlib.asynccontextmanager
     async def _get_db():
@@ -161,13 +176,20 @@ def _espace(journal, db_ok=True):
         "_radie_overwrite": lambda: object(),
         "_VERROUS_RADIATION": set(),
         "print": lambda *a, **k: None,
+        #  Le message privé de recours : on note QUAND il part, c'est tout ce
+        #  qui nous intéresse ici (son contenu a ses propres tests).
+        "_envoyer_recours_radie": _faux_recours(journal, dm_ok),
     }
+    #  ⚠️ LE VRAI `_radie_pseudo`, PAS UN SUBSTITUT. Absent de l espace de
+    #  noms, l appel levait un NameError avale par le repli : le test mesurait
+    #  le chemin de SECOURS en croyant mesurer le chemin normal.
+    exec(_src("_radie_pseudo"), ns)               # noqa: S102 — code du dépôt
     exec(_src("_verrouiller_salons_radie"), ns)   # noqa: S102 — code du dépôt
     exec(_src("_radier_membre"), ns)              # noqa: S102 — code du dépôt
     return ns
 
 
-def _jouer(db_ok=True, salons=6):
+def _jouer(db_ok=True, salons=6, dm_ok=True):
     journal = []
     moi = FauxMoi()
     radie = FauxRole(999, "🚫 Radié", position=50)
@@ -177,7 +199,7 @@ def _jouer(db_ok=True, salons=6):
     m = FauxMembre(porte, journal)
     g = FauxGuild(moi, [radie] + porte, [FauxSalon(journal) for _ in range(salons)],
                   journal)
-    ns = _espace(journal, db_ok=db_ok)
+    ns = _espace(journal, db_ok=db_ok, dm_ok=dm_ok)
 
     async def _run():
         r = await ns["_radier_membre"](g, m, FauxAuteur(), "test")
@@ -381,3 +403,137 @@ def test_les_cibles_interdites_le_restent():
     for garde in ("membre.bot", "guild.owner_id", "is_super_owner",
                   "membre.id == auteur.id"):
         assert garde in corps, f"garde-fou manquant : {garde}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LE RECOURS — un seul, et jamais avant d'avoir neutralisé
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_le_recours_part_APRES_la_neutralisation():
+    """⚠️ PRÉVENIR QUELQU'UN QU'ON VA LE RADIER LUI LAISSE LE TEMPS DE FAIRE
+    DES DÉGÂTS. Le message privé ne part qu'une fois la personne muette et
+    dépouillée."""
+    _res, journal, _m = _jouer()
+    assert "dm_recours" in journal, "aucun droit de recours n'est ouvert"
+    assert journal.index("timeout") < journal.index("dm_recours")
+    assert journal.index("edit_roles") < journal.index("dm_recours")
+
+
+def test_un_MP_ferme_est_SIGNALE_au_moderateur():
+    """⚠️ SANS CE SIGNAL, ON CROIRAIT LUI AVOIR LAISSÉ UNE PORTE. La personne
+    ne voit plus aucun salon : le message privé était son unique chemin."""
+    res, _journal, _m = _jouer(dm_ok=False)
+    assert res["recours_envoye"] is False
+    assert any("recours" in x for x in res["manques"])
+    txt = _rendu(res)
+    assert "aucun chemin pour se défendre" in txt
+
+
+def test_le_pseudo_de_serveur_est_detruit():
+    """« Que leur pseudo soit complètement détruit » — celui du serveur, pas
+    celui du compte Discord, qu'aucun bot ne peut changer."""
+    res, _journal, _m = _jouer()
+    assert res["pseudo_detruit"] is True
+    corps = _src("_radier_membre")
+    assert "nick=_nick" in corps, "le pseudo n'est pas modifié"
+    assert "roles=garder, nick=_nick" in corps, (
+        "pseudo et rôles doivent partir dans le MÊME appel : sinon deux "
+        "entrées d'audit et un instant où le membre est dépouillé mais porte "
+        "encore son nom")
+
+
+def test_un_echec_de_pseudo_ne_fait_pas_perdre_le_retrait_des_roles():
+    """⚠️ LA PERMISSION « Gérer les pseudos » peut manquer alors que « Gérer
+    les rôles » est là. Abandonner tout l'appel laisserait la personne AVEC
+    tous ses rôles — l'inverse du but."""
+    corps = _src("_radier_membre")
+    assert corps.count("await membre.edit(roles=garder") >= 1
+    assert "Gérer les pseudos" in corps, (
+        "le repli sans pseudo n'existe pas, ou ne dit pas ce qui manque")
+
+
+def test_le_nom_saffiche_en_NOIR_et_pas_en_couleur_par_defaut():
+    """⚠️ 0x000000 EST TRAITÉ PAR DISCORD COMME « aucune couleur » : le pseudo
+    reprendrait la couleur du rôle suivant. 0x010101 est visuellement noir et
+    compte comme une vraie couleur."""
+    assert "_RADIE_COULEUR = 0x010101" in SRC, (
+        "la couleur du rôle Radié n'est pas un noir valide")
+    corps = _src("_radier_membre")
+    assert "discord.Colour(_RADIE_COULEUR)" in corps
+    assert "role.colour.value != _RADIE_COULEUR" in corps, (
+        "un rôle « Radié » créé par une version antérieure garderait son "
+        "ancienne couleur : les anciens radiés ne seraient pas en noir")
+
+
+def test_le_droit_de_recours_est_UNIQUE_et_vit_en_base():
+    """« Ils peuvent en créer qu'un seul ». Un compteur en mémoire se
+    remettrait à zéro au premier redémarrage."""
+    corps = _src("_recours_deja_utilise")
+    assert "appel_utilise" in corps
+    assert "radiated_members" in corps
+
+
+def test_une_base_muette_REFUSE_le_recours():
+    """⚠️ FAIL-CLOSED, ET LE SENS COMPTE. Fail-open laisserait un radié rouvrir
+    un recours à chaque panne de base — donc autant de tickets qu'il veut,
+    exactement ce qu'on interdit."""
+    corps = _src("_recours_deja_utilise")
+    i_exc = corps.index("except Exception")
+    assert "return True" in corps[i_exc:], (
+        "en cas d'erreur, la fonction n'interdit pas le recours")
+
+
+def test_le_recours_nest_consomme_QU_APRES_la_creation_du_ticket():
+    """L'inverse ferait perdre le droit de recours sur une simple panne de
+    salon — et il n'y en a qu'un."""
+    corps = _src("_ouvrir_ticket_recours")
+    i_creation = corps.index("create_text_channel")
+    i_marque = corps.index("appel_utilise=1")
+    assert i_creation < i_marque
+
+
+def test_le_salon_de_recours_nest_PAS_visible_par_le_radie():
+    """« Ils ne voient plus aucun salon, mais vraiment plus aucun. » Et de
+    toute façon, en timeout, il ne pourrait pas y écrire."""
+    corps = _src("_ouvrir_ticket_recours")
+    assert "default_role: discord.PermissionOverwrite(view_channel=False)" in corps
+    assert "membre: discord.PermissionOverwrite" not in corps, (
+        "le radié reçoit un accès au salon de recours : il verrait un salon, "
+        "et il ne pourrait pas y écrire de toute façon")
+
+
+def test_la_decision_est_HUMAINE_et_reservee_au_staff():
+    """« C'est pas le bot qui va décider, c'est moi. » Le bot instruit le
+    dossier ; un humain tranche."""
+    corps = _src("callback")  # premier callback trouvé — on vise la classe
+    src_cls = SRC
+    assert "class RadieDecisionButton" in src_cls
+    i = src_cls.index("class RadieDecisionButton")
+    bloc = src_cls[i:i + 4000]
+    assert "guild_permissions.administrator" in bloc
+    assert "ticket_staff" in bloc
+    assert "Décision réservée au staff" in bloc
+
+
+def test_on_previent_AVANT_de_bannir():
+    """⚠️ APRÈS LE BANNISSEMENT, PLUS AUCUN SERVEUR EN COMMUN : le message
+    privé ne partirait jamais. La personne apprendrait son bannissement en
+    ne trouvant plus le serveur."""
+    #  ⚠️ ON BORNE SUR LA BRANCHE "bannir" SEULE. La branche "lever" appelle
+    #  aussi `_prevenir_radie` et EN PREMIER : chercher dans tout le bloc
+    #  trouvait cet appel-la et le test passait alors que le bannissement
+    #  precedait bien son avertissement. Mutation testee, defaut reel.
+    i = SRC.index("class RadieDecisionButton")
+    bloc = SRC[i:i + 4000]
+    i_ban = bloc.index("guild.ban(")
+    branche = bloc[bloc.index("else:", 0, i_ban):i_ban]
+    assert "_prevenir_radie(" in branche, (
+        "on bannit avant de prévenir : le message ne partira jamais")
+
+
+def test_la_levee_rend_le_pseudo():
+    """Laisser « ⛔ RADIÉ-1234 » sur quelqu'un dont on vient de reconnaître le
+    bon droit serait une sanction qui survit à sa levée."""
+    corps = _src("off_off_cmd")
+    assert "saved_nick" in corps
+    assert "nick=_ancien" in corps
