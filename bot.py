@@ -18953,6 +18953,37 @@ def _api_warning_state_file_path():
     return d / "state.json"
 
 
+async def _purger_commandes_globales():
+    """Supprime les commandes GLOBALES chez Discord SANS vider l'arbre local.
+
+    ⚠️ POURQUOI LA RESTAURATION DANS UN `finally` EST OBLIGATOIRE. Pour dire à
+    Discord « plus aucune commande globale », il faut lui pousser un ensemble
+    VIDE — donc vider l'arbre en mémoire le temps de l'appel. Si on ne le
+    remettait pas, le prochain `copy_global_to(guild=…)` copierait le VIDE et
+    EFFACERAIT les commandes de ce serveur. Un `on_guild_join` suffirait à
+    déclencher ça, et le serveur concerné n'aurait plus rien.
+
+    Le `finally` couvre aussi le cas où `sync()` lève : l'arbre revient en
+    place même si la purge échoue.
+    """
+    _snap = list(bot.tree.get_commands())
+    try:
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync()
+        print(f"🧹 Registre GLOBAL vidé chez Discord — plus de doublons "
+              f"(l'arbre local garde ses {len(_snap)} commandes).")
+        return True
+    except Exception as ex:
+        print(f"⚠️ purge des commandes globales échouée (non bloquant): {ex}")
+        return False
+    finally:
+        for _c in _snap:
+            try:
+                bot.tree.add_command(_c)
+            except Exception:
+                pass
+
+
 # ─── tree.sync() conditionnel (gain quota Discord + boot plus rapide) ─────────
 # Le sync global Discord est lent et compte dans le quota. Si l'ensemble des
 # commandes (noms + descriptions + params) est INCHANGÉ depuis le dernier boot,
@@ -23138,19 +23169,31 @@ async def on_ready():
             except: pass
     except: pass
     
-    # Sync global des commandes — CONDITIONNEL (Phase backup/sync)
-    # On ne re-sync QUE si l'ensemble des commandes a changé depuis le dernier
-    # boot (gain quota Discord + boot plus rapide). FORCE_SYNC=1 force le sync.
-    # FAIL-SAFE : tout doute/erreur de hash → on SYNC (comportement préservé).
-    #  Vrai dès qu'un sync global a réellement eu lieu : c'est LUI qui décide
-    #  si la propagation par guilde (instantanée) vaut le coup juste après.
+    # ═══════════════ SYNCHRONISATION DES COMMANDES — PAR GUILDE ═══════════════
+    #
+    # ⚠️ CORRECTION DU 06/09/2026 — TOUTES LES COMMANDES SORTAIENT EN DOUBLE.
+    # L'ancien code faisait les DEUX enregistrements : un `tree.sync()` GLOBAL,
+    # puis un `copy_global_to()` + `sync(guild=…)` par serveur. Le commentaire
+    # qui était ici affirmait « Discord fait primer la copie de guilde sur la
+    # globale du même nom : aucun doublon à l'affichage ». C'EST FAUX, et le
+    # propriétaire l'a prouvé par capture : `/off on`, `/off off`, `/off list`,
+    # `/bouclier off`… chaque entrée deux fois. Les commandes GLOBALES et les
+    # commandes de GUILDE sont deux registres distincts ; le client affiche les
+    # deux.
+    #
+    # On garde ce que le bloc par guilde apportait — la propagation INSTANTANÉE
+    # (le global met jusqu'à une heure, signalé le 16/08) — et on supprime le
+    # registre global chez Discord.
+    #
+    # ⚠️ L'ORDRE EST VITAL. Les guildes d'abord, la purge du global ENSUITE, et
+    # JAMAIS si aucune guilde n'a reçu les commandes : l'inverse laisserait le
+    # serveur sans aucune commande, un bot muet pour un défaut d'affichage.
     _sync_effectue = False
     try:
         _force_sync = os.getenv("FORCE_SYNC", "0").strip() == "1"
         _new_hash = None
         _old_hash = None
         _hash_file = None
-        # Calcul du hash : défensif. Si ça échoue, _new_hash reste None → sync.
         try:
             _new_hash = _compute_tree_hash(bot.tree)
             _hash_file = _sync_hash_file_path()
@@ -23160,17 +23203,50 @@ async def on_ready():
             print(f"⚠️ sync hash indisponible (on sync par sécurité): {_hex}")
             _new_hash = None
 
-        # SKIP uniquement si : pas de FORCE, hash calculé, et identique au précédent.
-        if (not _force_sync) and _new_hash is not None and _new_hash == _old_hash:
-            print("✅ Commandes inchangées (hash identique) — sync global SKIPPÉ")
+        #  Reste-t-il des commandes GLOBALES chez Discord ? Une seule requête,
+        #  et c'est elle qui rend la purge idempotente : une fois le ménage
+        #  fait, les démarrages suivants ne repurgent rien.
+        _globales = []
+        try:
+            _globales = await bot.tree.fetch_commands()
+        except Exception as _fex:
+            print(f"⚠️ lecture des commandes globales impossible: {_fex}")
+        _doit_purger = bool(_globales)
+        if _doit_purger:
+            print(f"🧹 {len(_globales)} commande(s) GLOBALE(S) encore chez "
+                  f"Discord — c'est la source des doublons, purge après la "
+                  f"pose par guilde.")
+
+        #  ⚠️ LE SAUT PAR HASH NE S'APPLIQUE PAS S'IL RESTE DES GLOBALES.
+        #  Sinon le ménage n'aurait jamais lieu : l'arbre n'a pas changé, donc
+        #  le hash non plus, donc on sauterait — et les doublons resteraient
+        #  pour toujours.
+        if ((not _force_sync) and _new_hash is not None
+                and _new_hash == _old_hash and not _doit_purger):
+            print("✅ Commandes inchangées (hash identique) — sync SKIPPÉ")
         else:
-            synced = await bot.tree.sync()
-            _sync_effectue = True
-            print(f"✅ {len(synced)} commandes synchronisées:")
-            for cmd in synced:
-                print(f"   - /{cmd.name}")
-            # MAJ du hash APRÈS un sync réussi (best-effort, non bloquant).
-            if _new_hash is not None:
+            _ok, _n = 0, 0
+            for _g in list(bot.guilds):
+                try:
+                    bot.tree.copy_global_to(guild=_g)
+                    _s = await bot.tree.sync(guild=_g)
+                    _n = len(_s)
+                    _ok += 1
+                except Exception as _gex:
+                    print(f"⚠️ sync guilde {_g.id} échouée (non bloquant): {_gex}")
+            _sync_effectue = _ok > 0
+            print(f"✅ {_n} commandes synchronisées sur {_ok}/{len(bot.guilds)} "
+                  f"serveur(s) — propagation immédiate")
+
+            if _doit_purger and _ok > 0:
+                await _purger_commandes_globales()
+            elif _doit_purger:
+                #  Aucune guilde n'a reçu les commandes : purger maintenant
+                #  couperait tout. On préfère un doublon à un bot muet.
+                print("⚠️ globales NON purgées : aucune guilde n'a reçu les "
+                      "commandes. Les doublons restent — c'est le moindre mal.")
+
+            if _new_hash is not None and _ok > 0:
                 try:
                     if _hash_file is None:
                         _hash_file = _sync_hash_file_path()
@@ -23178,44 +23254,7 @@ async def on_ready():
                 except Exception as _wex:
                     print(f"⚠️ écriture hash sync échouée (non bloquant): {_wex}")
     except Exception as ex:
-        # Dernier filet : on retombe sur le comportement historique = sync.
-        print(f"❌ Erreur sync global: {ex}")
-        try:
-            synced = await bot.tree.sync()
-            _sync_effectue = True
-            print(f"✅ {len(synced)} commandes synchronisées (fallback):")
-            for cmd in synced:
-                print(f"   - /{cmd.name}")
-        except Exception as ex2:
-            print(f"❌ Erreur sync global (fallback): {ex2}")
-
-    # ═══════════════ SYNC PAR GUILDE — PROPAGATION IMMÉDIATE ═══════════════
-    #
-    #  ⚠️ POURQUOI CE BLOC EXISTE. Le sync ci-dessus est GLOBAL : Discord met
-    #  jusqu'à UNE HEURE à propager une commande globale. Le propriétaire a
-    #  signalé le 16/08 ne pas voir `/rellseas` en tapant `/` — la commande
-    #  était pourtant bien dans l'arbre (vérifié à l'exécution). C'était la
-    #  propagation, pas le code.
-    #
-    #  Un sync PAR GUILDE est instantané. Discord fait primer la copie de
-    #  guilde sur la globale du même nom : aucun doublon à l'affichage.
-    #
-    #  Fait uniquement quand le hash a changé — c'est-à-dire quand une commande
-    #  a réellement bougé — pour ne pas brûler le quota à chaque redémarrage.
-    #  Fail-open par guilde : une guilde qui refuse n'empêche pas les autres.
-    try:
-        if _sync_effectue:
-            _ok = 0
-            for _g in list(bot.guilds):
-                try:
-                    bot.tree.copy_global_to(guild=_g)
-                    await bot.tree.sync(guild=_g)
-                    _ok += 1
-                except Exception as _gex:
-                    print(f"⚠️ sync guilde {_g.id} échouée (non bloquant): {_gex}")
-            print(f"✅ Commandes propagées immédiatement sur {_ok}/{len(bot.guilds)} serveur(s)")
-    except Exception as _sgex:
-        print(f"⚠️ sync par guilde indisponible (non bloquant): {_sgex}")
+        print(f"❌ Erreur sync des commandes: {ex}")
 
     # ═══════════════ INITIALISER LE TRACKING VOCAL ═══════════════
     # Tracker tous les membres déjà en vocal au démarrage
@@ -23978,6 +24017,28 @@ async def on_ready():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @bot.event
+async def on_guild_join(guild):
+    """Pose les commandes sur un serveur qui vient d'inviter le bot.
+
+    ⚠️ INDISPENSABLE DEPUIS LA PURGE DU REGISTRE GLOBAL (06/09/2026). Les
+    commandes ne vivent plus que dans les registres de guilde : sans ce
+    raccord, un nouveau serveur n'aurait AUCUNE commande jusqu'au prochain
+    redémarrage. Le symptôme — « le bot ne répond à rien » — ne ressemble pas
+    à sa cause, et se chercherait longtemps.
+
+    Fail-safe : une erreur ici ne doit pas empêcher l'arrivée sur le serveur.
+    """
+    try:
+        bot.tree.copy_global_to(guild=guild)
+        s = await bot.tree.sync(guild=guild)
+        print(f"✅ {len(s)} commandes posées sur le nouveau serveur "
+              f"{guild.name} ({guild.id})")
+    except Exception as ex:
+        print(f"⚠️ sync à l'arrivée sur {getattr(guild, 'id', '?')} "
+              f"échouée: {ex}")
+
+
+@bot.event
 async def on_thread_create(thread):
     """Ouvrir un fil est un geste d'animation : celui qui le fait est présent."""
     try:
@@ -24106,9 +24167,18 @@ async def sync_cmd(i: discord.Interaction):
 
     await i.response.defer(ephemeral=True)
     try:
-        synced = await bot.tree.sync()
+        #  ⚠️ SYNC SUR CETTE GUILDE, PAS EN GLOBAL. Un `tree.sync()` global
+        #  RECRÉERAIT le registre qu'on vient de purger — et les doublons
+        #  reviendraient au premier clic sur ce bouton, sans que personne ne
+        #  fasse le lien avec cette commande.
+        bot.tree.copy_global_to(guild=i.guild)
+        synced = await bot.tree.sync(guild=i.guild)
         cmd_list = "\n".join([f"• `/{c.name}`" for c in synced])
-        await i.followup.send(f"✅ **{len(synced)} commandes synchronisées!**\n\n{cmd_list}", ephemeral=True)
+        await i.followup.send(
+            f"✅ **{len(synced)} commandes synchronisées sur ce serveur !**\n"
+            f"-# Propagation immédiate. Si vous voyez encore des doublons, "
+            f"quittez et rouvrez Discord (cache client).\n\n{cmd_list}"[:1900],
+            ephemeral=True)
     except Exception as ex:
         await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
 
