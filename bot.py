@@ -4151,70 +4151,292 @@ off_group = app_commands.Group(
 )
 
 
+#  Les tâches de verrouillage en cours. ⚠️ SANS CETTE RÉFÉRENCE, le ramasse-
+#  miettes peut collecter une tâche `create_task` avant sa fin : le verrouillage
+#  des salons s'arrêterait au milieu, sans erreur, sans trace.
+_VERROUS_RADIATION: set = set()
+
+
+async def _verrouiller_salons_radie(guild, role, membre_id: int):
+    """Pose le refus total sur tous les salons. LENT, donc EN TÂCHE DE FOND.
+
+    ⚠️ CE N'EST PAS CE QUI ARRÊTE L'ATTAQUE — le timeout l'a déjà fait. Ceci
+    ne fait que masquer le serveur à la personne. Le mettre sur le chemin
+    critique coûtait 0,3 s par salon avant la moindre neutralisation.
+    """
+    poses, sautes, echecs = 0, 0, 0
+    try:
+        ow = _radie_overwrite()
+        for ch in list(guild.channels):
+            try:
+                cur = ch.overwrites_for(role)
+                if (cur.view_channel is False and cur.send_messages is False
+                        and cur.connect is False):
+                    sautes += 1
+                    continue
+                await ch.set_permissions(role, overwrite=ow,
+                                         reason="Radiation totale (/off)")
+                poses += 1
+                await asyncio.sleep(0.3)
+            except Exception:
+                echecs += 1
+        print(f"[off] verrouillage {guild.id} pour {membre_id} : "
+              f"{poses} salon(s) posé(s) · {sautes} déjà en place · "
+              f"{echecs} échec(s)")
+    except Exception as ex:
+        print(f"[off verrouillage] {ex}")
+
+
+async def _radier_membre(guild, membre, auteur, raison: str) -> dict:
+    """LE corps de la radiation. Rend le compte rendu de CE QUI A MARCHÉ.
+
+    ⚠️ UN SEUL CORPS POUR TOUTES LES PORTES : la commande `/off on` et le menu
+    contextuel « Radier » y arrivent tous les deux. Deux copies divergeraient,
+    et c'est la sauvegarde des rôles qui manquerait à l'une — donc des rôles
+    perdus pour toujours.
+
+    ⚠️ ON NE S'ARRÊTE PAS AU PREMIER ÉCHEC. Si le timeout passe mais que le
+    retrait des rôles échoue, la personne est déjà muette : abandonner là
+    serait pire. On fait tout ce qu'on peut, et on DIT ce qui a manqué.
+    """
+    res = {"timeout": False, "roles_retires": 0, "role_pose": False,
+           "sauvegarde": False, "verrou": False, "manques": []}
+    me = guild.me
+
+    # ── 1. LE COUP D'ARRÊT, EN PREMIER — un appel, immédiat ──────────────
+    #  Coupe l'écriture, les réactions, le vocal et les commandes dans TOUT
+    #  le serveur. C'est la seule action qui compte dans les deux premières
+    #  secondes d'une attaque.
+    try:
+        await membre.timeout(timedelta(days=28),
+                             reason=f"/off radiation — {raison}"[:400])
+        res["timeout"] = True
+    except Exception as ex:
+        res["manques"].append(f"réduction au silence impossible ({ex})")
+
+    # ── 2. Sauvegarder les rôles AVANT de les retirer ────────────────────
+    #  ⚠️ L'ORDRE EST NON NÉGOCIABLE. Retirer d'abord et écrire ensuite fait
+    #  perdre la liste si l'écriture échoue — et des rôles perdus ne se
+    #  devinent pas. `/off off` deviendrait un mensonge.
+    #  ⚠️ `managed` EXCLU : un rôle d'intégration (boost, bot, abonnement) ne
+    #  PEUT pas être retiré — l'API refuse TOUT l'appel si on le demande. Le
+    #  compter ici gonflerait le compte rendu, et ferait promettre à `/off off`
+    #  de rendre des rôles qu'on n'a jamais pris.
+    removable = [r for r in membre.roles
+                 if not r.is_default() and not r.managed and me.top_role > r]
+    saved_ids = [r.id for r in removable]
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS radiated_members (guild_id INTEGER, "
+                "user_id INTEGER, saved_roles TEXT, reason TEXT, "
+                "by_user_id INTEGER, radiated_at DATETIME DEFAULT "
+                "CURRENT_TIMESTAMP, PRIMARY KEY (guild_id, user_id))")
+            await db.execute(
+                "INSERT INTO radiated_members(guild_id, user_id, saved_roles, "
+                "reason, by_user_id) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "saved_roles=excluded.saved_roles, reason=excluded.reason, "
+                "by_user_id=excluded.by_user_id",
+                (guild.id, membre.id, json.dumps(saved_ids),
+                 str(raison or "")[:300], auteur.id))
+            await db.commit()
+        res["sauvegarde"] = True
+    except Exception as ex:
+        res["manques"].append(f"sauvegarde des rôles échouée ({ex})")
+
+    # ── 3. Le rôle « Radié » et le retrait, en UN SEUL appel ─────────────
+    #  ⚠️ `edit(roles=…)` PLUTÔT QUE remove_roles + add_roles : un seul appel
+    #  au lieu de deux, une seule entrée d'audit, et surtout AUCUN instant où
+    #  la personne se retrouve sans rôle mais sans étiquette non plus.
+    role = None
+    try:
+        role = discord.utils.get(guild.roles, name=_RADIE_ROLE_NAME)
+        if role is None:
+            role = await guild.create_role(
+                name=_RADIE_ROLE_NAME, color=discord.Color.dark_red(),
+                reason="Radiation totale (/off)")
+    except Exception as ex:
+        res["manques"].append(f"rôle « Radié » indisponible ({ex})")
+
+    try:
+        #  On garde @everyone, les rôles d'intégration et tout ce qu'on ne
+        #  PEUT pas retirer (au-dessus du bot) ; on ajoute l'étiquette. Tout
+        #  le reste part.
+        garder = [r for r in membre.roles
+                  if r.is_default() or r.managed or not (me.top_role > r)]
+        if role is not None and role not in garder:
+            garder.append(role)
+        await membre.edit(roles=garder,
+                          reason=f"/off radiation — {raison}"[:400])
+        res["roles_retires"] = len(removable)
+        res["role_pose"] = role is not None
+    except Exception as ex:
+        res["manques"].append(f"retrait des rôles échoué ({ex})")
+
+    # ── 4. Le verrouillage des salons, EN FOND ───────────────────────────
+    if role is not None:
+        try:
+            t = asyncio.create_task(
+                _verrouiller_salons_radie(guild, role, membre.id))
+            _VERROUS_RADIATION.add(t)
+            t.add_done_callback(_VERROUS_RADIATION.discard)
+            res["verrou"] = True
+        except Exception as ex:
+            res["manques"].append(f"verrouillage des salons non lancé ({ex})")
+
+    return res
+
+
+def _refus_radiation(guild, membre, auteur) -> str | None:
+    """Le motif de refus, ou None si on peut y aller. AUCUN appel réseau.
+
+    ⚠️ TOUT SE DÉCIDE AVANT LE MOINDRE APPEL : en pleine attaque, un refus
+    doit revenir instantanément et DIRE quoi faire, pas échouer à moitié.
+    """
+    me = guild.me
+    if membre.bot:
+        return "❌ Cible interdite : c'est un bot."
+    if membre.id == guild.owner_id:
+        return "❌ Cible interdite : propriétaire du serveur."
+    if owner_ids_module.is_super_owner(membre.id):
+        return "❌ Cible interdite : super-owner."
+    if membre.id == auteur.id:
+        return "❌ Vous ne pouvez pas vous radier vous-même."
+    if me is None:
+        return "❌ Je ne me trouve pas sur ce serveur."
+    if not me.guild_permissions.moderate_members:
+        return ("❌ Il me manque **Modérer les membres** — c'est la permission "
+                "qui coupe la parole immédiatement. Ajoutez-la à mon rôle.")
+    if not me.guild_permissions.manage_roles:
+        return ("❌ Il me manque **Gérer les rôles**. Ajoutez-la à mon rôle.")
+    if me.top_role <= membre.top_role:
+        return ("❌ Cette personne a un rôle **au-dessus du mien**. Montez mon "
+                "rôle plus haut dans la liste, sinon je ne peux rien lui "
+                "retirer.")
+    return None
+
+
+def _compte_rendu_radiation(membre, res: dict) -> str:
+    """Ce qui a été fait, ce qui a manqué. Jamais « c'est fait » en bloc.
+
+    ⚠️ UNE RADIATION PARTIELLE ANNONCÉE COMME TOTALE EST PIRE QU'UN ÉCHEC :
+    on croit le serveur protégé et on passe à autre chose.
+    """
+    if res["timeout"]:
+        tete = (f"🚫 **{membre.mention} est neutralisé** — plus un mot, plus "
+                f"une réaction, plus de vocal, plus de commandes.")
+    else:
+        tete = (f"⚠️ **{membre.mention} n'a PAS pu être réduit au silence.** "
+                f"Vérifiez la permission **Modérer les membres**.")
+    lignes = [tete]
+    detail = []
+    if res["roles_retires"]:
+        detail.append(f"`{res['roles_retires']}` rôle(s) retiré(s)")
+    if res["role_pose"]:
+        detail.append("étiquette « Radié » posée")
+    if res["sauvegarde"]:
+        detail.append("rôles sauvegardés")
+    if detail:
+        lignes.append("-# " + " · ".join(detail))
+    if res["verrou"]:
+        lignes.append("-# 🔒 Verrouillage des salons en cours (quelques "
+                      "secondes) — la personne ne peut déjà plus rien faire.")
+    if res["manques"]:
+        lignes.append("⚠️ **Incomplet :** " + " · ".join(res["manques"])[:600])
+    if not res["sauvegarde"]:
+        lignes.append("⚠️ **Les rôles n'ont PAS été sauvegardés** : `/off off` "
+                      "ne pourra pas les rendre. Notez-les avant de fermer.")
+    lignes.append("-# Annuler : `/off off`")
+    return "\n".join(lignes)
+
+
+async def _journal_radiation(guild, membre, auteur, raison, res):
+    """Logs forts + journal staff. Ne lève jamais : un log raté ne doit pas
+    faire échouer une radiation réussie."""
+    try:
+        await ulogger2026.log_event(
+            bot, guild, ulogger2026.EventType.SEC_ESCALATION,
+            description=(f"🚫 **RADIATION TOTALE** — {membre.mention} "
+                         f"`{membre.id}`\nPar : {auteur.mention}\n"
+                         f"**Raison :** {str(raison or '')[:500]}\n"
+                         f"_Silence immédiat, "
+                         f"{res.get('roles_retires', 0)} rôle(s) retiré(s), "
+                         f"salons verrouillés. Réintégration : `/off off`._"),
+            user=membre, moderator=auteur)
+    except Exception:
+        pass
+    try:
+        await log_staff_action(guild.id, auteur.id, membre.id, "radiation",
+                               detail=str(raison or "")[:200], surface="slash")
+    except Exception:
+        pass
+
+
 @off_group.command(name="on", description="🚫 Radier TOTALEMENT un membre (retire tout, bloque partout)")
-@app_commands.describe(membre="Le membre à radier", raison="Raison (affichée dans les logs forts)")
-async def off_on_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
+@app_commands.describe(membre="Le membre à radier",
+                       raison="Facultatif — laissez vide en cas d'urgence")
+async def off_on_cmd(i: discord.Interaction, membre: discord.Member,
+                     raison: str = "Attaque / urgence"):
+    """⚠️ `raison` EST FACULTATIVE, ET C'EST VOLONTAIRE. Elle était obligatoire :
+    en pleine attaque, il fallait taper une phrase avant de pouvoir valider.
+    Le champ reste là pour qui veut documenter ; il ne bloque plus personne."""
     try:
         await i.response.defer(ephemeral=True, thinking=True)
     except Exception:
         pass
-    guild, me = i.guild, i.guild.me
+    guild = i.guild
     try:
-        if membre.bot or membre.id == guild.owner_id or owner_ids_module.is_super_owner(membre.id):
-            return await i.followup.send("❌ Cible interdite (bot / propriétaire / super-owner).", ephemeral=True)
-        if not (me and me.guild_permissions.manage_roles):
-            return await i.followup.send("❌ Il me manque la permission **Gérer les rôles**.", ephemeral=True)
-        if me.top_role <= membre.top_role:
-            return await i.followup.send("❌ Le membre a un rôle au-dessus du mien (hiérarchie) — place mon rôle plus haut.", ephemeral=True)
-        role = await _ensure_radie_role(guild)
-        if role is None:
-            return await i.followup.send("❌ Impossible de créer/trouver le rôle de radiation.", ephemeral=True)
-        removable = [r for r in membre.roles if not r.is_default() and r != role and me.top_role > r]
-        saved_ids = [r.id for r in removable]
-        try:
-            async with get_db() as db:
-                await db.execute(
-                    "CREATE TABLE IF NOT EXISTS radiated_members (guild_id INTEGER, user_id INTEGER, "
-                    "saved_roles TEXT, reason TEXT, by_user_id INTEGER, radiated_at DATETIME DEFAULT "
-                    "CURRENT_TIMESTAMP, PRIMARY KEY (guild_id, user_id))")
-                await db.execute(
-                    "INSERT INTO radiated_members(guild_id, user_id, saved_roles, reason, by_user_id) "
-                    "VALUES(?,?,?,?,?) ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                    "saved_roles=excluded.saved_roles, reason=excluded.reason, by_user_id=excluded.by_user_id",
-                    (guild.id, membre.id, json.dumps(saved_ids), str(raison or "")[:300], i.user.id))
-                await db.commit()
-        except Exception as _ex:
-            print(f"[off_on save] {_ex}")
-        try:
-            if removable:
-                await membre.remove_roles(*removable, reason=f"/off radiation — {raison}"[:400])
-            await membre.add_roles(role, reason=f"/off radiation — {raison}"[:400])
-        except Exception as _ex:
-            return await i.followup.send(f"❌ Échec de l'application des rôles : `{_ex}`", ephemeral=True)
-        try:
-            await membre.timeout(timedelta(days=28), reason=f"/off radiation — {raison}"[:400])  # filet
-        except Exception:
-            pass
-        try:
-            await ulogger2026.log_event(
-                bot, guild, ulogger2026.EventType.SEC_ESCALATION,
-                description=(f"🚫 **RADIATION TOTALE** — {membre.mention} `{membre.id}`\n"
-                             f"Par : {i.user.mention}\n**Raison :** {str(raison or '')[:500]}\n"
-                             f"_Tous ses rôles retirés, bloqué partout (vue + écriture + vocal). "
-                             f"Réintégration : `/off off`._"),
-                user=membre, moderator=i.user)
-        except Exception:
-            pass
-        try:
-            await log_staff_action(guild.id, i.user.id, membre.id, "radiation",
-                                   detail=str(raison or "")[:200], surface="slash")
-        except Exception:
-            pass
-        await i.followup.send(
-            f"🚫 **{membre.mention} est radié** — plus aucun rôle, bloqué partout. `/off off` pour annuler.",
-            ephemeral=True)
+        refus = _refus_radiation(guild, membre, i.user)
+        if refus:
+            return await i.followup.send(refus, ephemeral=True)
+        res = await _radier_membre(guild, membre, i.user, raison)
+        await i.followup.send(_compte_rendu_radiation(membre, res),
+                              ephemeral=True)
+        await _journal_radiation(guild, membre, i.user, raison, res)
     except Exception as ex:
         _logerr("off_on_cmd", ex, guild_id=getattr(guild, "id", 0))
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.context_menu(name="🚫 Radier (off)")
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only()
+async def radier_menu_contextuel(i: discord.Interaction, membre: discord.Member):
+    """CLIC DROIT SUR LA PERSONNE → Applications → « 🚫 Radier ». Rien à taper.
+
+    ⚠️ C'EST LE CHEMIN PRÉVU POUR L'URGENCE, et il n'existait pas. Passer par
+    `/off on` demande d'ouvrir la barre, taper, attendre l'autocomplétion et
+    choisir dans une liste — plusieurs secondes sous stress, et un risque réel
+    de désigner un homonyme. Ici la cible est déjà celle du message sur lequel
+    on a cliqué : impossible de se tromper de personne.
+
+    Même corps, mêmes garde-fous, même compte rendu que `/off on` : c'est une
+    PORTE, pas un second système. Une copie aurait fini par diverger, et c'est
+    la sauvegarde des rôles qui aurait manqué à l'une des deux.
+
+    Les autorisations se règlent comme pour la commande : Paramètres du
+    serveur → Intégrations → le bot → « 🚫 Radier (off) ».
+    """
+    try:
+        await i.response.defer(ephemeral=True, thinking=True)
+    except Exception:
+        pass
+    guild = i.guild
+    try:
+        refus = _refus_radiation(guild, membre, i.user)
+        if refus:
+            return await i.followup.send(refus, ephemeral=True)
+        raison = "Radiation rapide (clic droit) — urgence"
+        res = await _radier_membre(guild, membre, i.user, raison)
+        await i.followup.send(_compte_rendu_radiation(membre, res),
+                              ephemeral=True)
+        await _journal_radiation(guild, membre, i.user, raison, res)
+    except Exception as ex:
+        _logerr("radier_menu_contextuel", ex, guild_id=getattr(guild, "id", 0))
         try:
             await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
