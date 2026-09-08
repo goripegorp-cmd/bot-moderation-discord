@@ -201,6 +201,7 @@ import roblox_pings as roblox_pings_module
 import roblox_panneau as roblox_ui
 import roblox_commandes as roblox_cmds
 import roblox_marche as roblox_marche_module
+import protection_mineurs as pmineurs
 import rellseas_panneau as rellseas_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
 import delegations as delegations2026
@@ -3416,6 +3417,20 @@ async def cfg(gid):
     data = await db_get(gid)
     defaults = {
         'anti_link': 0, 'anti_invite': 0, 'anti_image': 0, 'anti_phishing': 1, 'anti_scam': 1,
+        #  ⚠️ ALLUMÉ PAR DÉFAUT, contrairement à la plupart des protections.
+        #  C'est une communauté Roblox : le public est en grande partie mineur,
+        #  et une protection de l'enfance qu'il faut penser à activer ne
+        #  protège personne le jour où elle aurait servi.
+        'anti_grooming': 1,
+        #  Palier FORT (sollicitation sexuelle, site adulte, rencontre tarifée,
+        #  consigne de silence) : aucun usage innocent → on coupe tout de suite.
+        'grooming_action': 'mute',
+        'grooming_mute_duration': 1440,   # 24 h — le temps que le staff lise
+        #  Palier COMBINÉ : on supprime et on alerte, mais on NE SANCTIONNE PAS.
+        #  Accuser à tort quelqu'un d'approche prédatrice est une accusation
+        #  grave et difficile à défaire ; sur un faisceau d'indices, c'est un
+        #  humain qui doit trancher.
+        'grooming_action_combine': 'alerte',
         'anti_scam_image': 1,  # owner 2026-06-18 : motif « scam en image » (comptes piratés) — ON par défaut
         'anti_scam_ocr': 1,  # owner 2026-06-27 : OCR du texte DANS l'image (faux gains MrBeast/crypto) → BAN — ON
         'grooming_patrol': 1,  # owner 2026-06-27 : protection mineurs — détection d'approche prédatrice (grooming) — ON
@@ -28524,6 +28539,62 @@ async def on_message(msg):
                     dur = c.get('scam_mute_duration', 60)
                     await sanction(msg.author, c.get('scam_action', 'mute'), dur,
                                    "Scam image (compte probablement piraté)", msg.guild)
+                return
+
+        # ═══════════════ APPROCHE PRÉDATRICE (protection des mineurs) ═══════
+        #  ⚠️ PLACÉ AVANT LE RETOUR SUR `is_ticket` : un ticket est un salon
+        #  privé entre un membre et le staff — c'est exactement le genre
+        #  d'endroit où une approche se poursuit à l'abri des regards. Le
+        #  staff, lui, est exempté : il doit pouvoir CITER un message pour
+        #  instruire un dossier sans se faire sanctionner.
+        #
+        #  ⚠️ DEUX PALIERS, DEUX TRAITEMENTS. Le palier FORT (sollicitation
+        #  sexuelle, site adulte, rencontre tarifée, consigne de silence) n'a
+        #  aucun usage innocent : on coupe. Le palier COMBINÉ est un FAISCEAU
+        #  d'indices banals pris isolément : on supprime et on alerte, mais on
+        #  ne sanctionne pas — accuser à tort quelqu'un d'approche prédatrice
+        #  est une accusation grave et difficile à défaire.
+        if c.get('anti_grooming', 1) and not user_immune:
+            try:
+                _pm = pmineurs.analyser(msg.content or "")
+            except Exception:
+                _pm = {"touche": False}
+            if _pm.get("touche"):
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                try:
+                    await send_log(
+                        msg.guild, 'anti_scam', msg.author, msg,
+                        ("🚨 Approche prédatrice — signal FORT"
+                         if _pm["gravite"] == "forte"
+                         else "⚠️ Approche prédatrice — signaux combinés"),
+                        pmineurs.resume(_pm))
+                except Exception:
+                    pass
+                try:
+                    await log_staff_action(
+                        msg.guild.id, 0, msg.author.id, "grooming",
+                        detail=_pm.get("motif", "")[:200], surface="auto")
+                except Exception:
+                    pass
+                if _pm["gravite"] == "forte":
+                    _act = c.get('grooming_action', 'mute')
+                    if _act and _act != 'alerte':
+                        await sanction(
+                            msg.author, _act,
+                            c.get('grooming_mute_duration', 1440),
+                            f"Approche prédatrice — {_pm.get('motif', '')}"[:400],
+                            msg.guild)
+                else:
+                    _act = c.get('grooming_action_combine', 'alerte')
+                    if _act and _act != 'alerte':
+                        await sanction(
+                            msg.author, _act,
+                            c.get('grooming_mute_duration', 1440),
+                            f"Approche prédatrice — {_pm.get('motif', '')}"[:400],
+                            msg.guild)
                 return
 
         # Si utilisateur immunisé OU dans un ticket = ignorer les autres protections
