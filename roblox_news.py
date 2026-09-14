@@ -687,6 +687,38 @@ def _normaliser(data: dict, domaine: str) -> list[dict]:
     return out
 
 
+async def identifiants_connus_actus() -> set:
+    """Tous les `topic_id` déjà publiés OU déjà en file, tous serveurs.
+
+    ⚠️ L'AMORCE DE L'ÉCLAIREUR D'ACTUALITÉS. Il compare chaque page de forum à
+    cet ensemble : seul un billet qu'AUCUNE table ne connaît déclenche la mise
+    en file. Sans amorce, chaque redémarrage ferait passer toute la page
+    (vingt sujets) par la déduplication et l'absorption — sans dégât, mais
+    pour rien.
+
+    Les identifiants sont rendus en TEXTE : `roblox_news_file` les stocke en
+    TEXT (les sources hors forum ont des slugs), `roblox_news_publies` en
+    INTEGER. Un ensemble mixte ne comparerait rien.
+    """
+    vus = set()
+    if _get_db is None:
+        return vus
+    try:
+        async with _get_db() as db:
+            for sql in ("SELECT DISTINCT topic_id FROM roblox_news_publies",
+                        "SELECT DISTINCT topic_id FROM roblox_news_file"):
+                try:
+                    async with db.execute(sql) as cur:
+                        async for row in cur:
+                            if row[0] is not None:
+                                vus.add(str(row[0]))
+                except Exception as ex:
+                    _log(f"[roblox_news identifiants_connus_actus] {ex}")
+    except Exception as ex:
+        _log(f"[roblox_news identifiants_connus_actus] {ex}")
+    return vus
+
+
 async def deja_publie(guild_id: int, topic_id: int) -> bool:
     try:
         async with _get_db() as db:

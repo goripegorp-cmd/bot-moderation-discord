@@ -196,17 +196,17 @@ def _corps(src: str, nom: str) -> str:
 
 
 def test_la_boucle_deduplique_avant_de_tronquer():
-    corps = _corps(SRC_BOT, "veille_roblox_task")
-    bloc = corps.split("for src in roblox_news_module.SOURCES")[-1]
-    i_dedup = bloc.index("deja_publie")
-    i_tronque = bloc.index("_lot_b = ")
-    assert i_dedup < i_tronque, (
+    """Dédupliquer AVANT de tronquer, sinon le rang 6 est affamé. Les deux
+    bornes vivent dans `_enfiler_billets` depuis le 14/09."""
+    corps = _corps(SRC_BOT, "_enfiler_billets")
+    assert corps.index("deja_publie") < corps.index("_lot_b = "), (
         "la déduplication doit précéder la troncature, sinon le rang 6 est affamé")
+    assert "_enfiler_billets(" in _corps(SRC_BOT, "veille_roblox_task")
 
 
 def test_la_boucle_absorbe_les_trop_vieux():
-    corps = _corps(SRC_BOT, "veille_roblox_task")
-    assert "absorber_vieux" in corps
+    assert "absorber_vieux" in _corps(SRC_BOT, "_enfiler_billets")
+    assert "_enfiler_billets(" in _corps(SRC_BOT, "veille_roblox_task")
 
 
 def test_le_bouton_relever_maintenant_applique_le_meme_ordre():

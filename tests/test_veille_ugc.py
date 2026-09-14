@@ -253,7 +253,7 @@ def test_l_ugc_ne_pollue_JAMAIS_la_base_des_articles_roblox():
             bloc = lignes[n.lineno - 1:n.end_lineno]
             i_ugc = next(k for k, l in enumerate(bloc) if "relever_ugc(" in l)
             i_fin = next(k for k, l in enumerate(bloc)
-                         if k > i_ugc and "a_envoyer(" in l)
+                         if k > i_ugc and "_publier_file_accessoires(" in l)
             suite = chr(10).join(bloc[i_ugc:i_fin])
             assert "comparer_et_enregistrer" not in suite, (
                 "l'UGC passe par la détection des articles Roblox : la ligne "

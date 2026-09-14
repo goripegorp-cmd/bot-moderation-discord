@@ -45,6 +45,20 @@ SRC_BOT = (RACINE / "bot.py").read_text(encoding="utf-8")
 GUILDE = 555
 
 
+def _fn(nom: str) -> str:
+    """La source d'une fonction de bot.py — boucle OU fonction partagée.
+
+    Depuis le 14/09/2026, l'envoi vit dans trois fonctions extraites de la
+    boucle (`_publier_file_accessoires`, `_enfiler_billets`,
+    `_publier_file_actualites`), partagées avec l'éclaireur. Les propriétés
+    d'ORDRE se vérifient dans la fonction qui porte les deux bornes.
+    """
+    for n in ast.walk(ast.parse(SRC_BOT)):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == nom:
+            return ast.unparse(n)
+    raise AssertionError(f"{nom} introuvable dans bot.py")
+
+
 def _boucle() -> str:
     for n in ast.walk(ast.parse(SRC_BOT)):
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "veille_roblox_task":
@@ -196,30 +210,44 @@ async def test_la_purge_efface_ce_qui_est_parti(banc):
 
 def test_les_actualites_ont_leur_propre_budget():
     """⚠️ DOUZE FICHES D'ACCESSOIRES = ZÉRO ACTUALITÉ, passage après passage.
-    L'envoi doit tirer sur le plafond des actualités, pas sur le budget commun."""
-    corps = _boucle()
-    assert "roblox_news_module.actus_a_envoyer(" in corps, (
-        "la boucle n'envoie pas depuis la file d'actualités")
-    bloc = corps.split("actus_a_envoyer(")[1].split("purger_file_actu")[0]
-    assert "_budget" not in bloc, (
+    L'envoi doit tirer sur le plafond des actualités, pas sur le budget commun.
+    Depuis le 14/09 l'envoi vit dans `_publier_file_actualites` (partagée avec
+    l'éclaireur) : c'est ELLE qui ne doit connaître aucun budget d'accessoires."""
+    envoi = _fn("_publier_file_actualites")
+    assert "roblox_news_module.actus_a_envoyer(" in envoi, (
+        "l'envoi des actualités ne tire plus depuis leur file")
+    assert "budget" not in envoi, (
         "l'envoi des actualités consomme encore le budget des accessoires")
-    assert "MAX_BILLETS_PAR_PASSAGE" in corps
+    assert "MAX_BILLETS_PAR_PASSAGE" in envoi
+    assert "_publier_file_actualites(" in _boucle(), (
+        "la boucle n'appelle plus l'envoi des actualités")
 
 
 def test_l_envoi_ne_depend_plus_qu_une_source_reponde():
-    """⚠️ L'envoi vivait DANS la boucle des sources : sans réponse d'une source,
-    rien ne se vidait — même ce qui attendait depuis des jours."""
-    corps = _boucle()
-    i_sources = corps.index("for src in roblox_news_module.SOURCES")
-    i_envoi = corps.index("roblox_news_module.actus_a_envoyer(")
-    bloc_sources = corps[i_sources:i_envoi]
-    assert "actus_a_envoyer" not in bloc_sources
+    """L'envoi vivait DANS la boucle des sources : une source en panne, et
+    rien ne se vidait — même ce qui attendait depuis des jours. L'appel
+    d'envoi doit être HORS de cette boucle. On le vérifie sur l'ARBRE : la
+    boucle `for src in …` ne doit contenir aucun appel d'envoi."""
+    boucle = next(n for n in ast.walk(ast.parse(SRC_BOT))
+                  if isinstance(n, ast.AsyncFunctionDef)
+                  and n.name == "veille_roblox_task")
+    fors = [f for f in ast.walk(boucle)
+            if isinstance(f, ast.For) and getattr(f.target, "id", "") == "src"]
+    assert fors, "boucle des sources introuvable"
+    for f in fors:
+        assert "_publier_file_actualites(" not in ast.unparse(f), (
+            "l'envoi vit dans la boucle des sources : une source en panne "
+            "bloque tout ce qui attend")
+    assert "_publier_file_actualites(" in ast.unparse(boucle)
 
 
 def test_on_enfile_avant_de_tronquer():
-    corps = _boucle()
-    assert corps.index("roblox_news_module.enfiler_actu(") < corps.index(
-        "roblox_news_module.actus_a_envoyer(")
+    """La mise en file (`_enfiler_billets`) précède le tirage
+    (`_publier_file_actualites`), et la boucle les appelle dans cet ordre."""
+    b = _boucle()
+    assert b.index("_enfiler_billets(") < b.index("_publier_file_actualites(")
+    assert "roblox_news_module.enfiler_actu(" in _fn("_enfiler_billets")
+    assert "roblox_news_module.actus_a_envoyer(" in _fn("_publier_file_actualites")
 
 
 def test_le_bilan_dit_enfin_les_ecartes_et_la_file():

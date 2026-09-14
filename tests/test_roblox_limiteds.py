@@ -301,47 +301,33 @@ def test_la_boucle_reste_declaree_et_supervisee():
 
 
 def test_rien_n_est_tronque_avant_d_etre_mis_en_file():
-    """⚠️ CE TEST REMPLACE `test_la_tranche_des_bascules_permet_le_rattrapage`.
-
-    L'ancien verrouillait `_TRANCHE_FLUX = {"nouveaux": 5, "bascules": 10}` en
-    exigeant seulement que la seconde tranche soit plus large que la première.
-    Il gardait donc en place LE défaut : tronquer AVANT de publier, alors que
-    `comparer_et_enregistrer` a déjà écrit l'article en base au même passage.
-    Un article coupé par la tranche n'était plus « jamais vu » au passage
-    suivant — perdu pour toujours. Mesuré le 30/08 : 20 nouveautés dans la
-    fenêtre, 5 publiées, puis 0, puis 0.
-
-    La propriété à tenir est plus forte : la mise en file ne connaît AUCUN
-    plafond. Le seul plafond est à la sortie, et ce qui déborde reste en base.
-    """
+    """⚠️ LA PROPRIÉTÉ, PLUS FORTE QUE L'ANCIEN TEST. Aucune tranche ne coupe la
+    détection ; tout ce qui est détecté entre en file ; le seul plafond est
+    au TIRAGE — et le tirage vit depuis le 14/09 dans
+    `_publier_file_accessoires`, partagée avec l'éclaireur. Mesuré le 30/08 :
+    20 nouveautés dans la fenêtre, 5 publiées, puis 0, puis 0."""
     arbre = ast.parse(SRC_BOT)
-    for n in ast.walk(arbre):
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "veille_roblox_task":
-            corps = ast.unparse(n)
-            break
-    else:
-        raise AssertionError("veille_roblox_task introuvable")
 
-    #  ⚠️ ON CHERCHE UNE AFFECTATION, PAS UNE CHAÎNE. Le nom subsiste dans le
-    #  commentaire qui explique pourquoi la constante a disparu — un simple
-    #  `not in SRC_BOT` échouerait donc sur sa propre note de suppression.
+    def _src(nom):
+        for n in ast.walk(arbre):
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == nom:
+                return ast.unparse(n)
+        raise AssertionError(f"{nom} introuvable")
+
     for n in ast.walk(arbre):
         if (isinstance(n, ast.Assign) and n.targets
                 and getattr(n.targets[0], "id", "") == "_TRANCHE_FLUX"):
             raise AssertionError(
                 "la tranche est revenue : elle coupe la détection avant la "
                 "mise en file, et rouvre la famine du 30/08")
-    assert "roblox_module.enfiler(" in corps, (
+    boucle = _src("veille_roblox_task")
+    assert "roblox_module.enfiler(" in boucle, (
         "la boucle doit mettre en file ce qu'elle détecte, sinon rien ne "
         "survit à un redémarrage ni au plafond du passage")
-    assert "roblox_module.a_envoyer(" in corps, (
+    assert "roblox_module.a_envoyer(" in _src("_publier_file_accessoires"), (
         "le plafond doit être appliqué au TIRAGE, pas à la détection")
-
-    #  Et l'ordre : enfiler AVANT de tirer. L'inverse publierait d'abord et
-    #  n'enregistrerait qu'ensuite — soit exactement la perte qu'on répare.
-    assert corps.index("roblox_module.enfiler(") < corps.index(
-        "roblox_module.a_envoyer("), (
-        "on met en file d'abord, on tire ensuite")
+    assert boucle.index("roblox_module.enfiler(") < boucle.index(
+        "_publier_file_accessoires("), "on met en file d'abord, on tire ensuite"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1360,6 +1360,93 @@ async def _relever_catalogue(params: dict, source: str,
 #  Le point de détails PAR IDENTIFIANT — le seul qui rende le nom français d'un
 #  article quel que soit son âge, Assets et Bundles confondus.
 API_DETAILS = "https://catalog.roblox.com/v1/catalog/items/details"
+
+#  ⚠️ CHEMIN DISTINCT DE `API_CATALOGUE` ET DE `/details`, ET C'EST TOUT
+#  L'INTÉRÊT. Mesuré le 14/09/2026 : ce point a SON PROPRE quota de 12/min.
+#  L'éclaireur peut y frapper toutes les 75 secondes sans jamais retirer une
+#  requête au relevé complet ni aux fiches.
+API_IDENTIFIANTS = "https://catalog.roblox.com/v1/search/items"
+
+
+async def relever_identifiants(*, collectionnables: bool = False,
+                               limite: int = 120) -> dict:
+    """La tête du catalogue Roblox, en IDENTIFIANTS SEULS. UNE requête.
+
+    Rend `{"ids": set[int], "code": int|None, "reste": int|None}`.
+
+    ⚠️ C'EST LA REQUÊTE DE L'ÉCLAIREUR, ET ELLE NE DOIT JAMAIS GROSSIR. Elle
+    ne sert qu'à répondre « y a-t-il un identifiant que je n'ai jamais vu ? ».
+    Tout le reste — fiches, comparaison, mise en file — n'a lieu que si la
+    réponse est oui, ce qui est rare. C'est ce qui rend possible une cadence
+    de 75 s là où le relevé complet coûte neuf pages et huit secondes de pause
+    entre chacune.
+
+    `collectionnables=True` pose `SalesTypeFilter=2` : la même tête, limitée
+    aux articles Limited/Collectible. Un article qui le devient y entre.
+    """
+    params = {
+        "Category": 1,
+        "CreatorType": "User",
+        "CreatorTargetId": CREATEUR_ROBLOX,
+        "SortType": 3,
+        "IncludeNotForSale": "true",
+        "Limit": max(1, min(int(limite), 120)),
+    }
+    if collectionnables:
+        params["SalesTypeFilter"] = 2
+    out = {"ids": set(), "bundles": set(), "code": None, "reste": None}
+    try:
+        async with _ouvrir() as sess:
+            async with sess.get(API_IDENTIFIANTS, params=params) as r:
+                out["code"] = r.status
+                try:
+                    out["reste"] = int(r.headers.get("x-ratelimit-remaining"))
+                except (TypeError, ValueError):
+                    pass
+                if r.status != 200:
+                    return out
+                data = await r.json()
+        for it in (data.get("data") or []):
+            try:
+                v = int(it.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if v > 0:
+                out["ids"].add(v)
+                #  Le type commande le POINT D'API des fiches : un bundle
+                #  demandé comme asset ne revient jamais.
+                if str(it.get("itemType") or "").lower() == "bundle":
+                    out["bundles"].add(v)
+    except Exception as ex:
+        _log(f"[roblox_veille relever_identifiants] {type(ex).__name__}: {ex}")
+    return out
+
+
+async def identifiants_connus() -> tuple[set, set]:
+    """(tous les identifiants déjà vus, ceux déjà collectionnables).
+
+    ⚠️ L'AMORCE DE L'ÉCLAIREUR. Sans elle, son premier passage verrait 120
+    identifiants « jamais vus » et irait chercher 120 fiches pour rien. Avec
+    elle, il ne réagit qu'à ce que le relevé complet n'a JAMAIS enregistré.
+    """
+    tous, limited = set(), set()
+    if _get_db is None:
+        return tous, limited
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT asset_id, collectionnable FROM roblox_articles") as cur:
+                async for row in cur:
+                    try:
+                        aid = int(row[0])
+                    except (TypeError, ValueError):
+                        continue
+                    tous.add(aid)
+                    if row[1]:
+                        limited.add(aid)
+    except Exception as ex:
+        _log(f"[roblox_veille identifiants_connus] {ex}")
+    return tous, limited
 #  Jeton XSRF du point ci-dessus. Obtenu par un premier POST (403 attendu),
 #  gardé, rafraîchi sur 403. Jamais une authentification : c'est public.
 _jeton_xsrf: str | None = None

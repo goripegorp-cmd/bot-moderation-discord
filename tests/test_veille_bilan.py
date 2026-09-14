@@ -61,37 +61,30 @@ def test_le_bilan_compte_les_actualites_etage_par_etage():
 
 
 def test_un_envoi_rate_est_compte_et_pas_confondu_avec_rien_a_publier():
-    """⚠️ `publier` et `publier_actu` AVALENT leurs erreurs et rendent None.
-    Sans un `else` qui compte, un salon devenu interdit est indiscernable de
-    « il n'y avait rien à publier » — c'est-à-dire d'un bot en bonne santé."""
-    assert BOUCLE.count("echecs'] += 1") + BOUCLE.count('echecs"] += 1') >= 2, (
-        "les échecs d'envoi doivent être comptés des DEUX côtés")
+    """Sans un `else` qui compte, un salon devenu interdit est indiscernable de
+    « il n'y avait rien à publier ». Depuis le 14/09, chaque corps partagé
+    compte SES échecs, et la boucle les ramène dans son bilan."""
+    for f in ("_publier_file_accessoires", "_publier_file_actualites"):
+        c = ast.unparse(_fonction(f))
+        assert c.count("echecs'] += 1") >= 1, f"{f} ne compte pas ses échecs d'envoi"
+    assert "_sa['echecs'] += _rp['echecs']" in BOUCLE, (
+        "les échecs des accessoires ne remontent plus dans le bilan")
+    assert "'echecs', 'simules', 'non_marquees'" in BOUCLE, (
+        "les échecs des actualités ne remontent plus dans le bilan")
 
 
 def test_le_quota_par_source_est_compte_pas_tu():
-    """⚠️ LE BILAN DOIT S'ADDITIONNER. `ordonner_publication` ne garde que les
-    N plus récents de chaque source ; les autres ne passent devant AUCUNE des
-    portes comptées, donc ils n'apparaissaient nulle part. Mesuré sur Railway
-    le 19/08 : « 11 lus · 6 déjà publiés · 0 publication » — cinq billets
-    semblaient s'évaporer. Ils ne s'évaporent pas (ils repassent au tour
-    suivant), mais un bilan qui ne se boucle pas fait chercher une panne là où
-    il n'y en a pas.
-
-    ⚠️ LES DEUX CÔTÉS NE COMPTENT PLUS LA MÊME CHOSE DEPUIS LE 30/08, ET
-    C'EST VOULU. Côté ACTUALITÉS, le quota écarte des billets qui repasseront
-    au tour suivant : `plafonnes` reste le bon mot. Côté ACCESSOIRES, il n'y a
-    plus de quota d'entrée du tout — tout ce qui est détecté entre en file, et
-    ce qui ne part pas ce passage-ci RESTE EN BASE. Le compteur équivalent est
-    donc la profondeur de la file, imprimée telle quelle.
-    Ce qui reste exigé des deux côtés est la propriété, pas le mot : ce qui ne
-    sort pas doit être VISIBLE dans le bilan, jamais tu."""
-    #  Actualités : le quota, toujours compté.
-    assert BOUCLE.count("plafonnes'] += ") + BOUCLE.count('plafonnes"] += ') >= 1, (
+    """Ce qui ne sort pas doit être VISIBLE dans le bilan, jamais tu. Côté
+    actualités : `plafonnes` (dans `_enfiler_billets` depuis le 14/09). Côté
+    accessoires : la profondeur de la file (relevée dans
+    `_publier_file_accessoires`), imprimée par la boucle."""
+    enfile = ast.unparse(_fonction("_enfiler_billets"))
+    assert enfile.count("plafonnes'] += ") >= 1, (
         "le quota des actualités doit rester compté")
     bilan = BOUCLE.split("passage terminé")[-1]
     assert "quota" in bilan, "le quota doit apparaître dans le bilan imprimé"
-    #  Accessoires : la file, relevée puis imprimée.
-    assert 'roblox_module.etat_file()' in BOUCLE, (
+    assert "roblox_module.etat_file()" in ast.unparse(
+        _fonction("_publier_file_accessoires")), (
         "la profondeur de la file doit être relevée à chaque passage")
     assert "file d'envoi" in bilan and "en attente" in bilan, (
         "ce qui reste en file doit apparaître dans le bilan : sans ce nombre, "
@@ -99,17 +92,14 @@ def test_le_quota_par_source_est_compte_pas_tu():
 
 
 def test_le_lot_est_calcule_une_seule_fois():
-    """Rappeler `ordonner_publication` pour compter donnerait deux listes
-    potentiellement différentes — et un compteur faux.
-
-    ⚠️ `_lot_a` A DISPARU LE 30/08 avec la tranche des accessoires : le lot
-    d'envoi ne se calcule plus par troncature mais par tirage en base
-    (`a_envoyer`), qui est déjà un appel unique par serveur. `_lot_b` (les
-    actualités) garde l'ancienne forme, donc l'ancienne exigence."""
-    assert BOUCLE.count("_lot_b = ") == 1, "_lot_b doit être calculé une fois"
-    assert BOUCLE.count("_lot_a") == 0, (
+    """« Une seule fois » se mesure sur TOUTE LA CHAÎNE — boucle + corps
+    partagés — sinon une copie dans la boucle passerait inaperçue."""
+    chaine = (BOUCLE + ast.unparse(_fonction("_enfiler_billets"))
+              + ast.unparse(_fonction("_publier_file_accessoires")))
+    assert chaine.count("_lot_b = ") == 1, "_lot_b doit être calculé une fois"
+    assert chaine.count("_lot_a") == 0, (
         "la tranche des accessoires est revenue — voir la famine du 30/08")
-    assert BOUCLE.count("roblox_module.a_envoyer(") == 1, (
+    assert chaine.count("roblox_module.a_envoyer(") == 1, (
         "le tirage de la file doit être fait une seule fois par serveur")
 
 

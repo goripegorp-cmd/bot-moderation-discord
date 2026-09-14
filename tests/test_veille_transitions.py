@@ -621,6 +621,20 @@ async def test_effacer_les_marques_ne_peut_rien_republier(banc):
 #  Le mode simulation — éprouver une transition sans fausse annonce publique
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _corps_de(nom: str) -> str:
+    """La source d'une fonction de bot.py. Depuis le 14/09/2026, l'envoi vit
+    dans des fonctions partagées avec l'éclaireur : les propriétés d'ORDRE se
+    vérifient là où sont les deux bornes."""
+    import ast as _ast
+    import pathlib as _pl
+    src = (_pl.Path(__file__).resolve().parent.parent / "bot.py").read_text(
+        encoding="utf-8")
+    for n in _ast.walk(_ast.parse(src)):
+        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name == nom:
+            return _ast.unparse(n)
+    raise AssertionError(f"{nom} introuvable")
+
+
 def _corps_boucle() -> str:
     import ast as _ast
     import pathlib as _pl
@@ -638,22 +652,21 @@ def test_simulation_le_reglage_existe_et_est_eteint_par_defaut():
 
 
 def test_simulation_la_boucle_sarrete_avant_lenvoi():
-    """⚠️ LA GARDE DOIT ÊTRE AVANT `publier`, pas après. Après, l'annonce
-    serait partie — c'est exactement ce que le mode existe pour empêcher."""
-    corps = _corps_boucle()
+    """La garde de simulation AVANT l'envoi, dans le corps partagé — sinon la
+    fausse annonce serait déjà partie."""
+    corps = _corps_de("_publier_file_accessoires")
     assert "roblox_veille_simulation" in corps, (
-        "la boucle ne lit pas l'interrupteur : le mode n'existe pas")
-    i_garde = corps.index("if _simu:")
-    i_envoi = corps.index("roblox_ui.publier(")
-    assert i_garde < i_envoi, (
+        "le corps ne lit pas l'interrupteur : le mode n'existe pas")
+    assert corps.index("if _simu:") < corps.index("roblox_ui.publier("), (
         "la garde de simulation passe APRÈS l'envoi : la fausse annonce "
         "serait déjà partie")
+    assert "_publier_file_accessoires(" in _corps_boucle()
 
 
 def test_simulation_ne_marque_rien_comme_envoye():
-    """La fiche doit RESTER en file : éteindre l'interrupteur doit la faire
-    partir pour de bon. La marquer envoyée la perdrait silencieusement."""
-    corps = _corps_boucle()
+    """Une fiche simulée reste en file pour partir un jour pour de bon. La
+    marquer envoyée la perdrait silencieusement."""
+    corps = _corps_de("_publier_file_accessoires")
     bloc = corps.split("if _simu:")[1].split("continue")[0]
     for interdit in ("marquer_envoye", "marquer_publie"):
         assert interdit not in bloc, (
@@ -912,41 +925,26 @@ def test_M5_le_429_terminal_est_compte_lui_aussi():
 
 
 def test_G4_la_simulation_ne_mange_pas_le_budget_des_autres_serveurs():
-    """Un serveur en simulation placé en tête consommait les douze unités du
-    passage sans jamais rien publier : le suivant recevait zéro fiche,
-    définitivement."""
-    import ast as _ast
-    import pathlib as _pl
-    src = (_pl.Path(__file__).resolve().parent.parent / "bot.py").read_text(
-        encoding="utf-8")
-    boucle = next(_ast.unparse(n) for n in _ast.walk(_ast.parse(src))
-                  if isinstance(n, _ast.AsyncFunctionDef)
-                  and n.name == "veille_roblox_task")
-    bloc = boucle.split("if _simu:")[1].split("continue")[0]
-    assert "_budget -= 1" not in bloc, (
+    """Un serveur en simulation consommait les douze unités du passage sans
+    rien publier : le suivant recevait zéro fiche, définitivement. Le budget
+    s'appelle `budget` dans le corps partagé depuis le 14/09."""
+    corps = _corps_de("_publier_file_accessoires")
+    bloc = corps.split("if _simu:")[1].split("continue")[0]
+    assert "budget -= 1" not in bloc, (
         "la simulation consomme le budget du passage : les autres serveurs "
         "seront affamés sans qu'une seule fiche ne parte")
-    #  Et la part est bien calculée par serveur, pas premier arrivé premier servi.
-    assert "_part = max(1" in boucle and "limite=min(_part, _reste)" in boucle, (
+    assert "_part = max(1" in corps and "limite=min(_part, _reste)" in corps, (
         "le budget est de nouveau distribué au premier arrivé")
 
 
 def test_B5_la_simulation_couvre_aussi_les_actualites():
-    """Elle ne gardait que les accessoires, pendant que le panneau affirmait
-    sans réserve « rien ne part dans un salon » : simulation allumée, les
-    billets partaient quand même."""
-    import ast as _ast
+    """Simulation allumée, les billets partaient quand même (réfutation du
+    30/08). La garde vit dans `_publier_file_actualites` depuis le 14/09."""
     import pathlib as _pl
-    racine = _pl.Path(__file__).resolve().parent.parent
-    boucle = next(_ast.unparse(n) for n in _ast.walk(
-        _ast.parse((racine / "bot.py").read_text(encoding="utf-8")))
-        if isinstance(n, _ast.AsyncFunctionDef) and n.name == "veille_roblox_task")
-    #  La garde doit précéder l'envoi du billet, sinon il est déjà parti.
-    i_garde = boucle.index("if _simu_n:")
-    i_envoi = boucle.index("roblox_ui.publier_actu(")
-    assert i_garde < i_envoi, (
+    envoi = _corps_de("_publier_file_actualites")
+    assert envoi.index("if _simu_n:") < envoi.index("roblox_ui.publier_actu("), (
         "la garde de simulation passe après l'envoi du billet")
-    #  Et le même chemin dans le bouton manuel.
+    racine = _pl.Path(__file__).resolve().parent.parent
     pan = (racine / "roblox_panneau.py").read_text(encoding="utf-8")
     assert "if _simu_actu:" in pan and pan.index("if _simu_actu:") < pan.index(
         "if await publier_actu("), (

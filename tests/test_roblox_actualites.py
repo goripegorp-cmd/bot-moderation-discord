@@ -414,6 +414,20 @@ def test_la_sante_des_actualites_est_affichee_dans_le_panneau():
 #  5. La boucle n'est plus muette
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _fn(nom: str) -> str:
+    """La source d'une fonction de bot.py — boucle OU fonction partagée.
+
+    Depuis le 14/09/2026, l'envoi vit dans trois fonctions extraites de la
+    boucle (`_publier_file_accessoires`, `_enfiler_billets`,
+    `_publier_file_actualites`), partagées avec l'éclaireur. Les propriétés
+    d'ORDRE se vérifient dans la fonction qui porte les deux bornes.
+    """
+    for n in ast.walk(ast.parse(SRC_BOT)):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == nom:
+            return ast.unparse(n)
+    raise AssertionError(f"{nom} introuvable dans bot.py")
+
+
 def _boucle():
     for n in ast.walk(ast.parse(SRC_BOT)):
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "veille_roblox_task":
@@ -429,20 +443,21 @@ def test_la_boucle_dit_quand_elle_na_rien_a_faire():
 
 
 def test_la_boucle_fait_un_bilan_a_chaque_passage():
+    """Deux compteurs, jamais un commun (défaut G5 du 30/08). Depuis le 14/09,
+    chaque corps partagé tient SON compteur et la boucle les additionne
+    SÉPARÉMENT — l'un sans l'autre, on ne sait pas lequel est à zéro."""
     corps = _boucle()
     assert "passage terminé" in corps
-    #  ⚠️ DEUX COMPTEURS DEPUIS LE 30/08, ET C'EST PLUS STRICT, PAS MOINS.
-    #  Un compteur commun laissait un billet d'actualite eteindre le
-    #  diagnostic par serveur des accessoires — le cas qui a coute onze heures
-    #  au proprietaire. On exige donc que CHAQUE flux tienne le sien.
-    assert corps.count("_publies_a += 1") == 1, (
+    assert corps.count("_publies_a += _rp") == 1, (
         "les accessoires doivent tenir leur propre compteur")
-    assert corps.count("_publies_n += 1") == 1, (
+    assert corps.count("_publies_n += _rn") == 1, (
         "les actualites doivent tenir leur propre compteur")
     assert "_publies +=" not in corps, (
         "le compteur commun est revenu : voir le defaut G5 du 30/08")
-    assert "_publies_a" in corps and "_publies_n" in corps, (
-        "le bilan doit citer les deux, sinon on ne sait pas lequel est a zero")
+    assert "_publies_a" in corps and "_publies_n" in corps
+    for f in ("_publier_file_accessoires", "_publier_file_actualites"):
+        assert _fn(f).count("res['publies'] += 1") == 1, (
+            f"{f} doit compter ses publications une fois, et une seule")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
