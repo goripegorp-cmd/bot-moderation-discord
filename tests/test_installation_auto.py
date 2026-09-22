@@ -362,6 +362,42 @@ def test_B4_un_seul_message_par_JOUR_malgre_les_redeploiements():
     assert len(envois) == 1, "deux bilans le même jour"
 
 
+def test_B4b_une_liste_INCHANGEE_se_tait_une_semaine():
+    """⚠️ « C'EST TRÈS RELOU. » Un rappel identique chaque jour finit par ne
+    plus être lu — le jour où il compte. Tant que rien ne change, on se tait
+    une semaine ; un manque NOUVEAU, lui, est dit le jour même."""
+    import datetime as _dt
+    config = {'mod_log_channel': 4, 'activite_salon_retour': 1}
+    ns, g, envois, config = _espace_bilan(
+        config, perms=FauxPermsGuild(ban_members=False))
+    assert asyncio.run(ns["_publier_bilan_sante"](g)) is True
+    #  Le lendemain, même liste : silence.
+    config['bilan_sante_jour'] = (
+        _dt.datetime.now(_dt.timezone.utc).date() - _dt.timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+    assert asyncio.run(ns["_publier_bilan_sante"](g)) is False
+    assert len(envois) == 1
+    #  Huit jours plus tard, toujours pareil : on le redit.
+    config['bilan_sante_jour'] = (
+        _dt.datetime.now(_dt.timezone.utc).date() - _dt.timedelta(days=8)
+    ).strftime("%Y-%m-%d")
+    assert asyncio.run(ns["_publier_bilan_sante"](g)) is True
+    assert len(envois) == 2
+
+
+def test_B4c_un_manque_NOUVEAU_est_dit_le_jour_meme():
+    """Se taire une semaine sur une liste qui a changé cacherait le manque
+    qui vient d'apparaître — celui qui casse quelque chose aujourd'hui."""
+    import datetime as _dt
+    config = {'mod_log_channel': 4, 'activite_salon_retour': 1,
+              'bilan_sante_jour': _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d"),
+              'bilan_sante_signature': "un-manque-qui-n-existe-plus"}
+    ns, g, envois, config = _espace_bilan(
+        config, perms=FauxPermsGuild(ban_members=False))
+    assert asyncio.run(ns["_publier_bilan_sante"](g)) is True
+    assert len(envois) == 1
+
+
 def test_B5_le_bilan_est_APPELE_au_demarrage():
     """Une fonction non appelée n'est pas opérationnelle."""
     corps = _src("_travaux_de_demarrage")

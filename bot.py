@@ -14687,9 +14687,22 @@ async def _publier_bilan_sante(guild) -> bool:
         if not manques:
             return False
         c = await cfg(guild.id)
-        jour = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if str(c.get('bilan_sante_jour') or "") == jour:
-            return False
+        maintenant = datetime.now(timezone.utc)
+        jour = maintenant.strftime("%Y-%m-%d")
+        #  ⚠️ UN RAPPEL IDENTIQUE TOUS LES JOURS DEVIENT DU BRUIT, ET LE BRUIT
+        #  NE SE LIT PLUS. Tant que la liste ne CHANGE pas, on se tait une
+        #  semaine : le propriétaire qui assume ses manques n'est pas harcelé,
+        #  et un manque NOUVEAU est dit le jour même.
+        signature = "|".join(m[:40] for m in manques)
+        dernier = str(c.get('bilan_sante_jour') or "")
+        if str(c.get('bilan_sante_signature') or "") == signature and dernier:
+            try:
+                ecart = (maintenant.date()
+                         - datetime.strptime(dernier, "%Y-%m-%d").date()).days
+            except Exception:
+                ecart = 99
+            if ecart < 7:
+                return False
         salon = None
         for cle in ('mod_log_channel', 'activite_salon_staff', 'ticket_log'):
             salon = guild.get_channel(int(c.get(cle, 0) or 0))
@@ -14700,6 +14713,7 @@ async def _publier_bilan_sante(guild) -> bool:
                   f"aucun salon de logs pour le dire")
             return False
         await db_set(guild.id, 'bilan_sante_jour', jour)
+        await db_set(guild.id, 'bilan_sante_signature', signature)
         await salon.send("\n".join(
             ["## 🩺 Ce que je ne peux pas réparer moi-même",
              "-# Une seule fois par jour, et seulement s'il manque quelque chose.",
