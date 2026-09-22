@@ -296,10 +296,17 @@ async def echue(source: dict) -> bool:
         return True
 
 
-async def relever(source: dict, forcer: bool = False) -> dict:
+async def relever(source: dict, forcer: bool = False,
+                  leger: bool = False) -> dict:
     """Lit une source. Rend {"billets": [...], "code": int|None, "sautee": bool}.
 
     `forcer=True` ignore la cadence — c'est ce que fait « Relever maintenant ».
+    `leger=True` ne demande que les CINQ billets les plus récents : 15 Ko au
+    lieu de 84, pour la sonde qui tourne toutes les 30 s. Mesuré le 22/09 :
+    les cinq plus récents sont IDENTIQUES à ceux du relevé complet, catégorie
+    par catégorie. Le relevé complet, lui, garde ses 30 billets — c'est lui
+    qui rattrape ce que la sonde n'a pas vu.
+
     Ne lève jamais : une panne de veille ne doit pas gêner la modération.
     """
     out = {"billets": [], "code": None, "domaine": source["domaine"],
@@ -310,7 +317,7 @@ async def relever(source: dict, forcer: bool = False) -> dict:
     fmt = source.get("format", "discourse")
     try:
         if fmt == "discourse":
-            await _relever_discourse(source, out)
+            await _relever_discourse(source, out, leger=leger)
         elif fmt == "rss":
             await _relever_rss(source, out)
         elif fmt == "newsroom":
@@ -323,9 +330,14 @@ async def relever(source: dict, forcer: bool = False) -> dict:
     return out
 
 
-async def _relever_discourse(source: dict, out: dict) -> None:
+async def _relever_discourse(source: dict, out: dict,
+                             leger: bool = False) -> None:
+    #  ⚠️ `per_page=5` NE CHANGE QUE LE NOMBRE DE BILLETS RENDUS, pas
+    #  leur ordre ni leur contenu : mesuré catégorie par catégorie le
+    #  22/09, les cinq plus récents sont exactement les mêmes.
+    url = source["url"] + ("&per_page=5" if leger else "")
     async with _ouvrir() as sess:
-        async with sess.get(source["url"]) as r:
+        async with sess.get(url) as r:
             out["code"] = r.status
             if r.status != 200:
                 _log(f"[roblox_news {source['cle']}] HTTP {r.status}")

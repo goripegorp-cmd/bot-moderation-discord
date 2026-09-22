@@ -15298,8 +15298,17 @@ async def veille_roblox_task():
                   f"l'instant · {_E['sautes']} passage(s) cédé(s) au relevé · "
                   f"{_E['erreurs']} erreur(s) · dernier passage "
                   + (f"il y a {_ap:.0f} s" if _ap is not None else "JAMAIS")
+                  #  ⚠️ LE COMPTE DES REFUS REMPLACE 1 152 LIGNES PAR JOUR.
+                  #  C'est ici qu'on voit si l'IP partagée nous étrangle, et
+                  #  `reste` dit combien de requêtes l'API nous laissait.
+                  + (f" · 🚦 {_E['refus']} refus de quota (429), reste annoncé "
+                     f"{_E.get('reste')}/12"
+                     if _E.get("refus") else "")
+                  + (f" · ralenti (palier {_E['palier']})" if _E.get("palier") else "")
                   + (" · ⚠️ ÉCLAIREUR MUET : le délai est revenu à 30 min"
-                     if _ap is None or _ap > 5 * ECLAIREUR_SECONDES else ""))
+                     if _ap is None
+                     or _ap > 5 * ECLAIREUR_SECONDES + ECLAIREUR_PAUSES[-1]
+                     else ""))
             print(f"[veille_roblox_task]   accessoires : {_sa['lus']} lu(s) "
                   f"(+{_sa.get('lus_hors_vente', 0)} hors vente) · "
                   f"{_sa['candidats']} candidat(s) · {_sa['hors_fenetre']} hors "
@@ -15564,11 +15573,27 @@ async def _veille_marche_wait():
 #
 #  COÛT : 2 requêtes par passage (créations + collectionnables), soit 1,6/min
 #  sur un quota de 12 — et zéro sur le quota des fiches tant que rien ne bouge.
+#  `tour` : l'alternance créations/collectionnables. `palier` : où en est le
+#  ralentissement. `pause_jusqu` : quand on se réveille. `refus` : combien de
+#  429 depuis le démarrage — il part dans le bilan, plus dans 1 152 lignes.
 _ECLAIREUR = {"amorce": False, "vus": set(), "vus_limited": set(),
+              "tour": 0, "palier": 0, "pause_jusqu": None, "refus": 0,
+              "reste": None,
               "passages": 0, "sautes": 0, "erreurs": 0,
               "nouveautes": 0, "bascules": 0, "publies": 0,
               "dernier_passage": None, "dernier_signal": None}
-ECLAIREUR_SECONDES = 75
+#  45 s au lieu de 75 : avec UNE requête par passage (alternance), la
+#  consommation tombe de 1,6 à 1,3 requête/min sur un seau de 12 — et chaque
+#  file est regardée toutes les 90 s au pire, tout de suite quand le quota est
+#  large. Mesuré le 22/09 : `x-ratelimit-limit: 12, 12;w=60`.
+ECLAIREUR_SECONDES = 45
+#  Le ralentissement en cas de refus, en secondes de pause SUPPLÉMENTAIRE.
+#  Dernier palier : dix minutes — au-delà, le relevé complet reprend la main
+#  de toute façon, et marteler une IP saturée n'a jamais rendu un quota.
+ECLAIREUR_PAUSES = (0, 45, 135, 315, 555)
+#  Au-dessus de ce reste annoncé par l'API, on s'autorise la SECONDE requête
+#  dans le même passage : on ne dépense que ce qui est visiblement disponible.
+ECLAIREUR_RESTE_CONFORTABLE = 6
 #  ⚠️ LA LIGNE DE VIE — la leçon de `veille_marche_task`, qui n'a rien écrit
 #  pendant cinq heures : une boucle muette est indiscernable d'une boucle
 #  morte. Toutes les 24 × 75 s = 30 min sans rien, une ligne quand même.
@@ -15596,6 +15621,11 @@ async def eclaireur_task():
         if roblox_module.catalogue_est_occupe():
             E["sautes"] += 1
             return
+        #  Le ralentissement après refus : on saute les passages au lieu de
+        #  marteler une IP saturée.
+        if E["pause_jusqu"] and datetime.now(timezone.utc) < E["pause_jusqu"]:
+            E["sautes"] += 1
+            return
         guildes = []
         for g in list(bot.guilds):
             try:
@@ -15618,31 +15648,81 @@ async def eclaireur_task():
                   f"{len(lim)} collectionnable(s) — je ne réagirai qu'à ce que "
                   f"le relevé complet n'a jamais vu")
 
-        r1 = await roblox_module.relever_identifiants(collectionnables=False)
-        r2 = await roblox_module.relever_identifiants(collectionnables=True)
+        #  ⚠️ UNE REQUÊTE PAR PASSAGE, EN ALTERNANCE. Les deux collées se
+        #  faisaient refuser la seconde à CHAQUE passage en production : le
+        #  seau de 12/min est par IP, et l'IP de Railway est partagée. Une
+        #  requête qu'on sait condamnée est une requête gâchée.
+        collect = bool(E["tour"] % 2)
+        E["tour"] += 1
+        reponses = [(collect,
+                     await roblox_module.relever_identifiants(
+                         collectionnables=collect))]
+        #  La seconde SEULEMENT si l'API dit qu'il reste de la place. C'est
+        #  elle qui nous rend la cadence de 45 s sur les deux files quand le
+        #  voisinage nous laisse respirer.
+        _r0 = reponses[0][1]
+        if _r0["code"] == 200 and (_r0.get("reste") or 0) >= ECLAIREUR_RESTE_CONFORTABLE:
+            reponses.append((not collect,
+                             await roblox_module.relever_identifiants(
+                                 collectionnables=not collect)))
+            E["tour"] += 1
         E["passages"] += 1
         E["dernier_passage"] = datetime.now(timezone.utc)
-        if r1["code"] != 200 or r2["code"] != 200:
-            E["erreurs"] += 1
-            print(f"[eclaireur] catalogue injoignable (HTTP {r1['code']} / "
-                  f"{r2['code']}) — nouvel essai dans {ECLAIREUR_SECONDES} s")
-            return
+        E["reste"] = _r0.get("reste")
 
-        neufs = (r1["ids"] - E["vus"]) | (r2["ids"] - E["vus_limited"])
-        E["vus"] |= r1["ids"]
-        E["vus_limited"] |= r2["ids"]
+        ok = [(c, r) for c, r in reponses if r["code"] == 200]
+        if not ok:
+            #  ⚠️ ON RALENTIT, ET ON NE LE DIT QU'AU CHANGEMENT D'ÉTAT. La
+            #  version d'avant écrivait la même ligne toutes les 75 s : 1 152
+            #  lignes par jour, dans lesquelles une VRAIE panne serait passée
+            #  inaperçue.
+            E["erreurs"] += 1
+            if any(r["code"] == 429 for _c, r in reponses):
+                E["refus"] += 1
+            ancien = E["palier"]
+            E["palier"] = min(E["palier"] + 1, len(ECLAIREUR_PAUSES) - 1)
+            _sup = ECLAIREUR_PAUSES[E["palier"]]
+            if _sup:
+                E["pause_jusqu"] = (datetime.now(timezone.utc)
+                                    + timedelta(seconds=_sup))
+            if E["palier"] != ancien:
+                print(f"[eclaireur] catalogue refusé (HTTP "
+                      f"{reponses[0][1]['code']}) — le seau d'identifiants de "
+                      f"cette IP est saturé. Cadence ralentie à "
+                      f"{ECLAIREUR_SECONDES + _sup} s ; retour immédiat à "
+                      f"{ECLAIREUR_SECONDES} s à la première réussite.")
+            return
+        if E["palier"]:
+            #  Retour à la normale : on le dit UNE fois, parce que c'est la
+            #  preuve que le ralentissement a servi.
+            print(f"[eclaireur] catalogue de nouveau joignable après "
+                  f"{E['refus']} refus — cadence revenue à "
+                  f"{ECLAIREUR_SECONDES} s")
+            E["palier"] = 0
+            E["pause_jusqu"] = None
+
+        #  ⚠️ CHAQUE RÉUSSITE COMPTE POUR SA PROPRE FILE. Verser des
+        #  identifiants de créations dans la mémoire des collectionnables
+        #  masquerait une bascule Limited pour toujours.
+        neufs = set()
+        for c, r in ok:
+            cle = "vus_limited" if c else "vus"
+            neufs |= (r["ids"] - E[cle])
+            E[cle] |= r["ids"]
         if not neufs:
             if E["passages"] % ECLAIREUR_BATTEMENT == 0:
                 _ds = _age_s(E["dernier_signal"])
                 print(f"[eclaireur] {E['passages']} passage(s) · rien de nouveau · "
-                      f"quota identifiants restant {r1['reste']}/12 · dernier "
+                      f"quota identifiants restant {E.get('reste')}/12 · dernier "
                       f"signal : "
                       + (f"il y a {_ds / 60:.0f} min" if _ds is not None
                          else "jamais depuis le démarrage"))
             return
 
         # ── QUELQUE CHOSE A BOUGÉ : LES fiches, et seulement elles ────────
-        bundles_ids = (r1.get("bundles", set()) | r2.get("bundles", set()))
+        bundles_ids = set()
+        for _c, _r in ok:
+            bundles_ids |= _r.get("bundles", set())
         assets = sorted(neufs - bundles_ids)[:120]
         bundles = sorted(neufs & bundles_ids)[:120]
         fiches = []
@@ -15722,8 +15802,16 @@ async def _eclaireur_wait():
 _ECLAIREUR_ACTU = {"amorce": False, "vus": set(), "passages": 0, "erreurs": 0,
                    "billets": 0, "publies": 0,
                    "dernier_passage": None, "dernier_signal": None}
-ECLAIREUR_ACTU_SECONDES = 90
-ECLAIREUR_ACTU_BATTEMENT = 20          # 20 × 90 s = 30 min
+#  30 s au lieu de 90 : la sonde ne lit plus que 5 billets par catégorie
+#  (15 Ko contre 84), donc trois fois plus souvent coûte deux fois moins.
+ECLAIREUR_ACTU_SECONDES = 30
+ECLAIREUR_ACTU_BATTEMENT = 60          # 60 × 30 s = 30 min
+#  ⚠️ LES DEUX CATÉGORIES QUI PORTENT LES VRAIES ACTUALITÉS. Les trois
+#  autres (notes de version, communauté, ressources staff) n'ont jamais
+#  d'annonce chaude : les interroger toutes les 30 s serait trois fois
+#  plus de requêtes pour un délai que personne ne remarque. Elles gardent
+#  la cadence d'avant — un passage sur trois.
+ECLAIREUR_ACTU_CHAUDES = ("annonces", "alertes")
 
 
 @tasks.loop(seconds=ECLAIREUR_ACTU_SECONDES)
@@ -15748,10 +15836,17 @@ async def eclaireur_actu_task():
         E["dernier_passage"] = datetime.now(timezone.utc)
 
         neufs_total, enfiles_total = 0, 0
+        #  Un passage sur trois interroge TOUTES les catégories ; les deux
+        #  autres ne regardent que les chaudes.
+        _tout = (E["passages"] % 3 == 1)
         for src in roblox_news_module.SOURCES:
             if src.get("format", "discourse") != "discourse":
                 continue
-            rel = await roblox_news_module.relever(src, forcer=True)
+            if not _tout and src.get("cle") not in ECLAIREUR_ACTU_CHAUDES:
+                continue
+            #  ⚠️ SONDE LÉGÈRE : 5 billets, pas 30. C'est ce qui rend la
+            #  cadence de 30 s moins chère que celle de 90 s d'avant.
+            rel = await roblox_news_module.relever(src, forcer=True, leger=True)
             if rel.get("code") != 200:
                 E["erreurs"] += 1
                 await asyncio.sleep(2)
@@ -15766,7 +15861,10 @@ async def eclaireur_actu_task():
                 _re = await _enfiler_billets(guildes, {"billets": neufs})
                 enfiles_total += _re["enfiles"]
             #  La pause entre sources : c'est elle qui évite le pare-feu.
-            await asyncio.sleep(2)
+            #  1 s suffit sur une sonde de 15 Ko — le débit vers le forum
+            #  reste à ~6 requêtes/min, contre 3,3 avant pour 2,9 fois plus
+            #  d'octets.
+            await asyncio.sleep(1)
 
         if enfiles_total:
             E["dernier_signal"] = datetime.now(timezone.utc)

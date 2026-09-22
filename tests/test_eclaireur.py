@@ -53,12 +53,20 @@ def _fn(nom: str) -> str:
     raise AssertionError(f"{nom} introuvable dans bot.py")
 
 
-def _constante(nom: str) -> int:
+def _constante(nom: str):
+    """La valeur d'une constante du module, quel que soit son type.
+
+    ⚠️ Rendait `int()` seulement : `ECLAIREUR_ACTU_CHAUDES` (un tuple) faisait
+    échouer la recherche avec « introuvable » — un faux négatif qui accuse le
+    code alors que c'est la sonde du test qui ne sait pas lire.
+    """
     for n in ast.walk(ARBRE):
         if (isinstance(n, ast.Assign) and len(n.targets) == 1
-                and getattr(n.targets[0], "id", "") == nom
-                and isinstance(n.value, ast.Constant)):
-            return int(n.value.value)
+                and getattr(n.targets[0], "id", "") == nom):
+            try:
+                return ast.literal_eval(n.value)
+            except (ValueError, SyntaxError):
+                continue
     raise AssertionError(f"{nom} introuvable")
 
 
@@ -241,12 +249,21 @@ async def test_l_amorce_des_actualites_melange_les_deux_tables_en_TEXTE(banc):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_la_cadence_est_rapide_ET_economique():
-    """« sur l'instant t » ET « pas trop de demandes ». Deux requêtes par
-    passage sur un quota de 12/min : à 75 s, 1,6 req/min. En dessous de 60 s,
-    on tomberait dans le bruit ; au-dessus de 5 min, ce n'est plus l'instant."""
+    """« sur l'instant t » ET « pas trop de demandes ».
+
+    ⚠️ RÉÉCRIT LE 22/09 : la borne portait sur l'INTERVALLE, or ce qui compte
+    est le DÉBIT. Depuis le correctif du 429, l'éclaireur n'envoie qu'UNE
+    requête par passage (alternance créations/collectionnables) et n'ajoute la
+    seconde que si l'en-tête de quota annonce de la place. À 45 s, c'est
+    1,3 requête/min sur un seau MESURÉ à `12, 12;w=60` — et jusqu'à 2,7 quand
+    le quota est libre, toujours sous le quart du plafond.
+    """
     s = _constante("ECLAIREUR_SECONDES")
-    assert 60 <= s <= 300, f"cadence hors de raison : {s} s"
+    assert 30 <= s <= 300, f"cadence hors de raison : {s} s"
+    #  Le pire cas : les deux requêtes à chaque passage (quota confortable).
     assert 2 * 60 / s <= 4, "plus de 4 requêtes/min : ce n'est plus un éclaireur"
+    #  Le cas normal : une seule requête par passage.
+    assert 60 / s <= 2, "plus de 2 requêtes/min en régime normal"
 
 
 def test_l_eclaireur_ne_touche_pas_au_quota_des_fiches_tant_que_rien_ne_bouge():
@@ -254,7 +271,10 @@ def test_l_eclaireur_ne_touche_pas_au_quota_des_fiches_tant_que_rien_ne_bouge():
     c'est ce qui rend la cadence tenable."""
     c = _fn("eclaireur_task")
     assert c.count("relever_identifiants(") == 2
-    assert "collectionnables=False" in c and "collectionnables=True" in c
+    #  ⚠️ L'ALTERNANCE (22/09) : plus de `False`/`True` en dur. Le passage
+    #  interroge UNE file, et l'autre seulement si le quota le permet — c'est
+    #  ce qui a mis fin au 429 systématique mesuré en production.
+    assert "collectionnables=collect" in c and "collectionnables=not collect" in c
     i_neufs = c.index("if not neufs:")
     i_fiches = c.index("fiches_par_ids(")
     assert i_neufs < i_fiches, "les fiches partent avant de savoir si quelque chose a bougé"
@@ -352,10 +372,18 @@ def test_l_eclaireur_d_actualites_passe_par_les_corps_partages():
 
 
 def test_la_cadence_des_actualites_est_raisonnable():
+    """⚠️ RÉÉCRIT LE 22/09, APRÈS MESURE. La sonde ne lit plus 30 billets par
+    catégorie mais 5 : 70,0 Ko par passage contre 708,4 Ko, et 297 ms contre
+    9 265 ms sur « annonces » (vrai code, vraies URL, cache chaud). Trois fois
+    plus souvent coûte donc deux fois moins cher — et seules les deux
+    catégories chaudes tournent à chaque passage.
+    """
     s = _constante("ECLAIREUR_ACTU_SECONDES")
-    assert 60 <= s <= 300
-    #  5 catégories par passage.
-    assert 5 * 60 / s <= 6, "plus de 6 req/min vers le forum"
+    assert 20 <= s <= 300
+    chaudes = len(_constante("ECLAIREUR_ACTU_CHAUDES"))
+    #  chaudes à chaque passage + les 3 autres un passage sur trois.
+    req_min = (chaudes + 3 / 3) * 60 / s
+    assert req_min <= 8, f"{req_min:.1f} req/min vers le forum : trop"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

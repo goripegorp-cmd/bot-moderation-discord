@@ -288,7 +288,10 @@ async def test_une_source_relevee_a_linstant_est_sautee_sauf_si_on_force(monkeyp
 
     appels = []
 
-    async def _disc(source, out):
+    #  ⚠️ PIÈGE N°6 : le faux doit porter TOUTE la signature du vrai.
+    #  `leger` est arrivé le 22/09 ; sans lui, l'appel levait un
+    #  TypeError avalé par `relever`, et le test croyait la source morte.
+    async def _disc(source, out, leger=False):
         appels.append(source["cle"])
         out["code"] = 200
 
