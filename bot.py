@@ -13876,6 +13876,20 @@ async def activite_passage_task():
                      else "")
                   + (" · ⚠️ suivi MUET (aucune activité mesurée)"
                      if rap.get("suivi_muet") else "")
+                  #  ⚠️ LE RATTRAPAGE DU 22/09. `libérés au passage` = membres
+                  #  qui avaient ÉCRIT en étant masqués sans que le retrait sur
+                  #  message aboutisse. Élevé passage après passage : le chemin
+                  #  rapide est en panne, à investiguer.
+                  + (f" · 🔓 {rap.get('retours_forces')} libéré(s) au passage "
+                     f"(avaient écrit masqués)"
+                     if rap.get("retours_forces") else "")
+                  + (f" · {rap.get('hors_perimetre')} hors périmètre repris "
+                     f"pour être libérés"
+                     if rap.get("hors_perimetre") else "")
+                  + (" · 🚫 NON LIBÉRABLES (rôle au-dessus du bot) : "
+                     + ", ".join(f"« {k} » ×{v}" for k, v in
+                                 (rap.get("bloques_hierarchie") or {}).items())
+                     if rap.get("bloques_hierarchie") else "")
                   #  ⚠️ CE COMPTEUR ÉTAIT ÉCRIT ET LU NULLE PART. Le résumé au
                   #  staff annonçait « N à dépouiller » puis « 0 dépouillé(s) »
                   #  sans jamais dire pourquoi — la faute exacte qui avait fait
@@ -28317,6 +28331,12 @@ async def _check_compromised_account(msg):
         import traceback; traceback.print_exc()
 
 
+#  Les retraits d'étiquette AFK lancés depuis `on_message`. Voir le
+#  commentaire à l'endroit où ils sont créés : sans référence, une tâche peut
+#  disparaître en plein vol.
+_TACHES_RETOUR_AFK: set = set()
+
+
 @bot.event
 async def on_message(msg):
     if not msg.guild:
@@ -28337,8 +28357,20 @@ async def on_message(msg):
             # d'entiers en mémoire, sans await : elle coupe avant tout accès
             # base ou réseau pour l'immense majorité des messages.
             if activite_niv.porte_une_etiquette(msg.author):
-                asyncio.create_task(
+                #  ⚠️ LA MARQUE D'ABORD, LA TENTATIVE ENSUITE — 22/09/2026.
+                #  Le retrait ci-dessous est au mieux de ses efforts. S'il rate,
+                #  cette marque est ce qui permet au passage suivant de libérer
+                #  le membre quand même : sans elle, un membre masqué par cumul
+                #  de rappels doux restait masqué indéfiniment.
+                await activite_module.noter_retour_demande(
+                    msg.guild.id, msg.author.id)
+                #  ⚠️ LA TÂCHE EST RETENUE. `create_task` sans référence peut
+                #  être ramassée par le ramasse-miettes en plein `await` : le
+                #  retrait s'arrêterait au milieu, sans erreur et sans trace.
+                _t = asyncio.create_task(
                     activite_pass.retour_immediat(msg.guild, msg.author))
+                _TACHES_RETOUR_AFK.add(_t)
+                _t.add_done_callback(_TACHES_RETOUR_AFK.discard)
             # ═══ LE SALON AFK — demandé le 30/08/2026 ═══
             # ⚠️ APRÈS `marquer_actif`, ET C'EST L'ORDRE QUI COMPTE. Le membre
             # doit être compté actif AVANT qu'on efface sa preuve : l'inverse

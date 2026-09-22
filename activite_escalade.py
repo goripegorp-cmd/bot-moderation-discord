@@ -63,7 +63,11 @@ async def classer(guild) -> dict:
     cfg_act = await activite.config(guild.id)
     out = {"groupes": {}, "suivis": 0, "actifs": 0, "revenus": [],
            "doux": [], "rappel": [], "retrait": [], "expulsion": [],
-           "observation": 0, "suivi_muet": False}
+           "observation": 0, "suivi_muet": False,
+           #  Membres libérés par le passage parce qu'ils ont ÉCRIT en étant
+           #  masqués (le retrait sur message avait raté), et membres hors du
+           #  périmètre repris seulement pour être libérés.
+           "retours_forces": 0, "hors_perimetre": 0}
     if not await activite.actif(guild.id):
         return out
 
@@ -93,6 +97,20 @@ async def classer(guild) -> dict:
     #  Alimente le cache qui rend le retour immédiat possible sur chaque message
     #  (voir `activite_niveaux._IDS_CONNUS`).
     niv.memoriser_ids(cfg_act)
+    #  ⚠️ LE REGISTRE DES ÉTIQUETTES — 22/09/2026. Une étiquette n'est posée
+    #  QUE par un passage : l'inscrire ici garantit que tout rôle qui a pu être
+    #  posé sur quelqu'un reste reconnu, même si le panneau en désigne un autre
+    #  ensuite. Sans lui, redésigner le palier 1 laissait les porteurs de
+    #  l'ancien rôle masqués pour toujours. Une écriture, seulement quand un
+    #  identifiant nouveau apparaît.
+    try:
+        _hist = niv.registre_a_jour(cfg_act)
+        if _hist is not None:
+            await activite._db_set(guild.id, niv.CLE_HISTORIQUE, _hist)
+            cfg_act[niv.CLE_HISTORIQUE] = _hist
+            niv.memoriser_ids(cfg_act)
+    except Exception as ex:
+        _log(f"[activite classer registre] {ex}")
     semaine = cal.semaine()
 
     def _groupe(cle, role_obj):
@@ -106,9 +124,21 @@ async def classer(guild) -> dict:
 
     for member in guild.members:
         try:
+            #  ⚠️ HORS PÉRIMÈTRE, MAIS PORTEUR D'UNE DE NOS ÉTIQUETTES.
+            #  Le palier 2 retire TOUS les rôles — y compris le rôle surveillé
+            #  qui faisait entrer le membre dans le suivi. Il sortait donc du
+            #  périmètre : plus aucun passage ne le voyait, et s'il écrivait
+            #  pendant que le retrait sur message ratait, rien ne le libérerait
+            #  jamais. On le reprend, SEULEMENT pour le libérer — jamais pour
+            #  l'escalader davantage.
+            hors_perimetre = False
             if not await activite.membre_concerne(member, cfg_act):
-                continue
-            out["suivis"] += 1
+                if not await _liberable_hors_perimetre(member, cfg_act):
+                    continue
+                hors_perimetre = True
+                out["hors_perimetre"] += 1
+            else:
+                out["suivis"] += 1
 
             mesure = await activite.presence(guild.id, member, cfg_act,
                                              suivi_jours=suivi_jours,
@@ -151,6 +181,36 @@ async def classer(guild) -> dict:
                      "palier": palier,
                      "doux_deja": doux_deja, "semaine": semaine}
 
+            #  ⚠️ IL A ÉCRIT EN PORTANT UNE ÉTIQUETTE MASQUANTE — 22/09/2026.
+            #  La règle du propriétaire : « il écrit dans le salon AFK… il est
+            #  redevenu actif ». Le retrait sur message l'applique ; s'il a raté,
+            #  le verdict seul ne suffit pas à rattraper : un membre masqué par
+            #  cumul de rappels doux reste « rappel » tant que sa présence n'a
+            #  pas remonté — trois jours sur sept — et personne ne réessaie
+            #  après un message resté sans effet. La marque durable tranche :
+            #  il est libéré comme au retrait sur message, ardoise comprise.
+            _masque = bool(niv.etiquettes_portees(member, cfg_act, masquantes=True))
+            if etat.get("retour_demande"):
+                if _masque:
+                    fiche["palier"] = "actif"
+                    fiche["retour_force"] = True
+                    out["retours_forces"] += 1
+                    out["revenus"].append(fiche)
+                    if not hors_perimetre:
+                        out["actifs"] += 1
+                    continue
+                #  ⚠️ MARQUE PÉRIMÉE = IMMUNITÉ PERMANENTE. Elle bloque la pose
+                #  (voir `appliquer_rappels`) : on l'efface dès qu'elle ne
+                #  correspond plus à un masquage réel.
+                await activite.effacer_retour_demande(guild.id, member.id)
+
+            if hors_perimetre:
+                #  Repris pour être libéré, pas pour être jugé : on ne l'ajoute
+                #  à aucune liste d'escalade.
+                if palier in ("actif", "doux"):
+                    out["revenus"].append(fiche)
+                continue
+
             if palier == "actif":
                 out["actifs"] += 1
                 #  À jour, mais porte-t-il encore une étiquette d'absence ou
@@ -167,7 +227,9 @@ async def classer(guild) -> dict:
                 #  ⚠️ LES TROIS ÉTIQUETTES ICI. Un membre redevenu actif doit
                 #  perdre AUSSI l'étiquette « peu actif », sinon elle devient un
                 #  cliquet et le rôle finit par mentionner tout le serveur.
-                a_des_roles_afk = any(r.id in etiq_ids for r in member.roles)
+                #  ⚠️ `etiquettes_portees` et non `etiq_ids` : une étiquette
+                #  redésignée ou orpheline doit partir comme les autres.
+                a_des_roles_afk = bool(niv.etiquettes_portees(member, cfg_act))
                 if a_des_roles_afk or doux_deja or etat["a_des_roles_retires"]:
                     out["revenus"].append(fiche)
                 continue
@@ -178,8 +240,7 @@ async def classer(guild) -> dict:
             #  DÉPOUILLÉ sous une étiquette « peu actif ». On le verse aussi
             #  dans `revenus` pour qu'on lui rende ce qu'on lui a pris ; son
             #  étiquette douce, elle, sera reposée par `appliquer_doux`.
-            if palier == "doux" and (any(r.id in afk_ids for r in member.roles)
-                                     or etat["a_des_roles_retires"]):
+            if palier == "doux" and (_masque or etat["a_des_roles_retires"]):
                 out["revenus"].append(fiche)
 
             g[palier].append(fiche)
@@ -198,6 +259,33 @@ async def classer(guild) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Le retour — le pendant exact du retrait
 # ═══════════════════════════════════════════════════════════════════════════════
+
+async def _liberable_hors_perimetre(member, cfg_act: dict) -> bool:
+    """Hors du suivi, mais porteur d'une étiquette que le SYSTÈME a posée ?
+
+    ⚠️ LES INTOUCHABLES LE RESTENT : bot, propriétaire, administrateur, immunisé,
+    dispensé. On ne reprend que ceux que le suivi lui-même a fait sortir — un
+    palier 2 dépouillé de son rôle surveillé. Test en mémoire d'abord : cette
+    fonction est appelée pour chaque membre hors périmètre du serveur.
+    """
+    try:
+        if member.bot:
+            return False
+        if not niv.etiquettes_portees(member, cfg_act):
+            return False
+        if member.guild.owner_id == member.id:
+            return False
+        if getattr(member.guild_permissions, "administrator", False):
+            return False
+        if activite._est_immunise is not None and await activite._est_immunise(member):
+            return False
+        if activite.est_dispense(member, cfg_act):
+            return False
+        return True
+    except Exception as ex:
+        _log(f"[activite hors_perimetre {getattr(member, 'id', '?')}] {ex}")
+        return False
+
 
 async def traiter_retour(guild, fiche, cfg_act: dict) -> dict:
     """Un membre est redevenu à jour : on défait tout ce qu'on lui avait fait.
@@ -236,6 +324,14 @@ async def traiter_retour(guild, fiche, cfg_act: dict) -> dict:
         if fiche.get("palier", "actif") == "actif" and fiche.get("doux_deja"):
             await activite.remettre_doux(guild.id, member.id)
             res["doux_efface"] = True
+
+        #  ⚠️ ON N'EFFACE LA MARQUE QUE SI LE MASQUAGE EST VRAIMENT LEVÉ. Si
+        #  l'étiquette n'a pas pu partir (hiérarchie), la marque reste : le
+        #  jour où le propriétaire remonte le rôle du bot, le passage suivant
+        #  libère le membre sans qu'il ait à réécrire.
+        if res["etiquette"] or not niv.etiquettes_portees(member, cfg_act,
+                                                          masquantes=True):
+            await activite.effacer_retour_demande(guild.id, member.id)
     except Exception as ex:
         _log(f"[activite traiter_retour {member.id}] {ex}")
     return res
@@ -361,6 +457,14 @@ async def appliquer_abandon(guild, fiches: list, cfg_act: dict,
         if not await activite.membre_concerne(member, cfg_act):
             res["ignores"] += 1
             continue
+        #  ⚠️ A-T-IL ÉCRIT DEPUIS LE CLASSEMENT ? Un passage sur un gros
+        #  serveur dure plusieurs minutes : un membre qui écrit entre le
+        #  classement et la pose se faisait remasquer juste après avoir été
+        #  libéré par son message. La marque durable le dit, on s'abstient.
+        if (await activite.lire_etat(guild.id, member.id)).get("retour_demande"):
+            res["ignores"] += 1
+            res["revenus_entre_temps"] = res.get("revenus_entre_temps", 0) + 1
+            continue
         try:
             if await niv.poser_niveau(guild, member, 3, cfg_act):
                 res["faits"] += 1
@@ -389,6 +493,14 @@ async def appliquer_rappels(guild, fiches: list, cfg_act: dict) -> dict:
         if not await activite.membre_concerne(member, cfg_act):
             res["ignores"] += 1
             continue
+        #  ⚠️ A-T-IL ÉCRIT DEPUIS LE CLASSEMENT ? Un passage sur un gros
+        #  serveur dure plusieurs minutes : un membre qui écrit entre le
+        #  classement et la pose se faisait remasquer juste après avoir été
+        #  libéré par son message. La marque durable le dit, on s'abstient.
+        if (await activite.lire_etat(guild.id, member.id)).get("retour_demande"):
+            res["ignores"] += 1
+            res["revenus_entre_temps"] = res.get("revenus_entre_temps", 0) + 1
+            continue
         try:
             if await niv.poser_niveau(guild, member, 1, cfg_act):
                 res["faits"] += 1
@@ -415,6 +527,14 @@ async def appliquer_retraits(guild, fiches: list, cfg_act: dict) -> dict:
             continue
         if not await activite.membre_concerne(member, cfg_act):
             res["ignores"] += 1
+            continue
+        #  ⚠️ A-T-IL ÉCRIT DEPUIS LE CLASSEMENT ? Un passage sur un gros
+        #  serveur dure plusieurs minutes : un membre qui écrit entre le
+        #  classement et la pose se faisait remasquer juste après avoir été
+        #  libéré par son message. La marque durable le dit, on s'abstient.
+        if (await activite.lire_etat(guild.id, member.id)).get("retour_demande"):
+            res["ignores"] += 1
+            res["revenus_entre_temps"] = res.get("revenus_entre_temps", 0) + 1
             continue
         try:
             #  ⚠️ GARDE-FOU AJOUTE LE 12/08/2026 — NE PAS LE RETIRER.

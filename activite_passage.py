@@ -286,6 +286,19 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
     #  « compte abandonné » (étape 5) : c'est une étiquette mentionnable, pas
     #  une expulsion. Le bot ne met toujours personne dehors tout seul.
     rap["actions"]["a_expulser"] = len(cl["expulsion"])
+    #  ⚠️ CE QUI A ÉTÉ RATTRAPÉ, ET CE QUI BLOQUE — 22/09/2026.
+    #  `retours_forces` : membres libérés par le passage parce qu'ils avaient
+    #  ÉCRIT en étant masqués et que le retrait sur message avait raté. S'il
+    #  reste haut passage après passage, le chemin rapide est en panne.
+    #  `bloques_hierarchie` : étiquettes impossibles à retirer, rôle AFK
+    #  au-dessus du rôle du bot. Le seul cas que le bot ne peut PAS réparer
+    #  seul — il faut le dire au propriétaire, avec le nom du rôle.
+    rap["retours_forces"] = cl.get("retours_forces", 0)
+    rap["hors_perimetre"] = cl.get("hors_perimetre", 0)
+    _bloq = niv.BLOQUES_HIERARCHIE.pop(guild.id, {})
+    rap["bloques_hierarchie"] = {
+        (getattr(guild.get_role(rid), "name", None) or str(rid)): n
+        for rid, n in _bloq.items()}
     return rap
 
 
@@ -612,6 +625,13 @@ def resume_texte(rap: dict) -> str:
             f"au prochain passage — `{activite.PLAFOND_ACTIONS_PAR_PASSAGE}` "
             f"maximum à la fois, les plus anciens d'abord. "
             f"Rien n'est perdu, tout s'écoule.")
+    if rap.get("bloques_hierarchie"):
+        _noms = ", ".join(f"« {k} » ({v})"
+                          for k, v in rap["bloques_hierarchie"].items())
+        lignes.append(
+            f"🚫 **Des membres ne peuvent PAS être libérés** : {_noms[:300]}. "
+            f"Ce rôle est au-dessus du rôle du bot — remontez le rôle du bot "
+            f"au-dessus de lui dans Paramètres du serveur → Rôles.")
     if rap.get("anormal"):
         lignes.append("⚠️ Plus de la moitié des membres suivis bascule d'un "
                       "coup — vérifiez vos seuils avant de laisser filer.")

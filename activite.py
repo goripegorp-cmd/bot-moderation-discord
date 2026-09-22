@@ -239,6 +239,11 @@ async def init_db():
         for colonne, definition in (
             ("doux", "INTEGER NOT NULL DEFAULT 0"),
             ("derniere_semaine_doux", "TEXT"),
+            #  ⚠️ « A ÉCRIT EN PORTANT UNE ÉTIQUETTE MASQUANTE » — 22/09/2026.
+            #  Posée par `on_message`, effacée par `traiter_retour`. C'est ce qui
+            #  permet au passage de libérer un membre même quand le retrait sur
+            #  message a raté — voir `noter_retour_demande`.
+            ("retour_demande", "INTEGER NOT NULL DEFAULT 0"),
         ):
             try:
                 await db.execute(
@@ -326,6 +331,12 @@ CLES_DEFAUT = {
     #  les paliers 1 et 2 — voir `roles_afk`. L'expulsion, elle, reste une
     #  proposition au staff et n'est JAMAIS automatique.
     "activite_role_abandon": 0,         # posé au 3e — plus aucune activité
+    #  ⚠️ LE REGISTRE DES ÉTIQUETTES — 22/09/2026. Tous les identifiants jamais
+    #  configurés pour un palier, pour que les porteurs d'un rôle redésigné
+    #  depuis puissent encore être libérés. DOIT figurer ici : `config()` jette
+    #  toute clé absente de ce dictionnaire, et le registre se serait détruit
+    #  lui-même à chaque passage (trouvé par le test F1b).
+    "activite_etiquettes_historique": {},
     #  Masquer TOUT le serveur aux porteurs de ces rôles, sauf les deux salons
     #  d'activité. Réglable, parce que c'est l'action la plus visible du système.
     "activite_masquer_salons": True,
@@ -367,6 +378,14 @@ async def config(guild_id: int) -> dict:
             out["activite_roles"] = json.loads(out["activite_roles"])
         except Exception:
             out["activite_roles"] = {}
+    #  Même traitement que `activite_roles` : selon le stockage, un dict peut
+    #  revenir sérialisé.
+    if isinstance(out["activite_etiquettes_historique"], str):
+        try:
+            out["activite_etiquettes_historique"] = json.loads(
+                out["activite_etiquettes_historique"])
+        except Exception:
+            out["activite_etiquettes_historique"] = {}
     return out
 
 
@@ -1026,11 +1045,13 @@ async def lire_etat(guild_id: int, user_id: int) -> dict:
     `a_des_roles_retires` est ce qui permet de RENDRE ses rôles à quelqu'un qui
     ne porte plus d'étiquette AFK — voir le bug corrigé dans `classer`.
     """
-    vide = {"doux": 0, "semaine": "", "a_des_roles_retires": False}
+    vide = {"doux": 0, "semaine": "", "a_des_roles_retires": False,
+            "retour_demande": False}
     try:
         async with _get_db() as db:
             async with db.execute(
-                "SELECT doux, derniere_semaine_doux, roles_retires FROM activite_etat"
+                "SELECT doux, derniere_semaine_doux, roles_retires,"
+                " retour_demande FROM activite_etat"
                 " WHERE guild_id=? AND user_id=?", (guild_id, user_id),
             ) as cur:
                 row = await cur.fetchone()
@@ -1042,7 +1063,8 @@ async def lire_etat(guild_id: int, user_id: int) -> dict:
         except Exception:
             gardes = False
         return {"doux": int(row[0] or 0), "semaine": str(row[1] or ""),
-                "a_des_roles_retires": gardes}
+                "a_des_roles_retires": gardes,
+                "retour_demande": bool(row[3])}
     except Exception as ex:
         _log(f"[activite lire_etat] {ex}")
         return vide
@@ -1078,6 +1100,51 @@ async def noter_doux(guild_id: int, user_id: int, semaine: str) -> int:
     except Exception as ex:
         _log(f"[activite noter_doux] {ex}")
         return 0
+
+
+async def noter_retour_demande(guild_id: int, user_id: int) -> bool:
+    """Un membre qui porte une étiquette MASQUANTE vient d'écrire. On le RETIENT.
+
+    ⚠️ ÉCRIT AVANT de tenter le retrait, jamais après. Si la tentative échoue
+    (redémarrage, erreur Discord, tâche perdue), cette ligne est tout ce qui
+    reste pour que le passage suivant le libère. L'écrire après ferait perdre
+    exactement le cas qu'elle doit couvrir.
+
+    Coût : une écriture, et seulement pour les membres masqués qui écrivent —
+    `on_message` ne l'appelle que derrière `porte_une_etiquette`, un test en
+    mémoire.
+    """
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO activite_etat(guild_id, user_id, retour_demande)"
+                " VALUES(?,?,1)"
+                " ON CONFLICT(guild_id, user_id) DO UPDATE SET retour_demande=1",
+                (guild_id, user_id))
+            await db.commit()
+        return True
+    except Exception as ex:
+        _log(f"[activite noter_retour_demande] {ex}")
+        return False
+
+
+async def effacer_retour_demande(guild_id: int, user_id: int) -> None:
+    """Le retour a eu lieu (ou la marque est périmée) : on l'efface.
+
+    ⚠️ UNE MARQUE PÉRIMÉE EST UNE IMMUNITÉ PERMANENTE. Elle empêche la pose
+    d'une étiquette masquante (voir `appliquer_rappels`) : laissée en place
+    après le retour, elle rendrait le membre impossible à remasquer — le
+    contraire de la règle du propriétaire, « s'il redevient inactif, on le
+    redétecte ».
+    """
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE activite_etat SET retour_demande=0"
+                " WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+            await db.commit()
+    except Exception as ex:
+        _log(f"[activite effacer_retour_demande] {ex}")
 
 
 async def remettre_doux(guild_id: int, user_id: int) -> None:

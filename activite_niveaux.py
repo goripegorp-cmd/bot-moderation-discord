@@ -122,6 +122,98 @@ def roles_afk(guild, cfg_act: dict) -> list:
 #  écrits par des membres qui n'ont aucune étiquette.
 _IDS_CONNUS: set[int] = set()
 
+#  ⚠️ LES NOMS QUE LE BOT DONNE LUI-MÊME à ses étiquettes (`creer_role`). Ils
+#  servent de filet pour les étiquettes orphelines créées AVANT le registre :
+#  un rôle « 💤 AFK » que la config ne désigne plus reste une étiquette du
+#  système, et doit pouvoir partir.
+NOMS_MASQUANTS = frozenset({NOM_NIVEAU1, NOM_NIVEAU2, NOM_ABANDON})
+NOMS_ETIQUETTES = NOMS_MASQUANTS | {NOM_DOUX}
+
+#  Le registre durable : {cle_de_palier: [identifiants déjà configurés]}.
+#  Tenu par `classer` à chaque passage — voir `inscrire_historique`.
+CLE_HISTORIQUE = "activite_etiquettes_historique"
+_CLES_MASQUANTES = ("activite_role_niveau1", "activite_role_niveau2",
+                    "activite_role_abandon")
+
+#  Les retraits refusés par la hiérarchie depuis le dernier passage :
+#  {guild_id: {role_id: nb_membres}}. Lu et vidé par le compte rendu.
+BLOQUES_HIERARCHIE: dict[int, dict[int, int]] = {}
+
+
+def ids_historiques(cfg_act: dict, masquants_seulement: bool = False) -> set[int]:
+    """Tous les identifiants jamais configurés comme étiquette, par le registre."""
+    out = set()
+    hist = cfg_act.get(CLE_HISTORIQUE) or {}
+    if not isinstance(hist, dict):
+        return out
+    for cle, ids in hist.items():
+        if masquants_seulement and cle not in _CLES_MASQUANTES:
+            continue
+        for x in (ids or []):
+            try:
+                v = int(x)
+            except (TypeError, ValueError):
+                continue
+            if v:
+                out.add(v)
+    return out
+
+
+def registre_a_jour(cfg_act: dict) -> dict | None:
+    """Le registre complété des identifiants ACTUELS, ou None s'il est déjà à jour.
+
+    ⚠️ RIEN N'EST JAMAIS RETIRÉ DU REGISTRE. Un identifiant périmé coûte au pire
+    une comparaison ; un identifiant oublié laisse un membre masqué pour
+    toujours. C'est le même choix que `memoriser_ids`, rendu durable.
+    """
+    hist = cfg_act.get(CLE_HISTORIQUE) or {}
+    if not isinstance(hist, dict):
+        hist = {}
+    neuf = {k: list(v or []) for k, v in hist.items()}
+    change = False
+    for cle in _CLE_PAR_NIVEAU.values():
+        try:
+            rid = int(cfg_act.get(cle) or 0)
+        except (TypeError, ValueError):
+            rid = 0
+        if rid and rid not in [int(x) for x in neuf.get(cle, []) if str(x).lstrip("-").isdigit()]:
+            neuf.setdefault(cle, []).append(rid)
+            change = True
+    return neuf if change else None
+
+
+def est_etiquette(role, cfg_act: dict, masquante: bool = False) -> bool:
+    """Ce rôle est-il une étiquette du système — actuelle, ancienne ou orpheline ?
+
+    `masquante=True` restreint aux paliers qui MASQUENT (1, 2, abandon) : c'est
+    la question du retrait sur message, qui ne doit pas se déclencher pour
+    l'étiquette douce (voir `ids_afk`).
+
+    ⚠️ À N'UTILISER QUE POUR RETIRER. Poser ou masquer à partir de cette
+    reconnaissance élargie étiquetterait des gens avec un rôle que le
+    propriétaire a justement cessé d'utiliser.
+    """
+    try:
+        rid = int(role.id)
+    except Exception:
+        return False
+    actuels = ids_afk(cfg_act) if masquante else ids_etiquettes(cfg_act)
+    if rid in actuels:
+        return True
+    if rid in ids_historiques(cfg_act, masquants_seulement=masquante):
+        return True
+    noms = NOMS_MASQUANTS if masquante else NOMS_ETIQUETTES
+    return str(getattr(role, "name", "") or "") in noms
+
+
+def etiquettes_portees(member, cfg_act: dict, masquantes: bool = False) -> list:
+    """Les étiquettes (actuelles, anciennes, orphelines) que porte ce membre."""
+    try:
+        return [r for r in member.roles
+                if not r.is_default() and est_etiquette(r, cfg_act, masquantes)]
+    except Exception:
+        return []
+
 
 def memoriser_ids(cfg_act: dict) -> None:
     """Enregistre les rôles d'inactivité d'une guilde dans le cache mémoire.
@@ -132,14 +224,20 @@ def memoriser_ids(cfg_act: dict) -> None:
     membre masqué sans qu'il puisse revenir.
     """
     _IDS_CONNUS.update(ids_afk(cfg_act))
+    #  ⚠️ ET TOUS LES ANCIENS. Sans eux, un membre qui porte une étiquette
+    #  redésignée depuis n'avait plus de retrait sur message après un
+    #  redémarrage — le cache ne gardait l'ancien identifiant qu'en mémoire.
+    _IDS_CONNUS.update(ids_historiques(cfg_act, masquants_seulement=True))
 
 
 def porte_une_etiquette(member) -> bool:
     """Ce membre porte-t-il un rôle d'inactivité ? Sans base, sans réseau."""
-    if not _IDS_CONNUS:
-        return False
+    #  ⚠️ PLUS DE SORTIE ANTICIPÉE SUR UN CACHE VIDE. Il l'est entre le
+    #  démarrage et la fin d'`on_ready`, ou si l'amorce a échoué : le nom
+    #  standard suffit alors à reconnaître une étiquette posée par le bot.
     try:
-        return any(r.id in _IDS_CONNUS for r in member.roles)
+        return any(r.id in _IDS_CONNUS or getattr(r, "name", "") in NOMS_MASQUANTS
+                   for r in member.roles)
     except Exception:
         return False
 
@@ -576,8 +674,21 @@ async def retirer_niveaux(guild, member, cfg_act: dict) -> bool:
     gens redevenus actifs — et le ping finirait par mentionner tout le serveur,
     exactement ce que ce rôle était censé éviter.
     """
-    a_retirer = [r for r in roles_etiquettes(guild, cfg_act)
-                 if r in member.roles and utilisable(guild, r)]
+    #  ⚠️ TOUTE ÉTIQUETTE PORTÉE, PAS SEULEMENT LES ACTUELLES — voir l'en-tête
+    #  du 22/09 : une étiquette redésignée ou orpheline ne partait jamais.
+    portees = etiquettes_portees(member, cfg_act, masquantes=False)
+    a_retirer = [r for r in portees if utilisable(guild, r)]
+    #  ⚠️ LE REFUS DE LA HIÉRARCHIE N'EST PLUS SILENCIEUX. Un rôle AFK passé
+    #  au-dessus du rôle du bot ne peut pas être retiré : le membre reste
+    #  masqué, et c'est au propriétaire d'agir. On le compte pour le compte
+    #  rendu, et on l'écrit — message stable, détail à part.
+    for r in portees:
+        if r not in a_retirer:
+            _par_role = BLOQUES_HIERARCHIE.setdefault(guild.id, {})
+            _par_role[r.id] = _par_role.get(r.id, 0) + 1
+            _log("[activite_niveaux][E201] etiquette non retirable (hierarchie)")
+            _log(f"[activite_niveaux][E201:DETAIL] membre={member.id} "
+                 f"role={r.id} « {getattr(r, 'name', '?')} »")
     if not a_retirer:
         return False
     try:
