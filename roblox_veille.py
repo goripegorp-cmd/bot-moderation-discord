@@ -1372,10 +1372,19 @@ API_DETAILS = "https://catalog.roblox.com/v1/catalog/items/details"
 #  L'éclaireur peut y frapper toutes les 75 secondes sans jamais retirer une
 #  requête au relevé complet ni aux fiches.
 API_IDENTIFIANTS = "https://catalog.roblox.com/v1/search/items"
+#  ⚠️ LE SECOND SEAU. Même tête que `API_IDENTIFIANTS` (mesuré le 23/09 :
+#  10/10 en créations, 8/8 en collectionnables), un compteur de débit
+#  SÉPARÉ, et — en production — pas disputé par le voisinage de l'IP.
+API_SONDE_FICHES = "https://catalog.roblox.com/v2/search/items/details"
+#  10 articles : 7,5 Ko. La tête suffit à une sonde — une création apparaît
+#  EN TÊTE du tri par date — et la sonde principale (120 identifiants)
+#  reprend la couverture large dès qu'elle repasse.
+LIMITE_SONDE_FICHES = 10
 
 
 async def relever_identifiants(*, collectionnables: bool = False,
-                               limite: int = 120) -> dict:
+                               limite: int = 120,
+                               seau: str = "identifiants") -> dict:
     """La tête du catalogue Roblox, en IDENTIFIANTS SEULS. UNE requête.
 
     Rend `{"ids": set[int], "code": int|None, "reste": int|None}`.
@@ -1389,6 +1398,10 @@ async def relever_identifiants(*, collectionnables: bool = False,
 
     `collectionnables=True` pose `SalesTypeFilter=2` : la même tête, limitée
     aux articles Limited/Collectible. Un article qui le devient y entre.
+
+    `seau="fiches"` pose la MÊME question au point d'API des fiches, qui a son
+    propre compteur de débit : c'est le secours quand l'IP partagée a vidé le
+    seau des identifiants. Voir `API_SONDE_FICHES`.
     """
     params = {
         "Category": 1,
@@ -1400,10 +1413,15 @@ async def relever_identifiants(*, collectionnables: bool = False,
     }
     if collectionnables:
         params["SalesTypeFilter"] = 2
-    out = {"ids": set(), "bundles": set(), "code": None, "reste": None}
+    url = API_IDENTIFIANTS
+    if seau == "fiches":
+        url = API_SONDE_FICHES
+        params["Limit"] = LIMITE_SONDE_FICHES
+    out = {"ids": set(), "bundles": set(), "code": None, "reste": None,
+           "seau": seau}
     try:
         async with _ouvrir() as sess:
-            async with sess.get(API_IDENTIFIANTS, params=params) as r:
+            async with sess.get(url, params=params) as r:
                 out["code"] = r.status
                 try:
                     out["reste"] = int(r.headers.get("x-ratelimit-remaining"))

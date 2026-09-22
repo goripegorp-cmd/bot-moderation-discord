@@ -132,6 +132,32 @@ async def test_le_releve_d_identifiants_frappe_le_bon_point_avec_les_bons_parame
 
 
 @pytest.mark.asyncio
+async def test_le_SECOND_SEAU_pose_la_MEME_question_aux_fiches(monkeypatch):
+    """⚠️ LE SECOURS DU 23/09. Quand l'IP partagée a vidé le seau des
+    identifiants, la même question part au point des FICHES — son propre
+    compteur (mesuré), la même tête (10/10 et 8/8 mesurés sur l'API réelle).
+
+    C'est exactement le point que le test précédent interdit à la sonde
+    NORMALE : il est celui du relevé complet. Le secours ne le prend qu'au
+    refus, et l'éclaireur cède déjà la place pendant le relevé
+    (`catalogue_est_occupe`) : aucun chevauchement."""
+    j = []
+    monkeypatch.setattr(veille, "_ouvrir",
+                        lambda: _Session(data={"data": [{"id": 7, "itemType": "Asset"}]},
+                                         journal=j))
+    r = await veille.relever_identifiants(collectionnables=True, seau="fiches")
+    assert r["code"] == 200 and r["ids"] == {7}
+    url, p = j[0]
+    assert url == veille.API_SONDE_FICHES
+    assert url.endswith("/v2/search/items/details"), "le secours frappe le seau vide"
+    assert p["Limit"] == veille.LIMITE_SONDE_FICHES == 10
+    #  LA MÊME QUESTION : même créateur, même tri, même drapeau, même filtre.
+    assert p["SalesTypeFilter"] == 2
+    assert p["CreatorTargetId"] == veille.CREATEUR_ROBLOX
+    assert p["SortType"] == 3 and p["IncludeNotForSale"] == "true"
+
+
+@pytest.mark.asyncio
 async def test_le_filtre_collectionnables_ne_change_QUE_ce_parametre(monkeypatch):
     """Même question, même tri, même créateur — un seul paramètre en plus.
     Deux requêtes qui divergeraient ailleurs mesureraient deux choses."""
@@ -270,7 +296,14 @@ def test_l_eclaireur_ne_touche_pas_au_quota_des_fiches_tant_que_rien_ne_bouge():
     """Deux relevés d'identifiants, puis RIEN si l'ensemble n'a pas changé —
     c'est ce qui rend la cadence tenable."""
     c = _fn("eclaireur_task")
-    assert c.count("relever_identifiants(") == 2
+    #  ⚠️ TROIS APPELS DEPUIS LE 23/09, ET C'EST VOULU : la file du passage,
+    #  la même posée au SECOND SEAU (les fiches) quand le premier refuse, et
+    #  l'autre file si le quota annoncé le permet. Jamais plus.
+    assert c.count("relever_identifiants(") == 3
+    i_429 = c.index("== 429")
+    #  `ast.unparse` normalise les guillemets : on cherche la forme qu'il rend.
+    assert "seau='fiches'" in c[i_429:i_429 + 1500], (
+        "le second seau doit être réservé au refus du premier")
     #  ⚠️ L'ALTERNANCE (22/09) : plus de `False`/`True` en dur. Le passage
     #  interroge UNE file, et l'autre seulement si le quota le permet — c'est
     #  ce qui a mis fin au 429 systématique mesuré en production.

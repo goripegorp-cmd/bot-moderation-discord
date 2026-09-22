@@ -85,8 +85,12 @@ class FauxCatalogue:
     async def identifiants_connus(self):
         return {1, 2}, {1}
 
-    async def relever_identifiants(self, *, collectionnables=False, limite=120):
-        self.demandes.append("collect" if collectionnables else "creations")
+    #  ⚠️ PIÈGE N°6 : la VRAIE signature, `seau` compris — sans lui, l'appel
+    #  de secours lèverait un TypeError et le test mesurerait une panne.
+    async def relever_identifiants(self, *, collectionnables=False, limite=120,
+                                   seau="identifiants"):
+        self.demandes.append(("collect" if collectionnables else "creations")
+                             + (":fiches" if seau == "fiches" else ""))
         if self.reponses:
             return self.reponses.pop(0)
         return {"ids": set(), "bundles": set(), "code": 200, "reste": 11}
@@ -110,16 +114,30 @@ class FauxCatalogue:
         return True
 
 
+class FauxAsyncio:
+    """Le sommeil est instantané — mais NOTÉ : c'est lui qu'on vérifie quand
+    on prétend écouter `retry-after`."""
+
+    def __init__(self):
+        self.sommeils = []
+
+    async def sleep(self, d):
+        self.sommeils.append(d)
+
+
 def _banc(reponses, etat=None):
     journal = []
     cat = FauxCatalogue(reponses)
     E = {"amorce": True, "vus": {1, 2}, "vus_limited": {1},
          "tour": 0, "palier": 0, "pause_jusqu": None, "refus": 0, "reste": None,
+         "rattrapes": 0, "serie": 0, "serie_max": 0, "alerte": False,
+         "dernier_refus": None, "dernier_succes": datetime.now(timezone.utc),
          "passages": 0, "sautes": 0, "erreurs": 0, "nouveautes": 0,
          "bascules": 0, "publies": 0,
          "dernier_passage": None, "dernier_signal": None}
     if etat:
         E.update(etat)
+    faux_asyncio = FauxAsyncio()
 
     async def _publier(*a, **kw):
         journal.append("publie")
@@ -133,12 +151,17 @@ def _banc(reponses, etat=None):
         "ECLAIREUR_PAUSES": _constante("ECLAIREUR_PAUSES"),
         "ECLAIREUR_RESTE_CONFORTABLE": _constante("ECLAIREUR_RESTE_CONFORTABLE"),
         "ECLAIREUR_BATTEMENT": _constante("ECLAIREUR_BATTEMENT"),
+        "ECLAIREUR_SOBRIETE_S": _constante("ECLAIREUR_SOBRIETE_S"),
+        "ECLAIREUR_ALERTE_APRES_S": _constante("ECLAIREUR_ALERTE_APRES_S"),
+        "asyncio": faux_asyncio,
+        "random": type("Rnd", (), {"uniform": staticmethod(lambda a, b: 0.5)})(),
         "_publier_file_accessoires": _publier,
         "_age_s": lambda _d: 10,
         "datetime": datetime, "timezone": timezone, "timedelta": timedelta,
         "print": lambda *a, **k: journal.append(" ".join(str(x) for x in a)),
     }
     exec(_src("eclaireur_task"), ns)          # noqa: S102 — code du dépôt
+    ns["_sommeils"] = faux_asyncio.sommeils
     return ns, E, cat, journal
 
 
@@ -151,8 +174,9 @@ def _ok(ids, reste=11, bundles=None):
             "reste": reste}
 
 
-def _refus(code=429):
-    return {"ids": set(), "bundles": set(), "code": code, "reste": 0}
+def _refus(code=429, retry=5.0):
+    return {"ids": set(), "bundles": set(), "code": code, "reste": 0,
+            "retry": retry}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -212,10 +236,12 @@ def test_E4_l_alternance_regarde_les_DEUX_files_a_tour_de_role():
 
 def test_E5_un_refus_RALENTIT_au_lieu_de_marteler():
     """Marteler une IP saturée ne rend pas un quota : ça le garde vide."""
+    #  429, puis 429 encore après `retry-after` : là seulement le passage
+    #  est perdu et on ralentit.
     ns, E, _cat, journal = _banc([_refus(), _refus(), _refus()])
     _tick(ns)
     assert E["palier"] == 1 and E["pause_jusqu"] is not None
-    assert E["refus"] == 1
+    assert E["refus"] == 2, "les deux refus du passage doivent être comptés"
     #  Le passage suivant est SAUTÉ tant que la pause dure.
     avant = E["passages"]
     _tick(ns)
@@ -226,24 +252,86 @@ def test_E5_un_refus_RALENTIT_au_lieu_de_marteler():
 def test_E6_la_MEME_ligne_n_est_pas_repetee_a_chaque_passage():
     """⚠️ 1 152 LIGNES PAR JOUR. C'est dans ce bruit qu'une vraie panne passe
     inaperçue — et c'est la plainte du propriétaire sur les erreurs Railway."""
-    ns, E, _cat, journal = _banc([_refus() for _ in range(6)])
+    #  ⚠️ RÉFUTÉ PAR LA PRODUCTION LE 22/09 : « une ligne au changement
+    #  d'état » donnait encore une ligne par passage, parce que l'état
+    #  basculait à chaque fois (refusé → joignable → refusé…). Des refus
+    #  passagers ne doivent produire AUCUNE ligne.
+    ns, E, _cat, journal = _banc([_refus() for _ in range(12)])
     for _ in range(6):
         E["pause_jusqu"] = None            # on force les passages à s'enchaîner
         _tick(ns)
-    lignes = [l for l in journal if "refusé" in l]
-    assert len(lignes) <= len(ns["ECLAIREUR_PAUSES"]), (
-        f"le journal répète la même ligne : {len(lignes)} fois")
+    assert not [l for l in journal if "[eclaireur]" in l], (
+        f"des refus passagers ont écrit dans le journal : {journal}")
+    assert E["serie"] == 6 and E["serie_max"] == 6
 
 
 def test_E7_la_premiere_REUSSITE_rend_la_cadence_normale():
     """Un ralentissement qui ne se relâche pas est une panne de plus."""
-    ns, E, _cat, journal = _banc([_refus(), _ok([1], reste=3)])
+    ns, E, _cat, journal = _banc([_refus(), _refus(), _ok([1], reste=3)])
     _tick(ns)
     assert E["palier"] == 1
     E["pause_jusqu"] = None
     _tick(ns)
     assert E["palier"] == 0 and E["pause_jusqu"] is None
-    assert any("de nouveau joignable" in l for l in journal), journal
+    assert E["serie"] == 0
+    #  Pas d'alerte → pas de ligne de fin non plus : c'est la bascule
+    #  refusé/joignable qui faisait le bruit en production.
+    assert not [l for l in journal if "[eclaireur]" in l], journal
+
+
+def test_E9_le_SECOND_SEAU_sauve_le_passage_sans_attendre():
+    """⚠️ LE LEVIER MESURÉ. Refus sur le seau des identifiants → même question
+    au seau des fiches, qui a son propre compteur (mesuré), rend la même tête
+    (10/10, 8/8) et n'est pas disputé en production (relevé complet : 429=0).
+    Aucune attente : on ne perd ni le passage ni 90 s de détection."""
+    ns, E, cat, journal = _banc([_refus(), _ok([1, 2, 99], reste=3)])
+    _tick(ns)
+    assert 99 in E["vus"], "le passage n'a pas été sauvé"
+    assert E["rattrapes"] == 1 and E["palier"] == 0
+    assert cat.demandes == ["creations", "creations:fiches"], cat.demandes
+    assert ns["_sommeils"] == [], "on a dormi alors que l'autre seau répondait"
+
+
+def test_E10_l_aveuglement_PROLONGE_est_dit_une_fois_et_sa_fin_aussi():
+    """Le silence ne doit pas cacher une vraie panne : dix minutes sans rien
+    voir, c'en est une. Une ligne au début, une à la fin, pas une de plus."""
+    il_y_a_11_min = datetime.now(timezone.utc) - timedelta(minutes=11)
+    ns, E, _cat, journal = _banc(
+        [_refus() for _ in range(6)] + [_ok([1], reste=3)],
+        etat={"dernier_succes": il_y_a_11_min})
+    for _ in range(3):
+        E["pause_jusqu"] = None
+        _tick(ns)
+    alertes = [l for l in journal if "AVEUGLE" in l]
+    assert len(alertes) == 1, f"alerte absente ou répétée : {journal}"
+    E["pause_jusqu"] = None
+    _tick(ns)
+    fins = [l for l in journal if "de nouveau lisible" in l]
+    assert len(fins) == 1, f"fin d'aveuglement absente ou répétée : {journal}"
+
+
+def test_E11_apres_un_refus_on_ne_prend_QUE_le_strict_necessaire():
+    """Quand l'IP est disputée, la seconde requête du passage — même avec un
+    quota annoncé confortable — reprendrait le jeton qu'un voisin attend, et
+    nous vaudrait le refus suivant."""
+    ns, _E, cat, _j = _banc([_refus(), _ok([1], reste=11), _ok([1], reste=10)])
+    _tick(ns)
+    assert cat.demandes == ["creations", "creations:fiches"], (
+        f"seconde requête envoyée malgré un refus récent : {cat.demandes}")
+
+
+def test_E12_on_ne_dort_PAS_sur_retry_after_la_mesure_l_a_refute():
+    """⚠️ RÉFUTÉ LE 23/09 SUR L'API RÉELLE : saturer le seau, attendre le
+    `retry-after: 5` annoncé, réessayer → 429, deux essais sur deux. L'en-tête
+    ment ; c'est la fenêtre de 60 s qui décide. Dormir dessus, c'était une
+    requête de plus, refusée, à chaque refus."""
+    ns, _E, cat, _j = _banc([_refus(retry=5.0), _refus(retry=5.0)])
+    _tick(ns)
+    assert ns["_sommeils"] == [], f"relance sur retry-after : {ns['_sommeils']}"
+    assert cat.demandes == ["creations", "creations:fiches"], cat.demandes
+    corps = _src("eclaireur_task")
+    assert "retry" not in corps.replace("retry-after", "").lower() or \
+        "sleep(_att" not in corps, "la relance sur retry-after est revenue"
 
 
 def test_E8_la_cadence_et_les_paliers_sont_ceux_qu_on_a_mesures():

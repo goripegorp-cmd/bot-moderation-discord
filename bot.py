@@ -15301,7 +15301,10 @@ async def veille_roblox_task():
                   #  ⚠️ LE COMPTE DES REFUS REMPLACE 1 152 LIGNES PAR JOUR.
                   #  C'est ici qu'on voit si l'IP partagée nous étrangle, et
                   #  `reste` dit combien de requêtes l'API nous laissait.
-                  + (f" · 🚦 {_E['refus']} refus de quota (429), reste annoncé "
+                  + (f" · 🚦 {_E['refus']} refus (429) dont "
+                     f"{_E.get('rattrapes', 0)} rattrapé(s) par le second "
+                     f"seau · plus longue série aveugle "
+                     f"{_E.get('serie_max', 0)} passage(s) · reste annoncé "
                      f"{_E.get('reste')}/12"
                      if _E.get("refus") else "")
                   + (f" · ralenti (palier {_E['palier']})" if _E.get("palier") else "")
@@ -15579,6 +15582,11 @@ async def _veille_marche_wait():
 _ECLAIREUR = {"amorce": False, "vus": set(), "vus_limited": set(),
               "tour": 0, "palier": 0, "pause_jusqu": None, "refus": 0,
               "reste": None,
+              #  `rattrapes` : refus sauvés par le SECOND SEAU (les fiches).
+              #  `serie` / `serie_max` : passages aveugles d'affilée.
+              #  `dernier_succes` : l'horloge de l'alerte d'aveuglement.
+              "rattrapes": 0, "serie": 0, "serie_max": 0, "alerte": False,
+              "dernier_refus": None, "dernier_succes": None,
               "passages": 0, "sautes": 0, "erreurs": 0,
               "nouveautes": 0, "bascules": 0, "publies": 0,
               "dernier_passage": None, "dernier_signal": None}
@@ -15593,7 +15601,15 @@ ECLAIREUR_SECONDES = 45
 ECLAIREUR_PAUSES = (0, 45, 135, 315, 555)
 #  Au-dessus de ce reste annoncé par l'API, on s'autorise la SECONDE requête
 #  dans le même passage : on ne dépense que ce qui est visiblement disponible.
-ECLAIREUR_RESTE_CONFORTABLE = 6
+ECLAIREUR_RESTE_CONFORTABLE = 8
+#  Après un refus, pas de seconde requête pendant ce délai : quand l'IP est
+#  disputée, on ne prend que le strict nécessaire.
+ECLAIREUR_SOBRIETE_S = 300
+#  ⚠️ LE SEUIL DE L'ALERTE, EN TEMPS ET PAS EN PASSAGES. Un refus isolé sur
+#  une IP partagée est la météo ; dix minutes sans rien voir, c'est une panne.
+#  Mesuré le 22/09 : avec « une ligne à chaque changement d'état », l'état
+#  basculait à chaque passage et le journal portait ~1 100 lignes par jour.
+ECLAIREUR_ALERTE_APRES_S = 600
 #  ⚠️ LA LIGNE DE VIE — la leçon de `veille_marche_task`, qui n'a rien écrit
 #  pendant cinq heures : une boucle muette est indiscernable d'une boucle
 #  morte. Toutes les 24 × 75 s = 30 min sans rien, une ligne quand même.
@@ -15644,6 +15660,7 @@ async def eclaireur_task():
             E["vus"] |= tous
             E["vus_limited"] |= lim
             E["amorce"] = True
+            E["dernier_succes"] = datetime.now(timezone.utc)
             print(f"[eclaireur] amorcé : {len(tous)} identifiant(s) connu(s), "
                   f"{len(lim)} collectionnable(s) — je ne réagirai qu'à ce que "
                   f"le relevé complet n'a jamais vu")
@@ -15654,52 +15671,80 @@ async def eclaireur_task():
         #  requête qu'on sait condamnée est une requête gâchée.
         collect = bool(E["tour"] % 2)
         E["tour"] += 1
-        reponses = [(collect,
-                     await roblox_module.relever_identifiants(
-                         collectionnables=collect))]
-        #  La seconde SEULEMENT si l'API dit qu'il reste de la place. C'est
-        #  elle qui nous rend la cadence de 45 s sur les deux files quand le
-        #  voisinage nous laisse respirer.
-        _r0 = reponses[0][1]
-        if _r0["code"] == 200 and (_r0.get("reste") or 0) >= ECLAIREUR_RESTE_CONFORTABLE:
-            reponses.append((not collect,
-                             await roblox_module.relever_identifiants(
-                                 collectionnables=not collect)))
+        if E.get("dernier_succes") is None:
+            E["dernier_succes"] = datetime.now(timezone.utc)
+        _r0 = await roblox_module.relever_identifiants(collectionnables=collect)
+        E["reste"] = _r0.get("reste")
+        if _r0["code"] == 429:
+            #  ⚠️ LE SECOND SEAU, TOUT DE SUITE — ET PAS `retry-after`.
+            #  Mesuré le 23/09 : attendre le `retry-after: 5` annoncé puis
+            #  réessayer rend encore 429 (2 essais sur 2) — l'en-tête ment,
+            #  c'est la fenêtre de 60 s qui décide. En revanche le point d'API
+            #  des fiches a son propre compteur, rend la même tête (10/10 et
+            #  8/8), et n'est PAS disputé en production (relevé complet :
+            #  429=0). Même question, autre seau, zéro attente.
+            E["refus"] += 1
+            E["dernier_refus"] = datetime.now(timezone.utc)
+            _r0 = await roblox_module.relever_identifiants(
+                collectionnables=collect, seau="fiches")
+            if _r0["code"] == 200:
+                E["rattrapes"] += 1
+            elif _r0["code"] == 429:
+                E["refus"] += 1
+        reponses = [(collect, _r0)]
+        #  La seconde SEULEMENT si l'API dit qu'il reste de la place — et
+        #  jamais pendant 5 min après un refus : quand l'IP est disputée, on
+        #  ne prend que le strict nécessaire.
+        _sobre = (E.get("dernier_refus") is not None
+                  and (datetime.now(timezone.utc) - E["dernier_refus"]
+                       ).total_seconds() < ECLAIREUR_SOBRIETE_S)
+        if (_r0["code"] == 200 and not _sobre
+                and (_r0.get("reste") or 0) >= ECLAIREUR_RESTE_CONFORTABLE):
+            _r1 = await roblox_module.relever_identifiants(
+                collectionnables=not collect)
+            if _r1["code"] == 429:
+                E["refus"] += 1
+                E["dernier_refus"] = datetime.now(timezone.utc)
+            reponses.append((not collect, _r1))
             E["tour"] += 1
         E["passages"] += 1
         E["dernier_passage"] = datetime.now(timezone.utc)
-        E["reste"] = _r0.get("reste")
 
         ok = [(c, r) for c, r in reponses if r["code"] == 200]
         if not ok:
-            #  ⚠️ ON RALENTIT, ET ON NE LE DIT QU'AU CHANGEMENT D'ÉTAT. La
-            #  version d'avant écrivait la même ligne toutes les 75 s : 1 152
-            #  lignes par jour, dans lesquelles une VRAIE panne serait passée
-            #  inaperçue.
+            #  ⚠️ SILENCE SUR LES REFUS PASSAGERS. « Une ligne au changement
+            #  d'état » a été réfuté par la production : sur une IP partagée
+            #  l'état bascule à chaque passage, et on retombait à ~1 100 lignes
+            #  par jour. Les chiffres vont dans le bilan de 30 min ; le journal
+            #  ne parle que d'un aveuglement qui DURE.
             E["erreurs"] += 1
-            if any(r["code"] == 429 for _c, r in reponses):
-                E["refus"] += 1
-            ancien = E["palier"]
+            E["serie"] += 1
+            E["serie_max"] = max(E["serie_max"], E["serie"])
             E["palier"] = min(E["palier"] + 1, len(ECLAIREUR_PAUSES) - 1)
             _sup = ECLAIREUR_PAUSES[E["palier"]]
             if _sup:
                 E["pause_jusqu"] = (datetime.now(timezone.utc)
                                     + timedelta(seconds=_sup))
-            if E["palier"] != ancien:
-                print(f"[eclaireur] catalogue refusé (HTTP "
-                      f"{reponses[0][1]['code']}) — le seau d'identifiants de "
-                      f"cette IP est saturé. Cadence ralentie à "
-                      f"{ECLAIREUR_SECONDES + _sup} s ; retour immédiat à "
-                      f"{ECLAIREUR_SECONDES} s à la première réussite.")
+            _aveugle = (datetime.now(timezone.utc)
+                        - E["dernier_succes"]).total_seconds()
+            if _aveugle >= ECLAIREUR_ALERTE_APRES_S and not E["alerte"]:
+                E["alerte"] = True
+                print(f"[eclaireur] ⚠️ AVEUGLE depuis {_aveugle / 60:.0f} min "
+                      f"({E['serie']} passage(s) refusé(s) d'affilée, HTTP "
+                      f"{reponses[0][1]['code']}) — les nouveautés attendent "
+                      f"le relevé de 30 min. Cause probable : l'IP partagée de "
+                      f"Railway, pas le code.")
             return
+        E["serie"] = 0
+        E["dernier_succes"] = datetime.now(timezone.utc)
         if E["palier"]:
-            #  Retour à la normale : on le dit UNE fois, parce que c'est la
-            #  preuve que le ralentissement a servi.
-            print(f"[eclaireur] catalogue de nouveau joignable après "
-                  f"{E['refus']} refus — cadence revenue à "
-                  f"{ECLAIREUR_SECONDES} s")
             E["palier"] = 0
             E["pause_jusqu"] = None
+        if E["alerte"]:
+            #  Une ligne de fin, SEULEMENT s'il y a eu une ligne de début.
+            E["alerte"] = False
+            print(f"[eclaireur] ✅ de nouveau lisible — fin de l'aveuglement "
+                  f"({E['serie_max']} passage(s) refusé(s) au plus fort)")
 
         #  ⚠️ CHAQUE RÉUSSITE COMPTE POUR SA PROPRE FILE. Verser des
         #  identifiants de créations dans la mémoire des collectionnables
