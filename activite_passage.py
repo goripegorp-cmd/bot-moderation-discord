@@ -77,7 +77,22 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
     rap["actions"]["montees"] = len(montees)
 
     # ── 2. Classement ──
-    cl = await esc.classer(guild)
+    #  ⚠️ AVANT LE CLASSEMENT, SINON L'EFFET ATTENDRAIT SIX HEURES. Le
+    #  plancher de deux semaines ne s'applique qu'une fois ; le faire ici
+    #  garantit que le classement qui suit utilise déjà les bons seuils.
+    if not dry_run:
+        try:
+            _pl = await activite.appliquer_plancher_seuils(guild.id)
+            if _pl.get("fait"):
+                rap["seuils_remontes"] = _pl["roles"]
+                cfg_act = await activite.config(guild.id)
+        except Exception as ex:
+            _log(f"[activite passage plancher] {ex}")
+
+    #  ⚠️ PAS DE RATTRAPAGE EN SIMULATION. Une simulation ne doit rien
+    #  écrire de durable : poser les marques depuis le panneau libérerait
+    #  des membres au passage suivant sans que personne l'ait demandé.
+    cl = await esc.classer(guild, rattrapage=not dry_run)
     rap["classement"] = {
         "suivis": cl["suivis"], "actifs": cl["actifs"],
         "doux": len(cl["doux"]), "rappel": len(cl["rappel"]),
@@ -294,6 +309,9 @@ async def passage(guild, *, dry_run: bool = False) -> dict:
     #  au-dessus du rôle du bot. Le seul cas que le bot ne peut PAS réparer
     #  seul — il faut le dire au propriétaire, avec le nom du rôle.
     rap["retours_forces"] = cl.get("retours_forces", 0)
+    #  `rattrapes` : les bloqués d'AVANT le correctif, retrouvés une
+    #  seule fois par le balayage. Ce nombre ne réapparaîtra jamais.
+    rap["rattrapes"] = cl.get("rattrapes", 0)
     rap["hors_perimetre"] = cl.get("hors_perimetre", 0)
     _bloq = niv.BLOQUES_HIERARCHIE.pop(guild.id, {})
     rap["bloques_hierarchie"] = {
@@ -625,6 +643,39 @@ def resume_texte(rap: dict) -> str:
             f"au prochain passage — `{activite.PLAFOND_ACTIONS_PAR_PASSAGE}` "
             f"maximum à la fois, les plus anciens d'abord. "
             f"Rien n'est perdu, tout s'écoule.")
+    if rap.get("seuils_remontes"):
+        lignes.append(
+            f"📏 **Seuils remontés à {activite.SEUIL_RAPPEL_DEFAUT} / "
+            f"{activite.SEUIL_RETRAIT_DEFAUT} / {activite.SEUIL_EXPULSION_DEFAUT} "
+            f"jours** sur {len(rap['seuils_remontes'])} rôle(s) suivi(s) — "
+            f"l\'échelle demandée : étiquette à deux semaines, dépouillement à "
+            f"trois. Modifiable dans Panneau → Activité → Seuils.")
+    if rap.get("rattrapes"):
+        lignes.append(
+            f"🔓 **{rap['rattrapes']} membre(s) restés AFK à tort** ont été retrouvés "
+            f"et libérés : ils avaient écrit en étant masqués, avant la "
+            f"correction du retour. C'est un rattrapage unique — ce nombre "
+            f"ne reviendra pas.")
+    _masq = (rap.get("actions") or {}).get("masquage") or {}
+    if _masq.get("raison"):
+        #  ⚠️ CETTE LIGNE N'EXISTAIT PAS. Le masquage pouvait être REFUSÉ —
+        #  aucun salon de retour, trop de salons, interrupteur éteint — et la
+        #  carte n'en disait pas un mot : on croyait le serveur masqué.
+        lignes.append(
+            f"🚨 **Le masquage n'a PAS eu lieu** — {_masq['raison']}. "
+            f"Les absents voient donc encore tout le serveur.")
+    if _masq.get("ignores"):
+        lignes.append(
+            f"🔓 **{_masq['ignores']} salon(s) hors de ma portée** — je n'ai pas "
+            f"la main sur leurs permissions : ils restent visibles aux absents.")
+    if _masq.get("fuites"):
+        _top = sorted(_masq["fuites"].items(), key=lambda kv: -kv[1])[:3]
+        _noms = ", ".join(f"« {k} » ({v} salon·s)" for k, v in _top)
+        lignes.append(
+            f"👁️ **{_masq.get('fuites_salons', 0)} salon(s) resteront visibles** "
+            f"aux absents du palier 1 : {_noms[:250]} y portent une autorisation "
+            f"explicite, et Discord la fait primer sur mon refus. "
+            f"Au palier 2 le membre perd ces rôles et ne voit plus rien.")
     if rap.get("bloques_hierarchie"):
         _noms = ", ".join(f"« {k} » ({v})"
                           for k, v in rap["bloques_hierarchie"].items())

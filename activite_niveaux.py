@@ -385,6 +385,36 @@ def _droits_voulus(salon_id: int, cfg_act: dict, ouverts: set[int]):
     )
 
 
+def _fuites_du_salon(guild, salon, etiquettes: set) -> list:
+    """Les rôles qui rouvrent CE salon à un absent, malgré notre refus.
+
+    ⚠️ CE N'EST PAS UN DÉFAUT DE POSE, C'EST L'ORDRE DE DISCORD : parmi les
+    rôles d'un membre, les AUTORISATIONS explicites sont appliquées APRÈS les
+    refus. Notre `view_channel=False` perd donc contre le `view_channel=True`
+    d'un rôle que l'absent porte encore.
+
+    @everyone est ignoré : sa surcharge est appliquée AVANT celles des rôles,
+    donc notre refus la bat — c'est le cas courant, et il fonctionne.
+    Nos propres étiquettes sont ignorées aussi, évidemment.
+
+    Une surcharge NOMINATIVE est comptée : elle est appliquée en dernier et
+    l'emporte sur tout, y compris sur nous.
+    """
+    out = []
+    try:
+        for cible, ow in (getattr(salon, "overwrites", None) or {}).items():
+            cid = getattr(cible, "id", 0)
+            if cid == getattr(guild, "id", 0) or cid in etiquettes:
+                continue
+            if getattr(ow, "view_channel", None) is True:
+                nom = getattr(cible, "name", None) or getattr(
+                    cible, "display_name", None) or str(cid)
+                out.append(str(nom))
+    except Exception as ex:
+        _log(f"[activite_niveaux fuites {getattr(salon, 'id', '?')}] {ex}")
+    return out
+
+
 def _identiques(actuel, voulu) -> bool:
     """Le droit en place dit-il déjà exactement ce qu'on veut ?
 
@@ -407,7 +437,11 @@ async def appliquer_masquage(guild, cfg_act: dict, *, dry_run: bool = False) -> 
     Ne touche que ce qui diffère (voir l'en-tête) : relancer est gratuit.
     """
     res = {"modifies": 0, "deja_bons": 0, "echecs": 0, "ignores": 0,
-           "roles": 0, "raison": ""}
+           "roles": 0, "raison": "",
+           #  Salons qui resteront VISIBLES malgré le refus, et par quel
+           #  rôle. Voir `_fuites_du_salon` : c'est l'algorithme de
+           #  Discord, pas un bug de pose.
+           "fuites": {}, "fuites_salons": 0}
     if not cfg_act.get("activite_masquer_salons", True):
         res["raison"] = "masquage désactivé dans la configuration"
         return res
@@ -441,8 +475,19 @@ async def appliquer_masquage(guild, cfg_act: dict, *, dry_run: bool = False) -> 
                          f"{MAX_SALONS_PAR_PASSAGE}, traitement refusé")
         return res
 
+    etiquettes = set(ids_etiquettes(cfg_act)) | {r.id for r in roles}
     for salon in salons:
         voulu = _droits_voulus(salon.id, cfg_act, ouverts)
+        #  ⚠️ MESURÉ AVANT DE POSER, ET SANS AUCUN APPEL RÉSEAU. Poser un
+        #  refus qui perd contre une autorisation explicite donne un
+        #  masquage qui a l'air fait et ne masque rien — le pire des cas,
+        #  puisque personne ne va le vérifier membre par membre.
+        if salon.id not in ouverts:
+            _f = _fuites_du_salon(guild, salon, etiquettes)
+            if _f:
+                res["fuites_salons"] += 1
+                for _nom in _f:
+                    res["fuites"][_nom] = res["fuites"].get(_nom, 0) + 1
         for role in roles:
             try:
                 if _identiques(salon.overwrites_for(role), voulu):

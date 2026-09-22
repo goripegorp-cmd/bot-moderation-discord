@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import timedelta
 
 import activite
 import activite_calendrier as cal
@@ -48,7 +49,7 @@ def setup(*, log=None):
 #  Classement
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def classer(guild) -> dict:
+async def classer(guild, *, rattrapage: bool = True) -> dict:
     """Range les membres concernés par RÔLE, puis par palier. NE MODIFIE RIEN.
 
     Retourne :
@@ -67,7 +68,10 @@ async def classer(guild) -> dict:
            #  Membres libérés par le passage parce qu'ils ont ÉCRIT en étant
            #  masqués (le retrait sur message avait raté), et membres hors du
            #  périmètre repris seulement pour être libérés.
-           "retours_forces": 0, "hors_perimetre": 0}
+           "retours_forces": 0, "hors_perimetre": 0,
+           #  Membres masqués AVANT le correctif du retour, retrouvés
+           #  par le balayage de rattrapage (une seule fois).
+           "rattrapes": 0}
     if not await activite.actif(guild.id):
         return out
 
@@ -111,6 +115,40 @@ async def classer(guild) -> dict:
             niv.memoriser_ids(cfg_act)
     except Exception as ex:
         _log(f"[activite classer registre] {ex}")
+    #  ⚠️ LE RATTRAPAGE DES BLOQUÉS — 22/09/2026, ET UNE SEULE FOIS PAR
+    #  SERVEUR. Les membres masqués qui ont écrit AVANT le correctif n'ont
+    #  jamais reçu de marque : personne n'allait la poser, et le verdict seul
+    #  ne les rattrape pas (un masqué par cumul doux reste « rappel » tant que
+    #  sa présence n'a pas remonté). Sans ce balayage, il leur faudrait écrire
+    #  une fois de PLUS — après un message resté sans effet, personne ne
+    #  réessaie. C'est la plainte mot pour mot : « ils restent AFK
+    #  indéfiniment ».
+    #
+    #  ⚠️ POURQUOI PAS À CHAQUE PASSAGE. Un message peut précéder le masquage :
+    #  le « posteur du vendredi » écrit, puis se fait masquer le dimanche par
+    #  cumul doux. Un balayage permanent le libérerait aussitôt, à chaque fois,
+    #  et `doux_max` — qui existe précisément pour fermer ce contournement —
+    #  ne se refermerait plus jamais. Une fois : les bloqués d'avant sortent,
+    #  la règle reprend la main.
+    #
+    #  La fenêtre : le seuil de rappel le PLUS LARGE des rôles suivis. Au-delà,
+    #  un message ne prouve plus rien — un membre masqué pour silence avait, par
+    #  construction, au moins `rappel` jours sans rien, donc un message plus
+    #  récent que ce seuil est forcément POSTÉRIEUR au masquage.
+    _rattrapage = None
+    if rattrapage and not str(cfg_act.get("activite_rattrapage_retours") or ""):
+        try:
+            _seuils = [activite.config_du_role(cfg_act, activite.ROLE_TOUS)["rappel"]]
+            _seuils += [activite.config_du_role(cfg_act, _c)["rappel"]
+                        for _c in (cfg_act.get("activite_roles") or {})]
+            _fenetre = max([int(s or 0) for s in _seuils] + [1])
+            _rattrapage = await activite.ecrivains_recents(
+                guild.id,
+                cal.jour(cal.debut_du_jour() - timedelta(days=_fenetre)))
+        except Exception as ex:
+            _log(f"[activite classer rattrapage] {ex}")
+            _rattrapage = None
+
     semaine = cal.semaine()
 
     def _groupe(cle, role_obj):
@@ -190,6 +228,18 @@ async def classer(guild) -> dict:
             #  après un message resté sans effet. La marque durable tranche :
             #  il est libéré comme au retrait sur message, ardoise comprise.
             _masque = bool(niv.etiquettes_portees(member, cfg_act, masquantes=True))
+            #  Le rattrapage pose la marque que personne n'a posée à l'époque.
+            #  Elle est ÉCRITE EN BASE, pas seulement tenue en mémoire : si la
+            #  libération rate ce passage-ci (hiérarchie, coupure), le passage
+            #  suivant la retrouve. C'est tout l'intérêt de la marque.
+            if (_rattrapage is not None and _masque
+                    and not etat.get("retour_demande")):
+                _ecrit_le = _rattrapage.get(member.id)
+                _depuis = cal.jours_entre(_ecrit_le) if _ecrit_le else None
+                if _depuis is not None and _depuis < int(conf["rappel"] or 1):
+                    if await activite.noter_retour_demande(guild.id, member.id):
+                        etat["retour_demande"] = True
+                        out["rattrapes"] += 1
             if etat.get("retour_demande"):
                 if _masque:
                     fiche["palier"] = "actif"
@@ -247,6 +297,17 @@ async def classer(guild) -> dict:
             out[palier].append(fiche)
         except Exception as ex:
             _log(f"[activite classer {getattr(member, 'id', '?')}] {ex}")
+
+    #  ⚠️ ÉCRIT APRÈS LA BOUCLE, ET SEULEMENT SI LE BALAYAGE A EU LIEU. Les
+    #  marques, elles, sont déjà en base : même si la libération rate ce
+    #  passage-ci, les membres retrouvés ne sont pas perdus.
+    if _rattrapage is not None:
+        try:
+            _jour = cal.jour()
+            await activite._db_set(guild.id, "activite_rattrapage_retours", _jour)
+            cfg_act["activite_rattrapage_retours"] = _jour
+        except Exception as ex:
+            _log(f"[activite classer rattrapage date] {ex}")
 
     for g in out["groupes"].values():
         for k in PALIERS:

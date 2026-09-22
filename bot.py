@@ -3690,6 +3690,13 @@ async def cfg(gid):
         # clic le message d'un autre (texte envoyé à MyMemory, tiers — OPT-IN par
         # réaction). False = la réaction 🌐 ne fait rien. Toggle dans EntraidePanelV2.
         'translate_enabled': True,
+        #  ⚠️ LA DIRECTION — 22/09/2026. Ces deux clés étaient LUES par
+        #  `/mod direction` et par rien d'autre : aucune interface ne les
+        #  écrivait, elles valaient donc 0 pour toujours et la commande
+        #  restait réservée aux administrateurs. Le picker est dans
+        #  ModerationPanelV2 (« 🚫 Rôle Direction »).
+        'direction_allowed_role': 0,
+        'direction_allowed_user': 0,
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -4185,8 +4192,16 @@ async def _ensure_radie_role(guild):
 
 off_group = app_commands.Group(
     name="off",
-    description="🚫 Radiation totale d'un membre (réservé — attribue le rôle via Intégrations)",
-    default_permissions=discord.Permissions(administrator=True),
+    description="🚫 Radiation totale d'un membre (Direction)",
+    #  ⚠️ CE RÉGLAGE NE FAIT QUE L'AFFICHAGE, ET C'EST TOUT CE QU'ON PEUT
+    #  FAIRE DEPUIS UN BOT. Discord réserve les autorisations par rôle
+    #  (Intégrations) à un jeton d'utilisateur : aucun bot ne peut les
+    #  poser. Avec `administrator`, une Direction non-admin ne voyait même
+    #  pas la commande — donc en pleine attaque, rien. `moderate_members`
+    #  est le plancher juste : c'est exactement le pouvoir qu'exerce la
+    #  commande (couper la parole). QUI a le droit, lui, se décide DANS la
+    #  commande — voir `_autorise_radiation`.
+    default_permissions=discord.Permissions(moderate_members=True),
     guild_only=True,
 )
 
@@ -4376,6 +4391,50 @@ async def _radier_membre(guild, membre, auteur, raison: str) -> dict:
             res["manques"].append(f"verrouillage des salons non lancé ({ex})")
 
     return res
+
+
+async def _autorise_radiation(i, cible=None) -> str | None:
+    """QUI a le droit de radier. Rend le motif de refus, ou None.
+
+    ⚠️ LE CONTRÔLE VIT ICI, PAS DANS DISCORD. `default_permissions` ne règle
+    que l'affichage de la commande ; le droit réel se décide dans le code, à
+    partir du rôle Direction configuré dans le panneau. Sans ce contrôle,
+    abaisser l'affichage à « Exclure temporairement » aurait donné la
+    radiation à tous les modérateurs.
+
+    ⚠️ HIÉRARCHIE APPELANT-VS-CIBLE pour les non-admins. `/off` retire TOUT et
+    réduit au silence : sans cette garde, un membre de la Direction pouvait
+    radier quelqu'un de rang égal ou supérieur — l'escalade de privilège déjà
+    corrigée sur `/mod direction`. L'owner et le super-owner passent outre,
+    sinon personne ne pourrait plus arrêter un compte de direction compromis.
+    """
+    auteur, guild = i.user, i.guild
+    try:
+        if auteur.id == guild.owner_id or owner_ids_module.is_super_owner(auteur.id):
+            return None
+        if getattr(auteur.guild_permissions, "administrator", False):
+            return None
+        c = await cfg(guild.id)
+        rid = int(c.get('direction_allowed_role', 0) or 0)
+        uid = int(c.get('direction_allowed_user', 0) or 0)
+        ok = ((rid and any(r.id == rid for r in auteur.roles))
+              or (uid and auteur.id == uid))
+        if not ok:
+            if not rid and not uid:
+                return ("⛔ **Réservé à la Direction**, et aucun rôle Direction "
+                        "n'est configuré.\nLe propriétaire peut le désigner en "
+                        "une fois : `/configure` → **Sanctions** → "
+                        "**🚫 Rôle Direction**.")
+            return "⛔ **Réservé à la Direction.**"
+        if cible is not None and cible.top_role >= auteur.top_role:
+            return ("❌ Cette personne a un rôle **égal ou supérieur au vôtre** "
+                    "— seul le propriétaire peut la radier.")
+        return None
+    except Exception as ex:
+        _logerr("_autorise_radiation", ex, guild_id=getattr(guild, "id", 0))
+        #  ⚠️ FAIL-CLOSED. Une panne de configuration ne doit pas ouvrir la
+        #  radiation à tout le monde ; l'owner, lui, est déjà sorti plus haut.
+        return "⛔ Impossible de vérifier vos droits — radiation refusée."
 
 
 def _refus_radiation(guild, membre, auteur) -> str | None:
@@ -4841,7 +4900,8 @@ async def off_on_cmd(i: discord.Interaction, membre: discord.Member,
         pass
     guild = i.guild
     try:
-        refus = _refus_radiation(guild, membre, i.user)
+        refus = await _autorise_radiation(i, membre) or _refus_radiation(
+            guild, membre, i.user)
         if refus:
             return await i.followup.send(refus, ephemeral=True)
         res = await _radier_membre(guild, membre, i.user, raison)
@@ -4857,7 +4917,7 @@ async def off_on_cmd(i: discord.Interaction, membre: discord.Member,
 
 
 @bot.tree.context_menu(name="🚫 Radier (off)")
-@app_commands.default_permissions(administrator=True)
+@app_commands.default_permissions(moderate_members=True)
 @app_commands.guild_only()
 async def radier_menu_contextuel(i: discord.Interaction, membre: discord.Member):
     """CLIC DROIT SUR LA PERSONNE → Applications → « 🚫 Radier ». Rien à taper.
@@ -4881,7 +4941,8 @@ async def radier_menu_contextuel(i: discord.Interaction, membre: discord.Member)
         pass
     guild = i.guild
     try:
-        refus = _refus_radiation(guild, membre, i.user)
+        refus = await _autorise_radiation(i, membre) or _refus_radiation(
+            guild, membre, i.user)
         if refus:
             return await i.followup.send(refus, ephemeral=True)
         raison = "Radiation rapide (clic droit) — urgence"
@@ -4906,6 +4967,11 @@ async def off_off_cmd(i: discord.Interaction, membre: discord.Member, raison: st
         pass
     guild, me = i.guild, i.guild.me
     try:
+        #  Lever une radiation est aussi sensible que la poser : c'est rendre
+        #  la parole à quelqu'un qu'on venait d'arrêter.
+        refus = await _autorise_radiation(i)
+        if refus:
+            return await i.followup.send(refus, ephemeral=True)
         role = None
         for r in guild.roles:
             if (r.name or "") == _RADIE_ROLE_NAME:
@@ -4985,6 +5051,9 @@ async def off_list_cmd(i: discord.Interaction):
         await i.response.defer(ephemeral=True, thinking=True)
     except Exception:
         pass
+    refus = await _autorise_radiation(i)
+    if refus:
+        return await i.followup.send(refus, ephemeral=True)
     rows = []
     try:
         async with get_db() as db:
@@ -13880,6 +13949,9 @@ async def activite_passage_task():
                   #  qui avaient ÉCRIT en étant masqués sans que le retrait sur
                   #  message aboutisse. Élevé passage après passage : le chemin
                   #  rapide est en panne, à investiguer.
+                  + (f" · 🔓 {rap.get('rattrapes')} RATTRAPÉ(S) "
+                     f"(bloqués avant le correctif — une seule fois)"
+                     if rap.get("rattrapes") else "")
                   + (f" · 🔓 {rap.get('retours_forces')} libéré(s) au passage "
                      f"(avaient écrit masqués)"
                      if rap.get("retours_forces") else "")
@@ -14438,6 +14510,288 @@ async def _publier_file_actualites(guildes, etiquette: str = "veille_roblox_task
     return res
 
 
+#  ═══════════════════════════════════════════════════════════════════════════
+#  LA MIGRATION DES PANNEAUX DE TICKETS + LE BILAN DE SANTÉ (22/09/2026)
+#  ═══════════════════════════════════════════════════════════════════════════
+#  Les deux tournent APRÈS le démarrage, en tâche de fond retenue : aucune ne
+#  doit retarder la connexion, et aucune ne doit être ramassée en plein await.
+_TACHES_DEMARRAGE: set = set()
+
+
+def _custom_ids_du_message(msg) -> set:
+    """Tous les `custom_id` d'un message, Components V2 compris.
+
+    ⚠️ RÉCURSIF, ET C'EST INDISPENSABLE. En V2 un bouton vit sous un
+    `Container` → `Section` → `accessory` : le parcourir à plat ne verrait
+    aucun bouton et la migration croirait qu'il n'y a rien à remplacer.
+    """
+    out: set = set()
+
+    def _voir(x, profondeur=0):
+        if x is None or profondeur > 6:
+            return
+        cid = getattr(x, "custom_id", None)
+        if isinstance(cid, str):
+            out.add(cid)
+        for attr in ("children", "components", "items"):
+            for enfant in (getattr(x, attr, None) or []):
+                _voir(enfant, profondeur + 1)
+        _voir(getattr(x, "accessory", None), profondeur + 1)
+
+    for comp in (getattr(msg, "components", None) or []):
+        _voir(comp)
+    return out
+
+
+async def _migrer_panneaux_tickets(guild) -> dict:
+    """Remplace les anciens panneaux par type par le panneau unifié. UNE fois.
+
+    ⚠️ ON POSTE AVANT DE SUPPRIMER. Si l'envoi échoue (permission, salon
+    verrouillé), l'ancien panneau reste : un salon d'ouverture de tickets sans
+    aucun bouton, c'est un service coupé sans que personne le sache.
+
+    ⚠️ ON NE MIGRE PAS UN SERVEUR SANS TYPE DE TICKET. Le panneau unifié le
+    dirait honnêtement (« aucun type disponible »), mais remplacer un panneau
+    qui marche par un panneau qui annonce qu'il ne sert à rien serait une
+    régression.
+    """
+    res = {"postes": 0, "supprimes": 0, "salons": 0, "raison": ""}
+    try:
+        c = await cfg(guild.id)
+        if str(c.get('ticket_hub_migre') or ""):
+            res["raison"] = "déjà fait"
+            return res
+        if not _types_tickets(c):
+            res["raison"] = "aucun type de ticket configuré"
+            return res
+        me = guild.me
+        anciens: dict = {}
+        hubs: set = set()
+        for ch in list(getattr(guild, "text_channels", []) or []):
+            try:
+                perms = ch.permissions_for(me)
+                if not (perms.view_channel and perms.read_message_history):
+                    continue
+                async for msg in ch.history(limit=50):
+                    if getattr(msg.author, "id", 0) != bot.user.id:
+                        continue
+                    ids = _custom_ids_du_message(msg)
+                    if any(i.startswith("ticket_create_") for i in ids):
+                        anciens.setdefault(ch.id, []).append(msg)
+                    if "tickethub:open" in ids:
+                        hubs.add(ch.id)
+            except discord.Forbidden:
+                continue
+            except Exception as ex:
+                print(f"[tickets migration scan {ch.id}] {ex}")
+        for cid, messages in anciens.items():
+            ch = guild.get_channel(cid)
+            if ch is None:
+                continue
+            res["salons"] += 1
+            try:
+                if cid not in hubs:
+                    vue = await _build_ticket_hub_view(guild)
+                    await ch.send(view=vue)
+                    res["postes"] += 1
+                for msg in messages:
+                    try:
+                        await msg.delete()
+                        res["supprimes"] += 1
+                        await asyncio.sleep(0.4)
+                    except Exception as ex:
+                        print(f"[tickets migration delete {msg.id}] {ex}")
+            except Exception as ex:
+                #  L'envoi a raté : on ne supprime RIEN dans ce salon.
+                print(f"[tickets migration envoi {cid}] {ex}")
+        await db_set(guild.id, 'ticket_hub_migre',
+                     f"{res['postes']}/{res['supprimes']}")
+        if res["salons"]:
+            print(f"[tickets] {guild.id} : panneau unifié posé dans "
+                  f"{res['postes']} salon(s), {res['supprimes']} ancien(s) "
+                  f"panneau(x) retiré(s)")
+        return res
+    except Exception as ex:
+        _logerr("_migrer_panneaux_tickets", ex, guild_id=getattr(guild, "id", 0))
+        res["raison"] = str(ex)
+        return res
+
+
+async def _bilan_sante_serveur(guild) -> list:
+    """Ce que le bot NE PEUT PAS réparer seul. Rend la liste des manques.
+
+    ⚠️ AUCUN APPEL RÉSEAU : tout se lit dans le cache de la passerelle. Ce
+    bilan tourne à chaque démarrage, et Railway redéploie plusieurs fois par
+    jour.
+    """
+    manques = []
+    try:
+        me = guild.me
+        if me is None:
+            return manques
+        p = me.guild_permissions
+        for attr, nom, pourquoi in (
+            ("manage_nicknames", "Gérer les pseudos",
+             "le pseudo d'un radié ne sera pas détruit"),
+            ("ban_members", "Bannir des membres",
+             "le bouton « Bannir définitivement » d'un recours échouera"),
+            ("moderate_members", "Modérer les membres",
+             "`/off` ne pourra PAS réduire au silence — c'est ce qui arrête "
+             "une attaque"),
+            ("manage_roles", "Gérer les rôles",
+             "aucune étiquette d'inactivité ni radiation"),
+            ("manage_channels", "Gérer les salons",
+             "le salon des nouveautés UGC ne peut pas être créé"),
+        ):
+            if not getattr(p, attr, False):
+                manques.append(f"🔑 **{nom}** manque — {pourquoi}.")
+
+        cfg_act = await activite_module.config(guild.id)
+        hautes = []
+        for r in activite_niv.roles_etiquettes(guild, cfg_act):
+            if r is not None and me.top_role <= r:
+                hautes.append(r.name)
+        if hautes:
+            manques.append(
+                f"🚫 **{', '.join(f'« {n} »' for n in hautes[:3])}** est au-dessus "
+                f"de mon rôle : je ne peux ni le poser ni le RETIRER — les "
+                f"membres qui le portent restent AFK quoi qu'ils écrivent. "
+                f"Remontez mon rôle au-dessus dans Paramètres du serveur → Rôles.")
+
+        c = await cfg(guild.id)
+        if not int(c.get('direction_allowed_role', 0) or 0):
+            manques.append(
+                "🚫 **Aucun rôle Direction désigné** : `/off` et "
+                "`/mod direction` restent réservés aux administrateurs. "
+                "`/configure` → **Sanctions** → **🚫 Rôle Direction**.")
+        if not int(c.get('activite_salon_retour', 0) or 0):
+            manques.append(
+                "💤 **Aucun salon de retour d'activité** : le masquage des "
+                "absents est REFUSÉ tant qu'il n'existe pas (sans lui, un "
+                "absent masqué ne pourrait plus jamais revenir).")
+    except Exception as ex:
+        _logerr("_bilan_sante_serveur", ex, guild_id=getattr(guild, "id", 0))
+    return manques
+
+
+async def _publier_bilan_sante(guild) -> bool:
+    """Un message par jour AU PLUS, et seulement s'il manque quelque chose.
+
+    ⚠️ LE PROPRIÉTAIRE A DIT « c'est très relou » À PROPOS DES MESSAGES
+    RÉPÉTÉS. Railway redéploie plusieurs fois par jour : sans le marqueur de
+    date, ce bilan deviendrait exactement le bruit qu'il a demandé de couper,
+    et il finirait par ne plus le lire — le jour où il compte.
+    """
+    try:
+        manques = await _bilan_sante_serveur(guild)
+        if not manques:
+            return False
+        c = await cfg(guild.id)
+        jour = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if str(c.get('bilan_sante_jour') or "") == jour:
+            return False
+        salon = None
+        for cle in ('mod_log_channel', 'activite_salon_staff', 'ticket_log'):
+            salon = guild.get_channel(int(c.get(cle, 0) or 0))
+            if salon is not None:
+                break
+        if salon is None:
+            print(f"[bilan_sante] {guild.id} : {len(manques)} manque(s), "
+                  f"aucun salon de logs pour le dire")
+            return False
+        await db_set(guild.id, 'bilan_sante_jour', jour)
+        await salon.send("\n".join(
+            ["## 🩺 Ce que je ne peux pas réparer moi-même",
+             "-# Une seule fois par jour, et seulement s'il manque quelque chose.",
+             ""] + [f"• {m}" for m in manques[:6]]))
+        return True
+    except Exception as ex:
+        _logerr("_publier_bilan_sante", ex, guild_id=getattr(guild, "id", 0))
+        return False
+
+
+async def _travaux_de_demarrage():
+    """Les deux migrations, en tâche de fond, serveur par serveur."""
+    try:
+        await bot.wait_until_ready()
+        for g in list(bot.guilds):
+            try:
+                await _migrer_panneaux_tickets(g)
+                await _publier_bilan_sante(g)
+            except Exception as ex:
+                print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
+    except Exception as ex:
+        print(f"[demarrage travaux] {ex}")
+
+
+async def _installer_salon_ugc(guild) -> bool:
+    """Crée le salon des nouveautés UGC et allume le flux. UNE fois par serveur.
+
+    ⚠️ POURQUOI UN SALON NEUF ET PAS UN REPLI. Le flux UGC lit le catalogue de
+    TOUS les créateurs : même filtré (en vente, prix réel, créateur vérifié),
+    c'est un autre débit et un autre public que les créations officielles de
+    Roblox. Le déverser dans le salon des nouveautés officielles, c'est
+    exactement ce que le propriétaire avait refusé en gardant `CreatorTargetId=1`.
+
+    ⚠️ CONDITIONS STRICTES. On n'installe rien sur un serveur qui n'a pas déjà
+    la veille allumée AVEC un salon officiel : sans ce repère, on ne saurait ni
+    dans quelle catégorie créer le salon, ni si le serveur veut du Roblox.
+
+    La date est écrite même en cas d'échec de permission : sinon on retenterait
+    la création toutes les 30 minutes, indéfiniment. Le refus est DIT.
+    """
+    try:
+        c = await cfg(guild.id)
+        if str(c.get("roblox_ugc_installe") or ""):
+            return False
+        if int(c.get("roblox_salon_ugc", 0) or 0):
+            return False                      # déjà réglé à la main
+        if not c.get("roblox_veille_enabled"):
+            return False
+        ref = None
+        for cle in ("roblox_salon_nouveautes", "roblox_salon_bascules",
+                    "roblox_salon_surveiller"):
+            ref = guild.get_channel(int(c.get(cle, 0) or 0))
+            if ref is not None:
+                break
+        if ref is None:
+            return False
+        me = guild.me
+        if me is None or not me.guild_permissions.manage_channels:
+            await db_set(guild.id, "roblox_ugc_installe", "refus:permission")
+            print(f"[ugc] {guild.id} : installation impossible — il me manque "
+                  f"« Gérer les salons ». Créez le salon à la main puis "
+                  f"Panneau → Roblox → 🎨 Nouveautés UGC.")
+            return False
+        salon = await guild.create_text_channel(
+            "🎨・nouveautes-ugc",
+            category=getattr(ref, "category", None),
+            topic="Accessoires UGC des autres créateurs — en vente, prix réel, "
+                  "créateur vérifié. Réglages : /configure → Roblox → 🎚️ Seuils UGC.",
+            reason="Flux UGC — installation automatique (demande du 22/09)")
+        await db_set(guild.id, "roblox_salon_ugc", salon.id)
+        await db_set(guild.id, "roblox_ugc_enabled", True)
+        await db_set(guild.id, "roblox_ugc_installe", str(salon.id))
+        #  ⚠️ UN MESSAGE, TOUT DE SUITE. Un salon vide créé par un bot ressemble
+        #  à une erreur ; et c'est la seule preuve visible que le flux est né.
+        try:
+            await salon.send(
+                "## 🎨 Nouveautés UGC\n"
+                "Ce salon reçoit les accessoires créés par **les autres joueurs** "
+                "— pas seulement Roblox — et seulement ceux qui passent le "
+                "filtre de qualité : **en vente**, **prix réel**, **créateur "
+                "vérifié**.\n"
+                "-# Trop calme ou trop bavard ? `/configure` → **Roblox** → "
+                "**🎚️ Seuils UGC**. Pour l'éteindre : le bouton **🎨 UGC**.")
+        except Exception as ex:
+            print(f"[ugc] {guild.id} : salon créé mais message refusé — {ex}")
+        print(f"[ugc] {guild.id} : salon #{salon.name} créé et flux UGC allumé")
+        return True
+    except Exception as ex:
+        _logerr("_installer_salon_ugc", ex, guild_id=getattr(guild, "id", 0))
+        return False
+
+
 @tasks.loop(minutes=30)
 async def veille_roblox_task():
     """Veille Roblox : nouveautes du catalogue, bascules, et actualite.
@@ -14486,6 +14840,10 @@ async def veille_roblox_task():
         guildes_news = []
         for g in list(bot.guilds):
             try:
+                #  Le flux UGC ne peut pas publier sans salon, et il n'a
+                #  pas de repli : sans cette ligne, il reste muet pour
+                #  toujours. Une seule fois par serveur.
+                await _installer_salon_ugc(g)
                 if await roblox_module.actif(g.id):
                     guildes_items.append(g)
                 if await roblox_news_module.actif(g.id):
@@ -19192,6 +19550,10 @@ class ModerationPanelV2(LayoutView):
         mute_role = self.g.get_role(c.get('mod_mute_role', 0))
         inf_role = self.g.get_role(c.get('mod_infractions_role', 0))
         clear_role = self.g.get_role(c.get('mod_clear_role', 0))
+        #  ⚠️ SANS CE PICKER, LA CLÉ RESTAIT À 0 POUR TOUJOURS : `/off` et
+        #  `/mod direction` étaient donc réservés aux administrateurs, quoi
+        #  qu'on lise dans le code.
+        dir_role = self.g.get_role(c.get('direction_allowed_role', 0))
 
         def dot(item):
             return f"🔘 {item.mention if hasattr(item, 'mention') else item.name}" if item else "⚪ _non défini_"
@@ -19209,6 +19571,9 @@ class ModerationPanelV2(LayoutView):
         b_inf.callback = self._cb_set_inf
         b_clear = Button(label="🧹 Rôle clear", style=discord.ButtonStyle.primary, custom_id="mpv2_set_clear")
         b_clear.callback = self._cb_set_clear
+        b_dir = Button(label="🚫 Rôle Direction", style=discord.ButtonStyle.danger,
+                       custom_id="mpv2_set_direction")
+        b_dir.callback = self._cb_set_direction
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="mpv2_back")
         b_back.callback = self._cb_back
 
@@ -19229,12 +19594,13 @@ class ModerationPanelV2(LayoutView):
             f"⚠️ **Rôle /warn** · {dot(warn_role)}\n"
             f"🔇 **Rôle /mute** · {dot(mute_role)}\n"
             f"📋 **Rôle /infractions** · {dot(inf_role)}\n"
-            f"🧹 **Rôle /mod clear** · {dot(clear_role)}"
+            f"🧹 **Rôle /mod clear** · {dot(clear_role)}\n"
+            f"🚫 **Rôle Direction** · {dot(dir_role)} — `/off`, `/mod direction`"
         ))
         items.append(v2_divider())
 
         items.append(discord.ui.ActionRow(b_logs, b_warn, b_mute, b_inf, b_clear))
-        items.append(discord.ui.ActionRow(b_back))
+        items.append(discord.ui.ActionRow(b_dir, b_back))
 
         self.add_item(v2_container(*items, color=Palette.WARNING))
 
@@ -19278,6 +19644,10 @@ class ModerationPanelV2(LayoutView):
 
     async def _cb_set_clear(self, i):
         await self._open_role_picker(i, 'mod_clear_role', 'Rôle /mod clear')
+
+    async def _cb_set_direction(self, i):
+        await self._open_role_picker(i, 'direction_allowed_role',
+                                     'Rôle Direction (/off, /mod direction)')
 
     async def _cb_back(self, i):
         # Refonte 2026-08 : retour direct à la racine /configure (MainPanelV2).
@@ -25080,6 +25450,16 @@ async def on_ready():
         print(f"[on_ready boot cleanup] {ex}")
 
     # (Game Night retiré avec les événements.)
+
+    #  ⚠️ RETENUE DANS UN ENSEMBLE. Une tâche `create_task` sans référence
+    #  peut être ramassée en plein `await` : la migration s'arrêterait au
+    #  milieu, après avoir supprimé un panneau et avant d'en poster un.
+    try:
+        _t_dem = asyncio.create_task(_travaux_de_demarrage())
+        _TACHES_DEMARRAGE.add(_t_dem)
+        _t_dem.add_done_callback(_TACHES_DEMARRAGE.discard)
+    except Exception as ex:
+        print(f"[on_ready travaux demarrage] {ex}")
 
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")

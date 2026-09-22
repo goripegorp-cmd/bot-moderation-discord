@@ -63,6 +63,16 @@ class FauxRole:
     def __lt__(self, autre):
         return self.position < autre.position
 
+    #  ⚠️ PIÈGE N°6 — LE FAUX DOIT PORTER TOUT CE QUE PORTE LE VRAI.
+    #  `discord.Role` est totalement ordonné ; sans `__ge__`, le `>=` de la
+    #  garde de hiérarchie levait un TypeError, attrapé par le fail-closed :
+    #  le test mesurait un REFUS DE PANNE en croyant mesurer la règle.
+    def __ge__(self, autre):
+        return self.position >= autre.position
+
+    def __le__(self, autre):
+        return self.position <= autre.position
+
     def __eq__(self, autre):
         return isinstance(autre, FauxRole) and autre.id == self.id
 
@@ -537,3 +547,144 @@ def test_la_levee_rend_le_pseudo():
     corps = _src("off_off_cmd")
     assert "saved_nick" in corps
     assert "nick=_ancien" in corps
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  QUI A LE DROIT — 22/09/2026
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La commande était `default_permissions = administrator` : une Direction non
+#  administratrice ne la VOYAIT même pas, sauf à l'autoriser dans Paramètres du
+#  serveur → Intégrations — une étape qu'aucun bot ne peut faire à la place du
+#  propriétaire (l'API Discord la réserve à un jeton d'utilisateur), et que
+#  personne ne fait AVANT l'attaque.
+#
+#  Pire : `direction_allowed_role` était LUE par `/mod direction` et écrite
+#  NULLE PART. Aucune interface. Elle valait donc 0 pour toujours — le piège
+#  n°4 du dépôt, mot pour mot : « clé de config sans interface donc toujours à
+#  zéro ».
+#
+#  L'affichage descend donc à « Exclure temporairement » (le pouvoir même
+#  qu'exerce la commande), et le DROIT se décide dans le code.
+
+
+class FauxPerms:
+    def __init__(self, administrator=False):
+        self.administrator = administrator
+
+
+class FauxUtilisateur:
+    def __init__(self, uid, roles=(), admin=False, rang=10):
+        self.id = uid
+        self.roles = list(roles)
+        self.guild_permissions = FauxPerms(admin)
+        self.top_role = FauxRole(900 + uid, "rang", position=rang)
+
+
+class FauxCible:
+    def __init__(self, rang=5):
+        self.top_role = FauxRole(800, "cible", position=rang)
+
+
+class FauxInteraction:
+    def __init__(self, user, owner_id=1):
+        self.user = user
+        self.guild = type("G", (), {"id": 777, "owner_id": owner_id})()
+
+
+def _espace_droit(role_dir=0, user_dir=0, base_morte=False):
+    async def _cfg(_gid):
+        if base_morte:
+            raise RuntimeError("base morte")
+        return {"direction_allowed_role": role_dir,
+                "direction_allowed_user": user_dir}
+
+    ns = {
+        "cfg": _cfg,
+        "_logerr": lambda *a, **k: None,
+        "owner_ids_module": type("O", (), {
+            "is_super_owner": staticmethod(lambda uid: uid == 9)})(),
+    }
+    exec(_src("_autorise_radiation"), ns)      # noqa: S102 — code du dépôt
+    return ns
+
+
+def _droit(utilisateur, cible=None, **kw):
+    ns = _espace_droit(**kw)
+    return asyncio.run(ns["_autorise_radiation"](
+        FauxInteraction(utilisateur), cible))
+
+
+def test_la_DIRECTION_peut_radier_sans_passer_par_Integrations():
+    """⚠️ LE POINT DE LA CORRECTION. Sans lui, la commande restait invisible
+    pour la Direction le jour de l'attaque."""
+    dir_role = FauxRole(42, "Direction", position=30)
+    membre_dir = FauxUtilisateur(2, roles=[dir_role], rang=30)
+    assert _droit(membre_dir, FauxCible(rang=5), role_dir=42) is None
+
+
+def test_un_membre_ordinaire_est_REFUSE():
+    """L'affichage est descendu à « Exclure temporairement » : sans ce
+    contrôle, tous les modérateurs pourraient radier."""
+    refus = _droit(FauxUtilisateur(3), FauxCible(), role_dir=42)
+    assert refus and "Direction" in refus
+
+
+def test_sans_role_Direction_configure_le_refus_DIT_ou_le_regler():
+    """Un refus qui ne dit pas quoi faire envoie chercher dans les réglages
+    Discord — là où, précisément, ça ne se règle pas."""
+    refus = _droit(FauxUtilisateur(3), FauxCible())
+    assert refus and "Sanctions" in refus and "Rôle Direction" in refus
+
+
+def test_la_Direction_ne_peut_PAS_radier_plus_haut_qu_elle():
+    """Escalade de privilège : la garde existait sur `/mod direction`, pas
+    sur `/off` — qui n'était ouverte qu'aux administrateurs."""
+    dir_role = FauxRole(42, "Direction", position=30)
+    membre_dir = FauxUtilisateur(2, roles=[dir_role], rang=30)
+    refus = _droit(membre_dir, FauxCible(rang=30), role_dir=42)
+    assert refus and "supérieur" in refus
+
+
+def test_le_proprietaire_et_le_super_owner_passent_toujours():
+    """Sinon plus personne ne peut arrêter un compte de direction compromis."""
+    assert _droit(FauxUtilisateur(1), FauxCible(rang=99)) is None
+    assert _droit(FauxUtilisateur(9), FauxCible(rang=99)) is None
+
+
+def test_un_administrateur_garde_son_acces():
+    """Le comportement d'avant ne doit pas être retiré en chemin."""
+    assert _droit(FauxUtilisateur(4, admin=True), FauxCible(rang=99)) is None
+
+
+def test_une_panne_de_configuration_REFUSE_la_radiation():
+    """Fail-closed. L'inverse ouvrirait la radiation à tout le serveur le jour
+    où la base ne répond pas — exactement le jour d'une attaque."""
+    refus = _droit(FauxUtilisateur(3), FauxCible(), base_morte=True)
+    assert refus and "refusée" in refus
+
+
+def test_l_affichage_descend_a_EXCLURE_et_pas_plus_bas():
+    """`administrator` cachait la commande à la Direction ; sans plancher du
+    tout, les 900 membres du serveur la verraient dans leur barre."""
+    assert "default_permissions=discord.Permissions(moderate_members=True)" in SRC
+    assert "@app_commands.default_permissions(moderate_members=True)" in SRC
+    i = SRC.index("off_group = app_commands.Group(")
+    assert "administrator=True" not in SRC[i:i + 900], (
+        "le groupe /off est encore réservé aux administrateurs")
+
+
+def test_les_QUATRE_portes_controlent_le_droit():
+    """`/off on`, le clic droit, `/off off` et `/off list` : une porte oubliée
+    et le contrôle ne vaut rien."""
+    for nom in ("off_on_cmd", "radier_menu_contextuel", "off_off_cmd",
+                "off_list_cmd"):
+        assert "_autorise_radiation" in _src(nom), f"{nom} ne contrôle rien"
+
+
+def test_le_picker_du_role_Direction_EXISTE():
+    """⚠️ LA CLÉ ÉTAIT LUE ET ÉCRITE NULLE PART. Sans interface, elle reste à
+    zéro pour toujours et tout ce qui précède ne sert à rien."""
+    assert "'direction_allowed_role', " in SRC or '"direction_allowed_role", ' in SRC
+    assert "_cb_set_direction" in SRC and "mpv2_set_direction" in SRC
+    i = SRC.index("async def _cb_set_direction")
+    assert "direction_allowed_role" in SRC[i:i + 400]

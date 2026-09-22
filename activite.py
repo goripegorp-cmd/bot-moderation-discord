@@ -337,6 +337,23 @@ CLES_DEFAUT = {
     #  toute clé absente de ce dictionnaire, et le registre se serait détruit
     #  lui-même à chaque passage (trouvé par le test F1b).
     "activite_etiquettes_historique": {},
+    #  ⚠️ LE RATTRAPAGE DES BLOQUÉS — 22/09/2026, ET UNE SEULE FOIS.
+    #  Date du balayage qui libère les membres masqués AYANT ÉCRIT AVANT le
+    #  correctif du retour : eux n'ont jamais reçu de marque, personne
+    #  n'allait la poser, et ils seraient restés masqués jusqu'à ce qu'ils
+    #  réécrivent — c'est exactement la plainte « ils restent AFK
+    #  indéfiniment ». Vide = reste à faire.
+    #  ⚠️ SURTOUT PAS UN BALAYAGE PERMANENT. Il libérerait aussi le
+    #  « posteur du vendredi » masqué par cumul doux quelques jours APRÈS
+    #  son message : l'ardoise `doux_max` ne se refermerait plus jamais, et
+    #  le contournement qu'elle existe pour fermer serait rouvert.
+    "activite_rattrapage_retours": "",
+    #  ⚠️ LE PLANCHER DE DEUX SEMAINES — 22/09/2026, UNE SEULE FOIS.
+    #  Date de la remontée des seuils du serveur à l'échelle demandée
+    #  (« au bout de deux semaines, trois semaines »). Vide = à faire.
+    #  Sans marqueur, un propriétaire qui redescendrait volontairement à
+    #  7 jours verrait sa valeur réécrite à chaque passage.
+    "activite_seuils_migres": "",
     #  Masquer TOUT le serveur aux porteurs de ces rôles, sauf les deux salons
     #  d'activité. Réglable, parce que c'est l'action la plus visible du système.
     "activite_masquer_salons": True,
@@ -663,6 +680,78 @@ async def jours_vus(guild_id: int, user_id: int, depuis: str, jusqu: str) -> lis
     except Exception as ex:
         _log(f"[activite jours_vus] {ex}")
         return []
+
+
+async def appliquer_plancher_seuils(guild_id: int) -> dict:
+    """Remonte les seuils de CHAQUE rôle suivi à 14 / 21 / 28 jours. UNE fois.
+
+    ⚠️ ON NE RABAISSE JAMAIS. `max()` partout : un rôle réglé à 30/45/60 garde
+    ses valeurs. Le plancher n'impose qu'un minimum — celui que le propriétaire
+    a décrit deux fois : « pas deux semaines comme tu l'as décrit » le 31/08,
+    puis « vraiment inactifs au bout de deux semaines, trois semaines ».
+
+    ⚠️ ET ON GARDE L'ORDRE. Trois seuils qui se croisent (rappel ≥ retrait)
+    rendraient un palier inatteignable : le membre sauterait directement au
+    suivant, sans jamais être prévenu.
+    """
+    out = {"fait": False, "roles": {}, "raison": ""}
+    try:
+        cfg_act = await config(guild_id)
+        if str(cfg_act.get("activite_seuils_migres") or ""):
+            out["raison"] = "déjà appliqué"
+            return out
+        roles = dict(cfg_act.get("activite_roles") or {})
+        for cle, conf in list(roles.items()):
+            if not isinstance(conf, dict):
+                continue
+            eff = config_du_role(cfg_act, cle)
+            rappel = max(SEUIL_RAPPEL_DEFAUT, int(eff["rappel"] or 0))
+            retrait = max(SEUIL_RETRAIT_DEFAUT, int(eff["retrait"] or 0), rappel + 1)
+            expulsion = max(SEUIL_EXPULSION_DEFAUT, int(eff["expulsion"] or 0),
+                            retrait + 1)
+            if (rappel, retrait, expulsion) == (int(eff["rappel"] or 0),
+                                                int(eff["retrait"] or 0),
+                                                int(eff["expulsion"] or 0)):
+                continue
+            neuf = dict(conf)
+            neuf.update({"rappel": rappel, "retrait": retrait,
+                         "expulsion": expulsion})
+            roles[cle] = neuf
+            out["roles"][str(cle)] = [int(eff["rappel"] or 0), rappel]
+        if out["roles"]:
+            await _db_set(guild_id, "activite_roles", roles)
+            out["fait"] = True
+        await _db_set(guild_id, "activite_seuils_migres", cal.jour())
+    except Exception as ex:
+        _log(f"[activite plancher_seuils] {ex}")
+        out["raison"] = str(ex)
+    return out
+
+
+async def ecrivains_recents(guild_id: int, depuis: str) -> dict:
+    """Qui a ENVOYÉ UN MESSAGE depuis ce jour ? {user_id: dernier jour}.
+
+    UNE requête pour toute la guilde. La même question posée membre par
+    membre, c'est mille allers-retours par passage — le genre de détail qui
+    transforme une seconde en minute (voir `anciennete_du_suivi`).
+
+    ⚠️ `instr(sources, 'm')` ET PAS `sources LIKE`. Seul le MESSAGE compte
+    ici : la règle du propriétaire est « il écrit, il redevient actif ». Une
+    réaction ou un passage en vocal ne sont pas un retour au sens où il l'a
+    posée, et les confondre libérerait des membres qui n'ont rien écrit.
+    """
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT user_id, MAX(jour) FROM activite_jours"
+                " WHERE guild_id=? AND jour>=? AND instr(sources, ?)>0"
+                " GROUP BY user_id",
+                (guild_id, depuis, SOURCE_MESSAGE),
+            ) as cur:
+                return {int(r[0]): r[1] for r in await cur.fetchall()}
+    except Exception as ex:
+        _log(f"[activite ecrivains_recents] {ex}")
+        return {}
 
 
 async def anciennete_du_suivi(guild_id: int) -> int | None:

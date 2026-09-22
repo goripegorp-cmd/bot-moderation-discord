@@ -445,3 +445,133 @@ def test_la_reconnaissance_elargie_ne_sert_QU_A_RETIRER():
             for interdit in ("est_etiquette", "etiquettes_portees",
                              "ids_historiques", "NOMS_MASQUANTS"):
                 assert interdit not in corps, f"{n.name} utilise {interdit}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LE RATTRAPAGE — ceux qui étaient DÉJÀ bloqués quand le correctif est arrivé
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Leur message est antérieur à la marque : personne ne l'a posée, et le verdict
+#  seul ne les rattrape pas (masqués par cumul doux, ils restent « rappel »
+#  jusqu'à trois jours de présence sur sept). Sans balayage, il leur faudrait
+#  écrire une fois de PLUS — et après un message resté sans effet, personne ne
+#  réessaie. C'est la plainte mot pour mot.
+
+
+@pytest.mark.asyncio
+async def test_R1_un_bloque_d_AVANT_le_correctif_est_retrouve_et_libere(banc):
+    """Il a écrit il y a deux jours EN ÉTANT MASQUÉ, sans marque. Le verdict
+    dit encore « rappel » : seul le balayage peut le sortir de là."""
+    g, m = await _monter(banc, roles=[EVERY, MEMBRE, R_N1], doux=2, jours=(2, 16))
+    assert (await activite.lire_etat(g.id, m.id))["retour_demande"] is False
+    cl = await _passage(g)
+    assert cl["rattrapes"] == 1, "le balayage ne l'a pas retrouvé"
+    assert R_N1 not in m.roles, "il est resté masqué"
+
+
+@pytest.mark.asyncio
+async def test_R1b_le_verdict_SEUL_l_aurait_laisse_masque(banc):
+    """Contre-épreuve : sans le balayage, le même membre reste masqué. Si ce
+    test devient vert sans rattrapage, R1 ne prouve plus rien."""
+    g, m = await _monter(banc, roles=[EVERY, MEMBRE, R_N1], doux=2, jours=(2, 16))
+    cl = await esc.classer(g, rattrapage=False)
+    for f in cl["revenus"]:
+        await esc.traiter_retour(g, f, await activite.config(g.id))
+    assert cl["rattrapes"] == 0
+    assert R_N1 in m.roles, "il sort sans le balayage : le piège n'existe pas"
+
+
+@pytest.mark.asyncio
+async def test_R2_le_balayage_n_a_lieu_QU_UNE_FOIS(banc):
+    """⚠️ LE POINT LE PLUS DÉLICAT. Un balayage permanent libérerait aussi le
+    « posteur du vendredi » masqué par cumul doux quelques jours APRÈS son
+    message : `doux_max` ne se refermerait plus jamais."""
+    g, m = await _monter(banc, roles=[EVERY, MEMBRE, R_N1], doux=2, jours=(2, 16))
+    cl = await _passage(g)
+    assert cl["rattrapes"] == 1
+    assert (await activite.config(g.id))["activite_rattrapage_retours"], (
+        "la date du balayage n'a pas été écrite — il recommencerait sans fin")
+    #  Il se refait masquer plus tard, sans avoir écrit depuis.
+    m.roles.append(R_N1)
+    async with banc["db"]() as db:
+        await db.execute("UPDATE activite_etat SET doux=2, retour_demande=0"
+                         " WHERE guild_id=? AND user_id=?", (g.id, m.id))
+        await db.commit()
+    cl2 = await _passage(g)
+    assert cl2["rattrapes"] == 0, "le balayage a recommencé"
+    assert R_N1 in m.roles, "le cumul doux ne tient plus : contournement rouvert"
+
+
+@pytest.mark.asyncio
+async def test_R2b_la_cle_du_balayage_SURVIT_a_config(banc):
+    """Même piège que le registre : `config()` ne rend que les clés de
+    `CLES_DEFAUT`. Non déclarée, la date serait perdue à chaque lecture et le
+    balayage tournerait à chaque passage — exactement ce que R2 interdit."""
+    assert "activite_rattrapage_retours" in activite.CLES_DEFAUT
+    g, _m = await _monter(banc, roles=[EVERY, MEMBRE])
+    await esc.classer(g)
+    assert (await activite.config(g.id)).get("activite_rattrapage_retours")
+
+
+@pytest.mark.asyncio
+async def test_R3_un_message_TROP_VIEUX_ne_libere_personne(banc):
+    """Au-delà du seuil de rappel, un message ne prouve plus qu'il a écrit en
+    étant masqué : il peut être ANTÉRIEUR au masquage."""
+    g, m = await _monter(banc, roles=[EVERY, MEMBRE, R_N1], doux=2, jours=(9, 20))
+    cl = await _passage(g)
+    assert cl["rattrapes"] == 0
+    assert R_N1 in m.roles
+
+
+@pytest.mark.asyncio
+async def test_R4_seul_un_MESSAGE_compte_pas_une_reaction(banc):
+    """La règle du propriétaire est « il écrit ». Une réaction ou un passage en
+    vocal ne sont pas un retour — les confondre libérerait des muets."""
+    g, m = await _monter(banc, roles=[EVERY, MEMBRE, R_N1], doux=2, jours=(16,))
+    async with banc["db"]() as db:
+        await db.execute("INSERT OR REPLACE INTO activite_jours(guild_id, user_id,"
+                         " jour, sources) VALUES(?,?,?,?)",
+                         (g.id, m.id, _j(2), activite.SOURCE_REACTION))
+        await db.commit()
+    cl = await _passage(g)
+    assert cl["rattrapes"] == 0, "une réaction a été prise pour un message"
+    assert R_N1 in m.roles
+
+
+@pytest.mark.asyncio
+async def test_R5_un_membre_NON_MASQUE_n_est_pas_marque(banc):
+    """Le balayage ne sert qu'à libérer. Marquer un membre libre lui donnerait
+    une immunité gratuite au prochain passage."""
+    g, m = await _monter(banc, roles=[EVERY, MEMBRE], doux=2, jours=(2, 16))
+    cl = await _passage(g)
+    assert cl["rattrapes"] == 0
+    assert (await activite.lire_etat(g.id, m.id))["retour_demande"] is False
+
+
+@pytest.mark.asyncio
+async def test_R6_la_marque_du_rattrapage_est_ECRITE_EN_BASE(banc):
+    """Si la libération rate ce passage-ci (hiérarchie, coupure), le passage
+    suivant doit la retrouver. Une marque en mémoire ne survit pas."""
+    haut = R(33, niv.NOM_NIVEAU1, 150)          # au-dessus du bot : irretirable
+    g, m = await _monter(banc, roles=[EVERY, MEMBRE, haut], doux=2, jours=(2, 16),
+                         extra=(haut,))
+    banc["cfg"]["activite_role_niveau1"] = 33
+    niv.memoriser_ids(await activite.config(g.id))
+    await _passage(g)
+    assert haut in m.roles, "le banc ne reproduit pas le blocage de hiérarchie"
+    assert (await activite.lire_etat(g.id, m.id))["retour_demande"] is True, (
+        "la marque n'a pas survécu : le membre serait perdu à jamais")
+
+
+def test_R7_la_SIMULATION_ne_rattrape_rien():
+    """Une simulation depuis le panneau ne doit rien écrire de durable : elle
+    libérerait des membres au passage suivant sans que personne l'ait demandé."""
+    src = (RACINE / "activite_passage.py").read_text(encoding="utf-8")
+    assert "esc.classer(guild, rattrapage=not dry_run)" in src
+
+
+def test_R8_le_proprietaire_VOIT_le_rattrapage():
+    """Un rattrapage muet est un rattrapage invérifiable — et il n'a lieu
+    qu'une fois : s'il passe inaperçu, personne ne saura jamais s'il a servi."""
+    assert "rattrapes" in SRC_BOT and "RATTRAPÉ(S)" in SRC_BOT
+    src = (RACINE / "activite_passage.py").read_text(encoding="utf-8")
+    assert "restés AFK à tort" in src

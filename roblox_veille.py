@@ -370,6 +370,12 @@ CLES_DEFAUT = {
     #  À LA CRÉATION (17/99 mesuré). Réglable, parce que 17 % peut être trop
     #  strict selon le goût du propriétaire — le compte rendu lui dira.
     "roblox_ugc_verifie_seul": True,
+    #  ⚠️ DÉCLARÉE ICI OU PERDUE À LA LECTURE. `config()` ne rend que les
+    #  clés de ce dictionnaire : une clé non déclarée est réécrite à chaque
+    #  passage et l'installation recommencerait sans fin (le même piège que
+    #  le registre des étiquettes, trouvé le 22/09).
+    #  Date de l'installation automatique du salon UGC. Vide = à faire.
+    "roblox_ugc_installe": "",
 }
 
 
