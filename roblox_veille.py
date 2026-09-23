@@ -1497,9 +1497,16 @@ async def fiches_par_ids(ids: list, item_type: str = "Asset") -> list[dict]:
                         #  La danse XSRF : le 403 PORTE le jeton.
                         _jeton_xsrf = r.headers.get("x-csrf-token") or _jeton_xsrf
                         continue
+                    global DERNIER_CODE_FICHES
+                    DERNIER_CODE_FICHES = r.status
                     if r.status != 200:
-                        _log(f"[roblox_veille fiches_par_ids] HTTP {r.status} "
-                             f"pour {len(propres)} identifiant(s)")
+                        #  ⚠️ UN 429 N'EST PAS UNE PANNE, C'EST LA MÉTÉO DE
+                        #  L'IP PARTAGÉE : l'appelant le compte et prend le
+                        #  relais. Une ligne par refus, c'était ~2 par minute
+                        #  dans les journaux (mesuré le 23/09).
+                        if r.status != 429:
+                            _log(f"[roblox_veille fiches_par_ids] HTTP {r.status} "
+                                 f"pour {len(propres)} identifiant(s)")
                         return []
                     data = await r.json()
                 return _normaliser(data.get("data") or [])
@@ -2541,6 +2548,70 @@ async def enfiler(guild_id: int, article: dict, flux: str) -> bool:
     except Exception as ex:
         _log(f"[roblox_veille enfiler] {ex}")
         return False
+
+
+#  Le code HTTP du dernier `fiches_par_ids` : distingue « refusé » (429 →
+#  relais par l'économie) de « rien à rendre ».
+DERNIER_CODE_FICHES = None
+
+#  Le relais de la surveillance quand le seau des fiches est refusé. Mesuré le
+#  23/09 : `x-ratelimit-limit: 1000, 1000;w=60`, 1,2 Ko et ~150 ms par article.
+API_ECONOMIE_DETAILS = "https://economy.roblox.com/v2/assets/{}/details"
+
+
+async def verifier_par_economie(ids: list) -> tuple[list[dict], int]:
+    """Vérifie des articles UN PAR UN par l'économie. (devenus Limited, vus).
+
+    ⚠️ NE REND QUE LES ARTICLES DEVENUS LIMITED, complétés par ce que la base
+    sait d'eux. L'économie ne donne ni favoris ni description : faire passer
+    TOUS les articles par `comparer_et_enregistrer` avec ces trous écraserait
+    les favoris enregistrés. Seul un vrai passage en Limited mérite d'y aller.
+    """
+    devenus, vus = [], 0
+    try:
+        async with _ouvrir() as sess:
+            for aid in ids:
+                try:
+                    async with sess.get(API_ECONOMIE_DETAILS.format(int(aid))) as r:
+                        if r.status == 429:
+                            break             # le relais aussi est saturé : on arrête
+                        if r.status != 200:
+                            continue
+                        d = await r.json(content_type=None)
+                except Exception as ex:
+                    _log(f"[roblox_veille economie {aid}] {type(ex).__name__}: {ex}")
+                    continue
+                finally:
+                    await asyncio.sleep(0.25)
+                vus += 1
+                lim_u = bool(d.get("IsLimitedUnique"))
+                if not (lim_u or d.get("IsLimited")):
+                    continue
+                async with _get_db() as db:
+                    async with db.execute(
+                        "SELECT nom, type_article, prix, favoris, cree_le"
+                        " FROM roblox_articles WHERE asset_id=?", (int(aid),)) as cur:
+                        row = await cur.fetchone()
+                if row is None:
+                    continue              # inconnu : ce n'est pas un article surveillé
+                devenus.append({
+                    "asset_id": int(aid),
+                    "nom": str(d.get("Name") or row[0] or "")[:200],
+                    "type_article": row[1],
+                    "item_type": "Asset",
+                    "prix": row[2],
+                    "collectionnable": 1,
+                    "hors_vente": int(not d.get("IsForSale")),
+                    "favoris": row[3] or 0,
+                    "cree_le": row[4],
+                    "classe": CLASSE_LIMITED_U if lim_u else CLASSE_LIMITED,
+                    "limited_u": int(lim_u),
+                    "createur_id": int(((d.get("Creator") or {}).get("Id")) or 0),
+                    "description": str(d.get("Description") or "")[:1000],
+                })
+    except Exception as ex:
+        _log(f"[roblox_veille verifier_par_economie] {type(ex).__name__}: {ex}")
+    return devenus, vus
 
 
 #  Au-delà, UNE requête ne suffit plus (le point d'API prend 120 articles).

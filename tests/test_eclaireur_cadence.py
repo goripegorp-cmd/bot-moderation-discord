@@ -63,7 +63,9 @@ class FauxCatalogue:
 
     #  ⚠️ PIÈGE N°6 : tout ce que le vrai module porte sur ce chemin — la
     #  config des flux, la liste de surveillance, les fiches par identifiants.
-    def __init__(self, reponses, flux=None, surveilles=(), bascules=()):
+    def __init__(self, reponses, flux=None, surveilles=(), bascules=(),
+                 fiches_refusees=0):
+        self.fiches_refusees = fiches_refusees
         self.reponses = list(reponses)
         self.demandes = []
         #  `flux={}` veut dire « aucun flux » : ne pas le confondre avec
@@ -101,9 +103,21 @@ class FauxCatalogue:
             return self.reponses.pop(0)
         return {"ids": set(), "bundles": set(), "code": 200, "reste": 11}
 
+    #  Le code du dernier `fiches_par_ids` : 429 → relais par l'économie.
+    DERNIER_CODE_FICHES = 200
+
     async def fiches_par_ids(self, ids, item_type=None):
         self.demandes.append(f"fiches:{len(ids)}")
+        if self.fiches_refusees:
+            self.DERNIER_CODE_FICHES = self.fiches_refusees
+            return []
+        self.DERNIER_CODE_FICHES = 200
         return [{"asset_id": i} for i in ids]
+
+    async def verifier_par_economie(self, ids):
+        self.demandes.append("economie:" + ",".join(str(i) for i in ids))
+        devenus = [b for b in self.bascules_a_rendre if b["asset_id"] in ids]
+        return devenus, len(ids)
 
     async def comparer_et_enregistrer(self, fiches):
         ids = {f["asset_id"] for f in fiches}
@@ -136,10 +150,11 @@ class FauxAsyncio:
         self.sommeils.append(d)
 
 
-def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=()):
+def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=(),
+          fiches_refusees=0):
     journal = []
     cat = FauxCatalogue(reponses, flux=flux, surveilles=surveilles,
-                        bascules=bascules)
+                        bascules=bascules, fiches_refusees=fiches_refusees)
     E = {"amorce": True, "vus": {1, 2}, "vus_limited": {1},
          "tour": 0, "palier": 0, "pause_jusqu": None, "refus": 0, "reste": None,
          "rattrapes": 0, "serie": 0, "serie_max": 0, "alerte": False,
@@ -147,6 +162,8 @@ def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=()):
          "secours_retenus": 0, "secours_pause_jusqu": None,
          "surveilles": 0, "verifs_surveillance": 0,
          "bascules_surveillance": 0, "erreurs_surveillance": 0,
+         "refus_surveillance": 0, "verifs_economie": 0,
+         "curseur_surveillance": 0,
          "passages": 0, "sautes": 0, "erreurs": 0, "nouveautes": 0,
          "bascules": 0, "publies": 0,
          "dernier_passage": None, "dernier_signal": None}
@@ -174,7 +191,7 @@ def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=()):
     for nom in ("ECLAIREUR_SECONDES", "ECLAIREUR_PAUSES", "ECLAIREUR_BATTEMENT",
                 "ECLAIREUR_ALERTE_APRES_S", "ECLAIREUR_AVANT_RELEVE_S",
                 "ECLAIREUR_SECOURS_RESTE_MIN", "ECLAIREUR_SECOURS_PAUSE_S",
-                "ECLAIREUR_SURVEILLANCE_LEGERE"):
+                "ECLAIREUR_SURVEILLANCE_LEGERE", "ECLAIREUR_TRANCHE_ECONOMIE"):
         ns[nom] = _constante(nom)
     exec(_src("_surveiller_retires"), ns)     # noqa: S102 — code du dépôt
     exec(_src("eclaireur_task"), ns)          # noqa: S102 — code du dépôt
@@ -386,6 +403,43 @@ def test_S5_un_article_surveille_qui_n_a_PAS_bouge_ne_publie_rien():
     ns, _E, cat, journal = _banc([_ok([1])], surveilles=[500, 501])
     _tick(ns)
     assert not cat.enfiles and "publie:surveillance" not in journal
+
+
+def test_S6_seau_des_fiches_REFUSE_l_economie_prend_le_relais():
+    """⚠️ MESURÉ EN PRODUCTION LE 23/09 : `HTTP 429 pour 27 identifiant(s)`
+    à deux passages de suite. L'économie a son propre quota (1000/min,
+    mesuré) : une tranche de 9 est vérifiée à sa place, et un passage en
+    Limited trouvé ainsi sort comme les autres."""
+    ids = list(range(500, 527))
+    b = {"asset_id": 503, "nom": "Arcane Fedora", "bascule_detectee": True,
+         "collectionnable": 1}
+    ns, E, cat, journal = _banc([_ok([1])], surveilles=ids, bascules=[b],
+                                fiches_refusees=429)
+    _tick(ns)
+    eco = [d for d in cat.demandes if d.startswith("economie:")]
+    assert eco == ["economie:" + ",".join(str(i) for i in ids[:9])], cat.demandes
+    assert E["refus_surveillance"] == 1 and E["verifs_economie"] == 9
+    assert (503, "bascules") in cat.enfiles and "publie:surveillance" in journal
+
+
+def test_S7_le_relais_TOURNE_sur_toute_la_liste():
+    """Neuf par passage, en rotation : 27 articles revus en trois passages,
+    jamais les neuf mêmes."""
+    ids = list(range(500, 527))
+    ns, E, cat, _j = _banc([_ok([1]), _ok([1]), _ok([1])], surveilles=ids,
+                           fiches_refusees=429)
+    for _ in range(3):
+        _tick(ns)
+    vus = [d.split(":")[1] for d in cat.demandes if d.startswith("economie:")]
+    assert [v.split(",")[0] for v in vus] == ["500", "509", "518"], vus
+
+
+def test_S8_une_autre_panne_que_le_429_ne_declenche_PAS_le_relais():
+    """Le relais répond à un seau refusé, pas à n'importe quelle erreur."""
+    ns, E, cat, _j = _banc([_ok([1])], surveilles=[500], fiches_refusees=500)
+    _tick(ns)
+    assert not [d for d in cat.demandes if d.startswith("economie:")]
+    assert E["erreurs_surveillance"] == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

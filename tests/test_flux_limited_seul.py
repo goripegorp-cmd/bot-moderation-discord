@@ -403,3 +403,93 @@ def test_U2_le_role_Nouveautes_UGC_ne_peut_plus_etre_recree():
     import roblox_pings
     assert "ugc" not in roblox_pings.CATEGORIES
     assert "ugc" not in roblox_pings.CLE_PAR_FLUX
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  E — le relais par l'économie (production du 23/09 : fiches refusées, 429)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class _Rep:
+    def __init__(self, status, data=None):
+        self.status, self._d = status, data or {}
+        self.headers = {}
+
+    async def json(self, content_type=None):
+        return self._d
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class _Sess:
+    def __init__(self, par_id=None, post_status=200):
+        self.par_id, self.post_status, self.urls = par_id or {}, post_status, []
+
+    def get(self, url, **kw):
+        self.urls.append(url)
+        aid = int(url.rstrip("/").split("/")[-2])
+        st, d = self.par_id.get(aid, (200, {}))
+        return _Rep(st, d)
+
+    def post(self, url, **kw):
+        self.urls.append(url)
+        return _Rep(self.post_status, {"data": []})
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_E1_le_relais_ne_rend_QUE_les_articles_devenus_Limited(base, monkeypatch):
+    """⚠️ Il complète l'article par la base : l'économie ne donne ni favoris ni
+    description, et faire passer les autres par la comparaison les écraserait."""
+    await _poser(base, [(1, 9000, 0, 1, "Asset", "2026-08-12"),
+                        (2, 20000, 0, 1, "Asset", "2026-06-24")])
+    async with base["db"]() as db:
+        await db.execute("UPDATE roblox_articles SET favoris=4321 WHERE asset_id=2")
+        await db.commit()
+    sess = _Sess({1: (200, {"IsLimited": False, "IsForSale": False}),
+                  2: (200, {"IsLimited": True, "IsForSale": False, "Name": "Arcane Fedora",
+                            "Creator": {"Id": 1}})})
+    monkeypatch.setattr(veille, "_ouvrir", lambda: sess)
+    monkeypatch.setattr(veille.asyncio, "sleep", _pas_de_sommeil)
+    devenus, vus = await veille.verifier_par_economie([1, 2])
+    assert vus == 2 and [d["asset_id"] for d in devenus] == [2]
+    d = devenus[0]
+    assert d["collectionnable"] == 1 and d["classe"] == veille.CLASSE_LIMITED
+    assert d["favoris"] == 4321 and d["prix"] == 20000, "la base n'a pas complété l'article"
+    assert all(u.startswith("https://economy.roblox.com/v2/assets/") for u in sess.urls)
+
+
+async def _pas_de_sommeil(_d):
+    return None
+
+
+@pytest.mark.asyncio
+async def test_E2_le_relais_S_ARRETE_si_l_economie_refuse_aussi(base, monkeypatch):
+    """Marteler un second seau saturé ne rendrait pas de quota."""
+    await _poser(base, [(1, 9000, 0, 1, "Asset", "2026-08-12")])
+    sess = _Sess({1: (429, {})})
+    monkeypatch.setattr(veille, "_ouvrir", lambda: sess)
+    monkeypatch.setattr(veille.asyncio, "sleep", _pas_de_sommeil)
+    devenus, vus = await veille.verifier_par_economie([1, 2, 3])
+    assert devenus == [] and vus == 0 and len(sess.urls) == 1
+
+
+@pytest.mark.asyncio
+async def test_E3_un_429_du_seau_des_fiches_n_ECRIT_PAS_de_ligne(base, monkeypatch):
+    """Deux lignes par minute dans les journaux (mesuré le 23/09) : c'est le
+    bruit d'erreurs demandé à couper. Le code reste lisible par l'appelant."""
+    lignes = []
+    veille.setup(get_db=base["db"], cfg=None, db_set=None,
+                 log=lambda *a, **k: lignes.append(" ".join(map(str, a))))
+    monkeypatch.setattr(veille, "_ouvrir", lambda: _Sess(post_status=429))
+    assert await veille.fiches_par_ids([1, 2, 3]) == []
+    assert veille.DERNIER_CODE_FICHES == 429
+    assert not [l for l in lignes if "429" in l], lignes

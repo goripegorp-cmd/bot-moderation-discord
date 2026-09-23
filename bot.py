@@ -14155,6 +14155,14 @@ async def _diag_veille_serveurs(limite: int = 10) -> None:
 #  Identité de CE processus. Elle change à chaque démarrage : c'est exactement
 #  ce qu'on veut — deux conteneurs, deux identités.
 _INSTANCE_ID = uuid.uuid4().hex[:12]
+#  ⚠️ L'HEURE DE NOTRE DÉMARRAGE (23/09). Au redéploiement, Railway démarre
+#  le nouveau conteneur AVANT d'arrêter l'ancien : le dernier battement de
+#  l'ancien tombe dans la fenêtre de fraîcheur, et la sentinelle criait
+#  « DEUX INSTANCES » à chaque déploiement (journal du 23/09, 11:33 :
+#  « 10054bc1b336 (vu 11:31:29) », deux minutes AVANT notre démarrage). Un
+#  battement antérieur à notre démarrage est celui d'un PRÉDÉCESSEUR ; une
+#  vraie seconde instance, elle, bat encore APRÈS.
+_INSTANCE_DEMARRE = datetime.now(timezone.utc)
 
 #  En dessous de ce délai, une autre instance est considérée VIVANTE. Deux
 #  minutes : la boucle bat toutes les 30 min, mais un battement est aussi
@@ -14200,9 +14208,12 @@ async def _battre_sentinelle() -> list[str]:
                 (_INSTANCE_ID, iso, iso, iso))
             await db.commit()
             borne = (maintenant - timedelta(seconds=SENTINELLE_FRAICHEUR_S)).isoformat()
+            #  `vu_le > notre démarrage` : le prédécesseur, arrêté au
+            #  redéploiement, ne compte pas. Voir `_INSTANCE_DEMARRE`.
+            _depuis = max(borne, _INSTANCE_DEMARRE.isoformat())
             async with db.execute(
                 "SELECT id, vu_le FROM bot_instances"
-                " WHERE id<>? AND vu_le>=?", (_INSTANCE_ID, borne)) as cur:
+                " WHERE id<>? AND vu_le>=?", (_INSTANCE_ID, _depuis)) as cur:
                 autres = [f"{r[0]} (vu {r[1][11:19]})" for r in await cur.fetchall()]
             #  On oublie les instances mortes depuis longtemps, sinon la table
             #  garde une ligne par redéploiement, pour toujours.
@@ -15213,7 +15224,11 @@ async def veille_roblox_task():
                      f"{_E.get('bascules_surveillance', 0)} passage(s) en "
                      f"Limited vu(s)"
                      + (f", {_E['erreurs_surveillance']} échec(s)"
-                        if _E.get("erreurs_surveillance") else ""))
+                        if _E.get("erreurs_surveillance") else "")
+                     + (f", {_E['refus_surveillance']} refus du seau des fiches "
+                        f"→ {_E.get('verifs_economie', 0)} vérification(s) par "
+                        f"l'économie"
+                        if _E.get("refus_surveillance") else ""))
                   + (f" · {_E['secours_retenus']} secours retenu(s) pour "
                      f"protéger le relevé complet"
                      if _E.get("secours_retenus") else "")
@@ -15507,6 +15522,9 @@ _ECLAIREUR = {"amorce": False, "vus": set(), "vus_limited": set(),
               #  passages en Limited vus par ELLE.
               "surveilles": 0, "verifs_surveillance": 0,
               "bascules_surveillance": 0, "erreurs_surveillance": 0,
+              #  Le relais par l'économie quand le seau des fiches est refusé.
+              "refus_surveillance": 0, "verifs_economie": 0,
+              "curseur_surveillance": 0,
               "passages": 0, "sautes": 0, "erreurs": 0,
               "nouveautes": 0, "bascules": 0, "publies": 0,
               "dernier_passage": None, "dernier_signal": None}
@@ -15534,6 +15552,10 @@ ECLAIREUR_AVANT_RELEVE_S = 75
 #  liste, et le seau des fiches (10/min) sert aussi aux nouveautés.
 #  Mesuré le 23/09 : 28 articles retirés de la vente avec un vrai prix.
 ECLAIREUR_SURVEILLANCE_LEGERE = 40
+#  Le relais par l'économie : combien d'articles par passage. 9 × toutes les
+#  45 s = 12 requêtes/min sur un quota mesuré à 1000/min ; une liste de 27
+#  est revue en ~2 min 15.
+ECLAIREUR_TRANCHE_ECONOMIE = 9
 #  Si le second seau annonce lui-même 3 jetons ou moins, on le laisse souffler
 #  une minute : le relevé complet et le suivi de marché en dépendent.
 ECLAIREUR_SECOURS_RESTE_MIN = 3
@@ -15583,7 +15605,20 @@ async def _surveiller_retires(guildes, E) -> int:
             return 0                  # liste longue : un passage sur deux
         fiches = await roblox_module.fiches_par_ids(ids)
         E["verifs_surveillance"] += 1
-        if not fiches:
+        if not fiches and roblox_module.DERNIER_CODE_FICHES == 429:
+            #  ⚠️ LE SEAU DES FICHES EST REFUSÉ SUR L'IP PARTAGÉE (mesuré en
+            #  production le 23/09). L'économie a son propre quota (1000/min,
+            #  mesuré) : elle prend le relais par tranches, en rotation, et ne
+            #  rend que les articles DEVENUS Limited.
+            E["refus_surveillance"] += 1
+            c = E.get("curseur_surveillance", 0) % len(ids)
+            tranche = (ids[c:] + ids[:c])[:ECLAIREUR_TRANCHE_ECONOMIE]
+            E["curseur_surveillance"] = (c + len(tranche)) % len(ids)
+            fiches, _vus = await roblox_module.verifier_par_economie(tranche)
+            E["verifs_economie"] += _vus
+            if not fiches:
+                return 0
+        elif not fiches:
             E["erreurs_surveillance"] += 1
             return 0
         evts = await roblox_module.comparer_et_enregistrer(fiches)

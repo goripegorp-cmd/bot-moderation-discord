@@ -290,3 +290,65 @@ def test_une_tete_perimee_ne_passe_pas_pour_une_mesure_fraiche():
             assert 15 <= valeur <= 120, "seuil de fraîcheur du marché absurde"
             return
     raise AssertionError("MARCHE_FRAICHEUR_MIN introuvable")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Le conteneur REMPLACÉ n'est pas une seconde instance (23/09)
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Journal du 23/09, 11:33 : « UNE AUTRE INSTANCE DU BOT TOURNE : 10054bc1b336
+#  (vu 11:31:29) » — deux minutes AVANT notre démarrage. Railway démarre le
+#  nouveau conteneur avant d'arrêter l'ancien : le dernier battement de l'ancien
+#  tombait dans la fenêtre de fraîcheur, et l'alarme sonnait à chaque déploiement.
+
+def _sentinelle(tmp_path, demarre):
+    import asyncio
+    import contextlib
+    from datetime import datetime, timedelta, timezone
+
+    import aiosqlite
+
+    chemin = tmp_path / "sentinelle.db"
+
+    @contextlib.asynccontextmanager
+    async def _get_db():
+        db = await aiosqlite.connect(chemin)
+        try:
+            yield db
+        finally:
+            await db.close()
+
+    async def _preparer(lignes):
+        async with _get_db() as db:
+            await db.execute("CREATE TABLE IF NOT EXISTS bot_instances("
+                             " id TEXT PRIMARY KEY, vu_le TEXT NOT NULL,"
+                             " demarre_le TEXT NOT NULL)")
+            for iid, vu in lignes:
+                await db.execute("INSERT INTO bot_instances VALUES(?,?,?)",
+                                 (iid, vu.isoformat(), vu.isoformat()))
+            await db.commit()
+
+    ns = {"get_db": _get_db, "_INSTANCE_ID": "moi", "_INSTANCE_DEMARRE": demarre,
+          "SENTINELLE_FRAICHEUR_S": 180, "datetime": datetime,
+          "timezone": timezone, "timedelta": timedelta, "print": lambda *a: None}
+    exec(_fonction("_battre_sentinelle"), ns)          # noqa: S102 — code du dépôt
+    return ns, _preparer, asyncio
+
+
+def test_le_PREDECESSEUR_arrete_au_redeploiement_ne_declenche_pas_l_alarme(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    maintenant = datetime.now(timezone.utc)
+    demarre = maintenant - timedelta(seconds=20)
+    ns, preparer, aio = _sentinelle(tmp_path, demarre)
+    aio.run(preparer([("ancien", demarre - timedelta(minutes=2))]))
+    assert aio.run(ns["_battre_sentinelle"]()) == [], "fausse alarme de redéploiement"
+
+
+def test_une_VRAIE_seconde_instance_qui_bat_APRES_notre_demarrage_est_dite(tmp_path):
+    """La correction ne doit pas rendre la sentinelle aveugle."""
+    from datetime import datetime, timedelta, timezone
+    maintenant = datetime.now(timezone.utc)
+    demarre = maintenant - timedelta(minutes=10)
+    ns, preparer, aio = _sentinelle(tmp_path, demarre)
+    aio.run(preparer([("jumelle", maintenant - timedelta(seconds=40))]))
+    autres = aio.run(ns["_battre_sentinelle"]())
+    assert autres and autres[0].startswith("jumelle"), autres
