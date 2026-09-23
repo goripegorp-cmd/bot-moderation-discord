@@ -14770,6 +14770,12 @@ async def _travaux_de_demarrage():
         for g in list(bot.guilds):
             try:
                 await _migrer_panneaux_tickets(g)
+                #  « Dans la même catégorie » : nouveautés et passages Limited
+                #  dans le même salon. Une fois par serveur.
+                _u = await roblox_module.unifier_salons(g.id)
+                if _u.get("fait"):
+                    print(f"[veille] {g.id} : nouveautés et passages Limited "
+                          f"réunis dans le salon {_u['salon']}")
                 await _publier_bilan_sante(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
@@ -14867,7 +14873,9 @@ async def veille_roblox_task():
                #  La file d'attente des actualités — même dessin que celle des
                #  accessoires. `enfiles` = ce qui y entre à ce passage.
                "enfiles": 0, "file": None, "non_marquees": 0,
-               "pointeurs": 0}
+               "pointeurs": 0,
+               #  Récaps et tutoriels écartés (23/09) : « on s'en fout ».
+               "sans_interet": 0}
 
         # ── Les articles ────────────────────────────────────────────────────
         if guildes_items:
@@ -15086,6 +15094,8 @@ async def veille_roblox_task():
                 #  écartées sans qu'une seule ligne de journal le dise.
                 _sn["pointeurs"] = _sn.get("pointeurs", 0) + int(
                     rel.get("pointeurs") or 0)
+                _sn["sans_interet"] = _sn.get("sans_interet", 0) + int(
+                    rel.get("sans_interet") or 0)
                 #  ⚠️ EXTRAIT le 14/09/2026 dans `_enfiler_billets`, partagé
                 #  avec l'éclaireur d'actualités. Un seul corps.
                 _re = await _enfiler_billets(guildes_news, rel)
@@ -15197,6 +15207,13 @@ async def veille_roblox_task():
                      f"{_E.get('serie_max', 0)} passage(s) · reste annoncé "
                      f"{_E.get('reste')}/12"
                      if _E.get("refus") else "")
+                  + (f" · 💎 surveillance : {_E.get('surveilles', 0)} article(s) "
+                     f"retiré(s) de la vente suivi(s), "
+                     f"{_E.get('verifs_surveillance', 0)} vérification(s), "
+                     f"{_E.get('bascules_surveillance', 0)} passage(s) en "
+                     f"Limited vu(s)"
+                     + (f", {_E['erreurs_surveillance']} échec(s)"
+                        if _E.get("erreurs_surveillance") else ""))
                   + (f" · {_E['secours_retenus']} secours retenu(s) pour "
                      f"protéger le relevé complet"
                      if _E.get("secours_retenus") else "")
@@ -15306,6 +15323,8 @@ async def veille_roblox_task():
                   #  dans le module, n'était lu que par le bouton manuel, et le
                   #  bilan automatique n'en disait rien. Trois semaines de notes
                   #  de version ont ainsi disparu sans laisser une ligne.
+                  f"{_sn.get('sans_interet', 0)} écarté(s) comme récap ou "
+                  f"tutoriel · "
                   f"{_sn.get('pointeurs', 0)} écarté(s) comme « allez voir ce "
                   f"lien » · {_sn.get('enfiles', 0)} mise(s) en file")
             _fn = _sn.get("file") or {}
@@ -15483,6 +15502,11 @@ _ECLAIREUR = {"amorce": False, "vus": set(), "vus_limited": set(),
               #  Secours retenus pour protéger le relevé complet, et la pause
               #  du second seau quand il annonce lui-même peu de jetons.
               "secours_retenus": 0, "secours_pause_jusqu": None,
+              #  La surveillance des articles retirés de la vente (23/09) :
+              #  combien on en suit, combien de vérifications, combien de
+              #  passages en Limited vus par ELLE.
+              "surveilles": 0, "verifs_surveillance": 0,
+              "bascules_surveillance": 0, "erreurs_surveillance": 0,
               "passages": 0, "sautes": 0, "erreurs": 0,
               "nouveautes": 0, "bascules": 0, "publies": 0,
               "dernier_passage": None, "dernier_signal": None}
@@ -15495,18 +15519,21 @@ ECLAIREUR_SECONDES = 45
 #  Dernier palier : dix minutes — au-delà, le relevé complet reprend la main
 #  de toute façon, et marteler une IP saturée n'a jamais rendu un quota.
 ECLAIREUR_PAUSES = (0, 45, 135, 315, 555)
-#  Au-dessus de ce reste annoncé par l'API, on s'autorise la SECONDE requête
-#  dans le même passage : on ne dépense que ce qui est visiblement disponible.
-ECLAIREUR_RESTE_CONFORTABLE = 8
-#  Après un refus, pas de seconde requête pendant ce délai : quand l'IP est
-#  disputée, on ne prend que le strict nécessaire.
-ECLAIREUR_SOBRIETE_S = 300
+#  (`ECLAIREUR_RESTE_CONFORTABLE` et `ECLAIREUR_SOBRIETE_S` ont été RETIRÉS le
+#  23/09 avec la seconde sonde qu'ils réglaient : le tri de Roblox étant
+#  l'ordre de création, la tête des collectionnables n'apprenait rien que la
+#  tête générale ne dise déjà. Un réglage sans effet est un réglage qui ment.)
 #  ⚠️ LE SECOURS NE DOIT PAS MANGER LA MARGE DU RELEVÉ COMPLET. Mesuré en
 #  production (22/09 → 23/09) : depuis le second seau, le relevé complet est
 #  passé de `reste_min=3/12` à 1 ou 2 — la fenêtre glissante de 60 s compte
 #  encore une requête de secours faite juste AVANT lui. Pas de secours dans
 #  les 75 s qui précèdent un relevé : il regardera lui-même, rien n'est perdu.
 ECLAIREUR_AVANT_RELEVE_S = 75
+#  Jusqu'à ce nombre d'articles surveillés (~30 Ko la requête), on vérifie à
+#  CHAQUE passage ; au-delà, un passage sur deux — la réponse grossit avec la
+#  liste, et le seau des fiches (10/min) sert aussi aux nouveautés.
+#  Mesuré le 23/09 : 28 articles retirés de la vente avec un vrai prix.
+ECLAIREUR_SURVEILLANCE_LEGERE = 40
 #  Si le second seau annonce lui-même 3 jetons ou moins, on le laisse souffler
 #  une minute : le relevé complet et le suivi de marché en dépendent.
 ECLAIREUR_SECOURS_RESTE_MIN = 3
@@ -15529,6 +15556,67 @@ def _age_s(quand) -> float | None:
         return (datetime.now(timezone.utc) - quand).total_seconds()
     except Exception:
         return None
+
+
+async def _surveiller_retires(guildes, E) -> int:
+    """Vérifie d'UN coup les articles retirés de la vente. Rend les publiés.
+
+    ⚠️ C'EST ELLE QUI VOIT LES VRAIS « PASSE LIMITED ». Le propriétaire
+    (23/09) : « en vente, retirés de la vente, et d'un seul coup ils passent
+    Limited ». Or le tri « récents » de Roblox est l'ordre de CRÉATION
+    (mesuré) : un article retiré depuis des mois qui passe Limited ne
+    remonte en tête d'aucune liste. Aucune sonde de tête ne le verrait ; le
+    relevé de 30 min était le seul filet. Ici on va le regarder, LUI, avec
+    tous les autres, en UNE requête (120 max, seau des fiches, 10/min).
+
+    La MÊME détection que partout : `comparer_et_enregistrer` pose
+    `bascule_detectee` quand un article connu non Limited le devient — et la
+    surveillance le revoit toutes les 45 s, donc la bascule est toujours
+    observée « en direct ». Aucune règle nouvelle, aucun doublon possible.
+    """
+    try:
+        ids = await roblox_module.liste_de_surveillance()
+        E["surveilles"] = len(ids)
+        if not ids:
+            return 0
+        if len(ids) > ECLAIREUR_SURVEILLANCE_LEGERE and E["passages"] % 2:
+            return 0                  # liste longue : un passage sur deux
+        fiches = await roblox_module.fiches_par_ids(ids)
+        E["verifs_surveillance"] += 1
+        if not fiches:
+            E["erreurs_surveillance"] += 1
+            return 0
+        evts = await roblox_module.comparer_et_enregistrer(fiches)
+        bascules = evts.get("bascules") or []
+        if not bascules:
+            return 0
+        E["bascules_surveillance"] += len(bascules)
+        E["bascules"] += len(bascules)
+        enfiles = 0
+        for g in guildes:
+            for a in roblox_module.ordonner_publication(bascules, len(bascules)):
+                if not roblox_module.age_publiable(a, "bascules"):
+                    continue
+                if not await roblox_module.publiable_dans(
+                        g.id, a["asset_id"], "bascules"):
+                    continue
+                if await roblox_module.enfiler(g.id, a, "bascules"):
+                    enfiles += 1
+        rp = {"publies": 0}
+        if enfiles:
+            rp = await _publier_file_accessoires(
+                guildes, roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE,
+                pause_fiches=0, etiquette="surveillance")
+            E["publies"] += rp["publies"]
+            E["dernier_signal"] = datetime.now(timezone.utc)
+        print(f"[eclaireur] 💎 {len(bascules)} passage(s) en Limited vu(s) par "
+              f"la surveillance · {enfiles} mis en file · "
+              f"{rp.get('publies', 0)} publié(s) sur l'instant")
+        return int(rp.get("publies", 0))
+    except Exception as ex:
+        E["erreurs_surveillance"] += 1
+        print(f"[eclaireur surveillance] {type(ex).__name__}: {ex}")
+        return 0
 
 
 @tasks.loop(seconds=ECLAIREUR_SECONDES)
@@ -15590,7 +15678,23 @@ async def eclaireur_task():
         _veut_b = any(roblox_module.flux_allume(_c, "bascules") for _c in _cfgs)
         if not (_veut_n or _veut_b):
             return                    # rien que l'éclaireur sache regarder
-        collect = bool(E["tour"] % 2) if (_veut_n and _veut_b) else _veut_b
+        #  ⚠️ LA SURVEILLANCE PASSE D'ABORD, ET SUR SON PROPRE SEAU. Elle ne
+        #  dépend pas de la sonde de tête : si l'IP partagée refuse la sonde,
+        #  les passages en Limited continuent d'être vus.
+        if _veut_b:
+            await _surveiller_retires(guildes, E)
+        if not _veut_n:
+            #  Nouveautés éteintes partout : la sonde de tête ne publierait
+            #  rien. La surveillance a fait le travail utile de ce passage.
+            E["passages"] += 1
+            E["dernier_passage"] = datetime.now(timezone.utc)
+            return
+        #  ⚠️ UNE SEULE SONDE DE TÊTE, À CHAQUE PASSAGE (23/09, MESURÉ). La tête
+        #  des collectionnables ne contient que des Limited NOUVEAUX, qui sont
+        #  aussi en tête de la liste générale ; et un vieil article qui passe
+        #  Limited n'apparaît en tête d'AUCUNE des deux. La seconde sonde
+        #  coûtait une requête sur deux pour ne rien voir de plus.
+        collect = False
         E["tour"] += 1
         if E.get("dernier_succes") is None:
             E["dernier_succes"] = datetime.now(timezone.utc)
@@ -15636,21 +15740,6 @@ async def eclaireur_task():
                 elif _r0["code"] == 429:
                     E["refus"] += 1
         reponses = [(collect, _r0)]
-        #  La seconde SEULEMENT si l'API dit qu'il reste de la place — et
-        #  jamais pendant 5 min après un refus : quand l'IP est disputée, on
-        #  ne prend que le strict nécessaire.
-        _sobre = (E.get("dernier_refus") is not None
-                  and (datetime.now(timezone.utc) - E["dernier_refus"]
-                       ).total_seconds() < ECLAIREUR_SOBRIETE_S)
-        if (_r0["code"] == 200 and not _sobre and _veut_n and _veut_b
-                and (_r0.get("reste") or 0) >= ECLAIREUR_RESTE_CONFORTABLE):
-            _r1 = await roblox_module.relever_identifiants(
-                collectionnables=not collect)
-            if _r1["code"] == 429:
-                E["refus"] += 1
-                E["dernier_refus"] = datetime.now(timezone.utc)
-            reponses.append((not collect, _r1))
-            E["tour"] += 1
         E["passages"] += 1
         E["dernier_passage"] = datetime.now(timezone.utc)
 

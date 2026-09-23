@@ -344,6 +344,16 @@ async def _relever_discourse(source: dict, out: dict,
                 return
             data = await r.json()
             frais = _normaliser(data, source["domaine"])
+            #  ⚠️ LES RÉCAPS ET TUTORIELS SORTENT ICI, AVANT LE CORPS (23/09) :
+            #  chacun économise une requête `/t/{id}.json`, et aucun ne sert
+            #  d'« annonce liée » à une fiche d'accessoire.
+            _gardes = []
+            for b in frais:
+                if sans_interet(b.get("titre")):
+                    out["sans_interet"] = out.get("sans_interet", 0) + 1
+                    continue
+                _gardes.append(b)
+            frais = _gardes
             #  Tous les titres frais — corps ou pas — servent à relier les
             #  accessoires à leur annonce (voir `billets_lies`).
             for b in frais:
@@ -491,6 +501,9 @@ async def _relever_rss(source: dict, out: dict) -> None:
             bruts = _normaliser_rss(await r.text(), source["domaine"])
     billets, pointeurs = [], 0
     for b in bruts[:MAX_BILLETS_PAR_PASSAGE]:
+        if sans_interet(b.get("titre")):
+            out["sans_interet"] = out.get("sans_interet", 0) + 1
+            continue
         enrichi = _cache_forum.get(b["topic_id"])
         if enrichi is None:
             enrichi = await contenu.enrichir_billet(dict(b), b.pop("_html", ""), "en")
@@ -638,6 +651,9 @@ async def _relever_newsroom(source: dict, out: dict) -> None:
             #  illisible — une page sans `article:published_time` ne sort pas.
             if _trop_vieux(b.get("cree_le")):
                 continue
+            if sans_interet(b.get("titre")):
+                out["sans_interet"] = out.get("sans_interet", 0) + 1
+                continue
             _memoriser_recent(b)
             billets.append(b)
     billets.sort(key=lambda x: str(x.get("cree_le") or ""), reverse=True)
@@ -659,6 +675,46 @@ def _trop_vieux(quand, jours: int = FRAICHEUR_MAX_JOURS) -> bool:
         return (datetime.now(timezone.utc) - d).days > int(jours)
     except Exception:
         return True
+
+
+#  ⚠️ DES MOTS ENTIERS, JAMAIS DES MORCEAUX. « guide » ne doit pas attraper
+#  « guidelines » (les règles de la communauté SONT une nouvelle), ni « recap »
+#  un nom propre qui le contiendrait. Chaque motif est ancré sur des bornes.
+import re as _re
+
+MOTIFS_SANS_INTERET = (
+    #  Les récaps : une liste de nouvelles déjà publiées une par une.
+    ("récap", _re.compile(
+        #  `r[ée]cap` couvre « recap », « Weekly Recap », « récap » et
+        #  « récapitulatif » : une alternative de plus serait redondante — une
+        #  mutation l'a montré en survivant.
+        r"\br[ée]cap(itulatif)?\b|\bround-?\s?up\b"
+        r"|\bdigest\b|\b(year|month|week)\s+in\s+review\b"
+        r"|\bwhat\s+we\s+announced\b|\bcreator\s+monthly\b"
+        r"|\bthis\s+week\s+(in|on|at)\s+roblox\b|\bnewsletter\b",
+        _re.IGNORECASE)),
+    #  Les tutoriels et portraits : utiles à un développeur, pas une nouvelle.
+    ("tutoriel", _re.compile(
+        r"\bhow\s+to\b|\b101\b|\bbest\s+practices\b|\btips\s+(and|&)\b"
+        r"|\bdeep\s+dive\b|\btutorial\b|\blearn\s+how\b|\bguide\b"
+        r"|\binsights\s+from\b|\bengineering\s+insights\b"
+        r"|\bcreator\s+(spotlight|interviews?)\b",
+        _re.IGNORECASE)),
+)
+
+
+def sans_interet(titre) -> str | None:
+    """Le motif pour lequel ce billet n'est PAS une nouvelle, ou None.
+
+    Rend un MOTIF, pas un booléen : le compte rendu dit combien de billets
+    sont tombés et pourquoi — un filtre muet est indiscernable d'une source
+    calme, le défaut le plus coûteux de ce dépôt.
+    """
+    t = str(titre or "")
+    for motif, rx in MOTIFS_SANS_INTERET:
+        if rx.search(t):
+            return motif
+    return None
 
 
 def _normaliser(data: dict, domaine: str) -> list[dict]:

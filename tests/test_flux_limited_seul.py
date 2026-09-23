@@ -1,24 +1,25 @@
-"""« Uniquement les objets qui deviennent Limited, créés par Roblox. »
+"""Nouveautés Roblox + passages en Limited, dans un salon — jamais un hors-vente.
 
 ═══════════════════════════════════════════════════════════════════════════════
-LA DEMANDE DU PROPRIÉTAIRE (23/09/2026)
+LA CONSIGNE (23/09/2026, « la plus importante »)
 ═══════════════════════════════════════════════════════════════════════════════
-    « je veux que tu affiches uniquement les objets qui deviennent limited qui
-      sont uniquement créés par l'utilisateur Roblox. Ce qui est créé par
-      d'autres joueurs ne m'intéresse pas. » — et le flux « tous créateurs »
-      « consomme des données monstrueuses pour la plateforme ». Il ne veut
-      plus qu'un salon « Nouveautés UGC » soit recréé.
+    « Je veux que tu m'affiches les nouveaux accessoires créés par Roblox […]
+      et, dans la même catégorie, les accessoires qui viennent de passer
+      Limited — en vente, retirés de la vente, et d'un seul coup ils passent
+      Limited. […] Cela m'arrive très souvent que tu m'affiches des
+      accessoires enlevés de la vente comme potentiellement limited. Je ne
+      veux pas de ça. »
 
-CE QUI N'ÉTAIT PAS POSSIBLE AVANT
-    Un flux n'avait qu'un SALON, avec repli sur le premier salon réglé. Pour
-    ne garder que les Limited, il fallait vider le salon des nouveautés… et
-    elles retombaient alors dans celui des Limited, par repli. Aucun réglage
-    ne permettait de dire « ce flux-là, non ».
-
-⚠️ LE PIÈGE ÉVITÉ EN ROUTE
-    `actif()` testait « interrupteur ET salon des NOUVEAUTÉS ». Éteindre les
-    nouveautés sans le toucher aurait arrêté TOUTE la veille, Limited compris,
-    sans un mot — le contraire exact de la demande. `test_F4` le verrouille.
+CE QUE LA MESURE A MONTRÉ (API réelle, 23/09)
+  · 107 des 118 dernières créations de Roblox sont HORS VENTE et NON Limited,
+    dont 105 à 0-1 R$ : des récompenses d'événement (« Crown of Petals »,
+    « Team Create Workstation »…). C'étaient elles, les fiches « nouvel
+    accessoire · 🔴 retiré de la vente ».
+  · Le tri « récents » est l'ordre de CRÉATION : un vieil article qui passe
+    Limited ne remonte jamais en tête. Seule une SURVEILLANCE ciblée le voit.
+  · Sur 238 articles Roblox hors vente, 28 seulement ont un vrai prix
+    (« Sakura Antlers » 9 000 R$, « Arcane Fedora » 20 000 R$…) : une requête
+    suffit à tous les surveiller.
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
+import roblox_panneau as rp
 import roblox_veille as veille
 
 RACINE = Path(__file__).resolve().parent.parent
@@ -46,64 +48,59 @@ def _fn(src: str, nom: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  F — les interrupteurs par flux
+#  F — les flux
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_F1_par_defaut_SEULS_les_passages_Limited_publient():
-    """La consigne, appliquée sans que le propriétaire ait à cliquer."""
+def test_F1_nouveautes_ET_passages_Limited_publient_par_defaut():
+    """« les nouveaux accessoires créés par Roblox […] et, dans la même
+    catégorie, les accessoires qui viennent de passer Limited »."""
     c = dict(veille.CLES_DEFAUT)
+    assert veille.flux_allume(c, "nouveautes") is True
     assert veille.flux_allume(c, "bascules") is True
-    assert veille.flux_allume(c, "nouveautes") is False
+
+
+def test_F1b_le_flux_a_surveiller_n_EXISTE_plus():
+    """⚠️ « je ne veux pas de ça ». Les « indices » sur des articles retirés
+    de la vente ne peuvent plus sortir par aucun chemin."""
+    assert veille.FLUX_OFFICIELS == ("nouveautes", "bascules")
+    c = dict(veille.CLES_DEFAUT, roblox_salon_bascules=111)
     assert veille.flux_allume(c, "surveiller") is False
+    assert veille.salon_du_flux(c, "surveiller") == 0
+    assert "roblox_salon_surveiller" not in veille.CLES_DEFAUT
+    assert "roblox_flux_surveiller" not in veille.CLES_DEFAUT
 
 
 def test_F2_un_flux_ETEINT_n_a_pas_de_salon_REPLI_COMPRIS():
-    """⚠️ LE CŒUR DE LA DEMANDE. Avant, les nouveautés sans salon propre
-    retombaient dans celui des Limited : l'interrupteur doit l'empêcher."""
-    c = dict(veille.CLES_DEFAUT, roblox_salon_bascules=111,
-             roblox_salon_nouveautes=222)
+    c = dict(veille.CLES_DEFAUT, roblox_flux_nouveautes=False,
+             roblox_salon_bascules=111)
     assert veille.salon_du_flux(c, "bascules") == 111
-    assert veille.salon_du_flux(c, "nouveautes") == 0, "salon propre ignoré ?"
-    c2 = dict(veille.CLES_DEFAUT, roblox_salon_bascules=111)
-    assert veille.salon_du_flux(c2, "nouveautes") == 0, "repli vers les Limited"
+    assert veille.salon_du_flux(c, "nouveautes") == 0
 
 
 def test_F3_un_flux_ALLUME_sans_salon_propre_garde_son_repli():
-    """Le repli reste utile pour qui ne règle qu'un salon : on ne le retire
-    qu'aux flux éteints."""
-    c = dict(veille.CLES_DEFAUT, roblox_flux_nouveautes=True,
-             roblox_salon_bascules=111)
+    c = dict(veille.CLES_DEFAUT, roblox_salon_bascules=111)
     assert veille.salon_du_flux(c, "nouveautes") == 111
 
 
-def test_F4_eteindre_les_nouveautes_n_arrete_PAS_la_veille():
-    """⚠️ LE PIÈGE ÉVITÉ. L'ancien `actif()` exigeait le salon des nouveautés :
-    avec elles éteintes, toute la veille se serait arrêtée, Limited compris."""
-    corps = _fn(SRC_VEILLE, "actif")
-    assert '"nouveautes"' not in corps and "'nouveautes'" not in corps
-    assert "FLUX_OFFICIELS" in corps
-
-
 @pytest.mark.asyncio
-async def test_F4b_actif_est_VRAI_avec_les_seuls_Limited(monkeypatch):
+async def test_F4_eteindre_les_nouveautes_n_arrete_PAS_la_veille(monkeypatch):
+    """L'ancien `actif()` exigeait le salon des nouveautés : les éteindre
+    aurait arrêté toute la veille, Limited compris."""
     async def _cfg(_g):
-        return {"roblox_veille_enabled": True, "roblox_salon_bascules": 111}
+        return {"roblox_veille_enabled": True, "roblox_flux_nouveautes": False,
+                "roblox_salon_bascules": 111}
     monkeypatch.setattr(veille, "_cfg", _cfg)
     assert await veille.actif(1) is True
 
 
 def test_F5_un_flux_INCONNU_ne_publie_jamais_par_repli():
-    """Des fiches de l'ancien flux « ugc » pouvaient attendre en file : un
-    nom inconnu tombant dans le salon officiel les aurait publiées sous
-    l'identité des créations Roblox."""
     c = dict(veille.CLES_DEFAUT, roblox_salon_bascules=111)
-    assert veille.salon_du_flux(c, "ugc") == 0
-    assert veille.flux_allume(c, "ugc") is False
-    assert "ugc" not in veille.FLUX_OFFICIELS
+    for inconnu in ("ugc", "surveiller", "n_importe_quoi"):
+        assert veille.salon_du_flux(c, inconnu) == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  G — la garde « créé par Roblox », et la file
+#  G — l'entrée de la file : les règles d'or
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @pytest.fixture
@@ -131,130 +128,89 @@ def base(tmp_path):
     return {"cfg": cfg, "db": _get_db}
 
 
-def _bascule(aid, createur=1):
-    return {"asset_id": aid, "nom": f"art{aid}", "bascule_detectee": True,
-            "classe": veille.CLASSE_LIMITED, "createur_id": createur}
+def _article(aid, **kw):
+    a = {"asset_id": aid, "nom": f"art{aid}", "type_article": "Chapeau",
+         "item_type": "Asset", "prix": 400, "collectionnable": 0,
+         "hors_vente": 0, "favoris": 0, "cree_le": "2026-09-23T08:00:00Z",
+         "createur_id": 1}
+    a.update(kw)
+    return a
 
 
 async def _file(base):
     async with base["db"]() as db:
-        async with db.execute("SELECT asset_id, flux, envoye_le FROM "
-                              "roblox_transitions ORDER BY id") as cur:
+        async with db.execute("SELECT asset_id, flux FROM roblox_transitions"
+                              " ORDER BY id") as cur:
             return await cur.fetchall()
 
 
 @pytest.mark.asyncio
-async def test_G1_un_Limited_cree_par_ROBLOX_entre_en_file(base):
+async def test_G1_une_nouveaute_EN_VENTE_entre_en_file(base):
     await veille.init_db()
-    assert await veille.enfiler(1, _bascule(10), "bascules") is True
+    assert await veille.enfiler(1, _article(10), "nouveautes") is True
 
 
 @pytest.mark.asyncio
-async def test_G2_ce_que_cree_un_AUTRE_joueur_n_entre_JAMAIS(base):
-    """« Ce qui est créé par d'autres joueurs ne m'intéresse pas. » Les
-    requêtes filtrent déjà le créateur ; la garde tient même le jour où l'une
-    d'elles l'oublierait — ce qu'avait fait le flux UGC, par construction."""
+async def test_G2_un_passage_en_Limited_entre_meme_HORS_VENTE(base):
+    """Un Limited se revend entre joueurs : être hors vente est son état
+    normal. C'est précisément l'événement attendu."""
     await veille.init_db()
-    assert await veille.enfiler(1, _bascule(11, createur=98765), "bascules") is False
+    b = _article(11, hors_vente=1, collectionnable=1, bascule_detectee=True,
+                 classe=veille.CLASSE_LIMITED)
+    assert await veille.enfiler(1, b, "bascules") is True
+
+
+@pytest.mark.asyncio
+async def test_G3_hors_vente_et_NON_Limited_ne_sort_JAMAIS(base):
+    """⚠️ LA RÈGLE D'OR DU 23/09. Mesuré : 105 des 118 dernières créations de
+    Roblox sont des récompenses d'événement à 0-1 R$, hors vente — c'étaient
+    elles, les fiches « 🔴 retiré de la vente » lues comme « peut-être
+    Limited ». Aucun flux ne les laisse passer."""
+    await veille.init_db()
+    evenement = _article(12, prix=1, hors_vente=1, collectionnable=0)
+    retire = _article(13, prix=9000, hors_vente=1, collectionnable=0)
+    for a in (evenement, retire):
+        for flux in ("nouveautes", "bascules"):
+            assert await veille.enfiler(1, a, flux) is False, (a["asset_id"], flux)
     assert await _file(base) == []
 
 
 @pytest.mark.asyncio
-async def test_G3_un_flux_eteint_ou_inconnu_n_enfile_RIEN(base):
+async def test_G4_ce_que_cree_un_AUTRE_joueur_n_entre_JAMAIS(base):
     await veille.init_db()
-    a = {"asset_id": 12, "nom": "neuf", "createur_id": 1}
-    assert await veille.enfiler(1, a, "nouveautes") is False, "nouveautés éteintes"
-    assert await veille.enfiler(1, a, "ugc") is False, "flux retiré"
-    base["cfg"]["roblox_flux_nouveautes"] = True
-    assert await veille.enfiler(1, a, "nouveautes") is True, "rallumé : il repart"
+    assert await veille.enfiler(1, _article(14, createur_id=98765),
+                                "nouveautes") is False
 
 
 @pytest.mark.asyncio
-async def test_G4_eteindre_un_flux_RETIRE_son_arriere_et_rien_d_autre(base):
-    """Un flux éteint ne laisse rien partir. Les fiches déjà ENVOYÉES et
-    celles d'un flux allumé ne sont pas touchées."""
+async def test_G5_un_flux_eteint_n_enfile_rien_et_repart_rallume(base):
+    await veille.init_db()
+    base["cfg"]["roblox_flux_nouveautes"] = False
+    assert await veille.enfiler(1, _article(15), "nouveautes") is False
+    base["cfg"]["roblox_flux_nouveautes"] = True
+    assert await veille.enfiler(1, _article(15), "nouveautes") is True
+
+
+@pytest.mark.asyncio
+async def test_G6_eteindre_un_flux_RETIRE_son_arriere_et_rien_d_autre(base):
     await veille.init_db()
     async with base["db"]() as db:
         for aid, flux, envoye in ((1, "bascules", None), (2, "nouveautes", None),
-                                  (3, "ugc", None), (4, "nouveautes", "2026-09-20")):
+                                  (3, "surveiller", None), (4, "nouveautes", "2026-09-20")):
             await db.execute(
                 "INSERT INTO roblox_transitions(guild_id, asset_id, flux, de, vers,"
                 " detecte_le, charge, envoye_le) VALUES(?,?,?,?,?,?,?,?)",
                 (1, aid, flux, "a", "b", "2026-09-23", "{}", envoye))
         await db.commit()
-    n = await veille.oublier_flux_eteints(1, ["bascules"])
-    assert n == 2, f"{n} fiche(s) retirée(s) au lieu de 2"
-    restes = {(r[0], r[1]) for r in await _file(base)}
-    assert restes == {(1, "bascules"), (4, "nouveautes")}, restes
+    assert await veille.oublier_flux_eteints(1, ["bascules"]) == 2
+    async with base["db"]() as db:
+        async with db.execute("SELECT asset_id FROM roblox_transitions"
+                              " ORDER BY asset_id") as cur:
+            assert [r[0] for r in await cur.fetchall()] == [1, 4]
 
 
-def test_G5_le_menage_passe_AVANT_le_tirage_de_la_file():
-    """Une fonction non appelée n'est pas opérationnelle. Dans la boucle ET
-    dans « Relever maintenant » : les deux vident la file."""
-    corps = _fn(SRC_BOT, "_publier_file_accessoires")
-    assert corps.index("oublier_flux_eteints(") < corps.index("a_envoyer(")
-    panneau = SRC_PANNEAU
-    assert panneau.index("oublier_flux_eteints(") < panneau.index(
-        "attente = await veille.a_envoyer(")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  U — le flux UGC n'existe plus, nulle part
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_U1_plus_aucun_releve_du_catalogue_de_TOUS_les_createurs():
-    """C'était la consommation « monstrueuse ». Toute requête de catalogue du
-    module doit poser le créateur Roblox."""
-    for nom in ("relever_ugc", "qualite_ugc", "actif_ugc", "MAX_PAGES_UGC"):
-        assert not hasattr(veille, nom), f"{nom} existe encore"
-    arbre = ast.parse(SRC_VEILLE)
-    for n in ast.walk(arbre):
-        if (isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_relever_catalogue"
-                and n.args and isinstance(n.args[0], ast.Dict)):
-            cles = {k.value for k in n.args[0].keys if isinstance(k, ast.Constant)}
-            assert "CreatorTargetId" in cles, (
-                f"un relevé de catalogue sans créateur : {sorted(cles)}")
-
-
-def test_U2_le_role_Nouveautes_UGC_ne_peut_plus_etre_recree():
-    """C'est la catégorie « ugc » des pings qui le créait à la première
-    fiche. Sans elle, il ne revient jamais."""
-    import roblox_pings
-    assert "ugc" not in roblox_pings.CATEGORIES
-    assert "ugc" not in roblox_pings.CLE_PAR_FLUX
-    assert "Nouveautés UGC\", \"couleur\"" not in SRC_PINGS
-
-
-def test_U3_le_panneau_n_offre_plus_AUCUN_reglage_UGC():
-    """Un bouton pour un flux qui n'existe plus est un bouton qui ment
-    (UI.md)."""
-    for interdit in ("rblx_toggle_ugc", "rblx_seuils_ugc", "roblox_salon_ugc",
-                     "_cb_toggle_ugc", "_cb_seuils_ugc"):
-        assert interdit not in SRC_PANNEAU, f"{interdit} encore dans le panneau"
-
-
-def test_U4_le_panneau_offre_UN_interrupteur_par_flux():
-    """« que je puisse vraiment bien configurer le type de salon et tout
-    proprement ». Un interrupteur par flux, et chaque ligne de salon dit si
-    son flux publie, et où."""
-    assert "rblx_flux_bascules" in SRC_PANNEAU
-    assert "rblx_flux_nouveautes" in SRC_PANNEAU
-    corps = _fn(SRC_PANNEAU, "_faire_flux")
-    assert 'f"roblox_flux_{flux}"' in corps or "f'roblox_flux_{flux}'" in corps
-    assert "(repli)" in SRC_PANNEAU and "éteint" in SRC_PANNEAU
-
-
-def test_U5_publier_les_derniers_disparait_quand_les_nouveautes_sont_eteintes():
-    """Il remet en file des NOUVEAUTÉS : flux éteint, il répondrait « rien à
-    rattraper » — un bouton qui ment."""
-    assert "([b_rattrap] if _nv else [])" in SRC_PANNEAU
-
-
-def test_G6_le_publieur_VIDE_REELLEMENT_la_file_avant_de_tirer():
-    """⚠️ EXÉCUTÉ, PAS LU. Le test de source (G5) survit à une mutation qui
-    laisse le texte de l'appel en place mais le neutralise (`0 and await…`).
-    Ici on exécute le vrai `_publier_file_accessoires` : le ménage doit être
-    ATTENDU avant `a_envoyer`, avec la liste des flux ALLUMÉS du serveur."""
+def test_G7_le_publieur_VIDE_REELLEMENT_la_file_avant_de_tirer():
+    """EXÉCUTÉ, PAS LU : un test de source survit à `0 and await …`."""
     import asyncio as _aio
     journal = []
 
@@ -263,7 +219,7 @@ def test_G6_le_publieur_VIDE_REELLEMENT_la_file_avant_de_tirer():
         FLUX_OFFICIELS = veille.FLUX_OFFICIELS
 
         async def config(self, _gid):
-            return {"roblox_flux_bascules": True}
+            return {"roblox_flux_bascules": True, "roblox_flux_nouveautes": False}
 
         def flux_allume(self, c, f):
             return veille.flux_allume(c, f)
@@ -289,3 +245,161 @@ def test_G6_le_publieur_VIDE_REELLEMENT_la_file_avant_de_tirer():
     exec(_fn(SRC_BOT, "_publier_file_accessoires"), ns)   # noqa: S102 — code du dépôt
     _aio.run(ns["_publier_file_accessoires"]([_G()], 12, pause_fiches=0))
     assert journal[:2] == [("oubli", 42, ("bascules",)), ("tirage", 42)], journal
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  W — la liste de surveillance des retirés de la vente
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _poser(base, lignes):
+    await veille.init_db()
+    async with base["db"]() as db:
+        for (aid, prix, coll, hv, it, cree) in lignes:
+            await db.execute(
+                "INSERT INTO roblox_articles(asset_id, nom, type_article, prix,"
+                " collectionnable, hors_vente, favoris, cree_le, vu_le, signature,"
+                " item_type) VALUES(?,?,?,?,?,?,0,?,?,?,?)",
+                (aid, f"a{aid}", "Chapeau", prix, coll, hv, cree,
+                 "2026-09-23T09:00:00", "s", it))
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_W1_on_surveille_les_RETIRES_avec_un_vrai_prix_et_rien_d_autre(base):
+    """« en vente, retirés de la vente, et d'un seul coup ils passent
+    Limited ». Les récompenses à 0-1 R$ n'ont jamais été en vente."""
+    await _poser(base, [
+        (1, 9000, 0, 1, "Asset", "2026-08-12"),   # Sakura Antlers : surveillé
+        (2, 20000, 0, 1, "Asset", "2026-06-24"),  # Arcane Fedora : surveillé
+        (3, 1, 0, 1, "Asset", "2026-09-21"),      # récompense d'événement
+        (4, 0, 0, 1, "Asset", "2026-09-21"),      # récompense gratuite
+        (5, 400, 1, 1, "Asset", "2026-09-01"),    # déjà Limited
+        (6, 400, 0, 0, "Asset", "2026-09-01"),    # encore en vente
+        (7, 400, 0, 1, "Bundle", "2026-09-01"),   # un pack : autre espace d'ids
+        (8, 400, 0, 1, None, "2026-09-01"),       # type inconnu : prudence
+    ])
+    assert await veille.liste_de_surveillance() == [1, 2], "le plus récent d'abord"
+
+
+@pytest.mark.asyncio
+async def test_W2_la_liste_tient_en_UNE_requete(base):
+    await _poser(base, [(i, 500, 0, 1, "Asset", f"2026-01-{(i % 28) + 1:02d}")
+                        for i in range(1, 200)])
+    assert len(await veille.liste_de_surveillance()) == veille.LIMITE_SURVEILLANCE == 120
+
+
+@pytest.mark.asyncio
+async def test_W3_le_type_technique_est_ENREGISTRE_et_jamais_efface(base):
+    """Sans lui, la liste resterait vide pour toujours — et un fiche sans
+    type ne doit pas effacer celui qu'on connaît déjà."""
+    await veille.init_db()
+    await veille.comparer_et_enregistrer([_article(30, hors_vente=1)])
+    sans_type = _article(30, hors_vente=1)
+    sans_type.pop("item_type")
+    await veille.comparer_et_enregistrer([sans_type])
+    async with base["db"]() as db:
+        async with db.execute("SELECT item_type FROM roblox_articles"
+                              " WHERE asset_id=30") as cur:
+            assert (await cur.fetchone())[0] == "Asset"
+    assert await veille.liste_de_surveillance() == [30]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  C — « dans la même catégorie »
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_C1_les_deux_flux_vont_dans_LE_salon_des_Limited(base):
+    base["cfg"].update({"roblox_salon_bascules": 111, "roblox_salon_nouveautes": 222})
+    r = await veille.unifier_salons(1)
+    assert r["fait"] and r["salon"] == 111
+    assert base["cfg"]["roblox_salon_nouveautes"] == 111
+    assert base["cfg"]["roblox_salons_unifies"]
+
+
+@pytest.mark.asyncio
+async def test_C2_un_seul_salon_regle_devient_celui_des_deux(base):
+    base["cfg"].update({"roblox_salon_nouveautes": 222})
+    await veille.unifier_salons(1)
+    assert base["cfg"]["roblox_salon_bascules"] == 222
+
+
+@pytest.mark.asyncio
+async def test_C3_l_unification_n_a_lieu_QU_UNE_fois(base):
+    """Un choix fait ensuite dans le panneau ne doit plus être écrasé."""
+    base["cfg"].update({"roblox_salon_bascules": 111, "roblox_salons_unifies": "x",
+                        "roblox_salon_nouveautes": 333})
+    r = await veille.unifier_salons(1)
+    assert not r["fait"] and base["cfg"]["roblox_salon_nouveautes"] == 333
+
+
+def test_C4_l_unification_est_APPELEE_au_demarrage():
+    assert "unifier_salons(g.id)" in _fn(SRC_BOT, "_travaux_de_demarrage")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  P — le panneau et la fiche disent vrai
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_P1_UN_seul_reglage_de_salon_ecrit_les_DEUX_cles():
+    assert rp.CLES_DU_CHAMP[rp.CHAMP_ACCESSOIRES] == (
+        "roblox_salon_nouveautes", "roblox_salon_bascules")
+    assert any(c[0] == rp.CHAMP_ACCESSOIRES for c in rp.RobloxPanelV2.CHAMPS)
+    assert not any(c[0] in ("roblox_salon_nouveautes", "roblox_salon_bascules")
+                   for c in rp.RobloxPanelV2.CHAMPS), "deux réglages pour un salon"
+    assert "for _k in CLES_DU_CHAMP.get(cle, (cle,))" in _fn(SRC_PANNEAU, "_faire_salon")
+
+
+def test_P2_plus_aucune_trace_des_indices():
+    """Le texte d'aide promettait encore des « indices » sur le retrait de la
+    vente : un texte qui ment."""
+    assert "surveiller" not in rp.PLATEFORME and "surveiller" not in rp.NOMS_FLUX
+    assert "**indice**" not in SRC_PANNEAU
+    assert "🔴 **retiré de la vente**" not in SRC_PANNEAU
+
+
+def _texte(vue) -> str:
+    return str(vue.to_components())
+
+
+@pytest.fixture
+def panneau():
+    rp.setup(db_set=None, webhook_send=None, log=lambda *a: None)
+
+
+def test_P3_une_creation_qui_sort_DEJA_Limited_se_dit_NOUVEAU_LIMITED(panneau):
+    a = _article(40, collectionnable=1, classe=veille.CLASSE_LIMITED, prix=50000)
+    assert "NOUVEAU LIMITED ROBLOX" in _texte(rp.construire_fiche(a, "nouveautes"))
+
+
+def test_P4_un_Limited_hors_vente_se_REVEND_il_n_est_pas_retire(panneau):
+    """⚠️ « 🔴 retiré de la vente » faisait lire « peut-être Limited »."""
+    b = _article(41, collectionnable=1, hors_vente=1, bascule_detectee=True,
+                 classe=veille.CLASSE_LIMITED)
+    t = _texte(rp.construire_fiche(b, "bascules"))
+    assert "revente entre joueurs" in t and "retiré de la vente" not in t
+
+
+def test_P5_une_nouveaute_en_vente_le_dit(panneau):
+    t = _texte(rp.construire_fiche(_article(42), "nouveautes"))
+    assert "NOUVEL ACCESSOIRE ROBLOX" in t and "en vente" in t
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  U — le flux UGC reste retiré
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_U1_plus_aucun_releve_du_catalogue_de_TOUS_les_createurs():
+    for nom in ("relever_ugc", "qualite_ugc", "actif_ugc", "MAX_PAGES_UGC"):
+        assert not hasattr(veille, nom), f"{nom} existe encore"
+    for n in ast.walk(ast.parse(SRC_VEILLE)):
+        if (isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_relever_catalogue"
+                and n.args and isinstance(n.args[0], ast.Dict)):
+            cles = {k.value for k in n.args[0].keys if isinstance(k, ast.Constant)}
+            assert "CreatorTargetId" in cles, sorted(cles)
+
+
+def test_U2_le_role_Nouveautes_UGC_ne_peut_plus_etre_recree():
+    import roblox_pings
+    assert "ugc" not in roblox_pings.CATEGORIES
+    assert "ugc" not in roblox_pings.CLE_PAR_FLUX

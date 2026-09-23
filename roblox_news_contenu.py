@@ -140,6 +140,17 @@ def _texte(html_fragment: str) -> str:
     return t.strip()
 
 
+#  ⚠️ LA LÉGENDE TECHNIQUE D'UNE IMAGE DU FORUM (23/09). Discourse écrit, dans
+#  le paragraphe même, `<div class="meta">` « image 1137×342 52.3 KB » : sans
+#  ce retrait, la fiche commençait par ce charabia — mesuré sur « Ask
+#  Builderman ».
+_RX_META_IMAGE = re.compile(r'<div class="meta">.*?</div>', re.S | re.I)
+
+#  Une note de version : sa vraie liste de correctifs vit dans la
+#  documentation, le billet du forum n'en est que l'introduction.
+_RX_NOTES_VERSION = re.compile(r"\s*release\s+notes\s+for\s+\d+", re.I)
+
+
 def _blocs(html: str) -> list[tuple[str, str, int]]:
     """Découpe un HTML en blocs (type, texte, niveau).
 
@@ -148,6 +159,7 @@ def _blocs(html: str) -> list[tuple[str, str, int]]:
     une section. Les blocs vides sont écartés.
     """
     out = []
+    html = _RX_META_IMAGE.sub("", html or "")
     for m in re.finditer(
             r"<(h[1-6])[^>]*>(.*?)</\1>"
             r"|<li[^>]*>(.*?)</li>"
@@ -532,7 +544,13 @@ async def enrichir_billet(billet: dict, html_corps: str, langue: str = "en") -> 
         #  Aucune source périodique n'est ajoutée : la requête ne part que
         #  lorsqu'un billet pointe vraiment là-bas, soit ~1 fois par semaine.
         _repris_des_docs = False
-        if len((corps or "").strip()) < SEUIL_POINTEUR:
+        #  ⚠️ UNE NOTE DE VERSION VA D'ABORD À LA DOCUMENTATION (23/09). Son
+        #  billet du forum n'est souvent qu'une introduction (« Steve Jobs a
+        #  démissionné en 1985… ») plus longue que le seuil ci-dessous : 4
+        #  notes sur 5 affichaient ça au lieu de la liste des correctifs —
+        #  « ce qui a été corrigé », exactement ce qui est demandé.
+        _notes = bool(_RX_NOTES_VERSION.match(str(billet.get("titre") or "")))
+        if _notes or len((corps or "").strip()) < SEUIL_POINTEUR:
             #  ⚠️ SON PROPRE FILET, ET C'EST INDISPENSABLE. Le `try` qui
             #  englobe toute cette fonction rend le billet EN L'ÉTAT quand il
             #  attrape : une panne ici sortait donc un billet sans `corps`,
@@ -623,6 +641,12 @@ def lien_documentation(html: str) -> str | None:
         if not u.startswith(DOMAINE_DOCS + "/"):
             continue
         chemin = u[len(DOMAINE_DOCS):].split("?")[0].split("#")[0]
+        #  ⚠️ LE SEGMENT DE LANGUE (23/09). Les notes 737 et 738 pointent vers
+        #  `/docs/en-us/updates/2026-09-07` : sans ce retrait, le chemin ne
+        #  commençait pas par `/docs/updates/`, la documentation était
+        #  abandonnée, et la fiche montrait l'introduction du forum au lieu de
+        #  la liste des correctifs.
+        chemin = re.sub(r"^/docs/[a-z]{2}(?:-[a-z]{2})?/", "/docs/", chemin)
         #  ⚠️ ON VALIDE LE CHEMIN, on ne fait pas confiance à l'URL. Un billet
         #  peut citer n'importe quoi ; on ne suit que deux familles connues.
         if any(chemin.startswith(p) for p in CHEMINS_DOCS):

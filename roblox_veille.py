@@ -339,7 +339,6 @@ CLES_DEFAUT = {
     "roblox_veille_enabled": False,      # OFF par défaut — rien ne tourne
     "roblox_salon_nouveautes": 0,        # nouveaux articles créés par Roblox
     "roblox_salon_bascules": 0,          # ceux qui viennent de passer collectionnables
-    "roblox_salon_surveiller": 0,        # les indices — « à surveiller »
     "roblox_salon_sante": 0,             # où l'on dit qu'une source ne répond plus
     #  Le propriétaire peut n'en régler qu'UN : les trois flux retombent alors
     #  dessus. Voir `salon_du_flux`.
@@ -363,9 +362,15 @@ CLES_DEFAUT = {
     #  ⚠️ L'ancien flux « UGC » (le catalogue de TOUS les créateurs) a été
     #  RETIRÉ le même jour, relevé compris : rien de ce qu'un autre joueur a
     #  créé ne doit sortir, et ce relevé-là ne coûtera plus une requête.
-    "roblox_flux_bascules": True,        # 💎 vient de passer Limited — demandé
-    "roblox_flux_nouveautes": False,     # 🆕 nouvelle création Roblox
-    "roblox_flux_surveiller": False,     # 👀 indices — déjà retiré du panneau
+    #  ⚠️ 23/09 (APRÈS-MIDI) — LE PROPRIÉTAIRE A PRÉCISÉ : les nouveautés
+    #  Roblox ET les passages Limited, « dans la même catégorie ». Le flux
+    #  « à surveiller » (les « indices » sur des articles retirés de la vente)
+    #  n'existe PLUS : « je ne veux pas de ça ».
+    "roblox_flux_bascules": True,        # 💎 vient de passer Limited
+    "roblox_flux_nouveautes": True,      # 🆕 nouvelle création Roblox
+    #  Date de l'unification des deux salons en un seul (voir
+    #  `unifier_salons`). Vide = à faire.
+    "roblox_salons_unifies": "",
 }
 
 
@@ -385,7 +390,7 @@ async def config(guild_id: int) -> dict:
 #  Les SEULS flux qui existent. Un nom inconnu — comme l'ancien « ugc », dont
 #  des fiches pouvaient encore attendre en file au moment de son retrait — ne
 #  publie RIEN, et surtout pas par repli dans un salon officiel.
-FLUX_OFFICIELS = ("nouveautes", "bascules", "surveiller")
+FLUX_OFFICIELS = ("nouveautes", "bascules")
 
 
 def flux_allume(cfg_r: dict, flux: str) -> bool:
@@ -408,12 +413,10 @@ def salon_du_flux(cfg_r: dict, flux: str) -> int:
     if not flux_allume(cfg_r, flux):
         return 0
     cle = {"nouveautes": "roblox_salon_nouveautes",
-           "bascules": "roblox_salon_bascules",
-           "surveiller": "roblox_salon_surveiller"}.get(flux)
+           "bascules": "roblox_salon_bascules"}.get(flux)
     if cle and int(cfg_r.get(cle, 0) or 0):
         return int(cfg_r[cle])
-    for repli in ("roblox_salon_nouveautes", "roblox_salon_bascules",
-                  "roblox_salon_surveiller"):
+    for repli in ("roblox_salon_nouveautes", "roblox_salon_bascules"):
         if int(cfg_r.get(repli, 0) or 0):
             return int(cfg_r[repli])
     return 0
@@ -457,6 +460,16 @@ async def init_db():
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_roblox_articles_vu"
             " ON roblox_articles(vu_le)")
+        #  ⚠️ LE TYPE TECHNIQUE, POUR LA SURVEILLANCE (23/09). `type_article`
+        #  est un LIBELLÉ (« Chapeau »), pas « Asset » ou « Bundle ». Or un
+        #  identifiant de pack demandé comme accessoire rend un AUTRE article :
+        #  les deux espaces d'identifiants sont distincts. Sans cette colonne,
+        #  la surveillance aurait pu annoncer le passage en Limited d'un
+        #  article qui n'avait rien à voir.
+        try:
+            await db.execute("ALTER TABLE roblox_articles ADD COLUMN item_type TEXT")
+        except Exception:
+            pass                       # colonne déjà présente
         #  Ce qui a DÉJÀ été publié, par guilde et par flux. Persisté : un
         #  redémarrage ne doit jamais republier ce qui est déjà sorti.
         await db.execute(
@@ -2222,18 +2235,19 @@ async def comparer_et_enregistrer(articles: list[dict]) -> dict:
                             res.setdefault("bascules_anciennes", []).append(a)
                     elif not int(row[2]) and a["hors_vente"]:
                         res["retires"].append(a)
+                _it = str(a.get("item_type") or "") or None
                 await db.execute(
                     "INSERT INTO roblox_articles(asset_id, nom, type_article,"
                     " prix, collectionnable, hors_vente, favoris, cree_le,"
-                    " vu_le, signature) VALUES(?,?,?,?,?,?,?,?,?,?)"
+                    " vu_le, signature, item_type) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
                     " ON CONFLICT(asset_id) DO UPDATE SET nom=?, prix=?,"
                     "  collectionnable=?, hors_vente=?, favoris=?, vu_le=?,"
-                    "  signature=?",
+                    "  signature=?, item_type=COALESCE(?, item_type)",
                     (a["asset_id"], a["nom"], a["type_article"], a["prix"],
                      a["collectionnable"], a["hors_vente"], a["favoris"],
-                     a["cree_le"], maintenant, sig,
+                     a["cree_le"], maintenant, sig, _it,
                      a["nom"], a["prix"], a["collectionnable"], a["hors_vente"],
-                     a["favoris"], maintenant, sig))
+                     a["favoris"], maintenant, sig, _it))
             await db.commit()
     except Exception as ex:
         _log(f"[roblox_veille comparer] {ex}")
@@ -2498,6 +2512,15 @@ async def enfiler(guild_id: int, article: dict, flux: str) -> bool:
         _cid = 0
     if _cid and _cid != CREATEUR_ROBLOX:
         return False
+    #  ⚠️ LA RÈGLE D'OR DU 23/09 : « des accessoires enlevés de la vente
+    #  comme potentiellement limited — je ne veux pas de ça ». Un article HORS
+    #  VENTE et NON Limited ne sort JAMAIS, quel que soit le flux. Mesuré : 105
+    #  des 118 dernières créations de Roblox sont des récompenses d'événement à
+    #  0-1 R$, hors vente — c'étaient elles, les fiches « 🔴 retiré de la
+    #  vente ». Un article retiré qui PASSE Limited, lui, sort : il devient
+    #  collectionnable, et c'est précisément l'événement attendu.
+    if article.get("hors_vente") and not article.get("collectionnable"):
+        return False
     try:
         if not flux_allume(await config(guild_id), flux):
             return False
@@ -2518,6 +2541,71 @@ async def enfiler(guild_id: int, article: dict, flux: str) -> bool:
     except Exception as ex:
         _log(f"[roblox_veille enfiler] {ex}")
         return False
+
+
+#  Au-delà, UNE requête ne suffit plus (le point d'API prend 120 articles).
+LIMITE_SURVEILLANCE = 120
+
+
+async def liste_de_surveillance(limite: int = LIMITE_SURVEILLANCE) -> list[int]:
+    """Les accessoires Roblox RETIRÉS DE LA VENTE qui peuvent passer Limited.
+
+    ⚠️ C'EST LA SEULE FAÇON DE LES VOIR À TEMPS. Le tri « récents » de Roblox
+    est l'ordre de CRÉATION (mesuré le 23/09) : un article retiré il y a des
+    mois qui passe Limited ne remonte jamais en tête d'aucune liste. Il faut
+    donc aller le regarder, lui — et c'est bon marché : UNE requête pour 120.
+
+    Le critère est celui du propriétaire : « en vente, retirés de la vente, et
+    d'un seul coup ils passent Limited ». Donc : hors vente, pas encore
+    Limited, et un VRAI prix (> 1 R$) — ce qui écarte les récompenses
+    d'événement à 0-1 R$, qui n'ont jamais été en vente (105 sur 118 mesurées).
+    Les plus récents d'abord. Accessoires seulement : voir la colonne
+    `item_type`.
+    """
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT asset_id FROM roblox_articles"
+                " WHERE collectionnable=0 AND hors_vente=1 AND prix > 1"
+                " AND item_type='Asset'"
+                " ORDER BY cree_le DESC LIMIT ?",
+                (max(1, min(int(limite), LIMITE_SURVEILLANCE)),)) as cur:
+                return [int(r[0]) for r in await cur.fetchall()]
+    except Exception as ex:
+        _log(f"[roblox_veille liste_de_surveillance] {ex}")
+        return []
+
+
+async def unifier_salons(guild_id: int) -> dict:
+    """Nouveautés et passages Limited dans LE MÊME salon. UNE fois par serveur.
+
+    « Je veux que tu m'affiches, dans la même catégorie aussi, les accessoires
+      qui viennent de passer Limited » — le propriétaire, 23/09.
+
+    Le salon des Limited l'emporte s'il existe : c'est celui où le serveur
+    lisait jusqu'ici l'information la plus forte. Sinon, celui des nouveautés.
+    """
+    out = {"fait": False, "salon": 0, "raison": ""}
+    try:
+        c = await config(guild_id)
+        if str(c.get("roblox_salons_unifies") or ""):
+            out["raison"] = "déjà fait"
+            return out
+        b = int(c.get("roblox_salon_bascules", 0) or 0)
+        n = int(c.get("roblox_salon_nouveautes", 0) or 0)
+        cible = b or n
+        if cible:
+            if b != cible:
+                await _db_set(guild_id, "roblox_salon_bascules", cible)
+            if n != cible:
+                await _db_set(guild_id, "roblox_salon_nouveautes", cible)
+            out["fait"], out["salon"] = True, cible
+        await _db_set(guild_id, "roblox_salons_unifies",
+                      datetime.now(timezone.utc).isoformat())
+    except Exception as ex:
+        _log(f"[roblox_veille unifier_salons] {ex}")
+        out["raison"] = str(ex)
+    return out
 
 
 async def oublier_flux_eteints(guild_id: int, allumes) -> int:

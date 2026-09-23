@@ -44,21 +44,22 @@ _log = print
 PLATEFORME = {
     "nouveautes": "roblox_nouveautes",
     "bascules": "roblox_bascules",
-    "surveiller": "roblox_surveiller",
 }
 
 NOMS_FLUX = {
     "nouveautes": "🆕 Nouveautés Roblox",
     "bascules": "💎 Passés collectionnables",
-    "surveiller": "👀 À surveiller",
 }
 
 #  Quel flux règle chaque champ de salon — pour afficher, à côté du salon,
 #  si ce flux publie vraiment (interrupteur) et OÙ (salon propre ou repli).
-FLUX_DU_CHAMP = {
-    "roblox_salon_nouveautes": "nouveautes",
-    "roblox_salon_bascules": "bascules",
-}
+#  ⚠️ UN SEUL CHAMP POUR LES DEUX FLUX (23/09) — « dans la même catégorie ».
+#  Il écrit les deux clés d'un coup (voir `_faire_salon`) : le moteur garde
+#  un salon par flux, le propriétaire n'en règle qu'un.
+CHAMP_ACCESSOIRES = "roblox_salon_accessoires"
+CLES_DU_CHAMP = {CHAMP_ACCESSOIRES: ("roblox_salon_nouveautes",
+                                     "roblox_salon_bascules")}
+FLUX_DU_CHAMP = {CHAMP_ACCESSOIRES: ("nouveautes", "bascules")}
 
 
 def setup(*, db_set, webhook_send=None, log=None):
@@ -170,6 +171,12 @@ def construire_fiche(article: dict, flux: str, image: str | None = None,
             veille.CLASSE_LIMITED_U if limited_u else veille.CLASSE_LIMITED)
         etiquette = f"VIENT DE PASSER {veille.libelle_classe(_classe)}"
         pastille, couleur = "🔷", Palette.PREMIUM
+    elif article.get("collectionnable"):
+        #  Une création Roblox qui sort DÉJÀ Limited : c'est une nouveauté,
+        #  et elle se dit comme telle — « NOUVEL ACCESSOIRE » cachait le seul
+        #  mot qui compte pour qui échange.
+        etiquette = f"NOUVEAU {veille.libelle_classe(article.get('classe'))} ROBLOX"
+        pastille, couleur = "💎", Palette.PREMIUM
     else:
         etiquette, pastille, couleur = "NOUVEL ACCESSOIRE ROBLOX", "🆕", Palette.INFO
 
@@ -216,9 +223,18 @@ def construire_fiche(article: dict, flux: str, image: str | None = None,
     #  une fiche sans cette ligne enverrait le lecteur sur une page où il ne
     #  peut rien acheter, sans l'avoir prévenu. Le prix d'origine seul ne le
     #  dit pas : un article hors vente garde son prix affiché.
-    lignes.append("**Disponibilité** · "
-                  + ("🔴 **retiré de la vente**" if article.get("hors_vente")
-                     else "🟢 en vente"))
+    #  ⚠️ PLUS JAMAIS « 🔴 retiré de la vente » (23/09). C'était la formule
+    #  qui faisait lire « peut-être Limited » sur des récompenses d'événement.
+    #  Un article hors vente et non Limited ne sort plus du tout (voir
+    #  `roblox_veille.enfiler`) ; un Limited hors vente se revend entre
+    #  joueurs, et c'est ce qu'on dit.
+    if not article.get("hors_vente"):
+        _dispo = "🟢 en vente"
+    elif article.get("collectionnable"):
+        _dispo = "🔁 revente entre joueurs"
+    else:
+        _dispo = "hors vente"
+    lignes.append(f"**Disponibilité** · {_dispo}")
     if flux == "bascules" or article.get("collectionnable"):
         lignes.append(f"**Revente la plus basse** · {_fmt_robux(revente)}")
         lignes.append(f"**Stock émis** · {_fmt_nombre(stock)}")
@@ -592,10 +608,9 @@ class RobloxPanelV2(LayoutView):
     #  panneau : proposer un réglage pour un flux qui ne publie plus serait un
     #  menu qui ment (UI.md).
     CHAMPS = [
-        ("roblox_salon_nouveautes", "🆕 Nouveaux accessoires",
-         "Créés par Roblox à partir de maintenant."),
-        ("roblox_salon_bascules", "🔷 Vient de passer Limited",
-         "Limited ou Limited U — détecté en direct entre deux relevés."),
+        (CHAMP_ACCESSOIRES, "🎮 Accessoires Roblox",
+         "Nouveautés créées par Roblox ET passages en Limited, dans ce même "
+         "salon. Jamais un article simplement retiré de la vente."),
         ("roblox_news_salon", "📢 Actualité Roblox",
          "Studio · UGC · développeurs · événements · politique."),
     ]
@@ -639,23 +654,27 @@ class RobloxPanelV2(LayoutView):
 
             lignes = []
             for cle, nom, aide in self.CHAMPS:
-                ch = self.g.get_channel(int(c.get(cle, 0) or 0))
-                #  ⚠️ LE SALON SEUL MENTAIT. Un flux sans salon propre publiait
-                #  dans celui d'un autre (repli), et un salon réglé ne disait
-                #  pas si son flux était allumé. On dit les deux, en clair.
+                #  Un champ « accessoires » lit le salon où ses flux publient
+                #  RÉELLEMENT (après repli) : c'est ce que voit le serveur.
+                _cles = CLES_DU_CHAMP.get(cle, (cle,))
+                _id = next((int(c.get(k, 0) or 0) for k in _cles
+                            if int(c.get(k, 0) or 0)), 0)
+                ch = self.g.get_channel(_id) if _id else None
+                #  ⚠️ LE SALON SEUL MENTAIT : il ne disait pas si ses flux
+                #  étaient allumés. On dit l'état de chacun, en clair.
                 _etat = ""
                 _flux = FLUX_DU_CHAMP.get(cle)
                 if _flux:
-                    if not veille.flux_allume(c, _flux):
-                        _etat = " · ⚪ **éteint** — rien ne sort"
-                    else:
-                        _pub = self.g.get_channel(veille.salon_du_flux(c, _flux))
-                        if _pub is None:
-                            _etat = " · 🟢 allumé — ⚠️ _aucun salon, rien ne sortira_"
-                        elif ch is None:
-                            _etat = f" · 🟢 allumé — publie dans {_pub.mention} (repli)"
+                    _morceaux = []
+                    for _f in _flux:
+                        _nom_f = "🆕 nouveautés" if _f == "nouveautes" else "💎 passages Limited"
+                        if not veille.flux_allume(c, _f):
+                            _morceaux.append(f"{_nom_f} ⚪ éteint")
+                        elif not veille.salon_du_flux(c, _f):
+                            _morceaux.append(f"{_nom_f} ⚠️ sans salon")
                         else:
-                            _etat = " · 🟢 allumé"
+                            _morceaux.append(f"{_nom_f} 🟢")
+                    _etat = " · " + " · ".join(_morceaux)
                 lignes.append(f"**{nom}** · {ch.mention if ch else '⚪ _non défini_'}"
                               f"{_etat}\n-# {aide}")
 
@@ -693,8 +712,7 @@ class RobloxPanelV2(LayoutView):
 
             items = [
                 v2_title("🎮 Veille Roblox"),
-                v2_subtitle("Nouveaux accessoires de Roblox · passages en "
-                            "collectionnable · indices"),
+                v2_subtitle("Nouveaux accessoires de Roblox · passages en Limited"),
                 v2_divider(),
                 v2_body(
                     f"{'🟢' if c['roblox_veille_enabled'] else '⚪'} **Accessoires** · "
@@ -737,12 +755,13 @@ class RobloxPanelV2(LayoutView):
 
             items.append(v2_divider())
             items.append(v2_body(
-                "-# ⚠️ Roblox n'annonce **jamais** à l'avance qu'un article "
-                "passera collectionnable — vérifié sur 339 articles. Ce que le "
-                "bot publie est un **indice** adossé à des faits observables "
-                "(retrait de la vente, demande, prix), jamais une prédiction.\n"
-                "-# Le dernier collectionnable créé par Roblox date d'octobre "
-                "2025 : un salon calme est **normal**."))
+                "-# Le bot publie deux choses : les **nouveaux accessoires** "
+                "de Roblox (en vente, ou Limited dès leur sortie) et les "
+                "**passages en Limited**. Jamais un article simplement retiré "
+                "de la vente — Roblox en crée des dizaines à 1 R$ pour ses "
+                "événements.\n"
+                "-# Les articles retirés de la vente avec un vrai prix sont "
+                "**surveillés** : leur passage en Limited sort dans la minute."))
 
             for cle, nom, _ in self.CHAMPS:
                 sel = ChannelSelect(
@@ -865,7 +884,10 @@ class RobloxPanelV2(LayoutView):
     def _faire_salon(self, cle: str):
         async def _cb(i):
             try:
-                await _db_set(self.g.id, cle, int(i.data["values"][0]))
+                #  Un champ peut régler PLUSIEURS clés : « 🎮 Accessoires
+                #  Roblox » écrit celle des nouveautés ET celle des Limited.
+                for _k in CLES_DU_CHAMP.get(cle, (cle,)):
+                    await _db_set(self.g.id, _k, int(i.data["values"][0]))
                 self._dernier = ""
                 await self.render_to(i, edit=True)
             except Exception as ex:

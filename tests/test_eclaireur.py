@@ -296,18 +296,20 @@ def test_l_eclaireur_ne_touche_pas_au_quota_des_fiches_tant_que_rien_ne_bouge():
     """Deux relevés d'identifiants, puis RIEN si l'ensemble n'a pas changé —
     c'est ce qui rend la cadence tenable."""
     c = _fn("eclaireur_task")
-    #  ⚠️ TROIS APPELS DEPUIS LE 23/09, ET C'EST VOULU : la file du passage,
-    #  la même posée au SECOND SEAU (les fiches) quand le premier refuse, et
-    #  l'autre file si le quota annoncé le permet. Jamais plus.
-    assert c.count("relever_identifiants(") == 3
+    #  ⚠️ DEUX APPELS DEPUIS LE 23/09 (APRÈS-MIDI), ET C'EST VOULU : la tête
+    #  de la liste générale, et la même question au SECOND SEAU quand le
+    #  premier refuse. La tête des collectionnables n'est plus interrogée : le
+    #  tri de Roblox est l'ordre de création, elle n'apprenait rien de plus
+    #  (les passages en Limited sont vus par `_surveiller_retires`).
+    assert c.count("relever_identifiants(") == 2
     i_429 = c.index("== 429")
     #  `ast.unparse` normalise les guillemets : on cherche la forme qu'il rend.
     assert "seau='fiches'" in c[i_429:i_429 + 1500], (
         "le second seau doit être réservé au refus du premier")
-    #  ⚠️ L'ALTERNANCE (22/09) : plus de `False`/`True` en dur. Le passage
-    #  interroge UNE file, et l'autre seulement si le quota le permet — c'est
-    #  ce qui a mis fin au 429 systématique mesuré en production.
-    assert "collectionnables=collect" in c and "collectionnables=not collect" in c
+    #  ⚠️ PLUS D'ALTERNANCE (23/09) : une seule tête, la liste générale, à
+    #  chaque passage. `collectionnables=not collect` ne doit pas revenir.
+    assert "collectionnables=collect" in c
+    assert "collectionnables=not collect" not in c, "la seconde sonde est revenue"
     i_neufs = c.index("if not neufs:")
     i_fiches = c.index("fiches_par_ids(")
     assert i_neufs < i_fiches, "les fiches partent avant de savoir si quelque chose a bougé"
