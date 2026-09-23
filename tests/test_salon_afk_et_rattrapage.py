@@ -225,8 +225,12 @@ def banc(tmp_path):
         finally:
             await db.close()
 
+    #  ⚠️ LE RATTRAPAGE REMET EN FILE DES NOUVEAUTÉS : il n'a de sens que si
+    #  ce flux est allumé. Depuis le 23/09 il est éteint par défaut (« uniquement
+    #  les objets qui deviennent limited ») et le bouton disparaît du panneau
+    #  quand il l'est — ces tests décrivent donc le cas où on l'a rallumé.
     async def _cfg(_g):
-        return {}
+        return {"roblox_flux_nouveautes": True}
 
     async def _db_set(_g, _k, _v):
         return True

@@ -45,18 +45,19 @@ PLATEFORME = {
     "nouveautes": "roblox_nouveautes",
     "bascules": "roblox_bascules",
     "surveiller": "roblox_surveiller",
-    #  ⚠️ SANS CETTE LIGNE, `PLATEFORME.get(flux, "roblox_nouveautes")` fait
-    #  sortir un accessoire fabriqué par un joueur quelconque sous l'identité
-    #  réservée aux créations OFFICIELLES de Roblox. Le repli est utile
-    #  ailleurs ; ici il ment.
-    "ugc": "roblox_ugc",
 }
 
 NOMS_FLUX = {
     "nouveautes": "🆕 Nouveautés Roblox",
     "bascules": "💎 Passés collectionnables",
     "surveiller": "👀 À surveiller",
-    "ugc": "🎨 Nouveautés UGC (tous créateurs)",
+}
+
+#  Quel flux règle chaque champ de salon — pour afficher, à côté du salon,
+#  si ce flux publie vraiment (interrupteur) et OÙ (salon propre ou repli).
+FLUX_DU_CHAMP = {
+    "roblox_salon_nouveautes": "nouveautes",
+    "roblox_salon_bascules": "bascules",
 }
 
 
@@ -597,11 +598,6 @@ class RobloxPanelV2(LayoutView):
          "Limited ou Limited U — détecté en direct entre deux relevés."),
         ("roblox_news_salon", "📢 Actualité Roblox",
          "Studio · UGC · développeurs · événements · politique."),
-        #  ⚠️ SON PROPRE SALON, SANS REPLI POSSIBLE — voir `salon_du_flux`.
-        #  Le laisser retomber sur celui des nouveautés officielles y
-        #  déverserait le catalogue entier à la première activation.
-        ("roblox_salon_ugc", "🎨 Nouveautés UGC (tous créateurs)",
-         "Créés par les autres joueurs. Filtré : en vente, prix, créateur."),
     ]
 
     def __init__(self, u, g):
@@ -644,8 +640,24 @@ class RobloxPanelV2(LayoutView):
             lignes = []
             for cle, nom, aide in self.CHAMPS:
                 ch = self.g.get_channel(int(c.get(cle, 0) or 0))
-                lignes.append(f"**{nom}** · {ch.mention if ch else '⚪ _non défini_'}\n"
-                              f"-# {aide}")
+                #  ⚠️ LE SALON SEUL MENTAIT. Un flux sans salon propre publiait
+                #  dans celui d'un autre (repli), et un salon réglé ne disait
+                #  pas si son flux était allumé. On dit les deux, en clair.
+                _etat = ""
+                _flux = FLUX_DU_CHAMP.get(cle)
+                if _flux:
+                    if not veille.flux_allume(c, _flux):
+                        _etat = " · ⚪ **éteint** — rien ne sort"
+                    else:
+                        _pub = self.g.get_channel(veille.salon_du_flux(c, _flux))
+                        if _pub is None:
+                            _etat = " · 🟢 allumé — ⚠️ _aucun salon, rien ne sortira_"
+                        elif ch is None:
+                            _etat = f" · 🟢 allumé — publie dans {_pub.mention} (repli)"
+                        else:
+                            _etat = " · 🟢 allumé"
+                lignes.append(f"**{nom}** · {ch.mention if ch else '⚪ _non défini_'}"
+                              f"{_etat}\n-# {aide}")
 
             #  ⚠️ La santé se lit sur le CODE HTTP, jamais sur « on a trouvé
             #  quelque chose » : le dernier collectionnable créé par Roblox date
@@ -793,26 +805,24 @@ class RobloxPanelV2(LayoutView):
                                custom_id="rblx_rattraper")
             b_rattrap.callback = self._cb_rattraper
 
-            #  ⚠️ LE FLUX UGC — mesuré le 03/09 : le compte Roblox n'avait
-            #  rien créé depuis 19,8 jours pendant que le catalogue entier
-            #  produisait un accessoire toutes les quelques minutes. Deux
-            #  catalogues, donc deux interrupteurs.
-            _ugc = bool(c.get("roblox_ugc_enabled"))
-            b_ugc = Button(
-                label="UGC", emoji="🎨" if _ugc else "⚪",
-                style=(discord.ButtonStyle.success if _ugc
+            #  ⚠️ UN INTERRUPTEUR PAR FLUX (23/09). « Uniquement les objets
+            #  qui deviennent limited » : sans ces deux boutons, la seule
+            #  façon de couper les nouveautés était de vider leur salon — et
+            #  elles retombaient alors dans celui des Limited, par repli.
+            _lm = veille.flux_allume(c, "bascules")
+            b_lim = Button(
+                label="Passages Limited", emoji="💎" if _lm else "⚪",
+                style=(discord.ButtonStyle.success if _lm
                        else discord.ButtonStyle.secondary),
-                custom_id="rblx_toggle_ugc")
-            b_ugc.callback = self._cb_toggle_ugc
-
-            #  ⚠️ LES SEUILS DOIVENT ÊTRE ATTEIGNABLES. Le compte rendu de la
-            #  veille dit « desserrez le prix plancher ou le créateur
-            #  vérifié » : sans ce bouton, cette phrase serait un mensonge.
-            b_ugc_seuils = Button(
-                label="Seuils UGC", emoji="🎚️",
-                style=discord.ButtonStyle.secondary,
-                custom_id="rblx_seuils_ugc")
-            b_ugc_seuils.callback = self._cb_seuils_ugc
+                custom_id="rblx_flux_bascules")
+            b_lim.callback = self._faire_flux("bascules")
+            _nv = veille.flux_allume(c, "nouveautes")
+            b_nouv = Button(
+                label="Nouveautés", emoji="🆕" if _nv else "⚪",
+                style=(discord.ButtonStyle.success if _nv
+                       else discord.ButtonStyle.secondary),
+                custom_id="rblx_flux_nouveautes")
+            b_nouv.callback = self._faire_flux("nouveautes")
 
             b_back = Button(label="Retour", emoji="◀️",
                             style=discord.ButtonStyle.secondary,
@@ -822,10 +832,13 @@ class RobloxPanelV2(LayoutView):
             #  Deux rangées : Discord refuse plus de 5 boutons par ligne, et
             #  regrouper les trois interrupteurs ensemble se lit mieux.
             #  Cinq boutons : le maximum que Discord accepte par rangée.
-            items.append(discord.ui.ActionRow(b_on, b_news, b_simu, b_ugc,
-                                              b_ugc_seuils))
-            items.append(discord.ui.ActionRow(b_test, b_rattrap, b_reset,
-                                              b_back))
+            items.append(discord.ui.ActionRow(b_on, b_news, b_simu, b_lim,
+                                              b_nouv))
+            #  ⚠️ « Publier les derniers » remet en file des NOUVEAUTÉS : flux
+            #  éteint, il ne pourrait rien remettre et répondrait « rien à
+            #  rattraper » — un bouton qui ment (UI.md). Il disparaît.
+            _rangee2 = [b_test] + ([b_rattrap] if _nv else []) + [b_reset, b_back]
+            items.append(discord.ui.ActionRow(*_rangee2))
 
             self.clear_items()
             self.add_item(v2_container(*items, color=Palette.INFO))
@@ -948,103 +961,27 @@ class RobloxPanelV2(LayoutView):
         except Exception as ex:
             _log(f"[roblox toggle simulation] {ex}")
 
-    async def _cb_toggle_ugc(self, i):
-        """Allume ou éteint le flux des nouveautés UGC.
-
-        ⚠️ ON DIT CE QU'ON ALLUME. Le catalogue entier produit un accessoire
-        toutes les quelques minutes, contre un tous les vingt jours pour le
-        compte Roblox. Sans le filtre, ce salon deviendrait illisible en une
-        heure — le staff doit savoir que le filtre est ce qui rend ce flux
-        tenable, et où le régler.
-        """
-        try:
-            await i.response.defer()
-            c = await veille.config(self.g.id)
-            allume = not bool(c.get("roblox_ugc_enabled"))
-            await _db_set(self.g.id, "roblox_ugc_enabled", allume)
-            if allume and not int(c.get("roblox_salon_ugc", 0) or 0):
-                #  ⚠️ UN INTERRUPTEUR SANS SALON NE PUBLIE RIEN, ET IL FAUT LE
-                #  DIRE MAINTENANT. Ce flux n'a AUCUN repli : il resterait
-                #  muet, et « allumé » à l'écran.
-                self._dernier = (
-                    "🎨 **Flux UGC allumé — mais aucun salon n'est réglé.**\n"
-                    "-# Choisissez « 🎨 Nouveautés UGC » ci-dessus : ce flux "
-                    "n'a pas de salon de repli, exprès, pour ne jamais "
-                    "déverser l'UGC du monde entier dans vos nouveautés "
-                    "officielles.")
-            elif allume:
-                _pm = int(c.get("roblox_ugc_prix_min", 1) or 0)
-                _vs = bool(c.get("roblox_ugc_verifie_seul"))
-                self._dernier = (
-                    "🎨 **Flux UGC allumé.** Les accessoires créés par les "
-                    "autres joueurs, filtrés.\n"
-                    f"-# Filtre actuel : en vente · prix ≥ `{_pm}` R$"
-                    + (" · **créateur vérifié seulement**" if _vs else "")
-                    + ". Le compte rendu de chaque passage dit combien "
-                      "d'articles sont tombés à chaque marche.")
-            else:
-                self._dernier = ("⚪ **Flux UGC éteint.** Les nouveautés "
-                                 "officielles Roblox continuent.")
-            await self.render_to(i, edit=True)
-        except Exception as ex:
-            _log(f"[roblox toggle ugc] {ex}")
-
-    async def _cb_seuils_ugc(self, i):
-        """Ouvre les deux seuils du filtre UGC.
-
-        ⚠️ DEUX RÉGLAGES, PAS DIX. Les favoris n'y sont PAS, et c'est mesuré :
-        ils valent 0 sur 99/99 accessoires fraîchement créés. Offrir ce
-        réglage donnerait un moyen simple de vider le flux pour toujours en
-        croyant l'affiner.
-        """
-        try:
-            c = await veille.config(self.g.id)
-            parent = self
-
-            class _Seuils(discord.ui.Modal, title="Seuils du flux UGC"):
-                prix = discord.ui.TextInput(
-                    label="Prix plancher en R$ (0 = aucun)",
-                    default=str(int(c.get("roblox_ugc_prix_min", 1) or 0)),
-                    required=True, max_length=6)
-                verifie = discord.ui.TextInput(
-                    label="Créateurs vérifiés seulement ? (oui / non)",
-                    default=("oui" if c.get("roblox_ugc_verifie_seul")
-                             else "non"),
-                    required=True, max_length=3)
-
-                async def on_submit(self, i2):
-                    try:
-                        await i2.response.defer()
-                        try:
-                            _p = max(0, min(int(str(self.prix).strip()), 100000))
-                        except (TypeError, ValueError):
-                            #  ⚠️ ON NE DEVINE PAS. Une saisie illisible garde
-                            #  la valeur en place et le dit : la remplacer par
-                            #  un défaut silencieux changerait le filtre sans
-                            #  que personne ne l'ait demandé.
-                            _p = int(c.get("roblox_ugc_prix_min", 1) or 0)
-                            parent._dernier = (
-                                "⚠️ Prix illisible — l'ancienne valeur est "
-                                "conservée.")
-                        _v = str(self.verifie).strip().lower() in (
-                            "oui", "o", "yes", "y", "1", "true", "vrai")
-                        await _db_set(parent.g.id, "roblox_ugc_prix_min", _p)
-                        await _db_set(parent.g.id, "roblox_ugc_verifie_seul", _v)
-                        if not parent._dernier.startswith("⚠️ Prix"):
-                            parent._dernier = (
-                                f"🎚️ **Seuils UGC enregistrés.** Prix ≥ "
-                                f"`{_p}` R$"
-                                + (" · créateurs vérifiés seulement" if _v
-                                   else " · tous les créateurs")
-                                + ".\n-# Le prochain passage dira combien "
-                                  "d'articles passent ce filtre.")
-                        await parent.render_to(i2, edit=True)
-                    except Exception as ex2:
-                        _log(f"[roblox seuils ugc submit] {ex2}")
-
-            await i.response.send_modal(_Seuils())
-        except Exception as ex:
-            _log(f"[roblox seuils ugc] {ex}")
+    def _faire_flux(self, flux: str):
+        """Allume ou éteint UN flux, et dit exactement ce que ça change."""
+        async def _cb(i):
+            try:
+                await i.response.defer()
+                c = await veille.config(self.g.id)
+                allume = not veille.flux_allume(c, flux)
+                await _db_set(self.g.id, f"roblox_flux_{flux}", allume)
+                nom = NOMS_FLUX.get(flux, flux)
+                if allume:
+                    self._dernier = (f"🟢 **{nom}** allumé — les prochaines "
+                                     f"détections de ce flux seront publiées.")
+                else:
+                    self._dernier = (
+                        f"⚪ **{nom}** éteint — plus rien ne sort pour ce flux, "
+                        f"et ce qui attendait en file est retiré au prochain "
+                        f"passage.")
+                await self.render_to(i, edit=True)
+            except Exception as ex:
+                _log(f"[roblox flux {flux}] {ex}")
+        return _cb
 
     async def _cb_toggle(self, i):
         """Allume ou éteint. À l'allumage, pose la borne du premier relevé.
@@ -1228,6 +1165,12 @@ class RobloxPanelV2(LayoutView):
             #  Les images en UN SEUL appel pour tout le passage.
             #  Même sélection que la publication, sinon une fiche sort sans son
             #  image (ou on demande des vignettes pour rien).
+            #  Même ménage que la boucle : un flux éteint ne laisse rien
+            #  partir, et ses fiches ne doivent pas compter comme « sans
+            #  salon » — ce serait accuser une panne qui n'existe pas.
+            await veille.oublier_flux_eteints(
+                self.g.id, [f for f in veille.FLUX_OFFICIELS
+                            if veille.flux_allume(c, f)])
             attente = await veille.a_envoyer(
                 self.g.id, limite=veille.MAX_PUBLICATIONS_PAR_PASSAGE)
             a_publier = [e["article"] for e in attente]

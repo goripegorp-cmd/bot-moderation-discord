@@ -14109,10 +14109,18 @@ async def _diag_veille_serveurs(limite: int = 10) -> None:
         try:
             _ca = await roblox_module.config(g.id)
             _cn = await roblox_news_module.config(g.id)
-            _acc = ("OK" if _ca.get("roblox_veille_enabled")
-                    and roblox_module.salon_du_flux(_ca, "nouveautes")
+            #  ⚠️ PLUS « le salon des nouveautés » : avec les nouveautés
+            #  éteintes sur demande, ce test aurait crié « AUCUN salon » sur
+            #  un serveur qui publie ses Limited normalement.
+            _flux_on = [n for f, n in (("bascules", "💎 Limited"),
+                                       ("nouveautes", "🆕 nouveautés"),
+                                       ("surveiller", "👀 à surveiller"))
+                        if roblox_module.salon_du_flux(_ca, f)]
+            _acc = ((f"OK ({', '.join(_flux_on)})") if _ca.get("roblox_veille_enabled")
+                    and _flux_on
                     else ("éteint" if not _ca.get("roblox_veille_enabled")
-                          else "allumé mais AUCUN salon"))
+                          else "allumé mais AUCUN flux ne publie "
+                               "(interrupteur ou salon)"))
             _act = ("OK" if _cn.get("roblox_news_enabled")
                     and int(_cn.get("roblox_news_salon") or 0)
                     else ("éteintes" if not _cn.get("roblox_news_enabled")
@@ -14258,6 +14266,20 @@ async def _publier_file_accessoires(guildes, budget: int, *,
     for g in _ordre:
         if _reste <= 0:
             break
+        #  ⚠️ UN FLUX ÉTEINT NE LAISSE RIEN PARTIR (23/09). Sans ce
+        #  ménage, l'arriéré d'un flux qu'on vient d'éteindre sortait quand
+        #  même — et d'anciennes fiches « ugc » seraient tombées par repli
+        #  dans le salon des créations officielles.
+        try:
+            _cg = await roblox_module.config(g.id)
+            _oubli = await roblox_module.oublier_flux_eteints(
+                g.id, [f for f in roblox_module.FLUX_OFFICIELS
+                       if roblox_module.flux_allume(_cg, f)])
+            if _oubli:
+                print(f"[{etiquette}]   🧹 {_oubli} fiche(s) d'un flux éteint "
+                      f"retirée(s) de la file de {g.id}")
+        except Exception as ex:
+            print(f"[{etiquette}] ménage des flux éteints : {ex}")
         _lot_g = await roblox_module.a_envoyer(
             g.id, limite=min(_part, _reste))
         if _lot_g:
@@ -14664,6 +14686,23 @@ async def _bilan_sante_serveur(guild) -> list:
                 "🚫 **Aucun rôle Direction désigné** : `/off` et "
                 "`/mod direction` restent réservés aux administrateurs. "
                 "`/configure` → **Sanctions** → **🚫 Rôle Direction**.")
+        #  📺 UN FLUX YOUTUBE SANS SALON ne publie rien — et répétait un
+        #  avertissement toutes les 5 minutes dans les journaux.
+        _defaut_yt = guild.get_channel(int(c.get('ads_youtube_channel', 0) or 0))
+        _live_yt = guild.get_channel(int(c.get('ads_youtube_live_channel', 0) or 0))
+        _orphelins = []
+        for _f in (c.get('ads_youtube_feeds') or []):
+            if not isinstance(_f, dict):
+                continue
+            _cible = guild.get_channel(int(_f.get('channel_id', 0) or 0))
+            if not (_cible or _defaut_yt or _live_yt):
+                _orphelins.append(str(_f.get('name') or _f.get('id') or '?'))
+        if _orphelins:
+            manques.append(
+                f"📺 **Flux YouTube sans salon** : "
+                f"{', '.join(f'« {n} »' for n in _orphelins[:3])} — il ne "
+                f"publie rien. `/configure` → **Réseaux sociaux** : choisissez "
+                f"son salon, ou retirez le flux.")
         if not int(c.get('activite_salon_retour', 0) or 0):
             manques.append(
                 "💤 **Aucun salon de retour d'activité** : le masquage des "
@@ -14738,74 +14777,6 @@ async def _travaux_de_demarrage():
         print(f"[demarrage travaux] {ex}")
 
 
-async def _installer_salon_ugc(guild) -> bool:
-    """Crée le salon des nouveautés UGC et allume le flux. UNE fois par serveur.
-
-    ⚠️ POURQUOI UN SALON NEUF ET PAS UN REPLI. Le flux UGC lit le catalogue de
-    TOUS les créateurs : même filtré (en vente, prix réel, créateur vérifié),
-    c'est un autre débit et un autre public que les créations officielles de
-    Roblox. Le déverser dans le salon des nouveautés officielles, c'est
-    exactement ce que le propriétaire avait refusé en gardant `CreatorTargetId=1`.
-
-    ⚠️ CONDITIONS STRICTES. On n'installe rien sur un serveur qui n'a pas déjà
-    la veille allumée AVEC un salon officiel : sans ce repère, on ne saurait ni
-    dans quelle catégorie créer le salon, ni si le serveur veut du Roblox.
-
-    La date est écrite même en cas d'échec de permission : sinon on retenterait
-    la création toutes les 30 minutes, indéfiniment. Le refus est DIT.
-    """
-    try:
-        c = await cfg(guild.id)
-        if str(c.get("roblox_ugc_installe") or ""):
-            return False
-        if int(c.get("roblox_salon_ugc", 0) or 0):
-            return False                      # déjà réglé à la main
-        if not c.get("roblox_veille_enabled"):
-            return False
-        ref = None
-        for cle in ("roblox_salon_nouveautes", "roblox_salon_bascules",
-                    "roblox_salon_surveiller"):
-            ref = guild.get_channel(int(c.get(cle, 0) or 0))
-            if ref is not None:
-                break
-        if ref is None:
-            return False
-        me = guild.me
-        if me is None or not me.guild_permissions.manage_channels:
-            await db_set(guild.id, "roblox_ugc_installe", "refus:permission")
-            print(f"[ugc] {guild.id} : installation impossible — il me manque "
-                  f"« Gérer les salons ». Créez le salon à la main puis "
-                  f"Panneau → Roblox → 🎨 Nouveautés UGC.")
-            return False
-        salon = await guild.create_text_channel(
-            "🎨・nouveautes-ugc",
-            category=getattr(ref, "category", None),
-            topic="Accessoires UGC des autres créateurs — en vente, prix réel, "
-                  "créateur vérifié. Réglages : /configure → Roblox → 🎚️ Seuils UGC.",
-            reason="Flux UGC — installation automatique (demande du 22/09)")
-        await db_set(guild.id, "roblox_salon_ugc", salon.id)
-        await db_set(guild.id, "roblox_ugc_enabled", True)
-        await db_set(guild.id, "roblox_ugc_installe", str(salon.id))
-        #  ⚠️ UN MESSAGE, TOUT DE SUITE. Un salon vide créé par un bot ressemble
-        #  à une erreur ; et c'est la seule preuve visible que le flux est né.
-        try:
-            await salon.send(
-                "## 🎨 Nouveautés UGC\n"
-                "Ce salon reçoit les accessoires créés par **les autres joueurs** "
-                "— pas seulement Roblox — et seulement ceux qui passent le "
-                "filtre de qualité : **en vente**, **prix réel**, **créateur "
-                "vérifié**.\n"
-                "-# Trop calme ou trop bavard ? `/configure` → **Roblox** → "
-                "**🎚️ Seuils UGC**. Pour l'éteindre : le bouton **🎨 UGC**.")
-        except Exception as ex:
-            print(f"[ugc] {guild.id} : salon créé mais message refusé — {ex}")
-        print(f"[ugc] {guild.id} : salon #{salon.name} créé et flux UGC allumé")
-        return True
-    except Exception as ex:
-        _logerr("_installer_salon_ugc", ex, guild_id=getattr(guild, "id", 0))
-        return False
-
-
 @tasks.loop(minutes=30)
 async def veille_roblox_task():
     """Veille Roblox : nouveautes du catalogue, bascules, et actualite.
@@ -14854,10 +14825,6 @@ async def veille_roblox_task():
         guildes_news = []
         for g in list(bot.guilds):
             try:
-                #  Le flux UGC ne peut pas publier sans salon, et il n'a
-                #  pas de repli : sans cette ligne, il reste muet pour
-                #  toujours. Une seule fois par serveur.
-                await _installer_salon_ugc(g)
                 if await roblox_module.actif(g.id):
                     guildes_items.append(g)
                 if await roblox_news_module.actif(g.id):
@@ -14895,13 +14862,6 @@ async def veille_roblox_task():
                #  Fiches PARTIES dont la base n'a pas pris la marque : elles
                #  repartiront. C'est la seule trace d'un doublon à venir.
                "non_marquees": 0}
-        #  ⚠️ L'ENTONNOIR DU FLUX UGC, ÉTAGE PAR ÉTAGE. Sans lui, un seuil
-        #  trop strict rend un salon muet qu'on ne diagnostique que des
-        #  semaines plus tard — c'est exactement ce qui est arrivé au flux des
-        #  bascules. `refus` nomme la marche où chaque article est tombé, donc
-        #  le réglage exact à desserrer.
-        _sug = {"actif": False, "lus": 0, "retenus": 0, "hors_fenetre": 0,
-                "deja": 0, "enfiles": 0, "refus": {}, "code": None}
         _sn = {"lus": 0, "sautees": 0, "pannes": 0, "deja": 0,
                "echecs": 0, "plafonnes": 0, "absorbes": 0, "simules": 0,
                #  La file d'attente des actualités — même dessin que celle des
@@ -15079,58 +15039,11 @@ async def veille_roblox_task():
                             if await roblox_module.enfiler(g.id, a, flux):
                                 _sa["enfiles"] += 1
 
-            # ═══════════════════════════════════════════════════════════
-            #  ÉTAPE 1 bis — LE FLUX UGC (03/09/2026)
-            # ═══════════════════════════════════════════════════════════
-            #  ⚠️ POURQUOI CE FLUX EXISTE. Mesuré le 03/09 en posant deux fois
-            #  la même question au catalogue, en ne changeant QUE le créateur :
-            #    · CreatorTargetId=1 (le flux officiel) → plus récent 19,8 JOURS
-            #    · sans CreatorTargetId (tous créateurs) → plus récent 1,2 HEURE
-            #  Le propriétaire voyait arriver des accessoires ; le bot n'en
-            #  voyait aucun. Les deux avaient raison : ce sont DEUX CATALOGUES.
-            #
-            #  ⚠️ IL NE PASSE PAS PAR `comparer_et_enregistrer`, ET C'EST
-            #  DÉLIBÉRÉ. Y verser des milliers d'articles UGC par jour
-            #  polluerait `roblox_articles`, fausserait la détection de
-            #  bascules et surtout ferait mentir la ligne « création la plus
-            #  récente », qui répond à « Roblox est-il calme ? ». Ce flux vit
-            #  seul : relevé → filtre → file.
-            _g_ugc = []
-            for g in guildes_items:
-                try:
-                    if await roblox_module.actif_ugc(g.id):
-                        _g_ugc.append(g)
-                except Exception:
-                    continue
-            if _g_ugc:
-                _sug["actif"] = True
-                await asyncio.sleep(roblox_module.PAUSE_ENTRE_APPELS_CATALOGUE)
-                _relu = await roblox_module.relever_ugc(limite=30)
-                _budget_veille(_sa, _relu)
-                _sug["code"] = _relu.get("code")
-                _arts_ugc = _relu.get("articles") or []
-                _sug["lus"] = len(_arts_ugc)
-                for g in _g_ugc:
-                    _cfg_ugc = await roblox_module.config(g.id)
-                    #  Du plus ANCIEN au plus récent : la file sort dans son
-                    #  ordre d'entrée, et le propriétaire a demandé (16/08)
-                    #  qu'on ne mélange pas un vieil article à un neuf.
-                    for a in roblox_module.ordonner_publication(
-                            _arts_ugc, len(_arts_ugc)):
-                        _ok, _motif = roblox_module.qualite_ugc(a, _cfg_ugc)
-                        if not _ok:
-                            _sug["refus"][_motif] = _sug["refus"].get(_motif, 0) + 1
-                            continue
-                        _sug["retenus"] += 1
-                        if not roblox_module.age_publiable(a, "ugc"):
-                            _sug["hors_fenetre"] += 1
-                            continue
-                        if not await roblox_module.publiable_dans(
-                                g.id, a["asset_id"], "ugc"):
-                            _sug["deja"] += 1
-                            continue
-                        if await roblox_module.enfiler(g.id, a, "ugc"):
-                            _sug["enfiles"] += 1
+            #  ⚠️ L'ANCIENNE « ÉTAPE 1 bis » — le flux UGC, le catalogue de
+            #  TOUS les créateurs — A ÉTÉ RETIRÉE le 23/09 à la demande du
+            #  propriétaire : « ce qui est créé par d'autres joueurs ne
+            #  m'intéresse pas », et ce relevé « consomme des données
+            #  monstrueuses ». Plus une requête, plus un salon, plus un rôle.
 
             # ═══════════════════════════════════════════════════════════
             #  ÉTAPES 2 et 3 — TIRER DE LA FILE ET PUBLIER
@@ -15263,29 +15176,6 @@ async def veille_roblox_task():
                          else ", donc AUCUNE nouveauté n'est publiable "
                               "aujourd'hui, et c'est la source qui est calme, "
                               "pas le bot"))
-            #  ⚠️ L'ENTONNOIR, EN CLAIR. Le propriétaire doit pouvoir lire
-            #  « 30 lus → 2 retenus » et savoir SUR QUELLE MARCHE les 28
-            #  autres sont tombés. Un flux muet sans cette ligne est
-            #  indiscernable d'un catalogue calme — le défaut le plus coûteux
-            #  de ce dépôt, deux fois.
-            if _sug.get("actif"):
-                _det = " · ".join(f"{n} {m}" for m, n in
-                                  sorted(_sug["refus"].items(),
-                                         key=lambda kv: -kv[1]))
-                print(f"[veille_roblox_task]   UGC (tous créateurs) : "
-                      f"{_sug['lus']} lu(s) · {_sug['retenus']} retenu(s) par "
-                      f"le filtre · {_sug['hors_fenetre']} hors fenêtre "
-                      f"({roblox_module.FENETRE_DIRECTE_HEURES} h) · "
-                      f"{_sug['deja']} déjà sorti(s) · {_sug['enfiles']} "
-                      f"mise(s) en file"
-                      + (f" — écartés : {_det}" if _det else ""))
-                if _sug["lus"] and not _sug["retenus"]:
-                    print("[veille_roblox_task]   ⚠️ UGC : le filtre a tout "
-                          "écarté. Ce n'est PAS forcément une panne (les "
-                          "dépôts sans prix dominent le catalogue), mais si "
-                          "cette ligne se répète des jours, desserrez "
-                          "« créateur vérifié seulement » ou le prix plancher "
-                          "dans le panneau Roblox.")
             #  ⚠️ L'ÉCLAIREUR DOIT PROUVER QU'IL VIT — même leçon que pour le
             #  suivi de marché. Un éclaireur muet depuis plus de cinq passages
             #  est un éclaireur mort, et le délai est revenu à 30 minutes sans
@@ -15307,6 +15197,9 @@ async def veille_roblox_task():
                      f"{_E.get('serie_max', 0)} passage(s) · reste annoncé "
                      f"{_E.get('reste')}/12"
                      if _E.get("refus") else "")
+                  + (f" · {_E['secours_retenus']} secours retenu(s) pour "
+                     f"protéger le relevé complet"
+                     if _E.get("secours_retenus") else "")
                   + (f" · ralenti (palier {_E['palier']})" if _E.get("palier") else "")
                   + (" · ⚠️ ÉCLAIREUR MUET : le délai est revenu à 30 min"
                      if _ap is None
@@ -15587,6 +15480,9 @@ _ECLAIREUR = {"amorce": False, "vus": set(), "vus_limited": set(),
               #  `dernier_succes` : l'horloge de l'alerte d'aveuglement.
               "rattrapes": 0, "serie": 0, "serie_max": 0, "alerte": False,
               "dernier_refus": None, "dernier_succes": None,
+              #  Secours retenus pour protéger le relevé complet, et la pause
+              #  du second seau quand il annonce lui-même peu de jetons.
+              "secours_retenus": 0, "secours_pause_jusqu": None,
               "passages": 0, "sautes": 0, "erreurs": 0,
               "nouveautes": 0, "bascules": 0, "publies": 0,
               "dernier_passage": None, "dernier_signal": None}
@@ -15605,6 +15501,16 @@ ECLAIREUR_RESTE_CONFORTABLE = 8
 #  Après un refus, pas de seconde requête pendant ce délai : quand l'IP est
 #  disputée, on ne prend que le strict nécessaire.
 ECLAIREUR_SOBRIETE_S = 300
+#  ⚠️ LE SECOURS NE DOIT PAS MANGER LA MARGE DU RELEVÉ COMPLET. Mesuré en
+#  production (22/09 → 23/09) : depuis le second seau, le relevé complet est
+#  passé de `reste_min=3/12` à 1 ou 2 — la fenêtre glissante de 60 s compte
+#  encore une requête de secours faite juste AVANT lui. Pas de secours dans
+#  les 75 s qui précèdent un relevé : il regardera lui-même, rien n'est perdu.
+ECLAIREUR_AVANT_RELEVE_S = 75
+#  Si le second seau annonce lui-même 3 jetons ou moins, on le laisse souffler
+#  une minute : le relevé complet et le suivi de marché en dépendent.
+ECLAIREUR_SECOURS_RESTE_MIN = 3
+ECLAIREUR_SECOURS_PAUSE_S = 60
 #  ⚠️ LE SEUIL DE L'ALERTE, EN TEMPS ET PAS EN PASSAGES. Un refus isolé sur
 #  une IP partagée est la météo ; dix minutes sans rien voir, c'est une panne.
 #  Mesuré le 22/09 : avec « une ligne à chaque changement d'état », l'état
@@ -15669,7 +15575,22 @@ async def eclaireur_task():
         #  faisaient refuser la seconde à CHAQUE passage en production : le
         #  seau de 12/min est par IP, et l'IP de Railway est partagée. Une
         #  requête qu'on sait condamnée est une requête gâchée.
-        collect = bool(E["tour"] % 2)
+        #  ⚠️ UNE SEULE FILE UTILE → ON NE REGARDE QU'ELLE (23/09). Les
+        #  nouveautés éteintes partout, interroger les créations ne
+        #  publierait rien et coûterait une requête sur deux : les Limited
+        #  sont alors regardés à CHAQUE passage — deux fois plus vite, pour
+        #  le même débit.
+        _cfgs = []
+        for _g in guildes:
+            try:
+                _cfgs.append(await roblox_module.config(_g.id))
+            except Exception:
+                continue
+        _veut_n = any(roblox_module.flux_allume(_c, "nouveautes") for _c in _cfgs)
+        _veut_b = any(roblox_module.flux_allume(_c, "bascules") for _c in _cfgs)
+        if not (_veut_n or _veut_b):
+            return                    # rien que l'éclaireur sache regarder
+        collect = bool(E["tour"] % 2) if (_veut_n and _veut_b) else _veut_b
         E["tour"] += 1
         if E.get("dernier_succes") is None:
             E["dernier_succes"] = datetime.now(timezone.utc)
@@ -15685,12 +15606,35 @@ async def eclaireur_task():
             #  429=0). Même question, autre seau, zéro attente.
             E["refus"] += 1
             E["dernier_refus"] = datetime.now(timezone.utc)
-            _r0 = await roblox_module.relever_identifiants(
-                collectionnables=collect, seau="fiches")
-            if _r0["code"] == 200:
-                E["rattrapes"] += 1
-            elif _r0["code"] == 429:
-                E["refus"] += 1
+            _maint = datetime.now(timezone.utc)
+            #  ⚠️ DEUX GARDES, PARCE QUE LE SECOND SEAU N'EST PAS À NOUS SEULS.
+            #  Le relevé complet et le suivi de marché passent par lui. La
+            #  production l'a montré : un secours juste avant le relevé lui
+            #  coûtait sa marge (reste_min 3 → 1).
+            _prochain = getattr(veille_roblox_task, "next_iteration", None)
+            _avant_releve = False
+            try:
+                _avant_releve = (_prochain is not None and 0 <= (
+                    _prochain - _maint).total_seconds() < ECLAIREUR_AVANT_RELEVE_S)
+            except Exception:
+                _avant_releve = False
+            _en_pause = (E.get("secours_pause_jusqu") is not None
+                         and _maint < E["secours_pause_jusqu"])
+            if _avant_releve or _en_pause:
+                #  Rien n'est perdu : le relevé regarde lui-même dans 75 s au
+                #  plus, ou le passage suivant réessaiera le premier seau.
+                E["secours_retenus"] = E.get("secours_retenus", 0) + 1
+            else:
+                _r0 = await roblox_module.relever_identifiants(
+                    collectionnables=collect, seau="fiches")
+                if _r0["code"] == 200:
+                    E["rattrapes"] += 1
+                    _rs = _r0.get("reste")
+                    if _rs is not None and _rs <= ECLAIREUR_SECOURS_RESTE_MIN:
+                        E["secours_pause_jusqu"] = _maint + timedelta(
+                            seconds=ECLAIREUR_SECOURS_PAUSE_S)
+                elif _r0["code"] == 429:
+                    E["refus"] += 1
         reponses = [(collect, _r0)]
         #  La seconde SEULEMENT si l'API dit qu'il reste de la place — et
         #  jamais pendant 5 min après un refus : quand l'IP est disputée, on
@@ -15698,7 +15642,7 @@ async def eclaireur_task():
         _sobre = (E.get("dernier_refus") is not None
                   and (datetime.now(timezone.utc) - E["dernier_refus"]
                        ).total_seconds() < ECLAIREUR_SOBRIETE_S)
-        if (_r0["code"] == 200 and not _sobre
+        if (_r0["code"] == 200 and not _sobre and _veut_n and _veut_b
                 and (_r0.get("reste") or 0) >= ECLAIREUR_RESTE_CONFORTABLE):
             _r1 = await roblox_module.relever_identifiants(
                 collectionnables=not collect)
@@ -15758,7 +15702,11 @@ async def eclaireur_task():
             if E["passages"] % ECLAIREUR_BATTEMENT == 0:
                 _ds = _age_s(E["dernier_signal"])
                 print(f"[eclaireur] {E['passages']} passage(s) · rien de nouveau · "
-                      f"quota identifiants restant {E.get('reste')}/12 · dernier "
+                      + (f"seau des identifiants {E.get('reste')}/12 "
+                         f"(saturé par l'IP partagée — le second seau prend "
+                         f"le relais) · " if E.get("reste") == 0
+                         else f"seau des identifiants {E.get('reste')}/12 · ")
+                      + f"dernier "
                       f"signal : "
                       + (f"il y a {_ds / 60:.0f} min" if _ds is not None
                          else "jamais depuis le démarrage"))
@@ -34022,6 +33970,23 @@ async def _yt_resolve_channel_id(session, raw: str) -> str:
     return ""
 
 
+#  ⚠️ UN RÉGLAGE MANQUANT N'EST PAS UN ÉVÉNEMENT. Il était répété à chaque
+#  relevé — toutes les 5 minutes, 288 lignes par jour, identiques — et c'est
+#  dans ce bruit qu'une vraie panne passe inaperçue. Une fois par jour et par
+#  flux ; la cause, elle, va dans le bilan de santé (`_bilan_sante_serveur`).
+_AVERTIS_SOCIAL: dict = {}
+
+
+def _avertir_une_fois_par_jour(cle: str) -> bool:
+    """True si cet avertissement n'a pas été émis dans les dernières 24 h."""
+    maintenant = datetime.now(timezone.utc)
+    dernier = _AVERTIS_SOCIAL.get(cle)
+    if dernier is not None and (maintenant - dernier).total_seconds() < 86400:
+        return False
+    _AVERTIS_SOCIAL[cle] = maintenant
+    return True
+
+
 async def check_youtube_feeds(session, guild, data):
     """Vérifie les nouvelles vidéos YouTube + détection de lives"""
     default_channel = guild.get_channel(data.get('ads_youtube_channel', 0))
@@ -34059,19 +34024,23 @@ async def check_youtube_feeds(session, guild, data):
                     _yt_feeds_dirty = True
                 else:
                     try:
-                        diag.warn("social", "youtube_feed",
-                                  f"{channel_name}: id '{channel_id}' non résoluble en UC… "
-                                  f"(mur de consentement UE) → colle l'ID `UC…` ou l'URL "
-                                  f"youtube.com/channel/UC… dans le panneau")
+                        if _avertir_une_fois_par_jour(
+                                f"yt_uc:{guild.id}:{channel_id}"):
+                            diag.warn("social", "youtube_feed",
+                                      f"{channel_name}: id '{channel_id}' non résoluble en UC… "
+                                      f"(mur de consentement UE) → colle l'ID `UC…` ou l'URL "
+                                      f"youtube.com/channel/UC… dans le panneau")
                     except Exception:
                         pass
                     continue
 
             if not target_channel and not live_channel:
                 try:
-                    diag.warn("social", "youtube_feed",
-                              f"{channel_name}: aucun salon cible ni salon live configuré "
-                              f"(ads_youtube_channel / salon du feed non défini)")
+                    if _avertir_une_fois_par_jour(
+                            f"yt_salon:{guild.id}:{channel_id}"):
+                        diag.warn("social", "youtube_feed",
+                                  f"{channel_name}: aucun salon cible ni salon live configuré "
+                                  f"(ads_youtube_channel / salon du feed non défini)")
                 except Exception:
                     pass
                 continue

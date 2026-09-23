@@ -72,9 +72,20 @@ class FauxCatalogue:
 
     MAX_PUBLICATIONS_PAR_PASSAGE = 12
 
-    def __init__(self, reponses):
+    #  ⚠️ PIÈGE N°6 : depuis le 23/09 l'éclaireur lit la configuration des
+    #  flux pour savoir QUOI regarder. Par défaut ici : les deux flux allumés,
+    #  le cas où l'alternance a un sens — c'est lui que ces tests décrivent.
+    def __init__(self, reponses, flux=None):
         self.reponses = list(reponses)
         self.demandes = []
+        self.cfg = dict(flux or {"roblox_flux_nouveautes": True,
+                                 "roblox_flux_bascules": True})
+
+    async def config(self, _gid):
+        return self.cfg
+
+    def flux_allume(self, cfg, flux):
+        return bool(cfg.get(f"roblox_flux_{flux}", False))
 
     def catalogue_est_occupe(self):
         return False
@@ -125,13 +136,14 @@ class FauxAsyncio:
         self.sommeils.append(d)
 
 
-def _banc(reponses, etat=None):
+def _banc(reponses, etat=None, flux=None):
     journal = []
-    cat = FauxCatalogue(reponses)
+    cat = FauxCatalogue(reponses, flux=flux)
     E = {"amorce": True, "vus": {1, 2}, "vus_limited": {1},
          "tour": 0, "palier": 0, "pause_jusqu": None, "refus": 0, "reste": None,
          "rattrapes": 0, "serie": 0, "serie_max": 0, "alerte": False,
          "dernier_refus": None, "dernier_succes": datetime.now(timezone.utc),
+         "secours_retenus": 0, "secours_pause_jusqu": None,
          "passages": 0, "sautes": 0, "erreurs": 0, "nouveautes": 0,
          "bascules": 0, "publies": 0,
          "dernier_passage": None, "dernier_signal": None}
@@ -153,9 +165,17 @@ def _banc(reponses, etat=None):
         "ECLAIREUR_BATTEMENT": _constante("ECLAIREUR_BATTEMENT"),
         "ECLAIREUR_SOBRIETE_S": _constante("ECLAIREUR_SOBRIETE_S"),
         "ECLAIREUR_ALERTE_APRES_S": _constante("ECLAIREUR_ALERTE_APRES_S"),
+        #  ⚠️ PIÈGE N°6 : les trois réglages de la garde de marge. Absents, le
+        #  `NameError` était avalé par la boucle et le test mesurait une panne.
+        "ECLAIREUR_AVANT_RELEVE_S": _constante("ECLAIREUR_AVANT_RELEVE_S"),
+        "ECLAIREUR_SECOURS_RESTE_MIN": _constante("ECLAIREUR_SECOURS_RESTE_MIN"),
+        "ECLAIREUR_SECOURS_PAUSE_S": _constante("ECLAIREUR_SECOURS_PAUSE_S"),
         "asyncio": faux_asyncio,
         "random": type("Rnd", (), {"uniform": staticmethod(lambda a, b: 0.5)})(),
         "_publier_file_accessoires": _publier,
+        #  Le relevé complet n'est pas imminent dans ces bancs : la garde de
+        #  marge (75 s avant lui) ne doit pas retenir le secours.
+        "veille_roblox_task": type("L", (), {"next_iteration": None})(),
         "_age_s": lambda _d: 10,
         "datetime": datetime, "timezone": timezone, "timedelta": timedelta,
         "print": lambda *a, **k: journal.append(" ".join(str(x) for x in a)),
@@ -379,3 +399,52 @@ def test_N4_le_battement_reste_a_30_minutes():
     passages ne doit pas faire trois fois plus de lignes."""
     assert (_constante("ECLAIREUR_ACTU_SECONDES")
             * _constante("ECLAIREUR_ACTU_BATTEMENT")) == 1800
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  « UNIQUEMENT LES OBJETS QUI DEVIENNENT LIMITED » (23/09)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_E13_nouveautes_eteintes_on_ne_regarde_QUE_les_Limited_a_chaque_passage():
+    """Interroger les créations ne publierait rien : c'était une requête sur
+    deux pour rien. Les Limited sont alors regardés À CHAQUE passage — deux
+    fois plus vite, pour le même débit."""
+    ns, _E, cat, _j = _banc([_ok([1], reste=11), _ok([1], reste=11),
+                             _ok([1], reste=11)],
+                            flux={"roblox_flux_bascules": True})
+    for _ in range(3):
+        _tick(ns)
+    assert cat.demandes == ["collect", "collect", "collect"], cat.demandes
+
+
+def test_E14_aucun_flux_que_l_eclaireur_sache_regarder_AUCUNE_requete():
+    """Rien à publier = rien à demander. « Ne pas spammer une recherche qui
+    ne sert à rien. »"""
+    ns, _E, cat, _j = _banc([_ok([1])], flux={"roblox_flux_surveiller": True})
+    _tick(ns)
+    assert cat.demandes == [], cat.demandes
+
+
+def test_E15_le_secours_se_RETIENT_juste_avant_le_releve_complet():
+    """Mesuré en production : un secours dans la minute qui précède le relevé
+    lui coûtait sa marge (reste_min 3 → 1). Dans les 75 s qui le précèdent,
+    on ne prend pas le second seau — le relevé regardera lui-même."""
+    ns, E, cat, _j = _banc([_refus(), _ok([1], reste=9)])
+    ns["veille_roblox_task"] = type("L", (), {
+        "next_iteration": datetime.now(timezone.utc) + timedelta(seconds=30)})()
+    _tick(ns)
+    assert cat.demandes == ["creations"], (
+        f"secours pris juste avant le relevé : {cat.demandes}")
+    assert E["secours_retenus"] == 1
+
+
+def test_E16_un_second_seau_presque_vide_est_laisse_tranquille():
+    """Le relevé complet et le suivi de marché en dépendent : s'il annonce 3
+    jetons ou moins, on le laisse souffler une minute."""
+    ns, E, cat, _j = _banc([_refus(), _ok([1], reste=2), _refus()])
+    _tick(ns)
+    assert E["secours_pause_jusqu"] is not None
+    E["pause_jusqu"] = None
+    _tick(ns)
+    assert cat.demandes.count("creations:fiches") + cat.demandes.count(
+        "collect:fiches") == 1, cat.demandes

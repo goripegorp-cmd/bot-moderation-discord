@@ -72,8 +72,11 @@ def test_L2_la_veille_roblox_est_une_boucle_de_30_minutes():
     """Elle a perdu son décorateur pendant cette session. Jamais deux fois."""
     assert any("tasks.loop(minutes=30)" in d
                for d in _decorateurs("veille_roblox_task"))
-    assert not _decorateurs("_installer_salon_ugc"), (
-        "_installer_salon_ugc a récupéré un décorateur qui ne lui appartient pas")
+    #  L'installateur du salon UGC, sur lequel le décorateur avait glissé, a
+    #  été RETIRÉ le 23/09 avec son flux : il ne doit pas revenir.
+    noms = {n.name for n in ast.walk(ARBRE)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    assert "_installer_salon_ugc" not in noms
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -408,103 +411,65 @@ def test_B5_le_bilan_est_APPELE_au_demarrage():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  U — le flux UGC s'installe seul
+#  U — le flux UGC est RETIRÉ (23/09)
 # ═══════════════════════════════════════════════════════════════════════════════
+#  « ce qui est créé par d'autres joueurs ne m'intéresse pas » — et le salon
+#  « 🎨 Nouveautés UGC » que le bot créait tout seul ne doit JAMAIS revenir.
 
-def _espace_ugc(config, cree_casse=False, manage_channels=True):
-    journal = []
-
-    async def _cfg(_gid):
-        return dict(config)
-
-    async def _db_set(_gid, k, v):
-        config[k] = v
-        journal.append(f"cfg:{k}")
-
-    class _Salon:
-        id, name = 77, "🎨・nouveautes-ugc"
-
-        async def send(self, _t):
-            journal.append("message")
-
-    class _Ref:
-        id, category = 5, "CAT"
-
-    async def _create(nom, category=None, topic=None, reason=None):
-        if cree_casse:
-            raise RuntimeError("refus")
-        journal.append(f"cree:{nom}:{category}")
-        return _Salon()
-
-    me = type("Me", (), {"guild_permissions": type(
-        "P", (), {"manage_channels": manage_channels})()})()
-    guild = type("G", (), {
-        "id": 777, "me": me,
-        "get_channel": lambda self, cid: _Ref() if cid == 5 else None,
-        "create_text_channel": staticmethod(_create)})()
-
-    ns = {"cfg": _cfg, "db_set": _db_set, "_logerr": lambda *a, **k: None,
-          "print": lambda *a, **k: None}
-    exec(_src("_installer_salon_ugc"), ns)     # noqa: S102 — code du dépôt
-    return ns, guild, journal, config
+def test_U1_plus_aucune_creation_automatique_de_salon_UGC():
+    """Le propriétaire a supprimé le salon : s'il réapparaissait au prochain
+    redémarrage, ce serait exactement ce qu'il a demandé d'empêcher."""
+    assert "_installer_salon_ugc" not in SRC
+    assert "nouveautes-ugc" not in SRC
+    assert "create_text_channel" not in _src("veille_roblox_task")
 
 
-def test_U1_le_salon_UGC_est_cree_a_cote_du_salon_officiel_et_le_flux_allume():
-    """Le flux est livré depuis le 03/09 et n'a jamais rien publié : il exige
-    un salon et n'a pas de repli. Sans cette installation, il reste muet."""
-    ns, g, journal, config = _espace_ugc(
-        {"roblox_veille_enabled": True, "roblox_salon_nouveautes": 5})
-    assert asyncio.run(ns["_installer_salon_ugc"](g)) is True
-    assert any(j.startswith("cree:") and j.endswith(":CAT") for j in journal), journal
-    assert config["roblox_salon_ugc"] == 77
-    assert config["roblox_ugc_enabled"] is True
-    assert "message" in journal, "un salon vide ressemble à une erreur"
-
-
-def test_U2_on_n_installe_RIEN_sans_veille_allumee_ni_salon_officiel():
-    """Sans repère, on ne saurait ni où créer le salon, ni si le serveur veut
-    du Roblox."""
-    ns, g, journal, _c = _espace_ugc({"roblox_veille_enabled": False,
-                                      "roblox_salon_nouveautes": 5})
-    assert asyncio.run(ns["_installer_salon_ugc"](g)) is False and journal == []
-    ns, g, journal, _c = _espace_ugc({"roblox_veille_enabled": True})
-    assert asyncio.run(ns["_installer_salon_ugc"](g)) is False and journal == []
-
-
-def test_U3_une_installation_DEJA_faite_ne_recommence_pas():
-    """Sans marqueur, chaque passage de 30 minutes créerait un salon de plus."""
-    ns, g, journal, _c = _espace_ugc({"roblox_veille_enabled": True,
-                                      "roblox_salon_nouveautes": 5,
-                                      "roblox_ugc_installe": "77"})
-    assert asyncio.run(ns["_installer_salon_ugc"](g)) is False and journal == []
-
-
-def test_U4_un_salon_regle_A_LA_MAIN_est_respecte():
-    """Le propriétaire a pu choisir son salon : on ne le double pas."""
-    ns, g, journal, _c = _espace_ugc({"roblox_veille_enabled": True,
-                                      "roblox_salon_nouveautes": 5,
-                                      "roblox_salon_ugc": 123})
-    assert asyncio.run(ns["_installer_salon_ugc"](g)) is False and journal == []
-
-
-def test_U5_sans_la_permission_on_le_DIT_et_on_ne_retente_pas_en_boucle():
-    """Retenter toutes les 30 minutes une création qui ne peut pas aboutir,
-    c'est une erreur répétée 48 fois par jour dans les logs."""
-    ns, g, journal, config = _espace_ugc(
-        {"roblox_veille_enabled": True, "roblox_salon_nouveautes": 5},
-        manage_channels=False)
-    assert asyncio.run(ns["_installer_salon_ugc"](g)) is False
-    assert config.get("roblox_ugc_installe") == "refus:permission"
-
-
-def test_U6_la_cle_du_marqueur_est_DECLAREE_dans_le_module():
-    """`roblox_veille.config()` ne rend que les clés de `CLES_DEFAUT` : une clé
-    non déclarée serait perdue et l'installation recommencerait sans fin."""
-    src = (RACINE / "roblox_veille.py").read_text(encoding="utf-8")
-    assert '"roblox_ugc_installe"' in src
-
-
-def test_U7_l_installation_est_APPELEE_dans_la_boucle_de_veille():
-    """Une fonction non appelée n'est pas opérationnelle, même parfaite."""
+def test_U2_la_boucle_ne_releve_plus_le_catalogue_de_TOUS_les_createurs():
+    """Plus une requête sur le catalogue des autres joueurs — c'était la
+    consommation « monstrueuse » signalée."""
     corps = _src("veille_roblox_task")
-    assert "_installer_salon_ugc(g)" in corps
+    for interdit in ("relever_ugc", "actif_ugc", "qualite_ugc"):
+        assert interdit not in corps, f"{interdit} encore appelé"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Y — le bruit YouTube (journal Railway du 22/09 → 23/09)
+# ═══════════════════════════════════════════════════════════════════════════════
+#  `[DIAG] WARN social/youtube_feed :: @miranzaugc: aucun salon cible…` toutes
+#  les 5 minutes : 288 lignes par jour pour UN réglage manquant.
+
+def test_Y1_un_reglage_manquant_n_est_dit_qu_UNE_fois_par_jour():
+    from datetime import datetime, timedelta, timezone
+    ns = {"datetime": datetime, "timezone": timezone, "_AVERTIS_SOCIAL": {}}
+    exec(_src("_avertir_une_fois_par_jour"), ns)   # noqa: S102 — code du dépôt
+    f = ns["_avertir_une_fois_par_jour"]
+    assert f("yt:1") is True
+    assert f("yt:1") is False, "répété dans la journée"
+    ns["_AVERTIS_SOCIAL"]["yt:1"] = datetime.now(timezone.utc) - timedelta(hours=25)
+    assert f("yt:1") is True, "plus jamais redit après 24 h"
+    assert f("yt:2") is True, "un AUTRE flux doit pouvoir parler"
+
+
+def test_Y2_les_DEUX_avertissements_YouTube_passent_par_le_filtre():
+    """Un seul oublié, et les 288 lignes reviennent."""
+    corps = _src("check_youtube_feeds")
+    assert corps.count("_avertir_une_fois_par_jour(") == 2, corps.count(
+        "_avertir_une_fois_par_jour(")
+
+
+def test_Y3_le_flux_YouTube_SANS_SALON_est_dit_dans_le_bilan_avec_le_remede():
+    """Le journal ne le dit plus qu'une fois par jour : la cause doit être là
+    où le propriétaire regarde, avec l'endroit où la réparer."""
+    ns, g, _e, _c = _espace_bilan({
+        'direction_allowed_role': 1, 'activite_salon_retour': 1,
+        'ads_youtube_feeds': [{'id': 'UCx', 'name': '@miranzaugc'}]})
+    manques = asyncio.run(ns["_bilan_sante_serveur"](g))
+    assert any("@miranzaugc" in m and "Réseaux sociaux" in m for m in manques), manques
+
+
+def test_Y4_un_flux_YouTube_AVEC_salon_ne_figure_pas_au_bilan():
+    ns, g, _e, _c = _espace_bilan({
+        'direction_allowed_role': 1, 'activite_salon_retour': 1,
+        'ads_youtube_feeds': [{'id': 'UCx', 'name': '@ok', 'channel_id': 5}]})
+    manques = asyncio.run(ns["_bilan_sante_serveur"](g))
+    assert not any("YouTube" in m for m in manques), manques

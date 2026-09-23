@@ -117,8 +117,21 @@ def test_la_boucle_publie_dans_lordre():
             #  va réellement envoyer, dédoublonnés — l'ordonner n'aurait aucun
             #  sens. Restent les deux appels qui décident d'un salon : les
             #  articles (à l'entrée en file) et les actualités.
-            assert corps.count("ordonner_publication") >= 2, (
-                "articles ET actualités doivent passer par l'ordre")
+            #  ⚠️ REPOINTÉ LE 23/09. Ce test comptait DEUX appels dans la
+            #  boucle ; depuis l'extraction du 14/09, l'ordre des actualités
+            #  vit dans `_enfiler_billets`, et le second appel restant était…
+            #  celui du flux UGC. Le retrait de ce flux l'a révélé : le test
+            #  ne passait plus que par accident. On vérifie maintenant chaque
+            #  chemin là où il vit vraiment.
+            assert corps.count("ordonner_publication") >= 1, (
+                "les articles doivent passer par l'ordre à l'entrée en file")
+            assert "_enfiler_billets(" in corps, (
+                "les actualités ne passent plus par le corps partagé")
+            for m in ast.walk(arbre):
+                if (isinstance(m, ast.AsyncFunctionDef)
+                        and m.name == "_enfiler_billets"):
+                    assert "ordonner_publication" in ast.unparse(m), (
+                        "les actualités doivent passer par l'ordre")
             #  Et la propriété que l'ancien seuil ne vérifiait pas : c'est
             #  l'ENTRÉE en file qui est ordonnée, donc l'ordre survit au
             #  plafond du passage et au redémarrage.
