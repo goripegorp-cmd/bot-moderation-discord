@@ -309,15 +309,24 @@ def _espace_bilan(config, perms=None, etiquettes=(), me_sous_role=False):
     async def _cfg_act(_gid):
         return {}
 
+    #  ⚠️ PIÈGE N°6, VÉCU LE 23/09 : le faux `activite_niv` n'avait pas
+    #  `salons_de_retour`. L'AttributeError était avalée par le `except` du
+    #  bilan, et les tests passaient quand même. Les erreurs sont désormais
+    #  RETENUES, et un bilan sain doit n'en avoir aucune (B3).
+    erreurs = []
+    import activite_niveaux as _niv
     ns = {
-        "cfg": _cfg, "db_set": _db_set, "_logerr": lambda *a, **k: None,
+        "cfg": _cfg, "db_set": _db_set,
+        "_logerr": lambda *a, **k: erreurs.append(a),
         "print": lambda *a, **k: None,
         "activite_module": type("A", (), {"config": staticmethod(_cfg_act)}),
         "activite_niv": type("N", (), {
             "roles_etiquettes": staticmethod(
-                lambda g, c: [_Role(n) for n in etiquettes])}),
+                lambda g, c: [_Role(n) for n in etiquettes]),
+            "salons_de_retour": staticmethod(_niv.salons_de_retour)}),
         "datetime": __import__("datetime").datetime,
         "timezone": __import__("datetime").timezone,
+        "_erreurs": erreurs,
     }
     exec(_src("_bilan_sante_serveur"), ns)    # noqa: S102 — code du dépôt
     exec(_src("_publier_bilan_sante"), ns)    # noqa: S102 — code du dépôt
@@ -351,6 +360,21 @@ def test_B3_un_serveur_SAIN_ne_reçoit_aucun_message():
     assert asyncio.run(ns["_bilan_sante_serveur"](g)) == []
     assert asyncio.run(ns["_publier_bilan_sante"](g)) is False
     assert envois == []
+    assert ns["_erreurs"] == [], f"un bilan « sain » cachait une erreur : {ns['_erreurs']}"
+
+
+def test_B3b_la_PORTE_compte_pas_seulement_le_salon_de_retour():
+    """Le salon AFK est une porte depuis le 23/09 : un serveur qui n'a que lui
+    n'est pas « sans salon de retour ». Même fonction que le masquage."""
+    ns, g, _e, _c = _espace_bilan(
+        {'direction_allowed_role': 1, 'activite_salon_afk': 7,
+         'mod_log_channel': 4})
+    assert asyncio.run(ns["_bilan_sante_serveur"](g)) == []
+    ns, g, _e, _c = _espace_bilan(
+        {'direction_allowed_role': 1, 'mod_log_channel': 4})
+    manques = asyncio.run(ns["_bilan_sante_serveur"](g))
+    assert any("Aucun salon de retour" in m for m in manques), manques
+    assert ns["_erreurs"] == []
 
 
 def test_B4_un_seul_message_par_JOUR_malgre_les_redeploiements():

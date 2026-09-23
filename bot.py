@@ -14714,7 +14714,10 @@ async def _bilan_sante_serveur(guild) -> list:
                 f"{', '.join(f'« {n} »' for n in _orphelins[:3])} — il ne "
                 f"publie rien. `/configure` → **Réseaux sociaux** : choisissez "
                 f"son salon, ou retirez le flux.")
-        if not int(c.get('activite_salon_retour', 0) or 0):
+        #  ⚠️ LA PORTE, PAS LE SEUL SALON DE RETOUR (23/09) : le salon AFK et
+        #  le salon de retour propre à un rôle en sont aussi. Même fonction
+        #  que le masquage lui-même — deux définitions finiraient par diverger.
+        if not activite_niv.salons_de_retour(c):
             manques.append(
                 "💤 **Aucun salon de retour d'activité** : le masquage des "
                 "absents est REFUSÉ tant qu'il n'existe pas (sans lui, un "
@@ -29023,6 +29026,7 @@ async def on_message(msg):
             # (jusqu'à 6 h). `porte_une_etiquette` est une comparaison
             # d'entiers en mémoire, sans await : elle coupe avant tout accès
             # base ou réseau pour l'immense majorité des messages.
+            _retour_afk = None
             if activite_niv.porte_une_etiquette(msg.author):
                 #  ⚠️ LA MARQUE D'ABORD, LA TENTATIVE ENSUITE — 22/09/2026.
                 #  Le retrait ci-dessous est au mieux de ses efforts. S'il rate,
@@ -29034,10 +29038,22 @@ async def on_message(msg):
                 #  ⚠️ LA TÂCHE EST RETENUE. `create_task` sans référence peut
                 #  être ramassée par le ramasse-miettes en plein `await` : le
                 #  retrait s'arrêterait au milieu, sans erreur et sans trace.
-                _t = asyncio.create_task(
+                _retour_afk = asyncio.create_task(
                     activite_pass.retour_immediat(msg.guild, msg.author))
-                _TACHES_RETOUR_AFK.add(_t)
-                _t.add_done_callback(_TACHES_RETOUR_AFK.discard)
+                _TACHES_RETOUR_AFK.add(_retour_afk)
+                _retour_afk.add_done_callback(_TACHES_RETOUR_AFK.discard)
+            # ═══ LA PORTE DE RETOUR — demandée le 23/09/2026 ═══
+            # « Son message se fera automatiquement supprimer, et il gagnera
+            # les accès au serveur. Ça lui dira : pour garder cette activité… »
+            # ⚠️ LA MÊME TÂCHE DE RETOUR, PAS UNE SECONDE : `accueillir_retour`
+            # attend son résultat pour dire ce qui s'est vraiment passé.
+            if (_retour_afk is not None
+                    and await activite_pass.est_salon_de_retour(
+                        msg.guild.id, msg.channel.id)):
+                _porte = asyncio.create_task(
+                    activite_pass.accueillir_retour(msg, _retour_afk))
+                _TACHES_RETOUR_AFK.add(_porte)
+                _porte.add_done_callback(_TACHES_RETOUR_AFK.discard)
             # ═══ LE SALON AFK — demandé le 30/08/2026 ═══
             # ⚠️ APRÈS `marquer_actif`, ET C'EST L'ORDRE QUI COMPTE. Le membre
             # doit être compté actif AVANT qu'on efface sa preuve : l'inverse
@@ -29046,7 +29062,7 @@ async def on_message(msg):
             # pour que le membre voie l'accusé de réception. Bloquer
             # `on_message` pendant ce temps gèlerait le traitement de tous les
             # autres messages du serveur.
-            if await activite_pass.est_salon_afk(msg.guild.id, msg.channel.id):
+            elif await activite_pass.est_salon_afk(msg.guild.id, msg.channel.id):
                 asyncio.create_task(
                     activite_pass.nettoyer_message_afk(msg))
     except Exception as _ex_act:

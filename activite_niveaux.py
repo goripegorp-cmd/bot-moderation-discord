@@ -2,8 +2,9 @@
 
 Le système ne se contente pas de compter les absents : il leur POSE UN RÔLE.
 Ce rôle rend l'absence visible, et surtout il porte le masquage — un membre au
-premier palier ne voit plus rien du serveur, sauf deux salons : celui où la liste
-des absents est publiée, et celui où il écrit pour revenir.
+premier palier ne voit plus rien du serveur, sauf la PORTE où il écrit pour
+revenir, et les salons que le propriétaire a choisis de lui laisser lire
+(`salons_de_retour`, `salons_visibles` — demande du 23/09/2026).
 
 ═══════════════════════════════════════════════════════════════════════════════
 POURQUOI LE MASQUAGE PASSE PAR UN RÔLE, ET PAS PAR DES DROITS PAR MEMBRE
@@ -347,42 +348,92 @@ def utilisable(guild, role) -> bool:
 #  Le masquage des salons
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def salons_ouverts(guild, cfg_act: dict) -> set[int]:
-    """Les salons qui restent VISIBLES aux absents.
+#  Combien de salons le propriétaire peut laisser en lecture aux absents. Il
+#  en demande deux ; cinq laisse de la marge sans vider le masquage de son sens.
+MAX_SALONS_VISIBLES = 5
 
-    Deux seulement, par rôle surveillé : celui où la liste est publiée, et celui
-    où l'on écrit pour revenir. On prend l'union de tous les rôles, parce qu'un
-    rôle surveillé peut avoir ses propres salons — masquer le salon de retour
-    d'un autre groupe enfermerait ses membres sans issue.
+
+def _entier(x) -> int:
+    try:
+        return int(x or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def salons_de_retour(cfg_act: dict) -> set[int]:
+    """Les PORTES : les seuls salons où un absent peut ÉCRIRE pour revenir.
+
+    Le salon de retour du serveur, celui de chaque rôle suivi, et le salon AFK
+    (« où un membre écrit “je suis là” »). Toujours visibles aux absents, et
+    c'est là que leur message s'efface et que l'accès leur est rendu (voir
+    `activite_passage.accueillir_retour`).
+
+    ⚠️ LE SALON AFK EN EST UNE DEPUIS LE 23/09. Il n'était pas ouvert aux
+    absents : le salon où l'on écrit « je suis là » restait invisible à ceux
+    qui en avaient le plus besoin.
+
+    Accepte une configuration brute (`activite_roles` sérialisé) : le bilan de
+    santé de bot.py la lit sans passer par `activite.config`.
     """
-    ids = {int(cfg_act.get("activite_salon_annonce") or 0),
-           int(cfg_act.get("activite_salon_retour") or 0)}
-    for cle in (cfg_act.get("activite_roles") or {}):
-        conf = activite.config_du_role(cfg_act, cle)
-        ids.add(int(conf.get("salon_annonce") or 0))
-        ids.add(int(conf.get("salon_retour") or 0))
+    ids = {_entier(cfg_act.get("activite_salon_retour")),
+           _entier(cfg_act.get("activite_salon_afk"))}
+    roles = cfg_act.get("activite_roles") or {}
+    if isinstance(roles, str):
+        try:
+            roles = json.loads(roles)
+        except Exception:
+            roles = {}
+    if isinstance(roles, dict):
+        cfg = dict(cfg_act, activite_roles=roles)
+        for cle in roles:
+            ids.add(_entier(activite.config_du_role(cfg, cle).get("salon_retour")))
     return ids - {0}
+
+
+def salons_visibles(cfg_act: dict) -> set[int]:
+    """Les salons que le PROPRIÉTAIRE a choisi de laisser lire aux absents.
+
+    « C'est moi qui dois donc ajouter manuellement des salons qu'il verra. »
+    Vide par défaut : un absent ne voit alors que la porte.
+    """
+    brut = cfg_act.get("activite_salons_visibles") or []
+    if isinstance(brut, str):
+        try:
+            brut = json.loads(brut)
+        except Exception:
+            brut = []
+    return {_entier(x) for x in (brut if isinstance(brut, list) else [])} - {0}
+
+
+def salons_ouverts(guild, cfg_act: dict) -> set[int]:
+    """Les salons qui restent VISIBLES aux absents : la porte, plus les choisis.
+
+    ⚠️ PLUS RIEN D'OFFICE (23/09/2026). Le salon d'annonce était ouvert
+    automatiquement ; le propriétaire veut que l'absent ne voie « plus rien »
+    par défaut, et ajouter lui-même ce qu'il verra. Seule la porte reste
+    automatique : sans elle, le masquage serait un bannissement de fait.
+    """
+    return salons_de_retour(cfg_act) | salons_visibles(cfg_act)
 
 
 def _droits_voulus(salon_id: int, cfg_act: dict, ouverts: set[int]):
     """Le droit exact que doit porter un rôle AFK sur ce salon.
 
-    Le salon de RETOUR est le seul où l'absent peut écrire : c'est sa porte de
-    sortie. Le salon d'ANNONCE est visible mais muet — il sert à lire la liste,
-    pas à discuter, et laisser cent absents y répondre le rendrait illisible.
+    La PORTE est le seul endroit où l'absent peut écrire : sa sortie. Les
+    salons CHOISIS sont en lecture seule — fils compris, sinon répondre dans un
+    fil serait une seconde porte que personne n'a ouverte.
     """
     if salon_id not in ouverts:
         return discord.PermissionOverwrite(view_channel=False)
-
-    retour = int(cfg_act.get("activite_salon_retour") or 0)
-    for cle in (cfg_act.get("activite_roles") or {}):
-        if int(activite.config_du_role(cfg_act, cle).get("salon_retour") or 0) == salon_id:
-            retour = salon_id
-    peut_ecrire = (salon_id == retour)
+    if salon_id in salons_de_retour(cfg_act):
+        return discord.PermissionOverwrite(
+            view_channel=True, read_message_history=True,
+            send_messages=True, add_reactions=True)
     return discord.PermissionOverwrite(
         view_channel=True, read_message_history=True,
-        send_messages=peut_ecrire, add_reactions=peut_ecrire,
-    )
+        send_messages=False, add_reactions=False,
+        send_messages_in_threads=False, create_public_threads=False,
+        create_private_threads=False)
 
 
 def _fuites_du_salon(guild, salon, etiquettes: set) -> list:
@@ -464,7 +515,12 @@ async def appliquer_masquage(guild, cfg_act: dict, *, dry_run: bool = False) -> 
     #
     #  La porte de sortie n'est pas une option du masquage : elle en est la
     #  condition. Pas de salon de retour, pas de masquage.
-    if not ouverts:
+    #
+    #  ⚠️ ÉLARGI LE 23/09 : C'EST LA PORTE QUI COMPTE, PAS « UN SALON OUVERT ».
+    #  L'ancien test (`if not ouverts`) laissait masquer un serveur qui n'avait
+    #  qu'un salon d'annonce : l'absent le voyait, en lecture seule, et ne
+    #  pouvait écrire NULLE PART. Un salon qu'on lit n'est pas une sortie.
+    if not salons_de_retour(cfg_act):
         res["raison"] = ("aucun salon de retour défini — masquage REFUSÉ : "
                          "sans lui, un absent ne pourrait plus jamais revenir")
         return res
@@ -519,6 +575,10 @@ async def masquer_nouveau_salon(guild, salon, cfg_act: dict) -> bool:
     salon. C'est branché sur `on_guild_channel_create`.
     """
     if not cfg_act.get("activite_masquer_salons", True):
+        return False
+    #  ⚠️ MÊME GARDE-FOU QUE `appliquer_masquage`. Sans porte, masquer les
+    #  nouveaux salons un par un finirait par enfermer les absents quand même.
+    if not salons_de_retour(cfg_act):
         return False
     ouverts = salons_ouverts(guild, cfg_act)
     voulu = _droits_voulus(salon.id, cfg_act, ouverts)

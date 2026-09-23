@@ -26,12 +26,15 @@ from __future__ import annotations
 
 import asyncio
 
+import discord
+
 import activite
 import activite_calendrier as cal
 import activite_escalade as esc
 import activite_message as msgs
 import activite_niveaux as niv
 import activite_recompenses as rec
+import activite_textes as txt
 
 _log = print
 
@@ -524,8 +527,18 @@ async def envoyer_rappels(guild, cfg_act: dict, cl: dict, *,
 _retours_en_cours: set[tuple[int, int]] = set()
 
 
-async def retour_immediat(guild, member) -> bool:
+async def retour_immediat(guild, member) -> dict:
     """Un membre étiqueté vient de se manifester : on le débloque TOUT DE SUITE.
+
+    Rend {"etat", "rendus", "a_valider"} — `etat` dit ce qui s'est RÉELLEMENT
+    passé, pour que le mot de la porte de retour ne mente pas (23/09) :
+      · "libere"   — plus aucune étiquette masquante : il revoit le serveur ;
+      · "bloque"   — une étiquette n'a pas pu partir (rôle au-dessus du bot,
+                     refus de l'API) : la marque posée par `on_message` fera
+                     réessayer le passage ;
+      · "en_cours" — un autre message du même membre est déjà traité ;
+      · "eteint"   — système éteint : rien n'est fait ;
+      · "erreur"   — exception, journalisée.
 
     « S'il renvoie un message ou qu'il dit oui, je suis là par rapport au salon
     en question, alors ils regagnent tous ces rôles et ça revient à 0 pour lui. »
@@ -538,13 +551,16 @@ async def retour_immediat(guild, member) -> bool:
     qui coupe avant tout accès réseau pour l'immense majorité des messages.
     """
     cle = (guild.id, member.id)
+    out = {"etat": "erreur", "rendus": [], "a_valider": False}
     if cle in _retours_en_cours:
-        return False
+        out["etat"] = "en_cours"
+        return out
     _retours_en_cours.add(cle)
     try:
         cfg_act = await activite.config(guild.id)
         if not cfg_act.get("activite_enabled"):
-            return False
+            out["etat"] = "eteint"
+            return out
         #  `role_surveille_du_membre` rend un OBJET rôle (ou None) ; la config,
         #  elle, se lit par identifiant. Passer l'objet tel quel retomberait
         #  silencieusement sur les réglages du serveur, et un rôle de clan avec
@@ -554,11 +570,22 @@ async def retour_immediat(guild, member) -> bool:
             cfg_act, str(role.id) if role is not None else activite.ROLE_TOUS)
         doux, _ = await activite.lire_doux(guild.id, member.id)
         fiche = {"member": member, "seuils": conf, "doux_deja": doux}
+        #  ⚠️ L'ÉTAT SE DÉDUIT DE CE QU'ON SAVAIT AVANT, PAS DU CACHE APRÈS.
+        #  discord.py ne met `member.roles` à jour qu'à l'événement de la
+        #  passerelle : relire les rôles juste après le retrait les montrerait
+        #  encore, et le mot dirait « bloqué » à quelqu'un de libéré.
+        portees = niv.etiquettes_portees(member, cfg_act, masquantes=True)
+        intouchables = [r for r in portees if not niv.utilisable(guild, r)]
         r = await esc.traiter_retour(guild, fiche, cfg_act)
-        return bool(r["etiquette"] or r["rendus"])
+        out["rendus"] = list(r.get("rendus") or [])
+        out["a_valider"] = bool(r.get("a_valider"))
+        libere = not intouchables and (bool(r.get("etiquette")) or not portees)
+        out["etat"] = "libere" if libere else "bloque"
+        return out
     except Exception as ex:
         _log(f"[activite retour_immediat] {ex}")
-        return False
+        out["etat"] = "erreur"
+        return out
     finally:
         _retours_en_cours.discard(cle)
 
@@ -792,6 +819,148 @@ async def nettoyer_message_afk(message) -> bool:
             except Exception:
                 pass
         return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La porte de retour — « son message se fera automatiquement supprimer »
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#  Combien de temps le mot de retour reste lisible. Plus long que l'accusé du
+#  salon AFK : il porte le rappel « reste actif », qu'il faut avoir le temps de
+#  lire — un rappel qui disparaît avant d'être lu ne rappelle rien.
+SECONDES_MOT_DE_RETOUR = 30
+
+
+async def est_salon_de_retour(guild_id: int, salon_id: int) -> bool:
+    """Ce salon est-il une PORTE (salon de retour, d'un rôle, ou salon AFK) ?
+
+    Appelé seulement pour les messages d'un membre ÉTIQUETÉ (voir `on_message`) :
+    le cas courant ne paie rien. `activite.config` passe par le cache.
+    """
+    if not salon_id:
+        return False
+    try:
+        return int(salon_id) in niv.salons_de_retour(await activite.config(guild_id))
+    except Exception:
+        return False
+
+
+def _porte_publique(salon, guild) -> bool:
+    """@everyone voit-il cette porte ? Sinon, le membre la perd en revenant.
+
+    Une porte réservée aux absents disparaît de son écran dès que l'étiquette
+    part : le mot posté dedans ne serait jamais lu. Dans le doute, on la dit
+    privée — un message privé de trop vaut mieux qu'un rappel jamais reçu.
+    """
+    try:
+        return bool(salon.permissions_for(guild.default_role).view_channel)
+    except Exception:
+        return False
+
+
+async def accueillir_retour(message, tache_retour) -> dict:
+    """Un absent a écrit dans la porte : on lui dit ce qui s'est passé, puis son
+    message s'efface. Demande du propriétaire, 23/09/2026.
+
+    ⚠️ LE RETOUR N'EST PAS LANCÉ ICI : on ATTEND celui qu'`on_message` a déjà
+    lancé (`tache_retour`). En lancer un second tomberait sur la garde
+    `_retours_en_cours` et rendrait « en cours » — le mot dirait alors que rien
+    ne s'est passé à quelqu'un qu'on est justement en train de libérer.
+
+    ⚠️ ÉCRIT APRÈS LE RÉSULTAT, JAMAIS AVANT : voir `txt.mot_de_retour`.
+
+    Ne lève jamais : `on_message` traite tous les messages du serveur.
+    """
+    out = {"etat": None, "mot": False, "prive": False, "efface": False}
+    salon = getattr(message, "channel", None)
+    guild = getattr(message, "guild", None)
+    membre = getattr(message, "author", None)
+    if salon is None or guild is None or membre is None:
+        return out
+    try:
+        r = await tache_retour
+    except Exception as ex:
+        _log(f"[activite porte] retour en échec : {type(ex).__name__}: {ex}")
+        r = {"etat": "erreur"}
+    etat = str((r or {}).get("etat") or "erreur")
+    out["etat"] = etat
+    if etat == "eteint":
+        #  Système éteint : rien n'a été rendu, rien ne doit être promis. Le
+        #  salon AFK garde son nettoyage ordinaire, qui ne promet rien.
+        if await est_salon_afk(guild.id, salon.id):
+            out["efface"] = await nettoyer_message_afk(message)
+        return out
+    try:
+        c = await activite.config(guild.id)
+        delai = max(0, int(c.get("activite_afk_secondes", 8) or 0))
+    except Exception:
+        c, delai = dict(activite.CLES_DEFAUT), 8
+
+    #  Une rafale : le premier message porte le mot, les suivants s'effacent.
+    if etat != "en_cours":
+        try:
+            role = activite.role_surveille_du_membre(membre, c)
+            conf = activite.config_du_role(
+                c, str(role.id) if role is not None else activite.ROLE_TOUS)
+            exige = int(conf.get("presence") or activite.SEUIL_PRESENCE_DEFAUT)
+        except Exception:
+            exige = int(c.get("activite_seuil_presence")
+                        or activite.SEUIL_PRESENCE_DEFAUT)
+        fenetre = int(c.get("activite_fenetre") or activite.FENETRE_PRESENCE_DEFAUT)
+        mot = txt.mot_de_retour(etat, a_valider=bool((r or {}).get("a_valider")),
+                                exige=exige, fenetre=fenetre)
+        try:
+            await salon.send(
+                f"{membre.mention}\n{mot}\n{txt.pied_de_retour(delai)}",
+                delete_after=float(SECONDES_MOT_DE_RETOUR),
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False, roles=False, users=[membre]))
+            out["mot"] = True
+        except Exception as ex:
+            _log(f"[activite porte] mot impossible dans "
+                 f"#{getattr(salon, 'name', '?')} : {type(ex).__name__}: {ex}")
+        #  Une porte privée disparaît de son écran dès qu'il est libéré : le
+        #  rappel doit lui parvenir ailleurs, sinon il n'a jamais été dit.
+        if etat == "libere" and not _porte_publique(salon, guild):
+            try:
+                await membre.send(f"**{getattr(guild, 'name', '')}**\n{mot}")
+                out["prive"] = True
+            except Exception:
+                pass                  # MP fermés : le mot du salon reste la trace
+
+    #  Le message de l'absent s'efface — « quand il l'enverra ».
+    try:
+        moi = guild.me
+        if moi is not None and not salon.permissions_for(moi).manage_messages:
+            _log(f"[activite porte] ⚠️ il manque « Gérer les messages » dans "
+                 f"#{getattr(salon, 'name', '?')} ({salon.id}) : le message de "
+                 f"l'absent ne sera PAS effacé.")
+            _tracer_porte(out)
+            return out
+    except Exception:
+        pass
+    try:
+        if delai:
+            await asyncio.sleep(delai)
+        await message.delete()
+        out["efface"] = True
+    except Exception as ex:
+        _log(f"[activite porte] suppression refusée dans "
+             f"#{getattr(salon, 'name', '?')} : {type(ex).__name__}: {ex}")
+    _tracer_porte(out)
+    return out
+
+
+def _tracer_porte(out: dict) -> None:
+    """UNE ligne par retour par la porte — la preuve, dans les journaux Railway,
+    que le chemin a tourné jusqu'au bout. Un retour est rare : ce n'est pas du
+    bruit. La rafale (« en cours ») ne l'écrit pas une seconde fois."""
+    if out.get("etat") in (None, "en_cours", "eteint"):
+        return
+    _log(f"[activite porte] retour {out['etat']} · mot "
+         f"{'posté' if out['mot'] else 'NON posté'}"
+         f"{' + message privé' if out['prive'] else ''} · message "
+         f"{'effacé' if out['efface'] else 'NON effacé'}")
 
 
 async def _role_ou_creer(guild, cfg_act: dict, cle: str, niveau: int):

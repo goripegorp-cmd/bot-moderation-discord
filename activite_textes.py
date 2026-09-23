@@ -152,6 +152,49 @@ def semaine_du(debut, fin) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Le mot de retour — ce que lit l'absent qui vient d'écrire dans la porte
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def mot_de_retour(etat: str, *, a_valider: bool = False, exige: int = 1,
+                  fenetre: int = 7) -> str:
+    """Posté quand un absent écrit dans la porte de retour (demande du 23/09).
+
+    « Ça lui dira : attention, pour garder cette activité, n'oublie pas d'être
+      actif récemment en envoyant un petit message, un bonjour, un bonsoir, ou
+      d'être actif sur les réactions. »
+
+    ⚠️ IL DIT CE QUI S'EST PASSÉ, PAS CE QUI DEVAIT SE PASSER. Il est écrit
+    APRÈS le retour : annoncer un accès qui n'est pas revenu (rôle du bot trop
+    bas) serait un mot qui ment, et le membre réécrirait en boucle.
+    Les chiffres viennent de la CONFIGURATION, comme dans `regles`.
+    """
+    if etat != "libere":
+        return duo("⏳ Ton retour est noté. Je réessaie tout seul, inutile de réécrire.",
+                   "⏳ Your return is noted. I'll retry on my own, no need to write again.")
+    if a_valider:
+        tete = duo("✅ Bon retour ! Tu revois le serveur ; le staff te rendra tes rôles.",
+                   "✅ Welcome back! You see the server again; staff will return your roles.")
+    else:
+        tete = duo("✅ Bon retour ! Tu as retrouvé l'accès au serveur.",
+                   "✅ Welcome back! Your access to the server is restored.")
+    j = "jour" if exige <= 1 else "jours"
+    d = "day" if exige <= 1 else "days"
+    garde = duo(f"⚠️ Pour le garder, sois vu {exige} {j} sur {fenetre} : "
+                f"un bonjour, un bonsoir, une réaction.",
+                f"⚠️ To keep it, show up {exige} {d} out of {fenetre}: "
+                f"a hello, a good evening, a reaction.")
+    return f"{tete}\n{garde}"
+
+
+def pied_de_retour(secondes: int) -> str:
+    """La ligne qui dit que le message va partir — sinon le membre réécrit."""
+    if secondes > 0:
+        return (f"-# 🇫🇷 Ton message s'efface dans {secondes} s · "
+                f"🇬🇧 Yours disappears in {secondes} s")
+    return "-# 🇫🇷 Ton message s'efface · 🇬🇧 Your message disappears"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Le garde-fou de longueur
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -168,6 +211,11 @@ def verifier_longueurs() -> list[str]:
         #  Le texte du palier doux quand il s'adresse au RÔLE : il remplace la
         #  liste de centaines de pseudos, il doit tenir sur une ligne.
         presence_demandee(1, 7), presence_demandee(3, 7),
+        #  Le mot de retour, dans ses trois états, avec des chiffres à DEUX
+        #  chiffres : c'est le cas le plus long.
+        mot_de_retour("libere", exige=10, fenetre=14),
+        mot_de_retour("libere", a_valider=True, exige=10, fenetre=14),
+        mot_de_retour("bloque"), pied_de_retour(8), pied_de_retour(0),
     ]
     trop_longues = []
     for bloc in echantillons:

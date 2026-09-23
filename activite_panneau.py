@@ -271,6 +271,15 @@ class ActivitePanelV2(_Base):
             vip = self.g.get_role(int(cr["activite_vip_role"] or 0))
             afk1 = self.g.get_role(int(c["activite_role_niveau1"] or 0))
             afk2 = self.g.get_role(int(c["activite_role_niveau2"] or 0))
+            #  ⚠️ LE COMPTE RÉEL, PLUS « 2 salons » ÉCRIT EN DUR (23/09) : le
+            #  propriétaire choisit désormais ce que les absents voient encore.
+            _ouv = [s for s in niv.salons_ouverts(self.g, c) if self.g.get_channel(s)]
+            if not c["activite_masquer_salons"]:
+                _masq_txt = "désactivé"
+            elif not niv.salons_de_retour(c):
+                _masq_txt = "⚠️ refusé : aucun salon de retour"
+            else:
+                _masq_txt = f"les absents ne voient plus que {len(_ouv)} salon(s)"
 
             #  ⚠️ Ne PAS appeler `observation_jours` ici : elle POSE l'ancre si
             #  elle manque. Ouvrir l'écran de configuration ne doit rien
@@ -321,7 +330,7 @@ class ActivitePanelV2(_Base):
                     f"{afk1.mention if afk1 else '⚪ _niveau 1 manquant_'} → "
                     f"{afk2.mention if afk2 else '⚪ _niveau 2 manquant_'}\n"
                     f"{_pastille(c['activite_masquer_salons'])} **Masquage** · "
-                    f"{'les absents ne voient plus que 2 salons' if c['activite_masquer_salons'] else 'désactivé'}"
+                    f"{_masq_txt}"
                 ),
                 v2_divider(),
                 #  L'observation : la seule ligne qui explique pourquoi rien ne
@@ -893,7 +902,6 @@ class ActiviteRolesAfkPanelV2(_Base):
             r3 = self.g.get_role(int(c["activite_role_abandon"] or 0))
             r1 = self.g.get_role(int(c["activite_role_niveau1"] or 0))
             r2 = self.g.get_role(int(c["activite_role_niveau2"] or 0))
-            ouverts = niv.salons_ouverts(self.g, c)
             confl = niv.conflits(self.g, c) if (r1 or r2) else []
 
             def _nom_palier(niveau: int) -> str:
@@ -954,20 +962,41 @@ class ActiviteRolesAfkPanelV2(_Base):
             #  Ce que le masquage laisse ouvert. Affiché AVANT le bouton, parce
             #  que c'est la seule information qui permet de juger si l'on va
             #  enfermer les absents ou leur laisser une porte.
-            if ouverts:
+            #  ⚠️ DEUX LIGNES DISTINCTES (23/09) : la PORTE, où l'absent écrit
+            #  pour revenir, et les salons CHOISIS, qu'il lit seulement. Les
+            #  mélanger ferait croire qu'il peut écrire partout où il voit.
+            portes = niv.salons_de_retour(c)
+            choisis = niv.salons_visibles(c) - portes
+
+            def _mentions(ids) -> str:
                 noms = []
-                for sid in sorted(ouverts):
+                for sid in sorted(ids):
                     ch = self.g.get_channel(sid)
                     noms.append(ch.mention if ch else f"`{sid}` _(introuvable)_")
-                reste = "  ·  ".join(noms)
-            else:
-                reste = "⚠️ **aucun** — les absents seraient enfermés sans issue"
+                return "  ·  ".join(noms)
+
+            t_portes = (_mentions(portes) if portes else
+                        "⚠️ **aucune** — masquage REFUSÉ tant qu'il n'y en a "
+                        "pas : 📢 Salons → 🔙 Retour")
+            t_choisis = (_mentions(choisis) if choisis else
+                         "_aucun — ils ne voient que la porte_")
+            _an = int(c.get("activite_salon_annonce") or 0)
+            n_annonce = ""
+            if _an and _an not in choisis and _an not in portes:
+                n_annonce = ("\n-# 📢 Le salon d'annonce n'y est pas : les absents "
+                             "ne le voient pas, et la mention du rappel ne leur "
+                             "parvient pas. Ajoutez-le ci-dessous pour qu'ils le "
+                             "lisent.")
 
             items.append(v2_body(
                 f"{_pastille(c['activite_masquer_salons'])} **Masquage des salons**\n"
-                f"-# Tous les salons deviennent invisibles aux porteurs de ces "
-                f"rôles, y compris ceux créés plus tard.\n"
-                f"👁️ **Resteraient visibles** · {reste}"))
+                f"-# Les porteurs de ces rôles ne voient PLUS AUCUN salon, y "
+                f"compris ceux créés plus tard — sauf :\n"
+                f"🔙 **La porte** · {t_portes}\n"
+                f"-# Ils y écrivent : leur message s'efface, l'accès revient, "
+                f"et le bot leur rappelle comment le garder.\n"
+                f"👁️ **Choisis par vous** (lecture seule) · {t_choisis}"
+                + n_annonce))
 
             #  Le piège des permissions Discord, rendu concret. Voir l'en-tête de
             #  `activite_niveaux.py` : une autorisation explicite sur un autre
@@ -999,6 +1028,21 @@ class ActiviteRolesAfkPanelV2(_Base):
                     min_values=1, max_values=1, custom_id=f"act_afk_{niveau}")
                 sel.callback = self._faire_role(cle)
                 items.append(discord.ui.ActionRow(sel))
+
+            #  « C'est moi qui dois donc ajouter manuellement des salons qu'il
+            #  verra » — un menu natif, PRÉ-REMPLI : sans `default_values`, le
+            #  client repart d'une sélection vide et chaque choix effacerait
+            #  les précédents. `min_values=0` : tout retirer est un choix.
+            sel_vis = ChannelSelect(
+                channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+                placeholder="👁️ Salons que les absents voient encore (lecture)…",
+                min_values=0, max_values=niv.MAX_SALONS_VISIBLES,
+                default_values=[discord.Object(id=s) for s in sorted(choisis)
+                                if self.g.get_channel(s) is not None
+                                ][:niv.MAX_SALONS_VISIBLES],
+                custom_id="act_afk_visibles")
+            sel_vis.callback = self._cb_visibles
+            items.append(discord.ui.ActionRow(sel_vis))
 
             b_creer = Button(
                 label="Créer les rôles manquants", emoji="✨",
@@ -1047,6 +1091,39 @@ class ActiviteRolesAfkPanelV2(_Base):
             except Exception as ex:
                 await self._secours(i, ex, f"rôle afk {cle}")
         return _cb
+
+    async def _cb_visibles(self, i):
+        """Enregistre les salons choisis — et les POSE tout de suite.
+
+        ⚠️ SANS L'APPLICATION IMMÉDIATE, LE MENU MENTIRAIT : le choix serait
+        affiché, mais les absents verraient encore l'ancien état jusqu'au
+        passage suivant, six heures plus tard. Le coût est faible : seuls les
+        salons dont le droit change sont réécrits.
+        """
+        try:
+            await i.response.defer()
+            ids = sorted({int(v) for v in ((i.data or {}).get("values") or [])})
+            ids = ids[:niv.MAX_SALONS_VISIBLES]
+            await _db_set(self.g.id, "activite_salons_visibles", ids)
+            c = await activite.config(self.g.id)
+            if not c["activite_masquer_salons"]:
+                self._dernier = (f"✅ `{len(ids)}` salon(s) enregistré(s) — le "
+                                 f"masquage est désactivé : rien n'est posé.")
+            else:
+                res = await niv.appliquer_masquage(self.g, c)
+                if res.get("raison"):
+                    self._dernier = (f"✅ `{len(ids)}` salon(s) enregistré(s), "
+                                     f"mais ⚠️ {res['raison']}")
+                else:
+                    self._dernier = (
+                        f"✅ `{len(ids)}` salon(s) enregistré(s) et posé(s) · "
+                        f"`{res['modifies']}` droit(s) changé(s) · "
+                        f"`{res['deja_bons']}` déjà en règle"
+                        + (f" · ❌ `{res['echecs']}` échec(s)"
+                           if res["echecs"] else ""))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "salons visibles")
 
     async def _cb_creer(self, i):
         """Crée les rôles absents. Ne touche jamais à ceux déjà désignés."""
@@ -1137,9 +1214,13 @@ class ActiviteSalonsPanelV2(_Base):
 
     CHAMPS = [
         ("activite_salon_annonce", "📢 Annonce",
-         "Où le rappel hebdomadaire est publié. Les inactifs y sont mentionnés."),
+         "Où le rappel hebdomadaire est publié. Les inactifs y sont mentionnés. "
+         "Les absents masqués ne le voient que si vous l'ajoutez à leurs "
+         "salons visibles (💤 Rôles AFK & masquage)."),
         ("activite_salon_retour", "🔙 Retour",
-         "Où un membre écrit pour récupérer son rôle mis en veille."),
+         "La porte des absents : le seul salon où ils peuvent écrire. Leur "
+         "message s'efface, l'accès revient, et le bot leur rappelle comment "
+         "le garder. Le bot a besoin de « Gérer les messages » ici."),
         ("activite_salon_staff", "🛡️ Staff",
          "Où le bot vous rend compte et propose les expulsions. Réservé au staff."),
         #  ⚠️ AJOUTÉ LE 30/08/2026. Sans cette ligne, la clé de configuration
@@ -1150,7 +1231,8 @@ class ActiviteSalonsPanelV2(_Base):
         #  autre chose ferait croire qu'écrire ailleurs ne compte pas.
         ("activite_salon_afk", "💤 AFK",
          "Où un membre écrit « je suis là ». Son message et l'accusé "
-         "s'effacent tout seuls, le salon reste propre. Écrire ailleurs "
+         "s'effacent tout seuls, le salon reste propre. Les absents le "
+         "voient aussi : c'est une seconde porte. Écrire ailleurs "
          "compte tout autant — ce salon ne donne aucune immunité. "
          "Le bot a besoin de « Gérer les messages » ici."),
     ]

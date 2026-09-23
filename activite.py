@@ -354,9 +354,16 @@ CLES_DEFAUT = {
     #  Sans marqueur, un propriétaire qui redescendrait volontairement à
     #  7 jours verrait sa valeur réécrite à chaque passage.
     "activite_seuils_migres": "",
-    #  Masquer TOUT le serveur aux porteurs de ces rôles, sauf les deux salons
-    #  d'activité. Réglable, parce que c'est l'action la plus visible du système.
+    #  Masquer TOUT le serveur aux porteurs de ces rôles. Réglable, parce que
+    #  c'est l'action la plus visible du système.
     "activite_masquer_salons": True,
+    #  ⚠️ CE QUE LES ABSENTS VOIENT ENCORE — CHOISI PAR LE PROPRIÉTAIRE (23/09).
+    #  « Par défaut, quand il a l'un de ces deux rôles, il ne voit plus rien.
+    #    C'est moi qui dois donc ajouter manuellement des salons qu'il verra. »
+    #  Vide = il ne voit QUE la porte (salon de retour, salon AFK), où il écrit
+    #  pour revenir. Ces salons-ci sont en LECTURE seule. Le salon d'annonce
+    #  n'est plus ouvert d'office : il faut l'ajouter ici pour qu'ils le lisent.
+    "activite_salons_visibles": [],
 
     #  ── La mesure de présence (voir l'en-tête du module) ─────────────────────
     "activite_fenetre": FENETRE_PRESENCE_DEFAUT,
@@ -403,6 +410,12 @@ async def config(guild_id: int) -> dict:
                 out["activite_etiquettes_historique"])
         except Exception:
             out["activite_etiquettes_historique"] = {}
+    if isinstance(out["activite_salons_visibles"], str):
+        try:
+            out["activite_salons_visibles"] = json.loads(
+                out["activite_salons_visibles"])
+        except Exception:
+            out["activite_salons_visibles"] = []
     return out
 
 

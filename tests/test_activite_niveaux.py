@@ -316,21 +316,26 @@ def test_un_role_hors_de_portee_reste_en_memoire():
 #  Le masquage — ce qui reste visible, et ce qui ne l'est plus
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_les_deux_salons_d_activite_restent_ouverts():
-    """« Uniquement le salon qui permet de voir ceux qui sont inactifs et le
-    salon qui permet d'ecrire pour etre actif. »"""
+def test_seule_la_porte_reste_ouverte_d_office():
+    """⚠️ CHANGÉ LE 23/09/2026. L'ancienne règle ouvrait aussi le salon
+    d'annonce. Le propriétaire : « par défaut, quand il a l'un de ces deux
+    rôles, il ne voit plus rien. C'est moi qui dois donc ajouter manuellement
+    des salons qu'il verra. » L'annonce se choisit (`activite_salons_visibles`)."""
     cfg = {"activite_salon_annonce": 10, "activite_salon_retour": 20,
            "activite_roles": {}}
     g = _Guild()
+    assert niv.salons_ouverts(g, cfg) == {20}
+    cfg["activite_salons_visibles"] = [10]
     assert niv.salons_ouverts(g, cfg) == {10, 20}
 
 
-def test_les_salons_propres_a_chaque_role_restent_ouverts_aussi():
+def test_le_salon_de_retour_propre_a_chaque_role_reste_ouvert_aussi():
     """Masquer le salon de retour d'un autre groupe enfermerait ses membres
-    sans issue — l'erreur qui transforme une mise en veille en bannissement."""
+    sans issue — l'erreur qui transforme une mise en veille en bannissement.
+    Son salon d'annonce, lui, suit la règle commune : il se choisit."""
     cfg = {"activite_salon_annonce": 10, "activite_salon_retour": 20,
            "activite_roles": {"42": {"salon_annonce": 30, "salon_retour": 40}}}
-    assert niv.salons_ouverts(_Guild(), cfg) == {10, 20, 30, 40}
+    assert niv.salons_ouverts(_Guild(), cfg) == {20, 40}
 
 
 def test_un_salon_ordinaire_devient_invisible():
@@ -340,10 +345,11 @@ def test_un_salon_ordinaire_devient_invisible():
     assert ow.view_channel is False
 
 
-def test_le_salon_d_annonce_est_visible_mais_muet():
-    """Cent absents qui repondent sous la liste la rendraient illisible."""
+def test_un_salon_choisi_est_visible_mais_muet():
+    """Cent absents qui repondent sous la liste la rendraient illisible — et
+    un salon ou l'on ecrit serait une seconde porte que personne n'a ouverte."""
     cfg = {"activite_salon_annonce": 10, "activite_salon_retour": 20,
-           "activite_roles": {}}
+           "activite_roles": {}, "activite_salons_visibles": [10]}
     ow = niv._droits_voulus(10, cfg, niv.salons_ouverts(_Guild(), cfg))
     assert ow.view_channel is True
     assert ow.send_messages is False

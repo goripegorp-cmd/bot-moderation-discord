@@ -230,8 +230,19 @@ def test_M6_la_carte_DIT_le_masquage_refuse_et_les_fuites():
 
 def test_M7_le_masquage_REFUSE_de_tourner_sans_salon_de_retour():
     """La porte de sortie n'est pas une option du masquage : elle en est la
-    condition. Sans elle, l'absent ne pourrait plus jamais revenir."""
+    condition. Sans elle, l'absent ne pourrait plus jamais revenir.
+
+    ⚠️ ÉLARGI LE 23/09 : c'est la PORTE qui est exigée, plus « un salon
+    ouvert » — un salon qu'on lit n'est pas une sortie. Le comportement réel
+    est éprouvé dans `test_absents_porte_de_retour.py` (A5) ; ici, le corps
+    entier de la fonction, lu par l'AST — jamais une tranche de texte."""
+    import ast
     src = (RACINE / "activite_niveaux.py").read_text(encoding="utf-8")
-    i = src.index("async def appliquer_masquage")
-    corps = src[i:i + 3000]
-    assert "if not ouverts:" in corps and "masquage REFUSÉ" in corps
+    for n in ast.walk(ast.parse(src)):
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "appliquer_masquage":
+            corps = ast.unparse(n)
+            break
+    else:
+        raise AssertionError("appliquer_masquage introuvable")
+    assert "if not salons_de_retour(cfg_act):" in corps
+    assert "masquage REFUSÉ" in corps

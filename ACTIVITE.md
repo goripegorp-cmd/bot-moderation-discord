@@ -183,13 +183,43 @@ le palier de retrait d'inactivité — pas au premier jour d'absence.
 | Salon | À quoi il sert | Qui doit le voir |
 |---|---|---|
 | 📢 **Annonce** | Le rappel hebdomadaire, avec les mentions | Tout le monde |
-| 🔙 **Retour** | Où un membre écrit pour récupérer son rôle | Tout le monde |
+| 🔙 **Retour** | La **porte** des absents : où ils écrivent pour revenir | Tout le monde |
+| 💤 **AFK** | Où l'on écrit « je suis là » — s'efface tout seul, et c'est aussi une porte | Tout le monde |
 | 🛡️ **Staff** | Rapports et propositions d'expulsion | Staff uniquement |
 
 ⚠️ **Ne les mélangez pas.** Mettre le salon staff en public exposerait la liste
 des membres proposés à l'expulsion.
 
 Ce sont les salons **par défaut**. Chaque rôle peut avoir les siens.
+
+### Ce que voit un absent (💤 AFK, rôles retirés, compte abandonné)
+
+**Par défaut : plus rien**, sauf la **porte** (salon de retour, salon AFK, et
+le salon de retour propre à son rôle). C'est vous qui ajoutez le reste :
+`/configure` → **📊 Activité** → **💤 Rôles AFK & masquage** → menu
+**👁️ Salons que les absents voient encore** (5 au plus, en **lecture seule**).
+Le choix est enregistré **et posé tout de suite**.
+
+> Le salon d'**annonce** n'est plus ouvert d'office. S'il n'est pas dans la
+> liste, les absents ne le voient pas — et la mention du rappel ne leur
+> parvient pas (Discord ne notifie pas un salon invisible).
+
+Quand un absent écrit dans la porte :
+
+1. il retrouve l'accès au serveur et ses rôles, **tout de suite** ;
+2. le bot lui répond, en français et en anglais : bon retour, et
+   « pour le garder, sois vu N jours sur 7 : un bonjour, un bonsoir, une
+   réaction » — avec **vos** chiffres ;
+3. **son message s'efface** (après le délai du salon AFK), le mot du bot 30 s
+   plus tard.
+
+Le mot dit **ce qui s'est vraiment passé** : si ses rôles attendent le staff,
+ou si le rôle du bot est trop bas pour le libérer, il le dit au lieu de
+promettre. Si la porte est réservée aux absents, le rappel part aussi en
+message privé : sinon il disparaîtrait de son écran avec la porte.
+
+Sans porte, **le masquage est refusé** : un absent ne pourrait plus jamais
+revenir. Le bot a besoin de « Gérer les messages » dans la porte.
 
 Le rappel part **une fois par semaine par rôle**, le jour propre à ce rôle —
 **dimanche par défaut**, la fin de la semaine.
