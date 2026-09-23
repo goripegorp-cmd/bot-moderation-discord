@@ -1333,7 +1333,7 @@ async def relever_identifiants(*, collectionnables: bool = False,
         url = API_SONDE_FICHES
         params["Limit"] = LIMITE_SONDE_FICHES
     out = {"ids": set(), "bundles": set(), "code": None, "reste": None,
-           "seau": seau}
+           "seau": seau, "fiches": []}
     try:
         async with _ouvrir() as sess:
             async with sess.get(url, params=params) as r:
@@ -1345,6 +1345,12 @@ async def relever_identifiants(*, collectionnables: bool = False,
                 if r.status != 200:
                     return out
                 data = await r.json()
+        if seau == "fiches":
+            #  ⚠️ CE SEAU REND LES FICHES COMPLÈTES — même point d'API que le
+            #  relevé, même normalisation. Les jeter pour les redemander à la
+            #  requête groupée coûtait une requête refusée sur l'IP de Railway
+            #  à chaque nouveauté (60 fois en 1 h 15 le 23/09).
+            out["fiches"] = _normaliser(data.get("data") or [])
         for it in (data.get("data") or []):
             try:
                 v = int(it.get("id") or 0)
@@ -1497,8 +1503,12 @@ async def fiches_par_ids(ids: list, item_type: str = "Asset") -> list[dict]:
                         #  La danse XSRF : le 403 PORTE le jeton.
                         _jeton_xsrf = r.headers.get("x-csrf-token") or _jeton_xsrf
                         continue
-                    global DERNIER_CODE_FICHES
+                    global DERNIER_CODE_FICHES, DERNIER_QUOTA_FICHES
                     DERNIER_CODE_FICHES = r.status
+                    if r.status == 429:
+                        #  Ce que Roblox annonce AU MOMENT du refus : c'est
+                        #  ce qui a donné « 2, 2;w=1 » pour l'économie.
+                        DERNIER_QUOTA_FICHES = r.headers.get("x-ratelimit-limit")
                     if r.status != 200:
                         #  ⚠️ UN 429 N'EST PAS UNE PANNE, C'EST LA MÉTÉO DE
                         #  L'IP PARTAGÉE : l'appelant le compte et prend le
@@ -2553,10 +2563,34 @@ async def enfiler(guild_id: int, article: dict, flux: str) -> bool:
 #  Le code HTTP du dernier `fiches_par_ids` : distingue « refusé » (429 →
 #  relais par l'économie) de « rien à rendre ».
 DERNIER_CODE_FICHES = None
+#  Le quota annoncé par Roblox au dernier refus (429) de la requête groupée.
+DERNIER_QUOTA_FICHES = None
 
 #  Le relais de la surveillance quand le seau des fiches est refusé. Mesuré le
 #  23/09 : `x-ratelimit-limit: 1000, 1000;w=60`, 1,2 Ko et ~150 ms par article.
 API_ECONOMIE_DETAILS = "https://economy.roblox.com/v2/assets/{}/details"
+
+#  ⚠️ LE QUOTA DE L'ÉCONOMIE N'EST PAS LE MÊME PARTOUT (mesuré le 23/09).
+#  Poste résidentiel : `x-ratelimit-limit: 1000, 1000;w=60`. IP de Railway :
+#  « 2, 2;w=1 » — deux requêtes par seconde. À 0,25 s d'écart, la troisième
+#  tombait en 429 à chaque relais : 18 vérifications pour 9 relais. On lit
+#  donc le quota ANNONCÉ, et on espace d'autant, avec une marge.
+PAUSE_ECONOMIE_MIN = 0.25
+MARGE_ESPACEMENT = 1.25
+
+
+def _espacement_annonce(entete) -> float | None:
+    """« 2, 2;w=1 » → 0,5 s entre deux requêtes. None si illisible."""
+    try:
+        for morceau in str(entete or "").split(","):
+            if ";w=" in morceau:
+                n, w = morceau.strip().split(";w=", 1)
+                n, w = int(n), float(w)
+                if n > 0 and w > 0:
+                    return w / n
+    except (TypeError, ValueError):
+        pass
+    return None
 
 
 async def verifier_par_economie(ids: list) -> dict:
@@ -2585,7 +2619,8 @@ async def verifier_par_economie(ids: list) -> dict:
     TOUS les articles par `comparer_et_enregistrer` avec ces trous écraserait
     les favoris enregistrés. Seul un vrai passage en Limited mérite d'y aller.
     """
-    out = {"devenus": [], "vus": 0, "avance": 0, "codes": {}, "arret": None}
+    out = {"devenus": [], "vus": 0, "avance": 0, "codes": {}, "arret": None,
+           "pause": PAUSE_ECONOMIE_MIN}
     devenus = out["devenus"]
     try:
         async with _ouvrir() as sess:
@@ -2594,6 +2629,11 @@ async def verifier_par_economie(ids: list) -> dict:
                 try:
                     async with sess.get(API_ECONOMIE_DETAILS.format(int(aid))) as r:
                         out["codes"][r.status] = out["codes"].get(r.status, 0) + 1
+                        _esp = _espacement_annonce(
+                            (r.headers or {}).get("x-ratelimit-limit"))
+                        if _esp:
+                            out["pause"] = max(PAUSE_ECONOMIE_MIN,
+                                               _esp * MARGE_ESPACEMENT)
                         if r.status == 429:
                             #  Le relais aussi est refusé : on s'arrête AVANT cet
                             #  article, et on garde ce que Roblox annonce.
@@ -2610,7 +2650,7 @@ async def verifier_par_economie(ids: list) -> dict:
                 except Exception as ex:
                     _log(f"[roblox_veille economie {aid}] {type(ex).__name__}: {ex}")
                 finally:
-                    await asyncio.sleep(0.25)
+                    await asyncio.sleep(out["pause"])
                 #  Réponse définitive — bonne ou mauvaise : on passe au suivant.
                 #  Un article qui répondrait toujours 404 ne bloque pas la file.
                 out["avance"] += 1

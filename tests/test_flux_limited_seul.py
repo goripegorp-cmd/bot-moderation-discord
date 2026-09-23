@@ -555,3 +555,88 @@ async def test_E6_une_panne_reseau_est_ECRITE_et_ne_bloque_pas_la_file(base, mon
     r = await veille.verifier_par_economie([1, 2])
     assert (r["vus"], r["avance"]) == (1, 2), r
     assert any("TimeoutError" in l for l in lignes), lignes
+
+
+@pytest.mark.asyncio
+async def test_E7_le_rythme_SUIT_le_quota_ANNONCE(base, monkeypatch):
+    """⚠️ LE BILAN DU 23/09 (soir) : « quota annoncé 2, 2;w=1 » sur l'IP de
+    Railway — deux requêtes par SECONDE. À 0,25 s d'écart, la troisième
+    tombait en 429 à chaque relais. Ailleurs (« 1000, 1000;w=60 »), le rythme
+    d'avant."""
+    await _poser(base, [(i, 9000, 0, 1, "Asset", "2026-08-12") for i in (1, 2, 3)])
+    dormis = []
+
+    async def _dort(n):
+        dormis.append(n)
+
+    monkeypatch.setattr(veille.asyncio, "sleep", _dort)
+    serre = {"x-ratelimit-limit": "2, 2;w=1"}
+    monkeypatch.setattr(veille, "_ouvrir", lambda: _Sess(
+        {i: (200, {"IsLimited": False}, serre) for i in (1, 2, 3)}))
+    r = await veille.verifier_par_economie([1, 2, 3])
+    assert r["vus"] == 3 and len(dormis) == 3
+    assert min(dormis) >= 0.5, f"plus de 2 requêtes par seconde : {dormis}"
+    dormis.clear()
+    large = {"x-ratelimit-limit": "1000, 1000;w=60"}
+    monkeypatch.setattr(veille, "_ouvrir", lambda: _Sess(
+        {i: (200, {"IsLimited": False}, large) for i in (1, 2, 3)}))
+    await veille.verifier_par_economie([1, 2, 3])
+    assert dormis == [veille.PAUSE_ECONOMIE_MIN] * 3, dormis
+
+
+def test_E8_lire_le_quota_annonce():
+    assert veille._espacement_annonce("2, 2;w=1") == 0.5
+    assert veille._espacement_annonce("1000, 1000;w=60") == 0.06
+    for illisible in (None, "", "abc", "0;w=1", "2;w=0", "x;w=1"):
+        assert veille._espacement_annonce(illisible) is None, illisible
+
+
+class _SessGet:
+    """Une session qui rend la réponse du point `v2/search/items/details`."""
+
+    def __init__(self, data):
+        self.data, self.appels = data, []
+
+    def get(self, url, params=None, **kw):
+        self.appels.append((url, dict(params or {})))
+        return _Rep(200, self.data, {"x-ratelimit-remaining": "9"})
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_V1_le_second_seau_GARDE_les_fiches_de_la_tete(base, monkeypatch):
+    """Il les recevait et les jetait, pour les redemander à la requête groupée
+    — refusée à chaque nouveauté sur l'IP de Railway (23/09)."""
+    brut = {"data": [{"id": 777, "itemType": "Asset", "name": "Canon à confettis",
+                      "price": 2000, "creatorTargetId": 1,
+                      "itemCreatedUtc": "2026-09-23T18:00:00Z"}]}
+    sess = _SessGet(brut)
+    monkeypatch.setattr(veille, "_ouvrir", lambda: sess)
+    r = await veille.relever_identifiants(seau="fiches")
+    assert r["ids"] == {777} and len(r["fiches"]) == 1
+    f = r["fiches"][0]
+    assert (f["asset_id"], f["nom"], f["prix"], f["createur_id"]) == (
+        777, "Canon à confettis", 2000, 1)
+    assert sess.appels[0][0] == veille.API_SONDE_FICHES
+    r = await veille.relever_identifiants()
+    assert r["fiches"] == [], "le premier seau n'a que des identifiants"
+
+
+def test_R1_le_releve_DIT_les_candidats_ecartes_par_la_regle_d_or():
+    """« 5 candidat(s) · 0 mise(s) en file » ressemblait à une panne (23/09) :
+    c'étaient des récompenses d'événement. `enfiler` décide ; le relevé
+    COMPTE et le dit."""
+    import ast as _ast
+    for n in _ast.walk(_ast.parse(SRC_BOT)):
+        if (isinstance(n, _ast.If) and "enfiler(" in _ast.unparse(n.test)
+                and n.orelse and "ecartes_regle" in _ast.unparse(n.orelse[0])):
+            assert "hors_vente" in _ast.unparse(n.orelse[0].test)
+            break
+    else:
+        raise AssertionError("le refus de la règle d'or n'est pas compté")
+    assert "écarté(s) : hors vente et pas" in SRC_BOT

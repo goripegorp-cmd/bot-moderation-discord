@@ -44,6 +44,15 @@ def _src(nom: str) -> str:
     raise AssertionError(f"{nom} introuvable dans bot.py")
 
 
+def _src_sync(nom: str) -> str:
+    """Une fonction ORDINAIRE de bot.py, telle quelle (`_src` la rendrait
+    asynchrone, et `if _second_seau_libre(E)` serait toujours vrai)."""
+    for n in ast.walk(ARBRE):
+        if isinstance(n, ast.FunctionDef) and n.name == nom:
+            return ast.unparse(n)
+    raise AssertionError(f"{nom} introuvable dans bot.py")
+
+
 def _constante(nom: str):
     for n in ast.walk(ARBRE):
         if isinstance(n, ast.Assign) and any(
@@ -63,8 +72,14 @@ class FauxCatalogue:
 
     #  ⚠️ PIÈGE N°6 : tout ce que le vrai module porte sur ce chemin — la
     #  config des flux, la liste de surveillance, les fiches par identifiants.
+    #  Valeur de BANC (pas une mesure) : ce que « Roblox » annonce au refus.
+    QUOTA_REFUS = "3, 3;w=10"
+    DERNIER_QUOTA_FICHES = None
+
     def __init__(self, reponses, flux=None, surveilles=(), bascules=(),
-                 fiches_refusees=0, economie_max=None):
+                 fiches_refusees=0, economie_max=None, connus=None):
+        #  Ce que le relevé complet a déjà enregistré en base.
+        self.connus = connus or ({1, 2}, {1})
         #  Un code (refus à chaque appel) ou une LISTE de codes consommés un
         #  par appel — 0 = accepté.
         self.fiches_refusees = fiches_refusees
@@ -96,7 +111,7 @@ class FauxCatalogue:
         return True
 
     async def identifiants_connus(self):
-        return {1, 2}, {1}
+        return self.connus
 
     async def liste_de_surveillance(self):
         return list(self.surveilles)
@@ -119,6 +134,8 @@ class FauxCatalogue:
             code = code.pop(0) if code else 0
         if code:
             self.DERNIER_CODE_FICHES = code
+            if code == 429:
+                self.DERNIER_QUOTA_FICHES = self.QUOTA_REFUS
             return []
         self.DERNIER_CODE_FICHES = 200
         return [{"asset_id": i} for i in ids]
@@ -173,11 +190,11 @@ class FauxAsyncio:
 
 
 def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=(),
-          fiches_refusees=0, economie_max=None):
+          fiches_refusees=0, economie_max=None, connus=None):
     journal = []
     cat = FauxCatalogue(reponses, flux=flux, surveilles=surveilles,
                         bascules=bascules, fiches_refusees=fiches_refusees,
-                        economie_max=economie_max)
+                        economie_max=economie_max, connus=connus)
     E = {"amorce": True, "vus": {1, 2}, "vus_limited": {1},
          "tour": 0, "palier": 0, "pause_jusqu": None, "refus": 0, "reste": None,
          "rattrapes": 0, "serie": 0, "serie_max": 0, "alerte": False,
@@ -190,6 +207,8 @@ def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=(),
          "arrets_economie": 0, "dernier_arret_economie": None,
          "codes_economie": {},
          "serie_refus_fiches": 0, "serie_refus_fiches_max": 0,
+         "quota_fiches": None,
+         "fiches_ratees": 0, "dernier_lot_rate": None, "fiches_tete": 0,
          "passages": 0, "sautes": 0, "erreurs": 0, "nouveautes": 0,
          "bascules": 0, "publies": 0,
          "dernier_passage": None, "dernier_signal": None}
@@ -219,6 +238,11 @@ def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=(),
                 "ECLAIREUR_SECOURS_RESTE_MIN", "ECLAIREUR_SECOURS_PAUSE_S",
                 "ECLAIREUR_SURVEILLANCE_LEGERE", "ECLAIREUR_TRANCHE_ECONOMIE"):
         ns[nom] = _constante(nom)
+    #  ⚠️ PIÈGE N°6 : les deux gardes du second seau vivent HORS de
+    #  l'éclaireur depuis le 23/09 (soir). Sans elles dans le banc, chaque
+    #  passage levait un NameError avalé par le `except` — 10 tests rouges.
+    for nom in ("_second_seau_libre", "_noter_second_seau"):
+        exec(_src_sync(nom), ns)              # noqa: S102 — code du dépôt
     exec(_src("_surveiller_retires"), ns)     # noqa: S102 — code du dépôt
     exec(_src("eclaireur_task"), ns)          # noqa: S102 — code du dépôt
     ns["_sommeils"] = faux_asyncio.sommeils
@@ -550,6 +574,86 @@ def test_S13_le_bilan_de_30_min_BRANCHE_le_relais():
     assert blocs, "la ligne du bilan sur les refus des fiches a disparu"
     assert any("_bilan_economie(_E)" in b and "serie_refus_fiches_max" in b
                for b in blocs), blocs
+
+
+def test_S14_le_quota_annonce_au_refus_de_la_requete_groupee_est_GARDE():
+    """C'est ce que le bilan de l'économie a appris (« 2, 2;w=1 ») : la même
+    question, pour la requête groupée — celle qui échouait 60 fois en 1 h 15."""
+    ns, E, _cat, _j = _banc([_ok([1])], surveilles=[500], fiches_refusees=429)
+    _tick(ns)
+    assert E["quota_fiches"] == FauxCatalogue.QUOTA_REFUS
+    assert any("quota_fiches" in b for b in (
+        ast.unparse(n) for n in ast.walk(ARBRE) if isinstance(n, ast.IfExp)
+        and "refus du seau des fiches" in ast.unparse(n))), "le bilan ne le dit pas"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  T — les nouveautés : la fiche d'abord là où elle est déjà
+# ═══════════════════════════════════════════════════════════════════════════════
+#  JOURNAL RAILWAY DU 23/09 (soir) : « 5 identifiant(s) jamais vu(s) mais
+#  aucune fiche obtenue — nouvel essai dans 45 s », 60 fois en 1 h 15. La même
+#  requête passe 12 fois sur 12 depuis un poste résidentiel.
+
+def _ok_fiches(ids, fiches, reste=9):
+    """La tête du SECOND seau : les identifiants ET leurs fiches, comme le vrai
+    `relever_identifiants(seau="fiches")` depuis le 23/09."""
+    r = _ok(ids, reste=reste)
+    r["fiches"] = [dict(f) for f in fiches]
+    return r
+
+
+def test_T1_les_fiches_DEJA_EN_MAIN_servent_sans_requete_groupee():
+    f = {"asset_id": 777, "nom": "Canon à confettis", "hors_vente": 0}
+    ns, E, cat, _j = _banc([_refus(), _ok_fiches([1, 2, 777], [f])])
+    _tick(ns)
+    assert (777, "nouveautes") in cat.enfiles, cat.enfiles
+    assert not [d for d in cat.demandes if d.startswith("fiches:")], (
+        "la fiche était déjà là : une requête groupée pour rien", cat.demandes)
+
+
+def test_T2_requete_groupee_REFUSEE_la_tete_du_second_seau_la_remplace():
+    """Le cas du 23/09 : le premier seau voit la nouveauté, la requête
+    groupée est refusée — la tête AVEC ses fiches la rattrape au même passage."""
+    f = {"asset_id": 888, "nom": "Nouveau", "hors_vente": 0}
+    ns, E, cat, journal = _banc([_ok([1, 2, 888]), _ok_fiches([1, 2, 888], [f])],
+                                fiches_refusees=429)
+    _tick(ns)
+    assert cat.demandes == ["creations", "fiches:1", "creations:fiches"], cat.demandes
+    assert (888, "nouveautes") in cat.enfiles and E["fiches_tete"] == 1
+    assert not [l for l in journal if "sans fiche" in l], journal
+
+
+def test_T3_sans_fiche_UNE_ligne_par_lot_pas_une_par_passage():
+    """⚠️ LA MÊME LIGNE 60 FOIS EN 1 H 15. Une ligne pour le lot ; les essais
+    suivants se font en silence, comptés au bilan — et l'identifiant reste
+    « jamais vu » pour être réessayé."""
+    ns, E, _cat, journal = _banc(
+        [_ok([1, 2, 999]), _refus(), _ok([1, 2, 999]), _refus(),
+         _ok([1, 2, 999]), _refus()], fiches_refusees=429)
+    for _ in range(3):
+        _tick(ns)
+    assert len([l for l in journal if "sans fiche" in l]) == 1, journal
+    assert E["fiches_ratees"] == 3
+    assert 999 not in E["vus"], "plus jamais réessayé : il attendrait le relevé"
+
+
+def test_T4_ce_que_le_releve_a_DEJA_enregistre_n_est_plus_redemande():
+    """Le relevé complet l'a vu, et publié s'il le fallait : le redemander à
+    chaque passage était la boucle du 23/09."""
+    ns, E, _cat, journal = _banc([_ok([1, 2, 555]), _refus()], fiches_refusees=429,
+                                 connus=({1, 2, 555}, {1}))
+    _tick(ns)
+    assert 555 in E["vus"] and E["fiches_ratees"] == 0
+    assert not [l for l in journal if "sans fiche" in l], journal
+
+
+def test_T5_la_tete_de_secours_respecte_les_gardes_du_second_seau():
+    """Pas dans les 75 s qui précèdent le relevé complet : sa marge d'abord."""
+    ns, _E, cat, _j = _banc([_ok([1, 2, 444])], fiches_refusees=429)
+    ns["veille_roblox_task"] = type("L", (), {
+        "next_iteration": datetime.now(timezone.utc) + timedelta(seconds=30)})()
+    _tick(ns)
+    assert "creations:fiches" not in cat.demandes, cat.demandes
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -15060,6 +15060,12 @@ async def veille_roblox_task():
                             #  un redémarrage.
                             if await roblox_module.enfiler(g.id, a, flux):
                                 _sa["enfiles"] += 1
+                            elif a.get("hors_vente") and not a.get("collectionnable"):
+                                #  Écarté par la règle d'or d'`enfiler` (il
+                                #  décide ; ici on ne fait que COMPTER) : sans
+                                #  ce compte, « 5 candidat(s) · 0 mise(s) en
+                                #  file » ressemblait à une panne (23/09).
+                                _sa["ecartes_regle"] = _sa.get("ecartes_regle", 0) + 1
 
             #  ⚠️ L'ANCIENNE « ÉTAPE 1 bis » — le flux UGC, le catalogue de
             #  TOUS les créateurs — A ÉTÉ RETIRÉE le 23/09 à la demande du
@@ -15230,13 +15236,22 @@ async def veille_roblox_task():
                         if _E.get("erreurs_surveillance") else "")
                      + (f", {_E['refus_surveillance']} refus du seau des fiches "
                         f"(plus longue série {_E.get('serie_refus_fiches_max', 0)} "
-                        f"passage(s)) → {_E.get('verifs_economie', 0)} "
+                        f"passage(s)"
+                        + (f", quota annoncé « {_E['quota_fiches']} »"
+                           if _E.get("quota_fiches") else "")
+                        + f") → {_E.get('verifs_economie', 0)} "
                         f"vérification(s) par l'économie"
                         + _bilan_economie(_E)
                         if _E.get("refus_surveillance") else ""))
                   + (f" · {_E['secours_retenus']} secours retenu(s) pour "
                      f"protéger le relevé complet"
                      if _E.get("secours_retenus") else "")
+                  + (f" · 🆕 {_E.get('fiches_tete', 0)} fiche(s) de nouveauté "
+                     f"reprise(s) à la tête"
+                     if _E.get("fiches_tete") else "")
+                  + (f" · {_E['fiches_ratees']} passage(s) sans fiche de "
+                     f"nouveauté"
+                     if _E.get("fiches_ratees") else "")
                   + (f" · ralenti (palier {_E['palier']})" if _E.get("palier") else "")
                   + (" · ⚠️ ÉCLAIREUR MUET : le délai est revenu à 30 min"
                      if _ap is None
@@ -15246,7 +15261,10 @@ async def veille_roblox_task():
                   f"(+{_sa.get('lus_hors_vente', 0)} hors vente) · "
                   f"{_sa['candidats']} candidat(s) · {_sa['hors_fenetre']} hors "
                   f"fenêtre ({roblox_module.FENETRE_DIRECTE_HEURES} h) · "
-                  f"{_sa['deja']} déjà sorti(s) · {_sa['enfiles']} mise(s) en "
+                  f"{_sa['deja']} déjà sorti(s) · "
+                  + (f"{_sa['ecartes_regle']} écarté(s) : hors vente et pas "
+                     f"Limited · " if _sa.get("ecartes_regle") else "")
+                  + f"{_sa['enfiles']} mise(s) en "
                   f"file · {_sa['echecs']} échec(s) d'envoi")
 
             #  ⚠️ LA PREUVE DE VIE DE `veille_marche_task`. Elle ne parle que
@@ -15536,6 +15554,12 @@ _ECLAIREUR = {"amorce": False, "vus": set(), "vus_limited": set(),
               "arrets_economie": 0, "dernier_arret_economie": None,
               "codes_economie": {},
               "serie_refus_fiches": 0, "serie_refus_fiches_max": 0,
+              #  Le quota annoncé au dernier refus de la requête groupée.
+              "quota_fiches": None,
+              #  Les nouveautés dont la fiche manque encore (23/09) : combien
+              #  d'essais, le dernier lot DIT (une ligne par lot, plus une par
+              #  passage), et combien de fiches reprises à la tête.
+              "fiches_ratees": 0, "dernier_lot_rate": None, "fiches_tete": 0,
               "passages": 0, "sautes": 0, "erreurs": 0,
               "nouveautes": 0, "bascules": 0, "publies": 0,
               "dernier_passage": None, "dernier_signal": None}
@@ -15624,6 +15648,36 @@ def _age_s(quand) -> float | None:
         return None
 
 
+def _second_seau_libre(E) -> bool:
+    """Le second seau peut-il servir MAINTENANT ?
+
+    ⚠️ DEUX GARDES, PARCE QU'IL N'EST PAS À NOUS SEULS : le relevé complet et
+    le suivi de marché passent par lui. Pas dans les 75 s qui précèdent un
+    relevé (mesuré : un secours juste avant lui coûtait sa marge, reste_min
+    3 → 1), et pas pendant la pause qu'il a lui-même demandée.
+    """
+    _maint = datetime.now(timezone.utc)
+    _prochain = getattr(veille_roblox_task, "next_iteration", None)
+    try:
+        if (_prochain is not None and 0 <= (
+                _prochain - _maint).total_seconds() < ECLAIREUR_AVANT_RELEVE_S):
+            return False
+    except Exception:
+        pass
+    _p = E.get("secours_pause_jusqu")
+    return not (_p is not None and _maint < _p)
+
+
+def _noter_second_seau(E, r) -> None:
+    """Après une requête au second seau : une minute de répit s'il annonce
+    lui-même 3 jetons ou moins."""
+    if r.get("code") == 200:
+        _rs = r.get("reste")
+        if _rs is not None and _rs <= ECLAIREUR_SECOURS_RESTE_MIN:
+            E["secours_pause_jusqu"] = datetime.now(timezone.utc) + timedelta(
+                seconds=ECLAIREUR_SECOURS_PAUSE_S)
+
+
 async def _surveiller_retires(guildes, E) -> int:
     """Vérifie d'UN coup les articles retirés de la vente. Rend les publiés.
 
@@ -15657,6 +15711,8 @@ async def _surveiller_retires(guildes, E) -> int:
             #  le relais par tranches, en rotation, et ne rend que les articles
             #  DEVENUS Limited.
             E["refus_surveillance"] += 1
+            E["quota_fiches"] = getattr(roblox_module, "DERNIER_QUOTA_FICHES",
+                                        None) or E.get("quota_fiches")
             E["serie_refus_fiches"] = E.get("serie_refus_fiches", 0) + 1
             E["serie_refus_fiches_max"] = max(E.get("serie_refus_fiches_max", 0),
                                               E["serie_refus_fiches"])
@@ -15806,21 +15862,8 @@ async def eclaireur_task():
             #  429=0). Même question, autre seau, zéro attente.
             E["refus"] += 1
             E["dernier_refus"] = datetime.now(timezone.utc)
-            _maint = datetime.now(timezone.utc)
-            #  ⚠️ DEUX GARDES, PARCE QUE LE SECOND SEAU N'EST PAS À NOUS SEULS.
-            #  Le relevé complet et le suivi de marché passent par lui. La
-            #  production l'a montré : un secours juste avant le relevé lui
-            #  coûtait sa marge (reste_min 3 → 1).
-            _prochain = getattr(veille_roblox_task, "next_iteration", None)
-            _avant_releve = False
-            try:
-                _avant_releve = (_prochain is not None and 0 <= (
-                    _prochain - _maint).total_seconds() < ECLAIREUR_AVANT_RELEVE_S)
-            except Exception:
-                _avant_releve = False
-            _en_pause = (E.get("secours_pause_jusqu") is not None
-                         and _maint < E["secours_pause_jusqu"])
-            if _avant_releve or _en_pause:
+            #  ⚠️ LES DEUX GARDES DU SECOND SEAU : voir `_second_seau_libre`.
+            if not _second_seau_libre(E):
                 #  Rien n'est perdu : le relevé regarde lui-même dans 75 s au
                 #  plus, ou le passage suivant réessaiera le premier seau.
                 E["secours_retenus"] = E.get("secours_retenus", 0) + 1
@@ -15829,10 +15872,7 @@ async def eclaireur_task():
                     collectionnables=collect, seau="fiches")
                 if _r0["code"] == 200:
                     E["rattrapes"] += 1
-                    _rs = _r0.get("reste")
-                    if _rs is not None and _rs <= ECLAIREUR_SECOURS_RESTE_MIN:
-                        E["secours_pause_jusqu"] = _maint + timedelta(
-                            seconds=ECLAIREUR_SECOURS_PAUSE_S)
+                    _noter_second_seau(E, _r0)
                 elif _r0["code"] == 429:
                     E["refus"] += 1
         reponses = [(collect, _r0)]
@@ -15899,25 +15939,65 @@ async def eclaireur_task():
 
         # ── QUELQUE CHOSE A BOUGÉ : LES fiches, et seulement elles ────────
         bundles_ids = set()
+        en_main = {}
         for _c, _r in ok:
             bundles_ids |= _r.get("bundles", set())
-        assets = sorted(neufs - bundles_ids)[:120]
-        bundles = sorted(neufs & bundles_ids)[:120]
-        fiches = []
-        if assets:
-            fiches += await roblox_module.fiches_par_ids(assets)
-        if bundles:
-            fiches += await roblox_module.fiches_par_ids(bundles, item_type="Bundle")
-        if not fiches:
+            for _f in (_r.get("fiches") or []):
+                en_main[_f.get("asset_id")] = _f
+        #  ⚠️ D'ABORD LES FICHES DÉJÀ EN MAIN (23/09). Le second seau rend la
+        #  tête AVEC ses fiches. Les redemander coûtait la requête groupée —
+        #  la seconde du passage, refusée à CHAQUE essai sur l'IP de Railway :
+        #  60 fois en 1 h 15, alors qu'elle passe 12 fois sur 12 ailleurs.
+        fiches = [en_main[a] for a in sorted(neufs) if a in en_main]
+        manquants = neufs - set(en_main)
+        if manquants:
+            _as = sorted(manquants - bundles_ids)[:120]
+            _bs_ids = sorted(manquants & bundles_ids)[:120]
+            if _as:
+                fiches += await roblox_module.fiches_par_ids(_as)
+            if _bs_ids:
+                fiches += await roblox_module.fiches_par_ids(
+                    _bs_ids, item_type="Bundle")
+            manquants = neufs - {f.get("asset_id") for f in fiches}
+        if manquants and _second_seau_libre(E):
+            #  La requête groupée refusée : la TÊTE, avec ses fiches, sur le
+            #  second seau. Une création apparaît en tête par construction.
+            _t = await roblox_module.relever_identifiants(
+                collectionnables=False, seau="fiches")
+            _noter_second_seau(E, _t)
+            _reprises = [f for f in (_t.get("fiches") or [])
+                         if f.get("asset_id") in manquants]
+            fiches += _reprises
+            E["fiches_tete"] = E.get("fiches_tete", 0) + len(_reprises)
+            manquants = neufs - {f.get("asset_id") for f in fiches}
+        if manquants:
+            #  ⚠️ CE QUE LE RELEVÉ COMPLET A DÉJÀ ENREGISTRÉ EST TRAITÉ : il
+            #  l'a publié s'il le fallait. Le redemander à chaque passage était
+            #  la boucle du 23/09.
+            try:
+                _connus, _ = await roblox_module.identifiants_connus()
+            except Exception:
+                _connus = set()
+            manquants -= _connus
+        if manquants:
             E["erreurs"] += 1
-            #  ⚠️ ON REND LES IDENTIFIANTS À « JAMAIS VUS ». Sinon un échec de
-            #  fiches les ferait passer pour traités, et le seul rattrapage
-            #  serait le passage complet — 30 minutes, le délai qu'on chasse.
-            E["vus"] -= neufs
-            E["vus_limited"] -= neufs
-            print(f"[eclaireur] {len(neufs)} identifiant(s) jamais vu(s) mais "
-                  f"aucune fiche obtenue — nouvel essai dans "
-                  f"{ECLAIREUR_SECONDES} s")
+            E["fiches_ratees"] = E.get("fiches_ratees", 0) + 1
+            #  ⚠️ ON LES REND À « JAMAIS VUS ». Sinon un échec de fiches les
+            #  ferait passer pour traités, et le seul rattrapage serait le
+            #  passage complet — 30 minutes, le délai qu'on chasse.
+            E["vus"] -= manquants
+            E["vus_limited"] -= manquants
+            #  ⚠️ UNE LIGNE PAR LOT, PAS PAR PASSAGE : la même ligne 60 fois en
+            #  1 h 15 noyait tout le reste du journal.
+            _lot = tuple(sorted(manquants))
+            if E.get("dernier_lot_rate") != _lot:
+                E["dernier_lot_rate"] = _lot
+                print(f"[eclaireur] {len(manquants)} nouveauté(s) sans fiche "
+                      f"pour l'instant — j'y retourne à chaque passage, en "
+                      f"silence ; au pire le relevé de 30 min les prend")
+        else:
+            E["dernier_lot_rate"] = None
+        if not fiches:
             return
 
         #  La MÊME détection que le passage complet : elle juge chaque article

@@ -296,12 +296,16 @@ def test_l_eclaireur_ne_touche_pas_au_quota_des_fiches_tant_que_rien_ne_bouge():
     """Deux relevés d'identifiants, puis RIEN si l'ensemble n'a pas changé —
     c'est ce qui rend la cadence tenable."""
     c = _fn("eclaireur_task")
-    #  ⚠️ DEUX APPELS DEPUIS LE 23/09 (APRÈS-MIDI), ET C'EST VOULU : la tête
-    #  de la liste générale, et la même question au SECOND SEAU quand le
-    #  premier refuse. La tête des collectionnables n'est plus interrogée : le
-    #  tri de Roblox est l'ordre de création, elle n'apprenait rien de plus
-    #  (les passages en Limited sont vus par `_surveiller_retires`).
-    assert c.count("relever_identifiants(") == 2
+    #  ⚠️ TROIS APPELS DEPUIS LE 23/09 (SOIR), ET C'EST VOULU : la tête de la
+    #  liste générale, la même question au SECOND SEAU quand le premier
+    #  refuse, et — SEULEMENT quand quelque chose a bougé — la tête AVEC ses
+    #  fiches si la requête groupée est refusée. La tête des collectionnables
+    #  n'est plus interrogée : le tri de Roblox est l'ordre de création.
+    assert c.count("relever_identifiants(") == 3
+    _i_rien = c.index("if not neufs:")
+    assert c.index("relever_identifiants(", c.index("relever_identifiants(",
+                   c.index("relever_identifiants(") + 1) + 1) > _i_rien, (
+        "le troisième appel part même quand rien n'a bougé")
     i_429 = c.index("== 429")
     #  `ast.unparse` normalise les guillemets : on cherche la forme qu'il rend.
     assert "seau='fiches'" in c[i_429:i_429 + 1500], (
@@ -353,9 +357,11 @@ def test_un_echec_de_fiches_rend_les_identifiants_a_jamais_vus():
     """⚠️ Sinon un échec de fiches les ferait passer pour traités, et le seul
     rattrapage serait le passage complet — 30 minutes, le délai qu'on chasse."""
     c = _fn("eclaireur_task")
-    i_vide = c.index("if not fiches:")
-    bloc = c[i_vide:i_vide + 700]
-    assert "E['vus'] -= neufs" in bloc and "E['vus_limited'] -= neufs" in bloc
+    #  ⚠️ DEPUIS LE 23/09 (SOIR) : seuls les MANQUANTS repartent — ceux dont
+    #  la fiche n'est venue d'aucune source et que le relevé complet n'a pas
+    #  encore enregistrés. Le comportement est éprouvé dans
+    #  test_eclaireur_cadence.py (T3, T4).
+    assert "E['vus'] -= manquants" in c and "E['vus_limited'] -= manquants" in c
 
 
 def test_l_eclaireur_a_une_ligne_de_vie():
