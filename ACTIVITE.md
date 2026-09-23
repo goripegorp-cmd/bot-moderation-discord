@@ -183,8 +183,8 @@ le palier de retrait d'inactivité — pas au premier jour d'absence.
 | Salon | À quoi il sert | Qui doit le voir |
 |---|---|---|
 | 📢 **Annonce** | Le rappel hebdomadaire, avec les mentions | Tout le monde |
-| 🔙 **Retour** | La **porte** des absents : où ils écrivent pour revenir | Tout le monde |
-| 💤 **AFK** | Où l'on écrit « je suis là » — s'efface tout seul, et c'est aussi une porte | Tout le monde |
+| ✍️ **Où ils écrivent** | Le salon où les absents écrivent pour revenir | Tout le monde |
+| 💤 **AFK** | « Je suis là » pour les membres actifs — s'efface tout seul | Tout le monde |
 | 🛡️ **Staff** | Rapports et propositions d'expulsion | Staff uniquement |
 
 ⚠️ **Ne les mélangez pas.** Mettre le salon staff en public exposerait la liste
@@ -194,11 +194,15 @@ Ce sont les salons **par défaut**. Chaque rôle peut avoir les siens.
 
 ### Ce que voit un absent (💤 AFK, rôles retirés, compte abandonné)
 
-**Par défaut : plus rien**, sauf la **porte** (salon de retour, salon AFK, et
-le salon de retour propre à son rôle). C'est vous qui ajoutez le reste :
-`/configure` → **📊 Activité** → **💤 Rôles AFK & masquage** → menu
-**👁️ Salons que les absents voient encore** (5 au plus, en **lecture seule**).
-Le choix est enregistré **et posé tout de suite**.
+Deux réglages, l'un sous l'autre, dans `/configure` → **📊 Activité** →
+**📢 Salons** :
+
+- **✍️ Où ils écrivent** — UN salon. Ils le voient forcément.
+- **👁️ Ce qu'ils voient** — plusieurs salons (10 au plus), en **lecture**.
+
+**Tout le reste leur est caché.** Chaque choix est appliqué **tout de suite**.
+Le salon AFK n'est pas un salon où les absents écrivent : s'il doit l'être,
+choisissez-le dans « ✍️ Où ils écrivent ».
 
 > Le salon d'**annonce** n'est plus ouvert d'office. S'il n'est pas dans la
 > liste, les absents ne le voient pas — et la mention du rappel ne leur

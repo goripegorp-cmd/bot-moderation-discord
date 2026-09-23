@@ -360,9 +360,10 @@ CLES_DEFAUT = {
     #  ⚠️ CE QUE LES ABSENTS VOIENT ENCORE — CHOISI PAR LE PROPRIÉTAIRE (23/09).
     #  « Par défaut, quand il a l'un de ces deux rôles, il ne voit plus rien.
     #    C'est moi qui dois donc ajouter manuellement des salons qu'il verra. »
-    #  Vide = il ne voit QUE la porte (salon de retour, salon AFK), où il écrit
-    #  pour revenir. Ces salons-ci sont en LECTURE seule. Le salon d'annonce
-    #  n'est plus ouvert d'office : il faut l'ajouter ici pour qu'ils le lisent.
+    #  Vide = il ne voit QUE le salon où il écrit pour revenir (✍️, la clé
+    #  `activite_salon_retour`). Ces salons-ci sont en LECTURE seule. Le salon
+    #  d'annonce n'est plus ouvert d'office : il faut l'ajouter ici.
+    #  Réglé dans 📢 Salons, sous « ✍️ Où ils écrivent » (23/09, le soir).
     "activite_salons_visibles": [],
 
     #  ── La mesure de présence (voir l'en-tête du module) ─────────────────────

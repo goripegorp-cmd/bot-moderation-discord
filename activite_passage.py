@@ -832,7 +832,7 @@ SECONDES_MOT_DE_RETOUR = 30
 
 
 async def est_salon_de_retour(guild_id: int, salon_id: int) -> bool:
-    """Ce salon est-il une PORTE (salon de retour, d'un rôle, ou salon AFK) ?
+    """Ce salon est-il une PORTE (le salon où ils écrivent, ou celui d'un rôle) ?
 
     Appelé seulement pour les messages d'un membre ÉTIQUETÉ (voir `on_message`) :
     le cas courant ne paie rien. `activite.config` passe par le cache.

@@ -363,15 +363,18 @@ def test_B3_un_serveur_SAIN_ne_reçoit_aucun_message():
     assert ns["_erreurs"] == [], f"un bilan « sain » cachait une erreur : {ns['_erreurs']}"
 
 
-def test_B3b_la_PORTE_compte_pas_seulement_le_salon_de_retour():
-    """Le salon AFK est une porte depuis le 23/09 : un serveur qui n'a que lui
-    n'est pas « sans salon de retour ». Même fonction que le masquage."""
+def test_B3b_la_PORTE_est_celle_du_masquage_pas_une_copie():
+    """Même fonction que le masquage (`salons_de_retour`) : le salon de retour
+    propre à un rôle compte ; le salon AFK seul, non (« un salon, ils doivent
+    écrire » — ce n'est pas une porte)."""
+    import json as _json
+    ns, g, _e, _c = _espace_bilan(
+        {'direction_allowed_role': 1, 'mod_log_channel': 4,
+         'activite_roles': _json.dumps({"42": {"salon_retour": 9}})})
+    assert asyncio.run(ns["_bilan_sante_serveur"](g)) == []
     ns, g, _e, _c = _espace_bilan(
         {'direction_allowed_role': 1, 'activite_salon_afk': 7,
          'mod_log_channel': 4})
-    assert asyncio.run(ns["_bilan_sante_serveur"](g)) == []
-    ns, g, _e, _c = _espace_bilan(
-        {'direction_allowed_role': 1, 'mod_log_channel': 4})
     manques = asyncio.run(ns["_bilan_sante_serveur"](g))
     assert any("Aucun salon de retour" in m for m in manques), manques
     assert ns["_erreurs"] == []

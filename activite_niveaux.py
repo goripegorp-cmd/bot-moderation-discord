@@ -348,9 +348,9 @@ def utilisable(guild, role) -> bool:
 #  Le masquage des salons
 # ═══════════════════════════════════════════════════════════════════════════════
 
-#  Combien de salons le propriétaire peut laisser en lecture aux absents. Il
-#  en demande deux ; cinq laisse de la marge sans vider le masquage de son sens.
-MAX_SALONS_VISIBLES = 5
+#  Combien de salons le propriétaire peut laisser en lecture aux absents.
+#  « C'est plus simple de sélectionner plusieurs salons » (23/09) : dix.
+MAX_SALONS_VISIBLES = 10
 
 
 def _entier(x) -> int:
@@ -363,20 +363,19 @@ def _entier(x) -> int:
 def salons_de_retour(cfg_act: dict) -> set[int]:
     """Les PORTES : les seuls salons où un absent peut ÉCRIRE pour revenir.
 
-    Le salon de retour du serveur, celui de chaque rôle suivi, et le salon AFK
-    (« où un membre écrit “je suis là” »). Toujours visibles aux absents, et
-    c'est là que leur message s'efface et que l'accès leur est rendu (voir
-    `activite_passage.accueillir_retour`).
+    « Un salon, ils doivent écrire » : le salon de retour du serveur (le menu
+    ✍️ Où ils écrivent), et celui d'un rôle suivi s'il en a un à lui.
+    Toujours visibles aux absents ; c'est là que leur message s'efface et que
+    l'accès leur est rendu (voir `activite_passage.accueillir_retour`).
 
-    ⚠️ LE SALON AFK EN EST UNE DEPUIS LE 23/09. Il n'était pas ouvert aux
-    absents : le salon où l'on écrit « je suis là » restait invisible à ceux
-    qui en avaient le plus besoin.
+    ⚠️ LE SALON AFK N'EN EST PAS UNE (retiré le soir du 23/09). En faire une
+    seconde porte donnait deux salons où écrire à qui en voulait UN. S'il
+    doit servir de porte, on le choisit comme salon où ils écrivent.
 
     Accepte une configuration brute (`activite_roles` sérialisé) : le bilan de
     santé de bot.py la lit sans passer par `activite.config`.
     """
-    ids = {_entier(cfg_act.get("activite_salon_retour")),
-           _entier(cfg_act.get("activite_salon_afk"))}
+    ids = {_entier(cfg_act.get("activite_salon_retour"))}
     roles = cfg_act.get("activite_roles") or {}
     if isinstance(roles, str):
         try:

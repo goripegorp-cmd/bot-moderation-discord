@@ -274,6 +274,9 @@ class ActivitePanelV2(_Base):
             #  ⚠️ LE COMPTE RÉEL, PLUS « 2 salons » ÉCRIT EN DUR (23/09) : le
             #  propriétaire choisit désormais ce que les absents voient encore.
             _ouv = [s for s in niv.salons_ouverts(self.g, c) if self.g.get_channel(s)]
+            _vus = [self.g.get_channel(s) for s in sorted(niv.salons_visibles(c))]
+            _vus_txt = ("  ·  ".join(ch.mention for ch in _vus if ch is not None)
+                        or "_rien d'autre_")
             if not c["activite_masquer_salons"]:
                 _masq_txt = "désactivé"
             elif not niv.salons_de_retour(c):
@@ -317,7 +320,8 @@ class ActivitePanelV2(_Base):
                 ),
                 v2_body(
                     f"📢 **Annonce** · {an.mention if an else '⚪ _non défini_'}\n"
-                    f"🔙 **Retour** · {ret.mention if ret else '⚪ _non défini_'}\n"
+                    f"✍️ **Où ils écrivent** · {ret.mention if ret else '⚪ _non défini_'}\n"
+                    f"👁️ **Ce qu'ils voient** · {_vus_txt}\n"
                     f"🛡️ **Staff** · {st.mention if st else '⚪ _non défini_'}"
                 ),
                 v2_body(
@@ -959,44 +963,15 @@ class ActiviteRolesAfkPanelV2(_Base):
                 items.append(v2_body(self._dernier))
                 items.append(v2_divider())
 
-            #  Ce que le masquage laisse ouvert. Affiché AVANT le bouton, parce
-            #  que c'est la seule information qui permet de juger si l'on va
-            #  enfermer les absents ou leur laisser une porte.
-            #  ⚠️ DEUX LIGNES DISTINCTES (23/09) : la PORTE, où l'absent écrit
-            #  pour revenir, et les salons CHOISIS, qu'il lit seulement. Les
-            #  mélanger ferait croire qu'il peut écrire partout où il voit.
-            portes = niv.salons_de_retour(c)
-            choisis = niv.salons_visibles(c) - portes
-
-            def _mentions(ids) -> str:
-                noms = []
-                for sid in sorted(ids):
-                    ch = self.g.get_channel(sid)
-                    noms.append(ch.mention if ch else f"`{sid}` _(introuvable)_")
-                return "  ·  ".join(noms)
-
-            t_portes = (_mentions(portes) if portes else
-                        "⚠️ **aucune** — masquage REFUSÉ tant qu'il n'y en a "
-                        "pas : 📢 Salons → 🔙 Retour")
-            t_choisis = (_mentions(choisis) if choisis else
-                         "_aucun — ils ne voient que la porte_")
-            _an = int(c.get("activite_salon_annonce") or 0)
-            n_annonce = ""
-            if _an and _an not in choisis and _an not in portes:
-                n_annonce = ("\n-# 📢 Le salon d'annonce n'y est pas : les absents "
-                             "ne le voient pas, et la mention du rappel ne leur "
-                             "parvient pas. Ajoutez-le ci-dessous pour qu'ils le "
-                             "lisent.")
-
+            #  Ce que le masquage laisse ouvert, AVANT le bouton : c'est ce qui
+            #  dit si l'on enferme les absents ou si on leur laisse une porte.
+            #  ⚠️ UN RÉSUMÉ, PAS UN MENU (23/09, le soir) : le choix se fait
+            #  dans 📢 Salons, là où le propriétaire le cherche. Deux endroits
+            #  pour le même réglage finissent toujours par se contredire.
             items.append(v2_body(
-                f"{_pastille(c['activite_masquer_salons'])} **Masquage des salons**\n"
-                f"-# Les porteurs de ces rôles ne voient PLUS AUCUN salon, y "
-                f"compris ceux créés plus tard — sauf :\n"
-                f"🔙 **La porte** · {t_portes}\n"
-                f"-# Ils y écrivent : leur message s'efface, l'accès revient, "
-                f"et le bot leur rappelle comment le garder.\n"
-                f"👁️ **Choisis par vous** (lecture seule) · {t_choisis}"
-                + n_annonce))
+                f"{_pastille(c['activite_masquer_salons'])} **Masquage**\n"
+                + _resume_vue(self.g, c)
+                + "\n-# Tout le reste leur est caché. À changer dans 📢 Salons."))
 
             #  Le piège des permissions Discord, rendu concret. Voir l'en-tête de
             #  `activite_niveaux.py` : une autorisation explicite sur un autre
@@ -1028,21 +1003,6 @@ class ActiviteRolesAfkPanelV2(_Base):
                     min_values=1, max_values=1, custom_id=f"act_afk_{niveau}")
                 sel.callback = self._faire_role(cle)
                 items.append(discord.ui.ActionRow(sel))
-
-            #  « C'est moi qui dois donc ajouter manuellement des salons qu'il
-            #  verra » — un menu natif, PRÉ-REMPLI : sans `default_values`, le
-            #  client repart d'une sélection vide et chaque choix effacerait
-            #  les précédents. `min_values=0` : tout retirer est un choix.
-            sel_vis = ChannelSelect(
-                channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-                placeholder="👁️ Salons que les absents voient encore (lecture)…",
-                min_values=0, max_values=niv.MAX_SALONS_VISIBLES,
-                default_values=[discord.Object(id=s) for s in sorted(choisis)
-                                if self.g.get_channel(s) is not None
-                                ][:niv.MAX_SALONS_VISIBLES],
-                custom_id="act_afk_visibles")
-            sel_vis.callback = self._cb_visibles
-            items.append(discord.ui.ActionRow(sel_vis))
 
             b_creer = Button(
                 label="Créer les rôles manquants", emoji="✨",
@@ -1091,39 +1051,6 @@ class ActiviteRolesAfkPanelV2(_Base):
             except Exception as ex:
                 await self._secours(i, ex, f"rôle afk {cle}")
         return _cb
-
-    async def _cb_visibles(self, i):
-        """Enregistre les salons choisis — et les POSE tout de suite.
-
-        ⚠️ SANS L'APPLICATION IMMÉDIATE, LE MENU MENTIRAIT : le choix serait
-        affiché, mais les absents verraient encore l'ancien état jusqu'au
-        passage suivant, six heures plus tard. Le coût est faible : seuls les
-        salons dont le droit change sont réécrits.
-        """
-        try:
-            await i.response.defer()
-            ids = sorted({int(v) for v in ((i.data or {}).get("values") or [])})
-            ids = ids[:niv.MAX_SALONS_VISIBLES]
-            await _db_set(self.g.id, "activite_salons_visibles", ids)
-            c = await activite.config(self.g.id)
-            if not c["activite_masquer_salons"]:
-                self._dernier = (f"✅ `{len(ids)}` salon(s) enregistré(s) — le "
-                                 f"masquage est désactivé : rien n'est posé.")
-            else:
-                res = await niv.appliquer_masquage(self.g, c)
-                if res.get("raison"):
-                    self._dernier = (f"✅ `{len(ids)}` salon(s) enregistré(s), "
-                                     f"mais ⚠️ {res['raison']}")
-                else:
-                    self._dernier = (
-                        f"✅ `{len(ids)}` salon(s) enregistré(s) et posé(s) · "
-                        f"`{res['modifies']}` droit(s) changé(s) · "
-                        f"`{res['deja_bons']}` déjà en règle"
-                        + (f" · ❌ `{res['echecs']}` échec(s)"
-                           if res["echecs"] else ""))
-            await self.render_to(i, edit=True)
-        except Exception as ex:
-            await self._secours(i, ex, "salons visibles")
 
     async def _cb_creer(self, i):
         """Crée les rôles absents. Ne touche jamais à ceux déjà désignés."""
@@ -1209,33 +1136,46 @@ class ActiviteRolesAfkPanelV2(_Base):
 #  SALONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class ActiviteSalonsPanelV2(_Base):
-    """Les trois salons du système, chacun avec un rôle distinct."""
+def _resume_vue(g, c: dict) -> str:
+    """Les deux lignes du propriétaire : où ils écrivent, ce qu'ils voient."""
+    def _m(ids):
+        return "  ·  ".join(ch.mention for ch in (g.get_channel(s) for s in sorted(ids))
+                            if ch is not None)
+    portes = niv.salons_de_retour(c)
+    vus = niv.salons_visibles(c) - portes
+    return (f"✍️ **Où ils écrivent** · "
+            f"{_m(portes) or '⚠️ _aucun — alors rien ne leur est caché_'}\n"
+            f"👁️ **Ce qu'ils voient** · {_m(vus) or '_rien d’autre_'}")
 
+
+class ActiviteSalonsPanelV2(_Base):
+    """Les salons du système. En tête, les DEUX réglages des absents.
+
+    « Moi : un salon, ils doivent écrire. Un salon où je définis ce qu'ils
+      voient. Celui où ils doivent écrire, ils le voient aussi. » (23/09)
+    ⚠️ COURT. « Tu as fait des gros pavés, je comprends rien » : une aide
+    tient sur UNE ligne, et un test le vérifie.
+    """
+
+    #  (clé, nom, aide d'une ligne). Le salon où ils écrivent passe EN PREMIER.
     CHAMPS = [
+        ("activite_salon_retour", "✍️ Où ils écrivent",
+         "Leur message s'efface, ils récupèrent tout."),
         ("activite_salon_annonce", "📢 Annonce",
-         "Où le rappel hebdomadaire est publié. Les inactifs y sont mentionnés. "
-         "Les absents masqués ne le voient que si vous l'ajoutez à leurs "
-         "salons visibles (💤 Rôles AFK & masquage)."),
-        ("activite_salon_retour", "🔙 Retour",
-         "La porte des absents : le seul salon où ils peuvent écrire. Leur "
-         "message s'efface, l'accès revient, et le bot leur rappelle comment "
-         "le garder. Le bot a besoin de « Gérer les messages » ici."),
+         "Le rappel de la semaine."),
         ("activite_salon_staff", "🛡️ Staff",
-         "Où le bot vous rend compte et propose les expulsions. Réservé au staff."),
-        #  ⚠️ AJOUTÉ LE 30/08/2026. Sans cette ligne, la clé de configuration
-        #  existerait sans que personne puisse la régler : du code mort.
-        #  ⚠️ ET LE LIBELLÉ DOIT DIRE LA VÉRITÉ. Écrire n'importe où rend déjà
-        #  actif et rend déjà les rôles — ce salon n'ajoute pas ce pouvoir, il
-        #  ajoute un endroit prévu pour ça, qui s'efface tout seul. Promettre
-        #  autre chose ferait croire qu'écrire ailleurs ne compte pas.
+         "Rapports et expulsions. Staff seulement."),
+        #  ⚠️ AJOUTÉ LE 30/08/2026 : sans cette ligne, la clé existerait sans
+        #  que personne puisse la régler. Ce n'est PAS une porte des absents
+        #  (voir `niv.salons_de_retour`) : pour eux, c'est ✍️ qui compte.
         ("activite_salon_afk", "💤 AFK",
-         "Où un membre écrit « je suis là ». Son message et l'accusé "
-         "s'effacent tout seuls, le salon reste propre. Les absents le "
-         "voient aussi : c'est une seconde porte. Écrire ailleurs "
-         "compte tout autant — ce salon ne donne aucune immunité. "
-         "Le bot a besoin de « Gérer les messages » ici."),
+         "« Je suis là » pour les membres actifs. S'efface tout seul."),
     ]
+
+    def __init__(self, u, g):
+        super().__init__(u, g)
+        #  Le résultat du dernier choix : « appliqué », ou pourquoi pas.
+        self._dernier = ""
 
     async def render_to(self, i, *, edit: bool = True):
         try:
@@ -1245,25 +1185,47 @@ class ActiviteSalonsPanelV2(_Base):
                 ch = self.g.get_channel(int(c.get(cle, 0) or 0))
                 lignes.append(f"**{nom}** · {ch.mention if ch else '⚪ _non défini_'}\n"
                               f"-# {aide}")
+                if cle == "activite_salon_retour":
+                    vus = niv.salons_visibles(c) - niv.salons_de_retour(c)
+                    noms = "  ·  ".join(x.mention for x in
+                                        (self.g.get_channel(s) for s in sorted(vus))
+                                        if x is not None)
+                    lignes.append(f"**👁️ Ce qu'ils voient** · {noms or '_rien d’autre_'}\n"
+                                  f"-# En plus du salon où ils écrivent. Le reste est caché.")
 
             jour = int(c["activite_jour_rappel"] or 0) % 7
-            items = [
-                v2_title("📢 Salons"),
-                v2_subtitle("Chaque salon a un rôle précis — ne les mélangez pas"),
+            items = [v2_title("📢 Salons"), v2_divider()]
+            if self._dernier:
+                items += [v2_body(self._dernier), v2_divider()]
+            items += [
+                v2_body("\n".join(lignes)),
                 v2_divider(),
-                v2_body("\n\n".join(lignes)),
-                v2_divider(),
-                v2_body(f"📅 **Jour du rappel** · {JOURS_SEMAINE[jour]}\n"
-                        "-# Le rappel n'est envoyé qu'une fois par semaine, ce jour-là."),
+                v2_body(f"📅 **Jour du rappel** · {JOURS_SEMAINE[jour]}"),
             ]
 
             for cle, nom, _ in self.CHAMPS:
                 sel = ChannelSelect(
                     channel_types=[discord.ChannelType.text],
-                    placeholder=f"Définir le salon {nom.split(' ', 1)[1].lower()}…",
+                    placeholder=f"{nom} — choisir le salon…",
                     min_values=1, max_values=1, custom_id=f"act_ch_{cle}")
                 sel.callback = self._faire_salon(cle)
                 items.append(discord.ui.ActionRow(sel))
+                if cle == "activite_salon_retour":
+                    #  PLUSIEURS salons, et PRÉ-REMPLI : sans `default_values`
+                    #  le client repart de zéro et chaque choix effacerait les
+                    #  précédents. `min_values=0` : tout retirer est un choix.
+                    vus = sorted(niv.salons_visibles(c) - niv.salons_de_retour(c))
+                    sel_vis = ChannelSelect(
+                        channel_types=[discord.ChannelType.text,
+                                       discord.ChannelType.news],
+                        placeholder="👁️ Ce qu'ils voient — plusieurs possibles…",
+                        min_values=0, max_values=niv.MAX_SALONS_VISIBLES,
+                        default_values=[discord.Object(id=s) for s in vus
+                                        if self.g.get_channel(s) is not None
+                                        ][:niv.MAX_SALONS_VISIBLES],
+                        custom_id="act_sal_visibles")
+                    sel_vis.callback = self._cb_visibles
+                    items.append(discord.ui.ActionRow(sel_vis))
 
             b_jour = Button(label=f"Jour : {JOURS_SEMAINE[jour]}", emoji="📅",
                             style=discord.ButtonStyle.secondary, custom_id="act_jour")
@@ -1274,14 +1236,47 @@ class ActiviteSalonsPanelV2(_Base):
         except Exception as ex:
             await self._secours(i, ex, "salons")
 
+    async def _appliquer(self) -> None:
+        """⚠️ UN CHOIX NON POSÉ SERAIT UN MENU QUI MENT : l'écran afficherait
+        le nouveau salon, et les absents verraient l'ancien pendant six heures.
+        Seuls les salons dont le droit change sont réécrits."""
+        c = await activite.config(self.g.id)
+        if not c["activite_masquer_salons"]:
+            self._dernier = "✅ Enregistré. (Masquage désactivé : rien n'est caché.)"
+            return
+        res = await niv.appliquer_masquage(self.g, c)
+        if res.get("raison"):
+            self._dernier = f"⚠️ Enregistré, mais pas appliqué : {res['raison']}"
+        elif res.get("echecs"):
+            self._dernier = f"⚠️ Appliqué, sauf {res['echecs']} salon(s) en échec."
+        else:
+            self._dernier = "✅ Appliqué."
+
     def _faire_salon(self, cle: str):
         async def _cb(i):
             try:
+                if cle == "activite_salon_retour":
+                    #  Le salon où ils écrivent change ce qu'ils voient : on
+                    #  répond d'abord (poser peut prendre plus de 3 s).
+                    await i.response.defer()
                 await _db_set(self.g.id, cle, int(i.data["values"][0]))
+                if cle == "activite_salon_retour":
+                    await self._appliquer()
                 await self.render_to(i, edit=True)
             except Exception as ex:
                 await self._secours(i, ex, f"salon {cle}")
         return _cb
+
+    async def _cb_visibles(self, i):
+        try:
+            await i.response.defer()
+            ids = sorted({int(v) for v in ((i.data or {}).get("values") or [])})
+            await _db_set(self.g.id, "activite_salons_visibles",
+                          ids[:niv.MAX_SALONS_VISIBLES])
+            await self._appliquer()
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await self._secours(i, ex, "salons visibles")
 
     async def _cb_jour(self, i):
         try:

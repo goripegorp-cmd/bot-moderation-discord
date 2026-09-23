@@ -312,10 +312,14 @@ def test_A2_les_salons_CHOISIS_sont_visibles_en_LECTURE_seule():
     assert porte.view_channel is True and porte.send_messages is True
 
 
-def test_A3_le_salon_AFK_est_une_PORTE():
-    """Le salon où l'on écrit « je suis là » était invisible aux absents —
-    précisément ceux qui en ont besoin."""
+def test_A3_UN_seul_salon_ou_ils_ecrivent_le_salon_AFK_n_en_est_pas_un():
+    """« Moi : un salon, ils doivent écrire. » (23/09, le soir) Le salon AFK
+    en faisait une seconde porte : deux salons où écrire. S'il doit servir,
+    on le choisit comme salon où ils écrivent."""
     cfg = dict(activite.CLES_DEFAUT, activite_salon_afk=AFK)
+    assert niv.salons_de_retour(cfg) == set()
+    assert AFK not in niv.salons_ouverts(G(), cfg)
+    cfg["activite_salon_retour"] = AFK
     assert niv.salons_de_retour(cfg) == {AFK}
     assert niv._droits_voulus(AFK, cfg, niv.salons_ouverts(G(), cfg)).send_messages is True
 
@@ -619,6 +623,15 @@ def _trouver(payload, cid):
     return None
 
 
+def _a_plat(payload) -> list:
+    """Les composants dans l'ordre d'affichage."""
+    out = []
+    for c in payload:
+        out.append(c)
+        out.extend(_a_plat(c.get("components", []) or []))
+    return out
+
+
 def _textes(payload) -> str:
     out = []
     for c in payload:
@@ -628,41 +641,91 @@ def _textes(payload) -> str:
     return "\n".join(x for x in out if x)
 
 
+def _salons(g):
+    return panneau.ActiviteSalonsPanelV2(type("U", (), {"id": 1})(), g)
+
+
 @pytest.mark.asyncio
-async def test_D1_le_panneau_montre_la_porte_les_choisis_et_le_MENU_pre_rempli(banc):
+async def test_D1_dans_SALONS_ou_ils_ecrivent_puis_ce_qu_ils_voient_PLUSIEURS(banc):
+    """« Je peux en définir qu'un seul » : le menu à plusieurs salons était
+    rangé ailleurs. Il est dans 📢 Salons, JUSTE SOUS « où ils écrivent »,
+    pré-rempli (sinon chaque choix effacerait les précédents)."""
+    g, _m = await _monter(banc, activite_salons_visibles=[CHOISI])
+    vue = _salons(g)
+    await vue.render_to(_Inter(), edit=False)
+    payload = vue.to_components()
+    assert _compter(payload) <= 40, "au-delà de 40 composants, Discord refuse"
+    ids = [c.get("custom_id") for c in _a_plat(payload) if c.get("custom_id")]
+    i_ecrit = ids.index("act_ch_activite_salon_retour")
+    assert ids[i_ecrit + 1] == "act_sal_visibles", (
+        "les deux réglages du propriétaire ne sont pas côte à côte", ids)
+    menu = _trouver(payload, "act_sal_visibles")
+    assert menu["min_values"] == 0 and menu["max_values"] == niv.MAX_SALONS_VISIBLES >= 5
+    assert [int(d["id"]) for d in menu.get("default_values", [])] == [CHOISI]
+    ecrit = _trouver(payload, "act_ch_activite_salon_retour")
+    assert ecrit["max_values"] == 1, "UN salon où ils écrivent"
+    t = _textes(payload)
+    assert "Où ils écrivent" in t and f"<#{PORTE}>" in t
+    assert "Ce qu'ils voient" in t and f"<#{CHOISI}>" in t
+
+
+@pytest.mark.asyncio
+async def test_D1b_des_aides_d_UNE_ligne_courte(banc):
+    """« Tu as fait des gros pavés, je comprends rien. »"""
+    g, _m = await _monter(banc)
+    vue = _salons(g)
+    await vue.render_to(_Inter(), edit=False)
+    aides = [l for l in _textes(vue.to_components()).split("\n") if l.startswith("-#")]
+    assert aides, "plus aucune aide : on ne sait plus à quoi sert chaque salon"
+    trop = [l for l in aides if len(l) > 70]
+    assert not trop, trop
+
+
+@pytest.mark.asyncio
+async def test_D1c_UN_seul_endroit_l_ecran_du_masquage_n_a_plus_de_menu(banc):
+    """Deux menus pour le même réglage finissent par se contredire. L'écran
+    du masquage résume, et renvoie à 📢 Salons."""
     g, _m = await _monter(banc, activite_salons_visibles=[CHOISI])
     vue = panneau.ActiviteRolesAfkPanelV2(type("U", (), {"id": 1})(), g)
     await vue.render_to(_Inter(), edit=False)
     payload = vue.to_components()
-    assert _compter(payload) <= 40, "au-delà de 40 composants, Discord refuse"
-    menu = _trouver(payload, "act_afk_visibles")
-    assert menu is not None, "le choix des salons visibles n'est pas affiché"
-    assert menu["min_values"] == 0 and menu["max_values"] == niv.MAX_SALONS_VISIBLES
-    assert [int(d["id"]) for d in menu.get("default_values", [])] == [CHOISI], (
-        "menu vide : chaque choix effacerait les précédents")
+    assert _trouver(payload, "act_afk_visibles") is None
     t = _textes(payload)
-    assert "La porte" in t and f"<#{PORTE}>" in t
-    assert "Choisis par vous" in t and f"<#{CHOISI}>" in t
-    assert "Le salon d'annonce n'y est pas" in t, (
-        "le propriétaire ne saurait pas que l'annonce est désormais fermée")
+    assert "Où ils écrivent" in t and "Ce qu'ils voient" in t and "📢 Salons" in t
 
 
 @pytest.mark.asyncio
-async def test_D2_choisir_des_salons_les_ENREGISTRE_et_les_POSE(banc):
+async def test_D2_choisir_ce_qu_ils_voient_l_ENREGISTRE_et_l_APPLIQUE(banc):
     """Un choix affiché mais pas posé serait un menu qui ment pendant six
     heures, jusqu'au passage suivant."""
     g, _m = await _monter(banc)
-    vue = panneau.ActiviteRolesAfkPanelV2(type("U", (), {"id": 1})(), g)
+    vue = _salons(g)
     await vue._cb_visibles(_Inter([CHOISI, ANNONCE]))
     assert banc["cfg"]["activite_salons_visibles"] == sorted([CHOISI, ANNONCE])
     assert g.get_channel(CHOISI).poses[12].view_channel is True
     assert g.get_channel(ANNONCE).poses[12].view_channel is True
     assert g.get_channel(AUTRE).poses[12].view_channel is False
-    assert "enregistré(s) et posé(s)" in vue._dernier, vue._dernier
+    assert vue._dernier == "✅ Appliqué.", vue._dernier
     #  Tout retirer est un choix : l'annonce se referme.
     await vue._cb_visibles(_Inter([]))
     assert banc["cfg"]["activite_salons_visibles"] == []
     assert g.get_channel(ANNONCE).poses[12].view_channel is False
+
+
+@pytest.mark.asyncio
+async def test_D4_changer_le_salon_ou_ils_ecrivent_s_APPLIQUE_tout_de_suite(banc):
+    """Sinon le nouveau salon resterait invisible aux absents jusqu'au
+    passage suivant : ils ne pourraient plus revenir pendant six heures."""
+    g, _m = await _monter(banc)
+    vue = _salons(g)
+    await vue._cb_visibles(_Inter([]))                 # état de départ posé
+    assert g.get_channel(PORTE).poses[12].send_messages is True
+    await vue._faire_salon("activite_salon_retour")(_Inter([AUTRE]))
+    assert banc["cfg"]["activite_salon_retour"] == AUTRE
+    nouveau, ancien = g.get_channel(AUTRE).poses[12], g.get_channel(PORTE).poses[12]
+    assert nouveau.view_channel is True and nouveau.send_messages is True
+    assert ancien.view_channel is False, "l'ancien salon reste ouvert"
+    assert vue._dernier == "✅ Appliqué."
 
 
 @pytest.mark.asyncio
