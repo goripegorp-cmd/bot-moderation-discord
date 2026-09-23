@@ -410,9 +410,9 @@ def test_U2_le_role_Nouveautes_UGC_ne_peut_plus_etre_recree():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class _Rep:
-    def __init__(self, status, data=None):
+    def __init__(self, status, data=None, headers=None):
         self.status, self._d = status, data or {}
-        self.headers = {}
+        self.headers = dict(headers or {})
 
     async def json(self, content_type=None):
         return self._d
@@ -429,10 +429,14 @@ class _Sess:
         self.par_id, self.post_status, self.urls = par_id or {}, post_status, []
 
     def get(self, url, **kw):
+        """(code, données[, en-têtes]) par article ; une exception est LEVÉE,
+        comme une panne réseau d'aiohttp."""
         self.urls.append(url)
         aid = int(url.rstrip("/").split("/")[-2])
-        st, d = self.par_id.get(aid, (200, {}))
-        return _Rep(st, d)
+        st, d, *h = self.par_id.get(aid, (200, {}))
+        if isinstance(st, Exception):
+            raise st
+        return _Rep(st, d, h[0] if h else None)
 
     def post(self, url, **kw):
         self.urls.append(url)
@@ -459,9 +463,10 @@ async def test_E1_le_relais_ne_rend_QUE_les_articles_devenus_Limited(base, monke
                             "Creator": {"Id": 1}})})
     monkeypatch.setattr(veille, "_ouvrir", lambda: sess)
     monkeypatch.setattr(veille.asyncio, "sleep", _pas_de_sommeil)
-    devenus, vus = await veille.verifier_par_economie([1, 2])
-    assert vus == 2 and [d["asset_id"] for d in devenus] == [2]
-    d = devenus[0]
+    r = await veille.verifier_par_economie([1, 2])
+    assert r["vus"] == 2 and r["avance"] == 2 and r["arret"] is None
+    assert [d["asset_id"] for d in r["devenus"]] == [2]
+    d = r["devenus"][0]
     assert d["collectionnable"] == 1 and d["classe"] == veille.CLASSE_LIMITED
     assert d["favoris"] == 4321 and d["prix"] == 20000, "la base n'a pas complété l'article"
     assert all(u.startswith("https://economy.roblox.com/v2/assets/") for u in sess.urls)
@@ -475,11 +480,20 @@ async def _pas_de_sommeil(_d):
 async def test_E2_le_relais_S_ARRETE_si_l_economie_refuse_aussi(base, monkeypatch):
     """Marteler un second seau saturé ne rendrait pas de quota."""
     await _poser(base, [(1, 9000, 0, 1, "Asset", "2026-08-12")])
-    sess = _Sess({1: (429, {})})
+    sess = _Sess({1: (429, {}, {"x-ratelimit-limit": "1000, 1000;w=60",
+                                 "x-ratelimit-remaining": "0",
+                                 "retry-after": "7"})})
     monkeypatch.setattr(veille, "_ouvrir", lambda: sess)
     monkeypatch.setattr(veille.asyncio, "sleep", _pas_de_sommeil)
-    devenus, vus = await veille.verifier_par_economie([1, 2, 3])
-    assert devenus == [] and vus == 0 and len(sess.urls) == 1
+    r = await veille.verifier_par_economie([1, 2, 3])
+    assert r["devenus"] == [] and r["vus"] == 0 and len(sess.urls) == 1
+    #  Rien n'a été regardé : le curseur ne bouge pas, le 1 ouvrira le
+    #  relais suivant. Et ce que Roblox annonçait au refus est gardé.
+    assert r["avance"] == 0
+    a = r["arret"]
+    assert a["code"] == 429 and a["apres"] == 0
+    assert (a["limite"], a["reste"], a["retry_after"]) == (
+        "1000, 1000;w=60", "0", "7"), a
 
 
 @pytest.mark.asyncio
@@ -493,3 +507,51 @@ async def test_E3_un_429_du_seau_des_fiches_n_ECRIT_PAS_de_ligne(base, monkeypat
     assert await veille.fiches_par_ids([1, 2, 3]) == []
     assert veille.DERNIER_CODE_FICHES == 429
     assert not [l for l in lignes if "429" in l], lignes
+
+
+@pytest.mark.asyncio
+async def test_E4_la_PRODUCTION_deux_articles_puis_429(base, monkeypatch):
+    """⚠️ JOURNAL RAILWAY DU 23/09 : « 9 refus du seau des fiches → 18
+    vérification(s) par l'économie » — deux articles par relais, puis 429.
+    Le relais s'arrête AVANT l'article refusé et dit jusqu'où il est allé :
+    c'est `avance`, et c'est d'elle que le curseur tourne."""
+    await _poser(base, [(i, 9000, 0, 1, "Asset", "2026-08-12") for i in (1, 2, 3, 4)])
+    sess = _Sess({1: (200, {"IsLimited": False}), 2: (200, {"IsLimited": False}),
+                  3: (429, {}, {"x-ratelimit-limit": "1000, 1000;w=60"}),
+                  4: (200, {"IsLimited": True})})
+    monkeypatch.setattr(veille, "_ouvrir", lambda: sess)
+    monkeypatch.setattr(veille.asyncio, "sleep", _pas_de_sommeil)
+    r = await veille.verifier_par_economie([1, 2, 3, 4])
+    assert (r["vus"], r["avance"]) == (2, 2), r
+    assert r["arret"]["apres"] == 2 and r["codes"] == {200: 2, 429: 1}
+    assert len(sess.urls) == 3, "le 4 a été demandé APRÈS un refus"
+    assert r["devenus"] == []
+
+
+@pytest.mark.asyncio
+async def test_E5_un_404_est_une_reponse_DEFINITIVE_et_COMPTEE(base, monkeypatch):
+    """Un article supprimé répondrait 404 à chaque tour : il ne doit ni bloquer
+    le curseur, ni disparaître sans un mot (il était sauté en silence)."""
+    await _poser(base, [(1, 9000, 0, 1, "Asset", "2026-08-12"),
+                        (2, 9000, 0, 1, "Asset", "2026-08-12")])
+    sess = _Sess({1: (404, {}), 2: (200, {"IsLimited": False})})
+    monkeypatch.setattr(veille, "_ouvrir", lambda: sess)
+    monkeypatch.setattr(veille.asyncio, "sleep", _pas_de_sommeil)
+    r = await veille.verifier_par_economie([1, 2])
+    assert (r["vus"], r["avance"], r["arret"]) == (1, 2, None), r
+    assert r["codes"] == {404: 1, 200: 1}
+
+
+@pytest.mark.asyncio
+async def test_E6_une_panne_reseau_est_ECRITE_et_ne_bloque_pas_la_file(base, monkeypatch):
+    lignes = []
+    veille.setup(get_db=base["db"], cfg=None, db_set=None,
+                 log=lambda *a, **k: lignes.append(" ".join(map(str, a))))
+    await _poser(base, [(1, 9000, 0, 1, "Asset", "2026-08-12"),
+                        (2, 9000, 0, 1, "Asset", "2026-08-12")])
+    sess = _Sess({1: (TimeoutError("lent"), {}), 2: (200, {"IsLimited": False})})
+    monkeypatch.setattr(veille, "_ouvrir", lambda: sess)
+    monkeypatch.setattr(veille.asyncio, "sleep", _pas_de_sommeil)
+    r = await veille.verifier_par_economie([1, 2])
+    assert (r["vus"], r["avance"]) == (1, 2), r
+    assert any("TimeoutError" in l for l in lignes), lignes

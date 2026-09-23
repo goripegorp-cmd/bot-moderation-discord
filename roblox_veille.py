@@ -2559,31 +2559,64 @@ DERNIER_CODE_FICHES = None
 API_ECONOMIE_DETAILS = "https://economy.roblox.com/v2/assets/{}/details"
 
 
-async def verifier_par_economie(ids: list) -> tuple[list[dict], int]:
-    """Vérifie des articles UN PAR UN par l'économie. (devenus Limited, vus).
+async def verifier_par_economie(ids: list) -> dict:
+    """Vérifie des articles UN PAR UN par l'économie.
+
+    Rend {"devenus": [...], "vus": n, "avance": k, "codes": {...}, "arret": …} :
+      · `devenus` — SEULS les articles devenus Limited (voir plus bas) ;
+      · `vus` — les réponses 200 ;
+      · `avance` — combien d'articles de `ids`, dans l'ordre, ont eu une
+        réponse DÉFINITIVE (200, 404, panne réseau…).
+        ⚠️ L'APPELANT FAIT TOURNER SON CURSEUR D'AUTANT, PAS DE LA TRANCHE.
+        Production du 23/09 : sur l'IP de Railway l'économie s'arrêtait au
+        3ᵉ article (18 vérifications pour 9 relais), le curseur sautait quand
+        même de 9, et 21 articles sur 27 n'étaient JAMAIS regardés tant que
+        les fiches étaient refusées. Un 429 arrête le relais AVANT l'article
+        refusé : c'est lui qui ouvrira le relais suivant.
+      · `codes` — combien de réponses par code HTTP ;
+      · `arret` — le 429 qui a arrêté le relais, avec les en-têtes de quota
+        que Roblox annonce À CE MOMENT-LÀ. Depuis un poste résidentiel :
+        27 réponses sur 27, « 1000, 1000;w=60 » (mesuré le 23/09). C'est cet
+        en-tête qui dira si l'IP partagée a vidé le quota, ou si Roblox
+        applique aux hébergeurs une autre limite.
 
     ⚠️ NE REND QUE LES ARTICLES DEVENUS LIMITED, complétés par ce que la base
     sait d'eux. L'économie ne donne ni favoris ni description : faire passer
     TOUS les articles par `comparer_et_enregistrer` avec ces trous écraserait
     les favoris enregistrés. Seul un vrai passage en Limited mérite d'y aller.
     """
-    devenus, vus = [], 0
+    out = {"devenus": [], "vus": 0, "avance": 0, "codes": {}, "arret": None}
+    devenus = out["devenus"]
     try:
         async with _ouvrir() as sess:
             for aid in ids:
+                d = None
                 try:
                     async with sess.get(API_ECONOMIE_DETAILS.format(int(aid))) as r:
+                        out["codes"][r.status] = out["codes"].get(r.status, 0) + 1
                         if r.status == 429:
-                            break             # le relais aussi est saturé : on arrête
-                        if r.status != 200:
-                            continue
-                        d = await r.json(content_type=None)
+                            #  Le relais aussi est refusé : on s'arrête AVANT cet
+                            #  article, et on garde ce que Roblox annonce.
+                            h = r.headers or {}
+                            out["arret"] = {
+                                "code": 429, "apres": out["vus"],
+                                "limite": h.get("x-ratelimit-limit"),
+                                "reste": h.get("x-ratelimit-remaining"),
+                                "reset": h.get("x-ratelimit-reset"),
+                                "retry_after": h.get("retry-after")}
+                            break
+                        if r.status == 200:
+                            d = await r.json(content_type=None)
                 except Exception as ex:
                     _log(f"[roblox_veille economie {aid}] {type(ex).__name__}: {ex}")
-                    continue
                 finally:
                     await asyncio.sleep(0.25)
-                vus += 1
+                #  Réponse définitive — bonne ou mauvaise : on passe au suivant.
+                #  Un article qui répondrait toujours 404 ne bloque pas la file.
+                out["avance"] += 1
+                if not isinstance(d, dict):
+                    continue
+                out["vus"] += 1
                 lim_u = bool(d.get("IsLimitedUnique"))
                 if not (lim_u or d.get("IsLimited")):
                     continue
@@ -2611,7 +2644,7 @@ async def verifier_par_economie(ids: list) -> tuple[list[dict], int]:
                 })
     except Exception as ex:
         _log(f"[roblox_veille verifier_par_economie] {type(ex).__name__}: {ex}")
-    return devenus, vus
+    return out
 
 
 #  Au-delà, UNE requête ne suffit plus (le point d'API prend 120 articles).

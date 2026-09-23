@@ -64,8 +64,14 @@ class FauxCatalogue:
     #  ⚠️ PIÈGE N°6 : tout ce que le vrai module porte sur ce chemin — la
     #  config des flux, la liste de surveillance, les fiches par identifiants.
     def __init__(self, reponses, flux=None, surveilles=(), bascules=(),
-                 fiches_refusees=0):
+                 fiches_refusees=0, economie_max=None):
+        #  Un code (refus à chaque appel) ou une LISTE de codes consommés un
+        #  par appel — 0 = accepté.
         self.fiches_refusees = fiches_refusees
+        #  Combien d'articles l'économie accepte par relais avant son 429 :
+        #  None = tous ; 2 = la production du 23/09 sur l'IP de Railway.
+        self.economie_max = economie_max
+        self.regardes_economie = []
         self.reponses = list(reponses)
         self.demandes = []
         #  `flux={}` veut dire « aucun flux » : ne pas le confondre avec
@@ -108,16 +114,32 @@ class FauxCatalogue:
 
     async def fiches_par_ids(self, ids, item_type=None):
         self.demandes.append(f"fiches:{len(ids)}")
-        if self.fiches_refusees:
-            self.DERNIER_CODE_FICHES = self.fiches_refusees
+        code = self.fiches_refusees
+        if isinstance(code, list):
+            code = code.pop(0) if code else 0
+        if code:
+            self.DERNIER_CODE_FICHES = code
             return []
         self.DERNIER_CODE_FICHES = 200
         return [{"asset_id": i} for i in ids]
 
     async def verifier_par_economie(self, ids):
+        """Comme la vraie : s'arrête au 429 AVANT l'article refusé, dit
+        jusqu'où elle est allée (`avance`) et ce que Roblox annonçait."""
         self.demandes.append("economie:" + ",".join(str(i) for i in ids))
-        devenus = [b for b in self.bascules_a_rendre if b["asset_id"] in ids]
-        return devenus, len(ids)
+        n = len(ids) if self.economie_max is None else min(len(ids),
+                                                             self.economie_max)
+        regardes = list(ids)[:n]
+        self.regardes_economie.extend(regardes)
+        codes, arret = {200: n}, None
+        if n < len(ids):
+            codes[429] = 1
+            #  Valeurs de BANC (pas une mesure) : le bilan doit les recopier.
+            arret = {"code": 429, "apres": n, "limite": "1000, 1000;w=60",
+                     "reste": "0", "reset": "31", "retry_after": None}
+        devenus = [b for b in self.bascules_a_rendre if b["asset_id"] in regardes]
+        return {"devenus": devenus, "vus": n, "avance": n, "codes": codes,
+                "arret": arret}
 
     async def comparer_et_enregistrer(self, fiches):
         ids = {f["asset_id"] for f in fiches}
@@ -151,10 +173,11 @@ class FauxAsyncio:
 
 
 def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=(),
-          fiches_refusees=0):
+          fiches_refusees=0, economie_max=None):
     journal = []
     cat = FauxCatalogue(reponses, flux=flux, surveilles=surveilles,
-                        bascules=bascules, fiches_refusees=fiches_refusees)
+                        bascules=bascules, fiches_refusees=fiches_refusees,
+                        economie_max=economie_max)
     E = {"amorce": True, "vus": {1, 2}, "vus_limited": {1},
          "tour": 0, "palier": 0, "pause_jusqu": None, "refus": 0, "reste": None,
          "rattrapes": 0, "serie": 0, "serie_max": 0, "alerte": False,
@@ -164,6 +187,9 @@ def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=(),
          "bascules_surveillance": 0, "erreurs_surveillance": 0,
          "refus_surveillance": 0, "verifs_economie": 0,
          "curseur_surveillance": 0,
+         "arrets_economie": 0, "dernier_arret_economie": None,
+         "codes_economie": {},
+         "serie_refus_fiches": 0, "serie_refus_fiches_max": 0,
          "passages": 0, "sautes": 0, "erreurs": 0, "nouveautes": 0,
          "bascules": 0, "publies": 0,
          "dernier_passage": None, "dernier_signal": None}
@@ -440,6 +466,90 @@ def test_S8_une_autre_panne_que_le_429_ne_declenche_PAS_le_relais():
     _tick(ns)
     assert not [d for d in cat.demandes if d.startswith("economie:")]
     assert E["erreurs_surveillance"] == 1
+
+
+def _bilan_economie():
+    """La VRAIE `_bilan_economie` de bot.py (fonction ordinaire, pas `_src`,
+    qui la rendrait asynchrone)."""
+    for n in ast.walk(ARBRE):
+        if isinstance(n, ast.FunctionDef) and n.name == "_bilan_economie":
+            ns = {}
+            exec(ast.unparse(n), ns)          # noqa: S102 — code du dépôt
+            return ns["_bilan_economie"]
+    raise AssertionError("_bilan_economie introuvable dans bot.py")
+
+
+def test_S9_a_DEUX_articles_par_relais_TOUTE_la_liste_est_revue():
+    """⚠️ LA PRODUCTION DU 23/09 (Railway, 3 heures) : « 9 refus du seau des
+    fiches → 18 vérification(s) par l'économie », puis 18 → 36, 27 → 54…
+    L'économie s'arrêtait au 3ᵉ article ; le curseur sautait quand même de 9.
+    27 = 3 × 9 : les tranches étaient toujours les trois mêmes, et 21 articles
+    sur 27 n'étaient JAMAIS regardés par le relais. Le curseur avance
+    maintenant de ce qui a été vu : en 14 relais, les 27 y passent."""
+    ids = list(range(500, 527))
+    ns, E, cat, _j = _banc([], surveilles=ids, fiches_refusees=429,
+                           economie_max=2)
+    for _ in range(14):
+        _tick(ns)
+    manquants = sorted(set(ids) - set(cat.regardes_economie))
+    assert not manquants, f"{len(manquants)} article(s) jamais regardé(s) : {manquants}"
+    departs = [d.split(":")[1].split(",")[0] for d in cat.demandes
+               if d.startswith("economie:")]
+    assert departs[:4] == ["500", "502", "504", "506"], departs
+    assert E["verifs_economie"] == 28 and E["arrets_economie"] == 14
+
+
+def test_S10_le_bilan_dit_POURQUOI_l_economie_s_arrete():
+    """Le bilan disait « 18 vérification(s) par l'économie » sans dire
+    pourquoi pas 81. Il recopie ce que Roblox annonçait au moment du refus :
+    c'est ce qui départagera « l'IP partagée a vidé le quota » d'« une autre
+    limite pour les hébergeurs »."""
+    ns, E, _cat, _j = _banc([], surveilles=list(range(500, 527)),
+                            fiches_refusees=429, economie_max=2)
+    _tick(ns)
+    assert E["arrets_economie"] == 1 and E["dernier_arret_economie"]["apres"] == 2
+    ligne = _bilan_economie()(E)
+    assert "arrêtée 1 fois par un 429" in ligne, ligne
+    assert "après 2 article(s)" in ligne and "« 1000, 1000;w=60 »" in ligne, ligne
+    assert "reste 0" in ligne, ligne
+    assert _bilan_economie()({"arrets_economie": 0, "codes_economie": {200: 9}}) == ""
+
+
+def test_S11_la_plus_longue_serie_de_refus_des_fiches_est_comptee():
+    """Le pire retard de la surveillance, c'est la plus longue série de
+    passages où la requête groupée est refusée."""
+    ns, E, _cat, _j = _banc([], surveilles=[500, 501],
+                            fiches_refusees=[429, 429, 429, 0, 429])
+    for _ in range(5):
+        _tick(ns)
+    assert (E["serie_refus_fiches_max"], E["serie_refus_fiches"]) == (3, 1), E
+    assert E["refus_surveillance"] == 4
+
+
+def test_S12_un_autre_code_de_l_economie_n_est_plus_avale():
+    """Un 404 était sauté sans un mot. Il est compté, et dit au bilan ; et le
+    curseur avance de ce qui a eu une réponse, 404 compris."""
+    ns, E, cat, _j = _banc([], surveilles=[500, 501, 502], fiches_refusees=429)
+
+    async def _eco(tranche):
+        cat.demandes.append("economie:" + ",".join(map(str, tranche)))
+        return {"devenus": [], "vus": 1, "avance": 2,
+                "codes": {200: 1, 404: 1}, "arret": None}
+    cat.verifier_par_economie = _eco
+    _tick(ns)
+    assert E["codes_economie"] == {200: 1, 404: 1}
+    assert E["curseur_surveillance"] == 2
+    assert "HTTP 404 ×1" in _bilan_economie()(E)
+
+
+def test_S13_le_bilan_de_30_min_BRANCHE_le_relais():
+    """Une fonction jamais appelée n'informe personne."""
+    blocs = [ast.unparse(n) for n in ast.walk(ARBRE)
+             if isinstance(n, ast.IfExp)
+             and "refus du seau des fiches" in ast.unparse(n)]
+    assert blocs, "la ligne du bilan sur les refus des fiches a disparu"
+    assert any("_bilan_economie(_E)" in b and "serie_refus_fiches_max" in b
+               for b in blocs), blocs
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

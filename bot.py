@@ -15226,8 +15226,10 @@ async def veille_roblox_task():
                      + (f", {_E['erreurs_surveillance']} échec(s)"
                         if _E.get("erreurs_surveillance") else "")
                      + (f", {_E['refus_surveillance']} refus du seau des fiches "
-                        f"→ {_E.get('verifs_economie', 0)} vérification(s) par "
-                        f"l'économie"
+                        f"(plus longue série {_E.get('serie_refus_fiches_max', 0)} "
+                        f"passage(s)) → {_E.get('verifs_economie', 0)} "
+                        f"vérification(s) par l'économie"
+                        + _bilan_economie(_E)
                         if _E.get("refus_surveillance") else ""))
                   + (f" · {_E['secours_retenus']} secours retenu(s) pour "
                      f"protéger le relevé complet"
@@ -15525,6 +15527,12 @@ _ECLAIREUR = {"amorce": False, "vus": set(), "vus_limited": set(),
               #  Le relais par l'économie quand le seau des fiches est refusé.
               "refus_surveillance": 0, "verifs_economie": 0,
               "curseur_surveillance": 0,
+              #  Pourquoi le relais s'arrête (23/09 : 2 articles par relais sur
+              #  Railway, 9 sur 9 ailleurs) et combien de temps les fiches
+              #  restent refusées d'affilée — le pire retard de la surveillance.
+              "arrets_economie": 0, "dernier_arret_economie": None,
+              "codes_economie": {},
+              "serie_refus_fiches": 0, "serie_refus_fiches_max": 0,
               "passages": 0, "sautes": 0, "erreurs": 0,
               "nouveautes": 0, "bascules": 0, "publies": 0,
               "dernier_passage": None, "dernier_signal": None}
@@ -15552,10 +15560,43 @@ ECLAIREUR_AVANT_RELEVE_S = 75
 #  liste, et le seau des fiches (10/min) sert aussi aux nouveautés.
 #  Mesuré le 23/09 : 28 articles retirés de la vente avec un vrai prix.
 ECLAIREUR_SURVEILLANCE_LEGERE = 40
-#  Le relais par l'économie : combien d'articles par passage. 9 × toutes les
-#  45 s = 12 requêtes/min sur un quota mesuré à 1000/min ; une liste de 27
-#  est revue en ~2 min 15.
+#  Le relais par l'économie : combien d'articles par passage, AU PLUS. 9 ×
+#  toutes les 45 s = 12 requêtes/min sur un quota mesuré à 1000/min depuis un
+#  poste résidentiel. ⚠️ SUR L'IP DE RAILWAY, l'économie s'arrête au 3ᵉ
+#  (production du 23/09 : 18 vérifications pour 9 relais) : le curseur avance
+#  donc de ce qui a été VU, et la liste entière est quand même revue — plus
+#  lentement, deux articles par relais. Le bilan dit pourquoi elle s'arrête.
 ECLAIREUR_TRANCHE_ECONOMIE = 9
+
+
+def _bilan_economie(E) -> str:
+    """Ce que le relais par l'économie a rencontré, pour le bilan de 30 min.
+
+    ⚠️ C'EST ICI QU'ON SAURA POURQUOI ELLE S'ARRÊTE SUR RAILWAY. Depuis un
+    poste résidentiel : 27 requêtes sur 27, quota « 1000, 1000;w=60 » (mesuré
+    le 23/09) ; en production : 2 articles par relais, exactement. Le quota
+    que Roblox annonce AU MOMENT du refus départage « l'IP partagée l'a
+    vidé » (reste 0 sur 1000) d'« une autre limite pour les hébergeurs ».
+    Les autres codes (404…) étaient avalés sans un mot : ils sont comptés.
+    """
+    morceaux = []
+    n = E.get("arrets_economie", 0)
+    if n:
+        a = E.get("dernier_arret_economie") or {}
+        _reste = a.get("reste")
+        morceaux.append(
+            f"arrêtée {n} fois par un 429 (la dernière après "
+            f"{a.get('apres', '?')} article(s) · quota annoncé "
+            f"« {a.get('limite') or '?'} » · reste "
+            f"{_reste if _reste is not None else '?'} · retry-after "
+            f"{a.get('retry_after') or '—'})")
+    autres = {c: k for c, k in (E.get("codes_economie") or {}).items()
+              if c not in (200, 429)}
+    if autres:
+        morceaux.append("autres réponses : " + ", ".join(
+            f"HTTP {c} ×{k}" for c, k in sorted(autres.items())))
+    #  Suit « → N vérification(s) par l'économie » dans le bilan.
+    return (", " + ", ".join(morceaux)) if morceaux else ""
 #  Si le second seau annonce lui-même 3 jetons ou moins, on le laisse souffler
 #  une minute : le relevé complet et le suivi de marché en dépendent.
 ECLAIREUR_SECOURS_RESTE_MIN = 3
@@ -15605,20 +15646,37 @@ async def _surveiller_retires(guildes, E) -> int:
             return 0                  # liste longue : un passage sur deux
         fiches = await roblox_module.fiches_par_ids(ids)
         E["verifs_surveillance"] += 1
-        if not fiches and roblox_module.DERNIER_CODE_FICHES == 429:
+        if fiches:
+            E["serie_refus_fiches"] = 0
+        elif roblox_module.DERNIER_CODE_FICHES == 429:
             #  ⚠️ LE SEAU DES FICHES EST REFUSÉ SUR L'IP PARTAGÉE (mesuré en
-            #  production le 23/09). L'économie a son propre quota (1000/min,
-            #  mesuré) : elle prend le relais par tranches, en rotation, et ne
-            #  rend que les articles DEVENUS Limited.
+            #  production le 23/09). L'économie a son propre quota : elle prend
+            #  le relais par tranches, en rotation, et ne rend que les articles
+            #  DEVENUS Limited.
             E["refus_surveillance"] += 1
+            E["serie_refus_fiches"] = E.get("serie_refus_fiches", 0) + 1
+            E["serie_refus_fiches_max"] = max(E.get("serie_refus_fiches_max", 0),
+                                              E["serie_refus_fiches"])
             c = E.get("curseur_surveillance", 0) % len(ids)
             tranche = (ids[c:] + ids[:c])[:ECLAIREUR_TRANCHE_ECONOMIE]
-            E["curseur_surveillance"] = (c + len(tranche)) % len(ids)
-            fiches, _vus = await roblox_module.verifier_par_economie(tranche)
-            E["verifs_economie"] += _vus
+            _r = await roblox_module.verifier_par_economie(tranche)
+            #  ⚠️ LE CURSEUR AVANCE DE CE QUI A ÉTÉ REGARDÉ, PAS DE LA TRANCHE.
+            #  Production du 23/09 : 9 relais → 18 vérifications. L'économie
+            #  s'arrêtait au 3ᵉ article, le curseur sautait quand même de 9 ;
+            #  27 = 3 × 9, les tranches étaient toujours les trois mêmes, et 21
+            #  articles sur 27 n'étaient JAMAIS regardés par le relais.
+            E["curseur_surveillance"] = (c + int(_r.get("avance") or 0)) % len(ids)
+            E["verifs_economie"] += int(_r.get("vus") or 0)
+            if _r.get("arret"):
+                E["arrets_economie"] = E.get("arrets_economie", 0) + 1
+                E["dernier_arret_economie"] = _r["arret"]
+            _codes = E.setdefault("codes_economie", {})
+            for _code, _n in (_r.get("codes") or {}).items():
+                _codes[_code] = _codes.get(_code, 0) + _n
+            fiches = _r.get("devenus") or []
             if not fiches:
                 return 0
-        elif not fiches:
+        else:
             E["erreurs_surveillance"] += 1
             return 0
         evts = await roblox_module.comparer_et_enregistrer(fiches)
