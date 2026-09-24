@@ -660,11 +660,13 @@ def test_T5_la_tete_de_secours_respecte_les_gardes_du_second_seau():
 #  N — la sonde d'actualités
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_N1_la_sonde_demande_CINQ_billets_et_pas_trente():
-    """Mesuré le 22/09 avec le vrai code : 70,0 Ko contre 708,4 Ko par passage,
-    297 ms contre 9 265 ms sur « annonces », cinq plus récents identiques."""
+def test_N1_la_sonde_est_LEGERE_5_par_categorie_10_pour_la_lecture_groupee():
+    """Mesuré le 22/09 : 70,0 Ko contre 708,4 Ko par passage, cinq plus récents
+    identiques. Le 24/09 : la catégorie parente, 10 sujets, 30 Ko."""
+    import roblox_news
     src = (RACINE / "roblox_news.py").read_text(encoding="utf-8")
-    assert 'url = source["url"] + ("&per_page=5" if leger else "")' in src
+    assert "par_page_leger') or 5" in src
+    assert roblox_news.SOURCE_MISES_A_JOUR["par_page_leger"] == 10
     i = src.index("async def relever(")
     assert "leger: bool = False" in src[i:i + 400]
 
@@ -673,11 +675,15 @@ def test_N2_l_eclaireur_d_actualites_UTILISE_la_sonde_legere():
     assert "leger=True" in _src("eclaireur_actu_task")
 
 
-def test_N3_les_categories_CHAUDES_sont_regardees_a_chaque_passage():
+def test_N3_la_lecture_groupee_couvre_les_QUATRE_categories_updates():
+    """Annonces et alertes — les chaudes — à chaque passage, et désormais notes
+    et communauté aussi, dans la même requête. « Ressources » reste au relevé."""
+    import roblox_news
     assert _constante("ECLAIREUR_ACTU_SECONDES") == 30
-    chaudes = _constante("ECLAIREUR_ACTU_CHAUDES")
-    assert "annonces" in chaudes and "alertes" in chaudes
-    assert "ECLAIREUR_ACTU_CHAUDES" in _src("eclaireur_actu_task")
+    cats = {s["cle"]: roblox_news._categorie_de(s) for s in roblox_news.SOURCES}
+    assert (cats["annonces"], cats["notes"], cats["alertes"], cats["communaute"]) == (
+        36, 62, 193, 90), cats
+    assert cats["ressources"] is None
 
 
 def test_N4_le_battement_reste_a_30_minutes():

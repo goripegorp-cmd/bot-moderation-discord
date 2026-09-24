@@ -15375,6 +15375,12 @@ async def veille_roblox_task():
                       f"{_EA['publies']} publié(s) sur l'instant · "
                       f"{_EA['erreurs']} erreur(s) · dernier passage "
                       + (f"il y a {_apa:.0f} s" if _apa is not None else "JAMAIS")
+                      + (f" · 🚧 le forum refuse le serveur depuis "
+                         f"{_age_s(roblox_news_module.FORUM['refus_depuis']) / 60:.0f} "
+                         f"min (HTTP {roblox_news_module.FORUM['code']}, "
+                         f"{roblox_news_module.FORUM['refus']} refus) — éclaireur "
+                         f"ralenti, {_EA.get('sautes', 0)} passage(s) sautés"
+                         if roblox_news_module.forum_refuse() else "")
                       + (" · ⚠️ ÉCLAIREUR MUET"
                          if _apa is None or _apa > 5 * ECLAIREUR_ACTU_SECONDES else ""))
                 print(f"[veille_roblox_task]   file d'actualités : "
@@ -16053,23 +16059,24 @@ async def _eclaireur_wait():
 #  presse (560 Ko pour deux articles par mois, mesuré) restent au passage
 #  complet et à leur cadence de deux heures.
 #
-#  ⚠️ `relever(src, forcer=True)` note la date d'essai dans la table de santé :
-#  le passage complet verra donc ces sources « pas encore échues » et ne les
-#  relira pas — aucun double travail. Si l'éclaireur meurt, le superviseur le
-#  relance ; et à défaut, le passage complet les reprend à leur cadence.
+#  ⚠️ UNE REQUÊTE PAR PASSAGE DEPUIS LE 24/09 : `relever_mises_a_jour` lit
+#  les quatre catégories « updates » d'un coup. Le passage complet relit
+#  chacune à sa cadence : le filet, et la seule lecture de « ressources ».
+#  Si l'éclaireur meurt, le superviseur le relance.
 _ECLAIREUR_ACTU = {"amorce": False, "vus": set(), "passages": 0, "erreurs": 0,
                    "billets": 0, "publies": 0,
-                   "dernier_passage": None, "dernier_signal": None}
+                   "dernier_passage": None, "dernier_signal": None,
+                   #  Le ralentissement quand le forum refuse le serveur.
+                   "palier": 0, "pause_jusqu": None, "sautes": 0}
 #  30 s au lieu de 90 : la sonde ne lit plus que 5 billets par catégorie
 #  (15 Ko contre 84), donc trois fois plus souvent coûte deux fois moins.
 ECLAIREUR_ACTU_SECONDES = 30
 ECLAIREUR_ACTU_BATTEMENT = 60          # 60 × 30 s = 30 min
-#  ⚠️ LES DEUX CATÉGORIES QUI PORTENT LES VRAIES ACTUALITÉS. Les trois
-#  autres (notes de version, communauté, ressources staff) n'ont jamais
-#  d'annonce chaude : les interroger toutes les 30 s serait trois fois
-#  plus de requêtes pour un délai que personne ne remarque. Elles gardent
-#  la cadence d'avant — un passage sur trois.
-ECLAIREUR_ACTU_CHAUDES = ("annonces", "alertes")
+#  ⚠️ QUAND LE FORUM REFUSE (HTTP 202 le 24/09, depuis l'IP du serveur) : on
+#  RALENTIT au lieu d'insister — 1, 2, 5 puis 10 minutes entre deux essais —
+#  et on reprend les 30 s dès qu'il répond. Marteler une porte fermée ne
+#  l'ouvre pas ; c'est même ce qui la ferme.
+ECLAIREUR_ACTU_PAUSES = (0, 60, 120, 300, 600)
 
 
 @tasks.loop(seconds=ECLAIREUR_ACTU_SECONDES)
@@ -16090,39 +16097,34 @@ async def eclaireur_actu_task():
             E["amorce"] = True
             print(f"[eclaireur_actu] amorcé : {len(E['vus'])} billet(s) déjà "
                   f"connu(s)")
+        #  Le ralentissement : pendant la pause, on ne frappe pas.
+        _maint = datetime.now(timezone.utc)
+        if E.get("pause_jusqu") and _maint < E["pause_jusqu"]:
+            E["sautes"] = E.get("sautes", 0) + 1
+            return
         E["passages"] += 1
-        E["dernier_passage"] = datetime.now(timezone.utc)
+        E["dernier_passage"] = _maint
 
         neufs_total, enfiles_total = 0, 0
-        #  Un passage sur trois interroge TOUTES les catégories ; les deux
-        #  autres ne regardent que les chaudes.
-        _tout = (E["passages"] % 3 == 1)
-        for src in roblox_news_module.SOURCES:
-            if src.get("format", "discourse") != "discourse":
-                continue
-            if not _tout and src.get("cle") not in ECLAIREUR_ACTU_CHAUDES:
-                continue
-            #  ⚠️ SONDE LÉGÈRE : 5 billets, pas 30. C'est ce qui rend la
-            #  cadence de 30 s moins chère que celle de 90 s d'avant.
-            rel = await roblox_news_module.relever(src, forcer=True, leger=True)
-            if rel.get("code") != 200:
-                E["erreurs"] += 1
-                await asyncio.sleep(2)
-                continue
-            billets = rel.get("billets") or []
-            neufs = [b for b in billets
-                     if str(b.get("topic_id")) not in E["vus"]]
-            for b in billets:
-                E["vus"].add(str(b.get("topic_id")))
-            if neufs:
-                neufs_total += len(neufs)
-                _re = await _enfiler_billets(guildes, {"billets": neufs})
-                enfiles_total += _re["enfiles"]
-            #  La pause entre sources : c'est elle qui évite le pare-feu.
-            #  1 s suffit sur une sonde de 15 Ko — le débit vers le forum
-            #  reste à ~6 requêtes/min, contre 3,3 avant pour 2,9 fois plus
-            #  d'octets.
-            await asyncio.sleep(1)
+        #  ⚠️ UNE REQUÊTE PAR PASSAGE (24/09) : les quatre catégories
+        #  « updates », 10 sujets, 30 Ko. Avant : 2 requêtes toutes les 30 s et
+        #  3 de plus toutes les 90 s, ~8 600 par jour — jusqu'au 202.
+        rel = await roblox_news_module.relever_mises_a_jour(leger=True)
+        if rel.get("code") != 200:
+            E["erreurs"] += 1
+            E["palier"] = min(E.get("palier", 0) + 1, len(ECLAIREUR_ACTU_PAUSES) - 1)
+            E["pause_jusqu"] = _maint + timedelta(
+                seconds=ECLAIREUR_ACTU_PAUSES[E["palier"]])
+            return
+        E["palier"], E["pause_jusqu"] = 0, None
+        billets = rel.get("billets") or []
+        neufs = [b for b in billets if str(b.get("topic_id")) not in E["vus"]]
+        for b in billets:
+            E["vus"].add(str(b.get("topic_id")))
+        if neufs:
+            neufs_total = len(neufs)
+            _re = await _enfiler_billets(guildes, {"billets": neufs})
+            enfiles_total = _re["enfiles"]
 
         if enfiles_total:
             E["dernier_signal"] = datetime.now(timezone.utc)

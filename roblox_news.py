@@ -248,7 +248,9 @@ def _ouvrir():
 
 async def _noter_sante(cle: str, code: int | None) -> int:
     maintenant = datetime.now(timezone.utc).isoformat()
-    ok = code is not None and 200 <= code < 300
+    #  ⚠️ 200 SEULEMENT (24/09) : le forum a répondu 202 au serveur pendant des
+    #  heures, sans un billet — et le bilan disait « 0 source(s) en panne ».
+    ok = code == 200
     try:
         async with _get_db() as db:
             async with db.execute(
@@ -267,6 +269,91 @@ async def _noter_sante(cle: str, code: int | None) -> int:
     except Exception as ex:
         _log(f"[roblox_news _noter_sante] {ex}")
         return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Quand le forum refuse le serveur
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ⚠️ JOURNAL DU 24/09 : « HTTP 202 » sur les cinq catégories, une ligne par
+#  requête — 36 en quelques minutes. Depuis un poste résidentiel, les mêmes
+#  URL répondent 200 : c'est le serveur qui est refusé, pas le code qui est
+#  faux. UNE ligne quand le refus commence — avec les en-têtes qui disent QUI
+#  refuse —, UNE quand il cesse ; les refus entre les deux sont comptés.
+FORUM = {"refus_depuis": None, "code": None, "refus": 0}
+_ENTETES_REFUS = ("x-amzn-waf-action", "cf-mitigated", "server", "content-type",
+                  "retry-after", "content-length")
+
+
+def _forum_refus(code, entetes=None) -> None:
+    FORUM["refus"] += 1
+    if FORUM["refus_depuis"] is not None:
+        return
+    FORUM["refus_depuis"] = datetime.now(timezone.utc)
+    FORUM["code"] = code
+    vus = {}
+    try:
+        vus = {k: entetes.get(k) for k in _ENTETES_REFUS if entetes and entetes.get(k)}
+    except Exception:
+        pass
+    _log(f"[roblox_news] ⚠️ le forum refuse le serveur (HTTP {code}) — l'éclaireur "
+         f"ralentit, une seule ligne à la reprise · en-têtes : {vus or 'aucun'}")
+
+
+def _forum_ok() -> None:
+    if FORUM["refus_depuis"] is None:
+        return
+    duree = (datetime.now(timezone.utc) - FORUM["refus_depuis"]).total_seconds()
+    _log(f"[roblox_news] ✅ le forum répond de nouveau — {FORUM['refus']} refus "
+         f"en {duree / 60:.0f} min")
+    FORUM.update(refus_depuis=None, code=None, refus=0)
+
+
+def forum_refuse() -> bool:
+    return FORUM["refus_depuis"] is not None
+
+
+#  ⚠️ LES QUATRE CATÉGORIES « updates » EN UNE REQUÊTE (mesuré le 24/09) :
+#  annonces (36), notes (62), alertes (193) et communauté (90), du plus récent
+#  au plus ancien, sans épinglé. L'éclaireur en faisait 2 toutes les 30 s et
+#  3 de plus toutes les 90 s — jusqu'à ce que le forum refuse le serveur.
+SOURCE_MISES_A_JOUR = {"cle": "updates", "domaine": "Mises à jour",
+                       "format": "discourse", "par_page_leger": 10,
+                       "url": f"{DOMAINE_FORUM}/c/updates.json?order=created"}
+
+
+def _categorie_de(source: dict) -> int | None:
+    """Le numéro d'une catégorie « updates » (36, 62…) lu dans son URL."""
+    import re
+    m = re.search(r"/c/updates/[^/]+/(\d+)\.json", str(source.get("url") or ""))
+    return int(m.group(1)) if m else None
+
+
+async def relever_mises_a_jour(leger: bool = True) -> dict:
+    """Les catégories « updates » suivies, en UNE requête — l'éclaireur.
+
+    Même sortie que `relever` ; chaque billet garde le domaine de SA catégorie
+    (« Annonces », « Studio & moteur »…). Un sujet d'une catégorie qui n'est
+    pas suivie est ignoré. « Ressources » (tutoriels du staff) n'est pas sous
+    « updates » : elle reste au relevé de deux heures.
+
+    ⚠️ PAS DE NOTE DE SANTÉ PAR CATÉGORIE : le relevé complet relit donc
+    chacune à sa cadence — quelques requêtes par heure, et le filet qui
+    rattrape ce qui dépasserait les 10 sujets de tête.
+    """
+    par_cat = {}
+    for s in SOURCES:
+        if s.get("format", "discourse") == "discourse":
+            cat = _categorie_de(s)
+            if cat:
+                par_cat[cat] = s
+    out = {"billets": [], "code": None, "sautee": False,
+           "domaine": SOURCE_MISES_A_JOUR["domaine"]}
+    try:
+        await _relever_discourse(SOURCE_MISES_A_JOUR, out, leger=leger,
+                                 par_categorie=par_cat)
+    except Exception as ex:
+        _log(f"[roblox_news updates] {type(ex).__name__}: {ex}")
+    return out
 
 
 async def echue(source: dict) -> bool:
@@ -330,20 +417,33 @@ async def relever(source: dict, forcer: bool = False,
     return out
 
 
-async def _relever_discourse(source: dict, out: dict,
-                             leger: bool = False) -> None:
+async def _relever_discourse(source: dict, out: dict, leger: bool = False,
+                             par_categorie: dict | None = None) -> None:
     #  ⚠️ `per_page=5` NE CHANGE QUE LE NOMBRE DE BILLETS RENDUS, pas
     #  leur ordre ni leur contenu : mesuré catégorie par catégorie le
     #  22/09, les cinq plus récents sont exactement les mêmes.
-    url = source["url"] + ("&per_page=5" if leger else "")
+    url = source["url"] + (f"&per_page={int(source.get('par_page_leger') or 5)}"
+                           if leger else "")
     async with _ouvrir() as sess:
         async with sess.get(url) as r:
             out["code"] = r.status
             if r.status != 200:
-                _log(f"[roblox_news {source['cle']}] HTTP {r.status}")
+                _forum_refus(r.status, r.headers)
                 return
+            _forum_ok()
             data = await r.json()
-            frais = _normaliser(data, source["domaine"])
+            if par_categorie:
+                #  La catégorie parente : chaque sujet prend le domaine de
+                #  SA catégorie ; une catégorie non suivie est ignorée.
+                frais = []
+                for _t in ((data.get("topic_list") or {}).get("topics") or []):
+                    _src = par_categorie.get(_t.get("category_id"))
+                    if _src is not None:
+                        frais += _normaliser({"topic_list": {"topics": [_t]}},
+                                             _src["domaine"])
+                frais.sort(key=lambda b: str(b.get("cree_le") or ""), reverse=True)
+            else:
+                frais = _normaliser(data, source["domaine"])
             #  ⚠️ LES RÉCAPS ET TUTORIELS SORTENT ICI, AVANT LE CORPS (23/09) :
             #  chacun économise une requête `/t/{id}.json`, et aucun ne sert
             #  d'« annonce liée » à une fiche d'accessoire.
@@ -376,8 +476,12 @@ async def _relever_discourse(source: dict, out: dict,
                     async with sess.get(
                             f"{DOMAINE_FORUM}/t/{int(b['topic_id'])}.json") as rt:
                         if rt.status != 200:
-                            _log(f"[roblox_news {source['cle']} corps "
-                                 f"{b['topic_id']}] HTTP {rt.status}")
+                            if rt.status in (202, 403, 429, 503):
+                                #  Le même refus que la liste : dit une fois.
+                                _forum_refus(rt.status, rt.headers)
+                            else:
+                                _log(f"[roblox_news {source['cle']} corps "
+                                     f"{b['topic_id']}] HTTP {rt.status}")
                             continue
                         tj = await rt.json()
                     posts = ((tj.get("post_stream") or {}).get("posts") or [])

@@ -393,16 +393,19 @@ def test_les_deux_eclaireurs_sont_supervises_et_demarres():
 
 def test_l_eclaireur_d_actualites_ne_lit_que_le_forum():
     """Les salles de presse pèsent 560 Ko pour deux articles par mois (mesuré) :
-    les relire toutes les 90 s serait précisément « spammer une recherche qui
-    sert à rien »."""
+    les relire toutes les 30 s serait précisément « spammer une recherche qui
+    sert à rien ». Depuis le 24/09 : UNE lecture groupée du forum par passage,
+    plus aucune boucle sur les sources."""
     c = _fn("eclaireur_actu_task")
-    assert "!= 'discourse'" in c or '!= "discourse"' in c
-    assert "forcer=True" in c, "sans `forcer`, la cadence de 30-120 min bloque tout"
+    assert "relever_mises_a_jour(leger=True)" in c
+    assert "roblox_news_module.SOURCES" not in c and "relever(src" not in c
 
 
-def test_l_eclaireur_d_actualites_respire_entre_les_sources():
+def test_l_eclaireur_d_actualites_RALENTIT_quand_le_forum_refuse():
+    """Journal du 24/09 : HTTP 202 à chaque requête. Marteler une porte fermée
+    ne l'ouvre pas — le comportement est éprouvé dans test_forum_refus.py."""
     c = _fn("eclaireur_actu_task")
-    assert "asyncio.sleep(2)" in c
+    assert "ECLAIREUR_ACTU_PAUSES" in c and "pause_jusqu" in c
 
 
 def test_l_eclaireur_d_actualites_passe_par_les_corps_partages():
@@ -421,10 +424,14 @@ def test_la_cadence_des_actualites_est_raisonnable():
     """
     s = _constante("ECLAIREUR_ACTU_SECONDES")
     assert 20 <= s <= 300
-    chaudes = len(_constante("ECLAIREUR_ACTU_CHAUDES"))
-    #  chaudes à chaque passage + les 3 autres un passage sur trois.
-    req_min = (chaudes + 3 / 3) * 60 / s
-    assert req_min <= 8, f"{req_min:.1f} req/min vers le forum : trop"
+    #  ⚠️ DEPUIS LE 24/09 : UNE requête par passage (les quatre catégories
+    #  « updates » d'un coup). Avant, ~8 600 par jour — et le forum a fini par
+    #  répondre 202 au serveur.
+    assert _fn("eclaireur_actu_task").count("relever_mises_a_jour(") == 1
+    par_jour = 86400 / s
+    assert par_jour <= 3000, f"{par_jour:.0f} requêtes par jour vers le forum : trop"
+    pauses = _constante("ECLAIREUR_ACTU_PAUSES")
+    assert pauses[0] == 0 and pauses[-1] >= 300 and list(pauses) == sorted(pauses)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
