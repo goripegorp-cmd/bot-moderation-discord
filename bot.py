@@ -34238,13 +34238,13 @@ async def _yt_resolve_channel_id(session, raw: str) -> str:
                 html = await r.text()
         except Exception:
             continue
-        if "consent.youtube.com" in html[:5000] and "channelId" not in html[:20000]:
-            continue                                       # mur de consentement → suivant
-        m = (re.search(r'"channelId"\s*:\s*"(UC[\w-]{20,})"', html)
-             or re.search(r'/channel/(UC[\w-]{20,})', html)
-             or re.search(r'"externalId"\s*:\s*"(UC[\w-]{20,})"', html))
-        if m:
-            return m.group(1)
+        #  ⚠️ LA MÊME EXTRACTION QUE LE GESTIONNAIRE SOCIAL (24/09/2026) : le
+        #  premier « channelId » d'une page peut être celui d'une AUTRE chaîne
+        #  mise en avant — @RellGames donnait l'identifiant de CaribBros. Ici
+        #  l'erreur était pire : l'identifiant résolu est PERSISTÉ.
+        _uc = social2026.extraire_channel_id(html)
+        if _uc:
+            return _uc
     return ""
 
 

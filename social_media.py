@@ -692,6 +692,28 @@ def _clean_yt_handle(handle: str) -> str:
     return (segs[-1] if segs else "").lstrip("@").strip()
 
 
+def extraire_channel_id(html: str) -> Optional[str]:
+    """L'identifiant `UC…` DE LA CHAÎNE de cette page — jamais celui d'une autre.
+
+    ⚠️ PAS LE PREMIER « "channelId" » DE LA PAGE (mesuré le 24/09/2026) : la
+    page de @RellGames en porte UN, celui de CaribBros, qu'elle met en avant.
+    Le bot suivait donc CaribBros deux fois et RellGames jamais. Les sources
+    sûres, dans l'ordre : le lien canonique, `externalId` (l'en-tête de la
+    chaîne), la balise meta, le lien RSS de la page — elles disaient toutes
+    les quatre la même chose sur les deux pages mesurées.
+    """
+    import re as _re
+    for motif in (
+            r'<link rel="canonical" href="https://www\.youtube\.com/channel/(UC[\w-]{20,})"',
+            r'"externalId"\s*:\s*"(UC[\w-]{20,})"',
+            r'<meta itemprop="(?:identifier|channelId)" content="(UC[\w-]{20,})"',
+            r'feeds/videos\.xml\?channel_id=(UC[\w-]{20,})'):
+        m = _re.search(motif, html or "")
+        if m:
+            return m.group(1)
+    return None
+
+
 class RSSHubAdapter(PlatformAdapter):
     """Recupere les posts d'un compte (Twitter/TikTok/Insta) via un flux RSSHub.
 
@@ -739,23 +761,33 @@ class RSSHubAdapter(PlatformAdapter):
     def feed_url(self, handle: str) -> str:
         return f"{self.base_url}/{self.route.format(user=_clean_handle(handle))}"
 
-    async def _fetch_items(self, handle: str) -> list[SocialPost]:
-        """Telecharge + parse le flux RSS/Atom -> liste de SocialPost (du + recent au + ancien)."""
+    async def _fetch_items(self, handle: str, url: Optional[str] = None,
+                           avertir: bool = True) -> list[SocialPost]:
+        """Telecharge + parse le flux RSS/Atom -> liste de SocialPost (du + recent au + ancien).
+
+        `url` : un autre flux que celui du pseudo (YouTube : la playlist des mises
+        en ligne). `avertir=False` : un refus est TRACÉ, pas averti — l'appelant
+        décide (YouTube a un second flux, et des refus passagers). Le code HTTP
+        du dernier appel reste lisible dans `self.dernier_statut`.
+        """
         import xml.etree.ElementTree as ET
         if self._session is None:
             import aiohttp
             self._session = aiohttp.ClientSession()
-        url = self.feed_url(handle)
+        url = url or self.feed_url(handle)
+        self.dernier_statut = None
         try:
             async with self._session.get(url, headers=self._UA, timeout=15) as resp:
+                self.dernier_statut = resp.status
                 if resp.status != 200:
                     # owner 2026-07-18 : ne plus avaler en silence. rsshub.app public = 302/403,
                     # instance perso = 403/5xx si cookie mort → désormais VISIBLE dans [DIAG].
                     try:
                         import diag
-                        diag.warn("social", "rss_fetch",
-                                  f"{getattr(self.platform, 'value', '?')} @{handle} : "
-                                  f"flux HTTP {resp.status} ({url})")
+                        (diag.warn if avertir else diag.trace)(
+                            "social", "rss_fetch",
+                            f"{getattr(self.platform, 'value', '?')} @{handle} : "
+                            f"flux HTTP {resp.status} ({url})")
                     except Exception:
                         pass
                     return []
@@ -764,9 +796,10 @@ class RSSHubAdapter(PlatformAdapter):
         except Exception as _ex:
             try:
                 import diag
-                diag.warn("social", "rss_fetch",
-                          f"{getattr(self.platform, 'value', '?')} @{handle} : "
-                          f"échec réseau/parse ({type(_ex).__name__}) — {url}")
+                (diag.warn if avertir else diag.trace)(
+                    "social", "rss_fetch",
+                    f"{getattr(self.platform, 'value', '?')} @{handle} : "
+                    f"échec réseau/parse ({type(_ex).__name__}) — {url}")
             except Exception:
                 pass
             return []
@@ -810,7 +843,11 @@ class RSSHubAdapter(PlatformAdapter):
                     out.append(SocialPost(
                         platform=self.platform, handle=handle, post_id=pid,
                         post_type=PostType.POST, title=title[:280] or "Nouveau post",
-                        url=link or url))
+                        url=link or url,
+                        #  La date de publication : c'est elle qui empêche
+                        #  d'annoncer une vidéo de l'an dernier (voir YouTube).
+                        posted_at=(e.findtext("a:published", namespaces=ns)
+                                   or None)))
         except Exception as _ex:
             # owner 2026-07-18 : renvoyer ce qui a DÉJÀ été parsé (avant : `return []` jetait
             # tous les items déjà lus si une SEULE entrée était malformée) + trace visible.
@@ -882,6 +919,11 @@ class YouTubeRSSAdapter(RSSHubAdapter):
     platform = Platform.YOUTUBE
 
     _CID_FAIL_TTL = 3600.0                       # 1 h avant de retenter un pseudo irresolvable
+    #  ⚠️ UNE VIDÉO DE PLUS DE 7 JOURS N'EST PAS UNE NOUVEAUTÉ (24/09/2026). Les
+    #  trois dernières de RellGames datent du 18/07/2026, du 07/02/2026 et du
+    #  08/07/2025 : corriger sa chaîne les aurait publiées comme neuves.
+    AGE_MAX_JOURS = 7
+    _AVERTIR_TTL = 86400.0                       # un avertissement par jour et par pseudo
 
     def __init__(self):
         super().__init__(Platform.YOUTUBE)
@@ -889,6 +931,40 @@ class YouTubeRSSAdapter(RSSHubAdapter):
         self.route = "_youtube_rss_"
         self._cid: dict[str, str] = {}          # pseudo nettoye -> channel_id (UC...)
         self._cid_fail: dict[str, float] = {}   # pseudo nettoye -> instant du dernier echec
+        self._averti: dict[str, float] = {}     # pseudo nettoye -> dernier avertissement
+        self.dernier_statut = None
+
+    @staticmethod
+    def playlist_url(cid: str) -> str:
+        """Le flux de la playlist des mises en ligne (UU…) : mêmes vidéos, même
+        ordre, mêmes identifiants Atom que le flux de la chaîne (mesuré le 24/09)
+        — une autre porte chez YouTube quand la première est refusée."""
+        return "https://www.youtube.com/feeds/videos.xml?playlist_id=UU" + cid[2:]
+
+    def _recentes(self, items: list) -> list:
+        """Sans les vidéos de plus de `AGE_MAX_JOURS` jours. Sans date : gardée."""
+        from datetime import datetime, timedelta, timezone
+        borne = datetime.now(timezone.utc) - timedelta(days=self.AGE_MAX_JOURS)
+        out = []
+        for p in items:
+            try:
+                quand = datetime.fromisoformat(str(p.posted_at).replace("Z", "+00:00"))
+                if quand.tzinfo is None:
+                    quand = quand.replace(tzinfo=timezone.utc)
+                if quand < borne:
+                    continue
+            except (TypeError, ValueError):
+                pass
+            out.append(p)
+        return out
+
+    def _avertir_du_jour(self, cle: str) -> bool:
+        import time as _t
+        dernier = self._averti.get(cle)
+        if dernier is not None and _t.monotonic() - dernier < self._AVERTIR_TTL:
+            return False
+        self._averti[cle] = _t.monotonic()
+        return True
 
     @property
     def configured(self) -> bool:
@@ -921,7 +997,6 @@ class YouTubeRSSAdapter(RSSHubAdapter):
         if self._session is None:
             import aiohttp
             self._session = aiohttp.ClientSession()
-        import re as _re
         _hdr = {**self._UA, **self._CONSENT}
         for _u in (f"https://www.youtube.com/@{h}",
                    f"https://www.youtube.com/c/{h}",
@@ -934,22 +1009,19 @@ class YouTubeRSSAdapter(RSSHubAdapter):
                     html = await r.text()
             except Exception:
                 continue
-            if "consent.youtube.com" in html[:5000] and "channelId" not in html[:20000]:
-                continue                          # mur de consentement → tentative suivante
-            m = (_re.search(r'"channelId"\s*:\s*"(UC[\w-]{20,})"', html)
-                 or _re.search(r'/channel/(UC[\w-]{20,})', html)
-                 or _re.search(r'"externalId"\s*:\s*"(UC[\w-]{20,})"', html))
-            if m:
-                self._cid[h.lower()] = m.group(1)
-                if len(self._cid) > 500:         # borne memoire
-                    self._cid.clear()
-                    self._cid[h.lower()] = m.group(1)
-                try:
-                    import diag
-                    diag.event("social", "youtube_resolve", f"@{h} → {m.group(1)} (via {_u})")
-                except Exception:
-                    pass
-                return m.group(1)
+            cid = extraire_channel_id(html)
+            if not cid:
+                continue                          # mur de consentement, page vide → suivante
+            self._cid[h.lower()] = cid
+            if len(self._cid) > 500:             # borne memoire
+                self._cid.clear()
+                self._cid[h.lower()] = cid
+            try:
+                import diag
+                diag.event("social", "youtube_resolve", f"@{h} → {cid} (via {_u})")
+            except Exception:
+                pass
+            return cid
         # Échec de résolution — visible dans [DIAG] (le mur de consentement UE bloque le @pseudo ;
         # la voie SÛRE = l'URL youtube.com/channel/UC... ou une clé YOUTUBE_API_KEY).
         try:
@@ -993,7 +1065,34 @@ class YouTubeRSSAdapter(RSSHubAdapter):
             except Exception:
                 pass
             return []
-        return await super()._fetch_items(handle)
+        #  ⚠️ YOUTUBE REFUSE PAR INTERMITTENCE LES IP DE SERVEURS (404/5xx) :
+        #  un refus se TRACE, il ne s'avertit pas — la nuit du 24/09, deux
+        #  lignes toutes les 5 minutes pendant plus de 3 heures.
+        items = await super()._fetch_items(handle, avertir=False)
+        if self.dernier_statut == 200:
+            return self._recentes(items)
+        _refus = self.dernier_statut
+        items = await super()._fetch_items(handle, url=self.playlist_url(cid),
+                                           avertir=False)
+        if self.dernier_statut == 200:
+            try:
+                import diag
+                diag.trace("social", "youtube_feed",
+                           f"@{handle} : flux de la chaîne refusé (HTTP {_refus}), "
+                           f"playlist des mises en ligne utilisée")
+            except Exception:
+                pass
+            return self._recentes(items)
+        if self._avertir_du_jour(_h):
+            try:
+                import diag
+                diag.warn("social", "youtube_feed",
+                          f"@{handle} : YouTube refuse ses deux flux à ce serveur "
+                          f"(HTTP {_refus} puis {self.dernier_statut}) — nouvel essai "
+                          f"toutes les 5 min, en silence ; rien n'est perdu")
+            except Exception:
+                pass
+        return []
 
 
 # =============================================================================
