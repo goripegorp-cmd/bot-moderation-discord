@@ -19,6 +19,7 @@ MESURÉ LE MÊME JOUR, vraies pages, mêmes en-têtes que le bot :
 from __future__ import annotations
 
 import ast
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -217,7 +218,93 @@ async def test_F4_deux_refus_UN_avertissement_par_jour_pas_un_par_passage(journa
         assert await yt._fetch_items("@RellGames") == []
     avert = [l for l in journal if l[0] == "warn"]
     assert len(avert) == 1, avert
-    assert "refuse ses deux flux" in avert[0][1] and "rien n'est perdu" in avert[0][1]
+    #  « rien n'est perdu » a été RETIRÉ le 26/09 : au-delà de 7 jours de
+    #  refus, une vidéo manquée le serait pour de bon — une promesse fausse.
+    assert "refuse ses deux flux et sa page" in avert[0][1], avert
+    assert "rien n'est perdu" not in avert[0][1]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  P — la page « Vidéos », quand YouTube refuse ses DEUX flux au serveur
+# ═══════════════════════════════════════════════════════════════════════════════
+#  JOURNAL DU 26/09 : « @RellGames : YouTube refuse ses deux flux à ce serveur
+#  (HTTP 404 puis 404) », pendant que les pages de chaîne répondaient.
+
+VIDEO = "LOCKUP_CONTENT_TYPE_VIDEO"
+
+
+def _page(*videos):
+    """Une page « Vidéos » au format mesuré le 26/09 (`lockupViewModel`)."""
+    lockups = []
+    for vid, titre, quand, genre in videos:
+        parts = [{"text": {"content": "12K"}}] + (
+            [{"text": {"content": quand}}] if quand else [])
+        lockups.append({"richItemRenderer": {"content": {"lockupViewModel": {
+            "contentId": vid, "contentType": genre,
+            "metadata": {"lockupMetadataViewModel": {
+                "title": {"content": titre},
+                "metadata": {"contentMetadataViewModel": {
+                    "metadataRows": [{"metadataParts": parts}]}}}}}}}})
+    data = {"contents": {"tabs": [{"content": {"richGridRenderer": {"contents": lockups}}}]}}
+    return "<html><script>var ytInitialData = " + json.dumps(data) + ";</script></html>"
+
+
+@pytest.mark.parametrize("textes,jours", [
+    (["351K", "2mo ago"], 60), (["10d ago"], 10), (["1y ago"], 365),
+    (["5 days ago"], 5), (["Streamed 3h ago"], 0), (["5m ago"], 0), (["2w ago"], 14),
+])
+def test_P1_la_date_relative_de_YouTube_est_lue(textes, jours):
+    """« 2mo » : deux MOIS, pas deux minutes — « mo » est cherché avant « m »."""
+    quand = datetime.fromisoformat(sm.date_relative(textes))
+    ecart = (datetime.now(timezone.utc) - quand).total_seconds() / 86400
+    assert abs(ecart - jours) < 0.5, (textes, ecart)
+
+
+def test_P1b_une_video_programmee_ou_sans_date_n_a_PAS_de_date():
+    assert sm.date_relative(["Scheduled for 10/10/26"]) is None
+    assert sm.date_relative([]) is None and sm.date_relative(None) is None
+
+
+def test_P2_la_page_rend_les_videos_DATEES_avec_l_identifiant_du_flux():
+    """Même identifiant que le flux Atom (`yt:video:…`) : jamais deux annonces.
+    Sans date lisible : IGNORÉE, plutôt que risquer une vidéo d'il y a un an."""
+    html = _page(("NEWVIDEO011", "Neuve", "2d ago", VIDEO),
+                 ("OLDVIDEO011", "Vieille", "1y ago", VIDEO),
+                 ("NODATE00011", "Sans date", None, VIDEO),
+                 ("PLAYLIST011", "Une playlist", "1d ago", "LOCKUP_CONTENT_TYPE_PLAYLIST"))
+    posts = sm.videos_de_la_page(html, "@RellGames")
+    assert [p.post_id for p in posts] == ["yt:video:NEWVIDEO011", "yt:video:OLDVIDEO011"]
+    assert posts[0].url == "https://www.youtube.com/watch?v=NEWVIDEO011"
+    assert posts[0].title == "Neuve"
+    assert [p.post_id for p in sm.YouTubeRSSAdapter()._recentes(posts)] == [
+        "yt:video:NEWVIDEO011"]
+
+
+def test_P3_une_page_ILLISIBLE_rend_None_pas_une_liste_vide():
+    """Mur de consentement ou format changé : c'est un échec, pas « rien de neuf »."""
+    assert sm.videos_de_la_page("<html>consent.youtube.com</html>", "@x") is None
+    assert sm.videos_de_la_page("", "@x") is None
+
+
+@pytest.mark.asyncio
+async def test_P4_deux_flux_REFUSES_la_page_prend_le_relais_sans_bruit(journal):
+    yt = _yt({"channel_id=" + RELL: (404, ""), "playlist_id=UU" + RELL[2:]: (404, ""),
+              f"/channel/{RELL}/videos": (200, _page(
+                  ("NEWVIDEO012", "RELL Seas: Update", "3h ago", VIDEO),
+                  ("OLDVIDEO012", "Ancienne", "2mo ago", VIDEO)))})
+    items = await yt._fetch_items("@RellGames")
+    assert [p.post_id for p in items] == ["yt:video:NEWVIDEO012"]
+    assert not [l for l in journal if l[0] == "warn"], journal
+
+
+@pytest.mark.asyncio
+async def test_P5_la_page_d_1_Mo_n_est_lue_qu_une_fois_par_demi_heure(journal):
+    yt = _yt({"channel_id=" + RELL: (404, ""), "playlist_id=UU" + RELL[2:]: (404, ""),
+              f"/channel/{RELL}/videos": (200, _page(("NEWVIDEO013", "N", "1h ago", VIDEO)))})
+    await yt._fetch_items("@RellGames")
+    await yt._fetch_items("@RellGames")
+    pages = [u for u in yt._session.urls if u.endswith("/videos")]
+    assert len(pages) == 1, yt._session.urls
 
 
 def test_F5_l_ancien_avertissement_a_chaque_refus_n_est_plus_emis_pour_YouTube():

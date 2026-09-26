@@ -714,6 +714,103 @@ def extraire_channel_id(html: str) -> Optional[str]:
     return None
 
 
+#  Les unités de la date relative de YouTube, en secondes. « mo » avant « m » :
+#  « 2mo ago » (deux mois) n'est pas « 2m ago » (deux minutes).
+_UNITES_IL_Y_A = (
+    (("months", "month", "mo"), 30 * 86400), (("years", "year", "yrs", "yr", "y"), 365 * 86400),
+    (("weeks", "week", "wks", "wk", "w"), 7 * 86400), (("days", "day", "d"), 86400),
+    (("hours", "hour", "hrs", "hr", "h"), 3600),
+    (("minutes", "minute", "mins", "min", "m"), 60),
+    (("seconds", "second", "secs", "sec", "s"), 1))
+
+
+def date_relative(textes) -> Optional[str]:
+    """« 10d ago », « 2mo ago », « Streamed 3h ago », « 5 days ago » → date ISO.
+
+    ⚠️ UNE ESTIMATION : « 2mo ago » veut dire deux mois à quelques jours près.
+    Elle ne sert qu'à la règle des 7 jours, où cette précision suffit. `None`
+    si aucun texte n'en porte une (« Scheduled for… » : pas encore sortie).
+    """
+    import re as _re
+    from datetime import datetime, timedelta, timezone
+    noms = "|".join(sorted((n for g, _s in _UNITES_IL_Y_A for n in g), key=len, reverse=True))
+    motif = _re.compile(r"(\d+)\s*(" + noms + r")\s+ago\b", _re.I)
+    for t in (textes or []):
+        m = motif.search(str(t))
+        if not m:
+            continue
+        unite = m.group(2).lower()
+        for groupe, secondes in _UNITES_IL_Y_A:
+            if unite in groupe:
+                return (datetime.now(timezone.utc)
+                        - timedelta(seconds=int(m.group(1)) * secondes)).isoformat()
+    return None
+
+
+def videos_de_la_page(html: str, handle: str, maximum: int = 10) -> Optional[list]:
+    """Les vidéos de l'onglet « Vidéos » d'une chaîne (format `lockupViewModel`).
+
+    ⚠️ LE SECOURS DU SECOURS (26/09/2026) : YouTube refusait au serveur ses deux
+    flux RSS (404 puis 404), pas ses pages. Mêmes identifiants que le flux
+    Atom (`yt:video:…`) : une vidéo vue ici puis dans le flux n'est JAMAIS
+    annoncée deux fois. Une vidéo à la date illisible est IGNORÉE — mieux vaut
+    en rater une que republier une vidéo d'il y a un an.
+
+    `None` si la page n'est pas lisible (pas de `ytInitialData` : mur de
+    consentement, format changé) ; une liste, éventuellement vide, sinon.
+    """
+    import json as _json
+    import re as _re
+    m = _re.search(r"var ytInitialData\s*=\s*(\{.*?\});</script>", html or "", _re.S)
+    if not m:
+        return None
+    try:
+        data = _json.loads(m.group(1))
+    except ValueError:
+        return None
+
+    def _lockups(n):
+        if isinstance(n, dict):
+            if "lockupViewModel" in n:
+                yield n["lockupViewModel"]
+            for v in n.values():
+                yield from _lockups(v)
+        elif isinstance(n, list):
+            for v in n:
+                yield from _lockups(v)
+
+    def _textes(n):
+        if isinstance(n, dict):
+            if isinstance(n.get("content"), str):
+                yield n["content"]
+            for v in n.values():
+                yield from _textes(v)
+        elif isinstance(n, list):
+            for v in n:
+                yield from _textes(v)
+
+    out, vus = [], set()
+    for lvm in _lockups(data):
+        if not isinstance(lvm, dict) or lvm.get("contentType") != "LOCKUP_CONTENT_TYPE_VIDEO":
+            continue
+        vid = str(lvm.get("contentId") or "")
+        if not _re.fullmatch(r"[\w-]{11}", vid) or vid in vus:
+            continue
+        vus.add(vid)
+        meta = ((lvm.get("metadata") or {}).get("lockupMetadataViewModel") or {})
+        quand = date_relative(list(_textes(meta.get("metadata") or {})))
+        if quand is None:
+            continue
+        titre = str(((meta.get("title") or {}).get("content")) or "")
+        out.append(SocialPost(
+            platform=Platform.YOUTUBE, handle=handle, post_id=f"yt:video:{vid}",
+            post_type=PostType.POST, title=titre[:280] or "Nouvelle vidéo",
+            url=f"https://www.youtube.com/watch?v={vid}", posted_at=quand))
+        if len(out) >= maximum:
+            break
+    return out
+
+
 class RSSHubAdapter(PlatformAdapter):
     """Recupere les posts d'un compte (Twitter/TikTok/Insta) via un flux RSSHub.
 
@@ -924,6 +1021,9 @@ class YouTubeRSSAdapter(RSSHubAdapter):
     #  08/07/2025 : corriger sa chaîne les aurait publiées comme neuves.
     AGE_MAX_JOURS = 7
     _AVERTIR_TTL = 86400.0                       # un avertissement par jour et par pseudo
+    #  La page « Vidéos » pèse ~1 Mo : une lecture par demi-heure au plus, et par
+    #  chaîne — une vidéo annoncée avec 30 min de retard plutôt que 600 Mo par jour.
+    _PAGE_TTL = 1800.0
 
     def __init__(self):
         super().__init__(Platform.YOUTUBE)
@@ -932,7 +1032,33 @@ class YouTubeRSSAdapter(RSSHubAdapter):
         self._cid: dict[str, str] = {}          # pseudo nettoye -> channel_id (UC...)
         self._cid_fail: dict[str, float] = {}   # pseudo nettoye -> instant du dernier echec
         self._averti: dict[str, float] = {}     # pseudo nettoye -> dernier avertissement
+        self._page_lue: dict[str, float] = {}   # pseudo nettoye -> dernière lecture de page
         self.dernier_statut = None
+
+    @staticmethod
+    def page_url(cid: str) -> str:
+        return f"https://www.youtube.com/channel/{cid}/videos"
+
+    async def _videos_page(self, handle: str, cid: str, cle: str) -> Optional[list]:
+        """La page « Vidéos », au plus une fois par `_PAGE_TTL`. `[]` si elle a
+        été lue il y a moins longtemps ; `None` si elle est refusée ou illisible."""
+        import time as _t
+        dernier = self._page_lue.get(cle)
+        if dernier is not None and _t.monotonic() - dernier < self._PAGE_TTL:
+            return []
+        self._page_lue[cle] = _t.monotonic()
+        try:
+            async with self._session.get(self.page_url(cid),
+                                         headers={**self._UA, **self._CONSENT},
+                                         timeout=15) as r:
+                self.dernier_statut = r.status
+                if r.status != 200:
+                    return None
+                html = await r.text()
+        except Exception:
+            self.dernier_statut = None
+            return None
+        return videos_de_la_page(html, handle)
 
     @staticmethod
     def playlist_url(cid: str) -> str:
@@ -1083,13 +1209,26 @@ class YouTubeRSSAdapter(RSSHubAdapter):
             except Exception:
                 pass
             return self._recentes(items)
+        _refus2 = self.dernier_statut
+        #  ⚠️ LE TROISIÈME SECOURS : la page « Vidéos » (26/09 : 404 puis 404 sur
+        #  les deux flux, pendant que les pages de chaîne répondaient).
+        page = await self._videos_page(handle, cid, _h)
+        if page is not None:
+            try:
+                import diag
+                diag.trace("social", "youtube_feed",
+                           f"@{handle} : flux refusés (HTTP {_refus} puis {_refus2}), "
+                           f"page « Vidéos » utilisée ({len(page)} vidéo(s) datée(s))")
+            except Exception:
+                pass
+            return self._recentes(page)
         if self._avertir_du_jour(_h):
             try:
                 import diag
                 diag.warn("social", "youtube_feed",
-                          f"@{handle} : YouTube refuse ses deux flux à ce serveur "
-                          f"(HTTP {_refus} puis {self.dernier_statut}) — nouvel essai "
-                          f"toutes les 5 min, en silence ; rien n'est perdu")
+                          f"@{handle} : YouTube refuse ses deux flux et sa page à ce "
+                          f"serveur (HTTP {_refus}, {_refus2}, {self.dernier_statut}) — "
+                          f"nouvel essai toutes les 5 min, en silence")
             except Exception:
                 pass
         return []
