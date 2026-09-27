@@ -111,7 +111,7 @@
 | `setup_wizard.py` | 718 | 10 | 13 |
 | `slash_commands_2026.py` | 438 | 0 | 16 |
 | `social_match.py` | 197 | 0 | 8 |
-| `social_media.py` | 1693 | 13 | 9 |
+| `social_media.py` | 1832 | 13 | 11 |
 | `social_zones.py` | 2790 | 15 | 73 |
 | `staff_sanction.py` | 647 | 2 | 9 |
 | `sticky_messages.py` | 252 | 0 | 13 |
@@ -171,7 +171,7 @@
 | `tests/test_veille_famine.py` | 249 | 0 | 15 |
 | `tests/test_veille_serie_et_commandes.py` | 298 | 0 | 18 |
 | `tests/test_veille_transitions.py` | 1082 | 0 | 52 |
-| `tests/test_youtube_chaine.py` | 229 | 2 | 16 |
+| `tests/test_youtube_chaine.py` | 316 | 2 | 23 |
 | `tickets_enhance.py` | 1155 | 0 | 36 |
 | `token_grabber.py` | 415 | 0 | 6 |
 | `tracking_layer.py` | 482 | 1 | 14 |
@@ -183,9 +183,9 @@
 | `vocabulary.py` | 266 | 8 | 0 |
 | `webhook_leak.py` | 302 | 0 | 7 |
 | `webhook_tracker.py` | 389 | 0 | 8 |
-| **TOTAL (176 files)** | **117961** | **382** | **2833** |
+| **TOTAL (176 files)** | **118187** | **382** | **2842** |
 
-## Alphabetical lookup (4433 symbols)
+## Alphabetical lookup (4444 symbols)
 
 - `_2026_on_ready_addon` — `bot.py`:37722  (async def)
 - `_2026_start_activity_flush` — `bot.py`:38088  (async def)
@@ -199,7 +199,7 @@
 - `_Rep.__aenter__` — `tests/test_flux_limited_seul.py`:420  (method)
 - `_Rep.__aenter__` — `tests/test_forum_refus.py`:71  (method)
 - `_Rep.__aenter__` — `tests/test_marche_publie_recemment.py`:91  (method)
-- `_Rep.__aenter__` — `tests/test_youtube_chaine.py`:100  (method)
+- `_Rep.__aenter__` — `tests/test_youtube_chaine.py`:101  (method)
 - `_RepVide.__aenter__` — `tests/test_roblox_commandes_execution.py`:140  (method)
 - `_Reponse.__aenter__` — `tests/test_eclaireur.py`:86  (method)
 - `_Sess.__aenter__` — `tests/test_flux_limited_seul.py`:445  (method)
@@ -220,7 +220,7 @@
 - `_Rep.__aexit__` — `tests/test_flux_limited_seul.py`:423  (method)
 - `_Rep.__aexit__` — `tests/test_forum_refus.py`:74  (method)
 - `_Rep.__aexit__` — `tests/test_marche_publie_recemment.py`:94  (method)
-- `_Rep.__aexit__` — `tests/test_youtube_chaine.py`:103  (method)
+- `_Rep.__aexit__` — `tests/test_youtube_chaine.py`:104  (method)
 - `_RepVide.__aexit__` — `tests/test_roblox_commandes_execution.py`:143  (method)
 - `_Reponse.__aexit__` — `tests/test_eclaireur.py`:89  (method)
 - `_Sess.__aexit__` — `tests/test_flux_limited_seul.py`:448  (method)
@@ -389,7 +389,7 @@
 - `R.__init__` — `tests/test_absents_porte_de_retour.py`:52  (method)
 - `R.__init__` — `tests/test_activite_seuils_masquage.py`:50  (method)
 - `R.__init__` — `tests/test_afk_retour.py`:58  (method)
-- `RSSHubAdapter.__init__` — `social_media.py`:732  (method)
+- `RSSHubAdapter.__init__` — `social_media.py`:829  (method)
 - `RadieAppelButton.__init__` — `bot.py`:4639  (method)
 - `RadieDecisionButton.__init__` — `bot.py`:4773  (method)
 - `RaidAlertButton.__init__` — `raid_detector.py`:641  (method)
@@ -416,7 +416,7 @@
 - `SmStillOkButton.__init__` — `bot.py`:40983  (method)
 - `SocialAddPanel.__init__` — `admin_panels_v2.py`:678  (method)
 - `SocialEditPanel.__init__` — `admin_panels_v2.py`:831  (method)
-- `SocialMediaManager.__init__` — `social_media.py`:1260  (method)
+- `SocialMediaManager.__init__` — `social_media.py`:1399  (method)
 - `StaticPanel.__init__` — `ui_v2.py`:279  (method)
 - `StubDB.__init__` — `tests/conftest.py`:49  (method)
 - `SuggestionReplyButton.__init__` — `bot.py`:33851  (method)
@@ -445,7 +445,7 @@
 - `TransferTicketSelect.__init__` — `bot.py`:10004  (method)
 - `TransferTicketView.__init__` — `bot.py`:9999  (method)
 - `TwitchAdapter.__init__` — `social_media.py`:359  (method)
-- `TwitterSyndicationAdapter.__init__` — `social_media.py`:1120  (method)
+- `TwitterSyndicationAdapter.__init__` — `social_media.py`:1259  (method)
 - `UGCOptButton.__init__` — `bot.py`:35622  (method)
 - `UGCWishlistButton.__init__` — `bot.py`:35724  (method)
 - `UnwarnSelect.__init__` — `bot.py`:32010  (method)
@@ -456,7 +456,7 @@
 - `V2GenericRolePicker.__init__` — `bot.py`:21390  (method)
 - `WelcomeMessageModalSimple.__init__` — `bot.py`:23387  (method)
 - `YouTubeAdapter.__init__` — `social_media.py`:474  (method)
-- `YouTubeRSSAdapter.__init__` — `social_media.py`:928  (method)
+- `YouTubeRSSAdapter.__init__` — `social_media.py`:1028  (method)
 - `ZoneAddButton.__init__` — `social_zones.py`:2637  (method)
 - `ZoneCloseButton.__init__` — `social_zones.py`:2621  (method)
 - `ZoneCreateButton.__init__` — `social_zones.py`:2586  (method)
@@ -524,7 +524,7 @@
 - `_Rep.__init__` — `tests/test_flux_limited_seul.py`:413  (method)
 - `_Rep.__init__` — `tests/test_forum_refus.py`:65  (method)
 - `_Rep.__init__` — `tests/test_marche_publie_recemment.py`:84  (method)
-- `_Rep.__init__` — `tests/test_youtube_chaine.py`:94  (method)
+- `_Rep.__init__` — `tests/test_youtube_chaine.py`:95  (method)
 - `_Reponse.__init__` — `tests/test_absents_porte_de_retour.py`:576  (method)
 - `_Reponse.__init__` — `tests/test_eclaireur.py`:78  (method)
 - `_Reponse.__init__` — `tests/test_roblox_commandes_execution.py`:40  (method)
@@ -539,7 +539,7 @@
 - `_Sess.__init__` — `tests/test_marche_publie_recemment.py`:99  (method)
 - `_SessGet.__init__` — `tests/test_flux_limited_seul.py`:597  (method)
 - `_Session.__init__` — `tests/test_eclaireur.py`:95  (method)
-- `_Session.__init__` — `tests/test_youtube_chaine.py`:110  (method)
+- `_Session.__init__` — `tests/test_youtube_chaine.py`:111  (method)
 - `_SessionEmpruntee.__init__` — `roblox_marche.py`:191  (method)
 - `_SessionEmpruntee.__init__` — `roblox_veille.py`:930  (method)
 - `_SeuilsModal.__init__` — `activite_panneau.py`:592  (method)
@@ -588,7 +588,7 @@
 - `_announce_channel` — `activity_vip.py`:433  (async def)
 - `_announce_poll_winner` — `bot.py`:31248  (async def)
 - `_announce_sanction_public` — `bot.py`:6356  (async def)
-- `_anns_path` — `social_media.py`:1226  (def)
+- `_anns_path` — `social_media.py`:1365  (def)
 - `_antinuke_check` — `bot.py`:28503  (async def)
 - `_antinuke_respond` — `bot.py`:28548  (async def)
 - `_AntiRaidActionPickerV2` — `bot.py`:11796  (class)
@@ -606,7 +606,7 @@
 - `_article` — `tests/test_roblox_limiteds.py`:137  (def)
 - `_asset_dir` — `transcript_store.py`:71  (def)
 - `_asset_handler` — `health_server.py`:121  (async def)
-- `_atom` — `tests/test_youtube_chaine.py`:161  (def)
+- `_atom` — `tests/test_youtube_chaine.py`:162  (def)
 - `_attente_429` — `roblox_marche.py`:72  (def)
 - `_attente_429` — `roblox_veille.py`:1874  (def)
 - `_attente_429_progressive` — `roblox_veille.py`:1904  (def)
@@ -618,7 +618,7 @@
 - `_autorisation_mention` — `roblox_panneau.py`:293  (def)
 - `_autorise_radiation` — `bot.py`:4396  (async def)
 - `_avatar_cache_set` — `bot.py`:3135  (def)
-- `YouTubeRSSAdapter._avertir_du_jour` — `social_media.py`:961  (method)
+- `YouTubeRSSAdapter._avertir_du_jour` — `social_media.py`:1087  (method)
 - `_avertir_une_fois_par_jour` — `bot.py`:34260  (def)
 - `ChanSelectPaginatedView._back` — `bot.py`:22670  (method)
 - `PaginatedImmuneRemoveView._back` — `bot.py`:20540  (method)
@@ -942,7 +942,7 @@
 - `_cle` — `rellseas_panneau.py`:335  (def)
 - `_clean_handle` — `social_media.py`:646  (def)
 - `_clean_yt_handle` — `social_media.py`:666  (def)
-- `SocialMediaManager._cleanup_loop` — `social_media.py`:1613  (method)
+- `SocialMediaManager._cleanup_loop` — `social_media.py`:1752  (method)
 - `_cleanup_old_backups` — `backup_lite.py`:391  (async def)
 - `_cleanup_old_db_wait` — `bot.py`:22476  (async def)
 - `_clear_audit_log` — `bot.py`:31634  (async def)
@@ -1071,7 +1071,7 @@
 - `_ensure_combat_channel` — `bot.py`:42283  (async def)
 - `_ensure_entraide_ratings_table` — `bot.py`:12929  (async def)
 - `_ensure_events_category` — `bot.py`:42052  (async def)
-- `SocialMediaManager._ensure_loaded` — `social_media.py`:1347  (method)
+- `SocialMediaManager._ensure_loaded` — `social_media.py`:1486  (method)
 - `_ensure_notify_role` — `bot.py`:12559  (async def)
 - `_ensure_prudence_role` — `social_zones.py`:1409  (async def)
 - `_ensure_quarantine_role` — `bot.py`:5660  (async def)
@@ -1146,9 +1146,9 @@
 - `_FauxSalon` — `tests/test_rellseas_persistance.py`:283  (class)
 - `_FauxSalon` — `tests/test_roblox_actualites.py`:191  (class)
 - `_FauxUser` — `tests/test_roblox_actualites.py`:210  (class)
-- `RSSHubAdapter._fetch_items` — `social_media.py`:764  (method)
-- `YouTubeRSSAdapter._fetch_items` — `social_media.py`:1036  (method)
-- `TwitterSyndicationAdapter._fetch_tweets` — `social_media.py`:1136  (method)
+- `RSSHubAdapter._fetch_items` — `social_media.py`:861  (method)
+- `YouTubeRSSAdapter._fetch_items` — `social_media.py`:1162  (method)
+- `TwitterSyndicationAdapter._fetch_tweets` — `social_media.py`:1275  (method)
 - `_fiche` — `tests/test_activite.py`:115  (def)
 - `_fiches` — `tests/test_activite_role_doux.py`:294  (def)
 - `_file` — `tests/test_flux_limited_seul.py`:140  (async def)
@@ -1156,7 +1156,7 @@
 - `_filter_blob` — `gdpr.py`:478  (async def)
 - `_finalize` — `protection_guards.py`:632  (async def)
 - `_find_event_recap_channel` — `bot.py`:12342  (async def)
-- `SocialMediaManager._find_subscription` — `social_media.py`:1416  (method)
+- `SocialMediaManager._find_subscription` — `social_media.py`:1555  (method)
 - `_find_tesseract_binary` — `ocr_scan.py`:24  (def)
 - `_fix_role_tree` — `activity_vip.py`:368  (async def)
 - `_flag_dangerous_profile` — `bot.py`:5811  (async def)
@@ -1181,7 +1181,7 @@
 - `_fonction` — `tests/test_tickets_panneau_unifie.py`:47  (def)
 - `_fonction` — `tests/test_veille_bilan.py`:35  (def)
 - `_fonction_de` — `tests/test_activite_role_doux.py`:223  (def)
-- `_fonctions_bot` — `tests/test_youtube_chaine.py`:138  (def)
+- `_fonctions_bot` — `tests/test_youtube_chaine.py`:139  (def)
 - `_fonctions_module` — `outils/verif_boucles.py`:75  (def)
 - `_forget_temp_voice_room` — `bot.py`:36630  (async def)
 - `_format_channel` — `unified_logger.py`:512  (def)
@@ -1282,7 +1282,7 @@
 - `_identiques` — `activite_niveaux.py`:468  (def)
 - `_il_y_a` — `tests/test_activite.py`:17  (def)
 - `_il_y_a` — `tests/test_activite_observation.py`:27  (def)
-- `_il_y_a` — `tests/test_youtube_chaine.py`:170  (def)
+- `_il_y_a` — `tests/test_youtube_chaine.py`:171  (def)
 - `_in_night_window` — `bot.py`:11950  (def)
 - `_incr_phase113_counter` — `bot.py`:31509  (async def)
 - `_infractions_recap` — `bot.py`:6248  (async def)
@@ -1511,6 +1511,7 @@
 - `_ouvrir_contenu` — `roblox_news_contenu.py`:775  (def)
 - `_ouvrir_ticket_recours` — `bot.py`:4674  (async def)
 - `_OwnerView` — `admin_panels_v2.py`:84  (class)
+- `_page` — `tests/test_youtube_chaine.py`:236  (def)
 - `_PaginatedImmuneRemoveSelect` — `bot.py`:20545  (class)
 - `_panel_view` — `social_zones.py`:846  (def)
 - `_panneau_ticket_serveur` — `bot.py`:4555  (async def)
@@ -1529,7 +1530,7 @@
 - `_ping_founder_in_channel` — `unified_logger.py`:768  (async def)
 - `_policy_path` — `protection_guards.py`:323  (def)
 - `_poll_closer_wait` — `bot.py`:31432  (async def)
-- `SocialMediaManager._poll_loop` — `social_media.py`:1595  (method)
+- `SocialMediaManager._poll_loop` — `social_media.py`:1734  (method)
 - `_porte_publique` — `activite_passage.py`:848  (def)
 - `_poser` — `rellseas_panneau.py`:343  (def)
 - `_poser` — `tests/test_flux_limited_seul.py`:254  (async def)
@@ -1571,14 +1572,14 @@
 - `_RadieAppelModal` — `bot.py`:4596  (class)
 - `_radier_membre` — `bot.py`:4245  (async def)
 - `_rating_division` — `bot.py`:45618  (def)
-- `_read_json` — `social_media.py`:1233  (async def)
+- `_read_json` — `social_media.py`:1372  (async def)
 - `_read_last_dm_ts` — `backup_lite.py`:77  (def)
 - `_rebrancher_module` — `tests/test_roblox_publication.py`:98  (def)
-- `YouTubeRSSAdapter._recentes` — `social_media.py`:944  (method)
+- `YouTubeRSSAdapter._recentes` — `social_media.py`:1070  (method)
 - `_recidivism_log_escalation` — `bot.py`:5722  (async def)
 - `_recompute_locked` — `recidivism.py`:255  (async def)
 - `_record_action` — `protection_guards.py`:407  (def)
-- `SocialMediaManager._record_announcement` — `social_media.py`:1441  (method)
+- `SocialMediaManager._record_announcement` — `social_media.py`:1580  (method)
 - `_record_infraction` — `bot.py`:5691  (async def)
 - `_record_message` — `compromised_detector.py`:165  (def)
 - `_recours_deja_utilise` — `bot.py`:4575  (async def)
@@ -1607,7 +1608,7 @@
 - `_Rep` — `tests/test_flux_limited_seul.py`:412  (class)
 - `_Rep` — `tests/test_forum_refus.py`:64  (class)
 - `_Rep` — `tests/test_marche_publie_recemment.py`:83  (class)
-- `_Rep` — `tests/test_youtube_chaine.py`:93  (class)
+- `_Rep` — `tests/test_youtube_chaine.py`:94  (class)
 - `_repondre` — `roblox_commandes.py`:90  (async def)
 - `_Reponse` — `tests/test_absents_porte_de_retour.py`:575  (class)
 - `_Reponse` — `tests/test_eclaireur.py`:77  (class)
@@ -1618,7 +1619,7 @@
 - `PredictionResolveView._resolve` — `bot.py`:44113  (method)
 - `_resolve_backup_dir` — `db_backup.py`:61  (def)
 - `YouTubeAdapter._resolve_channel_id` — `social_media.py`:490  (method)
-- `YouTubeRSSAdapter._resolve_channel_id` — `social_media.py`:989  (method)
+- `YouTubeRSSAdapter._resolve_channel_id` — `social_media.py`:1115  (method)
 - `_resolve_db_path` — `db_backup.py`:54  (def)
 - `_resolve_event_type` — `bot.py`:17634  (def)
 - `_resolve_prediction` — `bot.py`:43993  (async def)
@@ -1668,13 +1669,13 @@
 - `EditChanCfgV2._save` — `bot.py`:22702  (method)
 - `V2GenericChannelPicker._save` — `bot.py`:21292  (method)
 - `V2GenericRolePicker._save` — `bot.py`:21412  (method)
-- `SocialMediaManager._save_anns` — `social_media.py`:1342  (method)
+- `SocialMediaManager._save_anns` — `social_media.py`:1481  (method)
 - `_save_api_warning_state` — `bot.py`:20892  (def)
 - `_save_atrisk_msg` — `activity_vip.py`:819  (async def)
 - `_save_guild` — `tracking_layer.py`:117  (async def)
 - `_save_inventory` — `bot.py`:11990  (async def)
 - `_save_role_ids` — `activity_vip.py`:318  (async def)
-- `SocialMediaManager._save_subs` — `social_media.py`:1337  (method)
+- `SocialMediaManager._save_subs` — `social_media.py`:1476  (method)
 - `_scan_for_tokens` — `anti_token_leak.py`:87  (def)
 - `_scan_profile_text` — `bot.py`:5787  (def)
 - `_scan_red_keywords` — `bot.py`:5766  (def)
@@ -1707,7 +1708,7 @@
 - `_Sess` — `tests/test_marche_publie_recemment.py`:98  (class)
 - `_SessGet` — `tests/test_flux_limited_seul.py`:594  (class)
 - `_Session` — `tests/test_eclaireur.py`:93  (class)
-- `_Session` — `tests/test_youtube_chaine.py`:107  (class)
+- `_Session` — `tests/test_youtube_chaine.py`:108  (class)
 - `_SessionEmpruntee` — `roblox_marche.py`:188  (class)
 - `_SessionEmpruntee` — `roblox_veille.py`:927  (class)
 - `_SessVide` — `tests/test_roblox_commandes_execution.py`:147  (class)
@@ -1750,7 +1751,7 @@
 - `_strip_media_urls` — `bot.py`:6792  (def)
 - `_strip_uid` — `gdpr.py`:515  (def)
 - `_StubCursor` — `tests/conftest.py`:20  (class)
-- `_subs_path` — `social_media.py`:1222  (def)
+- `_subs_path` — `social_media.py`:1361  (def)
 - `_subtitle` — `admin_panels_v2.py`:63  (def)
 - `_subtitle` — `setup_wizard.py`:221  (def)
 - `_SuggestionReplyModal` — `bot.py`:33769  (class)
@@ -1841,6 +1842,7 @@
 - `_veille_marche_wait` — `bot.py`:15506  (async def)
 - `_veille_roblox_wait` — `bot.py`:15432  (async def)
 - `_verrouiller_salons_radie` — `bot.py`:4215  (async def)
+- `YouTubeRSSAdapter._videos_page` — `social_media.py`:1042  (method)
 - `UpdateVoteView._view_results` — `bot.py`:45904  (method)
 - `_vip_wait_ready` — `activity_vip.py`:1117  (async def)
 - `_voice_duration_track_listener` — `bot.py`:45090  (async def)
@@ -1866,11 +1868,11 @@
 - `_welcome_raid_active` — `bot.py`:11531  (def)
 - `_window_start_str` — `activity_vip.py`:241  (def)
 - `_WizardView` — `setup_wizard.py`:247  (class)
-- `_write_json` — `social_media.py`:1242  (async def)
+- `_write_json` — `social_media.py`:1381  (async def)
 - `_write_last_dm_ts` — `backup_lite.py`:84  (def)
 - `_ConfirmView._yes` — `admin_panels_v2.py`:493  (method)
 - `_yesterday_str_p41` — `bot.py`:38127  (def)
-- `_yt` — `tests/test_youtube_chaine.py`:174  (def)
+- `_yt` — `tests/test_youtube_chaine.py`:175  (def)
 - `_yt_extract_handle` — `bot.py`:34202  (def)
 - `_yt_extract_uc` — `bot.py`:34188  (def)
 - `_yt_resolve_channel_id` — `bot.py`:34223  (async def)
@@ -1921,7 +1923,7 @@
 - `M.add_roles` — `tests/test_afk_retour.py`:131  (method)
 - `_FauxMembre.add_roles` — `tests/test_roblox_pings.py`:234  (method)
 - `TicketControlView.add_staff` — `bot.py`:9666  (method)
-- `SocialMediaManager.add_subscription` — `social_media.py`:1353  (method)
+- `SocialMediaManager.add_subscription` — `social_media.py`:1492  (method)
 - `add_template` — `tickets_enhance.py`:491  (async def)
 - `add_to_blacklist` — `delegations.py`:253  (def)
 - `add_to_whitelist` — `delegations.py`:287  (def)
@@ -1998,7 +2000,7 @@
 - `base_data_dir` — `paths.py`:39  (def)
 - `base_dir` — `transcript_store.py`:45  (def)
 - `base_memoire` — `tests/test_roblox_catalogue_complet.py`:208  (def)
-- `RSSHubAdapter.base_url` — `social_media.py`:742  (method)
+- `RSSHubAdapter.base_url` — `social_media.py`:839  (method)
 - `BasePanel` — `ui_v2.py`:193  (class)
 - `before_check_expired` — `bot.py`:37626  (async def)
 - `before_check_restrictions` — `bot.py`:37687  (async def)
@@ -2150,8 +2152,8 @@
 - `cle_config` — `roblox_pings.py`:140  (def)
 - `cle_du_billet` — `roblox_pings.py`:130  (def)
 - `cle_du_flux` — `roblox_pings.py`:135  (def)
-- `SocialMediaManager.cleanup_all` — `social_media.py`:1580  (method)
-- `SocialMediaManager.cleanup_announcement` — `social_media.py`:1548  (method)
+- `SocialMediaManager.cleanup_all` — `social_media.py`:1719  (method)
+- `SocialMediaManager.cleanup_announcement` — `social_media.py`:1687  (method)
 - `cleanup_deals_task` — `bot.py`:36618  (async def)
 - `cleanup_deleted_sources` — `tracking_layer.py`:396  (async def)
 - `cleanup_expired_deals_db` — `bot.py`:35848  (async def)
@@ -2187,12 +2189,12 @@
 - `configure_cmd` — `bot.py`:30762  (async def)
 - `ManualAdapter.configured` — `social_media.py`:325  (method)
 - `PlatformAdapter.configured` — `social_media.py`:274  (method)
-- `RSSHubAdapter.configured` — `social_media.py`:750  (method)
+- `RSSHubAdapter.configured` — `social_media.py`:847  (method)
 - `TwitchAdapter.configured` — `social_media.py`:371  (method)
-- `TwitterSyndicationAdapter.configured` — `social_media.py`:1126  (method)
+- `TwitterSyndicationAdapter.configured` — `social_media.py`:1265  (method)
 - `YouTubeAdapter.configured` — `social_media.py`:480  (method)
-- `YouTubeRSSAdapter.configured` — `social_media.py`:970  (method)
-- `SocialMediaManager.configured_platforms` — `social_media.py`:1287  (method)
+- `YouTubeRSSAdapter.configured` — `social_media.py`:1096  (method)
+- `SocialMediaManager.configured_platforms` — `social_media.py`:1426  (method)
 - `BlacklistClearConfirmView.confirm` — `bot.py`:23673  (method)
 - `ConfirmAltActionView.confirm` — `bot.py`:19209  (method)
 - `ConfirmKickView.confirm` — `bot.py`:19764  (method)
@@ -2218,6 +2220,7 @@
 - `croissance_favoris` — `roblox_veille.py`:2338  (async def)
 - `custom_id` — `roblox_pings.py`:126  (def)
 - `daily_snapshot_task` — `observability.py`:758  (async def)
+- `date_relative` — `social_media.py`:727  (def)
 - `_Banc.db_get` — `tests/test_config_lost_update.py`:85  (method)
 - `db_get` — `bot.py`:3285  (async def)
 - `db_init` — `bot.py`:1142  (async def)
@@ -2234,7 +2237,7 @@
 - `decide_action` — `protection_guards.py`:523  (async def)
 - `ManualAdapter.declare_post` — `social_media.py`:328  (method)
 - `deescalate_task` — `recidivism.py`:468  (async def)
-- `default_template` — `social_media.py`:1649  (def)
+- `default_template` — `social_media.py`:1788  (def)
 - `FausseReponse.defer` — `tests/test_panneaux_interaction.py`:98  (method)
 - `FausseReponse.defer` — `tests/test_rellseas.py`:223  (method)
 - `_Reponse.defer` — `tests/test_absents_porte_de_retour.py`:582  (method)
@@ -2395,14 +2398,14 @@
 - `FauxUser` — `tests/test_rellseas.py`:209  (class)
 - `FauxUtilisateur` — `tests/test_off_radiation.py`:575  (class)
 - `FauxWebhookSend` — `tests/test_roblox_publication.py`:65  (class)
-- `RSSHubAdapter.feed_url` — `social_media.py`:761  (method)
-- `YouTubeRSSAdapter.feed_url` — `social_media.py`:973  (method)
+- `RSSHubAdapter.feed_url` — `social_media.py`:858  (method)
+- `YouTubeRSSAdapter.feed_url` — `social_media.py`:1099  (method)
 - `fetch_avatar_url` — `bot.py`:3190  (async def)
 - `ManualAdapter.fetch_posts` — `social_media.py`:343  (method)
 - `PlatformAdapter.fetch_posts` — `social_media.py`:287  (method)
-- `RSSHubAdapter.fetch_posts` — `social_media.py`:864  (method)
+- `RSSHubAdapter.fetch_posts` — `social_media.py`:961  (method)
 - `TwitchAdapter.fetch_posts` — `social_media.py`:408  (method)
-- `TwitterSyndicationAdapter.fetch_posts` — `social_media.py`:1190  (method)
+- `TwitterSyndicationAdapter.fetch_posts` — `social_media.py`:1329  (method)
 - `YouTubeAdapter.fetch_posts` — `social_media.py`:542  (method)
 - `_Curseur.fetchall` — `tests/test_activite_observation.py`:63  (method)
 - `_StubCursor.fetchall` — `tests/conftest.py`:31  (method)
@@ -2484,8 +2487,8 @@
 - `_SessGet.get` — `tests/test_flux_limited_seul.py`:600  (method)
 - `_SessVide.get` — `tests/test_roblox_commandes_execution.py`:148  (method)
 - `_Session.get` — `tests/test_eclaireur.py`:99  (method)
-- `_Session.get` — `tests/test_youtube_chaine.py`:113  (method)
-- `SocialMediaManager.get_adapter` — `social_media.py`:1284  (method)
+- `_Session.get` — `tests/test_youtube_chaine.py`:114  (method)
+- `SocialMediaManager.get_adapter` — `social_media.py`:1423  (method)
 - `get_alt_accounts` — `bot.py`:10895  (async def)
 - `get_audit` — `tickets_enhance.py`:329  (async def)
 - `get_avatar_hash` — `bot.py`:10731  (def)
@@ -2565,7 +2568,7 @@
 - `handle_auto_help` — `bot.py`:21922  (async def)
 - `handle_recovery_message` — `bot.py`:37279  (async def)
 - `has_active_announcement` — `tracking_layer.py`:142  (async def)
-- `SocialMediaManager.has_announcement` — `social_media.py`:1434  (method)
+- `SocialMediaManager.has_announcement` — `social_media.py`:1573  (method)
 - `has_invite` — `trust_system.py`:187  (def)
 - `has_media` — `trust_system.py`:236  (def)
 - `has_non_media_link` — `trust_system.py`:194  (def)
@@ -2697,8 +2700,8 @@
 - `is_media_url` — `trust_system.py`:214  (def)
 - `is_nsfw` — `nsfw_scan.py`:68  (def)
 - `PlatformAdapter.is_post_active` — `social_media.py`:291  (method)
-- `RSSHubAdapter.is_post_active` — `social_media.py`:891  (method)
-- `TwitterSyndicationAdapter.is_post_active` — `social_media.py`:1210  (method)
+- `RSSHubAdapter.is_post_active` — `social_media.py`:988  (method)
+- `TwitterSyndicationAdapter.is_post_active` — `social_media.py`:1349  (method)
 - `YouTubeAdapter.is_post_active` — `social_media.py`:599  (method)
 - `is_sanctionable` — `permissions.py`:313  (async def)
 - `is_sticky_channel` — `sticky_messages.py`:69  (def)
@@ -2714,7 +2717,7 @@
 - `isolate_member` — `bot.py`:5914  (async def)
 - `join_zone` — `social_zones.py`:1842  (async def)
 - `jour` — `activite_calendrier.py`:54  (def)
-- `journal` — `tests/test_youtube_chaine.py`:122  (def)
+- `journal` — `tests/test_youtube_chaine.py`:123  (def)
 - `jours_actifs` — `activite_recompenses.py`:152  (async def)
 - `jours_du_mois` — `activite_calendrier.py`:140  (def)
 - `jours_ecoules` — `activite.py`:638  (def)
@@ -2753,7 +2756,7 @@
 - `LinkConfigPanelV2` — `bot.py`:18463  (class)
 - `lire_doux` — `activite.py`:1176  (async def)
 - `lire_etat` — `activite.py`:1140  (async def)
-- `SocialMediaManager.list_announcements` — `social_media.py`:1430  (method)
+- `SocialMediaManager.list_announcements` — `social_media.py`:1569  (method)
 - `list_announcements` — `tracking_layer.py`:231  (async def)
 - `list_backups` — `db_backup.py`:221  (def)
 - `list_birthdays` — `bot.py`:2948  (async def)
@@ -2762,7 +2765,7 @@
 - `list_creator_links` — `bot.py`:3026  (async def)
 - `list_delegations` — `delegations.py`:99  (def)
 - `list_stickies` — `sticky_messages.py`:146  (async def)
-- `SocialMediaManager.list_subscriptions` — `social_media.py`:1412  (method)
+- `SocialMediaManager.list_subscriptions` — `social_media.py`:1551  (method)
 - `list_tags` — `tickets_enhance.py`:251  (async def)
 - `list_templates` — `tickets_enhance.py`:560  (async def)
 - `list_unclaimed_tickets` — `tickets_enhance.py`:789  (async def)
@@ -2770,7 +2773,7 @@
 - `liste_de_surveillance` — `roblox_veille.py`:2694  (async def)
 - `load_cache` — `recidivism.py`:97  (async def)
 - `load_error` — `ocr_scan.py`:77  (def)
-- `SocialMediaManager.load_guild` — `social_media.py`:1314  (method)
+- `SocialMediaManager.load_guild` — `social_media.py`:1453  (method)
 - `load_live_state_from_db` — `bot.py`:20659  (async def)
 - `load_permissions` — `permissions.py`:205  (async def)
 - `load_policy` — `protection_guards.py`:335  (async def)
@@ -3015,6 +3018,7 @@
 - `Ow` — `tests/test_activite_seuils_masquage.py`:54  (class)
 - `owner_mod_stats_cmd` — `bot.py`:26026  (async def)
 - `FausseAPI.page` — `tests/test_roblox_catalogue_complet.py`:42  (method)
+- `YouTubeRSSAdapter.page_url` — `social_media.py`:1039  (method)
 - `PaginatedImmuneRemoveView` — `bot.py`:20474  (class)
 - `Palette` — `ui_v2.py`:94  (class)
 - `PanelAppearanceModalSimple` — `bot.py`:23348  (class)
@@ -3045,10 +3049,10 @@
 - `pied_de_retour` — `activite_textes.py`:189  (def)
 - `Platform` — `social_media.py`:53  (class)
 - `PlatformAdapter` — `social_media.py`:268  (class)
-- `YouTubeRSSAdapter.playlist_url` — `social_media.py`:938  (method)
-- `SocialMediaManager.poll_all` — `social_media.py`:1524  (method)
+- `YouTubeRSSAdapter.playlist_url` — `social_media.py`:1064  (method)
+- `SocialMediaManager.poll_all` — `social_media.py`:1663  (method)
 - `poll_closer` — `bot.py`:31409  (async def)
-- `SocialMediaManager.poll_subscription` — `social_media.py`:1469  (method)
+- `SocialMediaManager.poll_subscription` — `social_media.py`:1608  (method)
 - `PollVoteView` — `bot.py`:31118  (class)
 - `porte_une_etiquette` — `activite_niveaux.py`:234  (def)
 - `poser_niveau` — `activite_niveaux.py`:706  (async def)
@@ -3119,7 +3123,7 @@
 - `refresh_staff_index` — `impersonation_detector.py`:204  (async def)
 - `refs_autres_fichiers` — `outils/purge_morts.py`:69  (def)
 - `refs_par_nom` — `outils/purge_morts.py`:47  (def)
-- `SocialMediaManager.register_adapter` — `social_media.py`:1281  (method)
+- `SocialMediaManager.register_adapter` — `social_media.py`:1420  (method)
 - `register_panel_opener` — `help_faq.py`:248  (def)
 - `register_persistent_views` — `raid_detector.py`:779  (def)
 - `register_persistent_views` — `social_zones.py`:2778  (def)
@@ -3167,13 +3171,13 @@
 - `M.remove_roles` — `tests/test_afk_retour.py`:136  (method)
 - `_FauxMembre.remove_roles` — `tests/test_roblox_pings.py`:238  (method)
 - `remove_sticky` — `sticky_messages.py`:119  (async def)
-- `SocialMediaManager.remove_subscription` — `social_media.py`:1391  (method)
+- `SocialMediaManager.remove_subscription` — `social_media.py`:1530  (method)
 - `ImmuneRemoveView.remove_user` — `bot.py`:20326  (method)
 - `remplacer` — `activite_message.py`:246  (async def)
 - `remplacer_unique` — `outils/retape_selecteurs.py`:276  (def)
 - `AltScanResultsPanelV2.render_after_defer` — `bot.py`:19139  (method)
 - `SuspectScanPanelV2.render_after_defer` — `bot.py`:19426  (method)
-- `render_template` — `social_media.py`:1661  (def)
+- `render_template` — `social_media.py`:1800  (def)
 - `ActionConfigPanelV2.render_to` — `bot.py`:18774  (method)
 - `ActiviteApercuPanelV2.render_to` — `activite_panneau.py`:1397  (method)
 - `ActiviteCiblesPanelV2.render_to` — `activite_panneau.py`:471  (method)
@@ -3272,7 +3276,7 @@
 - `roles_autorises` — `rellseas_panneau.py`:79  (def)
 - `roles_etiquettes` — `activite_niveaux.py`:287  (def)
 - `roles_surveilles` — `activite.py`:977  (async def)
-- `RSSHubAdapter` — `social_media.py`:717  (class)
+- `RSSHubAdapter` — `social_media.py`:814  (class)
 - `run_check_now` — `health_check.py`:238  (async def)
 - `run_cleanup` — `data_cleanup.py`:134  (async def)
 - `run_lockdown` — `raid_detector.py`:432  (async def)
@@ -3349,7 +3353,7 @@
 - `ConfigCache.set` — `bot.py`:752  (method)
 - `set_category_channel` — `unified_logger.py`:280  (async def)
 - `set_creator_links` — `bot.py`:2983  (async def)
-- `SocialMediaManager.set_delete_callback` — `social_media.py`:1309  (method)
+- `SocialMediaManager.set_delete_callback` — `social_media.py`:1448  (method)
 - `set_digest_enabled` — `dm_digest.py`:199  (async def)
 - `set_disabled_events` — `unified_logger.py`:441  (async def)
 - `set_enabled_categories` — `unified_logger.py`:233  (async def)
@@ -3358,7 +3362,7 @@
 - `set_log_channel` — `unified_logger.py`:206  (async def)
 - `FauxSalon.set_permissions` — `tests/test_off_radiation.py`:134  (method)
 - `Salon.set_permissions` — `tests/test_absents_porte_de_retour.py`:111  (method)
-- `SocialMediaManager.set_post_callback` — `social_media.py`:1306  (method)
+- `SocialMediaManager.set_post_callback` — `social_media.py`:1445  (method)
 - `set_priority` — `tickets_enhance.py`:197  (async def)
 - `set_raid_callback` — `raid_detector.py`:65  (def)
 - `set_retour` — `activite_panneau.py`:459  (def)
@@ -3376,9 +3380,9 @@
 - `SetMaxModal` — `bot.py`:23757  (class)
 - `settings` — `activity_vip.py`:208  (async def)
 - `PlatformAdapter.setup` — `social_media.py`:278  (method)
-- `RSSHubAdapter.setup` — `social_media.py`:754  (method)
+- `RSSHubAdapter.setup` — `social_media.py`:851  (method)
 - `TwitchAdapter.setup` — `social_media.py`:374  (method)
-- `TwitterSyndicationAdapter.setup` — `social_media.py`:1129  (method)
+- `TwitterSyndicationAdapter.setup` — `social_media.py`:1268  (method)
 - `YouTubeAdapter.setup` — `social_media.py`:483  (method)
 - `setup` — `activite.py`:195  (def)
 - `setup` — `activite_escalade.py`:42  (def)
@@ -3424,7 +3428,7 @@
 - `setup` — `ui_usage.py`:43  (def)
 - `setup` — `webhook_leak.py`:59  (def)
 - `setup` — `webhook_tracker.py`:53  (def)
-- `SocialMediaManager.setup_all` — `social_media.py`:1290  (method)
+- `SocialMediaManager.setup_all` — `social_media.py`:1429  (method)
 - `setup_all_commands` — `slash_commands_2026.py`:420  (def)
 - `setup_setup_command` — `setup_wizard.py`:680  (def)
 - `seuils_du_role` — `activite.py`:529  (def)
@@ -3446,7 +3450,7 @@
 - `SocialAddPanel` — `admin_panels_v2.py`:675  (class)
 - `SocialEditPanel` — `admin_panels_v2.py`:828  (class)
 - `SocialManagePanel` — `admin_panels_v2.py`:777  (class)
-- `SocialMediaManager` — `social_media.py`:1257  (class)
+- `SocialMediaManager` — `social_media.py`:1396  (class)
 - `SocialMediaPanelV2` — `admin_panels_v2.py`:594  (class)
 - `SocialPost` — `social_media.py`:102  (class)
 - `socle` — `tests/test_activite_observation.py`:118  (def)
@@ -3455,13 +3459,13 @@
 - `speedrun_cat_add_cmd` — `bot.py`:43769  (async def)
 - `RellseasGestionV2.squelette` — `rellseas_panneau.py`:559  (method)
 - `start` — `health_server.py`:141  (async def)
-- `SocialMediaManager.start_background_tasks` — `social_media.py`:1626  (method)
+- `SocialMediaManager.start_background_tasks` — `social_media.py`:1765  (method)
 - `stat_line` — `ui_v2.py`:141  (def)
 - `StaticPanel` — `ui_v2.py`:271  (class)
 - `stats_grid` — `ui_v2.py`:146  (def)
 - `Status` — `vocabulary.py`:72  (class)
 - `stop` — `health_server.py`:180  (async def)
-- `SocialMediaManager.stop_background_tasks` — `social_media.py`:1632  (method)
+- `SocialMediaManager.stop_background_tasks` — `social_media.py`:1771  (method)
 - `stub_cfg` — `tests/conftest.py`:86  (def)
 - `stub_db` — `tests/conftest.py`:74  (def)
 - `StubDB` — `tests/conftest.py`:41  (class)
@@ -3480,7 +3484,7 @@
 - `task_supervisor` — `bot.py`:16500  (async def)
 - `PlatformAdapter.teardown` — `social_media.py`:282  (method)
 - `TwitchAdapter.teardown` — `social_media.py`:381  (method)
-- `SocialMediaManager.teardown_all` — `social_media.py`:1297  (method)
+- `SocialMediaManager.teardown_all` — `social_media.py`:1436  (method)
 - `temp_voice_watchdog` — `bot.py`:36642  (async def)
 - `Template` — `setup_wizard.py`:49  (class)
 - `test_10_aucune_probabilite_nest_affichee_sans_horizon_ni_modele` — `tests/test_veille_transitions.py`:481  (def)
@@ -3650,26 +3654,26 @@
 - `test_F1_nouveautes_ET_passages_Limited_publient_par_defaut` — `tests/test_flux_limited_seul.py`:54  (def)
 - `test_F1_un_202_compte_comme_un_ECHEC` — `tests/test_forum_refus.py`:104  (async def)
 - `test_F1_une_etiquette_orpheline_part_au_message` — `tests/test_afk_retour.py`:237  (async def)
-- `test_F1_une_vieille_video_n_est_JAMAIS_une_nouveaute` — `tests/test_youtube_chaine.py`:182  (async def)
+- `test_F1_une_vieille_video_n_est_JAMAIS_une_nouveaute` — `tests/test_youtube_chaine.py`:183  (async def)
 - `test_F1b_le_flux_a_surveiller_n_EXISTE_plus` — `tests/test_flux_limited_seul.py`:62  (def)
 - `test_F1b_une_ancienne_etiquette_au_nom_PERSONNALISE_part_aussi` — `tests/test_afk_retour.py`:248  (async def)
 - `test_F2_le_passage_libere_celui_qui_a_ecrit_meme_si_le_message_a_rate` — `tests/test_afk_retour.py`:295  (async def)
 - `test_F2_un_flux_ETEINT_n_a_pas_de_salon_REPLI_COMPRIS` — `tests/test_flux_limited_seul.py`:73  (def)
 - `test_F2_UNE_requete_les_quatre_categories_chacune_son_domaine` — `tests/test_forum_refus.py`:121  (async def)
-- `test_F2_une_video_RECENTE_passe_et_garde_l_identifiant_Atom` — `tests/test_youtube_chaine.py`:193  (async def)
+- `test_F2_une_video_RECENTE_passe_et_garde_l_identifiant_Atom` — `tests/test_youtube_chaine.py`:194  (async def)
 - `test_F2b_chaque_billet_porte_le_domaine_de_SA_categorie` — `tests/test_forum_refus.py`:142  (async def)
-- `test_F3_flux_de_la_chaine_REFUSE_la_playlist_le_remplace_sans_bruit` — `tests/test_youtube_chaine.py`:203  (async def)
+- `test_F3_flux_de_la_chaine_REFUSE_la_playlist_le_remplace_sans_bruit` — `tests/test_youtube_chaine.py`:204  (async def)
 - `test_F3_trois_refus_UNE_ligne_puis_UNE_ligne_a_la_reprise` — `tests/test_forum_refus.py`:172  (async def)
 - `test_F3_un_flux_ALLUME_sans_salon_propre_garde_son_repli` — `tests/test_flux_limited_seul.py`:80  (def)
 - `test_F3_un_palier_2_hors_perimetre_est_libere_et_recupere_ses_roles` — `tests/test_afk_retour.py`:316  (async def)
 - `test_F3b_hors_perimetre_mais_SILENCIEUX_on_ne_l_escalade_pas` — `tests/test_afk_retour.py`:331  (async def)
 - `test_F3c_les_intouchables_hors_perimetre_le_restent` — `tests/test_afk_retour.py`:341  (async def)
-- `test_F4_deux_refus_UN_avertissement_par_jour_pas_un_par_passage` — `tests/test_youtube_chaine.py`:213  (async def)
+- `test_F4_deux_refus_UN_avertissement_par_jour_pas_un_par_passage` — `tests/test_youtube_chaine.py`:214  (async def)
 - `test_F4_eteindre_les_nouveautes_n_arrete_PAS_la_veille` — `tests/test_flux_limited_seul.py`:86  (async def)
 - `test_F4_le_compte_rendu_dit_quoi_faire` — `tests/test_afk_retour.py`:363  (def)
 - `test_F4_un_role_au_dessus_du_bot_est_COMPTE_et_la_marque_gardee` — `tests/test_afk_retour.py`:352  (async def)
 - `test_F4_UNE_requete_par_passage` — `tests/test_forum_refus.py`:255  (def)
-- `test_F5_l_ancien_avertissement_a_chaque_refus_n_est_plus_emis_pour_YouTube` — `tests/test_youtube_chaine.py`:223  (def)
+- `test_F5_l_ancien_avertissement_a_chaque_refus_n_est_plus_emis_pour_YouTube` — `tests/test_youtube_chaine.py`:310  (def)
 - `test_F5_refuse_il_RALENTIT_puis_reprend_son_rythme` — `tests/test_forum_refus.py`:261  (def)
 - `test_F5_un_flux_INCONNU_ne_publie_jamais_par_repli` — `tests/test_flux_limited_seul.py`:96  (def)
 - `test_F6_des_refus_en_serie_allongent_la_pause_jusqu_au_plafond` — `tests/test_forum_refus.py`:276  (def)
@@ -3691,12 +3695,12 @@
 - `test_G7_le_publieur_VIDE_REELLEMENT_la_file_avant_de_tirer` — `tests/test_flux_limited_seul.py`:212  (def)
 - `test_get_honeypot_channel_id_default_zero` — `tests/test_honeypot.py`:43  (def)
 - `test_gratuit_et_inconnu_ne_se_confondent_pas` — `tests/test_roblox_fiche.py`:168  (def)
-- `test_H1_la_page_de_RellGames_donne_RellGames_pas_CaribBros` — `tests/test_youtube_chaine.py`:61  (def)
-- `test_H2_la_page_de_CaribBros_donne_CaribBros` — `tests/test_youtube_chaine.py`:65  (def)
-- `test_H3_chaque_source_sure_suffit_seule` — `tests/test_youtube_chaine.py`:76  (def)
-- `test_H4_un_channelId_ou_un_lien_d_une_AUTRE_chaine_ne_suffit_JAMAIS` — `tests/test_youtube_chaine.py`:80  (def)
-- `test_H5_le_gestionnaire_social_resout_RellGames_correctement` — `tests/test_youtube_chaine.py`:131  (async def)
-- `test_H6_l_ANCIEN_chemin_aussi_et_c_est_lui_qui_PERSISTE` — `tests/test_youtube_chaine.py`:148  (async def)
+- `test_H1_la_page_de_RellGames_donne_RellGames_pas_CaribBros` — `tests/test_youtube_chaine.py`:62  (def)
+- `test_H2_la_page_de_CaribBros_donne_CaribBros` — `tests/test_youtube_chaine.py`:66  (def)
+- `test_H3_chaque_source_sure_suffit_seule` — `tests/test_youtube_chaine.py`:77  (def)
+- `test_H4_un_channelId_ou_un_lien_d_une_AUTRE_chaine_ne_suffit_JAMAIS` — `tests/test_youtube_chaine.py`:81  (def)
+- `test_H5_le_gestionnaire_social_resout_RellGames_correctement` — `tests/test_youtube_chaine.py`:132  (async def)
+- `test_H6_l_ANCIEN_chemin_aussi_et_c_est_lui_qui_PERSISTE` — `tests/test_youtube_chaine.py`:149  (async def)
 - `test_ids_afk_ignore_letiquette_douce` — `tests/test_activite_role_doux.py`:138  (def)
 - `test_il_ecrit_entre_le_classement_et_la_pose` — `tests/test_afk_retour.py`:390  (async def)
 - `test_il_existe_un_chemin_SANS_RIEN_TAPER` — `tests/test_off_radiation.py`:314  (def)
@@ -4171,10 +4175,16 @@
 - `test_on_previent_AVANT_de_bannir` — `tests/test_off_radiation.py`:528  (def)
 - `test_oublier_publies_existe_pour_les_actualites` — `tests/test_roblox_actualites.py`:128  (async def)
 - `test_owner_sync_ne_recree_pas_les_doublons` — `tests/test_commandes_en_double.py`:94  (def)
+- `test_P1_la_date_relative_de_YouTube_est_lue` — `tests/test_youtube_chaine.py`:256  (def)
 - `test_P1_UN_seul_reglage_de_salon_ecrit_les_DEUX_cles` — `tests/test_flux_limited_seul.py`:344  (def)
+- `test_P1b_une_video_programmee_ou_sans_date_n_a_PAS_de_date` — `tests/test_youtube_chaine.py`:263  (def)
+- `test_P2_la_page_rend_les_videos_DATEES_avec_l_identifiant_du_flux` — `tests/test_youtube_chaine.py`:268  (def)
 - `test_P2_plus_aucune_trace_des_indices` — `tests/test_flux_limited_seul.py`:353  (def)
 - `test_P3_une_creation_qui_sort_DEJA_Limited_se_dit_NOUVEAU_LIMITED` — `tests/test_flux_limited_seul.py`:370  (def)
+- `test_P3_une_page_ILLISIBLE_rend_None_pas_une_liste_vide` — `tests/test_youtube_chaine.py`:283  (def)
+- `test_P4_deux_flux_REFUSES_la_page_prend_le_relais_sans_bruit` — `tests/test_youtube_chaine.py`:290  (async def)
 - `test_P4_un_Limited_hors_vente_se_REVEND_il_n_est_pas_retire` — `tests/test_flux_limited_seul.py`:375  (def)
+- `test_P5_la_page_d_1_Mo_n_est_lue_qu_une_fois_par_demi_heure` — `tests/test_youtube_chaine.py`:301  (async def)
 - `test_P5_une_nouveaute_en_vente_le_dit` — `tests/test_flux_limited_seul.py`:383  (def)
 - `test_palier2_reste_a_faire_tant_quun_vrai_role_subsiste` — `tests/test_activite_tapis_roulant.py`:138  (def)
 - `test_palier2_termine_quand_il_ne_reste_que_lintouchable` — `tests/test_activite_tapis_roulant.py`:145  (def)
@@ -4459,7 +4469,7 @@
 - `test_zero_publication_declenche_le_diagnostic_par_serveur` — `tests/test_veille_bilan.py`:128  (def)
 - `test_zero_type_ne_laisse_JAMAIS_un_bouton_mort` — `tests/test_tickets_panneau_unifie.py`:186  (def)
 - `tete_memorisee` — `roblox_marche.py`:507  (async def)
-- `_Rep.text` — `tests/test_youtube_chaine.py`:97  (method)
+- `_Rep.text` — `tests/test_youtube_chaine.py`:98  (method)
 - `thematic_voice_cleanup_task` — `bot.py`:45117  (async def)
 - `threat_hit` — `insult_filter.py`:363  (def)
 - `threat_soft_hit` — `insult_filter.py`:389  (def)
@@ -4535,7 +4545,7 @@
 - `trop_vieux` — `roblox_veille.py`:837  (def)
 - `TrustScore` — `protection_guards.py`:143  (class)
 - `TwitchAdapter` — `social_media.py`:351  (class)
-- `TwitterSyndicationAdapter` — `social_media.py`:1108  (class)
+- `TwitterSyndicationAdapter` — `social_media.py`:1247  (class)
 - `UGCOptButton` — `bot.py`:35619  (class)
 - `UGCWishlistButton` — `bot.py`:35721  (class)
 - `ui_report` — `ui_usage.py`:170  (async def)
@@ -4556,7 +4566,7 @@
 - `update_delegation` — `delegations.py`:200  (def)
 - `update_post` — `tracking_layer.py`:191  (async def)
 - `update_realsy_activity` — `bot.py`:24037  (async def)
-- `SocialMediaManager.update_subscription` — `social_media.py`:1399  (method)
+- `SocialMediaManager.update_subscription` — `social_media.py`:1538  (method)
 - `update_user_economy` — `bot.py`:22048  (async def)
 - `UpdateVoteView` — `bot.py`:45864  (class)
 - `UsagePanel` — `ui_usage.py`:365  (class)
@@ -4579,6 +4589,7 @@
 - `verifier_longueurs` — `activite_textes.py`:201  (def)
 - `FauxCatalogue.verifier_par_economie` — `tests/test_eclaireur_cadence.py`:143  (method)
 - `verifier_par_economie` — `roblox_veille.py`:2596  (async def)
+- `videos_de_la_page` — `social_media.py`:750  (def)
 - `View` — `ui_v2.py`:82  (class)
 - `vignettes` — `roblox_veille.py`:2132  (async def)
 - `vip_eval_task` — `activity_vip.py`:1102  (async def)
@@ -4604,7 +4615,7 @@
 - `WizardStep6` — `setup_wizard.py`:606  (class)
 - `_QuietStdout.write` — `bot.py`:96  (method)
 - `YouTubeAdapter` — `social_media.py`:464  (class)
-- `YouTubeRSSAdapter` — `social_media.py`:912  (class)
+- `YouTubeRSSAdapter` — `social_media.py`:1009  (class)
 - `zone_watchdog` — `social_zones.py`:672  (async def)
 - `ZoneAddButton` — `social_zones.py`:2635  (class)
 - `ZoneCloseButton` — `social_zones.py`:2619  (class)
@@ -7301,12 +7312,14 @@
 - L646  `def _clean_handle(handle)`
 - L666  `def _clean_yt_handle(handle)`
 - L695  `def extraire_channel_id(html)`
-- L1222  `def _subs_path(guild_id)`
-- L1226  `def _anns_path(guild_id)`
-- L1233  `async def _read_json(path)`
-- L1242  `async def _write_json(path, payload)`
-- L1649  `def default_template(platform, post_type)`
-- L1661  `def render_template(sub, post)`
+- L727  `def date_relative(textes)`
+- L750  `def videos_de_la_page(html, handle, maximum)`
+- L1361  `def _subs_path(guild_id)`
+- L1365  `def _anns_path(guild_id)`
+- L1372  `async def _read_json(path)`
+- L1381  `async def _write_json(path, payload)`
+- L1788  `def default_template(platform, post_type)`
+- L1800  `def render_template(sub, post)`
 - L53  `class Platform(str, Enum)`
 - L62  `class PostType(str, Enum)`
 - L102  `class SocialPost` @dataclass
@@ -7347,60 +7360,62 @@
     - L490  `async def _resolve_channel_id(self, handle)`
     - L542  `async def fetch_posts(self, handle)`
     - L599  `async def is_post_active(self, post)`
-- L717  `class RSSHubAdapter(PlatformAdapter)`
-    - L732  `def __init__(self, platform, base_url)`
-    - L742  `def base_url(self)` @property
-    - L750  `def configured(self)` @property
-    - L754  `async def setup(self, session)`
-    - L761  `def feed_url(self, handle)`
-    - L764  `async def _fetch_items(self, handle, url, avertir)`
-    - L864  `async def fetch_posts(self, handle)`
-    - L891  `async def is_post_active(self, post)`
-- L912  `class YouTubeRSSAdapter(RSSHubAdapter)`
-    - L928  `def __init__(self)`
-    - L938  `def playlist_url(cid)` @staticmethod
-    - L944  `def _recentes(self, items)`
-    - L961  `def _avertir_du_jour(self, cle)`
-    - L970  `def configured(self)` @property
-    - L973  `def feed_url(self, handle)`
-    - L989  `async def _resolve_channel_id(self, handle)`
-    - L1036  `async def _fetch_items(self, handle)`
-- L1108  `class TwitterSyndicationAdapter(PlatformAdapter)`
-    - L1120  `def __init__(self)`
-    - L1126  `def configured(self)` @property
-    - L1129  `async def setup(self, session)`
-    - L1136  `async def _fetch_tweets(self, handle)`
-    - L1190  `async def fetch_posts(self, handle)`
-    - L1210  `async def is_post_active(self, post)`
-- L1257  `class SocialMediaManager`
-    - L1260  `def __init__(self, post_callback, delete_callback, poll_interval_seconds, cleanup_interval_seconds)`
-    - L1281  `def register_adapter(self, adapter)`
-    - L1284  `def get_adapter(self, platform)`
-    - L1287  `def configured_platforms(self)`
-    - L1290  `async def setup_all(self, session)`
-    - L1297  `async def teardown_all(self)`
-    - L1306  `def set_post_callback(self, cb)`
-    - L1309  `def set_delete_callback(self, cb)`
-    - L1314  `async def load_guild(self, guild_id)`
-    - L1337  `async def _save_subs(self, guild_id)`
-    - L1342  `async def _save_anns(self, guild_id)`
-    - L1347  `async def _ensure_loaded(self, guild_id)`
-    - L1353  `async def add_subscription(self, guild_id, platform, handle, target_channel_id, display_name, role_to_ping, track_lives, track_videos, track_shorts, track_posts, template)`
-    - L1391  `async def remove_subscription(self, guild_id, sub_id)`
-    - L1399  `async def update_subscription(self, guild_id, sub_id, **changes)`
-    - L1412  `async def list_subscriptions(self, guild_id)`
-    - L1416  `def _find_subscription(self, guild_id, platform, handle, channel_id)`
-    - L1430  `async def list_announcements(self, guild_id)`
-    - L1434  `async def has_announcement(self, guild_id, platform, handle, post_id)`
-    - L1441  `async def _record_announcement(self, sub, post, discord_message_id)`
-    - L1469  `async def poll_subscription(self, sub)`
-    - L1524  `async def poll_all(self)`
-    - L1548  `async def cleanup_announcement(self, ann)`
-    - L1580  `async def cleanup_all(self)`
-    - L1595  `async def _poll_loop(self)`
-    - L1613  `async def _cleanup_loop(self)`
-    - L1626  `def start_background_tasks(self)`
-    - L1632  `async def stop_background_tasks(self)`
+- L814  `class RSSHubAdapter(PlatformAdapter)`
+    - L829  `def __init__(self, platform, base_url)`
+    - L839  `def base_url(self)` @property
+    - L847  `def configured(self)` @property
+    - L851  `async def setup(self, session)`
+    - L858  `def feed_url(self, handle)`
+    - L861  `async def _fetch_items(self, handle, url, avertir)`
+    - L961  `async def fetch_posts(self, handle)`
+    - L988  `async def is_post_active(self, post)`
+- L1009  `class YouTubeRSSAdapter(RSSHubAdapter)`
+    - L1028  `def __init__(self)`
+    - L1039  `def page_url(cid)` @staticmethod
+    - L1042  `async def _videos_page(self, handle, cid, cle)`
+    - L1064  `def playlist_url(cid)` @staticmethod
+    - L1070  `def _recentes(self, items)`
+    - L1087  `def _avertir_du_jour(self, cle)`
+    - L1096  `def configured(self)` @property
+    - L1099  `def feed_url(self, handle)`
+    - L1115  `async def _resolve_channel_id(self, handle)`
+    - L1162  `async def _fetch_items(self, handle)`
+- L1247  `class TwitterSyndicationAdapter(PlatformAdapter)`
+    - L1259  `def __init__(self)`
+    - L1265  `def configured(self)` @property
+    - L1268  `async def setup(self, session)`
+    - L1275  `async def _fetch_tweets(self, handle)`
+    - L1329  `async def fetch_posts(self, handle)`
+    - L1349  `async def is_post_active(self, post)`
+- L1396  `class SocialMediaManager`
+    - L1399  `def __init__(self, post_callback, delete_callback, poll_interval_seconds, cleanup_interval_seconds)`
+    - L1420  `def register_adapter(self, adapter)`
+    - L1423  `def get_adapter(self, platform)`
+    - L1426  `def configured_platforms(self)`
+    - L1429  `async def setup_all(self, session)`
+    - L1436  `async def teardown_all(self)`
+    - L1445  `def set_post_callback(self, cb)`
+    - L1448  `def set_delete_callback(self, cb)`
+    - L1453  `async def load_guild(self, guild_id)`
+    - L1476  `async def _save_subs(self, guild_id)`
+    - L1481  `async def _save_anns(self, guild_id)`
+    - L1486  `async def _ensure_loaded(self, guild_id)`
+    - L1492  `async def add_subscription(self, guild_id, platform, handle, target_channel_id, display_name, role_to_ping, track_lives, track_videos, track_shorts, track_posts, template)`
+    - L1530  `async def remove_subscription(self, guild_id, sub_id)`
+    - L1538  `async def update_subscription(self, guild_id, sub_id, **changes)`
+    - L1551  `async def list_subscriptions(self, guild_id)`
+    - L1555  `def _find_subscription(self, guild_id, platform, handle, channel_id)`
+    - L1569  `async def list_announcements(self, guild_id)`
+    - L1573  `async def has_announcement(self, guild_id, platform, handle, post_id)`
+    - L1580  `async def _record_announcement(self, sub, post, discord_message_id)`
+    - L1608  `async def poll_subscription(self, sub)`
+    - L1663  `async def poll_all(self)`
+    - L1687  `async def cleanup_announcement(self, ann)`
+    - L1719  `async def cleanup_all(self)`
+    - L1734  `async def _poll_loop(self)`
+    - L1752  `async def _cleanup_loop(self)`
+    - L1765  `def start_background_tasks(self)`
+    - L1771  `async def stop_background_tasks(self)`
 
 ### `social_zones.py`
 
@@ -9336,30 +9351,37 @@
 
 ### `tests/test_youtube_chaine.py`
 
-- L61  `def test_H1_la_page_de_RellGames_donne_RellGames_pas_CaribBros()`
-- L65  `def test_H2_la_page_de_CaribBros_donne_CaribBros()`
-- L76  `def test_H3_chaque_source_sure_suffit_seule(html)` @pytest.mark.parametrize
-- L80  `def test_H4_un_channelId_ou_un_lien_d_une_AUTRE_chaine_ne_suffit_JAMAIS()`
-- L122  `def journal(monkeypatch)` @pytest.fixture
-- L131  `async def test_H5_le_gestionnaire_social_resout_RellGames_correctement(journal)` @pytest.mark.asyncio
-- L138  `def _fonctions_bot(*noms)`
-- L148  `async def test_H6_l_ANCIEN_chemin_aussi_et_c_est_lui_qui_PERSISTE()` @pytest.mark.asyncio
-- L161  `def _atom(*entrees)`
-- L170  `def _il_y_a(jours)`
-- L174  `def _yt(reponses)`
-- L182  `async def test_F1_une_vieille_video_n_est_JAMAIS_une_nouveaute(journal)` @pytest.mark.asyncio
-- L193  `async def test_F2_une_video_RECENTE_passe_et_garde_l_identifiant_Atom(journal)` @pytest.mark.asyncio
-- L203  `async def test_F3_flux_de_la_chaine_REFUSE_la_playlist_le_remplace_sans_bruit(journal)` @pytest.mark.asyncio
-- L213  `async def test_F4_deux_refus_UN_avertissement_par_jour_pas_un_par_passage(journal)` @pytest.mark.asyncio
-- L223  `def test_F5_l_ancien_avertissement_a_chaque_refus_n_est_plus_emis_pour_YouTube()`
-- L93  `class _Rep`
-    - L94  `def __init__(self, status, texte)`
-    - L97  `async def text(self)`
-    - L100  `async def __aenter__(self)`
-    - L103  `async def __aexit__(self, *a)`
-- L107  `class _Session`
-    - L110  `def __init__(self, reponses)`
-    - L113  `def get(self, url, **kw)`
+- L62  `def test_H1_la_page_de_RellGames_donne_RellGames_pas_CaribBros()`
+- L66  `def test_H2_la_page_de_CaribBros_donne_CaribBros()`
+- L77  `def test_H3_chaque_source_sure_suffit_seule(html)` @pytest.mark.parametrize
+- L81  `def test_H4_un_channelId_ou_un_lien_d_une_AUTRE_chaine_ne_suffit_JAMAIS()`
+- L123  `def journal(monkeypatch)` @pytest.fixture
+- L132  `async def test_H5_le_gestionnaire_social_resout_RellGames_correctement(journal)` @pytest.mark.asyncio
+- L139  `def _fonctions_bot(*noms)`
+- L149  `async def test_H6_l_ANCIEN_chemin_aussi_et_c_est_lui_qui_PERSISTE()` @pytest.mark.asyncio
+- L162  `def _atom(*entrees)`
+- L171  `def _il_y_a(jours)`
+- L175  `def _yt(reponses)`
+- L183  `async def test_F1_une_vieille_video_n_est_JAMAIS_une_nouveaute(journal)` @pytest.mark.asyncio
+- L194  `async def test_F2_une_video_RECENTE_passe_et_garde_l_identifiant_Atom(journal)` @pytest.mark.asyncio
+- L204  `async def test_F3_flux_de_la_chaine_REFUSE_la_playlist_le_remplace_sans_bruit(journal)` @pytest.mark.asyncio
+- L214  `async def test_F4_deux_refus_UN_avertissement_par_jour_pas_un_par_passage(journal)` @pytest.mark.asyncio
+- L236  `def _page(*videos)`
+- L256  `def test_P1_la_date_relative_de_YouTube_est_lue(textes, jours)` @pytest.mark.parametrize
+- L263  `def test_P1b_une_video_programmee_ou_sans_date_n_a_PAS_de_date()`
+- L268  `def test_P2_la_page_rend_les_videos_DATEES_avec_l_identifiant_du_flux()`
+- L283  `def test_P3_une_page_ILLISIBLE_rend_None_pas_une_liste_vide()`
+- L290  `async def test_P4_deux_flux_REFUSES_la_page_prend_le_relais_sans_bruit(journal)` @pytest.mark.asyncio
+- L301  `async def test_P5_la_page_d_1_Mo_n_est_lue_qu_une_fois_par_demi_heure(journal)` @pytest.mark.asyncio
+- L310  `def test_F5_l_ancien_avertissement_a_chaque_refus_n_est_plus_emis_pour_YouTube()`
+- L94  `class _Rep`
+    - L95  `def __init__(self, status, texte)`
+    - L98  `async def text(self)`
+    - L101  `async def __aenter__(self)`
+    - L104  `async def __aexit__(self, *a)`
+- L108  `class _Session`
+    - L111  `def __init__(self, reponses)`
+    - L114  `def get(self, url, **kw)`
 
 ### `tickets_enhance.py`
 
