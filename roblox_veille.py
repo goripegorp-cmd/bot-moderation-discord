@@ -159,6 +159,11 @@ AGE_MAX_JOURS = 90
 #  RÉPONSE NORMALE la plupart du temps, pas une panne.
 FENETRE_DIRECTE_HEURES = 6
 
+#  ⚠️ LA MISE EN VENTE D'UNE CRÉATION RÉCENTE (27/09) — voir `age_publiable`.
+#  Au-delà de 30 jours, un article qui arrive en vente n'est plus un nouvel
+#  accessoire : c'est un RETOUR en vente, et il ne se déguise pas en nouveauté.
+AGE_MAX_SORTIE_JOURS = 30
+
 
 def _heures_depuis(quand) -> float | None:
     """Heures écoulées depuis un instant ISO. `None` si illisible."""
@@ -220,7 +225,11 @@ PAUSE_ENTRE_APPELS_CATALOGUE = 8.0
 
 #  Combien d'articles on garde en mémoire. Borné : on ne conserve pas
 #  l'historique complet du catalogue dans une base SQLite.
-MAX_ARTICLES_SUIVIS = 3000
+#  ⚠️ 8 000 DEPUIS LE 27/09 : le flux Limited en trois parties rend ~2 000
+#  articles à lui seul (mesuré), et la purge garde les plus récemment VUS. À
+#  3 000, elle aurait effacé à chaque tour ceux dont la page allait revenir —
+#  et avec eux leur classe, donc leur passage en Limited.
+MAX_ARTICLES_SUIVIS = 8000
 
 #  ⚠️ LA PAGINATION — SANS ELLE, LE BOT NE VOYAIT QUE 6 % DU CATALOGUE.
 #  Le relevé s'arrêtait à une seule requête de 60 articles. Mesuré le 16/08 :
@@ -470,6 +479,14 @@ async def init_db():
             await db.execute("ALTER TABLE roblox_articles ADD COLUMN item_type TEXT")
         except Exception:
             pass                       # colonne déjà présente
+        #  ⚠️ LA CLASSE EXACTE, DEPUIS LE 27/09 — voir `promotion_limited`.
+        #  `collectionnable` fondait « UGC Limited » et « Limited U » en un
+        #  seul 1 : le 22/09, Roblox a reclassé des UGC Limited à lui en
+        #  Limited U, et pour la base rien n'avait bougé.
+        try:
+            await db.execute("ALTER TABLE roblox_articles ADD COLUMN classe TEXT")
+        except Exception:
+            pass                       # colonne déjà présente
         #  Ce qui a DÉJÀ été publié, par guilde et par flux. Persisté : un
         #  redémarrage ne doit jamais republier ce qui est déjà sorti.
         await db.execute(
@@ -585,6 +602,7 @@ async def init_db():
         )
         await db.commit()
     await _migrer_amorce_bascules()
+    await _migrer_classes()
 
 
 #  ═══════════════════════════════════════════════════════════════════════════
@@ -615,6 +633,8 @@ async def _migrer_amorce_bascules() -> int:
         `roblox_articles` par le plafond LRU. Mesuré le 30/08 :
         `MAX_ARTICLES_SUIVIS = 3000` contre 964 (catalogue général) + 998
         (flux Limited) ≈ 1 962 suivis. **Le LRU n'évince rien.**
+        (27/09 : le flux Limited en trois parties rend ~2 000 articles ; le
+        plafond est passé à 8 000 le même jour, pour cette raison-là.)
 
     ⚠️ CETTE DÉFENSE A DONC UNE DATE DE PÉREMPTION : le jour où le catalogue
     Roblox dépassera 3 000 articles suivis, ou si le flux `surveiller` est
@@ -651,6 +671,48 @@ async def _migrer_amorce_bascules() -> int:
         return n
     except Exception as ex:
         _log(f"[roblox_veille _migrer_amorce_bascules] {ex}")
+        return 0
+
+
+MIGRATION_CLASSES = "classe_depuis_les_mesures_2026_09_27"
+
+
+async def _migrer_classes() -> int:
+    """Donne sa classe à chaque article déjà connu, d'après sa dernière mesure.
+
+    ⚠️ SANS ELLE, LE PREMIER TOUR APRÈS LE DÉPLOIEMENT SERAIT AVEUGLE : la
+    colonne `classe` naît vide, et une classe inconnue ne fabrique aucun
+    événement (on ne sait pas d'où l'article part). La série `roblox_mesures`
+    porte la classe de chaque article mesuré depuis le 30/08 : on la reprend,
+    une fois. Rend le nombre d'articles datés ; 0 si déjà faite.
+    """
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM roblox_migrations WHERE cle=?",
+                (MIGRATION_CLASSES,)) as cur:
+                if await cur.fetchone():
+                    return 0
+            await db.execute(
+                "UPDATE roblox_articles SET classe = (SELECT m.classe FROM"
+                " roblox_mesures m WHERE m.asset_id = roblox_articles.asset_id"
+                " ORDER BY m.id DESC LIMIT 1) WHERE classe IS NULL")
+            async with db.execute(
+                "SELECT COUNT(*) FROM roblox_articles WHERE classe IS NOT NULL"
+            ) as cur:
+                row = await cur.fetchone()
+            n = int(row[0] or 0) if row else 0
+            await db.execute(
+                "INSERT OR REPLACE INTO roblox_migrations(cle, fait_le, lignes)"
+                " VALUES(?,?,?)",
+                (MIGRATION_CLASSES, datetime.now(timezone.utc).isoformat(), n))
+            await db.commit()
+        _log(f"[roblox_veille migration] classes : {n} article(s) connu(s) "
+             f"reprennent leur classe (UGC Limited, Limited, Limited U) — un "
+             f"UGC Limited qui passe Limited se voit dès le premier tour")
+        return n
+    except Exception as ex:
+        _log(f"[roblox_veille _migrer_classes] {ex}")
         return 0
 
 
@@ -890,7 +952,21 @@ def age_publiable(article: dict, flux: str = "surveiller") -> bool:
         #  se tait (fail-closed, à l'inverse de la règle du 15/08 : la
         #  consigne a changé, la garde suit).
         h = _heures_depuis(article.get("cree_le"))
-        return h is not None and h <= FENETRE_DIRECTE_HEURES
+        if h is not None and h <= FENETRE_DIRECTE_HEURES:
+            return True
+        #  ⚠️ LA SORTIE, PAS SEULEMENT LA CRÉATION (27/09/2026). Roblox crée
+        #  certains accessoires À L'AVANCE et ne les met en vente que plus
+        #  tard. Mesuré ce jour-là : « Telamon's Other Crafting Jewel », créé
+        #  le 25/09 à 20:08, mis en vente le 27/09 à 15:13 (horodatage de
+        #  Roblox), absent du catalogue entre les deux. À sa première
+        #  apparition il avait 43 h : cette règle le jetait, et un accessoire
+        #  qui VENAIT de sortir n'était jamais annoncé. `sortie_le` n'est posé
+        #  que sur preuve (`comparer_et_enregistrer`, `_dater_par_roblox`) ;
+        #  la fenêtre reste celle du 18/08, et un article créé il y a plus de
+        #  AGE_MAX_SORTIE_JOURS ne passe jamais pour une nouveauté.
+        s = _heures_depuis(article.get("sortie_le"))
+        return (s is not None and s <= FENETRE_DIRECTE_HEURES
+                and h is not None and h <= 24 * AGE_MAX_SORTIE_JOURS)
     d = _jours_depuis(article.get("cree_le"))
     if d is None:
         return True
@@ -1051,77 +1127,109 @@ async def relever_hors_vente(limite: int = 120) -> dict:
     }, "hors_vente", max_pages=MAX_PAGES_HORS_VENTE)
 
 
-async def relever_collectionnables(limite: int = 30) -> dict:
-    """Les articles COLLECTIONNABLES de Roblox — le flux que le bot ne voyait pas.
+async def relever_collectionnables(limite: int = 30, pages: int | None = None,
+                                   reprises: bool = True) -> dict:
+    """Le flux Limited de Roblox, lu PAR MORCEAUX et EN TROIS PARTIES.
 
-    ⚠️ POURQUOI CETTE FONCTION EXISTE, ET CE QU'ELLE RÉPARE.
-    Le propriétaire a signalé le 16/08 que des accessoires passés Limited ne
-    sortaient jamais. La cause était structurelle : `relever_nouveautes` trie
-    par date de CRÉATION (`SortType=3`) et rend les N derniers articles créés
-    par Roblox. Or `comparer_et_enregistrer` ne peut détecter une bascule que
-    pour un article PRÉSENT dans le relevé. Un accessoire créé il y a six mois
-    qui passe Limited aujourd'hui n'est pas dans « les 60 derniers créés » : il
-    n'est jamais relevé, donc sa bascule n'est jamais vue.
+    ⚠️ POURQUOI CE RELEVÉ EXISTE (16/08). Un passage en Limited ne se voit que
+    si l'article est RELU : `comparer_et_enregistrer` compare à ce que la base
+    savait. Ce flux (`SalesTypeFilter=2`, créateur Roblox) est le seul qui
+    rende les Limiteds anciens ; le catalogue général ne montre que les
+    créations récentes. Mesuré le 16/08 : 10 Limited sur 10 avec le filtre,
+    0 sans. `SalesTypeFilter=3` ne filtre RIEN — ne pas le réintroduire.
 
-    MESURÉ, PAS SUPPOSÉ (sonde du 16/08, `outils/sonde_limiteds.py`) :
-      · les 10 articles les plus récemment créés par Roblox → **0 Limited** ;
-      · les 10 mêmes avec `SalesTypeFilter=2`               → **10 Limited**,
-        dont aucun n'apparaissait dans le premier relevé.
+    ⚠️ LA RECHERCHE DE ROBLOX S'ARRÊTE À 1 000 RÉSULTATS (mesuré le 27/09).
+    D'un seul tenant, ce flux rendait 995 Limiteds, et pas un de plus quelle
+    que soit la rotation ; découpé par type (`PARTITIONS_LIMITED`), il en rend
+    1 997, le flux unique y compris en entier. « Molten Lava Wings », passé
+    Limited le 28/08, n'était dans AUCUNE de ses pages.
 
-    Le paramètre `SalesTypeFilter=2` est donc le seul moyen de les atteindre.
-    `SalesTypeFilter=3` a été essayé : il ne filtre RIEN (résultats identiques
-    au relevé de référence) — ne pas le réintroduire en croyant mieux faire.
+    ⚠️ PAR MORCEAUX (30/08) : `pages` pages par appel, reprises là où l'appel
+    précédent s'est arrêté (`roblox_curseurs`, source `SOURCE_RECENSEMENT`).
+    Le débit est de 12 requêtes par minute et par IP — partagée sur Railway.
+    Le relevé de 30 min en lit `MAX_PAGES_COLLECTIONNABLES` ; l'éclaireur
+    une, de temps en temps, avec `reprises=False` : un 429 attend le passage
+    suivant au lieu de bloquer sa boucle. Un REFUS NE FAIT PAS AVANCER : la
+    même page sera redemandée. Un tour complet — les trois parties — compte
+    dans `tours` : c'est lui qui dit que le bot connaît TOUT le flux, la
+    condition pour dater par Roblox un Limited jamais vu (`_dater_par_roblox`).
 
     ⚠️ Garder `CreatorTargetId=1` : sans lui, le flux se remplit d'UGC de
-    créateurs tiers, hors du périmètre demandé (« uniquement ceux qui sont
-    créés par Roblox »).
-
-    ⚠️ DEPUIS LE 18/08 : DEUX PAGES, PAS PLUS. Ce flux ne publie plus rien
-    par lui-même (seules les bascules vues en direct sortent), il ne sert qu'à
-    DÉTECTER. Or il n'est PAS trié par date — mesuré ce jour-là : la page 1
-    va de 154 à 6 955 jours d'âge — donc aucun arrêt anticipé « par date »
-    n'est possible, et le paginer en entier coûtait 8 requêtes par passage,
-    celles qui faisaient tomber en 429 les appels de fiche. Presque toutes les
-    bascules qui nous intéressent sont visibles dans le catalogue GÉNÉRAL (les
-    964 plus récents, où l'article a déjà sa ligne « non collectionnable ») ;
-    ces deux pages attrapent le reste au meilleur coût. Un article de plus de
-    deux ans qui repasserait Limited peut nous échapper — cas rare, assumé.
+    créateurs tiers, hors du périmètre demandé.
     """
-    #  ⚠️ ROTATION DU CURSEUR — CORRECTIF DU 30/08/2026.
-    #  Deux pages restent le plafond (c'est le débit qui est en jeu, mesuré :
-    #  12 requêtes/60 s par chemin, `reste_min` descendu à 2). Mais on ne relit
-    #  plus les deux MÊMES pages : on reprend là où le passage précédent s'est
-    #  arrêté. Mesuré le 30/08 : le flux compte 998 articles en 9 pages, donc
-    #  238 lus sur 998 — 24 %. Les 76 % restants n'étaient JAMAIS comparés à
-    #  leur état antérieur, et leur passage en Limited ne pouvait pas être vu.
-    #  Avec la rotation, les 998 sont couverts en 5 passages, soit 2 h 30 — ce
-    #  qui tient dans la fenêtre de six heures de `vu_le`, la condition même de
-    #  « vient de passer Limited ».
-    depart, tours = await _curseur_lu("collectionnables")
-    out = await _relever_catalogue({
-        "Category": 1,
-        "SortType": 3,
-        "Limit": _limite_valide(limite),
-        "SalesTypeFilter": 2,          # 2 = Limited. Mesuré le 16/08.
-        "CreatorType": "User",
-        "CreatorTargetId": CREATEUR_ROBLOX,
-    }, "collectionnables", max_pages=MAX_PAGES_COLLECTIONNABLES,
-        curseur_depart=depart)
-    if out.get("curseur_refuse"):
-        #  Curseur périmé : on repart du début plutôt que de rester coincé.
-        _log("[roblox_veille collectionnables] curseur périmé — on repart du "
-             "début du flux")
-        await _curseur_ecrit("collectionnables", None, tours + 1)
-    elif out["code"] == 200:
-        suivant = out.get("curseur_suivant")
-        #  ⚠️ UN RELEVÉ TRONQUÉ N'EST PAS UN TOUR TERMINÉ. Le 429 est
-        #  requalifié en 200 plus haut (à raison : un relevé presque complet
-        #  vaut mieux que rien), mais le compter comme un tour ferait croire
-        #  qu'on a couvert les 998 articles alors qu'on s'est arrêté en route.
-        fini = not suivant and not out.get("tronque")
-        await _curseur_ecrit("collectionnables", suivant,
-                             tours + (1 if fini else 0))
-        out["tour"] = tours + (1 if fini else 0)
+    pages = MAX_PAGES_COLLECTIONNABLES if pages is None else max(1, int(pages))
+    brut, tours = await _curseur_lu(SOURCE_RECENSEMENT)
+    tours_debut = tours
+    partie, curseur = _position_recensement(brut)
+    out = {"articles": [], "code": None, "echecs": 0, "pages": 0,
+           "complet": False, "tronque": False, "req": 0, "n429": 0,
+           "reste_min": None, "curseur_suivant": None, "curseur_refuse": False,
+           "tour": tours, "partie": PARTITIONS_LIMITED[partie][0]}
+    vus: set[int] = set()
+    for n in range(pages):
+        if n:
+            await asyncio.sleep(PAUSE_ENTRE_APPELS_CATALOGUE)
+        nom, filtre = PARTITIONS_LIMITED[partie]
+        out["partie"] = nom
+        r = await _relever_catalogue({
+            "SortType": 3,
+            "Limit": _limite_valide(limite),
+            "SalesTypeFilter": 2,          # 2 = Limited. Mesuré le 16/08.
+            "IncludeNotForSale": "true",
+            "CreatorType": "User",
+            "CreatorTargetId": CREATEUR_ROBLOX,
+            **filtre,
+        }, "collectionnables", max_pages=1, curseur_depart=curseur,
+            reprises=reprises)
+        out["code"] = r.get("code")
+        out["echecs"] = int(r.get("echecs") or 0)
+        out["req"] += int(r.get("req") or 0)
+        out["n429"] += int(r.get("n429") or 0)
+        if r.get("reste_min") is not None:
+            out["reste_min"] = (r["reste_min"] if out["reste_min"] is None
+                                else min(out["reste_min"], r["reste_min"]))
+        if r.get("curseur_refuse"):
+            #  Curseur périmé (Roblox le refuse par un 400) : cette partie
+            #  repart de son début au lieu de rester coincée sur un curseur mort.
+            _log(f"[roblox_veille collectionnables] curseur périmé dans "
+                 f"« {nom} » — la partie repart de son début")
+            out["curseur_refuse"] = True
+            curseur = None
+            break
+        if out["code"] != 200:
+            out["tronque"] = out["tronque"] or out["code"] == 429
+            break
+        for a in (r.get("articles") or []):
+            if a["asset_id"] not in vus:
+                vus.add(a["asset_id"])
+                out["articles"].append(a)
+        out["pages"] += 1
+        curseur = r.get("curseur_suivant")
+        if r.get("tronque"):
+            #  Un 429 en cours de page : la page ratée sera redemandée, et on
+            #  ne martèle pas un seau qui vient de dire non.
+            out["tronque"] = True
+            break
+        if not curseur:
+            #  Cette partie est lue jusqu'au bout : la suivante — ou, après la
+            #  dernière, un tour de plus.
+            partie += 1
+            if partie >= len(PARTITIONS_LIMITED):
+                partie, tours = 0, tours + 1
+                out["complet"] = True
+    await _curseur_ecrit(SOURCE_RECENSEMENT, _position_ecrite(partie, curseur),
+                         tours)
+    if tours_debut < 1:
+        #  Lu pendant le PREMIER tour : « jamais vu » y veut dire « pas encore
+        #  lu », pas « nouveau dans le flux ». `_dater_par_roblox` les laisse.
+        for a in out["articles"]:
+            a["premier_tour"] = True
+    out["tour"] = tours
+    out["curseur_suivant"] = curseur
+    #  Une page refusée APRÈS d'autres pages lues : ce qui est lu reste bon,
+    #  comme dans `_relever_catalogue`. La page refusée sera redemandée.
+    if out["code"] == 429 and out["articles"]:
+        out["code"] = 200
     return out
 
 
@@ -1157,13 +1265,58 @@ async def _curseur_ecrit(source: str, curseur: str | None, tours: int) -> None:
 
 
 #  Voir la docstring de `relever_collectionnables` : ce flux n'est pas trié par
-#  date, il ne sert qu'à détecter, deux pages suffisent.
+#  date, il ne sert qu'à détecter, deux pages par relevé suffisent.
 MAX_PAGES_COLLECTIONNABLES = 2
+
+#  ⚠️ LES TROIS PARTIES DU FLUX LIMITED (27/09) — la recherche de Roblox
+#  s'arrête à 1 000 résultats. Mesuré ce jour-là, créateur Roblox,
+#  `SalesTypeFilter=2` : chapeaux 1 000 (plafond atteint : les plus anciens,
+#  Limited depuis longtemps, restent au-delà), accessoires et équipements
+#  836, packs 161. Soit 18 pages par tour, contre 995 articles en 9 pages
+#  d'un seul tenant.
+PARTITIONS_LIMITED = (
+    ("chapeaux", {"AssetTypeIds": (8,)}),
+    ("accessoires", {"AssetTypeIds": (41, 42, 43, 44, 45, 46, 47, 67, 72, 19)}),
+    ("packs", {"BundleTypeIds": (1, 2, 3, 4, 5)}),
+)
+#  Où en est la lecture : « partie|curseur » dans `roblox_curseurs`. Une clé
+#  NEUVE : l'ancienne rotation (« collectionnables ») comptait des tours d'un
+#  flux tronqué, qui ne prouvent pas qu'on connaît tout.
+SOURCE_RECENSEMENT = "limited_en_parties"
+
+
+def _position_recensement(brut) -> tuple[int, str | None]:
+    """« 1|curseur » → (1, "curseur"). Illisible ou hors bornes → (0, None)."""
+    try:
+        i, _sep, c = str(brut or "").partition("|")
+        i = int(i)
+        if 0 <= i < len(PARTITIONS_LIMITED):
+            return i, (c or None)
+    except (TypeError, ValueError):
+        pass
+    return 0, None
+
+
+def _position_ecrite(partie: int, curseur: str | None) -> str:
+    return f"{int(partie)}|{curseur or ''}"
+
+
+def _parametres(params):
+    """Les paramètres d'une requête ; une valeur multiple devient une CLÉ
+    RÉPÉTÉE (`AssetTypeIds=41&AssetTypeIds=42…`), ce qu'attend Roblox et ce
+    qu'un dict ne sait pas porter — aiohttp refuse une liste en valeur."""
+    from multidict import MultiDict
+    out = MultiDict()
+    for k, v in (params.items() if isinstance(params, dict) else params):
+        for x in (v if isinstance(v, (list, tuple)) else (v,)):
+            out.add(k, x)
+    return out
 
 
 async def _relever_catalogue(params: dict, source: str,
                              max_pages: int | None = None,
-                             curseur_depart: str | None = None) -> dict:
+                             curseur_depart: str | None = None,
+                             reprises: bool = True) -> dict:
     """L'appel au catalogue, partagé par les deux relevés.
 
     `source` sert au suivi de santé : un flux muet doit se voir SÉPARÉMENT.
@@ -1187,7 +1340,7 @@ async def _relever_catalogue(params: dict, source: str,
     try:
         async with _ouvrir() as sess:
             for page in range(MAX_PAGES_PAR_RELEVE):
-                p = dict(params)
+                p = _parametres(params)
                 if curseur:
                     p["Cursor"] = curseur
                 #  ⚠️ REPRISE SUR 429, ICI AUSSI. La sortie Railway est une IP
@@ -1198,7 +1351,8 @@ async def _relever_catalogue(params: dict, source: str,
                 #  comme pour les fiches (`_appel_avec_reprise`).
                 code, data = await _appel_avec_reprise(
                     sess, API_CATALOGUE, p,
-                    etiquette=f"{source} page {page + 1}", stats=out)
+                    etiquette=f"{source} page {page + 1}", stats=out,
+                    tentatives=MAX_TENTATIVES_429 if reprises else 1)
                 out["code"] = code
                 if code != 200 or data is None:
                     _log(f"[roblox_veille {source}] HTTP {code} à la page {page + 1}")
@@ -1951,7 +2105,8 @@ def _noter_budget(stats, entetes) -> None:
 
 async def _appel_avec_reprise(sess, url: str, params: dict | None = None,
                               etiquette: str | None = None,
-                              stats: dict | None = None):
+                              stats: dict | None = None,
+                              tentatives: int = MAX_TENTATIVES_429):
     """Un GET qui ne se laisse pas tuer par notre propre débit.
 
     Rend `(code, données)` — `données` vaut `None` si la réponse n'est pas
@@ -1964,7 +2119,8 @@ async def _appel_avec_reprise(sess, url: str, params: dict | None = None,
     le 16/08 : 0 article enrichi sur 3, alors que les mêmes appels rendaient
     3 sur 3 à froid.
     """
-    for tentative in range(1, MAX_TENTATIVES_429 + 1):
+    tentatives = max(1, int(tentatives))
+    for tentative in range(1, tentatives + 1):
         try:
             if stats is not None:
                 stats["req"] = int(stats.get("req") or 0) + 1
@@ -1976,7 +2132,7 @@ async def _appel_avec_reprise(sess, url: str, params: dict | None = None,
                 #  `429=0` pouvait s'afficher sur un passage tronqué.
                 if r.status == 429 and stats is not None:
                     stats["n429"] = int(stats.get("n429") or 0) + 1
-                if r.status == 429 and tentative < MAX_TENTATIVES_429:
+                if r.status == 429 and tentative < tentatives:
                     _attente = _attente_429_progressive(r.headers, tentative)
                     #  ⚠️ DIRE QUOI, PAS SEULEMENT « details ».
                     #  Les DEUX relevés paginés tapent la même URL, qui finit
@@ -2059,6 +2215,11 @@ async def enrichir(articles: list[dict]) -> None:
                 a["stock"] = det.get("TotalQuantity") or None
                 a["revente"] = det.get("CollectibleLowestResalePrice") or None
                 a["en_vente"] = bool(d.get("IsForSale"))
+                #  Ce qui reste à vendre (0 = épuisé) et l'heure de la
+                #  dernière modification par Roblox — celle d'un passage en
+                #  Limited ou d'une mise en vente (27/09). La fiche s'en sert.
+                a["restant"] = d.get("Remaining")
+                a["maj_roblox"] = d.get("Updated")
                 prix_origine = d.get("PriceInRobux")
                 if prix_origine is not None:
                     a["prix"] = prix_origine
@@ -2201,6 +2362,123 @@ async def vignettes(articles_ou_ids: list) -> dict:
     return out
 
 
+#  Les deux classes qui font un Limited ROBLOX. `Collectible` — « UGC
+#  Limited » côté joueur — n'en est pas une.
+CLASSES_LIMITED_ROBLOX = (CLASSE_LIMITED, CLASSE_LIMITED_U)
+
+
+def promotion_limited(avant, apres) -> bool:
+    """Un « UGC Limited » de Roblox devenu VRAI Limited (Limited ou Limited U).
+
+    ⚠️ LE TROU QUI A FAIT RATER LA FOURNÉE DU 22/09. Ce soir-là, Roblox a
+    reclassé ses propres UGC Limited en Limited U : Dark Guardian Angel,
+    Striking White Owl Shoulder Pet, Extraterrestrial Shades, Ice Fire Ram
+    Skull Helm (horodatage Roblox 23:04:41 → 23:06:53 UTC). Ils se
+    revendaient depuis 2024-2025 : collectionnables avant ET après, la base
+    n'y voyait aucun changement. Journal du 22/09, 23:xx : « 0 bascule(s) »
+    sur un tour complet du flux qui les contenait.
+
+    Une classe INCONNUE (`None`, article connu avant la colonne) ne promeut
+    rien : on ne sait pas d'où il part. Limited → Limited U non plus : ce
+    n'est pas « passer Limited ».
+    """
+    return avant == CLASSE_COLLECTIBLE and apres in CLASSES_LIMITED_ROBLOX
+
+
+#  Combien d'articles, au plus, on fait dater par Roblox à chaque détection.
+MAX_DATATIONS_ROBLOX = 8
+
+
+async def _dater_par_roblox(res: dict) -> None:
+    """Demande à ROBLOX quand un article a bougé, là où notre mémoire ne suffit
+    pas. Modifie `res` sur place.
+
+    Trois cas, rares, chacun mesuré le 27/09 :
+      · `bascules_anciennes` — un passage vu, mais notre dernière observation
+        date de plus de FENETRE_DIRECTE_HEURES (redémarrage, tour retardé) ;
+      · `limited_inconnus` — un Limited JAMAIS vu et pas une création
+        fraîche. Seulement une fois le flux Limited lu EN ENTIER au moins une
+        fois (`tours ≥ 1`) : avant, « jamais vu » veut dire « pas encore lu » ;
+      · `sorties_a_dater` — un accessoire jamais vu, en vente, créé il y a
+        plus de 6 h (« Telamon's Other Crafting Jewel »).
+    `economy.roblox.com/v2/assets/{id}/details` porte `Updated`, l'heure de la
+    dernière modification par Roblox : la fournée du 22/09 y porte 23:04:41 →
+    23:06:53 UTC, dans l'ordre où les sites d'échange l'ont listée. Seul ce
+    qui a bougé il y a moins de FENETRE_DIRECTE_HEURES passe : la règle du
+    18/08 (« il VIENT de passer ») reste entière — prouvée par Roblox au lieu
+    de l'être par notre mémoire.
+
+    ⚠️ L'ÉCONOMIE NE SERT QU'À DATER. Elle dit `IsLimitedUnique` d'un UGC
+    Limited (mesuré sur Shiny Bling, Glossy Red Baseball Cap) : la classe
+    vient toujours du catalogue. Au plus MAX_DATATIONS_ROBLOX appels, arrêt au
+    premier 429 ; les packs n'ont pas de fiche économie et restent non datés.
+    """
+    anciennes = list(res.get("bascules_anciennes") or [])
+    inconnus = [a for a in (res.get("limited_inconnus") or [])
+                if not a.get("premier_tour")]
+    sorties = list(res.get("sorties_a_dater") or [])
+    if inconnus:
+        _brut, tours = await _curseur_lu(SOURCE_RECENSEMENT)
+        if tours < 1:
+            inconnus = []
+    a_dater = ([(a, "bascule") for a in anciennes + inconnus]
+               + [(a, "sortie") for a in sorties])
+    a_dater = [(a, g) for a, g in a_dater
+               if str(a.get("item_type") or "").lower() != "bundle"]
+    a_dater = a_dater[:MAX_DATATIONS_ROBLOX]
+    if not a_dater:
+        return
+    res["datations"] = 0
+    pause = PAUSE_ECONOMIE_MIN
+    try:
+        async with _ouvrir() as sess:
+            for a, genre in a_dater:
+                if res["datations"]:
+                    await asyncio.sleep(pause)
+                d = None
+                try:
+                    async with sess.get(API_ECONOMIE_DETAILS.format(
+                            int(a["asset_id"]))) as r:
+                        _esp = _espacement_annonce(
+                            (r.headers or {}).get("x-ratelimit-limit"))
+                        if _esp:
+                            pause = max(PAUSE_ECONOMIE_MIN, _esp * MARGE_ESPACEMENT)
+                        if r.status == 429:
+                            break             # le seau a dit non : pas d'insistance
+                        if r.status == 200:
+                            d = await r.json(content_type=None)
+                except Exception as ex:
+                    #  Une panne réseau ne se répare pas dans la seconde : on
+                    #  arrête, le prochain passage redemandera.
+                    _log(f"[roblox_veille dater {a.get('asset_id')}] "
+                         f"{type(ex).__name__}: {ex}")
+                    break
+                res["datations"] += 1
+                if not isinstance(d, dict):
+                    continue
+                quand = d.get("Updated")
+                h = _heures_depuis(quand) if quand else None
+                if h is None or h > FENETRE_DIRECTE_HEURES:
+                    continue
+                if genre == "sortie":
+                    if d.get("IsForSale") is False:
+                        continue
+                    a["sortie_le"] = quand
+                    a["date_roblox"] = True
+                    res.setdefault("sorties_datees", []).append(a)
+                    continue
+                if not (d.get("IsLimited") or d.get("IsLimitedUnique")):
+                    continue
+                a["bascule_detectee"] = True
+                a["passe_le"] = quand
+                a["date_roblox"] = True
+                res["bascules"].append(a)
+                res["bascules_anciennes"] = [
+                    x for x in (res.get("bascules_anciennes") or []) if x is not a]
+    except Exception as ex:
+        _log(f"[roblox_veille _dater_par_roblox] {type(ex).__name__}: {ex}")
+
+
 def signature(article: dict) -> str:
     """Ce qui, en changeant, constitue un événement digne d'être publié.
 
@@ -2227,14 +2505,30 @@ async def comparer_et_enregistrer(articles: list[dict]) -> dict:
         async with _get_db() as db:
             for a in articles:
                 async with db.execute(
-                    "SELECT signature, collectionnable, hors_vente, vu_le FROM"
-                    " roblox_articles WHERE asset_id=?", (a["asset_id"],)) as cur:
+                    "SELECT signature, collectionnable, hors_vente, vu_le,"
+                    " classe FROM roblox_articles WHERE asset_id=?",
+                    (a["asset_id"],)) as cur:
                     row = await cur.fetchone()
                 sig = signature(a)
                 if row is None:
                     res["nouveaux"].append(a)
+                    _h = _heures_depuis(a.get("cree_le"))
+                    if _h is not None and _h > FENETRE_DIRECTE_HEURES:
+                        #  Jamais vu, et PAS une création fraîche : quand
+                        #  est-il arrivé ? Roblox le dira — `_dater_par_roblox`.
+                        if (a.get("collectionnable")
+                                and a.get("classe") in CLASSES_LIMITED_ROBLOX):
+                            res.setdefault("limited_inconnus", []).append(a)
+                        elif (not a.get("collectionnable")
+                              and not a.get("hors_vente")
+                              and _h <= 24 * AGE_MAX_SORTIE_JOURS):
+                            res.setdefault("sorties_a_dater", []).append(a)
                 else:
-                    if not int(row[1]) and a["collectionnable"]:
+                    promu = bool(int(row[1]) and a["collectionnable"]
+                                 and promotion_limited(row[4], a.get("classe")))
+                    if promu:
+                        a["classe_avant"] = row[4]
+                    if (not int(row[1]) and a["collectionnable"]) or promu:
                         #  ⚠️ « VIENT DE PASSER » — SEULEMENT SI ON L'A VU AVANT.
                         #  L'article était connu NON collectionnable et l'est
                         #  devenu. Mais depuis QUAND ? Si notre dernière
@@ -2252,19 +2546,40 @@ async def comparer_et_enregistrer(articles: list[dict]) -> dict:
                             res.setdefault("bascules_anciennes", []).append(a)
                     elif not int(row[2]) and a["hors_vente"]:
                         res["retires"].append(a)
+                    elif (int(row[2]) and not a["hors_vente"]
+                          and not a["collectionnable"]):
+                        #  ⚠️ MISE EN VENTE D'UNE CRÉATION RÉCENTE (27/09).
+                        #  Connue hors vente, la voici en vente : c'est sa
+                        #  SORTIE. Vue de près (dernière observation de moins
+                        #  de FENETRE_DIRECTE_HEURES), elle date d'à l'instant.
+                        #  Au-delà de AGE_MAX_SORTIE_JOURS, c'est un retour en
+                        #  vente, pas un nouvel accessoire.
+                        _h = _heures_depuis(a.get("cree_le"))
+                        depuis = _heures_depuis(row[3])
+                        if (_h is not None and _h <= 24 * AGE_MAX_SORTIE_JOURS
+                                and depuis is not None
+                                and depuis <= FENETRE_DIRECTE_HEURES):
+                            a["sortie_le"] = maintenant
+                            res["nouveaux"].append(a)
+                            res.setdefault("mises_en_vente", []).append(a)
                 _it = str(a.get("item_type") or "") or None
+                #  La classe EXACTE (27/09). `None` = inconnue : on garde celle
+                #  qu'on avait, on ne l'efface jamais par ignorance.
+                _cl = a.get("classe")
                 await db.execute(
                     "INSERT INTO roblox_articles(asset_id, nom, type_article,"
                     " prix, collectionnable, hors_vente, favoris, cree_le,"
-                    " vu_le, signature, item_type) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+                    " vu_le, signature, item_type, classe)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
                     " ON CONFLICT(asset_id) DO UPDATE SET nom=?, prix=?,"
                     "  collectionnable=?, hors_vente=?, favoris=?, vu_le=?,"
-                    "  signature=?, item_type=COALESCE(?, item_type)",
+                    "  signature=?, item_type=COALESCE(?, item_type),"
+                    "  classe=COALESCE(?, classe)",
                     (a["asset_id"], a["nom"], a["type_article"], a["prix"],
                      a["collectionnable"], a["hors_vente"], a["favoris"],
-                     a["cree_le"], maintenant, sig, _it,
+                     a["cree_le"], maintenant, sig, _it, _cl,
                      a["nom"], a["prix"], a["collectionnable"], a["hors_vente"],
-                     a["favoris"], maintenant, sig, _it))
+                     a["favoris"], maintenant, sig, _it, _cl))
             await db.commit()
     except Exception as ex:
         _log(f"[roblox_veille comparer] {ex}")
@@ -2273,6 +2588,9 @@ async def comparer_et_enregistrer(articles: list[dict]) -> dict:
     #  détection : la série est un bonus pour plus tard, la détection est le
     #  produit. `enregistrer_mesures` avale d'ailleurs ses propres erreurs.
     await enregistrer_mesures(articles)
+    #  ⚠️ APRÈS LA BASE, JAMAIS AVANT : une panne réseau ici ne doit pas coûter
+    #  l'enregistrement. Rare : seulement ce que notre mémoire ne sait pas dater.
+    await _dater_par_roblox(res)
     return res
 
 
@@ -2445,14 +2763,22 @@ async def flux_deja_sortis(guild_id: int, asset_id: int) -> set[str]:
         return set(PRIORITE_FLUX)
 
 
-async def publiable_dans(guild_id: int, asset_id: int, flux: str) -> bool:
+async def publiable_dans(guild_id: int, asset_id: int, flux: str,
+                         article: dict | None = None) -> bool:
     """Cet article a-t-il sa place dans CE flux, sur ce serveur ?
 
     Non s'il y est déjà sorti, et non s'il est déjà sorti dans un flux plus
     fort — voir `PRIORITE_FLUX`.
+
+    ⚠️ SAUF UNE PROMOTION (27/09) : un UGC Limited déjà annoncé comme tel qui
+    devient VRAI Limited est une autre nouvelle. `article` le dit
+    (`classe_avant`) ; « jamais deux fois la même » reste gardé par l'unicité
+    de la transition en base (`enfiler`).
     """
     sortis = await flux_deja_sortis(guild_id, asset_id)
-    if flux in sortis:
+    if flux in sortis and not (
+            flux == "bascules" and article
+            and article.get("classe_avant") == CLASSE_COLLECTIBLE):
         return False
     mien = PRIORITE_FLUX.get(flux, 0)
     return not any(PRIORITE_FLUX.get(f, 0) > mien for f in sortis)
@@ -2501,7 +2827,11 @@ def etat_transition(article: dict) -> tuple[str, str]:
     les favoris n'y entrent donc pas.
     """
     if article.get("bascule_detectee"):
-        return "normal", (article.get("classe") or CLASSE_LIMITED)
+        #  Une PROMOTION part d'une autre classe (27/09) : « Collectible →
+        #  LimitedUnique » n'est pas « normal → Collectible », et l'unicité
+        #  doit laisser sortir les deux, une fois chacune.
+        return ((article.get("classe_avant") or "normal"),
+                (article.get("classe") or CLASSE_LIMITED))
     return "absent", "nouveau"
 
 

@@ -18,6 +18,11 @@ L'HISTOIRE, MESURE PAR MESURE
       · UNE sonde de tête (la liste générale), à chaque passage ;
       · la SURVEILLANCE des articles retirés de la vente, à chaque passage,
         sur le seau des fiches : c'est elle qui voit les passages en Limited.
+27/09 — la fournée du 22/09 (UGC Limited de Roblox reclassés en Limited U)
+    n'est jamais sortie : ils étaient collectionnables avant ET après, et la
+    surveillance ne regarde que des NON collectionnables. D'où la RELECTURE
+    du flux Limited, une page tous les ECLAIREUR_RECENSEMENT_PASSAGES passages,
+    sur le second seau et sous ses gardes (tests R).
 """
 from __future__ import annotations
 
@@ -77,7 +82,12 @@ class FauxCatalogue:
     DERNIER_QUOTA_FICHES = None
 
     def __init__(self, reponses, flux=None, surveilles=(), bascules=(),
-                 fiches_refusees=0, economie_max=None, connus=None):
+                 fiches_refusees=0, economie_max=None, connus=None,
+                 recensement=()):
+        #  Les pages du flux Limited que rendra `relever_collectionnables`,
+        #  une par appel ; et ce qu'on lui a demandé.
+        self.recensement = list(recensement)
+        self.recensements = []
         #  Ce que le relevé complet a déjà enregistré en base.
         self.connus = connus or ({1, 2}, {1})
         #  Un code (refus à chaque appel) ou une LISTE de codes consommés un
@@ -171,8 +181,17 @@ class FauxCatalogue:
     def age_publiable(self, _a, _flux):
         return True
 
-    async def publiable_dans(self, _gid, _aid, _flux):
+    async def publiable_dans(self, _gid, _aid, _flux, article=None):
         return True
+
+    async def relever_collectionnables(self, limite=30, pages=None,
+                                       reprises=True):
+        self.recensements.append({"limite": limite, "pages": pages,
+                                  "reprises": reprises})
+        if self.recensement:
+            return self.recensement.pop(0)
+        return {"articles": [], "code": 200, "pages": 1, "reste_min": 11,
+                "partie": "chapeaux"}
 
     async def enfiler(self, _gid, a, flux):
         self.enfiles.append((a["asset_id"], flux))
@@ -190,11 +209,12 @@ class FauxAsyncio:
 
 
 def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=(),
-          fiches_refusees=0, economie_max=None, connus=None):
+          fiches_refusees=0, economie_max=None, connus=None, recensement=()):
     journal = []
     cat = FauxCatalogue(reponses, flux=flux, surveilles=surveilles,
                         bascules=bascules, fiches_refusees=fiches_refusees,
-                        economie_max=economie_max, connus=connus)
+                        economie_max=economie_max, connus=connus,
+                        recensement=recensement)
     E = {"amorce": True, "vus": {1, 2}, "vus_limited": {1},
          "tour": 0, "palier": 0, "pause_jusqu": None, "refus": 0, "reste": None,
          "rattrapes": 0, "serie": 0, "serie_max": 0, "alerte": False,
@@ -209,6 +229,9 @@ def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=(),
          "serie_refus_fiches": 0, "serie_refus_fiches_max": 0,
          "quota_fiches": None,
          "fiches_ratees": 0, "dernier_lot_rate": None, "fiches_tete": 0,
+         #  ⚠️ PIÈGE N°6 : ce que porte le vrai `_ECLAIREUR` depuis le 27/09.
+         "recensement_pages": 0, "recensement_refus": 0,
+         "recensement_retenus": 0, "promotions": 0,
          "passages": 0, "sautes": 0, "erreurs": 0, "nouveautes": 0,
          "bascules": 0, "publies": 0,
          "dernier_passage": None, "dernier_signal": None}
@@ -236,13 +259,18 @@ def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=(),
     for nom in ("ECLAIREUR_SECONDES", "ECLAIREUR_PAUSES", "ECLAIREUR_BATTEMENT",
                 "ECLAIREUR_ALERTE_APRES_S", "ECLAIREUR_AVANT_RELEVE_S",
                 "ECLAIREUR_SECOURS_RESTE_MIN", "ECLAIREUR_SECOURS_PAUSE_S",
-                "ECLAIREUR_SURVEILLANCE_LEGERE", "ECLAIREUR_TRANCHE_ECONOMIE"):
+                "ECLAIREUR_SURVEILLANCE_LEGERE", "ECLAIREUR_TRANCHE_ECONOMIE",
+                "ECLAIREUR_RECENSEMENT_PASSAGES"):
         ns[nom] = _constante(nom)
     #  ⚠️ PIÈGE N°6 : les deux gardes du second seau vivent HORS de
     #  l'éclaireur depuis le 23/09 (soir). Sans elles dans le banc, chaque
     #  passage levait un NameError avalé par le `except` — 10 tests rouges.
     for nom in ("_second_seau_libre", "_noter_second_seau"):
         exec(_src_sync(nom), ns)              # noqa: S102 — code du dépôt
+    #  Le corps partagé des passages en Limited et la relecture du flux
+    #  Limited (27/09) — même règle : sans eux, NameError avalé.
+    exec(_src("_publier_bascules"), ns)       # noqa: S102 — code du dépôt
+    exec(_src("_recenser_limited"), ns)       # noqa: S102 — code du dépôt
     exec(_src("_surveiller_retires"), ns)     # noqa: S102 — code du dépôt
     exec(_src("eclaireur_task"), ns)          # noqa: S102 — code du dépôt
     ns["_sommeils"] = faux_asyncio.sommeils
@@ -689,3 +717,81 @@ def test_N3_la_lecture_groupee_couvre_les_QUATRE_categories_updates():
 def test_N4_le_battement_reste_a_30_minutes():
     assert (_constante("ECLAIREUR_ACTU_SECONDES")
             * _constante("ECLAIREUR_ACTU_BATTEMENT")) == 1800
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  R — la relecture du flux Limited (27/09)
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MESURÉ LE 27/09 : Dark Guardian Angel, Striking White Owl Shoulder Pet,
+#  Extraterrestrial Shades, Ice Fire Ram Skull Helm — UGC Limited de Roblox
+#  reclassés en Limited U le 22/09 vers 23:05 UTC. Journal de ce soir-là :
+#  « 0 bascule(s) ». Ils étaient dans le flux Limited avant ET après.
+
+def _page(articles, code=200, reste=11):
+    return {"articles": list(articles), "code": code, "pages": 1 if code == 200
+            else 0, "reste_min": reste, "partie": "chapeaux"}
+
+
+def test_R1_une_page_du_flux_Limited_tous_les_N_passages_sans_reprise():
+    n = _constante("ECLAIREUR_RECENSEMENT_PASSAGES")
+    assert 2 <= n <= 8, "trop rare, le tour dépasse l'heure ; trop fréquent, le seau souffre"
+    ns, E, cat, _j = _banc([_ok([1]) for _ in range(2 * n)])
+    for _ in range(2 * n):
+        _tick(ns)
+    assert len(cat.recensements) == 2, cat.recensements
+    assert all(r["pages"] == 1 and r["reprises"] is False
+               for r in cat.recensements), (
+        "une page, et un 429 attend le passage suivant : une reprise de 60 s "
+        "bloquerait la boucle de 45 s")
+    assert E["recensement_pages"] == 2
+
+
+def test_R2_une_PROMOTION_vue_dans_le_flux_sort_tout_de_suite():
+    b = {"asset_id": 76292007466829, "bascule_detectee": True,
+         "classe_avant": "Collectible", "classe": "LimitedUnique"}
+    ns, E, cat, journal = _banc([_ok([1])], bascules=[b],
+                                recensement=[_page([dict(b)])])
+    _tick(ns)
+    assert (76292007466829, "bascules") in cat.enfiles
+    assert "publie:flux Limited" in journal, journal
+    assert E["promotions"] == 1 and E["bascules"] == 1
+    assert any("💎" in l and "flux Limited" in l for l in journal), journal
+
+
+def test_R3_la_relecture_se_RETIENT_juste_avant_le_releve_complet():
+    """Même garde que le secours : le relevé complet lit ce flux lui-même."""
+    ns, E, cat, _j = _banc([_ok([1])])
+    ns["veille_roblox_task"] = type("L", (), {
+        "next_iteration": datetime.now(timezone.utc) + timedelta(seconds=30)})()
+    _tick(ns)
+    assert cat.recensements == [] and E["recensement_retenus"] == 1
+
+
+def test_R4_un_refus_est_COMPTE_et_ne_compare_rien():
+    ns, E, cat, journal = _banc([_ok([1])], recensement=[_page([], code=429, reste=0)])
+    _tick(ns)
+    assert E["recensement_refus"] == 1 and E["recensement_pages"] == 0
+    assert not [l for l in journal if "💎" in l], journal
+
+
+def test_R5_bascules_eteintes_AUCUNE_relecture():
+    ns, _E, cat, _j = _banc([_ok([1])], flux={"roblox_flux_nouveautes": True})
+    _tick(ns)
+    assert cat.recensements == []
+
+
+def test_R6_un_second_seau_presque_vide_apres_la_page_se_repose():
+    ns, E, _cat, _j = _banc([_ok([1])], recensement=[_page([], reste=2)])
+    _tick(ns)
+    assert E["secours_pause_jusqu"] is not None
+
+
+def test_R7_la_relecture_passe_APRES_la_surveillance_et_seulement_pour_les_bascules():
+    c = _src("eclaireur_task")
+    i_surv = c.index("_surveiller_retires(guildes, E)")
+    i_rec = c.index("_recenser_limited(guildes, E)")
+    assert i_surv < i_rec
+    arbre = ast.parse(c)
+    garde = next(n for n in ast.walk(arbre) if isinstance(n, ast.If)
+                 and ast.unparse(n.test) == "_veut_b")
+    assert "_recenser_limited(guildes, E)" in ast.unparse(garde)

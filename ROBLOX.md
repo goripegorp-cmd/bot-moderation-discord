@@ -217,6 +217,25 @@ tout y tombe.
 3. **👀 À surveiller** — indice ≥ 60 uniquement
 4. **📢 Actualité** — 5 sources officielles, étiquetées par domaine
 
+### Ce qu'est « passer Limited » (27/09/2026)
+
+- **Trois classes, pas deux** : `Collectible` (UGC Limited), `Limited`,
+  `LimitedUnique`. La base garde la classe EXACTE (`roblox_articles.classe`) :
+  le 22/09, Roblox a reclassé des UGC Limited à lui en Limited U (Dark
+  Guardian Angel & co.), collectionnables avant ET après — invisibles tant
+  qu'on ne gardait qu'un booléen. `promotion_limited` en fait une bascule.
+- **Le flux Limited se lit en trois parties** (`PARTITIONS_LIMITED`) : la
+  recherche de Roblox s'arrête à 1 000 résultats (995 d'un seul tenant, 1 997
+  en trois parties, mesuré). Le relevé de 30 min en lit 2 pages, l'éclaireur
+  une toutes les 3 min : un tour complet en ~45 min.
+- **Roblox date ce que notre mémoire ne sait pas dater** (`_dater_par_roblox`,
+  champ `Updated` de l'économie) : une bascule vue trop tard, un Limited jamais
+  vu après un tour complet, une création mise en vente plus tard. La fenêtre
+  reste de 6 h — « il VIENT de passer ».
+- **Une nouveauté, c'est sa SORTIE** : un accessoire créé à l'avance puis mis
+  en vente (Telamon's Other Crafting Jewel, créé le 25/09, en vente le 27/09)
+  sort à sa mise en vente, s'il a moins de 30 jours.
+
 ### Les constantes, et leur justification MESURÉE
 
 ⚠️ Ne pas les changer sans refaire la mesure. Chacune vient d'un appel réel.

@@ -228,13 +228,27 @@ def construire_fiche(article: dict, flux: str, image: str | None = None,
     #  Un article hors vente et non Limited ne sort plus du tout (voir
     #  `roblox_veille.enfiler`) ; un Limited hors vente se revend entre
     #  joueurs, et c'est ce qu'on dit.
-    if not article.get("hors_vente"):
+    #  ⚠️ ÉPUISÉ N'EST PAS « EN VENTE » (27/09). « Shedletsekkar » : 20
+    #  exemplaires à 2 000 000 R$, tous partis — le catalogue ne le dit pas
+    #  hors vente, l'économie dit `Remaining: 0`. Et quand l'économie a
+    #  répondu (`enrichir`), c'est elle qui dit s'il s'achète encore.
+    #  Seulement pour ce qui SEMBLE en vente : un Limited offert lors d'un
+    #  événement (Dark Guardian Angel) n'a jamais été « épuisé », il se revend.
+    _epuise = (bool(article.get("collectionnable")) and not article.get("hors_vente")
+               and article.get("restant") == 0)
+    if (not article.get("hors_vente") and article.get("en_vente") is not False
+            and not _epuise):
         _dispo = "🟢 en vente"
     elif article.get("collectionnable"):
-        _dispo = "🔁 revente entre joueurs"
+        _dispo = "🔁 revente entre joueurs" + (" · stock épuisé" if _epuise else "")
     else:
         _dispo = "hors vente"
     lignes.append(f"**Disponibilité** · {_dispo}")
+    if flux == "bascules" and article.get("classe_avant") == veille.CLASSE_COLLECTIBLE:
+        #  UNE PROMOTION (27/09) : il se revendait déjà, en UGC Limited. Sans
+        #  cette ligne, « VIENT DE PASSER » paraîtrait faux à qui l'a vu se
+        #  revendre hier.
+        lignes.append("**Avant** · UGC Limited")
     if flux == "bascules" or article.get("collectionnable"):
         lignes.append(f"**Revente la plus basse** · {_fmt_robux(revente)}")
         lignes.append(f"**Stock émis** · {_fmt_nombre(stock)}")
@@ -253,7 +267,24 @@ def construire_fiche(article: dict, flux: str, image: str | None = None,
     #  La date : création pour une nouveauté ; pour une bascule, on la DIT
     #  détectée — Roblox ne publie pas la date de passage en Limited.
     if flux == "bascules":
-        pied = "-# 🔷 Passage en Limited **détecté à l'instant** par comparaison de deux relevés"
+        #  ⚠️ L'HEURE DE ROBLOX QUAND ELLE EXISTE (27/09). `passe_le` : Roblox
+        #  a daté le passage (`_dater_par_roblox`). Sinon `maj_roblox` (lue
+        #  par `enrichir`), mais seulement dans la fenêtre de détection :
+        #  plus vieille, c'est une autre modification, qu'on n'attribue pas
+        #  au passage.
+        _quand = article.get("passe_le") or _si_recent(article.get("maj_roblox"))
+        if _quand:
+            pied = (f"-# 🔷 Passé {veille.libelle_classe(_classe)} "
+                    f"{_horodatage(_quand, 'R')} · heure donnée par Roblox")
+        else:
+            pied = ("-# 🔷 Passage en Limited **détecté à l'instant** par "
+                    "comparaison de deux relevés")
+    elif article.get("sortie_le"):
+        #  Une création mise en vente plus tard (27/09) : c'est la SORTIE qui
+        #  fait la nouvelle, la création n'est qu'un repère.
+        _sortie = _si_recent(article.get("maj_roblox")) or article.get("sortie_le")
+        pied = (f"-# 🟢 Mis en vente {_horodatage(_sortie, 'R')} · créé "
+                f"{_horodatage(article.get('cree_le'))} · Roblox")
     else:
         pied = f"-# 📅 Créé {_horodatage(article.get('cree_le'))} · Roblox"
     items.append(v2_body(pied))
@@ -430,20 +461,27 @@ STYLE_DOMAINE = {
 }
 
 
-def _horodatage(iso) -> str:
+def _horodatage(iso, style: str = "f") -> str:
     """`<t:UNIX:f>` — Discord l'affiche dans le fuseau du LECTEUR.
 
     L'ancienne fiche écrivait « 04/08/2026 18:11 » en dur : juste pour un
     lecteur, faux pour tous les autres. Une date illisible rend « — ».
+    `style="R"` : « il y a 12 minutes », qui se met à jour tout seul.
     """
     try:
         from datetime import datetime, timezone
         d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
         if d.tzinfo is None:
             d = d.replace(tzinfo=timezone.utc)
-        return f"<t:{int(d.timestamp())}:f>"
+        return f"<t:{int(d.timestamp())}:{style}>"
     except Exception:
         return "—"
+
+
+def _si_recent(iso):
+    """`iso` s'il tombe dans la fenêtre de détection, sinon `None`."""
+    h = veille._heures_depuis(iso) if iso else None
+    return iso if (h is not None and h <= veille.FENETRE_DIRECTE_HEURES) else None
 
 
 def _tronquer_propre(texte: str, budget: int) -> str:
@@ -1174,7 +1212,7 @@ class RobloxPanelV2(LayoutView):
                         motifs["age"] += 1
                         continue
                     if not await veille.publiable_dans(
-                            self.g.id, a_e["asset_id"], flux_e):
+                            self.g.id, a_e["asset_id"], flux_e, article=a_e):
                         motifs["deja"] += 1
                         continue
                     #  ⚠️ ON LIT LE RETOUR. Un refus d'unicite — la fiche est

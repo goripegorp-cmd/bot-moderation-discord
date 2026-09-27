@@ -53,11 +53,13 @@ def params_captures(monkeypatch):
     #  donc il ne prouvait plus rien sur le code réel. Même règle pour les clés
     #  du dictionnaire rendu : `relever_collectionnables` lit maintenant
     #  `curseur_suivant` et `curseur_refuse`.
-    async def _faux(params, source, max_pages=None, curseur_depart=None):
+    async def _faux(params, source, max_pages=None, curseur_depart=None,
+                    reprises=True):
         vus["params"] = dict(params)
         vus["source"] = source
         vus["max_pages"] = max_pages
         vus["curseur_depart"] = curseur_depart
+        vus["appels"] = vus.get("appels", 0) + 1
         return {"articles": [], "code": 200, "echecs": 0,
                 "curseur_suivant": None, "curseur_refuse": False}
 
@@ -89,11 +91,15 @@ async def test_le_releve_des_collectionnables_filtre_sur_les_limiteds(params_cap
         "sans le filtre de créateur, le flux se remplit d'UGC tiers — hors du "
         "périmètre demandé (« uniquement ceux créés par Roblox »)")
     assert p.get("SortType") == 3, "les plus récents d'abord"
+    #  ⚠️ 27/09 : la recherche s'arrête à 1 000 résultats — chaque requête
+    #  porte le filtre d'UNE partie du flux (voir `PARTITIONS_LIMITED`).
+    assert p.get("AssetTypeIds") or p.get("BundleTypeIds"), p
     #  ⚠️ Ce flux N'EST PAS trié par date (mesuré le 18/08 : la page 1 va de
     #  154 à 6 955 jours) — donc pas d'arrêt anticipé « par date ». Il ne sert
-    #  qu'à détecter : deux pages, pas plus, sinon les 8 pages épuisent le
-    #  débit et les appels de fiche (stock, revente, vignettes) tombent en 429.
-    assert params_captures["max_pages"] == veille.MAX_PAGES_COLLECTIONNABLES
+    #  qu'à détecter : deux pages par relevé, une par requête, sinon les pages
+    #  épuisent le débit et les appels de fiche tombent en 429.
+    assert params_captures["max_pages"] == 1
+    assert params_captures["appels"] == veille.MAX_PAGES_COLLECTIONNABLES
     assert 1 <= veille.MAX_PAGES_COLLECTIONNABLES <= 3
 
 
@@ -214,7 +220,9 @@ async def test_une_bascule_nest_detectee_que_si_on_a_vu_larticle_recemment(monke
     def _faux_get_db(vu_le_iso):
         class _Cur:
             async def fetchone(self):
-                return ("0|0", 0, 0, vu_le_iso)   # connu NON collectionnable
+                #  connu NON collectionnable — les CINQ colonnes du vrai
+                #  SELECT (piège n°6), classe comprise (27/09).
+                return ("0|0", 0, 0, vu_le_iso, "")
 
             async def __aenter__(self):
                 return self

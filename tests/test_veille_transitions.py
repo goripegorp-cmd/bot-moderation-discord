@@ -505,62 +505,86 @@ def test_10_aucune_probabilite_nest_affichee_sans_horizon_ni_modele():
 #  La rotation du curseur — 24 % du flux Limited était lu, et toujours le même
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _flux_en_parties(tailles: dict, servies: list):
+    """Le flux Limited tel que Roblox le sert : une partie par filtre
+    (`AssetTypeIds`/`BundleTypeIds`), 120 par page, un curseur par partie.
+    Mêmes tailles que la mesure du 27/09 si on les lui donne."""
+    async def _faux(params, source, max_pages=None, curseur_depart=None,
+                    reprises=True):
+        cle = str(params.get("AssetTypeIds") or params.get("BundleTypeIds"))
+        rang = list(tailles).index(cle)
+        total = tailles[cle]
+        debut = int(curseur_depart or 0)
+        fin = min(debut + 120 * (max_pages or 99), total)
+        servies.append((cle, debut, fin))
+        return {"articles": [{"asset_id": rang * 100000 + i}
+                             for i in range(debut, fin)],
+                "code": 200, "echecs": 0,
+                "curseur_suivant": str(fin) if fin < total else None,
+                "curseur_refuse": False}
+    return _faux
+
+
+def _tailles_mesurees():
+    """1 000 chapeaux (plafond), 836 accessoires, 161 packs — le 27/09."""
+    return {str(f.get("AssetTypeIds") or f.get("BundleTypeIds")): n
+            for (_nom, f), n in zip(veille.PARTITIONS_LIMITED, (1000, 836, 161))}
+
+
 @pytest.mark.asyncio
 async def test_la_rotation_du_curseur_finit_par_tout_couvrir(banc, monkeypatch):
-    """⚠️ MESURÉ LE 30/08 : le flux Limited compte 998 articles en 9 pages ;
-    le relevé n'en lisait que 2, TOUJOURS LES MÊMES — 238 sur 998, soit 24 %.
-    Les 76 % restants n'étaient jamais comparés à leur état antérieur, donc
-    leur passage en Limited ne pouvait pas être vu."""
+    """⚠️ DEUX MESURES. Le 30/08 : le relevé lisait 2 pages sur 9, TOUJOURS
+    LES MÊMES (24 % du flux). Le 27/09 : la recherche s'arrête à 1 000
+    résultats — 995 Limiteds d'un seul tenant, 1 997 en trois parties. Neuf
+    relevés de deux pages doivent couvrir les TROIS parties, et un tour ne se
+    compte qu'à la fin de la dernière."""
     await _preparer(banc)
-    TOTAL, PAR_PAGE = 900, 120
-    servies = []
 
-    async def _faux(params, source, max_pages=None, curseur_depart=None):
-        debut = int(curseur_depart or 0)
-        pages, ids = 0, []
-        while pages < (max_pages or 99) and debut < TOTAL:
-            fin = min(debut + PAR_PAGE, TOTAL)
-            ids += list(range(debut + 1, fin + 1))
-            debut, pages = fin, pages + 1
-        servies.append(list(ids))
-        return {"articles": [{"asset_id": i} for i in ids], "code": 200,
-                "echecs": 0, "curseur_suivant": (str(debut) if debut < TOTAL
-                                                 else None),
-                "curseur_refuse": False}
+    async def _dodo(_s):
+        return None
 
-    monkeypatch.setattr(veille, "_relever_catalogue", _faux)
-
+    monkeypatch.setattr(veille.asyncio, "sleep", _dodo)
+    tailles, servies = _tailles_mesurees(), []
+    monkeypatch.setattr(veille, "_relever_catalogue",
+                        _flux_en_parties(tailles, servies))
     vus = set()
-    for _ in range(5):
+    for n in range(9):
         out = await veille.relever_collectionnables(limite=120)
         vus |= {a["asset_id"] for a in out["articles"]}
-
-    assert len(vus) == TOTAL, (
-        f"cinq passages ne couvrent que {len(vus)} articles sur {TOTAL} — "
-        f"la rotation du curseur ne tourne pas")
-    #  Le coût par passage n'a PAS bougé : c'est toute la raison du dispositif.
-    assert all(len(s) <= 2 * PAR_PAGE for s in servies)
-    #  Et le premier passage ne relit pas ce que le deuxième a lu.
-    assert servies[0] != servies[1]
+        _c, tours = await veille._curseur_lu(veille.SOURCE_RECENSEMENT)
+        assert tours == (1 if n == 8 else 0), (n, tours)
+    assert len(vus) == sum(tailles.values()) == 1997, len(vus)
+    #  Le coût par relevé n'a PAS bougé : deux pages, jamais plus.
+    assert len(servies) == 18 and all(f - d <= 120 for _c, d, f in servies)
+    #  Et chaque partie est reprise là où la précédente lecture l'avait laissée.
+    assert [d for c, d, _f in servies if c == str((8,))] == [
+        120 * k for k in range(9)]
 
 
 @pytest.mark.asyncio
 async def test_un_curseur_perime_ne_bloque_pas_le_flux_pour_toujours(banc, monkeypatch):
     """Un curseur mémorisé expire. Sans repli, le relevé resterait coincé
-    dessus à CHAQUE passage, muet pour toujours."""
+    dessus à CHAQUE passage, muet pour toujours. Repli : SA partie repart de
+    son début — pas tout le flux, et pas un tour compté pour rien."""
     await _preparer(banc)
-    await veille._curseur_ecrit("collectionnables", "curseur_mort", 0)
+    await veille._curseur_ecrit(veille.SOURCE_RECENSEMENT, "1|curseur_mort", 3)
+    vus = []
 
-    async def _faux(params, source, max_pages=None, curseur_depart=None):
+    async def _faux(params, source, max_pages=None, curseur_depart=None,
+                    reprises=True):
+        vus.append(curseur_depart)
         return {"articles": [], "code": 400, "echecs": 1,
                 "curseur_suivant": None, "curseur_refuse": True}
 
     monkeypatch.setattr(veille, "_relever_catalogue", _faux)
     await veille.relever_collectionnables(limite=120)
 
-    curseur, tours = await veille._curseur_lu("collectionnables")
-    assert curseur is None, "le curseur périmé doit être oublié"
-    assert tours == 1
+    brut, tours = await veille._curseur_lu(veille.SOURCE_RECENSEMENT)
+    assert vus == ["curseur_mort"]
+    assert veille._position_recensement(brut) == (1, None), brut
+    assert tours == 3, "un curseur refusé n'est pas un tour lu"
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -817,51 +841,65 @@ async def test_G1bis_le_staff_peut_relancer_une_fiche_abandonnee(banc):
 
 @pytest.mark.asyncio
 async def test_B2_un_releve_tronque_ne_rembobine_pas_le_curseur(banc, monkeypatch):
-    """⚠️ LE DÉFAUT LE PLUS SOURNOIS DE LA RÉFUTATION.
+    """⚠️ LE DÉFAUT LE PLUS SOURNOIS DE LA RÉFUTATION (30/08).
 
-    Le 429 est requalifié en 200 (à raison), mais la sortie par 429 laissait
-    `curseur_suivant` à None — ce que l'appelant lisait comme « tour terminé ».
-    La rotation REMBOBINAIT au début du flux, et les pages suivantes n'étaient
-    jamais atteintes tant que le 429 retombait au même rang. Le bilan imprimait
-    pourtant « reprise au prochain passage ».
+    Une sortie par 429 lue comme « tour terminé » REMBOBINAIT la rotation au
+    début du flux : les pages suivantes n'étaient jamais atteintes tant que
+    le 429 retombait au même rang. Un refus ne fait donc JAMAIS avancer — ni
+    un refus franc, ni une page tronquée — et ne compte pas de tour.
     """
     await _preparer(banc)
-    await veille._curseur_ecrit("collectionnables", "page_5", 0)
+    for reponse in ({"articles": [], "code": 429, "echecs": 1},
+                    {"articles": [{"asset_id": 1}], "code": 200, "echecs": 0,
+                     "tronque": True}):
+        await veille._curseur_ecrit(veille.SOURCE_RECENSEMENT, "0|page_5", 0)
+        appels = []
 
-    async def _tronque(params, source, max_pages=None, curseur_depart=None):
-        #  Ce que rend `_relever_catalogue` quand un 429 coupe la pagination :
-        #  code requalifié en 200, `tronque` posé, et la page ratée à rejouer.
-        return {"articles": [{"asset_id": 1}], "code": 200, "echecs": 0,
-                "tronque": True, "curseur_suivant": curseur_depart,
-                "curseur_refuse": False}
+        async def _refus(params, source, max_pages=None, curseur_depart=None,
+                         reprises=True, _r=reponse):
+            appels.append(curseur_depart)
+            return dict(_r, curseur_suivant=curseur_depart, curseur_refuse=False)
 
-    monkeypatch.setattr(veille, "_relever_catalogue", _tronque)
-    await veille.relever_collectionnables(limite=120)
-
-    curseur, tours = await veille._curseur_lu("collectionnables")
-    assert curseur == "page_5", (
-        "le curseur a été rembobiné : les pages suivantes du flux Limited ne "
-        "seront jamais atteintes")
-    assert tours == 0, (
-        "un relevé tronqué a été compté comme un tour complet — on croirait "
-        "avoir couvert les 998 articles")
+        monkeypatch.setattr(veille, "_relever_catalogue", _refus)
+        out = await veille.relever_collectionnables(limite=120)
+        brut, tours = await veille._curseur_lu(veille.SOURCE_RECENSEMENT)
+        assert veille._position_recensement(brut) == (0, "page_5"), (
+            "le curseur a bougé sur un refus : 120 Limiteds sautés sans être lus")
+        assert tours == 0, "un relevé refusé a été compté comme un tour"
+        assert appels == ["page_5"], "on a martelé un seau qui venait de dire non"
+        assert out["tronque"] is True
 
 
 @pytest.mark.asyncio
 async def test_B2bis_un_tour_reellement_fini_avance_le_compteur(banc, monkeypatch):
-    """La contre-épreuve : sans elle, le test ci-dessus passerait sur un code
-    qui n'avance JAMAIS le compteur."""
+    """La contre-épreuve : un tour se compte à la fin de la DERNIÈRE partie,
+    jamais avant — et le premier tour marque ce qu'il lit (« jamais vu » y
+    veut dire « pas encore lu »)."""
     await _preparer(banc)
 
-    async def _fini(params, source, max_pages=None, curseur_depart=None):
-        return {"articles": [{"asset_id": 1}], "code": 200, "echecs": 0,
-                "tronque": False, "curseur_suivant": None,
+    async def _fini(params, source, max_pages=None, curseur_depart=None,
+                    reprises=True):
+        cle = str(params.get("AssetTypeIds") or params.get("BundleTypeIds"))
+        return {"articles": [{"asset_id": len(cle)}], "code": 200,
+                "echecs": 0, "tronque": False, "curseur_suivant": None,
                 "curseur_refuse": False}
 
+    async def _dodo(_s):
+        return None
+
+    monkeypatch.setattr(veille.asyncio, "sleep", _dodo)
     monkeypatch.setattr(veille, "_relever_catalogue", _fini)
-    await veille.relever_collectionnables(limite=120)
-    curseur, tours = await veille._curseur_lu("collectionnables")
-    assert curseur is None and tours == 1
+    out = await veille.relever_collectionnables(limite=120)          # 2 parties
+    brut, tours = await veille._curseur_lu(veille.SOURCE_RECENSEMENT)
+    assert tours == 0 and veille._position_recensement(brut) == (2, None)
+    assert all(a.get("premier_tour") for a in out["articles"])
+    out = await veille.relever_collectionnables(limite=120)          # packs, puis
+    brut, tours = await veille._curseur_lu(veille.SOURCE_RECENSEMENT)
+    assert tours == 1 and out["complet"] is True
+    assert veille._position_recensement(brut) == (1, None)
+    out = await veille.relever_collectionnables(limite=120)
+    assert not any(a.get("premier_tour") for a in out["articles"]), (
+        "après un tour complet, un Limited jamais vu est vraiment nouveau")
 
 
 def test_B3_le_vidage_de_la_file_survit_a_une_panne_de_releve():
@@ -919,7 +957,7 @@ def test_M5_le_429_terminal_est_compte_lui_aussi():
     _ast.parse(src.lstrip())
     corps = src.replace(" ", "")
     i_compte = corps.index('stats["n429"]=int(stats.get("n429")or0)+1')
-    i_reprise = corps.index("tentative<MAX_TENTATIVES_429")
+    i_reprise = corps.index("tentative<tentatives")
     assert i_compte < i_reprise, (
         "le comptage du 429 est de nouveau sous la condition de reprise")
 

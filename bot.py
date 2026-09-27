@@ -14988,6 +14988,14 @@ async def veille_roblox_task():
                 _sa["detectes"] = len(evts.get("nouveaux") or [])
                 _sa["bascules"] = len(evts.get("bascules") or [])
                 _sa["bascules_anciennes"] = len(evts.get("bascules_anciennes") or [])
+                #  Ce que la détection voit depuis le 27/09 : un UGC Limited
+                #  de Roblox devenu Limited, un passage daté par ROBLOX (notre
+                #  mémoire ne suffisait pas), une création mise en vente.
+                _bas = evts.get("bascules") or []
+                _sa["promotions"] = sum(1 for x in _bas if x.get("classe_avant"))
+                _sa["datees_roblox"] = sum(1 for x in _bas if x.get("date_roblox"))
+                _sa["sorties"] = sum(1 for x in (evts.get("nouveaux") or [])
+                                     if x.get("sortie_le"))
                 #  L'âge de l'article le plus récent du catalogue Roblox. C'est
                 #  LA réponse à « est-ce cassé, ou Roblox ne crée rien ? » —
                 #  mesuré le 30/08 : 38 jours depuis la dernière création.
@@ -15051,7 +15059,7 @@ async def veille_roblox_task():
                             #  Déjà sorti ici, OU déjà sorti dans un flux plus
                             #  fort : on ne le republie pas ailleurs.
                             if not await roblox_module.publiable_dans(
-                                    g.id, a["asset_id"], flux):
+                                    g.id, a["asset_id"], flux, article=a):
                                 _sa["deja"] += 1
                                 continue
                             #  `enfiler` rend False si la transition est DÉJÀ
@@ -15193,7 +15201,13 @@ async def veille_roblox_task():
                   f"{_sa.get('bascules', 0)} bascule(s) EN DIRECT · "
                   f"{_sa.get('bascules_anciennes', 0)} bascule(s) vue(s) trop "
                   f"tard (article revu il y a plus de "
-                  f"{roblox_module.FENETRE_DIRECTE_HEURES} h)")
+                  f"{roblox_module.FENETRE_DIRECTE_HEURES} h)"
+                  + (f" · dont {_sa['promotions']} UGC Limited devenu(s) "
+                     f"Limited" if _sa.get("promotions") else "")
+                  + (f" · {_sa['datees_roblox']} datée(s) par Roblox"
+                     if _sa.get("datees_roblox") else "")
+                  + (f" · {_sa['sorties']} création(s) mise(s) en vente"
+                     if _sa.get("sorties") else ""))
             #  L'âge du plus récent : la seule ligne qui répond à « est-ce
             #  cassé, ou Roblox ne crée rien ? » sans ouvrir la base.
             _pf = _sa.get("plus_frais_h")
@@ -15243,6 +15257,14 @@ async def veille_roblox_task():
                         f"vérification(s) par l'économie"
                         + _bilan_economie(_E)
                         if _E.get("refus_surveillance") else ""))
+                  + (f" · 📚 flux Limited : {_E.get('recensement_pages', 0)} "
+                     f"page(s) relue(s)"
+                     + (f", {_E['recensement_refus']} refus"
+                        if _E.get("recensement_refus") else "")
+                     + (f", 💎 {_E['promotions']} UGC Limited devenu(s) "
+                        f"Limited" if _E.get("promotions") else "")
+                     if (_E.get("recensement_pages")
+                         or _E.get("recensement_refus")) else "")
                   + (f" · {_E['secours_retenus']} secours retenu(s) pour "
                      f"protéger le relevé complet"
                      if _E.get("secours_retenus") else "")
@@ -15325,13 +15347,18 @@ async def veille_roblox_task():
             #  d'un tour qui avance : personne ne pouvait dire si une bascule
             #  manquée venait de Roblox ou du bot.
             try:
-                _cur, _tours = await roblox_module._curseur_lu("collectionnables")
-                print(f"[veille_roblox_task]   rotation du flux Limited : "
-                      f"{_tours} tour(s) complet(s) · "
-                      + ("reprise en cours de flux au prochain passage"
-                         if _cur else "prochain passage repart du début"))
-            except Exception:
-                pass
+                _cur, _tours = await roblox_module._curseur_lu(
+                    roblox_module.SOURCE_RECENSEMENT)
+                _part, _c = roblox_module._position_recensement(_cur)
+                print(f"[veille_roblox_task]   flux Limited (3 parties, lu "
+                      f"par morceaux) : {_tours} tour(s) complet(s) · en "
+                      f"cours : « {roblox_module.PARTITIONS_LIMITED[_part][0]} »"
+                      + ("" if _tours else " · premier tour pas encore fini : "
+                         "un Limited jamais vu n'est pas encore daté par "
+                         "Roblox"))
+            except Exception as _ex_rot:
+                print(f"[veille_roblox_task]   ⚠️ flux Limited illisible : "
+                      f"{type(_ex_rot).__name__}: {_ex_rot}")
             _f = _sa.get("file") or {}
             if _f:
                 _vieille = _f.get("plus_vieille")
@@ -15566,6 +15593,11 @@ _ECLAIREUR = {"amorce": False, "vus": set(), "vus_limited": set(),
               #  d'essais, le dernier lot DIT (une ligne par lot, plus une par
               #  passage), et combien de fiches reprises à la tête.
               "fiches_ratees": 0, "dernier_lot_rate": None, "fiches_tete": 0,
+              #  Le flux Limited relu par morceaux (27/09) : pages lues,
+              #  refus, pages retenues pour le relevé, et combien d'UGC
+              #  Limited de Roblox vus devenir de vrais Limited.
+              "recensement_pages": 0, "recensement_refus": 0,
+              "recensement_retenus": 0, "promotions": 0,
               "passages": 0, "sautes": 0, "erreurs": 0,
               "nouveautes": 0, "bascules": 0, "publies": 0,
               "dernier_passage": None, "dernier_signal": None}
@@ -15600,6 +15632,12 @@ ECLAIREUR_SURVEILLANCE_LEGERE = 40
 #  donc de ce qui a été VU, et la liste entière est quand même revue — plus
 #  lentement, deux articles par relais. Le bilan dit pourquoi elle s'arrête.
 ECLAIREUR_TRANCHE_ECONOMIE = 9
+#  ⚠️ LE FLUX LIMITED, UNE PAGE TOUS LES QUATRE PASSAGES (27/09). Le relevé de
+#  30 min en lit deux : seul, il mettait ~4 h 30 à faire le tour des 1 997
+#  Limiteds (18 pages en trois parties, mesuré). Avec une page toutes les
+#  3 min ici, le tour prend ~45 min : un passage en Limited sort dans l'heure.
+#  Même seau que le secours (`/v2/search/items/details`), mêmes gardes.
+ECLAIREUR_RECENSEMENT_PASSAGES = 4
 
 
 def _bilan_economie(E) -> str:
@@ -15750,30 +15788,87 @@ async def _surveiller_retires(guildes, E) -> int:
             return 0
         E["bascules_surveillance"] += len(bascules)
         E["bascules"] += len(bascules)
-        enfiles = 0
-        for g in guildes:
-            for a in roblox_module.ordonner_publication(bascules, len(bascules)):
-                if not roblox_module.age_publiable(a, "bascules"):
-                    continue
-                if not await roblox_module.publiable_dans(
-                        g.id, a["asset_id"], "bascules"):
-                    continue
-                if await roblox_module.enfiler(g.id, a, "bascules"):
-                    enfiles += 1
-        rp = {"publies": 0}
-        if enfiles:
-            rp = await _publier_file_accessoires(
-                guildes, roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE,
-                pause_fiches=0, etiquette="surveillance")
-            E["publies"] += rp["publies"]
-            E["dernier_signal"] = datetime.now(timezone.utc)
+        rp = await _publier_bascules(guildes, bascules, E, "surveillance")
         print(f"[eclaireur] 💎 {len(bascules)} passage(s) en Limited vu(s) par "
-              f"la surveillance · {enfiles} mis en file · "
-              f"{rp.get('publies', 0)} publié(s) sur l'instant")
-        return int(rp.get("publies", 0))
+              f"la surveillance · {rp['enfiles']} mis en file · "
+              f"{rp['publies']} publié(s) sur l'instant")
+        return rp["publies"]
     except Exception as ex:
         E["erreurs_surveillance"] += 1
         print(f"[eclaireur surveillance] {type(ex).__name__}: {ex}")
+        return 0
+
+
+async def _publier_bascules(guildes, bascules, E, etiquette: str) -> dict:
+    """Met en file et publie des passages en Limited. Rend `{enfiles, publies}`.
+
+    ⚠️ DEUX APPELANTS, UN SEUL CORPS (27/09) : la surveillance des articles
+    retirés de la vente et la relecture du flux Limited. Mêmes filtres que le
+    passage complet — fenêtre, « déjà sorti » (la promotion d'un UGC Limited
+    passe : `article=`), unicité en base — et même publication.
+    """
+    enfiles = 0
+    for g in guildes:
+        for a in roblox_module.ordonner_publication(bascules, len(bascules)):
+            if not roblox_module.age_publiable(a, "bascules"):
+                continue
+            if not await roblox_module.publiable_dans(
+                    g.id, a["asset_id"], "bascules", article=a):
+                continue
+            if await roblox_module.enfiler(g.id, a, "bascules"):
+                enfiles += 1
+    rp = {"publies": 0}
+    if enfiles:
+        rp = await _publier_file_accessoires(
+            guildes, roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE,
+            pause_fiches=0, etiquette=etiquette)
+        E["publies"] += rp["publies"]
+        E["dernier_signal"] = datetime.now(timezone.utc)
+    return {"enfiles": enfiles, "publies": int(rp.get("publies", 0))}
+
+
+async def _recenser_limited(guildes, E) -> int:
+    """Une page du flux Limited, tous les ECLAIREUR_RECENSEMENT_PASSAGES
+    passages. Rend les publiés.
+
+    ⚠️ C'EST ELLE QUI VOIT LES PROMOTIONS À TEMPS (27/09). Le 22/09 vers
+    23:05 UTC, Roblox a reclassé des « UGC Limited » à lui en Limited U :
+    ils étaient dans ce flux avant ET après, seule leur classe a changé. La
+    surveillance ne regarde que des articles NON collectionnables, et le
+    relevé de 30 min, seul, faisait le tour du flux en ~4 h 30.
+    """
+    if E["passages"] % ECLAIREUR_RECENSEMENT_PASSAGES:
+        return 0
+    if not _second_seau_libre(E):
+        E["recensement_retenus"] = E.get("recensement_retenus", 0) + 1
+        return 0
+    try:
+        r = await roblox_module.relever_collectionnables(
+            limite=120, pages=1, reprises=False)
+        _noter_second_seau(E, {"code": r.get("code"),
+                               "reste": r.get("reste_min")})
+        if r.get("code") != 200:
+            E["recensement_refus"] = E.get("recensement_refus", 0) + 1
+            return 0
+        E["recensement_pages"] = (E.get("recensement_pages", 0)
+                                  + int(r.get("pages") or 0))
+        evts = await roblox_module.comparer_et_enregistrer(
+            r.get("articles") or [])
+        bascules = evts.get("bascules") or []
+        if not bascules:
+            return 0
+        E["bascules"] += len(bascules)
+        E["promotions"] = E.get("promotions", 0) + sum(
+            1 for a in bascules if a.get("classe_avant"))
+        rp = await _publier_bascules(guildes, bascules, E, "flux Limited")
+        print(f"[eclaireur] 💎 {len(bascules)} passage(s) en Limited vu(s) "
+              f"dans le flux Limited (partie « {r.get('partie')} ») · "
+              f"{rp['enfiles']} mis en file · {rp['publies']} publié(s) sur "
+              f"l'instant")
+        return rp["publies"]
+    except Exception as ex:
+        E["erreurs"] += 1
+        print(f"[eclaireur flux Limited] {type(ex).__name__}: {ex}")
         return 0
 
 
@@ -15841,6 +15936,7 @@ async def eclaireur_task():
         #  les passages en Limited continuent d'être vus.
         if _veut_b:
             await _surveiller_retires(guildes, E)
+            await _recenser_limited(guildes, E)
         if not _veut_n:
             #  Nouveautés éteintes partout : la sonde de tête ne publierait
             #  rien. La surveillance a fait le travail utile de ce passage.
@@ -16025,7 +16121,7 @@ async def eclaireur_task():
                     if not roblox_module.age_publiable(a, flux):
                         continue
                     if not await roblox_module.publiable_dans(
-                            g.id, a["asset_id"], flux):
+                            g.id, a["asset_id"], flux, article=a):
                         continue
                     if await roblox_module.enfiler(g.id, a, flux):
                         enfiles += 1
