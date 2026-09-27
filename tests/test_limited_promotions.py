@@ -306,11 +306,20 @@ async def test_B3_un_Limited_jamais_vu_n_est_date_qu_apres_un_tour_complet(base,
 async def test_B4_au_plus_huit_datations_et_arret_au_premier_refus(base, roblox):
     await veille.init_db()
     ids = list(range(100, 112))
+    #  ⚠️ UNE SEULE DATE DE CRÉATION POUR TOUS. `_normaliser` trie par date :
+    #  des dates prises à quelques microsecondes d'écart (Linux) inversaient
+    #  l'ordre, alors que l'horloge de Windows (~15 ms) les laissait égales —
+    #  vert en local, rouge en CI le 27/09.
+    cree = _iso(24 * 700).replace("+00:00", "Z")
+
+    def _b(i, restr):
+        return dict(_brut(i, restrictions=restr), itemCreatedUtc=cree)
+
     for i in ids:
-        await _voir(_brut(i, restrictions=["Collectible"]))
+        await _voir(_b(i, ["Collectible"]))
         await _vieillir(i, 30)
         roblox["fiches"][i] = _economie(24 * 5)
-    await _voir(*[_brut(i, restrictions=["LimitedUnique"]) for i in ids])
+    await _voir(*[_b(i, ["LimitedUnique"]) for i in ids])
     assert len(roblox["demandes"]) == veille.MAX_DATATIONS_ROBLOX == 8
     roblox["demandes"].clear()
     for i in ids:
@@ -320,7 +329,7 @@ async def test_B4_au_plus_huit_datations_et_arret_au_premier_refus(base, roblox)
                              " WHERE asset_id=?", (i,))
             await db.commit()
     roblox["fiches"][ids[2]] = (429, None)
-    await _voir(*[_brut(i, restrictions=["LimitedUnique"]) for i in ids])
+    await _voir(*[_b(i, ["LimitedUnique"]) for i in ids])
     assert roblox["demandes"] == ids[:3], "un seau qui dit non n'est pas relancé"
 
 
