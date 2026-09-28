@@ -15954,6 +15954,7 @@ async def eclaireur_task():
             E["dernier_succes"] = datetime.now(timezone.utc)
         _r0 = await roblox_module.relever_identifiants(collectionnables=collect)
         E["reste"] = _r0.get("reste")
+        _retenu = False
         if _r0["code"] == 429:
             #  ⚠️ LE SECOND SEAU, TOUT DE SUITE — ET PAS `retry-after`.
             #  Mesuré le 23/09 : attendre le `retry-after: 5` annoncé puis
@@ -15969,6 +15970,7 @@ async def eclaireur_task():
                 #  Rien n'est perdu : le relevé regarde lui-même dans 75 s au
                 #  plus, ou le passage suivant réessaiera le premier seau.
                 E["secours_retenus"] = E.get("secours_retenus", 0) + 1
+                _retenu = True
             else:
                 _r0 = await roblox_module.relever_identifiants(
                     collectionnables=collect, seau="fiches")
@@ -15982,6 +15984,14 @@ async def eclaireur_task():
         E["dernier_passage"] = datetime.now(timezone.utc)
 
         ok = [(c, r) for c, r in reponses if r["code"] == 200]
+        if not ok and _retenu:
+            #  ⚠️ UNE RETENUE N'EST PAS UN ÉCHEC (28/09). Journal de ce jour :
+            #  « 14 erreur(s) · ralenti (palier 1) », une par relevé, toujours
+            #  le passage des 75 s qui le précèdent — là où le secours est
+            #  RETENU exprès, et où le relevé regarde lui-même juste après. La
+            #  compter en erreur et ralentir accusait le bot d'une panne qui
+            #  n'existe pas. Le refus reste compté (`refus`, `secours_retenus`).
+            return
         if not ok:
             #  ⚠️ SILENCE SUR LES REFUS PASSAGERS. « Une ligne au changement
             #  d'état » a été réfuté par la production : sur une IP partagée

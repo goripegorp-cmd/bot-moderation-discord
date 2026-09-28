@@ -421,6 +421,10 @@ def test_E15_le_secours_se_RETIENT_juste_avant_le_releve_complet():
     _tick(ns)
     assert _sondes(cat) == ["creations"], cat.demandes
     assert E["secours_retenus"] == 1
+    #  ⚠️ 28/09 : une retenue voulue n'est ni une erreur, ni un aveuglement,
+    #  ni une raison de ralentir — le journal en comptait une par relevé.
+    assert E["erreurs"] == 0 and E["serie"] == 0
+    assert E["palier"] == 0 and E["pause_jusqu"] is None
 
 
 def test_E16_un_second_seau_presque_vide_est_laisse_tranquille():
