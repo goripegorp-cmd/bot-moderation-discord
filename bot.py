@@ -201,6 +201,7 @@ import roblox_pings as roblox_pings_module
 import roblox_panneau as roblox_ui
 import roblox_commandes as roblox_cmds
 import roblox_marche as roblox_marche_module
+import roblox_cartes as roblox_cartes_module
 import protection_mineurs as pmineurs
 import rellseas_panneau as rellseas_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
@@ -14410,6 +14411,82 @@ async def _publier_file_accessoires(guildes, budget: int, *,
     return res
 
 
+#  🎁 LES CARTES CADEAUX (29/09) — voir `roblox_cartes`. En mémoire : le
+#  dernier script lu (son empreinte) et son offre, l'heure de la dernière
+#  lecture, et le dernier état DIT au journal (une ligne par changement).
+_CARTES = {"script": None, "offre": None, "lu_le": None, "dit": None}
+
+
+async def _cartes_cadeaux(guildes) -> dict:
+    """Ce que donne une carte cadeau Roblox, affiché quand la liste change.
+
+    Demande du 29/09 : « affiche les items disponibles dans les cartes
+    cadeaux. Que ce soit optimisé. » La page officielle au plus toutes les
+    `HEURES_ENTRE_LECTURES` (son script seulement si son empreinte change),
+    une fiche par serveur seulement quand la liste diffère de la dernière
+    affichée — mémorisée en base, donc jamais deux fois, même après un
+    redémarrage. Ne lève jamais : une panne ici ne gêne pas la veille.
+    Rend `{"lu", "publies", "motif"}`.
+    """
+    res = {"lu": False, "publies": 0, "motif": None}
+    H = roblox_cartes_module.HEURES_ENTRE_LECTURES
+    try:
+        _maint = datetime.now(timezone.utc)
+        _der = _CARTES.get("lu_le")
+        if _der is not None and (_maint - _der).total_seconds() < H * 3600:
+            return res
+        _CARTES["lu_le"] = _maint
+        res["lu"] = True
+        r = await roblox_cartes_module.lire_offre(_CARTES)
+        offre = r.get("offre")
+        if not offre:
+            res["motif"] = r.get("motif") or "page illisible"
+            if _CARTES.get("dit") != "illisible":
+                _CARTES["dit"] = "illisible"
+                print(f"[veille_roblox_task]   🎁 cartes cadeaux : page officielle "
+                      f"illisible ({res['motif']}) — nouvel essai dans {H:.0f} h, "
+                      f"sans insister")
+            return res
+        sig = roblox_cartes_module.signature(offre)
+        n = len(roblox_cartes_module.ids_de(offre))
+        cibles = []
+        for g in guildes:
+            if await roblox_cartes_module.deja_affichee(g.id, sig):
+                continue
+            c = await roblox_module.config(g.id)
+            salon = g.get_channel(roblox_module.salon_du_flux(c, "nouveautes")
+                                  or roblox_module.salon_du_flux(c, "bascules"))
+            if salon is not None:
+                cibles.append((g, salon, bool(c.get("roblox_veille_simulation"))))
+        if not cibles:
+            if _CARTES.get("dit") != sig:
+                _CARTES["dit"] = sig
+                print(f"[veille_roblox_task]   🎁 cartes cadeaux (France) : {n} "
+                      f"article(s) offert(s), déjà affichés · relus toutes les "
+                      f"{H:.0f} h")
+            return res
+        articles = await roblox_cartes_module.fiches(offre)
+        images = await roblox_module.vignettes(articles)
+        for g, salon, simu in cibles:
+            if simu:
+                print(f"[veille_roblox_task]   🧪 SIMULATION — aurait affiché les "
+                      f"{n} article(s) des cartes cadeaux dans "
+                      f"#{getattr(salon, 'name', '?')}")
+                continue
+            if await roblox_ui.publier_cartes(g, salon, articles, offre, images):
+                await roblox_cartes_module.noter_affichee(g.id, sig)
+                res["publies"] += 1
+        _CARTES["dit"] = sig if res["publies"] == len(cibles) else None
+        _mois = roblox_cartes_module.mois_de(articles)
+        print(f"[veille_roblox_task]   🎁 cartes cadeaux (France) : {n} article(s) "
+              f"offert(s)" + (f" en {_mois}" if _mois else "")
+              + f" · fiche publiée sur {res['publies']}/{len(cibles)} serveur(s)")
+    except Exception as ex:
+        res["motif"] = f"{type(ex).__name__}: {ex}"
+        print(f"[veille_roblox_task] 🎁 cartes cadeaux : {res['motif']}")
+    return res
+
+
 async def _enfiler_billets(guildes, rel: dict) -> dict:
     """Dédupliquer, absorber les trop vieux, ENFILER — le corps partagé.
 
@@ -15101,6 +15178,9 @@ async def veille_roblox_task():
             #  Le chemin du catalogue est rendu au suivi de la tête de
             #  classement. Voir `roblox_veille.catalogue_occupe`.
             roblox_module.catalogue_occupe(False)
+            #  🎁 Les cartes cadeaux (29/09) : la page officielle au plus
+            #  toutes les 3 h, une fiche seulement quand sa liste change.
+            await _cartes_cadeaux(guildes_items)
 
         # ── L'actualite ─────────────────────────────────────────────────────
         if guildes_news:

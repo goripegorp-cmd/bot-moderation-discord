@@ -400,6 +400,108 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
             return False
 
 
+def construire_cartes(articles: list, offre: dict, images: dict | None = None,
+                      ping_cle: str | None = None, ping_role=None) -> LayoutView:
+    """🎁 Ce que donne une carte cadeau Roblox AUJOURD'HUI — une seule fiche.
+
+    Demande du propriétaire (29/09) : « affiche les items disponibles dans les
+    cartes cadeaux ». La liste vient de la page officielle (voir
+    `roblox_cartes`) ; chaque article dit QUELLE carte le donne — en magasin,
+    code Amazon, code bonus de roblox.com — parce que ce n'est pas la même
+    carte à acheter. Le mois vient de la description de Roblox, jamais de
+    notre horloge.
+
+    ⚠️ 40 COMPOSANTS PAR MESSAGE, PAS UN DE PLUS (Discord). Mesuré en test :
+    dix articles avec image et bouton en demandaient 51 — la fiche ne serait
+    jamais partie. On compte donc avant d'ajouter : un article avec image en
+    coûte 3, sans image 1, un bouton 1 (et 1 par rangée de cinq). Ce qui ne
+    tient pas est DIT (« … et N autre(s) »), jamais tu.
+    """
+    import roblox_cartes as cartes
+    images = images or {}
+    mois = cartes.mois_de(articles)
+    b_ping = _bouton_ping(ping_cle)
+    ligne_ping = _ligne_mention(ping_role) if b_ping is not None else None
+    bas = [Button(label="Échanger une carte", emoji="🎁",
+                  style=discord.ButtonStyle.link, url=cartes.PAGE_ECHANGE),
+           Button(label="Page officielle", emoji="🛒",
+                  style=discord.ButtonStyle.link, url=cartes.PAGE)]
+    if b_ping is not None:
+        bas.append(b_ping)
+    #  Le conteneur, le titre, la phrase d'accueil, le séparateur, le pied, la
+    #  mention éventuelle, la rangée du bas et ses boutons.
+    reste = 40 - (5 + (1 if ligne_ping else 0) + 1 + len(bas))
+    tete = [v2_title("🎁 CARTES CADEAUX ROBLOX · "
+                     + (f"offerts en {mois}" if mois else "offerts en ce moment"),
+                     level=3),
+            v2_body("-# Un article offert avec chaque carte cadeau échangée — "
+                    "la liste officielle de Roblox pour la France.")]
+    corps, montres = [], []
+    for a in articles[:cartes.MAX_ARTICLES]:
+        nom_en = _ou_tiret(a.get("nom"))
+        nom_fr = a.get("nom_fr")
+        titre = f"**{nom_fr}**\n-# {nom_en}" if nom_fr else f"**{nom_en}**"
+        texte = f"🎁 {titre}\n{cartes.source_de(a, offre)}"
+        image = images.get(a.get("asset_id"))
+        cout = 3 if image else 1
+        #  Une place gardée pour dire ce qui ne tient pas.
+        if cout > reste - 1:
+            break
+        element = None
+        if image:
+            try:
+                element = discord.ui.Section(
+                    v2_body(texte), accessory=discord.ui.Thumbnail(media=image))
+            except Exception as ex:
+                _log(f"[roblox cartes image] {ex}")
+                cout = 1
+        corps.append(element or v2_body(texte))
+        montres.append(a)
+        reste -= cout
+    if len(montres) < len(articles):
+        corps.append(v2_body(f"-# … et {len(articles) - len(montres)} autre(s) "
+                             f"sur la page officielle."))
+        reste -= 1
+    boutons = []
+    for a in montres:
+        besoin = 1 + (1 if len(boutons) % 5 == 0 else 0)
+        lien = veille.lien_article(a.get("asset_id"), a.get("item_type"))
+        if not lien or besoin > reste:
+            continue
+        boutons.append(Button(
+            label=str(a.get("nom_fr") or a.get("nom") or "Article")[:40],
+            emoji="🔗", style=discord.ButtonStyle.link, url=lien))
+        reste -= besoin
+    items = tete + corps + [
+        v2_divider(),
+        v2_body("-# Échange ta carte sur roblox.com/redeem : l'article arrive "
+                "dans ton inventaire. La liste change chaque mois — la nouvelle "
+                "sortira ici.")]
+    if ligne_ping:
+        items.append(v2_body(ligne_ping))
+    for k in range(0, len(boutons), 5):
+        items.append(discord.ui.ActionRow(*boutons[k:k + 5]))
+    items.append(discord.ui.ActionRow(*bas))
+    v = LayoutView(timeout=None)
+    v.add_item(v2_container(*items, color=Palette.ACCENT))
+    return v
+
+
+async def publier_cartes(guild, salon, articles: list, offre: dict,
+                         images: dict | None = None,
+                         trace: dict | None = None) -> bool:
+    """Publie la fiche des cartes cadeaux. `True` seulement si elle est
+    RÉELLEMENT partie — l'appelant ne note la liste « affichée » qu'à ce prix.
+    Le rôle des nouveautés est prévenu : ce sont des articles à obtenir."""
+    if salon is None or not articles:
+        return False
+    cle = pings.cle_du_flux("nouveautes")
+    role = await pings.role_de(guild, cle) if cle else None
+    vue = construire_cartes(articles, offre, images, ping_cle=cle, ping_role=role)
+    return await _envoyer(salon, PLATEFORME["nouveautes"], vue, "cartes",
+                          ping_role=role, trace=trace)
+
+
 async def publier(guild, salon, article: dict, flux: str,
                   image: str | None = None, lies: list | None = None,
                   trace: dict | None = None) -> bool:

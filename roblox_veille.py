@@ -380,6 +380,9 @@ CLES_DEFAUT = {
     #  Date de l'unification des deux salons en un seul (voir
     #  `unifier_salons`). Vide = à faire.
     "roblox_salons_unifies": "",
+    #  🎁 La liste des cartes cadeaux déjà affichée ici (29/09) — voir
+    #  `roblox_cartes.signature`. Vide = rien d'affiché encore.
+    "roblox_cartes_signature": "",
 }
 
 

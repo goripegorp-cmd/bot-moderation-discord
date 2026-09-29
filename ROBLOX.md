@@ -236,6 +236,21 @@ tout y tombe.
   en vente (Telamon's Other Crafting Jewel, créé le 25/09, en vente le 27/09)
   sort à sa mise en vente, s'il a moins de 30 jours.
 
+### 🎁 Les cartes cadeaux (29/09/2026)
+
+- **Source : la page officielle** `roblox.com/giftcards-fr`. Sa liste vit dans
+  son script `…-GiftCards.js`, pays par pays, en hexadécimal
+  (`roblox_cartes.offre_du_script`) ; France par défaut. Jamais un site tiers.
+- **Une fiche dans le salon des accessoires quand la liste change** — une par
+  mois en pratique, mémorisée en base (`roblox_cartes_signature`) : jamais deux
+  fois. Chaque article dit QUELLE carte le donne (magasin, code Amazon, code
+  bonus de roblox.com).
+- **Sobre** : la page au plus toutes les 3 h, le script seulement quand son
+  empreinte change, les noms par l'économie (anglais + français officiel).
+- Les articles des cartes restent hors du flux « nouveautés » (hors vente au
+  catalogue, créés des semaines avant) : ils sortent dans cette fiche le jour
+  où une carte les donne.
+
 ### Les constantes, et leur justification MESURÉE
 
 ⚠️ Ne pas les changer sans refaire la mesure. Chacune vient d'un appel réel.
