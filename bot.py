@@ -14413,31 +14413,47 @@ async def _publier_file_accessoires(guildes, budget: int, *,
 
 #  🎁 LES CARTES CADEAUX (29/09) — voir `roblox_cartes`. En mémoire : le
 #  dernier script lu (son empreinte) et son offre, l'heure de la dernière
-#  lecture, et le dernier état DIT au journal (une ligne par changement).
-_CARTES = {"script": None, "offre": None, "lu_le": None, "dit": None}
+#  lecture, le dernier état DIT au journal (une ligne par changement), et les
+#  noms déjà demandés pour cet état (un envoi raté ne les redemande pas).
+_CARTES = {"script": None, "offre": None, "lu_le": None, "dit": None,
+           "fiches_de": None, "fiches": None}
 
 
-async def _cartes_cadeaux(guildes) -> dict:
-    """Ce que donne une carte cadeau Roblox, affiché quand la liste change.
+async def _cartes_cadeaux(guildes, vus=()) -> dict:
+    """Ce que donne une carte cadeau Roblox — et le mois suivant, si Roblox
+    l'a écrit. UNE fiche courte par liste, complétée sur place.
 
-    Demande du 29/09 : « affiche les items disponibles dans les cartes
-    cadeaux. Que ce soit optimisé. » La page officielle au plus toutes les
-    `HEURES_ENTRE_LECTURES` (son script seulement si son empreinte change),
-    une fiche par serveur seulement quand la liste diffère de la dernière
-    affichée — mémorisée en base, donc jamais deux fois, même après un
-    redémarrage. Ne lève jamais : une panne ici ne gêne pas la veille.
-    Rend `{"lu", "publies", "motif"}`.
+    Demandes du 29/09 : « affiche les items disponibles dans les cartes
+    cadeaux. Que ce soit optimisé », puis « on peut mettre les prochains,
+    mais il faut que tu sois sûr de toi […] tu ne dois pas non plus envoyer
+    un maximum de requêtes ».
+
+      · les annonces du mois suivant sont relevées dans `vus` — ce que le
+        relevé de 30 min vient de lire : ZÉRO requête ;
+      · la page officielle au plus toutes les `HEURES_ENTRE_LECTURES` (son
+        script seulement si son empreinte change) ; les noms seulement quand
+        une fiche doit partir ou changer, et une seule image ;
+      · une NOUVELLE liste → une fiche neuve, avec ping ; le mois suivant
+        annoncé (ou une nouvelle présentation) → la fiche déjà publiée est
+        MODIFIÉE, sans message ni ping de plus ; introuvable → reposée, sans
+        ping.
+    Tout est noté en base : jamais deux fois, même après un redémarrage.
+    Ne lève jamais : une panne ici ne gêne pas la veille.
+    Rend `{"lu", "publies", "completees", "reposees", "annonces", "motif"}`.
     """
-    res = {"lu": False, "publies": 0, "motif": None}
-    H = roblox_cartes_module.HEURES_ENTRE_LECTURES
+    res = {"lu": False, "publies": 0, "completees": 0, "reposees": 0,
+           "annonces": 0, "motif": None}
+    C = roblox_cartes_module
+    H = C.HEURES_ENTRE_LECTURES
     try:
+        res["annonces"] = await C.noter_annonces(vus)
         _maint = datetime.now(timezone.utc)
         _der = _CARTES.get("lu_le")
         if _der is not None and (_maint - _der).total_seconds() < H * 3600:
             return res
         _CARTES["lu_le"] = _maint
         res["lu"] = True
-        r = await roblox_cartes_module.lire_offre(_CARTES)
+        r = await C.lire_offre(_CARTES)
         offre = r.get("offre")
         if not offre:
             res["motif"] = r.get("motif") or "page illisible"
@@ -14447,40 +14463,106 @@ async def _cartes_cadeaux(guildes) -> dict:
                       f"illisible ({res['motif']}) — nouvel essai dans {H:.0f} h, "
                       f"sans insister")
             return res
-        sig = roblox_cartes_module.signature(offre)
-        n = len(roblox_cartes_module.ids_de(offre))
+        sig = C.signature(offre)
+        ids = C.ids_de(offre)
+        #  ⚠️ LE MOIS SUIVANT N'EST JAMAIS DÉDUIT DE NOTRE HORLOGE. Il suit le
+        #  mois ÉCRIT par Roblox dans la description d'un article de l'offre :
+        #  la page change autour du 1er, pas à minuit pile — le 1er octobre,
+        #  une page encore en septembre aurait fait annoncer novembre.
+        _am = await C.mois_de_l_offre(offre)
+        _sv = C.mois_suivant(*_am) if _am else None
+        prochains = ([p for p in await C.annonces_du_mois(*_sv)
+                      if p["asset_id"] not in ids][:C.MAX_PROCHAINS]
+                     if _sv else [])
+        suite = C.signature_suite(prochains)
+        _etat_dit = f"{sig}|{suite}"
+        _en = (f" + {len(prochains)} annoncé(s) pour {C.nom_du_mois(*_sv)}"
+               if prochains else "")
         cibles = []
         for g in guildes:
-            if await roblox_cartes_module.deja_affichee(g.id, sig):
+            etat = await C.etat_affiche(g.id)
+            if etat["signature"] == sig and etat["suite"] == suite:
                 continue
             c = await roblox_module.config(g.id)
             salon = g.get_channel(roblox_module.salon_du_flux(c, "nouveautes")
                                   or roblox_module.salon_du_flux(c, "bascules"))
             if salon is not None:
-                cibles.append((g, salon, bool(c.get("roblox_veille_simulation"))))
+                cibles.append((g, salon, bool(c.get("roblox_veille_simulation")),
+                               etat))
         if not cibles:
-            if _CARTES.get("dit") != sig:
-                _CARTES["dit"] = sig
-                print(f"[veille_roblox_task]   🎁 cartes cadeaux (France) : {n} "
-                      f"article(s) offert(s), déjà affichés · relus toutes les "
-                      f"{H:.0f} h")
+            if _CARTES.get("dit") != _etat_dit:
+                _CARTES["dit"] = _etat_dit
+                print(f"[veille_roblox_task]   🎁 cartes cadeaux (France) : "
+                      f"{len(ids)} article(s) offert(s){_en}, déjà affichés · "
+                      f"relus toutes les {H:.0f} h")
             return res
-        articles = await roblox_cartes_module.fiches(offre)
-        images = await roblox_module.vignettes(articles)
-        for g, salon, simu in cibles:
+        #  Les noms (anglais + français officiel) : seulement maintenant qu'une
+        #  fiche doit partir ou changer — et une seule fois par état, même si
+        #  l'envoi rate et se retente trois heures plus tard.
+        if _CARTES.get("fiches_de") == _etat_dit and _CARTES.get("fiches"):
+            articles = _CARTES["fiches"]
+        else:
+            articles = await C.fiches(offre, en_plus=prochains)
+        #  ⚠️ JAMAIS UNE FICHE INCOMPLÈTE NOTÉE « AFFICHÉE ». Un article absent
+        #  (coupure réseau au milieu) : rien n'est envoyé, nouvel essai à la
+        #  lecture suivante. Un article sans nom (Roblox n'a rendu ni l'anglais
+        #  ni le français) : on attend aussi, au plus `ESSAIS_NOMS` lectures —
+        #  ensuite la fiche part, l'article avec son seul lien.
+        _manque = len(ids) + len(prochains) - len(articles)
+        _sans_nom = sum(1 for a in articles if not a.get("nom_lu", True))
+        if _manque > 0 or _sans_nom:
+            _essais = _CARTES.setdefault("essais", {})
+            _essais[_etat_dit] = _essais.get(_etat_dit, 0) + 1
+            if _manque > 0 or _essais[_etat_dit] < C.ESSAIS_NOMS:
+                res["motif"] = "noms incomplets"
+                print(f"[veille_roblox_task]   🎁 cartes cadeaux : noms incomplets "
+                      f"({max(_manque, 0)} absent(s), {_sans_nom} sans nom) — rien "
+                      f"envoyé, nouvel essai dans {H:.0f} h")
+                return res
+            print(f"[veille_roblox_task]   🎁 cartes cadeaux : {_sans_nom} nom(s) "
+                  f"toujours indisponible(s) après {C.ESSAIS_NOMS} lectures — la "
+                  f"fiche part avec leur lien seul")
+        _CARTES["fiches_de"], _CARTES["fiches"] = _etat_dit, articles
+        arts = [a for a in articles if a["asset_id"] in ids]
+        arts_suite = [a for a in articles if a["asset_id"] not in ids]
+        mois = C.nom_du_mois(*_am) if _am else C.mois_de(arts)
+        vue = {"prochains": arts_suite, "mois": mois,
+               "mois_prochain": C.mois_seul(*_sv) if _sv else None}
+        #  Une seule image sur la fiche : une seule demandée.
+        images = await roblox_module.vignettes(arts[:1])
+        for g, salon, simu, etat in cibles:
             if simu:
                 print(f"[veille_roblox_task]   🧪 SIMULATION — aurait affiché les "
-                      f"{n} article(s) des cartes cadeaux dans "
+                      f"{len(ids)} article(s) des cartes cadeaux{_en} dans "
                       f"#{getattr(salon, 'name', '?')}")
                 continue
-            if await roblox_ui.publier_cartes(g, salon, articles, offre, images):
-                await roblox_cartes_module.noter_affichee(g.id, sig)
-                res["publies"] += 1
-        _CARTES["dit"] = sig if res["publies"] == len(cibles) else None
-        _mois = roblox_cartes_module.mois_de(articles)
-        print(f"[veille_roblox_task]   🎁 cartes cadeaux (France) : {n} article(s) "
-              f"offert(s)" + (f" en {_mois}" if _mois else "")
-              + f" · fiche publiée sur {res['publies']}/{len(cibles)} serveur(s)")
+            neuve = etat["signature"] != sig
+            if not neuve:
+                #  Même liste : on COMPLÈTE la fiche publiée. Son identifiant
+                #  est noté depuis le 29/09 après-midi ; la toute première (le
+                #  matin) se retrouve une fois dans l'historique du salon.
+                mid = etat["message"] or await roblox_ui.retrouver_carte(salon)
+                if mid and await roblox_ui.editer_cartes(
+                        g, salon, mid, arts, offre, images, **vue):
+                    await C.noter_affichee(g.id, sig, suite, mid)
+                    res["completees"] += 1
+                    continue
+            trace = {}
+            if await roblox_ui.publier_cartes(g, salon, arts, offre, images,
+                                              trace=trace, ping=neuve, **vue):
+                await C.noter_affichee(g.id, sig, suite,
+                                       int(trace.get("message_id") or 0))
+                res["publies" if neuve else "reposees"] += 1
+        _faites = res["publies"] + res["completees"] + res["reposees"]
+        _CARTES["dit"] = _etat_dit if _faites == len(cibles) else None
+        _bilan = ", ".join(t for t in (
+            f"{res['publies']} publiée(s)" if res["publies"] else "",
+            f"{res['completees']} complétée(s) sur place" if res["completees"] else "",
+            f"{res['reposees']} reposée(s) sans ping (l'ancienne introuvable)"
+            if res["reposees"] else "") if t) or "aucune envoyée"
+        print(f"[veille_roblox_task]   🎁 cartes cadeaux (France) : {len(ids)} "
+              f"article(s) offert(s)" + (f" en {mois}" if mois else "") + _en
+              + f" · fiche : {_bilan} — {len(cibles)} serveur(s) visé(s)")
     except Exception as ex:
         res["motif"] = f"{type(ex).__name__}: {ex}"
         print(f"[veille_roblox_task] 🎁 cartes cadeaux : {res['motif']}")
@@ -14977,6 +15059,9 @@ async def veille_roblox_task():
             #  prochain redémarrage, en silence.
             roblox_module.catalogue_occupe(True)
             rel = await roblox_module.relever_nouveautes(limite=120)
+            #  🎁 Ce que ce passage lit sert aussi aux cartes cadeaux : Roblox y
+            #  écrit le mois suivant (« … in October 2026 »). Zéro requête.
+            _vus_cartes = list(rel.get("articles") or [])
             _sa["lus"] = len(rel.get("articles") or [])
             _sa["pages"] = rel.get("pages", 0)
             _sa["tronque"] = bool(rel.get("tronque"))
@@ -15041,6 +15126,9 @@ async def veille_roblox_task():
                 _budget_veille(_sa, relhv)
                 if relhv["code"] == 200:
                     _sa["lus_hors_vente"] = len(relhv.get("articles") or [])
+                    #  C'est ICI que vivent les articles des cartes du mois
+                    #  suivant : hors vente jusqu'au jour où une carte les donne.
+                    _vus_cartes += list(relhv.get("articles") or [])
                     evts_h = await roblox_module.comparer_et_enregistrer(
                         relhv["articles"])
                     #  ⚠️ ON FUSIONNE LES NOUVEAUTÉS AUSSI, pas seulement les
@@ -15179,8 +15267,9 @@ async def veille_roblox_task():
             #  classement. Voir `roblox_veille.catalogue_occupe`.
             roblox_module.catalogue_occupe(False)
             #  🎁 Les cartes cadeaux (29/09) : la page officielle au plus
-            #  toutes les 3 h, une fiche seulement quand sa liste change.
-            await _cartes_cadeaux(guildes_items)
+            #  toutes les 3 h, une fiche seulement quand sa liste change ; le
+            #  mois suivant, lu dans ce que ce passage vient de relever.
+            await _cartes_cadeaux(guildes_items, _vus_cartes)
 
         # ── L'actualite ─────────────────────────────────────────────────────
         if guildes_news:
@@ -24805,7 +24894,9 @@ async def _activite_boot():
     #  que les fiches sortent sous un nom propre a chaque flux (exigence ROBLOX.md).
     roblox_module.setup(get_db=get_db, cfg=cfg, db_set=db_set,
                         session=None, log=print)
-    roblox_ui.setup(db_set=db_set, webhook_send=webhook_send, log=print)
+    #  `webhook_edit` : la fiche des cartes cadeaux se COMPLÈTE sur place.
+    roblox_ui.setup(db_set=db_set, webhook_send=webhook_send,
+                    webhook_edit=webhook_edit, log=print)
     #  ⚠️ LE FILTRE OFFICIEL « PUBLIÉ RÉCEMMENT » — module à part, exprès.
     #  Il répond à une question DIFFÉRENTE de `roblox_veille` : « qui est en
     #  tête du Marketplace » et non « qui a la date de création la plus

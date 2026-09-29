@@ -383,6 +383,10 @@ CLES_DEFAUT = {
     #  🎁 La liste des cartes cadeaux déjà affichée ici (29/09) — voir
     #  `roblox_cartes.signature`. Vide = rien d'affiché encore.
     "roblox_cartes_signature": "",
+    #  L'article du mois suivant déjà ajouté à la fiche, et la fiche elle-même
+    #  (son identifiant Discord) — pour la COMPLÉTER au lieu d'en poster une.
+    "roblox_cartes_suite": "",
+    "roblox_cartes_message": 0,
 }
 
 
@@ -584,6 +588,17 @@ async def init_db():
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_roblox_mesures_article"
             " ON roblox_mesures(asset_id, mesure_le)")
+        #  🎁 Les articles de carte cadeau dont Roblox ÉCRIT le mois (29/09) —
+        #  voir `roblox_cartes.annonces_dans`. Relevés sans une requête dans ce
+        #  que le relevé lit déjà ; quelques lignes par an.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS roblox_cartes_annonces("
+            " asset_id INTEGER PRIMARY KEY,"
+            " annee INTEGER NOT NULL,"
+            " mois INTEGER NOT NULL,"
+            " nom TEXT,"
+            " description TEXT,"
+            " vu_le TEXT NOT NULL)")
         #  Où reprendre la pagination d'un relevé au passage suivant. Une seule
         #  ligne par source. Voir `relever_collectionnables`.
         await db.execute(

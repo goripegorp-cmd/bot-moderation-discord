@@ -241,12 +241,30 @@ tout y tombe.
 - **Source : la page officielle** `roblox.com/giftcards-fr`. Sa liste vit dans
   son script `…-GiftCards.js`, pays par pays, en hexadécimal
   (`roblox_cartes.offre_du_script`) ; France par défaut. Jamais un site tiers.
-- **Une fiche dans le salon des accessoires quand la liste change** — une par
-  mois en pratique, mémorisée en base (`roblox_cartes_signature`) : jamais deux
-  fois. Chaque article dit QUELLE carte le donne (magasin, code Amazon, code
-  bonus de roblox.com).
-- **Sobre** : la page au plus toutes les 3 h, le script seulement quand son
-  empreinte change, les noms par l'économie (anglais + français officiel).
+- **Une fiche COURTE dans le salon des accessoires quand la liste change** —
+  une par mois en pratique, mémorisée en base (`roblox_cartes_signature`) :
+  jamais deux fois. Une ligne par carte à acheter (magasin, code Amazon, bonus
+  de roblox.com), les noms en liens, une seule image, une rangée de boutons
+  (~10 composants ; la version du matin du 29/09 en comptait 20).
+- **Le mois suivant, seulement s'il est SÛR** : une ligne 🔜 pour l'article
+  dont la description de Roblox écrit le mois (« … select retailers in
+  October 2026 »). Relevé dans le relevé hors vente de 30 min (zéro requête),
+  mémorisé dans `roblox_cartes_annonces`. Le mois en cours vient de ces mêmes
+  descriptions, jamais de notre horloge ; Amazon et le bonus n'écrivent pas
+  leur mois : jamais annoncés d'avance.
+- **Complétée sur place** : une nouvelle annonce, ou une nouvelle présentation
+  (`VERSION_FICHE`), MODIFIE la fiche publiée (`roblox_cartes_message`) — pas
+  de message ni de ping de plus. Introuvable (supprimée) : reposée sans ping.
+  La fiche du 29/09 au matin, publiée avant qu'on note son identifiant, se
+  retrouve UNE fois dans les 50 derniers messages du salon.
+- **Sobre** (mesuré le 29/09, vraie chaîne) : 0 requête par passage de
+  30 min, 1 (la page) toutes les 3 h ; quand une fiche part ou change, le
+  script si son empreinte a changé, 2 appels à l'économie par article
+  (anglais + français officiel), une par seconde au plus, et une image —
+  15 requêtes, une fois.
+- **Jamais « Article 1396… »** : un article absent (coupure) → rien n'est
+  envoyé ; un nom que Roblox ne rend pas → la fiche attend la lecture
+  suivante (`ESSAIS_NOMS` = 3 au plus), puis part avec le lien seul.
 - Les articles des cartes restent hors du flux « nouveautés » (hors vente au
   catalogue, créés des semaines avant) : ils sortent dans cette fiche le jour
   où une carte les donne.

@@ -35,6 +35,10 @@ from ui_v2 import (
 
 _db_set = None
 _webhook_send = None
+#  Pour COMPLÉTER une fiche déjà publiée (cartes cadeaux) au lieu d'en poster
+#  une nouvelle. Même profil de webhook que l'envoi : un message se modifie
+#  par le webhook qui l'a posté.
+_webhook_edit = None
 _log = print
 
 #  Le nom affiché par le webhook, par flux. C'est ce qui rend le salon lisible
@@ -62,10 +66,11 @@ CLES_DU_CHAMP = {CHAMP_ACCESSOIRES: ("roblox_salon_nouveautes",
 FLUX_DU_CHAMP = {CHAMP_ACCESSOIRES: ("nouveautes", "bascules")}
 
 
-def setup(*, db_set, webhook_send=None, log=None):
-    global _db_set, _webhook_send, _log
+def setup(*, db_set, webhook_send=None, webhook_edit=None, log=None):
+    global _db_set, _webhook_send, _webhook_edit, _log
     _db_set = db_set
     _webhook_send = webhook_send
+    _webhook_edit = webhook_edit
     if log is not None:
         _log = log
 
@@ -393,94 +398,97 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
         #  Repli : un défaut de webhook ne doit pas faire taire le flux.
         _log(f"[roblox {etiquette} webhook] {ex}")
         try:
-            await salon.send(view=vue)
+            _m2 = await salon.send(view=vue)
+            if trace is not None:
+                trace["message_id"] = getattr(_m2, "id", None)
             return True
         except Exception as ex2:
             _log(f"[roblox {etiquette}] {ex2}")
             return False
 
 
+#  Ce qui identifie une fiche 🎁 dans un salon : son titre. Sert à retrouver
+#  celle publiée avant qu'on note son identifiant (29/09 au matin).
+MARQUE_CARTES = "CARTES CADEAUX ROBLOX"
+
+
+def _lien_carte(article: dict) -> str:
+    """`[Nom](lien)` — le nom EST le lien : pas un bouton par article."""
+    import roblox_cartes as cartes
+    nom = cartes.nom_affiche(article)
+    lien = veille.lien_article(article.get("asset_id"), article.get("item_type"))
+    return f"[{nom}]({lien})" if lien else f"**{nom}**"
+
+
 def construire_cartes(articles: list, offre: dict, images: dict | None = None,
+                      prochains=(), mois: str | None = None,
+                      mois_prochain: str | None = None,
                       ping_cle: str | None = None, ping_role=None) -> LayoutView:
-    """🎁 Ce que donne une carte cadeau Roblox AUJOURD'HUI — une seule fiche.
+    """🎁 Ce que donne une carte cadeau Roblox — UNE fiche courte, regroupée.
 
-    Demande du propriétaire (29/09) : « affiche les items disponibles dans les
-    cartes cadeaux ». La liste vient de la page officielle (voir
-    `roblox_cartes`) ; chaque article dit QUELLE carte le donne — en magasin,
-    code Amazon, code bonus de roblox.com — parce que ce n'est pas la même
-    carte à acheter. Le mois vient de la description de Roblox, jamais de
-    notre horloge.
+    Demandes du propriétaire (29/09) : « affiche les items disponibles dans
+    les cartes cadeaux », puis « tu regroupes, oui, mais tu t'assures que ça
+    ne prenne pas trop de place non plus. Que ce soit compréhensible. »
 
-    ⚠️ 40 COMPOSANTS PAR MESSAGE, PAS UN DE PLUS (Discord). Mesuré en test :
-    dix articles avec image et bouton en demandaient 51 — la fiche ne serait
-    jamais partie. On compte donc avant d'ajouter : un article avec image en
-    coûte 3, sans image 1, un bouton 1 (et 1 par rangée de cinq). Ce qui ne
-    tient pas est DIT (« … et N autre(s) »), jamais tu.
+    UNE LIGNE PAR CARTE À ACHETER, pas un bloc par article :
+        🟠 **Code Amazon** · Casquette d'Hermès · Casque d'Arès · …
+    Chaque nom est un lien vers sa page Roblox ; une seule image (le premier
+    article) ; une seule rangée de boutons. La version du matin empilait un
+    bloc illustré par article : cinq articles, un écran entier.
+
+    Le mois suivant (`prochains`) n'a qu'UNE ligne 🔜, et seulement si Roblox
+    l'a écrit dans la description de l'article (voir
+    `roblox_cartes.annonces_dans`) — rien de deviné.
+
+    ⚠️ Discord : 40 composants et 4 000 caractères par message. Cette fiche
+    compte au plus 10 composants ; son texte est borné (noms coupés à 48
+    caractères, `MAX_ARTICLES`, `MAX_PROCHAINS`), et ce qui ne tient pas est
+    DIT (« … et N autre(s) »), jamais tu.
     """
     import roblox_cartes as cartes
     images = images or {}
-    mois = cartes.mois_de(articles)
+    articles = list(articles or [])
+    montres = articles[:cartes.MAX_ARTICLES]
+    suite = list(prochains or [])[:cartes.MAX_PROCHAINS]
+    mois = mois or cartes.mois_de(montres)
+    lignes = [f"{etiquette} · " + " · ".join(_lien_carte(a) for a in groupe)
+              for etiquette, groupe in cartes.groupes(montres, offre)]
+    if len(articles) > len(montres):
+        lignes.append(f"-# … et {len(articles) - len(montres)} autre(s) sur la "
+                      f"page officielle.")
+    if suite:
+        quand = f"En {mois_prochain}" if mois_prochain else "Le mois prochain"
+        lignes.append(f"🔜 **{quand}** · " + " · ".join(
+            etiquette.replace("**", "") + " · "
+            + " · ".join(_lien_carte(a) for a in groupe)
+            for etiquette, groupe in cartes.groupes(suite, {})))
+    titre = v2_title(f"🎁 {MARQUE_CARTES} · " + (mois or "en ce moment"), level=3)
+    corps = v2_body("\n".join(lignes) or "—")
+    image = next((images[a.get("asset_id")] for a in montres
+                  if images.get(a.get("asset_id"))), None)
+    haut = None
+    if image:
+        try:
+            haut = discord.ui.Section(
+                titre, corps, accessory=discord.ui.Thumbnail(media=image))
+        except Exception as ex:
+            _log(f"[roblox cartes image] {ex}")
+    items = [haut] if haut is not None else [titre, corps]
+    pied = ("-# Un article offert par carte échangée · liste officielle de "
+            "Roblox pour la France")
+    if suite:
+        pied += " · 🔜 annoncé par Roblox sur la page de l'article"
+    items.append(v2_body(pied + "."))
     b_ping = _bouton_ping(ping_cle)
     ligne_ping = _ligne_mention(ping_role) if b_ping is not None else None
+    if ligne_ping:
+        items.append(v2_body(ligne_ping))
     bas = [Button(label="Échanger une carte", emoji="🎁",
                   style=discord.ButtonStyle.link, url=cartes.PAGE_ECHANGE),
            Button(label="Page officielle", emoji="🛒",
                   style=discord.ButtonStyle.link, url=cartes.PAGE)]
     if b_ping is not None:
         bas.append(b_ping)
-    #  Le conteneur, le titre, la phrase d'accueil, le séparateur, le pied, la
-    #  mention éventuelle, la rangée du bas et ses boutons.
-    reste = 40 - (5 + (1 if ligne_ping else 0) + 1 + len(bas))
-    tete = [v2_title("🎁 CARTES CADEAUX ROBLOX · "
-                     + (f"offerts en {mois}" if mois else "offerts en ce moment"),
-                     level=3),
-            v2_body("-# Un article offert avec chaque carte cadeau échangée — "
-                    "la liste officielle de Roblox pour la France.")]
-    corps, montres = [], []
-    for a in articles[:cartes.MAX_ARTICLES]:
-        nom_en = _ou_tiret(a.get("nom"))
-        nom_fr = a.get("nom_fr")
-        titre = f"**{nom_fr}**\n-# {nom_en}" if nom_fr else f"**{nom_en}**"
-        texte = f"🎁 {titre}\n{cartes.source_de(a, offre)}"
-        image = images.get(a.get("asset_id"))
-        cout = 3 if image else 1
-        #  Une place gardée pour dire ce qui ne tient pas.
-        if cout > reste - 1:
-            break
-        element = None
-        if image:
-            try:
-                element = discord.ui.Section(
-                    v2_body(texte), accessory=discord.ui.Thumbnail(media=image))
-            except Exception as ex:
-                _log(f"[roblox cartes image] {ex}")
-                cout = 1
-        corps.append(element or v2_body(texte))
-        montres.append(a)
-        reste -= cout
-    if len(montres) < len(articles):
-        corps.append(v2_body(f"-# … et {len(articles) - len(montres)} autre(s) "
-                             f"sur la page officielle."))
-        reste -= 1
-    boutons = []
-    for a in montres:
-        besoin = 1 + (1 if len(boutons) % 5 == 0 else 0)
-        lien = veille.lien_article(a.get("asset_id"), a.get("item_type"))
-        if not lien or besoin > reste:
-            continue
-        boutons.append(Button(
-            label=str(a.get("nom_fr") or a.get("nom") or "Article")[:40],
-            emoji="🔗", style=discord.ButtonStyle.link, url=lien))
-        reste -= besoin
-    items = tete + corps + [
-        v2_divider(),
-        v2_body("-# Échange ta carte sur roblox.com/redeem : l'article arrive "
-                "dans ton inventaire. La liste change chaque mois — la nouvelle "
-                "sortira ici.")]
-    if ligne_ping:
-        items.append(v2_body(ligne_ping))
-    for k in range(0, len(boutons), 5):
-        items.append(discord.ui.ActionRow(*boutons[k:k + 5]))
     items.append(discord.ui.ActionRow(*bas))
     v = LayoutView(timeout=None)
     v.add_item(v2_container(*items, color=Palette.ACCENT))
@@ -488,18 +496,87 @@ def construire_cartes(articles: list, offre: dict, images: dict | None = None,
 
 
 async def publier_cartes(guild, salon, articles: list, offre: dict,
-                         images: dict | None = None,
-                         trace: dict | None = None) -> bool:
+                         images: dict | None = None, prochains=(),
+                         mois: str | None = None, mois_prochain: str | None = None,
+                         trace: dict | None = None, ping: bool = True) -> bool:
     """Publie la fiche des cartes cadeaux. `True` seulement si elle est
     RÉELLEMENT partie — l'appelant ne note la liste « affichée » qu'à ce prix.
-    Le rôle des nouveautés est prévenu : ce sont des articles à obtenir."""
+    Une liste NOUVELLE prévient le rôle des nouveautés (`ping`) ; une fiche
+    reposée parce que l'ancienne est introuvable, non : ils l'ont déjà eue."""
     if salon is None or not articles:
         return False
     cle = pings.cle_du_flux("nouveautes")
-    role = await pings.role_de(guild, cle) if cle else None
-    vue = construire_cartes(articles, offre, images, ping_cle=cle, ping_role=role)
+    role = await pings.role_de(guild, cle) if (cle and ping) else None
+    vue = construire_cartes(articles, offre, images, prochains=prochains,
+                            mois=mois, mois_prochain=mois_prochain,
+                            ping_cle=cle, ping_role=role)
     return await _envoyer(salon, PLATEFORME["nouveautes"], vue, "cartes",
                           ping_role=role, trace=trace)
+
+
+async def editer_cartes(guild, salon, message_id: int, articles: list,
+                        offre: dict, images: dict | None = None, prochains=(),
+                        mois: str | None = None,
+                        mois_prochain: str | None = None) -> bool:
+    """COMPLÈTE la fiche déjà publiée — le mois suivant vient d'être annoncé,
+    ou la présentation a changé — sans message de plus, donc sans ping de
+    plus (une modification ne notifie personne). `True` seulement si Discord
+    a accepté la modification : l'appelant ne note rien sinon."""
+    if salon is None or not message_id or not articles or _webhook_edit is None:
+        return False
+    cle = pings.cle_du_flux("nouveautes")
+    #  `creer=False` : on ne crée pas de rôle pour une modification.
+    role = await pings.role_de(guild, cle, creer=False) if cle else None
+    vue = construire_cartes(articles, offre, images, prochains=prochains,
+                            mois=mois, mois_prochain=mois_prochain,
+                            ping_cle=cle, ping_role=role)
+    try:
+        res = await _webhook_edit(salon, PLATEFORME["nouveautes"],
+                                  int(message_id), view=vue)
+    except Exception as ex:
+        _log(f"[roblox cartes modifier] {type(ex).__name__}: {ex}")
+        return False
+    if res is None:
+        _log(f"[roblox cartes modifier] message {message_id} introuvable ou "
+             f"non modifiable dans #{getattr(salon, 'name', '?')}")
+        return False
+    return True
+
+
+def _textes_de(composants) -> str:
+    """Tout le texte d'un message Components V2 (conteneurs, sections…)."""
+    out, pile = [], list(composants or [])
+    while pile:
+        c = pile.pop()
+        t = getattr(c, "content", None)
+        if isinstance(t, str):
+            out.append(t)
+        pile.extend(getattr(c, "children", None) or [])
+        acc = getattr(c, "accessory", None)
+        if acc is not None:
+            pile.append(acc)
+    return "\n".join(out)
+
+
+async def retrouver_carte(salon, limite: int = 50) -> int | None:
+    """L'identifiant de la dernière fiche 🎁 de ce salon, ou `None`.
+
+    Pour la fiche publiée AVANT qu'on note son identifiant (29/09 au matin) :
+    UNE lecture des `limite` derniers messages, et seuls ceux du bot ou d'un
+    webhook comptent. Ne lève jamais (sans le droit de lire l'historique, on
+    le dit et on rend `None`)."""
+    try:
+        moi = getattr(getattr(salon, "guild", None), "me", None)
+        async for m in salon.history(limit=limite):
+            du_bot = moi is not None and getattr(
+                getattr(m, "author", None), "id", None) == moi.id
+            if getattr(m, "webhook_id", None) is None and not du_bot:
+                continue
+            if MARQUE_CARTES in _textes_de(getattr(m, "components", None)):
+                return int(m.id)
+    except Exception as ex:
+        _log(f"[roblox cartes retrouver] {type(ex).__name__}: {ex}")
+    return None
 
 
 async def publier(guild, salon, article: dict, flux: str,
