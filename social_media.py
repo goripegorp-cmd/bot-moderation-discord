@@ -1369,7 +1369,17 @@ def _anns_path(guild_id: int) -> Path:
 _io_lock = asyncio.Lock()
 
 
-async def _read_json(path: Path) -> Any:
+# ⚠️ LE DISQUE NE SE TOUCHE JAMAIS SUR LA BOUCLE ASYNCIO (29/09/2026).
+# Journal Railway du 29/09, 09:37 UTC : « [STALL] boucle asyncio bloquée depuis
+# 44.5s », puis « heartbeat blocked for more than 50 seconds ». Pile :
+# _cleanup_loop → cleanup_all → cleanup_announcement → _save_anns →
+# _write_json → path.write_text → io.open. Ces deux fonctions étaient `async`
+# de nom seulement : elles lisaient et écrivaient le fichier SUR la boucle.
+# Quand le volume a calé ~50 s sur un open(), TOUT le bot a calé avec lui —
+# modération, commandes, battement de cœur Discord. Dans un fil à part, un
+# disque lent ne fait plus attendre que la sauvegarde elle-même.
+
+def _lire_json_bloquant(path: Path) -> Any:
     if not path.exists():
         return None
     try:
@@ -1378,11 +1388,23 @@ async def _read_json(path: Path) -> Any:
         return None
 
 
+async def _read_json(path: Path) -> Any:
+    return await asyncio.to_thread(_lire_json_bloquant, path)
+
+
+def _ecrire_json_bloquant(path: Path, texte: str) -> None:
+    # ⚠️ ATOMIQUE : un fichier temporaire, puis un remplacement d'un bloc. Un
+    # conteneur arrêté au milieu d'un write_text (chaque déploiement en arrête
+    # un) laissait un JSON tronqué, que `_read_json` lit comme « rien » : toutes
+    # les annonces du serveur oubliées, sans un mot.
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(texte, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 async def _write_json(path: Path, payload: Any) -> None:
-    path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    texte = json.dumps(payload, indent=2, ensure_ascii=False)
+    await asyncio.to_thread(_ecrire_json_bloquant, path, texte)
 
 
 # =============================================================================
@@ -1684,8 +1706,12 @@ class SocialMediaManager:
 
     # ---- cleanup loop -----------------------------------------------------
 
-    async def cleanup_announcement(self, ann: Announcement) -> bool:
-        """Verifie qu'une annonce est toujours valide. Supprime sinon."""
+    async def cleanup_announcement(self, ann: Announcement,
+                                   sauver: bool = True) -> bool:
+        """Verifie qu'une annonce est toujours valide. Supprime sinon.
+
+        `sauver=False` : l'appelant (`cleanup_all`) sauvegarde lui-même, une
+        fois par serveur — plus une réécriture du fichier par annonce."""
         if ann.deleted:
             return False
         adapter = self._adapters.get(ann.platform)
@@ -1713,7 +1739,8 @@ class SocialMediaManager:
                     ann.deleted = True
             except Exception:
                 pass
-        await self._save_anns(ann.guild_id)
+        if sauver:
+            await self._save_anns(ann.guild_id)
         return ann.deleted
 
     async def cleanup_all(self) -> dict[int, int]:
@@ -1721,11 +1748,22 @@ class SocialMediaManager:
         results: dict[int, int] = {}
         for guild_id, anns in list(self._anns.items()):
             removed = 0
+            vues = 0
             for ann in list(anns.values()):
                 if ann.deleted:
                     continue
-                if await self.cleanup_announcement(ann):
+                vues += 1
+                if await self.cleanup_announcement(ann, sauver=False):
                     removed += 1
+                    # Une annonce SUPPRIMÉE de Discord se note tout de suite :
+                    # un redémarrage au milieu du tour ne doit pas la faire
+                    # supprimer deux fois.
+                    await self._save_anns(guild_id)
+            # ⚠️ UNE sauvegarde par serveur et par tour (dates de vérification),
+            # au lieu d'une réécriture complète du fichier PAR ANNONCE : c'est
+            # dans l'une d'elles que le bot a calé 50 s le 29/09.
+            if vues:
+                await self._save_anns(guild_id)
             results[guild_id] = removed
         return results
 
@@ -1753,8 +1791,15 @@ class SocialMediaManager:
         while not self._stop_event.is_set():
             try:
                 await self.cleanup_all()
-            except Exception:
-                pass
+            except Exception as _ex:
+                # Même règle que `_poll_loop` (18/07) : un tour qui plante se
+                # DIT — `except: pass` le rendait invisible.
+                try:
+                    import diag
+                    diag.error("social", "cleanup_loop",
+                               "cycle de nettoyage en échec", exc=_ex)
+                except Exception:
+                    pass
             try:
                 await asyncio.wait_for(
                     self._stop_event.wait(), timeout=self.cleanup_interval_seconds
