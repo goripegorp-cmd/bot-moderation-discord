@@ -112,7 +112,7 @@
 | `setup_wizard.py` | 718 | 10 | 13 |
 | `slash_commands_2026.py` | 438 | 0 | 16 |
 | `social_match.py` | 197 | 0 | 8 |
-| `social_media.py` | 1832 | 13 | 11 |
+| `social_media.py` | 1877 | 13 | 13 |
 | `social_zones.py` | 2790 | 15 | 73 |
 | `staff_sanction.py` | 647 | 2 | 9 |
 | `sticky_messages.py` | 252 | 0 | 13 |
@@ -168,6 +168,7 @@
 | `tests/test_roblox_sources_officielles.py` | 340 | 0 | 16 |
 | `tests/test_salon_afk_et_rattrapage.py` | 475 | 3 | 21 |
 | `tests/test_sentinelle_instance.py` | 355 | 0 | 19 |
+| `tests/test_social_sans_gel.py` | 181 | 1 | 11 |
 | `tests/test_stream_schedule.py` | 29 | 0 | 3 |
 | `tests/test_tickets_panneau_unifie.py` | 323 | 0 | 26 |
 | `tests/test_veille_bilan.py` | 176 | 0 | 13 |
@@ -186,9 +187,9 @@
 | `vocabulary.py` | 266 | 8 | 0 |
 | `webhook_leak.py` | 302 | 0 | 7 |
 | `webhook_tracker.py` | 389 | 0 | 8 |
-| **TOTAL (179 files)** | **121384** | **388** | **3005** |
+| **TOTAL (180 files)** | **121610** | **389** | **3018** |
 
-## Alphabetical lookup (4628 symbols)
+## Alphabetical lookup (4645 symbols)
 
 - `_2026_on_ready_addon` — `bot.py`:37999  (async def)
 - `_2026_start_activity_flush` — `bot.py`:38365  (async def)
@@ -423,7 +424,7 @@
 - `SmStillOkButton.__init__` — `bot.py`:41260  (method)
 - `SocialAddPanel.__init__` — `admin_panels_v2.py`:678  (method)
 - `SocialEditPanel.__init__` — `admin_panels_v2.py`:831  (method)
-- `SocialMediaManager.__init__` — `social_media.py`:1399  (method)
+- `SocialMediaManager.__init__` — `social_media.py`:1421  (method)
 - `StaticPanel.__init__` — `ui_v2.py`:279  (method)
 - `StubDB.__init__` — `tests/conftest.py`:49  (method)
 - `SuggestionReplyButton.__init__` — `bot.py`:34128  (method)
@@ -478,6 +479,7 @@
 - `ZoneTradeOkButton.__init__` — `social_zones.py`:2685  (method)
 - `ZoneTradeScamButton.__init__` — `social_zones.py`:2733  (method)
 - `ZoneVoiceButton.__init__` — `social_zones.py`:2653  (method)
+- `_Adaptateur.__init__` — `tests/test_social_sans_gel.py`:94  (method)
 - `_AddMemberSelectView.__init__` — `social_zones.py`:2094  (method)
 - `_AntiRaidActionPickerV2.__init__` — `bot.py`:11798  (method)
 - `_AntiRaidThresholdsModal.__init__` — `bot.py`:11776  (method)
@@ -586,6 +588,7 @@
 - `_active_zone_count` — `social_zones.py`:311  (async def)
 - `_activite_boot` — `bot.py`:24853  (async def)
 - `_activite_passage_wait` — `bot.py`:14043  (async def)
+- `_Adaptateur` — `tests/test_social_sans_gel.py`:91  (class)
 - `_add_member_to_alliance` — `bot.py`:42876  (async def)
 - `_AddMemberSelectView` — `social_zones.py`:2092  (class)
 - `_afficher` — `outils/apercu_fiche_actu.py`:45  (def)
@@ -596,6 +599,7 @@
 - `RellseasGestionV2._agir` — `rellseas_panneau.py`:841  (method)
 - `_alert_owner_backup_issue` — `backup_lite.py`:150  (async def)
 - `_alert_owner_integrity` — `db_backup.py`:48  (def)
+- `_annonce` — `tests/test_social_sans_gel.py`:104  (def)
 - `_announce` — `activity_vip.py`:948  (async def)
 - `_announce_channel` — `activity_vip.py`:433  (async def)
 - `_announce_poll_winner` — `bot.py`:31525  (async def)
@@ -631,6 +635,7 @@
 - `_autorisation_mention` — `roblox_panneau.py`:329  (def)
 - `_autorise_radiation` — `bot.py`:4397  (async def)
 - `_avatar_cache_set` — `bot.py`:3136  (def)
+- `_avec_horloge` — `tests/test_social_sans_gel.py`:24  (def)
 - `YouTubeRSSAdapter._avertir_du_jour` — `social_media.py`:1087  (method)
 - `_avertir_une_fois_par_jour` — `bot.py`:34537  (def)
 - `ChanSelectPaginatedView._back` — `bot.py`:22945  (method)
@@ -958,7 +963,7 @@
 - `_cle` — `rellseas_panneau.py`:335  (def)
 - `_clean_handle` — `social_media.py`:646  (def)
 - `_clean_yt_handle` — `social_media.py`:666  (def)
-- `SocialMediaManager._cleanup_loop` — `social_media.py`:1752  (method)
+- `SocialMediaManager._cleanup_loop` — `social_media.py`:1790  (method)
 - `_cleanup_old_backups` — `backup_lite.py`:391  (async def)
 - `_cleanup_old_db_wait` — `bot.py`:22751  (async def)
 - `_clear_audit_log` — `bot.py`:31911  (async def)
@@ -1078,6 +1083,7 @@
 - `_economie` — `roblox_cartes.py`:364  (async def)
 - `_economie` — `tests/test_limited_promotions.py`:136  (def)
 - `_Banc._ecrire` — `tests/test_config_lost_update.py`:97  (method)
+- `_ecrire_json_bloquant` — `social_media.py`:1395  (def)
 - `_ecrit` — `tests/test_absents_porte_de_retour.py`:269  (async def)
 - `_ecrit` — `tests/test_afk_retour.py`:211  (async def)
 - `_edit_group_nudge_live` — `social_zones.py`:1246  (async def)
@@ -1093,7 +1099,7 @@
 - `_ensure_combat_channel` — `bot.py`:42560  (async def)
 - `_ensure_entraide_ratings_table` — `bot.py`:12930  (async def)
 - `_ensure_events_category` — `bot.py`:42329  (async def)
-- `SocialMediaManager._ensure_loaded` — `social_media.py`:1486  (method)
+- `SocialMediaManager._ensure_loaded` — `social_media.py`:1508  (method)
 - `_ensure_notify_role` — `bot.py`:12560  (async def)
 - `_ensure_prudence_role` — `social_zones.py`:1409  (async def)
 - `_ensure_quarantine_role` — `bot.py`:5661  (async def)
@@ -1178,7 +1184,7 @@
 - `_filter_blob` — `gdpr.py`:478  (async def)
 - `_finalize` — `protection_guards.py`:632  (async def)
 - `_find_event_recap_channel` — `bot.py`:12343  (async def)
-- `SocialMediaManager._find_subscription` — `social_media.py`:1555  (method)
+- `SocialMediaManager._find_subscription` — `social_media.py`:1577  (method)
 - `_find_tesseract_binary` — `ocr_scan.py`:24  (def)
 - `_fix_role_tree` — `activity_vip.py`:368  (async def)
 - `_flag_dangerous_profile` — `bot.py`:5812  (async def)
@@ -1222,6 +1228,7 @@
 - `_gabarits_dynamiques` — `outils/verif_boutons_persistants.py`:116  (def)
 - `_gc_bucket` — `rate_limiter.py`:81  (def)
 - `_gdpr_retention_wait` — `bot.py`:8602  (async def)
+- `_gestionnaire` — `tests/test_social_sans_gel.py`:126  (def)
 - `DBPool._get` — `bot.py`:641  (method)
 - `_get` — `outils/sonde_signaux_limited.py`:52  (async def)
 - `ActionConfigPanelV2._get_action_key` — `bot.py`:19037  (method)
@@ -1382,6 +1389,7 @@
 - `_lire` — `outils/inventaire_evenements.py`:93  (def)
 - `_lire` — `tests/test_cartes_cadeaux.py`:178  (def)
 - `_lire_bot` — `tests/test_configure_social.py`:60  (def)
+- `_lire_json_bloquant` — `social_media.py`:1382  (def)
 - `_lire_page_article` — `roblox_news.py`:661  (def)
 - `_liste` — `activite_message.py`:74  (def)
 - `_liste` — `roblox_commandes.py`:286  (async def)
@@ -1566,7 +1574,7 @@
 - `_plus_tard` — `tests/test_cartes_cadeaux.py`:930  (def)
 - `_policy_path` — `protection_guards.py`:323  (def)
 - `_poll_closer_wait` — `bot.py`:31709  (async def)
-- `SocialMediaManager._poll_loop` — `social_media.py`:1734  (method)
+- `SocialMediaManager._poll_loop` — `social_media.py`:1772  (method)
 - `_porte_publique` — `activite_passage.py`:848  (def)
 - `_poser` — `rellseas_panneau.py`:343  (def)
 - `_poser` — `tests/test_flux_limited_seul.py`:254  (async def)
@@ -1612,7 +1620,7 @@
 - `_RadieAppelModal` — `bot.py`:4597  (class)
 - `_radier_membre` — `bot.py`:4246  (async def)
 - `_rating_division` — `bot.py`:45895  (def)
-- `_read_json` — `social_media.py`:1372  (async def)
+- `_read_json` — `social_media.py`:1391  (async def)
 - `_read_last_dm_ts` — `backup_lite.py`:77  (def)
 - `_rebrancher_module` — `tests/test_roblox_publication.py`:98  (def)
 - `_recenser_limited` — `bot.py`:15999  (async def)
@@ -1620,7 +1628,7 @@
 - `_recidivism_log_escalation` — `bot.py`:5723  (async def)
 - `_recompute_locked` — `recidivism.py`:255  (async def)
 - `_record_action` — `protection_guards.py`:407  (def)
-- `SocialMediaManager._record_announcement` — `social_media.py`:1580  (method)
+- `SocialMediaManager._record_announcement` — `social_media.py`:1602  (method)
 - `_record_infraction` — `bot.py`:5692  (async def)
 - `_record_message` — `compromised_detector.py`:165  (def)
 - `_recours_deja_utilise` — `bot.py`:4576  (async def)
@@ -1714,13 +1722,13 @@
 - `EditChanCfgV2._save` — `bot.py`:22977  (method)
 - `V2GenericChannelPicker._save` — `bot.py`:21567  (method)
 - `V2GenericRolePicker._save` — `bot.py`:21687  (method)
-- `SocialMediaManager._save_anns` — `social_media.py`:1481  (method)
+- `SocialMediaManager._save_anns` — `social_media.py`:1503  (method)
 - `_save_api_warning_state` — `bot.py`:21167  (def)
 - `_save_atrisk_msg` — `activity_vip.py`:819  (async def)
 - `_save_guild` — `tracking_layer.py`:117  (async def)
 - `_save_inventory` — `bot.py`:11991  (async def)
 - `_save_role_ids` — `activity_vip.py`:318  (async def)
-- `SocialMediaManager._save_subs` — `social_media.py`:1476  (method)
+- `SocialMediaManager._save_subs` — `social_media.py`:1498  (method)
 - `_scan_for_tokens` — `anti_token_leak.py`:87  (def)
 - `_scan_profile_text` — `bot.py`:5788  (def)
 - `_scan_red_keywords` — `bot.py`:5767  (def)
@@ -1925,7 +1933,7 @@
 - `_welcome_raid_active` — `bot.py`:11532  (def)
 - `_window_start_str` — `activity_vip.py`:241  (def)
 - `_WizardView` — `setup_wizard.py`:247  (class)
-- `_write_json` — `social_media.py`:1381  (async def)
+- `_write_json` — `social_media.py`:1405  (async def)
 - `_write_last_dm_ts` — `backup_lite.py`:84  (def)
 - `_ConfirmView._yes` — `admin_panels_v2.py`:493  (method)
 - `_yesterday_str_p41` — `bot.py`:38404  (def)
@@ -1980,7 +1988,7 @@
 - `M.add_roles` — `tests/test_afk_retour.py`:131  (method)
 - `_FauxMembre.add_roles` — `tests/test_roblox_pings.py`:234  (method)
 - `TicketControlView.add_staff` — `bot.py`:9667  (method)
-- `SocialMediaManager.add_subscription` — `social_media.py`:1492  (method)
+- `SocialMediaManager.add_subscription` — `social_media.py`:1514  (method)
 - `add_template` — `tickets_enhance.py`:491  (async def)
 - `add_to_blacklist` — `delegations.py`:253  (def)
 - `add_to_whitelist` — `delegations.py`:287  (def)
@@ -2213,8 +2221,8 @@
 - `cle_config` — `roblox_pings.py`:140  (def)
 - `cle_du_billet` — `roblox_pings.py`:130  (def)
 - `cle_du_flux` — `roblox_pings.py`:135  (def)
-- `SocialMediaManager.cleanup_all` — `social_media.py`:1719  (method)
-- `SocialMediaManager.cleanup_announcement` — `social_media.py`:1687  (method)
+- `SocialMediaManager.cleanup_all` — `social_media.py`:1746  (method)
+- `SocialMediaManager.cleanup_announcement` — `social_media.py`:1709  (method)
 - `cleanup_deals_task` — `bot.py`:36895  (async def)
 - `cleanup_deleted_sources` — `tracking_layer.py`:396  (async def)
 - `cleanup_expired_deals_db` — `bot.py`:36125  (async def)
@@ -2255,7 +2263,7 @@
 - `TwitterSyndicationAdapter.configured` — `social_media.py`:1265  (method)
 - `YouTubeAdapter.configured` — `social_media.py`:480  (method)
 - `YouTubeRSSAdapter.configured` — `social_media.py`:1096  (method)
-- `SocialMediaManager.configured_platforms` — `social_media.py`:1426  (method)
+- `SocialMediaManager.configured_platforms` — `social_media.py`:1448  (method)
 - `BlacklistClearConfirmView.confirm` — `bot.py`:23948  (method)
 - `ConfirmAltActionView.confirm` — `bot.py`:19484  (method)
 - `ConfirmKickView.confirm` — `bot.py`:20039  (method)
@@ -2299,7 +2307,7 @@
 - `decide_action` — `protection_guards.py`:523  (async def)
 - `ManualAdapter.declare_post` — `social_media.py`:328  (method)
 - `deescalate_task` — `recidivism.py`:468  (async def)
-- `default_template` — `social_media.py`:1788  (def)
+- `default_template` — `social_media.py`:1833  (def)
 - `FausseReponse.defer` — `tests/test_panneaux_interaction.py`:98  (method)
 - `FausseReponse.defer` — `tests/test_rellseas.py`:223  (method)
 - `_Reponse.defer` — `tests/test_absents_porte_de_retour.py`:582  (method)
@@ -2339,6 +2347,7 @@
 - `eclaireur_actu_task` — `bot.py`:16358  (async def)
 - `eclaireur_task` — `bot.py`:16045  (async def)
 - `ecrire_config_role` — `activite.py`:534  (async def)
+- `ecritures` — `tests/test_social_sans_gel.py`:113  (def)
 - `ecrivains_recents` — `activite.py`:745  (async def)
 - `FauxMembre.edit` — `tests/test_off_radiation.py`:97  (method)
 - `M.edit` — `tests/test_absents_porte_de_retour.py`:173  (method)
@@ -2472,6 +2481,7 @@
 - `TwitchAdapter.fetch_posts` — `social_media.py`:408  (method)
 - `TwitterSyndicationAdapter.fetch_posts` — `social_media.py`:1329  (method)
 - `YouTubeAdapter.fetch_posts` — `social_media.py`:542  (method)
+- `_Adaptateur.fetch_posts` — `tests/test_social_sans_gel.py`:97  (method)
 - `_Curseur.fetchall` — `tests/test_activite_observation.py`:63  (method)
 - `_StubCursor.fetchall` — `tests/conftest.py`:31  (method)
 - `_Curseur.fetchone` — `tests/test_activite_observation.py`:60  (method)
@@ -2554,7 +2564,7 @@
 - `_SessVide.get` — `tests/test_roblox_commandes_execution.py`:148  (method)
 - `_Session.get` — `tests/test_eclaireur.py`:99  (method)
 - `_Session.get` — `tests/test_youtube_chaine.py`:114  (method)
-- `SocialMediaManager.get_adapter` — `social_media.py`:1423  (method)
+- `SocialMediaManager.get_adapter` — `social_media.py`:1445  (method)
 - `get_alt_accounts` — `bot.py`:10896  (async def)
 - `get_audit` — `tickets_enhance.py`:329  (async def)
 - `get_avatar_hash` — `bot.py`:10732  (def)
@@ -2636,7 +2646,7 @@
 - `handle_auto_help` — `bot.py`:22197  (async def)
 - `handle_recovery_message` — `bot.py`:37556  (async def)
 - `has_active_announcement` — `tracking_layer.py`:142  (async def)
-- `SocialMediaManager.has_announcement` — `social_media.py`:1573  (method)
+- `SocialMediaManager.has_announcement` — `social_media.py`:1595  (method)
 - `has_invite` — `trust_system.py`:187  (def)
 - `has_media` — `trust_system.py`:236  (def)
 - `has_non_media_link` — `trust_system.py`:194  (def)
@@ -2773,6 +2783,7 @@
 - `RSSHubAdapter.is_post_active` — `social_media.py`:988  (method)
 - `TwitterSyndicationAdapter.is_post_active` — `social_media.py`:1349  (method)
 - `YouTubeAdapter.is_post_active` — `social_media.py`:599  (method)
+- `_Adaptateur.is_post_active` — `tests/test_social_sans_gel.py`:100  (method)
 - `is_sanctionable` — `permissions.py`:313  (async def)
 - `is_sticky_channel` — `sticky_messages.py`:69  (def)
 - `is_super_owner` — `owner_ids.py`:42  (def)
@@ -2829,7 +2840,7 @@
 - `lire_doux` — `activite.py`:1176  (async def)
 - `lire_etat` — `activite.py`:1140  (async def)
 - `lire_offre` — `roblox_cartes.py`:326  (async def)
-- `SocialMediaManager.list_announcements` — `social_media.py`:1569  (method)
+- `SocialMediaManager.list_announcements` — `social_media.py`:1591  (method)
 - `list_announcements` — `tracking_layer.py`:231  (async def)
 - `list_backups` — `db_backup.py`:221  (def)
 - `list_birthdays` — `bot.py`:2949  (async def)
@@ -2838,7 +2849,7 @@
 - `list_creator_links` — `bot.py`:3027  (async def)
 - `list_delegations` — `delegations.py`:99  (def)
 - `list_stickies` — `sticky_messages.py`:146  (async def)
-- `SocialMediaManager.list_subscriptions` — `social_media.py`:1551  (method)
+- `SocialMediaManager.list_subscriptions` — `social_media.py`:1573  (method)
 - `list_tags` — `tickets_enhance.py`:251  (async def)
 - `list_templates` — `tickets_enhance.py`:560  (async def)
 - `list_unclaimed_tickets` — `tickets_enhance.py`:789  (async def)
@@ -2846,7 +2857,7 @@
 - `liste_de_surveillance` — `roblox_veille.py`:3042  (async def)
 - `load_cache` — `recidivism.py`:97  (async def)
 - `load_error` — `ocr_scan.py`:77  (def)
-- `SocialMediaManager.load_guild` — `social_media.py`:1453  (method)
+- `SocialMediaManager.load_guild` — `social_media.py`:1475  (method)
 - `load_live_state_from_db` — `bot.py`:20934  (async def)
 - `load_permissions` — `permissions.py`:205  (async def)
 - `load_policy` — `protection_guards.py`:335  (async def)
@@ -3135,9 +3146,9 @@
 - `Platform` — `social_media.py`:53  (class)
 - `PlatformAdapter` — `social_media.py`:268  (class)
 - `YouTubeRSSAdapter.playlist_url` — `social_media.py`:1064  (method)
-- `SocialMediaManager.poll_all` — `social_media.py`:1663  (method)
+- `SocialMediaManager.poll_all` — `social_media.py`:1685  (method)
 - `poll_closer` — `bot.py`:31686  (async def)
-- `SocialMediaManager.poll_subscription` — `social_media.py`:1608  (method)
+- `SocialMediaManager.poll_subscription` — `social_media.py`:1630  (method)
 - `PollVoteView` — `bot.py`:31395  (class)
 - `porte_une_etiquette` — `activite_niveaux.py`:234  (def)
 - `poser_niveau` — `activite_niveaux.py`:706  (async def)
@@ -3210,7 +3221,7 @@
 - `refresh_staff_index` — `impersonation_detector.py`:204  (async def)
 - `refs_autres_fichiers` — `outils/purge_morts.py`:69  (def)
 - `refs_par_nom` — `outils/purge_morts.py`:47  (def)
-- `SocialMediaManager.register_adapter` — `social_media.py`:1420  (method)
+- `SocialMediaManager.register_adapter` — `social_media.py`:1442  (method)
 - `register_panel_opener` — `help_faq.py`:248  (def)
 - `register_persistent_views` — `raid_detector.py`:779  (def)
 - `register_persistent_views` — `social_zones.py`:2778  (def)
@@ -3259,13 +3270,13 @@
 - `M.remove_roles` — `tests/test_afk_retour.py`:136  (method)
 - `_FauxMembre.remove_roles` — `tests/test_roblox_pings.py`:238  (method)
 - `remove_sticky` — `sticky_messages.py`:119  (async def)
-- `SocialMediaManager.remove_subscription` — `social_media.py`:1530  (method)
+- `SocialMediaManager.remove_subscription` — `social_media.py`:1552  (method)
 - `ImmuneRemoveView.remove_user` — `bot.py`:20601  (method)
 - `remplacer` — `activite_message.py`:246  (async def)
 - `remplacer_unique` — `outils/retape_selecteurs.py`:276  (def)
 - `AltScanResultsPanelV2.render_after_defer` — `bot.py`:19414  (method)
 - `SuspectScanPanelV2.render_after_defer` — `bot.py`:19701  (method)
-- `render_template` — `social_media.py`:1800  (def)
+- `render_template` — `social_media.py`:1845  (def)
 - `ActionConfigPanelV2.render_to` — `bot.py`:19049  (method)
 - `ActiviteApercuPanelV2.render_to` — `activite_panneau.py`:1397  (method)
 - `ActiviteCiblesPanelV2.render_to` — `activite_panneau.py`:471  (method)
@@ -3444,7 +3455,7 @@
 - `ConfigCache.set` — `bot.py`:753  (method)
 - `set_category_channel` — `unified_logger.py`:280  (async def)
 - `set_creator_links` — `bot.py`:2984  (async def)
-- `SocialMediaManager.set_delete_callback` — `social_media.py`:1448  (method)
+- `SocialMediaManager.set_delete_callback` — `social_media.py`:1470  (method)
 - `set_digest_enabled` — `dm_digest.py`:199  (async def)
 - `set_disabled_events` — `unified_logger.py`:441  (async def)
 - `set_enabled_categories` — `unified_logger.py`:233  (async def)
@@ -3453,7 +3464,7 @@
 - `set_log_channel` — `unified_logger.py`:206  (async def)
 - `FauxSalon.set_permissions` — `tests/test_off_radiation.py`:134  (method)
 - `Salon.set_permissions` — `tests/test_absents_porte_de_retour.py`:111  (method)
-- `SocialMediaManager.set_post_callback` — `social_media.py`:1445  (method)
+- `SocialMediaManager.set_post_callback` — `social_media.py`:1467  (method)
 - `set_priority` — `tickets_enhance.py`:197  (async def)
 - `set_raid_callback` — `raid_detector.py`:65  (def)
 - `set_retour` — `activite_panneau.py`:459  (def)
@@ -3519,7 +3530,7 @@
 - `setup` — `ui_usage.py`:43  (def)
 - `setup` — `webhook_leak.py`:59  (def)
 - `setup` — `webhook_tracker.py`:53  (def)
-- `SocialMediaManager.setup_all` — `social_media.py`:1429  (method)
+- `SocialMediaManager.setup_all` — `social_media.py`:1451  (method)
 - `setup_all_commands` — `slash_commands_2026.py`:420  (def)
 - `setup_setup_command` — `setup_wizard.py`:680  (def)
 - `seuils_du_role` — `activite.py`:529  (def)
@@ -3543,7 +3554,7 @@
 - `SocialAddPanel` — `admin_panels_v2.py`:675  (class)
 - `SocialEditPanel` — `admin_panels_v2.py`:828  (class)
 - `SocialManagePanel` — `admin_panels_v2.py`:777  (class)
-- `SocialMediaManager` — `social_media.py`:1396  (class)
+- `SocialMediaManager` — `social_media.py`:1418  (class)
 - `SocialMediaPanelV2` — `admin_panels_v2.py`:594  (class)
 - `SocialPost` — `social_media.py`:102  (class)
 - `socle` — `tests/test_activite_observation.py`:118  (def)
@@ -3553,13 +3564,13 @@
 - `speedrun_cat_add_cmd` — `bot.py`:44046  (async def)
 - `RellseasGestionV2.squelette` — `rellseas_panneau.py`:559  (method)
 - `start` — `health_server.py`:141  (async def)
-- `SocialMediaManager.start_background_tasks` — `social_media.py`:1765  (method)
+- `SocialMediaManager.start_background_tasks` — `social_media.py`:1810  (method)
 - `stat_line` — `ui_v2.py`:141  (def)
 - `StaticPanel` — `ui_v2.py`:271  (class)
 - `stats_grid` — `ui_v2.py`:146  (def)
 - `Status` — `vocabulary.py`:72  (class)
 - `stop` — `health_server.py`:180  (async def)
-- `SocialMediaManager.stop_background_tasks` — `social_media.py`:1771  (method)
+- `SocialMediaManager.stop_background_tasks` — `social_media.py`:1816  (method)
 - `stub_cfg` — `tests/conftest.py`:86  (def)
 - `stub_db` — `tests/conftest.py`:74  (def)
 - `StubDB` — `tests/conftest.py`:41  (class)
@@ -3578,7 +3589,7 @@
 - `task_supervisor` — `bot.py`:16775  (async def)
 - `PlatformAdapter.teardown` — `social_media.py`:282  (method)
 - `TwitchAdapter.teardown` — `social_media.py`:381  (method)
-- `SocialMediaManager.teardown_all` — `social_media.py`:1436  (method)
+- `SocialMediaManager.teardown_all` — `social_media.py`:1458  (method)
 - `temp_voice_watchdog` — `bot.py`:36919  (async def)
 - `Template` — `setup_wizard.py`:49  (class)
 - `test_10_aucune_probabilite_nest_affichee_sans_horizon_ni_modele` — `tests/test_veille_transitions.py`:481  (def)
@@ -4642,8 +4653,15 @@
 - `test_V1_le_second_seau_GARDE_les_fiches_de_la_tete` — `tests/test_flux_limited_seul.py`:612  (async def)
 - `test_vip_par_defaut_demande_un_mois` — `tests/test_activite.py`:241  (def)
 - `test_W1_on_surveille_les_RETIRES_avec_un_vrai_prix_et_rien_d_autre` — `tests/test_flux_limited_seul.py`:268  (async def)
+- `test_W1_une_ecriture_lente_ne_gele_plus_la_boucle` — `tests/test_social_sans_gel.py`:45  (def)
 - `test_W2_la_liste_tient_en_UNE_requete` — `tests/test_flux_limited_seul.py`:285  (async def)
+- `test_W2_une_lecture_lente_non_plus` — `tests/test_social_sans_gel.py`:59  (def)
 - `test_W3_le_type_technique_est_ENREGISTRE_et_jamais_efface` — `tests/test_flux_limited_seul.py`:292  (async def)
+- `test_W3_un_arret_en_pleine_ecriture_ne_perd_pas_les_annonces` — `tests/test_social_sans_gel.py`:74  (def)
+- `test_W4_un_tour_de_nettoyage_ecrit_une_fois_par_serveur` — `tests/test_social_sans_gel.py`:137  (def)
+- `test_W5_une_suppression_se_note_tout_de_suite` — `tests/test_social_sans_gel.py`:148  (def)
+- `test_W6_cleanup_announcement_seul_sauve_toujours` — `tests/test_social_sans_gel.py`:158  (def)
+- `test_W7_un_tour_de_nettoyage_qui_plante_se_dit` — `tests/test_social_sans_gel.py`:166  (def)
 - `test_webhook_send_accepte_et_transmet_allowed_mentions` — `tests/test_roblox_pings.py`:175  (def)
 - `test_Y1_un_reglage_manquant_n_est_dit_qu_UNE_fois_par_jour` — `tests/test_installation_auto.py`:468  (def)
 - `test_Y2_les_DEUX_avertissements_YouTube_passent_par_le_filtre` — `tests/test_installation_auto.py`:480  (def)
@@ -4753,7 +4771,7 @@
 - `update_delegation` — `delegations.py`:200  (def)
 - `update_post` — `tracking_layer.py`:191  (async def)
 - `update_realsy_activity` — `bot.py`:24312  (async def)
-- `SocialMediaManager.update_subscription` — `social_media.py`:1538  (method)
+- `SocialMediaManager.update_subscription` — `social_media.py`:1560  (method)
 - `update_user_economy` — `bot.py`:22323  (async def)
 - `UpdateVoteView` — `bot.py`:46141  (class)
 - `UsagePanel` — `ui_usage.py`:365  (class)
@@ -7545,10 +7563,12 @@
 - L750  `def videos_de_la_page(html, handle, maximum)`
 - L1361  `def _subs_path(guild_id)`
 - L1365  `def _anns_path(guild_id)`
-- L1372  `async def _read_json(path)`
-- L1381  `async def _write_json(path, payload)`
-- L1788  `def default_template(platform, post_type)`
-- L1800  `def render_template(sub, post)`
+- L1382  `def _lire_json_bloquant(path)`
+- L1391  `async def _read_json(path)`
+- L1395  `def _ecrire_json_bloquant(path, texte)`
+- L1405  `async def _write_json(path, payload)`
+- L1833  `def default_template(platform, post_type)`
+- L1845  `def render_template(sub, post)`
 - L53  `class Platform(str, Enum)`
 - L62  `class PostType(str, Enum)`
 - L102  `class SocialPost` @dataclass
@@ -7616,35 +7636,35 @@
     - L1275  `async def _fetch_tweets(self, handle)`
     - L1329  `async def fetch_posts(self, handle)`
     - L1349  `async def is_post_active(self, post)`
-- L1396  `class SocialMediaManager`
-    - L1399  `def __init__(self, post_callback, delete_callback, poll_interval_seconds, cleanup_interval_seconds)`
-    - L1420  `def register_adapter(self, adapter)`
-    - L1423  `def get_adapter(self, platform)`
-    - L1426  `def configured_platforms(self)`
-    - L1429  `async def setup_all(self, session)`
-    - L1436  `async def teardown_all(self)`
-    - L1445  `def set_post_callback(self, cb)`
-    - L1448  `def set_delete_callback(self, cb)`
-    - L1453  `async def load_guild(self, guild_id)`
-    - L1476  `async def _save_subs(self, guild_id)`
-    - L1481  `async def _save_anns(self, guild_id)`
-    - L1486  `async def _ensure_loaded(self, guild_id)`
-    - L1492  `async def add_subscription(self, guild_id, platform, handle, target_channel_id, display_name, role_to_ping, track_lives, track_videos, track_shorts, track_posts, template)`
-    - L1530  `async def remove_subscription(self, guild_id, sub_id)`
-    - L1538  `async def update_subscription(self, guild_id, sub_id, **changes)`
-    - L1551  `async def list_subscriptions(self, guild_id)`
-    - L1555  `def _find_subscription(self, guild_id, platform, handle, channel_id)`
-    - L1569  `async def list_announcements(self, guild_id)`
-    - L1573  `async def has_announcement(self, guild_id, platform, handle, post_id)`
-    - L1580  `async def _record_announcement(self, sub, post, discord_message_id)`
-    - L1608  `async def poll_subscription(self, sub)`
-    - L1663  `async def poll_all(self)`
-    - L1687  `async def cleanup_announcement(self, ann)`
-    - L1719  `async def cleanup_all(self)`
-    - L1734  `async def _poll_loop(self)`
-    - L1752  `async def _cleanup_loop(self)`
-    - L1765  `def start_background_tasks(self)`
-    - L1771  `async def stop_background_tasks(self)`
+- L1418  `class SocialMediaManager`
+    - L1421  `def __init__(self, post_callback, delete_callback, poll_interval_seconds, cleanup_interval_seconds)`
+    - L1442  `def register_adapter(self, adapter)`
+    - L1445  `def get_adapter(self, platform)`
+    - L1448  `def configured_platforms(self)`
+    - L1451  `async def setup_all(self, session)`
+    - L1458  `async def teardown_all(self)`
+    - L1467  `def set_post_callback(self, cb)`
+    - L1470  `def set_delete_callback(self, cb)`
+    - L1475  `async def load_guild(self, guild_id)`
+    - L1498  `async def _save_subs(self, guild_id)`
+    - L1503  `async def _save_anns(self, guild_id)`
+    - L1508  `async def _ensure_loaded(self, guild_id)`
+    - L1514  `async def add_subscription(self, guild_id, platform, handle, target_channel_id, display_name, role_to_ping, track_lives, track_videos, track_shorts, track_posts, template)`
+    - L1552  `async def remove_subscription(self, guild_id, sub_id)`
+    - L1560  `async def update_subscription(self, guild_id, sub_id, **changes)`
+    - L1573  `async def list_subscriptions(self, guild_id)`
+    - L1577  `def _find_subscription(self, guild_id, platform, handle, channel_id)`
+    - L1591  `async def list_announcements(self, guild_id)`
+    - L1595  `async def has_announcement(self, guild_id, platform, handle, post_id)`
+    - L1602  `async def _record_announcement(self, sub, post, discord_message_id)`
+    - L1630  `async def poll_subscription(self, sub)`
+    - L1685  `async def poll_all(self)`
+    - L1709  `async def cleanup_announcement(self, ann, sauver)`
+    - L1746  `async def cleanup_all(self)`
+    - L1772  `async def _poll_loop(self)`
+    - L1790  `async def _cleanup_loop(self)`
+    - L1810  `def start_background_tasks(self)`
+    - L1816  `async def stop_background_tasks(self)`
 
 ### `social_zones.py`
 
@@ -9581,6 +9601,24 @@
 - L303  `def _sentinelle(tmp_path, demarre)`
 - L337  `def test_le_PREDECESSEUR_arrete_au_redeploiement_ne_declenche_pas_l_alarme(tmp_path)`
 - L346  `def test_une_VRAIE_seconde_instance_qui_bat_APRES_notre_demarrage_est_dite(tmp_path)`
+
+### `tests/test_social_sans_gel.py`
+
+- L24  `def _avec_horloge(fabrique)`
+- L45  `def test_W1_une_ecriture_lente_ne_gele_plus_la_boucle(tmp_path, monkeypatch)`
+- L59  `def test_W2_une_lecture_lente_non_plus(tmp_path, monkeypatch)`
+- L74  `def test_W3_un_arret_en_pleine_ecriture_ne_perd_pas_les_annonces(tmp_path, monkeypatch)`
+- L104  `def _annonce(gid, pid)`
+- L113  `def ecritures(tmp_path, monkeypatch)` @pytest.fixture
+- L126  `def _gestionnaire(actifs, n)`
+- L137  `def test_W4_un_tour_de_nettoyage_ecrit_une_fois_par_serveur(ecritures, tmp_path)`
+- L148  `def test_W5_une_suppression_se_note_tout_de_suite(ecritures, tmp_path)`
+- L158  `def test_W6_cleanup_announcement_seul_sauve_toujours(ecritures)`
+- L166  `def test_W7_un_tour_de_nettoyage_qui_plante_se_dit(monkeypatch)`
+- L91  `class _Adaptateur(sm.PlatformAdapter)`
+    - L94  `def __init__(self, actifs)`
+    - L97  `async def fetch_posts(self, handle)`
+    - L100  `async def is_post_active(self, post)`
 
 ### `tests/test_stream_schedule.py`
 
