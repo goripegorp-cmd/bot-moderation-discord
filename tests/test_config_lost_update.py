@@ -202,8 +202,3 @@ def test_lecriture_de_lancre_verifie_son_retour():
     raise AssertionError("observation_jours introuvable")
 
 
-def test_le_rearmement_manuel_est_journalise():
-    """C'est le seul geste volontaire qui remet l'ancre à aujourd'hui. Sans
-    trace, un clic du staff et une perte accidentelle sont indiscernables."""
-    src = (RACINE / "activite_panneau.py").read_text(encoding="utf-8")
-    assert "RÉARMEMENT" in src

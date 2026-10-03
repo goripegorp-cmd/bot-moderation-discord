@@ -278,7 +278,7 @@ class FauxMoi:
         return False
 
 
-def _espace_bilan(config, perms=None, etiquettes=(), me_sous_role=False):
+def _espace_bilan(config, perms=None):
     envois = []
 
     async def _cfg(_gid):
@@ -287,16 +287,7 @@ def _espace_bilan(config, perms=None, etiquettes=(), me_sous_role=False):
     async def _db_set(_gid, k, v):
         config[k] = v
 
-    class _Role:
-        def __init__(self, nom):
-            self.name = nom
-
-    class _Top:
-        def __le__(self, _r):
-            return me_sous_role
-
-    me = type("Me", (), {"guild_permissions": perms or FauxPermsGuild(),
-                         "top_role": _Top()})()
+    me = type("Me", (), {"guild_permissions": perms or FauxPermsGuild()})()
 
     class _Salon:
         id = 4
@@ -306,24 +297,16 @@ def _espace_bilan(config, perms=None, etiquettes=(), me_sous_role=False):
     guild = type("G", (), {"id": 777, "me": me,
                            "get_channel": lambda self, cid: _Salon() if cid else None})()
 
-    async def _cfg_act(_gid):
-        return {}
-
-    #  ⚠️ PIÈGE N°6, VÉCU LE 23/09 : le faux `activite_niv` n'avait pas
-    #  `salons_de_retour`. L'AttributeError était avalée par le `except` du
-    #  bilan, et les tests passaient quand même. Les erreurs sont désormais
-    #  RETENUES, et un bilan sain doit n'en avoir aucune (B3).
+    #  ⚠️ PIÈGE N°6, VÉCU LE 23/09 : un faux incomplet levait une
+    #  AttributeError avalée par le `except` du bilan, et les tests passaient
+    #  quand même. Les erreurs sont RETENUES : un bilan sain n'en a aucune (B3).
+    #  ⚠️ PLUS AUCUN FAUX MODULE D'ACTIVITÉ (03/10/2026) : le bilan n'en lit
+    #  plus rien — s'il y revenait, `exec` lèverait un NameError, retenu ici.
     erreurs = []
-    import activite_niveaux as _niv
     ns = {
         "cfg": _cfg, "db_set": _db_set,
         "_logerr": lambda *a, **k: erreurs.append(a),
         "print": lambda *a, **k: None,
-        "activite_module": type("A", (), {"config": staticmethod(_cfg_act)}),
-        "activite_niv": type("N", (), {
-            "roles_etiquettes": staticmethod(
-                lambda g, c: [_Role(n) for n in etiquettes]),
-            "salons_de_retour": staticmethod(_niv.salons_de_retour)}),
         "datetime": __import__("datetime").datetime,
         "timezone": __import__("datetime").timezone,
         "_erreurs": erreurs,
@@ -343,15 +326,6 @@ def test_B1_une_permission_manquante_est_NOMMEE_avec_sa_consequence():
     assert any("Gérer les pseudos" in m and "pseudo" in m for m in manques), manques
 
 
-def test_B2_un_role_AU_DESSUS_du_bot_est_signale_avec_son_nom():
-    """Le seul cas de l'AFK que le bot ne peut pas réparer seul."""
-    ns, g, _e, _c = _espace_bilan(
-        {'direction_allowed_role': 1, 'activite_salon_retour': 1},
-        etiquettes=("💤 AFK",), me_sous_role=True)
-    manques = asyncio.run(ns["_bilan_sante_serveur"](g))
-    assert any("💤 AFK" in m and "au-dessus" in m for m in manques), manques
-
-
 def test_B3_un_serveur_SAIN_ne_reçoit_aucun_message():
     """« C'est très relou » : pas de message quand tout va bien."""
     ns, g, envois, _c = _espace_bilan(
@@ -363,21 +337,16 @@ def test_B3_un_serveur_SAIN_ne_reçoit_aucun_message():
     assert ns["_erreurs"] == [], f"un bilan « sain » cachait une erreur : {ns['_erreurs']}"
 
 
-def test_B3b_la_PORTE_est_celle_du_masquage_pas_une_copie():
-    """Même fonction que le masquage (`salons_de_retour`) : le salon de retour
-    propre à un rôle compte ; le salon AFK seul, non (« un salon, ils doivent
-    écrire » — ce n'est pas une porte)."""
-    import json as _json
-    ns, g, _e, _c = _espace_bilan(
-        {'direction_allowed_role': 1, 'mod_log_channel': 4,
-         'activite_roles': _json.dumps({"42": {"salon_retour": 9}})})
-    assert asyncio.run(ns["_bilan_sante_serveur"](g)) == []
-    ns, g, _e, _c = _espace_bilan(
-        {'direction_allowed_role': 1, 'activite_salon_afk': 7,
-         'mod_log_channel': 4})
+def test_B2_le_bilan_ne_parle_plus_du_systeme_d_activite():
+    """Retiré le 03/10/2026 : plus de « salon de retour » exigé, plus d'alerte
+    sur un rôle AFK au-dessus du bot. Un serveur sans aucun réglage d'activité
+    est sain."""
+    ns, g, _e, _c = _espace_bilan({'direction_allowed_role': 1,
+                                   'mod_log_channel': 4})
     manques = asyncio.run(ns["_bilan_sante_serveur"](g))
-    assert any("Aucun salon de retour" in m for m in manques), manques
+    assert manques == [], manques
     assert ns["_erreurs"] == []
+    assert not any("AFK" in m or "retour" in m for m in manques)
 
 
 def test_B4_un_seul_message_par_JOUR_malgre_les_redeploiements():

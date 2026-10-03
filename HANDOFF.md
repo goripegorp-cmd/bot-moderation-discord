@@ -335,6 +335,8 @@ le *pourquoi*, pas seulement le *quoi*.
 
 ## 12. SYSTÈME D'ACTIVITÉ — REFONTE « RÔLES AFK » (12/08/2026)
 
+> ⚠️ **RETIRÉ LE 03/10/2026** — voir `ACTIVITE.md` et `activite_demontage.py`. Ce qui suit est l'historique.
+
 Le système de présence a été **entièrement recalculé** sur demande du propriétaire. Ne pas le
 retoucher sans avoir lu ce paragraphe : la règle est contre-intuitive et elle est volontaire.
 

@@ -182,16 +182,14 @@ import tracking_layer as tracking2026
 # ~3600 lignes. Le serveur reste géré manuellement par l'owner.
 import unified_logger as ulogger2026
 # ═══ SYSTÈME D'ACTIVITÉ (11/08/2026) — désactivé par défaut ═══
-#  Suivi (3 sources), escalade par paliers, niveaux et VIP. Rien ne tourne tant
-#  que le propriétaire n'a pas activé le système ET désigné une cible.
+#  ⚠️ LE SYSTÈME D'ACTIVITÉ EST RETIRÉ (03/10/2026) : « enlève-moi complètement
+#  ce système et ce calcul inutile ». `activite_demontage` défait sur Discord ce
+#  qu'il avait posé ; il ne reste que le COMPTAGE des jours d'activité, pour le
+#  bouton « Activité » de /rellseas (choix du propriétaire, le même jour).
 import activite as activite_module
-import activite_calendrier as activite_cal
-import activite_escalade as activite_esc
-import activite_niveaux as activite_niv
-import activite_message as activite_msg
-import activite_recompenses as activite_rec
-import activite_passage as activite_pass
-import activite_panneau as activite_ui
+import activite_demontage as activite_demontage_module
+#  Ce qu'un NOUVEL ARRIVANT voit du serveur (03/10/2026).
+import visibilite_serveur as visibilite_module
 #  Veille Roblox (12/08/2026) — voir ROBLOX.md. Reintroduction EXPLICITEMENT
 #  demandee par le proprietaire : le HANDOFF classe « Roblox » dans le perimetre
 #  supprime, ce module n'est donc PAS un reste oublie.
@@ -11193,7 +11191,6 @@ _CONFIG_SECTIONS = [
     ("antiraid",    "⚔️", "Anti-Raid",         "Vague d'arrivées · âge de compte minimum · riposte"),
     ("tickets",     "🎫", "Tickets",           "Panneaux d'ouverture · rôle staff · logs · blacklist"),
     ("logs",        "📋", "Logs & Audit",      "Un salon · toutes les catégories d'événements"),
-    ("activite",    "📊", "Activité",          "Présence exigée · rappels · retrait de rôle · expulsion"),
     ("roblox",      "🎮", "Veille Roblox",     "Nouveaux accessoires · passages collectionnables · indices"),
     ("social",      "📡", "Réseaux sociaux",   "YouTube · Twitch · X · TikTok · Instagram → salon d'annonces"),
     ("rellseas",    "🎭", "Rellseas",          "Qui peut donner, retirer, vérifier l'activité"),
@@ -11390,7 +11387,6 @@ class MainPanelV2(LayoutView):
             'antiraid':    lambda: AntiRaidPanelV2(self.u, self.g),
             'tickets':     lambda: TicketMainPanelV2(self.u, self.g),
             'logs':        lambda: LogsPanelV2(self.u, self.g),
-            'activite':    lambda: activite_ui.ActivitePanelV2(self.u, self.g),
             'roblox':      lambda: roblox_ui.RobloxPanelV2(self.u, self.g),
             #  Le panneau social n'était PAS à écrire : il existait déjà,
             #  complet et branché sur le vrai manager par `set_social_manager`.
@@ -13882,168 +13878,6 @@ else:
     _HEURES_PASSAGE_ACTIVITE = None
 
 
-@tasks.loop(**({"time": _HEURES_PASSAGE_ACTIVITE}
-               if _HEURES_PASSAGE_ACTIVITE else {"hours": 6}))
-async def activite_passage_task():
-    """Applique les paliers d'activité sur chaque serveur. FAIL-SAFE par guilde."""
-    for g in list(bot.guilds):
-        try:
-            if not await activite_module.actif(g.id):
-                #  ⚠️ LE DIRE. Sans cette ligne, « éteint », « allumé et
-                #  parfait » et « allumé mais inerte » donnaient EXACTEMENT
-                #  les mêmes logs Railway : aucun. Le propriétaire a dû
-                #  demander « est-ce que le système AFK est opérationnel ? »
-                #  parce que rien, nulle part, ne permettait d'y répondre
-                #  (19/08/2026). Le système est opt-in strict : interrupteur
-                #  ET cible. On dit lequel des deux manque.
-                try:
-                    _ca = await activite_module.config(g.id)
-                    _pourquoi = ("interrupteur éteint"
-                                 if not _ca.get("activite_enabled")
-                                 else "allumé mais AUCUNE cible "
-                                      "(ni « tout le monde », ni rôle surveillé)")
-                except Exception:
-                    _pourquoi = "configuration illisible"
-                print(f"[activite_passage_task] {g.name} ({g.id}) : inactif — {_pourquoi}")
-                continue
-            rap = await activite_pass.passage(g)
-            #  ⚠️ LE BILAN, TOUJOURS — même quand rien ne bouge. C'est la seule
-            #  chose qui distingue « personne n'est absent » de « les sondes ne
-            #  captent rien ». `observation` dit depuis combien de jours le bot
-            #  observe : sous le seuil, il REFUSE de juger, et c'est normal.
-            _cl = rap.get("classement") or {}
-            _ac = rap.get("actions") or {}
-            _sans = int((_ac.get("retraits") or {}).get("sans_etiquette", 0) or 0)
-            #  ⚠️ L'ÉTIQUETTE « PEU ACTIF » SE POSE PAR TRANCHES (budget de
-            #  débit) : sans ces chiffres, on ne peut pas savoir si l'écoulement
-            #  avance ou s'il est bloqué. `reportes` doit tomber à 0 en quelques
-            #  passages ; s'il stagne, c'est que les poses échouent.
-            _et = _ac.get("etiquettes") or {}
-            #  Ce que le bot a REELLEMENT applique aux paliers.
-            _rp = _ac.get("rappels") or {}
-            _rt = _ac.get("retraits") or {}
-            #  ⚠️ L'ANCRE D'OBSERVATION, EN CLAIR. `observation=0 j` fait croire
-            #  à une panne alors que c'est le garde-fou anti-faux-positif : sous
-            #  ANCIENNETE_MINIMALE jours, le bot REFUSE de juger qui que ce soit
-            #  et tout le monde ressort « actif ». Sans la date, impossible de
-            #  distinguer « le suivi vient de démarrer » de « quelqu'un a
-            #  réarmé l'observation » — deux causes très différentes pour le
-            #  même zéro, et la seconde est un geste volontaire du staff.
-            try:
-                _ancre = str((await activite_module.config(g.id)).get(
-                    "activite_observe_depuis") or "?")
-            except Exception:
-                _ancre = "?"
-            print(f"[activite_passage_task] {g.name} ({g.id}) : "
-                  f"suivis={_cl.get('suivis', 0)} · actifs={_cl.get('actifs', 0)} · "
-                  f"doux={_cl.get('doux', 0)} · rappel={_cl.get('rappel', 0)} · "
-                  f"retrait={_cl.get('retrait', 0)} · revenus={_cl.get('revenus', 0)} · "
-                  f"observation={rap.get('observation', 0)} j"
-                  + f" (depuis {_ancre})"
-                  + (f" · ⏳ sous le seuil de {activite_module.ANCIENNETE_MINIMALE} j "
-                     f"— personne n'est jugé, c'est voulu"
-                     if rap.get("observation", 0) < activite_module.ANCIENNETE_MINIMALE
-                     else "")
-                  + (" · ⚠️ suivi MUET (aucune activité mesurée)"
-                     if rap.get("suivi_muet") else "")
-                  #  ⚠️ LE RATTRAPAGE DU 22/09. `libérés au passage` = membres
-                  #  qui avaient ÉCRIT en étant masqués sans que le retrait sur
-                  #  message aboutisse. Élevé passage après passage : le chemin
-                  #  rapide est en panne, à investiguer.
-                  + (f" · 🔓 {rap.get('rattrapes')} RATTRAPÉ(S) "
-                     f"(bloqués avant le correctif — une seule fois)"
-                     if rap.get("rattrapes") else "")
-                  + (f" · 🔓 {rap.get('retours_forces')} libéré(s) au passage "
-                     f"(avaient écrit masqués)"
-                     if rap.get("retours_forces") else "")
-                  + (f" · {rap.get('hors_perimetre')} hors périmètre repris "
-                     f"pour être libérés"
-                     if rap.get("hors_perimetre") else "")
-                  + (" · 🚫 NON LIBÉRABLES (rôle au-dessus du bot) : "
-                     + ", ".join(f"« {k} » ×{v}" for k, v in
-                                 (rap.get("bloques_hierarchie") or {}).items())
-                     if rap.get("bloques_hierarchie") else "")
-                  #  ⚠️ CE COMPTEUR ÉTAIT ÉCRIT ET LU NULLE PART. Le résumé au
-                  #  staff annonçait « N à dépouiller » puis « 0 dépouillé(s) »
-                  #  sans jamais dire pourquoi — la faute exacte qui avait fait
-                  #  retirer le second compteur le 12/08.
-                  + (f" · étiquettes +{_et.get('faits', 0)}"
-                     f"/{_et.get('reportes', 0)} en attente"
-                     if (_et.get("faits") or _et.get("reportes")) else "")
-                  #  ⚠️ L'ACTION LA PLUS VISIBLE DU SYSTÈME N'ÉTAIT PAS DANS
-                  #  CETTE LIGNE. Journaux du 01/09 : « rappel=928 » — 928
-                  #  membres CLASSÉS au palier qui pose le rôle AFK, celui qui
-                  #  MASQUE TOUT LE SERVEUR — et pas un mot sur combien l'ont
-                  #  réellement reçu. Le propriétaire pouvait lire ce nombre
-                  #  quatre fois par jour sans savoir si son serveur était en
-                  #  train de se faire masquer membre par membre.
-                  #  `rappel=` compte ce que la classification a TROUVÉ,
-                  #  `posés` compte ce que le bot a FAIT. Les confondre est la
-                  #  différence entre un avertissement et un fait accompli.
-                  + (f" · 💤 rôle AFK posé sur {_rp.get('faits', 0)}"
-                     + (f", {_rp['echecs']} échec(s)" if _rp.get("echecs") else "")
-                     if _rp.get("faits") or _rp.get("echecs") else "")
-                  + (f" · 🔒 rôles retirés à {_rt.get('faits', 0)}"
-                     if _rt.get("faits") else "")
-                  + (f" · ⚠️ {_sans} dépouillement(s) REFUSÉ(S) : rôle AFK de "
-                     f"palier 2 absent ou au-dessus du bot" if _sans else ""))
-            #  On ne poste au staff QUE s'il s'est passé quelque chose : une
-            #  notification quotidienne « rien à signaler » se fait ignorer, puis
-            #  masquer, et le jour où le garde-fou parle personne ne le voit.
-            #
-            #  ⚠️ DEUX NATURES DE MESSAGE, ET C'EST TOUT LE SUJET (12/08/2026).
-            #  Un ÉVÉNEMENT (des rôles retirés, un rappel parti) est neuf à
-            #  chaque fois : on le poste toujours. Un ÉTAT (quota atteint,
-            #  suivi muet, expulsions en attente) est le MÊME à chaque passage :
-            #  le poster toutes les 6 h l'a transformé en bruit de fond — c'est
-            #  exactement ce qui est arrivé avec « 941 actions demandées »,
-            #  répété quatre fois par jour. Un état ne se dit qu'une fois par jour.
-            a = rap.get("actions", {})
-            evenement = (a.get("messages_envoyes")
-                         or (a.get("retraits") or {}).get("faits")
-                         or (a.get("rappels") or {}).get("faits")
-                         or a.get("retours"))
-            etat = (rap.get("suivi_muet") or rap.get("quota_atteint")
-                    or a.get("a_expulser"))
-
-            c = await activite_module.config(g.id)
-            aujourdhui = activite_cal.jour()
-            #  ⚠️ UN SEUL MESSAGE PAR SEMAINE — demandé le 03/09/2026.
-            #  La carte partait à CHAQUE passage, soit quatre fois par jour,
-            #  parce que `evenement` était toujours vrai : `rappels.faits`
-            #  valait 25 à tous les coups (le tapis roulant corrigé le même
-            #  jour dans `activite_passage`). Même corrigé, une carte toutes
-            #  les six heures pendant que 900 membres s'écoulent reste du
-            #  harcèlement. Le TRAVAIL garde sa cadence, l'ANNONCE devient
-            #  hebdomadaire, le jour de bilan déjà configuré.
-            #
-            #  ⚠️ SAUF SI LE SUIVI EST MORT. `suivi_muet` = les sondes ne
-            #  captent plus rien. Attendre dimanche pour le dire laisserait un
-            #  système en panne passer pour un serveur calme pendant six jours.
-            #  C'est la seule urgence, et elle reste à une fois par jour.
-            _casse = bool(rap.get("suivi_muet"))
-            _jour_bilan = int(c.get("activite_jour_rappel") or 6)
-            _est_jour_bilan = activite_cal.maintenant().weekday() == _jour_bilan
-            if not _casse and not _est_jour_bilan:
-                continue
-            #  Quatre passages tombent le jour du bilan : un seul parle.
-            if str(c.get("activite_jour_alerte") or "") == aujourdhui:
-                continue
-            await db_set(g.id, "activite_jour_alerte", aujourdhui)
-            await db_set(g.id, "activite_jour_bilan", aujourdhui)
-
-            salon = g.get_channel(int(c.get("activite_salon_staff", 0) or 0))
-            if salon is not None:
-                await salon.send(activite_pass.resume_texte(rap))
-        except Exception as ex:
-            print(f"[activite_passage_task {g.id}] {ex}")
-
-
-@activite_passage_task.before_loop
-async def _activite_passage_wait():
-    await bot.wait_until_ready()
-
-
 #  Une @tasks.loop qui lève une exception non gérée s'ARRÊTE définitivement
 #  (jusqu'au reboot). Symptôme vécu : tout se tait alors que le bot est en ligne.
 #  Ce superviseur re-démarre toute boucle critique morte, toutes les 5 min.
@@ -14831,24 +14665,12 @@ async def _bilan_sante_serveur(guild) -> list:
              "`/off` ne pourra PAS réduire au silence — c'est ce qui arrête "
              "une attaque"),
             ("manage_roles", "Gérer les rôles",
-             "aucune étiquette d'inactivité ni radiation"),
+             "aucune radiation, ni rôle d'arrivée posé aux nouveaux"),
             ("manage_channels", "Gérer les salons",
              "le salon des nouveautés UGC ne peut pas être créé"),
         ):
             if not getattr(p, attr, False):
                 manques.append(f"🔑 **{nom}** manque — {pourquoi}.")
-
-        cfg_act = await activite_module.config(guild.id)
-        hautes = []
-        for r in activite_niv.roles_etiquettes(guild, cfg_act):
-            if r is not None and me.top_role <= r:
-                hautes.append(r.name)
-        if hautes:
-            manques.append(
-                f"🚫 **{', '.join(f'« {n} »' for n in hautes[:3])}** est au-dessus "
-                f"de mon rôle : je ne peux ni le poser ni le RETIRER — les "
-                f"membres qui le portent restent AFK quoi qu'ils écrivent. "
-                f"Remontez mon rôle au-dessus dans Paramètres du serveur → Rôles.")
 
         c = await cfg(guild.id)
         if not int(c.get('direction_allowed_role', 0) or 0):
@@ -14873,14 +14695,6 @@ async def _bilan_sante_serveur(guild) -> list:
                 f"{', '.join(f'« {n} »' for n in _orphelins[:3])} — il ne "
                 f"publie rien. `/configure` → **Réseaux sociaux** : choisissez "
                 f"son salon, ou retirez le flux.")
-        #  ⚠️ LA PORTE, PAS LE SEUL SALON DE RETOUR (23/09) : le salon AFK et
-        #  le salon de retour propre à un rôle en sont aussi. Même fonction
-        #  que le masquage lui-même — deux définitions finiraient par diverger.
-        if not activite_niv.salons_de_retour(c):
-            manques.append(
-                "💤 **Aucun salon de retour d'activité** : le masquage des "
-                "absents est REFUSÉ tant qu'il n'existe pas (sans lui, un "
-                "absent masqué ne pourrait plus jamais revenir).")
     except Exception as ex:
         _logerr("_bilan_sante_serveur", ex, guild_id=getattr(guild, "id", 0))
     return manques
@@ -14936,8 +14750,73 @@ async def _publier_bilan_sante(guild) -> bool:
         return False
 
 
+async def _demonter_activite(guild):
+    """Défait ce que l'ancien système d'activité avait posé — voir
+    `activite_demontage`. Une fois par serveur (marque en base). Le compte
+    rendu va UNE fois au salon de logs, quand il y a eu quelque chose à défaire :
+    c'est la trace visible, dans Discord, que c'est fait."""
+    try:
+        c = await cfg(guild.id)
+        res = await activite_demontage_module.demonter(
+            guild, cfg=c, get_db=get_db, db_set=db_set)
+        if res["deja"]:
+            return res
+        texte = activite_demontage_module.bilan_texte(res)
+        print(f"[activite_demontage] {guild.name} ({guild.id}) : {texte}")
+        if activite_demontage_module.a_agi(res):
+            salon = None
+            for cle in ('mod_log_channel', 'ticket_log'):
+                salon = guild.get_channel(int(c.get(cle, 0) or 0))
+                if salon is not None:
+                    break
+            if salon is not None:
+                await salon.send(
+                    ("🧹 **Système d'activité retiré** — plus de rôle AFK ni de "
+                     "salon masqué : tout le monde voit de nouveau le serveur.\n"
+                     + "\n".join(f"• {m}" for m in texte.split(" · ")))[:1900],
+                    allowed_mentions=discord.AllowedMentions.none())
+        return res
+    except Exception as ex:
+        _logerr("_demonter_activite", ex, guild_id=getattr(guild, "id", 0))
+        return None
+
+
+async def _verifier_visibilite(guild):
+    """Ce qu'un nouvel arrivant voit du serveur — voir `visibilite_serveur`.
+    Une ligne de journal ; seule correction : l'onboarding Discord."""
+    try:
+        c = await cfg(guild.id)
+        r = visibilite_module.releve(guild, c)
+        ob = await visibilite_module.ouvrir_onboarding(guild)
+        print("[visibilite] " + visibilite_module.bilan_texte(
+            f"{guild.name} ({guild.id})", r, ob))
+        return r, ob
+    except Exception as ex:
+        _logerr("_verifier_visibilite", ex, guild_id=getattr(guild, "id", 0))
+        return None
+
+
+#  Les rôles rendus à l'arrivée d'un membre que l'ancien système avait
+#  dépouillé. Une tâche `create_task` sans référence peut disparaître en plein
+#  vol : on la retient ici.
+_TACHES_RETOUR_ROLES: set = set()
+
+
+async def _rendre_roles_au_retour(member):
+    try:
+        r = await activite_demontage_module.rendre_au_retour(
+            member.guild, member, get_db=get_db)
+        if r and r["rendus"]:
+            print(f"[activite_demontage] {member.guild.id} : "
+                  f"{len(r['rendus'])} rôle(s) rendu(s) à un membre revenu "
+                  f"({member.id})")
+    except Exception as ex:
+        _logerr("_rendre_roles_au_retour", ex,
+                guild_id=getattr(getattr(member, "guild", None), "id", 0))
+
+
 async def _travaux_de_demarrage():
-    """Les deux migrations, en tâche de fond, serveur par serveur."""
+    """Les migrations, en tâche de fond, serveur par serveur."""
     try:
         await bot.wait_until_ready()
         for g in list(bot.guilds):
@@ -14949,6 +14828,11 @@ async def _travaux_de_demarrage():
                 if _u.get("fait"):
                     print(f"[veille] {g.id} : nouveautés et passages Limited "
                           f"réunis dans le salon {_u['salon']}")
+                #  🧹 03/10/2026 : le système d'activité est retiré — on
+                #  défait ce qu'il avait posé (rôles, masquage, salons), puis
+                #  on regarde ce qu'un nouvel arrivant voit du serveur.
+                await _demonter_activite(g)
+                await _verifier_visibilite(g)
                 await _publier_bilan_sante(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
@@ -16426,7 +16310,6 @@ async def _eclaireur_actu_wait():
 
 
 _SUPERVISED_LOOP_NAMES = [
-    "activite_passage_task",
     #  Ajoutée le 12/08/2026 avec son `.start()` : elle n'avait ni l'un ni l'autre,
     #  donc elle n'a jamais tourné. Sans l'entrée ici, une exception non gérée
     #  l'arrêterait définitivement jusqu'au prochain redémarrage — et un rapport
@@ -24851,44 +24734,21 @@ _did_boot = False  # audit 2026-07-03 : on_ready peut se re-déclencher (reconne
 
 
 async def _activite_boot():
-    """Câble et initialise le système d'activité. Appelé une fois au boot.
+    """Câble les modules à leur base. Appelé une fois au boot.
 
-    `est_immunise` réunit TOUTES les protections en une seule fonction, pour que
-    le module d'activité n'ait pas à connaître les règles du bot : propriétaire,
-    super-owner, administrateur, immunisé, bot. Fail-CLOSED — si le calcul échoue,
-    on répond « intouchable » plutôt que de risquer de sanctionner un innocent.
+    ⚠️ LE SYSTÈME D'ACTIVITÉ EST RETIRÉ (03/10/2026) : ne restent que le
+    COMPTAGE des jours d'activité (bouton « Activité » de /rellseas) et le
+    démontage de ce que le système avait posé (`_travaux_de_demarrage`).
     """
-    async def est_immunise(member) -> bool:
-        try:
-            if member.bot:
-                return True
-            if member.id == member.guild.owner_id:
-                return True
-            if owner_ids_module.is_super_owner(member.id):
-                return True
-            if member.guild_permissions.administrator:
-                return True
-            return bool(await is_fully_immune(member))
-        except Exception as ex:
-            print(f"[activite est_immunise] {ex}")
-            return True          # dans le doute, on protège
+    activite_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
+    activite_demontage_module.setup(log=print)
+    visibilite_module.setup(log=print)
 
-    activite_module.setup(get_db=get_db, cfg=cfg, db_set=db_set,
-                          est_immunise=est_immunise, log=print)
-    activite_esc.setup(log=print)
-    activite_niv.setup(log=print)
-    activite_msg.setup(log=print)
-    activite_rec.setup(log=print)
-    activite_pass.setup(log=print)
-    activite_ui.setup(db_set=db_set, log=print)
-
-    #  Le bouton « Retour » du panneau d'activité doit rouvrir /configure. On
-    #  l'injecte plutôt que de laisser le module importer MainPanelV2 : ça
-    #  créerait un import circulaire (bot.py → panneau → bot.py).
+    #  Le bouton « Retour » des panneaux doit rouvrir /configure. On l'injecte
+    #  plutôt que de laisser un module importer MainPanelV2 : ça créerait un
+    #  import circulaire (bot.py → panneau → bot.py).
     async def _retour_vers_configure(u, g, inter):
         await MainPanelV2(u, g).render_to(inter, edit=True)
-
-    activite_ui.set_retour(_retour_vers_configure)
 
     #  Veille Roblox : meme patron que l'activite. `webhook_send` est passe pour
     #  que les fiches sortent sous un nom propre a chaque flux (exigence ROBLOX.md).
@@ -24953,17 +24813,6 @@ async def _activite_boot():
     await roblox_news_module.init_db()
 
     await activite_module.init_db()
-    await activite_rec.init_db()
-
-    #  Amorce le cache des rôles d'inactivité pour TOUTES les guildes. Sans lui,
-    #  le retour immédiat sur message ne se déclencherait qu'après le premier
-    #  passage — jusqu'à six heures pendant lesquelles un membre qui revient
-    #  reste masqué et croit le système cassé.
-    for g in bot.guilds:
-        try:
-            activite_niv.memoriser_ids(await activite_module.config(g.id))
-        except Exception as ex:
-            print(f"[activite boot ids {g.id}] {ex}")
 
 
 @bot.event
@@ -25515,13 +25364,10 @@ async def on_ready():
     if not check_social_feeds.is_running():
         check_social_feeds.start()
     
-    # ═══ ACTIVITÉ ═══ câblage + tables, puis la boucle. La boucle démarre même
-    # si le système est éteint : elle sort d'elle-même sur chaque guilde inactive.
-    # Ainsi, activer le système depuis le panneau prend effet sans redémarrage.
+    # ═══ ACTIVITÉ ═══ câblage + tables du COMPTAGE (pour /rellseas). Le
+    # système d'activité lui-même est retiré (03/10/2026) : plus de boucle.
     try:
         await _activite_boot()
-        if not activite_passage_task.is_running():
-            activite_passage_task.start()
     except Exception as ex:
         print(f"[on_ready activite] {ex}")
 
@@ -27727,15 +27573,14 @@ async def on_member_join(m):
     except Exception:
         pass
 
-    # ── RETOUR APRÈS UNE EXPULSION POUR INACTIVITÉ ──────────────────────────
-    # Quelqu'un qui a été retiré du serveur pour absence et qui revient reçoit un
-    # message privé court : ce qui s'est passé, et la règle. Sans ça, il
-    # redécouvre la règle au moment où elle le frappe une deuxième fois.
-    # En tâche de fond, et volontairement APRÈS l'anti-raid : un message de
-    # confort ne doit jamais retarder une protection.
+    # ── UN MEMBRE QUE L'ANCIEN SYSTÈME D'ACTIVITÉ AVAIT DÉPOUILLÉ REVIENT ───
+    # Il récupère ses rôles dès l'arrivée (voir `activite_demontage`) : une
+    # lecture en base par arrivée. En tâche de fond, APRÈS l'anti-raid.
     try:
         if not m.bot:
-            asyncio.create_task(activite_pass.accueillir_revenant(m.guild, m))
+            _t_ret = asyncio.create_task(_rendre_roles_au_retour(m))
+            _TACHES_RETOUR_ROLES.add(_t_ret)
+            _t_ret.add_done_callback(_TACHES_RETOUR_ROLES.discard)
     except Exception as ex:
         print(f"[on_member_join activite] {ex}")
 
@@ -28746,16 +28591,6 @@ async def on_guild_channel_create(channel):
                     reason="Radiation totale (/off) — couverture du nouveau salon")
         except Exception as _rex:
             print(f"[radie chan_create] {_rex}")
-        # INACTIVITÉ : même logique pour les rôles AFK. Un salon créé après la
-        # pose du masquage serait visible des absents jusqu'au prochain passage —
-        # et personne ne pense à relancer un masquage après avoir créé un salon.
-        try:
-            _cact = await activite_module.config(channel.guild.id)
-            if _cact.get('activite_enabled'):
-                await activite_niv.masquer_nouveau_salon(
-                    channel.guild, channel, _cact)
-        except Exception as _aex:
-            print(f"[activite chan_create] {_aex}")
         await _log_audited(
             channel.guild, ulogger2026.EventType.CHAN_CREATE,
             discord.AuditLogAction.channel_create, channel.id,
@@ -29360,10 +29195,6 @@ async def _check_compromised_account(msg):
         import traceback; traceback.print_exc()
 
 
-#  Les retraits d'étiquette AFK lancés depuis `on_message`. Voir le
-#  commentaire à l'endroit où ils sont créés : sans référence, une tâche peut
-#  disparaître en plein vol.
-_TACHES_RETOUR_AFK: set = set()
 
 
 @bot.event
@@ -29380,50 +29211,6 @@ async def on_message(msg):
         if not msg.author.bot:
             await activite_module.marquer_actif(
                 msg.guild.id, msg.author.id, activite_module.SOURCE_MESSAGE)
-            # RETOUR IMMÉDIAT : un membre étiqueté AFK qui écrit récupère ses
-            # rôles et sa vue du serveur MAINTENANT, pas au passage suivant
-            # (jusqu'à 6 h). `porte_une_etiquette` est une comparaison
-            # d'entiers en mémoire, sans await : elle coupe avant tout accès
-            # base ou réseau pour l'immense majorité des messages.
-            _retour_afk = None
-            if activite_niv.porte_une_etiquette(msg.author):
-                #  ⚠️ LA MARQUE D'ABORD, LA TENTATIVE ENSUITE — 22/09/2026.
-                #  Le retrait ci-dessous est au mieux de ses efforts. S'il rate,
-                #  cette marque est ce qui permet au passage suivant de libérer
-                #  le membre quand même : sans elle, un membre masqué par cumul
-                #  de rappels doux restait masqué indéfiniment.
-                await activite_module.noter_retour_demande(
-                    msg.guild.id, msg.author.id)
-                #  ⚠️ LA TÂCHE EST RETENUE. `create_task` sans référence peut
-                #  être ramassée par le ramasse-miettes en plein `await` : le
-                #  retrait s'arrêterait au milieu, sans erreur et sans trace.
-                _retour_afk = asyncio.create_task(
-                    activite_pass.retour_immediat(msg.guild, msg.author))
-                _TACHES_RETOUR_AFK.add(_retour_afk)
-                _retour_afk.add_done_callback(_TACHES_RETOUR_AFK.discard)
-            # ═══ LA PORTE DE RETOUR — demandée le 23/09/2026 ═══
-            # « Son message se fera automatiquement supprimer, et il gagnera
-            # les accès au serveur. Ça lui dira : pour garder cette activité… »
-            # ⚠️ LA MÊME TÂCHE DE RETOUR, PAS UNE SECONDE : `accueillir_retour`
-            # attend son résultat pour dire ce qui s'est vraiment passé.
-            if (_retour_afk is not None
-                    and await activite_pass.est_salon_de_retour(
-                        msg.guild.id, msg.channel.id)):
-                _porte = asyncio.create_task(
-                    activite_pass.accueillir_retour(msg, _retour_afk))
-                _TACHES_RETOUR_AFK.add(_porte)
-                _porte.add_done_callback(_TACHES_RETOUR_AFK.discard)
-            # ═══ LE SALON AFK — demandé le 30/08/2026 ═══
-            # ⚠️ APRÈS `marquer_actif`, ET C'EST L'ORDRE QUI COMPTE. Le membre
-            # doit être compté actif AVANT qu'on efface sa preuve : l'inverse
-            # perdrait exactement le message qui vient de le sauver.
-            # ⚠️ EN TÂCHE DÉTACHÉE : la suppression attend quelques secondes
-            # pour que le membre voie l'accusé de réception. Bloquer
-            # `on_message` pendant ce temps gèlerait le traitement de tous les
-            # autres messages du serveur.
-            elif await activite_pass.est_salon_afk(msg.guild.id, msg.channel.id):
-                asyncio.create_task(
-                    activite_pass.nettoyer_message_afk(msg))
     except Exception as _ex_act:
         print(f"[activite on_message] {_ex_act}")
 

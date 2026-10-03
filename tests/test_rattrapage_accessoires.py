@@ -1,29 +1,13 @@
-"""Le salon AFK, l'échelle d'inactivité, et le rattrapage des accessoires.
+"""Le rattrapage des derniers accessoires (30/08/2026).
 
-TROIS DEMANDES DU PROPRIÉTAIRE, LE 30/08/2026.
+« Assure-toi que les derniers accessoires soient bien publiés sur le serveur. »
+Mesuré le même jour : les huit derniers articles créés par Roblox avaient
+**38,4 jours**, pour une fenêtre de publication de six heures. Ils ne pouvaient
+PAS sortir seuls, et l'amorce les avait marqués « déjà publiés ». D'où un
+rattrapage borné et volontaire.
 
-1. LE SALON AFK. « Il y a un salon où les gens sont AFK, ils doivent écrire
-   dedans […] le message s'auto supprime automatiquement, ça évite de laisser
-   des pavés de messages. Ça permet à l'utilisateur d'envoyer un message. Le
-   message supprimé, OK, il est redevenu actif. »
-   ⚠️ CE QUI EXISTAIT DÉJÀ, ET QU'IL FAUT DIRE : écrire N'IMPORTE OÙ marquait
-   déjà l'activité ET rendait déjà ses rôles à un membre étiqueté
-   (`marquer_actif` + `retour_immediat`, bot.py). Le salon AFK n'ajoute donc
-   AUCUN pouvoir de retour — il ajoute un endroit prévu pour ça, qui se
-   nettoie. Prétendre le contraire ferait croire qu'écrire ailleurs ne compte
-   pas.
-
-2. L'ÉCHELLE. « Si y a aucun message dans la semaine, on leur dira d'être
-   actif ; au bout de la 2e semaine, pas de messages, et ben on les met AFK
-   avec le système de rôle. » Le rôle AFK arrivait à 7 jours ; il arrive
-   désormais à 14. Le changement ne peut qu'ADOUCIR : personne n'est sanctionné
-   plus tôt qu'avant.
-
-3. LES DERNIERS ACCESSOIRES. « Assure-toi que les derniers accessoires soient
-   bien publiés sur le serveur. » Mesuré le même jour : les huit derniers
-   articles créés par Roblox ont **38,4 jours**, pour une fenêtre de
-   publication de six heures. Ils ne peuvent PAS sortir seuls, et l'amorce les
-   a marqués « déjà publiés ». D'où un rattrapage borné et volontaire.
+(Ces tests vivaient dans `test_salon_afk_et_rattrapage.py`, avec ceux du salon
+AFK ; le système d'activité a été retiré le 03/10/2026 — ils restent, seuls.)
 """
 from __future__ import annotations
 
@@ -36,177 +20,10 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
-import activite
-import activite_passage as passage
 import roblox_veille as veille
 
 RACINE = Path(__file__).resolve().parent.parent
 SRC_BOT = (RACINE / "bot.py").read_text(encoding="utf-8")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  1. L'échelle d'inactivité correspond à celle qui a été décrite
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_le_role_afk_n_arrive_qu_a_la_deuxieme_semaine():
-    """⚠️ LE RÔLE AFK MASQUE TOUT LE SERVEUR. Le poser dès la première semaine
-    de silence, alors que le propriétaire décrit un simple avertissement à ce
-    stade, punit une semaine trop tôt."""
-    assert activite.SEUIL_RAPPEL_DEFAUT == 14, (
-        "le rôle AFK revient à 7 jours : la première semaine de silence ne "
-        "doit être qu'un avertissement")
-
-
-def test_l_echelle_reste_strictement_croissante():
-    """Deux paliers à la même valeur en rendraient un inatteignable — et le
-    système sauterait silencieusement une étape."""
-    assert (activite.SEUIL_RAPPEL_DEFAUT
-            < activite.SEUIL_RETRAIT_DEFAUT
-            < activite.SEUIL_EXPULSION_DEFAUT)
-
-
-def test_le_posteur_hebdomadaire_finit_par_basculer():
-    """« S'ils envoient un message une semaine… l'autre semaine aussi… on les
-    considère comme AFK. » C'est le compteur de rappels doux consécutifs qui
-    referme ce contournement, et il doit rester fini."""
-    assert 2 <= activite.DOUX_MAX_DEFAUT <= 4
-    assert activite.SEUIL_PRESENCE_DEFAUT >= 2, (
-        "un seul jour de présence par semaine ne doit pas suffire, sinon "
-        "poster le vendredi met le compteur à zéro toute l'année")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  2. Le salon AFK
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def test_le_salon_afk_est_reglable():
-    """Une clé de configuration que personne ne peut régler est du code mort."""
-    assert "activite_salon_afk" in activite.CLES_DEFAUT
-    assert activite.CLES_DEFAUT["activite_salon_afk"] == 0
-    src = (RACINE / "activite_panneau.py").read_text(encoding="utf-8")
-    assert '"activite_salon_afk"' in src, (
-        "le salon AFK n'apparaît pas dans le panneau : impossible à régler")
-
-
-def test_le_delai_laisse_voir_l_accuse():
-    """⚠️ ZÉRO SECONDE N'EST PAS UN BON RÉGLAGE. Le membre doit voir que c'est
-    passé, sinon il réécrit — et on obtient l'inverse du salon propre visé."""
-    assert activite.CLES_DEFAUT["activite_afk_secondes"] >= 3
-
-
-@pytest.mark.asyncio
-async def test_est_salon_afk_ne_confond_pas_les_salons(monkeypatch):
-    conf = {"activite_salon_afk": 4242}
-
-    async def _cfg(_g):
-        return dict(activite.CLES_DEFAUT, **conf)
-
-    monkeypatch.setattr(activite, "config", _cfg)
-    assert await passage.est_salon_afk(1, 4242) is True
-    assert await passage.est_salon_afk(1, 9999) is False
-    #  Salon non réglé : aucun salon ne doit être pris pour le salon AFK.
-    conf["activite_salon_afk"] = 0
-    assert await passage.est_salon_afk(1, 4242) is False
-    assert await passage.est_salon_afk(1, 0) is False
-
-
-class _Salon:
-    def __init__(self, peut_gerer=True):
-        self.id, self.name = 4242, "afk"
-        self._peut = peut_gerer
-        self.envoyes = []
-
-    def permissions_for(self, _membre):
-        class _P:
-            manage_messages = self._peut
-        _P.manage_messages = self._peut
-        return _P()
-
-    async def send(self, contenu, **kw):
-        self.envoyes.append(contenu)
-        return _Message(self, "accuse")
-
-
-class _Message:
-    def __init__(self, salon, texte="coucou", pinned=False):
-        self.channel, self.guild = salon, _Guild()
-        self.pinned = pinned
-        self.content = texte
-        self.author = type("A", (), {"mention": "@moi", "bot": False})()
-        self.supprime = False
-
-    async def delete(self):
-        self.supprime = True
-
-
-class _Guild:
-    id = 1
-    me = object()
-
-
-@pytest.mark.asyncio
-async def test_le_message_afk_est_efface_et_confirme(monkeypatch):
-    async def _cfg(_g):
-        return dict(activite.CLES_DEFAUT, activite_afk_secondes=0)
-
-    monkeypatch.setattr(activite, "config", _cfg)
-    salon = _Salon()
-    msg = _Message(salon)
-    assert await passage.nettoyer_message_afk(msg) is True
-    assert msg.supprime is True
-    assert salon.envoyes, "aucun accusé : le membre croira que ça n'a pas marché"
-    assert "actif" in salon.envoyes[0]
-
-
-@pytest.mark.asyncio
-async def test_sans_la_permission_on_le_DIT_au_lieu_d_echouer_en_boucle(monkeypatch):
-    """⚠️ SANS CE CONTRÔLE, chaque message du salon lèverait une erreur
-    attrapée plus bas : le journal se remplirait d'une ligne par message au
-    lieu d'un diagnostic, et le salon se remplirait en silence."""
-    async def _cfg(_g):
-        return dict(activite.CLES_DEFAUT, activite_afk_secondes=0)
-
-    monkeypatch.setattr(activite, "config", _cfg)
-    dits = []
-    monkeypatch.setattr(passage, "_log", lambda m: dits.append(str(m)))
-    msg = _Message(_Salon(peut_gerer=False))
-    assert await passage.nettoyer_message_afk(msg) is False
-    assert msg.supprime is False
-    assert any("Gérer les messages" in d for d in dits), (
-        "la cause exacte doit être journalisée")
-
-
-@pytest.mark.asyncio
-async def test_un_message_epingle_nest_pas_efface(monkeypatch):
-    """Un message épinglé est une consigne du staff, pas un « je suis là »."""
-    async def _cfg(_g):
-        return dict(activite.CLES_DEFAUT)
-
-    monkeypatch.setattr(activite, "config", _cfg)
-    msg = _Message(_Salon(), pinned=True)
-    assert await passage.nettoyer_message_afk(msg) is False
-    assert msg.supprime is False
-
-
-def test_le_nettoyage_passe_APRES_le_marquage_dans_on_message():
-    """⚠️ L'ORDRE EST LE CŒUR DE LA CHOSE. Effacer le message avant de compter
-    l'activité perdrait exactement la preuve qui vient de sauver le membre."""
-    for n in ast.walk(ast.parse(SRC_BOT)):
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "on_message":
-            corps = ast.unparse(n)
-            break
-    else:
-        raise AssertionError("on_message introuvable")
-    assert "activite_pass.nettoyer_message_afk" in corps, (
-        "le nettoyage n'est branché nulle part : le salon ne se videra jamais")
-    i_marque = corps.index("activite_module.marquer_actif")
-    i_nettoie = corps.index("activite_pass.nettoyer_message_afk")
-    assert i_marque < i_nettoie, (
-        "le message est effacé AVANT d'être compté comme activité")
-    #  Et en tâche détachée : l'attente ne doit pas geler tout on_message.
-    assert "asyncio.create_task(\n                    activite_pass.nettoyer_message_afk" in corps \
-        or "create_task" in corps.split("nettoyer_message_afk")[0][-120:], (
-        "le nettoyage bloque on_message pendant son délai d'attente")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -431,44 +248,3 @@ def test_le_bouton_annonce_qu_il_va_etre_long():
     assert "veille.relever_hors_vente(" in bloc, (
         "le bouton ne fait que deux relevés sur trois : il ne verra aucune "
         "création retirée de la vente")
-
-
-@pytest.mark.asyncio
-async def test_le_delai_est_reellement_applique(monkeypatch):
-    """⚠️ MUTATION SURVÉCUE LE 30/08 : retirer `delete_after` ET le `sleep` du
-    nettoyage AFK ne faisait échouer aucun test — l'accusé de réception serait
-    resté dans le salon POUR TOUJOURS, soit l'inverse exact de ce que ce salon
-    existe pour faire. Les tests existants passaient un délai de ZÉRO, qui
-    n'exerce ni l'un ni l'autre. Un banc qui neutralise le paramètre qu'il
-    devrait éprouver ne prouve rien."""
-    async def _cfg(_g):
-        return dict(activite.CLES_DEFAUT, activite_afk_secondes=6)
-
-    monkeypatch.setattr(activite, "config", _cfg)
-    dormi = []
-
-    async def _faux_sleep(n):
-        dormi.append(n)
-
-    monkeypatch.setattr(passage.asyncio, "sleep", _faux_sleep)
-
-    class _SalonTrace(_Salon):
-        def __init__(self):
-            super().__init__()
-            self.kw = None
-
-        async def send(self, contenu, **kw):
-            self.kw = kw
-            self.envoyes.append(contenu)
-            return _Message(self, "accuse")
-
-    salon = _SalonTrace()
-    msg = _Message(salon)
-    assert await passage.nettoyer_message_afk(msg) is True
-
-    assert dormi == [6], (
-        "le message est effacé sans laisser le temps de le lire : le membre "
-        "réécrira, et le salon se remplira — l'inverse du but")
-    assert salon.kw.get("delete_after") == 6.0, (
-        "l'accusé de réception n'a pas de `delete_after` : il resterait dans "
-        "le salon pour toujours")

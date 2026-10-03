@@ -9,15 +9,14 @@ import pytest
 
 PHASE_163_MODULES = [
     "activite",
-    "activite_message",
-    "activite_niveaux",
+    "activite_demontage",    # 03/10 : défait ce que le système d'activité avait posé
+    "visibilite_serveur",    # 03/10 : ce que voit un nouvel arrivant
     "roblox_veille",
     "roblox_news",
     "roblox_panneau",
     "roblox_pings",          # 19/08 : un rôle de notification par type d'annonce
     "roblox_news_contenu",   # 18/08 : essentiel, médias, traduction des actualités
     "rellseas_panneau",      # 16/08 : /rellseas et son réglage
-    "activite_recompenses",
     "dm_digest",
     "webhook_tracker",
     "honeypot",
