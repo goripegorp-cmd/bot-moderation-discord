@@ -1,4 +1,11 @@
-"""Nouveautés Roblox + passages en Limited, dans un salon — jamais un hors-vente.
+"""Nouveautés Roblox (des ACCESSOIRES) + passages en Limited, dans un salon.
+
+⚠️ RÉVISÉ LE 06/10/2026 — « uniquement les accessoires, pas les visages
+moches ou les camouflages […] la citrouille, elle n'est pas affichée ». Mesuré
+le 05/10 : sur 30 jours, les 126 créations de Roblox sont TOUTES hors vente
+(101 accessoires, 20 sourcils/cils « Template »…). Pour les NOUVEAUTÉS le
+critère est désormais le TYPE ; la règle « hors vente et pas Limited : jamais »
+ne vaut plus que pour les PASSAGES LIMITED.
 
 ═══════════════════════════════════════════════════════════════════════════════
 LA CONSIGNE (23/09/2026, « la plus importante »)
@@ -130,6 +137,7 @@ def base(tmp_path):
 
 def _article(aid, **kw):
     a = {"asset_id": aid, "nom": f"art{aid}", "type_article": "Chapeau",
+         "asset_type": 8,
          "item_type": "Asset", "prix": 400, "collectionnable": 0,
          "hors_vente": 0, "favoris": 0, "cree_le": "2026-09-23T08:00:00Z",
          "createur_id": 1}
@@ -161,18 +169,56 @@ async def test_G2_un_passage_en_Limited_entre_meme_HORS_VENTE(base):
 
 
 @pytest.mark.asyncio
-async def test_G3_hors_vente_et_NON_Limited_ne_sort_JAMAIS(base):
-    """⚠️ LA RÈGLE D'OR DU 23/09. Mesuré : 105 des 118 dernières créations de
-    Roblox sont des récompenses d'événement à 0-1 R$, hors vente — c'étaient
-    elles, les fiches « 🔴 retiré de la vente » lues comme « peut-être
-    Limited ». Aucun flux ne les laisse passer."""
+async def test_G3_hors_vente_et_NON_Limited_n_est_jamais_un_PASSAGE_Limited(base):
+    """⚠️ LA RÈGLE DU 23/09, POUR LES PASSAGES LIMITED : « des accessoires
+    enlevés de la vente comme potentiellement limited — je ne veux pas de ça »."""
     await veille.init_db()
     evenement = _article(12, prix=1, hors_vente=1, collectionnable=0)
     retire = _article(13, prix=9000, hors_vente=1, collectionnable=0)
     for a in (evenement, retire):
-        for flux in ("nouveautes", "bascules"):
-            assert await veille.enfiler(1, a, flux) is False, (a["asset_id"], flux)
+        assert await veille.enfiler(1, a, "bascules") is False, a["asset_id"]
     assert await _file(base) == []
+
+
+@pytest.mark.asyncio
+async def test_G3bis_la_citrouille_un_accessoire_HORS_VENTE_est_une_nouveaute(base):
+    """06/10 : « la citrouille, elle n'est pas affichée ». Récompense des quêtes
+    d'Halloween, hors vente, à « 1 R$ » au catalogue — c'est un accessoire de
+    tête : il sort."""
+    await veille.init_db()
+    citrouille = _article(126884250250747, nom="Duck-o-Lantern", prix=1,
+                          hors_vente=1, collectionnable=0, asset_type=8,
+                          type_article="Head Accessories")
+    assert await veille.enfiler(1, citrouille, "nouveautes") is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asset_type,item_type", [
+    (76, "Asset"), (77, "Asset"), (18, "Asset"), (17, "Asset"), (79, "Asset"),
+    (64, "Asset"), (19, "Asset"), (None, "Asset"), (None, "Bundle"),
+])
+async def test_G3ter_un_visage_des_sourcils_des_cils_un_pack_ne_sortent_JAMAIS(
+        base, asset_type, item_type):
+    """« Les visages moches ou les camouflages […] ça on s'en fout. » Même en
+    vente : le type décide."""
+    await veille.init_db()
+    a = _article(20, asset_type=asset_type, item_type=item_type, hors_vente=0)
+    assert await veille.enfiler(1, a, "nouveautes") is False
+    assert await _file(base) == []
+
+
+@pytest.mark.asyncio
+async def test_G3quater_une_rafale_au_meme_nom_donne_UNE_fiche(base):
+    """17/09 : 22 « The Hunt: Roblox 20 Badge » en huit minutes. Une fiche."""
+    await veille.init_db()
+    badges = [_article(300 + k, nom="The Hunt: Roblox 20 Badge", asset_type=45,
+                       hors_vente=1, prix=1) for k in range(22)]
+    entres = [await veille.enfiler(1, b, "nouveautes") for b in badges]
+    assert entres.count(True) == 1 and entres[0] is True
+    assert await veille.enfiler(1, _article(400, nom="Crown of RIVALS"),
+                                "nouveautes") is True
+    assert await veille.enfiler(1, _article(401, nom="  the hunt: ROBLOX 20 badge "),
+                                "nouveautes") is False, "casse et espaces ignorés"
 
 
 @pytest.mark.asyncio

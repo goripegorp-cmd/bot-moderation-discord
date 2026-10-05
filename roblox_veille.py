@@ -387,6 +387,9 @@ CLES_DEFAUT = {
     #  (son identifiant Discord) — pour la COMPLÉTER au lieu d'en poster une.
     "roblox_cartes_suite": "",
     "roblox_cartes_message": 0,
+    #  La citrouille du 05/10 (voir `MARQUE_RATTRAPAGE_ACCESSOIRES`) : vide tant
+    #  que le rattrapage unique n'a pas eu lieu sur ce serveur.
+    "roblox_rattrapage_accessoires_0610": "",
 }
 
 
@@ -1792,19 +1795,29 @@ async def rattraper_nouveautes(guild_id: int, combien: int = 12) -> dict:
         #  lien et la vignette), ni la classe, ni la description : publier
         #  depuis elle donnerait des fiches amputées.
         fiches = {a["asset_id"]: a for a in await fiches_par_ids(ids)}
-        retenus = []
+        retenus, noms = [], set()
         for aid in ids:
             if len(retenus) >= combien:
                 break
             a = fiches.get(aid)
             if a is None:
                 continue
+            #  ⚠️ 06/10 : DES ACCESSOIRES, UN SEUL PAR NOM. `enfiler` refuse le
+            #  reste (sourcils, cils, visages, rafales de badges identiques) :
+            #  les compter « retenus » ferait lire un échec au panneau, et
+            #  prendrait la place d'un vrai accessoire dans le lot.
+            cle = _cle_nom(a.get("nom"))
+            if not est_accessoire(a) or (cle and cle in noms):
+                continue
+            if await meme_nom_recent(guild_id, a):
+                continue
             #  ⚠️ LA MARQUE « nouveautes » NE COMPTE PAS ICI — c'est ELLE qu'on
             #  vient lever. L'amorce l'a posée sur les 964 articles du
             #  catalogue sans qu'aucune fiche ne soit jamais partie : s'en
             #  servir comme filtre ferait que ce bouton ne rattrape RIEN, ce
             #  qui est précisément le défaut qu'il répare.
-            #  On écarte donc sur deux critères, et deux seulement :
+            #  Côté « déjà sorti », on écarte donc sur deux critères, et deux
+            #  seulement :
             if "bascules" in await flux_deja_sortis(guild_id, aid):
                 #  Déjà annoncé comme passé Limited : le ressortir en
                 #  « nouveauté » serait un doublon ET une régression de flux.
@@ -1816,6 +1829,7 @@ async def rattraper_nouveautes(guild_id: int, combien: int = 12) -> dict:
                 #  absorbé sans jamais l'envoyer. Confondre les deux, c'est
                 #  soit republier, soit ne rien rattraper.
                 continue
+            noms.add(cle)
             retenus.append(a)
         out["candidats"] = len(retenus)
         if not retenus:
@@ -2853,6 +2867,91 @@ def etat_transition(article: dict) -> tuple[str, str]:
     return "absent", "nouveau"
 
 
+#  ⚠️ LES NOUVEAUTÉS : DES ACCESSOIRES, ET RIEN D'AUTRE (06/10/2026).
+#  Le propriétaire : « uniquement les accessoires, pas les visages moches ou
+#  les camouflages là, que donne Roblox, ça on s'en fout […] les accessoires de
+#  tête et tout ». MESURÉ LE 05/10 sur 30 jours : 126 créations de Roblox, et
+#  TOUTES hors vente — 101 accessoires (tête, dos, avant, cou, taille…),
+#  20 « Eyebrows/Eyelashes Template » (types 76/77), 4 vêtements, 1 personnage.
+#  La règle d'or du 23/09 (« hors vente et pas Limited : jamais ») faisait donc
+#  taire TOUTES les nouveautés : la citrouille « Duck-o-Lantern » (récompense
+#  des quêtes d'Halloween, créée le 05/10 à 21:23 UTC) a été vue au premier
+#  relevé — et écartée. Pour les nouveautés, le critère est désormais le TYPE ;
+#  le flux des passages Limited garde sa règle.
+TYPES_ACCESSOIRES = frozenset({8, 41, 42, 43, 44, 45, 46, 47})
+#  Une rafale d'objets au MÊME nom (22 « The Hunt: Roblox 20 Badge » en huit
+#  minutes, le 17/09) donne UNE fiche, pas vingt-deux.
+NOM_DOUBLON_JOURS = 7
+#  Le rattrapage UNIQUE, au premier relevé après ce changement : les accessoires
+#  des dernières 24 h que l'ancienne règle avait écartés — la citrouille.
+MARQUE_RATTRAPAGE_ACCESSOIRES = "roblox_rattrapage_accessoires_0610"
+RATTRAPAGE_UNIQUE_HEURES = 24
+
+
+def est_accessoire(article: dict) -> bool:
+    """Chapeau, cheveux, visage (lunettes, masque), cou, épaule, avant, dos,
+    taille. Pas un visage, pas des sourcils ni des cils, pas un pack."""
+    if str(article.get("item_type") or "Asset") != "Asset":
+        return False
+    try:
+        return int(article.get("asset_type") or 0) in TYPES_ACCESSOIRES
+    except (TypeError, ValueError):
+        return False
+
+
+def _cle_nom(nom) -> str:
+    return " ".join(str(nom or "").casefold().split())
+
+
+async def meme_nom_recent(guild_id: int, article: dict,
+                          jours: int = NOM_DOUBLON_JOURS) -> bool:
+    """Un AUTRE article au même nom est-il déjà entré en file ces derniers jours ?"""
+    cle = _cle_nom(article.get("nom"))
+    if not cle:
+        return False
+    depuis = (datetime.now(timezone.utc) - timedelta(days=jours)).isoformat()
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                    "SELECT asset_id, charge FROM roblox_transitions"
+                    " WHERE guild_id=? AND flux='nouveautes' AND detecte_le >= ?",
+                    (int(guild_id), depuis)) as cur:
+                lignes = await cur.fetchall()
+    except Exception as ex:
+        _log(f"[roblox_veille meme_nom_recent] {ex}")
+        return False
+    for aid, charge in lignes:
+        if int(aid) == int(article.get("asset_id") or 0):
+            continue
+        try:
+            nom = json.loads(charge or "{}").get("nom")
+        except (ValueError, AttributeError) as ex:
+            _log(f"[roblox_veille meme_nom_recent] charge illisible : {ex}")
+            continue
+        if _cle_nom(nom) == cle:
+            return True
+    return False
+
+
+def a_reexaminer(articles, heures: float) -> list[dict]:
+    """Les ACCESSOIRES créés il y a moins de `heures` h, parmi ce que le relevé
+    vient de lire — réexaminés à chaque passage, pas seulement à leur première
+    apparition. Sans ça, un article écarté une fois (règle changée depuis,
+    salon pas encore réglé, panne d'envoi) ne pouvait plus JAMAIS revenir :
+    au passage suivant, il n'était plus « jamais vu ». Zéro requête de plus ;
+    « jamais deux fois » reste tenu par la base (`enfiler`)."""
+    out, vus = [], set()
+    for a in articles or []:
+        h = _heures_depuis(a.get("cree_le"))
+        if h is None or h > heures or not est_accessoire(a):
+            continue
+        if a.get("asset_id") in vus:
+            continue
+        vus.add(a.get("asset_id"))
+        out.append(a)
+    return out
+
+
 async def enfiler(guild_id: int, article: dict, flux: str) -> bool:
     """Met une fiche en file. Rend True si elle y entre pour la première fois.
 
@@ -2877,20 +2976,25 @@ async def enfiler(guild_id: int, article: dict, flux: str) -> bool:
         _cid = 0
     if _cid and _cid != CREATEUR_ROBLOX:
         return False
-    #  ⚠️ LA RÈGLE D'OR DU 23/09 : « des accessoires enlevés de la vente
-    #  comme potentiellement limited — je ne veux pas de ça ». Un article HORS
-    #  VENTE et NON Limited ne sort JAMAIS, quel que soit le flux. Mesuré : 105
-    #  des 118 dernières créations de Roblox sont des récompenses d'événement à
-    #  0-1 R$, hors vente — c'étaient elles, les fiches « 🔴 retiré de la
-    #  vente ». Un article retiré qui PASSE Limited, lui, sort : il devient
-    #  collectionnable, et c'est précisément l'événement attendu.
-    if article.get("hors_vente") and not article.get("collectionnable"):
+    #  ⚠️ NOUVEAUTÉS : LE TYPE DÉCIDE, PLUS LA VENTE (06/10, voir
+    #  `TYPES_ACCESSOIRES`). Un accessoire hors vente — récompense d'événement
+    #  comme la citrouille — sort ; un visage, des sourcils, des cils, un pack
+    #  ne sortent jamais, même en vente.
+    #  ⚠️ PASSAGES LIMITED : LA RÈGLE DU 23/09 RESTE. Un article hors vente et
+    #  NON Limited n'y entre jamais (« des accessoires enlevés de la vente
+    #  comme potentiellement limited — je ne veux pas de ça »).
+    if flux == "nouveautes":
+        if not est_accessoire(article):
+            return False
+    elif article.get("hors_vente") and not article.get("collectionnable"):
         return False
     try:
         if not flux_allume(await config(guild_id), flux):
             return False
     except Exception as ex:
         _log(f"[roblox_veille enfiler config] {ex}")
+        return False
+    if flux == "nouveautes" and await meme_nom_recent(guild_id, article):
         return False
     de, vers = etat_transition(article)
     try:

@@ -236,6 +236,32 @@ tout y tombe.
   en vente (Telamon's Other Crafting Jewel, créé le 25/09, en vente le 27/09)
   sort à sa mise en vente, s'il a moins de 30 jours.
 
+### 🆕 Une nouveauté, c'est un ACCESSOIRE — hors vente compris (06/10/2026)
+
+« Uniquement les accessoires, pas les visages moches ou les camouflages […]
+la citrouille, elle n'est pas affichée. » La Duck-o-Lantern (récompense des
+quêtes d'Halloween) était en tête du relevé hors vente — vue, puis écartée
+par la règle du 23/09 « hors vente et pas Limited : jamais ». Mesuré : sur
+30 jours, les 126 créations de Roblox sont TOUTES hors vente (101
+accessoires, 20 sourcils/cils « Template »…).
+
+- **Le TYPE décide** (`est_accessoire`, gardé dans `enfiler`) : types 8 et
+  41-47 (tête, cheveux, visage, cou, épaule, avant, dos, taille), hors vente
+  compris. Jamais un visage (18), des sourcils/cils (76/77), une tête (17/79),
+  un vêtement 3D (64-72), un gear (19), un pack — même en vente.
+- **La règle du 23/09 ne vaut plus que pour les PASSAGES LIMITED** : un
+  hors-vente non Limited n'est jamais annoncé comme « passé Limited ».
+- **Une fiche par NOM sur 7 jours** (`meme_nom_recent`) : 22 « The Hunt:
+  Roblox 20 Badge » en huit minutes le 17/09.
+- **Les accessoires de moins de 6 h sont RÉEXAMINÉS à chaque relevé**
+  (`a_reexaminer`, zéro requête) : un article écarté une fois (règle changée,
+  salon pas réglé, panne d'envoi) n'était plus jamais « jamais vu ». Une seule
+  fois par serveur, la fenêtre va à 24 h (`MARQUE_RATTRAPAGE_ACCESSOIRES`).
+- La fiche ne montre pas « 1 R$ » pour une récompense d'événement (« — ») et
+  dit « hors vente · à gagner en jeu » quand la description le dit.
+- Le journal dit ce qui est écarté et pourquoi : relevé de 30 min
+  (« pas un accessoire », « doublon de nom », « rattrapé ») et éclaireur.
+
 ### 🎁 Les cartes cadeaux (29/09/2026)
 
 - **Source : la page officielle** `roblox.com/giftcards-fr`. Sa liste vit dans
@@ -265,9 +291,11 @@ tout y tombe.
 - **Jamais « Article 1396… »** : un article absent (coupure) → rien n'est
   envoyé ; un nom que Roblox ne rend pas → la fiche attend la lecture
   suivante (`ESSAIS_NOMS` = 3 au plus), puis part avec le lien seul.
-- Les articles des cartes restent hors du flux « nouveautés » (hors vente au
-  catalogue, créés des semaines avant) : ils sortent dans cette fiche le jour
-  où une carte les donne.
+- Les articles des cartes sortent dans cette fiche le jour où une carte les
+  donne. Depuis le 06/10 (hors vente compris), un article de carte qui est un
+  accessoire peut AUSSI sortir en « nouveauté » s'il est vu dans les 6 h de sa
+  création — comme tout accessoire de Roblox ; créé des semaines avant, il
+  n'y sort pas.
 
 ### Les constantes, et leur justification MESURÉE
 

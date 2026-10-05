@@ -21,6 +21,7 @@ pour un défaut de droits.
 from __future__ import annotations
 
 import asyncio
+import re
 
 import discord
 from discord.ui import Button, ChannelSelect
@@ -145,6 +146,12 @@ def _ligne_mention(ping_role) -> str | None:
     return f"-# 🔔 {m}" if m else None
 
 
+#  Une description qui dit qu'on GAGNE l'article en jouant (récompense d'événement).
+_MOTS_A_GAGNER = re.compile(
+    r"\b(?:earn(?:ed)?|quests?|badges?|events?|rewards?|unlock(?:ed)?|gagnez?|"
+    r"gagner|obtiens|quêtes?|événements?|récompenses?|débloque[rz]?)\b", re.I)
+
+
 def construire_fiche(article: dict, flux: str, image: str | None = None,
                      lies: list | None = None, ping_cle: str | None = None,
                      ping_role=None) -> LayoutView:
@@ -221,7 +228,14 @@ def construire_fiche(article: dict, flux: str, image: str | None = None,
     #  catalogue (`prix_revente`).
     revente = article.get("revente") or article.get("prix_revente")
     mult = article.get("multiplicateur")
-    lignes = [f"**Prix d'origine** · {_fmt_robux(article.get('prix'))}"]
+    #  ⚠️ UNE RÉCOMPENSE D'ÉVÉNEMENT N'A PAS DE PRIX (06/10). Hors vente, non
+    #  Limited, « 1 R$ » ou « 0 » au catalogue : c'est un marqueur de Roblox,
+    #  pas un prix — l'afficher ferait chercher un achat qui n'existe pas.
+    _prix = article.get("prix")
+    if (article.get("hors_vente") and not article.get("collectionnable")
+            and _prix in (0, 1)):
+        _prix = None
+    lignes = [f"**Prix d'origine** · {_fmt_robux(_prix)}"]
     #  ⚠️ DIRE S'IL EST ACHETABLE — demandé le 30/08 : « il y a des accessoires
     #  qui sont en vente et d'autres qui ne sont pas en vente ». Depuis que le
     #  bot voit AUSSI les créations retirées de la vente (troisième relevé),
@@ -248,6 +262,11 @@ def construire_fiche(article: dict, flux: str, image: str | None = None,
         _dispo = "🔁 revente entre joueurs" + (" · stock épuisé" if _epuise else "")
     else:
         _dispo = "hors vente"
+        #  « Earn it through the Halloween quests… » : la description dit
+        #  comment l'obtenir ; on le résume, sans rien inventer.
+        if _MOTS_A_GAGNER.search(" ".join(str(article.get(k) or "") for k in
+                                           ("description", "description_fr"))):
+            _dispo += " · à gagner en jeu"
     lignes.append(f"**Disponibilité** · {_dispo}")
     if flux == "bascules" and article.get("classe_avant") == veille.CLASSE_COLLECTIBLE:
         #  UNE PROMOTION (27/09) : il se revendait déjà, en UGC Limited. Sans

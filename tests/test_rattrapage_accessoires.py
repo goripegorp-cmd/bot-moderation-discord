@@ -57,9 +57,12 @@ def banc(tmp_path):
     return chemin
 
 
-def _brut(aid, jours):
+def _brut(aid, jours, asset_type=8):
+    """Comme le catalogue la rend : un article porte son `assetType` — depuis
+    le 06/10, c'est lui qui décide d'une nouveauté (8 : un chapeau)."""
     quand = (datetime.now(timezone.utc) - timedelta(days=jours))
     return {"id": aid, "name": f"Accessoire {aid}", "itemType": "Asset",
+            "assetType": asset_type,
             "itemCreatedUtc": quand.isoformat().replace("+00:00", "Z"),
             "itemRestrictions": [], "price": 100, "favoriteCount": 5}
 
@@ -88,6 +91,27 @@ async def test_le_rattrapage_libere_et_enfile_les_plus_recents(banc, monkeypatch
     #  ⚠️ IL DIT L'ÂGE. Publier 38 jours d'archives en silence romprait la
     #  règle « on ne présente pas comme nouveau ce qui a des semaines ».
     assert r["plus_vieux_j"] >= 37
+
+
+@pytest.mark.asyncio
+async def test_le_rattrapage_ne_retient_que_des_accessoires_un_par_nom(banc, monkeypatch):
+    """06/10 : « uniquement les accessoires, pas les visages moches ». Un
+    sourcil ou un doublon de nom n'est pas un « retenu » : `enfiler` le
+    refuserait, et le panneau lirait « 2 remis en file sur 4 » comme un échec."""
+    await veille.init_db()
+    arts = [_brut(1, 3), _brut(2, 3, asset_type=76), _brut(3, 3, asset_type=18),
+            dict(_brut(4, 3), name="Accessoire 1"), _brut(5, 3)]
+    await veille.comparer_et_enregistrer(veille._normaliser(arts))
+
+    async def _faux_fiches(ids, item_type="Asset"):
+        return veille._normaliser([a for a in arts if a["id"] in set(ids)])
+
+    monkeypatch.setattr(veille, "fiches_par_ids", _faux_fiches)
+    r = await veille.rattraper_nouveautes(1, combien=12)
+    assert r["candidats"] == 2 and r["enfiles"] == 2, r
+    assert not r.get("echecs"), "un sourcil n'est pas un échec : il n'est pas retenu"
+    ids = sorted(e["article"]["asset_id"] for e in await veille.a_envoyer(1, limite=12))
+    assert len(ids) == 2 and 5 in ids and ids[0] in (1, 4), ids
 
 
 @pytest.mark.asyncio

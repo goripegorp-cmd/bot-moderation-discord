@@ -31,6 +31,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import roblox_veille as veille
+
 RACINE = Path(__file__).resolve().parent.parent
 SRC = (RACINE / "bot.py").read_text(encoding="utf-8")
 ARBRE = ast.parse(SRC)
@@ -83,7 +85,9 @@ class FauxCatalogue:
 
     def __init__(self, reponses, flux=None, surveilles=(), bascules=(),
                  fiches_refusees=0, economie_max=None, connus=None,
-                 recensement=()):
+                 recensement=(), types=None):
+        #  Le type d'objet de chaque fiche rendue (8 = chapeau par défaut).
+        self.types = dict(types or {})
         #  Les pages du flux Limited que rendra `relever_collectionnables`,
         #  une par appel ; et ce qu'on lui a demandé.
         self.recensement = list(recensement)
@@ -148,7 +152,16 @@ class FauxCatalogue:
                 self.DERNIER_QUOTA_FICHES = self.QUOTA_REFUS
             return []
         self.DERNIER_CODE_FICHES = 200
-        return [{"asset_id": i} for i in ids]
+        #  ⚠️ PIÈGE N°6 : une vraie fiche porte son type — depuis le 06/10,
+        #  c'est lui qui décide d'une nouveauté. Un chapeau (8), sauf si le
+        #  banc dit autre chose (`types`).
+        _it = item_type or "Asset"
+        return [{"asset_id": i, "item_type": _it,
+                  "asset_type": self.types.get(i, 8) if _it == "Asset" else None}
+                for i in ids]
+
+    #  La VRAIE règle (06/10) : le banc ne la réécrit pas, il l'emprunte.
+    est_accessoire = staticmethod(veille.est_accessoire)
 
     async def verifier_par_economie(self, ids):
         """Comme la vraie : s'arrête au 429 AVANT l'article refusé, dit
@@ -209,12 +222,13 @@ class FauxAsyncio:
 
 
 def _banc(reponses, etat=None, flux=None, surveilles=(), bascules=(),
-          fiches_refusees=0, economie_max=None, connus=None, recensement=()):
+          fiches_refusees=0, economie_max=None, connus=None, recensement=(),
+          types=None):
     journal = []
     cat = FauxCatalogue(reponses, flux=flux, surveilles=surveilles,
                         bascules=bascules, fiches_refusees=fiches_refusees,
                         economie_max=economie_max, connus=connus,
-                        recensement=recensement)
+                        recensement=recensement, types=types)
     E = {"amorce": True, "vus": {1, 2}, "vus_limited": {1},
          "tour": 0, "palier": 0, "pause_jusqu": None, "refus": 0, "reste": None,
          "rattrapes": 0, "serie": 0, "serie_max": 0, "alerte": False,
@@ -306,6 +320,21 @@ def test_E1_une_reussite_est_UTILISEE():
     _tick(ns)
     assert 77 in E["vus"], "l'identifiant reçu a été jeté"
     assert any("🔔" in l for l in journal), journal
+
+
+def test_E1bis_ce_qui_n_est_pas_un_accessoire_est_ecarte_ET_LE_JOURNAL_LE_DIT():
+    """06/10 : « uniquement les accessoires, pas les visages moches ». Un
+    chapeau et des sourcils (76) arrivent ensemble : le chapeau entre en file,
+    les sourcils non — et la ligne ne se lit plus comme une panne."""
+    ns, _E, cat, journal = _banc([_ok([1, 2, 77, 78])], types={78: 76})
+    _tick(ns)
+    assert cat.enfiles == [(77, "nouveautes")], cat.enfiles
+    ligne = next(l for l in journal if "🔔" in l)
+    assert "· 1 écartée(s) : pas un accessoire" in ligne, ligne
+    #  Sans rien d'écarté, la ligne reste celle d'avant.
+    ns, _E, _cat, journal = _banc([_ok([1, 2, 79])])
+    _tick(ns)
+    assert "écartée" not in next(l for l in journal if "🔔" in l)
 
 
 def test_E2_UNE_seule_sonde_de_tete_jamais_celle_des_collectionnables():
@@ -635,7 +664,8 @@ def _ok_fiches(ids, fiches, reste=9):
 
 
 def test_T1_les_fiches_DEJA_EN_MAIN_servent_sans_requete_groupee():
-    f = {"asset_id": 777, "nom": "Canon à confettis", "hors_vente": 0}
+    f = {"asset_id": 777, "nom": "Canon à confettis", "hors_vente": 0,
+         "item_type": "Asset", "asset_type": 46}
     ns, E, cat, _j = _banc([_refus(), _ok_fiches([1, 2, 777], [f])])
     _tick(ns)
     assert (777, "nouveautes") in cat.enfiles, cat.enfiles
@@ -646,7 +676,8 @@ def test_T1_les_fiches_DEJA_EN_MAIN_servent_sans_requete_groupee():
 def test_T2_requete_groupee_REFUSEE_la_tete_du_second_seau_la_remplace():
     """Le cas du 23/09 : le premier seau voit la nouveauté, la requête
     groupée est refusée — la tête AVEC ses fiches la rattrape au même passage."""
-    f = {"asset_id": 888, "nom": "Nouveau", "hors_vente": 0}
+    f = {"asset_id": 888, "nom": "Nouveau", "hors_vente": 0,
+         "item_type": "Asset", "asset_type": 8}
     ns, E, cat, journal = _banc([_ok([1, 2, 888]), _ok_fiches([1, 2, 888], [f])],
                                 fiches_refusees=429)
     _tick(ns)

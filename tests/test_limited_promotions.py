@@ -43,11 +43,15 @@ def _iso(heures: float = 0.0) -> str:
 
 def _brut(aid: int, *, restrictions=(), age_h: float = 24 * 700,
           hors_vente: bool = False, item_type: str = "Asset"):
-    """Une fiche telle que le catalogue la rend (champs mesurés le 27/09)."""
+    """Une fiche telle que le catalogue la rend (champs mesurés le 27/09).
+    Un article (pas un pack) porte toujours son `assetType` : depuis le 06/10,
+    c'est lui qui décide d'une nouveauté — 8, un chapeau."""
     b = {"id": aid, "name": f"Article {aid}", "itemType": item_type,
          "itemCreatedUtc": _iso(age_h).replace("+00:00", "Z"),
          "itemRestrictions": list(restrictions), "price": 0,
          "favoriteCount": 5, "creatorTargetId": 1, "creatorType": "User"}
+    if item_type == "Asset":
+        b["assetType"] = 8
     if hors_vente:
         b["isOffSale"] = True
     return b

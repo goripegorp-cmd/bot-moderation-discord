@@ -15083,7 +15083,19 @@ async def veille_roblox_task():
                 #  ce qui déborde attend son tour au lieu de disparaître.
                 #  L'ordre bascules → nouveautés est conservé : il fixe la
                 #  priorité (voir `publiable_dans`) et l'ordre de tirage.
+                #  ⚠️ LES ACCESSOIRES RÉCENTS SONT RÉEXAMINÉS (06/10) — voir
+                #  `roblox_veille.a_reexaminer`. Une seule fois par serveur,
+                #  la fenêtre s'élargit à 24 h : c'est ce qui rattrape la
+                #  citrouille que l'ancienne règle avait écartée.
+                _lus_tous = ((rel.get("articles") or [])
+                             + (relhv.get("articles") or []))
+                _reex = roblox_module.a_reexaminer(
+                    _lus_tous, roblox_module.FENETRE_DIRECTE_HEURES)
+                _reex_unique = roblox_module.a_reexaminer(
+                    _lus_tous, roblox_module.RATTRAPAGE_UNIQUE_HEURES)
                 for g in guildes_items:
+                    _unique = not (await roblox_module.config(g.id)).get(
+                        roblox_module.MARQUE_RATTRAPAGE_ACCESSOIRES)
                     for flux, cle in (("bascules", "bascules"),
                                       ("nouveautes", "nouveaux")):
                         #  ⚠️ L'ORDRE D'ENTRÉE EN FILE EST L'ORDRE D'ENVOI.
@@ -15097,14 +15109,34 @@ async def veille_roblox_task():
                         #  parce que sa tranche est précisément ce qui affamait
                         #  le système : ici on ordonne, on ne coupe plus.
                         _brut = evts.get(cle) or []
+                        _rattrapes = set()
+                        if flux == "nouveautes":
+                            _deja_la = {x.get("asset_id") for x in _brut}
+                            _plus = [x for x in (_reex_unique if _unique else _reex)
+                                     if x.get("asset_id") not in _deja_la]
+                            _rattrapes = {x.get("asset_id") for x in _plus}
+                            _brut = _brut + _plus
                         for a in roblox_module.ordonner_publication(
                                 _brut, len(_brut)):
                             #  Trop vieux = plus une nouvelle. Pour
                             #  « bascules » : seule une bascule VUE EN DIRECT.
+                            #  Le rattrapage unique (24 h) passe outre la
+                            #  fenêtre, une fois — et seulement lui.
                             _sa["candidats"] += 1
-                            if not roblox_module.age_publiable(a, flux):
+                            if not ((_unique and a.get("asset_id") in _rattrapes)
+                                    or roblox_module.age_publiable(a, flux)):
                                 _sa["hors_fenetre"] += 1
                                 continue
+                            #  Les nouveautés : des ACCESSOIRES, et une fiche
+                            #  par nom (06/10). `enfiler` décide ; ici on
+                            #  COMPTE, pour que le journal le dise.
+                            if flux == "nouveautes":
+                                if not roblox_module.est_accessoire(a):
+                                    _sa["ecartes_type"] = _sa.get("ecartes_type", 0) + 1
+                                    continue
+                                if await roblox_module.meme_nom_recent(g.id, a):
+                                    _sa["doublons_nom"] = _sa.get("doublons_nom", 0) + 1
+                                    continue
                             #  Déjà sorti ici, OU déjà sorti dans un flux plus
                             #  fort : on ne le republie pas ailleurs.
                             if not await roblox_module.publiable_dans(
@@ -15117,12 +15149,17 @@ async def veille_roblox_task():
                             #  un redémarrage.
                             if await roblox_module.enfiler(g.id, a, flux):
                                 _sa["enfiles"] += 1
+                                if a.get("asset_id") in _rattrapes:
+                                    _sa["rattrapes"] = _sa.get("rattrapes", 0) + 1
                             elif a.get("hors_vente") and not a.get("collectionnable"):
-                                #  Écarté par la règle d'or d'`enfiler` (il
-                                #  décide ; ici on ne fait que COMPTER) : sans
-                                #  ce compte, « 5 candidat(s) · 0 mise(s) en
-                                #  file » ressemblait à une panne (23/09).
+                                #  Écarté par la règle d'`enfiler` (il décide ;
+                                #  ici on ne fait que COMPTER) : sans ce compte,
+                                #  « 5 candidat(s) · 0 mise(s) en file »
+                                #  ressemblait à une panne (23/09).
                                 _sa["ecartes_regle"] = _sa.get("ecartes_regle", 0) + 1
+                    if _unique:
+                        await db_set(g.id, roblox_module.MARQUE_RATTRAPAGE_ACCESSOIRES,
+                                     datetime.now(timezone.utc).isoformat())
 
             #  ⚠️ L'ANCIENNE « ÉTAPE 1 bis » — le flux UGC, le catalogue de
             #  TOUS les créateurs — A ÉTÉ RETIRÉE le 23/09 à la demande du
@@ -15337,6 +15374,13 @@ async def veille_roblox_task():
                   f"{_sa['candidats']} candidat(s) · {_sa['hors_fenetre']} hors "
                   f"fenêtre ({roblox_module.FENETRE_DIRECTE_HEURES} h) · "
                   f"{_sa['deja']} déjà sorti(s) · "
+                  + (f"{_sa['ecartes_type']} écarté(s) : pas un accessoire "
+                     f"(visage, sourcils, cils, pack…) · "
+                     if _sa.get("ecartes_type") else "")
+                  + (f"{_sa['doublons_nom']} doublon(s) de nom · "
+                     if _sa.get("doublons_nom") else "")
+                  + (f"{_sa['rattrapes']} rattrapé(s) · "
+                     if _sa.get("rattrapes") else "")
                   + (f"{_sa['ecartes_regle']} écarté(s) : hors vente et pas "
                      f"Limited · " if _sa.get("ecartes_regle") else "")
                   + f"{_sa['enfiles']} mise(s) en "
@@ -16176,12 +16220,20 @@ async def eclaireur_task():
         #  La MÊME mise en file que l'étape 1 du passage complet : fenêtre
         #  d'âge, « déjà sorti », unicité en base.
         enfiles = 0
+        #  06/10 : une nouveauté qui n'est pas un accessoire (sourcils, cils,
+        #  visage, pack) est écartée — et le journal le DIT. « 1 nouveauté ·
+        #  0 mise en file » se lisait comme une panne.
+        _hors_type = set()
         for g in guildes:
             for flux, cle in (("bascules", "bascules"),
                               ("nouveautes", "nouveaux")):
                 _brut = evts.get(cle) or []
                 for a in roblox_module.ordonner_publication(_brut, len(_brut)):
                     if not roblox_module.age_publiable(a, flux):
+                        continue
+                    if (flux == "nouveautes"
+                            and not roblox_module.est_accessoire(a)):
+                        _hors_type.add(a.get("asset_id"))
                         continue
                     if not await roblox_module.publiable_dans(
                             g.id, a["asset_id"], flux, article=a):
@@ -16201,7 +16253,9 @@ async def eclaireur_task():
         print(f"[eclaireur] 🔔 {len(neufs)} identifiant(s) jamais vu(s) → "
               f"{len(fiches)} fiche(s) · {_nv} nouveauté(s) · {_bs} bascule(s) "
               f"· {enfiles} mise(s) en file · {rp.get('publies', 0)} "
-              f"publiée(s) sur l'instant")
+              f"publiée(s) sur l'instant"
+              + (f" · {len(_hors_type)} écartée(s) : pas un accessoire "
+                 f"(visage, sourcils, cils, pack…)" if _hors_type else ""))
     except Exception as ex:
         E["erreurs"] += 1
         print(f"[eclaireur] {type(ex).__name__}: {ex}")
