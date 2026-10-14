@@ -164,6 +164,18 @@ def transcript_url(token: str):
     return f'{b}/t/{token}' if b else None
 
 
+def plafonner() -> int:
+    """14/10 : au plus `stockage.PART_TRANSCRIPTS` du volume ; au-delà, les plus
+    anciens transcripts partent d'abord (jusqu'à 64 Mo d'images par ticket :
+    120 jours de tickets pouvaient remplir le volume). Sync (via to_thread)."""
+    try:
+        import stockage
+        return stockage.plafonner_dossier(_BASE_DIR, stockage.PART_TRANSCRIPTS)
+    except Exception as ex:
+        print(f"[transcript_store plafonner] {ex}")
+        return 0
+
+
 def purge_old(max_age_days: int = None) -> int:
     """Supprime transcripts + assets plus vieux que la rétention. Retourne le nb d'éléments purgés.
     Sync (appeler via to_thread). FAIL-SAFE."""

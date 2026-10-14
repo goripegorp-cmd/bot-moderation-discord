@@ -2334,6 +2334,16 @@ async def voice_apply(i: discord.Interaction, zone_id: int, name: str, limit: in
             # (Un rôle Administrateur contourne les overwrites côté Discord — c'est attendu.)
             ow[st] = discord.PermissionOverwrite(
                 view_channel=True, connect=True, speak=True, send_messages=False)
+        #  14/10/2026 : la Direction et le Fondateur peuvent y DÉPLACER les
+        #  membres (« alors que pourtant c'est des staffs de direction »).
+        try:
+            import acces_direction
+            for r in acces_direction.roles(guild):
+                _o = acces_direction.permission(me.guild_permissions)
+                _o.send_messages = False
+                ow[r] = _o
+        except Exception as ex:
+            print(f"[social_zones acces direction] {ex}")
         members = []
         for uid in await _zone_member_ids(zone_id):
             m = guild.get_member(uid)

@@ -161,8 +161,22 @@ def _rotate_old_backups_sync() -> int:
         print(f"[db_backup] list backups failed: {ex}")
         return 0
 
+    #  14/10 : en plus du nombre, une PART DU VOLUME (`stockage.PART_COPIES`) —
+    #  chaque copie pèse la base entière ; sept copies d'une grosse base
+    #  remplissaient le volume. Les deux plus récentes restent toujours.
+    a_suppr = list(backups[RETENTION_COUNT:])
+    try:
+        import stockage
+        total, _libre = stockage.volume(dst_dir)
+        a_suppr += [p for p in stockage.a_retirer(
+            [(p, p.stat().st_size) for p in backups[:RETENTION_COUNT]],
+            total * stockage.PART_COPIES if total else None,
+            garder_min=stockage.COPIES_MIN)]
+    except Exception as ex:
+        print(f"[db_backup] budget du volume non appliqué : {ex}")
+
     deleted = 0
-    for old in backups[RETENTION_COUNT:]:
+    for old in a_suppr:
         try:
             old.unlink()
             deleted += 1

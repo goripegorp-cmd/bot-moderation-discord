@@ -286,6 +286,9 @@ import transcript_store  # Phase 281 : stockage + service web des transcripts de
 # Phase 170.1 : La Chronique d'Abylumis — récit narratif persistant 9 mois
 import sticky_messages as sticky_messages_module  # « Dernier message » sticky en bas de salon (owner 2026-06-16)
 import insult_filter as insult_filter  # Filtre insultes/haine GRADUÉ multilingue (owner 2026-06-21, lexique vérifié anti-FP)
+import mots_interdits  # 14/10/2026 : liste du serveur — exclamations libres, plus de mots recollés
+import acces_direction  # 14/10/2026 : Direction + Fondateur déplacent dans les vocaux créés
+import stockage as stockage_module  # 14/10/2026 : part du volume par poste + bilan quotidien
 import offtopic_filter as offtopic_filter  # Filtre politique/religion/militantisme (owner 2026-06-21, slogans + slugs de GIF, anti-FP gaming)
 import trust_system as trust_system  # Confiance progressive des nouveaux + politique liens/invitations (owner 2026-06-21)
 import behavior_guard as behavior_guard  # Anti-crash (zalgo/invisible) + spam inter-salons + anti-automation (owner 2026-06-21)
@@ -6732,60 +6735,13 @@ def check_badwords(ct, words, whitelist=None):
     Phase 24 : la `whitelist` (mots autorisés) court-circuite la détection.
     Un mot présent dans la whitelist ne sera JAMAIS bloqué, même s'il est dans
     `words`. Cas d'usage : "retard" est autorisé en FR mais aurait pu être bloqué.
+
+    ⚠️ 14/10/2026 : la détection vit dans `mots_interdits.cherche`. L'ancienne
+    recollait les mots voisins — « j'ai pu te répondre » lu « pute », « la mer
+    de » lu « merde » — et retirait les espaces de tout le message, si bien que
+    « c0n » dans une phrase n'était pas vu.
     """
-    if not words: return False, None
-
-    # Phase 24 : whitelist court-circuit
-    whitelist_lower = {w.strip().lower() for w in (whitelist or []) if str(w).strip()}
-
-    # Normaliser le texte
-    text_lower = ct.lower()
-
-    # Remplacer les caractères d'évasion courants
-    evasion_map = {
-        '@': 'a', '4': 'a', '0': 'o', '1': 'i', '!': 'i', '3': 'e',
-        '$': 's', '5': 's', '7': 't', '*': '', '.': '', '-': '', '_': '',
-        ' ': '', '|': 'i', '€': 'e', '£': 'l'
-    }
-
-    for word in words:
-        word = word.strip().lower()
-        if not word:
-            continue
-        # Phase 24 : si le mot interdit est aussi dans la whitelist, on l'ignore
-        if word in whitelist_lower:
-            continue
-        
-        # 1. Vérification mot entier exact (avec limites de mots)
-        # \b = limite de mot (début/fin de mot)
-        pattern = r'\b' + re.escape(word) + r'\b'
-        if re.search(pattern, text_lower, re.IGNORECASE):
-            return True, word
-        
-        # 2. Vérification avec évasion (ex: c.o.n, c-o-n, c0n)
-        # Nettoyer le texte des caractères d'évasion
-        cleaned_text = text_lower
-        for char, replacement in evasion_map.items():
-            cleaned_text = cleaned_text.replace(char, replacement)
-        
-        # Vérifier si le mot apparaît comme mot entier dans le texte nettoyé
-        # On construit un pattern qui cherche le mot avec des limites
-        if re.search(r'\b' + re.escape(word) + r'\b', cleaned_text):
-            return True, word
-        
-        # 3. Vérification du mot avec caractères séparateurs (c.o.n, c o n, c-o-n)
-        # Créer un pattern qui accepte des séparateurs entre chaque lettre.
-        # ANTI-ReDoS : on BORNE la longueur du mot (≤40) ET le nombre de séparateurs entre
-        # lettres ({0,3} au lieu de *). Sans ces bornes, un mot interdit contenant lui-même un
-        # séparateur (' . - _ * |) combiné à un message fait de ces caractères provoquait un
-        # backtracking lourd qui gelait la boucle d'événements (DoS par un seul message). Les
-        # mots > 40 chars restent couverts par les checks 1 (exact) et 2 (texte nettoyé).
-        if len(word) <= 40:
-            spaced_pattern = r'\b' + r'[\s.\-_*|]{0,3}'.join(re.escape(c) for c in word) + r'\b'
-            if re.search(spaced_pattern, text_lower, re.IGNORECASE):
-                return True, word
-
-    return False, None
+    return mots_interdits.cherche(ct, words, whitelist)
 
 
 def _strip_media_urls(text):
@@ -14815,6 +14771,22 @@ async def _rendre_roles_au_retour(member):
                 guild_id=getattr(getattr(member, "guild", None), "id", 0))
 
 
+async def _retirer_exclamations(g):
+    """14/10/2026 : « Damn c'est magnifique ✨ » supprimé comme mot interdit.
+    Une exclamation sort de la liste du serveur (et ne peut plus y entrer :
+    voir `_BadwordsAddListModal`). Rien à faire → rien n'est écrit."""
+    try:
+        mots = (await cfg(g.id)).get('badwords_list', []) or []
+        gardes, retires = mots_interdits.trier_liste(mots)
+        if retires:
+            await db_set(g.id, 'badwords_list', gardes)
+            print(f"[anti_badwords] {g.id} : retiré(s) de la liste des mots "
+                  f"interdits — {', '.join(retires)} (exclamations, pas des "
+                  f"insultes)")
+    except Exception as ex:
+        print(f"[anti_badwords exclamations {getattr(g, 'id', '?')}] {ex}")
+
+
 async def _travaux_de_demarrage():
     """Les migrations, en tâche de fond, serveur par serveur."""
     try:
@@ -14834,6 +14806,7 @@ async def _travaux_de_demarrage():
                 await _demonter_activite(g)
                 await _verifier_visibilite(g)
                 await _publier_bilan_sante(g)
+                await _retirer_exclamations(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
     except Exception as ex:
@@ -18514,6 +18487,11 @@ class _BadwordsAddListModal(Modal):
         # Aussi : si on ajoute à la whitelist, retirer le doublon de l'autre liste ? Non, c'est volontaire :
         # un mot peut être dans la liste interdite ET dans les exceptions — la whitelist gagne.
         new = [x.strip().lower() for x in (self.words.value or '').split(',') if x.strip()]
+        #  14/10 : une exclamation (« damn », « zut »…) n'est pas un mot
+        #  interdit — « ils ne peuvent même plus s'exprimer ».
+        refuses = []
+        if self.key == 'badwords_list':
+            new, refuses = mots_interdits.trier_liste(new)
         added = 0
         for w in new:
             if w and w not in existing and len(w) <= 60:
@@ -18521,6 +18499,14 @@ class _BadwordsAddListModal(Modal):
                 added += 1
         await db_set(self.g.id, self.key, existing)
         await BadwordsConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+        if refuses:
+            try:
+                await i.followup.send(
+                    "ℹ️ Pas ajouté(s) : " + ", ".join(f"`{w}`" for w in refuses)
+                    + " — une exclamation n'est pas un mot interdit.",
+                    ephemeral=True)
+            except Exception as ex:
+                print(f"[anti_badwords ajout] message de refus non envoyé : {ex}")
 
 
 class _BadwordsRemoveListModal(Modal):
@@ -37009,7 +36995,14 @@ async def on_voice_state_update(member, before, after):
                         if _me_perms.move_members:
                             bot_ow.move_members = True
                         overwrites[member.guild.me] = bot_ow
-                        
+
+                        #  14/10/2026 : la DIRECTION et le FONDATEUR déplacent
+                        #  les membres d'ici vers un autre vocal. Le salon a ses
+                        #  PROPRES permissions : celles de la catégorie (où le
+                        #  staff tient « Déplacer ») ne le suivent pas.
+                        for _r in acces_direction.roles(member.guild):
+                            overwrites[_r] = acces_direction.permission(_me_perms)
+
                         # Phase 221 : création ROBUSTE. Si Discord refuse les overwrites
                         # (perm manquante au bot → 403), on retente avec des overwrites
                         # MINIMAUX, puis SANS overwrites (hérite de la catégorie). Le
@@ -42044,6 +42037,21 @@ async def db_optimizer_task():
 
         if total_deleted:
             print(f"[DB OPTIMIZER] total deleted = {total_deleted}")
+
+        #  14/10/2026 : « vérifie bien la consommation du bot ». Les transcripts
+        #  expirés (et au-delà de leur part du volume) partent, puis UNE ligne
+        #  dit ce que le bot occupe réellement. (Les copies .bak sont tenues à
+        #  leur part par `db_backup`, à chaque copie.)
+        try:
+            _exp = await asyncio.to_thread(transcript_store.purge_old)
+            _cap = await asyncio.to_thread(transcript_store.plafonner)
+            print(await stockage_module.bilan(
+                get_db, DB_PATH, db_backup_module._resolve_backup_dir(),
+                transcript_store._BASE_DIR,
+                purges=(f"{_exp + _cap} transcript(s) purgé(s)"
+                        if _exp + _cap else "")))
+        except Exception as ex:
+            print(f"[STOCKAGE] bilan impossible : {ex}")
     except Exception as ex:
         _logerr("task.db_optimizer", ex)
 

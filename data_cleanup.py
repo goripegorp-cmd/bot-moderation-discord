@@ -23,6 +23,8 @@ Tables purgées + rétention :
 | anomaly_log                 | 180j      | Garde 6 mois pour audit   |
 | daily_join_log              | 730j      | Garde 2 ans (retention)   |
 | daily_stats_snapshot        | 730j      | Idem (history command)    |
+| activite_jours              | 90j       | Présence : 7 j par défaut |
+| health_check_log            | 30j       | Rapport horaire           |
 
 Note : pas de purge sur friendships / rivalries / marriages (n/a, supprimées)
 ou wiki_entries / roadmap_items (perso staff, garde tout).
@@ -59,6 +61,11 @@ CLEANUP_RULES = [
     ("anomaly_log",               "detected_at", 180),
     ("daily_join_log",            "joined_day",  730),
     ("daily_stats_snapshot",      "captured_at", 730),
+    #  14/10/2026 : une ligne par membre actif et par jour, sans fin. La
+    #  présence ne regarde que quelques jours (7 par défaut) : 90 suffisent.
+    ("activite_jours",            "jour",        90),
+    #  Un rapport par heure, jamais relu au-delà de quelques jours.
+    ("health_check_log",          "check_at",    30),
 ]
 
 # Day-of-week for the task (6 = Sunday) + hour (FR)
