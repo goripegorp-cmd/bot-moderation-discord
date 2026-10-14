@@ -4,8 +4,9 @@ BUT : quand l'owner colle les logs Railway, on voit D'UN COUP d'où vient un pro
 qui ne se poste pas, une suppression qui échoue, un module qui rate — avec le MODULE, l'ÉVÉNEMENT
 et la cause. PAS du bruit de crash aléatoire : des lignes STRUCTURÉES et FILTRABLES.
 
-POURQUOI stderr : `_QuietStdout` (bot.py) avale les lignes « [tag] … » de stdout sauf VERBOSE_LOGS=1.
-Toutes les lignes de diag vont donc sur **stderr**, TOUJOURS visibles sur Railway (déploiement + run).
+⚠️ 14/10/2026 — « les diagnostics, ils ne servent à rien » : le journal (journal.py) ne laisse
+passer que les lignes ERROR (et celles écrites pendant une exception), une fois par 6 h. EVENT et
+WARN ne s'affichent plus qu'avec VERBOSE_LOGS=1.
 
 FORMAT (une ligne, greppable) :
     [DIAG] <ISO-UTC> <LEVEL> <module>/<event> :: <detail>[ | err=<Type>: <msg>]
@@ -20,8 +21,8 @@ FILTRAGE Railway :
     grep '[DIAG] .*/social'    → un module précis
 
 API — toutes FAIL-SAFE (ne lèvent JAMAIS, ne bloquent jamais l'appelant) :
-    diag.event(module, event, detail="")           → succès/événement NOTABLE, TOUJOURS affiché
-    diag.warn (module, event, detail="")           → avertissement, TOUJOURS affiché
+    diag.event(module, event, detail="")           → succès/événement NOTABLE (VERBOSE_LOGS=1)
+    diag.warn (module, event, detail="")           → avertissement (VERBOSE_LOGS=1)
     diag.error(module, event, detail="", exc=None)  → erreur + type/msg de l'exception (+ trace si verbose)
     diag.trace(module, event, detail="")           → debug détaillé, affiché SEULEMENT si DIAG_VERBOSE=1
 

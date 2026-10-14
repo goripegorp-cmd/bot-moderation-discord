@@ -47,7 +47,7 @@ def _load() -> bool:
     fm = _free_mem_mb()
     if fm is not None and fm < _MIN_FREE_MB:
         _AVAILABLE = False
-        print(f"[nsfw_scan] désactivé : RAM dispo {fm} Mo < {_MIN_FREE_MB} Mo (anti-OOM) — "
+        print(f"🚨 [nsfw_scan] désactivé : RAM dispo {fm} Mo < {_MIN_FREE_MB} Mo (anti-OOM) — "
               f"détection NSFW OFF (le reste tourne). Augmente la RAM Railway pour l'activer.")
         return False
     try:

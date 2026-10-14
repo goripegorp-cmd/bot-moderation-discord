@@ -204,7 +204,8 @@ async def weekly_cleanup_task():
         # VACUUM seulement si on a supprimé beaucoup
         if total > 1000:
             ok = await vacuum_db()
-            print(f"🧹 [data_cleanup] VACUUM {'OK' if ok else 'échoué'}")
+            if not ok:
+                print("🚨 [data_cleanup] VACUUM échoué")
     except Exception as ex:
         print(f"[data_cleanup weekly_cleanup_task] {ex}")
 

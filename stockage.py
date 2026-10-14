@@ -15,10 +15,17 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+from datetime import datetime, timezone
 
 PART_COPIES = 0.30        # copies .bak : au plus 30 % du volume…
 COPIES_MIN = 2            # …mais toujours les deux plus récentes
 PART_TRANSCRIPTS = 0.25   # transcripts de tickets : au plus 25 % du volume
+SEUIL_LIBRE = 0.20        # moins de 20 % libres : alarme dans le journal
+
+#  Le dernier relevé, en POURCENTAGES du volume + la mémoire : exposé par
+#  /health (endpoint public — aucune taille absolue, aucune identité).
+#  Le journal, lui, ne parle du stockage que pour une ALARME (journal.py).
+DERNIER: dict = {}
 
 
 def taille(chemin) -> int:
@@ -155,7 +162,20 @@ async def bilan(get_db, db_path, dossier_copies, dossier_transcripts,
                                 dossier_transcripts)
     lourdes = await tables_lourdes(get_db)
     mem = r["memoire"]
-    return (f"[STOCKAGE] base {_mo(r['base'])} (+ journal {_mo(r['wal'])}) · "
+    total, libre = r["total"], r["libre"]
+    alarme = bool(total) and libre is not None and libre / total < SEUIL_LIBRE
+    if total:
+        DERNIER.clear()
+        DERNIER.update({
+            "volume_pct": round(100 * (total - (libre or 0)) / total, 1),
+            "base_pct": round(100 * (r["base"] + r["wal"]) / total, 1),
+            "copies_pct": round(100 * r["copies"] / total, 1),
+            "transcripts_pct": round(100 * r["transcripts"] / total, 1),
+            "memoire_mo": round(mem) if mem is not None else None,
+            "releve_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
+        })
+    return (("🚨 [STOCKAGE] volume presque plein — " if alarme else "[STOCKAGE] ")
+            + f"base {_mo(r['base'])} (+ journal {_mo(r['wal'])}) · "
             f"copies .bak {r['copies_n']} = {_mo(r['copies'])} · "
             f"transcripts {_mo(r['transcripts'])} · "
             f"volume {_mo(r['libre'])} libres sur {_mo(r['total'])} · "

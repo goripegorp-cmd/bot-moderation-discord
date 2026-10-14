@@ -63,7 +63,7 @@ def base_data_dir() -> Path:
     # 3. /tmp fallback (ephemere mais ne crash pas)
     tmp_data = Path(tempfile.gettempdir()) / "bot_data"
     if _try_dir(tmp_data):
-        print(f"⚠️  [PATHS] Aucun volume persistant ecrivable, fallback sur {tmp_data}. "
+        print(f"🚨 [PATHS] Aucun volume persistant ecrivable, fallback sur {tmp_data}. "
               f"Les donnees seront PERDUES au redemarrage.")
         _RESOLVED_BASE = tmp_data
         return _RESOLVED_BASE

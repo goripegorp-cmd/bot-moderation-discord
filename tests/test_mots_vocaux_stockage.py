@@ -198,6 +198,35 @@ async def test_S4_la_ligne_quotidienne_dit_l_etat_reel(tmp_path):
     assert "copies .bak 1 = 0 Mo" in ligne and "transcripts 0 Mo" in ligne
     assert "libres sur" in ligne and "plus grosses tables : grosse 500, petite 1" in ligne
     assert ligne.endswith(" · 2 purgés")
+    #  14/10 (soir) : le journal tait cette ligne… sauf quand le volume est
+    #  presque plein ; les pourcentages, eux, partent sur /stats.
+    import journal
+    assert not journal.a_garder(ligne, en_exception=False)
+    assert set(stockage.DERNIER) == {"volume_pct", "base_pct", "copies_pct",
+                                     "transcripts_pct", "memoire_mo", "releve_utc"}
+    import unittest.mock as um
+    with um.patch.object(stockage, "volume", lambda _c: (1000, 100)):
+        plein = await stockage.bilan(get_db, str(base), str(copies), str(tmp_path / "t"))
+    assert plein.startswith("🚨 [STOCKAGE] volume presque plein — base ")
+    assert journal.a_garder(plein, en_exception=False)
+    assert stockage.DERNIER["volume_pct"] == 90.0
+
+
+@pytest.mark.asyncio
+async def test_S4bis_stats_donne_les_pourcentages_jamais_de_taille():
+    import json
+    import health_server
+    stockage.DERNIER.clear()
+    stockage.DERNIER.update({"volume_pct": 12.5, "base_pct": 3.0, "copies_pct": 9.0,
+                             "transcripts_pct": 0.5, "memoire_mo": 410,
+                             "releve_utc": "2026-10-14 15:00"})
+    try:
+        r = await health_server._stats_handler(None)
+        assert json.loads(r.text)["stockage"]["volume_pct"] == 12.5
+        r = await health_server._health_handler(None)
+        assert "stockage" not in json.loads(r.text), "/health reste minimal"
+    finally:
+        stockage.DERNIER.clear()
 
 
 @pytest.mark.asyncio

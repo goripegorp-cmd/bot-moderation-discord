@@ -1,132 +1,28 @@
+import warnings as _warnings
 try:
-    import audioop
+    with _warnings.catch_warnings():
+        #  14/10/2026 : « audioop est déprécié » à chaque démarrage — du bruit.
+        _warnings.simplefilter("ignore", DeprecationWarning)
+        import audioop
 except ModuleNotFoundError:
     import audioop_lts as audioop
     import sys
     sys.modules['audioop'] = audioop
 
-# ─── Logs propres : ne garder QUE les erreurs (Phase 251) ───
-# L'owner veut des logs Railway lisibles : uniquement erreurs/avertissements, pas
-# le bruit INFO du boot (bannière, liste des commandes, lignes ✅ / [Phase] OK,
-# events de routine). On filtre stdout au plus tôt.
-# RÈGLE FAIL-SAFE (jamais masquer une vraie erreur) :
-#   • une ligne avec un marqueur d'erreur → TOUJOURS affichée ;
-#   • une ligne INCONNUE → affichée aussi (on ne devine pas qu'elle est anodine) ;
-#   • seules les lignes INFO CONNUES (préfixe succès/tag de boot) sont avalées.
-# Réversible SANS redeploy : variable d'env VERBOSE_LOGS=1 → tout réafficher.
+# ─── Le journal Railway : les VRAIES erreurs, chacune une fois (14/10/2026) ───
+# Remplace le filtre Phase 251 (`_QuietStdout`), qui devinait d'après le TEXTE et
+# laissait passer toute ligne inconnue (bilans de veille, « 0 échec(s) »…).
+# Désormais : un print fait dans un `except` est une erreur → affiché ; hors
+# `except`, seulement une alarme explicite ; chaque message une fois par 6 h.
+# Voir journal.py. VERBOSE_LOGS=1 → aucun filtre.
 import sys as _sys
 import os as _os
-import re as _re
 import unicodedata as _unicodedata
 import logging
+import journal as _journal
 
-class _QuietStdout:
-    # Marqueurs d'erreur FORTS (peu ambigus). NB : on NE met PAS le mot « error »
-    # nu — il apparaît dans des noms anodins (ex. « error_logger ») et causait des
-    # faux positifs. Les vraies erreurs restent gardées par le fail-safe (tag
-    # inconnu en minuscules, cf. _emit) ou par ces marqueurs.
-    # (A) Mots d'erreur NON ambigus (recherche directe) → toujours afficher.
-    # NB : critical/fatal/errno NE sont PAS ici en sous-chaîne nue — ils apparaissent
-    # dans des noms anodins (ex. backup « critical_2026-06-07.json.gz ») et causaient
-    # un faux positif. Ils sont gardés par _ERR_RE en FRONTIÈRE DE MOT ci-dessous.
-    _ERR = ('traceback', 'exception', 'httpexception',
-            'unclosed', 'erreur', 'échec', 'echec', '❌', '⚠', '🛑', '‼')
-    # error/forbidden/failed/denied/warning/critical/fatal/errno EN TANT QUE MOT —
-    # mais PAS un identifiant/nom de fichier (« error_logger », « critical_2026 ») ni
-    # un compteur à ZÉRO (« 'errors': 0 »). Un compteur NON nul reste une vraie erreur.
-    _ERR_RE = _re.compile(
-        r"(errors?|forbidden|failed|denied|warnings?|critical|fatal|errno)"
-        r"(?!\w)(?!['\"]?\s*[:=]\s*0\b)",
-        _re.IGNORECASE)
-    # Tag de STATUT tout en MAJUSCULES ([DB OPTIMIZER], [PERSIST CLEANUP]…) = info.
-    _INFO_TAG_RE = _re.compile(r'^\[[A-Z0-9 ._/:+\-]{2,}\]')
-    # Ligne « [tag_minuscule] … » contenant un mot de STATUT de routine = info
-    # (spawn/OK/deleted…), pas une erreur. Les erreurs gardent un tag minuscule
-    # SANS verbe de statut (ex. [saga_lifecycle_task] can't subtract…) → fail-safe.
-    _INFO_VERBS = (' ok', 'okay', 'spawn', 'deleted', 'scanned', 'loaded', 'restored',
-                   'dropped', 'sent ', 'ready', 'init', 'applied', 'backup', 'rows',
-                   'cleanup', 'started', 'synced', 'prêt', 'activé', 'enabled',
-                   'disabled', 'skipped', 'updated', 'created', 'posted', 'granted',
-                   'reloaded', 'wired', 'setup', 'opt-in', 'opt in',
-                   'trigger', 'resolve', 'hatched', 'claimed')
-    _INFO_START = ('✅', '🚀', '🔒', '👑', '🎙', '🛡', '🎮', '🗑', '👥', '📋',
-                   '🎵', '🔴', '🔗', '✨', '🧹', '🎤', '🌐', '📢', '🎁', '📨',
-                   '🛒', '🔊', '⚔', '🏆', '🎯', '📊', '💰', '🎉', '🐾', '🥚',
-                   '- /', '[Phase', '[2026]', '[PERSONAL EVENT', '[FLASH TREASURE',
-                   '[MYSTERY BOX', '[TREASURE', '[QUIZ', '[COMEBACK', '[RIDDLE',
-                   '[PERSIST CLEANUP', '[BOOT CLEANUP', '[cleanup_old_db_data',
-                   '[WORLD BOSS', '[MOB', '[DAILY', '[INVASION', '[CLIMAX', '[VOICE')
-    # Tags de SOUS-SYSTÈME dont les lignes sont du STATUT de routine (compteurs,
-    # envois planifiés, récaps…), JAMAIS des crashs. Vérifié : leurs vraies erreurs
-    # sortent soit avec un mot d'erreur (ex. « [backup_lite] échec : … » → gardé par
-    # rule A qui passe AVANT), soit sous un tag de FONCTION distinct (ex.
-    # [record_boss_attack]) capté par le fail-safe. On masque « [tag] … » en gros.
-    # NB : on liste UNIQUEMENT le tag EXACT « [module] » (fermé par ']'). Les erreurs
-    # de ces modules sortent sous « [module fonction] {ex} » (espace, pas ']') ou avec
-    # un mot d'erreur → JAMAIS masquées par erreur. Conservateur : tags vérifiés only.
-    _INFO_TAGS = ('[backup_lite]', '[event_notif_role]', '[owner_alert]',
-                  '[owner_digest]', '[activity_rewards]', '[daily_bosses]',
-                  '[coin_economy]')  # luxury tax = routine ; les erreurs sortent en [coin_economy <func>]
-
-    def __init__(self, real):
-        self._real = real
-        self._buf = ''
-
-    def _emit(self, line):
-        # True = ligne à AFFICHER.
-        st = line.strip()
-        if not st:
-            return False
-        low = st.lower()
-        # (A) erreur EXPLICITE (mot d'erreur non ambigu OU compteur non nul) → afficher
-        if any(m in low for m in self._ERR) or self._ERR_RE.search(low):
-            return True
-        # (B) INFO connue → masquer
-        if any(st.startswith(t) for t in self._INFO_TAGS):        # sous-système de routine connu
-            return False
-        if any(st.startswith(p) for p in self._INFO_START):       # emoji succès / tag connu
-            return False
-        if self._INFO_TAG_RE.match(st):                            # [TAG EN MAJUSCULES]
-            return False
-        if st[:1] == '[' and any(v in low for v in self._INFO_VERBS):  # [tag] + verbe de statut
-            return False
-        # (C) inconnu (souvent un except « [module_func] {ex} » sans verbe) → afficher (fail-safe)
-        return True
-
-    def write(self, s):
-        # Bufferise par LIGNE : print() écrit le texte puis le « \n » séparément,
-        # donc on n'évalue qu'une fois la ligne complète (sinon on couperait le
-        # retour à la ligne des erreurs gardées).
-        try:
-            self._buf += s
-            if '\n' not in self._buf:
-                return len(s)
-            *lines, self._buf = self._buf.split('\n')
-            out = [ln for ln in lines if self._emit(ln)]
-            if out:
-                self._real.write('\n'.join(out) + '\n')
-            return len(s)
-        except Exception:
-            try:
-                return self._real.write(s)
-            except Exception:
-                return 0
-
-    def flush(self):
-        try:
-            return self._real.flush()
-        except Exception:
-            return None
-
-    def __getattr__(self, name):
-        return getattr(self._real, name)
-
-
-if _os.getenv('VERBOSE_LOGS', '0') != '1':
-    try:
-        _sys.stdout = _QuietStdout(_sys.stdout)
-    except Exception:
-        pass
+if __name__ == "__main__":
+    _journal.installer()
 
 import discord
 from discord.ext import commands, tasks
@@ -423,9 +319,8 @@ def _stall_watchdog():
                 continue                      # heartbeat pas encore démarré
             _late = _time_mod.monotonic() - _last
             if _late > _STALL_THRESHOLD:
-                # ⚠️ stderr OBLIGATOIRE (owner 2026-07-12) : `_QuietStdout` (l.125) MASQUE toute
-                # ligne « [TAG EN MAJUSCULES] … » sur stdout → nos diagnostics étaient INVISIBLES
-                # dans les logs Railway. stderr n'est PAS filtré.
+                # ⚠️ « [STALL] » est une ALARME du journal (journal.py) : toujours affichée,
+                # une fois par stack distincte (l'ancien filtre `_QuietStdout` la masquait).
                 # ⚠️ owner 2026-07-28 (1er [STALL] réel capturé) : faulthandler.dump_traceback()
                 # dumpe TOUS les threads, le principal EN DERNIER → dans les logs Railway le
                 # coupable était NOYÉ/TRONQUÉ (on ne voyait que les threads inactifs aiosqlite/
@@ -655,7 +550,7 @@ class DBPool:
         try:
             await asyncio.wait_for(self._semaphore.acquire(), timeout=8.0)
         except asyncio.TimeoutError:
-            # stderr : `_QuietStdout` (l.125) masque les « [TAG] … » sur stdout (owner 2026-07-12).
+            # Dans un `except` : affiché par le journal (journal.py), une fois par 6 h.
             print(f"[DBPOOL] ⚠️ STARVATION : {self._in_use}/{self._pool_size} connexions "
                   f"empruntées, attente > 8 s → les commandes ne peuvent plus répondre. "
                   f"(fuite de connexion ou requête bloquée)", file=_sys.stderr, flush=True)
@@ -8521,7 +8416,7 @@ async def gdpr_retention_task():
         # schéma. (La carte a déjà été vérifiée exhaustivement hors-ligne, cf. workflow gdpr-map-vs-schema.)
         mc = drift.get('missing_columns') or []
         if mc:
-            print(f"⚠️ [gdpr_validate] dérive de schéma — colonnes absentes {mc[:40]}")
+            print(f"🚨 [gdpr_validate] dérive de schéma — colonnes absentes {mc[:40]}")
     except Exception as ex:
         _ok = False
         # owner 2026-06-18 : ne plus échouer en SILENCE — on enregistre l'erreur dans
@@ -16708,7 +16603,7 @@ async def task_supervisor():
     # (le superviseur les démarre) → on NE log PAS (ce n'est pas une mort). À partir
     # du 2e tour seulement, une résurrection = vraie tâche morte → à signaler.
     if restarted and _supervisor_did_first_pass:
-        print(f"[task_supervisor] ⚠️ RESSUSCITÉ {len(restarted)} tâche(s) morte(s) : {', '.join(restarted)}")
+        print(f"🚨 [task_supervisor] RESSUSCITÉ {len(restarted)} tâche(s) morte(s) : {', '.join(restarted)}")
     _supervisor_did_first_pass = True
 
 
@@ -29197,13 +29092,13 @@ async def _check_compromised_account(msg):
     # Récupérer le salon dédié
     alert_channel = msg.guild.get_channel(channel_id)
     if not alert_channel:
-        print(f"[CAD] guild={msg.guild.id} salon d'alerte introuvable ({channel_id})")
+        print(f"🚨 [CAD] guild={msg.guild.id} salon d'alerte introuvable ({channel_id})")
         return
 
     # Permissions ?
     perms = alert_channel.permissions_for(msg.guild.me)
     if not (perms.send_messages and perms.embed_links):
-        print(f"[CAD] guild={msg.guild.id} permissions manquantes dans #{alert_channel.name}")
+        print(f"🚨 [CAD] guild={msg.guild.id} permissions manquantes dans #{alert_channel.name}")
         return
 
     # (Cooldown et gel économie A5 sont désormais posés plus haut, dès score ≥ seuil.)
@@ -35475,10 +35370,9 @@ async def check_twitter_feeds(session, guild, data):
 
             if not tweet_id:
                 # Phase 251.18 : condition ATTENDUE (Twitter n'a plus d'API gratuite ;
-                # repli manuel/embed déjà en place). On retire le ⚠️ pour que le filtre
-                # de logs propres (_QuietStdout) masque cette ligne [TWITTER] de routine
-                # en mode normal — visible uniquement en VERBOSE_LOGS. Le vrai avis owner
-                # passe par _warn_api_dead (une fois par session), pas par ce print.
+                # repli manuel/embed déjà en place) : ligne de routine, tue par le
+                # journal (journal.py) — visible uniquement en VERBOSE_LOGS. Le vrai avis
+                # owner passe par _warn_api_dead (une fois par session), pas par ce print.
                 print(f"[TWITTER] aucune source pour @{username} (repli manuel)")
                 # Phase 3.8 : warn UNE seule fois par session que Nitter+Syndication sont morts
                 try:
@@ -46621,4 +46515,8 @@ if __name__ == "__main__":
           f"différents dans ces journaux, deux conteneurs tournent en même "
           f"temps (problème de déploiement, pas de code).")
     _installer_resumeur_passerelle()
-    bot.run(TOKEN, log_level=_dlevel)
+    #  14/10 : un seul gestionnaire, à la RACINE (discord.py, asyncio, aiohttp),
+    #  WARNING et plus, dédupliqué comme les print (journal.py).
+    _gestionnaire = logging.StreamHandler()
+    _gestionnaire.addFilter(_journal.FiltreLogging())
+    bot.run(TOKEN, log_handler=_gestionnaire, log_level=_dlevel, root_logger=True)

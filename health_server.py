@@ -89,6 +89,15 @@ async def _stats_handler(request):
                 data["latency_ms"] = round(_bot.latency * 1000, 1)
             except Exception:
                 pass
+        #  14/10/2026 : la consommation, en POURCENTAGES du volume + la mémoire
+        #  (dernier relevé quotidien de `stockage.bilan`, rien de recalculé ici)
+        #  — aucune taille absolue, rien qui identifie le bot.
+        try:
+            import stockage
+            if stockage.DERNIER:
+                data["stockage"] = dict(stockage.DERNIER)
+        except Exception:
+            pass
         return web.json_response(data)
     except Exception as ex:
         return web.json_response({"status": "error", "error": str(ex)}, status=500)
@@ -149,7 +158,7 @@ async def start(bot_instance, port: int = 8000) -> bool:
     _started_at = time.time()
 
     if not _AIOHTTP_OK:
-        print("⚠️  [health_server] aiohttp non installé, skip")
+        print("🚨 [health_server] aiohttp non installé : /health ne répondra pas")
         return False
 
     try:
