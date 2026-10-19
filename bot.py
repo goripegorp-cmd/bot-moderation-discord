@@ -5540,10 +5540,12 @@ async def _ocr_scam_check(msg, immune: bool = False):
     try:
         if not ocr_scan.available():
             # Visible dans [DIAG] Railway : sans ça, un Tesseract absent = zéro scan, en silence.
-            try:
-                diag.warn("security", "ocr_scan", "Tesseract indisponible → scan d'image OCR inactif")
-            except Exception:
-                pass
+            # (Pas encore vérifié — les 2 premières minutes après un démarrage — : on passe, sans alarme.)
+            if ocr_scan.etat() is False:
+                try:
+                    diag.warn("security", "ocr_scan", "Tesseract indisponible → scan d'image OCR inactif")
+                except Exception:
+                    pass
             return
         atts = []
         _srcs = list(getattr(msg, 'attachments', None) or [])
@@ -19617,11 +19619,11 @@ async def on_ready():
             _ocr_ok = False
             _nsfw_ok = False
             try:
-                _ocr_ok = bool(await _lp.run_in_executor(None, ocr_scan.available))
+                _ocr_ok = bool(await _lp.run_in_executor(None, ocr_scan.charger))
             except Exception:
                 pass
             try:
-                _nsfw_ok = bool(await _lp.run_in_executor(None, nsfw_scan.available))
+                _nsfw_ok = bool(await _lp.run_in_executor(None, nsfw_scan.charger))
             except Exception:
                 pass
             # owner 2026-07-18 (incident mabewin) : l'état des scanners d'image doit être VISIBLE

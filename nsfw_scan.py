@@ -14,7 +14,9 @@ le TEXTE, ne peut pas voir). Moteur : nudenet (onnxruntime, modèle ONNX léger)
 from __future__ import annotations
 
 import os
+import threading
 
+_VERROU = threading.Lock()
 _DETECTOR = None
 _AVAILABLE = None       # cache: True / False
 _MIN_FREE_MB = 500      # ne charge pas le modèle si moins de RAM dispo (marge anti-OOM)
@@ -43,25 +45,34 @@ def _load() -> bool:
     global _DETECTOR, _AVAILABLE
     if _AVAILABLE is not None:
         return _AVAILABLE
-    fm = _free_mem_mb()
-    if fm is not None and fm < _MIN_FREE_MB:
-        _AVAILABLE = False
-        print(f"🚨 [nsfw_scan] désactivé : RAM dispo {fm} Mo < {_MIN_FREE_MB} Mo (anti-OOM) — "
-              f"détection NSFW OFF (le reste tourne). Augmente la RAM Railway pour l'activer.")
-        return False
-    try:
-        from nudenet import NudeDetector
-        _DETECTOR = NudeDetector()      # télécharge + charge le modèle ONNX (1 fois)
-        _AVAILABLE = True
-        print(f"[nsfw_scan] prêt (nudenet, RAM dispo {fm if fm is not None else '?'} Mo)")
-    except Exception as ex:
-        _AVAILABLE = False
-        print(f"[nsfw_scan] indisponible ({ex}) — détection NSFW désactivée (fail-safe)")
+    with _VERROU:  # un seul chargement, même si la boucle et le démarrage le demandent ensemble
+        if _AVAILABLE is not None:
+            return _AVAILABLE
+        fm = _free_mem_mb()
+        if fm is not None and fm < _MIN_FREE_MB:
+            _AVAILABLE = False
+            print(f"🚨 [nsfw_scan] désactivé : RAM dispo {fm} Mo < {_MIN_FREE_MB} Mo (anti-OOM) — "
+                  f"détection NSFW OFF (le reste tourne). Augmente la RAM Railway pour l'activer.")
+            return False
+        try:
+            from nudenet import NudeDetector
+            _DETECTOR = NudeDetector()      # télécharge + charge le modèle ONNX (1 fois)
+            _AVAILABLE = True
+            print(f"[nsfw_scan] prêt (nudenet, RAM dispo {fm if fm is not None else '?'} Mo)")
+        except Exception as ex:
+            _AVAILABLE = False
+            print(f"[nsfw_scan] indisponible ({ex}) — détection NSFW désactivée (fail-safe)")
     return _AVAILABLE
 
 
-def available() -> bool:
+def charger() -> bool:
+    """BLOQUANT — à lancer dans un fil : charge le moteur une fois."""
     return _load()
+
+
+def available() -> bool:
+    """Instantané, pour la boucle : prêt ou non. Ne charge JAMAIS le moteur (voir `charger`)."""
+    return _AVAILABLE is True
 
 
 def is_nsfw(image_bytes):

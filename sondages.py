@@ -369,10 +369,15 @@ async def _marquer(sid: int, **champs) -> None:
         await db.commit()
 
 
+ECHECS_MAX = 6
+_echecs: dict = {}  # sondage -> lectures ratées d'affilée
+
+
 async def rafraichir(g, s: dict) -> None:
     """Les votes du sondage, lus chez Discord ; à la fin, le résultat part au journal."""
     salon = g.get_channel(int(s["channel_id"])) or (g.get_thread(int(s["channel_id"])) if hasattr(g, "get_thread") else None)
-    if salon is None:
+    if salon is None:  # salon disparu : plus rien à relire
+        await _marquer(s["id"], termine=1)
         return
     try:
         msg = await salon.fetch_message(int(s["message_id"]))
@@ -382,8 +387,14 @@ async def rafraichir(g, s: dict) -> None:
         return
     except discord.HTTPException as ex:
         _log(f"[SONDAGES] lecture : {ex}")
+        _echecs[s["id"]] = _echecs.get(s["id"], 0) + 1
+        if _echecs[s["id"]] >= ECHECS_MAX:  # une heure d'échecs : on arrête de le relire
+            _echecs.pop(s["id"], None)
+            await _marquer(s["id"], termine=1)
         return
-    if msg.poll is None:
+    _echecs.pop(s["id"], None)
+    if msg.poll is None:  # plus un sondage
+        await _marquer(s["id"], termine=1)
         return
     lu = lire_sondage(msg)
     fini = lu["termine"] or lu["fin"] <= _maintenant()
@@ -448,7 +459,7 @@ async def cloture_task():
     if _get_db is None or _bot is None:
         return
     async with _get_db() as db:
-        async with db.execute("SELECT id, guild_id FROM sondages WHERE termine=0 AND fin_le<=? LIMIT 30",
+        async with db.execute("SELECT id, guild_id FROM sondages WHERE termine=0 AND fin_le<=? ORDER BY fin_le LIMIT 30",
                               (_maintenant().strftime(_FORMAT),)) as cur:
             dus = await cur.fetchall()
     for sid, gid in dus:

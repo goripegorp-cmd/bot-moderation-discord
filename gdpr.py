@@ -55,6 +55,9 @@ DELETE_SUBJECT = {
     "phishing_log": ["user_id"],
     "phishing_offender": ["user_id"],
     "webhook_leak_log": ["user_id"],
+    "activite_jours": ["user_id"],
+    "activite_etat": ["user_id"],
+    "ticket_transcripts": ["user_id"],
     # colonnes sujet ≠ "user_id"
     "temp_voice_rooms": ["owner_id"],
     # relations symétriques (le membre est sujet des deux côtés) → delete par OR
@@ -85,6 +88,7 @@ DELETE_SUBJECT_KEEP_ACTOR = {
     "tableau_blocages": {"subject": ["user_id"], "actor": []},
     "mod_notes": {"subject": ["user_id"], "actor": ["mod_id"]},
     "restricted_members": {"subject": ["user_id"], "actor": ["restricted_by"]},
+    "clan_rappels": {"subject": ["membre_id"], "actor": ["par", "resolu_par"]},
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -99,6 +103,8 @@ ANONYMIZE = {
     "impersonation_alerts": {"ids": ["suspect_user_id", "target_staff_id"], "redact": []},
     "ticket_response_templates": {"ids": ["added_by"], "redact": []},
     "webhook_registry": {"ids": ["owner_id"], "redact": []},
+    "ticket_audit": {"ids": ["actor_id"], "redact": []},
+    "ticket_log_events": {"ids": ["actor_id"], "redact": []},
 }
 
 # Colonnes HMAC (pas un user_id brut) : agies seulement si l'appelant fournit hmac_user.
@@ -131,11 +137,13 @@ JSON_BLOB_PRECOLUMN = {}
 # ─────────────────────────────────────────────────────────────────────────────
 RETENTION = {
     "raid_join_log": ("joined_at", 30),
-    "daily_join_log": ("joined_at", 30),
-    "honeypot_hits": ("created_at", 90),
-    "phishing_log": ("created_at", 90),
-    "security_logs": ("timestamp", 180),
-    "behavior_alerts": ("created_at", 90),
+    #  120 j : l'amnistie des 3 mois lit `left_day`. Les départs sans date d'arrivée (record_leave)
+    #  sont datés par leur départ.
+    "daily_join_log": (("joined_day", "left_day"), 120),
+    "honeypot_hits": ("detected_at", 90),
+    "phishing_log": ("detected_at", 90),
+    "phishing_offender": ("last_hit_at", 90),
+    "security_logs": ("created_at", 180),
     "alt_detection_log": ("detected_at", 90),
     "error_log": ("occurred_at", 30),
     "recrutements": ("ferme_le", 365),
@@ -433,6 +441,8 @@ async def validate_map(db):
         checks.setdefault(t, set()).update(spec["hmac_cols"] + spec.get("redact", []))
     for spec in JSON_BLOBS + JSON_BLOBS_SCAN:
         checks.setdefault(spec["table"], set()).add(spec["col"])
+    for t, (col, _jours) in RETENTION.items():
+        checks.setdefault(t, set()).update(col if isinstance(col, tuple) else (col,))
 
     for table, want in checks.items():
         cols = await _columns(db, table)
@@ -456,8 +466,15 @@ async def run_retention(db, *, now_ts=None, commit=True):
     out = {}
     for table, (col, days) in RETENTION.items():
         cols = await _columns(db, table)
-        if not cols or col not in cols:
+        noms = col if isinstance(col, tuple) else (col,)
+        if not cols:
             continue
+        if any(c not in cols for c in noms):
+            #  Plus jamais en silence : une colonne qui manque, c'est une table jamais purgée.
+            print("[GDPR][E1] colonne de rétention absente : table jamais purgée")
+            print(f"[GDPR][E1:DETAIL] {table}.{noms}")
+            continue
+        expr = noms[0] if len(noms) == 1 else "COALESCE(%s)" % ", ".join(noms)
         cutoff_epoch = now_ts - days * 86400
         cutoff_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(cutoff_epoch))
         try:
@@ -465,7 +482,7 @@ async def run_retention(db, *, now_ts=None, commit=True):
             # On tente les deux formes via un OR typé tolérant (CAST échoue silencieusement → 0).
             cur = await db.execute(
                 "DELETE FROM %s WHERE (typeof(%s) IN ('integer','real') AND %s < ?) "
-                "OR (typeof(%s)='text' AND %s < ?)" % (table, col, col, col, col),
+                "OR (typeof(%s)='text' AND %s < ?)" % (table, expr, expr, expr, expr),
                 [cutoff_epoch, cutoff_iso],
             )
             out[table] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -149,8 +150,10 @@ async def _lignes(db, sql: str, args: tuple) -> list:
     try:
         async with db.execute(sql, args) as cur:
             return await cur.fetchall()
-    except Exception as ex:  # table absente sur une base ancienne : rien à rattraper d'elle
-        _log(f"[RECRUTEMENTS:DETAIL] lecture : {type(ex).__name__} {ex}")
+    except sqlite3.OperationalError as ex:
+        if "no such table" not in str(ex):
+            raise  # base occupée, verrou… : l'appelant affiche « données indisponibles », pas « 0 »
+        _log(f"[RECRUTEMENTS:DETAIL] lecture : table absente {ex}")  # base ancienne : rien d'elle
         return []
 
 

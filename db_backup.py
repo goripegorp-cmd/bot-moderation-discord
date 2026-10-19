@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -34,7 +35,9 @@ from discord.ext import tasks
 
 # ─── Configuration ───────────────────────────────────────────────────────
 RETENTION_COUNT = 7   # Garde 7 derniers backups (1 semaine)
+SEMAINES = 4          # …plus le plus récent de chacune des 4 dernières semaines
 BACKUP_INTERVAL_HOURS = 24
+FRAICHEUR_HEURES = 20  # une copie plus jeune : pas de nouvelle copie (un redémarrage n'en refait pas)
 
 # B2 : alerte intégrité. _do_backup_sync() tourne dans un thread (sqlite3 sync) →
 # il ne peut pas await un DM. On dépose donc le message ici ; la task async le
@@ -159,15 +162,25 @@ def _rotate_old_backups_sync() -> int:
         print(f"[db_backup] list backups failed: {ex}")
         return 0
 
+    #  Les 7 plus récentes, plus la plus récente de chacune des 4 dernières semaines (19/10/2026).
+    garder = list(backups[:RETENTION_COUNT])
+    semaines = []
+    for p in backups:
+        sem = datetime.fromtimestamp(p.stat().st_mtime).isocalendar()[:2]
+        if sem not in semaines and len(semaines) < SEMAINES:
+            semaines.append(sem)
+            if p not in garder:
+                garder.append(p)
+    garder.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    a_suppr = [p for p in backups if p not in garder]
     #  14/10 : en plus du nombre, une PART DU VOLUME (`stockage.PART_COPIES`) —
-    #  chaque copie pèse la base entière ; sept copies d'une grosse base
+    #  chaque copie pèse la base entière ; trop de copies d'une grosse base
     #  remplissaient le volume. Les deux plus récentes restent toujours.
-    a_suppr = list(backups[RETENTION_COUNT:])
     try:
         import stockage
         total, _libre = stockage.volume(dst_dir)
         a_suppr += [p for p in stockage.a_retirer(
-            [(p, p.stat().st_size) for p in backups[:RETENTION_COUNT]],
+            [(p, p.stat().st_size) for p in garder],
             total * stockage.PART_COPIES if total else None,
             garder_min=stockage.COPIES_MIN)]
     except Exception as ex:
@@ -184,6 +197,12 @@ def _rotate_old_backups_sync() -> int:
     return deleted
 
 
+def copie_recente(heures: float = FRAICHEUR_HEURES) -> bool:
+    """La copie la plus récente a moins de `heures` heures."""
+    dates = [p.stat().st_mtime for p in _resolve_backup_dir().glob("bot.db.*.bak") if p.is_file()]
+    return bool(dates) and time.time() - max(dates) < heures * 3600
+
+
 @tasks.loop(hours=BACKUP_INTERVAL_HOURS)
 async def backup_task():
     """Tâche périodique : backup quotidien + rotation.
@@ -192,6 +211,8 @@ async def backup_task():
     Try/except englobant : ne plante JAMAIS le bot.
     """
     try:
+        if await asyncio.to_thread(copie_recente):
+            return  # un redémarrage ne refait pas de copie : la dernière a moins de 20 h
         # Délègue le backup au threadpool (sqlite3 = sync)
         path = await asyncio.to_thread(_do_backup_sync)
         if path:

@@ -15,7 +15,9 @@ from __future__ import annotations
 import io
 import os
 import re
+import threading
 
+_VERROU = threading.Lock()
 _PYTESS = None          # module pytesseract (chargé paresseusement)
 _AVAILABLE = None       # cache: True / False (évite de re-tester le binaire à chaque image)
 _LOAD_ERR = ""          # dernière raison d'indisponibilité (exposée pour le diagnostic Railway)
@@ -52,6 +54,14 @@ def _load() -> bool:
     global _PYTESS, _AVAILABLE, _LOAD_ERR
     if _AVAILABLE is not None:
         return _AVAILABLE
+    with _VERROU:
+        if _AVAILABLE is None:
+            _charger_sous_verrou()
+    return _AVAILABLE
+
+
+def _charger_sous_verrou() -> None:
+    global _PYTESS, _AVAILABLE, _LOAD_ERR
     try:
         import pytesseract
         from PIL import Image  # noqa: F401  (utilisé dans image_text)
@@ -71,7 +81,6 @@ def _load() -> bool:
         _AVAILABLE = False
         _LOAD_ERR = f"{type(ex).__name__}: {ex}"
         print(f"[ocr_scan] OCR indisponible ({ex}) — scan d'image OCR désactivé (fail-safe)")
-    return _AVAILABLE
 
 
 def load_error() -> str:
@@ -79,8 +88,19 @@ def load_error() -> str:
     return _LOAD_ERR
 
 
-def available() -> bool:
+def charger() -> bool:
+    """BLOQUANT — à lancer dans un fil : vérifie tesseract une fois."""
     return _load()
+
+
+def available() -> bool:
+    """Instantané, pour la boucle : prêt ou non. Ne lance JAMAIS tesseract (voir `charger`)."""
+    return _AVAILABLE is True
+
+
+def etat():
+    """None : pas encore vérifié ; True / False : prêt ou absent."""
+    return _AVAILABLE
 
 
 # ── Helpers prétraitement OCR (owner 2026-07-18, scam « casino MrBeast » mode sombre non lu) ──

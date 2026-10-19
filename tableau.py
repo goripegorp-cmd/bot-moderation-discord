@@ -1188,5 +1188,5 @@ async def sortir(request):
             await db.commit()
         _sessions.pop(ses[0], None)
     r = web.Response(status=204, headers=ENTETES)
-    r.del_cookie(COOKIE, path="/")
+    r.del_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="Lax")  # __Host- exige Secure
     return r
