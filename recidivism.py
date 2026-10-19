@@ -59,9 +59,10 @@ _DEF = {
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, is_immune_fn, is_super_owner_fn,
-          log_escalation_fn=None, notice_fn=None):
+          log_escalation_fn=None, notice_fn=None, db_set_fn=None):
     global _bot, _get_db, _db_get, _is_immune_fn, _is_super_owner_fn
-    global _log_escalation_fn, _notice_fn
+    global _log_escalation_fn, _notice_fn, _db_set_fn
+    _db_set_fn = db_set_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -71,12 +72,15 @@ def setup(bot_instance, get_db_fn, db_get_fn, is_immune_fn, is_super_owner_fn,
     _notice_fn = notice_fn
 
 
+_db_set_fn = None
+
+
 async def _db_set(guild_id: int, key: str, value):
-    try:
-        from bot import db_set
-        await db_set(guild_id, key, value)
-    except Exception:
-        pass
+    """Par la fonction donnée à setup() — jamais `from bot import` (voir l'en-tête du correctif)."""
+    if _db_set_fn is None:
+        print("[RECIDIVISM][E1] db_set absent : réglage non enregistré")
+        return
+    await _db_set_fn(guild_id, key, value)
 
 
 async def init_db():

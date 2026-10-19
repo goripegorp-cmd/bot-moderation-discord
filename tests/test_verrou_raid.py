@@ -71,7 +71,7 @@ def test_R2_un_membre_isole_par_le_raid_ne_poursuit_pas_son_arrivee():
     corps = next(ast.unparse(n) for n in ARBRE.body
                  if isinstance(n, ast.AsyncFunctionDef) and n.name == "_handle_antiraid_join")
     assert "return member.id in isoles" in corps
-    assert "await _lever_verrou_raid(g)" in next(ast.unparse(n) for n in ARBRE.body
+    assert "_lever_verrou_raid(g)" in next(ast.unparse(n) for n in ARBRE.body
                                                  if getattr(n, "name", "") == "server_controls_task")
     assert "_restore_lockdown" not in corps, "plus de rétablissement en mémoire"
 

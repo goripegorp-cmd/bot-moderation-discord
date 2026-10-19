@@ -180,7 +180,7 @@ def test_L3_en_mode_site_rien_sur_discord_sauf_les_alertes(tmp_path, monkeypatch
     assert [x["type"] for x in lignes] == ["sec.escalation", "member.join"], "un évènement désactivé n'est pas noté"
     assert lignes[1]["texte"] == "Arrivée · Arrivée de @Kolax" or "Kolax" in lignes[1]["texte"]
     assert lignes[1]["membre_id"] == 7
-    assert apres is False, "un salon choisi à la main remet les logs sur Discord"
+    assert apres is True, "choisir un salon ne remet pas les logs sur Discord : le mode a son propre réglage"
 
 
 def test_L4_passage_au_site_une_fois_alertes_au_salon_unique(tmp_path):

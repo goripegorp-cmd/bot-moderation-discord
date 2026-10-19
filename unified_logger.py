@@ -320,9 +320,7 @@ async def set_log_channel(guild_id: int, channel_id: int) -> None:
         data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
     except Exception:
         data = {}
-    data["channel_id"] = int(channel_id)
-    if int(channel_id):
-        data["site"] = False  # un salon choisi à la main : les logs reviennent aussi sur Discord
+    data["channel_id"] = int(channel_id)  # le mode (site ou Discord) ne change pas : il a son propre réglage
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -711,11 +709,6 @@ async def log_event(
         site = await mode_site(guild.id)
         #  En mode site, une alerte passe toujours : plus aucun autre salon ne la rattraperait.
         alerte = site and _ev_val in ALERTES
-        # Verifier que la categorie est activee (avant toute resolution de salon)
-        if meta and not alerte:
-            enabled = await get_enabled_categories(guild.id)
-            if meta["cat"] not in enabled:
-                return None
         if not alerte and await _ecarte(guild.id, _ev_val, user, moderator):
             return None
         try:
@@ -725,6 +718,12 @@ async def log_event(
         except Exception as ex:  # le registre ne doit jamais empêcher l'alerte
             print("[UNIFIED_LOGGER][E1] registre indisponible")
             print(f"[UNIFIED_LOGGER][E1:DETAIL] {type(ex).__name__} {ex}")
+        # Une catégorie décochée ne part plus dans Discord ; le site, lui, garde tout (19/10/2026 :
+        # le filtre passait avant le registre, et la catégorie disparaissait aussi du site).
+        if meta and not alerte:
+            enabled = await get_enabled_categories(guild.id)
+            if meta["cat"] not in enabled:
+                return None
         if site:
             if not alerte:
                 return None

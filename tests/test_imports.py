@@ -19,7 +19,6 @@ PHASE_163_MODULES = [
     "dm_digest",
     "webhook_tracker",
     "honeypot",
-    "behavior_anomaly",
     # Phase 165 — nouveaux modules
     # Phase 166 — anti-token-leak, birthday, welcome, spotlight
     "anti_token_leak",
@@ -62,7 +61,6 @@ INIT_DB_MODULES = [
     "dm_digest",
     "webhook_tracker",
     "honeypot",
-    "behavior_anomaly",
     # Phase 165
     "anti_token_leak",
     # Phase 167 (status_rotator n'a pas d'init_db, pas de table)

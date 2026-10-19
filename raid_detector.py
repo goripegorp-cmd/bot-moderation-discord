@@ -430,10 +430,8 @@ async def _create_alert(guild: discord.Guild, suspicious: list[dict]):
 # ─── Lockdown ───────────────────────────────────────────────────────────────
 
 async def run_lockdown(guild: discord.Guild, duration_min: int = 30) -> dict:
-    """Active la quarantaine : désactive invites + crée rôle 'Vérification'
-    pour les nouveaux arrivants pendant duration_min minutes.
-    """
-    out = {"invites_disabled": 0, "verify_role_id": None, "errors": [], "perm_warning": False}
+    """Lockdown : invitations en pause pendant duration_min minutes."""
+    out = {"invites_disabled": False, "errors": [], "perm_warning": False}
     try:
         # FIX sécu P1-3 : si le bot n'a PAS les perms critiques, le lockdown échoue en
         # silence (un attaquant peut rogner ces perms pour neutraliser l'anti-raid).
@@ -442,12 +440,10 @@ async def run_lockdown(guild: discord.Guild, duration_min: int = 30) -> dict:
         me = guild.me
         if me is not None:
             gp = me.guild_permissions
-            if not (gp.manage_roles and gp.manage_channels):
+            if not gp.manage_guild:
                 out["perm_warning"] = True
-                out["errors"].append(
-                    "PERMS MANQUANTES (manage_roles/manage_channels) — anti-raid INEFFICACE")
-                print(f"[run_lockdown] ⚠️ guild={guild.id} perms bot insuffisantes : "
-                      f"manage_roles={gp.manage_roles} manage_channels={gp.manage_channels}")
+                out["errors"].append("PERMS MANQUANTES (manage_guild) — anti-raid INEFFICACE")
+                print(f"[run_lockdown] ⚠️ guild={guild.id} perms bot insuffisantes : manage_guild=False")
                 # ⚠️ EN SALON, PAS EN MP (12/08/2026). Cette information n'existe
                 # NULLE PART ailleurs : ni le journal `SEC_ESCALATION` ni le panneau ne
                 # disent que le lockdown a échoué faute de permissions. La jeter aurait
@@ -459,59 +455,22 @@ async def run_lockdown(guild: discord.Guild, duration_min: int = 30) -> dict:
                     if _sa is not None:
                         await _sa.send(
                             f"⚠️ **Alerte sécurité — {guild.name}**\n"
-                            f"Un lockdown anti-raid a été déclenché mais je n'ai pas les "
-                            f"permissions `Gérer les rôles` / `Gérer les salons`. La "
-                            f"quarantaine est donc **inopérante**. Vérifiez le rôle du bot "
+                            f"Un lockdown anti-raid a été déclenché mais je n'ai pas la "
+                            f"permission `Gérer le serveur`. Les invitations ne sont donc "
+                            f"**pas en pause**. Vérifiez le rôle du bot "
                             f"(quelqu'un a peut-être rogné mes permissions)."
                         )
                 except Exception:
                     pass
 
-        # 1) Désactive toutes les invitations existantes
+        # 1) Les invitations en PAUSE (réglage natif de Discord, réversible). Avant : TOUTES les
+        #    invitations étaient supprimées et jamais recréées, et un rôle « Vérification » était
+        #    créé sans être donné à personne (19/10/2026).
         try:
-            invites = await guild.invites()
-            for inv in invites:
-                try:
-                    await inv.delete(reason="Anti-raid lockdown")
-                    out["invites_disabled"] += 1
-                except Exception:
-                    pass
-                await asyncio.sleep(0.3)  # throttle anti-429 (DELETE invites en rafale)
-        except Exception as ex:
-            out["errors"].append(f"invites: {ex}")
-
-        # 2) Crée ou trouve le rôle Vérification
-        verify_role = None
-        for r in guild.roles:
-            if r.name.lower() in ("vérification", "verification", "verify",
-                                  "quarantaine"):
-                verify_role = r
-                break
-        if verify_role is None:
-            try:
-                verify_role = await guild.create_role(
-                    name="Vérification",
-                    reason="Anti-raid auto",
-                    color=discord.Color.dark_grey(),
-                )
-                # Restreindre permissions par défaut sur tous les salons
-                for ch in guild.channels:
-                    try:
-                        await ch.set_permissions(
-                            verify_role,
-                            send_messages=False,
-                            add_reactions=False,
-                            speak=False,
-                            reason="Anti-raid lockdown",
-                        )
-                    except Exception:
-                        pass
-                    await asyncio.sleep(0.5)  # throttle anti-429 (set_permissions = endpoint lourd)
-            except Exception as ex:
-                out["errors"].append(f"role: {ex}")
-
-        if verify_role:
-            out["verify_role_id"] = verify_role.id
+            await guild.edit(invites_disabled=True, reason="Anti-raid lockdown")
+            out["invites_disabled"] = True
+        except discord.HTTPException as ex:
+            out["errors"].append(f"invitations: {ex}")
 
         # 3) Enregistre la fin du lockdown dans config
         if _db_get is not None:
@@ -538,15 +497,14 @@ async def run_lockdown(guild: discord.Guild, duration_min: int = 30) -> dict:
 
 
 async def end_lockdown(guild: discord.Guild) -> bool:
-    """Désactive le rôle Vérification (le supprime) — appelé par scheduler
-    ou manuellement par owner."""
+    """Fin du lockdown : les invitations reprennent — appelé par l'échéance ou par /bouclier off."""
     try:
-        for r in guild.roles:
-            if r.name.lower() in ("vérification", "verification", "verify"):
-                try:
-                    await r.delete(reason="Fin du lockdown anti-raid")
-                except Exception:
-                    pass
+        # Les invitations reprennent. On ne supprime plus aucun rôle : « Vérification » est aussi
+        # le rôle de quarantaine, et le supprimer libérait chaque membre isolé (19/10/2026).
+        try:
+            await guild.edit(invites_disabled=False, reason="Fin du lockdown anti-raid")
+        except discord.HTTPException as ex:
+            print(f"[raid_detector end_lockdown invitations] {ex}")
         # Marquer les alerts comme resolved
         async with _get_db() as db:
             await db.execute(
@@ -702,10 +660,9 @@ async def _handle_alert_action(
             result = await run_lockdown(guild, duration_min=30)
             await i.followup.send(
                 f"🔒 **Lockdown 30 min activé.**\n"
-                f"• Invitations désactivées : `{result['invites_disabled']}`\n"
-                f"• Rôle Vérification : "
-                f"`{result.get('verify_role_id') or 'non créé'}`\n"
-                f"• Erreurs : `{len(result.get('errors', []))}`",
+                + ("• Invitations en pause.\n" if result["invites_disabled"]
+                   else "• Invitations **pas** en pause (droit « Gérer le serveur » manquant).\n")
+                + f"• Erreurs : `{len(result.get('errors', []))}`",
                 ephemeral=True,
             )
 
@@ -815,7 +772,7 @@ def build_alert_panel(guild: discord.Guild, alert_id: int):
             ))
             items.append(v2_divider())
             items.append(v2_body(
-                "**Lockdown** invites + rôle Vérification · "
+                "**Lockdown** invitations en pause · "
                 "✅ **Ignorer** faux positif · 📋 **Détails** comptes suspects"
             ))
             self.add_item(v2_container(*items, color=0xE74C3C))

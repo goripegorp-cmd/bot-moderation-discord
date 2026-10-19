@@ -50,8 +50,6 @@ from ui_v2 import (
 # ─── Modules du bot ───
 import social_media as social2026
 import admin_panels_v2 as panels2026  # (set_social_manager uniquement ; /admin retiré)
-import setup_wizard as wizard2026
-import slash_commands_2026 as slashcmds2026
 import tracking_layer as tracking2026
 import unified_logger as ulogger2026
 #  Activité : seulement les membres du rôle choisi (/rellseas) ; `activite_demontage`
@@ -86,7 +84,6 @@ import backup_lite as backup_module
 import dm_digest as dm_digest_module
 import webhook_tracker as webhook_tracker_module
 import honeypot as honeypot_module
-import behavior_anomaly as behavior_anomaly_module
 import anti_token_leak as anti_token_leak_module
 import member_risk as member_risk_module
 import error_logger as error_logger_module
@@ -7653,14 +7650,14 @@ async def server_controls_task():
     ouvert/fermé + (#1/#2) slowmode nuit. Par guilde, tout en try/except (ne casse jamais)."""
     try:
         for g in list(bot.guilds):
-            try:
-                c = await cfg(g.id)
-                await _update_support_status(g, c)
-                await _apply_night_slowmode(g, c)
-                await _lever_verrou_raid(g)
-                await asyncio.sleep(0.5)  # throttle anti-429 (espace les edits entre guildes)
-            except Exception:
-                continue
+            c = await cfg(g.id)
+            for etape in (lambda: _update_support_status(g, c), lambda: _apply_night_slowmode(g, c),
+                          lambda: _lever_verrou_raid(g), lambda: _lever_ralentis(g)):
+                try:
+                    await etape()
+                except Exception as ex:  # chacun son filet : une erreur ne saute plus les suivants
+                    _logerr("controles_serveur", ex, guild_id=g.id)
+            await asyncio.sleep(0.5)  # throttle anti-429 (espace les edits entre guildes)
     except Exception as ex:
         print(f"[server_controls_task] {ex}")
 
@@ -19995,13 +19992,7 @@ async def on_ready():
         # /configure → Logs → Salons sécurité. honeypot.get_honeypot_channel_id(g.id)
         # retourne 0 par défaut = honeypot désactivé tant que non configuré.
 
-        behavior_anomaly_module.setup(
-            get_db, db_get, _v2h,
-            staff_sanction_module=staff_sanction_module,
-        )
-        await behavior_anomaly_module.init_db()
-
-        print("[Phase 154] Sécurité 2026++ : honeypot + behavior anomaly")
+        print("[Phase 154] Sécurité 2026++ : honeypot")
     except Exception as ex:
         print(f"[on_ready Phase 154 security++] {ex}")
 
@@ -20029,7 +20020,7 @@ async def on_ready():
         try:
             recidivism_module.setup(
                 bot, get_db, db_get, is_fully_immune, owner_ids_module.is_super_owner,
-                log_escalation_fn=_recidivism_log_escalation, notice_fn=_warn_calm_down)
+                log_escalation_fn=_recidivism_log_escalation, notice_fn=_warn_calm_down, db_set_fn=db_set)
             await recidivism_module.init_db()
             await recidivism_module.load_cache()
             if not recidivism_module.deescalate_task.is_running():
@@ -22118,15 +22109,24 @@ async def _scan_security_on_edit(after) -> bool:
     scanner ne bloque jamais la chaîne (sécurité best-effort, comme on_message)."""
     if after.author is None or after.author.bot or not after.content:
         return False
-    # 1) Scanners de secrets/grabber auto-suppresseurs (mêmes que on_message:46741-46773)
+    # 1) Scanners de secrets/grabber auto-suppresseurs (mêmes que on_message), avec les mêmes
+    #    exemptions qu'à l'envoi : le piège à bots épargne la tête, le staff et les immunisés, et le
+    #    module des jetons ne les sanctionne pas (19/10/2026).
+    exempt = await is_fully_immune(after.author)
     for _mod, _name in (
         (honeypot_module, "honeypot"),
         (anti_token_leak_module, "anti_token_leak"),
         (webhook_leak_module, "webhook_leak"),
         (token_grabber_module, "token_grabber"),
     ):
+        if _mod is honeypot_module and exempt:
+            continue
         try:
-            if await _mod.on_message_hook(after):
+            if _mod is token_grabber_module:
+                fait = await _mod.on_message_hook(after, sanctionner=not exempt)
+            else:
+                fait = await _mod.on_message_hook(after)
+            if fait:
                 return True  # message déjà supprimé par le scanner
         except Exception as ex:
             print(f"[on_message_edit {_name}] {ex}")
@@ -22461,6 +22461,15 @@ async def on_guild_channel_create(channel):
                     reason="Radiation totale (/off) — couverture du nouveau salon")
         except Exception as _rex:
             print(f"[radie chan_create] {_rex}")
+        # QUARANTAINE : même chose — sans ça, un membre en quarantaine parlait dans tout salon créé
+        # après sa mise à l'écart (audit 19/10/2026).
+        try:
+            quar = next((r for r in channel.guild.roles if (r.name or "").lower() in _QUARANTINE_ROLE_NAMES), None)
+            if quar is not None and hasattr(channel, 'set_permissions'):
+                await channel.set_permissions(quar, send_messages=False, add_reactions=False, speak=False,
+                                              reason="Isolement sécurité (nouveau salon)")
+        except discord.HTTPException as _qex:
+            _logerr("quarantaine.nouveau_salon", _qex, guild_id=channel.guild.id)
         await _log_audited(
             channel.guild, ulogger2026.EventType.CHAN_CREATE,
             discord.AuditLogAction.channel_create, channel.id,
@@ -23183,11 +23192,6 @@ async def on_message(msg):
         except Exception as ex:
             print(f"[on_message token_grabber] {ex}")
 
-        # Phase 154 : tracking comportemental (background, ne bloque pas)
-        try:
-            asyncio.create_task(behavior_anomaly_module.track_message(msg))
-        except Exception:
-            pass
 
 
         # Phase 165.3 : auto-preview Roblox URLs (cooldown 5min/canal,
@@ -23242,11 +23246,7 @@ async def on_message(msg):
     # Rell Seas : présence du clan, hors du chemin bloquant (une écriture / 10 min / membre).
     asyncio.create_task(update_realsy_activity(msg.guild.id, msg.author.id))
 
-    # ═══════════════ Phase 64 : toxicity score + auto slow mode ═══════════════
-    try:
-        await _track_toxicity(msg)
-    except Exception as ex:
-        print(f"[_track_toxicity] {ex}")
+    # ═══════════════ Phase 64 : auto slow mode ═══════════════
     try:
         await _check_auto_slow_mode(msg)
     except Exception as ex:
@@ -25414,6 +25414,12 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
 async def unwarn_cmd(i: discord.Interaction, membre: discord.Member):
     if not await check_mod_perm(i, 'mod_warn_role'):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
+    if membre.id == i.user.id:
+        return await i.response.send_message("❌ Tu ne peux pas retirer tes propres avertissements.", ephemeral=True)
+    if (membre.top_role >= i.user.top_role and i.user.id != i.guild.owner_id
+            and i.user.id not in TETE_IDS):
+        return await i.response.send_message(
+            "❌ Ce membre a un rang égal ou supérieur au tien : demande à la direction.", ephemeral=True)
     
     # Récupérer les warns (sans created_at pour éviter l'erreur)
     async with get_db() as db:
@@ -25526,13 +25532,15 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
         delta = timedelta(days=7)
         dur_txt = "7 jours (maximum)"
     
-    # Appliquer le timeout
+    # 19/10/2026 (audit) : répondre d'abord — l'exclusion, le MP et la base dépassaient les 3 s, et
+    # l'interaction mourait APRÈS le mute : ni annonce, ni log, ni trace dans l'audit du staff.
+    await i.response.defer(ephemeral=True, thinking=True)
     try:
         await membre.timeout(delta, reason=f"{raison} - Par {i.user.name}")
     except discord.Forbidden:
-        return await i.response.send_message("❌ Je ne peux pas mute ce membre (permissions)", ephemeral=True)
-    except Exception as ex:
-        return await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+        return await i.followup.send("❌ Je ne peux pas mute ce membre (permissions)", ephemeral=True)
+    except discord.HTTPException as ex:
+        return await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
 
     # DM systématique au membre (quick-win pro) : type + durée + raison + contestation.
     await _dm_sanction(membre, i.guild, "Mute 🔇", raison, duration_text=dur_txt)
@@ -25557,7 +25565,7 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
 
     # ⚠️ Réponse ÉPHÉMÈRE puis annonce SÉPARÉE : une réponse publique ferait afficher par Discord
     # « <mod> a utilisé /mod mute » au-dessus de l'embed → le nom fuiterait malgré l'embed anonyme.
-    await i.response.send_message(
+    await i.followup.send(
         f"✅ {membre.mention} a été mute (**{dur_txt}**). L'annonce publique ne te nomme pas.",
         ephemeral=True)
     await _announce_sanction_public(i, e)
@@ -25575,15 +25583,21 @@ async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str
     if not await check_mod_perm(i, 'mod_mute_role'):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
     
-    if not membre.is_timed_out():
+    # Muet = exclusion temporaire OU quarantaine (le « mute permanent » de l'escalade) : avant, seule
+    # l'exclusion était levée, et au-delà de 28 jours la commande répondait « n'est pas mute ».
+    quarantaine = next((r for r in membre.roles if (r.name or "").lower() in _QUARANTINE_ROLE_NAMES), None)
+    if not membre.is_timed_out() and quarantaine is None:
         return await i.response.send_message(f"❌ {membre.mention} n'est pas mute", ephemeral=True)
+    await i.response.defer(ephemeral=True, thinking=True)
     
     try:
+        if quarantaine is not None:
+            await membre.remove_roles(quarantaine, reason=f"Unmute par {i.user.name}: {raison}")
         await membre.timeout(None, reason=f"Unmute par {i.user.name}: {raison}")
     except discord.Forbidden:
-        return await i.response.send_message("❌ Je ne peux pas unmute ce membre", ephemeral=True)
-    except Exception as ex:
-        return await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+        return await i.followup.send("❌ Je ne peux pas unmute ce membre (hiérarchie des rôles)", ephemeral=True)
+    except discord.HTTPException as ex:
+        return await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
     
     # 🔒 Anonyme comme les sanctions (owner 2026-07-17). Un unmute n'est PAS une sanction, mais
     # afficher « débloqué par X » laisse deviner qui modère — et par symétrie qui a mute.
@@ -25593,7 +25607,7 @@ async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str
     e.set_footer(text="Décision prise au nom du serveur")
     e.set_thumbnail(url=membre.display_avatar.url)
 
-    await i.response.send_message(
+    await i.followup.send(
         f"✅ {membre.mention} a été unmute. L'annonce publique ne te nomme pas.", ephemeral=True)
     await _announce_sanction_public(i, e)
 
@@ -29715,8 +29729,6 @@ async def before_check_restrictions():
 #   /setup   - wizard d'installation guidée
 #   /permissions, /social, /protection, /community - granular CLI
 # /admin RETIRÉ (audit admin) : il doublonnait /configure → 1 slot de commande libéré.
-wizard2026.setup_setup_command(bot)
-slashcmds2026.setup_all_commands(bot)
 
 
 # ─── Phase 3.0g : commande /ping minimale pour tester la liveness ───
@@ -33225,17 +33237,6 @@ _LEGACY_COMBAT_CHANNEL_NAMES = frozenset({
 # ─── ALT DETECTION (heuristique légère sur on_member_join) ──────────────────
 
 
-_TOXIC_WORDS = {
-    "ftg", "fdp", "pute", "salope", "connard", "enculé", "encule",
-    "nique", "bitch", "fuck", "shit", "wtf", "tg", "ntm",
-}
-# audit 2026-07-02 : match MOT ENTIER (bordures). L'ancien `word in content` (sous-chaîne)
-# comptait « technique/panique/communique » (→ « nique ») et « partage/étage » (→ « tg »)
-# comme toxiques → fausse alerte staff. Surface d'ALERTE seulement (aucune sanction).
-_TOXIC_RE = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in _TOXIC_WORDS) + r")\b",
-                       re.IGNORECASE)
-
-
 async def _check_alt_account(member: discord.Member):
     """Check si un nouveau membre ressemble suspectement à un membre existant.
 
@@ -33306,69 +33307,6 @@ async def _check_alt_account(member: discord.Member):
         print(f"[_check_alt_account] {ex}")
 
 
-# ─── ANTI-TOXICITY PASSIVE (score, alerte staff si trop) ─────────────────────
-
-
-async def _track_toxicity(msg):
-    """Compte les mots toxiques par user. Alerte staff si seuil dépassé."""
-    if not msg.guild or msg.author.bot:
-        return
-    try:
-        toxic_count = len(_TOXIC_RE.findall(msg.content or ""))
-        if toxic_count == 0:
-            return
-        async with get_db() as db:
-            await db.execute(
-                "INSERT INTO user_toxicity_scores(guild_id, user_id, score) VALUES(?,?,?) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                "score = score + ?, updated_at=CURRENT_TIMESTAMP",
-                (msg.guild.id, msg.author.id, toxic_count, toxic_count),
-            )
-            await db.commit()
-        # Check seuil : 10 points = staff alert
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT score, staff_notified FROM user_toxicity_scores "
-                "WHERE guild_id=? AND user_id=?",
-                (msg.guild.id, msg.author.id),
-            ) as cur:
-                row = await cur.fetchone()
-        if row and int(row[0]) >= 10 and int(row[1]) == 0:
-            # Notifier staff
-            c = await cfg(msg.guild.id)
-            await _au_journal(msg.guild, "Sécurité", "sec.toxicite",
-                              f"Toxicité élevée : {msg.author} a accumulé {int(row[0])} signaux toxiques",
-                              membre_id=msg.author.id, gravite=1)
-            log_id = int(c.get('mod_log_channel', 0) or 0)
-            log_ch = msg.guild.get_channel(log_id) if log_id else None
-            if log_ch:
-                try:
-                    await log_ch.send(
-                        embed=discord.Embed(
-                            title="⚠️ Toxicité user élevée",
-                            description=(
-                                f"**{msg.author.mention}** a accumulé `{int(row[0])}` "
-                                f"signaux toxiques sur ses messages.\n\n"
-                                f"_Pas auto-sanction. Surveillance staff recommandée._"
-                            ),
-                            color=0xF39C12,
-                            timestamp=datetime.now(timezone.utc),
-                        ),
-                        view=_vue_alerte(msg.author.id),
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-                except Exception:
-                    pass
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE user_toxicity_scores SET staff_notified=1 WHERE guild_id=? AND user_id=?",
-                    (msg.guild.id, msg.author.id),
-                )
-                await db.commit()
-    except Exception as ex:
-        print(f"[_track_toxicity] {ex}")
-
-
 # ─── SLOW MODE AUTO-DYNAMIQUE ────────────────────────────────────────────────
 
 
@@ -33376,6 +33314,27 @@ _channel_msg_rates: dict = {}  # channel_id → [timestamps des derniers msgs]
 
 
 _auto_slow_pending: dict = {}  # {channel_id: epoch} anti-rafale d'edit (audit 2026-07-02)
+
+
+async def _lever_ralentis(guild) -> None:
+    """Le ralentissement automatique est levé dès que le calme revient, vérifié toutes les 5 min par
+    `server_controls_task` à partir de `auto_slow_log` : aussi après un redémarrage, ou quand le salon
+    était encore agité à +2 min (avant, il restait pour toujours — audit 19/10/2026)."""
+    async with get_db() as db:
+        async with db.execute("SELECT DISTINCT channel_id FROM auto_slow_log WHERE guild_id=? AND cleared_at IS NULL",
+                              (guild.id,)) as cur:
+            salons = [r[0] for r in await cur.fetchall()]
+    maintenant = time.time()
+    for cid in salons:
+        ch = guild.get_channel(cid)
+        if ch is not None and len([t for t in _channel_msg_rates.get(cid, []) if t > maintenant - 60]) >= 10:
+            continue  # toujours agité : on revient dans 5 min
+        if ch is not None and getattr(ch, "slowmode_delay", 0) == 5:  # un autre réglage est celui du staff
+            await ch.edit(slowmode_delay=0, reason="Auto-slow : calme revenu")
+        async with get_db() as db:
+            await db.execute("UPDATE auto_slow_log SET cleared_at=CURRENT_TIMESTAMP WHERE channel_id=? AND cleared_at IS NULL",
+                             (cid,))
+            await db.commit()
 
 
 async def _check_auto_slow_mode(msg):
