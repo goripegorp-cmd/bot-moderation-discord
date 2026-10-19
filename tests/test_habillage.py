@@ -99,3 +99,28 @@ def test_H5_les_icones_connues_reviennent_au_demarrage(tmp_path, monkeypatch):
     assert visuels._lire_memoire() == {}, "une autre version d'icônes n'est jamais reprise"
     memoire.write_text("pas du json", encoding="utf-8")
     assert visuels._lire_memoire() == {}
+
+
+def test_H6_logs_et_alertes_sans_emoji_decoratif():
+    import unified_logger as U
+    e = U.build_log_embed(next(iter(U.EVENT_META)), user=None, reason="test", content="x")
+    assert not EMOJI.match(e.author.name or ""), e.author.name
+    assert all(not EMOJI.match(f.name) for f in e.fields)
+    publics = {"_build_boost_support_embed", "_handle_boost_stopped", "_handle_boost_started",
+               "_handle_welcome", "birthday_announcer", "check_twitch_feeds", "check_youtube_feeds",
+               "check_tiktok_feeds", "check_twitter_feeds", "check_reddit_feeds",
+               "check_creator_spotlight_feeds", "relay_discord_message", "handle_auto_help",
+               "on_interaction", "_flush_welcome_raid_recap", "_envoyer_recours_radie"}
+    fautes = []
+    arbre = ast.parse((RACINE / "bot.py").read_text(encoding="utf-8"))
+    for fn in ast.walk(arbre):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or fn.name in publics:
+            continue
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Call) and ast.unparse(n.func).endswith(("Embed", "set_author", "add_field")):
+                for k in n.keywords:
+                    if k.arg in ("title", "name") and isinstance(k.value, ast.Constant) \
+                            and isinstance(k.value.value, str) and EMOJI.match(k.value.value) \
+                            and k.value.value[0] not in ETATS:
+                        fautes.append(f"{fn.name}:{n.lineno} {k.value.value[:30]!r}")
+    assert not fautes, fautes

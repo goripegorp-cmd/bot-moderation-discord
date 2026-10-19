@@ -890,9 +890,9 @@ def _zone_intro_embed(kind: str, creator: discord.Member, members: list,
     if kind == "trade":
         t = (topic or "").strip()
         if t:
-            e.add_field(name="📦 Échange", value=f"_{t[:300]}_", inline=False)
+            e.add_field(name="Échange", value=f"_{t[:300]}_", inline=False)
         if rep_lines:
-            e.add_field(name="🛡️ Confiance", value=rep_lines[:1024], inline=False)
+            e.add_field(name="Confiance", value=rep_lines[:1024], inline=False)
         # Anti-arnaque : COURT mais visible (owner : c'est important, mais pas de pavé).
         e.add_field(
             name="⚠️ Anti-arnaque",

@@ -313,7 +313,7 @@ def build_dossier_embed(
         level = "🟠 **Suspicion forte — À vérifier**"
 
     e = discord.Embed(
-        title="🚨 Compte suspect détecté",
+        title="Compte suspect détecté",
         description=(
             f"{level} · **Score** `{score}/100`\n"
             f"-# Le bot ne signale que les comptes au score ≥ 60 · tu décides"
@@ -329,7 +329,7 @@ def build_dossier_embed(
     join_warning = " ⚠️" if join_age < 7 else ""
 
     e.add_field(
-        name="👤 Compte concerné",
+        name="Compte concerné",
         value=(
             f"{member.mention}\n"
             f"**Tag** · `{member}`\n"
@@ -340,7 +340,7 @@ def build_dossier_embed(
     )
 
     e.add_field(
-        name="📅 Ancienneté",
+        name="Ancienneté",
         value=(
             f"**Compte créé** · <t:{int(member.created_at.timestamp())}:R> ({account_age} jours){age_warning}\n"
             f"**Rejoint serveur** · "
@@ -356,7 +356,7 @@ def build_dossier_embed(
         if len(roles) > 8:
             role_mentions += f" *+{len(roles) - 8}*"
         e.add_field(
-            name=f"🎭 Rôles ({len(roles)})",
+            name=f"Rôles ({len(roles)})",
             value=role_mentions or "_aucun_",
             inline=False,
         )
@@ -364,7 +364,7 @@ def build_dossier_embed(
     # Raisons de la détection
     if reasons:
         e.add_field(
-            name="🚩 Signaux détectés",
+            name="Signaux détectés",
             value="\n".join(reasons[:8]),
             inline=False,
         )
@@ -376,16 +376,16 @@ def build_dossier_embed(
     # Censurer les URLs pour éviter de propager le phishing
     msg_safe = re.sub(r'https?://\S+', '[🔗 LIEN CENSURÉ]', msg_content)
     e.add_field(
-        name=f"💬 Message déclencheur · #{message.channel.name}",
+        name=f"Message déclencheur · #{message.channel.name}",
         value=f"```\n{msg_safe}\n```",
         inline=False,
     )
 
     e.add_field(
-        name="🛠️ Actions",
+        name="Actions",
         value=(
-            "🔇 **Mute 24h** précaution · 👢 **Kick** expulsion · "
-            "🔨 **Ban** définitif · ✅ **Faux positif** ferme l'alerte"
+            "**Mute 24h** précaution · 👢 **Kick** expulsion · "
+            "**Ban** définitif · ✅ **Faux positif** ferme l'alerte"
         ),
         inline=False,
     )

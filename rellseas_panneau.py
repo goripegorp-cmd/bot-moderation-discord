@@ -19,17 +19,18 @@ Ce qui existait déjà et n'a pas été réécrit : la table `realsy_tracking` e
 from __future__ import annotations
 
 import io
-import unicodedata
 
 import discord
 from discord.ui import Button, ChannelSelect, RoleSelect, UserSelect
 
 import activite_calendrier as cal
+from colonnes import cadrer, largeur  # noqa: F401 — largeur sert aux tests
 import config_salons
+import recrutements
 import visuels
 from ui_v2 import (
     LayoutView, Palette, body as v2_body, container as v2_container,
-    divider as v2_divider, subtitle as v2_subtitle, title as v2_title,
+    divider as v2_divider, subtitle as v2_subtitle,
 )
 
 _cfg = None
@@ -626,7 +627,8 @@ class RellseasGestionV2(LayoutView):
                         ("rellseas_g_retirer", v._cb_retirer),
                         ("rellseas_g_activite", v._cb_activite),
                         ("rellseas_g_vider", v._cb_vider),
-                        ("rellseas_g_liste", v._cb_liste)):
+                        ("rellseas_g_liste", v._cb_liste),
+                        ("rellseas_g_recrutements", v._cb_recrutements)):
             b = Button(label="—", custom_id=cid)
             b.callback = cb
             boutons.append(b)
@@ -800,7 +802,10 @@ class RellseasGestionV2(LayoutView):
                          emoji=visuels.icone("membres"), style=discord.ButtonStyle.primary,
                          disabled=role is None, custom_id="rellseas_g_liste")
         b_liste.callback = self._cb_liste
-        lignes.append(discord.ui.ActionRow(b_liste))
+        b_recr = Button(label="Recrutements du mois", emoji=visuels.icone("journal"),
+                        style=discord.ButtonStyle.secondary, custom_id="rellseas_g_recrutements")
+        b_recr.callback = self._cb_recrutements
+        lignes.append(discord.ui.ActionRow(b_liste, b_recr))
 
         items += lignes
         self.clear_items()
@@ -996,6 +1001,13 @@ class RellseasGestionV2(LayoutView):
                               allowed_mentions=discord.AllowedMentions.none())
         await self._journal(g, f"📋 **Liste du clan** · `{len(lignes)}` membre(s) · exportée par {u.mention}")
 
+    async def _cb_recrutements(self, i):
+        """L'aperçu du mois en cours : le même bilan que celui du 1er, filtrable."""
+        await i.response.defer()
+        vue, fichier = await recrutements.bilan(i.guild, recrutements.cle_mois(cal.maintenant()))
+        await i.followup.send(view=vue, file=fichier, ephemeral=True,
+                              allowed_mentions=discord.AllowedMentions.none())
+
     async def _journal(self, g, texte: str) -> None:
         """Trace nominative. Fail-open : jamais bloquant."""
         try:
@@ -1075,29 +1087,6 @@ def lignes_clan(membres, mesures: dict) -> list[dict]:
         })
     out.sort(key=lambda x: (x["rang"], x["nom"].casefold(), x["id"]))
     return out
-
-
-def largeur(t: str) -> int:
-    """Colonnes occupées à l'écran : un émoji ou un idéogramme en prend deux."""
-    n = 0
-    for ch in t:
-        if unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Me", "Cf"):
-            continue
-        n += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-    return n
-
-
-def cadrer(t: str, n: int) -> str:
-    """Le texte tient dans `n` colonnes : coupé (…) ou complété d'espaces."""
-    t = "".join(ch for ch in str(t) if ch.isprintable()).replace("`", "ˋ").strip()
-    if largeur(t) > n:
-        coupe = ""
-        for ch in t:
-            if largeur(coupe + ch) > n - 1:
-                break
-            coupe += ch
-        t = coupe + "…"
-    return t + " " * (n - largeur(t))
 
 
 _COLONNES = (("N°", 5), ("NOM", 26), ("PSEUDO", 22), ("IDENTIFIANT", 21), ("7 JOURS", 9),

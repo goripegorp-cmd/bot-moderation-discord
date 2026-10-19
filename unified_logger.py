@@ -579,18 +579,18 @@ def build_log_embed(
         timestamp=datetime.now(timezone.utc),
         description=description[:4000] if description else None,
     )
-    embed.set_author(name=f"{meta['icon']} {title_override or meta['label']}")
+    embed.set_author(name=str(title_override or meta['label'])[:256])
 
     if user is not None:
-        embed.add_field(name="👤 Concerné", value=_format_user(user), inline=False)
+        embed.add_field(name="Concerné", value=_format_user(user), inline=False)
     if moderator is not None:
-        embed.add_field(name="🛡️ Modérateur", value=_format_user(moderator), inline=False)
+        embed.add_field(name="Modérateur", value=_format_user(moderator), inline=False)
     if channel is not None:
-        embed.add_field(name="📺 Salon", value=_format_channel(channel), inline=False)
+        embed.add_field(name="Salon", value=_format_channel(channel), inline=False)
     if reason:
-        embed.add_field(name="📝 Raison", value=reason[:1024], inline=False)
+        embed.add_field(name="Raison", value=reason[:1024], inline=False)
     if content:
-        embed.add_field(name="💬 Contenu", value=f"```\n{content[:900]}\n```", inline=False)
+        embed.add_field(name="Contenu", value=f"```\n{content[:900]}\n```", inline=False)
     if extra:
         for k, v in extra.items():
             embed.add_field(name=str(k)[:256], value=str(v)[:1024], inline=False)
@@ -598,7 +598,7 @@ def build_log_embed(
         for name, value, inline in fields:
             embed.add_field(name=str(name)[:256], value=str(value)[:1024], inline=bool(inline))
 
-    embed.set_footer(text=f"[{meta['cat']}] · type={event_type.value}")
+    embed.set_footer(text=str(meta['cat']))
     return embed
 
 

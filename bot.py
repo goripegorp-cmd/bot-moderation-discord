@@ -106,6 +106,7 @@ import suggestions  # idées des membres : votes, fil de discussion, décision d
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
 import config_salons  # @everyone voit tout sauf le réservé ; communautaire ouvert
+import recrutements  # suivi des recrutements Rell Seas, bilan du mois filtrable
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
@@ -2860,7 +2861,7 @@ async def _ouvrir_ticket_recours(guild, membre, pourquoi: str,
         print(f"[radie recours enregistrement] {ex}")
 
     e = discord.Embed(color=0x010101, timestamp=now())
-    e.set_author(name=f"⛔ RECOURS DE RADIATION · ticket #{tid}",
+    e.set_author(name=f"RECOURS DE RADIATION · ticket #{tid}",
                  icon_url=membre.display_avatar.url)
     e.description = (f"{membre.mention} · `{membre.id}`\n"
                      f"Compte Discord : `{membre}`\n"
@@ -3629,7 +3630,7 @@ class SecReportView(discord.ui.View):
                 r = (reason or '').replace('\n', ' ')[:100] or '—'
                 lines.append(f"• **{typ or '—'}** · {r}" + (f" · _{when}_" if when else ''))
             e = discord.Embed(
-                title="🔎 Sanctions récentes (7 j)", color=0xE74C3C,
+                title="Sanctions récentes (7 j)", color=0xE74C3C,
                 description=f"{who} (`{uid}`) — **{len(rows)}** sanction(s)\n\n" + "\n".join(lines[:15]))
             e.set_footer(text="Visibilité seule · clic droit sur le membre pour agir (mute/kick…).")
             await i.followup.send(embed=e, ephemeral=True)
@@ -3711,7 +3712,7 @@ async def _post_weekly_security_report(guild):
         top_lines.append(f"{rk} <@{uid}> — **{len(infs)}** sanction(s)")
     extra = f"\n_+{len(ordered) - 10} autre(s) membre(s)_" if len(ordered) > 10 else ""
     e = discord.Embed(
-        title="🛡️ Rapport sécurité hebdomadaire", color=0xC0392B, timestamp=now(),
+        title="Rapport sécurité hebdomadaire", color=0xC0392B, timestamp=now(),
         description=(f"**7 derniers jours** · **{total} sanction(s)**\n{type_line}\n\n"
                      "**Membres les plus fichés :**\n" + "\n".join(top_lines) + extra
                      + "\n\n_Visibilité seule (aucune action auto). Choisis un membre ci-dessous "
@@ -4628,7 +4629,7 @@ async def _badword_strike(msg, c):
                     try:
                         await ulogger2026.log_event(
                             bot, msg.guild, ulogger2026.EventType.SEC_BADWORD,
-                            title_override=f"🔨 Sanction auto badwords ({pretty})",
+                            title_override=f"Sanction auto badwords ({pretty})",
                             description=(
                                 f"{msg.author.mention} a accumulé `{total_warns}` warns via le filtre "
                                 f"de mots interdits — sanction `{action}` appliquée."
@@ -4746,12 +4747,12 @@ async def send_log(g, key, m, msg, reason, extra=None):
             user_info += f"\n**Âge compte:** {account_age} jours"
         except:
             pass
-        e.add_field(name="👤 Utilisateur", value=user_info, inline=True)
+        e.add_field(name="Utilisateur", value=user_info, inline=True)
         
         # Informations salon
         if msg and msg.channel:
             channel_info = f"**Salon:** {msg.channel.mention}\n**ID:** `{msg.channel.id}`"
-            e.add_field(name="📍 Localisation", value=channel_info, inline=True)
+            e.add_field(name="Localisation", value=channel_info, inline=True)
         
         # Action prise
         action_taken = c.get(f'{key.replace("anti_", "")}_action', 'mute')
@@ -4763,14 +4764,14 @@ async def send_log(g, key, m, msg, reason, extra=None):
             action_taken = c.get('compromised_action', 'mute')
         
         action_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(action_taken, '⚡')
-        e.add_field(name="⚡ Action", value=f"{action_emoji} {action_taken.upper()}", inline=True)
+        e.add_field(name="Action", value=f"{action_emoji} {action_taken.upper()}", inline=True)
         
         # Raison détaillée
         e.add_field(name="⚠️ Raison", value=reason[:1024], inline=False)
         
         # Détails supplémentaires
         if extra:
-            e.add_field(name="🔍 Détails", value=str(extra)[:1024], inline=False)
+            e.add_field(name="Détails", value=str(extra)[:1024], inline=False)
         
         # Contenu du message (censuré si trop long)
         if msg and msg.content:
@@ -4781,7 +4782,7 @@ async def send_log(g, key, m, msg, reason, extra=None):
             content = re.sub(
                 r'https?://\S+',
                 lambda _m: _m.group(0)[:200].replace('http', 'hxxp').replace('.', '[.]'), content)
-            e.add_field(name="💬 Message (lien neutralisé)", value=f"```{content}```", inline=False)
+            e.add_field(name="Message (lien neutralisé)", value=f"```{content}```", inline=False)
         
         # Avatar et footer
         e.set_thumbnail(url=m.display_avatar.url)
@@ -5273,7 +5274,7 @@ async def _warn_calm_down(channel, text):
     le pipeline on_message."""
     try:
         warn_e = discord.Embed(color=0xF1C40F, description=text)
-        warn_e.set_footer(text="🛡️ Protection — reste cool 🙏")
+        warn_e.set_footer(text="Protection — reste cool 🙏")
         warn_msg = await webhook_send(channel, 'protection', embed=warn_e)
         if warn_msg:
             async def _del_warn(m):
@@ -6208,15 +6209,15 @@ def _ticket_timeline_line(kind, actor_id, detail, ts):
     t = f" · <t:{int(ts)}:t>" if ts else ""
     who = f"<@{int(actor_id)}>" if actor_id else "—"
     lab = {
-        'create':    f"🎫 **Créé** par {who}",
-        'claim':     f"🙋 **Pris en charge** par {who}",
-        'close':     f"🔒 **Fermé** par {who}",
-        'leave':     f"🚪 {who} a **quitté** le ticket",
-        'add_staff': f"➕ Staff ajouté (par {who})",
-        'blacklist': f"🚫 **Blacklisté** par {who}" + (f" · panel {detail}" if detail else ""),
-        'priority':  f"🚩 Priorité → **{detail}** (par {who})",
-        'note':      f"📌 Note de {who}" + (f" : _{str(detail)[:150]}_" if detail else ""),
-    }.get(kind, f"• {kind} ({who})")
+        'create':    f"**Créé** par {who}",
+        'claim':     f"**Pris en charge** par {who}",
+        'close':     f"**Fermé** par {who}",
+        'leave':     f"{who} a **quitté** le ticket",
+        'add_staff': f"Staff ajouté (par {who})",
+        'blacklist': f"**Blacklisté** par {who}" + (f" · panel {detail}" if detail else ""),
+        'priority':  f"Priorité → **{detail}** (par {who})",
+        'note':      f"Note de {who}" + (f" : _{str(detail)[:150]}_" if detail else ""),
+    }.get(kind, f"{kind} ({who})")
     return lab + t
 
 
@@ -6403,13 +6404,13 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
         last_kind = events[-1][0]
         color = {'create': C.GREEN, 'claim': C.BLUE, 'close': C.RED}.get(last_kind, C.BLURPLE)
         timeline = "\n".join(_ticket_timeline_line(k, a, d, t) for (k, a, d, t) in events[-25:])
-        head = f"👤 Ouvert par <@{uid}>" + (f" · panel **{panel_name}**" if panel_name else "")
+        head = f"Ouvert par <@{uid}>" + (f" · panel **{panel_name}**" if panel_name else "")
         ans = ''
         if ti.get('answers'):
             ans = "\n".join(f"**{q}** : {str(a)[:80]}" for q, a in list(ti['answers'].items())[:5])
-        desc = (f"{head}\n\n**📜 Historique**\n{timeline}"
-                + (f"\n\n**📝 Réponses**\n{ans}" if ans else ""))
-        e = discord.Embed(title=f"🎫 Ticket #{tid or ti.get('id', '?')}", color=color,
+        desc = (f"{head}\n\n**Historique**\n{timeline}"
+                + (f"\n\n**Réponses**\n{ans}" if ans else ""))
+        e = discord.Embed(title=f"Ticket #{tid or ti.get('id', '?')}", color=color,
                           timestamp=now(), description=desc[:4000])
         if last_kind == 'close':
             e.set_footer(text="✅ Ticket clôturé — transcript ci-dessous")
@@ -6495,6 +6496,9 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                     await lch.send(view=vue, file=discord.File(io.BytesIO(texte.encode('utf-8')),
                                                                filename=nom_fichier),
                                    allowed_mentions=discord.AllowedMentions.none())
+                    if str(_tid).isdigit() and str(uid).isdigit():
+                        await recrutements.enregistrer(g.id, int(_tid), int(uid), _qui, events,
+                                                       ti.get('answers') or {}, participants, url)
                 elif url:
                     # LIEN prioritaire : GROS bouton, PAS de fichier .html joint (sinon Discord
                     # affiche le code brut qui masque le lien — owner 2026-07-01).
@@ -6883,13 +6887,13 @@ async def create_ticket(i, pid, ans=None):
         # ═══════════════════════════════════════════════════════════════════════════════
         panel_name = pnl.get('name', 'Support')
         emb = discord.Embed(color=0x5865F2, timestamp=now())
-        emb.set_author(name=f"🎫 Ticket #{tid} • {panel_name}", icon_url=i.guild.icon.url if i.guild.icon else None)
+        emb.set_author(name=f"Ticket #{tid} • {panel_name}", icon_url=i.guild.icon.url if i.guild.icon else None)
         emb.description = f"Ouvert par {i.user.mention} · panel **{panel_name}**"
         emb.set_thumbnail(url=i.user.display_avatar.url)
         if ans:
             for t, a in ans.items():
-                emb.add_field(name=f"📝 {t}", value=a[:1024], inline=False)
-        emb.set_footer(text="⏳ En attente du staff")
+                emb.add_field(name=f"{t}", value=a[:1024], inline=False)
+        emb.set_footer(text="En attente du staff")
         # owner 2026-07-20 : PLUS de ping à la création (avant : ouvreur + ROLE staff entier =
         # ping de masse inutile à chaque ticket). L'embed indique déjà qui a ouvert ; le staff
         # voit le ticket dans la catégorie + le salon de logs (send_ticket_log 'create' ci-dessous).
@@ -6902,7 +6906,7 @@ async def create_ticket(i, pid, ans=None):
         if welcome_message:
             # Créer un embed pour le message d'accueil
             welcome_emb = discord.Embed(
-                title="👋 Bienvenue !",
+                title="Bienvenue !",
                 description=welcome_message,
                 color=0x3498DB  # Bleu clair
             )
@@ -8063,7 +8067,7 @@ class TicketControlView(View):
             
             # Créer l'embed de confirmation
             e = discord.Embed(
-                title="🚫 Membre Blacklisté",
+                title="Membre Blacklisté",
                 color=0xE74C3C,
                 timestamp=now()
             )
@@ -8072,9 +8076,9 @@ class TicketControlView(View):
             if ticket_user:
                 e.set_thumbnail(url=ticket_user.display_avatar.url)
             
-            e.add_field(name="👤 Membre", value=f"{user_mention}\n`{tk['user']}`", inline=True)
-            e.add_field(name="📋 Panel", value=f"**{panel_name}**", inline=True)
-            e.add_field(name="👮 Par", value=i.user.mention, inline=True)
+            e.add_field(name="Membre", value=f"{user_mention}\n`{tk['user']}`", inline=True)
+            e.add_field(name="Panel", value=f"**{panel_name}**", inline=True)
+            e.add_field(name="Par", value=i.user.mention, inline=True)
             e.set_footer(text="Ce membre ne pourra plus créer de tickets sur ce panel")
             
             await i.response.send_message(embed=e)
@@ -8174,7 +8178,7 @@ class AddStaffSelect(Select):
                 # GIF/liens (mêmes droits média que l'ouvreur), pas seulement du texte.
                 await tickets_fils.ajouter(ch, st)
                 await i.response.send_message(f"✅ {st.mention} ajouté au ticket!", ephemeral=True)
-                add_e = discord.Embed(color=0x2ECC71, description=f"➕ **{st.display_name}** a été ajouté au ticket par {i.user.mention}")
+                add_e = discord.Embed(color=0x2ECC71, description=f"**{st.display_name}** a été ajouté au ticket par {i.user.mention}")
                 add_e.set_footer(text="Staff ajouté")
                 add_e.timestamp = now()
                 await webhook_send(ch, 'ticket', embed=add_e)
@@ -8256,7 +8260,7 @@ class TransferTicketSelect(Select):
                 await db.commit()
             await i.response.send_message(f"✅ Prise en charge transférée à {new_staff.mention}", ephemeral=True)
             try:
-                tr_e = discord.Embed(color=0x5865F2, description=f"🔄 Prise en charge **transférée de <@{old_id}> à {new_staff.mention}** par {i.user.mention}")
+                tr_e = discord.Embed(color=0x5865F2, description=f"Prise en charge **transférée de <@{old_id}> à {new_staff.mention}** par {i.user.mention}")
                 tr_e.set_footer(text="Transfert de prise en charge")
                 tr_e.timestamp = now()
                 await webhook_send(ch, 'ticket', embed=tr_e)
@@ -8321,7 +8325,7 @@ class TicketPrioritySelect(Select):
             await i.followup.send(f"✅ Priorité réglée : {emoji} **{label}**", ephemeral=True)
             # Trace visible dans le salon (entre au transcript) + log staff.
             try:
-                pr_e = discord.Embed(color=C.GOLD, description=f"🚩 Priorité passée à {emoji} **{label}** par {i.user.mention}")
+                pr_e = discord.Embed(color=C.GOLD, description=f"Priorité passée à {emoji} **{label}** par {i.user.mention}")
                 pr_e.timestamp = now()
                 await webhook_send(ch, 'ticket', embed=pr_e)
             except Exception:
@@ -8369,7 +8373,7 @@ class TicketNoteModal(Modal):
         ch = i.channel
         try:
             note_e = discord.Embed(
-                title="📌 Note interne (staff)",
+                title="Note interne (staff)",
                 description=txt[:4000],
                 color=C.BLURPLE, timestamp=now())
             note_e.set_footer(text=f"Ajoutée par {i.user.display_name}")
@@ -11758,6 +11762,7 @@ _SUPERVISED_MODULE_LOOPS = (
     ('error_logger_module', 'burst_check_task'),
     ('raid_module', 'lockdown_expiry_task'),
     ('sondages', 'cloture_task'),
+    ('recrutements', 'export_task'),
 )
 
 # DENY-LIST EXPLICITE (Tâche C) : boucles que le balayage AUTO ne doit JAMAIS démarrer ni
@@ -14967,7 +14972,7 @@ class SuspectScanPanel(View):
             self.scan_complete = True
     
     async def embed(self):
-        e = discord.Embed(title="🔍 Scan des Comptes Suspects", color=0xE74C3C)
+        e = discord.Embed(title="Scan des Comptes Suspects", color=0xE74C3C)
         
         # Résumé
         critical = len([s for s in self.suspects if s['severity'] == 'critical'])
@@ -14975,7 +14980,7 @@ class SuspectScanPanel(View):
         medium = len([s for s in self.suspects if s['severity'] == 'medium'])
         
         summary = f"**🚨 Critiques:** {critical}\n**⚠️ Élevés:** {high}\n**⚡ Moyens:** {medium}\n**🤖 Bots non vérifiés:** {len(self.bots)}"
-        e.add_field(name="📊 Résumé", value=summary, inline=False)
+        e.add_field(name="Résumé", value=summary, inline=False)
         
         # Liste des suspects (paginée)
         if self.suspects:
@@ -14991,19 +14996,19 @@ class SuspectScanPanel(View):
                 lines.append(f"{severity_emoji} **{member.display_name}** (`{member.id}`)\n   └ {reasons_short}")
             
             e.add_field(
-                name=f"👥 Suspects ({len(self.suspects)}) - Page {self.page + 1}/{max(1, (len(self.suspects) - 1) // self.per_page + 1)}",
+                name=f"Suspects ({len(self.suspects)}) - Page {self.page + 1}/{max(1, (len(self.suspects) - 1) // self.per_page + 1)}",
                 value="\n".join(lines) if lines else "*Aucun*",
                 inline=False
             )
         else:
-            e.add_field(name="👥 Suspects", value="✅ Aucun compte suspect détecté !", inline=False)
+            e.add_field(name="Suspects", value="✅ Aucun compte suspect détecté !", inline=False)
         
         # Bots non vérifiés
         if self.bots:
             bot_lines = [f"🤖 **{b['member'].name}** (`{b['member'].id}`)" for b in self.bots[:5]]
             if len(self.bots) > 5:
                 bot_lines.append(f"*... et {len(self.bots) - 5} autres*")
-            e.add_field(name="🤖 Bots non vérifiés", value="\n".join(bot_lines), inline=False)
+            e.add_field(name="Bots non vérifiés", value="\n".join(bot_lines), inline=False)
         
         e.set_footer(text="⚠️ Vérifiez manuellement avant d'agir • Les scores sont indicatifs")
         return e
@@ -15120,7 +15125,7 @@ class ConfirmKickView(View):
 
         await i.edit_original_response(
             embed=discord.Embed(
-                title="🔒 Isolement terminé",
+                title="Isolement terminé",
                 description=f"**{kicked}** membre(s) isolé(s) en quarantaine\n**{failed}** échec(s)\n"
                             f"_Le bannissement éventuel reste au fondateur._",
                 color=0x2ECC71 if failed == 0 else 0xE67E22
@@ -15208,15 +15213,15 @@ async def send_mod_log(guild, action, mod, target, reason=None, duration=None, e
             timestamp=now()
         )
         e.set_author(name=f"{emojis.get(action, '🔨')} {titles.get(action, action.upper())}", icon_url=guild.icon.url if guild.icon else None)
-        e.add_field(name="👮 Modérateur", value=f"{mod.mention}\n`{mod.id}`", inline=True)
-        e.add_field(name="👤 Membre", value=f"{target.mention}\n`{target.id}`", inline=True)
+        e.add_field(name="Modérateur", value=f"{mod.mention}\n`{mod.id}`", inline=True)
+        e.add_field(name="Membre", value=f"{target.mention}\n`{target.id}`", inline=True)
 
         if duration:
-            e.add_field(name="⏱️ Durée", value=duration, inline=True)
+            e.add_field(name="Durée", value=duration, inline=True)
         if reason:
-            e.add_field(name="📝 Raison", value=reason[:1024], inline=False)
+            e.add_field(name="Raison", value=reason[:1024], inline=False)
         if extra:
-            e.add_field(name="ℹ️ Info", value=extra, inline=False)
+            e.add_field(name="Info", value=extra, inline=False)
 
         e.set_thumbnail(url=target.display_avatar.url)
         e.set_footer(text=f"ID cible: {target.id}")
@@ -15590,7 +15595,7 @@ class ImmunePanelV2(LayoutView):
         v = ImmuneRemoveView(self.u, self.g)
         await i.response.edit_message(
             embed=discord.Embed(
-                title="🗑️ Supprimer une immunité",
+                title="Supprimer une immunité",
                 description="Choisis le type d'élément à supprimer.",
                 color=0xE74C3C,
             ),
@@ -15635,7 +15640,7 @@ class ImmuneRemoveView(View):
             return await i.response.send_message("❌ Aucun rôle immunisé", ephemeral=True)
         view = PaginatedImmuneRemoveView(self.u, self.g, 'role', rids, page=0)
         await i.response.edit_message(
-            embed=discord.Embed(title=f"🗑️ Supprimer un rôle ({len(rids)} total)", color=C.RED),
+            embed=discord.Embed(title=f"Supprimer un rôle ({len(rids)} total)", color=C.RED),
             view=view, attachments=[],
         )
 
@@ -15648,7 +15653,7 @@ class ImmuneRemoveView(View):
             return await i.response.send_message("❌ Aucun utilisateur immunisé", ephemeral=True)
         view = PaginatedImmuneRemoveView(self.u, self.g, 'user', uids, page=0)
         await i.response.edit_message(
-            embed=discord.Embed(title=f"🗑️ Supprimer un utilisateur ({len(uids)} total)", color=C.RED),
+            embed=discord.Embed(title=f"Supprimer un utilisateur ({len(uids)} total)", color=C.RED),
             view=view, attachments=[],
         )
 
@@ -15661,7 +15666,7 @@ class ImmuneRemoveView(View):
             return await i.response.send_message("❌ Aucun salon immunisé", ephemeral=True)
         view = PaginatedImmuneRemoveView(self.u, self.g, 'channel', chids, page=0)
         await i.response.edit_message(
-            embed=discord.Embed(title=f"🗑️ Supprimer un salon ({len(chids)} total)", color=C.RED),
+            embed=discord.Embed(title=f"Supprimer un salon ({len(chids)} total)", color=C.RED),
             view=view, attachments=[],
         )
     
@@ -15744,7 +15749,7 @@ class ImmuneRemoveViewV2(LayoutView):
         view = PaginatedImmuneRemoveView(self.u, self.g, 'role', rids, page=0)
         await i.response.edit_message(
             embed=discord.Embed(
-                title=f"🗑️ Supprimer un rôle immunisé ({len(rids)} total)",
+                title=f"Supprimer un rôle immunisé ({len(rids)} total)",
                 color=0xE74C3C,
             ),
             view=view,
@@ -15760,7 +15765,7 @@ class ImmuneRemoveViewV2(LayoutView):
         view = PaginatedImmuneRemoveView(self.u, self.g, 'user', uids, page=0)
         await i.response.edit_message(
             embed=discord.Embed(
-                title=f"🗑️ Supprimer un utilisateur immunisé ({len(uids)} total)",
+                title=f"Supprimer un utilisateur immunisé ({len(uids)} total)",
                 color=0xE74C3C,
             ),
             view=view,
@@ -15776,7 +15781,7 @@ class ImmuneRemoveViewV2(LayoutView):
         view = PaginatedImmuneRemoveView(self.u, self.g, 'channel', chids, page=0)
         await i.response.edit_message(
             embed=discord.Embed(
-                title=f"🗑️ Supprimer un salon immunisé ({len(chids)} total)",
+                title=f"Supprimer un salon immunisé ({len(chids)} total)",
                 color=0xE74C3C,
             ),
             view=view,
@@ -16921,7 +16926,7 @@ class CompromisedAccountActionView(View):
             for f in old.fields:
                 new.add_field(name=f.name, value=f.value, inline=f.inline)
             new.add_field(
-                name="📌 Statut",
+                name="Statut",
                 value=f"{action} par {by.mention} · <t:{int(time.time())}:R>",
                 inline=False,
             )
@@ -17521,7 +17526,7 @@ class PanelEditViewV2(LayoutView):
             v = PanelCatPaginatedView(self.u, self.g, self.pid)
             await i.response.edit_message(
                 embed=discord.Embed(
-                    title="📁 Choisir la catégorie",
+                    title="Choisir la catégorie",
                     description=f"**{len(cats)} catégories** · Page 1/{v.max_page+1}",
                     color=0x9B59B6,
                 ),
@@ -17739,7 +17744,7 @@ class PanelBlacklistView(View):
         blacklist = pnl.get('blacklist', [])
         
         e = discord.Embed(
-            title=f"🚫 Blacklist - {pnl.get('name', '?')}",
+            title=f"Blacklist - {pnl.get('name', '?')}",
             color=0xE74C3C
         )
         
@@ -18033,12 +18038,12 @@ class PanelCatPaginatedView(View):
     async def _prev(self, i):
         self.page -= 1
         self._build()
-        await i.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", description=f"**{len(self.categories)} catégories** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+        await i.response.edit_message(embed=discord.Embed(title="Choisir la catégorie", description=f"**{len(self.categories)} catégories** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
 
     async def _next(self, i):
         self.page += 1
         self._build()
-        await i.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", description=f"**{len(self.categories)} catégories** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+        await i.response.edit_message(embed=discord.Embed(title="Choisir la catégorie", description=f"**{len(self.categories)} catégories** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
 
     async def _back(self, i):
         # Phase 3.0h : retour vers V2 panel
@@ -18087,7 +18092,7 @@ class PanelQsView(View):
         c = await cfg(self.g.id)
         pnl = c.get('ticket_panels', {}).get(self.pid, {})
         qs = pnl.get('questions', [])
-        e = discord.Embed(title="📝 Questions du panel", color=C.PURPLE)
+        e = discord.Embed(title="Questions du panel", color=C.PURPLE)
         if qs:
             for j, q in enumerate(qs, 1):
                 e.add_field(name=f"{j}. {q['title']}", value=q['question'][:100], inline=False)
@@ -18498,6 +18503,11 @@ async def _activite_boot():
                       #  construit au démarrage sans savoir qui l'ouvrira.
                       autorise=_rellseas_autorise, log=print)
     rellseas_ui.set_retour(_retour_vers_configure)
+    recrutements.setup(get_db=get_db, cfg=cfg, db_set=db_set, salon=_salon_transcripts_rellseas,
+                       role=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
+                       autorise=_rellseas_autorise, log=print)
+    await recrutements.init_db()
+    recrutements.demarrer(bot)
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()
 
@@ -18602,7 +18612,8 @@ async def on_ready():
         bot.add_dynamic_items(sondages.BoutonCreer, sondages.BoutonTerminer, sondages.BoutonVote,
                               sondages.BoutonFinAnonyme, suggestions.BoutonProposer,
                               suggestions.BoutonPour, suggestions.BoutonContre,
-                              suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig)
+                              suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig,
+                              recrutements.FiltreRecrutement)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
@@ -20073,7 +20084,7 @@ async def on_member_remove(m):
             await send_ticket_log(m.guild, 'leave', m, ti)
             if ch:
                 leave_e = discord.Embed(color=C.ORANGE, timestamp=now())
-                leave_e.set_author(name="🚪 Utilisateur parti", icon_url=m.display_avatar.url if m.display_avatar else None)
+                leave_e.set_author(name="Utilisateur parti", icon_url=m.display_avatar.url if m.display_avatar else None)
                 leave_e.description = f"**{m.display_name}** (`{m.name}`) a quitté le serveur."
                 leave_e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
                 await webhook_send(ch, 'ticket', embed=leave_e)
@@ -20975,12 +20986,12 @@ async def on_member_join(m):
                 log_ch = m.guild.get_channel(c.get('log_anti_alt', 0))
                 if log_ch:
                     e = discord.Embed(
-                        title="👥 COMPTE SECONDAIRE DÉTECTÉ !",
+                        title="COMPTE SECONDAIRE DÉTECTÉ !",
                         description=f"**Compte secondaire:** {m.mention} (`{m.id}`)\n**Compte principal:** {main_txt}\n**Confiance:** {confidence}%",
                         color=0xE74C3C
                     )
-                    e.add_field(name="📋 Raisons", value="\n".join([f"• {r}" for r in reasons[:5]]), inline=False)
-                    e.add_field(name="⚡ Action auto", value="✅ Activée" if auto_action else "❌ Désactivée", inline=True)
+                    e.add_field(name="Raisons", value="\n".join([f"• {r}" for r in reasons[:5]]), inline=False)
+                    e.add_field(name="Action auto", value="✅ Activée" if auto_action else "❌ Désactivée", inline=True)
                     e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
                     e.timestamp = now()
                     await webhook_send(log_ch, 'protection', embed=e)
@@ -21178,7 +21189,7 @@ async def _handle_antiraid_join(member):
     if log_ch:
         try:
             e = discord.Embed(
-                title="🚨 RAID DÉTECTÉ",
+                title="RAID DÉTECTÉ",
                 description=(
                     f"**{len(joins)}** joins en `{window}`s (seuil : `{threshold}`)\n"
                     f"**Action** : `{action}` appliquée à `{applied}`/`{len(recent_members)}` membres"
@@ -21186,7 +21197,7 @@ async def _handle_antiraid_join(member):
                 color=0xE74C3C,
                 timestamp=datetime.now(timezone.utc),
             )
-            e.add_field(name="🆕 Membres concernés", value="\n".join(f"• {m.mention} (`{m.id}`)" for m in recent_members[:10]) or "_aucun_", inline=False)
+            e.add_field(name="Membres concernés", value="\n".join(f"• {m.mention} (`{m.id}`)" for m in recent_members[:10]) or "_aucun_", inline=False)
             if is_suspect:
                 e.add_field(name="⚠️ Compte suspect", value=f"Le dernier compte a `{account_age_days}`j d'âge (seuil : `{min_age_days}`j)", inline=False)
             await log_ch.send(embed=e)
@@ -22445,7 +22456,7 @@ async def _check_compromised_account(msg):
         try:
             await ulogger2026.log_event(
                 bot, msg.guild, ulogger2026.EventType.SEC_PHISHING,
-                title_override=f"🚨 Compte suspect (score {score})",
+                title_override=f"Compte suspect (score {score})",
                 description=(
                     f"Le bot a détecté un comportement suspect chez {msg.author.mention}.\n"
                     f"Le dossier complet est dans {alert_channel.mention} avec les actions disponibles."
@@ -23948,7 +23959,7 @@ async def on_message(msg):
                     await send_log(msg.guild, 'anti_phishing', msg.author, msg, 
                                   "Fichier dangereux détecté", f"Extension: {ext}")
                     warn_e = discord.Embed(color=0xE74C3C, description=f"⚠️ {msg.author.mention} a envoyé un fichier potentiellement dangereux (`{ext}`).\nLe fichier a été **supprimé** automatiquement.")
-                    warn_e.set_footer(text="🛡️ Protection anti-phishing")
+                    warn_e.set_footer(text="Protection anti-phishing")
                     warn_msg = await webhook_send(msg.channel, 'protection', embed=warn_e)
                     if warn_msg:
                         async def _del_warn(m):
@@ -24118,7 +24129,7 @@ async def logs_status(i: discord.Interaction):
             ch = i.guild.get_channel(chan_id)
             chan_txt = ch.mention if ch else f"⚠️ `{chan_id}` (introuvable)"
         e = discord.Embed(
-            title="📋 Logs unifiés — état actuel",
+            title="Logs unifiés — état actuel",
             description=f"**Salon :** {chan_txt}",
             color=0x3498DB,
             timestamp=now(),
@@ -24126,7 +24137,7 @@ async def logs_status(i: discord.Interaction):
         cats_txt = "\n".join(
             f"{'✅' if c in cats else '❌'} **{c}**" for c in all_cats
         )
-        e.add_field(name="🎛️ Catégories", value=cats_txt or "_aucune_", inline=False)
+        e.add_field(name="Catégories", value=cats_txt or "_aucune_", inline=False)
         e.set_footer(text="/logs setchannel · /logs categories")
         await i.response.send_message(embed=e, ephemeral=True)
     except Exception as ex:
@@ -24189,7 +24200,7 @@ async def logs_categories(i: discord.Interaction):
         v = View(timeout=180)
         v.add_item(LogsCategoriesSelect(cats))
         e = discord.Embed(
-            title="🎛️ Catégories de logs",
+            title="Catégories de logs",
             description=(
                 "Choisis les catégories que tu veux logger dans le salon unifié.\n"
                 "Décoche celles que tu ne veux pas voir.\n\n"
@@ -24475,7 +24486,7 @@ async def _clear_audit_log(guild, ch, moderator, deleted: int, limit) -> bool:
             return False
         scope = "tout le salon" if limit is None else f"{limit} demandé(s)"
         e = discord.Embed(
-            title="🧹 Clear (purge)",
+            title="Clear (purge)",
             description=(f"{getattr(moderator, 'mention', moderator)} a vidé {ch.mention}\n"
                          f"**{deleted}** message(s) supprimé(s) · portée : {scope}"),
             color=0xED4245, timestamp=now())
@@ -24672,11 +24683,11 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     # 🔒 PAS de champ « Modérateur » ici : cet embed est PUBLIC (owner 2026-07-17 — seuls les
     # autres staffs doivent savoir qui a warn qui). Le mod_id est tracé dans `infractions`,
     # le salon de logs (`send_mod_log`) et `staff_audit_log` — tous réservés au staff.
-    e.add_field(name="👤 Membre fiché", value=f"{membre.mention}\n`{membre.id}`", inline=True)
-    e.add_field(name="📊 Total warns", value=f"`{warn_count}`", inline=True)
-    e.add_field(name="📝 Motif", value=raison, inline=False)
+    e.add_field(name="Membre fiché", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+    e.add_field(name="Total warns", value=f"`{warn_count}`", inline=True)
+    e.add_field(name="Motif", value=raison, inline=False)
     e.add_field(
-        name="🆔 ID de la fiche",
+        name="ID de la fiche",
         value=f"`{warn_id_str}` — utilise `/mod infractions` pour voir la fiche complète",
         inline=False,
     )
@@ -24733,15 +24744,15 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
             _auto_txt = (f"🔇 **Mute automatique : {_label}** (palier **{warn_count} warns**)."
                          + (" À vous de décider de la suite (ban ?)." if warn_count >= 6 else ""))
     if _auto_txt:
-        e.add_field(name="⚖️ Sanction automatique", value=_auto_txt, inline=False)
+        e.add_field(name="Sanction automatique", value=_auto_txt, inline=False)
     elif warn_count < 3:
-        e.add_field(name="📈 Escalade", value="Prochain palier **auto** au **3ᵉ warn** → mute 10 min.", inline=False)
+        e.add_field(name="Escalade", value="Prochain palier **auto** au **3ᵉ warn** → mute 10 min.", inline=False)
 
     # ─── Copie STAFF de la fiche (éphémère, pour l'auteur du warn) ───
     # 🔒 owner 2026-07-17 : l'embed `e` ci-dessus part en PUBLIC et doit rester anonyme. Tout ce
     # qui identifie le staff (modérateur, notes internes et LEURS auteurs) vit uniquement ici.
     _staff_e = discord.Embed.from_dict(e.to_dict())
-    _staff_e.add_field(name="👮 Modérateur", value=f"{i.user.mention}", inline=True)
+    _staff_e.add_field(name="Modérateur", value=f"{i.user.mention}", inline=True)
     _staff_e.set_footer(text=f"Copie STAFF · DB id: {infraction_id} · le public ne te voit pas")
 
     # #21 : contexte au moment de sanctionner — affiche les notes de modération RÉCENTES sur
@@ -24763,7 +24774,7 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
                 _who = f"<@{int(_mid)}>" if _mid else "?"
                 _txt = (str(_content or "")[:120]).replace("\n", " ")
                 _lines.append(f"• {_txt} — {_who}")
-            _staff_e.add_field(name=f"📝 Notes récentes ({len(_notes)})",
+            _staff_e.add_field(name=f"Notes récentes ({len(_notes)})",
                                value="\n".join(_lines)[:1024], inline=False)
     except Exception:
         pass
@@ -24862,10 +24873,10 @@ class UnwarnSelect(Select):
                 warn_count = (await c.fetchone())[0]
         
         e = discord.Embed(title="✅ Warn supprimé", color=C.GREEN, timestamp=now())
-        e.add_field(name="👤 Membre", value=f"{self.membre.mention}", inline=True)
-        e.add_field(name="👮 Par", value=f"{i.user.mention}", inline=True)
-        e.add_field(name="📊 Warns restants", value=str(warn_count), inline=True)
-        e.add_field(name="📝 Warn supprimé", value=reason[:1024], inline=False)
+        e.add_field(name="Membre", value=f"{self.membre.mention}", inline=True)
+        e.add_field(name="Par", value=f"{i.user.mention}", inline=True)
+        e.add_field(name="Warns restants", value=str(warn_count), inline=True)
+        e.add_field(name="Warn supprimé", value=reason[:1024], inline=False)
         
         await i.response.edit_message(embed=e, view=None)
         
@@ -24940,10 +24951,10 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
     # Embed PUBLIC — 🔒 SANS le modérateur (owner 2026-07-17 : seuls les autres staffs doivent
     # savoir qui a sanctionné). Le mod_id reste tracé dans `infractions`, le salon de logs et
     # `staff_audit_log` ci-dessous.
-    e = discord.Embed(title="🔇 Membre mute", color=C.ORANGE, timestamp=now())
-    e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
-    e.add_field(name="⏱️ Durée", value=dur_txt, inline=True)
-    e.add_field(name="📝 Motif", value=raison, inline=False)
+    e = discord.Embed(title="Membre mute", color=C.ORANGE, timestamp=now())
+    e.add_field(name="Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+    e.add_field(name="Durée", value=dur_txt, inline=True)
+    e.add_field(name="Motif", value=raison, inline=False)
     e.set_footer(text="Sanction prononcée au nom du serveur")
     e.set_thumbnail(url=membre.display_avatar.url)
 
@@ -24979,9 +24990,9 @@ async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str
     
     # 🔒 Anonyme comme les sanctions (owner 2026-07-17). Un unmute n'est PAS une sanction, mais
     # afficher « débloqué par X » laisse deviner qui modère — et par symétrie qui a mute.
-    e = discord.Embed(title="🔊 Membre unmute", color=C.GREEN, timestamp=now())
-    e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
-    e.add_field(name="📝 Motif", value=raison, inline=False)
+    e = discord.Embed(title="Membre unmute", color=C.GREEN, timestamp=now())
+    e.add_field(name="Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+    e.add_field(name="Motif", value=raison, inline=False)
     e.set_footer(text="Décision prise au nom du serveur")
     e.set_thumbnail(url=membre.display_avatar.url)
 
@@ -25104,11 +25115,11 @@ async def direction_cmd(i: discord.Interaction, membre: discord.Member, duree: i
 
     # Embed de confirmation
     dur_txt = f"`{duree}` minutes" if duree > 0 else "**Permanent** ♾️"
-    e = discord.Embed(color=0xFF0000, title="🔒 Membre Restreint — Direction")
-    e.add_field(name="👤 Membre", value=f"{membre.mention} (`{membre.id}`)", inline=True)
-    e.add_field(name="⏱️ Durée", value=dur_txt, inline=True)
-    e.add_field(name="📝 Raison", value=raison, inline=False)
-    e.add_field(name="🔧 Actions effectuées", value=(
+    e = discord.Embed(color=0xFF0000, title="Membre Restreint — Direction")
+    e.add_field(name="Membre", value=f"{membre.mention} (`{membre.id}`)", inline=True)
+    e.add_field(name="Durée", value=dur_txt, inline=True)
+    e.add_field(name="Raison", value=raison, inline=False)
+    e.add_field(name="Actions effectuées", value=(
         f"• Tous les rôles retirés (`{len(saved_roles)}`)\n"
         f"• Rôle `🔒 Restricted` ajouté\n"
         f"• Timeout Discord appliqué\n"
@@ -25182,10 +25193,10 @@ async def undirection_cmd(i: discord.Interaction, membre: discord.Member, raison
         await db.execute('DELETE FROM restricted_members WHERE guild_id=? AND user_id=?', (i.guild.id, membre.id))
         await db.commit()
 
-    e = discord.Embed(color=0x2ECC71, title="🔓 Restriction Levée — Direction")
-    e.add_field(name="👤 Membre", value=f"{membre.mention}", inline=True)
-    e.add_field(name="🔄 Rôles restaurés", value=f"`{restored}/{len(saved_roles)}`", inline=True)
-    e.add_field(name="📝 Raison", value=raison, inline=False)
+    e = discord.Embed(color=0x2ECC71, title="Restriction Levée — Direction")
+    e.add_field(name="Membre", value=f"{membre.mention}", inline=True)
+    e.add_field(name="Rôles restaurés", value=f"`{restored}/{len(saved_roles)}`", inline=True)
+    e.add_field(name="Raison", value=raison, inline=False)
     e.set_thumbnail(url=membre.display_avatar.url)
     e.timestamp = now()
 
@@ -25921,7 +25932,7 @@ async def mod_note_cmd(i: discord.Interaction, membre: discord.Member, texte: st
                            detail=texte[:200], surface="slash")
 
     e = discord.Embed(
-        title="🗒️ Note interne ajoutée",
+        title="Note interne ajoutée",
         description=(
             f"Note enregistrée sur {membre.mention} — visible par le staff via "
             f"`/mod infractions`.\n_Non-punitive : aucun rôle, aucun impact sur le casier._"
@@ -25929,8 +25940,8 @@ async def mod_note_cmd(i: discord.Interaction, membre: discord.Member, texte: st
         color=discord.Color.light_grey(),
         timestamp=now(),
     )
-    e.add_field(name="📝 Note", value=texte[:1024], inline=False)
-    e.add_field(name="🗂️ Total notes", value=f"`{ncount}`", inline=True)
+    e.add_field(name="Note", value=texte[:1024], inline=False)
+    e.add_field(name="Total notes", value=f"`{ncount}`", inline=True)
     e.set_thumbnail(url=membre.display_avatar.url)
     await i.response.send_message(embed=e, ephemeral=True)
     try:
@@ -25987,7 +25998,7 @@ async def ticketblacklist_cmd(
     
     # Si action = list, afficher tous les panels et leurs blacklists
     if action == "list":
-        e = discord.Embed(title="🚫 Blacklists des Panels de Tickets", color=0xE74C3C)
+        e = discord.Embed(title="Blacklists des Panels de Tickets", color=0xE74C3C)
         
         for pid, pdata in panels.items():
             blacklist = pdata.get('blacklist', [])
@@ -26003,7 +26014,7 @@ async def ticketblacklist_cmd(
             else:
                 bl_text = "*Aucun membre*"
             
-            e.add_field(name=f"📋 {panel_name} ({len(blacklist)})", value=bl_text, inline=True)
+            e.add_field(name=f"{panel_name} ({len(blacklist)})", value=bl_text, inline=True)
         
         e.set_footer(text="Utilisez /ticketblacklist add/remove pour modifier")
         return await i.response.send_message(embed=e, ephemeral=True)
@@ -26054,14 +26065,14 @@ async def ticketblacklist_cmd(
         await db_set(i.guild.id, 'ticket_panels', panels)
         
         e = discord.Embed(
-            title="🚫 Membre Blacklisté",
+            title="Membre Blacklisté",
             description=f"{membre.mention} ne peut plus créer de tickets sur le panel **{panel_name}**.",
             color=0xE74C3C
         )
         e.set_thumbnail(url=membre.display_avatar.url)
-        e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
-        e.add_field(name="📋 Panel", value=panel_name, inline=True)
-        e.add_field(name="👮 Par", value=i.user.mention, inline=True)
+        e.add_field(name="Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+        e.add_field(name="Panel", value=panel_name, inline=True)
+        e.add_field(name="Par", value=i.user.mention, inline=True)
         e.set_footer(text="Le membre verra un message d'erreur s'il essaie de créer un ticket")
         
         await i.response.send_message(embed=e)
@@ -26080,9 +26091,9 @@ async def ticketblacklist_cmd(
             color=0x2ECC71
         )
         e.set_thumbnail(url=membre.display_avatar.url)
-        e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
-        e.add_field(name="📋 Panel", value=panel_name, inline=True)
-        e.add_field(name="👮 Par", value=i.user.mention, inline=True)
+        e.add_field(name="Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+        e.add_field(name="Panel", value=panel_name, inline=True)
+        e.add_field(name="Par", value=i.user.mention, inline=True)
         
         await i.response.send_message(embed=e)
 
@@ -28436,24 +28447,24 @@ async def create_deal_embed(platform: str, game_name: str, game_url: str, image_
     
     savings = original_price - final_price
     
-    e.add_field(name="💳 Prix", value=price_text, inline=True)
+    e.add_field(name="Prix", value=price_text, inline=True)
     if savings > 0:
-        e.add_field(name="💵 Économie", value=f"**{savings:.2f}€**", inline=True)
-    e.add_field(name="📊 Réduction", value=f"**-{discount}%**", inline=True)
+        e.add_field(name="Économie", value=f"**{savings:.2f}€**", inline=True)
+    e.add_field(name="Réduction", value=f"**-{discount}%**", inline=True)
     
     # Metacritic
     if metacritic and metacritic not in ['0', '']:
         try:
             score = int(metacritic)
             score_emoji = "🟢" if score >= 75 else ("🟡" if score >= 50 else "🔴")
-            e.add_field(name="🎯 Metacritic", value=f"{score_emoji} **{score}/100**", inline=True)
+            e.add_field(name="Metacritic", value=f"{score_emoji} **{score}/100**", inline=True)
         except:
             pass
     
     # Lien d'achat
     e.add_field(
         name="",
-        value=f"🛒 [{plat['emoji']} **Acheter sur {plat['name']}**]({game_url})",
+        value=f"[{plat['emoji']} **Acheter sur {plat['name']}**]({game_url})",
         inline=False
     )
     
@@ -32598,7 +32609,7 @@ async def _check_alt_account(member: discord.Member):
                 if _lch is not None:
                     await _lch.send(
                         embed=discord.Embed(
-                            title="🚨 Compte secondaire présumé — nouveau membre",
+                            title="Compte secondaire présumé — nouveau membre",
                             description=(
                                 f"**Nouveau :** {member.mention} (`{member.name}`)" + chr(10) +
                                 f"**Ressemble à :** {top.mention} (`{top.name}`)" + chr(10) +
