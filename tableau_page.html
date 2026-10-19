@@ -13,7 +13,7 @@
   --fond:#05070d;--fond-2:#0a0f1c;--fond-3:#0f1626;
   --s1:rgba(148,163,184,.055);--s2:rgba(148,163,184,.09);--s3:rgba(148,163,184,.14);
   --b1:rgba(148,163,184,.13);--b2:rgba(148,163,184,.22);--b3:rgba(148,163,184,.34);
-  --t1:#eef3fb;--t2:#a9b6ca;--t3:#74829a;
+  --t1:#eef3fb;--t2:#bcc7d8;--t3:#8f9cb3;
   --cyan:#22d3ee;--bleu:#3b82f6;--indigo:#818cf8;--violet:#a78bfa;--vert:#34d399;--rouge:#fb7185;--ambre:#fbbf24;--gris:#94a3b8;
   --r1:10px;--r2:14px;--r3:18px;--r4:24px;
   --ombre:0 1px 0 rgba(255,255,255,.04) inset,0 14px 34px -18px rgba(0,0,0,.7);
@@ -118,12 +118,21 @@ img{display:block}
 /* Cartes */
 .grille{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr));align-items:start}
 .grille.etroite{grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr))}
+.grille.mosaique{display:flex;align-items:flex-start;gap:12px}
+.grille.mosaique>.colonne{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:12px}
 .carte{position:relative;min-width:0;padding:16px;border-radius:var(--r3);background:linear-gradient(180deg,var(--s2),var(--s1));border:1px solid var(--b1);box-shadow:var(--ombre)}
 .carte.lien{cursor:pointer;transition:transform .3s var(--ease),border-color .3s,background .3s}
 .carte.lien:hover{transform:translateY(-2px);border-color:var(--b2);background:linear-gradient(180deg,var(--s3),var(--s1))}
 .carte.alerte{border-color:rgba(251,113,133,.42);background:linear-gradient(180deg,rgba(251,113,133,.09),var(--s1))}
 .carte.chaude{border-color:rgba(251,191,36,.42)}
-.anime>.carte,.anime>.ligne,.anime>.evt{animation:monte .5s var(--ease) both;animation-delay:calc(var(--i,0) * 32ms)}
+.anime>.carte,.anime>.colonne>.carte,.anime>.ligne,.anime>.evt{animation:monte .5s var(--ease) both;animation-delay:calc(var(--i,0) * 32ms)}
+.carte{transition:transform .3s var(--ease),border-color .3s,box-shadow .3s}
+@media (hover:hover){.carte:hover{border-color:var(--b2);box-shadow:var(--ombre),0 18px 40px -24px rgba(34,211,238,.35)}}
+.intro{display:flex;align-items:center;gap:14px;min-width:0;animation:monte .5s var(--ease) both}
+.intro .icone-onglet{flex:none;width:46px;height:46px;border-radius:14px;display:grid;place-items:center;color:#fff;
+  background:linear-gradient(135deg,var(--teinte,var(--cyan)),rgba(99,102,241,.85));box-shadow:0 10px 26px -10px var(--teinte,var(--cyan))}
+.intro h1{margin:0;font-size:clamp(20px,4.2vw,26px);font-weight:800;letter-spacing:-.01em;line-height:1.15}
+.intro p{margin:3px 0 0;color:var(--t2);font-size:14px}
 @keyframes monte{from{opacity:0;transform:translateY(10px) scale(.985)}}
 .pile{display:grid;gap:12px;min-width:0}
 .cadre{min-width:0;padding:18px;border-radius:var(--r3);background:linear-gradient(180deg,var(--s2),var(--s1));border:1px solid var(--b1)}
@@ -155,7 +164,7 @@ img{display:block}
 .bouton{display:inline-flex;align-items:center;justify-content:center;gap:8px;max-width:100%;min-height:36px;padding:7px 13px;border-radius:11px;border:1px solid var(--b2);background:var(--s2);
   color:var(--t1);font-size:13px;font-weight:650;cursor:pointer;text-decoration:none;white-space:nowrap;transition:background .2s,transform .15s,border-color .2s}
 .bouton:hover{background:var(--s3);border-color:var(--b3)}
-.bouton:active{transform:translateY(1px)}
+.bouton:active{transform:scale(.97)}
 .bouton:disabled{opacity:.5;cursor:not-allowed}
 .bouton.principal{background:linear-gradient(135deg,var(--cyan),var(--bleu));border-color:transparent;color:#03111e}
 .bouton.principal:hover{filter:brightness(1.08)}
@@ -250,6 +259,7 @@ details.repli>summary::-webkit-details-marker{display:none}
 details.repli>summary .chevron{transition:transform .3s var(--ease);color:var(--t3)}
 details.repli[open]>summary .chevron{transform:rotate(90deg)}
 details.repli>.contenu{padding:0 16px 16px;display:grid;gap:12px;min-width:0}
+details.repli[open]>.contenu{animation:monte .4s var(--ease) both}
 
 /* Pagination, vides */
 .plus{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding-top:4px}
@@ -315,7 +325,13 @@ details.repli>.contenu{padding:0 16px 16px;display:grid;gap:12px;min-width:0}
 .menu .liste-menu a:hover,.menu .liste-menu button:hover{background:var(--s2)}
 footer{margin-top:34px;padding-top:18px;border-top:1px solid var(--b1);display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;color:var(--t3);font-size:12px}
 footer p{margin:0;max-width:760px}
-@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+@keyframes fondu{from{opacity:0}}
+@media (prefers-reduced-motion:reduce){
+  .aurore i{animation:none}
+  .vue.anim,.intro,.anime>*,.anime>.colonne>*,details.repli[open]>.contenu,.barre-h .plein,.choix-sondage .plein{animation-name:fondu!important}
+  .carte,.tuile,.bouton,.curseur{transition-property:opacity,background,border-color,box-shadow,color!important}
+  .bouton:active{transform:none}
+}
 </style>
 </head>
 <body>
@@ -574,7 +590,8 @@ function barres(cles, valeurs, series, vide_) {
       const v = (valeurs[k] || {})[s] || 0; if (!v) return;
       const hh = (H - bas - haut) * v / max; y -= hh;
       const r = ajoute("rect", {x, y, width: larg, height: Math.max(hh - 2, 1.5), rx: 4, fill: coul});
-      if (!reduit.matches) { r.style.transformOrigin = `${x + larg / 2}px ${H - bas}px`; r.style.animation = `pousseY .8s ${i * 40}ms var(--ease) both`; }
+      r.style.transformOrigin = `${x + larg / 2}px ${H - bas}px`;
+      r.style.animation = reduit.matches ? `fondu .6s ${i * 40}ms ease both` : `pousseY .8s ${i * 40}ms var(--ease) both`;
       const t = document.createElementNS(NS, "title"); t.textContent = (k.length === 7 ? libelleMois(k) : libelleJour(k)) + " · " + lib + " : " + v; r.append(t);
     });
     if (i % etiquettes === 0) ajoute("text", {x: x + larg / 2, y: H - 7, "text-anchor": "middle"}, k.length === 7 ? libelleMois(k) : k.slice(8) + "/" + k.slice(5, 7));
@@ -682,11 +699,73 @@ function majBadges() {
 
 /* ── Rendu ─────────────────────────────────────────────────────────────── */
 const RENDUS = {};
+const INTROS = {
+  apercu: ["Aperçu", "Ce qui demande ton attention, en un coup d'œil.", "accueil", "var(--cyan)"],
+  candidatures: ["Candidatures", "Les candidatures Rell Seas : en cours, acceptées, refusées.", "personnes", "#2dd4bf"],
+  tickets: ["Tickets", "Les tickets ouverts et fermés, par type et par membre du staff.", "ticket", "#22d3ee"],
+  moderation: ["Modération", "Le casier par membre, les modérateurs, et le nettoyage.", "bouclier", "#fbbf24"],
+  journal: ["Journal", "Tout ce qui s'est passé sur le serveur, jour par jour.", "journal", "#38bdf8"],
+  questions: ["Questions", "Les questions posées dans les salons publics, et leur réponse.", "question", "#60a5fa"],
+  sondages: ["Sondages", "Les sondages Discord des membres, résultats en direct.", "sondage", "#818cf8"],
+  clan: ["Clan Rell Seas", "Les membres du clan, leur activité, les rappels d'inactivité.", "personnes", "#2dd4bf"]
+};
+function introOnglet(cle) {
+  const [titre, phrase, nomIcone, teinte] = INTROS[cle] || [cle, "", "vide", "var(--cyan)"];
+  return h("header", {classe: "intro", style: "--teinte:" + teinte}, h("div", {classe: "icone-onglet", "aria-hidden": "true"}, icone(nomIcone, 22)),
+    h("div", {style: "min-width:0"}, h("h1", {}, titre), phrase ? h("p", {}, phrase) : null));
+}
+/* Mosaïque : chaque carte s'empile sous la plus courte des colonnes ; plus jamais de trou sous
+   une carte plus courte que sa voisine. Les tuiles se répartissent sans case vide. */
+const observees = new WeakSet();
+const suivi = "ResizeObserver" in window ? new ResizeObserver((entrees) => entrees.forEach(e => {
+  const el = e.target; if (el.classList.contains("tuiles")) repartirTuiles(el); else mosaique(el);
+})) : null;
+function mosaique(g) {
+  const cartes = g._cartes || (g._cartes = [...g.children]);
+  if (!cartes.length) return;
+  const min = g.classList.contains("etroite") ? 250 : 310;
+  const n = Math.max(1, Math.min(cartes.length, Math.floor((g.clientWidth + 12) / (min + 12))));
+  if (g._n === n) return;
+  g._n = n;
+  g.classList.add("mosaique");
+  const cols = Array.from({length: n}, () => h("div", {classe: "colonne"}));
+  cartes.forEach((c, i) => cols[i % n].append(c));
+  g.replaceChildren(...cols);
+  if (n > 1) {
+    const hauteurs = cartes.map(c => c.offsetHeight);
+    const cumul = new Array(n).fill(0);
+    const place = cols.map(() => []);
+    cartes.forEach((c, i) => { let k = 0; for (let j = 1; j < n; j++) if (cumul[j] < cumul[k] - 1) k = j; place[k].push(c); cumul[k] += hauteurs[i] + 12; });
+    place.forEach((l, k) => cols[k].replaceChildren(...l));
+  }
+}
+function repartirTuiles(t) {
+  const tuiles = [...t.children];
+  const n = tuiles.length;
+  if (!n) return;
+  const m = Math.max(1, Math.floor((t.clientWidth + 10) / 160));
+  let c = Math.min(n, m);
+  for (let k = c; k >= Math.max(2, Math.ceil(m / 2)); k--) if (n % k === 0) { c = k; break; }
+  t.style.gridTemplateColumns = `repeat(${c}, minmax(0, 1fr))`;
+  tuiles.forEach(x => { x.style.gridColumn = ""; });
+  const reste = n % c;
+  if (reste) tuiles[n - 1].style.gridColumn = `span ${c - reste + 1}`;
+}
+function ranger(racine) {
+  racine.querySelectorAll(".grille").forEach(g => { mosaique(g); if (suivi && !observees.has(g)) { observees.add(g); suivi.observe(g); } });
+  racine.querySelectorAll(".tuiles").forEach(t => { repartirTuiles(t); if (suivi && !observees.has(t)) { observees.add(t); suivi.observe(t); } });
+}
 function rendre(cle, complet) {
   if (!etat.d || etat.fini) return;
   const vue = $("#vue-" + cle);
   const plein = complet || !vue.firstChild || !etat.rendus.has(cle);
   RENDUS[cle](vue, plein);
+  if (INTROS[cle] && !vue.querySelector(":scope > .intro")) {
+    const intro = introOnglet(cle);
+    if (!plein) intro.style.animation = "none";
+    vue.prepend(intro);
+  }
+  ranger(vue);
   if (plein) {
     etat.rendus.add(cle);
     if (etat.anim && !reduit.matches) { vue.classList.remove("anim"); void vue.offsetWidth; vue.classList.add("anim"); }

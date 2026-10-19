@@ -2,6 +2,8 @@
 
 « Quand quelqu'un dit bonjour, on a un emoji qui apparaît en dessous de lui, avec une main. Dans les
 salons où l'everyone peut écrire, sauf les salons d'annonces ou autres, où il ne peut pas écrire. »
+Puis : « pas que bonjour : bonsoir, bonne nuit, bonne soirée, BNN, les raccourcis, salut, yo… tous
+les trucs qui disent bonjour, bonsoir » — les salutations d'arrivée ET de départ, abréviations comprises.
 
 Une salutation = le message COMMENCE par un mot de salut (« Bonjour tout le monde ! », « salut
 @Kolax ») et reste court. Une fois par membre et par salon toutes les 10 minutes : pas d'avalanche
@@ -17,8 +19,17 @@ import discord
 
 EMOJI = "👋"
 MOTS = frozenset({"bonjour", "bonjours", "bonsoir", "bjr", "bsr", "salut", "salu", "slt", "coucou", "cc", "hello",
-                  "helo", "hey", "hi", "yo", "hola", "wesh", "bonjoir", "re", "rebonjour", "resalut", "kikou"})
-AMBIGUS = frozenset({"re", "cc", "yo", "hi"})  # seulement dans un message très court
+                  "helo", "hey", "hi", "yo", "hola", "wesh", "bonjoir", "re", "rebonjour", "resalut", "kikou",
+                  "bn", "bnn", "bns", "bnj", "bonuit", "bonenuit", "bye", "byebye", "bybye", "ciao", "tchao", "tchuss",
+                  "cya", "aplus", "apluss", "apl", "gn", "gm", "goodnight", "night", "nuit"})
+#  Les débuts en deux mots : « bonne nuit », « bonne soirée », « à plus », « à demain », « good night »…
+DEUX_MOTS = frozenset({("bonne", "nuit"), ("bonne", "soiree"), ("bonne", "journee"), ("bonne", "matinee"),
+                       ("bonne", "aprem"), ("bonne", "apres"), ("bonne", "fin"), ("bon", "aprem"), ("bon", "matin"),
+                       ("bon", "soir"), ("bne", "nuit"), ("bne", "soiree"), ("bne", "journee"), ("a", "plus"),
+                       ("a", "demain"), ("a", "toute"), ("a", "tout"), ("a", "bientot"), ("a", "tantot"),
+                       ("good", "night"), ("good", "morning"), ("bye", "bye"), ("bonne", "nuitt")})
+#  Seulement dans un message très court (« bn » peut vouloir dire « bien », « re » « regarde »…).
+AMBIGUS = {"re": 4, "cc": 4, "yo": 4, "hi": 4, "bn": 2, "gn": 3, "gm": 3, "nuit": 3, "night": 3, "apl": 3}
 LONGUEUR_MAX = 80
 ATTENTE = 600
 _derniers: dict = {}
@@ -40,13 +51,18 @@ def est_salutation(texte: str) -> bool:
     """« Bonjour à tous », « slt », « Hello !! », « salut @x » — pas « je voulais dire salut »."""
     if not texte or len(texte) > LONGUEUR_MAX:
         return False
+    if re.match(r"\s*[a@]\s?\+", texte.lower()):
+        return True  # « a+ », « @+ », « a + tout le monde »
     mots = _mots(texte)
     if not mots:
         return False
-    premier = re.sub(r"(.)\1{2,}", r"\1", mots[0])  # « saluuuut » → « salut », « coucouuu » → « coucou »
+    a_plat = [re.sub(r"(.)\1{2,}", r"\1", m) for m in mots[:2]]  # « saluuuut » → « salut »
+    if len(a_plat) == 2 and (tuple(a_plat) in DEUX_MOTS or (a_plat[0], re.sub(r"(.)\1+", r"\1", a_plat[1])) in DEUX_MOTS):
+        return True
+    premier = a_plat[0]
     if premier not in MOTS:
         premier = re.sub(r"(.)\1+", r"\1", mots[0])
-    if premier in AMBIGUS and len(mots) > 4:
+    if premier in AMBIGUS and len(mots) > AMBIGUS[premier]:
         return False
     return premier in MOTS
 

@@ -12,10 +12,14 @@ from conftest_discord import Obj
 
 def test_A1_ce_qui_est_une_salutation():
     for texte in ("Bonjour", "bonjour tout le monde !", "Salut <@1234567890123>", "slt", "Coucouuu", "HELLO !!",
-                  "Bonsoir à tous", "re", "cc les gens", "saluuuut la team", "Hey", "bjr"):
+                  "Bonsoir à tous", "re", "cc les gens", "saluuuut la team", "Hey", "bjr", "yo",
+                  "Bonne nuit", "bonne nuit tout le monde", "BNN", "bnn tlm", "bn", "Bonne soirée !", "bns",
+                  "Bonne journée à vous", "bnj", "à plus", "A+", "@+ les gars", "a demain", "à toute", "bye",
+                  "bye bye", "ciao", "tchao", "good night", "gn", "bonne nuittt", "Bon aprem !"):
         assert S.est_salutation(texte), texte
     for texte in ("je voulais dire salut", "c'est bon", "regarde ça", "re-regarde la vidéo stp maintenant les gars",
-                  "Bonjour " + "x" * 90, "", "!!!", "Salutations distinguées"):
+                  "Bonjour " + "x" * 90, "", "!!!", "Salutations distinguées", "bn et toi ?", "bonne idée",
+                  "à mon avis non", "bon ça marche", "a faire demain"):
         assert not S.est_salutation(texte), texte
 
 
