@@ -78,10 +78,14 @@ _db_set = None
 _log = print
 
 
-def setup(*, get_db, cfg, db_set, log=None):
-    """Branche le module sur les fonctions de bot.py."""
-    global _get_db, _cfg, _db_set, _log
-    _get_db, _cfg, _db_set = get_db, cfg, db_set
+_suivi = None   # (guild_id, user_id) -> bool : le membre porte-t-il le rôle suivi ?
+
+
+def setup(*, get_db, cfg, db_set, log=None, suivi=None):
+    """Branche le module sur les fonctions de bot.py. `suivi` : 19/10/2026, seuls les
+    membres du rôle choisi par le propriétaire sont suivis — les autres ne coûtent rien."""
+    global _get_db, _cfg, _db_set, _log, _suivi
+    _get_db, _cfg, _db_set, _suivi = get_db, cfg, db_set, suivi
     if log is not None:
         _log = log
 
@@ -144,6 +148,8 @@ async def marquer_actif(guild_id: int, user_id: int, source: str) -> None:
     d'un compte qui ne fait que réagir.
     """
     if source not in SOURCES:
+        return
+    if _suivi is not None and not await _suivi(guild_id, user_id):
         return
     jour = _aujourdhui()
 

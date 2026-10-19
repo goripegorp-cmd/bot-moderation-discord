@@ -24736,7 +24736,8 @@ async def _activite_boot():
     COMPTAGE des jours d'activité (bouton « Activité » de /rellseas) et le
     démontage de ce que le système avait posé (`_travaux_de_demarrage`).
     """
-    activite_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
+    activite_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print,
+                          suivi=_activite_suivi)
     activite_demontage_module.setup(log=print)
     visibilite_module.setup(log=print)
 
@@ -37239,50 +37240,30 @@ async def on_voice_state_update(member, before, after):
     except Exception as ex:
         print(f"Erreur tracking vocal: {ex}")
 
+async def _activite_suivi(guild_id, user_id) -> bool:
+    """19/10/2026 : « un système d'inactivité en fonction d'un rôle que j'aurai moi-même
+    prédéfini » — le « Rôle attribué » du menu Rell Seas. Sans rôle choisi : personne."""
+    rid = int((await cfg(guild_id)).get('rellseas_role', 0) or 0)
+    g = bot.get_guild(int(guild_id)) if rid else None
+    m = g.get_member(int(user_id)) if g else None
+    return m is not None and any(r.id == rid for r in m.roles)
+
+
 async def track_member_message(msg):
-    """Enregistre un message dans le tracking d'activité.
-
-    Phase 4.5 : si le système AFK est actif ET qu'une liste de salons surveillés
-    est définie, seuls les messages dans ces salons mettent à jour `last_message`.
-    Le compteur total_messages reste mis à jour partout (pour stats globales).
-    """
+    """Les compteurs de /profile (messages, dernier message, agrégat du jour).
+    19/10/2026 : l'ancien AFK (« salons surveillés ») est retiré — un cfg de moins par message."""
     try:
-        # Phase 4.5 : vérifier si le salon compte pour l'activité AFK
-        afk_tracks_this_channel = True
-        try:
-            c = await cfg(msg.guild.id)
-            afk_cfg = c.get('afk_role_config', {})
-            if afk_cfg.get('enabled', False):
-                tracked = afk_cfg.get('tracked_channels', []) or []
-                if tracked and msg.channel.id not in tracked:
-                    afk_tracks_this_channel = False
-        except Exception:
-            pass  # En cas d'erreur, on compte (fail-open)
-
         async with get_db() as db:
             now_str = now().isoformat()
             today = now().strftime('%Y-%m-%d')
+            await db.execute('''
+                INSERT INTO activity_tracking (guild_id, user_id, last_message, total_messages)
+                VALUES (?, ?, ?, 1)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                    last_message = ?,
+                    total_messages = total_messages + 1
+            ''', (msg.guild.id, msg.author.id, now_str, now_str))
 
-            # Mettre à jour activity_tracking
-            # Si AFK actif mais salon hors-liste : on incrémente total_messages
-            # mais on NE met PAS à jour last_message (donc AFK continue à compter)
-            if afk_tracks_this_channel:
-                await db.execute('''
-                    INSERT INTO activity_tracking (guild_id, user_id, last_message, total_messages)
-                    VALUES (?, ?, ?, 1)
-                    ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                        last_message = ?,
-                        total_messages = total_messages + 1
-                ''', (msg.guild.id, msg.author.id, now_str, now_str))
-            else:
-                # Incrémenter compteur uniquement (sans toucher last_message)
-                await db.execute('''
-                    INSERT INTO activity_tracking (guild_id, user_id, total_messages)
-                    VALUES (?, ?, 1)
-                    ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                        total_messages = total_messages + 1
-                ''', (msg.guild.id, msg.author.id))
-            
             # D3 : agrégat journalier au lieu d'1 INSERT brut PAR message (anti-gonflement).
             # UPSERT cheap : 1 ligne par (guild, user, channel, jour), hits += 1.
             # Sert le ciblage de salon ET les compteurs de stats messages.
