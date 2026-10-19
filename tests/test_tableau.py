@@ -1,6 +1,7 @@
-"""19/10/2026 : « un vrai site interactif… candidatures Rell Seas, tickets ouverts » — « seulement
-le rôle staff et au-dessus » — « des zones par personne » — « direction et fondateur mis à part »
-— « renforce l'infrastructure du site : quelqu'un qui n'a pas les accès ne l'a pas du tout »."""
+"""19/10/2026 : « un vrai site interactif… candidatures Rell Seas, tickets ouverts » — « des zones
+par personne » — « direction et fondateur mis à part » — « renforce l'infrastructure du site :
+quelqu'un qui n'a pas les accès ne l'a pas du tout » — « on va restreindre le site à 2 types de
+rôles : fondateur et direction. Les staffs n'auront pas accès au site »."""
 from __future__ import annotations
 
 import ast
@@ -135,10 +136,12 @@ class Env:
 
         async def alerte(g, m, raison):
             self.alertes.append((m.id, raison))
+
+        def direction(g, m, c):
+            return m is not None and m.id == 3
         tableau.setup(bot=Obj(get_guild=lambda gid: self.g if gid == 1 else None, user=Obj(id=999)), cle="k",
                       base_url="https://bot.exemple", cfg=cfg, get_db=get_db, mesurer_groupe=mesurer,
-                      autorise_membre=ns["_staff_ou_plus"], direction=lambda g, m, c: m is not None and m.id == 3,
-                      alerte_securite=alerte, log=lambda *a: None)
+                      autorise_membre=direction, direction=direction, alerte_securite=alerte, log=lambda *a: None)
         questions.setup(get_db=get_db, est_staff=ns["_staff_ou_plus"], log=lambda *a: None)
 
         async def salon(_g):
@@ -200,7 +203,7 @@ def test_T4_lien_a_usage_unique_puis_session(tmp_path):
     env = Env(tmp_path)
 
     async def scenario():
-        j = tableau.jeton(1, 2, "tout")
+        j = tableau.jeton(1, 3, "tout")
         entree = await tableau.entree(Requete(j))
         sid = entree.cookies[tableau.COOKIE].value
         rejoue = await tableau.entree(Requete(j))
@@ -210,17 +213,18 @@ def test_T4_lien_a_usage_unique_puis_session(tmp_path):
         api = await tableau.api(Requete(cookie=sid))
         api304 = await tableau.api(Requete(cookie=sid, entetes={"If-None-Match": api.headers["ETag"]}))
         hors_staff = await tableau.entree(Requete(tableau.jeton(1, 8, "tout")))
+        staff = await tableau.entree(Requete(tableau.jeton(1, 2, "tout")))
         faux = await tableau.entree(Requete("faux"))
         sortie = await tableau.sortir(Requete(cookie=sid, entetes=ORIGINE))
         apres = await tableau.api(Requete(cookie=sid))
-        return entree, rejoue, rejoue_meme_navigateur, page, sans, api, api304, hors_staff, faux, sortie, apres
-    entree, rejoue, meme, page, sans, api, api304, hors_staff, faux, sortie, apres = asyncio.run(scenario())
+        return entree, rejoue, rejoue_meme_navigateur, page, sans, api, api304, hors_staff, staff, faux, sortie, apres
+    entree, rejoue, meme, page, sans, api, api304, hors_staff, staff, faux, sortie, apres = asyncio.run(scenario())
     biscuit = entree.cookies[tableau.COOKIE]
     assert entree.status == 303 and entree.headers["Location"] == tableau.ESPACE, "l'adresse perd le jeton"
     assert biscuit["httponly"] and biscuit["secure"] and biscuit["samesite"] == "Lax" and biscuit["path"] == "/"
     assert rejoue.status == 403 and "déjà servi" in rejoue.text, "un lien copié ne sert plus à rien"
     assert meme.status == 303, "le même navigateur, déjà connecté, repasse sans erreur"
-    assert page.status == 200 and "Espace staff" in page.text and "__NONCE__" not in page.text
+    assert page.status == 200 and "Espace direction" in page.text and "__NONCE__" not in page.text
     csp = page.headers["Content-Security-Policy"]
     assert "script-src 'nonce-" in csp and "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
     assert page.headers["Cache-Control"] == "no-store" and "noindex" in page.headers["X-Robots-Tag"]
@@ -229,22 +233,25 @@ def test_T4_lien_a_usage_unique_puis_session(tmp_path):
     corps = json.loads(api.text)
     assert api.status == 200 and corps["tickets"]["types"] and corps["expire"] > 0 and api.headers["ETag"]
     assert api304.status == 304, "rien n'a changé : rien n'est retéléchargé"
-    assert hors_staff.status == 403 and faux.status == 403, "un lien d'un membre qui n'est pas staff ne montre rien"
+    assert hors_staff.status == 403 and faux.status == 403, "un lien d'un simple membre ne montre rien"
+    assert staff.status == 403, "le staff n'entre plus sur le site, même avec un lien signé"
     assert sortie.status == 204 and apres.status == 403, "déconnecté : la session est effacée"
 
 
-def test_T5_le_bouton_ne_donne_le_lien_qu_au_staff_non_suspendu(tmp_path):
+def test_T5_le_bouton_ne_donne_le_lien_qu_au_fondateur_et_a_la_direction(tmp_path):
     env = Env(tmp_path)
 
     async def scenario():
-        ok = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[2]), membre_id=7)
+        ok = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[3]), membre_id=7)
         non = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[8]))
-        await tableau.suspendre(env.g, env.membres[2], "essai")
-        suspendu = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[2]))
-        return ok, non, suspendu
-    (url, refus), (url2, refus2), (url3, refus3) = asyncio.run(scenario())
+        staff = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[2]))
+        await tableau.suspendre(env.g, env.membres[3], "essai")
+        suspendu = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[3]))
+        return ok, non, staff, suspendu
+    (url, refus), (url2, refus2), (url4, refus4), (url3, refus3) = asyncio.run(scenario())
     assert url.startswith("https://bot.exemple/tableau/") and url.endswith("#membre=7") and refus == ""
-    assert url2 is None and "staff" in refus2
+    assert url2 is None and "direction" in refus2
+    assert url4 is None and refus4 == "Réservé au fondateur et à la direction.", "le staff n'a plus de lien"
     assert url3 is None and "suspendu" in refus3
 
 
@@ -355,7 +362,7 @@ def test_T8_un_seul_salon_de_logs_le_menu_epingle_toujours_a_jour():
         conf[k] = v
     ns = {"cfg": cfg, "db_set": db_set, "discord": discord, "visuels": visuels, "LayoutView": LayoutView,
           "Palette": Palette, "recrutements": recrutements, "_logerr": lambda *a, **k: None,
-          "ulogger2026": Obj(mode_site=mode_site)}
+          "ulogger2026": Obj(mode_site=mode_site), "now": lambda: datetime.now(timezone.utc)}
     for nom in ("NOM_SALON_LOGS", "MENU_LOGS_VERSION", "_anciens_salons", "_menu_logs", "_salon_tableau"):
         exec(_source(nom), ns)  # noqa: S102 — code du dépôt
     assert asyncio.run(ns["_salon_tableau"](g)) is salon
@@ -363,8 +370,9 @@ def test_T8_un_seul_salon_de_logs_le_menu_epingle_toujours_a_jour():
     assert len(crees) == 1 and crees[0][0] == "📋logs"
     ows = crees[0][1]["overwrites"]
     assert ows[tous].view_channel is False
-    assert ows[staff].view_channel and ows[direction].view_channel, "staff et au-dessus"
+    assert ows[direction].view_channel and staff not in ows, "la direction et au-dessus, plus le staff"
     assert membre_r not in ows and robot_r not in ows
+    assert conf.get("logs_direction_v1"), "créé déjà réservé : aucune migration à refaire"
     assert len(envois) == 1 and epingles and not edits, "un seul message, épinglé, pas réécrit pour rien"
     composants = list(envois[0]["view"].walk_children())
     assert any(getattr(c, "custom_id", "") == "recr:web" for c in composants)
@@ -393,7 +401,7 @@ def test_T9_seuls_le_fondateur_et_la_direction_agissent():
     assert not direction(g, _membre(6, admin=True), {}), "sans rôle direction : le fondateur seul"
 
 
-def test_T10_actions_verifiees_origine_niveaux_cadence(tmp_path):
+def test_T10_actions_verifiees_origine_droits_cadence(tmp_path):
     env = Env(tmp_path)
     appels = []
 
@@ -404,8 +412,8 @@ def test_T10_actions_verifiees_origine_niveaux_cadence(tmp_path):
     async def question(g, auteur, corps):
         return True, "Question traitée."
     tableau._actions = {"ticket_fermer": fermer, "question": question}
-    tableau._niveaux = {"question": "staff"}
-    dir_sid, staff_sid = env.session(3), env.session(2)
+    dir_sid = env.session(3)
+    staff_sid = asyncio.run(tableau._ouvrir_session(1, 2, 4102444800))
 
     def act(sid, corps, entetes=ORIGINE):
         return tableau.action(Requete(cookie=sid, corps=corps, entetes=entetes))
@@ -425,8 +433,7 @@ def test_T10_actions_verifiees_origine_niveaux_cadence(tmp_path):
     sans_entete, autre_site, croise, sans_session, refuse, geste_staff, inconnue, ok, dernier = asyncio.run(scenario())
     assert sans_entete.status == autre_site.status == croise.status == 400, "une requête venue d'ailleurs que la page est refusée"
     assert sans_session.status == 403
-    assert refuse.status == 403 and "direction" in json.loads(refuse.text)["message"]
-    assert geste_staff.status == 200, "un geste sans risque est ouvert au staff"
+    assert refuse.status == 403 and geste_staff.status == 403, "même une session forgée pour le staff n'agit pas"
     assert inconnue.status == 400
     assert ok.status == 200 and json.loads(ok.text) == {"ok": True, "message": "Ticket fermé."}
     assert appels[0] == (3, {"action": "ticket_fermer", "ticket": 5})

@@ -123,15 +123,18 @@ class Monde:
         return asyncio.run(self.ns[nom](self.g, self.membres[auteur], corps))
 
 
-def test_S1_fondateur_direction_et_staff_intouchables(tmp_path):
+def test_S1_fondateur_et_direction_intouchables_le_staff_sanctionnable(tmp_path):
     m = Monde(tmp_path)
     cible = lambda auteur, uid: asyncio.run(m.ns["_cible_site"](m.g, m.membres[auteur], uid, {}))
-    for uid, mot in ((99, "fondateur"), (42, "fondateur"), (3, "fondateur"), (2, "staff"), (9, "bot"), (11, "immunisé"),
+    for uid, mot in ((99, "fondateur"), (42, "fondateur"), (3, "fondateur"), (9, "bot"), (11, "immunisé"),
                      (12, "rôle"), (555, "plus sur le serveur")):
         membre, refus = cible(3, uid)
         assert membre is None and mot in refus.lower(), (uid, refus)
     membre, refus = cible(3, 7)
     assert membre is m.membres[7] and refus is None
+    assert cible(3, 2)[0] is m.membres[2], "« sanctions directes par le panel en fonction de tout » : le staff aussi"
+    m.membres[2].top_role = 30
+    assert "rôle" in cible(3, 2)[1], "jamais un rôle égal ou supérieur au sien"
     m.membres[7].top_role = 33
     assert "sous le sien" in cible(99, 7)[1], "jamais au-dessus du bot"
 
@@ -154,7 +157,7 @@ def test_S3_retirer_le_role_du_clan_seulement_et_par_lots(tmp_path):
     ok, msg = m.faire("_action_clan_retirer", 3, {"membre": 7})
     assert ok and m.membres[7].faits == [("retire", CLAN)]
     ok, msg = m.faire("_action_clan_retirer", 3, {"membre": 2})
-    assert not ok and CLAN in m.membres[2].roles, "le staff ne se gère pas depuis le site"
+    assert ok and CLAN not in m.membres[2].roles, "le staff sous l'auteur se gère aussi depuis le site"
     lot = list(range(100, 140))
     for uid in lot:
         m.membres[uid] = Membre(uid)

@@ -98,7 +98,6 @@ _bot = None
 _radie = "🚫 Radié"
 _cfg = _get_db = _mesurer_groupe = _autorise_membre = _direction = _alerte_securite = None
 _actions: dict = {}
-_niveaux: dict = {}
 _cadence: dict = {}
 _sessions: dict = {}
 _requetes: dict = {}
@@ -124,14 +123,14 @@ _log = print
 
 
 def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_membre, radie=None,
-          direction=None, actions=None, niveaux=None, alerte_securite=None, log=None):
-    """`autorise_membre(g, membre, c)` → staff ou au-dessus (voir) ; `direction(g, membre, c)` →
-    fondateur ou direction (agir, et « mis à part » des statistiques) ; `actions` : {nom: async
-    (g, auteur, données) → (ok, message)} ; `niveaux` : {nom: "staff"} pour les gestes ouverts au
-    staff ; `alerte_securite(g, membre, texte)` : prévient dans « 📋logs »."""
+          direction=None, actions=None, alerte_securite=None, log=None):
+    """`autorise_membre(g, membre, c)` → qui entre sur le site (« restreindre le site au fondateur et
+    à la direction ; les staffs n'auront pas accès ») ; `direction(g, membre, c)` → qui agit, et qui
+    est « mis à part » des statistiques ; `actions` : {nom: async (g, auteur, données) → (ok,
+    message)} ; `alerte_securite(g, membre, texte)` : prévient dans « 📋logs »."""
     global _bot, _cle, _base, _cfg, _get_db, _mesurer_groupe, _autorise_membre, _log, _radie
-    global _direction, _actions, _niveaux, _alerte_securite
-    _direction, _actions, _niveaux = direction, dict(actions or {}), dict(niveaux or {})
+    global _direction, _actions, _alerte_securite
+    _direction, _actions = direction, dict(actions or {})
     _bot, _cle, _base = bot, cle.encode(), (base_url or "").rstrip("/")
     _radie = radie or _radie
     _cfg, _get_db, _mesurer_groupe, _autorise_membre = cfg, get_db, mesurer_groupe, autorise_membre
@@ -203,7 +202,7 @@ async def lien_pour(i, membre_id: int = 0) -> tuple[str | None, str]:
     if not _base or not _cle or i.guild is None:
         return None, "Le tableau de bord n'est pas joignable pour le moment."
     if _autorise_membre is None or not _autorise_membre(i.guild, i.user, await _cfg(i.guild.id)):
-        return None, "Réservé au staff et aux rôles au-dessus (direction…)."
+        return None, "Réservé au fondateur et à la direction."
     fin = await suspendu(i.guild.id, i.user.id)
     if fin:
         return None, (f"Ton accès au site est suspendu jusqu'à {_quand(fin)[-5:]} : trop d'actions graves "
@@ -302,7 +301,7 @@ def _trop_essais(request, compter: bool = False, maintenant: float | None = None
 
 
 async def _verifier(request, maintenant: float | None = None):
-    """Session valide, personne toujours staff ou au-dessus, pas suspendue, cadence raisonnable."""
+    """Session valide, personne toujours fondateur ou direction, pas suspendue, cadence raisonnable."""
     t = maintenant or time.time()
     ses = await _session(request, t)
     if ses is None:
@@ -678,9 +677,7 @@ async def fiche(g, uid: int, auteur) -> dict:
     qui = _Personnes(g)
     qui(uid)
     m = g.get_member(int(uid))
-    protege = m is not None and (int(uid) == getattr(g, "owner_id", 0)
-                                 or bool(_direction and _direction(g, m, c))
-                                 or bool(_autorise_membre and _autorise_membre(g, m, c)))
+    protege = m is not None and (int(uid) == getattr(g, "owner_id", 0) or bool(_direction and _direction(g, m, c)))
     agir = (bool(_direction and auteur is not None and _direction(g, auteur, c))
             and not await suspendu(g.id, getattr(auteur, "id", 0)))
     clan = g.get_role(int(c.get(rellseas_panneau.CLE_ROLE_CIBLE, 0) or 0))
@@ -965,8 +962,8 @@ def _genre_grave(nom: str, corps: dict) -> tuple[str, int] | None:
 
 async def action(request):
     """« Seulement le fondateur et le rôle direction » : chaque action est revérifiée ici, inscrite
-    au journal, et refusée si elle ne vient pas de la page elle-même. Les gestes sans risque
-    (`niveaux` = "staff") sont ouverts au staff. Trop d'actions graves : accès suspendu."""
+    au journal, et refusée si elle ne vient pas de la page elle-même. Trop d'actions graves : accès
+    suspendu."""
     try:
         j, g = await _verifier(request)
     except _Refus as r:
@@ -984,7 +981,7 @@ async def action(request):
     if fn is None:
         return _json({"ok": False, "message": "Action inconnue."}, 400)
     auteur = g.get_member(j["u"])
-    if _niveaux.get(nom) != "staff" and (_direction is None or not _direction(g, auteur, await _cfg(g.id))):
+    if _direction is None or not _direction(g, auteur, await _cfg(g.id)):
         return _json({"ok": False, "message": "Réservé au fondateur et à la direction."}, 403)
     maintenant = time.time()
     recents = [t for t in _cadence.get(auteur.id, []) if maintenant - t < 60]

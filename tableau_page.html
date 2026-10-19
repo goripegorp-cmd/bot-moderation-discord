@@ -7,7 +7,7 @@
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#05070d">
-<title>Espace staff</title>
+<title>Espace direction</title>
 <style>
 :root{
   --fond:#05070d;--fond-2:#0a0f1c;--fond-3:#0f1626;
@@ -314,7 +314,7 @@ footer p{margin:0;max-width:760px}
     <div class="barre">
       <div class="marque">
         <div class="logo" id="logo" aria-hidden="true">RS</div>
-        <div class="titre"><b id="nom-serveur">Espace staff</b><small id="sous-titre">Chargement…</small></div>
+        <div class="titre"><b id="nom-serveur">Espace direction</b><small id="sous-titre">Chargement…</small></div>
       </div>
       <div class="direct" id="direct" title="Les données se mettent à jour toutes seules">
         <span class="point" id="point"></span><span class="cacher-mobile" id="etat-direct">En direct</span>
@@ -1115,7 +1115,7 @@ RENDUS.clan = (vue, plein) => {
         const l = c.membres, larg = Math.max(4, ...l.map(x => x.nom.length));
         copier(l.map(x => x.nom.padEnd(larg + 2) + x.id + "  " + x.statut).join("\n"), l.length + " membre(s) copié(s)");
       }}, icone("copier"), "Copier la liste")));
-    if (agir_) vue.append(h("p", {classe: "aide"}, "Coche des membres pour leur retirer le rôle du clan d'un coup (25 au plus). Le site ne donne aucun rôle ; le fondateur, la direction et le staff ne peuvent pas être touchés."));
+    if (agir_) vue.append(h("p", {classe: "aide"}, "Coche des membres pour leur retirer le rôle du clan d'un coup (25 au plus). Le fondateur et la direction ne sont jamais touchés."));
     vue.append(h("div", {classe: "pile resultats"}));
     if ((c.direction || []).length) vue.append(h("div", {classe: "cadre pile"}, h("h3", {}, "Direction et fondateur"), h("p", {classe: "aide"}, "Mis à part : hors statistiques, intouchables depuis le site."),
       h("div", {classe: "pastilles"}, c.direction.map(m => h("span", {classe: "puce"}, avatar(m, "xs"), m.nom)))));
@@ -1162,7 +1162,7 @@ function barreLot() {
       h("button", {classe: "bouton p discret", type: "button", onclick: () => { etat.selection.clear(); rendre("clan"); }}, "Annuler"),
       h("button", {classe: "bouton p danger", type: "button", onclick: async () => {
         const ok = await agir({action: "clan_retirer_lot", membres: [...etat.selection]}, "Retirer " + n + " membre(s) du clan ?",
-          "Seul le rôle du clan leur est retiré, sur Discord. Chacun est vérifié : le fondateur, la direction et le staff ne sont jamais touchés.", {}, "Retirer " + n + " du clan", "danger");
+          "Seul le rôle du clan leur est retiré, sur Discord. Chacun est vérifié : le fondateur et la direction ne sont jamais touchés.", {}, "Retirer " + n + " du clan", "danger");
         if (ok) { etat.selection.clear(); rendre("clan"); }
       }}, "Retirer du clan")));
 }
@@ -1289,7 +1289,7 @@ function rendreFiche() {
       h("button", {classe: "bouton p danger", type: "button", onclick: () => moderer(m, "ban")}, "Bannir"),
       m.clan ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "clan_retirer", membre: m.id}, "Retirer " + p.nom + " du clan ?",
         "Seul le rôle du clan lui est retiré, sur Discord.", {}, "Retirer du clan", "danger")}, "Retirer du clan") : null)));
-  else if (m.protege && peutAgir()) corps.append(h("p", {classe: "aide"}, m.a_part ? "Fondateur ou direction : protégé, aucune action possible depuis le site." : "Membre du staff : se gère sur Discord, pas depuis le site."));
+  else if (m.protege && peutAgir()) corps.append(h("p", {classe: "aide"}, "Fondateur ou direction : protégé, aucune action possible depuis le site."));
   const nb = {chrono: null, sanctions: f.sanctions.length, tickets: f.tickets.length, candidatures: f.candidatures.length, questions: f.questions.length, journal: f.journal.length, donnees: f.donnees.length};
   const dispo = ONGLETS_FICHE.filter(([k]) => k === "chrono" || nb[k]);
   if (!dispo.some(([k]) => k === etat.ficheOnglet)) etat.ficheOnglet = "chrono";
@@ -1406,7 +1406,7 @@ async function agir(corps, titre, texte, opts, libelleOk, style) {
 function majEntete() {
   const d = etat.d;
   $("#nom-serveur").textContent = d.serveur.nom;
-  document.title = "Espace staff · " + d.serveur.nom;
+  document.title = "Espace direction · " + d.serveur.nom;
   const logo = $("#logo");
   if (d.serveur.icone && !logo.querySelector("img")) logo.replaceChildren(h("img", {src: d.serveur.icone, alt: ""}));
   majDirect(); pied();

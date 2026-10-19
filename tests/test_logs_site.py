@@ -350,7 +350,8 @@ def test_L6_le_site_lit_tout_ce_qui_concerne_une_personne(tmp_path):
     e = corps["journal"][1]
     assert (e["membre"], e["auteur"], e["salon"], e["detail"]) == ("7", "2", "#général", "spam")
     assert corps["personnes"]["2"]["nom"] == "Membre parti" and corps["personnes"]["7"]["nom"] == "Kolax"
-    assert corps["membre"]["protege"] and not corps["agir"], "un administrateur est protégé : aucune action depuis le site"
+    assert not corps["agir"], "sans rôle direction réglé, personne n'agit depuis le site"
+    assert not corps["membre"]["protege"], "protégés : le fondateur et la direction, pas un simple administrateur"
     page = (RACINE / "tableau_page.html").read_text(encoding="utf-8")
     assert '["journal", "Journal", "journal"]' in page and "/membre?id=" in page and "ouvrirFiche" in page
     assert "/tableau/espace/membre" in (RACINE / "health_server.py").read_text(encoding="utf-8")
@@ -422,3 +423,74 @@ def test_L8_le_menu_epingle_n_est_jamais_purge():
         finally:
             N.asyncio.sleep = original
     assert asyncio.run(scenario()) == 1 and supprimes == [alerte]
+
+
+class _Role(discord.Role):
+    """Un rôle du serveur, sans l'état de Discord."""
+
+    def __init__(self, rid, nom, position, managed=False, admin=False):
+        self.id, self.name, self.position, self.managed, self._admin = rid, nom, position, managed, admin
+
+    @property
+    def permissions(self):
+        return Obj(administrator=self._admin)
+
+
+def test_L9_logs_reserve_au_fondateur_et_a_la_direction():
+    """« Le salon Logs n'apparaîtra plus pour les staffs, mais que pour la direction et le fondateur. »"""
+    tous, staff, modo = _Role(1, "@everyone", 0), _Role(10, "Staff", 5, admin=True), _Role(12, "Modo", 4)
+    direction, haut, robot = _Role(11, "Direction", 8), _Role(13, "Co-fondateur", 9), _Role(14, "Bot", 10, managed=True)
+    me, staffeur, chef = Obj(id=500, bot=True), Obj(id=20, bot=False), Obj(id=30, bot=False)
+    vue = discord.PermissionOverwrite
+
+    class SalonLogs:
+        mention = "<#77>"
+
+        def __init__(self):
+            self.overwrites = {tous: vue(view_channel=True), staff: vue(view_channel=True), modo: vue(view_channel=True),
+                               direction: vue(view_channel=True), robot: vue(view_channel=True), me: vue(view_channel=True),
+                               staffeur: vue(view_channel=True), chef: vue(view_channel=True)}
+            self.appels = []
+
+        def overwrites_for(self, cible):
+            ow = self.overwrites.get(cible)
+            return vue(**dict(ow)) if ow is not None else vue()
+
+        async def set_permissions(self, cible, overwrite=None, reason=None):
+            self.appels.append(cible)
+            if overwrite is None:
+                self.overwrites.pop(cible, None)
+            else:
+                self.overwrites[cible] = overwrite
+    salon = SalonLogs()
+    conf, journal = {"tableau_salon": 77, "direction_allowed_role": 11}, []
+
+    async def cfg(_g):
+        return conf
+
+    async def db_set(_g, k, v):
+        conf[k] = v
+
+    async def au_journal(_g, *a, **k):
+        journal.append(a)
+
+    async def dormir(_s):
+        return None
+    g = Obj(id=1, owner_id=99, default_role=tous, me=Obj(id=500, guild_permissions=Obj(manage_roles=True, manage_channels=True)),
+            roles=[tous, modo, staff, direction, haut, robot], get_channel=lambda cid: salon if cid == 77 else None,
+            get_role={11: direction}.get)
+    g.me = me
+    me.guild_permissions = Obj(manage_roles=True, manage_channels=True)
+    ns = {"cfg": cfg, "db_set": db_set, "discord": discord, "asyncio": Obj(sleep=dormir), "_au_journal": au_journal,
+          "_logerr": lambda *a, **k: None, "now": lambda: datetime.now(timezone.utc),
+          "_direction_ou_plus": lambda _g, m, _c: m.id == 30}
+    exec(_source("_logs_direction_seule"), ns)  # noqa: S102 — code du dépôt
+    assert asyncio.run(ns["_logs_direction_seule"](g)) is True
+    ows = salon.overwrites
+    assert staff not in ows and modo not in ows and staffeur not in ows, "le staff ne voit plus 📋logs"
+    assert ows[tous].view_channel is False, "@everyone ne voit pas"
+    assert ows[direction].view_channel and ows[haut].view_channel, "la direction et au-dessus voient"
+    assert robot in ows and me in ows and chef in ows, "le bot, son rôle et la direction gardent leurs droits"
+    assert "Staff" in journal[-1][2] and "Administrateur" in journal[-1][2], "un rôle admin sous la direction est signalé"
+    appels = len(salon.appels)
+    assert asyncio.run(ns["_logs_direction_seule"](g)) is False and len(salon.appels) == appels, "une seule fois"

@@ -6356,8 +6356,9 @@ async def _action_candidature(g, auteur, d):
 
 async def _cible_site(g, auteur, membre_id, c):
     """(membre, None) ou (None, la raison du refus). 19/10/2026 : « si quelqu'un se fait voler son
-    compte, il n'a aucune interaction sur nous-mêmes, fondateur ou direction ». Le staff se gère
-    sur Discord ; les immunisés, les bots et les rôles au-dessus de l'auteur ou du bot non plus."""
+    compte, il n'a aucune interaction sur nous-mêmes, fondateur ou direction ». Ni les immunisés, ni
+    les bots, ni un rôle égal ou supérieur à celui de l'auteur ou du bot. Le staff, oui : « la
+    direction et le fondateur appliquent des sanctions directes par le panel en fonction de tout »."""
     cible = g.get_member(int(membre_id or 0))
     if cible is None:
         return None, "Ce membre n'est plus sur le serveur."
@@ -6365,8 +6366,6 @@ async def _cible_site(g, auteur, membre_id, c):
         return None, "Un bot ne se gère pas depuis le site."
     if cible.id == g.owner_id or owner_ids_module.is_super_owner(cible.id) or _direction_ou_plus(g, cible, c):
         return None, "Le fondateur et la direction sont protégés : aucune action possible depuis le site."
-    if _staff_ou_plus(g, cible, c):
-        return None, "Un membre du staff se gère sur Discord, pas depuis le site."
     if await is_fully_immune(cible):
         return None, "Membre immunisé : à voir sur Discord."
     chef = auteur.id == g.owner_id or owner_ids_module.is_super_owner(auteur.id)
@@ -6584,8 +6583,6 @@ _ACTIONS_TABLEAU = {"ticket_fermer": _action_ticket_fermer, "candidature": _acti
                     "clan_retirer": _action_clan_retirer, "clan_retirer_lot": _action_clan_retirer_lot,
                     "fiche_retirer": _action_fiche_retirer, "sanction_retirer": _action_sanction_retirer,
                     "moderer": _action_moderer, "question": _action_question, "alerte_geree": _action_alerte_geree}
-#  Gestes sans risque, ouverts à tout le staff ; tout le reste : fondateur et direction.
-_NIVEAUX_TABLEAU = {"question": "staff", "alerte_geree": "staff"}
 
 
 async def _salon_alertes_site(g):
@@ -6660,8 +6657,8 @@ class BoutonGere(discord.ui.DynamicItem[Button], template=r"alerte:gere:(?P<m>\d
         return cls(int(match["m"]))
 
     async def callback(self, i: discord.Interaction):
-        if not _staff_ou_plus(i.guild, i.user, await cfg(i.guild.id)):
-            return await i.response.send_message("Réservé au staff.", ephemeral=True)
+        if not _direction_ou_plus(i.guild, i.user, await cfg(i.guild.id)):
+            return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
         await i.response.defer(ephemeral=True)
         if self.membre_id:
             await vigilance.gerer(i.guild.id, self.membre_id, i.user.id)
@@ -6699,7 +6696,7 @@ class BoutonFicheSite(discord.ui.DynamicItem[Button], template=r"alerte:fiche:(?
 
 NOM_SALON_LOGS = "📋logs"
 #  Le menu est réécrit quand sa signature change (texte, mode, nombre d'anciens salons).
-MENU_LOGS_VERSION = 2
+MENU_LOGS_VERSION = 3
 #  Les alertes qui demandent une réaction humaine (raid, compte piraté, escalade, staff) : en
 #  mode site, elles arrivent dans le salon unique. Tous les autres salons de logs sont mis à 0.
 CLES_ALERTES = ('mod_log_channel', 'antiraid_log_channel', 'log_anti_raid', 'log_anti_alt',
@@ -6736,7 +6733,7 @@ async def _menu_logs(g, c):
     texte = ("### Les logs du serveur, sur le site\n"
              "Tickets et transcripts · candidatures · sanctions par modérateur et par membre · "
              "journal de tout ce qui s'est passé, lisible par personne.\n"
-             "-# Un clic : ton lien personnel, valable 24 h. Réservé au staff et aux rôles au-dessus.")
+             "-# Un clic : ton lien personnel, valable 24 h. Réservé au fondateur et à la direction.")
     if site:
         texte += ("\n-# Plus aucun log sur Discord : ici n'arrivent que les alertes qui demandent "
                   "une réaction (raid, compte piraté, escalade).")
@@ -6754,8 +6751,9 @@ async def _salon_tableau(g):
     """19/10/2026 : « que le site soit accessible pour nous, qu'on puisse le voir dans le serveur
     Discord ». Puis : « il n'y aura qu'un seul salon, qui mettra le lien correctement, et tu
     t'assures qu'il sera tout le temps opérationnel… le salon de logs, ce sera le fameux menu ».
-    Seuls le staff et les rôles au-dessus le voient ; le menu épinglé revient s'il a été
-    supprimé, se réécrit s'il a changé. Rend le salon, ou None."""
+    Puis : « le salon Logs n'apparaîtra plus pour les staffs, que pour la direction et le
+    fondateur ». Le menu épinglé revient s'il a été supprimé, se réécrit s'il a changé. Rend le
+    salon, ou None."""
     try:
         c = await cfg(g.id)
         me = g.me
@@ -6763,23 +6761,21 @@ async def _salon_tableau(g):
         if salon is None:
             if not (me and me.guild_permissions.manage_channels and me.guild_permissions.manage_roles):
                 return None
-            seuils = [g.get_role(int(c.get(k, 0) or 0)) for k in ('ticket_staff', 'direction_allowed_role')]
-            seuils = [r for r in seuils if r is not None]
-            if not seuils:
-                return None
-            plancher = min(r.position for r in seuils)
+            direction = g.get_role(int(c.get('direction_allowed_role', 0) or 0))
+            plancher = direction.position if direction is not None else None
             ows = {g.default_role: discord.PermissionOverwrite(view_channel=False),
                    me: discord.PermissionOverwrite(view_channel=True, send_messages=True, embed_links=True,
                                                    read_message_history=True, manage_messages=True)}
             for r in g.roles:
-                if r.position >= plancher and not r.managed and r != g.default_role:
+                if plancher is not None and r.position >= plancher and not r.managed and r != g.default_role:
                     ows[r] = discord.PermissionOverwrite(view_channel=True, read_message_history=True,
                                                          send_messages=False)
             ref = (g.get_channel(int(c.get('ticket_log', 0) or 0))
                    or g.get_channel(int(c.get('mod_log_channel', 0) or 0)))
             ancien = int(c.get('tableau_salon', 0) or 0)
             salon = await g.create_text_channel(NOM_SALON_LOGS, category=getattr(ref, "category", None),
-                                                overwrites=ows, reason="Salon des logs du staff")
+                                                overwrites=ows, reason="Salon des logs : fondateur et direction")
+            await db_set(g.id, 'logs_direction_v1', now().isoformat())
             await db_set(g.id, 'tableau_salon', salon.id)
             if ancien and c.get('logs_sur_site_v1'):
                 #  Recréé : les alertes suivent (sinon elles partiraient vers un salon disparu).
@@ -6807,6 +6803,62 @@ async def _salon_tableau(g):
     except discord.HTTPException as ex:
         _logerr("tableau.salon", ex, guild_id=getattr(g, 'id', 0))
         return None
+
+
+async def _logs_direction_seule(g) -> bool:
+    """19/10/2026 (soir) : « le salon Logs n'apparaîtra plus pour les staffs, que pour la direction
+    et le fondateur ». Une fois par serveur, sur « 📋logs » : les droits propres à ce salon des rôles
+    sous la direction (et des membres hors direction) sont retirés, @everyone ne voit pas, la
+    direction et les rôles au-dessus voient. Un rôle « Administrateur » voit tout salon malgré
+    tout : il est seulement signalé au journal du site."""
+    try:
+        c = await cfg(g.id)
+        if c.get('logs_direction_v1'):
+            return False
+        salon = g.get_channel(int(c.get('tableau_salon', 0) or 0))
+        me = g.me
+        if salon is None or me is None or not (me.guild_permissions.manage_roles
+                                               and me.guild_permissions.manage_channels):
+            return False
+        direction = g.get_role(int(c.get('direction_allowed_role', 0) or 0))
+        seuil = direction.position if direction is not None else None
+        raison = "📋logs : fondateur et direction seulement"
+        retires = 0
+        for cible in list(salon.overwrites):
+            if cible == g.default_role or cible == me or getattr(cible, 'bot', False):
+                continue
+            if isinstance(cible, discord.Role):
+                garde = cible.managed or (seuil is not None and cible.position >= seuil)
+            else:
+                garde = cible.id == g.owner_id or _direction_ou_plus(g, cible, c)
+            if not garde:
+                await salon.set_permissions(cible, overwrite=None, reason=raison)
+                retires += 1
+                await asyncio.sleep(0.3)
+        tous = salon.overwrites_for(g.default_role)
+        if tous.view_channel is not False:
+            tous.view_channel = False
+            await salon.set_permissions(g.default_role, overwrite=tous, reason=raison)
+        for r in g.roles:
+            if seuil is None or r.managed or r == g.default_role or r.position < seuil:
+                continue
+            ow = salon.overwrites_for(r)
+            if not ow.view_channel:
+                ow.update(view_channel=True, read_message_history=True)
+                await salon.set_permissions(r, overwrite=ow, reason=raison)
+        admins = [r.name for r in g.roles if r.permissions.administrator and not r.managed
+                  and r != g.default_role and (seuil is None or r.position < seuil)]
+        await db_set(g.id, 'logs_direction_v1', now().isoformat())
+        texte = f"{salon.mention} réservé au fondateur et à la direction : {retires} accès retiré(s)."
+        if admins:
+            texte += (" Attention : ces rôles ont la permission Administrateur et voient tout salon : "
+                      + ", ".join(admins[:10]) + ".")
+        await _au_journal(g, "Config", "logs.direction", texte)
+        print(f"[LOGS] 📋logs réservé à la direction : {g.id} · {retires} accès retirés · {len(admins)} admin(s)")
+        return True
+    except discord.HTTPException as ex:
+        _logerr("logs.direction", ex, guild_id=getattr(g, 'id', 0))
+        return False
 
 
 async def _passer_logs_sur_site(g) -> bool:
@@ -12295,6 +12347,7 @@ async def _travaux_de_demarrage():
                     await recrutements.rattraper(g)
                     await recrutements.publier_recap(g)
                 await _salon_tableau(g)
+                await _logs_direction_seule(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
         await _fermer_anciens_sondages()
@@ -19360,9 +19413,9 @@ async def _activite_boot():
     ulogger2026.vue_alerte = _vue_alerte
     tableau.setup(bot=bot, base_url=transcript_store.public_base_url(), cfg=cfg, get_db=get_db,
                   cle=os.getenv("TABLEAU_CLE") or hashlib.sha256((TOKEN or "").encode() + b"|tableau").hexdigest(),
-                  mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_staff_ou_plus,
+                  mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_direction_ou_plus,
                   radie=_RADIE_ROLE_NAME, direction=_direction_ou_plus, actions=_ACTIONS_TABLEAU,
-                  niveaux=_NIVEAUX_TABLEAU, alerte_securite=_alerte_securite_site, log=print)
+                  alerte_securite=_alerte_securite_site, log=print)
     await tableau.init_db()
     publications.setup(get_db=get_db, instance=_INSTANCE_ID, log=print)
     await publications.init_db()
