@@ -30367,35 +30367,90 @@ async def _voice_log_listener(member, before, after):
 # manège. Immunisés / owner / staff EXEMPTÉS. Mémoire bornée. 100% FAIL-SAFE.
 # NB : le CONTENU vocal (ce qui est dit) reste hors de portée d'un bot ; ici on n'agit
 # que sur l'ÉTAT (les transitions de salon), seule chose observable.
-_voice_hop_tracker: dict = {}   # (guild_id, user_id) -> [timestamps de transitions de salon]
-_VOICE_HOP_MAX = 6              # nb de transitions (join/leave/move)…
-_VOICE_HOP_WINDOW = 12.0        # …dans cette fenêtre (s) → déclenche le frein
+# 19/10/2026 (BUG) : « quelqu'un a rejoint un vocal et ça a écrit anti-hop alors qu'il n'a rien
+# fait, ça a juste créé un salon pour lui… ça expulse des gens qui n'ont rien fait ». Le salon
+# « Join » (création d'un vocal perso), le déplacement par le bot, les sorties et les
+# déplacements par le staff comptaient comme des sauts. Désormais seuls les GESTES DU MEMBRE
+# comptent ; un changement de salon douteux est vérifié au journal d'audit avant toute sanction.
+_voice_hop_tracker: dict = {}   # (guild_id, user_id) -> [(instant, geste, salon_id)]
+_VOICE_HOP_MAX = 6              # gestes (entrées, changements de salon)…
+_VOICE_HOP_WINDOW = 15.0        # …dans cette fenêtre (s) → déclenche le frein
+
+
+def _salons_hub(c) -> set:
+    v = c.get('temp_voice_config') or {}
+    return {int(k) for k in (v.get('hubs') or {}) if str(k).isdigit()}
+
+
+def _geste_vocal(before, after, hubs):
+    """(« entree » | « saut », salon) — ou None si ce n'est pas un geste du membre. Une ENTRÉE est
+    toujours de lui : personne ne peut faire entrer quelqu'un dans un vocal. Un SAUT (changement
+    de salon) peut venir du staff ou du bot : vérifié avant toute sanction. Une sortie ne compte
+    pas (déconnexion forcée possible) ; le salon « Join » non plus, dans un sens ni dans l'autre."""
+    a, b = before.channel, after.channel
+    if b is None or (a is not None and a.id == b.id):
+        return None
+    if b.id in hubs or (a is not None and a.id in hubs):
+        return None
+    return ("entree" if a is None else "saut", b.id)
+
+
+async def _sauts_imposes(guild, member, salons, depuis):
+    """Les changements de salon faits par un autre (staff, bot) vers ces salons depuis `depuis`,
+    d'après le journal d'audit. None : journal illisible."""
+    me = guild.me
+    if me is None or not me.guild_permissions.view_audit_log:
+        return None
+    n = 0
+    try:
+        async for e in guild.audit_logs(limit=25, action=discord.AuditLogAction.member_move, after=depuis):
+            salon = getattr(getattr(e, 'extra', None), 'channel', None)
+            if e.user_id != member.id and getattr(salon, 'id', None) in salons:
+                n += int(getattr(e.extra, 'count', 1) or 1)
+    except discord.HTTPException as ex:
+        _logerr("vocal.hop.audit", ex, guild_id=guild.id)
+        return None
+    return n
 
 
 async def _voice_hop_listener(member, before, after):
     try:
         if member is None or getattr(member, 'bot', False) or member.guild is None:
             return
-        # On ne compte QUE les vrais changements de salon. Un mute/sourdine/stream/partage
-        # sans bouger de salon (before.channel == after.channel) n'est PAS un hop.
         if before.channel == after.channel:
             return
         c = await cfg(member.guild.id)
         if not c.get('anti_voice_hop', 1):
             return
+        geste = _geste_vocal(before, after, _salons_hub(c))
+        if geste is None:
+            return
         if await is_fully_immune(member):
             return  # owner / staff / immunisés jamais freinés
         _nowv = now()
         _k = (member.guild.id, member.id)
-        _buf = [t for t in _voice_hop_tracker.get(_k, [])
-                if (_nowv - t).total_seconds() < _VOICE_HOP_WINDOW]
-        _buf.append(_nowv)
+        _buf = [x for x in _voice_hop_tracker.get(_k, [])
+                if (_nowv - x[0]).total_seconds() < _VOICE_HOP_WINDOW]
+        _buf.append((_nowv, *geste))
         _voice_hop_tracker[_k] = _buf
         if len(_voice_hop_tracker) > 5000:  # borne mémoire (éviction paresseuse)
             for _kk in [k for k, v in list(_voice_hop_tracker.items())
-                        if not v or (_nowv - v[-1]).total_seconds() > _VOICE_HOP_WINDOW]:
+                        if not v or (_nowv - v[-1][0]).total_seconds() > _VOICE_HOP_WINDOW]:
                 _voice_hop_tracker.pop(_kk, None)
         if len(_buf) < _VOICE_HOP_MAX:
+            return
+        entrees = sum(1 for x in _buf if x[1] == "entree")
+        sauts = len(_buf) - entrees
+        imposes = 0
+        if sauts:
+            imposes = await _sauts_imposes(member.guild, member, {x[2] for x in _buf if x[1] == "saut"},
+                                           _buf[0][0] - timedelta(minutes=5))
+            if imposes is None:
+                imposes = sauts  # journal illisible : seules les entrées, toujours de lui, comptent
+        if entrees + max(0, sauts - imposes) < _VOICE_HOP_MAX:
+            if imposes:
+                print("[VOCAL] anti-hop : déplacements imposés, aucune sanction")
+                print(f"[VOCAL:DETAIL] {member.guild.id} {member.id} entrees={entrees} sauts={sauts} imposes={imposes}")
             return
         _voice_hop_tracker[_k] = []  # reset → il faut re-spammer pour re-déclencher
         # Déconnexion immédiate s'il est encore en vocal.
@@ -30431,7 +30486,9 @@ async def _voice_hop_listener(member, before, after):
                 description=(f"🔁 {member.mention} enchaînait les entrées/sorties vocales "
                              f"en boucle (anti channel-hop) → **{_action}**."),
                 user=member, moderator=bot.user,
-                extra={"🛡️ Palier": str(_s), "⏱️ Fenêtre": f"{_VOICE_HOP_MAX}+ en {int(_VOICE_HOP_WINDOW)}s"},
+                extra={"🛡️ Palier": str(_s),
+                       "⏱️ Gestes": f"{entrees} entrée(s), {sauts - imposes} changement(s) de salon en "
+                                   f"{int(_VOICE_HOP_WINDOW)} s"},
             )
         except Exception:
             pass
