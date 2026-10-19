@@ -4993,6 +4993,9 @@ def _deobfuscate_for_insult(text: str) -> str:
 
 def check_phishing(ct):
     """Vérification de phishing améliorée"""
+    ct = sans_liens_officiels(ct)
+    if not ct.strip():
+        return False, None
     # Utiliser la fonction avancée
     found, detail, ptype = advanced_phishing_check(ct)
     if found:
@@ -5019,6 +5022,9 @@ def check_phishing(ct):
 
 def check_scam(ct):
     """Vérification de scam améliorée"""
+    ct = sans_liens_officiels(ct)
+    if not ct.strip():
+        return False, None
     # Utiliser la fonction avancée
     found, detail, score = advanced_scam_check(ct)
     if found:
@@ -6829,6 +6835,20 @@ async def _amnistie_attente():
     await asyncio.sleep(1800)
 
 
+async def _action_suggestion_repondre(g, auteur, d):
+    """La direction répond à une idée depuis le site : statut et réponse, comme le bouton « Gérer »."""
+    statut = str(d.get("statut") or "")
+    if statut not in suggestions.STATUTS:
+        return False, "Statut inconnu."
+    ok = await suggestions.appliquer_decision(g, int(d.get("suggestion", 0) or 0), statut,
+                                              str(d.get("motif") or "").strip()[:800], auteur.id)
+    return (True, f"Idée : {suggestions.STATUTS[statut][0]}. L'auteur est prévenu.") if ok else (False, "Idée introuvable.")
+
+
+async def _action_suggestion_retirer(g, auteur, d):
+    return await suggestions.retirer(g, int(d.get("suggestion", 0) or 0), auteur)
+
+
 async def _action_sondage_retirer(g, auteur, d):
     """« Comme ça, on peut décider si on l'enlève du salon ou non. »"""
     return await sondages.retirer(g, int(d.get("sondage", 0) or 0), auteur)
@@ -6841,7 +6861,8 @@ _ACTIONS_TABLEAU = {"ticket_fermer": _action_ticket_fermer, "candidature": _acti
                     "sondage_retirer": _action_sondage_retirer, "casier_effacer": _action_casier_effacer,
                     "casier_serveur": _action_casier_serveur, "casier_restaurer": _action_casier_restaurer,
                     "debannir": _action_debannir, "clan_ajouter": _action_clan_ajouter,
-                    "clan_prevenir": _action_clan_prevenir, "clan_rappel_annuler": _action_clan_rappel_annuler}
+                    "clan_prevenir": _action_clan_prevenir, "clan_rappel_annuler": _action_clan_rappel_annuler,
+                    "suggestion_repondre": _action_suggestion_repondre, "suggestion_retirer": _action_suggestion_retirer}
 
 
 async def _salon_alertes_site(g):
@@ -9675,14 +9696,12 @@ SCAM_KEYWORDS = [
 # Patterns de messages de comptes compromis
 COMPROMISED_PATTERNS = [
     r'@everyone.*http', r'@here.*http',  # Mention de masse + lien
-    r'check.*this.*http', r'look.*what.*found.*http',
-    r'bro.*check.*http', r'dude.*look.*http',
-    r'yo.*this.*real.*http', r'omg.*http',
-    r'free.*gift.*http', r'won.*http',
+    #  19/10/2026 (audit) : « omg regarde https://… », « check this https://… », « won » dans
+    #  « wonderful », « test game » chez des joueurs étaient punis : motifs retirés.
+    r'free.*gift.*http',
     r'http.*\.(gift|ru|tk|ml|ga|cf|gq)(\s|$)',  # TLD suspects
     # 2026 — Nouveaux patterns comptes compromis
     r'verify.*age.*http', r'safeguard.*http',
-    r'playtest.*http', r'test.*game.*http',
     r'sensitive.*content.*http', r'nsfw.*verify.*http',
     # 2026 (owner 2026-06-21) — faux ban/appeal + faux staff + vote Steam (link-gated → sûr)
     r'appeal.*ban.*http', r'banned.*click.*http', r'you.*reported.*http',
@@ -9756,15 +9775,51 @@ SCAM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in COMPROMISED_PATTERNS]
 #                           🛡️ FONCTIONS DE PROTECTION AVANCÉES
 # ═══════════════════════════════════════════════════════════════════════════════
 
+#  19/10/2026 (audit) : les vrais domaines ne sont JAMAIS suspects. Un lien d'image Discord
+#  (cdn.discordapp.com, media.discordapp.net), un cadeau officiel (discord.gift), un échange Steam
+#  ou une page d'aide de Discord étaient pris pour du phishing : message supprimé, infraction,
+#  escalade, et rôles retirés au staff. Le nom de domaine est lu proprement, puis comparé.
+DOMAINES_OFFICIELS = (
+    "discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media", "discord.gift", "discord.new",
+    "discord.co", "discord.dev", "discordstatus.com", "dis.gd", "discord.store",
+    "steampowered.com", "steamcommunity.com", "steamstatic.com", "steamusercontent.com", "s.team", "steam.tv",
+    "roblox.com", "rbxcdn.com", "rblx.co", "robloxdev.com",
+    "youtube.com", "youtu.be", "twitch.tv", "tiktok.com", "x.com", "twitter.com", "instagram.com", "tenor.com",
+    "giphy.com", "imgur.com", "medal.tv", "google.com", "reddit.com", "wikipedia.org", "spotify.com", "github.com",
+    "gyazo.com", "prnt.sc", "epicgames.com", "fortnite.com", "minecraft.net", "playstation.com", "xbox.com",
+)
+_URL_COMPLETE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+
+
+def _hote(url: str) -> str:
+    """Le nom de domaine d'une adresse, sans « www. », sans port ni identifiants."""
+    reste = str(url).split("://", 1)[-1]
+    hote = reste.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0].rsplit("@", 1)[-1].split(":", 1)[0]
+    hote = hote.strip(".").lower()
+    return hote[4:] if hote.startswith("www.") else hote
+
+
+def domaine_officiel(hote: str) -> bool:
+    return any(hote == d or hote.endswith("." + d) for d in DOMAINES_OFFICIELS)
+
+
+def sans_liens_officiels(texte: str) -> str:
+    """Le message sans ses liens vers des domaines officiels (ils ne prouvent rien)."""
+    return _URL_COMPLETE.sub(lambda m: " " if domaine_officiel(_hote(m.group(0))) else m.group(0), texte or "")
+
+
 def advanced_phishing_check(content):
     """Vérifie le contenu pour détecter le phishing avec analyse avancée"""
     content_lower = content.lower()
-    detected = []
+    suspects = []
     
     # 1. Vérifier les domaines de phishing connus
     urls = re.findall(r'https?://([^\s<>"\']+)', content_lower)
     for url in urls:
-        domain = url.split('/')[0].split('?')[0]
+        domain = _hote(url)
+        if domaine_officiel(domain):
+            continue
+        suspects.append(url)
         
         # Domaines exacts
         for phish_domain in PHISHING_DOMAINS:
@@ -9793,6 +9848,10 @@ def advanced_phishing_check(content):
                 return True, f"TLD suspect: {domain}", "suspect_tld"
     
     # 2. Vérifier les patterns de messages phishing
+    # Les phrases de phishing ne comptent qu'accompagnées d'un lien douteux (« félicitations,
+    # t'as gagné la partie » n'est pas une arnaque).
+    if not suspects:
+        return False, None, None
     phishing_message_patterns = [
         r'(click|cliquez).*link.*claim',
         r'congratulations.*won',
@@ -9828,8 +9887,15 @@ _FREE_HOST_SCAM_RE = re.compile(
     re.IGNORECASE)
 
 
+#  Arnaques qui se passent de lien (portefeuille, phrase secrète) ; toutes les autres en exigent un.
+_SCAM_SANS_LIEN = ('seed phrase', 'recovery phrase', 'send 0.1 eth', 'double your', 'x2 your crypto', 'wallet address',
+                   'withdraw your funds', 'verify wallet', 'activate wallet')
+
+
 def advanced_scam_check(content):
     """Vérifie le contenu pour détecter les scams avec analyse avancée"""
+    if not re.search(r'https?://', content.lower()) and not any(k in content.lower() for k in _SCAM_SANS_LIEN):
+        return False, None, 0
     content_lower = content.lower()
     
     # 1. Vérifier les mots-clés de scam
@@ -9866,7 +9932,7 @@ def advanced_scam_check(content):
     urgency_patterns = [
         r'(only|seulement)\s*\d+\s*(left|remaining|restant)',
         r'(expire|end)s?\s*(in|dans)\s*\d+',
-        r'(hurry|vite|dépêche)',
+        r'(hurry|dépêche-toi)',  # « vite » : bien trop courant en français
         r'(last|dernier)\s*(chance|opportunit)',
         r'(act|agir)\s*(now|maintenant)',
     ]
@@ -12233,6 +12299,7 @@ bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_remove")
 bot.add_listener(sondages.sur_suppression, "on_raw_message_delete")
 bot.add_listener(sondages.sur_salon_supprime, "on_guild_channel_delete")
 bot.add_listener(suggestions.sur_message, "on_message")
+bot.add_listener(suggestions.sur_suppression, "on_raw_message_delete")
 bot.add_listener(suggestions.sur_salon_supprime, "on_guild_channel_delete")
 
 

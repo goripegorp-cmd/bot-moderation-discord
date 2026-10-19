@@ -251,4 +251,4 @@ def test_S10_branchements():
     source = (RACINE / "sondages.py").read_text(encoding="utf-8")
     assert "salon.send(view=" not in source and "Poll(" not in source, "le bot ne publie plus de sondage"
     page = (RACINE / "tableau_page.html").read_text(encoding="utf-8")
-    assert '["sondages", "Sondages", "sondage"]' in page and 'action: "sondage_retirer"' in page
+    assert '["sondages", "Salons", "sondage"]' in page and 'action: "sondage_retirer"' in page

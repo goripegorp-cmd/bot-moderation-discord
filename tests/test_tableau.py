@@ -17,6 +17,7 @@ import casier
 import clan
 import questions
 import sondages
+import suggestions
 import recrutements
 import registre
 import rellseas_panneau
@@ -148,6 +149,8 @@ class Env:
         questions.setup(get_db=get_db, est_staff=ns["_staff_ou_plus"], log=lambda *a: None)
         clan.setup(get_db=get_db, log=lambda *a: None)
         sondages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=None, controle=None, log=lambda *a: None)
+        suggestions.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=None, controle=None, salon_logs=None,
+                          log=lambda *a: None)
         casier.setup(get_db=get_db, log=lambda *a: None)
 
         async def salon(_g):
@@ -163,6 +166,7 @@ class Env:
             await clan.init_db()
             await casier.init_db()
             await sondages.init_db()
+            await suggestions.init_db()
             async with get_db() as db:
                 await db.execute("CREATE TABLE tickets(id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER,"
                                  " user_id INTEGER, panel_id TEXT, claimed_by INTEGER, status TEXT, answers TEXT,"
@@ -523,7 +527,7 @@ def test_T15_la_fiche_montre_les_sondages_du_membre(tmp_path):
     assert [x["question"] for x in f["sondages"]] == ["On fait un event ?"], "seulement les siens"
     assert f["sondages"][0]["salon"] == "#📊sondages" and f["sondages"][0]["comptes"] == [3, 1]
     page = tableau.PAGE
-    assert '["sondages", "Sondages"]' in page and "function entreeSondage" in page
+    assert '["sondages", "Sondages et idées"]' in page and "function entreeSondage" in page and "function entreeIdee" in page
 
 
 def test_T12_export_propre_et_reserve(tmp_path):

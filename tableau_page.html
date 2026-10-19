@@ -242,6 +242,10 @@ select{min-height:40px;max-width:100%;padding:0 12px;border-radius:12px;backgrou
 .barre-h .fond{height:9px;border-radius:999px;background:rgba(148,163,184,.14);overflow:hidden}
 .barre-h .plein{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--cyan),var(--bleu));transform-origin:left;animation:pousse .9s var(--ease) both}
 .question-sondage{margin:12px 0 4px;font-weight:700;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.salon-ligne{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--b1);min-width:0}
+.salon-ligne:last-child{border-bottom:0}
+.salon-ligne .nom-salon{min-width:0;overflow-wrap:anywhere;font-size:13px;color:var(--t2)}
+.salon-ligne .droite{flex:none}
 .choix-sondage{margin:10px 0}
 .choix-sondage .haut-choix{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;color:var(--t2)}
 .choix-sondage .haut-choix span{min-width:0;overflow-wrap:anywhere}
@@ -428,7 +432,7 @@ function icone(nom, taille) {
 
 /* ── État ──────────────────────────────────────────────────────────────── */
 const ONGLETS = [["apercu", "Aperçu", "accueil"], ["candidatures", "Candidatures", "personnes"], ["tickets", "Tickets", "ticket"],
-  ["moderation", "Modération", "bouclier"], ["journal", "Journal", "journal"], ["questions", "Questions", "question"], ["sondages", "Sondages", "sondage"],
+  ["moderation", "Modération", "bouclier"], ["journal", "Journal", "journal"], ["questions", "Questions", "question"], ["sondages", "Salons", "sondage"],
   ["clan", "Clan", "personnes"]];
 const etat = {
   d: null, etag: null, dernier: 0, erreurs: 0, onglet: "apercu", rendus: new Set(), pages: {}, precedents: {}, selection: new Set(),
@@ -439,7 +443,7 @@ const etat = {
     mod: {q: "", periode: "90", groupe: "tous", origine: "tous", tri: "recent"},
     jour: {q: "", periode: "7", cat: "tous", vue: "personnes", grave: false},
     ques: {q: "", statut: "ouverte"},
-    sond: {q: "", statut: "en_cours"},
+    sond: {q: "", statut: "en_cours", idees: "ouvertes"},
     clan: {q: "", rang: "tous", ajout: ""}
   }
 };
@@ -571,7 +575,9 @@ function paginer(cle, liste, rendreUn, conteneur, classe) {
 }
 const reinitPages = (prefixe) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(prefixe)) delete etat.pages[k]; };
 function repli(titre, ouvert, ...contenu) {
-  return h("details", {classe: "repli", open: ouvert || null}, h("summary", {}, h("span", {}, titre), icone("chevron", 18)), h("div", {classe: "contenu"}, contenu));
+  const fleche = icone("chevron", 18);
+  fleche.classList.add("chevron");
+  return h("details", {classe: "repli", open: ouvert || null}, h("summary", {}, h("span", {}, titre), fleche), h("div", {classe: "contenu"}, contenu));
 }
 
 /* ── Graphiques (SVG construit, aucune bibliothèque) ───────────────────── */
@@ -686,7 +692,8 @@ function majBadges() {
     moderation: [d.sanctions.trente_jours, false],
     journal: [((d.journal && d.journal.evenements) || []).filter(e => cleJour(e.quand) === today).length, false],
     questions: [qOuvertes, qOuvertes > 0],
-    sondages: [((d.sondages && d.sondages.stats) || {}).en_cours || 0, false],
+    sondages: [((d.suggestions && d.suggestions.stats) || {}).ouvertes || ((d.sondages && d.sondages.stats) || {}).en_cours || 0,
+      !!(((d.suggestions && d.suggestions.stats) || {}).ouvertes)],
     clan: [(d.clan.membres.filter(m => m.rappel && m.rappel.statut === "echu").length) || d.clan.membres.length,
       d.clan.membres.some(m => m.rappel && m.rappel.statut === "echu")]
   };
@@ -706,7 +713,7 @@ const INTROS = {
   moderation: ["Modération", "Le casier par membre, les modérateurs, et le nettoyage.", "bouclier", "#fbbf24"],
   journal: ["Journal", "Tout ce qui s'est passé sur le serveur, jour par jour.", "journal", "#38bdf8"],
   questions: ["Questions", "Les questions posées dans les salons publics, et leur réponse.", "question", "#60a5fa"],
-  sondages: ["Sondages", "Les sondages Discord des membres, résultats en direct.", "sondage", "#818cf8"],
+  sondages: ["Salons", "Salon par salon : les sondages, les idées, et ce que chacun peut y faire.", "sondage", "#818cf8"],
   clan: ["Clan Rell Seas", "Les membres du clan, leur activité, les rappels d'inactivité.", "personnes", "#2dd4bf"]
 };
 function introOnglet(cle) {
@@ -1241,29 +1248,91 @@ function carteQuestions(id, qs) {
 
 /* ── Sondages ──────────────────────────────────────────────────────────── */
 const STATUTS_S = {en_cours: ["En cours", "var(--vert)"], termine: ["Terminé", "var(--cyan)"], retire: ["Retiré du salon", "var(--gris)"]};
+const STATUTS_I = {attente: ["En attente", "var(--ambre)"], etude: ["À l'étude", "var(--bleu)"], acceptee: ["Acceptée", "var(--vert)"],
+  refusee: ["Refusée", "var(--rouge)"], realisee: ["Réalisée", "var(--vert)"]};
+const PROFILS = {ouvert: ["Ouvert à tous", "var(--vert)"], lecture: ["Lecture seule", "var(--cyan)"], vitrine: ["Visible, fermé", "var(--indigo)"],
+  clan: ["Clan seulement", "#2dd4bf"], cache: ["Réservé", "var(--gris)"]};
 RENDUS.sondages = (vue, plein) => {
   const s = etat.d.sondages || {}, liste = s.liste || [], st = s.stats || {}, f = etat.f.sond;
-  const changer = () => { reinitPages("sond"); sauver(); rendre("sondages"); };
+  const idees = etat.d.suggestions || {}, si = idees.stats || {};
+  const changer = () => { reinitPages("sond"); reinitPages("idee"); sauver(); rendre("sondages"); };
   if (plein) {
     vue.replaceChildren();
     vue.append(h("div", {classe: "tuiles"},
-      tuile({cle: "s1", lib: "En cours", val: st.en_cours || 0, teinte: "var(--vert)"}),
-      tuile({cle: "s2", lib: "Sondages · 30 jours", val: st.mois || 0, teinte: "var(--indigo)"}),
-      tuile({cle: "s3", lib: "Votes · 30 jours", val: st.votes_mois || 0, teinte: "var(--cyan)"})));
-    vue.append(h("div", {classe: "outils"}, recherche(f.q, "Question, choix, membre…", (v) => { f.q = v; changer(); })));
-    vue.append(h("p", {classe: "aide"}, "Les membres créent leurs sondages avec le bouton ➕ de Discord. Les votes se mettent à jour seuls ; un sondage retiré disparaît du salon, son résultat reste ici."));
+      tuile({cle: "s1", lib: "Sondages en cours", val: st.en_cours || 0, teinte: "var(--vert)"}),
+      tuile({cle: "s2", lib: "Idées à traiter", val: si.ouvertes || 0, teinte: "var(--ambre)"}),
+      tuile({cle: "s3", lib: "Votes aux sondages · 30 jours", val: st.votes_mois || 0, teinte: "var(--cyan)"})));
+    vue.append(h("div", {classe: "outils"}, recherche(f.q, "Question, idée, membre…", (v) => { f.q = v; changer(); })));
     vue.append(h("div", {classe: "pile resultats"}));
   }
   const zone = zoneResultats(vue);
-  if (s.erreur) { zone.append(vide("Sondages momentanément illisibles")); return; }
-  const nb = {tous: liste.length}; liste.forEach(x => { nb[x.statut] = (nb[x.statut] || 0) + 1; });
-  zone.append(puces([["en_cours", "En cours", nb.en_cours || 0, "var(--vert)"], ["termine", "Terminés", nb.termine || 0, "var(--cyan)"],
-    ["retire", "Retirés", nb.retire || 0, "var(--gris)"], ["tous", "Tous", nb.tous]], f.statut, (v) => { f.statut = v; changer(); }));
-  const filtre = liste.filter(x => (f.statut === "tous" || x.statut === f.statut) &&
-    (!f.q || [x.question, x.choix.join(" "), x.salon, P(x.auteur).nom, P(x.auteur).pseudo].join(" ").toLowerCase().includes(f.q)));
-  if (!filtre.length) { zone.append(vide(f.statut === "en_cours" ? "Aucun sondage en cours" : "Rien ici", "Change le filtre ou la recherche.")); return; }
-  paginer("sond", filtre, carteSondage, zone);
+  const cherche = (x, ...champs) => !f.q || [...champs, P(x.auteur).nom, P(x.auteur).pseudo].join(" ").toLowerCase().includes(f.q);
+  // 📊 Le salon des sondages
+  const sectS = h("section", {classe: "section"}, sectionTete("Sondages", "sondage", liste.length ? nombre(liste.length) + " sondage(s)" : null),
+    h("p", {classe: "aide"}, "Créés par les membres avec le bouton ➕ de Discord ; les votes suivent en direct. Un sondage retiré quitte le salon, son résultat reste ici."));
+  if (s.erreur) sectS.append(vide("Sondages momentanément illisibles"));
+  else {
+    const nb = {tous: liste.length}; liste.forEach(x => { nb[x.statut] = (nb[x.statut] || 0) + 1; });
+    sectS.append(puces([["en_cours", "En cours", nb.en_cours || 0, "var(--vert)"], ["termine", "Terminés", nb.termine || 0, "var(--cyan)"],
+      ["retire", "Retirés", nb.retire || 0, "var(--gris)"], ["tous", "Tous", nb.tous]], f.statut, (v) => { f.statut = v; changer(); }));
+    const filtre = liste.filter(x => (f.statut === "tous" || x.statut === f.statut) && cherche(x, x.question, x.choix.join(" "), x.salon));
+    if (filtre.length) paginer("sond", filtre, carteSondage, sectS);
+    else sectS.append(vide(f.statut === "en_cours" ? "Aucun sondage en cours" : "Rien ici", "Change le filtre ou la recherche."));
+  }
+  zone.append(sectS);
+  // 💡 Le salon des suggestions
+  const li = idees.liste || [];
+  const sectI = h("section", {classe: "section"}, sectionTete("Suggestions", "question", li.length ? nombre(li.length) + " idée(s)" : null),
+    h("p", {classe: "aide"}, "Les idées des membres et leurs votes. Réponds d'ici : la carte change sur Discord et l'auteur reçoit ta réponse en privé."));
+  if (idees.erreur) sectI.append(vide("Suggestions momentanément illisibles"));
+  else {
+    const groupe = (x) => x.retire_le ? "retirees" : (x.statut === "attente" || x.statut === "etude") ? "ouvertes" : "decidees";
+    const nb = {toutes: li.length}; li.forEach(x => { nb[groupe(x)] = (nb[groupe(x)] || 0) + 1; });
+    sectI.append(puces([["ouvertes", "À traiter", nb.ouvertes || 0, "var(--ambre)"], ["decidees", "Décidées", nb.decidees || 0, "var(--vert)"],
+      ["retirees", "Retirées", nb.retirees || 0, "var(--gris)"], ["toutes", "Toutes", nb.toutes]], f.idees, (v) => { f.idees = v; changer(); }));
+    const filtre = li.filter(x => (f.idees === "toutes" || groupe(x) === f.idees) && cherche(x, x.titre, x.details, x.note));
+    if (filtre.length) paginer("idee", filtre, carteIdee, sectI);
+    else sectI.append(vide(f.idees === "ouvertes" ? "Aucune idée à traiter" : "Rien ici", "Change le filtre ou la recherche."));
+  }
+  zone.append(sectI);
+  // 🔐 Ce que chacun peut faire, salon par salon
+  const cats = etat.d.salons || [];
+  if (Array.isArray(cats) && cats.length) zone.append(repli("Droits des salons · ce que @everyone peut faire", false,
+    h("p", {classe: "aide"}, "Lecture seule : on lit sans écrire. Visible, fermé : on voit le vocal sans y entrer. Clan seulement : réservé au rôle du clan. Réservé : caché à @everyone."),
+    h("div", {classe: "grille"}, cats.map(carteCategorie))));
 };
+function carteIdee(x) {
+  const p = P(x.auteur), [lib, teinte] = STATUTS_I[x.statut] || [x.libelle, null];
+  const total = x.pour + x.contre, accord = total ? Math.round(100 * x.pour / total) : 0;
+  const ouverte = !x.retire_le && (x.statut === "attente" || x.statut === "etude");
+  return h("article", {classe: "carte" + (ouverte ? " chaude" : "")},
+    h("div", {classe: "qui"}, avatar(p), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, lienNom(x.auteur)),
+      h("div", {classe: "sous-nom"}, "Idée n°" + x.id + " · " + x.salon + " · " + depuis(x.cree)))),
+    h("div", {classe: "question-sondage"}, x.titre),
+    x.details ? h("div", {classe: "texte clamp3 deplier", style: "font-size:13px;color:var(--t2)", onclick: deplier}, x.details) : null,
+    h("div", {classe: "choix-sondage" + (total && accord >= 50 ? " tete" : "")},
+      h("div", {classe: "haut-choix"}, h("span", {}, total ? accord + " % d'accord" : "Pas encore de vote"), h("b", {}, nombre(x.pour) + " pour", h("small", {}, nombre(x.contre) + " contre"))),
+      h("div", {classe: "fond"}, h("div", {classe: "plein", style: "width:" + accord + "%"}))),
+    x.note ? h("div", {classe: "bandeau", style: "margin:8px 0 0;color:var(--t1)"}, h("div", {}, h("b", {}, "Réponse : "), x.note)) : null,
+    h("div", {classe: "pastilles"}, pastille(x.retire_le ? "Retirée du salon" : lib, x.retire_le ? "var(--gris)" : teinte, null, true),
+      x.decide_par ? h("span", {classe: "meta"}, "par " + P(x.decide_par).nom + (x.decide_le ? " · " + depuis(x.decide_le) : "")) : null),
+    !x.retire_le ? h("div", {classe: "actions", style: "margin-top:10px"},
+      x.lien ? h("a", {classe: "bouton p", href: x.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Voir sur Discord") : null,
+      peutAgir() ? h("button", {classe: "bouton p vert", type: "button", onclick: () => agir({action: "suggestion_repondre", suggestion: x.id},
+        "Répondre à l'idée n°" + x.id, x.titre, {motif: true, choix: Object.entries(STATUTS_I).map(([k, [l]]) => [k, l]), choixDefaut: x.statut === "attente" ? "etude" : x.statut},
+        "Envoyer la réponse")}, "Répondre") : null,
+      peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "suggestion_retirer", suggestion: x.id},
+        "Retirer cette idée du salon ?", "Sa carte disparaît de Discord ; elle reste ici.", {}, "Retirer du salon", "danger")}, "Retirer") : null) : null);
+}
+function carteCategorie(cat) {
+  return h("article", {classe: "carte"}, h("h3", {style: "margin:0 0 8px;font-size:14px"}, cat.categorie),
+    h("div", {classe: "lignes"}, cat.salons.map(sl => {
+      const [lib, teinte] = PROFILS[sl.profil] || [sl.profil, null];
+      const peut = sl.vocal ? [sl.rejoindre ? "rejoindre" : null] : [sl.ecrire ? "écrire" : null, sl.images ? "images" : null, sl.reagir ? "réagir" : null];
+      return h("div", {classe: "salon-ligne"}, h("span", {classe: "nom-salon"}, (sl.vocal ? "🔊 " : "# ") + sl.nom),
+        h("span", {classe: "droite"}, pastille(lib, teinte, peut.filter(Boolean).join(", ") || "rien d'autre que voir", true)));
+    })));
+}
 function carteSondage(x) {
   const p = P(x.auteur), [lib, teinte] = STATUTS_S[x.statut] || [x.statut, null];
   const total = x.comptes.reduce((a, n) => a + n, 0), max = Math.max(0, ...x.comptes);
@@ -1449,7 +1518,7 @@ function barreLot() {
 }
 
 /* ── La fiche d'une personne ───────────────────────────────────────────── */
-const ONGLETS_FICHE = [["chrono", "Chronologie"], ["sanctions", "Sanctions"], ["tickets", "Tickets"], ["candidatures", "Candidatures"], ["questions", "Questions"], ["sondages", "Sondages"],
+const ONGLETS_FICHE = [["chrono", "Chronologie"], ["sanctions", "Sanctions"], ["tickets", "Tickets"], ["candidatures", "Candidatures"], ["questions", "Questions"], ["sondages", "Sondages et idées"],
   ["journal", "Journal"], ["donnees", "Données par lui"]];
 function enteteFiche(p, f) {
   const m = f && f.membre;
@@ -1517,8 +1586,10 @@ function chronologie(f) {
   f.questions.forEach(q => items.push({t: q.quand, cat: "Question", teinte: "#60a5fa", texte: q.texte, meta: q.salon + " · " + (STATUTS_Q[q.statut] || [q.libelle])[0], lien: q.message}));
   (f.sondages || []).forEach(x => items.push({t: x.cree, cat: "Sondage", teinte: "#818cf8", texte: x.question,
     meta: x.salon + " · " + (STATUTS_S[x.statut] || [x.statut])[0] + " · " + nombre(x.total) + " vote(s)", lien: x.statut !== "retire" ? x.lien : ""}));
+  (f.idees || []).forEach(x => items.push({t: x.cree, cat: "Idée", teinte: "#fbbf24", texte: x.titre,
+    meta: x.salon + " · " + (STATUTS_I[x.statut] || [x.libelle])[0] + " · " + x.pour + " pour, " + x.contre + " contre", lien: x.retire_le ? "" : x.lien}));
   f.journal.forEach(e => {
-    if (/^(mod\.|ticket\.|question\.|sondage\.)/.test(e.type) || (/^sec\./.test(e.type) && proche(e.quand))) return;
+    if (/^(mod\.|ticket\.|question\.|sondage\.|suggestion\.)/.test(e.type) || (/^sec\./.test(e.type) && proche(e.quand))) return;
     items.push({t: e.quand, cat: e.cat, teinte: teinteCat(e.cat), grave: e.gravite >= 2, texte: e.texte, meta: [e.auteur && e.auteur !== f.membre.id ? "par " + P(e.auteur).nom : "", e.salon].filter(Boolean).join(" · ")});
   });
   return items.filter(x => x.t).sort((a, b) => b.t - a.t);
@@ -1586,7 +1657,7 @@ function rendreFiche() {
           "Lever son bannissement ?", "Il pourra revenir sur le serveur.", {}, "Débannir", "vert")}, "Lever le bannissement") : null)));
   }
   const nb = {chrono: null, sanctions: f.sanctions.length, tickets: f.tickets.length, candidatures: f.candidatures.length, questions: f.questions.length,
-    sondages: (f.sondages || []).length, journal: f.journal.length, donnees: f.donnees.length};
+    sondages: (f.sondages || []).length + (f.idees || []).length, journal: f.journal.length, donnees: f.donnees.length};
   const dispo = ONGLETS_FICHE.filter(([k]) => k === "chrono" || nb[k]);
   if (!dispo.some(([k]) => k === etat.ficheOnglet)) etat.ficheOnglet = "chrono";
   corps.append(h("div", {style: "overflow-x:auto;scrollbar-width:none"}, segment(etat.ficheOnglet, dispo.map(([k, l]) => [k, nb[k] ? l + " · " + nb[k] : l]),
@@ -1609,7 +1680,9 @@ function rendreFiche() {
     h("div", {classe: "haut"}, h("span", {classe: "quoi"}, q.salon), h("span", {classe: "quand"}, heure(q.quand))), h("div", {classe: "texte"}, q.texte),
     h("div", {classe: "pastilles"}, pastille((STATUTS_Q[q.statut] || [q.libelle])[0], (STATUTS_Q[q.statut] || [])[1], null, true), q.par ? h("span", {classe: "meta"}, "par " + q.par) : null),
     h("div", {}, h("a", {classe: "bouton p discret", href: q.message, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Voir sur Discord")))));
-  else if (o === "sondages") corps.append(listeParJour((f.sondages || []).map(x => Object.assign({t: x.cree}, x)), entreeSondage));
+  else if (o === "sondages") corps.append(listeParJour([...(f.sondages || []).map(x => Object.assign({t: x.cree, _type: "sondage"}, x)),
+    ...(f.idees || []).map(x => Object.assign({t: x.cree, _type: "idee"}, x))].sort((a, b) => b.t - a.t),
+    (x) => x._type === "idee" ? entreeIdee(x) : entreeSondage(x)));
   else if (o === "journal") corps.append(listeParJour(f.journal.map(e => Object.assign({t: e.quand}, e)), (e) => entreeJournal(e, m.id)));
   else if (o === "donnees") corps.append(listeParJour(f.donnees.map(s => Object.assign({t: s.date}, s)), (s) => h("li", {classe: "entree"},
     h("div", {classe: "haut"}, h("span", {classe: "quoi", style: "color:" + teinteType(s.type)}, s.libelle + " → " + P(s.id).nom), h("span", {classe: "quand"}, heure(s.date))),
@@ -1633,6 +1706,16 @@ function entreeSondage(x) {
       h("a", {classe: "bouton p discret", href: x.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Voir sur Discord"),
       peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "sondage_retirer", sondage: x.id},
         "Retirer ce sondage du salon ?", "Le message disparaît de Discord ; son résultat reste ici.", {}, "Retirer du salon", "danger")}, "Retirer du salon") : null) : null);
+}
+function entreeIdee(x) {
+  const [lib, teinte] = STATUTS_I[x.statut] || [x.libelle, null];
+  return h("li", {classe: "entree"},
+    h("div", {classe: "haut"}, h("span", {classe: "quoi", style: "color:#fbbf24"}, "Idée n°" + x.id + " · " + x.salon), h("span", {classe: "quand"}, heure(x.cree))),
+    h("div", {classe: "question-sondage", style: "margin-top:4px"}, x.titre),
+    x.details ? h("div", {classe: "texte clamp3 deplier", onclick: deplier}, x.details) : null,
+    x.note ? h("div", {classe: "meta"}, "Réponse : " + x.note) : null,
+    h("div", {classe: "pastilles"}, pastille(x.retire_le ? "Retirée du salon" : lib, x.retire_le ? "var(--gris)" : teinte, null, true),
+      h("span", {classe: "meta"}, x.pour + " pour · " + x.contre + " contre")));
 }
 function rendreCandidaturesFiche(f) {
   const enCours = (etat.d.en_cours || []).find(c => c.id === f.membre.id);
@@ -1676,6 +1759,8 @@ function dialogue(o) {
     const hote = $("#dialogue-hote"), voile = $("#voile-dialogue");
     const motif = o.motif ? h("textarea", {name: "motif", rows: 3, maxlength: 300, placeholder: o.motifRequis ? "Motif (obligatoire)" : "Motif (facultatif)"}) : null;
     const duree_ = o.durees ? h("select", {name: "duree", "aria-label": "Durée"}, [[10, "10 minutes"], [60, "1 heure"], [360, "6 heures"], [1440, "1 jour"], [10080, "7 jours"]].map(([v, l]) => h("option", {value: v}, l))) : null;
+    const choix_ = o.choix ? h("select", {name: "choix", "aria-label": "Statut"}, o.choix.map(([v, l]) => h("option", {value: v}, l))) : null;
+    if (choix_ && o.choixDefaut) choix_.value = o.choixDefaut;
     if (duree_) duree_.value = "60";
     const ok = h("button", {classe: "bouton " + (o.style || "principal"), type: "button"}, o.libelleOk || "Confirmer");
     const finir = (v) => { hote.replaceChildren(); voile.classList.remove("ouvert"); document.removeEventListener("keydown", echap, true); fin(v); };
@@ -1683,25 +1768,28 @@ function dialogue(o) {
     ok.addEventListener("click", () => {
       const texte = motif ? motif.value.trim() : "";
       if (o.motifRequis && texte.length < 3) { motif.focus(); motif.style.borderColor = "var(--rouge)"; toast("Indique un motif."); return; }
-      finir({motif: texte, duree: duree_ ? Number(duree_.value) : null});
+      finir({motif: texte, duree: duree_ ? Number(duree_.value) : null, choix: choix_ ? choix_.value : null});
     });
     hote.replaceChildren(h("div", {classe: "dialogue", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "d-titre"},
       h("h3", {id: "d-titre"}, o.titre), o.texte ? h("p", {}, o.texte) : null,
-      duree_ ? h("label", {}, "Durée", duree_) : null, motif ? h("label", {}, o.motifRequis ? "Motif" : "Motif (facultatif)", motif) : null,
+      choix_ ? h("label", {}, "Statut", choix_) : null,
+      duree_ ? h("label", {}, "Durée", duree_) : null, motif ? h("label", {}, o.motifRequis ? "Motif" : (choix_ ? "Réponse (facultatif)" : "Motif (facultatif)"), motif) : null,
       h("div", {classe: "actions"}, h("button", {classe: "bouton discret", type: "button", onclick: () => finir(null)}, "Annuler"), ok)));
     voile.classList.add("ouvert");
     document.addEventListener("keydown", echap, true);
-    (motif || duree_ || ok).focus();
+    (choix_ || motif || duree_ || ok).focus();
   });
 }
 $("#voile-dialogue").addEventListener("click", () => { const b = $("#dialogue-hote .bouton.discret"); if (b) b.click(); });
 async function agir(corps, titre, texte, opts, libelleOk, style) {
   opts = opts || {};
   if (!opts.direct) {
-    const r = await dialogue({titre, texte, motif: !!opts.motif, motifRequis: !!opts.motifRequis, durees: !!opts.durees, libelleOk, style});
+    const r = await dialogue({titre, texte, motif: !!opts.motif, motifRequis: !!opts.motifRequis, durees: !!opts.durees,
+      choix: opts.choix, choixDefaut: opts.choixDefaut, libelleOk, style});
     if (!r) return false;
     if (r.motif) corps.motif = r.motif;
     if (r.duree) corps.duree = r.duree;
+    if (r.choix) corps.statut = r.choix;
   }
   try {
     const rep = await fetch(BASE + "/action", {method: "POST", credentials: "same-origin", cache: "no-store",

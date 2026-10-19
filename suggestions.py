@@ -68,6 +68,9 @@ async def init_db():
             " decide_par INTEGER, cree_le TEXT NOT NULL, decide_le TEXT, log_message_id INTEGER)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_suggestions_v2_auteur "
                          "ON suggestions_v2(guild_id, auteur_id, cree_le)")
+        async with db.execute("PRAGMA table_info(suggestions_v2)") as cur:
+            if "retire_le" not in {r[1] for r in await cur.fetchall()}:
+                await db.execute("ALTER TABLE suggestions_v2 ADD COLUMN retire_le INTEGER NOT NULL DEFAULT 0")
         await db.execute("CREATE TABLE IF NOT EXISTS suggestions_votes ("
                          " suggestion_id INTEGER NOT NULL, user_id INTEGER NOT NULL,"
                          " vote INTEGER NOT NULL, PRIMARY KEY(suggestion_id, user_id))")
@@ -229,7 +232,7 @@ async def moderniser(g) -> int:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _COLONNES = ("id", "guild_id", "channel_id", "message_id", "thread_id", "auteur_id", "titre",
-             "details", "statut", "note", "decide_par", "cree_le", "decide_le", "log_message_id")
+             "details", "statut", "note", "decide_par", "cree_le", "decide_le", "log_message_id", "retire_le")
 
 
 async def charger(sid: int):
@@ -518,18 +521,85 @@ async def decider(i, sid: int, statut: str, note: str):
     if not est_staff(i.user):
         return await i.response.send_message("Réservé au staff.", ephemeral=True)
     await i.response.defer(ephemeral=True)
+    await appliquer_decision(i.guild, sid, statut, note, i.user.id)
+    await i.followup.send(f"Idée n°{sid} : {STATUTS[statut][0]}.", ephemeral=True)
+
+
+async def appliquer_decision(g, sid: int, statut: str, note: str, par: int) -> bool:
+    """La décision, d'où qu'elle vienne (Discord ou site) : la carte suit, l'auteur est prévenu en
+    privé, le journal la garde."""
+    if statut not in STATUTS:
+        return False
     async with _get_db() as db:
-        await db.execute("UPDATE suggestions_v2 SET statut=?, note=?, decide_par=?, decide_le=? "
-                         "WHERE id=?", (statut, note, i.user.id, _maintenant().strftime(_FORMAT), sid))
+        cur = await db.execute("UPDATE suggestions_v2 SET statut=?, note=?, decide_par=?, decide_le=? WHERE id=? AND guild_id=?",
+                               (statut, note[:800], int(par), _maintenant().strftime(_FORMAT), sid, getattr(g, "id", 0)))
         await db.commit()
+        if not cur.rowcount:
+            return False
     s, pour, contre = await charger(sid)
-    g = i.guild
     salon = g.get_channel(s["channel_id"]) if g else None
-    if salon is not None:
+    if salon is not None and not s.get("retire_le"):
         await _rafraichir(salon, sid, attendre=0)
     await prevenir_auteur(g, s, statut, note)
     await journaliser(g, sid)
-    await i.followup.send(f"Idée n°{sid} : {STATUTS[statut][0]}.", ephemeral=True)
+    return True
+
+
+async def retirer(g, sid: int, auteur) -> tuple[bool, str]:
+    """Le site : retirer une idée du salon (sa carte disparaît de Discord, elle reste sur le site)."""
+    s, _, _ = await charger(sid)
+    if s is None or s["guild_id"] != g.id:
+        return False, "Idée introuvable."
+    if s.get("retire_le"):
+        return False, "Cette idée est déjà retirée du salon."
+    salon = g.get_channel(int(s["channel_id"]))
+    if salon is not None and s["message_id"]:
+        try:
+            await salon.get_partial_message(int(s["message_id"])).delete()
+        except discord.NotFound:
+            pass
+        except discord.Forbidden:
+            return False, "Il me manque le droit de gérer les messages dans ce salon."
+    async with _get_db() as db:
+        await db.execute("UPDATE suggestions_v2 SET retire_le=? WHERE id=?", (int(time.time()), sid))
+        await db.commit()
+    await registre.noter(g.id, "Suggestions", "suggestion.retiree", f"Idée n°{sid} retirée du salon par "
+                         f"{auteur.display_name} : {s['titre']}", membre_id=int(s["auteur_id"]), auteur_id=auteur.id,
+                         salon_id=int(s["channel_id"]))
+    return True, "Idée retirée du salon."
+
+
+async def lister(guild_id: int, limite: int = 60, auteur_id: int = 0) -> dict:
+    """Pour le site : les idées (d'un membre, si demandé), les plus récentes d'abord, avec leurs votes."""
+    filtre, args = ("AND s.auteur_id=? ", (int(auteur_id),)) if auteur_id else ("", ())
+    requete = ("SELECT s.id, s.channel_id, s.message_id, s.auteur_id, s.titre, s.details, s.statut, s.note, s.decide_par,"
+               " s.cree_le, s.decide_le, s.retire_le, COALESCE(SUM(v.vote=1), 0), COALESCE(SUM(v.vote=-1), 0)"
+               " FROM suggestions_v2 s LEFT JOIN suggestions_votes v ON v.suggestion_id=s.id WHERE s.guild_id=? " + filtre
+               + "GROUP BY s.id ORDER BY s.id DESC LIMIT ?")
+    async with _get_db() as db:
+        async with db.execute(requete, (guild_id, *args, limite)) as cur:
+            lignes = await cur.fetchall()
+    def unix(t):
+        return int(datetime.strptime(t, _FORMAT).replace(tzinfo=timezone.utc).timestamp()) if t else None
+    liste = [{"id": sid, "salon_id": str(cid), "lien": f"https://discord.com/channels/{guild_id}/{cid}/{mid}" if mid else "",
+              "auteur": str(auteur), "titre": titre, "details": details or "", "statut": statut,
+              "libelle": STATUTS.get(statut, STATUTS["attente"])[0], "note": note or "",
+              "decide_par": str(decide_par) if decide_par else "", "cree": unix(cree), "decide_le": unix(decide_le),
+              "retire_le": int(retire or 0) or None, "pour": int(pour), "contre": int(contre)}
+             for sid, cid, mid, auteur, titre, details, statut, note, decide_par, cree, decide_le, retire, pour, contre in lignes]
+    ouvertes = [x for x in liste if x["statut"] not in FINAUX and not x["retire_le"]]
+    return {"liste": liste, "stats": {"ouvertes": len(ouvertes), "total": len(liste),
+                                      "votes": sum(x["pour"] + x["contre"] for x in liste)}}
+
+
+async def sur_suppression(payload) -> None:
+    """La carte supprimée sur Discord : l'idée est marquée retirée (elle reste sur le site)."""
+    if _get_db is None or not getattr(payload, "guild_id", None):
+        return
+    async with _get_db() as db:
+        await db.execute("UPDATE suggestions_v2 SET retire_le=? WHERE message_id=? AND retire_le=0",
+                         (int(time.time()), int(payload.message_id)))
+        await db.commit()
 
 
 async def prevenir_auteur(g, s: dict, statut: str, note: str) -> bool:

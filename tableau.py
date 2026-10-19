@@ -43,13 +43,16 @@ try:
 except Exception:  # sans base de fuseaux : l'heure UTC
     PARIS = timezone.utc
 
+import discord
+
+import casier
+import clan
 import questions
 import recrutements
 import registre
-import casier
-import clan
 import rellseas_panneau
 import sondages
+import suggestions
 import vigilance
 
 DUREE = 24 * 3600
@@ -677,6 +680,46 @@ async def _casier(g, qui) -> dict:
     return {"lots": lots, "compte": await casier.comptes(g.id, getattr(getattr(_bot, "user", None), "id", 0) or 0)}
 
 
+async def _suggestions(g, qui) -> dict:
+    d = await suggestions.lister(g.id)
+    for s in d["liste"]:
+        s["auteur"] = qui(int(s["auteur"]))
+        if s["decide_par"]:
+            s["decide_par"] = qui(int(s["decide_par"]))
+        ch = g.get_channel(int(s["salon_id"]))
+        s["salon"] = f"#{ch.name}" if ch is not None else "#salon supprimé"
+    return d
+
+
+async def _droits_salons(g, c) -> list:
+    """« Des vrais trucs bien propres par salon, qu'on comprenne bien » : chaque catégorie, chaque
+    salon, ce que @everyone (et le clan) peut y faire. Lecture seule : rien ne se règle d'ici."""
+    tous = g.default_role
+    clan = g.get_role(int(c.get(rellseas_panneau.CLE_ROLE_CIBLE, 0) or 0))
+    sortie = []
+    for categorie, salons in g.by_category():
+        lignes = []
+        for s in salons:
+            if isinstance(s, discord.CategoryChannel):
+                continue
+            p = s.permissions_for(tous)
+            vocal = isinstance(s, (discord.VoiceChannel, discord.StageChannel))
+            pc = s.permissions_for(clan) if clan is not None else None
+            if p.view_channel:
+                profil = ("ouvert" if p.connect else "vitrine") if vocal else ("ouvert" if p.send_messages else "lecture")
+            elif pc is not None and pc.view_channel:
+                profil = "clan"
+            else:
+                profil = "cache"
+            lignes.append({"id": str(s.id), "nom": s.name, "vocal": vocal, "profil": profil,
+                           "voir": bool(p.view_channel), "ecrire": bool(p.send_messages) and not vocal,
+                           "reagir": bool(p.add_reactions) and not vocal, "rejoindre": bool(p.connect) and vocal,
+                           "images": bool(p.attach_files) and not vocal})
+        if lignes:
+            sortie.append({"categorie": categorie.name if categorie is not None else "Sans catégorie", "salons": lignes})
+    return sortie
+
+
 async def _sondages(g, qui) -> dict:
     """« Et qui s'affiche au propre, même sur le panel. »"""
     d = await sondages.lister(g.id)
@@ -700,7 +743,8 @@ async def donnees(g, portee: str = "tout") -> dict:
     parties = {}
     for nom, fn in (("journal", lambda: _journal(g, qui)), ("questions", lambda: _questions(g, qui)),
                     ("alertes", lambda: _alertes(g, qui)), ("sondages", lambda: _sondages(g, qui)),
-                    ("casier", lambda: _casier(g, qui))):
+                    ("casier", lambda: _casier(g, qui)), ("suggestions", lambda: _suggestions(g, qui)),
+                    ("salons", lambda: _droits_salons(g, c))):
         try:
             parties[nom] = await fn()
         except Exception as ex:  # une partie illisible n'emporte pas le reste du tableau
@@ -812,19 +856,22 @@ async def fiche(g, uid: int, auteur) -> dict:
     journal = await _journal(g, qui, int(uid), 300)
     qs = [_question(g, q, qui) for q in await questions.du_membre(g.id, int(uid))]
     alerte = next((a for a in await _alertes(g, qui) if a["id"] == str(int(uid))), None)
-    try:
-        ses_sondages = (await sondages.lister(g.id, 30, int(uid)))["liste"]
-        for x in ses_sondages:
+    ses_sondages, ses_idees = [], []
+    for nom, module in (("sondages", sondages), ("idees", suggestions)):
+        try:
+            liste = (await module.lister(g.id, 30, int(uid)))["liste"]
+        except Exception as ex:  # l'une illisible n'emporte pas l'autre ; le détail part au journal
+            _log("[TABLEAU][E9] sondages ou idées du membre illisibles")
+            _log(f"[TABLEAU][E9:DETAIL] {nom} {type(ex).__name__} {ex}")
+            continue
+        for x in liste:
             ch = g.get_channel(int(x["salon_id"])) or g.get_thread(int(x["salon_id"]))
             x["salon"] = f"#{ch.name}" if ch is not None else "#salon supprimé"
-    except Exception as ex:  # sans ses sondages, la fiche reste lisible ; le détail part au journal
-        _log("[TABLEAU][E9] sondages du membre illisibles")
-        _log(f"[TABLEAU][E9:DETAIL] {type(ex).__name__} {ex}")
-        ses_sondages = []
+        (ses_sondages if nom == "sondages" else ses_idees).extend(liste)
     return {"membre": dict(qui[str(int(uid))], **infos), "agir": agir and not protege, "sanctions": sanctions,
             "donnees": donnees_par_lui, "tickets": tickets, "candidatures": candidatures,
-            "journal": journal["evenements"], "questions": qs, "sondages": ses_sondages, "alerte": alerte,
-            "personnes": qui}
+            "journal": journal["evenements"], "questions": qs, "sondages": ses_sondages, "idees": ses_idees,
+            "alerte": alerte, "personnes": qui}
 
 
 # ─── L'export : un fichier propre, à garder ou à m'envoyer ──────────────────
