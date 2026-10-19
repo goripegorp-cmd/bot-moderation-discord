@@ -141,14 +141,6 @@ def test_annee_bissextile():
     assert cal.jours_du_mois(_le("2028-02-10")) == 29
 
 
-def test_prochain_jour_de_semaine_saute_aujourdhui():
-    """Demander « prochain lundi » un lundi doit donner le lundi SUIVANT."""
-    lundi = _le("2026-08-10")
-    suivant = cal.prochain_jour_de_semaine(0, lundi)
-    assert suivant.weekday() == 0
-    assert (suivant - lundi).days == 7
-
-
 def test_jours_entre_inconnu_renvoie_none():
     assert cal.jours_entre("pas-une-date") is None
 

@@ -262,26 +262,6 @@ async def get_server_languages_async(guild_id) -> list:
         return list(DEFAULT_SERVER_LANGS)
 
 
-async def set_server_languages(guild_id, langs) -> bool:
-    """Écrit la liste des langues officielles du serveur (validée/dédoublonnée).
-    FAIL-SAFE : False si db_set indispo / aucune langue valide / erreur."""
-    try:
-        if _db_set is None:
-            return False
-        clean, seen = [], set()
-        for x in (langs or []):
-            l = normalize_lang(x)
-            if l in SUPPORTED_LANGS and l not in seen:
-                seen.add(l)
-                clean.append(l)
-        if not clean:
-            return False
-        return bool(await _db_set(int(guild_id), SERVER_LANGS_KEY, clean))
-    except Exception as ex:
-        print(f"[i18n set_server_languages] {ex}")
-        return False
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 #  RÉSOLUTION DE LA LANGUE À UTILISER
 # ═══════════════════════════════════════════════════════════════════════════

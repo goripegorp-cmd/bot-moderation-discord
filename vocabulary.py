@@ -98,18 +98,6 @@ class Status:
 # ROLES UTILISATEUR (terminologie metier)
 # =============================================================================
 
-class UserRole:
-    """Roles utilisateur du bot."""
-
-    OWNER = "Proprietaire du serveur"
-    ADMIN = "Administrateur"
-    MOD = "Moderateur"
-    HELPER = "Helper"
-    MEMBER = "Membre"
-    NEWCOMER = "Nouveau membre"
-    HOST = "Animateur / Staff"
-    BOT = "Bot"
-
 
 # =============================================================================
 # MODULES (noms officiels affiches dans les menus)
@@ -203,63 +191,20 @@ class Message:
 # TONE GUIDE (regles de redaction pour cohérence)
 # =============================================================================
 
-class Tone:
-    """Regles de redaction a respecter dans tout texte UI."""
-
-    # Tutoiement systematique (pas de vouvoiement) sauf messages d'erreur permission
-    USE_TU = True
-    # Phrases courtes : 1 idee = 1 phrase
-    MAX_SENTENCE_WORDS = 20
-    # Pas de jargon technique sans explication
-    EXPLAIN_TECHNICAL = True
-    # Toujours indiquer la prochaine action a faire
-    ALWAYS_NEXT_STEP = True
-
 
 # =============================================================================
 # LABELS DE TEMPS (durations, periodes)
 # =============================================================================
-
-class Time:
-    """Labels temporels."""
-
-    NEVER = "Jamais"
-    NOW = "Maintenant"
-    JUST_NOW = "A l'instant"
-    MINUTES = "minutes"
-    HOURS = "heures"
-    DAYS = "jours"
-    WEEKS = "semaines"
-    MONTHS = "mois"
-    YEARS = "annees"
-    PERMANENT = "Permanent"
-    TEMPORARY = "Temporaire"
 
 
 # =============================================================================
 # CHIFFRES & UNITES
 # =============================================================================
 
-class Unit:
-    """Unites courantes."""
-
-    XP = "XP"
-    POINTS = "points"
-    LEVEL = "Niveau"
-    COINS = "pieces"
-    MEMBERS = "membres"
-    MESSAGES = "messages"
-    CHANNELS = "salons"
-    ROLES = "roles"
-
 
 __all__ = [
     "Action",
     "Status",
-    "UserRole",
     "Module",
     "Message",
-    "Tone",
-    "Time",
-    "Unit",
 ]

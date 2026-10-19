@@ -25,7 +25,6 @@ DB :
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
 from typing import Optional
 
 import discord

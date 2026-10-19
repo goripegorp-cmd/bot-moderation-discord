@@ -39,7 +39,7 @@ import gzip
 import json
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -453,18 +453,6 @@ async def restore_latest() -> dict:
 
 # ─── Backup integrity check ────────────────────────────────────────────────
 
-async def check_db_integrity() -> bool:
-    """SELECT 1 sur les tables critiques. True si OK."""
-    if _get_db is None:
-        return False
-    try:
-        async with _get_db() as db:
-            async with db.execute("PRAGMA integrity_check") as cur:
-                row = await cur.fetchone()
-            return row and str(row[0]).lower() == "ok"
-    except Exception:
-        return False
-
 
 # ─── Task ───────────────────────────────────────────────────────────────────
 
@@ -528,7 +516,6 @@ __all__ = [
     "setup",
     "backup_now",
     "restore_latest",
-    "check_db_integrity",
     "backup_daily_task",
     "get_backup_list",
 ]

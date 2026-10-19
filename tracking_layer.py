@@ -139,16 +139,6 @@ async def was_posted(
     return key in _cache.get(guild_id, {})
 
 
-async def has_active_announcement(
-    guild_id: int, platform: str, username: str, post_id: str
-) -> bool:
-    """True si une annonce existe et n'a pas ete supprimee."""
-    await _load_guild(guild_id)
-    key = f"{platform}:{username.lower()}:{post_id}"
-    tp = _cache.get(guild_id, {}).get(key)
-    return tp is not None and not tp.deleted
-
-
 async def record_post(
     guild_id: int,
     platform: str,
@@ -188,46 +178,6 @@ async def record_post(
     return tp
 
 
-async def update_post(
-    guild_id: int,
-    platform: str,
-    username: str,
-    post_id: str,
-    *,
-    title: Optional[str] = None,
-    url: Optional[str] = None,
-    thumbnail_url: Optional[str] = None,
-    display_author: Optional[str] = None,
-) -> bool:
-    """Phase 14 : met à jour les champs (title/url/thumbnail/author) d'un post
-    existant. Utilisé pour le backfill des anciennes entrées qui n'ont pas
-    `thumbnail_url` ou `display_author` (capturées avant Phase 14).
-
-    Retourne True si la mise à jour a été faite, False si la clé n'existe pas.
-    """
-    await _load_guild(guild_id)
-    key = f"{platform}:{username.lower()}:{post_id}"
-    tp = _cache.get(guild_id, {}).get(key)
-    if tp is None:
-        return False
-    changed = False
-    if title is not None and tp.title != title[:200]:
-        tp.title = title[:200]
-        changed = True
-    if url is not None and tp.url != url:
-        tp.url = url
-        changed = True
-    if thumbnail_url is not None and tp.thumbnail_url != thumbnail_url:
-        tp.thumbnail_url = thumbnail_url
-        changed = True
-    if display_author is not None and tp.display_author != display_author:
-        tp.display_author = display_author
-        changed = True
-    if changed:
-        await _save_guild(guild_id)
-    return changed
-
-
 async def list_announcements(
     guild_id: int,
     platform: Optional[str] = None,
@@ -260,43 +210,6 @@ async def mark_deleted(
     tp.deleted = True
     await _save_guild(guild_id)
     return True
-
-
-async def remove_record(
-    guild_id: int, platform: str, username: str, post_id: str
-) -> bool:
-    """Supprime entierement le record (cas ou l'owner supprime un compte tracke)."""
-    await _load_guild(guild_id)
-    key = f"{platform}:{username.lower()}:{post_id}"
-    if key not in _cache.get(guild_id, {}):
-        return False
-    del _cache[guild_id][key]
-    await _save_guild(guild_id)
-    return True
-
-
-async def rebind_channel(guild_id: int, platform: str, new_channel_id: int) -> int:
-    """Met a jour le channel_id de toutes les entries de cette plateforme.
-
-    Phase 3.7 : si l'owner change le salon configure pour cette plateforme,
-    on doit propager le nouveau channel_id aux entries existantes pour que
-    la galerie les retrouve correctement.
-
-    Retourne le nombre d'entries mises a jour.
-    """
-    await _load_guild(guild_id)
-    updated = 0
-    store = _cache.get(guild_id, {})
-    for tp in store.values():
-        if tp.platform != platform:
-            continue
-        if tp.discord_channel_id == new_channel_id:
-            continue
-        tp.discord_channel_id = new_channel_id
-        updated += 1
-    if updated > 0:
-        await _save_guild(guild_id)
-    return updated
 
 
 async def prune_to_max(
@@ -471,11 +384,9 @@ async def cleanup_deleted_sources(
 __all__ = [
     "TrackedPost",
     "was_posted",
-    "has_active_announcement",
     "record_post",
     "list_announcements",
     "mark_deleted",
-    "remove_record",
     "prune_old",
     "cleanup_deleted_sources",
 ]

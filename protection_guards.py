@@ -129,11 +129,6 @@ DEFAULT_GIVEAWAY_PATTERNS: list[str] = [
     r"\bgagnant\b",
 ]
 
-# Extensions images / videos legitimes
-LEGIT_FILE_EXT = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm",
-}
-
 
 # =============================================================================
 # MODELES
@@ -362,12 +357,6 @@ async def save_policy(guild_id: int, policy: ProtectionPolicy) -> None:
         )
 
 
-async def reload_policy(guild_id: int) -> ProtectionPolicy:
-    async with _io_lock:
-        _policy_cache.pop(guild_id, None)
-    return await load_policy(guild_id)
-
-
 # =============================================================================
 # AUDIT (JSONL append-only, simple et robuste)
 # =============================================================================
@@ -378,22 +367,6 @@ async def append_audit(entry: AuditEntry) -> None:
         line = json.dumps(entry.to_dict(), ensure_ascii=False) + "\n"
         with path.open("a", encoding="utf-8") as f:
             f.write(line)
-
-
-async def read_audit(guild_id: int, limit: int = 100) -> list[AuditEntry]:
-    async with _io_lock:
-        path = _audit_path(guild_id)
-        if not path.exists():
-            return []
-        lines = path.read_text(encoding="utf-8").splitlines()
-    out: list[AuditEntry] = []
-    for line in lines[-limit:]:
-        try:
-            d = json.loads(line)
-            out.append(AuditEntry.from_dict(d))
-        except (json.JSONDecodeError, TypeError):
-            continue
-    return out
 
 
 # =============================================================================
@@ -683,8 +656,6 @@ __all__ = [
     "ProtectionPolicy",
     "load_policy",
     "save_policy",
-    "reload_policy",
     "append_audit",
-    "read_audit",
     "decide_action",
 ]

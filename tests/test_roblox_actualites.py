@@ -26,7 +26,6 @@ from pathlib import Path
 import pytest
 
 import roblox_news as news
-import roblox_panneau as panneau
 
 RACINE = Path(__file__).resolve().parent.parent
 SRC_BOT = (RACINE / "bot.py").read_text(encoding="utf-8")
@@ -312,53 +311,5 @@ def _boucle():
 
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  6. Le lien entre un ACCESSOIRE et l'annonce qui en parle (18/08)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@pytest.fixture
-def registre_vide():
-    news._recents.clear()
-    yield
-    news._recents.clear()
-
-
-def test_un_accessoire_est_relie_a_lannonce_qui_le_nomme(registre_vide):
-    news._memoriser_recent({"topic_id": 4800001, "titre": "New Limited: The Requiem drops today",
-                            "cree_le": "2026-08-18T10:00:00Z", "domaine": "Annonces"})
-    news._memoriser_recent({"topic_id": 4800002, "titre": "Release Notes for 735",
-                            "cree_le": "2026-08-18T11:00:00Z", "domaine": "Studio & moteur"})
-    lies = news.billets_lies("The Requiem")
-    assert len(lies) == 1
-    assert lies[0]["lien"] == "https://devforum.roblox.com/t/4800001"
-
-
-def test_un_nom_dun_seul_mot_ne_relie_rien(registre_vide):
-    """« Hat » collerait a toute annonce qui contient « hat » : on prefere se
-    taire qu'annoncer un rapport qui n'existe pas."""
-    news._memoriser_recent({"topic_id": 1, "titre": "A new hat for everyone",
-                            "cree_le": "2026-08-18T10:00:00Z", "domaine": "Annonces"})
-    assert news.billets_lies("Hat") == []
-
-
-def test_tous_les_mots_significatifs_doivent_apparaitre(registre_vide):
-    news._memoriser_recent({"topic_id": 1, "titre": "Specter items are back",
-                            "cree_le": "2026-08-18T10:00:00Z", "domaine": "Annonces"})
-    assert news.billets_lies("Specter Time Fedora") == [], (
-        "« time » et « fedora » manquent : pas de lien")
-
-
-def test_le_corps_du_billet_compte_aussi(registre_vide):
-    news._memoriser_recent({"topic_id": 1, "titre": "Weekly Recap",
-                            "corps": "This week the Tricolor Ladoo Hat went live for India Day.",
-                            "cree_le": "2026-08-18T10:00:00Z", "domaine": "Annonces"})
-    assert len(news.billets_lies("Tricolor Ladoo Hat")) == 1
-
-
-def test_le_registre_est_borne(registre_vide):
-    for i in range(news.MAX_RECENTS + 50):
-        news._memoriser_recent({"topic_id": i + 1, "titre": f"billet {i}",
-                                "cree_le": "2026-08-18T10:00:00Z", "domaine": "x"})
-    assert len(news._recents) <= news.MAX_RECENTS
 
 

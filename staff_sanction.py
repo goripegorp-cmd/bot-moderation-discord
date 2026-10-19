@@ -38,13 +38,12 @@ DB tables :
 """
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import discord
-from discord.ui import View, Button
+from discord.ui import Button
 
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
@@ -61,7 +60,6 @@ try:
 except Exception:
     _ratelimit = None
 STAFF_CHANNEL_NAME = "🚨-actions-staff"
-STAFF_CATEGORY_HINT = "🛡️ Modération"
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict):
@@ -165,77 +163,6 @@ async def ensure_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
         return None
 
 
-async def _legacy_ensure_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
-    """ANCIENNE création auto — gardée pour migrations manuelles owner.
-    Plus appelé automatiquement."""
-    if not guild:
-        return None
-    try:
-        # Recherche existant
-        for ch in guild.text_channels:
-            if ch.name == STAFF_CHANNEL_NAME:
-                return ch
-
-        # Crée la catégorie si absente
-        category = None
-        for cat in guild.categories:
-            if STAFF_CATEGORY_HINT.lower() in cat.name.lower() \
-               or "modération" in cat.name.lower() \
-               or "staff" in cat.name.lower():
-                category = cat
-                break
-        if category is None:
-            try:
-                category = await guild.create_category(
-                    STAFF_CATEGORY_HINT,
-                    reason="Anti-raid : catégorie staff",
-                )
-            except Exception:
-                pass
-
-        # Overwrites : @everyone DENY, manage_messages roles ALLOW
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(
-                view_channel=False, read_messages=False,
-            ),
-        }
-        for role in guild.roles:
-            try:
-                if role.permissions.manage_messages or \
-                   role.permissions.kick_members or \
-                   role.permissions.ban_members:
-                    overwrites[role] = discord.PermissionOverwrite(
-                        view_channel=True, read_messages=True,
-                        send_messages=True, embed_links=True,
-                    )
-            except Exception:
-                pass
-        # Bot lui-même
-        try:
-            overwrites[guild.me] = discord.PermissionOverwrite(
-                view_channel=True, read_messages=True,
-                send_messages=True, manage_messages=True,
-                embed_links=True,
-            )
-        except Exception:
-            pass
-
-        ch = await guild.create_text_channel(
-            STAFF_CHANNEL_NAME,
-            category=category,
-            overwrites=overwrites,
-            topic=(
-                "Actions de modération pré-mâchées par les détecteurs auto. "
-                "Cliquez sur un bouton pour valider la sanction."
-            ),
-            reason="Anti-raid : salon actions staff",
-        )
-        return ch
-    except Exception as ex:
-        print(f"[staff_sanction ensure_channel] {ex}")
-        return None
-
-
 # ─── Panel builder ──────────────────────────────────────────────────────────
 
 # ─── DynamicItem pour persistance des boutons sanction (Phase 150) ────────
@@ -287,18 +214,6 @@ class SanctionDynamicButton(
         await _handle_sanction_click(
             interaction, self.sanction_id, self.action
         )
-
-
-class SanctionView(View):
-    """View standard utilisée à la création du panel (avant persistance)."""
-
-    def __init__(self, sanction_id: int):
-        super().__init__(timeout=None)
-        self.sanction_id = sanction_id
-        # RÈGLE FONDATEUR-ONLY (2026-06-13) : kick/ban RETIRÉS des boutons staff.
-        # Le staff ne dispose plus que de Mute 1h / Warn / Faux positif.
-        for action in ("mute_1h", "warn", "ignore"):
-            self.add_item(SanctionDynamicButton(action, sanction_id))
 
 
 async def _handle_sanction_click(
@@ -642,5 +557,4 @@ __all__ = [
     "ensure_channel",
     "create_sanction_panel",
     "register_persistent_views",
-    "SanctionView",
 ]

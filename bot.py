@@ -11646,8 +11646,6 @@ _SUPERVISED_MODULE_LOOPS = (
 #   • task_supervisor / combat_channel_sweeper : se gèrent eux-mêmes (le superviseur ne se
 #     supervise pas lui-même ; combat_channel_sweeper est déjà dans _SUPERVISED_LOOP_NAMES).
 _SUPERVISOR_DENY = frozenset({
-    "auto_close_inactive_task",
-    "sla_reminder_task",
     "task_supervisor",
     # ⚠️ backup_daily_task (backup_lite) DÉSACTIVÉE — owner 2026-07-12, PREUVE PAR LES METRICS
     # Railway : la RAM montait jusqu'à **5 Go** en dents de scie → conteneur tué (OOM) →

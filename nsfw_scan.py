@@ -13,7 +13,6 @@ le TEXTE, ne peut pas voir). Moteur : nudenet (onnxruntime, modèle ONNX léger)
 """
 from __future__ import annotations
 
-import io  # noqa: F401  (réservé)
 import os
 
 _DETECTOR = None

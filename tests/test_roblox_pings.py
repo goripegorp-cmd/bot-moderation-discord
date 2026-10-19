@@ -119,7 +119,6 @@ def test_les_deux_salles_de_presse_partagent_un_seul_role():
 
 
 def test_un_flux_inconnu_ne_ping_personne():
-    assert pings.cle_du_flux("surveiller") is None
     assert pings.cle_du_billet({"domaine": "Blog d'un inconnu"}) is None
 
 

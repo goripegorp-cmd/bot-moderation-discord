@@ -43,7 +43,6 @@ import asyncio
 import re
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 import discord
 from discord.ui import Button

@@ -30,8 +30,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import datetime, timezone
 
 import discord
 
@@ -206,23 +205,6 @@ async def get_risky_members_this_week(guild_id: int) -> list[dict]:
     return out
 
 
-async def mark_reviewed(guild_id: int, user_id: int) -> bool:
-    """Marque un user comme reviewé par l'owner."""
-    if _get_db is None:
-        return False
-    try:
-        async with _get_db() as db:
-            await db.execute(
-                "UPDATE member_risk_scores SET reviewed=1 "
-                "WHERE guild_id=? AND user_id=?",
-                (guild_id, user_id),
-            )
-            await db.commit()
-        return True
-    except Exception:
-        return False
-
-
 def build_risk_panel(guild: discord.Guild):
     """Panel V2 listant les joins à risque pour review owner."""
     if _v2 is None or guild is None:
@@ -291,7 +273,6 @@ __all__ = [
     "init_db",
     "on_member_join",
     "get_risky_members_this_week",
-    "mark_reviewed",
     "build_risk_panel",
     "RISK_THRESHOLD",
 ]

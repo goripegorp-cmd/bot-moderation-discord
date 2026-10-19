@@ -121,11 +121,6 @@ def cle_du_billet(billet: dict) -> str | None:
     return CLE_PAR_DOMAINE.get(str((billet or {}).get("domaine") or ""))
 
 
-def cle_du_flux(flux: str) -> str | None:
-    """La catégorie d'un accessoire, d'après son flux de publication."""
-    return CLE_PAR_FLUX.get(str(flux or ""))
-
-
 def cle_config(cle: str) -> str:
     return f"roblox_ping_role_{cle}"
 

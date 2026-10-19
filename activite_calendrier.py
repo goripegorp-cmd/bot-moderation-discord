@@ -103,15 +103,6 @@ def semaine(dt: datetime | None = None) -> str:
     return debut_de_semaine(dt).strftime(SEMAINE_FMT)
 
 
-def prochain_jour_de_semaine(cible: int, dt: datetime | None = None) -> datetime:
-    """Prochaine occurrence de ce jour (0=lundi … 6=dimanche) à 00h00."""
-    d = debut_du_jour(dt)
-    ecart = (int(cible) - d.weekday()) % 7
-    if ecart == 0:
-        ecart = 7
-    return d + timedelta(days=ecart)
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  MOIS — du 1er 00h00 au 1er du mois suivant
 # ═══════════════════════════════════════════════════════════════════════════════

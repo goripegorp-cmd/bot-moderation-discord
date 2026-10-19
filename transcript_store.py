@@ -42,10 +42,6 @@ _MIN_FREE_BYTES = 300 * 1024 * 1024        # plancher d'espace libre : en-dessou
 _ALLOWED_EXTS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 
-def base_dir() -> str:
-    return _BASE_DIR
-
-
 def new_token() -> str:
     return secrets.token_urlsafe(16)
 

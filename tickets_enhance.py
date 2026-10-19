@@ -30,7 +30,6 @@ API publique :
 - set_inactivity_days(guild_id, days) / get_inactivity_days(guild_id)
 - collect_ticket_stats(guild_id) -> dict
 - build_stats_panel / build_templates_panel
-- auto_close_inactive_task (tasks.loop quotidienne)
 
 ⚠️ Conforme RULES.md : zéro feature relationnelle. Pur outil staff/gestion.
 """
@@ -40,7 +39,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import discord
-from discord.ext import tasks
 
 
 # ─── Configuration ───────────────────────────────────────────────────────
@@ -51,14 +49,9 @@ PRIORITY_LEVELS = {
     "low":    ("🔵", "BASSE"),
 }
 DEFAULT_INACTIVITY_DAYS = 7
-AUTO_CLOSE_CHECK_HOURS = 24
 # Phase 245 : rappel SLA — un ticket OUVERT et NON PRIS EN CHARGE depuis ce délai
 # déclenche UN rappel staff (un seul, jamais de spam). Vérification toutes les 2 h.
 SLA_UNCLAIMED_HOURS = 24
-# Escalade (2e palier, owner 2026-06-15) : ticket TOUJOURS non pris après ce délai →
-# on PING l'owner du serveur UNE fois (force la résolution des goulots). Configurable
-# par guilde via la clé 'ticket_sla_escalate_hours' (fallback sur cette constante).
-SLA_ESCALATE_HOURS = 48
 
 # ── TAGS internes (owner 2026-06-15, Lot 2) : classification PAR SUJET (orthogonale aux
 #    priorités qui gèrent la RÉACTIVITÉ). Liste fixe → pas de prolifération. Réassignables.
@@ -439,44 +432,6 @@ async def touch_activity(channel_id: int):
                 "VALUES(?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(channel_id) DO UPDATE SET "
                 "last_activity_at=CURRENT_TIMESTAMP",
-                (channel_id,),
-            )
-            await db.commit()
-    except Exception:
-        pass
-
-
-async def mark_claimed(channel_id: int):
-    """Marque le ticket comme claim (au moment du claim staff)."""
-    if _get_db is None:
-        return
-    await _ensure_tables()
-    try:
-        async with _get_db() as db:
-            await db.execute(
-                "INSERT INTO ticket_extras(channel_id, claimed_at) "
-                "VALUES(?, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(channel_id) DO UPDATE SET "
-                "claimed_at=COALESCE(claimed_at, CURRENT_TIMESTAMP)",
-                (channel_id,),
-            )
-            await db.commit()
-    except Exception:
-        pass
-
-
-async def mark_closed(channel_id: int):
-    """Marque le ticket comme fermé (au moment du close staff)."""
-    if _get_db is None:
-        return
-    await _ensure_tables()
-    try:
-        async with _get_db() as db:
-            await db.execute(
-                "INSERT INTO ticket_extras(channel_id, closed_at) "
-                "VALUES(?, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(channel_id) DO UPDATE SET "
-                "closed_at=CURRENT_TIMESTAMP",
                 (channel_id,),
             )
             await db.commit()
@@ -983,114 +938,10 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
 # AUTO-CLOSE TASK — quotidienne
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def _try_close_channel(channel_id: int):
-    """Tente de fermer un ticket inactif (DB + channel)."""
-    if _bot is None or _get_db is None:
-        return False
-    try:
-        async with _get_db() as db:
-            await db.execute(
-                "UPDATE tickets SET status='closed' WHERE channel_id=?",
-                (channel_id,),
-            )
-            await db.commit()
-        await mark_closed(channel_id)
-
-        # Tente d'envoyer un message dans le ticket + archive
-        ch = _bot.get_channel(channel_id)
-        if isinstance(ch, (discord.TextChannel, discord.Thread)):
-            try:
-                await ch.send(
-                    "🔒 **Auto-close** : ce ticket est fermé pour cause "
-                    "d'inactivité. Si tu as encore besoin d'aide, "
-                    "ouvre un nouveau ticket."
-                )
-                if isinstance(ch, discord.Thread):
-                    await ch.edit(archived=True, locked=True)
-            except discord.HTTPException as ex:
-                print(f"[tickets_enhance auto-close {channel_id}] {ex}")
-            # Optionnel : delete après quelques min (laissé à la charge de l'admin)
-        return True
-    except Exception as ex:
-        print(f"[tickets_enhance _try_close_channel] {ex}")
-        return False
-
-
-@tasks.loop(hours=AUTO_CLOSE_CHECK_HOURS)
-async def auto_close_inactive_task():
-    """No-op, jamais lancée : depuis le 19/10/2026 la fermeture après N jours sans message
-    est `tickets_inactifs_task` (bot.py), qui passe par la même fermeture que le bouton 🔒."""
-    return
-
-
-@auto_close_inactive_task.before_loop
-async def _before():
-    if _bot is not None:
-        await _bot.wait_until_ready()
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SLA — rappel staff sur les tickets non pris en charge (Phase 245)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-async def _mark_sla_reminded(channel_id: int):
-    """Marque un ticket comme « rappel SLA envoyé » (1 seule fois → jamais de spam)."""
-    if _get_db is None:
-        return
-    try:
-        async with _get_db() as db:
-            await db.execute(
-                "INSERT INTO ticket_sla_reminded(channel_id, reminded_at) "
-                "VALUES(?, CURRENT_TIMESTAMP) ON CONFLICT(channel_id) DO NOTHING",
-                (int(channel_id),),
-            )
-            await db.commit()
-    except Exception:
-        pass
-
-
-async def _mark_sla_escalated(channel_id: int):
-    """Marque un ticket comme « escaladé à l'owner » (1 seule fois → jamais de spam)."""
-    if _get_db is None:
-        return
-    try:
-        async with _get_db() as db:
-            await db.execute(
-                "INSERT INTO ticket_sla_escalated(channel_id, escalated_at) "
-                "VALUES(?, CURRENT_TIMESTAMP) ON CONFLICT(channel_id) DO NOTHING",
-                (int(channel_id),),
-            )
-            await db.commit()
-    except Exception:
-        pass
-
-
-async def _staff_has_replied(channel, creator_id) -> Optional[bool]:
-    """Le ticket a-t-il DÉJÀ été pris en main, même sans clic « Réclamer » ? (owner
-    2026-06-17). Vrai dès qu'un HUMAIN autre que le créateur a écrit dans le salon
-    (≈ un staff a répondu). Sert à ne JAMAIS rappeler/escalader un ticket que le staff
-    a déjà traité et volontairement mis de côté — la plainte n°1 de l'owner.
-
-    Retour : True (déjà répondu → suppression du rappel) · False (personne d'autre que
-    le créateur n'a parlé → rappel légitime) · None (lecture impossible → INDÉCIS : on
-    réessaiera au prochain cycle, sans pinguer à tort ET sans tuer le rappel pour
-    toujours). On lit au plus 200 messages : largement assez pour un ticket calme « mis
-    de côté » (une réponse staff enterrée sous 200 messages du créateur SANS aucun claim
-    est quasi impossible ; les messages du bot sont ignorés et ne consomment pas le
-    budget). FAIL-SAFE."""
-    try:
-        cid = int(creator_id or 0)
-        async for m in channel.history(limit=200):
-            try:
-                if getattr(m.author, 'bot', False):
-                    continue
-                if int(getattr(m.author, 'id', 0)) != cid:
-                    return True  # un tiers (staff) a parlé → ticket traité
-            except Exception:
-                continue
-        return False
-    except Exception:
-        return None  # indécis : on ne décide rien ce cycle-ci
 
 
 def _format_ticket_age(created_at) -> str:
@@ -1113,38 +964,17 @@ def _format_ticket_age(created_at) -> str:
         return f"depuis plus de {SLA_UNCLAIMED_HOURS}h"
 
 
-@tasks.loop(hours=2)
-async def sla_reminder_task():
-    """DÉSACTIVÉ COMPLÈTEMENT (directive owner 2026-06-18) : le bot ne PING PLUS JAMAIS
-    le staff (ni l'owner) au sujet d'un ticket. Plus aucun rappel « Ticket en attente »,
-    plus aucune escalade « sans prise en charge », plus aucun message « pas de réponse ».
-    Le système de mention de tickets était jugé inutile + affichait une date fausse (un
-    vieux ticket resté au défaut `2020-01-01` → « ~2361 jours »).
-
-    Boucle conservée en NO-OP (références boot/historique préservées, zéro NameError) ;
-    elle n'est même plus lancée au boot ni supervisée (cf. bot.py). La gestion des tickets
-    reste 100 % MANUELLE : création + prise en charge + fermeture par le staff, sans aucun
-    automatisme de relance. NE PAS réactiver sans demande explicite de l'owner."""
-    return
-
-
-@sla_reminder_task.before_loop
-async def _sla_before():
-    if _bot is not None:
-        await _bot.wait_until_ready()
-
-
 __all__ = [
     "setup",
     # Priorities
     "PRIORITY_LEVELS",
     "get_priority", "set_priority", "update_channel_name_for_priority",
     # Activity
-    "touch_activity", "mark_claimed", "mark_closed",
+    "touch_activity",
     # Templates
     "add_template", "get_template", "list_templates", "delete_template",
     # Auto-close
-    "get_inactivity_days", "set_inactivity_days", "auto_close_inactive_task",
+    "get_inactivity_days", "set_inactivity_days",
     # Stats
     "collect_ticket_stats",
     # Panels

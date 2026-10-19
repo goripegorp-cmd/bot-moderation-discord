@@ -36,8 +36,6 @@ from __future__ import annotations
 
 import re
 import aiohttp
-from datetime import datetime
-from typing import Optional
 
 import discord
 
@@ -263,39 +261,10 @@ async def on_message_hook(message: discord.Message) -> bool:
 
 # ─── Helpers de stats (utilisé par le panel owner) ──────────────────────────
 
-async def get_recent_leaks(guild_id: int, limit: int = 10) -> list[dict]:
-    """Renvoie les N derniers leaks pour un guild."""
-    out = []
-    if _get_db is None:
-        return out
-    try:
-        async with _get_db() as db:
-            async with db.execute(
-                "SELECT user_id, channel_id, leaked_url_redacted, "
-                "detected_at, auto_revoked, revoke_status "
-                "FROM webhook_leak_log WHERE guild_id=? "
-                "ORDER BY detected_at DESC LIMIT ?",
-                (guild_id, limit),
-            ) as cur:
-                rows = await cur.fetchall()
-        for r in rows:
-            out.append({
-                "user_id": int(r[0]),
-                "channel_id": int(r[1] or 0),
-                "url_redacted": r[2],
-                "detected_at": r[3],
-                "auto_revoked": bool(r[4]),
-                "revoke_status": r[5],
-            })
-    except Exception as ex:
-        print(f"[webhook_leak get_recent_leaks] {ex}")
-    return out
-
 
 __all__ = [
     "setup",
     "init_db",
     "scan_message",
     "on_message_hook",
-    "get_recent_leaks",
 ]

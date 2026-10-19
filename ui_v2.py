@@ -133,21 +133,6 @@ def kv_block(rows: Sequence[tuple[str, str]], *, separator: str = " — ") -> ui
     return ui.TextDisplay("\n".join(lines))
 
 
-def bullets(items: Sequence[str]) -> ui.TextDisplay:
-    """Liste à puces."""
-    return ui.TextDisplay("\n".join(f"• {item}" for item in items))
-
-
-def stat_line(icon: str, label: str, value: str) -> str:
-    """Ligne de stat formatée (renvoie une str — à composer dans un TextDisplay)."""
-    return f"{icon} **{label}** · `{value}`"
-
-
-def stats_grid(stats: Sequence[tuple[str, str, str]]) -> ui.TextDisplay:
-    """Grille de stats (icône, label, valeur), une par ligne."""
-    return ui.TextDisplay("\n".join(stat_line(i, l, v) for i, l, v in stats))
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🖼️ BUILDERS VISUELS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -243,179 +228,16 @@ def header(
     return ui.Section(*parts, accessory=ui.Thumbnail(media=icon_url))
 
 
-def info_card(
-    title_text: str,
-    description: str,
-    *,
-    icon_url: Optional[str] = None,
-    color: discord.Color = Palette.PRIMARY,
-    footer: Optional[str] = None,
-) -> ui.Container:
-    """Carte d'information complète : header + description + footer optionnel.
-
-    Si `icon_url` est fourni, utilise une Section avec Thumbnail.
-    Sinon, ajoute le titre/description en TextDisplays directs.
-    """
-    items: list[ui.Item] = []
-    if icon_url:
-        items.append(header(title_text, description, icon_url=icon_url))
-    else:
-        items.append(ui.TextDisplay(f"# {title_text}"))
-        items.append(ui.TextDisplay(description))
-    if footer:
-        items.append(ui.Separator())
-        items.append(ui.TextDisplay(f"-# {footer}"))
-    return ui.Container(*items, accent_color=color)
-
-
-class StaticPanel(LayoutView):
-    """LayoutView statique pour une ANNONCE / un RÉCAP public (sans boutons).
-
-    Pas d'interaction → pas de risque d'« Échec de l'interaction », pas besoin
-    de persistance. À envoyer en `view=` UNIQUEMENT (jamais avec `content=` :
-    content + Components V2 = erreur 400).
-    """
-
-    def __init__(self, *items: ui.Item, timeout: Optional[float] = None):
-        super().__init__(timeout=timeout)
-        for it in items:
-            self.add_item(it)
-
-
-# custom_id stable du bouton « Mon hub » apposé sous les récaps/annonces publics.
-# Re-enregistré au boot via bot.add_view(MyHubButtonView()) côté bot.py → le clic
-# est dispatché même sur de vieux messages survivant à un reboot. NE PAS renommer.
-MY_HUB_BUTTON_CUSTOM_ID = "open_my_hub"
-
-
-def _my_hub_action_row() -> ui.ActionRow:
-    """ActionRow contenant le seul bouton « 🎮 Mon hub » (custom_id stable).
-
-    Le bouton n'a volontairement PAS de callback ici : le dispatch est assuré par
-    la vue persistante MyHubButtonView (même custom_id) enregistrée au boot dans
-    bot.py. Apposé sous un récap/annonce public, il ouvre le hub en éphémère pour
-    le cliqueur (découvrabilité passive)."""
-    btn = ui.Button(
-        label="Mon hub",
-        emoji="🎮",
-        style=discord.ButtonStyle.secondary,
-        custom_id=MY_HUB_BUTTON_CUSTOM_ID,
-    )
-    return ui.ActionRow(btn)
-
-
-def recap_view(
-    title_text: str,
-    description: str,
-    *,
-    color: discord.Color = Palette.PRIMARY,
-    footer: Optional[str] = None,
-    icon_url: Optional[str] = None,
-    hub_button: bool = False,
-) -> "StaticPanel":
-    """Récap/annonce d'événement dans un bel ENCADRÉ Components V2 (au lieu de
-    texte brut). Renvoie une LayoutView prête à envoyer :
-
-        await channel.send(view=ui_v2.recap_view("🏆 Fin du Boss", body, color=...))
-
-    Look identique partout (même design-system que tous les panels du bot).
-    `description` accepte du markdown multi-ligne (≤ ~4000 caractères).
-
-    Garde-fou : un TextDisplay VIDE est rejeté par Discord (400) → ferait
-    échouer le récap. On garantit donc un titre + un corps non vides.
-
-    `hub_button=True` ajoute SOUS l'encadré un bouton « 🎮 Mon hub » persistant
-    (custom_id stable, dispatché par MyHubButtonView au boot) qui ouvre le hub en
-    éphémère pour le cliqueur — découvrabilité passive sur les annonces publiques.
-    """
-    safe_title = (title_text or "").strip() or "📢 Événement"
-    safe_desc = (description or "").strip()[:4000] or "_—_"
-    items = [info_card(
-        safe_title, safe_desc, icon_url=icon_url, color=color, footer=footer)]
-    if hub_button:
-        items.append(_my_hub_action_row())
-    return StaticPanel(*items)
-
-
-def combat_recap_view(
-    emoji: str,
-    name: str,
-    outcome: str,
-    podium: Sequence = (),
-    *,
-    others_count: int = 0,
-    participants: Optional[int] = None,
-    total_damage: Optional[int] = None,
-    hub_button: bool = False,
-) -> "StaticPanel":
-    """Récap de fin d'événement de COMBAT — format UNIQUE, compact et BORNÉ,
-    identique pour TOUS les events (boss raid, world boss, boss du jour, mob,
-    climax, invasion, donjon). Toujours ~5-6 lignes quel que soit le nombre de
-    participants : ligne d'état + podium (max 3) + « +N autres récompensés ».
-
-    Tout le monde reste RÉCOMPENSÉ (la ligne « +N autres » le rappelle) — seul
-    l'AFFICHAGE est borné. Ce helper ne touche AUCUNE logique d'économie.
-
-        view = combat_recap_view("🐲", "Dragon des Cendres", "win",
-                                 [("Aria", 1200), ("Korr", 900)],
-                                 others_count=12, total_damage=45000)
-
-    Args:
-        outcome: "win" (vaincu) · "fail" (non vaincu) · "done" (terminé).
-        podium:  séquence de (nom_affiché, pièces) déjà triée du 1er au 3e.
-        others_count: nombre de participants au-delà du podium affiché.
-        participants: total de participants (sinon déduit de podium+others_count).
-        total_damage: dégâts cumulés (optionnel).
-    """
-    title = f"{(emoji or '').strip()} {(name or 'Événement').strip()}".strip()
-    out = (outcome or "done").lower()
-    if out == "win":
-        head, color = "✅ Vaincu", Palette.SUCCESS
-    elif out == "fail":
-        head, color = "⏳ Non vaincu", Palette.NEUTRAL
-    else:
-        head, color = "🏁 Terminé", Palette.PRIMARY
-    # Récap volontairement MINIMAL (demande owner : « beaucoup plus simple, juste
-    # les infos essentielles ») : état + nombre de participants + qui a gagné +
-    # récompense. `total_damage` reste accepté pour compat d'appel mais n'est PLUS
-    # affiché (stat technique, non essentielle au joueur).
-    n = participants if participants is not None else (len(podium) + max(0, others_count))
-    head_line = head
-    if n:
-        head_line += f" · {n} participant" + ("s" if n > 1 else "")
-    lines = [head_line]
-    medals = ("🥇", "🥈", "🥉")
-    if podium:
-        lines.append("")
-        for i, entry in enumerate(list(podium)[:3]):
-            try:
-                nm, coins = entry
-                lines.append(f"{medals[i]} **{nm}** · `{int(coins):,}` 🪙")
-            except Exception:
-                continue
-        if others_count and others_count > 0:
-            lines.append(f"🔸 _+{int(others_count)} autres récompensés_")
-    return recap_view(title, "\n".join(lines), color=color, hub_button=hub_button)
-
-
 __all__ = [
     "Palette",
     "title",
     "subtitle",
     "body",
     "kv_block",
-    "bullets",
-    "stat_line",
-    "stats_grid",
     "divider",
     "thumb",
     "section",
     "container",
     "BasePanel",
     "header",
-    "info_card",
-    "StaticPanel",
-    "recap_view",
-    "combat_recap_view",
-    "MY_HUB_BUTTON_CUSTOM_ID",
 ]

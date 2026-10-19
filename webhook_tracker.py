@@ -35,11 +35,10 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 import discord
 from discord.ext import tasks
-from discord.ui import Button, View
+from discord.ui import Button
 
 import owner_ids as _owner_ids  # FIX sécu : source UNIQUE de super-owners
 

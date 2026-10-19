@@ -97,4 +97,3 @@ def scan(raw: str, normalized: str | None = None):
     return None
 
 
-_COUNT = _load()

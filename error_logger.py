@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import traceback as _tb
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 import discord
@@ -45,8 +45,6 @@ _v2 = None
 BURST_THRESHOLD_PER_HOUR = 10
 # Cooldown anti-spam : pas 2 alertes burst du même source dans 4h
 BURST_ALERT_COOLDOWN_HOURS = 4
-# Rétention DB
-RETENTION_DAYS = 7
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict):

@@ -22,12 +22,10 @@ Usage dans bot.py :
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import time
 from typing import TYPE_CHECKING
 
-import discord
 
 if TYPE_CHECKING:
     from discord.ext import commands
@@ -186,16 +184,4 @@ async def start(bot_instance, port: int = 8000) -> bool:
         return False
 
 
-async def stop():
-    """Arrête le serveur HTTP (à appeler dans bot.close si nécessaire)."""
-    global _server_runner
-    if _server_runner is not None:
-        try:
-            await _server_runner.cleanup()
-            _server_runner = None
-            print("🌐 [health_server] stopped")
-        except Exception as ex:
-            print(f"[health_server stop] {ex}")
-
-
-__all__ = ["start", "stop"]
+__all__ = ["start"]

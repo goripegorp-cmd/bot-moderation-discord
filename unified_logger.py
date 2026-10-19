@@ -26,7 +26,6 @@ API :
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -709,48 +708,6 @@ async def log_event(
 # HELPERS PRATIQUES PAR TYPE
 # =============================================================================
 
-async def log_ban(bot, guild, target_user, moderator, reason=""):
-    return await log_event(
-        bot, guild, EventType.MOD_BAN,
-        description=f"**{target_user}** a été banni du serveur.",
-        user=target_user, moderator=moderator, reason=reason,
-    )
-
-
-async def log_kick(bot, guild, target_user, moderator, reason=""):
-    return await log_event(
-        bot, guild, EventType.MOD_KICK,
-        description=f"**{target_user}** a été expulsé du serveur.",
-        user=target_user, moderator=moderator, reason=reason,
-    )
-
-
-async def log_mute(bot, guild, target_user, moderator, duration_min=0, reason=""):
-    duration_str = f"{duration_min} min" if duration_min else "permanent"
-    return await log_event(
-        bot, guild, EventType.MOD_MUTE,
-        description=f"**{target_user}** a été mute (durée : **{duration_str}**).",
-        user=target_user, moderator=moderator, reason=reason,
-        extra={"⏱️ Durée": duration_str} if duration_min else None,
-    )
-
-
-async def log_warn(bot, guild, target_user, moderator, reason=""):
-    return await log_event(
-        bot, guild, EventType.MOD_WARN,
-        description=f"**{target_user}** a reçu un avertissement.",
-        user=target_user, moderator=moderator, reason=reason,
-    )
-
-
-async def log_purge(bot, guild, moderator, channel, count: int):
-    return await log_event(
-        bot, guild, EventType.MOD_PURGE,
-        description=f"**{count}** message(s) supprimés dans {channel.mention if channel else '_un salon_'}.",
-        moderator=moderator, channel=channel,
-        extra={"🧹 Quantité": str(count)},
-    )
-
 
 async def log_security_event(bot, guild, event_type, target_user, *,
                               channel=None, content_preview=None, reason=""):
@@ -1006,18 +963,6 @@ async def log_message_delete(bot, guild, message, deleted_by=None):
     )
 
 
-async def log_config_change(bot, guild, moderator, what: str, old=None, new=None):
-    return await log_event(
-        bot, guild, EventType.CONFIG_CHANGE,
-        description=f"⚙️ Configuration modifiée : **{what}**",
-        moderator=moderator,
-        extra={
-            "📝 Avant": str(old) if old is not None else "_(non défini)_",
-            "✅ Après": str(new) if new is not None else "_(non défini)_",
-        },
-    )
-
-
 __all__ = [
     "EventType",
     "EVENT_META",
@@ -1027,14 +972,8 @@ __all__ = [
     "set_enabled_categories",
     "build_log_embed",
     "log_event",
-    "log_ban",
-    "log_kick",
-    "log_mute",
-    "log_warn",
-    "log_purge",
     "log_security_event",
     "log_member_join",
     "log_member_leave",
     "log_message_delete",
-    "log_config_change",
 ]

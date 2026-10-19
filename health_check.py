@@ -47,10 +47,6 @@ _mem_stats_fn = None
 # Tables critiques à vérifier (présence + read OK)
 CRITICAL_TABLES = ("daily_guild_stats", "infractions", "guild_config")
 
-# D2 : seuils d'alerte mémoire (généreux → on alerte une fuite réelle, pas un pic).
-_MEM_TASKS_THRESHOLD = 1500     # nb de tâches asyncio vivantes
-_MEM_DICT_THRESHOLD = 50_000    # taille d'un seul gros dict mémoire
-
 
 def setup(bot_instance, get_db_fn, db_get_fn, loops_status_fn=None, mem_stats_fn=None):
     global _bot, _get_db, _db_get, _loops_status_fn, _mem_stats_fn

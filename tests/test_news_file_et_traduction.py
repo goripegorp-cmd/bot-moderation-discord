@@ -168,6 +168,9 @@ async def test_le_bouton_tout_republier_ramene_vraiment_les_abandonnees(banc):
 
     assert await news.relancer_actus_abandonnees(GUILDE) == 1
     assert len(await news.actus_a_envoyer(GUILDE)) == 1
+    pan = (Path(__file__).resolve().parent.parent / "roblox_panneau.py").read_text(encoding="utf-8")
+    assert "news.relancer_actus_abandonnees(self.g.id)" in pan, (
+        "le seul chemin de retour d'un billet bloqué : « Relever maintenant »")
 
 
 

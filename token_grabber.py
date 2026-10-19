@@ -38,8 +38,7 @@ le module staff_sanction.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import datetime, timezone
 
 import discord
 

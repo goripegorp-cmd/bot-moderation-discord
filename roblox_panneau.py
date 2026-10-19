@@ -20,7 +20,6 @@ pour un défaut de droits.
 """
 from __future__ import annotations
 
-import re
 
 import discord
 from discord.ui import Button, ChannelSelect
@@ -61,7 +60,6 @@ def _ou_tiret(v) -> str:
     return str(v)
 
 
-
 def _bouton_ping(cle: str | None):
     """Le bouton d'abonnement aux notifications de cette catégorie.
 
@@ -90,13 +88,6 @@ def _ligne_mention(ping_role) -> str | None:
     ça donne l'illusion du contraire."""
     m = pings.mention(ping_role)
     return f"-# 🔔 {m}" if m else None
-
-
-#  Une description qui dit qu'on GAGNE l'article en jouant (récompense d'événement).
-_MOTS_A_GAGNER = re.compile(
-    r"\b(?:earn(?:ed)?|quests?|badges?|events?|rewards?|unlock(?:ed)?|gagnez?|"
-    r"gagner|obtiens|quêtes?|événements?|récompenses?|débloque[rz]?)\b", re.I)
-
 
 
 def _autorisation_mention(ping_role):
@@ -178,7 +169,6 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
         except Exception as ex2:
             _log(f"[roblox {etiquette}] {ex2}")
             return False
-
 
 
 #  ⚠️ LIMITE DURE : 4 000 caractères de texte au total dans un message V2
@@ -508,10 +498,16 @@ class RobloxPanelV2(LayoutView):
             await i.response.defer()
             self._dernier = "🔄 Relevé en cours…"
             await self.render_to(i, edit=True)
+            #  Un billet abandonné après MAX_ESSAIS_ACTU échecs (salon interdit, supprimé)
+            #  ne revient jamais seul : `enfiler_actu` refuse de le réinsérer. Ce bouton
+            #  est le chemin de retour, une fois la panne réparée.
+            relances = await news.relancer_actus_abandonnees(self.g.id)
             res = await _relever()
             self._dernier = (f"✅ `{res.get('lus', 0)}` billet(s) lu(s) · "
                              f"`{res.get('enfiles', 0)}` nouveau(x) · "
                              f"`{res.get('publies', 0)}` publié(s)"
+                             + (f" · ♻️ `{relances}` billet(s) bloqué(s) remis en file"
+                                if relances else "")
                              + (f" · ⚠️ `{res['pannes']}` source(s) en panne"
                                 if res.get("pannes") else ""))
             await self.render_to(i, edit=True)

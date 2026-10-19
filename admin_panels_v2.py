@@ -22,26 +22,26 @@ passe par `_revenir()` — jamais par une classe supprimee.
 """
 from __future__ import annotations
 
-import asyncio
 import discord
 from discord import ui
 
 # Modules metier
 from permissions import (
-    load_permissions, save_permissions, reload_permissions,
-    PermissionsConfig, PermissionRule,
-    COMMAND_CATEGORIES, CATEGORY_LABELS, list_categories,
+    load_permissions,
+    save_permissions,
+    PermissionsConfig,
+    PermissionRule,
+    CATEGORY_LABELS,
+    list_categories,
 )
-import social_media
 from social_media import (
-    Platform, PostType, SocialMediaManager, ManualAdapter,
-    PLATFORM_LABELS, PLATFORM_ICONS,
+    Platform,
+    SocialMediaManager,
+    ManualAdapter,
+    PLATFORM_LABELS,
+    PLATFORM_ICONS,
 )
-import protection_guards
-from protection_guards import (
-    load_policy, save_policy,
-    ProtectionPolicy, AutoEventType,
-)
+from protection_guards import load_policy, save_policy, AutoEventType
 # Design system
 from ui_v2 import Palette
 from vocabulary import Action as A, Status as S, Module as Mod, Message as Msg

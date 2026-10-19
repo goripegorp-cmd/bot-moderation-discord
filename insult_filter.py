@@ -412,5 +412,3 @@ def threat_soft_hit(raw: str, normalized: str | None = None):
     return None
 
 
-# Chargé à l'import (le module est importé une fois au boot).
-_STATS = _load()

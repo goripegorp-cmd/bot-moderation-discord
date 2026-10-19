@@ -192,3 +192,57 @@ def test_C6_chaque_module_supervise_est_importe():
                and getattr(n.targets[0], "id", "") == "_SUPERVISED_MODULE_LOOPS")
     absents = [e.elts[0].value for e in sup.value.elts if e.elts[0].value not in imports]
     assert absents == [], absents
+
+
+def test_C7_aucune_definition_morte_dans_bot_py():
+    """Atteignabilité : racines = code exécuté au chargement, commandes, événements, noms
+    cités dans une chaîne, noms importés de bot.py par les modules. Une boucle n'est vivante
+    que si on la cite ; `@X.before_loop` vit avec X."""
+    def cites(noeud):
+        out = set()
+        for x in ast.walk(noeud):
+            if isinstance(x, ast.Name):
+                out.add(x.id)
+            elif isinstance(x, ast.Constant) and isinstance(x.value, str) and x.value.isidentifier():
+                out.add(x.value)
+        return out
+
+    defs, racines, attache = {}, set(), {}
+    for f in RACINE.glob("*.py"):
+        if f.name != "bot.py":
+            for groupe in re.findall(r"from bot import ([\w, ]+)", f.read_text(encoding="utf-8")):
+                racines |= {x.strip() for x in groupe.split(",")}
+    for n in ARBRE.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            noms = [n.name]
+        elif isinstance(n, ast.Assign):
+            noms = [t.id for t in n.targets if isinstance(t, ast.Name)]
+        else:
+            noms = []
+        if not noms:
+            racines |= cites(n)
+            continue
+        for nom in noms:
+            defs.setdefault(nom, []).append(n)
+        for d in getattr(n, "decorator_list", []):
+            cible = d.func if isinstance(d, ast.Call) else d
+            texte = ast.unparse(cible)
+            if isinstance(cible, ast.Attribute) and cible.attr in ("before_loop", "after_loop", "error") \
+                    and isinstance(cible.value, ast.Name):
+                attache.setdefault(cible.value.id, set()).add(n.name)
+                continue
+            if not (texte.startswith("tasks.loop") or texte.startswith("app_commands.")
+                    and texte.split(".")[-1] not in ("command", "context_menu")):
+                racines.add(n.name)
+            racines |= cites(d) - {n.name}
+    vivants, pile = set(), [r for r in racines if r in defs]
+    while pile:
+        nom = pile.pop()
+        if nom in vivants:
+            continue
+        vivants.add(nom)
+        for n in defs[nom]:
+            pile += [c for c in cites(n) if c in defs and c not in vivants]
+        pile += [f for f in attache.get(nom, ()) if f not in vivants]
+    morts = sorted(set(defs) - vivants)
+    assert morts == [], morts

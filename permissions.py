@@ -231,13 +231,6 @@ async def save_permissions(guild_id: int, config: PermissionsConfig) -> None:
         )
 
 
-async def reload_permissions(guild_id: int) -> PermissionsConfig:
-    """Force un rechargement depuis le disque (vide le cache)."""
-    async with _cache_lock:
-        _cache.pop(guild_id, None)
-    return await load_permissions(guild_id)
-
-
 # =============================================================================
 # EVALUATION DES REGLES
 # =============================================================================
@@ -351,16 +344,6 @@ def get_command_categories() -> dict[str, str]:
     return dict(COMMAND_CATEGORIES)
 
 
-def get_category_labels() -> dict[str, str]:
-    """Retourne le mapping categorie -> label affichable."""
-    return dict(CATEGORY_LABELS)
-
-
-def list_commands_in_category(category: str) -> list[str]:
-    """Liste toutes les commandes d'une categorie."""
-    return [cmd for cmd, cat in COMMAND_CATEGORIES.items() if cat == category]
-
-
 def list_categories() -> list[str]:
     """Liste toutes les categories disponibles."""
     return list(CATEGORY_LABELS.keys())
@@ -375,12 +358,9 @@ __all__ = [
     "PermissionsConfig",
     "load_permissions",
     "save_permissions",
-    "reload_permissions",
     "can_use",
     "is_sanctionable",
     "is_bypassed",
     "get_command_categories",
-    "get_category_labels",
-    "list_commands_in_category",
     "list_categories",
 ]

@@ -1721,38 +1721,6 @@ def _lfg_view(zone_id: int):
     return v
 
 
-def _lfg_header_view():
-    v = discord.ui.View(timeout=None)
-    v.add_item(discord.ui.Button(
-        label="🔔 Alertes groupes (on/off)", style=discord.ButtonStyle.primary,
-        custom_id="szone_lfg_optin"))
-    return v
-
-
-async def post_lfg_header(guild) -> bool:
-    """Poste l'en-tête du tableau LFG (explication + bouton d'opt-in). Appelé par bot.py quand
-    l'owner configure le salon LFG. IDEMPOTENT (ne re-poste pas si l'entête existe déjà). FAIL-SAFE."""
-    board = await _lfg_board_channel(guild)
-    if board is None:
-        return False
-    try:
-        me_id = guild.me.id if guild.me else 0
-        async for m in board.history(limit=30):
-            if int(getattr(m.author, "id", 0)) == me_id and "Recherche de groupe" in (m.content or ""):
-                return True   # entête déjà présente → ne pas dupliquer
-    except Exception:
-        pass
-    try:
-        await board.send(
-            "🔍 **Recherche de groupe** — les groupes ouverts s'affichent ici : clique **➕ Rejoindre** "
-            "pour entrer (même si le message du chat a disparu). Active le bouton ci-dessous pour être "
-            "**alerté** quand un nouveau groupe s'ouvre.",
-            view=_lfg_header_view(), allowed_mentions=discord.AllowedMentions.none())
-        return True
-    except Exception:
-        return False
-
-
 async def _lfg_upsert(zone_id: int):
     """Poste/actualise l'entrée d'un GROUPE actif dans le tableau LFG (compteur N/cap). Retire
     l'entrée si le groupe est COMPLET. No-op si le tableau n'est pas configuré. FAIL-SAFE."""

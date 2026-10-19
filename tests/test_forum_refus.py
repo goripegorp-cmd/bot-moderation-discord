@@ -182,11 +182,11 @@ async def test_F3_trois_refus_UNE_ligne_puis_UNE_ligne_a_la_reprise(base, monkey
         assert r["code"] == 202
     lignes = [l for l in base["lignes"] if "forum" in l]
     assert len(lignes) == 1 and "HTTP 202" in lignes[0] and "challenge" in lignes[0], lignes
-    assert news.forum_refuse() and news.FORUM["refus"] == 3
+    assert news.FORUM["refus_depuis"] is not None and news.FORUM["refus"] == 3
     await news.relever_mises_a_jour(leger=True)
     lignes = [l for l in base["lignes"] if "forum" in l]
     assert len(lignes) == 2 and "répond de nouveau" in lignes[1] and "3 refus" in lignes[1]
-    assert not news.forum_refuse()
+    assert news.FORUM["refus_depuis"] is None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

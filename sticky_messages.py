@@ -206,12 +206,6 @@ async def _do_repost(channel_id):
         _repost_lock.discard(int(channel_id))
 
 
-async def repost_now(channel_id):
-    """Force un repost immédiat (utilisé juste après set_sticky pour afficher le message
-    tout de suite). FAIL-SAFE."""
-    await _do_repost(channel_id)
-
-
 async def _delayed_repost(channel_id, delay):
     try:
         await asyncio.sleep(max(0.0, float(delay)))
@@ -246,6 +240,6 @@ async def on_message_hook(msg):
 
 __all__ = [
     "setup", "init_db", "set_sticky", "get_sticky", "remove_sticky",
-    "list_stickies", "is_sticky_channel", "on_message_hook", "repost_now",
+    "list_stickies", "is_sticky_channel", "on_message_hook",
     "STICKY_COOLDOWN_SEC",
 ]

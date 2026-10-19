@@ -27,11 +27,9 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
-import time
 from datetime import datetime
 from pathlib import Path
 
-import discord
 from discord.ext import tasks
 
 # ─── Configuration ───────────────────────────────────────────────────────
@@ -232,25 +230,4 @@ async def _before_loop():
         print(f"[db_backup before_loop] {ex}")
 
 
-def list_backups() -> list[dict]:
-    """API d'introspection : retourne la liste des backups (pour /owner)."""
-    dst_dir = _resolve_backup_dir()
-    out = []
-    try:
-        for p in sorted(dst_dir.glob("bot.db.*.bak"), key=lambda x: x.stat().st_mtime, reverse=True):
-            try:
-                st = p.stat()
-                out.append({
-                    "name": p.name,
-                    "path": str(p),
-                    "size_kb": round(st.st_size / 1024, 1),
-                    "mtime_ts": int(st.st_mtime),
-                })
-            except Exception:
-                continue
-    except Exception as ex:
-        print(f"[db_backup list_backups] {ex}")
-    return out
-
-
-__all__ = ["backup_task", "list_backups", "RETENTION_COUNT", "BACKUP_INTERVAL_HOURS"]
+__all__ = ["backup_task", "RETENTION_COUNT", "BACKUP_INTERVAL_HOURS"]
