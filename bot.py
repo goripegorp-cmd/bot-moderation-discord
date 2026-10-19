@@ -102,6 +102,7 @@ import stockage as stockage_module  # part du volume par poste + bilan quotidien
 import tickets_fils  # un fil privé par ticket, un salon par équipe
 import nettoyage  # journal en fils, rétention 30 jours, remise à neuf
 import sondages  # les sondages Discord des membres, vérifiés puis suivis sur le site
+import salutations  # un 👋 sous chaque « bonjour », là où tout le monde peut écrire
 import suggestions  # idées des membres : votes, fil de discussion, décision du staff
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -12226,6 +12227,7 @@ _LIEN_OU_MENTION = re.compile(
 
 
 bot.add_listener(sondages.sur_message, "on_message")
+bot.add_listener(salutations.sur_message, "on_message")
 bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_add")
 bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_remove")
 bot.add_listener(sondages.sur_suppression, "on_raw_message_delete")
