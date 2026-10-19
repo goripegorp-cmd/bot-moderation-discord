@@ -158,6 +158,22 @@ async def run_cleanup() -> dict[str, int]:
     return results
 
 
+async def part_libre() -> float:
+    """La part du fichier faite de pages libres (freelist / page_count)."""
+    if _get_db is None:
+        return 0.0
+    try:
+        async with _get_db() as db:
+            async with db.execute("PRAGMA page_count") as c:
+                pages = (await c.fetchone())[0] or 0
+            async with db.execute("PRAGMA freelist_count") as c:
+                libres = (await c.fetchone())[0] or 0
+        return libres / pages if pages else 0.0
+    except Exception as ex:
+        print(f"[data_cleanup part_libre] {ex}")
+        return 0.0
+
+
 async def vacuum_db() -> bool:
     """Compacte la DB après cleanup (récupère l'espace libre).
 
@@ -203,8 +219,9 @@ async def weekly_cleanup_task():
             f"{total} rows supprimées au total : {results}"
         )
 
-        # VACUUM seulement si on a supprimé beaucoup
-        if total > 1000:
+        # VACUUM si on a supprimé beaucoup, OU si les pages libres dépassent 20 % du fichier
+        # (19/10/2026 : tables des accessoires supprimées — SQLite ne rend la place qu'ici).
+        if total > 1000 or await part_libre() > 0.20:
             ok = await vacuum_db()
             if not ok:
                 print("🚨 [data_cleanup] VACUUM échoué")

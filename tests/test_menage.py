@@ -216,3 +216,39 @@ def test_M8_branchements():
     assert "await _menage_unique(g)" in _source("_travaux_de_demarrage")
     assert '"menage_salons_task",' in SRC and "menage_salons_task.start()" in SRC
     assert "_backfill_events_role(" not in SRC, "plus aucun rôle d'événement distribué"
+
+
+def test_M9_la_base_rend_la_place(tmp_path):
+    import contextlib
+    import sqlite3
+
+    import aiosqlite
+
+    import data_cleanup as dc
+    p = tmp_path / "b.db"
+    with sqlite3.connect(p) as c:
+        c.execute("CREATE TABLE a(x)")
+        c.executemany("INSERT INTO a VALUES (?)", [("y" * 500,)] * 2000)
+        c.commit()
+        c.execute("DROP TABLE a")
+        c.commit()
+
+    @contextlib.asynccontextmanager
+    async def get_db():
+        db = await aiosqlite.connect(p)
+        try:
+            yield db
+        finally:
+            await db.close()
+
+    dc.setup(None, get_db)
+    try:
+        assert asyncio.run(dc.part_libre()) > 0.2
+        avant = p.stat().st_size
+        assert asyncio.run(dc.vacuum_db()) is True
+        assert p.stat().st_size < avant / 10
+    finally:
+        dc.setup(None, None)
+    src = (Path(__file__).resolve().parent.parent / "data_cleanup.py").read_text(encoding="utf-8")
+    assert "if total > 1000 or await part_libre() > 0.20:" in src
+    assert 'await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")' in SRC

@@ -82,7 +82,9 @@ def test_M5_un_message_hostile_ne_gele_pas_le_bot():
     piege = ("a . " * 2000) + "!"
     t0 = time.perf_counter()
     mi.cherche(piege, [mot, "i" * 40, "s" * 40])
-    assert time.perf_counter() - t0 < 1.0
+    #  ~10 ms en vrai ; un retour arrière explosif prendrait des minutes. 5 s : marge
+    #  pour une machine de CI partagée (1,36 s mesurées le 19/10).
+    assert time.perf_counter() - t0 < 5.0
 
 
 def test_M6_branchement_dans_le_bot():

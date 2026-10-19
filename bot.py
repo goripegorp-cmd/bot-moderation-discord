@@ -40326,6 +40326,14 @@ async def db_optimizer_task():
         except Exception as ex:
             print(f"[DB OPTIMIZER PRAGMA] {ex}")
 
+        # 19/10/2026 : le journal WAL ne grossit plus sans fin — il est reversé dans la base
+        # et tronqué chaque jour (la base mesurée passait de 8 % à 13 % du volume en 5 jours).
+        try:
+            async with get_db() as db:
+                await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception as ex:
+            print(f"[DB OPTIMIZER WAL] {ex}")
+
         # VACUUM : 1× par semaine (lundi 4h)
         try:
             try:
