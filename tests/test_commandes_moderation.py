@@ -116,3 +116,14 @@ def test_C8_a_l_edition_les_memes_exemptions_qu_a_l_envoi():
     assert "if _mod is honeypot_module and exempt:" in corps
     assert "sanctionner=not exempt" in corps
     assert "behavior_anomaly" not in SRC and "_track_toxicity" not in SRC
+
+
+def test_C9_les_interdictions_de_tickets_ne_disent_plus_qui_a_agi():
+    """Audit 5 #23 : « Par : @moderateur » en public (et dans le ticket du membre)."""
+    import ast as _a
+    src = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")
+    arbre = _a.parse(src)
+    corps = _a.unparse(next(n for n in arbre.body if getattr(n, "name", "") == "ticketblacklist_cmd"))
+    assert "i.user.mention" not in corps and "/ticketblacklist add" not in corps
+    assert corps.count("ephemeral=True") >= 8 and "_au_journal" in corps
+    assert 'name="Par", value=i.user.mention' not in src

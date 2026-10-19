@@ -249,3 +249,27 @@ def test_F20_bd_chemin_et_adresses_de_service_ne_sont_pas_des_coordonnees():
         assert adresse(phrase), phrase
     assert mail("mon mail c'est lucas.martin2012@gmail.com")
     assert mail("support@roblox.com ou moi : lea.d@hotmail.fr"), "une adresse perso parmi d'autres"
+
+
+def test_F21_un_message_deja_supprime_n_annule_plus_le_log_ni_la_sanction():
+    """Audit 5 #27 : `await msg.delete()` nu dans six filtres ; NotFound coupait tout, puis `except: pass`."""
+    import asyncio
+
+    import discord
+
+    from conftest_discord import Obj
+    ns = _extraire("_supprimer_filtre", ns={"discord": discord, "_logerr": lambda *a, **k: None})
+
+    async def deja(**k):
+        raise discord.NotFound(Obj(status=404, reason="x"), "Unknown Message")
+
+    async def interdit(**k):
+        raise discord.Forbidden(Obj(status=403, reason="x"), "Missing Permissions")
+    assert asyncio.run(ns["_supprimer_filtre"](Obj(delete=deja, guild=Obj(id=1)))) is True
+    assert asyncio.run(ns["_supprimer_filtre"](Obj(delete=interdit, guild=Obj(id=1)))) is False
+    texte = (RACINE / "bot.py").read_text(encoding="utf-8")
+    debut = texte.index("        # Anti-invite")
+    lignes = texte[debut:texte.index('_logerr("filtres.message"', debut)].splitlines()
+    nus = [k for k, l in enumerate(lignes) if re.fullmatch(r"\s+await msg\.delete\(\)", l)
+           and lignes[k - 1].strip() != "try:"]
+    assert nus == [], [lignes[k] for k in nus]

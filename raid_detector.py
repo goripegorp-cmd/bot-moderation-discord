@@ -84,9 +84,11 @@ CLUSTER_WINDOW_MIN = 10        # tous ces comptes doivent join en < 10 min
 ROLLING_WINDOW_SIZE = 30       # garde les 30 derniers joins par guild
 
 # Regex pour détecter pseudos suspects
+#  ⚠️ Plus de branche « CamelCase » (20/10/2026) : compilée sans casse, elle attrapait tout pseudo
+#  de 6 à 18 lettres (« goripe », « minecraft ») — et les pseudos Discord sont en minuscules.
 _RX_BOT_PATTERN = re.compile(
     r"^(?:user|discord|member|guest|player|test|bot|raid|attack)"
-    r"[._-]?\d{3,}$|^[a-z]{3,8}\d{4,}$|^[A-Z][a-z]{2,8}_?[A-Z][a-z]{2,8}\d*$",
+    r"[._-]?\d{3,}$|^[a-z]{3,8}\d{4,}$",
     re.IGNORECASE,
 )
 _RX_ALL_RANDOM = re.compile(r"^[a-z]{6,}\d{4,}$", re.IGNORECASE)
@@ -177,6 +179,11 @@ async def init_db():
                 "CREATE INDEX IF NOT EXISTS idx_raid_join_log_recent "
                 "ON raid_join_log(guild_id, joined_at)"
             )
+            # La racine du pseudo (6 lettres, sans les chiffres de fin) : de quoi repérer des
+            # arrivants « jumeaux » sans garder leur pseudo (20/10/2026).
+            async with db.execute("PRAGMA table_info(raid_join_log)") as cur:
+                if "racine" not in {r[1] for r in await cur.fetchall()}:
+                    await db.execute("ALTER TABLE raid_join_log ADD COLUMN racine TEXT")
             await db.commit()
     except Exception as ex:
         print(f"[raid_detector init_db] {ex}")
@@ -236,22 +243,20 @@ def _score_account(member: discord.Member) -> dict:
     return parts
 
 
-def _detect_pseudo_twins(joins: list[dict], current_name: str) -> int:
-    """Si un autre joiner récent partage la même 'racine' de pseudo,
-    bonus suspicion."""
-    if not current_name or len(current_name) < 4:
-        return 0
-    cur = current_name.lower()
-    # On extrait la "racine alpha" en virant les chiffres
-    root = re.sub(r"\d+$", "", cur)[:6]
-    if len(root) < 3:
+def _racine(nom: str) -> str:
+    """La « racine alpha » d'un pseudo : minuscules, sans les chiffres de fin, 6 lettres au plus."""
+    racine = re.sub(r"\d+$", "", (nom or "").lower())[:6]
+    return racine if len(racine) >= 3 and len(nom or "") >= 4 else ""
+
+
+def _detect_pseudo_twins(joins: list[dict], current_name: str, user_id: int = 0) -> int:
+    """Si un autre arrivant récent partage la même racine de pseudo, bonus de suspicion. 20/10/2026 :
+    les noms n'étaient jamais enregistrés — la comparaison ne trouvait jamais rien."""
+    root = _racine(current_name)
+    if not root:
         return 0
     for j in joins:
-        other = (j.get("name") or "").lower()
-        if not other or other == cur:
-            continue
-        other_root = re.sub(r"\d+$", "", other)[:6]
-        if other_root == root:
+        if j.get("user_id") != user_id and j.get("racine") == root:
             return SCORE_PSEUDO_TWIN
     return 0
 
@@ -266,7 +271,7 @@ async def on_member_join(member: discord.Member):
         scored = _score_account(member)
         # Récupère les joins récents (10 min)
         recent = await _get_recent_joins(member.guild.id, minutes=CLUSTER_WINDOW_MIN)
-        twin_bonus = _detect_pseudo_twins(recent, member.name)
+        twin_bonus = _detect_pseudo_twins(recent, member.name, member.id)
         scored["total_score"] += twin_bonus
 
         # Log dans DB
@@ -274,7 +279,7 @@ async def on_member_join(member: discord.Member):
             await db.execute(
                 "INSERT INTO raid_join_log "
                 "(guild_id, user_id, account_age_days, has_custom_avatar, "
-                "pseudo_score, total_score) VALUES (?, ?, ?, ?, ?, ?)",
+                "pseudo_score, total_score, racine) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     member.guild.id,
                     member.id,
@@ -282,6 +287,7 @@ async def on_member_join(member: discord.Member):
                     scored["has_custom_avatar"],
                     scored["pseudo_score"],
                     scored["total_score"],
+                    _racine(member.name),
                 ),
             )
             await db.commit()
@@ -310,7 +316,7 @@ async def _get_recent_joins(guild_id: int, minutes: int) -> list[dict]:
         async with _get_db() as db:
             async with db.execute(
                 "SELECT user_id, joined_at, account_age_days, "
-                "has_custom_avatar, pseudo_score, total_score "
+                "has_custom_avatar, pseudo_score, total_score, racine "
                 "FROM raid_join_log "
                 "WHERE guild_id=? AND joined_at >= ? "
                 "ORDER BY joined_at DESC LIMIT ?",
@@ -327,7 +333,7 @@ async def _get_recent_joins(guild_id: int, minutes: int) -> list[dict]:
                 "has_custom_avatar": int(r[3] or 0),
                 "pseudo_score": int(r[4] or 0),
                 "total_score": int(r[5] or 0),
-                "name": "",  # rempli côté caller si nécessaire
+                "racine": r[6] or "",
             })
         return out
     except Exception as ex:
@@ -336,13 +342,14 @@ async def _get_recent_joins(guild_id: int, minutes: int) -> list[dict]:
 
 
 async def _has_recent_alert(guild_id: int, minutes: int) -> bool:
-    """True si un alert pending existe dans la fenêtre."""
+    """True si une alerte a été émise dans la fenêtre, QUEL QUE SOIT son sort (20/10/2026 : après
+    « Ignorer », chaque nouvelle arrivée relançait l'alerte)."""
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         async with _get_db() as db:
             async with db.execute(
                 "SELECT COUNT(*) FROM raid_alerts "
-                "WHERE guild_id=? AND created_at >= ? AND status='pending'",
+                "WHERE guild_id=? AND created_at >= ?",
                 (guild_id, cutoff.strftime("%Y-%m-%d %H:%M:%S")),
             ) as cur:
                 row = await cur.fetchone()

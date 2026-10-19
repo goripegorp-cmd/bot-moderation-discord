@@ -197,3 +197,35 @@ def test_B6_les_messages_ne_promettent_que_ce_qui_a_ete_fait(tmp_path):
     assert "'arrivées en pause' if pause" in corps["bouclier_on"]
     assert "'arrivées rétablies' if reprise" in corps["bouclier_off"]
     assert "except Exception:\n        pass" not in corps["bouclier_on"] + corps["bouclier_off"]
+
+
+def test_B7_un_pseudo_ordinaire_n_est_plus_suspect():
+    """Audit 2 #17 : la branche CamelCase sans casse notait +3 « goripe », « minecraft »."""
+    for nom in ("goripe", "minecraft", "theoaventurier", "lea.martin"):
+        assert R._score_pseudo(nom) == 0, nom
+    for nom in ("user12345", "abcdefgh12345", "xxdarkxx", "aaaaaa"):
+        assert R._score_pseudo(nom) == R.SCORE_BOT_PATTERN, nom
+
+
+def test_B8_les_arrivants_jumeaux_sont_reperes_et_une_alerte_ignoree_ne_revient_pas(tmp_path):
+    get_db, *_ = base(tmp_path)
+    R.setup(None, get_db, None, {})
+
+    class Membre:
+        def __init__(self, uid, nom):
+            self.id, self.name, self.bot, self.avatar = uid, nom, False, None
+            self.created_at = _dt.now(_tz.utc)
+            self.guild = Obj(id=1)
+
+    async def scenario():
+        await R.init_db()
+        await R.on_member_join(Membre(1, "nitroboost1"))
+        recents = await R._get_recent_joins(1, 10)
+        assert recents[0]["racine"] == "nitrob" and "name" not in recents[0], "la racine, pas le pseudo"
+        assert R._detect_pseudo_twins(recents, "nitroboost77", 2) == R.SCORE_PSEUDO_TWIN
+        assert R._detect_pseudo_twins(recents, "nitroboost1", 1) == 0, "pas jumeau de soi-même"
+        async with get_db() as db:
+            await db.execute("INSERT INTO raid_alerts(guild_id, status) VALUES(1, 'false_positive')")
+            await db.commit()
+        return await R._has_recent_alert(1, 30)
+    assert asyncio.run(scenario()) is True, "« Ignorer » ne relance pas l'alerte à chaque arrivée"

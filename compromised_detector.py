@@ -178,6 +178,9 @@ def _record_message(guild_id: int, user_id: int, channel_id: int, content: str):
     # Garde 5 dernières minutes
     cutoff = now_ts - 300
     _history_cache[key] = [m for m in _history_cache[key] if m['time'] > cutoff]
+    if len(_history_cache) > 500:  # 20/10/2026 : une clé par membre ayant un jour écrit, à vie
+        for k in [k for k, v in _history_cache.items() if not v or v[-1]['time'] <= cutoff]:
+            del _history_cache[k]
 
 
 def score_message(

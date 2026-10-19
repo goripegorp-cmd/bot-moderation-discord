@@ -69,3 +69,17 @@ def test_A3_la_boucle_ne_lit_plus_rien_pour_rien():
     assert "yt_avatar = await fetch_avatar_url('youtube', channel_id, session) if posts_to_publish else None" in src
     corps = src[src.index("async def check_creator_spotlight_feeds"):]
     assert corps.index("if not (role_id and ch_id):") < corps.index("await list_creator_links(guild.id)")
+
+
+def test_A4_la_boucle_rend_sa_connexion_et_garde_les_modifications_du_panneau():
+    """Audit 5 #25 : connexion et curseur ouverts pendant tous les appels reseau ; liste YouTube
+    lue au debut du passage reecrite par-dessus une modification faite entre-temps."""
+    import ast
+    from pathlib import Path
+    src = ast.unparse(ast.parse((Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")))
+    boucle = src[src.index("async def check_social_feeds"):]
+    boucle = boucle[:boucle.index("\nasync def ") if "\nasync def " in boucle else None]
+    assert "lignes = await cursor.fetchall()" in boucle and "async for row in cursor" not in boucle
+    yt = src[src.index("async def check_youtube_feeds"):]
+    assert "await db_set(guild.id, 'ads_youtube_feeds', actuels)" in yt
+    assert "await db_set(guild.id, 'ads_youtube_feeds', feeds)" not in yt

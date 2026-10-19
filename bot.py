@@ -5697,6 +5697,19 @@ def _lecteur_partage(lecteurs: int):
     return lire
 
 
+async def _supprimer_filtre(msg) -> bool:
+    """Retire le message d'un filtre. Déjà supprimé (AutoMod, un autre filtre, son auteur) : c'est
+    fait. Avant le 20/10/2026, NotFound coupait le filtre — ni log ni sanction."""
+    try:
+        await msg.delete()
+        return True
+    except discord.NotFound:
+        return True
+    except discord.HTTPException as ex:
+        _logerr("filtres.suppression", ex, guild_id=getattr(msg.guild, 'id', 0))
+        return False
+
+
 def _spawn_bg_scan(coro):
     """Lance un scan d'image en arrière-plan en gardant une référence (anti-GC). FAIL-SAFE."""
     try:
@@ -9132,25 +9145,12 @@ class TicketControlView(View):
             # Ajouter à la blacklist
             blacklist.append(tk['user'])
             panels[panel_id]['blacklist'] = blacklist
-            await db_set(i.guild.id, 'ticket_panels', panels)
-            
-            # Créer l'embed de confirmation
-            e = discord.Embed(
-                title="Membre Blacklisté",
-                color=0xE74C3C,
-                timestamp=now()
-            )
-            
-            user_mention = f"<@{tk['user']}>"
-            if ticket_user:
-                e.set_thumbnail(url=ticket_user.display_avatar.url)
-            
-            e.add_field(name="Membre", value=f"{user_mention}\n`{tk['user']}`", inline=True)
-            e.add_field(name="Panel", value=f"**{panel_name}**", inline=True)
-            e.add_field(name="Par", value=i.user.mention, inline=True)
-            e.set_footer(text="Ce membre ne pourra plus créer de tickets sur ce panel")
-            
-            await i.response.send_message(embed=e)
+            if not await db_set(i.guild.id, 'ticket_panels', panels):
+                return await i.response.send_message("❌ L'interdiction n'a pas pu être enregistrée.", ephemeral=True)
+            # En privé, sans « Par » : le membre ne voit pas qui l'a interdit (le journal le garde)
+            await i.response.send_message(view=_vue_blacklist(
+                f"### Interdit de tickets\n<@{tk['user']}> ne peut plus ouvrir de ticket « {panel_name} ».",
+                ticket_user.display_avatar.url if ticket_user else None, Palette.DANGER), ephemeral=True)
             
             # Log
             await send_ticket_log(i.guild, 'blacklist', tk['user'], tk, extra=i.user.id)
@@ -24103,7 +24103,7 @@ async def on_message(msg):
         if c.get('anti_invite'):
             f, inv = check_invite(ct)
             if f:
-                await msg.delete()
+                await _supprimer_filtre(msg)
                 await send_log(msg.guild, 'anti_invite', msg.author, msg, "Invitation Discord", f"`{inv}`")
                 action = c.get('invite_action', 'delete')
                 dur = c.get('invite_mute_duration', 5)
@@ -24115,7 +24115,7 @@ async def on_message(msg):
             if chid not in c.get('link_allowed_channels', []):
                 f, url = check_link(ct, c.get('link_whitelist', []))
                 if f:
-                    await msg.delete()
+                    await _supprimer_filtre(msg)
                     await send_log(msg.guild, 'anti_link', msg.author, msg, "Lien non autorisé", f"`{url}`")
                     action = c.get('link_action', 'delete')
                     dur = c.get('link_mute_duration', 5)
@@ -24127,7 +24127,7 @@ async def on_message(msg):
             if chid not in c.get('image_allowed_channels', []):
                 bl = check_image(msg, c.get('image_allowed', []))
                 if bl:
-                    await msg.delete()
+                    await _supprimer_filtre(msg)
                     await send_log(msg.guild, 'anti_image', msg.author, msg, "Format non autorisé", f"`{', '.join(bl)}`")
                     action = c.get('image_action', 'delete')
                     dur = c.get('image_mute_duration', 5)
@@ -24330,7 +24330,7 @@ async def on_message(msg):
         # Anti-caps
         if c.get('anti_caps'):
             if check_caps(ct, c.get('caps_percent', 70)):
-                await msg.delete()
+                await _supprimer_filtre(msg)
                 await send_log(msg.guild, 'anti_caps', msg.author, msg, "Trop de majuscules", None)
                 action = c.get('caps_action', 'delete')
                 dur = c.get('caps_mute_duration', 5)
@@ -24389,7 +24389,7 @@ async def on_message(msg):
         if c.get('anti_qrcode'):
             is_qr_scam, qr_pattern = check_qr_code_scam(ct)
             if is_qr_scam:
-                await msg.delete()
+                await _supprimer_filtre(msg)
                 await send_log(msg.guild, 'anti_qrcode', msg.author, msg,
                               "Scam QR Code détecté", f"Pattern: {qr_pattern}")
                 dur = c.get('qrcode_mute_duration', 30)
@@ -24401,7 +24401,7 @@ async def on_message(msg):
             for att in msg.attachments:
                 is_dangerous, ext = check_dangerous_file(att.filename)
                 if is_dangerous:
-                    await msg.delete()
+                    await _supprimer_filtre(msg)
                     await send_log(msg.guild, 'anti_phishing', msg.author, msg, 
                                   "Fichier dangereux détecté", f"Extension: {ext}")
                     warn_e = discord.Embed(color=0xE74C3C, description=f"⚠️ {msg.author.mention} a envoyé un fichier potentiellement dangereux (`{ext}`).\nLe fichier a été **supprimé** automatiquement.")
@@ -24415,7 +24415,8 @@ async def on_message(msg):
                         asyncio.create_task(_del_warn(warn_msg))
                     return
         
-    except: pass
+    except Exception as ex:  # 20/10/2026 : `except: pass`
+        _logerr("filtres.message", ex, guild_id=getattr(msg.guild, 'id', 0))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              📋 COMMANDES SLASH
@@ -25448,8 +25449,8 @@ async def direction_cmd(i: discord.Interaction, membre: discord.Member, duree: i
     try:
         timeout_dur = min(duree, 40320) if duree > 0 else 40320  # Max 28 jours
         await membre.timeout(timedelta(minutes=timeout_dur), reason=f"Direction: {raison}")
-    except:
-        pass
+    except discord.HTTPException as ex:  # 20/10/2026 : `except: pass`
+        _logerr("direction.exclusion", ex, guild_id=i.guild.id)
 
     # Sauvegarder en DB
     import json
@@ -26318,6 +26319,15 @@ async def mod_note_cmd(i: discord.Interaction, membre: discord.Member, texte: st
 #                        🚫 TICKET BLACKLIST COMMAND
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _vue_blacklist(texte: str, avatar, couleur) -> LayoutView:
+    """Réponse privée de /mod ticketblacklist (Components V2)."""
+    v = LayoutView(timeout=60)
+    corps = discord.ui.TextDisplay(texte)
+    v.add_item(v2_container(discord.ui.Section(corps, accessory=discord.ui.Thumbnail(avatar)) if avatar else corps,
+                            color=couleur))
+    return v
+
+
 @mod_group.command(name="ticketblacklist", description="🚫 Gérer la blacklist des tickets")
 @app_commands.describe(
     action="Ajouter ou retirer de la blacklist",
@@ -26363,26 +26373,15 @@ async def ticketblacklist_cmd(
     
     # Si action = list, afficher tous les panels et leurs blacklists
     if action == "list":
-        e = discord.Embed(title="Blacklists des Panels de Tickets", color=0xE74C3C)
-        
+        lignes = []
         for pid, pdata in panels.items():
             blacklist = pdata.get('blacklist', [])
-            panel_name = pdata.get('name', pid)
-            
-            if blacklist:
-                bl_text = ""
-                for uid in blacklist[:5]:
-                    member = i.guild.get_member(uid)
-                    bl_text += f"• {member.mention if member else f'`{uid}`'}\n"
-                if len(blacklist) > 5:
-                    bl_text += f"*...et {len(blacklist) - 5} autre(s)*"
-            else:
-                bl_text = "*Aucun membre*"
-            
-            e.add_field(name=f"{panel_name} ({len(blacklist)})", value=bl_text, inline=True)
-        
-        e.set_footer(text="Utilisez /ticketblacklist add/remove pour modifier")
-        return await i.response.send_message(embed=e, ephemeral=True)
+            noms = [f"<@{uid}>" for uid in blacklist[:10]] + ([f"… +{len(blacklist) - 10}"] if len(blacklist) > 10 else [])
+            lignes.append(f"**{pdata.get('name', pid)}** ({len(blacklist)}) · " + (", ".join(noms) or "personne"))
+        return await i.response.send_message(view=_vue_blacklist(
+            "### Interdictions de tickets\n" + "\n".join(lignes)
+            + "\n-# `/mod ticketblacklist` pour ajouter ou retirer quelqu'un.", None, Palette.DANGER),
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
     
     # Pour add/remove, membre requis
     if not membre:
@@ -26427,40 +26426,29 @@ async def ticketblacklist_cmd(
         
         blacklist.append(membre.id)
         panels[target_pid]['blacklist'] = blacklist
-        await db_set(i.guild.id, 'ticket_panels', panels)
-        
-        e = discord.Embed(
-            title="Membre Blacklisté",
-            description=f"{membre.mention} ne peut plus créer de tickets sur le panel **{panel_name}**.",
-            color=0xE74C3C
-        )
-        e.set_thumbnail(url=membre.display_avatar.url)
-        e.add_field(name="Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
-        e.add_field(name="Panel", value=panel_name, inline=True)
-        e.add_field(name="Par", value=i.user.mention, inline=True)
-        e.set_footer(text="Le membre verra un message d'erreur s'il essaie de créer un ticket")
-        
-        await i.response.send_message(embed=e)
-        
+        if not await db_set(i.guild.id, 'ticket_panels', panels):
+            return await i.response.send_message("❌ L'interdiction n'a pas pu être enregistrée.", ephemeral=True)
+        await _au_journal(i.guild, "Tickets", "ticket.interdit",
+                          f"{membre.display_name} interdit de tickets « {panel_name} » par {i.user.display_name}",
+                          membre_id=membre.id, auteur_id=i.user.id)
+        await i.response.send_message(view=_vue_blacklist(
+            f"### Interdit de tickets\n{membre.mention} ne peut plus ouvrir de ticket « {panel_name} ».\n"
+            "-# S'il essaie, un message le lui dit.", membre.display_avatar.url, Palette.DANGER), ephemeral=True)
+
     elif action == "remove":
         if membre.id not in blacklist:
             return await i.response.send_message(f"❌ {membre.mention} n'est pas blacklisté du panel **{panel_name}**.", ephemeral=True)
-        
+
         blacklist.remove(membre.id)
         panels[target_pid]['blacklist'] = blacklist
-        await db_set(i.guild.id, 'ticket_panels', panels)
-        
-        e = discord.Embed(
-            title="✅ Membre Déblacklisté",
-            description=f"{membre.mention} peut à nouveau créer des tickets sur le panel **{panel_name}**.",
-            color=0x2ECC71
-        )
-        e.set_thumbnail(url=membre.display_avatar.url)
-        e.add_field(name="Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
-        e.add_field(name="Panel", value=panel_name, inline=True)
-        e.add_field(name="Par", value=i.user.mention, inline=True)
-        
-        await i.response.send_message(embed=e)
+        if not await db_set(i.guild.id, 'ticket_panels', panels):
+            return await i.response.send_message("❌ Le retrait n'a pas pu être enregistré.", ephemeral=True)
+        await _au_journal(i.guild, "Tickets", "ticket.autorise",
+                          f"{membre.display_name} de nouveau autorisé (tickets « {panel_name} ») par {i.user.display_name}",
+                          membre_id=membre.id, auteur_id=i.user.id)
+        await i.response.send_message(view=_vue_blacklist(
+            f"### Tickets de nouveau ouverts\n{membre.mention} peut à nouveau ouvrir un ticket « {panel_name} ».",
+            membre.display_avatar.url, Palette.SUCCESS), ephemeral=True)
 
 
 # Phase 119 : enregistrer /mod après toutes ses subcommands
@@ -26722,47 +26710,50 @@ async def check_social_feeds():
     async with _feeds_lock:
         try:
             async with aiohttp.ClientSession() as session:
+                # Les lignes d'un coup, la connexion rendue AVANT les appels réseau (20/10/2026 : elle
+                # restait ouverte, curseur compris, pendant tout le passage — jusqu'à une minute).
                 async with get_db() as db:
                     async with db.execute('SELECT guild_id, data FROM guild_config') as cursor:
-                        async for row in cursor:
-                            guild_id, data_str = row
-                            try:
-                                data = json.loads(data_str) if data_str else {}
-                                guild = bot.get_guild(guild_id)
-                                if not guild:
-                                    continue
+                        lignes = await cursor.fetchall()
+                for row in lignes:
+                    guild_id, data_str = row
+                    try:
+                        data = json.loads(data_str) if data_str else {}
+                        guild = bot.get_guild(guild_id)
+                        if not guild:
+                            continue
                             
-                                # YouTube
-                                await check_youtube_feeds(session, guild, data)
+                        # YouTube
+                        await check_youtube_feeds(session, guild, data)
                             
-                                # Twitch
-                                await check_twitch_feeds(session, guild, data)
+                        # Twitch
+                        await check_twitch_feeds(session, guild, data)
                             
-                                # TikTok
-                                await check_tiktok_feeds(session, guild, data)
+                        # TikTok
+                        await check_tiktok_feeds(session, guild, data)
                             
-                                # Twitter/X
-                                await check_twitter_feeds(session, guild, data)
+                        # Twitter/X
+                        await check_twitter_feeds(session, guild, data)
                             
-                                # Reddit
-                                await check_reddit_feeds(session, guild, data)
+                        # Reddit
+                        await check_reddit_feeds(session, guild, data)
                             
-                                # RoSocial
+                        # RoSocial
                             
-                                # Roblox UGC
+                        # Roblox UGC
                             
-                                # Réductions de jeux (vérifiée moins souvent via counter)
-                                await check_game_deals(session, guild, data)
+                        # Réductions de jeux (vérifiée moins souvent via counter)
+                        await check_game_deals(session, guild, data)
 
 
-                                # owner 2026-07-17 : statut « jeu down » (poste/supprime l'alerte)
+                        # owner 2026-07-17 : statut « jeu down » (poste/supprime l'alerte)
 
-                                # Phase 26.2 : Spotlight Créateurs (role-gated YT)
-                                await check_creator_spotlight_feeds(session, guild, data)
+                        # Phase 26.2 : Spotlight Créateurs (role-gated YT)
+                        await check_creator_spotlight_feeds(session, guild, data)
 
-                            except Exception as ex:
-                                print(f"Erreur feed {guild_id}: {ex}")
-                                continue
+                    except Exception as ex:
+                        print(f"Erreur feed {guild_id}: {ex}")
+                        continue
         except Exception as ex:
             print(f"Erreur check_social_feeds: {ex}")
 
@@ -26896,6 +26887,7 @@ async def check_youtube_feeds(session, guild, data):
 
     headers_yt = dict(_YT_RESOLVE_CONSENT)  # la page « live » aussi : sinon le consentement européen
     _yt_feeds_dirty = False           # un feed a-t-il été résolu @pseudo→UC (à persister) ?
+    _resolus: dict = {}               # ancien identifiant → UC (reporté dans la liste ACTUELLE)
 
     for feed in feeds:
         try:
@@ -26918,6 +26910,7 @@ async def check_youtube_feeds(session, guild, data):
                                    f"{channel_name}: '{channel_id}' résolu → {_uc} (persisté)")
                     except Exception:
                         pass
+                    _resolus[str(channel_id)] = _uc
                     feed['id'] = _uc
                     channel_id = _uc
                     _yt_feeds_dirty = True
@@ -27108,10 +27101,17 @@ async def check_youtube_feeds(session, guild, data):
     # owner 2026-07-18 : persiste les ids résolus @pseudo→UC pour ne plus jamais rescraper,
     # et émet un battement de cycle (visible dans [DIAG]) pour PROUVER que le poll tourne.
     if _yt_feeds_dirty:
+        # La liste ACTUELLE (le panneau a pu la modifier pendant le passage), avec les UC résolus —
+        # 20/10/2026 : on réécrivait celle lue au début, et la modification était perdue.
         try:
-            await db_set(guild.id, 'ads_youtube_feeds', feeds)
-        except Exception:
-            pass
+            actuels = [dict(f) if isinstance(f, dict) else f
+                       for f in ((await db_get(guild.id)).get('ads_youtube_feeds') or [])]
+            for f in actuels:
+                if isinstance(f, dict) and str(f.get('id')) in _resolus:
+                    f['id'] = _resolus[str(f.get('id'))]
+            await db_set(guild.id, 'ads_youtube_feeds', actuels)
+        except Exception as ex:
+            _logerr("youtube.resolution", ex, guild_id=guild.id)
     try:
         diag.trace("social", "youtube_cycle", f"{len(feeds)} chaîne(s) YouTube vérifiée(s)")
     except Exception:

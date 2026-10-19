@@ -293,8 +293,9 @@ async def _check_name(member: discord.Member, new_name: str) -> Optional[dict]:
             staff_norm = _normalize(val)
             staff_collapsed = _collapse_homoglyphs(staff_norm)
             sim = _similarity(cand_collapsed, staff_collapsed)
-            if sim >= SIMILARITY_THRESHOLD and sim < 1.0:
-                # Pas la même string, mais très proche
+            # 20/10/2026 : la copie EXACTE compte (elle était exclue : « < 1.0 ») ; un nom de staff de
+            # moins de 4 caractères est trop courant pour juger.
+            if sim >= SIMILARITY_THRESHOLD and len(staff_collapsed) >= 4:
                 if best is None or sim > best["score"]:
                     best = {
                         "match_type": "name_similarity",
@@ -378,8 +379,26 @@ async def _log_and_alert(member: discord.Member, alert: dict):
                         nick=None,
                         reason="Anti-impersonation : pseudo imitant un staff réinitialisé")
                     nick_reset = True
-        except Exception:
-            pass
+        except discord.HTTPException as ex:
+            print("[IMPERSONATION][E2] pseudo non réinitialisé")
+            print(f"[IMPERSONATION][E2:DETAIL] {member.id} {type(ex).__name__} {ex}")
+
+        # 20/10/2026 : l'alerte n'allait que dans une table que personne ne lit. Le salon d'alertes
+        # la reçoit quand on a agi (pseudo réinitialisé) ou que l'avatar est copié à l'identique.
+        if nick_reset or alert.get("match_type") == "avatar_exact":
+            try:
+                import unified_logger
+                cible = member.guild.get_member(int(alert.get("target_staff_id") or 0))
+                quoi = "un pseudo imitant" if nick_reset else "l'avatar identique de"
+                await unified_logger.log_event(
+                    _bot, member.guild, unified_logger.EventType.SEC_ESCALATION,
+                    description=(f"🎭 **Usurpation possible** — {member.mention} a pris {quoi} "
+                                 f"{cible.mention if cible else 'un membre du staff'}"
+                                 + (" : pseudo réinitialisé." if nick_reset else " : à vérifier.")),
+                    user=member)
+            except Exception as ex:
+                print("[IMPERSONATION][E1] alerte impossible")
+                print(f"[IMPERSONATION][E1:DETAIL] {type(ex).__name__} {ex}")
 
         # (MP au propriétaire SUPPRIMÉ le 12/08/2026, à sa demande : il ne veut plus
         # de message privé hors sanctions, comptes compromis et retour d'inactivité.
@@ -395,8 +414,16 @@ async def _log_and_alert(member: discord.Member, alert: dict):
 async def on_member_update_hook(
     before: discord.Member, after: discord.Member
 ):
-    """Hook pour on_member_update (changements de nick)."""
+    """Hook pour on_member_update (changements de nick). Un membre qui devient (ou cesse d'être) du
+    staff, ou un staff qui change de nom ou d'avatar, met à jour la liste protégée (20/10/2026 : elle
+    n'était construite qu'au démarrage)."""
     if before.bot or after.bot:
+        return
+    staff_avant, staff_apres = _is_staff_member(before), _is_staff_member(after)
+    if staff_avant != staff_apres or (staff_apres and (
+            before.display_name != after.display_name
+            or getattr(before.display_avatar, "key", None) != getattr(after.display_avatar, "key", None))):
+        await refresh_staff_index(after.guild)
         return
     if before.display_name == after.display_name:
         return
@@ -424,6 +451,9 @@ async def on_user_update_hook(
                     guilds_shared.append(m)
 
         for member in guilds_shared:
+            if _is_staff_member(member):
+                await refresh_staff_index(member.guild)  # son nouveau nom / avatar est protégé
+                continue
             # Username change
             if before.name != after.name:
                 alert = await _check_name(member, after.name)
