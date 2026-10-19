@@ -118,6 +118,10 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path):
                           _message(staff, "Ton niveau ?", 2), _message(candidat, "2400\net je joue chaque soir", 3)):
                     yield m
             return gen()
+    enregistres = []
+
+    async def enregistrer(*a):
+        enregistres.append(a)
     ns = {"cfg": cfg, "get_db": get_db, "db_set": db_set, "discord": discord, "io": io, "re": re,
           "asyncio": asyncio, "datetime": datetime, "timezone": timezone, "ZoneInfo": ZoneInfo,
           "_TICKET_TZ": "Europe/Paris", "rellseas_ui": rellseas_panneau, "visuels": visuels,
@@ -129,14 +133,21 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path):
           "transcript_store": Obj(public_base_url=lambda: "https://bot.exemple",
                                   new_token=lambda: "tok", save_html=lambda t, h: True,
                                   transcript_url=lambda t: f"https://bot.exemple/t/{t}"),
-          "_logerr": lambda *a, **k: (_ for _ in ()).throw(AssertionError(a))}
+          "_logerr": lambda *a, **k: (_ for _ in ()).throw(AssertionError(a)),
+          "recrutements": Obj(enregistrer=enregistrer)}
     for nom in ("_ticket_event_parts", "_ticket_timeline_line", "_salon_transcripts_rellseas",
                 "_heure_paris", "_nom_et_id", "_EVENEMENTS_TICKET", "_dossier_recrutement",
                 "_vue_recrutement", "send_ticket_log"):
         exec(_source(nom), ns)  # noqa: S102 — code du dépôt
     tk = {"id": 5, "panel_id": "p1", "answers": {"Pseudo Roblox": "Kolax_RS", "Niveau": "2400"}}
     asyncio.run(ns["send_ticket_log"](g, "create", candidat, tk))
-    asyncio.run(ns["send_ticket_log"](g, "close", candidat, tk, closer=staff, ch=Ticket()))
+    asyncio.run(ns["send_ticket_log"](g, "close", candidat, tk, extra="Accepté, bienvenue", closer=staff,
+                                      ch=Ticket()))
+    assert len(enregistres) == 1, "la candidature entre au suivi des recrutements"
+    _gid, tid, cid, nom, events, reponses, participants, url = enregistres[0]
+    assert (tid, cid, nom, url) == (5, 7, "Kolax", "https://bot.exemple/t/tok")
+    assert events[-1][0] == "close" and events[-1][2] == "Accepté, bienvenue", "le motif de fermeture suit"
+    assert reponses["Pseudo Roblox"] == "Kolax_RS" and any(p["id"] == 7 for p in participants)
 
     assert logs.envois == [], "rien d'un ticket Rell Seas dans le salon des tickets"
     dedie = salons[56]

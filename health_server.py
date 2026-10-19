@@ -161,6 +161,16 @@ async def _visuel_handler(request):
         return web.Response(status=500, text="err")
 
 
+async def _tableau_page(request):
+    import tableau
+    return await tableau.page(request)
+
+
+async def _tableau_donnees(request):
+    import tableau
+    return await tableau.api(request)
+
+
 async def start(bot_instance, port: int = 8000) -> bool:
     """Démarre le serveur HTTP en background.
 
@@ -183,6 +193,8 @@ async def start(bot_instance, port: int = 8000) -> bool:
         app.router.add_get('/t/{token}', _transcript_handler)       # Phase 281 : page transcript
         app.router.add_get('/ta/{token}/{idx}', _asset_handler)      # assets ré-hébergés
         app.router.add_get('/v/{nom}', _visuel_handler)               # bandeaux et icônes
+        app.router.add_get('/tableau/{jeton}', _tableau_page)         # tableau de bord (staff)
+        app.router.add_get('/tableau/{jeton}/donnees', _tableau_donnees)
 
         runner = web.AppRunner(app)
         await runner.setup()

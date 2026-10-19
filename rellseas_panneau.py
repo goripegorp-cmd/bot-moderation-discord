@@ -628,7 +628,7 @@ class RellseasGestionV2(LayoutView):
                         ("rellseas_g_activite", v._cb_activite),
                         ("rellseas_g_vider", v._cb_vider),
                         ("rellseas_g_liste", v._cb_liste),
-                        ("rellseas_g_recrutements", v._cb_recrutements)):
+                        ("rellseas_g_tableau", v._cb_tableau)):
             b = Button(label="—", custom_id=cid)
             b.callback = cb
             boutons.append(b)
@@ -802,10 +802,10 @@ class RellseasGestionV2(LayoutView):
                          emoji=visuels.icone("membres"), style=discord.ButtonStyle.primary,
                          disabled=role is None, custom_id="rellseas_g_liste")
         b_liste.callback = self._cb_liste
-        b_recr = Button(label="Recrutements du mois", emoji=visuels.icone("journal"),
-                        style=discord.ButtonStyle.secondary, custom_id="rellseas_g_recrutements")
-        b_recr.callback = self._cb_recrutements
-        lignes.append(discord.ui.ActionRow(b_liste, b_recr))
+        b_tableau = Button(label="Tableau de bord", emoji=visuels.icone("stats"),
+                           style=discord.ButtonStyle.secondary, custom_id="rellseas_g_tableau")
+        b_tableau.callback = self._cb_tableau
+        lignes.append(discord.ui.ActionRow(b_liste, b_tableau))
 
         items += lignes
         self.clear_items()
@@ -1001,12 +1001,9 @@ class RellseasGestionV2(LayoutView):
                               allowed_mentions=discord.AllowedMentions.none())
         await self._journal(g, f"📋 **Liste du clan** · `{len(lignes)}` membre(s) · exportée par {u.mention}")
 
-    async def _cb_recrutements(self, i):
-        """L'aperçu du mois en cours : le même bilan que celui du 1er, filtrable."""
-        await i.response.defer()
-        vue, fichier = await recrutements.bilan(i.guild, recrutements.cle_mois(cal.maintenant()))
-        await i.followup.send(view=vue, file=fichier, ephemeral=True,
-                              allowed_mentions=discord.AllowedMentions.none())
+    async def _cb_tableau(self, i):
+        """Le tableau de bord web : candidatures, tickets par type, clan — staff et au-dessus."""
+        await recrutements.envoyer_lien(i)
 
     async def _journal(self, g, texte: str) -> None:
         """Trace nominative. Fail-open : jamais bloquant."""

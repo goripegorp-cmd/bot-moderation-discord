@@ -106,7 +106,8 @@ import suggestions  # idées des membres : votes, fil de discussion, décision d
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
 import config_salons  # @everyone voit tout sauf le réservé ; communautaire ouvert
-import recrutements  # suivi des recrutements Rell Seas, bilan du mois filtrable
+import recrutements  # suivi des candidatures Rell Seas, bilan du mois
+import tableau  # tableau de bord web : candidatures, tickets par type, clan
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
@@ -6190,6 +6191,7 @@ def _ticket_event_parts(lt, user, extra, closer):
             actor = uid
         elif lt == 'close':
             actor = getattr(closer, 'id', 0) or 0
+            detail = str(extra or '')[:200] if isinstance(extra, str) else ''
         elif lt in ('claim', 'add_staff', 'blacklist'):
             actor = extra or 0
         elif lt == 'priority':
@@ -6211,7 +6213,7 @@ def _ticket_timeline_line(kind, actor_id, detail, ts):
     lab = {
         'create':    f"**Créé** par {who}",
         'claim':     f"**Pris en charge** par {who}",
-        'close':     f"**Fermé** par {who}",
+        'close':     f"**Fermé** par {who}" + (f" · _{str(detail)[:150]}_" if detail else ""),
         'leave':     f"{who} a **quitté** le ticket",
         'add_staff': f"Staff ajouté (par {who})",
         'blacklist': f"**Blacklisté** par {who}" + (f" · panel {detail}" if detail else ""),
@@ -6219,6 +6221,23 @@ def _ticket_timeline_line(kind, actor_id, detail, ts):
         'note':      f"Note de {who}" + (f" : _{str(detail)[:150]}_" if detail else ""),
     }.get(kind, f"{kind} ({who})")
     return lab + t
+
+
+def _staff_ou_plus(g, membre, c) -> bool:
+    """19/10/2026 : « seulement le rôle staff et au-dessus — direction, les rôles les plus élevés ».
+    Propriétaire et administrateurs, ou un rôle placé au niveau du rôle staff (tickets) ou plus
+    haut ; sans rôle staff réglé, le rôle direction sert de seuil ; sans aucun des deux, personne
+    d'autre que l'administration."""
+    if membre is None or g is None:
+        return False
+    if membre.id == g.owner_id or getattr(membre.guild_permissions, "administrator", False):
+        return True
+    seuils = [g.get_role(int(c.get(k, 0) or 0)) for k in ('ticket_staff', 'direction_allowed_role')]
+    seuils = [r for r in seuils if r is not None]
+    if not seuils:
+        return False
+    plancher = min(seuils, key=lambda r: r.position)
+    return any(r.position >= plancher.position for r in getattr(membre, "roles", []) or [])
 
 
 async def _salon_transcripts_rellseas(g, c, ref=None):
@@ -7677,7 +7696,7 @@ async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours=0):
     tid = tk.get('id', '?')
     try:
         tu_log = guild.get_member(tk['user'])
-        await send_ticket_log(guild, 'close', tu_log or tk['user'], tk, closer=closer, ch=ch)
+        await send_ticket_log(guild, 'close', tu_log or tk['user'], tk, extra=reason, closer=closer, ch=ch)
     except Exception as ex:
         _logerr("ticket.close_log", ex, guild_id=guild.id)
     try:
@@ -11500,6 +11519,8 @@ async def _travaux_de_demarrage():
                 _c = await cfg(g.id)
                 if rellseas_ui.panneaux_tickets(_c):
                     await _salon_transcripts_rellseas(g, _c)
+                    await recrutements.rattraper(g)
+                    await recrutements.publier_recap(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
         await _fermer_anciens_sondages()
@@ -18505,9 +18526,12 @@ async def _activite_boot():
     rellseas_ui.set_retour(_retour_vers_configure)
     recrutements.setup(get_db=get_db, cfg=cfg, db_set=db_set, salon=_salon_transcripts_rellseas,
                        role=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
-                       autorise=_rellseas_autorise, log=print)
+                       panneaux=rellseas_ui.panneaux_tickets, lien=tableau.lien_pour, log=print)
     await recrutements.init_db()
     recrutements.demarrer(bot)
+    tableau.setup(bot=bot, base_url=transcript_store.public_base_url(), cfg=cfg, get_db=get_db,
+                  cle=os.getenv("TABLEAU_CLE") or hashlib.sha256((TOKEN or "").encode() + b"|tableau").hexdigest(),
+                  mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_staff_ou_plus, log=print)
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()
 
@@ -18613,7 +18637,7 @@ async def on_ready():
                               sondages.BoutonFinAnonyme, suggestions.BoutonProposer,
                               suggestions.BoutonPour, suggestions.BoutonContre,
                               suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig,
-                              recrutements.FiltreRecrutement)
+                              recrutements.BoutonTableau)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:

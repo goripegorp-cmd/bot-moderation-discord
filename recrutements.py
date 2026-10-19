@@ -1,19 +1,24 @@
-"""recrutements.py — le suivi des recrutements Rell Seas (19/10/2026).
+"""recrutements.py — le suivi des candidatures Rell Seas (19/10/2026).
 
 « Un export mensuel de tous les dossiers de recrutement, qu'on ait un aperçu, avec un vrai
 système de nettoyage : qu'on ait que le filtre, pas un surplus de données qui sert à rien. »
+Puis : « les fiches de toutes celles et ceux qui ont candidaté, acceptés et refusés » — et
+plutôt qu'un fichier, « un vrai site interactif » : le tableau de bord (`tableau.py`).
 
-Une ligne compacte par ticket Rell Seas clôturé : qui, quand, par qui, ses réponses — la
-conversation reste dans le transcript. Le 1er du mois, le bilan du mois écoulé part dans le
-salon des transcripts Rell Seas, avec un filtre (acceptés, sans le rôle, partis).
+Une ligne par ticket Rell Seas clôturé : qui, quand, par qui, ses réponses, le motif — jamais
+la conversation (elle reste dans le transcript). Les tickets fermés avant ce suivi sont
+rattrapés une fois depuis l'historique des tickets.
 
-Nettoyage : un ticket où le candidat n'a rien écrit est écarté (seulement compté) ; un candidat
-venu plusieurs fois tient en une ligne ; les réponses sont resserrées ; les lignes de plus d'un
-an sont effacées par la rétention RGPD (`gdpr.RETENTION`).
+Statut d'un candidat : parti du serveur → Parti ; porte le rôle du clan → Accepté ; sinon le
+motif de fermeture tranche (« refus » → Non retenu, « accepté » → Accepté) ; sinon Non retenu.
+Un ticket encore ouvert → En cours.
+
+Nettoyage : ticket où le candidat n'a rien écrit ou doublon → écarté (compté) ; un candidat =
+une fiche (avec ses candidatures précédentes) ; réponses bornées ; lignes de plus d'un an
+effacées par la rétention RGPD (`gdpr.RETENTION`).
 """
 from __future__ import annotations
 
-import io
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -22,29 +27,32 @@ import discord
 from discord.ext import tasks
 
 import activite_calendrier as cal
-import colonnes
 import visuels
 
 MOIS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
         "septembre", "octobre", "novembre", "décembre")
-FILTRES = {"tous": "Tous", "acceptes": "Acceptés", "sans_role": "Sans le rôle",
-           "partis": "Partis du serveur"}
-ISSUES = {"acceptes": "Accepté", "sans_role": "Sans le rôle", "partis": "Parti"}
-REPONSES_MAX, QUESTION_MAX, REPONSE_MAX = 6, 40, 80
-APERCU_MAX = 12
+STATUTS = {"acceptes": "Accepté", "non_retenus": "Non retenu", "partis": "Parti",
+           "en_cours": "En cours"}
+REPONSES_MAX, QUESTION_MAX, REPONSE_MAX = 10, 120, 600
+APERCU_MAX = 10
 CLE_EXPORT = "recrutements_export"
-_COLONNES = (("DATE", 6), ("CANDIDAT", 24), ("IDENTIFIANT", 21), ("ISSUE", 13), ("DURÉE", 10),
-             ("PRIS EN CHARGE PAR", 22), ("TRANSCRIPT", 60))
+CLE_RATTRAPAGE = "recrutements_rattrapage_v1"
+CLE_RECAP = "recrutements_recap_v1"
+ACCEPTE = re.compile(r"accept|admis|bienvenue dans|recrut[ée]", re.I)
+REFUS = re.compile(r"refus|pas retenu|non retenu|rejet", re.I)
+DOUBLON = re.compile(r"doublon", re.I)
 
-_get_db = _cfg = _db_set = _salon = _role = _autorise = None
+_get_db = _cfg = _db_set = _salon = _role = _panneaux = _lien = None
 _bot = None
 _log = print
 
 
-def setup(*, get_db, cfg, db_set, salon, role, autorise=None, log=None):
-    """`salon(g, c)` → le salon des transcripts Rell Seas ; `role(g, c)` → le rôle du clan."""
-    global _get_db, _cfg, _db_set, _salon, _role, _autorise, _log
-    _get_db, _cfg, _db_set, _salon, _role, _autorise = get_db, cfg, db_set, salon, role, autorise
+def setup(*, get_db, cfg, db_set, salon, role, panneaux, lien=None, log=None):
+    """`salon(g, c)` → salon des transcripts Rell Seas ; `role(g, c)` → rôle du clan ;
+    `panneaux(c)` → panneaux de tickets Rell Seas ; `lien(i)` → (lien du tableau de bord, refus)."""
+    global _get_db, _cfg, _db_set, _salon, _role, _panneaux, _lien, _log
+    _get_db, _cfg, _db_set, _salon, _role = get_db, cfg, db_set, salon, role
+    _panneaux, _lien = panneaux, lien
     _log = log or print
 
 
@@ -55,7 +63,11 @@ async def init_db():
             " guild_id INTEGER NOT NULL, ticket_id INTEGER NOT NULL, candidat_id INTEGER NOT NULL,"
             " candidat_nom TEXT, ouvert_le INTEGER, ferme_le INTEGER NOT NULL, ferme_par INTEGER,"
             " pris_par INTEGER, reponses TEXT, msg_candidat INTEGER DEFAULT 0,"
-            " msg_staff INTEGER DEFAULT 0, transcript TEXT, PRIMARY KEY (guild_id, ticket_id))")
+            " msg_staff INTEGER DEFAULT 0, transcript TEXT, raison TEXT DEFAULT '',"
+            " PRIMARY KEY (guild_id, ticket_id))")
+        async with db.execute("PRAGMA table_info(recrutements)") as cur:
+            if "raison" not in [r[1] for r in await cur.fetchall()]:
+                await db.execute("ALTER TABLE recrutements ADD COLUMN raison TEXT DEFAULT ''")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_recrutements_mois"
                          " ON recrutements(guild_id, ferme_le)")
         await db.commit()
@@ -72,24 +84,28 @@ def mois_precedent(d: datetime) -> str:
 
 
 def bornes(mois: str) -> tuple[int, int]:
+    if mois == "tout":
+        return 0, 2 ** 40
     a, m = (int(x) for x in mois.split("-"))
     debut = datetime(a, m, 1, tzinfo=cal.FUSEAU)
     return int(debut.timestamp()), int(cal.fin_de_mois(debut).timestamp())
 
 
 def libelle(mois: str) -> str:
+    if mois == "tout":
+        return "depuis le début"
     a, m = mois.split("-")
     return f"{MOIS[int(m) - 1]} {a}"
 
 
-# ─── L'enregistrement, à la clôture ─────────────────────────────────────────
+# ─── L'enregistrement ───────────────────────────────────────────────────────
 
-def resserrer(reponses) -> dict:
-    """Les réponses du formulaire, réduites à l'utile : espaces écrasés, longueurs bornées."""
+def garder(reponses) -> dict:
+    """Les réponses du formulaire : espaces écrasés, longueurs bornées, vides retirés."""
     out = {}
     for q, r in list((reponses or {}).items()):
         q = re.sub(r"\s+", " ", str(q)).strip()[:QUESTION_MAX]
-        r = re.sub(r"\s+", " ", str(r)).strip()
+        r = re.sub(r"[ \t]+", " ", str(r)).strip()
         if q and r:
             out[q] = r if len(r) <= REPONSE_MAX else r[:REPONSE_MAX - 1] + "…"
         if len(out) >= REPONSES_MAX:
@@ -99,10 +115,11 @@ def resserrer(reponses) -> dict:
 
 async def enregistrer(guild_id: int, ticket_id: int, candidat_id: int, candidat_nom: str,
                       events, reponses, participants, url) -> None:
-    """Une ligne par ticket : jamais la conversation, seulement ce qui sert au bilan."""
+    """À la clôture : une ligne par ticket, jamais la conversation."""
     ouvert = next((int(t) for k, _a, _d, t in events if k == "create" and t), None)
-    fin = next(((int(t), int(a or 0)) for k, a, _d, t in reversed(events) if k == "close" and t), None)
-    ferme_le, ferme_par = fin or (int(datetime.now(timezone.utc).timestamp()), 0)
+    fin = next(((int(t), int(a or 0), str(d or "")) for k, a, d, t in reversed(events)
+                if k == "close" and t), None)
+    ferme_le, ferme_par, raison = fin or (int(datetime.now(timezone.utc).timestamp()), 0, "")
     pris_par = next((int(a or 0) for k, a, _d, _t in reversed(events) if k == "claim"), 0)
     cand = sum(p["n"] for p in participants if p["id"] == candidat_id)
     staff = sum(p["n"] for p in participants if p["id"] != candidat_id and not p["bot"])
@@ -110,26 +127,101 @@ async def enregistrer(guild_id: int, ticket_id: int, candidat_id: int, candidat_
         await db.execute(
             "INSERT OR REPLACE INTO recrutements (guild_id, ticket_id, candidat_id, candidat_nom,"
             " ouvert_le, ferme_le, ferme_par, pris_par, reponses, msg_candidat, msg_staff,"
-            " transcript) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " transcript, raison) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (guild_id, ticket_id, candidat_id, str(candidat_nom or "")[:100], ouvert, ferme_le,
-             ferme_par, pris_par, json.dumps(resserrer(reponses), ensure_ascii=False), cand,
-             staff, url or ""))
+             ferme_par, pris_par, json.dumps(garder(reponses), ensure_ascii=False), cand,
+             staff, url or "", raison[:200]))
         await db.commit()
 
 
-# ─── Le bilan ───────────────────────────────────────────────────────────────
+def _unix(texte) -> int | None:
+    """« 2026-10-19 14:05:00 » (UTC, SQLite) → horodatage ; la date bouche-trou de 2020 → None."""
+    try:
+        d = datetime.strptime(str(texte)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return None if d.year <= 2020 else int(d.timestamp())
 
-async def lire(guild_id: int, mois: str) -> list[dict]:
+
+async def _lignes(db, sql: str, args: tuple) -> list:
+    try:
+        async with db.execute(sql, args) as cur:
+            return await cur.fetchall()
+    except Exception as ex:  # table absente sur une base ancienne : rien à rattraper d'elle
+        _log(f"[RECRUTEMENTS:DETAIL] lecture : {type(ex).__name__} {ex}")
+        return []
+
+
+async def rattraper(g) -> int:
+    """Une fois : les tickets Rell Seas fermés avant ce suivi entrent dans le registre, depuis
+    l'historique des tickets (réponses, staff, motif, dates, transcript)."""
+    c = await _cfg(g.id)
+    if c.get(CLE_RATTRAPAGE):
+        return 0
+    pids = sorted(_panneaux(c)) if _panneaux else []
+    n = 0
+    if pids:
+        marques = ",".join("?" * len(pids))
+        async with _get_db() as db:
+            tickets = await _lignes(
+                db, f"SELECT id, user_id, claimed_by, answers, created_at, channel_id FROM tickets"
+                    f" WHERE guild_id=? AND status='closed' AND panel_id IN ({marques})", (g.id, *pids))
+            for tid, uid, pris, reponses, cree, salon in tickets:
+                evts = await _lignes(db, "SELECT kind, actor_id, detail, created_unix FROM"
+                                         " ticket_log_events WHERE guild_id=? AND ticket_id=?"
+                                         " ORDER BY id", (g.id, tid))
+                audit = await _lignes(db, "SELECT action, actor_id, detail, at FROM ticket_audit"
+                                          " WHERE guild_id=? AND channel_id=? ORDER BY id",
+                                      (g.id, salon))
+                tr = await _lignes(db, "SELECT url, user_name FROM ticket_transcripts"
+                                       " WHERE guild_id=? AND ticket_id=?", (g.id, tid))
+                fermeture = next(((int(t), int(a or 0)) for k, a, _d, t in reversed(evts)
+                                  if k == "close" and t), None)
+                fa = next(((_unix(t), int(a or 0), str(d or "")) for k, a, d, t in reversed(audit)
+                           if k == "close"), None)
+                ouvert = next((int(t) for k, _a, _d, t in evts if k == "create" and t), None) \
+                    or _unix(cree)
+                ferme_le, ferme_par = fermeture or ((fa[0], fa[1]) if fa and fa[0] else (ouvert, 0))
+                if not ferme_le:
+                    continue
+                pris_par = int(pris or 0) or next(
+                    (int(a or 0) for k, a, _d, _t in reversed(evts) if k == "claim"), 0)
+                try:
+                    rep = json.loads(reponses or "{}")
+                except ValueError:
+                    rep = {}
+                m = g.get_member(int(uid or 0))
+                nom = m.display_name if m else (tr[0][1] if tr else "")
+                await db.execute(
+                    "INSERT OR IGNORE INTO recrutements (guild_id, ticket_id, candidat_id,"
+                    " candidat_nom, ouvert_le, ferme_le, ferme_par, pris_par, reponses,"
+                    " msg_candidat, msg_staff, transcript, raison)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,NULL,NULL,?,?)",
+                    (g.id, int(tid), int(uid or 0), str(nom or "")[:100], ouvert, ferme_le,
+                     ferme_par, pris_par, json.dumps(garder(rep if isinstance(rep, dict) else {}),
+                                                     ensure_ascii=False),
+                     tr[0][0] if tr else "", (fa[2] if fa else "")[:200]))
+                n += 1
+            await db.commit()
+    await _db_set(g.id, CLE_RATTRAPAGE, datetime.now(timezone.utc).isoformat())
+    if n:
+        _log(f"[RECRUTEMENTS] {n} candidature(s) rattrapée(s)")
+    return n
+
+
+# ─── Les fiches ─────────────────────────────────────────────────────────────
+
+async def lire(guild_id: int, mois: str = "tout") -> list[dict]:
     debut, fin = bornes(mois)
     async with _get_db() as db:
         async with db.execute(
                 "SELECT ticket_id, candidat_id, candidat_nom, ouvert_le, ferme_le, ferme_par,"
-                " pris_par, reponses, msg_candidat, transcript FROM recrutements"
+                " pris_par, reponses, msg_candidat, transcript, raison FROM recrutements"
                 " WHERE guild_id=? AND ferme_le >= ? AND ferme_le < ? ORDER BY ferme_le",
                 (guild_id, debut, fin)) as cur:
             rows = await cur.fetchall()
     cles = ("ticket", "candidat_id", "nom", "ouvert", "ferme", "ferme_par", "pris_par",
-            "reponses", "msg_candidat", "transcript")
+            "reponses", "msg_candidat", "transcript", "raison")
     out = []
     for r in rows:
         d = dict(zip(cles, r))
@@ -137,156 +229,190 @@ async def lire(guild_id: int, mois: str) -> list[dict]:
             d["reponses"] = json.loads(d["reponses"] or "{}")
         except ValueError:
             d["reponses"] = {}
+        d["raison"] = d["raison"] or ""
         out.append(d)
     return out
 
 
-def nettoyer(lignes: list[dict], issue_de) -> tuple[list[dict], int]:
-    """Un candidat = une ligne (son dernier dossier, avec le nombre de tickets) ; un ticket où le
-    candidat n'a rien écrit est écarté et seulement compté."""
-    vides = sum(1 for d in lignes if not d["msg_candidat"])
+def statut(present: bool, a_le_role: bool, raison: str) -> str:
+    if not present:
+        return "partis"
+    if a_le_role:
+        return "acceptes"
+    if REFUS.search(raison or ""):
+        return "non_retenus"
+    return "acceptes" if ACCEPTE.search(raison or "") else "non_retenus"
+
+
+def nettoyer(lignes: list[dict], statut_de) -> tuple[list[dict], int, int]:
+    """Une fiche par candidat (son dernier ticket, la liste de ses candidatures) ; un ticket où
+    le candidat n'a rien écrit, ou un doublon, est écarté et seulement compté."""
+    vides = doublons = 0
     par_candidat: dict = {}
     for d in lignes:
-        if not d["msg_candidat"]:
+        if d["msg_candidat"] == 0:
+            vides += 1
+            continue
+        if DOUBLON.search(d.get("raison") or ""):
+            doublons += 1
             continue
         prec = par_candidat.get(d["candidat_id"])
-        n = (prec["tickets"] if prec else 0) + 1
+        dates = (prec["dates"] if prec else []) + [d["ferme"]]
         if prec is None or d["ferme"] >= prec["ferme"]:
-            par_candidat[d["candidat_id"]] = dict(d, tickets=n)
+            par_candidat[d["candidat_id"]] = dict(d, dates=dates)
         else:
-            prec["tickets"] = n
-    dossiers = sorted(par_candidat.values(), key=lambda d: d["ferme"])
-    for d in dossiers:
-        d["issue"] = issue_de(d["candidat_id"])
-    return dossiers, vides
+            prec["dates"] = dates
+    fiches = sorted(par_candidat.values(), key=lambda d: -d["ferme"])
+    for d in fiches:
+        d["dates"] = sorted(d["dates"])
+        d["statut"] = statut_de(d["candidat_id"], d.get("raison") or "")
+    return fiches, vides, doublons
 
 
-def duree(d: dict) -> str:
-    if not d.get("ouvert") or d["ferme"] < d["ouvert"]:
-        return "—"
-    mn = (d["ferme"] - d["ouvert"]) // 60
-    j, reste = divmod(mn, 1440)
-    h, m = divmod(reste, 60)
-    return f"{j} j {h} h" if j else f"{h} h {m:02d}" if h else f"{m} min"
+async def en_cours(g, c=None) -> list[dict]:
+    """Les candidatures dont le ticket est encore ouvert."""
+    c = c or await _cfg(g.id)
+    pids = sorted(_panneaux(c)) if _panneaux else []
+    if not pids:
+        return []
+    marques = ",".join("?" * len(pids))
+    async with _get_db() as db:
+        rows = await _lignes(db, f"SELECT id, user_id, claimed_by, answers, created_at, channel_id"
+                                 f" FROM tickets WHERE guild_id=? AND status='open'"
+                                 f" AND panel_id IN ({marques}) ORDER BY id", (g.id, *pids))
+    out = []
+    for tid, uid, pris, reponses, cree, salon in rows:
+        try:
+            rep = json.loads(reponses or "{}")
+        except ValueError:
+            rep = {}
+        out.append({"ticket": tid, "candidat_id": int(uid or 0), "pris_par": int(pris or 0),
+                    "reponses": garder(rep if isinstance(rep, dict) else {}), "ouvert": _unix(cree),
+                    "salon": int(salon or 0), "statut": "en_cours"})
+    return out
 
 
-def resume(dossiers: list[dict], vides: int) -> str:
-    n = len(dossiers)
-    parts = [f"{n} dossier{'s' if n > 1 else ''}"]
-    parts += [f"{ISSUES[k]}{'s' if sum(d['issue'] == k for d in dossiers) > 1 else ''} "
-              f"{sum(d['issue'] == k for d in dossiers)}"
-              for k in ISSUES if any(d["issue"] == k for d in dossiers)]
-    if vides:
-        parts.append(f"{vides} ticket{'s' if vides > 1 else ''} vide{'s' if vides > 1 else ''} écarté{'s' if vides > 1 else ''}")
+async def candidatures(g, mois: str = "tout") -> dict:
+    """Tout ce que le tableau de bord et les bilans montrent : fiches nettoyées + en cours."""
+    c = await _cfg(g.id)
+    role = _role(g, c) if _role else None
+
+    def statut_de(uid, raison):
+        m = g.get_member(int(uid))
+        return statut(m is not None, role is not None and m is not None and role in m.roles, raison)
+    fiches, vides, doublons = nettoyer(await lire(g.id, mois), statut_de)
+    return {"fiches": fiches, "vides": vides, "doublons": doublons,
+            "en_cours": await en_cours(g, c) if mois == "tout" else []}
+
+
+def compter(fiches: list[dict], ouverts: list[dict]) -> dict:
+    n = {k: 0 for k in STATUTS}
+    for d in fiches:
+        n[d["statut"]] += 1
+    n["en_cours"] = len(ouverts)
+    return n
+
+
+def resume(fiches: list[dict], ouverts: list[dict], vides: int = 0, doublons: int = 0) -> str:
+    n = compter(fiches, ouverts)
+    total = len(fiches) + len(ouverts)
+    parts = [f"{total} candidature{'s' if total > 1 else ''}"]
+    parts += [f"{STATUTS[k]}{'s' if n[k] > 1 and k != 'en_cours' else ''} {n[k]}"
+              for k in STATUTS if n[k]]
+    ecartes = vides + doublons
+    if ecartes:
+        parts.append(f"{ecartes} écarté{'s' if ecartes > 1 else ''} (vides ou doublons)")
     return " · ".join(parts)
 
 
-def _quand(t: int, fmt: str) -> str:
-    return datetime.fromtimestamp(int(t), timezone.utc).astimezone(cal.FUSEAU).strftime(fmt)
+def _quand(t, fmt: str) -> str:
+    return datetime.fromtimestamp(int(t), timezone.utc).astimezone(cal.FUSEAU).strftime(fmt) if t else "—"
 
 
-def texte_fichier(serveur: str, mois: str, garde: list[dict], tous: list[dict], vides: int,
-                  filtre: str, nom_de) -> str:
-    lignes = [f"RECRUTEMENTS RELL SEAS · {libelle(mois)} · {serveur}",
-              resume(tous, vides),
-              f"Filtre : {FILTRES[filtre]} · {len(garde)} ligne(s)",
-              ""]
-    lignes += colonnes.entete(_COLONNES)
-    for d in garde:
-        nom = nom_de(d["candidat_id"], d["nom"]) + (f" ×{d['tickets']}" if d["tickets"] > 1 else "")
-        valeurs = (_quand(d["ferme"], "%d/%m"), nom, d["candidat_id"], ISSUES[d["issue"]], duree(d),
-                   nom_de(d["pris_par"], "—") if d["pris_par"] else "—")
-        #  Le lien reste entier, en dernière colonne : coupé, il ne mènerait nulle part.
-        lignes.append("".join(colonnes.cadrer(v, w) + " " for v, (_t, w) in zip(valeurs, _COLONNES))
-                      + (d["transcript"] or "—"))
-        if d["reponses"]:
-            lignes.append(" " * 7 + " · ".join(f"{q} : {r}" for q, r in d["reponses"].items()))
-    if not garde:
-        lignes.append("Aucun dossier pour ce filtre.")
-    return "\n".join(lignes + [""])
+# ─── Les cartes Discord : un résumé et le tableau de bord ───────────────────
+
+class BoutonTableau(discord.ui.DynamicItem[discord.ui.Button], template=r"recr:web"):
+    """Sous chaque bilan : le lien personnel du tableau de bord, envoyé à soi seul."""
+
+    def __init__(self):
+        super().__init__(discord.ui.Button(label="Ouvrir le tableau de bord", custom_id="recr:web",
+                                           style=discord.ButtonStyle.primary,
+                                           emoji=visuels.icone("stats")))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, i: discord.Interaction):
+        await envoyer_lien(i)
 
 
-def vue_bilan(mois: str, garde: list[dict], tous: list[dict], vides: int, filtre: str,
-              nom_fichier: str, nom_de) -> discord.ui.LayoutView:
-    apercu = [f"{_quand(d['ferme'], '%d/%m')} · **{nom_de(d['candidat_id'], d['nom'])}** · "
-              f"{ISSUES[d['issue']]}" for d in garde[:APERCU_MAX]]
-    if len(garde) > APERCU_MAX:
-        apercu.append(f"-# … et {len(garde) - APERCU_MAX} autre(s) dans le fichier")
-    titre = f"### {libelle(mois).capitalize()}" + ("" if filtre == "tous" else f" · {FILTRES[filtre]}")
+async def envoyer_lien(i: discord.Interaction) -> None:
+    """Le lien personnel du tableau de bord, à soi seul — ou la raison du refus."""
+    url, refus = await _lien(i) if _lien else (None, "Le tableau de bord n'est pas branché.")
+    if not url:
+        return await i.response.send_message(refus, ephemeral=True)
+    v = discord.ui.View()
+    v.add_item(discord.ui.Button(label="Ouvrir le tableau de bord", url=url, emoji=visuels.icone("lien")))
+    await i.response.send_message("Ton lien personnel — valable 24 h. Ne le partage pas.",
+                                  view=v, ephemeral=True)
+
+
+def carte(g, titre: str, donnees: dict) -> discord.ui.LayoutView:
+    fiches, ouverts = donnees["fiches"], donnees["en_cours"]
+    apercu = [f"{_quand(d['ferme'], '%d/%m')} · **{_nom(g, d['candidat_id'], d['nom'])}** · "
+              f"{STATUTS[d['statut']]}" for d in fiches[:APERCU_MAX]]
+    if len(fiches) > APERCU_MAX:
+        apercu.append(f"-# … et {len(fiches) - APERCU_MAX} autre(s) dans le tableau de bord")
     v = discord.ui.LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
         visuels.bandeau("recrutement", "Recrutements Rell Seas"),
-        discord.ui.TextDisplay(f"{titre}\n{resume(tous, vides)}"),
+        discord.ui.TextDisplay(f"### {titre}\n"
+                               f"{resume(fiches, ouverts, donnees['vides'], donnees['doublons'])}"),
         discord.ui.Separator(),
-        discord.ui.TextDisplay("\n".join(apercu) or "Aucun dossier pour ce filtre."),
-        discord.ui.File(f"attachment://{nom_fichier}"),
-        discord.ui.ActionRow(FiltreRecrutement(mois)),
+        discord.ui.TextDisplay("\n".join(apercu) or "Aucune candidature."),
+        discord.ui.ActionRow(BoutonTableau()),
         accent_color=0x0EA5E9))
     return v
 
 
-async def bilan(g, mois: str, filtre: str = "tous"):
-    """(vue, fichier) du mois — `filtre` : tous, acceptes, sans_role, partis."""
-    filtre = filtre if filtre in FILTRES else "tous"
+def _nom(g, uid, defaut="") -> str:
+    m = g.get_member(int(uid)) if uid else None
+    return m.display_name if m else (defaut or str(uid))
+
+
+async def publier_recap(g) -> bool:
+    """Une fois, après le rattrapage : le récapitulatif de toutes les candidatures."""
     c = await _cfg(g.id)
-    role = _role(g, c) if _role else None
+    if c.get(CLE_RECAP):
+        return False
+    donnees = await candidatures(g)
+    if not donnees["fiches"] and not donnees["en_cours"]:
+        return False
+    salon = await _salon(g, c)
+    if salon is None:
+        return False
+    await salon.send(view=carte(g, "Toutes les candidatures", donnees),
+                     allowed_mentions=discord.AllowedMentions.none())
+    await _db_set(g.id, CLE_RECAP, datetime.now(timezone.utc).isoformat())
+    return True
 
-    def issue_de(uid):
-        m = g.get_member(int(uid))
-        if m is None:
-            return "partis"
-        return "acceptes" if role is not None and role in m.roles else "sans_role"
-
-    def nom_de(uid, defaut):
-        m = g.get_member(int(uid)) if uid else None
-        return m.display_name if m else (defaut or str(uid))
-    tous, vides = nettoyer(await lire(g.id, mois), issue_de)
-    garde = tous if filtre == "tous" else [d for d in tous if d["issue"] == filtre]
-    nom = f"recrutements-{mois}" + ("" if filtre == "tous" else f"-{filtre}") + ".txt"
-    texte = texte_fichier(g.name, mois, garde, tous, vides, filtre, nom_de)
-    return (vue_bilan(mois, garde, tous, vides, filtre, nom, nom_de),
-            discord.File(io.BytesIO(texte.encode("utf-8")), filename=nom))
-
-
-class FiltreRecrutement(discord.ui.DynamicItem[discord.ui.Select],
-                        template=r"recr:f:(?P<mois>\d{4}-\d{2})"):
-    """Le filtre sous chaque bilan : renvoie, à soi seul, le fichier filtré du mois."""
-
-    def __init__(self, mois: str):
-        self.mois = mois
-        super().__init__(discord.ui.Select(
-            placeholder="Filtrer le mois…", custom_id=f"recr:f:{mois}",
-            options=[discord.SelectOption(label=v, value=k) for k, v in FILTRES.items()]))
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(match["mois"])
-
-    async def callback(self, i: discord.Interaction):
-        if _autorise is not None and not await _autorise(i):
-            return await i.response.send_message("Réservé à l'équipe Rell Seas.", ephemeral=True)
-        await i.response.defer(ephemeral=True, thinking=True)
-        vue, fichier = await bilan(i.guild, self.mois, (i.data.get("values") or ["tous"])[0])
-        await i.followup.send(view=vue, file=fichier, ephemeral=True,
-                              allowed_mentions=discord.AllowedMentions.none())
-
-
-# ─── L'export du 1er du mois ────────────────────────────────────────────────
 
 async def exporter(g, maintenant: datetime | None = None) -> bool:
-    """Le bilan du mois écoulé, une seule fois, dans le salon des transcripts Rell Seas."""
+    """Le 1er du mois : le bilan du mois écoulé, une seule fois, jamais pour un mois vide."""
     precedent = mois_precedent(maintenant or datetime.now(timezone.utc))
     c = await _cfg(g.id)
     if c.get(CLE_EXPORT) == precedent:
         return False
-    if not await lire(g.id, precedent):
+    donnees = await candidatures(g, precedent)
+    if not donnees["fiches"]:
         await _db_set(g.id, CLE_EXPORT, precedent)
         return False
     salon = await _salon(g, c)
     if salon is None:
         return False
-    vue, fichier = await bilan(g, precedent)
-    await salon.send(view=vue, file=fichier, allowed_mentions=discord.AllowedMentions.none())
+    await salon.send(view=carte(g, f"Bilan · {libelle(precedent)}", donnees),
+                     allowed_mentions=discord.AllowedMentions.none())
     await _db_set(g.id, CLE_EXPORT, precedent)
     return True
 
