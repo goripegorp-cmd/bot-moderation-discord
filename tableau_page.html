@@ -1296,16 +1296,19 @@ function cadreAjout() {
       if (r.status === 403) { expire(); return; }
       const j = await r.json();
       if (q !== dernier) return;
-      const l = j.membres || [];
+      const l = (j.membres || []).slice(0, q ? 12 : 6);
       res.replaceChildren(...(l.length ? l.map(ligneAjout) : [vide("Personne", "Essaie un autre nom ou l'identifiant.")]));
     } catch (e) { if (q === dernier) res.replaceChildren(vide("Recherche indisponible", "Réessaie dans un instant.")); }
   };
   const i = h("input", {type: "search", name: "chercher-membre", value: f.ajout, placeholder: "Nom, pseudo ou identifiant…", "aria-label": "Chercher dans tout le serveur", autocomplete: "off", spellcheck: "false"});
   i.addEventListener("input", () => { clearTimeout(minuteur); minuteur = setTimeout(() => { f.ajout = i.value.trim(); sauver(); lancer(f.ajout); }, 250); });
-  lancer(f.ajout);
-  return h("div", {classe: "cadre pile"}, h("h3", {}, "Ajouter au clan"),
-    h("p", {classe: "aide"}, "Tout le serveur : cherche une personne, ou parcours les arrivées récentes. Seul le rôle du clan est donné."),
+  const bloc = repli("Ajouter au clan", !!f.ajout, h("p", {classe: "aide"}, "Tout le serveur : cherche une personne, ou parcours les arrivées récentes. Seul le rôle du clan est donné."),
     h("label", {classe: "recherche"}, icone("recherche"), i), res);
+  let charge = false;
+  const ouvrir = () => { if (bloc.open && !charge) { charge = true; lancer(f.ajout); } };
+  bloc.addEventListener("toggle", ouvrir);
+  ouvrir();
+  return bloc;
 }
 function ligneAjout(x) {
   const [lib, teinte] = RANGS[x.rang] || ["", null];
