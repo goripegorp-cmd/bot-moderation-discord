@@ -101,7 +101,10 @@ import acces_direction  # Direction + Fondateur déplacent dans les vocaux cré�
 import stockage as stockage_module  # part du volume par poste + bilan quotidien
 import tickets_fils  # un fil privé par ticket, un salon par équipe
 import nettoyage  # journal en fils, rétention 30 jours, remise à neuf
-import sondages  # sondages natifs créés par les membres en un bouton
+import sondages  # sondages créés par les membres en un bouton (visibles ou anonymes)
+import suggestions  # idées des membres : votes, fil de discussion, décision du staff
+import notifs  # rôles de notification pris d'un clic
+import visuels  # bandeaux animés des menus, icônes des boutons
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
@@ -588,143 +591,6 @@ def _get_config_lock(gid: int) -> asyncio.Lock:
 #                           🔒 SYSTÈME DE SÉCURITÉ
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class Security:
-    """Système de sécurité centralisé pour le bot"""
-
-    # ⚠️ NON UTILISÉ (audit 2026-06-29) : Security.check_rate_limit + _rate_limits + RATE_LIMITS
-    # sont du CODE MORT (aucun appelant ; le rate-limit réel = la fonction module-level
-    # check_rate_limit() ligne ~1016, bornée via _evict_if_big, + le module rate_limiter.py).
-    # NE PAS recâbler ce bloc (son dict n'est pas borné). Conservé pour ne pas casser d'import.
-    # Rate limiting par utilisateur
-    _rate_limits = {}  # {user_id: {action: [timestamps]}}
-    _blocked_users = set()  # Utilisateurs temporairement bloqués
-    _security_logs = []  # Logs de sécurité
-    
-    # Configuration des limites
-    RATE_LIMITS = {
-        'command': (10, 60),      # 10 commandes par 60 secondes
-        'button': (20, 60),       # 20 clics par 60 secondes
-        'modal': (5, 60),         # 5 modals par 60 secondes
-        'api_call': (30, 60),     # 30 appels API par 60 secondes
-    }
-    
-    # Patterns dangereux à bloquer
-    DANGEROUS_PATTERNS = [
-        r'(?i)eval\s*\(',
-        r'(?i)exec\s*\(',
-        r'(?i)__import__',
-        r'(?i)subprocess',
-        r'(?i)os\.system',
-        r'(?i)import\s+os',
-        r'<script',
-        r'javascript:',
-        r'data:text/html',
-        r'(?i)on\w+\s*=',  # Event handlers HTML
-    ]
-    
-    @classmethod
-    def sanitize_input(cls, text: str, max_length: int = 2000) -> str:
-        """Nettoie et valide les entrées utilisateur"""
-        if not text:
-            return ""
-        
-        # Limiter la longueur
-        text = str(text)[:max_length]
-        
-        # Supprimer les caractères de contrôle (sauf newlines et tabs)
-        text = ''.join(c for c in text if c.isprintable() or c in '\n\t')
-        
-        # Échapper les mentions dangereuses
-        text = text.replace('@everyone', '@\u200beveryone')
-        text = text.replace('@here', '@\u200bhere')
-        
-        return text.strip()
-    
-    @classmethod
-    def validate_url(cls, url: str) -> bool:
-        """Valide une URL"""
-        if not url:
-            return True  # URL optionnelle
-        
-        # Pattern URL basique sécurisé
-        url_pattern = r'^https?://[a-zA-Z0-9\-._~:/?#\[\]@!$&\'()*+,;=%]+$'
-        if not re.match(url_pattern, url):
-            return False
-        
-        # Bloquer les schemes dangereux
-        dangerous = ['javascript:', 'data:', 'vbscript:', 'file:']
-        if any(url.lower().startswith(d) for d in dangerous):
-            return False
-        
-        return len(url) <= 2000
-    
-    @classmethod
-    def check_dangerous_content(cls, text: str) -> bool:
-        """Vérifie si le texte contient du contenu dangereux"""
-        if not text:
-            return False
-        
-        for pattern in cls.DANGEROUS_PATTERNS:
-            if re.search(pattern, text):
-                return True
-        return False
-    
-    @classmethod
-    async def check_rate_limit(cls, user_id: int, action: str = 'command') -> bool:
-        """Vérifie si l'utilisateur dépasse le rate limit. Retourne True si bloqué."""
-        if user_id in cls._blocked_users:
-            return True
-        
-        now_ts = time.time()
-        limit, window = cls.RATE_LIMITS.get(action, (10, 60))
-        
-        if user_id not in cls._rate_limits:
-            cls._rate_limits[user_id] = {}
-        
-        if action not in cls._rate_limits[user_id]:
-            cls._rate_limits[user_id][action] = []
-        
-        # Nettoyer les vieux timestamps
-        cls._rate_limits[user_id][action] = [
-            ts for ts in cls._rate_limits[user_id][action]
-            if now_ts - ts < window
-        ]
-        
-        # Vérifier la limite
-        if len(cls._rate_limits[user_id][action]) >= limit:
-            cls._log_security(f"RATE_LIMIT: User {user_id} exceeded {action} limit")
-            return True
-        
-        cls._rate_limits[user_id][action].append(now_ts)
-        return False
-    
-    @classmethod
-    def _log_security(cls, message: str):
-        """Log un événement de sécurité"""
-        timestamp = datetime.now(timezone.utc).isoformat()
-        log_entry = f"[{timestamp}] {message}"
-        cls._security_logs.append(log_entry)
-        
-        # Garder seulement les 1000 derniers logs
-        if len(cls._security_logs) > 1000:
-            cls._security_logs = cls._security_logs[-1000:]
-        
-        print(f"🔒 SECURITY: {message}")
-    
-    @classmethod
-    def validate_snowflake(cls, value) -> bool:
-        """Valide un Discord Snowflake ID"""
-        try:
-            snowflake = int(value)
-            # Discord Snowflakes sont >= 2^22 (environ 4194304)
-            return 4194304 <= snowflake <= 9223372036854775807
-        except (ValueError, TypeError):
-            return False
-    
-    @classmethod
-    def hash_sensitive_data(cls, data: str) -> str:
-        """Hash des données sensibles pour les logs"""
-        return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 class C:
     BLURPLE=0x5865F2; GREEN=0x57F287; RED=0xED4245; YELLOW=0xFEE75C
@@ -975,15 +841,6 @@ async def db_init():
             warn_count INTEGER DEFAULT 0,
             PRIMARY KEY(guild_id, user_id)
         )''')
-        # Table pour les suggestions
-        await db.execute('''CREATE TABLE IF NOT EXISTS suggestions(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            message_id INTEGER,
-            user_id INTEGER,
-            title TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
         # E1 : journal d'audit STAFF consolidé (traçabilité QUI a fait QUOI).
         # Toutes surfaces (slash, panneaux de sanction, actions fondateur) écrivent
         # ici via log_staff_action(). Lecture seule côté owner (dashboard).
@@ -1031,23 +888,6 @@ async def db_init():
         except: pass
         # Table pour les giveaways (cadeaux)
         # Table pour les messages automatiques
-        await db.execute('''CREATE TABLE IF NOT EXISTS scheduled_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            channel_id INTEGER,
-            title TEXT,
-            description TEXT,
-            color TEXT DEFAULT "#5865F2",
-            image_url TEXT,
-            footer TEXT,
-            frequency TEXT,
-            frequency_value INTEGER DEFAULT 1,
-            send_hour INTEGER DEFAULT 12,
-            send_minute INTEGER DEFAULT 0,
-            last_sent DATETIME,
-            enabled INTEGER DEFAULT 1,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
         async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tickets'") as cur:
             if not await cur.fetchone():
                 await db.execute('CREATE TABLE tickets(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER, user_id INTEGER, panel_id TEXT DEFAULT "", claimed_by INTEGER DEFAULT 0, status TEXT DEFAULT "open", answers TEXT DEFAULT "{}", created_at DATETIME DEFAULT CURRENT_TIMESTAMP)')
@@ -9383,7 +9223,8 @@ _CONFIG_SECTIONS = [
     ("tickets",     "🎫", "Tickets",           "Panneaux d'ouverture · rôle staff · logs · blacklist"),
     ("logs",        "📋", "Logs & Audit",      "Un salon · toutes les catégories d'événements"),
     ("roblox",      "📰", "Actualités Roblox", "Blog, forum et notes de version · salon de publication"),
-    ("sondages",    "📊", "Sondages",          "Salon dédié · création en un bouton"),
+    ("sondages",    "📊", "Sondages",          "Salon dédié · votes visibles ou anonymes"),
+    ("suggestions", "💡", "Suggestions",       "Idées des membres · votes · décisions du staff"),
     ("social",      "📡", "Réseaux sociaux",   "YouTube · Twitch · X · TikTok · Instagram → salon d'annonces"),
     ("rellseas",    "🎭", "Rellseas",          "Qui peut donner, retirer, vérifier l'activité"),
     ("rgpd",        "🔒", "Données & RGPD",    "Droit à l'effacement (art. 17) · rétention"),
@@ -9581,6 +9422,7 @@ class MainPanelV2(LayoutView):
             'logs':        lambda: LogsPanelV2(self.u, self.g),
             'roblox':      lambda: roblox_ui.RobloxPanelV2(self.u, self.g),
             'sondages':    lambda: sondages.SondagesPanelV2(self.u, self.g),
+            'suggestions': lambda: suggestions.SuggestionsPanelV2(self.u, self.g),
             #  Le panneau social n'était PAS à écrire : il existait déjà,
             #  complet et branché sur le vrai manager par `set_social_manager`.
             #  Il était seulement devenu inatteignable quand `/admin` a été
@@ -10941,6 +10783,7 @@ async def menage_salons_task():
                 if isinstance(ch, (discord.TextChannel, discord.Thread)):
                     await nettoyage.purger_salon(ch, bot.user.id)
             await sondages.assurer_panneau(g)
+            await suggestions.assurer_panneau(g)
         except Exception as ex:
             _logerr("menage.salons", ex, guild_id=g.id)
 
@@ -11042,7 +10885,7 @@ _TABLES_MORTES = frozenset({
     "player_stash", "player_styles", "player_voice_optin", "prediction_bets", "predictions",
     "presence_chain", "promo_sources", "publish_config", "pvp_duels", "raffle_draws",
     "raffle_tickets", "referral_links", "referrals", "regional_state", "reputation",
-    "reputation_history", "rift_contributors", "polls", "rift_events", "rivalries", "roadmap_items",
+    "reputation_history", "rift_contributors", "polls", "rellseas_quizzes", "rift_events", "rivalries", "scheduled_messages", "suggestions", "roadmap_items",
     "roadmap_votes", "roblox_account_links", "roblox_articles", "roblox_cartes_annonces",
     "roblox_curseurs", "roblox_game_library", "roblox_game_stats",
     "roblox_game_stats_snapshots", "roblox_games", "roblox_link_pending",
@@ -11138,6 +10981,70 @@ _LIEN_OU_MENTION = re.compile(
 bot.add_listener(sondages.sur_message, "on_message")
 bot.add_listener(sondages.sur_suppression, "on_raw_message_delete")
 bot.add_listener(sondages.sur_salon_supprime, "on_guild_channel_delete")
+bot.add_listener(suggestions.sur_message, "on_message")
+bot.add_listener(suggestions.sur_salon_supprime, "on_guild_channel_delete")
+
+
+class BoutonArchive(discord.ui.DynamicItem[Button],
+                    template=r"(?P<cid>suggreply:\d+|poll_\d+_\d+|"
+                             r"rellseas_(?:answer|examine_accept|examine_reject)_\d+)"):
+    """Les boutons des systèmes retirés (anciennes suggestions, ancien sondage,
+    questionnaire Rell Seas) : au premier clic, le message perd ses boutons."""
+
+    def __init__(self, cid: str):
+        super().__init__(Button(label="Archivé", custom_id=cid, disabled=True))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["cid"])
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            await i.response.edit_message(view=None)
+        except discord.HTTPException as ex:
+            _logerr("archives.bouton", ex)
+
+
+async def _salon_logs_dedie(g, cle: str, nom: str):
+    """Un salon de logs propre à un système (sondages, suggestions), créé une fois à côté du
+    salon de logs principal — mêmes droits que sa catégorie."""
+    try:
+        c = await cfg(g.id)
+        salon = g.get_channel(int(c.get(f"logs_salon_{cle}", 0) or 0))
+        if isinstance(salon, discord.TextChannel):
+            return salon
+        me = g.me
+        if not (me and me.guild_permissions.manage_channels):
+            return None
+        ref = g.get_channel(int(await ulogger2026.get_log_channel(g.id) or 0)) \
+            or g.get_channel(int(c.get('mod_log_channel', 0) or 0))
+        categorie = getattr(ref, "category", None)
+        if categorie is not None:
+            salon = await g.create_text_channel(nom, category=categorie, reason="Logs dédiés")
+        else:
+            salon = await g.create_text_channel(nom, reason="Logs dédiés", overwrites={
+                g.default_role: discord.PermissionOverwrite(view_channel=False),
+                me: discord.PermissionOverwrite(view_channel=True, send_messages=True)})
+        await db_set(g.id, f"logs_salon_{cle}", salon.id)
+        return salon
+    except discord.HTTPException as ex:
+        _logerr("logs.dedie", ex, guild_id=g.id)
+        return None
+
+
+async def _ping_social(salon):
+    """Le rôle « 🔔 <salon> » des publications de ce salon, pris d'un clic sous chacune."""
+    cle = notifs.cle_salon(salon.id)
+    role = await notifs.role(salon.guild, cle)
+    vue = discord.ui.View(timeout=None)
+    vue.add_item(notifs.BoutonNotif(cle, emoji=visuels.icone("cloche")))
+    return notifs.ping(role), role, vue
+
+
+async def _publier_social(salon, profil: str, embed):
+    ping, role, vue = await _ping_social(salon)
+    return await webhook_send(salon, profil, embed=embed, content=ping or None, view=vue,
+                              allowed_mentions=notifs.mentions(role))
 
 
 async def _texte_sondage_refuse(g, texte: str) -> str:
@@ -11218,6 +11125,7 @@ async def _travaux_de_demarrage():
                 await _menage_unique(g)
                 await _menage_v2(g)
                 await sondages.installer(g)
+                await suggestions.installer(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
         await _fermer_anciens_sondages()
@@ -11442,12 +11350,11 @@ _SUPERVISED_LOOP_NAMES = [
     # (jusqu'au reboot). Plusieurs sont CRITIQUES côté utilisateur/sécurité :
     #   • check_expired_roles     → un rôle boutique temporaire ne s'enlève jamais
     #   • check_expired_restrictions → une sanction temporaire ne se lève jamais (SÉCU)
-    #   • check_scheduled_messages → un message programmé ne part jamais
     #   • temp_voice_watchdog     → les vocaux temporaires s'empilent (plainte owner)
     # Toutes sont lancées INCONDITIONNELLEMENT au boot (garde is_running() seule) →
     # les superviser est sans effet de bord (no-op si déjà vivantes, resurrection sinon).
     "check_social_feeds",
-    "cleanup_old_db_data", "check_scheduled_messages",
+    "cleanup_old_db_data",
     "check_expired_roles", "cleanup_deals_task", "check_expired_restrictions",
     "birthday_announcer", "temp_voice_watchdog",     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
     # que la date n'est pas configurée/atteinte.
@@ -11480,6 +11387,7 @@ _SUPERVISED_MODULE_LOOPS = (
     ('webhook_tracker_module', 'weekly_scan_task'),
     ('error_logger_module', 'burst_check_task'),
     ('raid_module', 'lockdown_expiry_task'),
+    ('sondages', 'cloture_task'),
 )
 
 # DENY-LIST EXPLICITE (Tâche C) : boucles que le balayage AUTO ne doit JAMAIS démarrer ni
@@ -18243,10 +18151,20 @@ async def _activite_boot():
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()
 
+    visuels.setup(base_url=transcript_store.public_base_url(), log=print)
+    asyncio.create_task(visuels.installer_icones(bot))
+    notifs.setup(cfg=cfg, db_set=db_set, log=print)
     sondages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_sondage_refuse,
-                   controle=_access_gate_reason, log=print)
+                   controle=_access_gate_reason, salon_logs=_salon_logs_dedie,
+                   cle_secrete=os.getenv("SONDAGES_CLE") or hashlib.sha256((TOKEN or "").encode()).hexdigest(),
+                   log=print)
     sondages.set_retour(_retour_vers_configure)
     await sondages.init_db()
+    sondages.demarrer(bot)
+    suggestions.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_sondage_refuse,
+                      controle=_access_gate_reason, salon_logs=_salon_logs_dedie, log=print)
+    suggestions.set_retour(_retour_vers_configure)
+    await suggestions.init_db()
 
     await activite_module.init_db()
 
@@ -18331,7 +18249,10 @@ async def on_ready():
     # Boutons persistants encore utiles (19/10/2026 : jeux, événements, UGC et hub retirés).
     try:
         bot.add_dynamic_items(BoostSupportButton)  # 💎 panneau « Soutenir le serveur » (boost)
-        bot.add_dynamic_items(sondages.BoutonCreer, sondages.BoutonTerminer)
+        bot.add_dynamic_items(sondages.BoutonCreer, sondages.BoutonTerminer, sondages.BoutonVote,
+                              sondages.BoutonFinAnonyme, suggestions.BoutonProposer,
+                              suggestions.BoutonPour, suggestions.BoutonContre,
+                              suggestions.BoutonGerer, notifs.BoutonNotif)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
@@ -18372,13 +18293,6 @@ async def on_ready():
                             bot.add_view(TicketCreateView(pid))
                     except: pass
             
-            # Charger les vues de questionnaires Realsy en attente
-            try:
-                async with db.execute('SELECT id, guild_id FROM rellseas_quizzes WHERE status IN ("pending", "answered")') as c:
-                    for row in await c.fetchall():
-                        bot.add_view(RellseasQuizAnswerView(row[0], row[1]))
-                        bot.add_view(RellseasExamineResponseView(row[0], row[1]))
-            except: pass
     except: pass
     
     # ═══════════════ SYNCHRONISATION DES COMMANDES — PAR GUILDE ═══════════════
@@ -18633,9 +18547,6 @@ async def on_ready():
 
     # Lancer la tâche des giveaways
     
-    # Lancer la tâche des messages automatiques
-    if not check_scheduled_messages.is_running():
-        check_scheduled_messages.start()
     
     # Lancer la tâche des rôles boutique expirés
     if not check_expired_roles.is_running():
@@ -18978,12 +18889,10 @@ async def on_ready():
             print(f"[on_ready i18n] {ex}")
 
 
-        # TASK C.1 : bouton « 💬 Répondre » sous les suggestions (owner/staff,
-        # persistant → re-capté au reboot, réponse publique, zéro MP).
         try:
-            bot.add_dynamic_items(SuggestionReplyButton)
+            bot.add_dynamic_items(BoutonArchive)
         except Exception as ex:
-            print(f"[on_ready C.1 suggestion_reply] {ex}")
+            print(f"[on_ready archives] {ex}")
 
         print(
             "[Phase 155/165/166/167/168/169/170/171] Stream + token_leak + "
@@ -25837,9 +25746,8 @@ bot.tree.add_command(mod_group)
 #  Remise en place le 16/08/2026, sur demande explicite du propriétaire. Trois
 #  actions : donner le rôle, le retirer, vérifier l'activité d'un membre.
 #
-#  ⚠️ CE QUI N'A PAS ÉTÉ RÉÉCRIT, ET NE DOIT PAS L'ÊTRE : `realsy_tracking`,
-#  `update_realsy_activity`, `rellseas_quizzes` et les deux vues de
-#  questionnaire sont INTACTS. Seuls manquaient la commande et son réglage.
+#  ⚠️ CE QUI N'A PAS ÉTÉ RÉÉCRIT, ET NE DOIT PAS L'ÊTRE : `realsy_tracking` et
+#  `update_realsy_activity` (le questionnaire est retiré le 19/10/2026).
 #
 #  ⚠️ ET SURTOUT : LA VÉRIFICATION D'ACTIVITÉ NE COMPTE RIEN ELLE-MÊME. Elle
 #  appelle `activite.presence()` sur la fenêtre du système d'activité. Un
@@ -25915,303 +25823,16 @@ async def rellseas_cmd(i: discord.Interaction):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class RellseasQuizAnswerView(View):
-    """Vue pour que le candidat réponde au questionnaire"""
-    def __init__(self, quiz_id, guild_id):
-        super().__init__(timeout=None)
-        self.quiz_id = quiz_id
-        self.guild_id = guild_id
-        self.add_item(RellseasAnswerButton(quiz_id, guild_id))
 
 
-class RellseasAnswerButton(Button):
-    def __init__(self, quiz_id, guild_id):
-        super().__init__(
-            label="📝 Répondre au questionnaire",
-            style=discord.ButtonStyle.success,
-            custom_id=f"rellseas_answer_{quiz_id}"
-        )
-        self.quiz_id = quiz_id
-        self.guild_id = guild_id
-    
-    async def callback(self, i):
-        # Vérifier que c'est bien le candidat
-        async with get_db() as db:
-            async with db.execute('SELECT user_id, status, questions FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
-                row = await cur.fetchone()
-        
-        if not row:
-            return await i.response.send_message("❌ Questionnaire introuvable", ephemeral=True)
-        
-        if row[0] != i.user.id:
-            return await i.response.send_message("❌ Ce questionnaire ne vous est pas destiné", ephemeral=True)
-        
-        if row[1] != 'pending':
-            return await i.response.send_message("❌ Ce questionnaire a déjà été traité", ephemeral=True)
-        
-        # Récupérer les questions sauvegardées avec le quiz
-        questions = []
-        if row[2]:
-            try:
-                questions = json.loads(row[2])
-            except:
-                pass
-        
-        # Fallback vers les questions globales si pas de questions sauvegardées
-        if not questions:
-            c = await cfg(i.guild.id)
-            questions = c.get('rellseas_questions', [])
-        
-        if not questions:
-            return await i.response.send_message("❌ Aucune question configurée", ephemeral=True)
-        
-        # Lancer le modal de réponse
-        await i.response.send_modal(RellseasAnswerModal(self.quiz_id, questions))
 
 
-class RellseasAnswerModal(Modal, title="📝 Vos réponses"):
-    def __init__(self, quiz_id, questions):
-        super().__init__()
-        self.quiz_id = quiz_id
-        self.questions = questions[:5]  # Max 5 questions dans un modal
-        
-        for q in self.questions:
-            self.add_item(TextInput(
-                label=q['title'][:45],
-                placeholder=q['question'][:100],
-                style=discord.TextStyle.paragraph,
-                required=True,
-                max_length=1000
-            ))
-    
-    async def on_submit(self, i):
-        # Sauvegarder les réponses
-        answers = {}
-        for idx, child in enumerate(self.children):
-            if idx < len(self.questions):
-                answers[self.questions[idx]['title']] = child.value
-        
-        async with get_db() as db:
-            await db.execute('UPDATE rellseas_quizzes SET answers=?, status=? WHERE id=?',
-                (json.dumps(answers, ensure_ascii=False), 'answered', self.quiz_id))
-            await db.commit()
-        
-        # Confirmer
-        await i.response.send_message(
-            "✅ **Merci !**\n\nVos réponses ont été enregistrées. Un examinateur va les examiner prochainement.",
-            ephemeral=True
-        )
-        
-        # ═══════════════════════════════════════════════════════════════════════════════
-        #          📋 METTRE À JOUR L'EMBED AVEC LES RÉPONSES DIRECTEMENT
-        # ═══════════════════════════════════════════════════════════════════════════════
-        try:
-            e = discord.Embed(
-                title="📝 Questionnaire Realsy - Répondu ✅",
-                description=f"**{i.user.mention}** a répondu au questionnaire.\n\n*En attente d'examen par un staff...*",
-                color=0x2ECC71,  # Vert
-                timestamp=now()
-            )
-            
-            # Ajouter les réponses directement dans l'embed
-            for question_title, answer in answers.items():
-                # Tronquer la réponse si trop longue
-                answer_display = answer if len(answer) <= 500 else answer[:497] + "..."
-                e.add_field(
-                    name=f"❓ {question_title}",
-                    value=f"```{answer_display}```",
-                    inline=False
-                )
-            
-            e.set_thumbnail(url=i.user.display_avatar.url)
-            e.set_footer(text=f"Questionnaire #{self.quiz_id} • Cliquez sur les boutons pour examiner")
-            
-            # Ajouter les boutons d'examen - chercher le message original du quiz
-            try:
-                c = await cfg(i.guild.id)
-                quiz_channel_id = c.get('rellseas_channel', 0)
-                quiz_channel = i.guild.get_channel(quiz_channel_id)
-                if quiz_channel:
-                    async with get_db() as db:
-                        async with db.execute('SELECT message_id FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
-                            row = await cur.fetchone()
-                            if row and row[0]:
-                                try:
-                                    quiz_msg = await quiz_channel.fetch_message(row[0])
-                                    await quiz_msg.edit(embed=e, view=RellseasExamineResponseView(self.quiz_id, i.guild.id))
-                                except:
-                                    pass
-            except:
-                pass
-        except Exception as ex:
-            print(f"[QUIZ] Erreur mise à jour embed: {ex}")
 
 
-class RellseasExamineResponseView(View):
-    """Vue persistante avec boutons d'examen pour les réponses au questionnaire"""
-    def __init__(self, quiz_id, guild_id):
-        super().__init__(timeout=None)
-        self.quiz_id = quiz_id
-        self.guild_id = guild_id
-        self.add_item(RellseasExamineAcceptButton(quiz_id, guild_id))
-        self.add_item(RellseasExamineRejectButton(quiz_id, guild_id))
 
 
-class RellseasExamineAcceptButton(Button):
-    def __init__(self, quiz_id, guild_id):
-        super().__init__(
-            label="✅ Accepter + Donner rôle",
-            style=discord.ButtonStyle.success,
-            custom_id=f"rellseas_examine_accept_{quiz_id}"
-        )
-        self.quiz_id = quiz_id
-        self.guild_id = guild_id
-    
-    async def callback(self, i):
-        """Phase 168.1 fix : defer immédiat car add_roles peut prendre 1-3s
-        + 2 DB calls — risque "Échec de l'interaction" sans defer."""
-        # DEFER FIRST — interaction reste ouverte 15 min au lieu de 3s
-        try:
-            await i.response.defer()
-        except Exception:
-            pass
-
-        g = i.guild
-        c = await cfg(g.id)
-        role = g.get_role(c.get('rellseas_role', 0))
-
-        async def _send_or_edit(content=None, embed=None, view=None):
-            try:
-                if embed is not None or view is not None:
-                    await i.edit_original_response(embed=embed, view=view, attachments=[])
-                else:
-                    await i.edit_original_response(content=content, view=None, attachments=[])
-                return
-            except Exception:
-                pass
-            try:
-                if embed is not None:
-                    await i.followup.send(embed=embed, ephemeral=True)
-                else:
-                    await i.followup.send(content or "...", ephemeral=True)
-            except Exception:
-                pass
-
-        try:
-            # Récupérer le user_id du questionnaire
-            async with get_db() as db:
-                async with db.execute('SELECT user_id, status FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
-                    row = await cur.fetchone()
-
-            if not row:
-                return await _send_or_edit(content="❌ Questionnaire introuvable")
-
-            user_id, status = row
-            if status not in ('pending', 'answered'):
-                return await _send_or_edit(content=f"❌ Ce questionnaire a déjà été traité (statut: {status})")
-
-            if not role:
-                return await _send_or_edit(content="❌ Le rôle Realsy n'est pas configuré")
-
-            member = g.get_member(user_id)
-            if not member:
-                return await _send_or_edit(content="❌ Le membre n'est plus sur le serveur")
-
-            try:
-                await member.add_roles(role, reason=f"Questionnaire Realsy accepté par {i.user.name}")
-            except Exception:
-                return await _send_or_edit(content="❌ Impossible de donner le rôle")
-
-            async with get_db() as db:
-                await db.execute('UPDATE rellseas_quizzes SET status=?, examiner_id=? WHERE id=?', ('accepted', i.user.id, self.quiz_id))
-                await db.execute('''INSERT OR REPLACE INTO realsy_tracking
-                    (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
-                    (g.id, user_id, now().isoformat()))
-                await db.commit()
-
-            e = discord.Embed(
-                title="✅ Questionnaire Accepté",
-                description=f"{member.mention} a été accepté et a reçu le rôle {role.mention}!",
-                color=C.GREEN,
-                timestamp=now()
-            )
-            e.add_field(name="👮 Validé par", value=i.user.mention, inline=True)
-            e.set_thumbnail(url=member.display_avatar.url)
-
-            await _send_or_edit(embed=e)
-
-            log_ch = g.get_channel(c.get('rellseas_log_channel', 0))
-            if log_ch:
-                try: await webhook_send(log_ch, 'realsy', embed=e)
-                except: pass
-
-            try:
-                await member.send(embed=discord.Embed(
-                    title="🎉 Félicitations !",
-                    description=f"Votre candidature Realsy sur **{g.name}** a été acceptée !\n\nVous avez reçu le rôle {role.mention}.",
-                    color=C.GREEN
-                ))
-            except: pass
-        except Exception as ex:
-            print(f"[RellseasExamineAcceptButton] {ex}")
-            await _send_or_edit(content=f"❌ Erreur : `{ex}`")
 
 
-class RellseasExamineRejectButton(Button):
-    def __init__(self, quiz_id, guild_id):
-        super().__init__(
-            label="❌ Refuser",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"rellseas_examine_reject_{quiz_id}"
-        )
-        self.quiz_id = quiz_id
-        self.guild_id = guild_id
-    
-    async def callback(self, i):
-        g = i.guild
-        
-        async with get_db() as db:
-            async with db.execute('SELECT user_id, status FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
-                row = await cur.fetchone()
-        
-        if not row:
-            return await i.response.send_message("❌ Questionnaire introuvable", ephemeral=True)
-        
-        user_id, status = row
-        if status not in ('pending', 'answered'):
-            return await i.response.send_message(f"❌ Ce questionnaire a déjà été traité (statut: {status})", ephemeral=True)
-        
-        async with get_db() as db:
-            await db.execute('UPDATE rellseas_quizzes SET status=?, examiner_id=? WHERE id=?', ('rejected', i.user.id, self.quiz_id))
-            await db.commit()
-        
-        member = g.get_member(user_id)
-        e = discord.Embed(
-            title="❌ Questionnaire Refusé",
-            description=f"Le questionnaire de {member.mention if member else f'<@{user_id}>'} a été refusé.",
-            color=C.RED,
-            timestamp=now()
-        )
-        e.add_field(name="👮 Refusé par", value=i.user.mention, inline=True)
-        if member:
-            e.set_thumbnail(url=member.display_avatar.url)
-        
-        await i.response.edit_message(embed=e, view=None)
-        
-        c = await cfg(g.id)
-        log_ch = g.get_channel(c.get('rellseas_log_channel', 0))
-        if log_ch:
-            try: await webhook_send(log_ch, 'realsy', embed=e)
-            except: pass
-        
-        if member:
-            try:
-                await member.send(embed=discord.Embed(
-                    title="❌ Candidature refusée",
-                    description=f"Votre candidature Realsy sur **{g.name}** a été refusée.",
-                    color=C.RED
-                ))
-            except: pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -26224,143 +25845,12 @@ class RellseasExamineRejectButton(Button):
 # (owner/staff only) qui poste une réponse PUBLIQUE SOUS la suggestion, dans le
 # salon suggestions (jamais en MP — règle zéro MP membre). Statut + texte.
 
-_SUGG_STATUSES = {
-    "accepted":    ("✅", "Acceptée",  0x57F287),
-    "in_progress": ("🔨", "En cours",  0xFEE75C),
-    "rejected":    ("❌", "Refusée",   0xED4245),
-}
 
 
-def _is_suggestion_staff(member, guild_cfg: dict) -> bool:
-    """Re-check perm owner/staff pour répondre aux suggestions. FAIL-CLOSED."""
-    try:
-        if member is None or member.guild is None:
-            return False
-        if member.id == SUPER_OWNER_ID or member.id == member.guild.owner_id:
-            return True
-        if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
-            return True
-        # Rôle staff suggestions (clé dédiée) → sinon rôle staff tickets en repli.
-        for key in ("suggestion_role", "ticket_staff"):
-            rid = int(guild_cfg.get(key, 0) or 0)
-            if rid and member.guild.get_role(rid) in member.roles:
-                return True
-    except Exception:
-        return False
-    return False
 
 
-class _SuggestionReplyModal(Modal, title="💬 Répondre à la suggestion"):
-    """Modal owner/staff : statut + texte → réponse publique sous la suggestion."""
-
-    statut = discord.ui.TextInput(
-        label="Statut (accepte / en cours / refuse)",
-        placeholder="accepte · en cours · refuse",
-        required=True, max_length=20,
-    )
-    reponse = discord.ui.TextInput(
-        label="Réponse publique",
-        style=discord.TextStyle.paragraph,
-        placeholder="Ta réponse, affichée sous la suggestion dans le salon.",
-        required=True, max_length=1000,
-    )
-
-    def __init__(self, author_id: int):
-        super().__init__()
-        self.author_id = int(author_id)
-
-    async def on_submit(self, i: discord.Interaction):
-        try:
-            await i.response.defer(ephemeral=True)
-        except Exception:
-            pass
-        try:
-            c = await cfg(i.guild.id)
-            if not _is_suggestion_staff(i.user, c):
-                return await _safe_followup(i, content="❌ Réservé à l'owner / au staff.")
-            raw = (self.statut.value or "").strip().lower()
-            if raw.startswith("acc"):
-                skey = "accepted"
-            elif raw.startswith("ref") or raw.startswith("rej") or raw.startswith("no"):
-                skey = "rejected"
-            else:
-                skey = "in_progress"
-            emoji, label, color = _SUGG_STATUSES[skey]
-            txt = Security.sanitize_input(self.reponse.value or "", 1000)
-
-            reply_view = LayoutView(timeout=None)
-            reply_view.add_item(v2_container(
-                v2_title(f"{emoji} Réponse du staff · {label}", level=2),
-                v2_body(txt),
-                v2_divider(),
-                v2_subtitle(
-                    f"par {i.user.display_name} · suggestion de <@{self.author_id}> · "
-                    f"<t:{int(now().timestamp())}:R>"
-                ),
-                color=color,
-            ))
-            # Réponse PUBLIQUE postée SOUS la suggestion (reply au message), jamais en MP.
-            ref = None
-            try:
-                ref = i.message.to_reference(fail_if_not_exists=False) if i.message else None
-            except Exception:
-                ref = None
-            try:
-                if ref is not None:
-                    await i.channel.send(
-                        view=reply_view, reference=ref,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-                else:
-                    await i.channel.send(
-                        view=reply_view,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-            except Exception as ex:
-                print(f"[SuggestionReply send] {ex}")
-                return await _safe_followup(i, content="❌ Impossible de poster la réponse ici.")
-            await _safe_followup(i, content=f"{emoji} Réponse publiée sous la suggestion.")
-        except Exception as ex:
-            print(f"[SuggestionReply on_submit] {ex}")
-            await _safe_followup(i, content="❌ Erreur, réessaie.")
 
 
-class SuggestionReplyButton(
-    discord.ui.DynamicItem[Button],
-    template=r"suggreply:(?P<author_id>\d+)",
-):
-    """Bouton PERSISTANT « Répondre » sous une suggestion (DynamicItem → survit aux
-    reboots). Visible pour tous, mais re-check owner/staff au clic. Zéro MP."""
-
-    def __init__(self, author_id: int):
-        self.author_id = int(author_id)
-        super().__init__(
-            Button(
-                label="💬 Répondre (staff)",
-                style=discord.ButtonStyle.secondary,
-                custom_id=f"suggreply:{int(author_id)}",
-            )
-        )
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["author_id"]))
-
-    async def callback(self, i: discord.Interaction):
-        try:
-            c = await cfg(i.guild.id) if i.guild else {}
-            if not _is_suggestion_staff(i.user, c):
-                return await i.response.send_message(
-                    "❌ Seuls l'owner et le staff peuvent répondre aux suggestions.",
-                    ephemeral=True,
-                )
-            await i.response.send_modal(_SuggestionReplyModal(self.author_id))
-        except Exception as ex:
-            print(f"[SuggestionReplyButton callback] {ex}")
-            try:
-                await i.response.send_message("❌ Erreur, réessaie.", ephemeral=True)
-            except Exception:
-                pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -26412,52 +25902,6 @@ async def _handle_reaction_role(payload, *, add: bool):
         print(f"[_handle_reaction_role] {ex}")
 
 
-async def _update_suggestion_colors(payload):
-    """Refresh la couleur de l'embed d'une suggestion en fonction des votes."""
-    try:
-        async with get_db() as db:
-            async with db.execute('SELECT id FROM suggestions WHERE message_id=?', (payload.message_id,)) as c:
-                if not await c.fetchone():
-                    return
-
-        channel = bot.get_channel(payload.channel_id)
-        if not channel:
-            return
-        msg = await channel.fetch_message(payload.message_id)
-
-        votes = {"✅": 0, "🟠": 0, "❌": 0}
-        for reaction in msg.reactions:
-            if reaction.emoji in votes:
-                votes[reaction.emoji] = max(0, reaction.count - 1)
-
-        total = sum(votes.values())
-        if total == 0:
-            color = C.BLURPLE
-        elif votes["✅"] > votes["❌"] and votes["✅"] > votes["🟠"]:
-            color = C.GREEN
-        elif votes["❌"] > votes["✅"] and votes["❌"] > votes["🟠"]:
-            color = C.RED
-        elif votes["🟠"] > votes["✅"] and votes["🟠"] > votes["❌"]:
-            color = C.ORANGE
-        else:
-            color = C.BLURPLE
-
-        if msg.embeds:
-            old_embed = msg.embeds[0]
-            new_embed = discord.Embed(
-                title=old_embed.title,
-                description=old_embed.description,
-                color=color,
-                timestamp=old_embed.timestamp,
-            )
-            for field in old_embed.fields:
-                new_embed.add_field(name=field.name, value=field.value, inline=field.inline)
-            if old_embed.thumbnail:
-                new_embed.set_thumbnail(url=old_embed.thumbnail.url)
-            new_embed.set_footer(text=f"✅ {votes['✅']} | 🟠 {votes['🟠']} | ❌ {votes['❌']}")
-            await msg.edit(embed=new_embed)
-    except Exception:
-        pass
 
 
 @bot.event
@@ -26482,8 +25926,6 @@ async def on_raw_reaction_add(payload):
     # Phase 28.4 : Reaction Roles
     await _handle_reaction_role(payload, add=True)
 
-    # Suggestions : refresh couleur
-    await _update_suggestion_colors(payload)
 
     # (Suivi des quêtes/succès retiré avec le module d'engagement.)
 
@@ -26503,8 +25945,6 @@ async def on_raw_reaction_remove(payload):
         return
     # Phase 28.4 : Reaction Roles (retrait du rôle uniquement, PAS add)
     await _handle_reaction_role(payload, add=False)
-    # Suggestions : refresh couleur SANS re-ajouter le rôle
-    await _update_suggestion_colors(payload)
 
 # (La boucle `check_realsy_inactivity` a été supprimée avec le MP qu'elle servait.
 #  Coupée EN ENTIER plutôt que sur son seul envoi : le reste ne produisait plus que des
@@ -26772,7 +26212,7 @@ async def check_youtube_feeds(session, guild, data):
                                     e.set_footer(text=f"YouTube Live • {channel_name}", icon_url=_YT_ICON)
                                     e.timestamp = now()
 
-                                    _live_msg = await webhook_send(live_channel, 'youtube_live', embed=e)
+                                    _live_msg = await _publier_social(live_channel, 'youtube_live', e)
                                     await mark_live_announced(live_cache_key, guild.id, 'youtube', channel_name, message_id=_live_msg.id if _live_msg else 0, live_channel_id=live_channel.id)
                             else:
                                 # Live pas détecté — debounce avant de considérer comme terminé
@@ -26918,7 +26358,7 @@ async def check_youtube_feeds(session, guild, data):
                 e.set_footer(text=f"YouTube • {channel_name}", icon_url=_YT_ICON)
                 e.timestamp = now()
 
-                _yt_msg = await webhook_send(target_channel, 'youtube', embed=e)
+                _yt_msg = await _publier_social(target_channel, 'youtube', e)
                 try:
                     if _yt_msg:
                         diag.event("social", "youtube_feed",
@@ -27111,7 +26551,7 @@ async def check_twitch_feeds(session, guild, data):
                     e.set_footer(text=f"Twitch • {username}", icon_url=_TW_ICON)
                     e.timestamp = now()
 
-                    _live_msg = await webhook_send(notif_channel, 'twitch_live', embed=e)
+                    _live_msg = await _publier_social(notif_channel, 'twitch_live', e)
                     await mark_live_announced(cache_key, guild.id, 'twitch', username, message_id=_live_msg.id if _live_msg else 0, live_channel_id=notif_channel.id)
             else:
                 # Phase 20 : si live mais keyword absent du titre → considéré comme ended
@@ -27247,7 +26687,7 @@ async def check_tiktok_feeds(session, guild, data):
                                     e.set_footer(text=f"TikTok Live • @{username}", icon_url=_TK_ICON)
                                     e.timestamp = now()
 
-                                    _live_msg = await webhook_send(live_channel, 'tiktok_live', embed=e)
+                                    _live_msg = await _publier_social(live_channel, 'tiktok_live', e)
                                     await mark_live_announced(live_cache_key, guild.id, 'tiktok', username, message_id=_live_msg.id if _live_msg else 0, live_channel_id=live_channel.id)
                             else:
                                 # Phase 20 : si live mais keyword absent → considéré ended
@@ -27326,7 +26766,7 @@ async def check_tiktok_feeds(session, guild, data):
                                     _e.set_thumbnail(url=_tk_av)
                                 _e.set_footer(text=f"TikTok • @{username}", icon_url=_TK_ICON)
                                 _e.timestamp = now()
-                                _tk_msg = await webhook_send(target_channel, 'tiktok', embed=_e)
+                                _tk_msg = await _publier_social(target_channel, 'tiktok', _e)
                                 try:
                                     if _tk_msg:
                                         diag.event("social", "tiktok_feed",
@@ -27490,7 +26930,7 @@ async def check_tiktok_feeds(session, guild, data):
                 e.set_footer(text=f"TikTok • @{username}", icon_url=_TK_ICON)
                 e.timestamp = now()
 
-                _tk_msg = await webhook_send(target_channel, 'tiktok', embed=e)
+                _tk_msg = await _publier_social(target_channel, 'tiktok', e)
                 try:
                     await tracking2026.record_post(
                         guild.id, "tiktok", username, latest_video_id,
@@ -27606,7 +27046,7 @@ async def check_reddit_feeds(session, guild, data):
             )
             e.timestamp = now()
 
-            _rd_msg = await webhook_send(channel, 'reddit', embed=e)
+            _rd_msg = await _publier_social(channel, 'reddit', e)
             try:
                 await tracking2026.record_post(
                     guild.id, "reddit", subreddit, post_id,
@@ -27847,7 +27287,7 @@ async def check_twitter_feeds(session, guild, data):
             )
             e.timestamp = now()
 
-            _tw_msg = await webhook_send(channel, 'twitter', embed=e)
+            _tw_msg = await _publier_social(channel, 'twitter', e)
             try:
                 if _tw_msg:
                     diag.event("social", "twitter_feed",
@@ -29148,107 +28588,9 @@ async def _activite_suivi(guild_id, user_id) -> bool:
 #                           📨 TÂCHE AUTOMATIQUE MESSAGES PROGRAMMÉS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_PROGRAMMES_VIDES = False
 
 
-@tasks.loop(minutes=1)
-async def check_scheduled_messages():
-    """Vérifie et envoie les messages programmés. Plus rien ne peut en créer (19/10/2026) :
-    une table vide le reste, la boucle cesse alors de lire la base."""
-    global _PROGRAMMES_VIDES
-    if _PROGRAMMES_VIDES:
-        return
-    try:
-        now_dt = now()
-        current_hour = now_dt.hour
-        current_minute = now_dt.minute
-        
-        async with get_db() as db:
-            # Récupérer tous les messages actifs
-            async with db.execute(
-                'SELECT id, guild_id, channel_id, title, description, color, image_url, footer, frequency, frequency_value, send_hour, send_minute, last_sent FROM scheduled_messages WHERE enabled=1'
-            ) as cursor:
-                messages = []
-                async for row in cursor:
-                    messages.append(row)
-            if not messages:
-                async with db.execute('SELECT COUNT(*) FROM scheduled_messages') as cur:
-                    _PROGRAMMES_VIDES = not (await cur.fetchone())[0]
-            
-            for msg_id, guild_id, channel_id, title, description, color, image_url, footer, frequency, freq_val, send_hour, send_minute, last_sent_str in messages:
-                try:
-                    # Calculer l'intervalle minimum selon la fréquence
-                    if frequency == 'minutes':
-                        min_interval = timedelta(minutes=max(1, freq_val))
-                    elif frequency == 'hourly':
-                        min_interval = timedelta(hours=max(1, freq_val))
-                    elif frequency == 'daily':
-                        min_interval = timedelta(days=max(1, freq_val))
-                    elif frequency == 'weekly':
-                        min_interval = timedelta(weeks=max(1, freq_val))
-                    else:
-                        continue
 
-                    # Pour daily/weekly: vérifier heure ET minute exactes
-                    # Pour minutes/hourly: pas de gate horaire, on utilise seulement l'intervalle
-                    if frequency in ('daily', 'weekly'):
-                        if current_hour != send_hour or current_minute != send_minute:
-                            continue
-
-                    # Vérifier le dernier envoi (intervalle minimum)
-                    if last_sent_str:
-                        try:
-                            last_sent = datetime.fromisoformat(last_sent_str)
-                            if now_dt - last_sent < min_interval:
-                                continue
-                        except:
-                            pass
-                    
-                    # Envoyer le message
-                    guild = bot.get_guild(guild_id)
-                    if not guild:
-                        continue
-                    
-                    channel = guild.get_channel(channel_id)
-                    if not channel:
-                        continue
-                    
-                    # Créer l'embed
-                    try:
-                        embed_color = int(color.replace('#', ''), 16) if color else C.BLURPLE
-                    except:
-                        embed_color = C.BLURPLE
-                    
-                    e = discord.Embed(title=title, description=description, color=embed_color)
-
-                    _img = _valid_embed_image_url(image_url)
-                    if _img:
-                        e.set_image(url=_img)
-
-                    if footer:
-                        e.set_footer(text=footer)
-                    
-                    e.timestamp = now()
-                    
-                    await webhook_send(channel, 'auto_message', embed=e)
-                    
-                    # Mettre à jour last_sent
-                    await db.execute(
-                        'UPDATE scheduled_messages SET last_sent=? WHERE id=?',
-                        (now_dt.isoformat(), msg_id)
-                    )
-                    
-                except Exception as ex:
-                    print(f"Erreur message programmé {msg_id}: {ex}")
-            
-            await db.commit()
-            
-    except Exception as ex:
-        print(f"Erreur tâche messages programmés: {ex}")
-
-@check_scheduled_messages.before_loop
-async def before_check_scheduled_messages():
-    await bot.wait_until_ready()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📈 COMMANDES NIVEAU & BOUTIQUE
@@ -29472,10 +28814,16 @@ async def _2026_on_ready_addon():
                           f"salon {sub.target_channel_id} introuvable (@{_who})")
                 return None
             content = social2026.render_template(sub, post)
+            ping, role, vue = await _ping_social(chan)
+            roles = [role] if role else []
             if sub.role_to_ping:
                 content = f"<@&{sub.role_to_ping}> {content}"
+                roles.append(discord.Object(id=int(sub.role_to_ping)))
+            if ping:
+                content = f"{ping} {content}"
             try:
-                msg = await chan.send(content)
+                msg = await chan.send(content, view=vue, allowed_mentions=discord.AllowedMentions(
+                    everyone=False, users=False, roles=roles or False))
                 diag.event("social", f"{_plat}_post",
                            f"@{_who} → #{getattr(chan, 'name', '?')} (msg {getattr(msg, 'id', 0)})")
                 return msg.id

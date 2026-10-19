@@ -145,6 +145,22 @@ async def _asset_handler(request):
         return web.Response(status=500, text="err")
 
 
+async def _visuel_handler(request):
+    """GET /v/<nom> → un bandeau ou une icône de `visuels/` (images publiques, cache long)."""
+    try:
+        import visuels
+        f = visuels.fichier(request.match_info.get('nom', ''))
+        if f is None:
+            return web.Response(status=404, text="404")
+        return web.FileResponse(f, headers={
+            "Cache-Control": "public, max-age=604800",
+            "X-Content-Type-Options": "nosniff",
+        })
+    except Exception as ex:
+        print(f"[health_server visuel] {ex}")
+        return web.Response(status=500, text="err")
+
+
 async def start(bot_instance, port: int = 8000) -> bool:
     """Démarre le serveur HTTP en background.
 
@@ -166,6 +182,7 @@ async def start(bot_instance, port: int = 8000) -> bool:
         app.router.add_get('/stats', _stats_handler)
         app.router.add_get('/t/{token}', _transcript_handler)       # Phase 281 : page transcript
         app.router.add_get('/ta/{token}/{idx}', _asset_handler)      # assets ré-hébergés
+        app.router.add_get('/v/{nom}', _visuel_handler)               # bandeaux et icônes
 
         runner = web.AppRunner(app)
         await runner.setup()

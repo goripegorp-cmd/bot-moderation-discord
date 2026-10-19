@@ -198,7 +198,7 @@ def test_C5_chaque_boucle_supervisee_existe_et_chaque_boucle_tourne():
 
 
 def test_C6_chaque_module_supervise_est_importe():
-    imports = set(re.findall(r"^import [a-z_0-9]+ as ([a-z_0-9]+)", SRC, re.M))
+    imports = set(re.findall(r"^import [a-z_0-9]+ as ([a-z_0-9]+)", SRC, re.M)) |         set(re.findall(r"^import ([a-z_0-9]+)\s*(?:#|$)", SRC, re.M))
     sup = next(n for n in ARBRE.body if isinstance(n, ast.Assign)
                and getattr(n.targets[0], "id", "") == "_SUPERVISED_MODULE_LOOPS")
     absents = [e.elts[0].value for e in sup.value.elts if e.elts[0].value not in imports]

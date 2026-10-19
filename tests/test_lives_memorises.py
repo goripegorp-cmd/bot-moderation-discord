@@ -22,7 +22,7 @@ def _source(nom):
 
 def test_L1_chaque_annonce_est_memorisee_et_chaque_absence_comptee():
     for plateforme in ("youtube", "twitch", "tiktok"):
-        m = re.search(rf"_live_msg = await webhook_send\(\w+, '{plateforme}_live', embed=e\)\n"
+        m = re.search(rf"_live_msg = await _publier_social\(\w+, '{plateforme}_live', e\)\n"
                       rf"\s+await mark_live_announced\(", SRC)
         assert m, f"{plateforme} : l'annonce n'est pas mémorisée"
         assert f"await check_live_ended(" in SRC[m.end():m.end() + 900], plateforme

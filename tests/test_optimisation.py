@@ -111,8 +111,8 @@ def test_O2_salon_de_ticket_une_lecture_par_salon_et_par_2_minutes():
 
 
 def test_O3_boucles_a_la_minute_muettes_quand_plus_rien_ne_peut_arriver():
-    for boucle, drapeau, table in (("check_scheduled_messages", "_PROGRAMMES_VIDES", "scheduled_messages"),
-                                   ("check_expired_roles", "_ACHATS_VIDES", "shop_purchases")):
+    assert "check_scheduled_messages" not in SRC, "messages programmés retirés le 19/10"
+    for boucle, drapeau, table in (("check_expired_roles", "_ACHATS_VIDES", "shop_purchases"),):
         db = Db(lambda sql: [(0,)] if "COUNT(*)" in sql else [])
         ns = {"get_db": _get_db(db), "tasks": Obj(loop=lambda **k: (lambda f: f)),
               "now": lambda: __import__("datetime").datetime(2026, 10, 19, 12),

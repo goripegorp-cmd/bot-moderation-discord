@@ -13,9 +13,8 @@ qui doit vérifier. Un panneau qui masque un bouton n'empêche personne de taper
 la commande — la permission est contrôlée dans `/rellseas` elle-même
 (`bot._rellseas_autorise`), et ce panneau n'en est que le réglage.
 
-Ce qui existait déjà et n'a pas été réécrit : la table `realsy_tracking`,
-`update_realsy_activity`, la table `rellseas_quizzes` et les deux vues de
-questionnaire, toutes intactes. Seuls manquaient la commande et son réglage.
+Ce qui existait déjà et n'a pas été réécrit : la table `realsy_tracking` et
+`update_realsy_activity` (le questionnaire est retiré le 19/10/2026).
 """
 from __future__ import annotations
 

@@ -29,13 +29,14 @@ import time
 # ─────────────────────────────────────────────────────────────────────────────
 DELETE_SUBJECT = {
     "sondages": ["auteur_id"],
+    "suggestions_v2": ["auteur_id"],
+    "suggestions_votes": ["user_id"],
     # bot.py — cœur joueur / modération-sujet / social
     "immune_users": ["user_id"],
     "account_freeze": ["user_id"],
     "security_logs": ["user_id"],
     "infractions": ["user_id"],
     "realsy_tracking": ["user_id"],
-    "suggestions": ["user_id"],
     "shop_purchases": ["user_id"],
     "user_toxicity_scores": ["user_id"],
     "user_fingerprints": ["user_id"],
@@ -76,7 +77,6 @@ GLOBAL_NO_GUILD = {
 DELETE_SUBJECT_KEEP_ACTOR = {
     "tickets": {"subject": ["user_id"], "actor": ["claimed_by"]},
     "mod_notes": {"subject": ["user_id"], "actor": ["mod_id"]},
-    "rellseas_quizzes": {"subject": ["user_id"], "actor": ["examiner_id"]},
     "restricted_members": {"subject": ["user_id"], "actor": ["restricted_by"]},
 }
 
