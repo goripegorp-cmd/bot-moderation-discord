@@ -83,6 +83,8 @@ _ACTIVITY_THROTTLE_SEC = 45                     # n'écrit last_activity au + qu
 _CLOSE_LINGER_SEC = 4                           # le message « fermé » reste visible avant delete
 
 _LABEL = {"group": "groupe", "trade": "trade"}
+#  19/10/2026 : un salon PORTEUR par type ; chaque zone y est un fil privé.
+_PARENT = {"group": "👥・groupes", "trade": "🤝・échanges"}
 _COLOR = {"group": 0x5865F2, "trade": 0x2ECC71}
 
 # ─── État mémoire (reconstruit au boot) ────────────────────────────────────────
@@ -399,9 +401,58 @@ def _member_overwrite() -> discord.PermissionOverwrite:
         attach_files=True, embed_links=True, add_reactions=True)
 
 
+async def _parent_zone(guild: discord.Guild, kind: str):
+    """Le salon qui porte les fils privés des zones de ce type — créé une fois. Lecture seule
+    pour tous ; le staff y a « Gérer les fils » (il voit toutes les zones, anti-triche)."""
+    import tickets_fils
+    if not tickets_fils.possible(guild):
+        return None
+    cat = await _get_category(guild, kind)
+    nom = _PARENT.get(kind, "zones")
+    ch = discord.utils.get(cat.text_channels if cat else guild.text_channels, name=nom)
+    if ch is not None:
+        return ch
+    ch = await guild.create_text_channel(
+        nom, category=cat, overwrites=tickets_fils.permissions_parent(guild, _staff_role(guild)),
+        reason="Zones sociales en fils privés")
+    try:
+        await ch.send(f"🔒 Chaque {_LABEL.get(kind, 'zone')} s'ouvre ici en **fil privé** : "
+                      f"seuls ses membres (et le staff) le voient.")
+    except discord.HTTPException as ex:
+        print(f"[social_zones parent] message d'accueil non posé : {ex}")
+    return ch
+
+
+async def _ouvrir_a(ch, member, reason: str):
+    if isinstance(ch, discord.Thread):
+        await ch.add_user(member)
+    else:
+        await ch.set_permissions(member, overwrite=_member_overwrite(), reason=reason)
+
+
 async def _create_zone_channel(guild: discord.Guild, kind: str,
                                members: list, slug_name: str):
-    """Crée le salon texte privé (membres + bot). Retourne le salon ou None."""
+    """Un fil privé dans le salon porteur du type (membres ajoutés) ; repli : le salon texte
+    privé d'avant, si le bot ne peut pas créer de fils."""
+    name = f"{_PREFIX.get(kind, 'zone')}-{slug_name}"[:95]
+    fil = None
+    try:
+        parent = await _parent_zone(guild, kind)
+        if parent is not None:
+            fil = await parent.create_thread(
+                name=name, type=discord.ChannelType.private_thread, invitable=False,
+                auto_archive_duration=1440, reason=f"Zone sociale ({_LABEL.get(kind, kind)})")
+            for m in members:
+                if m is not None:
+                    await fil.add_user(m)
+            return fil
+    except discord.HTTPException as ex:
+        print(f"[social_zones fil] {ex}")
+        if fil is not None:
+            try:
+                await fil.delete()
+            except discord.HTTPException as ex2:
+                print(f"[social_zones fil orphelin] {ex2}")
     cat = await _get_category(guild, kind)
     me = guild.me
     ow = {
@@ -419,7 +470,6 @@ async def _create_zone_channel(guild: discord.Guild, kind: str,
     if st is not None:
         ow[st] = discord.PermissionOverwrite(
             view_channel=True, read_message_history=True, send_messages=True)
-    name = f"{_PREFIX.get(kind, 'zone')}-{slug_name}"[:95]
     try:
         return await guild.create_text_channel(
             name=name, category=cat, overwrites=ow,
@@ -477,7 +527,7 @@ async def _delete_zone_channel(zone_id: int):
             for _cid in (ch_id, vc_id):   # salon texte + vocal dédié éventuel
                 if _cid <= 0:             # 0 = néant, -1 = réservation vocale (pas encore de salon)
                     continue
-                ch = g.get_channel(_cid)
+                ch = g.get_channel_or_thread(_cid)
                 if ch is not None:
                     try:
                         await ch.delete(reason="Zone sociale fermée")
@@ -640,6 +690,15 @@ async def _boot_reconcile_orphans():
                                 removed += 1
                             except Exception:
                                 pass
+                        for fil in list(getattr(ch, "threads", []) or []):
+                            if fil.id in active_ids or not any(
+                                    (fil.name or "").startswith(p + "-") for p in prefixes):
+                                continue
+                            try:
+                                await fil.delete()
+                                removed += 1
+                            except discord.HTTPException as ex:
+                                print(f"[social_zones fil orphelin {fil.id}] {ex}")
                 # Filet DÉFENSE-EN-PROFONDEUR (owner 2026-07-02) : un crash entre la création du
                 # salon et la persistance de channel_id, AVEC une catégorie indisponible, laisse un
                 # salon à la RACINE (sans catégorie) que la boucle par-catégorie ci-dessus ne voit
@@ -767,7 +826,7 @@ async def _farewell(zone_id: int):
         if not z or not z.get("channel_id"):
             return
         g = _bot.get_guild(int(z["guild_id"])) if _bot else None
-        ch = g.get_channel(int(z["channel_id"])) if g else None
+        ch = g.get_channel_or_thread(int(z["channel_id"])) if g else None
         if ch is not None:
             try:
                 await ch.send("💤 Zone fermée automatiquement (inactivité). À bientôt !")
@@ -1109,7 +1168,7 @@ async def _materialize_zone(zone_id: int, joiner) -> "tuple":
     if z["status"] == "active" and z["channel_id"] and _bot:
         # déjà matérialisée (course gagnée par un autre) → renvoie le salon existant
         g = _bot.get_guild(int(z["guild_id"]))
-        return (g.get_channel(int(z["channel_id"])) if g else None), None
+        return (g.get_channel_or_thread(int(z["channel_id"])) if g else None), None
     if z["status"] == "materializing":
         return None, "race"   # matérialisation en cours par un autre clic → réessaie
     if z["status"] != "pending":
@@ -1134,7 +1193,7 @@ async def _materialize_zone(zone_id: int, joiner) -> "tuple":
         # quelqu'un d'autre matérialise → renvoie le salon dès qu'il existe (best-effort)
         z2 = await _get_zone(zone_id)
         if z2 and z2["channel_id"] and guild:
-            return guild.get_channel(int(z2["channel_id"])), None
+            return guild.get_channel_or_thread(int(z2["channel_id"])), None
         return None, "race"
     members = [m for m in (creator, joiner) if m is not None]
     ch = await _create_zone_channel(guild, kind, members, (creator.display_name if creator else "zone"))
@@ -1279,7 +1338,7 @@ async def trade_consent_click(i: discord.Interaction, zone_id: int, accept: bool
             return await _safe_followup(i, content="⌛ Cette demande n'est plus disponible.")
         if z["status"] not in ("pending", "materializing"):
             if z["status"] == "active" and z["channel_id"]:
-                _c = i.guild.get_channel(int(z["channel_id"]))
+                _c = i.guild.get_channel_or_thread(int(z["channel_id"]))
                 if _c is not None:
                     return await _safe_followup(
                         i, content=f"✅ L'échange a déjà son salon : {_c.mention}")
@@ -1455,7 +1514,7 @@ async def _trade_guard(i, zone_id):
     if not await _is_member(zone_id, i.user.id):
         await _safe_followup(i, content="ℹ️ Seuls les **2 participants** de l'échange peuvent agir ici.")
         return None, None, None
-    ch = i.guild.get_channel(int(z["channel_id"]))
+    ch = i.guild.get_channel_or_thread(int(z["channel_id"]))
     member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
     return z, ch, member
 
@@ -1878,7 +1937,7 @@ async def join_zone(i: discord.Interaction, zone_id: int):
             return await _safe_followup(i, content=f"✅ Groupe créé — tu as rejoint : {ch2.mention}")
         if z["status"] != "active" or not z["channel_id"]:
             return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
-        ch = guild.get_channel(int(z["channel_id"]))
+        ch = guild.get_channel_or_thread(int(z["channel_id"]))
         if ch is None:
             # Salon disparu → ferme la ligne pour cohérence.
             await close_zone(zone_id, linger=False)
@@ -1912,8 +1971,7 @@ async def join_zone(i: discord.Interaction, zone_id: int):
             return await _safe_followup(i, content="🚪 Cette zone est **complète**.")
         # Slot gagné → accorde l'accès. Si l'octroi échoue, on REND le slot (anti-place fantôme).
         try:
-            await ch.set_permissions(member, overwrite=_member_overwrite(),
-                                     reason="Rejoint la zone sociale")
+            await _ouvrir_a(ch, member, "Rejoint la zone sociale")
             # Si un vocal de groupe existe déjà, ouvre-lui aussi l'accès (best-effort).
             _vc_id = await _zone_voice_id(zone_id)
             if _vc_id:
@@ -2128,7 +2186,7 @@ async def _do_add_member(i: discord.Interaction, zone_id: int, user):
             user if isinstance(user, discord.Member) else None)
         if member is None or getattr(member, "bot", False):
             return await _safe_followup(i, content="❌ Membre invalide (ou bot).")
-        ch = guild.get_channel(int(z["channel_id"]))
+        ch = guild.get_channel_or_thread(int(z["channel_id"]))
         if ch is None:
             await close_zone(zone_id, linger=False)
             return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
@@ -2154,8 +2212,7 @@ async def _do_add_member(i: discord.Interaction, zone_id: int, user):
             return await _safe_followup(i, content="👥 Le groupe est **complet**.")
         # Accorde l'accès texte (+ vocal si présent). Échec → rollback du slot (anti-fantôme).
         try:
-            await ch.set_permissions(member, overwrite=_member_overwrite(),
-                                     reason="Ajouté à la zone par le créateur/staff")
+            await _ouvrir_a(ch, member, "Ajouté à la zone par le créateur/staff")
             vc_id = await _zone_voice_id(zone_id)
             if vc_id:
                 vc = guild.get_channel(vc_id)
@@ -2270,7 +2327,7 @@ async def voice_apply(i: discord.Interaction, zone_id: int, name: str, limit: in
         guild = i.guild
         if guild is None:
             return await _safe_followup(i, content="❌ Serveur uniquement.")
-        ch = guild.get_channel(int(z["channel_id"]))
+        ch = guild.get_channel_or_thread(int(z["channel_id"]))
         vc_name = f"🔊 {name}"[:95] if name else None
         existing = await _zone_voice_id(zone_id)
         if existing == -1:
@@ -2518,7 +2575,7 @@ async def _do_expel(i: discord.Interaction, zone_id: int, user_id: int):
         # cache) → il n'a plus accès de toute façon ; on retire l'overwrite résiduel en best-effort
         # (API bas niveau) SANS bloquer l'expulsion (sinon un départ figerait la liste).
         member = guild.get_member(int(user_id))
-        ch = guild.get_channel(int(z["channel_id"])) if z["channel_id"] else None
+        ch = guild.get_channel_or_thread(int(z["channel_id"])) if z["channel_id"] else None
         vc_id = await _zone_voice_id(zone_id)
         vc = guild.get_channel(vc_id) if (vc_id and vc_id > 0) else None
 
@@ -2527,6 +2584,15 @@ async def _do_expel(i: discord.Interaction, zone_id: int, user_id: int):
             absent). Pour un membre PARTI, best-effort → toujours True (pas d'accès résiduel réel)."""
             if channel is None:
                 return True
+            if isinstance(channel, discord.Thread):
+                try:
+                    await channel.remove_user(discord.Object(id=int(user_id)))
+                    return True
+                except discord.NotFound:
+                    return True
+                except discord.HTTPException as ex:
+                    print(f"[social_zones expel fil {channel.id}] {ex}")
+                    return False
             if member is not None:
                 try:
                     await channel.set_permissions(member, overwrite=None, reason="Expulsé de la zone")
