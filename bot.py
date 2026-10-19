@@ -11170,19 +11170,118 @@ async def _actus_en_annonces(g) -> None:
 _FLUX_RESEAUX = ("youtube", "twitch", "tiktok", "twitter", "reddit")
 
 
+def _flux_du_studio(f) -> bool:
+    """Un flux du studio Rell (Rell Seas, Rell Games…) : son nom ou son identifiant le dit."""
+    if not isinstance(f, dict):
+        return True
+    noms = " ".join(str(f.get(k) or "") for k in ("name", "username", "subreddit", "id", "titre"))
+    return "rell" in config_salons.normaliser(noms).replace(" ", "")
+
+
+def _cle_de_suivi(reseau: str, f: dict) -> str:
+    """La clé sous laquelle `tracking2026` range les publications de ce flux."""
+    if reseau == "youtube":
+        return str(f.get("id") or "")
+    return str(f.get("username") or f.get("subreddit") or f.get("name") or f.get("id") or "")
+
+
+async def _titre_youtube(uc: str):
+    """Le nom public d'une chaîne YouTube, lu dans son flux RSS — None si illisible."""
+    from html import unescape
+    if not re.fullmatch(r"UC[\w-]{20,}", uc or ""):
+        return None
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+            async with s.get(f"https://www.youtube.com/feeds/videos.xml?channel_id={uc}") as r:
+                if r.status != 200:
+                    return None
+                m = re.search(r"<title>([^<]+)</title>", await r.text())
+                return unescape(m.group(1)).strip() if m else None
+    except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
+        print(f"[FLUX:DETAIL] titre {uc} : {type(ex).__name__}")
+        return None
+
+
+#  La rattache automatique du 19/10 (13 h 33 UTC) a relié un flux sans salon au salon des
+#  sneaks : ce qui a été publié depuis par un flux retiré l'a été à tort.
+_RATTACHE_FAUTIVE = datetime(2026, 10, 19, 13, 30, tzinfo=timezone.utc)
+
+
+async def _flux_studio_rell(g) -> list:
+    """19/10/2026 : « enlève dans la chaîne YouTube tous les autres, tout ce qui ne correspond
+    pas au studio de Rell ». Une fois par serveur : YouTube ne garde que les chaînes du studio,
+    et le salon des sneaks que des comptes du studio ; les publications faites à tort sont
+    effacées. Rend la liste des flux retirés."""
+    c = await cfg(g.id)
+    if c.get('flux_rell_v1'):
+        return []
+    tous = {p: [f for f in (c.get(f'ads_{p}_feeds') or [])] for p in _FLUX_RESEAUX}
+    for f in tous['youtube']:
+        if isinstance(f, dict) and not _flux_du_studio(f):
+            titre = await _titre_youtube(str(f.get('id') or ''))
+            if titre:
+                f['titre'] = titre
+            elif not str(f.get('name') or '').strip():
+                f['titre'] = 'rell ?'          # illisible et sans nom : dans le doute, on garde
+    salons_rell = {int(f.get('channel_id', 0) or 0) for p in _FLUX_RESEAUX for f in tous[p]
+                   if isinstance(f, dict) and _flux_du_studio(f)} - {0}
+    retires = []
+    for p, flux in tous.items():
+        garde = []
+        for f in flux:
+            hors_studio = isinstance(f, dict) and not _flux_du_studio(f)
+            if hors_studio and (p == 'youtube' or int(f.get('channel_id', 0) or 0) in salons_rell):
+                retires.append((p, f))
+            else:
+                if isinstance(f, dict):
+                    f.pop('titre', None)
+                garde.append(f)
+        if len(garde) != len(flux):
+            await db_set(g.id, f'ads_{p}_feeds', garde)
+    effaces = 0
+    for p, f in retires:
+        cle = _cle_de_suivi(p, f)
+        for tp in await tracking2026.list_announcements(g.id, p, username=cle) if cle else []:
+            mid = int(tp.discord_message_id or 0)
+            salon = g.get_channel(int(tp.discord_channel_id or 0))
+            if not mid or salon is None or discord.utils.snowflake_time(mid) < _RATTACHE_FAUTIVE:
+                continue
+            try:
+                await salon.get_partial_message(mid).delete()
+                effaces += 1
+            except discord.NotFound:
+                pass
+            except discord.HTTPException as ex:
+                _logerr("flux.rell_effacer", ex, guild_id=g.id)
+                continue
+            await tracking2026.mark_deleted(g.id, p, cle, tp.post_id)
+    await db_set(g.id, 'flux_rell_v1', now().isoformat())
+    if retires:
+        noms = ", ".join(f"{str(f.get('name') or f.get('username') or _cle_de_suivi(p, f))} ({p})"
+                         for p, f in retires)
+        print(f"[FLUX] studio Rell seul : retirés {noms} · {effaces} publication(s) effacée(s)")
+        logs = g.get_channel(int(await ulogger2026.get_log_channel(g.id) or 0))
+        if logs is not None:
+            v = LayoutView(timeout=None)
+            v.add_item(discord.ui.Container(
+                discord.ui.TextDisplay("### Réseaux · studio Rell uniquement\n"
+                                       f"Retirés : {noms}\n-# {effaces} publication(s) effacée(s) du salon des sneaks"),
+                accent_color=Palette.INFO))
+            await logs.send(view=v, allowed_mentions=discord.AllowedMentions.none())
+    return retires
+
+
 async def _rattacher_flux_orphelins(g) -> int:
-    """Un flux de réseau sans salon ne publie rien : il prend le salon où publient les autres."""
+    """Un flux du studio Rell sans salon prend le salon des autres flux du studio. Un flux hors
+    studio n'est jamais rattaché : c'est ce qui avait mis @miranzaugc dans les sneaks."""
     from collections import Counter
     c = await cfg(g.id)
     vus = Counter()
     for p in _FLUX_RESEAUX:
         for f in (c.get(f'ads_{p}_feeds') or []):
             cid = int((f.get('channel_id', 0) if isinstance(f, dict) else 0) or 0)
-            if g.get_channel(cid) is not None:
+            if g.get_channel(cid) is not None and _flux_du_studio(f):
                 vus[cid] += 1
-        defaut = int(c.get(f'ads_{p}_channel', 0) or 0)
-        if g.get_channel(defaut) is not None:
-            vus[defaut] += 1
     if not vus:
         return 0
     cible = vus.most_common(1)[0][0]
@@ -11193,8 +11292,8 @@ async def _rattacher_flux_orphelins(g) -> int:
         live = g.get_channel(int(c.get(f'ads_{p}_live_channel', 0) or 0))
         change = False
         for f in flux:
-            if isinstance(f, dict) and g.get_channel(int(f.get('channel_id', 0) or 0)) is None \
-                    and defaut is None and live is None:
+            if isinstance(f, dict) and _flux_du_studio(f) and defaut is None and live is None \
+                    and g.get_channel(int(f.get('channel_id', 0) or 0)) is None:
                 f['channel_id'] = cible
                 change, rattaches = True, rattaches + 1
         if change:
@@ -11393,6 +11492,7 @@ async def _travaux_de_demarrage():
                 await sondages.installer(g)
                 await suggestions.installer(g)
                 await _actus_en_annonces(g)
+                await _flux_studio_rell(g)
                 await _rattacher_flux_orphelins(g)
                 await _configurer_salons(g)
                 _c = await cfg(g.id)
