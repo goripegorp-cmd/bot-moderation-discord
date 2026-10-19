@@ -79,8 +79,24 @@ async def supprimer_vieux_fils(salon, jours: int = RETENTION_JOURS) -> int:
     return n
 
 
-def _du_bot(m, bot_id: int) -> bool:
-    return m.author.id == bot_id or m.webhook_id is not None
+def _du_bot(m, bot_id: int, webhooks_du_bot=frozenset()) -> bool:
+    """Le bot lui-même, ou un de SES webhooks. 19/10/2026 (audit) : n'importe quel webhook comptait,
+    et les messages d'autres services (salons suivis, Discohook) partaient avec la purge."""
+    return m.author.id == bot_id or (m.webhook_id is not None and m.webhook_id in webhooks_du_bot)
+
+
+async def webhooks_du_bot(salon, bot_id: int) -> frozenset:
+    """Les webhooks créés par le bot dans ce salon (celui du fil, pour un fil)."""
+    cible = salon.parent if isinstance(salon, discord.Thread) else salon
+    lire = getattr(cible, "webhooks", None)
+    if lire is None:
+        return frozenset()
+    try:
+        return frozenset(wh.id for wh in await lire() if getattr(wh.user, "id", 0) == bot_id)
+    except discord.HTTPException as ex:
+        print("[nettoyage] webhooks illisibles : seuls les messages du bot lui-même partent")
+        print(f"[nettoyage:DETAIL] salon={salon.id} {ex}")
+        return frozenset()
 
 
 async def purger_salon(salon, bot_id: int, jours: int = RETENTION_JOURS,
@@ -88,15 +104,23 @@ async def purger_salon(salon, bot_id: int, jours: int = RETENTION_JOURS,
     """Les messages du bot (et de ses webhooks) de plus de `jours`, du plus ancien au plus
     récent, `maximum` par passage. Les messages des membres ne sont jamais touchés, les messages
     épinglés non plus (le menu du salon des logs)."""
+    ids = await webhooks_du_bot(salon, bot_id)
     n = 0
     async for m in salon.history(limit=maximum * 5, before=_limite(jours), oldest_first=True):
-        if not _du_bot(m, bot_id) or getattr(m, "pinned", False):
+        if not _du_bot(m, bot_id, ids) or getattr(m, "pinned", False):
             continue
         try:
             await m.delete()
             n += 1
         except discord.NotFound:
             pass
+        except discord.Forbidden:
+            # Sans le droit de gérer les messages : on s'arrête là pour ce salon, sans casser la passe.
+            print("[nettoyage] suppression refusée : droit « Gérer les messages » manquant")
+            print(f"[nettoyage:DETAIL] salon={salon.id}")
+            break
+        except discord.HTTPException as ex:
+            print(f"[nettoyage] message {m.id} non supprimé : {ex}")
         if n >= maximum:
             break
         await asyncio.sleep(1.2)

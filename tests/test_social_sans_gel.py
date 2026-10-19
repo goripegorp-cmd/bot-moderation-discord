@@ -149,6 +149,8 @@ def test_W5_une_suppression_se_note_tout_de_suite(ecritures, tmp_path):
     """Une annonce supprimée de Discord est notée sans attendre la fin du tour :
     un redémarrage au milieu ne doit pas la faire supprimer deux fois."""
     m = _gestionnaire(actifs={"p1", "p2", "p3", "p4"})
+    asyncio.run(m.cleanup_all())  # 19/10/2026 : un premier constat d'absence ne supprime rien
+    ecritures.clear()
     assert asyncio.run(m.cleanup_all()) == {1: 1}
     assert ecritures == ["1_anns.json", "1_anns.json"]
     sauve = json.loads((tmp_path / "1_anns.json").read_text(encoding="utf-8"))

@@ -33,6 +33,8 @@ _chaines = None
 _annoncer = None
 _log = print
 _abonnes: dict = {}
+_attentes: dict = {}  # (chaîne, mode) -> heure de NOTRE demande : le hub ne confirme que celles-là
+ATTENTE = 600
 _taches: set = set()
 _stats = {"notifications": 0, "rejetees": 0, "annonces": 0, "dernier": 0}
 
@@ -64,6 +66,7 @@ def uc_du_sujet(topic: str) -> str:
 
 
 async def abonner(session, uc: str, mode: str = "subscribe") -> bool:
+    _attentes[(uc, mode)] = time.time()
     donnees = {"hub.callback": rappel(), "hub.topic": sujet(uc), "hub.verify": "async", "hub.mode": mode,
                "hub.lease_seconds": str(BAIL), "hub.secret": _secret.decode()}
     try:
@@ -123,11 +126,17 @@ async def verification(request):
     uc = uc_du_sujet(q.get("hub.topic", ""))
     if not defi or not uc or len(defi) > 512 or not actif():
         return web.Response(status=400, text="")
+    # Seulement ce que le bot a demandé lui-même il y a moins de ATTENTE secondes : sinon n'importe
+    # qui réabonnait notre adresse avec son propre secret, et les vraies notifications étaient rejetées.
+    if time.time() - _attentes.get((uc, mode), 0) > ATTENTE:
+        return web.Response(status=404, text="")
     suivies = set(await _chaines())
     if (mode == "subscribe" and uc in suivies) or (mode == "unsubscribe" and uc not in suivies):
+        _attentes.pop((uc, mode), None)
         if mode == "subscribe":
             bail = q.get("hub.lease_seconds", "")
-            _abonnes[uc] = time.time() + (int(bail) if bail.isdigit() else BAIL)
+            # Plafonnée : une durée gonflée empêchait tout renouvellement.
+            _abonnes[uc] = time.time() + min(int(bail) if bail.isdigit() else BAIL, BAIL)
         return web.Response(text=defi, content_type="text/plain")
     return web.Response(status=404, text="")
 

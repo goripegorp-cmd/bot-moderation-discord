@@ -13,6 +13,7 @@ REPRISE secondes.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 
 REPRISE = 600
@@ -63,11 +64,21 @@ async def reserver(guild_id: int, plateforme: str, post_id: str, chemin: str = "
 
 
 async def confirmer(guild_id: int, plateforme: str, post_id: str, message_id: int, salon_id: int) -> None:
-    async with _get_db() as db:
-        await db.execute("UPDATE publications SET message_id=?, salon_id=? WHERE guild_id=? AND plateforme=? AND post_id=?",
-                         (int(message_id or 0), int(salon_id or 0) or -1, int(guild_id), str(plateforme),
-                          identifiant(plateforme, post_id)))
-        await db.commit()
+    """Le message est parti. Réessayé : une confirmation perdue rendait la place au bout de REPRISE
+    secondes, et le post repartait une deuxième fois."""
+    for essai in range(3):
+        try:
+            async with _get_db() as db:
+                await db.execute("UPDATE publications SET message_id=?, salon_id=? WHERE guild_id=? AND plateforme=?"
+                                 " AND post_id=?", (int(message_id or 0), int(salon_id or 0) or -1, int(guild_id),
+                                                    str(plateforme), identifiant(plateforme, post_id)))
+                await db.commit()
+            return
+        except Exception as ex:
+            if essai == 2:
+                raise
+            _log(f"[PUBLICATIONS] confirmation réessayée : {type(ex).__name__}")
+            await asyncio.sleep(1 + essai)
 
 
 async def annuler(guild_id: int, plateforme: str, post_id: str) -> None:
@@ -80,7 +91,10 @@ async def annuler(guild_id: int, plateforme: str, post_id: str) -> None:
 
 
 async def deja(guild_id: int, plateforme: str, post_id: str) -> bool:
+    """Publié pour de bon. Une réservation jamais confirmée (instance arrêtée au milieu de l'envoi)
+    ne compte pas : sinon ce post n'était plus jamais publié."""
     async with _get_db() as db:
-        async with db.execute("SELECT 1 FROM publications WHERE guild_id=? AND plateforme=? AND post_id=?",
+        async with db.execute("SELECT 1 FROM publications WHERE guild_id=? AND plateforme=? AND post_id=?"
+                              " AND (message_id != 0 OR salon_id != 0)",
                               (int(guild_id), str(plateforme), identifiant(plateforme, post_id))) as cur:
             return await cur.fetchone() is not None

@@ -68,7 +68,8 @@ def test_N2_le_bouton_donne_puis_reprend_le_role():
 
 
 def test_N3_chaque_publication_des_reseaux_previent_son_role_avec_le_bouton():
-    assert SRC.count("await _publier_social(") == 8
+    # 19/10/2026 : toutes passent par la réservation (une publication = un seul message)
+    assert SRC.count("await _publier_social(") == 2 and SRC.count("await _publier_reserve(") == 7
     assert "webhook_send(target_channel, 'youtube', embed=e)" not in SRC
     assert "ping, role, vue = await _ping_social(chan)" in SRC
 

@@ -63,7 +63,8 @@ def track_xchannel(gid, uid, chan_id, content) -> bool:
     """True si le MÊME contenu apparaît dans ≥ XCHAN_CHANNELS salons distincts en XCHAN_WINDOW."""
     try:
         body = (content or '').strip().lower()
-        if len(body) < 3:
+        #  19/10/2026 : « salut », « gg », « mdr » dans trois salons, ce n'est pas du spam.
+        if len(body) < 12 and 'http' not in body:
             return False
         h = hash(body[:200])
         n = _now()

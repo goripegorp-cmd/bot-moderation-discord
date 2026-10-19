@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import hmac
 import json
+import time
 from pathlib import Path
 
 import aiosqlite
@@ -118,6 +119,10 @@ def test_P3_notification_instantanee_signee(tmp_path):
 
     async def scenario():
         r = {}
+        r["pas_demandee"] = await W.verification(Requete(query={"hub.mode": "subscribe", "hub.topic": W.sujet(UC),
+                                                                 "hub.challenge": "pirate"}))
+        W._attentes[(UC, "subscribe")] = time.time()  # comme si `abonner` venait de partir
+        W._attentes[("UC" + "b" * 22, "subscribe")] = time.time()
         r["verif_ok"] = await W.verification(Requete(query={"hub.mode": "subscribe", "hub.topic": W.sujet(UC),
                                                              "hub.challenge": "abc123", "hub.lease_seconds": "432000"}))
         r["verif_inconnue"] = await W.verification(Requete(query={"hub.mode": "subscribe", "hub.topic": W.sujet("UC" + "b" * 22),
@@ -130,7 +135,9 @@ def test_P3_notification_instantanee_signee(tmp_path):
         await asyncio.sleep(0.05)
         return r
     r = asyncio.run(scenario())
+    assert r["pas_demandee"].status == 404, "un abonnement que le bot n'a pas demandé : refusé"
     assert r["verif_ok"].status == 200 and r["verif_ok"].text == "abc123", "le hub vérifie l'abonnement"
+    assert W._abonnes[UC] - time.time() <= W.BAIL, "durée plafonnée"
     assert r["verif_inconnue"].status == 404, "une chaîne qu'on ne suit pas : refusée"
     assert r["sans_signature"].status == 202 and r["fausse"].status == 202
     assert r["vieille"].status == 204 and r["autre"].status == 204 and r["bonne"].status == 204

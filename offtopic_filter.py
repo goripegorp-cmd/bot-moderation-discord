@@ -96,4 +96,6 @@ def scan(raw: str, normalized: str | None = None):
             continue
     return None
 
-
+#  ⚠️ Charge le lexique à l'import. Sans cet appel le filtre ne voit RIEN (retiré par erreur
+#  le 19/10/2026 comme « code mort » : le filtre est resté muet en production).
+_load()

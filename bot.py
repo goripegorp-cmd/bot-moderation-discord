@@ -121,7 +121,6 @@ import offtopic_filter as offtopic_filter  # politique/religion/militantisme (an
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
 import ocr_scan as ocr_scan  # OCR anti-scam image — sans effet si tesseract absent
-import grooming_detector as grooming_detector  # protection des mineurs : approche prédatrice
 import nsfw_scan as nsfw_scan  # protection des mineurs : images sexuelles (IA, garde RAM)
 import i18n as i18n_module  # préférence de langue par membre + sélecteur (zéro slash)
 import random
@@ -319,10 +318,28 @@ spam_tracker = {}
 # que personne n'intercale », même lentement.
 _monologue_tracker: dict = {}
 _MONOLOGUE_THRESHOLD = 10  # ≥ 10 messages d'affilée sans interruption → on freine
+_MONOLOGUE_PAUSE = 180     # 3 min sans écrire : la série repart de zéro
+
+
+def _compter_serie(msg) -> int:
+    """Messages d'affilée du même auteur dans ce salon. 19/10/2026 : N'IMPORTE QUEL autre message
+    (staff, bot, ticket, message retiré) coupe la série — avant, les réponses du staff ne la
+    coupaient pas, et quelqu'un qui discutait avec un modérateur passait pour un monologue."""
+    t = time.time()
+    st = _monologue_tracker.get(msg.channel.id)
+    if st and st[0] == msg.author.id and t - st[2] < _MONOLOGUE_PAUSE:
+        st[1] += 1
+        st[2] = t
+        return st[1]
+    _monologue_tracker[msg.channel.id] = [msg.author.id, 1, t]
+    if len(_monologue_tracker) > 3000:
+        for k in list(_monologue_tracker)[:600]:
+            _monologue_tracker.pop(k, None)
+    return 1
 # Anti-rafale d'IMAGES/FICHIERS (owner 2026-06-21, #4) : {(guild,user): [ts...]} — nb de
 # pièces jointes sur une fenêtre glissante. Au-delà du seuil → on freine (anti-flood média).
 _attach_flood: dict = {}
-_IMG_FLOOD_MAX = 8        # pièces jointes max…
+_IMG_FLOOD_MAX = 5        # messages avec fichiers max (une galerie de 10 captures = 1 message)…
 _IMG_FLOOD_WINDOW = 12.0  # …par fenêtre de 12 s
 # Ciblage d'une insulte (owner 2026-06-21) : tournures à la 2e personne / désignation directe.
 # Sert à GRADUER — une insulte qui VISE quelqu'un est plus grave qu'un juron en l'air. Combiné
@@ -369,6 +386,24 @@ _GAMING_CTX_RE = re.compile(
     # audit 2026-07-02 : noms d'objets de jeu fréquents dans le banter (« connasse de quête »…)
     r"qu[êe]te|qu[êe]tes|quest|mob|mobs|drop|skin|skins|pnj|npc|hitbox|combo|donj)\b",
     re.IGNORECASE | re.UNICODE)
+_MENTION_ECRITE_RE = re.compile(r'<@!?\d+>')
+#  « il m'a dit… », « on m'a traité de… », « he told me… » : il RAPPORTE ce qu'on lui a dit.
+_DISCOURS_RAPPORTE_RE = re.compile(
+    r"\b(?:il|elle|ils|elles|on|quelqu'?un|un\s+mec|une\s+fille)\s+(?:m|t|nous|vous|l|lui)?'?\s*"
+    r"(?:a|ont|avait)\s+(?:dit|trait[ée]|[ée]crit|insult[ée]|envoy[ée])\b"
+    r"|\bm'?\s*a\s+trait[ée]\b|\b(?:he|she|they|someone)\s+(?:told|called|said|wrote)\b",
+    re.IGNORECASE | re.UNICODE)
+
+
+def _insulte_visee(msg, parle) -> bool:
+    """Une insulte vise quelqu'un : « t'es / tu / toi… », une mention écrite, ou une réponse réduite à
+    l'insulte. 19/10/2026 : répondre « c'est bâtard ce jeu » à quelqu'un ne vise personne (le ping
+    automatique d'une réponse ne compte plus)."""
+    parle = parle or ''
+    return bool(_INSULT_TARGET_RE.search(parle) or _MENTION_ECRITE_RE.search(getattr(msg, 'content', '') or '')
+                or (getattr(msg, 'reference', None) is not None and len(parle.split()) <= 2))
+
+
 voice_join_tracker = {}  # {(guild_id, user_id): datetime} - pour tracker le temps en vocal
 
 # ─── Strikes progressifs anti-spam de mentions / spam de messages (rétention #1) ───
@@ -1485,6 +1520,7 @@ async def _d4_migrate_blob_to_tables():
 
 # ═══════════════ CACHE AVATARS RÉSEAUX SOCIAUX ═══════════════
 _avatar_cache = {}  # {(platform, username): avatar_url}
+_avatar_echecs = {}  # {(platform, username): heure de l'échec} — on ne redemande pas avant 24 h
 # Borne anti-OOM (owner 2026-06-18) : les avatars sont de petites strings, mais le cache
 # grossissait SANS LIMITE (1 entrée par (plateforme, pseudo) jamais purgée) → fuite mémoire
 # lente sur un runtime long (Railway redéploie souvent, mais pas toujours). Éviction FIFO
@@ -1552,14 +1588,17 @@ async def fetch_avatar_url(platform: str, username: str, session) -> str:
     cached = await get_cached_avatar(platform, username)
     if cached:
         return cached
+    if time.time() - _avatar_echecs.get((platform, username), 0) < 86400:
+        return None
 
     avatar_url = None
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         if platform == 'youtube':
-            # YouTube: extraire avatar depuis la page channel
+            # YouTube: extraire avatar depuis la page channel (avec le consentement, sinon la page
+            # de consentement européenne revient à la place)
             url = f"https://www.youtube.com/channel/{username}"
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with session.get(url, headers=_YT_RESOLVE_CONSENT, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status == 200:
                     html = await resp.text()
                     import re
@@ -1596,23 +1635,7 @@ async def fetch_avatar_url(platform: str, username: str, session) -> str:
                         avatar_url = data['data'][0].get('imageUrl')
 
         elif platform == 'twitter':
-            # Twitter: essayer via xcancel/Nitter pour og:image
-            for inst in NITTER_INSTANCES:
-                try:
-                    url = f"https://{inst}/{username}"
-                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                        if resp.status == 200:
-                            html = await resp.text()
-                            m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', html)
-                            if not m:
-                                m = re.search(r'<img[^>]+class="[^"]*profile[^"]*"[^>]+src="([^"]+)"', html, re.IGNORECASE)
-                            if m:
-                                avatar_url = m.group(1)
-                                if inst in avatar_url:
-                                    avatar_url = avatar_url.replace(f"https://{inst}", "https://pbs.twimg.com")
-                                break
-                except:
-                    continue
+            pass  # l'avatar vient du flux RSSHub (image du canal) ; plus de miroirs Nitter
 
         elif platform == 'reddit':
             url = f"https://www.reddit.com/r/{username}/about.json"
@@ -1640,6 +1663,10 @@ async def fetch_avatar_url(platform: str, username: str, session) -> str:
 
     if avatar_url:
         await save_avatar_cache(platform, username, avatar_url)
+    else:
+        _avatar_echecs[(platform, username)] = time.time()
+        if len(_avatar_echecs) > 2000:
+            _avatar_echecs.clear()
     return avatar_url
 
 async def db_get(gid):
@@ -1783,8 +1810,9 @@ async def cfg(gid):
         #  protège personne le jour où elle aurait servi.
         'anti_grooming': 1,
         #  Palier FORT (sollicitation sexuelle, site adulte, rencontre tarifée,
-        #  consigne de silence) : aucun usage innocent → on coupe tout de suite.
-        'grooming_action': 'mute',
+        #  consigne de silence) : retiré et alerte, sans sanction automatique
+        #  (19/10/2026 : le bot ne connaît pas l'âge des gens) ; 'mute' coupe aussitôt.
+        'grooming_action': 'alerte',
         'grooming_mute_duration': 1440,   # 24 h — le temps que le staff lise
         #  Palier COMBINÉ : on supprime et on alerte, mais on NE SANCTIONNE PAS.
         #  Accuser à tort quelqu'un d'approche prédatrice est une accusation
@@ -1792,8 +1820,7 @@ async def cfg(gid):
         #  humain qui doit trancher.
         'grooming_action_combine': 'alerte',
         'anti_scam_image': 1,  # owner 2026-06-18 : motif « scam en image » (comptes piratés) — ON par défaut
-        'anti_scam_ocr': 1,  # owner 2026-06-27 : OCR du texte DANS l'image (faux gains MrBeast/crypto) → BAN — ON
-        'grooming_patrol': 1,  # owner 2026-06-27 : protection mineurs — détection d'approche prédatrice (grooming) — ON
+        'anti_scam_ocr': 1,  # OCR du texte DANS l'image (faux gains MrBeast/crypto) → retrait + alerte — ON
         'anti_doxxing': 1,  # owner 2026-06-27 : protection mineurs — retire les coordonnées perso (tél/adresse/email) en public — ON
         'anti_nsfw_image': 1,  # owner 2026-06-27 : protection mineurs — détection d'images sexuelles par IA (nudenet) — ON (auto-OFF si RAM insuffisante)
         'age_gate_min_days': 0,  # owner 2026-06-27 : compte Discord plus récent que N jours → accès REFUSÉ aux salons NSFW (0 = OFF ; intrusif, opt-in)
@@ -1823,8 +1850,8 @@ async def cfg(gid):
         'auto_escalate_warns': 1,  # owner 2026-06-21 : sanction auto graduée par nb de warns (3→10min·4→1h·5→7j·6+→perm)
         # owner 2026-06-26 : RAFALE d'infractions automatiques rapprochées = bot / compte piraté /
         # raid → BAN direct (exception explicite à la règle founder-only, comme le kick comptes jeunes).
-        'burst_autoban': 1,          # ON : ≥ burst_autoban_count infractions auto en burst_autoban_window s → ban
-        'burst_autoban_count': 4,    # nb d'infractions rapprochées qui déclenche le ban (owner : « 4-5 en 10 s »)
+        'burst_autoban': 1,          # ON : ≥ burst_autoban_count infractions auto en burst_autoban_window s → exclusion 1 h
+        'burst_autoban_count': 4,    # nb d'infractions rapprochées qui déclenche l'exclusion (owner : « 4-5 en 10 s »)
         'burst_autoban_window': 12,  # fenêtre (s) pour compter les infractions rapprochées
         'anti_rogue_bot': 1,  # owner 2026-06-21 : bot tiers non approuvé + perms dangereuses → expulsé + alerte
         'approved_bots': [],  # IDs de bots explicitement autorisés (sinon expulsés s'ils ont des perms à risque)
@@ -2210,6 +2237,16 @@ async def is_fully_immune(member):
         pass
     if member.id == member.guild.owner_id or member.guild_permissions.administrator:
         return True
+    #  19/10/2026 : la tête (fondateur, direction) et le staff et au-dessus ne sont jamais sanctionnés
+    #  par un automatisme ; la tête les sanctionne elle-même, depuis le site.
+    if member.id in TETE_IDS:
+        return True
+    try:
+        if _staff_ou_plus(member.guild, member, await cfg(member.guild.id)):
+            return True
+    except Exception as ex:
+        _logerr("immunite.staff", ex, guild_id=member.guild.id)
+        return True
 
     # ⚠️ CORRECTIF MAJEUR (owner 2026-07-12) — LE CLONE OUBLIÉ.
     # Le cache d'immunité avait été branché sur `is_immune` et `is_channel_immune`… mais PAS ici.
@@ -2414,7 +2451,7 @@ async def _radier_membre(guild, membre, auteur, raison: str) -> dict:
     #  de rendre des rôles qu'on n'a jamais pris.
     removable = [r for r in membre.roles
                  if not r.is_default() and not r.managed and me.top_role > r]
-    saved_ids = [r.id for r in removable]
+    saved_ids = [r.id for r in removable if r.name != _RADIE_ROLE_NAME]
     try:
         async with get_db() as db:
             await db.execute(
@@ -2438,10 +2475,10 @@ async def _radier_membre(guild, membre, auteur, raison: str) -> dict:
                 "INSERT INTO radiated_members(guild_id, user_id, saved_roles, "
                 "reason, by_user_id, saved_nick, appel_utilise) "
                 "VALUES(?,?,?,?,?,?,0) "
+                # Déjà radié : on garde les rôles et le pseudo d'AVANT la première radiation (les
+                # remplacer par ceux d'un membre déjà radié les perdait pour toujours).
                 "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                "saved_roles=excluded.saved_roles, reason=excluded.reason, "
-                "by_user_id=excluded.by_user_id, "
-                "saved_nick=excluded.saved_nick, appel_utilise=0",
+                "reason=excluded.reason, by_user_id=excluded.by_user_id, appel_utilise=0",
                 (guild.id, membre.id, json.dumps(saved_ids),
                  str(raison or "")[:300], auteur.id,
                  (membre.nick or "")[:32]))
@@ -2925,15 +2962,10 @@ class RadieDecisionButton(discord.ui.DynamicItem[Button],
         except Exception:
             pass
         try:
-            c = await cfg(i.guild.id)
-            staff_id = int(c.get('ticket_staff', 0) or 0)
-            autorise = (i.user.guild_permissions.administrator
-                        or i.user.id == i.guild.owner_id
-                        or owner_ids_module.is_super_owner(i.user.id)
-                        or any(r.id == staff_id for r in i.user.roles))
-            if not autorise:
-                return await i.followup.send(
-                    "⛔ Décision réservée au staff.", ephemeral=True)
+            # Le même droit que /off : la direction et au-dessus (le staff ne bannit pas).
+            refus = await _autorise_radiation(i)
+            if refus:
+                return await i.followup.send(refus, ephemeral=True)
 
             membre = i.guild.get_member(self.uid)
             if self.act == "lever":
@@ -2941,14 +2973,15 @@ class RadieDecisionButton(discord.ui.DynamicItem[Button],
                     return await i.followup.send(
                         "❌ Ce membre n'est plus sur le serveur.",
                         ephemeral=True)
+                erreur = await _lever_radiation(i.guild, membre, i.user, "Recours accepté")
+                if erreur:
+                    return await i.followup.send(f"❌ {erreur}", ephemeral=True)
                 await i.followup.send(
-                    f"✅ Radiation levée — utilisez `/off off membre:` pour "
-                    f"restaurer {membre.mention} proprement (rôles et pseudo).",
+                    f"✅ Radiation levée : {membre.mention} retrouve ses rôles et son pseudo.",
                     ephemeral=True)
                 await _prevenir_radie(
                     i.guild, self.uid,
-                    "✅ **Votre recours a été accepté.** L'équipe lève votre "
-                    "radiation.")
+                    "✅ **Votre recours a été accepté.** Votre radiation est levée.")
             else:
                 #  ⚠️ LE BANNISSEMENT EST DÉFINITIF ET IRRÉVERSIBLE CÔTÉ MEMBRE :
                 #  on le prévient AVANT de bannir, sinon le message ne part
@@ -2961,7 +2994,7 @@ class RadieDecisionButton(discord.ui.DynamicItem[Button],
                 await i.guild.ban(
                     discord.Object(id=self.uid),
                     reason=f"Recours rejeté — décision de {i.user} ({i.user.id})",
-                    delete_message_days=0)
+                    delete_message_seconds=0)
                 await i.followup.send(
                     f"⛔ <@{self.uid}> est **banni définitivement**.",
                     ephemeral=True)
@@ -3092,6 +3125,51 @@ async def radier_menu_contextuel(i: discord.Interaction, membre: discord.Member)
             pass
 
 
+async def _lever_radiation(guild, membre, auteur, raison: str) -> str | None:
+    """Rend les rôles et le pseudo, lève l'exclusion, efface la fiche. Rend l'erreur, ou None.
+    Un seul corps pour `/off off` et le bouton « Lever la radiation » du recours : le bouton disait
+    au membre que sa radiation était levée sans rien lever (19/10/2026)."""
+    me = guild.me
+    role = discord.utils.get(guild.roles, name=_RADIE_ROLE_NAME)
+    saved_ids, ancien = [], None
+    async with get_db() as db:
+        async with db.execute("SELECT saved_roles, saved_nick FROM radiated_members WHERE guild_id=? AND user_id=?",
+                              (guild.id, membre.id)) as cur:
+            row = await cur.fetchone()
+    if row:
+        saved_ids = json.loads(row[0] or "[]") or []
+        ancien = (row[1] or "").strip() or None
+    try:
+        if role and role in membre.roles:
+            await membre.remove_roles(role, reason=f"/off levée — {raison}"[:400])
+        restore = [guild.get_role(int(rid)) for rid in saved_ids]
+        restore = [r for r in restore if r and me and me.top_role > r and not r.is_default()]
+        if restore:
+            await membre.add_roles(*restore, reason=f"/off levée — {raison}"[:400])
+    except discord.HTTPException as ex:
+        return f"Échec : {ex}"
+    try:
+        await membre.timeout(None, reason="/off levée")
+    except discord.HTTPException as ex:
+        print(f"[off levee exclusion] {ex}")
+    #  ⚠️ RENDRE LE PSEUDO, SINON LA LEVÉE EST INCOMPLÈTE : « ⛔ RADIÉ-1234 » sur quelqu'un dont on
+    #  vient de reconnaître le bon droit serait une sanction qui survit à sa levée. `None` remet le
+    #  nom de compte quand la personne n'avait pas de pseudo avant.
+    try:
+        await membre.edit(nick=ancien, reason="/off levée — pseudo rendu")
+    except discord.HTTPException as ex:
+        print(f"[off levee pseudo] {ex}")
+    async with get_db() as db:
+        await db.execute("DELETE FROM radiated_members WHERE guild_id=? AND user_id=?", (guild.id, membre.id))
+        await db.commit()
+    await ulogger2026.log_event(
+        bot, guild, ulogger2026.EventType.SEC_ESCALATION,
+        description=(f"✅ **Radiation levée** — {membre.mention} `{membre.id}`\nPar : {auteur.mention}\n"
+                     f"**Raison :** {str(raison or '')[:300]}\n_Rôles restaurés._"),
+        user=membre, moderator=auteur)
+    return None
+
+
 @off_group.command(name="off", description="✅ Lever la radiation d'un membre (restaure ses rôles)")
 @app_commands.describe(membre="Le membre à réintégrer", raison="Raison (optionnel)")
 async def off_off_cmd(i: discord.Interaction, membre: discord.Member, raison: str = "Levée de radiation"):
@@ -3106,70 +3184,9 @@ async def off_off_cmd(i: discord.Interaction, membre: discord.Member, raison: st
         refus = await _autorise_radiation(i)
         if refus:
             return await i.followup.send(refus, ephemeral=True)
-        role = None
-        for r in guild.roles:
-            if (r.name or "") == _RADIE_ROLE_NAME:
-                role = r
-                break
-        saved_ids = []
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT saved_roles FROM radiated_members WHERE guild_id=? AND user_id=?",
-                    (guild.id, membre.id)) as cur:
-                    row = await cur.fetchone()
-            if row and row[0]:
-                saved_ids = json.loads(row[0]) or []
-        except Exception:
-            pass
-        try:
-            if role and role in membre.roles:
-                await membre.remove_roles(role, reason=f"/off levée — {raison}"[:400])
-            restore = [guild.get_role(int(rid)) for rid in saved_ids]
-            restore = [r for r in restore if r and me and me.top_role > r and not r.is_default()]
-            if restore:
-                await membre.add_roles(*restore, reason=f"/off levée — {raison}"[:400])
-            try:
-                await membre.timeout(None, reason="/off levée")
-            except Exception:
-                pass
-            #  ⚠️ RENDRE LE PSEUDO, SINON LA LEVÉE EST INCOMPLÈTE. On a détruit
-            #  le pseudo de serveur à la radiation ; laisser « ⛔ RADIÉ-1234 »
-            #  sur quelqu'un dont on vient de reconnaître le bon droit serait
-            #  une sanction qui survit à sa levée.
-            #  `None` remet le nom de compte : c'est le bon repli quand la
-            #  personne n'avait pas de pseudo avant.
-            try:
-                _ancien = None
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT saved_nick FROM radiated_members "
-                        "WHERE guild_id=? AND user_id=?",
-                        (guild.id, membre.id)) as _c2:
-                        _r2 = await _c2.fetchone()
-                if _r2 and (_r2[0] or "").strip():
-                    _ancien = _r2[0]
-                await membre.edit(nick=_ancien, reason="/off levée — pseudo rendu")
-            except Exception as _exn:
-                print(f"[off levee pseudo] {_exn}")
-        except Exception as _ex:
-            return await i.followup.send(f"❌ Échec : `{_ex}`", ephemeral=True)
-        try:
-            async with get_db() as db:
-                await db.execute("DELETE FROM radiated_members WHERE guild_id=? AND user_id=?",
-                                 (guild.id, membre.id))
-                await db.commit()
-        except Exception:
-            pass
-        try:
-            await ulogger2026.log_event(
-                bot, guild, ulogger2026.EventType.SEC_ESCALATION,
-                description=(f"✅ **Radiation levée** — {membre.mention} `{membre.id}`\n"
-                             f"Par : {i.user.mention}\n**Raison :** {str(raison or '')[:300]}\n"
-                             f"_Rôles restaurés._"),
-                user=membre, moderator=i.user)
-        except Exception:
-            pass
+        erreur = await _lever_radiation(guild, membre, i.user, raison)
+        if erreur:
+            return await i.followup.send(f"❌ {erreur}", ephemeral=True)
         await i.followup.send(f"✅ **{membre.mention} réintégré** — ses rôles ont été restaurés.", ephemeral=True)
     except Exception as ex:
         _logerr("off_off_cmd", ex, guild_id=getattr(guild, "id", 0))
@@ -3863,8 +3880,16 @@ _RED_KEYWORDS = (
 )
 
 
+def _mot_entier(terme: str):
+    return re.compile(r'(?<![a-z0-9])' + re.escape(terme) + r'(?![a-z0-9])')
+
+
+_RED_KEYWORDS_RE = [(_t, _mot_entier(_t)) for _t in _RED_KEYWORDS]
+
+
 def _scan_red_keywords(text, extra=None) -> str:
-    """Renvoie le 1er terme ROUGE trouvé dans `text` (substring, brut + normalisé), ou "".
+    """Renvoie le 1er terme ROUGE trouvé dans `text` (mot entier, brut + normalisé), ou "".
+    19/10/2026 : en mot entier — « ce mineur nul » contenait « mineur nu » (28 jours d'exclusion).
     `extra` = liste owner additionnelle. FAIL-SAFE."""
     try:
         if not text:
@@ -3874,10 +3899,10 @@ def _scan_red_keywords(text, extra=None) -> str:
             cands.add(_normalize_for_scan(str(text)).lower())
         except Exception:
             pass
-        terms = list(_RED_KEYWORDS) + [str(t).lower() for t in (extra or []) if t]
+        motifs = _RED_KEYWORDS_RE + [(t, _mot_entier(t)) for t in (str(x).lower() for x in (extra or []) if x)]
         for cand in cands:
-            for term in terms:
-                if term and term in cand:
+            for term, rx in motifs:
+                if rx.search(cand):
                     return term
     except Exception:
         pass
@@ -4225,7 +4250,7 @@ async def sanction(m, action, dur, reason, g, actor_id=None):
                 pass
             try:
                 if await _offense_tick(m.guild, m, None):
-                    return True   # membre banni par la rafale → plus rien à faire
+                    return True   # exclu par la rafale → plus rien à faire
             except Exception:
                 pass
     # Phase 263 : ne plus AVALER silencieusement les échecs (perms/hiérarchie) — logguer
@@ -5360,143 +5385,92 @@ def _msg_url_slugs(text):
     return ' '.join(out)
 
 
-# ═══════════════ RAFALE D'INFRACTIONS → BAN AUTO (owner 2026-06-26) ═══════════════
-# Quelqu'un qui spamme des invitations / insultes / liens / scam d'un seul coup (≥ N
-# infractions AUTOMATIQUES en quelques secondes) = signature d'un BOT, d'un compte PIRATÉ
-# ou d'un RAID → on le BANNIT directement (« il en a rien à faire du règlement »). C'est une
-# EXCEPTION explicite, voulue par l'owner, à la règle founder-only de sanction() — comme le
-# kick des comptes trop récents (_kick_young_account). 100% gated par config, immunisés/owner/
-# super-owner JAMAIS touchés, FAIL-OPEN (en cas de doute on ne bannit pas), mémoire bornée.
+# ═══════════════ RAFALE D'INFRACTIONS → EXCLUSION 1 H ═══════════════
+# Quelqu'un qui enchaîne des infractions AUTOMATIQUES en quelques secondes = signature d'un BOT,
+# d'un compte PIRATÉ ou d'un RAID → exclusion temporaire d'une heure et alerte. Le ban (2026-06-26)
+# est retiré le 19/10/2026 : « ça expulse des gens qui n'ont rien fait ». Immunisés, owner, tête et
+# staff jamais touchés, FAIL-OPEN, mémoire bornée.
 _offense_burst: dict = {}     # (gid, uid) -> [datetime, ...] des infractions auto récentes
 _burst_banned: dict = {}      # (gid, uid) -> datetime du ban burst (anti-rejeu, éviction par fenêtre)
 _offense_last_tick: dict = {}  # (gid, uid) -> datetime du dernier tick (dédup même-message)
 
 
 async def _offense_tick(guild, member, channel=None):
-    """Compte une infraction AUTOMATIQUE et déclenche un BAN si le membre en enchaîne trop en
-    quelques secondes (bot / piraté / raid). Renvoie True SSI un ban de burst a été déclenché
-    (l'appelant peut alors s'arrêter). Immunisés/owner/super-owner exclus. FAIL-OPEN, borné."""
+    """Compte une infraction AUTOMATIQUE ; si le membre en enchaîne trop en quelques secondes (bot,
+    compte piraté, raid), exclusion temporaire d'une heure. Renvoie True SSI elle vient d'être posée
+    (l'appelant peut alors s'arrêter). Owner, tête, staff et immunisés exclus. FAIL-OPEN, borné."""
     try:
         if guild is None or member is None or getattr(member, 'bot', False):
             return False
         gid, uid = guild.id, member.id
-        # Immunité : owner serveur, super-owner, admins, rôles/users immunisés → jamais.
         try:
-            if owner_ids_module.is_super_owner(uid):
+            if owner_ids_module.is_super_owner(uid) or await is_fully_immune(member):
                 return False
         except Exception:
-            pass
-        try:
-            if await is_fully_immune(member):
-                return False
-        except Exception:
-            return False  # en cas de doute sur l'immunité → on NE bannit pas (fail-open)
-        conf = {}
-        try:
-            conf = await cfg(gid)
-        except Exception:
-            conf = {}
+            return False
+        conf = await cfg(gid)
         if not conf.get('burst_autoban', 1):
             return False
         need = max(3, int(conf.get('burst_autoban_count', 4) or 4))   # plancher de sécurité = 3
         window = max(3.0, float(conf.get('burst_autoban_window', 12) or 12))
         n = now()
         key = (gid, uid)
-        # Dédup même-message : plusieurs sanctions pour UN message (rare, blocs `return`) ne
-        # comptent qu'une fois. Un humain ne peut pas poster 2 messages à < 0,3 s d'intervalle.
+        # Dédup même-message : plusieurs sanctions pour UN message ne comptent qu'une fois.
         _last = _offense_last_tick.get(key)
         if _last is not None and (n - _last).total_seconds() < 0.3:
             return False
         _offense_last_tick[key] = n
-        bucket = _offense_burst.get(key)
-        if bucket is None:
-            bucket = []
-            _offense_burst[key] = bucket
+        bucket = _offense_burst.setdefault(key, [])
         bucket[:] = [t for t in bucket if (n - t).total_seconds() < window]
         bucket.append(n)
-        # Éviction paresseuse anti-fuite mémoire (mêmes bornes que les autres trackers).
         if len(_offense_burst) > 5000:
             for _k in [k for k, v in list(_offense_burst.items())
                        if not v or (n - v[-1]).total_seconds() > window]:
                 _offense_burst.pop(_k, None)
                 _offense_last_tick.pop(_k, None)
-        if len(bucket) >= need and key not in _burst_banned:
+        # Une exclusion par heure au plus : elle dure une heure, la suivante peut repartir après.
+        _deja = _burst_banned.get(key)
+        if len(bucket) >= need and (_deja is None or (n - _deja).total_seconds() > 3600):
             _burst_banned[key] = n
-            # Éviction PAR FENÊTRE (jamais de clear() brutal qui casserait l'anti-rejeu) : on ne
-            # garde que les bans récents — le membre banni est de toute façon parti du serveur.
             if len(_burst_banned) > 10000:
-                for _bk in [k for k, t in list(_burst_banned.items())
-                            if (n - t).total_seconds() > max(window, 60)]:
+                for _bk in [k for k, t in list(_burst_banned.items()) if (n - t).total_seconds() > 3600]:
                     _burst_banned.pop(_bk, None)
-            await _burst_autoban(guild, member, channel, len(bucket), int(window))
+            await _burst_timeout(guild, member, channel, len(bucket), int(window))
             return True
     except Exception as ex:
-        print(f"[_offense_tick] {ex}")
+        _logerr("rafale.compte", ex, guild_id=getattr(guild, 'id', 0))
     return False
 
 
-async def _burst_autoban(guild, member, channel, count, window):
-    """Exécute le BAN de rafale (owner 2026-06-26). DM AVANT le ban, alerte Sécurité, fiche.
-    FAIL-OPEN : si le ban échoue (perms/hiérarchie), filet = blacklist (rôle Muet + timeout 28 j)
-    + alerte. Bypass volontaire du verrou founder-only (cas bot/piraté/raid à haute confiance)."""
-    reason = (f"Rafale d'infractions ({count} en {window}s) — bot / compte piraté / raid présumé "
-              f"(ban automatique)")
+async def _burst_timeout(guild, member, channel, count, window):
+    """Rafale d'infractions automatiques : exclusion temporaire d'une heure et alerte. Plus de ban
+    (19/10/2026, « ça expulse des gens qui n'ont rien fait ») : la direction bannit depuis le site
+    si c'est un bot ou un compte piraté ; sinon l'exclusion se lève seule."""
+    reason = f"Rafale d'infractions automatiques ({count} en {window} s)"
     try:
-        await _dm_sanction(
-            member, guild, "Bannissement",
-            "Trop d'infractions en quelques secondes (comportement de bot / compte compromis). "
-            "Si c'est une erreur ou un piratage de ton compte, tu pourras revenir après vérification.")
-    except Exception:
-        pass
-    banned = False
+        await member.timeout(timedelta(hours=1), reason=reason)
+    except discord.HTTPException as ex:
+        _logerr("rafale.exclusion", ex, guild_id=guild.id)
+        return
     try:
-        await member.ban(reason=reason, delete_message_seconds=86400)  # purge 24 h de spam
-        banned = True
+        await _dm_sanction(member, guild, "Exclusion temporaire (1 h)",
+                           "Plusieurs de tes messages ont été retirés en quelques secondes. "
+                           "Si c'est une erreur, ouvre un ticket.")
     except Exception as ex:
-        print(f"[_burst_autoban ban] {ex}")
-    if not banned:   # filet : on isole très fort si le ban est impossible (perms/hiérarchie)
-        try:
-            _qr = await _ensure_quarantine_role(guild)
-            if _qr is not None and _qr not in member.roles:
-                await member.add_roles(_qr, reason=reason)
-        except Exception:
-            pass
-        try:
-            await member.timeout(timedelta(days=28), reason=reason)
-        except Exception:
-            pass
-    try:
-        await _record_infraction(guild.id, member.id, 'ban' if banned else 'mute',
-                                 reason, 'définitif' if banned else '28 j (ban impossible)')
-    except Exception:
-        pass
-    try:
-        await ulogger2026.log_event(
-            bot, guild, ulogger2026.EventType.SEC_ESCALATION,
-            description=(
-                f"⛔ {'**BANNI automatiquement**' if banned else '**Isolé 28 j** (ban impossible — vérifie mes permissions)'} : "
-                f"{member.mention} (`{member.id}`) — **{count} infractions en {window}s** "
-                f"(signature **bot / compte piraté / raid**)."),
-            user=member, moderator=bot.user, channel=channel,
-            extra={"🤖 Motif": "Rafale d'infractions automatiques",
-                   "⚖️ Action": "Bannissement" if banned else "Isolement 28 j (ban échoué)"})
-    except Exception:
-        pass
-    if channel is not None and banned:
-        try:
-            await _warn_calm_down(
-                channel,
-                "⛔ Un membre a été **banni automatiquement** : flot d'infractions en quelques "
-                "secondes (bot / compte piraté). Le serveur reste clean 🛡️")
-        except Exception:
-            pass
+        _logerr("rafale.mp", ex, guild_id=guild.id)
+    await _record_infraction(guild.id, member.id, 'mute', reason, '1 h')
+    await ulogger2026.log_event(
+        bot, guild, ulogger2026.EventType.SEC_ESCALATION,
+        description=(f"{member.mention} (`{member.id}`) exclu 1 h : {count} infractions automatiques "
+                     f"en {window} s. Bot ou compte piraté ? Bannis depuis le site ; sinon ça se lève seul."),
+        user=member, moderator=bot.user, channel=channel)
 
 
-async def _security_ban(member, guild, channel, reason):
-    """BAN direct d'un profil scam/raid à haute confiance (owner 2026-06-27, exception explicite
-    à la règle founder-only — comme _burst_autoban / _kick_young_account). DM avant, filet
-    isolement 28 j si le ban échoue, alerte Sécurité, fiche. Owner/super-owner/immunisés JAMAIS
-    (double garde ici en plus du filtrage amont). FAIL-OPEN (doute → on ne bannit pas)."""
+async def _isoler_par_securite(member, guild, channel, reason, heures=24):
+    """Contenu dangereux sûr (lien de phishing connu, image explicite, ping de masse avec un lien
+    d'arnaque) : exclusion temporaire et alerte. 19/10/2026 : plus jamais de ban automatique (« ça
+    expulse des gens qui n'ont rien fait ») ; la direction bannit depuis le site si c'est confirmé.
+    Owner, tête, staff et immunisés ne sont jamais visés."""
     try:
         if member is None or guild is None or getattr(member, 'bot', False):
             return
@@ -5504,46 +5478,26 @@ async def _security_ban(member, guild, channel, reason):
             return
         if await is_fully_immune(member):
             return
-    except Exception:
-        return
-    reason = str(reason or "Comportement scam/raid")[:480]
-    try:
-        await _dm_sanction(member, guild, "Bannissement",
-                           "Comportement de scam / raid détecté (ping de masse + contenu suspect). "
-                           "Si c'est une erreur, contacte le staff pour faire appel.")
-    except Exception:
-        pass
-    banned = False
-    try:
-        await member.ban(reason=reason, delete_message_seconds=86400)  # purge 24 h
-        banned = True
     except Exception as ex:
-        print(f"[_security_ban] {ex}")
-    if not banned:
-        try:
-            _qr = await _ensure_quarantine_role(guild)
-            if _qr is not None and _qr not in member.roles:
-                await member.add_roles(_qr, reason=reason)
-        except Exception:
-            pass
-        try:
-            await member.timeout(timedelta(days=28), reason=reason)
-        except Exception:
-            pass
+        _logerr("securite.immunite", ex, guild_id=getattr(guild, 'id', 0))
+        return
+    reason = str(reason or "Contenu dangereux")[:480]
     try:
-        await _record_infraction(guild.id, member.id, 'ban' if banned else 'mute', reason,
-                                 'définitif' if banned else '28 j (ban impossible)')
-    except Exception:
-        pass
+        await member.timeout(timedelta(hours=heures), reason=reason)
+    except discord.HTTPException as ex:
+        _logerr("securite.exclusion", ex, guild_id=guild.id)
+        return
     try:
-        await ulogger2026.log_event(
-            bot, guild, ulogger2026.EventType.SEC_ESCALATION,
-            description=(f"⛔ {'**BANNI**' if banned else '**isolé 28 j** (ban impossible — vérifie mes perms)'} : "
-                         f"{member.mention} (`{member.id}`) — {reason}"),
-            user=member, moderator=bot.user, channel=channel,
-            extra={"⚖️ Action": "Bannissement permanent" if banned else "Isolement 28 j"})
-    except Exception:
-        pass
+        await _dm_sanction(member, guild, f"Exclusion temporaire ({heures} h)",
+                           "Un contenu dangereux a été retiré de ton message. Si c'est une erreur, ouvre un ticket.")
+    except Exception as ex:
+        _logerr("securite.mp", ex, guild_id=guild.id)
+    await _record_infraction(guild.id, member.id, 'mute', reason, f"{heures} h")
+    await ulogger2026.log_event(
+        bot, guild, ulogger2026.EventType.SEC_ESCALATION,
+        description=(f"{member.mention} (`{member.id}`) exclu {heures} h — {reason}\n"
+                     f"Confirmé ? Bannis depuis le site. Erreur ? Lève l'exclusion."),
+        user=member, moderator=bot.user, channel=channel)
 
 
 async def _lockdown_role_mentions(guild):
@@ -5581,11 +5535,11 @@ _IMG_EXTS = ('png', 'jpg', 'jpeg', 'webp', 'bmp')
 
 
 async def _ocr_scam_check(msg, immune: bool = False):
-    """Tâche de fond : OCR les images du message et AGIT si motif d'arnaque (haute précision).
-    Ne tourne que si Tesseract est dispo (sinon no-op). FAIL-SAFE.
-    owner 2026-07-18 : scanne AUSSI les immunisés (protection critique anti-comptes-piratés) —
-    pour eux : retrait + ALERTE « compte probablement piraté », AUCUNE sanction (précédent
-    owner anti_scam_image : un membre de confiance piraté est traité MANUELLEMENT)."""
+    """Tâche de fond : lit le texte DANS les images (et les QR codes) et retire une image d'arnaque.
+    19/10/2026 : plus de ban sur une lecture d'image (« ça expulse des gens qui n'ont rien fait »).
+    Image retirée et direction alertée ; l'infraction compte pour la rafale (bot ou compte piraté →
+    exclu 1 h). Seul un QR code menant à un site de phishing exclut 24 h. Immunisés : retrait et
+    alerte « compte probablement piraté », jamais de sanction. Sans Tesseract : rien. FAIL-SAFE."""
     try:
         if not ocr_scan.available():
             # Visible dans [DIAG] Railway : sans ça, un Tesseract absent = zéro scan, en silence.
@@ -5607,52 +5561,30 @@ async def _ocr_scam_check(msg, immune: bool = False):
         if not atts:
             return
         loop = asyncio.get_event_loop()
-        # owner 2026-07-18 : 2 → 4 images/message. La vague « casino » poste 4 captures d'un
-        # coup ; le coût reste borné (sémaphore 2, thread, ≤8 Mo/image, timeout 20 s/passe).
+        # La vague « casino » poste 4 captures d'un coup ; le coût reste borné (sémaphore 2, thread,
+        # ≤8 Mo/image).
         for a in atts[:4]:
             try:
                 data = await a.read()
             except Exception:
                 continue
-            # QR CODES PIÉGÉS (owner 2026-06-27) : un QR = destination MASQUÉE (faux Nitro, token
-            # grabber, phishing). On décode et on vérifie la destination → ban si malveillante.
             try:
-                for _qp in (await loop.run_in_executor(None, ocr_scan.qr_payloads, data)):
-                    _qf = False
-                    try:
-                        _qf = (check_phishing(_qp)[0] or check_scam(_qp)[0]
-                               or check_shortener(_qp)[0])
-                    except Exception:
-                        _qf = False
-                    if _qf:
-                        try:
-                            await msg.delete()
-                        except Exception:
-                            pass
-                        try:
-                            await send_log(msg.guild, 'anti_scam', msg.author, msg,
-                                           "QR code piégé (destination malveillante)", _qp[:80])
-                        except Exception:
-                            pass
-                        try:
-                            diag.event("security", "ocr_scan",
-                                       f"QR piégé supprimé — {msg.author.id} ({'immunisé' if immune else 'ban'})")
-                        except Exception:
-                            pass
-                        if immune:
-                            await _ocr_alert_compromised(msg, f"QR code piégé → {_qp[:60]}")
-                            try:    # même riposte anti-nuke que la branche scam (modo piraté)
-                                await _compromised_riposte(msg, "QR piégé (OCR)")
-                            except Exception:
-                                pass
-                        else:
-                            await _security_ban(
-                                msg.author, msg.guild, msg.channel,
-                                f"QR code piégé — destination phishing/scam ({_qp[:60]}) — "
-                                f"compte probablement PIRATÉ (déban possible une fois récupéré)")
-                        return
-            except Exception:
-                pass
+                qrs = await loop.run_in_executor(None, ocr_scan.qr_payloads, data)
+            except Exception as ex:
+                _logerr("ocr.qr", ex, guild_id=msg.guild.id)
+                qrs = []
+            for _qp in qrs:
+                phishing = check_phishing(_qp)[0]
+                if not (phishing or check_scam(_qp)[0] or check_shortener(_qp)[0]):
+                    continue
+                await _retirer_image_arnaque(msg, "QR code piégé (destination malveillante)", _qp[:80], immune)
+                if not immune:
+                    if phishing:
+                        await _isoler_par_securite(msg.author, msg.guild, msg.channel,
+                                                   f"QR code vers un site de phishing ({_qp[:60]})")
+                    else:
+                        await _offense_tick(msg.guild, msg.author, msg.channel)
+                return
             try:
                 async with _OCR_SEM:
                     text = await loop.run_in_executor(None, ocr_scan.image_text, data)
@@ -5660,48 +5592,32 @@ async def _ocr_scam_check(msg, immune: bool = False):
                 continue
             is_scam, reason, score = ocr_scan.scan_scam(text, threshold=6)
             if is_scam:
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-                try:
-                    await send_log(msg.guild, 'anti_scam', msg.author, msg,
-                                   "Image d'arnaque détectée par OCR", reason)
-                except Exception:
-                    pass
-                try:
-                    diag.event("security", "ocr_scan",
-                               f"image scam supprimée — {msg.author.id} score={score} "
-                               f"({'immunisé → alerte' if immune else 'ban'})")
-                except Exception:
-                    pass
-                if immune:
-                    await _ocr_alert_compromised(msg, f"{reason} (score {score})")
-                    # Riposte anti-nuke EXISTANTE (owner 2026-06-21 #4) : si ce compte immunisé
-                    # a des perms à risque (admin/manage/ban), retrait préventif RÉVERSIBLE des
-                    # rôles + timeout 1 h — un modo piraté ne doit pas pouvoir nuker. No-op pour
-                    # un immunisé sans perms ; owner/super-owner jamais visés.
-                    try:
-                        await _compromised_riposte(msg, "image scam (OCR)")
-                    except Exception:
-                        pass
-                else:
-                    await _security_ban(
-                        msg.author, msg.guild, msg.channel,
-                        f"Image d'arnaque (OCR — {reason}, score {score}) — faux gains "
-                        f"crypto/casino : compte probablement PIRATÉ (déban possible une "
-                        f"fois le compte récupéré)")
+                await _retirer_image_arnaque(msg, "Image d'arnaque détectée par OCR", f"{reason} (score {score})", immune)
+                if not immune:
+                    await _offense_tick(msg.guild, msg.author, msg.channel)
                 return
-            else:
-                # Routine (caché sauf DIAG_VERBOSE=1) : prouve que le scan a TOURNÉ et ce qu'il
-                # a lu — l'incident mabewin était invisible faute de cette trace.
-                try:
-                    diag.trace("security", "ocr_scan",
-                               f"image scannée — {msg.author.id} texte={len(text)}c score={score}")
-                except Exception:
-                    pass
+            # Routine (caché sauf DIAG_VERBOSE=1) : prouve que le scan a TOURNÉ et ce qu'il a lu.
+            try:
+                diag.trace("security", "ocr_scan",
+                           f"image scannée — {msg.author.id} texte={len(text)}c score={score}")
+            except Exception:
+                pass
     except Exception as ex:
-        print(f"[_ocr_scam_check] {ex}")
+        _logerr("ocr.scan", ex, guild_id=getattr(getattr(msg, 'guild', None), 'id', 0))
+
+
+async def _retirer_image_arnaque(msg, titre: str, detail: str, immune: bool) -> None:
+    try:
+        await msg.delete()
+    except discord.HTTPException:
+        pass
+    await send_log(msg.guild, 'anti_scam', msg.author, msg, titre, detail)
+    try:
+        diag.event("security", "ocr_scan", f"{titre} — {msg.author.id}")
+    except Exception:
+        pass
+    if immune:
+        await _ocr_alert_compromised(msg, detail)
 
 
 async def _ocr_alert_compromised(msg, detail: str):
@@ -5739,13 +5655,13 @@ def _spawn_bg_scan(coro):
         _t.add_done_callback(_bg_scan_tasks.discard)
     except Exception:
         pass
-# Labels SANS AMBIGUÏTÉ → BAN direct. Seins/fessiers exposés → suppression + alerte (peut être une
-# photo de plage/art → l'humain tranche), pas de ban auto.
+# Labels sans ambiguïté → exclusion 24 h et alerte (19/10/2026 : plus de ban automatique, la direction
+# tranche). Seins/fessiers exposés → suppression + alerte (plage, art…).
 _NSFW_BAN_LABELS = {"FEMALE_GENITALIA_EXPOSED", "MALE_GENITALIA_EXPOSED", "ANUS_EXPOSED"}
 
 
 async def _nsfw_image_check(msg):
-    """Tâche de fond : détecte une image sexuellement explicite et AGIT. Génitalité/anus → BAN ;
+    """Tâche de fond : détecte une image sexuellement explicite et AGIT. Génitalité/anus → exclusion 24 h ;
     seins/fessiers → suppression + alerte owner. Ne tourne que si le moteur est dispo (garde RAM).
     Immunisés exclus en amont. FAIL-SAFE."""
     try:
@@ -5786,10 +5702,9 @@ async def _nsfw_image_check(msg):
             except Exception:
                 pass
             if label in _NSFW_BAN_LABELS:
-                await _security_ban(
+                await _isoler_par_securite(
                     msg.author, msg.guild, msg.channel,
-                    f"Image sexuellement EXPLICITE détectée par IA ({label}, {score:.2f}) — "
-                    f"protection des mineurs")
+                    f"Image sexuellement explicite détectée par IA ({label}, {score:.2f}) — protection des mineurs")
             else:
                 # seins/fessiers exposés : suppression + alerte (l'humain tranche le ban).
                 try:
@@ -5806,67 +5721,6 @@ async def _nsfw_image_check(msg):
             return
     except Exception as ex:
         print(f"[_nsfw_image_check] {ex}")
-
-
-async def _grooming_action(msg, level, cats, terms):
-    """Action GRADUÉE anti-grooming (owner 2026-06-27, protection mineurs). Le message est DÉJÀ
-    supprimé par l'appelant. L3 (sexuel visant un jeune) → BAN ; L2 (combo prédateur clair) → gel
-    1 h + alerte URGENTE owner ; L1 (approche suspecte) → alerte owner (humain tranche). Dans tous
-    les cas : rappel de prudence au jeune dans le salon. FAIL-SAFE."""
-    guild, member, channel = msg.guild, msg.author, msg.channel
-    cats_txt = ", ".join(cats) or "?"
-    ev = "||" + " · ".join((terms or [])[:6]) + "||"
-    try:
-        _age_days = (discord.utils.utcnow() - member.created_at).days
-    except Exception:
-        _age_days = -1
-    if level >= 3:
-        try:
-            await _record_infraction(guild.id, member.id, 'grooming',
-                                     f"Grooming N3 (sollicitation sexuelle) : {cats_txt}", 'ban')
-        except Exception:
-            pass
-        await _security_ban(
-            member, guild, channel,
-            f"Sollicitation sexuelle visant un mineur présumé (grooming : {cats_txt})")
-    elif level >= 2:
-        try:
-            await member.timeout(timedelta(hours=1),
-                                 reason=f"Approche prédatrice présumée (grooming : {cats_txt})")
-        except Exception:
-            pass
-        try:
-            await _record_infraction(guild.id, member.id, 'grooming', f"Grooming N2 : {cats_txt}", '1h')
-        except Exception:
-            pass
-    # Alerte owner (L1/L2 ; L3 a déjà son alerte via _security_ban mais on double l'info mineurs).
-    try:
-        if level >= 3:
-            _hdr = "⛔ **PRÉDATEUR — sollicitation sexuelle d'un mineur** → BANNI"
-        elif level >= 2:
-            _hdr = "🚨 **PRÉDATEUR PRÉSUMÉ** — approche de grooming (gelé 1 h, à toi de trancher)"
-        else:
-            _hdr = "⚠️ **Approche suspecte à vérifier** (message retiré)"
-        await ulogger2026.log_event(
-            bot, guild, ulogger2026.EventType.SEC_ESCALATION,
-            description=(f"{_hdr}\n{member.mention} (`{member.id}`) dans {channel.mention}\n"
-                         f"**Signaux :** {cats_txt}\n**Extraits :** {ev}\n"
-                         f"**Compte créé il y a :** {_age_days} j\n"
-                         f"➡️ Si c'est un prédateur : **`/off` ou bannis** sans hésiter. 🧒🛡️"),
-            user=member, moderator=bot.user, channel=channel,
-            extra={"🧒 Protection mineurs": f"Grooming niveau {level}", "🔎 Catégories": cats_txt})
-    except Exception:
-        pass
-    # Rappel de prudence au jeune (couper le réflexe de répondre / partager).
-    if channel is not None:
-        try:
-            await _warn_calm_down(
-                channel,
-                "🛡️ Un message a été retiré par la protection. **Ne partage jamais de photo, "
-                "d'infos perso (âge, ville, adresse, numéro) ni ton contact privé** à quelqu'un "
-                "que tu ne connais pas. Le moindre doute → préviens le staff. 💚")
-        except Exception:
-            pass
 
 
 # ANTI-DOXXING / COORDONNÉES PERSO (owner 2026-06-27, protection mineurs) : on retire les
@@ -9744,20 +9598,20 @@ def check_masked_links(content):
         display_domains = re.findall(_dom_re, display_norm) + re.findall(_dom_re, display_text)
         if not display_domains:
             continue
-        # Extraire le domaine de l'URL réelle
-        real_domain_match = re.search(r'https?://([^/\s]+)', real_url)
-        if not real_domain_match:
+        # 19/10/2026 : on compare des NOMS DE DOMAINE. Avant, « roblox.com.evil.ru » passait pour
+        # roblox.com, et [youtube.com](https://youtu.be/…) était pris pour du phishing.
+        real_domain = _hote(real_url)
+        if not real_domain or _domaine_de_confiance(real_domain):
             continue
-        real_domain = real_domain_match.group(1).lower()
-        # Vérifier si le texte prétend être un domaine de confiance mais l'URL est différente
         for disp_dom in display_domains:
-            disp_dom_clean = disp_dom.split('/')[0].lower()
-            # Le texte montre un domaine de confiance...
-            if any(trusted in disp_dom_clean for trusted in TRUSTED_DOMAINS_FOR_MASKING):
-                # ...mais l'URL réelle pointe vers un domaine différent
-                if not any(trusted in real_domain for trusted in TRUSTED_DOMAINS_FOR_MASKING):
-                    return True, f"Lien masqué: [{disp_dom_clean}] → {real_domain}"
+            disp_dom_clean = _hote(disp_dom)
+            if _domaine_de_confiance(disp_dom_clean):
+                return True, f"Lien masqué: [{disp_dom_clean}] → {real_domain}"
     return False, None
+
+
+def _domaine_de_confiance(hote: str) -> bool:
+    return domaine_officiel(hote) or any(hote == t or hote.endswith("." + t) for t in TRUSTED_DOMAINS_FOR_MASKING)
 
 
 SCAM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in COMPROMISED_PATTERNS]
@@ -9988,15 +9842,13 @@ def check_shortener(ct):
 
 def check_qr_code_scam(content):
     """Détecte les tentatives de scam par QR code"""
+    # 19/10/2026 : « qr » dans chaque motif (« scanner le code promo », « le token de mon bot discord »
+    # étaient pris pour une arnaque), et des écarts bornés plutôt que tout le message.
     qr_patterns = [
-        r'scan.*qr.*code',
-        r'qr.*code.*scan',
-        r'scanner.*code',
-        r'discord.*token',
-        r'login.*qr',
-        r'authenticate.*qr',
-        r'qr.*gift',
-        r'qr.*nitro',
+        r'\bscan\w*\b.{0,30}\bqr\b',
+        r'\bqr\b.{0,30}\bscan',
+        r'\b(?:login|connexion|authenticate|v[ée]rifi\w*)\b.{0,30}\bqr\b',
+        r'\bqr\b.{0,30}\b(?:gift|nitro|robux|cadeau)\b',
     ]
     
     content_lower = content.lower()
@@ -12787,6 +12639,24 @@ async def _publier_social(salon, profil: str, embed):
     ping, role, vue = await _ping_social(salon)
     return await webhook_send(salon, profil, embed=embed, content=ping or None, view=vue,
                               allowed_mentions=notifs.mentions(role))
+
+
+async def _publier_reserve(guild, plateforme: str, post_id, salon, profil: str, embed, chemin: str):
+    """19/10/2026 (audit) : une publication = un seul message, même suivie par deux chemins ou vue
+    par deux instances pendant un déploiement (`publications`). L'envoi raté rend la place : le
+    passage suivant réessaie, et rien n'est noté comme publié. Renvoie le message, None si l'envoi
+    a échoué, False si le post est déjà publié (ou en cours d'envoi) ailleurs."""
+    if not await publications.reserver(guild.id, plateforme, str(post_id), chemin):
+        return False
+    msg = None
+    try:
+        msg = await _publier_social(salon, profil, embed)
+    finally:
+        if msg:
+            await publications.confirmer(guild.id, plateforme, str(post_id), msg.id, salon.id)
+        else:
+            await publications.annuler(guild.id, plateforme, str(post_id))
+    return msg
 
 
 async def _texte_sondage_refuse(g, texte: str) -> str:
@@ -17892,24 +17762,6 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
             return None
 
 
-# ─────────────────────────────── TWITTER/X ───────────────────────────────
-
-# Instances Nitter — liste VÉRIFIÉE juin 2026 (sources sûres : wiki officiel
-# github.com/zedeus/nitter + tracker status.d420.de). Nitter a été officiellement
-# ARRÊTÉ en 2024 (X a coupé les guest accounts) ; il ne reste que des instances
-# communautaires INTERMITTENTES, souvent bloquées depuis une IP datacenter (Railway).
-# On en garde plusieurs et on prend la 1re qui répond ; si TOUTES échouent → fallback
-# Twitter Syndication, puis mode manuel (jamais de crash). xcancel.com = la plus stable.
-# Retirées car MORTES : nitter.net, nitter.cz, nitter.privacydev.net.
-NITTER_INSTANCES = [
-    "xcancel.com",
-    "nitter.poast.org",
-    "nitter.privacyredirect.com",
-    "nitter.space",
-    "nitter.tiekoetter.com",
-    "nitter.catsarch.com",
-    "lightbrd.com",
-]
 
 
 # ─────────────────────────────── COMMON VIEWS ───────────────────────────────
@@ -20003,8 +19855,18 @@ async def _activite_boot():
     await activite_module.init_db()
 
 
+_PRET_UNE_FOIS = False
+
+
 @bot.event
 async def on_ready():
+    # Audit 19/10/2026 : on_ready revient à chaque reconnexion complète ; tout ce qui suit (base,
+    # vues, tâches, serveur HTTP, migrations) ne se fait qu'une fois par instance.
+    global _PRET_UNE_FOIS
+    if _PRET_UNE_FOIS:
+        print("[BOOT] reconnexion : démarrage déjà fait")
+        return
+    _PRET_UNE_FOIS = True
     # 🩺 Battement de cœur du watchdog de gel (owner 2026-07-12) : démarré EN PREMIER pour couvrir
     # tout le boot. Si la boucle gèle > 3 s, le thread watchdog imprime la stack du coupable.
     try:
@@ -22378,7 +22240,10 @@ async def _handle_antiraid_join(member):
         # IMMUNITÉ (audit 2026-06-21) : owner / super-owner / immunisés JAMAIS isolés pendant
         # un raid (aligne sur _kick_young_account ; sinon le super-owner rejoignant en plein
         # raid se faisait retirer ses rôles + timeout 28 j).
+        # 19/10/2026 : seuls les comptes Discord récents sont isolés ; une vague de vrais joueurs
+        # (une vidéo, un évènement) n'isole personne.
         if (m and not m.bot and m.id != member.guild.owner_id
+                and (datetime.now(timezone.utc) - m.created_at).days < min_age_days
                 and not owner_ids_module.is_super_owner(m.id)
                 and not await is_fully_immune(m)):
             recent_members.append(m)
@@ -22803,21 +22668,16 @@ async def _scan_security_on_edit(after) -> bool:
         except Exception:
             _ideob = ""
 
-        # — GROOMING (protection mineurs, priorité n°1) —
-        if c.get('grooming_patrol', 1):
-            try:
-                _glvl, _gcats, _gterms = grooming_detector.scan(ct, _normalize_for_scan(ct))
-            except Exception:
-                _glvl, _gcats, _gterms = 0, [], []
-            if _glvl >= 1:
+        # — APPROCHE PRÉDATRICE : mêmes règles qu'à l'envoi (retiré, direction alertée) —
+        if c.get('anti_grooming', 1):
+            _pm = pmineurs.analyser(ct)
+            if _pm.get("touche"):
                 try:
                     await after.delete()
-                except Exception:
+                except discord.HTTPException:
                     pass
-                try:
-                    await _grooming_action(after, _glvl, _gcats, _gterms)
-                except Exception as _gex:
-                    print(f"[on_message_edit grooming] {_gex}")
+                await send_log(guild, 'anti_scam', author, after, "Approche prédatrice (édition)",
+                               pmineurs.resume(_pm))
                 return True
 
         # — DOXXING —
@@ -22829,12 +22689,13 @@ async def _scan_security_on_edit(after) -> bool:
                 pass
 
         # — MENACES / INTIMIDATION IRL —
-        _thr = None
+        _thr, _thr_dur = None, False
         try:
             if c.get('anti_threat', 1):
                 _thr = insult_filter.threat_hit(_spoken, _ispoken_norm)
                 if not _thr and _ideob:
                     _thr = insult_filter.threat_hit(_ideob)
+                _thr_dur = bool(_thr)
                 if not _thr and not _GAMING_CTX_RE.search(_spoken or ''):
                     _thr = insult_filter.threat_soft_hit(_spoken, _ispoken_norm)
                     if not _thr and _ideob:
@@ -22846,21 +22707,23 @@ async def _scan_security_on_edit(after) -> bool:
                 await after.delete()
             except Exception:
                 pass
-            try:
-                await author.timeout(timedelta(hours=1), reason=f"Menace (édition) : {str(_thr)[:40]}")
-            except Exception:
-                pass
+            if _thr_dur:
+                try:
+                    await author.timeout(timedelta(hours=1), reason=f"Menace (édition) : {str(_thr)[:40]}")
+                except Exception:
+                    pass
             try:
                 await _record_infraction(guild.id, author.id, 'menace',
-                                         f"Menace/intimidation IRL (édition) : {str(_thr)[:50]}", '1h')
+                                         f"Menace/intimidation IRL (édition) : {str(_thr)[:50]}",
+                                         '1h' if _thr_dur else '')
             except Exception:
                 pass
             try:
                 await ulogger2026.log_event(
                     bot, guild, ulogger2026.EventType.SEC_ESCALATION,
                     description=(f"⚔️ **MENACE / INTIMIDATION (édition)** de {author.mention} "
-                                 f"(`{author.id}`) dans {after.channel.mention} → message retiré + "
-                                 f"exclusion 1 h.\n**Extrait :** ||{str(_thr)[:60]}||\n"
+                                 f"(`{author.id}`) dans {after.channel.mention} → message retiré"
+                                 f"{' + exclusion 1 h' if _thr_dur else ''}.\n**Extrait :** ||{str(_thr)[:60]}||\n"
                                  f"➡️ Si menace réelle, **bannis** (`/off`)."),
                     user=author, moderator=bot.user, channel=after.channel,
                     extra={"⚔️ Gravité": "Menace IRL (édition)"})
@@ -22922,6 +22785,9 @@ async def _scan_security_on_edit(after) -> bool:
                     _dv = _DIRECT_VULGAR_RE.search(_spoken or '')
                     if not _dv and _ideob:
                         _dv = _DIRECT_VULGAR_RE.search(_ideob)
+                    if (_dv and _dv.group(0).lower().startswith(('con', 'c0n', 'fil'))
+                            and not _insulte_visee(after, _spoken) and _GAMING_CTX_RE.search(_spoken or '')):
+                        _dv = None  # « ce boss est un fils de pute » : une chose du jeu, comme à l'envoi
                 except Exception:
                     _dv = None
                 if _dv:
@@ -22950,7 +22816,7 @@ async def _scan_security_on_edit(after) -> bool:
                     # d'immunité. FAIL-SAFE.
                     try:
                         if await _offense_tick(guild, author, after.channel):
-                            return True   # banni par la rafale → on s'arrête là
+                            return True   # exclu par la rafale → on s'arrête là
                     except Exception:
                         pass
                     try:
@@ -22958,7 +22824,7 @@ async def _scan_security_on_edit(after) -> bool:
                     except Exception:
                         pass
                     return True
-            if _ilvl >= 2:
+            if _ilvl >= 3 or (_ilvl == 2 and _insulte_visee(after, _spoken)):
                 try:
                     await after.delete()
                 except Exception:
@@ -23202,7 +23068,7 @@ async def _compromised_riposte(msg, reason):
         guild = getattr(msg, 'guild', None)
         if member is None or guild is None or getattr(member, 'bot', False):
             return
-        if member.id == guild.owner_id or owner_ids_module.is_super_owner(member.id):
+        if member.id in (guild.owner_id, *TETE_IDS) or owner_ids_module.is_super_owner(member.id):
             return
         if not _has_risky_perms(member):
             return
@@ -23720,6 +23586,7 @@ async def _check_compromised_account(msg):
 async def on_message(msg):
     if not msg.guild:
         return
+    _serie = _compter_serie(msg)
 
     # ═══ ACTIVITÉ — source 1/3 : le message ═══
     # Placé tout en haut, AVANT toute autre logique : un membre qui écrit est
@@ -23792,7 +23659,8 @@ async def on_message(msg):
         except Exception as ex:
             print(f"[on_message webhook_leak] {ex}")
         try:
-            handled = await token_grabber_module.on_message_hook(msg)
+            handled = await token_grabber_module.on_message_hook(
+                msg, sanctionner=not await is_fully_immune(msg.author))
             if handled:
                 return  # message supprimé, stop pipeline
         except Exception as ex:
@@ -23970,84 +23838,31 @@ async def on_message(msg):
         # 3. Vérifier immunité de l'utilisateur
         user_immune = await is_immune(msg.author, 'general', msg.channel)
 
-        # ═══ ANTI PING DE RÔLE / @everyone (owner 2026-06-27 — incident scam MrBeast) ═══
-        # AUCUN membre non-immunisé ne peut mentionner un RÔLE ni @everyone/@here : c'est une
-        # notification de MASSE, vecteur n°1 de raid/scam. On supprime ; et si c'est le profil
-        # d'un arnaqueur (image jointe, OU @everyone, OU compte pas encore « de confiance ») →
-        # BAN direct (owner : « ban permanent sans réfléchir »). Membre établi sans image qui
-        # ping un rôle = probable maladresse → suppression + avertissement. Immunisés exemptés.
+        # ═══ ANTI PING DE RÔLE / @everyone ═══
+        # Personne en dehors du staff ne mentionne un rôle ni @everyone : message retiré et rappel.
+        # 19/10/2026 : plus de ban sur ce seul geste (« ça expulse des gens qui n'ont rien fait ») ;
+        # exclusion 24 h seulement si le message porte aussi un lien d'arnaque. Une image jointe
+        # passe à la lecture d'image, comme les autres.
         if (not user_immune) and not is_ticket and (
-                getattr(msg, 'role_mentions', None) or getattr(msg, 'mention_everyone', False)):
+                getattr(msg, 'role_mentions', None) or getattr(msg, 'mention_everyone', False)) \
+                and not getattr(getattr(msg.author, 'guild_permissions', None), 'mention_everyone', False):
             try:
                 await msg.delete()
-            except Exception:
+            except discord.HTTPException:
                 pass
-            _rm_img = False
-            try:
-                _rm_img = _msg_has_image(msg)
-            except Exception:
-                _rm_img = False
-            _rm_trusted = True
-            try:
-                _rm_trusted = trust_system.is_trusted(
-                    msg.author,
-                    age_hours=int(c.get('trust_age_hours', 24) or 24),
-                    fast_hours=int(c.get('trust_fast_hours', 2) or 2),
-                    fast_msgs=int(c.get('trust_fast_msgs', 12) or 12),
-                    min_account_days=int(c.get('trust_min_account_days', 7) or 0))
-            except Exception:
-                _rm_trusted = True
-            try:
-                await send_log(msg.guild, 'anti_mass_mention', msg.author, msg,
-                               "Mention de rôle / @everyone (interdite)", None)
-            except Exception:
-                pass
-            if _rm_img or getattr(msg, 'mention_everyone', False) or (not _rm_trusted):
-                # Profil scam/raid (image, ou @everyone, ou compte non fiable) → BAN.
-                try:
-                    await _security_ban(
-                        msg.author, msg.guild, msg.channel,
-                        "Ping de masse (rôle/@everyone) + profil scam/raid "
-                        "(image jointe ou compte non fiable) — arnaque type « crypto/MrBeast »")
-                except Exception:
-                    pass
+            await send_log(msg.guild, 'anti_mass_mention', msg.author, msg,
+                           "Mention de rôle / @everyone (interdite)", None)
+            if check_phishing(ct)[0] or check_scam(ct)[0] or check_shortener(ct)[0]:
+                await _isoler_par_securite(msg.author, msg.guild, msg.channel,
+                                           "Ping de masse avec un lien d'arnaque")
             else:
-                # Membre établi sans image → maladresse probable : suppression + avertissement.
-                try:
-                    await _record_infraction(msg.guild.id, msg.author.id, 'protection',
-                                             "Mention de rôle interdite", '')
-                except Exception:
-                    pass
-                try:
+                if not await _offense_tick(msg.guild, msg.author, msg.channel):
                     await _warn_calm_down(
                         msg.channel,
-                        f"🚫 {msg.author.mention}, mentionner un **rôle** (ping de masse) est "
-                        f"**interdit** ici — message supprimé. En cas de récidive, ça se durcit.")
-                except Exception:
-                    pass
+                        f"🚫 {msg.author.mention}, mentionner un **rôle** est **interdit** ici — message retiré.")
+                if c.get('anti_scam_ocr', 1) and _msg_has_image(msg):
+                    _spawn_bg_scan(_ocr_scam_check(msg, immune=False))
             return
-
-        # 🛡️ PATROUILLE ANTI-GROOMING (owner 2026-06-27 — PROTECTION DES MINEURS, priorité n°1) :
-        # repère l'APPROCHE prédatrice (demande de photo/d'infos perso, secret, passage en privé/
-        # autre plateforme, proposition de rencontre, sollicitation sexuelle) — pas seulement les
-        # termes pédocriminels après coup. GRADUÉ : L3 (sexuel visant un jeune) → BAN ; L2 (combo
-        # prédateur clair) → gel 1 h + alerte URGENTE owner ; L1 (2 signaux mous) → alerte owner.
-        # On SUPPRIME toujours (protection immédiate). Immunisés/tickets exclus. FAIL-SAFE.
-        if c.get('grooming_patrol', 1) and (not user_immune) and (not is_ticket) and ct:
-            try:
-                _glvl, _gcats, _gterms = grooming_detector.scan(ct, _normalize_for_scan(ct))
-            except Exception:
-                _glvl, _gcats, _gterms = 0, [], []
-            if _glvl >= 1:
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-                try:
-                    await _grooming_action(msg, _glvl, _gcats, _gterms)
-                except Exception as _gex:
-                    print(f"[grooming_action] {_gex}")
-                return
 
         # 🔒 ANTI-DOXXING (owner 2026-06-27 — protection mineurs) : retire les coordonnées perso
         # (tél/e-mail/adresse) postées en public + alerte owner. Pas de sanction. Immunisés/tickets
@@ -24157,7 +23972,6 @@ async def on_message(msg):
                 await send_log(msg.guild, 'anti_scam', msg.author, msg, "Message de scam détecté", f"`{p}`")
                 dur = c.get('scam_mute_duration', 60)
                 await sanction(msg.author, c.get('scam_action', 'mute'), dur, "Scam", msg.guild)
-                await _compromised_riposte(msg, "scam")
                 return
 
         # Renfort anti-scam IMAGE (owner 2026-06-18) : vague « crypto image spam » où des
@@ -24177,30 +23991,32 @@ async def on_message(msg):
             except Exception:
                 _red = ""
             if _red:
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-                if not user_immune:
+                _exclu = False
+                if not is_ticket:  # en ticket, c'est un signalement : la preuve reste, personne n'est puni
                     try:
-                        await msg.author.timeout(
-                            timedelta(days=28), reason="Mot-clé interdit GRAVE (anti-TOS)")
+                        await msg.delete()
                     except Exception:
                         pass
-                try:
-                    await ulogger2026.log_event(
-                        bot, msg.guild, ulogger2026.EventType.SEC_ESCALATION,
-                        description=(
-                            f"🚨 **MOT-CLÉ ROUGE (anti-TOS GRAVE)** — {msg.author.mention} "
-                            f"`{msg.author.id}`\nMessage **supprimé** · membre **timeout 28 j**.\n"
-                            f"_Terme déclencheur masqué (gravité). Envisage **`/off on`** pour une "
-                            f"radiation TOTALE immédiate._"),
-                        user=msg.author, moderator=bot.user)
-                except Exception:
-                    pass
+                    if not user_immune and not await is_fully_immune(msg.author):
+                        try:
+                            await msg.author.timeout(
+                                timedelta(days=28), reason="Mot-clé interdit GRAVE (anti-TOS)")
+                            _exclu = True
+                        except discord.HTTPException as ex:
+                            _logerr("rouge.exclusion", ex, guild_id=msg.guild.id)
+                _fait = ("Message laissé (signalement en ticket)." if is_ticket
+                         else "Message **supprimé** · membre **exclu 28 j**." if _exclu else "Message **supprimé**.")
+                await ulogger2026.log_event(
+                    bot, msg.guild, ulogger2026.EventType.SEC_ESCALATION,
+                    description=(
+                        f"🚨 **MOT-CLÉ ROUGE (anti-TOS GRAVE)** — {msg.author.mention} "
+                        f"`{msg.author.id}`\n{_fait}\n"
+                        f"_Terme déclencheur masqué (gravité). Envisage **`/off on`** pour une "
+                        f"radiation TOTALE immédiate._"),
+                    user=msg.author, moderator=bot.user)
                 return
 
-        if c.get('anti_scam_image', 1):
+        if c.get('anti_scam_image', 1) and not is_ticket:  # en ticket : des captures envoyées comme preuves
             try:
                 f_img, r_img = check_image_scam(msg)
             except Exception:
@@ -24229,22 +24045,21 @@ async def on_message(msg):
         #  staff, lui, est exempté : il doit pouvoir CITER un message pour
         #  instruire un dossier sans se faire sanctionner.
         #
-        #  ⚠️ DEUX PALIERS, DEUX TRAITEMENTS. Le palier FORT (sollicitation
-        #  sexuelle, site adulte, rencontre tarifée, consigne de silence) n'a
-        #  aucun usage innocent : on coupe. Le palier COMBINÉ est un FAISCEAU
-        #  d'indices banals pris isolément : on supprime et on alerte, mais on
-        #  ne sanctionne pas — accuser à tort quelqu'un d'approche prédatrice
-        #  est une accusation grave et difficile à défaire.
+        #  Les deux paliers : message retiré et direction alertée, sans sanction
+        #  automatique (19/10/2026 : « ça expulse des gens qui n'ont rien fait » —
+        #  le bot ne connaît pas l'âge des gens, un humain tranche). En ticket, le
+        #  message reste : c'est souvent un signalement, la preuve doit rester.
         if c.get('anti_grooming', 1) and not user_immune:
             try:
                 _pm = pmineurs.analyser(msg.content or "")
             except Exception:
                 _pm = {"touche": False}
             if _pm.get("touche"):
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
+                if not is_ticket:
+                    try:
+                        await msg.delete()
+                    except Exception:
+                        pass
                 try:
                     await send_log(
                         msg.guild, 'anti_scam', msg.author, msg,
@@ -24260,8 +24075,10 @@ async def on_message(msg):
                         detail=_pm.get("motif", "")[:200], surface="auto")
                 except Exception:
                     pass
-                if _pm["gravite"] == "forte":
-                    _act = c.get('grooming_action', 'mute')
+                if is_ticket:
+                    pass
+                elif _pm["gravite"] == "forte":
+                    _act = c.get('grooming_action', 'alerte')
                     if _act and _act != 'alerte':
                         await sanction(
                             msg.author, _act,
@@ -24354,12 +24171,13 @@ async def on_message(msg):
             # gaming EXCLU du lexique → on n'attrape que l'IRL sans ambiguïté. Action forte :
             # suppression + exclusion 1 h + alerte URGENTE owner. Alimente aussi l'anti-harcèlement.
             try:
-                _thr = None
+                _thr, _thr_dur = None, False
                 if c.get('anti_threat', 1):
-                    # menaces DURES (localisation/dox/arme) → toujours, peu importe le contexte
+                    # menaces DURES (adresse, ville, IP, dox) → toujours, peu importe le contexte
                     _thr = insult_filter.threat_hit(_spoken, _ispoken_norm)
                     if not _thr and _ideob:
                         _thr = insult_filter.threat_hit(_ideob)
+                    _thr_dur = bool(_thr)  # 19/10/2026 : les DOUCES ne valent jamais une exclusion
                     # menaces DOUCES (bagarre/intimidation) → SEULEMENT hors contexte gaming
                     if not _thr and not _GAMING_CTX_RE.search(_spoken or ''):
                         _thr = insult_filter.threat_soft_hit(_spoken, _ispoken_norm)
@@ -24372,21 +24190,22 @@ async def on_message(msg):
                     await msg.delete()
                 except Exception:
                     pass
-                try:
-                    await msg.author.timeout(timedelta(hours=1), reason=f"Menace/intimidation : {_thr[:40]}")
-                except Exception:
-                    pass
+                if _thr_dur:
+                    try:
+                        await msg.author.timeout(timedelta(hours=1), reason=f"Menace/intimidation : {_thr[:40]}")
+                    except Exception:
+                        pass
                 try:
                     await _record_infraction(msg.guild.id, msg.author.id, 'menace',
-                                             f"Menace/intimidation IRL : {_thr[:50]}", '1h')
+                                             f"Menace/intimidation IRL : {_thr[:50]}", '1h' if _thr_dur else '')
                 except Exception:
                     pass
                 try:
                     await ulogger2026.log_event(
                         bot, msg.guild, ulogger2026.EventType.SEC_ESCALATION,
                         description=(f"⚔️ **MENACE / INTIMIDATION** de {msg.author.mention} "
-                                     f"(`{msg.author.id}`) dans {msg.channel.mention} → message retiré "
-                                     f"+ exclusion 1 h.\n**Extrait :** ||{(_thr or '')[:60]}||\n"
+                                     f"(`{msg.author.id}`) dans {msg.channel.mention} → message retiré"
+                                     f"{' + exclusion 1 h' if _thr_dur else ''}.\n**Extrait :** ||{(_thr or '')[:60]}||\n"
                                      f"➡️ C'est **grave** (parfois illégal). Si menace réelle, **bannis** "
                                      f"(`/off`)."),
                         user=msg.author, moderator=bot.user, channel=msg.channel,
@@ -24396,8 +24215,8 @@ async def on_message(msg):
                 try:
                     await _warn_calm_down(
                         msg.channel,
-                        f"⛔ {msg.author.mention}, les **menaces** n'ont aucune place ici. Message retiré, "
-                        f"exclusion temporaire, staff prévenu.")
+                        f"⛔ {msg.author.mention}, les **menaces** n'ont aucune place ici. Message retiré"
+                        f"{', exclusion temporaire' if _thr_dur else ''}, staff prévenu.")
                 except Exception:
                     pass
                 try:
@@ -24499,9 +24318,7 @@ async def on_message(msg):
                     try:
                         _dvl = _dv.group(0).lower()
                         if _dvl.startswith(('con', 'c0n', 'fil')):
-                            _tgt = bool(getattr(msg, 'mentions', None)) \
-                                or getattr(msg, 'reference', None) is not None \
-                                or bool(_INSULT_TARGET_RE.search(_spoken or ''))
+                            _tgt = _insulte_visee(msg, _spoken)
                             if not _tgt and _GAMING_CTX_RE.search(_spoken or ''):
                                 _dv = None
                     except Exception:
@@ -24524,7 +24341,7 @@ async def on_message(msg):
                         pass
                     try:
                         if await _offense_tick(msg.guild, msg.author, msg.channel):
-                            return   # banni par la rafale → on s'arrête là
+                            return   # exclu par la rafale → on s'arrête là
                     except Exception:
                         pass
                     try:
@@ -24538,11 +24355,18 @@ async def on_message(msg):
                     return
             if _ilvl >= 2:
                 try:
-                    _itargeted = bool(getattr(msg, 'mentions', None)) \
-                        or getattr(msg, 'reference', None) is not None \
-                        or bool(_INSULT_TARGET_RE.search(_spoken or ''))
+                    _itargeted = _insulte_visee(msg, _spoken)
                 except Exception:
                     _itargeted = False
+                if _ilvl >= 3 and _DISCOURS_RAPPORTE_RE.search(_spoken or ''):
+                    # Il RAPPORTE ce qu'on lui a dit (souvent la victime) : retiré, jamais puni.
+                    try:
+                        await msg.delete()
+                    except discord.HTTPException:
+                        pass
+                    await send_log(msg.guild, 'anti_badwords', msg.author, msg,
+                                   "Propos graves rapportés (non sanctionné)", f"||{(_iterm or '')[:40]}||")
+                    return
                 if _ilvl >= 4:
                     # 🆘 INCITATION AU SUICIDE / À LA MORT dirigée vers autrui (owner 2026-06-21) :
                     # une ATTAQUE grave → action maximale + alerte owner. NB : exprimer SA propre
@@ -24641,7 +24465,7 @@ async def on_message(msg):
                         pass
                     try:
                         if await _offense_tick(msg.guild, msg.author, msg.channel):
-                            return   # banni par la rafale → on s'arrête là
+                            return   # exclu par la rafale → on s'arrête là
                     except Exception:
                         pass
                     try:
@@ -24743,11 +24567,15 @@ async def on_message(msg):
                 except Exception:
                     pass
                 try:
-                    await msg.author.timeout(timedelta(minutes=10), reason="Spam inter-salons (même message partout)")
+                    _xs = _register_protection_strike(msg.guild.id, msg.author.id, 'xchannel')
                 except Exception:
-                    pass
+                    _xs = 1
+                if _xs <= 1:  # 19/10/2026 : la première fois, un rappel
+                    await _warn_calm_down(
+                        msg.channel, f"📡 {msg.author.mention}, poste ton message dans un seul salon 🙏")
+                    return
                 try:
-                    _register_protection_strike(msg.guild.id, msg.author.id, 'xchannel')
+                    await msg.author.timeout(timedelta(minutes=10), reason="Spam inter-salons (même message partout)")
                 except Exception:
                     pass
                 try:
@@ -24833,7 +24661,7 @@ async def on_message(msg):
                     pass
                 try:
                     if await _offense_tick(msg.guild, msg.author, msg.channel):
-                        return   # banni par la rafale
+                        return   # exclu par la rafale
                 except Exception:
                     pass
                 try:
@@ -24860,7 +24688,10 @@ async def on_message(msg):
                     await msg.delete()
                 except Exception:
                     pass
-                await _trust_block_notice(msg, 'link', fresh_escalate=True, fresh_minutes=_fresh_min)
+                # 19/10/2026 : un nouveau qui partage son profil Roblox ou une vidéo YouTube n'est pas
+                # un arnaqueur ; seul un lien vers un site inconnu vaut l'exclusion d'office.
+                _inconnu = any(not domaine_officiel(_hote(u)) for u in _URL_COMPLETE.findall(ct))
+                await _trust_block_notice(msg, 'link', fresh_escalate=_inconnu, fresh_minutes=_fresh_min)
                 try:
                     await send_log(msg.guild, 'anti_link', msg.author, msg, "Lien (interdit hors image/GIF)", None)
                 except Exception:
@@ -25032,18 +24863,8 @@ async def on_message(msg):
         # staff exemptés (is_fully_immune). Ne SUPPRIME PAS le message (il est légitime). FAIL-SAFE.
         if c.get('anti_monologue', 1) and not await is_fully_immune(msg.author):
             try:
-                _mid = msg.channel.id
-                _st = _monologue_tracker.get(_mid)
-                if _st and _st[0] == msg.author.id:
-                    _st[1] += 1
-                else:
-                    _st = [msg.author.id, 1]
-                    _monologue_tracker[_mid] = _st
-                if len(_monologue_tracker) > 3000:  # borne mémoire
-                    for _k in list(_monologue_tracker.keys())[:600]:
-                        _monologue_tracker.pop(_k, None)
-                if _st[1] >= _MONOLOGUE_THRESHOLD:
-                    _st[1] = 0  # reset → il faut RE-enchaîner 10 messages pour re-déclencher
+                if _serie >= _MONOLOGUE_THRESHOLD:
+                    _monologue_tracker[msg.channel.id][1] = 0  # il faut RE-enchaîner 10 messages
                     try:
                         _strk = _register_protection_strike(msg.guild.id, msg.author.id, 'monologue')
                     except Exception:
@@ -25090,7 +24911,7 @@ async def on_message(msg):
                 _kf = (msg.guild.id, msg.author.id)
                 _buf = [t for t in _attach_flood.get(_kf, [])
                         if (_now_f - t).total_seconds() < _IMG_FLOOD_WINDOW]
-                _buf.extend([_now_f] * len(msg.attachments))
+                _buf.append(_now_f)
                 _attach_flood[_kf] = _buf
                 if len(_attach_flood) > 5000:  # borne mémoire
                     for _k2 in [k for k, v in list(_attach_flood.items())
@@ -27773,7 +27594,7 @@ async def check_youtube_feeds(session, guild, data):
     if not feeds:
         return
 
-    headers_yt = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    headers_yt = dict(_YT_RESOLVE_CONSENT)  # la page « live » aussi : sinon le consentement européen
     _yt_feeds_dirty = False           # un feed a-t-il été résolu @pseudo→UC (à persister) ?
 
     for feed in feeds:
@@ -27849,8 +27670,11 @@ async def check_youtube_feeds(session, guild, data):
                                     e.set_footer(text=f"YouTube Live • {channel_name}", icon_url=_YT_ICON)
                                     e.timestamp = now()
 
-                                    _live_msg = await _publier_social(live_channel, 'youtube_live', e)
-                                    await mark_live_announced(live_cache_key, guild.id, 'youtube', channel_name, message_id=_live_msg.id if _live_msg else 0, live_channel_id=live_channel.id)
+                                    _live_msg = await _publier_reserve(
+                                        guild, "youtube_live", f"{channel_id}:{now():%Y-%m-%d}", live_channel,
+                                        'youtube_live', e, "live")
+                                    if _live_msg:  # envoi raté : rien de noté, le passage suivant réessaie
+                                        await mark_live_announced(live_cache_key, guild.id, 'youtube', channel_name, message_id=_live_msg.id, live_channel_id=live_channel.id)
                             else:
                                 # Live pas détecté — debounce avant de considérer comme terminé
                                 await check_live_ended(live_cache_key, guild.id, 'youtube', channel_name)
@@ -28267,8 +28091,11 @@ async def check_twitch_feeds(session, guild, data):
                     e.set_footer(text=f"Twitch • {username}", icon_url=_TW_ICON)
                     e.timestamp = now()
 
-                    _live_msg = await _publier_social(notif_channel, 'twitch_live', e)
-                    await mark_live_announced(cache_key, guild.id, 'twitch', username, message_id=_live_msg.id if _live_msg else 0, live_channel_id=notif_channel.id)
+                    _live_msg = await _publier_reserve(
+                        guild, "twitch_live", f"{username.lower()}:{now():%Y-%m-%d}", notif_channel,
+                        'twitch_live', e, "live")
+                    if _live_msg:  # envoi raté : rien de noté, le passage suivant réessaie
+                        await mark_live_announced(cache_key, guild.id, 'twitch', username, message_id=_live_msg.id, live_channel_id=notif_channel.id)
             else:
                 # Phase 20 : si live mais keyword absent du titre → considéré comme ended
                 # (déclenche delete du message s'il avait été posté)
@@ -28403,8 +28230,11 @@ async def check_tiktok_feeds(session, guild, data):
                                     e.set_footer(text=f"TikTok Live • @{username}", icon_url=_TK_ICON)
                                     e.timestamp = now()
 
-                                    _live_msg = await _publier_social(live_channel, 'tiktok_live', e)
-                                    await mark_live_announced(live_cache_key, guild.id, 'tiktok', username, message_id=_live_msg.id if _live_msg else 0, live_channel_id=live_channel.id)
+                                    _live_msg = await _publier_reserve(
+                                        guild, "tiktok_live", f"{username.lower()}:{now():%Y-%m-%d}", live_channel,
+                                        'tiktok_live', e, "live")
+                                    if _live_msg:  # envoi raté : rien de noté, le passage suivant réessaie
+                                        await mark_live_announced(live_cache_key, guild.id, 'tiktok', username, message_id=_live_msg.id, live_channel_id=live_channel.id)
                             else:
                                 # Phase 20 : si live mais keyword absent → considéré ended
                                 await check_live_ended(live_cache_key, guild.id, 'tiktok', username)
@@ -28482,7 +28312,10 @@ async def check_tiktok_feeds(session, guild, data):
                                     _e.set_thumbnail(url=_tk_av)
                                 _e.set_footer(text=f"TikTok • @{username}", icon_url=_TK_ICON)
                                 _e.timestamp = now()
-                                _tk_msg = await _publier_social(target_channel, 'tiktok', _e)
+                                _tk_msg = await _publier_reserve(guild, "tiktok", _tk_vid, target_channel, 'tiktok', _e,
+                                                                 "rsshub")
+                                if _tk_msg is False:
+                                    continue  # déjà publié (ou en cours d'envoi) ailleurs
                                 try:
                                     if _tk_msg:
                                         diag.event("social", "tiktok_feed",
@@ -28492,6 +28325,8 @@ async def check_tiktok_feeds(session, guild, data):
                                                   f"@{username}: webhook_send n'a rien renvoyé → #{getattr(target_channel, 'name', '?')}")
                                 except Exception:
                                     pass
+                                if not _tk_msg:
+                                    continue  # envoi raté : rien de noté, le passage suivant réessaie
                                 try:
                                     await tracking2026.record_post(
                                         guild.id, "tiktok", username, _tk_vid,
@@ -28646,7 +28481,9 @@ async def check_tiktok_feeds(session, guild, data):
                 e.set_footer(text=f"TikTok • @{username}", icon_url=_TK_ICON)
                 e.timestamp = now()
 
-                _tk_msg = await _publier_social(target_channel, 'tiktok', e)
+                _tk_msg = await _publier_reserve(guild, "tiktok", latest_video_id, target_channel, 'tiktok', e, "page")
+                if not _tk_msg:
+                    continue  # déjà publié ailleurs, ou envoi raté (le passage suivant réessaie)
                 try:
                     await tracking2026.record_post(
                         guild.id, "tiktok", username, latest_video_id,
@@ -28762,7 +28599,9 @@ async def check_reddit_feeds(session, guild, data):
             )
             e.timestamp = now()
 
-            _rd_msg = await _publier_social(channel, 'reddit', e)
+            _rd_msg = await _publier_reserve(guild, "reddit", post_id, channel, 'reddit', e, "flux")
+            if not _rd_msg:
+                continue  # déjà publié ailleurs, ou envoi raté (le passage suivant réessaie)
             try:
                 await tracking2026.record_post(
                     guild.id, "reddit", subreddit, post_id,
@@ -28786,7 +28625,9 @@ async def check_reddit_feeds(session, guild, data):
             continue
 
 async def check_twitter_feeds(session, guild, data):
-    """Vérifie les nouveaux tweets via Twitter Syndication API (+ Nitter fallback)"""
+    """Nouveaux posts X par le RSSHub du propriétaire (RSSHUB_BASE_URL), seule source fiable.
+    19/10/2026 : les miroirs Nitter publics et l'API Syndication (morts) sont retirés — un miroir
+    pouvait remplacer le lien, le texte et l'image publiés."""
     channel = guild.get_channel(data.get('ads_twitter_channel', 0))
     feeds = data.get('ads_twitter_feeds', [])
     if not channel or not feeds:
@@ -28808,12 +28649,8 @@ async def check_twitter_feeds(session, guild, data):
             image_url = None
             tw_avatar_url = None
 
-            # ═══════════════ MÉTHODE 0 : RSSHub auto-hébergé (owner 2026-07-09) ═══════════════
-            # VÉRIF 2026 (tests réels) : syndication.twitter.com = MORT (réponse vide), Nitter public
-            # = mort, instance RSSHub publique = bloquée. La SEULE voie fiable = une instance RSSHub
-            # AUTO-HÉBERGÉE (RSSHUB_BASE_URL). On l'essaie EN PREMIER ; le flux Twitter y est du RSS
-            # standard (même parsing que Nitter). Si non configuré → on tombe sur Nitter/syndication
-            # (legacy, souvent KO) comme avant.
+            # RSSHub AUTO-HÉBERGÉ (owner 2026-07-09) : syndication.twitter.com et Nitter sont morts,
+            # l'instance RSSHub publique est bloquée.
             _rssbase = (os.getenv("RSSHUB_BASE_URL") or "").strip().rstrip("/")
             if _rssbase and not tweet_id:
                 try:
@@ -28822,7 +28659,9 @@ async def check_twitter_feeds(session, guild, data):
                         if resp.status == 200:
                             _rtext = await resp.text()
                             if '<item>' in _rtext:
-                                _rit = (ET.fromstring(_rtext).findall('.//item') or [None])[0]
+                                _rroot = ET.fromstring(_rtext)
+                                tw_avatar_url = (_rroot.findtext('.//channel/image/url') or '').strip() or None
+                                _rit = (_rroot.findall('.//item') or [None])[0]
                                 if _rit is not None:
                                     tweet_link = (_rit.findtext('link') or '').strip()
                                     _rguid = (_rit.findtext('guid') or tweet_link or '').strip()
@@ -28856,115 +28695,32 @@ async def check_twitter_feeds(session, guild, data):
                     except Exception:
                         pass
 
-            # ═══════════════ MÉTHODE 1 : Nitter RSS (plus stable que Syndication) ═══════════════
-            # Note (2026): Twitter Syndication renvoie souvent 429 depuis IP datacenter.
-            # On essaye Nitter d'abord, qui marche bien.
-            working_instance = None
-            for instance in NITTER_INSTANCES:
-                try:
-                    rss_url = f"https://{instance}/{username}/rss"
-                    async with session.get(rss_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                        if resp.status == 200:
-                            text = await resp.text()
-                            if '<item>' in text or '<entry>' in text:
-                                root = ET.fromstring(text)
-                                if '<entry>' in text:
-                                    ns = {'atom': 'http://www.w3.org/2005/Atom'}
-                                    entry = (root.findall('.//atom:entry', ns) or root.findall('.//entry') or [None])[0]
-                                    if entry is not None:
-                                        id_el = entry.find('atom:id', ns) or entry.find('id')
-                                        title_el = entry.find('atom:title', ns) or entry.find('title')
-                                        link_el = entry.find('atom:link', ns) or entry.find('link')
-                                        tweet_id = id_el.text if id_el is not None else ""
-                                        tweet_text = title_el.text if title_el is not None else ""
-                                        tweet_link = link_el.get('href', '') if link_el is not None else ""
-                                else:
-                                    item = (root.findall('.//item') or [None])[0]
-                                    if item is not None:
-                                        guid_el = item.find('guid')
-                                        title_el = item.find('title')
-                                        link_el = item.find('link')
-                                        desc_el = item.find('description')
-                                        tweet_id = guid_el.text if guid_el is not None else ""
-                                        tweet_text = title_el.text if title_el is not None else ""
-                                        tweet_link = link_el.text if link_el is not None else ""
-                                        if desc_el is not None and desc_el.text:
-                                            img_m = re.search(r'<img[^>]+src="([^"]+)"', desc_el.text)
-                                            if img_m:
-                                                image_url = img_m.group(1)
-                                if tweet_id:
-                                    # Extraire l'ID numerique (Nitter le wrap parfois)
-                                    id_match = re.search(r'(\d{15,})', tweet_id)
-                                    if id_match:
-                                        tweet_id = id_match.group(1)
-                                    working_instance = instance
-                                    break
-                except Exception:
-                    continue
-
-            # Convertir liens Nitter → Twitter
-            if working_instance and tweet_link and working_instance in tweet_link:
-                tweet_link = tweet_link.replace(f"https://{working_instance}", "https://twitter.com")
-            if working_instance and image_url and working_instance in image_url:
-                image_url = image_url.replace(f"https://{working_instance}", "https://pbs.twimg.com")
-
-            # ═══════════════ MÉTHODE 2 : Twitter Syndication API (fallback) ═══════════════
-            # Souvent rate-limitee (429) depuis cloud, mais on tente quand meme si Nitter rate.
-            if not tweet_id:
-                try:
-                    synd_url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
-                    async with session.get(synd_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                        if resp.status == 200:
-                            html = await resp.text()
-                            nd_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
-                            if nd_match:
-                                import json as _json
-                                nd_data = _json.loads(nd_match.group(1))
-                                entries = nd_data.get('props', {}).get('pageProps', {}).get('timeline', {}).get('entries', [])
-                                if entries:
-                                    tweet_data = entries[0].get('content', {}).get('tweet', {})
-                                    if tweet_data:
-                                        tweet_id = tweet_data.get('id_str', '')
-                                        tweet_text = tweet_data.get('text', '') or tweet_data.get('full_text', '')
-                                        permalink = tweet_data.get('permalink', '')
-                                        tweet_link = f"https://twitter.com{permalink}" if permalink else f"https://twitter.com/{username}/status/{tweet_id}"
-                                        user_data = tweet_data.get('user', {})
-                                        tw_avatar_url = user_data.get('profile_image_url_https', '').replace('_normal', '_400x400')
-                                        media_details = tweet_data.get('mediaDetails', [])
-                                        if media_details:
-                                            for md in media_details:
-                                                if md.get('type') == 'photo':
-                                                    image_url = md.get('media_url_https', '')
-                                                    break
-                                        if not image_url:
-                                            entities_media = tweet_data.get('entities', {}).get('media', [])
-                                            for em in entities_media:
-                                                if em.get('type') == 'photo':
-                                                    image_url = em.get('media_url_https', '')
-                                                    break
-                        elif resp.status == 429:
-                            print(f"[TWITTER] Syndication rate-limited (429) pour @{username}")
-                except Exception as ex:
-                    print(f"[TWITTER] Syndication API échouée pour @{username}: {ex}")
-
             if not tweet_id:
                 # Phase 251.18 : condition ATTENDUE (Twitter n'a plus d'API gratuite ;
                 # repli manuel/embed déjà en place) : ligne de routine, tue par le
                 # journal (journal.py) — visible uniquement en VERBOSE_LOGS. Le vrai avis
                 # owner passe par _warn_api_dead (une fois par session), pas par ce print.
                 print(f"[TWITTER] aucune source pour @{username} (repli manuel)")
-                # Phase 3.8 : warn UNE seule fois par session que Nitter+Syndication sont morts
                 try:
                     await _warn_api_dead(
                         guild, "twitter",
-                        "Nitter instances down depuis 2024, Twitter Syndication 429 depuis cloud.",
+                        "RSSHub non configuré ou injoignable (RSSHUB_BASE_URL).",
                     )
                 except Exception:
                     pass
                 continue
 
-            if not tweet_link:
-                tweet_link = f"https://twitter.com/{username}/status/{tweet_id}"
+            # Rien de ce que renvoie un service tiers ne devient tel quel un lien ou une image : le
+            # lien est reconstruit depuis l'identifiant, le texte neutralisé (pas de [lien](piège)
+            # ni de @everyone), les images acceptées seulement chez X.
+            if not str(tweet_id).isdigit():
+                continue
+            tweet_link = f"https://x.com/{username}/status/{tweet_id}"
+            tweet_text = _escape_md(tweet_text or "", 1900)
+            if image_url and _hote(image_url) not in ("pbs.twimg.com", "video.twimg.com"):
+                image_url = None
+            if tw_avatar_url and _hote(tw_avatar_url) != "pbs.twimg.com":
+                tw_avatar_url = None
 
             # Dedup persistant (Phase 1.8) - garde l'historique entre redemarrages
             if await tracking2026.was_posted(guild.id, "twitter", username, tweet_id):
@@ -29003,7 +28759,9 @@ async def check_twitter_feeds(session, guild, data):
             )
             e.timestamp = now()
 
-            _tw_msg = await _publier_social(channel, 'twitter', e)
+            _tw_msg = await _publier_reserve(guild, "twitter", tweet_id, channel, 'twitter', e, "rsshub")
+            if _tw_msg is False:
+                continue  # déjà publié (ou en cours d'envoi) ailleurs
             try:
                 if _tw_msg:
                     diag.event("social", "twitter_feed",
@@ -29014,6 +28772,8 @@ async def check_twitter_feeds(session, guild, data):
                               f"#{getattr(channel, 'name', '?')} (perms webhook/salon ?)")
             except Exception:
                 pass
+            if not _tw_msg:
+                continue  # envoi raté : rien de noté, le passage suivant réessaie
             try:
                 await tracking2026.record_post(
                     guild.id, "twitter", username, tweet_id,

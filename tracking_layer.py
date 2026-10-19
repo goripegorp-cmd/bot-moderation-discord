@@ -33,6 +33,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
+import stockage
 from paths import module_dir
 
 
@@ -77,6 +78,7 @@ class TrackedPost:
 _io_lock = asyncio.Lock()
 _cache: dict[int, dict[str, TrackedPost]] = {}  # guild_id -> {key -> TrackedPost}
 _loaded_guilds: set[int] = set()
+_illisibles: set[int] = set()  # historique abîmé : rien n'est réécrit, rien n'est republié
 
 
 def _path(guild_id: int):
@@ -89,10 +91,17 @@ async def _load_guild(guild_id: int) -> None:
     async with _io_lock:
         if guild_id in _loaded_guilds:
             return
-        path = _path(guild_id)
-        if path.exists():
+        try:
+            raw = await asyncio.to_thread(stockage.lire_json_sur, _path(guild_id))
+        except stockage.Illisible as ex:
+            # Ni chargé ni réécrit ; was_posted dit « déjà publié » pour ne rien republier.
+            print("[TRACKING][E302] historique des publications illisible, rien n'est réécrit")
+            print(f"[TRACKING][E302:DETAIL] guild={guild_id} {ex}")
+            _illisibles.add(guild_id)
+            return
+        _illisibles.discard(guild_id)
+        if raw is not None:
             try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
                 store: dict[str, TrackedPost] = {}
                 # Phase 14 : robust loading — filtre les champs inconnus du JSON
                 # (pour gérer rolling updates où les anciens JSON ont moins de
@@ -108,7 +117,7 @@ async def _load_guild(guild_id: int) -> None:
                     except (KeyError, TypeError, ValueError):
                         continue
                 _cache[guild_id] = store
-            except (json.JSONDecodeError, OSError):
+            except TypeError:
                 _cache[guild_id] = {}
         else:
             _cache[guild_id] = {}
@@ -119,12 +128,12 @@ def _ecrire_atomique(chemin, texte: str) -> None:
     """19/10/2026 : un conteneur arrêté au milieu de l'écriture (chaque déploiement en arrête un)
     laissait un JSON tronqué, relu comme VIDE : tout l'historique oublié, et les vidéos de la
     semaine republiées. Fichier temporaire, puis remplacement d'un bloc."""
-    tmp = chemin.with_name(chemin.name + ".tmp")
-    tmp.write_text(texte, encoding="utf-8")
-    os.replace(tmp, chemin)
+    stockage.ecrire_json_sur(chemin, texte)
 
 
 async def _save_guild(guild_id: int) -> None:
+    if guild_id in _illisibles:
+        return
     async with _io_lock:
         store = _cache.get(guild_id, {})
         payload = [asdict(tp) for tp in store.values()]
@@ -144,6 +153,8 @@ async def was_posted(
     Empeche le re-post au redemarrage ou si la source revient en ligne.
     """
     await _load_guild(guild_id)
+    if guild_id in _illisibles:
+        return True
     key = f"{platform}:{username.lower()}:{post_id}"
     return key in _cache.get(guild_id, {})
 

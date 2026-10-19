@@ -401,7 +401,7 @@ def test_off_off_leve_bien_le_silence():
     """⚠️ LE TIMEOUT EST MAINTENANT L'ACTION PRINCIPALE, plus un filet. Si la
     levée ne l'annulait pas, un membre « réintégré » resterait muet 28 jours
     avec tous ses rôles rendus — et personne ne comprendrait pourquoi."""
-    corps = _src("off_off_cmd")
+    corps = _src("_lever_radiation")  # le corps commun de /off off et du bouton du recours
     assert "timeout(None" in corps, (
         "`/off off` n'annule pas la réduction au silence")
 
@@ -512,17 +512,34 @@ def test_le_salon_de_recours_nest_PAS_visible_par_le_radie():
         "et il ne pourrait pas y écrire de toute façon")
 
 
-def test_la_decision_est_HUMAINE_et_reservee_au_staff():
+def test_la_decision_est_HUMAINE_et_reservee_a_la_direction():
     """« C'est pas le bot qui va décider, c'est moi. » Le bot instruit le
-    dossier ; un humain tranche."""
-    corps = _src("callback")  # premier callback trouvé — on vise la classe
+    dossier ; un humain tranche — avec le même droit que /off (19/10/2026 : le
+    staff ne bannit pas)."""
     src_cls = SRC
     assert "class RadieDecisionButton" in src_cls
     i = src_cls.index("class RadieDecisionButton")
     bloc = src_cls[i:i + 4000]
-    assert "guild_permissions.administrator" in bloc
-    assert "ticket_staff" in bloc
-    assert "Décision réservée au staff" in bloc
+    assert "refus = await _autorise_radiation(i)" in bloc
+    assert "ticket_staff" not in bloc
+
+
+def test_lever_la_radiation_LA_LEVE_vraiment():
+    """19/10/2026 : le bouton annonçait au membre « radiation levée » sans rien
+    lever (il renvoyait vers /off off). Il passe maintenant par le même corps."""
+    i = SRC.index("class RadieDecisionButton")
+    bloc = SRC[i:i + 4000]
+    assert "await _lever_radiation(i.guild, membre, i.user" in bloc
+    assert "utilisez `/off off" not in bloc
+    assert "await _lever_radiation(guild, membre, i.user, raison)" in _src("off_off_cmd")
+
+
+def test_une_deuxieme_radiation_garde_les_roles_d_avant():
+    """Radier un membre déjà radié remplaçait ses rôles sauvegardés par… le rôle
+    « Radié » : /off off ne pouvait plus rien lui rendre."""
+    corps = _src("_radier_membre")
+    assert "saved_roles=excluded.saved_roles" not in corps
+    assert "r.name != _RADIE_ROLE_NAME" in corps
 
 
 def test_on_previent_AVANT_de_bannir():
@@ -544,9 +561,9 @@ def test_on_previent_AVANT_de_bannir():
 def test_la_levee_rend_le_pseudo():
     """Laisser « ⛔ RADIÉ-1234 » sur quelqu'un dont on vient de reconnaître le
     bon droit serait une sanction qui survit à sa levée."""
-    corps = _src("off_off_cmd")
+    corps = _src("_lever_radiation")
     assert "saved_nick" in corps
-    assert "nick=_ancien" in corps
+    assert "nick=ancien" in corps
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -409,24 +409,22 @@ class TwitchAdapter(PlatformAdapter):
         """Recupere le live en cours d'un user (vide si pas en live)."""
         if not self.configured or not self._session:
             return []
+        # 19/10/2026 : une panne n'est pas « pas en live » — elle lève, et l'annonce reste.
         token = await self._ensure_token()
         if not token:
-            return []
+            raise RuntimeError("jeton Twitch indisponible")
         url = "https://api.twitch.tv/helix/streams"
         headers = {
             "Client-Id": self.client_id,
             "Authorization": f"Bearer {token}",
         }
         params = {"user_login": handle}
-        try:
-            async with self._session.get(
-                url, headers=headers, params=params, timeout=10
-            ) as resp:
-                if resp.status != 200:
-                    return []
-                data = await resp.json()
-        except Exception:
-            return []
+        async with self._session.get(
+            url, headers=headers, params=params, timeout=10
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Twitch HTTP {resp.status}")
+            data = await resp.json()
 
         posts: list[SocialPost] = []
         for entry in data.get("data", []):
@@ -1249,6 +1247,7 @@ class YouTubeRSSAdapter(RSSHubAdapter):
 # PERSISTANCE
 # =============================================================================
 
+import stockage
 from paths import module_dir
 DATA_DIR = module_dir("social")
 
@@ -1275,12 +1274,7 @@ _io_lock = asyncio.Lock()
 # disque lent ne fait plus attendre que la sauvegarde elle-même.
 
 def _lire_json_bloquant(path: Path) -> Any:
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    return stockage.lire_json_sur(path)  # abîmé et sans copie : Illisible, jamais « vide »
 
 
 async def _read_json(path: Path) -> Any:
@@ -1292,9 +1286,7 @@ def _ecrire_json_bloquant(path: Path, texte: str) -> None:
     # conteneur arrêté au milieu d'un write_text (chaque déploiement en arrête
     # un) laissait un JSON tronqué, que `_read_json` lit comme « rien » : toutes
     # les annonces du serveur oubliées, sans un mot.
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(texte, encoding="utf-8")
-    os.replace(tmp, path)
+    stockage.ecrire_json_sur(path, texte)
 
 
 async def _write_json(path: Path, payload: Any) -> None:
@@ -1331,6 +1323,8 @@ class SocialMediaManager:
         self._cleanup_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
         self._loaded_guilds: set[int] = set()
+        self._illisibles: set[int] = set()  # fichier abîmé : on ne réécrit rien par-dessus
+        self._absences: dict = {}  # (serveur, annonce) -> constats d'absence d'affilée
         self._reserver = self._confirmer = self._annuler = None
 
     # ---- adapters ---------------------------------------------------------
@@ -1375,8 +1369,18 @@ class SocialMediaManager:
 
     async def load_guild(self, guild_id: int) -> None:
         async with _io_lock:
-            subs_data = await _read_json(_subs_path(guild_id)) or []
-            anns_data = await _read_json(_anns_path(guild_id)) or []
+            try:
+                subs_data = await _read_json(_subs_path(guild_id)) or []
+                anns_data = await _read_json(_anns_path(guild_id)) or []
+            except stockage.Illisible as ex:
+                # On ne charge rien, on n'écrit rien : la prochaine lecture réessaiera.
+                print("[SOCIAL][E301] fichier d'abonnements illisible, rien n'est réécrit")
+                print(f"[SOCIAL][E301:DETAIL] guild={guild_id} {ex}")
+                self._illisibles.add(guild_id)
+                self._subs.setdefault(guild_id, {})
+                self._anns.setdefault(guild_id, {})
+                return
+        self._illisibles.discard(guild_id)
 
         self._subs[guild_id] = {}
         for d in subs_data:
@@ -1397,11 +1401,15 @@ class SocialMediaManager:
         self._loaded_guilds.add(guild_id)
 
     async def _save_subs(self, guild_id: int) -> None:
+        if guild_id in self._illisibles:
+            raise stockage.Illisible(f"abonnements du serveur {guild_id}")
         async with _io_lock:
             payload = [s.to_dict() for s in self._subs.get(guild_id, {}).values()]
             await _write_json(_subs_path(guild_id), payload)
 
     async def _save_anns(self, guild_id: int) -> None:
+        if guild_id in self._illisibles:
+            raise stockage.Illisible(f"annonces du serveur {guild_id}")
         async with _io_lock:
             payload = [a.to_dict() for a in self._anns.get(guild_id, {}).values()]
             await _write_json(_anns_path(guild_id), payload)
@@ -1645,6 +1653,14 @@ class SocialMediaManager:
         except Exception:
             still_active = True
         ann.last_checked_at = datetime.now(timezone.utc).isoformat()
+        # Deux constats d'absence d'affilée avant de retirer : un trou passager de la plateforme ne
+        # supprime plus l'annonce d'un live en cours.
+        cle = (ann.guild_id, ann.unique_key)
+        if still_active:
+            self._absences.pop(cle, None)
+        else:
+            self._absences[cle] = self._absences.get(cle, 0) + 1
+            still_active = self._absences[cle] < 2
         if not still_active and self._delete_callback is not None:
             try:
                 ok = await self._delete_callback(ann)

@@ -148,17 +148,14 @@ _RE_ABLEIST = (None, None)
 # intimidation directe (« tu vas le regretter »). Phrases dirigées → action forte + alerte owner.
 # MENACES DURES — ZÉRO interprétation gaming (localisation/dox/arme blanche/mutilation). Toujours
 # action forte, peu importe le contexte.
+#  19/10/2026 : seulement l'adresse, la ville, l'IP, le dox. « je viens chez toi », « je vais te
+#  retrouver », « i'm coming for you », « je sais qui tu es vraiment », « je vais te planter » sont le
+#  quotidien du jeu de rôle (Brookhaven, cache-cache, Murder Mystery) ; le couteau passe en DOUCE.
 _THREAT_TERMS = frozenset({
     "je sais où tu habites", "je sais ou tu habites", "je sais où t'habites", "je sais ou t'habites",
-    "je connais ton adresse", "je connais ta ville", "je vais te retrouver", "on va te retrouver",
-    "je te retrouverai", "je vais débarquer chez toi", "je débarque chez toi", "je viens chez toi",
-    "je vais venir chez toi", "je vais venir te voir", "je sais qui tu es vraiment",
+    "je connais ton adresse", "je connais ta ville",
     "je sais où tu vis", "je sais ou tu vis", "j'ai ton ip", "je vais te dox", "je vais te doxx",
-    "je vais te poignarder", "je vais te planter", "je vais te crever les yeux",
-    "je vais te briser les jambes",
-    "i know where you live", "i'll find you", "i will find you", "i'm coming for you",
-    "im coming for you", "i know your address", "i'll come to your house", "i'll hunt you down",
-    "i know who you are", "i have your ip", "i'll dox you", "ill dox you",
+    "i know where you live", "i know your address", "i have your ip", "i'll dox you", "ill dox you",
 })
 # MENACES DOUCES — violence physique « bagarre »/armes à feu/intimidation, qui PEUVENT exister en
 # banter gaming (« casser la gueule au boss », « te tirer dessus » dans un FPS, « tu vas le
@@ -168,7 +165,8 @@ _THREAT_SOFT_TERMS = frozenset({
     "je vais te tabasser", "je vais te casser la gueule", "je vais te péter la gueule",
     "je vais te peter la gueule", "je vais te défoncer la gueule", "je vais te faire la peau",
     "je vais te fracasser", "je vais te frapper", "je vais te faire du mal",
-    "je vais te tirer dessus", "balle dans la tête",
+    "je vais te tirer dessus", "je vais te poignarder", "je vais te crever les yeux",
+    "je vais te briser les jambes",
     "tu vas le regretter", "tu vas le payer", "tu vas voir ce qui va t'arriver",
     # NB (audit 2026-07-02) : « fais gaffe à toi » / « tu ferais mieux de faire gaffe » RETIRÉS —
     # ce sont des formules d'AFFECTION/prudence (« prends soin de toi ») indiscernables d'une
@@ -411,4 +409,6 @@ def threat_soft_hit(raw: str, normalized: str | None = None):
         return None
     return None
 
-
+#  ⚠️ Charge le lexique à l'import. Sans cet appel le filtre ne voit RIEN (retiré par erreur
+#  le 19/10/2026 comme « code mort » : le filtre est resté muet en production).
+_load()

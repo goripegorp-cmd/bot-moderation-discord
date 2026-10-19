@@ -13,9 +13,12 @@ libre, mémoire, tables les plus lourdes.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 PART_COPIES = 0.30        # copies .bak : au plus 30 % du volume…
 COPIES_MIN = 2            # …mais toujours les deux plus récentes
@@ -26,6 +29,46 @@ SEUIL_LIBRE = 0.20        # moins de 20 % libres : alarme dans le journal
 #  /health (endpoint public — aucune taille absolue, aucune identité).
 #  Le journal, lui, ne parle du stockage que pour une ALARME (journal.py).
 DERNIER: dict = {}
+
+
+class Illisible(Exception):
+    """Le fichier existe mais ne se lit pas : surtout ne rien écrire par-dessus."""
+
+
+def lire_json_sur(chemin):
+    """Le contenu JSON ; None si le fichier n'existe pas. Abîmé : la copie .bak ; sinon Illisible —
+    jamais « vide », sinon la sauvegarde suivante effacerait tout (audit 19/10/2026)."""
+    chemin = Path(chemin)
+    candidats = [c for c in (chemin, chemin.with_name(chemin.name + ".bak")) if c.exists()]
+    if not candidats:
+        return None
+    for c in candidats:
+        try:
+            return json.loads(c.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+    raise Illisible(str(chemin))
+
+
+def ecrire_json_sur(chemin, texte: str) -> None:
+    """Un nom temporaire unique (deux écritures ne se marchent plus dessus), forcé sur le disque, la
+    version d'avant gardée en .bak, puis le remplacement d'un bloc."""
+    chemin = Path(chemin)
+    marque = f"{os.getpid()}.{uuid.uuid4().hex[:8]}"
+    tmp = chemin.with_name(f"{chemin.name}.{marque}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(texte)
+            f.flush()
+            os.fsync(f.fileno())
+        if chemin.exists():
+            copie = chemin.with_name(f"{chemin.name}.{marque}.baktmp")
+            shutil.copyfile(chemin, copie)
+            os.replace(copie, chemin.with_name(chemin.name + ".bak"))
+        os.replace(tmp, chemin)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
 
 
 def taille(chemin) -> int:

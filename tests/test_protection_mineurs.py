@@ -92,6 +92,7 @@ DOIT_SE_TAIRE = [
     "tu habites quelle region du serveur minecraft ?",
     "mon insta est dans ma bio si tu veux voir mes dessins",
     "on parle en prive pour organiser l'event du serveur",
+    "on fait la mission escorte ce soir ?",
 ]
 
 
@@ -242,10 +243,11 @@ def test_le_palier_COMBINE_ne_sanctionne_pas_tout_seul():
         "le palier combiné sanctionne automatiquement par défaut")
 
 
-def test_le_palier_FORT_coupe_tout_de_suite():
-    """Sollicitation sexuelle, site adulte, rencontre tarifée : aucun usage
-    innocent. Attendre un modérateur laisserait le message agir."""
-    assert "'grooming_action': 'mute'" in SRC_BOT
+def test_le_palier_FORT_retire_et_alerte_sans_sanction():
+    """19/10/2026 : « ça expulse des gens qui n'ont rien fait ». Le bot ne
+    connaît pas l'âge des gens : le message part tout de suite, la direction est
+    alertée et c'est elle qui sanctionne."""
+    assert "'grooming_action': 'alerte'" in SRC_BOT
 
 
 def test_la_protection_est_ALLUMEE_par_defaut():

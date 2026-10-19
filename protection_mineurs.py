@@ -145,7 +145,7 @@ _SITE = [
 #        tête écrit moi si tu es intéressé »
 #  Aucun usage innocent sur un serveur de jeu pour mineurs.
 _TARIF = [
-    r"\bescorte?\b", r"\bescort\s*girl\b",
+    r"\bescort\s*girl\b",  # « escorte » seul : une mission de jeu
     r"\bsugar\s*(?:daddy|baby|mamma|momma)\b",
     r"\brencontres?\s+(?:payante|tarifee|remuneree)s?\b",
     r"\brencontres?\s+\w{0,12}\s*payant",

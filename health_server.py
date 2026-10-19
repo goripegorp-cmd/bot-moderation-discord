@@ -214,6 +214,8 @@ async def start(bot_instance, port: int = 8000) -> bool:
     """
     global _bot, _server_runner, _started_at
     _bot = bot_instance
+    if _server_runner is not None:  # déjà démarré : ni second serveur, ni compteur remis à zéro
+        return True
     _started_at = time.time()
 
     if not _AIOHTTP_OK:

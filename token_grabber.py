@@ -82,26 +82,35 @@ PHISHING_KEYWORDS = [
     "act fast", "click before",
 ]
 
-# Phrases courantes des token grabbers Python
+# Ce qui ne sert qu'à VOLER un jeton Discord (lire le stockage de l'appli, déchiffrer ses données).
 GRABBER_CODE_PATTERNS = [
-    r"requests\.post\s*\(",
-    r"webhook\.send",
-    r"os\.environ.*?(?:DISCORD|TOKEN)",
     r"%LOCALAPPDATA%[\\/]Discord",
-    r"leveldb",
+    r"\bleveldb\b",
     r"discord_desktop_core",
     r"Local Storage[\\/]leveldb",
     r"import\s+win32crypt",
     r"CryptUnprotectData",
-    # Patterns plus génériques de RAT
+    r"os\.environ.*?(?:DISCORD|TOKEN)",
+]
+# Code banal pris seul (un membre qui demande de l'aide pour son bot) : ne compte qu'à côté du reste.
+GRABBER_CODE_GENERIQUE = [
+    r"requests\.post\s*\(",
+    r"webhook\.send",
     r"socket\.connect\s*\(",
     r"subprocess\.(?:Popen|run|call)\s*\(",
     r"base64\.b64decode\s*\(",
     r"exec\s*\(\s*(?:base64|bytes|requests)",
 ]
-_RX_GRABBER_CODE = re.compile(
-    "|".join(GRABBER_CODE_PATTERNS), re.IGNORECASE | re.MULTILINE
-)
+_RX_GRABBER_SPECIFIQUE = [re.compile(p, re.IGNORECASE | re.MULTILINE) for p in GRABBER_CODE_PATTERNS]
+_RX_GRABBER_GENERIQUE = [re.compile(p, re.IGNORECASE | re.MULTILINE) for p in GRABBER_CODE_GENERIQUE]
+
+
+def code_de_vol(texte: str) -> bool:
+    """19/10/2026 : un motif propre au vol de jeton, plus un deuxième indice. « j'utilise
+    requests.post( pour mon bot » ou « webhook.send » seuls ne sont plus pris pour un vol."""
+    specifiques = sum(1 for rx in _RX_GRABBER_SPECIFIQUE if rx.search(texte))
+    generiques = sum(1 for rx in _RX_GRABBER_GENERIQUE if rx.search(texte))
+    return specifiques >= 1 and specifiques + generiques >= 2
 
 # Détection URLs raccourcies (bit.ly etc) — combinées avec keywords = suspect
 SHORTENER_DOMAINS = {
@@ -249,7 +258,7 @@ def scan_message(content: str, attachments: list = None) -> dict:
         return out
 
     # 3) Code grabber Python
-    if _RX_GRABBER_CODE.search(content):
+    if code_de_vol(content):
         out["has_grabber_code"] = True
         out["reason"] = "Code Python suspect (token grabber / RAT pattern)"
         out["severity"] = "high"
@@ -293,8 +302,9 @@ def scan_message(content: str, attachments: list = None) -> dict:
 
 # ─── Action handler ─────────────────────────────────────────────────────────
 
-async def on_message_hook(message: discord.Message) -> bool:
-    """Hook depuis bot.py on_message. Retourne True si action a été prise."""
+async def on_message_hook(message: discord.Message, sanctionner: bool = True) -> bool:
+    """Hook depuis bot.py on_message. Retourne True si action a été prise. `sanctionner` = False
+    pour le staff, la tête et les immunisés : message retiré, jamais d'exclusion."""
     if not message.guild or message.author.bot:
         return False
     if _get_db is None:
@@ -332,7 +342,8 @@ async def on_message_hook(message: discord.Message) -> bool:
                 "INSERT INTO phishing_offender (guild_id, user_id, hits_24h, "
                 "last_hit_at) VALUES (?, ?, 1, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                "hits_24h = hits_24h + 1, last_hit_at = CURRENT_TIMESTAMP",
+                "hits_24h = CASE WHEN last_hit_at < datetime('now', '-1 day') THEN 1 "
+                "ELSE hits_24h + 1 END, last_hit_at = CURRENT_TIMESTAMP",
                 (message.guild.id, message.author.id),
             )
             await db.commit()
@@ -347,6 +358,11 @@ async def on_message_hook(message: discord.Message) -> bool:
                 row = await cur.fetchone()
             hits = int(row[0] if row else 1)
 
+        # Exclusion d'une heure seulement pour une RÉCIDIVE dans les 24 h avec un lien piégé connu
+        # (domaine de phishing, adresse d'arnaque) — jamais pour du code ou des mots seuls.
+        exclure = (sanctionner and hits >= 2 and result["severity"] == "high"
+                   and bool(result["matched_urls"]))
+
         # DM author (peut-être compte piraté qui ne sait pas)
         try:
             dm_text = (
@@ -358,7 +374,8 @@ async def on_message_hook(message: discord.Message) -> bool:
                 f"2. Active la 2FA (Settings → My Account → Two-Factor)\n"
                 f"3. Déconnecte les sessions inconnues "
                 f"(Settings → Devices)\n\n"
-                f"_Aucune sanction automatique appliquée. Le staff va review._"
+                + ("_Exclusion d'une heure : c'est la deuxième fois en 24 h._" if exclure
+                   else "_Aucune sanction automatique appliquée. Le staff va review._")
             )
             await message.author.send(dm_text)
         except Exception:
@@ -368,7 +385,7 @@ async def on_message_hook(message: discord.Message) -> bool:
         if _staff_sanction is not None:
             try:
                 auto_mute_duration = 0
-                if hits >= 2:
+                if exclure:
                     # Récidive → mute auto 1h
                     auto_mute_duration = 60
                     try:

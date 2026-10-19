@@ -75,6 +75,9 @@ class Salon(discord.TextChannel):
         for t in self._archives:
             yield t
 
+    async def webhooks(self):
+        return [Obj(id=5, user=Obj(id=BOT)), Obj(id=6, user=Obj(id=42))]
+
     async def history(self, limit=None, before=None, oldest_first=False):
         ms = sorted(self._msgs, key=lambda m: m.created_at, reverse=not oldest_first)
         if before is not None:
@@ -115,7 +118,8 @@ def test_M3_seuls_les_vieux_messages_du_bot_partent():
     b = Msg(2, 99, 40)
     c = Msg(3, 77, 35, webhook=5)
     d = Msg(4, BOT, 3)
-    s = Salon(10, messages=[a, b, c, d])
+    e = Msg(5, 88, 36, webhook=6)  # le webhook d'un autre service (salon suivi, Discohook)
+    s = Salon(10, messages=[a, b, c, d, e])
 
     async def dormir(_s):
         return None
@@ -125,7 +129,7 @@ def test_M3_seuls_les_vieux_messages_du_bot_partent():
         assert asyncio.run(n.purger_salon(s, BOT)) == 2
     finally:
         n.asyncio.sleep = vrai
-    assert (a.supprime, b.supprime, c.supprime, d.supprime) == (True, False, True, False)
+    assert (a.supprime, b.supprime, c.supprime, d.supprime, e.supprime) == (True, False, True, False, False)
 
 
 def test_M4_remise_a_neuf_seulement_d_un_salon_de_logs_pur():
