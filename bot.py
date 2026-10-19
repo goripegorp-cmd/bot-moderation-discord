@@ -901,6 +901,25 @@ security_blacklist = {}  # {user_id: {'until': datetime, 'reason': str}}
 # Cache des tentatives de sécurité
 security_attempts = {}  # {user_id: {'attempts': int, 'last': datetime}}
 
+_MP_ENVOYES: dict = {}
+
+
+async def _mp_une_fois(membre, cle: str, texte: str, heures: float = 6) -> None:
+    """19/10/2026 : « éviter toute cause de messages privés et de spam ». Un même MP
+    (membre × sujet) au plus une fois toutes les `heures` ; MP fermés : rien, en silence."""
+    k = (getattr(membre, 'id', 0), cle)
+    t = now()
+    dernier = _MP_ENVOYES.get(k)
+    if dernier is not None and (t - dernier).total_seconds() < heures * 3600:
+        return
+    _MP_ENVOYES[k] = t
+    _evict_if_big(_MP_ENVOYES, 5000)
+    try:
+        await membre.send(texte)
+    except discord.HTTPException:
+        pass
+
+
 def check_rate_limit(guild_id, user_id, action='command'):
     """Vérifie si un utilisateur dépasse la limite de rate"""
     key = (guild_id, user_id, action)
@@ -28830,10 +28849,8 @@ async def on_message(msg):
                         # vip_status + rôles VIP) : ni coins, ni succès, ni inventaire.
                         _reason = f"Spam toxique répété (malgré {strikes - 1} rappels)"
                         await _record_infraction(msg.guild.id, msg.author.id, 'warn', _reason, '')
-                        _was_reset = False
                         try:
-                            _was_reset = await activity_vip_module.reset_member_stats(
-                                msg.guild, msg.author.id)
+                            await activity_vip_module.reset_member_stats(msg.guild, msg.author.id)
                         except Exception as _ex:
                             print(f"[anti_spam reset stats] {_ex}", file=_sys.stderr, flush=True)
                         # MP avec le récap COMPLET (owner : « il dira toujours j'ai rien fait »).
@@ -28841,19 +28858,6 @@ async def on_message(msg):
                             msg.author, msg.guild,
                             f"⚠️ Avertissement officiel ({_spam_warns + 1}/2) — statistiques remises à zéro",
                             _reason)
-                        # MP dédié : lui dire CLAIREMENT qu'il repart de zéro et pourquoi.
-                        if _was_reset:
-                            try:
-                                await msg.author.send(
-                                    f"🔄 **Tes statistiques d'activité sur {msg.guild.name} ont été "
-                                    f"remises à ZÉRO.**\n"
-                                    f"Raison : spam répété malgré {strikes - 1} rappels.\n\n"
-                                    f"Tu repars de 0 : ton score pour le **VIP / VIP+** est réinitialisé "
-                                    f"et tu dois le re-gagner par une activité **normale** (des vraies "
-                                    f"phrases, du vocal…). Rien d'autre n'est touché.\n"
-                                    f"-# Si tu respames, ça recommence — puis une sanction.")
-                            except Exception:
-                                pass
                         await _warn_calm_down(
                             msg.channel,
                             f"⚠️ {msg.author.mention}, **avertissement officiel** enregistré "
@@ -35138,14 +35142,11 @@ async def on_voice_state_update(member, before, after):
                             try:
                                 await member.move_to(None)
                                 # Envoyer un message privé expliquant pourquoi
-                                try:
-                                    await member.send(
-                                        f"❌ Vous ne pouvez pas créer de vocal dans ce hub.\n"
-                                        f"🔒 Rôle requis: **{required_role.name}**\n"
-                                        f"📍 Serveur: {member.guild.name}"
-                                    )
-                                except:
-                                    pass  # DM désactivés
+                                await _mp_une_fois(
+                                    member, f"hub_role:{after.channel.id}",
+                                    f"❌ Vous ne pouvez pas créer de vocal dans ce hub.\n"
+                                    f"🔒 Rôle requis: **{required_role.name}**\n"
+                                    f"📍 Serveur: {member.guild.name}")
                                 print(f"[TEMP VOICE] {member.display_name} expulsé du hub (rôle manquant: {required_role.name})")
                             except:
                                 pass
@@ -35322,17 +35323,8 @@ async def on_voice_state_update(member, before, after):
                                 # Si, même après, l'audience ne peut ni rejoindre ni parler → le bot
                                 # n'a pas « Gérer les rôles » : on ne laisse pas un salon muet.
                                 if not (ap.connect and ap.speak):
-                                    print("[TEMP VOICE] audience sans accès/parole (bot sans "
-                                          "« Gérer les rôles ») → DM + nettoyage du salon-piège")
-                                    try:
-                                        await member.send(
-                                            f"⚠️ Ton vocal **{channel_name}** a bien été créé sur "
-                                            f"**{member.guild.name}**, mais je n'ai pas pu régler ses "
-                                            f"permissions : il me manque **« Gérer les rôles »**. Sans "
-                                            f"elle, les gens ne peuvent pas parler dedans. Préviens un "
-                                            f"admin — dès que j'ai la permission, tout marchera. 🔧")
-                                    except Exception:
-                                        pass
+                                    print("🚨 [TEMP VOICE] audience sans accès/parole : il manque "
+                                          "au bot « Gérer les rôles » — salon-piège nettoyé")
                                     try:
                                         await member.move_to(None)
                                     except Exception:
@@ -35378,15 +35370,11 @@ async def on_voice_state_update(member, before, after):
                                 await member.move_to(new_channel)
                                 print(f"[TEMP VOICE] Créé vocal '{channel_name}' pour {member.display_name} (hub: {after.channel.name})")
                             except discord.Forbidden:
-                                print("[TEMP VOICE] move échoué — bot sans « Déplacer des membres »")
-                                try:
-                                    await member.send(
-                                        f"🔊 Ton salon **{channel_name}** a été créé sur "
-                                        f"**{member.guild.name}**, mais je n'ai pas pu t'y "
-                                        f"déplacer (permission « Déplacer des membres » "
-                                        f"manquante côté bot). Rejoins-le manuellement !")
-                                except Exception:
-                                    pass
+                                print("🚨 [TEMP VOICE] il manque au bot « Déplacer des membres »")
+                                await _mp_une_fois(
+                                    member, "hub_deplacement",
+                                    f"🔊 Ton salon **{channel_name}** est prêt sur "
+                                    f"**{member.guild.name}** : rejoins-le directement.")
                             except Exception as ex_m:
                                 print(f"[TEMP VOICE] move échoué : {ex_m}")
             
