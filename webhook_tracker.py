@@ -41,6 +41,7 @@ from discord.ext import tasks
 from discord.ui import Button
 
 import owner_ids as _owner_ids  # FIX sécu : source UNIQUE de super-owners
+import visuels
 
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
@@ -254,7 +255,7 @@ def build_panel(guild: discord.Guild):
         async def populate(self):
             inactive = await get_inactive_webhooks(guild.id, days=90)
             items = []
-            items.append(v2_title("🔌  Webhooks du serveur"))
+            items.append(visuels.bandeau("webhooks", "Webhooks du serveur"))
             items.append(v2_subtitle(
                 f"_{len(inactive)} webhook(s) inactif(s) depuis 90+ jours_"
             ))
@@ -292,11 +293,11 @@ def build_panel(guild: discord.Guild):
 
             # Boutons
             b_purge = Button(
-                label="🗑️ Purger les 10 premiers",
+                emoji=visuels.icone("supprimer"), label="Purger les 10 premiers",
                 style=discord.ButtonStyle.danger,
             )
             b_rescan = Button(
-                label="🔄 Rescan",
+                emoji=visuels.icone("actualiser"), label="Rescan",
                 style=discord.ButtonStyle.secondary,
             )
 

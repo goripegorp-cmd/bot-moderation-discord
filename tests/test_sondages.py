@@ -12,7 +12,7 @@ import pytest
 
 import notifs
 import sondages as S
-from conftest_discord import Guilde, Membre, Obj, Salon, base, interaction
+from conftest_discord import laisser_finir, Guilde, Membre, Obj, Salon, base, interaction
 
 SRC = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")
 
@@ -45,7 +45,7 @@ def env(tmp_path):
 def run(coro):
     async def _avec_taches():
         r = await coro
-        await asyncio.sleep(0.05)
+        await laisser_finir()
         return r
     return asyncio.run(_avec_taches())
 
@@ -146,7 +146,7 @@ def test_S7_un_en_cours_trois_par_jour_staff_libre(env):
             refus.append(i.response.messages)
         for _ in range(4):
             await S.publier(interaction(env.g, Membre(9, staff=True)), "Q ?", ["a", "b"], 1, False)
-        await asyncio.sleep(0.05)
+        await laisser_finir()
         return refus
     refus = asyncio.run(scenario())
     assert refus[0] == [] and "déjà un sondage en cours" in refus[1][0][0]

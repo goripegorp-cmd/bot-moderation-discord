@@ -2770,7 +2770,7 @@ class RadieAppelButton(discord.ui.DynamicItem[Button],
     heures plus tard, après n'importe quel redémarrage."""
 
     def __init__(self, gid: int):
-        super().__init__(Button(label="📩 Faire mon recours (1 seul)",
+        super().__init__(Button(emoji=visuels.icone("envoyer"), label="Faire mon recours (1 seul)",
                                 style=discord.ButtonStyle.primary,
                                 custom_id=f"radieappel:{gid}"))
         self.gid = int(gid)
@@ -2906,8 +2906,8 @@ class RadieDecisionButton(discord.ui.DynamicItem[Button],
     def __init__(self, act: str, uid: int):
         lever = act == "lever"
         super().__init__(Button(
-            label=("✅ Lever la radiation" if lever
-                   else "⛔ Bannir définitivement"),
+            emoji=(visuels.icone("valider") if lever else visuels.icone("interdit")), label=("Lever la radiation" if lever
+                   else "Bannir définitivement"),
             style=(discord.ButtonStyle.success if lever
                    else discord.ButtonStyle.danger),
             custom_id=f"radiedec:{act}:{uid}"))
@@ -3605,7 +3605,7 @@ class SecReportView(discord.ui.View):
                 for uid, nm, n in (top_players or [])[:25]]
         if opts:
             sel = discord.ui.Select(
-                placeholder="🔎 Cibler un membre fiché → voir ses sanctions…", options=opts)
+                placeholder="Cibler un membre fiché → voir ses sanctions…", options=opts)
             sel.callback = self._on_pick
             self.add_item(sel)
 
@@ -6505,7 +6505,7 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                         color=0x5865F2)
                     v = discord.ui.View(timeout=None)
                     v.add_item(discord.ui.Button(
-                        style=discord.ButtonStyle.link, url=url, label="🔗 Ouvrir le transcript"))
+                        style=discord.ButtonStyle.link, url=url, emoji=visuels.icone("lien"), label="Ouvrir le transcript"))
                     await lch.send(content=_etiquette, embed=e, view=v,
                                    allowed_mentions=discord.AllowedMentions.none())
                 else:
@@ -6920,7 +6920,7 @@ async def create_ticket(i, pid, ans=None):
 
 class TicketQuestionnaireModal(Modal):
     def __init__(self, pid, qs):
-        super().__init__(title="📝 Créer un ticket")
+        super().__init__(title="Créer un ticket")
         self.pid = pid
         self.qs = qs
         for i, q in enumerate(qs[:5]):
@@ -6951,7 +6951,7 @@ class TicketConfirmCreateView(View):
         super().__init__(timeout=120)
         self.pid = pid
 
-    @discord.ui.button(label="✅ Confirmer l'ouverture", style=discord.ButtonStyle.success)
+    @discord.ui.button(emoji=visuels.icone("valider"), label="Confirmer l'ouverture", style=discord.ButtonStyle.success)
     async def _confirm(self, i, button):
         try:
             await i.response.defer(ephemeral=True)
@@ -6963,7 +6963,7 @@ class TicketConfirmCreateView(View):
             except Exception:
                 pass
 
-    @discord.ui.button(label="✖️ Annuler", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary)
     async def _cancel(self, i, button):
         try:
             await i.response.edit_message(content="Annulé — aucun ticket créé.", view=None)
@@ -7078,7 +7078,7 @@ class TicketCreateDynamic(discord.ui.DynamicItem[Button],
     l'outil, pas oubli de sa part.
     """
     def __init__(self, pid):
-        super().__init__(Button(label="📩 Créer un ticket",
+        super().__init__(Button(emoji=visuels.icone("envoyer"), label="Créer un ticket",
                                 style=discord.ButtonStyle.success,
                                 custom_id=f"ticket_create_{pid}"))
         self.pid = pid
@@ -7148,7 +7148,7 @@ async def _build_ticket_hub_view(guild):
     types = _types_tickets(c)
     total = len(c.get('ticket_panels', {}) or {})
 
-    items = [v2_title("🎫 Création de tickets"),
+    items = [visuels.bandeau("ticket_creation", "Création de tickets"),
              v2_subtitle("Un seul endroit pour toutes vos demandes"),
              v2_divider()]
 
@@ -7156,7 +7156,7 @@ async def _build_ticket_hub_view(guild):
         lignes = "\n".join(f"**{(p.get('name') or pid)[:32]}** — {_resume_type(p)}"
                             for pid, p in types[:10])
         items.append(_section_with_button(
-            "📩 Ouvrir un ticket",
+            "Ouvrir un ticket",
             "Clique sur le bouton, puis **choisis le type** de ta demande.\n"
             "Un salon privé sera créé et l'équipe prévenue.",
             TicketHubOpenDynamic().item))
@@ -7199,7 +7199,7 @@ class TicketHubOpenDynamic(discord.ui.DynamicItem[Button],
     `ticket_toggle` dans ce fichier.
     """
     def __init__(self):
-        super().__init__(Button(label="📩 Créer un ticket",
+        super().__init__(Button(emoji=visuels.icone("envoyer"), label="Créer un ticket",
                                 style=discord.ButtonStyle.success,
                                 custom_id="tickethub:open"))
 
@@ -7260,7 +7260,7 @@ class TicketHubTypeDynamic(discord.ui.DynamicItem[discord.ui.Select],
                 label=(p.get('name') or pid)[:100],
                 value=str(pid)[:100],
                 description=_resume_type(p),
-                emoji="🎫")
+                emoji=visuels.icone("ticket"))
             for pid, p in (types or [])[:25]
         ] or [discord.SelectOption(label="—", value="__vide__")]
         super().__init__(discord.ui.Select(
@@ -7346,7 +7346,7 @@ async def _build_ticket_panel_view(guild, pid):
     except Exception:
         pass
     toggle_btn = Button(
-        label=("🔴 Tickets : OFF" if disabled else "🟢 Tickets : ON"),
+        emoji=('🔴' if disabled else '🟢'), label=("Tickets : OFF" if disabled else "Tickets : ON"),
         style=(discord.ButtonStyle.danger if disabled else discord.ButtonStyle.success),
         custom_id=f"ticket_toggle_{pid}")
 
@@ -7358,17 +7358,17 @@ async def _build_ticket_panel_view(guild, pid):
             "_Reviens un peu plus tard — l'équipe les rouvrira bientôt._"))
         items.append(v2_divider())
     # Section principale : description + bouton « Créer un ticket » en accessoire.
-    items.append(_section_with_button("📩 Ouvrir un ticket", emb_desc, create_btn))
+    items.append(_section_with_button("Ouvrir un ticket", emb_desc, create_btn))
     # Badges d'info compacts.
     _badge = (f"📝 `{len(qs)}` question(s)   ·   " if qs else "")
     _badge += f"🎫 max `{mx}` ticket(s) simultané(s)"
     items.append(v2_body(_badge))
     if links_text:
         items.append(v2_divider())
-        items.append(v2_body(f"🔗 **Liens utiles**\n{links_text}"))
+        items.append(v2_body(f"**Liens utiles**\n{links_text}"))
     # Toggle FONDATEUR (discret, en bas) — visible mais utilisable par le fondateur seul.
     items.append(v2_divider())
-    items.append(v2_subtitle("⚙️ Activer / désactiver — réservé au fondateur"))
+    items.append(v2_subtitle("Activer / désactiver — réservé au fondateur"))
     items.append(discord.ui.ActionRow(toggle_btn))
 
     class _TicketPanelLayout(LayoutView):
@@ -7422,7 +7422,7 @@ class TicketToggleDynamic(discord.ui.DynamicItem[Button],
     """Bouton ACTIVER/DÉSACTIVER du panneau de tickets (fondateur seul). Persistant
     (re-capté au reboot). Le pid (clé du panel) est extrait du custom_id."""
     def __init__(self, pid):
-        super().__init__(Button(label="🟢 Tickets : ON", style=discord.ButtonStyle.success,
+        super().__init__(Button(emoji='🟢', label="Tickets : ON", style=discord.ButtonStyle.success,
                                 custom_id=f"ticket_toggle_{pid}"))
         self.pid = pid
 
@@ -7742,7 +7742,7 @@ class TicketCloseModal(Modal):
     voir avec la fermeture après N jours sans message (`tickets_inactifs_task`), qui passe par
     la même `_fermer_ticket`."""
     def __init__(self, tk, prefill: str = ""):
-        super().__init__(title="🔒 Fermer le ticket")
+        super().__init__(title="Fermer le ticket")
         self.tk = tk
         # `prefill` = motif rapide pré-rempli (cliqué dans TicketCloseReasonView) ;
         # le staff peut le garder, le compléter ou l'effacer avant de soumettre.
@@ -7766,7 +7766,7 @@ class TicketControlView(View):
     def __init__(self):
         super().__init__(timeout=None)
     
-    @discord.ui.button(label="🙋 Prendre en charge", style=discord.ButtonStyle.success, custom_id="ticket_ctrl_claim")
+    @discord.ui.button(emoji=visuels.icone("membre"), label="Prendre en charge", style=discord.ButtonStyle.success, custom_id="ticket_ctrl_claim")
     async def claim(self, i, btn):
         try:
             tk = await get_ticket(i.channel.id)
@@ -7862,7 +7862,7 @@ class TicketControlView(View):
             except Exception:
                 pass
     
-    @discord.ui.button(label="➕ Ajouter Staff", style=discord.ButtonStyle.primary, custom_id="ticket_ctrl_add")
+    @discord.ui.button(emoji=visuels.icone("ajouter"), label="Ajouter Staff", style=discord.ButtonStyle.primary, custom_id="ticket_ctrl_add")
     async def add_staff(self, i, btn):
         try:
             tk = await get_ticket(i.channel.id)
@@ -7900,7 +7900,7 @@ class TicketControlView(View):
             except Exception:
                 pass
     
-    @discord.ui.button(label="🔄 Transférer", style=discord.ButtonStyle.primary, custom_id="ticket_ctrl_transfer")
+    @discord.ui.button(emoji=visuels.icone("actualiser"), label="Transférer", style=discord.ButtonStyle.primary, custom_id="ticket_ctrl_transfer")
     async def transfer(self, i, btn):
         # POURQUOI : transfert de la PRISE EN CHARGE uniquement (réassigne claimed_by +
         # recalcule les overwrites comme Claim). Jamais de fermeture, jamais d'argent/items.
@@ -7943,7 +7943,7 @@ class TicketControlView(View):
             except Exception:
                 pass
 
-    @discord.ui.button(label="🚩 Priorité", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_priority")
+    @discord.ui.button(emoji=visuels.icone("drapeau"), label="Priorité", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_priority")
     async def priority(self, i, btn):
         # POURQUOI : la priorité existait UNIQUEMENT via la slash command /ticket priority.
         # On l'expose en BOUTON pour que le staff la change en 1 clic depuis le ticket lui-même.
@@ -7975,7 +7975,7 @@ class TicketControlView(View):
             except Exception:
                 pass
 
-    @discord.ui.button(label="📌 Note interne", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_note")
+    @discord.ui.button(emoji=visuels.icone("epingle"), label="Note interne", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_note")
     async def internal_note(self, i, btn):
         # POURQUOI : passage de relais entre staff. Ouvre un modal ; la note est postée
         # DANS le salon du ticket → elle entre AUTOMATIQUEMENT dans le transcript (qui lit
@@ -8003,7 +8003,7 @@ class TicketControlView(View):
             except Exception:
                 pass
 
-    @discord.ui.button(label="🚫 Blacklist", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_blacklist")
+    @discord.ui.button(emoji=visuels.icone("interdit"), label="Blacklist", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_blacklist")
     async def blacklist_user(self, i, btn):
         """Blacklist le créateur du ticket sur ce panel"""
         try:
@@ -8085,7 +8085,7 @@ class TicketControlView(View):
         except Exception as ex:
             await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
-    @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger, custom_id="ticket_ctrl_close")
+    @discord.ui.button(emoji=visuels.icone("verrou"), label="Fermer", style=discord.ButtonStyle.danger, custom_id="ticket_ctrl_close")
     async def close(self, i, btn):
         try:
             tk = await get_ticket(i.channel.id)
@@ -8128,7 +8128,7 @@ class TicketControlView(View):
             except Exception:
                 pass
 
-    @discord.ui.button(label="🏷️ Gérer", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_manage")
+    @discord.ui.button(emoji=visuels.icone("etiquette"), label="Gérer", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_manage")
     async def manage(self, i, btn):
         """Lot 2 (owner 2026-06-15) : panneau staff de CLASSIFICATION (tags par sujet) +
         HISTORIQUE d'actions (audit-trail). Lecture/écriture staff seulement, éphémère."""
@@ -8299,10 +8299,10 @@ class TicketPrioritySelect(Select):
         except Exception:
             # Fallback défensif si le module n'est pas chargé (ne casse jamais l'UI).
             opts = [
-                discord.SelectOption(label="Urgent", value="urgent", emoji="🔴"),
-                discord.SelectOption(label="Haute", value="high", emoji="🟠"),
-                discord.SelectOption(label="Normale", value="normal", emoji="🟡"),
-                discord.SelectOption(label="Basse", value="low", emoji="🔵"),
+                discord.SelectOption(label="Urgent", value="urgent", emoji='🔴'),
+                discord.SelectOption(label="Haute", value="high", emoji='🟠'),
+                discord.SelectOption(label="Normale", value="normal", emoji='🟡'),
+                discord.SelectOption(label="Basse", value="low", emoji='🔵'),
             ]
         super().__init__(placeholder="Choisir le niveau de priorité…", options=opts, min_values=1, max_values=1)
         self.chid = chid
@@ -8346,7 +8346,7 @@ class TicketNoteModal(Modal):
     ticket (donc inclus au transcript). Sert au passage de relais entre staff.
     Jamais de fermeture, jamais d'action destructrice."""
     def __init__(self, tk):
-        super().__init__(title="📌 Note interne (staff)")
+        super().__init__(title="Note interne (staff)")
         self.tk = tk
         self.note = TextInput(
             label="Note de relais",
@@ -9145,7 +9145,7 @@ async def scan_all_members_for_alts(guild):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class _RgpdPurgeModal(Modal, title="🔒 Effacement RGPD d'un membre"):
+class _RgpdPurgeModal(Modal, title="Effacement RGPD d'un membre"):
     """Saisie de l'ID + confirmation explicite, puis purge via gdpr.purge_user. Defer-first
     (la purge balaie ~280 tables → on ne dépasse jamais la fenêtre 3 s)."""
     def __init__(self, g):
@@ -9274,20 +9274,20 @@ class RgpdPanelV2(LayoutView):
             return False
 
     async def render_to(self, interaction, *, edit: bool = True):
-        b_purge = Button(label="Effacer un membre", emoji="🗑️", style=discord.ButtonStyle.danger, custom_id="rgpd_purge")
+        b_purge = Button(label="Effacer un membre", emoji=visuels.icone("supprimer"), style=discord.ButtonStyle.danger, custom_id="rgpd_purge")
         b_purge.callback = self._open_purge
-        b_check = Button(label="Vérifier la carte", emoji="🩺", style=discord.ButtonStyle.secondary, custom_id="rgpd_check")
+        b_check = Button(label="Vérifier la carte", emoji=visuels.icone("diagnostic"), style=discord.ButtonStyle.secondary, custom_id="rgpd_check")
         b_check.callback = self._check
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="rgpd_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="rgpd_back")
         b_back.callback = self._back
 
         self.clear_items()
         self.add_item(v2_container(
-            v2_title("🔒 Données & RGPD"),
+            visuels.bandeau("rgpd", "Données & RGPD"),
             v2_subtitle("Droit à l'effacement (art. 17 RGPD)"),
             v2_divider(),
             v2_body(
-                "🗑️ **Effacer un membre** — toutes ses données partent ; dans le casier des autres, son identifiant est neutralisé. Confirmation `PURGER`.\n🩺 **Vérifier la carte** — le registre RGPD face à la base réelle."
+                "**Effacer un membre** — toutes ses données partent ; dans le casier des autres, son identifiant est neutralisé. Confirmation `PURGER`.\n**Vérifier la carte** — le registre RGPD face à la base réelle."
             ),
             v2_divider(),
             discord.ui.ActionRow(b_purge, b_check, b_back),
@@ -9374,6 +9374,10 @@ _CONFIG_SECTIONS = [
     ("rellseas",    "🎭", "Rellseas",          "Qui peut donner, retirer, vérifier l'activité"),
     ("rgpd",        "🔒", "Données & RGPD",    "Droit à l'effacement (art. 17) · rétention"),
 ]
+_ICONES_SECTIONS = {"protections": "bouclier", "sanctions": "sanction", "immunites": "staff",
+                    "antiraid": "alerte", "tickets": "ticket", "logs": "journal", "roblox": "actu",
+                    "sondages": "sondage", "suggestions": "idee", "social": "globe",
+                    "rellseas": "navire", "rgpd": "verrou"}
 
 
 class MainPanelV2(LayoutView):
@@ -9401,34 +9405,28 @@ class MainPanelV2(LayoutView):
         items: list = []
 
         sous_titre = f"**{self.g.name}** · 👑 {self.u.display_name}"
-        if self.g.icon:
-            items.append(v2_section(
-                v2_title("⚙️ Configuration"),
-                v2_subtitle(sous_titre),
-                accessory=v2_thumb(self.g.icon.url),
-            ))
-        else:
-            items.append(v2_title("⚙️ Configuration"))
-            items.append(v2_subtitle(sous_titre))
+        items.append(visuels.bandeau("configuration", "Configuration"))
+        items.append(v2_subtitle(sous_titre))
 
         items.append(v2_divider())
 
         # Résumé d'état — présent uniquement par le chemin async (`render_to`).
         if etat is not None:
             items.append(v2_body(
-                f"🛡️ **Protections** · `{etat['prot_on']}/{etat['prot_total']}` actives\n"
-                f"⚖️ **Sanctions** · `{etat['infractions']}` au casier · logs {etat['mod_log']}\n"
-                f"👮 **Immunités** · `{etat['immune_roles']}` rôles · `{etat['immune_users']}` membres\n"
-                f"⚔️ **Anti-Raid** · {etat['antiraid']}\n"
-                f"🎫 **Tickets** · {etat['tickets']}\n"
-                f"📋 **Logs** · {etat['logs']}"
+                f"**Protections** · `{etat['prot_on']}/{etat['prot_total']}` actives\n"
+                f"**Sanctions** · `{etat['infractions']}` au casier · logs {etat['mod_log']}\n"
+                f"**Immunités** · `{etat['immune_roles']}` rôles · `{etat['immune_users']}` membres\n"
+                f"**Anti-Raid** · {etat['antiraid']}\n"
+                f"**Tickets** · {etat['tickets']}\n"
+                f"**Logs** · {etat['logs']}"
             ))
             items.append(v2_divider())
 
         sel = Select(
             placeholder="Choisis une section à configurer…",
             options=[
-                discord.SelectOption(label=libelle, value=valeur, emoji=emoji, description=description)
+                discord.SelectOption(label=libelle, value=valeur, description=description,
+                                     emoji=visuels.icone(_ICONES_SECTIONS.get(valeur, ""), emoji))
                 for valeur, emoji, libelle, description in _CONFIG_SECTIONS
             ],
             custom_id="cfgv2_section",
@@ -9436,13 +9434,13 @@ class MainPanelV2(LayoutView):
         sel.callback = self._module_select
 
         b_refresh = Button(
-            label="Actualiser", emoji="🔄",
+            label="Actualiser", emoji=visuels.icone("actualiser"),
             style=discord.ButtonStyle.secondary, custom_id="cfgv2_refresh",
         )
         b_refresh.callback = self._cb_refresh
 
         b_close = Button(
-            label="Fermer", emoji="✖️",
+            label="Fermer", emoji=visuels.icone("fermer"),
             style=discord.ButtonStyle.danger, custom_id="cfgv2_close",
         )
         b_close.callback = self._close
@@ -9789,33 +9787,33 @@ class AntiRaidPanelV2(LayoutView):
         self.clear_items()
 
         b_toggle = Button(
-            label=("🔘 Désactiver" if enabled else "⚪ Activer"),
+            emoji=('🔘' if enabled else '⚪'), label=("Désactiver" if enabled else "Activer"),
             style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
             custom_id="ar_toggle",
         )
         b_toggle.callback = self._cb_toggle
 
-        b_thresh = Button(label="⚙️ Seuils", style=discord.ButtonStyle.primary, custom_id="ar_thresh")
+        b_thresh = Button(emoji=visuels.icone("reglages"), label="Seuils", style=discord.ButtonStyle.primary, custom_id="ar_thresh")
         b_thresh.callback = self._cb_thresholds
 
-        b_action = Button(label="🎯 Action", style=discord.ButtonStyle.primary, custom_id="ar_action")
+        b_action = Button(emoji=visuels.icone("cible"), label="Action", style=discord.ButtonStyle.primary, custom_id="ar_action")
         b_action.callback = self._cb_action
 
         log_select = discord.ui.ChannelSelect(
-            placeholder=f"📢 Salon logs raid : {(log_ch.name if log_ch else 'aucun')}",
+            placeholder=f"Salon logs raid : {(log_ch.name if log_ch else 'aucun')}",
             channel_types=[discord.ChannelType.text, discord.ChannelType.news],
             min_values=0, max_values=1, custom_id="ar_log",
         )
         log_select.callback = self._cb_log_channel
 
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="ar_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="ar_back")
         b_back.callback = self._cb_back
 
         # Le scan de comptes suspects n'était atteignable que depuis le panneau de
         # l'ancien anti-raid, supprimé en 08/2026. Capacité de sécurité réelle : elle
         # est transplantée ici plutôt que perdue avec lui.
         b_scan = Button(
-            label="Scanner les comptes suspects", emoji="🔍",
+            label="Scanner les comptes suspects", emoji=visuels.icone("recherche"),
             style=discord.ButtonStyle.secondary, custom_id="arv2_scan",
         )
         b_scan.callback = self._cb_scan
@@ -9823,15 +9821,15 @@ class AntiRaidPanelV2(LayoutView):
         pretty_action = {'kick': '👢 Kick auto', 'ban': '🔨 Ban auto', 'lockdown': '🔒 Lockdown serveur'}.get(action, action)
 
         items = [
-            v2_title("⚔️ Anti-Raid"),
+            visuels.bandeau("antiraid", "Anti-raid"),
             v2_subtitle("Vague d'arrivées → riposte immédiate"),
             v2_divider(),
             v2_body(
-                f"🔌 **État** · {'🟢 actif' if enabled else '⚪ désactivé'}\n"
-                f"📊 **Détection** · `{threshold}` joins en `{window}`s déclenche le raid\n"
-                f"👶 **Âge min compte** · `{min_age}` jours (sinon flag suspect)\n"
-                f"🎯 **Action auto** · {pretty_action}\n"
-                f"📢 **Salon logs** · {log_ch.mention if log_ch else '_non défini_'}"
+                f"**État** · {'🟢 actif' if enabled else '⚪ désactivé'}\n"
+                f"**Détection** · `{threshold}` joins en `{window}`s déclenche le raid\n"
+                f"**Âge min compte** · `{min_age}` jours (sinon flag suspect)\n"
+                f"**Action auto** · {pretty_action}\n"
+                f"**Salon logs** · {log_ch.mention if log_ch else '_non défini_'}"
             ),
             v2_divider(),
             v2_divider(),
@@ -9901,7 +9899,7 @@ class AntiRaidPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
-class _AntiRaidThresholdsModal(Modal, title="⚙️ Seuils Anti-Raid"):
+class _AntiRaidThresholdsModal(Modal, title="Seuils Anti-Raid"):
     threshold = TextInput(label="Nb de joins pour déclencher (entier ≥ 2)", placeholder="5", max_length=3, required=True)
     window = TextInput(label="Fenêtre temporelle en secondes (5-300)", placeholder="10", max_length=3, required=True)
     min_age = TextInput(label="Âge minimum du compte en jours (0-365)", placeholder="7", max_length=3, required=True)
@@ -9951,12 +9949,12 @@ class _AntiRaidActionPickerV2(LayoutView):
         b_ban.callback = lambda i: self._set(i, 'ban')
         b_lock = Button(label=("🔒 Lockdown" + (" ✓" if current == 'lockdown' else "")), style=style_for('lockdown'))
         b_lock.callback = lambda i: self._set(i, 'lockdown')
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary)
         b_back.callback = self._cb_back
 
         self.clear_items()
         items = [
-            v2_title("🎯 Action quand raid détecté"),
+            visuels.bandeau("antiraid_action", "Action en cas de raid"),
             v2_subtitle(f"Action actuelle : **{current}**"),
             v2_divider(),
             v2_body(
@@ -10212,14 +10210,14 @@ async def help_cmd(i: discord.Interaction):
 
     v = LayoutView(timeout=300)
     items = [
-        v2_title("❓ Aide"),
+        visuels.bandeau("aide", "Aide"),
         v2_subtitle("Un bot de modération — sécurité, sanctions, tickets"),
         v2_divider(),
         v2_title("Pour tout le monde", level=3),
         v2_body(
-            "🚨 `/signaler` — signaler un message gênant, **en toute discrétion**\n"
-            "🔊 `/signaler-vocal` — signaler une nuisance en vocal\n"
-            "❓ `/help` — cette aide"
+            "`/signaler` — signaler un message gênant, **en toute discrétion**\n"
+            "`/signaler-vocal` — signaler une nuisance en vocal\n"
+            "`/help` — cette aide"
         ),
     ]
 
@@ -10257,7 +10255,7 @@ async def help_cmd(i: discord.Interaction):
                 "`/server report` · `/server history` · `/server anomalies`"
             ),
             v2_divider(),
-            v2_body("⚙️ `/configure` — **tout le reste se règle ici** : protections, "
+            v2_body("`/configure` — **tout le reste se règle ici** : protections, "
                     "sanctions, immunités, anti-raid, tickets, journaux, activité."),
         ]
     else:
@@ -12063,15 +12061,8 @@ class LogsPanelV2(LayoutView):
 
         # Section header
         items: list = []
-        if self.g.icon:
-            items.append(v2_section(
-                v2_title("📋 Logs unifiés"),
-                v2_subtitle("Un salon · tous les événements"),
-                accessory=v2_thumb(self.g.icon.url),
-            ))
-        else:
-            items.append(v2_title("📋 Logs unifiés"))
-            items.append(v2_subtitle("Un salon · tous les événements"))
+        items.append(visuels.bandeau("logs", "Logs unifiés"))
+        items.append(v2_subtitle("Un salon · tous les événements"))
         items.append(v2_divider())
 
         # ─── État du salon (radio visuel) ───
@@ -12099,7 +12090,7 @@ class LogsPanelV2(LayoutView):
             items.append(v2_title("Catégories", level=3))
             items.append(v2_body("\n".join(cats_lines)))
             items.append(v2_body(
-                "📡 **Mode webhook :** "
+                "**Mode webhook :** "
                 + ("🟢 ON — chaque catégorie a son expéditeur (« 🛡️ Sécurité »…)"
                    if wh_mode else "⚪ OFF — envoi classique par le bot")
             ))
@@ -12108,40 +12099,40 @@ class LogsPanelV2(LayoutView):
 
         # ─── Boutons ───
         if log_ch:
-            b_chan = Button(label="📍 Changer salon", style=discord.ButtonStyle.primary, custom_id="logsv2_chan")
+            b_chan = Button(emoji=visuels.icone("position"), label="Changer salon", style=discord.ButtonStyle.primary, custom_id="logsv2_chan")
             b_chan.callback = self._cb_set_channel
-            b_cats = Button(label="🎛️ Catégories", style=discord.ButtonStyle.primary, custom_id="logsv2_cats")
+            b_cats = Button(emoji=visuels.icone("curseurs"), label="Catégories", style=discord.ButtonStyle.primary, custom_id="logsv2_cats")
             b_cats.callback = self._cb_categories
-            b_events = Button(label="🔍 Détail par évènement", style=discord.ButtonStyle.primary, custom_id="logsv2_evts")
+            b_events = Button(emoji=visuels.icone("recherche"), label="Détail par évènement", style=discord.ButtonStyle.primary, custom_id="logsv2_evts")
             b_events.callback = self._cb_events
-            b_excl = Button(label="🛡️ Rôles épargnés", style=discord.ButtonStyle.primary, custom_id="logsv2_excl")
+            b_excl = Button(emoji=visuels.icone("bouclier"), label="Rôles épargnés", style=discord.ButtonStyle.primary, custom_id="logsv2_excl")
             b_excl.callback = self._cb_exclusions
             # Phase 158 : bouton Salons sécurité (honeypot, staff sanction)
-            b_sec = Button(label="🛡️ Salons sécurité", style=discord.ButtonStyle.primary, custom_id="logsv2_sec")
+            b_sec = Button(emoji=visuels.icone("bouclier"), label="Salons sécurité", style=discord.ButtonStyle.primary, custom_id="logsv2_sec")
             b_sec.callback = self._cb_security_channels
             # Phase 268 : router chaque catégorie vers un salon dédié
-            b_route = Button(label="🎯 Salon par catégorie", style=discord.ButtonStyle.primary, custom_id="logsv2_route")
+            b_route = Button(emoji=visuels.icone("cible"), label="Salon par catégorie", style=discord.ButtonStyle.primary, custom_id="logsv2_route")
             b_route.callback = self._cb_routing
             # Phase 268 : mode webhook (expéditeur au nom de la catégorie)
             b_wh = Button(
-                label=("📡 Webhook : ON" if wh_mode else "📡 Webhook : OFF"),
+                emoji=(visuels.icone("actu") if wh_mode else visuels.icone("actu")), label=("Webhook : ON" if wh_mode else "Webhook : OFF"),
                 style=(discord.ButtonStyle.success if wh_mode else discord.ButtonStyle.secondary),
                 custom_id="logsv2_wh",
             )
             b_wh.callback = self._cb_toggle_webhook
-            b_clear = Button(label="⚪ Désactiver", style=discord.ButtonStyle.danger, custom_id="logsv2_clear")
+            b_clear = Button(emoji='⚪', label="Désactiver", style=discord.ButtonStyle.danger, custom_id="logsv2_clear")
             b_clear.callback = self._cb_disable
-            b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
+            b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
             b_back.callback = self._cb_back
             items.append(discord.ui.ActionRow(b_chan, b_cats, b_events, b_excl))
             items.append(discord.ui.ActionRow(b_sec, b_route, b_wh, b_clear, b_back))
         else:
-            b_chan = Button(label="📍 Définir le salon", style=discord.ButtonStyle.success, custom_id="logsv2_chan")
+            b_chan = Button(emoji=visuels.icone("position"), label="Définir le salon", style=discord.ButtonStyle.success, custom_id="logsv2_chan")
             b_chan.callback = self._cb_set_channel
             # Phase 158 : même sans log unifié, on peut configurer les salons sécurité
-            b_sec = Button(label="🛡️ Salons sécurité", style=discord.ButtonStyle.primary, custom_id="logsv2_sec")
+            b_sec = Button(emoji=visuels.icone("bouclier"), label="Salons sécurité", style=discord.ButtonStyle.primary, custom_id="logsv2_sec")
             b_sec.callback = self._cb_security_channels
-            b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
+            b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
             b_back.callback = self._cb_back
             items.append(discord.ui.ActionRow(b_chan, b_sec, b_back))
 
@@ -12157,7 +12148,7 @@ class LogsPanelV2(LayoutView):
             self.u, self.g,
             config_key="_unified_log_channel",  # ignored, save_fn handles it
             return_panel_factory=lambda: LogsPanelV2(self.u, self.g),
-            title="📋 Salon de logs unifiés",
+            title="Salon de logs unifiés",
             description="Choisis le salon où arriveront tous les évènements.",
             color=0x3498DB,
             save_fn=_save_log_channel,
@@ -12247,7 +12238,7 @@ class SecurityChannelsPanelV2(LayoutView):
         self.clear_items()
 
         items: list = []
-        items.append(v2_title("🛡️ Salons sécurité"))
+        items.append(visuels.bandeau("salons_securite", "Salons sécurité"))
         items.append(v2_subtitle(
             "Configure chaque salon de sécurité individuellement"
         ))
@@ -12279,7 +12270,7 @@ class SecurityChannelsPanelV2(LayoutView):
         _sec_btns = []
         for key, label, _ in self.CHANNEL_KEYS:
             btn = Button(
-                label=f"📍 Définir : {label}",
+                emoji=visuels.icone("position"), label=f"Définir : {label}",
                 style=discord.ButtonStyle.primary,
                 custom_id=f"secch_set_{key}",
             )
@@ -12291,7 +12282,7 @@ class SecurityChannelsPanelV2(LayoutView):
             _sec_btns.append(btn)
 
         b_back = Button(
-            label="◀️ Retour", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary,
             custom_id="secch_back",
         )
         b_back.callback = self._cb_back
@@ -12396,11 +12387,11 @@ class LogsRoutingPanelV2(LayoutView):
 
         self.clear_items()
         items: list = []
-        items.append(v2_title("🎯 Salon par catégorie"))
+        items.append(visuels.bandeau("logs_routage", "Salon par catégorie"))
         items.append(v2_subtitle("Un salon par type de log"))
         items.append(v2_divider())
         items.append(v2_body(
-            f"🌐 **Salon global** (par défaut) : "
+            f"**Salon global** (par défaut) : "
             f"{g_ch.mention if g_ch else '⚪ non défini'}"
         ))
         lines = []
@@ -12430,16 +12421,16 @@ class LogsRoutingPanelV2(LayoutView):
         sel.callback = self._cb_pick
         items.append(discord.ui.ActionRow(sel))
 
-        b_ev = Button(label="🔬 Par évènement précis", style=discord.ButtonStyle.primary, custom_id="logsroute_ev")
+        b_ev = Button(emoji=visuels.icone("detail"), label="Par évènement précis", style=discord.ButtonStyle.primary, custom_id="logsroute_ev")
         b_ev.callback = self._cb_event_routing
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsroute_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="logsroute_back")
         b_back.callback = self._cb_back
         # 3 NIVEAUX (owner 2026-06-21) : chaque bouton = 1 salon + activer/désactiver le groupe.
-        b_lo = Button(label="🟢 Logs faibles", style=discord.ButtonStyle.success, custom_id="logslvl_faible")
+        b_lo = Button(emoji='🟢', label="Logs faibles", style=discord.ButtonStyle.success, custom_id="logslvl_faible")
         b_lo.callback = lambda ii: self._cb_level(ii, 'faible')
-        b_mi = Button(label="🟠 Logs moyens", style=discord.ButtonStyle.success, custom_id="logslvl_moyen")
+        b_mi = Button(emoji='🟠', label="Logs moyens", style=discord.ButtonStyle.success, custom_id="logslvl_moyen")
         b_mi.callback = lambda ii: self._cb_level(ii, 'moyen')
-        b_hi = Button(label="🔴 Logs forts", style=discord.ButtonStyle.danger, custom_id="logslvl_fort")
+        b_hi = Button(emoji='🔴', label="Logs forts", style=discord.ButtonStyle.danger, custom_id="logslvl_fort")
         b_hi.callback = lambda ii: self._cb_level(ii, 'fort')
         items.append(discord.ui.ActionRow(b_lo, b_mi, b_hi))
         items.append(discord.ui.ActionRow(b_ev, b_back))
@@ -12472,7 +12463,7 @@ class LogsRoutingPanelV2(LayoutView):
             self.u, self.g,
             config_key=f"_logcat_{cat}",  # ignoré : save_fn gère tout
             return_panel_factory=lambda: LogsRoutingPanelV2(self.u, self.g),
-            title=f"🎯 Salon pour « {cat} »",
+            title=f"Salon pour « {cat} »",
             description=(
                 f"Choisis le salon où arriveront les logs **{cat}**.\n"
                 f"_Efface la sélection pour repasser au salon global._"
@@ -12524,21 +12515,22 @@ class LogLevelPanelV2(LayoutView):
 
         self.clear_items()
         items = [
-            v2_title(f"{lvl['emoji']} Logs {lvl['name']}"),
+            visuels.bandeau("logs", "Logs"),
+            v2_title(f"Logs {lvl['name']}", level=3),
             v2_subtitle(f"_{lvl['desc']}_"),
             v2_divider(),
             v2_body(
-                f"📍 **Salon** : {ch.mention if ch else '⚪ non défini (→ salon global)'}\n"
-                f"🔌 **État** : {'✅ Activé' if is_on else '⛔ Désactivé'}"),
+                f"**Salon** : {ch.mention if ch else '⚪ non défini (→ salon global)'}\n"
+                f"**État** : {'✅ Activé' if is_on else 'Désactivé'}"),
         ]
-        b_ch = Button(label="📍 Choisir le salon", style=discord.ButtonStyle.primary, custom_id="loglvl_ch")
+        b_ch = Button(emoji=visuels.icone("position"), label="Choisir le salon", style=discord.ButtonStyle.primary, custom_id="loglvl_ch")
         b_ch.callback = self._cb_pick_channel
         b_tog = Button(
-            label=("⛔ Désactiver" if is_on else "✅ Activer"),
+            emoji=(visuels.icone("interdit") if is_on else visuels.icone("valider")), label=("Désactiver" if is_on else "Activer"),
             style=(discord.ButtonStyle.danger if is_on else discord.ButtonStyle.success),
             custom_id="loglvl_tog")
         b_tog.callback = self._cb_toggle
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="loglvl_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="loglvl_back")
         b_back.callback = self._cb_back
         items.append(discord.ui.ActionRow(b_ch, b_tog, b_back))
         self.add_item(v2_container(*items, color=Palette.INFO))
@@ -12611,7 +12603,7 @@ class LogsEventRoutingPanelV2(LayoutView):
 
         self.clear_items()
         items: list = []
-        items.append(v2_title("🔬 Salon par évènement précis"))
+        items.append(visuels.bandeau("logs_evenement", "Salon par évènement"))
         items.append(v2_subtitle("Encore plus fin : un salon dédié pour UN type d'évènement"))
         items.append(v2_divider())
 
@@ -12644,7 +12636,7 @@ class LogsEventRoutingPanelV2(LayoutView):
             items.append(discord.ui.ActionRow(ev_sel))
 
         items.append(v2_divider())
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsevroute_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="logsevroute_back")
         b_back.callback = self._cb_back
         items.append(discord.ui.ActionRow(b_back))
 
@@ -12675,7 +12667,7 @@ class LogsEventRoutingPanelV2(LayoutView):
             self.u, self.g,
             config_key=f"_logev_{ev}",  # ignoré : save_fn gère tout
             return_panel_factory=lambda: LogsEventRoutingPanelV2(self.u, self.g, cat=cat),
-            title=f"🔬 Salon pour « {ev} »",
+            title=f"Salon pour « {ev} »",
             description=(
                 "Salon dédié à CET évènement (prioritaire sur la catégorie).\n"
                 "_Efface la sélection pour revenir au salon de catégorie._"
@@ -12707,7 +12699,7 @@ class LogsCategoriesPanelV2(LayoutView):
 
         self.clear_items()
         items: list = []
-        items.append(v2_title("🎛️ Catégories de logs"))
+        items.append(visuels.bandeau("logs_categories", "Catégories de logs"))
         items.append(v2_subtitle("Coche/décoche les catégories à logger dans le salon unifié"))
         items.append(v2_divider())
 
@@ -12751,7 +12743,7 @@ class LogsCategoriesPanelV2(LayoutView):
         sel.callback = self._cb_select
         items.append(discord.ui.ActionRow(sel))
 
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2cats_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2cats_back")
         b_back.callback = self._cb_back
         items.append(discord.ui.ActionRow(b_back))
 
@@ -12799,7 +12791,7 @@ class LogsEventsPanelV2(LayoutView):
         # Si aucune catégorie choisie : afficher select catégorie
         self.clear_items()
         items = [
-            v2_title("🔍 Détail par évènement"),
+            visuels.bandeau("logs_details", "Détail par évènement"),
             v2_subtitle("Active/désactive chaque type d'évènement individuellement"),
             v2_divider(),
         ]
@@ -12854,11 +12846,11 @@ class LogsEventsPanelV2(LayoutView):
             items.append(v2_divider())
             items.append(discord.ui.ActionRow(sel))
 
-            b_change_cat = Button(label="↩️ Changer de catégorie", style=discord.ButtonStyle.secondary)
+            b_change_cat = Button(emoji=visuels.icone("annuler"), label="Changer de catégorie", style=discord.ButtonStyle.secondary)
             b_change_cat.callback = self._cb_change_cat
             items.append(discord.ui.ActionRow(b_change_cat))
 
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_evts_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_evts_back")
         b_back.callback = self._cb_back
         items.append(discord.ui.ActionRow(b_back))
 
@@ -12929,7 +12921,7 @@ class LogsExclusionsPanelV2(LayoutView):
 
         self.clear_items()
         items = [
-            v2_title("🛡️ Rôles épargnés des logs"),
+            visuels.bandeau("logs_exclusions", "Rôles épargnés"),
             v2_subtitle("Choisis quels rôles ne doivent JAMAIS apparaître dans tel ou tel log"),
             v2_divider(),
         ]
@@ -12985,11 +12977,11 @@ class LogsExclusionsPanelV2(LayoutView):
             role_sel.callback = self._cb_pick_roles
             items.append(discord.ui.ActionRow(role_sel))
 
-            b_change = Button(label="↩️ Autre évènement", style=discord.ButtonStyle.secondary)
+            b_change = Button(emoji=visuels.icone("annuler"), label="Autre évènement", style=discord.ButtonStyle.secondary)
             b_change.callback = self._cb_change_event
             items.append(discord.ui.ActionRow(b_change))
 
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_excl_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_excl_back")
         b_back.callback = self._cb_back
         items.append(discord.ui.ActionRow(b_back))
 
@@ -13065,25 +13057,18 @@ class ProtPanelV2(LayoutView):
         pct = round(enabled_count / total * 100) if total > 0 else 0
 
         sel = Select(
-            placeholder="🛡️ Choisir une protection à configurer…",
+            placeholder="Choisir une protection à configurer…",
             options=[discord.SelectOption(label=nm, value=k, emoji=em) for k, em, nm in PROTS],
             custom_id="ppv2_sel",
         )
         sel.callback = self._cb_sel
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="ppv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="ppv2_back")
         b_back.callback = self._cb_back
 
         self.clear_items()
         items: list = []
-        if self.g.icon:
-            items.append(v2_section(
-                v2_title("🛡️ Protection"),
-                v2_subtitle(f"`{enabled_count}/{total}` filtres actifs · `{pct}%`"),
-                accessory=v2_thumb(self.g.icon.url),
-            ))
-        else:
-            items.append(v2_title("🛡️ Protection"))
-            items.append(v2_subtitle(f"`{enabled_count}/{total}` filtres actifs · `{pct}%`"))
+        items.append(visuels.bandeau("protections", "Protection"))
+        items.append(v2_subtitle(f"`{enabled_count}/{total}` filtres actifs · `{pct}%`"))
 
         items.append(v2_divider())
         items.append(v2_body("\n".join(lines_out)))
@@ -13141,7 +13126,8 @@ class ProtDetailV2(LayoutView):
 
         # Items de base : titre + status (Phase 11 : radio dot)
         items: list = [
-            v2_title(f"{self.prot[1]} {self.prot[2]}"),
+            visuels.bandeau("protections", "Protection"),
+            v2_title(f"{self.prot[2]}", level=3),
             v2_subtitle(f"{'🔘 Activé' if on else '⚪ Désactivé'}"),
             v2_divider(),
         ]
@@ -13152,7 +13138,7 @@ class ProtDetailV2(LayoutView):
             chs = c.get('link_allowed_channels', [])
             wl_txt = ", ".join(f"`{d}`" for d in wl[:15]) if wl else "_Aucun domaine_"
             ch_txt = ", ".join(f"<#{x}>" for x in chs[:10]) if chs else "_Aucun salon_"
-            items.append(v2_body(f"🌐 **Whitelist domaines** · {wl_txt}\n📍 **Salons autorisés** · {ch_txt}"))
+            items.append(v2_body(f"**Whitelist domaines** · {wl_txt}\n**Salons autorisés** · {ch_txt}"))
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
 
@@ -13160,7 +13146,7 @@ class ProtDetailV2(LayoutView):
             allowed = c.get('image_allowed', [])
             fmts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'tenor', 'giphy']
             fmt_txt = "  ".join(f"{'✅' if f in allowed else '❌'} `{f}`" for f in fmts)
-            items.append(v2_body(f"📁 **Formats autorisés**\n{fmt_txt}"))
+            items.append(v2_body(f"**Formats autorisés**\n{fmt_txt}"))
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
 
@@ -13171,32 +13157,32 @@ class ProtDetailV2(LayoutView):
                     words_txt = ", ".join(f"`{w}`" for w in words)
                 else:
                     words_txt = ", ".join(f"`{w}`" for w in words[:30]) + f"\n_… + {len(words) - 30} autres_"
-                items.append(v2_body(f"🚫 **Mots interdits** ({len(words)})\n{words_txt[:1000]}"))
+                items.append(v2_body(f"**Mots interdits** ({len(words)})\n{words_txt[:1000]}"))
             else:
-                items.append(v2_body("🚫 **Mots interdits** · _Aucun mot configuré_"))
+                items.append(v2_body("**Mots interdits** · _Aucun mot configuré_"))
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
 
         elif self.key == "anti_spam":
             items.append(v2_body(
-                f"📊 **Max messages** · `{c.get('spam_max', 5)}`  ·  "
-                f"⏱️ **Intervalle** · `{c.get('spam_interval', 5)}` sec"
+                f"**Max messages** · `{c.get('spam_max', 5)}`  ·  "
+                f"**Intervalle** · `{c.get('spam_interval', 5)}` sec"
             ))
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
 
         elif self.key == "anti_caps":
-            items.append(v2_body(f"📊 **Pourcentage max** · `{c.get('caps_percent', 70)}%`"))
+            items.append(v2_body(f"**Pourcentage max** · `{c.get('caps_percent', 70)}%`"))
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
 
         elif self.key == "anti_mass_mention":
-            items.append(v2_body(f"📊 **Max mentions** · `{c.get('mention_limit', 5)}` par message"))
+            items.append(v2_body(f"**Max mentions** · `{c.get('mention_limit', 5)}` par message"))
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
 
         elif self.key == "anti_newaccount":
-            items.append(v2_body(f"📅 **Jours minimum** · `{c.get('newaccount_days', 7)}`"))
+            items.append(v2_body(f"**Jours minimum** · `{c.get('newaccount_days', 7)}`"))
 
         elif self.key == "anti_invite":
             sl = _sanction_line(self.key)
@@ -13215,10 +13201,10 @@ class ProtDetailV2(LayoutView):
                 "Un score par message (phishing, invitation et mentions de masse, message copié partout). Au-delà du seuil : compte gelé, dossier pour le staff."
             ))
             items.append(v2_body(
-                f"🎯 **Seuil** · `{c.get('compromised_alert_threshold', 60)}`/100  ·  "
-                f"⏱️ **Anti-rafale** · `{c.get('compromised_alert_cooldown', 300)}` s\n"
-                f"📬 **Dossier envoyé dans** · "
-                f"{_cad_ch.mention if _cad_ch else '⚠️ _aucun salon — utilise « 📜 Log »_'}"
+                f"**Seuil** · `{c.get('compromised_alert_threshold', 60)}`/100  ·  "
+                f"**Anti-rafale** · `{c.get('compromised_alert_cooldown', 300)}` s\n"
+                f"**Dossier envoyé dans** · "
+                f"{_cad_ch.mention if _cad_ch else '⚠️ _aucun salon — utilise « Log »_'}"
             ))
 
         elif self.key == "anti_qrcode":
@@ -13259,32 +13245,32 @@ class ProtDetailV2(LayoutView):
                 "Avatar ou pseudo copié, compte créé juste après un ban, comportement suspect."
             ))
             items.append(v2_body(
-                f"⚡ **Action** · `{action.upper()}`  ·  "
-                f"🤖 **Action auto** · {'✅' if auto else '❌'}  ·  "
-                f"📊 **Confiance min.** · `{min_conf}%`\n"
-                f"🔍 **Détections** · ⚠️ `{suspected}` suspects · ✅ `{confirmed}` confirmés"
+                f"**Action** · `{action.upper()}`  ·  "
+                f"**Action auto** · {'✅' if auto else '❌'}  ·  "
+                f"**Confiance min.** · `{min_conf}%`\n"
+                f"**Détections** · ⚠️ `{suspected}` suspects · ✅ `{confirmed}` confirmés"
             ))
 
         # Salon de log (commun à toutes)
         log_ch = self.g.get_channel(c.get(f'log_{self.key}', 0))
         items.append(v2_divider())
-        items.append(v2_body(f"📜 **Salon de log** · {log_ch.mention if log_ch else '⚪ _non configuré_'}"))
+        items.append(v2_body(f"**Salon de log** · {log_ch.mention if log_ch else '⚪ _non configuré_'}"))
 
         # Boutons
         self.clear_items()
         b_toggle = Button(
-            label=("⏸️ Désactiver" if on else "▶️ Activer"),
+            emoji=(visuels.icone("pause") if on else visuels.icone("activer")), label=("Désactiver" if on else "Activer"),
             style=(discord.ButtonStyle.danger if on else discord.ButtonStyle.success),
             custom_id="pdv2_toggle",
         )
         b_toggle.callback = self._cb_toggle
-        b_config = Button(label="⚙️ Configurer", style=discord.ButtonStyle.primary, custom_id="pdv2_config")
+        b_config = Button(emoji=visuels.icone("reglages"), label="Configurer", style=discord.ButtonStyle.primary, custom_id="pdv2_config")
         b_config.callback = self._cb_config
-        b_sanction = Button(label="⚡ Sanction", style=discord.ButtonStyle.secondary, custom_id="pdv2_sanction")
+        b_sanction = Button(emoji=visuels.icone("sanction"), label="Sanction", style=discord.ButtonStyle.secondary, custom_id="pdv2_sanction")
         b_sanction.callback = self._cb_sanction
-        b_log = Button(label="📜 Définir Log", style=discord.ButtonStyle.secondary, custom_id="pdv2_log")
+        b_log = Button(emoji=visuels.icone("journal"), label="Définir Log", style=discord.ButtonStyle.secondary, custom_id="pdv2_log")
         b_log.callback = self._cb_log
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="pdv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="pdv2_back")
         b_back.callback = self._cb_back
 
         items.append(v2_divider())
@@ -13351,7 +13337,7 @@ class ProtDetailV2(LayoutView):
                 self.u, self.g,
                 config_key=f'log_{self.key}',
                 return_panel_factory=lambda: ProtDetailV2(self.u, self.g, self.prot),
-                title="📜 Salon de log",
+                title="Salon de log",
                 description=f"Où envoyer les alertes de **{self.prot[2]}**.",
                 color=0x9B59B6,
             )
@@ -13398,13 +13384,13 @@ class ImageConfigPanelV2(LayoutView):
 
         # Select avec defaults
         opts = [
-            discord.SelectOption(label="PNG", value="png", emoji="🖼️", default=("png" in allowed)),
-            discord.SelectOption(label="JPG", value="jpg", emoji="🖼️", default=("jpg" in allowed)),
-            discord.SelectOption(label="JPEG", value="jpeg", emoji="🖼️", default=("jpeg" in allowed)),
-            discord.SelectOption(label="GIF (fichier)", value="gif", emoji="🎞️", default=("gif" in allowed)),
-            discord.SelectOption(label="WEBP", value="webp", emoji="🖼️", default=("webp" in allowed)),
-            discord.SelectOption(label="Tenor", value="tenor", emoji="🎬", default=("tenor" in allowed)),
-            discord.SelectOption(label="Giphy", value="giphy", emoji="🎬", default=("giphy" in allowed)),
+            discord.SelectOption(label="PNG", value="png", emoji=visuels.icone("image"), default=("png" in allowed)),
+            discord.SelectOption(label="JPG", value="jpg", emoji=visuels.icone("image"), default=("jpg" in allowed)),
+            discord.SelectOption(label="JPEG", value="jpeg", emoji=visuels.icone("image"), default=("jpeg" in allowed)),
+            discord.SelectOption(label="GIF (fichier)", value="gif", emoji=visuels.icone("video"), default=("gif" in allowed)),
+            discord.SelectOption(label="WEBP", value="webp", emoji=visuels.icone("image"), default=("webp" in allowed)),
+            discord.SelectOption(label="Tenor", value="tenor", emoji=visuels.icone("video"), default=("tenor" in allowed)),
+            discord.SelectOption(label="Giphy", value="giphy", emoji=visuels.icone("video"), default=("giphy" in allowed)),
         ]
         sel = Select(
             placeholder="Sélectionner les formats à autoriser…",
@@ -13416,15 +13402,15 @@ class ImageConfigPanelV2(LayoutView):
         sel.callback = self._cb_select
 
         self.clear_items()
-        b_all = Button(label="✅ Tout autoriser", style=discord.ButtonStyle.success, custom_id="icpv2_all")
+        b_all = Button(emoji=visuels.icone("valider"), label="Tout autoriser", style=discord.ButtonStyle.success, custom_id="icpv2_all")
         b_all.callback = self._cb_allow_all
-        b_none = Button(label="❌ Tout bloquer", style=discord.ButtonStyle.danger, custom_id="icpv2_none")
+        b_none = Button(emoji=visuels.icone("fermer"), label="Tout bloquer", style=discord.ButtonStyle.danger, custom_id="icpv2_none")
         b_none.callback = self._cb_block_all
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="icpv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="icpv2_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title("🖼️ Formats d'image autorisés"),
+            visuels.bandeau("images", "Formats d'image"),
             v2_subtitle(f"`{len(allowed)}` / `{len(fmts)}` formats activés"),
             v2_divider(),
             v2_body("\n".join(lines_out)),
@@ -13516,45 +13502,45 @@ class BadwordsConfigPanelV2(LayoutView):
         self.clear_items()
 
         # Rangée 1 — mots interdits
-        b_add = Button(label="➕ Ajouter mots", style=discord.ButtonStyle.success, custom_id="bcpv2_add")
+        b_add = Button(emoji=visuels.icone("ajouter"), label="Ajouter mots", style=discord.ButtonStyle.success, custom_id="bcpv2_add")
         b_add.callback = self._cb_add
         b_remove = Button(
-            label="🗑️ Retirer mot", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("supprimer"), label="Retirer mot", style=discord.ButtonStyle.secondary,
             disabled=(not words), custom_id="bcpv2_remove",
         )
         b_remove.callback = self._cb_remove
         b_clear = Button(
-            label="🧹 Tout effacer", style=discord.ButtonStyle.danger,
+            emoji=visuels.icone("balai"), label="Tout effacer", style=discord.ButtonStyle.danger,
             disabled=(not words), custom_id="bcpv2_clear",
         )
         b_clear.callback = self._cb_clear
 
         # Rangée 2 — whitelist
-        b_wl_add = Button(label="✅ Autoriser mot", style=discord.ButtonStyle.success, custom_id="bcpv2_wl_add")
+        b_wl_add = Button(emoji=visuels.icone("valider"), label="Autoriser mot", style=discord.ButtonStyle.success, custom_id="bcpv2_wl_add")
         b_wl_add.callback = self._cb_wl_add
         b_wl_remove = Button(
-            label="❌ Retirer exception", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("fermer"), label="Retirer exception", style=discord.ButtonStyle.secondary,
             disabled=(not whitelist), custom_id="bcpv2_wl_remove",
         )
         b_wl_remove.callback = self._cb_wl_remove
         b_wl_clear = Button(
-            label="🧹 Effacer exceptions", style=discord.ButtonStyle.danger,
+            emoji=visuels.icone("balai"), label="Effacer exceptions", style=discord.ButtonStyle.danger,
             disabled=(not whitelist), custom_id="bcpv2_wl_clear",
         )
         b_wl_clear.callback = self._cb_wl_clear
 
         # Rangée 3 — config
-        b_thresholds = Button(label="⚙️ Seuils", style=discord.ButtonStyle.primary, custom_id="bcpv2_th")
+        b_thresholds = Button(emoji=visuels.icone("reglages"), label="Seuils", style=discord.ButtonStyle.primary, custom_id="bcpv2_th")
         b_thresholds.callback = self._cb_thresholds
-        b_action = Button(label="🔨 Choisir sanction", style=discord.ButtonStyle.primary, custom_id="bcpv2_act")
+        b_action = Button(emoji=visuels.icone("interdit"), label="Choisir sanction", style=discord.ButtonStyle.primary, custom_id="bcpv2_act")
         b_action.callback = self._cb_sanction_action
 
         # Rangée 4 — retour
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="bcpv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="bcpv2_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title("🤬 Filtre de mots interdits"),
+            visuels.bandeau("mots_interdits", "Mots interdits"),
             v2_subtitle(f"{len(words)} bloqué(s) · {len(whitelist)} exception(s) · seuils {warn_th}/{sanc_th}"),
             v2_divider(),
             v2_body(words_block),
@@ -13576,7 +13562,7 @@ class BadwordsConfigPanelV2(LayoutView):
     # ─────────── Callbacks Mots interdits ───────────
 
     async def _cb_add(self, i):
-        modal = _BadwordsAddListModal(self.g, self.u, key='badwords_list', title_text="➕ Ajouter mots interdits")
+        modal = _BadwordsAddListModal(self.g, self.u, key='badwords_list', title_text="Ajouter des mots interdits")
         modal._panel = self
         await i.response.send_modal(modal)
 
@@ -13707,7 +13693,7 @@ class _BadwordsRemoveListModal(Modal):
         await BadwordsConfigPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
-class _BadwordsThresholdsModal(Modal, title="⚙️ Configurer les seuils"):
+class _BadwordsThresholdsModal(Modal, title="Configurer les seuils"):
     warn_threshold = TextInput(
         label="Seuil mots → warn (entier ≥ 1)",
         placeholder="Ex: 3 — après 3 mots interdits, 1 warn auto",
@@ -13792,12 +13778,12 @@ class _BadwordsSanctionActionView(LayoutView):
         )
         b_ban.callback = lambda i: self._set(i, 'ban')
 
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="bcpv2_sa_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="bcpv2_sa_back")
         b_back.callback = self._back
 
         self.clear_items()
         items = [
-            v2_title("🔨 Action quand le seuil de warns est atteint"),
+            visuels.bandeau("mots_sanction", "Action au seuil"),
             v2_subtitle(f"Action actuelle : **{current}**"),
             v2_divider(),
             v2_body(
@@ -13848,25 +13834,25 @@ class LinkConfigPanelV2(LayoutView):
         ch_txt = ", ".join(f"<#{x}>" for x in chs) if chs else "_Aucun_"
 
         self.clear_items()
-        b_add_dom = Button(label="➕ Ajouter domaines", style=discord.ButtonStyle.success, custom_id="lcpv2_add_dom")
+        b_add_dom = Button(emoji=visuels.icone("ajouter"), label="Ajouter domaines", style=discord.ButtonStyle.success, custom_id="lcpv2_add_dom")
         b_add_dom.callback = self._cb_add_dom
-        b_clear_wl = Button(label="🗑️ Vider whitelist", style=discord.ButtonStyle.danger, disabled=(not wl), custom_id="lcpv2_clear_wl")
+        b_clear_wl = Button(emoji=visuels.icone("supprimer"), label="Vider whitelist", style=discord.ButtonStyle.danger, disabled=(not wl), custom_id="lcpv2_clear_wl")
         b_clear_wl.callback = self._cb_clear_wl
-        b_add_ch = Button(label="➕ Ajouter salon", style=discord.ButtonStyle.primary, custom_id="lcpv2_add_ch")
+        b_add_ch = Button(emoji=visuels.icone("ajouter"), label="Ajouter salon", style=discord.ButtonStyle.primary, custom_id="lcpv2_add_ch")
         b_add_ch.callback = self._cb_add_ch
-        b_clear_ch = Button(label="🗑️ Vider salons", style=discord.ButtonStyle.danger, disabled=(not chs), custom_id="lcpv2_clear_ch")
+        b_clear_ch = Button(emoji=visuels.icone("supprimer"), label="Vider salons", style=discord.ButtonStyle.danger, disabled=(not chs), custom_id="lcpv2_clear_ch")
         b_clear_ch.callback = self._cb_clear_ch
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="lcpv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="lcpv2_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title("🔗 Configuration Anti-Liens"),
+            visuels.bandeau("liens", "Anti-liens"),
             v2_subtitle("Domaines whitelist + salons autorisés"),
             v2_divider(),
-            v2_title(f"🌐 Whitelist domaines ({len(wl)})", level=3),
+            v2_title(f"Whitelist domaines ({len(wl)})", level=3),
             v2_body(wl_txt),
             v2_divider(),
-            v2_title(f"📍 Salons autorisés ({len(chs)})", level=3),
+            v2_title(f"Salons autorisés ({len(chs)})", level=3),
             v2_body(ch_txt),
             v2_divider(),
             discord.ui.ActionRow(b_add_dom, b_clear_wl, b_add_ch, b_clear_ch),
@@ -13912,7 +13898,7 @@ class LinkConfigPanelV2(LayoutView):
             v = V2GenericChannelPicker(
                 self.u, self.g,
                 return_panel_factory=lambda: LinkConfigPanelV2(self.u, self.g),
-                title="📍 Autoriser un salon",
+                title="Autoriser un salon",
                 description="Les liens resteront permis dans ce salon.",
                 color=0x9B59B6,
                 save_fn=_ajouter,
@@ -13938,7 +13924,7 @@ class LinkConfigPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
-class AddDomainModal(Modal, title="➕ Ajouter des domaines"):
+class AddDomainModal(Modal, title="Ajouter des domaines"):
     doms = TextInput(
         label="Domaines (séparés par des virgules)",
         placeholder="youtube.com, twitter.com, trello.com",
@@ -13999,7 +13985,7 @@ class AddDomainModal(Modal, title="➕ Ajouter des domaines"):
 #                           ⚙️ NUMBER CONFIG MODAL
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class NumberConfigModal(Modal, title="⚙️ Configuration"):
+class NumberConfigModal(Modal, title="Configuration"):
     val = TextInput(label="Valeur", placeholder="5", max_length=3)
     
     def __init__(self, g, u, key):
@@ -14170,13 +14156,14 @@ class ActionConfigPanelV2(LayoutView):
         b_kick.callback = lambda i: self._set(i, 'kick')
         b_ban = _btn('ban', "🔨 Ban", danger_style=True)
         b_ban.callback = lambda i: self._set(i, 'ban')
-        b_dur = Button(label=f"⏱️ Durée mute · {current_dur} min", style=discord.ButtonStyle.primary, custom_id=f"acpv2_{self.key}_dur")
+        b_dur = Button(emoji=visuels.icone("horloge"), label=f"Durée mute · {current_dur} min", style=discord.ButtonStyle.primary, custom_id=f"acpv2_{self.key}_dur")
         b_dur.callback = self._cb_duration
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id=f"acpv2_{self.key}_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id=f"acpv2_{self.key}_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title(f"⚡ Sanction · {name}"),
+            visuels.bandeau("sanctions", "Sanctions"),
+            v2_title(f"Sanction · {name}", level=3),
             v2_subtitle(f"Action actuelle · `{current_action.upper()}`"),
             v2_divider(),
             v2_body(
@@ -14209,7 +14196,7 @@ class ActionConfigPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
-class DurationConfigModal(Modal, title="⏱️ Durée du Mute"):
+class DurationConfigModal(Modal, title="Durée du Mute"):
     dur_input = TextInput(label="Durée en minutes", placeholder="5", max_length=5)
 
     def __init__(self, g, u, key):
@@ -14278,44 +14265,44 @@ class AltConfigPanelV2(LayoutView):
         # Phase 11 : radio dots + compact
         self.clear_items()
         if enabled:
-            b_toggle = Button(label="⚪ Désactiver", style=discord.ButtonStyle.danger, custom_id="alcv2_toggle")
+            b_toggle = Button(emoji='⚪', label="Désactiver", style=discord.ButtonStyle.danger, custom_id="alcv2_toggle")
         else:
-            b_toggle = Button(label="🔘 Activer", style=discord.ButtonStyle.success, custom_id="alcv2_toggle")
+            b_toggle = Button(emoji='🔘', label="Activer", style=discord.ButtonStyle.success, custom_id="alcv2_toggle")
         b_toggle.callback = self._cb_toggle
-        b_action = Button(label=f"⚡ Action · {action.upper()}", style=discord.ButtonStyle.primary, custom_id="alcv2_action")
+        b_action = Button(emoji=visuels.icone("sanction"), label=f"Action · {action.upper()}", style=discord.ButtonStyle.primary, custom_id="alcv2_action")
         b_action.callback = self._cb_cycle_action
         b_auto = Button(
-            label=("🔘 Auto" if auto else "⚪ Auto"),
+            emoji=('🔘' if auto else '⚪'), label=("Auto" if auto else "Auto"),
             style=(discord.ButtonStyle.success if auto else discord.ButtonStyle.secondary),
             custom_id="alcv2_auto",
         )
         b_auto.callback = self._cb_toggle_auto
-        b_conf = Button(label=f"📊 Confiance · {min_conf}%", style=discord.ButtonStyle.primary, custom_id="alcv2_conf")
+        b_conf = Button(emoji=visuels.icone("stats"), label=f"Confiance · {min_conf}%", style=discord.ButtonStyle.primary, custom_id="alcv2_conf")
         b_conf.callback = self._cb_conf
-        b_scan = Button(label="🔍 Scanner", style=discord.ButtonStyle.success, custom_id="alcv2_scan")
+        b_scan = Button(emoji=visuels.icone("recherche"), label="Scanner", style=discord.ButtonStyle.success, custom_id="alcv2_scan")
         b_scan.callback = self._cb_scan
-        b_view = Button(label="📋 Détections", style=discord.ButtonStyle.secondary, disabled=(not (suspected or confirmed)), custom_id="alcv2_view")
+        b_view = Button(emoji=visuels.icone("journal"), label="Détections", style=discord.ButtonStyle.secondary, disabled=(not (suspected or confirmed)), custom_id="alcv2_view")
         b_view.callback = self._cb_view
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="alcv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="alcv2_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title("👥 Anti-MultiCompte"),
+            visuels.bandeau("multicomptes", "Anti multi-comptes"),
             v2_subtitle(f"{'🔘 actif' if enabled else '⚪ désactivé'} · `{suspected}` suspect(s)"),
             v2_divider(),
         ]
 
         if enabled:
             items.append(v2_body(
-                f"⚡ **Action** · `{action.upper()}`\n"
+                f"**Action** · `{action.upper()}`\n"
                 f"{'🔘' if auto else '⚪'} **Action auto**\n"
-                f"📊 **Confiance minimum** · `{min_conf}%`"
+                f"**Confiance minimum** · `{min_conf}%`"
             ))
             items.append(v2_divider())
             items.append(v2_body(
                 f"⚠️ Suspects · `{suspected}`  ·  "
                 f"✅ Confirmés · `{confirmed}`  ·  "
-                f"⚡ Sanctionnés · `{actioned}`"
+                f"Sanctionnés · `{actioned}`"
             ))
             items.append(v2_divider())
 
@@ -14385,7 +14372,7 @@ class AltConfigPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
-class AltConfidenceModal(Modal, title="📊 Confiance minimum"):
+class AltConfidenceModal(Modal, title="Confiance minimum"):
     value = TextInput(
         label="Pourcentage de confiance (40-100)",
         placeholder="70",
@@ -14463,20 +14450,20 @@ class AltScanResultsPanelV2(LayoutView):
         list_block = "\n\n".join(item_blocks) if item_blocks else "_Aucun résultat sur cette page_"
 
         self.clear_items()
-        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="asrv2_prev")
+        b_prev = Button(emoji=visuels.icone("retour", '◀️'), style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="asrv2_prev")
         b_prev.callback = self._cb_prev
         b_page = Button(label=f"Page {self.page + 1}/{max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="asrv2_page")
-        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="asrv2_next")
+        b_next = Button(emoji=visuels.icone("activer", '▶️'), style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="asrv2_next")
         b_next.callback = self._cb_next
-        b_kick70 = Button(label="👢 Kick tous (>=70%)", style=discord.ButtonStyle.danger, disabled=(high_conf == 0), custom_id="asrv2_kick70")
+        b_kick70 = Button(emoji=visuels.icone("expulser"), label="Kick tous (>=70%)", style=discord.ButtonStyle.danger, disabled=(high_conf == 0), custom_id="asrv2_kick70")
         b_kick70.callback = self._cb_kick70
-        b_ban80 = Button(label="🔨 Ban tous (>=80%)", style=discord.ButtonStyle.danger, disabled=(very_high == 0), custom_id="asrv2_ban80")
+        b_ban80 = Button(emoji=visuels.icone("interdit"), label="Ban tous (>=80%)", style=discord.ButtonStyle.danger, disabled=(very_high == 0), custom_id="asrv2_ban80")
         b_ban80.callback = self._cb_ban80
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="asrv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="asrv2_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title("🔍 Résultats du Scan"),
+            visuels.bandeau("scan_resultats", "Résultats du scan"),
             v2_subtitle(f"`{total}` alts potentiels · `{high_conf}` haute confiance (>=70%) · `{very_high}` très haute (>=80%)"),
             v2_divider(),
             v2_body(list_block),
@@ -14559,7 +14546,7 @@ class ConfirmAltActionView(View):
             return False
         return True
 
-    @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(emoji=visuels.icone("valider"), label="Confirmer", style=discord.ButtonStyle.danger, row=0)
     async def confirm(self, i, b):
         await i.response.edit_message(content="⏳ Exécution en cours...", embed=None, view=None)
 
@@ -14584,7 +14571,7 @@ class ConfirmAltActionView(View):
                     f"_Le bannissement éventuel reste au fondateur._"
         )
     
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary, row=0)
     async def cancel(self, i, b):
         await i.response.edit_message(content="❌ Action annulée", embed=None, view=None)
 
@@ -14635,18 +14622,18 @@ class AltDetectionsPanelV2(LayoutView):
         list_block = "\n\n".join(item_blocks) if item_blocks else "_Aucune détection enregistrée_"
 
         self.clear_items()
-        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="adpv2_prev")
+        b_prev = Button(emoji=visuels.icone("retour", '◀️'), style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="adpv2_prev")
         b_prev.callback = self._cb_prev
         b_page = Button(label=f"Page {self.page + 1}/{max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="adpv2_page")
-        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="adpv2_next")
+        b_next = Button(emoji=visuels.icone("activer", '▶️'), style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="adpv2_next")
         b_next.callback = self._cb_next
-        b_clear = Button(label="🗑️ Effacer historique", style=discord.ButtonStyle.danger, disabled=(not self.alts), custom_id="adpv2_clear")
+        b_clear = Button(emoji=visuels.icone("supprimer"), label="Effacer historique", style=discord.ButtonStyle.danger, disabled=(not self.alts), custom_id="adpv2_clear")
         b_clear.callback = self._cb_clear
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="adpv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="adpv2_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title("📋 Détections de Comptes Secondaires"),
+            visuels.bandeau("multicomptes_detections", "Comptes secondaires"),
             v2_subtitle(f"`{total}` détection(s) enregistrée(s)"),
             v2_divider(),
             v2_body(list_block),
@@ -14738,31 +14725,31 @@ class SuspectScanPanelV2(LayoutView):
         bot_block = "\n".join(bot_lines) if bot_lines else None
 
         self.clear_items()
-        b_prev = Button(label="◀️ Préc.", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="sspv2_prev")
+        b_prev = Button(emoji=visuels.icone("retour"), label="Préc.", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="sspv2_prev")
         b_prev.callback = self._cb_prev
-        b_next = Button(label="▶️ Suiv.", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="sspv2_next")
+        b_next = Button(emoji=visuels.icone("activer"), label="Suiv.", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="sspv2_next")
         b_next.callback = self._cb_next
-        b_rescan = Button(label="🔄 Re-scanner", style=discord.ButtonStyle.primary, custom_id="sspv2_rescan")
+        b_rescan = Button(emoji=visuels.icone("actualiser"), label="Re-scanner", style=discord.ButtonStyle.primary, custom_id="sspv2_rescan")
         b_rescan.callback = self._cb_rescan
-        b_kick_crit = Button(label="👢 Kick Critiques", style=discord.ButtonStyle.danger, disabled=(critical == 0), custom_id="sspv2_kick_crit")
+        b_kick_crit = Button(emoji=visuels.icone("expulser"), label="Kick Critiques", style=discord.ButtonStyle.danger, disabled=(critical == 0), custom_id="sspv2_kick_crit")
         b_kick_crit.callback = self._cb_kick_crit
-        b_kick_bots = Button(label="🤖 Kick Bots", style=discord.ButtonStyle.danger, disabled=(not self.bots), custom_id="sspv2_kick_bots")
+        b_kick_bots = Button(emoji=visuels.icone("robot"), label="Kick Bots", style=discord.ButtonStyle.danger, disabled=(not self.bots), custom_id="sspv2_kick_bots")
         b_kick_bots.callback = self._cb_kick_bots
-        b_kick_all = Button(label="👢 Kick Tous Suspects", style=discord.ButtonStyle.danger, disabled=((critical + high) == 0), custom_id="sspv2_kick_all")
+        b_kick_all = Button(emoji=visuels.icone("expulser"), label="Kick Tous Suspects", style=discord.ButtonStyle.danger, disabled=((critical + high) == 0), custom_id="sspv2_kick_all")
         b_kick_all.callback = self._cb_kick_all
-        b_close = Button(label="❌ Fermer", style=discord.ButtonStyle.secondary, custom_id="sspv2_close")
+        b_close = Button(emoji=visuels.icone("fermer"), label="Fermer", style=discord.ButtonStyle.secondary, custom_id="sspv2_close")
         b_close.callback = self._cb_close
 
         items: list = [
-            v2_title("🔍 Scan des Comptes Suspects"),
-            v2_subtitle(f"🚨 {critical} crit · ⚠️ {high} elevés · ⚡ {medium} moyens · 🤖 {len(self.bots)} bots non vérifiés"),
+            visuels.bandeau("scan_suspects", "Comptes suspects"),
+            v2_subtitle(f"{critical} crit · ⚠️ {high} elevés · ⚡ {medium} moyens · 🤖 {len(self.bots)} bots non vérifiés"),
             v2_divider(),
-            v2_title(f"👥 Suspects ({len(self.suspects)}) — Page {self.page + 1}/{max_page + 1}", level=3),
+            v2_title(f"Suspects ({len(self.suspects)}) — Page {self.page + 1}/{max_page + 1}", level=3),
             v2_body(sus_block),
         ]
         if bot_block:
             items.append(v2_divider())
-            items.append(v2_title("🤖 Bots non vérifiés", level=3))
+            items.append(v2_title("Bots non vérifiés", level=3))
             items.append(v2_body(bot_block))
         items.append(v2_divider())
         items.append(v2_subtitle("⚠️ Vérifie manuellement avant d'agir · Les scores sont indicatifs"))
@@ -15021,26 +15008,26 @@ class SuspectScanPanel(View):
         e.set_footer(text="⚠️ Vérifiez manuellement avant d'agir • Les scores sont indicatifs")
         return e
     
-    @discord.ui.button(label="◀️ Préc.", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(emoji=visuels.icone("retour"), label="Préc.", style=discord.ButtonStyle.secondary, row=0)
     async def prev_page(self, i, b):
         if self.page > 0:
             self.page -= 1
         await i.response.edit_message(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="▶️ Suiv.", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(emoji=visuels.icone("activer"), label="Suiv.", style=discord.ButtonStyle.secondary, row=0)
     async def next_page(self, i, b):
         max_page = max(0, (len(self.suspects) - 1) // self.per_page)
         if self.page < max_page:
             self.page += 1
         await i.response.edit_message(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="🔄 Re-scanner", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(emoji=visuels.icone("actualiser"), label="Re-scanner", style=discord.ButtonStyle.primary, row=0)
     async def rescan(self, i, b):
         await i.response.defer()
         await self.scan_members()
         await i.edit_original_response(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="👢 Kick Critiques", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(emoji=visuels.icone("expulser"), label="Kick Critiques", style=discord.ButtonStyle.danger, row=1)
     async def kick_critical(self, i, b):
         critical = [s for s in self.suspects if s['severity'] == 'critical']
         if not critical:
@@ -15057,7 +15044,7 @@ class SuspectScanPanel(View):
             ephemeral=True
         )
     
-    @discord.ui.button(label="🤖 Kick Bots", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(emoji=visuels.icone("robot"), label="Kick Bots", style=discord.ButtonStyle.danger, row=1)
     async def kick_bots(self, i, b):
         if not self.bots:
             return await i.response.send_message("✅ Aucun bot non vérifié à kick", ephemeral=True)
@@ -15073,7 +15060,7 @@ class SuspectScanPanel(View):
             ephemeral=True
         )
     
-    @discord.ui.button(label="👢 Kick Tous Suspects", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(emoji=visuels.icone("expulser"), label="Kick Tous Suspects", style=discord.ButtonStyle.danger, row=1)
     async def kick_all(self, i, b):
         high_and_critical = [s for s in self.suspects if s['severity'] in ['critical', 'high']]
         if not high_and_critical:
@@ -15090,7 +15077,7 @@ class SuspectScanPanel(View):
             ephemeral=True
         )
     
-    @discord.ui.button(label="❌ Fermer", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(emoji=visuels.icone("fermer"), label="Fermer", style=discord.ButtonStyle.secondary, row=2)
     async def close(self, i, b):
         await i.response.edit_message(content="✅ Scan fermé", embed=None, view=None)
 
@@ -15113,7 +15100,7 @@ class ConfirmKickView(View):
             return False
         return True
 
-    @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
+    @discord.ui.button(emoji=visuels.icone("valider"), label="Confirmer", style=discord.ButtonStyle.danger)
     async def confirm(self, i, b):
         await i.response.defer()
 
@@ -15141,7 +15128,7 @@ class ConfirmKickView(View):
             view=None
         )
     
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, i, b):
         await i.response.edit_message(content="❌ Kick annulé", embed=None, view=None)
 
@@ -15284,41 +15271,34 @@ class ModerationPanelV2(LayoutView):
         # Reconstruire les boutons à chaque render (pour les ré-attacher)
         self.clear_items()
 
-        b_logs = Button(label="📜 Salon Logs", style=discord.ButtonStyle.primary, custom_id="mpv2_set_logs")
+        b_logs = Button(emoji=visuels.icone("journal"), label="Salon Logs", style=discord.ButtonStyle.primary, custom_id="mpv2_set_logs")
         b_logs.callback = self._cb_set_logs
-        b_warn = Button(label="⚠️ Rôle warn", style=discord.ButtonStyle.primary, custom_id="mpv2_set_warn")
+        b_warn = Button(emoji=visuels.icone("avertir"), label="Rôle warn", style=discord.ButtonStyle.primary, custom_id="mpv2_set_warn")
         b_warn.callback = self._cb_set_warn
-        b_mute = Button(label="🔇 Rôle mute", style=discord.ButtonStyle.primary, custom_id="mpv2_set_mute")
+        b_mute = Button(emoji=visuels.icone("muet"), label="Rôle mute", style=discord.ButtonStyle.primary, custom_id="mpv2_set_mute")
         b_mute.callback = self._cb_set_mute
-        b_inf = Button(label="📋 Rôle infractions", style=discord.ButtonStyle.primary, custom_id="mpv2_set_inf")
+        b_inf = Button(emoji=visuels.icone("journal"), label="Rôle infractions", style=discord.ButtonStyle.primary, custom_id="mpv2_set_inf")
         b_inf.callback = self._cb_set_inf
-        b_clear = Button(label="🧹 Rôle clear", style=discord.ButtonStyle.primary, custom_id="mpv2_set_clear")
+        b_clear = Button(emoji=visuels.icone("balai"), label="Rôle clear", style=discord.ButtonStyle.primary, custom_id="mpv2_set_clear")
         b_clear.callback = self._cb_set_clear
-        b_dir = Button(label="🚫 Rôle Direction", style=discord.ButtonStyle.danger,
+        b_dir = Button(emoji=visuels.icone("interdit"), label="Rôle Direction", style=discord.ButtonStyle.danger,
                        custom_id="mpv2_set_direction")
         b_dir.callback = self._cb_set_direction
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="mpv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="mpv2_back")
         b_back.callback = self._cb_back
 
         items: list = []
-        if self.g.icon:
-            items.append(v2_section(
-                v2_title("🔨 Modération"),
-                v2_subtitle(f"`{inf_count}` infractions enregistrées"),
-                accessory=v2_thumb(self.g.icon.url),
-            ))
-        else:
-            items.append(v2_title("🔨 Modération"))
-            items.append(v2_subtitle(f"`{inf_count}` infractions enregistrées"))
+        items.append(visuels.bandeau("sanctions", "Modération"))
+        items.append(v2_subtitle(f"`{inf_count}` infractions enregistrées"))
 
         items.append(v2_divider())
         items.append(v2_body(
-            f"📜 **Salon logs** · {dot(log_ch)}\n"
+            f"**Salon logs** · {dot(log_ch)}\n"
             f"⚠️ **Rôle /warn** · {dot(warn_role)}\n"
-            f"🔇 **Rôle /mute** · {dot(mute_role)}\n"
-            f"📋 **Rôle /infractions** · {dot(inf_role)}\n"
-            f"🧹 **Rôle /mod clear** · {dot(clear_role)}\n"
-            f"🚫 **Rôle Direction** · {dot(dir_role)} — `/off`, `/mod direction`"
+            f"**Rôle /mute** · {dot(mute_role)}\n"
+            f"**Rôle /infractions** · {dot(inf_role)}\n"
+            f"**Rôle /mod clear** · {dot(clear_role)}\n"
+            f"**Rôle Direction** · {dot(dir_role)} — `/off`, `/mod direction`"
         ))
         items.append(v2_divider())
 
@@ -15335,7 +15315,7 @@ class ModerationPanelV2(LayoutView):
             self.u, self.g,
             config_key=key,
             return_panel_factory=lambda: ModerationPanelV2(self.u, self.g),
-            title=f"📜 {label}",
+            title=f"{label}",
             description=f"Sélectionne le salon. {len(list(self.g.text_channels))} disponibles.",
             color=0xE67E22,
         )
@@ -15347,7 +15327,7 @@ class ModerationPanelV2(LayoutView):
             self.u, self.g,
             config_key=key,
             return_panel_factory=lambda: ModerationPanelV2(self.u, self.g),
-            title=f"⚙️ {label}",
+            title=f"{label}",
             description="Sélectionne le rôle minimum requis pour cette commande.",
             color=0xE67E22,
         )
@@ -15423,35 +15403,28 @@ class ImmunePanelV2(LayoutView):
 
         # Boutons
         self.clear_items()
-        b_add_role = Button(label="➕ Rôle", style=discord.ButtonStyle.success, custom_id="ipv2_add_role")
+        b_add_role = Button(emoji=visuels.icone("ajouter"), label="Rôle", style=discord.ButtonStyle.success, custom_id="ipv2_add_role")
         b_add_role.callback = self._cb_add_role
-        b_add_user = Button(label="➕ Utilisateur", style=discord.ButtonStyle.success, custom_id="ipv2_add_user")
+        b_add_user = Button(emoji=visuels.icone("ajouter"), label="Utilisateur", style=discord.ButtonStyle.success, custom_id="ipv2_add_user")
         b_add_user.callback = self._cb_add_user
-        b_add_chan = Button(label="➕ Salon", style=discord.ButtonStyle.success, custom_id="ipv2_add_chan")
+        b_add_chan = Button(emoji=visuels.icone("ajouter"), label="Salon", style=discord.ButtonStyle.success, custom_id="ipv2_add_chan")
         b_add_chan.callback = self._cb_add_chan
-        b_remove = Button(label="🗑️ Retirer", style=discord.ButtonStyle.danger, disabled=(total == 0), custom_id="ipv2_remove")
+        b_remove = Button(emoji=visuels.icone("supprimer"), label="Retirer", style=discord.ButtonStyle.danger, disabled=(total == 0), custom_id="ipv2_remove")
         b_remove.callback = self._cb_remove
-        b_clear = Button(label="🧹 Tout effacer", style=discord.ButtonStyle.danger, disabled=(total == 0), custom_id="ipv2_clear")
+        b_clear = Button(emoji=visuels.icone("balai"), label="Tout effacer", style=discord.ButtonStyle.danger, disabled=(total == 0), custom_id="ipv2_clear")
         b_clear.callback = self._cb_clear
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="ipv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="ipv2_back")
         b_back.callback = self._cb_back
 
         items: list = []
-        if self.g.icon:
-            items.append(v2_section(
-                v2_title("👑 Immunités"),
-                v2_subtitle(f"`{total}` élément(s) · bypass des filtres"),
-                accessory=v2_thumb(self.g.icon.url),
-            ))
-        else:
-            items.append(v2_title("👑 Immunités"))
-            items.append(v2_subtitle(f"`{total}` élément(s) · bypass des filtres"))
+        items.append(visuels.bandeau("immunites", "Immunités"))
+        items.append(v2_subtitle(f"`{total}` élément(s) · bypass des filtres"))
 
         items.append(v2_divider())
         items.append(v2_body(
-            f"🎭 **Rôles** *(`{len(rids)}`)* · {roles_txt}\n"
-            f"👤 **Utilisateurs** *(`{len(uids)}`)* · {users_txt}\n"
-            f"📺 **Salons** *(`{len(chids)}`)* · {chans_txt}"
+            f"**Rôles** *(`{len(rids)}`)* · {roles_txt}\n"
+            f"**Utilisateurs** *(`{len(uids)}`)* · {users_txt}\n"
+            f"**Salons** *(`{len(chids)}`)* · {chans_txt}"
         ))
         items.append(v2_divider())
         items.append(v2_body(
@@ -15652,7 +15625,7 @@ class ImmuneRemoveView(View):
         self.u = u
         self.g = g
     
-    @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(emoji=visuels.icone("role"), label="Rôle", style=discord.ButtonStyle.primary, row=0)
     async def remove_role(self, i, b):
         # Phase 3.0h : pagination via PaginatedImmuneRemoveView
         async with get_db() as db:
@@ -15666,7 +15639,7 @@ class ImmuneRemoveView(View):
             view=view, attachments=[],
         )
 
-    @discord.ui.button(label="👤 Utilisateur", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(emoji=visuels.icone("membre"), label="Utilisateur", style=discord.ButtonStyle.primary, row=0)
     async def remove_user(self, i, b):
         async with get_db() as db:
             async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (self.g.id,)) as c:
@@ -15679,7 +15652,7 @@ class ImmuneRemoveView(View):
             view=view, attachments=[],
         )
 
-    @discord.ui.button(label="📺 Salon", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(emoji=visuels.icone("video"), label="Salon", style=discord.ButtonStyle.primary, row=0)
     async def remove_channel(self, i, b):
         async with get_db() as db:
             async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=?', (self.g.id,)) as c:
@@ -15692,7 +15665,7 @@ class ImmuneRemoveView(View):
             view=view, attachments=[],
         )
     
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = ImmunePanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
@@ -15720,37 +15693,37 @@ class ImmuneRemoveViewV2(LayoutView):
 
         self.clear_items()
         b_role = Button(
-            label=f"🎭 Rôle ({role_count})",
+            emoji=visuels.icone("role"), label=f"Rôle ({role_count})",
             style=discord.ButtonStyle.primary,
             disabled=(role_count == 0),
             custom_id="irvv2_role",
         )
         b_role.callback = self._cb_role
         b_user = Button(
-            label=f"👤 Utilisateur ({user_count})",
+            emoji=visuels.icone("membre"), label=f"Utilisateur ({user_count})",
             style=discord.ButtonStyle.primary,
             disabled=(user_count == 0),
             custom_id="irvv2_user",
         )
         b_user.callback = self._cb_user
         b_chan = Button(
-            label=f"📺 Salon ({chan_count})",
+            emoji=visuels.icone("video"), label=f"Salon ({chan_count})",
             style=discord.ButtonStyle.primary,
             disabled=(chan_count == 0),
             custom_id="irvv2_chan",
         )
         b_chan.callback = self._cb_chan
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="irvv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="irvv2_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title("🗑️ Supprimer une immunité"),
+            visuels.bandeau("immunites_retrait", "Retirer une immunité"),
             v2_subtitle("Choisis le type d'élément à retirer"),
             v2_divider(),
             v2_body(
-                f"🎭 **Rôles immunisés** · `{role_count}`\n"
-                f"👤 **Utilisateurs immunisés** · `{user_count}`\n"
-                f"📺 **Salons immunisés** · `{chan_count}`"
+                f"**Rôles immunisés** · `{role_count}`\n"
+                f"**Utilisateurs immunisés** · `{user_count}`\n"
+                f"**Salons immunisés** · `{chan_count}`"
             ),
             v2_divider(),
             v2_subtitle("Les boutons sont désactivés si aucun élément du type n'existe"),
@@ -15860,16 +15833,16 @@ class PaginatedImmuneRemoveView(View):
             self.add_item(_PaginatedImmuneRemoveSelect(self, opts))
 
         if self.max_page > 0:
-            prev_btn = Button(label="◀️", style=discord.ButtonStyle.secondary, row=1, disabled=(self.page == 0))
+            prev_btn = Button(emoji=visuels.icone("retour", '◀️'), style=discord.ButtonStyle.secondary, row=1, disabled=(self.page == 0))
             prev_btn.callback = self._prev
             self.add_item(prev_btn)
             page_btn = Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.primary, row=1, disabled=True)
             self.add_item(page_btn)
-            nxt_btn = Button(label="▶️", style=discord.ButtonStyle.secondary, row=1, disabled=(self.page >= self.max_page))
+            nxt_btn = Button(emoji=visuels.icone("activer", '▶️'), style=discord.ButtonStyle.secondary, row=1, disabled=(self.page >= self.max_page))
             nxt_btn.callback = self._next
             self.add_item(nxt_btn)
 
-        back_btn = Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.danger, row=2)
         back_btn.callback = self._back
         self.add_item(back_btn)
 
@@ -16565,7 +16538,7 @@ class V2GenericChannelPicker(LayoutView):
 
         sel = discord.ui.ChannelSelect(
             channel_types=self.channel_types,
-            placeholder="📁 Choisir un salon...",
+            placeholder="Choisir un salon...",
             min_values=1, max_values=1,
         )
 
@@ -16587,7 +16560,7 @@ class V2GenericChannelPicker(LayoutView):
                     pass
         sel.callback = _on_select
 
-        b_none = Button(label="❌ Aucun (reset)", style=discord.ButtonStyle.secondary)
+        b_none = Button(emoji=visuels.icone("fermer"), label="Aucun (reset)", style=discord.ButtonStyle.secondary)
         async def _none(i):
             try:
                 await self._save(0)
@@ -16600,7 +16573,7 @@ class V2GenericChannelPicker(LayoutView):
                     pass
         b_none.callback = _none
 
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary)
         async def _back(i):
             try:
                 await self._return_to_parent(i)
@@ -16616,7 +16589,7 @@ class V2GenericChannelPicker(LayoutView):
             v2_title(self.title),
             v2_subtitle(self.description),
             v2_divider(),
-            v2_subtitle(f"📂 {len(self.g.text_channels)} salons disponibles · scroll dans le menu"),
+            v2_subtitle(f"{len(self.g.text_channels)} salons disponibles · scroll dans le menu"),
             v2_divider(),
             discord.ui.ActionRow(sel),
             discord.ui.ActionRow(b_none, b_back),
@@ -16682,7 +16655,7 @@ class V2GenericRolePicker(LayoutView):
         self.clear_items()
 
         sel = discord.ui.RoleSelect(
-            placeholder="🎭 Choisir un rôle...",
+            placeholder="Choisir un rôle...",
             min_values=1, max_values=1,
         )
 
@@ -16703,7 +16676,7 @@ class V2GenericRolePicker(LayoutView):
                     pass
         sel.callback = _on_select
 
-        b_none = Button(label="❌ Aucun (reset)", style=discord.ButtonStyle.secondary)
+        b_none = Button(emoji=visuels.icone("fermer"), label="Aucun (reset)", style=discord.ButtonStyle.secondary)
         async def _none(i):
             try:
                 await self._save(0)
@@ -16716,7 +16689,7 @@ class V2GenericRolePicker(LayoutView):
                     pass
         b_none.callback = _none
 
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary)
         async def _back(i):
             try:
                 await self._return_to_parent(i)
@@ -16732,7 +16705,7 @@ class V2GenericRolePicker(LayoutView):
             v2_title(self.title),
             v2_subtitle(self.description),
             v2_divider(),
-            v2_subtitle(f"🎭 {len([r for r in self.g.roles if not r.is_bot_managed()])} rôles disponibles"),
+            v2_subtitle(f"{len([r for r in self.g.roles if not r.is_bot_managed()])} rôles disponibles"),
             v2_divider(),
             discord.ui.ActionRow(sel),
             discord.ui.ActionRow(b_none, b_back),
@@ -16798,7 +16771,7 @@ class CompromisedAccountActionView(View):
     async def _get_member(self, i):
         return i.guild.get_member(self.target_user_id)
 
-    @discord.ui.button(label="🔇 Mute 24h", style=discord.ButtonStyle.secondary, custom_id="cad_mute")
+    @discord.ui.button(emoji=visuels.icone("muet"), label="Mute 24h", style=discord.ButtonStyle.secondary, custom_id="cad_mute")
     async def mute_btn(self, i, b):
         if not await self._check_owner(i):
             return
@@ -16819,7 +16792,7 @@ class CompromisedAccountActionView(View):
             print(f"[CompromisedAccountActionView mute] {ex}")
             await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
 
-    @discord.ui.button(label="👢 Kick", style=discord.ButtonStyle.danger, custom_id="cad_kick")
+    @discord.ui.button(emoji=visuels.icone("expulser"), label="Kick", style=discord.ButtonStyle.danger, custom_id="cad_kick")
     async def kick_btn(self, i, b):
         if not await self._check_founder(i):
             return
@@ -16837,7 +16810,7 @@ class CompromisedAccountActionView(View):
             print(f"[CompromisedAccountActionView kick] {ex}")
             await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
 
-    @discord.ui.button(label="🔨 Ban", style=discord.ButtonStyle.danger, custom_id="cad_ban")
+    @discord.ui.button(emoji=visuels.icone("interdit"), label="Ban", style=discord.ButtonStyle.danger, custom_id="cad_ban")
     async def ban_btn(self, i, b):
         if not await self._check_founder(i):
             return
@@ -16895,7 +16868,7 @@ class CompromisedAccountActionView(View):
                 print(f"[CAD audit] {_aex}")
         return summary
 
-    @discord.ui.button(label="✅ Faux positif", style=discord.ButtonStyle.success, custom_id="cad_fp")
+    @discord.ui.button(emoji=visuels.icone("valider"), label="Faux positif", style=discord.ButtonStyle.success, custom_id="cad_fp")
     async def false_positive_btn(self, i, b):
         # TASK A5 : un faux positif RESTAURE le compte (dégel + levée d'isolement) ;
         # cette restauration est réservée au FONDATEUR (_check_founder).
@@ -16914,7 +16887,7 @@ class CompromisedAccountActionView(View):
             except Exception:
                 pass
 
-    @discord.ui.button(label="🔓 Dégeler", style=discord.ButtonStyle.primary, custom_id="cad_unfreeze")
+    @discord.ui.button(emoji=visuels.icone("deverrou"), label="Dégeler", style=discord.ButtonStyle.primary, custom_id="cad_unfreeze")
     async def unfreeze_btn(self, i, b):
         # TASK A5 : dégel + levée d'isolement, FONDATEUR uniquement. Garde le compte
         # dans le serveur (contrairement à un kick/ban) mais lui rend ses droits.
@@ -17228,42 +17201,35 @@ class TicketMainPanelV2(LayoutView):
 
         # Boutons
         self.clear_items()
-        b_staff = Button(label="👮 Staff", style=discord.ButtonStyle.primary, custom_id="tmpv2_staff")
+        b_staff = Button(emoji=visuels.icone("staff"), label="Staff", style=discord.ButtonStyle.primary, custom_id="tmpv2_staff")
         b_staff.callback = self._cb_staff
-        b_logs = Button(label="📜 Logs", style=discord.ButtonStyle.primary, custom_id="tmpv2_logs")
+        b_logs = Button(emoji=visuels.icone("journal"), label="Logs", style=discord.ButtonStyle.primary, custom_id="tmpv2_logs")
         b_logs.callback = self._cb_logs
-        b_blacklist = Button(label="🚫 Blacklist", style=discord.ButtonStyle.primary, custom_id="tmpv2_blacklist")
+        b_blacklist = Button(emoji=visuels.icone("interdit"), label="Blacklist", style=discord.ButtonStyle.primary, custom_id="tmpv2_blacklist")
         b_blacklist.callback = self._cb_blacklist
-        b_new = Button(label="➕ Nouveau panel", style=discord.ButtonStyle.success, custom_id="tmpv2_new")
+        b_new = Button(emoji=visuels.icone("ajouter"), label="Nouveau panel", style=discord.ButtonStyle.success, custom_id="tmpv2_new")
         b_new.callback = self._cb_new
-        b_edit = Button(label="📝 Modifier", style=discord.ButtonStyle.secondary, disabled=(not panels), custom_id="tmpv2_edit")
+        b_edit = Button(emoji=visuels.icone("modifier"), label="Modifier", style=discord.ButtonStyle.secondary, disabled=(not panels), custom_id="tmpv2_edit")
         b_edit.callback = self._cb_edit
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tmpv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="tmpv2_back")
         b_back.callback = self._cb_back
         #  ⚠️ LE PANNEAU UNIFIÉ — demande du 06/09/2026. Un seul message public
         #  pour TOUS les types : le membre clique, puis choisit. Désactivé s'il
         #  n'y a aucun type, parce qu'un panneau sans type est un bouton qui
         #  répond « rien à proposer » à chaque clic.
-        b_hub = Button(label="🎫 Panneau unifié", style=discord.ButtonStyle.success,
+        b_hub = Button(emoji=visuels.icone("ticket"), label="Panneau unifié", style=discord.ButtonStyle.success,
                        disabled=(not panels), custom_id="tmpv2_hub")
         b_hub.callback = self._cb_hub
 
         items: list = []
-        if self.g.icon:
-            items.append(v2_section(
-                v2_title("🎫 Tickets"),
-                v2_subtitle(f"`{len(panels)}` panel(s) · système de support"),
-                accessory=v2_thumb(self.g.icon.url),
-            ))
-        else:
-            items.append(v2_title("🎫 Tickets"))
-            items.append(v2_subtitle(f"`{len(panels)}` panel(s) · système de support"))
+        items.append(visuels.bandeau("tickets", "Tickets"))
+        items.append(v2_subtitle(f"`{len(panels)}` panel(s) · système de support"))
 
         items.append(v2_divider())
         items.append(v2_body(
-            f"👮 **Staff** · {dot(staff)}\n"
-            f"📜 **Logs** · {dot(lch)}\n"
-            f"🚫 **Blacklist** · {dot(blacklist_role, '_Staff par défaut_')}"
+            f"**Staff** · {dot(staff)}\n"
+            f"**Logs** · {dot(lch)}\n"
+            f"**Blacklist** · {dot(blacklist_role, '_Staff par défaut_')}"
         ))
         items.append(v2_divider())
         items.append(v2_title("Panels de tickets", level=3))
@@ -17303,7 +17269,7 @@ class TicketMainPanelV2(LayoutView):
             self.u, self.g,
             config_key='ticket_staff',
             return_panel_factory=lambda: TicketMainPanelV2(self.u, self.g),
-            title="👮 Rôle Staff Tickets",
+            title="Rôle Staff Tickets",
             description="Ce rôle aura accès à tous les tickets.",
             color=0x9B59B6,
         )
@@ -17316,7 +17282,7 @@ class TicketMainPanelV2(LayoutView):
             self.u, self.g,
             config_key='ticket_log',
             return_panel_factory=lambda: TicketMainPanelV2(self.u, self.g),
-            title="📜 Salon des logs Tickets",
+            title="Salon des logs Tickets",
             description="Salon où sont enregistrés les événements tickets.",
             color=0x9B59B6,
         )
@@ -17328,7 +17294,7 @@ class TicketMainPanelV2(LayoutView):
             self.u, self.g,
             config_key='ticket_blacklist_role',
             return_panel_factory=lambda: TicketMainPanelV2(self.u, self.g),
-            title="🚫 Rôle /ticketblacklist",
+            title="Rôle /ticketblacklist",
             description="Ce rôle pourra utiliser /ticketblacklist. Aucun = seuls Staff et Admins.",
             color=0xE74C3C,
         )
@@ -17362,7 +17328,7 @@ class TicketMainPanelV2(LayoutView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class NewPanelModal(Modal, title="➕ Nouveau Panel"):
+class NewPanelModal(Modal, title="Nouveau Panel"):
     name = TextInput(label="Nom du panel", placeholder="Support, Partenariat...", max_length=30)
     mx = TextInput(label="Max tickets par utilisateur", placeholder="1", default="1", max_length=2)
     
@@ -17399,12 +17365,12 @@ class EditPanelSelectViewV2(LayoutView):
         sel = Select(placeholder="Choisir un panel...", options=self.opts, custom_id="epsv2_sel") if self.opts else None
         if sel:
             sel.callback = self._cb_select
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="epsv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="epsv2_back")
         b_back.callback = self._cb_back
 
         self.clear_items()
         items: list = [
-            v2_title("📝 Modifier un Panel de Tickets"),
+            visuels.bandeau("tickets_modifier", "Modifier un panneau"),
             v2_subtitle(f"`{len(self.opts)}` panel(s) configuré(s)"),
             v2_divider(),
             v2_body("Choisis le panel à modifier dans le menu ci-dessous."),
@@ -17482,47 +17448,48 @@ class PanelEditViewV2(LayoutView):
         bl_txt = f"`{len(blacklist)}` membre(s)" if blacklist else "_Aucun_"
 
         self.clear_items()
-        b_cat = Button(label="📁 Catégorie", style=discord.ButtonStyle.primary, custom_id="pevv2_cat")
+        b_cat = Button(emoji=visuels.icone("dossier"), label="Catégorie", style=discord.ButtonStyle.primary, custom_id="pevv2_cat")
         b_cat.callback = self._cb_cat
-        b_staff = Button(label="👥 Rôle Staff", style=discord.ButtonStyle.primary, custom_id="pevv2_staff")
+        b_staff = Button(emoji=visuels.icone("membres"), label="Rôle Staff", style=discord.ButtonStyle.primary, custom_id="pevv2_staff")
         b_staff.callback = self._cb_staff
-        b_qs = Button(label="📝 Questions", style=discord.ButtonStyle.primary, custom_id="pevv2_qs")
+        b_qs = Button(emoji=visuels.icone("modifier"), label="Questions", style=discord.ButtonStyle.primary, custom_id="pevv2_qs")
         b_qs.callback = self._cb_qs
-        b_max = Button(label="🔢 Max", style=discord.ButtonStyle.secondary, custom_id="pevv2_max")
+        b_max = Button(emoji=visuels.icone("numero"), label="Max", style=discord.ButtonStyle.secondary, custom_id="pevv2_max")
         b_max.callback = self._cb_max
-        b_apparence = Button(label="🎨 Apparence", style=discord.ButtonStyle.success, custom_id="pevv2_app")
+        b_apparence = Button(emoji=visuels.icone("palette"), label="Apparence", style=discord.ButtonStyle.success, custom_id="pevv2_app")
         b_apparence.callback = self._cb_apparence
-        b_welcome = Button(label="👋 Message accueil", style=discord.ButtonStyle.success, custom_id="pevv2_wel")
+        b_welcome = Button(emoji=visuels.icone("accueil"), label="Message accueil", style=discord.ButtonStyle.success, custom_id="pevv2_wel")
         b_welcome.callback = self._cb_welcome
-        b_blacklist = Button(label="🚫 Blacklist", style=discord.ButtonStyle.danger, custom_id="pevv2_bl")
+        b_blacklist = Button(emoji=visuels.icone("interdit"), label="Blacklist", style=discord.ButtonStyle.danger, custom_id="pevv2_bl")
         b_blacklist.callback = self._cb_blacklist
-        b_send = Button(label="📤 Envoyer", style=discord.ButtonStyle.primary, custom_id="pevv2_send")
+        b_send = Button(emoji=visuels.icone("exporter"), label="Envoyer", style=discord.ButtonStyle.primary, custom_id="pevv2_send")
         b_send.callback = self._cb_send
-        b_delete = Button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, custom_id="pevv2_del")
+        b_delete = Button(emoji=visuels.icone("supprimer"), label="Supprimer", style=discord.ButtonStyle.danger, custom_id="pevv2_del")
         b_delete.callback = self._cb_delete
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="pevv2_back")
+        b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="pevv2_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title(f"🎫 Panel · {pnl.get('name', '?')}"),
+            visuels.bandeau("tickets_panneau", "Panneau de tickets"),
+            v2_title(f"{pnl.get('name', '?')}", level=3),
             v2_subtitle("Configuration spécifique de ce panel de tickets"),
             v2_divider(),
             v2_body(
-                f"📁 **Catégorie** · `{cat.name if cat else 'Non configurée'}`\n"
-                f"🔢 **Max tickets** · `{pnl.get('max', 1)}`\n"
-                f"👥 **Rôle Staff** · {staff_txt}"
+                f"**Catégorie** · `{cat.name if cat else 'Non configurée'}`\n"
+                f"**Max tickets** · `{pnl.get('max', 1)}`\n"
+                f"**Rôle Staff** · {staff_txt}"
             ),
             v2_divider(),
-            v2_title(f"📝 Questions ({len(qs)})", level=3),
+            v2_title(f"Questions ({len(qs)})", level=3),
             v2_body(qs_block),
             v2_divider(),
-            v2_title("🎨 Apparence", level=3),
+            v2_title("Apparence", level=3),
             v2_body(apparence),
             v2_divider(),
-            v2_title("👋 Message d'accueil", level=3),
+            v2_title("Message d'accueil", level=3),
             v2_body(welcome_block),
             v2_divider(),
-            v2_body(f"🚫 **Blacklist** · {bl_txt}"),
+            v2_body(f"**Blacklist** · {bl_txt}"),
             v2_divider(),
             discord.ui.ActionRow(b_cat, b_staff, b_qs, b_max),
             discord.ui.ActionRow(b_apparence, b_welcome, b_blacklist),
@@ -17577,7 +17544,7 @@ class PanelEditViewV2(LayoutView):
             v = V2GenericRolePicker(
                 self.u, self.g,
                 return_panel_factory=lambda: PanelEditViewV2(self.u, self.g, self.pid),
-                title="👥 Rôle Staff du Panel",
+                title="Rôle Staff du Panel",
                 description="Le rôle qui gère ce panel. Aucun = utilise le rôle staff global.",
                 color=0x9B59B6,
                 save_fn=_save,
@@ -17687,7 +17654,7 @@ class PanelEditViewV2(LayoutView):
 class PanelAppearanceModalSimple(Modal):
     """Modal pour customiser l'embed du panel de tickets (sans pré-remplissage)"""
     def __init__(self, u, g, pid):
-        super().__init__(title="🎨 Apparence du panel")
+        super().__init__(title="Apparence du panel")
         self.u = u
         self.g = g
         self.pid = pid
@@ -17724,7 +17691,7 @@ class PanelAppearanceModalSimple(Modal):
 class WelcomeMessageModalSimple(Modal):
     """Modal pour le message d'accueil (sans pré-remplissage)"""
     def __init__(self, u, g, pid):
-        super().__init__(title="👋 Message d'accueil")
+        super().__init__(title="Message d'accueil")
         self.u = u
         self.g = g
         self.pid = pid
@@ -17777,7 +17744,7 @@ class PanelBlacklistView(View):
         )
         
         if not blacklist:
-            e.description = "*Aucun membre blacklisté sur ce panel*\n\nUtilisez le bouton **➕ Ajouter** pour blacklister un membre."
+            e.description = "*Aucun membre blacklisté sur ce panel*\n\nUtilisez le bouton **Ajouter** pour blacklister un membre."
         else:
             # Pagination
             total_pages = max(1, (len(blacklist) - 1) // self.per_page + 1)
@@ -17798,11 +17765,11 @@ class PanelBlacklistView(View):
         
         return e
     
-    @discord.ui.button(label="➕ Ajouter", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(emoji=visuels.icone("ajouter"), label="Ajouter", style=discord.ButtonStyle.success, row=0)
     async def add_member(self, i, b):
         await i.response.send_modal(BlacklistAddModal(self.u, self.g, self.pid))
     
-    @discord.ui.button(label="➖ Retirer", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(emoji=visuels.icone("retirer"), label="Retirer", style=discord.ButtonStyle.danger, row=0)
     async def remove_member(self, i, b):
         pnl = await self.get_panel()
         blacklist = pnl.get('blacklist', [])
@@ -17810,7 +17777,7 @@ class PanelBlacklistView(View):
             return await i.response.send_message("❌ La blacklist est vide", ephemeral=True)
         await i.response.send_modal(BlacklistRemoveModal(self.u, self.g, self.pid))
     
-    @discord.ui.button(label="🗑️ Tout vider", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(emoji=visuels.icone("supprimer"), label="Tout vider", style=discord.ButtonStyle.danger, row=0)
     async def clear_all(self, i, b):
         pnl = await self.get_panel()
         blacklist = pnl.get('blacklist', [])
@@ -17828,14 +17795,14 @@ class PanelBlacklistView(View):
             view=v
         )
     
-    @discord.ui.button(label="◀️ Préc.", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji=visuels.icone("retour"), label="Préc.", style=discord.ButtonStyle.secondary, row=1)
     async def prev_page(self, i, b):
         if self.page > 0:
             self.page -= 1
         v = PanelBlacklistView(self.u, self.g, self.pid, self.page)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="▶️ Suiv.", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji=visuels.icone("activer"), label="Suiv.", style=discord.ButtonStyle.secondary, row=1)
     async def next_page(self, i, b):
         pnl = await self.get_panel()
         blacklist = pnl.get('blacklist', [])
@@ -17845,19 +17812,19 @@ class PanelBlacklistView(View):
         v = PanelBlacklistView(self.u, self.g, self.pid, self.page)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="🔄 Rafraîchir", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji=visuels.icone("actualiser"), label="Rafraîchir", style=discord.ButtonStyle.secondary, row=1)
     async def refresh(self, i, b):
         v = PanelBlacklistView(self.u, self.g, self.pid, self.page)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.primary, row=2)
+    @discord.ui.button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.primary, row=2)
     async def back(self, i, b):
         # Phase 3.0h : retour vers V2 panel
         v = PanelEditViewV2(self.u, self.g, self.pid)
         await v.render_to(i, edit=True)
 
 
-class BlacklistAddModal(Modal, title="🚫 Ajouter à la blacklist"):
+class BlacklistAddModal(Modal, title="Ajouter à la blacklist"):
     def __init__(self, u, g, pid):
         super().__init__()
         self.u = u
@@ -18008,7 +17975,7 @@ class BlacklistClearConfirmView(View):
         self.g = g
         self.pid = pid
     
-    @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
+    @discord.ui.button(emoji=visuels.icone("valider"), label="Confirmer", style=discord.ButtonStyle.danger)
     async def confirm(self, i, b):
         c = await cfg(self.g.id)
         panels = c.get('ticket_panels', {})
@@ -18021,7 +17988,7 @@ class BlacklistClearConfirmView(View):
         await i.response.edit_message(embed=await v.embed(), view=v)
         await i.followup.send(f"✅ **{old_count}** membre(s) ont été retirés de la blacklist.", ephemeral=True)
     
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, i, b):
         v = PanelBlacklistView(self.u, self.g, self.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
@@ -18051,15 +18018,15 @@ class PanelCatPaginatedView(View):
             select.callback = self._select_cb
             self.add_item(select)
         if self.max_page > 0:
-            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn = discord.ui.Button(emoji=visuels.icone("retour", '◀️'), style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
             prev_btn.callback = self._prev
             self.add_item(prev_btn)
             page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
             self.add_item(page_btn)
-            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn = discord.ui.Button(emoji=visuels.icone("activer", '▶️'), style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
             next_btn.callback = self._next
             self.add_item(next_btn)
-        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+        back_btn = discord.ui.Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, row=2)
         back_btn.callback = self._back
         self.add_item(back_btn)
 
@@ -18089,7 +18056,7 @@ class PanelCatPaginatedView(View):
         await v.render_to(i, edit=True)
 
 
-class SetMaxModal(Modal, title="🔢 Max tickets par utilisateur"):
+class SetMaxModal(Modal, title="Max tickets par utilisateur"):
     mx = TextInput(label="Nombre maximum", placeholder="1-10", default="1", max_length=2)
     
     def __init__(self, u, g, pid):
@@ -18129,7 +18096,7 @@ class PanelQsView(View):
         e.set_footer(text="Maximum 5 questions")
         return e
     
-    @discord.ui.button(label="➕ Ajouter", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(emoji=visuels.icone("ajouter"), label="Ajouter", style=discord.ButtonStyle.success, row=0)
     async def add(self, i, b):
         c = await cfg(self.g.id)
         pnl = c.get('ticket_panels', {}).get(self.pid, {})
@@ -18137,7 +18104,7 @@ class PanelQsView(View):
             return await i.response.send_message("❌ Maximum 5 questions", ephemeral=True)
         await i.response.send_modal(AddQModal(self.u, self.g, self.pid))
     
-    @discord.ui.button(label="🗑️ Tout supprimer", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(emoji=visuels.icone("supprimer"), label="Tout supprimer", style=discord.ButtonStyle.danger, row=0)
     async def clear(self, i, b):
         c = await cfg(self.g.id)
         panels = c.get('ticket_panels', {})
@@ -18148,13 +18115,13 @@ class PanelQsView(View):
         v = PanelQsView(self.u, self.g, self.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         # Phase 3.0h : retour vers V2 panel
         v = PanelEditViewV2(self.u, self.g, self.pid)
         await v.render_to(i, edit=True)
 
-class AddQModal(Modal, title="➕ Ajouter une question"):
+class AddQModal(Modal, title="Ajouter une question"):
     t = TextInput(label="Titre (affiché dans le formulaire)", placeholder="Ex: Pseudo en jeu", max_length=45)
     q = TextInput(label="Question complète", placeholder="Ex: Quel est votre pseudo sur le serveur?", style=discord.TextStyle.paragraph, max_length=100)
     
@@ -18213,7 +18180,7 @@ class SendPanelPaginatedView(LayoutView):
         ]
 
         items = [
-            v2_title("📤 Envoyer le panel"),
+            visuels.bandeau("tickets_envoyer", "Envoyer un panneau"),
             v2_subtitle(f"`{len(self.channels)}` salons accessibles · Page `{self.page+1}/{self.max_page+1}`"),
             v2_divider(),
             v2_body("Choisis le salon où le menu de création de tickets sera publié."),
@@ -18234,7 +18201,7 @@ class SendPanelPaginatedView(LayoutView):
         # Navigation pagination
         if self.max_page > 0:
             prev_btn = Button(
-                label="◀️ Préc.",
+                emoji=visuels.icone("retour"), label="Préc.",
                 style=discord.ButtonStyle.secondary,
                 disabled=(self.page == 0),
                 custom_id="sppv2_prev",
@@ -18255,7 +18222,7 @@ class SendPanelPaginatedView(LayoutView):
             next_btn.callback = self._next
             items.append(discord.ui.ActionRow(prev_btn, page_btn, next_btn))
 
-        back_btn = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="sppv2_back")
+        back_btn = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="sppv2_back")
         back_btn.callback = self._back
         items.append(discord.ui.ActionRow(back_btn))
 
@@ -19805,7 +19772,7 @@ async def ticket_template_add_cmd(i: discord.Interaction):
     if not _tix_is_staff(i.user):
         return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
 
-    class _TplModal(discord.ui.Modal, title="📝 Nouveau template ticket"):
+    class _TplModal(discord.ui.Modal, title="Nouveau template ticket"):
         tpl_name = discord.ui.TextInput(
             label="Nom (court, sans espaces)",
             placeholder="Ex : rule_5 ou ban_appeal",
@@ -20152,7 +20119,7 @@ async def _handle_goodbye(member):
         def __init__(self):
             super().__init__(timeout=None)
             items = [
-                v2_title("😢 Au revoir"),
+                visuels.bandeau("au_revoir", "Au revoir"),
                 v2_subtitle(_gb_guild_line),
                 v2_divider(),
             ]
@@ -20535,7 +20502,7 @@ async def _handle_boost_stopped(member):
         try:
             _v = discord.ui.View(timeout=None)
             _v.add_item(discord.ui.Button(
-                label="💎 Soutenir / en savoir plus", style=discord.ButtonStyle.secondary,
+                emoji=visuels.icone("etoile"), label="Soutenir / en savoir plus", style=discord.ButtonStyle.secondary,
                 custom_id="boostinfo:open"))   # capté par BoostSupportButton (persistant, boot)
         except Exception:
             _v = None
@@ -20571,7 +20538,7 @@ class BoostSupportButton(discord.ui.DynamicItem[discord.ui.Button], template=r"b
     """Bouton persistant « 💎 Soutenir / en savoir plus » → ouvre le panneau boost (éphémère)."""
     def __init__(self):
         super().__init__(discord.ui.Button(
-            label="💎 Soutenir / en savoir plus", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("etoile"), label="Soutenir / en savoir plus", style=discord.ButtonStyle.secondary,
             custom_id="boostinfo:open"))
 
     @classmethod
@@ -21262,7 +21229,7 @@ def _welcome_quick_buttons(guild):
         #  (on_ready, Phase 40). Si ce `bot.add_view` disparaît, CE BOUTON MENT : il
         #  s'affiche et ne répond pas. C'est arrivé — la purge d'animation avait
         #  emporté l'ancienne OnboardingView en laissant le bouton ici (19/08/2026).
-        v.add_item(discord.ui.Button(label="🌍 Ma langue / My language",
+        v.add_item(discord.ui.Button(emoji=visuels.icone("globe"), label="Ma langue / My language",
                                      style=discord.ButtonStyle.secondary, custom_id="onb_lang"))
         return v
     except Exception:
@@ -24039,10 +24006,10 @@ async def configure_cmd(i: discord.Interaction):
         owner_mention = i.guild.owner.mention if i.guild.owner else "_Inconnu_"
         denied_view = LayoutView(timeout=None)
         denied_view.add_item(v2_container(
-            v2_title("⛔ Accès Refusé", level=2),
+            v2_title("Accès Refusé", level=2),
             v2_body(
                 "**Cette commande est réservée au fondateur du serveur.**\n\n"
-                f"👑 Fondateur : {owner_mention}"
+                f"Fondateur : {owner_mention}"
             ),
             v2_divider(),
             v2_subtitle("Seul le propriétaire du serveur peut configurer le bot · Sécurité"),
@@ -24545,7 +24512,7 @@ class ClearAllConfirmView(discord.ui.View):
         self.user_id = int(user_id)
         self.channel_id = int(channel_id)
 
-    @discord.ui.button(label="🗑️ Tout supprimer", style=discord.ButtonStyle.danger)
+    @discord.ui.button(emoji=visuels.icone("supprimer"), label="Tout supprimer", style=discord.ButtonStyle.danger)
     async def _confirm(self, i: discord.Interaction, b: discord.ui.Button):
         if i.user.id != self.user_id:
             return await i.response.send_message("❌ Ce n'est pas ta confirmation.", ephemeral=True)
@@ -25565,7 +25532,7 @@ class _CasierManageView(View):
         # Bouton « tout effacer » : seulement s'il y a quelque chose à effacer.
         if rows:
             _clear = discord.ui.Button(
-                label="Effacer TOUT le casier", emoji="🧹",
+                label="Effacer TOUT le casier", emoji=visuels.icone("balai"),
                 style=discord.ButtonStyle.danger, custom_id="casier_clear_all")
             _clear.callback = self._on_clear_all
             self.add_item(_clear)
@@ -25606,7 +25573,7 @@ class _CasierManageView(View):
     async def _on_clear_all(self, i: discord.Interaction):
         # Action DESTRUCTIVE → confirmation explicite (2 temps).
         vue = View(timeout=60)
-        oui = discord.ui.Button(label="Oui, tout effacer", emoji="🧹",
+        oui = discord.ui.Button(label="Oui, tout effacer", emoji=visuels.icone("balai"),
                                 style=discord.ButtonStyle.danger)
         non = discord.ui.Button(label="Annuler", style=discord.ButtonStyle.secondary)
 
@@ -25675,16 +25642,16 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
 
     # ─── LayoutView V2 — vraie fiche ───
     items: list = [
+        visuels.bandeau("casier", "Fiche d'infractions"),
         v2_section(
-            v2_title(f"📋 Fiche d'infractions"),
             v2_body(f"**{membre.display_name}** · {membre.mention}\n`{membre.id}`"),
             accessory=v2_thumb(membre.display_avatar.url),
         ),
         v2_divider(),
         v2_body(
             f"{level_emoji} **Statut** · {level_label}\n"
-            f"📅 **Sur le serveur** · `{time_on_server}`\n"
-            f"📊 **Total** · `{len(rows)}` infraction(s)\n"
+            f"**Sur le serveur** · `{time_on_server}`\n"
+            f"**Total** · `{len(rows)}` infraction(s)\n"
             f"⚠️ Warns · `{warns}`  ·  🔇 Mutes · `{mutes}`"
             + (f"  ·  📋 Autre · `{other}`" if other else "")
         ),
@@ -25694,13 +25661,13 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     if membre.is_timed_out() and membre.timed_out_until:
         items.append(v2_divider())
         items.append(v2_body(
-            f"🔇 **Mute actif** — fin <t:{int(membre.timed_out_until.timestamp())}:R>"
+            f"**Mute actif** — fin <t:{int(membre.timed_out_until.timestamp())}:R>"
         ))
 
     # Historique détaillé avec ID formaté
     items.append(v2_divider())
     if rows:
-        items.append(v2_title(f"📜 Historique ({min(10, len(rows))} dernières)", level=3))
+        items.append(v2_title(f"Historique ({min(10, len(rows))} dernières)", level=3))
         inf_lines = []
         for (infr_id, typ, reason, duration, mod_id, created_at) in rows[:10]:
             emoji = {'warn': '⚠️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(typ, '📋')
@@ -25751,7 +25718,7 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
         note_rows = []
     if note_rows:
         items.append(v2_divider())
-        items.append(v2_title("🗒️ Notes internes (staff)", level=3))
+        items.append(v2_title("Notes internes (staff)", level=3))
         nlines = []
         for (content, mod_id, created_at) in note_rows:
             mm = i.guild.get_member(mod_id) if mod_id else None
@@ -25788,7 +25755,7 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     # même pattern que les boutons d'export du dashboard (mod_dashboard._build_layout).
     try:
         btn_dash = discord.ui.Button(
-            label="Tableau de bord", emoji="📊",
+            label="Tableau de bord", emoji=visuels.icone("stats"),
             style=discord.ButtonStyle.secondary,
             custom_id="infractions_open_dashboard",
         )
@@ -25866,15 +25833,15 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
                 return _cb_sanction
 
             btn_mute = discord.ui.Button(
-                label="Mute", emoji="🔇", style=discord.ButtonStyle.secondary,
+                label="Mute", emoji=visuels.icone("muet"), style=discord.ButtonStyle.secondary,
                 custom_id="infractions_sanction_mute",
             )
             btn_kick = discord.ui.Button(
-                label="Kick", emoji="👢", style=discord.ButtonStyle.danger,
+                label="Kick", emoji=visuels.icone("expulser"), style=discord.ButtonStyle.danger,
                 custom_id="infractions_sanction_kick",
             )
             btn_ban = discord.ui.Button(
-                label="Ban", emoji="🔨", style=discord.ButtonStyle.danger,
+                label="Ban", emoji=visuels.icone("interdit"), style=discord.ButtonStyle.danger,
                 custom_id="infractions_sanction_ban",
             )
             btn_mute.callback = _make_sanction_cb('mute')
@@ -25888,7 +25855,7 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     # une infraction ciblée ou effacer tout le casier. Re-vérifie la permission au clic. Vue éphémère → callback bound. ───
     try:
         btn_casier = discord.ui.Button(
-            label="Gérer le casier", emoji="🗂️",
+            label="Gérer le casier", emoji=visuels.icone("dossier"),
             style=discord.ButtonStyle.secondary, custom_id="infractions_manage_casier")
 
         async def _cb_casier(inter: discord.Interaction):
@@ -30493,7 +30460,7 @@ async def _delete_nudge_for_original(original_msg_id: int):
 def _group_pair_view(author_id: int):
     v = discord.ui.View(timeout=None)
     v.add_item(discord.ui.Button(
-        label="👥 Créer le groupe", style=discord.ButtonStyle.success,
+        emoji=visuels.icone("membres"), label="Créer le groupe", style=discord.ButtonStyle.success,
         custom_id=f"szone_create:group:{int(author_id)}:0"))
     return v
 
@@ -30549,7 +30516,7 @@ async def _post_social_pair(msg, match) -> bool:
             try:
                 v = discord.ui.View(timeout=None)
                 v.add_item(discord.ui.Button(
-                    label="🤝 Ouvrir l'échange", style=discord.ButtonStyle.success,
+                    emoji=visuels.icone("membres"), label="Ouvrir l'échange", style=discord.ButtonStyle.success,
                     custom_id=f"szone_create:trade:{int(author.id)}:{int(other_id)}"))
                 sug = await msg.reply(
                     f"🤝 {author.mention} ↔ {other.mention}, un **échange** sur **{shared}** ? Ouvrez "
@@ -30587,10 +30554,10 @@ async def _post_social_pair(msg, match) -> bool:
         try:
             v = discord.ui.View(timeout=None)
             v.add_item(discord.ui.Button(
-                label="✅ Oui, toujours", style=discord.ButtonStyle.success,
+                emoji=visuels.icone("valider"), label="Oui, toujours", style=discord.ButtonStyle.success,
                 custom_id=f"sm_still_ok:{other_id}:{int(author.id)}"))
             v.add_item(discord.ui.Button(
-                label="❌ Non, c'est bon", style=discord.ButtonStyle.secondary,
+                emoji=visuels.icone("fermer"), label="Non, c'est bon", style=discord.ButtonStyle.secondary,
                 custom_id=f"sm_still_no:{other_id}"))
             conf = await msg.reply(
                 f"👋 {other.mention}, un joueur cherche aussi **{shared}** — tu es **toujours "
@@ -30772,7 +30739,7 @@ async def _social_reply_trade_hook(msg):
             return
         view = discord.ui.View(timeout=None)
         view.add_item(discord.ui.Button(
-            label="🤝 Ouvrir l'échange", style=discord.ButtonStyle.success,
+            emoji=visuels.icone("membres"), label="Ouvrir l'échange", style=discord.ButtonStyle.success,
             custom_id=f"szone_create:trade:{int(author.id)}:{int(other)}"))
         sug = await msg.reply(
             f"🤝 {author.mention} ↔ {om.mention}, vous parlez d'un **échange** — ouvrez un salon "
@@ -30869,7 +30836,7 @@ async def _maybe_suggest_groupe(msg, content_lower: str) -> bool:
         try:
             view = discord.ui.View(timeout=None)
             view.add_item(discord.ui.Button(
-                label="👥 Créer un groupe", style=discord.ButtonStyle.success,
+                emoji=visuels.icone("membres"), label="Créer un groupe", style=discord.ButtonStyle.success,
                 custom_id=f"szone_create:group:{int(author.id)}:0"))
             # Lot C (nudge unifié) : si l'AIDE (entraide) est configurée, propose aussi « Demande
             # d'aide » dans le MÊME nudge → l'auteur choisit groupe OU aide. On ne l'affiche que si
@@ -30878,12 +30845,12 @@ async def _maybe_suggest_groupe(msg, content_lower: str) -> bool:
                 _cc = await cfg(guild.id)
                 if int(_cc.get('entraide_request_channel', 0) or 0) and bool(_cc.get('entraide_enabled', True)):
                     view.add_item(discord.ui.Button(
-                        label="🆘 Plutôt de l'aide", style=discord.ButtonStyle.primary,
+                        emoji=visuels.icone("aide"), label="Plutôt de l'aide", style=discord.ButtonStyle.primary,
                         custom_id=f"entr_detect:{int(author.id)}"))
             except Exception:
                 pass
             view.add_item(discord.ui.Button(
-                label="🔕 Ne plus me proposer", style=discord.ButtonStyle.secondary,
+                emoji=visuels.icone("cloche_off"), label="Ne plus me proposer", style=discord.ButtonStyle.secondary,
                 custom_id=f"help_optout:{int(author.id)}:group"))
             sug = await msg.reply(
                 "👥 Besoin de joueurs ? Lance un **groupe** en un clic — une invitation s'affiche, "
@@ -31229,10 +31196,10 @@ async def _trade_autodetect_hook(msg) -> None:
         try:
             view = discord.ui.View(timeout=None)
             view.add_item(discord.ui.Button(
-                label="🤝 Proposer l'échange", style=discord.ButtonStyle.success,
+                emoji=visuels.icone("membres"), label="Proposer l'échange", style=discord.ButtonStyle.success,
                 custom_id=f"szone_create:trade:{int(author.id)}:{int(partner_id)}"))
             view.add_item(discord.ui.Button(
-                label="🔕 Ne plus me proposer", style=discord.ButtonStyle.secondary,
+                emoji=visuels.icone("cloche_off"), label="Ne plus me proposer", style=discord.ButtonStyle.secondary,
                 custom_id=f"help_optout:{int(author.id)}:trade"))
             partner_txt = (f" avec <@{partner_id}>" if partner_id else "")
             # Lot 4 (pt 13) : badge de CONFIANCE (échanges réussis / signalements) affiché DÈS le nudge
@@ -31453,7 +31420,7 @@ async def _music_bridge_play(guild_id, vc_id, url, requester_id):
 
 def _zone_music_view(vc_id):
     v = discord.ui.View(timeout=None)
-    v.add_item(discord.ui.Button(label="🎵 Ajouter une musique", style=discord.ButtonStyle.success,
+    v.add_item(discord.ui.Button(emoji=visuels.icone("musique"), label="Ajouter une musique", style=discord.ButtonStyle.success,
                                  custom_id=f"zmusic:{int(vc_id)}"))
     return v
 
@@ -31472,7 +31439,7 @@ async def _post_zone_music_panel(vc_channel):
         print(f"[zone music panel] {ex}")
 
 
-class ZoneMusicModal(discord.ui.Modal, title="🎵 Ajouter une musique"):
+class ZoneMusicModal(discord.ui.Modal, title="Ajouter une musique"):
     lien = discord.ui.TextInput(
         label="Lien (SoundCloud / Bandcamp / .mp3 …)",
         placeholder="https://…  (pas YouTube)", style=discord.TextStyle.short,
@@ -31502,7 +31469,7 @@ class ZoneMusicModal(discord.ui.Modal, title="🎵 Ajouter une musique"):
 class ZoneMusicButton(discord.ui.DynamicItem[Button], template=r"zmusic:(?P<vc>\d+)"):
     """Bouton « 🎵 Ajouter une musique » du vocal de zone → modal → pont vers le bot musique. Persistant."""
     def __init__(self, vc_id: int):
-        super().__init__(Button(label="🎵 Ajouter une musique", style=discord.ButtonStyle.success,
+        super().__init__(Button(emoji=visuels.icone("musique"), label="Ajouter une musique", style=discord.ButtonStyle.success,
                                 custom_id=f"zmusic:{int(vc_id)}"))
         self.vc_id = int(vc_id)
 
@@ -31738,17 +31705,17 @@ def _help_optout_build_panel(guild_id, user_id, header=None):
             for k in _NUDGE_KINDS:
                 muted = _nudge_muted(g, u, k)
                 row1.add_item(Button(
-                    label=(f"🔔 {_NUDGE_KIND_LABEL[k].capitalize()}" if muted
-                           else f"🔕 {_NUDGE_KIND_LABEL[k].capitalize()}"),
+                    emoji=(visuels.icone("cloche") if muted else visuels.icone("cloche_off")), label=(f"{_NUDGE_KIND_LABEL[k].capitalize()}" if muted
+                           else f"{_NUDGE_KIND_LABEL[k].capitalize()}"),
                     style=(discord.ButtonStyle.success if muted else discord.ButtonStyle.secondary),
                     custom_id=f"nudgepref:{u}:tog_{k}"))
             row2 = discord.ui.ActionRow()
-            row2.add_item(Button(label="😴 Pause tout 7 j", style=discord.ButtonStyle.secondary,
+            row2.add_item(Button(emoji=visuels.icone("sommeil"), label="Pause tout 7 j", style=discord.ButtonStyle.secondary,
                                  custom_id=f"nudgepref:{u}:snz7"))
-            row2.add_item(Button(label="🆘 J'ai besoin d'aide", style=discord.ButtonStyle.primary,
+            row2.add_item(Button(emoji=visuels.icone("aide"), label="J'ai besoin d'aide", style=discord.ButtonStyle.primary,
                                  custom_id=f"nudgepref:{u}:help"))
             if any_muted:
-                row2.add_item(Button(label="🔔 Tout réactiver", style=discord.ButtonStyle.success,
+                row2.add_item(Button(emoji=visuels.icone("cloche"), label="Tout réactiver", style=discord.ButtonStyle.success,
                                      custom_id=f"nudgepref:{u}:onall"))
             self.add_item(v2_container(v2_body(body), row1, row2, color=0x5865F2))
 
@@ -31775,10 +31742,10 @@ async def _nudge_help_on_demand(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=None)
                 self.add_item(v2_container(
-                    v2_body("🆘 **Besoin d'aide ?** Clique pour créer ta demande — la communauté "
+                    v2_body("**Besoin d'aide ?** Clique pour créer ta demande — la communauté "
                             "pourra t'aider (ça marche même si tu as mis les propositions en pause)."),
                     discord.ui.ActionRow(Button(
-                        label="🆘 Créer ma demande d'aide", style=discord.ButtonStyle.primary,
+                        emoji=visuels.icone("aide"), label="Créer ma demande d'aide", style=discord.ButtonStyle.primary,
                         custom_id=f"entr_detect:{int(i.user.id)}")),
                     color=0x2ECC71))
         if not i.response.is_done():
@@ -31870,7 +31837,7 @@ class HelpOptOutButton(discord.ui.DynamicItem[Button],
     def __init__(self, uid: int, kind: str = 'help'):
         k = kind if kind in _NUDGE_KINDS else 'help'
         super().__init__(Button(
-            label="🔕 Ne plus me proposer", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("cloche_off"), label="Ne plus me proposer", style=discord.ButtonStyle.secondary,
             custom_id=(f"help_optout:{int(uid)}:{k}" if k != 'help' else f"help_optout:{int(uid)}")))
         self.uid = int(uid)
         self.kind = k
@@ -31888,7 +31855,7 @@ class NudgePrefButton(discord.ui.DynamicItem[Button],
     """Boutons du panneau « Mes préférences » (toggle aide/échange/groupe, pause 7 j, tout réactiver,
     « J'ai besoin d'aide »). NOMINATIF, persistant (re-capté au reboot)."""
     def __init__(self, uid: int, act: str):
-        super().__init__(Button(label="⚙️", style=discord.ButtonStyle.secondary,
+        super().__init__(Button(emoji=visuels.icone("reglages", '⚙️'), style=discord.ButtonStyle.secondary,
                                 custom_id=f"nudgepref:{int(uid)}:{act}"))
         self.uid = int(uid)
         self.act = act
@@ -31905,7 +31872,7 @@ class SmStillOkButton(discord.ui.DynamicItem[Button],
                       template=r"sm_still_ok:(?P<older>\d+):(?P<newer>\d+)"):
     """Appariement croisé : l'ancien confirme « oui, toujours besoin » → propose le groupe."""
     def __init__(self, older: int, newer: int):
-        super().__init__(Button(label="✅ Oui, toujours", style=discord.ButtonStyle.success,
+        super().__init__(Button(emoji=visuels.icone("valider"), label="Oui, toujours", style=discord.ButtonStyle.success,
                                 custom_id=f"sm_still_ok:{int(older)}:{int(newer)}"))
         self.older = int(older)
         self.newer = int(newer)
@@ -31922,7 +31889,7 @@ class SmStillNoButton(discord.ui.DynamicItem[Button],
                       template=r"sm_still_no:(?P<older>\d+)"):
     """Appariement croisé : l'ancien répond « non, c'est bon » → clôture sa demande."""
     def __init__(self, older: int):
-        super().__init__(Button(label="❌ Non, c'est bon", style=discord.ButtonStyle.secondary,
+        super().__init__(Button(emoji=visuels.icone("fermer"), label="Non, c'est bon", style=discord.ButtonStyle.secondary,
                                 custom_id=f"sm_still_no:{int(older)}"))
         self.older = int(older)
 
@@ -32105,7 +32072,7 @@ class RobloxPingButton(discord.ui.DynamicItem[discord.ui.Button],
     def __init__(self, cle: str):
         self.cle = cle
         super().__init__(discord.ui.Button(
-            label="Me prévenir · arrêter", emoji="🔔",
+            label="Me prévenir · arrêter", emoji=visuels.icone("cloche"),
             style=discord.ButtonStyle.secondary,
             custom_id=roblox_pings_module.custom_id(cle)))
 
@@ -32153,7 +32120,7 @@ class AccueilLangueView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🌍 Ma langue / My language",
+    @discord.ui.button(emoji=visuels.icone("globe"), label="Ma langue / My language",
                        style=discord.ButtonStyle.secondary,
                        custom_id="onb_lang")
     async def _cb_langue(self, i: discord.Interaction, _b: discord.ui.Button):

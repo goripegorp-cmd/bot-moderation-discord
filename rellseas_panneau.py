@@ -160,7 +160,7 @@ class RellseasPanelV2(LayoutView):
                 noms.append(r.mention if r else f"`{rid}` ⚠️ _rôle supprimé_")
 
             items = [
-                v2_title("🎭 Rellseas"),
+                visuels.bandeau("rellseas", "Rell Seas"),
                 v2_subtitle("Qui peut donner, retirer, et vérifier l'activité"),
                 v2_divider(),
                 v2_body(
@@ -204,7 +204,7 @@ class RellseasPanelV2(LayoutView):
                 min_values=1, max_values=1, custom_id="rellseas_log")
             sel_log.callback = self._faire_cle(CLE_SALON_LOG, "Salon de journal")
 
-            b_back = Button(label="Retour", emoji="◀️",
+            b_back = Button(label="Retour", emoji=visuels.icone("retour"),
                             style=discord.ButtonStyle.secondary,
                             custom_id="rellseas_back")
             b_back.callback = self._cb_retour
@@ -514,7 +514,7 @@ class _ChercheModal(discord.ui.Modal, title="Trouver un membre"):
             if m is None:
                 _RECHERCHES.pop(k, None)
                 _DERNIER[k] = (
-                    f"🔎 Aucun membre avec l'identifiant `{uid}` sur ce serveur.\n"
+                    f"Aucun membre avec l'identifiant `{uid}` sur ce serveur.\n"
                     f"-# Vérifiez l'identifiant, ou collez la mention du membre.")
             else:
                 ids = list(_sel(i))
@@ -546,7 +546,7 @@ class _ChercheModal(discord.ui.Modal, title="Trouver un membre"):
         _log(f"[rellseas recherche] « {saisie} » → {len(trouves)} sur {vus} membres")
         if not trouves:
             _DERNIER[k] = (
-                f"🔎 Aucun membre ne correspond à « {saisie} » "
+                f"Aucun membre ne correspond à « {saisie} » "
                 f"(`{vus}` membres fouillés).\n"
                 f"-# Essayez moins de lettres, ou **collez son identifiant** — "
                 f"c'est le chemin le plus sûr.")
@@ -564,7 +564,7 @@ class _ChercheModal(discord.ui.Modal, title="Trouver un membre"):
             try:
                 await i.followup.send(
                     _DERNIER.get(_cle(i))
-                    or "🔎 Recherche effectuée — rouvrez le panneau pour voir "
+                    or "Recherche effectuée — rouvrez le panneau pour voir "
                        "le résultat.", ephemeral=True)
             except Exception:
                 pass
@@ -658,7 +658,7 @@ class RellseasGestionV2(LayoutView):
         try:
             await i.response.send_message(
                 "❌ Vous n'avez plus la permission d'utiliser ce panneau.\n"
-                "-# Elle se règle dans `/configure` → 🎭 Rellseas.",
+                "-# Elle se règle dans `/configure` → Rellseas.",
                 ephemeral=True)
         except Exception:
             pass
@@ -677,14 +677,14 @@ class RellseasGestionV2(LayoutView):
         n = len(choisis)
 
         items = [
-            v2_title("🎭 Rellseas · Gestion du rôle"),
+            visuels.bandeau("rellseas_gestion", "Gestion du rôle"),
             v2_subtitle("Donner ou retirer le rôle à plusieurs membres d'un coup"),
             v2_divider(),
         ]
 
         if role is None:
             items.append(v2_body(
-                "🔴 **Aucun rôle réglé** — `/configure` → 🎭 Rellseas"))
+                "🔴 **Aucun rôle réglé** — `/configure` → Rellseas"))
         else:
             items.append(v2_body(
                 f"**Rôle** · {role.mention} · `{len(getattr(role, 'members', []) or [])}` membre(s)"))
@@ -701,10 +701,10 @@ class RellseasGestionV2(LayoutView):
                 #  le menu : les décocher paraîtrait sans effet.
                 items.append(v2_body(
                     f"-# Les `{MAX_MEMBRES}` premiers sont dans le menu "
-                    f"ci-dessous. Pour tout enlever d'un coup : 🧹."))
+                    f"ci-dessous. Pour tout enlever d'un coup : « Tout désélectionner »."))
         else:
             items.append(v2_body(
-                "**Sélection** · ⚪ _aucun membre_ — menu ci-dessous ou 🔎"))
+                "**Sélection** · ⚪ _aucun membre_ — menu ci-dessous ou « Chercher un membre »"))
 
         dernier = _DERNIER.get(k)
         if dernier:
@@ -739,7 +739,7 @@ class RellseasGestionV2(LayoutView):
                 value=str(m.id), emoji="✅" if m.id in ids else None)
                 for m in ici[:MAX_RESULTATS]]
             s_ici = discord.ui.Select(
-                placeholder=(f"👥 Les {len(opts)} membres de ce salon — "
+                placeholder=(f"Les {len(opts)} membres de ce salon — "
                              f"cliquez pour ajouter ou retirer"),
                 options=opts, min_values=1, max_values=1,
                 custom_id="rellseas_salon")
@@ -770,26 +770,26 @@ class RellseasGestionV2(LayoutView):
                 lignes.append(discord.ui.ActionRow(res))
 
         pret = bool(choisis) and role is not None
-        b_chercher = Button(label="Chercher un membre", emoji="🔎",
+        b_chercher = Button(label="Chercher un membre", emoji=visuels.icone("recherche"),
                             style=discord.ButtonStyle.secondary,
                             custom_id="rellseas_g_chercher")
         b_chercher.callback = self._cb_chercher
         b_donner = Button(
             label=(f"Donner le rôle à {n}" if pret else "Donner le rôle"),
-            emoji="✅", style=discord.ButtonStyle.success,
+            emoji=visuels.icone("valider"), style=discord.ButtonStyle.success,
             disabled=not pret, custom_id="rellseas_g_donner")
         b_donner.callback = self._cb_donner
         b_retirer = Button(
             label=(f"Retirer le rôle à {n}" if pret else "Retirer le rôle"),
-            emoji="🚫", style=discord.ButtonStyle.danger,
+            emoji=visuels.icone("interdit"), style=discord.ButtonStyle.danger,
             disabled=not pret, custom_id="rellseas_g_retirer")
         b_retirer.callback = self._cb_retirer
         b_activite = Button(
             label=(f"Activité 7 j de {n}" if choisis else "Activité 7 jours"),
-            emoji="📊", style=discord.ButtonStyle.primary,
+            emoji=visuels.icone("stats"), style=discord.ButtonStyle.primary,
             disabled=not choisis, custom_id="rellseas_g_activite")
         b_activite.callback = self._cb_activite
-        b_vider = Button(label="Tout désélectionner", emoji="🧹",
+        b_vider = Button(label="Tout désélectionner", emoji=visuels.icone("balai"),
                          style=discord.ButtonStyle.secondary,
                          disabled=not choisis, custom_id="rellseas_g_vider")
         b_vider.callback = self._cb_vider
@@ -870,7 +870,7 @@ class RellseasGestionV2(LayoutView):
         role = g.get_role(int(c.get(CLE_ROLE_CIBLE, 0) or 0))
         if role is None:
             return None, ("Aucun rôle Rellseas réglé — `/configure` → "
-                          "🎭 Rellseas.")
+                          "Rellseas.")
         moi = g.me
         if moi is None:
             return role, "Je ne me vois pas sur ce serveur."

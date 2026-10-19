@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 
 import discord
 from discord.ext import tasks
+import visuels
 
 # Rôle STAFF autorisé à VOIR toutes les zones (anti-triche) + expulser/fermer (owner 2026-07-02,
 # ID 1465411944205914275). Surchargable par env SOCIAL_STAFF_ROLE_ID.
@@ -911,32 +912,32 @@ def _panel_view(zone_id: int, kind: str):
     zid = int(zone_id)
     if kind == "group":
         v.add_item(discord.ui.Button(
-            label="➕ Ajouter un membre", style=discord.ButtonStyle.success,
+            emoji=visuels.icone("ajouter"), label="Ajouter un membre", style=discord.ButtonStyle.success,
             custom_id=f"szone_add:{zid}"))
         v.add_item(discord.ui.Button(
-            label="🔊 Vocal", style=discord.ButtonStyle.primary,
+            emoji=visuels.icone("son"), label="Vocal", style=discord.ButtonStyle.primary,
             custom_id=f"szone_voice:{zid}"))
         v.add_item(discord.ui.Button(
-            label="👢 Expulser", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("expulser"), label="Expulser", style=discord.ButtonStyle.secondary,
             custom_id=f"szone_expel:{zid}"))
         v.add_item(discord.ui.Button(
-            label="🔒 Fermer la zone", style=discord.ButtonStyle.danger,
+            emoji=visuels.icone("verrou"), label="Fermer la zone", style=discord.ButtonStyle.danger,
             custom_id=f"szone_close:{zid}"))
     else:  # trade — confiance (anti-arnaque) + vocal
         v.add_item(discord.ui.Button(
-            label="✅ Échange réussi", style=discord.ButtonStyle.success,
+            emoji=visuels.icone("valider"), label="Échange réussi", style=discord.ButtonStyle.success,
             custom_id=f"szone_trade_done:{zid}"))
         v.add_item(discord.ui.Button(
-            label="🚨 Signaler", style=discord.ButtonStyle.danger,
+            emoji=visuels.icone("alerte"), label="Signaler", style=discord.ButtonStyle.danger,
             custom_id=f"szone_trade_scam:{zid}"))
         v.add_item(discord.ui.Button(
-            label="⚖️ Médiateur", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("sanction"), label="Médiateur", style=discord.ButtonStyle.secondary,
             custom_id=f"szone_trade_med:{zid}"))
         v.add_item(discord.ui.Button(
-            label="🔊 Vocal", style=discord.ButtonStyle.primary,
+            emoji=visuels.icone("son"), label="Vocal", style=discord.ButtonStyle.primary,
             custom_id=f"szone_voice:{zid}"))
         v.add_item(discord.ui.Button(
-            label="🔒 Fermer", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("verrou"), label="Fermer", style=discord.ButtonStyle.secondary,
             custom_id=f"szone_close:{zid}"))
     return v
 
@@ -1073,7 +1074,7 @@ async def _post_group_invite(i, zone_id: int, creator):
         return
     v = discord.ui.View(timeout=None)
     v.add_item(discord.ui.Button(
-        label="➕ Rejoindre le groupe", style=discord.ButtonStyle.success,
+        emoji=visuels.icone("ajouter"), label="Rejoindre le groupe", style=discord.ButtonStyle.success,
         custom_id=f"szone_join:{int(zone_id)}"))
     try:
         await msg.edit(
@@ -1091,10 +1092,10 @@ async def _post_trade_consent(i, zone_id: int, creator, partner, topic: str):
         return
     v = discord.ui.View(timeout=None)
     v.add_item(discord.ui.Button(
-        label="✅ Accepter l'échange", style=discord.ButtonStyle.success,
+        emoji=visuels.icone("valider"), label="Accepter l'échange", style=discord.ButtonStyle.success,
         custom_id=f"szone_trade_ok:{int(zone_id)}"))
     v.add_item(discord.ui.Button(
-        label="❌ Refuser", style=discord.ButtonStyle.secondary,
+        emoji=visuels.icone("fermer"), label="Refuser", style=discord.ButtonStyle.secondary,
         custom_id=f"szone_trade_no:{int(zone_id)}"))
     try:
         badge = await _trade_badge(i.guild.id, creator.id) if i.guild else ""
@@ -1120,7 +1121,7 @@ async def _post_trade_open(i, zone_id: int, creator, topic: str):
         return
     v = discord.ui.View(timeout=None)
     v.add_item(discord.ui.Button(
-        label="🤝 Faire l'échange", style=discord.ButtonStyle.success,
+        emoji=visuels.icone("membres"), label="Faire l'échange", style=discord.ButtonStyle.success,
         custom_id=f"szone_trade_ok:{int(zone_id)}"))
     try:
         badge = await _trade_badge(i.guild.id, creator.id) if i.guild else ""
@@ -1311,7 +1312,7 @@ async def _edit_group_nudge_live(i, zone_id: int, ch, full: bool):
     v = discord.ui.View(timeout=None)
     if not full:
         v.add_item(discord.ui.Button(
-            label="➕ Rejoindre le groupe", style=discord.ButtonStyle.success,
+            emoji=visuels.icone("ajouter"), label="Rejoindre le groupe", style=discord.ButtonStyle.success,
             custom_id=f"szone_join:{int(zone_id)}"))
     head = (f"👥 Groupe en cours → {ch.mention}"
             + ("  ·  _complet_" if full else " — clique pour rejoindre !"))
@@ -1716,7 +1717,7 @@ async def _lfg_board_channel(guild):
 def _lfg_view(zone_id: int):
     v = discord.ui.View(timeout=None)
     v.add_item(discord.ui.Button(
-        label="➕ Rejoindre", style=discord.ButtonStyle.success,
+        emoji=visuels.icone("ajouter"), label="Rejoindre", style=discord.ButtonStyle.success,
         custom_id=f"szone_join:{int(zone_id)}"))
     return v
 
@@ -2235,7 +2236,7 @@ async def _do_add_member(i: discord.Interaction, zone_id: int, user):
 class _VoiceModal(discord.ui.Modal):
     """Modal du créateur : nom + taille du vocal. Sert à créer OU à régler l'existant."""
     def __init__(self, zone_id: int, cur_name: str = "", cur_limit: int = 0):
-        super().__init__(title="🔊 Salon vocal")
+        super().__init__(title="Salon vocal")
         self.zone_id = int(zone_id)
         self.f_name = discord.ui.TextInput(
             label="Nom (optionnel)", required=False, max_length=90, default=(cur_name or ""))
@@ -2648,7 +2649,7 @@ class ZoneJoinButton(discord.ui.DynamicItem[discord.ui.Button],
                      template=r"szone_join:(?P<zid>\d+)"):
     def __init__(self, zid: int):
         super().__init__(discord.ui.Button(
-            label="➕ Rejoindre", style=discord.ButtonStyle.success,
+            emoji=visuels.icone("ajouter"), label="Rejoindre", style=discord.ButtonStyle.success,
             custom_id=f"szone_join:{int(zid)}"))
         self.zid = int(zid)
 
@@ -2664,7 +2665,7 @@ class ZoneCloseButton(discord.ui.DynamicItem[discord.ui.Button],
                       template=r"szone_close:(?P<zid>\d+)"):
     def __init__(self, zid: int):
         super().__init__(discord.ui.Button(
-            label="🔒 Fermer", style=discord.ButtonStyle.danger,
+            emoji=visuels.icone("verrou"), label="Fermer", style=discord.ButtonStyle.danger,
             custom_id=f"szone_close:{int(zid)}"))
         self.zid = int(zid)
 
@@ -2680,7 +2681,7 @@ class ZoneAddButton(discord.ui.DynamicItem[discord.ui.Button],
                     template=r"szone_add:(?P<zid>\d+)"):
     def __init__(self, zid: int):
         super().__init__(discord.ui.Button(
-            label="➕ Ajouter un membre", style=discord.ButtonStyle.success,
+            emoji=visuels.icone("ajouter"), label="Ajouter un membre", style=discord.ButtonStyle.success,
             custom_id=f"szone_add:{int(zid)}"))
         self.zid = int(zid)
 
@@ -2696,7 +2697,7 @@ class ZoneVoiceButton(discord.ui.DynamicItem[discord.ui.Button],
                       template=r"szone_voice:(?P<zid>\d+)"):
     def __init__(self, zid: int):
         super().__init__(discord.ui.Button(
-            label="🔊 Créer un vocal", style=discord.ButtonStyle.primary,
+            emoji=visuels.icone("son"), label="Créer un vocal", style=discord.ButtonStyle.primary,
             custom_id=f"szone_voice:{int(zid)}"))
         self.zid = int(zid)
 
@@ -2712,7 +2713,7 @@ class ZoneExpelButton(discord.ui.DynamicItem[discord.ui.Button],
                       template=r"szone_expel:(?P<zid>\d+)"):
     def __init__(self, zid: int):
         super().__init__(discord.ui.Button(
-            label="👢 Expulser", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("expulser"), label="Expulser", style=discord.ButtonStyle.secondary,
             custom_id=f"szone_expel:{int(zid)}"))
         self.zid = int(zid)
 
@@ -2728,7 +2729,7 @@ class ZoneTradeOkButton(discord.ui.DynamicItem[discord.ui.Button],
                         template=r"szone_trade_ok:(?P<zid>\d+)"):
     def __init__(self, zid: int):
         super().__init__(discord.ui.Button(
-            label="✅ Accepter l'échange", style=discord.ButtonStyle.success,
+            emoji=visuels.icone("valider"), label="Accepter l'échange", style=discord.ButtonStyle.success,
             custom_id=f"szone_trade_ok:{int(zid)}"))
         self.zid = int(zid)
 
@@ -2744,7 +2745,7 @@ class ZoneTradeNoButton(discord.ui.DynamicItem[discord.ui.Button],
                         template=r"szone_trade_no:(?P<zid>\d+)"):
     def __init__(self, zid: int):
         super().__init__(discord.ui.Button(
-            label="❌ Refuser", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("fermer"), label="Refuser", style=discord.ButtonStyle.secondary,
             custom_id=f"szone_trade_no:{int(zid)}"))
         self.zid = int(zid)
 
@@ -2760,7 +2761,7 @@ class ZoneTradeDoneButton(discord.ui.DynamicItem[discord.ui.Button],
                           template=r"szone_trade_done:(?P<zid>\d+)"):
     def __init__(self, zid: int):
         super().__init__(discord.ui.Button(
-            label="✅ Échange réussi", style=discord.ButtonStyle.success,
+            emoji=visuels.icone("valider"), label="Échange réussi", style=discord.ButtonStyle.success,
             custom_id=f"szone_trade_done:{int(zid)}"))
         self.zid = int(zid)
 
@@ -2776,7 +2777,7 @@ class ZoneTradeScamButton(discord.ui.DynamicItem[discord.ui.Button],
                           template=r"szone_trade_scam:(?P<zid>\d+)"):
     def __init__(self, zid: int):
         super().__init__(discord.ui.Button(
-            label="🚨 Signaler une arnaque", style=discord.ButtonStyle.danger,
+            emoji=visuels.icone("alerte"), label="Signaler une arnaque", style=discord.ButtonStyle.danger,
             custom_id=f"szone_trade_scam:{int(zid)}"))
         self.zid = int(zid)
 
@@ -2792,7 +2793,7 @@ class ZoneTradeMediatorButton(discord.ui.DynamicItem[discord.ui.Button],
                               template=r"szone_trade_med:(?P<zid>\d+)"):
     def __init__(self, zid: int):
         super().__init__(discord.ui.Button(
-            label="⚖️ Médiateur", style=discord.ButtonStyle.secondary,
+            emoji=visuels.icone("sanction"), label="Médiateur", style=discord.ButtonStyle.secondary,
             custom_id=f"szone_trade_med:{int(zid)}"))
         self.zid = int(zid)
 
@@ -2808,7 +2809,7 @@ class ZoneLfgOptinButton(discord.ui.DynamicItem[discord.ui.Button],
                          template=r"szone_lfg_optin"):
     def __init__(self):
         super().__init__(discord.ui.Button(
-            label="🔔 Alertes groupes (on/off)", style=discord.ButtonStyle.primary,
+            emoji=visuels.icone("cloche"), label="Alertes groupes (on/off)", style=discord.ButtonStyle.primary,
             custom_id="szone_lfg_optin"))
 
     @classmethod

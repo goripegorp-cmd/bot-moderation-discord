@@ -25,6 +25,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import discord
+import visuels
 
 # ─── Configuration ───────────────────────────────────────────────────────
 WINDOW_DAYS = 30           # Période de stats (par défaut 30 jours)
@@ -250,24 +251,24 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             super().__init__(timeout=300)
             items = []
 
-            items.append(v2_title("🛡️ Modération"))
+            items.append(visuels.bandeau("moderation", "Modération"))
             items.append(v2_subtitle(
                 f"{stats['window_days']} derniers jours · {guild.name}"
             ))
             items.append(v2_divider())
 
             # Stats globales
-            items.append(v2_body("### 📊 Activité globale"))
+            items.append(v2_body("### Activité globale"))
             items.append(v2_body(
-                f"📋 **Total** `{stats['total']}` · "
-                f"⏱️ **24h** `{stats['recent_24h']}` · "
+                f"**Total** `{stats['total']}` · "
+                f"**24h** `{stats['recent_24h']}` · "
                 f"⚠️ **Warns** `{stats['active_warns']}`"
             ))
 
             # Breakdown par type
             if stats["by_type"]:
                 items.append(v2_divider())
-                items.append(v2_body("### 📝 Par type"))
+                items.append(v2_body("### Par type"))
                 lines = []
                 for typ, cnt in sorted(
                     stats["by_type"].items(), key=lambda x: -x[1]
@@ -279,7 +280,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             # Top staff
             if stats["top_staff"]:
                 items.append(v2_divider())
-                items.append(v2_body("### 🛡️ TOP STAFF"))
+                items.append(v2_body("### TOP STAFF"))
                 medals = ["🥇", "🥈", "🥉", "▪️", "▪️"]
                 lines = []
                 for idx, s in enumerate(stats["top_staff"][:TOP_STAFF_LIMIT]):
@@ -293,7 +294,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             if stats["top_offenders"]:
                 items.append(v2_divider())
                 items.append(v2_body(
-                    "### 👥 TOP RÉCIDIVISTES"
+                    "### TOP RÉCIDIVISTES"
                 ))
                 lines = []
                 for o in stats["top_offenders"][:TOP_OFFENDERS_LIMIT]:
@@ -308,7 +309,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             # pas juste des compteurs. Lecture seule (aucun bouton/action ici).
             if stats.get("recent_actions"):
                 items.append(v2_divider())
-                items.append(v2_body("### 🕑 Actions récentes"))
+                items.append(v2_body("### Actions récentes"))
                 lines = []
                 for a in stats["recent_actions"]:
                     emo = type_emojis.get(a.get("type"), "▫️")
@@ -357,7 +358,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
                     "founder": "fondateur", "auto": "auto",
                 }
                 items.append(v2_divider())
-                items.append(v2_body("### 🕑 Audit staff"))
+                items.append(v2_body("### Audit staff"))
                 lines = []
                 for a in audit:
                     act = a.get("action") or "?"
@@ -386,13 +387,13 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             # 🎫 Tickets (Lot 4 — "dashboard staff = tickets + sanctions")
             if tickets:
                 items.append(v2_divider())
-                items.append(v2_body("### 🎫 TICKETS"))
+                items.append(v2_body("### TICKETS"))
                 unclaimed = int(tickets.get("unclaimed", 0) or 0)
                 unclaimed_txt = f" · 🙋 `{unclaimed}` non pris en charge" if unclaimed else ""
                 items.append(v2_body(
                     f"🟢 **Ouverts :** `{tickets.get('open', 0)}`{unclaimed_txt}\n"
                     f"✅ **Fermés :** `{tickets.get('closed', 0)}`\n"
-                    f"🆕 **7 derniers jours :** `{tickets.get('recent_7d', 0)}`"
+                    f"**7 derniers jours :** `{tickets.get('recent_7d', 0)}`"
                 ))
                 t_staff = tickets.get("top_staff") or []
                 if t_staff:
@@ -401,13 +402,13 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
                     for idx, s in enumerate(t_staff[:5]):
                         medal = medals[idx] if idx < 5 else "▪️"
                         lines.append(f"{medal} <@{s['user_id']}> · `{s['count']}` ticket(s)")
-                    items.append(v2_body("**🛡️ Top support :**\n" + "\n".join(lines)))
+                    items.append(v2_body("**Top support :**\n" + "\n".join(lines)))
 
             # Cas où aucune activité
             if stats["total"] == 0:
                 items.append(v2_divider())
                 items.append(v2_body(
-                    "✨ **Période calme !**\n\n"
+                    "**Période calme !**\n\n"
                     "_Aucune sanction sur cette période. Le serveur est propre._"
                 ))
 
@@ -424,12 +425,12 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             # Lazy import d'owner_export → zéro couplage d'ordre d'import.
             try:
                 btn_json = discord.ui.Button(
-                    label="Export JSON", emoji="📤",
+                    label="Export JSON", emoji=visuels.icone("exporter"),
                     style=discord.ButtonStyle.secondary,
                     custom_id="modash_export_json",
                 )
                 btn_csv = discord.ui.Button(
-                    label="Export CSV", emoji="📊",
+                    label="Export CSV", emoji=visuels.icone("stats"),
                     style=discord.ButtonStyle.secondary,
                     custom_id="modash_export_csv",
                 )

@@ -43,6 +43,7 @@ from typing import Optional
 
 import discord
 from discord.ext import tasks
+import visuels
 
 try:
     from zoneinfo import ZoneInfo
@@ -546,27 +547,28 @@ def build_daily_report_panel(snapshot: dict, prev_snapshot: Optional[dict],
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title(f"📊 Rapport du {snapshot['day']}"))
+            items.append(visuels.bandeau("rapport", "Rapport du jour"))
+            items.append(v2_title(f"Rapport du {snapshot['day']}", level=3))
             items.append(v2_subtitle(
                 f"Dernières 24h · {guild_name}"
             ))
             items.append(v2_divider())
 
             # Members
-            items.append(v2_body("### 👥 Membres"))
+            items.append(v2_body("### Membres"))
             items.append(v2_body(
-                f"👥 **Total** `{snapshot['member_count']}` "
+                f"**Total** `{snapshot['member_count']}` "
                 f"{_diff_str(snapshot['member_count'], prev.get('member_count', 0))} · "
-                f"➕ `{snapshot['joined']}` "
+                f"`{snapshot['joined']}` "
                 f"{_diff_str(snapshot['joined'], prev.get('joined', 0))} · "
-                f"➖ `{snapshot['left_count']}` "
+                f"`{snapshot['left_count']}` "
                 f"{_diff_str(snapshot['left_count'], prev.get('left_count', 0))} · "
-                f"📈 **Net** `{snapshot['joined'] - snapshot['left_count']:+}`"
+                f"**Net** `{snapshot['joined'] - snapshot['left_count']:+}`"
             ))
 
             # Mod
             items.append(v2_divider())
-            items.append(v2_body("### 🛡️ Modération"))
+            items.append(v2_body("### Modération"))
             items.append(v2_body(
                 f"⚠️ **Infractions** `{snapshot['infractions']}` "
                 f"{_diff_str(snapshot['infractions'], prev.get('infractions', 0))}"
@@ -574,19 +576,19 @@ def build_daily_report_panel(snapshot: dict, prev_snapshot: Optional[dict],
 
             # Tickets
             items.append(v2_divider())
-            items.append(v2_body("### 🎫 Tickets"))
+            items.append(v2_body("### Tickets"))
             items.append(v2_body(
                 f"🟢 **Ouverts** `{snapshot['tickets_opened']}` "
                 f"{_diff_str(snapshot['tickets_opened'], prev.get('tickets_opened', 0))} · "
-                f"🔒 **Fermés** `{snapshot['tickets_closed']}` "
+                f"**Fermés** `{snapshot['tickets_closed']}` "
                 f"{_diff_str(snapshot['tickets_closed'], prev.get('tickets_closed', 0))}"
             ))
 
             # Events
             items.append(v2_divider())
-            items.append(v2_body("### 🎯 Events"))
+            items.append(v2_body("### Events"))
             items.append(v2_body(
-                f"🏆 **Terminés** `{snapshot['events_finished']}` "
+                f"**Terminés** `{snapshot['events_finished']}` "
                 f"{_diff_str(snapshot['events_finished'], prev.get('events_finished', 0))}"
             ))
 
@@ -610,7 +612,7 @@ def build_history_panel(snapshots: list[dict], guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("📈 Historique"))
+            items.append(visuels.bandeau("historique", "Historique"))
             items.append(v2_subtitle(
                 f"{len(snapshots)} derniers jours · {guild_name}"
             ))
@@ -653,14 +655,14 @@ def build_retention_panel(retention: dict, guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("📉 Rétention"))
+            items.append(visuels.bandeau("retention", "Rétention"))
             items.append(v2_subtitle(
                 f"Membres restés après N jours · {guild_name}"
             ))
             items.append(v2_divider())
 
             items.append(v2_body(
-                f"📊 **Membres trackés** `{retention.get('total_tracked', 0)}`\n"
+                f"**Membres trackés** `{retention.get('total_tracked', 0)}`\n"
                 f"-# Comptés depuis l'activation du module"
             ))
             items.append(v2_divider())
@@ -714,7 +716,7 @@ def build_anomalies_panel(anomalies: list[dict], guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("🚨 Anomalies"))
+            items.append(visuels.bandeau("anomalies", "Anomalies"))
             items.append(v2_subtitle(
                 f"{len(anomalies)} derniers signaux · {guild_name}"
             ))
@@ -722,7 +724,7 @@ def build_anomalies_panel(anomalies: list[dict], guild_name: str = ""):
 
             if not anomalies:
                 items.append(v2_body(
-                    "✨ _Aucune anomalie récente. Tout va bien !_"
+                    "_Aucune anomalie récente. Tout va bien !_"
                 ))
             else:
                 lines = []

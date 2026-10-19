@@ -33,6 +33,7 @@ import re
 from datetime import datetime, timezone
 
 import discord
+import visuels
 
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
@@ -224,7 +225,7 @@ def build_risk_panel(guild: discord.Guild):
             risky = await get_risky_members_this_week(guild.id)
 
             items = []
-            items.append(v2_title("🤖 Joins à risque"))
+            items.append(visuels.bandeau("risques", "Arrivées à risque"))
             items.append(v2_subtitle(
                 f"7 jours · {len(risky)} membre(s) score ≥ {RISK_THRESHOLD}"
             ))

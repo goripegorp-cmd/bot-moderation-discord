@@ -37,6 +37,7 @@ from vocabulary import Action as A, Status as S, Message as Msg
 
 import permissions as perms_mod
 import protection_guards as guards_mod
+import visuels
 
 
 DATA_DIR = module_dir("setup")
@@ -285,7 +286,7 @@ class WizardStep1(_WizardView):
             await WizardStep2(self.owner, self.guild).render_to(i)
         sel.callback = _on_sel
 
-        b_skip = ui.Button(label="⏭️ Sauter (custom)", style=discord.ButtonStyle.secondary, custom_id="wiz1_skip")
+        b_skip = ui.Button(emoji=visuels.icone("suivant"), label="Sauter (custom)", style=discord.ButtonStyle.secondary, custom_id="wiz1_skip")
         async def _skip(i):
             self.state.template = Template.CUSTOM.value
             save_state(self.state)
@@ -562,7 +563,7 @@ class WizardStep5(_WizardView):
             await WizardStep4(self.owner, self.guild).render_to(i)
         b_back.callback = _back
 
-        b_next = ui.Button(label="✔️ Terminer", style=discord.ButtonStyle.primary, custom_id="wiz5_next")
+        b_next = ui.Button(emoji=visuels.icone("valider"), label="Terminer", style=discord.ButtonStyle.primary, custom_id="wiz5_next")
         async def _next(i):
             await WizardStep6(self.owner, self.guild).render_to(i)
         b_next.callback = _next
@@ -629,7 +630,7 @@ class WizardStep6(_WizardView):
             await WizardStep5(self.owner, self.guild).render_to(i)
         b_back.callback = _back
 
-        b_apply = ui.Button(label="🚀 Appliquer la configuration", style=discord.ButtonStyle.success, custom_id="wiz6_apply")
+        b_apply = ui.Button(emoji=visuels.icone("activer"), label="Appliquer la configuration", style=discord.ButtonStyle.success, custom_id="wiz6_apply")
         async def _apply(i):
             await i.response.defer(ephemeral=True)
             report = await apply_wizard_config(self.state, self.guild)

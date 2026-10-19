@@ -45,6 +45,7 @@ from protection_guards import load_policy, save_policy, AutoEventType
 # Design system
 from ui_v2 import Palette
 from vocabulary import Action as A, Status as S, Module as Mod, Message as Msg
+import visuels
 
 
 # =============================================================================
@@ -126,15 +127,15 @@ class PermissionsPanelV2(_OwnerView):
 
         self.clear_items()
 
-        b_cat = ui.Button(label="📂 Configurer une catégorie", style=discord.ButtonStyle.primary, custom_id="perm_cat")
+        b_cat = ui.Button(emoji=visuels.icone("dossier"), label="Configurer une catégorie", style=discord.ButtonStyle.primary, custom_id="perm_cat")
         b_cat.callback = self._cb_categories
-        b_cmd = ui.Button(label="⌨️ Configurer une commande", style=discord.ButtonStyle.primary, custom_id="perm_cmd")
+        b_cmd = ui.Button(emoji=visuels.icone("clavier"), label="Configurer une commande", style=discord.ButtonStyle.primary, custom_id="perm_cmd")
         b_cmd.callback = self._cb_commands
-        b_sanct = ui.Button(label="🛡️ Rôles non-sanctionnables", style=discord.ButtonStyle.secondary, custom_id="perm_sanct")
+        b_sanct = ui.Button(emoji=visuels.icone("bouclier"), label="Rôles non-sanctionnables", style=discord.ButtonStyle.secondary, custom_id="perm_sanct")
         b_sanct.callback = self._cb_sanctionable
-        b_byp = ui.Button(label="🔓 Bypass systèmes", style=discord.ButtonStyle.secondary, custom_id="perm_byp")
+        b_byp = ui.Button(emoji=visuels.icone("deverrou"), label="Bypass systèmes", style=discord.ButtonStyle.secondary, custom_id="perm_byp")
         b_byp.callback = self._cb_bypass
-        b_reset = ui.Button(label="🔄 Réinitialiser tout", style=discord.ButtonStyle.danger, custom_id="perm_reset")
+        b_reset = ui.Button(emoji=visuels.icone("actualiser"), label="Réinitialiser tout", style=discord.ButtonStyle.danger, custom_id="perm_reset")
         b_reset.callback = self._cb_reset
         b_back = ui.Button(label=A.BACK_ICON, style=discord.ButtonStyle.secondary, custom_id="perm_back")
         b_back.callback = self._cb_back
@@ -276,10 +277,10 @@ class CategoryEditPanel(_OwnerView):
 
         # Default selector
         default_options = [
-            discord.SelectOption(label="✅ Allow", value="allow", description="Autorise par défaut"),
-            discord.SelectOption(label="❌ Deny", value="deny", description="Refuse par défaut"),
-            discord.SelectOption(label="🛡️ Mod only", value="mod_only", description="Autorise si kick_members"),
-            discord.SelectOption(label="↪️ Inherit", value="inherit", description="Hérite (catégorie -> default)"),
+            discord.SelectOption(emoji=visuels.icone("valider"), label="Allow", value="allow", description="Autorise par défaut"),
+            discord.SelectOption(emoji=visuels.icone("fermer"), label="Deny", value="deny", description="Refuse par défaut"),
+            discord.SelectOption(emoji=visuels.icone("bouclier"), label="Mod only", value="mod_only", description="Autorise si kick_members"),
+            discord.SelectOption(emoji=visuels.icone("heriter"), label="Inherit", value="inherit", description="Hérite (catégorie -> default)"),
         ]
         for opt in default_options:
             opt.default = (opt.value == rule.default)
@@ -319,7 +320,7 @@ class CategoryEditPanel(_OwnerView):
             await self.render_to(i)
         role_deny.callback = _on_deny
 
-        b_clear = ui.Button(label="🧹 Vider la règle", style=discord.ButtonStyle.danger, custom_id="catedit_clear")
+        b_clear = ui.Button(emoji=visuels.icone("balai"), label="Vider la règle", style=discord.ButtonStyle.danger, custom_id="catedit_clear")
         async def _clear(i: discord.Interaction):
             cfg = await load_permissions(self.guild.id)
             cfg.categories.pop(self.category, None)
@@ -390,7 +391,7 @@ class SanctionablePanel(_OwnerView):
             await self.render_to(i)
         user_add.callback = _on_user
 
-        b_clear = ui.Button(label="🧹 Tout vider", style=discord.ButtonStyle.danger, custom_id="sanct_clear")
+        b_clear = ui.Button(emoji=visuels.icone("balai"), label="Tout vider", style=discord.ButtonStyle.danger, custom_id="sanct_clear")
         async def _clear(i: discord.Interaction):
             cfg = await load_permissions(self.guild.id)
             cfg.sanctionable.non_sanctionable_roles = []
@@ -619,11 +620,11 @@ class SocialMediaPanelV2(_OwnerView):
             subs_lines.append(f"{on_off} {icon} **{s.display_name}** ({s.handle}) → {chan_str}")
         subs_block = "\n".join(subs_lines) if subs_lines else "_Aucun abonnement configuré_"
 
-        b_add = ui.Button(label="➕ Ajouter un abonnement", style=discord.ButtonStyle.success, custom_id="soc_add")
+        b_add = ui.Button(emoji=visuels.icone("ajouter"), label="Ajouter un abonnement", style=discord.ButtonStyle.success, custom_id="soc_add")
         b_add.callback = self._cb_add
         #  `disabled` plutôt qu'absent : sans abonnement, « Gérer » n'a rien à
         #  gérer, et l'utilisateur doit voir POURQUOI il ne peut pas cliquer.
-        b_manage = ui.Button(label="📋 Gérer", style=discord.ButtonStyle.primary, custom_id="soc_manage", disabled=(not subs))
+        b_manage = ui.Button(emoji=visuels.icone("journal"), label="Gérer", style=discord.ButtonStyle.primary, custom_id="soc_manage", disabled=(not subs))
         b_manage.callback = self._cb_manage
         b_back = ui.Button(label=A.BACK_ICON, style=discord.ButtonStyle.secondary, custom_id="soc_back")
         b_back.callback = self._cb_back
@@ -836,7 +837,7 @@ class SocialEditPanel(_OwnerView):
         self.clear_items()
 
         b_toggle = ui.Button(
-            label=("🔴 Désactiver" if self.sub.enabled else "🟢 Activer"),
+            emoji=('🔴' if self.sub.enabled else '🟢'), label=("Désactiver" if self.sub.enabled else "Activer"),
             style=(discord.ButtonStyle.secondary if self.sub.enabled else discord.ButtonStyle.success),
             custom_id="socedit_toggle",
         )
@@ -899,7 +900,7 @@ class ProtectionPanelV2(_OwnerView):
         self.clear_items()
 
         b_soft = ui.Button(
-            label=("🔴 Soft mode : ON" if policy.soft_mode else "🟢 Soft mode : OFF"),
+            emoji=('🔴' if policy.soft_mode else '🟢'), label=("Soft mode : ON" if policy.soft_mode else "Soft mode : OFF"),
             style=discord.ButtonStyle.success if not policy.soft_mode else discord.ButtonStyle.secondary,
             custom_id="prot_soft",
         )
@@ -910,7 +911,7 @@ class ProtectionPanelV2(_OwnerView):
         b_soft.callback = _soft
 
         b_review = ui.Button(
-            label=("🔴 Review mode : ON" if policy.review_mode else "🟢 Review mode : OFF"),
+            emoji=('🔴' if policy.review_mode else '🟢'), label=("Review mode : ON" if policy.review_mode else "Review mode : OFF"),
             style=discord.ButtonStyle.success if not policy.review_mode else discord.ButtonStyle.secondary,
             custom_id="prot_review",
         )
@@ -921,7 +922,7 @@ class ProtectionPanelV2(_OwnerView):
         b_review.callback = _review
 
         b_trust = ui.Button(
-            label=("🔴 Trust boost : ON" if policy.trust_boost_enabled else "🟢 Trust boost : OFF"),
+            emoji=('🔴' if policy.trust_boost_enabled else '🟢'), label=("Trust boost : ON" if policy.trust_boost_enabled else "Trust boost : OFF"),
             style=discord.ButtonStyle.success if not policy.trust_boost_enabled else discord.ButtonStyle.secondary,
             custom_id="prot_trust",
         )
@@ -931,12 +932,12 @@ class ProtectionPanelV2(_OwnerView):
             await self.render_to(i)
         b_trust.callback = _trust
 
-        b_thr = ui.Button(label="📊 Seuils détection", style=discord.ButtonStyle.primary, custom_id="prot_thr")
+        b_thr = ui.Button(emoji=visuels.icone("stats"), label="Seuils détection", style=discord.ButtonStyle.primary, custom_id="prot_thr")
         async def _thr(i: discord.Interaction):
             await ProtectionThresholdsPanel(self.owner, self.guild).render_to(i)
         b_thr.callback = _thr
 
-        b_wl = ui.Button(label="📜 Whitelist", style=discord.ButtonStyle.primary, custom_id="prot_wl")
+        b_wl = ui.Button(emoji=visuels.icone("journal"), label="Whitelist", style=discord.ButtonStyle.primary, custom_id="prot_wl")
         async def _wl(i: discord.Interaction):
             await ProtectionWhitelistPanel(self.owner, self.guild).render_to(i)
         b_wl.callback = _wl

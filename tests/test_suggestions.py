@@ -10,7 +10,7 @@ import pytest
 
 import notifs
 import suggestions as G
-from conftest_discord import Guilde, Membre, Obj, Salon, base, interaction
+from conftest_discord import Guilde, Membre, Obj, Salon, base, interaction, laisser_finir
 
 
 @pytest.fixture
@@ -38,10 +38,10 @@ def env(tmp_path):
     return Obj(g=g, salon=salon, logs=logs, conf=conf, get_db=get_db)
 
 
-def run(coro, attendre=0.05):
+def run(coro):
     async def _avec_taches():
         r = await coro
-        await asyncio.sleep(attendre)
+        await laisser_finir()
         return r
     return asyncio.run(_avec_taches())
 
@@ -109,7 +109,7 @@ def test_G4_limites_et_filtres(env):
         i = interaction(env.g, Membre(20))
         await G.publier(i, "Idée interdit", "")
         refus.append(i.response.messages)
-        await asyncio.sleep(0.05)
+        await laisser_finir()
         return refus
     refus = asyncio.run(scenario())
     assert refus[:3] == [[], [], []] and "3 idées par jour" in refus[3][0][0]

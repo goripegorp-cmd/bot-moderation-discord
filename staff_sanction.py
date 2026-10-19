@@ -52,6 +52,7 @@ _db_get = None
 _v2 = None
 
 import owner_ids as _owner_ids  # FIX sécu : source UNIQUE (incluait GoRipe non protégé avant)
+import visuels
 # B3 : rate-limiter partagé (owner/super-owner exempts, fail-open). Import gardé :
 # si indisponible, on dégrade proprement (les sanctions ne sont jamais bloquées par
 # un souci d'import du limiter).
@@ -426,7 +427,7 @@ def _build_panel_view(_v2_helpers: dict, sanction_id: int, target: discord.Membe
         def __init__(self):
             super().__init__(timeout=None)
             items = []
-            items.append(v2_title("🚨 Action staff requise"))
+            items.append(visuels.bandeau("signalement", "Action staff requise"))
             items.append(v2_subtitle(
                 f"Source `{source}` · ID `{sanction_id}`"
             ))

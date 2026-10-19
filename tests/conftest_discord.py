@@ -1,10 +1,23 @@
 """Faux objets Discord partagés par les tests des sondages et des suggestions."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 
 import aiosqlite
 import discord
+
+
+async def laisser_finir(limite: float = 5.0):
+    """Attend les tâches lancées en arrière-plan au lieu d'une durée fixe (sous charge,
+    50 ms ne suffisaient pas toujours)."""
+    boucle = asyncio.get_running_loop()
+    fin = boucle.time() + limite
+    while boucle.time() < fin:
+        autres = [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
+        if not autres:
+            return
+        await asyncio.wait(autres, timeout=0.05)
 
 
 class Obj:

@@ -4,22 +4,73 @@ Les images sont rendues hors ligne par `outils/visuels.py` dans `visuels/`, serv
 serveur du bot (`/v/<nom>`, cache long) et affichées par Discord dans les menus. Les icônes
 deviennent des émojis de l'application, installés une fois. Sans domaine public ou sans
 fichier, chaque menu retombe sur un titre texte.
+
+Une icône est UN objet partagé par tous les boutons qui la portent : un bouton construit au
+chargement du module (décorateur, vue persistante) l'a déjà, sous sa forme de repli ; dès que
+les émojis de l'application sont connus, l'objet devient l'icône maison, sur place.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import aiohttp
 
 import discord
 
+import paths
+
 DOSSIER = Path(__file__).resolve().parent / "visuels"
 VERSION = "1"
 _base = ""
 _servi = None
-_icones: dict = {}
 _log = print
+
+#  L'émoji d'avant, tant que l'icône maison n'est pas installée.
+REPLI = {
+    "retour": "◀️", "fermer": "✖️", "actualiser": "🔄", "ajouter": "➕", "supprimer": "🗑️",
+    "modifier": "✏️", "valider": "✅", "annuler": "↩️", "reglages": "⚙️", "cloche": "🔔",
+    "cloche_off": "🔕", "idee": "💡", "pour": "👍", "contre": "👎", "terminer": "⏹️",
+    "pause": "⏸️", "activer": "▶️", "salon": "💬", "membre": "👤", "membres": "👥",
+    "recherche": "🔎", "bouclier": "🛡️", "ticket": "🎫", "journal": "📋", "stats": "📊",
+    "exporter": "📤", "lien": "🔗", "verrou": "🔒", "deverrou": "🔓", "avertir": "⚠️",
+    "info": "ℹ️", "aide": "❓", "horloge": "⏱️", "calendrier": "📅", "balai": "🧹",
+    "epingle": "📌", "envoyer": "📩", "sondage": "📊", "actu": "📰", "navire": "🚢",
+    "globe": "🌐", "cle": "🔑", "sanction": "⚖️", "muet": "🔇", "etoile": "⭐",
+    "expulser": "👢", "interdit": "🚫", "son": "🔊", "musique": "🎵", "alerte": "🚨",
+    "dossier": "📁", "clavier": "⌨️", "heriter": "↪️", "video": "🎬", "diagnostic": "🩺",
+    "cible": "🎯", "sommeil": "😴", "suivant": "⏭️", "palette": "🎨", "accueil": "👋",
+    "numero": "🔢", "role": "🎭", "staff": "👮", "robot": "🤖", "image": "🖼️",
+    "position": "📍", "detail": "🔬", "curseurs": "🎛️", "drapeau": "🚩", "etiquette": "🏷️",
+    "retirer": "➖",
+}
+
+
+def _memoire() -> Path:
+    return paths.base_data_dir() / "visuels_icones.json"
+
+
+def _lire_memoire() -> dict:
+    """Les identifiants des icônes installées au démarrage précédent : les boutons créés au
+    chargement les portent tout de suite."""
+    try:
+        brut = json.loads(_memoire().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(brut, dict) or brut.get("version") != VERSION:
+        return {}
+    return {n: int(i) for n, i in (brut.get("icones") or {}).items() if str(i).isdigit()}
+
+
+def _partage(nom: str, ident=None) -> discord.PartialEmoji:
+    if ident:
+        return discord.PartialEmoji(name=f"{nom}_v{VERSION}", id=int(ident))
+    return discord.PartialEmoji(name=REPLI[nom])
+
+
+_connus = _lire_memoire()
+_icones: dict = {nom: _partage(nom, _connus.get(nom)) for nom in REPLI}
 
 
 def setup(*, base_url, log=None):
@@ -71,8 +122,18 @@ def bandeau(cle: str, titre: str):
     return discord.ui.TextDisplay(f"## {titre}")
 
 
-def icone(nom: str):
-    return _icones.get(nom)
+def icone(nom: str, repli=None):
+    """L'icône maison (ou son émoji de repli) : le même objet pour tous les boutons."""
+    return _icones.get(nom) or repli
+
+
+def _monter(nom: str, emoji) -> None:
+    """L'objet partagé devient l'icône maison, sur place : tous ses boutons suivent."""
+    pe = _icones.get(nom)
+    if pe is None:
+        _icones[nom] = _partage(nom, emoji.id)
+        return
+    pe.name, pe.id, pe.animated = emoji.name, emoji.id, False
 
 
 def fichier(nom: str):
@@ -104,7 +165,12 @@ async def installer_icones(bot) -> int:
             except discord.HTTPException as ex:
                 _log(f"[VISUELS] émoji {nom} : {ex}")
                 continue
-        _icones[f.stem] = e
+        _monter(f.stem, e)
+    try:
+        _memoire().write_text(json.dumps({"version": VERSION, "icones": {
+            n: pe.id for n, pe in _icones.items() if pe.id}}), encoding="utf-8")
+    except OSError as ex:
+        _log(f"[VISUELS] mémoire des icônes : {ex}")
     for nom, e in existants.items():
         base, _, v = nom.rpartition("_v")
         if base and v != VERSION and (dossier / f"{base}.png").is_file():

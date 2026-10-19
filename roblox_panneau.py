@@ -32,6 +32,7 @@ from ui_v2 import (
     LayoutView, Palette, body as v2_body, container as v2_container,
     divider as v2_divider, subtitle as v2_subtitle, title as v2_title,
 )
+import visuels
 
 _db_set = None
 _webhook_send = None
@@ -74,7 +75,7 @@ def _bouton_ping(cle: str | None):
     """
     if not cle or cle not in pings.CATEGORIES:
         return None
-    return Button(label="Me prévenir · arrêter", emoji="🔔",
+    return Button(label="Me prévenir · arrêter", emoji=visuels.icone("cloche"),
                   style=discord.ButtonStyle.secondary,
                   custom_id=pings.custom_id(cle))
 
@@ -343,17 +344,17 @@ def construire_actu(billet: dict, ping_cle: str | None = None,
     items.append(v2_divider())
     items.append(v2_body(
         f"-# {mention}\n"
-        f"-# 📅 Publié {_horodatage(billet.get('cree_le'))} · "
+        f"-# Publié {_horodatage(billet.get('cree_le'))} · "
         f"{'DevForum' if isinstance(billet.get('topic_id'), int) else 'Roblox'}"))
 
     # ── Les boutons : article complet, vidéos YouTube ──────────────────────
     boutons = []
     if lien:
-        boutons.append(Button(label="Lire l'article complet", emoji="🔗",
+        boutons.append(Button(label="Lire l'article complet", emoji=visuels.icone("lien"),
                               style=discord.ButtonStyle.link, url=lien))
     for k, v in enumerate((billet.get("videos") or [])[:2], 1):
         boutons.append(Button(label=f"Vidéo {k}" if k > 1 or len(billet.get("videos") or []) > 1
-                              else "Vidéo", emoji="▶️",
+                              else "Vidéo", emoji=visuels.icone("activer"),
                               style=discord.ButtonStyle.link, url=v))
     #  Même règle que sur la fiche d'accessoire : le bouton d'abonnement garde
     #  sa place, quitte à laisser tomber une vidéo (elle reste dans l'article).
@@ -439,7 +440,7 @@ class RobloxPanelV2(LayoutView):
                 for s in diag) or "⚪ aucun relevé pour l'instant"
             f = await news.etat_file_actu(self.g.id)
             items = [
-                v2_title("📢 Actualité Roblox"),
+                visuels.bandeau("actualites", "Actualité Roblox"),
                 v2_subtitle("Studio · UGC · développeurs · événements · politique"),
                 v2_divider(),
                 v2_body(("🟢 **Allumée**" if allume else "⚪ **Éteinte**")
@@ -461,11 +462,11 @@ class RobloxPanelV2(LayoutView):
                                  else discord.ButtonStyle.secondary),
                           custom_id="rblx_toggle_news")
             b_on.callback = self._cb_toggle_news
-            b_test = Button(label="Relever maintenant", emoji="🔄",
+            b_test = Button(label="Relever maintenant", emoji=visuels.icone("actualiser"),
                             style=discord.ButtonStyle.primary, custom_id="rblx_test",
                             disabled=_relever is None)
             b_test.callback = self._cb_relever
-            b_back = Button(label="Retour", emoji="◀️", style=discord.ButtonStyle.secondary,
+            b_back = Button(label="Retour", emoji=visuels.icone("retour"), style=discord.ButtonStyle.secondary,
                             custom_id="rblx_back")
             b_back.callback = self._cb_retour
             items.append(discord.ui.ActionRow(b_on, b_test, b_back))

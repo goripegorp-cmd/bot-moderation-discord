@@ -111,6 +111,15 @@ ICONES = {
     "envoyer": ("\uE724", BLEU), "sondage": ("\uEB05", BLEU), "actu": ("\uE789", BLEU),
     "navire": ("\uEB48", BLEU), "globe": ("\uE774", BLEU), "cle": ("\uE8D7", AMBRE),
     "sanction": ("\uE730", ROUGE), "muet": ("\uE74F", ROUGE), "etoile": ("\uE735", AMBRE),
+    "expulser": ("\uF3B1", ROUGE), "interdit": ("\uE733", ROUGE), "son": ("\uE767", BLEU),
+    "musique": ("\uE8D6", BLEU), "alerte": ("\uE814", ROUGE), "dossier": ("\uE8B7", BLEU),
+    "clavier": ("\uE765", GRIS), "heriter": ("\uE7A6", GRIS), "video": ("\uE714", BLEU),
+    "diagnostic": ("\uE9D9", VERT), "cible": ("\uEB44", BLEU), "sommeil": ("\uE708", GRIS),
+    "suivant": ("\uE893", GRIS), "palette": ("\uE790", BLEU), "accueil": ("\uE76E", AMBRE),
+    "numero": ("\uE8EF", GRIS), "role": ("\uE8D4", BLEU), "staff": ("\uECA7", BLEU),
+    "robot": ("\uE99A", GRIS), "image": ("\uE8B9", BLEU), "position": ("\uE707", BLEU),
+    "detail": ("\uE8A3", BLEU), "curseurs": ("\uE9E9", BLEU),
+    "drapeau": ("\uE7C1", AMBRE), "etiquette": ("\uE8EC", BLEU), "retirer": ("\uE738", ROUGE),
 }
 
 

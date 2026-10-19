@@ -52,6 +52,7 @@ from typing import Optional
 import discord
 from discord.ext import tasks
 from discord.ui import Button, View
+import visuels
 
 try:
     from zoneinfo import ZoneInfo
@@ -312,7 +313,7 @@ async def send_digest_for_user(member: discord.Member) -> int:
         v2_container = _v2['v2_container']
 
         items = []
-        items.append(v2_title("🌟 Ton récap du jour"))
+        items.append(visuels.bandeau("recap", "Ton récap du jour"))
         items.append(v2_subtitle(
             f"-# {member.guild.name} · {len(rows)} notification(s)"
         ))
@@ -333,7 +334,7 @@ async def send_digest_for_user(member: discord.Member) -> int:
 
         items.append(v2_divider())
         items.append(v2_body(
-            "-# 💡 Configure tes notifs via le bouton ❓ dans /hub."
+            "-# Configure tes notifs via le bouton ❓ dans /hub."
         ))
 
         class _DigestPanel(LayoutView):
@@ -448,10 +449,10 @@ def build_prefs_panel(member: discord.Member):
             opt_out = set(prefs.get("opt_out_categories", []))
             digest_on = bool(prefs.get("digest_enabled", False))
             items = []
-            items.append(v2_title("🔔 Mes DMs"))
+            items.append(visuels.bandeau("mes_mp", "Mes messages privés"))
             items.append(v2_body(
                 f"Récap quotidien (18h FR) de ton activité · "
-                f"{'🔔 **activé**' if digest_on else '🔕 **désactivé**'}\n"
+                f"{'🔔 **activé**' if digest_on else '**désactivé**'}\n"
                 "-# Opt-in : rien n'est envoyé tant que tu ne l'actives pas."
             ))
             items.append(v2_divider())
@@ -499,7 +500,7 @@ def build_prefs_panel(member: discord.Member):
             master_btn = Button(
                 label=("Couper le récap quotidien" if digest_on
                        else "Activer le récap quotidien"),
-                emoji="🔔",
+                emoji=visuels.icone("cloche"),
                 style=(discord.ButtonStyle.danger if digest_on
                        else discord.ButtonStyle.success),
                 custom_id=f"digest_master_{member.id}",

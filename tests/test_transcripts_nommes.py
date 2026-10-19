@@ -15,6 +15,7 @@ import aiosqlite
 import discord
 
 import rellseas_panneau
+import visuels
 
 SRC = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")
 
@@ -73,7 +74,7 @@ def test_T1_le_transcript_porte_le_nom_et_se_retrouve_par_membre(tmp_path):
         return "<html>conversation</html>"
 
     ns = {"cfg": cfg, "get_db": get_db, "now": lambda: datetime(2026, 10, 19, tzinfo=timezone.utc),
-          "discord": discord, "io": io, "re": re, "asyncio": asyncio, "rellseas_ui": rellseas_panneau,
+          "discord": discord, "io": io, "re": re, "asyncio": asyncio, "rellseas_ui": rellseas_panneau, "visuels": visuels,
           "_ticket_event_parts": lambda *a: (7, ""), "_ticket_timeline_line": lambda *a: "ligne",
           "C": Obj(GREEN=1, BLUE=2, RED=3, BLURPLE=4), "_recent_transcript_urls": {},
           "_render_ticket_transcript_html": rendu, "_ticket_transcript_file": rendu,

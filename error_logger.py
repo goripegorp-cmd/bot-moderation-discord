@@ -34,6 +34,7 @@ from typing import Optional
 
 import discord
 from discord.ext import tasks
+import visuels
 
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
@@ -336,7 +337,7 @@ def build_errors_panel(guild: discord.Guild):
             recent = await get_recent_errors(limit=10, hours=24)
 
             items = []
-            items.append(v2_title("🔥  Erreurs récentes (24h)"))
+            items.append(visuels.bandeau("erreurs", "Erreurs récentes"))
             items.append(v2_subtitle(
                 f"_{summary['total']} erreur(s) capturée(s) dans les "
                 f"dernières 24h_"
@@ -354,7 +355,7 @@ def build_errors_panel(guild: discord.Guild):
             else:
                 # Top sources
                 if summary["by_source"]:
-                    items.append(v2_body("**📊  Top sources :**"))
+                    items.append(v2_body("**Top sources :**"))
                     for s in summary["by_source"][:5]:
                         items.append(v2_body(
                             f"• `{s['source']}` : **{s['count']}**"
@@ -363,7 +364,7 @@ def build_errors_panel(guild: discord.Guild):
 
                 # Top types
                 if summary["by_type"]:
-                    items.append(v2_body("**🔧  Top types :**"))
+                    items.append(v2_body("**Top types :**"))
                     for t in summary["by_type"][:5]:
                         items.append(v2_body(
                             f"• `{t['error_type']}` : **{t['count']}**"
@@ -372,7 +373,7 @@ def build_errors_panel(guild: discord.Guild):
 
                 # Recent samples
                 if recent:
-                    items.append(v2_body("**🕐  10 dernières :**"))
+                    items.append(v2_body("**10 dernières :**"))
                     for e in recent[:10]:
                         msg_short = (e["message"] or "")[:120]
                         items.append(v2_body(

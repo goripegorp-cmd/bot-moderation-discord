@@ -32,6 +32,8 @@ from pathlib import Path
 import discord
 import pytest
 
+import visuels
+
 RACINE = Path(__file__).resolve().parent.parent
 SRC = (RACINE / "bot.py").read_text(encoding="utf-8")
 ARBRE = ast.parse(SRC)
@@ -247,7 +249,7 @@ def _construire(nom_classe):
     On reprend le motif éprouvé de `test_sentinelle_instance.py` : le code
     exécuté est EXACTEMENT celui du dépôt.
     """
-    ns = {"discord": discord, "Button": discord.ui.Button,
+    ns = {"discord": discord, "Button": discord.ui.Button, "visuels": visuels,
           "View": discord.ui.View, "_resume_type": lambda p: "desc"}
     exec(ast.unparse(_classe(nom_classe)), ns)      # noqa: S102 — code du dépôt
     return ns[nom_classe]

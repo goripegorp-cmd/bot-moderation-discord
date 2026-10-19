@@ -49,6 +49,7 @@ from discord.ui import Button
 from discord.ext import tasks
 
 import owner_ids as _owner_ids  # FIX sécu : source UNIQUE de super-owners
+import visuels
 
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
@@ -802,7 +803,7 @@ def build_alert_panel(guild: discord.Guild, alert_id: int):
         def __init__(self):
             super().__init__(timeout=600)
             items = []
-            items.append(v2_title("🚨 Alerte raid"))
+            items.append(visuels.bandeau("raid", "Alerte raid"))
             items.append(v2_subtitle(
                 f"{guild.name} · ID `{alert_id}`"
             ))
@@ -814,7 +815,7 @@ def build_alert_panel(guild: discord.Guild, alert_id: int):
             ))
             items.append(v2_divider())
             items.append(v2_body(
-                "🔒 **Lockdown** invites + rôle Vérification · "
+                "**Lockdown** invites + rôle Vérification · "
                 "✅ **Ignorer** faux positif · 📋 **Détails** comptes suspects"
             ))
             self.add_item(v2_container(*items, color=0xE74C3C))
