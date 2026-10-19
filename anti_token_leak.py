@@ -152,21 +152,10 @@ async def on_message_hook(message: discord.Message) -> bool:
         f"Aucune sanction prise — c'est juste une protection."
     )
     try:
-        # Route via dm_digest.send_urgent_now si dispo
-        sent = False
         try:
-            import dm_digest as _dm_dig
-            if _dm_dig and hasattr(_dm_dig, "send_urgent_now"):
-                sent = await _dm_dig.send_urgent_now(
-                    message.author, dm_text
-                )
+            await message.author.send(dm_text)
         except Exception:
-            sent = False
-        if not sent:
-            try:
-                await message.author.send(dm_text)
-            except Exception:
-                pass
+            pass  # MP fermés : le message est quand même retiré
     except Exception:
         pass
 

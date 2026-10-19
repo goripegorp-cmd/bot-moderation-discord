@@ -44,6 +44,12 @@ FRAICHEUR_HEURES = 20  # une copie plus jeune : pas de nouvelle copie (un redém
 # flushe via le canal owner déjà câblé dans backup_lite (super-owner uniquement,
 # jamais un membre). Fail-safe : si rien n'est dispo, on log et on n'insiste pas.
 _pending_integrity_alert: str | None = None
+_alerter = None  # async (titre, détail) — l'alerte de sécurité du bot (setup)
+
+
+def setup(alerter) -> None:
+    global _alerter
+    _alerter = alerter
 
 
 def _alert_owner_integrity(integ_msg: str) -> None:
@@ -223,15 +229,13 @@ async def backup_task():
         if _pending_integrity_alert:
             msg = _pending_integrity_alert
             _pending_integrity_alert = None
-            try:
-                import backup_lite
-                await backup_lite._alert_owner_backup_issue(
-                    "🛑 **Backup .db ANNULÉ — base corrompue**",
-                    f"`PRAGMA quick_check` a échoué (`{msg}`). Aucun `.bak` n'a "
-                    f"été écrit ; les backups sains précédents sont intacts.",
-                )
-            except Exception as ex2:
-                print(f"[db_backup task] alerte intégrité non envoyée : {ex2}")
+            titre = "🛑 **Backup .db ANNULÉ — base corrompue**"
+            detail = (f"`PRAGMA quick_check` a échoué (`{msg}`). Aucun `.bak` n'a été écrit ; "
+                      f"les backups sains précédents sont intacts.")
+            if _alerter is None:
+                print(f"[db_backup] {titre} — {detail}")
+            else:
+                await _alerter(titre, detail)
     except Exception as ex:
         print(f"[db_backup task] {ex}")
 

@@ -79,19 +79,14 @@ import webhook_leak as webhook_leak_module
 import staff_sanction as staff_sanction_module
 import impersonation_detector as impersonation_module
 import rate_limiter as ratelimit_module
-import health_check as health_module
-import backup_lite as backup_module
-import dm_digest as dm_digest_module
 import webhook_tracker as webhook_tracker_module
 import honeypot as honeypot_module
 import anti_token_leak as anti_token_leak_module
-import member_risk as member_risk_module
 import error_logger as error_logger_module
 import recidivism as recidivism_module
 import social_zones as social_zones_module  # groupes et échanges privés, 100 % boutons
 import social_match as social_match_module  # appariement croisé (2 personnes qui se répondent/se ressemblent)
 import transcript_store  # stockage et service web des transcripts de tickets
-import sticky_messages as sticky_messages_module  # « Dernier message » sticky en bas de salon
 import insult_filter as insult_filter  # filtre insultes/haine gradué multilingue
 import mots_interdits  # liste du serveur — exclamations libres, plus de mots recollés
 import acces_direction  # Direction + Fondateur déplacent dans les vocaux créés
@@ -12736,6 +12731,13 @@ _TRAVAUX = (
 )
 
 
+async def _alerte_sauvegarde(titre: str, detail: str) -> None:
+    """Un souci de sauvegarde de la base : alerte de sécurité (site + 📋logs), sur chaque serveur."""
+    for g in list(bot.guilds):
+        await ulogger2026.log_event(bot, g, ulogger2026.EventType.SEC_ESCALATION,
+                                    description=f"{titre}\n{detail}")
+
+
 async def _travaux_de_demarrage():
     """Les migrations, en tâche de fond, serveur par serveur. 19/10/2026 (audit) : chacune dans son
     propre `try` — avant, une erreur sautait toutes les suivantes, à chaque démarrage, en silence."""
@@ -13001,15 +13003,11 @@ _supervisor_did_first_pass = False  # FIX logs : 1er tour = démarrage au boot �
 _SUPERVISED_MODULE_LOOPS = (
     #  19/10/2026 : seulement les modules qui existent encore.
     ('recidivism_module', 'deescalate_task'),
-    ('social_zones_module', 'zone_watchdog'),
     ('db_backup_module', 'backup_task'),
     ('obs_module', 'daily_snapshot_task'),
     ('obs_module', 'anomaly_check_task'),
     ('cleanup_module', 'weekly_cleanup_task'),
-    ('health_module', 'health_check_task'),
-    ('dm_digest_module', 'digest_dispatch_task'),
     ('webhook_tracker_module', 'weekly_scan_task'),
-    ('error_logger_module', 'burst_check_task'),
     ('raid_module', 'lockdown_expiry_task'),
     ('sondages', 'cloture_task'),
     ('recrutements', 'export_task'),
@@ -13028,18 +13026,6 @@ _SUPERVISED_MODULE_LOOPS = (
 #     supervise pas lui-même ; combat_channel_sweeper est déjà dans _SUPERVISED_LOOP_NAMES).
 _SUPERVISOR_DENY = frozenset({
     "task_supervisor",
-    # ⚠️ backup_daily_task (backup_lite) DÉSACTIVÉE — owner 2026-07-12, PREUVE PAR LES METRICS
-    # Railway : la RAM montait jusqu'à **5 Go** en dents de scie → conteneur tué (OOM) →
-    # redémarrage → re-saturation = BOUCLE DE CRASH → « L'application ne répond plus » sur TOUT.
-    # Cause : backup_lite chargeait ~60 tables en `SELECT *` SANS LIMIT, puis en faisait une
-    # chaîne JSON, puis des octets, puis les compressait → **4 copies simultanées en RAM**
-    # (objets Python ≈ 10× la taille brute) → plusieurs Go d'un coup.
-    # C'est un DOUBLON INFÉRIEUR : `db_backup.py` fait déjà le backup 24 h avec l'API NATIVE
-    # SQLite (`src_conn.backup()`) → copie cohérente, PAGE PAR PAGE (aucun pic RAM), vérifiée
-    # par quick_check, atomique, rotation 7 jours, et déjà en `asyncio.to_thread`.
-    # → AUCUNE perte de sauvegarde. Verrouillée ici pour que le superviseur ne la ressuscite
-    #   JAMAIS (retirer le .start() ne suffit pas : le balayage auto la relancerait sous 5 min).
-    "backup_daily_task",
 })
 
 # Cause-de-mort déjà loguée (dédup, borné) — évite de spammer error_logger.log_error à
@@ -13168,82 +13154,6 @@ def _iter_supervised_loops():
                 continue
     except Exception:
         pass
-
-
-def supervised_loops_status():
-    """Snapshot (label, is_running) de TOUTES les boucles supervisées — API partagée lue par
-    health_check pour lister les loops mortes depuis le MÊME registre que le superviseur.
-    Fail-safe : ne lève jamais, renvoie [] en cas de pépin."""
-    out = []
-    try:
-        for label, lo in _iter_supervised_loops():
-            try:
-                out.append((label, bool(lo.is_running())))
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return out
-
-
-def memory_stats():
-    """D2 — Watchdog mémoire (léger) : renvoie un snapshot pour détecter une fuite
-    AVANT l'OOM-kill Railway. Lu par health_check (callback partagé), jamais bloquant.
-
-    Mesure :
-      • asyncio_tasks : nombre de tâches asyncio vivantes (fuite de tasks = fuite mémoire).
-      • dicts : taille des gros dicts mémoire connus (in-process). Un dict qui gonfle
-        sans plafond = la signature classique d'une fuite.
-    Fail-safe TOTAL : toute erreur d'une sonde est ignorée (renvoie ce qu'on a pu lire)."""
-    out = {"asyncio_tasks": 0, "dicts": {}}
-    # Tâches asyncio vivantes (snapshot best-effort).
-    try:
-        out["asyncio_tasks"] = len(asyncio.all_tasks())
-    except Exception:
-        pass
-
-    def _safe_len(obj):
-        try:
-            return len(obj)
-        except Exception:
-            return None
-
-    # Gros dicts connus de bot.py.
-    probes = {
-        "_config_cache": globals().get("_config_cache", None),
-        "_config_locks": globals().get("_config_locks", None),
-        "_loop_death_seen": globals().get("_loop_death_seen", None),
-        "_entr_detect_cooldown": globals().get("_entr_detect_cooldown", None),
-        "_unanswered_pending": globals().get("_unanswered_pending", None),
-    }
-    for name, obj in probes.items():
-        if obj is None:
-            continue
-        # _config_cache est un objet wrapper → on tente .size()/._cache, sinon len().
-        n = None
-        try:
-            if name == "_config_cache":
-                inner = getattr(obj, "_cache", None)
-                n = _safe_len(inner) if inner is not None else None
-            else:
-                n = _safe_len(obj)
-        except Exception:
-            n = None
-        if n is not None:
-            out["dicts"][name] = n
-
-    # Dict mémoire connu vivant dans activity_system (best-effort, import déjà fait).
-    try:
-        import activity_system as _act
-        lmt = getattr(_act, "_last_msg_ts", None)
-        if lmt is not None:
-            v = _safe_len(lmt)
-            if v is not None:
-                out["dicts"]["activity._last_msg_ts"] = v
-    except Exception:
-        pass
-
-    return out
 
 
 @tasks.loop(minutes=5)
@@ -19763,6 +19673,7 @@ async def on_ready():
         task_supervisor.start()
     # Phase 126 : DB backup quotidien automatique (rotation 7 jours)
     try:
+        db_backup_module.setup(_alerte_sauvegarde)
         if not db_backup_module.backup_task.is_running():
             db_backup_module.backup_task.start()
     except Exception as ex:
@@ -19903,14 +19814,6 @@ async def on_ready():
 
         ratelimit_module.setup(bot)
 
-        # Tâche C : on passe supervised_loops_status → health_check lit le MÊME registre
-        # de boucles que le task_supervisor (source de vérité mutualisée).
-        # D2 : on passe AUSSI memory_stats → watchdog mémoire (fuite avant OOM Railway).
-        health_module.setup(bot, get_db, db_get, supervised_loops_status, memory_stats)
-        await health_module.init_db()
-        if not health_module.health_check_task.is_running():
-            health_module.health_check_task.start()
-
         # ⚠️ RAPPORT DE SÉCURITÉ HEBDOMADAIRE — DÉMARRAGE AJOUTÉ LE 12/08/2026.
         # La boucle `weekly_security_report` était écrite, décorée `@tasks.loop`,
         # dotée de son `before_loop`… mais aucun `.start()` n'existait nulle part
@@ -19927,30 +19830,13 @@ async def on_ready():
         if not eclaireur_actu_task.is_running():
             eclaireur_actu_task.start()
 
-        # ⚠️ backup_lite (backup_daily_task) N'EST PLUS LANCÉ — owner 2026-07-12.
-        # PREUVE (Metrics Railway) : RAM en dents de scie jusqu'à **5 Go** → conteneur tué (OOM)
-        # → redémarrage → re-saturation = BOUCLE DE CRASH → « L'application ne répond plus » sur
-        # TOUTES les commandes/boutons. Cause : ~60 tables en `SELECT *` SANS LIMIT → JSON →
-        # bytes → gzip = 4 copies simultanées en RAM (objets Python ≈ 10× la taille brute).
-        # Le backup 24 h reste ASSURÉ par db_backup.py : API NATIVE SQLite (`src_conn.backup()`)
-        # → copie cohérente PAGE PAR PAGE (zéro pic RAM), quick_check d'intégrité avant écriture,
-        # écriture atomique, rotation 7 jours, déjà en `asyncio.to_thread`. → ZÉRO perte.
-        # `setup()` est conservé : /backup manuel et restore_latest() restent disponibles.
-        # (Verrouillé aussi dans _SUPERVISOR_DENY : sans ça, task_supervisor le relancerait <5 min.)
-        backup_module.setup(get_db, bot)
-
-        print("[Phase 148] Robustesse active : 2FA + ratelimit + health + backup (db_backup)")
+        print("[Phase 148] Robustesse active : 2FA + ratelimit + backup (db_backup)")
     except Exception as ex:
         print(f"[on_ready Phase 148 robustness] {ex}")
 
 
     # Phase 152 : DM digest + webhook tracker + owner daily digest
     try:
-        dm_digest_module.setup(bot, get_db, db_get, _v2h)
-        await dm_digest_module.init_db()
-        if not dm_digest_module.digest_dispatch_task.is_running():
-            dm_digest_module.digest_dispatch_task.start()
-
         webhook_tracker_module.setup(bot, get_db, db_get, _v2h)
         await webhook_tracker_module.init_db()
         if not webhook_tracker_module.weekly_scan_task.is_running():
@@ -20007,14 +19893,9 @@ async def on_ready():
         )
         await anti_token_leak_module.init_db()
 
-        member_risk_module.setup(bot, get_db, db_get, _v2h)
-        await member_risk_module.init_db()
-
         # Phase 168.4 : Centralised error logger + burst alert
         error_logger_module.setup(bot, get_db, db_get, _v2h)
         await error_logger_module.init_db()
-        if not error_logger_module.burst_check_task.is_running():
-            error_logger_module.burst_check_task.start()
 
 
         # owner 2026-06-30 : DÉGRADATION CRESCENDO des récidivistes (restriction persistante,
@@ -21407,12 +21288,6 @@ async def on_member_join(m):
             await _handle_rogue_bot(m)
     except Exception as ex:
         print(f"[on_member_join rogue_bot] {ex}")
-
-    # Phase 167.3 : score risque (visibility-only, no auto-action)
-    try:
-        asyncio.create_task(member_risk_module.on_member_join(m))
-    except Exception as ex:
-        print(f"[on_member_join member_risk] {ex}")
 
     # Gate +18 (owner 2026-06-27, OPT-IN via age_gate_min_days) : compte trop récent → accès NSFW
     # refusé. En tâche de fond, no-op si désactivé / pas de salon NSFW. FAIL-SAFE.
@@ -23128,16 +23003,6 @@ async def on_message(msg):
     except Exception as _ex_act:
         print(f"[activite on_message] {_ex_act}")
 
-    # « Dernier message » (sticky, owner 2026-06-16) : si le salon a un sticky actif, on
-    # le redescend en bas. Garde O(1) mémoire AVANT toute requête (anti-429) + fire-and-
-    # forget throttlé → ne bloque JAMAIS on_message ni les autres handlers.
-    try:
-        if (not msg.author.bot
-                and sticky_messages_module.is_sticky_channel(msg.channel.id)):
-            asyncio.create_task(sticky_messages_module.on_message_hook(msg))
-    except Exception:
-        pass
-
     # ═══════════════ Phase 147 : SÉCURITÉ EARLY-RETURN ═══════════════
     # Webhook leak scan + token grabber scan AVANT tout autre traitement.
     # Si détecté → message supprimé, on stoppe le pipeline ici (les autres
@@ -23259,10 +23124,6 @@ async def on_message(msg):
     # et NUDGE l'auteur vers l'entraide (zéro MP, zéro ping aidant, auto-supprimé 5 min).
     # Backgroundé (create_task) : CHEAP-FIRST en mémoire, ne bloque jamais on_message ;
     # toutes les gardes (config/chatty/cooldown/DB) vivent dans le hook (fail-safe).
-    try:
-        asyncio.create_task(_entraide_autodetect_hook(msg))
-    except Exception as ex:
-        print(f"[on_message entraide_autodetect] {ex}")
 
     # Questions posées dans les salons publics : l'onglet « Questions » du site (19/10/2026).
     _tq = asyncio.create_task(_questions_hook(msg))
@@ -23273,23 +23134,8 @@ async def on_message(msg):
     # (1) Détecte « je trade X contre Y / wts / wtb / wtt / j'échange… » → propose un BOUTON
     #     « Ouvrir un trade » (salon privé à 2, modéré, auto-fermé). (2) Rafraîchit l'activité
     #     d'une zone quand on y parle (anti-fermeture prématurée). Backgroundé, fail-safe.
-    try:
-        asyncio.create_task(_trade_autodetect_hook(msg))
-    except Exception as ex:
-        print(f"[on_message trade_autodetect] {ex}")
     # Appariement croisé : une RÉPONSE à un message d'échange → propose de réunir les 2 (anti-arnaque
     # via le flux de consentement existant). Backgroundé, fail-safe (toutes les gardes dans le hook).
-    try:
-        asyncio.create_task(_social_reply_trade_hook(msg))
-    except Exception as ex:
-        print(f"[on_message social_reply_trade] {ex}")
-    try:
-        # Gate O(1) : la grande majorité des messages ne sont pas dans une zone → on évite
-        # d'allouer une Task pour un no-op (note_message re-teste la même appartenance).
-        if social_zones_module.is_zone_channel(getattr(msg.channel, 'id', 0)):
-            asyncio.create_task(social_zones_module.note_message(msg))
-    except Exception as ex:
-        print(f"[on_message social_zones note] {ex}")
 
     # ═══════════════ Phase 23 : DÉTECTION COMPTES PIRATÉS ═══════════════
     try:
@@ -30431,447 +30277,32 @@ async def _run_persistent_cleanup_once() -> dict:
 #      conservée (« pas besoin d'aide » ne déclenche pas).
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Longueur mini d'un message pour être candidat (anti messages ultra-courts/liens seuls).
-_ENTR_DETECT_MIN_LEN = 12
 # Dict borné mémoire { (guild_id, user_id): datetime dernier nudge }. Fail-open.
 _entr_detect_cooldown: dict = {}
 
-# Phrases FORTES (déclenchent seules) — recherche de sous-chaîne sur le texte lowercé
-# ET « déaccentué » (les apostrophes typographiques/espaces sont normalisés en amont).
-#  NB : tout est normalisé via _entr_normalize (lowercase, SANS accents, apostrophe→espace)
-#  AVANT comparaison → écrire les needles sans accent et en forme « apostrophe = espace ».
-_ENTR_SELF_SUFFICIENT_NEEDLES = (
-    # ── FR : « m'aider » et toutes ses variantes/fautes (apostrophe retirée par
-    #    _entr_normalize → « m aider », et l'orthographe collée « maider »).
-    "m aider", "maider", "maidez",
-    "aidez moi", "aide moi", "aidez nous", "aide nous", "aidez moi svp", "aide stp",
-    "quelqu un peut m aider", "quelqu un peut maider", "quelqu un pourrait m aider",
-    "quelqu un pour m aider", "quelqu un pour maider", "quelqu un veut m aider",
-    "qq1 peut m aider", "qqn peut m aider", "qq1 peut maider", "qqn peut maider",
-    "kelkun peut m aider", "kelkun peut maider",
-    "pouvez vous m aider", "pouvez vous maider", "tu peux m aider", "vous pouvez m aider",
-    "tu peux maider", "vous pouvez maider",
-    "qui peut m aider", "qui peut maider", "qui pourrait m aider", "qui pourrait maider",
-    "qui veut m aider", "qui veut maider", "qui pour m aider", "pour m aider", "pour maider",
-    "a l aide", "au secours", "j ai besoin d aide", "jai besoin daide",
-    "j ai besoin d un coup de main",
-    # ── FR : question EXPLICITE (l'owner cite « j'ai une question » sans « ? »)
-    "j ai une question", "jai une question", "g une question", "j ai une qst",
-    "une petite question", "petite question", "j aurais une question",
-    "j ai une autre question", "question rapide", "question bete",
-    # ── FR : « bloqué / je galère / je n'y arrive pas / je comprends pas / je trouve pas »
-    "je galere", "je galere a", "je suis bloque", "je suis bloquee", "je bloque",
-    "je stagne", "j arrive pas", "j y arrive pas", "je n arrive pas", "arrive pas a",
-    "je comprends pas", "je comprend pas", "jcomprend pas", "jcomprends pas",
-    "je pige pas", "je sais pas comment", "je trouve pas", "je trouve pas comment",
-    "je trouve pas la", "je trouve pas le", "je trouve pas les", "je trouve pas ou",
-    # ── FR : how-to gameplay (verbe d'action) — vraies questions « comment … »
-    "comment battre", "comment passer", "comment avoir", "comment obtenir",
-    "comment debloquer", "comment vaincre", "comment tuer", "comment finir",
-    "comment terminer", "comment gagner", "comment reussir", "comment monter",
-    "comment fabriquer", "comment trouver", "comment faire pour", "comment up",
-    "comment craft", "comment je fais", "comment on fait", "comment aller a",
-    "comment on va", "comment je peux", "comment acceder",
-    # ── EN
-    "help me", "i need help", "need help with", "need some help", "need assistance",
-    "can someone help", "can anyone help", "could someone help", "could anyone help",
-    "anyone able to help", "someone help me", "anyone help me",
-    "pls help", "plz help", "please help", "help pls", "help plz", "help please",
-    "how do i", "how to beat", "how to get", "how can i", "i m stuck", "im stuck",
-    "stuck on", "stuck at", "i cant beat", "i can t beat", "looking for help", "lf help",
-    # ── FR : how-to gameplay élargi (owner 2026-07-03 : « augmenter ses pv », « réduire les
-    #    dégâts »… — verbes concrets, déclenchent SEULS, node-testé 0 FP)
-    "comment augmenter", "comment augmente", "comment ameliorer", "comment booster",
-    "comment maximiser", "comment farmer", "comment recuperer", "comment upgrade",
-    "comment up ses", "comment monter ses", "comment reduire", "comment eviter",
-    "comment contrer", "comment esquiver",
-    # ── EN élargi
-    "how do you", "how to increase", "how to level", "how to farm", "how to upgrade",
-    "how to unlock", "how to make", "anyone know how", "does anyone know how",
-    "how do i get", "how do i beat",
-    # ── ES (communauté internationale — phrases SPÉCIFIQUES, jamais « ayuda »/« como » seuls)
-    "como consigo", "como puedo", "como se hace", "como subir", "como mejorar",
-    "como aumentar", "como derrotar", "como paso", "como hago", "como se sube",
-    "necesito ayuda", "alguien me ayuda", "alguien puede ayudar", "me pueden ayudar",
-    "me puedes ayudar", "ayudenme", "una ayuda porfa", "como le hago",
-    # ── PT
-    "como faco", "como conseguir", "como melhorar", "preciso de ajuda",
-    "alguem pode ajudar", "me ajuda", "como passar", "como derrotar o",
-    # ── RU (cyrillique — 0 FP vs latin ; on ÉVITE « й » : NFKD le transforme en « и »)
-    "помогите", "нужна помощь", "как повысить", "как получить", "как убить",
-    "как прокачать", "как увеличить", "как сделать", "как победить", "как улучшить",
-)
-
-# Signaux ABSTRAITS (Tier C) : ne déclenchent QU'AVEC une ancre (« ? » ou politesse).
-# Ces mots peuvent apparaître HORS demande (« pas besoin d'aide », « je sais comment
-# faire »…) → on exige l'ancre pour eux (précision, anti-faux-positifs owner 2026-06-13).
-_ENTR_WEAK_NEEDLES = (
-    # FR — « besoin / aide / conseil » abstraits + « comment » génériques
-    "besoin d aide", "besoin daide", "besoin d un coup de main", "besoin d un conseil",
-    "une aide", "un coup de main", "coup de main", "des conseils", "un conseil",
-    "koi faire", "quoi faire", "que faire", "comment faire", "comment on", "comment je",
-    "comment ca marche", "comment ca fonctionne", "comment resoudre", "comment reparer",
-    "comment installer",
-    # problème décrit (bug / « ça marche pas » / « pourquoi mon … »)
-    "pourquoi je", "pourquoi mon", "pourquoi ma", "pourquoi mes", "pourquoi ca",
-    "ca marche pas", "ca veut pas", "ca bug", "ca plante", "marche pas", "y a un bug",
-    # EN
-    "how to", "how to do", "any tips", "any advice", "any help", "what do i do",
-    "where do i", "where can i", "what should i", "why is my", "why does my",
-    "i can t", "i cant",
-)
-
-# ── OPINION / COMPARAISON (owner 2026-06-30, vrais exemples ratés : « c'est quoi le
-#    meilleur entre X et Y », « lequel choisir entre… ») : STRUCTURE interrogative complète
-#    (ouvreur + superlatif) → précision haute, déclenche SEULE (l'ancre est dans la phrase).
-_ENTR_OPINION_NEEDLES = (
-    "c est quoi le meilleur", "c est quoi le mieux", "c est quoi le plus",
-    "quoi le meilleur entre", "quoi le mieux entre", "quoi de mieux entre",
-    "quoi le meilleur", "quel est le meilleur", "quel est le mieux", "quel est le plus",
-    "quelle est la meilleure", "quel meilleur", "quelle meilleure",
-    "lequel est le meilleur", "lequel est le mieux", "lequel est mieux",
-    "lequel est le plus", "lequel choisir", "lequel prendre", "lequel je prends",
-    "lequel je prend", "lequel vaut", "lequel des deux", "laquelle choisir",
-    "laquelle prendre", "laquelle des deux",
-    "which is better", "which one is better", "what is better", "what s better",
-    "which is best", "what s the best", "which should i", "which one should i",
-)
-# ── HOW-TO / UTILITÉ explicites manquant à la liste préfixe (« comment répartir »,
-#    « ça sert à quoi »…). Déclenchent SEULES (verbe d'action concret = sans ambiguïté).
-_ENTR_HOWTO_NEEDLES = (
-    "comment repartir", "comment distribuer", "comment utiliser", "comment ameliorer",
-    "comment optimiser", "comment placer", "comment gerer", "comment choisir",
-    "comment depenser", "comment investir", "comment configurer", "comment regler",
-    "comment proceder", "comment ca se passe", "comment je dois", "comment on doit",
-    "comment doit on", "comment faut il", "comment il faut", "il faut faire comment",
-    "comment debuter", "comment commencer", "comment progresser", "comment debloquer",
-    "ca sert a quoi", "a quoi ca sert", "a quoi sert", "a quoi servent", "sert a quoi",
-    "ca veut dire quoi", "veut dire quoi",
-)
-# ── « comment » POSTPOSÉ (« répartir comment ?? », « on fait comment pour le boss ») —
-#    le trou de l'exemple (B). EXCLUT les salutations (« comment ça va ») et usages non
-#    interrogatifs (« regarde comment », « je sais comment »). GATÉ par l'ancre dans le détecteur.
-_ENTR_COMMENT_TAIL_EXCLUDE = (
-    "comment ca va", "comment vas", "comment allez", "comment tu vas", "comment va ",
-    "comment dire", "regarde comment", "vois comment", "sait comment", "sais comment",
-    "savoir comment", "voir comment", "explique comment", "montre comment",
-)
-_ENTR_COMMENT_TAIL_RE = re.compile(r"\bcomment\s*\?*\s*$")  # « comment » en dernier mot (+ « ?? »)
-_ENTR_TRAILING_COMMENT_FORMS = (
-    "fais comment", "fait comment", "faire comment", "on fait comment",
-    "je fais comment", "tu fais comment", "ca marche comment", "ca se passe comment",
-    "je dois comment", "repartir comment", "distribuer comment", "placer comment",
-    "gerer comment", "les repartir comment", "les distribuer comment",
-)
-# ── PRÉFÉRENCE (« vous préférez quoi », « tu prends quoi ») : ambigu avec le social
-#    (« tu préfères quoi, pizza ou sushi ») → GATÉ contexte gaming, comme le Tier B.
-_ENTR_PREF_NEEDLES = (
-    "preferez quoi", "preferes quoi", "preferer quoi", "tu prends quoi",
-    "vous prenez quoi", "je prends quoi", "je prends lequel", "tu prends lequel",
-    "vous conseillez quoi", "tu conseilles quoi", "conseillez quoi comme",
-    "recommandez quoi", "tu recommandes quoi", "vous me conseillez", "tu me conseilles",
-    "je choisis quoi", "on choisit quoi", "je monte quoi", "je prends quel",
-)
-
-# ── OUVREURS DE QUESTION (Tier Q, owner 2026-07-03) — « comment/pourquoi/où/quel/combien… »
-# FR + EN + ES + PT + RU. Le Tier Q ne déclenche QU'AVEC « ? » + un CONTEXTE gaming (jeu cité ou mot
-# de jeu) → capte « comment on augmente ses pv ? », « quel build ? », « how do i get hp ? », « como
-# subir de nivel ? » MAIS PAS le social (« comment ça va ? », « quel âge ? », « как дела ? » n'ont pas
-# de contexte gaming). NB : bare « ou » EXCLU (accent retiré → « où »=« ou »/or : « pizza ou sushi ? »).
-# Cyrillique sans « й » (NFKD le change en « и »). Testé node : 53 cas, 0 FP.
-_ENTR_QUESTION_OPENERS = (
-    # FR
-    "comment ", "pourquoi ", "quel ", "quelle ", "quels ", "quelles ", "combien ",
-    "lequel ", "laquelle ", "c est quoi ", "qu est ce ", "ou est ", "ou sont ",
-    "ou trouver", "ou faire", "ou farmer", "d ou ",
-    # EN
-    "how ", "why ", "where ", "what ", "which ", "how many ", "how much ", "how do ", "how can ",
-    # ES
-    "como ", "por que ", "donde ", "cual ", "cuanto ", "cuantos ", "que hago",
-    # PT
-    "onde ", "qual ", "quanto ",
-    # RU (sans « й »)
-    "как ", "почему ", "где ", "сколько ",
-)
-# ── CONTEXTE du Tier Q — liste DÉDIÉE, curée, NON ambiguë et BORNÉE (revue adverse 2026-07-03 :
-# les stats courtes/ambiguës « pv » (=privé), « mana » (⊂ manager), « buff » (⊂ buffet), « degats/
-# damage/heal » (mots courants), « boss » (⊂ bosser) causaient des FP). On N'utilise PAS la liste
-# _ENTR_CONTEXT_KEYWORDS (partagée avec le Tier B) pour le Tier Q : seulement ces mots clairement
-# gaming, bornés par un espace là où le préfixe collerait à un mot courant. Node-testé 0 FP (62 cas).
-_ENTR_Q_CONTEXT = (
-    " raid", " donjon", " dungeon", " boss ", " pvp", " pve", " loot ", " stuff", " xp ",
-    " lvl", " level", " niveau", " quete", " quest", " farm", " mana ", " dps", " stamina",
-    " debuff", " armure ", " crit ", " buff ", " buffs ", " skill ", " skills", " build",
-    " meta", " talent", " stat ", " stats", " nerf", " gameplay",
-)
-# « comment » NON interrogatif (« je sais/tu as vu/regarde comment … ») → ne compte PAS comme
-# ouvreur de question. Protège le Tier Q ET le Tier C (needles « comment on/je/faire… ») des FP
-# du type « je sais comment on gagne des pv ? ». N'affecte PAS « comment on augmente ses pv ? »
-# (aucun « sais/vu/regarde » devant). owner 2026-07-03, node-testé.
-_ENTR_Q_COMMENT_EXCLUDE = (
-    " vu comment", " vois comment", " voir comment", " vue comment",
-    " sais comment", " sait comment", " savoir comment", " su comment",
-    " regarde comment", " regardez comment", " regarder comment",
-    " explique comment", " expliquer comment", " expliques comment",
-    " montre comment", " montrer comment", " montres comment",
-    " comprends comment", " comprend comment", " compris comment",
-    " dit comment", " dire comment", " dis comment",
-)
 
 
-def _entr_strong_compare(norm: str) -> bool:
-    """True si STRUCTURE de comparaison complète « <superlatif> … entre X et Y » (capte
-    « le meilleur entre hollow et shinigami » même SANS « ? »). Exige les 3 morceaux :
-    superlatif (meilleur/mieux) + « entre » + un « et » APRÈS « entre » → 0 FP sur
-    « le meilleur entre nous c'est lui » (pas de « et » après)."""
-    try:
-        pos = norm.find(" entre ")
-        if pos < 0:
-            return False
-        if not (" meilleur" in norm or "mieux" in norm):
-            return False
-        return norm.find(" et ", pos + 1) > pos
-    except Exception:
-        return False
 
 
-def _entr_trailing_comment(norm: str) -> bool:
-    """True si « comment » POSTPOSÉ interrogatif (dernier mot, ou forme « X comment »).
-    EXCLUT salutations/usages non-questions. N'est utilisé QUE derrière l'ancre (« ? »/
-    politesse) dans le détecteur → jamais sur une affirmation."""
-    try:
-        if any(x in norm for x in _ENTR_COMMENT_TAIL_EXCLUDE):
-            return False
-        if _ENTR_COMMENT_TAIL_RE.search(norm):
-            return True
-        return any(x in norm for x in _ENTR_TRAILING_COMMENT_FORMS)
-    except Exception:
-        return False
 
 
-# ── SOLLICITATION AU GROUPE (LFG « qui veut… », « quelqu'un a… ») — Tier B. Testées
-# BORDÉES (sur " "+texte+" ") pour éviter les sous-chaînes accidentelles. Ne déclenchent
-# QU'AVEC un contexte gaming (jeu cité OU mot de progression) → « qui veut du gateau » ne
-# déclenche pas ; « qui veut faire un raid » oui. Capte les fautes courantes (« quelqun »,
-# « quelquun », apostrophe retirée par _entr_normalize).
-_ENTR_LFG_NEEDLES = (
-    " qui veut ", " qui pour ", " qui peut ", " qui a ", " qui aurait ", " qui serait ",
-    " qui est chaud", " qui est dispo", " qui est cho", " qui pourrait ",
-    # Coordination boss/raid/donjon (owner 2026-06-15, vrais exemples ratés : « qui fais le
-    # boss à … », « des personnes peuvent aider pour le boss … »). Gated TIER B = ne fire
-    # QU'AVEC un contexte gaming (boss/raid/donjon/… déjà dans _ENTR_CONTEXT_KEYWORDS) → pas
-    # de faux positif sur « qui fait la vaisselle ».
-    " qui fait ", " qui fais ", " qui fe ", " qui veut faire", " qui veux faire",
-    " qui se fait ", " qui est la pour", " on fait le", " on fait un",
-    " des gens pour", " des personnes pour", " du monde pour", " des joueurs pour",
-    " besoin de monde", " besoin de joueurs", " besoin de gens", " besoin d aide pour",
-    " cherche du monde", " cherche des gens", " cherche des joueurs", " cherche team",
-    " aide pour", " aider pour", " aide au", " aider au", " aide sur", " aider sur",
-    " coup de main pour", " un coup de main pour",
-    " quelqu un veut", " quelqu un peut", " quelqu un pour", " quelqu un a ",
-    " quelqu un est ", " quelqu un serait", " quelqu un aurait", " quelqu un dispo",
-    " quelqun a ", " quelqun veut", " quelqun peut", " quelqun pour", " quelqun est ",
-    " quelquun a ", " quelquun veut", " quelquun peut", " quelquun est ",
-    " possible une personne", " possible quelqu un", " possible que quelqu un",
-    " y a quelqu un", " y a t il quelqu un", " ya quelqu un", " ya t il quelqu un",
-    " qqn ", " qq1 ", " qqun ",
-    # EN
-    " anyone ", " someone ", " somebody ", " who can ", " who wants ",
-    " lf ", " lfg ", " lfm ", " looking for ",
-)
 
-# Contexte GAMING/PROGRESSION (bordé) — sert d'ancre au Tier B uniquement.
-_ENTR_CONTEXT_KEYWORDS = (
-    " jouer", " joue ", " jouez", " play", " playing", " raid", " farm", " xp ",
-    " exp ", " lvl", " level", " niv ", " niv.", " niveau", " boss", " donjon",
-    " dungeon", " mission", " missions", " quete", " quetes", " quest", " stuff",
-    " drop", " trade", " echange", " carry", " rush", " team", " duo", " trio",
-    " squad", " coop", " co op", " co-op", " grind", " loot", " token", " stat ",
-    " stats", " reset", " craft", " up ", " monter", " vv", " pvp", " pve", " kill",
-    " tuer", " battre", " key ", " cle ", " clef", " event", " manche", " partie",
-    " ranked", " elo", " trophee", " skin", " grade", " rang",
-    # owner 2026-06-30 : tokens de progression pour ancrer opinion/préférence gaming
-    # (« vous préférez quoi comme classe/arme/build »).
-    " classe", " classes", " arme", " armes", " perso", " persos", " build", " meta",
-    " tier list", " point ", " points", " talent", " talents", " competence",
-    " competences", " skill ", " skills",
-)
 
-# Marqueurs de POLITESSE / supplication (FR + EN) — ancre ALTERNATIVE au « ? ».
-# Recherche de sous-chaîne sur le texte normalisé (lowercase, SANS accents,
-# apostrophe→espace) → écrire chaque forme déjà normalisée. Combinés à un signal
-# fort/faible, ils suffisent à déclencher (« aidez moi svp » sans « ? » → True).
-# Seuls, SANS aucun signal d'aide, ils ne déclenchent JAMAIS (précision conservée).
-_ENTR_POLITE_MARKERS = (
-    # FR — « s'il vous/te plaît » (accents retirés par normalize → « plait »)
-    "svp", "svpl", "svppp", "svpp", "stp", "stpl", "s il vous plait",
-    "s il te plait", "sil vous plait", "sil te plait", "siouplait", "siouplé",
-    "siouple", "siouplez", "s il vous plais", "s il te plais",
-    # EN
-    "plz", "plzz", "plzzz", "pls", "plss", "plis", "pliz", "please", "pleaase",
-    "pleeease", "plox",
-)
+
+
+
 
 
 # audit 2026-07-03 : mémo borné — sur un message chatty, les hooks PARALLÈLES (aide/trade/groupe)
 # normalisent le MÊME texte 2 à 4 fois (NFKD = O(len) par caractère). Ce cache dédoublonne ces appels
 # répétés sur un texte identique (les répétitions arrivent en quelques ms → hit ≈ 100 %), borné + purgé.
 _ENTR_NORM_CACHE: dict = {}
-_ENTR_NORM_CACHE_MAX = 512
 
 
-def _entr_normalize(text: str) -> str:
-    """Normalise un message pour la détection : lowercase + accents RETIRÉS +
-    apostrophes/espaces unifiés. Pas de regex coûteuse ici (appelé à chaque
-    message). FAIL-OPEN.
-
-    NB (owner 2026-06-13) : on retire les accents (NFKD + filtrage des marques
-    combinantes) pour que « plaît »/« plait », « galère »/« galere », « résoudre »/
-    « resoudre »… matchent tous les needles (écrits SANS accent). Comme la même
-    fonction normalise aussi le contenu testé, toute la détection devient robuste
-    aux accents (les markers/needles existants sont déjà sans accent)."""
-    try:
-        key = text or ""
-        cached = _ENTR_NORM_CACHE.get(key)
-        if cached is not None:
-            return cached
-        s = key.lower()
-        # Retire les accents : décomposition NFKD puis filtrage des diacritiques.
-        s = "".join(
-            ch for ch in _unicodedata.normalize("NFKD", s)
-            if not _unicodedata.combining(ch)
-        )
-        # Unifie apostrophes typographiques et divers espaces → ' ' / espace simple.
-        s = (s.replace("’", "'").replace("ʼ", "'").replace("`", "'")
-             .replace(" ", " "))
-        # « d'aide » → on garde aussi la version « d aide » : on remplace l'apostrophe
-        # par un espace pour que les needles « ... d aide » matchent les deux écritures.
-        s = s.replace("'", " ")
-        # Compacte les espaces multiples (cheap).
-        result = " ".join(s.split())
-        if len(_ENTR_NORM_CACHE) >= _ENTR_NORM_CACHE_MAX:
-            _ENTR_NORM_CACHE.clear()  # purge simple (n'utile qu'aux répétitions rapprochées)
-        _ENTR_NORM_CACHE[key] = result
-        return result
-    except Exception:
-        return (text or "").lower()
 
 
-def _entr_detect_game(content_norm: str, guild_games_labels) -> Optional[str]:
-    """Cherche un jeu du catalogue cité dans le message (par label/alias). Reçoit la
-    liste pré-extraite [(game_key, label_norm), …] pour rester cheap. Renvoie le
-    game_key du 1er jeu trouvé, ou None. On ignore les labels trop courts (< 3) pour
-    éviter les faux positifs (« GO », « LoL » resteraient ambigus → on exige ≥3 car.)."""
-    try:
-        if not guild_games_labels:
-            return None
-        for gk, label_norm in guild_games_labels:
-            if not label_norm or len(label_norm) < 3:
-                continue
-            # Match « mot entier » léger : entouré d'espaces/bordures (cheap, pas de regex).
-            if label_norm in content_norm:
-                # Vérif bordure rudimentaire pour éviter les sous-chaînes accidentelles.
-                idx = content_norm.find(label_norm)
-                before = content_norm[idx - 1] if idx > 0 else " "
-                after_i = idx + len(label_norm)
-                after = content_norm[after_i] if after_i < len(content_norm) else " "
-                if not before.isalnum() and not after.isalnum():
-                    return gk
-        return None
-    except Exception:
-        return None
 
 
-def _entraide_detect_help(content_lower: str, guild_games_labels=None):
-    """Moteur de détection d'appel à l'aide (cheap, mémoire pur). Renvoie un tuple
-    (match: bool, detected_game_key: str|None, confidence: float). CONSERVATEUR :
-    renvoie (False, None, 0.0) par défaut.
-
-    `content_lower` est le contenu DÉJÀ lowercé (on le re-normalise localement).
-    `guild_games_labels` = liste [(game_key, label_normalisé), …] pour la détection
-    de jeu (passée par l'appelant, qui la met en cache). Aucune DB ici."""
-    try:
-        if not content_lower:
-            return (False, None, 0.0)
-        norm = _entr_normalize(content_lower)
-        if len(norm) < _ENTR_DETECT_MIN_LEN:
-            return (False, None, 0.0)
-
-        detected_game = _entr_detect_game(norm, guild_games_labels)
-        padded = " " + norm + " "
-
-        # ÉQUILIBRE PRÉCISION/RAPPEL (owner 2026-06-14, vrais exemples ratés à l'appui) :
-        # on déclenche sur une STRUCTURE de demande/question, pas sur un mot-clé en
-        # passant. 3 tiers.
-        #
-        # TIER A — demande/question EXPLICITE : déclenche SEULE, même en AFFIRMATION sans
-        # « ? » (« quelqu'un peut m'aider », « j'ai une question », « je galère »,
-        # « comment battre … », « help me »…). C'était LE trou : l'ancre « ? » obligatoire
-        # ratait toutes les demandes formulées en affirmation.
-        if any(n in norm for n in _ENTR_SELF_SUFFICIENT_NEEDLES):
-            return (True, detected_game, 0.92)
-
-        # TIER A-bis — OPINION/COMPARAISON & HOW-TO explicites (owner 2026-06-30). La STRUCTURE
-        # interrogative est intégrée à la phrase (ouvreur + superlatif, ou « comment <action> »)
-        # → précision haute, déclenche SEULE. Couvre « c'est quoi le meilleur entre X et Y »,
-        # « comment répartir mes points », « ça sert à quoi ».
-        if any(n in norm for n in _ENTR_OPINION_NEEDLES):
-            return (True, detected_game, 0.9)
-        if _entr_strong_compare(norm):
-            return (True, detected_game, 0.9)
-        if any(n in norm for n in _ENTR_HOWTO_NEEDLES):
-            return (True, detected_game, 0.9)
-
-        # TIER B — SOLLICITATION au groupe (LFG : « qui veut… », « quelqu'un a… »,
-        # « possible une personne… ») : déclenche UNIQUEMENT avec un contexte gaming (jeu
-        # cité OU mot de progression : raid/xp/lvl/stuff/token…). Le simple « ? » ne suffit
-        # PAS ici (précision : « qui veut du gateau ? » → rien ; « qui veut faire un raid »
-        # → oui). Les questions sociales avec « ? » restent surveillées, elles, par
-        # _is_genuine_question (nudge différé, moins intrusif).
-        if any(n in padded for n in _ENTR_LFG_NEEDLES):
-            if (detected_game is not None
-                    or any(k in padded for k in _ENTR_CONTEXT_KEYWORDS)):
-                return (True, detected_game, 0.85)
-
-        # TIER Q — QUESTION interrogative + « ? » + CONTEXTE gaming (owner 2026-07-03). Un ouvreur
-        # (« comment/pourquoi/où/quel/combien… » FR+EN+ES+PT+RU) AVEC un « ? » ET un contexte gaming
-        # (jeu cité OU mot de jeu : boss/pv/stuff/dps…) → vraie question de jeu. Le contexte gaming est
-        # ce qui écarte le social (« comment ça va ? », « quel âge ? » = pas de contexte → rien).
-        # Node-testé (53 cas, 0 FP). Capte « comment on augmente ses pv ? » (l'exemple owner).
-        _noninterro_comment = any(x in padded for x in _ENTR_Q_COMMENT_EXCLUDE)
-        if "?" in norm:
-            # Contexte gaming = jeu cité OU un mot de la liste DÉDIÉE Q (curée/non ambiguë), PAS la
-            # liste partagée (revue adverse : « pv »=privé, « mana »⊂manager, « boss »⊂bosser… → FP).
-            _has_game_ctx = (detected_game is not None
-                             or any(k in padded for k in _ENTR_Q_CONTEXT))
-            if _has_game_ctx and any(
-                    (" " + o) in padded for o in _ENTR_QUESTION_OPENERS
-                    if not (o == "comment " and _noninterro_comment)):
-                return (True, detected_game, 0.8)
-
-        # TIER C — signaux ABSTRAITS (« besoin d'aide », « un conseil », « pourquoi mon… »,
-        # « how to »…) : gardent l'ANCRE (« ? » ou politesse) → précision conservée
-        # (« pas besoin d'aide », « je sais comment faire » ne déclenchent pas). Un needle de la
-        # famille « comment … » ne compte PAS si un « comment » NON interrogatif précède (« je sais
-        # comment on gagne ? ») → garde la précision sans casser « comment on augmente ses pv ? ».
-        has_anchor = ("?" in norm) or any(m in norm for m in _ENTR_POLITE_MARKERS)
-        _weak_hit = any(n in norm for n in _ENTR_WEAK_NEEDLES
-                        if not (_noninterro_comment and n.startswith("comment")))
-        if has_anchor and (_weak_hit or _entr_trailing_comment(norm)):
-            # « répartir comment ?? », « on fait comment pour le boss ? » : le « comment »
-            # POSTPOSÉ est gardé par l'ancre (jamais sur une affirmation). owner 2026-06-30.
-            return (True, detected_game, 0.8)
-
-        # TIER B-bis — PRÉFÉRENCE (« vous préférez quoi comme classe », « tu prends quoi ») :
-        # ambigu avec le social → GATÉ contexte gaming (jeu cité OU mot de progression), comme
-        # le Tier B. « tu préfères quoi pizza ou sushi » (sans contexte gaming) ne déclenche pas.
-        if (detected_game is not None or any(k in padded for k in _ENTR_CONTEXT_KEYWORDS)) \
-                and any(n in norm for n in _ENTR_PREF_NEEDLES):
-            return (True, detected_game, 0.82)
-
-        return (False, detected_game, 0.0)
-    except Exception:
-        return (False, None, 0.0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -30984,127 +30415,13 @@ async def _entraide_maybe_delete_empty_voice(guild, channel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def _entraide_autodetect_hook(msg):
-    """Point d'entrée appelé depuis on_message (backgroundé). Fait TOUTES les gardes
-    cheap AVANT d'engager quoi que ce soit, dans l'ordre du moins cher au plus cher :
-
-      1. Gardes mémoire instantanées : guild présent, pas un bot, contenu non vide/pas
-         une commande (préfixes), longueur mini.
-      2. Détection EN MÉMOIRE (motifs précompilés) — si False → STOP, zéro DB.
-      3. Seulement si match : config (cfg, cache court) entraide actif + autodetect ON.
-      4. Salon chatty + PAS le salon des demandes d'entraide lui-même.
-      5. _entraide_maybe_nudge (cooldown mémoire puis DB demande-open puis post).
-
-    FAIL-SAFE intégral : avale tout, ne casse JAMAIS on_message."""
-    try:
-        guild = getattr(msg, 'guild', None)
-        author = getattr(msg, 'author', None)
-        if guild is None or author is None or getattr(author, 'bot', False):
-            return
-        content = msg.content or ""
-        if not content:
-            return
-        # Ignore les commandes (préfixes courants) et les messages très courts.
-        stripped = content.lstrip()
-        if stripped[:1] in ('!', '/', '.', '?', '-', '+', '$', '>') and len(stripped) < 4:
-            return
-        if stripped.startswith(('!', '/', '.', '$', '>', '+', '-')):
-            # Préfixe de commande probable → on ignore (sauf si phrase longue contenant
-            # un appel d'aide ; on reste conservateur et on laisse passer les vraies
-            # phrases qui commencent par un mot, pas par un préfixe).
-            return
-        content_lower = content.lower()
-        if len(content_lower.strip()) < _ENTR_DETECT_MIN_LEN:
-            return
-
-        # 2) Détection EN MÉMOIRE d'abord (sans jeux) : si rien ne matche même les
-        #    signaux forts/faibles, on sort SANS toucher au catalogue ni à la config.
-        quick_match, _gk0, _conf0 = _entraide_detect_help(content_lower, None)
-        if not quick_match:
-            return
-        # OPT-OUT (court-circuit hot-path) : membre désinscrit des propositions d'aide →
-        # on s'arrête AVANT cfg/chatty/DB SEULEMENT si l'aide ET le groupe sont coupés/en pause (ce
-        # hook ne produit que ces 2 types ; la granularité fine reste dans _entraide_maybe_nudge et
-        # _maybe_suggest_groupe). Test O(1) mémoire.
-        if _help_optout_is(int(guild.id), int(author.id), 'help') and \
-                _help_optout_is(int(guild.id), int(author.id), 'group'):
-            return
-
-        # 3) Config (cfg est caché) : entraide actif + autodetect ON ?
-        try:
-            c = await cfg(guild.id)
-        except Exception:
-            return
-        if not bool(c.get('entraide_enabled', True)):
-            return
-        if not bool(c.get('entraide_autodetect_enabled', True)):
-            return
-        # 3bis) COORDINATION gaming (kill/boss/raid…) → bouton « Créer un groupe » (zone privée
-        #       100% boutons, marche SANS config). Prioritaire sur le nudge d'aide générique :
-        #       « aidez moi à kill la dragonfly » a besoin de JOUEURS, pas d'une réponse texte.
-        try:
-            if await _maybe_suggest_groupe(msg, content_lower):
-                return
-        except Exception:
-            pass
-        req_ch_id = int(c.get('entraide_request_channel', 0) or 0)
-        if not req_ch_id:
-            return  # entraide non reliée à un salon → flux demandeur↔aidant OFF
-        # 4) Pas dans le salon des demandes lui-même.
-        if msg.channel.id == req_ch_id:
-            return
-        # Salon « chatty » uniquement (refuse tickets/annonces/staff/RO…).
-        try:
-            if not await _is_chatty_channel(msg.channel):
-                return
-        except Exception:
-            return
-
-        # 5) Re-détection AVEC les labels de jeux (cache 5 min) pour pré-remplir, puis nudge.
-    except Exception as ex:
-        print(f"[_entraide_autodetect_hook] {ex}")
 
 
 # Fallback /groupe : suggère le matchmaking quand l'entraide n'est PAS configurée et qu'une
 # demande de COORDINATION gaming est détectée (boss/raid/groupe…). Anti-spam mémoire borné.
 _GROUPE_SUGGEST_COOLDOWN: dict = {}  # (guild_id, user_id) -> ts du dernier conseil
-# Contexte de COORDINATION en 2 niveaux (revue anti-FP 2026-06-30) :
-#  - FORT = sans ambiguïté gaming → déclenche le bouton « Créer un groupe » SEUL.
-#  - AMBIGU = mots du quotidien (« boss » du taf, « team » building, « duo » de série…) →
-#    ne déclenchent QUE si AUCUN marqueur « vie réelle » n'est présent.
-_GROUPE_STRONG_CONTEXT = (
-    " raid", " donjon", " dungeon", " world boss", " invasion", " climax",
-    " kill", " killer", " kiler", " tuer", " tue ", " buter", " bute ", " vaincre",
-    " mob", " loot ", " farmer ", " pvp", " pve",
-)
-_GROUPE_AMBIG_CONTEXT = (
-    " boss", " team", " squad", " duo", " trio", " coop", " co op", " event",
-    " carry", " rush", " farm ", " battre", " groupe", " partie",
-)
-# Marqueurs « VIE RÉELLE » : si présents avec un mot AMBIGU sans signal gaming fort, ce n'est
-# PAS de la coordination de jeu (« je galère contre mon boss au taf », « duo de cette série »).
-_GROUPE_IRL_EXCLUDE = (
-    " taf", " boulot", " travail", " bureau", " ecole", " lycee", " college",
-    " fac ", " universite", " cours ", " revision", " reviser", " exam", " devoir",
-    " prof ", " serie", " netflix", " film", " chanson", " musique", " building",
-    " timidite", " irl ", " real life", " vie reelle", " mariage", " soiree ",
-    # non-jeu additionnels (pour la structure « aide pour <tâche> » ci-dessous)
-    " dissert", " menage", " vaisselle", " demenage", " demenagement", " permis",
-    " maths", " philo", " code de la route", " impots", " cv ",
-)
-# Structure « aidez-moi POUR/À <tâche> » : demande d'aide sur une tâche précise. Sur un serveur
-# de JEU, c'est quasi toujours « j'ai besoin de joueurs pour ce boss/mob/donjon » MÊME quand le
-# nom n'est pas un mot-clé connu (« la taupe aux plaines arctiques », « le boss gelid »). owner
-# 2026-07-01. Gaté par l'exclusion VIE RÉELLE ci-dessus → « aide pour mes devoirs » ne fire pas.
-_GROUPE_HELP_TASK_NEEDLES = (
-    " aidez moi pour", " aide moi pour", " aidez moi a ", " aide moi a ",
-    " m aider pour", " maider pour", " m aider a ", " maider a ",
-    " aider pour", " aide pour", " besoin d aide pour", " coup de main pour",
-    " help me with", " help with", " help me beat", " help me kill",
-)
 
 
-_ZONE_NUDGE_LIFETIME_SEC = 1200  # 20 min : > TTL pending (15 min, social_zones) → le watchdog
 #   édite le nudge en « expiré »/« accepté » AVANT que le nettoyeur ne le supprime (état visible).
 
 
@@ -31171,121 +30488,6 @@ def _group_pair_view(author_id: int):
     return v
 
 
-async def _post_social_pair(msg, match) -> bool:
-    """Propose de RÉUNIR l'auteur de `msg` et un autre joueur (`match`) qui cherche la même chose.
-    FRAIS (< FRESH_SEC) → mention des 2 + « Créer le groupe ». PLUS ANCIEN → on demande d'abord à
-    l'ancien « tu cherches toujours ? Oui/Non » (clôture des demandes périmées). FAIL-SAFE False."""
-    # ⚠️ NEUTRALISÉE LE 12/08/2026 — NE PAS RETIRER CE RETURN SANS REBRANCHER.
-    #
-    # Cette fonction posait un bouton « Créer un groupe / Proposer l'échange (appariement de deux joueurs) » que PLUS PERSONNE N'ÉCOUTE :
-    # le câblage des zones sociales a été retiré d'on_ready le 11/08 (7b036f8), pas le
-    # message. Résultat mesuré : le clic renvoie « L'interaction a échoué », en public,
-    # dans le salon, et se répète toutes les 30 minutes par membre.
-    #
-    # Le message entier est supprimé, pas seulement le bouton : il promet « en un clic »,
-    # donc sans bouton il ment. Tout le code en dessous est INTACT — `social_zones.py`
-    # (2 789 lignes) n'a jamais été supprimé, seulement débranché. Retirer ce return et
-    # réenregistrer les DynamicItem au boot suffit à tout rallumer.
-    return False
-    try:
-        guild = msg.guild
-        author = msg.author
-        if guild is None or author is None:
-            return False
-        other_id = int(match.get("other_author_id", 0) or 0)
-        if not other_id or other_id == int(author.id):
-            return False
-        other = guild.get_member(other_id)
-        if other is None or getattr(other, "bot", False):
-            try:
-                social_match_module.drop(guild.id, other_id)   # membre parti → oublie sa demande
-            except Exception:
-                pass
-            return False
-        # Opt-out respecté pour les DEUX, selon le TYPE de la paire (groupe/échange).
-        _pk = match.get("kind", "group")
-        if _help_optout_is(int(guild.id), int(author.id), _pk) \
-                or _help_optout_is(int(guild.id), other_id, _pk):
-            return False
-        shared = ", ".join((match.get("shared") or [])[:3]) or "la même chose"
-        age = float(match.get("age_sec", 0) or 0)
-        other_msg_id = int(match.get("other_msg_id", 0) or 0)
-        kind = match.get("kind", "group")
-        # ── TRADE apparié par SIMILARITÉ (2 messages d'échange, même objet) → double consentement ──
-        if kind == "trade":
-            if age > social_match_module.FRESH_SEC:
-                return False   # offre d'échange trop ancienne → on ne relance pas
-            key = frozenset((int(author.id), int(other_id)))
-            now = discord.utils.utcnow().timestamp()
-            if now - _SM_TRADE_CD.get(key, 0) < 900:
-                return False
-            try:
-                v = discord.ui.View(timeout=None)
-                v.add_item(discord.ui.Button(
-                    emoji=visuels.icone("membres"), label="Ouvrir l'échange", style=discord.ButtonStyle.success,
-                    custom_id=f"szone_create:trade:{int(author.id)}:{int(other_id)}"))
-                sug = await msg.reply(
-                    f"🤝 {author.mention} ↔ {other.mention}, un **échange** sur **{shared}** ? Ouvrez "
-                    "un salon privé (l'autre doit accepter · résumé · rappel anti-arnaque).",
-                    view=v, mention_author=False,
-                    allowed_mentions=discord.AllowedMentions(
-                        everyone=False, roles=False, users=[author, other]))
-                _SM_TRADE_CD[key] = now
-                social_zones_module.remember_zone_topic(int(sug.id), getattr(msg, "content", "") or "")
-                await _register_for_cleanup(sug, _ZONE_NUDGE_LIFETIME_SEC, reason='trade_match', reply_to=msg)
-                social_match_module.drop_msg(guild.id, other_msg_id)
-                social_match_module.drop_msg(guild.id, int(msg.id))
-            except Exception:
-                return False
-            return True
-        if age <= social_match_module.FRESH_SEC:
-            # FRAIS → propose direct de monter un groupe ensemble.
-            try:
-                pairm = await msg.reply(
-                    f"👥 {author.mention} et {other.mention}, vous cherchez **{shared}** — montez un "
-                    "**groupe** ensemble ! Cliquez pour lancer.",
-                    view=_group_pair_view(int(author.id)), mention_author=False,
-                    allowed_mentions=discord.AllowedMentions(
-                        everyone=False, roles=False, users=[author, other]))
-            except Exception:
-                return False
-            try:
-                await _register_for_cleanup(pairm, _ZONE_NUDGE_LIFETIME_SEC, reason='group_pair', reply_to=msg)
-                social_match_module.drop_msg(guild.id, other_msg_id)
-                social_match_module.drop_msg(guild.id, int(msg.id))
-            except Exception:
-                pass
-            return True
-        # PLUS ANCIEN → on demande à l'ANCIEN s'il cherche toujours (Oui → groupe ; Non → clôture).
-        try:
-            v = discord.ui.View(timeout=None)
-            v.add_item(discord.ui.Button(
-                emoji=visuels.icone("valider"), label="Oui, toujours", style=discord.ButtonStyle.success,
-                custom_id=f"sm_still_ok:{other_id}:{int(author.id)}"))
-            v.add_item(discord.ui.Button(
-                emoji=visuels.icone("fermer"), label="Non, c'est bon", style=discord.ButtonStyle.secondary,
-                custom_id=f"sm_still_no:{other_id}"))
-            conf = await msg.reply(
-                f"👋 {other.mention}, un joueur cherche aussi **{shared}** — tu es **toujours "
-                "partant** ? _(sinon je clôture ta demande)_",
-                view=v, mention_author=False,
-                allowed_mentions=discord.AllowedMentions(
-                    everyone=False, roles=False, users=[other]))
-        except Exception:
-            return False
-        try:
-            # NB : ce nudge s'ADRESSE à `other` (l'ancien), mais RÉPOND au message de `msg` (le
-            # nouveau) → on NE le lie PAS à la suppression de `msg` (sinon le nouveau, en supprimant
-            # son message jetable, effacerait une question encore utile à l'ancien). Auto-expiration
-            # seule (20 min). [revue 2026-07-03]
-            await _register_for_cleanup(conf, _ZONE_NUDGE_LIFETIME_SEC, reason='sm_still')
-            social_match_module.drop_msg(guild.id, other_msg_id)   # en cours de confirmation
-        except Exception:
-            pass
-        return True
-    except Exception as ex:
-        print(f"[_post_social_pair] {ex}")
-        return False
 
 
 async def _sm_still_ok(i, older_id: int, newer_id: int):
@@ -31346,599 +30548,35 @@ async def _sm_still_no(i, older_id: int):
         print(f"[_sm_still_no] {ex}")
 
 
-# owner 2026-07-20 : QUESTION de trade dirigée en RÉPONSE (« tu trade ? », « wanna trade? »).
-# 3 gardes anti-FP (règle n°1) : contient « ? », courte (≤ 60 c), mot de trade. Multilingue
-# FR/EN/ES/PT. Node-testé 25/25 (0 FP). N'est utilisée QUE sur une RÉPONSE (contexte dirigé).
-_TRADE_INQUIRY_RE = re.compile(
-    r"\b(trade|trades|trader|trad|echange|echanges|echanger|troc|troque|troquer|swap|swaps|"
-    r"deal|deals|vends|vendre|achete|acheter|cambio|cambias|cambiar|trocar|intercambio)\b")
 
 
-def _looks_like_trade_inquiry(text: str) -> bool:
-    try:
-        if "?" not in (text or ""):
-            return False
-        t = _entr_normalize(text or "").strip()
-        if not t or len(t) > 60:
-            return False
-        return bool(_TRADE_INQUIRY_RE.search(t))
-    except Exception:
-        return False
 
 
-async def _resolve_replied_author_id(msg, ref, replied_id):
-    """ID de l'auteur (non-bot) du message auquel on répond : cache d'abord, sinon fetch. None sinon."""
-    try:
-        _res = getattr(ref, "resolved", None)
-        _a = getattr(_res, "author", None)
-        if _a is not None and not getattr(_a, "bot", False):
-            return int(_a.id)
-    except Exception:
-        pass
-    try:
-        _m = await msg.channel.fetch_message(int(replied_id))
-        if _m and getattr(_m, "author", None) and not getattr(_m.author, "bot", False):
-            return int(_m.author.id)
-    except Exception:
-        pass
-    return None
 
 
-async def _social_reply_trade_hook(msg):
-    """Si quelqu'un RÉPOND à un message d'ÉCHANGE d'un autre joueur → il est intéressé → propose
-    d'ouvrir un salon d'échange entre les deux (consentement + résumé + anti-arnaque). FAIL-SAFE.
-    owner 2026-07-20 : gère AUSSI le cas inverse — la RÉPONSE elle-même est une question de trade
-    (« tu trade ? ») adressée à la personne à qui on répond."""
-    # ⚠️ NEUTRALISÉE LE 12/08/2026 — NE PAS RETIRER CE RETURN SANS REBRANCHER.
-    #
-    # Cette fonction posait un bouton « Proposer l'échange (réponse à un message de trade) » que PLUS PERSONNE N'ÉCOUTE :
-    # le câblage des zones sociales a été retiré d'on_ready le 11/08 (7b036f8), pas le
-    # message. Résultat mesuré : le clic renvoie « L'interaction a échoué », en public,
-    # dans le salon, et se répète toutes les 30 minutes par membre.
-    #
-    # Le message entier est supprimé, pas seulement le bouton : il promet « en un clic »,
-    # donc sans bouton il ment. Tout le code en dessous est INTACT — `social_zones.py`
-    # (2 789 lignes) n'a jamais été supprimé, seulement débranché. Retirer ce return et
-    # réenregistrer les DynamicItem au boot suffit à tout rallumer.
-    return None
-    try:
-        guild = getattr(msg, "guild", None)
-        author = getattr(msg, "author", None)
-        if guild is None or author is None or getattr(author, "bot", False):
-            return
-        ref = getattr(msg, "reference", None)
-        replied_id = getattr(ref, "message_id", None) if ref else None
-        if not replied_id:
-            return
-        try:
-            if social_zones_module.is_zone_channel(getattr(msg.channel, "id", 0)):
-                return
-        except Exception:
-            pass
-        other = social_match_module.trade_reply_match(guild.id, replied_id, author.id)
-        if not other:
-            # owner 2026-07-20 : la RÉPONSE elle-même est-elle une QUESTION de trade (« tu trade ? »)
-            # adressée à la personne à qui on répond ? Alors on apparie l'auteur ↔ l'auteur du
-            # message d'origine, MÊME si ce dernier n'était pas un « message d'échange » enregistré.
-            # (Cas le plus courant : on demande « tu trade ? » en réponse à quelqu'un.)
-            if _looks_like_trade_inquiry(getattr(msg, "content", "") or ""):
-                _ra = await _resolve_replied_author_id(msg, ref, replied_id)
-                if _ra and int(_ra) != int(author.id):
-                    other = _ra
-        if not other:
-            return
-        # Salon « chatty » uniquement (jamais dans tickets/annonces/staff/lecture-seule).
-        try:
-            if not await _is_chatty_channel(msg.channel):
-                return
-        except Exception:
-            return
-        if _help_optout_is(int(guild.id), int(author.id), 'trade') \
-                or _help_optout_is(int(guild.id), int(other), 'trade'):
-            return
-        om = guild.get_member(int(other))
-        if om is None or getattr(om, "bot", False):
-            return
-        key = frozenset((int(author.id), int(other)))
-        now = discord.utils.utcnow().timestamp()
-        if now - _SM_TRADE_CD.get(key, 0) < 900:   # 1 proposition / paire / 15 min
-            return
-        view = discord.ui.View(timeout=None)
-        view.add_item(discord.ui.Button(
-            emoji=visuels.icone("membres"), label="Ouvrir l'échange", style=discord.ButtonStyle.success,
-            custom_id=f"szone_create:trade:{int(author.id)}:{int(other)}"))
-        sug = await msg.reply(
-            f"🤝 {author.mention} ↔ {om.mention}, vous parlez d'un **échange** — ouvrez un salon "
-            "privé (résumé + rappel anti-arnaque, l'autre doit accepter). Cliquez pour lancer.",
-            view=view, mention_author=False,
-            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=[author, om]))
-        # Cooldown consommé SEULEMENT après un post réussi (sinon un échec figerait la paire 15 min).
-        _SM_TRADE_CD[key] = now
-        if len(_SM_TRADE_CD) > 500:
-            _SM_TRADE_CD.clear()
-            _SM_TRADE_CD[key] = now
-        # Résumé : contenu du message d'échange initial (celui auquel on a répondu) si dispo.
-        try:
-            _resolved = getattr(ref, "resolved", None)
-            _txt = getattr(_resolved, "content", None) or getattr(msg, "content", "") or ""
-            social_zones_module.remember_zone_topic(int(sug.id), _txt)
-        except Exception:
-            pass
-        try:
-            await _register_for_cleanup(sug, _ZONE_NUDGE_LIFETIME_SEC, reason='trade_match', reply_to=msg)
-            social_match_module.drop_msg(guild.id, int(replied_id))   # apparié → ne pas re-proposer
-        except Exception:
-            pass
-    except Exception as ex:
-        print(f"[_social_reply_trade_hook] {ex}")
 
 
-async def _maybe_suggest_groupe(msg, content_lower: str) -> bool:
-    """Si la demande détectée a un contexte de COORDINATION gaming (boss/raid/kill…), on
-    poste sous le message un bouton **« Créer un groupe »** (zone privée 100% boutons — le
-    membre n'a aucune commande à taper, owner 2026-06-30). En REPLY, jamais de MP/ping,
-    salon chatty, anti-spam 1/30 min/membre, auto-suppression. FAIL-SAFE.
-
-    Retourne True si un nudge a été posté (ou cooldown actif sur une coordination détectée)
-    → l'appelant n'enchaîne PAS sur le nudge d'aide générique (évite le double-nudge)."""
-    # ⚠️ NEUTRALISÉE LE 12/08/2026 — NE PAS RETIRER CE RETURN SANS REBRANCHER.
-    #
-    # Cette fonction posait un bouton « Créer un groupe » que PLUS PERSONNE N'ÉCOUTE :
-    # le câblage des zones sociales a été retiré d'on_ready le 11/08 (7b036f8), pas le
-    # message. Résultat mesuré : le clic renvoie « L'interaction a échoué », en public,
-    # dans le salon, et se répète toutes les 30 minutes par membre.
-    #
-    # Le message entier est supprimé, pas seulement le bouton : il promet « en un clic »,
-    # donc sans bouton il ment. Tout le code en dessous est INTACT — `social_zones.py`
-    # (2 789 lignes) n'a jamais été supprimé, seulement débranché. Retirer ce return et
-    # réenregistrer les DynamicItem au boot suffit à tout rallumer.
-    return False
-    try:
-        guild = getattr(msg, 'guild', None)
-        author = getattr(msg, 'author', None)
-        if guild is None or author is None:
-            return False
-        if _help_optout_is(int(guild.id), int(author.id), 'group'):
-            return False
-        # Jamais à l'intérieur d'une zone sociale (groupe/trade) existante.
-        try:
-            if social_zones_module.is_zone_channel(getattr(msg.channel, 'id', 0)):
-                return False
-        except Exception:
-            pass
-        norm = _entr_normalize(content_lower or "")
-        padded = " " + norm + " "
-        # Si c'est clairement un TRADE, le hook trade s'en charge → pas de double-nudge.
-        if _looks_like_strong_trade(padded):
-            return False
-        strong_game = any(k in padded for k in _GROUPE_STRONG_CONTEXT)
-        ambiguous = any(k in padded for k in _GROUPE_AMBIG_CONTEXT)
-        help_task = any(k in padded for k in _GROUPE_HELP_TASK_NEEDLES)
-        if not (strong_game or ambiguous or help_task):
-            return False  # ni coordination gaming, ni « aide pour <tâche> »
-        # Mot ambigu / tâche SANS signal gaming fort + marqueur « vie réelle » → pas du jeu.
-        if not strong_game and any(x in padded for x in _GROUPE_IRL_EXCLUDE):
-            return False
-        try:
-            if not await _is_chatty_channel(msg.channel):
-                return False
-        except Exception:
-            return False
-        # ── APPARIEMENT CROISÉ (owner 2026-07-02) : enregistre ce message de coordination et
-        #    cherche un AUTRE joueur récent qui cherche la MÊME chose (token spécifique partagé,
-        #    anti-FP node-testé) → propose de les RÉUNIR au lieu du simple nudge solo.
-        try:
-            _sm_match = social_match_module.note(
-                guild.id, author.id, msg.id, getattr(msg.channel, 'id', 0),
-                'group', getattr(msg, 'content', '') or '')
-            if _sm_match and await _post_social_pair(msg, _sm_match):
-                return True   # paire proposée → pas de nudge solo (évite le doublon)
-        except Exception:
-            pass
-        now = discord.utils.utcnow().timestamp()
-        key = (int(guild.id), int(author.id))
-        if now - _GROUPE_SUGGEST_COOLDOWN.get(key, 0) < 1800 + _nudge_extra_cooldown(guild.id, author.id):  # +repli
-            return True  # coordination détectée mais récemment proposée → on suppress le doublon
-        try:
-            view = discord.ui.View(timeout=None)
-            view.add_item(discord.ui.Button(
-                emoji=visuels.icone("membres"), label="Créer un groupe", style=discord.ButtonStyle.success,
-                custom_id=f"szone_create:group:{int(author.id)}:0"))
-            # Lot C (nudge unifié) : si l'AIDE (entraide) est configurée, propose aussi « Demande
-            # d'aide » dans le MÊME nudge → l'auteur choisit groupe OU aide. On ne l'affiche que si
-            # ça marche (salon d'aide réglé + activé), sinon on ne montre pas un bouton mort.
-            try:
-                _cc = await cfg(guild.id)
-                if int(_cc.get('entraide_request_channel', 0) or 0) and bool(_cc.get('entraide_enabled', True)):
-                    view.add_item(discord.ui.Button(
-                        emoji=visuels.icone("aide"), label="Plutôt de l'aide", style=discord.ButtonStyle.primary,
-                        custom_id=f"entr_detect:{int(author.id)}"))
-            except Exception:
-                pass
-            view.add_item(discord.ui.Button(
-                emoji=visuels.icone("cloche_off"), label="Ne plus me proposer", style=discord.ButtonStyle.secondary,
-                custom_id=f"help_optout:{int(author.id)}:group"))
-            sug = await msg.reply(
-                "👥 Besoin de joueurs ? Lance un **groupe** en un clic — une invitation s'affiche, "
-                "et le **salon se crée dès qu'un joueur te rejoint** (rien si personne ne vient).",
-                view=view, mention_author=False,
-                allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=False),
-            )
-        except Exception:
-            return False
-        # Lot B : mémorise le message d'origine (« qui veut faire le boss X ») → le tableau LFG
-        # et l'intro du salon peuvent afficher le but du groupe.
-        try:
-            social_zones_module.remember_zone_topic(int(sug.id), getattr(msg, "content", "") or "")
-        except Exception:
-            pass
-        # Cooldown consommé seulement après un post réussi.
-        if len(_GROUPE_SUGGEST_COOLDOWN) > 500:
-            _GROUPE_SUGGEST_COOLDOWN.clear()
-        _GROUPE_SUGGEST_COOLDOWN[key] = now
-        _nudge_on_posted(guild.id, author.id, 'group')  # Lot 2 : +1 posté + streak (repli)
-        try:
-            await _register_for_cleanup(sug, _ZONE_NUDGE_LIFETIME_SEC, reason='groupe_suggest', reply_to=msg)
-        except Exception:
-            pass
-        return True
-    except Exception as ex:
-        print(f"[_maybe_suggest_groupe] {ex}")
-        return False
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  DÉTECTION TRADE → bouton « Ouvrir un trade » (salon privé à 2, modéré, auto-fermé)
-# ═══════════════════════════════════════════════════════════════════════════════
-# Précision d'abord : en MMORPG « échanger/contre » est banal. On exige donc un signal FORT
-# (wts/wtb/wtt, « je trade/vends », « j'échange », « troc »…) OU une STRUCTURE (« contre » +
-# un verbe d'échange). On EXCLUT le combat (« tuer le boss contre… ») sans signal fort, qui
-# relève du GROUPE, pas du trade. Texte normalisé (accents/apostrophes) via _entr_normalize.
-# Signaux FORTS, NON ambigus (déclenchent SEULS) : jargon de trade explicite + adjacence
-# « <verbe> contre ». Revue anti-FP 2026-06-30 : « je vends/vend/revends » RETIRÉ d'ici (FP
-# « je vends du rêve / mon âme / la mèche ») → déplacé dans la famille gatée par token ci-dessous.
-_TRADE_STRONG_NEEDLES = (
-    " wts ", " wtb ", " wtt ", " wts:", " wtb:", " wtt:",
-    " je trade ", " jtrade ", " je trade,", " je propose un trade", " qui veut trade",
-    " qui trade ", " cherche a trade",
-    " qui veut echanger", " cherche a echanger", " cherche un echange", " cherche echange",
-    " je propose un echange", " propose un echange",
-    " je troc", " du troc ", " troc:", " contre quoi ",
-    " echange contre ", " echanger contre ", " vends contre ", " vend contre ",
-    " revend contre ", " cede contre ", " troc contre ",
-    # ── MULTILINGUE (owner 2026-07-02 : serveur international) — signaux d'échange NON ambigus ──
-    # EN
-    " for trade ", " up for trade ", " uft ", " trade offer ", " want to trade ", " wanna trade ",
-    " looking to trade ", " lf trade ", " who wants to trade ", " anyone trading ", " selling my ",
-    " i sell my ", " looking to sell ", " looking to buy ", " wanna buy ", " wanna sell ",
-    " trading my ", " swap my ",
-    # ES / PT (verbes d'échange non ambigus)
-    " vendo ", " compro ", " cambio ", " lo cambio ", " vendendo ", " comprando ", " troco ",
-    # DE
-    " verkaufe ", " tausche ", " biete ",
-    # ── owner 2026-07-03 : RU (méné/obméné/prodam/kouplou — sans « й »), échange sans ambiguïté.
-    #    Revue adverse : « échange mon/ma/mes » & « trading for »/« swap for » RETIRÉS — ils
-    #    matchaient des idiomes figurés (« échanger ses vœux/impressions », « swap for a coffee »).
-    #    Le FR possessif reste couvert par la STRUCTURE « X contre Y » + le « je vends … » gaté.
-    " меняю ", " обменяю ", " продам ", " куплю ",
-)
-# Famille « je vends/vend/revends » : FP-prone (idiomes figurés) → exige un TOKEN transactionnel.
-_TRADE_VENDS_NEEDLES = (
-    " je vends ", " je vend ", " je revends ", " jvends ", " jvend ", " je vends,", " je vend,",
-)
-# Verbes pour la STRUCTURE « X contre Y » (gatée par exclusions débat/combat). « troc »/« donne »
-# RETIRÉS (FP « on troc plus rien… contre », « je te donne raison contre »).
-_TRADE_VERB_NEEDLES = (
-    " echange", " echanger", " vend ", " vends ", " revend", " cede", " ceder",
-)
-# Token transactionnel (prix/monnaie/quantité/« contre »/mention) requis pour la famille « vends ».
-_TRADE_TXN_RE = re.compile(r"\d|gold|kamas|robux|paypal|\beuros?\b|\bmp\b|\bdm\b|\bpo\b|\bkk\b|stuff|\bvs\b|\$|€")
-# Débat/opinion : « contre » y est ultra-banal (« lutter contre », « pour ou contre »,
-# « échanger des points de vue ») → on EXCLUT ces tournures de la structure « contre »+verbe.
-_TRADE_DEBATE_EXCLUDE = (
-    " point de vue", " points de vue", " pour ou contre", " je suis contre", " suis contre",
-    " es contre", " est contre", " etes contre", " sommes contre", " sont contre",
-    " lutter contre", " lutte contre", " luttent contre", " se battre contre",
-    " battre contre", " voter contre", " vote contre", " votez contre", " votent contre",
-    " manifester contre", " contre la montre", " contre toute attente", " contre son gre",
-    " contre mon gre", " propos", " des idees", " echanger sur", " echange sur",
-    " rien contre", " quelque chose contre", " avis contre",
-)
-# Combat/coordination : si présent SANS signal FORT de trade, c'est du GROUPE → on laisse passer.
-_TRADE_COMBAT_EXCLUDE = (
-    " boss", " raid", " donjon", " dungeon", " kill", " tuer", " tue ", " battre",
-    " vaincre", " buter", " carry", " rush", " invasion", " climax", " mob",
-)
 _TRADE_SUGGEST_COOLDOWN: dict = {}  # (guild_id, user_id) -> ts du dernier nudge trade
 
 
-def _looks_like_strong_trade(padded: str) -> bool:
-    """True si le message porte un signal de trade NON ambigu (utilisé aussi par le nudge
-    groupe pour céder la priorité au trade et éviter le double-nudge)."""
-    try:
-        return any(n in padded for n in _TRADE_STRONG_NEEDLES)
-    except Exception:
-        return False
 
 
-# owner 2026-07-03 : TROC d'objets « X contre/vs Y » SANS verbe explicite (« 2 hog shard vs crow et
-# monkey », « 3 fragment contre 3 hog shard qui veut » — ratés jusqu'ici). Débat/combat déjà écartés en
-# amont dans le hook ; ici on écarte EN PLUS le « versus » de COMBAT/matchmaking (pvp/arène/team/1v1…)
-# et les SCORES (« 2 vs 3 »), puis on exige un séparateur BORDÉ + une QUANTITÉ + un mot « objet »
-# (>=4 lettres, hors mots courants) de CHAQUE CÔTÉ (on échange X CONTRE Y). Node-testé 25/0.
-_TRADE_BARTER_FIGHT = (
-    " pvp", " pve", " arene", " arena", " team", " squad", " duo", " trio", " ranked", " elo",
-    " tournoi", " tournament", " match", " matchmaking", " duel", " scrim", " ligue", " gvg",
-    " ffa", " manche",
-)
-_TRADE_SCORE_RE = re.compile(r"\d+\s+(?:vs|versus|contre)\s+\d+")
-# QUANTITÉ d'objet = un chiffre immédiatement suivi d'un mot (>=3 lettres). « 2 hog », « 3 acsencion »
-# = oui ; « 2 fois », « 13 vs » = non → écarte les opinions (« je suis 2 fois contre X ») et les
-# comparaisons (« matrix 2 vs inception », « iphone 13 vs samsung ») du troc. (revue adverse 2026-07-03)
-_TRADE_QTY_ITEM_RE = re.compile(r"\d+\s+([a-z]{3,})")
-_TRADE_BARTER_STOP = frozenset({
-    "contre", "versus", "avec", "pour", "dans", "sans", "sous", "vers", "chez", "mais", "donc",
-    "alors", "comme", "cette", "leur", "leurs", "nous", "vous", "elle", "elles", "veut", "veux",
-    "veulent", "prend", "prends", "prendre", "cherche", "chercher", "donne", "donner", "propose",
-    "offre", "contres", "aussi", "encore", "plus", "moins", "quelqu", "quelqun", "personne",
-    "please", "trade", "trades", "echange", "echanger", "vends", "vend", "vendre", "quoi",
-    "fois", "truc", "trucs", "chose", "choses", "decision", "decisions", "idee", "idees", "avis",
-    "nouveau", "nouvelle", "nouvel", "patch", "systeme", "regle", "regles", "mode", "update",
-    "gouvernement", "president", "monde", "gens", "moment", "raison", "tout", "tous", "toute",
-    "toutes", "tellement", "vraiment", "toujours", "jamais", "cela", "suis", "etais", "serais",
-    "pense", "pensez", "trouve", "trouvez", "perso", "genre", "meme", "autre", "autres", "gars",
-    "mecs", "chaud", "chaude", "personnes", "joueur", "joueurs", "joueuse", "membre", "membres",
-    "equipe", "equipes", "vote", "votes", "voter", "votent", "votez", "votons", "repas", "soir",
-    "soiree",
-    # 3 lettres COURANTS FR/EN (anti-apprentissage de junk : ne comptent jamais comme objet) :
-    "les", "des", "une", "ils", "mon", "ton", "son", "mes", "tes", "ses", "nos", "vos", "que",
-    "qui", "oui", "non", "pas", "car", "peu", "peut", "the", "and", "for", "you", "are", "was",
-    "has", "our", "out", "not", "but", "all", "any", "can", "her", "him", "his", "its", "may",
-    "new", "now", "old", "one", "two", "way", "who", "why", "yes", "per", "via", "fait", "cette",
-})
 
 
-# ═══ Lot 3 (owner 2026-07-03) — APPRENTISSAGE des noms d'objets du jeu (pt 6) ═══
-# Le troc « X contre Y » exige des mots « objet » >=4 lettres → les objets à NOM COURT (« hog »,
-# « orb », « key ») étaient ratés. On APPREND les noms vus dans les échanges à FORTE CONFIANCE
-# (strong/vends/structural, JAMAIS le barter lui-même → pas d'auto-amplification). Un token vu dans
-# >=3 messages de trade devient un « objet connu » de la guilde → il compte alors même à 3 lettres.
-_TRADE_ITEM3_RE = re.compile(r"[a-z]{3,}")
 _learned_items: dict = {}          # {(guild_id, token): count}
 _learned_items_dirty = False
-_LEARN_ITEM_MIN = 3                # vu dans >=3 messages de trade fort → objet connu
-_LEARN_ITEM_MAX_PER_MSG = 8        # anti-flood : au plus 8 nouveaux tokens appris par message
-_LEARN_ITEM_CAP = 20000           # borne mémoire globale
 
 
-def _is_known_item(guild_id, token) -> bool:
-    try:
-        return _learned_items.get((int(guild_id), token), 0) >= _LEARN_ITEM_MIN
-    except Exception:
-        return False
 
 
-def _learn_items_from_trade(guild_id, norm_text: str):
-    """Apprend les objets d'un message de trade À FORTE CONFIANCE. Tokens 3-15 lettres hors mots
-    courants → +1. FAIL-SAFE. (Appelé UNIQUEMENT sur strong/vends/structural, pas sur barter.)"""
-    try:
-        global _learned_items_dirty
-        g = int(guild_id)
-        seen = set()
-        for w in _TRADE_ITEM3_RE.findall(norm_text or ""):
-            if len(w) > 15 or w in _TRADE_BARTER_STOP or w in seen:
-                continue
-            seen.add(w)
-            k = (g, w)
-            _learned_items[k] = min(9999, _learned_items.get(k, 0) + 1)
-            _learned_items_dirty = True
-            if len(seen) >= _LEARN_ITEM_MAX_PER_MSG:
-                break
-        if len(_learned_items) > _LEARN_ITEM_CAP:
-            try:   # évince les plus rares (garde les plus fréquents = les vrais objets)
-                keep = sorted(_learned_items.items(), key=lambda kv: kv[1], reverse=True)[:12000]
-                _learned_items.clear()
-                _learned_items.update(keep)
-            except Exception:
-                _learned_items.clear()
-    except Exception:
-        pass
 
 
-def _barter_has_item(text: str, guild_id=0) -> bool:
-    """Un mot « objet » = >=4 lettres hors mots courants, OU un objet APPRIS du jeu (>=3 lettres)."""
-    for w in _TRADE_ITEM3_RE.findall(text):
-        if w in _TRADE_BARTER_STOP:
-            continue
-        if len(w) >= 4 or _is_known_item(guild_id, w):
-            return True
-    return False
 
 
-def _looks_like_barter(padded: str, guild_id=0) -> bool:
-    """« X contre/vs Y » = troc d'objets. Débat/combat écartés EN AMONT dans le hook ; ici on
-    ajoute le garde anti-combat-versus/score + item de chaque côté (objets appris inclus). FAIL-SAFE."""
-    try:
-        sep = None
-        for s in (" contre ", " versus ", " vs "):
-            if s in padded:
-                sep = s
-                break
-        if sep is None:
-            return False
-        if any(x in padded for x in _TRADE_BARTER_FIGHT):
-            return False
-        if not any(ch.isdigit() for ch in padded):
-            return False
-        if _TRADE_SCORE_RE.search(padded):
-            return False
-        # le chiffre doit être une QUANTITÉ D'OBJET (« 2 hog »), pas « 2 fois »/« matrix 2 vs »
-        if not any(w not in _TRADE_BARTER_STOP for w in _TRADE_QTY_ITEM_RE.findall(padded)):
-            return False
-        i = padded.find(sep)
-        return _barter_has_item(padded[:i], guild_id) and _barter_has_item(padded[i + len(sep):], guild_id)
-    except Exception:
-        return False
 
 
-async def _trade_autodetect_hook(msg) -> None:
-    """Détecte un message de TRADE en chat et poste un bouton « Ouvrir un trade » (salon
-    privé à 2, modéré par le bot, auto-fermé à l'inactivité). 100% boutons (owner : « les
-    commandes ils ne savent pas faire »). Gardes CHEAP-FIRST, jamais de MP/ping. FAIL-SAFE."""
-    # ⚠️ NEUTRALISÉE LE 12/08/2026 — NE PAS RETIRER CE RETURN SANS REBRANCHER.
-    #
-    # Cette fonction posait un bouton « Proposer l'échange (détection automatique) » que PLUS PERSONNE N'ÉCOUTE :
-    # le câblage des zones sociales a été retiré d'on_ready le 11/08 (7b036f8), pas le
-    # message. Résultat mesuré : le clic renvoie « L'interaction a échoué », en public,
-    # dans le salon, et se répète toutes les 30 minutes par membre.
-    #
-    # Le message entier est supprimé, pas seulement le bouton : il promet « en un clic »,
-    # donc sans bouton il ment. Tout le code en dessous est INTACT — `social_zones.py`
-    # (2 789 lignes) n'a jamais été supprimé, seulement débranché. Retirer ce return et
-    # réenregistrer les DynamicItem au boot suffit à tout rallumer.
-    return None
-    try:
-        guild = getattr(msg, 'guild', None)
-        author = getattr(msg, 'author', None)
-        if guild is None or author is None or getattr(author, 'bot', False):
-            return
-        content = msg.content or ""
-        if not content:
-            return
-        stripped = content.lstrip()
-        if stripped.startswith(('!', '/', '.', '$', '>', '+', '-')):
-            return
-        content_lower = content.lower()
-        if len(content_lower.strip()) < _ENTR_DETECT_MIN_LEN:
-            return
-        # Opt-out GRANULAIRE : ce membre a coupé/mis en pause les propositions d'ÉCHANGE ?
-        if _help_optout_is(int(guild.id), int(author.id), 'trade'):
-            return
-        # Jamais à l'intérieur d'une zone sociale existante.
-        try:
-            if social_zones_module.is_zone_channel(getattr(msg.channel, 'id', 0)):
-                return
-        except Exception:
-            pass
-        # Anti-doublon : si ce message RÉPOND à un échange enregistré d'un AUTRE joueur, c'est
-        # _social_reply_trade_hook qui poste le nudge APPARIÉ → on ne poste PAS le nudge solo ici.
-        try:
-            _ref = getattr(msg, 'reference', None)
-            _rid = getattr(_ref, 'message_id', None) if _ref else None
-            if _rid and social_match_module.trade_reply_match(guild.id, _rid, author.id):
-                return
-        except Exception:
-            pass
-        norm = _entr_normalize(content_lower)
-        padded = " " + norm + " "
-        # Mention non-bot (≠ auteur) = partenaire pressenti ET token transactionnel implicite.
-        partner_id = 0
-        try:
-            for u in (msg.mentions or []):
-                if u and not getattr(u, 'bot', False) and int(u.id) != int(author.id):
-                    partner_id = int(u.id)
-                    break
-        except Exception:
-            partner_id = 0
-        strong = _looks_like_strong_trade(padded)
-        fire = False
-        high_conf = False   # Lot 3 : trade à FORTE confiance (strong/vends/structural) → on APPREND
-        if strong:
-            fire = True
-            high_conf = True
-        else:
-            # Familles NON fortes : on écarte d'abord le DÉBAT (« lutter contre »…) et le
-            # COMBAT (coordination → groupe), puis on exige un token transactionnel.
-            if any(x in padded for x in _TRADE_DEBATE_EXCLUDE):
-                return
-            if any(x in padded for x in _TRADE_COMBAT_EXCLUDE):
-                return
-            vends = any(n in padded for n in _TRADE_VENDS_NEEDLES)
-            has_txn = bool(_TRADE_TXN_RE.search(padded)) or (" contre " in padded) or bool(partner_id)
-            structural = (" contre " in padded) and any(v in padded for v in _TRADE_VERB_NEEDLES)
-            barter = _looks_like_barter(padded, guild.id)
-            if vends and has_txn:
-                fire = True            # « je vends mon stuff 500k / contre des kamas / @joueur »
-                high_conf = True
-            elif structural:
-                fire = True            # « je vends mon épée contre une potion »
-                high_conf = True
-            elif barter:
-                fire = True            # owner 2026-07-03 : « 2 hog shard vs crow », « 3 fragment contre 3 hog shard »
-        if fire and high_conf:
-            # Lot 3 : on apprend les noms d'objets des trades SÛRS (jamais du barter → pas d'auto-amplif).
-            _learn_items_from_trade(guild.id, norm)
-        if not fire:
-            return
-        # Appariement croisé (owner 2026-07-02) : mémorise ce message d'ÉCHANGE ET cherche un AUTRE
-        # joueur récent qui échange le MÊME objet (token spécifique partagé, multilingue, node-testé)
-        # → propose DIRECTEMENT de les réunir (double consentement). Une RÉPONSE est gérée à part par
-        # _social_reply_trade_hook. Si une paire est proposée → pas de nudge solo (anti-doublon).
-        try:
-            _sm = social_match_module.note(guild.id, author.id, msg.id,
-                                           getattr(msg.channel, 'id', 0), 'trade', content)
-            if _sm and await _post_social_pair(msg, _sm):
-                return
-        except Exception:
-            pass
-        # Config : master toggle des nudges en chat (réutilise l'autodetect entraide).
-        try:
-            c = await cfg(guild.id)
-        except Exception:
-            return
-        if not bool(c.get('entraide_autodetect_enabled', True)):
-            return
-        # Salon « chatty » uniquement (pas de tickets/annonces/staff/RO).
-        try:
-            if not await _is_chatty_channel(msg.channel):
-                return
-        except Exception:
-            return
-        # Cooldown mémoire (1 nudge / 30 min / membre).
-        now = discord.utils.utcnow().timestamp()
-        key = (int(guild.id), int(author.id))
-        if now - _TRADE_SUGGEST_COOLDOWN.get(key, 0) < 1800 + _nudge_extra_cooldown(guild.id, author.id):
-            return
-        try:
-            view = discord.ui.View(timeout=None)
-            view.add_item(discord.ui.Button(
-                emoji=visuels.icone("membres"), label="Proposer l'échange", style=discord.ButtonStyle.success,
-                custom_id=f"szone_create:trade:{int(author.id)}:{int(partner_id)}"))
-            view.add_item(discord.ui.Button(
-                emoji=visuels.icone("cloche_off"), label="Ne plus me proposer", style=discord.ButtonStyle.secondary,
-                custom_id=f"help_optout:{int(author.id)}:trade"))
-            partner_txt = (f" avec <@{partner_id}>" if partner_id else "")
-            # Lot 4 (pt 13) : badge de CONFIANCE (échanges réussis / signalements) affiché DÈS le nudge
-            # → l'autre voit tout de suite à qui il a affaire (anti-arnaque, prudence plus tôt).
-            try:
-                _rep_badge = await social_zones_module._trade_badge(guild.id, author.id)
-            except Exception:
-                _rep_badge = ""
-            sug = await msg.reply(
-                f"🤝 Un échange{partner_txt} ? Clique pour **proposer l'échange** : l'autre doit "
-                "**accepter**, puis un salon privé s'ouvre (résumé + rappel anti-arnaque, modéré, "
-                f"fermé tout seul).\n{_rep_badge}",
-                view=view, mention_author=False,
-                allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=False),
-            )
-        except Exception:
-            return
-        # owner 2026-07-02 : mémorise le contenu du message (« je vends X contre Y ») pour l'afficher
-        # en résumé dans le futur salon d'échange (le custom_id ne peut pas transporter de texte).
-        try:
-            social_zones_module.remember_zone_topic(int(sug.id), getattr(msg, "content", "") or "")
-        except Exception:
-            pass
-        if len(_TRADE_SUGGEST_COOLDOWN) > 500:
-            _TRADE_SUGGEST_COOLDOWN.clear()
-        _TRADE_SUGGEST_COOLDOWN[key] = now
-        _nudge_on_posted(guild.id, author.id, 'trade')  # Lot 2 : +1 posté + streak (repli)
-        try:
-            await _register_for_cleanup(sug, _ZONE_NUDGE_LIFETIME_SEC, reason='trade_suggest', reply_to=msg)
-        except Exception:
-            pass
-    except Exception as ex:
-        print(f"[_trade_autodetect_hook] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -32044,9 +30682,6 @@ _nudge_mute: dict = {}  # {(guild_id, user_id, kind): muted_until_epoch}  (0/abs
 _nudge_stats: dict = {}
 _nudge_stats_dirty = False
 _nudge_streak: dict = {}       # {(guild_id, user_id): nb de nudges sans engagement}
-_NUDGE_BACKOFF_START = 3       # 3 nudges ignorés d'affilée → début du repli
-_NUDGE_BACKOFF_STEP = 3 * 3600     # +3 h de cooldown par cran au-delà du seuil
-_NUDGE_BACKOFF_MAX = 3 * 24 * 3600  # plafond du repli : 3 j
 
 
 def _nudge_stat_bump(guild_id, kind, metric):
@@ -32059,15 +30694,6 @@ def _nudge_stat_bump(guild_id, kind, metric):
         pass
 
 
-def _nudge_on_posted(guild_id, user_id, kind):
-    """Nudge de type `kind` posté à user → +1 posted (stat) + +1 streak (repli). O(1) mémoire."""
-    try:
-        _nudge_stat_bump(guild_id, kind, 'posted')
-        key = (int(guild_id), int(user_id))
-        _nudge_streak[key] = _nudge_streak.get(key, 0) + 1
-        _evict_if_big(_nudge_streak)
-    except Exception:
-        pass
 
 
 def _nudge_on_engaged(guild_id, user_id, kind):
@@ -32195,15 +30821,6 @@ except Exception:
     pass
 
 
-def _nudge_extra_cooldown(guild_id, user_id) -> int:
-    """Secondes de cooldown SUPPLÉMENTAIRE selon le streak d'ignores (repli progressif, plafonné)."""
-    try:
-        s = _nudge_streak.get((int(guild_id), int(user_id)), 0)
-        if s < _NUDGE_BACKOFF_START:
-            return 0
-        return min(_NUDGE_BACKOFF_MAX, (s - _NUDGE_BACKOFF_START + 1) * _NUDGE_BACKOFF_STEP)
-    except Exception:
-        return 0
 
 
 async def _nudge_stats_load():

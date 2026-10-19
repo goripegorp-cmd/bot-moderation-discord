@@ -16,14 +16,12 @@ PHASE_163_MODULES = [
     "roblox_pings",          # 19/08 : un rôle de notification par type d'annonce
     "roblox_news_contenu",   # 18/08 : essentiel, médias, traduction des actualités
     "rellseas_panneau",      # 16/08 : /rellseas et son réglage
-    "dm_digest",
     "webhook_tracker",
     "honeypot",
     # Phase 165 — nouveaux modules
     # Phase 166 — anti-token-leak, birthday, welcome, spotlight
     "anti_token_leak",
     # Phase 167 — status rotator, voice autoclean, member risk
-    "member_risk",
     # Phase 168 — error logger
     "error_logger",
     # Phase 169 — mob hunts, marchand, invasion
@@ -58,13 +56,11 @@ def test_module_has_setup(mod_name):
 # Modules qui ont un init_db (pas tous, weekly_stats/server_pulse n'en ont
 # pas car ils lisent des tables d'autres modules).
 INIT_DB_MODULES = [
-    "dm_digest",
     "webhook_tracker",
     "honeypot",
     # Phase 165
     "anti_token_leak",
     # Phase 167 (status_rotator n'a pas d'init_db, pas de table)
-    "member_risk",
     # Phase 168 — error_logger
     "error_logger",
     # Phase 169 — mob_hunts, merchant, invasion

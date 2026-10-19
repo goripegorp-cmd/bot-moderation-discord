@@ -12,7 +12,7 @@ import discord
 import visuels
 
 RACINE = Path(__file__).resolve().parent.parent
-MENUS = ["bot.py", "admin_panels_v2.py", "dm_digest.py", "error_logger.py", "member_risk.py",
+MENUS = ["bot.py", "admin_panels_v2.py", "error_logger.py",
          "mod_dashboard.py", "observability.py", "raid_detector.py", "rellseas_panneau.py",
          "roblox_panneau.py", "staff_sanction.py", "tickets_enhance.py", "webhook_tracker.py",
          "social_zones.py", "sondages.py", "suggestions.py", "notifs.py"]
