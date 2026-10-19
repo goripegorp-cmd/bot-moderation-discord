@@ -45,15 +45,26 @@ ENTETES = {
 _cle = b""
 _base = ""
 _bot = None
+_radie = "🚫 Radié"
 _cfg = _get_db = _mesurer_groupe = _autorise_membre = None
+
+#  Le casier mélange les sanctions décidées (staff ou escalade) et les détections du bot.
+SANCTIONS = {"warn": "Avertissement", "mute": "Mute", "kick": "Expulsion", "ban": "Bannissement"}
+DETECTIONS = {"insulte": "Insulte", "menace": "Menace", "discrimination": "Discrimination",
+              "haine": "Haine", "incitation": "Incitation", "harcelement": "Harcèlement",
+              "grooming": "Protection des mineurs", "protection": "Filtre automatique"}
+GROUPES = {"warn": "Avertissements", "mute": "Mutes", "kick": "Expulsions et bans",
+           "ban": "Expulsions et bans"}
 _cache: dict = {}
 _log = print
 
 
-def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_membre, log=None):
+def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_membre, radie=None,
+          log=None):
     """`autorise_membre(g, membre, c)` → la personne est-elle staff ou au-dessus ?"""
-    global _bot, _cle, _base, _cfg, _get_db, _mesurer_groupe, _autorise_membre, _log
+    global _bot, _cle, _base, _cfg, _get_db, _mesurer_groupe, _autorise_membre, _log, _radie
     _bot, _cle, _base = bot, cle.encode(), (base_url or "").rstrip("/")
+    _radie = radie or _radie
     _cfg, _get_db, _mesurer_groupe, _autorise_membre = cfg, get_db, mesurer_groupe, autorise_membre
     _log = log or print
 
@@ -199,6 +210,77 @@ async def _tickets(g, c) -> dict:
     }
 
 
+def _libelle(typ: str) -> str:
+    return SANCTIONS.get(typ) or DETECTIONS.get(typ) or (typ or "Autre").capitalize()
+
+
+async def _sanctions(g) -> dict:
+    """Le casier, en chiffres : par type, par mois, par modérateur, automatique ou non, les
+    membres qui reviennent le plus, et ce qui est en cours à l'instant sur le serveur."""
+    robot = getattr(getattr(_bot, "user", None), "id", 0) or 0
+    async with _get_db() as db:
+        rows = await recrutements._lignes(
+            db, "SELECT id, user_id, mod_id, type, reason, duration, created_at FROM infractions"
+                " WHERE guild_id=? ORDER BY id DESC LIMIT 5000", (g.id,))
+        restreints = await recrutements._lignes(
+            db, "SELECT user_id, restricted_at, duration, reason, restricted_by FROM restricted_members"
+                " WHERE guild_id=?", (g.id,))
+    maintenant = time.time()
+    par_type, mois, staff, membres = {}, {}, {}, {}
+    auto = manuel = recents_30 = 0
+    recentes = []
+    for iid, uid, mod, typ, raison, duree, cree in rows:
+        typ = str(typ or "autre").lower()
+        quand = recrutements._unix(cree)
+        est_auto = not mod or int(mod) == robot
+        par_type[typ] = par_type.get(typ, 0) + 1
+        auto, manuel = auto + est_auto, manuel + (not est_auto)
+        if quand and maintenant - quand <= 30 * 86400:
+            recents_30 += 1
+        if quand and maintenant - quand <= 365 * 86400:
+            cle_m = recrutements.cle_mois(datetime.fromtimestamp(quand, timezone.utc))
+            groupe = GROUPES.get(typ, "Détections")
+            mois.setdefault(cle_m, {"Avertissements": 0, "Mutes": 0, "Expulsions et bans": 0,
+                                    "Détections": 0})[groupe] += 1
+        if not est_auto:
+            st = staff.setdefault(int(mod), {"total": 0, "types": {}})
+            st["total"] += 1
+            st["types"][typ] = st["types"].get(typ, 0) + 1
+        if quand and maintenant - quand <= 90 * 86400:
+            fiche = membres.setdefault(int(uid or 0), {"total": 0, "types": {}, "historique": []})
+            fiche["total"] += 1
+            fiche["types"][typ] = fiche["types"].get(typ, 0) + 1
+            if len(fiche["historique"]) < 12:
+                fiche["historique"].append({"type": typ, "libelle": _libelle(typ), "raison": str(raison or "")[:200],
+                                            "duree": str(duree or ""), "date": quand,
+                                            "par": "Automatique" if est_auto else _nom(g, mod)})
+        if len(recentes) < 150:
+            recentes.append(dict(_ident(g, uid), sanction=iid, type=typ, libelle=_libelle(typ),
+                                 groupe=GROUPES.get(typ, "Détections"), raison=str(raison or "")[:300],
+                                 duree=str(duree or ""), date=quand, auto=est_auto,
+                                 par="Automatique" if est_auto else _nom(g, mod)))
+    a_surveiller = sorted(membres.items(), key=lambda kv: -kv[1]["total"])[:15]
+    radie = next((r for r in getattr(g, "roles", []) if r.name == _radie), None)
+    mutes = [m for m in getattr(g, "members", []) if getattr(m, "is_timed_out", lambda: False)()]
+    return {
+        "total": len(rows), "trente_jours": recents_30, "auto": auto, "manuel": manuel,
+        "libelles": {k: _libelle(k) for k in par_type},
+        "types": sorted(({"type": k, "libelle": _libelle(k), "n": v, "detection": k not in SANCTIONS}
+                         for k, v in par_type.items()), key=lambda t: -t["n"]),
+        "mois": dict(sorted(mois.items())[-12:]),
+        "staff": sorted(({"nom": _nom(g, k), **v} for k, v in staff.items()), key=lambda x: -x["total"])[:15],
+        "surveiller": [dict(_ident(g, uid), **f) for uid, f in a_surveiller if uid],
+        "recentes": recentes,
+        "actives": {
+            "mutes": [dict(_ident(g, m.id), jusqu=int(m.timed_out_until.timestamp()) if m.timed_out_until else None)
+                      for m in mutes],
+            "radies": [_ident(g, m.id) for m in (radie.members if radie else [])],
+            "restreints": [dict(_ident(g, uid), depuis=recrutements._unix(depuis), raison=str(raison or "")[:200],
+                                par=_nom(g, par)) for uid, depuis, _d, raison, par in restreints],
+        },
+    }
+
+
 async def donnees(g, portee: str = "tout") -> dict:
     cle = (g.id, portee)
     deja = _cache.get(cle)
@@ -226,6 +308,7 @@ async def donnees(g, portee: str = "tout") -> dict:
         "ecartes": cand["vides"] + cand["doublons"],
         "tickets": await _tickets(g, c),
         "clan": await _clan(g, c),
+        "sanctions": await _sanctions(g),
     }
     _cache[cle] = (time.time(), out)
     return out

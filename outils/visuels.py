@@ -90,6 +90,7 @@ BANDEAUX = {
     "rellseas_gestion": ("RELL SEAS", "Gestion du rôle", "Donner ou retirer à plusieurs", "\uE716", (6, 182, 212), (37, 99, 235)),
     "clan": ("RELL SEAS", "Liste du clan", "Qui est dedans, qui est actif", "\uE8FD", (6, 182, 212), (37, 99, 235)),
     "recrutement": ("RELL SEAS", "Recrutement", "Le dossier complet du candidat", "\uE77B", (6, 182, 212), (79, 70, 229)),
+    "tableau": ("STAFF", "Tableau de bord", "Candidatures · tickets · sanctions · clan", "\uE9D2", (14, 165, 233), (99, 102, 241)),
 }
 
 #  Icônes des boutons : (glyphe, famille de couleur)

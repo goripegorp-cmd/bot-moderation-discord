@@ -139,6 +139,19 @@ select{padding:9px 12px;border-radius:12px;background:var(--fond2);border:1px so
 .type .delai{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--doux);padding:3px 0}
 .type .delai b{color:var(--texte)}
 
+/* Sanctions */
+.mini{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:6px}
+.mini .chiffre{padding:12px 14px}
+.mini .chiffre .val{font-size:24px}
+[data-groupe="Avertissements"]{--teinte:#f59e0b}
+[data-groupe="Mutes"]{--teinte:#a78bfa}
+[data-groupe="Expulsions et bans"]{--teinte:#f43f5e}
+[data-groupe="Détections"]{--teinte:#94a3b8}
+.motif{color:var(--doux);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.petits{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.petit{display:inline-flex;align-items:center;gap:6px;padding:4px 9px 4px 4px;border-radius:999px;background:rgba(255,255,255,.05);font-size:12px}
+.petit .avatar{width:22px;height:22px;font-size:10px}
+
 /* Statistiques */
 .panneaux2{display:grid;grid-template-columns:1.5fr 1fr;gap:12px}
 .cadre{padding:18px;border-radius:var(--rayon);background:var(--carte);border:1px solid var(--bord)}
@@ -186,8 +199,9 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
 @keyframes charge{to{background-position:-200% 0}}
 [hidden]{display:none!important}
 
-@media (max-width:980px){.chiffres{grid-template-columns:repeat(3,minmax(0,1fr))}.panneaux2{grid-template-columns:1fr}}
+@media (max-width:980px){.chiffres,.mini{grid-template-columns:repeat(3,minmax(0,1fr))}.panneaux2{grid-template-columns:1fr}}
 @media (max-width:640px){
+  .mini{grid-template-columns:repeat(2,minmax(0,1fr))}
   .page{padding:16px 12px 48px}.hero{padding:18px;gap:14px;flex-wrap:wrap}.logo{width:56px;height:56px;border-radius:16px}
   .hero .bouton{width:100%;justify-content:center}.chiffres{grid-template-columns:repeat(2,minmax(0,1fr))}
   .chiffre .val{font-size:24px}.infos{grid-template-columns:1fr}
@@ -229,6 +243,7 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
   <nav class="onglets" role="tablist" aria-label="Sections">
     <button class="onglet" role="tab" data-onglet="candidatures" aria-selected="true">Candidatures<span class="nb" id="nb-candidatures">0</span></button>
     <button class="onglet" role="tab" data-onglet="tickets" aria-selected="false">Tickets<span class="nb" id="nb-tickets">0</span></button>
+    <button class="onglet" role="tab" data-onglet="sanctions" aria-selected="false">Sanctions<span class="nb" id="nb-sanctions">0</span></button>
     <button class="onglet" role="tab" data-onglet="clan" aria-selected="false">Clan<span class="nb" id="nb-clan">0</span></button>
     <button class="onglet" role="tab" data-onglet="stats" aria-selected="false">Statistiques</button>
   </nav>
@@ -251,6 +266,31 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
     <div class="grille-types" id="types"></div>
     <div class="titre-section"><h2>Tickets ouverts</h2><span class="etiquette" id="nb-ouverts"></span></div>
     <div class="liste" id="liste-ouverts"></div>
+  </section>
+
+  <section id="vue-sanctions" role="tabpanel" hidden>
+    <div class="mini" id="sanctions-chiffres"></div>
+    <div class="titre-section"><h2>En ce moment</h2></div>
+    <div class="grille-types" id="sanctions-actives"></div>
+    <div class="panneaux2" style="margin-top:12px">
+      <div class="cadre"><h3>Sanctions par mois</h3><p class="aide">Tout le casier : décisions du staff, escalades et détections du bot, sur douze mois.</p>
+        <div id="graphe-sanctions"></div>
+        <div class="legende"><span><i style="background:#f59e0b"></i>Avertissements</span><span><i style="background:#a78bfa"></i>Mutes</span><span><i style="background:#f43f5e"></i>Expulsions et bans</span><span><i style="background:#64748b"></i>Détections</span></div>
+      </div>
+      <div class="cadre"><h3>Par type</h3><p class="aide">Depuis le début du casier.</p><div id="sanctions-types"></div></div>
+    </div>
+    <div class="panneaux2" style="margin-top:12px">
+      <div class="cadre"><h3>Membres à surveiller</h3><p class="aide">Les plus souvent au casier sur 90 jours — clique pour le détail.</p><div class="liste" id="surveiller"></div></div>
+      <div class="cadre"><h3>Modérateurs</h3><p class="aide">Sanctions décidées à la main, par personne.</p><div id="moderateurs"></div></div>
+    </div>
+    <div class="titre-section"><h2>Dernières sanctions</h2><span class="etiquette" id="nb-recentes"></span></div>
+    <div class="outils">
+      <label class="recherche"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q-sanctions" type="search" placeholder="Membre, identifiant, motif, modérateur…" aria-label="Rechercher une sanction"></label>
+      <select id="origine" aria-label="Origine"><option value="tous">Staff et automatique</option><option value="staff">Décidées par le staff</option><option value="auto">Automatiques</option></select>
+    </div>
+    <div class="puces" id="puces-sanctions" style="margin-bottom:14px"></div>
+    <div class="liste" id="recentes"></div>
   </section>
 
   <section id="vue-clan" role="tabpanel" hidden>
@@ -299,7 +339,8 @@ const STATUTS = {en_cours:"En cours", acceptes:"Accepté", non_retenus:"Non rete
 const PLURIELS = {en_cours:"En cours", acceptes:"Acceptés", non_retenus:"Non retenus", partis:"Partis"};
 const RANGS = ["Actif","Peu présent","Absent","Jamais vu","Trop récent"];
 const $ = (s) => document.querySelector(s);
-const etat = {donnees:null, onglet:"candidatures", statut:"tous", rang:"tous", type:"tous", charge:false};
+const etat = {donnees:null, onglet:"candidatures", statut:"tous", rang:"tous", type:"tous", groupe:"tous", charge:false};
+const GROUPES = ["Avertissements", "Mutes", "Expulsions et bans", "Détections"];
 
 function h(tag, attrs, ...enfants){
   const e = document.createElement(tag);
@@ -495,6 +536,89 @@ function rendreTickets(){
   ouverts.forEach(c => liste.append(ligneTicket(c)));
 }
 
+/* Sanctions */
+const libelleType = (k) => ((etat.donnees.sanctions || {}).libelles || {})[k] || k;
+function petitMembre(m, extra){ return h("span", {classe:"petit", title:m.nom + " · " + m.id}, avatar(m), m.nom + (extra ? " · " + extra : "")); }
+function ouvrirSanctions(m){
+  dernierFocus = document.activeElement;
+  const t = $("#tiroir"); t.replaceChildren();
+  const types = Object.entries(m.types || {}).sort((a, b) => b[1] - a[1]);
+  t.append(
+    h("header", {}, avatar(m, true), h("div", {classe:"bloc", style:"min-width:0"},
+      h("div", {classe:"nom", id:"t-nom", style:"font-size:20px"}, m.nom),
+      h("div", {classe:"ident"}, (m.pseudo ? "@" + m.pseudo + " · " : "") + m.id, boutonCopie(m.id, "Identifiant copié")),
+      h("div", {style:"margin-top:6px", classe:"pseudo"}, m.total + " passage(s) au casier sur 90 jours")),
+      h("button", {classe:"fermer", type:"button", "aria-label":"Fermer", onclick:fermerFiche}, "×")),
+    h("div", {classe:"corps"},
+      h("div", {classe:"dates"}, types.map(([ty, n]) => h("span", {classe:"etiquette"}, n + " × " + libelleType(ty)))),
+      h("div", {}, h("div", {classe:"titre-section", style:"margin:0 0 8px"}, h("h2", {}, "Historique récent")),
+        h("div", {classe:"liste"}, (m.historique || []).map(x => h("div", {classe:"reponse"},
+          h("div", {classe:"q"}, x.libelle + " · " + date(x.date, true) + " · " + x.par + (x.duree ? " · " + x.duree : "")),
+          h("div", {classe:"r"}, x.raison || "Sans motif")))))));
+  t.classList.add("ouvert"); t.setAttribute("aria-hidden", "false"); $("#voile").classList.add("ouvert");
+  t.querySelector(".fermer").focus({preventScroll:true});
+}
+function rendreSanctions(){
+  const s = etat.donnees.sanctions, zone = $("#sanctions-chiffres"); zone.replaceChildren();
+  const somme = (cles) => s.types.filter(t => cles.includes(t.type)).reduce((a, t) => a + t.n, 0);
+  const actives = s.actives.mutes.length + s.actives.radies.length + s.actives.restreints.length;
+  [["30 derniers jours", s.trente_jours, "Tout le casier", "var(--cyan)"],
+   ["Avertissements", somme(["warn"]), "Depuis le début", "#f59e0b"],
+   ["Mutes", somme(["mute"]), "Depuis le début", "#a78bfa"],
+   ["Expulsions et bans", somme(["kick", "ban"]), "Depuis le début", "#f43f5e"],
+   ["Par le staff", s.manuel, s.auto + " automatique(s)", "#38bdf8"],
+   ["En ce moment", actives, "Mutes, radiés, restreints", "var(--ambre)"]].forEach(([lib, val, sous, teinte]) => {
+    const v = h("div", {classe:"val"}, "0");
+    zone.append(h("div", {classe:"chiffre", style:"--teinte:" + teinte}, v, h("div", {classe:"lib"}, lib), h("div", {classe:"sous"}, sous)));
+    compteur(v, val);
+  });
+  const act = $("#sanctions-actives"); act.replaceChildren();
+  [["Mutes en cours", s.actives.mutes, m => m.jusqu ? "jusqu'à " + date(m.jusqu, true).slice(-5) : ""],
+   ["Radiés", s.actives.radies, () => ""],
+   ["Restreints (direction)", s.actives.restreints, m => m.par ? "par " + m.par : ""]].forEach(([titre, liste, extra]) =>
+    act.append(h("div", {classe:"type"}, h("h3", {}, h("span", {}, titre), h("span", {classe:"etiquette"}, liste.length)),
+      liste.length ? h("div", {classe:"petits"}, liste.slice(0, 24).map(m => petitMembre(m, extra(m))), liste.length > 24 ? h("span", {classe:"pseudo"}, "+ " + (liste.length - 24)) : null)
+        : h("div", {classe:"pseudo", style:"margin-top:8px"}, "Personne"))));
+  barres($("#graphe-sanctions"), s.mois, [["Avertissements", "#f59e0b", "Avertissements"], ["Mutes", "#a78bfa", "Mutes"],
+    ["Expulsions et bans", "#f43f5e", "Expulsions et bans"], ["Détections", "#64748b", "Détections"]], "Le casier est vide pour l'instant.");
+  const ty = $("#sanctions-types"); ty.replaceChildren();
+  const maxT = Math.max(1, ...s.types.map(t => t.n));
+  if (!s.types.length) ty.append(h("div", {classe:"vide"}, h("b", {}, "Casier vide"), "Aucune sanction enregistrée."));
+  s.types.forEach(t => ty.append(h("div", {classe:"barre-h"}, h("span", {classe:"lib", title:t.libelle}, t.libelle),
+    h("div", {classe:"fond"}, h("div", {classe:"plein", style:"width:" + Math.round(100 * t.n / maxT) + "%;" + (t.detection ? "background:#64748b" : "")})), h("b", {}, t.n))));
+  const sv = $("#surveiller"); sv.replaceChildren();
+  if (!s.surveiller.length) sv.append(h("div", {classe:"vide"}, h("b", {}, "Personne à surveiller"), "Aucun passage au casier sur 90 jours."));
+  s.surveiller.forEach(m => sv.append(h("button", {classe:"ligne", type:"button", style:"text-align:left;cursor:pointer;width:100%", onclick:() => ouvrirSanctions(m)},
+    avatar(m), h("div", {classe:"bloc"}, h("div", {classe:"nom"}, m.nom),
+      h("div", {classe:"meta"}, Object.entries(m.types).sort((a, b) => b[1] - a[1]).slice(0, 3)
+        .map(([k, n]) => n + " × " + libelleType(k)).join(" · "))),
+    h("span", {classe:"statut", "data-statut":m.total >= 5 ? "non_retenus" : "en_cours"}, m.total + " en 90 j"))));
+  const md = $("#moderateurs"); md.replaceChildren();
+  const maxM = Math.max(1, ...s.staff.map(x => x.total));
+  if (!s.staff.length) md.append(h("div", {classe:"vide"}, h("b", {}, "Rien à afficher"), "Aucune sanction décidée à la main."));
+  s.staff.forEach(x => md.append(h("div", {classe:"barre-h", title:Object.entries(x.types).map(([k, n]) => n + " " + k).join(" · ")},
+    h("span", {classe:"lib", title:x.nom}, x.nom), h("div", {classe:"fond"}, h("div", {classe:"plein", style:"width:" + Math.round(100 * x.total / maxM) + "%"})), h("b", {}, x.total))));
+  rendreRecentes();
+}
+function rendreRecentes(){
+  const s = etat.donnees.sanctions, q = $("#q-sanctions").value.trim().toLowerCase(), origine = $("#origine").value;
+  const nb = {tous:s.recentes.length}; GROUPES.forEach(g => nb[g] = s.recentes.filter(x => x.groupe === g).length);
+  const puces = $("#puces-sanctions"); puces.replaceChildren();
+  ["tous", ...GROUPES].forEach(g => puces.append(h("button", {classe:"puce", type:"button", "data-groupe":g === "tous" ? null : g,
+    "aria-pressed":String(etat.groupe === g), onclick:() => { etat.groupe = g; rendreRecentes(); }}, g === "tous" ? null : h("i"), (g === "tous" ? "Toutes" : g) + " · " + nb[g])));
+  const liste = s.recentes.filter(x => (etat.groupe === "tous" || x.groupe === etat.groupe)
+    && (origine === "tous" || (origine === "auto") === x.auto)
+    && (!q || [x.nom, x.pseudo, x.id, x.raison, x.par, x.libelle].join(" ").toLowerCase().includes(q)));
+  $("#nb-recentes").textContent = liste.length + " affichée(s) · 150 dernières";
+  const zone = $("#recentes"); zone.replaceChildren();
+  if (!liste.length) zone.append(h("div", {classe:"vide"}, h("b", {}, "Aucune sanction ici"), "Change le filtre ou la recherche."));
+  liste.forEach(x => zone.append(h("div", {classe:"ligne"}, avatar(x),
+    h("div", {classe:"bloc"}, h("div", {classe:"nom"}, x.nom), h("div", {classe:"motif", title:x.raison}, x.raison || "Sans motif"),
+      h("div", {classe:"meta"}, date(x.date, true) + " · " + (x.auto ? "automatique" : "par " + x.par) + (x.duree ? " · " + x.duree : ""))),
+    h("span", {classe:"statut", "data-groupe":x.groupe}, x.libelle))));
+}
+["#q-sanctions", "#origine"].forEach(s => $(s).addEventListener("input", rendreRecentes));
+
 /* Clan */
 function rendreClan(){
   const c = etat.donnees.clan, q = $("#q-clan").value.trim().toLowerCase();
@@ -579,7 +703,7 @@ function rendreStats(){
 document.querySelectorAll(".onglet").forEach(b => b.addEventListener("click", () => {
   etat.onglet = b.dataset.onglet;
   document.querySelectorAll(".onglet").forEach(x => x.setAttribute("aria-selected", String(x === b)));
-  ["candidatures", "tickets", "clan", "stats"].forEach(k => $("#vue-" + k).hidden = k !== etat.onglet);
+  ["candidatures", "tickets", "sanctions", "clan", "stats"].forEach(k => $("#vue-" + k).hidden = k !== etat.onglet);
 }));
 ["#q-candidatures", "#mois", "#tri"].forEach(s => $(s).addEventListener("input", rendreCandidatures));
 $("#q-clan").addEventListener("input", rendreClan);
@@ -597,7 +721,8 @@ function rendre(){
   const cles = [...new Set(toutesLesFiches().map(c => moisDe(c.ferme || c.ouvert || 0)))].filter(k => !k.startsWith("1970")).sort().reverse();
   mois.replaceChildren(h("option", {value:"tous"}, "Tous les mois"), ...cles.map(k => h("option", {value:k}, libelleMois(k))));
   mois.value = cles.includes(choisi) ? choisi : "tous";
-  chiffres(d); rendreCandidatures(); rendreTickets(); rendreClan(); rendreStats();
+  $("#nb-sanctions").textContent = d.sanctions.trente_jours;
+  chiffres(d); rendreCandidatures(); rendreTickets(); rendreSanctions(); rendreClan(); rendreStats();
   $("#pied").textContent = "Lien personnel, valable jusqu'au " + date(d.expire, true) + " · données lues en direct dans la base du bot · ne le partage pas.";
 }
 async function charger(){

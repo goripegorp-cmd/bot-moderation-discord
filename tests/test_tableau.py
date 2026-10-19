@@ -178,3 +178,102 @@ def test_T6_la_page_n_injecte_jamais_de_donnees_en_html():
     assert "innerHTML = chemin" in page and page.count("innerHTML") == 1, "seules les icônes fixes"
     assert "textContent" in page and "createTextNode" in page
     assert "fetch(" in page and "/donnees" in page
+
+
+def test_T7_sanctions_en_chiffres_et_en_cours(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    env = Env(tmp_path)
+    radie_role = Obj(id=66, name="🚫 Radié", members=[env.membres[8]])
+    env.g.roles = [radie_role]
+    fin = datetime.now(timezone.utc) + timedelta(hours=2)
+    env.membres[7].is_timed_out = lambda: True
+    env.membres[7].timed_out_until = fin
+    env.membres[8].is_timed_out = lambda: False
+    env.membres[2].is_timed_out = lambda: False
+    env.g.members = list(env.membres.values())
+    tableau._bot.user = Obj(id=999)
+    il_y_a = lambda j: (datetime.now(timezone.utc) - timedelta(days=j)).strftime("%Y-%m-%d %H:%M:%S")
+
+    async def preparer():
+        async with aiosqlite.connect(env.base) as db:
+            await db.execute("CREATE TABLE infractions(id INTEGER PRIMARY KEY, guild_id INTEGER, user_id INTEGER,"
+                             " mod_id INTEGER, type TEXT, reason TEXT, duration TEXT, created_at DATETIME)")
+            await db.execute("CREATE TABLE restricted_members(guild_id INTEGER, user_id INTEGER, roles_backup TEXT,"
+                             " restricted_at DATETIME, duration INTEGER, reason TEXT, restricted_by INTEGER)")
+            await db.executemany("INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration, created_at)"
+                                 " VALUES (?,?,?,?,?,?,?)", [
+                (1, 7, 2, "warn", "Spam", "", il_y_a(2)), (1, 7, 999, "insulte", "Insulte détectée", "", il_y_a(3)),
+                (1, 7, 2, "mute", "Récidive", "1h", il_y_a(4)), (1, 8, 999, "protection", "Lien", "", il_y_a(400)),
+                (1, 8, 2, "ban", "Raid", "", il_y_a(40))])
+            await db.execute("INSERT INTO restricted_members VALUES (1, 8, '[]', ?, 0, 'Direction', 2)", (il_y_a(1),))
+            await db.commit()
+    asyncio.run(preparer())
+    s = asyncio.run(tableau._sanctions(env.g))
+    assert (s["total"], s["trente_jours"], s["auto"], s["manuel"]) == (5, 3, 2, 3)
+    types = {t["type"]: t for t in s["types"]}
+    assert types["insulte"]["detection"] and not types["warn"]["detection"] and types["ban"]["libelle"] == "Bannissement"
+    assert s["staff"] == [{"nom": "M2", "total": 3, "types": {"warn": 1, "mute": 1, "ban": 1}}], "le bot n'est pas un modérateur"
+    assert s["surveiller"][0]["id"] == "7" and s["surveiller"][0]["total"] == 3, "90 jours seulement"
+    assert s["recentes"][0]["libelle"] == "Bannissement" and s["recentes"][-1]["auto"] is False
+    assert [m["id"] for m in s["actives"]["mutes"]] == ["7"] and s["actives"]["mutes"][0]["jusqu"]
+    assert [m["id"] for m in s["actives"]["radies"]] == ["8"]
+    assert s["actives"]["restreints"][0]["par"] == "M2"
+    assert sum(sum(v.values()) for v in s["mois"].values()) == 4, "plus d'un an : hors du graphique"
+
+
+def test_T8_le_salon_du_tableau_reserve_au_staff_et_epingle():
+    import discord
+    import visuels
+    from ui_v2 import LayoutView, Palette
+    staff, direction, membre_r, robot_r = Role(10, 5), Role(11, 8), Role(12, 2), Role(13, 9)
+    robot_r.managed = True
+    for r in (staff, direction, membre_r):
+        r.managed = False
+    tous = Obj(id=1, position=0, managed=False)
+    conf, crees, envois, epingles = {"ticket_staff": 10, "direction_allowed_role": 11}, [], [], []
+
+    class Message:
+        id = 555
+
+        async def pin(self, reason=None):
+            epingles.append(reason)
+
+    class Salon:
+        id = 77
+
+        async def send(self, **kw):
+            envois.append(kw)
+            return Message()
+
+        async def fetch_message(self, mid):
+            if mid != 555:
+                raise discord.NotFound(Obj(status=404, reason="x"), "x")
+            return Message()
+    salon = Salon()
+
+    async def creer(nom, **kw):
+        crees.append((nom, kw))
+        return salon
+    me = Obj(guild_permissions=Obj(manage_channels=True, manage_roles=True))
+    g = Obj(id=1, default_role=tous, roles=[tous, membre_r, staff, direction, robot_r], me=me,
+            get_role={10: staff, 11: direction}.get, create_text_channel=creer,
+            get_channel=lambda cid: salon if cid == 77 and conf.get("tableau_salon") == 77 else None)
+
+    async def cfg(_g):
+        return conf
+
+    async def db_set(_g, k, v):
+        conf[k] = v
+    ns = {"cfg": cfg, "db_set": db_set, "discord": discord, "visuels": visuels, "LayoutView": LayoutView,
+          "Palette": Palette, "recrutements": recrutements, "_logerr": lambda *a, **k: None}
+    exec(_source("_salon_tableau"), ns)  # noqa: S102 — code du dépôt
+    asyncio.run(ns["_salon_tableau"](g))
+    asyncio.run(ns["_salon_tableau"](g))
+    assert len(crees) == 1 and crees[0][0] == "📊tableau-de-bord"
+    ows = crees[0][1]["overwrites"]
+    assert ows[tous].view_channel is False
+    assert ows[staff].view_channel and ows[direction].view_channel, "staff et au-dessus"
+    assert membre_r not in ows and robot_r not in ows
+    assert len(envois) == 1 and epingles, "un seul message, épinglé"
+    composants = list(envois[0]["view"].walk_children())
+    assert any(getattr(c, "custom_id", "") == "recr:web" for c in composants)

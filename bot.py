@@ -6240,6 +6240,58 @@ def _staff_ou_plus(g, membre, c) -> bool:
     return any(r.position >= plancher.position for r in getattr(membre, "roles", []) or [])
 
 
+async def _salon_tableau(g) -> None:
+    """19/10/2026 : « que le site soit accessible pour nous, qu'on puisse le voir dans le serveur
+    Discord ». Un salon que seuls le staff et les rôles au-dessus voient, un message épinglé :
+    un clic, son lien personnel. Le message revient s'il a été supprimé."""
+    try:
+        c = await cfg(g.id)
+        me = g.me
+        salon = g.get_channel(int(c.get('tableau_salon', 0) or 0))
+        if salon is None:
+            if not (me and me.guild_permissions.manage_channels and me.guild_permissions.manage_roles):
+                return
+            seuils = [g.get_role(int(c.get(k, 0) or 0)) for k in ('ticket_staff', 'direction_allowed_role')]
+            seuils = [r for r in seuils if r is not None]
+            if not seuils:
+                return
+            plancher = min(r.position for r in seuils)
+            ows = {g.default_role: discord.PermissionOverwrite(view_channel=False),
+                   me: discord.PermissionOverwrite(view_channel=True, send_messages=True, embed_links=True,
+                                                   read_message_history=True, manage_messages=True)}
+            for r in g.roles:
+                if r.position >= plancher and not r.managed and r != g.default_role:
+                    ows[r] = discord.PermissionOverwrite(view_channel=True, read_message_history=True,
+                                                         send_messages=False)
+            ref = g.get_channel(int(c.get('ticket_log', 0) or 0))
+            salon = await g.create_text_channel("📊tableau-de-bord", category=getattr(ref, "category", None),
+                                                overwrites=ows, reason="Tableau de bord du staff")
+            await db_set(g.id, 'tableau_salon', salon.id)
+        mid = int(c.get('tableau_message', 0) or 0)
+        if mid:
+            try:
+                await salon.fetch_message(mid)
+                return
+            except discord.NotFound:
+                pass
+        v = LayoutView(timeout=None)
+        v.add_item(discord.ui.Container(
+            visuels.bandeau("tableau", "Tableau de bord du staff"),
+            discord.ui.TextDisplay("### Le site du staff, en direct\n"
+                                   "Candidatures Rell Seas · tickets par type · sanctions · clan.\n"
+                                   "-# Un clic : ton lien personnel, valable 24 h. Réservé au staff "
+                                   "et aux rôles au-dessus."),
+            discord.ui.ActionRow(recrutements.BoutonTableau()), accent_color=Palette.INFO))
+        msg = await salon.send(view=v, allowed_mentions=discord.AllowedMentions.none())
+        await db_set(g.id, 'tableau_message', msg.id)
+        try:
+            await msg.pin(reason="Tableau de bord du staff")
+        except discord.HTTPException as ex:
+            _logerr("tableau.epingle", ex, guild_id=g.id)
+    except discord.HTTPException as ex:
+        _logerr("tableau.salon", ex, guild_id=getattr(g, 'id', 0))
+
+
 async def _salon_transcripts_rellseas(g, c, ref=None):
     """19/10/2026 : « un salon transcript pour les tickets de type Rell Seas ». Créé une fois à
     côté du salon des logs de tickets, mêmes droits que lui."""
@@ -11521,6 +11573,7 @@ async def _travaux_de_demarrage():
                     await _salon_transcripts_rellseas(g, _c)
                     await recrutements.rattraper(g)
                     await recrutements.publier_recap(g)
+                await _salon_tableau(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
         await _fermer_anciens_sondages()
@@ -18531,7 +18584,8 @@ async def _activite_boot():
     recrutements.demarrer(bot)
     tableau.setup(bot=bot, base_url=transcript_store.public_base_url(), cfg=cfg, get_db=get_db,
                   cle=os.getenv("TABLEAU_CLE") or hashlib.sha256((TOKEN or "").encode() + b"|tableau").hexdigest(),
-                  mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_staff_ou_plus, log=print)
+                  mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_staff_ou_plus,
+                  radie=_RADIE_ROLE_NAME, log=print)
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()
 
