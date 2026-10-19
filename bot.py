@@ -108,6 +108,8 @@ import visuels  # bandeaux animés des menus, icônes des boutons
 import config_salons  # @everyone voit tout sauf le réservé ; communautaire ouvert
 import recrutements  # suivi des candidatures Rell Seas, bilan du mois
 import registre  # le journal du serveur, lu sur le site (19/10/2026)
+import questions  # les questions posées dans les salons publics (onglet du site)
+import vigilance  # un membre qui cumule les évènements graves : alerte dans « 📋logs »
 import tableau  # tableau de bord web : candidatures, tickets par type, clan
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
@@ -6269,6 +6271,16 @@ async def _journal_rellseas(g, texte: str, membre_id: int = 0, auteur_id: int = 
             _logerr("rellseas.journal", ex, guild_id=g.id)
 
 
+_TACHES_QUESTIONS: set = set()
+
+
+async def _questions_hook(msg):
+    try:
+        await questions.sur_message(msg, await cfg(msg.guild.id))
+    except Exception as ex:
+        _logerr("questions.message", ex, guild_id=getattr(msg.guild, 'id', 0))
+
+
 async def _ticket_ouvert(g, ticket_id: int):
     """(salon, ticket) d'un ticket encore ouvert de ce serveur, ou (None, None)."""
     async with get_db() as db:
@@ -6332,16 +6344,46 @@ async def _action_ticket_fermer(g, auteur, d):
 
 
 async def _action_candidature(g, auteur, d):
-    return await _decision_recrutement(g, int(d.get("ticket", 0) or 0), auteur,
-                                       d.get("decision") == "accepter", str(d.get("motif") or "").strip())
+    """19/10/2026 : « ils ne peuvent attribuer de rôle à personne » — le site refuse ou ferme ;
+    accepter (qui donne le rôle du clan) se fait dans le ticket, sur Discord."""
+    if d.get("decision") == "accepter":
+        return False, "Accepter donne le rôle du clan : le site ne donne aucun rôle. Accepte dans le ticket, sur Discord."
+    return await _decision_recrutement(g, int(d.get("ticket", 0) or 0), auteur, False,
+                                       str(d.get("motif") or "").strip())
 
 
-async def _action_clan_retirer(g, auteur, d):
-    c = await cfg(g.id)
-    role = g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
-    membre = g.get_member(int(d.get("membre", 0) or 0))
-    if role is None or membre is None or role not in membre.roles:
-        return False, "Ce membre n'a pas (ou plus) le rôle du clan."
+async def _cible_site(g, auteur, membre_id, c):
+    """(membre, None) ou (None, la raison du refus). 19/10/2026 : « si quelqu'un se fait voler son
+    compte, il n'a aucune interaction sur nous-mêmes, fondateur ou direction ». Le staff se gère
+    sur Discord ; les immunisés, les bots et les rôles au-dessus de l'auteur ou du bot non plus."""
+    cible = g.get_member(int(membre_id or 0))
+    if cible is None:
+        return None, "Ce membre n'est plus sur le serveur."
+    if cible.bot:
+        return None, "Un bot ne se gère pas depuis le site."
+    if cible.id == g.owner_id or owner_ids_module.is_super_owner(cible.id) or _direction_ou_plus(g, cible, c):
+        return None, "Le fondateur et la direction sont protégés : aucune action possible depuis le site."
+    if _staff_ou_plus(g, cible, c):
+        return None, "Un membre du staff se gère sur Discord, pas depuis le site."
+    if await is_fully_immune(cible):
+        return None, "Membre immunisé : à voir sur Discord."
+    chef = auteur.id == g.owner_id or owner_ids_module.is_super_owner(auteur.id)
+    if not chef and cible.top_role >= auteur.top_role:
+        return None, "Ce membre a un rôle égal ou supérieur au tien."
+    if g.me is None or cible.top_role >= g.me.top_role:
+        return None, "Mon rôle est sous le sien : je ne peux rien faire."
+    return cible, None
+
+
+async def _retirer_du_clan(g, auteur, membre_id, c, role):
+    """Le seul rôle que le site touche : celui du clan Rell Seas, et seulement pour le retirer."""
+    membre, refus = await _cible_site(g, auteur, membre_id, c)
+    if membre is None:
+        return False, refus
+    if role not in membre.roles:
+        return False, f"{membre.display_name} n'a pas (ou plus) le rôle du clan."
+    if role >= g.me.top_role or not g.me.guild_permissions.manage_roles:
+        return False, "Je ne peux pas retirer ce rôle (permission ou hiérarchie)."
     try:
         await membre.remove_roles(role, reason=f"Retiré du clan par {auteur} ({auteur.id}) — tableau de bord")
     except discord.HTTPException as ex:
@@ -6351,6 +6393,152 @@ async def _action_clan_retirer(g, auteur, d):
                             membre_id=membre.id, auteur_id=auteur.id)
     await log_staff_action(g.id, auteur.id, membre.id, "clan_retire", role.name, surface="tableau")
     return True, f"{membre.display_name} n'a plus le rôle du clan."
+
+
+async def _action_clan_retirer(g, auteur, d):
+    c = await cfg(g.id)
+    role = g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
+    if role is None:
+        return False, "Aucun rôle Rell Seas réglé dans /configure."
+    return await _retirer_du_clan(g, auteur, d.get("membre", 0), c, role)
+
+
+async def _action_clan_retirer_lot(g, auteur, d):
+    """« Une réelle interaction avec ceux qui sont inactifs » : le rôle du clan retiré à une
+    sélection (25 au plus d'un coup), chacun vérifié comme s'il était seul."""
+    c = await cfg(g.id)
+    role = g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
+    ids = [int(x) for x in (d.get("membres") or []) if str(x).isdigit()][:25]
+    if role is None or not ids:
+        return False, "Rien à retirer."
+    faits, refus = 0, []
+    for uid in ids:
+        ok, message = await _retirer_du_clan(g, auteur, uid, c, role)
+        if ok:
+            faits += 1
+        else:
+            refus.append(message)
+        await asyncio.sleep(0.4)
+    return faits > 0, (f"{faits} membre(s) retiré(s) du clan." + (f" {len(refus)} refus : {refus[0]}" if refus else ""))
+
+
+_SANCTIONS_SITE = {"warn": "Avertissement", "mute": "Mute", "unmute": "Fin du mute", "kick": "Expulsion",
+                   "ban": "Bannissement"}
+_DUREES_MUTE = {10: "10 minutes", 60: "1 heure", 360: "6 heures", 1440: "1 jour", 10080: "7 jours"}
+
+
+async def _inscrire_sanction(g, membre_id, mod_id, typ, raison, duree=""):
+    async with get_db() as db:
+        cur = await db.execute(
+            "INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) VALUES(?,?,?,?,?,?)",
+            (g.id, int(membre_id), int(mod_id), typ, str(raison)[:300], str(duree)[:30]))
+        await db.commit()
+        return cur.lastrowid
+
+
+async def _action_moderer(g, auteur, d):
+    """« Un vrai système de modération intégré » : avertir, muter, lever un mute, expulser,
+    bannir — depuis la fiche d'un membre, avec le même circuit que les commandes (fiche, MP au
+    membre au nom du serveur, escalade, journal). Fondateur et direction seulement."""
+    c = await cfg(g.id)
+    sanction = str(d.get("sanction") or "")
+    if sanction not in _SANCTIONS_SITE:
+        return False, "Sanction inconnue."
+    raison = str(d.get("motif") or "").strip()[:300]
+    if sanction != "unmute" and len(raison) < 3:
+        return False, "Indique un motif (3 caractères au moins)."
+    cible, refus = await _cible_site(g, auteur, d.get("membre", 0), c)
+    if cible is None:
+        return False, refus
+    perms = g.me.guild_permissions
+    trace = f"{raison or 'Sans motif'} — {auteur} ({auteur.id}) via le tableau de bord"[:500]
+    message = ""
+    if sanction == "warn":
+        iid = await _inscrire_sanction(g, cible.id, auteur.id, "warn", raison)
+        async with get_db() as db:
+            async with db.execute("SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND type='warn'",
+                                  (g.id, cible.id)) as cur:
+                total = (await cur.fetchone())[0]
+        await _dm_sanction(cible, g, "Avertissement ⚠️", raison)
+        auto = await _escalade_warns(g, cible, total)
+        await send_mod_log(g, "warn", auteur, cible, raison,
+                           extra=f"Fiche {_format_warn_id(iid)} · Total warns: {total} · tableau de bord")
+        if total in (3, 5, 10):
+            try:
+                await ulogger2026.log_member_escalation(
+                    bot, g, cible, total, total, reason=raison, moderator=auteur,
+                    severity="moyenne" if total == 3 else ("haute" if total == 5 else "critique"))
+            except Exception as ex:
+                _logerr("site.escalade", ex, guild_id=g.id)
+        message = f"Avertissement enregistré ({total} au total)." + (" " + registre.propre(auto) if auto else "")
+    elif sanction == "mute":
+        try:
+            minutes = int(d.get("duree") or 60)
+        except (TypeError, ValueError):
+            minutes = 0
+        if minutes not in _DUREES_MUTE:
+            return False, "Durée invalide."
+        if not perms.moderate_members:
+            return False, "Il me manque la permission « Exclure temporairement des membres »."
+        await _dm_sanction(cible, g, f"Mute ({_DUREES_MUTE[minutes]})", raison, _DUREES_MUTE[minutes])
+        await cible.timeout(timedelta(minutes=minutes), reason=trace)
+        await _inscrire_sanction(g, cible.id, auteur.id, "mute", raison, _DUREES_MUTE[minutes])
+        await send_mod_log(g, "mute", auteur, cible, raison, _DUREES_MUTE[minutes])
+        message = f"{cible.display_name} est muté {_DUREES_MUTE[minutes]}."
+    elif sanction == "unmute":
+        if not cible.is_timed_out():
+            return False, "Ce membre n'est pas muté."
+        await cible.timeout(None, reason=trace)
+        await send_mod_log(g, "unmute", auteur, cible, raison or "Levé depuis le tableau de bord")
+        message = f"Le mute de {cible.display_name} est levé."
+    elif sanction == "kick":
+        if not perms.kick_members:
+            return False, "Il me manque la permission « Expulser des membres »."
+        await _dm_sanction(cible, g, "Expulsion", raison)
+        await cible.kick(reason=trace)
+        await _inscrire_sanction(g, cible.id, auteur.id, "kick", raison)
+        await send_mod_log(g, "kick", auteur, cible, raison)
+        message = f"{cible.display_name} est expulsé."
+    else:
+        if not perms.ban_members:
+            return False, "Il me manque la permission « Bannir des membres »."
+        await _dm_sanction(cible, g, "Bannissement", raison)
+        await g.ban(cible, reason=trace, delete_message_seconds=0)
+        await _inscrire_sanction(g, cible.id, auteur.id, "ban", raison)
+        await send_mod_log(g, "ban", auteur, cible, raison)
+        message = f"{cible.display_name} est banni."
+    await log_staff_action(g.id, auteur.id, cible.id, f"site_{sanction}", raison[:200], surface="tableau")
+    return True, message
+
+
+async def _action_question(g, auteur, d):
+    statut = str(d.get("statut") or "")
+    if statut not in ("traitee", "ignoree", "ouverte"):
+        return False, "Statut inconnu."
+    if not await questions.marquer(g.id, int(d.get("question", 0) or 0), statut, auteur.id):
+        return False, "Question introuvable."
+    await _au_journal(g, "Questions", "question." + statut,
+                      f"Question {questions.STATUTS[statut].lower()} par {auteur.display_name}", auteur_id=auteur.id)
+    return True, {"traitee": "Question marquée traitée.", "ignoree": "Retirée : ce n'était pas une question.",
+                  "ouverte": "Question rouverte."}[statut]
+
+
+async def _action_alerte_geree(g, auteur, d):
+    membre_id = int(d.get("membre", 0) or 0)
+    if not membre_id:
+        return False, "Alerte inconnue."
+    ouverte = await vigilance.gerer(g.id, membre_id, auteur.id)
+    if ouverte:
+        salon = g.get_channel(ouverte[0])
+        if salon is not None:
+            try:
+                await salon.get_partial_message(ouverte[1]).delete()
+            except discord.HTTPException as ex:
+                if not isinstance(ex, discord.NotFound):
+                    _logerr("alerte.geree", ex, guild_id=g.id)
+    await _au_journal(g, "Sécurité", "alerte.geree", f"Alerte gérée par {auteur.display_name}",
+                      membre_id=membre_id, auteur_id=auteur.id)
+    return True, "Alerte gérée : elle disparaît du salon des logs."
 
 
 async def _action_fiche_retirer(g, auteur, d):
@@ -6391,8 +6579,120 @@ async def _action_sanction_retirer(g, auteur, d):
 
 
 _ACTIONS_TABLEAU = {"ticket_fermer": _action_ticket_fermer, "candidature": _action_candidature,
-                    "clan_retirer": _action_clan_retirer, "fiche_retirer": _action_fiche_retirer,
-                    "sanction_retirer": _action_sanction_retirer}
+                    "clan_retirer": _action_clan_retirer, "clan_retirer_lot": _action_clan_retirer_lot,
+                    "fiche_retirer": _action_fiche_retirer, "sanction_retirer": _action_sanction_retirer,
+                    "moderer": _action_moderer, "question": _action_question, "alerte_geree": _action_alerte_geree}
+#  Gestes sans risque, ouverts à tout le staff ; tout le reste : fondateur et direction.
+_NIVEAUX_TABLEAU = {"question": "staff", "alerte_geree": "staff"}
+
+
+async def _salon_alertes_site(g):
+    c = await cfg(g.id)
+    cid = c.get('tableau_salon') if c.get('logs_sur_site_v1') else c.get('mod_log_channel')
+    return g.get_channel(int(cid or 0))
+
+
+async def _epargne_vigilance(g, membre_id) -> bool:
+    """« Direction et fondateur : mis à part. »"""
+    m = g.get_member(int(membre_id))
+    return m is None or m.bot or m.id == g.owner_id or _direction_ou_plus(g, m, await cfg(g.id))
+
+
+def _heure_courte(t) -> str:
+    d = datetime.fromtimestamp(int(t), timezone.utc)
+    if ZoneInfo is not None:
+        d = d.astimezone(ZoneInfo(_TICKET_TZ))
+    return d.strftime('%d/%m %H:%M')
+
+
+def _carte_vigilance(g, membre_id, incidents, points, evenements):
+    m = g.get_member(int(membre_id))
+    nom = m.display_name if m else f"Membre {membre_id}"
+    lignes = "\n".join(f"- `{_heure_courte(e['quand'])}` · {str(e['texte'])[:150]}" for e in evenements[-8:])
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(
+        discord.ui.TextDisplay(f"### 🚨 {nom} cumule des évènements graves\n<@{int(membre_id)}> · "
+                               f"{incidents} incident(s) · {points} point(s) en 24 h"),
+        discord.ui.TextDisplay(lignes or "-"),
+        discord.ui.TextDisplay("-# « Géré » retire l'alerte ; le compteur repart alors de zéro."),
+        discord.ui.ActionRow(BoutonFicheSite(int(membre_id)), BoutonGere(int(membre_id))),
+        accent_color=Palette.DANGER))
+    return v
+
+
+def _vue_alerte(membre_id: int = 0):
+    """Sous chaque alerte du salon des logs : la fiche sur le site, et « Géré »."""
+    v = discord.ui.View(timeout=None)
+    if membre_id:
+        v.add_item(BoutonFicheSite(int(membre_id)))
+    v.add_item(BoutonGere(int(membre_id or 0)))
+    return v
+
+
+async def _alerte_securite_site(g, membre, raison: str):
+    """Trop d'actions graves depuis le site : le signe d'un compte volé. Le fondateur est prévenu."""
+    salon = await _salon_alertes_site(g)
+    if salon is None:
+        return
+    proprio = g.owner_id
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(
+        discord.ui.TextDisplay(f"### 🔒 Accès au site suspendu une heure\n{membre.mention} — {raison}.\n"
+                               "Si ce n'est pas lui, son compte est peut-être volé : vérifie avec lui avant tout."),
+        discord.ui.ActionRow(BoutonGere(0)), accent_color=Palette.DANGER))
+    await salon.send(content=f"<@{proprio}>", view=v,
+                     allowed_mentions=discord.AllowedMentions(everyone=False, roles=False,
+                                                              users=[discord.Object(id=proprio)]))
+
+
+class BoutonGere(discord.ui.DynamicItem[Button], template=r"alerte:gere:(?P<m>\d+)"):
+    """« Et après, ça s'enlève une fois qu'on a géré. »"""
+
+    def __init__(self, membre_id: int = 0):
+        self.membre_id = int(membre_id)
+        super().__init__(Button(label="Géré", style=discord.ButtonStyle.success, emoji=visuels.icone("valider"),
+                                custom_id=f"alerte:gere:{self.membre_id}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["m"]))
+
+    async def callback(self, i: discord.Interaction):
+        if not _staff_ou_plus(i.guild, i.user, await cfg(i.guild.id)):
+            return await i.response.send_message("Réservé au staff.", ephemeral=True)
+        await i.response.defer(ephemeral=True)
+        if self.membre_id:
+            await vigilance.gerer(i.guild.id, self.membre_id, i.user.id)
+        try:
+            await i.message.delete()
+        except discord.HTTPException as ex:
+            if not isinstance(ex, discord.NotFound):
+                _logerr("alerte.gere", ex, guild_id=i.guild.id)
+        await _au_journal(i.guild, "Sécurité", "alerte.geree", f"Alerte gérée par {i.user.display_name}",
+                          membre_id=self.membre_id, auteur_id=i.user.id)
+        await i.followup.send("Alerte retirée.", ephemeral=True)
+
+
+class BoutonFicheSite(discord.ui.DynamicItem[Button], template=r"alerte:fiche:(?P<m>\d+)"):
+    """Le lien personnel du site, ouvert directement sur la fiche du membre."""
+
+    def __init__(self, membre_id: int):
+        self.membre_id = int(membre_id)
+        super().__init__(Button(label="Sa fiche sur le site", style=discord.ButtonStyle.secondary,
+                                emoji=visuels.icone("membre"), custom_id=f"alerte:fiche:{self.membre_id}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["m"]))
+
+    async def callback(self, i: discord.Interaction):
+        url, refus = await tableau.lien_pour(i, self.membre_id)
+        if not url:
+            return await i.response.send_message(refus, ephemeral=True)
+        v = discord.ui.View()
+        v.add_item(discord.ui.Button(label="Ouvrir sa fiche", url=url, emoji=visuels.icone("lien")))
+        await i.response.send_message("Ton lien personnel : il ne s'ouvre qu'une fois. Ne le partage pas.",
+                                      view=v, ephemeral=True)
 
 
 NOM_SALON_LOGS = "📋logs"
@@ -19047,12 +19347,20 @@ async def _activite_boot():
                        decider=_decision_recrutement, autorise=_peut_decider, log=print)
     await recrutements.init_db()
     recrutements.demarrer(bot)
-    registre.setup(get_db=get_db, log=print)
+    registre.setup(get_db=get_db, log=print, apres_grave=vigilance.planifier)
     await registre.init_db()
+    vigilance.setup(get_db=get_db, salon=_salon_alertes_site, carte=_carte_vigilance, bot=bot,
+                    epargne=_epargne_vigilance, log=print)
+    await vigilance.init_db()
+    questions.setup(get_db=get_db, est_staff=_staff_ou_plus, log=print)
+    await questions.init_db()
+    ulogger2026.vue_alerte = _vue_alerte
     tableau.setup(bot=bot, base_url=transcript_store.public_base_url(), cfg=cfg, get_db=get_db,
                   cle=os.getenv("TABLEAU_CLE") or hashlib.sha256((TOKEN or "").encode() + b"|tableau").hexdigest(),
                   mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_staff_ou_plus,
-                  radie=_RADIE_ROLE_NAME, direction=_direction_ou_plus, actions=_ACTIONS_TABLEAU, log=print)
+                  radie=_RADIE_ROLE_NAME, direction=_direction_ou_plus, actions=_ACTIONS_TABLEAU,
+                  niveaux=_NIVEAUX_TABLEAU, alerte_securite=_alerte_securite_site, log=print)
+    await tableau.init_db()
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()
 
@@ -19159,7 +19467,7 @@ async def on_ready():
                               suggestions.BoutonPour, suggestions.BoutonContre,
                               suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig,
                               recrutements.BoutonTableau, recrutements.BoutonDecision,
-                              BoutonAnciensSalons)
+                              BoutonAnciensSalons, BoutonGere, BoutonFicheSite)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
@@ -21545,7 +21853,7 @@ async def on_member_join(m):
                     e.add_field(name="Action auto", value="✅ Activée" if auto_action else "❌ Désactivée", inline=True)
                     e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
                     e.timestamp = now()
-                    await webhook_send(log_ch, 'protection', embed=e)
+                    await log_ch.send(embed=e, view=_vue_alerte(m.id))
                 
                 # Appliquer l'action automatique si activée
                 if auto_action:
@@ -21751,7 +22059,7 @@ async def _handle_antiraid_join(member):
             e.add_field(name="Membres concernés", value="\n".join(f"• {m.mention} (`{m.id}`)" for m in recent_members[:10]) or "_aucun_", inline=False)
             if is_suspect:
                 e.add_field(name="⚠️ Compte suspect", value=f"Le dernier compte a `{account_age_days}`j d'âge (seuil : `{min_age_days}`j)", inline=False)
-            await log_ch.send(embed=e)
+            await log_ch.send(embed=e, view=_vue_alerte(0))
         except Exception as ex:
             print(f"[ANTIRAID log] {ex}")
 
@@ -23183,6 +23491,11 @@ async def on_message(msg):
         asyncio.create_task(_entraide_autodetect_hook(msg))
     except Exception as ex:
         print(f"[on_message entraide_autodetect] {ex}")
+
+    # Questions posées dans les salons publics : l'onglet « Questions » du site (19/10/2026).
+    _tq = asyncio.create_task(_questions_hook(msg))
+    _TACHES_QUESTIONS.add(_tq)
+    _tq.add_done_callback(_TACHES_QUESTIONS.discard)
 
     # ═══════════════ ZONES SOCIALES : détection TRADE + maintien d'activité ═══════════════
     # (1) Détecte « je trade X contre Y / wts / wtb / wtt / j'échange… » → propose un BOUTON
@@ -25177,6 +25490,58 @@ def _format_warn_id(infraction_id: int, created_dt=None) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+async def _escalade_warns(guild, membre, warn_count: int):
+    """ESCALADE AUTOMATIQUE (owner 2026-06-21) — partagée par `/mod warn` et le site : 3 → mute
+    10 min · 4 → 1 h · 5 → 1 semaine · 6+ → mute permanent. Rend la phrase à afficher, ou None."""
+    _auto_txt = None
+    try:
+        _ecfg = await cfg(guild.id)
+    except Exception:
+        _ecfg = {}
+    if _ecfg.get('auto_escalate_warns', 1) and not await is_fully_immune(membre):
+        _esc = None
+        if warn_count == 3:
+            _esc = (timedelta(minutes=10), "10 minutes", "10m")
+        elif warn_count == 4:
+            _esc = (timedelta(hours=1), "1 heure", "1h")
+        elif warn_count == 5:
+            _esc = (timedelta(days=7), "1 semaine", "7j")
+        elif warn_count >= 6:
+            _esc = (None, "permanent", "permanent")
+        if _esc is not None:
+            _delta, _label, _durstr = _esc
+            if _delta is not None:
+                try:
+                    await membre.timeout(_delta, reason=f"Escalade automatique : {warn_count} warns")
+                except Exception:
+                    pass
+            else:
+                # Permanent : rôle Muet (deny send partout) + timeout 28 j natif en filet.
+                try:
+                    _qr = await _ensure_quarantine_role(membre.guild)
+                    if _qr is not None and _qr not in membre.roles:
+                        await membre.add_roles(_qr, reason="Mute permanent (≥6 warns)")
+                except Exception:
+                    pass
+                try:
+                    await membre.timeout(timedelta(days=28), reason="Mute permanent (≥6 warns) — filet natif")
+                except Exception:
+                    pass
+            try:
+                await _record_infraction(guild.id, membre.id, 'mute',
+                                         f"Escalade auto ({warn_count} warns)", _durstr)
+            except Exception:
+                pass
+            try:
+                await _dm_sanction(membre, guild, f"Mute automatique ({_label})",
+                                   f"{warn_count} avertissements cumulés")
+            except Exception:
+                pass
+            _auto_txt = (f"🔇 **Mute automatique : {_label}** (palier **{warn_count} warns**)."
+                         + (" À vous de décider de la suite (ban ?)." if warn_count >= 6 else ""))
+    return _auto_txt
+
+
 @mod_group.command(name="warn", description="⚠️ Avertir un membre (crée une fiche, aucun rôle attribué)")
 @app_commands.describe(membre="Le membre à avertir", raison="La raison de l'avertissement")
 async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
@@ -25251,52 +25616,7 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     # ── ESCALADE AUTOMATIQUE (owner 2026-06-21) : sanction graduée selon le NB de warns ──
     # 3 → mute 10 min · 4 → 1 h · 5 → 1 semaine · 6+ → mute permanent. Au-delà, le staff tranche
     # (ban…). Immunisés/staff jamais auto-mutés. Le mute auto est inscrit dans la fiche.
-    _auto_txt = None
-    try:
-        _ecfg = await cfg(i.guild.id)
-    except Exception:
-        _ecfg = {}
-    if _ecfg.get('auto_escalate_warns', 1) and not await is_fully_immune(membre):
-        _esc = None
-        if warn_count == 3:
-            _esc = (timedelta(minutes=10), "10 minutes", "10m")
-        elif warn_count == 4:
-            _esc = (timedelta(hours=1), "1 heure", "1h")
-        elif warn_count == 5:
-            _esc = (timedelta(days=7), "1 semaine", "7j")
-        elif warn_count >= 6:
-            _esc = (None, "permanent", "permanent")
-        if _esc is not None:
-            _delta, _label, _durstr = _esc
-            if _delta is not None:
-                try:
-                    await membre.timeout(_delta, reason=f"Escalade automatique : {warn_count} warns")
-                except Exception:
-                    pass
-            else:
-                # Permanent : rôle Muet (deny send partout) + timeout 28 j natif en filet.
-                try:
-                    _qr = await _ensure_quarantine_role(membre.guild)
-                    if _qr is not None and _qr not in membre.roles:
-                        await membre.add_roles(_qr, reason="Mute permanent (≥6 warns)")
-                except Exception:
-                    pass
-                try:
-                    await membre.timeout(timedelta(days=28), reason="Mute permanent (≥6 warns) — filet natif")
-                except Exception:
-                    pass
-            try:
-                await _record_infraction(i.guild.id, membre.id, 'mute',
-                                         f"Escalade auto ({warn_count} warns)", _durstr)
-            except Exception:
-                pass
-            try:
-                await _dm_sanction(membre, i.guild, f"Mute automatique ({_label})",
-                                   f"{warn_count} avertissements cumulés")
-            except Exception:
-                pass
-            _auto_txt = (f"🔇 **Mute automatique : {_label}** (palier **{warn_count} warns**)."
-                         + (" À vous de décider de la suite (ban ?)." if warn_count >= 6 else ""))
+    _auto_txt = await _escalade_warns(i.guild, membre, warn_count)
     if _auto_txt:
         e.add_field(name="Sanction automatique", value=_auto_txt, inline=False)
     elif warn_count < 3:
@@ -33170,7 +33490,8 @@ async def _check_alt_account(member: discord.Member):
                                 f"**Similarité :** `{ratio:.0%}` · compte de moins de 7 jours"
                             ),
                             color=0xE67E22,
-                        )
+                        ),
+                        view=_vue_alerte(member.id),
                     )
             except Exception as _exalt:
                 print(f"[alt detection salon] {_exalt}")
@@ -33226,6 +33547,7 @@ async def _track_toxicity(msg):
                             color=0xF39C12,
                             timestamp=datetime.now(timezone.utc),
                         ),
+                        view=_vue_alerte(msg.author.id),
                         allowed_mentions=discord.AllowedMentions.none(),
                     )
                 except Exception:

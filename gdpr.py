@@ -78,6 +78,10 @@ DELETE_SUBJECT_KEEP_ACTOR = {
     "tickets": {"subject": ["user_id"], "actor": ["claimed_by"]},
     "recrutements": {"subject": ["candidat_id"], "actor": ["ferme_par", "pris_par"]},
     "registre": {"subject": ["membre_id"], "actor": ["auteur_id"]},
+    "questions": {"subject": ["auteur_id"], "actor": ["repondu_par"]},
+    "vigilance": {"subject": ["membre_id"], "actor": ["gere_par"]},
+    "tableau_sessions": {"subject": ["user_id"], "actor": []},
+    "tableau_blocages": {"subject": ["user_id"], "actor": []},
     "mod_notes": {"subject": ["user_id"], "actor": ["mod_id"]},
     "restricted_members": {"subject": ["user_id"], "actor": ["restricted_by"]},
 }
@@ -135,6 +139,7 @@ RETENTION = {
     "error_log": ("occurred_at", 30),
     "recrutements": ("ferme_le", 365),
     "registre": ("quand", 90),
+    "questions": ("quand", 30),
 }
 
 

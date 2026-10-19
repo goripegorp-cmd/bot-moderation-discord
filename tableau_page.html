@@ -2,942 +2,1511 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark">
-<title>Tableau de bord · Rell Seas</title>
+<meta name="theme-color" content="#05070d">
+<title>Espace staff</title>
 <style>
 :root{
-  --fond:#070b14;--fond2:#0c1424;--carte:rgba(255,255,255,.035);--carte2:rgba(255,255,255,.065);
-  --bord:rgba(148,163,184,.15);--bord2:rgba(148,163,184,.28);--texte:#e5edf7;--doux:#9aa9bd;--pale:#6b7a90;
-  --cyan:#06b6d4;--bleu:#2563eb;--vert:#22c55e;--rouge:#f43f5e;--gris:#94a3b8;--ambre:#f59e0b;
-  --rayon:18px;--ombre:0 10px 30px rgba(0,0,0,.35);
+  --fond:#05070d;--fond-2:#0a0f1c;--fond-3:#0f1626;
+  --s1:rgba(148,163,184,.055);--s2:rgba(148,163,184,.09);--s3:rgba(148,163,184,.14);
+  --b1:rgba(148,163,184,.13);--b2:rgba(148,163,184,.22);--b3:rgba(148,163,184,.34);
+  --t1:#eef3fb;--t2:#a9b6ca;--t3:#74829a;
+  --cyan:#22d3ee;--bleu:#3b82f6;--indigo:#818cf8;--violet:#a78bfa;--vert:#34d399;--rouge:#fb7185;--ambre:#fbbf24;--gris:#94a3b8;
+  --r1:10px;--r2:14px;--r3:18px;--r4:24px;
+  --ombre:0 1px 0 rgba(255,255,255,.04) inset,0 14px 34px -18px rgba(0,0,0,.7);
+  --ease:cubic-bezier(.22,.9,.24,1);--ressort:cubic-bezier(.34,1.36,.64,1);
+  --g:clamp(12px,3.4vw,24px);--entete:112px;
 }
 *{box-sizing:border-box}
-html,body{margin:0;overflow-x:hidden;overflow-x:clip}
-body{min-height:100vh;color:var(--texte);font:15px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",sans-serif;
-  background:radial-gradient(1100px 620px at 8% -12%,rgba(6,182,212,.20),transparent 60%),
-             radial-gradient(900px 520px at 100% -6%,rgba(37,99,235,.20),transparent 62%),var(--fond);
-  -webkit-font-smoothing:antialiased}
-button,input,select{font:inherit;color:inherit}
+html{-webkit-text-size-adjust:100%;overflow-x:hidden;overflow-x:clip;scroll-padding-top:calc(var(--entete) + 8px)}
+body{margin:0;min-height:100vh;min-height:100dvh;color:var(--t1);background:var(--fond);
+  font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden;overflow-x:clip}
+button,input,select,textarea{font:inherit;color:inherit}
 a{color:inherit}
-.page{max-width:1240px;margin:0 auto;padding:24px 16px 56px}
-
-/* En-tête */
-.hero{position:relative;overflow:hidden;border-radius:24px;padding:26px 28px;display:flex;align-items:center;gap:20px;
-  background:linear-gradient(120deg,rgba(6,182,212,.22),rgba(37,99,235,.20) 55%,rgba(99,102,241,.16));
-  border:1px solid var(--bord2);box-shadow:var(--ombre)}
-.hero::before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.07) 1px,transparent 1px);
-  background-size:18px 18px;mask-image:linear-gradient(90deg,transparent,#000 30%,#000 70%,transparent);pointer-events:none}
-.hero::after{content:"";position:absolute;top:-60%;left:-30%;width:40%;height:220%;transform:rotate(18deg);
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.10),transparent);animation:reflet 7s ease-in-out infinite;pointer-events:none}
-@keyframes reflet{0%{left:-40%}55%,100%{left:120%}}
-.logo{position:relative;flex:none;width:72px;height:72px;border-radius:20px;display:grid;place-items:center;font-weight:800;font-size:26px;
-  background:linear-gradient(135deg,var(--cyan),var(--bleu));box-shadow:0 8px 24px rgba(37,99,235,.45);overflow:hidden}
-.logo img{width:100%;height:100%;object-fit:cover}
-.hero-texte{position:relative;flex:1;min-width:0}
-.surtitre{letter-spacing:.22em;font-size:12px;font-weight:700;color:#7dd3fc}
-h1{margin:2px 0 4px;font-size:clamp(24px,4vw,34px);line-height:1.15;font-weight:800}
-.etat{display:flex;align-items:baseline;gap:8px;color:var(--doux);font-size:14px}
-.direct{flex:none;align-self:center;width:9px;height:9px;border-radius:50%;background:var(--vert);box-shadow:0 0 0 0 rgba(34,197,94,.6);animation:pouls 2s infinite}
-@keyframes pouls{0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
-.bouton{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--bord2);background:rgba(255,255,255,.06);
-  padding:9px 14px;border-radius:12px;cursor:pointer;transition:background .15s,transform .15s;text-decoration:none;white-space:nowrap}
-.bouton:hover{background:rgba(255,255,255,.12)}
-.bouton:active{transform:translateY(1px)}
-.bouton.principal{background:linear-gradient(135deg,var(--cyan),var(--bleu));border-color:transparent;font-weight:600}
-.bouton.principal:hover{filter:brightness(1.08)}
-.bouton svg{width:16px;height:16px}
-.tourne svg{animation:rot .8s linear infinite}
-@keyframes rot{to{transform:rotate(360deg)}}
-:focus-visible{outline:2px solid #7dd3fc;outline-offset:2px}
-
-/* Chiffres */
-.chiffres{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin:18px 0}
-.chiffre{position:relative;padding:16px 16px 14px;border-radius:var(--rayon);background:var(--carte);border:1px solid var(--bord);overflow:hidden}
-.chiffre::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--teinte,var(--cyan))}
-.chiffre .val{font-size:30px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}
-.chiffre .lib{color:var(--doux);font-size:13px;margin-top:2px}
-.chiffre .sous{color:var(--pale);font-size:12px;margin-top:6px}
-
-/* Onglets */
-.onglets{display:flex;gap:6px;padding:5px;border-radius:14px;background:var(--carte);border:1px solid var(--bord);width:max-content;max-width:100%;overflow-x:auto;margin-bottom:16px;scrollbar-width:none}
-.onglets::-webkit-scrollbar{display:none}
-.onglet{border:0;background:transparent;padding:9px 14px;border-radius:10px;cursor:pointer;color:var(--doux);font-weight:600;white-space:nowrap}
-.onglet[aria-selected="true"]{background:linear-gradient(135deg,rgba(6,182,212,.25),rgba(37,99,235,.25));color:var(--texte);box-shadow:inset 0 0 0 1px var(--bord2)}
-.onglet .nb{margin-left:6px;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.08);font-size:12px}
-
-/* Barre d'outils */
-.outils{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
-.recherche{flex:1 1 260px;display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:12px;background:var(--carte);border:1px solid var(--bord)}
-.recherche input{flex:1;min-width:0;border:0;outline:0;background:transparent}
-.recherche svg{width:16px;height:16px;color:var(--pale)}
-select{padding:9px 12px;border-radius:12px;background:var(--fond2);border:1px solid var(--bord)}
-.puces{display:flex;flex-wrap:wrap;gap:6px}
-.puce{border:1px solid var(--bord);background:var(--carte);padding:6px 11px;border-radius:999px;cursor:pointer;font-size:13px;display:inline-flex;gap:6px;align-items:center}
-.puce[aria-pressed="true"]{border-color:var(--teinte,var(--cyan));background:color-mix(in srgb,var(--teinte,var(--cyan)) 18%,transparent)}
-.puce i{width:8px;height:8px;border-radius:50%;background:var(--teinte,var(--cyan));display:inline-block}
-
-/* Statuts */
-.statut{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap;
-  color:var(--teinte);background:color-mix(in srgb,var(--teinte) 15%,transparent);border:1px solid color-mix(in srgb,var(--teinte) 40%,transparent)}
-.statut::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--teinte)}
-[data-statut="acceptes"],[data-rang="0"]{--teinte:var(--vert)}
-[data-statut="refuses"],[data-rang="2"]{--teinte:var(--rouge)}
-[data-rang="3"],[data-rang="4"]{--teinte:var(--gris)}
-[data-statut="en_cours"],[data-rang="1"]{--teinte:var(--ambre)}
-.bouton.danger{border-color:rgba(244,63,94,.5);color:#fecdd3;background:rgba(244,63,94,.12)}
-.bouton.danger:hover{background:rgba(244,63,94,.22)}
-.bouton.vert{border-color:rgba(34,197,94,.5);color:#bbf7d0;background:rgba(34,197,94,.12)}
-.bouton.petit-b{padding:5px 10px;font-size:12px;border-radius:9px}
-.tag{font-size:11px;padding:1px 7px;border-radius:999px;background:rgba(148,163,184,.15);color:var(--doux);margin-left:6px}
-.confirmation{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,calc(100% - 32px));z-index:41;
-  padding:20px;border-radius:18px;background:var(--fond2);border:1px solid var(--bord2);box-shadow:var(--ombre)}
-.confirmation h3{margin:0 0 6px;font-size:17px}
-.confirmation p{margin:0 0 14px;color:var(--doux)}
-.confirmation textarea{width:100%;margin:6px 0 14px;padding:10px;border-radius:10px;background:var(--carte);border:1px solid var(--bord);color:var(--texte);font:inherit;resize:vertical}
-.confirmation .actions{justify-content:flex-end}
-#voile-confirm{z-index:40}
-
-/* Fiches */
-.grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
-.fiche{text-align:left;width:100%;border:1px solid var(--bord);background:var(--carte);border-radius:var(--rayon);padding:16px;cursor:pointer;
-  transition:transform .15s,border-color .15s,background .15s;display:flex;flex-direction:column;gap:10px}
-.fiche:hover{transform:translateY(-2px);border-color:var(--bord2);background:var(--carte2)}
-.qui{display:flex;align-items:center;gap:12px;min-width:0}
-.avatar{flex:none;width:42px;height:42px;border-radius:50%;object-fit:cover;background:linear-gradient(135deg,#334155,#1e293b);display:grid;place-items:center;font-weight:700;color:#cbd5e1}
-.avatar.grand{width:64px;height:64px;font-size:22px}
-.nom{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pseudo{color:var(--pale);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.qui .bloc{min-width:0;flex:1}
-.apercu{display:grid;gap:4px;font-size:13px;color:var(--doux)}
-.apercu div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.apercu b{color:var(--texte);font-weight:600}
-.pied{display:flex;justify-content:space-between;gap:8px;color:var(--pale);font-size:12px;border-top:1px solid var(--bord);padding-top:9px}
-
-/* Listes */
-.liste{display:grid;gap:8px}
-.ligne{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;background:var(--carte);border:1px solid var(--bord)}
-.ligne .bloc{flex:1;min-width:0}
-.ligne .meta{color:var(--pale);font-size:13px}
-.ligne.alerte{border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.06)}
-.etiquette{font-size:12px;padding:2px 8px;border-radius:8px;background:rgba(255,255,255,.07);color:var(--doux);white-space:nowrap}
-.titre-section{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:22px 0 10px}
-.titre-section h2{margin:0;font-size:17px}
-
-/* Tableau du clan */
-.table{width:100%;border-collapse:separate;border-spacing:0 6px}
-.table th{color:var(--pale);font-size:12px;font-weight:600;text-align:left;padding:0 12px;text-transform:uppercase;letter-spacing:.06em}
-.table td{background:var(--carte);border-top:1px solid var(--bord);border-bottom:1px solid var(--bord);padding:10px 12px;vertical-align:middle}
-.table td:first-child{border-left:1px solid var(--bord);border-radius:14px 0 0 14px}
-.table td:last-child{border-right:1px solid var(--bord);border-radius:0 14px 14px 0}
-.ident{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:13px;color:var(--doux);display:inline-flex;align-items:center;gap:6px}
-.copier{border:0;background:transparent;color:var(--pale);cursor:pointer;padding:2px;border-radius:6px;display:inline-grid;place-items:center}
-.copier:hover{color:var(--texte);background:rgba(255,255,255,.08)}
-.copier svg{width:15px;height:15px}
-.jauge{display:flex;gap:3px}
-.jauge span{width:9px;height:16px;border-radius:3px;background:rgba(148,163,184,.18)}
-.jauge span.on{background:var(--teinte,var(--vert))}
-
-/* Types de tickets */
-.grille-types{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-bottom:6px}
-.type{position:relative;padding:16px;border-radius:var(--rayon);background:var(--carte);border:1px solid var(--bord);overflow:hidden}
-.type.rell{background:linear-gradient(135deg,rgba(6,182,212,.12),rgba(37,99,235,.08));border-color:rgba(6,182,212,.35)}
-.type h3{margin:0 0 2px;font-size:16px;display:flex;align-items:center;justify-content:space-between;gap:8px}
-.type .trio{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
-.type .trio div{padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04)}
-.type .trio b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
-.type .trio span{color:var(--pale);font-size:12px}
-.type .delai{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--doux);padding:3px 0}
-.type .delai b{color:var(--texte)}
-
-/* Sanctions */
-.mini{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:6px}
-.mini .chiffre{padding:12px 14px}
-.mini .chiffre .val{font-size:24px}
-[data-groupe="Avertissements"]{--teinte:#f59e0b}
-[data-groupe="Mutes"]{--teinte:#a78bfa}
-[data-groupe="Expulsions et bans"]{--teinte:#f43f5e}
-[data-groupe="Détections"]{--teinte:#94a3b8}
-.motif{color:var(--doux);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-.petits{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.petit{display:inline-flex;align-items:center;gap:6px;padding:4px 9px 4px 4px;border-radius:999px;background:rgba(255,255,255,.05);font-size:12px}
-.petit .avatar{width:22px;height:22px;font-size:10px}
-
-/* Statistiques */
-.panneaux2{display:grid;grid-template-columns:1.5fr 1fr;gap:12px}
-.cadre{padding:18px;border-radius:var(--rayon);background:var(--carte);border:1px solid var(--bord)}
-.cadre h3{margin:0 0 4px;font-size:15px}
-.cadre p.aide{margin:0 0 14px;color:var(--pale);font-size:13px}
-.legende{display:flex;gap:14px;flex-wrap:wrap;color:var(--doux);font-size:12px;margin-top:10px}
-.legende span{display:inline-flex;align-items:center;gap:6px}
-.legende i{width:10px;height:10px;border-radius:3px;display:inline-block}
-.barre-h{display:grid;grid-template-columns:120px 1fr 36px;align-items:center;gap:10px;margin:8px 0;font-size:13px}
-.barre-h .fond{height:10px;border-radius:999px;background:rgba(148,163,184,.15);overflow:hidden}
-.barre-h .plein{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--cyan),var(--bleu))}
-.barre-h .lib{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--doux)}
-svg text{fill:var(--pale);font-size:11px}
-
-/* Fiche détaillée */
-.voile{position:fixed;inset:0;background:rgba(2,6,15,.6);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .2s;z-index:20}
-.voile.ouvert{opacity:1;pointer-events:auto}
-.porte-tiroir{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:21}
-.tiroir{position:absolute;top:0;right:0;height:100%;width:min(560px,100%);background:var(--fond2);border-left:1px solid var(--bord2);
-  transform:translateX(100%);visibility:hidden;transition:transform .25s ease,visibility 0s .25s;display:flex;flex-direction:column;
-  box-shadow:-20px 0 50px rgba(0,0,0,.45);pointer-events:auto}
-.tiroir.ouvert{transform:none;visibility:visible;transition:transform .25s ease}
-.tiroir header{padding:20px 22px;border-bottom:1px solid var(--bord);display:flex;gap:14px;align-items:center;
-  background:linear-gradient(120deg,rgba(6,182,212,.14),rgba(37,99,235,.10))}
-.tiroir .corps{overflow:auto;padding:18px 22px 40px;display:grid;gap:18px}
-.actions{display:flex;flex-wrap:wrap;gap:8px}
-.infos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.info{padding:11px 13px;border-radius:12px;background:var(--carte);border:1px solid var(--bord)}
-.info .k{color:var(--pale);font-size:12px}
-.info .v{font-weight:600;word-break:break-word}
-.reponse{padding:12px 14px;border-radius:12px;background:var(--carte);border:1px solid var(--bord)}
-.reponse .q{color:#7dd3fc;font-size:13px;font-weight:600;margin-bottom:4px}
-.reponse .r{white-space:pre-wrap;word-break:break-word}
-.lien-nom{border:0;background:none;padding:0;font:inherit;color:#7dd3fc;cursor:pointer;text-align:left}
-.lien-nom:hover{text-decoration:underline}
-.nom.lien-nom{color:var(--texte);font-weight:700;max-width:100%}
-.ligne.evt{align-items:flex-start}
-.texte-evt{word-break:break-word}
-.fermer{margin-left:auto;align-self:flex-start;border:0;background:rgba(255,255,255,.07);width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:20px;line-height:1}
-.dates{display:flex;flex-wrap:wrap;gap:6px}
-
-.vide{padding:40px 20px;text-align:center;color:var(--doux);border:1px dashed var(--bord2);border-radius:var(--rayon)}
-.vide b{display:block;color:var(--texte);font-size:16px;margin-bottom:4px}
-.bandeau-erreur{display:none;margin:12px 0;padding:12px 14px;border-radius:12px;background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.4)}
-.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);opacity:0;padding:10px 16px;border-radius:12px;background:#111c33;
-  border:1px solid var(--bord2);box-shadow:var(--ombre);transition:.2s;z-index:30;pointer-events:none}
-.toast.vu{opacity:1;transform:translate(-50%,0)}
-footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
-.squelette{height:120px;border-radius:var(--rayon);background:linear-gradient(90deg,var(--carte),var(--carte2),var(--carte));background-size:200% 100%;animation:charge 1.2s infinite}
-@keyframes charge{to{background-position:-200% 0}}
+img{display:block}
+.num{font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid #7dd3fc;outline-offset:2px;border-radius:8px}
 [hidden]{display:none!important}
 
-@media (max-width:980px){.chiffres,.mini{grid-template-columns:repeat(3,minmax(0,1fr))}.panneaux2{grid-template-columns:1fr}}
-@media (max-width:640px){
-  .mini{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .page{padding:16px 12px 48px}.hero{padding:18px;gap:14px;flex-wrap:wrap}.logo{width:56px;height:56px;border-radius:16px}
-  .hero .bouton{width:100%;justify-content:center}.chiffres{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .chiffre .val{font-size:24px}.infos{grid-template-columns:1fr}
-  .table thead{display:none}.table,.table tbody{display:block;width:100%}
-  .table tr{display:grid;grid-template-columns:1fr auto;gap:6px 10px;margin-bottom:8px;border:1px solid var(--bord);border-radius:14px;background:var(--carte);padding:12px 14px}
-  .table td{display:block;background:none;border:0!important;border-radius:0!important;padding:0;min-width:0}
-  .table td:nth-child(1){grid-column:1;grid-row:1}
-  .table td:nth-child(4){grid-column:2;grid-row:1;align-self:center}
-  .table td:nth-child(2),.table td:nth-child(3){grid-column:1/-1}
-  .table td:nth-child(5),.table td:nth-child(6){font-size:12px}
-  .table td[data-k]::before{content:attr(data-k) " : ";color:var(--pale)}
-  .barre-h{grid-template-columns:90px 1fr 30px}
-}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* Fond vivant, léger (transform seulement) */
+.aurore{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.aurore i{position:absolute;width:80vmax;height:80vmax;border-radius:50%;opacity:.5;will-change:transform}
+.aurore i:nth-child(1){top:-48vmax;left:-28vmax;background:radial-gradient(closest-side,rgba(8,145,178,.45),transparent);animation:derive 26s var(--ease) infinite alternate}
+.aurore i:nth-child(2){top:-44vmax;right:-34vmax;background:radial-gradient(closest-side,rgba(79,70,229,.42),transparent);animation:derive 32s var(--ease) infinite alternate-reverse}
+.aurore i:nth-child(3){bottom:-60vmax;left:10vmax;background:radial-gradient(closest-side,rgba(37,99,235,.18),transparent);animation:derive 38s var(--ease) infinite alternate}
+@keyframes derive{to{transform:translate3d(6vmax,5vmax,0) scale(1.08)}}
+
+.app{max-width:1320px;margin:0 auto;padding:0 var(--g) 80px}
+
+/* En-tête collant */
+.entete{position:sticky;top:0;z-index:30;margin:0 calc(var(--g) * -1);padding:max(10px,env(safe-area-inset-top)) var(--g) 0;
+  background:rgba(5,7,13,.86);-webkit-backdrop-filter:saturate(1.5) blur(16px);backdrop-filter:saturate(1.5) blur(16px);border-bottom:1px solid var(--b1)}
+.barre{display:flex;align-items:center;gap:10px;min-height:48px}
+.marque{display:flex;align-items:center;gap:12px;min-width:0;flex:1}
+.logo{flex:none;width:40px;height:40px;border-radius:12px;overflow:hidden;display:grid;place-items:center;font-weight:800;
+  background:linear-gradient(135deg,var(--cyan),var(--bleu));box-shadow:0 8px 22px -6px rgba(37,99,235,.6)}
+.logo img{width:100%;height:100%;object-fit:cover}
+.titre{min-width:0;line-height:1.2}
+.titre b{display:block;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.titre small{display:block;font-size:12px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.direct{display:inline-flex;align-items:center;gap:8px;padding:6px 6px 6px 10px;border-radius:999px;background:var(--s1);border:1px solid var(--b1);
+  font-size:12px;color:var(--t2);white-space:nowrap;flex:none}
+.point{width:8px;height:8px;border-radius:50%;background:var(--vert);box-shadow:0 0 0 0 rgba(52,211,153,.6);animation:pouls 2.4s infinite}
+.point.panne{background:var(--ambre);animation:none}
+@keyframes pouls{70%{box-shadow:0 0 0 8px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
+.rafraichir{position:relative;width:32px;height:32px;border-radius:50%;border:0;background:var(--s2);display:grid;place-items:center;cursor:pointer;color:var(--t1);flex:none}
+.rafraichir:hover{background:var(--s3)}
+.rafraichir svg.anneau{position:absolute;inset:0;width:32px;height:32px;transform:rotate(-90deg)}
+.anneau circle{fill:none;stroke-width:2.4}
+.anneau .fond-a{stroke:rgba(148,163,184,.18)}
+.anneau .plein-a{stroke:var(--cyan);stroke-linecap:round;stroke-dasharray:88;stroke-dashoffset:88}
+.anneau .plein-a.court{animation:anneau linear forwards;animation-duration:var(--duree,60s)}
+@keyframes anneau{from{stroke-dashoffset:0}to{stroke-dashoffset:88}}
+.rafraichir.tourne>svg:not(.anneau){animation:rot .8s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+.cacher-mobile{display:inline}
+@media (max-width:520px){.cacher-mobile{display:none}.direct{padding:4px}}
+
+/* Onglets */
+.onglets{position:relative;display:flex;gap:2px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;padding:8px 2px 10px;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent);mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent)}
+.onglets::-webkit-scrollbar{display:none}
+.onglet{position:relative;z-index:1;flex:none;display:inline-flex;align-items:center;gap:8px;padding:8px 13px;border:0;border-radius:11px;background:none;
+  color:var(--t2);font-weight:650;font-size:14px;cursor:pointer;white-space:nowrap;transition:color .2s}
+.onglet:hover{color:var(--t1)}
+.onglet[aria-selected="true"]{color:var(--t1)}
+.curseur{position:absolute;z-index:0;left:0;top:8px;height:calc(100% - 18px);width:0;border-radius:11px;pointer-events:none;
+  background:linear-gradient(135deg,rgba(34,211,238,.20),rgba(99,102,241,.24));box-shadow:inset 0 0 0 1px rgba(125,211,252,.28);
+  transition:transform .5s var(--ressort),width .5s var(--ressort)}
+.badge{min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--s3);font-size:11px;font-weight:700;display:inline-grid;place-items:center;color:var(--t2)}
+.badge.chaud{background:rgba(251,113,133,.2);color:#fecdd3}
+
+/* Bandeaux */
+.bandeau{margin-top:14px;padding:12px 14px;border-radius:var(--r2);display:flex;gap:10px;align-items:flex-start;font-size:14px;
+  background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.35);color:#fde68a}
+.bandeau.rouge{background:rgba(251,113,133,.08);border-color:rgba(251,113,133,.4);color:#fecdd3}
+.bandeau svg{flex:none;margin-top:2px}
+
+/* Vues */
+.vue{display:grid;gap:22px;padding-top:20px;min-width:0}
+.vue>*{min-width:0}
+.vue.anim{animation:vue .5s var(--ease) both}
+@keyframes vue{from{opacity:0;transform:translateY(10px)}}
+
+.section{display:grid;gap:12px;min-width:0}
+.section-tete{display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap;min-width:0}
+.section-tete h2{margin:0;font-size:16px;font-weight:750;display:flex;align-items:center;gap:8px;min-width:0}
+.section-tete h2 svg{color:var(--cyan);flex:none}
+.compte{font-size:12px;color:var(--t3)}
+.aide{margin:0;color:var(--t3);font-size:13px}
+
+/* Tuiles */
+.tuiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr))}
+.tuile{position:relative;overflow:hidden;padding:14px 16px 13px;border-radius:var(--r3);background:linear-gradient(180deg,var(--s2),var(--s1));border:1px solid var(--b1);min-width:0}
+.tuile::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:var(--teinte,var(--cyan))}
+.tuile::after{content:"";position:absolute;right:-40px;bottom:-60px;width:140px;height:140px;border-radius:50%;background:radial-gradient(closest-side,var(--teinte,var(--cyan)),transparent);opacity:.16}
+.tuile.lien{cursor:pointer;transition:transform .3s var(--ease),border-color .3s}
+.tuile.lien:hover{transform:translateY(-2px);border-color:var(--b2)}
+.tuile .val{font-size:clamp(22px,5vw,30px);font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.tuile .lib{font-size:13px;color:var(--t2);margin-top:3px}
+.tuile .sous{font-size:12px;color:var(--t3);margin-top:6px;overflow-wrap:anywhere}
+
+/* Cartes */
+.grille{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr));align-items:start}
+.grille.etroite{grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr))}
+.carte{position:relative;min-width:0;padding:16px;border-radius:var(--r3);background:linear-gradient(180deg,var(--s2),var(--s1));border:1px solid var(--b1);box-shadow:var(--ombre)}
+.carte.lien{cursor:pointer;transition:transform .3s var(--ease),border-color .3s,background .3s}
+.carte.lien:hover{transform:translateY(-2px);border-color:var(--b2);background:linear-gradient(180deg,var(--s3),var(--s1))}
+.carte.alerte{border-color:rgba(251,113,133,.42);background:linear-gradient(180deg,rgba(251,113,133,.09),var(--s1))}
+.carte.chaude{border-color:rgba(251,191,36,.42)}
+.anime>.carte,.anime>.ligne,.anime>.evt{animation:monte .5s var(--ease) both;animation-delay:calc(var(--i,0) * 32ms)}
+@keyframes monte{from{opacity:0;transform:translateY(10px) scale(.985)}}
+.pile{display:grid;gap:12px;min-width:0}
+.cadre{min-width:0;padding:18px;border-radius:var(--r3);background:linear-gradient(180deg,var(--s2),var(--s1));border:1px solid var(--b1)}
+.cadre h3{margin:0 0 4px;font-size:15px}
+.duo{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr))}
+
+/* Personnes */
+.qui{display:flex;align-items:center;gap:12px;min-width:0}
+.qui .bloc{min-width:0;flex:1}
+.nom{font-weight:700;line-height:1.25;overflow-wrap:anywhere}
+.sous-nom{font-size:12px;color:var(--t3);overflow-wrap:anywhere}
+.avatar{flex:none;width:42px;height:42px;border-radius:50%;object-fit:cover;background:linear-gradient(135deg,#334155,#1e293b);display:grid;place-items:center;font-weight:750;font-size:14px;color:#cbd5e1}
+.avatar.p{width:32px;height:32px;font-size:12px}
+.avatar.xs{width:24px;height:24px;font-size:10px}
+.avatar.g{width:64px;height:64px;font-size:22px}
+
+/* Pastilles, puces, boutons */
+.pastilles{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.pastille{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  color:var(--teinte,var(--t2));background:rgba(148,163,184,.1);background:color-mix(in srgb,var(--teinte,#94a3b8) 14%,transparent);border:1px solid color-mix(in srgb,var(--teinte,#94a3b8) 32%,transparent)}
+.pastille.point-av::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.puces{display:flex;flex-wrap:wrap;gap:6px}
+.puce{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:999px;border:1px solid var(--b1);background:var(--s1);font-size:13px;cursor:pointer;color:var(--t2);transition:background .2s,border-color .2s,color .2s;max-width:100%}
+.puce:hover{color:var(--t1);border-color:var(--b2)}
+.puce i{width:8px;height:8px;border-radius:50%;background:var(--teinte,var(--cyan));flex:none}
+.puce[aria-pressed="true"]{color:var(--t1);border-color:var(--teinte,var(--cyan));background:color-mix(in srgb,var(--teinte,#22d3ee) 16%,transparent)}
+.puce .n{color:var(--t3);font-variant-numeric:tabular-nums}
+.actions{display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+.bouton{display:inline-flex;align-items:center;justify-content:center;gap:8px;max-width:100%;min-height:36px;padding:7px 13px;border-radius:11px;border:1px solid var(--b2);background:var(--s2);
+  color:var(--t1);font-size:13px;font-weight:650;cursor:pointer;text-decoration:none;white-space:nowrap;transition:background .2s,transform .15s,border-color .2s}
+.bouton:hover{background:var(--s3);border-color:var(--b3)}
+.bouton:active{transform:translateY(1px)}
+.bouton:disabled{opacity:.5;cursor:not-allowed}
+.bouton.principal{background:linear-gradient(135deg,var(--cyan),var(--bleu));border-color:transparent;color:#03111e}
+.bouton.principal:hover{filter:brightness(1.08)}
+.bouton.danger{color:#fecdd3;border-color:rgba(251,113,133,.45);background:rgba(251,113,133,.12)}
+.bouton.danger:hover{background:rgba(251,113,133,.2)}
+.bouton.vert{color:#bbf7d0;border-color:rgba(52,211,153,.45);background:rgba(52,211,153,.12)}
+.bouton.discret{background:none;border-color:transparent;color:var(--t2)}
+.bouton.discret:hover{background:var(--s2);color:var(--t1)}
+.bouton.p{min-height:30px;padding:4px 10px;font-size:12px;border-radius:9px}
+.lien-nom{border:0;background:none;padding:0;font:inherit;color:#7dd3fc;cursor:pointer;text-align:left;overflow-wrap:anywhere}
+.lien-nom:hover{text-decoration:underline}
+.copier{border:0;background:none;color:var(--t3);cursor:pointer;padding:3px;border-radius:7px;display:inline-grid;place-items:center;vertical-align:middle}
+.copier:hover{color:var(--t1);background:var(--s2)}
+.ident{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12px;color:var(--t3);overflow-wrap:anywhere}
+
+/* Barre d'outils */
+.outils{display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0}
+.recherche{flex:1 1 230px;min-width:0;display:flex;align-items:center;gap:8px;padding:0 12px;min-height:40px;border-radius:12px;background:var(--s1);border:1px solid var(--b1)}
+.recherche:focus-within{border-color:var(--b3)}
+.recherche input{flex:1;min-width:0;border:0;outline:0;background:none;padding:8px 0}
+.recherche svg{color:var(--t3);flex:none}
+select{min-height:40px;max-width:100%;padding:0 12px;border-radius:12px;background:var(--fond-3);border:1px solid var(--b1)}
+.segment{display:inline-flex;padding:3px;border-radius:12px;background:var(--s1);border:1px solid var(--b1)}
+.segment button{border:0;background:none;padding:6px 12px;border-radius:9px;font-size:13px;font-weight:650;color:var(--t2);cursor:pointer;white-space:nowrap}
+.segment button[aria-pressed="true"]{background:var(--s3);color:var(--t1)}
+.bascule{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--t2);cursor:pointer;user-select:none}
+.bascule input{accent-color:var(--rouge);width:16px;height:16px}
+
+/* Listes d'entrées (dans une carte) */
+.entrees{display:grid;gap:6px;margin:0;padding:0;list-style:none;min-width:0}
+.entree{display:grid;grid-template-columns:minmax(0,1fr);gap:2px;padding:9px 11px;border-radius:12px;background:var(--s1);border:1px solid var(--b1);min-width:0}
+.entree .haut{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0;flex-wrap:wrap}
+.entree .quoi{font-weight:650;font-size:13px;overflow-wrap:anywhere}
+.entree .quand{font-size:12px;color:var(--t3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.entree .texte{font-size:13px;color:var(--t2);overflow-wrap:anywhere}
+.entree .meta{font-size:12px;color:var(--t3);overflow-wrap:anywhere}
+.entree.grave{border-color:rgba(251,113,133,.38);background:rgba(251,113,133,.06)}
+.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.clamp3{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.deplier{cursor:pointer}
+.deplier.ouvert{-webkit-line-clamp:unset;display:block}
+
+/* Fil chronologique */
+.fil{display:grid;gap:16px;min-width:0}
+.jour{display:grid;gap:8px;min-width:0}
+.jour-titre{position:sticky;top:calc(var(--entete) + 6px);z-index:2;justify-self:start;padding:4px 11px;border-radius:999px;background:var(--fond-3);border:1px solid var(--b2);font-size:12px;font-weight:750;color:var(--t2)}
+.evt{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 12px;padding:12px;border-radius:14px;background:var(--s1);border:1px solid var(--b1);min-width:0}
+.evt.grave{border-color:rgba(251,113,133,.4);background:linear-gradient(90deg,rgba(251,113,133,.09),var(--s1) 45%)}
+.evt .corps-e{min-width:0;display:grid;gap:3px}
+.evt .ligne1{display:flex;align-items:baseline;justify-content:space-between;gap:6px 10px;flex-wrap:wrap}
+.evt .texte{overflow-wrap:anywhere}
+.evt .meta{font-size:12px;color:var(--t3);overflow-wrap:anywhere}
+
+/* Lignes compactes */
+.lignes{display:grid;gap:8px;min-width:0}
+.ligne{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px 12px;align-items:center;padding:10px 12px;border-radius:14px;background:var(--s1);border:1px solid var(--b1);min-width:0}
+.ligne .droite{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center}
+.ligne.choisie{border-color:rgba(251,113,133,.5);background:rgba(251,113,133,.07)}
+@media (max-width:560px){.ligne{grid-template-columns:auto minmax(0,1fr)}.ligne .droite{grid-column:1/-1;justify-content:flex-start}}
+.coche{width:18px;height:18px;accent-color:var(--rouge);flex:none}
+
+/* Jauge 7 jours */
+.jauge{display:inline-flex;gap:3px;vertical-align:middle}
+.jauge span{width:8px;height:14px;border-radius:3px;background:rgba(148,163,184,.18)}
+.jauge span.on{background:var(--teinte,var(--vert))}
+
+/* Graphiques */
+.graphe svg{width:100%;height:auto;display:block}
+.graphe text{fill:var(--t3);font-size:11px}
+.legende{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--t2);margin-top:10px}
+.legende span{display:inline-flex;align-items:center;gap:6px}
+.legende i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.barre-h{display:grid;grid-template-columns:minmax(0,1fr) minmax(60px,2fr) auto;gap:10px;align-items:center;margin:8px 0;font-size:13px}
+.barre-h .lib{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--t2)}
+.barre-h .fond{height:9px;border-radius:999px;background:rgba(148,163,184,.14);overflow:hidden}
+.barre-h .plein{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--cyan),var(--bleu));transform-origin:left;animation:pousse .9s var(--ease) both}
+@keyframes pousse{from{transform:scaleX(0)}}
+@keyframes pousseY{from{transform:scaleY(0)}}
+details.repli{border-radius:var(--r3);border:1px solid var(--b1);background:var(--s1);min-width:0}
+details.repli>summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-weight:700;font-size:15px}
+details.repli>summary::-webkit-details-marker{display:none}
+details.repli>summary .chevron{transition:transform .3s var(--ease);color:var(--t3)}
+details.repli[open]>summary .chevron{transform:rotate(90deg)}
+details.repli>.contenu{padding:0 16px 16px;display:grid;gap:12px;min-width:0}
+
+/* Pagination, vides */
+.plus{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding-top:4px}
+.vide{padding:36px 18px;text-align:center;color:var(--t2);border:1px dashed var(--b2);border-radius:var(--r3);display:grid;justify-items:center;gap:6px}
+.vide b{color:var(--t1);font-size:15px}
+.vide svg{color:var(--t3);margin-bottom:4px}
+.squelette{border-radius:var(--r3);background:linear-gradient(90deg,var(--s1),var(--s2),var(--s1));background-size:200% 100%;animation:charge 1.2s infinite}
+@keyframes charge{to{background-position:-200% 0}}
+
+/* Sélection groupée (clan) */
+.lot{position:sticky;bottom:max(12px,env(safe-area-inset-bottom));z-index:20;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  padding:10px 12px;border-radius:16px;background:rgba(15,22,38,.94);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid rgba(251,113,133,.45);box-shadow:var(--ombre);animation:monte .35s var(--ease) both}
+
+/* Fiche membre */
+.voile{position:fixed;inset:0;z-index:40;background:rgba(2,6,15,.62);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .3s}
+.voile.ouvert{opacity:1;pointer-events:auto}
+.porte{position:fixed;inset:0;z-index:41;overflow:hidden;pointer-events:none}
+.fiche{position:absolute;top:0;right:0;bottom:0;width:min(700px,100%);display:flex;flex-direction:column;background:var(--fond-2);border-left:1px solid var(--b2);
+  box-shadow:-24px 0 60px rgba(0,0,0,.5);transform:translateX(104%);visibility:hidden;transition:transform .5s var(--ressort),visibility 0s .5s;pointer-events:auto}
+.fiche.ouverte{transform:none;visibility:visible;transition:transform .5s var(--ressort)}
+@media (max-width:640px){.fiche{top:auto;height:94%;width:100%;border-left:0;border-top:1px solid var(--b2);border-radius:22px 22px 0 0;transform:translateY(104%)}}
+.fiche-tete{padding:18px 20px 14px;border-bottom:1px solid var(--b1);background:linear-gradient(120deg,rgba(34,211,238,.12),rgba(99,102,241,.10));display:grid;gap:12px}
+.fiche-tete .qui{align-items:flex-start}
+.fiche-corps{overflow:auto;overscroll-behavior:contain;padding:16px 20px 40px;display:grid;gap:16px;align-content:start;grid-auto-rows:max-content}
+.fermer{flex:none;width:38px;height:38px;border-radius:12px;border:0;background:var(--s2);display:grid;place-items:center;cursor:pointer;color:var(--t1)}
+.fermer:hover{background:var(--s3)}
+.mini-tuiles{display:grid;gap:8px;grid-template-columns:repeat(4,minmax(0,1fr))}
+.mini-tuiles div{padding:10px;border-radius:12px;background:var(--s1);border:1px solid var(--b1);text-align:center;min-width:0}
+.mini-tuiles b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.mini-tuiles span{font-size:11px;color:var(--t3)}
+@media (max-width:420px){.mini-tuiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.infos{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))}
+.info{padding:10px 12px;border-radius:12px;background:var(--s1);border:1px solid var(--b1);min-width:0}
+.info .k{font-size:12px;color:var(--t3)}
+.info .v{font-weight:650;overflow-wrap:anywhere}
+.reponse{padding:10px 12px;border-radius:12px;background:var(--s1);border:1px solid var(--b1);min-width:0}
+.reponse .q{font-size:12px;font-weight:700;color:#7dd3fc;margin-bottom:2px;overflow-wrap:anywhere}
+.reponse .r{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}
+
+/* Confirmation, formulaire */
+.dialogue{position:fixed;z-index:51;left:50%;top:50%;transform:translate(-50%,-50%);width:min(480px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;
+  padding:20px;border-radius:20px;background:var(--fond-2);border:1px solid var(--b2);box-shadow:0 30px 80px rgba(0,0,0,.6);animation:pop .35s var(--ressort) both}
+@keyframes pop{from{opacity:0;transform:translate(-50%,-46%) scale(.97)}}
+.dialogue h3{margin:0 0 6px;font-size:17px;overflow-wrap:anywhere}
+.dialogue p{margin:0 0 14px;color:var(--t2);overflow-wrap:anywhere}
+.dialogue label{display:grid;gap:6px;margin-bottom:12px;font-size:13px;color:var(--t2)}
+.dialogue textarea,.dialogue select{width:100%;padding:10px;border-radius:12px;background:var(--s1);border:1px solid var(--b1);resize:vertical}
+.dialogue .actions{justify-content:flex-end}
+.choix{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(min(100%,130px),1fr));margin-bottom:12px}
+.choix button{padding:10px;border-radius:12px;border:1px solid var(--b1);background:var(--s1);cursor:pointer;font-weight:650;font-size:13px}
+.choix button[aria-pressed="true"]{border-color:var(--rouge);background:rgba(251,113,133,.14)}
+#voile-dialogue{z-index:50}
+
+.toast{position:fixed;left:50%;bottom:max(20px,env(safe-area-inset-bottom));z-index:60;transform:translate(-50%,20px);opacity:0;padding:11px 16px;border-radius:14px;
+  background:#111c33;border:1px solid var(--b2);box-shadow:var(--ombre);transition:.3s var(--ease);pointer-events:none;max-width:calc(100% - 24px);text-align:center}
+.toast.vu{opacity:1;transform:translate(-50%,0)}
+.menu{position:relative}
+.menu>summary{list-style:none}
+.menu>summary::-webkit-details-marker{display:none}
+.menu .liste-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:25;min-width:220px;max-width:calc(100vw - 32px);padding:6px;border-radius:14px;background:var(--fond-3);border:1px solid var(--b2);box-shadow:var(--ombre);display:grid;gap:2px}
+.menu .liste-menu a,.menu .liste-menu button{display:block;padding:9px 11px;border-radius:9px;text-decoration:none;font-size:13px;color:var(--t1);background:none;border:0;text-align:left;cursor:pointer}
+.menu .liste-menu a:hover,.menu .liste-menu button:hover{background:var(--s2)}
+footer{margin-top:34px;padding-top:18px;border-top:1px solid var(--b1);display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;color:var(--t3);font-size:12px}
+footer p{margin:0;max-width:760px}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<div class="page">
-  <header class="hero">
-    <div class="logo" id="logo">RS</div>
-    <div class="hero-texte">
-      <div class="surtitre">ESPACE STAFF</div>
-      <h1>Tableau de bord</h1>
-      <div class="etat"><span class="direct" aria-hidden="true"></span><span id="etat">Chargement des données…</span></div>
+<div class="aurore" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="app">
+  <header class="entete" id="entete">
+    <div class="barre">
+      <div class="marque">
+        <div class="logo" id="logo" aria-hidden="true">RS</div>
+        <div class="titre"><b id="nom-serveur">Espace staff</b><small id="sous-titre">Chargement…</small></div>
+      </div>
+      <div class="direct" id="direct" title="Les données se mettent à jour toutes seules">
+        <span class="point" id="point"></span><span class="cacher-mobile" id="etat-direct">En direct</span>
+        <button class="rafraichir" id="rafraichir" type="button" aria-label="Actualiser maintenant">
+          <svg class="anneau" viewBox="0 0 32 32" aria-hidden="true"><circle class="fond-a" cx="16" cy="16" r="14"></circle><circle class="plein-a" id="anneau" cx="16" cy="16" r="14"></circle></svg>
+        </button>
+      </div>
     </div>
-    <button class="bouton principal" id="actualiser" type="button">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
-      Actualiser
-    </button>
+    <nav class="onglets" id="onglets" role="tablist" aria-label="Sections"><span class="curseur" id="curseur" aria-hidden="true"></span></nav>
   </header>
-
-  <div class="bandeau-erreur" id="erreur" role="alert"></div>
-
-  <section class="chiffres" id="chiffres" aria-label="Chiffres clés">
-    <div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>
-    <div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>
-  </section>
-
-  <nav class="onglets" role="tablist" aria-label="Sections">
-    <button class="onglet" role="tab" data-onglet="candidatures" aria-selected="true">Candidatures<span class="nb" id="nb-candidatures">0</span></button>
-    <button class="onglet" role="tab" data-onglet="tickets" aria-selected="false">Tickets<span class="nb" id="nb-tickets">0</span></button>
-    <button class="onglet" role="tab" data-onglet="sanctions" aria-selected="false">Modération<span class="nb" id="nb-sanctions">0</span></button>
-    <button class="onglet" role="tab" data-onglet="journal" aria-selected="false">Journal<span class="nb" id="nb-journal">0</span></button>
-    <button class="onglet" role="tab" data-onglet="clan" aria-selected="false">Clan<span class="nb" id="nb-clan">0</span></button>
-    <button class="onglet" role="tab" data-onglet="stats" aria-selected="false">Statistiques</button>
-  </nav>
-
-  <section id="vue-candidatures" role="tabpanel">
-    <div class="outils">
-      <label class="recherche"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q-candidatures" type="search" placeholder="Nom, identifiant, réponse…" aria-label="Rechercher une candidature"></label>
-      <select id="mois" aria-label="Mois"></select>
-      <select id="tri" aria-label="Tri">
-        <option value="recent">Plus récentes</option><option value="ancien">Plus anciennes</option><option value="nom">Nom A → Z</option>
-      </select>
-    </div>
-    <div class="puces" id="puces-statut" style="margin-bottom:14px"></div>
-    <div class="grille" id="grille"></div>
-  </section>
-
-  <section id="vue-tickets" role="tabpanel" hidden>
-    <div class="puces" id="puces-types" style="margin-bottom:14px"></div>
-    <div class="grille-types" id="types"></div>
-    <div class="titre-section"><h2>Tickets ouverts</h2><span class="etiquette" id="nb-ouverts"></span></div>
-    <div class="liste" id="liste-ouverts"></div>
-    <div class="titre-section"><h2>Derniers tickets fermés</h2><span class="etiquette" id="nb-fermes"></span></div>
-    <div class="liste" id="liste-fermes"></div>
-  </section>
-
-  <section id="vue-sanctions" role="tabpanel" hidden>
-    <div class="mini" id="sanctions-chiffres"></div>
-    <div class="titre-section"><h2>En ce moment</h2></div>
-    <div class="grille-types" id="sanctions-actives"></div>
-    <div class="panneaux2" style="margin-top:12px">
-      <div class="cadre"><h3>Sanctions par mois</h3><p class="aide">Tout le casier : décisions du staff, escalades et détections du bot, sur douze mois.</p>
-        <div id="graphe-sanctions"></div>
-        <div class="legende"><span><i style="background:#f59e0b"></i>Avertissements</span><span><i style="background:#a78bfa"></i>Mutes</span><span><i style="background:#f43f5e"></i>Expulsions et bans</span><span><i style="background:#64748b"></i>Détections</span></div>
-      </div>
-      <div class="cadre"><h3>Par type</h3><p class="aide">Depuis le début du casier.</p><div id="sanctions-types"></div></div>
-    </div>
-    <div class="panneaux2" style="margin-top:12px">
-      <div class="cadre"><h3>Membres à surveiller</h3><p class="aide">Les plus souvent au casier sur 90 jours — clique pour le détail.</p><div class="liste" id="surveiller"></div></div>
-      <div class="cadre"><h3>Modérateurs</h3><p class="aide">Sanctions décidées à la main, par personne.</p><div id="moderateurs"></div></div>
-    </div>
-    <div class="titre-section"><h2>Dernières sanctions</h2><span class="etiquette" id="nb-recentes"></span></div>
-    <div class="outils">
-      <label class="recherche"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q-sanctions" type="search" placeholder="Membre, identifiant, motif, modérateur…" aria-label="Rechercher une sanction"></label>
-      <select id="origine" aria-label="Origine"><option value="tous">Staff et automatique</option><option value="staff">Décidées par le staff</option><option value="auto">Automatiques</option></select>
-    </div>
-    <div class="puces" id="puces-sanctions" style="margin-bottom:14px"></div>
-    <div class="liste" id="recentes"></div>
-  </section>
-
-  <section id="vue-journal" role="tabpanel" hidden>
-    <div class="outils">
-      <label class="recherche"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q-journal" type="search" placeholder="Membre, identifiant, salon, texte…" aria-label="Rechercher dans le journal"></label>
-      <select id="periode" aria-label="Période"><option value="tout">Tout ce qui est chargé</option><option value="1">Dernières 24 h</option><option value="7">7 derniers jours</option></select>
-    </div>
-    <div class="puces" id="puces-journal" style="margin-bottom:14px"></div>
-    <div class="panneaux2">
-      <div class="cadre"><h3>Ce qui s'est passé</h3><p class="aide">Les 400 derniers évènements, du plus récent au plus ancien. Clique sur un nom : tout son historique.</p><div class="liste" id="journal"></div></div>
-      <div class="cadre"><h3>Les plus présents</h3><p class="aide">Les personnes les plus souvent au journal, sur la période choisie.</p><div class="liste" id="journal-personnes"></div></div>
-    </div>
-    <p class="pseudo" style="margin-top:12px">Conservation : messages et vocal 30 jours, le reste 90 jours. Plus aucun log n'est posté sur Discord.</p>
-  </section>
-
-  <section id="vue-clan" role="tabpanel" hidden>
-    <div class="outils">
-      <label class="recherche"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q-clan" type="search" placeholder="Rechercher un membre ou un identifiant…" aria-label="Rechercher un membre"></label>
-      <button class="bouton" id="copier-clan" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
-        Copier la liste
-      </button>
-    </div>
-    <div class="puces" id="puces-clan" style="margin-bottom:10px"></div>
-    <table class="table" id="table-clan">
-      <thead><tr><th>Membre</th><th>Identifiant</th><th>7 derniers jours</th><th>Statut</th><th>Dernière activité</th><th>Arrivée</th><th></th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </section>
-
-  <section id="vue-stats" role="tabpanel" hidden>
-    <div class="panneaux2">
-      <div class="cadre"><h3>Tickets ouverts par mois</h3><p class="aide">Rell Seas et tickets normaux, sur les douze derniers mois.</p>
-        <div id="graphe-tickets"></div>
-        <div class="legende"><span><i style="background:var(--cyan)"></i>Rell Seas</span><span><i style="background:#818cf8"></i>Tickets normaux</span></div>
-      </div>
-      <div class="cadre"><h3>Staff</h3><p class="aide">Tickets pris en charge et tickets fermés, par personne.</p><div id="staff"></div></div>
-    </div>
-    <div class="panneaux2" style="margin-top:12px">
-      <div class="cadre"><h3>Candidatures par mois</h3><p class="aide">Selon la date de fermeture du ticket.</p>
-        <div id="graphe"></div>
-        <div class="legende"><span><i style="background:var(--vert)"></i>Acceptés</span><span><i style="background:var(--rouge)"></i>Refusés</span></div>
-      </div>
-      <div class="cadre"><h3>Délais par type</h3><p class="aide">Médianes : de l'ouverture à la prise en charge, et à la fermeture.</p><div id="delais"></div></div>
-    </div>
-  </section>
-
-  <footer id="pied">Données lues en direct dans la base du bot.</footer>
+  <div id="bandeaux"></div>
+  <main id="vues"></main>
+  <footer id="pied"></footer>
 </div>
-
 <div class="voile" id="voile"></div>
-<div class="porte-tiroir"><aside class="tiroir" id="tiroir" role="dialog" aria-modal="true" aria-labelledby="t-nom" aria-hidden="true"></aside></div>
-<div class="toast" id="toast" role="status"></div>
-<div class="voile" id="voile-confirm"></div>
-<div class="confirmation" id="confirmation" role="alertdialog" aria-modal="true" aria-labelledby="c-titre" hidden>
-  <h3 id="c-titre"></h3><p id="c-texte"></p>
-  <label id="c-motif-bloc" hidden><span class="pseudo">Motif (facultatif)</span><textarea id="c-motif" maxlength="150" rows="2"></textarea></label>
-  <div class="actions"><button class="bouton" id="c-annuler" type="button">Annuler</button><button class="bouton danger" id="c-ok" type="button">Confirmer</button></div>
-</div>
+<div class="porte"><aside class="fiche" id="fiche" role="dialog" aria-modal="true" aria-labelledby="fiche-nom" aria-hidden="true"></aside></div>
+<div class="voile" id="voile-dialogue"></div>
+<div id="dialogue-hote"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script>
+<script nonce="__NONCE__">
 "use strict";
-const STATUTS = {en_cours:"En cours", acceptes:"Accepté", refuses:"Refusé"};
-const PLURIELS = {en_cours:"En cours", acceptes:"Acceptés", refuses:"Refusés"};
-const peutAgir = () => !!(etat.donnees && etat.donnees.droits && etat.donnees.droits.actions);
-const RANGS = ["Actif","Peu présent","Inactif","Jamais vu","Trop récent"];
-const $ = (s) => document.querySelector(s);
-const etat = {donnees:null, onglet:"candidatures", statut:"tous", rang:"tous", type:"tous", groupe:"tous", cat:"tous", journalMax:100, charge:false};
-const GROUPES = ["Avertissements", "Mutes", "Expulsions et bans", "Détections"];
+const VERSION = "__VERSION__";
+const BASE = "/tableau/espace";
+const RAFRAICHIR = 60000;
+const REDEMARRER = 30 * 60000;
+const PAGE = 12;
+const NS = "http://www.w3.org/2000/svg";
+const TZ = "Europe/Paris";
+const $ = (s, r) => (r || document).querySelector(s);
+const reduit = matchMedia("(prefers-reduced-motion: reduce)");
 
-function h(tag, attrs, ...enfants){
+/* ── Construction sûre : jamais d'HTML, seulement du texte ─────────────── */
+function h(tag, attrs, ...enfants) {
   const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs || {})){
+  for (const [k, v] of Object.entries(attrs || {})) {
     if (v === null || v === undefined || v === false) continue;
     if (k === "classe") e.className = v;
+    else if (k === "style") e.style.cssText = v;
     else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
-    else if (k === "href") { if (/^https:\/\//.test(v)) e.setAttribute("href", v); }
+    else if (k === "href") { if (/^https:\/\//.test(v) || String(v).startsWith(BASE + "/")) e.setAttribute("href", v); }
     else if (k === "src") { if (/^https:\/\/(cdn\.discordapp\.com|media\.discordapp\.net)\//.test(v)) e.setAttribute("src", v); }
     else e.setAttribute(k, v === true ? "" : String(v));
   }
-  for (const c of enfants.flat()){
-    if (c === null || c === undefined || c === false) continue;
+  for (const c of enfants.flat(4)) {
+    if (c === null || c === undefined || c === false || c === "") continue;
     e.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
   return e;
 }
-const svg = (chemin) => { const s = document.createElementNS("http://www.w3.org/2000/svg","svg");
-  s.setAttribute("viewBox","0 0 24 24"); s.setAttribute("fill","none"); s.setAttribute("stroke","currentColor"); s.setAttribute("stroke-width","2");
-  s.innerHTML = chemin; return s; };
-const ICONE_COPIE = '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>';
-
-function avatar(p, grand){
-  const initiales = (p.nom || "?").trim().slice(0, 2).toUpperCase();
-  if (p.avatar){
-    const i = h("img", {classe:"avatar" + (grand ? " grand" : ""), src:p.avatar, alt:"", loading:"lazy"});
-    i.addEventListener("error", () => i.replaceWith(h("div", {classe:"avatar" + (grand ? " grand" : "")}, initiales)));
-    return i;
+const ICONES = {
+  actualiser: [["path", {d: "M21 12a9 9 0 1 1-3-6.7"}], ["path", {d: "M21 4v5h-5"}]],
+  recherche: [["circle", {cx: 11, cy: 11, r: 7}], ["path", {d: "m20 20-3.5-3.5"}]],
+  copier: [["rect", {x: 9, y: 9, width: 12, height: 12, rx: 2}], ["path", {d: "M5 15V5a2 2 0 0 1 2-2h10"}]],
+  fermer: [["path", {d: "M18 6 6 18"}], ["path", {d: "m6 6 12 12"}]],
+  export: [["path", {d: "M12 3v12"}], ["path", {d: "m7 10 5 5 5-5"}], ["path", {d: "M5 21h14"}]],
+  lien: [["path", {d: "M15 3h6v6"}], ["path", {d: "M10 14 21 3"}], ["path", {d: "M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"}]],
+  sortir: [["path", {d: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"}], ["path", {d: "m16 17 5-5-5-5"}], ["path", {d: "M21 12H9"}]],
+  alerte: [["path", {d: "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"}], ["path", {d: "M12 9v4"}], ["path", {d: "M12 17h.01"}]],
+  bouclier: [["path", {d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"}]],
+  ticket: [["path", {d: "M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4z"}], ["path", {d: "M14 5v14"}]],
+  question: [["circle", {cx: 12, cy: 12, r: 9}], ["path", {d: "M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"}], ["path", {d: "M12 17h.01"}]],
+  personnes: [["path", {d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"}], ["circle", {cx: 9, cy: 7, r: 4}], ["path", {d: "M22 21v-2a4 4 0 0 0-3-3.9"}], ["path", {d: "M16 3.1a4 4 0 0 1 0 7.8"}]],
+  journal: [["path", {d: "M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4z"}], ["path", {d: "M8 9h8"}], ["path", {d: "M8 13h6"}]],
+  check: [["path", {d: "M20 6 9 17l-5-5"}]],
+  chevron: [["path", {d: "m9 18 6-6-6-6"}]],
+  horloge: [["circle", {cx: 12, cy: 12, r: 9}], ["path", {d: "M12 7v5l3 2"}]],
+  accueil: [["path", {d: "m3 11 9-8 9 8"}], ["path", {d: "M5 10v10h14V10"}]],
+  graphe: [["path", {d: "M3 3v18h18"}], ["path", {d: "M7 15l4-4 3 3 5-6"}]],
+  vide: [["circle", {cx: 12, cy: 12, r: 9}], ["path", {d: "M8 12h8"}]]
+};
+function icone(nom, taille) {
+  const s = document.createElementNS(NS, "svg");
+  for (const [k, v] of Object.entries({viewBox: "0 0 24 24", width: taille || 16, height: taille || 16, fill: "none", stroke: "currentColor",
+    "stroke-width": 2, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true"})) s.setAttribute(k, v);
+  for (const [tag, attrs] of ICONES[nom] || []) {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    s.append(e);
   }
-  return h("div", {classe:"avatar" + (grand ? " grand" : ""), "aria-hidden":"true"}, initiales);
+  return s;
 }
-const pastille = (s) => h("span", {classe:"statut", "data-statut":s}, STATUTS[s] || s);
-const date = (t, heure) => t ? new Date(t * 1000).toLocaleString("fr-FR", heure
-  ? {timeZone:"Europe/Paris", day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"}
-  : {timeZone:"Europe/Paris", day:"2-digit", month:"2-digit", year:"numeric"}) : "—";
-function depuis(t){
+
+/* ── État ──────────────────────────────────────────────────────────────── */
+const ONGLETS = [["apercu", "Aperçu", "accueil"], ["candidatures", "Candidatures", "personnes"], ["tickets", "Tickets", "ticket"],
+  ["moderation", "Modération", "bouclier"], ["journal", "Journal", "journal"], ["questions", "Questions", "question"], ["clan", "Clan", "personnes"]];
+const etat = {
+  d: null, etag: null, dernier: 0, erreurs: 0, onglet: "apercu", rendus: new Set(), pages: {}, precedents: {}, selection: new Set(),
+  ouverture: Date.now(), versionNeuve: false, fini: false, anim: true,
+  f: {
+    cand: {q: "", statut: "tous", mois: "tous", tri: "recent"},
+    tick: {type: "tous", q: ""},
+    mod: {q: "", periode: "90", groupe: "tous", origine: "tous", tri: "recent"},
+    jour: {q: "", periode: "7", cat: "tous", vue: "personnes", grave: false},
+    ques: {q: "", statut: "ouverte"},
+    clan: {q: "", rang: "tous"}
+  }
+};
+try {
+  const s = JSON.parse(sessionStorage.getItem("tableau.etat") || "null");
+  if (s && s.f) for (const k of Object.keys(etat.f)) Object.assign(etat.f[k], s.f[k] || {});
+  if (s && s.onglet && ONGLETS.some(o => o[0] === s.onglet)) etat.onglet = s.onglet;
+} catch (e) { /* stockage indisponible : réglages par défaut */ }
+function sauver() {
+  try { sessionStorage.setItem("tableau.etat", JSON.stringify({onglet: etat.onglet, f: etat.f})); } catch (e) { /* rien à garder */ }
+}
+const peutAgir = () => !!(etat.d && etat.d.droits && etat.d.droits.actions);
+const P = (id) => (etat.d && etat.d.personnes && etat.d.personnes[id]) || {id: String(id || ""), nom: id ? "Membre parti" : "Serveur", pseudo: "", avatar: ""};
+const aPart = (id) => !!(etat.d && (etat.d.a_part || []).includes(String(id)));
+
+/* ── Formats (heure de Paris) ──────────────────────────────────────────── */
+const fmt = {
+  date: new Intl.DateTimeFormat("fr-FR", {timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric"}),
+  dateHeure: new Intl.DateTimeFormat("fr-FR", {timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"}),
+  heure: new Intl.DateTimeFormat("fr-FR", {timeZone: TZ, hour: "2-digit", minute: "2-digit"}),
+  jour: new Intl.DateTimeFormat("fr-FR", {timeZone: TZ, weekday: "long", day: "numeric", month: "long"}),
+  cle: new Intl.DateTimeFormat("fr-CA", {timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit"}),
+  mois: new Intl.DateTimeFormat("fr-FR", {month: "short", year: "numeric", timeZone: "UTC"}),
+  nombre: new Intl.NumberFormat("fr-FR")
+};
+const date = (t, avecHeure) => t ? (avecHeure ? fmt.dateHeure : fmt.date).format(new Date(t * 1000)) : "—";
+const heure = (t) => t ? fmt.heure.format(new Date(t * 1000)) : "";
+const cleJour = (t) => fmt.cle.format(new Date(t * 1000));
+function libelleJour(cle) {
+  const auj = cleJour(Date.now() / 1000), hier = cleJour(Date.now() / 1000 - 86400);
+  if (cle === auj) return "Aujourd'hui";
+  if (cle === hier) return "Hier";
+  const [a, m, j] = cle.split("-").map(Number);
+  const t = fmt.jour.format(new Date(Date.UTC(a, m - 1, j, 12)));
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+function depuis(t) {
   if (!t) return "date inconnue";
   const s = Math.max(0, Date.now() / 1000 - t);
-  if (s < 90) return "à l'instant";
+  if (s < 60) return "à l'instant";
   if (s < 3600) return "il y a " + Math.round(s / 60) + " min";
   if (s < 86400) return "il y a " + Math.round(s / 3600) + " h";
-  return "il y a " + Math.round(s / 86400) + " j";
+  if (s < 86400 * 45) return "il y a " + Math.round(s / 86400) + " j";
+  return "le " + date(t);
 }
-function formatDuree(s){
+function duree(s) {
   if (!s || s < 0) return "—";
   const m = Math.round(s / 60), j = Math.floor(m / 1440), hh = Math.floor((m % 1440) / 60), mm = m % 60;
   return j ? j + " j " + hh + " h" : hh ? hh + " h " + String(mm).padStart(2, "0") : mm + " min";
 }
-const duree = (a, b) => (!a || !b || b < a) ? "—" : formatDuree(b - a);
-function moisDe(t){ const d = new Date(t * 1000); return d.toLocaleString("fr-FR",{timeZone:"Europe/Paris",year:"numeric",month:"2-digit"}).split("/").reverse().join("-"); }
-const libelleMois = (cle) => { const [a, m] = cle.split("-"); return new Date(Date.UTC(+a, +m - 1, 15)).toLocaleString("fr-FR",{month:"short",year:"numeric",timeZone:"UTC"}); };
+const nombre = (n) => fmt.nombre.format(n || 0);
+const libelleMois = (cle) => { const [a, m] = cle.split("-"); return fmt.mois.format(new Date(Date.UTC(+a, +m - 1, 15))); };
+const moisDe = (t) => cleJour(t).slice(0, 7);
 
-function toast(texte){ const t = $("#toast"); t.textContent = texte; t.classList.add("vu"); clearTimeout(toast.m); toast.m = setTimeout(() => t.classList.remove("vu"), 1800); }
-async function copier(texte, message){
-  try { await navigator.clipboard.writeText(texte); toast(message || "Copié"); }
-  catch (e) { const z = h("textarea", {}, texte); document.body.append(z); z.select(); document.execCommand("copy"); z.remove(); toast(message || "Copié"); }
+/* ── Petits composants ─────────────────────────────────────────────────── */
+function avatar(p, taille) {
+  const c = "avatar" + (taille ? " " + taille : "");
+  const init = (p.nom || "?").trim().slice(0, 2).toUpperCase();
+  if (p.avatar) {
+    const i = h("img", {classe: c, src: p.avatar, alt: "", loading: "lazy", decoding: "async"});
+    i.addEventListener("error", () => i.replaceWith(h("div", {classe: c, "aria-hidden": "true"}, init)));
+    return i;
+  }
+  return h("div", {classe: c, "aria-hidden": "true"}, init);
 }
-const boutonCopie = (texte, message) => h("button", {classe:"copier", type:"button", title:"Copier", "aria-label":"Copier",
-  onclick:(e) => { e.stopPropagation(); copier(texte, message); }}, svg(ICONE_COPIE));
-
-/* Chiffres clés */
-function compteur(el, cible, suffixe){
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches || etat.charge){ el.textContent = cible + (suffixe || ""); return; }
-  const t0 = performance.now();
-  const pas = (t) => { const p = Math.min(1, (t - t0) / 700); el.textContent = Math.round(cible * (1 - Math.pow(1 - p, 3))) + (suffixe || ""); if (p < 1) requestAnimationFrame(pas); };
+const pastille = (texte, teinte, titre, point) => h("span", {classe: "pastille" + (point ? " point-av" : ""), style: teinte ? "--teinte:" + teinte : null, title: titre || null}, texte);
+function toast(texte) {
+  const t = $("#toast"); t.textContent = texte; t.classList.add("vu");
+  clearTimeout(toast.m); toast.m = setTimeout(() => t.classList.remove("vu"), 2600);
+}
+async function copier(texte, message) {
+  try { await navigator.clipboard.writeText(texte); }
+  catch (e) { const z = h("textarea", {style: "position:fixed;opacity:0"}, texte); document.body.append(z); z.select(); document.execCommand("copy"); z.remove(); }
+  toast(message || "Copié");
+}
+const boutonCopie = (texte, message) => h("button", {classe: "copier", type: "button", title: "Copier", "aria-label": "Copier",
+  onclick: (e) => { e.stopPropagation(); copier(texte, message); }}, icone("copier", 14));
+const lienNom = (id) => h("button", {classe: "lien-nom", type: "button", title: "Ouvrir sa fiche", onclick: (e) => { e.stopPropagation(); ouvrirFiche(id); }}, P(id).nom);
+function vide(titre, texte) { return h("div", {classe: "vide"}, icone("vide", 26), h("b", {}, titre), texte || null); }
+function sectionTete(titre, nomIcone, compte, ...droite) {
+  return h("div", {classe: "section-tete"}, h("h2", {}, nomIcone ? icone(nomIcone, 18) : null, titre, compte !== undefined && compte !== null ? h("span", {classe: "compte"}, compte) : null),
+    droite.length ? h("div", {classe: "actions"}, droite) : null);
+}
+function tuile(o) {
+  const v = h("div", {classe: "val"}, o.texte !== undefined ? o.texte : "0");
+  const t = h("div", {classe: "tuile" + (o.clic ? " lien" : ""), style: "--teinte:" + (o.teinte || "var(--cyan)"), onclick: o.clic || null, role: o.clic ? "button" : null, tabindex: o.clic ? 0 : null},
+    v, h("div", {classe: "lib"}, o.lib), o.sous ? h("div", {classe: "sous"}, o.sous) : null);
+  if (o.texte === undefined) compteur(v, o.cle, o.val || 0, o.suffixe || "");
+  return t;
+}
+function compteur(el, cle, cible, suffixe) {
+  const avant = etat.precedents[cle];
+  etat.precedents[cle] = cible;
+  if (reduit.matches || (avant === cible && avant !== undefined)) { el.textContent = nombre(cible) + suffixe; return; }
+  const depart = avant === undefined ? 0 : avant, t0 = performance.now();
+  const pas = (t) => { const p = Math.min(1, (t - t0) / 800); el.textContent = nombre(Math.round(depart + (cible - depart) * (1 - Math.pow(1 - p, 3)))) + suffixe; if (p < 1) requestAnimationFrame(pas); };
   requestAnimationFrame(pas);
 }
-function chiffres(d){
-  const tous = d.candidats, n = {acceptes:0, refuses:0};
-  tous.forEach(c => n[c.statut] = (n[c.statut] || 0) + 1);
-  const decides = n.acceptes + n.refuses;
-  const taux = decides ? Math.round(100 * n.acceptes / decides) : 0;
-  const ouverts = d.tickets.ouverts, rell = ouverts.filter(t => t.rellseas).length, nonPris = ouverts.filter(t => !t.pris_par).length;
-  const prises = d.tickets.types.filter(t => t.prise_mediane).map(t => t.prise_mediane).sort((a, b) => a - b);
-  const prise = prises.length ? prises[Math.floor(prises.length / 2)] : 0;
-  const tuiles = [
-    ["Tickets ouverts", ouverts.length, rell + " Rell Seas · " + nonPris + " non pris", "var(--ambre)"],
-    ["Prise en charge", 0, "Délai médian, tous types", "#38bdf8", "", formatDuree(prise)],
-    ["Candidatures", tous.length + d.en_cours.length, d.ecartes ? d.ecartes + " écartée(s) : sans décision, vides, doublons" : "Décidées ou en cours", "var(--cyan)"],
-    ["Acceptés", n.acceptes, "Décision : accepté", "var(--vert)"],
-    ["Refusés", n.refuses, "Décision : refusé", "var(--rouge)"],
-    ["Taux d'acceptation", taux, decides + " décision(s)", "#a78bfa", " %"],
-  ];
-  const zone = $("#chiffres"); zone.replaceChildren();
-  tuiles.forEach(([lib, val, sous, teinte, suffixe, texte]) => {
-    const v = h("div", {classe:"val"}, "0");
-    zone.append(h("div", {classe:"chiffre", style:"--teinte:" + teinte}, v, h("div", {classe:"lib"}, lib), h("div", {classe:"sous"}, sous)));
-    if (texte !== undefined) v.textContent = texte; else compteur(v, val, suffixe);
-  });
+function puces(options, actif, choisir) {
+  return h("div", {classe: "puces", role: "group"}, options.map(([cle, lib, n, teinte]) => h("button", {classe: "puce", type: "button",
+    style: teinte ? "--teinte:" + teinte : null, "aria-pressed": String(actif === cle), onclick: () => choisir(cle)},
+    teinte ? h("i") : null, lib, n !== undefined && n !== null ? h("span", {classe: "n"}, nombre(n)) : null)));
+}
+function recherche(valeur, placeholder, changer) {
+  const i = h("input", {type: "search", value: valeur, placeholder, "aria-label": placeholder, autocomplete: "off", spellcheck: "false"});
+  let m; i.addEventListener("input", () => { clearTimeout(m); m = setTimeout(() => changer(i.value.trim().toLowerCase()), 140); });
+  return h("label", {classe: "recherche"}, icone("recherche"), i);
+}
+function choixListe(valeur, options, label, changer) {
+  const s = h("select", {"aria-label": label}, options.map(([v, l]) => h("option", {value: v}, l)));
+  s.value = valeur; s.addEventListener("change", () => changer(s.value));
+  return s;
+}
+function segment(valeur, options, changer) {
+  return h("div", {classe: "segment", role: "group"}, options.map(([v, l]) => h("button", {type: "button", "aria-pressed": String(valeur === v), onclick: () => changer(v)}, l)));
+}
+/* Pagination : jamais de défilement sans fin */
+function paginer(cle, liste, rendreUn, conteneur, classe) {
+  const n = etat.pages[cle] || PAGE;
+  const zone = h("div", {classe: (classe || "grille") + (etat.anim ? " anime" : "")});
+  liste.slice(0, n).forEach((x, i) => { const el = rendreUn(x, i); if (el) { el.style.setProperty("--i", Math.min(i, 12)); zone.append(el); } });
+  conteneur.append(zone);
+  if (liste.length > n) conteneur.append(h("div", {classe: "plus"},
+    h("button", {classe: "bouton", type: "button", onclick: () => { etat.pages[cle] = n + PAGE; etat.anim = false; rendre(etat.onglet, true); }},
+      "Afficher " + Math.min(PAGE, liste.length - n) + " de plus"),
+    h("span", {classe: "compte"}, nombre(n) + " sur " + nombre(liste.length))));
+  else if (n > PAGE) conteneur.append(h("div", {classe: "plus"}, h("button", {classe: "bouton discret", type: "button",
+    onclick: () => { etat.pages[cle] = PAGE; rendre(etat.onglet, true); conteneur.scrollIntoView({block: "start"}); }}, "Replier")));
+}
+const reinitPages = (prefixe) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(prefixe)) delete etat.pages[k]; };
+function repli(titre, ouvert, ...contenu) {
+  return h("details", {classe: "repli", open: ouvert || null}, h("summary", {}, h("span", {}, titre), icone("chevron", 18)), h("div", {classe: "contenu"}, contenu));
 }
 
-/* Candidatures */
-function toutesLesFiches(){ return etat.donnees.en_cours.concat(etat.donnees.candidats); }
-function rendreCandidatures(){
-  const d = etat.donnees, q = $("#q-candidatures").value.trim().toLowerCase(), mois = $("#mois").value, tri = $("#tri").value;
-  const nb = {tous:0, en_cours:0, acceptes:0, refuses:0};
-  toutesLesFiches().forEach(c => { nb.tous++; nb[c.statut]++; });
-  const puces = $("#puces-statut"); puces.replaceChildren();
-  ["tous","en_cours","acceptes","refuses"].forEach(s => puces.append(h("button", {classe:"puce", type:"button", "data-statut":s === "tous" ? null : s,
-    "aria-pressed":String(etat.statut === s), onclick:() => { etat.statut = s; rendreCandidatures(); }},
-    s === "tous" ? null : h("i"), s === "tous" ? "Toutes" : PLURIELS[s], " · " + nb[s])));
-  let liste = toutesLesFiches().filter(c => etat.statut === "tous" || c.statut === etat.statut);
-  if (mois !== "tous") liste = liste.filter(c => moisDe(c.ferme || c.ouvert || 0) === mois);
-  if (q) liste = liste.filter(c => [c.nom, c.pseudo, c.id, c.motif, c.pris_par, ...(c.reponses || []).flat()].join(" ").toLowerCase().includes(q));
+/* ── Graphiques (SVG construit, aucune bibliothèque) ───────────────────── */
+function barres(cles, valeurs, series, vide_) {
+  const zone = h("div", {classe: "graphe"});
+  if (!cles.length) { zone.append(vide("Pas encore de données", vide_)); return zone; }
+  const total = (k) => series.reduce((a, [s]) => a + ((valeurs[k] || {})[s] || 0), 0);
+  const W = 640, H = 220, bas = 24, haut = 22, max = Math.max(1, ...cles.map(total));
+  const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("role", "img");
+  const ajoute = (tag, a, txt) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); if (txt !== undefined) e.textContent = txt; svg.append(e); return e; };
+  [0, .5, 1].forEach(f => ajoute("line", {x1: 0, x2: W, y1: H - bas - (H - bas - haut) * f, y2: H - bas - (H - bas - haut) * f, stroke: "rgba(148,163,184,.14)"}));
+  const pasX = W / cles.length, larg = Math.min(40, pasX * .62), etiquettes = Math.ceil(cles.length / 12);
+  cles.forEach((k, i) => {
+    let y = H - bas; const x = i * pasX + (pasX - larg) / 2;
+    series.forEach(([s, coul, lib]) => {
+      const v = (valeurs[k] || {})[s] || 0; if (!v) return;
+      const hh = (H - bas - haut) * v / max; y -= hh;
+      const r = ajoute("rect", {x, y, width: larg, height: Math.max(hh - 2, 1.5), rx: 4, fill: coul});
+      if (!reduit.matches) { r.style.transformOrigin = `${x + larg / 2}px ${H - bas}px`; r.style.animation = `pousseY .8s ${i * 40}ms var(--ease) both`; }
+      const t = document.createElementNS(NS, "title"); t.textContent = (k.length === 7 ? libelleMois(k) : libelleJour(k)) + " · " + lib + " : " + v; r.append(t);
+    });
+    if (i % etiquettes === 0) ajoute("text", {x: x + larg / 2, y: H - 7, "text-anchor": "middle"}, k.length === 7 ? libelleMois(k) : k.slice(8) + "/" + k.slice(5, 7));
+    const tot = total(k); if (tot) ajoute("text", {x: x + larg / 2, y: y - 6, "text-anchor": "middle", style: "fill:#e8eef8;font-weight:700"}, tot);
+  });
+  zone.append(svg);
+  zone.append(h("div", {classe: "legende"}, series.map(([, coul, lib]) => h("span", {}, h("i", {style: "background:" + coul}), lib))));
+  return zone;
+}
+function barresH(lignes) {
+  const max = Math.max(1, ...lignes.map(l => l[1]));
+  return h("div", {}, lignes.map(([lib, n, titre, clic]) => h(clic ? "button" : "div", {classe: "barre-h", type: clic ? "button" : null, onclick: clic || null, title: titre || null,
+    style: clic ? "width:100%;border:0;background:none;padding:0;cursor:pointer;text-align:left;color:inherit" : null},
+    h("span", {classe: "lib"}, lib), h("div", {classe: "fond"}, h("div", {classe: "plein", style: "width:" + Math.round(100 * n / max) + "%"})), h("b", {classe: "num"}, nombre(n)))));
+}
+
+/* ── Couleurs et libellés ──────────────────────────────────────────────── */
+const COULEURS = {"Modération": "#fbbf24", "Sécurité": "#fb7185", "Membres": "#34d399", "Messages": "#38bdf8", "Vocal": "#a78bfa",
+  "Serveur": "#94a3b8", "Tickets": "#22d3ee", "Config": "#64748b", "Clan": "#2dd4bf", "Sondages": "#818cf8", "Suggestions": "#facc15",
+  "Questions": "#60a5fa", "Accès": "#f472b6"};
+const teinteCat = (c) => COULEURS[c] || "#94a3b8";
+const GROUPES = {"Avertissements": "#fbbf24", "Mutes": "#a78bfa", "Expulsions et bans": "#fb7185", "Détections": "#94a3b8"};
+const GROUPE_DE = {warn: "Avertissements", mute: "Mutes", kick: "Expulsions et bans", ban: "Expulsions et bans"};
+const teinteType = (t) => GROUPES[GROUPE_DE[t] || "Détections"];
+const libelleType = (t) => ((etat.d && etat.d.sanctions.libelles) || {})[t] || t;
+const STATUTS = {en_cours: ["En cours", "var(--ambre)"], acceptes: ["Accepté", "var(--vert)"], refuses: ["Refusé", "var(--rouge)"]};
+const STATUTS_Q = {ouverte: ["Sans réponse", "var(--ambre)"], repondue: ["Répondue", "var(--vert)"], resolue: ["Résolue", "var(--vert)"],
+  traitee: ["Traitée", "var(--cyan)"], ignoree: ["Pas une question", "var(--gris)"]};
+const RANGS = [["Actif", "var(--vert)"], ["Peu présent", "var(--ambre)"], ["Inactif", "var(--rouge)"], ["Jamais vu", "var(--gris)"], ["Trop récent", "var(--gris)"]];
+const auClavier = (fn) => (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); fn(); } };
+const deplier = (e) => { e.stopPropagation(); e.currentTarget.classList.toggle("ouvert"); };
+const maintenant = () => Date.now() / 1000;
+
+/* ── Onglets ───────────────────────────────────────────────────────────── */
+function monterOnglets() {
+  const nav = $("#onglets");
+  for (const [cle, lib] of ONGLETS) {
+    nav.append(h("button", {classe: "onglet", role: "tab", type: "button", id: "onglet-" + cle, "data-onglet": cle, "aria-selected": String(etat.onglet === cle),
+      "aria-controls": "vue-" + cle, onclick: () => choisirOnglet(cle)}, lib, h("span", {classe: "badge", id: "badge-" + cle, hidden: true})));
+    $("#vues").append(h("section", {classe: "vue", id: "vue-" + cle, role: "tabpanel", "aria-labelledby": "onglet-" + cle, hidden: etat.onglet !== cle}));
+  }
+  if ("ResizeObserver" in window) new ResizeObserver(() => { placerCurseur(false); hauteurEntete(); }).observe($("#entete"));
+  addEventListener("resize", () => placerCurseur(false));
+  requestAnimationFrame(() => {
+    placerCurseur(false); hauteurEntete();
+    const b = $(`.onglet[data-onglet="${etat.onglet}"]`);
+    if (b) nav.scrollLeft = Math.max(0, b.offsetLeft - (nav.clientWidth - b.offsetWidth) / 2);
+  });
+}
+function hauteurEntete() { document.documentElement.style.setProperty("--entete", $("#entete").offsetHeight + "px"); }
+function placerCurseur(anime) {
+  const b = $(`.onglet[data-onglet="${etat.onglet}"]`), c = $("#curseur");
+  if (!b) return;
+  if (!anime) c.style.transition = "none";
+  c.style.width = b.offsetWidth + "px";
+  c.style.transform = `translateX(${b.offsetLeft}px)`;
+  if (!anime) { void c.offsetWidth; c.style.transition = ""; }
+}
+function choisirOnglet(cle) {
+  if (cle === etat.onglet) { scrollTo({top: 0, behavior: reduit.matches ? "auto" : "smooth"}); return; }
+  const faire = () => {
+    etat.onglet = cle; etat.anim = true; sauver(); majAncre();
+    document.querySelectorAll(".onglet").forEach(b => b.setAttribute("aria-selected", String(b.dataset.onglet === cle)));
+    document.querySelectorAll(".vue").forEach(v => { v.hidden = v.id !== "vue-" + cle; });
+    placerCurseur(true);
+    const b = $(`.onglet[data-onglet="${cle}"]`);
+    if (b && b.scrollIntoView) b.scrollIntoView({block: "nearest", inline: "center", behavior: reduit.matches ? "auto" : "smooth"});
+    rendre(cle);
+    scrollTo({top: 0});
+  };
+  faire();
+}
+function majAncre() {
+  const a = ["onglet=" + etat.onglet];
+  if (etat.ficheId) a.push("membre=" + etat.ficheId);
+  try { history.replaceState(null, "", BASE + "#" + a.join("&")); } catch (e) { /* adresse inchangée */ }
+}
+function lireAncre() {
+  const a = new URLSearchParams(location.hash.slice(1));
+  const m = a.get("membre") || "";
+  return {onglet: a.get("onglet"), membre: /^\d{5,22}$/.test(m) ? m : null};
+}
+function majBadges() {
+  const d = etat.d, n = maintenant();
+  const qOuvertes = ((d.questions && d.questions.liste) || []).filter(q => q.statut === "ouverte").length;
+  const oublies = d.tickets.ouverts.filter(t => !t.pris_par && t.ouvert && n - t.ouvert > 86400).length;
+  const today = cleJour(n);
+  const valeurs = {
+    apercu: [(d.alertes || []).length, true],
+    candidatures: [d.en_cours.length, false],
+    tickets: [d.tickets.ouverts.length, oublies > 0],
+    moderation: [d.sanctions.trente_jours, false],
+    journal: [((d.journal && d.journal.evenements) || []).filter(e => cleJour(e.quand) === today).length, false],
+    questions: [qOuvertes, qOuvertes > 0],
+    clan: [d.clan.membres.length, false]
+  };
+  for (const [cle, [v, chaud]] of Object.entries(valeurs)) {
+    const b = $("#badge-" + cle);
+    b.hidden = !v; b.textContent = v > 999 ? "999+" : String(v); b.classList.toggle("chaud", !!chaud && v > 0);
+  }
+  requestAnimationFrame(() => placerCurseur(false));
+}
+
+/* ── Rendu ─────────────────────────────────────────────────────────────── */
+const RENDUS = {};
+function rendre(cle, complet) {
+  if (!etat.d || etat.fini) return;
+  const vue = $("#vue-" + cle);
+  const plein = complet || !vue.firstChild || !etat.rendus.has(cle);
+  RENDUS[cle](vue, plein);
+  if (plein) {
+    etat.rendus.add(cle);
+    if (etat.anim && !reduit.matches) { vue.classList.remove("anim"); void vue.offsetWidth; vue.classList.add("anim"); }
+  }
+  etat.anim = false;
+}
+function toutRendre() {
+  const a = document.activeElement, cle = etat.onglet;
+  const enSaisie = a && /INPUT|SELECT|TEXTAREA/.test(a.tagName) && $("#vue-" + cle).contains(a);
+  etat.rendus = new Set(enSaisie ? [cle] : []);
+  majBadges(); majEntete();
+  rendre(cle, !enSaisie);
+}
+function zoneResultats(vue) {
+  let z = vue.querySelector(":scope > .resultats");
+  if (!z) { z = h("div", {classe: "pile resultats"}); vue.append(z); }
+  z.replaceChildren();
+  return z;
+}
+function grilleAnimee(elements, classe) {
+  const g = h("div", {classe: (classe || "grille") + (etat.anim ? " anime" : "")});
+  elements.forEach((el, i) => { el.style.setProperty("--i", Math.min(i, 12)); g.append(el); });
+  return g;
+}
+function menuExport(liens) {
+  const liste = h("div", {classe: "liste-menu"}, liens.filter(Boolean).map(([lib, url]) => h("a", {href: url, download: ""}, lib)));
+  const d = h("details", {classe: "menu"}, h("summary", {classe: "bouton", role: "button"}, icone("export"), "Exporter"), liste);
+  d.addEventListener("toggle", () => {
+    if (!d.open) return;
+    liste.style.left = ""; liste.style.right = "0px";
+    const r = liste.getBoundingClientRect(), vw = document.documentElement.clientWidth;
+    if (r.left < 8) { liste.style.right = "auto"; liste.style.left = Math.min(0, vw - 8 - d.getBoundingClientRect().left - r.width) + "px"; }
+  });
+  return d;
+}
+document.addEventListener("click", (e) => document.querySelectorAll("details.menu[open]").forEach(m => { if (!m.contains(e.target)) m.open = false; }));
+
+/* ── Aperçu ────────────────────────────────────────────────────────────── */
+RENDUS.apercu = (vue) => {
+  const d = etat.d, n = maintenant();
+  vue.replaceChildren();
+  const ouverts = d.tickets.ouverts, nonPris = ouverts.filter(t => !t.pris_par);
+  const qs = (d.questions && d.questions.liste) || [], qOuvertes = qs.filter(q => q.statut === "ouverte");
+  const alertes = d.alertes || [], clan = d.clan.membres, inactifs = clan.filter(m => m.rang === 2).length;
+  const acc = d.candidats.filter(c => c.statut === "acceptes").length, ref = d.candidats.filter(c => c.statut === "refuses").length;
+  const st = (d.questions && d.questions.stats) || {};
+  vue.append(h("div", {classe: "tuiles"},
+    tuile({cle: "a1", lib: "Tickets ouverts", val: ouverts.length, sous: nonPris.length + " pas encore pris", teinte: "var(--ambre)", clic: () => choisirOnglet("tickets")}),
+    tuile({cle: "a2", lib: "Questions sans réponse", val: qOuvertes.length, sous: st.delai_median ? "réponse médiane : " + duree(st.delai_median) : "aucune réponse mesurée", teinte: "var(--cyan)", clic: () => choisirOnglet("questions")}),
+    tuile({cle: "a3", lib: "Alertes en cours", val: alertes.length, sous: alertes.length ? "membres qui cumulent du grave" : "rien à signaler", teinte: alertes.length ? "var(--rouge)" : "var(--vert)"}),
+    tuile({cle: "a4", lib: "Sanctions · 30 jours", val: d.sanctions.trente_jours, sous: nombre(d.sanctions.total) + " au casier", teinte: "var(--violet)", clic: () => choisirOnglet("moderation")}),
+    tuile({cle: "a5", lib: "Candidatures en cours", val: d.en_cours.length, sous: acc + ref ? Math.round(100 * acc / (acc + ref)) + " % acceptées" : "aucune décision", teinte: "var(--bleu)", clic: () => choisirOnglet("candidatures")}),
+    tuile({cle: "a6", lib: "Membres du clan", val: clan.length, sous: inactifs + " inactif(s) depuis un mois", teinte: "var(--vert)", clic: () => choisirOnglet("clan")})));
+  const items = [];
+  alertes.forEach(a => items.push(carteAlerte(a)));
+  nonPris.filter(t => t.ouvert && n - t.ouvert > 6 * 3600).slice(0, 4).forEach(t => items.push(carteTicketOuvert(t)));
+  qOuvertes.filter(q => n - q.quand > 1800).slice(0, 4).forEach(q => items.push(carteQuestions(q.id, [q])));
+  d.en_cours.filter(c => c.ouvert && n - c.ouvert > 2 * 86400).slice(0, 3).forEach(c => items.push(carteCandidature(c)));
+  const s = h("section", {classe: "section"}, sectionTete("À traiter maintenant", "alerte", items.length ? items.length + " élément(s)" : null));
+  s.append(items.length ? grilleAnimee(items) : vide("Rien d'urgent", "Pas d'alerte, pas de ticket oublié, pas de question en attente."));
+  vue.append(s);
+  const pj = (d.journal && d.journal.par_jour) || {}, jours = [], fam = {};
+  for (let i = 13; i >= 0; i--) jours.push(cleJour(n - i * 86400));
+  const connues = ["Modération", "Sécurité", "Tickets", "Questions", "Clan", "Membres", "Messages", "Vocal"];
+  for (const k of jours) {
+    const v = pj[k] || {};
+    fam[k] = {mod: (v["Modération"] || 0) + (v["Sécurité"] || 0), sup: (v["Tickets"] || 0) + (v["Questions"] || 0) + (v["Clan"] || 0),
+      mem: v["Membres"] || 0, msg: (v["Messages"] || 0) + (v["Vocal"] || 0),
+      autre: Object.entries(v).filter(([c]) => !connues.includes(c)).reduce((a, [, x]) => a + x, 0)};
+  }
+  const eq = d.equipe || [];
+  vue.append(h("div", {classe: "duo"},
+    h("div", {classe: "cadre"}, h("h3", {}, "Activité · 14 jours"), h("p", {classe: "aide"}, "Tout ce que le journal a consigné, jour par jour."),
+      barres(jours, fam, [["mod", "#fb7185", "Modération et sécurité"], ["sup", "#22d3ee", "Tickets, questions, clan"], ["mem", "#34d399", "Arrivées et départs"],
+        ["msg", "#818cf8", "Messages et vocal"], ["autre", "#64748b", "Autre"]], "Le journal se remplit au fil des évènements.")),
+    h("div", {classe: "cadre"}, h("h3", {}, "Équipe · 30 jours"), h("p", {classe: "aide"}, "Tickets pris ou fermés, sanctions, questions répondues. Direction et fondateur à part."),
+      eq.length ? barresH(eq.map(x => [P(x.id).nom, x.tickets + x.sanctions + x.questions,
+        x.tickets + " ticket(s) · " + x.sanctions + " sanction(s) · " + x.questions + " question(s)", () => ouvrirFiche(x.id)])) : vide("Rien sur 30 jours"))));
+};
+function carteAlerte(a) {
+  const p = P(a.id);
+  return h("article", {classe: "carte alerte"},
+    h("div", {classe: "qui"}, avatar(p), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, p.nom),
+      h("div", {classe: "sous-nom"}, a.incidents + " incident(s) · " + a.points + " point(s) en 24 h")), pastille("Alerte", "var(--rouge)", null, true)),
+    h("ul", {classe: "entrees", style: "margin-top:12px"}, (a.evenements || []).slice(-3).reverse().map(e => h("li", {classe: "entree" + (e.gravite >= 2 ? " grave" : "")},
+      h("div", {classe: "haut"}, h("span", {classe: "quoi"}, heure(e.quand)), h("span", {classe: "quand"}, depuis(e.quand))), h("div", {classe: "texte clamp2"}, e.texte)))),
+    h("div", {classe: "actions", style: "margin-top:12px"},
+      h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirFiche(a.id)}, "Voir la fiche"),
+      h("button", {classe: "bouton p vert", type: "button", onclick: () => agir({action: "alerte_geree", membre: a.id}, "Alerte gérée ?",
+        "Elle disparaît du salon des logs ; le compteur de " + p.nom + " repart de zéro.", {}, "Géré", "vert")}, icone("check", 14), "Géré")));
+}
+
+/* ── Candidatures ──────────────────────────────────────────────────────── */
+RENDUS.candidatures = (vue, plein) => {
+  const d = etat.d, f = etat.f.cand, toutes = d.en_cours.concat(d.candidats);
+  const changer = () => { reinitPages("cand"); sauver(); rendre("candidatures"); };
+  if (plein) {
+    vue.replaceChildren();
+    const acc = d.candidats.filter(c => c.statut === "acceptes").length, ref = d.candidats.filter(c => c.statut === "refuses").length;
+    vue.append(h("div", {classe: "tuiles"},
+      tuile({cle: "c1", lib: "En cours", val: d.en_cours.length, teinte: "var(--ambre)"}),
+      tuile({cle: "c2", lib: "Acceptés", val: acc, teinte: "var(--vert)"}),
+      tuile({cle: "c3", lib: "Refusés", val: ref, teinte: "var(--rouge)"}),
+      tuile({cle: "c4", lib: "Taux d'acceptation", val: acc + ref ? Math.round(100 * acc / (acc + ref)) : 0, suffixe: " %", teinte: "var(--violet)",
+        sous: d.ecartes ? d.ecartes + " écartée(s) : sans décision, vides, doublons" : null})));
+    const mois = [...new Set(toutes.map(c => c.ferme || c.ouvert ? moisDe(c.ferme || c.ouvert) : ""))].filter(Boolean).sort().reverse();
+    if (f.mois !== "tous" && !mois.includes(f.mois)) f.mois = "tous";
+    vue.append(h("div", {classe: "outils"},
+      recherche(f.q, "Nom, identifiant, réponse…", (q) => { f.q = q; changer(); }),
+      choixListe(f.mois, [["tous", "Tous les mois"], ...mois.map(k => [k, libelleMois(k)])], "Mois", (v) => { f.mois = v; changer(); }),
+      choixListe(f.tri, [["recent", "Plus récentes"], ["ancien", "Plus anciennes"], ["nom", "Nom A → Z"]], "Tri", (v) => { f.tri = v; changer(); })));
+    vue.append(h("div", {classe: "pile resultats"}));
+    const parMois = {};
+    d.candidats.forEach(c => { if (!c.ferme) return; const k = moisDe(c.ferme); (parMois[k] = parMois[k] || {acceptes: 0, refuses: 0})[c.statut]++; });
+    vue.append(repli("Tendances", false, h("div", {classe: "cadre"}, h("h3", {}, "Candidatures par mois"), h("p", {classe: "aide"}, "Selon la date de la décision."),
+      barres(Object.keys(parMois).sort().slice(-12), parMois, [["acceptes", "#34d399", "Acceptés"], ["refuses", "#fb7185", "Refusés"]], "Les mois apparaîtront avec les premières décisions."))));
+  }
+  const zone = zoneResultats(vue);
+  const nb = {tous: toutes.length, en_cours: 0, acceptes: 0, refuses: 0};
+  toutes.forEach(c => { nb[c.statut] = (nb[c.statut] || 0) + 1; });
+  zone.append(puces([["tous", "Toutes", nb.tous], ["en_cours", "En cours", nb.en_cours, "var(--ambre)"], ["acceptes", "Acceptés", nb.acceptes, "var(--vert)"],
+    ["refuses", "Refusés", nb.refuses, "var(--rouge)"]], f.statut, (v) => { f.statut = v; changer(); }));
+  let liste = toutes.filter(c => (f.statut === "tous" || c.statut === f.statut) && (f.mois === "tous" || ((c.ferme || c.ouvert) && moisDe(c.ferme || c.ouvert) === f.mois)));
+  if (f.q) liste = liste.filter(c => [c.nom, c.pseudo, c.id, c.motif, c.pris_par, ...(c.reponses || []).flat()].join(" ").toLowerCase().includes(f.q));
   const cle = (c) => c.ferme || c.ouvert || 0;
-  liste.sort(tri === "nom" ? (a, b) => a.nom.localeCompare(b.nom, "fr") : tri === "ancien" ? (a, b) => cle(a) - cle(b) : (a, b) => cle(b) - cle(a));
-  const grille = $("#grille"); grille.replaceChildren();
-  if (!liste.length){ grille.append(h("div", {classe:"vide", style:"grid-column:1/-1"}, h("b", {}, "Aucune candidature ici"), "Change le filtre ou la recherche.")); return; }
-  liste.forEach(c => grille.append(h("button", {classe:"fiche", type:"button", onclick:() => ouvrirFiche(c)},
-    h("div", {classe:"qui"}, avatar(c), h("div", {classe:"bloc"}, h("div", {classe:"nom"}, c.nom, c.parti ? h("span", {classe:"tag"}, "parti") : null), h("div", {classe:"pseudo"}, (c.pseudo ? "@" + c.pseudo + " · " : "") + date(c.ferme || c.ouvert))), pastille(c.statut)),
-    (c.reponses || []).length ? h("div", {classe:"apercu"}, c.reponses.slice(0, 2).map(([qq, r]) => h("div", {}, h("b", {}, qq + " : "), r))) : h("div", {classe:"apercu"}, h("div", {}, "Formulaire non rempli")),
-    h("div", {classe:"pied"}, h("span", {}, c.statut === "en_cours" ? (c.pris_par ? "Pris par " + c.pris_par : "Pas encore pris en charge") : (c.pris_par || c.ferme_par ? "Traité par " + (c.pris_par || c.ferme_par) : "Traitement non renseigné")),
-      h("span", {}, (c.candidatures || []).length > 1 ? c.candidatures.length + " candidatures" : (c.statut === "en_cours" ? depuis(c.ouvert) : "")))
-  )));
+  liste.sort(f.tri === "nom" ? (a, b) => a.nom.localeCompare(b.nom, "fr") : f.tri === "ancien" ? (a, b) => cle(a) - cle(b) : (a, b) => cle(b) - cle(a));
+  if (!liste.length) { zone.append(vide("Aucune candidature ici", "Change le filtre ou la recherche.")); return; }
+  paginer("cand", liste, carteCandidature, zone);
+};
+function carteCandidature(c) {
+  const [lib, teinte] = STATUTS[c.statut] || [c.statut, null];
+  const ouvrir = () => ouvrirFiche(c.id, "candidatures");
+  return h("article", {classe: "carte lien", tabindex: 0, onclick: ouvrir, onkeydown: auClavier(ouvrir)},
+    h("div", {classe: "qui"}, avatar(c), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, c.nom),
+      h("div", {classe: "sous-nom"}, (c.pseudo ? "@" + c.pseudo + " · " : "") + date(c.ferme || c.ouvert))), pastille(lib, teinte, null, true)),
+    c.parti ? h("div", {classe: "pastilles", style: "margin-top:8px"}, pastille("A quitté le serveur", "var(--gris)")) : null,
+    (c.reponses || []).length ? h("ul", {classe: "entrees", style: "margin-top:12px"}, c.reponses.slice(0, 2).map(([q, r]) => h("li", {classe: "entree"},
+      h("div", {classe: "meta"}, q), h("div", {classe: "texte clamp2"}, r)))) : h("p", {classe: "aide", style: "margin-top:10px"}, "Formulaire non rempli."),
+    h("div", {classe: "sous-nom", style: "margin-top:10px"}, c.statut === "en_cours"
+      ? (c.pris_par ? "Pris par " + c.pris_par : "Pas encore pris") + " · ouvert " + depuis(c.ouvert)
+      : (c.pris_par || c.ferme_par ? "Traité par " + (c.pris_par || c.ferme_par) : "Traitement non renseigné") + ((c.candidatures || []).length > 1 ? " · " + c.candidatures.length + " candidatures" : "")));
 }
 
-/* Fiche détaillée */
-let dernierFocus = null;
-function ouvrirFiche(c){
-  dernierFocus = document.activeElement;
-  const t = $("#tiroir"); t.replaceChildren();
-  const actions = h("div", {classe:"actions"},
-    h("button", {classe:"bouton", type:"button", onclick:() => copier(c.id, "Identifiant copié")}, svg(ICONE_COPIE), "Copier l'identifiant"),
-    h("button", {classe:"bouton", type:"button", onclick:() => ouvrirPersonne(c.id)}, "Son journal"),
-    c.transcript ? h("a", {classe:"bouton principal", href:c.transcript, target:"_blank", rel:"noopener noreferrer"}, "Ouvrir le transcript") : null,
-    c.salon ? h("a", {classe:"bouton principal", href:c.salon, target:"_blank", rel:"noopener noreferrer"}, "Ouvrir le ticket") : null,
-    h("a", {classe:"bouton", href:"https://discord.com/users/" + c.id, target:"_blank", rel:"noopener noreferrer"}, "Profil Discord"));
-  const gestes = !peutAgir() ? null : h("div", {classe:"actions"},
-    c.statut === "en_cours" ? [
-      h("button", {classe:"bouton vert", type:"button", onclick:() => agir({action:"candidature", ticket:c.ticket, decision:"accepter"},
-        "Accepter " + c.nom + " ?", "Le rôle du clan lui est donné et son ticket est fermé (transcript et dossier gardés).", false, "Accepter")}, "Accepter"),
-      h("button", {classe:"bouton danger", type:"button", onclick:() => agir({action:"candidature", ticket:c.ticket, decision:"refuser"},
-        "Refuser " + c.nom + " ?", "Son ticket est fermé avec ce motif (transcript et dossier gardés).", true, "Refuser")}, "Refuser"),
-      h("button", {classe:"bouton", type:"button", onclick:() => agir({action:"ticket_fermer", ticket:c.ticket},
-        "Fermer le ticket #" + c.ticket + " ?", "Fermeture sans décision : le transcript est gardé.", true, "Fermer")}, "Fermer sans décider")
-    ] : [
-      c.statut === "acceptes" && !c.parti ? h("button", {classe:"bouton", type:"button", onclick:() => agir({action:"clan_retirer", membre:c.id},
-        "Retirer " + c.nom + " du clan ?", "Le rôle du clan lui est retiré sur Discord.", false, "Retirer du clan")}, "Retirer du clan") : null,
-      h("button", {classe:"bouton danger", type:"button", onclick:() => agir({action:"fiche_retirer", candidat:c.id},
-        "Retirer la fiche de " + c.nom + " ?", "Ses candidatures disparaissent du tableau de bord. Les transcripts restent.", false, "Retirer la fiche")}, "Retirer la fiche")
-    ]);
-  const info = (k, v) => h("div", {classe:"info"}, h("div", {classe:"k"}, k), h("div", {classe:"v"}, v || "—"));
-  const infos = h("div", {classe:"infos"},
-    info("Candidature déposée", date(c.ouvert, true)),
-    c.statut === "en_cours" ? info("Ouverte", depuis(c.ouvert)) : info("Ticket fermé", date(c.ferme, true)),
-    info("Pris en charge par", c.pris_par || (c.statut === "en_cours" ? "Personne pour l'instant" : "")),
-    c.statut === "en_cours" ? info("Ticket", "#" + c.ticket) : info("Fermé par", c.ferme_par),
-    c.statut === "en_cours" ? null : info("Durée du traitement", duree(c.ouvert, c.ferme)),
-    c.statut === "en_cours" ? null : info("Motif de fermeture", c.motif));
-  const reponses = (c.reponses || []).length
-    ? h("div", {classe:"liste"}, c.reponses.map(([q, r]) => h("div", {classe:"reponse"}, h("div", {classe:"q"}, q), h("div", {classe:"r"}, r))))
-    : h("div", {classe:"vide"}, h("b", {}, "Pas de formulaire"), "Ce ticket a été ouvert sans réponses.");
-  t.append(
-    h("header", {}, avatar(c, true), h("div", {classe:"bloc", style:"min-width:0"},
-      h("div", {classe:"nom", id:"t-nom", style:"font-size:20px"}, c.nom),
-      h("div", {classe:"ident"}, (c.pseudo ? "@" + c.pseudo + " · " : "") + c.id, boutonCopie(c.id, "Identifiant copié")),
-      h("div", {style:"margin-top:6px"}, pastille(c.statut))),
-      h("button", {classe:"fermer", type:"button", "aria-label":"Fermer", onclick:fermerFiche}, "×")),
-    h("div", {classe:"corps"}, actions, gestes, infos,
-      (c.candidatures || []).length > 1 ? h("div", {}, h("div", {classe:"titre-section", style:"margin:0 0 8px"}, h("h2", {}, "Candidatures précédentes")),
-        h("div", {classe:"dates"}, c.candidatures.map(x => h("span", {classe:"etiquette"}, date(x))))) : null,
-      h("div", {}, h("div", {classe:"titre-section", style:"margin:0 0 8px"}, h("h2", {}, "Réponses au formulaire")), reponses)));
-  t.classList.add("ouvert"); t.setAttribute("aria-hidden", "false"); $("#voile").classList.add("ouvert");
-  t.querySelector(".fermer").focus({preventScroll:true});
+/* ── Tickets ───────────────────────────────────────────────────────────── */
+RENDUS.tickets = (vue, plein) => {
+  const d = etat.d, tk = d.tickets, f = etat.f.tick, n = maintenant();
+  const changer = () => { reinitPages("tick"); sauver(); rendre("tickets"); };
+  if (plein) {
+    vue.replaceChildren();
+    const prises = tk.types.filter(t => t.prise_mediane).map(t => t.prise_mediane).sort((a, b) => a - b);
+    vue.append(h("div", {classe: "tuiles"},
+      tuile({cle: "t1", lib: "Ouverts", val: tk.ouverts.length, teinte: "var(--ambre)"}),
+      tuile({cle: "t2", lib: "Pas encore pris", val: tk.ouverts.filter(t => !t.pris_par).length, teinte: "var(--rouge)"}),
+      tuile({cle: "t3", lib: "Prise en charge", texte: duree(prises.length ? prises[Math.floor(prises.length / 2)] : 0), sous: "délai médian, tous types", teinte: "var(--cyan)"}),
+      tuile({cle: "t4", lib: "Fermés · 30 jours", val: tk.fermes.filter(t => t.ferme && n - t.ferme <= 30 * 86400).length, teinte: "var(--vert)"})));
+    vue.append(h("div", {classe: "outils"}, recherche(f.q, "Membre, numéro, motif…", (q) => { f.q = q; changer(); })));
+    vue.append(h("div", {classe: "pile resultats"}));
+    vue.append(repli("Tendances", false, h("div", {classe: "duo"},
+      h("div", {classe: "cadre"}, h("h3", {}, "Tickets ouverts par mois"), h("p", {classe: "aide"}, "Rell Seas et tickets normaux, douze mois."),
+        barres(Object.keys(tk.mois).sort(), tk.mois, [["Rell Seas", "#22d3ee", "Rell Seas"], ["Tickets normaux", "#818cf8", "Tickets normaux"]], "Les mois apparaîtront avec les premiers tickets.")),
+      h("div", {classe: "cadre"}, h("h3", {}, "Staff"), h("p", {classe: "aide"}, "Tickets pris en charge et fermés, depuis le début. Direction et fondateur à part."),
+        tk.staff.length ? barresH(tk.staff.map(x => [x.nom, x.pris + x.fermes, x.pris + " pris · " + x.fermes + " fermés"])) : vide("Rien à afficher")),
+      h("div", {classe: "cadre"}, h("h3", {}, "Délais par type"), h("p", {classe: "aide"}, "Médianes : prise en charge, puis fermeture."),
+        h("ul", {classe: "entrees"}, tk.types.map(t => h("li", {classe: "entree"}, h("div", {classe: "haut"}, h("span", {classe: "quoi"}, t.nom), h("span", {classe: "quand"}, t.total + " au total")),
+          h("div", {classe: "meta"}, "prise en charge " + duree(t.prise_mediane) + " · fermeture " + duree(t.fermeture_mediane) + " · " + t.sans_prise + " fermé(s) sans prise"))))))));
+  }
+  const zone = zoneResultats(vue);
+  const rell = tk.types.filter(t => t.rellseas), norm = tk.types.filter(t => !t.rellseas);
+  const somme = (l) => l.reduce((a, t) => a + t.total, 0);
+  const options = [["tous", "Tous les types", somme(tk.types)], ["rell", "Rell Seas", somme(rell), "var(--cyan)"], ["normaux", "Tickets normaux", somme(norm), "var(--indigo)"],
+    ...(norm.length > 1 ? norm.map(t => ["t:" + t.nom, t.nom, t.total, "var(--indigo)"]) : [])];
+  if (!options.some(o => o[0] === f.type)) f.type = "tous";
+  zone.append(puces(options, f.type, (v) => { f.type = v; changer(); }));
+  const garde = (t) => f.type === "tous" || (f.type === "rell" && t.rellseas) || (f.type === "normaux" && !t.rellseas) || f.type === "t:" + (t.type || t.nom);
+  const cherche = (t, p) => !f.q || [p.nom, p.pseudo, p.id, "#" + t.ticket, t.motif, t.type].join(" ").toLowerCase().includes(f.q);
+  const ouverts = tk.ouverts.filter(t => garde(t) && cherche(t, t));
+  const so = h("section", {classe: "section"}, sectionTete("Ouverts", "ticket", ouverts.length + " ticket(s)"));
+  if (ouverts.length) paginer("tick-o", ouverts, carteTicketOuvert, so); else so.append(vide("Aucun ticket ouvert ici", "Tout est traité."));
+  zone.append(so);
+  const groupes = new Map();
+  tk.fermes.filter(t => garde(t) && cherche(t, P(t.id))).forEach(t => { if (!groupes.has(t.id)) groupes.set(t.id, []); groupes.get(t.id).push(t); });
+  const sf = h("section", {classe: "section"}, sectionTete("Fermés, par personne", "personnes", groupes.size + " personne(s) · 300 derniers tickets"));
+  if (groupes.size) paginer("tick-f", [...groupes.entries()], ([id, l]) => carteTicketsFermes(id, l), sf); else sf.append(vide("Aucun ticket fermé ici"));
+  zone.append(sf);
+};
+function carteTicketOuvert(t) {
+  const tard = !t.pris_par && t.ouvert && maintenant() - t.ouvert > 86400;
+  return h("article", {classe: "carte" + (tard ? " chaude" : "")},
+    h("div", {classe: "qui"}, avatar(t), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, t.nom), h("div", {classe: "sous-nom"}, "Ticket #" + t.ticket + " · ouvert " + depuis(t.ouvert))),
+      pastille(t.type, t.rellseas ? "var(--cyan)" : "var(--indigo)")),
+    h("div", {classe: "pastilles", style: "margin-top:10px"}, t.pris_par ? pastille("Pris par " + t.pris_par, "var(--vert)", null, true)
+      : pastille(tard ? "Personne depuis plus de 24 h" : "Pas encore pris", "var(--ambre)", null, true)),
+    h("div", {classe: "actions", style: "margin-top:12px"},
+      t.salon ? h("a", {classe: "bouton p", href: t.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir sur Discord") : null,
+      h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirFiche(t.id, "tickets")}, "Fiche"),
+      peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "ticket_fermer", ticket: t.ticket},
+        "Fermer le ticket #" + t.ticket + " ?", "Le salon du ticket est supprimé ; le transcript est gardé.", {motif: true}, "Fermer", "danger")}, "Fermer") : null));
 }
-function fermerFiche(){
-  $("#tiroir").classList.remove("ouvert"); $("#tiroir").setAttribute("aria-hidden", "true"); $("#voile").classList.remove("ouvert");
-  if (dernierFocus) dernierFocus.focus();
-}
-$("#voile").addEventListener("click", fermerFiche);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#tiroir").classList.contains("ouvert")) fermerFiche(); });
-
-/* Tickets, triés par type */
-function ligneTicket(c){
-  const tard = !c.pris_par && c.ouvert && Date.now() / 1000 - c.ouvert > 86400;
-  const fiche = c.rellseas ? etat.donnees.en_cours.find(x => x.ticket === c.ticket) : null;
-  return h("div", {classe:"ligne" + (tard ? " alerte" : "")}, avatar(c),
-    h("div", {classe:"bloc"}, h("div", {classe:"nom"}, c.nom),
-      h("div", {classe:"meta"}, "Ticket #" + c.ticket + " · ouvert " + depuis(c.ouvert) + (tard ? " · personne ne l'a pris" : ""))),
-    h("span", {classe:"etiquette", style:c.rellseas ? "color:#67e8f9" : null}, c.type),
-    h("span", {classe:"statut", "data-statut":c.pris_par ? "acceptes" : "en_cours"}, c.pris_par ? "Pris par " + c.pris_par : "Non pris"),
-    fiche ? h("button", {classe:"bouton", type:"button", onclick:() => ouvrirFiche(fiche)}, "Fiche") : null,
-    c.salon ? h("a", {classe:"bouton", href:c.salon, target:"_blank", rel:"noopener noreferrer"}, "Ouvrir") : null,
-    peutAgir() ? h("button", {classe:"bouton danger", type:"button", onclick:() => agir({action:"ticket_fermer", ticket:c.ticket},
-      "Fermer le ticket #" + c.ticket + " de " + c.nom + " ?", "Le salon du ticket est supprimé ; le transcript est gardé.", true, "Fermer")}, "Fermer") : null);
-}
-function garde(t){ return etat.type === "tous" || (etat.type === "rell" && t.rellseas) || (etat.type === "normaux" && !t.rellseas) || etat.type === "t:" + t.nom || etat.type === "t:" + t.type; }
-function rendreTickets(){
-  const tk = etat.donnees.tickets, puces = $("#puces-types"); puces.replaceChildren();
-  const total = tk.types.reduce((a, t) => a + t.total, 0), rell = tk.types.filter(t => t.rellseas), norm = tk.types.filter(t => !t.rellseas);
-  const choix = [["tous", "Tous les types", total, null], ["rell", "Rell Seas", rell.reduce((a, t) => a + t.total, 0), "var(--cyan)"],
-    ["normaux", "Tickets normaux", norm.reduce((a, t) => a + t.total, 0), "#818cf8"],
-    ...(norm.length > 1 ? norm.map(t => ["t:" + t.nom, t.nom, t.total, "#818cf8"]) : [])];
-  choix.forEach(([cle, lib, n, teinte]) => puces.append(h("button", {classe:"puce", type:"button", style:teinte ? "--teinte:" + teinte : null,
-    "aria-pressed":String(etat.type === cle), onclick:() => { etat.type = cle; rendreTickets(); }}, teinte ? h("i") : null, lib + " · " + n)));
-  const zone = $("#types"); zone.replaceChildren();
-  const types = tk.types.filter(garde);
-  if (!types.length) zone.append(h("div", {classe:"vide", style:"grid-column:1/-1"}, h("b", {}, "Aucun ticket"), "Aucun ticket de ce type pour l'instant."));
-  types.forEach(t => zone.append(h("div", {classe:"type" + (t.rellseas ? " rell" : "")},
-    h("h3", {}, h("span", {}, t.nom), h("span", {classe:"etiquette", style:t.rellseas ? "color:#67e8f9" : null}, t.rellseas ? "Rell Seas" : "Normal")),
-    h("div", {classe:"trio"}, h("div", {}, h("b", {}, t.ouverts), h("span", {}, "ouverts")), h("div", {}, h("b", {}, t.fermes), h("span", {}, "fermés")),
-      h("div", {}, h("b", {}, t.total), h("span", {}, "au total"))),
-    h("div", {classe:"delai"}, h("span", {}, "Prise en charge"), h("b", {}, formatDuree(t.prise_mediane))),
-    h("div", {classe:"delai"}, h("span", {}, "Fermeture"), h("b", {}, formatDuree(t.fermeture_mediane))),
-    h("div", {classe:"delai"}, h("span", {}, "Fermés sans prise en charge"), h("b", {}, t.sans_prise)))));
-  const liste = $("#liste-ouverts"); liste.replaceChildren();
-  const ouverts = tk.ouverts.filter(garde);
-  $("#nb-ouverts").textContent = ouverts.length + " ouvert(s)";
-  if (!ouverts.length) liste.append(h("div", {classe:"vide"}, h("b", {}, "Aucun ticket ouvert ici"), "Tout est traité."));
-  ouverts.forEach(c => liste.append(ligneTicket(c)));
-  const fermes = (tk.fermes_recents || []).filter(garde), zf = $("#liste-fermes"); zf.replaceChildren();
-  $("#nb-fermes").textContent = fermes.length + " · les 40 derniers";
-  if (!fermes.length) zf.append(h("div", {classe:"vide"}, h("b", {}, "Aucun ticket fermé ici"), "Ils apparaîtront à la première fermeture."));
-  fermes.forEach(c => zf.append(h("div", {classe:"ligne"}, avatar(c),
-    h("div", {classe:"bloc"}, h("div", {classe:"nom"}, c.nom),
-      h("div", {classe:"motif", title:c.motif}, c.motif || "Sans motif"),
-      h("div", {classe:"meta"}, "Ticket #" + c.ticket + " · fermé " + depuis(c.ferme) + (c.ferme_par ? " par " + c.ferme_par : "") + " · durée " + duree(c.ouvert, c.ferme))),
-    h("span", {classe:"etiquette", style:c.rellseas ? "color:#67e8f9" : null}, c.type),
-    c.transcript ? h("a", {classe:"bouton", href:c.transcript, target:"_blank", rel:"noopener noreferrer"}, "Transcript") : h("span", {classe:"pseudo"}, "pas de transcript"))));
+function carteTicketsFermes(id, liste) {
+  const p = P(id), ouvrir = () => ouvrirFiche(id, "tickets");
+  return h("article", {classe: "carte lien", tabindex: 0, onclick: ouvrir, onkeydown: auClavier(ouvrir)},
+    h("div", {classe: "qui"}, avatar(p), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, p.nom),
+      h("div", {classe: "sous-nom"}, liste.length + " ticket(s) · dernier fermé " + depuis(liste[0].ferme || liste[0].ouvert)))),
+    h("ul", {classe: "entrees", style: "margin-top:12px"}, liste.slice(0, 3).map(t => h("li", {classe: "entree"},
+      h("div", {classe: "haut"}, h("span", {classe: "quoi"}, "#" + t.ticket + " · " + t.type), h("span", {classe: "quand"}, date(t.ferme || t.ouvert, true))),
+      h("div", {classe: "texte clamp2"}, t.motif || "Sans motif"),
+      h("div", {classe: "meta"}, (t.ferme_par ? "fermé par " + t.ferme_par + " · " : "") + "durée " + duree(t.ferme && t.ouvert ? t.ferme - t.ouvert : 0)),
+      t.transcript ? h("div", {}, h("a", {classe: "bouton p discret", href: t.transcript, target: "_blank", rel: "noopener noreferrer", onclick: (e) => e.stopPropagation()},
+        icone("lien", 14), "Transcript")) : null))),
+    liste.length > 3 ? h("div", {classe: "compte", style: "margin-top:8px"}, "+ " + (liste.length - 3) + " autre(s) dans la fiche") : null);
 }
 
-/* Modération */
-const boutonRetirerSanction = (x, nom) => h("button", {classe:"bouton danger petit-b", type:"button", onclick:(e) => { e.stopPropagation();
-  agir({action:"sanction_retirer", sanction:x.sanction}, "Retirer cette sanction ?", x.libelle + " de " + nom + " — " + (x.raison || "sans motif") + ". Elle sort du casier.", false, "Retirer"); }}, "Retirer");
-function ouvrirModerateur(x){
-  dernierFocus = document.activeElement;
-  const t = $("#tiroir"); t.replaceChildren();
-  t.append(
-    h("header", {}, h("div", {classe:"avatar grand", "aria-hidden":"true"}, (x.nom || "?").slice(0, 2).toUpperCase()), h("div", {classe:"bloc", style:"min-width:0"},
-      h("div", {classe:"nom", id:"t-nom", style:"font-size:20px"}, x.nom),
-      h("div", {classe:"pseudo", style:"margin-top:4px"}, x.total + " sanction(s) décidée(s)")),
-      h("button", {classe:"fermer", type:"button", "aria-label":"Fermer", onclick:fermerFiche}, "×")),
-    h("div", {classe:"corps"},
-      h("div", {classe:"dates"}, Object.entries(x.types).sort((a, b) => b[1] - a[1]).map(([k, n]) => h("span", {classe:"etiquette"}, n + " × " + libelleType(k)))),
-      h("div", {}, h("div", {classe:"titre-section", style:"margin:0 0 8px"}, h("h2", {}, "Ses dernières sanctions")),
-        h("div", {classe:"liste"}, (x.dernieres || []).map(y => h("div", {classe:"reponse"},
-          h("div", {classe:"q"}, y.libelle + " · " + y.nom + " · " + date(y.date, true) + (y.duree ? " · " + y.duree : "")),
-          h("div", {classe:"r"}, y.raison || "Sans motif"),
-          peutAgir() ? h("div", {style:"margin-top:8px"}, boutonRetirerSanction(y, y.nom)) : null))))));
-  t.classList.add("ouvert"); t.setAttribute("aria-hidden", "false"); $("#voile").classList.add("ouvert");
-  t.querySelector(".fermer").focus({preventScroll:true});
+/* ── Modération ────────────────────────────────────────────────────────── */
+RENDUS.moderation = (vue, plein) => {
+  const s = etat.d.sanctions, f = etat.f.mod;
+  const changer = () => { reinitPages("mod"); sauver(); rendre("moderation"); };
+  if (plein) {
+    vue.replaceChildren();
+    const somme = (cles) => s.types.filter(t => cles.includes(t.type)).reduce((a, t) => a + t.n, 0);
+    const actives = s.actives.mutes.length + s.actives.radies.length + s.actives.restreints.length;
+    vue.append(h("div", {classe: "tuiles"},
+      tuile({cle: "m1", lib: "30 derniers jours", val: s.trente_jours, sous: "tout le casier", teinte: "var(--cyan)"}),
+      tuile({cle: "m2", lib: "Avertissements", val: somme(["warn"]), sous: "depuis le début", teinte: "#fbbf24"}),
+      tuile({cle: "m3", lib: "Mutes", val: somme(["mute"]), sous: "depuis le début", teinte: "#a78bfa"}),
+      tuile({cle: "m4", lib: "Expulsions et bans", val: somme(["kick", "ban"]), sous: "depuis le début", teinte: "#fb7185"}),
+      tuile({cle: "m5", lib: "Par le staff", val: s.manuel, sous: nombre(s.auto) + " automatique(s)", teinte: "#38bdf8"}),
+      tuile({cle: "m6", lib: "En ce moment", val: actives, sous: "mutés, radiés, restreints", teinte: "var(--ambre)"})));
+    if (actives) {
+      const groupe = (titre, liste, extra) => liste.length ? h("div", {classe: "pile"}, h("div", {classe: "compte"}, titre + " · " + liste.length),
+        h("div", {classe: "pastilles"}, liste.slice(0, 30).map(m => h("button", {classe: "puce", type: "button", onclick: () => ouvrirFiche(m.id)}, avatar(m, "xs"), m.nom, extra(m) ? h("span", {classe: "n"}, extra(m)) : null)))) : null;
+      vue.append(h("div", {classe: "cadre pile"}, h("h3", {}, "En ce moment"),
+        groupe("Mutés", s.actives.mutes, m => m.jusqu ? "jusqu'à " + heure(m.jusqu) : ""),
+        groupe("Radiés", s.actives.radies, () => ""),
+        groupe("Restreints par la direction", s.actives.restreints, m => m.par ? "par " + m.par : "")));
+    }
+    vue.append(h("div", {classe: "outils"},
+      recherche(f.q, "Membre, identifiant, motif, modérateur…", (q) => { f.q = q; changer(); }),
+      choixListe(f.periode, [["7", "7 jours"], ["30", "30 jours"], ["90", "90 jours"], ["365", "12 mois"], ["tout", "Tout le casier"]], "Période", (v) => { f.periode = v; changer(); }),
+      choixListe(f.origine, [["tous", "Staff et automatique"], ["staff", "Décidées par le staff"], ["auto", "Automatiques"]], "Origine", (v) => { f.origine = v; changer(); }),
+      choixListe(f.tri, [["recent", "Plus récents"], ["nombre", "Plus sanctionnés"]], "Tri", (v) => { f.tri = v; changer(); }),
+      menuExport([["Casier complet (CSV)", BASE + "/export?quoi=sanctions"], ["Casier complet (JSON)", BASE + "/export?quoi=sanctions&format=json"]])));
+    vue.append(h("div", {classe: "pile resultats"}));
+    vue.append(repli("Modérateurs", false, h("p", {classe: "aide"}, "Sanctions décidées à la main, par personne. Direction et fondateur à part."),
+      s.staff.length ? grilleAnimee(s.staff.map(carteModerateur), "grille etroite") : vide("Aucune sanction décidée à la main")));
+    vue.append(repli("Tendances", false, h("div", {classe: "duo"},
+      h("div", {classe: "cadre"}, h("h3", {}, "Sanctions par mois"), h("p", {classe: "aide"}, "Tout le casier, sur douze mois."),
+        barres(Object.keys(s.mois).sort(), s.mois, Object.entries(GROUPES).map(([g, c]) => [g, c, g]), "Le casier est vide pour l'instant.")),
+      h("div", {classe: "cadre"}, h("h3", {}, "Par type"), h("p", {classe: "aide"}, "Depuis le début du casier."),
+        s.types.length ? barresH(s.types.map(t => [t.libelle, t.n])) : vide("Casier vide")))));
+  }
+  const zone = zoneResultats(vue);
+  const limite = f.periode === "tout" ? 0 : maintenant() - Number(f.periode) * 86400;
+  const garde = (x) => (x.date || 0) >= limite && (f.origine === "tous" || (f.origine === "auto") === !!x.auto);
+  const nbGroupe = {tous: 0}; Object.keys(GROUPES).forEach(g => { nbGroupe[g] = 0; });
+  const cartes = [];
+  for (const m of s.membres) {
+    const p = P(m.id);
+    if (f.q && ![p.nom, p.pseudo, m.id, ...m.liste.map(x => x.raison + " " + x.par)].join(" ").toLowerCase().includes(f.q)) continue;
+    const dansPeriode = m.liste.filter(garde);
+    if (!dansPeriode.length) continue;
+    nbGroupe.tous++;
+    new Set(dansPeriode.map(x => x.groupe)).forEach(g => { nbGroupe[g] = (nbGroupe[g] || 0) + 1; });
+    const entrees = f.groupe === "tous" ? dansPeriode : dansPeriode.filter(x => x.groupe === f.groupe);
+    if (!entrees.length) continue;
+    const plein_ = m.liste.length >= 12 && entrees.length === m.liste.length;
+    const compte = f.periode === "tout" && f.origine === "tous" && f.groupe === "tous" ? m.total
+      : f.periode === "90" && f.origine === "tous" && f.groupe === "tous" ? m.n90
+      : f.periode === "30" && f.origine === "tous" && f.groupe === "tous" ? m.n30 : (plein_ ? entrees.length + "+" : entrees.length);
+    cartes.push([m, entrees, compte]);
+  }
+  zone.append(puces([["tous", "Tous", nbGroupe.tous], ...Object.entries(GROUPES).map(([g, c]) => [g, g, nbGroupe[g], c])], f.groupe, (v) => { f.groupe = v; changer(); }));
+  if (f.tri === "nombre") cartes.sort((a, b) => parseInt(b[2]) - parseInt(a[2]) || b[0].derniere - a[0].derniere);
+  const sect = h("section", {classe: "section"}, sectionTete("Par membre", "personnes", cartes.length + " personne(s)"),
+    h("p", {classe: "aide"}, "Une case par personne : tout ce qu'elle a reçu sur la période. Clique pour toute sa fiche."));
+  if (cartes.length) paginer("mod", cartes, ([m, e, c]) => carteCasier(m, e, c), sect); else sect.append(vide("Personne au casier ici", "Change la période, le type ou la recherche."));
+  zone.append(sect);
+};
+function carteCasier(m, entrees, compte) {
+  const p = P(m.id), ouvrir = () => ouvrirFiche(m.id, "sanctions");
+  const types = Object.entries(m.types).sort((a, b) => b[1] - a[1]);
+  return h("article", {classe: "carte lien" + (m.n30 >= 3 ? " alerte" : ""), tabindex: 0, onclick: ouvrir, onkeydown: auClavier(ouvrir)},
+    h("div", {classe: "qui"}, avatar(p), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, p.nom),
+      h("div", {classe: "sous-nom"}, (p.pseudo ? "@" + p.pseudo + " · " : "") + "dernière " + depuis(m.derniere))),
+      h("div", {style: "flex:none;text-align:right"}, h("div", {classe: "num", style: "font-size:24px;font-weight:800;line-height:1"}, String(compte)), h("div", {classe: "compte"}, "sur la période"))),
+    h("div", {classe: "pastilles", style: "margin-top:10px"}, types.slice(0, 4).map(([t, n]) => pastille(n + " × " + libelleType(t), teinteType(t)))),
+    h("ul", {classe: "entrees", style: "margin-top:10px"}, entrees.slice(0, 3).map(x => h("li", {classe: "entree" + (["kick", "ban"].includes(x.type) ? " grave" : "")},
+      h("div", {classe: "haut"}, h("span", {classe: "quoi", style: "color:" + teinteType(x.type)}, x.libelle + (x.duree ? " · " + x.duree : "")), h("span", {classe: "quand"}, date(x.date, true))),
+      x.raison ? h("div", {classe: "texte clamp2"}, x.raison) : null, h("div", {classe: "meta"}, x.auto ? "Automatique" : "Par " + x.par)))),
+    entrees.length > 3 ? h("div", {classe: "compte", style: "margin-top:8px"}, "+ " + (entrees.length - 3) + " autre(s) — tout est dans la fiche") : null);
 }
-const libelleType = (k) => ((etat.donnees.sanctions || {}).libelles || {})[k] || k;
-function petitMembre(m, extra){ return h("span", {classe:"petit", title:m.nom + " · " + m.id}, avatar(m), m.nom + (extra ? " · " + extra : "")); }
-function ouvrirSanctions(m){
-  dernierFocus = document.activeElement;
-  const t = $("#tiroir"); t.replaceChildren();
-  const types = Object.entries(m.types || {}).sort((a, b) => b[1] - a[1]);
-  t.append(
-    h("header", {}, avatar(m, true), h("div", {classe:"bloc", style:"min-width:0"},
-      h("div", {classe:"nom", id:"t-nom", style:"font-size:20px"}, m.nom),
-      h("div", {classe:"ident"}, (m.pseudo ? "@" + m.pseudo + " · " : "") + m.id, boutonCopie(m.id, "Identifiant copié")),
-      h("div", {style:"margin-top:6px", classe:"pseudo"}, m.total + " passage(s) au casier sur 90 jours" + (m.total_tout ? " · " + m.total_tout + " au total" : ""))),
-      h("button", {classe:"fermer", type:"button", "aria-label":"Fermer", onclick:fermerFiche}, "×")),
-    h("div", {classe:"corps"},
-      h("div", {classe:"actions"}, h("button", {classe:"bouton", type:"button", onclick:() => ouvrirPersonne(m.id)}, "Son journal")),
-      h("div", {classe:"dates"}, types.map(([ty, n]) => h("span", {classe:"etiquette"}, n + " × " + libelleType(ty)))),
-      h("div", {}, h("div", {classe:"titre-section", style:"margin:0 0 8px"}, h("h2", {}, "Historique récent")),
-        h("div", {classe:"liste"}, (m.historique || []).map(x => h("div", {classe:"reponse"},
-          h("div", {classe:"q"}, x.libelle + " · " + date(x.date, true) + " · " + x.par + (x.duree ? " · " + x.duree : "")),
-          h("div", {classe:"r"}, x.raison || "Sans motif"),
-          peutAgir() && x.sanction ? h("div", {style:"margin-top:8px"}, boutonRetirerSanction(x, m.nom)) : null))))));
-  t.classList.add("ouvert"); t.setAttribute("aria-hidden", "false"); $("#voile").classList.add("ouvert");
-  t.querySelector(".fermer").focus({preventScroll:true});
+function carteModerateur(x) {
+  const ouvrir = () => ouvrirFiche(x.id, "donnees");
+  return h("article", {classe: "carte lien", tabindex: 0, onclick: ouvrir, onkeydown: auClavier(ouvrir)},
+    h("div", {classe: "qui"}, avatar(P(x.id), "p"), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, x.nom), h("div", {classe: "sous-nom"}, x.total + " sanction(s) décidée(s)"))),
+    h("div", {classe: "pastilles", style: "margin-top:10px"}, Object.entries(x.types).sort((a, b) => b[1] - a[1]).map(([t, n]) => pastille(n + " × " + libelleType(t), teinteType(t)))));
 }
-function rendreSanctions(){
-  const s = etat.donnees.sanctions, zone = $("#sanctions-chiffres"); zone.replaceChildren();
-  const somme = (cles) => s.types.filter(t => cles.includes(t.type)).reduce((a, t) => a + t.n, 0);
-  const actives = s.actives.mutes.length + s.actives.radies.length + s.actives.restreints.length;
-  [["30 derniers jours", s.trente_jours, "Tout le casier", "var(--cyan)"],
-   ["Avertissements", somme(["warn"]), "Depuis le début", "#f59e0b"],
-   ["Mutes", somme(["mute"]), "Depuis le début", "#a78bfa"],
-   ["Expulsions et bans", somme(["kick", "ban"]), "Depuis le début", "#f43f5e"],
-   ["Par le staff", s.manuel, s.auto + " automatique(s)", "#38bdf8"],
-   ["En ce moment", actives, "Mutes, radiés, restreints", "var(--ambre)"]].forEach(([lib, val, sous, teinte]) => {
-    const v = h("div", {classe:"val"}, "0");
-    zone.append(h("div", {classe:"chiffre", style:"--teinte:" + teinte}, v, h("div", {classe:"lib"}, lib), h("div", {classe:"sous"}, sous)));
-    compteur(v, val);
-  });
-  const act = $("#sanctions-actives"); act.replaceChildren();
-  [["Mutes en cours", s.actives.mutes, m => m.jusqu ? "jusqu'à " + date(m.jusqu, true).slice(-5) : ""],
-   ["Radiés", s.actives.radies, () => ""],
-   ["Restreints (direction)", s.actives.restreints, m => m.par ? "par " + m.par : ""]].forEach(([titre, liste, extra]) =>
-    act.append(h("div", {classe:"type"}, h("h3", {}, h("span", {}, titre), h("span", {classe:"etiquette"}, liste.length)),
-      liste.length ? h("div", {classe:"petits"}, liste.slice(0, 24).map(m => petitMembre(m, extra(m))), liste.length > 24 ? h("span", {classe:"pseudo"}, "+ " + (liste.length - 24)) : null)
-        : h("div", {classe:"pseudo", style:"margin-top:8px"}, "Personne"))));
-  barres($("#graphe-sanctions"), s.mois, [["Avertissements", "#f59e0b", "Avertissements"], ["Mutes", "#a78bfa", "Mutes"],
-    ["Expulsions et bans", "#f43f5e", "Expulsions et bans"], ["Détections", "#64748b", "Détections"]], "Le casier est vide pour l'instant.");
-  const ty = $("#sanctions-types"); ty.replaceChildren();
-  const maxT = Math.max(1, ...s.types.map(t => t.n));
-  if (!s.types.length) ty.append(h("div", {classe:"vide"}, h("b", {}, "Casier vide"), "Aucune sanction enregistrée."));
-  s.types.forEach(t => ty.append(h("div", {classe:"barre-h"}, h("span", {classe:"lib", title:t.libelle}, t.libelle),
-    h("div", {classe:"fond"}, h("div", {classe:"plein", style:"width:" + Math.round(100 * t.n / maxT) + "%;" + (t.detection ? "background:#64748b" : "")})), h("b", {}, t.n))));
-  const sv = $("#surveiller"); sv.replaceChildren();
-  if (!s.surveiller.length) sv.append(h("div", {classe:"vide"}, h("b", {}, "Personne à surveiller"), "Aucun passage au casier sur 90 jours."));
-  s.surveiller.forEach(m => sv.append(h("button", {classe:"ligne", type:"button", style:"text-align:left;cursor:pointer;width:100%", onclick:() => ouvrirSanctions(m)},
-    avatar(m), h("div", {classe:"bloc"}, h("div", {classe:"nom"}, m.nom),
-      h("div", {classe:"meta"}, Object.entries(m.types).sort((a, b) => b[1] - a[1]).slice(0, 3)
-        .map(([k, n]) => n + " × " + libelleType(k)).join(" · "))),
-    h("span", {classe:"statut", "data-statut":m.total >= 5 ? "refuses" : "en_cours"}, m.total + " en 90 j"))));
-  const md = $("#moderateurs"); md.replaceChildren();
-  const maxM = Math.max(1, ...s.staff.map(x => x.total));
-  if (!s.staff.length) md.append(h("div", {classe:"vide"}, h("b", {}, "Rien à afficher"), "Aucune sanction décidée à la main."));
-  s.staff.forEach(x => md.append(h("button", {classe:"barre-h", type:"button", style:"width:100%;border:0;background:none;color:inherit;cursor:pointer;padding:0;text-align:left",
-    title:"Voir ses sanctions", onclick:() => ouvrirModerateur(x)},
-    h("span", {classe:"lib", title:x.nom}, x.nom), h("div", {classe:"fond"}, h("div", {classe:"plein", style:"width:" + Math.round(100 * x.total / maxM) + "%"})), h("b", {}, x.total))));
-  if (s.staff.length) md.append(h("p", {classe:"aide", style:"margin:10px 0 0"}, "Clique sur un modérateur pour voir tout ce qu'il a attribué."));
-  rendreRecentes();
-}
-function rendreRecentes(){
-  const s = etat.donnees.sanctions, q = $("#q-sanctions").value.trim().toLowerCase(), origine = $("#origine").value;
-  const nb = {tous:s.recentes.length}; GROUPES.forEach(g => nb[g] = s.recentes.filter(x => x.groupe === g).length);
-  const puces = $("#puces-sanctions"); puces.replaceChildren();
-  ["tous", ...GROUPES].forEach(g => puces.append(h("button", {classe:"puce", type:"button", "data-groupe":g === "tous" ? null : g,
-    "aria-pressed":String(etat.groupe === g), onclick:() => { etat.groupe = g; rendreRecentes(); }}, g === "tous" ? null : h("i"), (g === "tous" ? "Toutes" : g) + " · " + nb[g])));
-  const liste = s.recentes.filter(x => (etat.groupe === "tous" || x.groupe === etat.groupe)
-    && (origine === "tous" || (origine === "auto") === x.auto)
-    && (!q || [x.nom, x.pseudo, x.id, x.raison, x.par, x.libelle].join(" ").toLowerCase().includes(q)));
-  $("#nb-recentes").textContent = liste.length + " affichée(s) · 150 dernières";
-  const zone = $("#recentes"); zone.replaceChildren();
-  if (!liste.length) zone.append(h("div", {classe:"vide"}, h("b", {}, "Aucune sanction ici"), "Change le filtre ou la recherche."));
-  liste.forEach(x => zone.append(h("div", {classe:"ligne"}, avatar(x),
-    h("div", {classe:"bloc"}, h("div", {classe:"nom"}, x.nom), h("div", {classe:"motif", title:x.raison}, x.raison || "Sans motif"),
-      h("div", {classe:"meta"}, date(x.date, true) + " · " + (x.auto ? "automatique" : "par " + x.par) + (x.duree ? " · " + x.duree : ""))),
-    h("span", {classe:"statut", "data-groupe":x.groupe}, x.libelle),
-    peutAgir() ? boutonRetirerSanction(x, x.nom) : null)));
-}
-["#q-sanctions", "#origine"].forEach(s => $(s).addEventListener("input", rendreRecentes));
 
-/* Journal : tous les logs du serveur, par personne */
-const COULEURS_JOURNAL = {"Modération":"#f59e0b", "Sécurité":"#f43f5e", "Membres":"#22c55e", "Messages":"#38bdf8", "Vocal":"#a78bfa",
-  "Serveur":"#94a3b8", "Tickets":"#06b6d4", "Config":"#64748b", "Clan":"#2dd4bf", "Sondages":"#818cf8", "Suggestions":"#facc15"};
-const teinteJournal = (c) => COULEURS_JOURNAL[c] || "#94a3b8";
-const boutonFermer = () => h("button", {classe:"fermer", type:"button", "aria-label":"Fermer", onclick:fermerFiche}, "×");
-function ligneJournal(e, P){
-  const m = e.membre ? P[e.membre] : null, a = e.auteur && e.auteur !== e.membre ? P[e.auteur] : null;
-  const nom = (p) => h("button", {classe:"lien-nom", type:"button", title:"Son journal", onclick:(ev) => { ev.stopPropagation(); ouvrirPersonne(p.id); }}, p.nom);
-  return h("div", {classe:"ligne evt" + (e.gravite >= 1 ? " alerte" : "")},
-    m ? avatar(m) : h("div", {classe:"avatar", "aria-hidden":"true"}, (e.cat || "?").slice(0, 2).toUpperCase()),
-    h("div", {classe:"bloc"}, h("div", {classe:"texte-evt"}, e.texte),
-      e.detail ? h("div", {classe:"motif", title:e.detail}, e.detail) : null,
-      h("div", {classe:"meta"}, date(e.quand, true), m ? [" · ", nom(m)] : null, a ? [" · par ", nom(a)] : null, e.salon ? " · " + e.salon : null)),
-    h("span", {classe:"statut", style:"--teinte:" + teinteJournal(e.cat)}, e.cat));
-}
-function rendreJournal(){
-  const j = etat.donnees.journal, P = j.personnes, q = $("#q-journal").value.trim().toLowerCase(), periode = $("#periode").value;
-  const depuisT = periode === "tout" ? 0 : Date.now() / 1000 - (+periode) * 86400;
-  const ev = j.evenements.filter(e => e.quand >= depuisT);
-  const nb = {}; ev.forEach(e => nb[e.cat] = (nb[e.cat] || 0) + 1);
-  if (etat.cat !== "tous" && !nb[etat.cat]) etat.cat = "tous";
-  const puces = $("#puces-journal"); puces.replaceChildren();
-  puces.append(h("button", {classe:"puce", type:"button", "aria-pressed":String(etat.cat === "tous"), onclick:() => { etat.cat = "tous"; etat.journalMax = 100; rendreJournal(); }}, "Tout · " + ev.length));
-  Object.keys(nb).sort((a, b) => nb[b] - nb[a]).forEach(c => puces.append(h("button", {classe:"puce", type:"button", style:"--teinte:" + teinteJournal(c),
-    "aria-pressed":String(etat.cat === c), onclick:() => { etat.cat = c; etat.journalMax = 100; rendreJournal(); }}, h("i"), c + " · " + nb[c])));
-  const cherche = (e) => [e.texte, e.detail, e.salon, e.cat, ...[e.membre, e.auteur].filter(Boolean).flatMap(id => [id, (P[id] || {}).nom, (P[id] || {}).pseudo])].join(" ").toLowerCase();
-  const liste = ev.filter(e => (etat.cat === "tous" || e.cat === etat.cat) && (!q || cherche(e).includes(q)));
-  const zone = $("#journal"); zone.replaceChildren();
-  if (j.erreur) zone.append(h("div", {classe:"vide"}, h("b", {}, "Journal momentanément illisible"), "Nouvel essai à la prochaine actualisation."));
-  else if (!liste.length) zone.append(h("div", {classe:"vide"}, h("b", {}, "Rien ici"), "Change le filtre ou la recherche : le journal se remplit au fil des évènements."));
-  liste.slice(0, etat.journalMax).forEach(e => zone.append(ligneJournal(e, P)));
-  if (liste.length > etat.journalMax) zone.append(h("button", {classe:"bouton", type:"button", onclick:() => { etat.journalMax += 100; rendreJournal(); }}, "Afficher plus · " + (liste.length - etat.journalMax)));
-  const compte = {}; ev.forEach(e => new Set([e.membre, e.auteur].filter(Boolean)).forEach(id => compte[id] = (compte[id] || 0) + 1));
-  const top = Object.entries(compte).sort((a, b) => b[1] - a[1]).slice(0, 12), zp = $("#journal-personnes"); zp.replaceChildren();
-  if (!top.length) zp.append(h("div", {classe:"vide"}, h("b", {}, "Personne"), "Aucun évènement sur cette période."));
-  top.forEach(([id, n]) => { const p = P[id] || {id, nom:"Membre", pseudo:"", avatar:""};
-    zp.append(h("button", {classe:"ligne", type:"button", style:"text-align:left;cursor:pointer;width:100%", onclick:() => ouvrirPersonne(id)},
-      avatar(p), h("div", {classe:"bloc"}, h("div", {classe:"nom"}, p.nom), h("div", {classe:"meta"}, p.pseudo ? "@" + p.pseudo : id)),
-      h("span", {classe:"etiquette"}, n))); });
-}
-["#q-journal", "#periode"].forEach(s => $(s).addEventListener("input", () => { etat.journalMax = 100; rendreJournal(); }));
-async function ouvrirPersonne(id){
-  const t = $("#tiroir");
-  if (!t.classList.contains("ouvert")) dernierFocus = document.activeElement;
-  t.replaceChildren(h("header", {}, h("div", {classe:"bloc"}, h("div", {classe:"nom", id:"t-nom"}, "Journal")), boutonFermer()),
-    h("div", {classe:"corps"}, h("div", {classe:"squelette"})));
-  t.classList.add("ouvert"); t.setAttribute("aria-hidden", "false"); $("#voile").classList.add("ouvert");
-  let r;
-  try {
-    const rep = await fetch(location.pathname.replace(/\/$/, "") + "/journal?membre=" + encodeURIComponent(id), {cache:"no-store"});
-    r = await rep.json();
-    if (!rep.ok) throw new Error(r.erreur || "erreur");
-  } catch (e) {
-    t.replaceChildren(h("header", {}, h("div", {classe:"bloc"}, h("div", {classe:"nom", id:"t-nom"}, "Journal indisponible")), boutonFermer()),
-      h("div", {classe:"corps"}, h("div", {classe:"vide"}, h("b", {}, "Impossible de lire ce journal"), "Réessaie dans un instant.")));
+/* ── Journal ───────────────────────────────────────────────────────────── */
+RENDUS.journal = (vue, plein) => {
+  const j = etat.d.journal || {}, f = etat.f.jour, evts = j.evenements || [], n = maintenant();
+  const changer = () => { reinitPages("jour"); sauver(); rendre("journal"); };
+  if (plein) {
+    vue.replaceChildren();
+    const auj = cleJour(n), sept = evts.filter(e => n - e.quand <= 7 * 86400);
+    vue.append(h("div", {classe: "tuiles"},
+      tuile({cle: "j1", lib: "Aujourd'hui", val: evts.filter(e => cleJour(e.quand) === auj).length, sous: "évènements consignés", teinte: "var(--cyan)"}),
+      tuile({cle: "j2", lib: "Graves · 7 jours", val: sept.filter(e => e.gravite >= 2).length, sous: "sanctions lourdes, détections", teinte: "var(--rouge)"}),
+      tuile({cle: "j3", lib: "Personnes · 7 jours", val: new Set(sept.map(e => e.membre).filter(Boolean)).size, sous: "concernées par un évènement", teinte: "var(--vert)"})));
+    vue.append(h("div", {classe: "outils"},
+      recherche(f.q, "Membre, identifiant, salon, texte…", (q) => { f.q = q; changer(); }),
+      choixListe(f.periode, [["1", "24 heures"], ["7", "7 jours"], ["30", "30 jours"], ["tout", "Tout ce qui est chargé"]], "Période", (v) => { f.periode = v; changer(); }),
+      segment(f.vue, [["personnes", "Par personne"], ["fil", "Fil"]], (v) => { f.vue = v; changer(); rendre("journal", true); }),
+      h("label", {classe: "bascule"}, (() => { const c = h("input", {type: "checkbox"}); c.checked = !!f.grave; c.addEventListener("change", () => { f.grave = c.checked; changer(); }); return c; })(), "Grave seulement"),
+      menuExport([["Journal · 7 jours (CSV)", BASE + "/export?quoi=journal&jours=7"], ["Journal · 30 jours (CSV)", BASE + "/export?quoi=journal&jours=30"],
+        ["Journal · 90 jours (CSV)", BASE + "/export?quoi=journal&jours=90"], ["Journal · 30 jours (JSON)", BASE + "/export?quoi=journal&jours=30&format=json"],
+        peutAgir() ? ["Erreurs du bot · 30 jours (CSV)", BASE + "/export?quoi=erreurs"] : null])));
+    vue.append(h("p", {classe: "aide"}, "Plus aucun log sur Discord : tout arrive ici. Conservation : messages et vocal 30 jours, le reste 90 jours. Les 400 derniers évènements sont chargés ; l'export prend tout."));
+    vue.append(h("div", {classe: "pile resultats"}));
+  }
+  const zone = zoneResultats(vue);
+  if (j.erreur) { zone.append(vide("Journal momentanément illisible", "Nouvel essai à la prochaine mise à jour.")); return; }
+  const limite = f.periode === "tout" ? 0 : n - Number(f.periode) * 86400;
+  const dansPeriode = evts.filter(e => e.quand >= limite && (!f.grave || e.gravite >= 2));
+  const nb = {}; dansPeriode.forEach(e => { nb[e.cat] = (nb[e.cat] || 0) + 1; });
+  if (f.cat !== "tous" && !nb[f.cat]) f.cat = "tous";
+  zone.append(puces([["tous", "Tout", dansPeriode.length], ...Object.keys(nb).sort((a, b) => nb[b] - nb[a]).map(c => [c, c, nb[c], teinteCat(c)])], f.cat, (v) => { f.cat = v; changer(); }));
+  const texte = (e) => [e.texte, e.detail, e.salon, e.cat, ...[e.membre, e.auteur].filter(Boolean).flatMap(id => [id, P(id).nom, P(id).pseudo])].join(" ").toLowerCase();
+  const liste = dansPeriode.filter(e => (f.cat === "tous" || e.cat === f.cat) && (!f.q || texte(e).includes(f.q)));
+  if (!liste.length) { zone.append(vide("Rien ici", "Change la période, la catégorie ou la recherche. Le journal se remplit au fil des évènements.")); return; }
+  if (f.vue === "fil") {
+    const max = etat.pages["jour-fil"] || 60, jours = new Map();
+    liste.slice(0, max).forEach(e => { const k = cleJour(e.quand); if (!jours.has(k)) jours.set(k, []); jours.get(k).push(e); });
+    const fil = h("div", {classe: "fil"});
+    for (const [k, l] of jours) fil.append(h("div", {classe: "jour"}, h("div", {classe: "jour-titre"}, libelleJour(k) + " · " + l.length), grilleAnimee(l.map(evtFil), "lignes")));
+    zone.append(fil);
+    if (liste.length > max) zone.append(h("div", {classe: "plus"}, h("button", {classe: "bouton", type: "button", onclick: () => { etat.pages["jour-fil"] = max + 60; rendre("journal"); }},
+      "Afficher 60 de plus"), h("span", {classe: "compte"}, nombre(max) + " sur " + nombre(liste.length))));
     return;
   }
-  const m = r.membre, ev = r.evenements, cats = {};
-  ev.forEach(e => cats[e.cat] = (cats[e.cat] || 0) + 1);
-  const concernent = ev.filter(e => e.membre === m.id).length, sesActes = ev.filter(e => e.auteur === m.id && e.membre !== m.id).length;
-  t.replaceChildren(
-    h("header", {}, avatar(m, true), h("div", {classe:"bloc", style:"min-width:0"},
-      h("div", {classe:"nom", id:"t-nom", style:"font-size:20px"}, m.nom),
-      h("div", {classe:"ident"}, (m.pseudo ? "@" + m.pseudo + " · " : "") + m.id, boutonCopie(m.id, "Identifiant copié")),
-      h("div", {classe:"pseudo", style:"margin-top:6px"}, ev.length + " évènement(s) · " + concernent + " le concernent · " + sesActes + " de sa main")),
-      boutonFermer()),
-    h("div", {classe:"corps"},
-      h("div", {classe:"dates"}, Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([c, n]) => h("span", {classe:"etiquette", style:"color:" + teinteJournal(c)}, n + " × " + c))),
-      ev.length ? h("div", {classe:"liste"}, ev.map(e => ligneJournal(e, r.personnes)))
-        : h("div", {classe:"vide"}, h("b", {}, "Rien au journal"), "Aucun évènement conservé pour cette personne (messages et vocal 30 jours, le reste 90).")));
-  t.querySelector(".fermer").focus({preventScroll:true});
+  const groupes = new Map();
+  liste.forEach(e => { const k = e.membre || "serveur"; if (!groupes.has(k)) groupes.set(k, []); groupes.get(k).push(e); });
+  const sect = h("section", {classe: "section"}, sectionTete("Par personne", "personnes", groupes.size + " personne(s) · " + liste.length + " évènement(s)"));
+  paginer("jour-p", [...groupes.entries()], ([id, l]) => carteJournal(id, l), sect);
+  zone.append(sect);
+};
+function entreeJournal(e, sujet) {
+  const a = e.auteur && e.auteur !== e.membre && e.auteur !== sujet ? e.auteur : null;
+  return h("li", {classe: "entree" + (e.gravite >= 2 ? " grave" : "")},
+    h("div", {classe: "haut"}, h("span", {classe: "quoi", style: "color:" + teinteCat(e.cat)}, e.cat), h("span", {classe: "quand"}, heure(e.quand) + " · " + libelleJour(cleJour(e.quand)))),
+    h("div", {classe: "texte clamp3 deplier", onclick: deplier, title: "Afficher tout"}, e.texte),
+    e.detail ? h("div", {classe: "meta clamp2 deplier", onclick: deplier}, e.detail) : null,
+    a || e.salon ? h("div", {classe: "meta"}, a ? ["par ", lienNom(a)] : null, a && e.salon ? " · " : null, e.salon || null) : null);
+}
+function carteJournal(id, evts) {
+  const serveur = id === "serveur", p = serveur ? {nom: "Serveur", pseudo: "", avatar: ""} : P(id);
+  const cats = {}; evts.forEach(e => { cats[e.cat] = (cats[e.cat] || 0) + 1; });
+  const graves = evts.filter(e => e.gravite >= 2).length, ouvrir = () => ouvrirFiche(id, "journal");
+  return h("article", {classe: "carte" + (serveur ? "" : " lien") + (graves ? " alerte" : ""), tabindex: serveur ? null : 0, onclick: serveur ? null : ouvrir, onkeydown: serveur ? null : auClavier(ouvrir)},
+    h("div", {classe: "qui"}, avatar(p), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, p.nom),
+      h("div", {classe: "sous-nom"}, evts.length + " évènement(s) · dernier " + depuis(evts[0].quand))), aPart(id) ? pastille("Direction", "var(--violet)") : null),
+    h("div", {classe: "pastilles", style: "margin-top:10px"}, Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([c, k]) => pastille(k + " · " + c, teinteCat(c)))),
+    h("ul", {classe: "entrees", style: "margin-top:10px"}, evts.slice(0, 3).map(e => entreeJournal(e, id))),
+    evts.length > 3 ? h("div", {classe: "compte", style: "margin-top:8px"}, "+ " + (evts.length - 3) + " autre(s)" + (serveur ? "" : " — tout est dans la fiche")) : null);
+}
+function evtFil(e) {
+  const m = e.membre ? P(e.membre) : null;
+  return h("div", {classe: "evt" + (e.gravite >= 2 ? " grave" : "")},
+    m ? avatar(m, "p") : h("div", {classe: "avatar p", "aria-hidden": "true"}, (e.cat || "?").slice(0, 2).toUpperCase()),
+    h("div", {classe: "corps-e"},
+      h("div", {classe: "ligne1"}, pastille(e.cat, teinteCat(e.cat), null, true), h("span", {classe: "compte num"}, heure(e.quand))),
+      h("div", {classe: "texte"}, e.texte),
+      e.detail ? h("div", {classe: "meta clamp2 deplier", onclick: deplier}, e.detail) : null,
+      e.membre || (e.auteur && e.auteur !== e.membre) || e.salon ? h("div", {classe: "meta"}, e.membre ? lienNom(e.membre) : null,
+        e.auteur && e.auteur !== e.membre ? [e.membre ? " · par " : "Par ", lienNom(e.auteur)] : null, e.salon ? " · " + e.salon : null) : null));
 }
 
-/* Clan */
-function rendreClan(){
-  const c = etat.donnees.clan, q = $("#q-clan").value.trim().toLowerCase();
-  const nb = [0, 0, 0, 0, 0]; c.membres.forEach(m => nb[m.rang]++);
-  const puces = $("#puces-clan"); puces.replaceChildren();
-  puces.append(h("button", {classe:"puce", type:"button", "aria-pressed":String(etat.rang === "tous"), onclick:() => { etat.rang = "tous"; rendreClan(); }}, "Tous · " + c.membres.length));
-  RANGS.forEach((lib, r) => { if (nb[r]) puces.append(h("button", {classe:"puce", type:"button", "data-rang":r, "aria-pressed":String(etat.rang === r),
-    onclick:() => { etat.rang = r; rendreClan(); }}, h("i"), lib + " · " + nb[r])); });
-  const corps = $("#table-clan tbody"); corps.replaceChildren();
-  const liste = c.membres.filter(m => (etat.rang === "tous" || m.rang === etat.rang) && (!q || (m.nom + " " + m.pseudo + " " + m.id).toLowerCase().includes(q)));
-  if (!c.role){ corps.append(h("tr", {}, h("td", {colspan:"7"}, "Aucun rôle Rell Seas réglé dans /configure."))); return; }
-  if (!liste.length){ corps.append(h("tr", {}, h("td", {colspan:"7"}, "Personne pour ce filtre."))); return; }
-  liste.forEach(m => {
-    const presents = /^\d+\/\d+$/.test(m.jours) ? +m.jours.split("/")[0] : 0;
-    const jauge = h("div", {classe:"jauge", "data-rang":m.rang, title:m.jours + " jour(s) actifs"},
-      Array.from({length:7}, (_, k) => h("span", {classe:k < presents ? "on" : ""})));
-    corps.append(h("tr", {},
-      h("td", {}, h("div", {classe:"qui"}, avatar(m), h("div", {classe:"bloc"}, h("button", {classe:"nom lien-nom", type:"button", title:"Son journal", onclick:() => ouvrirPersonne(m.id)}, m.nom), h("div", {classe:"pseudo"}, "@" + m.pseudo)))),
-      h("td", {}, h("span", {classe:"ident"}, m.id, boutonCopie(m.id, "Identifiant copié"))),
-      h("td", {}, m.jours === "—" ? h("span", {classe:"pseudo"}, "—") : jauge),
-      h("td", {}, h("span", {classe:"statut", "data-rang":m.rang}, m.statut)),
-      h("td", {classe:"pseudo", "data-k":"Dernière activité"}, m.derniere),
-      h("td", {classe:"pseudo", "data-k":"Arrivée"}, m.arrivee),
-      h("td", {}, peutAgir() ? h("button", {classe:"bouton danger petit-b", type:"button", onclick:() => agir({action:"clan_retirer", membre:m.id},
-        "Retirer " + m.nom + " du clan ?", "Le rôle du clan lui est retiré sur Discord.", false, "Retirer du clan")}, "Retirer") : null)));
-  });
-}
-$("#copier-clan").addEventListener("click", () => {
-  const m = etat.donnees.clan.membres, largeur = Math.max(4, ...m.map(x => x.nom.length));
-  copier(m.map(x => x.nom.padEnd(largeur + 2) + x.id + "  " + x.statut).join("\n"), m.length + " membre(s) copié(s)");
-});
-
-/* Statistiques */
-function barres(zone, parMois, series, vide){
-  const cles = Object.keys(parMois).sort().slice(-12); zone.replaceChildren();
-  if (!cles.length){ zone.append(h("div", {classe:"vide"}, h("b", {}, "Pas encore de données"), vide)); return; }
-  const total = (k) => series.reduce((a, [st]) => a + (parMois[k][st] || 0), 0);
-  const W = 640, H = 240, bas = 26, haut = 22, max = Math.max(...cles.map(total), 1);
-  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("viewBox", `0 0 ${W} ${H}`); s.setAttribute("role", "img");
-  s.style.width = "100%"; s.style.height = "auto";
-  const pasX = W / cles.length, larg = Math.min(46, pasX * .6);
-  const ajoute = (tag, a, texte) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); if (texte !== undefined) e.textContent = texte; s.append(e); return e; };
-  [0, .5, 1].forEach(f => ajoute("line", {x1:0, x2:W, y1:H - bas - (H - bas - haut) * f, y2:H - bas - (H - bas - haut) * f, stroke:"rgba(148,163,184,.15)"}));
-  cles.forEach((k, i) => {
-    let y = H - bas; const x = i * pasX + (pasX - larg) / 2, v = parMois[k];
-    series.forEach(([st, coul, lib]) => {
-      if (!v[st]) return; const hh = (H - bas - haut) * v[st] / max; y -= hh;
-      const r = ajoute("rect", {x, y, width:larg, height:Math.max(hh - 2, 1), rx:4, fill:coul});
-      const t = document.createElementNS("http://www.w3.org/2000/svg", "title"); t.textContent = libelleMois(k) + " · " + lib + " : " + v[st]; r.append(t);
-    });
-    ajoute("text", {x:x + larg / 2, y:H - 8, "text-anchor":"middle"}, libelleMois(k));
-    ajoute("text", {x:x + larg / 2, y:y - 6, "text-anchor":"middle", style:"fill:#e5edf7;font-weight:700"}, total(k));
-  });
-  zone.append(s);
-}
-function rendreStats(){
-  const d = etat.donnees, parMois = {};
-  d.candidats.forEach(c => { if (!c.ferme) return; const k = moisDe(c.ferme); (parMois[k] = parMois[k] || {acceptes:0, refuses:0})[c.statut]++; });
-  barres($("#graphe"), parMois, [["acceptes", "#22c55e", "Acceptés"], ["refuses", "#f43f5e", "Refusés"]],
-    "Les mois apparaîtront avec les premières candidatures fermées.");
-  barres($("#graphe-tickets"), d.tickets.mois, [["Rell Seas", "#06b6d4", "Rell Seas"], ["Tickets normaux", "#818cf8", "Tickets normaux"]],
-    "Les mois apparaîtront avec les premiers tickets.");
-  const staff = d.tickets.staff, z2 = $("#staff"); z2.replaceChildren();
-  if (!staff.length) z2.append(h("div", {classe:"vide"}, h("b", {}, "Rien à afficher"), "Aucun ticket pris en charge ou fermé pour l'instant."));
-  const maxi = Math.max(1, ...staff.map(x => x.pris + x.fermes));
-  staff.forEach(x => z2.append(h("div", {classe:"barre-h", title:x.pris + " pris en charge · " + x.fermes + " fermés"},
-    h("span", {classe:"lib", title:x.nom}, x.nom),
-    h("div", {classe:"fond"}, h("div", {classe:"plein", style:"width:" + Math.round(100 * (x.pris + x.fermes) / maxi) + "%"})),
-    h("b", {}, x.pris + x.fermes))));
-  if (staff.length) z2.append(h("p", {classe:"aide", style:"margin:10px 0 0"}, "Survole une ligne : pris en charge et fermés séparément."));
-  const z3 = $("#delais"); z3.replaceChildren();
-  const types = d.tickets.types.filter(t => t.prise_mediane || t.fermeture_mediane);
-  if (!types.length) z3.append(h("div", {classe:"vide"}, h("b", {}, "Pas encore de délais"), "Ils apparaissent dès qu'un ticket est pris en charge ou fermé."));
-  const maxD = Math.max(1, ...types.map(t => t.fermeture_mediane || t.prise_mediane));
-  types.forEach(t => z3.append(h("div", {style:"margin:10px 0"},
-    h("div", {classe:"delai", style:"display:flex;justify-content:space-between;font-size:13px"}, h("b", {}, t.nom),
-      h("span", {classe:"pseudo"}, "prise " + formatDuree(t.prise_mediane) + " · fermeture " + formatDuree(t.fermeture_mediane))),
-    h("div", {classe:"fond", style:"height:8px;border-radius:999px;background:rgba(148,163,184,.15);overflow:hidden;margin-top:6px;position:relative"},
-      h("div", {style:"position:absolute;inset:0 auto 0 0;width:" + Math.round(100 * (t.fermeture_mediane || 0) / maxD) + "%;background:#818cf8;opacity:.55;border-radius:999px"}),
-      h("div", {style:"position:absolute;inset:0 auto 0 0;width:" + Math.round(100 * (t.prise_mediane || 0) / maxD) + "%;background:" + (t.rellseas ? "var(--cyan)" : "#38bdf8") + ";border-radius:999px"})))));
+/* ── Questions ─────────────────────────────────────────────────────────── */
+RENDUS.questions = (vue, plein) => {
+  const q = etat.d.questions || {}, liste = q.liste || [], st = q.stats || {}, f = etat.f.ques;
+  const changer = () => { reinitPages("ques"); sauver(); rendre("questions"); };
+  if (plein) {
+    vue.replaceChildren();
+    const top = (st.salons || [])[0];
+    vue.append(h("div", {classe: "tuiles"},
+      tuile({cle: "q1", lib: "Sans réponse", val: st.ouvertes || 0, teinte: "var(--ambre)"}),
+      tuile({cle: "q2", lib: "Répondues · 7 jours", val: st.repondues_7 || 0, teinte: "var(--vert)"}),
+      tuile({cle: "q3", lib: "Réponse du staff", texte: duree(st.delai_median), sous: "délai médian", teinte: "var(--cyan)"}),
+      tuile({cle: "q4", lib: "Salon le plus questionné", texte: top ? top.salon : "—", sous: top ? top.n + " question(s) sur 30 jours" : null, teinte: "var(--indigo)"})));
+    vue.append(h("div", {classe: "outils"}, recherche(f.q, "Membre, salon, texte…", (v) => { f.q = v; changer(); }),
+      menuExport([["Questions · 30 jours (CSV)", BASE + "/export?quoi=questions"], ["Questions · 30 jours (JSON)", BASE + "/export?quoi=questions&format=json"]])));
+    vue.append(h("p", {classe: "aide"}, "Relevées toutes seules dans les salons publics. Elles se ferment quand le staff répond (réponse, mention, fil, message juste après) ou quand l'auteur dit que c'est bon."));
+    vue.append(h("div", {classe: "pile resultats"}));
+  }
+  const zone = zoneResultats(vue);
+  if (q.erreur) { zone.append(vide("Questions momentanément illisibles")); return; }
+  const nb = {tous: liste.length}; liste.forEach(x => { nb[x.statut] = (nb[x.statut] || 0) + 1; });
+  zone.append(puces([["ouverte", "Sans réponse", nb.ouverte || 0, "var(--ambre)"], ["repondue", "Répondues", nb.repondue || 0, "var(--vert)"],
+    ["resolue", "Résolues", nb.resolue || 0, "var(--vert)"], ["traitee", "Traitées", nb.traitee || 0, "var(--cyan)"], ["ignoree", "Pas des questions", nb.ignoree || 0, "var(--gris)"],
+    ["tous", "Toutes", nb.tous]], f.statut, (v) => { f.statut = v; changer(); }));
+  const filtre = liste.filter(x => (f.statut === "tous" || x.statut === f.statut) && (!f.q || [x.texte, x.salon, P(x.id).nom, P(x.id).pseudo, x.id].join(" ").toLowerCase().includes(f.q)));
+  if (!filtre.length) { zone.append(vide(f.statut === "ouverte" ? "Aucune question en attente" : "Rien ici", f.statut === "ouverte" ? "Tout le monde a eu sa réponse." : "Change le filtre ou la recherche.")); return; }
+  const groupes = new Map();
+  filtre.forEach(x => { if (!groupes.has(x.id)) groupes.set(x.id, []); groupes.get(x.id).push(x); });
+  paginer("ques", [...groupes.entries()], ([id, l]) => carteQuestions(id, l), zone);
+};
+function carteQuestions(id, qs) {
+  const p = P(id);
+  return h("article", {classe: "carte"},
+    h("div", {classe: "qui"}, avatar(p), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, lienNom(id)),
+      h("div", {classe: "sous-nom"}, qs.length + " question(s) · dernière " + depuis(qs[0].quand)))),
+    h("ul", {classe: "entrees", style: "margin-top:12px"}, qs.slice(0, 4).map(x => {
+      const [lib, teinte] = STATUTS_Q[x.statut] || [x.libelle, null];
+      return h("li", {classe: "entree"},
+        h("div", {classe: "haut"}, h("span", {classe: "quoi"}, x.salon), h("span", {classe: "quand"}, depuis(x.quand))),
+        h("div", {classe: "texte clamp3 deplier", onclick: deplier}, x.texte),
+        h("div", {classe: "pastilles"}, pastille(lib, teinte, null, true), x.par ? h("span", {classe: "meta"}, "par " + x.par + (x.repondu_le && x.repondu_le >= x.quand ? " · en " + duree(x.repondu_le - x.quand) : "")) : null),
+        h("div", {classe: "actions", style: "margin-top:6px"},
+          h("a", {classe: "bouton p", href: x.message, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), x.statut === "ouverte" ? "Répondre sur Discord" : "Voir sur Discord"),
+          x.statut === "ouverte" ? [
+            h("button", {classe: "bouton p vert", type: "button", onclick: () => agir({action: "question", question: x.question, statut: "traitee"}, "", "", {direct: true})}, icone("check", 14), "Traitée"),
+            h("button", {classe: "bouton p discret", type: "button", onclick: () => agir({action: "question", question: x.question, statut: "ignoree"}, "", "", {direct: true})}, "Pas une question")
+          ] : h("button", {classe: "bouton p discret", type: "button", onclick: () => agir({action: "question", question: x.question, statut: "ouverte"}, "", "", {direct: true})}, "Rouvrir")));
+    })),
+    qs.length > 4 ? h("div", {classe: "compte", style: "margin-top:8px"}, "+ " + (qs.length - 4) + " autre(s) dans la fiche") : null);
 }
 
-/* Actions : fondateur et direction, toujours confirmées */
-function confirmer(titre, texte, avecMotif, libelleOk){
-  return new Promise(fin => {
-    const c = $("#confirmation"), voile = $("#voile-confirm");
-    $("#c-titre").textContent = titre; $("#c-texte").textContent = texte;
-    $("#c-motif-bloc").hidden = !avecMotif; $("#c-motif").value = ""; $("#c-ok").textContent = libelleOk || "Confirmer";
-    c.hidden = false; voile.classList.add("ouvert");
-    const finir = (v) => { c.hidden = true; voile.classList.remove("ouvert"); document.removeEventListener("keydown", echap); fin(v); };
-    const echap = (e) => { if (e.key === "Escape"){ e.stopPropagation(); finir(null); } };
-    document.addEventListener("keydown", echap);
-    $("#c-ok").onclick = () => finir({motif:$("#c-motif").value.trim()});
-    $("#c-annuler").onclick = () => finir(null);
-    (avecMotif ? $("#c-motif") : $("#c-annuler")).focus();
-  });
+/* ── Clan ──────────────────────────────────────────────────────────────── */
+RENDUS.clan = (vue, plein) => {
+  const c = etat.d.clan, f = etat.f.clan, agir_ = peutAgir();
+  const changer = () => { reinitPages("clan"); sauver(); rendre("clan"); };
+  if (plein) {
+    vue.replaceChildren();
+    const nb = [0, 0, 0, 0, 0]; c.membres.forEach(m => { nb[m.rang]++; });
+    vue.append(h("div", {classe: "tuiles"},
+      tuile({cle: "k1", lib: "Membres", val: c.membres.length, sous: c.role ? "rôle « " + c.role + " »" : "aucun rôle réglé", teinte: "var(--cyan)"}),
+      tuile({cle: "k2", lib: "Actifs", val: nb[0], sous: "présents cette semaine", teinte: "var(--vert)"}),
+      tuile({cle: "k3", lib: "Peu présents", val: nb[1], sous: "absents plus de 7 jours", teinte: "var(--ambre)"}),
+      tuile({cle: "k4", lib: "Inactifs", val: nb[2], sous: "absents un mois ou plus", teinte: "var(--rouge)"})));
+    vue.append(h("div", {classe: "outils"},
+      recherche(f.q, "Rechercher un membre ou un identifiant…", (v) => { f.q = v; changer(); }),
+      h("button", {classe: "bouton", type: "button", onclick: () => {
+        const l = c.membres, larg = Math.max(4, ...l.map(x => x.nom.length));
+        copier(l.map(x => x.nom.padEnd(larg + 2) + x.id + "  " + x.statut).join("\n"), l.length + " membre(s) copié(s)");
+      }}, icone("copier"), "Copier la liste")));
+    if (agir_) vue.append(h("p", {classe: "aide"}, "Coche des membres pour leur retirer le rôle du clan d'un coup (25 au plus). Le site ne donne aucun rôle ; le fondateur, la direction et le staff ne peuvent pas être touchés."));
+    vue.append(h("div", {classe: "pile resultats"}));
+    if ((c.direction || []).length) vue.append(h("div", {classe: "cadre pile"}, h("h3", {}, "Direction et fondateur"), h("p", {classe: "aide"}, "Mis à part : hors statistiques, intouchables depuis le site."),
+      h("div", {classe: "pastilles"}, c.direction.map(m => h("span", {classe: "puce"}, avatar(m, "xs"), m.nom)))));
+  }
+  const zone = zoneResultats(vue);
+  if (!c.role) { zone.append(vide("Aucun rôle Rell Seas réglé", "Choisis-le dans /configure.")); return; }
+  const nb = [0, 0, 0, 0, 0]; c.membres.forEach(m => { nb[m.rang]++; });
+  zone.append(puces([["tous", "Tous", c.membres.length], ...RANGS.map(([lib, t], r) => nb[r] ? [String(r), lib, nb[r], t] : null).filter(Boolean)], String(f.rang),
+    (v) => { f.rang = v; changer(); }));
+  const liste = c.membres.filter(m => (f.rang === "tous" || String(m.rang) === String(f.rang)) && (!f.q || (m.nom + " " + m.pseudo + " " + m.id).toLowerCase().includes(f.q)));
+  if (!liste.length) { zone.append(vide("Personne ici", "Change le filtre ou la recherche.")); return; }
+  for (const r of [2, 1, 3, 4, 0]) {
+    const groupe = liste.filter(m => m.rang === r);
+    if (!groupe.length) continue;
+    const [lib, teinte] = RANGS[r];
+    const contenu = h("div", {classe: "pile"});
+    paginer("clan-" + r, groupe, (m) => ligneClan(m, teinte), contenu, "lignes");
+    zone.append(repli(lib + " · " + groupe.length, r === 2 || r === 1 || !!f.q || f.rang !== "tous", contenu));
+  }
+  if (etat.selection.size) zone.append(barreLot());
+};
+function ligneClan(m, teinte) {
+  const presents = /^\d+\/\d+$/.test(m.jours) ? +m.jours.split("/")[0] : 0;
+  const choisi = etat.selection.has(m.id);
+  const coche = peutAgir() ? (() => { const c = h("input", {classe: "coche", type: "checkbox", "aria-label": "Sélectionner " + m.nom}); c.checked = choisi;
+    c.addEventListener("change", () => { if (c.checked && etat.selection.size >= 25) { c.checked = false; toast("25 au plus d'un coup."); return; }
+      c.checked ? etat.selection.add(m.id) : etat.selection.delete(m.id); rendre("clan"); }); return c; })() : null;
+  return h("div", {classe: "ligne" + (choisi ? " choisie" : "")},
+    h("div", {classe: "qui", style: "gap:10px"}, coche, avatar(m, "p")),
+    h("div", {classe: "bloc", style: "min-width:0"}, h("div", {classe: "nom"}, lienNom(m.id)),
+      h("div", {classe: "sous-nom"}, "@" + m.pseudo + " · ", h("span", {classe: "ident"}, m.id), boutonCopie(m.id, "Identifiant copié")),
+      h("div", {classe: "sous-nom"}, "Dernière activité : " + m.derniere + " · arrivé " + m.arrivee)),
+    h("div", {classe: "droite"},
+      m.jours !== "—" ? h("span", {classe: "jauge", style: "--teinte:" + teinte, title: m.jours + " jour(s) actifs sur 7"}, Array.from({length: 7}, (_, k) => h("span", {classe: k < presents ? "on" : ""}))) : null,
+      pastille(m.statut, teinte, null, true),
+      peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "clan_retirer", membre: m.id},
+        "Retirer " + m.nom + " du clan ?", "Seul le rôle du clan lui est retiré, sur Discord.", {}, "Retirer du clan", "danger")}, "Retirer") : null));
 }
-async function agir(corps, titre, texte, avecMotif, libelleOk){
-  const r = await confirmer(titre, texte, avecMotif, libelleOk);
-  if (!r) return;
-  if (avecMotif && r.motif) corps.motif = r.motif;
+function barreLot() {
+  const n = etat.selection.size;
+  return h("div", {classe: "lot", role: "region", "aria-label": "Sélection"},
+    h("span", {}, h("b", {}, n), " membre(s) sélectionné(s)"),
+    h("div", {classe: "actions"},
+      h("button", {classe: "bouton p discret", type: "button", onclick: () => { etat.selection.clear(); rendre("clan"); }}, "Annuler"),
+      h("button", {classe: "bouton p danger", type: "button", onclick: async () => {
+        const ok = await agir({action: "clan_retirer_lot", membres: [...etat.selection]}, "Retirer " + n + " membre(s) du clan ?",
+          "Seul le rôle du clan leur est retiré, sur Discord. Chacun est vérifié : le fondateur, la direction et le staff ne sont jamais touchés.", {}, "Retirer " + n + " du clan", "danger");
+        if (ok) { etat.selection.clear(); rendre("clan"); }
+      }}, "Retirer du clan")));
+}
+
+/* ── La fiche d'une personne ───────────────────────────────────────────── */
+const ONGLETS_FICHE = [["chrono", "Chronologie"], ["sanctions", "Sanctions"], ["tickets", "Tickets"], ["candidatures", "Candidatures"], ["questions", "Questions"],
+  ["journal", "Journal"], ["donnees", "Données par lui"]];
+function enteteFiche(p, f) {
+  const m = f && f.membre;
+  const pastilles_ = !m ? [] : [
+    m.a_part ? pastille("Direction · protégé", "var(--violet)", "Aucune action possible depuis le site", true) : m.protege ? pastille("Staff · protégé", "var(--indigo)", "Se gère sur Discord", true) : null,
+    m.clan ? pastille("Clan Rell Seas", "var(--cyan)") : null,
+    m.mute_jusqu ? pastille("Muté jusqu'à " + date(m.mute_jusqu, true), "var(--ambre)", null, true) : null,
+    !m.present ? pastille(m.banni ? "Banni" : "A quitté le serveur", m.banni ? "var(--rouge)" : "var(--gris)", null, true) : null,
+    f.alerte ? pastille("Alerte en cours", "var(--rouge)", null, true) : null];
+  return h("header", {classe: "fiche-tete"},
+    h("div", {classe: "qui"}, avatar(p, "g"), h("div", {classe: "bloc"},
+      h("div", {classe: "nom", id: "fiche-nom", style: "font-size:20px"}, p.nom),
+      h("div", {classe: "sous-nom"}, (p.pseudo ? "@" + p.pseudo + " · " : ""), h("span", {classe: "ident"}, p.id), boutonCopie(p.id, "Identifiant copié")),
+      h("div", {classe: "pastilles", style: "margin-top:8px"}, pastilles_)),
+      h("button", {classe: "fermer", type: "button", "aria-label": "Fermer", onclick: fermerFiche}, icone("fermer", 18))));
+}
+async function ouvrirFiche(id, ongletFiche) {
+  if (!id || id === "serveur") return;
+  const t = $("#fiche");
+  if (!t.classList.contains("ouverte")) etat.focusAvant = document.activeElement;
+  etat.ficheId = String(id); etat.ficheOnglet = ongletFiche || "chrono"; etat.ficheMax = 40; etat.fiche = null; majAncre();
+  t.replaceChildren(enteteFiche(P(id), null), h("div", {classe: "fiche-corps"}, h("div", {classe: "squelette", style: "height:72px"}),
+    h("div", {classe: "squelette", style: "height:40px"}), h("div", {classe: "squelette", style: "height:280px"})));
+  t.classList.add("ouverte"); t.setAttribute("aria-hidden", "false"); $("#voile").classList.add("ouvert");
+  document.documentElement.style.overflow = "hidden";
+  $(".fermer", t).focus({preventScroll: true});
+  let f;
   try {
-    const rep = await fetch(location.pathname.replace(/\/$/, "") + "/action",
-      {method:"POST", headers:{"Content-Type":"application/json", "X-Tableau":"1"}, body:JSON.stringify(corps), cache:"no-store"});
-    const j = await rep.json();
-    toast(j.message || (j.ok ? "C'est fait." : "Refusé."));
-    if (j.ok){ fermerFiche(); setTimeout(charger, 2500); }
-  } catch (e) { toast("L'action n'a pas pu être envoyée."); }
-}
-
-/* Navigation, chargement */
-document.querySelectorAll(".onglet").forEach(b => b.addEventListener("click", () => {
-  etat.onglet = b.dataset.onglet;
-  document.querySelectorAll(".onglet").forEach(x => x.setAttribute("aria-selected", String(x === b)));
-  ["candidatures", "tickets", "sanctions", "journal", "clan", "stats"].forEach(k => $("#vue-" + k).hidden = k !== etat.onglet);
-}));
-["#q-candidatures", "#mois", "#tri"].forEach(s => $(s).addEventListener("input", rendreCandidatures));
-$("#q-clan").addEventListener("input", rendreClan);
-
-function rendre(){
-  const d = etat.donnees;
-  document.title = "Tableau de bord · " + d.serveur.nom;
-  const logo = $("#logo"); logo.replaceChildren(d.serveur.icone ? h("img", {src:d.serveur.icone, alt:""}) : "RS");
-  $("#etat").textContent = d.serveur.nom + " · données en direct · mises à jour à " +
-    new Date(d.genere).toLocaleTimeString("fr-FR", {timeZone:"Europe/Paris", hour:"2-digit", minute:"2-digit"});
-  $("#nb-candidatures").textContent = d.candidats.length + d.en_cours.length;
-  $("#nb-tickets").textContent = d.tickets.ouverts.length;
-  $("#nb-clan").textContent = d.clan.membres.length;
-  const mois = $("#mois"), choisi = mois.value || "tous";
-  const cles = [...new Set(toutesLesFiches().map(c => moisDe(c.ferme || c.ouvert || 0)))].filter(k => !k.startsWith("1970")).sort().reverse();
-  mois.replaceChildren(h("option", {value:"tous"}, "Tous les mois"), ...cles.map(k => h("option", {value:k}, libelleMois(k))));
-  mois.value = cles.includes(choisi) ? choisi : "tous";
-  $("#nb-sanctions").textContent = d.sanctions.trente_jours;
-  $("#nb-journal").textContent = d.journal.evenements.filter(e => e.quand >= Date.now() / 1000 - 86400).length;
-  chiffres(d); rendreCandidatures(); rendreTickets(); rendreSanctions(); rendreJournal(); rendreClan(); rendreStats();
-  $("#pied").textContent = "Lien personnel, valable jusqu'au " + date(d.expire, true) + " · données lues en direct dans la base du bot · ne le partage pas · "
-    + (peutAgir() ? "tu peux agir (fondateur ou direction) : chaque action est confirmée et inscrite au journal." : "consultation : les actions sont réservées au fondateur et à la direction.");
-}
-async function charger(){
-  const b = $("#actualiser"); b.classList.add("tourne"); b.disabled = true;
-  try {
-    const r = await fetch(location.pathname.replace(/\/$/, "") + "/donnees", {cache:"no-store"});
-    const corps = await r.json();
-    if (r.status === 403){ $("#erreur").style.display = "block"; $("#erreur").textContent = "Ce lien a expiré ou n'est plus autorisé. Demande-en un nouveau dans Discord : salon 📋logs → Ouvrir le tableau de bord."; clearInterval(charger.t); return; }
-    if (!r.ok) throw new Error(corps.erreur || "erreur");
-    $("#erreur").style.display = "none";
-    etat.donnees = corps; rendre(); etat.charge = true;
+    const r = await fetch(BASE + "/membre?id=" + encodeURIComponent(id), {cache: "no-store", credentials: "same-origin"});
+    if (r.status === 403) { fermerFiche(); expire(); return; }
+    f = await r.json();
+    if (!r.ok) throw new Error(f.erreur || "erreur");
   } catch (e) {
-    $("#erreur").style.display = "block"; $("#erreur").textContent = "Données momentanément indisponibles — nouvel essai automatique dans une minute.";
-  } finally { b.classList.remove("tourne"); b.disabled = false; }
+    if (etat.ficheId === String(id)) t.replaceChildren(enteteFiche(P(id), null), h("div", {classe: "fiche-corps"}, vide("Fiche indisponible", "Réessaie dans un instant.")));
+    return;
+  }
+  if (etat.ficheId !== String(id)) return;
+  etat.fiche = f;
+  rendreFiche();
 }
-$("#actualiser").addEventListener("click", charger);
-charger();
-charger.t = setInterval(() => { if (!document.hidden) charger(); }, 60000);
+function fermerFiche() {
+  const t = $("#fiche");
+  if (!t.classList.contains("ouverte")) return;
+  t.classList.remove("ouverte"); t.setAttribute("aria-hidden", "true"); $("#voile").classList.remove("ouvert");
+  document.documentElement.style.overflow = "";
+  etat.ficheId = null; etat.fiche = null; majAncre();
+  if (etat.focusAvant && etat.focusAvant.focus) etat.focusAvant.focus({preventScroll: true});
+}
+function chronologie(f) {
+  const items = [];
+  const sanctionsT = f.sanctions.map(s => s.date || 0);
+  const proche = (t) => sanctionsT.some(x => Math.abs(x - t) < 120);
+  f.sanctions.forEach(s => items.push({t: s.date, cat: s.libelle, teinte: teinteType(s.type), grave: ["kick", "ban"].includes(s.type),
+    texte: s.libelle + (s.duree ? " · " + s.duree : "") + (s.raison ? " — " + s.raison : ""), meta: s.auto ? "Automatique" : "Par " + s.par}));
+  f.tickets.forEach(t => {
+    items.push({t: t.ouvert, cat: "Ticket", teinte: "#22d3ee", texte: "Ticket #" + t.ticket + " ouvert · " + t.type, meta: t.pris_par ? "pris par " + t.pris_par : ""});
+    if (t.ferme) items.push({t: t.ferme, cat: "Ticket", teinte: "#22d3ee", texte: "Ticket #" + t.ticket + " fermé" + (t.motif ? " — " + t.motif : ""), meta: t.ferme_par ? "par " + t.ferme_par : "", lien: t.transcript});
+  });
+  f.candidatures.forEach(c => items.push({t: c.ferme, cat: "Candidature", teinte: "#2dd4bf", texte: "Candidature fermée" + (c.raison ? " — " + c.raison : ""), lien: c.transcript}));
+  f.questions.forEach(q => items.push({t: q.quand, cat: "Question", teinte: "#60a5fa", texte: q.texte, meta: q.salon + " · " + (STATUTS_Q[q.statut] || [q.libelle])[0], lien: q.message}));
+  f.journal.forEach(e => {
+    if (/^(mod\.|ticket\.|question\.)/.test(e.type) || (/^sec\./.test(e.type) && proche(e.quand))) return;
+    items.push({t: e.quand, cat: e.cat, teinte: teinteCat(e.cat), grave: e.gravite >= 2, texte: e.texte, meta: [e.auteur && e.auteur !== f.membre.id ? "par " + P(e.auteur).nom : "", e.salon].filter(Boolean).join(" · ")});
+  });
+  return items.filter(x => x.t).sort((a, b) => b.t - a.t);
+}
+function listeParJour(items, rendreUn) {
+  const max = etat.ficheMax, jours = new Map();
+  items.slice(0, max).forEach(x => { const k = cleJour(x.t); if (!jours.has(k)) jours.set(k, []); jours.get(k).push(x); });
+  const fil = h("div", {classe: "fil"});
+  for (const [k, l] of jours) fil.append(h("div", {classe: "jour"}, h("div", {classe: "jour-titre", style: "top:6px"}, libelleJour(k)), h("ul", {classe: "entrees"}, l.map(rendreUn))));
+  if (items.length > max) fil.append(h("div", {classe: "plus"}, h("button", {classe: "bouton", type: "button", onclick: () => { etat.ficheMax += 40; rendreFiche(); }}, "Afficher 40 de plus"),
+    h("span", {classe: "compte"}, nombre(max) + " sur " + nombre(items.length))));
+  return items.length ? fil : vide("Rien ici", "Rien de conservé pour cette personne.");
+}
+function entreeChrono(x) {
+  return h("li", {classe: "entree" + (x.grave ? " grave" : "")},
+    h("div", {classe: "haut"}, h("span", {classe: "quoi", style: "color:" + x.teinte}, x.cat), h("span", {classe: "quand"}, heure(x.t))),
+    h("div", {classe: "texte clamp3 deplier", onclick: deplier}, x.texte),
+    x.meta ? h("div", {classe: "meta"}, x.meta) : null,
+    x.lien ? h("div", {}, h("a", {classe: "bouton p discret", href: x.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir")) : null);
+}
+function rendreFiche() {
+  const f = etat.fiche, t = $("#fiche");
+  if (!f) return;
+  const m = f.membre, p = Object.assign({}, P(m.id), m);
+  const corps = h("div", {classe: "fiche-corps"});
+  corps.append(h("div", {classe: "mini-tuiles"},
+    h("div", {}, h("b", {}, nombre(f.sanctions.length)), h("span", {}, "sanction(s)")),
+    h("div", {}, h("b", {}, nombre(f.tickets.length)), h("span", {}, "ticket(s)")),
+    h("div", {}, h("b", {}, nombre(f.journal.length)), h("span", {}, "au journal")),
+    h("div", {}, h("b", {}, nombre(f.questions.length)), h("span", {}, "question(s)"))));
+  corps.append(h("div", {classe: "infos"},
+    h("div", {classe: "info"}, h("div", {classe: "k"}, "Sur le serveur"), h("div", {classe: "v"}, m.present ? "Depuis le " + date(m.arrivee) : (m.banni ? "Non — banni" : "Non — parti"))),
+    h("div", {classe: "info"}, h("div", {classe: "k"}, "Compte Discord créé"), h("div", {classe: "v"}, m.cree ? date(m.cree) : "—")),
+    m.roles && m.roles.length ? h("div", {classe: "info", style: "grid-column:1/-1"}, h("div", {classe: "k"}, "Rôles (lecture seule)"),
+      h("div", {classe: "pastilles", style: "margin-top:6px"}, m.roles.map(r => pastille(r.nom, r.couleur || null)))) : null));
+  const outils = h("div", {classe: "actions"},
+    h("a", {classe: "bouton p", href: "https://discord.com/users/" + m.id, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Profil Discord"),
+    h("a", {classe: "bouton p", href: BASE + "/export?quoi=membre&membre=" + m.id, download: ""}, icone("export", 14), "Exporter sa fiche"));
+  corps.append(outils);
+  if (f.alerte) corps.append(h("div", {classe: "bandeau rouge", style: "margin:0"}, icone("alerte"), h("div", {},
+    h("b", {}, "Alerte en cours · "), f.alerte.incidents + " incident(s) en 24 h. ",
+    h("button", {classe: "bouton p vert", type: "button", style: "margin-left:6px", onclick: () => agir({action: "alerte_geree", membre: m.id}, "Alerte gérée ?",
+      "Elle disparaît du salon des logs ; le compteur repart de zéro.", {}, "Géré", "vert")}, "Géré"))));
+  if (f.agir && m.present) corps.append(h("div", {classe: "cadre pile", style: "padding:14px"}, h("h3", {}, "Modérer"),
+    h("p", {classe: "aide"}, "Même circuit que les commandes : fiche au casier, message privé au membre au nom du serveur, journal. Motif obligatoire."),
+    h("div", {classe: "actions"},
+      h("button", {classe: "bouton p", type: "button", onclick: () => moderer(m, "warn")}, "Avertir"),
+      m.mute_jusqu ? h("button", {classe: "bouton p vert", type: "button", onclick: () => moderer(m, "unmute")}, "Lever le mute")
+        : h("button", {classe: "bouton p", type: "button", onclick: () => moderer(m, "mute")}, "Muter"),
+      h("button", {classe: "bouton p danger", type: "button", onclick: () => moderer(m, "kick")}, "Expulser"),
+      h("button", {classe: "bouton p danger", type: "button", onclick: () => moderer(m, "ban")}, "Bannir"),
+      m.clan ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "clan_retirer", membre: m.id}, "Retirer " + p.nom + " du clan ?",
+        "Seul le rôle du clan lui est retiré, sur Discord.", {}, "Retirer du clan", "danger")}, "Retirer du clan") : null)));
+  else if (m.protege && peutAgir()) corps.append(h("p", {classe: "aide"}, m.a_part ? "Fondateur ou direction : protégé, aucune action possible depuis le site." : "Membre du staff : se gère sur Discord, pas depuis le site."));
+  const nb = {chrono: null, sanctions: f.sanctions.length, tickets: f.tickets.length, candidatures: f.candidatures.length, questions: f.questions.length, journal: f.journal.length, donnees: f.donnees.length};
+  const dispo = ONGLETS_FICHE.filter(([k]) => k === "chrono" || nb[k]);
+  if (!dispo.some(([k]) => k === etat.ficheOnglet)) etat.ficheOnglet = "chrono";
+  corps.append(h("div", {style: "overflow-x:auto;scrollbar-width:none"}, segment(etat.ficheOnglet, dispo.map(([k, l]) => [k, nb[k] ? l + " · " + nb[k] : l]),
+    (v) => { etat.ficheOnglet = v; etat.ficheMax = 40; rendreFiche(); })));
+  const o = etat.ficheOnglet;
+  if (o === "chrono") corps.append(listeParJour(chronologie(f), entreeChrono));
+  else if (o === "sanctions") corps.append(listeParJour(f.sanctions.map(s => Object.assign({t: s.date}, s)), (s) => h("li", {classe: "entree" + (["kick", "ban"].includes(s.type) ? " grave" : "")},
+    h("div", {classe: "haut"}, h("span", {classe: "quoi", style: "color:" + teinteType(s.type)}, s.libelle + (s.duree ? " · " + s.duree : "")), h("span", {classe: "quand"}, heure(s.date))),
+    s.raison ? h("div", {classe: "texte"}, s.raison) : null, h("div", {classe: "meta"}, s.auto ? "Automatique" : "Par " + s.par),
+    peutAgir() ? h("div", {}, h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "sanction_retirer", sanction: s.sanction}, "Retirer cette sanction du casier ?",
+      s.libelle + " — " + (s.raison || "sans motif") + ". Elle sort du casier.", {}, "Retirer", "danger")}, "Retirer du casier")) : null)));
+  else if (o === "tickets") corps.append(listeParJour(f.tickets.map(x => Object.assign({t: x.ferme || x.ouvert}, x)), (x) => h("li", {classe: "entree"},
+    h("div", {classe: "haut"}, h("span", {classe: "quoi"}, "#" + x.ticket + " · " + x.type), h("span", {classe: "quand"}, x.statut)),
+    h("div", {classe: "texte"}, x.motif || (x.statut === "ouvert" ? "En cours" : "Sans motif")),
+    h("div", {classe: "meta"}, "ouvert le " + date(x.ouvert, true) + (x.ferme ? " · fermé le " + date(x.ferme, true) + (x.ferme_par ? " par " + x.ferme_par : "") : "") + (x.pris_par ? " · pris par " + x.pris_par : "")),
+    h("div", {classe: "actions"}, x.transcript ? h("a", {classe: "bouton p discret", href: x.transcript, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Transcript") : null,
+      x.salon ? h("a", {classe: "bouton p discret", href: x.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir le ticket") : null))));
+  else if (o === "candidatures") corps.append(...rendreCandidaturesFiche(f));
+  else if (o === "questions") corps.append(listeParJour(f.questions.map(q => Object.assign({t: q.quand}, q)), (q) => h("li", {classe: "entree"},
+    h("div", {classe: "haut"}, h("span", {classe: "quoi"}, q.salon), h("span", {classe: "quand"}, heure(q.quand))), h("div", {classe: "texte"}, q.texte),
+    h("div", {classe: "pastilles"}, pastille((STATUTS_Q[q.statut] || [q.libelle])[0], (STATUTS_Q[q.statut] || [])[1], null, true), q.par ? h("span", {classe: "meta"}, "par " + q.par) : null),
+    h("div", {}, h("a", {classe: "bouton p discret", href: q.message, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Voir sur Discord")))));
+  else if (o === "journal") corps.append(listeParJour(f.journal.map(e => Object.assign({t: e.quand}, e)), (e) => entreeJournal(e, m.id)));
+  else if (o === "donnees") corps.append(listeParJour(f.donnees.map(s => Object.assign({t: s.date}, s)), (s) => h("li", {classe: "entree"},
+    h("div", {classe: "haut"}, h("span", {classe: "quoi", style: "color:" + teinteType(s.type)}, s.libelle + " → " + P(s.id).nom), h("span", {classe: "quand"}, heure(s.date))),
+    s.raison ? h("div", {classe: "texte"}, s.raison) : null)));
+  t.replaceChildren(enteteFiche(p, f), corps);
+}
+function rendreCandidaturesFiche(f) {
+  const enCours = (etat.d.en_cours || []).find(c => c.id === f.membre.id);
+  const blocs = [];
+  if (enCours) blocs.push(h("div", {classe: "cadre pile", style: "padding:14px"}, h("h3", {}, "Candidature en cours · ticket #" + enCours.ticket),
+    h("p", {classe: "aide"}, "Ouverte " + depuis(enCours.ouvert) + (enCours.pris_par ? " · prise par " + enCours.pris_par : " · pas encore prise") + ". Accepter donne le rôle du clan : ça se fait dans le ticket, sur Discord."),
+    reponses(enCours.reponses),
+    h("div", {classe: "actions"}, enCours.salon ? h("a", {classe: "bouton p principal", href: enCours.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir le ticket") : null,
+      peutAgir() ? [h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "candidature", ticket: enCours.ticket, decision: "refuser"},
+        "Refuser la candidature ?", "Le ticket est fermé avec ce motif (transcript et dossier gardés).", {motif: true}, "Refuser", "danger")}, "Refuser"),
+        h("button", {classe: "bouton p", type: "button", onclick: () => agir({action: "ticket_fermer", ticket: enCours.ticket}, "Fermer sans décider ?",
+          "Le ticket est fermé ; le transcript est gardé.", {motif: true}, "Fermer")}, "Fermer sans décider")] : null)));
+  const fiche = (etat.d.candidats || []).find(c => c.id === f.membre.id);
+  if (fiche) blocs.push(h("div", {classe: "cadre pile", style: "padding:14px"}, h("h3", {}, "Dernière décision : " + (STATUTS[fiche.statut] || [fiche.statut])[0]),
+    h("p", {classe: "aide"}, "Fermée le " + date(fiche.ferme, true) + (fiche.ferme_par ? " par " + fiche.ferme_par : "") + (fiche.motif ? " — " + fiche.motif : "")),
+    reponses(fiche.reponses),
+    h("div", {classe: "actions"}, fiche.transcript ? h("a", {classe: "bouton p", href: fiche.transcript, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Transcript") : null,
+      peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "fiche_retirer", candidat: fiche.id}, "Retirer ses fiches de candidature ?",
+        "Elles disparaissent du site. Les transcripts restent.", {}, "Retirer", "danger")}, "Retirer ses fiches") : null)));
+  f.candidatures.forEach(c => blocs.push(h("div", {classe: "entree"}, h("div", {classe: "haut"}, h("span", {classe: "quoi"}, "Ticket #" + c.ticket), h("span", {classe: "quand"}, date(c.ferme, true))),
+    h("div", {classe: "texte"}, c.raison || "Sans motif"))));
+  return blocs.length ? blocs : [vide("Aucune candidature")];
+}
+function reponses(liste) {
+  return (liste || []).length ? h("div", {classe: "pile", style: "gap:8px"}, liste.map(([q, r]) => h("div", {classe: "reponse"}, h("div", {classe: "q"}, q), h("div", {classe: "r"}, r))))
+    : h("p", {classe: "aide"}, "Formulaire non rempli.");
+}
+async function moderer(m, sanction) {
+  const p = P(m.id), noms = {warn: "Avertir", mute: "Muter", unmute: "Lever le mute de", kick: "Expulser", ban: "Bannir"};
+  const textes = {warn: "Une fiche au casier et un message privé au nom du serveur. L'escalade automatique s'applique (3ᵉ avertissement : mute).",
+    mute: "Il ne peut plus écrire ni parler pendant la durée choisie.", unmute: "Il peut de nouveau écrire et parler.",
+    kick: "Il est expulsé du serveur ; il pourra revenir avec une invitation.", ban: "Il est banni du serveur. Irréversible depuis le site."};
+  await agir({action: "moderer", membre: m.id, sanction}, noms[sanction] + " " + p.nom + " ?", textes[sanction],
+    {motif: true, motifRequis: sanction !== "unmute", durees: sanction === "mute"}, noms[sanction].replace(" de", ""), ["kick", "ban"].includes(sanction) ? "danger" : "");
+}
+$("#voile").addEventListener("click", fermerFiche);
+
+/* ── Confirmation et actions ───────────────────────────────────────────── */
+function dialogue(o) {
+  return new Promise((fin) => {
+    const hote = $("#dialogue-hote"), voile = $("#voile-dialogue");
+    const motif = o.motif ? h("textarea", {rows: 3, maxlength: 300, placeholder: o.motifRequis ? "Motif (obligatoire)" : "Motif (facultatif)"}) : null;
+    const duree_ = o.durees ? h("select", {"aria-label": "Durée"}, [[10, "10 minutes"], [60, "1 heure"], [360, "6 heures"], [1440, "1 jour"], [10080, "7 jours"]].map(([v, l]) => h("option", {value: v}, l))) : null;
+    if (duree_) duree_.value = "60";
+    const ok = h("button", {classe: "bouton " + (o.style || "principal"), type: "button"}, o.libelleOk || "Confirmer");
+    const finir = (v) => { hote.replaceChildren(); voile.classList.remove("ouvert"); document.removeEventListener("keydown", echap, true); fin(v); };
+    const echap = (e) => { if (e.key === "Escape") { e.stopPropagation(); finir(null); } };
+    ok.addEventListener("click", () => {
+      const texte = motif ? motif.value.trim() : "";
+      if (o.motifRequis && texte.length < 3) { motif.focus(); motif.style.borderColor = "var(--rouge)"; toast("Indique un motif."); return; }
+      finir({motif: texte, duree: duree_ ? Number(duree_.value) : null});
+    });
+    hote.replaceChildren(h("div", {classe: "dialogue", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "d-titre"},
+      h("h3", {id: "d-titre"}, o.titre), o.texte ? h("p", {}, o.texte) : null,
+      duree_ ? h("label", {}, "Durée", duree_) : null, motif ? h("label", {}, o.motifRequis ? "Motif" : "Motif (facultatif)", motif) : null,
+      h("div", {classe: "actions"}, h("button", {classe: "bouton discret", type: "button", onclick: () => finir(null)}, "Annuler"), ok)));
+    voile.classList.add("ouvert");
+    document.addEventListener("keydown", echap, true);
+    (motif || duree_ || ok).focus();
+  });
+}
+$("#voile-dialogue").addEventListener("click", () => { const b = $("#dialogue-hote .bouton.discret"); if (b) b.click(); });
+async function agir(corps, titre, texte, opts, libelleOk, style) {
+  opts = opts || {};
+  if (!opts.direct) {
+    const r = await dialogue({titre, texte, motif: !!opts.motif, motifRequis: !!opts.motifRequis, durees: !!opts.durees, libelleOk, style});
+    if (!r) return false;
+    if (r.motif) corps.motif = r.motif;
+    if (r.duree) corps.duree = r.duree;
+  }
+  try {
+    const rep = await fetch(BASE + "/action", {method: "POST", credentials: "same-origin", cache: "no-store",
+      headers: {"Content-Type": "application/json", "X-Tableau": "1"}, body: JSON.stringify(corps)});
+    const j = await rep.json().catch(() => ({}));
+    if (rep.status === 403 && /expir|retir|suspendu/i.test(j.message || "")) { expire(j.message); return false; }
+    toast(j.message || (j.ok ? "C'est fait." : "Refusé."));
+    if (j.ok) {
+      setTimeout(() => charger(), 1200);
+      if (etat.ficheId) { const id = etat.ficheId, o = etat.ficheOnglet; setTimeout(() => { if (etat.ficheId === id) ouvrirFiche(id, o); }, 1600); }
+    }
+    return !!j.ok;
+  } catch (e) { toast("L'action n'a pas pu être envoyée."); return false; }
+}
+
+/* ── En-tête, pied, session ────────────────────────────────────────────── */
+function majEntete() {
+  const d = etat.d;
+  $("#nom-serveur").textContent = d.serveur.nom;
+  document.title = "Espace staff · " + d.serveur.nom;
+  const logo = $("#logo");
+  if (d.serveur.icone && !logo.querySelector("img")) logo.replaceChildren(h("img", {src: d.serveur.icone, alt: ""}));
+  majDirect(); pied();
+}
+function majDirect() {
+  if (etat.fini) return;
+  const s = Math.round((Date.now() - etat.dernier) / 1000);
+  $("#sous-titre").textContent = etat.erreurs ? "Connexion instable · nouvel essai automatique" : !etat.dernier ? "Chargement…"
+    : "À jour " + (s < 15 ? "à l'instant" : "il y a " + (s < 60 ? s + " s" : Math.round(s / 60) + " min")) + " · mise à jour automatique";
+  $("#etat-direct").textContent = etat.erreurs ? "Hors ligne" : "En direct";
+  $("#point").classList.toggle("panne", !!etat.erreurs);
+}
+setInterval(majDirect, 10000);
+function pied() {
+  const d = etat.d;
+  $("#pied").replaceChildren(
+    h("p", {}, "Session personnelle jusqu'au " + date(d.expire, true) + ". Données lues en direct, mises à jour toutes les minutes ; la page se relance seule toutes les 30 minutes. "
+      + (peutAgir() ? "Tu peux agir (fondateur ou direction) : chaque action est confirmée et inscrite au journal ; le fondateur et la direction ne peuvent pas être touchés depuis le site."
+        : "Consultation : agir est réservé au fondateur et à la direction.")),
+    h("button", {classe: "bouton p discret", type: "button", onclick: deconnecter}, icone("sortir", 14), "Se déconnecter"));
+}
+async function deconnecter() {
+  try { await fetch(BASE + "/sortir", {method: "POST", credentials: "same-origin", headers: {"X-Tableau": "1"}}); } catch (e) { /* la session expirera d'elle-même */ }
+  expire("Tu es déconnecté. Pour revenir : salon 📋logs → « Ouvrir le tableau de bord ».");
+}
+function expire(texte) {
+  etat.fini = true; clearTimeout(planifier.t);
+  fermerFiche();
+  $("#vues").replaceChildren();
+  $("#onglets").hidden = true;
+  $("#sous-titre").textContent = "Session terminée";
+  $("#point").classList.add("panne");
+  $("#bandeaux").replaceChildren(h("div", {classe: "bandeau rouge", role: "alert"}, icone("alerte"),
+    h("div", {}, texte || "Ta session est terminée ou ton accès a changé. Demande un nouveau lien dans Discord : salon 📋logs → « Ouvrir le tableau de bord ».")));
+}
+
+/* ── Chargement, mise à jour automatique, redémarrage ──────────────────── */
+async function charger() {
+  if (charger.enCours || etat.fini) return;
+  charger.enCours = true;
+  $("#rafraichir").classList.add("tourne");
+  try {
+    const r = await fetch(BASE + "/donnees", {cache: "no-store", credentials: "same-origin", headers: etat.etag ? {"If-None-Match": etat.etag} : {}});
+    if (r.status === 304) { etat.dernier = Date.now(); etat.erreurs = 0; majDirect(); return; }
+    if (r.status === 403) { expire(); return; }
+    if (!r.ok) throw new Error(String(r.status));
+    const d = await r.json();
+    etat.etag = r.headers.get("ETag"); etat.d = d; etat.dernier = Date.now(); etat.erreurs = 0;
+    if (d.version && d.version !== VERSION) etat.versionNeuve = true;
+    $("#bandeaux").replaceChildren();
+    toutRendre();
+  } catch (e) {
+    etat.erreurs++;
+    if (!etat.d) $("#bandeaux").replaceChildren(h("div", {classe: "bandeau", role: "alert"}, icone("alerte"), h("div", {}, "Données momentanément indisponibles — nouvel essai automatique.")));
+    majDirect();
+  } finally {
+    charger.enCours = false;
+    $("#rafraichir").classList.remove("tourne");
+    planifier();
+  }
+}
+function planifier() {
+  clearTimeout(planifier.t);
+  if (etat.fini) return;
+  const delai = RAFRAICHIR * Math.min(4, 1 + etat.erreurs), a = $("#anneau");
+  a.classList.remove("court"); void a.getBoundingClientRect();
+  a.style.setProperty("--duree", delai / 1000 + "s"); a.classList.add("court");
+  planifier.t = setTimeout(() => { if (document.hidden) { etat.enAttente = true; return; } charger(); }, delai);
+}
+function calme() {
+  const a = document.activeElement;
+  return !$("#fiche").classList.contains("ouverte") && !$("#dialogue-hote").firstChild && !etat.selection.size
+    && !(a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) && !String(getSelection() || "");
+}
+function redemarrer() {
+  sauver();
+  try { sessionStorage.setItem("tableau.retour", JSON.stringify({onglet: etat.onglet, y: Math.round(scrollY)})); } catch (e) { /* on repart du haut */ }
+  location.reload();
+}
+setInterval(() => {
+  if (etat.fini || !(etat.versionNeuve || Date.now() - etat.ouverture > REDEMARRER)) return;
+  if (document.hidden) { etat.redemarrerAuRetour = true; return; }
+  if (calme()) redemarrer();
+}, 15000);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || etat.fini) return;
+  if (etat.redemarrerAuRetour && calme()) { redemarrer(); return; }
+  if (etat.enAttente || Date.now() - etat.dernier > 45000) { etat.enAttente = false; charger(); }
+});
+$("#rafraichir").addEventListener("click", () => charger());
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#dialogue-hote").firstChild) fermerFiche(); });
+
+/* ── Démarrage ─────────────────────────────────────────────────────────── */
+(async () => {
+  const ancre = lireAncre();
+  if (ancre.onglet && ONGLETS.some(o => o[0] === ancre.onglet)) etat.onglet = ancre.onglet;
+  monterOnglets();
+  $("#vue-" + etat.onglet).append(h("div", {classe: "tuiles"}, [1, 2, 3, 4].map(() => h("div", {classe: "squelette", style: "height:98px"}))),
+    h("div", {classe: "squelette", style: "height:340px"}));
+  await charger();
+  let retour = null;
+  try { retour = JSON.parse(sessionStorage.getItem("tableau.retour") || "null"); sessionStorage.removeItem("tableau.retour"); } catch (e) { retour = null; }
+  if (retour && retour.onglet === etat.onglet && retour.y) requestAnimationFrame(() => scrollTo({top: retour.y}));
+  if (ancre.membre && etat.d) ouvrirFiche(ancre.membre); else majAncre();
+})();
 </script>
 </body>
 </html>

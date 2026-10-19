@@ -16,10 +16,13 @@ import discord
 import data_cleanup
 import gdpr
 import nettoyage
+import questions
+import recrutements
 import registre
 import rellseas_panneau
 import tableau
 import unified_logger as UL
+import vigilance
 import visuels
 from conftest_discord import Obj
 from ui_v2 import LayoutView, Palette
@@ -305,37 +308,52 @@ def test_L5_suppression_des_anciens_salons_fondateur_et_direction_confirmee():
     assert actions and actions[0][3] == "logs_anciens_supprimes"
 
 
-def test_L6_le_site_lit_le_journal_par_personne(tmp_path):
-    _registre(tmp_path)
-    tableau._cle = b"cle"
-    kolax = Obj(id=7, display_name="Kolax", name="kolax", roles=[], guild_permissions=Obj(administrator=True),
+def test_L6_le_site_lit_tout_ce_qui_concerne_une_personne(tmp_path):
+    get_db = _registre(tmp_path)
+    kolax = Obj(id=7, display_name="Kolax", name="kolax", roles=[], guild_permissions=Obj(administrator=True), bot=False,
                 display_avatar=Obj(with_size=lambda n: Obj(url="https://cdn.discordapp.com/a/7.png")))
-    g = Obj(id=1, get_member={7: kolax}.get, get_channel={5: Obj(name="général")}.get, get_thread=lambda i: None)
-    tableau.setup(bot=Obj(get_guild=lambda gid: g if gid == 1 else None), cle="cle", base_url="https://bot.exemple",
-                  cfg=lambda gid: asyncio.sleep(0, {}), get_db=None, mesurer_groupe=None,
+    g = Obj(id=1, owner_id=99, members=[kolax], get_member={7: kolax}.get, get_channel={5: Obj(name="général")}.get,
+            get_thread=lambda i: None, get_role=lambda i: None, me=None)
+
+    async def cfg(_g):
+        return {}
+
+    async def rien(*_a, **_k):
+        return None
+    tableau.setup(bot=Obj(get_guild=lambda gid: g if gid == 1 else None, user=Obj(id=999)), cle="cle",
+                  base_url="https://bot.exemple", cfg=cfg, get_db=get_db, mesurer_groupe=None,
                   autorise_membre=lambda g_, m, c: m is not None, log=lambda *a: None)
+    recrutements.setup(get_db=get_db, cfg=cfg, db_set=rien, salon=None, role=lambda *a: None,
+                       panneaux=rellseas_panneau.panneaux_tickets, log=lambda *a: None)
+    questions.setup(get_db=get_db, est_staff=lambda *a: False, log=lambda *a: None)
+    vigilance.setup(get_db=get_db, salon=rien, carte=lambda *a: None, log=lambda *a: None)
 
     class Requete:
-        def __init__(self, j, membre):
-            self.match_info, self.query = {"jeton": j}, {"membre": membre}
+        def __init__(self, jeton="", cookie=None, query=None):
+            self.match_info, self.query, self.headers, self.remote = {"jeton": jeton}, dict(query or {}), {}, "1.2.3.4"
+            self.cookies = {tableau.COOKIE: cookie} if cookie else {}
 
     async def scenario():
+        for f in (tableau.init_db, recrutements.init_db, questions.init_db, vigilance.init_db):
+            await f()
         await registre.noter(1, "Modération", "mod.warn", "Avertissement de Kolax", membre_id=7, auteur_id=2,
                              salon_id=5, detail="spam")
         await registre.noter(1, "Membres", "member.join", "Arrivée de Mira", membre_id=8)
-        bon = tableau.jeton(1, 7, "tout")
-        return (await tableau.journal(Requete("faux", "7")), await tableau.journal(Requete(bon, "7; DROP")),
-                await tableau.journal(Requete(bon, "7")))
+        entree = await tableau.entree(Requete(tableau.jeton(1, 7, "tout")))
+        sid = entree.cookies[tableau.COOKIE].value
+        return (await tableau.membre(Requete(query={"id": "7"})), await tableau.membre(Requete(cookie=sid, query={"id": "7; DROP"})),
+                await tableau.membre(Requete(cookie=sid, query={"id": "7"})))
     expire, invalide, ok = asyncio.run(scenario())
     assert (expire.status, invalide.status, ok.status) == (403, 400, 200)
     corps = json.loads(ok.body)
-    assert corps["membre"]["nom"] == "Kolax" and [e["type"] for e in corps["evenements"]] == ["mod.warn"]
-    e = corps["evenements"][0]
+    assert corps["membre"]["nom"] == "Kolax" and [e["type"] for e in corps["journal"]] == ["site.ouvert", "mod.warn"],         "ce qui le concerne ET ce qu'il a fait (il a ouvert le site)"
+    e = corps["journal"][1]
     assert (e["membre"], e["auteur"], e["salon"], e["detail"]) == ("7", "2", "#général", "spam")
     assert corps["personnes"]["2"]["nom"] == "Membre parti" and corps["personnes"]["7"]["nom"] == "Kolax"
+    assert corps["membre"]["protege"] and not corps["agir"], "un administrateur est protégé : aucune action depuis le site"
     page = (RACINE / "tableau_page.html").read_text(encoding="utf-8")
-    assert 'data-onglet="journal"' in page and "/journal?membre=" in page and "ouvrirPersonne" in page
-    assert "/tableau/{jeton}/journal" in (RACINE / "health_server.py").read_text(encoding="utf-8")
+    assert '["journal", "Journal", "journal"]' in page and "/membre?id=" in page and "ouvrirFiche" in page
+    assert "/tableau/espace/membre" in (RACINE / "health_server.py").read_text(encoding="utf-8")
 
 
 def test_L7_les_anciens_envoyeurs_se_taisent_en_mode_site():

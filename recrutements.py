@@ -236,6 +236,23 @@ async def lire(guild_id: int, mois: str = "tout") -> list[dict]:
     return out
 
 
+async def du_candidat(guild_id: int, candidat_id: int) -> list[dict]:
+    """Toutes les candidatures fermées d'une personne, de la plus récente à la plus ancienne."""
+    async with _get_db() as db:
+        rows = await _lignes(db, "SELECT ticket_id, ouvert_le, ferme_le, raison, reponses, transcript"
+                                 " FROM recrutements WHERE guild_id=? AND candidat_id=? ORDER BY ferme_le DESC",
+                             (int(guild_id), int(candidat_id)))
+    out = []
+    for tid, ouvert, ferme, raison, reponses, transcript in rows:
+        try:
+            rep = json.loads(reponses or "{}")
+        except ValueError:
+            rep = {}
+        out.append({"ticket": tid, "ouvert": ouvert, "ferme": ferme, "raison": raison or "",
+                    "statut": decision(False, raison or "") or "", "reponses": rep, "transcript": transcript or ""})
+    return out
+
+
 def decision(a_le_role: bool, raison: str) -> str | None:
     """La décision prise, ou None quand rien ne l'établit (ticket sans suite)."""
     if REFUS.search(raison or ""):
@@ -369,8 +386,8 @@ async def envoyer_lien(i: discord.Interaction) -> None:
         return await i.response.send_message(refus, ephemeral=True)
     v = discord.ui.View()
     v.add_item(discord.ui.Button(label="Ouvrir le tableau de bord", url=url, emoji=visuels.icone("lien")))
-    await i.response.send_message("Ton lien personnel — valable 24 h. Ne le partage pas.",
-                                  view=v, ephemeral=True)
+    await i.response.send_message("Ton lien personnel : il ne s'ouvre qu'une fois, valable 24 h. "
+                                  "Ne le partage pas.", view=v, ephemeral=True)
 
 
 class BoutonDecision(discord.ui.DynamicItem[discord.ui.Button],

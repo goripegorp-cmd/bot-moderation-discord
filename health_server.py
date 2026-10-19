@@ -161,24 +161,32 @@ async def _visuel_handler(request):
         return web.Response(status=500, text="err")
 
 
-async def _tableau_page(request):
+async def _tableau(request):
+    """Le site du staff : `tableau` sert chaque adresse (lien à usage unique, puis session)."""
     import tableau
-    return await tableau.page(request)
+    nom = request.match_info.route.name or ""
+    return await getattr(tableau, nom.split(":", 1)[1])(request)
 
 
-async def _tableau_donnees(request):
-    import tableau
-    return await tableau.api(request)
-
-
-async def _tableau_action(request):
-    import tableau
-    return await tableau.action(request)
-
-
-async def _tableau_journal(request):
-    import tableau
-    return await tableau.journal(request)
+def construire_app():
+    """Toutes les adresses servies par le bot (testées telles quelles)."""
+    app = web.Application()
+    app.router.add_get('/', _root_handler)
+    app.router.add_get('/health', _health_handler)
+    app.router.add_get('/stats', _stats_handler)
+    app.router.add_get('/t/{token}', _transcript_handler)       # Phase 281 : page transcript
+    app.router.add_get('/ta/{token}/{idx}', _asset_handler)      # assets ré-hébergés
+    app.router.add_get('/v/{nom}', _visuel_handler)               # bandeaux et icônes
+    #  Site du staff : l'espace (session) AVANT le lien à usage unique, sinon « espace » serait
+    #  pris pour un jeton.
+    app.router.add_get('/tableau/espace', _tableau, name="tableau:page")
+    app.router.add_get('/tableau/espace/donnees', _tableau, name="tableau:api")
+    app.router.add_get('/tableau/espace/membre', _tableau, name="tableau:membre")
+    app.router.add_get('/tableau/espace/export', _tableau, name="tableau:export")
+    app.router.add_post('/tableau/espace/action', _tableau, name="tableau:action")
+    app.router.add_post('/tableau/espace/sortir', _tableau, name="tableau:sortir")
+    app.router.add_get('/tableau/{jeton}', _tableau, name="tableau:entree")
+    return app
 
 
 async def start(bot_instance, port: int = 8000) -> bool:
@@ -196,17 +204,7 @@ async def start(bot_instance, port: int = 8000) -> bool:
         return False
 
     try:
-        app = web.Application()
-        app.router.add_get('/', _root_handler)
-        app.router.add_get('/health', _health_handler)
-        app.router.add_get('/stats', _stats_handler)
-        app.router.add_get('/t/{token}', _transcript_handler)       # Phase 281 : page transcript
-        app.router.add_get('/ta/{token}/{idx}', _asset_handler)      # assets ré-hébergés
-        app.router.add_get('/v/{nom}', _visuel_handler)               # bandeaux et icônes
-        app.router.add_get('/tableau/{jeton}', _tableau_page)         # tableau de bord (staff)
-        app.router.add_get('/tableau/{jeton}/donnees', _tableau_donnees)
-        app.router.add_get('/tableau/{jeton}/journal', _tableau_journal)  # une personne
-        app.router.add_post('/tableau/{jeton}/action', _tableau_action)  # fondateur et direction
+        app = construire_app()
 
         runner = web.AppRunner(app)
         await runner.setup()

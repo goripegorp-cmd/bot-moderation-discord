@@ -1,22 +1,27 @@
 """19/10/2026 : « un vrai site interactif… candidatures Rell Seas, tickets ouverts » — « seulement
-le rôle staff et au-dessus » — « tu tries bien les tickets par type… de vrais stats »."""
+le rôle staff et au-dessus » — « des zones par personne » — « direction et fondateur mis à part »
+— « renforce l'infrastructure du site : quelqu'un qui n'a pas les accès ne l'a pas du tout »."""
 from __future__ import annotations
 
 import ast
 import asyncio
 import contextlib
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import aiosqlite
 
+import questions
 import recrutements
 import registre
 import rellseas_panneau
 import tableau
+import vigilance
 from conftest_discord import Obj
 
 SRC = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")
+ORIGINE = {"X-Tableau": "1", "Origin": "https://bot.exemple", "Sec-Fetch-Site": "same-origin"}
 
 
 def _source(nom):
@@ -36,15 +41,37 @@ def _membre(uid, *roles, admin=False):
                display_avatar=Obj(with_size=lambda n: Obj(url=f"https://cdn.discordapp.com/a/{uid}.png")))
 
 
-def test_T1_le_lien_est_signe_personnel_et_expire():
+class Requete:
+    """Une requête du navigateur, telle que le site la voit."""
+
+    def __init__(self, jeton="", cookie=None, corps=None, entetes=None, query=None, ip="1.2.3.4"):
+        self.match_info = {"jeton": jeton}
+        self.cookies = {tableau.COOKIE: cookie} if cookie else {}
+        self.headers = dict(entetes or {})
+        self.query = dict(query or {})
+        self._corps = corps
+        self.content_length = len(json.dumps(corps)) if corps is not None else 0
+        self.remote, self.scheme, self.host = ip, "https", "bot.exemple"
+
+    async def json(self):
+        return self._corps
+
+
+def test_T1_le_lien_est_signe_personnel_expire_et_unique():
     tableau._cle = b"secret"
-    j = tableau.jeton(1, 7, "tout", maintenant=1000)
-    assert tableau.lire_jeton(j, maintenant=1000 + 3600) == {"g": 1, "u": 7, "p": "tout", "e": 1000 + tableau.DUREE}
+    j = tableau.jeton(1, 7, "tout", maintenant=1000, nonce="abc")
+    assert tableau.lire_jeton(j, maintenant=1000 + 3600) == {"g": 1, "u": 7, "p": "tout", "e": 1000 + tableau.DUREE, "n": "abc"}
     assert tableau.lire_jeton(j, maintenant=1000 + tableau.DUREE + 1) is None, "expiré"
     a, b = j.split(".")
-    faux = tableau._b64(b"1.8.tout.999999") + "." + b
+    faux = tableau._b64(b"1.8.tout.999999.abc") + "." + b
     assert tableau.lire_jeton(faux, maintenant=1000) is None, "un autre membre ne se fabrique pas"
     assert tableau.lire_jeton("n'importe quoi", maintenant=1000) is None
+    ancien = tableau._b64(b"1.7.tout.99999999")
+    import hashlib
+    import hmac
+    sig = tableau._b64(hmac.new(b"secret", b"1.7.tout.99999999", hashlib.sha256).digest()[:18])
+    assert tableau.lire_jeton(ancien + "." + sig, maintenant=1000) is None, "l'ancien format (sans usage unique) ne vaut plus"
+    assert tableau.jeton(1, 7, "tout") != tableau.jeton(1, 7, "tout"), "chaque lien est neuf"
     tableau._cle = b"autre"
     assert tableau.lire_jeton(j, maintenant=1000) is None
 
@@ -79,6 +106,7 @@ class Env:
                 yield db
             finally:
                 await db.close()
+        self.get_db = get_db
 
         async def cfg(_g):
             return self.conf
@@ -88,11 +116,12 @@ class Env:
 
         async def mesurer(_gid, membres):
             return {}
-        self.clan = Obj(id=50, name="Rell Seas", members=[])
+        self.clan = Obj(id=50, name="Rell Seas", members=[], position=1)
         self.staff = Role(10, 5)
-        self.membres = {2: _membre(2, self.staff), 7: _membre(7, self.clan), 8: _membre(8)}
-        self.clan.members = [self.membres[7]]
+        self.membres = {2: _membre(2, self.staff), 3: _membre(3, self.staff), 7: _membre(7, self.clan), 8: _membre(8)}
+        self.clan.members = [self.membres[7], self.membres[3]]
         self.g = Obj(id=1, name="GoRP SEA", icon=None, owner_id=99, get_member=self.membres.get,
+                     members=list(self.membres.values()), roles=[], default_role=Obj(id=1, position=0),
                      get_role={50: self.clan, 10: self.staff}.get, get_channel=lambda i: None,
                      get_thread=lambda i: None)
         registre.setup(get_db=get_db, log=lambda *a: None)
@@ -102,14 +131,26 @@ class Env:
                            log=lambda *a: None)
         ns = {}
         exec(_source("_staff_ou_plus"), ns)  # noqa: S102 — code du dépôt
-        tableau.setup(bot=Obj(get_guild=lambda gid: self.g if gid == 1 else None), cle="k",
+        self.alertes = []
+
+        async def alerte(g, m, raison):
+            self.alertes.append((m.id, raison))
+        tableau.setup(bot=Obj(get_guild=lambda gid: self.g if gid == 1 else None, user=Obj(id=999)), cle="k",
                       base_url="https://bot.exemple", cfg=cfg, get_db=get_db, mesurer_groupe=mesurer,
-                      autorise_membre=ns["_staff_ou_plus"], log=lambda *a: None)
-        tableau._cache.clear()
+                      autorise_membre=ns["_staff_ou_plus"], direction=lambda g, m, c: m is not None and m.id == 3,
+                      alerte_securite=alerte, log=lambda *a: None)
+        questions.setup(get_db=get_db, est_staff=ns["_staff_ou_plus"], log=lambda *a: None)
+
+        async def salon(_g):
+            return None
+        vigilance.setup(get_db=get_db, salon=salon, carte=lambda *a: None, log=lambda *a: None)
 
         async def preparer():
             await recrutements.init_db()
             await registre.init_db()
+            await tableau.init_db()
+            await questions.init_db()
+            await vigilance.init_db()
             async with get_db() as db:
                 await db.execute("CREATE TABLE tickets(id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER,"
                                  " user_id INTEGER, panel_id TEXT, claimed_by INTEGER, status TEXT, answers TEXT,"
@@ -130,8 +171,13 @@ class Env:
                 await db.commit()
         asyncio.run(preparer())
 
+    def session(self, uid: int) -> str:
+        r = asyncio.run(tableau.entree(Requete(tableau.jeton(1, uid, "tout"))))
+        assert r.status == 303, r.status
+        return r.cookies[tableau.COOKIE].value
 
-def test_T3_tickets_tries_par_type_avec_les_vrais_chiffres(tmp_path):
+
+def test_T3_tickets_tries_par_type_et_direction_a_part(tmp_path):
     env = Env(tmp_path)
     d = asyncio.run(tableau.donnees(env.g))
     types = {t["nom"]: t for t in d["tickets"]["types"]}
@@ -141,63 +187,85 @@ def test_T3_tickets_tries_par_type_avec_les_vrais_chiffres(tmp_path):
     assert (types["Support"]["ouverts"], types["Support"]["fermes"], types["Support"]["sans_prise"]) == (1, 2, 1)
     assert [o["type"] for o in d["tickets"]["ouverts"]] == ["Rellseas", "Support"]
     assert d["tickets"]["staff"] == [{"nom": "M2", "pris": 2, "fermes": 1}]
+    assert [t["ticket"] for t in d["tickets"]["fermes"]] == [4, 1, 3] and d["tickets"]["fermes"][0]["id"] == "8", "du plus récent au plus ancien"
     assert sum(sum(v.values()) for v in d["tickets"]["mois"].values()) == 5
     assert [c["nom"] for c in d["en_cours"]] == ["M8"] and list(map(list, d["en_cours"][0]["reponses"])) == [["Pseudo Roblox", "Mira_RS"]]
-    assert d["clan"]["role"] == "Rell Seas" and d["clan"]["membres"][0]["id"] == "7"
+    assert d["clan"]["role"] == "Rell Seas" and [m["id"] for m in d["clan"]["membres"]] == ["7"]
+    assert [m["id"] for m in d["clan"]["direction"]] == ["3"], "direction et fondateur : mis à part des stats"
+    assert set(d["a_part"]) == {"3", "99"} and d["personnes"]["8"]["nom"] == "M8" and d["version"] == tableau.VERSION
     json.dumps(d)
 
 
-def test_T4_page_et_donnees_refusees_sans_lien_valide_ou_hors_staff(tmp_path):
+def test_T4_lien_a_usage_unique_puis_session(tmp_path):
     env = Env(tmp_path)
 
-    def requete(j):
-        return Obj(match_info={"jeton": j})
-
     async def scenario():
-        bon = tableau.jeton(1, 2, "tout")
-        hors_staff = tableau.jeton(1, 8, "tout")
-        return (await tableau.page(requete(bon)), await tableau.api(requete(bon)),
-                await tableau.page(requete("faux")), await tableau.api(requete(hors_staff)))
-    page, api, faux, refuse = asyncio.run(scenario())
-    assert page.status == 200 and "Tableau de bord" in page.text
+        j = tableau.jeton(1, 2, "tout")
+        entree = await tableau.entree(Requete(j))
+        sid = entree.cookies[tableau.COOKIE].value
+        rejoue = await tableau.entree(Requete(j))
+        rejoue_meme_navigateur = await tableau.entree(Requete(j, cookie=sid))
+        page = await tableau.page(Requete(cookie=sid))
+        sans = await tableau.page(Requete())
+        api = await tableau.api(Requete(cookie=sid))
+        api304 = await tableau.api(Requete(cookie=sid, entetes={"If-None-Match": api.headers["ETag"]}))
+        hors_staff = await tableau.entree(Requete(tableau.jeton(1, 8, "tout")))
+        faux = await tableau.entree(Requete("faux"))
+        sortie = await tableau.sortir(Requete(cookie=sid, entetes=ORIGINE))
+        apres = await tableau.api(Requete(cookie=sid))
+        return entree, rejoue, rejoue_meme_navigateur, page, sans, api, api304, hors_staff, faux, sortie, apres
+    entree, rejoue, meme, page, sans, api, api304, hors_staff, faux, sortie, apres = asyncio.run(scenario())
+    biscuit = entree.cookies[tableau.COOKIE]
+    assert entree.status == 303 and entree.headers["Location"] == tableau.ESPACE, "l'adresse perd le jeton"
+    assert biscuit["httponly"] and biscuit["secure"] and biscuit["samesite"] == "Lax" and biscuit["path"] == "/"
+    assert rejoue.status == 403 and "déjà servi" in rejoue.text, "un lien copié ne sert plus à rien"
+    assert meme.status == 303, "le même navigateur, déjà connecté, repasse sans erreur"
+    assert page.status == 200 and "Espace staff" in page.text and "__NONCE__" not in page.text
+    csp = page.headers["Content-Security-Policy"]
+    assert "script-src 'nonce-" in csp and "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
     assert page.headers["Cache-Control"] == "no-store" and "noindex" in page.headers["X-Robots-Tag"]
+    assert page.headers["X-Frame-Options"] == "DENY" and "max-age" in page.headers["Strict-Transport-Security"]
+    assert sans.status == 403 and "plus valable" in sans.text and "script-src 'none'" in sans.headers["Content-Security-Policy"]
     corps = json.loads(api.text)
-    assert api.status == 200 and corps["tickets"]["types"] and corps["expire"] > 0
-    assert faux.status == 403 and "plus valable" in faux.text
-    assert refuse.status == 403, "un lien d'un membre qui n'est pas staff ne montre rien"
+    assert api.status == 200 and corps["tickets"]["types"] and corps["expire"] > 0 and api.headers["ETag"]
+    assert api304.status == 304, "rien n'a changé : rien n'est retéléchargé"
+    assert hors_staff.status == 403 and faux.status == 403, "un lien d'un membre qui n'est pas staff ne montre rien"
+    assert sortie.status == 204 and apres.status == 403, "déconnecté : la session est effacée"
 
 
-def test_T5_le_bouton_ne_donne_le_lien_qu_au_staff(tmp_path):
+def test_T5_le_bouton_ne_donne_le_lien_qu_au_staff_non_suspendu(tmp_path):
     env = Env(tmp_path)
 
     async def scenario():
-        ok = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[2]))
+        ok = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[2]), membre_id=7)
         non = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[8]))
-        return ok, non
-    (url, refus), (url2, refus2) = asyncio.run(scenario())
-    assert url.startswith("https://bot.exemple/tableau/") and refus == ""
+        await tableau.suspendre(env.g, env.membres[2], "essai")
+        suspendu = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[2]))
+        return ok, non, suspendu
+    (url, refus), (url2, refus2), (url3, refus3) = asyncio.run(scenario())
+    assert url.startswith("https://bot.exemple/tableau/") and url.endswith("#membre=7") and refus == ""
     assert url2 is None and "staff" in refus2
+    assert url3 is None and "suspendu" in refus3
 
 
 def test_T6_la_page_n_injecte_jamais_de_donnees_en_html():
     page = tableau.PAGE
-    assert "innerHTML = chemin" in page and page.count("innerHTML") == 1, "seules les icônes fixes"
-    assert "textContent" in page and "createTextNode" in page
-    assert "fetch(" in page and "/donnees" in page
+    assert page.count("innerHTML") == 0 and "insertAdjacentHTML" not in page and "eval(" not in page
+    assert "textContent" in page and "createTextNode" in page and '<script nonce="__NONCE__">' in page
+    assert page.count("<script") == 1 and "fetch(" in page and "/donnees" in page and "If-None-Match" in page
+    assert "/tableau/espace" in page and "location.reload()" in page, "la page se relance seule"
+    assert "add_roles" not in page and "role_donner" not in page, "le site ne donne aucun rôle"
 
 
-def test_T7_sanctions_en_chiffres_et_en_cours(tmp_path):
-    from datetime import datetime, timedelta, timezone
+def test_T7_casier_par_membre_direction_a_part(tmp_path):
     env = Env(tmp_path)
     radie_role = Obj(id=66, name="🚫 Radié", members=[env.membres[8]])
     env.g.roles = [radie_role]
     fin = datetime.now(timezone.utc) + timedelta(hours=2)
     env.membres[7].is_timed_out = lambda: True
     env.membres[7].timed_out_until = fin
-    env.membres[8].is_timed_out = lambda: False
-    env.membres[2].is_timed_out = lambda: False
-    env.g.members = list(env.membres.values())
-    tableau._bot.user = Obj(id=999)
+    for k in (2, 3, 8):
+        env.membres[k].is_timed_out = lambda: False
     il_y_a = lambda j: (datetime.now(timezone.utc) - timedelta(days=j)).strftime("%Y-%m-%d %H:%M:%S")
 
     async def preparer():
@@ -210,24 +278,28 @@ def test_T7_sanctions_en_chiffres_et_en_cours(tmp_path):
                                  " VALUES (?,?,?,?,?,?,?)", [
                 (1, 7, 2, "warn", "Spam", "", il_y_a(2)), (1, 7, 999, "insulte", "Insulte détectée", "", il_y_a(3)),
                 (1, 7, 2, "mute", "Récidive", "1h", il_y_a(4)), (1, 8, 999, "protection", "Lien", "", il_y_a(400)),
-                (1, 8, 2, "ban", "Raid", "", il_y_a(40))])
+                (1, 8, 2, "ban", "Raid", "", il_y_a(40)), (1, 8, 3, "warn", "Par la direction", "", il_y_a(1)),
+                (1, 3, 2, "warn", "La direction ne figure pas au casier du site", "", il_y_a(1))])
             await db.execute("INSERT INTO restricted_members VALUES (1, 8, '[]', ?, 0, 'Direction', 2)", (il_y_a(1),))
             await db.commit()
     asyncio.run(preparer())
-    s = asyncio.run(tableau._sanctions(env.g))
-    assert (s["total"], s["trente_jours"], s["auto"], s["manuel"]) == (5, 3, 2, 3)
+    qui = tableau._Personnes(env.g)
+    s = asyncio.run(tableau._sanctions(env.g, {3, 99}, qui))
+    assert (s["total"], s["trente_jours"], s["auto"], s["manuel"]) == (7, 5, 2, 5)
     types = {t["type"]: t for t in s["types"]}
     assert types["insulte"]["detection"] and not types["warn"]["detection"] and types["ban"]["libelle"] == "Bannissement"
     assert [(x["nom"], x["total"], x["types"]) for x in s["staff"]] == \
-        [("M2", 3, {"warn": 1, "mute": 1, "ban": 1})], "le bot n'est pas un modérateur"
-    assert [y["type"] for y in s["staff"][0]["dernieres"]] == ["ban", "mute", "warn"], "tout ce qu'il a attribué"
-    assert s["surveiller"][0]["total_tout"] == 3
-    assert s["surveiller"][0]["id"] == "7" and s["surveiller"][0]["total"] == 3, "90 jours seulement"
-    assert s["recentes"][0]["libelle"] == "Bannissement" and s["recentes"][-1]["auto"] is False
+        [("M2", 4, {"warn": 2, "mute": 1, "ban": 1})], "ni le bot ni la direction dans les stats du staff"
+    par = {m["id"]: m for m in s["membres"]}
+    assert set(par) == {"7", "8"}, "une case par personne ; la direction n'y figure pas"
+    assert (par["7"]["total"], par["7"]["n30"], par["7"]["n90"]) == (3, 3, 3)
+    assert [x["type"] for x in par["7"]["liste"]] == ["mute", "insulte", "warn"], "tout ce qu'elle a reçu, du plus récent"
+    assert par["7"]["liste"][1]["auto"] and par["7"]["liste"][0]["par"] == "M2"
+    assert (par["8"]["total"], par["8"]["n30"], par["8"]["n90"]) == (3, 1, 2)
     assert [m["id"] for m in s["actives"]["mutes"]] == ["7"] and s["actives"]["mutes"][0]["jusqu"]
     assert [m["id"] for m in s["actives"]["radies"]] == ["8"]
     assert s["actives"]["restreints"][0]["par"] == "M2"
-    assert sum(sum(v.values()) for v in s["mois"].values()) == 4, "plus d'un an : hors du graphique"
+    assert sum(sum(v.values()) for v in s["mois"].values()) == 6, "plus d'un an : hors du graphique"
 
 
 def test_T8_un_seul_salon_de_logs_le_menu_epingle_toujours_a_jour():
@@ -321,41 +393,126 @@ def test_T9_seuls_le_fondateur_et_la_direction_agissent():
     assert not direction(g, _membre(6, admin=True), {}), "sans rôle direction : le fondateur seul"
 
 
-def test_T10_actions_verifiees_tracees_et_limitees(tmp_path):
+def test_T10_actions_verifiees_origine_niveaux_cadence(tmp_path):
     env = Env(tmp_path)
     appels = []
 
     async def fermer(g, auteur, corps):
         appels.append((auteur.id, corps))
         return True, "Ticket fermé."
-    tableau._actions = {"ticket_fermer": fermer}
-    tableau._direction = lambda g, m, c: m is not None and m.id == 2
-    tableau._cadence.clear()
 
-    class Requete:
-        def __init__(self, j, corps, entete=True):
-            self.match_info = {"jeton": j}
-            self.headers = {"X-Tableau": "1"} if entete else {}
-            self._corps = corps
-            self.content_length = len(json.dumps(corps))
+    async def question(g, auteur, corps):
+        return True, "Question traitée."
+    tableau._actions = {"ticket_fermer": fermer, "question": question}
+    tableau._niveaux = {"question": "staff"}
+    dir_sid, staff_sid = env.session(3), env.session(2)
 
-        async def json(self):
-            return self._corps
+    def act(sid, corps, entetes=ORIGINE):
+        return tableau.action(Requete(cookie=sid, corps=corps, entetes=entetes))
 
     async def scenario():
-        bon, staff_simple = tableau.jeton(1, 2, "tout"), tableau.jeton(1, 8, "tout")
-        env.membres[8].roles = [env.staff]
-        sans_entete = await tableau.action(Requete(bon, {"action": "ticket_fermer", "ticket": 5}, entete=False))
-        refuse = await tableau.action(Requete(staff_simple, {"action": "ticket_fermer", "ticket": 5}))
-        inconnue = await tableau.action(Requete(bon, {"action": "tout_supprimer"}))
-        ok = await tableau.action(Requete(bon, {"action": "ticket_fermer", "ticket": 5}))
+        sans_entete = await act(dir_sid, {"action": "ticket_fermer", "ticket": 5}, {})
+        autre_site = await act(dir_sid, {"action": "ticket_fermer", "ticket": 5}, dict(ORIGINE, Origin="https://pirate.exemple"))
+        croise = await act(dir_sid, {"action": "ticket_fermer", "ticket": 5}, dict(ORIGINE, **{"Sec-Fetch-Site": "cross-site"}))
+        sans_session = await tableau.action(Requete(corps={"action": "ticket_fermer"}, entetes=ORIGINE))
+        refuse = await act(staff_sid, {"action": "ticket_fermer", "ticket": 5})
+        geste_staff = await act(staff_sid, {"action": "question", "question": 1, "statut": "traitee"})
+        inconnue = await act(dir_sid, {"action": "tout_supprimer"})
+        ok = await act(dir_sid, {"action": "ticket_fermer", "ticket": 5})
         for _ in range(25):
-            dernier = await tableau.action(Requete(bon, {"action": "ticket_fermer", "ticket": 5}))
-        return sans_entete, refuse, inconnue, ok, dernier
-    sans_entete, refuse, inconnue, ok, dernier = asyncio.run(scenario())
-    assert sans_entete.status == 400, "une requête venue d'ailleurs que la page est refusée"
+            dernier = await act(dir_sid, {"action": "ticket_fermer", "ticket": 5})
+        return sans_entete, autre_site, croise, sans_session, refuse, geste_staff, inconnue, ok, dernier
+    sans_entete, autre_site, croise, sans_session, refuse, geste_staff, inconnue, ok, dernier = asyncio.run(scenario())
+    assert sans_entete.status == autre_site.status == croise.status == 400, "une requête venue d'ailleurs que la page est refusée"
+    assert sans_session.status == 403
     assert refuse.status == 403 and "direction" in json.loads(refuse.text)["message"]
+    assert geste_staff.status == 200, "un geste sans risque est ouvert au staff"
     assert inconnue.status == 400
     assert ok.status == 200 and json.loads(ok.text) == {"ok": True, "message": "Ticket fermé."}
-    assert appels[0] == (2, {"action": "ticket_fermer", "ticket": 5})
+    assert appels[0] == (3, {"action": "ticket_fermer", "ticket": 5})
     assert dernier.status == 429, "pas plus de 20 actions par minute"
+
+
+def test_T11_trop_d_actions_graves_suspend_l_acces(tmp_path):
+    """« Si quelqu'un se fait voler son compte » : 6 bannissements en 10 minutes, c'est stop."""
+    env = Env(tmp_path)
+    faits = []
+
+    async def moderer(g, auteur, corps):
+        faits.append(corps["membre"])
+        return True, "Banni."
+    tableau._actions = {"moderer": moderer}
+    sid = env.session(3)
+
+    async def scenario():
+        reps = [await tableau.action(Requete(cookie=sid, corps={"action": "moderer", "sanction": "ban", "membre": k},
+                                             entetes=ORIGINE)) for k in range(6)]
+        apres = await tableau.api(Requete(cookie=sid))
+        lien = await tableau.lien_pour(Obj(guild=env.g, user=env.membres[3]))
+        return reps, apres, lien
+    reps, apres, lien = asyncio.run(scenario())
+    assert [r.status for r in reps] == [200] * 5 + [403] and len(faits) == 5, "le 6ᵉ n'est jamais exécuté"
+    assert "suspendu" in json.loads(reps[-1].text)["message"]
+    assert apres.status == 403, "sessions fermées sur-le-champ"
+    assert lien[0] is None and "suspendu" in lien[1]
+    assert env.alertes and env.alertes[0][0] == 3, "le fondateur est prévenu dans le salon des logs"
+
+
+def test_T12_export_propre_et_reserve(tmp_path):
+    env = Env(tmp_path)
+
+    async def scenario():
+        await registre.noter(1, "Modération", "mod.warn", "=HYPERLINK(\"http://x\") avertissement", membre_id=7, auteur_id=2)
+        csv_ = await tableau.exporter(env.g, "journal", env.membres[2], 7)
+        json_ = await tableau.exporter(env.g, "journal", env.membres[2], 7, format_="json")
+        erreurs_staff = await tableau.exporter(env.g, "erreurs", env.membres[2])
+        inconnu = await tableau.exporter(env.g, "tout", env.membres[3])
+        return csv_, json_, erreurs_staff, inconnu
+    (contenu, type_, nom), (jcontenu, jtype, jnom), erreurs_staff, inconnu = asyncio.run(scenario())
+    texte = contenu.decode("utf-8")
+    assert texte.startswith("﻿Date;Catégorie;Type;Gravité;Membre") and type_ == "text/csv" and nom.endswith(".csv")
+    assert "'=HYPERLINK" in texte, "une formule n'est jamais exécutée à l'ouverture dans Excel"
+    assert "M7 (7)" in texte and "M2 (2)" in texte
+    assert jtype == "application/json" and json.loads(jcontenu)[0]["type"] == "mod.warn"
+    assert erreurs_staff is None and inconnu is None, "les erreurs du bot : fondateur et direction seulement"
+
+
+def test_T13_les_adresses_du_site_par_http(tmp_path):
+    """Le vrai serveur HTTP, de bout en bout : le lien, la session, chaque adresse."""
+    from aiohttp.test_utils import TestClient, TestServer
+
+    import health_server
+    env = Env(tmp_path)
+
+    async def raison(g, auteur, corps):
+        return True, "Fait."
+    tableau._actions = {"essai": raison}
+
+    async def scenario():
+        out = {}
+        async with TestClient(TestServer(health_server.construire_app())) as client:
+            r = await client.get("/tableau/" + tableau.jeton(1, 3, "tout"), allow_redirects=False)
+            out["entree"] = (r.status, r.headers.get("Location"))
+            sid = r.cookies[tableau.COOKIE].value
+            biscuit = {"Cookie": f"{tableau.COOKIE}={sid}"}
+            for nom, chemin in (("page", "/tableau/espace"), ("donnees", "/tableau/espace/donnees"),
+                                ("membre", "/tableau/espace/membre?id=7"), ("export", "/tableau/espace/export?quoi=journal"),
+                                ("sans", "/tableau/espace"), ("inconnue", "/tableau/espace/rien")):
+                r = await client.get(chemin, headers=biscuit if nom != "sans" else {})
+                out[nom] = (r.status, r.headers.get("Content-Type", ""), r.headers.get("Content-Disposition", ""))
+            origine = dict(biscuit, **{"X-Tableau": "1", "Origin": "https://bot.exemple"})
+            r = await client.post("/tableau/espace/action", json={"action": "essai"}, headers=origine)
+            out["action"] = (r.status, await r.json())
+            r = await client.post("/tableau/espace/sortir", headers=origine)
+            out["sortir"] = r.status
+            r = await client.get("/tableau/espace/donnees", headers=biscuit)
+            out["apres"] = r.status
+        return out
+    out = asyncio.run(scenario())
+    assert out["entree"] == (303, "/tableau/espace")
+    assert out["page"][0] == 200 and out["page"][1].startswith("text/html")
+    assert out["donnees"][0] == 200 and out["membre"][0] == 200
+    assert out["export"][0] == 200 and out["export"][1].startswith("text/csv") and "attachment" in out["export"][2]
+    assert out["sans"][0] == 403 and out["inconnue"][0] == 404
+    assert out["action"] == (200, {"ok": True, "message": "Fait."})
+    assert out["sortir"] == 204 and out["apres"] == 403

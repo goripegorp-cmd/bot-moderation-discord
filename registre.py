@@ -8,17 +8,25 @@ Une ligne par évènement : quand, quoi (catégorie, type), qui (membre visé, a
 phrase lisible et un détail court. Écartés : le bruit (bots, vocal coupé/partagé, doublons à
 quelques secondes). Purge : messages et vocal après 30 jours, le reste après 90, jamais plus de
 100 000 lignes — toutes les 2 000 écritures et chaque semaine (`data_cleanup.PURGES_CIBLEES`).
+
+Gravité : 0 information, 1 à surveiller, 2 grave, 3 critique (`GRAVITES`). Un évènement grave
+qui vise un membre prévient `vigilance` (l'alerte « cumule des évènements graves »).
 """
 from __future__ import annotations
 
 import re
 import time
+from datetime import datetime, timezone
 
 INUTILES = {"voice.mute", "voice.stream"}
 DOUBLON_SECONDES = 5
 JOURS_COURTS = 30  # messages et vocal
 JOURS = 90
 PLAFOND = 100_000
+GRAVITES = {"mod.warn": 1, "mod.mute": 2, "mod.timeout": 2, "mod.kick": 3, "mod.ban": 3,
+            "sec.spam": 1, "sec.badword": 1, "sec.link": 1, "sec.invite": 1, "sec.mention": 1,
+            "sec.image": 1, "sec.alt": 1, "sec.toxicite": 1, "sec.qrcode": 2, "sec.escalation": 2,
+            "sec.raid": 3, "sec.phishing": 3, "sec.scam": 3, "sec.nsfw": 3}
 #  Les mêmes purges servent au grand nettoyage hebdomadaire (`data_cleanup`) et, ici, toutes
 #  les PURGE_TOUTES écritures : la rétention est tenue au jour près, sans attendre dimanche.
 PURGES = [
@@ -29,15 +37,18 @@ PURGES = [
                            f"(SELECT id FROM registre ORDER BY id DESC LIMIT 1 OFFSET {PLAFOND})", None, None),
 ]
 PURGE_TOUTES = 2000
+COLONNES = ("id", "quand", "categorie", "type", "membre_id", "auteur_id", "salon_id", "texte", "detail", "gravite")
 _get_db = None
+_apres_grave = None
 _derniers: dict = {}
 _ecritures = 0
 _log = print
 
 
-def setup(*, get_db, log=None):
-    global _get_db, _log
-    _get_db, _log = get_db, log or print
+def setup(*, get_db, log=None, apres_grave=None):
+    """`apres_grave(guild_id, membre_id)` : appelé (sans attendre) après un évènement grave."""
+    global _get_db, _log, _apres_grave
+    _get_db, _log, _apres_grave = get_db, log or print, apres_grave
 
 
 async def init_db():
@@ -99,6 +110,7 @@ async def noter(guild_id: int, categorie: str, type_: str, texte: str, *, membre
     if len(_derniers) > 5000:
         for k in [k for k, t in _derniers.items() if maintenant - t > DOUBLON_SECONDES]:
             _derniers.pop(k, None)
+    gravite = max(int(gravite or 0), GRAVITES.get(type_, 0))
     try:
         async with _get_db() as db:
             await db.execute(
@@ -106,34 +118,76 @@ async def noter(guild_id: int, categorie: str, type_: str, texte: str, *, membre
                 " texte, detail, gravite) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (int(guild_id), int(maintenant), str(categorie or "Autre")[:40], str(type_)[:40],
                  int(membre_id or 0), int(auteur_id or 0), int(salon_id or 0), str(texte)[:300],
-                 str(detail or "")[:600], int(gravite)))
+                 str(detail or "")[:600], gravite))
             await db.commit()
         _ecritures += 1
         if _ecritures % PURGE_TOUTES == 0:
             _log(f"[REGISTRE] purge : {await purger()} ligne(s)")
-        return True
     except Exception as ex:  # le journal ne doit jamais casser l'action qui l'appelle
         _log("[REGISTRE][E1] écriture impossible")
         _log(f"[REGISTRE][E1:DETAIL] {type(ex).__name__} {ex}")
         return False
+    if gravite >= 1 and membre_id and _apres_grave is not None:
+        try:
+            _apres_grave(int(guild_id), int(membre_id))
+        except Exception as ex:  # l'alerte ne doit jamais casser le journal
+            _log("[REGISTRE][E2] vigilance indisponible")
+            _log(f"[REGISTRE][E2:DETAIL] {type(ex).__name__} {ex}")
+    return True
 
 
-async def lire(guild_id: int, limite: int = 400, membre_id: int | None = None) -> list[dict]:
-    """Les derniers évènements, du plus récent au plus ancien (d'une personne si demandé)."""
-    if membre_id:
-        sql = ("SELECT id, quand, categorie, type, membre_id, auteur_id, salon_id, texte, detail, gravite"
-               " FROM registre WHERE guild_id=? AND (membre_id=? OR auteur_id=?) ORDER BY id DESC LIMIT ?")
-        args = (guild_id, int(membre_id), int(membre_id), int(limite))
-    else:
-        sql = ("SELECT id, quand, categorie, type, membre_id, auteur_id, salon_id, texte, detail, gravite"
-               " FROM registre WHERE guild_id=? ORDER BY id DESC LIMIT ?")
-        args = (guild_id, int(limite))
+async def _rangs(sql: str, args: tuple) -> list[dict]:
     try:
         async with _get_db() as db:
             async with db.execute(sql, args) as cur:
                 rows = await cur.fetchall()
     except Exception as ex:
-        _log(f"[REGISTRE:DETAIL] lecture : {type(ex).__name__} {ex}")
+        _log("[REGISTRE][E3] lecture impossible")
+        _log(f"[REGISTRE][E3:DETAIL] {type(ex).__name__} {ex}")
         return []
-    cles = ("id", "quand", "categorie", "type", "membre_id", "auteur_id", "salon_id", "texte", "detail", "gravite")
-    return [dict(zip(cles, r)) for r in rows]
+    return [dict(zip(COLONNES, r)) for r in rows]
+
+
+async def lire(guild_id: int, limite: int = 400, membre_id: int | None = None, depuis: int = 0,
+               categorie: str | None = None) -> list[dict]:
+    """Les derniers évènements, du plus récent au plus ancien : d'une personne (visée ou auteur),
+    depuis une date, d'une catégorie, si demandé."""
+    where, args = ["guild_id=?"], [int(guild_id)]
+    if membre_id:
+        where.append("(membre_id=? OR auteur_id=?)")
+        args += [int(membre_id), int(membre_id)]
+    if depuis:
+        where.append("quand>=?")
+        args.append(int(depuis))
+    if categorie:
+        where.append("categorie=?")
+        args.append(str(categorie))
+    return await _rangs(f"SELECT {', '.join(COLONNES)} FROM registre WHERE {' AND '.join(where)}"
+                        " ORDER BY id DESC LIMIT ?", (*args, int(limite)))
+
+
+async def graves(guild_id: int, membre_id: int, depuis: int) -> list[dict]:
+    """Les évènements graves qui visent un membre, depuis une date, du plus ancien au plus récent."""
+    return await _rangs(f"SELECT {', '.join(COLONNES)} FROM registre WHERE guild_id=? AND membre_id=?"
+                        " AND gravite>=1 AND quand>=? ORDER BY quand, id", (int(guild_id), int(membre_id), int(depuis)))
+
+
+async def par_jour(guild_id: int, jours: int = 30, decalage: int = 0, maintenant: float | None = None) -> dict:
+    """{« AAAA-MM-JJ » : {catégorie : nombre}} sur `jours` jours ; `decalage` : secondes ajoutées
+    à l'heure UTC pour couper les journées à minuit, heure de Paris."""
+    debut = int((maintenant or time.time()) - jours * 86400)
+    try:
+        async with _get_db() as db:
+            async with db.execute("SELECT (quand + ?) / 86400 AS j, categorie, COUNT(*) FROM registre"
+                                  " WHERE guild_id=? AND quand>=? GROUP BY j, categorie",
+                                  (int(decalage), int(guild_id), debut)) as cur:
+                rows = await cur.fetchall()
+    except Exception as ex:
+        _log("[REGISTRE][E4] comptage impossible")
+        _log(f"[REGISTRE][E4:DETAIL] {type(ex).__name__} {ex}")
+        return {}
+    out: dict = {}
+    for j, cat, n in rows:
+        cle = datetime.fromtimestamp(int(j) * 86400, timezone.utc).strftime("%Y-%m-%d")
+        out.setdefault(cle, {})[cat or "Autre"] = int(n)
+    return dict(sorted(out.items()))

@@ -239,6 +239,8 @@ def remplacer_salon(guild_id: int, ancien: int, nouveau: int) -> None:
 #  réaction humaine, vont encore dans Discord — dans le salon unique. Le raid n'y est pas : ses
 #  deux détecteurs postent déjà leur propre alerte (avec les boutons) dans ce salon.
 ALERTES = {"sec.escalation"}
+#  Branché par le bot : les boutons sous une alerte (« Géré », la fiche sur le site).
+vue_alerte = None
 
 
 def _lire_cfg(guild_id: int) -> dict:
@@ -730,10 +732,11 @@ async def log_event(
             cible = bot.get_channel(int(cid)) if cid else None
             if cible is None:
                 return None
+            vue = vue_alerte(getattr(user, "id", 0) or 0) if vue_alerte is not None else None
             return await cible.send(embed=build_log_embed(
                 event_type, title_override=title_override, description=description, fields=fields,
                 user=user, moderator=moderator, channel=channel, reason=reason, content=content,
-                extra=extra))
+                extra=extra), **({"view": vue} if vue is not None else {}))
 
         # Phase 268 : routage évènement > catégorie > salon global.
         chan_id = await resolve_channel_for_event(guild.id, _ev_val, meta["cat"] if meta else None)
