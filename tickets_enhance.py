@@ -998,15 +998,17 @@ async def _try_close_channel(channel_id: int):
 
         # Tente d'envoyer un message dans le ticket + archive
         ch = _bot.get_channel(channel_id)
-        if isinstance(ch, discord.TextChannel):
+        if isinstance(ch, (discord.TextChannel, discord.Thread)):
             try:
                 await ch.send(
                     "🔒 **Auto-close** : ce ticket est fermé pour cause "
                     "d'inactivité. Si tu as encore besoin d'aide, "
                     "ouvre un nouveau ticket."
                 )
-            except Exception:
-                pass
+                if isinstance(ch, discord.Thread):
+                    await ch.edit(archived=True, locked=True)
+            except discord.HTTPException as ex:
+                print(f"[tickets_enhance auto-close {channel_id}] {ex}")
             # Optionnel : delete après quelques min (laissé à la charge de l'admin)
         return True
     except Exception as ex:

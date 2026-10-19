@@ -185,6 +185,7 @@ import insult_filter as insult_filter  # Filtre insultes/haine GRADUÉ multiling
 import mots_interdits  # 14/10/2026 : liste du serveur — exclamations libres, plus de mots recollés
 import acces_direction  # 14/10/2026 : Direction + Fondateur déplacent dans les vocaux créés
 import stockage as stockage_module  # 14/10/2026 : part du volume par poste + bilan quotidien
+import tickets_fils  # 19/10/2026 : un fil privé par ticket, un salon par équipe
 import offtopic_filter as offtopic_filter  # Filtre politique/religion/militantisme (owner 2026-06-21, slogans + slugs de GIF, anti-FP gaming)
 import trust_system as trust_system  # Confiance progressive des nouveaux + politique liens/invitations (owner 2026-06-21)
 import behavior_guard as behavior_guard  # Anti-crash (zalgo/invisible) + spam inter-salons + anti-automation (owner 2026-06-21)
@@ -3391,6 +3392,7 @@ async def cfg(gid):
         'alt_config': {'auto_action': False, 'min_confidence': 70},
         'channel_configs': {},
         'ticket_staff': 0, 'ticket_log': 0, 'ticket_panels': {},
+        'tickets_fils': 1, 'tickets_fils_parents': {},
         'mod_warn_role': 0, 'mod_mute_role': 0, 'mod_infractions_role': 0, 'mod_log_channel': 0,
         # Phase 23 : salon dédié aux alertes de comptes suspects/piratés
         'compromised_alerts_channel': 0,
@@ -7987,7 +7989,7 @@ async def count_user_tickets(g, uid, pid=None):
             async with db.execute(q, p) as c:
                 tks = await c.fetchall()
         for tid, chid in tks:
-            if g.get_channel(chid): cnt += 1
+            if await tickets_fils.existe(g, chid): cnt += 1
             else: to_close.append(tid)
         if to_close:
             async with get_db() as db:
@@ -8523,7 +8525,18 @@ async def create_ticket(i, pid, ans=None):
                 view_channel=True, send_messages=True, read_message_history=True, manage_channels=True,
                 attach_files=True, embed_links=True, add_reactions=True,
                 use_external_emojis=True, use_external_stickers=True)
-        ch = await i.guild.create_text_channel(f"ticket-{i.user.name}"[:50], category=cat, overwrites=ow)
+        if c.get('tickets_fils', 1):
+            try:
+                _par = await tickets_fils.parent(
+                    i.guild, cat, staff, c.get(tickets_fils.CLE_PARENTS) or {},
+                    lambda p: db_set(i.guild.id, tickets_fils.CLE_PARENTS, p))
+                if _par is not None:
+                    ch = await tickets_fils.ouvrir(_par, i.user, f"ticket-{i.user.name}")
+            except discord.HTTPException as _fx:
+                _logerr("ticket.fil", _fx, guild_id=i.guild.id)
+                ch = None
+        if ch is None:
+            ch = await i.guild.create_text_channel(f"ticket-{i.user.name}"[:50], category=cat, overwrites=ow)
         aj = json.dumps(ans or {}, ensure_ascii=False)
         async with get_db() as db:
             await db.execute('INSERT INTO tickets(guild_id, channel_id, user_id, panel_id, claimed_by, status, answers) VALUES(?,?,?,?,0,"open",?)',
@@ -9468,7 +9481,10 @@ class TicketControlView(View):
                 ow[i.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
             if sr:
                 ow[sr] = discord.PermissionOverwrite(view_channel=False)
-            await i.channel.edit(overwrites=ow)
+            if isinstance(i.channel, discord.Thread):
+                await i.channel.add_user(i.user)
+            else:
+                await i.channel.edit(overwrites=ow)
             async with get_db() as db:
                 await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (i.user.id, i.channel.id))
                 await db.commit()
@@ -9818,14 +9834,11 @@ class AddStaffSelect(Select):
     async def callback(self, i):
         try:
             st = i.guild.get_member(int(self.values[0]))
-            ch = i.guild.get_channel(self.chid)
+            ch = i.guild.get_channel_or_thread(self.chid)
             if st and ch:
                 # owner 2026-07-20 : un staff ajouté au ticket doit pouvoir poster images/vidéos/
                 # GIF/liens (mêmes droits média que l'ouvreur), pas seulement du texte.
-                await ch.set_permissions(
-                    st, view_channel=True, send_messages=True, read_message_history=True,
-                    attach_files=True, embed_links=True, add_reactions=True,
-                    use_external_emojis=True, use_external_stickers=True)
+                await tickets_fils.ajouter(ch, st)
                 await i.response.send_message(f"✅ {st.mention} ajouté au ticket!", ephemeral=True)
                 add_e = discord.Embed(color=0x2ECC71, description=f"➕ **{st.display_name}** a été ajouté au ticket par {i.user.mention}")
                 add_e.set_footer(text="Staff ajouté")
@@ -9875,7 +9888,7 @@ class TransferTicketSelect(Select):
 
             old_id = tk['claimed']
             new_staff = i.guild.get_member(int(self.values[0]))
-            ch = i.guild.get_channel(self.chid)
+            ch = i.guild.get_channel_or_thread(self.chid)
             if not new_staff or not ch:
                 return await i.response.send_message("❌ Staff ou salon introuvable", ephemeral=True)
 
@@ -9899,7 +9912,10 @@ class TransferTicketSelect(Select):
                 ow[i.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
             if sr:
                 ow[sr] = discord.PermissionOverwrite(view_channel=False)
-            await ch.edit(overwrites=ow)
+            if isinstance(ch, discord.Thread):
+                await ch.add_user(new_staff)
+            else:
+                await ch.edit(overwrites=ow)
             # Réassignation de la prise en charge (claimed_by uniquement).
             async with get_db() as db:
                 await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (new_staff.id, self.chid))
@@ -9961,7 +9977,7 @@ class TicketPrioritySelect(Select):
         try:
             await i.response.defer(ephemeral=True)  # defer-first : anti « Échec interaction »
             level = self.values[0]
-            ch = i.guild.get_channel(self.chid)
+            ch = i.guild.get_channel_or_thread(self.chid)
             if not ch:
                 return await i.followup.send("❌ Salon introuvable", ephemeral=True)
             # Backend partagé : persiste la priorité + renomme le salon (préfixe emoji).
@@ -21104,6 +21120,11 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
     est indiscernable d'un ping réussi — d'où ce paramètre plutôt qu'un défaut.
     """
     chan_info = f"#{getattr(channel, 'name', '?')}/{getattr(channel, 'id', '?')}"
+    if isinstance(channel, discord.Thread):
+        kw = {k: v for k, v in (('content', content), ('embed', embed), ('embeds', embeds),
+                                ('file', file), ('files', files), ('view', view),
+                                ('allowed_mentions', allowed_mentions)) if v is not None}
+        return await channel.send(**kw)
 
     def _build_kwargs(include_profile=True):
         kw = {}
@@ -26219,7 +26240,7 @@ def _tix_is_staff(member: discord.Member) -> bool:
 
 async def _tix_is_in_ticket(channel) -> bool:
     """Check si on est dans un channel ticket actuel (status open)."""
-    if not isinstance(channel, discord.TextChannel):
+    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
         return False
     try:
         async with get_db() as db:
@@ -28767,6 +28788,17 @@ async def on_webhooks_update(channel):
         #  part déjà dans le journal de sécurité juste au-dessus — rien n'est perdu.)
     except Exception as ex:
         print(f"[on_webhooks_update] {ex}")
+
+
+@bot.event
+async def on_raw_thread_delete(payload):
+    try:
+        async with get_db() as db:
+            await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=? AND status='open'",
+                             (payload.thread_id,))
+            await db.commit()
+    except Exception as ex:
+        print(f"[on_raw_thread_delete tickets] {ex}")
 
 
 @bot.event

@@ -192,8 +192,11 @@ async def test_S4_la_ligne_quotidienne_dit_l_etat_reel(tmp_path):
         finally:
             await db.close()
 
-    ligne = await stockage.bilan(get_db, str(base), str(copies),
-                                 str(tmp_path / "transcripts"), purges="2 purgés")
+    import unittest.mock as um
+    #  Un volume sain, fixé : le disque du poste qui lance les tests n'y est pour rien.
+    with um.patch.object(stockage, "volume", lambda _c: (10 * 1024 ** 3, 6 * 1024 ** 3)):
+        ligne = await stockage.bilan(get_db, str(base), str(copies),
+                                     str(tmp_path / "transcripts"), purges="2 purgés")
     assert ligne.startswith("[STOCKAGE] base ")
     assert "copies .bak 1 = 0 Mo" in ligne and "transcripts 0 Mo" in ligne
     assert "libres sur" in ligne and "plus grosses tables : grosse 500, petite 1" in ligne
