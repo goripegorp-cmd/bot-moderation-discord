@@ -296,7 +296,8 @@ details.repli>.contenu{padding:0 16px 16px;display:grid;gap:12px;min-width:0}
 .dialogue h3{margin:0 0 6px;font-size:17px;overflow-wrap:anywhere}
 .dialogue p{margin:0 0 14px;color:var(--t2);overflow-wrap:anywhere}
 .dialogue label{display:grid;gap:6px;margin-bottom:12px;font-size:13px;color:var(--t2)}
-.dialogue textarea,.dialogue select{width:100%;padding:10px;border-radius:12px;background:var(--s1);border:1px solid var(--b1);resize:vertical}
+.dialogue textarea,.dialogue select,.dialogue input{width:100%;padding:10px;border-radius:12px;background:var(--s1);border:1px solid var(--b1);resize:vertical}
+.dialogue button:disabled{opacity:.45;cursor:not-allowed}
 .dialogue .actions{justify-content:flex-end}
 .choix{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(min(100%,130px),1fr));margin-bottom:12px}
 .choix button{padding:10px;border-radius:12px;border:1px solid var(--b1);background:var(--s1);cursor:pointer;font-weight:650;font-size:13px}
@@ -920,6 +921,7 @@ RENDUS.moderation = (vue, plein) => {
         groupe("Radiés", s.actives.radies, () => ""),
         groupe("Restreints par la direction", s.actives.restreints, m => m.par ? "par " + m.par : "")));
     }
+    vue.append(cadreNettoyage());
     vue.append(h("div", {classe: "outils"},
       recherche(f.q, "Membre, identifiant, motif, modérateur…", (q) => { f.q = q; changer(); }),
       choixListe(f.periode, [["7", "7 jours"], ["30", "30 jours"], ["90", "90 jours"], ["365", "12 mois"], ["tout", "Tout le casier"]], "Période", (v) => { f.periode = v; changer(); }),
@@ -962,6 +964,52 @@ RENDUS.moderation = (vue, plein) => {
   if (cartes.length) paginer("mod", cartes, ([m, e, c]) => carteCasier(m, e, c), sect); else sect.append(vide("Personne au casier ici", "Change la période, le type ou la recherche."));
   zone.append(sect);
 };
+function cadreNettoyage() {
+  const c = etat.d.casier || {}, lots = c.lots || [];
+  if (!peutAgir() && !lots.length) return h("div");
+  return h("div", {classe: "cadre pile"}, h("h3", {}, "Nettoyer le casier"),
+    h("p", {classe: "aide"}, "Repartir de zéro ou nettoyer une zone ; les bannissements restent, tout se défait pendant 30 jours. Amnistie automatique : 3 mois sans infraction."),
+    peutAgir() ? h("div", {classe: "actions"}, h("button", {classe: "bouton p danger", type: "button", onclick: nettoyerCasier}, "Nettoyer le casier…")) : null,
+    lots.length ? h("ul", {classe: "entrees"}, lots.map(l => h("li", {classe: "entree"},
+      h("div", {classe: "haut"}, h("span", {classe: "quoi"}, l.quoi), h("span", {classe: "quand"}, depuis(l.quand))),
+      h("div", {classe: "meta"}, nombre(l.n) + " entrée(s) · " + nombre(l.personnes) + " personne(s) · " + (l.par ? "par " + P(l.par).nom : "automatique")
+        + (l.restaure_le ? " · annulé " + depuis(l.restaure_le) + (l.restaure_par ? " par " + P(l.restaure_par).nom : "") : "")),
+      !l.restaure_le && peutAgir() ? h("div", {}, h("button", {classe: "bouton p discret", type: "button", onclick: () => agir({action: "casier_restaurer", lot: l.lot},
+        "Annuler ce nettoyage ?", nombre(l.n) + " entrée(s) reviennent au casier.", {}, "Remettre au casier")}, "Annuler ce nettoyage")) : null))) : null);
+}
+function dialogueNettoyage() {
+  const compte = (etat.d.casier && etat.d.casier.compte) || {};
+  return new Promise((fin) => {
+    const hote = $("#dialogue-hote"), voile = $("#voile-dialogue");
+    const zone = h("select", {name: "zone"}, [["warns", "Tous les avertissements"], ["auto", "Les détections automatiques"], ["tout", "Tout le casier, sauf les bannissements"]].map(([v, l]) => h("option", {value: v}, l)));
+    const age = h("select", {name: "age"}, [["0", "Tout, même récent"], ["30", "Plus vieux que 30 jours"], ["90", "Plus vieux que 90 jours"]].map(([v, l]) => h("option", {value: v}, l)));
+    const mot = h("input", {name: "confirmation", type: "text", autocomplete: "off", spellcheck: "false", placeholder: "EFFACER"});
+    const note = h("p", {"aria-live": "polite"});
+    const ok = h("button", {classe: "bouton danger", type: "button"}, "Effacer");
+    const n = () => ((compte[zone.value] || {})[age.value]) || 0;
+    const maj = () => {
+      note.textContent = n() ? nombre(n()) + " entrée(s) effacée(s) du casier, et leurs effets sur Discord. Annulable pendant 30 jours." : "Rien à effacer dans cette zone.";
+      ok.disabled = !n() || mot.value.trim().toUpperCase() !== "EFFACER";
+    };
+    const finir = (v) => { hote.replaceChildren(); voile.classList.remove("ouvert"); document.removeEventListener("keydown", echap, true); fin(v); };
+    const echap = (e) => { if (e.key === "Escape") { e.stopPropagation(); finir(null); } };
+    zone.addEventListener("change", maj); age.addEventListener("change", maj); mot.addEventListener("input", maj);
+    ok.addEventListener("click", () => { if (!ok.disabled) finir({portee: zone.value, jours: Number(age.value), confirmation: mot.value.trim()}); });
+    hote.replaceChildren(h("div", {classe: "dialogue", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "d-titre"},
+      h("h3", {id: "d-titre"}, "Nettoyer le casier du serveur"),
+      h("p", {}, "Pour repartir de zéro, ou nettoyer une zone. Les bannissements restent toujours."),
+      h("label", {}, "Quoi", zone), h("label", {}, "Âge des entrées", age), note,
+      h("label", {}, "Écris EFFACER pour confirmer", mot),
+      h("div", {classe: "actions"}, h("button", {classe: "bouton discret", type: "button", onclick: () => finir(null)}, "Annuler"), ok)));
+    voile.classList.add("ouvert");
+    document.addEventListener("keydown", echap, true);
+    maj(); zone.focus();
+  });
+}
+async function nettoyerCasier() {
+  const r = await dialogueNettoyage();
+  if (r) agir(Object.assign({action: "casier_serveur"}, r), "", "", {direct: true});
+}
 function carteCasier(m, entrees, compte) {
   const p = P(m.id), ouvrir = () => ouvrirFiche(m.id, "sanctions");
   const types = Object.entries(m.types).sort((a, b) => b[1] - a[1]);
@@ -1353,6 +1401,18 @@ function rendreFiche() {
       m.clan ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "clan_retirer", membre: m.id}, "Retirer " + p.nom + " du clan ?",
         "Seul le rôle du clan lui est retiré, sur Discord.", {}, "Retirer du clan", "danger")}, "Retirer du clan") : null)));
   else if (m.protege && peutAgir()) corps.append(h("p", {classe: "aide"}, "Fondateur ou direction : protégé, aucune action possible depuis le site."));
+  if (peutAgir() && !m.protege && (f.sanctions.length || (!m.present && m.banni))) {
+    const warns = f.sanctions.filter(s => s.type === "warn").length;
+    corps.append(h("div", {classe: "cadre pile", style: "padding:14px"}, h("h3", {}, "Casier"),
+      h("p", {classe: "aide"}, "Effacé du casier et de ses effets sur Discord (compteurs du filtre, rôle de récidive" + (m.mute_jusqu ? ", mute en cours" : "") + "). Annulable pendant 30 jours, onglet Modération."),
+      h("div", {classe: "actions"},
+        warns ? h("button", {classe: "bouton p", type: "button", onclick: () => agir({action: "casier_effacer", membre: m.id, quoi: "warns"},
+          "Effacer ses avertissements ?", nombre(warns) + " avertissement(s) sortent du casier d'un coup. Annulable pendant 30 jours.", {}, "Effacer", "danger")}, "Effacer ses avertissements · " + warns) : null,
+        f.sanctions.length ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "casier_effacer", membre: m.id, quoi: "tout"},
+          "Effacer tout son casier ?", nombre(f.sanctions.length) + " entrée(s)." + (m.mute_jusqu ? " Son mute en cours est levé." : "") + " Annulable pendant 30 jours.", {}, "Tout effacer", "danger")}, "Effacer tout son casier") : null,
+        !m.present && m.banni ? h("button", {classe: "bouton p vert", type: "button", onclick: () => agir({action: "debannir", membre: m.id},
+          "Lever son bannissement ?", "Il pourra revenir sur le serveur.", {}, "Débannir", "vert")}, "Lever le bannissement") : null)));
+  }
   const nb = {chrono: null, sanctions: f.sanctions.length, tickets: f.tickets.length, candidatures: f.candidatures.length, questions: f.questions.length, journal: f.journal.length, donnees: f.donnees.length};
   const dispo = ONGLETS_FICHE.filter(([k]) => k === "chrono" || nb[k]);
   if (!dispo.some(([k]) => k === etat.ficheOnglet)) etat.ficheOnglet = "chrono";

@@ -46,6 +46,7 @@ except Exception:  # sans base de fuseaux : l'heure UTC
 import questions
 import recrutements
 import registre
+import casier
 import rellseas_panneau
 import sondages
 import vigilance
@@ -55,7 +56,7 @@ ESPACE = "/tableau/espace"
 COOKIE = "__Host-tableau"
 LIMITE_REQUETES = 240          # par minute et par session
 LIMITE_ESSAIS = 30             # liens invalides par adresse et par 10 minutes
-LIMITES_GRAVES = {"exclusion": 5, "roles": 25}  # par 10 minutes et par personne
+LIMITES_GRAVES = {"exclusion": 5, "roles": 25, "casier": 10}  # par 10 minutes et par personne
 BLOCAGE = 3600
 PAGE_BRUTE = (Path(__file__).resolve().parent / "tableau_page.html").read_text(encoding="utf-8")
 VERSION = hashlib.sha256(PAGE_BRUTE.encode()).hexdigest()[:12]
@@ -609,6 +610,15 @@ async def _alertes(g, qui) -> list:
     return out
 
 
+async def _casier(g, qui) -> dict:
+    """Ce que chaque zone du casier effacerait, et les nettoyages des 30 derniers jours (à défaire)."""
+    lots = await casier.lots(g.id)
+    for x in lots:
+        x["par"] = qui(int(x["par"])) if x["par"] else ""
+        x["restaure_par"] = qui(int(x["restaure_par"])) if x["restaure_par"] else ""
+    return {"lots": lots, "compte": await casier.comptes(g.id, getattr(getattr(_bot, "user", None), "id", 0) or 0)}
+
+
 async def _sondages(g, qui) -> dict:
     """« Et qui s'affiche au propre, même sur le panel. »"""
     d = await sondages.lister(g.id)
@@ -631,7 +641,8 @@ async def donnees(g, portee: str = "tout") -> dict:
     qui = _Personnes(g)
     parties = {}
     for nom, fn in (("journal", lambda: _journal(g, qui)), ("questions", lambda: _questions(g, qui)),
-                    ("alertes", lambda: _alertes(g, qui)), ("sondages", lambda: _sondages(g, qui))):
+                    ("alertes", lambda: _alertes(g, qui)), ("sondages", lambda: _sondages(g, qui)),
+                    ("casier", lambda: _casier(g, qui))):
         try:
             parties[nom] = await fn()
         except Exception as ex:  # une partie illisible n'emporte pas le reste du tableau
@@ -706,6 +717,16 @@ async def fiche(g, uid: int, auteur) -> dict:
         infos["cree"] = int(m.created_at.timestamp()) if getattr(m, "created_at", None) else None
         if getattr(m, "timed_out_until", None) and getattr(m, "is_timed_out", lambda: False)():
             infos["mute_jusqu"] = int(m.timed_out_until.timestamp())
+    elif getattr(g, "fetch_ban", None) is not None:
+        import discord
+        try:
+            await g.fetch_ban(discord.Object(id=int(uid)))
+            infos["banni"] = True
+        except discord.NotFound:
+            infos["banni"] = False
+        except discord.HTTPException as ex:
+            _log("[TABLEAU][E6] bannissement illisible")
+            _log(f"[TABLEAU][E6:DETAIL] {uid} {type(ex).__name__} {ex}")
     robot = getattr(getattr(_bot, "user", None), "id", 0) or 0
     async with _get_db() as db:
         rows = await recrutements._lignes(
@@ -970,6 +991,12 @@ def _genre_grave(nom: str, corps: dict) -> tuple[str, int] | None:
         return "roles", 1
     if nom == "clan_retirer_lot":
         return "roles", len(corps.get("membres") or [])
+    if nom in ("casier_effacer", "casier_restaurer"):
+        return "casier", 1
+    if nom == "casier_serveur":
+        return "casier", 5
+    if nom == "debannir":
+        return "exclusion", 1
     return None
 
 

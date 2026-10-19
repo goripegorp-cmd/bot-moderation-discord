@@ -86,7 +86,8 @@ async def init_db():
             colonnes = {r[1] for r in await cur.fetchall()}
         for nom, type_ in _COLONNES.items():
             if nom not in colonnes:
-                await db.execute(f"ALTER TABLE sondages ADD COLUMN {nom} {type_}")
+                ajout = f"ALTER TABLE sondages ADD COLUMN {nom} {type_}"
+                await db.execute(ajout)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_sondages_auteur ON sondages(guild_id, auteur_id, cree_le)")
         async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sondages_votes'") as cur:
             anciens_votes = await cur.fetchone() is not None
@@ -344,11 +345,10 @@ async def nouveau(msg) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def _ligne(message_id=None, sid=None):
+    requete = ("SELECT id, guild_id, channel_id, message_id, auteur_id, question, choix, comptes, total, termine,"
+               " retire_le FROM sondages WHERE " + ("message_id=?" if message_id else "id=?"))
     async with _get_db() as db:
-        async with db.execute(
-                "SELECT id, guild_id, channel_id, message_id, auteur_id, question, choix, comptes, total, termine,"
-                " retire_le FROM sondages WHERE " + ("message_id=?" if message_id else "id=?"),
-                (int(message_id or sid),)) as cur:
+        async with db.execute(requete, (int(message_id or sid),)) as cur:
             r = await cur.fetchone()
     if r is None:
         return None
@@ -357,12 +357,15 @@ async def _ligne(message_id=None, sid=None):
             "total": r[8], "termine": bool(r[9]), "retire_le": r[10]}
 
 
+_CHAMPS = ("termine", "retire_le", "retire_par", "comptes", "total", "choix", "maj_le")
+
+
 async def _marquer(sid: int, **champs) -> None:
     if not champs:
         return
+    requete = "UPDATE sondages SET " + ", ".join(k + "=?" for k in champs if k in _CHAMPS) + " WHERE id=?"
     async with _get_db() as db:
-        await db.execute(f"UPDATE sondages SET {', '.join(k + '=?' for k in champs)} WHERE id=?",
-                         (*champs.values(), sid))
+        await db.execute(requete, (*(v for k, v in champs.items() if k in _CHAMPS), sid))
         await db.commit()
 
 

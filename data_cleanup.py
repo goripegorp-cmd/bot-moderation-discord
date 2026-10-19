@@ -42,6 +42,7 @@ from datetime import datetime, timedelta, timezone
 
 from discord.ext import tasks
 
+import casier
 import publications
 import questions
 import registre
@@ -89,6 +90,7 @@ PURGES_CIBLEES = [
     *publications.PURGES,
     *vigilance.PURGES,
     *tableau.PURGES,
+    *casier.PURGES,
 ]
 
 # Day-of-week for the task (6 = Sunday) + hour (FR)

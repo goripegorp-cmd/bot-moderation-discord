@@ -36,6 +36,7 @@ DELETE_SUBJECT = {
     "account_freeze": ["user_id"],
     "security_logs": ["user_id"],
     "infractions": ["user_id"],
+    "infractions_archive": ["user_id"],
     "realsy_tracking": ["user_id"],
     "shop_purchases": ["user_id"],
     "user_toxicity_scores": ["user_id"],

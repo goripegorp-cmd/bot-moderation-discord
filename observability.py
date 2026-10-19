@@ -172,10 +172,13 @@ async def record_leave(guild_id: int, user_id: int):
     day = _today_paris()
     try:
         async with _get_db() as db:
+            #  Un membre arrivé avant ce journal n'avait pas de ligne : son départ se perdait. Il a
+            #  désormais la sienne (l'amnistie de 3 mois des membres partis en dépend).
             await db.execute(
-                "UPDATE daily_join_log SET left_day=? "
-                "WHERE guild_id=? AND user_id=? AND left_day IS NULL",
-                (day, guild_id, user_id),
+                "INSERT INTO daily_join_log(guild_id, user_id, joined_day, left_day) VALUES(?, ?, NULL, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET left_day=excluded.left_day "
+                "WHERE daily_join_log.left_day IS NULL",
+                (guild_id, user_id, day),
             )
             await db.commit()
     except Exception as ex:

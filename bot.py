@@ -110,6 +110,7 @@ import recrutements  # suivi des candidatures Rell Seas, bilan du mois
 import registre  # le journal du serveur, lu sur le site (19/10/2026)
 import questions  # les questions posées dans les salons publics (onglet du site)
 import publications  # une publication des réseaux = un seul message (réservation atomique)
+import casier  # amnistie de 3 mois, effacer une personne ou une zone du casier, défaire pendant 30 jours
 import websub_youtube  # YouTube prévient le bot dès qu'une vidéo sort
 import vigilance  # un membre qui cumule les évènements graves : alerte dans « 📋logs »
 import tableau  # tableau de bord web : candidatures, tickets par type, clan
@@ -6553,6 +6554,26 @@ async def _action_fiche_retirer(g, auteur, d):
     return True, "Fiche retirée."
 
 
+async def _apres_casier(g, membres, *, lever_mute: bool = False, motif: str = "Casier effacé (tableau de bord)"):
+    """« Que quand on enlève les infractions, ça s'enlève bien aussi sur le serveur Discord » :
+    compteurs du filtre remis à zéro, rôle de récidive recalculé (retiré s'il n'a plus lieu d'être),
+    mute en cours levé si demandé."""
+    for uid in membres:
+        try:
+            async with get_db() as db:
+                await db.execute("DELETE FROM badword_strikes WHERE guild_id=? AND user_id=?", (g.id, int(uid)))
+                await db.execute("DELETE FROM user_toxicity_scores WHERE guild_id=? AND user_id=?", (g.id, int(uid)))
+                await db.commit()
+            m = g.get_member(int(uid))
+            if m is not None:
+                await recidivism_module.recompute(g, m)
+                if lever_mute and m.is_timed_out():
+                    await m.timeout(None, reason=motif)
+        except (discord.HTTPException, aiosqlite.Error) as ex:
+            _logerr("casier.discord", ex, guild_id=g.id)
+        await asyncio.sleep(0.2)
+
+
 async def _action_sanction_retirer(g, auteur, d):
     sid = int(d.get("sanction", 0) or 0)
     async with get_db() as db:
@@ -6561,8 +6582,14 @@ async def _action_sanction_retirer(g, auteur, d):
             r = await cur.fetchone()
         if not r:
             return False, "Sanction déjà retirée."
+        dernier_mute = False
+        if str(r[1]).lower() == "mute":
+            async with db.execute("SELECT MAX(id) FROM infractions WHERE guild_id=? AND user_id=? AND type='mute'",
+                                  (g.id, r[0])) as cur:
+                dernier_mute = (await cur.fetchone())[0] == sid
         await db.execute("DELETE FROM infractions WHERE id=? AND guild_id=?", (sid, g.id))
         await db.commit()
+    await _apres_casier(g, [int(r[0] or 0)], lever_mute=dernier_mute, motif="Mute retiré du casier (tableau de bord)")
     await log_staff_action(g.id, auteur.id, int(r[0] or 0), "sanction_retiree",
                            f"{r[1]} — {str(r[2] or '')[:120]}", surface="tableau")
     await _au_journal(g, "Modération", "mod.sanction_retiree",
@@ -6579,6 +6606,125 @@ async def _action_sanction_retirer(g, auteur, d):
     return True, "Sanction retirée du casier."
 
 
+async def _action_casier_effacer(g, auteur, d):
+    """« Enlever tous les avertissements de quelqu'un d'un seul coup » — ou tout son casier."""
+    quoi = str(d.get("quoi") or "")
+    uid = int(d.get("membre", 0) or 0)
+    if quoi not in ("warns", "tout") or not uid:
+        return False, "Demande invalide."
+    if uid == g.owner_id:
+        return False, "Le fondateur n'a pas de casier à effacer."
+    bilan = await casier.effacer_membre(g.id, uid, quoi, auteur.id)
+    if not bilan["n"]:
+        return False, "Rien à effacer."
+    await _apres_casier(g, [uid], lever_mute=quoi == "tout")
+    quoi_txt = "avertissement(s)" if quoi == "warns" else "entrée(s) du casier"
+    await _au_journal(g, "Modération", "mod.casier_efface",
+                      f"{bilan['n']} {quoi_txt} effacé(s) par {auteur.display_name} (tableau de bord, annulable 30 jours)",
+                      membre_id=uid, auteur_id=auteur.id)
+    await log_staff_action(g.id, auteur.id, uid, "casier_efface", f"{quoi} · {bilan['n']}", surface="tableau")
+    return True, f"{bilan['n']} {quoi_txt} effacé(s). Annulable pendant 30 jours."
+
+
+async def _action_casier_serveur(g, auteur, d):
+    """« Nettoyer tous les avertissements du serveur d'un seul coup… repartir de zéro… nettoyer
+    une zone. » Confirmation écrite, bannissements jamais touchés, annulable pendant 30 jours."""
+    portee = str(d.get("portee") or "")
+    try:
+        jours = int(d.get("jours") or 0)
+    except (TypeError, ValueError):
+        jours = -1
+    if portee not in casier.PORTEES or jours not in casier.AGES:
+        return False, "Demande invalide."
+    if str(d.get("confirmation") or "").strip().upper() != "EFFACER":
+        return False, "Écris EFFACER pour confirmer."
+    bilan = await casier.nettoyer(g.id, portee, jours, auteur.id, bot.user.id)
+    if not bilan["n"]:
+        return False, "Rien à effacer dans cette zone."
+    asyncio.create_task(_apres_casier(g, bilan["membres"]))
+    await _au_journal(g, "Modération", "mod.casier_serveur",
+                      f"Casier du serveur nettoyé par {auteur.display_name} : {bilan['quoi']} — {bilan['n']} entrée(s), "
+                      f"{len(bilan['membres'])} personne(s). Annulable 30 jours.", auteur_id=auteur.id)
+    await log_staff_action(g.id, auteur.id, 0, "casier_serveur", f"{portee} · {jours} j · {bilan['n']}", surface="tableau")
+    return True, f"{bilan['n']} entrée(s) effacée(s) pour {len(bilan['membres'])} personne(s). Annulable pendant 30 jours."
+
+
+async def _action_casier_restaurer(g, auteur, d):
+    lot = str(d.get("lot") or "")[:80]
+    bilan = await casier.restaurer(g.id, lot, auteur.id)
+    if not bilan["n"]:
+        return False, "Ce nettoyage est déjà annulé, ou trop ancien."
+    asyncio.create_task(_apres_casier(g, bilan["membres"]))
+    await _au_journal(g, "Modération", "mod.casier_restaure",
+                      f"Nettoyage du casier annulé par {auteur.display_name} : {bilan['n']} entrée(s) remise(s)",
+                      auteur_id=auteur.id)
+    await log_staff_action(g.id, auteur.id, 0, "casier_restaure", f"{lot} · {bilan['n']}", surface="tableau")
+    return True, f"{bilan['n']} entrée(s) remise(s) au casier."
+
+
+async def _action_debannir(g, auteur, d):
+    uid = int(d.get("membre", 0) or 0)
+    if not uid or g.get_member(uid) is not None:
+        return False, "Ce membre n'est pas banni."
+    if not g.me.guild_permissions.ban_members:
+        return False, "Il me manque la permission « Bannir des membres »."
+    try:
+        await g.unban(discord.Object(id=uid), reason=f"Débanni par {auteur} ({auteur.id}) — tableau de bord")
+    except discord.NotFound:
+        return False, "Ce membre n'est pas banni."
+    await _au_journal(g, "Modération", "mod.unban", f"Bannissement levé par {auteur.display_name} (tableau de bord)",
+                      membre_id=uid, auteur_id=auteur.id)
+    await log_staff_action(g.id, auteur.id, uid, "site_unban", "", surface="tableau")
+    return True, "Bannissement levé : il peut revenir sur le serveur."
+
+
+async def _dates_de_depart(guild_id: int) -> dict:
+    """Le jour de départ connu de chaque membre parti (journal des arrivées et départs)."""
+    out = {}
+    try:
+        async with get_db() as db:
+            async with db.execute("SELECT user_id, left_day FROM daily_join_log WHERE guild_id=? AND left_day IS NOT NULL",
+                                  (guild_id,)) as cur:
+                for uid, jour in await cur.fetchall():
+                    try:
+                        out[int(uid)] = datetime.strptime(str(jour)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
+                    except ValueError:
+                        continue
+    except aiosqlite.Error as ex:
+        _logerr("amnistie.departs", ex, guild_id=guild_id)
+    return out
+
+
+@tasks.loop(hours=6)
+async def amnistie_task():
+    """« Si quelqu'un n'a pas commis d'infraction depuis plus de 3 mois non-stop, tu enlèves toutes
+    les infractions… sauf s'il a vraiment été très agressif… et les avertissements des joueurs partis
+    depuis plus de 3 mois. » Une fois par jour et par serveur, seulement quand la liste des membres
+    est complète (sinon un présent passerait pour parti)."""
+    for g in list(bot.guilds):
+        try:
+            c = await cfg(g.id)
+            if not g.chunked or time.time() - float(c.get('amnistie_derniere', 0) or 0) < 86400 - 900:
+                continue
+            bilan = await casier.amnistie(g.id, {m.id for m in g.members}, await _dates_de_depart(g.id))
+            await db_set(g.id, 'amnistie_derniere', int(time.time()))
+            if bilan["membres"]:
+                await _apres_casier(g, bilan["membres"], motif="Amnistie : 3 mois sans infraction")
+                await _au_journal(g, "Modération", "mod.amnistie",
+                                  f"Amnistie : {bilan['n']} entrée(s) retirée(s) du casier de {len(bilan['membres'])} "
+                                  "personne(s) — 3 mois sans infraction, ou partie depuis 3 mois. Annulable 30 jours.")
+            print(f"[AMNISTIE] {g.id} · {len(bilan['membres'])} casier(s) · {bilan['n']} entrée(s) · "
+                  f"{len(bilan['gardes'])} gardé(s)")
+        except Exception as ex:  # un serveur en échec n'arrête pas les autres ; réessai au tour suivant
+            _logerr("amnistie", ex, guild_id=getattr(g, 'id', 0))
+
+
+@amnistie_task.before_loop
+async def _amnistie_attente():
+    await bot.wait_until_ready()
+    await asyncio.sleep(1800)
+
+
 async def _action_sondage_retirer(g, auteur, d):
     """« Comme ça, on peut décider si on l'enlève du salon ou non. »"""
     return await sondages.retirer(g, int(d.get("sondage", 0) or 0), auteur)
@@ -6588,7 +6734,9 @@ _ACTIONS_TABLEAU = {"ticket_fermer": _action_ticket_fermer, "candidature": _acti
                     "clan_retirer": _action_clan_retirer, "clan_retirer_lot": _action_clan_retirer_lot,
                     "fiche_retirer": _action_fiche_retirer, "sanction_retirer": _action_sanction_retirer,
                     "moderer": _action_moderer, "question": _action_question, "alerte_geree": _action_alerte_geree,
-                    "sondage_retirer": _action_sondage_retirer}
+                    "sondage_retirer": _action_sondage_retirer, "casier_effacer": _action_casier_effacer,
+                    "casier_serveur": _action_casier_serveur, "casier_restaurer": _action_casier_restaurer,
+                    "debannir": _action_debannir}
 
 
 async def _salon_alertes_site(g):
@@ -12585,6 +12733,7 @@ _SUPERVISED_LOOP_NAMES = [
     "menage_salons_task",
     "salon_logs_task",
     "websub_task",
+    "amnistie_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -19437,6 +19586,8 @@ async def _activite_boot():
                   radie=_RADIE_ROLE_NAME, direction=_direction_ou_plus, actions=_ACTIONS_TABLEAU,
                   alerte_securite=_alerte_securite_site, log=print)
     await tableau.init_db()
+    casier.setup(get_db=get_db, log=print)
+    await casier.init_db()
     publications.setup(get_db=get_db, instance=_INSTANCE_ID, log=print)
     await publications.init_db()
     websub_youtube.setup(secret=os.getenv("WEBSUB_SECRET") or hashlib.sha256((TOKEN or "").encode() + b"|websub").hexdigest()[:40],
@@ -20227,6 +20378,8 @@ async def on_ready():
         salon_logs_task.start()
     if not websub_task.is_running():
         websub_task.start()
+    if not amnistie_task.is_running():
+        amnistie_task.start()
 
     # Phase 48 : Compliment du jour DÉSACTIVÉ (système Saint-Valentin retiré)
     # if not compliment_dispatcher.is_running():
