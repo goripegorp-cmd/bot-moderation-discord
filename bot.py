@@ -1095,14 +1095,7 @@ async def db_init():
             try: await db.execute('ALTER TABLE infractions ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP')
             except: pass
         
-        # ═══════════════ TABLES ÉCONOMIE & MINI-JEUX ═══════════════
 
-        # Phase 262 : VERROU DE SPAWN ATOMIQUE (1 seul event de combat à la fois).
-        # PK guild_id → l'INSERT ON CONFLICT DO NOTHING ne réussit que pour le 1er
-        # spawn concurrent (les autres voient rowcount=0 → bail). Court-vécu : le
-        # claim auto-expire (TTL) après que l'event soit inséré ; au-delà, c'est le
-        # verrou _has_any_major_event_running (lecture des tables d'events) qui
-        # sérialise. Pas de release explicite nécessaire (auto-expiration).
 
         
         # Table des achats boutique (rôles temporaires)
@@ -1127,7 +1120,6 @@ async def db_init():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_rr_msg ON reaction_roles(message_id)')
 
 
-
         # Phase 102 : nouveaux slots équipement (Helmet, Boots, Accessory, Trinket)
         # ALTER TABLE idempotent — try/except si colonne déjà existante
         for col_def in (
@@ -1141,70 +1133,6 @@ async def db_init():
             col_name = col_def.split()[0]
 
 
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 41 — Engagement quotidien (daily quests, achievements, pets,
-        # wheel, confessions)
-        # ═══════════════════════════════════════════════════════════════════
-
-        # Streak quotidien : N jours consécutifs avec >=1 quête complétée
-
-
-        # Pets possédés par les membres (1 ligne par pet, plusieurs possibles)
-
-        # Log des spins de Daily Wheel (cooldown 24h)
-
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 42 — World Boss + Daily Riddle + Voice Chaos
-        # ═══════════════════════════════════════════════════════════════════
-
-
-        # Phase 251.15 : claim PAR JOUEUR de la consolation d'énigme (anti-spam de la
-        # bonne réponse → +50 à chaque clic). 1 ligne = ce joueur a déjà été récompensé
-        # pour l'énigme de ce jour. INSERT OR IGNORE + rowcount = paiement unique.
-
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 43 — Vrais events originaux (Trésor Flash, Rituel, Tag Royale)
-        # ═══════════════════════════════════════════════════════════════════
-
-
-        # owner 2026-06-30 (équité hybride) : qui a déjà reçu le lot de CONSOLATION d'un trésor
-        # (1 fois/joueur/trésor). Anti-double + reboot-safe.
-
-
-        # Anniversaire serveur : éviter de relancer 2× la même année
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 45 — Camouflage de salon + Vocal Spotlight + Compliment
-        # TOUJOURS réversible. Backup garanti via DB + failsafe loop.
-        # ═══════════════════════════════════════════════════════════════════
-
-        # Channel camouflage : 1 ligne par camouflage actif/historique
-
-        # Voice spotlight : 1 ligne par spotlight
-
-        # Compliment du jour : tracking pour cooldown 1/jour/user
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 46 — Alliances + Game Night
-        # ═══════════════════════════════════════════════════════════════════
-
-
-        # Phase 253 : POINTS DE COMBAT d'alliance. Chaque attaque de boss d'un membre
-        # crédite SON alliance → classement + concours. Table dédiée (reset de saison
-        # = simple DELETE/UPDATE, sans toucher au schéma des alliances).
-
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 47 — Saisons + Prestige + Factions + Weekly/Monthly quests
-        # ═══════════════════════════════════════════════════════════════════
-
-        # Season pass progress (1 ligne par user/saison)
-
-        # owner 2026-06-30 : « jouer fait avancer » — participer aux events crédite le Season
-        # Pass + l'XP, PLAFONNÉ par jour pour anti-farm (cf. _award_event_meta).
-
         # owner 2026-06-30 : cartes d'accueil à purger périodiquement (restent ~1h puis supprimées).
         await db.execute('''CREATE TABLE IF NOT EXISTS welcome_msgs (
             guild_id INTEGER,
@@ -1213,31 +1141,6 @@ async def db_init():
             posted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (guild_id, message_id)
         )''')
-
-        # Prestige rank (1 ligne par user)
-
-        # Réputation par faction (4 lignes max par user : 1 par faction)
-
-        # Weekly quests progress (5 lignes par user/semaine)
-
-        # Monthly mega quest progress (1 ligne par user/mois)
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 49 — LORE ÉVOLUTIF + NPCs + MISSIONS
-        # ═══════════════════════════════════════════════════════════════════
-        # État du lore par serveur (chapitre actuellement actif)
-
-
-        # Progression par participant et par étape (unique user_id par step)
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 50 — ROBLOX SPÉCIALISÉ : Speedrun + Studio Tips + Matchmaking
-        # ═══════════════════════════════════════════════════════════════════
-
-
-        # Catalogue jeux Roblox (owner-managed)
-
-        # Updates de jeu (annonces owner avec thread feedback)
 
 
         # Logs de tickets REGROUPÉS (owner 2026-06-29) : 1 timeline ÉVOLUTIVE par ticket.
@@ -1260,26 +1163,6 @@ async def db_init():
         )''')
         await db.execute("CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_user "
                          "ON ticket_transcripts(guild_id, user_id)")
-
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 53 — AMBIANCE : Heures dorées + Recap DM + Conversation starters
-        # ═══════════════════════════════════════════════════════════════════
-
-
-        # Greeting daily log (1 par jour par user)
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 57 — LORE VIVANT : Choix narratifs + Classes RP + Mémoires
-        # ═══════════════════════════════════════════════════════════════════
-
-
-        # Classe RP de chaque membre (1 par guild+user)
-
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 62 — VOIX + SAISONS IRL
-        # ═══════════════════════════════════════════════════════════════════
 
 
         # Phase 235.5 : vocaux temporaires « Voc Build » (join-to-create) persistés
@@ -1324,13 +1207,6 @@ async def db_init():
             triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             cleared_at DATETIME
         )''')
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 67 — ALLIANCE COMPLÈTE : Trésorerie + Audit log
-        # ═══════════════════════════════════════════════════════════════════
-
-
-        # Marketplace : annonces de vente entre joueurs
 
 
         # ═══════════════════════════════════════════════════════════════════
@@ -1475,7 +1351,6 @@ async def db_init():
             PRIMARY KEY (guild_id, user_id)
         )''')
 
-        # Table pour les auto-réactions
 
         # ── D4 : extraction des dicts indexés par user_id hors du blob config ──
         # Ces 3 clés (badwords_strikes / birthdays / creator_links) grossissaient
@@ -2356,30 +2231,32 @@ async def is_channel_immune(guild_id, channel_id):
     except Exception:
         return False
 
+_SALONS_TICKET: dict = {}
+
+
 async def is_ticket_channel(channel):
-    """
-    Vérifie si un salon est un ticket.
-    Les tickets sont immunisés contre toutes les protections SAUF anti-phishing et anti-scam.
-    """
-    try:
-        # Vérifier dans la base de données des tickets
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT id FROM tickets WHERE channel_id=? AND status="open"',
-                (channel.id,)
-            ) as c:
-                if await c.fetchone():
-                    return True
+    """Vérifie si un salon est un ticket (immunisé contre tout sauf phishing et scam).
+    Appelée à chaque message : la réponse est gardée 2 minutes par salon."""
+    cid = getattr(channel, 'id', 0)
+    vu = _SALONS_TICKET.get(cid)
+    if vu is not None and time.monotonic() - vu[0] < 120:
+        return vu[1]
+    nom = (getattr(channel, 'name', '') or '').lower()
+    oui = nom.startswith('ticket-') or nom.startswith('🎫')
+    if not oui:
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT 1 FROM tickets WHERE channel_id=? AND status="open"', (cid,)
+                ) as c:
+                    oui = await c.fetchone() is not None
+        except Exception as ex:
+            _logerr("tickets.salon", ex)
+            return False
+    _SALONS_TICKET[cid] = (time.monotonic(), oui)
+    _evict_if_big(_SALONS_TICKET, 5000)
+    return oui
 
-        # Vérifier aussi par le nom du salon (backup)
-        channel_name = channel.name.lower()
-        if channel_name.startswith('ticket-') or channel_name.startswith('🎫'):
-            return True
-
-    except:
-        pass
-
-    return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3702,11 +3579,6 @@ async def bouclier_secours(i: discord.Interaction):
 bot.tree.add_command(bouclier_group)
 
 
-# ═══════════════ ABONNEMENTS RSS UNIVERSELS (owner 2026-06-24) ═══════════════
-# Twitter/X, TikTok, Instagram (et tout) → Discord, via un flux RSS (RSSHub gratuit ou
-# RSS.app). Réservé admin via Intégrations. Le bot poll, dédup et poste les nouveaux posts.
-
-
 # ═══════════════ /signaler — SIGNALEMENT MEMBRE (owner 2026-06-27, protection mineurs) ═══════════════
 # Le bot ne voit PAS les MP → un membre (surtout un jeune) peut signaler une arnaque, du grooming
 # ou un malaise reçu en privé. Le signalement part DISCRÈTEMENT au staff (salon Sécurité), jamais
@@ -3815,17 +3687,6 @@ async def signaler_vocal_cmd(i: discord.Interaction, membre: discord.Member, rai
             ephemeral=True)
     except Exception:
         pass
-
-
-# ═══════════════ /social — ÉTAT DES RÉSEAUX SOCIAUX (owner 2026-07-12) ═══════════════
-# Vérifie EN DIRECT depuis Discord (au lieu de fouiller les logs Railway) : RSSHUB_BASE_URL
-# posée ? le bot ATTEINT-il RSSHub ? quels réseaux sont en auto. Réservé staff/owner. FAIL-SAFE.
-
-
-# ═══════════════ /parrainage — MOTEUR DE CROISSANCE (owner 2026-06-27) ═══════════════
-# Chaque membre obtient SON lien d'invitation perso (le bot l'attribue via referral_links), voit
-# ses récompenses + le classement des parrains, et un CTA. Anti-triche : seuls les filleuls RÉELS
-# qui restent/sont actifs comptent (gate côté referrals.py). 100% dans les règles Discord.
 
 
 # ═══════════════ /promo — PROMOTION EXTERNE (owner 2026-06-29) ═══════════════
@@ -9441,13 +9302,7 @@ class RgpdPanelV2(LayoutView):
             v2_subtitle("Droit à l'effacement (art. 17 RGPD)"),
             v2_divider(),
             v2_body(
-                "**🗑️ Effacer un membre** : supprime ou anonymise *toutes* ses données de ce serveur "
-                "(éco, inventaire, stats, préférences, logs…). L'historique de modération d'**autrui** "
-                "est préservé — seul l'identifiant du membre y est neutralisé. _Irréversible : une "
-                "confirmation (`PURGER`) est demandée._\n\n"
-                "**🩺 Vérifier la carte** : compare le registre RGPD au schéma réel de la base "
-                "(diagnostic — repère une table éventuellement oubliée).\n\n"
-                "_Les logs de sécurité datés sont purgés automatiquement chaque jour (rétention)._"
+                "🗑️ **Effacer un membre** — toutes ses données partent ; dans le casier des autres, son identifiant est neutralisé. Confirmation `PURGER`.\n🩺 **Vérifier la carte** — le registre RGPD face à la base réelle."
             ),
             v2_divider(),
             discord.ui.ActionRow(b_purge, b_check, b_back),
@@ -9982,7 +9837,7 @@ class AntiRaidPanelV2(LayoutView):
 
         items = [
             v2_title("⚔️ Anti-Raid"),
-            v2_subtitle("Détection automatique de raid (mass-join) + action immédiate"),
+            v2_subtitle("Vague d'arrivées → riposte immédiate"),
             v2_divider(),
             v2_body(
                 f"🔌 **État** · {'🟢 actif' if enabled else '⚪ désactivé'}\n"
@@ -9992,12 +9847,6 @@ class AntiRaidPanelV2(LayoutView):
                 f"📢 **Salon logs** · {log_ch.mention if log_ch else '_non défini_'}"
             ),
             v2_divider(),
-            v2_body(
-                "**Comment ça marche :**\n"
-                f"• Quand `{threshold}` nouveaux membres rejoignent en `{window}`s → 🚨 RAID détecté\n"
-                f"• L'action `{action}` est appliquée à tous les nouveaux\n"
-                f"• Les comptes < `{min_age}`j sont flaggés en priorité"
-            ),
             v2_divider(),
             discord.ui.ActionRow(log_select),
             discord.ui.ActionRow(b_toggle, b_thresh, b_action, b_scan, b_back),
@@ -10184,41 +10033,6 @@ def _in_night_window(c: dict) -> bool:
     except Exception:
         return False
 
-
-# ─────────────────────────── Phase 179 : COFFRE / STASH ───────────────────────────
-# player_inventory = les 6 pièces ÉQUIPÉES. player_stash = la collection qu'on
-# peut équiper à la main. Loot → _acquire_gear (équipe si slot vide, sinon coffre).
-
-
-# ─────────────────────────── Phase 179b : UI ÉQUIPEMENT ───────────────────────────
-
-
-# ───────── Phase 252 : inventaire au propre — déséquiper + familier intégrés ─────────
-
-
-# ─────────────────────────── PANEL DE CONFIG ───────────────────────────
-
-
-# ─────────────────────────── ENGINE — START / END ───────────────────────────
-
-
-# ───────────────────────────  Phase 74 : BOSS ARENA V2  ───────────────────────
-# LayoutView unifié pour l'arène : HP boss + bouton ATTAQUER accessory + top
-# combattants + bouton INVENTAIRE. Remplace _build_boss_embed + BossAttackView
-# au niveau visuel. Les boutons restent persistants via custom_id event_id.
-# Tous les phase warning messages sont gérés séparément (Phase 66 cleanup).
-
-
-# ─────────────────────────── BOUTON ATTAQUE ───────────────────────────
-
-
-# ─────────────────────────── Helper envoi V2 + ping ───────────────────────────
-
-
-# ─────────────────────────── END EVENT (restauration) ───────────────────────────
-
-
-# ─────────────────────────── BACKGROUND TASKS ───────────────────────────
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 37 — CLASSES + VOCAL OPT-IN
@@ -10499,14 +10313,6 @@ async def help_cmd(i: discord.Interaction):
 # créée. Elle tournait donc pour rien, mais une enchère héritée encore `active` en
 # base aurait suffi à envoyer deux MP au vendeur et à l'acheteur. Les enchères font
 # partie du MMORPG, retiré par la refonte.
-
-
-# ─── Phase 111 : Hub Live Events Tile — refresh dynamique ────────────────
-#
-# Une seconde "tuile" est postée dans le salon du hub (juste après le hub
-# pinned). Elle affiche les events actifs en temps réel : Boss Raid, World
-# Boss, Treasure Hunt, Quiz, Voice Chaos, etc. La loop edit le message
-# toutes les minutes UNIQUEMENT si le contenu a changé (anti-spam edit log).
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -11951,9 +11757,6 @@ async def _task_supervisor_wait():
 task_supervisor.add_exception_type(Exception)
 
 
-# ─────────────────────────── RESTAURATION AU BOOT ───────────────────────────
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  📋 LOGS UNIFIÉS — Panel V2 (Phase 3.8)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -12314,7 +12117,7 @@ class LogsRoutingPanelV2(LayoutView):
         self.clear_items()
         items: list = []
         items.append(v2_title("🎯 Salon par catégorie"))
-        items.append(v2_subtitle("Envoie chaque type de log dans le salon de ton choix"))
+        items.append(v2_subtitle("Un salon par type de log"))
         items.append(v2_divider())
         items.append(v2_body(
             f"🌐 **Salon global** (par défaut) : "
@@ -12333,11 +12136,7 @@ class LogsRoutingPanelV2(LayoutView):
         items.append(v2_body("\n".join(lines)))
         items.append(v2_divider())
         items.append(v2_body(
-            "🎚️ **3 niveaux de logs** (owner 2026-06-21) — pour chacun : 1 salon + activer/désactiver :\n"
-            "🟢 **Faibles** (serveur) : arrivées/départs · messages supprimés · vocal · salons/rôles · tickets\n"
-            "🟠 **Moyens** (sanctions staff) : mute · warn · kick · ban · timeout · purge\n"
-            "🔴 **Forts** (cybersécurité/TOS) : raids · phishing · scam · insultes · NSFW · alts · profils à surveiller"))
-        items.append(v2_subtitle("Ou route une catégorie précise via le menu ci-dessous"))
+            "🟢 Serveur · 🟠 Sanctions · 🔴 Sécurité — un salon et un interrupteur chacun"))
 
         opts = [
             discord.SelectOption(label=cat, value=cat, emoji=_LOG_CAT_EMOJIS.get(cat, "📋"))
@@ -13115,7 +12914,6 @@ class ProtDetailV2(LayoutView):
             items.append(v2_body(f"📊 **Max mentions** · `{c.get('mention_limit', 5)}` par message"))
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
-            items.append(v2_body("ℹ️ Détecte @everyone, @here, et les mentions massives de membres/rôles"))
 
         elif self.key == "anti_newaccount":
             items.append(v2_body(f"📅 **Jours minimum** · `{c.get('newaccount_days', 7)}`"))
@@ -13134,10 +12932,7 @@ class ProtDetailV2(LayoutView):
                 or c.get('mod_log_channel', 0)
             )
             items.append(v2_body(
-                "🔐 **Détection des comptes compromis/hackés**\n\n"
-                "Chaque message reçoit un score de compromission : lien de phishing connu, "
-                "invitation Discord doublée d'une mention massive, même message répété dans "
-                "plusieurs salons, compte récent qui poste soudainement un lien…"
+                "Un score par message (phishing, invitation et mentions de masse, message copié partout). Au-delà du seuil : compte gelé, dossier pour le staff."
             ))
             items.append(v2_body(
                 f"🎯 **Seuil** · `{c.get('compromised_alert_threshold', 60)}`/100  ·  "
@@ -13145,52 +12940,29 @@ class ProtDetailV2(LayoutView):
                 f"📬 **Dossier envoyé dans** · "
                 f"{_cad_ch.mention if _cad_ch else '⚠️ _aucun salon — utilise « 📜 Log »_'}"
             ))
-            items.append(v2_body(
-                "⚡ **Sanction** · aucune sanction automatique. Le compte est **gelé** et un "
-                "dossier avec les boutons Mute 24 h / Kick / Ban est posté pour le staff "
-                "(kick et ban réservés au fondateur)."
-            ))
 
         elif self.key == "anti_qrcode":
             items.append(v2_body(
-                "📱 **Protection contre les scams par QR Code**\n\n"
-                "Détecte les tentatives de vol de compte via QR code Discord :\n"
-                "• Messages demandant de scanner un QR code\n"
-                "• Faux QR codes de 'cadeaux'\n"
-                "• Tentatives de vol de token"
+                "Arnaques au QR code : faux cadeaux, vol de compte."
             ))
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
 
         elif self.key == "anti_phishing":
             items.append(v2_body(
-                "🎣 **Protection Anti-Phishing Avancée 2026**\n\nProtège contre :\n"
-                "• Faux sites Discord/Steam/Nitro/Roblox\n"
-                "• Typosquatting (dlscord, steampowored…)\n"
-                "• Liens masqués [texte](url phishing)\n"
-                "• Scam 'Verify age group' / Safeguard bot\n"
-                "• IP grabbers et raccourcisseurs suspects\n"
-                "• TLD dangereux (.ru, .tk, .xyz…)\n"
-                "• URLs dans les embeds de messages"
+                "Faux sites, typosquatting, liens masqués, raccourcisseurs suspects."
             ))
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
-            items.append(v2_body(f"📊 **Base de données** · `{len(PHISHING_DOMAINS)}` domaines blacklistés"))
+            items.append(v2_body(f"-# `{len(PHISHING_DOMAINS)}` domaines connus"))
 
         elif self.key == "anti_scam":
             items.append(v2_body(
-                "🚨 **Protection Anti-Scam Avancée 2026**\n\nDétecte :\n"
-                "• Free Nitro / Steam Gift scams\n"
-                "• Crypto giveaway / Airdrop scams\n"
-                "• Scam vérification âge Discord\n"
-                "• Token grabbers / ClickFix\n"
-                "• Faux jeux à tester (playtest)\n"
-                "• Investment / Job / Romance scams\n"
-                "• Urgence artificielle"
+                "Faux Nitro, crypto, vérification d'âge, faux jeux, urgence artificielle."
             ))
             sl = _sanction_line(self.key)
             if sl: items.append(v2_body(sl))
-            items.append(v2_body(f"📊 **Base de données** · `{len(SCAM_KEYWORDS)}` mots-clés détectés"))
+            items.append(v2_body(f"-# `{len(SCAM_KEYWORDS)}` mots-clés connus"))
 
         elif self.key == "anti_alt":
             alt_cfg = c.get('alt_config', {})
@@ -13204,12 +12976,7 @@ class ProtDetailV2(LayoutView):
             except Exception:
                 suspected = confirmed = 0
             items.append(v2_body(
-                "👥 **Détection des Comptes Secondaires**\n\n"
-                "Détecte automatiquement les comptes secondaires (alts) :\n"
-                "• Avatar identique à un membre existant/banni\n"
-                "• Nom d'utilisateur similaire\n"
-                "• Compte créé juste après un ban\n"
-                "• Comportement suspect"
+                "Avatar ou pseudo copié, compte créé juste après un ban, comportement suspect."
             ))
             items.append(v2_body(
                 f"⚡ **Action** · `{action.upper()}`  ·  "
@@ -15408,8 +15175,7 @@ class ImmunePanelV2(LayoutView):
         ))
         items.append(v2_divider())
         items.append(v2_body(
-            "ℹ️ Les immunisés ignorent : liens, images, GIFs, invitations, majuscules.\n"
-            "⚠️ **Phishing & scams restent détectés** pour tout le monde."
+            "-# Ignorent liens, images, GIFs, invitations et majuscules — jamais le phishing ni les scams."
         ))
         items.append(v2_divider())
         items.append(discord.ui.ActionRow(b_add_role, b_add_user, b_add_chan))
@@ -16416,19 +16182,6 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
             return None
 
 
-
-# ─────────────────────────────── YOUTUBE ───────────────────────────────
-
-
-# ─────────────────────────────── TWITCH ───────────────────────────────
-
-
-# ─────────────────────────────── TIKTOK ───────────────────────────────
-
-
-# ─────────────────────────────── REDDIT ───────────────────────────────
-
-
 # ─────────────────────────────── TWITTER/X ───────────────────────────────
 
 # Instances Nitter — liste VÉRIFIÉE juin 2026 (sources sûres : wiki officiel
@@ -16447,18 +16200,6 @@ NITTER_INSTANCES = [
     "nitter.catsarch.com",
     "lightbrd.com",
 ]
-
-
-# ─────────────────────────────── DISCORD CHANNELS ───────────────────────────────
-
-
-# ─────────────────────────────── ROSOCIAL ───────────────────────────────
-
-
-# ─────────────────────────────── ROBLOX UGC ───────────────────────────────
-
-
-# ─────────────────────────────── RÉDUCTIONS JEUX ───────────────────────────────
 
 
 # ─────────────────────────────── COMMON VIEWS ───────────────────────────────
@@ -16936,9 +16677,6 @@ class CompromisedAccountActionView(View):
             print(f"[CompromisedAccountActionView _update_dossier] {ex}")
 
 
-# ─────────────────────────────── RÔLES NIVEAU ───────────────────────────────
-
-
 # ─────────────────────────────── BOUTIQUE CONFIG ───────────────────────────────
 
 
@@ -16950,9 +16688,6 @@ class CompromisedAccountActionView(View):
 
 # Cache des vocaux temporaires : {channel_id: {'owner': user_id, 'created_at': datetime}}
 temp_voice_channels = {}
-
-
-# ─────────────────────────────── SALONS COMMANDES ───────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -18917,7 +18652,6 @@ async def on_ready():
     # Phase 28.5 : tâche annonce anniversaires (1x/heure mais agit à 9h UTC)
     if not birthday_announcer.is_running():
         birthday_announcer.start()
-
 
 
     # Phase 203 — superviseur : ressuscite toute boucle critique morte
@@ -22272,90 +22006,83 @@ async def _perm_escalation_guard(guild, before, after):
 
 
 async def relay_discord_message(msg):
-    """Relay un message vers les serveurs qui suivent ce salon"""
-    try:
-        channel_id = str(msg.channel.id)
-        
-        async with get_db() as db:
-            async with db.execute('SELECT guild_id, data FROM guild_config') as cursor:
-                async for row in cursor:
-                    guild_id, data_str = row
-                    if guild_id == msg.guild.id:
-                        continue
-                    
-                    try:
-                        data = json.loads(data_str) if data_str else {}
-                        feeds = data.get('ads_discord_feeds', [])
-                        dest_channel_id = data.get('ads_discord_channel', 0)
-                        
-                        is_followed = any(f['channel_id'] == channel_id for f in feeds)
-                        if not is_followed or not dest_channel_id:
-                            continue
-                        
-                        dest_guild = bot.get_guild(guild_id)
-                        if not dest_guild:
-                            continue
-                        dest_channel = dest_guild.get_channel(dest_channel_id)
-                        if not dest_channel:
-                            continue
-                        
-                        # ═══════════════ EMBED DISCORD RELAY PROFESSIONNEL ═══════════════
-                        e = discord.Embed(color=0x5865F2)
-                        
-                        # Auteur avec le nom du serveur
-                        e.set_author(
-                            name=f"📡 DISCORD • {msg.guild.name}",
-                            icon_url=msg.guild.icon.url if msg.guild.icon else "https://discord.com/assets/847541504914fd33810e70a0ea73177e.ico"
-                        )
-                        
-                        # Thumbnail avec avatar de l'auteur
-                        if msg.author.display_avatar:
-                            e.set_thumbnail(url=msg.author.display_avatar.url)
-                        
-                        # Info du message — FIX sécu P1-5 : on ÉCHAPPE le markdown du
-                        # contenu d'un AUTRE serveur avant de le réinjecter dans l'embed.
-                        # Les embeds rendent les liens masqués [texte](url) CLIQUABLES →
-                        # sans escape, un message relayé pouvait glisser un faux-lien de
-                        # phishing crédibilisé par « 📡 DISCORD • <serveur source> ».
-                        e.add_field(
-                            name="👤 Auteur",
-                            value=f"**{_escape_md(msg.author.display_name, 60)}**",
-                            inline=True
-                        )
-                        e.add_field(
-                            name="📍 Salon",
-                            value=f"#{_escape_md(msg.channel.name, 60)}",
-                            inline=True
-                        )
+    """Relaie un message vers les serveurs qui suivent ce salon. La configuration vient du
+    cache de `cfg` : avant le 19/10/2026, chaque message relisait et décodait TOUTE la
+    table guild_config."""
+    if len(bot.guilds) < 2:
+        return
+    channel_id = str(msg.channel.id)
+    for dest_guild in list(bot.guilds):
+        if dest_guild.id == msg.guild.id:
+            continue
+        try:
+            data = await cfg(dest_guild.id)
+            feeds = data.get('ads_discord_feeds', [])
+            dest_channel_id = data.get('ads_discord_channel', 0)
+            
+            is_followed = any(f['channel_id'] == channel_id for f in feeds)
+            if not is_followed or not dest_channel_id:
+                continue
+            
+            dest_channel = dest_guild.get_channel(dest_channel_id)
+            if not dest_channel:
+                continue
+            
+            # ═══════════════ EMBED DISCORD RELAY PROFESSIONNEL ═══════════════
+            e = discord.Embed(color=0x5865F2)
+            
+            # Auteur avec le nom du serveur
+            e.set_author(
+                name=f"📡 DISCORD • {msg.guild.name}",
+                icon_url=msg.guild.icon.url if msg.guild.icon else "https://discord.com/assets/847541504914fd33810e70a0ea73177e.ico"
+            )
+            
+            # Thumbnail avec avatar de l'auteur
+            if msg.author.display_avatar:
+                e.set_thumbnail(url=msg.author.display_avatar.url)
+            
+            # Info du message — FIX sécu P1-5 : on ÉCHAPPE le markdown du
+            # contenu d'un AUTRE serveur avant de le réinjecter dans l'embed.
+            # Les embeds rendent les liens masqués [texte](url) CLIQUABLES →
+            # sans escape, un message relayé pouvait glisser un faux-lien de
+            # phishing crédibilisé par « 📡 DISCORD • <serveur source> ».
+            e.add_field(
+                name="👤 Auteur",
+                value=f"**{_escape_md(msg.author.display_name, 60)}**",
+                inline=True
+            )
+            e.add_field(
+                name="📍 Salon",
+                value=f"#{_escape_md(msg.channel.name, 60)}",
+                inline=True
+            )
 
-                        # Contenu du message (échappé : pas de lien masqué / markdown injecté)
-                        content = _escape_md(msg.content, 1500) if msg.content else ""
-                        if content:
-                            e.add_field(
-                                name="💬 Message",
-                                value=content,
-                                inline=False
-                            )
-                        
-                        # Images
-                        if msg.attachments:
-                            for att in msg.attachments[:1]:
-                                if att.content_type and att.content_type.startswith('image'):
-                                    e.set_image(url=att.url)
-                                    break
-                        
-                        e.set_footer(
-                            text=f"Discord • {msg.guild.name}",
-                            icon_url="https://discord.com/assets/847541504914fd33810e70a0ea73177e.ico"
-                        )
-                        e.timestamp = msg.created_at
-                        
-                        await webhook_send(dest_channel, 'discord_relay', embed=e)
-                        
-                    except:
-                        continue
-    except:
-        pass
+            # Contenu du message (échappé : pas de lien masqué / markdown injecté)
+            content = _escape_md(msg.content, 1500) if msg.content else ""
+            if content:
+                e.add_field(
+                    name="💬 Message",
+                    value=content,
+                    inline=False
+                )
+            
+            # Images
+            if msg.attachments:
+                for att in msg.attachments[:1]:
+                    if att.content_type and att.content_type.startswith('image'):
+                        e.set_image(url=att.url)
+                        break
+            
+            e.set_footer(
+                text=f"Discord • {msg.guild.name}",
+                icon_url="https://discord.com/assets/847541504914fd33810e70a0ea73177e.ico"
+            )
+            e.timestamp = msg.created_at
+            
+            await webhook_send(dest_channel, 'discord_relay', embed=e)
+            
+        except Exception as ex:
+            _logerr("relais", ex, guild_id=dest_guild.id)
 
 
 # Phase 23 : cache de cooldown par (guild_id, user_id) → timestamp dernière alerte
@@ -22656,13 +22383,6 @@ async def on_message(msg):
             asyncio.create_task(social_zones_module.note_message(msg))
     except Exception as ex:
         print(f"[on_message social_zones note] {ex}")
-
-    # ═══════════════ VEILLEUR : questions sans réponse (serveur entier) ═══════════════
-    # Suit les VRAIES questions (filtre mémoire pur) et nudge après ~10 min si personne
-    # n'a aidé. Coordonne aussi les signaux de réponse (reply/mention) en mémoire pure.
-    # Backgroundé (create_task) : CHEAP-FIRST, ne bloque jamais on_message ; toutes les
-    # gardes (config/chatty/cooldown/DB) vivent dans le hook (fail-safe).
-
 
     # ═══════════════ Phase 23 : DÉTECTION COMPTES PIRATÉS ═══════════════
     try:
@@ -24269,8 +23989,6 @@ except Exception as ex:
 # (cherche `bot.tree.add_command(mod_group)` plus bas dans le fichier).
 
 
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 28.5 : Task daily — annonce des anniversaires
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -24380,25 +24098,9 @@ async def _birthday_announcer_wait():
     await bot.wait_until_ready()
 
 
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  /event /inventory /event_start — Phase 30
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── Phase 107 : /repair (Repair/Durability) ─────────────────────────────
-# Phase 118 HOTFIX : décorateur @bot.tree.command retiré (CommandLimitReached
-# 101 globally — admin_panels_v2 + setup_wizard non comptés précédemment).
-# Le helper repair_cmd reste accessible via le bouton "🔧 Réparer mon équipement"
-# du panel /inventory (ajouté Phase 117).
-
-
-# ─── Phase 108 : /trade (P2P Trade entre joueurs) ────────────────────────
-#
-# Système 2-side confirm : A propose un item de son inventaire en échange
-# d'un item de B + un bonus de coins éventuel. B reçoit un panel avec
-# ACCEPTER / REFUSER. Atomique côté DB, lock anti double-spend.
 
 
 # ─── Phase 117 : Flow swap multi-étapes via boutons (sans slash) ─────────
@@ -24415,12 +24117,6 @@ async def _birthday_announcer_wait():
 
 # Phase 117 : signature refactorée pour accepter strings (appel depuis bouton).
 # Le helper swap_cmd est appelé depuis le flow Phase 117 (bouton inventory).
-
-
-# ─── Phase 113 : Achievement checker helper ──────────────────────────────
-#
-# Vérifie + débloque les badges Phase 113 (Swap/Auction/Craft) après une
-# action utilisateur. Idempotent : INSERT OR IGNORE sur player_badges.
 
 
 # ─── Phase 109 : /auction (Auction House) ────────────────────────────────
@@ -25781,8 +25477,7 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
             nlines.append(f"• {ctext}\n   _— {mtxt} · {drel}_")
         items.append(v2_body("\n".join(nlines)))
         items.append(v2_subtitle(
-            "_Notes non-punitives : contexte interne, n'affectent pas le casier. "
-            "Ajoute-en avec_ `/mod note`."
+            "-# Sans effet sur le casier · `/mod note` pour en ajouter"
         ))
 
     items.append(v2_divider())
@@ -26213,21 +25908,6 @@ async def rellseas_cmd(i: discord.Interaction):
     #  persistante. Serveur et utilisateur se lisent dans l'interaction.
     vue = rellseas_ui.RellseasGestionV2()
     await vue.render_to(i, edit=False)
-
-
-# ═══════════════ RAPPORT D'INACTIVITÉ DU CLAN (owner 2026-07-20) ═══════════════
-# Le rôle Realsy = le rôle de CLAN (ex. ￤GoRpSea). À chaque ajout au clan (et via un bouton
-# dédié), le bot poste un rapport PROPRE : qui est inactif (aucun message serveur depuis ≥ N j)
-# et depuis combien de temps, PING les inactifs, et RAPPELLE que le rôle sera retiré — mais
-# MANUELLEMENT par le staff (le bot ne retire JAMAIS le rôle lui-même). Données = realsy_tracking
-# (last_activity : posé à l'ajout, mis à jour à chaque message via update_realsy_activity).
-# (CLAN_INACTIVE_DAYS et `_dm_clan_inactive` SUPPRIMÉS le 12/08/2026.)
-#
-# Ce message privé quotidien — « 🌊 Rappel d'activité — ton clan » — faisait DOUBLON avec
-# le système d'activité reconstruit (rappel → rôle AFK → retrait → expulsion), et surtout
-# il MENTAIT : il annonçait au membre que son rôle allait lui être retiré, alors que le
-# commentaire de la boucle disait explicitement que le bot ne le retire JAMAIS lui-même.
-# Le clan Realsy fait partie du périmètre supprimé par la refonte.
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -29468,9 +29148,16 @@ async def _activite_suivi(guild_id, user_id) -> bool:
 #                           📨 TÂCHE AUTOMATIQUE MESSAGES PROGRAMMÉS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_PROGRAMMES_VIDES = False
+
+
 @tasks.loop(minutes=1)
 async def check_scheduled_messages():
-    """Vérifie et envoie les messages programmés"""
+    """Vérifie et envoie les messages programmés. Plus rien ne peut en créer (19/10/2026) :
+    une table vide le reste, la boucle cesse alors de lire la base."""
+    global _PROGRAMMES_VIDES
+    if _PROGRAMMES_VIDES:
+        return
     try:
         now_dt = now()
         current_hour = now_dt.hour
@@ -29484,6 +29171,9 @@ async def check_scheduled_messages():
                 messages = []
                 async for row in cursor:
                     messages.append(row)
+            if not messages:
+                async with db.execute('SELECT COUNT(*) FROM scheduled_messages') as cur:
+                    _PROGRAMMES_VIDES = not (await cur.fetchone())[0]
             
             for msg_id, guild_id, channel_id, title, description, color, image_url, footer, frequency, freq_val, send_hour, send_minute, last_sent_str in messages:
                 try:
@@ -29566,8 +29256,16 @@ async def before_check_scheduled_messages():
 
 
 # Tâche pour retirer les rôles expirés
+_ACHATS_VIDES = False
+
+
 @tasks.loop(minutes=1)
 async def check_expired_roles():
+    """Rôles temporaires de l'ancienne boutique. Plus rien n'en vend : une table vide le
+    reste, la boucle cesse alors de lire la base."""
+    global _ACHATS_VIDES
+    if _ACHATS_VIDES:
+        return
     try:
         async with get_db() as db:
             now_str = now().isoformat()
@@ -29578,6 +29276,9 @@ async def check_expired_roles():
                 (now_str,)
             ) as cursor:
                 expired = await cursor.fetchall()
+            if not expired:
+                async with db.execute('SELECT COUNT(*) FROM shop_purchases') as cur:
+                    _ACHATS_VIDES = not (await cur.fetchone())[0]
             
             for purchase_id, guild_id, user_id, role_id in expired:
                 try:
@@ -30059,27 +29760,6 @@ except Exception:
     _TZ_P41 = timezone.utc
 
 
-# ─── HELPERS STATS ─────────────────────────────────────────────────────────────
-
-
-# ─── HELPERS QUESTS ────────────────────────────────────────────────────────────
-
-
-# ─── HELPERS ACHIEVEMENTS ──────────────────────────────────────────────────────
-
-
-# ─── HELPERS PETS ──────────────────────────────────────────────────────────────
-
-
-# ─── VIEWS PHASE 41 ────────────────────────────────────────────────────────────
-
-
-# ─── DAILY WHEEL : LOGIQUE ─────────────────────────────────────────────────────
-
-
-# ─── COMMANDES PHASE 41 ────────────────────────────────────────────────────────
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 41.1 — HUB D'ENGAGEMENT (zéro commande à mémoriser)
 #  Un seul panneau avec 5 boutons → tous les systèmes accessibles en 1 clic
@@ -30169,13 +29849,6 @@ async def _safe_followup(i: discord.Interaction, **kwargs) -> bool:
     except Exception as ex:
         print(f"[_safe_followup] {ex}")
         return False
-
-
-# ─── Phase 48.3 : Cache TTL 60s pour hot path (alliance + pet + stats) ───────
-# Réduit le load DB d'un facteur 10x sur les fonctions appelées à chaque message.
-
-
-# ─── Phase 45.1 : helpers anti-pollution (auto-delete + chrono visuel) ───────
 
 
 # ─── Phase 47.3 : delete persistant (survit aux redémarrages bot) ─────────────
@@ -30313,9 +29986,6 @@ async def _run_persistent_cleanup_once() -> dict:
 
 
 # ─── Phase 55 : SAFETY NET — purge messages bot vieux dans hub (orphelins) ───
-
-
-# ─── PET SUB-VIEWS ─────────────────────────────────────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -30880,12 +30550,6 @@ async def _entraide_maybe_delete_empty_voice(guild, channel):
             print(f"[_entraide_maybe_delete_empty_voice delete] {ex}")
     except Exception as ex:
         print(f"[_entraide_maybe_delete_empty_voice] {ex}")
-
-
-# ─── DynamicItem persistants : « 🤝 J'aide ! » (claim) et « ✅ Résolu » ──────────
-
-
-# ─── Panneau joueur ÉPHÉMÈRE : EntraideHubV2 (3 boutons) ─────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -32779,15 +32443,6 @@ class AccueilLangueView(discord.ui.View):
                 i, content="❌ Sélecteur de langue indisponible — réessaie dans un instant.")
 
 
-# ─── HUB D'ENGAGEMENT (5 boutons persistants, custom_ids stables) ─────────────
-
-
-# ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
-
-
-# ─── HOOKS DE TRACKING (appelés par on_message etc.) ───────────────────────────
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 42 — WORLD BOSS HEBDO + DAILY RIDDLE + VOICE CHAOS
@@ -32810,9 +32465,6 @@ class AccueilLangueView(discord.ui.View):
 # qui sérialise. Pas de release explicite requis (auto-expiration).
 
 
-# ─── VOICE PROTECTION (fondateurs / staff) ─────────────────────────────────────
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 43 — VRAIS EVENTS ORIGINAUX
@@ -32820,18 +32472,6 @@ class AccueilLangueView(discord.ui.View):
 #  + Hub button "🌍 Events en cours"
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── TRÉSOR FLASH ──────────────────────────────────────────────────────────────
-
-
-# ─── RITUEL DU SOIR ────────────────────────────────────────────────────────────
-
-
-# ─── TAG ROYALE (chaîne d'invitation hebdo) ────────────────────────────────────
-
-
-# ─── ANNIVERSAIRE DU SERVEUR ───────────────────────────────────────────────────
 
 
 # ─── HUB BUTTON : Events en cours (6ème bouton hub) ───────────────────────────
@@ -33002,26 +32642,6 @@ async def _db_optimizer_wait():
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 45 — CAMOUFLAGE DE SALON + VOCAL SUR SCÈNE + COMPLIMENT
-#  Tous réversibles, jamais 2 simultanés, backup auto en DB + failsafe loop
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── CHANNEL CAMOUFLAGE ────────────────────────────────────────────────────────
-
-
-# ─── VOCAL SUR SCÈNE ───────────────────────────────────────────────────────────
-
-
-# ─── FAILSAFE LOOP : revert tout orphelin (crash recovery, restart) ───────────
-
-
-# ─── COMPLIMENT DU JOUR : SUPPRIMÉ (système Saint-Valentin retiré) ────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 46 — ALLIANCES (rôle + salon dynamiques) + GAME NIGHT (vocal éphémère)
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -33072,9 +32692,6 @@ _LEGACY_COMBAT_CHANNEL_NAMES = frozenset({
 })
 
 
-# ─── VIEWS ALLIANCES ───────────────────────────────────────────────────────────
-
-
 # ─── Patch hub : ajout du 7ème bouton "🤝 Mes alliances" ───────────────────────
 
 
@@ -33089,49 +32706,10 @@ _LEGACY_COMBAT_CHANNEL_NAMES = frozenset({
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# GAME NIGHT — vendredi 21h FR, salons vocal + texte éphémères, mini-jeux
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── Phase 46.2 : Vrais events interactifs 2026 ─────────────────────────────
-# Compteurs en mémoire pour les events live (pas besoin de DB pour ces courts)
-
-
-# ─── 🔍 DÉTECTIVE EXPRESS ────────────────────────────────────────────────────
-
-
-# ─── ♟️ MASTERMIND ────────────────────────────────────────────────────────────
-
-
-# ─── 🏆 QUIZ SURVIVOR ─────────────────────────────────────────────────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 47 — MOTEUR LONG TERME (Saisons + Prestige + Factions + Weekly/Monthly)
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── SEASON PROGRESS / PASS ────────────────────────────────────────────────────
-
-
-# ─── PRESTIGE ──────────────────────────────────────────────────────────────────
-
-
-# ─── FACTIONS ──────────────────────────────────────────────────────────────────
-
-
-# ─── WEEKLY QUESTS ─────────────────────────────────────────────────────────────
-
-
-# ─── MONTHLY MEGA QUEST ────────────────────────────────────────────────────────
-
-
-# ─── Hooks pour intégrer Phase 47 dans le tracking existant ────────────────────
-
-
-# ─── VIEWS / COMMANDES ─────────────────────────────────────────────────────────
 
 
 # ─── Patch HUB : ajout des boutons "📆 Saison" et "🏰 Factions" ───────────────
@@ -33150,50 +32728,6 @@ _LEGACY_COMBAT_CHANNEL_NAMES = frozenset({
 # EngagementHubView.__init__ = _patched_hub_init_p47
 
 
-# ─── SLASH COMMANDS ────────────────────────────────────────────────────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 48.1 — ANALYTICS + MENTION INTELLIGENTE + MARKETPLACE P2P
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── ANALYTICS : tracker l'engagement par type d'event ────────────────────────
-
-
-# ─── MENTION INTELLIGENTE : préférences réelles des joueurs ──────────────────
-
-
-# ─── AUTO-PROMOTE des events morts ────────────────────────────────────────────
-
-
-# ─── MARKETPLACE P2P (vente de pets entre joueurs) ────────────────────────────
-
-
-# ─── Cleanup auto des listings expirés ────────────────────────────────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 48.2 — /profile unifié + Notifications granulaires + Anim drops + Quiet hours
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── /profile : tout ton statut en 1 écran ───────────────────────────────────
-
-
-# ─── NOTIFICATIONS GRANULAIRES ───────────────────────────────────────────────
-
-
-# ─── CÉLÉBRATION drops rares (légendaire / mythique) ─────────────────────────
-
-
-# ─── QUIET HOURS — commande owner pour personnaliser ─────────────────────────
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 49 — LORE ÉVOLUTIF + NPCs + MISSIONS SCÉNARISÉES
@@ -33204,34 +32738,10 @@ _LEGACY_COMBAT_CHANNEL_NAMES = frozenset({
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-# ─── HELPERS LORE STATE ──────────────────────────────────────────────────────
-
-
-# ─── HELPERS NPC ─────────────────────────────────────────────────────────────
-
-
-# ─── TASK : NPC CHATTER (un NPC parle 1x toutes les 6h dans le hub) ─────────
-
-
-# ─── HOOK NPC REACTION APRÈS WORLD BOSS ──────────────────────────────────────
-
-
-# ─── MISSIONS — HELPERS DB ───────────────────────────────────────────────────
-
-
-# ─── MISSION TRACKING (on_message hook) ──────────────────────────────────────
-
-
 # ─── VIEW : bouton click participation à une étape ───────────────────────────
 
 
 # ─── TASK : MISSIONS RUNNER (1x/jour, lance une nouvelle mission si conditions) ─
-
-
-# ─── HUB BUTTONS : 📖 Histoire + 🎯 Mission ──────────────────────────────────
-
-
-# ─── SLASH COMMANDS OWNER DEBUG ──────────────────────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -33242,72 +32752,10 @@ _LEGACY_COMBAT_CHANNEL_NAMES = frozenset({
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-# ─── STUDIO TIP DAILY (1x/jour à 9h FR) ──────────────────────────────────────
-
-
-# ─── SPEEDRUN — Helpers + Modal + Views ──────────────────────────────────────
-
-
-# ─── MATCHMAKING PARTIES — héberger une session de jeu ───────────────────────
-
-
 # ─── GAME UPDATES — Owner posts update + thread feedback ─────────────────────
 
 
 # ─── ROBLOX SUB-HUB (4 boutons : Speedrun / Matchmaking / Tips / Updates) ───
-
-
-# ─── SLASH COMMANDS OWNER — gestion Roblox ───────────────────────────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 51 — COMPÉTITIF : Bingo mensuel + Prediction Market + Faction Wars
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── BINGO MENSUEL ───────────────────────────────────────────────────────────
-
-
-# ─── PREDICTION MARKET ───────────────────────────────────────────────────────
-
-
-# ─── FACTION WARS — Leaderboard saison auto ───────────────────────────────────
-
-
-# ─── COMPETITIONS SUB-HUB ────────────────────────────────────────────────────
-
-
-# ─── SLASH COMMANDS OWNER PHASE 51 ───────────────────────────────────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 52 — SOCIAL : Shoutouts + Mentor/Apprenti + Confessions Replies
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── SHOUTOUTS ───────────────────────────────────────────────────────────────
-
-
-# ─── MENTOR ELIGIBILITY HELPERS ──────────────────────────────────────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  Tâche B.2 — COUNTDOWN SORTIE + COSMÉTIQUE « PIONNIER »
-#  Une date de sortie est configurée par l'OWNER (release_countdown_ts, via le
-#  panel /configure). C'est du CONTENU DISCORD (compte à rebours d'une sortie
-#  Roblox) — JAMAIS une édition du jeu/Roblox Studio. Tout est FAIL-SAFE : sans
-#  date configurée, rien ne s'affiche et aucun badge n'est décerné.
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-# ─── CONFESSION REPLIES ──────────────────────────────────────────────────────
-
-
-# ─── SOCIAL SUB-HUB ──────────────────────────────────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -33317,21 +32765,12 @@ _LEGACY_COMBAT_CHANNEL_NAMES = frozenset({
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-# ─── HEURES DORÉES (dimanche 18h-20h FR ×2 multiplier) ───────────────────────
-
-
-# ─── RECAP HEBDO DM (dimanche 21h FR) ────────────────────────────────────────
-
-
 # ─── CONVERSATION STARTERS (anti-silence dans le hub) ────────────────────────
 
 
 # conv_starter_task → EXTRAIT dans conversation_starters.py (Phase 234, 1re brique
 # de modularisation du monolithe). Déps injectées au boot ; ressuscité par le
 # task_supervisor via le tuple ("conversation_starters_module", "conv_starter_task").
-
-
-# ─── GREETING JOURNALIER (1er message du jour) ───────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -33366,21 +32805,12 @@ _LEGACY_COMBAT_CHANNEL_NAMES = frozenset({
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-# ─── HELPERS LORE MEMORIES ───────────────────────────────────────────────────
-
-
-# ─── CROSSOVER NPC LINES (NPCs se citent entre eux) ──────────────────────────
-
-
 # ─── CLASSES RP ──────────────────────────────────────────────────────────────
 
 
 # HOTFIX Phase 65.1 : la slash /class (Phase 57) était en conflit avec class_group
 # (L10651, déjà existant). Slash supprimée — accès via bouton hub "🎖️ Ma classe RP"
 # dans le sub-hub Outils (Phase 65). _open_class_panel reste l'helper utilisé.
-
-
-# ─── NARRATIVE CHOICES (votes collectifs 48h) ────────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -33618,71 +33048,9 @@ async def _check_auto_slow_mode(msg):
         print(f"[_check_auto_slow_mode] {ex}")
 
 
-# ─── MEMBER JOURNEY (slash owner) ────────────────────────────────────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 63 — ORIGINALITÉS : Time Capsule + Hall of Fame + Whispers + Anniversaire + Easter eggs
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── TIME CAPSULE (messages futurs scellés) ──────────────────────────────────
-
-
-# ─── HALL OF FAME ────────────────────────────────────────────────────────────
-
-
-# ─── WHISPERS NPC (1x/semaine random NPC chuchote un teaser) ─────────────────
-
-
-# ─── ANNIVERSAIRE SERVEUR ────────────────────────────────────────────────────
-
-
-# ─── EASTER EGGS (mots magiques cachés) ──────────────────────────────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 62 — VOIX + SAISONS IRL : Voice tracking + Thematic voices + Halloween/Noël/Été
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── VOICE ACTIVITY TRACKING (via on_voice_state_update) ─────────────────────
-
-
-# ─── VOCAUX THÉMATIQUES (temporaires) ────────────────────────────────────────
-
-
-# ─── SAISONS IRL (auto-detect dates) ─────────────────────────────────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 61 — VIE QUOTIDIENNE : Streak collectif + Avent + Météo + Activity badges
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── CALENDRIER DE L'AVENT (30 jours, claim quotidien) ───────────────────────
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 60 — ÉCONOMIE ADDICTIVE : Heist + Banque + Loots uniques
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── HEIST EVENT (10 places, rôles asymétriques, payout proportionnel) ───────
-
-
-# ─── BANQUE AVEC INTÉRÊTS ───────────────────────────────────────────────────
-
-
-# ─── LOOTS UNIQUES (drop random pendant events) ──────────────────────────────
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 59 — COMPÉTITIF SÉRIEUX : Ladder Elo + Duels 1v1 + Tournaments + Titles
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── LADDER ELO ──────────────────────────────────────────────────────────────
 
 
 # ─── DUEL 1V1 ────────────────────────────────────────────────────────────────
@@ -33691,12 +33059,6 @@ async def _check_auto_slow_mode(msg):
 # HOTFIX Phase 65.1 : la slash /duel (Phase 59) était en conflit avec /duel existant
 # (L10466). Slash supprimée — accès via bouton hub "⚔️ PvP / Duel" → "⚔️ Défier"
 # avec UserSelect dans le sub-hub Outils (Phase 65). Logique préservée.
-
-
-# ─── TITRES PERMANENTS ───────────────────────────────────────────────────────
-
-
-# ─── TOURNAMENTS (8 places, single-elim simple) ──────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -33713,55 +33075,6 @@ async def _check_auto_slow_mode(msg):
 # laissée en place plutôt que supprimée, parce qu'un DROP en production ne s'annule pas.
 # Phase 120 : enregistrer /owner après toutes ses subcommands
 bot.tree.add_command(owner_group)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 65 — TOUT EN BOUTONS : Sub-hub "🧰 Outils" + UserSelect pour actions @user
-#  Tous les slash members deviennent des boutons pour ne plus perturber les members.
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── SUB-HUB OUTILS (8 boutons regroupant tout) ──────────────────────────────
-
-
-# ─── 🏦 BANQUE (panel avec boutons Modal) ────────────────────────────────────
-
-
-# ─── 💰 MA FORTUNE (vue d'ensemble lecture seule, éphémère) ───────────────────
-#  Demande owner : 1 panneau V2 qui regroupe pièces (economy.coins) + banque
-#  (dépôts actifs + intérêts courants calculés à la volée, MÊME formule que le
-#  retrait : 1%/jour, cap 30 j) + Éclats (citadelle_wallet) + prochaines
-#  récompenses atteignables (dépôt mature, rente prête).
-#  100% LECTURE SEULE : aucun claim ici. Les actions restent dans Banque / La Cité.
-
-
-# ─── 💎 LOOTS (réutilise logique existante) ──────────────────────────────────
-
-
-# ─── ⚔️ PVP (Top + Mes stats + Défier via UserSelect) ────────────────────────
-
-
-# ─── 🎖️ CLASSE RP (réutilise ClassSelectView Phase 57) ──────────────────────
-
-
-# ─── 💝 SHOUTOUT (UserSelect → Catégorie Select → Modal raison) ──────────────
-
-
-# ─── 🎓 MENTOR INVITE (UserSelect → confirm) ─────────────────────────────────
-
-
-# ─── 📦 TIME CAPSULE (Modal create + display mes capsules) ───────────────────
-
-
-# ─── 🏛️ HALL OF FAME (read-only display) ────────────────────────────────────
-
-
-# ─── 🎙️ TOP VOCAL ───────────────────────────────────────────────────────────
-
-
-# ─── 📅 MÉTÉO SERVEUR ───────────────────────────────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -33814,24 +33127,6 @@ def _escape_md(text: str, max_len: int = 1000) -> str:
         for char in ('*', '_', '`', '~', '|', '>', '#'):
             text = text.replace(char, f"\\{char}")
     return text
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 67 — ALLIANCE COMPLÈTE : Trésorerie + Gestion membres + Audit log
-#  Le chef peut déposer/retirer coins, donner à un membre, expulser de l'alliance.
-#  Aucun pouvoir Discord (kick/ban serveur) — uniquement gestion interne alliance.
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── HELPERS TRÉSORERIE ──────────────────────────────────────────────────────
-
-
-# ─── MODALS ──────────────────────────────────────────────────────────────────
-
-
-# ─── VIEWS ───────────────────────────────────────────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

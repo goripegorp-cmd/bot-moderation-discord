@@ -139,24 +139,15 @@ class RellseasPanelV2(LayoutView):
                 v2_subtitle("Qui peut donner, retirer, et vérifier l'activité"),
                 v2_divider(),
                 v2_body(
-                    f"**Rôle attribué** · "
-                    f"{role_cible.mention if role_cible else '⚪ _non défini_'}\n"
-                    f"-# C'est le rôle que `/rellseas donner` et "
-                    f"`/rellseas retirer` posent et enlèvent."),
+                    f"**Rôle attribué** · {role_cible.mention if role_cible else '⚪ _non défini_'}"),
                 v2_body(
-                    f"**Salon de journal** · "
-                    f"{salon_log.mention if salon_log else '⚪ _non défini_'}\n"
-                    f"-# Chaque geste y laisse une trace nominative."),
+                    f"**Salon de journal** · {salon_log.mention if salon_log else '⚪ _non défini_'}"),
                 v2_divider(),
                 v2_body(
                     "**Rôles autorisés à utiliser `/rellseas`**\n"
                     + (" · ".join(noms) if noms
                        else "⚪ _aucun_ — seuls les administrateurs et le "
                             "propriétaire du serveur peuvent s'en servir")),
-                v2_body(
-                    "-# Les administrateurs et le propriétaire y ont **toujours** "
-                    "droit, réglage ou pas. Le contrôle est fait dans la commande, "
-                    "pas seulement à l'affichage."),
             ]
 
             if self._dernier:
@@ -641,14 +632,10 @@ class RellseasGestionV2(LayoutView):
 
         if role is None:
             items.append(v2_body(
-                "🔴 **Aucun rôle n'est réglé.**\n"
-                "-# `/configure` → 🎭 Rellseas → « Rôle attribué ». Tant qu'il "
-                "manque, donner et retirer sont impossibles."))
+                "🔴 **Aucun rôle réglé** — `/configure` → 🎭 Rellseas"))
         else:
             items.append(v2_body(
-                f"**Rôle donné par ce panneau** · {role.mention}\n"
-                f"-# `{len(getattr(role, 'members', []) or [])}` membre(s) le "
-                f"portent · se change dans `/configure` → 🎭 Rellseas"))
+                f"**Rôle** · {role.mention} · `{len(getattr(role, 'members', []) or [])}` membre(s)"))
 
         items.append(v2_divider())
 
@@ -665,9 +652,7 @@ class RellseasGestionV2(LayoutView):
                     f"ci-dessous. Pour tout enlever d'un coup : 🧹."))
         else:
             items.append(v2_body(
-                "**Sélection** · ⚪ _aucun membre_\n"
-                "-# Ouvrez le menu ci-dessous, **ou** cliquez 🔎 et tapez "
-                "quelques lettres d'un pseudo."))
+                "**Sélection** · ⚪ _aucun membre_ — menu ci-dessous ou 🔎"))
 
         dernier = _DERNIER.get(k)
         if dernier:
