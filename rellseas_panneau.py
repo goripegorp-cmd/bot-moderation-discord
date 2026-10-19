@@ -27,6 +27,7 @@ import activite_calendrier as cal
 from colonnes import cadrer, largeur  # noqa: F401 — largeur sert aux tests
 import config_salons
 import recrutements
+import registre
 import visuels
 from ui_v2 import (
     LayoutView, Palette, body as v2_body, container as v2_container,
@@ -933,7 +934,7 @@ class RellseasGestionV2(LayoutView):
         _DERNIER[k] = _bilan(f"**Rôle {verbe}** · {role.mention}", faits, echecs)
         await self._journal(
             g, f"🎭 **Rôle {verbe}** · `{len(faits)}` membre(s) "
-               f"par {u.mention}" + (f" — {' '.join(faits)}" if faits else ""))
+               f"par {u.mention}" + (f" — {' '.join(faits)}" if faits else ""), auteur_id=u.id)
         #  La sélection est conservée : enchaîner « donner » puis « vérifier »
         #  sur le même lot est le geste courant.
         await RellseasGestionV2().render_to(i, edit=True)
@@ -999,17 +1000,20 @@ class RellseasGestionV2(LayoutView):
                          filename=nom)
         await i.followup.send(view=vue_liste(role, lignes, nom), file=f, ephemeral=True,
                               allowed_mentions=discord.AllowedMentions.none())
-        await self._journal(g, f"📋 **Liste du clan** · `{len(lignes)}` membre(s) · exportée par {u.mention}")
+        await self._journal(g, f"📋 **Liste du clan** · `{len(lignes)}` membre(s) · exportée par {u.mention}",
+                            auteur_id=u.id)
 
     async def _cb_tableau(self, i):
         """Le tableau de bord web : candidatures, tickets par type, clan — staff et au-dessus."""
         await recrutements.envoyer_lien(i)
 
-    async def _journal(self, g, texte: str) -> None:
-        """Trace nominative. Fail-open : jamais bloquant."""
+    async def _journal(self, g, texte: str, auteur_id: int = 0) -> None:
+        """Trace nominative, au journal du site (et au salon de logs s'il y en a encore un).
+        Fail-open : jamais bloquant."""
         try:
+            await registre.noter(g.id, "Clan", "clan.journal", registre.propre(texte, g), auteur_id=auteur_id)
             c = await _cfg(g.id)
-            salon = g.get_channel(int(c.get(CLE_SALON_LOG, 0) or 0))
+            salon = None if c.get("logs_sur_site_v1") else g.get_channel(int(c.get(CLE_SALON_LOG, 0) or 0))
             if salon is not None:
                 await salon.send(texte)
         except Exception as ex:

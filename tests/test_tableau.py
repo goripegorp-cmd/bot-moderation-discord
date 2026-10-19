@@ -11,6 +11,7 @@ from pathlib import Path
 import aiosqlite
 
 import recrutements
+import registre
 import rellseas_panneau
 import tableau
 from conftest_discord import Obj
@@ -20,7 +21,8 @@ SRC = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="ut
 
 def _source(nom):
     return next(ast.unparse(n) for n in ast.parse(SRC).body
-                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == nom)
+                if (isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.name == nom)
+                or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") == nom for t in n.targets)))
 
 
 class Role:
@@ -91,7 +93,10 @@ class Env:
         self.membres = {2: _membre(2, self.staff), 7: _membre(7, self.clan), 8: _membre(8)}
         self.clan.members = [self.membres[7]]
         self.g = Obj(id=1, name="GoRP SEA", icon=None, owner_id=99, get_member=self.membres.get,
-                     get_role={50: self.clan, 10: self.staff}.get)
+                     get_role={50: self.clan, 10: self.staff}.get, get_channel=lambda i: None,
+                     get_thread=lambda i: None)
+        registre.setup(get_db=get_db, log=lambda *a: None)
+        registre._derniers.clear()
         recrutements.setup(get_db=get_db, cfg=cfg, db_set=db_set, salon=None,
                            role=lambda g, c: self.clan, panneaux=rellseas_panneau.panneaux_tickets,
                            log=lambda *a: None)
@@ -104,6 +109,7 @@ class Env:
 
         async def preparer():
             await recrutements.init_db()
+            await registre.init_db()
             async with get_db() as db:
                 await db.execute("CREATE TABLE tickets(id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER,"
                                  " user_id INTEGER, panel_id TEXT, claimed_by INTEGER, status TEXT, answers TEXT,"
@@ -224,7 +230,8 @@ def test_T7_sanctions_en_chiffres_et_en_cours(tmp_path):
     assert sum(sum(v.values()) for v in s["mois"].values()) == 4, "plus d'un an : hors du graphique"
 
 
-def test_T8_le_salon_du_tableau_reserve_au_staff_et_epingle():
+def test_T8_un_seul_salon_de_logs_le_menu_epingle_toujours_a_jour():
+    """« Il n'y aura qu'un seul salon, qui mettra le lien correctement… tout le temps opérationnel. »"""
     import discord
     import visuels
     from ui_v2 import LayoutView, Palette
@@ -233,13 +240,17 @@ def test_T8_le_salon_du_tableau_reserve_au_staff_et_epingle():
     for r in (staff, direction, membre_r):
         r.managed = False
     tous = Obj(id=1, position=0, managed=False)
-    conf, crees, envois, epingles = {"ticket_staff": 10, "direction_allowed_role": 11}, [], [], []
+    conf, crees, envois, epingles, edits = {"ticket_staff": 10, "direction_allowed_role": 11}, [], [], [], []
+    etat = {"site": False, "supprime": False}
 
     class Message:
         id = 555
 
         async def pin(self, reason=None):
             epingles.append(reason)
+
+        async def edit(self, **kw):
+            edits.append(kw)
 
     class Salon:
         id = 77
@@ -249,10 +260,13 @@ def test_T8_le_salon_du_tableau_reserve_au_staff_et_epingle():
             return Message()
 
         async def fetch_message(self, mid):
-            if mid != 555:
+            if mid != 555 or etat["supprime"]:
                 raise discord.NotFound(Obj(status=404, reason="x"), "x")
             return Message()
     salon = Salon()
+
+    async def mode_site(_gid):
+        return etat["site"]
 
     async def creer(nom, **kw):
         crees.append((nom, kw))
@@ -268,18 +282,30 @@ def test_T8_le_salon_du_tableau_reserve_au_staff_et_epingle():
     async def db_set(_g, k, v):
         conf[k] = v
     ns = {"cfg": cfg, "db_set": db_set, "discord": discord, "visuels": visuels, "LayoutView": LayoutView,
-          "Palette": Palette, "recrutements": recrutements, "_logerr": lambda *a, **k: None}
-    exec(_source("_salon_tableau"), ns)  # noqa: S102 — code du dépôt
+          "Palette": Palette, "recrutements": recrutements, "_logerr": lambda *a, **k: None,
+          "ulogger2026": Obj(mode_site=mode_site)}
+    for nom in ("NOM_SALON_LOGS", "MENU_LOGS_VERSION", "_anciens_salons", "_menu_logs", "_salon_tableau"):
+        exec(_source(nom), ns)  # noqa: S102 — code du dépôt
+    assert asyncio.run(ns["_salon_tableau"](g)) is salon
     asyncio.run(ns["_salon_tableau"](g))
-    asyncio.run(ns["_salon_tableau"](g))
-    assert len(crees) == 1 and crees[0][0] == "📊tableau-de-bord"
+    assert len(crees) == 1 and crees[0][0] == "📋logs"
     ows = crees[0][1]["overwrites"]
     assert ows[tous].view_channel is False
     assert ows[staff].view_channel and ows[direction].view_channel, "staff et au-dessus"
     assert membre_r not in ows and robot_r not in ows
-    assert len(envois) == 1 and epingles, "un seul message, épinglé"
+    assert len(envois) == 1 and epingles and not edits, "un seul message, épinglé, pas réécrit pour rien"
     composants = list(envois[0]["view"].walk_children())
     assert any(getattr(c, "custom_id", "") == "recr:web" for c in composants)
+
+    etat["site"] = True
+    asyncio.run(ns["_salon_tableau"](g))
+    asyncio.run(ns["_salon_tableau"](g))
+    assert len(edits) == 1, "le menu change une fois, il est réécrit une fois"
+    textes = " ".join(c.content for c in edits[0]["view"].walk_children() if isinstance(c, discord.ui.TextDisplay))
+    assert "Plus aucun log sur Discord" in textes
+    etat["supprime"] = True
+    asyncio.run(ns["_salon_tableau"](g))
+    assert len(envois) == 2 and len(epingles) == 2, "supprimé : le menu revient, épinglé"
 
 
 def test_T9_seuls_le_fondateur_et_la_direction_agissent():

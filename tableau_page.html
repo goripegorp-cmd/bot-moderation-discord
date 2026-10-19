@@ -197,6 +197,11 @@ svg text{fill:var(--pale);font-size:11px}
 .reponse{padding:12px 14px;border-radius:12px;background:var(--carte);border:1px solid var(--bord)}
 .reponse .q{color:#7dd3fc;font-size:13px;font-weight:600;margin-bottom:4px}
 .reponse .r{white-space:pre-wrap;word-break:break-word}
+.lien-nom{border:0;background:none;padding:0;font:inherit;color:#7dd3fc;cursor:pointer;text-align:left}
+.lien-nom:hover{text-decoration:underline}
+.nom.lien-nom{color:var(--texte);font-weight:700;max-width:100%}
+.ligne.evt{align-items:flex-start}
+.texte-evt{word-break:break-word}
 .fermer{margin-left:auto;align-self:flex-start;border:0;background:rgba(255,255,255,.07);width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:20px;line-height:1}
 .dates{display:flex;flex-wrap:wrap;gap:6px}
 
@@ -235,7 +240,7 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
   <header class="hero">
     <div class="logo" id="logo">RS</div>
     <div class="hero-texte">
-      <div class="surtitre">RELL SEAS · STAFF</div>
+      <div class="surtitre">ESPACE STAFF</div>
       <h1>Tableau de bord</h1>
       <div class="etat"><span class="direct" aria-hidden="true"></span><span id="etat">Chargement des données…</span></div>
     </div>
@@ -256,6 +261,7 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
     <button class="onglet" role="tab" data-onglet="candidatures" aria-selected="true">Candidatures<span class="nb" id="nb-candidatures">0</span></button>
     <button class="onglet" role="tab" data-onglet="tickets" aria-selected="false">Tickets<span class="nb" id="nb-tickets">0</span></button>
     <button class="onglet" role="tab" data-onglet="sanctions" aria-selected="false">Modération<span class="nb" id="nb-sanctions">0</span></button>
+    <button class="onglet" role="tab" data-onglet="journal" aria-selected="false">Journal<span class="nb" id="nb-journal">0</span></button>
     <button class="onglet" role="tab" data-onglet="clan" aria-selected="false">Clan<span class="nb" id="nb-clan">0</span></button>
     <button class="onglet" role="tab" data-onglet="stats" aria-selected="false">Statistiques</button>
   </nav>
@@ -305,6 +311,20 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
     </div>
     <div class="puces" id="puces-sanctions" style="margin-bottom:14px"></div>
     <div class="liste" id="recentes"></div>
+  </section>
+
+  <section id="vue-journal" role="tabpanel" hidden>
+    <div class="outils">
+      <label class="recherche"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q-journal" type="search" placeholder="Membre, identifiant, salon, texte…" aria-label="Rechercher dans le journal"></label>
+      <select id="periode" aria-label="Période"><option value="tout">Tout ce qui est chargé</option><option value="1">Dernières 24 h</option><option value="7">7 derniers jours</option></select>
+    </div>
+    <div class="puces" id="puces-journal" style="margin-bottom:14px"></div>
+    <div class="panneaux2">
+      <div class="cadre"><h3>Ce qui s'est passé</h3><p class="aide">Les 400 derniers évènements, du plus récent au plus ancien. Clique sur un nom : tout son historique.</p><div class="liste" id="journal"></div></div>
+      <div class="cadre"><h3>Les plus présents</h3><p class="aide">Les personnes les plus souvent au journal, sur la période choisie.</p><div class="liste" id="journal-personnes"></div></div>
+    </div>
+    <p class="pseudo" style="margin-top:12px">Conservation : messages et vocal 30 jours, le reste 90 jours. Plus aucun log n'est posté sur Discord.</p>
   </section>
 
   <section id="vue-clan" role="tabpanel" hidden>
@@ -360,7 +380,7 @@ const PLURIELS = {en_cours:"En cours", acceptes:"Acceptés", refuses:"Refusés"}
 const peutAgir = () => !!(etat.donnees && etat.donnees.droits && etat.donnees.droits.actions);
 const RANGS = ["Actif","Peu présent","Inactif","Jamais vu","Trop récent"];
 const $ = (s) => document.querySelector(s);
-const etat = {donnees:null, onglet:"candidatures", statut:"tous", rang:"tous", type:"tous", groupe:"tous", charge:false};
+const etat = {donnees:null, onglet:"candidatures", statut:"tous", rang:"tous", type:"tous", groupe:"tous", cat:"tous", journalMax:100, charge:false};
 const GROUPES = ["Avertissements", "Mutes", "Expulsions et bans", "Détections"];
 
 function h(tag, attrs, ...enfants){
@@ -485,6 +505,7 @@ function ouvrirFiche(c){
   const t = $("#tiroir"); t.replaceChildren();
   const actions = h("div", {classe:"actions"},
     h("button", {classe:"bouton", type:"button", onclick:() => copier(c.id, "Identifiant copié")}, svg(ICONE_COPIE), "Copier l'identifiant"),
+    h("button", {classe:"bouton", type:"button", onclick:() => ouvrirPersonne(c.id)}, "Son journal"),
     c.transcript ? h("a", {classe:"bouton principal", href:c.transcript, target:"_blank", rel:"noopener noreferrer"}, "Ouvrir le transcript") : null,
     c.salon ? h("a", {classe:"bouton principal", href:c.salon, target:"_blank", rel:"noopener noreferrer"}, "Ouvrir le ticket") : null,
     h("a", {classe:"bouton", href:"https://discord.com/users/" + c.id, target:"_blank", rel:"noopener noreferrer"}, "Profil Discord"));
@@ -616,6 +637,7 @@ function ouvrirSanctions(m){
       h("div", {style:"margin-top:6px", classe:"pseudo"}, m.total + " passage(s) au casier sur 90 jours" + (m.total_tout ? " · " + m.total_tout + " au total" : ""))),
       h("button", {classe:"fermer", type:"button", "aria-label":"Fermer", onclick:fermerFiche}, "×")),
     h("div", {classe:"corps"},
+      h("div", {classe:"actions"}, h("button", {classe:"bouton", type:"button", onclick:() => ouvrirPersonne(m.id)}, "Son journal")),
       h("div", {classe:"dates"}, types.map(([ty, n]) => h("span", {classe:"etiquette"}, n + " × " + libelleType(ty)))),
       h("div", {}, h("div", {classe:"titre-section", style:"margin:0 0 8px"}, h("h2", {}, "Historique récent")),
         h("div", {classe:"liste"}, (m.historique || []).map(x => h("div", {classe:"reponse"},
@@ -689,6 +711,79 @@ function rendreRecentes(){
 }
 ["#q-sanctions", "#origine"].forEach(s => $(s).addEventListener("input", rendreRecentes));
 
+/* Journal : tous les logs du serveur, par personne */
+const COULEURS_JOURNAL = {"Modération":"#f59e0b", "Sécurité":"#f43f5e", "Membres":"#22c55e", "Messages":"#38bdf8", "Vocal":"#a78bfa",
+  "Serveur":"#94a3b8", "Tickets":"#06b6d4", "Config":"#64748b", "Clan":"#2dd4bf", "Sondages":"#818cf8", "Suggestions":"#facc15"};
+const teinteJournal = (c) => COULEURS_JOURNAL[c] || "#94a3b8";
+const boutonFermer = () => h("button", {classe:"fermer", type:"button", "aria-label":"Fermer", onclick:fermerFiche}, "×");
+function ligneJournal(e, P){
+  const m = e.membre ? P[e.membre] : null, a = e.auteur && e.auteur !== e.membre ? P[e.auteur] : null;
+  const nom = (p) => h("button", {classe:"lien-nom", type:"button", title:"Son journal", onclick:(ev) => { ev.stopPropagation(); ouvrirPersonne(p.id); }}, p.nom);
+  return h("div", {classe:"ligne evt" + (e.gravite >= 1 ? " alerte" : "")},
+    m ? avatar(m) : h("div", {classe:"avatar", "aria-hidden":"true"}, (e.cat || "?").slice(0, 2).toUpperCase()),
+    h("div", {classe:"bloc"}, h("div", {classe:"texte-evt"}, e.texte),
+      e.detail ? h("div", {classe:"motif", title:e.detail}, e.detail) : null,
+      h("div", {classe:"meta"}, date(e.quand, true), m ? [" · ", nom(m)] : null, a ? [" · par ", nom(a)] : null, e.salon ? " · " + e.salon : null)),
+    h("span", {classe:"statut", style:"--teinte:" + teinteJournal(e.cat)}, e.cat));
+}
+function rendreJournal(){
+  const j = etat.donnees.journal, P = j.personnes, q = $("#q-journal").value.trim().toLowerCase(), periode = $("#periode").value;
+  const depuisT = periode === "tout" ? 0 : Date.now() / 1000 - (+periode) * 86400;
+  const ev = j.evenements.filter(e => e.quand >= depuisT);
+  const nb = {}; ev.forEach(e => nb[e.cat] = (nb[e.cat] || 0) + 1);
+  if (etat.cat !== "tous" && !nb[etat.cat]) etat.cat = "tous";
+  const puces = $("#puces-journal"); puces.replaceChildren();
+  puces.append(h("button", {classe:"puce", type:"button", "aria-pressed":String(etat.cat === "tous"), onclick:() => { etat.cat = "tous"; etat.journalMax = 100; rendreJournal(); }}, "Tout · " + ev.length));
+  Object.keys(nb).sort((a, b) => nb[b] - nb[a]).forEach(c => puces.append(h("button", {classe:"puce", type:"button", style:"--teinte:" + teinteJournal(c),
+    "aria-pressed":String(etat.cat === c), onclick:() => { etat.cat = c; etat.journalMax = 100; rendreJournal(); }}, h("i"), c + " · " + nb[c])));
+  const cherche = (e) => [e.texte, e.detail, e.salon, e.cat, ...[e.membre, e.auteur].filter(Boolean).flatMap(id => [id, (P[id] || {}).nom, (P[id] || {}).pseudo])].join(" ").toLowerCase();
+  const liste = ev.filter(e => (etat.cat === "tous" || e.cat === etat.cat) && (!q || cherche(e).includes(q)));
+  const zone = $("#journal"); zone.replaceChildren();
+  if (j.erreur) zone.append(h("div", {classe:"vide"}, h("b", {}, "Journal momentanément illisible"), "Nouvel essai à la prochaine actualisation."));
+  else if (!liste.length) zone.append(h("div", {classe:"vide"}, h("b", {}, "Rien ici"), "Change le filtre ou la recherche : le journal se remplit au fil des évènements."));
+  liste.slice(0, etat.journalMax).forEach(e => zone.append(ligneJournal(e, P)));
+  if (liste.length > etat.journalMax) zone.append(h("button", {classe:"bouton", type:"button", onclick:() => { etat.journalMax += 100; rendreJournal(); }}, "Afficher plus · " + (liste.length - etat.journalMax)));
+  const compte = {}; ev.forEach(e => new Set([e.membre, e.auteur].filter(Boolean)).forEach(id => compte[id] = (compte[id] || 0) + 1));
+  const top = Object.entries(compte).sort((a, b) => b[1] - a[1]).slice(0, 12), zp = $("#journal-personnes"); zp.replaceChildren();
+  if (!top.length) zp.append(h("div", {classe:"vide"}, h("b", {}, "Personne"), "Aucun évènement sur cette période."));
+  top.forEach(([id, n]) => { const p = P[id] || {id, nom:"Membre", pseudo:"", avatar:""};
+    zp.append(h("button", {classe:"ligne", type:"button", style:"text-align:left;cursor:pointer;width:100%", onclick:() => ouvrirPersonne(id)},
+      avatar(p), h("div", {classe:"bloc"}, h("div", {classe:"nom"}, p.nom), h("div", {classe:"meta"}, p.pseudo ? "@" + p.pseudo : id)),
+      h("span", {classe:"etiquette"}, n))); });
+}
+["#q-journal", "#periode"].forEach(s => $(s).addEventListener("input", () => { etat.journalMax = 100; rendreJournal(); }));
+async function ouvrirPersonne(id){
+  const t = $("#tiroir");
+  if (!t.classList.contains("ouvert")) dernierFocus = document.activeElement;
+  t.replaceChildren(h("header", {}, h("div", {classe:"bloc"}, h("div", {classe:"nom", id:"t-nom"}, "Journal")), boutonFermer()),
+    h("div", {classe:"corps"}, h("div", {classe:"squelette"})));
+  t.classList.add("ouvert"); t.setAttribute("aria-hidden", "false"); $("#voile").classList.add("ouvert");
+  let r;
+  try {
+    const rep = await fetch(location.pathname.replace(/\/$/, "") + "/journal?membre=" + encodeURIComponent(id), {cache:"no-store"});
+    r = await rep.json();
+    if (!rep.ok) throw new Error(r.erreur || "erreur");
+  } catch (e) {
+    t.replaceChildren(h("header", {}, h("div", {classe:"bloc"}, h("div", {classe:"nom", id:"t-nom"}, "Journal indisponible")), boutonFermer()),
+      h("div", {classe:"corps"}, h("div", {classe:"vide"}, h("b", {}, "Impossible de lire ce journal"), "Réessaie dans un instant.")));
+    return;
+  }
+  const m = r.membre, ev = r.evenements, cats = {};
+  ev.forEach(e => cats[e.cat] = (cats[e.cat] || 0) + 1);
+  const concernent = ev.filter(e => e.membre === m.id).length, sesActes = ev.filter(e => e.auteur === m.id && e.membre !== m.id).length;
+  t.replaceChildren(
+    h("header", {}, avatar(m, true), h("div", {classe:"bloc", style:"min-width:0"},
+      h("div", {classe:"nom", id:"t-nom", style:"font-size:20px"}, m.nom),
+      h("div", {classe:"ident"}, (m.pseudo ? "@" + m.pseudo + " · " : "") + m.id, boutonCopie(m.id, "Identifiant copié")),
+      h("div", {classe:"pseudo", style:"margin-top:6px"}, ev.length + " évènement(s) · " + concernent + " le concernent · " + sesActes + " de sa main")),
+      boutonFermer()),
+    h("div", {classe:"corps"},
+      h("div", {classe:"dates"}, Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([c, n]) => h("span", {classe:"etiquette", style:"color:" + teinteJournal(c)}, n + " × " + c))),
+      ev.length ? h("div", {classe:"liste"}, ev.map(e => ligneJournal(e, r.personnes)))
+        : h("div", {classe:"vide"}, h("b", {}, "Rien au journal"), "Aucun évènement conservé pour cette personne (messages et vocal 30 jours, le reste 90).")));
+  t.querySelector(".fermer").focus({preventScroll:true});
+}
+
 /* Clan */
 function rendreClan(){
   const c = etat.donnees.clan, q = $("#q-clan").value.trim().toLowerCase();
@@ -706,7 +801,7 @@ function rendreClan(){
     const jauge = h("div", {classe:"jauge", "data-rang":m.rang, title:m.jours + " jour(s) actifs"},
       Array.from({length:7}, (_, k) => h("span", {classe:k < presents ? "on" : ""})));
     corps.append(h("tr", {},
-      h("td", {}, h("div", {classe:"qui"}, avatar(m), h("div", {classe:"bloc"}, h("div", {classe:"nom"}, m.nom), h("div", {classe:"pseudo"}, "@" + m.pseudo)))),
+      h("td", {}, h("div", {classe:"qui"}, avatar(m), h("div", {classe:"bloc"}, h("button", {classe:"nom lien-nom", type:"button", title:"Son journal", onclick:() => ouvrirPersonne(m.id)}, m.nom), h("div", {classe:"pseudo"}, "@" + m.pseudo)))),
       h("td", {}, h("span", {classe:"ident"}, m.id, boutonCopie(m.id, "Identifiant copié"))),
       h("td", {}, m.jours === "—" ? h("span", {classe:"pseudo"}, "—") : jauge),
       h("td", {}, h("span", {classe:"statut", "data-rang":m.rang}, m.statut)),
@@ -803,7 +898,7 @@ async function agir(corps, titre, texte, avecMotif, libelleOk){
 document.querySelectorAll(".onglet").forEach(b => b.addEventListener("click", () => {
   etat.onglet = b.dataset.onglet;
   document.querySelectorAll(".onglet").forEach(x => x.setAttribute("aria-selected", String(x === b)));
-  ["candidatures", "tickets", "sanctions", "clan", "stats"].forEach(k => $("#vue-" + k).hidden = k !== etat.onglet);
+  ["candidatures", "tickets", "sanctions", "journal", "clan", "stats"].forEach(k => $("#vue-" + k).hidden = k !== etat.onglet);
 }));
 ["#q-candidatures", "#mois", "#tri"].forEach(s => $(s).addEventListener("input", rendreCandidatures));
 $("#q-clan").addEventListener("input", rendreClan);
@@ -822,16 +917,17 @@ function rendre(){
   mois.replaceChildren(h("option", {value:"tous"}, "Tous les mois"), ...cles.map(k => h("option", {value:k}, libelleMois(k))));
   mois.value = cles.includes(choisi) ? choisi : "tous";
   $("#nb-sanctions").textContent = d.sanctions.trente_jours;
-  chiffres(d); rendreCandidatures(); rendreTickets(); rendreSanctions(); rendreClan(); rendreStats();
+  $("#nb-journal").textContent = d.journal.evenements.filter(e => e.quand >= Date.now() / 1000 - 86400).length;
+  chiffres(d); rendreCandidatures(); rendreTickets(); rendreSanctions(); rendreJournal(); rendreClan(); rendreStats();
   $("#pied").textContent = "Lien personnel, valable jusqu'au " + date(d.expire, true) + " · données lues en direct dans la base du bot · ne le partage pas · "
-    + (peutAgir() ? "tu peux agir (fondateur ou direction) : chaque action est confirmée et tracée dans Discord." : "consultation : les actions sont réservées au fondateur et à la direction.");
+    + (peutAgir() ? "tu peux agir (fondateur ou direction) : chaque action est confirmée et inscrite au journal." : "consultation : les actions sont réservées au fondateur et à la direction.");
 }
 async function charger(){
   const b = $("#actualiser"); b.classList.add("tourne"); b.disabled = true;
   try {
     const r = await fetch(location.pathname.replace(/\/$/, "") + "/donnees", {cache:"no-store"});
     const corps = await r.json();
-    if (r.status === 403){ $("#erreur").style.display = "block"; $("#erreur").textContent = "Ce lien a expiré ou n'est plus autorisé. Demande-en un nouveau dans Discord : /rellseas → Tableau de bord."; clearInterval(charger.t); return; }
+    if (r.status === 403){ $("#erreur").style.display = "block"; $("#erreur").textContent = "Ce lien a expiré ou n'est plus autorisé. Demande-en un nouveau dans Discord : salon 📋logs → Ouvrir le tableau de bord."; clearInterval(charger.t); return; }
     if (!r.ok) throw new Error(corps.erreur || "erreur");
     $("#erreur").style.display = "none";
     etat.donnees = corps; rendre(); etat.charge = true;

@@ -86,10 +86,11 @@ def _du_bot(m, bot_id: int) -> bool:
 async def purger_salon(salon, bot_id: int, jours: int = RETENTION_JOURS,
                        maximum: int = MAX_SUPPRESSIONS) -> int:
     """Les messages du bot (et de ses webhooks) de plus de `jours`, du plus ancien au plus
-    récent, `maximum` par passage. Les messages des membres ne sont jamais touchés."""
+    récent, `maximum` par passage. Les messages des membres ne sont jamais touchés, les messages
+    épinglés non plus (le menu du salon des logs)."""
     n = 0
     async for m in salon.history(limit=maximum * 5, before=_limite(jours), oldest_first=True):
-        if not _du_bot(m, bot_id):
+        if not _du_bot(m, bot_id) or getattr(m, "pinned", False):
             continue
         try:
             await m.delete()

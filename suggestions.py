@@ -17,6 +17,7 @@ import discord
 from discord.ui import Button, ChannelSelect
 
 import notifs
+import registre
 import visuels
 from ui_v2 import LayoutView, Palette
 
@@ -557,10 +558,20 @@ async def journaliser(g, sid: int, auteur=None) -> None:
     try:
         if g is None:
             return
+        s, pour, contre = await charger(sid)
+        if s is None:
+            return
+        statut = STATUTS.get(s["statut"], STATUTS["attente"])[0]
+        await registre.noter(
+            g.id, "Suggestions", "suggestion.publiee" if auteur is not None else "suggestion.statut",
+            f"Idée n°{sid} ({statut}) : {s['titre']} · {pour} pour, {contre} contre"
+            + (f" · réponse du staff : {s['note']}" if s.get("note") else ""),
+            membre_id=int(s["auteur_id"] or 0),
+            auteur_id=0 if auteur is not None else int(s.get("decide_par") or 0),
+            salon_id=int(s["channel_id"] or 0))
         salon = await _salon_logs(g, "suggestions", NOM_LOGS)
         if salon is None:
             return
-        s, pour, contre = await charger(sid)
         vue = vue_journal(g.id, s, pour, contre, getattr(auteur, "display_name", ""))
         mentions = discord.AllowedMentions.none()
         if s["log_message_id"]:

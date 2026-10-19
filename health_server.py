@@ -176,6 +176,11 @@ async def _tableau_action(request):
     return await tableau.action(request)
 
 
+async def _tableau_journal(request):
+    import tableau
+    return await tableau.journal(request)
+
+
 async def start(bot_instance, port: int = 8000) -> bool:
     """Démarre le serveur HTTP en background.
 
@@ -200,6 +205,7 @@ async def start(bot_instance, port: int = 8000) -> bool:
         app.router.add_get('/v/{nom}', _visuel_handler)               # bandeaux et icônes
         app.router.add_get('/tableau/{jeton}', _tableau_page)         # tableau de bord (staff)
         app.router.add_get('/tableau/{jeton}/donnees', _tableau_donnees)
+        app.router.add_get('/tableau/{jeton}/journal', _tableau_journal)  # une personne
         app.router.add_post('/tableau/{jeton}/action', _tableau_action)  # fondateur et direction
 
         runner = web.AppRunner(app)

@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import recrutements
+import registre
 import rellseas_panneau
 
 DUREE = 24 * 3600
@@ -29,7 +30,7 @@ EXPIRE = ("<!doctype html><html lang='fr'><meta charset='utf-8'><meta name='view
           "style='margin:0;min-height:100vh;display:grid;place-items:center;background:#070b14;"
           "color:#e2e8f0;font-family:Segoe UI,system-ui,sans-serif;text-align:center'><div>"
           "<h1 style='font-size:22px'>Ce lien n'est plus valable</h1><p style='color:#94a3b8'>"
-          "Demande un nouveau lien dans Discord : <b>/rellseas</b> → <b>Tableau de bord</b>.</p>"
+          "Demande un nouveau lien dans Discord : salon <b>📋logs</b> → <b>Ouvrir le tableau de bord</b>.</p>"
           "</div></body></html>")
 ENTETES = {
     "Cache-Control": "no-store",
@@ -302,12 +303,42 @@ async def _sanctions(g) -> dict:
     }
 
 
+async def _journal(g, membre_id: int | None = None, limite: int = 400) -> dict:
+    """« Il n'y aura plus de logs sur Discord : tout sur le site, traduit par personne. » Les
+    évènements du registre, et une fiche par personne citée (nom, avatar) envoyée une fois."""
+    personnes: dict = {}
+
+    def qui(uid) -> str:
+        if not uid:
+            return ""
+        k = str(uid)
+        if k not in personnes:
+            personnes[k] = _ident(g, uid)
+        return k
+    evenements = []
+    for r in await registre.lire(g.id, limite, membre_id):
+        lieu = None
+        if r["salon_id"]:
+            lieu = g.get_channel(int(r["salon_id"])) or g.get_thread(int(r["salon_id"]))
+        evenements.append({"id": r["id"], "quand": r["quand"], "cat": r["categorie"] or "Autre",
+                           "type": r["type"] or "", "texte": r["texte"] or "", "detail": r["detail"] or "",
+                           "membre": qui(r["membre_id"]), "auteur": qui(r["auteur_id"]),
+                           "salon": f"#{lieu.name}" if lieu else "", "gravite": int(r["gravite"] or 0)})
+    return {"evenements": evenements, "personnes": personnes}
+
+
 async def donnees(g, portee: str = "tout") -> dict:
     cle = (g.id, portee)
     deja = _cache.get(cle)
     if deja and time.time() - deja[0] < 15:
         return deja[1]
     c = await _cfg(g.id)
+    try:
+        journal = await _journal(g)
+    except Exception as ex:  # le journal ne doit pas emporter le reste du tableau
+        _log("[TABLEAU][E4] journal illisible")
+        _log(f"[TABLEAU][E4:DETAIL] {type(ex).__name__} {ex}")
+        journal = {"evenements": [], "personnes": {}, "erreur": True}
     cand = await recrutements.candidatures(g)
     candidats = [dict(_ident(g, d["candidat_id"], d["nom"]), statut=d["statut"], ticket=d["ticket"],
                       ouvert=d["ouvert"], ferme=d["ferme"], pris_par=_nom(g, d["pris_par"]),
@@ -330,6 +361,7 @@ async def donnees(g, portee: str = "tout") -> dict:
         "tickets": await _tickets(g, c),
         "clan": await _clan(g, c),
         "sanctions": await _sanctions(g),
+        "journal": journal,
     }
     _cache[cle] = (time.time(), out)
     return out
@@ -372,9 +404,29 @@ async def api(request):
     return r
 
 
+async def journal(request):
+    """L'historique d'UNE personne : ce qui la concerne et ce qu'elle a fait (300 derniers)."""
+    from aiohttp import web
+    j, g = await _acces(request)
+    if j is None:
+        return web.json_response({"erreur": "lien expiré"}, status=403, headers=ENTETES)
+    membre = request.query.get("membre", "")
+    if not membre.isdigit() or len(membre) > 20:
+        return web.json_response({"erreur": "membre invalide"}, status=400, headers=ENTETES)
+    try:
+        d = await _journal(g, int(membre), 300)
+    except Exception as ex:  # la page le dit ; le détail part au journal du bot
+        _log("[TABLEAU][E3] journal indisponible")
+        _log(f"[TABLEAU][E3:DETAIL] {type(ex).__name__} {ex}")
+        return web.json_response({"erreur": "journal indisponible"}, status=500, headers=ENTETES)
+    r = web.json_response(dict(d, membre=_ident(g, int(membre))), headers=ENTETES)
+    r.enable_compression()
+    return r
+
+
 async def action(request):
-    """« Seulement le fondateur et le rôle direction » : chaque action est revérifiée ici, tracée
-    dans Discord, et refusée si elle ne vient pas de la page elle-même (en-tête X-Tableau)."""
+    """« Seulement le fondateur et le rôle direction » : chaque action est revérifiée ici, inscrite
+    au journal, et refusée si elle ne vient pas de la page elle-même (en-tête X-Tableau)."""
     from aiohttp import web
     j, g = await _acces(request)
     if j is None:

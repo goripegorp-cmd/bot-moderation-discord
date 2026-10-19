@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import aiosqlite
 import discord
 
+import registre
 import rellseas_panneau
 import visuels
 from ui_v2 import LayoutView, Palette
@@ -65,7 +66,19 @@ def _message(auteur, texte, minutes):
                created_at=datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc) + timedelta(minutes=minutes))
 
 
-def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path):
+class Journal:
+    """Le registre du site, tel que le ticket l'appelle."""
+    propre = staticmethod(registre.propre)
+
+    def __init__(self):
+        self.lignes = []
+
+    async def noter(self, gid, categorie, type_, texte, **kw):
+        self.lignes.append((categorie, type_, texte, kw))
+        return True
+
+
+def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path, site=False):
     base = tmp_path / "t.db"
 
     @contextlib.asynccontextmanager
@@ -89,6 +102,9 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path):
 
     conf = {"ticket_log": 55, "ticket_panels": {"p1": {"name": "🏴‍☠️ Recrutement Rell Seas"},
                                                 "p2": {"name": "Support"}}}
+    if site:
+        conf["logs_sur_site_v1"] = "2026-10-19T20:00:00"
+    journal = Journal()
     logs = Salon(55, "logs-tickets", categorie="LOGS")
     salons = {55: logs}
     candidat = Obj(id=7, display_name="Kolax", name="kolax_", bot=False)
@@ -134,7 +150,7 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path):
                                   new_token=lambda: "tok", save_html=lambda t, h: True,
                                   transcript_url=lambda t: f"https://bot.exemple/t/{t}"),
           "_logerr": lambda *a, **k: (_ for _ in ()).throw(AssertionError(a)),
-          "recrutements": Obj(enregistrer=enregistrer)}
+          "recrutements": Obj(enregistrer=enregistrer), "registre": journal}
     for nom in ("_ticket_event_parts", "_ticket_timeline_line", "_salon_transcripts_rellseas",
                 "_heure_paris", "_nom_et_id", "_EVENEMENTS_TICKET", "_dossier_recrutement",
                 "_vue_recrutement", "send_ticket_log"):
@@ -148,6 +164,21 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path):
     assert (tid, cid, nom, url) == (5, 7, "Kolax", "https://bot.exemple/t/tok")
     assert events[-1][0] == "close" and events[-1][2] == "Accepté, bienvenue", "le motif de fermeture suit"
     assert reponses["Pseudo Roblox"] == "Kolax_RS" and any(p["id"] == 7 for p in participants)
+    assert [(c, t) for c, t, _x, _k in journal.lignes] == [("Tickets", "ticket.create"), ("Tickets", "ticket.close")]
+    texte_fin, kw_fin = journal.lignes[-1][2], journal.lignes[-1][3]
+    assert texte_fin.startswith("Ticket #5 (🏴‍☠️ Recrutement Rell Seas) — Fermé par @Capitaine")
+    assert "Accepté, bienvenue" in texte_fin and (kw_fin["membre_id"], kw_fin["auteur_id"]) == (7, 2)
+
+    async def index():
+        async with get_db() as db:
+            async with db.execute("SELECT ticket_id, user_id, url FROM ticket_transcripts") as cur:
+                return await cur.fetchall()
+    assert asyncio.run(index()) == [(5, 7, "https://bot.exemple/t/tok")], "le transcript est indexé pour le site"
+    if site:
+        assert logs.envois == [] and 56 not in salons, "plus rien sur Discord, aucun salon créé"
+        asyncio.run(ns["send_ticket_log"](g, "create", candidat, {"id": 6, "panel_id": "p2"}))
+        assert logs.envois == [] and len(journal.lignes) == 3, "un ticket Support : au journal seulement"
+        return
 
     assert logs.envois == [], "rien d'un ticket Rell Seas dans le salon des tickets"
     dedie = salons[56]
@@ -171,6 +202,11 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path):
     autre = {"id": 6, "panel_id": "p2"}
     asyncio.run(ns["send_ticket_log"](g, "create", candidat, autre))
     assert len(logs.envois) == 1, "un ticket Support reste dans le salon des tickets"
+
+
+def test_T1b_logs_sur_le_site_rien_sur_discord_tout_au_journal(tmp_path):
+    """« Il n'y aura plus de logs sur le serveur Discord, ce sera envoyé sur le site. »"""
+    test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path, site=True)
 
 
 def test_T2_choix_explicite_dans_configure_prime_sur_le_nom():

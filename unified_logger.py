@@ -33,6 +33,7 @@ from typing import Optional, Any
 
 import discord
 
+import registre
 from paths import module_dir
 
 
@@ -233,6 +234,83 @@ def remplacer_salon(guild_id: int, ancien: int, nouveau: int) -> None:
                             ensure_ascii=False), encoding="utf-8")
 
 
+#  19/10/2026 : « il n'y aura plus de logs sur le serveur Discord, tout sera sur le site ».
+#  En mode site, chaque évènement part au registre ; seules ces alertes, qui demandent une
+#  réaction humaine, vont encore dans Discord — dans le salon unique. Le raid n'y est pas : ses
+#  deux détecteurs postent déjà leur propre alerte (avec les boutons) dans ce salon.
+ALERTES = {"sec.escalation"}
+
+
+def _lire_cfg(guild_id: int) -> dict:
+    p = _cfg_path(guild_id)
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+async def mode_site(guild_id: int) -> bool:
+    return bool(_lire_cfg(guild_id).get("site"))
+
+
+async def salon_alertes(guild_id: int) -> Optional[int]:
+    cid = _lire_cfg(guild_id).get("alertes", 0)
+    return int(cid) if cid else None
+
+
+async def activer_site(guild_id: int, alertes_id: int) -> set[int]:
+    """Plus aucun salon de logs : l'ancienne configuration est gardée de côté (pour annuler),
+    les alertes vont dans `alertes_id`. Rend les salons qui servaient jusque-là."""
+    data = _lire_cfg(guild_id)
+    anciens = salons_de_logs(guild_id)
+    if not data.get("site"):
+        data["ancien"] = {k: data.get(k) for k in ("channel_id", "category_channels", "event_channels")}
+    data.update({"site": True, "alertes": int(alertes_id or 0), "channel_id": 0,
+                 "category_channels": {}, "event_channels": {},
+                 "updated_at": datetime.now(timezone.utc).isoformat()})
+    _cfg_path(guild_id).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return anciens
+
+
+def _nom_de(x) -> str:
+    return getattr(x, "display_name", None) or getattr(x, "name", None) or ""
+
+
+async def _ecarte(guild_id: int, ev_val, user, moderator) -> bool:
+    """Évènement désactivé, ou rôle épargné (Phase 26.3) : ni Discord, ni le site."""
+    try:
+        if ev_val in await get_disabled_events(guild_id):
+            return True
+        exclus = (await get_role_exclusions(guild_id)).get(ev_val, []) or []
+        return bool(exclus) and (_user_has_excluded_role(user, exclus) or _user_has_excluded_role(moderator, exclus))
+    except Exception as ex:  # réglages illisibles : on consigne plutôt que de perdre l'évènement
+        print("[UNIFIED_LOGGER][E2] filtres illisibles")
+        print(f"[UNIFIED_LOGGER][E2:DETAIL] {guild_id} {type(ex).__name__} {ex}")
+        return False
+
+
+async def _consigner(guild, event_type, meta, *, title_override, description, user, moderator,
+                     channel, reason, content, extra) -> None:
+    """La version « site » d'un log : une phrase lisible et un détail court, par personne."""
+    cat = (meta or {}).get("cat", "Autre")
+    if getattr(user, "bot", False) and cat in ("Messages", "Vocal"):
+        return
+    lib = title_override or (meta or {}).get("label", "Évènement")
+    texte = registre.propre(description, guild) if description else ""
+    if not texte:
+        qui = _nom_de(user)
+        texte = f"{lib}" + (f" · {qui}" if qui else "") + (f" · #{getattr(channel, 'name', '')}" if channel else "")
+    elif lib and lib.lower() not in texte.lower():
+        texte = f"{lib} · {texte}"
+    morceaux = [str(content or "").strip(), str(reason or "").strip()]
+    morceaux += [f"{registre.propre(str(k))} : {registre.propre(str(v))}" for k, v in (extra or {}).items()]
+    await registre.noter(guild.id, cat, getattr(event_type, "value", str(event_type)), texte,
+                         membre_id=getattr(user, "id", 0) or 0, auteur_id=getattr(moderator, "id", 0) or 0,
+                         salon_id=getattr(channel, "id", 0) or 0,
+                         detail=" · ".join(m for m in morceaux if m)[:600],
+                         gravite=2 if getattr(event_type, "value", "") in ALERTES else 0)
+
+
 async def set_log_channel(guild_id: int, channel_id: int) -> None:
     """Configure le salon de logs pour ce serveur (preserve les autres champs)."""
     p = _cfg_path(guild_id)
@@ -241,6 +319,8 @@ async def set_log_channel(guild_id: int, channel_id: int) -> None:
     except Exception:
         data = {}
     data["channel_id"] = int(channel_id)
+    if int(channel_id):
+        data["site"] = False  # un salon choisi à la main : les logs reviennent aussi sur Discord
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -621,43 +701,47 @@ async def log_event(
     content: Optional[str] = None,
     extra: Optional[dict] = None,
 ) -> Optional[discord.Message]:
-    """Envoie un log dans le salon de la categorie (sinon salon global). Retourne le message ou None."""
+    """Envoie un log dans le salon de la categorie (sinon salon global). Retourne le message ou None.
+    Toujours consigné au registre (le site) ; en mode site, seules les alertes vont dans Discord."""
     try:
         meta = EVENT_META.get(event_type)
-
+        _ev_val = getattr(event_type, "value", None) or (str(event_type) if event_type else None)
+        site = await mode_site(guild.id)
+        #  En mode site, une alerte passe toujours : plus aucun autre salon ne la rattraperait.
+        alerte = site and _ev_val in ALERTES
         # Verifier que la categorie est activee (avant toute resolution de salon)
-        if meta:
+        if meta and not alerte:
             enabled = await get_enabled_categories(guild.id)
             if meta["cat"] not in enabled:
                 return None
+        if not alerte and await _ecarte(guild.id, _ev_val, user, moderator):
+            return None
+        try:
+            await _consigner(guild, event_type, meta, title_override=title_override,
+                             description=description, user=user, moderator=moderator, channel=channel,
+                             reason=reason, content=content, extra=extra)
+        except Exception as ex:  # le registre ne doit jamais empêcher l'alerte
+            print("[UNIFIED_LOGGER][E1] registre indisponible")
+            print(f"[UNIFIED_LOGGER][E1:DETAIL] {type(ex).__name__} {ex}")
+        if site:
+            if not alerte:
+                return None
+            cid = await salon_alertes(guild.id)
+            cible = bot.get_channel(int(cid)) if cid else None
+            if cible is None:
+                return None
+            return await cible.send(embed=build_log_embed(
+                event_type, title_override=title_override, description=description, fields=fields,
+                user=user, moderator=moderator, channel=channel, reason=reason, content=content,
+                extra=extra))
 
         # Phase 268 : routage évènement > catégorie > salon global.
-        _ev_val = getattr(event_type, "value", None) or (str(event_type) if event_type else None)
         chan_id = await resolve_channel_for_event(guild.id, _ev_val, meta["cat"] if meta else None)
         if not chan_id:
             return None
         target = bot.get_channel(int(chan_id))
         if target is None:
             return None
-
-        # Phase 26.3 : event-type desactive specifiquement ?
-        try:
-            disabled = await get_disabled_events(guild.id)
-            if event_type.value in disabled:
-                return None
-        except Exception:
-            pass
-
-        # Phase 26.3 : roles epargnes ?
-        try:
-            exclusions = await get_role_exclusions(guild.id)
-            excluded_ids = exclusions.get(event_type.value, []) or []
-            if excluded_ids:
-                # Si user OU moderator a un role epargne, on skippe le log
-                if _user_has_excluded_role(user, excluded_ids) or _user_has_excluded_role(moderator, excluded_ids):
-                    return None
-        except Exception:
-            pass
 
         embed = build_log_embed(
             event_type,

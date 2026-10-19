@@ -22,6 +22,7 @@ from discord.ext import tasks
 from discord.ui import Button, ChannelSelect
 
 import notifs
+import registre
 import visuels
 from ui_v2 import LayoutView, Palette
 
@@ -664,7 +665,14 @@ def vue_journal(s: dict, auteur_txt: str, comptes=None) -> LayoutView:
 
 
 async def journaliser(g, s: dict, auteur=None, comptes=None) -> None:
-    """Crée la fiche du sondage dans les logs, ou la complète avec le résultat."""
+    """Crée la fiche du sondage dans les logs, ou la complète avec le résultat. Toujours au
+    journal du site, même sans salon de logs."""
+    fin = comptes is not None
+    texte = (f"Sondage terminé : {s['question']} · {sum(comptes)} vote(s) · "
+             + registre.propre(gagnants(s["choix"], comptes))) if fin else \
+        (f"Sondage publié par {getattr(auteur, 'display_name', None) or 'un membre'} : {s['question']}")
+    await registre.noter(g.id, "Sondages", "sondage.fin" if fin else "sondage.publie", texte,
+                         membre_id=int(s.get("auteur_id") or 0), salon_id=int(s.get("channel_id") or 0))
     try:
         salon = await _salon_logs(g, "sondages", NOM_LOGS)
         if salon is None:

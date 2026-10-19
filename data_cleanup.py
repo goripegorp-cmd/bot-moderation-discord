@@ -42,6 +42,8 @@ from datetime import datetime, timedelta, timezone
 
 from discord.ext import tasks
 
+import registre
+
 try:
     from zoneinfo import ZoneInfo
     _PARIS_TZ = ZoneInfo("Europe/Paris")
@@ -78,6 +80,7 @@ PURGES_CIBLEES = [
     ("casier : détections", "DELETE FROM infractions WHERE created_at < ?"
                             " AND type NOT IN ('warn', 'mute', 'kick', 'ban')", 365, "sqlite"),
     ("casier : sanctions", "DELETE FROM infractions WHERE created_at < ?", 730, "sqlite"),
+    *registre.PURGES,
 ]
 
 # Day-of-week for the task (6 = Sunday) + hour (FR)

@@ -107,6 +107,7 @@ import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
 import config_salons  # @everyone voit tout sauf le réservé ; communautaire ouvert
 import recrutements  # suivi des candidatures Rell Seas, bilan du mois
+import registre  # le journal du serveur, lu sur le site (19/10/2026)
 import tableau  # tableau de bord web : candidatures, tickets par type, clan
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
@@ -4696,7 +4697,7 @@ async def send_log(g, key, m, msg, reason, extra=None):
     # ───── Salon legacy (rétrocompat) ─────
     try:
         c = await cfg(g.id)
-        ch = g.get_channel(c.get(f'log_{key}', 0))
+        ch = None if c.get('logs_sur_site_v1') else g.get_channel(c.get(f'log_{key}', 0))
         if not ch: return
         
         # Couleurs par type de protection
@@ -6252,9 +6253,15 @@ def _direction_ou_plus(g, membre, c) -> bool:
                                          for r in getattr(membre, "roles", []) or [])
 
 
-async def _journal_rellseas(g, texte: str) -> None:
+async def _au_journal(g, categorie: str, type_: str, texte: str, **kw) -> bool:
+    """Le journal du site (`registre`) : une phrase lisible, rangée par personne."""
+    return await registre.noter(g.id, categorie, type_, registre.propre(texte, g), **kw)
+
+
+async def _journal_rellseas(g, texte: str, membre_id: int = 0, auteur_id: int = 0) -> None:
+    await _au_journal(g, "Clan", "clan.journal", texte, membre_id=membre_id, auteur_id=auteur_id)
     c = await cfg(g.id)
-    salon = g.get_channel(int(c.get(rellseas_ui.CLE_SALON_LOG, 0) or 0))
+    salon = None if c.get('logs_sur_site_v1') else g.get_channel(int(c.get(rellseas_ui.CLE_SALON_LOG, 0) or 0))
     if salon is not None:
         try:
             await salon.send(texte, allowed_mentions=discord.AllowedMentions.none())
@@ -6299,7 +6306,8 @@ async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif:
     raison = "Accepté" if accepte else ("Refusé" + (f" : {motif[:150]}" if motif else ""))
     asyncio.create_task(_fermer_ticket(g, ch, tk, auteur, raison))
     await _journal_rellseas(g, f"**Candidature {'acceptée' if accepte else 'refusée'}** · <@{tk['user']}> "
-                               f"par {auteur.mention}" + (f" — {motif[:150]}" if motif and not accepte else ""))
+                               f"par {auteur.mention}" + (f" — {motif[:150]}" if motif and not accepte else ""),
+                            membre_id=int(tk['user']), auteur_id=auteur.id)
     await log_staff_action(g.id, auteur.id, int(tk['user']), "recrutement_" + ("accepte" if accepte else "refuse"),
                            raison, surface="recrutement")
     return True, ("Candidature acceptée : rôle donné, ticket fermé." if accepte
@@ -6339,7 +6347,8 @@ async def _action_clan_retirer(g, auteur, d):
     except discord.HTTPException as ex:
         _logerr("clan.retirer", ex, guild_id=g.id)
         return False, "Discord a refusé de retirer le rôle (hiérarchie)."
-    await _journal_rellseas(g, f"**Retiré du clan** · {membre.mention} par {auteur.mention} (tableau de bord)")
+    await _journal_rellseas(g, f"**Retiré du clan** · {membre.mention} par {auteur.mention} (tableau de bord)",
+                            membre_id=membre.id, auteur_id=auteur.id)
     await log_staff_action(g.id, auteur.id, membre.id, "clan_retire", role.name, surface="tableau")
     return True, f"{membre.display_name} n'a plus le rôle du clan."
 
@@ -6349,7 +6358,8 @@ async def _action_fiche_retirer(g, auteur, d):
     n = await recrutements.retirer_fiche(g.id, cid)
     if not n:
         return False, "Fiche déjà retirée."
-    await _journal_rellseas(g, f"**Fiche de candidature retirée** · <@{cid}> par {auteur.mention} (tableau de bord)")
+    await _journal_rellseas(g, f"**Fiche de candidature retirée** · <@{cid}> par {auteur.mention} (tableau de bord)",
+                            membre_id=cid, auteur_id=auteur.id)
     await log_staff_action(g.id, auteur.id, cid, "fiche_retiree", f"{n} ligne(s)", surface="tableau")
     return True, "Fiche retirée."
 
@@ -6366,7 +6376,11 @@ async def _action_sanction_retirer(g, auteur, d):
         await db.commit()
     await log_staff_action(g.id, auteur.id, int(r[0] or 0), "sanction_retiree",
                            f"{r[1]} — {str(r[2] or '')[:120]}", surface="tableau")
-    logs = g.get_channel(int((await cfg(g.id)).get('mod_log_channel', 0) or 0))
+    await _au_journal(g, "Modération", "mod.sanction_retiree",
+                      f"Sanction retirée du casier · {tableau._libelle(str(r[1]))} · par {auteur.display_name}"
+                      " (tableau de bord)", membre_id=int(r[0] or 0), auteur_id=auteur.id, detail=str(r[2] or ''))
+    c = await cfg(g.id)
+    logs = None if c.get('logs_sur_site_v1') else g.get_channel(int(c.get('mod_log_channel', 0) or 0))
     if logs is not None:
         try:
             await logs.send(f"**Sanction retirée du casier** · <@{r[0]}> · {r[1]} par {auteur.mention} "
@@ -6381,21 +6395,76 @@ _ACTIONS_TABLEAU = {"ticket_fermer": _action_ticket_fermer, "candidature": _acti
                     "sanction_retirer": _action_sanction_retirer}
 
 
-async def _salon_tableau(g) -> None:
+NOM_SALON_LOGS = "📋logs"
+#  Le menu est réécrit quand sa signature change (texte, mode, nombre d'anciens salons).
+MENU_LOGS_VERSION = 2
+#  Les alertes qui demandent une réaction humaine (raid, compte piraté, escalade, staff) : en
+#  mode site, elles arrivent dans le salon unique. Tous les autres salons de logs sont mis à 0.
+CLES_ALERTES = ('mod_log_channel', 'antiraid_log_channel', 'log_anti_raid', 'log_anti_alt',
+                'log_anti_compromised', 'compromised_alerts_channel', 'staff_sanction_channel_id')
+
+
+async def _anciens_salons(g, c) -> list:
+    """Les anciens salons de logs encore là (proposés à la suppression), hors salon unique."""
+    unique = int(c.get('tableau_salon', 0) or 0)
+    out = []
+    for cid in c.get('logs_anciens_salons') or []:
+        ch = g.get_channel(int(cid))
+        if isinstance(ch, discord.TextChannel) and ch.id != unique:
+            out.append(ch)
+    return out
+
+
+async def _salon_de_logs_pur(ch) -> bool:
+    """Seul le bot (ou ses webhooks) y a écrit : sa suppression n'emporte aucune parole humaine.
+    Un salon illisible n'est jamais proposé."""
+    try:
+        async for m in ch.history(limit=100):
+            if not m.is_system() and not nettoyage._du_bot(m, bot.user.id):
+                return False
+        return True
+    except discord.HTTPException as ex:
+        _logerr("logs.anciens.lecture", ex, guild_id=ch.guild.id)
+        return False
+
+
+async def _menu_logs(g, c):
+    site = await ulogger2026.mode_site(g.id)
+    anciens = await _anciens_salons(g, c)
+    texte = ("### Les logs du serveur, sur le site\n"
+             "Tickets et transcripts · candidatures · sanctions par modérateur et par membre · "
+             "journal de tout ce qui s'est passé, lisible par personne.\n"
+             "-# Un clic : ton lien personnel, valable 24 h. Réservé au staff et aux rôles au-dessus.")
+    if site:
+        texte += ("\n-# Plus aucun log sur Discord : ici n'arrivent que les alertes qui demandent "
+                  "une réaction (raid, compte piraté, escalade).")
+    boutons = [recrutements.BoutonTableau()]
+    if anciens:
+        boutons.append(BoutonAnciensSalons(len(anciens)))
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(visuels.bandeau("logs", "Les logs du serveur"),
+                                    discord.ui.TextDisplay(texte), discord.ui.ActionRow(*boutons),
+                                    accent_color=Palette.INFO))
+    return v, f"{MENU_LOGS_VERSION}|{int(site)}|{len(anciens)}"
+
+
+async def _salon_tableau(g):
     """19/10/2026 : « que le site soit accessible pour nous, qu'on puisse le voir dans le serveur
-    Discord ». Un salon que seuls le staff et les rôles au-dessus voient, un message épinglé :
-    un clic, son lien personnel. Le message revient s'il a été supprimé."""
+    Discord ». Puis : « il n'y aura qu'un seul salon, qui mettra le lien correctement, et tu
+    t'assures qu'il sera tout le temps opérationnel… le salon de logs, ce sera le fameux menu ».
+    Seuls le staff et les rôles au-dessus le voient ; le menu épinglé revient s'il a été
+    supprimé, se réécrit s'il a changé. Rend le salon, ou None."""
     try:
         c = await cfg(g.id)
         me = g.me
         salon = g.get_channel(int(c.get('tableau_salon', 0) or 0))
         if salon is None:
             if not (me and me.guild_permissions.manage_channels and me.guild_permissions.manage_roles):
-                return
+                return None
             seuils = [g.get_role(int(c.get(k, 0) or 0)) for k in ('ticket_staff', 'direction_allowed_role')]
             seuils = [r for r in seuils if r is not None]
             if not seuils:
-                return
+                return None
             plancher = min(r.position for r in seuils)
             ows = {g.default_role: discord.PermissionOverwrite(view_channel=False),
                    me: discord.PermissionOverwrite(view_channel=True, send_messages=True, embed_links=True,
@@ -6404,38 +6473,204 @@ async def _salon_tableau(g) -> None:
                 if r.position >= plancher and not r.managed and r != g.default_role:
                     ows[r] = discord.PermissionOverwrite(view_channel=True, read_message_history=True,
                                                          send_messages=False)
-            ref = g.get_channel(int(c.get('ticket_log', 0) or 0))
-            salon = await g.create_text_channel("📊tableau-de-bord", category=getattr(ref, "category", None),
-                                                overwrites=ows, reason="Tableau de bord du staff")
+            ref = (g.get_channel(int(c.get('ticket_log', 0) or 0))
+                   or g.get_channel(int(c.get('mod_log_channel', 0) or 0)))
+            ancien = int(c.get('tableau_salon', 0) or 0)
+            salon = await g.create_text_channel(NOM_SALON_LOGS, category=getattr(ref, "category", None),
+                                                overwrites=ows, reason="Salon des logs du staff")
             await db_set(g.id, 'tableau_salon', salon.id)
+            if ancien and c.get('logs_sur_site_v1'):
+                #  Recréé : les alertes suivent (sinon elles partiraient vers un salon disparu).
+                await _remplacer_salon_partout(g, ancien, salon.id)
+            c = await cfg(g.id)
+        vue, signature = await _menu_logs(g, c)
         mid = int(c.get('tableau_message', 0) or 0)
         if mid:
             try:
-                await salon.fetch_message(mid)
-                return
+                msg = await salon.fetch_message(mid)
+                if str(c.get('tableau_message_v', '')) != signature:
+                    await msg.edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
+                    await db_set(g.id, 'tableau_message_v', signature)
+                return salon
             except discord.NotFound:
                 pass
-        v = LayoutView(timeout=None)
-        v.add_item(discord.ui.Container(
-            visuels.bandeau("tableau", "Tableau de bord du staff"),
-            discord.ui.TextDisplay("### Le site du staff, en direct\n"
-                                   "Candidatures Rell Seas · tickets par type · sanctions · clan.\n"
-                                   "-# Un clic : ton lien personnel, valable 24 h. Réservé au staff "
-                                   "et aux rôles au-dessus."),
-            discord.ui.ActionRow(recrutements.BoutonTableau()), accent_color=Palette.INFO))
-        msg = await salon.send(view=v, allowed_mentions=discord.AllowedMentions.none())
+        msg = await salon.send(view=vue, allowed_mentions=discord.AllowedMentions.none())
         await db_set(g.id, 'tableau_message', msg.id)
+        await db_set(g.id, 'tableau_message_v', signature)
         try:
-            await msg.pin(reason="Tableau de bord du staff")
+            await msg.pin(reason="Menu des logs du staff")
         except discord.HTTPException as ex:
             _logerr("tableau.epingle", ex, guild_id=g.id)
+        return salon
     except discord.HTTPException as ex:
         _logerr("tableau.salon", ex, guild_id=getattr(g, 'id', 0))
+        return None
+
+
+async def _passer_logs_sur_site(g) -> bool:
+    """19/10/2026 (soir) : « tous les logs à un seul endroit… on peut enlever tous les salons
+    logs, tout est fait par le site. Il n'y aura qu'un seul salon, qui mettra le lien ». Une fois
+    par serveur : le salon du tableau de bord devient « 📋logs », les alertes y arrivent, plus
+    aucun autre log ne part sur Discord. Les anciens salons NE SONT PAS supprimés ici — leur
+    historique partirait avec eux : le menu le propose au fondateur et à la direction, salon par
+    salon, et seulement ceux où le bot est le seul à avoir écrit."""
+    try:
+        c = await cfg(g.id)
+        if c.get('logs_sur_site_v1'):
+            return False
+        salon = await _salon_tableau(g)
+        if salon is None:
+            return False
+        if salon.name != NOM_SALON_LOGS:
+            try:
+                await salon.edit(name=NOM_SALON_LOGS, reason="Un seul salon de logs : le menu du site")
+            except discord.HTTPException as ex:
+                _logerr("logs.site.nom", ex, guild_id=g.id)
+        anciens = set(await ulogger2026.activer_site(g.id, salon.id))
+        a_zero = {k for k in c if str(k).startswith(('log_anti_', 'logs_salon_'))} - set(CLES_ALERTES)
+        a_zero |= {'ticket_log', rellseas_ui.CLE_SALON_LOG, rellseas_ui.CLE_SALON_TRANSCRIPTS}
+        for k in a_zero | set(CLES_ALERTES):
+            v = c.get(k)
+            if str(v or '').isdigit() and int(v):
+                anciens.add(int(v))
+        for k in a_zero:
+            if c.get(k):
+                await db_set(g.id, k, 0)
+        for k in CLES_ALERTES:
+            await db_set(g.id, k, salon.id)
+        anciens.discard(salon.id)
+        proposes = []
+        for cid in sorted(anciens):
+            ch = g.get_channel(cid)
+            if isinstance(ch, discord.TextChannel) and await _salon_de_logs_pur(ch):
+                proposes.append(cid)
+        await db_set(g.id, 'logs_anciens_salons', proposes)
+        await db_set(g.id, 'logs_sur_site_v1', now().isoformat())
+        await _salon_tableau(g)
+        await _au_journal(g, "Config", "logs.site", f"Logs passés sur le site : un seul salon, {salon.mention}. "
+                                                    f"{len(proposes)} ancien(s) salon(s) proposé(s) à la suppression.")
+        print(f"[LOGS] logs sur le site : {g.id}")
+        return True
+    except discord.HTTPException as ex:
+        _logerr("logs.site", ex, guild_id=getattr(g, 'id', 0))
+        return False
+
+
+class BoutonAnciensSalons(discord.ui.DynamicItem[Button], template=r"logs:anciens"):
+    """Le seul geste irréversible du passage au site : fondateur et direction, après confirmation."""
+
+    def __init__(self, n: int = 0):
+        super().__init__(Button(label=f"Supprimer les anciens salons de logs ({n})" if n
+                                else "Supprimer les anciens salons de logs",
+                                style=discord.ButtonStyle.danger, custom_id="logs:anciens",
+                                emoji=visuels.icone("supprimer")))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, i: discord.Interaction):
+        c = await cfg(i.guild.id)
+        if not _direction_ou_plus(i.guild, i.user, c):
+            return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
+        await i.response.defer(ephemeral=True, thinking=True)
+        salons = [ch for ch in await _anciens_salons(i.guild, c) if await _salon_de_logs_pur(ch)]
+        if not salons:
+            await db_set(i.guild.id, 'logs_anciens_salons', [])
+            await _salon_tableau(i.guild)
+            return await i.followup.send("Plus aucun ancien salon de logs à supprimer.", ephemeral=True)
+        await i.followup.send(view=ConfirmerAnciensSalons(i.user.id, salons), ephemeral=True)
+
+
+class ConfirmerAnciensSalons(LayoutView):
+    def __init__(self, auteur_id: int, salons: list):
+        super().__init__(timeout=300)
+        self.auteur_id = auteur_id
+        self.salons = salons[:25]
+        self.choix = [ch.id for ch in self.salons]
+        sel = discord.ui.Select(placeholder="Salons à supprimer", min_values=0, max_values=len(self.salons),
+                                options=[discord.SelectOption(
+                                    label=f"#{ch.name}"[:100], value=str(ch.id), default=True,
+                                    description=(ch.category.name if ch.category else "Sans catégorie")[:100])
+                                    for ch in self.salons])
+        sel.callback = self._choisir
+        ok = Button(label="Supprimer la sélection", style=discord.ButtonStyle.danger,
+                    emoji=visuels.icone("supprimer"))
+        ok.callback = self._supprimer
+        non = Button(label="Annuler", style=discord.ButtonStyle.secondary, emoji=visuels.icone("annuler"))
+        non.callback = self._annuler
+        self.add_item(discord.ui.Container(
+            discord.ui.TextDisplay("### Supprimer les anciens salons de logs\n"
+                                   "Ils ne reçoivent plus rien : tout est sur le site. Seuls ceux où le bot est "
+                                   "le seul à avoir écrit sont proposés.\n"
+                                   "-# Décoche ceux à garder : ils ne seront plus proposés. "
+                                   "Irréversible : leur historique part avec eux."),
+            discord.ui.ActionRow(sel), discord.ui.ActionRow(ok, non), accent_color=Palette.DANGER))
+
+    async def interaction_check(self, i):
+        return i.user.id == self.auteur_id
+
+    async def _choisir(self, i):
+        self.choix = [int(v) for v in i.data.get("values", [])]
+        await i.response.defer()
+
+    async def _annuler(self, i):
+        v = LayoutView(timeout=None)
+        v.add_item(discord.ui.Container(discord.ui.TextDisplay("Rien n'a été supprimé.")))
+        await i.response.edit_message(view=v)
+        self.stop()
+
+    async def _supprimer(self, i):
+        g = i.guild
+        c = await cfg(g.id)
+        if not _direction_ou_plus(g, i.user, c):
+            return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
+        attente = LayoutView(timeout=None)
+        attente.add_item(discord.ui.Container(discord.ui.TextDisplay("Suppression en cours…")))
+        await i.response.edit_message(view=attente)
+        self.stop()
+        permis = {ch.id for ch in await _anciens_salons(g, c)}
+        faits, refus, categories = [], 0, set()
+        for cid in self.choix:
+            ch = g.get_channel(cid)
+            if cid not in permis or not isinstance(ch, discord.TextChannel) or not await _salon_de_logs_pur(ch):
+                refus += 1
+                continue
+            try:
+                if ch.category is not None:
+                    categories.add(ch.category)
+                await ch.delete(reason=f"Anciens logs : tout est sur le site ({i.user} · {i.user.id})")
+                faits.append(ch.name)
+                await asyncio.sleep(1)
+            except discord.HTTPException as ex:
+                _logerr("logs.anciens.suppression", ex, guild_id=g.id)
+                refus += 1
+        for cat in categories:
+            if not cat.channels and "log" in cat.name.casefold():
+                try:
+                    await cat.delete(reason="Catégorie de logs vide")
+                except discord.HTTPException as ex:
+                    _logerr("logs.anciens.categorie", ex, guild_id=g.id)
+        await db_set(g.id, 'logs_anciens_salons', [])
+        await _salon_tableau(g)
+        if faits:
+            await _au_journal(g, "Config", "logs.anciens", f"Anciens salons de logs supprimés ({len(faits)}) : "
+                              + ", ".join(f"#{n}" for n in faits), auteur_id=i.user.id)
+            await log_staff_action(g.id, i.user.id, 0, "logs_anciens_supprimes", ", ".join(faits)[:200],
+                                   surface="logs")
+        fin = LayoutView(timeout=None)
+        fin.add_item(discord.ui.Container(discord.ui.TextDisplay(
+            f"{len(faits)} salon(s) supprimé(s)." + (f" {refus} non supprimé(s) : un membre y avait écrit, "
+                                                     "ou Discord a refusé." if refus else ""))))
+        await i.edit_original_response(view=fin)
 
 
 async def _salon_transcripts_rellseas(g, c, ref=None):
     """19/10/2026 : « un salon transcript pour les tickets de type Rell Seas ». Créé une fois à
-    côté du salon des logs de tickets, mêmes droits que lui."""
+    côté du salon des logs de tickets, mêmes droits que lui. Plus aucun quand les logs sont sur
+    le site."""
+    if c.get('logs_sur_site_v1'):
+        return None
     salon = g.get_channel(int(c.get(rellseas_ui.CLE_SALON_TRANSCRIPTS, 0) or 0))
     if isinstance(salon, discord.TextChannel):
         return salon
@@ -6566,15 +6801,16 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
     """owner 2026-06-29 : LOG REGROUPÉ — tous les événements d'un ticket dans UN SEUL message
     qui se met à jour (timeline créé→pris→note→fermé), au lieu d'un message par événement (qui
     se mélangeaient entre tickets). À la fermeture : transcript PRO en pièce jointe. FAIL-SAFE.
-    19/10/2026 : un ticket Rell Seas va tout entier dans son propre salon de transcripts."""
+    19/10/2026 : un ticket Rell Seas va tout entier dans son propre salon de transcripts.
+    19/10/2026 (soir) : « plus de logs sur Discord, tout sur le site » — en mode site, rien
+    n'est posté ; l'historique, le transcript, l'index et le dossier de recrutement restent."""
     try:
         c = await cfg(g.id)
-        lch = g.get_channel(c.get('ticket_log', 0))
+        site = bool(c.get('logs_sur_site_v1'))
+        lch = None if site else g.get_channel(c.get('ticket_log', 0))
         rellseas = str(ti.get('panel_id', '') or '') in rellseas_ui.panneaux_tickets(c)
-        if rellseas:
+        if rellseas and not site:
             lch = await _salon_transcripts_rellseas(g, c, ref=lch) or lch
-        if not lch:
-            return
         try:
             tid = int(ti.get('id', 0) or 0)
         except Exception:
@@ -6631,9 +6867,17 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                 e.set_thumbnail(url=user.display_avatar.url)
             except Exception:
                 pass
+        try:
+            await registre.noter(g.id, "Tickets", f"ticket.{lt}",
+                                 f"Ticket #{tid or ti.get('id', '?')}" + (f" ({panel_name})" if panel_name else "")
+                                 + " — " + registre.propre(_ticket_timeline_line(lt, actor, detail, 0), g),
+                                 membre_id=int(uid) if str(uid).isdigit() else 0, auteur_id=actor,
+                                 salon_id=getattr(ch, 'id', 0) or 0, detail=str(detail or ''))
+        except Exception as ex:
+            _logerr("ticket.registre", ex, guild_id=g.id)
         # 3) ÉDITE le message unique du ticket (sinon le crée + mémorise son id)
         msg_id = 0
-        if tid:
+        if tid and lch is not None:
             try:
                 async with get_db() as db:
                     async with db.execute(
@@ -6643,7 +6887,7 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                 msg_id = int(r[0]) if r and r[0] else 0
             except Exception:
                 msg_id = 0
-        edited = False
+        edited = lch is None
         if msg_id:
             try:
                 old = await lch.fetch_message(msg_id)
@@ -6703,14 +6947,19 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                         ch, g, _tid, int(uid) if str(uid).isdigit() else 0, panel_name,
                         ti.get('answers') or {}, events)
                     nom_fichier = f"recrutement-{_slug}-{_tid}.txt"
-                    vue = _vue_recrutement(g, _tid, uid, _qui, panel_name, ti.get('answers') or {},
-                                           events, participants, nom_fichier, url)
-                    await lch.send(view=vue, file=discord.File(io.BytesIO(texte.encode('utf-8')),
-                                                               filename=nom_fichier),
-                                   allowed_mentions=discord.AllowedMentions.none())
+                    if lch is not None:
+                        vue = _vue_recrutement(g, _tid, uid, _qui, panel_name, ti.get('answers') or {},
+                                               events, participants, nom_fichier, url)
+                        await lch.send(view=vue, file=discord.File(io.BytesIO(texte.encode('utf-8')),
+                                                                   filename=nom_fichier),
+                                       allowed_mentions=discord.AllowedMentions.none())
                     if str(_tid).isdigit() and str(uid).isdigit():
                         await recrutements.enregistrer(g.id, int(_tid), int(uid), _qui, events,
                                                        ti.get('answers') or {}, participants, url)
+                elif lch is None:
+                    if not url:
+                        print("[TICKETS][E7] transcript non sauvegardé (logs sur le site)")
+                        print(f"[TICKETS][E7:DETAIL] guild={g.id} ticket={_tid} html={bool(html)} base={bool(base_url)}")
                 elif url:
                     # LIEN prioritaire : GROS bouton, PAS de fichier .html joint (sinon Discord
                     # affiche le code brut qui masque le lien — owner 2026-07-01).
@@ -10314,15 +10563,19 @@ class TicketFeedbackButton(discord.ui.DynamicItem[Button],
             guild = bot.get_guild(self.gid)
             if guild is not None:
                 c = await cfg(self.gid)
-                log_ch = guild.get_channel(int(c.get('mod_log_channel', 0) or 0))
+                emo = {3: "👍 Résolu", 2: "😐 Moyen", 1: "👎 Non résolu"}.get(self.rating, "?")
+                await _au_journal(guild, "Tickets", "ticket.avis",
+                                  f"Avis sur le ticket #{self.tid} : {emo} (staff : <@{self.sid}>)",
+                                  membre_id=i.user.id)
+                log_ch = (None if c.get('logs_sur_site_v1')
+                          else guild.get_channel(int(c.get('mod_log_channel', 0) or 0)))
                 if log_ch is not None:
-                    emo = {3: "👍 Résolu", 2: "😐 Moyen", 1: "👎 Non résolu"}.get(self.rating, "?")
                     await log_ch.send(
                         f"⭐ **Satisfaction ticket #{self.tid}** : {emo} — par {getattr(i.user, 'mention', i.user.id)} "
                         f"(staff : <@{self.sid}>)",
                         allowed_mentions=discord.AllowedMentions.none())
-        except Exception:
-            pass
+        except Exception as ex:
+            _logerr("ticket.avis", ex, guild_id=self.gid)
         try:
             await i.response.send_message(
                 "🙏 **Merci pour ton retour !** Ça nous aide à améliorer le support.", ephemeral=True)
@@ -11157,6 +11410,23 @@ async def _menage_salons_wait():
     await asyncio.sleep(600)
 
 
+@tasks.loop(minutes=30)
+async def salon_logs_task():
+    """« Tu t'assures qu'il sera tout le temps opérationnel » : le salon des logs et son menu
+    reviennent s'ils ont disparu ; le menu se réécrit s'il a changé."""
+    for g in list(bot.guilds):
+        try:
+            await _salon_tableau(g)
+        except Exception as ex:
+            _logerr("logs.salon", ex, guild_id=g.id)
+
+
+@salon_logs_task.before_loop
+async def _salon_logs_wait():
+    await bot.wait_until_ready()
+    await asyncio.sleep(900)
+
+
 async def _retirer_salons_combat(g):
     """19/10/2026 : « les salons de combat temporaires, tu les enlèves — je ne veux plus de
     système de combat ». Plus rien ne les crée ; on retire ceux qui restent (par nom ou par
@@ -11594,6 +11864,8 @@ async def _salon_logs_dedie(g, cle: str, nom: str):
     salon de logs principal — mêmes droits que sa catégorie."""
     try:
         c = await cfg(g.id)
+        if c.get('logs_sur_site_v1'):
+            return None
         salon = g.get_channel(int(c.get(f"logs_salon_{cle}", 0) or 0))
         if isinstance(salon, discord.TextChannel):
             return salon
@@ -11714,6 +11986,7 @@ async def _travaux_de_demarrage():
                 await _flux_studio_rell(g)
                 await _rattacher_flux_orphelins(g)
                 await _configurer_salons(g)
+                await _passer_logs_sur_site(g)
                 _c = await cfg(g.id)
                 if rellseas_ui.panneaux_tickets(_c):
                     await _salon_transcripts_rellseas(g, _c)
@@ -11935,6 +12208,7 @@ _SUPERVISED_LOOP_NAMES = [
     "db_optimizer_task",
     "tickets_inactifs_task",
     "menage_salons_task",
+    "salon_logs_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -12276,6 +12550,8 @@ class LogsPanelV2(LayoutView):
         return i.user.id == self.u.id
 
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        if await ulogger2026.mode_site(self.g.id):
+            return await self._rendre_site(interaction, edit)
         chan_id = await ulogger2026.get_log_channel(self.g.id)
         cats_enabled = await ulogger2026.get_enabled_categories(self.g.id)
         all_cats = sorted(set(m["cat"] for m in ulogger2026.EVENT_META.values()))
@@ -12363,6 +12639,35 @@ class LogsPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.INFO if log_ch else Palette.NEUTRAL))
 
+        await _afficher_panneau(self, interaction, edit)
+
+    async def _rendre_site(self, interaction, edit):
+        """19/10/2026 : plus aucun log sur Discord. Ce qui reste réglable filtre le journal du site."""
+        self.clear_items()
+        c = await cfg(self.g.id)
+        salon = self.g.get_channel(int(c.get('tableau_salon', 0) or 0))
+        boutons = []
+        for emoji, label, cid, cb in (("curseurs", "Catégories", "logsv2_cats", self._cb_categories),
+                                      ("recherche", "Détail par évènement", "logsv2_evts", self._cb_events),
+                                      ("bouclier", "Rôles épargnés", "logsv2_excl", self._cb_exclusions),
+                                      ("alerte", "Salons sécurité", "logsv2_sec", self._cb_security_channels),
+                                      ("retour", "Retour", "logsv2_back", self._cb_back)):
+            b = Button(emoji=visuels.icone(emoji), label=label, custom_id=cid,
+                       style=discord.ButtonStyle.secondary if cid == "logsv2_back" else discord.ButtonStyle.primary)
+            b.callback = cb
+            boutons.append(b)
+        self.add_item(v2_container(
+            visuels.bandeau("logs", "Logs du serveur"),
+            v2_subtitle("Sur le site · plus aucun log sur Discord"),
+            v2_divider(),
+            v2_body("🌐 **Tout est consigné sur le site**, lisible par personne, nettoyé tout seul "
+                    "(messages et vocal 30 jours, le reste 90 jours).\n"
+                    + (f"Lien personnel : {salon.mention} → « Ouvrir le tableau de bord ».\n" if salon else "")
+                    + "-# Discord ne reçoit plus que les alertes qui demandent une réaction. Catégories, "
+                      "évènements et rôles épargnés filtrent ce qui est consigné."),
+            v2_divider(),
+            discord.ui.ActionRow(*boutons[:3]), discord.ui.ActionRow(*boutons[3:]),
+            color=Palette.INFO))
         await _afficher_panneau(self, interaction, edit)
 
     async def _cb_set_channel(self, i):
@@ -13478,8 +13783,15 @@ class ProtDetailV2(LayoutView):
 
         # Salon de log (commun à toutes)
         log_ch = self.g.get_channel(c.get(f'log_{self.key}', 0))
+        site = bool(c.get('logs_sur_site_v1'))
+        #  En mode site, seules les protections qui alertent gardent un salon : le salon unique.
+        sur_site = site and f'log_{self.key}' not in CLES_ALERTES
         items.append(v2_divider())
-        items.append(v2_body(f"**Salon de log** · {log_ch.mention if log_ch else '⚪ _non configuré_'}"))
+        if sur_site:
+            items.append(v2_body("**Salon de log** · 🌐 sur le site — journal du tableau de bord"))
+        else:
+            items.append(v2_body(f"**{'Salon des alertes' if site else 'Salon de log'}** · "
+                                 f"{log_ch.mention if log_ch else '⚪ _non configuré_'}"))
 
         # Boutons
         self.clear_items()
@@ -13493,7 +13805,8 @@ class ProtDetailV2(LayoutView):
         b_config.callback = self._cb_config
         b_sanction = Button(emoji=visuels.icone("sanction"), label="Sanction", style=discord.ButtonStyle.secondary, custom_id="pdv2_sanction")
         b_sanction.callback = self._cb_sanction
-        b_log = Button(emoji=visuels.icone("journal"), label="Définir Log", style=discord.ButtonStyle.secondary, custom_id="pdv2_log")
+        b_log = Button(emoji=visuels.icone("journal"), label="Log : sur le site" if sur_site else "Définir Log",
+                       style=discord.ButtonStyle.secondary, custom_id="pdv2_log", disabled=sur_site)
         b_log.callback = self._cb_log
         b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="pdv2_back")
         b_back.callback = self._cb_back
@@ -15420,7 +15733,7 @@ async def send_mod_log(guild, action, mod, target, reason=None, duration=None, e
     # ───── Salon legacy (rétrocompat) ─────
     try:
         c = await cfg(guild.id)
-        log_ch = guild.get_channel(c.get('mod_log_channel', 0))
+        log_ch = None if c.get('logs_sur_site_v1') else guild.get_channel(c.get('mod_log_channel', 0))
         if not log_ch:
             return
 
@@ -15496,7 +15809,9 @@ class ModerationPanelV2(LayoutView):
         # Reconstruire les boutons à chaque render (pour les ré-attacher)
         self.clear_items()
 
-        b_logs = Button(emoji=visuels.icone("journal"), label="Salon Logs", style=discord.ButtonStyle.primary, custom_id="mpv2_set_logs")
+        site = bool(c.get('logs_sur_site_v1'))
+        b_logs = Button(emoji=visuels.icone("journal"), label="Salon des alertes" if site else "Salon Logs",
+                        style=discord.ButtonStyle.primary, custom_id="mpv2_set_logs")
         b_logs.callback = self._cb_set_logs
         b_warn = Button(emoji=visuels.icone("avertir"), label="Rôle warn", style=discord.ButtonStyle.primary, custom_id="mpv2_set_warn")
         b_warn.callback = self._cb_set_warn
@@ -15518,8 +15833,9 @@ class ModerationPanelV2(LayoutView):
 
         items.append(v2_divider())
         items.append(v2_body(
-            f"**Salon logs** · {dot(log_ch)}\n"
-            f"⚠️ **Rôle /warn** · {dot(warn_role)}\n"
+            (f"**Salon des alertes** · {dot(log_ch)} — les sanctions sont sur le site\n" if site
+             else f"**Salon logs** · {dot(log_ch)}\n")
+            + f"⚠️ **Rôle /warn** · {dot(warn_role)}\n"
             f"**Rôle /mute** · {dot(mute_role)}\n"
             f"**Rôle /infractions** · {dot(inf_role)}\n"
             f"**Rôle /mod clear** · {dot(clear_role)}\n"
@@ -17428,7 +17744,9 @@ class TicketMainPanelV2(LayoutView):
         self.clear_items()
         b_staff = Button(emoji=visuels.icone("staff"), label="Staff", style=discord.ButtonStyle.primary, custom_id="tmpv2_staff")
         b_staff.callback = self._cb_staff
-        b_logs = Button(emoji=visuels.icone("journal"), label="Logs", style=discord.ButtonStyle.primary, custom_id="tmpv2_logs")
+        site = bool(c.get('logs_sur_site_v1'))
+        b_logs = Button(emoji=visuels.icone("journal"), label="Logs : sur le site" if site else "Logs",
+                        style=discord.ButtonStyle.primary, custom_id="tmpv2_logs", disabled=site)
         b_logs.callback = self._cb_logs
         b_blacklist = Button(emoji=visuels.icone("interdit"), label="Blacklist", style=discord.ButtonStyle.primary, custom_id="tmpv2_blacklist")
         b_blacklist.callback = self._cb_blacklist
@@ -17453,7 +17771,7 @@ class TicketMainPanelV2(LayoutView):
         items.append(v2_divider())
         items.append(v2_body(
             f"**Staff** · {dot(staff)}\n"
-            f"**Logs** · {dot(lch)}\n"
+            f"**Logs** · {'🌐 sur le site — transcripts et historique' if site else dot(lch)}\n"
             f"**Blacklist** · {dot(blacklist_role, '_Staff par défaut_')}"
         ))
         items.append(v2_divider())
@@ -18729,6 +19047,8 @@ async def _activite_boot():
                        decider=_decision_recrutement, autorise=_peut_decider, log=print)
     await recrutements.init_db()
     recrutements.demarrer(bot)
+    registre.setup(get_db=get_db, log=print)
+    await registre.init_db()
     tableau.setup(bot=bot, base_url=transcript_store.public_base_url(), cfg=cfg, get_db=get_db,
                   cle=os.getenv("TABLEAU_CLE") or hashlib.sha256((TOKEN or "").encode() + b"|tableau").hexdigest(),
                   mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_staff_ou_plus,
@@ -18838,7 +19158,8 @@ async def on_ready():
                               sondages.BoutonFinAnonyme, suggestions.BoutonProposer,
                               suggestions.BoutonPour, suggestions.BoutonContre,
                               suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig,
-                              recrutements.BoutonTableau, recrutements.BoutonDecision)
+                              recrutements.BoutonTableau, recrutements.BoutonDecision,
+                              BoutonAnciensSalons)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
@@ -19516,6 +19837,8 @@ async def on_ready():
         tickets_inactifs_task.start()
     if not menage_salons_task.is_running():
         menage_salons_task.start()
+    if not salon_logs_task.is_running():
+        salon_logs_task.start()
 
     # Phase 48 : Compliment du jour DÉSACTIVÉ (système Saint-Valentin retiré)
     # if not compliment_dispatcher.is_running():
@@ -21208,6 +21531,9 @@ async def on_member_join(m):
                 main_member = m.guild.get_member(main_id)
                 main_txt = f"{main_member.name} ({main_id})" if main_member else f"ID: {main_id} (banni/parti)"
                 
+                await _au_journal(m.guild, "Sécurité", "sec.alt",
+                                  f"Compte secondaire présumé : {m} · ressemble à {main_txt} · confiance {confidence} %",
+                                  membre_id=m.id, detail=" · ".join(str(r) for r in reasons[:5]), gravite=1)
                 log_ch = m.guild.get_channel(c.get('log_anti_alt', 0))
                 if log_ch:
                     e = discord.Embed(
@@ -24706,10 +25032,13 @@ async def _clear_audit_log(guild, ch, moderator, deleted: int, limit) -> bool:
     « tout » dépasse la fenêtre d'interaction de 15 min. Retourne True si posté. FAIL-SAFE."""
     try:
         c = await cfg(guild.id)
-        lch = guild.get_channel(int(c.get('mod_log_channel', 0) or 0))
+        scope = "tout le salon" if limit is None else f"{limit} demandé(s)"
+        await _au_journal(guild, "Modération", "mod.clear",
+                          f"Purge de #{getattr(ch, 'name', '?')} : {deleted} message(s) supprimé(s) · portée : {scope}",
+                          auteur_id=getattr(moderator, 'id', 0) or 0, salon_id=getattr(ch, 'id', 0) or 0)
+        lch = None if c.get('logs_sur_site_v1') else guild.get_channel(int(c.get('mod_log_channel', 0) or 0))
         if lch is None:
             return False
-        scope = "tout le salon" if limit is None else f"{limit} demandé(s)"
         e = discord.Embed(
             title="Clear (purge)",
             description=(f"{getattr(moderator, 'mention', moderator)} a vidé {ch.mention}\n"
@@ -32879,6 +33208,9 @@ async def _track_toxicity(msg):
         if row and int(row[0]) >= 10 and int(row[1]) == 0:
             # Notifier staff
             c = await cfg(msg.guild.id)
+            await _au_journal(msg.guild, "Sécurité", "sec.toxicite",
+                              f"Toxicité élevée : {msg.author} a accumulé {int(row[0])} signaux toxiques",
+                              membre_id=msg.author.id, gravite=1)
             log_id = int(c.get('mod_log_channel', 0) or 0)
             log_ch = msg.guild.get_channel(log_id) if log_id else None
             if log_ch:

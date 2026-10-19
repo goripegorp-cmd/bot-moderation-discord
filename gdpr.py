@@ -77,6 +77,7 @@ GLOBAL_NO_GUILD = {
 DELETE_SUBJECT_KEEP_ACTOR = {
     "tickets": {"subject": ["user_id"], "actor": ["claimed_by"]},
     "recrutements": {"subject": ["candidat_id"], "actor": ["ferme_par", "pris_par"]},
+    "registre": {"subject": ["membre_id"], "actor": ["auteur_id"]},
     "mod_notes": {"subject": ["user_id"], "actor": ["mod_id"]},
     "restricted_members": {"subject": ["user_id"], "actor": ["restricted_by"]},
 }
@@ -133,6 +134,7 @@ RETENTION = {
     "alt_detection_log": ("detected_at", 90),
     "error_log": ("occurred_at", 30),
     "recrutements": ("ferme_le", 365),
+    "registre": ("quand", 90),
 }
 
 
