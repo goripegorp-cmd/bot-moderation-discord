@@ -27,7 +27,8 @@ def test_N1_un_role_par_sujet_cree_a_la_demande_personne_dedans():
     g = Guilde(salon)
     r = asyncio.run(notifs.role(g, notifs.cle_salon(42)))
     assert r.name == "🔔 Rell Seas News" and conf["notif_role_salon42"] == r.id
-    assert asyncio.run(notifs.role(g, "sondages")).name == "🔔 Sondages"
+    assert asyncio.run(notifs.role(g, "suggestions")).name == "🔔 Suggestions"
+    assert asyncio.run(notifs.role(g, "sondages")) is None, "plus de rôle pour les sondages"
     assert asyncio.run(notifs.role(g, "inconnu")) is None
     assert notifs.mentions(r).roles == [r] and notifs.ping(None) == ""
 
@@ -61,8 +62,8 @@ def test_N2_le_bouton_donne_puis_reprend_le_role():
         return None
     for _ in range(2):
         i = Obj(guild=g, user=m, response=Obj(defer=defer), followup=Obj(send=suivi))
-        asyncio.run(notifs.BoutonNotif("sondages").callback(i))
-    assert suivis == ["Tu recevras les nouveaux sondages.", "Tu ne recevras plus les nouveaux sondages."]
+        asyncio.run(notifs.BoutonNotif("suggestions").callback(i))
+    assert suivis == ["Tu recevras les nouvelles suggestions.", "Tu ne recevras plus les nouvelles suggestions."]
     assert len(ajoute) == len(retire) == 1
 
 

@@ -70,6 +70,10 @@ async def _health_handler(request):
         return web.json_response({"status": "error", "error": str(ex)}, status=500)
 
 
+#  Les travaux uniques passés (oui/non), posés par le bot : vérifier un déploiement sans Railway.
+ETAT_PUBLIC: dict = {}
+
+
 async def _stats_handler(request):
     """GET /stats → métriques détaillées (DB, cache, tasks)."""
     try:
@@ -96,6 +100,8 @@ async def _stats_handler(request):
                 data["stockage"] = dict(stockage.DERNIER)
         except Exception:
             pass
+        if ETAT_PUBLIC:
+            data["travaux"] = dict(ETAT_PUBLIC)
         return web.json_response(data)
     except Exception as ex:
         return web.json_response({"status": "error", "error": str(ex)}, status=500)

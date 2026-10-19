@@ -101,7 +101,7 @@ import acces_direction  # Direction + Fondateur déplacent dans les vocaux cré�
 import stockage as stockage_module  # part du volume par poste + bilan quotidien
 import tickets_fils  # un fil privé par ticket, un salon par équipe
 import nettoyage  # journal en fils, rétention 30 jours, remise à neuf
-import sondages  # sondages créés par les membres en un bouton (visibles ou anonymes)
+import sondages  # les sondages Discord des membres, vérifiés puis suivis sur le site
 import suggestions  # idées des membres : votes, fil de discussion, décision du staff
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -6579,10 +6579,16 @@ async def _action_sanction_retirer(g, auteur, d):
     return True, "Sanction retirée du casier."
 
 
+async def _action_sondage_retirer(g, auteur, d):
+    """« Comme ça, on peut décider si on l'enlève du salon ou non. »"""
+    return await sondages.retirer(g, int(d.get("sondage", 0) or 0), auteur)
+
+
 _ACTIONS_TABLEAU = {"ticket_fermer": _action_ticket_fermer, "candidature": _action_candidature,
                     "clan_retirer": _action_clan_retirer, "clan_retirer_lot": _action_clan_retirer_lot,
                     "fiche_retirer": _action_fiche_retirer, "sanction_retirer": _action_sanction_retirer,
-                    "moderer": _action_moderer, "question": _action_question, "alerte_geree": _action_alerte_geree}
+                    "moderer": _action_moderer, "question": _action_question, "alerte_geree": _action_alerte_geree,
+                    "sondage_retirer": _action_sondage_retirer}
 
 
 async def _salon_alertes_site(g):
@@ -10192,7 +10198,7 @@ _CONFIG_SECTIONS = [
     ("tickets",     "🎫", "Tickets",           "Panneaux d'ouverture · rôle staff · logs · blacklist"),
     ("logs",        "📋", "Logs & Audit",      "Un salon · toutes les catégories d'événements"),
     ("roblox",      "📰", "Actualités Roblox", "Blog, forum et notes de version · salon de publication"),
-    ("sondages",    "📊", "Sondages",          "Salon dédié · votes visibles ou anonymes"),
+    ("sondages",    "📊", "Sondages",          "Sondages Discord des membres · suivis sur le site"),
     ("suggestions", "💡", "Suggestions",       "Idées des membres · votes · décisions du staff"),
     ("social",      "📡", "Réseaux sociaux",   "YouTube · Twitch · X · TikTok · Instagram → salon d'annonces"),
     ("rellseas",    "🎭", "Rellseas",          "Qui peut donner, retirer, vérifier l'activité"),
@@ -11752,7 +11758,6 @@ async def menage_salons_task():
             for ch in await _salons_de_flux(g, c):
                 if isinstance(ch, (discord.TextChannel, discord.Thread)):
                     await nettoyage.purger_salon(ch, bot.user.id)
-            await sondages.assurer_panneau(g)
             await suggestions.assurer_panneau(g)
         except Exception as ex:
             _logerr("menage.salons", ex, guild_id=g.id)
@@ -11966,6 +11971,8 @@ _LIEN_OU_MENTION = re.compile(
 
 
 bot.add_listener(sondages.sur_message, "on_message")
+bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_add")
+bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_remove")
 bot.add_listener(sondages.sur_suppression, "on_raw_message_delete")
 bot.add_listener(sondages.sur_salon_supprime, "on_guild_channel_delete")
 bot.add_listener(suggestions.sur_message, "on_message")
@@ -12317,6 +12324,18 @@ async def _retirer_tables_mortes():
         _logerr("data.tables_mortes", ex)
 
 
+async def _etat_public():
+    """/stats : les travaux uniques passés (oui ou non), pour vérifier un déploiement sans rien
+    révéler du serveur."""
+    try:
+        confs = [await cfg(g.id) for g in list(bot.guilds)]
+        health_server_module.ETAT_PUBLIC.update({
+            "logs_direction": any(c.get('logs_direction_v1') for c in confs),
+            "sondages_discord": any(c.get('sondages_natifs_v2') for c in confs)})
+    except Exception as ex:
+        _logerr("etat.public", ex)
+
+
 async def _travaux_de_demarrage():
     """Les migrations, en tâche de fond, serveur par serveur."""
     try:
@@ -12350,6 +12369,7 @@ async def _travaux_de_demarrage():
                 await _logs_direction_seule(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
+        await _etat_public()
         await _fermer_anciens_sondages()
         await _retirer_tables_mortes()
     except Exception as ex:
@@ -19429,9 +19449,7 @@ async def _activite_boot():
     asyncio.create_task(visuels.installer_icones(bot))
     notifs.setup(cfg=cfg, db_set=db_set, log=print)
     sondages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_sondage_refuse,
-                   controle=_access_gate_reason, salon_logs=_salon_logs_dedie,
-                   cle_secrete=os.getenv("SONDAGES_CLE") or hashlib.sha256((TOKEN or "").encode()).hexdigest(),
-                   log=print)
+                   controle=_access_gate_reason, log=print)
     sondages.set_retour(_retour_vers_configure)
     await sondages.init_db()
     sondages.demarrer(bot)
@@ -19523,8 +19541,7 @@ async def on_ready():
     # Boutons persistants encore utiles (19/10/2026 : jeux, événements, UGC et hub retirés).
     try:
         bot.add_dynamic_items(BoostSupportButton)  # 💎 panneau « Soutenir le serveur » (boost)
-        bot.add_dynamic_items(sondages.BoutonCreer, sondages.BoutonTerminer, sondages.BoutonVote,
-                              sondages.BoutonFinAnonyme, suggestions.BoutonProposer,
+        bot.add_dynamic_items(suggestions.BoutonProposer,
                               suggestions.BoutonPour, suggestions.BoutonContre,
                               suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig,
                               recrutements.BoutonTableau, recrutements.BoutonDecision,

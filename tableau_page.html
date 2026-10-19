@@ -232,6 +232,16 @@ select{min-height:40px;max-width:100%;padding:0 12px;border-radius:12px;backgrou
 .barre-h .lib{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--t2)}
 .barre-h .fond{height:9px;border-radius:999px;background:rgba(148,163,184,.14);overflow:hidden}
 .barre-h .plein{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--cyan),var(--bleu));transform-origin:left;animation:pousse .9s var(--ease) both}
+.question-sondage{margin:12px 0 4px;font-weight:700;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.choix-sondage{margin:10px 0}
+.choix-sondage .haut-choix{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;color:var(--t2)}
+.choix-sondage .haut-choix span{min-width:0;overflow-wrap:anywhere}
+.choix-sondage .haut-choix b{flex:none;color:var(--t1);font-variant-numeric:tabular-nums}
+.choix-sondage .haut-choix small{color:var(--t3);font-weight:500;margin-left:6px}
+.choix-sondage .fond{height:8px;margin-top:5px;border-radius:999px;background:rgba(148,163,184,.14);overflow:hidden}
+.choix-sondage .plein{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--cyan),var(--bleu));transform-origin:left;animation:pousse .9s var(--ease) both}
+.choix-sondage.tete .ligne span{color:var(--t1);font-weight:700}
+.choix-sondage.tete .plein{background:linear-gradient(90deg,var(--vert),var(--cyan))}
 @keyframes pousse{from{transform:scaleX(0)}}
 @keyframes pousseY{from{transform:scaleY(0)}}
 details.repli{border-radius:var(--r3);border:1px solid var(--b1);background:var(--s1);min-width:0}
@@ -384,7 +394,8 @@ const ICONES = {
   horloge: [["circle", {cx: 12, cy: 12, r: 9}], ["path", {d: "M12 7v5l3 2"}]],
   accueil: [["path", {d: "m3 11 9-8 9 8"}], ["path", {d: "M5 10v10h14V10"}]],
   graphe: [["path", {d: "M3 3v18h18"}], ["path", {d: "M7 15l4-4 3 3 5-6"}]],
-  vide: [["circle", {cx: 12, cy: 12, r: 9}], ["path", {d: "M8 12h8"}]]
+  vide: [["circle", {cx: 12, cy: 12, r: 9}], ["path", {d: "M8 12h8"}]],
+  sondage: [["path", {d: "M5 20V11"}], ["path", {d: "M11 20V5"}], ["path", {d: "M17 20v-6"}], ["path", {d: "M3 20h18"}]]
 };
 function icone(nom, taille) {
   const s = document.createElementNS(NS, "svg");
@@ -400,7 +411,8 @@ function icone(nom, taille) {
 
 /* ── État ──────────────────────────────────────────────────────────────── */
 const ONGLETS = [["apercu", "Aperçu", "accueil"], ["candidatures", "Candidatures", "personnes"], ["tickets", "Tickets", "ticket"],
-  ["moderation", "Modération", "bouclier"], ["journal", "Journal", "journal"], ["questions", "Questions", "question"], ["clan", "Clan", "personnes"]];
+  ["moderation", "Modération", "bouclier"], ["journal", "Journal", "journal"], ["questions", "Questions", "question"], ["sondages", "Sondages", "sondage"],
+  ["clan", "Clan", "personnes"]];
 const etat = {
   d: null, etag: null, dernier: 0, erreurs: 0, onglet: "apercu", rendus: new Set(), pages: {}, precedents: {}, selection: new Set(),
   ouverture: Date.now(), versionNeuve: false, fini: false, anim: true,
@@ -410,6 +422,7 @@ const etat = {
     mod: {q: "", periode: "90", groupe: "tous", origine: "tous", tri: "recent"},
     jour: {q: "", periode: "7", cat: "tous", vue: "personnes", grave: false},
     ques: {q: "", statut: "ouverte"},
+    sond: {q: "", statut: "en_cours"},
     clan: {q: "", rang: "tous"}
   }
 };
@@ -655,6 +668,7 @@ function majBadges() {
     moderation: [d.sanctions.trente_jours, false],
     journal: [((d.journal && d.journal.evenements) || []).filter(e => cleJour(e.quand) === today).length, false],
     questions: [qOuvertes, qOuvertes > 0],
+    sondages: [((d.sondages && d.sondages.stats) || {}).en_cours || 0, false],
     clan: [d.clan.membres.length, false]
   };
   for (const [cle, [v, chaud]] of Object.entries(valeurs)) {
@@ -1095,6 +1109,55 @@ function carteQuestions(id, qs) {
           ] : h("button", {classe: "bouton p discret", type: "button", onclick: () => agir({action: "question", question: x.question, statut: "ouverte"}, "", "", {direct: true})}, "Rouvrir")));
     })),
     qs.length > 4 ? h("div", {classe: "compte", style: "margin-top:8px"}, "+ " + (qs.length - 4) + " autre(s) dans la fiche") : null);
+}
+
+/* ── Sondages ──────────────────────────────────────────────────────────── */
+const STATUTS_S = {en_cours: ["En cours", "var(--vert)"], termine: ["Terminé", "var(--cyan)"], retire: ["Retiré du salon", "var(--gris)"]};
+RENDUS.sondages = (vue, plein) => {
+  const s = etat.d.sondages || {}, liste = s.liste || [], st = s.stats || {}, f = etat.f.sond;
+  const changer = () => { reinitPages("sond"); sauver(); rendre("sondages"); };
+  if (plein) {
+    vue.replaceChildren();
+    vue.append(h("div", {classe: "tuiles"},
+      tuile({cle: "s1", lib: "En cours", val: st.en_cours || 0, teinte: "var(--vert)"}),
+      tuile({cle: "s2", lib: "Sondages · 30 jours", val: st.mois || 0, teinte: "var(--indigo)"}),
+      tuile({cle: "s3", lib: "Votes · 30 jours", val: st.votes_mois || 0, teinte: "var(--cyan)"})));
+    vue.append(h("div", {classe: "outils"}, recherche(f.q, "Question, choix, membre…", (v) => { f.q = v; changer(); })));
+    vue.append(h("p", {classe: "aide"}, "Les membres créent leurs sondages avec le bouton ➕ de Discord. Les votes se mettent à jour seuls ; un sondage retiré disparaît du salon, son résultat reste ici."));
+    vue.append(h("div", {classe: "pile resultats"}));
+  }
+  const zone = zoneResultats(vue);
+  if (s.erreur) { zone.append(vide("Sondages momentanément illisibles")); return; }
+  const nb = {tous: liste.length}; liste.forEach(x => { nb[x.statut] = (nb[x.statut] || 0) + 1; });
+  zone.append(puces([["en_cours", "En cours", nb.en_cours || 0, "var(--vert)"], ["termine", "Terminés", nb.termine || 0, "var(--cyan)"],
+    ["retire", "Retirés", nb.retire || 0, "var(--gris)"], ["tous", "Tous", nb.tous]], f.statut, (v) => { f.statut = v; changer(); }));
+  const filtre = liste.filter(x => (f.statut === "tous" || x.statut === f.statut) &&
+    (!f.q || [x.question, x.choix.join(" "), x.salon, P(x.auteur).nom, P(x.auteur).pseudo].join(" ").toLowerCase().includes(f.q)));
+  if (!filtre.length) { zone.append(vide(f.statut === "en_cours" ? "Aucun sondage en cours" : "Rien ici", "Change le filtre ou la recherche.")); return; }
+  paginer("sond", filtre, carteSondage, zone);
+};
+function carteSondage(x) {
+  const p = P(x.auteur), [lib, teinte] = STATUTS_S[x.statut] || [x.statut, null];
+  const total = x.comptes.reduce((a, n) => a + n, 0), max = Math.max(0, ...x.comptes);
+  const quand = x.statut === "en_cours" ? "fin le " + date(x.fin, true) : x.statut === "retire"
+    ? "retiré " + depuis(x.retire_le) + (x.retire_par ? " par " + P(x.retire_par).nom : "") : "terminé le " + date(x.fin, true);
+  return h("article", {classe: "carte"},
+    h("div", {classe: "qui"}, avatar(p), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, lienNom(x.auteur)),
+      h("div", {classe: "sous-nom"}, x.salon + " · " + depuis(x.cree)))),
+    h("div", {classe: "question-sondage"}, x.question),
+    h("div", {}, x.choix.map((c, i) => {
+      const n = x.comptes[i] || 0, pc = total ? Math.round(100 * n / total) : 0;
+      return h("div", {classe: "choix-sondage" + (total && n === max ? " tete" : "")},
+        h("div", {classe: "haut-choix"}, h("span", {}, c), h("b", {}, pc + " %", h("small", {}, nombre(n)))),
+        h("div", {classe: "fond"}, h("div", {classe: "plein", style: "width:" + pc + "%"})));
+    })),
+    h("div", {classe: "pastilles"}, pastille(lib, teinte, null, true),
+      h("span", {classe: "meta"}, nombre(x.total) + " vote(s)" + (x.multiple ? " · plusieurs choix" : "") + " · " + quand)),
+    x.statut !== "retire" ? h("div", {classe: "actions", style: "margin-top:10px"},
+      h("a", {classe: "bouton p", href: x.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Voir sur Discord"),
+      peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "sondage_retirer", sondage: x.id},
+        "Retirer ce sondage du salon ?", "Le message disparaît de Discord ; son résultat reste ici.", {}, "Retirer du salon", "danger")},
+        "Retirer du salon") : null) : null);
 }
 
 /* ── Clan ──────────────────────────────────────────────────────────────── */

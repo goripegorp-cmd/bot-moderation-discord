@@ -1,18 +1,22 @@
-"""sondages.py — sondages créés par les membres en un bouton (19/10/2026).
+"""sondages.py — les sondages Discord, faits comme Discord les fait (19/10/2026, soir).
 
-Un salon « 📊sondages » créé une fois par le bot, puis à son propriétaire (suivi par son
-identifiant). Personne n'y écrit : le panneau tout en bas ouvre un menu (durée, votes
-visibles ou anonymes) puis un formulaire (question, 2 à 4 choix, chacun son champ).
-Votes visibles : un sondage natif Discord. Votes anonymes : un sondage maison, chaque vote
-réduit à une empreinte HMAC — personne ne peut savoir qui a voté quoi.
-Chaque sondage a sa fiche dans « 📊logs-sondages », complétée par le résultat final.
-Rôle « 🔔 Sondages » pris d'un clic ; personne n'est prévenu au départ.
+« Refais-le avec le système de sondage par défaut de Discord, qui était bien mieux. Pas le nouveau
+système… ça envoie trop de messages débiles… Et qui s'affiche au propre, même sur le panel. Comme
+ça, on peut décider si on l'enlève du salon ou non. »
+
+Les membres créent leurs sondages eux-mêmes, avec le bouton « Sondage » de Discord, dans
+« 📊sondages » (et partout où Discord le leur permet). Le bot n'écrit plus rien dans le salon : ni
+panneau, ni annonce, ni bouton. Il veille seulement :
+· un sondage qui enfreint les filtres du serveur (lien, mention, mot interdit, insulte, politique)
+  ou les limites (un en cours et trois par jour par membre ; staff libre) est retiré, la raison
+  dite à l'auteur dans un message qui s'efface ;
+· dans « 📊sondages », un message qui n'est pas un sondage est retiré (rappel rare, qui s'efface) ;
+· chaque sondage est suivi — question, choix, votes en direct, fin — et s'affiche sur le site, où
+  le fondateur et la direction peuvent le retirer du salon.
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import json
 import time
 from datetime import datetime, timedelta, timezone
@@ -21,47 +25,42 @@ import discord
 from discord.ext import tasks
 from discord.ui import Button, ChannelSelect
 
-import notifs
 import registre
 import visuels
 from ui_v2 import LayoutView, Palette
 
 NOM_SALON = "📊sondages"
 ANCIENS_NOMS = ("📊・sondages",)
-NOM_LOGS = "📊logs-sondages"
-DUREES = (("1 heure", 1), ("4 heures", 4), ("12 heures", 12),
-          ("1 jour", 24), ("3 jours", 72), ("7 jours", 168))
-DUREE_DEFAUT = 24
-MAX_QUESTION = 300          # limites de Discord
-MAX_REPONSE = 55
-MIN_CHOIX, MAX_CHOIX = 2, 4
 EN_COURS_PAR_MEMBRE = 1
 PAR_JOUR = 3
+RAPPEL = 3600
+ATTENTE_VOTES = 5
 _FORMAT = "%Y-%m-%d %H:%M:%S"   # comme CURRENT_TIMESTAMP : comparable par SQLite
 
 _get_db = _cfg = _db_set = None
-_texte_refuse = _controle = _salon_logs = _retour = None
-_cle = b""
+_texte_refuse = _controle = _retour = None
 _log = print
 _bot = None
-_verrous: dict = {}
 _rappels: dict = {}
 _a_rafraichir: dict = {}
 
 
-def setup(*, get_db, cfg, db_set, texte_refuse, controle, salon_logs, cle_secrete, log=None):
-    """`texte_refuse(g, texte) -> str` · `controle(membre, cfg) -> str` ·
-    `salon_logs(g, cle, nom) -> salon|None` · `cle_secrete` : la clé des votes anonymes."""
-    global _get_db, _cfg, _db_set, _texte_refuse, _controle, _salon_logs, _cle, _log
+def setup(*, get_db, cfg, db_set, texte_refuse, controle, log=None):
+    """`texte_refuse(g, texte) -> str` · `controle(membre, cfg) -> str` (âge du compte…)."""
+    global _get_db, _cfg, _db_set, _texte_refuse, _controle, _log
     _get_db, _cfg, _db_set = get_db, cfg, db_set
-    _texte_refuse, _controle, _salon_logs = texte_refuse, controle, salon_logs
-    _cle = str(cle_secrete or "").encode()
+    _texte_refuse, _controle = texte_refuse, controle
     _log = log or print
 
 
 def set_retour(fn):
     global _retour
     _retour = fn
+
+
+_COLONNES = {"comptes": "TEXT NOT NULL DEFAULT '[]'", "total": "INTEGER NOT NULL DEFAULT 0",
+             "multiple": "INTEGER NOT NULL DEFAULT 0", "retire_le": "INTEGER NOT NULL DEFAULT 0",
+             "retire_par": "INTEGER NOT NULL DEFAULT 0", "maj_le": "INTEGER NOT NULL DEFAULT 0"}
 
 
 async def init_db():
@@ -83,57 +82,34 @@ async def init_db():
                 "cree_le, fin_le, termine) SELECT message_id, guild_id, channel_id, auteur_id, "
                 "question, cree_le, fin_le, termine FROM sondages_avant")
             await db.execute("DROP TABLE sondages_avant")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_sondages_auteur "
-                         "ON sondages(guild_id, auteur_id, cree_le)")
-        await db.execute("CREATE TABLE IF NOT EXISTS sondages_votes ("
-                         " sondage_id INTEGER NOT NULL, votant TEXT NOT NULL, choix INTEGER NOT NULL,"
-                         " PRIMARY KEY(sondage_id, votant))")
+        async with db.execute("PRAGMA table_info(sondages)") as cur:
+            colonnes = {r[1] for r in await cur.fetchall()}
+        for nom, type_ in _COLONNES.items():
+            if nom not in colonnes:
+                await db.execute(f"ALTER TABLE sondages ADD COLUMN {nom} {type_}")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_sondages_auteur ON sondages(guild_id, auteur_id, cree_le)")
+        async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sondages_votes'") as cur:
+            anciens_votes = await cur.fetchone() is not None
+        if anciens_votes:
+            #  Les anciens sondages anonymes : leurs résultats passent dans `comptes`, les empreintes partent.
+            async with db.execute("SELECT id, choix FROM sondages WHERE anonyme=1") as cur:
+                anonymes = await cur.fetchall()
+            for sid, choix in anonymes:
+                comptes = [0] * len(json.loads(choix or "[]"))
+                async with db.execute("SELECT choix, COUNT(*) FROM sondages_votes WHERE sondage_id=? GROUP BY choix",
+                                      (sid,)) as cur:
+                    for k, n in await cur.fetchall():
+                        if 0 <= k < len(comptes):
+                            comptes[k] = n
+                await db.execute("UPDATE sondages SET comptes=?, total=? WHERE id=?",
+                                 (json.dumps(comptes), sum(comptes), sid))
+            await db.execute("DROP TABLE sondages_votes")
         await db.commit()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Règles pures
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def nettoyer_choix(valeurs) -> list:
-    """Les choix remplis, sans doublon, dans l'ordre des champs."""
-    vus, out = set(), []
-    for v in valeurs:
-        r = " ".join(str(v or "").split())
-        if r and r.casefold() not in vus:
-            vus.add(r.casefold())
-            out.append(r)
-    return out
-
-
-def verifier(question: str, choix: list) -> str:
-    q = (question or "").strip()
-    if not q:
-        return "Écris une question."
-    if len(q) > MAX_QUESTION:
-        return f"La question dépasse {MAX_QUESTION} caractères."
-    if len(choix) < MIN_CHOIX:
-        return "Il faut au moins deux choix différents."
-    if len(choix) > MAX_CHOIX:
-        return f"{MAX_CHOIX} choix au maximum."
-    trop = next((c for c in choix if len(c) > MAX_REPONSE), None)
-    if trop:
-        return f"« {trop[:40]}… » dépasse {MAX_REPONSE} caractères."
-    return ""
-
-
-def barre(part: float, largeur: int = 12) -> str:
-    plein = round(max(0.0, min(1.0, part)) * largeur)
-    return "▰" * plein + "▱" * (largeur - plein)
-
-
-def libelle_duree(heures: int) -> str:
-    return next((l for l, h in DUREES if h == heures), f"{heures} h")
-
-
-def empreinte(sondage_id: int, user_id: int) -> str:
-    return hmac.new(_cle, f"{sondage_id}:{user_id}".encode(), hashlib.sha256).hexdigest()[:32]
-
 
 def _maintenant() -> datetime:
     return datetime.now(timezone.utc)
@@ -148,25 +124,33 @@ def est_staff(membre) -> bool:
     return bool(p and (p.administrator or p.manage_messages))
 
 
+def libelle(reponse) -> str:
+    """Le texte d'un choix tel que Discord l'affiche (émoji compris)."""
+    emoji, texte = getattr(reponse, "emoji", None), (getattr(reponse, "text", None) or "").strip()
+    return " ".join(x for x in (str(emoji) if emoji else "", texte) if x) or "—"
+
+
 def gagnants(choix: list, comptes: list) -> str:
-    total = sum(comptes)
-    if not total:
+    if not sum(comptes):
         return "Aucun vote."
     meilleur = max(comptes)
-    tete = [choix[k] for k, n in enumerate(comptes) if n == meilleur]
-    if len(tete) > 1:
-        return "Égalité : " + " · ".join(tete)
-    return f"Gagnant : **{tete[0]}**"
+    tete = [choix[k] for k, n in enumerate(comptes) if n == meilleur and k < len(choix)]
+    return ("Égalité : " + " · ".join(tete)) if len(tete) > 1 else f"Gagnant : {tete[0]}"
 
 
-def lignes_resultats(choix: list, comptes: list) -> str:
-    total = sum(comptes) or 1
-    return "\n".join(f"**{c}**\n`{barre(n / total)}` {round(100 * n / total)} % · {n}"
-                     for c, n in zip(choix, comptes))
+def lire_sondage(msg) -> dict:
+    """Ce que le site montre d'un sondage Discord : question, choix, votes, fin."""
+    p = msg.poll
+    reponses = list(p.answers)
+    fin = getattr(p, "expires_at", None) or (msg.created_at + (p.duration or timedelta(hours=24)))
+    return {"question": str(getattr(p.question, "text", p.question) or "")[:300],
+            "choix": [libelle(a) for a in reponses], "comptes": [int(a.vote_count or 0) for a in reponses],
+            "multiple": bool(getattr(p, "multiple", False)), "fin": fin,
+            "termine": bool(p.is_finalized()) if hasattr(p, "is_finalized") else False}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Salon et panneau
+#  Le salon
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def salon_de(g):
@@ -179,100 +163,106 @@ async def ouverts(g) -> bool:
     return bool((await _cfg(g.id)).get("sondages_actifs", 1))
 
 
-def vue_panneau(ouvert: bool = True) -> LayoutView:
-    v = LayoutView(timeout=None)
-    creer = BoutonCreer()
-    creer.item.disabled = not ouvert
-    creer.item.emoji = visuels.icone("ajouter")
-    v.add_item(discord.ui.Container(
-        visuels.bandeau("sondages", "Sondages"),
-        discord.ui.TextDisplay("Pose ta question, la communauté vote." if ouvert
-                               else "Les sondages sont fermés pour le moment."),
-        discord.ui.ActionRow(creer, notifs.BoutonNotif("sondages", emoji=visuels.icone("cloche"))),
-        accent_color=Palette.PRIMARY))
-    return v
+def droits_membres(ouvert: bool) -> discord.PermissionOverwrite:
+    """Créer un sondage demande « Envoyer des messages » ET « Créer des sondages » : les messages
+    qui ne sont pas des sondages sont retirés par le bot. Ni réaction, ni fil, ni fichier."""
+    return discord.PermissionOverwrite(send_messages=ouvert, send_polls=ouvert, add_reactions=False,
+                                       attach_files=False, embed_links=False, create_public_threads=False,
+                                       create_private_threads=False)
 
 
-def _verrou(gid):
-    return _verrous.setdefault(gid, asyncio.Lock())
-
-
-async def reposer_panneau(g, salon=None) -> None:
-    """Le panneau reste le dernier message du salon : l'ancien part, un neuf arrive."""
-    async with _verrou(g.id):
-        try:
-            salon = salon or await salon_de(g)
-            if salon is None:
-                return
-            c = await _cfg(g.id)
-            ancien = int(c.get("sondages_panneau", 0) or 0)
-            if ancien:
-                try:
-                    await salon.get_partial_message(ancien).delete()
-                except discord.NotFound:
-                    pass
-            msg = await salon.send(view=vue_panneau(bool(c.get("sondages_actifs", 1))))
-            await _db_set(g.id, "sondages_panneau", msg.id)
-        except discord.HTTPException as ex:
-            _log(f"[SONDAGES] panneau : {type(ex).__name__} {ex}")
-
-
-async def assurer_panneau(g) -> None:
-    salon = await salon_de(g)
-    if salon is None:
-        return
-    pid = int((await _cfg(g.id)).get("sondages_panneau", 0) or 0)
-    if pid:
-        try:
-            await salon.fetch_message(pid)
-            return
-        except discord.NotFound:
-            pass
-        except discord.HTTPException as ex:
-            _log(f"[SONDAGES] lecture du panneau : {ex}")
-            return
-    await reposer_panneau(g, salon)
+async def regler_salon(g, salon, ouvert: bool) -> bool:
+    """Seuls les droits des sondages changent ; la vue du salon et le reste restent tels quels."""
+    tous = salon.overwrites_for(g.default_role)
+    voulu = {k: v for k, v in droits_membres(ouvert) if v is not None}
+    if all(getattr(tous, k) == v for k, v in voulu.items()):
+        return False
+    tous.update(**voulu)
+    await salon.set_permissions(g.default_role, overwrite=tous, reason="Sondages Discord : droits du salon")
+    return True
 
 
 async def creer_salon(g):
-    """Lecture seule pour les membres : ils votent, le bot publie."""
     me = g.me
     salon = await g.create_text_channel(
         NOM_SALON, reason="Sondages : salon dédié",
-        topic="Les sondages de la communauté — bouton tout en bas.",
-        overwrites={
-            g.default_role: discord.PermissionOverwrite(
-                send_messages=False, send_polls=False, add_reactions=False,
-                create_public_threads=False, create_private_threads=False),
-            me: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, send_polls=True,
-                manage_messages=True, read_message_history=True, embed_links=True),
-        })
+        topic="Crée ton sondage avec le bouton ➕ puis « Sondage ». Un en cours, trois par jour.",
+        overwrites={g.default_role: droits_membres(await ouverts(g)),
+                    me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_messages=True,
+                                                    read_message_history=True)})
     await _db_set(g.id, "sondages_salon", salon.id)
-    await _db_set(g.id, "sondages_panneau", 0)
-    await reposer_panneau(g, salon)
     return salon
 
 
 async def installer(g) -> None:
-    """Le salon est créé UNE fois ; ensuite il appartient au propriétaire."""
+    """Le salon est créé UNE fois ; ensuite il appartient au propriétaire. Une fois aussi : passage
+    aux sondages Discord (panneau, boutons et rôle de notification de l'ancien système retirés)."""
     try:
         c = await _cfg(g.id)
+        me = g.me
         if not c.get("sondages_installes"):
-            me = g.me
             if me and me.guild_permissions.manage_channels and not c.get("sondages_salon"):
                 await creer_salon(g)
             await _db_set(g.id, "sondages_installes", 1)
         salon = await salon_de(g)
         if salon is not None and salon.name in ANCIENS_NOMS:
             await salon.edit(name=NOM_SALON, reason="Sondages : nom du salon")
-        await assurer_panneau(g)
+        if not c.get("sondages_natifs_v2"):
+            await _passer_aux_sondages_discord(g, c, salon)
     except discord.HTTPException as ex:
-        _log(f"[SONDAGES] installation : {type(ex).__name__} {ex}")
+        _log("[SONDAGES][E1] installation impossible")
+        _log(f"[SONDAGES][E1:DETAIL] {g.id} {type(ex).__name__} {ex}")
+
+
+async def _passer_aux_sondages_discord(g, c, salon) -> None:
+    if salon is not None:
+        pid = int(c.get("sondages_panneau", 0) or 0)
+        if pid:
+            try:
+                await salon.get_partial_message(pid).delete()
+            except discord.NotFound:
+                pass
+        if g.me and g.me.guild_permissions.manage_roles:
+            await regler_salon(g, salon, bool(c.get("sondages_actifs", 1)))
+    async with _get_db() as db:
+        async with db.execute("SELECT id, channel_id, message_id, anonyme, question, choix, comptes FROM sondages"
+                              " WHERE guild_id=? AND termine=0", (g.id,)) as cur:
+            anciens = await cur.fetchall()
+    for sid, cid, mid, anonyme, question, choix, comptes in anciens:
+        ch = g.get_channel(int(cid or 0))
+        vue = _vue_figee(question, json.loads(choix or "[]"), json.loads(comptes or "[]")) if anonyme else None
+        if ch is not None and mid:
+            try:
+                await ch.get_partial_message(int(mid)).edit(view=vue)
+            except discord.HTTPException as ex:
+                _log(f"[SONDAGES] ancien sondage : {ex}")
+        if anonyme:
+            await _marquer(sid, termine=1)
+    role = g.get_role(int(c.get("notif_role_sondages", 0) or 0))
+    if role is not None and g.me and g.me.guild_permissions.manage_roles and not role.managed:
+        try:
+            await role.delete(reason="Sondages : plus de rôle de notification")
+        except discord.HTTPException as ex:
+            _log(f"[SONDAGES] rôle de notification : {ex}")
+    await _db_set(g.id, "notif_role_sondages", 0)
+    await _db_set(g.id, "sondages_panneau", 0)
+    await _db_set(g.id, "sondages_natifs_v2", int(time.time()))
+    _log(f"[SONDAGES] passage aux sondages Discord : {g.id}")
+
+
+def _vue_figee(question: str, choix: list, comptes: list):
+    """Un ancien sondage anonyme (bouton du bot) : ses boutons partent, son résultat reste."""
+    total = sum(comptes) or 1
+    lignes = "\n".join(f"**{c}** · {round(100 * n / total)} % · {n}" for c, n in zip(choix, comptes))
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(
+        discord.ui.TextDisplay(f"### {question}\n{lignes or 'Aucun vote.'}\n-# Sondage terminé · "
+                               f"{gagnants(choix, comptes)}"), accent_color=Palette.PRIMARY))
+    return v
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Création
+#  Un nouveau sondage : vérifié, puis suivi
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def _limite(g, membre) -> str:
@@ -281,303 +271,191 @@ async def _limite(g, membre) -> str:
     maintenant = _maintenant()
     async with _get_db() as db:
         async with db.execute(
-                "SELECT message_id, channel_id FROM sondages WHERE guild_id=? AND auteur_id=? "
-                "AND termine=0 AND fin_le>? ORDER BY cree_le DESC",
-                (g.id, membre.id, maintenant.strftime(_FORMAT))) as cur:
-            en_cours = await cur.fetchall()
+                "SELECT COUNT(*) FROM sondages WHERE guild_id=? AND auteur_id=? AND termine=0 AND retire_le=0 "
+                "AND fin_le>?", (g.id, membre.id, maintenant.strftime(_FORMAT))) as cur:
+            en_cours = (await cur.fetchone())[0]
         async with db.execute(
-                "SELECT cree_le FROM sondages WHERE guild_id=? AND auteur_id=? AND cree_le>? "
-                "ORDER BY cree_le", (g.id, membre.id,
-                                    (maintenant - timedelta(days=1)).strftime(_FORMAT))) as cur:
+                "SELECT cree_le FROM sondages WHERE guild_id=? AND auteur_id=? AND cree_le>? ORDER BY cree_le",
+                (g.id, membre.id, (maintenant - timedelta(days=1)).strftime(_FORMAT))) as cur:
             du_jour = [r[0] for r in await cur.fetchall()]
-    if len(en_cours) >= EN_COURS_PAR_MEMBRE:
-        mid, cid = en_cours[0]
-        return (f"Tu as déjà un sondage en cours : "
-                f"https://discord.com/channels/{g.id}/{cid}/{mid}")
+    if en_cours >= EN_COURS_PAR_MEMBRE:
+        return "tu as déjà un sondage en cours."
     if len(du_jour) >= PAR_JOUR:
-        libre = _ts(du_jour[0]) + 86400
-        return f"{PAR_JOUR} sondages par jour au maximum — le prochain <t:{libre}:R>."
+        return f"{PAR_JOUR} sondages par jour au maximum (le prochain <t:{_ts(du_jour[0]) + 86400}:R>)."
     return ""
 
 
-async def peut_creer(i) -> str:
-    g, m = i.guild, i.user
-    if g is None or getattr(m, "guild_permissions", None) is None:
-        return "Les sondages se créent sur le serveur."
-    if not await ouverts(g) or await salon_de(g) is None:
-        return "Les sondages sont fermés pour le moment."
-    if m.is_timed_out():
-        return "Pas de sondage pendant une exclusion temporaire."
-    raison = await _controle(m, await _cfg(g.id))
-    return raison or await _limite(g, m)
-
-
-class Formulaire(discord.ui.Modal, title="Nouveau sondage"):
-    def __init__(self, heures=DUREE_DEFAUT, anonyme=False, question="", choix=()):
-        super().__init__(timeout=900)
-        self.heures, self.anonyme = heures, anonyme
-        choix = list(choix) + [""] * MAX_CHOIX
-        self.q = discord.ui.TextInput(max_length=MAX_QUESTION, default=question or None,
-                                      placeholder="Ta question")
-        self.champs = [discord.ui.TextInput(max_length=MAX_REPONSE, required=k < MIN_CHOIX,
-                                            default=choix[k] or None,
-                                            placeholder="Facultatif" if k >= MIN_CHOIX else None)
-                       for k in range(MAX_CHOIX)]
-        self.add_item(discord.ui.Label(text="Question", component=self.q))
-        for k, champ in enumerate(self.champs):
-            self.add_item(discord.ui.Label(text=f"Choix {k + 1}", component=champ))
-
-    async def on_submit(self, i: discord.Interaction):
-        await publier(i, self.q.value, [c.value for c in self.champs], self.heures, self.anonyme)
-
-
-class MenuCreation(LayoutView):
-    """Le menu avant le formulaire : durée et type de vote."""
-
-    def __init__(self, auteur_id: int):
-        super().__init__(timeout=600)
-        self.auteur_id, self.heures, self.anonyme = auteur_id, DUREE_DEFAUT, False
-        duree = discord.ui.Select(placeholder="Durée", options=[
-            discord.SelectOption(label=l, value=str(h), default=h == DUREE_DEFAUT) for l, h in DUREES])
-        votes = discord.ui.Select(placeholder="Votes", options=[
-            discord.SelectOption(label="Votes visibles", value="0", default=True,
-                                 description="Un sondage Discord classique"),
-            discord.SelectOption(label="Votes anonymes", value="1",
-                                 description="Personne ne voit qui a voté quoi")])
-        ecrire = Button(label="Écrire le sondage", style=discord.ButtonStyle.primary,
-                        emoji=visuels.icone("modifier"))
-        duree.callback, votes.callback, ecrire.callback = self._duree, self._votes, self._ecrire
-        self.add_item(discord.ui.Container(
-            discord.ui.TextDisplay("### Nouveau sondage\n-# Durée et votes, puis la question "
-                                   "et ses choix."),
-            discord.ui.ActionRow(duree), discord.ui.ActionRow(votes), discord.ui.ActionRow(ecrire),
-            accent_color=Palette.PRIMARY))
-
-    async def interaction_check(self, i):
-        return i.user.id == self.auteur_id
-
-    async def _duree(self, i):
-        self.heures = int(i.data["values"][0])
-        await i.response.defer()
-
-    async def _votes(self, i):
-        self.anonyme = i.data["values"][0] == "1"
-        await i.response.defer()
-
-    async def _ecrire(self, i):
-        await i.response.send_modal(Formulaire(self.heures, self.anonyme))
-
-
-def vue_corriger(auteur_id, erreur, heures, anonyme, question, choix) -> LayoutView:
-    v = LayoutView(timeout=900)
-    b = Button(label="Corriger", style=discord.ButtonStyle.primary, emoji=visuels.icone("modifier"))
-
-    async def _cb(i: discord.Interaction):
-        if i.user.id != auteur_id:
-            return await i.response.defer()
-        await i.response.send_modal(Formulaire(heures, anonyme, question, choix))
-    b.callback = _cb
-    v.add_item(discord.ui.Container(discord.ui.TextDisplay(erreur), discord.ui.ActionRow(b),
-                                    accent_color=Palette.WARNING))
-    return v
-
-
-async def publier(i, question, valeurs, heures, anonyme):
-    g, m = i.guild, i.user
-    choix = nettoyer_choix(valeurs)
-    erreur = verifier(question, choix) or await _texte_refuse(g, "\n".join([question] + choix))
-    if erreur:
-        return await i.response.send_message(
-            view=vue_corriger(m.id, erreur, heures, anonyme, question, list(valeurs)), ephemeral=True)
-    refus = await peut_creer(i)
-    if refus:
-        return await i.response.send_message(refus, ephemeral=True)
-    await i.response.defer(ephemeral=True, thinking=True)
+async def raison_du_refus(msg, s: dict) -> str:
+    g, m = msg.guild, msg.author
+    if getattr(m, "guild_permissions", None) is None:
+        return ""
+    if est_staff(m):
+        return ""
     salon = await salon_de(g)
-    role = await notifs.role(g, "sondages")
-    maintenant = _maintenant()
-    fin = maintenant + timedelta(hours=heures)
-    async with _get_db() as db:
-        cur = await db.execute(
-            "INSERT INTO sondages(guild_id, channel_id, auteur_id, question, choix, anonyme, "
-            "heures, cree_le, fin_le) VALUES(?,?,?,?,?,?,?,?,?)",
-            (g.id, salon.id, m.id, question.strip(), json.dumps(choix, ensure_ascii=False),
-             int(anonyme), heures, maintenant.strftime(_FORMAT), fin.strftime(_FORMAT)))
-        sid = cur.lastrowid
-        await db.commit()
-    s = {"id": sid, "auteur_id": m.id, "question": question.strip(), "choix": choix,
-         "anonyme": anonyme, "heures": heures, "fin": int(fin.timestamp()), "termine": False,
-         "channel_id": salon.id}
+    if salon is not None and msg.channel.id == salon.id and not await ouverts(g):
+        return "les sondages sont fermés pour le moment."
+    raison = await _texte_refuse(g, "\n".join([s["question"]] + s["choix"]))
+    if raison:
+        return raison[0].lower() + raison[1:]
+    raison = await _controle(m, await _cfg(g.id))
+    return (raison[0].lower() + raison[1:]) if raison else await _limite(g, m)
+
+
+async def _dire(salon, texte: str, membre, secondes: int = 12) -> None:
     try:
-        if anonyme:
-            msg = await salon.send(view=vue_anonyme(s, [0] * len(choix), ping=notifs.ping(role)),
-                                   allowed_mentions=notifs.mentions(role))
-        else:
-            sondage = discord.Poll(question=s["question"], duration=timedelta(hours=heures))
-            for c in choix:
-                sondage.add_answer(text=c)
-            vue = discord.ui.View(timeout=None)
-            vue.add_item(BoutonTerminer(m.id))
-            msg = await salon.send(f"{notifs.ping(role)} Sondage de {m.mention}".strip(),
-                                   poll=sondage, view=vue, allowed_mentions=notifs.mentions(role))
+        await salon.send(texte, delete_after=secondes, allowed_mentions=discord.AllowedMentions(users=[membre]))
     except discord.HTTPException as ex:
-        _log(f"[SONDAGES] envoi : {type(ex).__name__} {ex}")
-        async with _get_db() as db:
-            await db.execute("DELETE FROM sondages WHERE id=?", (sid,))
-            await db.commit()
-        texte = (f"Je n'ai pas le droit de publier dans {salon.mention}."
-                 if isinstance(ex, discord.Forbidden) else "Discord a refusé ce sondage. Réessaie.")
-        return await i.followup.send(texte, ephemeral=True)
+        _log(f"[SONDAGES] message : {ex}")
+
+
+async def nouveau(msg) -> bool:
+    """Un sondage vient d'être posté : retiré s'il enfreint une règle, suivi sinon."""
+    g = msg.guild
+    s = lire_sondage(msg)
+    raison = await raison_du_refus(msg, s)
+    if raison:
+        try:
+            await msg.delete()
+        except discord.HTTPException as ex:
+            _log(f"[SONDAGES] retrait impossible : {ex}")
+            return False
+        await _dire(msg.channel, f"{msg.author.mention} Sondage retiré : {raison}", msg.author)
+        await registre.noter(g.id, "Sondages", "sondage.refuse", f"Sondage refusé : {s['question'][:120]} — {raison}",
+                             membre_id=msg.author.id, salon_id=msg.channel.id)
+        return False
+    cree = msg.created_at.astimezone(timezone.utc)
     async with _get_db() as db:
-        await db.execute("UPDATE sondages SET message_id=? WHERE id=?", (msg.id, sid))
+        await db.execute(
+            "INSERT OR IGNORE INTO sondages(message_id, guild_id, channel_id, auteur_id, question, choix, comptes,"
+            " total, multiple, heures, cree_le, fin_le, maj_le) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (msg.id, g.id, msg.channel.id, msg.author.id, s["question"], json.dumps(s["choix"], ensure_ascii=False),
+             json.dumps(s["comptes"]), sum(s["comptes"]), int(s["multiple"]),
+             max(1, round((s["fin"] - cree).total_seconds() / 3600)), cree.strftime(_FORMAT),
+             s["fin"].astimezone(timezone.utc).strftime(_FORMAT), int(time.time())))
         await db.commit()
-    s["message_id"], s["lien"] = msg.id, msg.jump_url
-    await i.followup.send(f"Sondage publié : {msg.jump_url}", ephemeral=True)
-    asyncio.create_task(reposer_panneau(g, salon))
-    asyncio.create_task(journaliser(g, s, m))
+    await registre.noter(g.id, "Sondages", "sondage.publie",
+                         f"Sondage publié par {getattr(msg.author, 'display_name', 'un membre')} : {s['question']}",
+                         membre_id=msg.author.id, salon_id=msg.channel.id)
+    return True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Sondage anonyme
+#  Votes, fin, retrait
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def vue_anonyme(s: dict, comptes: list, *, ping: str = "") -> LayoutView:
-    v = LayoutView(timeout=None)
-    total = sum(comptes)
-    votes = f"{total} vote{'s' if total > 1 else ''}"
-    pied = (f"-# Vote anonyme · terminé · {votes}" if s["termine"]
-            else f"-# Vote anonyme · fin <t:{s['fin']}:R> · {votes}")
-    tete = f"{ping}\n" if ping else ""
-    items = [discord.ui.TextDisplay(f"{tete}### {s['question']}\n-# Sondage de <@{s['auteur_id']}>"),
-             discord.ui.Separator(),
-             discord.ui.TextDisplay(lignes_resultats(s["choix"], comptes))]
-    if s["termine"]:
-        items += [discord.ui.TextDisplay(gagnants(s["choix"], comptes)), discord.ui.TextDisplay(pied)]
-    else:
-        boutons = []
-        for k, c in enumerate(s["choix"]):
-            b = BoutonVote(s["id"], k)
-            b.item.label = c[:80]
-            boutons.append(b)
-        fin = BoutonFinAnonyme(s["id"])
-        fin.item.emoji = visuels.icone("terminer")
-        items += [discord.ui.TextDisplay(pied), discord.ui.ActionRow(*boutons), discord.ui.ActionRow(fin)]
-    v.add_item(discord.ui.Container(*items, accent_color=Palette.PRIMARY))
-    return v
-
-
-async def charger(sid: int):
+async def _ligne(message_id=None, sid=None):
     async with _get_db() as db:
         async with db.execute(
-                "SELECT id, guild_id, channel_id, message_id, auteur_id, question, choix, anonyme, "
-                "heures, cree_le, fin_le, termine, log_message_id FROM sondages WHERE id=?",
-                (sid,)) as cur:
+                "SELECT id, guild_id, channel_id, message_id, auteur_id, question, choix, comptes, total, termine,"
+                " retire_le FROM sondages WHERE " + ("message_id=?" if message_id else "id=?"),
+                (int(message_id or sid),)) as cur:
             r = await cur.fetchone()
-        if r is None:
-            return None, []
-        choix = json.loads(r[6] or "[]")
-        comptes = [0] * len(choix)
-        async with db.execute("SELECT choix, COUNT(*) FROM sondages_votes WHERE sondage_id=? "
-                              "GROUP BY choix", (sid,)) as cur:
-            for k, n in await cur.fetchall():
-                if 0 <= k < len(comptes):
-                    comptes[k] = n
-    s = {"id": r[0], "guild_id": r[1], "channel_id": r[2], "message_id": r[3], "auteur_id": r[4],
-         "question": r[5], "choix": choix, "anonyme": bool(r[7]), "heures": r[8],
-         "cree": _ts(r[9]), "fin": _ts(r[10]), "termine": bool(r[11]), "log_message_id": r[12]}
-    return s, comptes
+    if r is None:
+        return None
+    return {"id": r[0], "guild_id": r[1], "channel_id": r[2], "message_id": r[3], "auteur_id": r[4],
+            "question": r[5], "choix": json.loads(r[6] or "[]"), "comptes": json.loads(r[7] or "[]"),
+            "total": r[8], "termine": bool(r[9]), "retire_le": r[10]}
 
 
-async def _rafraichir(salon, sid: int):
-    """Un vote → le message suit, au plus une modification toutes les 3 s par sondage."""
-    await asyncio.sleep(3)
-    _a_rafraichir.pop(sid, None)
-    s, comptes = await charger(sid)
-    if s is None or not s["message_id"] or s["termine"]:
+async def _marquer(sid: int, **champs) -> None:
+    if not champs:
+        return
+    async with _get_db() as db:
+        await db.execute(f"UPDATE sondages SET {', '.join(k + '=?' for k in champs)} WHERE id=?",
+                         (*champs.values(), sid))
+        await db.commit()
+
+
+async def rafraichir(g, s: dict) -> None:
+    """Les votes du sondage, lus chez Discord ; à la fin, le résultat part au journal."""
+    salon = g.get_channel(int(s["channel_id"])) or (g.get_thread(int(s["channel_id"])) if hasattr(g, "get_thread") else None)
+    if salon is None:
         return
     try:
-        await salon.get_partial_message(s["message_id"]).edit(view=vue_anonyme(s, comptes))
+        msg = await salon.fetch_message(int(s["message_id"]))
+    except discord.NotFound:
+        if not s["retire_le"]:
+            await _marquer(s["id"], termine=1, retire_le=int(time.time()))
+        return
     except discord.HTTPException as ex:
-        _log(f"[SONDAGES] rafraîchir : {ex}")
+        _log(f"[SONDAGES] lecture : {ex}")
+        return
+    if msg.poll is None:
+        return
+    lu = lire_sondage(msg)
+    fini = lu["termine"] or lu["fin"] <= _maintenant()
+    await _marquer(s["id"], comptes=json.dumps(lu["comptes"]), total=sum(lu["comptes"]), choix=json.dumps(
+        lu["choix"], ensure_ascii=False), termine=int(fini), maj_le=int(time.time()))
+    if fini and not s["termine"]:
+        await registre.noter(g.id, "Sondages", "sondage.fin",
+                             f"Sondage terminé : {s['question']} · {sum(lu['comptes'])} vote(s) · "
+                             + gagnants(lu["choix"], lu["comptes"]),
+                             membre_id=int(s["auteur_id"]), salon_id=int(s["channel_id"]))
 
 
-class BoutonVote(discord.ui.DynamicItem[Button], template=r"sdgv:(?P<sid>\d+):(?P<k>\d)"):
-    def __init__(self, sid: int, k: int):
-        self.sid, self.k = int(sid), int(k)
-        super().__init__(Button(label=f"Choix {self.k + 1}", style=discord.ButtonStyle.secondary,
-                                custom_id=f"sdgv:{self.sid}:{self.k}"))
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["sid"]), int(match["k"]))
-
-    async def callback(self, i: discord.Interaction):
-        s, _ = await charger(self.sid)
-        if s is None or s["termine"] or time.time() >= s["fin"] or self.k >= len(s["choix"]):
-            return await i.response.send_message("Ce sondage est terminé.", ephemeral=True)
-        async with _get_db() as db:
-            await db.execute("INSERT INTO sondages_votes(sondage_id, votant, choix) VALUES(?,?,?) "
-                             "ON CONFLICT(sondage_id, votant) DO UPDATE SET choix=excluded.choix",
-                             (self.sid, empreinte(self.sid, i.user.id), self.k))
-            await db.commit()
-        await i.response.send_message(f"Vote enregistré : **{s['choix'][self.k]}**. "
-                                      "Personne ne peut savoir lequel.", ephemeral=True)
-        if self.sid not in _a_rafraichir:
-            _a_rafraichir[self.sid] = asyncio.create_task(_rafraichir(i.channel, self.sid))
+async def _plus_tard(g, message_id) -> None:
+    await asyncio.sleep(ATTENTE_VOTES)
+    _a_rafraichir.pop(message_id, None)
+    s = await _ligne(message_id=message_id)
+    if s is not None:
+        await rafraichir(g, s)
 
 
-class BoutonFinAnonyme(discord.ui.DynamicItem[Button], template=r"sdgf:(?P<sid>\d+)"):
-    def __init__(self, sid: int):
-        self.sid = int(sid)
-        super().__init__(Button(label="Terminer", style=discord.ButtonStyle.secondary,
-                                custom_id=f"sdgf:{self.sid}"))
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["sid"]))
-
-    async def callback(self, i: discord.Interaction):
-        s, _ = await charger(self.sid)
-        if s is None:
-            return await i.response.send_message("Sondage introuvable.", ephemeral=True)
-        if i.user.id != s["auteur_id"] and not est_staff(i.user):
-            return await i.response.send_message("Seul l'auteur ou le staff peut le terminer.",
-                                                 ephemeral=True)
-        await i.response.defer(ephemeral=True)
-        await finaliser(i.client, self.sid)
-        await i.followup.send("Sondage terminé.", ephemeral=True)
-
-
-async def finaliser(bot, sid: int) -> None:
-    """Fin d'un sondage anonyme : le résultat est figé dans le message et dans les logs."""
-    async with _get_db() as db:
-        cur = await db.execute("UPDATE sondages SET termine=1 WHERE id=? AND termine=0", (sid,))
-        await db.commit()
-        if not cur.rowcount:
+async def sur_vote(payload) -> None:
+    """Un vote ajouté ou retiré : le site suit, au plus une lecture toutes les 5 s par sondage."""
+    try:
+        if _get_db is None or _bot is None or not getattr(payload, "guild_id", None):
             return
-    s, comptes = await charger(sid)
-    g = bot.get_guild(s["guild_id"])
-    salon = g.get_channel(s["channel_id"]) if g else None
-    if salon is not None and s["message_id"]:
+        mid = payload.message_id
+        if mid in _a_rafraichir:
+            return
+        g = _bot.get_guild(payload.guild_id)
+        if g is not None:
+            _a_rafraichir[mid] = asyncio.get_running_loop().create_task(_plus_tard(g, mid))
+    except Exception as ex:  # un vote ne casse jamais rien ; le relevé périodique rattrape
+        _log("[SONDAGES][E2] vote non suivi")
+        _log(f"[SONDAGES][E2:DETAIL] {type(ex).__name__} {ex}")
+
+
+async def retirer(g, sid: int, auteur) -> tuple[bool, str]:
+    """Le site : retirer un sondage du salon (fondateur et direction)."""
+    s = await _ligne(sid=sid)
+    if s is None or s["guild_id"] != g.id:
+        return False, "Sondage introuvable."
+    if s["retire_le"]:
+        return False, "Ce sondage est déjà retiré du salon."
+    salon = g.get_channel(int(s["channel_id"])) or g.get_thread(int(s["channel_id"]))
+    if salon is not None:
         try:
-            await salon.get_partial_message(s["message_id"]).edit(view=vue_anonyme(s, comptes))
-        except discord.HTTPException as ex:
-            _log(f"[SONDAGES] fin anonyme : {ex}")
-    if g is not None:
-        await journaliser(g, s, None, comptes)
+            await salon.get_partial_message(int(s["message_id"])).delete()
+        except discord.NotFound:
+            pass
+        except discord.Forbidden:
+            return False, "Il me manque le droit de gérer les messages dans ce salon."
+    await _marquer(sid, termine=1, retire_le=int(time.time()), retire_par=int(auteur.id))
+    await registre.noter(g.id, "Sondages", "sondage.retire",
+                         f"Sondage retiré du salon par {auteur.display_name} : {s['question']}",
+                         membre_id=int(s["auteur_id"]), auteur_id=auteur.id, salon_id=int(s["channel_id"]))
+    return True, "Sondage retiré du salon."
 
 
-@tasks.loop(minutes=1)
+@tasks.loop(minutes=10)
 async def cloture_task():
-    """Les sondages anonymes arrivés à échéance (les natifs, Discord les clôt)."""
+    """Les sondages arrivés à échéance : résultat définitif relu chez Discord."""
     if _get_db is None or _bot is None:
         return
     async with _get_db() as db:
-        async with db.execute("SELECT id FROM sondages WHERE anonyme=1 AND termine=0 AND fin_le<=?",
+        async with db.execute("SELECT id, guild_id FROM sondages WHERE termine=0 AND fin_le<=? LIMIT 30",
                               (_maintenant().strftime(_FORMAT),)) as cur:
-            dus = [r[0] for r in await cur.fetchall()]
-    for sid in dus:
-        await finaliser(_bot, sid)
+            dus = await cur.fetchall()
+    for sid, gid in dus:
+        g = _bot.get_guild(int(gid))
+        s = await _ligne(sid=sid)
+        if g is None or s is None:
+            await _marquer(sid, termine=1)
+            continue
+        await rafraichir(g, s)
+        await asyncio.sleep(1)
 
 
 def demarrer(bot) -> None:
@@ -587,115 +465,29 @@ def demarrer(bot) -> None:
         cloture_task.start()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Sondage natif : terminer, fin naturelle
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class BoutonTerminer(discord.ui.DynamicItem[Button], template=r"sdg:fin:(?P<auteur>\d+)"):
-    def __init__(self, auteur: int):
-        self.auteur = int(auteur)
-        super().__init__(Button(label="Terminer", style=discord.ButtonStyle.secondary,
-                                emoji=visuels.icone("terminer"), custom_id=f"sdg:fin:{self.auteur}"))
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["auteur"]))
-
-    async def callback(self, i: discord.Interaction):
-        msg = i.message
-        if i.user.id != self.auteur and not est_staff(i.user):
-            return await i.response.send_message(
-                "Seul l'auteur ou le staff peut terminer ce sondage.", ephemeral=True)
-        await i.response.defer(ephemeral=True)
-        try:
-            await msg.end_poll()
-        except discord.HTTPException as ex:
-            if ex.status != 400:                      # 400 : déjà terminé
-                _log(f"[SONDAGES] fin : {ex}")
-                return await i.followup.send("Impossible de terminer ce sondage.", ephemeral=True)
-        try:
-            await msg.edit(view=None)
-        except discord.HTTPException:
-            pass
-        await marquer_termine(msg.id)
-        await i.followup.send("Sondage terminé.", ephemeral=True)
-
-
-async def marquer_termine(message_id) -> None:
-    try:
-        async with _get_db() as db:
-            await db.execute("UPDATE sondages SET termine=1 WHERE message_id=?", (int(message_id),))
-            await db.commit()
-    except Exception as ex:
-        _log(f"[SONDAGES] marquer terminé : {ex}")
-
-
-async def _par_message(message_id):
+async def lister(guild_id: int, limite: int = 60) -> dict:
+    """Pour le site : les sondages, du plus récent au plus ancien, et quelques chiffres."""
+    maintenant = _maintenant().strftime(_FORMAT)
     async with _get_db() as db:
-        async with db.execute("SELECT id FROM sondages WHERE message_id=?", (int(message_id),)) as cur:
-            r = await cur.fetchone()
-    return (await charger(r[0])) if r else (None, [])
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Logs : une fiche par sondage, complétée par le résultat
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def vue_journal(s: dict, auteur_txt: str, comptes=None) -> LayoutView:
-    v = LayoutView(timeout=None)
-    etat = "terminé" if comptes is not None else "en cours"
-    lignes = [f"### Sondage {etat}",
-              f"**{s['question']}**",
-              f"Auteur : {auteur_txt}",
-              f"Votes {'anonymes' if s['anonyme'] else 'visibles'} · {libelle_duree(s['heures'])}"
-              f" · fin <t:{s['fin']}:f>"]
-    if s.get("lien"):
-        lignes.append(f"[Voir le sondage]({s['lien']})")
-    items = [discord.ui.TextDisplay("\n".join(lignes)), discord.ui.Separator()]
-    if comptes is None:
-        items.append(discord.ui.TextDisplay("\n".join(f"· {c}" for c in s["choix"])))
-    else:
-        total = sum(comptes)
-        items += [discord.ui.TextDisplay(lignes_resultats(s["choix"], comptes)),
-                  discord.ui.TextDisplay(f"{gagnants(s['choix'], comptes)} · {total} vote"
-                                         f"{'s' if total > 1 else ''}")]
-    v.add_item(discord.ui.Container(*items, accent_color=Palette.PRIMARY if comptes is None
-                                    else Palette.SUCCESS))
-    return v
-
-
-async def journaliser(g, s: dict, auteur=None, comptes=None) -> None:
-    """Crée la fiche du sondage dans les logs, ou la complète avec le résultat. Toujours au
-    journal du site, même sans salon de logs."""
-    fin = comptes is not None
-    texte = (f"Sondage terminé : {s['question']} · {sum(comptes)} vote(s) · "
-             + registre.propre(gagnants(s["choix"], comptes))) if fin else \
-        (f"Sondage publié par {getattr(auteur, 'display_name', None) or 'un membre'} : {s['question']}")
-    await registre.noter(g.id, "Sondages", "sondage.fin" if fin else "sondage.publie", texte,
-                         membre_id=int(s.get("auteur_id") or 0), salon_id=int(s.get("channel_id") or 0))
-    try:
-        salon = await _salon_logs(g, "sondages", NOM_LOGS)
-        if salon is None:
-            return
-        uid = s["auteur_id"]
-        auteur_txt = f"<@{uid}> · `{uid}`" + (f" · {auteur.display_name}" if auteur else "")
-        if "lien" not in s and s.get("message_id") and s.get("channel_id"):
-            s["lien"] = f"https://discord.com/channels/{g.id}/{s['channel_id']}/{s['message_id']}"
-        vue = vue_journal(s, auteur_txt, comptes)
-        mentions = discord.AllowedMentions.none()
-        lid = s.get("log_message_id")
-        if lid:
-            try:
-                await salon.get_partial_message(lid).edit(view=vue, allowed_mentions=mentions)
-                return
-            except discord.NotFound:
-                pass
-        msg = await salon.send(view=vue, allowed_mentions=mentions)
-        async with _get_db() as db:
-            await db.execute("UPDATE sondages SET log_message_id=? WHERE id=?", (msg.id, s["id"]))
-            await db.commit()
-    except discord.HTTPException as ex:
-        _log(f"[SONDAGES] logs : {type(ex).__name__} {ex}")
+        async with db.execute(
+                "SELECT id, channel_id, message_id, auteur_id, question, choix, comptes, total, multiple, cree_le,"
+                " fin_le, termine, retire_le, retire_par FROM sondages WHERE guild_id=? ORDER BY cree_le DESC LIMIT ?",
+                (guild_id, limite)) as cur:
+            lignes = await cur.fetchall()
+        async with db.execute("SELECT COUNT(*), COALESCE(SUM(total), 0) FROM sondages WHERE guild_id=? AND cree_le>?",
+                              (guild_id, (_maintenant() - timedelta(days=30)).strftime(_FORMAT))) as cur:
+            mois, votes = await cur.fetchone()
+    liste = []
+    for (sid, cid, mid, auteur, question, choix, comptes, total, multiple, cree, fin, termine, retire,
+         retire_par) in lignes:
+        statut = "retire" if retire else ("termine" if termine or fin <= maintenant else "en_cours")
+        liste.append({"id": sid, "salon_id": str(cid), "lien": f"https://discord.com/channels/{guild_id}/{cid}/{mid}",
+                      "auteur": str(auteur), "question": question, "choix": json.loads(choix or "[]"),
+                      "comptes": json.loads(comptes or "[]"), "total": int(total or 0), "multiple": bool(multiple),
+                      "cree": _ts(cree), "fin": _ts(fin), "statut": statut,
+                      "retire_le": int(retire or 0) or None, "retire_par": str(retire_par) if retire_par else ""})
+    return {"liste": liste, "stats": {"en_cours": sum(1 for x in liste if x["statut"] == "en_cours"),
+                                      "mois": int(mois or 0), "votes_mois": int(votes or 0)}}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -703,48 +495,44 @@ async def journaliser(g, s: dict, auteur=None, comptes=None) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def sur_message(msg: discord.Message) -> None:
-    """Fin d'un sondage natif : bouton retiré, résultat aux logs, panneau redescendu.
-    Un message posé à la main (droits resynchronisés par une catégorie) est retiré."""
     g = msg.guild
     if g is None or _cfg is None:
         return
     try:
-        salon = await salon_de(g)
-        if salon is None or msg.channel.id != salon.id:
-            return
         if msg.type == discord.MessageType.poll_result:
             ref = msg.reference.message_id if msg.reference else None
-            if ref:
-                await marquer_termine(ref)
-                try:
-                    sondage_msg = await salon.fetch_message(ref)
-                    await sondage_msg.edit(view=None)
-                    s, _ = await _par_message(ref)
-                    if s is not None and sondage_msg.poll is not None:
-                        comptes = [a.vote_count for a in sondage_msg.poll.answers]
-                        await journaliser(g, s, None, comptes)
-                except discord.HTTPException as ex:
-                    _log(f"[SONDAGES] fin naturelle : {ex}")
-            await reposer_panneau(g, salon)
+            s = await _ligne(message_id=ref) if ref else None
+            if s is not None:
+                await rafraichir(g, s)
             return
-        if msg.author.bot or msg.webhook_id or est_staff(msg.author):
+        if msg.author.bot or msg.webhook_id:
+            return
+        if getattr(msg, "poll", None) is not None:
+            await nouveau(msg)
+            return
+        salon = await salon_de(g)
+        if salon is None or msg.channel.id != salon.id or msg.is_system() or est_staff(msg.author):
             return
         try:
             await msg.delete()
         except discord.HTTPException:
             return
         cle = (g.id, msg.author.id)
-        if time.monotonic() - _rappels.get(cle, -1e9) > 600:
+        if time.monotonic() - _rappels.get(cle, -1e9) > RAPPEL:
             _rappels[cle] = time.monotonic()
-            await salon.send(f"{msg.author.mention} Ici, on crée un sondage avec le bouton en bas.",
-                             delete_after=10, allowed_mentions=discord.AllowedMentions(users=True))
-    except Exception as ex:
-        _log(f"[SONDAGES] message : {type(ex).__name__} {ex}")
+            await _dire(salon, f"{msg.author.mention} Ici, seulement des sondages : bouton ➕ puis « Sondage ».",
+                        msg.author, 10)
+    except Exception as ex:  # un message ne casse jamais rien
+        _log("[SONDAGES][E3] message non traité")
+        _log(f"[SONDAGES][E3:DETAIL] {type(ex).__name__} {ex}")
 
 
 async def sur_suppression(payload) -> None:
-    if _get_db is not None and payload.guild_id:
-        await marquer_termine(payload.message_id)
+    if _get_db is None or not payload.guild_id:
+        return
+    s = await _ligne(message_id=payload.message_id)
+    if s is not None and not s["retire_le"]:
+        await _marquer(s["id"], termine=1, retire_le=int(time.time()))
 
 
 async def sur_salon_supprime(channel) -> None:
@@ -754,23 +542,6 @@ async def sur_salon_supprime(channel) -> None:
     c = await _cfg(g.id)
     if int(c.get("sondages_salon", 0) or 0) == channel.id:
         await _db_set(g.id, "sondages_salon", 0)
-        await _db_set(g.id, "sondages_panneau", 0)
-
-
-class BoutonCreer(discord.ui.DynamicItem[Button], template=r"sdg:creer"):
-    def __init__(self):
-        super().__init__(Button(label="Créer un sondage", style=discord.ButtonStyle.primary,
-                                custom_id="sdg:creer"))
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls()
-
-    async def callback(self, i: discord.Interaction):
-        refus = await peut_creer(i)
-        if refus:
-            return await i.response.send_message(refus, ephemeral=True)
-        await i.response.send_message(view=MenuCreation(i.user.id), ephemeral=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -789,13 +560,14 @@ class SondagesPanelV2(LayoutView):
         try:
             salon = await salon_de(self.g)
             actifs = await ouverts(self.g)
-            etat = ("🟢 Ouverts" if actifs else "⚪ Fermés") + " · " + (
-                salon.mention if salon else "aucun salon")
-            items = [visuels.bandeau("sondages", "Sondages"), discord.ui.TextDisplay(etat)]
+            etat = ("🟢 Ouverts" if actifs else "⚪ Fermés") + " · " + (salon.mention if salon else "aucun salon")
+            items = [visuels.bandeau("sondages", "Sondages"), discord.ui.TextDisplay(
+                f"{etat}\n-# Les membres créent leurs sondages avec le bouton ➕ de Discord. Suivi et retrait : "
+                "sur le site.")]
             if self._note:
                 items.append(discord.ui.TextDisplay(self._note))
-            sel = ChannelSelect(channel_types=[discord.ChannelType.text],
-                                placeholder="Salon des sondages", min_values=1, max_values=1)
+            sel = ChannelSelect(channel_types=[discord.ChannelType.text], placeholder="Salon des sondages",
+                                min_values=1, max_values=1)
             sel.callback = self._cb_salon
             b_on = Button(label="Fermer" if actifs else "Ouvrir",
                           style=discord.ButtonStyle.secondary if actifs else discord.ButtonStyle.success,
@@ -803,16 +575,12 @@ class SondagesPanelV2(LayoutView):
             b_on.callback = self._cb_basculer
             boutons = [b_on]
             if salon is None:
-                b = Button(label="Créer le salon", style=discord.ButtonStyle.primary,
-                           emoji=visuels.icone("ajouter"))
+                b = Button(label="Créer le salon", style=discord.ButtonStyle.primary, emoji=visuels.icone("ajouter"))
                 b.callback = self._cb_creer
-            else:
-                b = Button(label="Reposer le bouton", style=discord.ButtonStyle.secondary,
-                           emoji=visuels.icone("actualiser"))
-                b.callback = self._cb_reposer
+                boutons.append(b)
             r = Button(label="Retour", style=discord.ButtonStyle.secondary, emoji=visuels.icone("retour"))
             r.callback = self._cb_retour
-            boutons += [b, r]
+            boutons.append(r)
             items += [discord.ui.ActionRow(sel), discord.ui.ActionRow(*boutons)]
             self.clear_items()
             self.add_item(discord.ui.Container(*items, accent_color=Palette.PRIMARY))
@@ -823,29 +591,34 @@ class SondagesPanelV2(LayoutView):
             else:
                 await i.response.edit_message(content=None, view=self, embed=None, attachments=[])
         except Exception as ex:
-            _log(f"[SONDAGES] panneau de configuration : {type(ex).__name__} {ex}")
+            _log("[SONDAGES][E4] panneau de configuration")
+            _log(f"[SONDAGES][E4:DETAIL] {type(ex).__name__} {ex}")
 
     async def _cb_salon(self, i):
         await i.response.defer()
-        nouveau_id = int(i.data["values"][0])
-        ancien = await salon_de(self.g)
-        if ancien is not None and ancien.id != nouveau_id:
-            pid = int((await _cfg(self.g.id)).get("sondages_panneau", 0) or 0)
-            if pid:
-                try:
-                    await ancien.get_partial_message(pid).delete()
-                except discord.HTTPException:
-                    pass
-        await _db_set(self.g.id, "sondages_salon", nouveau_id)
-        await _db_set(self.g.id, "sondages_panneau", 0)
-        await reposer_panneau(self.g)
+        await _db_set(self.g.id, "sondages_salon", int(i.data["values"][0]))
+        salon = await salon_de(self.g)
         self._note = ""
+        if salon is not None:
+            try:
+                await regler_salon(self.g, salon, await ouverts(self.g))
+            except discord.HTTPException as ex:
+                _log(f"[SONDAGES] droits du salon : {ex}")
+                self._note = "Je n'ai pas pu régler les droits de ce salon (il me faut « Gérer les rôles »)."
         await self.render_to(i)
 
     async def _cb_basculer(self, i):
         await i.response.defer()
-        await _db_set(self.g.id, "sondages_actifs", 0 if await ouverts(self.g) else 1)
-        await reposer_panneau(self.g)
+        ouvert = not await ouverts(self.g)
+        await _db_set(self.g.id, "sondages_actifs", int(ouvert))
+        salon = await salon_de(self.g)
+        self._note = ""
+        if salon is not None:
+            try:
+                await regler_salon(self.g, salon, ouvert)
+            except discord.HTTPException as ex:
+                _log(f"[SONDAGES] droits du salon : {ex}")
+                self._note = "Je n'ai pas pu régler les droits du salon (il me faut « Gérer les rôles »)."
         await self.render_to(i)
 
     async def _cb_creer(self, i):
@@ -856,12 +629,6 @@ class SondagesPanelV2(LayoutView):
         except discord.HTTPException as ex:
             _log(f"[SONDAGES] création du salon : {ex}")
             self._note = "Il me manque le droit de gérer les salons."
-        await self.render_to(i)
-
-    async def _cb_reposer(self, i):
-        await i.response.defer()
-        await reposer_panneau(self.g)
-        self._note = "Bouton reposé en bas du salon."
         await self.render_to(i)
 
     async def _cb_retour(self, i):

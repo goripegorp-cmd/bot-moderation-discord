@@ -1,6 +1,6 @@
 """notifs.py — rôles de notification pris et rendus d'un clic (19/10/2026).
 
-Sondages, suggestions, et chaque salon de réseaux sociaux (les « sneaks » Rell Seas…) :
+Suggestions, et chaque salon de réseaux sociaux (les « sneaks » Rell Seas…) :
 un rôle par sujet, créé à la première utilisation, que personne ne porte au départ. Le
 bouton « Me prévenir » le donne ou le reprend ; les publications du sujet le mentionnent.
 Les rôles sont non mentionnables : seul le bot (ou son webhook) peut les réveiller.
@@ -13,7 +13,6 @@ import discord
 from discord.ui import Button
 
 SUJETS = {
-    "sondages": ("🔔 Sondages", 0x5865F2, "les nouveaux sondages"),
     "suggestions": ("🔔 Suggestions", 0xF59E0B, "les nouvelles suggestions"),
 }
 _cfg = _db_set = None

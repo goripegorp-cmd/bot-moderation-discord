@@ -47,6 +47,7 @@ import questions
 import recrutements
 import registre
 import rellseas_panneau
+import sondages
 import vigilance
 
 DUREE = 24 * 3600
@@ -608,6 +609,18 @@ async def _alertes(g, qui) -> list:
     return out
 
 
+async def _sondages(g, qui) -> dict:
+    """« Et qui s'affiche au propre, même sur le panel. »"""
+    d = await sondages.lister(g.id)
+    for s in d["liste"]:
+        s["auteur"] = qui(int(s["auteur"]))
+        if s["retire_par"]:
+            s["retire_par"] = qui(int(s["retire_par"]))
+        ch = g.get_channel(int(s["salon_id"])) or g.get_thread(int(s["salon_id"]))
+        s["salon"] = f"#{ch.name}" if ch is not None else "#salon supprimé"
+    return d
+
+
 async def donnees(g, portee: str = "tout") -> dict:
     cle = (g.id, portee)
     deja = _cache.get(cle)
@@ -618,7 +631,7 @@ async def donnees(g, portee: str = "tout") -> dict:
     qui = _Personnes(g)
     parties = {}
     for nom, fn in (("journal", lambda: _journal(g, qui)), ("questions", lambda: _questions(g, qui)),
-                    ("alertes", lambda: _alertes(g, qui))):
+                    ("alertes", lambda: _alertes(g, qui)), ("sondages", lambda: _sondages(g, qui))):
         try:
             parties[nom] = await fn()
         except Exception as ex:  # une partie illisible n'emporte pas le reste du tableau
