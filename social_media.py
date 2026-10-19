@@ -1833,13 +1833,14 @@ class SocialMediaManager:
 def default_template(platform: Platform, post_type: PostType) -> str:
     """Template par defaut pour une plateforme + type de post."""
     icon = PLATFORM_ICONS.get(platform, "")
+    #  Le lien en dernière ligne : Discord en tire l'aperçu (miniature, lecteur).
     if post_type == PostType.LIVE:
-        return f"{icon} **{{display_name}}** est en live sur {PLATFORM_LABELS[platform]} !\n{{title}}\n{{url}}"
+        return f"{icon} **{{display_name}}** est en live sur {PLATFORM_LABELS[platform]} !\n**{{title}}**\n{{url}}"
     if post_type == PostType.VIDEO:
-        return f"{icon} Nouvelle video de **{{display_name}}** sur {PLATFORM_LABELS[platform]} !\n{{title}}\n{{url}}"
+        return f"{icon} **{{display_name}}** · nouvelle vidéo\n**{{title}}**\n{{url}}"
     if post_type == PostType.SHORT:
-        return f"{icon} **{{display_name}}** a publie un Short !\n{{url}}"
-    return f"{icon} Nouveau post de **{{display_name}}** !\n{{url}}"
+        return f"{icon} **{{display_name}}** · nouveau Short\n{{url}}"
+    return f"{icon} **{{display_name}}** · nouveau post\n{{url}}"
 
 
 def render_template(sub: Subscription, post: SocialPost) -> str:
