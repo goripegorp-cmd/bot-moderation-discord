@@ -1992,6 +1992,14 @@ async def db_init():
             guild_id INTEGER, ticket_id INTEGER, message_id INTEGER,
             PRIMARY KEY (guild_id, ticket_id)
         )''')
+        #  19/10/2026 : « qu'on sache quel transcript appartient à qui […] filtrer ».
+        await db.execute('''CREATE TABLE IF NOT EXISTS ticket_transcripts (
+            guild_id INTEGER, ticket_id INTEGER, user_id INTEGER, user_name TEXT,
+            panel TEXT, url TEXT, closed_at TEXT,
+            PRIMARY KEY (guild_id, ticket_id)
+        )''')
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_user "
+                         "ON ticket_transcripts(guild_id, user_id)")
 
         # Studio tips déjà postés (anti-repeat 60j)
         try:
@@ -8157,6 +8165,14 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
         if lt == 'close' and ch:
             try:
                 _tid = tid or ti.get('id', '?')
+                #  19/10/2026 : le transcript dit À QUI il appartient — nom et identifiant en
+                #  clair (cherchables dans Discord), et indexé pour `/ticket transcripts`.
+                _membre = g.get_member(int(uid)) if str(uid).isdigit() else None
+                _qui = (getattr(_membre, 'display_name', None) or getattr(user, 'name', None)
+                        or "membre parti")
+                _etiquette = (f"📄 Transcript #{_tid} · {_qui} ({uid})"
+                              + (f" · {panel_name}" if panel_name else ""))
+                _slug = re.sub(r"[^a-z0-9]+", "-", str(_qui).casefold()).strip("-")[:32] or "membre"
                 base_url = transcript_store.public_base_url()
                 token = transcript_store.new_token()
                 html = await _render_ticket_transcript_html(
@@ -8179,30 +8195,40 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                     # LIEN prioritaire : GROS bouton, PAS de fichier .html joint (sinon Discord
                     # affiche le code brut qui masque le lien — owner 2026-07-01).
                     e = discord.Embed(
-                        title=f"📄 Transcript du ticket #{_tid}",
+                        title=f"📄 Transcript #{_tid} — {_qui}"[:256],
                         description=("La conversation complète — messages, images, GIFs — est "
                                      "consultable en **un clic** sur une vraie page web 👇"),
                         color=0x5865F2)
                     v = discord.ui.View(timeout=None)
                     v.add_item(discord.ui.Button(
                         style=discord.ButtonStyle.link, url=url, label="🔗 Ouvrir le transcript"))
-                    await lch.send(embed=e, view=v, allowed_mentions=discord.AllowedMentions.none())
+                    await lch.send(content=_etiquette, embed=e, view=v,
+                                   allowed_mentions=discord.AllowedMentions.none())
                 else:
                     # Pas de domaine public configuré → repli : pièce jointe téléchargeable.
                     f = None
                     if html:
                         try:
                             f = discord.File(io.BytesIO(html.encode('utf-8')),
-                                             filename=f"ticket-{_tid}.html")
+                                             filename=f"ticket-{_tid}-{_slug}.html")
                         except Exception:
                             f = None
                     if f is None:
                         f = await _ticket_transcript_file(ch, _tid)
                     if f is not None:
-                        await lch.send(content=f"📄 Transcript du ticket **#{_tid}**",
-                                       file=f, allowed_mentions=discord.AllowedMentions.none())
-            except Exception:
-                pass
+                        f.filename = f"ticket-{_tid}-{_slug}.{f.filename.rsplit('.', 1)[-1]}"
+                        await lch.send(content=_etiquette, file=f,
+                                       allowed_mentions=discord.AllowedMentions.none())
+                if str(_tid).isdigit():
+                    async with get_db() as db:
+                        await db.execute(
+                            "INSERT OR REPLACE INTO ticket_transcripts(guild_id, ticket_id, user_id, "
+                            "user_name, panel, url, closed_at) VALUES (?,?,?,?,?,?,?)",
+                            (g.id, int(_tid), int(uid) if str(uid).isdigit() else 0, str(_qui)[:100],
+                             panel_name or '', url or '', now().isoformat()))
+                        await db.commit()
+            except Exception as ex:
+                _logerr("ticket.transcript", ex, guild_id=g.id)
     except Exception:
         pass
 
@@ -24584,6 +24610,37 @@ async def _tix_is_in_ticket(channel) -> bool:
                 return (await cur.fetchone()) is not None
     except Exception:
         return False
+
+
+@ticket_group.command(name="transcripts", description="📄 Les transcripts d'un membre (ou les derniers)")
+@app_commands.describe(membre="Le membre dont on veut les transcripts (vide = les 20 derniers)")
+async def ticket_transcripts_cmd(i: discord.Interaction, membre: discord.User | None = None):
+    """19/10/2026 : « qu'on sache quel transcript appartient à qui, que si on a besoin de
+    filtrer, on sache exactement »."""
+    if not _tix_is_staff(i.user):
+        return await i.response.send_message("❌ Réservé au staff.", ephemeral=True)
+    await i.response.defer(ephemeral=True)
+    q = ("SELECT ticket_id, user_id, user_name, panel, url, closed_at FROM ticket_transcripts "
+         "WHERE guild_id=?" + (" AND user_id=?" if membre else "")
+         + " ORDER BY closed_at DESC LIMIT 20")
+    async with get_db() as db:
+        async with db.execute(q, (i.guild.id, membre.id) if membre else (i.guild.id,)) as cur:
+            rows = await cur.fetchall()
+    if not rows:
+        return await i.followup.send("📄 Aucun transcript" + (f" pour {membre.mention}." if membre else "."),
+                                     ephemeral=True)
+    lignes = []
+    for tid, uid, nom, panel, url, quand in rows:
+        try:
+            t = f"<t:{int(datetime.fromisoformat(quand).timestamp())}:d>"
+        except (TypeError, ValueError):
+            t = "?"
+        lien = f"[ouvrir]({url})" if url else "fichier dans le salon des logs"
+        lignes.append(f"🎫 #{tid} · **{nom}** (`{uid}`)" + (f" · {panel}" if panel else "")
+                      + f" · {t} · {lien}")
+    await i.followup.send(("**📄 Transcripts" + (f" de {membre.mention}" if membre else "")
+                           + f"** ({len(rows)})\n" + "\n".join(lignes))[:1950], ephemeral=True,
+                          allowed_mentions=discord.AllowedMentions.none())
 
 
 @ticket_group.command(name="search", description="🔎 Liste les tickets ouverts (option : seulement les non pris)")
