@@ -262,12 +262,6 @@ async def capture_snapshot(guild) -> dict:
 
             # events finished today
             try:
-                async with db.execute(
-                    "SELECT COUNT(*) FROM events "
-                    "WHERE guild_id=? AND ended=1 AND started_at >= ?",
-                    (guild.id, cutoff_iso),
-                ) as cur:
-                    row = await cur.fetchone()
                 out["events_finished"] = int(row[0] or 0) if row else 0
             except Exception:
                 pass

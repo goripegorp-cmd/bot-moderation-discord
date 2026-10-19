@@ -66,12 +66,10 @@ GARDER = {
     #    est plus dangereux qu'un outil qui n'existe pas.
     "roblox_news", "roblox_panneau",   # ROBLOX.md (accessoires retirés le 19/10/2026)
     "social_media", "social_zones", "social_match",     # /social + onglet /configure
-    "activite", "activite_calendrier", "activite_escalade", "activite_message",
-    "activite_niveaux", "activite_panneau", "activite_passage",
-    "activite_recompenses", "activite_textes",          # système d'activité (11-12/08)
+    "activite", "activite_calendrier",                  # comptage d'activité (rôle choisi)
     "vocabulary",                                        # importé DUR par 3 modules gardés
     # Divers infra encore câblés
-    "setup_wizard", "slash_commands_2026", "admin_panels_v2", "ui_usage",
+    "setup_wizard", "slash_commands_2026", "admin_panels_v2",
     # Outillage : régénère INDEX.md (carte des symboles) — appelé par le workflow
     # GitHub .github/workflows/index.yml, tous les jours. Le supprimer casserait
     # ce workflow, et la carte est précieuse sur un fichier de 83 000 lignes.

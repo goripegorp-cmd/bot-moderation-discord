@@ -24,7 +24,6 @@ DB tables :
 """
 from __future__ import annotations
 
-import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Optional
@@ -46,10 +45,7 @@ _loops_status_fn = None
 _mem_stats_fn = None
 
 # Tables critiques à vérifier (présence + read OK)
-CRITICAL_TABLES = (
-    "daily_guild_stats", "infractions", "ladder_ratings",
-    "guild_config", "season_drops_log",
-)
+CRITICAL_TABLES = ("daily_guild_stats", "infractions", "guild_config")
 
 # D2 : seuils d'alerte mémoire (généreux → on alerte une fuite réelle, pas un pic).
 _MEM_TASKS_THRESHOLD = 1500     # nb de tâches asyncio vivantes

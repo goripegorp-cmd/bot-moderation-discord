@@ -21,10 +21,8 @@ PHASE_163_MODULES = [
     "honeypot",
     "behavior_anomaly",
     # Phase 165 — nouveaux modules
-    "stream_schedule",
     # Phase 166 — anti-token-leak, birthday, welcome, spotlight
     "anti_token_leak",
-    "birthday_panel",
     # Phase 167 — status rotator, voice autoclean, member risk
     "member_risk",
     # Phase 168 — error logger
@@ -66,8 +64,6 @@ INIT_DB_MODULES = [
     "honeypot",
     "behavior_anomaly",
     # Phase 165
-    "stream_schedule",
-    # Phase 166 (birthday_panel n'a pas d'init_db, lit cfg directement)
     "anti_token_leak",
     # Phase 167 (status_rotator n'a pas d'init_db, pas de table)
     "member_risk",

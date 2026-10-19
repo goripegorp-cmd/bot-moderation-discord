@@ -23,7 +23,6 @@ Usage dans bot.py :
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 import discord
 
@@ -414,7 +413,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
 
             items.append(v2_divider())
             items.append(v2_body(
-                "-# Exporte un instantané du serveur via les boutons"
+                "-# Exporte les sanctions des 30 derniers jours via les boutons"
             ))
 
             self.add_item(v2_container(*items, color=0x9B59B6))

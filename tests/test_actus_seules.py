@@ -34,7 +34,8 @@ def test_N1_plus_rien_des_accessoires():
                 "_cartes_cadeaux", "_surveiller_retires"):
         assert f"def {nom}(" not in SRC, nom
     assert not {"limited", "nouveaux"} & set(roblox_pings.CATEGORIES)
-    assert "await _retirer_tables_accessoires()" in _fonction("_travaux_de_demarrage")
+    assert "await _retirer_tables_mortes()" in _fonction("_travaux_de_demarrage")
+    assert "roblox_marche_tete" in SRC.split("_TABLES_MORTES = frozenset(")[1].split("})")[0]
 
 
 def test_N2_un_passage_releve_enfile_publie_et_dit_les_pannes():

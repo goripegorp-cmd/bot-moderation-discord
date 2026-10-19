@@ -52,12 +52,6 @@ except Exception:
 # ─── Configuration : (table_name, column_for_date, retention_days) ───────
 # Si column_for_date est None, on utilise simplement "created_at" si elle existe.
 CLEANUP_RULES = [
-    ("gift_log",                  "created_at",  90),
-    ("social_interactions",       "created_at",  60),
-    ("voice_milestone_claims",    "claimed_at",  365),
-    ("milestone_claims",          "claimed_at",  365),
-    ("highlights_log",            "posted_at",   90),
-    ("bot_post_tracking",         "posted_at",   90),
     ("anomaly_log",               "detected_at", 180),
     ("daily_join_log",            "joined_day",  730),
     ("daily_stats_snapshot",      "captured_at", 730),

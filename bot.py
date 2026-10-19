@@ -27,7 +27,7 @@ if __name__ == "__main__":
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-from discord.ui import Select, Modal, TextInput, Button, UserSelect
+from discord.ui import Select, Modal, TextInput, Button
 
 # ─── Helpers Components V2 (design system) ───
 # ⚠️ `View` et `LayoutView` viennent d'ui_v2, PAS de discord.ui : ce sont les mêmes
@@ -41,86 +41,38 @@ from ui_v2 import (
     title as v2_title,
     subtitle as v2_subtitle,
     body as v2_body,
-    kv_block as v2_kv,
-    bullets as v2_bullets,
-    stats_grid as v2_stats,
     divider as v2_divider,
     thumb as v2_thumb,
     section as v2_section,
     container as v2_container,
-    BasePanel as V2BasePanel,
-    header as v2_header,
-    info_card as v2_info_card,
-    recap_view as v2_recap_view,
-    combat_recap_view as v2_combat_recap_view,
-    MY_HUB_BUTTON_CUSTOM_ID,
 )
 
-# ─── Modules redesign 2026 (Phase 0 + 1) ───
-# Permissions granulaires, vocabulaire centralisé, aide multi-niveaux,
-# engagement non-intrusif, sauvegardes versionnées, social media avec
-# anti-doublon + auto-clean, protection sans faux-positifs, features
-# communautaires.
-import permissions as perms2026
-import vocabulary as vocab2026
+# ─── Modules du bot ───
 import social_media as social2026
-# Phase 41 : moteur d'engagement quotidien (quests, achievements, pets, wheel, confessions)
-# Phase 42 : nouveaux events (world boss, voice chaos, daily riddles)
-# Phase 47 : moteur long terme (saisons, prestige, factions, weekly/monthly)
-import protection_guards as guards2026
 import admin_panels_v2 as panels2026  # (set_social_manager uniquement ; /admin retiré)
-import antiscam as antiscam2026
 import setup_wizard as wizard2026
 import slash_commands_2026 as slashcmds2026
 import tracking_layer as tracking2026
-# Phase 46.1 : modules backup/architecture supprimés (server_architect,
-# architecture_builder, custom_blueprint, slash_commands_architecture) → libère
-# ~3600 lignes. Le serveur reste géré manuellement par l'owner.
 import unified_logger as ulogger2026
-# ═══ SYSTÈME D'ACTIVITÉ (11/08/2026) — désactivé par défaut ═══
-#  ⚠️ LE SYSTÈME D'ACTIVITÉ EST RETIRÉ (03/10/2026) : « enlève-moi complètement
-#  ce système et ce calcul inutile ». `activite_demontage` défait sur Discord ce
-#  qu'il avait posé ; il ne reste que le COMPTAGE des jours d'activité, pour le
-#  bouton « Activité » de /rellseas (choix du propriétaire, le même jour).
+#  Activité : seulement les membres du rôle choisi (/rellseas) ; `activite_demontage`
+#  défait sur Discord ce que l'ancien système d'activité avait posé.
 import activite as activite_module
 import activite_demontage as activite_demontage_module
-#  Ce qu'un NOUVEL ARRIVANT voit du serveur (03/10/2026).
-import visibilite_serveur as visibilite_module
+import visibilite_serveur as visibilite_module  # ce qu'un nouvel arrivant voit du serveur
 import roblox_news as roblox_news_module
 import roblox_pings as roblox_pings_module
 import roblox_panneau as roblox_ui
 import protection_mineurs as pmineurs
 import rellseas_panneau as rellseas_ui
-import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
-import delegations as delegations2026
+import diag  # journal de diagnostic structuré sur stderr (visible Railway)
 import compromised_detector as compromised2026
-# Phase 126 : modules backend infrastructure
 import db_backup as db_backup_module
 import health_server as health_server_module
-# Phase 127 : helpers V2 communs réutilisables
-import panels_helpers as panels_h
-# Phase 129 : récap hebdomadaire des Boss Raids
-# Phase 130 : dashboard staff modération
 import mod_dashboard as mod_dashboard_module
 import owner_export as owner_export_module
-# Phase 131 : événements économiques cycliques + /gift
-# Phase 132 : paliers de progression (streak / veteran / prestige)
-# Phase 134 : wiki + roadmap + weekly highlights
-# Phase 135 : coffre d'alliance + stats de gestion
-# Phase 136 : Roblox link verify + game library
-# Phase 137 : Voice Lounges + paliers vocaux
-# Phase 138 : Tickets enhancements (priority + templates + auto-close)
-import tickets_enhance as tix_module
-# Phase 139 : Observabilité (daily report + anomalies + retention)
-import observability as obs_module
-# Phase 140 : Publish metrics + cross-poster
-# Phase 141 : UX final — theme switcher + tutorial
-# Phase 143 : DB cleanup hebdo (purge tables qui grossissent indéfiniment)
-import data_cleanup as cleanup_module
-# Phase 144 : Saisons thématiques qui transforment les events sur l'année
-# Phase 145 : Réveil intelligent des membres dormants (DM + reward comeback)
-# Phase 146 : Boutons de suivi après chaque event (zéro commande à mémoriser)
-# Phase 147 : Sécurité moderne 2026 — anti-raid, anti-phishing, anti-impersonation
+import tickets_enhance as tix_module  # priorité, modèles, fermeture auto
+import observability as obs_module  # rapport quotidien, anomalies, rétention
+import data_cleanup as cleanup_module  # purge des tables qui grossissent
 import raid_detector as raid_module
 import owner_ids as owner_ids_module  # SOURCE UNIQUE du/des super-owner(s) (founder-only)
 import gdpr  # RGPD : purge/anonymisation des données utilisateur (carte faisant autorité, cf. gdpr.py)
@@ -128,73 +80,34 @@ import token_grabber as token_grabber_module
 import webhook_leak as webhook_leak_module
 import staff_sanction as staff_sanction_module
 import impersonation_detector as impersonation_module
-# Phase 148 : Robustesse — 2FA, rate limit, health check, backup lite
 import rate_limiter as ratelimit_module
 import health_check as health_module
 import backup_lite as backup_module
-# Phase 149 : Events MMO — sagas multi-jours, profil joueur, FAQ navigable
-import help_faq as faq_module
-# Phase 152 : UX/Owner — DM digest, owner digest, webhook tracker
 import dm_digest as dm_digest_module
 import webhook_tracker as webhook_tracker_module
-# Phase 153 : Engagement long terme — reputation, pet evo, daily prompt,
-# onboarding journey, mentor bonus
-# Phase 154 : Sécurité 2026++ — honeypot + behavior anomaly
 import honeypot as honeypot_module
 import behavior_anomaly as behavior_anomaly_module
-# Phase 155 : Roblox / Stream — game stats, raffle, watch party
-# Phase 157 : Community goals + Coin economy (anti-inflation)
-# Phase 161 : Weekly recap + Leaderboards publics
-# Phase 162 : Server Pulse live + Tips Rotator
-# Phase 165.1 : Stream schedule + countdown auto
-import stream_schedule as stream_schedule_module
-# Phase 165.2 : Activity heatmap (quand le serveur est actif)
-# Phase 166.1 : Anti-token-leak DM scanner
 import anti_token_leak as anti_token_leak_module
-# Phase 166.2 : Birthday auto-panel
-import birthday_panel as birthday_panel_module
-# Phase 166.3 : Welcome ack (👋 sur premier message)
-# Phase 166.4 : Spotlight qualité (⭐ → highlights)
-# Phase 167.1 : Status rotator (bot status dynamique)
-# Phase 167.2 : Voice autoclean (vocaux temp vides)
-# Phase 167.3 : Member risk review
 import member_risk as member_risk_module
-# Phase 168.4 : Central error logger + burst alert
 import error_logger as error_logger_module
-# Phase 169.1 : Mob Hunts (combat fréquent multi-user)
-# Phase 256 Lot 3 : events COLLABORATIFS (Faille 🟡 / Caravane 🟢)
-# Phase 173.2 : Boss du jour, 4×/jour, gating de niveau
 import recidivism as recidivism_module
-import activity_vip as activity_vip_module  # owner 2026-07-02 : VIP CONTINU par seuil + décroissance + rappels
-import ui_usage as ui_usage_module  # owner 2026-07-17 : mesurer QUELS menus/boutons servent vraiment
-import social_zones as social_zones_module  # Phase 280 : groupes + trades privés 100% boutons
-import social_match as social_match_module  # owner 2026-07-02 : appariement croisé (2 personnes qui se répondent/se ressemblent)
-import transcript_store  # Phase 281 : stockage + service web des transcripts de tickets
-# Phase 169.2 : Marchand itinérant quotidien
-# Phase 169.3 : World Invasion mensuelle
-# Phase 170.1 : La Chronique d'Abylumis — récit narratif persistant 9 mois
-import sticky_messages as sticky_messages_module  # « Dernier message » sticky en bas de salon (owner 2026-06-16)
-import insult_filter as insult_filter  # Filtre insultes/haine GRADUÉ multilingue (owner 2026-06-21, lexique vérifié anti-FP)
-import mots_interdits  # 14/10/2026 : liste du serveur — exclamations libres, plus de mots recollés
-import acces_direction  # 14/10/2026 : Direction + Fondateur déplacent dans les vocaux créés
-import stockage as stockage_module  # 14/10/2026 : part du volume par poste + bilan quotidien
-import tickets_fils  # 19/10/2026 : un fil privé par ticket, un salon par équipe
-import nettoyage  # 19/10/2026 : journal en fils, rétention 30 jours, remise à neuf
-import offtopic_filter as offtopic_filter  # Filtre politique/religion/militantisme (owner 2026-06-21, slogans + slugs de GIF, anti-FP gaming)
-import trust_system as trust_system  # Confiance progressive des nouveaux + politique liens/invitations (owner 2026-06-21)
-import behavior_guard as behavior_guard  # Anti-crash (zalgo/invisible) + spam inter-salons + anti-automation (owner 2026-06-21)
-import ocr_scan as ocr_scan  # OCR anti-scam image (lire le texte DANS l'image, owner 2026-06-27) — fail-safe si tesseract absent
-import grooming_detector as grooming_detector  # Protection mineurs : détection d'approche prédatrice (owner 2026-06-27)
-import nsfw_scan as nsfw_scan  # Protection mineurs : détection d'images sexuelles par IA (owner 2026-06-27) — fail-safe + garde RAM
-# (import de `dm_notify` retiré le 12/08/2026 : module d'envoi de MP sans
-#  aucun appelant, dont `send_weekly_recaps` sortait déjà sur un `return 0`.)
-import i18n as i18n_module  # Socle i18n : préférence de langue par membre + sélecteur (zéro slash)
-# Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
-# Phase 170.4 : Conseil des Anciens hebdomadaire
-# Phase 170.5 : Régions du monde + patrouilles
-# Phase 170.6 : Indices fragmentés (force la discussion en chat)
-# Phase 170.7 : Lettres NPC hebdo en DM (opt-in)
-# Phase 170.8 : Boss Climax mensuel thématique
+import social_zones as social_zones_module  # groupes et échanges privés, 100 % boutons
+import social_match as social_match_module  # appariement croisé (2 personnes qui se répondent/se ressemblent)
+import transcript_store  # stockage et service web des transcripts de tickets
+import sticky_messages as sticky_messages_module  # « Dernier message » sticky en bas de salon
+import insult_filter as insult_filter  # filtre insultes/haine gradué multilingue
+import mots_interdits  # liste du serveur — exclamations libres, plus de mots recollés
+import acces_direction  # Direction + Fondateur déplacent dans les vocaux créés
+import stockage as stockage_module  # part du volume par poste + bilan quotidien
+import tickets_fils  # un fil privé par ticket, un salon par équipe
+import nettoyage  # journal en fils, rétention 30 jours, remise à neuf
+import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
+import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
+import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
+import ocr_scan as ocr_scan  # OCR anti-scam image — sans effet si tesseract absent
+import grooming_detector as grooming_detector  # protection des mineurs : approche prédatrice
+import nsfw_scan as nsfw_scan  # protection des mineurs : images sexuelles (IA, garde RAM)
+import i18n as i18n_module  # préférence de langue par membre + sélecteur (zéro slash)
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -249,28 +162,6 @@ from datetime import time as _dtime
 import uuid
 from dotenv import load_dotenv
 import xml.etree.ElementTree as ET
-import matplotlib
-matplotlib.use('Agg')  # Backend non-interactif
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-# owner 2026-06-21 : les titres de graphes contiennent des emojis (💬 🔊 …) et le nom des
-# membres peut avoir des caractères déco/CJK absents de la police DejaVu → matplotlib émettait
-# un UserWarning « Glyph … missing from current font » À CHAQUE rendu = bruit dans les logs
-# (cosmétique seulement : l'emoji manquant s'affiche en carré vide, le graphe reste correct).
-# On fait taire CE warning précis (sans masquer les vraies erreurs).
-# ⚠️ owner 2026-07-26 : matplotlib ≥3.9 (bump du build Docker) a CHANGÉ le texte en
-# « Glyph … missing from font(s) DejaVu Sans » → l'ancien filtre (« from current font ») ne
-# matchait plus et le bruit est revenu dans les Deploy Logs. Préfixe commun aux 2 variantes.
-import warnings as _warnings
-_warnings.filterwarnings("ignore", message="Glyph .* missing from")
-# Phase 172 : lock global pour le rendu matplotlib. pyplot N'EST PAS
-# thread-safe : on serialise les rendus + on les sort de la boucle asyncio
-# via asyncio.to_thread. Sinon un plt.savefig (dpi 100-120) gèle la boucle
-# 1-2s, ce qui fait rater la fenêtre de 3s à TOUTES les interactions en
-# cours → "Échec de l'interaction" global sans erreur loggée.
-_PLOT_LOCK = asyncio.Lock()
-from collections import defaultdict
-from functools import wraps
 from typing import Optional
 
 load_dotenv()
@@ -693,16 +584,6 @@ def _get_config_lock(gid: int) -> asyncio.Lock:
     return lock
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           ⚡ SYSTÈME D'INTERACTION OPTIMISÉ
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 #                           🔒 SYSTÈME DE SÉCURITÉ
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -848,10 +729,7 @@ class C:
     BLURPLE=0x5865F2; GREEN=0x57F287; RED=0xED4245; YELLOW=0xFEE75C
     PURPLE=0x9B59B6; BLUE=0x3498DB; ORANGE=0xE67E22; GOLD=0xFFD700
 
-# Références aux nouvelles bases de données (définies dans PROTS section)
-PHISHING = []  # Sera remplacé par PHISHING_DOMAINS après la définition
 SCAM_PATTERNS = []  # Sera remplacé après la définition
-LEET = {'a':['@','4'],'e':['3','€'],'i':['1','!'],'o':['0'],'s':['$','5'],'t':['7']}
 
 def now(): return datetime.now(timezone.utc)
 
@@ -1105,33 +983,6 @@ async def db_init():
             title TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
-        # Table pour tracker l'activité des membres
-        await db.execute('''CREATE TABLE IF NOT EXISTS member_activity (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            user_id INTEGER,
-            activity_type TEXT,
-            channel_id INTEGER,
-            duration INTEGER DEFAULT 0,
-            message_id INTEGER DEFAULT 0,
-            reactions INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
-        # D3 : agrégat journalier de l'activité MESSAGE (anti-gonflement).
-        # 1 ligne par (guild, user, channel, jour) au lieu d'1 ligne PAR message.
-        # Les lectures de ciblage de salon + les compteurs de stats messages lisent
-        # désormais cette table. member_activity ne garde QUE le vocal (granularité
-        # 'duration' requise). Les vrais consommateurs gate/difficulté lisent
-        # activity_score (table à part) — non touchés.
-        await db.execute('''CREATE TABLE IF NOT EXISTS member_activity_daily (
-            guild_id INTEGER,
-            user_id INTEGER,
-            channel_id INTEGER,
-            day TEXT,
-            hits INTEGER DEFAULT 0,
-            last_ts TEXT,
-            PRIMARY KEY(guild_id, user_id, channel_id, day)
-        )''')
         # E1 : journal d'audit STAFF consolidé (traçabilité QUI a fait QUOI).
         # Toutes surfaces (slash, panneaux de sanction, actions fondateur) écrivent
         # ici via log_staff_action(). Lecture seule côté owner (dashboard).
@@ -1146,11 +997,6 @@ async def db_init():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
 
-        # Index pour améliorer les performances des requêtes de stats
-        try:
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_member_activity_guild_user ON member_activity(guild_id, user_id, activity_type, created_at)')
-        except:
-            pass
         # D3 : index ciblage salon (actifs récents par salon) + stats user/jour.
         try:
             # ⚠️ owner 2026-07-12 : la table `tickets` (créée l.1510) n'avait QUE sa PK autoincrement
@@ -1159,9 +1005,6 @@ async def db_init():
             # n'existe NULLE PART → la table ne se purge jamais → le coût du scan AUGMENTE chaque
             # mois : c'est un facteur qui explique que le ralentissement EMPIRE avec le temps.
             await db.execute('CREATE INDEX IF NOT EXISTS idx_tickets_channel_status ON tickets(channel_id, status)')
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_mad_guild_day ON member_activity_daily(guild_id, day)')
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_mad_guild_ch_day ON member_activity_daily(guild_id, channel_id, day)')
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_mad_guild_user_day ON member_activity_daily(guild_id, user_id, day)')
         except:
             pass
         # E1 : index lecture audit owner (N dernières actions par guild).
@@ -1170,39 +1013,6 @@ async def db_init():
         except:
             pass
         
-        # Table pour les stats d'inactivité
-        await db.execute('''CREATE TABLE IF NOT EXISTS activity_tracking (
-            guild_id INTEGER,
-            user_id INTEGER,
-            last_message DATETIME,
-            last_vocal DATETIME,
-            total_messages INTEGER DEFAULT 0,
-            total_vocal_time INTEGER DEFAULT 0,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
-        # Phase 206 : journal de rotation des pings « membres actifs » (combat)
-        # Phase 210 : arènes de combat éphémères (catégorie + salons créés par
-        # event de combat, supprimés à la fin). Suivi pour cleanup garanti.
-        await db.execute('''CREATE TABLE IF NOT EXISTS combat_arenas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            kind TEXT,
-            category_id INTEGER,
-            text_channel_id INTEGER,
-            alert_channel_id INTEGER DEFAULT 0,
-            alert_message_id INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
-        # Phase 231 : alerte « combat en cours » (hub/journal) à supprimer en fin
-        # de combat → colonnes ajoutées aux bases existantes (no-op si déjà là).
-        try:
-            await db.execute("ALTER TABLE combat_arenas ADD COLUMN alert_channel_id INTEGER DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE combat_arenas ADD COLUMN alert_message_id INTEGER DEFAULT 0")
-        except Exception:
-            pass
         # Table pour les stats journalières du serveur (graphiques tendances)
         await db.execute('''CREATE TABLE IF NOT EXISTS daily_guild_stats (
             guild_id INTEGER,
@@ -1285,31 +1095,6 @@ async def db_init():
             except: pass
         
         # ═══════════════ TABLES ÉCONOMIE & MINI-JEUX ═══════════════
-        # Table économie des membres
-        await db.execute('''CREATE TABLE IF NOT EXISTS economy (
-            guild_id INTEGER,
-            user_id INTEGER,
-            coins INTEGER DEFAULT 0,
-            bank INTEGER DEFAULT 0,
-            xp INTEGER DEFAULT 0,
-            level INTEGER DEFAULT 1,
-            last_daily DATETIME,
-            last_work DATETIME,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
-        # Phase 260 : echos « Rejoins-nous dans #salon » postés en chat → supprimés
-        # dès que le salon de combat lié est supprimé (sinon ils pointent vers
-        # #inconnu et polluent le chat).
-        await db.execute('''CREATE TABLE IF NOT EXISTS event_echo_msgs (
-            guild_id INTEGER,
-            arena_channel_id INTEGER,
-            echo_channel_id INTEGER,
-            echo_message_id INTEGER
-        )''')
-        await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_event_echo_arena '
-            'ON event_echo_msgs(arena_channel_id)'
-        )
 
         # Phase 262 : VERROU DE SPAWN ATOMIQUE (1 seul event de combat à la fois).
         # PK guild_id → l'INSERT ON CONFLICT DO NOTHING ne réussit que pour le 1er
@@ -1318,13 +1103,6 @@ async def db_init():
         # verrou _has_any_major_event_running (lecture des tables d'events) qui
         # sérialise. Pas de release explicite nécessaire (auto-expiration).
 
-        # Table des niveaux (pour récompenses automatiques)
-        await db.execute('''CREATE TABLE IF NOT EXISTS level_rewards (
-            guild_id INTEGER,
-            level INTEGER,
-            role_id INTEGER,
-            PRIMARY KEY (guild_id, level)
-        )''')
         
         # Table des achats boutique (rôles temporaires)
         await db.execute('''CREATE TABLE IF NOT EXISTS shop_purchases (
@@ -1363,66 +1141,6 @@ async def db_init():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
 
-        # Phase 30 : Système d'événements (Boss Raid)
-        await db.execute('''CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            event_type TEXT DEFAULT 'boss_raid',
-            boss_json TEXT,
-            arena_channel_id INTEGER,
-            arena_message_id INTEGER,
-            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            ends_at DATETIME,
-            ended INTEGER DEFAULT 0,
-            victory INTEGER DEFAULT 0,
-            triggered_by INTEGER DEFAULT 0
-        )''')
-        await db.execute('CREATE INDEX IF NOT EXISTS idx_events_guild_active ON events(guild_id, ended)')
-
-        # Participation des joueurs à un event
-        await db.execute('''CREATE TABLE IF NOT EXISTS event_participants (
-            event_id INTEGER,
-            user_id INTEGER,
-            damage_dealt INTEGER DEFAULT 0,
-            attacks_count INTEGER DEFAULT 0,
-            last_attack_ts REAL DEFAULT 0,
-            PRIMARY KEY (event_id, user_id)
-        )''')
-
-        # Snapshots des permissions de salons (pour restauration)
-        await db.execute('''CREATE TABLE IF NOT EXISTS event_channel_snapshots (
-            event_id INTEGER,
-            channel_id INTEGER,
-            had_overwrite INTEGER DEFAULT 0,
-            allow_value INTEGER DEFAULT 0,
-            deny_value INTEGER DEFAULT 0,
-            PRIMARY KEY (event_id, channel_id)
-        )''')
-
-        # Inventaire joueur (pour gear/HP/coins event)
-        await db.execute('''CREATE TABLE IF NOT EXISTS player_inventory (
-            guild_id INTEGER,
-            user_id INTEGER,
-            hp INTEGER DEFAULT 100,
-            max_hp INTEGER DEFAULT 100,
-            weapon_json TEXT DEFAULT '{}',
-            armor_json TEXT DEFAULT '{}',
-            kills INTEGER DEFAULT 0,
-            total_damage INTEGER DEFAULT 0,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
-
-        # Phase 179 : COFFRE / STASH — collection d'objets POSSÉDÉS mais non
-        # équipés. player_inventory = les 6 pièces ÉQUIPÉES (source de vérité
-        # combat) ; player_stash = tout le reste qu'on peut équiper à la main.
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_player_stash_owner "
-                "ON player_stash(guild_id, user_id, slot)"
-            )
-        except Exception:
-            pass
 
         # Phase 102 : nouveaux slots équipement (Helmet, Boots, Accessory, Trinket)
         # ALTER TABLE idempotent — try/except si colonne déjà existante
@@ -1435,312 +1153,41 @@ async def db_init():
             "cosmetic_tint TEXT DEFAULT ''",
         ):
             col_name = col_def.split()[0]
-            try:
-                await db.execute(f"ALTER TABLE player_inventory ADD COLUMN {col_def}")
-            except Exception:
-                # Colonne déjà existante (SQLite throws on duplicate)
-                pass
 
-        # Phase 105 : Loot history — journal de chaque drop obtenu
-        await db.execute('CREATE INDEX IF NOT EXISTS idx_loot_history_user '
-                         'ON loot_history(guild_id, user_id, obtained_at)')
-
-        # Phase 109 : Auction House — enchères pour items uniques
-        await db.execute('''CREATE TABLE IF NOT EXISTS auctions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            seller_id INTEGER NOT NULL,
-            slot TEXT,
-            item_json TEXT NOT NULL,
-            start_price INTEGER NOT NULL,
-            current_bid INTEGER NOT NULL,
-            top_bidder_id INTEGER,
-            bids_count INTEGER DEFAULT 0,
-            started_at INTEGER NOT NULL,
-            ends_at INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'active'
-        )''')
-        await db.execute('CREATE INDEX IF NOT EXISTS idx_auctions_active '
-                         'ON auctions(guild_id, status, ends_at)')
-        await db.execute('CREATE INDEX IF NOT EXISTS idx_auctions_seller '
-                         'ON auctions(guild_id, seller_id, status)')
-
-        # Phase 31 : badges débloqués par joueur
-
-        # Phase 31 : stats étendues par joueur (compteurs spéciaux)
-        await db.execute('''CREATE TABLE IF NOT EXISTS player_event_stats (
-            guild_id INTEGER,
-            user_id INTEGER,
-            raids_participated INTEGER DEFAULT 0,
-            final_blows INTEGER DEFAULT 0,
-            top1_count INTEGER DEFAULT 0,
-            shop_spent INTEGER DEFAULT 0,
-            rank_key TEXT DEFAULT '',
-            duels_won INTEGER DEFAULT 0,
-            duels_lost INTEGER DEFAULT 0,
-            personal_events_completed INTEGER DEFAULT 0,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
-
-        # Phase 33 : événements personnels lancés (anti-spam)
-        await db.execute('''CREATE TABLE IF NOT EXISTS personal_events_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            user_id INTEGER,
-            event_type TEXT,
-            event_data_json TEXT DEFAULT '{}',
-            dm_channel_id INTEGER DEFAULT 0,
-            dm_message_id INTEGER DEFAULT 0,
-            channel_id INTEGER DEFAULT 0,
-            channel_message_id INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            claimed INTEGER DEFAULT 0
-        )''')
-        await db.execute('CREATE INDEX IF NOT EXISTS idx_personal_events_user ON personal_events_log(guild_id, user_id, created_at)')
-        # Migration : colonnes ajoutées en Phase 34 (refonte DM)
-        try:
-            async with db.execute('PRAGMA table_info(personal_events_log)') as cur:
-                cols = [r[1] for r in await cur.fetchall()]
-            if 'event_data_json' not in cols:
-                await db.execute("ALTER TABLE personal_events_log ADD COLUMN event_data_json TEXT DEFAULT '{}'")
-            if 'dm_channel_id' not in cols:
-                await db.execute("ALTER TABLE personal_events_log ADD COLUMN dm_channel_id INTEGER DEFAULT 0")
-            if 'dm_message_id' not in cols:
-                await db.execute("ALTER TABLE personal_events_log ADD COLUMN dm_message_id INTEGER DEFAULT 0")
-            if 'channel_id' not in cols:
-                await db.execute("ALTER TABLE personal_events_log ADD COLUMN channel_id INTEGER DEFAULT 0")
-            if 'channel_message_id' not in cols:
-                await db.execute("ALTER TABLE personal_events_log ADD COLUMN channel_message_id INTEGER DEFAULT 0")
-        except Exception:
-            pass
-
-        # Phase 33 : historique des duels
-
-        # Phase 37 : classes choisies par les joueurs
-
-        # Phase 37 : opt-in pour déplacement vocal automatique
-
-        # Phase 37 : zones vocales par event (3 vocaux temporaires)
-
-        # Phase 40 : log des wake-up pings (pour éviter de spammer le même
-        # membre trop souvent — cap 1 mention publique / 48h)
-        await db.execute('''CREATE TABLE IF NOT EXISTS wakeup_log (
-            guild_id INTEGER,
-            user_id INTEGER,
-            last_mentioned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            mention_count INTEGER DEFAULT 1,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
-
-        # Phase 40 : log des comeback DMs (cap 1 DM / semaine par membre)
-        await db.execute('''CREATE TABLE IF NOT EXISTS comeback_dms (
-            guild_id INTEGER,
-            user_id INTEGER,
-            last_dm_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            bonus_amount INTEGER DEFAULT 0,
-            claimed INTEGER DEFAULT 0,
-            claimed_at DATETIME,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 41 — Engagement quotidien (daily quests, achievements, pets,
         # wheel, confessions)
         # ═══════════════════════════════════════════════════════════════════
-        # Progrès des daily quests (1 ligne par (guild,user,date,quest_id))
-        await db.execute('''CREATE TABLE IF NOT EXISTS daily_quest_progress (
-            guild_id INTEGER,
-            user_id INTEGER,
-            day TEXT,                           -- 'YYYY-MM-DD' Europe/Paris
-            quest_id TEXT,
-            metric TEXT,
-            target INTEGER,
-            progress INTEGER DEFAULT 0,
-            completed INTEGER DEFAULT 0,
-            completed_at DATETIME,
-            claimed INTEGER DEFAULT 0,
-            PRIMARY KEY (guild_id, user_id, day, quest_id)
-        )''')
 
         # Streak quotidien : N jours consécutifs avec >=1 quête complétée
 
-        # Stats cumulatives pour achievements (compteurs persistants)
-        await db.execute('''CREATE TABLE IF NOT EXISTS user_stats41 (
-            guild_id INTEGER,
-            user_id INTEGER,
-            messages INTEGER DEFAULT 0,
-            reactions_given INTEGER DEFAULT 0,
-            voice_min INTEGER DEFAULT 0,
-            events_participated INTEGER DEFAULT 0,
-            events_won INTEGER DEFAULT 0,
-            bosses_won INTEGER DEFAULT 0,
-            duels_won INTEGER DEFAULT 0,
-            treasures_found INTEGER DEFAULT 0,
-            quiz_correct INTEGER DEFAULT 0,
-            mystery_opened INTEGER DEFAULT 0,
-            total_coins_earned INTEGER DEFAULT 0,
-            shop_purchases INTEGER DEFAULT 0,
-            legendary_purchases INTEGER DEFAULT 0,
-            divine_purchases INTEGER DEFAULT 0,
-            unique_commands INTEGER DEFAULT 0,
-            classes_tried INTEGER DEFAULT 0,
-            pets_owned INTEGER DEFAULT 0,
-            wheel_spins INTEGER DEFAULT 0,
-            quests_done INTEGER DEFAULT 0,
-            confessions_sent INTEGER DEFAULT 0,
-            level INTEGER DEFAULT 0,
-            best_streak INTEGER DEFAULT 0,
-            commands_used_json TEXT DEFAULT '[]',  -- JSON array des commandes utilisées (pour unique_commands)
-            classes_tried_json TEXT DEFAULT '[]',
-            PRIMARY KEY (guild_id, user_id)
-        )''')
-
-        # Achievements débloqués (1 ligne par unlock)
-        await db.execute('''CREATE TABLE IF NOT EXISTS achievements_unlocked (
-            guild_id INTEGER,
-            user_id INTEGER,
-            achievement_id TEXT,
-            unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, user_id, achievement_id)
-        )''')
 
         # Pets possédés par les membres (1 ligne par pet, plusieurs possibles)
 
         # Log des spins de Daily Wheel (cooldown 24h)
 
-        # Confessions anonymes (auto-incrément, conservées 30j)
-        await db.execute('''CREATE TABLE IF NOT EXISTS confessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            user_hash TEXT,                        -- hash anonymisé (HMAC) — anti-doublon
-            content TEXT,
-            message_id INTEGER,
-            channel_id INTEGER,
-            sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            flagged INTEGER DEFAULT 0
-        )''')
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 42 — World Boss + Daily Riddle + Voice Chaos
         # ═══════════════════════════════════════════════════════════════════
 
-        # World Bosses en cours / passés
-        await db.execute('''CREATE TABLE IF NOT EXISTS world_bosses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            boss_id TEXT,
-            hp INTEGER,
-            max_hp INTEGER,
-            arena_channel_id INTEGER,
-            arena_message_id INTEGER,
-            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            ends_at DATETIME,
-            ended INTEGER DEFAULT 0,
-            victory INTEGER DEFAULT 0
-        )''')
 
-        # Attaquants d'un world boss (un par user)
-        await db.execute('''CREATE TABLE IF NOT EXISTS world_boss_attackers (
-            world_boss_id INTEGER,
-            user_id INTEGER,
-            damage_dealt INTEGER DEFAULT 0,
-            attacks_count INTEGER DEFAULT 0,
-            last_attack_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (world_boss_id, user_id)
-        )''')
-
-        # Daily Riddles : 1 énigme/jour/guild
-        await db.execute('''CREATE TABLE IF NOT EXISTS daily_riddles_log (
-            guild_id INTEGER,
-            day TEXT,                               -- 'YYYY-MM-DD' Europe/Paris
-            riddle_id TEXT,
-            channel_id INTEGER,
-            message_id INTEGER,
-            first_winner_id INTEGER,
-            winner_at DATETIME,
-            answered_count INTEGER DEFAULT 0,
-            PRIMARY KEY (guild_id, day)
-        )''')
         # Phase 251.15 : claim PAR JOUEUR de la consolation d'énigme (anti-spam de la
         # bonne réponse → +50 à chaque clic). 1 ligne = ce joueur a déjà été récompensé
         # pour l'énigme de ce jour. INSERT OR IGNORE + rowcount = paiement unique.
 
-        # Voice Chaos : log des chaos appliqués pour éviter de re-frapper le même vocal
-        await db.execute('''CREATE TABLE IF NOT EXISTS voice_chaos_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            voice_channel_id INTEGER,
-            action_id TEXT,
-            original_name TEXT,
-            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            reverted INTEGER DEFAULT 0
-        )''')
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 43 — Vrais events originaux (Trésor Flash, Rituel, Tag Royale)
         # ═══════════════════════════════════════════════════════════════════
 
-        # Trésor Flash : pop random, fenêtre 60s, premier qui clique gagne
-        await db.execute('''CREATE TABLE IF NOT EXISTS flash_treasures (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            channel_id INTEGER,
-            message_id INTEGER,
-            reward_coins INTEGER,
-            spawned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            expires_at DATETIME,
-            grabbed_by INTEGER,
-            grabbed_at DATETIME,
-            ended INTEGER DEFAULT 0
-        )''')
 
         # owner 2026-06-30 (équité hybride) : qui a déjà reçu le lot de CONSOLATION d'un trésor
         # (1 fois/joueur/trésor). Anti-double + reboot-safe.
 
-        # Rituel du Soir : récap des emojis par jour
-        await db.execute('''CREATE TABLE IF NOT EXISTS evening_rituals (
-            guild_id INTEGER,
-            day TEXT,                       -- 'YYYY-MM-DD'
-            message_id INTEGER,
-            channel_id INTEGER,
-            counts_json TEXT DEFAULT '{}',  -- {"sun": 12, "ok": 5, ...}
-            participants_json TEXT DEFAULT '[]',  -- liste user_ids déjà cliqué
-            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            recap_posted INTEGER DEFAULT 0,
-            PRIMARY KEY (guild_id, day)
-        )''')
-
-        # Tag Royale : chaîne d'invitation hebdomadaire
-        await db.execute('''CREATE TABLE IF NOT EXISTS tag_royale (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            channel_id INTEGER,
-            started_user_id INTEGER,
-            current_level INTEGER DEFAULT 1,
-            chain_users_json TEXT DEFAULT '[]',  -- IDs participants
-            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            last_action_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            ended INTEGER DEFAULT 0,
-            success INTEGER DEFAULT 0
-        )''')
 
         # Anniversaire serveur : éviter de relancer 2× la même année
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 44 — Daily Quest Push (proactif en DM) + tracking pushes
-        # ═══════════════════════════════════════════════════════════════════
-
-        # 1 ligne par (guild, user, day) pour tracker les pushes envoyés
-        await db.execute('''CREATE TABLE IF NOT EXISTS daily_quest_pushes (
-            guild_id INTEGER,
-            user_id INTEGER,
-            day TEXT,                          -- 'YYYY-MM-DD'
-            status TEXT DEFAULT 'pushed',      -- pushed / opened / later / done
-            pushed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            last_action_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            retry_after DATETIME,              -- pour 'later' : quand re-push possible
-            PRIMARY KEY (guild_id, user_id, day)
-        )''')
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 45 — Camouflage de salon + Vocal Spotlight + Compliment
@@ -1757,55 +1204,11 @@ async def db_init():
         # Phase 46 — Alliances + Game Night
         # ═══════════════════════════════════════════════════════════════════
 
-        # Alliances (groupes 2-8 membres, role+channel dynamiques)
-        await db.execute('''CREATE TABLE IF NOT EXISTS alliances (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            name TEXT,
-            emoji TEXT,
-            role_id INTEGER,
-            channel_id INTEGER,
-            leader_id INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            dissolved INTEGER DEFAULT 0,
-            UNIQUE(guild_id, name)
-        )''')
-
-        # Membres d'alliance
-        await db.execute('''CREATE TABLE IF NOT EXISTS alliance_members (
-            alliance_id INTEGER,
-            user_id INTEGER,
-            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            role TEXT DEFAULT 'member',  -- 'leader' | 'member'
-            PRIMARY KEY (alliance_id, user_id)
-        )''')
-
-        # Invitations en attente
-        await db.execute('''CREATE TABLE IF NOT EXISTS alliance_invites (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            alliance_id INTEGER,
-            invited_user_id INTEGER,
-            invited_by INTEGER,
-            sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            expires_at DATETIME,
-            status TEXT DEFAULT 'pending'  -- pending | accepted | refused | expired
-        )''')
 
         # Phase 253 : POINTS DE COMBAT d'alliance. Chaque attaque de boss d'un membre
         # crédite SON alliance → classement + concours. Table dédiée (reset de saison
         # = simple DELETE/UPDATE, sans toucher au schéma des alliances).
 
-        # Game Nights : tracking pour cleanup salons + éviter double creation
-        await db.execute('''CREATE TABLE IF NOT EXISTS game_nights (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            voice_channel_id INTEGER,
-            text_channel_id INTEGER,
-            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            ends_at DATETIME,
-            ended INTEGER DEFAULT 0,
-            prompts_sent INTEGER DEFAULT 0
-        )''')
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 47 — Saisons + Prestige + Factions + Weekly/Monthly quests
@@ -1834,151 +1237,22 @@ async def db_init():
         # Monthly mega quest progress (1 ligne par user/mois)
 
         # ═══════════════════════════════════════════════════════════════════
-        # Phase 48.1 — Analytics + Marketplace + Mention intelligente
-        # ═══════════════════════════════════════════════════════════════════
-
-        # Engagement par type d'event : pour tracker quels jeux marchent
-        await db.execute('''CREATE TABLE IF NOT EXISTS event_engagement (
-            guild_id INTEGER,
-            event_kind TEXT,
-            count_started INTEGER DEFAULT 0,
-            count_participations INTEGER DEFAULT 0,
-            count_completions INTEGER DEFAULT 0,
-            last_run_at DATETIME,
-            PRIMARY KEY (guild_id, event_kind)
-        )''')
-
-        # Préférences de notifications par membre (Phase 48.2)
-        await db.execute('''CREATE TABLE IF NOT EXISTS user_notif_prefs (
-            guild_id INTEGER,
-            user_id INTEGER,
-            prefs_json TEXT DEFAULT '{}',
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
-
-        # ═══════════════════════════════════════════════════════════════════
         # Phase 49 — LORE ÉVOLUTIF + NPCs + MISSIONS
         # ═══════════════════════════════════════════════════════════════════
         # État du lore par serveur (chapitre actuellement actif)
 
-        # Log des prises de parole des NPCs (anti-spam : 1 NPC parle pas plus de X fois/jour)
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_npc_posts_guild_at "
-                "ON npc_posts_log(guild_id, posted_at DESC)"
-            )
-        except Exception:
-            pass
-
-        # Missions scénarisées en cours / passées
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_missions_guild_status "
-                "ON missions(guild_id, status)"
-            )
-        except Exception:
-            pass
 
         # Progression par participant et par étape (unique user_id par step)
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 50 — ROBLOX SPÉCIALISÉ : Speedrun + Studio Tips + Matchmaking
         # ═══════════════════════════════════════════════════════════════════
-        # Soumissions speedrun (pending review staff)
-        await db.execute('''CREATE TABLE IF NOT EXISTS speedrun_submissions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            user_id INTEGER,
-            category_id TEXT,
-            time_seconds REAL,
-            video_url TEXT,
-            notes TEXT,
-            status TEXT DEFAULT 'pending',
-            reviewed_by INTEGER,
-            reviewed_at DATETIME,
-            submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_speedrun_lb "
-                "ON speedrun_submissions(guild_id, category_id, status, time_seconds ASC)"
-            )
-        except Exception:
-            pass
 
-        # Catégories speedrun custom (l'owner peut en ajouter)
-        await db.execute('''CREATE TABLE IF NOT EXISTS speedrun_categories_custom (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            cat_id TEXT,
-            name TEXT,
-            description TEXT,
-            target_seconds INTEGER,
-            active INTEGER DEFAULT 1,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
-
-        # Matchmaking parties (annoncer qu'on joue, d'autres rejoignent)
-        await db.execute('''CREATE TABLE IF NOT EXISTS matchmaking_parties (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            host_id INTEGER,
-            game_id TEXT,
-            game_name TEXT,
-            place_id INTEGER DEFAULT 0,
-            channel_id INTEGER,
-            message_id INTEGER,
-            max_players INTEGER DEFAULT 8,
-            status TEXT DEFAULT 'open',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            expires_at DATETIME
-        )''')
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_party_open "
-                "ON matchmaking_parties(guild_id, status, expires_at)"
-            )
-        except Exception:
-            pass
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS matchmaking_party_members (
-            party_id INTEGER,
-            user_id INTEGER,
-            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (party_id, user_id)
-        )''')
 
         # Catalogue jeux Roblox (owner-managed)
 
         # Updates de jeu (annonces owner avec thread feedback)
 
-        # Spotlight UGC (owner 2026-06-29) : 1 ligne par annonce d'accessoire postée → permet
-        # le « Créateur du mois » (votes ❤️ agrégés par créateur) + le suivi d'intérêt + la vitrine.
-        await db.execute('''CREATE TABLE IF NOT EXISTS ugc_spotlights (
-            guild_id INTEGER,
-            message_id INTEGER,
-            channel_id INTEGER,
-            item_id INTEGER,
-            item_name TEXT,
-            item_url TEXT,
-            image_url TEXT,
-            creator_name TEXT,
-            creator_id INTEGER,
-            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, message_id)
-        )''')
-
-        # Wishlist UGC (bouton « Je le veux ») : 1 ligne par (membre, item).
-        await db.execute('''CREATE TABLE IF NOT EXISTS ugc_wishlist (
-            guild_id INTEGER,
-            user_id INTEGER,
-            item_id INTEGER,
-            item_name TEXT,
-            item_url TEXT,
-            added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, user_id, item_id)
-        )''')
 
         # Logs de tickets REGROUPÉS (owner 2026-06-29) : 1 timeline ÉVOLUTIVE par ticket.
         await db.execute('''CREATE TABLE IF NOT EXISTS ticket_log_events (
@@ -2001,387 +1275,26 @@ async def db_init():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_user "
                          "ON ticket_transcripts(guild_id, user_id)")
 
-        # Studio tips déjà postés (anti-repeat 60j)
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_tip_log_guild_at "
-                "ON studio_tip_posts_log(guild_id, posted_at DESC)"
-            )
-        except Exception:
-            pass
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 51 — COMPÉTITIF : Bingo + Prediction Market + Faction Wars
-        # ═══════════════════════════════════════════════════════════════════
-        # Bingo cards (1 carte/user/mois, cells_json = liste des 25 IDs de défis)
-        try:
-            await db.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_bingo_user_month "
-                "ON bingo_cards(guild_id, user_id, month_year)"
-            )
-        except Exception:
-            pass
-
-        # Predictions (owner crée, members parient, owner résout)
-        await db.execute('''CREATE TABLE IF NOT EXISTS predictions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            title TEXT,
-            description TEXT,
-            deadline DATETIME,
-            status TEXT DEFAULT 'open',
-            outcome TEXT,
-            total_yes_pool INTEGER DEFAULT 0,
-            total_no_pool INTEGER DEFAULT 0,
-            channel_id INTEGER,
-            message_id INTEGER,
-            created_by INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            resolved_at DATETIME
-        )''')
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_pred_status "
-                "ON predictions(guild_id, status, deadline)"
-            )
-        except Exception:
-            pass
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS prediction_bets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            prediction_id INTEGER,
-            user_id INTEGER,
-            choice TEXT,
-            amount INTEGER,
-            placed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            paid_out INTEGER DEFAULT 0
-        )''')
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_pred_bets_user "
-                "ON prediction_bets(prediction_id, user_id)"
-            )
-        except Exception:
-            pass
-
-        # Faction wars (objectif compétitif par saison)
-        try:
-            await db.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_faction_war_season "
-                "ON faction_wars(guild_id, season_id, objective_kind)"
-            )
-        except Exception:
-            pass
-
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 52 — SOCIAL : Shoutouts + Mentor + Confess Replies
-        # ═══════════════════════════════════════════════════════════════════
-        # Shoutouts entre membres
-        await db.execute('''CREATE TABLE IF NOT EXISTS shoutouts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            from_user_id INTEGER,
-            to_user_id INTEGER,
-            category TEXT,
-            reason TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_shoutouts_to "
-                "ON shoutouts(guild_id, to_user_id, created_at DESC)"
-            )
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_shoutouts_from "
-                "ON shoutouts(guild_id, from_user_id, created_at DESC)"
-            )
-        except Exception:
-            pass
-
-        # Mentorat (relation mentor → apprenti)
-        try:
-            await db.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_mentorship_active_app "
-                "ON mentorships(guild_id, apprentice_id) WHERE status='active'"
-            )
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mentorship_mentor "
-                "ON mentorships(guild_id, mentor_id, status)"
-            )
-        except Exception:
-            pass
-
-        # Tâche B.2 : paliers de membres célébrés (anti-doublon PERSISTANT).
-        # 1 ligne par palier atteint → on ne re-célèbre jamais le même cap.
-        await db.execute('''CREATE TABLE IF NOT EXISTS member_milestones (
-            guild_id INTEGER NOT NULL,
-            milestone INTEGER NOT NULL,
-            reached_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, milestone)
-        )''')
-
-        # Confess replies (réponses publiques avec identité)
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_confess_replies "
-                "ON confession_replies(confession_id, created_at)"
-            )
-        except Exception:
-            pass
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 53 — AMBIANCE : Heures dorées + Recap DM + Conversation starters
         # ═══════════════════════════════════════════════════════════════════
-        # Recap DMs envoyés (anti-doublon dimanche)
-        try:
-            await db.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_recap_unique "
-                "ON weekly_recap_log(guild_id, user_id, week_key)"
-            )
-        except Exception:
-            pass
 
-        # Conversation starters log (anti-spam)
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_conv_starter_at "
-                "ON conv_starter_log(guild_id, posted_at DESC)"
-            )
-        except Exception:
-            pass
 
         # Greeting daily log (1 par jour par user)
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 57 — LORE VIVANT : Choix narratifs + Classes RP + Mémoires
         # ═══════════════════════════════════════════════════════════════════
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_narr_votes_open "
-                "ON narrative_votes(guild_id, status, deadline)"
-            )
-        except Exception:
-            pass
 
 
         # Classe RP de chaque membre (1 par guild+user)
-
-        # Mémoires du serveur (événements importants)
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_lore_memories_guild "
-                "ON lore_memories(guild_id, created_at DESC)"
-            )
-        except Exception:
-            pass
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 58 — PONT ROBLOX RÉEL : Update Voting + Achievements + Stats
-        # ═══════════════════════════════════════════════════════════════════
-        await db.execute('''CREATE TABLE IF NOT EXISTS update_votes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            title TEXT,
-            options_json TEXT,
-            status TEXT DEFAULT 'open',
-            deadline DATETIME,
-            channel_id INTEGER,
-            message_id INTEGER,
-            winning_option TEXT,
-            created_by INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            resolved_at DATETIME
-        )''')
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS update_vote_ballots (
-            update_vote_id INTEGER,
-            user_id INTEGER,
-            option_id TEXT,
-            placed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (update_vote_id, user_id)
-        )''')
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS achievement_broadcasts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            user_id INTEGER,
-            game_id TEXT,
-            achievement_name TEXT,
-            description TEXT,
-            posted_by INTEGER,
-            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS game_stats_panels (
-            guild_id INTEGER,
-            game_id TEXT,
-            channel_id INTEGER,
-            message_id INTEGER,
-            players_online INTEGER DEFAULT 0,
-            visits_total INTEGER DEFAULT 0,
-            favorites INTEGER DEFAULT 0,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, game_id)
-        )''')
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 59 — COMPÉTITIF : Ladder Elo + Duels 1v1 + Tournaments + Titles
-        # ═══════════════════════════════════════════════════════════════════
-        await db.execute('''CREATE TABLE IF NOT EXISTS ladder_ratings (
-            guild_id INTEGER,
-            user_id INTEGER,
-            rating INTEGER DEFAULT 1000,
-            wins INTEGER DEFAULT 0,
-            losses INTEGER DEFAULT 0,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (guild_id, user_id)
-        )''')
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_ladder_rating "
-                "ON ladder_ratings(guild_id, rating DESC)"
-            )
-        except Exception:
-            pass
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS pvp_duels (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            challenger_id INTEGER,
-            challenged_id INTEGER,
-            stake_amount INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'pending',
-            winner_id INTEGER,
-            channel_id INTEGER,
-            message_id INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            resolved_at DATETIME
-        )''')
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS user_titles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            user_id INTEGER,
-            title TEXT,
-            awarded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            awarded_by INTEGER,
-            equipped INTEGER DEFAULT 0
-        )''')
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_user_titles_uid "
-                "ON user_titles(guild_id, user_id)"
-            )
-        except Exception:
-            pass
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS tournaments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            title TEXT,
-            category TEXT,
-            max_players INTEGER DEFAULT 8,
-            status TEXT DEFAULT 'recruiting',
-            winner_id INTEGER,
-            channel_id INTEGER,
-            message_id INTEGER,
-            created_by INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS tournament_participants (
-            tournament_id INTEGER,
-            user_id INTEGER,
-            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            eliminated_round INTEGER DEFAULT 0,
-            PRIMARY KEY (tournament_id, user_id)
-        )''')
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 60 — ÉCONOMIE : Heist + Banque + Crafting + Loots uniques
-        # ═══════════════════════════════════════════════════════════════════
-        # Heist events
-        await db.execute('''CREATE TABLE IF NOT EXISTS heists (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            status TEXT DEFAULT 'recruiting',
-            pool_total INTEGER DEFAULT 0,
-            channel_id INTEGER,
-            message_id INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            resolved_at DATETIME
-        )''')
-        await db.execute('''CREATE TABLE IF NOT EXISTS heist_participants (
-            heist_id INTEGER,
-            user_id INTEGER,
-            role TEXT,
-            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            payout INTEGER DEFAULT 0,
-            PRIMARY KEY (heist_id, user_id)
-        )''')
-        # Phase 101 FIX persistance : le tier (small/medium/big) du braquage était gardé
-        # en mémoire (_heist_targets) → un reboot pendant le recrutement le perdait et le
-        # join/resolve retombait sur 'small' (mises payées au prix fort, payout du tier bas).
-        # On le persiste en DB. Migration idempotente (ALTER échoue si la colonne existe déjà).
-        try:
-            await db.execute("ALTER TABLE heists ADD COLUMN target_id TEXT DEFAULT 'small'")
-        except Exception:
-            pass
-
-        # Banque avec intérêts
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_bank_user "
-                "ON user_bank_deposits(guild_id, user_id, withdrawn)"
-            )
-        except Exception:
-            pass
-
-        # Loots uniques (1 exemplaire max au monde, possédable, tradable)
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_unique_loot_owner "
-                "ON unique_loots(guild_id, current_owner_id)"
-            )
-        except Exception:
-            pass
-
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 61 — VIE QUOTIDIENNE : Streak + Avent + Météo + Badges
-        # ═══════════════════════════════════════════════════════════════════
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS advent_calendar (
-            guild_id INTEGER,
-            day INTEGER,
-            user_id INTEGER,
-            claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            reward_coins INTEGER,
-            PRIMARY KEY (guild_id, day, user_id)
-        )''')
 
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 62 — VOIX + SAISONS IRL
         # ═══════════════════════════════════════════════════════════════════
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_voice_log_user "
-                "ON voice_activity_log(guild_id, user_id, joined_at DESC)"
-            )
-        except Exception:
-            pass
 
-        await db.execute('''CREATE TABLE IF NOT EXISTS thematic_voices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            host_id INTEGER,
-            channel_id INTEGER,
-            theme TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            closed_at DATETIME
-        )''')
 
         # Phase 235.5 : vocaux temporaires « Voc Build » (join-to-create) persistés
         # pour le nettoyage au reboot (sinon ils s'accumulaient vides en bas du serveur).
@@ -2393,33 +1306,6 @@ async def db_init():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
 
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 63 — ORIGINALITÉS : Capsules + Hall of Fame + Whispers + ...
-        # ═══════════════════════════════════════════════════════════════════
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_capsule_unlock "
-                "ON time_capsules(guild_id, status, unlock_date)"
-            )
-        except Exception:
-            pass
-
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_hof_cat "
-                "ON hall_of_fame_records(guild_id, category)"
-            )
-        except Exception:
-            pass
-
-        await db.execute('''CREATE TABLE IF NOT EXISTS easter_eggs_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            user_id INTEGER,
-            trigger_word TEXT,
-            triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 64 — SÉCURITÉ + OWNER : Alt detection + Toxicity + Auto slow
@@ -2457,21 +1343,9 @@ async def db_init():
         # Phase 67 — ALLIANCE COMPLÈTE : Trésorerie + Audit log
         # ═══════════════════════════════════════════════════════════════════
 
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_alliance_audit "
-                "ON alliance_audit_log(alliance_id, created_at DESC)"
-            )
-        except Exception:
-            pass
 
         # Marketplace : annonces de vente entre joueurs
 
-        # Index pour les listings actifs
-        try:
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_marketplace_active ON marketplace_listings(guild_id, status, created_at DESC)")
-        except Exception:
-            pass
 
         # ═══════════════════════════════════════════════════════════════════
         # Phase 47.3 — Persistent message cleanup (survie aux redémarrages)
@@ -2497,148 +1371,8 @@ async def db_init():
         except Exception:
             pass
 
-        # Indexes Phase 47
-        for _p47_idx in [
-            "CREATE INDEX IF NOT EXISTS idx_season_progress_season ON season_progress(season_id, points DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_prestige_rank ON user_prestige(guild_id, rank DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_faction_points ON faction_reputation(guild_id, faction_id, points DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_weekly_week ON weekly_quests(week)",
-            "CREATE INDEX IF NOT EXISTS idx_monthly_month ON monthly_quests(month)",
-        ]:
-            try:
-                await db.execute(_p47_idx)
-            except Exception:
-                pass
 
-        # Indexes Phase 46
-        for _p46_idx in [
-            "CREATE INDEX IF NOT EXISTS idx_alliances_active ON alliances(guild_id, dissolved)",
-            "CREATE INDEX IF NOT EXISTS idx_alliance_members_user ON alliance_members(user_id)",
-            "CREATE INDEX IF NOT EXISTS idx_alliance_invites_user ON alliance_invites(invited_user_id, status)",
-            "CREATE INDEX IF NOT EXISTS idx_game_nights_active ON game_nights(guild_id, ended)",
-        ]:
-            try:
-                await db.execute(_p46_idx)
-            except Exception:
-                pass
-
-        # Indexes Phase 45 (idempotent)
-        for _p45_idx in [
-            "CREATE INDEX IF NOT EXISTS idx_camouflage_active ON channel_camouflage(guild_id, reverted, expires_at)",
-            "CREATE INDEX IF NOT EXISTS idx_spotlight_active ON voice_spotlight(guild_id, reverted, expires_at)",
-            "CREATE INDEX IF NOT EXISTS idx_compliments_day ON compliments_log(guild_id, day, from_user_hash)",
-        ]:
-            try:
-                await db.execute(_p45_idx)
-            except Exception:
-                pass
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Phase 44 — INDEXES pour les requêtes hot path
-        # Tous IF NOT EXISTS, idempotents, créés une seule fois au boot
-        # ═══════════════════════════════════════════════════════════════════
-
-        _idx_statements = [
-            # economy : leaderboards / classements (ORDER BY coins|level) sur la
-            # table la plus volumineuse. La PK (guild_id, user_id) ne couvre PAS
-            # ces tris → full scan + sort par guild. Index couvrants additifs.
-            #  - top par pièces : owner_export + /top + luxury tax (ORDER BY coins DESC)
-            "CREATE INDEX IF NOT EXISTS idx_economy_guild_coins "
-            "ON economy(guild_id, coins DESC)",
-            #  - top par niveau : owner_export (ORDER BY level DESC, xp DESC)
-            "CREATE INDEX IF NOT EXISTS idx_economy_guild_level "
-            "ON economy(guild_id, level DESC, xp DESC)",
-            # activity_tracking : ORDER BY last_message DESC sur 200-500 rows
-            "CREATE INDEX IF NOT EXISTS idx_activity_tracking_last "
-            "ON activity_tracking(guild_id, last_message DESC)",
-            # member_activity : ne contient plus que le VOCAL (D3 — messages agrégés
-            # dans member_activity_daily). Index gardés pour les SELECT vocaux.
-            "CREATE INDEX IF NOT EXISTS idx_member_activity_guild_created "
-            "ON member_activity(guild_id, activity_type, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_member_activity_user_ch "
-            "ON member_activity(guild_id, user_id, channel_id, created_at DESC)",
-            # member_activity_daily : agrégat messages — ciblage salon + stats user/jour.
-            "CREATE INDEX IF NOT EXISTS idx_mad_guild_day "
-            "ON member_activity_daily(guild_id, day)",
-            "CREATE INDEX IF NOT EXISTS idx_mad_guild_ch_day "
-            "ON member_activity_daily(guild_id, channel_id, day)",
-            "CREATE INDEX IF NOT EXISTS idx_mad_guild_user_day "
-            "ON member_activity_daily(guild_id, user_id, day)",
-            # wakeup_log : SELECT par guild + cooldown 48h
-            "CREATE INDEX IF NOT EXISTS idx_wakeup_log_guild "
-            "ON wakeup_log(guild_id, last_mentioned_at)",
-            # comeback_dms : SELECT par guild + cooldown 7j
-            "CREATE INDEX IF NOT EXISTS idx_comeback_dms_guild "
-            "ON comeback_dms(guild_id, last_dm_at)",
-            # events : SELECT WHERE guild_id AND ended=0
-            "CREATE INDEX IF NOT EXISTS idx_events_guild_ended "
-            "ON events(guild_id, ended)",
-            # world_boss_attackers : ORDER BY damage_dealt DESC
-            "CREATE INDEX IF NOT EXISTS idx_wb_attackers_dmg "
-            "ON world_boss_attackers(world_boss_id, damage_dealt DESC)",
-            # world_bosses : WHERE guild_id AND ended=0
-            "CREATE INDEX IF NOT EXISTS idx_world_bosses_guild_ended "
-            "ON world_bosses(guild_id, ended)",
-            # flash_treasures : lookup par message_id + cleanup par ended/expires_at
-            "CREATE INDEX IF NOT EXISTS idx_flash_treasures_msg "
-            "ON flash_treasures(message_id)",
-            "CREATE INDEX IF NOT EXISTS idx_flash_treasures_ended "
-            "ON flash_treasures(guild_id, ended, expires_at)",
-            # daily_quest_progress : WHERE guild_id, user_id, day (PK couvre)
-            # mais une vue par day pour cleanup :
-            "CREATE INDEX IF NOT EXISTS idx_daily_quest_day "
-            "ON daily_quest_progress(day)",
-            # voice_chaos_log : cooldown 2h par vocal
-            "CREATE INDEX IF NOT EXISTS idx_voice_chaos_guild_at "
-            "ON voice_chaos_log(guild_id, applied_at)",
-            # achievements_unlocked : WHERE guild_id AND user_id (PK couvre)
-            # daily_riddles_log : SELECT par day
-            "CREATE INDEX IF NOT EXISTS idx_daily_riddles_day "
-            "ON daily_riddles_log(day)",
-            # tag_royale : WHERE guild_id AND ended=0 AND last_action_at
-            "CREATE INDEX IF NOT EXISTS idx_tag_royale_ended "
-            "ON tag_royale(guild_id, ended, last_action_at)",
-            # confessions : cleanup par sent_at
-            "CREATE INDEX IF NOT EXISTS idx_confessions_sent "
-            "ON confessions(guild_id, sent_at)",
-            # daily_quest_pushes : cleanup par day
-            "CREATE INDEX IF NOT EXISTS idx_quest_pushes_day "
-            "ON daily_quest_pushes(day)",
-        ]
-        for stmt in _idx_statements:
-            try:
-                await db.execute(stmt)
-            except Exception as ex:
-                print(f"[DB INDEX] {stmt[:60]}... → {ex}")
-
-        # Migration : ajoute colonnes manquantes à player_event_stats si DB existe déjà
-        try:
-            async with db.execute('PRAGMA table_info(player_event_stats)') as cur:
-                cols = [r[1] for r in await cur.fetchall()]
-            if 'duels_won' not in cols:
-                await db.execute('ALTER TABLE player_event_stats ADD COLUMN duels_won INTEGER DEFAULT 0')
-            if 'duels_lost' not in cols:
-                await db.execute('ALTER TABLE player_event_stats ADD COLUMN duels_lost INTEGER DEFAULT 0')
-            if 'personal_events_completed' not in cols:
-                await db.execute('ALTER TABLE player_event_stats ADD COLUMN personal_events_completed INTEGER DEFAULT 0')
-            # Phase 113 : compteurs Swap/Auction/Craft
-            if 'swaps_done' not in cols:
-                await db.execute('ALTER TABLE player_event_stats ADD COLUMN swaps_done INTEGER DEFAULT 0')
-            if 'auctions_sold' not in cols:
-                await db.execute('ALTER TABLE player_event_stats ADD COLUMN auctions_sold INTEGER DEFAULT 0')
-            if 'auctions_won' not in cols:
-                await db.execute('ALTER TABLE player_event_stats ADD COLUMN auctions_won INTEGER DEFAULT 0')
-            if 'refines_success' not in cols:
-                await db.execute('ALTER TABLE player_event_stats ADD COLUMN refines_success INTEGER DEFAULT 0')
-        except Exception:
-            pass
         
-        # Ajouter colonne message_count si elle n'existe pas
-        async with db.execute('PRAGMA table_info(economy)') as cursor:
-            cols = [r[1] for r in await cursor.fetchall()]
-        if 'message_count' not in cols:
-            try: await db.execute('ALTER TABLE economy ADD COLUMN message_count INTEGER DEFAULT 0')
-            except: pass
         
         # ═══════════════ TABLES DÉTECTION COMPTES SECONDAIRES ═══════════════
         # Table pour stocker les relations de comptes secondaires détectés
@@ -2860,10 +1594,6 @@ async def set_strikes(gid, uid, count, last_at):
 # ── anniversaires ─────────────────────────────────────────────────────────────
 
 
-
-
-
-
 async def list_birthdays(gid):
     """Retourne { str(user_id): 'MM-DD' } pour la guilde.
 
@@ -2971,8 +1701,6 @@ async def list_creator_links(gid):
     except Exception as ex:
         print(f"[list_creator_links] {ex}")
     return out
-
-
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3435,7 +2163,6 @@ async def cfg(gid):
         # owner 2026-06-30 : célébration RICHE des boosts (remercier + informer sans mendier +
         # célébrer les paliers de niveau). Actif par défaut, salon auto si boost_channel non réglé.
         'boost_celebrate': True,           # 0 = désactive toute la célébration de boost
-        'boost_reward_coins': 1000,        # 🪙 offerts au booster en remerciement (0 = aucun)
         # owner 2026-07-17 : quand un membre ARRÊTE de booster (« on descend »), nudge GENTIL 1×/jour
         # citant le niveau à risque + les avantages (serveur ET boosteurs). Actif par défaut.
         'boost_rally_enabled': True,       # 0 = désactive le nudge à la baisse de boost
@@ -3445,25 +2172,6 @@ async def cfg(gid):
         'creator_channel': 0,              # salon destination
         'creator_keyword': '',             # filtre mot-clé (optionnel)
         'creator_links': {},               # { str(user_id): [ {platform, url, last_post_id} ] }
-        # Spotlight UGC (owner 2026-06-29) : annonce ÉVÉNEMENT + ping à chaque nouvel accessoire.
-        'ugc_spotlight_enabled': 1,        # poster une annonce pingée pour chaque nouvel UGC
-        'ugc_creator_role': 0,             # rôle 🎨 Créateur UGC (opt-out, NON mentionnable par @everyone)
-        'ugc_fans_role': 0,                # rôle 🛒 Collectionneur UGC (audience — owner 2026-06-30 : DÉFAUT pour TOUS, opt-out)
-        'ugc_fans_default_all': 1,         # 1 = tout le monde a le rôle Collectionneur par défaut (auto-arrivée + backfill)
-        'ugc_ping_gap_min': 90,            # anti-rafale : minutes mini entre 2 pings du rôle (0 = pinger chaque item)
-        'ugc_info_msg': 0,                 # id du message d'info sticky du salon (explique le ping + opt-out)
-        'season_race_enabled': 1,          # board « Course de Saison » (classement live dans le hub)
-        'season_race_msg': 0,              # id du message sticky du board (édité en place)
-        'flash_streak_enabled': 0,         # équité (owner 2026-06-30) : bonus de streak trésor flash OFF (récompensait le spam de clics)
-        # Équité HYBRIDE (owner 2026-06-30) : le 1er garde le gros lot, mais ceux qui cliquent juste
-        # après reçoivent un PETIT lot de consolation (une fois). Le ressenti « course » reste.
-        'flash_consolation_sec': 15,       # fenêtre (s) après la prise pendant laquelle on peut avoir la consolation (0 = off)
-        'flash_consolation_pct': 20,       # % du lot de base donné en consolation
-        'flash_consolation_min': 50,       # 🪙 minimum garanti de consolation
-        # Anti-surping (owner 2026-06-30) : pinger DE MOINS EN MOINS. @Tous réservé aux temps forts rares.
-        'event_ping_global_min': 360,      # min minutes entre 2 pings @Tous (tous types) — déf 6 h
-        'event_ping_type_hours': 24,       # un même TYPE ne re-ping @Tous qu'1×/N h — déf 24 h
-        'event_notify_min_minutes': 60,    # cadence légère du 🔔 par-type (opt-in) — déf 1×/h
         # Dégradation crescendo des récidivistes (owner 2026-06-30) — restriction PERSISTANTE et progressive.
         'recidivism_enabled': 1,           # 1 = restreindre auto les récidivistes chroniques (score 90j)
         'recidivism_t1': 3,                # seuil palier 🟡 Surveillé (plus d'images + cooldown léger)
@@ -3473,9 +2181,6 @@ async def cfg(gid):
         'recidivism_cd2': 30,              # cooldown messages (s) palier 2
         'recidivism_cd3': 60,              # cooldown messages (s) palier 3
         'recidivism_role': 0,              # id du rôle « 🔇 Restreint (auto) » (non-hoisté)
-        'ugc_creator_month_role': 0,       # rôle 🏆 Créateur UGC du Mois (gagnant des votes ❤️)
-        'member_milestone_enabled': 1,     # annonce festive aux paliers de membres (100/250/500…)
-        'member_milestone_channel': 0,     # salon des paliers (0 = système/auto)
         # Phase 26.3 : logs configurables — exclusions de rôles par event_type
         'log_role_exclusions': {},         # { event_type_str: [role_id, ...] }
         # Phase 28.2 : Anti-raid
@@ -3500,7 +2205,6 @@ async def cfg(gid):
         'welcome_lifetime_minutes': 60,
         # owner 2026-06-30 : INTERNATIONAL — ajoute auto une réaction 🌐 sur les annonces (ping
         # @everyone ou salon d'annonces) → n'importe qui la lit dans sa langue en 1 clic. Off = 0.
-        'i18n_announce_react': 1,
         'goodbye_enabled': False,
         'goodbye_channel': 0,
         'goodbye_message': "😢 {user_name} a quitté le serveur. À bientôt peut-être !",
@@ -3510,33 +2214,18 @@ async def cfg(gid):
         'birthday_role': 0,                  # rôle donné le jour J
         'birthday_message': "🎂 Joyeux anniversaire {user} ! 🎉 Toute l'équipe te souhaite une belle journée !",
         'birthdays': {},                     # { str(user_id): "MM-DD" }
-        # Phase 30 : Système d'événements
-        'event_enabled': False,
-        'event_auto_interval_hours': 6,       # auto-trigger tous les N heures (0 = manuel uniquement) - Phase 35: 24h→6h
-        'event_difficulty': 100,              # 50-500, 100 = normal
-        'event_duration_min': 30,             # boss s'enfuit après N minutes
-        'event_coin_multiplier': 1.0,         # multiplicateur récompenses
-        'event_arena_channel_name': '⚔️-arène-du-boss',  # nom du salon créé
-        'event_log_channel': 0,                # logs des events (recap)
-        'event_last_run': '',                  # ISO timestamp dernière event
         # Phase 35 : plages horaires actives (timezone France par défaut)
-        'event_active_hours_start': 10,       # début fenêtre active (heure locale TZ)
-        'event_active_hours_end': 23,         # fin fenêtre active (exclusive)
         'event_timezone': 'Europe/Paris',     # TZ pour calcul des heures actives
         # ── CONTRÔLES SERVEUR (owner 2026-06-14) — fenêtres horaires (heure FR) ──
         'night_mode_enabled': True,           # #1 : couper les pings d'event la nuit
         'night_mode_start': 23,               # début nuit (heure FR, traverse minuit)
         'night_mode_end': 8,                  # fin nuit (heure FR)
-        'entraide_voice_hours_enabled': True, # #3 : pas de vocal d'entraide la nuit
         'ticket_hours_enabled': True,         # #4 : restriction horaire création tickets (07-12/13-22h30)
         'night_slowmode_sec': 0,              # #1/#2 : slowmode (s) sur salons chat la nuit (0=off)
         'support_status_channel': 0,          # #2 : salon dont le topic = statut support ouvert/fermé
         'tickets_per_day': 0,                 # #5 : quota tickets/jour/personne (0=illimité)
-        'entraide_per_day': 0,                # #6 : quota demandes d'entraide/jour/personne (0=illimité)
         'newaccount_gate_days': 0,            # #9 : compte Discord < N jours → bloqué (ticket/entraide) (0=off)
-        'controls_min_level': 0,              # #11 : niveau de jeu mini pour ticket/entraide (0=off)
         # ── MISE EN AVANT DU VOCAL (owner 2026-06-15) ──
-        'vocal_recognition_enabled': True,    # bloc « Rois & Reines du Vocal » dans l'annonce hebdo + titre mensuel « Voix du serveur »
         # ── ANTI-NUKE + GARDE WEBHOOKS (audit 2026-06-14) ──
         'antinuke_enabled': True,             # suppression massive salons/rôles par 1 acteur → réponse
         'antinuke_threshold': 4,              # nb de suppressions du MÊME acteur…
@@ -3545,58 +2234,10 @@ async def cfg(gid):
         'antinuke_perm_guard': 1,             # owner 2026-06-27 : perm DANGEREUSE ajoutée à un rôle par un non-fondateur → révoquée + alerte
         'webhook_guard_enabled': True,        # alerte owner si un non-owner crée un webhook
         'webhook_autodelete': 1,              # owner 2026-06-21 #5 : auto-suppr. webhook créé par un non-admin
-        # Phase 31 : extensions du système d'événements
-        'event_combo_enabled': True,           # combos communautaires actifs
-        'event_progressive_enabled': True,     # difficulté progressive
-        'event_tier_roles_enabled': False,     # créer/donner les rôles de rang auto (event-based)
-        'event_shop_enabled': True,            # boutique d'événement active
-        'event_shop_seed_week': 0,             # numéro de semaine du shop courant
-        'event_last_duration_min': 0,          # durée du dernier event (pour progressive)
-        'event_last_victory': False,
-        # Phase 32 : types d'événements activés (auto-scheduler choisit aléatoirement parmi)
-        'event_type_boss_enabled': True,
-        'event_type_treasure_enabled': True,
-        'event_type_quiz_enabled': True,
-        # Phase 39 : notifications événements (2 tiers opt-in)
-        # Les rôles sont auto-créés à la 1ère utilisation de /notify
-        'notify_role_important_id': 0,  # ping seulement pour boss raids
-        'notify_role_all_id': 0,        # ping pour TOUS les events
-        # Phase 33 : événements personnels (DM-style via ping+button → ephemeral)
-        'personal_events_enabled': True,
-        'personal_events_interval_min': 20,  # Phase 35: 30→20 (plus fréquent)
-        'personal_events_per_user_cooldown_h': 4,  # même user pas plus d'1/4h
-        'personal_events_max_per_hour': 15,  # Phase 35: 10→15 (plus de débit serveur)
-        # Phase 33 : PvP duels
-        'pvp_enabled': True,
-        'pvp_min_kills_required': 0,  # minimum kills lifetime pour pouvoir dueler
-        'pvp_cooldown_min': 60,        # 1 duel par user par heure
-        'pvp_max_bet': 5000,            # mise max en coins
         # Phase 158 : salons sécurité configurables (au lieu d'auto-créer)
         # 0 = désactivé. Owner configure via /configure → Logs → Salons sécurité.
         'honeypot_channel_id': 0,
         'staff_sanction_channel_id': 0,
-        # Phase 163.4 : salon watch party live (Twitch/YouTube créateur)
-        # 0 = panel non posté (mais le buff XP×2 reste actif quand même)
-        'stream_watch_channel_id': 0,
-        # Phase 166.4 : salon spotlight (⭐ 5+ → republie)
-        # 0 = désactivé. Owner configure via /configure
-        'spotlight_channel_id': 0,
-        'spotlight_threshold': 5,
-        # Phase 169 : salon combat permanent (mobs, marchand, invasion)
-        # 0 = pas configuré → fallback boss arena si active, sinon skip.
-        # Owner configure via /configure → Logs → Salons sécurité.
-        'combat_arena_channel_id': 0,
-        # Phase 235.10 : salon PERMANENT et VISIBLE « ⚔️-combat » où s'affichent
-        # TOUS les combats (boss/world boss/climax/mob/invasion). Créé+suivi une
-        # fois → visible pour toujours. 0 = pas encore créé.
-        'combat_channel_id': 0,
-        # Tâche B.2 : COUNTDOWN SORTIE Roblox (contenu DISCORD, pas une édition du jeu).
-        # Date configurée par l'OWNER. 0 = aucune date → la tuile countdown ne s'affiche
-        # PAS et le badge Pionnier n'est pas décerné (fail-safe : rien ne se passe).
-        'release_countdown_ts': 0,         # epoch (s) UTC de la sortie ; 0 = désactivé
-        'release_countdown_label': 'la sortie',   # libellé court affiché ("la sortie", "Abylumis", …)
-        'release_announce_channel': 0,     # salon chatty où poster L'ANNONCE à l'échéance (0 = auto-pick)
-        'release_announced': 0,            # anti-doublon : 1 = annonce déjà postée (ne pas reposter)
         # Entraide multi-gaming : salon où sont postées les demandes d'aide + catégorie
         # où créer les vocaux temporaires. 0 = NON CONFIGURÉ → la feature est OFF
         # (fail-safe : rien ne se passe, aucun post, aucun vocal). Owner les règle
@@ -3605,11 +2246,6 @@ async def cfg(gid):
         'entraide_request_channel': 0,     # salon texte des demandes d'aide (0 = OFF)
         'entraide_voice_category': 0,      # catégorie où créer les vocaux temp (0 = pas de vocal)
         'entraide_autodetect_enabled': True,  # détecte les appels à l'aide en chat (langage naturel) → nudge
-        'entraide_unanswered_watch_enabled': True,  # veilleur : nudge si une vraie question reste sans réponse ~10 min
-        # Traduction à la demande (réaction 🌐). True = un membre peut traduire d'un
-        # clic le message d'un autre (texte envoyé à MyMemory, tiers — OPT-IN par
-        # réaction). False = la réaction 🌐 ne fait rien. Toggle dans EntraidePanelV2.
-        'translate_enabled': True,
         #  ⚠️ LA DIRECTION — 22/09/2026. Ces deux clés étaient LUES par
         #  `/mod direction` et par rien d'autre : aucune interface ne les
         #  écrivait, elles valaient donc 0 pour toujours et la commande
@@ -3781,74 +2417,6 @@ _CHATTY_BLACKLIST_KEYWORDS = (
 )
 
 
-# Phase 177 : cache court (10s) des salons "occupés" par un event de combat
-# dédié — évite de marteler la DB depuis _is_chatty_channel (appelé en boucle).
-_busy_combat_cache: dict = {}  # guild_id -> (timestamp, set[channel_id])
-
-
-async def _busy_combat_channel_ids(guild_id: int) -> set:
-    """Phase 177 : salons actuellement RÉSERVÉS par un event de combat dédié.
-
-    Couvre : arène de Boss Raid (events), salons de mobs vivants (mob_spawns),
-    salons de boss du jour actifs (daily_boss_events). Ces salons sont dédiés à
-    LEUR event → aucun autre event (mystery box, énigme, cadeau...) ne doit y
-    apparaître. Résultat mis en cache 10s.
-    """
-    try:
-        now_ts = time.time()
-    except Exception:
-        now_ts = 0
-    cached = _busy_combat_cache.get(guild_id)
-    if cached and now_ts and (now_ts - cached[0] < 10):
-        return cached[1]
-
-    ids: set = set()
-    try:
-        async with get_db() as db:
-            # Boss Raid (arène dédiée + serveur masqué)
-            try:
-                async with db.execute(
-                    "SELECT arena_channel_id FROM events "
-                    "WHERE guild_id=? AND ended=0 AND arena_channel_id > 0",
-                    (guild_id,),
-                ) as cur:
-                    for r in await cur.fetchall():
-                        if r[0]:
-                            ids.add(int(r[0]))
-            except Exception:
-                pass
-            # Mobs vivants (mob_hunts)
-            try:
-                async with db.execute(
-                    "SELECT DISTINCT channel_id FROM mob_spawns "
-                    "WHERE guild_id=? AND status='alive' "
-                    "AND datetime(expires_at) > datetime('now')",
-                    (guild_id,),
-                ) as cur:
-                    for r in await cur.fetchall():
-                        if r[0]:
-                            ids.add(int(r[0]))
-            except Exception:
-                pass
-            # Boss du jour actifs (daily_bosses)
-            try:
-                async with db.execute(
-                    "SELECT DISTINCT channel_id FROM daily_boss_events "
-                    "WHERE guild_id=? AND status='alive' AND channel_id > 0",
-                    (guild_id,),
-                ) as cur:
-                    for r in await cur.fetchall():
-                        if r[0]:
-                            ids.add(int(r[0]))
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    _busy_combat_cache[guild_id] = (now_ts, ids)
-    return ids
-
-
 async def _is_chatty_channel(channel, *, allow_announce: bool = False) -> bool:
     """Garantit qu'un salon est OK pour poster un event PUBLIC.
 
@@ -3912,38 +2480,12 @@ async def _is_chatty_channel(channel, *, allow_announce: bool = False) -> bool:
     if not perms_default.send_messages:
         return False
 
-    # 8. Arena d'un event en cours
-    try:
-        cache = _active_events_cache.get(channel.guild.id) if '_active_events_cache' in globals() else None
-        if cache and cache.get('arena_channel_id') == channel.id:
-            return False
-    except Exception:
-        pass
-
-    # 9. Phase 177 : salon RÉSERVÉ par un event de combat dédié (boss raid,
-    #    mob, boss du jour) → aucun autre event ne doit s'y superposer.
-    try:
-        busy = await _busy_combat_channel_ids(channel.guild.id)
-        if channel.id in busy:
-            return False
-    except Exception:
-        pass
-
     return True
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📺 SÉLECTEURS PAGINÉS UNIVERSELS
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
 
 
 # Ancien système gardé pour compatibilité
@@ -4066,9 +2608,6 @@ def _radie_pseudo(membre) -> str:
     return f"⛔ RADIÉ-{int(getattr(membre, 'id', 0)) % 10000:04d}"[:32]
 
 
-_RADIE_PSEUDO = _radie_pseudo
-
-
 def _radie_overwrite():
     """DENY TOTAL appliqué au rôle « 🚫 Radié » (vue/écriture/réactions/threads/vocal/
     historique/slash). Factorisé pour que _ensure_radie_role ET on_guild_channel_create
@@ -4078,36 +2617,6 @@ def _radie_overwrite():
         add_reactions=False, create_public_threads=False, create_private_threads=False,
         send_messages_in_threads=False, connect=False, speak=False,
         use_application_commands=False)
-
-
-async def _ensure_radie_role(guild):
-    """Trouve/crée le rôle « 🚫 Radié » et pose un DENY TOTAL (view/écriture/vocal/historique)
-    sur TOUS les salons (throttle anti-429, idempotent : saute si déjà posé). Renvoie le rôle
-    ou None."""
-    role = None
-    try:
-        for r in guild.roles:
-            if (r.name or "") == _RADIE_ROLE_NAME:
-                role = r
-                break
-        if role is None:
-            role = await guild.create_role(
-                name=_RADIE_ROLE_NAME, color=discord.Color.dark_red(),
-                reason="Radiation totale (/off)")
-        ow = _radie_overwrite()
-        for ch in list(guild.channels):
-            try:
-                cur = ch.overwrites_for(role)
-                if cur.view_channel is False and cur.send_messages is False and cur.connect is False:
-                    continue  # déjà posé → on saute (anti-429)
-                await ch.set_permissions(role, overwrite=ow, reason="Radiation totale (/off)")
-                await asyncio.sleep(0.3)
-            except Exception:
-                pass
-        return role
-    except Exception as ex:
-        print(f"[_ensure_radie_role] {ex}")
-        return role
 
 
 off_group = app_commands.Group(
@@ -5212,14 +3721,6 @@ bot.tree.add_command(bouclier_group)
 # RSS.app). Réservé admin via Intégrations. Le bot poll, dédup et poste les nouveaux posts.
 
 
-
-
-
-
-
-
-
-
 # ═══════════════ /signaler — SIGNALEMENT MEMBRE (owner 2026-06-27, protection mineurs) ═══════════════
 # Le bot ne voit PAS les MP → un membre (surtout un jeune) peut signaler une arnaque, du grooming
 # ou un malaise reçu en privé. Le signalement part DISCRÈTEMENT au staff (salon Sécurité), jamais
@@ -5341,15 +3842,9 @@ async def signaler_vocal_cmd(i: discord.Interaction, membre: discord.Member, rai
 # qui restent/sont actifs comptent (gate côté referrals.py). 100% dans les règles Discord.
 
 
-
-
 # ═══════════════ /promo — PROMOTION EXTERNE (owner 2026-06-29) ═══════════════
 # Suivi par-annuaire (lien d'invit unique → on lit .uses) + checklist + kit de fiche.
 # ZÉRO bot ajouté : tout via NOTRE bot. Le bump reste manuel/humain (cf. /rappel-bump).
-
-
-
-
 
 
 _DISBOARD_ID = 302050872383242240
@@ -5407,10 +3902,6 @@ async def bump_reminder_task():
 async def _before_bump_reminder():
     await bot.wait_until_ready()
     await asyncio.sleep(30)
-
-
-
-
 
 
 # ═══════════════ RAPPORT SÉCURITÉ HEBDOMADAIRE (owner 2026-06-21 #12) ═══════════════
@@ -6021,8 +4512,6 @@ async def _check_staff_sanction_rate(g, actor_id, action):
         pass
 
 
-
-
 async def sanction(m, action, dur, reason, g, actor_id=None):
     # ═══ PIPELINE INFRACTIONS AUTOMATIQUES (owner 2026-06-26) ═══
     # Toute sanction AUTOMATIQUE (actor_id is None : anti-invite/lien/scam/spam/mention/caps…)
@@ -6077,16 +4566,6 @@ async def sanction(m, action, dur, reason, g, actor_id=None):
         if _floor:
             return True
 
-        # ═══ PRIVATION VIP / RÉCOMPENSES D'ACTIVITÉ (owner 2026-07-12) ═══
-        # Une VRAIE sanction (mute/kick/ban — auto OU staff) coûte les récompenses gagnées par
-        # l'activité : 1 mois, puis 2, 4, 8, jusqu'à 1 an si ça recommence. Objectif owner : que
-        # spammer pour farmer le VIP n'ait plus aucun intérêt.
-        # ⚠️ Les simples suppressions/rappels (action='delete') n'arrivent JAMAIS ici → une
-        # maladresse (lien collé) ne coûte RIEN (règle n°1 : ne jamais punir un innocent).
-        # Le floor ci-dessus garantit qu'on n'est ici QUE pour un membre NON protégé
-        # (ni super-owner, ni owner du serveur, ni immunisé si c'est automatique).
-        # (La privation des récompenses VIP appliquée ici est partie avec le module
-        #  vip_exclusion : le VIP lui-même est supprimé du serveur.)
 
     try:
         if action in ('kick', 'ban'):
@@ -6639,13 +5118,6 @@ def get_gif_type(msg):
         if att.filename.lower().endswith('.gif'): return 'gif'
     return None
 
-def normalize(t):
-    t = t.lower()
-    t = unicodedata.normalize('NFD', t)
-    t = ''.join(c for c in t if unicodedata.category(c) != 'Mn')
-    for l, vs in LEET.items():
-        for v in vs: t = t.replace(v, l)
-    return t
 
 def check_badwords(ct, words, whitelist=None):
     """Vérifie si le message contient des mots interdits (mots entiers uniquement).
@@ -8313,17 +6785,6 @@ async def _access_gate_reason(member, c):
                 if age_days < days:
                     return (f"🛡️ Ton compte Discord est trop récent ({age_days} j) — cette action "
                             f"est réservée aux comptes de **{days} jours** ou plus. Reviens un peu plus tard 🙏")
-        except Exception:
-            pass
-        # #11 — niveau de jeu minimum
-        try:
-            minlvl = int(c.get('controls_min_level', 0) or 0)
-            if minlvl > 0 and g is not None:
-                eco = await get_user_economy(g.id, uid)
-                lvl = int((eco or {}).get('level', 1) or 1)
-                if lvl < minlvl:
-                    return (f"📈 Action réservée au **niveau {minlvl}+** (tu es niveau {lvl}). "
-                            f"Joue un peu pour la débloquer 🙂")
         except Exception:
             pass
         return ""
@@ -10176,8 +8637,6 @@ PROTS = [
 # (`raid_tracker` a disparu avec l'ancien anti-raid : le tracker en service est
 #  `_recent_joins`, utilisé par _handle_antiraid_join.)
 
-# Cache pour les détections de comptes secondaires
-alt_account_cache = {}  # {guild_id: {user_id: {'main_account': user_id, 'alts': [user_ids], 'reasons': []}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🛡️ BASES DE DONNÉES DE PROTECTION
@@ -10373,11 +8832,7 @@ def check_masked_links(content):
                     return True, f"Lien masqué: [{disp_dom_clean}] → {real_domain}"
     return False, None
 
-# Cache pour détecter les comportements suspects
-compromised_cache = {}  # {user_id: {'messages': [], 'flags': 0}}
 
-# Initialiser les variables globales avec les nouvelles bases
-PHISHING = PHISHING_DOMAINS
 SCAM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in COMPROMISED_PATTERNS]
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -10858,19 +9313,6 @@ async def scan_all_members_for_alts(guild):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 class _RgpdPurgeModal(Modal, title="🔒 Effacement RGPD d'un membre"):
     """Saisie de l'ID + confirmation explicite, puis purge via gdpr.purge_user. Defer-first
     (la purge balaie ~280 tables → on ne dépasse jamais la fenêtre 3 s)."""
@@ -11099,7 +9541,7 @@ _CONFIG_SECTIONS = [
     ("antiraid",    "⚔️", "Anti-Raid",         "Vague d'arrivées · âge de compte minimum · riposte"),
     ("tickets",     "🎫", "Tickets",           "Panneaux d'ouverture · rôle staff · logs · blacklist"),
     ("logs",        "📋", "Logs & Audit",      "Un salon · toutes les catégories d'événements"),
-    ("roblox",      "🎮", "Veille Roblox",     "Nouveaux accessoires · passages collectionnables · indices"),
+    ("roblox",      "📰", "Actualités Roblox", "Blog, forum et notes de version · salon de publication"),
     ("social",      "📡", "Réseaux sociaux",   "YouTube · Twitch · X · TikTok · Instagram → salon d'annonces"),
     ("rellseas",    "🎭", "Rellseas",          "Qui peut donner, retirer, vérifier l'activité"),
     ("rgpd",        "🔒", "Données & RGPD",    "Droit à l'effacement (art. 17) · rétention"),
@@ -11359,43 +9801,6 @@ class MainPanelV2(LayoutView):
                     await i.response.defer()
             except Exception:
                 pass
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  🎮 JEUX & ÉCONOMIE — Panel V2 (Phase 4.2)
-#
-#  Hub jeux : giveaways + game deals + (récompenses).
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  💎 BOOST CONFIG PANEL (Phase 26.1)
-#  Configuration des messages affichés quand un membre boost le serveur.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  AntiRaidPanelV2 — riposte aux vagues d'arrivées (clés antiraid_*).
-#  Ouvert par /configure · « ⚔️ Anti-Raid ».
-#  (Les 4 autres panneaux de ce bloc — permissions, accueil, rôles-réaction,
-#   anniversaires — relevaient de sections supprimées : purge 08/2026.)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-import permissions as perms_mod
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -11756,32 +10161,6 @@ class _AntiRaidActionPickerV2(LayoutView):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  👋 WELCOME / GOODBYE PANEL (Phase 28.3)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  🎫 REACTION ROLES PANEL (Phase 28.4)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  🎂 BIRTHDAY PANEL (Phase 28.5)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 #  🎪 PHASE 30 — SYSTÈME D'ÉVÉNEMENTS COMMUNAUTAIRES
 #
 #  Permet à l'owner de déclencher (auto ou manuel) des Boss Raids :
@@ -11793,63 +10172,6 @@ class _AntiRaidActionPickerV2(LayoutView):
 #  - SÉCURITÉ : badwords/anti-spam/everyone restent actifs pendant l'event
 #  - Owner et admins voient toujours tous les salons (jamais affectés)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ── État runtime des événements (en plus de la DB) ──
-# Cache rapide : { guild_id: {event_id, arena_channel_id, arena_message_id} }
-_active_events_cache: dict[int, dict] = {}
-# Phase 235.13 : WARM-UP pré-combat. Le boss est INVULNÉRABLE pendant les premières
-# secondes après le spawn → le temps que les gens reçoivent le ping, lisent le loot,
-# s'équipent et rejoignent un vocal. { event_id: timestamp_fin_warmup }.
-_BOSS_WARMUP_SECONDS = 25
-_boss_warmup_until: dict[int, float] = {}
-# Phase 235.16 : warm-up World Boss (clé = wb_id) — même principe, namespace séparé
-# (les ids des tables events / world_bosses peuvent coïncider).
-_wb_warmup_until: dict[int, float] = {}
-# Rate-limit des attaques : { (guild_id, user_id): last_ts }
-_attack_cooldown: dict[tuple[int, int], float] = {}
-# Phase 31 : historique attaques récentes par event (pour combos)
-# { event_id: [(timestamp, user_id), ...] } — purgé > 10s
-_recent_attacks_log: dict[int, list[tuple]] = {}
-# Phase 31 : compteurs in-memory pour combos par event
-_event_combo_count: dict[int, int] = {}
-# Phase 31 : crit streaks par (guild, user)
-_crit_streaks: dict[tuple[int, int], int] = {}
-
-
-def _is_event_active_time(c: dict) -> bool:
-    """Phase 35 : retourne True si on est dans la fenêtre horaire active (TZ configurée).
-
-    Par défaut : 10h-23h Europe/Paris.
-    Pendant la nuit, aucun event auto n'est lancé (les gens dorment).
-    """
-    try:
-        start_h = int(c.get('event_active_hours_start', 10) or 10)
-        end_h = int(c.get('event_active_hours_end', 23) or 23)
-        tz_name = c.get('event_timezone', 'Europe/Paris') or 'Europe/Paris'
-
-        # Fallback si zoneinfo indispo : utiliser UTC + offset estimé
-        if ZoneInfo is None:
-            hour = datetime.now(timezone.utc).hour
-            # Approximation : France = UTC+1 ou UTC+2 selon saison ; on prend +2 (été)
-            hour = (hour + 2) % 24
-        else:
-            try:
-                tz = ZoneInfo(tz_name)
-                hour = datetime.now(tz).hour
-            except Exception:
-                hour = datetime.now(timezone.utc).hour
-
-        # Plage normale : start <= hour < end
-        if start_h <= end_h:
-            return start_h <= hour < end_h
-        else:
-            # Plage qui traverse minuit (ex: 22h-6h)
-            return hour >= start_h or hour < end_h
-    except Exception as ex:
-        print(f"[_is_event_active_time] {ex}")
-        # En cas d'erreur, on autorise (fail-open) pour ne pas casser le système
-        return True
 
 
 def _in_night_window(c: dict) -> bool:
@@ -11875,298 +10197,21 @@ def _in_night_window(c: dict) -> bool:
         return False
 
 
-
-
-async def _is_event_active_hour(guild_id: int) -> bool:
-    """Phase 151 : wrapper async qui prend guild_id, charge cfg + appelle
-    _is_event_active_time. Utilisé par npc_chatter, conv_starter, etc."""
-    try:
-        c = await cfg(guild_id)
-        return _is_event_active_time(c)
-    except Exception as ex:
-        print(f"[_is_event_active_hour] {ex}")
-        return True  # fail-open
-
-
-
-
-
-
-async def _save_inventory(guild_id: int, user_id: int, inv: dict):
-    """Phase 102 : persiste aussi les 4 nouveaux slots.
-    Try/except pour fallback si colonnes pas encore ajoutées."""
-    async with get_db() as db:
-        try:
-            await db.execute(
-                'UPDATE player_inventory SET '
-                'hp=?, max_hp=?, weapon_json=?, armor_json=?, kills=?, total_damage=?, '
-                'helmet_json=?, boots_json=?, accessory_json=?, trinket_json=?, legs_json=?, '
-                'updated_at=CURRENT_TIMESTAMP '
-                'WHERE guild_id=? AND user_id=?',
-                (
-                    int(inv.get('hp', 100)), int(inv.get('max_hp', 100)),
-                    json.dumps(inv.get('weapon', {})), json.dumps(inv.get('armor', {})),
-                    int(inv.get('kills', 0)), int(inv.get('total_damage', 0)),
-                    json.dumps(inv.get('helmet', {})), json.dumps(inv.get('boots', {})),
-                    json.dumps(inv.get('accessory', {})), json.dumps(inv.get('trinket', {})),
-                    json.dumps(inv.get('legs', {})),
-                    guild_id, user_id,
-                ),
-            )
-        except Exception:
-            # Fallback : nouvelles colonnes pas dispo (ALTER TABLE pas appliquée)
-            await db.execute(
-                'UPDATE player_inventory SET hp=?, max_hp=?, weapon_json=?, armor_json=?, '
-                'kills=?, total_damage=?, updated_at=CURRENT_TIMESTAMP '
-                'WHERE guild_id=? AND user_id=?',
-                (
-                    int(inv.get('hp', 100)), int(inv.get('max_hp', 100)),
-                    json.dumps(inv.get('weapon', {})), json.dumps(inv.get('armor', {})),
-                    int(inv.get('kills', 0)), int(inv.get('total_damage', 0)),
-                    guild_id, user_id,
-                ),
-            )
-        await db.commit()
-
-
 # ─────────────────────────── Phase 179 : COFFRE / STASH ───────────────────────────
 # player_inventory = les 6 pièces ÉQUIPÉES. player_stash = la collection qu'on
 # peut équiper à la main. Loot → _acquire_gear (équipe si slot vide, sinon coffre).
 
-_RARITY_RANK = {
-    "commune": 0, "rare": 1, "épique": 2, "epique": 2,
-    "légendaire": 3, "legendaire": 3, "mythique": 4, "divine": 5,
-    "céleste": 6, "celeste": 6, "primordial": 7,
-}
-
-
-
-
-
-
-# ── Phase 217 : VENTE au MARCHAND (système) — PAS de trading joueur↔joueur ──
-# Vendre un objet du coffre = pièces. Valeur selon la rareté, bonifiée par le
-# niveau d'amélioration (+N) et l'enchantement. C'est le SEUL moyen de
-# transformer du stuff en pièces : aucun item ne change jamais de joueur.
-_SELL_VALUE = {
-    "commune": 25, "rare": 80,
-    "épique": 220, "epique": 220,
-    "légendaire": 650, "legendaire": 650,
-    "mythique": 1800, "divine": 5000,
-    "céleste": 12000, "celeste": 12000, "primordial": 30000,
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 # ─────────────────────────── Phase 179b : UI ÉQUIPEMENT ───────────────────────────
-
-_SLOT_META = {
-    'weapon':    ('⚔️', 'Arme'),
-    'armor':     ('🛡️', 'Torse'),
-    'helmet':    ('⛑️', 'Casque'),
-    'legs':      ('🦵', 'Jambières'),
-    'boots':     ('🥾', 'Bottes'),
-    'accessory': ('💍', 'Accessoire'),
-    'trinket':   ('🔮', 'Talisman'),
-}
-
-
-# Phase 235.27 : NIVEAU REQUIS POUR ÉQUIPER. Les items n'ont pas de champ
-# 'level' → on le DÉRIVE de la rareté : plus c'est rare, plus il faut être haut
-# niveau (les meilleures pièces se méritent — cahier des charges owner). Tolère
-# les libellés FR/EN.
-_EQUIP_LEVEL_BY_RARITY = {
-    "commune": 1, "common": 1,
-    "rare": 5,
-    "épique": 12, "epique": 12, "epic": 12,
-    "légendaire": 25, "legendaire": 25, "legendary": 25,
-    "mythique": 40, "mythic": 40,
-    "divine": 60,
-    "céleste": 75, "celeste": 75, "primordial": 90,
-}
-
-
-
-
-
-
-
-
-
-
 
 
 # ───────── Phase 252 : inventaire au propre — déséquiper + familier intégrés ─────────
 
 
-
-_PET_BONUS_LABEL = {
-    'rare_loot': "loot rare", 'boss_damage': "dégâts boss", 'msg_xp': "XP messages",
-    'duel_attack': "attaque PvP", 'wheel_luck': "chance roue", 'global': "tout",
-}
-
-
-
-
-
-
-
-
-# Aide COURTE, phrases simples : quoi utiliser, et pourquoi.
-_INVENTORY_HELP = (
-    "🎒 **Aide — Inventaire & Familiers**\n\n"
-    "**Équiper / déséquiper**\n"
-    "• Menu **⚔️ Équiper** → sors une pièce du coffre.\n"
-    "• Menu **🧤 Déséquiper** → la pièce repart au coffre.\n"
-    "• `🔒 niv.X` = niveau requis (plus c'est rare, plus il faut être haut niveau).\n\n"
-    "**Familier 🐾**\n"
-    "• Menu **🐾 Équiper un familier** → 1 seul actif à la fois.\n"
-    "• En **combat**, clique le bouton **🐾 Familier** : il frappe le boss "
-    "(et te soigne s'il est 💚 passif). 1 fois toutes les 90 s.\n"
-    "• Pour en **obtenir** : gagne des **œufs** dans les events, puis fais-les "
-    "éclore avec **/pet**.\n\n"
-    "**Vendre 💰** → transforme le stuff en trop en 🪙. Aucun échange entre joueurs."
-)
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Phase 251.22 — TEINTES COSMÉTIQUES (#3). Customisation PURE du perso : recolore le
-# panneau /inventory + affiche une ligne « 🎨 Teinte ». ZÉRO stat, ZÉRO éco. Choix
-# gratuit ; quelques teintes prestige réservées par NIVEAU (chase cosmétique, 0 éco).
-# ═══════════════════════════════════════════════════════════════════════════
-COSMETIC_TINTS = [
-    {"key": "none",      "name": "Aucune",      "emoji": "▫️", "color": 0x9B59B6, "min_level": 0},
-    {"key": "ecarlate",  "name": "Écarlate",    "emoji": "🔴", "color": 0xE74C3C, "min_level": 0},
-    {"key": "azur",      "name": "Azur",        "emoji": "🔵", "color": 0x3498DB, "min_level": 0},
-    {"key": "emeraude",  "name": "Émeraude",    "emoji": "🟢", "color": 0x2ECC71, "min_level": 0},
-    {"key": "ambre",     "name": "Ambre",       "emoji": "🟠", "color": 0xE67E22, "min_level": 0},
-    {"key": "amethyste", "name": "Améthyste",   "emoji": "🟣", "color": 0x9B59B6, "min_level": 0},
-    {"key": "onyx",      "name": "Onyx",        "emoji": "⚫", "color": 0x2C2F33, "min_level": 5},
-    {"key": "or",        "name": "Or",          "emoji": "🟡", "color": 0xF1C40F, "min_level": 15},
-    {"key": "prisme",    "name": "Prismatique", "emoji": "🌈", "color": 0xE91E63, "min_level": 25},
-    {"key": "divin",     "name": "Doré-Divin",  "emoji": "✨", "color": 0xF9E79F, "min_level": 40},
-    # Phase 256 Lot 2 — +7 teintes (familles élémentaires). Total 17 ≤ 25 (cap Select OK).
-    # ZÉRO stat / ZÉRO éco ; gate par niveau croissant = chase cosmétique.
-    {"key": "crepuscule","name": "Crépuscule",  "emoji": "🌑", "color": 0x4B0082, "min_level": 8},
-    {"key": "braise",    "name": "Braise",      "emoji": "🔥", "color": 0xE25822, "min_level": 10},
-    {"key": "polaire",   "name": "Polaire",     "emoji": "❄️", "color": 0x48DBFB, "min_level": 12},
-    {"key": "venin",     "name": "Venin",       "emoji": "☠️", "color": 0x6AAB3D, "min_level": 18},
-    {"key": "orage",     "name": "Orage",       "emoji": "⚡", "color": 0xF4D03F, "min_level": 20},
-    {"key": "neant",     "name": "Néant",       "emoji": "🕳️", "color": 0xBE2EDD, "min_level": 30},
-    {"key": "celeste",   "name": "Céleste",     "emoji": "🌠", "color": 0x5DADE2, "min_level": 45},
-]
-_TINT_BY_KEY = {t["key"]: t for t in COSMETIC_TINTS}
-
-
-
-
-
-
-
-
-
-
-# ═══════════════ PRÉRÉGLAGES D'ÉQUIPEMENT — /loadout (#9) ═══════════════
-# DUPE-SAFE PAR CONSTRUCTION : un loadout ne RECRÉE jamais d'item. « load » se contente de
-# RETROUVER l'item voulu dans le coffre (par slot+nom) et d'appeler la primitive atomique
-# anti-dupe `_stash_equip` (qui supprime la ligne de coffre puis équipe, l'ancien gear repart
-# au coffre). Item absent du coffre / non possédé → simplement SAUTÉ (jamais recréé). Donc :
-# impossible de dupliquer, impossible de perdre du stuff (les items ne font que se déplacer).
-_LOADOUT_MAX = 5  # max de préréglages par joueur
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ─────────────────────────── PANEL DE CONFIG ───────────────────────────
-
-# Registre extensible des types d'événements configurables (Phase 1 du hub).
-# Chaque entrée doit pointer vers un module qui APPLIQUE réellement son enabled_cfg,
-# pour que chaque toggle soit fonctionnel. On n'ajoute ici que les events dont la
-# clé est déjà respectée par le scheduler / dispatcher.
-EVENT_TYPE_REGISTRY = [
-    {"key": "boss_engine", "emoji": "⚔️", "label": "Moteur Boss / Trésor / Quiz", "enabled_cfg": "event_enabled", "default": False, "rich_panel": "EventConfigPanelV2"},
-    {"key": "world_boss", "emoji": "🐲", "label": "World Boss", "enabled_cfg": "world_boss_enabled", "default": True},
-    {"key": "voice_chaos", "emoji": "🎤", "label": "Chaos vocal", "enabled_cfg": "voice_chaos_enabled", "default": True},
-    {"key": "flash_treasure", "emoji": "⚡", "label": "Trésor Flash", "enabled_cfg": "flash_treasure_enabled", "default": True},
-    # Phase 191 — interrupteurs réels (toggle seul) des events restants
-    {"key": "daily_boss", "emoji": "👹", "label": "Boss quotidien", "enabled_cfg": "daily_boss_enabled", "default": True},
-    {"key": "mob_hunts", "emoji": "🗡️", "label": "Chasse aux mobs", "enabled_cfg": "mob_hunts_enabled", "default": True},
-    {"key": "dungeon", "emoji": "🏰", "label": "Donjons", "enabled_cfg": "dungeon_enabled", "default": True},
-    {"key": "world_invasion", "emoji": "🌍", "label": "Invasion mondiale", "enabled_cfg": "world_invasion_enabled", "default": True},
-    {"key": "treasure", "emoji": "💎", "label": "Chasse au trésor", "enabled_cfg": "event_type_treasure_enabled", "default": True},
-    {"key": "quiz", "emoji": "🎓", "label": "Quiz", "enabled_cfg": "event_type_quiz_enabled", "default": True},
-    {"key": "mystery_box", "emoji": "📦", "label": "Boîte Mystère", "enabled_cfg": "mystery_box_enabled", "default": True},
-    {"key": "daily_riddle", "emoji": "🧠", "label": "Énigme du jour", "enabled_cfg": "daily_riddle_enabled", "default": True},
-    {"key": "game_night", "emoji": "🎮", "label": "Game Night", "enabled_cfg": "game_night_enabled", "default": True},
-    # Phase 195 — annonce quotidienne calme du planning combat (sans ping, sans bouton)
-    {"key": "daily_agenda", "emoji": "📅", "label": "Programme du jour", "enabled_cfg": "daily_agenda_enabled", "default": True},
-]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # ─────────────────────────── ENGINE — START / END ───────────────────────────
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 32 — Helper commun : préparation de l'arène (snapshot + masquage)
-#  Utilisé par TOUS les types d'événements pour garantir restauration EXACTE.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
 
 
 # ───────────────────────────  Phase 74 : BOSS ARENA V2  ───────────────────────
@@ -12176,227 +10221,23 @@ EVENT_TYPE_REGISTRY = [
 # Tous les phase warning messages sont gérés séparément (Phase 66 cleanup).
 
 
-
-
 # ─────────────────────────── BOUTON ATTAQUE ───────────────────────────
-
-
-
-
-
-# Phase 183 : RIPOSTE du boss + MORT / RÉAPPARITION du joueur (choix owner : ~5 min)
-BOSS_RETAL_CHANCE = 0.35   # proba qu'un coup déclenche une riposte du boss
-RESPAWN_SEC = 300          # délai de réapparition après un K.O. (5 min)
-_player_respawn = {}       # (guild_id, user_id) -> timestamp de réapparition
-
-
-# Phase 251.24 — ANTI-429 : cooldown d'attaque PAR JOUEUR, partagé par le Boss Raid et
-# le World Boss. Un boss à gros HP invite au matraquage du bouton ; chaque clic =
-# defer + followup (2 requêtes) que discord.py re-essaie sur 429 → tempête globale. On
-# coalesce les clics rapprochés d'un même joueur AVANT toute requête (clic noyé = 0 requête).
-_boss_attack_cooldown: dict = {}
-_BOSS_ATTACK_CD = 2.0
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Phase 253 — POINTS DE COMBAT D'ALLIANCE. Chaque attaque de boss d'un membre
-# d'alliance crédite son alliance (10 % des dégâts, min 1) → classement & concours.
-# TOUT fail-open : une erreur ici ne casse JAMAIS le combat (priorité absolue).
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-async def _get_alliance_by_id(guild_id: int, alliance_id: int):
-    """Alliance (non dissoute) par id → {id, name, emoji} | None. Pour le tournoi PvP (254)."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id, name, emoji FROM alliances WHERE id=? AND guild_id=? AND dissolved=0",
-                (int(alliance_id), guild_id)) as cur:
-                r = await cur.fetchone()
-        return {"id": r[0], "name": r[1], "emoji": (r[2] or "🤝")} if r else None
-    except Exception:
-        return None
-
-
-
-
-
-
-
-
-_pet_assist_cooldown = {}  # Phase 182 : (guild_id, user_id) -> last assist ts
-
-
-
-
-
-
-_br_panel_refresh: dict[int, float] = {}  # Phase 251.3 anti-429 : throttle refresh boss raid
-
-
 
 
 # ─────────────────────────── Helper envoi V2 + ping ───────────────────────────
 
 
-
 # ─────────────────────────── END EVENT (restauration) ───────────────────────────
-
-async def _find_event_recap_channel(guild, exclude_ids=None):
-    """Phase 178 : trouve un salon PERSISTANT pour poster le récap d'un event.
-
-    L'arène d'un Boss Raid est SUPPRIMÉE en fin de combat → le récap (gagnants,
-    top dégâts, loot) doit atterrir dans un salon qui reste. Priorité :
-    event_log_channel → hub_channel → 1er salon "chatty". Exclut les salons en
-    cours de suppression (l'arène).
-    """
-    exclude = set(exclude_ids or [])
-    me = guild.me
-    try:
-        c = await cfg(guild.id)
-        for key in ('event_log_channel', 'hub_channel'):
-            cid = int(c.get(key, 0) or 0)
-            if cid and cid not in exclude:
-                ch = guild.get_channel(cid)
-                try:
-                    if ch and me and ch.permissions_for(me).send_messages:
-                        return ch
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    try:
-        for ch in guild.text_channels:
-            if ch.id in exclude:
-                continue
-            if await _is_chatty_channel(ch):
-                return ch
-    except Exception:
-        pass
-    return None
-
-
-
-
-# ───────────────────────────────────────────────────────────────────────────────
-# Phase 31 : Vérification badges + rangs + compteurs stats
-# ───────────────────────────────────────────────────────────────────────────────
-
-
-
-
-
-
-
 
 
 # ─────────────────────────── BACKGROUND TASKS ───────────────────────────
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 32 — TREASURE HUNT (chasse au trésor)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Cache : event_id → list of {treasure_msg_id, treasure_data, claimed_by}
-_treasure_pool: dict[int, list[dict]] = {}
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 32 — QUIZ COMMUNAUTAIRE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Cache : event_id → {question_idx, answers_received, scores, current_msg_id}
-_quiz_state: dict[int, dict] = {}
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 32 — Dispatch (boss / treasure / quiz)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 32 — EVENT SHOP (rotation hebdomadaire d'équipement à acheter)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 33 — ÉVÉNEMENTS PERSONNELS (un seul membre, ephemeral)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Cache : (guild_id, user_id) → timestamp dernier envoi
-_personal_event_last: dict[tuple[int, int], float] = {}
-# Cache global serveur : guild_id → list[timestamp]
-_personal_event_hourly: dict[int, list[float]] = {}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 33 — PvP DUELS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Cache cooldown : (guild_id, user_id) → timestamp dernier duel
-_duel_cooldowns: dict[tuple[int, int], float] = {}
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 33 — /help (aide globale)
-# ═══════════════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 37 — CLASSES + VOCAL OPT-IN
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
-
-
-
-
-
-
-
 # ─── Slash /class ───
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -12410,278 +10251,6 @@ owner_group = app_commands.Group(
     name="owner",
     description="🔧 Commandes administrateur (Owner uniquement)",
 )
-
-
-
-
-@tasks.loop(seconds=60)
-async def ui_usage_flush_task():
-    """Écrit les compteurs d'usage accumulés en RAM. 1×/min → le chemin chaud ne fait JAMAIS d'I/O."""
-    try:
-        await ui_usage_module.flush()
-    except Exception as ex:
-        print(f"[ui_usage_flush_task] {ex}", file=_sys.stderr, flush=True)
-
-
-@ui_usage_flush_task.before_loop
-async def _before_ui_usage_flush():
-    await bot.wait_until_ready()
-
-
-@bot.listen('on_interaction')
-async def _ui_usage_probe(interaction: discord.Interaction):
-    """Compte QUI est utilisé — listener SÉPARÉ, donc il ne peut pas casser un bouton.
-
-    C'est tout l'intérêt de passer par `on_interaction` (API publique) plutôt que par
-    `interaction_check` (129 classes ont le leur → MRO → mesure faussée) ou `_scheduled_task`
-    (API privée → une signature qui change casserait TOUS les boutons). Ici, au pire, on ne
-    compte pas. Aucun ID de membre n'est enregistré.
-    """
-    try:
-        ui_usage_module.observe(
-            interaction, datetime.now(timezone.utc).strftime('%Y-%m-%d'))
-    except Exception:
-        pass
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 39 — SMART PING SYSTEM (2 tiers opt-in)
-#  Solution au problème du chicken-and-egg : les membres ont besoin de pings
-#  pour voir les events, mais ne s'inscrivent pas s'ils ne savent pas.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-async def _ensure_notify_role(guild, tier: str) -> Optional[discord.Role]:
-    """Récupère ou crée le rôle de notification pour ce tier.
-
-    tier : 'important' (boss raids only) ou 'all' (tous les events)
-    """
-    try:
-        c = await cfg(guild.id)
-        key = f'notify_role_{tier}_id'
-        role_id = int(c.get(key, 0) or 0)
-        if role_id:
-            role = guild.get_role(role_id)
-            if role:
-                return role
-            # Role configuré mais supprimé → reset et recréer
-            await db_set(guild.id, key, 0)
-
-        # Créer le rôle
-        if tier == 'important':
-            role_name = "🔔 Événements Important"
-            color = 0xE74C3C
-            reason = "Auto-créé par /notify (Phase 39 - notifications importantes)"
-        else:
-            role_name = "📢 Tous les Événements"
-            color = 0x3498DB
-            reason = "Auto-créé par /notify (Phase 39 - notifications complètes)"
-
-        # Chercher d'abord si un rôle avec ce nom existe déjà
-        existing = discord.utils.get(guild.roles, name=role_name)
-        if existing:
-            await db_set(guild.id, key, existing.id)
-            return existing
-
-        try:
-            role = await guild.create_role(
-                name=role_name,
-                color=discord.Color(color),
-                mentionable=False,  # owner 2026-06-27 : JAMAIS mentionnable par les membres
-                #   (anti ping de masse / scam). Le bot, lui, ping via allowed_mentions(roles=True).
-                hoist=False,
-                reason=reason,
-            )
-            await db_set(guild.id, key, role.id)
-            return role
-        except discord.Forbidden:
-            print(f"[_ensure_notify_role {tier}] perm refusée")
-            return None
-        except Exception as ex:
-            print(f"[_ensure_notify_role {tier}] {ex}")
-            return None
-    except Exception as ex:
-        print(f"[_ensure_notify_role outer] {ex}")
-        return None
-
-
-
-
-# Phase 258 — MENTION MÉTHODIQUE (directive owner : « les events ne touchent que
-# 2-3 personnes sur des centaines »). PRINCIPE : tout le monde a le rôle
-# « 📢 Tous les Événements » par défaut (opt-out, auto-attribué + backfill), et
-# TOUS les events pingent ce rôle → on touche tout le monde. La modération du spam
-# se fait par (a) une CADENCE intelligente (un même TYPE max 1×/4 h + plancher 45 min
-# entre 2 pings tous types confondus) et (b) un OPT-OUT 1 clic (🔕). Ceux qui se
-# désabonnent = ne veulent pas (signal) ; ceux qui restent = OK pour être prévenus.
-# owner 2026-06-30 : ANTI-SURPING. « Le gros des problèmes c'est spammer les events avec une
-# mention tout le temps → ça lasse, les gens se détachent. » On réduit DRASTIQUEMENT le ping
-# @Tous (tout le monde) : RÉSERVÉ aux seuls TEMPS FORTS RARES (world boss ~hebdo, climax ~mensuel,
-# invasion grandiose). boss_raid (auto ~6 h) + rift/caravane/chaîne (~4 h) NE pingent PLUS @Tous →
-# ils ne touchent que le 🔔 opt-in (les INTÉRESSÉS qui l'ont choisi) + l'écho/board silencieux.
-# Les intéressés se servent eux-mêmes (🔔 + board « prochain event »), les autres ne sont (presque)
-# plus dérangés. Planchers très élargis + configurables (event_ping_global_min / _type_hours).
-_BIG_EVENT_TYPES = {
-    'world_boss', 'climax', 'monthly_climax', 'invasion', 'world_invasion',
-}
-_ROLE_PING_TYPE_HOURS = 24      # défaut : un même TYPE ne re-ping @Tous qu'1×/24 h (réglable)
-_ROLE_PING_GLOBAL_MIN = 360     # défaut : ≥6 h entre 2 pings @Tous tous types confondus (réglable)
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 235.22 — NOTIFICATION PAR TYPE (opt-in EN UN BOUTON, sous chaque event)
-#  Owner : « pas de multi-mentions ; un bouton sous chaque event pour être notifié
-#  UNIQUEMENT pour ce type ; reclique = retire le rôle. » → rôles 🔔 par catégorie,
-#  créés à la demande, toggle en 1 clic, pingés au spawn (seulement les volontaires).
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_EVENT_NOTIFY_TYPES = {
-    "boss":       ("🔔 Boss", "Boss du jour & Boss Raid"),
-    "world_boss": ("🔔 World Boss", "World Boss hebdo"),
-    "climax":     ("🔔 Climax", "Boss climax mensuel"),
-    "chest":      ("🔔 Coffres & Trésors", "Boîtes mystères, coffres, trésors"),
-    "minigame":   ("🔔 Quiz & Énigmes", "Quiz et énigmes"),
-    "mob":        ("🔔 Chasses", "Chasses aux mobs"),
-    "invasion":   ("🔔 Invasions", "Invasions du serveur"),
-    "council":    ("🔔 Conseil", "Conseil des Anciens"),
-    "collab":     ("🔔 Events Collaboratifs", "Faille Convergente / Caravane / Chaîne"),
-}
-
-# event_type interne → catégorie de notif (pour le ping au spawn via _get_event_mention).
-_EVENT_TYPE_TO_NOTIFY = {
-    "boss_raid": "boss", "daily_boss": "boss",
-    "world_boss": "world_boss", "climax": "climax",
-    "mystery_box": "chest", "treasure_hunt": "chest", "treasure": "chest",
-    "quiz": "minigame", "riddle": "minigame", "daily_riddle": "minigame",
-    "mob": "mob", "mob_hunt": "mob",
-    "invasion": "invasion", "world_invasion": "invasion", "council": "council",
-    # Phase 257.5 : events collaboratifs → catégorie 🔔 dédiée (en plus du ping @Tous).
-    "rift": "collab", "caravan": "collab", "chain": "collab",
-}
-
-
-async def _event_notify_role(guild, etype: str, *, create: bool = True):
-    """Get-or-create le rôle 🔔 de la catégorie `etype`. Retourne le rôle ou None.
-    create=False → simple lookup (utilisé au spawn : on ne ping que si le rôle existe
-    déjà, càd si ≥1 membre s'est abonné)."""
-    if guild is None or etype not in _EVENT_NOTIFY_TYPES:
-        return None
-    name = _EVENT_NOTIFY_TYPES[etype][0]
-    cfg_key = f"notify_type_{etype}_id"
-    try:
-        c = await cfg(guild.id)
-        rid = int(c.get(cfg_key, 0) or 0)
-        if rid:
-            r = guild.get_role(rid)
-            if r:
-                return r
-        r = discord.utils.get(guild.roles, name=name)
-        if r:
-            await db_set(guild.id, cfg_key, r.id)
-            return r
-        if not create:
-            return None
-        me = guild.me
-        if not (me and me.guild_permissions.manage_roles):
-            return None
-        r = await guild.create_role(name=name, mentionable=False,
-                                    reason="Notif par type (opt-in bouton)")
-        await db_set(guild.id, cfg_key, r.id)
-        return r
-    except Exception as ex:
-        print(f"[_event_notify_role {etype}] {ex}")
-        return None
-
-
-
-
-async def _toggle_event_notify(i: discord.Interaction, etype: str):
-    """Toggle le rôle 🔔 de la catégorie `etype` pour le membre. Réutilisé par le
-    DynamicItem EventNotifyButton (panneaux V2 nus) ET par les boutons à callback des
-    Views suivies/enregistrées (boss raid, world boss) — où un bouton nu ne serait pas
-    capté. Fail-open."""
-    try:
-        await i.response.defer(ephemeral=True)
-    except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
-        pass
-    if i.guild is None:
-        try:
-            await i.followup.send("❌ Serveur uniquement.", ephemeral=True)
-        except Exception:
-            pass
-        return
-    label = _EVENT_NOTIFY_TYPES.get(etype, ("ce type",))[0]
-    role = await _event_notify_role(i.guild, etype, create=True)
-    if role is None:
-        try:
-            await i.followup.send(
-                "❌ Rôle de notif indisponible (permissions). Préviens un admin.",
-                ephemeral=True)
-        except Exception:
-            pass
-        return
-    try:
-        member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
-        if member is None:
-            return
-        if role in member.roles:
-            await member.remove_roles(role, reason="Désabonnement notif (bouton)")
-            msg = f"🔕 Ok, tu ne seras **plus** notifié pour **{label}**."
-        else:
-            await member.add_roles(role, reason="Abonnement notif (bouton)")
-            msg = (f"🔔 C'est noté ! Tu seras notifié pour **{label}**.\n"
-                   f"_Reclique pour te désabonner._")
-        await i.followup.send(msg, ephemeral=True)
-    except discord.Forbidden:
-        try:
-            await i.followup.send("❌ Je n'ai pas la permission de gérer ce rôle.", ephemeral=True)
-        except Exception:
-            pass
-    except Exception as ex:
-        print(f"[_toggle_event_notify {etype}] {ex}")
-        try:
-            await i.followup.send("❌ Erreur, réessaie.", ephemeral=True)
-        except Exception:
-            pass
-
-
-class EventNotifyButton(discord.ui.DynamicItem[Button],
-                        template=r"evtnotif:(?P<etype>[a-z_]+)"):
-    """1er clic = abonné au type, 2e clic = désabonné. Persistant (DynamicItem)."""
-    def __init__(self, etype: str):
-        super().__init__(Button(label="🔔 Me notifier",
-                                style=discord.ButtonStyle.secondary,
-                                custom_id=f"evtnotif:{etype}"))
-        self.etype = etype
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(match["etype"])
-
-    async def callback(self, i: discord.Interaction):
-        await _toggle_event_notify(i, self.etype)
-
-
-
-
 
 
 # ═══════════════ NOTE DE SATISFACTION DE TICKET (#16) ═══════════════
@@ -12789,8 +10358,6 @@ async def _ensure_entraide_ratings_table():
         print(f"[entraide_ratings table] {ex}")
 
 
-
-
 class EntraideRatingButton(discord.ui.DynamicItem[Button],
                            template=r"erate:(?P<g>\d+):(?P<h>\d+):(?P<q>\d+):(?P<r>[123])"):
     """Bouton de note d'entraide (persistant, capté dans le MP du demandeur)."""
@@ -12825,336 +10392,9 @@ class EntraideRatingButton(discord.ui.DynamicItem[Button],
                 pass
 
 
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 40 — CIBLAGE WAKE-UP INDIVIDUEL
-#  Les gros events mentionnent personnellement les membres dormants (inactifs
-#  3-30 jours), même s'ils ne sont pas dans /notify. Anti-spam : max 1 mention
-#  publique par membre par 48h. Les actifs (< 24h) sont JAMAIS pingués.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 40.1 — ECHO DISCRET DANS LES SALONS ACTIFS
-#  Pour atteindre les ACTIFS qui n'ont pas le rôle notif sans les ping (TOS safe)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-async def _get_top_active_channels(guild, limit: int = 3) -> list:
-    """Renvoie les N salons texte les plus actifs des dernières 24h.
-
-    Utilisé pour poster un echo discret (sans mention) d'un event en cours.
-    Permet aux actifs qui discutent dans ces salons de voir l'event arriver.
-
-    Phase 41.2 : filtre strict — JAMAIS tickets, annonces, RO, threads.
-    """
-    if not guild or not guild.me:
-        return []
-    try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT channel_id, SUM(hits) AS msgs FROM member_activity_daily "
-                "WHERE guild_id=? AND last_ts > ? "
-                "GROUP BY channel_id ORDER BY msgs DESC LIMIT ?",
-                (guild.id, cutoff, limit * 5),  # marge généreuse pour filtrer
-            ) as cur:
-                rows = await cur.fetchall()
-        out = []
-        for ch_id, _msgs in rows:
-            ch = guild.get_channel(int(ch_id))
-            # Filtre central Phase 41.2 (tickets, annonces, RO, threads OUT)
-            if not await _is_chatty_channel(ch):
-                continue
-            # Skip aussi les salons systèmes par nom (defense en profondeur)
-            if any(kw in (ch.name or '').lower() for kw in ('rules', 'règles', 'welcome', 'bienvenue', 'annonces', 'announcement')):
-                continue
-            out.append(ch)
-            if len(out) >= limit:
-                break
-        return out
-    except Exception as ex:
-        print(f"[_get_top_active_channels] {ex}")
-        return []
-
-
-async def _i18n_server_lines(guild, key: str, **kw) -> str:
-    """I3 — Rend UNE ligne d'accroche par LANGUE OFFICIELLE du serveur, jointes par
-    retour-ligne. Lit les langues officielles (cfg server_languages, défaut [fr,en])
-    via get_server_languages, traduit `key` dans chacune via i18n_module.t(**kw),
-    et DÉDOUBLONNE les rendus identiques (si une seule langue officielle, ou si deux
-    langues produisent le même texte → une seule ligne, jamais de doublon).
-
-    COMPACT par conception : l'appelant ne passe QUE la ligne-titre/accroche, pas le
-    corps. FAIL-SAFE TOTAL : sur la moindre erreur, repli sur la version FR seule
-    (jamais de crash, jamais de post vide)."""
-    try:
-        try:
-            c = await cfg(guild.id)
-        except Exception:
-            c = {}
-        langs = i18n_module.get_server_languages(c if isinstance(c, dict) else {})
-        if not langs:
-            langs = ["fr"]
-        out, seen = [], set()
-        for l in langs:
-            try:
-                line = i18n_module.t(key, l, **kw)
-            except Exception:
-                line = ""
-            line = (line or "").strip()
-            if line and line not in seen:
-                seen.add(line)
-                out.append(line)
-        if out:
-            return "\n".join(out)
-    except Exception as ex:
-        print(f"[_i18n_server_lines] {ex}")
-    # Repli ultime : FR seul (jamais vide / jamais crash).
-    try:
-        return i18n_module.t(key, "fr", **kw)
-    except Exception:
-        return ""
-
-
-
-
-async def _purge_event_echoes(channel) -> None:
-    """Phase 260 : supprime les echos « Rejoins-nous dans #X » liés à un salon de
-    combat dès que ce salon est supprimé (évite les liens morts #inconnu en chat)."""
-    try:
-        guild = getattr(channel, "guild", None)
-        if guild is None:
-            return
-        async with get_db() as db:
-            try:
-                async with db.execute(
-                    'SELECT echo_channel_id, echo_message_id FROM event_echo_msgs '
-                    'WHERE arena_channel_id=?', (channel.id,),
-                ) as cur:
-                    rows = await cur.fetchall()
-            except Exception:
-                return  # table pas encore créée → rien à purger
-            if not rows:
-                return
-            await db.execute('DELETE FROM event_echo_msgs WHERE arena_channel_id=?', (channel.id,))
-            await db.commit()
-        for ech_cid, ech_mid in rows:
-            try:
-                ech = guild.get_channel(int(ech_cid))
-                if ech is not None:
-                    await ech.get_partial_message(int(ech_mid)).delete()
-            except (discord.NotFound, discord.Forbidden):
-                pass
-            except Exception:
-                pass
-            # Throttle anti-429 : plusieurs echos dans le MÊME salon → le DELETE de messages
-            # est rate-limité par salon. On espace les suppressions (teardown rare, peu d'echos).
-            await asyncio.sleep(0.4)
-    except Exception as ex:
-        print(f"[_purge_event_echoes] {ex}")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  TÂCHE B — ACCÈS & DÉCOUVRABILITÉ PASSIVE
-#  Helper unique pour ouvrir le hub épuré (HubLayoutV2) en ÉPHÉMÈRE depuis
-#  n'importe quelle interaction (DM onboarding, bouton « Mon hub » sous les récaps
-#  publics). Résout le guild_id (None en DM) + le style joueur, le tout FAIL-SAFE.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class MyHubButtonView(View):
-    """Vue PERSISTANTE à un seul bouton « 🎮 Mon hub » (custom_id stable
-    open_my_hub). Apposée sous les récaps/annonces publics (récaps de combat,
-    Héraut, programme du jour…) via ui_v2.recap_view(hub_button=True) qui pose
-    le MÊME custom_id dans le LayoutView. Cette vue assure le DISPATCH : on en
-    enregistre une instance au boot via bot.add_view(MyHubButtonView()) → le clic
-    rend HubLayoutV2 en ÉPHÉMÈRE pour le cliqueur, même sur de vieux messages
-    survivant à un reboot. NE PAS renommer le custom_id (persistance)."""
-
-    def __init__(self):
-        super().__init__(timeout=None)  # persistant via custom_id stable
-        b = Button(
-            label="Mon hub",
-            emoji="🎮",
-            style=discord.ButtonStyle.secondary,
-            custom_id=MY_HUB_BUTTON_CUSTOM_ID,
-        )
-        b.callback = self._on_open_my_hub
-        self.add_item(b)
-
-    async def _on_open_my_hub(self, i: discord.Interaction):
-        # defer-first non requis : _open_hub_layout_ephemeral fait un send_message
-        # direct (réponse initiale) → le hub s'affiche sans flicker. Fail-safe.
-        try:
-            pass  # bloc vidé (module détaché)
-        except Exception as ex:
-            print(f"[MyHubButtonView _on_open_my_hub] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.defer(ephemeral=True)
-            except Exception:
-                pass
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 40 — ONBOARDING DM pour nouveaux membres
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# AUDIT fix : référencer les fire-and-forget tasks pour éviter le GC mid-sleep
-_pending_onboardings: set = set()
-
-
-
-
-
-
-
-
-# Auto-suppression du message de bienvenue (owner 2026-06-18) : il reste assez longtemps
-# pour être vu + cliquer les boutons d'aide, puis disparaît pour NE PAS noyer le chat lors
-# des vagues d'arrivées (« on dirait qu'il n'y a que le bot qui parle »). Constante = facile
-# à ajuster. Suppression native delete_after (gère NotFound seule ; léger même en masse).
-_WELCOME_AUTODELETE_SEC = 20
-
-
-async def _post_onboarding_welcome(member):
-    """Phase 257.1 — ACCUEIL EN SALON (remplace le MP d'onboarding coupé Phase 257 ;
-    objectif : ATTIRER les nouveaux en leur faisant comprendre tout de suite qu'il y
-    a des EVENTS, SANS aucun MP). Poste UN message de bienvenue dans le salon d'accueil
-    (welcome_channel > salon système > 1er salon « chatty » écrivable) avec le panneau
-    OnboardingView (boutons hub / parcours / notifs). Mentionne UNIQUEMENT le nouveau
-    venu (1 mention de bienvenue, normale — pas un ping de masse). Fail-open."""
-    try:
-        if member is None or getattr(member, 'bot', False):
-            return
-        guild = member.guild
-        c = await cfg(guild.id)
-        # owner 2026-06-30 : l'accueil doit S'AFFICHER POUR TOUT LE MONDE (« on ne le voit pas du
-        # tout »). On NE gate PLUS sur event_enabled → un nouveau membre est TOUJOURS accueilli
-        # (carte compacte + une ligne + auto-purge). Le chemin _handle_welcome (welcome_enabled)
-        # reste prioritaire ci-dessous pour ne pas doubler.
-        # Phase 268 (demande owner — anti-clutter) : si un message de bienvenue CONFIGURÉ
-        # poste déjà (_handle_welcome), on n'ajoute PAS ce 2e message d'intro events.
-        # Les nouveaux sont de toute façon abonnés aux events (Phase 256) et l'onboarding
-        # complet (classe/notifs/Parcours) reste dans /hub → un seul message à l'arrivée.
-        if c.get('welcome_enabled', False):
-            return
-        me = guild.me
-
-        def _ok(x):
-            try:
-                return (x is not None and me is not None
-                        and x.permissions_for(me).send_messages)
-            except Exception:
-                return False
-
-        ch = None
-        wid = int(c.get('welcome_channel', 0) or 0)
-        if wid:
-            ch = guild.get_channel(wid)
-        if not _ok(ch):
-            ch = guild.system_channel if _ok(guild.system_channel) else None
-        if not _ok(ch):
-            ch = None
-            for cand in guild.text_channels:
-                try:
-                    if _ok(cand) and await _is_chatty_channel(cand):
-                        ch = cand
-                        break
-                except Exception:
-                    continue
-        if ch is None:
-            return
-
-        # TASK C.1 : pendant une vague de raid, on suspend l'accueil events individuel
-        # et on compte l'arrivée pour le récap groupé. FAIL-SAFE hors raid.
-        if _defer_welcome_during_raid(guild.id, ch, getattr(member, 'id', 0)):
-            return
-
-        # Phase 268 (demande owner) : message d'accueil COMPACT — une seule ligne pour
-        # ne pas noyer le chat lors des vagues d'arrivées. Le détail (principe d'activité,
-        # events, hub) reste accessible via les boutons ci-dessous (Parcours/hub/notifs).
-        # I2 : ligne d'accueil DANS LA LANGUE du nouveau (locale Discord → langue serveur
-        # → FR). Pas encore de préférence persistée à l'arrivée → lang_of fait la cascade.
-        try:
-            _olang = await i18n_module.lang_of(member.id, guild_id=guild.id)
-        except Exception:
-            _olang = "fr"
-        desc_fr = i18n_module.t("welcome.onboarding_line", _olang, user=member.mention)
-        # TASK C.4 : conserve une ligne EN compacte sous la ligne principale si la langue
-        # résolue n'est pas déjà l'anglais (fail-safe, comprehensible pour locales exotiques).
-        if c.get('welcome_bilingual', True) and _olang != "en":
-            desc_en = i18n_module.t("welcome.onboarding_line", "en", user=member.mention)
-            if desc_en and desc_en != desc_fr:
-                desc_fr = f"{desc_fr}\n-# {desc_en}"
-        embed = discord.Embed(
-            description=desc_fr,
-            color=0x5865F2,
-        )
-        try:
-            #  ⚠️ L'ENVOI AVAIT DISPARU — RÉTABLI LE 19/08/2026.
-            #  Le message d'accueil était CONSTRUIT (`embed`) puis jamais
-            #  envoyé : la ligne `_ow = await ch.send(...)` portait une vue de
-            #  boutons d'animation (Parcours / hub / notifications) et est
-            #  partie avec eux à la purge. Restait `getattr(_ow, 'id', 0)`,
-            #  donc un `NameError` avalé par le `except` — et AUCUN nouveau
-            #  membre n'a été accueilli depuis. Trouvé par
-            #  `outils/verif_portees.py`, que `verif_noms.py` ne pouvait pas
-            #  voir (il ignore les portées).
-            #  L'accueil n'est pas de l'animation : il reste. Sans les boutons.
-            _ow = await ch.send(embed=embed)
-            # owner 2026-06-30 : la carte RESTE visible puis est purgée par welcome_cleanup_task.
-            try:
-                await _track_welcome_msg(guild.id, ch.id, getattr(_ow, 'id', 0))
-            except Exception:
-                pass
-            print(f"[ONBOARDING WELCOME] guild={guild.id} user={member.id} salon={ch.id}")
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-    except Exception as ex:
-        _logerr("onboarding.post_welcome", ex, guild_id=getattr(getattr(member, "guild", None), "id", 0))
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 40 — COMEBACK DM hebdomadaire (réveille les dormants)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-async def restore_active_comebacks():
-    """Au boot : ré-enregistre les ComebackClaimView non-claimed."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT guild_id, user_id, bonus_amount FROM comeback_dms '
-                'WHERE claimed=0 AND datetime(last_dm_at) > datetime("now", "-14 days")',
-            ) as cur:
-                rows = await cur.fetchall()
-        for guild_id, user_id, bonus in rows:
-            try:
-                bot.add_view(v)
-            except Exception:
-                pass
-        if rows:
-            print(f"[COMEBACK] {len(rows)} comeback view(s) restored")
-    except Exception as ex:
-        print(f"[restore_active_comebacks] {ex}")
-
-
-
 
 
 @bot.tree.command(name="help", description="❓ Voir ce que le bot sait faire")
@@ -13256,46 +10496,12 @@ async def help_cmd(i: discord.Interaction):
 #  peut participer. Auto-delete 5 min après pour ne pas polluer.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Cache : message_id du mystery box → {box_data, claimed_by, claimed_at}
-_mystery_boxes: dict[int, dict] = {}
-
-# Phase 38 : refcount des salons temporairement dé-masqués pendant un raid
-# (guild_id, channel_id) → count
-# Permet de garder visible un salon pendant qu'un light event y est actif,
-# puis le re-masquer automatiquement quand l'event finit.
-_light_event_visible: dict[tuple[int, int], int] = {}
-
-
-
-
-
-
-
-
-_last_chat_announce: dict = {}  # {guild_id: epoch} — anti-remplissage du chat (owner 2026-07-02)
-_CHAT_ANNOUNCE_GAP_SEC = 900    # ≥ 15 min entre 2 accroches AUTO du bot dans le chat général
-
-
-
-
-
-
-_light_events_first_tick = True  # audit 2026-07-02 : saute le 1er tick (boot)
-
-
-
-
-
-
-
 
 # ─── Phase 109 : Auction Settler ─────────────────────────────────────────
 # Loop qui termine les enchères expirées :
 # - Transfère l'item au top_bidder (ou rend au seller si pas de bid)
 # - Crédite le seller (prix - commission 5%)
 # - Marque l'enchère comme 'completed' / 'unsold'
-
-AUCTION_COMMISSION_PCT = 5  # 5% prélevé sur la vente
 
 
 # (auction_settler_task SUPPRIMÉE le 12/08/2026.)
@@ -13306,9 +10512,6 @@ AUCTION_COMMISSION_PCT = 5  # 5% prélevé sur la vente
 # base aurait suffi à envoyer deux MP au vendeur et à l'acheteur. Les enchères font
 # partie du MMORPG, retiré par la refonte.
 
-async def _auction_settler_wait():
-    await bot.wait_until_ready()
-
 
 # ─── Phase 111 : Hub Live Events Tile — refresh dynamique ────────────────
 #
@@ -13316,360 +10519,6 @@ async def _auction_settler_wait():
 # pinned). Elle affiche les events actifs en temps réel : Boss Raid, World
 # Boss, Treasure Hunt, Quiz, Voice Chaos, etc. La loop edit le message
 # toutes les minutes UNIQUEMENT si le contenu a changé (anti-spam edit log).
-
-# Cache : guild_id → last_signature
-_hub_live_events_sig_cache: dict = {}
-
-
-async def _collect_live_events(guild_id: int) -> list:
-    """Phase 111 : retourne une liste de tuples (label, emoji, line) pour
-    tous les events actifs du serveur."""
-    lines = []
-    try:
-        # Events boss raid / treasure / quiz (table `events`)
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT event_type, boss_json, started_at, ends_at "
-                "FROM events WHERE guild_id=? AND ended=0 ORDER BY id DESC LIMIT 5",
-                (guild_id,),
-            ) as cur:
-                rows = await cur.fetchall()
-        for event_type, boss_json, started_at, ends_at in rows:
-            label_map = {
-                "boss": "👹 Boss Raid",
-                "treasure": "💎 Chasse au trésor",
-                "quiz": "❓ Quiz",
-                "boss_raid": "👹 Boss Raid",
-            }
-            label = label_map.get(event_type, f"🎯 {event_type}")
-            # Boss spécifique
-            extra = ""
-            if event_type in ("boss", "boss_raid") and boss_json:
-                try:
-                    boss = json.loads(boss_json)
-                    name = boss.get("name", "?")
-                    chp = int(boss.get("current_hp", 0) or 0)
-                    mhp = int(boss.get("max_hp", 1) or 1)
-                    extra = f" · **{name}** {chp}/{mhp} HP"
-                except Exception:
-                    pass
-            lines.append(f"{label}{extra}")
-    except Exception:
-        pass
-
-    # World boss hebdo
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT boss_id, hp, max_hp FROM world_bosses "
-                "WHERE guild_id=? AND ended=0 ORDER BY id DESC LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row:
-            boss_id, hp, mhp = row
-            hp = int(hp or 0)
-            mhp = int(mhp or 1)
-            name = boss_id or "?"
-            lines.append(f"🌍 **World Boss** · {name} {hp}/{mhp} HP")
-    except Exception:
-        pass
-
-    # Boss du jour (daily_boss_events) — Phase 257.1 : ajouté à la tuile live
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT boss_id, hp_current, hp_max FROM daily_boss_events "
-                "WHERE guild_id=? AND status='alive' "
-                "AND datetime(expires_at) > datetime('now') "
-                "ORDER BY id DESC LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row:
-            bid, chp, mhp = row
-            chp = int(chp or 0)
-            mhp = int(mhp or 1)
-            lines.append(f"👹 **Boss du Jour** · {bid} {chp}/{mhp} HP")
-    except Exception:
-        pass
-
-    # Phase 257.4 : compléter la tuile avec TOUS les types d'events restants.
-    # Mob hunts (mob_spawns)
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT COUNT(*) FROM mob_spawns WHERE guild_id=? AND status='alive' "
-                "AND datetime(expires_at) > datetime('now')",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row and int(row[0] or 0) > 0:
-            lines.append(f"🐗 **{int(row[0])} mob(s)** en chasse")
-    except Exception:
-        pass
-
-    # Boss Climax mensuel (climax_events)
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT boss_id, hp_current, hp_max FROM climax_events "
-                "WHERE guild_id=? AND status='active' "
-                "AND datetime(ends_at) > datetime('now') ORDER BY id DESC LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row:
-            bid, chp, mhp = row
-            lines.append(f"🔥 **Boss Climax** · {bid} {int(chp or 0)}/{int(mhp or 1)} HP")
-    except Exception:
-        pass
-
-    # Invasion du serveur (invasion_events)
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT 1 FROM invasion_events WHERE guild_id=? AND status='active' "
-                "ORDER BY id DESC LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row:
-            lines.append("🚨 **Invasion du serveur** en cours — tous à l'arène !")
-    except Exception:
-        pass
-
-    # Events COLLABORATIFS (rift / caravane / chaîne) — ils ont besoin de monde
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT energy, target FROM rift_events WHERE guild_id=? AND ended=0 "
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) "
-                "ORDER BY id DESC LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row:
-            lines.append(f"🌀 **Faille Convergente** · {int(row[0] or 0):,}/{int(row[1] or 1):,} énergie")
-    except Exception:
-        pass
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT stage, stages_target FROM caravan_events WHERE guild_id=? AND ended=0 "
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) "
-                "ORDER BY id DESC LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row:
-            lines.append(f"🐫 **Caravane des Trois Sceaux** · étape {int(row[0] or 0)}/{int(row[1] or 1)}")
-    except Exception:
-        pass
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT links, target FROM chain_events WHERE guild_id=? AND ended=0 "
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) "
-                "ORDER BY id DESC LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row:
-            lines.append(f"🔗 **Chaîne d'Invocation** · {int(row[0] or 0)}/{int(row[1] or 1)} maillons")
-    except Exception:
-        pass
-
-    # Voice chaos (récent : appliqué dans les dernières 30 min)
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT action_id, voice_channel_id FROM voice_chaos_log "
-                "WHERE guild_id=? AND reverted=0 "
-                "AND applied_at > datetime('now', '-30 minutes') "
-                "ORDER BY id DESC LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row:
-            action, vch = row
-            lines.append(f"🎭 **Voice Chaos** actif · action `{action}`")
-    except Exception:
-        pass
-
-    # Daily riddle
-    try:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT first_winner_id FROM daily_riddles_log "
-                "WHERE guild_id=? AND day=?",
-                (guild_id, today),
-            ) as cur:
-                row = await cur.fetchone()
-        if row is not None:
-            first_winner_id = row[0]
-            if not first_winner_id:
-                lines.append("🧩 **Énigme du jour** disponible — premier arrivé = jackpot !")
-    except Exception:
-        pass
-
-    # Flash treasure
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id FROM flash_treasures WHERE guild_id=? AND ended=0 "
-                "ORDER BY id DESC LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row:
-            lines.append("💰 **Flash Treasure** spawn actif")
-    except Exception:
-        pass
-
-    # Auctions actives (Phase 109)
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT COUNT(*) FROM auctions WHERE guild_id=? AND status='active'",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if row and row[0]:
-            count = int(row[0])
-            lines.append(f"🔨 **{count} enchère(s) Maison des enchères** en cours")
-    except Exception:
-        pass
-
-    return lines
-
-
-# TÂCHE B.3 — pool « Le savais-tu ? » : chaque entrée met en avant UNE feature
-# souvent ignorée des joueurs. Texte court, factuel, sans ping. Rotation stable
-# (jour + tranche de 6 h) côté HubLiveEventsLayoutV2 — pas de random au render.
-HUB_DID_YOU_KNOW_TIPS = (
-    "Le hub a un bouton **Ma Fortune** qui récolte d'un coup ta rente de la Cité, tes dépôts mûrs et tes œufs éclos.",
-    "Ton **compagnon** combat à tes côtés sur les boss — pense à l'assister via son bouton pendant les raids.",
-    "La **Forge** améliore et enchante ton stuff épique+ : plus d'effets élémentaires et de DoT à débloquer.",
-    "Tu peux régler tes notifications par **type d'event** : active seulement les boss, ou seulement les chasses.",
-    "Les **quêtes du jour** et la **Daily Wheel** se réinitialisent chaque jour — un passage rapide au hub suffit.",
-    "Le **Passe de Saison** est 100% gratuit : tu gagnes des paliers rien qu'en jouant aux events.",
-    "Les **donjons** se jouent en solo ou en groupe de 4 — ton propre salon de combat instancié.",
-    "La **Carte de Joueur** et l'**Atelier d'Emblèmes** personnalisent ton profil et le blason de ton alliance.",
-    "Les **métiers** (récolte, artisanat) progressent hors-combat et alimentent ton Sanctuaire personnel.",
-    "Le **Héraut de la Semaine** récapitule chaque dimanche tout ce qui t'attend — un seul message, zéro spam.",
-)
-
-
-class HubLiveEventsLayoutV2(LayoutView):
-    """Phase 111 : panel Live Events, refreshable, posté juste après le hub.
-
-    Pas de boutons interactifs (juste de l'info). Custom_ids stables not needed.
-    """
-
-    def __init__(self, event_lines: list, last_updated_ts: int):
-        super().__init__(timeout=None)
-        items = []
-        items.append(v2_title("📡 Events en cours"))
-        items.append(v2_subtitle(
-            f"Actualisé <t:{last_updated_ts}:R>"
-        ))
-        items.append(v2_divider())
-        if event_lines:
-            items.append(v2_body("### 🔥 Actif maintenant"))
-            items.append(v2_body("\n".join(f"• {line}" for line in event_lines)))
-        else:
-            items.append(v2_body(
-                "### 😴 Silence…\n"
-                "_Aucun event en cours pour le moment._\n"
-                "_Reste actif — un boss/chasse/quiz peut spawn à tout moment !_"
-            ))
-        # Phase 268 — VITRINE PASSIVE « Prêt pour toi » : rappel générique (ZÉRO ping,
-        # ZÉRO MP, ZÉRO nouveau message — juste une section de plus sur le message déjà
-        # rafraîchi 1×/min). Le message épinglé est SERVEUR-WIDE → impossible de calculer
-        # le par-joueur ici ; la version par-utilisateur (rente · dépôt mature · œuf éclos
-        # calculés pour i.user) vit dans « Ma Fortune ». Ici, formulation générique qui
-        # crée le réflexe de retour quotidien sans bruit.
-        items.append(v2_divider())
-        items.append(v2_body(
-            "### 🎁 Prêt pour toi\n"
-            "_Rente de la Cité, dépôts arrivés à maturité, œufs éclos : "
-            "passe voir au **hub** (Ma Fortune · Mon compagnon · Revenus) — "
-            "il y a peut-être déjà quelque chose à récupérer._"
-        ))
-        # TÂCHE B.3 — ENCART « LE SAVAIS-TU » : met en avant UNE feature peu connue.
-        # Rotation STABLE basée sur le jour + tranche de 6 h (déduits du timestamp de
-        # refresh, déjà passé au constructeur) — JAMAIS de random au render, sinon
-        # la signature anti-spam du refresh task changerait à chaque tour et le
-        # message serait ré-édité en boucle (cf. _hub_live_events_sig_cache). Zéro
-        # bouton, zéro ping. Fail-safe (try/except → on omet juste l'encart).
-        try:
-            slot = (int(last_updated_ts) // 86400) * 4 + ((int(last_updated_ts) % 86400) // 21600)
-            tip = HUB_DID_YOU_KNOW_TIPS[slot % len(HUB_DID_YOU_KNOW_TIPS)]
-            items.append(v2_divider())
-            items.append(v2_body(f"### 💡 Le savais-tu ?\n_{tip}_"))
-        except Exception as ex:
-            print(f"[HubLiveEventsLayoutV2 did_you_know] {ex}")
-        self.add_item(v2_container(*items, color=0xE74C3C if event_lines else 0x95A5A6))
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 89 — STALE EVENT CLEANUP
-#  Détecte les events dont le message a été supprimé manuellement (souris user)
-#  et nettoie l'état du bot. Sinon l'anti-doublon Phase 69 bloque les nouveaux
-#  spawns indéfiniment ("plus aucun event n'apparaît").
-# ═══════════════════════════════════════════════════════════════════════════════
-async def _restore_event_masks(guild, event_id):
-    """Phase 202 — Restaure les permissions @everyone des salons masqués par un
-    event (depuis event_channel_snapshots), comme la fin normale d'un boss.
-    Idempotent et sûr : si aucun snapshot, ne fait rien. Réutilisé par le
-    watchdog stale_event_cleanup pour AUTO-SOIGNER les events bloqués sans
-    attendre un reboot. Retourne le nombre de salons démasqués."""
-    if guild is None:
-        return 0
-    restored = 0
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT channel_id, had_overwrite, allow_value, deny_value '
-                'FROM event_channel_snapshots WHERE event_id=?',
-                (event_id,),
-            ) as cur:
-                snaps = await cur.fetchall()
-        for ch_id, had, allow_v, deny_v in snaps:
-            ch = guild.get_channel(int(ch_id))
-            if not ch:
-                continue
-            try:
-                if had:
-                    perm = discord.PermissionOverwrite.from_pair(
-                        discord.Permissions(int(allow_v)),
-                        discord.Permissions(int(deny_v)),
-                    )
-                    await ch.set_permissions(
-                        guild.default_role, overwrite=perm,
-                        reason=f"Stale event {event_id} unmask (watchdog)")
-                else:
-                    await ch.set_permissions(
-                        guild.default_role, overwrite=None,
-                        reason=f"Stale event {event_id} unmask (watchdog)")
-                restored += 1
-            except discord.Forbidden:
-                continue
-            except Exception as ex:
-                print(f"[_restore_event_masks ch={ch_id}] {ex}")
-    except Exception as ex:
-        print(f"[_restore_event_masks evt={event_id}] {ex}")
-    return restored
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -13705,18 +10554,6 @@ else:
     _HEURES_PASSAGE_ACTIVITE = None
 
 
-#  Une @tasks.loop qui lève une exception non gérée s'ARRÊTE définitivement
-#  (jusqu'au reboot). Symptôme vécu : tout se tait alors que le bot est en ligne.
-#  Ce superviseur re-démarre toute boucle critique morte, toutes les 5 min.
-#  Sûr : .start() est ignoré si la boucle tourne déjà (garde is_running) ; on ne
-#  touche qu'à des boucles censées tourner en continu.
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Le serveur par lequel la distribution du budget commence. Il tourne d'un
-#  cran à chaque passage : sinon le reste de la division profiterait toujours
-#  au même, et le dernier de la liste ne verrait jamais une fiche impaire.
-#  Remis à zéro au redémarrage, sans conséquence : ce n'est qu'un décalage.
-_veille_tour = 0
-
 #  ⚠️ `_TRANCHE_FLUX` A ÉTÉ SUPPRIMÉ LE 30/08/2026 — NE PAS LE RÉINTRODUIRE.
 #
 #  Il valait {"nouveaux": 5, "bascules": 10} et bornait ce qu'on REGARDAIT par
@@ -13731,29 +10568,6 @@ _veille_tour = 0
 #  (`roblox_veille.a_envoyer`) : tout ce qui est détecté entre en base, et
 #  `MAX_PUBLICATIONS_PAR_PASSAGE` décide seulement de ce qui part MAINTENANT.
 #  Reborner l'entrée rouvrirait la famine.
-
-
-def _budget_veille(stats: dict, releve: dict) -> None:
-    """Cumule les compteurs de débit d'un relevé dans le bilan du passage.
-
-    ⚠️ POURQUOI ON MESURE ÇA. Un `HTTP 429` tombait à CHAQUE passage (48 fois
-    par jour, 25 s de pénalité chacun) et rien ne permettait de dire si c'était
-    notre cadence ou un voisin : la sortie Railway est une IP PARTAGÉE, le
-    budget de 12 requêtes/60 s sur le chemin catalogue n'est pas le nôtre seul.
-    `reste_min` — le plus petit `x-ratelimit-remaining` du passage — est la
-    seule chose qui tranche entre les deux, et personne ne la regardait.
-
-    `n429` est le CRITÈRE DE RÉUSSITE du correctif du 20/08 : avant, 48
-    passages sur 48 à `429=1`. Un `grep '429=0'` sur les logs du jour donne la
-    mesure directement.
-    """
-    stats["req"] = int(stats.get("req") or 0) + int(releve.get("req") or 0)
-    stats["n429"] = int(stats.get("n429") or 0) + int(releve.get("n429") or 0)
-    r = releve.get("reste_min")
-    if r is not None:
-        actuel = stats.get("reste_min")
-        stats["reste_min"] = r if actuel is None else min(actuel, r)
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -13787,16 +10601,6 @@ _INSTANCE_ID = uuid.uuid4().hex[:12]
 #  vraie seconde instance, elle, bat encore APRÈS.
 _INSTANCE_DEMARRE = datetime.now(timezone.utc)
 
-#  En dessous de ce délai, une autre instance est considérée VIVANTE. Deux
-#  minutes : la boucle bat toutes les 30 min, mais un battement est aussi
-#  écrit à chaque passage — voir `_battre_sentinelle`.
-#  ⚠️ AU-DELÀ DE CE DÉLAI, LA BOUCLE DU MARCHÉ EST CONSIDÉRÉE COMME
-#  MUETTE. Elle tourne toutes les 4 minutes ; elle s'efface pendant un
-#  passage de veille (priorité au budget de requêtes), et un passage
-#  mesuré dure ~4 min. Trente minutes lui laissent donc ~7 tours pour
-#  se manifester : si rien n'a été confirmé depuis, ce n'est plus de
-#  l'effacement, c'est une panne.
-MARCHE_FRAICHEUR_MIN = 30
 SENTINELLE_FRAICHEUR_S = 180
 
 
@@ -13847,7 +10651,6 @@ async def _battre_sentinelle() -> list[str]:
     except Exception as ex:
         print(f"[sentinelle] {type(ex).__name__}: {ex}")
     return autres
-
 
 
 async def _enfiler_billets(guildes, rel: dict) -> dict:
@@ -14399,28 +11202,161 @@ async def _retirer_exclamations(g):
         print(f"[anti_badwords exclamations {getattr(g, 'id', '?')}] {ex}")
 
 
-_TABLES_ACCESSOIRES = ("roblox_articles", "roblox_cartes_annonces", "roblox_curseurs",
-                       "roblox_marche_retenue", "roblox_marche_tete", "roblox_mesures",
-                       "roblox_migrations", "roblox_publies", "roblox_sante",
-                       "roblox_transitions")
+_TABLES_MORTES = frozenset({
+    "achievement_broadcasts", "achievements_unlocked", "active_combat_lock",
+    "activite_expulses", "activity", "activity_heatmap_buckets", "activity_heatmap_dispatch",
+    "activity_score", "activity_tracking", "activity_vip_grants", "activity_vip_roles",
+    "advent_calendar", "alliance_audit_log", "alliance_combat_points", "alliance_invites",
+    "alliance_members", "alliance_treasury", "alliance_vault_items",
+    "alliance_war_participants", "alliance_wars", "alliances", "analytics_events", "auctions",
+    "auto_reactions", "bingo_cards", "boss_ping_log", "bot_post_tracking",
+    "caravan_contributors", "caravan_events", "caravan_roles", "chain_contributors",
+    "chain_events", "channel_camouflage", "chronicle_chapter_progress",
+    "chronicle_contributors", "chronicle_events", "chronicle_state", "citadelle_active",
+    "citadelle_cosmetics", "citadelle_domaine", "citadelle_garden", "citadelle_mastery",
+    "citadelle_materials", "citadelle_passe", "citadelle_professions", "citadelle_rente",
+    "citadelle_wallet", "climax_attackers", "climax_events", "climax_titles", "combat_arenas",
+    "combat_ping_log", "combat_recall", "comeback_dms", "community_goal_progress",
+    "community_goals", "compliments_log", "confession_replies", "confessions", "config",
+    "conv_starter_log", "council_sessions", "council_votes", "cross_post_groups",
+    "cross_post_targets", "daily_boss_attackers", "daily_boss_events", "daily_encounters_log",
+    "daily_greeting_log", "daily_prompt_votes", "daily_prompts", "daily_quest_progress",
+    "daily_quest_pushes", "daily_riddle_answered", "daily_riddles_log", "dm_event_optin",
+    "dormant_comeback_pending", "dormant_dm_log", "duels", "dungeon_lobbies", "dungeon_members",
+    "dungeon_runs", "easter_eggs_log", "economy", "economy_festivals", "entraide_games",
+    "entraide_helper_stats", "entraide_requests", "equipment_loadouts", "evening_rituals",
+    "event_channel_snapshots", "event_echo_msgs", "event_engagement", "event_meta_daily",
+    "event_notif_roles", "event_participants", "event_recall_ping_log", "event_voice_zones",
+    "events", "exempt_channels", "faction_reputation", "faction_war_scores", "faction_wars",
+    "flash_consolations", "flash_treasures", "friend_requests", "friendships", "game_nights",
+    "game_stats_panels", "game_status_state", "game_updates", "gift_log", "giveaways",
+    "hall_of_fame_records", "heist_participants", "heists", "hero_journey", "highlights_log",
+    "invasion_attackers", "invasion_events", "irl_seasons_active", "ladder_ratings",
+    "level_rewards", "loot_history", "lore_memories", "lore_state", "luxury_tax_log",
+    "marketplace_listings", "marriage_proposals", "marriages", "matchmaking_parties",
+    "matchmaking_party_members", "member_activity", "member_activity_daily",
+    "member_milestones", "mentor_bonus_track", "mentorships", "merchant_purchases",
+    "merchant_stock", "merchant_visits", "message_stats", "milestone_claims",
+    "mission_step_progress", "missions", "mob_attackers", "mob_spawns", "mod_logs",
+    "monthly_champions", "monthly_quests", "monthly_voice_kings", "mystery_clues_held",
+    "mystery_revelations", "mystery_shares", "narrative_vote_ballots", "narrative_votes",
+    "npc_letter_subscriptions", "npc_letters_sent", "npc_mood", "npc_posts_log",
+    "onboarding_journey", "owner_digest_log", "owner_monthly_log", "patrol_contributions",
+    "patrol_sessions", "personal_events_log", "pet_eggs", "pet_evolution", "player_badges",
+    "player_class_choice", "player_classes", "player_event_stats", "player_inventory",
+    "player_stash", "player_styles", "player_voice_optin", "prediction_bets", "predictions",
+    "presence_chain", "promo_sources", "publish_config", "pvp_duels", "raffle_draws",
+    "raffle_tickets", "referral_links", "referrals", "regional_state", "reputation",
+    "reputation_history", "rift_contributors", "rift_events", "rivalries", "roadmap_items",
+    "roadmap_votes", "roblox_account_links", "roblox_articles", "roblox_cartes_annonces",
+    "roblox_curseurs", "roblox_game_library", "roblox_game_stats",
+    "roblox_game_stats_snapshots", "roblox_games", "roblox_link_pending",
+    "roblox_marche_retenue", "roblox_marche_tete", "roblox_mesures", "roblox_migrations",
+    "roblox_publies", "roblox_sante", "roblox_transitions", "role_permissions", "rss_feeds",
+    "saga_choices", "saga_participants", "sagas", "season_progress", "seasonal_drops_log",
+    "server_anniversaries", "server_streak", "server_weather_log", "shoutouts", "social_feeds",
+    "social_interactions", "solo_cooldowns", "solo_runs", "speedrun_categories_custom",
+    "speedrun_submissions", "spotlighted_messages", "staff_roles", "stream_schedule",
+    "stream_watch_parties", "studio_tip_posts_log", "tag_royale", "temp_voice_state",
+    "thematic_voices", "ticket_config", "ticket_immune_roles", "time_capsules",
+    "tournament_participants", "tournaments", "twofa_confirmations", "ugc_spotlights",
+    "ugc_wishlist", "ui_usage", "unique_loot_history", "unique_loots", "update_ping_roles",
+    "update_vote_ballots", "update_votes", "user_bank_deposits", "user_cosmetics",
+    "user_notif_prefs", "user_pets", "user_prestige", "user_stats41", "user_streaks",
+    "user_theme_pref", "user_titles", "vip_atrisk_msg", "vip_audit", "vip_exclusions",
+    "vip_status", "voice_activity_log", "voice_chaos_log", "voice_daily_rewards",
+    "voice_empty_since", "voice_milestone_claims", "voice_spotlight", "voice_stats",
+    "wakeup_log", "warns", "weekly_quests", "weekly_recap_log", "welcomed_users", "wheel_log",
+    "wiki_entries", "world_boss_attackers", "world_bosses"
+})
+
+#  19/10/2026 : rôles des systèmes retirés — VIP d'activité, UGC, notifications d'événements
+#  (que le bouton « Me notifier » a pu recréer après le premier ménage).
+_ROLES_RETIRES_V2 = _ROLES_OBSOLETES | {"🌟 VIP", "💎 VIP+", "🎨 Créateur UGC", "🛒 Collectionneur UGC"}
+_PERMS_STAFF = ("administrator", "manage_guild", "manage_roles", "manage_channels",
+                "ban_members", "kick_members", "moderate_members", "manage_messages")
 
 
-async def _retirer_tables_accessoires():
-    """19/10/2026 : la veille des accessoires est retirée ; ses tables aussi."""
+def _ids_configures(valeur, out=None) -> set:
+    """Tous les identifiants cités par la configuration du serveur (rôles d'équipe, etc.)."""
+    out = set() if out is None else out
+    if isinstance(valeur, dict):
+        for v in valeur.values():
+            _ids_configures(v, out)
+    elif isinstance(valeur, (list, tuple, set)):
+        for v in valeur:
+            _ids_configures(v, out)
+    elif isinstance(valeur, int) and not isinstance(valeur, bool):
+        out.add(valeur)
+    elif isinstance(valeur, str):
+        out.update(int(x) for x in re.findall(r"\d{15,20}", valeur))
+    return out
+
+
+def _role_supprimable(r, me, configures: set) -> bool:
+    perms = r.permissions
+    return (not r.managed and not r.is_default() and r < me.top_role
+            and r.id not in configures
+            and not any(getattr(perms, p, False) for p in _PERMS_STAFF))
+
+
+async def _menage_v2(g):
+    """19/10/2026, une fois par serveur : rôles VIP / UGC / notifications et rôles de
+    récompense de niveau. Un rôle cité par la configuration ou qui donne un pouvoir de staff
+    n'est jamais touché."""
+    try:
+        c = await cfg(g.id)
+        if c.get('menage_v2'):
+            return
+        me = g.me
+        if not (me and me.guild_permissions.manage_roles):
+            return
+        niveaux = set()
+        try:
+            async with get_db() as db:
+                async with db.execute("SELECT name FROM sqlite_master "
+                                      "WHERE type='table' AND name='level_rewards'") as cur:
+                    existe = await cur.fetchone()
+                if existe:
+                    async with db.execute("SELECT role_id FROM level_rewards WHERE guild_id=?",
+                                          (g.id,)) as cur:
+                        niveaux = {int(r[0]) for r in await cur.fetchall() if r[0]}
+        except Exception as ex:
+            _logerr("menage.niveaux", ex, guild_id=g.id)
+        configures = _ids_configures(dict(c))
+        for r in list(g.roles):
+            if (r.name in _ROLES_RETIRES_V2 or r.id in niveaux) and _role_supprimable(r, me, configures):
+                try:
+                    await r.delete(reason="Système retiré (VIP, niveaux, UGC, notifications)")
+                    await asyncio.sleep(0.5)
+                except discord.HTTPException as ex:
+                    _logerr("menage.roles_v2", ex, guild_id=g.id)
+        await db_set(g.id, 'menage_v2', now().isoformat())
+    except Exception as ex:
+        _logerr("menage.v2", ex, guild_id=getattr(g, 'id', 0))
+
+
+async def _retirer_tables_mortes():
+    """19/10/2026 : tables que plus aucun code n'écrit ni ne lit (jeux, combat, économie,
+    niveaux, activité, accessoires…). Idempotent : seules celles encore présentes partent."""
     try:
         async with get_db() as db:
-            for t in _TABLES_ACCESSOIRES:
+            async with db.execute("SELECT name FROM sqlite_master WHERE type='table'") as cur:
+                presentes = {r[0] for r in await cur.fetchall()}
+            a_retirer = sorted(presentes & _TABLES_MORTES)
+            for t in a_retirer:
                 await db.execute(f"DROP TABLE IF EXISTS {t}")
             await db.commit()
+        if a_retirer:
+            print("[DATA] tables mortes retirées :", len(a_retirer))
     except Exception as ex:
-        _logerr("accessoires.tables", ex)
+        _logerr("data.tables_mortes", ex)
 
 
 async def _travaux_de_demarrage():
     """Les migrations, en tâche de fond, serveur par serveur."""
     try:
         await bot.wait_until_ready()
-        await _retirer_tables_accessoires()
         for g in list(bot.guilds):
             try:
                 await _migrer_panneaux_tickets(g)
@@ -14433,8 +11369,10 @@ async def _travaux_de_demarrage():
                 await _retirer_exclamations(g)
                 await _retirer_salons_combat(g)
                 await _menage_unique(g)
+                await _menage_v2(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
+        await _retirer_tables_mortes()
     except Exception as ex:
         print(f"[demarrage travaux] {ex}")
 
@@ -14523,7 +11461,6 @@ async def _veille_roblox_wait():
 #   panneau puisse le lever lui aussi — il ne le pouvait pas depuis ici.)
 
 
-
 def _age_s(quand) -> float | None:
     if quand is None:
         return None
@@ -14531,7 +11468,6 @@ def _age_s(quand) -> float | None:
         return (datetime.now(timezone.utc) - quand).total_seconds()
     except Exception:
         return None
-
 
 
 # ── L'éclaireur d'ACTUALITÉS ─────────────────────────────────────────────────
@@ -14640,7 +11576,6 @@ _SUPERVISED_LOOP_NAMES = [
     "veille_roblox_task",
     #  ⚠️ PIÈGE N°2 DU DÉPÔT : le superviseur relance les boucles PAR LEUR NOM.
     "eclaireur_actu_task",
-    "ui_usage_flush_task",
     #  ⚠️ `event_auto_scheduler` et `world_boss_scheduler` retirés le 16/08/2026 :
     #  les fonctions n'existaient plus depuis une purge antérieure, seuls les
     #  NOMS restaient. Sans effet ici (`globals().get()` rend None), mais c'est
@@ -14666,7 +11601,7 @@ _SUPERVISED_LOOP_NAMES = [
     "check_social_feeds",
     "cleanup_old_db_data", "check_scheduled_messages",
     "check_expired_roles", "cleanup_deals_task", "check_expired_restrictions",
-    "birthday_announcer", "poll_closer",     "thematic_voice_cleanup_task", "temp_voice_watchdog",     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
+    "birthday_announcer", "poll_closer", "temp_voice_watchdog",     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
     # que la date n'est pas configurée/atteinte.
     # Entraide : édite les posts des demandes expirées + supprime les vocaux temp
     # orphelins (vides) de la catégorie configurée. Fail-open, no-op si non configuré.
@@ -14679,62 +11614,24 @@ _SUPERVISED_LOOP_NAMES = [
 ]
 
 
-
-
-
-
 _supervisor_did_first_pass = False  # FIX logs : 1er tour = démarrage au boot → silencieux
 
 # Boucles des MODULES supervisées (alias *_module en tête de fichier → globals().get()).
 # Extrait en CONSTANTE module-level (Tâche C) pour devenir une SOURCE DE VÉRITÉ partagée
 # entre le superviseur ET health_check (avant : tuple inline, illisible côté health_check).
 _SUPERVISED_MODULE_LOOPS = (
-    ("recidivism_module", "deescalate_task"),
-    ("conversation_starters_module", "conv_starter_task"),
-    ("social_zones_module", "zone_watchdog"),
-    # FIX fiabilité (Lot 3) : boucles de MODULES lancées au boot mais non supervisées →
-    # mortes à vie sur une exception. getattr(...,None) est fail-safe si un module n'a
-    # pas chargé.
-    ("db_backup_module", "backup_task"),
-    ("cmty_hub_module", "weekly_highlights_task"),
-    ("rblx_link_module", "roblox_updates_check_task"),
-    # auto_close_inactive_task NON supervisée : désactivée (no-op, plus lancée au boot) —
-    # le bot ne ferme jamais un ticket. Verrouillée aussi via _SUPERVISOR_DENY (balayage auto).
-    # sla_reminder_task RETIRÉE (owner 2026-06-18) : rappel/escalade/ping de tickets supprimés
-    # complètement (no-op, plus lancée ni supervisée) → ne pas re-superviser une boucle morte.
-    ("obs_module", "daily_snapshot_task"),
-    ("obs_module", "anomaly_check_task"),
-    ("pubmet_module", "metrics_refresh_task"),
-    ("cleanup_module", "weekly_cleanup_task"),
-    ("health_module", "health_check_task"),
-    # ("backup_module", "backup_daily_task") RETIRÉE (owner 2026-07-12) : backup_lite faisait
-    # exploser la RAM à ~5 Go (60 tables SELECT * → JSON → bytes → gzip = 4 copies) → OOM →
-    # boucle de crash. db_backup.py assure le backup 24 h proprement (API SQLite native, page
-    # par page, zéro pic RAM). Ne PAS re-superviser une boucle volontairement désactivée.
-    ("dm_digest_module", "digest_dispatch_task"),
-    ("webhook_tracker_module", "weekly_scan_task"),
-    ("owner_digest_module", "owner_digest_task"),
-    ("roblox_stats_module", "weekly_stats_task"),
-    ("stream_party_module", "cleanup_task"),
-    ("stream_schedule_module", "countdown_task"),
-    ("activity_heatmap_module", "weekly_owner_dispatch_task"),
-    ("status_rotator_module", "rotator_task"),
-    ("voice_autoclean_module", "check_task"),
-    ("error_logger_module", "burst_check_task"),
-    ("activity_rewards_module", "weekly_reward_task"),
-    ("activity_vip_module", "vip_eval_task"),
-    # FIX sécu P0 : expiration auto du lockdown anti-raid (sans elle, un faux-raid
-    # verrouillait le serveur À VIE).
-    ("raid_module", "lockdown_expiry_task"),
-    ("weekly_stats_module", "weekly_post_task"),
-    # Tâche A.2 : chaîne collective de présence (évaluation quotidienne, fail-open)
-    ("presence_chain_module", "chain_daily_task"),
-    # Tâche B.1 : crédit différé des parrainages éligibles (anti-alt, fail-open)
-    ("referrals_module", "referral_reward_task"),
-    # Entraide : expire les demandes ouvertes trop vieilles (dégorge la file, fail-open)
-    ("entraide_module", "entraide_expiry_task"),
-    # Vocaux temp : auto-déverrouillage des vocaux verrouillés expirés (anti-oubli, fail-open)
-    ("voice_control_module", "unlock_expired_task"),
+    #  19/10/2026 : seulement les modules qui existent encore.
+    ('recidivism_module', 'deescalate_task'),
+    ('social_zones_module', 'zone_watchdog'),
+    ('db_backup_module', 'backup_task'),
+    ('obs_module', 'daily_snapshot_task'),
+    ('obs_module', 'anomaly_check_task'),
+    ('cleanup_module', 'weekly_cleanup_task'),
+    ('health_module', 'health_check_task'),
+    ('dm_digest_module', 'digest_dispatch_task'),
+    ('webhook_tracker_module', 'weekly_scan_task'),
+    ('error_logger_module', 'burst_check_task'),
+    ('raid_module', 'lockdown_expiry_task'),
 )
 
 # DENY-LIST EXPLICITE (Tâche C) : boucles que le balayage AUTO ne doit JAMAIS démarrer ni
@@ -15014,93 +11911,7 @@ async def _task_supervisor_wait():
 task_supervisor.add_exception_type(Exception)
 
 
-async def _guild_recently_active(guild_id, minutes: int = 120, min_users: int = 1) -> bool:
-    """Phase 194 — OFFRE À LA DEMANDE : le serveur a-t-il eu de l'activité humaine
-    récente (≥ min_users membres ayant parlé dans les `minutes` dernières) ?
-    Évite de lancer un événement de remplissage dans un serveur désert (ça
-    « parle dans le vide » et ne sert personne). `last_message` est stocké en
-    UTC ISO (now()=UTC) → datetime() le normalise pour la comparaison. Fail-open :
-    en cas d'erreur on renvoie True (mieux vaut un event de trop qu'un serveur
-    rendu muet par une erreur technique)."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT COUNT(*) FROM activity_tracking WHERE guild_id=? "
-                "AND last_message IS NOT NULL "
-                "AND datetime(last_message) > datetime('now', ?)",
-                (guild_id, f"-{int(minutes)} minutes"),
-            ) as cur:
-                row = await cur.fetchone()
-                return bool(row and row[0] >= min_users)
-    except Exception:
-        return True
-
-
-
-
-
-
-
-
 # ─────────────────────────── RESTAURATION AU BOOT ───────────────────────────
-
-async def restore_active_events():
-    """Au boot du bot : restore les views (boss/treasure/quiz) des events actifs."""
-    try:
-        async with get_db() as db:
-            async with db.execute('SELECT id, event_type FROM events WHERE ended=0') as cur:
-                rows = await cur.fetchall()
-        for event_id, event_type in rows:
-            try:
-                if event_type == 'boss_raid' or not event_type:
-                    pass  # bloc vidé (module détaché)
-                # Treasure / Quiz : les views sont attachées à des messages spécifiques
-                # qui contiennent leur custom_id. Au reboot, on ne peut pas restaurer
-                # les boutons sans relancer le spawner / runner. Solution : on les ignore
-                # (le timeout_checker terminera l'event).
-            except Exception as ex:
-                print(f"[restore_active_events event_id={event_id}] {ex}")
-        if rows:
-            print(f"[EVENTS] {len(rows)} événement(s) actif(s) restauré(s)")
-    except Exception as ex:
-        print(f"[restore_active_events] {ex}")
-
-
-async def restore_active_personal_events():
-    """Au boot : restore les PersonalEventOpenView persistantes pour les events non-claim."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT id FROM personal_events_log WHERE claimed=0 '
-                'AND datetime(created_at) > datetime("now", "-7 days")',
-            ) as cur:
-                rows = await cur.fetchall()
-        count = 0
-        for (log_id,) in rows:
-            try:
-                bot.add_view(v)
-                count += 1
-            except Exception as ex:
-                print(f"[restore_active_personal_events log_id={log_id}] {ex}")
-        if count:
-            print(f"[PERSONAL EVENTS] {count} event(s) personnel(s) restauré(s)")
-    except Exception as ex:
-        print(f"[restore_active_personal_events] {ex}")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  🔑 DÉLÉGATIONS — Owner crée des rôles délégués, managers utilisent /manage
-#  Phase 18
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -15287,8 +12098,6 @@ class SecurityChannelsPanelV2(LayoutView):
       (suggéré : 🎁-claim-free-nitro pour appâter les bots scrapers)
     - 🚨 Staff Sanction : salon où le bot pose les panels d'action quand
       un module détecte une infraction (Mute/Warn/Kick/Ban)
-    - 🔴 Watch Party : salon où le bot annonce les lives du créateur
-      (optionnel — buff XP×2 fonctionne sans)
     """
 
     CHANNEL_KEYS = [
@@ -15300,15 +12109,6 @@ class SecurityChannelsPanelV2(LayoutView):
          "Salon où le bot envoie les panels d'action quand un module "
          "(token grabber, webhook leak, honeypot, anomaly) détecte "
          "une infraction. Boutons Mute/Warn/Kick/Ban."),
-        ("stream_watch_channel_id", "🔴 Watch Party",
-         "Salon où le bot poste un panel quand le créateur lance un "
-         "live Twitch/YouTube (buff XP×2 reste actif partout même si "
-         "ce salon n'est pas configuré)."),
-        ("combat_arena_channel_id", "⚔️ Arène Combat",
-         "Salon où le bot fait spawn les mobs (Phase 169 Mob Hunts), "
-         "le marchand itinérant et les invasions mondiales. "
-         "Si non défini, fallback sur l'arène boss raid active ou "
-         "un salon nommé 'arène/arena/combat/boss'."),
     ]
 
     def __init__(self, u, g):
@@ -16188,7 +12988,6 @@ class ProtPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
-
 class ProtDetailV2(LayoutView):
     """Detail d'une protection en V2 — toutes les sub-panels accessibles."""
 
@@ -16485,8 +13284,6 @@ class ProtDetailV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🖼️ ANTI-IMAGE CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -16570,7 +13367,6 @@ class ImageConfigPanelV2(LayoutView):
         prot = next(p for p in PROTS if p[0] == "anti_image")
         v = ProtDetailV2(self.u, self.g, prot)
         await v.render_to(i, edit=True)
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -16941,8 +13737,6 @@ class _BadwordsSanctionActionView(LayoutView):
         await BadwordsConfigPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🔗 ANTI-LINK CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -17057,7 +13851,6 @@ class LinkConfigPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
-
 class AddDomainModal(Modal, title="➕ Ajouter des domaines"):
     doms = TextInput(
         label="Domaines (séparés par des virgules)",
@@ -17110,7 +13903,6 @@ class AddDomainModal(Modal, title="➕ Ajouter des domaines"):
                 )
         except Exception:
             pass
-
 
 
 # Garder l'ancienne classe pour compatibilité
@@ -17231,7 +14023,6 @@ def get_prot_default_action(key):
 
 def get_prot_default_duration(key):
     return _PROT_DEFAULT_DURATIONS.get(key, 5)
-
 
 
 class ActionConfigPanelV2(LayoutView):
@@ -17363,15 +14154,6 @@ class DurationConfigModal(Modal, title="⏱️ Durée du Mute"):
         prot = next(p for p in PROTS if p[0] == self.key)
         v = ProtDetailV2(self.u, self.g, prot)
         await v.render_to(i, edit=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           ⚔️ ANTI-RAID CONFIG PANEL
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           👥 ANTI-ALT CONFIG (Comptes Secondaires)
@@ -17514,7 +14296,6 @@ class AltConfigPanelV2(LayoutView):
         prot = next(p for p in PROTS if p[0] == "anti_alt")
         v = ProtDetailV2(self.u, self.g, prot)
         await v.render_to(i, edit=True)
-
 
 
 class AltConfidenceModal(Modal, title="📊 Confiance minimum"):
@@ -17673,7 +14454,6 @@ class AltScanResultsPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
-
 class ConfirmAltActionView(View):
     def __init__(self, u, g, targets, action):
         super().__init__(timeout=60)
@@ -17822,7 +14602,6 @@ class AltDetectionsPanelV2(LayoutView):
     async def _cb_back(self, i):
         v = AltConfigPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
-
 
 
 class SuspectScanPanelV2(LayoutView):
@@ -18278,8 +15057,6 @@ class ConfirmKickView(View):
     @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, i, b):
         await i.response.edit_message(content="❌ Kick annulé", embed=None, view=None)
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -18780,13 +15557,7 @@ class ImmunePanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
-
-
-
-
 # Garder les anciennes classes pour compatibilité (mais elles ne seront plus utilisées)
-
-
 
 
 class ImmuneRemoveView(View):
@@ -19058,60 +15829,12 @@ class _PaginatedImmuneRemoveSelect(Select):
         await v.render_to(i, edit=True)
 
 
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           ⚡ COMMANDES PANEL
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🔒 DIRECTION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🎭 RELLSEAS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           💡 SUGGESTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
 # Sélecteur de rôle paginé
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🔄 TRADE PANEL
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -19136,9 +15859,7 @@ _live_state = {}
 # C'est le fix principal du spam : même si le live flicker (TikTok/Twitch HTML instable),
 # on ne re-annonce JAMAIS avant 18h. Un stream de 24h = 1 seule annonce.
 LIVE_ANNOUNCE_COOLDOWN = 64800  # 18 heures en secondes
-# Nombre de checks "non-live" consécutifs avant de considérer le live VRAIMENT terminé
-# Avec check_social_feeds toutes les 5 min → 36 checks = 3 HEURES de debounce
-# Ça évite les faux "fin de live" causés par des erreurs réseau/HTML temporaires
+# Passages d'affilée sans live avant d'en déclarer la fin (anti-clignotement du HTML).
 LIVE_END_THRESHOLD = 36
 # Lock pour empêcher les exécutions concurrentes du task
 _feeds_lock = asyncio.Lock()
@@ -19164,6 +15885,65 @@ async def load_live_state_from_db():
         print(f"✅ Live state loaded: {len(_live_state)} entries")
     except:
         pass
+
+
+async def save_live_state(cache_key: str, guild_id: int = 0, platform: str = '', username: str = ''):
+    """Persiste l'état d'un live en DB (relu au démarrage par load_live_state_from_db)."""
+    state = _live_state.get(cache_key)
+    if not state:
+        return
+    try:
+        ann_str = state['announced_at'].isoformat() if state.get('announced_at') else None
+        msg_id = state.get('message_id', 0)
+        ch_id = state.get('live_channel_id', 0)
+        async with get_db() as db:
+            await db.execute('''
+                INSERT INTO live_announcements (cache_key, guild_id, platform, username, announced_at, is_live, fail_count, message_id, live_channel_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    announced_at = ?, is_live = ?, fail_count = ?, message_id = ?, live_channel_id = ?
+            ''', (cache_key, guild_id, platform, username, ann_str,
+                  1 if state.get('is_live') else 0, state.get('fail_count', 0), msg_id, ch_id,
+                  ann_str, 1 if state.get('is_live') else 0, state.get('fail_count', 0), msg_id, ch_id))
+            await db.commit()
+    except Exception as ex:
+        _logerr("live.save", ex, guild_id=guild_id)
+
+
+async def mark_live_announced(cache_key: str, guild_id: int = 0, platform: str = '', username: str = '',
+                              message_id: int = 0, live_channel_id: int = 0):
+    """Marque un live comme annoncé (RAM + DB) et garde le message pour le retirer à la fin."""
+    _live_state[cache_key] = {
+        'is_live': True,
+        'announced_at': now(),
+        'fail_count': 0,
+        'message_id': message_id,
+        'live_channel_id': live_channel_id,
+    }
+    await save_live_state(cache_key, guild_id, platform, username)
+
+
+async def check_live_ended(cache_key: str, guild_id: int = 0, platform: str = '', username: str = ''):
+    """Un passage sans live : après LIVE_END_THRESHOLD d'affilée, le live est fini et son
+    message d'annonce est retiré."""
+    state = _live_state.get(cache_key)
+    if not state or not state.get('is_live'):
+        return
+    state['fail_count'] = state.get('fail_count', 0) + 1
+    if state['fail_count'] >= LIVE_END_THRESHOLD:
+        msg_id = state.get('message_id', 0)
+        ch_id = state.get('live_channel_id', 0)
+        guild = bot.get_guild(guild_id) if guild_id else None
+        channel = guild.get_channel(ch_id) if guild and ch_id else None
+        if channel and msg_id:
+            try:
+                await (await channel.fetch_message(msg_id)).delete()
+            except discord.NotFound:
+                pass
+            except discord.HTTPException as ex:
+                _logerr("live.fin", ex, guild_id=guild_id)
+        state.update(is_live=False, fail_count=0, message_id=0, live_channel_id=0)
+    await save_live_state(cache_key, guild_id, platform, username)
 
 
 async def should_announce_live(cache_key: str) -> bool:
@@ -19199,7 +15979,6 @@ async def should_announce_live(cache_key: str) -> bool:
     return True  # Cooldown passé → annoncer
 
 
-
 def mark_live_still_active(cache_key: str):
     """Le live est toujours actif — reset le compteur de fin ET s'assurer que is_live=True.
     
@@ -19223,9 +16002,6 @@ _TW_ICON = 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.
 _TK_ICON = 'https://sf16-scmcdn-va.ibytedtos.com/goofy/tiktok/web/node/_next/static/images/logo-7328701c.png'
 _X_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/X_logo_2023.svg/120px-X_logo_2023.svg.png'
 _RD_ICON = 'https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png'
-_DC_ICON = 'https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.png'
-_RBX_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bb/Roblox_logo_2022.svg/120px-Roblox_logo_2022.svg.png'
-_STM_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Steam_icon_logo.svg/120px-Steam_icon_logo.svg.png'
 
 # ═══ AVATAR GLOBAL DU BOT (mis à jour dans on_ready) ═══
 # Utilisé comme avatar de TOUS les webhooks — garantit un logo uniforme
@@ -19625,44 +16401,16 @@ async def webhook_edit(channel, platform: str, message_id: int, embed=None, cont
         return None
 
 
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  🎬 SPOTLIGHT CRÉATEURS (Phase 26.2)
-#  Membres avec un rôle "Créateur" enregistrent leur YouTube/Twitch.
-#  Les nouvelles vidéos/lives (filtre keyword optionnel) sont auto-publiées
-#  dans un salon dédié.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
 # ─────────────────────────────── YOUTUBE ───────────────────────────────
-
-
-
-
-
 
 
 # ─────────────────────────────── TWITCH ───────────────────────────────
 
 
-
-
-
 # ─────────────────────────────── TIKTOK ───────────────────────────────
 
 
-
-
-
 # ─────────────────────────────── REDDIT ───────────────────────────────
-
-
-
 
 
 # ─────────────────────────────── TWITTER/X ───────────────────────────────
@@ -19683,52 +16431,18 @@ NITTER_INSTANCES = [
     "nitter.catsarch.com",
     "lightbrd.com",
 ]
-# Fallback RSS-Bridge si Nitter échoue
-RSS_BRIDGE_URLS = [
-    "https://rss-bridge.org/bridge01/?action=display&bridge=TwitterBridge&context=By+username&u={username}&format=Atom",
-]
-
-
-
-
-
 
 
 # ─────────────────────────────── DISCORD CHANNELS ───────────────────────────────
 
 
-
-
-
 # ─────────────────────────────── ROSOCIAL ───────────────────────────────
-
-
-
 
 
 # ─────────────────────────────── ROBLOX UGC ───────────────────────────────
 
 
-
-
-
-
-
-
 # ─────────────────────────────── RÉDUCTIONS JEUX ───────────────────────────────
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  🎮 MISES À JOUR DE PLATEFORMES / JEUX — Panel V2 (Phase 17)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
 
 
 # ─────────────────────────────── COMMON VIEWS ───────────────────────────────
@@ -19871,8 +16585,6 @@ class V2GenericChannelPicker(LayoutView):
         await _afficher_panneau(self, interaction, edit)
 
 
-
-
 class V2GenericRolePicker(LayoutView):
     """Selecteur de role V2 generique (Phase 3.0k).
 
@@ -19989,56 +16701,7 @@ class V2GenericRolePicker(LayoutView):
         await _afficher_panneau(self, interaction, edit)
 
 
-
-
-
-
-
-
-
-
 # Anciennes classes gardées pour compatibilité
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🎯 CENTRE PANEL
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           😄 AUTO-RÉACTIONS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🎭 RÔLES EN MASSE (AJOUT / RETRAIT)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -20046,45 +16709,7 @@ class V2GenericRolePicker(LayoutView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
-
-
-
-
-
 # Ancien code conservé pour compatibilité
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🎁 GIVEAWAY (CADEAU) PANEL
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -20295,60 +16920,11 @@ class CompromisedAccountActionView(View):
             print(f"[CompromisedAccountActionView _update_dossier] {ex}")
 
 
-# Verrou par giveaway (message_id) pour sérialiser les écritures concurrentes
-# de la liste de participants — le pool SQLite n'a pas de row-lock, donc un
-# double-clic / deux participants simultanés provoquerait un lost-update
-# (le dernier writer écrase le participant du premier). Cf. AUDIT sécu Phase 251.
-_giveaway_locks = {}
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           📈 SYSTÈME DE NIVEAUX & BOUTIQUE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
 # ─────────────────────────────── RÔLES NIVEAU ───────────────────────────────
-
-
-
-
-
 
 
 # ─────────────────────────────── BOUTIQUE CONFIG ───────────────────────────────
 
-
-
-
-
-
-
-def format_duration(seconds):
-    """Formate une durée en texte lisible"""
-    if seconds < 60:
-        return f"{seconds}s"
-    elif seconds < 3600:
-        return f"{seconds // 60}min"
-    elif seconds < 86400:
-        hours = seconds // 3600
-        mins = (seconds % 3600) // 60
-        return f"{hours}h{mins}min" if mins else f"{hours}h"
-    else:
-        days = seconds // 86400
-        hours = (seconds % 86400) // 3600
-        return f"{days}j{hours}h" if hours else f"{days}j"
 
 # Sélecteur de salons générique avec callback personnalisé
 
@@ -20360,38 +16936,7 @@ def format_duration(seconds):
 temp_voice_channels = {}
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ─────────────────────────────── SALONS COMMANDES ───────────────────────────────
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -20404,11 +16949,6 @@ auto_help_messages = {}  # {channel_id: message_id}
 _auto_help_locks = {}  # {channel_id: asyncio.Lock}
 
 # NOTE: AutoHelpPanel (View V1) supprime — remplace par AutoHelpPanelV2 (LayoutView). Jamais instancie.
-
-
-
-
-
 
 
 async def handle_auto_help(message):
@@ -20503,64 +17043,6 @@ async def handle_auto_help(message):
     except Exception as ex:
         print(f"[AUTO_HELP] Erreur générale: {ex}")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           💰 FONCTIONS ÉCONOMIE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-async def get_user_economy(guild_id, user_id):
-    """Récupère les données économiques d'un utilisateur"""
-    async with get_db() as db:
-        async with db.execute(
-            'SELECT coins, bank, xp, level, last_daily, last_work, message_count FROM economy WHERE guild_id=? AND user_id=?',
-            (guild_id, user_id)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return {
-                    'coins': row[0] or 0, 
-                    'bank': row[1] or 0, 
-                    'xp': row[2] or 0, 
-                    'level': row[3] or 1,
-                    'last_daily': row[4], 
-                    'last_work': row[5],
-                    'message_count': row[6] or 0
-                }
-            else:
-                # Créer l'entrée. OR IGNORE (owner 2026-06-18) : 2 coroutines concurrentes
-                # (récompenses vocales au boot) pouvaient toutes deux voir « pas de ligne »
-                # et INSERT → la 2e plantait « UNIQUE constraint failed: economy.guild_id,
-                # economy.user_id ». OR IGNORE rend la création atomique (aucune perte).
-                await db.execute(
-                    'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level, message_count) VALUES (?, ?, 0, 0, 0, 1, 0)',
-                    (guild_id, user_id)
-                )
-                await db.commit()
-                return {'coins': 0, 'bank': 0, 'xp': 0, 'level': 1, 'last_daily': None, 'last_work': None, 'message_count': 0}
-
-async def update_user_economy(guild_id, user_id, **kwargs):
-    """Met à jour les données économiques d'un utilisateur"""
-    async with get_db() as db:
-        # S'assurer que l'utilisateur existe
-        await db.execute(
-            'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
-            (guild_id, user_id)
-        )
-        
-        # Construire la requête de mise à jour
-        updates = []
-        values = []
-        for key, value in kwargs.items():
-            updates.append(f"{key}=?")
-            values.append(value)
-        
-        if updates:
-            values.extend([guild_id, user_id])
-            await db.execute(
-                f'UPDATE economy SET {", ".join(updates)} WHERE guild_id=? AND user_id=?',
-                values
-            )
-            await db.commit()
-
 # ═════════════════════════════════════════════════════════════════════════════
 #  TASK A5 — GEL ÉCONOMIE d'un compte compromis / isolé (anti-drain)
 #  Puisqu'on ne bannit plus (règle founder-only), on gèle les MOUVEMENTS d'argent
@@ -20571,10 +17053,6 @@ async def update_user_economy(guild_id, user_id, **kwargs):
 #  - is_account_frozen : FAIL-OPEN sur erreur infra (renvoie False → ne bloque pas
 #    un membre légitime sur un hoquet DB) ; un compte RÉELLEMENT gelé → True.
 # ═════════════════════════════════════════════════════════════════════════════
-
-# Message standard renvoyé (éphémère) quand un mouvement d'argent est refusé.
-FROZEN_ACCOUNT_MSG = ("🔒 Ton compte est temporairement gelé (sécurité) — "
-                      "contacte le fondateur")
 
 
 async def freeze_account(guild_id, user_id, reason="compte compromis"):
@@ -20610,283 +17088,6 @@ async def unfreeze_account(guild_id, user_id):
         return False
 
 
-async def is_account_frozen(guild_id, user_id) -> bool:
-    """True si le compte est gelé. FAIL-OPEN sur erreur infra (renvoie False) :
-    un hoquet DB ne doit JAMAIS bloquer un membre légitime. Un compte réellement
-    présent dans account_freeze → True."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT 1 FROM account_freeze WHERE guild_id=? AND user_id=?",
-                (int(guild_id), int(user_id)),
-            ) as cur:
-                row = await cur.fetchone()
-        return row is not None
-    except Exception as ex:
-        print(f"[is_account_frozen] FAIL-OPEN sur erreur infra : {ex}")
-        return False
-
-
-async def add_coins(guild_id, user_id, amount):
-    """Ajoute des coins à un utilisateur de manière atomique.
-
-    TASK A5 : si le montant est NÉGATIF (débit/sortie d'argent) et que le compte
-    est GELÉ (compromis), on REFUSE le mouvement et on renvoie le solde inchangé.
-    Les CRÉDITS (montant ≥ 0 : récompenses passives, remboursements) restent permis
-    — on cible le DRAIN. Le check vit juste avant l'opération atomique."""
-    if amount < 0:
-        try:
-            if await is_account_frozen(guild_id, user_id):
-                print(f"[add_coins] DÉBIT REFUSÉ (compte gelé) guild={guild_id} "
-                      f"user={user_id} amount={amount}")
-                # Renvoie le solde INCHANGÉ (aucun mouvement), comme le chemin normal.
-                async with get_db() as _db:
-                    async with _db.execute(
-                        'SELECT coins FROM economy WHERE guild_id=? AND user_id=?',
-                        (guild_id, user_id),
-                    ) as _cur:
-                        _row = await _cur.fetchone()
-                return _row[0] if _row else 0
-        except Exception:
-            pass  # fail-open : un hoquet du check ne doit pas bloquer
-    async with get_db() as db:
-        # S'assurer que l'utilisateur existe
-        await db.execute(
-            'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
-            (guild_id, user_id)
-        )
-        # Mise à jour atomique
-        await db.execute(
-            'UPDATE economy SET coins = MAX(0, coins + ?) WHERE guild_id=? AND user_id=?',
-            (amount, guild_id, user_id)
-        )
-        await db.commit()
-        
-        # Récupérer le nouveau solde
-        async with db.execute(
-            'SELECT coins FROM economy WHERE guild_id=? AND user_id=?',
-            (guild_id, user_id)
-        ) as cursor:
-            row = await cursor.fetchone()
-            return row[0] if row else 0
-
-
-
-# ─── BANQUE : intérêts DÉGRESSIFS par palier de principal + CAP (Tâche C.2) ──
-# Avant : 1%/jour plat, capé à 30 j → +30% du principal sans limite absolue
-# (un dépôt de 10 M générait +3 M, inflationniste). Maintenant le taux est
-# MARGINAL et dégressif par TRANCHE de principal, avec un PLAFOND d'intérêt
-# total par dépôt. Les petits/moyens dépôts gardent ~1%/jour (tranche 1 pleine).
-# Tout est dérivé de `days` (calculé depuis deposited_at) → survit aux reboots,
-# rétro-compatible (aucune migration), aucune task.
-BANK_INTEREST_MAX_DAYS = 30          # maturité inchangée
-BANK_INTEREST_TOTAL_CAP = 50_000     # plafond d'intérêt absolu par dépôt (anti-whale)
-# Paliers (seuil_haut_de_tranche, taux/jour). La dernière tranche couvre l'infini.
-BANK_INTEREST_TIERS = (
-    (50_000,     0.010),   # 0 → 50k     : 1.0%/j   (petits/moyens : INCHANGÉ)
-    (250_000,    0.005),   # 50k → 250k  : 0.5%/j
-    (1_000_000,  0.0025),  # 250k → 1M   : 0.25%/j
-    (None,       0.001),   # > 1M        : 0.1%/j
-)
-
-
-
-
-async def add_xp(guild_id, user_id, amount, channel=None):
-    """Ajoute de l'XP et vérifie le level up"""
-    eco = await get_user_economy(guild_id, user_id)
-    new_xp = eco['xp'] + amount
-    current_level = eco['level']
-    
-    # Calcul du niveau (formule: XP requis = niveau * 100)
-    xp_for_next = current_level * 100
-    new_level = current_level
-    
-    while new_xp >= xp_for_next:
-        new_xp -= xp_for_next
-        new_level += 1
-        xp_for_next = new_level * 100
-    
-    await update_user_economy(guild_id, user_id, xp=new_xp, level=new_level)
-    
-    # Vérifier si level up
-    if new_level > current_level:
-        return new_level  # Retourne le nouveau niveau si level up
-    return None
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           📨 MESSAGE PANEL
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  « DERNIER MESSAGE » (sticky) — owner 2026-06-16. Cohabite avec les Auto-Messages.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-class AutoMessageChannelPaginatedView(View):
-    """Sélecteur de salon paginé pour les messages automatiques"""
-    def __init__(self, u, g, data, page=0):
-        super().__init__(timeout=180)
-        self.u = u
-        self.g = g
-        self.data = data
-        self.page = page
-        self.channels = list(g.text_channels)
-        self.per_page = 23
-        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
-        self._build()
-
-    def _build(self):
-        self.clear_items()
-        start = self.page * self.per_page
-        end = start + self.per_page
-        page_chs = self.channels[start:end]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id), description=(c.category.name[:50] if c.category else "Sans catégorie")) for c in page_chs]
-        if opts:
-            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Salon...", options=opts)
-            select.callback = self._select_cb
-            self.add_item(select)
-        if self.max_page > 0:
-            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
-            prev_btn.callback = self._prev
-            self.add_item(prev_btn)
-            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
-            self.add_item(page_btn)
-            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
-            next_btn.callback = self._next
-            self.add_item(next_btn)
-
-    async def _prev(self, i):
-        self.page -= 1
-        self._build()
-        await i.response.edit_message(view=self)
-
-    async def _next(self, i):
-        self.page += 1
-        self._build()
-        await i.response.edit_message(view=self)
-
-    async def _select_cb(self, i):
-        channel_id = int(i.data['values'][0])
-        channel = self.g.get_channel(channel_id)
-        if not channel:
-            return await i.response.edit_message(content="❌ Salon introuvable", view=None)
-        try:
-            async with get_db() as db:
-                await db.execute('''
-                    INSERT INTO scheduled_messages (guild_id, channel_id, title, description, image_url, frequency, frequency_value, send_hour)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    self.g.id, channel_id,
-                    self.data['title'], self.data['description'], self.data['image_url'],
-                    self.data['frequency'], self.data['frequency_value'], self.data['send_hour']
-                ))
-                await db.commit()
-        except Exception as ex:
-            print(f"Erreur sauvegarde message auto: {ex}")
-            return await i.response.edit_message(content=f"❌ Erreur: {ex}", view=None)
-        freq_labels = {
-            'minutes': f"toutes les {self.data['frequency_value']} minute(s)",
-            'hourly': f"toutes les {self.data['frequency_value']} heure(s)",
-            'daily': f"tous les {self.data['frequency_value']} jour(s)",
-            'weekly': f"toutes les {self.data['frequency_value']} semaine(s)"
-        }
-        await i.response.edit_message(
-            content=f"✅ **Message automatique créé !**\n\n"
-                    f"📢 Salon: {channel.mention}\n"
-                    f"🔄 Fréquence: {freq_labels.get(self.data['frequency'], self.data['frequency'])}\n"
-                    f"⏰ Heure d'envoi: {self.data['send_hour']}h00",
-            view=None
-        )
-
-# Legacy compat
-AutoMessageChannelSelectView = AutoMessageChannelPaginatedView
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           📊 STATISTIQUES PANEL
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🔕 SYSTÈME RÔLE AFK
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🔄 TÂCHE AUTOMATIQUE INACTIVITÉ
-# ═══════════════════════════════════════════════════════════════════════════════
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🧹 CLEANUP AUTO DES DB ANCIENNES (Phase 20)
 #
@@ -20908,29 +17109,6 @@ async def cleanup_old_db_data():
     try:
         deleted_total = 0
         async with get_db() as db:
-            # 1. member_activity > 30 jours (D3 : ne contient plus que le VOCAL —
-            #    les messages sont agrégés dans member_activity_daily).
-            try:
-                cur = await db.execute(
-                    "DELETE FROM member_activity WHERE created_at < datetime('now', '-30 days')"
-                )
-                deleted_total += cur.rowcount or 0
-                await db.commit()
-            except Exception as ex:
-                print(f"[cleanup member_activity] {ex}")
-
-            # 1b. member_activity_daily : rétention courte (agrégat messages).
-            #    35 j = couvre la fenêtre mensuelle des compteurs de stats (objectifs
-            #    du mois, msgs_30d) tout en restant minuscule (1 ligne/salon/jour).
-            try:
-                cur = await db.execute(
-                    "DELETE FROM member_activity_daily WHERE day < strftime('%Y-%m-%d', 'now', '-35 days')"
-                )
-                deleted_total += cur.rowcount or 0
-                await db.commit()
-            except Exception as ex:
-                print(f"[cleanup member_activity_daily] {ex}")
-
             # 2. security_logs > 90 jours
             try:
                 cur = await db.execute(
@@ -20967,308 +17145,6 @@ async def cleanup_old_db_data():
 @cleanup_old_db_data.before_loop
 async def _cleanup_old_db_wait():
     await bot.wait_until_ready()
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           📺 CONFIG SALON
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class ChanPanelV2(LayoutView):
-    """Panneau Configuration des Salons en V2."""
-
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        c = await cfg(self.g.id)
-        configs = c.get('channel_configs', {})
-        count = len(configs) if configs else 0
-
-        # Liste des salons configurés
-        if configs:
-            list_lines = []
-            for ch_id, conf in list(configs.items())[:15]:
-                ch = self.g.get_channel(int(ch_id))
-                if ch:
-                    restrictions = []
-                    if not conf.get('messages', True): restrictions.append("💬")
-                    if not conf.get('images', True): restrictions.append("🖼️")
-                    if not conf.get('gifs', True): restrictions.append("🎞️")
-                    if not conf.get('emojis', True): restrictions.append("😀")
-                    if not conf.get('links', True): restrictions.append("🔗")
-                    if conf.get('commands_only', False): restrictions.append("🤖")
-                    status = (" ".join(restrictions) + " bloqué(s)") if restrictions else "✅ Tout OK"
-                    list_lines.append(f"{ch.mention} → {status}")
-            list_block = "\n".join(list_lines)
-            if count > 15:
-                list_block += f"\n_… + {count - 15} autres_"
-        else:
-            list_block = "_Aucun salon avec règles personnalisées_"
-
-        # Boutons
-        self.clear_items()
-        b_add = Button(label="➕ Configurer un salon", style=discord.ButtonStyle.success, custom_id="chpv2_add")
-        b_add.callback = self._cb_add
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="chpv2_back")
-        b_back.callback = self._cb_back
-
-        items: list = []
-        if self.g.icon:
-            items.append(v2_section(
-                v2_title("📺 Configuration des Salons"),
-                v2_subtitle(f"{count} salon(s) avec règles personnalisées"),
-                accessory=v2_thumb(self.g.icon.url),
-            ))
-        else:
-            items.append(v2_title("📺 Configuration des Salons"))
-            items.append(v2_subtitle(f"{count} salon(s) avec règles personnalisées"))
-
-        items.append(v2_divider())
-        items.append(v2_body(list_block))
-        items.append(v2_divider())
-        items.append(v2_subtitle("Légende : 💬 messages · 🖼️ images · 🎞️ GIFs · 😀 emojis · 🔗 liens · 🤖 cmds only"))
-        items.append(discord.ui.ActionRow(b_add, b_back))
-
-        self.add_item(v2_container(*items, color=Palette.WARNING))
-
-        await _afficher_panneau(self, interaction, edit)
-
-    async def _cb_add(self, i):
-        # Phase 3.0k : V2 native picker - on select va vers EditChanCfgV2
-        v = _ChanPickerV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-    async def _cb_back(self, i):
-        # Refonte 2026-08 : passer par render_to(), sinon la racine s'affiche
-        # sans son résumé d'état (celui-ci est lu en base, donc en async).
-        await MainPanelV2(self.u, self.g).render_to(i, edit=True)
-
-
-class _ChanPickerV2(LayoutView):
-    """V2 picker pour ChanPanelV2 : selectionne un salon, ouvre EditChanCfgV2."""
-
-    def __init__(self, u, g):
-        super().__init__(timeout=300)
-        self.u = u
-        self.g = g
-        self._build()
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    def _build(self):
-        self.clear_items()
-        sel = discord.ui.ChannelSelect(
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news,
-                           discord.ChannelType.voice],
-            placeholder="📁 Choisir un salon a configurer...",
-            min_values=1, max_values=1,
-        )
-        async def _on_select(i):
-            try:
-                ch = sel.values[0]
-                v = EditChanCfgV2(self.u, self.g, str(ch.id))
-                await v.render_to(i, edit=True)
-            except Exception as ex:
-                import traceback; traceback.print_exc()
-                try:
-                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
-                except Exception:
-                    pass
-        sel.callback = _on_select
-
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
-        async def _back(i):
-            try:
-                v = ChanPanelV2(self.u, self.g)
-                await v.render_to(i, edit=True)
-            except Exception as ex:
-                import traceback; traceback.print_exc()
-                try:
-                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
-                except Exception:
-                    pass
-        b_back.callback = _back
-
-        items = [
-            v2_title("📺 Choisir un salon a configurer"),
-            v2_subtitle(f"{len(self.g.text_channels)} salons textuels et {len(self.g.voice_channels)} vocaux"),
-            v2_divider(),
-            v2_subtitle("Selectionne le salon dans le menu, tu pourras ensuite definir les regles."),
-            v2_divider(),
-            discord.ui.ActionRow(sel),
-            discord.ui.ActionRow(b_back),
-        ]
-        self.add_item(v2_container(*items, color=Palette.WARNING))
-
-    async def render_to(self, interaction, *, edit=True):
-        await _afficher_panneau(self, interaction, edit)
-
-
-class ChanSelectPaginatedView(View):
-    """Sélecteur de salon paginé pour Config Salon"""
-    def __init__(self, u, g, page=0):
-        super().__init__(timeout=180)
-        self.u = u
-        self.g = g
-        self.page = page
-        self.channels = list(g.text_channels)
-        self.per_page = 23
-        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
-        self._build()
-
-    def _build(self):
-        self.clear_items()
-        start = self.page * self.per_page
-        end = start + self.per_page
-        page_chs = self.channels[start:end]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id), description=(c.category.name[:50] if c.category else "Sans catégorie")) for c in page_chs]
-        if opts:
-            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Salon...", options=opts)
-            select.callback = self._select_cb
-            self.add_item(select)
-        if self.max_page > 0:
-            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
-            prev_btn.callback = self._prev
-            self.add_item(prev_btn)
-            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
-            self.add_item(page_btn)
-            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
-            next_btn.callback = self._next
-            self.add_item(next_btn)
-        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
-        back_btn.callback = self._back
-        self.add_item(back_btn)
-
-    async def _prev(self, i):
-        self.page -= 1
-        self._build()
-        await i.response.edit_message(embed=discord.Embed(title="📺 Choisir un salon", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.ORANGE), view=self)
-
-    async def _next(self, i):
-        self.page += 1
-        self._build()
-        await i.response.edit_message(embed=discord.Embed(title="📺 Choisir un salon", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.ORANGE), view=self)
-
-    async def _back(self, i):
-        v = ChanPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-    async def _select_cb(self, i):
-        v = EditChanCfgV2(self.u, self.g, i.data['values'][0])
-        await v.render_to(i, edit=True)
-
-# Legacy compat
-ChanSelectView = ChanSelectPaginatedView
-
-
-
-class EditChanCfgV2(LayoutView):
-    """Configuration par-salon en V2."""
-
-    def __init__(self, u, g, ch_id):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-        self.ch_id = ch_id
-
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-
-    async def _get_conf(self):
-        c = await cfg(self.g.id)
-        return c.get('channel_configs', {}).get(
-            str(self.ch_id),
-            {'messages': True, 'images': True, 'gifs': True, 'emojis': True, 'links': True, 'commands_only': False},
-        )
-
-    async def _save(self, conf):
-        c = await cfg(self.g.id)
-        configs = c.get('channel_configs', {})
-        configs[str(self.ch_id)] = conf
-        await db_set(self.g.id, 'channel_configs', configs)
-
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        ch = self.g.get_channel(int(self.ch_id))
-        conf = await self._get_conf()
-
-        def s(key, default=True):
-            return "✅ Autorisé" if conf.get(key, default) else "❌ Bloqué"
-
-        cmd_only = conf.get('commands_only', False)
-
-        # Boutons toggle — style dynamique : vert = activé/autorisé, rouge = bloqué
-        def _btn_perm(key, label):
-            allowed = conf.get(key, True)
-            return Button(
-                label=label,
-                style=(discord.ButtonStyle.success if allowed else discord.ButtonStyle.danger),
-                custom_id=f"eccv2_{key}",
-            )
-
-        self.clear_items()
-        b_msg = _btn_perm('messages', "💬 Messages")
-        b_msg.callback = lambda i: self._toggle(i, 'messages')
-        b_img = _btn_perm('images', "🖼️ Images")
-        b_img.callback = lambda i: self._toggle(i, 'images')
-        b_gif = _btn_perm('gifs', "🎞️ GIFs")
-        b_gif.callback = lambda i: self._toggle(i, 'gifs')
-        b_emo = _btn_perm('emojis', "😀 Emojis")
-        b_emo.callback = lambda i: self._toggle(i, 'emojis')
-        b_link = _btn_perm('links', "🔗 Liens")
-        b_link.callback = lambda i: self._toggle(i, 'links')
-        b_cmd = Button(
-            label="🤖 Cmds uniquement",
-            style=(discord.ButtonStyle.success if cmd_only else discord.ButtonStyle.secondary),
-            custom_id="eccv2_cmd",
-        )
-        b_cmd.callback = lambda i: self._toggle(i, 'commands_only', default=False)
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="eccv2_back")
-        b_back.callback = self._cb_back
-
-        items: list = [
-            v2_title(f"📺 Configuration · #{ch.name if ch else '?'}"),
-            v2_subtitle("Règles d'autorisation par type de contenu"),
-            v2_divider(),
-            v2_body(
-                f"💬 **Messages** · {s('messages')}\n"
-                f"🖼️ **Images** · {s('images')}\n"
-                f"🎞️ **GIFs** · {s('gifs')}\n"
-                f"😀 **Emojis** · {s('emojis')}\n"
-                f"🔗 **Liens** · {s('links')}"
-            ),
-            v2_divider(),
-            v2_body(
-                f"🤖 **Commandes bot uniquement** · {'✅ Activé' if cmd_only else '❌ Désactivé'}\n"
-                "_Si activé, seules les commandes slash peuvent être utilisées._"
-            ),
-            v2_divider(),
-            discord.ui.ActionRow(b_msg, b_img, b_gif, b_emo, b_link),
-            discord.ui.ActionRow(b_cmd, b_back),
-        ]
-
-        self.add_item(v2_container(*items, color=Palette.WARNING))
-
-        await _afficher_panneau(self, interaction, edit)
-
-    async def _toggle(self, i, key, default=True):
-        conf = await self._get_conf()
-        conf[key] = not conf.get(key, default)
-        await self._save(conf)
-        await EditChanCfgV2(self.u, self.g, self.ch_id).render_to(i, edit=True)
-
-    async def _cb_back(self, i):
-        v = ChanPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -21445,73 +17321,10 @@ class TicketMainPanelV2(LayoutView):
         await MainPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #              🚫 SÉLECTEUR DE RÔLE POUR BLACKLIST TICKETS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
-
-
-
-class TkLogPaginatedView(View):
-    """Sélecteur de salon Logs paginé pour les tickets"""
-    def __init__(self, u, g, page=0):
-        super().__init__(timeout=180)
-        self.u = u
-        self.g = g
-        self.page = page
-        self.channels = list(g.text_channels)
-        self.per_page = 23
-        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
-        self._build()
-
-    def _build(self):
-        self.clear_items()
-        start = self.page * self.per_page
-        end = start + self.per_page
-        page_chs = self.channels[start:end]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id), description=(c.category.name[:50] if c.category else "Sans catégorie")) for c in page_chs]
-        if opts:
-            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Salon logs...", options=opts)
-            select.callback = self._select_cb
-            self.add_item(select)
-        if self.max_page > 0:
-            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
-            prev_btn.callback = self._prev
-            self.add_item(prev_btn)
-            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
-            self.add_item(page_btn)
-            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
-            next_btn.callback = self._next
-            self.add_item(next_btn)
-        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
-        back_btn.callback = self._back
-        self.add_item(back_btn)
-
-    async def _prev(self, i):
-        self.page -= 1
-        self._build()
-        await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon Logs", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
-
-    async def _next(self, i):
-        self.page += 1
-        self._build()
-        await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon Logs", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
-
-    async def _back(self, i):
-        v = TicketMainPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-    async def _select_cb(self, i):
-        await db_set(i.guild.id, 'ticket_log', int(i.data['values'][0]))
-        v = TicketMainPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-# Legacy compat
-TkLogView = TkLogPaginatedView
 
 class NewPanelModal(Modal, title="➕ Nouveau Panel"):
     name = TextInput(label="Nom du panel", placeholder="Support, Partenariat...", max_length=30)
@@ -21579,8 +17392,6 @@ class EditPanelSelectViewV2(LayoutView):
     async def _cb_back(self, i):
         v = TicketMainPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
-
-
 
 
 class PanelEditViewV2(LayoutView):
@@ -22180,8 +17991,6 @@ class BlacklistClearConfirmView(View):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 
-
-
 class PanelCatPaginatedView(View):
     """Sélecteur de catégorie paginé pour les panels de tickets"""
     def __init__(self, u, g, pid, page=0):
@@ -22243,8 +18052,6 @@ class PanelCatPaginatedView(View):
         v = PanelEditViewV2(self.u, self.g, self.pid)
         await v.render_to(i, edit=True)
 
-# Legacy compat
-PanelCatView = PanelCatPaginatedView
 
 class SetMaxModal(Modal, title="🔢 Max tickets par utilisateur"):
     mx = TextInput(label="Nombre maximum", placeholder="1-10", default="1", max_length=2)
@@ -22519,15 +18326,23 @@ class SendPanelPaginatedView(LayoutView):
             except Exception:
                 pass
 
-# Legacy compat
-SendPanelView = SendPanelPaginatedView
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🎯 EVENTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_REALSY_VU: dict = {}
+
+
 async def update_realsy_activity(guild_id, user_id):
-    """Met à jour la dernière activité d'un utilisateur avec le rôle Realsy"""
+    """Met à jour la dernière activité d'un utilisateur avec le rôle Realsy — au plus une
+    écriture par membre toutes les 10 minutes (19/10/2026 : plus une par message)."""
+    k = (guild_id, user_id)
+    t = now()
+    if k in _REALSY_VU and (t - _REALSY_VU[k]).total_seconds() < 600:
+        return
+    _REALSY_VU[k] = t
+    _evict_if_big(_REALSY_VU, 5000)
     try:
         # PERF (revue totale) : un seul UPDATE — il est déjà no-op si la ligne n'existe pas
         # (WHERE guild_id/user_id). Le SELECT d'existence préalable était un round-trip DB
@@ -22607,462 +18422,6 @@ async def on_app_command_error(interaction: discord.Interaction, error):
         print(f"[APP CMD ERROR HANDLER FATAL] {ex}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 114 — BOOT CLEANUP : reset events actifs au démarrage
-# ═══════════════════════════════════════════════════════════════════════════════
-#
-# À chaque redéploiement Railway, les events `ended=0` en DB sont morts :
-# - Le message d'arène a perdu son bouton (View pas re-attachée)
-# - L'anti-spam Phase 69 bloque les nouveaux spawns du même type
-# - Les caches in-memory sont vides → incohérence vs DB
-#
-# Solution : au boot, marquer tous les events actifs comme terminés et vider
-# les caches. GARDE INTACT :
-# - player_inventory (équipement + HP + coins event)
-# - economy (coins/banque/XP/level)
-# - player_badges + player_event_stats (stats cumulées)
-# - loot_history, auctions, pets, daily_quests, achievements, missions, etc.
-#
-# Tente aussi de supprimer les messages d'arène orphelins (best-effort).
-async def _boot_cleanup_active_events():
-    """Phase 114 : reset events actifs + clear in-memory caches.
-
-    Idempotent : si rien à nettoyer, no-op. Log un récap des compteurs.
-    """
-    counts = {"events": 0, "world_bosses": 0, "flash_treasures": 0,
-              "voice_chaos": 0, "msgs_deleted": 0, "perms_restored": 0}
-
-    # ─── 1. Récolter les message_ids à supprimer + snapshots de perms ───
-    orphans_to_delete = []  # list of (channel_id, message_id)
-    perm_snapshots = []     # list of (guild_id, channel_id, had_overwrite, allow, deny)
-    arena_chans_to_delete = []  # Phase 219 : (guild_id, arena_channel_id) à DÉTRUIRE (+ leur catégorie)
-    # Phase 235.10 : ne JAMAIS détruire le salon PERMANENT « ⚔️-combat » au boot
-    # (le Boss Raid y vit désormais). On mappe l'id permanent par guild pour l'exclure.
-    _perm_ids = {}
-    try:
-        for _g in list(bot.guilds):
-            try:
-                _perm_ids[int(_g.id)] = int((await cfg(_g.id)).get('combat_channel_id', 0) or 0)
-            except Exception:
-                _perm_ids[int(_g.id)] = 0
-    except Exception:
-        pass
-    try:
-        async with get_db() as db:
-            # events (Boss Raid + Treasure + Quiz)
-            async with db.execute(
-                "SELECT id, guild_id, arena_channel_id, arena_message_id FROM events "
-                "WHERE ended=0"
-            ) as cur:
-                event_rows = await cur.fetchall()
-            for eid, gid, ch, msg in event_rows:
-                if ch and msg:
-                    orphans_to_delete.append((int(ch), int(msg)))
-                # Phase 219/235.10 : l'arène ÉPHÉMÈRE (vieux boss raid / trésor /
-                # quiz) est détruite au boot (+ sa catégorie). MAIS on ne touche
-                # JAMAIS le salon PERMANENT « ⚔️-combat » (le boss raid y vit
-                # désormais — on supprime juste son panneau via orphans_to_delete).
-                if ch and gid and int(ch) != _perm_ids.get(int(gid), 0):
-                    arena_chans_to_delete.append((int(gid), int(ch)))
-                # Charger snapshots de perms pour cet event
-                try:
-                    async with db.execute(
-                        "SELECT channel_id, had_overwrite, allow_value, deny_value "
-                        "FROM event_channel_snapshots WHERE event_id=?",
-                        (eid,),
-                    ) as sc:
-                        for ch_id, had, allow_v, deny_v in await sc.fetchall():
-                            perm_snapshots.append((int(gid), int(ch_id), int(had or 0), int(allow_v or 0), int(deny_v or 0)))
-                except Exception:
-                    pass
-            # world_bosses
-            async with db.execute(
-                "SELECT arena_channel_id, arena_message_id FROM world_bosses "
-                "WHERE ended=0 AND arena_message_id IS NOT NULL"
-            ) as cur:
-                for ch, msg in await cur.fetchall():
-                    if ch and msg:
-                        orphans_to_delete.append((int(ch), int(msg)))
-            # flash_treasures
-            async with db.execute(
-                "SELECT channel_id, message_id FROM flash_treasures "
-                "WHERE ended=0 AND message_id IS NOT NULL"
-            ) as cur:
-                for ch, msg in await cur.fetchall():
-                    if ch and msg:
-                        orphans_to_delete.append((int(ch), int(msg)))
-    except Exception as ex:
-        print(f"[boot_cleanup collect orphans] {ex}")
-
-    # ─── 2. Restaurer les permissions @everyone des salons d'event ───
-    # (les channels ont été restreints/ouverts pendant l'event ; on remet
-    # l'état d'origine snapshot AVANT mark-ended pour ne pas perdre l'info)
-    if perm_snapshots:
-        for gid, ch_id, had, allow_v, deny_v in perm_snapshots:
-            try:
-                guild = bot.get_guild(gid)
-                if not guild:
-                    continue
-                ch = guild.get_channel(ch_id)
-                if not ch:
-                    continue
-                try:
-                    if had:
-                        perm = discord.PermissionOverwrite.from_pair(
-                            discord.Permissions(allow_v),
-                            discord.Permissions(deny_v),
-                        )
-                        await ch.set_permissions(
-                            guild.default_role, overwrite=perm,
-                            reason="Phase 114 boot cleanup — restore event perms",
-                        )
-                    else:
-                        await ch.set_permissions(
-                            guild.default_role, overwrite=None,
-                            reason="Phase 114 boot cleanup — clear event perms",
-                        )
-                    counts["perms_restored"] += 1
-                except (discord.Forbidden, discord.HTTPException):
-                    pass
-            except Exception as ex:
-                print(f"[boot_cleanup restore perm ch={ch_id}] {ex}")
-
-    # ─── Phase 219 : DÉTRUIRE les arènes d'event résiduelles (salon + catégorie) ───
-    # Après un redémarrage en plein event, l'arène masquante (salon créé en haut +
-    # sa catégorie « ⚔️ … ») doit disparaître — sinon elle traîne, vide. On ne
-    # touche JAMAIS la catégorie persistante des mobs « ⚔️ Combat ».
-    for gid, ch_id in arena_chans_to_delete:
-        try:
-            guild = bot.get_guild(gid)
-            if not guild:
-                continue
-            ach = guild.get_channel(ch_id)
-            if ach is None:
-                continue
-            acat = getattr(ach, 'category', None)
-            try:
-                await ach.delete(reason="Phase 219 boot cleanup — arène d'event résiduelle")
-            except Exception:
-                pass
-            await asyncio.sleep(0.3)  # throttle anti-429 (DELETE salon arène en boucle)
-            if acat is not None and acat.name.startswith("⚔️ "):  # Phase 232 : plus d'exception « ⚔️ Combat » (rien de permanent)
-                try:
-                    for _c in list(getattr(acat, 'channels', [])):
-                        try:
-                            await _c.delete(reason="Phase 219 boot cleanup — résidu arène")
-                        except Exception:
-                            pass
-                        await asyncio.sleep(0.3)  # throttle anti-429
-                    await acat.delete(reason="Phase 219 boot cleanup — catégorie arène")
-                except Exception:
-                    pass
-        except Exception as ex:
-            print(f"[boot_cleanup arena delete ch={ch_id}] {ex}")
-
-    # ─── Phase 230 : balayage des VOCAUX « 🔊 Combat » ORPHELINS ───
-    # Quand une arène de boss a été mal nettoyée (catégorie supprimée mais vocaux
-    # restés — bug rapporté), il traîne des « 🔊 Combat » / « 🔊 Combat 2 » SANS
-    # catégorie, tout en bas du serveur. Ces noms ne sont créés QUE par
-    # _create_combat_arena, et TOUJOURS dans une catégorie → un vocal de ce nom
-    # SANS catégorie est forcément un orphelin. On les supprime (auto-réparation
-    # du bazar existant). La catégorie persistante des mobs « ⚔️ Combat » est
-    # épargnée : ses vocaux, eux, ONT une catégorie.
-    try:
-        for _g in list(bot.guilds):
-            for _vc in list(getattr(_g, 'voice_channels', [])):
-                try:
-                    if _vc.category is not None:
-                        continue
-                    _nm = (_vc.name or "").strip()
-                    _is_orphan_combat = _nm == "🔊 Combat" or (
-                        _nm.startswith("🔊 Combat ")
-                        and _nm[len("🔊 Combat "):].strip().isdigit())
-                    if _is_orphan_combat:
-                        await _vc.delete(
-                            reason="Phase 230 boot cleanup — vocal d'arène orphelin")
-                        await asyncio.sleep(0.3)  # throttle anti-429 (DELETE vocaux orphelins)
-                except Exception:
-                    pass
-    except Exception as ex:
-        print(f"[boot_cleanup orphan voice] {ex}")
-
-    # ─── FIX salons : salons d'event LEGACY orphelins (noms hors schéma actuel) ───
-    # Ex. « 📢-mob » d'avant le renommage « 🐗-mob » : aucun code ne les crée plus,
-    # aucun event ne s'y rattache, mais le sweeper par-nom ne les connaissait pas → ils
-    # traînaient À VIE, VIDES (plainte owner « le salon ne disparaît jamais »). Comme
-    # ils ne portent JAMAIS d'event en cours, on les supprime INCONDITIONNELLEMENT au
-    # boot (même si un autre event tourne — eux n'en sont pas un). Fail-open.
-    try:
-        for _g in list(bot.guilds):
-            for _ch in list(getattr(_g, 'text_channels', [])):
-                try:
-                    if (getattr(_ch, 'name', '') or '') in _LEGACY_COMBAT_CHANNEL_NAMES:
-                        await _ch.delete(
-                            reason="FIX salons : salon d'event legacy orphelin (boot)")
-                except Exception:
-                    pass
-    except Exception as ex:
-        print(f"[boot_cleanup legacy combat orphan] {ex}")
-
-    # ─── Phase 231 : salons de combat ÉPHÉMÈRES résiduels + alertes ───
-    # Les combats vivent dans la catégorie PERMANENTE « ⚔️ Combat » via des salons
-    # texte éphémères « ⚔️-{nom} » (table combat_arenas). Après un redémarrage en
-    # plein combat, ces salons + leurs alertes hub traînent → on nettoie. On GARDE
-    # la catégorie permanente, ses vocaux, et le salon partagé « ⚔️-arène ».
-    try:
-        _ca_rows = []
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT guild_id, text_channel_id, alert_channel_id, alert_message_id, category_id "
-                "FROM combat_arenas") as cur:
-                _ca_rows = await cur.fetchall()
-        for _gid, _tch, _ach, _amsg, _catid in _ca_rows:
-            _g = bot.get_guild(int(_gid))
-            if not _g:
-                continue
-            try:
-                if _ach and _amsg:
-                    _a_ch = _g.get_channel(int(_ach))
-                    if isinstance(_a_ch, discord.TextChannel):
-                        _am = await _a_ch.fetch_message(int(_amsg))
-                        await _am.delete()
-            except Exception:
-                pass
-            # Phase 235.10 : ne supprimer le salon QUE si c'est une ANCIENNE arène
-            # éphémère (category_id != 0). Les lignes du salon PERMANENT « ⚔️-combat »
-            # ont category_id=0 → on ne touche JAMAIS le salon permanent (double garde :
-            # cfg combat_channel_id + nom).
-            try:
-                _perm = int((await cfg(int(_gid))).get('combat_channel_id', 0) or 0)
-            except Exception:
-                _perm = 0
-            try:
-                _c2 = _g.get_channel(int(_tch))
-                if (isinstance(_c2, discord.TextChannel)
-                        and int(_catid or 0) != 0
-                        and _c2.id != _perm
-                        and _c2.name not in ("⚔️-arène", "⚔️-combat")):
-                    await _c2.delete(reason="Phase 231 boot cleanup — ancienne arène éphémère")
-            except Exception:
-                pass
-        if _ca_rows:
-            async with get_db() as db:
-                await db.execute("DELETE FROM combat_arenas")
-                await db.commit()
-    except Exception as ex:
-        print(f"[boot_cleanup combat arenas] {ex}")
-
-    # Phase 232 : TOUTE catégorie de combat « ⚔️ … » résiduelle (y compris l'ancienne
-    # « ⚔️ Combat » permanente, désormais supprimée) → on la détruit ENTIÈREMENT
-    # (salons texte + vocaux + catégorie). Plus rien de permanent : au boot, aucun
-    # combat n'est en cours, donc aucune catégorie « ⚔️ … » ne doit subsister.
-    try:
-        for _g in list(bot.guilds):
-            for _cat in list(getattr(_g, 'categories', [])):
-                try:
-                    _nm = _cat.name or ""
-                    # Phase 232 : on supprime AUSSI « ⚔️ Combat » (plus rien de permanent).
-                    if not _nm.startswith("⚔️ "):
-                        continue
-                    for _cc in list(getattr(_cat, 'channels', [])):
-                        try:
-                            await _cc.delete(reason="Phase 231 cleanup — ancienne arène éphémère")
-                        except Exception:
-                            pass
-                    await _cat.delete(reason="Phase 231 cleanup — ancienne catégorie de combat")
-                except Exception:
-                    pass
-    except Exception as ex:
-        print(f"[boot_cleanup old combat cats] {ex}")
-
-    # ─── 3. Mark-ended en DB (tous events actifs) ───
-    try:
-        async with get_db() as db:
-            cur = await db.execute("UPDATE events SET ended=1 WHERE ended=0")
-            counts["events"] = cur.rowcount or 0
-            cur = await db.execute("UPDATE world_bosses SET ended=1 WHERE ended=0")
-            counts["world_bosses"] = cur.rowcount or 0
-            cur = await db.execute("UPDATE flash_treasures SET ended=1 WHERE ended=0")
-            counts["flash_treasures"] = cur.rowcount or 0
-            # voice_chaos_log : reverted=1 (libère la protection sur les vocaux)
-            cur = await db.execute(
-                "UPDATE voice_chaos_log SET reverted=1 WHERE reverted=0"
-            )
-            counts["voice_chaos"] = cur.rowcount or 0
-            await db.commit()
-    except Exception as ex:
-        print(f"[boot_cleanup mark-ended] {ex}")
-
-    # ─── 4. Clear in-memory caches d'events ───
-    # IMPORTANT : on garde _crit_streaks, _attack_cooldown (lifecycle court de
-    # toute façon), mais on clear tout ce qui référence un event spécifique.
-    try:
-        _active_events_cache.clear()
-    except Exception:
-        pass
-    try:
-        _recent_attacks_log.clear()
-    except Exception:
-        pass
-    try:
-        _event_combo_count.clear()
-    except Exception:
-        pass
-    try:
-        _mystery_boxes.clear()
-    except Exception:
-        pass
-    # ─── FIX salons : salons de CAISSE LÉGÈRE (📦-mystere / 🎁-tresor) orphelins au boot ───
-    # Placé ICI, APRÈS le mark-ended (flash_treasures SET ended=1 ci-dessus) ET le clear
-    # du RAM des boîtes mystère → les deux gardes _has_active_light_crate sont désormais
-    # False → on supprime tout salon de caisse résiduel d'un reboot DÈS le démarrage,
-    # INDÉPENDAMMENT d'un combat en cours (une caisse n'est pas un combat). Fail-open.
-    try:
-        for _g in list(bot.guilds):
-            try:
-                await _sweep_idle_light_crate_channels(_g)
-            except Exception:
-                continue
-    except Exception as ex:
-        print(f"[boot_cleanup light crate orphan] {ex}")
-    try:
-        _gn_event_state.clear()
-    except Exception:
-        pass
-    try:
-        # Anti « Échec de l'interaction » : efface les mini-jeux Game Night dont
-        # les vues sont mortes après ce (re)démarrage (boutons orphelins).
-        await _purge_orphaned_gn_minigames()
-    except Exception:
-        pass
-    try:
-        _light_event_visible.clear()
-    except Exception:
-        pass
-    try:
-        _quiz_state.clear()
-    except Exception:
-        pass
-    try:
-        _treasure_pool.clear()
-    except Exception:
-        pass
-    try:
-        _heist_targets.clear()
-    except Exception:
-        pass
-    # Phase 111 : forcer un refresh complet du live events tile
-    try:
-        _hub_live_events_sig_cache.clear()
-    except Exception:
-        pass
-    # Phase 108 : si des trades étaient pending ils sont morts maintenant
-    try:
-        _active_trades.clear()
-    except Exception:
-        pass
-    try:
-        _trade_locks.clear()
-    except Exception:
-        pass
-
-    # ─── 5. Tenter de supprimer les messages d'arène orphelins (best-effort) ───
-    if orphans_to_delete:
-        deleted = 0
-        for ch_id, msg_id in orphans_to_delete[:100]:  # cap pour pas spammer l'API
-            try:
-                ch = bot.get_channel(ch_id)
-                if not ch:
-                    continue
-                try:
-                    msg = await ch.fetch_message(msg_id)
-                    await msg.delete()
-                    deleted += 1
-                    await asyncio.sleep(0.3)  # throttle anti-429 (DELETE messages orphelins en boucle)
-                except (discord.NotFound, discord.Forbidden):
-                    pass
-                except Exception as ex:
-                    print(f"[boot_cleanup del msg {msg_id}] {ex}")
-            except Exception:
-                pass
-        counts["msgs_deleted"] = deleted
-
-    # ─── 6. Phase 115 — fallback : détecter les salons "STUCK MASKED" ───
-    # Pour chaque snapshot des 7 derniers jours, si le salon est ACTUELLEMENT
-    # masqué (view_channel=False sur @everyone) MAIS le snapshot dit qu'il
-    # devrait être ouvert → on restaure le snapshot.
-    # Idempotent : si le state actuel = snapshot, on skip silencieusement.
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT DISTINCT s.channel_id, s.had_overwrite, s.allow_value, s.deny_value, e.guild_id "
-                "FROM event_channel_snapshots s "
-                "JOIN events e ON e.id = s.event_id "
-                "WHERE datetime(e.started_at) > datetime('now', '-7 days')"
-            ) as cur:
-                rows = await cur.fetchall()
-
-        for ch_id, had, allow_v, deny_v, gid in rows:
-            try:
-                guild = bot.get_guild(int(gid))
-                if not guild:
-                    continue
-                ch = guild.get_channel(int(ch_id))
-                if not ch or isinstance(ch, discord.CategoryChannel):
-                    continue
-
-                # État actuel de l'overwrite @everyone sur ce salon
-                cur_ow = ch.overwrites_for(guild.default_role)
-                cur_view = cur_ow.view_channel  # True / False / None
-
-                # Seulement traiter si le salon est CURRENT MASKED
-                if cur_view is not False:
-                    continue
-
-                # Snapshot : que devrait-il être ?
-                if had:
-                    snap_perm = discord.PermissionOverwrite.from_pair(
-                        discord.Permissions(int(allow_v or 0)),
-                        discord.Permissions(int(deny_v or 0)),
-                    )
-                    snap_view = snap_perm.view_channel
-                    # Si le snapshot disait aussi view_channel=False → laisser stuck (c'était voulu)
-                    if snap_view is False:
-                        continue
-                    # Restaurer le snapshot
-                    await ch.set_permissions(
-                        guild.default_role, overwrite=snap_perm,
-                        reason="Phase 115 boot cleanup — unmask stuck channel",
-                    )
-                else:
-                    # Snapshot : pas d'overwrite à l'origine → on supprime celui qu'on a posé
-                    await ch.set_permissions(
-                        guild.default_role, overwrite=None,
-                        reason="Phase 115 boot cleanup — unmask stuck channel",
-                    )
-                counts["perms_restored"] += 1
-            except (discord.Forbidden, discord.HTTPException):
-                pass
-            except Exception as ex:
-                print(f"[boot_cleanup Phase 115 stuck ch={ch_id}] {ex}")
-    except Exception as ex:
-        print(f"[boot_cleanup Phase 115 scan] {ex}")
-
-    total_db = counts["events"] + counts["world_bosses"] + counts["flash_treasures"] + counts["voice_chaos"]
-    if total_db > 0 or counts["msgs_deleted"] > 0 or counts["perms_restored"] > 0:
-        print(
-            f"🧹 [boot_cleanup Phase 114+115] reset terminé : "
-            f"{counts['events']} events · {counts['world_bosses']} world_bosses · "
-            f"{counts['flash_treasures']} flash_treasures · "
-            f"{counts['voice_chaos']} voice_chaos · "
-            f"{counts['perms_restored']} perms restaurées · "
-            f"{counts['msgs_deleted']} messages orphelins supprimés"
-        )
-    else:
-        print("🧹 [boot_cleanup Phase 114+115] aucun event actif à nettoyer")
-
-
-_did_boot = False  # audit 2026-07-03 : on_ready peut se re-déclencher (reconnexion gateway) → on ne
 #                    rejoue PAS le travail de boot DESTRUCTIF/one-shot (nettoyage events), seulement
 #                    la ré-inscription des vues persistantes (nécessaire à chaque reconnexion).
 
@@ -23139,7 +18498,6 @@ async def _activite_boot():
 
 @bot.event
 async def on_ready():
-    global _did_boot
     # 🩺 Battement de cœur du watchdog de gel (owner 2026-07-12) : démarré EN PREMIER pour couvrir
     # tout le boot. Si la boucle gèle > 3 s, le thread watchdog imprime la stack du coupable.
     try:
@@ -23168,18 +18526,6 @@ async def on_ready():
         await load_live_state_from_db()  # Charge l'état des lives depuis la DB
     except Exception as ex:
         print(f"[on_ready load_live_state] {ex}")
-
-    # ═══ Phase 114 — Boot cleanup events fantômes (UNE SEULE FOIS par process) ═══
-    # Après un redéploiement Railway, les events `ended=0` en DB sont morts (boutons cassés, messages
-    # orphelins, anti-spam bloquant nouveaux spawns) → on les marque ended/reverted + vide les caches.
-    # IMPORTANT : on garde TOUT le reste (inventory/economy/badges/pets…). audit 2026-07-03 : GATÉ par
-    # _did_boot — sur une RECONNEXION en cours de session, le relancer effacerait les events EN COURS.
-    if not _did_boot:
-        try:
-            await _boot_cleanup_active_events()
-        except Exception as ex:
-            print(f"[on_ready boot_cleanup_active_events] {ex}")
-        _did_boot = True
 
     # ═══ Capture l'avatar du bot pour TOUS les webhooks ═══
     global _BOT_AVATAR_URL
@@ -23227,15 +18573,11 @@ async def on_ready():
     # (Confessions retirées : plus de vue persistante à réenregistrer.)
     # (Hub d'engagement retiré : /hub et ses commandes sont supprimés, cette vue
     #  persistante était le dernier fil qui le maintenait vivant au boot.)
-    # Tâche B.1 — bouton « Devenir son mentor » PERSISTANT (DynamicItem) → les
-    # appels à parrainage postés dans les salons restent cliquables après un reboot.
+    # Boutons persistants encore utiles (19/10/2026 : jeux, événements, UGC et hub retirés).
     try:
-        bot.add_dynamic_items(MentorVolunteerButton)
-        bot.add_dynamic_items(UGCOptButton)  # boutons opt persistants sous les annonces UGC
-        bot.add_dynamic_items(UGCWishlistButton)  # bouton « Je le veux » (wishlist) persistant
         bot.add_dynamic_items(BoostSupportButton)  # 💎 panneau « Soutenir le serveur » (boost)
     except Exception as ex:
-        print(f"[on_ready add_dynamic_items MentorVolunteerButton] {ex}")
+        print(f"[on_ready add_dynamic_items BoostSupportButton] {ex}")
     try:
         #  ⚠️ LES TROIS CAPTEURS DU SYSTÈME DE TICKETS. `TicketCreateDynamic`
         #  RÉPARE une panne existante : le bouton « Créer un ticket » des
@@ -23258,160 +18600,6 @@ async def on_ready():
         bot.add_dynamic_items(EntraideRatingButton)  # #14 : notes d'entraide (MP persistant)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items EntraideRatingButton] {ex}")
-    # TÂCHE B.2 — bouton « 🎮 Mon hub » persistant (custom_id open_my_hub) apposé
-    # sous les récaps/annonces publics. 1 instance globale → dispatch sur tous les
-    # messages (y compris ceux survivant à un reboot), rend HubLayoutV2 en éphémère.
-    try:
-        bot.add_view(MyHubButtonView())
-    except Exception as ex:
-        print(f"[on_ready add_view MyHubButtonView] {ex}")
-    # Phase 189 — Leaderboard à onglets PERSISTANT : survit aux redémarrages et
-    # au timeout → fini les « Échec de l'interaction » sur un classement laissé
-    # affiché (custom_ids stables lb_coins/lb_msgs/lb_voice + callbacks sans état).
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[on_ready add_view LeaderboardTabsView] {ex}")
-
-
-    # Phase 50 : re-attacher les MatchmakingJoinView actifs + SpeedrunReviewView pending
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id FROM matchmaking_parties WHERE status='open' "
-                "AND (expires_at IS NULL OR datetime(expires_at)>datetime('now'))",
-            ) as cur:
-                rows = await cur.fetchall()
-        for r in rows:
-            try:
-                bot.add_view(MatchmakingJoinView(int(r[0])))
-            except Exception:
-                pass
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id FROM speedrun_submissions WHERE status='pending'",
-            ) as cur:
-                rows = await cur.fetchall()
-        for r in rows:
-            try:
-                pass  # bloc vidé (module détaché)
-            except Exception:
-                pass
-    except Exception as ex:
-        print(f"[on_ready phase50 persist] {ex}")
-
-    # Phase 51 : re-attacher les PredictionBetView + PredictionResolveView open
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id FROM predictions WHERE status='open'",
-            ) as cur:
-                rows = await cur.fetchall()
-        for r in rows:
-            try:
-                bot.add_view(PredictionBetView(int(r[0])))
-                bot.add_view(PredictionResolveView(int(r[0])))
-            except Exception:
-                pass
-    except Exception as ex:
-        print(f"[on_ready phase51 persist] {ex}")
-
-
-    # Phase 58 : re-attacher UpdateVoteView open
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id, options_json FROM update_votes WHERE status='open'",
-            ) as cur:
-                rows = await cur.fetchall()
-        for uv_id, options_json in rows:
-            try:
-                opts = json.loads(options_json or "[]")
-                bot.add_view(UpdateVoteView(int(uv_id), opts))
-            except Exception:
-                pass
-    except Exception as ex:
-        print(f"[on_ready phase58 persist] {ex}")
-
-    # Phase 59 : re-attacher DuelAcceptView pending + TournamentJoinView recruiting
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id FROM pvp_duels WHERE status='pending'",
-            ) as cur:
-                rows = await cur.fetchall()
-        for r in rows:
-            try:
-                bot.add_view(DuelAcceptView(int(r[0])))
-            except Exception:
-                pass
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id FROM tournaments WHERE status='recruiting'",
-            ) as cur:
-                rows = await cur.fetchall()
-        for r in rows:
-            try:
-                bot.add_view(TournamentJoinView(int(r[0])))
-            except Exception:
-                pass
-    except Exception as ex:
-        print(f"[on_ready phase59 persist] {ex}")
-
-    # Phase 60 : re-attacher HeistJoinView recruiting
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id FROM heists WHERE status='recruiting'",
-            ) as cur:
-                rows = await cur.fetchall()
-        for r in rows:
-            try:
-                bot.add_view(HeistJoinView(int(r[0])))
-            except Exception:
-                pass
-    except Exception as ex:
-        print(f"[on_ready phase60 persist] {ex}")
-
-    # Phase 42 — Views persistantes : World Boss + Daily Riddle
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[on_ready add_view WorldBossAttackView] {ex}")
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[on_ready add_view RiddleAnswerView] {ex}")
-    # Phase 43 — Views persistantes : Flash Treasure + Evening Ritual
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[on_ready add_view FlashTreasureView] {ex}")
-    # Phase 77 — Mystery Box V2 : custom_id stable "mbox_open" capté globalement
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[on_ready add_view MysteryBoxView] {ex}")
-    # Phase 85 — Game Night Speed Click + Threshold Click : custom_ids stables
-    try:
-        bot.add_view(GameNightSpeedClickView())
-    except Exception as ex:
-        print(f"[on_ready add_view GameNightSpeedClickView] {ex}")
-    try:
-        bot.add_view(GameNightThresholdView())
-    except Exception as ex:
-        print(f"[on_ready add_view GameNightThresholdView] {ex}")
-    # Phase 48 : Compliment du jour DÉSACTIVÉ (système Saint-Valentin retiré)
-    # Code conservé en mémoire pour ne pas casser, mais view + dispatcher inactifs.
-    # try:
-    #     bot.add_view(ComplimentOpenView())
-    # except Exception as ex:
-    #     print(f"[on_ready add_view ComplimentOpenView] {ex}")
-    # Phase 46 — Alliance invite persistent view (DM)
-    try:
-        bot.add_view(AllianceInviteAcceptView())
-    except Exception as ex:
-        print(f"[on_ready add_view AllianceInviteAcceptView] {ex}")
     # Toggle ACTIVER/DÉSACTIVER des panneaux de tickets (fondateur) — DynamicItem persistant :
     # 1 seul enregistrement couvre TOUS les pid via le template ticket_toggle_<pid>. 2026-06-16.
     try:
@@ -23667,19 +18855,6 @@ async def on_ready():
     except Exception:
         pass
 
-    # owner 2026-07-23 : purge UNIQUE des rôles UGC (🎨 Créateur UGC + 🛒 Collectionneur UGC) —
-    # suppression + coupe la recréation/auto-attribution. Idempotent (flag par guilde). Léger
-    # délai pour laisser le boot se stabiliser.
-    async def _ugc_purge_later():
-        try:
-            await asyncio.sleep(90)
-            await _ugc_roles_purge_once()
-        except Exception:
-            pass
-    try:
-        asyncio.create_task(_ugc_purge_later())
-    except Exception:
-        pass
 
     
     # Lancer la tâche des feeds sociaux
@@ -23730,19 +18905,10 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready restore_active_polls] {ex}")
 
-    # owner 2026-07-17 : écriture périodique des compteurs d'usage (le comptage lui-même est en
-    # RAM, cf. _ui_usage_probe) → aucune I/O sur le chemin chaud des interactions.
-    if not ui_usage_flush_task.is_running():
-        ui_usage_flush_task.start()
-
-    # Phase 30 : events — timeout checker + auto scheduler + restore active
-    # Phase 89 : stale event cleanup (events supprimés manuellement)
 
     # Phase 203 — superviseur : ressuscite toute boucle critique morte
     if not task_supervisor.is_running():
         task_supervisor.start()
-    # Phase 109 : auction settler — termine les enchères expirées
-    # Phase 111 : refresh tuile Live Events sur les hubs configurés
     # Phase 126 : DB backup quotidien automatique (rotation 7 jours)
     try:
         if not db_backup_module.backup_task.is_running():
@@ -23816,11 +18982,6 @@ async def on_ready():
             obs_module.anomaly_check_task.start()
     except Exception as ex:
         print(f"[on_ready obs setup] {ex}")
-    # Phase 141 : UX final — theme switcher + tutorial
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[on_ready ux_module setup] {ex}")
     # Phase 143 : DB cleanup hebdo (purge tables qui grossissent indéfiniment)
     try:
         cleanup_module.setup(bot, get_db)
@@ -23945,34 +19106,16 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 152 ux/owner] {ex}")
 
-    # Phase 160 : table voice_daily_rewards pour cap quotidien
-    try:
-        async with get_db() as db:
-            await db.execute("""
-            """)
-            await db.commit()
-    except Exception as ex:
-        print(f"[Phase 160 voice_daily_rewards] {ex}")
 
     # Phase 152.D2 : Audit DB indexes + auto-create les manquants critiques
     try:
         async with get_db() as db:
             # Indexes critiques pour les queries hot path
             critical_indexes = [
-                ("idx_economy_guild_user", "economy(guild_id, user_id)"),
                 ("idx_infractions_guild_user", "infractions(guild_id, user_id, created_at)"),
                 ("idx_inventory_items_user", "inventory_items(guild_id, user_id)"),
-                ("idx_marketplace_active", "marketplace_listings(guild_id, status)"),
-                ("idx_pvp_duels_status", "pvp_duels(guild_id, status, resolved_at)"),
-                ("idx_alliance_members_user", "alliance_members(user_id)"),
-                ("idx_season_drops_user", "seasonal_drops_log(guild_id, user_id, season_key)"),
-                ("idx_player_styles_user", "player_styles(guild_id, user_id)"),
                 ("idx_voice_log_guild", "voice_log(guild_id, joined_at)"),
-                ("idx_member_activity_recent", "member_activity(guild_id, user_id, created_at)"),
                 # D3 : agrégat messages (ciblage salon + stats user/jour).
-                ("idx_mad_guild_day", "member_activity_daily(guild_id, day)"),
-                ("idx_mad_guild_ch_day", "member_activity_daily(guild_id, channel_id, day)"),
-                ("idx_mad_guild_user_day", "member_activity_daily(guild_id, user_id, day)"),
             ]
             for idx_name, idx_def in critical_indexes:
                 try:
@@ -24028,8 +19171,6 @@ async def on_ready():
             error_logger_module.burst_check_task.start()
 
 
-
-
         # owner 2026-06-30 : DÉGRADATION CRESCENDO des récidivistes (restriction persistante,
         # score 90j, dé-escalade auto). Jamais owner/super-owner/staff/immunisés. FAIL-OPEN.
         try:
@@ -24051,68 +19192,12 @@ async def on_ready():
             print(f"[on_ready welcome_cleanup] {ex}")
 
 
-
-
-
-
-        # Phase 256 : SYSTÈME DE MENTION PRO — abonne TOUS les membres existants
-        # au rôle « 📢 Tous les Événements » (opt-out) une fois par serveur, pour
-        # que chaque event mentionne l'intégralité du serveur (même inactifs /
-        # hors-ligne). Guardé par flag global → ne se relance pas aux reconnexions.
-
-        # owner 2026-06-30 : abonne TOUS les membres existants au rôle « 🛒 Collectionneur UGC »
-        # (opt-out) une fois par serveur → le ping spotlight atteint enfin tout le monde (avant :
-        # opt-in, donc ~personne). Guardé par flag global → ne se relance pas aux reconnexions.
-        try:
-            if not getattr(bot, '_ugc_fans_backfill_started', False):
-                bot._ugc_fans_backfill_started = True
-                for _g in list(bot.guilds):
-                    asyncio.create_task(_backfill_ugc_fans_role(_g))
-        except Exception as ex:
-            print(f"[on_ready ugc_fans_backfill] {ex}")
-
-
-
-
-
-
-
-
-        # owner 2026-07-17 : mesure d'usage des menus/boutons/commandes. L'owner veut désactiver
-        # ce qui ne sert plus — or RIEN n'enregistrait les clics, donc c'était inmesurable et
-        # toute suppression aurait été de la devinette. On instrumente ; /mod usage lit les faits.
-        try:
-            ui_usage_module.setup(get_db)
-            await ui_usage_module.init_db()
-            await ui_usage_module.purge_old()
-        except Exception as ex:
-            print(f"[on_ready ui_usage] {ex}")
-
-
-
         # ════════════════════════════════════════════════════════════════
         # Phase 170 + 171 — Chronique d'Abylumis
         # Chaque module est wired dans SON propre try/except : si un module
         # crash à l'init, les autres modules continuent à fonctionner. Le bot
         # ne tombe pas pour 1 module défaillant.
         # ════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
         # OPT-OUT « propositions d'aide » par membre (owner 2026-06-15) : charge le set en
@@ -24145,16 +19230,6 @@ async def on_ready():
             print(f"[on_ready i18n] {ex}")
 
 
-
-
-
-
-        # Phase 235.22 : bouton « 🔔 Me notifier » par type (opt-in, persistant).
-        try:
-            bot.add_dynamic_items(EventNotifyButton)
-        except Exception as ex:
-            print(f"[on_ready 235.22 event_notify] {ex}")
-
         # TASK C.1 : bouton « 💬 Répondre » sous les suggestions (owner/staff,
         # persistant → re-capté au reboot, réponse publique, zéro MP).
         try:
@@ -24173,8 +19248,6 @@ async def on_ready():
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
 
-
-
     #  Purge 16/08/2026 — événements personnels, événements légers (boîtes
     #  mystère) et MP de retour avec bonus à réclamer : retirés sur demande du
     #  propriétaire (« les gens peuvent gagner des cadeaux […] t'enlèves
@@ -24191,7 +19264,6 @@ async def on_ready():
     #   partis à la purge. Il ne restait qu'une boucle qui se réveillait toutes
     #   les heures pour écrire un marqueur puis lever un NameError.)
 
-    # Phase 43 : Trésor Flash + Rituel du Soir + Tag Royale + Anniversaire
 
     # Phase 44 : Daily Quest push proactif + DB optimizer
     if not db_optimizer_task.is_running():
@@ -24201,7 +19273,6 @@ async def on_ready():
     if not menage_salons_task.is_running():
         menage_salons_task.start()
 
-    # Phase 45 : Camouflage de salon + Vocal Spotlight + Compliment + failsafe
     # Phase 48 : Compliment du jour DÉSACTIVÉ (système Saint-Valentin retiré)
     # if not compliment_dispatcher.is_running():
     #     compliment_dispatcher.start()
@@ -24211,24 +19282,11 @@ async def on_ready():
     #  tels quels : plus rien ne les restaurera. À remettre à la main s'il en
     #  traîne — c'est le seul effet visible de cette purge côté serveur.
 
-    # Phase 47.3 : persistent cleanup des messages d'events expirés
-    # Phase 55 : safety net hub orphan cleaner (loop 6h)
 
     # (auto-promote des events retiré avec les événements.)
-    # Phase 49 : NPC chatter (toutes les 6h) + missions runner (daily)
-    # Phase 50 : Studio Tip daily (9h FR)
-    # Phase 53 : ambiance passive
-    # Tâche B.2 : annonce de sortie à l'échéance du countdown (fail-open, no-op sans date)
-    # Phase 57 : narrative choices resolver
-    # Phase 58 : update votes resolver
-    # Phase 61 : daily meta (streak collectif + météo)
-    # Phase 62 : vocaux thématiques cleanup + IRL season check
-    if not thematic_voice_cleanup_task.is_running():
-        thematic_voice_cleanup_task.start()
     # Phase 235.5 : watchdog des vocaux temporaires « Voc Build » (anti-orphelins reboot)
     if not temp_voice_watchdog.is_running():
         temp_voice_watchdog.start()
-
 
 
     # Rappel auto de /bump (owner 2026-06-27, croissance) — démarrage de la tâche. FAIL-SAFE.
@@ -24240,12 +19298,6 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready bump_reminder] {ex}")
 
-    # Phase 63 : capsule unlock + npc whisper + anniversary
-    # Phase 61 : AdventClaimView persistante (custom_id stable)
-    try:
-        bot.add_view(AdventClaimView())
-    except Exception as ex:
-        print(f"[on_ready advent persist] {ex}")
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
     # Phase 55 : boucle jusqu'à plus rien à supprimer (par batch de 500)
     try:
@@ -24274,15 +19326,10 @@ async def on_ready():
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
     print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
-    print(f"🎁 Vérification giveaways toutes les 30 secondes")
     print(f"📨 Vérification messages auto toutes les minutes")
     print(f"🛒 Vérification rôles boutique expirés toutes les minutes")
     print(f"🔊 Vocaux temporaires activés")
     print(f"⚔️ Système anti-raid activé")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           📨 ON_INTERACTION POUR MESSAGES AUTO
-# ═══════════════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ACTIVITÉ — deux sources de plus, toutes deux volontaires
@@ -24476,103 +19523,6 @@ async def owner_mod_stats_cmd(i: discord.Interaction, jours: int = 30):
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 131 : /bonus — voir le bonus économique du jour
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 131 : /gift — DÉSACTIVÉ Phase 168.2 (sleep-on-events guard)
-# Phase 168.3 : retiré du tree Discord (décorateur supprimé)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 132 : /milestones — paliers streak / vétéran / prestige
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 134 : /community — wiki + roadmap + highlights
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 135 : /vault — coffre d'alliance (overview / audit / contribs)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 136 : /roblox — link verify + profile + game library
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 137 : /voice — paliers de récompenses vocaux
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -25007,49 +19957,6 @@ async def server_anomalies_cmd(i: discord.Interaction):
 
 
 bot.tree.add_command(server_obs_group)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 140 : /publish — metrics + cross-poster
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 141 : /theme & /tutorial — UX final
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 144 : /season — voir la saison active + drops exclusifs
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -25640,10 +20547,6 @@ class BoostSupportButton(discord.ui.DynamicItem[discord.ui.Button], template=r"b
 # kit promo · suivre le créateur. Aucune obligation, jamais de spam.
 
 
-
-
-
-
 async def _handle_boost_started(member):
     """owner 2026-06-30 : à chaque boost — REMERCIER chaleureusement + INFORMER (sans mendier) sur
     les avantages débloqués + RÉCOMPENSER le booster ; célèbre aussi les paliers de NIVEAU
@@ -25705,14 +20608,6 @@ async def _handle_boost_started(member):
             e.add_field(name="📊 Progression",
                         value=f"💎 **{count}** boost(s) · 🏆 **Niveau {level} (max)** — merci infiniment !",
                         inline=False)
-        _rew = int(c.get('boost_reward_coins', 1000) or 0)
-        if _rew > 0:
-            try:
-                await add_coins(guild.id, member.id, _rew)
-                e.add_field(name="🎁 Petit merci",
-                            value=f"+`{_rew}` 🪙 pour toi, **{member.display_name}** !", inline=False)
-            except Exception:
-                pass
         e.set_footer(text="Booster = soutenir + débloquer des avantages pour tous · aucune obligation 💜")
 
         _v = discord.ui.View(timeout=None)
@@ -25752,8 +20647,6 @@ async def _handle_boost_started(member):
         print(f"[_handle_boost_started] {ex}")
         import traceback
         traceback.print_exc()
-
-
 
 
 @bot.event
@@ -26335,8 +21228,6 @@ def _welcome_quick_buttons(guild):
         return None
 
 
-
-
 async def _track_welcome_msg(guild_id: int, channel_id: int, message_id: int):
     """owner 2026-06-30 : enregistre une carte d'accueil pour la purge périodique (elle RESTE
     visible `welcome_lifetime_minutes` puis est supprimée → le chat ne s'encombre pas). FAIL-SAFE."""
@@ -26559,25 +21450,6 @@ async def on_raw_bulk_message_delete(payload):
             await _delete_nudge_for_original(int(mid))
     except Exception as ex:
         print(f"[on_raw_bulk_message_delete nudge] {ex}")
-
-
-@bot.event
-async def on_invite_create(invite):
-    """Tâche B.1 : maintient le cache des uses d'invites à jour (suivi parrainage).
-    FAIL-SAFE — n'interrompt jamais rien."""
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[on_invite_create referrals] {ex}")
-
-
-@bot.event
-async def on_invite_delete(invite):
-    """Tâche B.1 : retire l'invite supprimée/expirée du cache de suivi. FAIL-SAFE."""
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[on_invite_delete referrals] {ex}")
 
 
 async def _scan_security_on_edit(after) -> bool:
@@ -26918,9 +21790,8 @@ async def on_guild_channel_create(channel):
     try:
         if channel.guild is None:
             return
-        # Salon d'event ÉPHÉMÈRE créé par le bot (combat/caisse/entraide…) → JAMAIS loggé
-        # (cheap, sans audit) : c'était la source #1 de spam de logs.
-        if _is_sweepable_event_channel(channel) or (getattr(channel, 'name', '') or '').startswith('🆘'):
+        # Salon d'entraide 🆘 éphémère créé par le bot → jamais loggé (anti-bruit).
+        if (getattr(channel, 'name', '') or '').startswith('🆘'):
             return
         await _antinuke_check(channel.guild, 'channel_create')  # owner 2026-06-27 : nuke par création massive
         # RADIATION (/off) : si le rôle « 🚫 Radié » existe, poser le DENY sur ce NOUVEAU salon.
@@ -27236,18 +22107,12 @@ async def on_raw_thread_delete(payload):
 
 @bot.event
 async def on_guild_channel_delete(channel):
-    # Phase 260 : un salon de combat supprimé → on efface les echos « Rejoins-nous
-    # dans #X » qu'il avait générés en chat (sinon ils pointent vers #inconnu).
-    try:
-        await _purge_event_echoes(channel)
-    except Exception as ex:
-        print(f"[on_guild_channel_delete purge echoes] {ex}")
     try:
         if channel.guild is None:
             return
-        if _is_sweepable_event_channel(channel) or (getattr(channel, 'name', '') or '').startswith('🆘'):
-            return  # salon d'event éphémère supprimé par le bot → pas de log (anti-spam)
-        await _antinuke_check(channel.guild, 'channel')  # anti-nuke (hors salons d'event du bot)
+        if (getattr(channel, 'name', '') or '').startswith('🆘'):
+            return  # salon d'entraide éphémère supprimé par le bot → pas de log
+        await _antinuke_check(channel.guild, 'channel')
         await _log_audited(
             channel.guild, ulogger2026.EventType.CHAN_DELETE,
             discord.AuditLogAction.channel_delete, channel.id,
@@ -27267,7 +22132,7 @@ async def on_guild_channel_update(before, after):
         guild = getattr(after, 'guild', None)
         if guild is None:
             return
-        if _is_sweepable_event_channel(after) or (getattr(after, 'name', '') or '').startswith('🆘'):
+        if (getattr(after, 'name', '') or '').startswith('🆘'):
             return
         if getattr(before, 'overwrites', None) == getattr(after, 'overwrites', None):
             return  # pas un changement de permission → anti-bruit
@@ -27595,8 +22460,6 @@ async def _check_compromised_account(msg):
         import traceback; traceback.print_exc()
 
 
-
-
 @bot.event
 async def on_message(msg):
     if not msg.guild:
@@ -27685,24 +22548,10 @@ async def on_message(msg):
         except Exception:
             pass
 
-        # Phase 165.2 : tracking heatmap (background, super léger : 1 UPSERT)
-        try:
-            pass  # bloc vidé (module détaché)
-        except Exception:
-            pass
 
         # Phase 165.3 : auto-preview Roblox URLs (cooldown 5min/canal,
         # silencieux si pas d'URL Roblox dans le message)
-        try:
-            pass  # bloc vidé (module détaché)
-        except Exception:
-            pass
 
-        # Phase 166.3 : welcome ack — 👋 sur 1er message ever du user
-        try:
-            pass  # bloc vidé (module détaché)
-        except Exception:
-            pass
 
     # ═══════════════ MESSAGES D'AIDE AUTOMATIQUES ═══════════════
     # Doit être appelé AVANT le filtre bot pour repositionner après les messages de bots
@@ -27748,49 +22597,9 @@ async def on_message(msg):
     # de retarder le traitement de CHAQUE message. Lecture seule + webhook_send, try/except interne.
     asyncio.create_task(relay_discord_message(msg))
 
-    # ═══════════════ SALON DE RÉCUPÉRATION D'ACTIVITÉ (INLINE : contient un return) ═══════════════
-    # Garde INLINE car il court-circuite le reste du pipeline (return). cfg() est caché → O(1).
-    try:
-        c = await cfg(msg.guild.id)
-        stat_cfg = c.get('stat_config', {})
-        recovery_ch_id = stat_cfg.get('recovery_channel', 0)
 
-        # Si le message est dans le salon de récupération
-        if recovery_ch_id and msg.channel.id == recovery_ch_id:
-            await handle_recovery_message(msg, stat_cfg)
-            return  # Ne pas traiter le reste
-    except Exception as ex:
-        print(f"[RECOVERY] Erreur vérification salon récupération: {ex}")
-
-    # ═══════════════ TRACKING / GAMIFICATION — BACKGROUNDÉ (audit 2026-07-03) ═══════════════
-    # AVANT : ces trackers (activité Realsy, XP/éco, quêtes+achievements, missions, mentor, greeting,
-    # easter eggs) étaient AWAITÉS en SÉRIE → ~12 checkouts get_db + 8+ commits par message d'un
-    # membre. À l'échelle (milliers de msg/min) ça saturait le pool (20 conns) et RETARDAIT l'auto-mod
-    # qui suit (suppressions/sanctions arrivaient en retard). Or c'est de la COMPTABILITÉ pure : aucune
-    # dépendance d'ordre avec l'auto-mod. On les sort du chemin bloquant via UNE seule tâche de fond
-    # (leur ordre relatif entre eux est préservé). Chaque fonction a déjà son try/except interne ; le
-    # wrapper garantit qu'aucune erreur ne remonte à on_message. FAIL-SAFE.
-    async def _bg_message_trackers(m):
-        try:
-            await update_realsy_activity(m.guild.id, m.author.id)
-        except Exception as ex:
-            print(f"[bg update_realsy_activity] {ex}")
-        try:
-            await track_member_message(m)
-        except Exception as ex:
-            print(f"[bg track_member_message] {ex}")
-        for _fn, _lbl in (
-            (_check_easter_eggs, '_check_easter_eggs'),
-        ):
-            try:
-                await _fn(m)
-            except Exception as ex:
-                print(f"[bg {_lbl}] {ex}")
-        try:
-            pass  # bloc vidé (module détaché)
-        except Exception as ex:
-            print(f"[bg _track_mentor_interaction] {ex}")
-    asyncio.create_task(_bg_message_trackers(msg))
+    # Rell Seas : présence du clan, hors du chemin bloquant (une écriture / 10 min / membre).
+    asyncio.create_task(update_realsy_activity(msg.guild.id, msg.author.id))
 
     # ═══════════════ Phase 64 : toxicity score + auto slow mode ═══════════════
     try:
@@ -27839,17 +22648,7 @@ async def on_message(msg):
     # n'a aidé. Coordonne aussi les signaux de réponse (reply/mention) en mémoire pure.
     # Backgroundé (create_task) : CHEAP-FIRST, ne bloque jamais on_message ; toutes les
     # gardes (config/chatty/cooldown/DB) vivent dans le hook (fail-safe).
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[on_message unanswered_watch] {ex}")
 
-
-    # ═══════════════ Phase 46.2 : Game Night emoji storm tracking ═══════════════
-    try:
-        await _check_game_night_emoji_storm(msg)
-    except Exception as ex:
-        print(f"[_check_game_night_emoji_storm] {ex}")
 
     # ═══════════════ Phase 23 : DÉTECTION COMPTES PIRATÉS ═══════════════
     try:
@@ -28903,7 +23702,7 @@ async def on_message(msg):
 
                 # ═══ ÉCHELLE VOULUE PAR L'OWNER (2026-07-17) ═══
                 # « Tu le reprends une fois. S'il comprend pas, 2 fois. S'il comprend toujours pas,
-                #   au bout de la 3e fois tu le WARN → il perd les events et le VIP. S'il comprend
+                #   au bout de la 3e fois tu le WARN. S'il comprend
                 #   toujours pas, tu le re-warn. Et après tu le sanctionnes. »
                 # → rappels 1-3 · warn 4 · warn 5 · sanction 6+.
                 # Les RAPPELS vivent dans la fenêtre RAM (10 min) : s'il se calme, on oublie — c'est
@@ -28913,8 +23712,7 @@ async def on_message(msg):
                 if strikes < _warn_at:
                     _ordinal = {1: "1er", 2: "2e", 3: "3e"}.get(strikes, f"{strikes}e")
                     _suite = ("" if strikes < _warn_at - 1 else
-                              " — **prochaine fois = avertissement officiel** (tu perdrais le VIP "
-                              "et l'accès aux événements).")
+                              " — **prochaine fois = avertissement officiel**.")
                     await _warn_calm_down(
                         msg.channel,
                         f"⚠️ {msg.author.mention}, **{_ordinal} rappel** : évite de répéter le même "
@@ -28936,29 +23734,19 @@ async def on_message(msg):
                         print(f"[anti_spam warn count] {_ex}", file=_sys.stderr, flush=True)
 
                     if _spam_warns < int(c.get('spam_warns_before_sanction', 2)):
-                        # ── PALIER WARN (4e puis 5e) : fiche + REMISE À ZÉRO DES STATS + MP ──
-                        # owner 2026-07-17 (CHANGEMENT vs privation VIP) : « au 3e rappel ignoré, tu
-                        # lui supprimes TOUTES ses statistiques → il repart de zéro et doit tout
-                        # re-gagner (VIP, VIP+, Hyper). » N'est atteignable qu'après CUMUL : contenu
-                        # toxique ET débit ET 3 rappels ignorés → un membre qui écrit des phrases n'y
-                        # arrive jamais. Le reset ne touche QUE l'activité (activity_score +
-                        # vip_status + rôles VIP) : ni coins, ni succès, ni inventaire.
+                        # ── PALIER WARN (4e puis 5e) : fiche + MP ──
                         _reason = f"Spam toxique répété (malgré {strikes - 1} rappels)"
                         await _record_infraction(msg.guild.id, msg.author.id, 'warn', _reason, '')
-                        try:
-                            await activity_vip_module.reset_member_stats(msg.guild, msg.author.id)
-                        except Exception as _ex:
-                            print(f"[anti_spam reset stats] {_ex}", file=_sys.stderr, flush=True)
                         # MP avec le récap COMPLET (owner : « il dira toujours j'ai rien fait »).
                         await _dm_sanction(
                             msg.author, msg.guild,
-                            f"⚠️ Avertissement officiel ({_spam_warns + 1}/2) — statistiques remises à zéro",
+                            f"⚠️ Avertissement officiel ({_spam_warns + 1}/2)",
                             _reason)
                         await _warn_calm_down(
                             msg.channel,
                             f"⚠️ {msg.author.mention}, **avertissement officiel** enregistré "
-                            f"(spam malgré les rappels) — **tes statistiques d'activité repartent de "
-                            f"zéro**. Regarde tes MP. À la prochaine, c'est une sanction.",
+                            f"(spam malgré les rappels). Regarde tes MP. À la prochaine, "
+                            f"c'est une sanction.",
                         )
                         try:
                             await ulogger2026.log_member_escalation(
@@ -29435,11 +24223,6 @@ except Exception as ex:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
-
-
 except Exception as ex:
     print(f"[PUBLICATIONS] Erreur enregistrement groupe : {ex}")
 
@@ -29458,58 +24241,14 @@ except Exception as ex:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
-
-
-
-
-
-
-
-
 # Phase 151 : publish_group est un alias de publish_metrics_group, deja
 # enregistre plus haut via bot.tree.add_command(publish_metrics_group).
 # On ne re-add pas pour eviter le "Command 'publish' already registered".
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  🔑 /manage — Panel personnel pour les managers de Distribution (Phase 18)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  /creator — Phase 26.2 : commandes pour membres avec rôle créateur
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 #  /birthday — Phase 28.5
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
 
 
 # Phase 119 : /mod et /bank groups enregistrés après leur définition
@@ -29742,8 +24481,6 @@ async def _announce_poll_winner(poll_id: int):
         print(f"[_announce_poll_winner poll={poll_id}] {ex}")
 
 
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 28.5 : Task daily — annonce des anniversaires
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -29887,9 +24624,6 @@ async def _poll_closer_wait():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
 # ─── Phase 107 : /repair (Repair/Durability) ─────────────────────────────
 # Phase 118 HOTFIX : décorateur @bot.tree.command retiré (CommandLimitReached
 # 101 globally — admin_panels_v2 + setup_wizard non comptés précédemment).
@@ -29903,17 +24637,6 @@ async def _poll_closer_wait():
 # d'un item de B + un bonus de coins éventuel. B reçoit un panel avec
 # ACCEPTER / REFUSER. Atomique côté DB, lock anti double-spend.
 
-# Lock global en mémoire des items "engagés" dans un trade ouvert
-# clé : (guild_id, user_id, slot) → trade_id
-_trade_locks: dict = {}
-# Trades actifs : trade_id → dict
-_active_trades: dict = {}
-_TRADE_TIMEOUT_SEC = 180  # 3 min pour confirmer
-
-
-
-
-
 
 # ─── Phase 117 : Flow swap multi-étapes via boutons (sans slash) ─────────
 #
@@ -29926,24 +24649,7 @@ _TRADE_TIMEOUT_SEC = 180  # 3 min pour confirmer
 #   3. Modal coins_bonus (optionnel)
 #   4. swap_cmd() → crée la proposition publique (mention cible)
 
-_PHASE117_SWAP_SLOT_CHOICES = [
-    ("weapon",    "⚔️ Arme"),
-    ("armor",     "🛡️ Armure"),
-    ("helmet",    "🎩 Casque"),
-    ("legs",      "🦵 Jambières"),
-    ("boots",     "👢 Bottes"),
-    ("accessory", "💍 Accessoire"),
-    ("trinket",   "🔮 Trinket"),
-]
 
-
-
-
-
-
-
-
-# Phase 116 HOTFIX : décorateur retiré (CommandLimitReached 100 globally).
 # Phase 117 : signature refactorée pour accepter strings (appel depuis bouton).
 # Le helper swap_cmd est appelé depuis le flow Phase 117 (bouton inventory).
 
@@ -29952,32 +24658,6 @@ _PHASE117_SWAP_SLOT_CHOICES = [
 #
 # Vérifie + débloque les badges Phase 113 (Swap/Auction/Craft) après une
 # action utilisateur. Idempotent : INSERT OR IGNORE sur player_badges.
-
-
-
-async def _incr_phase113_counter(guild_id: int, user_id: int, column: str, by: int = 1):
-    """Phase 113 : incrémente un compteur dans player_event_stats.
-
-    Colonnes supportées : swaps_done, auctions_sold, auctions_won,
-    refines_success.
-    """
-    valid = {"swaps_done", "auctions_sold", "auctions_won", "refines_success"}
-    if column not in valid:
-        return
-    try:
-        async with get_db() as db:
-            # INSERT OR UPDATE (sans la colonne dans VALUES, on s'appuie sur DEFAULT 0)
-            await db.execute(
-                f"INSERT INTO player_event_stats(guild_id, user_id, {column}) "
-                f"VALUES(?,?,?) "
-                f"ON CONFLICT(guild_id, user_id) DO UPDATE SET {column} = {column} + ?",
-                (guild_id, user_id, by, by),
-            )
-            await db.commit()
-    except Exception as ex:
-        print(f"[_incr_phase113_counter {column}] {ex}")
-
-
 
 
 # ─── Phase 109 : /auction (Auction House) ────────────────────────────────
@@ -29996,14 +24676,6 @@ async def _incr_phase113_counter(guild_id: int, user_id: int, column: str, by: i
 # directement, mais elle n'apparaît plus dans le menu slash.
 
 
-
-
-
-
-
-
-
-
 # ─── Phase 110 : /craft (Crafting / Refinement) ──────────────────────────
 #
 # Affine un item équipé pour tenter de monter sa rareté d'un cran.
@@ -30015,8 +24687,6 @@ async def _incr_phase113_counter(guild_id: int, user_id: int, column: str, by: i
 # Pour réactiver : remettre le décorateur @bot.tree.command(name="craft", ...)
 
 
-
-
 # Phase 103 HOTFIX : retirer @bot.tree.command (limite Discord 100 atteinte)
 # Cette fonction reste appelable via /stats view:records (helper interne).
 
@@ -30025,12 +24695,8 @@ async def _incr_phase113_counter(guild_id: int, user_id: int, column: str, by: i
 # Cette fonction reste appelable via /stats view:loot_table (helper interne).
 
 
-
-
 # Phase 103 HOTFIX : retirer @bot.tree.command (limite Discord 100 atteinte)
 # Cette fonction reste appelable via /stats view:dashboard (helper interne).
-
-
 
 
 async def check_mod_perm(i, cmd_key):
@@ -30225,7 +24891,6 @@ def _format_warn_id(infraction_id: int, created_dt=None) -> str:
 # /bank       — banque (deposit, withdraw, status)
 # /owner      — admin/owner commands (force events, config, debug)
 # ═══════════════════════════════════════════════════════════════════════════════
-
 
 
 @mod_group.command(name="warn", description="⚠️ Avertir un membre (crée une fiche, aucun rôle attribué)")
@@ -30492,38 +25157,6 @@ class UnwarnSelect(Select):
 #                              🔇 MUTE / UNMUTE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def _hard_reset_member_stats(guild, member) -> bool:
-    """GROSSE BÊTISE — sanction MANUELLE du staff (owner 2026-07-17, décision « uniquement les
-    sanctions manuelles du staff : mute/kick/ban »). En plus du reset VIP (score d'activité + rôles),
-    on efface les compteurs À VIE de /profile (total messages + temps vocal cumulés) → le membre
-    repart VRAIMENT de zéro.
-
-    IRRÉVERSIBLE. FAIL-SAFE. Ne touche NI l'économie, NI les succès, NI les infractions (celles-ci
-    restent = la preuve). L'appelant a déjà filtré owner/super-owner/immunisés (gardes de sanction).
-    """
-    try:
-        uid = int(getattr(member, 'id', 0) or 0)
-        if not uid or guild is None:
-            return False
-        # 1) Reset VIP : activity_score + vip_status + rôles VIP (la partie déjà existante).
-        try:
-            await activity_vip_module.reset_member_stats(guild, uid)
-        except Exception as ex:
-            print(f"[hard_reset vip] {ex}", file=_sys.stderr, flush=True)
-        # 2) Compteurs À VIE de /profile (table activity_tracking) → 0.
-        try:
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE activity_tracking SET total_messages=0, total_vocal_time=0 "
-                    "WHERE guild_id=? AND user_id=?", (int(guild.id), uid))
-                await db.commit()
-        except Exception as ex:
-            print(f"[hard_reset lifetime] {ex}", file=_sys.stderr, flush=True)
-        return True
-    except Exception as ex:
-        print(f"[_hard_reset_member_stats] {ex}", file=_sys.stderr, flush=True)
-        return False
-
 
 @mod_group.command(name="mute", description="🔇 Timeout un membre")
 @app_commands.describe(membre="Le membre à mute", duree="La durée (nombre)", unite="L'unité de temps", raison="La raison du mute")
@@ -30585,10 +25218,6 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
         )
         await db.commit()
 
-    # GROSSE BÊTISE (sanction manuelle du staff) → reset TOTAL : score VIP + rôles + compteurs à
-    # vie de /profile (owner 2026-07-17). Le membre repart de zéro. FAIL-SAFE.
-    await _hard_reset_member_stats(i.guild, membre)
-
     # Embed PUBLIC — 🔒 SANS le modérateur (owner 2026-07-17 : seuls les autres staffs doivent
     # savoir qui a sanctionné). Le mod_id reste tracé dans `infractions`, le salon de logs et
     # `staff_audit_log` ci-dessous.
@@ -30602,8 +25231,7 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
     # ⚠️ Réponse ÉPHÉMÈRE puis annonce SÉPARÉE : une réponse publique ferait afficher par Discord
     # « <mod> a utilisé /mod mute » au-dessus de l'embed → le nom fuiterait malgré l'embed anonyme.
     await i.response.send_message(
-        f"✅ {membre.mention} a été mute (**{dur_txt}**). L'annonce publique ne te nomme pas.\n"
-        f"-# 🧹 Ses statistiques (score VIP + compteurs à vie) ont été **remises à zéro**.",
+        f"✅ {membre.mention} a été mute (**{dur_txt}**). L'annonce publique ne te nomme pas.",
         ephemeral=True)
     await _announce_sanction_public(i, e)
 
@@ -30993,11 +25621,6 @@ class _StaffSanctionModal(discord.ui.Modal):
                     "Aucune trace enregistrée.", ephemeral=True
                 )
 
-            # GROSSE BÊTISE (sanction MANUELLE du staff : mute/kick/ban) → reset TOTAL : score VIP
-            # + rôles + compteurs à vie de /profile (owner 2026-07-17). Le target n'est jamais
-            # immunisé ici (garde _staff_sanction_guard ci-dessus). FAIL-SAFE.
-            if target is not None:
-                await _hard_reset_member_stats(guild, target)
             # Règle dure : seul le FONDATEUR peut kick/ban. Pour un staff non-fondateur,
             # kick/ban est converti en ISOLEMENT (quarantaine) + alerte fondateur.
             if action in ('kick', 'ban') and not owner_ids_module.is_super_owner(moderator.id):
@@ -31117,13 +25740,11 @@ async def mod_active_cmd(i: discord.Interaction):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  GESTION DU CASIER — retirer une infraction / lever la privation VIP (owner 2026-07-17)
+#  GESTION DU CASIER — retirer une infraction ciblée ou tout le casier (owner 2026-07-17)
 # ═══════════════════════════════════════════════════════════════════════════════
 # Directive owner : « avec /mod infractions (staff UNIQUEMENT, rôle de modération), on voit TOUT
-# ce que le membre a commis, on peut CIBLER une infraction pour l'enlever (n'importe quel type),
-# et on peut aussi retirer le fait qu'il ne gagne plus le VIP → il pourra le regagner. Ses stats
-# restent à 0 (il doit les refaire). Ça nettoie la base et permet de réinitialiser une infraction
-# trop abusive. »
+# ce que le membre a commis, on peut CIBLER une infraction pour l'enlever (n'importe quel type).
+# Ça nettoie la base et permet de réinitialiser une infraction trop abusive. »
 #
 # 🔒 STAFF ONLY : le panneau s'ouvre depuis /mod infractions (déjà gardé `mod_infractions_role`),
 # et CHAQUE clic re-vérifie la permission (le panneau éphémère a pu rester ouvert).
@@ -31133,10 +25754,6 @@ _CASIER_TYPE_EMOJI = {
     'insulte': '🤬', 'haine': '🚫', 'menace': '⚔️', 'incitation': '📢',
     'discrimination': '🚫', 'harcelement': '🎯', 'grooming': '🛑', 'protection': '🛡️',
 }
-
-
-
-
 
 
 async def _build_casier_panel(staff, member, guild):
@@ -31162,23 +25779,20 @@ async def _build_casier_panel(staff, member, guild):
 
     lines = [f"🗂️ **Gestion du casier — {member.mention}**",
              f"-# `{member.id}` · {_total} infraction(s) au total"]
-    # (La ligne « privation VIP » a disparu avec le module vip_exclusion : le VIP
-    #  n'existe plus sur le serveur, il n'y a donc plus rien à priver ni à lever.)
     lines.append("")
     if rows:
         lines.append("Choisis un élément à **retirer** ci-dessous, ou efface tout le casier.")
     else:
         lines.append("✅ _Casier vierge._")
 
-    view = _CasierManageView(staff, member, guild, rows, False)
+    view = _CasierManageView(staff, member, guild, rows)
     return "\n".join(lines), view
 
 
 class _CasierManageView(View):
-    """Panneau STAFF (éphémère) : retirer une infraction ciblée / lever la privation VIP /
-    effacer tout le casier. Timeout 5 min. Re-vérifie la permission à CHAQUE interaction."""
+    """Panneau STAFF (éphémère) : retirer une infraction ciblée ou effacer tout le casier. Timeout 5 min. Re-vérifie la permission à CHAQUE interaction."""
 
-    def __init__(self, staff, member, guild, rows, vip_active):
+    def __init__(self, staff, member, guild, rows):
         super().__init__(timeout=300)
         self.staff_id = int(staff.id)
         self.member = member
@@ -31191,14 +25805,13 @@ class _CasierManageView(View):
             _desc = (str(reason or '').strip() or 'sans détail')[:90]
             opts.append(discord.SelectOption(
                 label=_lbl[:100], description=_desc, value=f"inf:{int(infr_id)}", emoji=_emo))
-        if vip_active:
-            opts.append(discord.SelectOption(
-                label="Lever la privation VIP", emoji="🚫", value="vip_lift",
-                description="il pourra REGAGNER le VIP (ses stats restent à 0)"))
         if opts:
-            pass  # bloc vidé (module détaché)
+            sel = discord.ui.Select(placeholder="Retirer une infraction…", min_values=1,
+                                    max_values=1, options=opts[:25])
+            sel.callback = self._on_select
+            self.add_item(sel)
         # Bouton « tout effacer » : seulement s'il y a quelque chose à effacer.
-        if rows or vip_active:
+        if rows:
             _clear = discord.ui.Button(
                 label="Effacer TOUT le casier", emoji="🧹",
                 style=discord.ButtonStyle.danger, custom_id="casier_clear_all")
@@ -31221,16 +25834,50 @@ class _CasierManageView(View):
             return False
         return True
 
+    async def _reafficher(self, i: discord.Interaction, note: str):
+        contenu, vue = await _build_casier_panel(i.user, self.member, self.guild)
+        await i.response.edit_message(content=f"{note}\n\n{contenu}", view=vue)
+
+    async def _on_select(self, i: discord.Interaction):
+        val = str((i.data or {}).get("values", [""])[0])
+        if not val.startswith("inf:"):
+            return await i.response.defer()
+        infr_id = int(val[4:])
+        async with get_db() as db:
+            await db.execute("DELETE FROM infractions WHERE id=? AND guild_id=? AND user_id=?",
+                             (infr_id, int(self.guild.id), int(self.member.id)))
+            await db.commit()
+        await log_staff_action(self.guild.id, i.user.id, self.member.id, "casier_retrait",
+                               f"infraction #{infr_id}", "casier")
+        await self._reafficher(i, f"✅ Infraction **#{infr_id}** retirée.")
+
     async def _on_clear_all(self, i: discord.Interaction):
         # Action DESTRUCTIVE → confirmation explicite (2 temps).
-        try:
-            pass  # bloc vidé (module détaché)
-        except Exception as ex:
-            print(f"[casier clear_all] {ex}", file=_sys.stderr, flush=True)
+        vue = View(timeout=60)
+        oui = discord.ui.Button(label="Oui, tout effacer", emoji="🧹",
+                                style=discord.ButtonStyle.danger)
+        non = discord.ui.Button(label="Annuler", style=discord.ButtonStyle.secondary)
 
+        async def _oui(i2: discord.Interaction):
+            if not await self.interaction_check(i2):
+                return
+            async with get_db() as db:
+                await db.execute("DELETE FROM infractions WHERE guild_id=? AND user_id=?",
+                                 (int(self.guild.id), int(self.member.id)))
+                await db.commit()
+            await log_staff_action(self.guild.id, i2.user.id, self.member.id, "casier_efface",
+                                   "tout le casier", "casier")
+            await self._reafficher(i2, "🧹 Casier effacé.")
 
+        async def _non(i2: discord.Interaction):
+            await self._reafficher(i2, "↩️ Rien n'a été effacé.")
 
-
+        oui.callback, non.callback = _oui, _non
+        vue.add_item(oui)
+        vue.add_item(non)
+        await i.response.edit_message(
+            content=f"⚠️ Effacer **tout** le casier de {self.member.mention} ? Irréversible.",
+            view=vue)
 
 
 @mod_group.command(name="infractions", description="📋 Voir la fiche d'infractions d'un membre")
@@ -31487,8 +26134,7 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
         _logerr("sanction.buttons_build", _ex)
 
     # ─── Bouton « 🗂️ Gérer le casier » (owner 2026-07-17) : ouvre un panneau STAFF pour RETIRER
-    # une infraction ciblée, LEVER la privation VIP (→ il peut regagner le rôle), ou effacer tout
-    # le casier. Re-vérifie la permission au clic. Vue éphémère → callback bound. ───
+    # une infraction ciblée ou effacer tout le casier. Re-vérifie la permission au clic. Vue éphémère → callback bound. ───
     try:
         btn_casier = discord.ui.Button(
             label="Gérer le casier", emoji="🗂️",
@@ -31775,16 +26421,6 @@ async def _rellseas_autorise(i) -> bool:
     return any(r.id in permis for r in getattr(i.user, "roles", []))
 
 
-
-
-
-
-
-
-
-
-
-
 @bot.tree.command(
     name="rellseas",
     description="🎭 Panneau de gestion Rellseas — donner et retirer le rôle par lots")
@@ -31831,42 +26467,9 @@ async def rellseas_cmd(i: discord.Interaction):
 # Le clan Realsy fait partie du périmètre supprimé par la refonte.
 
 
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                    🚀 LANCEMENT QUESTIONNAIRE - SÉLECTION QUESTIONS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #                    📍 SÉLECTION DE SALON PAGINÉE (QUESTIONNAIRE)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 class RellseasQuizAnswerView(View):
@@ -32168,20 +26771,9 @@ class RellseasExamineRejectButton(Button):
             except: pass
 
 
-
-
-
-
-
-
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              💡 SUGGESTION COMMAND
 # ═══════════════════════════════════════════════════════════════════════════════
-
-suggestion_cooldowns = {}
 
 
 # ─── TASK C.1 : feedback owner/staff sur les suggestions ──────────────────────
@@ -32328,38 +26920,12 @@ class SuggestionReplyButton(
                 pass
 
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                              🔄 TRADE COMMAND
-# ═══════════════════════════════════════════════════════════════════════════════
-
-trade_cooldowns = {}
-
-# Phase 168.3 : /trade retirée du tree Discord (décorateur supprimé).
-
-
-
-
-
-
-
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              📊 COMMANDE /STAT - STATISTIQUES MEMBRE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
-
-
-
 # create_stat_embed retiré : remplacé par build_stat_v2_data() en V2.
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -32451,24 +27017,6 @@ async def _update_suggestion_colors(payload):
         pass
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  🌐 TRADUCTION À LA DEMANDE (réaction 🌐) — T1
-# ───────────────────────────────────────────────────────────────────────────────
-#  Un membre réagit 🌐 sur le message d'un autre → le bot poste, EN REPLY au message
-#  (sans MP, sans ping), une traduction COMPACTE vers la langue du réacteur, qui
-#  S'AUTO-SUPPRIME (~120 s). OPT-IN (réaction volontaire) + désactivable (cfg
-#  translate_enabled + toggle EntraidePanelV2). Cooldown par utilisateur anti-spam.
-#  FAIL-SAFE TOTAL : toute erreur est avalée, on_raw_reaction_add n'est jamais cassé.
-# ═══════════════════════════════════════════════════════════════════════════════
-_translate_user_cooldown: dict = {}      # user_id(int) -> ts du dernier 🌐 (anti-spam)
-_TRANSLATE_USER_COOLDOWN_S = 20          # un même membre : 1 traduction / 20 s
-_TRANSLATE_DELETE_AFTER = 120            # la traduction postée s'auto-supprime (s)
-
-
-
-
-
-
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
@@ -32483,12 +27031,6 @@ async def on_raw_reaction_add(payload):
     except Exception as _ex_act:
         print(f"[activite on_reaction] {_ex_act}")
 
-    try:
-        if payload.guild_id:
-            pass  # bloc vidé (module détaché)
-    except Exception:
-        pass
-
     # (Traduction au clic sur 🌐 SUPPRIMÉE le 12/08/2026 : le module ayant été détaché
     #  pendant la refonte, ce bloc ne contenait plus qu'un `pass`. Il testait donc chaque
     #  réaction du serveur pour ne rien faire. La pose automatique de la 🌐 sur les annonces
@@ -32502,18 +27044,6 @@ async def on_raw_reaction_add(payload):
 
     # (Suivi des quêtes/succès retiré avec le module d'engagement.)
 
-    # Phase 166.4 : spotlight qualité (⭐ → repost dans #highlights)
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[spotlight_quality on_reaction] {ex}")
-
-
-    # Phase 46.2 : Game Night sync_react tracking
-    try:
-        await _check_game_night_sync_react(payload)
-    except Exception as ex:
-        print(f"[_check_game_night_sync_react] {ex}")
 
     # VEILLEUR questions sans réponse : SEULE la réaction de l'AUTEUR avec un emoji « résolu »
     # (✅/☑️/✔️/👍) clôt sa question. Toute autre réaction (autre membre, bot, emoji de
@@ -32583,7 +27113,6 @@ async def check_social_feeds():
                                 # Réductions de jeux (vérifiée moins souvent via counter)
                                 await check_game_deals(session, guild, data)
 
-                                # Phase 17 : Mises à jour de plateformes/jeux
 
                                 # owner 2026-07-17 : statut « jeu down » (poste/supprime l'alerte)
 
@@ -32801,9 +27330,10 @@ async def check_youtube_feeds(session, guild, data):
                                     e.timestamp = now()
 
                                     _live_msg = await webhook_send(live_channel, 'youtube_live', embed=e)
+                                    await mark_live_announced(live_cache_key, guild.id, 'youtube', channel_name, message_id=_live_msg.id if _live_msg else 0, live_channel_id=live_channel.id)
                             else:
                                 # Live pas détecté — debounce avant de considérer comme terminé
-                                pass  # bloc vidé (module détaché)
+                                await check_live_ended(live_cache_key, guild.id, 'youtube', channel_name)
                         # Si status != 200, ne rien faire (ne pas reset le cache)
                 except:
                     pass  # Erreur réseau → ne PAS toucher au cache
@@ -33139,11 +27669,11 @@ async def check_twitch_feeds(session, guild, data):
                     e.timestamp = now()
 
                     _live_msg = await webhook_send(notif_channel, 'twitch_live', embed=e)
+                    await mark_live_announced(cache_key, guild.id, 'twitch', username, message_id=_live_msg.id if _live_msg else 0, live_channel_id=notif_channel.id)
             else:
                 # Phase 20 : si live mais keyword absent du titre → considéré comme ended
                 # (déclenche delete du message s'il avait été posté)
-                if is_live and not keyword_matches:
-                    print(f"[Twitch] {username} live mais titre ne match pas filtre '{kw_filter}' → close")
+                await check_live_ended(cache_key, guild.id, 'twitch', username)
             
             await asyncio.sleep(1)
             
@@ -33275,10 +27805,10 @@ async def check_tiktok_feeds(session, guild, data):
                                     e.timestamp = now()
 
                                     _live_msg = await webhook_send(live_channel, 'tiktok_live', embed=e)
+                                    await mark_live_announced(live_cache_key, guild.id, 'tiktok', username, message_id=_live_msg.id if _live_msg else 0, live_channel_id=live_channel.id)
                             else:
                                 # Phase 20 : si live mais keyword absent → considéré ended
-                                if is_live and not keyword_matches_tk:
-                                    print(f"[TikTok] @{username} live mais titre ne match pas '{kw_filter_tk}' → close")
+                                await check_live_ended(live_cache_key, guild.id, 'tiktok', username)
                 except:
                     pass  # Erreur réseau → ne PAS toucher au cache
             
@@ -33909,351 +28439,6 @@ async def check_twitter_feeds(session, guild, data):
             print(f"Erreur Twitter feed {username}: {ex}")
             continue
 
-# Phase 15 : tracker des guilds déjà backfillés
-_rosocial_backfilled: set[int] = set()
-
-
-
-
-
-# Phase 15 : tracker des guilds déjà backfillés cette session (pas besoin de re-faire)
-_roblox_ugc_backfilled: set[int] = set()
-
-
-
-
-# ═══════════════ SPOTLIGHT UGC — annonce ÉVÉNEMENT + ping (owner 2026-06-29) ═══════════════
-# Le feed UGC détecte déjà les nouveaux accessoires (galerie passive). On AJOUTE une annonce
-# « événement » qui met le créateur + l'accessoire en avant et PING deux rôles : 🎨 Créateur UGC
-# (opt-out, NON mentionnable par @everyone — on ne refait pas l'erreur du mass-ping) et
-# 🛒 Collectionneur UGC (audience opt-IN). Boutons d'opt persistants. Tout FAIL-SAFE.
-async def _ensure_ugc_roles(guild):
-    """(creator_role, fans_role) — auto-créés si besoin. Créateur = NON mentionnable. FAIL-OPEN.
-    owner 2026-07-23 : si les rôles UGC ont été PURGÉS (`ugc_roles_purged`), on ne les recrée
-    PLUS JAMAIS → retourne (None, None). Tous les appelants gèrent déjà l'absence (`if role:`)."""
-    creator_role = fans_role = None
-    try:
-        c = await cfg(guild.id)
-        if c.get('ugc_roles_purged'):
-            return None, None
-        me = guild.me
-        can_roles = bool(me and me.guild_permissions.manage_roles)
-        crid = int(c.get('ugc_creator_role', 0) or 0)
-        creator_role = guild.get_role(crid) if crid else None
-        if creator_role is None and can_roles:
-            try:
-                creator_role = await guild.create_role(
-                    name="🎨 Créateur UGC", mentionable=False, hoist=False,
-                    reason="Spotlight UGC — rôle NON mentionnable par @everyone (anti mass-ping)")
-                await db_set(guild.id, 'ugc_creator_role', creator_role.id)
-            except Exception:
-                creator_role = None
-        frid = int(c.get('ugc_fans_role', 0) or 0)
-        fans_role = guild.get_role(frid) if frid else None
-        if fans_role is None and can_roles:
-            try:
-                fans_role = await guild.create_role(
-                    name="🛒 Collectionneur UGC", color=discord.Color(0xFFA94D),
-                    mentionable=False, hoist=False,
-                    reason="Spotlight UGC — audience (défaut pour tous, opt-out)")
-                await db_set(guild.id, 'ugc_fans_role', fans_role.id)
-            except Exception:
-                fans_role = None
-    except Exception as ex:
-        print(f"[_ensure_ugc_roles] {ex}")
-    return creator_role, fans_role
-
-
-async def _ugc_roles_purge_once():
-    """ONE-SHOT (owner 2026-07-23) : SUPPRIME DÉFINITIVEMENT les rôles 🎨 Créateur UGC et
-    🛒 Collectionneur UGC du serveur, coupe leur auto-attribution, et bloque toute recréation
-    (flag `ugc_roles_purged` → _ensure_ugc_roles renvoie None,None). Suppression par ID stocké
-    (précis) PUIS par NOM exact (repli). Idempotent par guilde, throttlé anti-429, FAIL-SAFE."""
-    try:
-        for guild in list(bot.guilds):
-            try:
-                c = await cfg(guild.id)
-                if c.get('ugc_roles_purged'):
-                    continue
-                _targets = []
-                for _key in ('ugc_creator_role', 'ugc_fans_role'):
-                    _rid = int(c.get(_key, 0) or 0)
-                    if _rid:
-                        _r = guild.get_role(_rid)
-                        if _r is not None and _r not in _targets:
-                            _targets.append(_r)
-                for _nm in ("🎨 Créateur UGC", "🛒 Collectionneur UGC"):
-                    _r = discord.utils.get(guild.roles, name=_nm)
-                    if _r is not None and _r not in _targets:
-                        _targets.append(_r)
-                _deleted = 0
-                for _r in _targets:
-                    try:
-                        await _r.delete(reason="Suppression définitive des rôles UGC (owner 2026-07-23)")
-                        _deleted += 1
-                        await asyncio.sleep(0.5)   # anti-429 (delete role = endpoint lourd)
-                    except Exception:
-                        pass
-                # Coupe l'auto-attribution + efface les références + pose le flag anti-recréation.
-                for _k, _v in (('ugc_creator_role', 0), ('ugc_fans_role', 0),
-                               ('ugc_fans_default_all', 0), ('ugc_roles_purged', 1)):
-                    try:
-                        await db_set(guild.id, _k, _v)
-                    except Exception:
-                        pass
-                try:
-                    diag.event("ugc", "roles_purge",
-                               f"{_deleted} rôle(s) UGC supprimé(s) + recréation coupée (guild {guild.id})")
-                except Exception:
-                    pass
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-
-async def _backfill_ugc_fans_role(guild):
-    """owner 2026-06-30 : abonne TOUS les membres existants au rôle « 🛒 Collectionneur UGC »
-    (opt-out) — UNE fois par serveur (flag `ugc_fans_backfilled`) — pour que le ping spotlight
-    atteigne ENFIN tout le monde (avant : opt-in → quasi personne ne l'avait → le salon ne
-    notifiait personne). Idempotent, throttlé anti-429, fail-open. Opt-out 1-clic ensuite
-    (bouton 🔔 sous une annonce ou message d'info du salon). Calqué sur _backfill_events_role."""
-    try:
-        if guild is None:
-            return
-        c = await cfg(guild.id)
-        if not c.get('ugc_fans_default_all', 1):
-            return  # désactivé par l'owner → on n'abonne personne d'office
-        if int(c.get('ugc_fans_backfilled', 0) or 0) == 1:
-            return
-        _creator, role = await _ensure_ugc_roles(guild)
-        if role is None:
-            # Perm « Gérer les rôles » manquante → on NE pose PAS le flag (réessai prochain boot).
-            return
-        try:
-            if not guild.chunked:
-                await guild.chunk()
-        except Exception:
-            pass
-        added = 0
-        attempted = 0
-        for member in list(guild.members):
-            try:
-                if member.bot or role in member.roles:
-                    continue
-                # Respecter un opt-out PRÉALABLE (membre s'étant désabonné). Défaut = True.
-                if not await _member_wants_notif(guild.id, member.id, 'ugc'):
-                    continue
-                attempted += 1
-                await member.add_roles(
-                    role, reason="Abonnement Collectionneur UGC par défaut (opt-out)")
-                added += 1
-                await asyncio.sleep(0.6)   # throttle doux anti rate-limit
-            except Exception:
-                continue
-        # Si on AVAIT des membres à abonner mais que TOUT a échoué → perm manquante OU rôle du bot
-        # SOUS le rôle Collectionneur dans la hiérarchie. On NE pose PAS le flag → réessai prochain boot.
-        if attempted > 0 and added == 0:
-            print(f"[ugc_fans_backfill] {guild.name}: ÉCHEC ({attempted} membres, 0 ajout) "
-                  f"— vérifie « Gérer les rôles » + la hiérarchie du rôle du bot. "
-                  f"Non marqué → réessai au prochain boot.")
-            return
-        await db_set(guild.id, 'ugc_fans_backfilled', 1)
-        print(f"[ugc_fans_backfill] {guild.name}: +{added} membres abonnés (opt-out)")
-    except Exception as ex:
-        print(f"[ugc_fans_backfill] {ex}")
-
-
-class UGCOptButton(discord.ui.DynamicItem[discord.ui.Button],
-                   template=r"ugcopt:(?P<act>[a-z_]+)"):
-    """Boutons persistants sous une annonce UGC : opt-out créateur / toggle fans."""
-    def __init__(self, act: str):
-        self.act = act
-        if act == 'creator_out':
-            btn = discord.ui.Button(label="🔕 Ne plus être mis en avant",
-                                    style=discord.ButtonStyle.secondary, custom_id="ugcopt:creator_out")
-        else:
-            btn = discord.ui.Button(label="🔔 Suivre / ne plus suivre les UGC",
-                                    style=discord.ButtonStyle.success, custom_id="ugcopt:fans_toggle")
-        super().__init__(btn)
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(match['act'])
-
-    async def callback(self, i: discord.Interaction):
-        await _ugc_opt_click(i, self.act)
-
-
-async def _ugc_opt_click(i: discord.Interaction, act: str):
-    """Opt-out créateur / opt-in-out fans. Défère via send_message éphémère. FAIL-SAFE."""
-    try:
-        if i.guild is None:
-            return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-        creator_role, fans_role = await _ensure_ugc_roles(i.guild)
-        mem = i.user
-        roles = getattr(mem, 'roles', [])
-        if act == 'creator_out':
-            if creator_role and creator_role in roles:
-                try:
-                    await mem.remove_roles(creator_role, reason="Opt-out spotlight UGC")
-                except Exception:
-                    pass
-                return await i.response.send_message(
-                    "🔕 C'est noté — tu ne seras plus **pingé** sur les nouveaux UGC. "
-                    "Tes créations restent visibles dans la galerie.", ephemeral=True)
-            return await i.response.send_message(
-                "ℹ️ Tu n'es pas dans le rôle 🎨 Créateur UGC (le staff te l'attribue).", ephemeral=True)
-        # fans_toggle
-        if fans_role is None:
-            return await i.response.send_message(
-                "ℹ️ Le rôle de suivi n'est pas disponible (permission « Gérer les rôles » manquante).",
-                ephemeral=True)
-        if fans_role in roles:
-            try:
-                await mem.remove_roles(fans_role, reason="Opt-out fans UGC")
-            except Exception:
-                pass
-            # PERSISTE l'opt-out → le backfill et l'auto-arrivée ne re-colleront JAMAIS le rôle.
-            try:
-                await _set_notif_pref(i.guild.id, mem.id, 'ugc', False)
-            except Exception:
-                pass
-            return await i.response.send_message(
-                "🔕 C'est noté — tu ne seras plus notifié des nouveaux accessoires UGC. "
-                "Reclique ce bouton quand tu veux pour te réabonner.", ephemeral=True)
-        try:
-            await mem.add_roles(fans_role, reason="Opt-in fans UGC")
-        except Exception:
-            pass
-        # Réabonnement persistant (efface un opt-out précédent).
-        try:
-            await _set_notif_pref(i.guild.id, mem.id, 'ugc', True)
-        except Exception:
-            pass
-        return await i.response.send_message(
-            "🔔 Parfait ! Tu seras **notifié** des nouveaux accessoires UGC. 🛒", ephemeral=True)
-    except Exception as ex:
-        print(f"[_ugc_opt_click] {ex}")
-        try:
-            if not i.response.is_done():
-                await i.response.send_message("✅ Pris en compte.", ephemeral=True)
-        except Exception:
-            pass
-
-
-# Détails ENRICHIS d'un UGC via l'endpoint CSRF (owner 2026-06-29 : « informer, dire pourquoi
-# acheter, montrer ce dont c'est fait, sources fiables »). Vérifié : renvoie assetType/description/
-# itemRestrictions/creatorHasVerifiedBadge/price/lowestResalePrice. Token CSRF caché + refresh sur 403.
-_UGC_CSRF: dict = {"token": None}
-_UGC_ASSET_TYPES = {
-    8: "🎩 Chapeau", 41: "💇 Cheveux", 42: "😎 Accessoire de visage", 43: "📿 Accessoire de cou",
-    44: "🎒 Accessoire d'épaule", 45: "🧷 Accessoire avant", 46: "🎒 Accessoire de dos",
-    47: "🥋 Accessoire de taille", 17: "🗿 Tête", 18: "😀 Visage", 19: "⚙️ Équipement",
-    2: "👕 T-shirt", 11: "👕 Chemise", 12: "👖 Pantalon", 64: "👕 Haut", 65: "👖 Bas",
-    66: "🧥 Veste", 67: "🧥 Manteau", 68: "🧶 Pull", 69: "🩳 Short", 72: "🧥 Sweat",
-    76: "👗 Robe", 78: "👟 Chaussures",
-}
-
-
-
-
-
-
-
-
-
-
-
-
-class UGCWishlistButton(discord.ui.DynamicItem[discord.ui.Button],
-                        template=r"ugcwish:(?P<iid>\d+)"):
-    """Bouton « 🤍 Je le veux » persistant sous une fiche UGC → wishlist du membre."""
-    def __init__(self, item_id: int):
-        self.item_id = int(item_id)
-        super().__init__(discord.ui.Button(
-            label="🤍 Je le veux", style=discord.ButtonStyle.secondary,
-            custom_id=f"ugcwish:{int(item_id)}"))
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match['iid']))
-
-    async def callback(self, i: discord.Interaction):
-        await _ugc_wishlist_click(i, self.item_id)
-
-
-async def _ugc_wishlist_click(i: discord.Interaction, item_id: int):
-    """Toggle wishlist (nom/url repris de ugc_spotlights). Éphémère. FAIL-SAFE."""
-    try:
-        if i.guild is None:
-            return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT 1 FROM ugc_wishlist WHERE guild_id=? AND user_id=? AND item_id=?",
-                (i.guild.id, i.user.id, int(item_id))) as cur:
-                exists = (await cur.fetchone()) is not None
-            if exists:
-                await db.execute(
-                    "DELETE FROM ugc_wishlist WHERE guild_id=? AND user_id=? AND item_id=?",
-                    (i.guild.id, i.user.id, int(item_id)))
-                await db.commit()
-                return await i.response.send_message("🤍 Retiré de ta wishlist.", ephemeral=True)
-            async with db.execute(
-                "SELECT item_name, item_url FROM ugc_spotlights WHERE guild_id=? AND item_id=? LIMIT 1",
-                (i.guild.id, int(item_id))) as cur:
-                row = await cur.fetchone()
-            nm = ((row[0] if row else "") or f"Item {item_id}")
-            url = ((row[1] if row else "") or f"https://www.roblox.com/catalog/{item_id}")
-            await db.execute(
-                "INSERT OR IGNORE INTO ugc_wishlist (guild_id, user_id, item_id, item_name, item_url) "
-                "VALUES (?,?,?,?,?)", (i.guild.id, i.user.id, int(item_id), nm[:200], url))
-            await db.commit()
-        return await i.response.send_message(
-            f"❤️ **{nm[:60]}** ajouté à ta wishlist ! Retrouve-la avec `/ma-wishlist`.", ephemeral=True)
-    except Exception as ex:
-        print(f"[_ugc_wishlist_click] {ex}")
-        try:
-            if not i.response.is_done():
-                await i.response.send_message("✅ Pris en compte.", ephemeral=True)
-        except Exception:
-            pass
-
-
-
-
-
-
-
-
-async def _ugc_votes_for_message(guild, channel_id, message_id) -> int:
-    """Compte les ❤️ d'une annonce UGC (moins la réaction du bot). FAIL-OPEN → 0."""
-    try:
-        ch = guild.get_channel(int(channel_id))
-        if ch is None:
-            return 0
-        msg = await ch.fetch_message(int(message_id))
-        for r in msg.reactions:
-            if str(r.emoji) == "❤️":
-                return max(0, r.count - 1)
-        return 0
-    except Exception:
-        return 0
-
-
-
-
-_MEMBER_MILESTONES = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000]
-
-
-
-
-
-
-
-
-
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #              🎮 SYSTÈME DE DEALS PERSISTANT (anti-doublon en DB)
@@ -34508,15 +28693,6 @@ GAME_PLATFORMS = {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  🎮 MISES À JOUR DE PLATEFORMES / JEUX (Phase 17)
-#
-#  Config : `ads_updates_feeds` = list[ {game_key, channel_id} ]
-#  Pour chaque feed configuré, vérifie les nouvelles mises à jour officielles
-#  (patch notes, dev updates, release notes) et les poste.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 26.2 : SPOTLIGHT CRÉATEURS — polling YouTube RSS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -34677,20 +28853,6 @@ def _valid_embed_image_url(u, base: str = "") -> str:
         return u
     except Exception:
         return ""
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 async def check_game_deals(session, guild, data):
@@ -35456,10 +29618,6 @@ async def on_voice_state_update(member, before, after):
                             # Panneau de contrôle in-room (owner 2026-06-15) : poste dans le
                             # chat texte du vocal les boutons renommer/limite/lock/kick/transfert
                             # pour le propriétaire. FAIL-SAFE (n'empêche jamais la création/move).
-                            try:
-                                pass  # bloc vidé (module détaché)
-                            except Exception as _vcex:
-                                print(f"[TEMP VOICE control panel] {_vcex}")
                             # Déplacer le membre DANS son salon. Si le bot n'a pas
                             # « Déplacer des membres », on le prévient en DM.
                             try:
@@ -35526,35 +29684,13 @@ async def on_voice_state_update(member, before, after):
     except Exception as ex:
         print(f"[on_voice_state_update entraide] {ex}")
 
-    # ═══════════════ TRACKING ACTIVITÉ VOCALE ═══════════════
+    # Rell Seas : un retour en vocal compte comme une présence du clan (le reste du suivi
+    # vocal — XP, temps cumulé — est retiré le 19/10/2026).
     try:
-        # Cas 1: L'utilisateur REJOINT un vocal (était pas en vocal ou change de salon)
         if after.channel and (before.channel is None or before.channel.id != after.channel.id):
-            print(f"[VOCAL] {member.display_name} rejoint {after.channel.name}")
-            
-            # Enregistrer l'heure de connexion
-            voice_join_tracker[key] = now()
-            _evict_if_big(voice_join_tracker)
-
-            # Mettre à jour last_vocal et redonner le rôle si configuré
-            await track_member_vocal_join(member, after.channel)
             await update_realsy_activity(guild_id, user_id)
-        
-        # Cas 2: L'utilisateur QUITTE un vocal (quitte complètement ou change de salon)
-        if before.channel and (after.channel is None or before.channel.id != after.channel.id):
-            print(f"[VOCAL] {member.display_name} quitte {before.channel.name}")
-            
-            # Calculer le temps passé
-            join_time = voice_join_tracker.pop(key, None)
-            if join_time:
-                duration = int((now() - join_time).total_seconds())
-                print(f"[VOCAL] Durée: {duration} secondes")
-                if duration > 0:
-                    await track_member_vocal_leave(member, before.channel, duration)
-            else:
-                print(f"[VOCAL] Pas de join_time trouvé pour {member.display_name}")
     except Exception as ex:
-        print(f"Erreur tracking vocal: {ex}")
+        print(f"[on_voice_state_update rellseas] {ex}")
 
 async def _activite_suivi(guild_id, user_id) -> bool:
     """19/10/2026 : « un système d'inactivité en fonction d'un rôle que j'aurai moi-même
@@ -35563,343 +29699,6 @@ async def _activite_suivi(guild_id, user_id) -> bool:
     g = bot.get_guild(int(guild_id)) if rid else None
     m = g.get_member(int(user_id)) if g else None
     return m is not None and any(r.id == rid for r in m.roles)
-
-
-async def track_member_message(msg):
-    """Les compteurs de /profile (messages, dernier message, agrégat du jour).
-    19/10/2026 : l'ancien AFK (« salons surveillés ») est retiré — un cfg de moins par message."""
-    try:
-        async with get_db() as db:
-            now_str = now().isoformat()
-            today = now().strftime('%Y-%m-%d')
-            await db.execute('''
-                INSERT INTO activity_tracking (guild_id, user_id, last_message, total_messages)
-                VALUES (?, ?, ?, 1)
-                ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                    last_message = ?,
-                    total_messages = total_messages + 1
-            ''', (msg.guild.id, msg.author.id, now_str, now_str))
-
-            # D3 : agrégat journalier au lieu d'1 INSERT brut PAR message (anti-gonflement).
-            # UPSERT cheap : 1 ligne par (guild, user, channel, jour), hits += 1.
-            # Sert le ciblage de salon ET les compteurs de stats messages.
-            await db.execute('''
-                INSERT INTO member_activity_daily (guild_id, user_id, channel_id, day, hits, last_ts)
-                VALUES (?, ?, ?, ?, 1, ?)
-                ON CONFLICT(guild_id, user_id, channel_id, day) DO UPDATE SET
-                    hits = hits + 1,
-                    last_ts = ?
-            ''', (msg.guild.id, msg.author.id, msg.channel.id, today, now_str, now_str))
-            
-            # ═══ Stats journalières agrégées (pour graphiques tendances) ═══
-            await db.execute('''
-                INSERT INTO daily_guild_stats (guild_id, date, total_messages, active_members)
-                VALUES (?, ?, 1, 1)
-                ON CONFLICT(guild_id, date) DO UPDATE SET
-                    total_messages = total_messages + 1
-            ''', (msg.guild.id, today))
-            
-            await db.commit()
-        
-        # ═══════════════ RESTAURATION DU RÔLE D'ACTIVITÉ ═══════════════
-        # Si le membre a perdu son rôle d'activité à cause de l'AFK,
-        # un simple message N'IMPORTE OÙ suffit à le récupérer
-        try:
-            c = await cfg(msg.guild.id)
-            stat_cfg = c.get('stat_config', {})
-            role_id = stat_cfg.get('activity_role', 0)
-            if role_id:
-                role = msg.guild.get_role(role_id)
-                if role and role not in msg.author.roles:
-                    try:
-                        await msg.author.add_roles(role, reason="Retour d'activité via message")
-                    except discord.Forbidden:
-                        print(f"[ACTIVITY] Permission refusée pour rôle {role.name} à {msg.author}")
-                    except Exception as ex:
-                        print(f"[ACTIVITY] Erreur ajout rôle: {ex}")
-        except:
-            pass
-        
-        # ═══════════════ NOUVEAU SYSTÈME DE NIVEAUX ═══════════════
-        try:
-            c = await cfg(msg.guild.id)
-            level_cfg = c.get('level_config', {})
-            
-            # Vérifier si le système est activé
-            if not level_cfg.get('enabled', False):
-                return
-            
-            # ═══════════════ VÉRIFIER SI LE SALON EST AUTORISÉ ═══════════════
-            xp_text_channels = level_cfg.get('xp_text_channels', [])
-            if xp_text_channels and msg.channel.id not in xp_text_channels:
-                return  # Salon non autorisé, pas de gains
-            
-            # Ajouter de l'XP
-            xp_per_msg = level_cfg.get('xp_per_message', 15)
-            if xp_per_msg > 0:
-                new_level = await add_xp(msg.guild.id, msg.author.id, xp_per_msg)
-                
-                # Si level up
-                if new_level:
-                    # Annoncer le level up
-                    levelup_ch_id = level_cfg.get('levelup_channel', 0)
-                    levelup_ch = msg.guild.get_channel(levelup_ch_id) if levelup_ch_id else msg.channel
-                    
-                    e = discord.Embed(color=0xF1C40F, timestamp=now())
-                    e.set_author(name="⭐ Level Up !", icon_url=msg.author.display_avatar.url if msg.author.display_avatar else None)
-                    e.description = f"🎉 {msg.author.mention} est passé au **niveau {new_level}** !"
-                    e.set_thumbnail(url=msg.author.display_avatar.url if msg.author.display_avatar else None)
-                    e.set_footer(text=msg.author.display_name, icon_url=msg.guild.icon.url if msg.guild.icon else None)
-                    
-                    try:
-                        _lu = await webhook_send(levelup_ch, 'level_up', embed=e)
-                        if _lu:
-                            async def _del(m): 
-                                await asyncio.sleep(30)
-                                try: await m.delete()
-                                except: pass
-                            asyncio.create_task(_del(_lu))
-                    except:
-                        pass
-                    
-                    # Vérifier les récompenses de niveau
-                    async with get_db() as db:
-                        async with db.execute('SELECT role_id FROM level_rewards WHERE guild_id=? AND level=?', (msg.guild.id, new_level)) as cursor:
-                            row = await cursor.fetchone()
-                            if row:
-                                role = msg.guild.get_role(row[0])
-                                if role:
-                                    try:
-                                        await msg.author.add_roles(role, reason=f"Récompense niveau {new_level}")
-                                    except:
-                                        pass
-            
-            # Ajouter des pièces (basé sur le nombre de messages)
-            coins_per_messages = level_cfg.get('coins_per_messages', 1)
-            coins_amount = level_cfg.get('coins_amount', 1)
-            
-            if coins_per_messages > 0 and coins_amount > 0:
-                # Récupérer le compteur de messages pour les pièces
-                eco = await get_user_economy(msg.guild.id, msg.author.id)
-                msg_count = eco.get('message_count', 0) + 1
-                
-                if msg_count >= coins_per_messages:
-                    # Donner les pièces et réinitialiser le compteur
-                    await add_coins(msg.guild.id, msg.author.id, coins_amount)
-                    await update_user_economy(msg.guild.id, msg.author.id, message_count=0)
-                else:
-                    # Incrémenter le compteur
-                    await update_user_economy(msg.guild.id, msg.author.id, message_count=msg_count)
-        except Exception as ex:
-            print(f"Erreur level system: {ex}")
-    except:
-        pass
-
-async def handle_recovery_message(msg, stat_cfg):
-    """Gère un message dans le salon de récupération - supprime le message et redonne le rôle"""
-    try:
-        role_id = stat_cfg.get('activity_role', 0)
-        
-        role = msg.guild.get_role(role_id) if role_id else None
-        
-        # ═══════════════ ÉTAPE 1: METTRE À JOUR L'ACTIVITÉ EN PREMIER ═══════════════
-        now_str = now().isoformat()
-        async with get_db() as db:
-            await db.execute('''
-                INSERT INTO activity_tracking (guild_id, user_id, last_message, total_messages)
-                VALUES (?, ?, ?, 1)
-                ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                    last_message = ?,
-                    total_messages = total_messages + 1
-            ''', (msg.guild.id, msg.author.id, now_str, now_str))
-            await db.commit()
-        
-        # ═══════════════ ÉTAPE 2: REDONNER LE RÔLE ═══════════════
-        if role and role not in msg.author.roles:
-            try:
-                await msg.author.add_roles(role, reason="Récupération d'activité via salon dédié")
-                print(f"[RECOVERY] Rôle {role.name} redonné à {msg.author} dans {msg.guild.name}")
-            except discord.Forbidden:
-                print(f"[RECOVERY] Permission refusée pour ajouter le rôle {role.name} à {msg.author}")
-            except Exception as ex:
-                print(f"[RECOVERY] Erreur ajout rôle: {ex}")
-        elif not role:
-            print(f"[RECOVERY] Aucun rôle d'activité configuré (role_id={role_id})")
-
-        # ═══════════════ ÉTAPE 3: SUPPRIMER LE MESSAGE ═══════════════
-        try:
-            await msg.delete()
-        except:
-            pass
-
-    except Exception as ex:
-        print(f"Erreur handle_recovery_message: {ex}")
-
-async def track_member_vocal_join(member, channel):
-    """Enregistre une connexion vocale"""
-    try:
-        async with get_db() as db:
-            now_str = now().isoformat()
-            
-            # Mettre à jour last_vocal
-            await db.execute('''
-                INSERT INTO activity_tracking (guild_id, user_id, last_vocal)
-                VALUES (?, ?, ?)
-                ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                    last_vocal = ?
-            ''', (member.guild.id, member.id, now_str, now_str))
-            
-            await db.commit()
-        
-        # Redonner le rôle d'activité si configuré
-        await restore_activity_role(member)
-        
-    except Exception as ex:
-        print(f"Erreur track vocal join: {ex}")
-
-async def track_member_vocal_leave(member, channel, duration):
-    """Enregistre le temps passé en vocal et donne XP/pièces"""
-    try:
-        async with get_db() as db:
-            now_str = now().isoformat()
-            
-            # Mettre à jour le temps total en vocal
-            await db.execute('''
-                INSERT INTO activity_tracking (guild_id, user_id, total_vocal_time)
-                VALUES (?, ?, ?)
-                ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                    total_vocal_time = COALESCE(total_vocal_time, 0) + ?
-            ''', (member.guild.id, member.id, duration, duration))
-            
-            # Enregistrer la session vocale
-            await db.execute('''
-                INSERT INTO member_activity (guild_id, user_id, activity_type, channel_id, duration, created_at)
-                VALUES (?, ?, 'vocal', ?, ?, ?)
-            ''', (member.guild.id, member.id, channel.id, duration, now_str))
-            
-            await db.commit()
-            print(f"[VOCAL DB] Enregistré {duration}s pour {member.display_name} dans {channel.name}")
-        
-        # ═══════════════ XP ET PIÈCES VOCAUX ═══════════════
-        try:
-            c = await cfg(member.guild.id)
-            level_cfg = c.get('level_config', {})
-            
-            if level_cfg.get('enabled', False) and duration > 0:
-                # ═══════════════ VÉRIFIER SI LE SALON EST AUTORISÉ ═══════════════
-                xp_voice_channels = level_cfg.get('xp_voice_channels', [])
-                if xp_voice_channels and channel.id not in xp_voice_channels:
-                    print(f"[VOCAL] Salon {channel.name} non autorisé pour XP/pièces")
-                    return  # Salon non autorisé, pas de gains
-                
-                # Fonction pour convertir la durée selon l'unité
-                def get_units(seconds, unit):
-                    if unit == 'minute':
-                        return seconds // 60
-                    elif unit == 'hour':
-                        return seconds // 3600
-                    elif unit == 'day':
-                        return seconds // 86400
-                    return seconds // 60  # Par défaut en minutes
-                
-                # XP Vocal
-                xp_per_vocal = level_cfg.get('xp_per_vocal', level_cfg.get('xp_per_vocal_minute', 5))
-                xp_vocal_unit = level_cfg.get('xp_vocal_unit', 'minute')
-                xp_units = get_units(duration, xp_vocal_unit)
-                
-                if xp_units > 0 and xp_per_vocal > 0:
-                    total_xp = xp_units * xp_per_vocal
-                    print(f"[VOCAL XP] {member.display_name}: {xp_units} {xp_vocal_unit}s x {xp_per_vocal} = {total_xp} XP")
-                    new_level = await add_xp(member.guild.id, member.id, total_xp)
-                    
-                    # Si level up
-                    if new_level:
-                        levelup_ch_id = level_cfg.get('levelup_channel', 0)
-                        levelup_ch = member.guild.get_channel(levelup_ch_id) if levelup_ch_id else None
-                        
-                        if levelup_ch:
-                            e = discord.Embed(color=0xF1C40F, timestamp=now())
-                            e.set_author(name="⭐ Level Up !", icon_url=member.display_avatar.url if member.display_avatar else None)
-                            e.description = f"🎉 {member.mention} est passé au **niveau {new_level}** !"
-                            e.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
-                            e.set_footer(text=f"🎤 Temps en vocal: {duration // 60} min", icon_url=member.guild.icon.url if member.guild.icon else None)
-                            try:
-                                _lu = await webhook_send(levelup_ch, 'level_up', embed=e)
-                                if _lu:
-                                    async def _del2(m): 
-                                        await asyncio.sleep(30)
-                                        try: await m.delete()
-                                        except: pass
-                                    asyncio.create_task(_del2(_lu))
-                            except:
-                                pass
-                        
-                        # Vérifier les récompenses de niveau
-                        async with get_db() as db:
-                            async with db.execute('SELECT role_id FROM level_rewards WHERE guild_id=? AND level=?', (member.guild.id, new_level)) as cursor:
-                                row = await cursor.fetchone()
-                                if row:
-                                    role = member.guild.get_role(row[0])
-                                    if role:
-                                        try:
-                                            await member.add_roles(role, reason=f"Récompense niveau {new_level}")
-                                        except:
-                                            pass
-                
-                # Pièces Vocal
-                coins_per_vocal = level_cfg.get('coins_per_vocal', level_cfg.get('coins_per_vocal_minute', 1))
-                coins_vocal_unit = level_cfg.get('coins_vocal_unit', 'minute')
-                coins_units = get_units(duration, coins_vocal_unit)
-                
-                if coins_units > 0 and coins_per_vocal > 0:
-                    total_coins = coins_units * coins_per_vocal
-                    print(f"[VOCAL COINS] {member.display_name}: {coins_units} {coins_vocal_unit}s x {coins_per_vocal} = {total_coins} pièces")
-                    await add_coins(member.guild.id, member.id, total_coins)
-        except Exception as ex:
-            print(f"Erreur XP/coins vocal: {ex}")
-            
-    except Exception as ex:
-        print(f"Erreur track vocal leave: {ex}")
-
-async def restore_activity_role(member):
-    """Redonne le rôle d'activité si le membre rejoint un vocal"""
-    try:
-        c = await cfg(member.guild.id)
-        stat_cfg = c.get('stat_config', {})
-        role_id = stat_cfg.get('activity_role', 0)
-        
-        if not role_id:
-            return
-        
-        role = member.guild.get_role(role_id)
-        if not role:
-            return
-        
-        # ═══════════════ ENREGISTRER L'ACTIVITÉ ═══════════════
-        now_str = now().isoformat()
-        async with get_db() as db:
-            await db.execute('''
-                INSERT INTO activity_tracking (guild_id, user_id, last_vocal)
-                VALUES (?, ?, ?)
-                ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                    last_vocal = ?
-            ''', (member.guild.id, member.id, now_str, now_str))
-            await db.commit()
-        
-        # Redonner le rôle silencieusement
-        if role not in member.roles:
-            try:
-                await member.add_roles(role, reason="Retour d'activité via vocal")
-            except:
-                pass
-                
-    except Exception as ex:
-        print(f"Erreur restore role: {ex}")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🎁 TÂCHE AUTOMATIQUE GIVEAWAYS
-# ═══════════════════════════════════════════════════════════════════════════════
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -36003,11 +29802,6 @@ async def before_check_scheduled_messages():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
-
-
 # Tâche pour retirer les rôles expirés
 @tasks.loop(minutes=1)
 async def check_expired_roles():
@@ -36107,13 +29901,6 @@ async def before_check_restrictions():
     await bot.wait_until_ready()
 
 
-
-
-
-# Phase 120 : retiré (debug inutilisé, ex-/testdeals)
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #                    🆕 INTÉGRATION MODULES REDESIGN 2026
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -36126,7 +29913,6 @@ async def before_check_restrictions():
 # /admin RETIRÉ (audit admin) : il doublonnait /configure → 1 slot de commande libéré.
 wizard2026.setup_setup_command(bot)
 slashcmds2026.setup_all_commands(bot)
-# Phase 46.1 : slash_commands_architecture supprimé (système backup/rebuild retiré)
 
 
 # ─── Phase 3.0g : commande /ping minimale pour tester la liveness ───
@@ -36308,8 +30094,6 @@ bot.add_listener(_2026_on_ready_addon, "on_ready")
     # (voice_joins) → activité clan captée par le vrai système d'activité (avec historique).
 
 
-
-
 async def _voice_log_listener(member, before, after):
     """LOG VOCAL (quick-win pro) : émet VOICE_JOIN/LEAVE/MOVE dans le salon de logs
     unifié — la catégorie « Vocal » existait mais AUCUN émetteur ne la remplissait.
@@ -36482,36 +30266,10 @@ bot.add_listener(_bump_detect_listener, "on_message")  # réarme le rappel de bu
 # ─── Boucle d'auto-clean : detecte si une source (tweet/video/post) a ete
 #    supprimee et retire le message Discord correspondant (Phase 1.8).
 #    Tourne toutes les 30 min, max 50 verifications/guild/run pour eviter rate-limit.
-_2026_cleanup_task = None  # asyncio.Task | None
-
-
-
-
-async def _2026_start_cleanup_loop():
-    """Lance la boucle d'auto-clean une seule fois (idempotent)."""
-    global _2026_cleanup_task
-    if _2026_cleanup_task is None or _2026_cleanup_task.done():
-        pass  # bloc vidé (module détaché)
-
-
-bot.add_listener(_2026_start_cleanup_loop, "on_ready")
 
 
 # ─── Flush periodique de l'activity tracker (Phase 3.0e)
 #    Evite le disk-thrashing en bufferisant en RAM.
-_2026_flush_task = None
-
-
-
-
-async def _2026_start_activity_flush():
-    """Lance la boucle de flush activity (idempotent)."""
-    global _2026_flush_task
-    if _2026_flush_task is None or _2026_flush_task.done():
-        pass  # bloc vidé (module détaché)
-
-
-bot.add_listener(_2026_start_activity_flush, "on_ready")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -36538,142 +30296,25 @@ except Exception:
     _TZ_P41 = timezone.utc
 
 
-def _today_str_p41() -> str:
-    """Aujourd'hui au format YYYY-MM-DD (Europe/Paris)."""
-    return datetime.now(_TZ_P41).strftime('%Y-%m-%d')
-
-
-def _yesterday_str_p41() -> str:
-    return (datetime.now(_TZ_P41) - timedelta(days=1)).strftime('%Y-%m-%d')
-
-
-
-
 # ─── HELPERS STATS ─────────────────────────────────────────────────────────────
-
-
-async def _get_user_stats41(guild_id: int, user_id: int) -> dict:
-    """Récupère (ou crée) la ligne user_stats41 pour un membre."""
-    async with get_db() as db:
-        async with db.execute(
-            'SELECT messages, reactions_given, voice_min, events_participated, events_won, '
-            'bosses_won, duels_won, treasures_found, quiz_correct, mystery_opened, '
-            'total_coins_earned, shop_purchases, legendary_purchases, divine_purchases, '
-            'unique_commands, classes_tried, pets_owned, wheel_spins, quests_done, '
-            'confessions_sent, level, best_streak, commands_used_json, classes_tried_json '
-            'FROM user_stats41 WHERE guild_id=? AND user_id=?',
-            (guild_id, user_id),
-        ) as cur:
-            row = await cur.fetchone()
-        if row is None:
-            await db.execute(
-                'INSERT OR IGNORE INTO user_stats41(guild_id, user_id) VALUES(?,?)',
-                (guild_id, user_id),
-            )
-            await db.commit()
-            return {
-                'messages': 0, 'reactions_given': 0, 'voice_min': 0,
-                'events_participated': 0, 'events_won': 0, 'bosses_won': 0,
-                'duels_won': 0, 'treasures_found': 0, 'quiz_correct': 0,
-                'mystery_opened': 0, 'total_coins_earned': 0, 'shop_purchases': 0,
-                'legendary_purchases': 0, 'divine_purchases': 0,
-                'unique_commands': 0, 'classes_tried': 0, 'pets_owned': 0,
-                'wheel_spins': 0, 'quests_done': 0, 'confessions_sent': 0,
-                'level': 0, 'best_streak': 0,
-                'commands_used_json': '[]', 'classes_tried_json': '[]',
-            }
-        keys = [
-            'messages', 'reactions_given', 'voice_min', 'events_participated',
-            'events_won', 'bosses_won', 'duels_won', 'treasures_found',
-            'quiz_correct', 'mystery_opened', 'total_coins_earned',
-            'shop_purchases', 'legendary_purchases', 'divine_purchases',
-            'unique_commands', 'classes_tried', 'pets_owned', 'wheel_spins',
-            'quests_done', 'confessions_sent', 'level', 'best_streak',
-            'commands_used_json', 'classes_tried_json',
-        ]
-        return dict(zip(keys, row))
-
-
 
 
 # ─── HELPERS QUESTS ────────────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
 # ─── HELPERS ACHIEVEMENTS ──────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
 
 
 # ─── HELPERS PETS ──────────────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
-
-
 # ─── VIEWS PHASE 41 ────────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
 
 
 # ─── DAILY WHEEL : LOGIQUE ─────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
 # ─── COMMANDES PHASE 41 ────────────────────────────────────────────────────────
-
-
-
-
-def _make_progress_bar(current: int, target: int, length: int = 10) -> str:
-    if target <= 0:
-        return "▱" * length
-    ratio = min(1.0, current / target)
-    filled = int(ratio * length)
-    return "▰" * filled + "▱" * (length - filled)
-
-
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -36770,82 +30411,8 @@ async def _safe_followup(i: discord.Interaction, **kwargs) -> bool:
 # ─── Phase 48.3 : Cache TTL 60s pour hot path (alliance + pet + stats) ───────
 # Réduit le load DB d'un facteur 10x sur les fonctions appelées à chaque message.
 
-import time as _time_p48
-
-_HOT_CACHE_TTL = 60.0
-_cache_user_alliance: dict = {}   # (gid, uid) → (timestamp, dict|None)
-_cache_active_pet: dict = {}      # (gid, uid) → (timestamp, dict|None)
-_cache_user_stats: dict = {}      # (gid, uid) → (timestamp, dict)
-
-
-
-
-
-
-
 
 # ─── Phase 45.1 : helpers anti-pollution (auto-delete + chrono visuel) ───────
-
-
-def _chrono_footer(seconds: int, prefix: str = "⏱️ Se supprime") -> str:
-    """Construit un footer chrono dynamique Discord.
-
-    Utilise <t:UNIX:R> qui s'affiche 'in 10 minutes' et se rafraîchit côté client.
-    Ex retour : '⏱️ Se supprime <t:1716738000:R>'
-    """
-    try:
-        target_ts = int(datetime.now(timezone.utc).timestamp()) + max(1, int(seconds))
-        return f"{prefix} <t:{target_ts}:R>"
-    except Exception:
-        return prefix
-
-
-def _claim_chrono(seconds: int) -> str:
-    """Chrono spécifique pour les claims : 'Claim avant <t:X:R>'."""
-    try:
-        target_ts = int(datetime.now(timezone.utc).timestamp()) + max(1, int(seconds))
-        return f"⏰ Claim avant <t:{target_ts}:R>"
-    except Exception:
-        return "⏰ Claim limité"
-
-
-async def _schedule_msg_delete(message, delay_seconds: int):
-    """Supprime un message après N secondes. Silent sur erreur (déjà delete / pas droits)."""
-    try:
-        await asyncio.sleep(max(1, int(delay_seconds)))
-        try:
-            await message.delete()
-        except (discord.NotFound, discord.Forbidden, AttributeError):
-            pass
-        except Exception as ex:
-            print(f"[_schedule_msg_delete] {ex}")
-    except asyncio.CancelledError:
-        raise
-    except Exception as ex:
-        print(f"[_schedule_msg_delete outer] {ex}")
-
-
-def _schedule_delete(message, delay_seconds: int):
-    """Helper sync : fire-and-forget asyncio.create_task pour delete."""
-    if message is None:
-        return
-    try:
-        asyncio.create_task(_schedule_msg_delete(message, delay_seconds))
-    except Exception as ex:
-        print(f"[_schedule_delete] {ex}")
-
-
-# ─── Phase 258 : BONUS VOCAL — inciter FORTEMENT à se connecter en vocal ──────
-# Owner : « force les gens à se connecter en vocal ; chaque event/action donne
-# BEAUCOUP plus en vocal ». Bonus de combat amplifié (+25→+60 % de dégâts, avant
-# +12→+30 %) ET étendu aux 🪙 des events non-combat (+50 %).
-_VOICE_COMBAT_MIN = 1.25   # +25 % mini de dégâts en vocal
-_VOICE_COMBAT_MAX = 1.60   # +60 % maxi de dégâts en vocal
-_VOICE_COIN_MULT = 1.50    # +50 % de 🪙 en vocal (trésor / quiz / boîte / flash)
-
-
-
-
 
 
 # ─── Phase 47.3 : delete persistant (survit aux redémarrages bot) ─────────────
@@ -36889,10 +30456,6 @@ async def _register_for_cleanup(message, delay_seconds: int, reason: str = 'even
             await asyncio.sleep(0.5 * (attempt + 1))
     print(f"[_register_for_cleanup FAILED 3x reason={reason} msg={message.id}] {last_err}")
     return False
-
-
-
-
 
 
 async def _run_persistent_cleanup_once() -> dict:
@@ -36986,52 +30549,10 @@ async def _run_persistent_cleanup_once() -> dict:
     return stats
 
 
-
-
 # ─── Phase 55 : SAFETY NET — purge messages bot vieux dans hub (orphelins) ───
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ─── PET SUB-VIEWS ─────────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ENTRAIDE MULTI-GAMING — CONFIG owner (/configure → 🆘 Entraide)
-#
-#  Sous-panneau V2 de MainPanelV2 (owner/admin only, re-check perm). Permet :
-#    • activer/désactiver (cfg entraide_enabled)
-#    • salon des demandes (ChannelSelect texte → cfg entraide_request_channel)
-#    • catégorie vocale (ChannelSelect catégories → cfg entraide_voice_category)
-#    • catalogue de jeux : ajouter (Modal label+emoji, option création rôle Aidant),
-#      lister, retirer. Calque WelcomeGoodbyePanelV2 / _ReactionRolesDeletePanelV2.
-#  FAIL-SAFE : toute erreur est avalée, rien ne casse le panneau /configure.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -37061,13 +30582,8 @@ async def _run_persistent_cleanup_once() -> dict:
 
 # Longueur mini d'un message pour être candidat (anti messages ultra-courts/liens seuls).
 _ENTR_DETECT_MIN_LEN = 12
-# Longueur « suffisante » qui, combinée à UN signal faible, suffit à déclencher.
-_ENTR_DETECT_LONG_LEN = 60
-# Cooldown mémoire par (guild_id, user_id) entre deux nudges (anti-spam, non intrusif).
-_ENTR_DETECT_COOLDOWN_SEC = 1800  # 30 min
 # Dict borné mémoire { (guild_id, user_id): datetime dernier nudge }. Fail-open.
 _entr_detect_cooldown: dict = {}
-_ENTR_DETECT_COOLDOWN_CAP = 5000  # cap dur (éviction la plus ancienne au-delà)
 
 # Phrases FORTES (déclenchent seules) — recherche de sous-chaîne sur le texte lowercé
 # ET « déaccentué » (les apostrophes typographiques/espaces sont normalisés en amont).
@@ -37415,14 +30931,6 @@ def _entr_detect_game(content_norm: str, guild_games_labels) -> Optional[str]:
         return None
 
 
-# Cache mémoire des labels de jeux par guilde (pour la détection cheap, TTL court).
-# { guild_id: (timestamp, [(game_key, label_normalisé), …]) }. Évite un hit DB par message.
-_entr_games_labels_cache: dict = {}
-_ENTR_GAMES_LABELS_TTL = 300  # 5 min
-
-
-
-
 def _entraide_detect_help(content_lower: str, guild_games_labels=None):
     """Moteur de détection d'appel à l'aide (cheap, mémoire pur). Renvoie un tuple
     (match: bool, detected_game_key: str|None, confidence: float). CONSERVATEUR :
@@ -37577,12 +31085,6 @@ async def _entraide_voice_category(guild):
         return None
 
 
-
-
-
-
-
-
 async def _entraide_maybe_delete_empty_voice(guild, channel):
     """Supprime un vocal temporaire d'entraide DEVENU VIDE. Double garde stricte :
     (1) nom « 🆘 … » ET (2) parent == catégorie d'entraide configurée. Ne touche
@@ -37617,108 +31119,10 @@ async def _entraide_maybe_delete_empty_voice(guild, channel):
         print(f"[_entraide_maybe_delete_empty_voice] {ex}")
 
 
-
-
-# Mots IGNORÉS pour le nom intelligent du vocal (FR+EN+LFG) — on veut le mot le PLUS
-# IMPORTANT de la demande (nom de boss / zone / quête), pas les liaisons et verbes LFG.
-_ENTR_VOICE_STOPWORDS = {
-    "le", "la", "les", "un", "une", "des", "de", "du", "d", "au", "aux", "a", "et",
-    "ou", "qui", "que", "quoi", "c", "ce", "cet", "cette", "ces", "mon", "ma", "mes",
-    "son", "sa", "ses", "leur", "leurs", "nos", "vos", "on", "je", "tu", "il", "elle",
-    "nous", "vous", "ils", "elles", "me", "te", "se", "y", "en", "ne", "pas", "plus",
-    "pour", "avec", "dans", "sur", "sous", "par", "sans", "vers", "chez", "entre",
-    "quelqu", "quelquun", "qqn", "qq1", "qqun", "faire", "fais", "fait", "fe", "veut",
-    "veux", "veulent", "peut", "peux", "cherche", "cherchent", "besoin", "aide",
-    "aider", "aidez", "help", "go", "join", "rejoindre", "rejoins", "monde", "gens",
-    "joueurs", "joueur", "personne", "personnes", "team", "groupe", "grp", "duo",
-    "trio", "squad", "stp", "svp", "please", "plz", "pls", "slt", "salut", "yo",
-    "hello", "jouer", "joue", "play", "playing", "online", "dispo", "chaud", "cho",
-    "des", "quelques", "moi", "toi", "lui", "the", "for", "with", "anyone", "someone",
-}
-# Catégories reconnues → préfixe court et lisible du vocal.
-_ENTR_VOICE_CATEGORIES = {
-    "boss": "Boss", "raid": "Raid", "donjon": "Donjon", "dungeon": "Donjon",
-    "quete": "Quête", "quest": "Quête", "zone": "Zone", "farm": "Farm",
-    "event": "Event", "invasion": "Invasion", "mission": "Mission",
-    "world": "World Boss", "wb": "World Boss", "climax": "Climax",
-}
-
-
-
-
-
-
-
-
-# ─── Messages AUXILIAIRES d'une demande (ping rôle, regroupement, note de prise en
-#     charge) — suivis PAR DEMANDE pour être TOUS supprimés à la fin (résolue/expirée).
-#     Owner 2026-06-14 : « assure-toi que TOUT s'enlève à la fin ». Avant, chaque message
-#     auxiliaire avait son propre timer fixe (~1 h) DÉCOUPLÉ de la demande → il traînait
-#     longtemps après la résolution. Désormais : RAM { rid -> [(channel_id, msg_id), …] }
-#     purgée à resolve/expire (le _register_for_cleanup posé à la création reste le FILET
-#     reboot, raccourci à 30 min). Borné + éviction FIFO. Fail-safe.
-_entraide_aux_msgs: dict = {}
-_ENTRAIDE_AUX_CAP = 2000
-_ENTRAIDE_AUX_BACKSTOP_SEC = 1800  # filet reboot (RAM perdu) — sinon la purge RAM suffit
-
-
-
-
-
-
-
-
-# Regroupement « même besoin » : fenêtre de recherche des autres demandeurs du
-# même jeu (heures) + plafond de mentions (anti-spam, jamais de masse).
-ENTRAIDE_SAME_NEED_WINDOW_H = 6
-ENTRAIDE_SAME_NEED_MENTION_CAP = 5
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# C3 — TITRE D'HONNEUR « Pilier de l'entraide » : nombre de meilleurs aidants qui
-# reçoivent le titre cosmétique (recalculé périodiquement). Volontairement restreint
-# (rareté = valeur). Le titre est DÉCERNÉ (owned) mais JAMAIS auto-équipé → opt-out
-# naturel : le membre l'affiche dans /profile seulement s'il le choisit lui-même.
-ENTRAIDE_PILLAR_TOP_N = 3
-
-
-
-
-
-
 # ─── DynamicItem persistants : « 🤝 J'aide ! » (claim) et « ✅ Résolu » ──────────
 
 
-
-
-
-
-
-
-
 # ─── Panneau joueur ÉPHÉMÈRE : EntraideHubV2 (3 boutons) ─────────────────────────
-
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -37733,19 +31137,6 @@ ENTRAIDE_PILLAR_TOP_N = 3
 #  Anti-spam : cooldown mémoire 30 min/utilisateur + on ne nudge JAMAIS si l'auteur a
 #  déjà une demande open. FAIL-SAFE : si l'entraide est OFF / autodetect OFF → rien.
 # ═══════════════════════════════════════════════════════════════════════════════
-
-# Jeu détecté mémorisé par message-de-nudge (pour pré-remplir au clic). Borné.
-_entr_detect_game_by_msg: dict = {}  # nudge_message_id -> game_key
-_ENTR_DETECT_GAME_MAP_CAP = 2000
-
-
-
-
-NUDGE_AUTODELETE_SEC = 300  # ~5 min
-
-
-
-
 
 
 async def _entraide_autodetect_hook(msg):
@@ -38436,7 +31827,6 @@ _TRADE_BARTER_FIGHT = (
     " ffa", " manche",
 )
 _TRADE_SCORE_RE = re.compile(r"\d+\s+(?:vs|versus|contre)\s+\d+")
-_TRADE_ITEM_RE = re.compile(r"[a-z]{4,}")
 # QUANTITÉ d'objet = un chiffre immédiatement suivi d'un mot (>=3 lettres). « 2 hog », « 3 acsencion »
 # = oui ; « 2 fois », « 13 vs » = non → écarte les opinions (« je suis 2 fois contre X ») et les
 # comparaisons (« matrix 2 vs inception », « iphone 13 vs samsung ») du troc. (revue adverse 2026-07-03)
@@ -38706,12 +32096,6 @@ async def _trade_autodetect_hook(msg) -> None:
         print(f"[_trade_autodetect_hook] {ex}")
 
 
-
-
-
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  VEILLEUR DE QUESTIONS SANS RÉPONSE (serveur entier) — anti « personne ne m'a aidé »
 #
@@ -38731,57 +32115,10 @@ async def _trade_autodetect_hook(msg) -> None:
 #  Tout en try/except : ne casse JAMAIS on_message / on_raw_reaction_add.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Délai avant de considérer une question « sans réponse » et de nudger (~10 min).
-_UNANSWERED_DELAY_SEC = 300   # owner 2026-06-30 : 10→5 min — réagir plus vite aux questions sans réponse
-# Cap dur du dict de suivi (anti-fuite mémoire ; éviction des plus vieux au-delà).
-_UNANSWERED_PENDING_CAP = 3000
-# Longueur/mots mini pour qu'un message soit une question « assez spécifique ».
-_UNANSWERED_MIN_LEN = 15
-_UNANSWERED_MIN_WORDS = 4
-# Mots mini pour qu'un message contenant « ? » SANS mot interrogatif explicite compte
-# comme une vraie question (« … ou ya une raison particulière ? »). Filtre les « ok ? ».
-_UNANSWERED_QMARK_MIN_WORDS = 5
-# Auto-suppression du nudge (~10 min) — surface la question sans encombrer le salon.
-_UNANSWERED_NUDGE_AUTODELETE_SEC = 600
-# Nb max de nudges postés par tick de sweep (borne l'API au réveil après downtime).
-_UNANSWERED_MAX_NUDGES_PER_TICK = 8
 
 # Suivi mémoire BORNÉ des questions en attente de réponse :
 #   message_id -> {guild_id, channel_id, author_id, ts (datetime), game_key (str|None)}
 _unanswered_pending: dict = {}
-
-# Mots interrogatifs (FR + EN) — recherche de sous-chaîne sur le texte normalisé via
-# _entr_normalize (lowercase + apostrophes/espaces unifiés). Conservateur : on borde
-# la plupart par un espace pour éviter les sous-chaînes accidentelles.
-_UNANSWERED_QWORDS = (
-    # FR
-    " comment ", " pourquoi ", " ou est", " ou sont", " ou se", " ou je", " ou on",
-    " quand ", " quel ", " quelle ", " quels ", " quelles ", " combien ", " lequel ",
-    " laquelle ", "est ce que", "est ce qu", " c est quoi", "qu est ce", " qui peut",
-    " a quoi ", " comment on", " comment je",
-    # EN
-    " how ", " why ", " where ", " what ", " which ", " when ", " who ", " whom ",
-    " can i ", " can you", " could i", " could you", " does ", " do i ", " is there",
-    " are there", " should i", " how do", " how can", " what s ",
-)
-
-# Banalités / accusés de réception : si le message normalisé RÉDUIT à ça (ou très court),
-# on IGNORE (jamais une vraie question). Comparaison sur le texte normalisé compacté.
-_UNANSWERED_TRIVIAL_EXACT = {
-    "ok", "oki", "okay", "dac", "dacc", "d accord", "daccord", "ack", "merci",
-    "merci beaucoup", "mrc", "thanks", "thank you", "thx", "ty", "oui", "non",
-    "ouais", "ouai", "yep", "nope", "yes", "no", "lol", "mdr", "ptdr", "ptdrr",
-    "xd", "gg", "wp", "ggwp", "+1", "ce", "voila", "voilà", "bah oui", "bah non",
-    "exact", "carrement", "grave", "ah ok", "ah oui", "ah daccord", "nice", "cool",
-    "parfait", "top", "super", "bien", "ok merci", "bonjour", "bonsoir", "salut",
-    "hello", "hi", "yo", "coucou", "re", "wsh", "wesh",
-}
-
-
-
-
-
-
 
 
 def _unanswered_clear(message_id) -> None:
@@ -38790,8 +32127,6 @@ def _unanswered_clear(message_id) -> None:
         _unanswered_pending.pop(int(message_id), None)
     except Exception:
         pass
-
-
 
 
 def _unanswered_on_reaction(payload):
@@ -39083,8 +32418,6 @@ async def _nudge_stats_flush():
             _learned_items_dirty = False
     except Exception as ex:
         print(f"[_learned_items_flush] {ex}")
-
-
 
 
 @tasks.loop(minutes=5)
@@ -39429,14 +32762,6 @@ class SmStillNoButton(discord.ui.DynamicItem[Button],
         await _sm_still_no(i, self.older)
 
 
-
-
-
-
-
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  i18n — SÉLECTEUR DE LANGUE (zéro slash, tout bouton/DynamicItem, FAIL-SAFE)
 #
@@ -39526,8 +32851,6 @@ async def _i18n_assign_lang_role(member, lang) -> None:
         print(f"[_i18n_assign_lang_role] {ex}")
 
 
-
-
 async def _i18n_apply_lang(i: discord.Interaction, lang: str) -> None:
     """Cœur commun du choix de langue (appelé par les boutons drapeau). Defer-first,
     persiste la préférence, attribue le rôle drapeau, confirme EN ÉPHÉMÈRE dans la
@@ -39582,10 +32905,6 @@ class LangSelectButton(
 
     async def callback(self, i: discord.Interaction):
         await _i18n_apply_lang(i, self.lang)
-
-
-
-
 
 
 class RobloxPingButton(discord.ui.DynamicItem[discord.ui.Button],
@@ -39700,20 +33019,10 @@ class AccueilLangueView(discord.ui.View):
 # ─── HUB D'ENGAGEMENT (5 boutons persistants, custom_ids stables) ─────────────
 
 
-
-
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
 
 
-
-
-
-
 # ─── HOOKS DE TRACKING (appelés par on_message etc.) ───────────────────────────
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -39727,262 +33036,18 @@ class AccueilLangueView(discord.ui.View):
 # ─── ANTI-SPAM GLOBAL : 1 event majeur en cours max ────────────────────────────
 
 
-_EVENT_BUSY_GRACE = "-25 minutes"  # Phase 262 : un event EXPIRÉ mais non encore RÉSOLU
 # (finalizer/teardown pas encore passé) compte ENCORE comme « en cours » pendant cette
 # grâce → empêche un NOUVEAU boss de spawn par-dessus un event pas démantelé (cause racine
 # du chevauchement). Au-delà → ignoré (anti-figement, leçon Phase 174.1 ; toutes les boucles
 # de résolution tournent ≤ 15 min, bien sous la grâce de 25 min).
 
 
-async def _has_any_major_event_running(guild_id: int, include_mobs: bool = False) -> bool:
-    """SOURCE DE VÉRITÉ UNIQUE (Phase 230) : un événement de combat est-il
-    réellement EN COURS sur ce serveur ? Couvre TOUTES les tables d'events :
-      - events            (boss raid / chasse au trésor / quiz — moteur MASQUANT)
-      - world_bosses      (world boss hebdo)
-      - daily_boss_events (boss du jour, 4×/jour)
-      - climax_events     (boss climax mensuel)
-      - mob_spawns        (UNIQUEMENT si include_mobs=True)
-
-    RÈGLE owner : « quand un événement est lancé, on attend qu'il soit terminé
-    avant d'en lancer un autre ; on ne détruit/remplace JAMAIS un event en cours.
-    Seule l'expiration de son timer y met fin. » → tant que ceci renvoie True,
-    aucun NOUVEL event ne doit démarrer.
-
-    SÉCURITÉ ANTI-« SERVEUR MORT » : on ne bloque QUE sur un event encore dans sa
-    fenêtre de temps (ends_at / expires_at dans le futur). Une ligne périmée
-    laissée à ended=0 / status='alive' (cleanup raté) est IGNORÉE ici — sinon
-    elle bloquerait À VIE tous les events (leçon Phase 174.1). Fail-open : une
-    erreur DB renvoie False (on préfère un doublon rare à un serveur figé).
-
-    include_mobs : True seulement pour le « remplissage » auto (event_auto_
-    scheduler) — un mob éphémère ne doit pas, lui, bloquer un GROS boss (sinon le
-    boss du jour, qui est une ancre fixe, serait sans cesse repoussé)."""
-    try:
-        async with get_db() as db:
-            g = _EVENT_BUSY_GRACE  # Phase 262 : grâce expiré-mais-non-résolu
-
-            async def _busy(sql: str) -> bool:
-                # Helper : True si la requête (params = guild_id, grâce) trouve une ligne.
-                # try/except → table absente sur vieux schéma = on n'empêche rien.
-                try:
-                    async with db.execute(sql, (guild_id, g)) as cur:
-                        return (await cur.fetchone()) is not None
-                except Exception:
-                    return False
-
-            if await _busy(
-                "SELECT 1 FROM events WHERE guild_id=? AND ended=0 "
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
-                return True
-            if await _busy(
-                "SELECT 1 FROM world_bosses WHERE guild_id=? AND ended=0 "
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
-                return True
-            if await _busy(
-                "SELECT 1 FROM daily_boss_events WHERE guild_id=? AND status='alive' "
-                "AND (expires_at IS NULL OR datetime(expires_at) > datetime('now', ?)) LIMIT 1"):
-                return True
-            if await _busy(
-                "SELECT 1 FROM climax_events WHERE guild_id=? AND status='active' "
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
-                return True
-            # Phase 262 : INVASION (table invasion_events sans colonne ends_at/expires_at →
-            # on borne sur started_at : active ET démarrée il y a < 60 min = en cours).
-            try:
-                async with db.execute(
-                    "SELECT 1 FROM invasion_events WHERE guild_id=? AND status='active' "
-                    "AND datetime(started_at) > datetime('now', '-35 minutes') LIMIT 1",
-                    (guild_id,),
-                ) as cur:
-                    if await cur.fetchone():
-                        return True
-            except Exception:
-                pass
-            # Phase 256 Lot 3 : FAILLE / CARAVANE / CHAÎNE actives comptent aussi (même
-            # salon ⚔️-combat partagé) → sérialisées avec les gros boss.
-            if await _busy(
-                "SELECT 1 FROM rift_events WHERE guild_id=? AND ended=0 "
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
-                return True
-            if await _busy(
-                "SELECT 1 FROM caravan_events WHERE guild_id=? AND ended=0 "
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
-                return True
-            if await _busy(
-                "SELECT 1 FROM chain_events WHERE guild_id=? AND ended=0 "
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
-                return True
-            if include_mobs:
-                # Mob = remplissage éphémère → PAS de grâce (ne doit pas sur-bloquer).
-                try:
-                    async with db.execute(
-                        "SELECT 1 FROM mob_spawns WHERE guild_id=? AND status='alive' "
-                        "AND expires_at IS NOT NULL AND datetime(expires_at) > datetime('now') LIMIT 1",
-                        (guild_id,),
-                    ) as cur:
-                        if await cur.fetchone():
-                            return True
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    return False
-
-
-_COMBAT_CLAIM_TTL = "-90 seconds"  # Phase 262 : durée de vie d'un claim de spawn. Court : il
 # ne sert qu'à bloquer la course TOCTOU (2 spawns simultanés AVANT que l'un ait inséré sa
 # ligne). Passé ce délai, l'event est inséré et c'est _has_any_major_event_running (grâce)
 # qui sérialise. Pas de release explicite requis (auto-expiration).
 
 
-
-
-
-
 # ─── VOICE PROTECTION (fondateurs / staff) ─────────────────────────────────────
-
-
-async def _get_protected_voice_channels(guild_id: int) -> set:
-    """Set des IDs de vocaux protégés contre Voice Chaos."""
-    try:
-        c = await cfg(guild_id)
-        protected = c.get('voice_protected_channels', []) or []
-        return {int(x) for x in protected if x}
-    except Exception:
-        return set()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# WORLD BOSS HEBDO
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 78 — World Boss Arena en LayoutView V2
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-_wb_panel_refresh: dict[int, float] = {}  # Phase 251.3 anti-429 : throttle refresh world boss
-
-
-
-
-
-
-
-
-# Task C.1 : cadence du World Boss configurable (DÉFAUT = comportement actuel).
-_WORLD_BOSS_DEFAULT_WEEKDAY = 5   # samedi (datetime.weekday : lundi=0 … dimanche=6)
-_WORLD_BOSS_DEFAULT_HOUR = 21     # 21h heure locale (Europe/Paris)
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# VOICE CHAOS — perturbation aléatoire des vocaux en soirée
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DAILY RIDDLE — énigme matinale
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PHASE 195 — 📅 Programme du jour : annonce quotidienne calme du planning combat
-#   (zéro ping, zéro bouton, auto-supprimée en fin de journée). Postée à 8h FR,
-#   juste avant le boss accessible de 9h, pour que les membres anticipent.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  HÉRAUT DE LA SEMAINE (Phase 266 — anti-bruit : UN seul post hebdo consolidé)
-#  Remplace l'éparpillement de petites annonces par UN récap hebdomadaire unique.
-#  Sans ping (allowed_mentions=none → rien à opt-out), auto-supprimé en fin de
-#  semaine. Réutilise toute l'infra du daily_agenda (salon/cleanup/anti-doublon).
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  VITRINE COMMUNAUTAIRE HEBDO — UN seul message/semaine qui célèbre la communauté
-#  (et non le combat, déjà couvert par le Héraut). Agrège, depuis les tables déjà
-#  alimentées : top shoutouts, paire mentor/apprenti active, meilleur spotlight,
-#  nouveaux membres bien intégrés, contributeur lore. Salon hub/chatty, ZÉRO ping
-#  (allowed_mentions=none → rien à opt-out), auto-purgé en fin de semaine. Anti-
-#  doublon par semaine ISO (marqueur cfg). Réutilise toute l'infra des recaps
-#  (salon via _find_event_recap_channel, cleanup via _register_for_cleanup).
-#  FAIL-OPEN : chaque section est isolée, une section vide est juste omise.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 238 — RÉCAP HEBDO EN MP (strictement opt-in, réutilise « 📩 Notifs MP »)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMMANDS PHASE 42 (owner only)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -39997,141 +33062,16 @@ _WORLD_BOSS_DEFAULT_HOUR = 21     # 21h heure locale (Europe/Paris)
 # ─── TRÉSOR FLASH ──────────────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
 # ─── RITUEL DU SOIR ────────────────────────────────────────────────────────────
-
-
-_RITUAL_EMOJIS = [
-    ('sun', '☀️ Super journée'),
-    ('ok', '🙂 Ça va'),
-    ('meh', '😐 Bof'),
-    ('rain', '🌧️ Dur'),
-    ('tired', '😴 Fatigué'),
-    ('magic', '💫 Magique'),
-]
-
-
-
-
-
-
-async def _post_morning_recap(guild) -> bool:
-    """Poste le récap du rituel d'hier dans le hub channel."""
-    try:
-        yesterday = _yesterday_str_p41()
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT counts_json, channel_id, recap_posted FROM evening_rituals '
-                'WHERE guild_id=? AND day=?',
-                (guild.id, yesterday),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            return False
-        counts_json, ch_id, recap_posted = row
-        if recap_posted:
-            return False
-        try:
-            counts = json.loads(counts_json or '{}')
-        except Exception:
-            counts = {}
-        if not counts:
-            # Marquer quand même comme recap_posted pour ne pas re-tenter
-            async with get_db() as db:
-                await db.execute(
-                    'UPDATE evening_rituals SET recap_posted=1 WHERE guild_id=? AND day=?',
-                    (guild.id, yesterday),
-                )
-                await db.commit()
-            return False
-
-        total = sum(counts.values())
-        # Construire la ligne récap par emoji
-        lines = []
-        for key, label in _RITUAL_EMOJIS:
-            n = counts.get(key, 0)
-            pct = (n / total * 100) if total else 0
-            lines.append(f"{label} — `{n}` ({pct:.0f}%)")
-        # Mood dominant
-        mood_top = max(counts.items(), key=lambda kv: kv[1])[0] if counts else None
-        mood_label = next((lbl for k, lbl in _RITUAL_EMOJIS if k == mood_top), "—")
-
-        ch = guild.get_channel(int(ch_id)) if ch_id else None
-        if not ch or not await _is_chatty_channel(ch):
-            return False
-
-        # Le récap reste 12h (de 9h jusqu'au prochain rituel à 22h - 1h marge)
-        LIFETIME = 12 * 3600
-        e = discord.Embed(
-            title=f"☀️ Bonjour ! Récap d'hier ({yesterday})",
-            description=(
-                f"**{total}** membre(s) ont partagé leur humeur hier soir.\n"
-                f"Humeur dominante : **{mood_label}**\n\n"
-                f"{chr(10).join(lines)}\n\n"
-                f"_Pensez à participer ce soir au prochain Rituel !_\n\n"
-                f"{_chrono_footer(LIFETIME)}"
-            ),
-            color=0xFFA500,
-            timestamp=datetime.now(timezone.utc),
-        )
-        try:
-            msg_recap = await ch.send(
-                embed=e,
-                allowed_mentions=discord.AllowedMentions.none(),
-                delete_after=LIFETIME,
-            )
-            await _register_for_cleanup(msg_recap, LIFETIME, 'morning_recap')
-        except Exception as ex:
-            print(f"[_post_morning_recap send] {ex}")
-            return False
-        async with get_db() as db:
-            await db.execute(
-                'UPDATE evening_rituals SET recap_posted=1 WHERE guild_id=? AND day=?',
-                (guild.id, yesterday),
-            )
-            await db.commit()
-        return True
-    except Exception as ex:
-        print(f"[_post_morning_recap] {ex}")
-        return False
-
-
-
-
 
 
 # ─── TAG ROYALE (chaîne d'invitation hebdo) ────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 # ─── ANNIVERSAIRE DU SERVEUR ───────────────────────────────────────────────────
 
 
-
-
-
-
 # ─── HUB BUTTON : Events en cours (6ème bouton hub) ───────────────────────────
-
-
 
 
 # Inject le 6ème bouton dans EngagementHubView (monkey-patch propre)
@@ -40148,27 +33088,9 @@ async def _post_morning_recap(guild) -> bool:
     # self.add_item(b6)
 
 
-
-
 # Phase 169.7 : __init__ assignment commenté (le patch ne fait plus rien
 # d'utile, mais on garde la méthode pour compat).
 # EngagementHubView.__init__ = _patched_hub_init
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 44 — DAILY QUEST PUSH PROACTIF + OPTIMISATION DB
-#  Le bot propose les quêtes en DM aux actifs — pas besoin de connaître /daily
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -40183,19 +33105,7 @@ async def db_optimizer_task():
     VACUUM tourne 1×/semaine (lundi 4h).
 
     Politique de rétention :
-    - member_activity : 30 jours (déjà très volumineux)
-    - daily_quest_progress : 7 jours
-    - daily_quest_pushes : 7 jours
-    - voice_chaos_log : 7 jours
-    - wakeup_log : 14 jours
-    - flash_treasures ended : 7 jours
-    - daily_riddles_log : 30 jours
-    - confessions : 90 jours
-    - world_bosses ended : 30 jours
     - world_boss_attackers : suit world_bosses
-    - tag_royale ended : 30 jours
-    - evening_rituals : 30 jours
-    - personal_events_log : 14 jours (si table existe)
     """
     try:
         # ─── Seuils de rétention calculés en Python (format CURRENT_TIMESTAMP :
@@ -40210,74 +33120,24 @@ async def db_optimizer_task():
             return (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
         _c7, _c14, _c30, _c90 = _cut(7), _cut(14), _cut(30), _cut(90)
         cleanup_stmts = [
-            ("member_activity",          "DELETE FROM member_activity WHERE datetime(created_at) < datetime('now', '-30 days')"),
             # D3 : agrégat messages (1 ligne/salon/jour) — rétention 35 j (couvre fenêtre mensuelle).
-            ("member_activity_daily",    "DELETE FROM member_activity_daily WHERE day < strftime('%Y-%m-%d', 'now', '-35 days')"),
-            ("daily_quest_progress",     "DELETE FROM daily_quest_progress WHERE day < strftime('%Y-%m-%d', 'now', '-7 days')"),
-            ("daily_quest_pushes",       "DELETE FROM daily_quest_pushes WHERE day < strftime('%Y-%m-%d', 'now', '-7 days')"),
-            ("voice_chaos_log",          "DELETE FROM voice_chaos_log WHERE applied_at < ?", (_c7,)),
-            ("wakeup_log",               "DELETE FROM wakeup_log WHERE last_mentioned_at < ?", (_c14,)),
-            ("flash_treasures_ended",    "DELETE FROM flash_treasures WHERE ended=1 AND spawned_at < ?", (_c7,)),
-            ("daily_riddles_log",        "DELETE FROM daily_riddles_log WHERE day < strftime('%Y-%m-%d', 'now', '-30 days')"),
-            ("confessions",              "DELETE FROM confessions WHERE sent_at < ?", (_c90,)),
-            ("world_boss_attackers",     "DELETE FROM world_boss_attackers WHERE world_boss_id IN (SELECT id FROM world_bosses WHERE ended=1 AND datetime(started_at) < datetime('now', '-30 days'))"),
-            ("world_bosses_ended",       "DELETE FROM world_bosses WHERE ended=1 AND started_at < ?", (_c30,)),
-            ("tag_royale_ended",         "DELETE FROM tag_royale WHERE ended=1 AND started_at < ?", (_c30,)),
-            ("evening_rituals_old",      "DELETE FROM evening_rituals WHERE day < strftime('%Y-%m-%d', 'now', '-30 days')"),
-            ("personal_events_log_old",  "DELETE FROM personal_events_log WHERE created_at < ?", (_c14,)),
-            ("comeback_dms_old_claimed", "DELETE FROM comeback_dms WHERE claimed=1 AND claimed_at < ?", (_c30,)),
-            ("comeback_dms_old_unclaimed", "DELETE FROM comeback_dms WHERE claimed=0 AND last_dm_at < ?", (_c30,)),
             # Phase 164.1 : DB Janitor — nouvelles tables Phase 152-163
             ("behavior_profile_inactive",  "DELETE FROM behavior_profile WHERE datetime(last_message_at) < datetime('now', '-60 days')"),
             ("honeypot_hits_old",          "DELETE FROM honeypot_hits WHERE datetime(detected_at) < datetime('now', '-90 days')"),
             ("dm_digest_queue_sent",       "DELETE FROM dm_digest_queue WHERE status='sent' AND datetime(sent_at) < datetime('now', '-30 days')"),
             ("dm_digest_queue_failed",     "DELETE FROM dm_digest_queue WHERE status='failed' AND datetime(created_at) < datetime('now', '-7 days')"),
-            ("analytics_events_old",       "DELETE FROM analytics_events WHERE datetime(created_at) < datetime('now', '-180 days')"),
-            ("reputation_history_old",     "DELETE FROM reputation_history WHERE datetime(created_at) < datetime('now', '-180 days')"),
-            ("raffle_tickets_old",         "DELETE FROM raffle_tickets WHERE week_key < strftime('%Y-W%W', 'now', '-6 weeks')"),
-            ("raffle_draws_old",           "DELETE FROM raffle_draws WHERE week_key < strftime('%Y-W%W', 'now', '-26 weeks')"),
-            ("community_goals_old",        "DELETE FROM community_goals WHERE week_key < strftime('%Y-W%W', 'now', '-6 weeks')"),
-            ("community_goal_progress_old","DELETE FROM community_goal_progress WHERE goal_id NOT IN (SELECT id FROM community_goals)"),
-            ("luxury_tax_log_old",         "DELETE FROM luxury_tax_log WHERE datetime(taxed_at) < datetime('now', '-180 days')"),
             ("behavior_alerts_old",        "DELETE FROM behavior_alerts WHERE datetime(detected_at) < datetime('now', '-90 days')"),
-            ("stream_watch_parties_old",   "DELETE FROM stream_watch_parties WHERE status IN ('ended','cleaned') AND datetime(ended_at) < datetime('now', '-30 days')"),
-            ("daily_prompt_votes_old",     "DELETE FROM daily_prompt_votes WHERE prompt_id IN (SELECT id FROM daily_prompts WHERE status='closed' AND datetime(closed_at) < datetime('now', '-30 days'))"),
-            ("daily_prompts_old",          "DELETE FROM daily_prompts WHERE status='closed' AND datetime(closed_at) < datetime('now', '-30 days')"),
-            ("roblox_game_stats_old",      "DELETE FROM roblox_game_stats WHERE datetime(fetched_at) < datetime('now', '-60 days')"),
             ("webhook_registry_dead",      "DELETE FROM webhook_registry WHERE is_active=0 AND datetime(last_seen) < datetime('now', '-30 days')"),
             # Phase 167 : cleanup nouveaux modules
             ("member_risk_old_reviewed",   "DELETE FROM member_risk_scores WHERE reviewed=1 AND datetime(joined_at) < datetime('now', '-90 days')"),
             ("member_risk_old_unreviewed", "DELETE FROM member_risk_scores WHERE reviewed=0 AND datetime(joined_at) < datetime('now', '-180 days')"),
-            ("voice_empty_stale",          "DELETE FROM voice_empty_since WHERE datetime(empty_since) < datetime('now', '-1 day')"),
-            ("welcomed_users_old",         "DELETE FROM welcomed_users WHERE datetime(welcomed_at) < datetime('now', '-365 days')"),
-            ("spotlight_old",              "DELETE FROM spotlighted_messages WHERE datetime(spotlight_at) < datetime('now', '-90 days')"),
             ("token_leaks_old",            "DELETE FROM token_leaks WHERE datetime(detected_at) < datetime('now', '-180 days')"),
-            ("stream_schedule_past",       "DELETE FROM stream_schedule WHERE (cancelled=1 OR datetime(starts_at) < datetime('now', '-30 days'))"),
-            ("activity_heatmap_dispatch_old", "DELETE FROM activity_heatmap_dispatch WHERE datetime(last_sent_at) < datetime('now', '-90 days')"),
             # Phase 168.4 + 169 : cleanup
             ("error_log_old",              "DELETE FROM error_log WHERE occurred_at < ?", (_c7,)),
             ("error_burst_alerts_old",     "DELETE FROM error_burst_alerts WHERE datetime(last_alert_at) < datetime('now', '-30 days')"),
-            ("mob_spawns_old",             "DELETE FROM mob_spawns WHERE status IN ('killed','despawned') AND datetime(spawned_at) < datetime('now', '-7 days')"),
-            ("mob_attackers_orphan",       "DELETE FROM mob_attackers WHERE mob_id NOT IN (SELECT id FROM mob_spawns)"),
-            ("merchant_visits_old",        "DELETE FROM merchant_visits WHERE status != 'active' AND datetime(started_at) < datetime('now', '-30 days')"),
-            ("merchant_stock_orphan",      "DELETE FROM merchant_stock WHERE visit_id NOT IN (SELECT id FROM merchant_visits)"),
-            ("merchant_purchases_old",     "DELETE FROM merchant_purchases WHERE datetime(purchased_at) < datetime('now', '-180 days')"),
-            ("invasion_events_old",        "DELETE FROM invasion_events WHERE status != 'active' AND datetime(started_at) < datetime('now', '-90 days')"),
-            ("invasion_attackers_orphan",  "DELETE FROM invasion_attackers WHERE event_id NOT IN (SELECT id FROM invasion_events)"),
             # Phase 171 : cleanup Chronique d'Abylumis (Phase 170)
             # Rétention longue pour préserver les "Mémoires" : on garde le
             # gros de l'histoire 365 jours, le détail seulement 90 jours.
-            ("chronicle_events_old",       "DELETE FROM chronicle_events WHERE datetime(timestamp) < datetime('now', '-365 days')"),
-            ("daily_encounters_log_old",   "DELETE FROM daily_encounters_log WHERE datetime(played_at) < datetime('now', '-90 days')"),
-            ("council_votes_resolved",     "DELETE FROM council_votes WHERE session_id IN (SELECT id FROM council_sessions WHERE status='resolved' AND datetime(closes_at) < datetime('now', '-90 days'))"),
-            ("council_sessions_old",       "DELETE FROM council_sessions WHERE status='resolved' AND datetime(closes_at) < datetime('now', '-90 days')"),
-            ("patrol_contributions_old",   "DELETE FROM patrol_contributions WHERE patrol_id IN (SELECT id FROM patrol_sessions WHERE status != 'open' AND datetime(opens_at) < datetime('now', '-60 days'))"),
-            ("patrol_sessions_old",        "DELETE FROM patrol_sessions WHERE status != 'open' AND datetime(opens_at) < datetime('now', '-60 days')"),
-            ("mystery_shares_old",         "DELETE FROM mystery_shares WHERE datetime(shared_at) < datetime('now', '-60 days')"),
-            ("npc_letters_undelivered_old","DELETE FROM npc_letters_sent WHERE delivered=0 AND datetime(sent_at) < datetime('now', '-14 days')"),
-            ("npc_letters_delivered_old",  "DELETE FROM npc_letters_sent WHERE delivered=1 AND datetime(sent_at) < datetime('now', '-180 days')"),
-            ("climax_attackers_old",       "DELETE FROM climax_attackers WHERE event_id IN (SELECT id FROM climax_events WHERE status != 'active' AND datetime(started_at) < datetime('now', '-180 days'))"),
-            ("climax_events_old",          "DELETE FROM climax_events WHERE status != 'active' AND datetime(started_at) < datetime('now', '-180 days')"),
             # Titres permanents = JAMAIS supprimés (fierté définitive)
             # chronicle_state = JAMAIS supprimé (état du serveur)
             # chronicle_chapter_progress = JAMAIS supprimé (historique chapitres)
@@ -40385,54 +33245,13 @@ async def _db_optimizer_wait():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-# Décorations thématiques (préfixe nom + topic alternatif)
-_CAMOUFLAGE_THEMES = [
-    {"emoji": "☕", "name_prefix": "☕", "topic": "On parle autour d'un café virtuel ☕"},
-    {"emoji": "🌙", "name_prefix": "🌙", "topic": "Ambiance feutrée du soir 🌙"},
-    {"emoji": "🎭", "name_prefix": "🎭", "topic": "Aujourd'hui, c'est jour de comédie 🎭"},
-    {"emoji": "✨", "name_prefix": "✨", "topic": "Quelque chose de magique flotte dans l'air ✨"},
-    {"emoji": "🌿", "name_prefix": "🌿", "topic": "Pause nature — respire un coup 🌿"},
-    {"emoji": "🔥", "name_prefix": "🔥", "topic": "L'ambiance est chaude ici 🔥"},
-    {"emoji": "💫", "name_prefix": "💫", "topic": "Étoiles filantes — fais un vœu 💫"},
-    {"emoji": "🎨", "name_prefix": "🎨", "topic": "Le serveur prend des couleurs 🎨"},
-    {"emoji": "🪐", "name_prefix": "🪐", "topic": "Voyage interplanétaire en cours 🪐"},
-    {"emoji": "🌊", "name_prefix": "🌊", "topic": "Vagues calmes — laisse-toi porter 🌊"},
-]
-
-
 # ─── CHANNEL CAMOUFLAGE ────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
 
 
 # ─── VOCAL SUR SCÈNE ───────────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
-
-
 # ─── FAILSAFE LOOP : revert tout orphelin (crash recovery, restart) ───────────
-
-
-
-
-
-
 
 
 # ─── COMPLIMENT DU JOUR : SUPPRIMÉ (système Saint-Valentin retiré) ────────────
@@ -40445,148 +33264,7 @@ _CAMOUFLAGE_THEMES = [
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-# Limites strictes pour ne pas spammer Discord
-_ALLIANCE_MAX_PER_GUILD = 10
-_ALLIANCE_MAX_MEMBERS = 8
-_ALLIANCE_MIN_MEMBERS = 2  # 2 pour fonctionner
-
-
 # ─── HELPERS ALLIANCES ─────────────────────────────────────────────────────────
-
-
-async def _get_user_alliance(guild_id: int, user_id: int) -> Optional[dict]:
-    """Retourne {id, name, emoji, role_id, channel_id, leader_id, role} ou None."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT a.id, a.name, a.emoji, a.role_id, a.channel_id, a.leader_id, am.role "
-                "FROM alliances a JOIN alliance_members am ON am.alliance_id = a.id "
-                "WHERE a.guild_id=? AND am.user_id=? AND a.dissolved=0 LIMIT 1",
-                (guild_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            return None
-        return {
-            'id': row[0], 'name': row[1], 'emoji': row[2],
-            'role_id': row[3], 'channel_id': row[4], 'leader_id': row[5],
-            'my_role': row[6],
-        }
-    except Exception as ex:
-        print(f"[_get_user_alliance] {ex}")
-        return None
-
-
-
-
-async def _get_alliance_members(alliance_id: int) -> list:
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT user_id, role, joined_at FROM alliance_members WHERE alliance_id=?",
-                (alliance_id,),
-            ) as cur:
-                return [{'user_id': r[0], 'role': r[1], 'joined_at': r[2]} for r in await cur.fetchall()]
-    except Exception:
-        return []
-
-
-async def _ensure_events_category(guild) -> Optional[discord.CategoryChannel]:
-    """Phase 188 : LA catégorie centrale '🎪 Événements', placée TOUT EN HAUT du
-    serveur, où sont rangés les salons d'event éphémères (World Boss, Game
-    Night...). Objectif : que ce soit propre et visible, pas éparpillé en bas.
-
-    Priorité :
-      1. `event_arena_category` configurée par l'owner (choix explicite respecté)
-      2. catégorie auto déjà créée (cache `events_category`)
-      3. catégorie nommée "🎪 Événements" déjà présente (anti-doublon)
-      4. création auto à position 0 (si le bot a Gérer les salons)
-    Retourne la CategoryChannel ou None (le caller retombe alors sans catégorie).
-    """
-    if guild is None:
-        return None
-    try:
-        c = await cfg(guild.id)
-        # 1. choix explicite de l'owner
-        cat_id = int(c.get('event_arena_category', 0) or 0)
-        if cat_id:
-            cat = guild.get_channel(cat_id)
-            if isinstance(cat, discord.CategoryChannel):
-                return cat
-        # 2. catégorie auto déjà connue
-        auto_id = int(c.get('events_category', 0) or 0)
-        if auto_id:
-            cat = guild.get_channel(auto_id)
-            if isinstance(cat, discord.CategoryChannel):
-                return cat
-        # 3. anti-doublon : une "🎪 Événements" existe déjà ?
-        for cc in guild.categories:
-            if cc.name == "🎪 Événements":
-                try:
-                    await db_set(guild.id, 'events_category', cc.id)
-                except Exception:
-                    pass
-                return cc
-        # 4. création auto en haut du serveur
-        me = guild.me
-        if not (me and me.guild_permissions.manage_channels):
-            return None
-        cat = await guild.create_category(
-            name="🎪 Événements", position=0,
-            reason="Phase 188 : catégorie centrale des événements",
-        )
-        try:
-            await db_set(guild.id, 'events_category', cat.id)
-        except Exception:
-            pass
-        return cat
-    except Exception as ex:
-        print(f"[_ensure_events_category] {ex}")
-        return None
-
-
-
-
-
-
-
-
-
-
-
-
-async def _lock_event_channel(guild, channel):
-    """Verrouille un salon d'ÉVÉNEMENT en LECTURE SEULE pour @everyone (owner 2026-06-16) :
-    voir + lire l'historique OUI, mais PAS écrire / réagir / créer des threads. Les boutons
-    restent cliquables (interactions). Le bot garde l'écriture. IDEMPOTENT (zéro appel API si
-    déjà verrouillé → anti-429), FAIL-OPEN (un échec n'empêche jamais l'event)."""
-    try:
-        if guild is None or channel is None:
-            return
-        everyone = guild.default_role
-        try:
-            cur = channel.overwrites_for(everyone)
-        except Exception:
-            cur = discord.PermissionOverwrite()
-        # Déjà en lecture seule (visible + écriture coupée) → rien à refaire (anti-429).
-        if cur.view_channel is True and cur.send_messages is False and cur.add_reactions is False:
-            return
-        cur.view_channel = True
-        cur.read_message_history = True
-        cur.send_messages = False
-        cur.add_reactions = False
-        cur.create_public_threads = False
-        cur.create_private_threads = False
-        cur.send_messages_in_threads = False
-        await channel.set_permissions(
-            everyone, overwrite=cur,
-            reason="Salon d'événement en lecture seule (anti-flood — owner 2026-06-16)")
-    except Exception as ex:
-        print(f"[_lock_event_channel] {ex}")
-
-
-
-
 
 
 # FIX salons (2026-06) : chaque TYPE d'event de combat a désormais SON salon TEXTE
@@ -40613,21 +33291,12 @@ _COMBAT_KIND_CHANNELS = {
     'treasure':       "🎁-tresor",
     'mystery':        "📦-mystere",
 }
-# Kinds des « caisses légères » (loot fun hors combat) : salon protégé tant que la
-# caisse y vit, supprimé dès qu'elle est saisie/ouverte/expirée (garde-vie ci-dessous).
-_LIGHT_CRATE_KINDS = frozenset({'treasure', 'mystery'})
 # Nom du salon « combat » générique (boss raid + caisses légères + arène partagée).
 _COMBAT_GENERIC_CHANNEL = "⚔️-combat"
 # Tous les noms de salons de combat connus → utilisés par l'idle-sweeper pour balayer
 # fiablement TOUS les salons par-type devenus orphelins (reboot, fin ratée…).
 _ALL_COMBAT_CHANNEL_NAMES = frozenset(
     {_COMBAT_GENERIC_CHANNEL} | set(_COMBAT_KIND_CHANNELS.values()))
-# Noms de salons par-type des CAISSES LÉGÈRES (loot fun) — sous-ensemble protégé
-# par la garde-vie tant que la caisse y vit ; utilisé aussi par l'anti-salon-vide
-# (suppression immédiate d'un salon de caisse créé mais dont le panneau n'a pas pu
-# être posté).
-_LIGHT_CRATE_CHANNEL_NAMES = frozenset(
-    _COMBAT_KIND_CHANNELS[k] for k in _LIGHT_CRATE_KINDS)
 # Noms de salons d'event LEGACY (anciens schémas de nommage, AVANT le renommage
 # par-type actuel) — ex. « 📢-mob » d'avant « 🐗-mob ». Aucun code ne les crée
 # plus, mais des salons résiduels traînent À VIE car le sweeper par-nom ne les
@@ -40638,592 +33307,18 @@ _LEGACY_COMBAT_CHANNEL_NAMES = frozenset({
     "📢-mystere",  # anciens schémas du même type (mégaphone)
     "📢-tresor",
 })
-# ⚠️ NE PAS ajouter « ⚔️-arène » ni « ⚔️-combat » ici : ce sont des salons partagés
-# ACTIFS (cf. _ensure_combat_arena_channel + garde boot 44245). « ⚔️-combat » est
-# déjà géré (idle) via _ALL_COMBAT_CHANNEL_NAMES ; « ⚔️-arène » reste, lui, permanent.
-# Noms de salons d'event que du code ACTUEL crée encore mais qui sont HORS du schéma
-# par-type (donc invisibles du sweeper par-nom) — ex. « 🐉-boss-du-jour » (emoji
-# dragon) créé par _ensure_daily_boss_channel, alors que le schéma utilise
-# « 👹-boss-du-jour » (ogre). Contrairement aux LEGACY, un tel salon PEUT héberger un
-# event en cours → balayable UNIQUEMENT quand idle (via _is_sweepable_event_channel +
-# la garde _has_any_major_event_running du sweeper), JAMAIS supprimé inconditionnellement
-# au boot.
-_EXTRA_IDLE_SWEEP_NAMES = frozenset({
-    "🐉-boss-du-jour",  # _ensure_daily_boss_channel (emoji dragon ≠ 👹 ogre du schéma)
-})
-# MARQUEUR STABLE inscrit dans le topic de TOUT salon d'event éphémère créé par
-# _ensure_combat_channel. Indépendant du NOM → si un type est renommé un jour, le
-# sweeper retrouve quand même le salon par ce marqueur (zéro nouvel orphelin). Le
-# journal PERMANENT « 📜-chroniques-combat » n'est jamais créé par cette fonction
-# → il ne porte pas ce marqueur → il n'est JAMAIS balayé. Texte visible et utile
-# (prévient l'utilisateur que le salon est temporaire).
-_EPHEMERAL_EVENT_TOPIC_TAG = "salon d'événement temporaire — il disparaît à la fin"
-# Topic par-type (l'event « apparaît » avec une description qui colle au contenu,
-# pas un « Combat en cours » générique trompeur sur une boîte/loot). Défaut =
-# combat. Le marqueur _EPHEMERAL_EVENT_TOPIC_TAG est ajouté à TOUS (cf.
-# _ensure_combat_channel).
-_COMBAT_KIND_TOPICS = {
-    'mystery':  "📦 Boîte mystère — ouvre-la vite avant qu'elle disparaisse !",
-    'treasure': "🎁 Trésor flash — premier arrivé, premier servi !",
-    'mob':      "🐗 Un monstre rôde — attaque-le pour le butin !",
-}
-_COMBAT_TOPIC_DEFAULT = (
-    "⚔️ Combat en cours sur le serveur. "
-    "Connecte-toi à un vocal pendant le combat → bonus de dégâts !")
-
-
-def _combat_channel_topic_for_kind(kind) -> str:
-    """Topic du salon de combat/event pour ce `kind`, AVEC le marqueur éphémère
-    stable. Centralisé → un seul endroit à faire évoluer."""
-    base = _COMBAT_KIND_TOPICS.get(str(kind or ''), _COMBAT_TOPIC_DEFAULT)
-    return f"{base} · {_EPHEMERAL_EVENT_TOPIC_TAG}"
-
-
-def _is_sweepable_event_channel(ch) -> bool:
-    """True si `ch` est un salon d'event ÉPHÉMÈRE créé par le bot, donc supprimable
-    quand plus aucun event ne tourne. Reconnu par : (1) nom dans le schéma par-type
-    actuel, (2) nom LEGACY connu, ou (3) topic portant le marqueur éphémère (filet
-    anti-renommage). Le journal permanent « 📜-chroniques-combat » échoue les 3 tests
-    → JAMAIS supprimé. Fail-safe → False (dans le doute, on ne supprime pas)."""
-    try:
-        nm = getattr(ch, 'name', '') or ''
-        if (nm in _ALL_COMBAT_CHANNEL_NAMES
-                or nm in _LEGACY_COMBAT_CHANNEL_NAMES
-                or nm in _EXTRA_IDLE_SWEEP_NAMES):
-            return True
-        topic = getattr(ch, 'topic', '') or ''
-        if _EPHEMERAL_EVENT_TOPIC_TAG and _EPHEMERAL_EVENT_TOPIC_TAG in topic:
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def _combat_channel_name_for_kind(kind) -> str:
-    """Nom du salon de combat pour ce `kind`. Renvoie le nom par-type (schéma de
-    nommage) si connu, sinon le salon générique « ⚔️-combat » (boss raid / caisses /
-    arène partagée). Centralisé → un seul endroit à faire évoluer."""
-    return _COMBAT_KIND_CHANNELS.get(str(kind or ''), _COMBAT_GENERIC_CHANNEL)
-
-
-# Map nom-de-salon → suffixe ASCII de clé cfg (stable, sans emoji → db_set safe).
-_COMBAT_NAME_TO_CFG_SUFFIX = {
-    v: k for k, v in _COMBAT_KIND_CHANNELS.items()
-}
-
-
-def _combat_channel_cfg_key(name: str) -> str:
-    """Clé cfg de cache d'id pour un salon de combat donné. Le salon générique garde
-    la clé HISTORIQUE 'combat_channel_id' (compat avec toutes les gardes existantes :
-    teardown, boot cleanup, voice-protect…) ; les salons par-type ont une clé dédiée
-    en ASCII pur (suffixe = kind → jamais d'emoji dans la clé db_set)."""
-    if name == _COMBAT_GENERIC_CHANNEL:
-        return 'combat_channel_id'
-    return 'combat_channel_id_' + _COMBAT_NAME_TO_CFG_SUFFIX.get(name, 'misc')
-
-
-async def _ensure_combat_channel(guild, kind=None):
-    """FIX salons : salon de combat VISIBLE et ÉPHÉMÈRE pour ce `kind`. Chaque TYPE a
-    SON salon au nom spécifique (cf. _COMBAT_KIND_CHANNELS) ; `kind` None/'boss_raid'/
-    'shared' → salon générique « ⚔️-combat » (boss raid masquant + caisses légères +
-    arène partagée d'invasion). Créé à la volée, « suivi » par les membres, SUPPRIMÉ
-    quand l'event se termine (idle-sweeper / teardown). Salon AUTONOME (PAS dans une
-    catégorie « ⚔️ … » → les nettoyages de boot qui suppriment ces catégories ne le
-    touchent JAMAIS). Lecture + écriture publiques, bot complet. Id mémorisé en cfg
-    (par-type). Fail-open → None.
-
-    Histo : avant, TOUS les combats partageaient « ⚔️-combat » (kind/title ignorés) →
-    plainte owner « tout est du combat ». Désormais le nom suit le type."""
-    if guild is None:
-        return None
-    me = guild.me
-    name = _combat_channel_name_for_kind(kind)
-    cfg_key = _combat_channel_cfg_key(name)
-    try:
-        c = await cfg(guild.id)
-        ch_id = int(c.get(cfg_key, 0) or 0)
-        ch = None
-        if ch_id:
-            _c = guild.get_channel(ch_id)
-            if isinstance(_c, discord.TextChannel):
-                ch = _c
-        if ch is None:
-            ch = discord.utils.get(guild.text_channels, name=name)
-        if ch is None:
-            if not (me and me.guild_permissions.manage_channels):
-                return None
-            # Salon d'event NÉ en LECTURE SEULE (owner 2026-06-16) : @everyone voit + lit,
-            # mais n'écrit pas / ne réagit pas / pas de threads → fini le flood qui gâche le
-            # farm. Les boutons restent cliquables. Le bot garde l'écriture.
-            ow = {
-                guild.default_role: discord.PermissionOverwrite(
-                    view_channel=True, read_message_history=True,
-                    send_messages=False, add_reactions=False,
-                    create_public_threads=False, create_private_threads=False,
-                    send_messages_in_threads=False),
-                me: discord.PermissionOverwrite(
-                    view_channel=True, send_messages=True, embed_links=True,
-                    manage_messages=True),
-            }
-            ch = await guild.create_text_channel(
-                name=name, overwrites=ow,
-                topic=_combat_channel_topic_for_kind(kind),
-                reason="FIX salons : salon de combat par-type, éphémère (lecture seule)")
-        # Verrou LECTURE SEULE garanti : couvre aussi un salon EXISTANT créé AVANT ce fix
-        # (ex. #-faille / #-mob déjà ouverts) → re-verrouillé au prochain spawn. Idempotent.
-        await _lock_event_channel(guild, ch)
-        await db_set(guild.id, cfg_key, ch.id)
-        return ch
-    except Exception as ex:
-        print(f"[_ensure_combat_channel kind={kind}] {ex}")
-        return None
-
-
-async def _discard_empty_crate_channel(guild, channel, chatty_ch=None):
-    """FIX salons (anti-salon-vide) : une caisse légère (boîte mystère / trésor flash)
-    crée SON salon dédié AVANT de poster le panneau. Si l'envoi du panneau échoue, le
-    salon reste VIDE et orphelin (plainte owner « le salon apparaît sans event dedans
-    et ne disparaît jamais »). On le supprime IMMÉDIATEMENT — symétrique du flux mob.
-    Garde-fous : on ne touche QUE le salon DÉDIÉ d'une caisse (nom dans
-    _LIGHT_CRATE_CHANNEL_NAMES), JAMAIS le fallback chatty (salon public réutilisé) ni
-    un salon permanent. Idempotent / fail-open."""
-    if guild is None or channel is None:
-        return
-    try:
-        if chatty_ch is not None and getattr(channel, 'id', 0) == getattr(chatty_ch, 'id', -1):
-            return  # fallback chatty : salon public, on n'y touche jamais
-        name = getattr(channel, 'name', '') or ''
-        if name not in _LIGHT_CRATE_CHANNEL_NAMES:
-            return  # par sécurité : uniquement les salons dédiés de caisse
-        try:
-            await channel.delete(reason="FIX salons : caisse non postée — salon vide annulé")
-        except Exception as ex:
-            print(f"[_discard_empty_crate_channel del={name}] {ex}")
-        try:
-            await db_set(guild.id, _combat_channel_cfg_key(name), 0)
-        except Exception:
-            pass
-    except Exception as ex:
-        print(f"[_discard_empty_crate_channel] {ex}")
-
-
-async def _has_active_light_crate(guild_id: int, kind=None) -> bool:
-    """True si une caisse légère est ACTIVE dans cette guild → SON salon par-type
-    (« 🎁-tresor » / « 📦-mystere ») ne doit pas être supprimé sous elle.
-    `kind` filtre la caisse à tester : 'treasure' (trésor flash), 'mystery' (boîte
-    mystère), ou None = n'importe laquelle. Volontairement HORS
-    _has_any_major_event_running : une caisse NE doit PAS bloquer un spawn de combat,
-    seulement protéger SON salon de la suppression idle."""
-    # Boîte mystère : dict RAM (clé msg.id → valeur avec 'guild_id')
-    if kind in (None, 'mystery'):
-        try:
-            for _mid, _box in list(_mystery_boxes.items()):
-                if _box.get('guild_id') == guild_id:
-                    return True
-        except Exception:
-            pass
-    # Trésor flash : ligne non terminée (ended=0) ET encore dans sa fenêtre.
-    # La borne datetime(expires_at) > now empêche qu'une ligne ended=0 périmée
-    # (cleanup raté) bloque le salon À VIE. Après claim/timeout, ended=1 → garde levée.
-    if kind in (None, 'treasure'):
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT 1 FROM flash_treasures WHERE guild_id=? AND ended=0 "
-                    "AND (expires_at IS NULL OR datetime(expires_at) > datetime('now')) LIMIT 1",
-                    (guild_id,),
-                ) as cur:
-                    if await cur.fetchone():
-                        return True
-        except Exception:
-            pass
-    return False
-
-
-async def _sweep_idle_light_crate_channels(guild):
-    """FIX salons (owner 2026-06-14, INDÉPENDANT du combat) : supprime les salons de
-    CAISSE LÉGÈRE (« 📦-mystere » / « 🎁-tresor ») dès que LEUR caisse est finie
-    (saisie/ouverte/expirée), **PEU IMPORTE qu'un combat tourne ailleurs**.
-
-    CAUSE RACINE corrigée : `_maybe_delete_idle_combat_channel` faisait un return GLOBAL
-    si un boss/mob tournait → les salons de caisse VIDES (caisse finie) restaient pris en
-    otage par ce combat (« mystere/tresor restent vides pendant qu'un autre event
-    tourne »). Or une caisse N'EST PAS un combat : son salon dédié est autonome et doit
-    être nettoyé sur SON seul critère = `_has_active_light_crate(kind)`. Fail-open : si la
-    caisse est encore active (ou au moindre doute) → on GARDE son salon."""
-    if guild is None:
-        return
-    try:
-        c = await cfg(guild.id)
-    except Exception:
-        c = {}
-    for _ck in _LIGHT_CRATE_KINDS:
-        _name = _COMBAT_KIND_CHANNELS.get(_ck)
-        if not _name:
-            continue
-        # Caisse encore vivante → on garde SON salon. Fail-open : erreur → on garde.
-        try:
-            if await _has_active_light_crate(guild.id, kind=_ck):
-                continue
-        except Exception:
-            continue
-        _key = _combat_channel_cfg_key(_name)
-        _ch = None
-        try:
-            _cid = int((c or {}).get(_key, 0) or 0)
-        except Exception:
-            _cid = 0
-        if _cid:
-            _ch = guild.get_channel(_cid)
-        if _ch is None:
-            _ch = discord.utils.get(guild.text_channels, name=_name)
-        if _ch is None:
-            # salon déjà parti → on solde juste la clé cfg
-            if _cid:
-                try:
-                    await db_set(guild.id, _key, 0)
-                except Exception:
-                    pass
-            continue
-        # Double garde : on ne supprime QUE le salon de caisse reconnu (nom exact +
-        # marqueur/schéma) — jamais un salon homonyme non-event.
-        try:
-            if getattr(_ch, 'name', '') == _name and _is_sweepable_event_channel(_ch):
-                await _ch.delete(
-                    reason="FIX salons : caisse terminée — salon éphémère supprimé")
-        except Exception as ex:
-            print(f"[_sweep_idle_light_crate_channels del={_name}] {ex}")
-        try:
-            await db_set(guild.id, _key, 0)
-        except Exception:
-            pass
-
-
-async def _maybe_delete_idle_combat_channel(guild, grace_seconds: int = 0):
-    """FIX salons : les salons de combat sont ÉPHÉMÈRES (demande owner : ils doivent
-    DISPARAÎTRE quand aucun event ne tourne, pas juste se vider). Dès qu'AUCUN combat
-    n'est en cours (boss raid / world boss / boss du jour / climax / invasion / mob /
-    faille / caravane / chaîne), on supprime TOUS les salons de combat par-type
-    (_ALL_COMBAT_CHANNEL_NAMES) — par id cfg ET par nom (filet reboot / fin ratée).
-    Recréés à la volée par _ensure_combat_channel au prochain spawn. Le journal
-    « 📜-chroniques-combat » reste, lui, PERMANENT. Fail-open : au moindre doute on
-    GARDE les salons (JAMAIS de suppression pendant un combat).
-
-    ⚠️ Les salons de CAISSE LÉGÈRE (📦-mystere / 🎁-tresor) sont traités À PART AVANT la
-    garde combat (_sweep_idle_light_crate_channels) : une caisse n'est pas un combat, son
-    salon ne doit PAS être pris en otage par un boss/mob qui tourne ailleurs."""
-    if guild is None:
-        return
-    try:
-        if grace_seconds and grace_seconds > 0:
-            await asyncio.sleep(grace_seconds)
-    except Exception:
-        pass
-    # ÉTAPE 1 — CAISSES LÉGÈRES, INDÉPENDANT du combat (cf. cause racine ci-dessus).
-    try:
-        await _sweep_idle_light_crate_channels(guild)
-    except Exception:
-        pass
-    # ÉTAPE 2 — SALONS DE COMBAT : gardés tant qu'un combat tourne (mob inclus).
-    try:
-        if await _has_any_major_event_running(guild.id, include_mobs=True):
-            return
-    except Exception:
-        return  # fail-open : dans le doute, ne rien supprimer
-    # GARDE-VIE caisses légères : chaque caisse vit dans SON salon par-type
-    # (« 🎁-tresor » pour le trésor flash, « 📦-mystere » pour la boîte mystère) SANS
-    # event de combat. Ne JAMAIS supprimer le salon d'une caisse tant qu'elle y vit.
-    # On NE touche PAS _has_any_major_event_running (sinon une caisse bloquerait les
-    # spawns de combat — non voulu) : check LOCAL et ciblé ici uniquement. À la fin de
-    # la caisse (saisie/ouverte/expirée), la garde tombe → le sweeper supprime le salon.
-    _crate_active_by_name = {}  # nom de salon caisse → True si caisse encore vivante
-    try:
-        for _ck in _LIGHT_CRATE_KINDS:
-            _crate_active_by_name[_COMBAT_KIND_CHANNELS[_ck]] = \
-                await _has_active_light_crate(guild.id, kind=_ck)
-    except Exception:
-        return  # fail-open : au moindre doute, on NE supprime rien
-    # Une caisse vit-elle quelque part dans la guild ? (sert au garde-fou anti-faux-
-    # positif des salons reconnus UNIQUEMENT par marqueur, cf. boucle de suppression.)
-    _any_crate_alive = any(_crate_active_by_name.values())
-    # Candidats : tous les salons de combat connus, retrouvés par id cfg PUIS par nom.
-    try:
-        c = await cfg(guild.id)
-    except Exception:
-        c = {}
-    seen_ids = set()
-    candidates = []  # (channel, name, cfg_key)
-    for _name in _ALL_COMBAT_CHANNEL_NAMES:
-        _key = _combat_channel_cfg_key(_name)
-        _ch = None
-        try:
-            _cid = int((c or {}).get(_key, 0) or 0)
-        except Exception:
-            _cid = 0
-        if _cid:
-            _ch = guild.get_channel(_cid)
-        if _ch is None:
-            _ch = discord.utils.get(guild.text_channels, name=_name)
-        if _ch is not None and _ch.id not in seen_ids:
-            seen_ids.add(_ch.id)
-            candidates.append((_ch, _name, _key))
-        elif _ch is None and _cid:
-            # salon déjà disparu (fin normale) → on solde juste la clé cfg
-            try:
-                await db_set(guild.id, _key, 0)
-            except Exception:
-                pass
-    # FILET ANTI-ORPHELIN : balaye AUSSI tout salon texte RECONNU comme salon d'event
-    # éphémère (nom LEGACY « 📢-mob »… OU topic portant le marqueur éphémère) que la
-    # boucle par-nom ci-dessus n'a pas attrapé — renommage manuel, ancien schéma de
-    # nommage, salon dont l'id cfg a été perdu. C'est la cause directe de « le salon ne
-    # disparaît jamais » pour les noms divergents. Le journal PERMANENT
-    # « 📜-chroniques-combat » n'est reconnu par AUCUN des 3 tests → JAMAIS touché.
-    try:
-        for _ch in list(guild.text_channels):
-            if _ch.id in seen_ids:
-                continue
-            if _is_sweepable_event_channel(_ch):
-                seen_ids.add(_ch.id)
-                _nm2 = getattr(_ch, 'name', '') or ''
-                candidates.append((_ch, _nm2, _combat_channel_cfg_key(_nm2)))
-    except Exception:
-        pass
-    for _ch, _name, _key in candidates:
-        # Le salon d'une caisse légère (« 🎁-tresor » / « 📦-mystere ») est ÉPARGNÉ
-        # tant que SA caisse vit ; dès qu'elle est saisie/ouverte/expirée → supprimé.
-        if _crate_active_by_name.get(_name):
-            continue
-        # SF1 anti-faux-positif : salon reconnu UNIQUEMENT par le marqueur (nom hors
-        # de tout schéma connu) PENDANT qu'une caisse vit ailleurs dans la guild →
-        # pourrait être un salon de caisse RENOMMÉ manuellement dont le nom ne mappe
-        # plus la garde-vie _crate_active_by_name. Dans le doute, on s'abstient.
-        if (_any_crate_alive
-                and _name not in _ALL_COMBAT_CHANNEL_NAMES
-                and _name not in _LEGACY_COMBAT_CHANNEL_NAMES
-                and _name not in _EXTRA_IDLE_SWEEP_NAMES):
-            continue
-        try:
-            # Double garde : on ne supprime QUE un salon d'event éphémère reconnu
-            # (nom par-type / nom legacy / marqueur topic). Le journal permanent
-            # « 📜-chroniques-combat » échoue ce test → jamais supprimé.
-            if _is_sweepable_event_channel(_ch):
-                await _ch.delete(reason="FIX salons : salon de combat éphémère — aucun event en cours")
-        except discord.NotFound:
-            # Salon déjà disparu (supprimé entre-temps) = exactement l'état voulu.
-            # Ce n'est pas une erreur : on enchaîne sur l'oubli de la clé cfg sans bruiter les logs.
-            pass
-        except Exception as ex:
-            print(f"[_maybe_delete_idle_combat_channel del={_name}] {ex}")
-        # Oublier l'id en cfg → le prochain event recrée un salon neuf. Fail-open.
-        try:
-            await db_set(guild.id, _key, 0)
-        except Exception:
-            pass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-async def _add_member_to_alliance(guild, alliance: dict, member: discord.Member) -> dict:
-    """Ajoute un membre à une alliance : rôle Discord + DB."""
-    try:
-        # Check capacité
-        members = await _get_alliance_members(alliance['id'])
-        if len(members) >= _ALLIANCE_MAX_MEMBERS:
-            return {'ok': False, 'error': f'Alliance pleine ({_ALLIANCE_MAX_MEMBERS} max).'}
-        if any(m['user_id'] == member.id for m in members):
-            return {'ok': False, 'error': 'Ce membre est déjà dans l\'alliance.'}
-        if await _get_user_alliance(guild.id, member.id):
-            return {'ok': False, 'error': 'Ce membre est déjà dans une autre alliance.'}
-
-        role = guild.get_role(int(alliance['role_id']))
-        if not role:
-            return {'ok': False, 'error': 'Rôle alliance introuvable (resync nécessaire).'}
-
-        # Assigner le rôle
-        try:
-            await member.add_roles(role, reason=f"Rejoint alliance {alliance['name']}")
-        except discord.Forbidden:
-            return {'ok': False, 'error': 'Permission manage_roles refusée.'}
-        except Exception as ex:
-            return {'ok': False, 'error': f'Erreur add_role : {ex}'}
-
-        # DB
-        async with get_db() as db:
-            await db.execute(
-                "INSERT OR IGNORE INTO alliance_members(alliance_id, user_id, role) VALUES(?,?,?)",
-                (alliance['id'], member.id, 'member'),
-            )
-            await db.commit()
-
-        # Notif dans le salon
-        try:
-            ch = guild.get_channel(int(alliance['channel_id']))
-            if ch:
-                await ch.send(
-                    embed=discord.Embed(
-                        description=f"🎉 {member.mention} rejoint l'alliance **{alliance['emoji']} {alliance['name']}** !",
-                        color=0x2ECC71,
-                    ),
-                    allowed_mentions=discord.AllowedMentions(users=[member], roles=False, everyone=False),
-                )
-        except Exception:
-            pass
-
-        return {'ok': True}
-    except Exception as ex:
-        print(f"[_add_member_to_alliance] {ex}")
-        return {'ok': False, 'error': str(ex)}
-
-
-
-
 
 
 # ─── VIEWS ALLIANCES ───────────────────────────────────────────────────────────
 
 
-
-
-class AllianceInviteAcceptView(View):
-    """View persistante DM : 'Accepter' / 'Refuser' une invitation alliance."""
-
-    def __init__(self):
-        super().__init__(timeout=None)
-        b1 = Button(
-            label="✅ Accepter l'invitation",
-            style=discord.ButtonStyle.success,
-            custom_id="alliance_invite_accept",
-        )
-        b1.callback = self._on_accept
-        self.add_item(b1)
-        b2 = Button(
-            label="❌ Refuser",
-            style=discord.ButtonStyle.secondary,
-            custom_id="alliance_invite_refuse",
-        )
-        b2.callback = self._on_refuse
-        self.add_item(b2)
-
-    async def _on_accept(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            # Trouver l'invitation pending la plus récente pour ce user
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT id, alliance_id FROM alliance_invites "
-                    "WHERE invited_user_id=? AND status='pending' "
-                    "ORDER BY sent_at DESC LIMIT 1",
-                    (i.user.id,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row:
-                return await _safe_followup(i, content="❌ Aucune invitation en attente.")
-            invite_id, alliance_id = row
-            # Récupérer l'alliance
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT id, guild_id, name, emoji, role_id, channel_id, leader_id "
-                    "FROM alliances WHERE id=? AND dissolved=0",
-                    (alliance_id,),
-                ) as cur:
-                    arow = await cur.fetchone()
-            if not arow:
-                async with get_db() as db:
-                    await db.execute(
-                        "UPDATE alliance_invites SET status='expired' WHERE id=?",
-                        (invite_id,),
-                    )
-                    await db.commit()
-                return await _safe_followup(i, content="❌ Cette alliance n'existe plus.")
-            alliance = {
-                'id': arow[0], 'guild_id': arow[1], 'name': arow[2], 'emoji': arow[3],
-                'role_id': arow[4], 'channel_id': arow[5], 'leader_id': arow[6],
-            }
-            guild = bot.get_guild(int(alliance['guild_id']))
-            if not guild:
-                return await _safe_followup(i, content="❌ Serveur introuvable.")
-            member = guild.get_member(i.user.id)
-            if not member:
-                return await _safe_followup(i, content="❌ Tu n'es plus membre du serveur.")
-
-            result = await _add_member_to_alliance(guild, alliance, member)
-            if not result.get('ok'):
-                return await _safe_followup(i, content=f"❌ {result.get('error')}")
-
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE alliance_invites SET status='accepted' WHERE id=?",
-                    (invite_id,),
-                )
-                await db.commit()
-
-            await _safe_followup(
-                i,
-                content=(
-                    f"🎉 **Bienvenue dans l'alliance {alliance['emoji']} {alliance['name']} !**\n"
-                    f"📍 Salon privé : <#{alliance['channel_id']}>"
-                ),
-            )
-        except Exception as ex:
-            print(f"[AllianceInviteAcceptView _on_accept] {ex}")
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-    async def _on_refuse(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE alliance_invites SET status='refused' "
-                    "WHERE invited_user_id=? AND status='pending'",
-                    (i.user.id,),
-                )
-                await db.commit()
-            await _safe_followup(i, content="❌ Invitation refusée.")
-        except Exception as ex:
-            print(f"[AllianceInviteAcceptView _on_refuse] {ex}")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ─── Patch hub : ajout du 7ème bouton "🤝 Mes alliances" ───────────────────────
-
-
-# Phase 169.7 : monkey-patch désactivé (overflow 25-enfants Discord).
 
 
     # Phase 169.7 : add_item commenté.
     # b7 = Button(label="🤝 Mes alliances", custom_id="hub_alliances", row=2)
     # b7.callback = self._on_alliances
     # self.add_item(b7)
-
-
 
 
 # Phase 169.7 : __init__ assignment commenté.
@@ -41235,357 +33330,17 @@ class AllianceInviteAcceptView(View):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
-
-async def _end_game_night(gn_id: int):
-    """Termine une Game Night : supprime les 2 salons + marque ended."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT guild_id, voice_channel_id, text_channel_id, ended FROM game_nights WHERE id=?",
-                (gn_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            return
-        gid, vc_id, tc_id, ended = row
-        if ended:
-            return
-        guild = bot.get_guild(int(gid))
-        if guild:
-            for ch_id in (vc_id, tc_id):
-                ch = guild.get_channel(int(ch_id)) if ch_id else None
-                if ch:
-                    try:
-                        await ch.delete(reason="Game Night terminée")
-                    except Exception:
-                        pass
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE game_nights SET ended=1 WHERE id=?",
-                (gn_id,),
-            )
-            await db.commit()
-        print(f"[GAME NIGHT END] gn_id={gn_id}")
-    except Exception as ex:
-        print(f"[_end_game_night] {ex}")
-
-
 # ─── Phase 46.2 : Vrais events interactifs 2026 ─────────────────────────────
 # Compteurs en mémoire pour les events live (pas besoin de DB pour ces courts)
-
-_gn_event_state: dict = {}  # event_msg_id -> {kind, gn_id, ...state}
-
-
-class GameNightSpeedClickView(View):
-    """Speed click : premier à cliquer dans la fenêtre temporelle gagne tout.
-
-    Phase 85 : custom_id "gn_speed" STABLE (lookup state via i.message.id)
-    → bot.add_view(GameNightSpeedClickView()) au boot capte tous les clics.
-    """
-
-    def __init__(self):
-        super().__init__(timeout=None)
-        b = Button(
-            label="💥 GO !",
-            style=discord.ButtonStyle.success,
-            custom_id="gn_speed",
-        )
-        b.callback = self._on_click
-        self.add_item(b)
-
-    async def _on_click(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            if not i.message:
-                return await _safe_followup(i, content="❌ Erreur.")
-            state = _gn_event_state.get(i.message.id)
-            if not state or state.get('kind') != 'speed_click':
-                return await _safe_followup(i, content="❌ Event expiré.")
-            if state.get('winner'):
-                return await _safe_followup(i, content="✋ Trop tard ! Déjà gagné.")
-            # Race-safe : on capture le winner
-            state['winner'] = i.user.id
-            try:
-                await add_coins(i.guild.id, i.user.id, int(state['reward']))
-            except Exception:
-                pass
-            # Désactiver le bouton + édit
-            try:
-                disabled = View(timeout=1)
-                db = Button(
-                    label=f"🏆 Gagné par {i.user.display_name[:30]}",
-                    style=discord.ButtonStyle.secondary,
-                    disabled=True,
-                )
-                disabled.add_item(db)
-                new_e = discord.Embed(
-                    title=state.get('title', '⚡ Speed Click'),
-                    description=(
-                        f"🏆 **{i.user.display_name}** a été le plus rapide !\n"
-                        f"💰 **+{state['reward']} 🪙** remportés."
-                    ),
-                    color=0x2ECC71,
-                )
-                await i.message.edit(embed=new_e, view=disabled)
-            except Exception:
-                pass
-            await _safe_followup(i, content=f"⚡ Bien joué ! **+{state['reward']} 🪙** gagnés.")
-        except Exception as ex:
-            print(f"[GameNightSpeedClickView] {ex}")
-
-
-class GameNightThresholdView(View):
-    """Threshold click : N personnes différentes cliquent en T sec → tout le monde gagne.
-
-    Phase 85 : custom_id "gn_thresh" STABLE (lookup state via i.message.id)
-    → bot.add_view(GameNightThresholdView()) au boot capte tous les clics.
-    """
-
-    def __init__(self):
-        super().__init__(timeout=None)
-        b = Button(
-            label="✋ J'en suis",
-            style=discord.ButtonStyle.primary,
-            custom_id="gn_thresh",
-        )
-        b.callback = self._on_click
-        self.add_item(b)
-
-    async def _on_click(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            if not i.message:
-                return await _safe_followup(i, content="❌ Erreur.")
-            state = _gn_event_state.get(i.message.id)
-            if not state or state.get('kind') != 'threshold_click':
-                return await _safe_followup(i, content="❌ Event expiré.")
-            if state.get('completed'):
-                return await _safe_followup(i, content="🎉 L'objectif est déjà atteint, merci d'avoir participé !")
-
-            participants = state.setdefault('participants', set())
-            if i.user.id in participants:
-                return await _safe_followup(i, content=f"✅ Tu as déjà participé. Continuons à attendre les autres ! ({len(participants)}/{state['threshold']})")
-
-            participants.add(i.user.id)
-            count = len(participants)
-            threshold = state['threshold']
-
-            # Update le message pour montrer la progression
-            try:
-                bar = "█" * count + "░" * max(0, threshold - count)
-                if count < threshold:
-                    new_e = discord.Embed(
-                        title=state['title'],
-                        description=(
-                            f"{state['original_desc']}\n\n"
-                            f"**Progression :** `{count}/{threshold}` participants\n"
-                            f"`{bar}`"
-                        ),
-                        color=0xE91E63,
-                    )
-                    await i.message.edit(embed=new_e)
-                else:
-                    # Objectif atteint !
-                    state['completed'] = True
-                    # Distribute coins to all participants
-                    for uid in participants:
-                        try:
-                            await add_coins(i.guild.id, uid, int(state['reward']))
-                        except Exception:
-                            pass
-                    disabled = View(timeout=1)
-                    db = Button(
-                        label=f"🎉 Objectif atteint ({count}/{threshold})",
-                        style=discord.ButtonStyle.success,
-                        disabled=True,
-                    )
-                    disabled.add_item(db)
-                    new_e = discord.Embed(
-                        title=f"🎉 {state['title']} — RÉUSSI !",
-                        description=(
-                            f"**{count} participants** ont relevé le défi.\n"
-                            f"💰 **+{state['reward']} 🪙** à chacun !"
-                        ),
-                        color=0x2ECC71,
-                    )
-                    await i.message.edit(embed=new_e, view=disabled)
-            except Exception as ex:
-                print(f"[GameNightThresholdView update] {ex}")
-
-            if state.get('completed'):
-                await _safe_followup(i, content=f"🎉 **OBJECTIF ATTEINT !** +{state['reward']} 🪙 pour toi.")
-            else:
-                await _safe_followup(i, content=f"✅ Participation enregistrée ! ({count}/{threshold})")
-        except Exception as ex:
-            print(f"[GameNightThresholdView] {ex}")
 
 
 # ─── 🔍 DÉTECTIVE EXPRESS ────────────────────────────────────────────────────
 
 
-
-
-
-
-async def _purge_orphaned_gn_minigames():
-    """Au boot : supprime les messages de mini-jeux Game Night ORPHELINS.
-
-    Les vues dynamiques (Détective Express, Mastermind, Quiz Survivor) ne se
-    ré-enregistrent PAS après un redémarrage et `_gn_event_state` est vidé →
-    leurs boutons renvoient « Échec de l'interaction » et le message reste
-    affiché avec des boutons morts (l'owner doit le supprimer à la main).
-
-    Comme un reboot rend ces mini-jeux invalides (state perdu), on efface ces
-    messages au boot — cohérent avec `_gn_event_state.clear()` déjà fait dans
-    on_ready. Tracés en DB via reason='gn_minigame'.
-    """
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT guild_id, channel_id, message_id FROM event_message_cleanup "
-                "WHERE reason='gn_minigame'"
-            ) as cur:
-                rows = await cur.fetchall()
-        done = []  # message_ids effectivement traités (guilde dispo)
-        for gid, cid, mid in rows:
-            g = bot.get_guild(int(gid))
-            if g is None:
-                # Guilde pas encore en cache → on LAISSE la ligne (sinon le message
-                # serait orphelin pour toujours). Le prochain boot/cleaner la reprendra.
-                continue
-            try:
-                ch = g.get_channel(int(cid))
-                if ch is not None:
-                    await ch.get_partial_message(int(mid)).delete()
-            except Exception:
-                pass  # message déjà supprimé / salon disparu → considéré traité
-            done.append(int(mid))
-        if done:
-            async with get_db() as db:
-                await db.executemany(
-                    "DELETE FROM event_message_cleanup WHERE reason='gn_minigame' AND message_id=?",
-                    [(m,) for m in done],
-                )
-                await db.commit()
-        if rows:
-            print(f"[gn purge] {len(done)}/{len(rows)} mini-jeu(x) Game Night orphelin(s) nettoyé(s)")
-    except Exception as ex:
-        print(f"[_purge_orphaned_gn_minigames] {ex}")
-
-
-
-
 # ─── ♟️ MASTERMIND ────────────────────────────────────────────────────────────
 
 
-_MASTERMIND_COLORS = ['🔴', '🟡', '🟢', '🔵', '🟣', '⚫']
-
-
-
-
-
-
 # ─── 🏆 QUIZ SURVIVOR ─────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
-# Hook on_message pour TOUS les mini-jeux chat-based (Phase 47.1)
-async def _check_game_night_emoji_storm(msg):
-    """Hook universel on_message pour les mini-jeux Game Night basés sur le chat.
-
-    Détecte : emoji_storm, anagramme.
-    (Phase 48.3 : branches deadcode pour guess_number/math_express/speed_sequence/mots_interdits
-    supprimées — ces kinds ne sont plus dans events42.GAME_NIGHT_EVENTS.)
-    """
-    try:
-        if msg.author.bot or not msg.guild:
-            return
-        content = (msg.content or '').strip()
-        for state_msg_id, state in list(_gn_event_state.items()):
-            kind = state.get('kind')
-            if state.get('completed'):
-                continue
-            if state.get('channel_id') != msg.channel.id:
-                continue
-
-            # ─── EMOJI STORM ──
-            if kind == 'emoji_storm':
-                trigger = state.get('trigger_emoji')
-                if trigger and trigger in content:
-                    state.setdefault('participants', set()).add(msg.author.id)
-
-            # Phase 48.3 : branches deadcode supprimées (guess_number, math_express)
-            # — ces kinds ne sont plus dans le catalogue events42.GAME_NIGHT_EVENTS
-
-            # ─── ANAGRAMME (premier qui poste le mot correct) ──
-            elif kind == 'anagramme':
-                word_target = state.get('word', '').upper()
-                if word_target and content.strip().upper() == word_target:
-                    state['completed'] = True
-                    state['winner'] = msg.author.id
-                    try:
-                        await add_coins(msg.guild.id, msg.author.id, int(state['reward']))
-                    except Exception:
-                        pass
-                    try:
-                        await msg.channel.send(
-                            embed=discord.Embed(
-                                title=f"🔤 {msg.author.display_name} a trouvé !",
-                                description=(
-                                    f"Mot original : **{word_target}**\n"
-                                    f"💰 **+{state['reward']} 🪙**"
-                                ),
-                                color=0x2ECC71,
-                            ),
-                            delete_after=90,
-                            allowed_mentions=discord.AllowedMentions.none(),
-                        )
-                    except Exception:
-                        pass
-
-            # Phase 48.3 : branches deadcode supprimées (speed_sequence, mots_interdits)
-            # — ces kinds ne sont plus dans le catalogue events42.GAME_NIGHT_EVENTS
-    except Exception as ex:
-        print(f"[_check_game_night_emoji_storm] {ex}")
-
-
-async def _check_game_night_sync_react(payload):
-    """Hook on_raw_reaction_add pour sync_react events."""
-    try:
-        if payload.user_id == bot.user.id or not payload.guild_id:
-            return
-        state = _gn_event_state.get(payload.message_id)
-        if not state or state.get('kind') != 'sync_react':
-            return
-        if state.get('completed'):
-            return
-        target = state.get('target_emoji')
-        if not target:
-            return
-        # Match emoji
-        em = str(payload.emoji)
-        if target in em or em in target:
-            state.setdefault('participants', set()).add(payload.user_id)
-    except Exception as ex:
-        print(f"[_check_game_night_sync_react] {ex}")
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41595,110 +33350,28 @@ async def _check_game_night_sync_react(payload):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
-
-
-
 # ─── SEASON PROGRESS / PASS ────────────────────────────────────────────────────
-
-
-
-
-# ═══ owner 2026-06-30 : « JOUER FAIT AVANCER » (fix du trou de rétention n°1) ═══
-# Avant : taper des boss / saisir des trésors ne nourrissait NI le Season Pass (alimenté
-# seulement par les quêtes/missions) NI l'XP de niveau (venant des messages) → « je joue tous
-# les jours mais ma barre ne bouge pas ». Désormais chaque PARTICIPATION à un event crédite le
-# Season Pass + l'XP. Anti-farm : crédit EN FIN d'event (jamais par clic) + PLAFOND QUOTIDIEN
-# par joueur (enchaîner les boss ou spammer les clics ne fait pas exploser la progression).
-_EVENT_META_DAILY_CAP = 150        # max de points de saison gagnés via events / jour / joueur
-_EVENT_META_XP_PER_POINT = 10      # 1 point de saison event = 10 XP de niveau
-
-
-
-
-
-
-_reward_claim_locks: dict = {}  # Phase 251.8 : verrou par (type,guild,user) anti double-clic
-
-
-def _reward_lock(key):
-    """asyncio.Lock partagé pour `key` — sérialise les claims concurrents d'un même
-    joueur (le bot = 1 process/1 event loop) → le read-modify-write des listes de
-    tiers/quêtes hebdo/mensuelles ne peut plus payer deux fois sur un double-clic."""
-    lk = _reward_claim_locks.get(key)
-    if lk is None:
-        # audit 2026-07-03 : borne mémoire — un verrou par (type,guild,user) fuit sinon à l'échelle
-        # (milliers de joueurs). On évince UNIQUEMENT les verrous NON tenus (jamais un verrou en
-        # cours d'utilisation) → sûr. Le verrou courant est (re)créé juste après.
-        if len(_reward_claim_locks) > 4000:
-            for _k in [k for k, v in list(_reward_claim_locks.items()) if not v.locked()]:
-                _reward_claim_locks.pop(_k, None)
-        lk = _reward_claim_locks[key] = asyncio.Lock()
-    return lk
-
-
-
-
 
 
 # ─── PRESTIGE ──────────────────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
 # ─── FACTIONS ──────────────────────────────────────────────────────────────────
-
-
-
-
 
 
 # ─── WEEKLY QUESTS ─────────────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
 # ─── MONTHLY MEGA QUEST ────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
 
 
 # ─── Hooks pour intégrer Phase 47 dans le tracking existant ────────────────────
 
 
-
-
 # ─── VIEWS / COMMANDES ─────────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
 # ─── Patch HUB : ajout des boutons "📆 Saison" et "🏰 Factions" ───────────────
-
-
-# Phase 169.7 : monkey-patch désactivé (overflow 25-enfants Discord).
 
 
     # Phase 169.7 : add_item commentés.
@@ -41710,23 +33383,11 @@ def _reward_lock(key):
     # self.add_item(b_factions)
 
 
-
-
-
-
 # Phase 169.7 : __init__ assignment commenté.
 # EngagementHubView.__init__ = _patched_hub_init_p47
 
 
 # ─── SLASH COMMANDS ────────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41739,84 +33400,16 @@ def _reward_lock(key):
 # ─── ANALYTICS : tracker l'engagement par type d'event ────────────────────────
 
 
-async def _track_event_engagement(guild_id: int, event_kind: str, action: str = 'start'):
-    """Incrémente le compteur pour ce type d'event.
-
-    action :
-      - 'start'        → +1 count_started (event lancé)
-      - 'participate'  → +1 count_participations (un joueur a interagi)
-      - 'complete'     → +1 count_completions (event terminé avec succès)
-    """
-    if not event_kind:
-        return
-    field = {
-        'start': 'count_started',
-        'participate': 'count_participations',
-        'complete': 'count_completions',
-    }.get(action)
-    if not field:
-        return
-    try:
-        async with get_db() as db:
-            await db.execute(
-                f"INSERT INTO event_engagement(guild_id, event_kind, {field}, last_run_at) "
-                f"VALUES(?,?,1,CURRENT_TIMESTAMP) "
-                f"ON CONFLICT(guild_id, event_kind) DO UPDATE SET "
-                f"{field}={field}+1, last_run_at=CURRENT_TIMESTAMP",
-                (guild_id, event_kind),
-            )
-            await db.commit()
-    except Exception as ex:
-        print(f"[_track_event_engagement {event_kind} {action}] {ex}")
-
-
-# Phase 120 : retiré (debug inutilisé, ex-/event_stats)
-
-
 # ─── MENTION INTELLIGENTE : préférences réelles des joueurs ──────────────────
-
-
-_EVENT_KIND_TO_METRICS = {
-    'boss_raid':   ['bosses_won', 'events_won'],
-    'world_boss':  ['bosses_won', 'world_boss_attacks'],
-    'treasure':    ['treasures_found'],
-    'flash_treasure': ['treasures_found'],
-    'quiz':        ['quiz_correct'],
-    'daily_riddle': ['quiz_correct'],
-    'duel':        ['duels_won'],
-    'game_night':  ['events_participated'],
-}
-
-
-
-
 
 
 # ─── AUTO-PROMOTE des events morts ────────────────────────────────────────────
 
 
-
-
-
-
 # ─── MARKETPLACE P2P (vente de pets entre joueurs) ────────────────────────────
 
 
-
-
-# Phase 168.3 : /sell_pet retirée du tree Discord (décorateur supprimé).
-
-
-
-# Phase 168.3 : /marketplace retirée du tree Discord (décorateur supprimé).
-
-
-
 # ─── Cleanup auto des listings expirés ────────────────────────────────────────
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41829,86 +33422,13 @@ _EVENT_KIND_TO_METRICS = {
 # ─── /profile : tout ton statut en 1 écran ───────────────────────────────────
 
 
-
-
-
-
 # ─── NOTIFICATIONS GRANULAIRES ───────────────────────────────────────────────
-
-
-# Catégories disponibles pour notif opt-in
-_NOTIF_CATEGORIES = [
-    ('events',     '🔔', "Pings d'événements (rôle auto)"),
-    ('boss_raid',  '⚔️', 'Boss Raids'),
-    ('world_boss', '🌍', 'World Boss (hebdo)'),
-    ('treasure',   '💎', 'Trésor / Flash'),
-    ('quiz',       '🧠', 'Quiz / Énigme'),
-    ('game_night', '🎮', 'Game Night (vendredi)'),
-    ('tag_royale', '🔗', 'Tag Royale'),
-    ('marketplace','🛒', 'Marketplace'),
-    ('alliance',   '🤝', 'Alliance (toujours actif)'),
-]
-
-
-async def _get_notif_prefs(guild_id: int, user_id: int) -> dict:
-    """Retourne le dict des préférences notif d'un user (défaut = tout activé)."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT prefs_json FROM user_notif_prefs WHERE guild_id=? AND user_id=?",
-                (guild_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-        if row and row[0]:
-            try:
-                return json.loads(row[0])
-            except Exception:
-                pass
-    except Exception:
-        pass
-    # Defaut : tout activé sauf marketplace
-    return {cat: (cat != 'marketplace') for cat, _, _ in _NOTIF_CATEGORIES}
-
-
-async def _set_notif_pref(guild_id: int, user_id: int, category: str, value: bool):
-    prefs = await _get_notif_prefs(guild_id, user_id)
-    prefs[category] = bool(value)
-    try:
-        async with get_db() as db:
-            await db.execute(
-                "INSERT INTO user_notif_prefs(guild_id, user_id, prefs_json) VALUES(?,?,?) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET prefs_json=?",
-                (guild_id, user_id, json.dumps(prefs), json.dumps(prefs)),
-            )
-            await db.commit()
-    except Exception as ex:
-        print(f"[_set_notif_pref] {ex}")
-
-
-async def _member_wants_notif(guild_id: int, user_id: int, category: str) -> bool:
-    """Helper public — l'auto-promote l'utilise pour filtrer les pings."""
-    prefs = await _get_notif_prefs(guild_id, user_id)
-    return prefs.get(category, True)
-
-
-
-
-
-
 
 
 # ─── CÉLÉBRATION drops rares (légendaire / mythique) ─────────────────────────
 
 
-# Couleurs arc-en-ciel pour les drops mythiques
-_RAINBOW_COLORS = [0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x0000FF, 0x4B0082, 0x9400D3]
-
-
-
-
 # ─── QUIET HOURS — commande owner pour personnaliser ─────────────────────────
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41924,96 +33444,31 @@ _RAINBOW_COLORS = [0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x0000FF, 0x4B0082, 0
 # ─── HELPERS LORE STATE ──────────────────────────────────────────────────────
 
 
-
-
-
-
 # ─── HELPERS NPC ─────────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
 
 
 # ─── TASK : NPC CHATTER (un NPC parle 1x toutes les 6h dans le hub) ─────────
 
 
-
-
-
-
 # ─── HOOK NPC REACTION APRÈS WORLD BOSS ──────────────────────────────────────
-
-
 
 
 # ─── MISSIONS — HELPERS DB ───────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ─── MISSION TRACKING (on_message hook) ──────────────────────────────────────
-
-
-
-
-
-
-
-
 
 
 # ─── VIEW : bouton click participation à une étape ───────────────────────────
 
 
-
-
 # ─── TASK : MISSIONS RUNNER (1x/jour, lance une nouvelle mission si conditions) ─
-
-
-
-
 
 
 # ─── HUB BUTTONS : 📖 Histoire + 🎯 Mission ──────────────────────────────────
 
 
-
-
-
-
-
-
 # ─── SLASH COMMANDS OWNER DEBUG ──────────────────────────────────────────────
-
-
-# Phase 120 : retiré (debug inutilisé, ex-/lore_advance)
-
-
-# Phase 120 : retiré (debug inutilisé, ex-/mission_force_start)
-
-
-# Phase 120 : retiré (debug inutilisé, ex-/npc_force_post)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -42027,206 +33482,19 @@ _RAINBOW_COLORS = [0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x0000FF, 0x4B0082, 0
 # ─── STUDIO TIP DAILY (1x/jour à 9h FR) ──────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
 # ─── SPEEDRUN — Helpers + Modal + Views ──────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # ─── MATCHMAKING PARTIES — héberger une session de jeu ───────────────────────
 
 
-class MatchmakingJoinView(View):
-    """View persistante : bouton 'Rejoindre la party' + 'Quitter'."""
-
-    def __init__(self, party_id: int):
-        super().__init__(timeout=None)
-        self.party_id = party_id
-        join = Button(
-            label="🎮 Rejoindre",
-            style=discord.ButtonStyle.success,
-            custom_id=f"party_join_{party_id}",
-        )
-        join.callback = self._join
-        leave = Button(
-            label="👋 Quitter",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"party_leave_{party_id}",
-        )
-        leave.callback = self._leave
-        close = Button(
-            label="🔒 Fermer (host)",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"party_close_{party_id}",
-        )
-        close.callback = self._close
-        self.add_item(join)
-        self.add_item(leave)
-        self.add_item(close)
-
-    async def _join(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            if not i.guild:
-                return await _safe_followup(i, content="❌ Serveur uniquement.")
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT host_id, game_name, place_id, max_players, status "
-                    "FROM matchmaking_parties WHERE id=?",
-                    (self.party_id,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row:
-                return await _safe_followup(i, content="⏱️ Party introuvable.")
-            host_id, game_name, place_id, max_p, status = row
-            if status != "open":
-                return await _safe_followup(i, content="🔒 Cette party est fermée.")
-            # Compter membres
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT COUNT(*) FROM matchmaking_party_members WHERE party_id=?",
-                    (self.party_id,),
-                ) as cur:
-                    count = int((await cur.fetchone() or [0])[0])
-            if count >= int(max_p):
-                return await _safe_followup(i, content=f"❌ Party pleine ({count}/{max_p}).")
-            # Insert (idempotent)
-            try:
-                async with get_db() as db:
-                    cur = await db.execute(
-                        "INSERT INTO matchmaking_party_members(party_id, user_id) VALUES(?,?) "
-                        "ON CONFLICT(party_id, user_id) DO NOTHING",
-                        (self.party_id, i.user.id),
-                    )
-                    await db.commit()
-            except Exception:
-                pass
-            link = f"https://www.roblox.com/games/{place_id}" if place_id else None
-            if link:
-                await _safe_followup(
-                    i,
-                    content=f"✅ Tu as rejoint la party **{game_name}** !\n🔗 Lien : {link}",
-                )
-            else:
-                await _safe_followup(
-                    i,
-                    content=f"✅ Tu as rejoint la party **{game_name}** ! Le host te donnera le lien.",
-                )
-        except Exception as ex:
-            print(f"[MatchmakingJoinView join] {ex}")
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-    async def _leave(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            async with get_db() as db:
-                await db.execute(
-                    "DELETE FROM matchmaking_party_members WHERE party_id=? AND user_id=?",
-                    (self.party_id, i.user.id),
-                )
-                await db.commit()
-            await _safe_followup(i, content="👋 Tu as quitté la party.")
-        except Exception as ex:
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-    async def _close(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT host_id FROM matchmaking_parties WHERE id=?",
-                    (self.party_id,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row:
-                return await _safe_followup(i, content="⏱️ Party inexistante.")
-            host_id = int(row[0])
-            if i.user.id != host_id and i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
-                return await _safe_followup(i, content="🔒 Seul le host peut fermer.")
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE matchmaking_parties SET status='closed' WHERE id=?",
-                    (self.party_id,),
-                )
-                await db.commit()
-            await _safe_followup(i, content="🔒 Party fermée.")
-        except Exception as ex:
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-
-
-
-
-
-
-
-
-
 # ─── GAME UPDATES — Owner posts update + thread feedback ─────────────────────
-
-
 
 
 # ─── ROBLOX SUB-HUB (4 boutons : Speedrun / Matchmaking / Tips / Updates) ───
 
 
-
-
-
-
 # ─── SLASH COMMANDS OWNER — gestion Roblox ───────────────────────────────────
-
-
-
-
-
-
-# Phase 120 : retiré (debug inutilisé, ex-/speedrun_cat_add)
-@app_commands.describe(
-    cat_id="ID unique (ex: 'glitchless_any')",
-    name="Nom affiché (ex: '🏃 Glitchless Any%')",
-    description="Règles courtes",
-    target_seconds="Temps cible en secondes",
-)
-async def speedrun_cat_add_cmd(i: discord.Interaction, cat_id: str, name: str,
-                                description: str = "", target_seconds: int = 300):
-    if not i.guild:
-        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
-        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
-    if not await _safe_defer(i):
-        return
-    try:
-        async with get_db() as db:
-            await db.execute(
-                "INSERT INTO speedrun_categories_custom(guild_id, cat_id, name, description, target_seconds) "
-                "VALUES(?, ?, ?, ?, ?)",
-                (i.guild.id, cat_id, name, description, int(target_seconds)),
-            )
-            await db.commit()
-        await _safe_followup(i, content=f"✅ Catégorie **{name}** (`{cat_id}`) ajoutée.")
-    except Exception as ex:
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -42239,398 +33507,16 @@ async def speedrun_cat_add_cmd(i: discord.Interaction, cat_id: str, name: str,
 # ─── BINGO MENSUEL ───────────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 # ─── PREDICTION MARKET ───────────────────────────────────────────────────────
-
-
-class PredictionBetModal(Modal):
-    """Modal pour parier sur une prédiction (choix + amount)."""
-
-    def __init__(self, prediction_id: int, choice: str):
-        super().__init__(title=f"🎲 Parier : {choice.upper()}")
-        self.prediction_id = prediction_id
-        self.choice = choice  # 'yes' ou 'no'
-        self.amount_input = TextInput(
-            label=f"Montant à parier sur '{choice.upper()}' (en 🪙)",
-            placeholder="50",
-            max_length=10,
-            required=True,
-        )
-        self.add_item(self.amount_input)
-
-    async def on_submit(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            # B3 : rate-limit AVANT le débit (pari = action économie à fort enjeu).
-            # Fail-open : un pépin du limiter n'empêche jamais le pari légitime.
-            try:
-                ok_rate = await ratelimit_module.check_and_record(
-                    i.user.id, "button",
-                    user_member=i.user if isinstance(i.user, discord.Member) else None,
-                )
-                if not ok_rate:
-                    return await _safe_followup(i, content="⏳ Trop d'actions — pause 5 min.")
-            except Exception:
-                pass
-            try:
-                amount = int(self.amount_input.value.strip())
-                if amount < 10 or amount > 100000:
-                    raise ValueError
-            except Exception:
-                return await _safe_followup(i, content="❌ Montant invalide (10-100000).")
-            # TASK A5 : gel compte compromis → pari refusé (mise = sortie d'argent).
-            if await is_account_frozen(i.guild.id, i.user.id):
-                return await _safe_followup(i, content=FROZEN_ACCOUNT_MSG)
-            # Check status & deadline
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT status, deadline FROM predictions WHERE id=?",
-                    (self.prediction_id,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row:
-                return await _safe_followup(i, content="⏱️ Prédiction inexistante.")
-            status, deadline = row[0], row[1]
-            if status != "open":
-                return await _safe_followup(i, content="🔒 Prédiction fermée.")
-            if deadline:
-                try:
-                    dl = datetime.fromisoformat(str(deadline).replace('Z', '+00:00')) \
-                        if 'T' in str(deadline) \
-                        else datetime.strptime(str(deadline), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                    if datetime.now(timezone.utc) > dl:
-                        return await _safe_followup(i, content="⏱️ Deadline dépassée.")
-                except Exception:
-                    pass
-            # TASK C.3 (durcissement atomicité éco) : débit ATOMIQUE conditionnel
-            # AVANT d'enregistrer le pari. Avant : SELECT solde + add_coins(-amount) —
-            # non atomique, et add_coins plafonne à MAX(0,…) → un double-clic ou une
-            # course pouvait enregistrer 2 paris en ne débitant qu'une fois (solde
-            # « gratté » sous le plancher). Ici : UPDATE … WHERE coins>=? + rowcount==1
-            # (fail-closed). Si le débit échoue → on s'arrête AVANT l'INSERT.
-            async with get_db() as db:
-                _deb = await db.execute(
-                    "UPDATE economy SET coins = coins - ? WHERE guild_id=? AND user_id=? AND coins >= ?",
-                    (amount, i.guild.id, i.user.id, amount),
-                )
-                await db.commit()
-            if (getattr(_deb, "rowcount", 0) or 0) != 1:
-                return await _safe_followup(i, content=f"❌ Solde insuffisant (min {amount:,} 🪙).")
-            # Enregistre le pari + alimente le pool. Si l'INSERT échoue (cas improbable),
-            # on REMBOURSE la mise déjà débitée → jamais de mise « avalée ».
-            try:
-                async with get_db() as db:
-                    await db.execute(
-                        "INSERT INTO prediction_bets(prediction_id, user_id, choice, amount) "
-                        "VALUES(?, ?, ?, ?)",
-                        (self.prediction_id, i.user.id, self.choice, amount),
-                    )
-                    col = "total_yes_pool" if self.choice == "yes" else "total_no_pool"
-                    await db.execute(
-                        f"UPDATE predictions SET {col} = {col} + ? WHERE id=?",
-                        (amount, self.prediction_id),
-                    )
-                    await db.commit()
-            except Exception as ex_ins:
-                print(f"[PredictionBetModal insert] {ex_ins}")
-                try:
-                    await add_coins(i.guild.id, i.user.id, amount)
-                except Exception:
-                    pass
-                return await _safe_followup(i, content="❌ Erreur, mise remboursée.")
-            await _safe_followup(
-                i,
-                content=(
-                    f"✅ Pari placé : **{amount:,} 🪙** sur **{self.choice.upper()}**.\n"
-                    f"_Tu seras payé si tu as raison, proportionnel à l'autre pool._"
-                ),
-            )
-        except Exception as ex:
-            print(f"[PredictionBetModal] {ex}")
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-
-class PredictionBetView(View):
-    """View persistante : bouton 'YES' / 'NO' pour parier."""
-
-    def __init__(self, prediction_id: int):
-        super().__init__(timeout=None)
-        self.prediction_id = prediction_id
-        yes = Button(
-            label="✅ Parier OUI",
-            style=discord.ButtonStyle.success,
-            custom_id=f"pred_bet_yes_{prediction_id}",
-        )
-        yes.callback = self._on_yes
-        no = Button(
-            label="❌ Parier NON",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"pred_bet_no_{prediction_id}",
-        )
-        no.callback = self._on_no
-        view_pools = Button(
-            label="📊 Pools actuels",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"pred_pools_{prediction_id}",
-        )
-        view_pools.callback = self._on_pools
-        self.add_item(yes)
-        self.add_item(no)
-        self.add_item(view_pools)
-
-    async def _on_yes(self, i: discord.Interaction):
-        try:
-            await i.response.send_modal(PredictionBetModal(self.prediction_id, "yes"))
-        except Exception as ex:
-            print(f"[PredictionBetView yes] {ex}")
-
-    async def _on_no(self, i: discord.Interaction):
-        try:
-            await i.response.send_modal(PredictionBetModal(self.prediction_id, "no"))
-        except Exception as ex:
-            print(f"[PredictionBetView no] {ex}")
-
-    async def _on_pools(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT title, total_yes_pool, total_no_pool, deadline, status FROM predictions WHERE id=?",
-                    (self.prediction_id,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row:
-                return await _safe_followup(i, content="⏱️ Prédiction inexistante.")
-            title, yp, np_, dl, status = row[0], int(row[1] or 0), int(row[2] or 0), row[3], row[4]
-            total = yp + np_
-            yes_pct = (yp / total * 100) if total else 0
-            no_pct = (np_ / total * 100) if total else 0
-            await _safe_followup(
-                i,
-                content=(
-                    f"**{title}**\n\n"
-                    f"✅ **OUI :** `{yp:,} 🪙` ({yes_pct:.1f}%)\n"
-                    f"❌ **NON :** `{np_:,} 🪙` ({no_pct:.1f}%)\n"
-                    f"📦 **Pool total :** `{total:,} 🪙`\n"
-                    f"_Status : {status}_"
-                ),
-            )
-        except Exception as ex:
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-
-async def _resolve_prediction(prediction_id: int, outcome: str, resolver_id: int) -> Optional[dict]:
-    """Résout une prédiction.
-
-    Phase 168.2 : le payout parimutuel original redistribuait le pool
-    des perdants aux gagnants — c'est un transfert P2P déguisé. Modifié
-    pour rembourser TOUS les bets sans redistribution. Le système reste
-    actif pour la mécanique de prédiction (qui a vu juste) mais sans
-    transfert d'argent entre joueurs.
-
-    outcome = 'yes', 'no', ou 'cancel'.
-    """
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT guild_id, status, total_yes_pool, total_no_pool, title FROM predictions WHERE id=?",
-                (prediction_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row or row[1] != "open":
-            return None
-        gid, _, yp, np_, title = int(row[0]), row[1], int(row[2] or 0), int(row[3] or 0), row[4]
-        total_pool = yp + np_
-
-        if outcome == "cancel":
-            # Refund tous les paris
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT user_id, amount FROM prediction_bets WHERE prediction_id=? AND paid_out=0",
-                    (prediction_id,),
-                ) as cur:
-                    bets = await cur.fetchall()
-            for uid, amt in bets:
-                try:
-                    await add_coins(gid, int(uid), int(amt))
-                except Exception:
-                    pass
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE prediction_bets SET paid_out=1 WHERE prediction_id=?",
-                    (prediction_id,),
-                )
-                await db.execute(
-                    "UPDATE predictions SET status='cancelled', outcome='cancel', "
-                    "resolved_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (prediction_id,),
-                )
-                await db.commit()
-            return {"gid": gid, "title": title, "outcome": "cancel", "winners": len(bets)}
-
-        # Phase 168.2 : Plus de redistribution parimutuel. Tous les bets
-        # sont simplement remboursés. Les "winners" sont juste loggés
-        # pour les stats / leaderboards mais ne reçoivent plus le pool
-        # des "losers" (= transfert P2P déguisé interdit).
-        winners_choice = outcome
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT user_id, amount, choice FROM prediction_bets "
-                "WHERE prediction_id=? AND paid_out=0",
-                (prediction_id,),
-            ) as cur:
-                all_bets = await cur.fetchall()
-
-        winners_count = 0
-        for uid, amt, choice in all_bets:
-            try:
-                # Refund pur — chaque user reçoit SA propre mise back
-                await add_coins(gid, int(uid), int(amt))
-            except Exception:
-                pass
-            if choice == winners_choice:
-                winners_count += 1
-
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE prediction_bets SET paid_out=1 WHERE prediction_id=?",
-                (prediction_id,),
-            )
-            await db.execute(
-                "UPDATE predictions SET status='resolved', outcome=?, "
-                "resolved_at=CURRENT_TIMESTAMP WHERE id=?",
-                (outcome, prediction_id),
-            )
-            await db.commit()
-        return {
-            "gid": gid, "title": title, "outcome": outcome,
-            "winners": winners_count, "pool": total_pool,
-        }
-    except Exception as ex:
-        print(f"[_resolve_prediction] {ex}")
-        return None
-
-
-class PredictionResolveView(View):
-    """View staff-only : ✅ Resolve YES / ❌ Resolve NO / 🚫 Cancel."""
-
-    def __init__(self, prediction_id: int):
-        super().__init__(timeout=None)
-        self.prediction_id = prediction_id
-        b_yes = Button(
-            label="✅ OUI gagne",
-            style=discord.ButtonStyle.success,
-            custom_id=f"pred_res_yes_{prediction_id}",
-        )
-        b_yes.callback = lambda i: self._resolve(i, "yes")
-        b_no = Button(
-            label="❌ NON gagne",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"pred_res_no_{prediction_id}",
-        )
-        b_no.callback = lambda i: self._resolve(i, "no")
-        b_cancel = Button(
-            label="🚫 Annuler (refund)",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"pred_res_cancel_{prediction_id}",
-        )
-        b_cancel.callback = lambda i: self._resolve(i, "cancel")
-        self.add_item(b_yes)
-        self.add_item(b_no)
-        self.add_item(b_cancel)
-
-    async def _resolve(self, i: discord.Interaction, outcome: str):
-        if not await _safe_defer(i):
-            return
-        try:
-            if not i.guild:
-                return await _safe_followup(i, content="❌ Serveur uniquement.")
-            # Owner ou perms manage_messages
-            is_staff = (i.user.id == i.guild.owner_id or i.user.id == SUPER_OWNER_ID)
-            if not is_staff:
-                try:
-                    perms = i.channel.permissions_for(i.user)
-                    is_staff = perms.manage_messages
-                except Exception:
-                    pass
-            if not is_staff:
-                return await _safe_followup(i, content="🔒 Staff uniquement.")
-            result = await _resolve_prediction(self.prediction_id, outcome, i.user.id)
-            if not result:
-                return await _safe_followup(i, content="⏱️ Prédiction déjà résolue ou inexistante.")
-            # Annoncer dans le hub
-            try:
-                c = await cfg(result["gid"])
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                guild = bot.get_guild(result["gid"])
-                hub_ch = guild.get_channel(hub_id) if guild and hub_id else None
-                if hub_ch:
-                    if outcome == "cancel":
-                        desc = f"🚫 **ANNULÉE.** Tous les paris ont été remboursés ({result['winners']} parieurs)."
-                        color = 0x95A5A6
-                    else:
-                        desc = (
-                            f"🎉 **Résolu :** {outcome.upper()} a gagné !\n"
-                            f"💰 Pool total : `{result['pool']:,} 🪙` distribué à `{result['winners']}` gagnants."
-                        )
-                        color = 0x2ECC71
-                    LIFETIME_RES = 24 * 3600
-                    res_msg = await hub_ch.send(
-                        embed=discord.Embed(
-                            title=f"🎲 Prédiction résolue : {result['title']}",
-                            description=desc,
-                            color=color,
-                            timestamp=datetime.now(timezone.utc),
-                        ),
-                        delete_after=LIFETIME_RES,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-                    try:
-                        await _register_for_cleanup(res_msg, LIFETIME_RES, 'pred_resolve')
-                    except Exception:
-                        pass
-            except Exception as ex:
-                print(f"[pred resolve announce] {ex}")
-            await _safe_followup(i, content=f"✅ Résolu : `{outcome}` — {result['winners']} payés.")
-        except Exception as ex:
-            print(f"[PredictionResolveView] {ex}")
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-
 
 
 # ─── FACTION WARS — Leaderboard saison auto ───────────────────────────────────
 
 
-
-
-
-
-
-
 # ─── COMPETITIONS SUB-HUB ────────────────────────────────────────────────────
 
 
-
-
-
-
 # ─── SLASH COMMANDS OWNER PHASE 51 ───────────────────────────────────────────
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -42643,156 +33529,7 @@ class PredictionResolveView(View):
 # ─── SHOUTOUTS ───────────────────────────────────────────────────────────────
 
 
-
-
-async def _count_shoutouts_received(guild_id: int, user_id: int,
-                                     days: Optional[int] = None) -> int:
-    try:
-        params = [guild_id, user_id]
-        sql = "SELECT COUNT(*) FROM shoutouts WHERE guild_id=? AND to_user_id=?"
-        if days:
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-            sql += " AND created_at>?"
-            params.append(cutoff)
-        async with get_db() as db:
-            async with db.execute(sql, params) as cur:
-                row = await cur.fetchone()
-        return int(row[0]) if row else 0
-    except Exception:
-        return 0
-
-
-
-
-
-
 # ─── MENTOR ELIGIBILITY HELPERS ──────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  Tâche B.1 — Appel à parrainage DANS UN SALON à l'arrivée (zéro DM membre)
-#  Quand un nouveau arrive, on poste un appel DISCRET dans le salon mentorat
-#  (ou accueil/hub) avec un bouton « Devenir son mentor ». La logique mentor
-#  existante (table mentorships + éligibilité) est réutilisée. Throttle strict :
-#  cooldown par guilde + skip si rafale d'arrivées (anti-spam). AUCUN DM.
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Cooldown en mémoire : guild_id -> timestamp du dernier appel posté.
-_mentor_call_last_post: dict[int, datetime] = {}
-# Fenêtre d'arrivées récentes par guilde (anti-rafale) : guild_id -> [timestamps]
-_mentor_call_recent_joins: dict[int, list] = {}
-MENTOR_CALL_COOLDOWN_S = 3600          # max 1 appel / heure / guilde
-MENTOR_CALL_BURST_WINDOW_S = 60        # fenêtre de détection de rafale
-MENTOR_CALL_BURST_THRESHOLD = 3        # ≥3 arrivées / 60s → on skip (rafale)
-
-
-
-
-class MentorVolunteerButton(
-    discord.ui.DynamicItem[Button],
-    template=r"mentor_volunteer:(?P<apprentice_id>\d+)",
-):
-    """Bouton PERSISTANT « Devenir son mentor » (DynamicItem → survit aux
-    reboots, aucun bouton mort). Capté par custom_id mentor_volunteer:<id>."""
-
-    def __init__(self, apprentice_id: int):
-        self.apprentice_id = apprentice_id
-        super().__init__(
-            Button(
-                label="🎓 Devenir son mentor",
-                style=discord.ButtonStyle.success,
-                custom_id=f"mentor_volunteer:{apprentice_id}",
-            )
-        )
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["apprentice_id"]))
-
-    async def callback(self, i: discord.Interaction):
-        pass  # bloc vidé (module détaché)
-
-
-
-
-
-
-# Auto-suppression de l'appel à parrainage (owner 2026-06-18) : comme l'accueil, il
-# disparaît pour garder le chat propre — MAIS plus longtemps que la bienvenue car il
-# attend qu'un ANCIEN se porte volontaire (20 s tueraient la feature). 3 min = fenêtre
-# correcte pour cliquer « Devenir son mentor », puis nettoyage. Constante = à ajuster.
-_MENTOR_CALL_AUTODELETE_SEC = 180
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  Tâche B.2 — Paliers de membres célébrés (100/250/500/1000…) DANS UN SALON
-#  Détecte le franchissement d'un cap de member_count et poste UNE annonce
-#  festive dans un salon chatty (allowed_mentions=none). Anti-doublon PERSISTANT
-#  (flag DB par palier) : ne re-célèbre jamais le même palier. FAIL-SAFE.
-# ═══════════════════════════════════════════════════════════════════════════
-
-MEMBER_MILESTONES = (50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000)
-
-
-async def _maybe_celebrate_member_milestone(guild: discord.Guild):
-    """Tâche B.2 : célèbre UNE fois chaque palier de membres atteint."""
-    try:
-        if guild is None:
-            return
-        count = guild.member_count or 0
-        if count <= 0:
-            return
-        # Plus haut palier atteint par le compte actuel.
-        reached = [m for m in MEMBER_MILESTONES if count >= m]
-        if not reached:
-            return
-        milestone = max(reached)
-
-        # Anti-doublon persistant ATOMIQUE : on RÉSERVE le palier via un INSERT
-        # OR IGNORE et on n'annonce QUE si la ligne a réellement été insérée
-        # (rowcount=1). Deux arrivées simultanées → une seule gagne le claim, donc
-        # une seule annonce. Idempotent : si l'annonce échoue, le palier reste
-        # marqué (on ne re-spammera jamais).
-        async with get_db() as db:
-            cur = await db.execute(
-                "INSERT OR IGNORE INTO member_milestones (guild_id, milestone) "
-                "VALUES (?, ?)",
-                (guild.id, milestone),
-            )
-            await db.commit()
-            if cur.rowcount != 1:
-                return  # palier déjà célébré (ou pris par une autre arrivée)
-
-        ch = await _find_event_recap_channel(guild)
-        if ch is None:
-            return
-        embed = discord.Embed(
-            title=f"🎉 {milestone:,} membres !",
-            description=(
-                f"On vient de franchir la barre des **{milestone:,} membres** "
-                f"sur **{guild.name}** ! Merci à toutes et à tous d'être là. "
-                f"En route vers le prochain palier ! 🥳"
-            ),
-            color=0xF1C40F,
-        )
-        await ch.send(
-            embed=embed,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
-    except Exception as ex:
-        print(f"[_maybe_celebrate_member_milestone] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -42804,34 +33541,10 @@ async def _maybe_celebrate_member_milestone(guild: discord.Guild):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def _release_ts(c: dict) -> int:
-    """Lit la date de sortie configurée (epoch s). 0 = désactivée. FAIL-SAFE."""
-    try:
-        return int(c.get('release_countdown_ts', 0) or 0)
-    except Exception:
-        return 0
-
-
-
-
-
-
-
-
-
-
 # ─── CONFESSION REPLIES ──────────────────────────────────────────────────────
 
 
-
-
-
-
 # ─── SOCIAL SUB-HUB ──────────────────────────────────────────────────────────
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -42844,114 +33557,7 @@ def _release_ts(c: dict) -> int:
 # ─── HEURES DORÉES (dimanche 18h-20h FR ×2 multiplier) ───────────────────────
 
 
-
-
-
-
-
-
 # ─── RECAP HEBDO DM (dimanche 21h FR) ────────────────────────────────────────
-
-
-def _current_week_key() -> str:
-    """Retourne 'YYYY-WW' pour la semaine actuelle."""
-    try:
-        from zoneinfo import ZoneInfo
-        dt = datetime.now(ZoneInfo("Europe/Paris"))
-    except Exception:
-        dt = datetime.now(timezone.utc)
-    iso_year, iso_week, _ = dt.isocalendar()
-    return f"{iso_year}-W{iso_week:02d}"
-
-
-async def _build_user_recap_dm(guild_id: int, user_id: int) -> Optional[discord.Embed]:
-    """Construit l'embed récap hebdo perso d'un user."""
-    try:
-        week_start = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-        # Messages
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT COALESCE(SUM(hits),0) FROM member_activity_daily WHERE guild_id=? AND user_id=? "
-                "AND last_ts>?",
-                (guild_id, user_id, week_start),
-            ) as cur:
-                msgs = int((await cur.fetchone() or [0])[0])
-        # Si vraiment 0 message, skip
-        if msgs == 0:
-            return None
-        # Quêtes
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT COUNT(*) FROM daily_quests WHERE guild_id=? AND user_id=? "
-                    "AND completed=1 AND date>=date('now', '-7 days')",
-                    (guild_id, user_id),
-                ) as cur:
-                    quests = int((await cur.fetchone() or [0])[0])
-        except Exception:
-            quests = 0
-        # Achievements unlocked this week
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT COUNT(*) FROM achievements_unlocked WHERE guild_id=? AND user_id=? "
-                    "AND unlocked_at>?",
-                    (guild_id, user_id, week_start),
-                ) as cur:
-                    ach = int((await cur.fetchone() or [0])[0])
-        except Exception:
-            ach = 0
-        # Coins gagnés (approximation = coins - bank)
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT coins, xp, level FROM economy WHERE guild_id=? AND user_id=?",
-                    (guild_id, user_id),
-                ) as cur:
-                    row = await cur.fetchone()
-            coins, xp, level = (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)) if row else (0, 0, 0)
-        except Exception:
-            coins, xp, level = 0, 0, 0
-        # Shoutouts reçus
-        try:
-            sh_received = await _count_shoutouts_received(guild_id, user_id, days=7)
-        except Exception:
-            sh_received = 0
-        # Events gagnés
-        try:
-            stats = await _get_user_stats41(guild_id, user_id)
-            events_won = int(stats.get('events_won', 0) or 0)
-        except Exception:
-            events_won = 0
-
-        guild = bot.get_guild(guild_id)
-        guild_name = guild.name if guild else "Serveur"
-
-        e = discord.Embed(
-            title=f"📊 Ta semaine sur {guild_name}",
-            description=(
-                f"Voici ce que tu as fait cette semaine :\n\n"
-                f"💬 **Messages :** `{msgs:,}`\n"
-                f"📜 **Quêtes complétées :** `{quests}`\n"
-                f"🏆 **Events gagnés (total) :** `{events_won}`\n"
-                f"🏅 **Hauts faits débloqués cette semaine :** `{ach}`\n"
-                f"💝 **Shoutouts reçus :** `{sh_received}`\n"
-                f"💰 **Solde actuel :** `{coins:,}` 🪙\n"
-                f"🎚️ **Level actuel :** `{level}`\n\n"
-                f"_Continue comme ça la semaine prochaine ! Le hub t'attend._"
-            ),
-            color=0x5865F2,
-            timestamp=datetime.now(timezone.utc),
-        )
-        e.set_footer(text="Recap hebdo · Désactivable via /notifs")
-        return e
-    except Exception as ex:
-        print(f"[_build_user_recap_dm] {ex}")
-        return None
-
-
-
-
 
 
 # ─── CONVERSATION STARTERS (anti-silence dans le hub) ────────────────────────
@@ -42975,14 +33581,6 @@ async def _build_user_recap_dm(guild_id: int, user_id: int) -> Optional[discord.
 # ─── HEALTH DASHBOARD (panel owner avec stats clés) ──────────────────────────
 
 
-
-
-
-
-
-
-
-
 # (ALERTES AUTO OWNER SUPPRIMÉES le 12/08/2026, à la demande du propriétaire.)
 #
 # C'est ce bloc qui lui envoyait « 🚨 Perte nette de membres — le serveur a perdu N
@@ -42998,7 +33596,6 @@ async def _build_user_recap_dm(guild_id: int, user_id: int) -> Optional[discord.
 # `_mark_alert_sent`, `owner_alerts_task` et son `before_loop`.
 
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 57 — LORE VIVANT : Choix narratifs + Classes RP + Crossover NPCs + Mémoires
@@ -43009,22 +33606,10 @@ async def _build_user_recap_dm(guild_id: int, user_id: int) -> Optional[discord.
 # ─── HELPERS LORE MEMORIES ───────────────────────────────────────────────────
 
 
-
-
-
-
 # ─── CROSSOVER NPC LINES (NPCs se citent entre eux) ──────────────────────────
 
 
-
-
-
-
 # ─── CLASSES RP ──────────────────────────────────────────────────────────────
-
-
-
-
 
 
 # HOTFIX Phase 65.1 : la slash /class (Phase 57) était en conflit avec class_group
@@ -43033,16 +33618,6 @@ async def _build_user_recap_dm(guild_id: int, user_id: int) -> Optional[discord.
 
 
 # ─── NARRATIVE CHOICES (votes collectifs 48h) ────────────────────────────────
-
-
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -43283,113 +33858,6 @@ async def _check_auto_slow_mode(msg):
 # ─── MEMBER JOURNEY (slash owner) ────────────────────────────────────────────
 
 
-# Phase 120 : retiré (debug inutilisé, ex-/admin_journey)
-@app_commands.describe(membre="Le membre à explorer")
-async def admin_journey_cmd(i: discord.Interaction, membre: discord.Member):
-    if not i.guild:
-        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
-        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
-    if not await _safe_defer(i):
-        return
-    try:
-        gid = i.guild.id
-        # Joined date
-        joined = membre.joined_at
-        days_in = (datetime.now(timezone.utc) - joined).days if joined else 0
-        # First message (D3 : member_activity_daily — borné par la rétention agrégat ;
-        # "première activité dans la fenêtre conservée" plutôt que all-time exact).
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT MIN(day) FROM member_activity_daily WHERE guild_id=? AND user_id=?",
-                (gid, membre.id),
-            ) as cur:
-                row = await cur.fetchone()
-        first_msg = row[0] if row and row[0] else "_Jamais_"
-        # Total messages (D3 : compteur LIFETIME via activity_tracking — jamais purgé,
-        # incrémenté à chaque message ; member_activity_daily ne couvre que la fenêtre récente).
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT COALESCE(total_messages,0) FROM activity_tracking WHERE guild_id=? AND user_id=?",
-                (gid, membre.id),
-            ) as cur:
-                total_msgs = int((await cur.fetchone() or [0])[0])
-        # Level + coins
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT level, xp, coins FROM economy WHERE guild_id=? AND user_id=?",
-                (gid, membre.id),
-            ) as cur:
-                row = await cur.fetchone()
-        level = int(row[0]) if row else 0
-        xp = int(row[1]) if row else 0
-        coins = int(row[2]) if row else 0
-        # Achievements count
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT COUNT(*) FROM achievements_unlocked WHERE guild_id=? AND user_id=?",
-                (gid, membre.id),
-            ) as cur:
-                ach_count = int((await cur.fetchone() or [0])[0])
-        #  ⚠️ « Classe RP » retirée le 19/08/2026 : le système de classes est
-        #  parti à la purge, mais la ligne qui le LISAIT était restée. Elle
-        #  levait `NameError: name 'cls' is not defined` À CHAQUE APPEL — la
-        #  commande entière rendait « ❌ Erreur » au lieu de la fiche membre.
-        # Titles
-        titles = await _get_user_titles(gid, membre.id)
-        # Ladder
-        ladder = await _get_ladder_rating(gid, membre.id)
-        # Shoutouts received
-        shouts = await _count_shoutouts_received(gid, membre.id)
-        # Toxicity score
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT score FROM user_toxicity_scores WHERE guild_id=? AND user_id=?",
-                (gid, membre.id),
-            ) as cur:
-                row = await cur.fetchone()
-        tox_score = int(row[0]) if row else 0
-        # Alt detection
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT confidence FROM alt_detection_log WHERE guild_id=? AND new_user_id=? "
-                "ORDER BY detected_at DESC LIMIT 1",
-                (gid, membre.id),
-            ) as cur:
-                row = await cur.fetchone()
-        alt_warning = f"⚠️ Alt suspect ({float(row[0]):.2f})" if row else "✅ Aucune alerte"
-
-        e = discord.Embed(
-            title=f"📜 Journey : {membre.display_name}",
-            description=(
-                f"**Compte créé :** <t:{int(membre.created_at.timestamp())}:R>\n"
-                f"**Rejoint serveur :** {joined.strftime('%Y-%m-%d') if joined else '?'} (`{days_in}` j)\n"
-                f"**1er message :** `{first_msg}`\n\n"
-                f"## 📊 Stats\n"
-                f"💬 Messages : `{total_msgs:,}`\n"
-                f"🎚️ Level : `{level}` · XP : `{xp:,}` · 🪙 : `{coins:,}`\n"
-                f"🏅 Achievements : `{ach_count}`\n"
-                f"💝 Shoutouts reçus : `{shouts}`\n\n"
-                f"## ⚔️ Profil\n"
-                f"**Titres :** `{len(titles)}` ({', '.join(t['title'][:30] for t in titles[:3])})\n"
-                f"**Ladder :** {_rating_division(ladder['rating'])} `{ladder['rating']}` "
-                f"(W:{ladder['wins']} L:{ladder['losses']})\n\n"
-                f"## 🚨 Sécurité\n"
-                f"**Toxicity score :** `{tox_score}`\n"
-                f"**Alt detection :** {alt_warning}"
-            ),
-            color=0x3498DB,
-            timestamp=datetime.now(timezone.utc),
-        )
-        if membre.display_avatar:
-            e.set_thumbnail(url=membre.display_avatar.url)
-        e.set_footer(text=f"User ID : {membre.id} · Phase 64 Member Journey")
-        await _safe_followup(i, embed=e)
-    except Exception as ex:
-        print(f"[admin_journey_cmd] {ex}")
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 63 — ORIGINALITÉS : Time Capsule + Hall of Fame + Whispers + Anniversaire + Easter eggs
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -43398,111 +33866,16 @@ async def admin_journey_cmd(i: discord.Interaction, membre: discord.Member):
 # ─── TIME CAPSULE (messages futurs scellés) ──────────────────────────────────
 
 
-
-
-
-
-
-
 # ─── HALL OF FAME ────────────────────────────────────────────────────────────
-
-
-
-
 
 
 # ─── WHISPERS NPC (1x/semaine random NPC chuchote un teaser) ─────────────────
 
 
-NPC_WHISPERS = [
-    "_Le mage que vous cherchez se cache là où la rivière fait son coude._",
-    "_J'ai vu une ombre traverser le ciel cette nuit. Quelqu'un d'autre l'a vue ?_",
-    "_Le trésor n'est jamais là où on pense. Cherchez là où personne ne regarde._",
-    "_Trois noms doivent tomber avant que le quatrième se révèle._",
-    "_Si vous entendez un chuchotement la nuit, n'écoutez pas. Mais souvenez-vous._",
-    "_Le seigneur ne dort plus. C'est un fait. Mais qui l'a réveillé ?_",
-    "_Une porte s'ouvre quelque part. Trouvez-la avant qu'elle se referme._",
-    "_Le passé reviendra. Pas tout entier. Juste la partie qui fait mal._",
-]
-
-
-
-
-
-
 # ─── ANNIVERSAIRE SERVEUR ────────────────────────────────────────────────────
 
 
-
-
-
-
 # ─── EASTER EGGS (mots magiques cachés) ──────────────────────────────────────
-
-
-EASTER_EGGS = {
-    "konami":      "_*la guilde entend un son ancien...* Code activé. +100 🪙 pour ta curiosité._",
-    "open sesame": "_*la porte secrète s'ouvre légèrement.* Tu as trouvé un easter egg ! +100 🪙._",
-    "abracadabra": "_*la magie scintille.* Lyra te sourit de loin. +100 🪙._",
-    "il était une fois": "_*le conte commence.* Tu connais le début. Continueras-tu l'histoire ? +50 🪙._",
-    "il etait une fois": "_*le conte commence.* Tu connais le début. Continueras-tu l'histoire ? +50 🪙._",
-}
-
-
-async def _check_easter_eggs(msg) -> None:
-    """Hook on_message : détecte les mots magiques et récompense."""
-    if not msg.guild or msg.author.bot:
-        return
-    try:
-        content_lower = (msg.content or "").lower().strip()
-        for trigger, response in EASTER_EGGS.items():
-            if trigger in content_lower:
-                # Anti-spam : 1 fois par user par easter egg par jour
-                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT 1 FROM easter_eggs_log WHERE guild_id=? AND user_id=? "
-                        "AND trigger_word=? AND DATE(triggered_at)=?",
-                        (msg.guild.id, msg.author.id, trigger, today),
-                    ) as cur:
-                        if await cur.fetchone():
-                            return  # Déjà fait aujourd'hui
-                # Log + reward
-                async with get_db() as db:
-                    await db.execute(
-                        "INSERT INTO easter_eggs_log(guild_id, user_id, trigger_word) VALUES(?,?,?)",
-                        (msg.guild.id, msg.author.id, trigger),
-                    )
-                    await db.commit()
-                # Reward
-                reward = 100 if trigger in ("konami", "open sesame", "abracadabra") else 50
-                try:
-                    await add_coins(msg.guild.id, msg.author.id, reward)
-                except Exception:
-                    pass
-                # Réponse mystérieuse en réponse au message
-                try:
-                    LIFETIME = 60
-                    em = discord.Embed(
-                        description=response,
-                        color=0x9B59B6,
-                    )
-                    em.set_footer(text="🥚 Easter egg trouvé")
-                    reply = await msg.reply(
-                        embed=em,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME,
-                    )
-                    try:
-                        await _register_for_cleanup(reply, LIFETIME, 'easter_egg')
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-                print(f"[EASTER EGG] guild={msg.guild.id} user={msg.author.id} trigger={trigger}")
-                return  # 1 easter egg max par message
-    except Exception as ex:
-        print(f"[_check_easter_eggs] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -43513,112 +33886,10 @@ async def _check_easter_eggs(msg) -> None:
 # ─── VOICE ACTIVITY TRACKING (via on_voice_state_update) ─────────────────────
 
 
-_voice_session_starts: dict = {}  # (guild_id, user_id) → datetime du join
-
-
-
-
-
-
-
-
-# Phase 235.2 (FIX VOCAUX TEMPORAIRES) : ceci était un 2e « @bot.event
-# on_voice_state_update » qui ÉCRASAIT le handler principal (≈ ligne 54814 :
-# activité vocale + VOCAUX TEMPORAIRES « Voc Build »). discord.py ne garde qu'UN
-# seul @bot.event par événement (le dernier défini gagne) → le join-to-create ne
-# se déclenchait JAMAIS. On enregistre donc le tracking de durée comme LISTENER
-# ADDITIF (les listeners se cumulent, ils n'écrasent rien) + renommage pour ne
-# plus masquer le handler principal.
-async def _voice_duration_track_listener(member, before, after):
-    try:
-        pass  # bloc vidé (module détaché)
-    except Exception as ex:
-        print(f"[_voice_duration_track_listener] {ex}")
-
-
-bot.add_listener(_voice_duration_track_listener, "on_voice_state_update")
-
-
-
-
 # ─── VOCAUX THÉMATIQUES (temporaires) ────────────────────────────────────────
 
 
-VOICE_THEMES = [
-    {"id": "calm",    "label": "🌙 Discussion calme",    "user_limit": 6},
-    {"id": "gaming",  "label": "🎮 Gaming Hype",          "user_limit": 10},
-    {"id": "study",   "label": "📚 Étude/Concentration",  "user_limit": 8},
-    {"id": "chill",   "label": "☕ Chill",                "user_limit": 8},
-    {"id": "events",  "label": "🎉 Événement spécial",    "user_limit": 20},
-]
-
-
-
-
-@tasks.loop(minutes=5)
-async def thematic_voice_cleanup_task():
-    """Supprime les vocaux thématiques vides depuis >5 min."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id, guild_id, channel_id FROM thematic_voices WHERE closed_at IS NULL",
-            ) as cur:
-                rows = await cur.fetchall()
-        for tv_id, gid, ch_id in rows:
-            try:
-                guild = bot.get_guild(int(gid))
-                ch = guild.get_channel(int(ch_id)) if guild else None
-                if not ch:
-                    # Channel déjà supprimé manuellement
-                    async with get_db() as db:
-                        await db.execute(
-                            "UPDATE thematic_voices SET closed_at=CURRENT_TIMESTAMP WHERE id=?",
-                            (tv_id,),
-                        )
-                        await db.commit()
-                    continue
-                # Si vide → delete
-                if len(ch.members) == 0:
-                    try:
-                        await ch.delete(reason="Vocal thématique vide depuis >5 min")
-                    except Exception:
-                        pass
-                    async with get_db() as db:
-                        await db.execute(
-                            "UPDATE thematic_voices SET closed_at=CURRENT_TIMESTAMP WHERE id=?",
-                            (tv_id,),
-                        )
-                        await db.commit()
-            except Exception as ex:
-                print(f"[thematic voice cleanup id={tv_id}] {ex}")
-    except Exception as ex:
-        print(f"[thematic_voice_cleanup_task] {ex}")
-
-
-@thematic_voice_cleanup_task.before_loop
-async def _thematic_voice_cleanup_wait():
-    await bot.wait_until_ready()
-
-
 # ─── SAISONS IRL (auto-detect dates) ─────────────────────────────────────────
-
-
-IRL_SEASONS = [
-    {"id": "halloween", "name": "🎃 Halloween", "start": (10, 25), "end": (11, 5),
-     "color": 0xFF8C00, "intro": "Les ombres s'allongent. Quelque chose se cache dans les recoins du serveur..."},
-    {"id": "christmas", "name": "🎄 Noël",      "start": (12, 15), "end": (12, 31),
-     "color": 0x16A085, "intro": "La guilde s'illumine. Le Père Hiver passe par ici."},
-    {"id": "summer",    "name": "🏖️ Été",        "start": (7, 1),   "end": (8, 31),
-     "color": 0xF1C40F, "intro": "Le soleil tape. Tout le monde ralentit. Multiplicateurs vacances activés."},
-    {"id": "newyear",   "name": "🎆 Nouvel An",  "start": (12, 31), "end": (1, 2),
-     "color": 0xFFD700, "intro": "Une nouvelle année commence. Que vos résolutions tiennent."},
-]
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -43626,72 +33897,7 @@ IRL_SEASONS = [
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-
-
-
-
-
-
 # ─── CALENDRIER DE L'AVENT (30 jours, claim quotidien) ───────────────────────
-
-
-class AdventClaimView(View):
-    """View persistante : bouton pour claim le jour actuel."""
-
-    def __init__(self):
-        super().__init__(timeout=None)
-        b = Button(
-            label="🎁 Claim le cadeau du jour",
-            style=discord.ButtonStyle.primary,
-            custom_id="advent_claim",
-        )
-        b.callback = self._claim
-        self.add_item(b)
-
-    async def _claim(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            if not i.guild:
-                return await _safe_followup(i, content="❌ Serveur uniquement.")
-            try:
-                from zoneinfo import ZoneInfo
-                day = datetime.now(ZoneInfo("Europe/Paris")).day
-            except Exception:
-                day = datetime.now(timezone.utc).day
-            # Reward random selon jour (plus tu avances, plus c'est gros)
-            base = 50 + day * 10
-            reward = base + random.randint(0, base // 2)
-            # CLAIM ATOMIQUE (Phase 251.6, anti double-clic) : on INSÈRE la ligne du
-            # jour UNIQUEMENT si elle n'existe pas, et on ne paie QUE si l'insert a
-            # gagné (rowcount=1). SQLite sérialise les écritures → 2 clics rapprochés
-            # ne donnent JAMAIS 2 récompenses. Plus de SELECT-puis-INSERT racy.
-            async with get_db() as db:
-                cur = await db.execute(
-                    "INSERT INTO advent_calendar(guild_id, day, user_id, reward_coins) "
-                    "SELECT ?, ?, ?, ? WHERE NOT EXISTS ("
-                    "SELECT 1 FROM advent_calendar WHERE guild_id=? AND day=? AND user_id=?)",
-                    (i.guild.id, day, i.user.id, reward,
-                     i.guild.id, day, i.user.id),
-                )
-                await db.commit()
-            if getattr(cur, "rowcount", 0) != 1:
-                return await _safe_followup(i, content="⏱️ Tu as déjà claim aujourd'hui. Reviens demain !")
-            try:
-                await add_coins(i.guild.id, i.user.id, reward)
-            except Exception:
-                pass
-            await _safe_followup(
-                i,
-                content=(
-                    f"🎁 **Jour {day} claim !** +`{reward}` 🪙\n"
-                    f"_Reviens demain pour le jour suivant._"
-                ),
-            )
-        except Exception as ex:
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -43702,330 +33908,10 @@ class AdventClaimView(View):
 # ─── HEIST EVENT (10 places, rôles asymétriques, payout proportionnel) ───────
 
 
-HEIST_ROLES = [
-    {"id": "cerveau",     "label": "🧠 Cerveau",      "desc": "Planifie le coup. +25% du payout.",     "share": 1.25},
-    {"id": "hacker",      "label": "💻 Hacker",        "desc": "Désactive l'alarme. +15%.",             "share": 1.15},
-    {"id": "conducteur",  "label": "🚗 Conducteur",    "desc": "L'évasion. +10%.",                       "share": 1.10},
-    {"id": "mule",        "label": "🎒 Mule",          "desc": "Porte le butin. +5%.",                  "share": 1.05},
-    {"id": "garde",       "label": "🛡️ Garde",         "desc": "Couvre l'équipe. +5%.",                 "share": 1.05},
-]
-
-
-# Phase 101 AMPLIFY : Heist targets — 3 tiers risque/reward différents
-HEIST_TARGETS = [
-    {
-        "id": "small",
-        "name": "Banque locale",
-        "emoji": "🏪",
-        "stake": 50,
-        "payout_mult": 2.0,
-        "base_success": 0.50,
-        "per_player_bonus": 0.10,
-        "description": "Petit coup, faible risque · Mise 50 🪙 · Pot × 2",
-    },
-    {
-        "id": "medium",
-        "name": "Banque centrale",
-        "emoji": "🏦",
-        "stake": 100,
-        "payout_mult": 3.0,
-        "base_success": 0.40,
-        "per_player_bonus": 0.08,
-        "description": "Coup moyen, risque modéré · Mise 100 🪙 · Pot × 3",
-    },
-    {
-        "id": "big",
-        "name": "Coffre national",
-        "emoji": "🏛️",
-        "stake": 200,
-        "payout_mult": 5.0,
-        "base_success": 0.30,
-        "per_player_bonus": 0.06,
-        "description": "Le gros coup, haut risque · Mise 200 🪙 · Pot × 5",
-    },
-]
-
-
-def _get_heist_target(target_id: str) -> dict:
-    """Retourne le target spec par id, fallback small."""
-    for t in HEIST_TARGETS:
-        if t['id'] == target_id:
-            return t
-    return HEIST_TARGETS[0]
-
-
-# Cache mémoire : heist_id → target_id. Source de vérité = colonne heists.target_id (DB).
-# Le cache n'est qu'un raccourci ; après reboot il est vide → _heist_target_id relit la DB.
-_heist_targets: dict = {}
-
-
-async def _heist_target_id(hid: int) -> str:
-    """Tier (small/medium/big) d'un braquage, FAIL-SAFE.
-
-    Lit le cache mémoire en priorité ; sinon relit la colonne persistée heists.target_id
-    (survit aux reboots, cf. Phase 101 FIX). Défaut 'small' si introuvable/erreur.
-    """
-    cached = _heist_targets.get(hid)
-    if cached:
-        return cached
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT target_id FROM heists WHERE id=?", (hid,),
-            ) as cur:
-                row = await cur.fetchone()
-        tid = (row[0] if row and row[0] else None) or 'small'
-        _heist_targets[hid] = tid  # réamorce le cache
-        return tid
-    except Exception:
-        return 'small'
-
-
-class HeistJoinView(View):
-    """View persistante : Select pour choisir son rôle + bouton lancer."""
-
-    def __init__(self, heist_id: int):
-        super().__init__(timeout=None)
-        self.hid = heist_id
-        options = [
-            discord.SelectOption(
-                label=r["label"][:100], value=r["id"], description=r["desc"][:100],
-            ) for r in HEIST_ROLES
-        ]
-        select = Select(
-            placeholder="Choisis ton rôle pour le braquage…",
-            options=options,
-            custom_id=f"heist_role_{heist_id}",
-        )
-        select.callback = self._on_role
-        self.add_item(select)
-        b_launch = Button(
-            label="🚨 Lancer le braquage maintenant",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"heist_launch_{heist_id}",
-        )
-        b_launch.callback = self._launch
-        self.add_item(b_launch)
-
-    async def _on_role(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT status FROM heists WHERE id=?", (self.hid,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row or row[0] != 'recruiting':
-                return await _safe_followup(i, content="⏱️ Braquage déjà lancé / inexistant.")
-            role_id = i.data["values"][0]
-            # Phase 101 : stake dépend du target tier (relu en DB, survit aux reboots)
-            target_id = await _heist_target_id(self.hid)
-            target = _get_heist_target(target_id)
-            stake = int(target['stake'])
-            # TASK A5 : gel compte compromis → participation refusée (mise = sortie d'argent).
-            if await is_account_frozen(i.guild.id, i.user.id):
-                return await _safe_followup(i, content=FROZEN_ACCOUNT_MSG)
-            try:
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
-                        (i.guild.id, i.user.id),
-                    ) as cur:
-                        b_row = await cur.fetchone()
-                bal = int(b_row[0]) if b_row else 0
-            except Exception:
-                bal = 0
-            if bal < stake:
-                return await _safe_followup(i, content=f"❌ Solde min : {stake} 🪙 pour participer.")
-            # FIX audit (atomicité éco) : débit CONDITIONNEL d'abord (réserve la mise sans le
-            # plancher MAX(0,…) d'add_coins), puis INSERT OR IGNORE (PK heist_id,user_id) ;
-            # si le joueur avait déjà rejoint (course/double-clic), on REMBOURSE la mise.
-            # Avant : SELECT anti-dup non atomique + débit AVANT l'insert → double-clic =
-            # débité 2× mais inscrit/crédité 1× (mise perdue). Cf. claim atomique _launch.
-            async with get_db() as db:
-                _deb = await db.execute(
-                    "UPDATE economy SET coins = coins - ? WHERE guild_id=? AND user_id=? AND coins >= ?",
-                    (stake, i.guild.id, i.user.id, stake),
-                )
-                await db.commit()
-            if (getattr(_deb, "rowcount", 0) or 0) != 1:
-                return await _safe_followup(i, content=f"❌ Solde min : {stake} 🪙 pour participer.")
-            async with get_db() as db:
-                _ins = await db.execute(
-                    "INSERT OR IGNORE INTO heist_participants(heist_id, user_id, role) VALUES(?,?,?)",
-                    (self.hid, i.user.id, role_id),
-                )
-                await db.commit()
-            if (getattr(_ins, "rowcount", 0) or 0) != 1:
-                # Déjà inscrit (course) → on rend la mise débitée, aucune double-participation.
-                try:
-                    await add_coins(i.guild.id, i.user.id, stake)
-                except Exception:
-                    pass
-                return await _safe_followup(i, content="⏱️ Tu participes déjà.")
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE heists SET pool_total = pool_total + ? WHERE id=?",
-                    (stake, self.hid),
-                )
-                await db.commit()
-            await _safe_followup(
-                i,
-                content=f"✅ Tu rejoins le braquage en tant que `{role_id}` ! Mise : {stake} 🪙.",
-            )
-        except Exception as ex:
-            print(f"[HeistJoinView role] {ex}")
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-    async def _launch(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            # FIX sécu (claim atomique anti double-payout) : bascule recruiting->resolving
-            # de façon ATOMIQUE. Seul le 1er clic gagne le claim (rowcount==1) ; les clics
-            # concurrents voient rowcount=0 et abandonnent AVANT toute distribution de pièces
-            # (sinon le pot était versé 2×/N× à toute l'équipe). Cf. pattern Phase 250.
-            async with get_db() as db:
-                claim = await db.execute(
-                    "UPDATE heists SET status='resolving' WHERE id=? AND status='recruiting'",
-                    (self.hid,),
-                )
-                await db.commit()
-                if (claim.rowcount or 0) != 1:
-                    return await _safe_followup(i, content="⏱️ Déjà lancé / inexistant.")
-                async with db.execute(
-                    "SELECT pool_total, channel_id FROM heists WHERE id=?",
-                    (self.hid,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row:
-                return await _safe_followup(i, content="⏱️ Inexistant.")
-            pool, channel_id = int(row[0]), int(row[1])
-            # Au moins 3 participants
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT user_id, role FROM heist_participants WHERE heist_id=?",
-                    (self.hid,),
-                ) as cur:
-                    parts = await cur.fetchall()
-            if len(parts) < 3:
-                # Pas assez de monde : on REND le claim (resolving -> recruiting) pour
-                # que le braquage reste lançable quand d'autres rejoignent. Sinon le
-                # claim atomique l'aurait verrouillé à vie.
-                try:
-                    async with get_db() as db:
-                        await db.execute(
-                            "UPDATE heists SET status='recruiting' WHERE id=? AND status='resolving'",
-                            (self.hid,),
-                        )
-                        await db.commit()
-                except Exception:
-                    pass
-                return await _safe_followup(i, content=f"❌ Min 3 participants ({len(parts)} actuels).")
-            # Phase 101 : success rate + payout selon target tier (relu en DB, survit aux reboots)
-            target_id_l = await _heist_target_id(self.hid)
-            target_l = _get_heist_target(target_id_l)
-            success_rate = min(
-                0.90,
-                float(target_l['base_success']) + float(target_l['per_player_bonus']) * len(parts),
-            )
-            success = random.random() < success_rate
-            # Pot = pool × payout_mult si success, sinon 0
-            total_payout = int(pool * float(target_l['payout_mult'])) if success else 0
-            shares_total = 0.0
-            role_map = {r["id"]: r for r in HEIST_ROLES}
-            for uid, role_id in parts:
-                role = role_map.get(role_id, {"share": 1.0})
-                shares_total += float(role["share"])
-            # Distribute proportionnellement
-            payouts = []
-            for uid, role_id in parts:
-                role = role_map.get(role_id, {"share": 1.0})
-                user_share = float(role["share"]) / shares_total
-                user_payout = int(total_payout * user_share) if success else 0
-                payouts.append((int(uid), role_id, user_payout))
-                if user_payout > 0:
-                    try:
-                        await add_coins(i.guild.id, int(uid), user_payout)
-                    except Exception:
-                        pass
-            async with get_db() as db:
-                for uid, role_id, payout in payouts:
-                    await db.execute(
-                        "UPDATE heist_participants SET payout=? WHERE heist_id=? AND user_id=?",
-                        (payout, self.hid, uid),
-                    )
-                await db.execute(
-                    "UPDATE heists SET status=?, resolved_at=CURRENT_TIMESTAMP WHERE id=?",
-                    ('success' if success else 'failed', self.hid),
-                )
-                await db.commit()
-            # Announce
-            guild = i.guild
-            ch = guild.get_channel(channel_id) if guild else None
-            if ch:
-                lines = []
-                for uid, role_id, payout in payouts:
-                    m = guild.get_member(uid)
-                    mname = m.display_name if m else f"User {uid}"
-                    role_lbl = role_map.get(role_id, {}).get("label", role_id)
-                    lines.append(f"{role_lbl} — **{mname}** : `{payout:,}` 🪙")
-                LIFETIME = 12 * 3600
-                if success:
-                    title = f"💰 BRAQUAGE RÉUSSI !"
-                    desc = (
-                        f"_L'équipe s'enfuit avec **{total_payout:,} 🪙** du coffre de la banque._\n\n"
-                        f"**Taux de réussite :** `{int(success_rate*100)}%` ({len(parts)} participants)\n\n"
-                        f"**Partage du butin :**\n" + "\n".join(lines)
-                    )
-                    color = 0x2ECC71
-                else:
-                    title = f"🚨 BRAQUAGE RATÉ !"
-                    desc = (
-                        f"_La police a coincé l'équipe avant l'évasion. **Tout est perdu.**_\n\n"
-                        f"**Mises perdues :** `{pool:,} 🪙`\n"
-                        f"**Taux échec :** `{int((1-success_rate)*100)}%`\n\n"
-                        f"_Bonne chance la prochaine fois._"
-                    )
-                    color = 0xE74C3C
-                e = discord.Embed(title=title, description=desc, color=color,
-                                  timestamp=datetime.now(timezone.utc))
-                e.set_footer(text=f"Heist #{self.hid}")
-                try:
-                    msg = await ch.send(
-                        embed=e,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME,
-                    )
-                    await _register_for_cleanup(msg, LIFETIME, 'heist_result')
-                except Exception:
-                    pass
-            await _safe_followup(i, content=f"🚨 Braquage résolu — {'SUCCESS' if success else 'FAILED'}.")
-        except Exception as ex:
-            print(f"[HeistJoinView launch] {ex}")
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-
-
-
 # ─── BANQUE AVEC INTÉRÊTS ───────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-# Phase 119 : enregistrer /bank après toutes ses subcommands
-
-
 # ─── LOOTS UNIQUES (drop random pendant events) ──────────────────────────────
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -44036,162 +33922,7 @@ class HeistJoinView(View):
 # ─── LADDER ELO ──────────────────────────────────────────────────────────────
 
 
-
-
-
-
-async def _get_ladder_rating(guild_id: int, user_id: int) -> dict:
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT rating, wins, losses FROM ladder_ratings WHERE guild_id=? AND user_id=?",
-                (guild_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            return {"rating": 1000, "wins": 0, "losses": 0}
-        return {"rating": int(row[0]), "wins": int(row[1]), "losses": int(row[2])}
-    except Exception:
-        return {"rating": 1000, "wins": 0, "losses": 0}
-
-
-
-
-def _rating_division(rating: int) -> str:
-    if rating >= 1800:
-        return "💎 Diamant"
-    if rating >= 1500:
-        return "🥇 Or"
-    if rating >= 1200:
-        return "🥈 Argent"
-    if rating >= 900:
-        return "🥉 Bronze"
-    return "⚪ Non classé"
-
-
 # ─── DUEL 1V1 ────────────────────────────────────────────────────────────────
-
-
-class DuelAcceptView(View):
-    """View persistante : challenged peut accepter ou refuser le duel."""
-
-    def __init__(self, duel_id: int):
-        super().__init__(timeout=None)
-        self.did = duel_id
-        b_a = Button(
-            label="✅ Accepter le duel",
-            style=discord.ButtonStyle.success,
-            custom_id=f"duel_accept_{duel_id}",
-        )
-        b_a.callback = self._accept
-        b_r = Button(
-            label="❌ Refuser",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"duel_refuse_{duel_id}",
-        )
-        b_r.callback = self._refuse
-        self.add_item(b_a)
-        self.add_item(b_r)
-
-    async def _accept(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT challenger_id, challenged_id, stake_amount, status FROM pvp_duels WHERE id=?",
-                    (self.did,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row or row[3] != 'pending':
-                return await _safe_followup(i, content="⏱️ Duel inexistant ou déjà traité.")
-            ch_id, cd_id, stake = int(row[0]), int(row[1]), int(row[2])
-            if i.user.id != cd_id:
-                return await _safe_followup(i, content="🔒 Ce duel n'est pas pour toi.")
-            # A5 — GEL SÉCURITÉ : si l'un des deux comptes est gelé (compromis), on
-            # n'engage PAS le duel. Sinon le compte gelé ne perd rien (débit bloqué)
-            # mais la mise de l'adversaire non-gelé serait convertie en payout =
-            # extraction de valeur. Annulation propre.
-            try:
-                if await is_account_frozen(i.guild.id, ch_id) or await is_account_frozen(i.guild.id, cd_id):
-                    async with get_db() as db:
-                        await db.execute("UPDATE pvp_duels SET status='cancelled' WHERE id=?", (self.did,))
-                        await db.commit()
-                    return await _safe_followup(i, content=FROZEN_ACCOUNT_MSG)
-            except Exception:
-                pass
-            # Vérifier que les 2 ont assez de coins
-            try:
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT user_id, coins FROM economy WHERE guild_id=? AND user_id IN (?,?)",
-                        (i.guild.id, ch_id, cd_id),
-                    ) as cur:
-                        bal = {int(r[0]): int(r[1] or 0) for r in await cur.fetchall()}
-            except Exception:
-                bal = {}
-            if bal.get(ch_id, 0) < stake or bal.get(cd_id, 0) < stake:
-                async with get_db() as db:
-                    await db.execute(
-                        "UPDATE pvp_duels SET status='cancelled' WHERE id=?",
-                        (self.did,),
-                    )
-                    await db.commit()
-                return await _safe_followup(i, content="❌ Un des deux n'a plus assez de coins. Duel annulé.")
-            # FIX sécu (claim atomique anti double-débit) : bascule pending->active AVANT
-            # de débiter. Un 2e clic « Accepter » concurrent voit rowcount=0 et n'enlève
-            # pas une mise supplémentaire aux joueurs (sinon double prélèvement perdu).
-            async with get_db() as db:
-                _claim = await db.execute(
-                    "UPDATE pvp_duels SET status='active' WHERE id=? AND status='pending'",
-                    (self.did,),
-                )
-                await db.commit()
-                if (_claim.rowcount or 0) != 1:
-                    return await _safe_followup(i, content="⏱️ Duel déjà traité.")
-            # Débiter les 2
-            try:
-                await add_coins(i.guild.id, ch_id, -stake)
-                await add_coins(i.guild.id, cd_id, -stake)
-            except Exception:
-                pass
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE pvp_duels SET status='active' WHERE id=?",
-                    (self.did,),
-                )
-                await db.commit()
-            await _safe_followup(
-                i,
-                content=(
-                    f"⚔️ **Duel accepté !** Les {stake} 🪙 sont mis en jeu de chaque côté.\n\n"
-                    f"_Les 2 joueurs jouent leur match (irl, dans le jeu Roblox, etc.). "
-                    f"Le perdant doit reporter via `/duel_report duel_id:{self.did} winner:@gagnant`._"
-                ),
-            )
-        except Exception as ex:
-            print(f"[DuelAcceptView accept] {ex}")
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-    async def _refuse(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT challenged_id, status FROM pvp_duels WHERE id=?", (self.did,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row or int(row[0]) != i.user.id or row[1] != 'pending':
-                return await _safe_followup(i, content="🔒 Pas pour toi ou déjà traité.")
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE pvp_duels SET status='refused' WHERE id=?", (self.did,),
-                )
-                await db.commit()
-            await _safe_followup(i, content="❌ Duel refusé.")
-        except Exception as ex:
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 # HOTFIX Phase 65.1 : la slash /duel (Phase 59) était en conflit avec /duel existant
@@ -44199,322 +33930,15 @@ class DuelAcceptView(View):
 # avec UserSelect dans le sub-hub Outils (Phase 65). Logique préservée.
 
 
-
-
-
-
 # ─── TITRES PERMANENTS ───────────────────────────────────────────────────────
-
-
-
-
-async def _get_user_titles(guild_id: int, user_id: int) -> list:
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id, title, equipped FROM user_titles WHERE guild_id=? AND user_id=? "
-                "ORDER BY awarded_at DESC",
-                (guild_id, user_id),
-            ) as cur:
-                rows = await cur.fetchall()
-        return [{"id": int(r[0]), "title": r[1], "equipped": bool(r[2])} for r in rows]
-    except Exception:
-        return []
 
 
 # ─── TOURNAMENTS (8 places, single-elim simple) ──────────────────────────────
 
 
-class TournamentJoinView(View):
-    """View persistante : Rejoindre / Quitter un tournament."""
-
-    def __init__(self, tournament_id: int):
-        super().__init__(timeout=None)
-        self.tid = tournament_id
-        b_j = Button(
-            label="🏆 Rejoindre",
-            style=discord.ButtonStyle.success,
-            custom_id=f"tourn_join_{tournament_id}",
-        )
-        b_j.callback = self._join
-        b_l = Button(
-            label="👋 Quitter",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"tourn_leave_{tournament_id}",
-        )
-        b_l.callback = self._leave
-        self.add_item(b_j)
-        self.add_item(b_l)
-
-    async def _join(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT max_players, status FROM tournaments WHERE id=?",
-                    (self.tid,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row or row[1] != 'recruiting':
-                return await _safe_followup(i, content="⏱️ Tournoi fermé / inexistant.")
-            max_p = int(row[0])
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT COUNT(*) FROM tournament_participants WHERE tournament_id=?",
-                    (self.tid,),
-                ) as cur:
-                    count = int((await cur.fetchone() or [0])[0])
-            if count >= max_p:
-                return await _safe_followup(i, content=f"❌ Plein ({count}/{max_p}).")
-            try:
-                async with get_db() as db:
-                    await db.execute(
-                        "INSERT INTO tournament_participants(tournament_id, user_id) VALUES(?,?) "
-                        "ON CONFLICT(tournament_id, user_id) DO NOTHING",
-                        (self.tid, i.user.id),
-                    )
-                    await db.commit()
-            except Exception:
-                pass
-            await _safe_followup(i, content=f"✅ Tu as rejoint le tournoi #{self.tid}.")
-        except Exception as ex:
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-    async def _leave(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            async with get_db() as db:
-                await db.execute(
-                    "DELETE FROM tournament_participants WHERE tournament_id=? AND user_id=?",
-                    (self.tid, i.user.id),
-                )
-                await db.commit()
-            await _safe_followup(i, content="👋 Tu as quitté le tournoi.")
-        except Exception as ex:
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 58 — PONT ROBLOX RÉEL : Update Voting + Achievements + Game Stats
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-class UpdateVoteView(View):
-    """View persistante : boutons pour voter une option d'update."""
-
-    def __init__(self, update_vote_id: int, options: list):
-        super().__init__(timeout=None)
-        self.uv_id = update_vote_id
-        for opt in options[:5]:
-            b = Button(
-                label=opt.get("label", "?")[:80],
-                style=discord.ButtonStyle.primary,
-                custom_id=f"update_vote_{update_vote_id}_{opt['id']}",
-            )
-            b.callback = self._make_cb(opt["id"])
-            self.add_item(b)
-        view_btn = Button(
-            label="📊 Voir résultats",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"update_vote_view_{update_vote_id}",
-        )
-        view_btn.callback = self._view_results
-        self.add_item(view_btn)
-
-    def _make_cb(self, option_id: str):
-        async def _cb(i: discord.Interaction):
-            if not await _safe_defer(i):
-                return
-            try:
-                async with get_db() as db:
-                    await db.execute(
-                        "INSERT INTO update_vote_ballots(update_vote_id, user_id, option_id) "
-                        "VALUES(?,?,?) ON CONFLICT(update_vote_id, user_id) DO UPDATE SET "
-                        "option_id=?, placed_at=CURRENT_TIMESTAMP",
-                        (self.uv_id, i.user.id, option_id, option_id),
-                    )
-                    await db.commit()
-                await _safe_followup(i, content=f"✅ Vote enregistré pour `{option_id}`.")
-            except Exception as ex:
-                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-        return _cb
-
-    async def _view_results(self, i: discord.Interaction):
-        if not await _safe_defer(i):
-            return
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT option_id, COUNT(*) AS c FROM update_vote_ballots "
-                    "WHERE update_vote_id=? GROUP BY option_id ORDER BY c DESC",
-                    (self.uv_id,),
-                ) as cur:
-                    rows = await cur.fetchall()
-            total = sum(int(r[1]) for r in rows) or 1
-            lines = [f"`{r[0]}` — `{r[1]}` votes ({r[1]/total*100:.0f}%)" for r in rows]
-            await _safe_followup(
-                i,
-                content="📊 **Résultats actuels :**\n" + ("\n".join(lines) if lines else "_Aucun vote_"),
-            )
-        except Exception as ex:
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-
-
-
-# Phase 120 : retiré (debug inutilisé, ex-/achievement_post)
-@app_commands.describe(
-    membre="Le membre qui a réalisé l'exploit",
-    achievement="Nom de l'achievement (ex: 'Premier à tuer le Boss Final')",
-    description="Détail (optionnel)",
-    game_id="ID du jeu Roblox (optionnel)",
-)
-async def achievement_post_cmd(i: discord.Interaction, membre: discord.Member,
-                                achievement: str, description: Optional[str] = None,
-                                game_id: Optional[str] = None):
-    if not i.guild:
-        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
-        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
-    if not await _safe_defer(i):
-        return
-    try:
-        c = await cfg(i.guild.id)
-        hub_id = int(c.get('hub_channel', 0) or 0)
-        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
-        if not hub_ch:
-            return await _safe_followup(i, content="❌ Hub non configuré.")
-        async with get_db() as db:
-            cur = await db.execute(
-                "INSERT INTO achievement_broadcasts"
-                "(guild_id, user_id, game_id, achievement_name, description, posted_by) "
-                "VALUES(?, ?, ?, ?, ?, ?)",
-                (i.guild.id, membre.id, game_id or "", achievement, description or "", i.user.id),
-            )
-            ab_id = cur.lastrowid
-            await db.commit()
-        LIFETIME = 24 * 3600
-        e = discord.Embed(
-            title=f"🏆 EXPLOIT : {achievement}",
-            description=(
-                f"**{membre.mention} vient de réaliser :**\n"
-                f"# {achievement}\n\n"
-                + (f"_{description}_\n\n" if description else "")
-                + (f"🎮 Jeu : `{game_id}`\n\n" if game_id else "")
-                + "_Bravo ! Ton nom est dans les livres._"
-            ),
-            color=0xFFD700,
-            timestamp=datetime.now(timezone.utc),
-        )
-        if membre.display_avatar:
-            e.set_thumbnail(url=membre.display_avatar.url)
-        e.set_footer(text=f"Achievement #{ab_id} · Posté par {i.user.display_name}")
-        msg = await hub_ch.send(
-            content=membre.mention,
-            embed=e,
-            allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
-            delete_after=LIFETIME,
-        )
-        try:
-            await _register_for_cleanup(msg, LIFETIME, 'achievement_broadcast')
-        except Exception:
-            pass
-        # Reward 200 🪙 au membre
-        try:
-            await add_coins(i.guild.id, membre.id, 200)
-        except Exception:
-            pass
-        await _safe_followup(i, content=f"✅ Achievement #{ab_id} annoncé. +200 🪙 à {membre.mention}.")
-    except Exception as ex:
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
-
-
-# Phase 120 : retiré (debug inutilisé, ex-/game_stats_set)
-
-
-async def _resolve_update_vote(uv_id: int):
-    """Résout un update vote (pick le winner)."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT guild_id, title, options_json, channel_id, status FROM update_votes WHERE id=?",
-                (uv_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row or row[4] != 'open':
-            return
-        gid, title, options_json, channel_id, _ = int(row[0]), row[1], row[2], int(row[3] or 0), row[4]
-        opts = json.loads(options_json or "[]")
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT option_id, COUNT(*) AS c FROM update_vote_ballots "
-                "WHERE update_vote_id=? GROUP BY option_id ORDER BY c DESC",
-                (uv_id,),
-            ) as cur:
-                results = await cur.fetchall()
-        if not results:
-            winner_id = None
-        else:
-            top_count = results[0][1]
-            top = [r[0] for r in results if r[1] == top_count]
-            winner_id = random.choice(top)
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE update_votes SET status='resolved', winning_option=?, "
-                "resolved_at=CURRENT_TIMESTAMP WHERE id=?",
-                (winner_id, uv_id),
-            )
-            await db.commit()
-        # Annoncer
-        guild = bot.get_guild(gid)
-        ch = guild.get_channel(channel_id) if guild else None
-        winning_opt = next((o for o in opts if o["id"] == winner_id), None)
-        if ch and winning_opt:
-            try:
-                total = sum(int(r[1]) for r in results) or 1
-                LIFETIME = 24 * 3600
-                lines = []
-                for r in results:
-                    opt = next((o for o in opts if o["id"] == r[0]), None)
-                    if opt:
-                        pct = (int(r[1]) / total) * 100
-                        mark = "👑 " if r[0] == winner_id else ""
-                        lines.append(f"{mark}**{opt['label']}** — `{r[1]}` votes ({pct:.0f}%)")
-                e = discord.Embed(
-                    title=f"🗳️ Vote terminé : {title}",
-                    description=(
-                        f"**Gagnant : {winning_opt['label']}**\n\n"
-                        f"_Cette feature/option sera priorisée pour le développement._\n\n"
-                        f"**Résultats :**\n" + "\n".join(lines)
-                    ),
-                    color=0x00A2FF,
-                    timestamp=datetime.now(timezone.utc),
-                )
-                msg = await ch.send(
-                    embed=e,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                    delete_after=LIFETIME,
-                )
-                try:
-                    await _register_for_cleanup(msg, LIFETIME, 'update_vote_resolved')
-                except Exception:
-                    pass
-            except Exception as ex:
-                print(f"[update vote resolve announce] {ex}")
-        print(f"[UPDATE VOTE RESOLVED] uv_id={uv_id} winner={winner_id}")
-    except Exception as ex:
-        print(f"[_resolve_update_vote] {ex}")
-
-
-
-
-
-
-# Phase 120 : retiré (debug inutilisé, ex-/narrative_force)
 
 
 # (_maybe_greet_user_today SUPPRIMÉE le 12/08/2026, à la demande du propriétaire.)
@@ -44539,19 +33963,7 @@ bot.tree.add_command(owner_group)
 # ─── SUB-HUB OUTILS (8 boutons regroupant tout) ──────────────────────────────
 
 
-
-
-
-
 # ─── 🏦 BANQUE (panel avec boutons Modal) ────────────────────────────────────
-
-
-
-
-
-
-
-
 
 
 # ─── 💰 MA FORTUNE (vue d'ensemble lecture seule, éphémère) ───────────────────
@@ -44562,84 +33974,31 @@ bot.tree.add_command(owner_group)
 #  100% LECTURE SEULE : aucun claim ici. Les actions restent dans Banque / La Cité.
 
 
-
-
-
-
 # ─── 💎 LOOTS (réutilise logique existante) ──────────────────────────────────
-
-
 
 
 # ─── ⚔️ PVP (Top + Mes stats + Défier via UserSelect) ────────────────────────
 
 
-
-
-
-
-
-
-
-
 # ─── 🎖️ CLASSE RP (réutilise ClassSelectView Phase 57) ──────────────────────
-
-
 
 
 # ─── 💝 SHOUTOUT (UserSelect → Catégorie Select → Modal raison) ──────────────
 
 
-
-
-
-
-
-
-
-
 # ─── 🎓 MENTOR INVITE (UserSelect → confirm) ─────────────────────────────────
-
-
-
-
 
 
 # ─── 📦 TIME CAPSULE (Modal create + display mes capsules) ───────────────────
 
 
-
-
-
-
-
-
 # ─── 🏛️ HALL OF FAME (read-only display) ────────────────────────────────────
-
-
-
-
-
-
 
 
 # ─── 🎙️ TOP VOCAL ───────────────────────────────────────────────────────────
 
 
-
-
 # ─── 📅 MÉTÉO SERVEUR ───────────────────────────────────────────────────────
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 249 — BOUTIQUE DE TITRES COSMÉTIQUES (sink économique anti-inflation)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -44658,96 +34017,6 @@ def _section_with_button(title_str: str, subtitle_str: str, button: Button):
         v2_subtitle(subtitle_str),
         accessory=button,
     )
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 272 — DÉCOUVRABILITÉ DU HUB ÉPHÉMÈRE : catégories + retour
-#
-#  Problème : HubLayoutV2 (éphémère /hub) ne surfaçait que 8 sections + sous-hub
-#  Outils. ~15 features (Saga, Chronique, Rencontre, Réputation, Loterie, Streams,
-#  Anniversaires, Récap 7j, Pulse, FAQ/Aide, Objectif collectif, DM, Confession,
-#  Histoire, Mission, Notifs) avaient un callback opérationnel sur EngagementHubView
-#  (le hub ÉPINGLÉ persistant 25/25) mais n'étaient JOIGNABLES nulle part depuis le
-#  /hub éphémère. La limite 25 boutons du panel persistant interdisait d'en ajouter.
-#
-#  Solution conservatrice : on réorganise UNIQUEMENT HubLayoutV2 (éphémère, par-user,
-#  NON persistant, NON ré-enregistré au boot) en ~5 boutons de CATÉGORIE qui ouvrent
-#  chacun un sous-panneau V2 (éphémère lui aussi). Chaque sous-panneau RÉUTILISE les
-#  callbacks EXISTANTS de EngagementHubView via _hub_feature_delegate — AUCUN callback
-#  réécrit, AUCUN custom_id persistant modifié, le dispatch global du hub épinglé est
-#  intact. Comme les vues catégorie sont éphémères (interaction_check par-user), leurs
-#  custom_id n'ont PAS besoin d'être persistants : rien n'est ajouté à bot.add_view,
-#  donc le boot ne casse pas.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 81 — HubPinnedLayoutV2 : version PERSISTANTE du hub pour /hub_setup
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 71 — SUB-HUBS COMPONENTS V2 : Outils / Social / Compétitions / Roblox
-#  Cohérence visuelle avec HubLayoutV2 Phase 70 — sections cliquables partout.
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 72 — SUB-PANELS NIVEAU 2 EN V2 : Bank + PvP + Alliance
-#  Migration des panneaux ouverts depuis les sub-hubs vers LayoutView V2.
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -44784,14 +34053,6 @@ def _escape_md(text: str, max_len: int = 1000) -> str:
     return text
 
 
-# Rate limit in-memory : {(user_id, key): [timestamps]}
-_rate_limit_buckets: dict = {}
-
-
-
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 67 — ALLIANCE COMPLÈTE : Trésorerie + Gestion membres + Audit log
@@ -44804,43 +34065,10 @@ _rate_limit_buckets: dict = {}
 # ─── HELPERS TRÉSORERIE ──────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 # ─── MODALS ──────────────────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
 # ─── VIEWS ───────────────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

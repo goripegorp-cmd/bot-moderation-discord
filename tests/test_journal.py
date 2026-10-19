@@ -52,7 +52,7 @@ ALARMES = [
     "[backup_lite] échec : disk I/O error",
     "[DIAG] 2026-10-14T11:17:40Z ERROR social/youtube_post :: @x | err=ClientError: 403",
     "[view on_error] rblx_x : TypeError: boom",
-    "[activity_vip] Impossible de remonter VIP au-dessus de X : mon rôle est trop bas",
+    "[roles] Impossible de remonter X au-dessus de Y : mon rôle est trop bas",
     "❌ ERREUR: BOT_TOKEN non défini dans le fichier .env !",
     "[events_role_backfill] 12 : ÉCHEC (40 membres, 0 ajout)",
     "[VIEW ERROR] x -> y : boom",
