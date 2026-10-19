@@ -109,6 +109,8 @@ import config_salons  # @everyone voit tout sauf le réservé ; communautaire ou
 import recrutements  # suivi des candidatures Rell Seas, bilan du mois
 import registre  # le journal du serveur, lu sur le site (19/10/2026)
 import questions  # les questions posées dans les salons publics (onglet du site)
+import publications  # une publication des réseaux = un seul message (réservation atomique)
+import websub_youtube  # YouTube prévient le bot dès qu'une vidéo sort
 import vigilance  # un membre qui cumule les évènements graves : alerte dans « 📋logs »
 import tableau  # tableau de bord web : candidatures, tickets par type, clan
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
@@ -12509,6 +12511,7 @@ _SUPERVISED_LOOP_NAMES = [
     "tickets_inactifs_task",
     "menage_salons_task",
     "salon_logs_task",
+    "websub_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -19361,6 +19364,11 @@ async def _activite_boot():
                   radie=_RADIE_ROLE_NAME, direction=_direction_ou_plus, actions=_ACTIONS_TABLEAU,
                   niveaux=_NIVEAUX_TABLEAU, alerte_securite=_alerte_securite_site, log=print)
     await tableau.init_db()
+    publications.setup(get_db=get_db, instance=_INSTANCE_ID, log=print)
+    await publications.init_db()
+    websub_youtube.setup(secret=os.getenv("WEBSUB_SECRET") or hashlib.sha256((TOKEN or "").encode() + b"|websub").hexdigest()[:40],
+                         base_url=transcript_store.public_base_url(), chaines=_chaines_youtube_suivies,
+                         annoncer=_annoncer_websub, log=print)
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()
 
@@ -20147,6 +20155,8 @@ async def on_ready():
         menage_salons_task.start()
     if not salon_logs_task.is_running():
         salon_logs_task.start()
+    if not websub_task.is_running():
+        websub_task.start()
 
     # Phase 48 : Compliment du jour DÉSACTIVÉ (système Saint-Valentin retiré)
     # if not compliment_dispatcher.is_running():
@@ -27526,7 +27536,8 @@ async def check_youtube_feeds(session, guild, data):
                 published_elem = entry.find('atom:published', ns)
                 published_at = published_elem.text if published_elem is not None else None
 
-                if await tracking2026.was_posted(guild.id, "youtube", channel_id, video_id):
+                if (await tracking2026.was_posted(guild.id, "youtube", channel_id, video_id)
+                        or await publications.deja(guild.id, "youtube", video_id)):
                     _n_seen += 1
                     continue
 
@@ -27560,6 +27571,8 @@ async def check_youtube_feeds(session, guild, data):
                 # Trop vieux -> record sans poster
                 if published_at and not _is_recent_iso(published_at, BACKFILL_MAX_AGE_DAYS):
                     _n_old += 1
+                    if await publications.reserver(guild.id, "youtube", video_id, "ancienne"):
+                        await publications.confirmer(guild.id, "youtube", video_id, 0, 0)
                     try:
                         # Note Phase 3.8 : pour YouTube, le 3e arg `username` reçoit le YouTube UC ID
                         # (string "UCxxxxx"). C'est consistant et la dedup marche, juste sémantiquement
@@ -27589,52 +27602,8 @@ async def check_youtube_feeds(session, guild, data):
 
             for video_id, title, description, video_url in posts_to_publish:
                 posted_content[cache_key] = video_id
-
-                e = discord.Embed(color=0xFF0000, url=video_url)
-                e.set_author(name=f"YOUTUBE • {channel_name}",
-                             url=f"https://www.youtube.com/channel/{channel_id}",
-                             icon_url=_YT_ICON)
-                e.title = f"▶️ {title}"[:256]
-
-                if description and len(description.strip()) > 10:
-                    e.description = f"*{description}*\n\n🔗 [**Regarder sur YouTube**]({video_url})"
-                else:
-                    e.description = f"🔗 [**Regarder sur YouTube**]({video_url})"
-
-                e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
-                if yt_avatar:
-                    e.set_thumbnail(url=yt_avatar)
-                e.set_footer(text=f"YouTube • {channel_name}", icon_url=_YT_ICON)
-                e.timestamp = now()
-
-                _yt_msg = await _publier_social(target_channel, 'youtube', e)
-                try:
-                    if _yt_msg:
-                        diag.event("social", "youtube_feed",
-                                   f"{channel_name}: ▶️ vidéo publiée → "
-                                   f"#{getattr(target_channel, 'name', '?')} ({title[:50]})")
-                    else:
-                        diag.warn("social", "youtube_feed",
-                                  f"{channel_name}: webhook_send n'a rien renvoyé → "
-                                  f"#{getattr(target_channel, 'name', '?')} (perms webhook/salon ?)")
-                except Exception:
-                    pass
-                try:
-                    await tracking2026.record_post(
-                        guild.id, "youtube", channel_id, video_id,
-                        channel_id=target_channel.id,
-                        message_id=getattr(_yt_msg, 'id', 0) or 0,
-                        post_type="video", title=title, url=video_url,
-                    )
-                    # Phase 19 : prune auto — garde max 5 posts récents
-                    try:
-                        await tracking2026.prune_to_max(
-                            bot, guild.id, "youtube", target_channel.id, max_keep=5,
-                        )
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                await _annoncer_video_youtube(guild, feed, target_channel, video_id, title, description,
+                                              chemin="rss", avatar=yt_avatar)
                 await asyncio.sleep(1)
 
             # owner 2026-07-18 : bilan par chaîne → EVENT (visible) SEULEMENT si on a publié quelque
@@ -27666,6 +27635,126 @@ async def check_youtube_feeds(session, guild, data):
         diag.trace("social", "youtube_cycle", f"{len(feeds)} chaîne(s) YouTube vérifiée(s)")
     except Exception:
         pass
+
+async def _deja_dans_le_salon(salon, url: str) -> int:
+    """Après un envoi au résultat incertain : le message est-il quand même arrivé ? Son id, ou 0."""
+    try:
+        async for m in salon.history(limit=15):
+            if any(getattr(e, "url", None) == url for e in m.embeds) or url in (m.content or ""):
+                return m.id
+    except discord.HTTPException as ex:
+        _logerr("youtube.verifier_envoi", ex, guild_id=getattr(getattr(salon, 'guild', None), 'id', 0))
+    return 0
+
+
+async def _annoncer_video_youtube(guild, feed: dict, target_channel, video_id: str, title: str,
+                                  description: str = "", chemin: str = "rss", avatar=None) -> bool:
+    """19/10/2026 : « le bot publie deux fois les annonces ». L'unique chemin d'envoi d'une vidéo,
+    pour le relevé RSS comme pour la notification instantanée : réservation atomique d'abord
+    (une seule boucle, une seule instance l'emporte), envoi, puis confirmation — ou place rendue
+    si l'envoi a échoué (vérifié dans le salon : jamais de doublon sur un envoi incertain)."""
+    channel_id = str(feed.get('id') or '')
+    channel_name = feed.get('name', 'YouTube')
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+    if await tracking2026.was_posted(guild.id, "youtube", channel_id, video_id):
+        return False
+    if not await publications.reserver(guild.id, "youtube", video_id, chemin):
+        return False
+    e = discord.Embed(color=0xFF0000, url=video_url)
+    e.set_author(name=f"YOUTUBE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}",
+                 icon_url=_YT_ICON)
+    e.title = f"▶️ {title}"[:256]
+    if description and len(description.strip()) > 10:
+        e.description = f"*{description}*\n\n🔗 [**Regarder sur YouTube**]({video_url})"
+    else:
+        e.description = f"🔗 [**Regarder sur YouTube**]({video_url})"
+    e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
+    if avatar:
+        e.set_thumbnail(url=avatar)
+    e.set_footer(text=f"YouTube • {channel_name}", icon_url=_YT_ICON)
+    e.timestamp = now()
+    try:
+        msg = await _publier_social(target_channel, 'youtube', e)
+    except Exception as ex:
+        _logerr("youtube.publier", ex, guild_id=guild.id)
+        msg = None
+    msg_id = getattr(msg, 'id', 0) or await _deja_dans_le_salon(target_channel, video_url)
+    if not msg_id:
+        await publications.annuler(guild.id, "youtube", video_id)
+        if _avertir_une_fois_par_jour(f"yt_envoi:{guild.id}:{channel_id}"):
+            diag.warn("social", "youtube_feed", f"{channel_name}: envoi impossible → "
+                      f"#{getattr(target_channel, 'name', '?')} (permissions du salon ?) — réessai au prochain passage")
+        return False
+    await publications.confirmer(guild.id, "youtube", video_id, msg_id, target_channel.id)
+    diag.event("social", "youtube_feed", f"{channel_name}: ▶️ vidéo publiée ({chemin}) → "
+               f"#{getattr(target_channel, 'name', '?')} ({title[:50]})")
+    try:
+        await tracking2026.record_post(guild.id, "youtube", channel_id, video_id, channel_id=target_channel.id,
+                                       message_id=msg_id, post_type="video", title=title, url=video_url)
+        await tracking2026.prune_to_max(bot, guild.id, "youtube", target_channel.id, max_keep=5)
+    except Exception as ex:  # la réservation, elle, est déjà confirmée : aucun doublon possible
+        _logerr("youtube.suivi", ex, guild_id=guild.id)
+    return True
+
+
+async def _feeds_youtube():
+    """(serveur, flux, salon cible) pour chaque chaîne YouTube suivie dans le panneau."""
+    out = []
+    async with get_db() as db:
+        async with db.execute('SELECT guild_id, data FROM guild_config') as cur:
+            lignes = await cur.fetchall()
+    for guild_id, data_str in lignes:
+        guild = bot.get_guild(int(guild_id))
+        if guild is None:
+            continue
+        try:
+            data = json.loads(data_str) if data_str else {}
+        except ValueError:
+            continue
+        defaut = guild.get_channel(int(data.get('ads_youtube_channel', 0) or 0))
+        for f in data.get('ads_youtube_feeds') or []:
+            if not isinstance(f, dict) or not re.fullmatch(r'UC[\w-]{20,}', str(f.get('id') or '')):
+                continue
+            cible = guild.get_channel(int(f.get('channel_id', 0) or 0)) or defaut
+            if cible is not None:
+                out.append((guild, f, cible))
+    return out
+
+
+async def _chaines_youtube_suivies() -> set:
+    return {str(f['id']) for _g, f, _c in await _feeds_youtube()}
+
+
+async def _annoncer_websub(uc: str, video: dict) -> bool:
+    """La notification instantanée de YouTube : publiée partout où la chaîne est suivie."""
+    fait = False
+    for guild, feed, cible in await _feeds_youtube():
+        if str(feed.get('id')) != uc:
+            continue
+        filtre = feed.get('keyword_filter', '')
+        if filtre and not _matches_keyword_filter(video.get('titre', ''), filtre):
+            continue
+        fait = await _annoncer_video_youtube(guild, feed, cible, video['video_id'], video.get('titre') or '',
+                                             chemin="websub") or fait
+    return fait
+
+
+@tasks.loop(minutes=10)
+async def websub_task():
+    """Abonnements WebSub entretenus : chaque chaîne suivie, renouvelée avant échéance."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            r = await websub_youtube.entretenir(session)
+        if r.get("abonnements"):
+            print(f"[WEBSUB] {r['abonnements']} abonnement(s) envoyé(s) · {r['suivies']} chaîne(s) suivie(s)")
+    except Exception as ex:
+        _logerr("websub.entretien", ex)
+
+
+@websub_task.before_loop
+async def _websub_wait():
+    await bot.wait_until_ready()
+
 
 async def check_twitch_feeds(session, guild, data):
     """Vérifie si des streamers sont en live sur Twitch"""
@@ -30105,6 +30194,7 @@ async def _2026_on_ready_addon():
 
         mgr.set_post_callback(_post_cb)
         mgr.set_delete_callback(_delete_cb)
+        mgr.set_reservation(publications.reserver, publications.confirmer, publications.annuler)
         panels2026.set_social_manager(mgr)
 
         # Charge les guilds connues

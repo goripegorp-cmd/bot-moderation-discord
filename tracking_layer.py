@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Awaitable, Callable, Optional
@@ -114,13 +115,21 @@ async def _load_guild(guild_id: int) -> None:
         _loaded_guilds.add(guild_id)
 
 
+def _ecrire_atomique(chemin, texte: str) -> None:
+    """19/10/2026 : un conteneur arrêté au milieu de l'écriture (chaque déploiement en arrête un)
+    laissait un JSON tronqué, relu comme VIDE : tout l'historique oublié, et les vidéos de la
+    semaine republiées. Fichier temporaire, puis remplacement d'un bloc."""
+    tmp = chemin.with_name(chemin.name + ".tmp")
+    tmp.write_text(texte, encoding="utf-8")
+    os.replace(tmp, chemin)
+
+
 async def _save_guild(guild_id: int) -> None:
     async with _io_lock:
         store = _cache.get(guild_id, {})
         payload = [asdict(tp) for tp in store.values()]
-        _path(guild_id).write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        texte = json.dumps(payload, ensure_ascii=False)
+        await asyncio.to_thread(_ecrire_atomique, _path(guild_id), texte)
 
 
 # =============================================================================

@@ -168,6 +168,14 @@ async def _tableau(request):
     return await getattr(tableau, nom.split(":", 1)[1])(request)
 
 
+async def _websub(request):
+    """YouTube (hub WebSub) : vérification d'abonnement (GET) et vidéos publiées (POST)."""
+    import websub_youtube
+    if request.method == "POST":
+        return await websub_youtube.notification(request)
+    return await websub_youtube.verification(request)
+
+
 def construire_app():
     """Toutes les adresses servies par le bot (testées telles quelles)."""
     app = web.Application()
@@ -177,6 +185,8 @@ def construire_app():
     app.router.add_get('/t/{token}', _transcript_handler)       # Phase 281 : page transcript
     app.router.add_get('/ta/{token}/{idx}', _asset_handler)      # assets ré-hébergés
     app.router.add_get('/v/{nom}', _visuel_handler)               # bandeaux et icônes
+    app.router.add_get('/websub/youtube', _websub)                # YouTube : vidéo publiée, à la seconde
+    app.router.add_post('/websub/youtube', _websub)
     #  Site du staff : l'espace (session) AVANT le lien à usage unique, sinon « espace » serait
     #  pris pour un jeton.
     app.router.add_get('/tableau/espace', _tableau, name="tableau:page")

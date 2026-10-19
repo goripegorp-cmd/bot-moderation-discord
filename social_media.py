@@ -1331,6 +1331,7 @@ class SocialMediaManager:
         self._cleanup_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
         self._loaded_guilds: set[int] = set()
+        self._reserver = self._confirmer = self._annuler = None
 
     # ---- adapters ---------------------------------------------------------
 
@@ -1364,6 +1365,11 @@ class SocialMediaManager:
 
     def set_delete_callback(self, cb: DeleteCallback) -> None:
         self._delete_callback = cb
+
+    def set_reservation(self, reserver, confirmer, annuler) -> None:
+        """19/10/2026 : la réservation commune à tous les chemins de publication (`publications`) —
+        un post suivi ici ET dans le panneau (ou vu par deux instances) ne part qu'une fois."""
+        self._reserver, self._confirmer, self._annuler = reserver, confirmer, annuler
 
     # ---- persistence ------------------------------------------------------
 
@@ -1557,9 +1563,14 @@ class SocialMediaManager:
             # Post via callback
             if self._post_callback is None:
                 continue
+            plateforme = getattr(post.platform, "value", str(post.platform))
+            if self._reserver is not None and not await self._reserver(sub.guild_id, plateforme, post.post_id, "abonnement"):
+                continue
             try:
                 msg_id = await self._post_callback(sub, post)
             except Exception as _ex:
+                if self._annuler is not None:
+                    await self._annuler(sub.guild_id, plateforme, post.post_id)
                 # owner 2026-07-18 : un échec d'envoi Discord (perms, 429, salon supprimé)
                 # faisait disparaître le post SANS trace → désormais visible dans [DIAG].
                 try:
@@ -1572,7 +1583,11 @@ class SocialMediaManager:
                     pass
                 continue
             if msg_id is None:
+                if self._annuler is not None:
+                    await self._annuler(sub.guild_id, plateforme, post.post_id)
                 continue
+            if self._confirmer is not None:
+                await self._confirmer(sub.guild_id, plateforme, post.post_id, msg_id, sub.target_channel_id)
             await self._record_announcement(sub, post, msg_id)
             created += 1
         return created

@@ -42,6 +42,7 @@ from datetime import datetime, timedelta, timezone
 
 from discord.ext import tasks
 
+import publications
 import questions
 import registre
 import tableau
@@ -85,6 +86,7 @@ PURGES_CIBLEES = [
     ("casier : sanctions", "DELETE FROM infractions WHERE created_at < ?", 730, "sqlite"),
     *registre.PURGES,
     *questions.PURGES,
+    *publications.PURGES,
     *vigilance.PURGES,
     *tableau.PURGES,
 ]

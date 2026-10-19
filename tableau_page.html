@@ -330,7 +330,7 @@ footer p{margin:0;max-width:760px}
   <footer id="pied"></footer>
 </div>
 <div class="voile" id="voile"></div>
-<div class="porte"><aside class="fiche" id="fiche" role="dialog" aria-modal="true" aria-labelledby="fiche-nom" aria-hidden="true"></aside></div>
+<div class="porte"><aside class="fiche" id="fiche" role="dialog" aria-modal="true" aria-labelledby="fiche-nom" inert></aside></div>
 <div class="voile" id="voile-dialogue"></div>
 <div id="dialogue-hote"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -514,12 +514,12 @@ function puces(options, actif, choisir) {
     teinte ? h("i") : null, lib, n !== undefined && n !== null ? h("span", {classe: "n"}, nombre(n)) : null)));
 }
 function recherche(valeur, placeholder, changer) {
-  const i = h("input", {type: "search", value: valeur, placeholder, "aria-label": placeholder, autocomplete: "off", spellcheck: "false"});
+  const i = h("input", {type: "search", name: "recherche", value: valeur, placeholder, "aria-label": placeholder, autocomplete: "off", spellcheck: "false"});
   let m; i.addEventListener("input", () => { clearTimeout(m); m = setTimeout(() => changer(i.value.trim().toLowerCase()), 140); });
   return h("label", {classe: "recherche"}, icone("recherche"), i);
 }
 function choixListe(valeur, options, label, changer) {
-  const s = h("select", {"aria-label": label}, options.map(([v, l]) => h("option", {value: v}, l)));
+  const s = h("select", {name: label.toLowerCase(), "aria-label": label}, options.map(([v, l]) => h("option", {value: v}, l)));
   s.value = valeur; s.addEventListener("change", () => changer(s.value));
   return s;
 }
@@ -983,7 +983,7 @@ RENDUS.journal = (vue, plein) => {
       recherche(f.q, "Membre, identifiant, salon, texte…", (q) => { f.q = q; changer(); }),
       choixListe(f.periode, [["1", "24 heures"], ["7", "7 jours"], ["30", "30 jours"], ["tout", "Tout ce qui est chargé"]], "Période", (v) => { f.periode = v; changer(); }),
       segment(f.vue, [["personnes", "Par personne"], ["fil", "Fil"]], (v) => { f.vue = v; changer(); rendre("journal", true); }),
-      h("label", {classe: "bascule"}, (() => { const c = h("input", {type: "checkbox"}); c.checked = !!f.grave; c.addEventListener("change", () => { f.grave = c.checked; changer(); }); return c; })(), "Grave seulement"),
+      h("label", {classe: "bascule"}, (() => { const c = h("input", {type: "checkbox", name: "grave"}); c.checked = !!f.grave; c.addEventListener("change", () => { f.grave = c.checked; changer(); }); return c; })(), "Grave seulement"),
       menuExport([["Journal · 7 jours (CSV)", BASE + "/export?quoi=journal&jours=7"], ["Journal · 30 jours (CSV)", BASE + "/export?quoi=journal&jours=30"],
         ["Journal · 90 jours (CSV)", BASE + "/export?quoi=journal&jours=90"], ["Journal · 30 jours (JSON)", BASE + "/export?quoi=journal&jours=30&format=json"],
         peutAgir() ? ["Erreurs du bot · 30 jours (CSV)", BASE + "/export?quoi=erreurs"] : null])));
@@ -1140,7 +1140,7 @@ RENDUS.clan = (vue, plein) => {
 function ligneClan(m, teinte) {
   const presents = /^\d+\/\d+$/.test(m.jours) ? +m.jours.split("/")[0] : 0;
   const choisi = etat.selection.has(m.id);
-  const coche = peutAgir() ? (() => { const c = h("input", {classe: "coche", type: "checkbox", "aria-label": "Sélectionner " + m.nom}); c.checked = choisi;
+  const coche = peutAgir() ? (() => { const c = h("input", {classe: "coche", type: "checkbox", name: "selection", "aria-label": "Sélectionner " + m.nom}); c.checked = choisi;
     c.addEventListener("change", () => { if (c.checked && etat.selection.size >= 25) { c.checked = false; toast("25 au plus d'un coup."); return; }
       c.checked ? etat.selection.add(m.id) : etat.selection.delete(m.id); rendre("clan"); }); return c; })() : null;
   return h("div", {classe: "ligne" + (choisi ? " choisie" : "")},
@@ -1192,7 +1192,7 @@ async function ouvrirFiche(id, ongletFiche) {
   etat.ficheId = String(id); etat.ficheOnglet = ongletFiche || "chrono"; etat.ficheMax = 40; etat.fiche = null; majAncre();
   t.replaceChildren(enteteFiche(P(id), null), h("div", {classe: "fiche-corps"}, h("div", {classe: "squelette", style: "height:72px"}),
     h("div", {classe: "squelette", style: "height:40px"}), h("div", {classe: "squelette", style: "height:280px"})));
-  t.classList.add("ouverte"); t.setAttribute("aria-hidden", "false"); $("#voile").classList.add("ouvert");
+  t.inert = false; t.classList.add("ouverte"); $("#voile").classList.add("ouvert");
   document.documentElement.style.overflow = "hidden";
   $(".fermer", t).focus({preventScroll: true});
   let f;
@@ -1212,10 +1212,15 @@ async function ouvrirFiche(id, ongletFiche) {
 function fermerFiche() {
   const t = $("#fiche");
   if (!t.classList.contains("ouverte")) return;
-  t.classList.remove("ouverte"); t.setAttribute("aria-hidden", "true"); $("#voile").classList.remove("ouvert");
+  //  Le focus sort AVANT que le panneau soit rendu inerte : jamais de focus dans un élément masqué.
+  const retour = etat.focusAvant;
+  if (t.contains(document.activeElement)) {
+    if (retour && retour.isConnected && retour.focus) retour.focus({preventScroll: true});
+    if (t.contains(document.activeElement)) document.activeElement.blur();
+  }
+  t.classList.remove("ouverte"); t.inert = true; $("#voile").classList.remove("ouvert");
   document.documentElement.style.overflow = "";
   etat.ficheId = null; etat.fiche = null; majAncre();
-  if (etat.focusAvant && etat.focusAvant.focus) etat.focusAvant.focus({preventScroll: true});
 }
 function chronologie(f) {
   const items = [];
@@ -1354,8 +1359,8 @@ $("#voile").addEventListener("click", fermerFiche);
 function dialogue(o) {
   return new Promise((fin) => {
     const hote = $("#dialogue-hote"), voile = $("#voile-dialogue");
-    const motif = o.motif ? h("textarea", {rows: 3, maxlength: 300, placeholder: o.motifRequis ? "Motif (obligatoire)" : "Motif (facultatif)"}) : null;
-    const duree_ = o.durees ? h("select", {"aria-label": "Durée"}, [[10, "10 minutes"], [60, "1 heure"], [360, "6 heures"], [1440, "1 jour"], [10080, "7 jours"]].map(([v, l]) => h("option", {value: v}, l))) : null;
+    const motif = o.motif ? h("textarea", {name: "motif", rows: 3, maxlength: 300, placeholder: o.motifRequis ? "Motif (obligatoire)" : "Motif (facultatif)"}) : null;
+    const duree_ = o.durees ? h("select", {name: "duree", "aria-label": "Durée"}, [[10, "10 minutes"], [60, "1 heure"], [360, "6 heures"], [1440, "1 jour"], [10080, "7 jours"]].map(([v, l]) => h("option", {value: v}, l))) : null;
     if (duree_) duree_.value = "60";
     const ok = h("button", {classe: "bouton " + (o.style || "principal"), type: "button"}, o.libelleOk || "Confirmer");
     const finir = (v) => { hote.replaceChildren(); voile.classList.remove("ouvert"); document.removeEventListener("keydown", echap, true); fin(v); };
