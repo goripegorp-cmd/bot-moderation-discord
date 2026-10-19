@@ -7657,6 +7657,7 @@ async def server_controls_task():
                 c = await cfg(g.id)
                 await _update_support_status(g, c)
                 await _apply_night_slowmode(g, c)
+                await _lever_verrou_raid(g)
                 await asyncio.sleep(0.5)  # throttle anti-429 (espace les edits entre guildes)
             except Exception:
                 continue
@@ -7998,23 +7999,6 @@ async def _ticket_ouvrir(i, pid):
             pass
 
 
-class TicketCreateButton(Button):
-    """Le bouton des panneaux PAR TYPE (historique). Il reste, et il remarche.
-
-    ⚠️ SON `custom_id` EST PERSISTANT ET N'AVAIT AUCUN CAPTEUR AU BOOT —
-    voir `TicketCreateDynamic`. C'est la cause de « Cette interaction a
-    échoué » après chaque redéploiement.
-    """
-    def __init__(self, pid):
-        super().__init__(label="📩 Créer un ticket",
-                         style=discord.ButtonStyle.success,
-                         custom_id=f"ticket_create_{pid}")
-        self.pid = pid
-
-    async def callback(self, i):
-        await _ticket_ouvrir(i, self.pid)
-
-
 class TicketCreateDynamic(discord.ui.DynamicItem[Button],
                           template=r"ticket_create_(?P<pid>.+)"):
     """LE CAPTEUR QUI MANQUAIT.
@@ -8040,11 +8024,6 @@ class TicketCreateDynamic(discord.ui.DynamicItem[Button],
 
     async def callback(self, i):
         await _ticket_ouvrir(i, self.pid)
-
-class TicketCreateView(View):
-    def __init__(self, pid):
-        super().__init__(timeout=None)
-        self.add_item(TicketCreateButton(pid))
 
 
 #  ═══════════════════════════════════════════════════════════════════════════
@@ -8289,13 +8268,11 @@ async def _build_ticket_panel_view(guild, pid):
             links_text += f"• {line}\n"
     links_text = links_text.strip()
 
-    create_btn = TicketCreateButton(pid)
-    # owner 2026-06-29 (audit) : le bouton affiche le TYPE du panneau (sinon « 📩 Créer un
-    # ticket » identique partout → le membre se trompe de panneau). custom_id INCHANGÉ.
-    try:
-        create_btn.label = f"📩 Ouvrir : {name}"[:80]
-    except Exception:
-        pass
+    # Un bouton sans action propre : c'est `TicketCreateDynamic` qui répond. Un bouton avec sa propre
+    # action ici (et la vue réenregistrée au démarrage) faisait répondre chaque clic DEUX fois.
+    # Le libellé dit le TYPE du panneau (owner 2026-06-29), custom_id inchangé.
+    create_btn = Button(style=discord.ButtonStyle.success, custom_id=f"ticket_create_{pid}",
+                        label=f"📩 Ouvrir : {name}"[:80])
     toggle_btn = Button(
         emoji=('🔴' if disabled else '🟢'), label=("Tickets : OFF" if disabled else "Tickets : ON"),
         style=(discord.ButtonStyle.danger if disabled else discord.ButtonStyle.success),
@@ -12736,48 +12713,47 @@ async def _etat_public():
         _logerr("etat.public", ex)
 
 
+async def _recrutement_rellseas(g) -> None:
+    c = await cfg(g.id)
+    if rellseas_ui.panneaux_tickets(c):
+        await _salon_transcripts_rellseas(g, c)
+        await recrutements.rattraper(g)
+        await recrutements.publier_recap(g)
+
+
+async def _boosts_au_demarrage(g) -> None:
+    await boosts.installer(g, _roles_staff_et_plus(g, await cfg(g.id)))
+
+
+#  Dans l'ordre. 🧹 03/10/2026 : le système d'activité est retiré — on défait ce qu'il avait posé
+#  (rôles, masquage, salons), puis on regarde ce qu'un nouvel arrivant voit du serveur.
+_TRAVAUX = (
+    "_migrer_panneaux_tickets", "_demonter_activite", "_verifier_visibilite", "_publier_bilan_sante",
+    "_retirer_exclamations", "_retirer_salons_combat", "_menage_unique", "_menage_v2", "sondages.installer",
+    "suggestions.installer", "_actus_en_annonces", "_flux_studio_rell", "_rattacher_flux_orphelins",
+    "_configurer_salons", "_passer_logs_sur_site", "_recrutement_rellseas", "_salon_tableau",
+    "_logs_direction_seule", "_configurer_salons_v2", "_automod_invitations", "_salon_aide",
+    "_boosts_au_demarrage",
+)
+
+
 async def _travaux_de_demarrage():
-    """Les migrations, en tâche de fond, serveur par serveur."""
-    try:
-        await bot.wait_until_ready()
-        for g in list(bot.guilds):
+    """Les migrations, en tâche de fond, serveur par serveur. 19/10/2026 (audit) : chacune dans son
+    propre `try` — avant, une erreur sautait toutes les suivantes, à chaque démarrage, en silence."""
+    await bot.wait_until_ready()
+    for g in list(bot.guilds):
+        for nom in _TRAVAUX:
+            module, _, fonction = nom.rpartition(".")
+            etape = getattr(globals()[module], fonction) if module else globals()[fonction]
             try:
-                await _migrer_panneaux_tickets(g)
-                #  🧹 03/10/2026 : le système d'activité est retiré — on
-                #  défait ce qu'il avait posé (rôles, masquage, salons), puis
-                #  on regarde ce qu'un nouvel arrivant voit du serveur.
-                await _demonter_activite(g)
-                await _verifier_visibilite(g)
-                await _publier_bilan_sante(g)
-                await _retirer_exclamations(g)
-                await _retirer_salons_combat(g)
-                await _menage_unique(g)
-                await _menage_v2(g)
-                await sondages.installer(g)
-                await suggestions.installer(g)
-                await _actus_en_annonces(g)
-                await _flux_studio_rell(g)
-                await _rattacher_flux_orphelins(g)
-                await _configurer_salons(g)
-                await _passer_logs_sur_site(g)
-                _c = await cfg(g.id)
-                if rellseas_ui.panneaux_tickets(_c):
-                    await _salon_transcripts_rellseas(g, _c)
-                    await recrutements.rattraper(g)
-                    await recrutements.publier_recap(g)
-                await _salon_tableau(g)
-                await _logs_direction_seule(g)
-                await _configurer_salons_v2(g)
-                await _automod_invitations(g)
-                await _salon_aide(g)
-                await boosts.installer(g, _roles_staff_et_plus(g, await cfg(g.id)))
+                await etape(g)
             except Exception as ex:
-                print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
-        await _etat_public()
-        await _fermer_anciens_sondages()
-        await _retirer_tables_mortes()
-    except Exception as ex:
-        print(f"[demarrage travaux] {ex}")
+                _logerr(f"demarrage.{nom}", ex, guild_id=g.id)
+    for etape in (_etat_public, _fermer_anciens_sondages, _retirer_tables_mortes):
+        try:
+            await etape()
+        except Exception as ex:
+            _logerr(f"demarrage.{etape.__name__}", ex)
 
 
 async def _relever_actus() -> dict:
@@ -16906,19 +16882,6 @@ class ImmunePanelV2(LayoutView):
     async def _cb_remove(self, i):
         v = ImmuneRemoveViewV2(self.u, self.g)
         await v.render_to(i, edit=True)
-        return  # short-circuit pour éviter le code legacy ci-dessous
-
-    async def _cb_remove_legacy(self, i):
-        v = ImmuneRemoveView(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="Supprimer une immunité",
-                description="Choisis le type d'élément à supprimer.",
-                color=0xE74C3C,
-            ),
-            view=v,
-            attachments=[],
-        )
 
     async def _cb_clear(self, i):
         async with get_db() as db:
@@ -16937,60 +16900,6 @@ class ImmunePanelV2(LayoutView):
         v = MainPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
-
-# Garder les anciennes classes pour compatibilité (mais elles ne seront plus utilisées)
-
-
-class ImmuneRemoveView(View):
-    def __init__(self, u, g):
-        super().__init__(timeout=120)
-        self.u = u
-        self.g = g
-    
-    @discord.ui.button(emoji=visuels.icone("role"), label="Rôle", style=discord.ButtonStyle.primary, row=0)
-    async def remove_role(self, i, b):
-        # Phase 3.0h : pagination via PaginatedImmuneRemoveView
-        async with get_db() as db:
-            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,)) as c:
-                rids = [r[0] for r in await c.fetchall()]
-        if not rids:
-            return await i.response.send_message("❌ Aucun rôle immunisé", ephemeral=True)
-        view = PaginatedImmuneRemoveView(self.u, self.g, 'role', rids, page=0)
-        await i.response.edit_message(
-            embed=discord.Embed(title=f"Supprimer un rôle ({len(rids)} total)", color=C.RED),
-            view=view, attachments=[],
-        )
-
-    @discord.ui.button(emoji=visuels.icone("membre"), label="Utilisateur", style=discord.ButtonStyle.primary, row=0)
-    async def remove_user(self, i, b):
-        async with get_db() as db:
-            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (self.g.id,)) as c:
-                uids = [r[0] for r in await c.fetchall()]
-        if not uids:
-            return await i.response.send_message("❌ Aucun utilisateur immunisé", ephemeral=True)
-        view = PaginatedImmuneRemoveView(self.u, self.g, 'user', uids, page=0)
-        await i.response.edit_message(
-            embed=discord.Embed(title=f"Supprimer un utilisateur ({len(uids)} total)", color=C.RED),
-            view=view, attachments=[],
-        )
-
-    @discord.ui.button(emoji=visuels.icone("video"), label="Salon", style=discord.ButtonStyle.primary, row=0)
-    async def remove_channel(self, i, b):
-        async with get_db() as db:
-            async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=?', (self.g.id,)) as c:
-                chids = [r[0] for r in await c.fetchall()]
-        if not chids:
-            return await i.response.send_message("❌ Aucun salon immunisé", ephemeral=True)
-        view = PaginatedImmuneRemoveView(self.u, self.g, 'channel', chids, page=0)
-        await i.response.edit_message(
-            embed=discord.Embed(title=f"Supprimer un salon ({len(chids)} total)", color=C.RED),
-            view=view, attachments=[],
-        )
-    
-    @discord.ui.button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = ImmunePanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
 
 class ImmuneRemoveViewV2(LayoutView):
     """Hub V2 pour supprimer une immunite (role / utilisateur / salon)."""
@@ -17063,15 +16972,7 @@ class ImmuneRemoveViewV2(LayoutView):
                 rids = [r[0] for r in await c.fetchall()]
         if not rids:
             return await i.response.send_message("❌ Aucun rôle immunisé", ephemeral=True)
-        view = PaginatedImmuneRemoveView(self.u, self.g, 'role', rids, page=0)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title=f"Supprimer un rôle immunisé ({len(rids)} total)",
-                color=0xE74C3C,
-            ),
-            view=view,
-            attachments=[],
-        )
+        await PaginatedImmuneRemoveView(self.u, self.g, 'role', rids, page=0).render_to(i, edit=True)
 
     async def _cb_user(self, i):
         async with get_db() as db:
@@ -17079,15 +16980,7 @@ class ImmuneRemoveViewV2(LayoutView):
                 uids = [r[0] for r in await c.fetchall()]
         if not uids:
             return await i.response.send_message("❌ Aucun utilisateur immunisé", ephemeral=True)
-        view = PaginatedImmuneRemoveView(self.u, self.g, 'user', uids, page=0)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title=f"Supprimer un utilisateur immunisé ({len(uids)} total)",
-                color=0xE74C3C,
-            ),
-            view=view,
-            attachments=[],
-        )
+        await PaginatedImmuneRemoveView(self.u, self.g, 'user', uids, page=0).render_to(i, edit=True)
 
     async def _cb_chan(self, i):
         async with get_db() as db:
@@ -17095,28 +16988,16 @@ class ImmuneRemoveViewV2(LayoutView):
                 chids = [r[0] for r in await c.fetchall()]
         if not chids:
             return await i.response.send_message("❌ Aucun salon immunisé", ephemeral=True)
-        view = PaginatedImmuneRemoveView(self.u, self.g, 'channel', chids, page=0)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title=f"Supprimer un salon immunisé ({len(chids)} total)",
-                color=0xE74C3C,
-            ),
-            view=view,
-            attachments=[],
-        )
+        await PaginatedImmuneRemoveView(self.u, self.g, 'channel', chids, page=0).render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = ImmunePanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
 
-class PaginatedImmuneRemoveView(View):
-    """Vue paginee unifiee pour supprimer une immunite (role/user/channel).
-
-    Phase 3.0d : remplace les anciens [:25] hardcodes qui cachaient les
-    elements au-dela du 25e. Pagination par 24 elements / page + boutons
-    nav <- ->.
-    """
+class PaginatedImmuneRemoveView(LayoutView):
+    """Retirer une immunité (rôle, membre ou salon), 24 par page. 19/10/2026 : en V2 — le menu parent
+    est en V2, et l'éditer avec un embed répondait « Erreur 400 » : seul « Tout effacer » marchait."""
 
     KIND_TABLE = {'role': 'immune_roles', 'user': 'immune_users', 'channel': 'immune_channels'}
     KIND_COL = {'role': 'role_id', 'user': 'user_id', 'channel': 'channel_id'}
@@ -17125,89 +17006,70 @@ class PaginatedImmuneRemoveView(View):
         'user': lambda g, x: f"@{g.get_member(x).display_name if g.get_member(x) else x}"[:25],
         'channel': lambda g, x: (lambda c: f"# {c.name if c else x}"[:25])(g.get_channel(x)),
     }
+    TITRES = {'role': "Retirer un rôle immunisé", 'user': "Retirer un membre immunisé",
+              'channel': "Retirer un salon immunisé"}
 
     def __init__(self, u, g, kind: str, items: list[int], page: int = 0):
         super().__init__(timeout=180)
-        self.u = u
-        self.g = g
-        self.kind = kind
-        self.items = items
-        self.page = page
+        self.u, self.g, self.kind, self.items, self.page = u, g, kind, items, page
         self.max_page = max(0, (len(items) - 1) // 24)
-        self._build()
 
-    def _build(self):
-        self.clear_items()
-        start = self.page * 24
-        end = start + 24
-        page_items = self.items[start:end]
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, i, *, edit=True):
         label_fn = self.KIND_LABEL_FN[self.kind]
-
         opts = []
-        for item_id in page_items:
+        for item_id in self.items[self.page * 24:(self.page + 1) * 24]:
             try:
                 label = label_fn(self.g, item_id)
             except Exception:
                 label = str(item_id)[:25]
             opts.append(discord.SelectOption(label=label, value=str(item_id)))
-
+        lignes = [v2_title(f"{self.TITRES[self.kind]} ({len(self.items)})", level=3)]
         if opts:
-            self.add_item(_PaginatedImmuneRemoveSelect(self, opts))
+            sel = discord.ui.Select(placeholder="Choisir l'immunité à retirer…", options=opts)
 
+            async def _choisir(it):
+                await self._retirer(it, int(sel.values[0]))
+            sel.callback = _choisir
+            lignes.append(discord.ui.ActionRow(sel))
+        boutons = []
         if self.max_page > 0:
-            prev_btn = Button(emoji=visuels.icone("retour", '◀️'), style=discord.ButtonStyle.secondary, row=1, disabled=(self.page == 0))
-            prev_btn.callback = self._prev
-            self.add_item(prev_btn)
-            page_btn = Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.primary, row=1, disabled=True)
-            self.add_item(page_btn)
-            nxt_btn = Button(emoji=visuels.icone("activer", '▶️'), style=discord.ButtonStyle.secondary, row=1, disabled=(self.page >= self.max_page))
-            nxt_btn.callback = self._next
-            self.add_item(nxt_btn)
+            prec = Button(emoji=visuels.icone("retour", '◀️'), style=discord.ButtonStyle.secondary,
+                          disabled=self.page == 0)
+            page = Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.primary,
+                          disabled=True)
+            suiv = Button(emoji=visuels.icone("activer", '▶️'), style=discord.ButtonStyle.secondary,
+                          disabled=self.page >= self.max_page)
 
-        back_btn = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.danger, row=2)
-        back_btn.callback = self._back
-        self.add_item(back_btn)
+            async def _prec(it):
+                self.page -= 1
+                await self.render_to(it, edit=True)
 
-    async def _prev(self, i):
-        v = PaginatedImmuneRemoveView(self.u, self.g, self.kind, self.items, self.page - 1)
-        await i.response.edit_message(view=v, attachments=[])
+            async def _suiv(it):
+                self.page += 1
+                await self.render_to(it, edit=True)
+            prec.callback, suiv.callback = _prec, _suiv
+            boutons += [prec, page, suiv]
+        retour = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.danger)
 
-    async def _next(self, i):
-        v = PaginatedImmuneRemoveView(self.u, self.g, self.kind, self.items, self.page + 1)
-        await i.response.edit_message(view=v, attachments=[])
+        async def _retour(it):
+            await ImmuneRemoveViewV2(self.u, self.g).render_to(it, edit=True)
+        retour.callback = _retour
+        boutons.append(retour)
+        lignes.append(discord.ui.ActionRow(*boutons))
+        self.clear_items()
+        self.add_item(v2_container(*lignes, color=Palette.DANGER))
+        await _afficher_panneau(self, i, edit)
 
-    async def _back(self, i):
-        v = ImmuneRemoveViewV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-
-class _PaginatedImmuneRemoveSelect(Select):
-    def __init__(self, parent: PaginatedImmuneRemoveView, opts):
-        kind_placeholder = {
-            'role': "Choisir un rôle à supprimer...",
-            'user': "Choisir un utilisateur à supprimer...",
-            'channel': "Choisir un salon à supprimer...",
-        }[parent.kind]
-        if parent.max_page > 0:
-            kind_placeholder = f"Page {parent.page+1}/{parent.max_page+1} — {kind_placeholder}"
-        super().__init__(placeholder=kind_placeholder, options=opts)
-        self.parent_view = parent
-
-    async def callback(self, i):
-        kind = self.parent_view.kind
-        item_id = int(self.values[0])
-        try:
-            async with get_db() as db:
-                await db.execute(
-                    f'DELETE FROM {PaginatedImmuneRemoveView.KIND_TABLE[kind]} '
-                    f'WHERE guild_id=? AND {PaginatedImmuneRemoveView.KIND_COL[kind]}=?',
-                    (self.parent_view.g.id, item_id),
-                )
-                await db.commit()
-        except Exception as ex:
-            print(f"[IMMUNE REMOVE] erreur DB : {ex}")
-        v = ImmuneRemoveViewV2(self.parent_view.u, self.parent_view.g)
-        await v.render_to(i, edit=True)
+    async def _retirer(self, i, item_id: int):
+        async with get_db() as db:
+            await db.execute(f'DELETE FROM {self.KIND_TABLE[self.kind]} WHERE guild_id=? AND {self.KIND_COL[self.kind]}=?',
+                             (self.g.id, item_id))
+            await db.commit()
+        _invalidate_immunity(self.g.id)  # effet immédiat, pas d'attente du cache
+        await ImmuneRemoveViewV2(self.u, self.g).render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -18036,207 +17898,111 @@ class V2GenericRolePicker(LayoutView):
 #  Boutons pour l'owner : Mute / Kick / Ban / Faux positif
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CompromisedAccountActionView(View):
-    """View attachée au dossier dans le salon dédié.
+_DOSSIER_BOUTONS = (("mute", "muet", "Mute 24h", discord.ButtonStyle.secondary),
+                    ("kick", "expulser", "Kick", discord.ButtonStyle.danger),
+                    ("ban", "interdit", "Ban", discord.ButtonStyle.danger),
+                    ("fp", "valider", "Faux positif", discord.ButtonStyle.success),
+                    ("degel", "deverrou", "Lever l'isolement", discord.ButtonStyle.primary))
 
-    Boutons réservés à l'owner du serveur + super-owner.
-    Les staff ne peuvent PAS y toucher (sanction critique).
-    """
 
-    def __init__(self, target_user_id: int, message_link: str = ""):
-        super().__init__(timeout=None)  # persistant
-        self.target_user_id = target_user_id
-        self.message_link = message_link
+def _dossier_vue(uid: int, *, eteinte: bool = False) -> View:
+    """Le dossier « compte suspect » dans le salon dédié. Des boutons sans action propre :
+    `DossierCompromisBouton` répond. 19/10/2026 : le membre est DANS l'identifiant du bouton, qui
+    marche donc encore après un redémarrage (avant, tous les dossiers mouraient au déploiement)."""
+    v = View(timeout=None)
+    for act, icone, libelle, style in _DOSSIER_BOUTONS:
+        v.add_item(Button(emoji=visuels.icone(icone), label=libelle, style=style, custom_id=f"cad:{act}:{uid}",
+                          disabled=eteinte))
+    return v
 
-    async def _check_owner(self, i: discord.Interaction) -> bool:
-        """Seul le owner du serveur ou super-owner peut sanctionner."""
-        is_owner = (i.user.id == i.guild.owner_id) or owner_ids_module.is_super_owner(i.user.id)
-        if not is_owner:
-            await i.response.send_message(
-                "⛔ Seul le propriétaire du serveur peut décider sur les comptes suspects.\n"
-                "Les staff peuvent utiliser `/mod mute` ou `/mod warn`.",
-                ephemeral=True,
-            )
-            return False
-        return True
 
-    async def _check_founder(self, i: discord.Interaction) -> bool:
-        """RÈGLE DURE (2026-06-13) : KICK/BAN = FONDATEUR (super-owner) UNIQUEMENT —
-        même un compte phishé n'est banni que par le fondateur. Le mute reste owner."""
-        if not owner_ids_module.is_super_owner(i.user.id):
-            await i.response.send_message(
-                "🔒 Le **kick/ban est réservé au fondateur**. Tu peux Mute 24h le compte "
-                "(il reste isolé) en attendant la décision du fondateur.",
-                ephemeral=True,
-            )
-            return False
-        return True
-
-    async def _get_member(self, i):
-        return i.guild.get_member(self.target_user_id)
-
-    @discord.ui.button(emoji=visuels.icone("muet"), label="Mute 24h", style=discord.ButtonStyle.secondary, custom_id="cad_mute")
-    async def mute_btn(self, i, b):
-        if not await self._check_owner(i):
-            return
-        try:
-            await i.response.defer(ephemeral=True)
-            member = await self._get_member(i)
-            if not member:
+async def _dossier_agir(i, act: str, uid: int) -> None:
+    """Mute : propriétaire du serveur ou fondateur. Expulsion, ban, faux positif, levée de
+    l'isolement : fondateur seul (règle 2026-06-13)."""
+    fondateur = owner_ids_module.is_super_owner(i.user.id)
+    if act == "mute" and not (fondateur or i.user.id == i.guild.owner_id):
+        return await i.response.send_message(
+            "⛔ Seul le propriétaire du serveur peut décider sur les comptes suspects.", ephemeral=True)
+    if act != "mute" and not fondateur:
+        return await i.response.send_message(
+            "🔒 Réservé au fondateur. Tu peux exclure le compte 24 h en attendant sa décision.", ephemeral=True)
+    await i.response.defer(ephemeral=True)
+    membre = i.guild.get_member(uid)
+    try:
+        if act == "mute":
+            if membre is None:
                 return await i.followup.send("❌ Membre introuvable (parti ?).", ephemeral=True)
-            await member.timeout(
-                timedelta(hours=24),
-                reason=f"Compte suspect — sanction owner {i.user}",
-            )
-            await i.followup.send(f"✅ {member.mention} mute 24h.", ephemeral=True)
-            await self._update_dossier(i, action="🔇 Muté 24h", by=i.user)
-        except discord.Forbidden:
-            await i.followup.send("❌ Permissions insuffisantes pour mute.", ephemeral=True)
-        except Exception as ex:
-            print(f"[CompromisedAccountActionView mute] {ex}")
-            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
-
-    @discord.ui.button(emoji=visuels.icone("expulser"), label="Kick", style=discord.ButtonStyle.danger, custom_id="cad_kick")
-    async def kick_btn(self, i, b):
-        if not await self._check_founder(i):
-            return
-        try:
-            await i.response.defer(ephemeral=True)
-            member = await self._get_member(i)
-            if not member:
+            await membre.timeout(timedelta(hours=24), reason=f"Compte suspect — décision de {i.user}")
+            fait = "🔇 Exclu 24 h"
+        elif act == "kick":
+            if membre is None:
                 return await i.followup.send("❌ Membre introuvable (parti ?).", ephemeral=True)
-            await member.kick(reason=f"Compte suspect — kick owner {i.user}")
-            await i.followup.send(f"✅ {member.mention} expulsé.", ephemeral=True)
-            await self._update_dossier(i, action="👢 Expulsé", by=i.user)
-        except discord.Forbidden:
-            await i.followup.send("❌ Permissions insuffisantes pour kick.", ephemeral=True)
-        except Exception as ex:
-            print(f"[CompromisedAccountActionView kick] {ex}")
-            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            await membre.kick(reason=f"Compte suspect — décision de {i.user}")
+            fait = "👢 Expulsé"
+        elif act == "ban":
+            await i.guild.ban(discord.Object(id=uid), reason=f"Compte suspect — décision de {i.user}",
+                              delete_message_seconds=86400)
+            fait = "🔨 Banni"
+        else:
+            leve = membre is not None and await lift_isolation(membre)
+            fait = "✅ Faux positif, isolement levé" if act == "fp" else "🔓 Isolement levé"
+            if not leve:
+                fait += " (rien à lever)"
+            await log_staff_action(i.guild.id, i.user.id, uid, "degel", detail=fait[:200], surface="founder")
+    except discord.Forbidden:
+        return await i.followup.send("❌ Permissions insuffisantes (hiérarchie des rôles ?).", ephemeral=True)
+    await i.followup.send(f"✅ {fait}.", ephemeral=True)
+    await _dossier_traite(i, fait, uid)
 
-    @discord.ui.button(emoji=visuels.icone("interdit"), label="Ban", style=discord.ButtonStyle.danger, custom_id="cad_ban")
-    async def ban_btn(self, i, b):
-        if not await self._check_founder(i):
-            return
-        try:
-            await i.response.defer(ephemeral=True)
-            member = await self._get_member(i)
-            if not member:
-                # On peut quand même ban par ID
-                try:
-                    user_obj = await bot.fetch_user(self.target_user_id)
-                    await i.guild.ban(user_obj, reason=f"Compte suspect — ban owner {i.user}", delete_message_seconds=86400)
-                    await i.followup.send(f"✅ Utilisateur banni (était parti) : `{user_obj}`.", ephemeral=True)
-                    await self._update_dossier(i, action="🔨 Banni", by=i.user)
-                except Exception as ex2:
-                    await i.followup.send(f"❌ Impossible : `{ex2}`", ephemeral=True)
-                return
-            await member.ban(
-                reason=f"Compte suspect — ban owner {i.user}",
-                delete_message_seconds=86400,
-            )
-            await i.followup.send(f"✅ {member.mention} banni définitivement.", ephemeral=True)
-            await self._update_dossier(i, action="🔨 Banni", by=i.user)
-        except discord.Forbidden:
-            await i.followup.send("❌ Permissions insuffisantes pour ban.", ephemeral=True)
-        except Exception as ex:
-            print(f"[CompromisedAccountActionView ban] {ex}")
-            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
 
-    async def _do_unfreeze_and_lift(self, i) -> str:
-        """TASK A5 : DÉGÈLE le compte + lève l'isolement (quarantaine + timeout).
-        Appelé par « Faux positif » et « 🔓 Dégeler » (tous deux founder-only).
-        Renvoie un court résumé texte des actions. Fail-safe."""
-        parts = []
-        try:
-            if await unfreeze_account(i.guild.id, self.target_user_id):
-                parts.append("💸 économie dégelée")
-        except Exception as ex:
-            print(f"[CAD _do_unfreeze_and_lift unfreeze] {ex}")
-        try:
-            member = await self._get_member(i)
-            if member is not None:
-                if await lift_isolation(member):
-                    parts.append("🔓 isolement levé")
-        except Exception as ex:
-            print(f"[CAD _do_unfreeze_and_lift lift] {ex}")
-        summary = " · ".join(parts) if parts else "aucune action (déjà dégelé/parti)"
-        # E1 : audit staff consolidé — dégel = action fondateur (QUI a dégelé QUI).
-        if parts:
-            try:
-                await log_staff_action(
-                    i.guild.id, i.user.id, self.target_user_id, "degel",
-                    detail=summary[:200], surface="founder",
-                )
-            except Exception as _aex:
-                print(f"[CAD audit] {_aex}")
-        return summary
+async def _dossier_traite(i, fait: str, uid: int) -> None:
+    """Le dossier passe en gris avec sa décision, ses boutons éteints."""
+    msg = i.message
+    if msg is None or not msg.embeds:
+        return
+    old = msg.embeds[0]
+    new = discord.Embed(title=old.title or "Compte suspect détecté", description=old.description, color=0x95A5A6)
+    for f in old.fields:
+        new.add_field(name=f.name, value=f.value, inline=f.inline)
+    new.add_field(name="Statut", value=f"{fait} par {i.user.mention} · <t:{int(time.time())}:R>", inline=False)
+    if old.thumbnail:
+        new.set_thumbnail(url=old.thumbnail.url)
+    new.set_footer(text=f"Dossier traité · action par {i.user}")
+    try:
+        await msg.edit(embed=new, view=_dossier_vue(uid, eteinte=True))
+    except discord.HTTPException as ex:
+        _logerr("dossier.statut", ex, guild_id=i.guild.id)
 
-    @discord.ui.button(emoji=visuels.icone("valider"), label="Faux positif", style=discord.ButtonStyle.success, custom_id="cad_fp")
-    async def false_positive_btn(self, i, b):
-        # TASK A5 : un faux positif RESTAURE le compte (dégel + levée d'isolement) ;
-        # cette restauration est réservée au FONDATEUR (_check_founder).
-        if not await self._check_founder(i):
-            return
-        try:
-            await i.response.defer(ephemeral=True)
-            summary = await self._do_unfreeze_and_lift(i)
-            await i.followup.send(
-                f"✅ Faux positif — compte restauré.\n_{summary}_", ephemeral=True)
-            await self._update_dossier(i, action="✅ Faux positif (restauré)", by=i.user)
-        except Exception as ex:
-            print(f"[CompromisedAccountActionView fp] {ex}")
-            try:
-                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
 
-    @discord.ui.button(emoji=visuels.icone("deverrou"), label="Dégeler", style=discord.ButtonStyle.primary, custom_id="cad_unfreeze")
-    async def unfreeze_btn(self, i, b):
-        # TASK A5 : dégel + levée d'isolement, FONDATEUR uniquement. Garde le compte
-        # dans le serveur (contrairement à un kick/ban) mais lui rend ses droits.
-        if not await self._check_founder(i):
-            return
-        try:
-            await i.response.defer(ephemeral=True)
-            summary = await self._do_unfreeze_and_lift(i)
-            await i.followup.send(
-                f"🔓 Compte dégelé.\n_{summary}_", ephemeral=True)
-            await self._update_dossier(i, action="🔓 Dégelé", by=i.user)
-        except Exception as ex:
-            print(f"[CompromisedAccountActionView unfreeze] {ex}")
-            try:
-                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
+class DossierCompromisBouton(discord.ui.DynamicItem[Button],
+                             template=r"cad:(?P<act>mute|kick|ban|fp|degel):(?P<uid>\d+)"):
+    def __init__(self, act: str, uid: int):
+        _a, icone, libelle, style = next(b for b in _DOSSIER_BOUTONS if b[0] == act)
+        super().__init__(Button(emoji=visuels.icone(icone), label=libelle, style=style, custom_id=f"cad:{act}:{uid}"))
+        self.act, self.uid = act, int(uid)
 
-    async def _update_dossier(self, i, *, action: str, by):
-        """Marque le dossier comme traité (édite l'embed)."""
-        try:
-            msg = i.message
-            if not msg or not msg.embeds:
-                return
-            old = msg.embeds[0]
-            new = discord.Embed(
-                title=old.title or "🚨 Compte suspect détecté",
-                description=old.description,
-                color=0x95A5A6,  # gris : traité
-            )
-            for f in old.fields:
-                new.add_field(name=f.name, value=f.value, inline=f.inline)
-            new.add_field(
-                name="Statut",
-                value=f"{action} par {by.mention} · <t:{int(time.time())}:R>",
-                inline=False,
-            )
-            new.set_thumbnail(url=old.thumbnail.url if old.thumbnail else None)
-            new.set_footer(text=f"Dossier traité · action par {by}")
-            # Désactiver les boutons
-            for child in self.children:
-                child.disabled = True
-            await msg.edit(embed=new, view=self)
-        except Exception as ex:
-            print(f"[CompromisedAccountActionView _update_dossier] {ex}")
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["act"], int(match["uid"]))
+
+    async def callback(self, i):
+        await _dossier_agir(i, self.act, self.uid)
+
+
+class DossierCompromisAncien(discord.ui.DynamicItem[Button], template=r"cad_(?P<act>mute|kick|ban|fp|unfreeze)"):
+    """Les dossiers d'avant le 19/10/2026 ne portaient pas le membre dans leurs boutons : ils ne
+    peuvent plus agir. On le dit, au lieu de « l'interaction a échoué »."""
+    def __init__(self, act: str):
+        super().__init__(Button(label="Ancien dossier", custom_id=f"cad_{act}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["act"])
+
+    async def callback(self, i):
+        await i.response.send_message(
+            "Ce dossier date d'avant une mise à jour : ses boutons ne peuvent plus agir. "
+            "Décide depuis le site (fiche du membre).", ephemeral=True)
 
 
 # ─────────────────────────────── BOUTIQUE CONFIG ───────────────────────────────
@@ -18355,51 +18121,6 @@ async def handle_auto_help(message):
 
     except Exception as ex:
         print(f"[AUTO_HELP] Erreur générale: {ex}")
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  TASK A5 — GEL ÉCONOMIE d'un compte compromis / isolé (anti-drain)
-#  Puisqu'on ne bannit plus (règle founder-only), on gèle les MOUVEMENTS d'argent
-#  d'un compte signalé compromis (compromised_detector score≥60 / honeypot hit)
-#  pour empêcher un pirate de vider/transférer les avoirs pendant l'isolement.
-#  Le DÉGEL est réservé au FONDATEUR (panel CompromisedAccountActionView).
-#  - freeze_account / unfreeze_account : pose / lève le gel (idempotents, fail-safe).
-#  - is_account_frozen : FAIL-OPEN sur erreur infra (renvoie False → ne bloque pas
-#    un membre légitime sur un hoquet DB) ; un compte RÉELLEMENT gelé → True.
-# ═════════════════════════════════════════════════════════════════════════════
-
-
-async def freeze_account(guild_id, user_id, reason="compte compromis"):
-    """Gèle l'économie d'un compte (idempotent). Fail-safe : log mais ne lève pas."""
-    try:
-        async with get_db() as db:
-            await db.execute(
-                "INSERT INTO account_freeze(guild_id, user_id, reason) VALUES(?,?,?) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET reason=excluded.reason",
-                (int(guild_id), int(user_id), str(reason)[:500]),
-            )
-            await db.commit()
-        print(f"[freeze_account] guild={guild_id} user={user_id} reason={reason!r}")
-        return True
-    except Exception as ex:
-        print(f"[freeze_account] {ex}")
-        return False
-
-
-async def unfreeze_account(guild_id, user_id):
-    """Lève le gel d'un compte (idempotent). Fail-safe."""
-    try:
-        async with get_db() as db:
-            await db.execute(
-                "DELETE FROM account_freeze WHERE guild_id=? AND user_id=?",
-                (int(guild_id), int(user_id)),
-            )
-            await db.commit()
-        print(f"[unfreeze_account] guild={guild_id} user={user_id}")
-        return True
-    except Exception as ex:
-        print(f"[unfreeze_account] {ex}")
-        return False
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🧹 CLEANUP AUTO DES DB ANCIENNES (Phase 20)
@@ -18821,19 +18542,23 @@ class PanelEditViewV2(LayoutView):
 
     async def _cb_cat(self, i):
         try:
-            cats = list(self.g.categories)
-            if not cats:
+            if not self.g.categories:
                 return await i.response.send_message("❌ Aucune catégorie sur ce serveur", ephemeral=True)
-            v = PanelCatPaginatedView(self.u, self.g, self.pid)
-            await i.response.edit_message(
-                embed=discord.Embed(
-                    title="Choisir la catégorie",
-                    description=f"**{len(cats)} catégories** · Page 1/{v.max_page+1}",
-                    color=0x9B59B6,
-                ),
-                view=v,
-                attachments=[],
-            )
+            pid = self.pid
+
+            async def _save(guild_id, cat_id):
+                c = await cfg(guild_id)
+                panels = c.get('ticket_panels', {}) or {}
+                if pid in panels:
+                    panels[pid]['category'] = cat_id
+                    await db_set(guild_id, 'ticket_panels', panels)
+            v = V2GenericChannelPicker(
+                self.u, self.g,
+                return_panel_factory=lambda: PanelEditViewV2(self.u, self.g, self.pid),
+                title="Catégorie des tickets",
+                description="Les tickets de ce type s'ouvrent dans cette catégorie.",
+                color=0x9B59B6, channel_types=[discord.ChannelType.category], save_fn=_save)
+            await v.render_to(i, edit=True)
         except Exception as ex:
             await self._safe_error(i, ex)
 
@@ -18861,8 +18586,7 @@ class PanelEditViewV2(LayoutView):
 
     async def _cb_qs(self, i):
         try:
-            v = PanelQsView(self.u, self.g, self.pid)
-            await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+            await PanelQsView(self.u, self.g, self.pid).render_to(i, edit=True)
         except Exception as ex:
             await self._safe_error(i, ex)
 
@@ -18888,8 +18612,7 @@ class PanelEditViewV2(LayoutView):
 
     async def _cb_blacklist(self, i):
         try:
-            v = PanelBlacklistView(self.u, self.g, self.pid)
-            await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+            await PanelBlacklistView(self.u, self.g, self.pid).render_to(i, edit=True)
         except Exception as ex:
             await self._safe_error(i, ex)
 
@@ -19026,340 +18749,124 @@ class WelcomeMessageModalSimple(Modal):
 #                        🚫 SYSTÈME DE BLACKLIST PAR PANEL
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class PanelBlacklistView(View):
-    """Gestion de la blacklist d'un panel de ticket"""
+class PanelBlacklistView(LayoutView):
+    """Les membres qui ne peuvent pas ouvrir ce type de ticket. 19/10/2026 : en V2 de bout en bout —
+    le panneau parent est en V2, et l'éditer avec un embed répondait « Erreur 400 »."""
+    PAR_PAGE = 10
+
     def __init__(self, u, g, pid, page=0):
         super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-        self.pid = pid
-        self.page = page
-        self.per_page = 10
-    
-    async def get_panel(self):
+        self.u, self.g, self.pid, self.page = u, g, pid, page
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def _liste(self) -> list:
         c = await cfg(self.g.id)
-        return c.get('ticket_panels', {}).get(self.pid, {})
-    
-    async def embed(self):
-        pnl = await self.get_panel()
-        blacklist = pnl.get('blacklist', [])
-        
-        e = discord.Embed(
-            title=f"Blacklist - {pnl.get('name', '?')}",
-            color=0xE74C3C
-        )
-        
-        if not blacklist:
-            e.description = "*Aucun membre blacklisté sur ce panel*\n\nUtilisez le bouton **Ajouter** pour blacklister un membre."
+        return list(c.get('ticket_panels', {}).get(self.pid, {}).get('blacklist', []))
+
+    async def _ecrire(self, liste: list) -> None:
+        c = await cfg(self.g.id)
+        panels = c.get('ticket_panels', {})
+        if self.pid in panels:
+            panels[self.pid]['blacklist'] = liste
+            await db_set(self.g.id, 'ticket_panels', panels)
+
+    def _nom(self, uid: int) -> str:
+        m = self.g.get_member(uid)
+        return (m.display_name if m else f"Parti du serveur ({uid})")[:100]
+
+    async def render_to(self, i, *, edit=True, confirmer=False):
+        liste = await self._liste()
+        pages = max(1, (len(liste) - 1) // self.PAR_PAGE + 1)
+        self.page = min(self.page, pages - 1)
+        morceau = liste[self.page * self.PAR_PAGE:(self.page + 1) * self.PAR_PAGE]
+        texte = ("\n".join(f"• <@{uid}> (`{uid}`)" for uid in morceau) if liste
+                 else "_Personne : tout le monde peut ouvrir ce type de ticket._")
+        items = [v2_title(f"Liste noire ({len(liste)})", level=3), v2_body(texte)]
+        if pages > 1:
+            items.append(v2_subtitle(f"Page {self.page + 1}/{pages}"))
+
+        ajout = discord.ui.UserSelect(placeholder="Ajouter des membres…", min_values=1, max_values=10)
+
+        async def _ajouter(it):
+            await self._cb_ajout(it, ajout)
+        ajout.callback = _ajouter
+        items.append(discord.ui.ActionRow(ajout))
+        if morceau:
+            retrait = discord.ui.Select(
+                placeholder="Retirer de la liste…", min_values=1, max_values=len(morceau),
+                options=[discord.SelectOption(label=self._nom(uid), value=str(uid)) for uid in morceau])
+
+            async def _retirer(it):
+                await self._cb_retrait(it, retrait)
+            retrait.callback = _retirer
+            items.append(discord.ui.ActionRow(retrait))
+
+        boutons = []
+        if pages > 1:
+            prec = Button(emoji=visuels.icone("retour"), label="Préc.", style=discord.ButtonStyle.secondary,
+                          disabled=self.page == 0)
+            suiv = Button(emoji=visuels.icone("activer"), label="Suiv.", style=discord.ButtonStyle.secondary,
+                          disabled=self.page >= pages - 1)
+
+            async def _prec(it):
+                self.page -= 1
+                await self.render_to(it, edit=True)
+
+            async def _suiv(it):
+                self.page += 1
+                await self.render_to(it, edit=True)
+            prec.callback, suiv.callback = _prec, _suiv
+            boutons += [prec, suiv]
+        if confirmer:
+            oui = Button(emoji=visuels.icone("valider"), label=f"Oui, retirer les {len(liste)}",
+                         style=discord.ButtonStyle.danger)
+            non = Button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary)
+
+            async def _oui(it):
+                await self._ecrire([])
+                await self.render_to(it, edit=True)
+
+            async def _non(it):
+                await self.render_to(it, edit=True)
+            oui.callback, non.callback = _oui, _non
+            boutons += [oui, non]
         else:
-            # Pagination
-            total_pages = max(1, (len(blacklist) - 1) // self.per_page + 1)
-            start = self.page * self.per_page
-            end = start + self.per_page
-            page_users = blacklist[start:end]
-            
-            desc = f"**{len(blacklist)}** membre(s) blacklisté(s)\n\n"
-            for uid in page_users:
-                member = self.g.get_member(uid)
-                if member:
-                    desc += f"• {member.mention} (`{uid}`)\n"
-                else:
-                    desc += f"• *Utilisateur parti* (`{uid}`)\n"
-            
-            e.description = desc
-            e.set_footer(text=f"Page {self.page + 1}/{total_pages}")
-        
-        return e
-    
-    @discord.ui.button(emoji=visuels.icone("ajouter"), label="Ajouter", style=discord.ButtonStyle.success, row=0)
-    async def add_member(self, i, b):
-        await i.response.send_modal(BlacklistAddModal(self.u, self.g, self.pid))
-    
-    @discord.ui.button(emoji=visuels.icone("retirer"), label="Retirer", style=discord.ButtonStyle.danger, row=0)
-    async def remove_member(self, i, b):
-        pnl = await self.get_panel()
-        blacklist = pnl.get('blacklist', [])
-        if not blacklist:
-            return await i.response.send_message("❌ La blacklist est vide", ephemeral=True)
-        await i.response.send_modal(BlacklistRemoveModal(self.u, self.g, self.pid))
-    
-    @discord.ui.button(emoji=visuels.icone("supprimer"), label="Tout vider", style=discord.ButtonStyle.danger, row=0)
-    async def clear_all(self, i, b):
-        pnl = await self.get_panel()
-        blacklist = pnl.get('blacklist', [])
-        if not blacklist:
-            return await i.response.send_message("❌ La blacklist est déjà vide", ephemeral=True)
-        
-        # Confirmer
-        v = BlacklistClearConfirmView(self.u, self.g, self.pid)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="⚠️ Confirmer la suppression",
-                description=f"Êtes-vous sûr de vouloir retirer **{len(blacklist)}** membre(s) de la blacklist ?",
-                color=0xE74C3C
-            ),
-            view=v
-        )
-    
-    @discord.ui.button(emoji=visuels.icone("retour"), label="Préc.", style=discord.ButtonStyle.secondary, row=1)
-    async def prev_page(self, i, b):
-        if self.page > 0:
-            self.page -= 1
-        v = PanelBlacklistView(self.u, self.g, self.pid, self.page)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(emoji=visuels.icone("activer"), label="Suiv.", style=discord.ButtonStyle.secondary, row=1)
-    async def next_page(self, i, b):
-        pnl = await self.get_panel()
-        blacklist = pnl.get('blacklist', [])
-        max_page = max(0, (len(blacklist) - 1) // self.per_page)
-        if self.page < max_page:
-            self.page += 1
-        v = PanelBlacklistView(self.u, self.g, self.pid, self.page)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(emoji=visuels.icone("actualiser"), label="Rafraîchir", style=discord.ButtonStyle.secondary, row=1)
-    async def refresh(self, i, b):
-        v = PanelBlacklistView(self.u, self.g, self.pid, self.page)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.primary, row=2)
-    async def back(self, i, b):
-        # Phase 3.0h : retour vers V2 panel
-        v = PanelEditViewV2(self.u, self.g, self.pid)
-        await v.render_to(i, edit=True)
+            vider = Button(emoji=visuels.icone("supprimer"), label="Tout vider", style=discord.ButtonStyle.danger,
+                           disabled=not liste)
+            retour = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary)
 
+            async def _vider(it):
+                await self.render_to(it, edit=True, confirmer=True)
 
-class BlacklistAddModal(Modal, title="Ajouter à la blacklist"):
-    def __init__(self, u, g, pid):
-        super().__init__()
-        self.u = u
-        self.g = g
-        self.pid = pid
-    
-    user_input = TextInput(
-        label="ID ou @mention du membre",
-        placeholder="Ex: 123456789012345678 ou @Pseudo",
-        required=True,
-        max_length=100
-    )
-    
-    reason = TextInput(
-        label="Raison (optionnel)",
-        placeholder="Ex: Spam de tickets, comportement abusif...",
-        required=False,
-        max_length=200
-    )
-    
-    async def on_submit(self, i):
-        try:
-            # Extraire l'ID du membre
-            user_str = self.user_input.value.strip()
-            user_id = None
-            
-            # Si c'est une mention <@123456789>
-            if user_str.startswith('<@') and user_str.endswith('>'):
-                user_str = user_str[2:-1]
-                if user_str.startswith('!'):
-                    user_str = user_str[1:]
-            
-            try:
-                user_id = int(user_str)
-            except ValueError:
-                # Chercher par nom
-                member = discord.utils.find(lambda m: m.name.lower() == user_str.lower() or m.display_name.lower() == user_str.lower(), self.g.members)
-                if member:
-                    user_id = member.id
-            
-            if not user_id:
-                return await i.response.send_message("❌ Membre introuvable. Utilisez un ID ou une @mention.", ephemeral=True)
-            
-            # Vérifier que ce n'est pas un admin
-            member = self.g.get_member(user_id)
-            if member and (member.guild_permissions.administrator or member.id == self.g.owner_id):
-                return await i.response.send_message("❌ Impossible de blacklister un administrateur.", ephemeral=True)
-            
-            # Ajouter à la blacklist
-            c = await cfg(self.g.id)
-            panels = c.get('ticket_panels', {})
-            if self.pid not in panels:
-                return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
-            
-            blacklist = panels[self.pid].get('blacklist', [])
-            if user_id in blacklist:
-                return await i.response.send_message("❌ Ce membre est déjà blacklisté sur ce panel.", ephemeral=True)
-            
-            blacklist.append(user_id)
-            panels[self.pid]['blacklist'] = blacklist
-            await db_set(self.g.id, 'ticket_panels', panels)
-            
-            # Message de confirmation
-            member_txt = f"<@{user_id}>" if member else f"`{user_id}`"
-            reason_txt = f"\n📝 Raison: *{self.reason.value}*" if self.reason.value else ""
-            
-            v = PanelBlacklistView(self.u, self.g, self.pid)
-            await i.response.edit_message(
-                embed=await v.embed(),
-                view=v
-            )
-            await i.followup.send(f"✅ {member_txt} a été blacklisté de ce panel.{reason_txt}", ephemeral=True)
-            
-        except Exception as ex:
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-
-
-class BlacklistRemoveModal(Modal, title="✅ Retirer de la blacklist"):
-    def __init__(self, u, g, pid):
-        super().__init__()
-        self.u = u
-        self.g = g
-        self.pid = pid
-    
-    user_input = TextInput(
-        label="ID ou @mention du membre",
-        placeholder="Ex: 123456789012345678 ou @Pseudo",
-        required=True,
-        max_length=100
-    )
-    
-    async def on_submit(self, i):
-        try:
-            # Extraire l'ID du membre
-            user_str = self.user_input.value.strip()
-            user_id = None
-            
-            # Si c'est une mention <@123456789>
-            if user_str.startswith('<@') and user_str.endswith('>'):
-                user_str = user_str[2:-1]
-                if user_str.startswith('!'):
-                    user_str = user_str[1:]
-            
-            try:
-                user_id = int(user_str)
-            except ValueError:
-                # Chercher par nom
-                member = discord.utils.find(lambda m: m.name.lower() == user_str.lower() or m.display_name.lower() == user_str.lower(), self.g.members)
-                if member:
-                    user_id = member.id
-            
-            if not user_id:
-                return await i.response.send_message("❌ Membre introuvable. Utilisez un ID.", ephemeral=True)
-            
-            # Retirer de la blacklist
-            c = await cfg(self.g.id)
-            panels = c.get('ticket_panels', {})
-            if self.pid not in panels:
-                return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
-            
-            blacklist = panels[self.pid].get('blacklist', [])
-            if user_id not in blacklist:
-                return await i.response.send_message("❌ Ce membre n'est pas blacklisté sur ce panel.", ephemeral=True)
-            
-            blacklist.remove(user_id)
-            panels[self.pid]['blacklist'] = blacklist
-            await db_set(self.g.id, 'ticket_panels', panels)
-            
-            # Message de confirmation
-            member = self.g.get_member(user_id)
-            member_txt = f"<@{user_id}>" if member else f"`{user_id}`"
-            
-            v = PanelBlacklistView(self.u, self.g, self.pid)
-            await i.response.edit_message(
-                embed=await v.embed(),
-                view=v
-            )
-            await i.followup.send(f"✅ {member_txt} a été retiré de la blacklist.", ephemeral=True)
-            
-        except Exception as ex:
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-
-
-class BlacklistClearConfirmView(View):
-    def __init__(self, u, g, pid):
-        super().__init__(timeout=60)
-        self.u = u
-        self.g = g
-        self.pid = pid
-    
-    @discord.ui.button(emoji=visuels.icone("valider"), label="Confirmer", style=discord.ButtonStyle.danger)
-    async def confirm(self, i, b):
-        c = await cfg(self.g.id)
-        panels = c.get('ticket_panels', {})
-        if self.pid in panels:
-            old_count = len(panels[self.pid].get('blacklist', []))
-            panels[self.pid]['blacklist'] = []
-            await db_set(self.g.id, 'ticket_panels', panels)
-        
-        v = PanelBlacklistView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-        await i.followup.send(f"✅ **{old_count}** membre(s) ont été retirés de la blacklist.", ephemeral=True)
-    
-    @discord.ui.button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary)
-    async def cancel(self, i, b):
-        v = PanelBlacklistView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-
-
-class PanelCatPaginatedView(View):
-    """Sélecteur de catégorie paginé pour les panels de tickets"""
-    def __init__(self, u, g, pid, page=0):
-        super().__init__(timeout=180)
-        self.u = u
-        self.g = g
-        self.pid = pid
-        self.page = page
-        self.categories = list(g.categories)
-        self.per_page = 23
-        self.max_page = max(0, (len(self.categories) - 1) // self.per_page)
-        self._build()
-
-    def _build(self):
+            async def _retour(it):
+                await PanelEditViewV2(self.u, self.g, self.pid).render_to(it, edit=True)
+            vider.callback, retour.callback = _vider, _retour
+            boutons += [vider, retour]
+        items.append(discord.ui.ActionRow(*boutons))
         self.clear_items()
-        start = self.page * self.per_page
-        end = start + self.per_page
-        page_cats = self.categories[start:end]
-        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in page_cats]
-        if opts:
-            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Catégorie...", options=opts)
-            select.callback = self._select_cb
-            self.add_item(select)
-        if self.max_page > 0:
-            prev_btn = discord.ui.Button(emoji=visuels.icone("retour", '◀️'), style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
-            prev_btn.callback = self._prev
-            self.add_item(prev_btn)
-            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
-            self.add_item(page_btn)
-            next_btn = discord.ui.Button(emoji=visuels.icone("activer", '▶️'), style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
-            next_btn.callback = self._next
-            self.add_item(next_btn)
-        back_btn = discord.ui.Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, row=2)
-        back_btn.callback = self._back
-        self.add_item(back_btn)
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+        await _afficher_panneau(self, i, edit)
 
-    async def _prev(self, i):
-        self.page -= 1
-        self._build()
-        await i.response.edit_message(embed=discord.Embed(title="Choisir la catégorie", description=f"**{len(self.categories)} catégories** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+    async def _cb_ajout(self, i, sel):
+        liste, refuses = await self._liste(), []
+        for m in sel.values:
+            if (getattr(m, "bot", False) or m.id == self.g.owner_id
+                    or getattr(getattr(m, "guild_permissions", None), "administrator", False)):
+                refuses.append(m.mention)
+            elif m.id not in liste:
+                liste.append(m.id)
+        await self._ecrire(liste)
+        await self.render_to(i, edit=True)
+        if refuses:
+            await i.followup.send(f"Jamais sur la liste noire (administration ou bot) : {', '.join(refuses)}",
+                                  ephemeral=True)
 
-    async def _next(self, i):
-        self.page += 1
-        self._build()
-        await i.response.edit_message(embed=discord.Embed(title="Choisir la catégorie", description=f"**{len(self.categories)} catégories** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
-
-    async def _back(self, i):
-        # Phase 3.0h : retour vers V2 panel
-        v = PanelEditViewV2(self.u, self.g, self.pid)
-        await v.render_to(i, edit=True)
-
-    async def _select_cb(self, i):
-        c = await cfg(i.guild.id)
-        panels = c.get('ticket_panels', {})
-        if self.pid in panels:
-            panels[self.pid]['category'] = int(i.data['values'][0])
-            await db_set(i.guild.id, 'ticket_panels', panels)
-        # Phase 3.0h : retour vers V2 panel
-        v = PanelEditViewV2(self.u, self.g, self.pid)
-        await v.render_to(i, edit=True)
+    async def _cb_retrait(self, i, sel):
+        retirer = {int(v) for v in sel.values}
+        await self._ecrire([uid for uid in await self._liste() if uid not in retirer])
+        await self.render_to(i, edit=True)
 
 
 class SetMaxModal(Modal, title="Max tickets par utilisateur"):
@@ -19382,50 +18889,48 @@ class SetMaxModal(Modal, title="Max tickets par utilisateur"):
         vw = PanelEditViewV2(self.u, self.g, self.pid)
         await vw.render_to(i, edit=True)
 
-class PanelQsView(View):
+class PanelQsView(LayoutView):
+    """Les questions du formulaire d'un type de ticket (5 au plus). 19/10/2026 : en V2 de bout en bout,
+    même raison que la liste noire."""
+
     def __init__(self, u, g, pid):
         super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-        self.pid = pid
-    
-    async def embed(self):
+        self.u, self.g, self.pid = u, g, pid
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, i, *, edit=True):
         c = await cfg(self.g.id)
-        pnl = c.get('ticket_panels', {}).get(self.pid, {})
-        qs = pnl.get('questions', [])
-        e = discord.Embed(title="Questions du panel", color=C.PURPLE)
-        if qs:
-            for j, q in enumerate(qs, 1):
-                e.add_field(name=f"{j}. {q['title']}", value=q['question'][:100], inline=False)
-        else:
-            e.description = "*Aucune question configurée*"
-        e.set_footer(text="Maximum 5 questions")
-        return e
-    
-    @discord.ui.button(emoji=visuels.icone("ajouter"), label="Ajouter", style=discord.ButtonStyle.success, row=0)
-    async def add(self, i, b):
-        c = await cfg(self.g.id)
-        pnl = c.get('ticket_panels', {}).get(self.pid, {})
-        if len(pnl.get('questions', [])) >= 5:
-            return await i.response.send_message("❌ Maximum 5 questions", ephemeral=True)
-        await i.response.send_modal(AddQModal(self.u, self.g, self.pid))
-    
-    @discord.ui.button(emoji=visuels.icone("supprimer"), label="Tout supprimer", style=discord.ButtonStyle.danger, row=0)
-    async def clear(self, i, b):
-        c = await cfg(self.g.id)
-        panels = c.get('ticket_panels', {})
-        if self.pid in panels:
-            panels[self.pid]['questions'] = []
-            await db_set(self.g.id, 'ticket_panels', panels)
-        # Phase 3.9 fix : `pid` undefined (pyflakes catch) - utiliser self.pid
-        v = PanelQsView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        # Phase 3.0h : retour vers V2 panel
-        v = PanelEditViewV2(self.u, self.g, self.pid)
-        await v.render_to(i, edit=True)
+        qs = c.get('ticket_panels', {}).get(self.pid, {}).get('questions', [])
+        lignes = ("\n".join(f"**{j}. {q['title']}**\n{q['question'][:100]}" for j, q in enumerate(qs, 1))
+                  or "_Aucune question : le ticket s'ouvre sans formulaire._")
+        ajouter = Button(emoji=visuels.icone("ajouter"), label="Ajouter", style=discord.ButtonStyle.success,
+                         disabled=len(qs) >= 5)
+        vider = Button(emoji=visuels.icone("supprimer"), label="Tout supprimer", style=discord.ButtonStyle.danger,
+                       disabled=not qs)
+        retour = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary)
+
+        async def _ajouter(it):
+            await it.response.send_modal(AddQModal(self.u, self.g, self.pid))
+
+        async def _vider(it):
+            c2 = await cfg(self.g.id)
+            panels = c2.get('ticket_panels', {})
+            if self.pid in panels:
+                panels[self.pid]['questions'] = []
+                await db_set(self.g.id, 'ticket_panels', panels)
+            await self.render_to(it, edit=True)
+
+        async def _retour(it):
+            await PanelEditViewV2(self.u, self.g, self.pid).render_to(it, edit=True)
+        ajouter.callback, vider.callback, retour.callback = _ajouter, _vider, _retour
+        self.clear_items()
+        self.add_item(v2_container(
+            v2_title("Questions du formulaire", level=3), v2_body(lignes), v2_subtitle("5 questions au maximum"),
+            discord.ui.ActionRow(ajouter, vider, retour), color=Palette.ACCENT))
+        await _afficher_panneau(self, i, edit)
+
 
 class AddQModal(Modal, title="Ajouter une question"):
     t = TextInput(label="Titre (affiché dans le formulaire)", placeholder="Ex: Pseudo en jeu", max_length=45)
@@ -19443,8 +18948,8 @@ class AddQModal(Modal, title="Ajouter une question"):
         if self.pid in panels:
             panels[self.pid].setdefault('questions', []).append({'title': self.t.value, 'question': self.q.value})
             await db_set(self.g.id, 'ticket_panels', panels)
-        v = PanelQsView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        await PanelQsView(self.u, self.g, self.pid).render_to(i, edit=True)
+
 
 class SendPanelPaginatedView(LayoutView):
     """Sélecteur de salon paginé pour envoyer un panel de tickets.
@@ -19978,17 +19483,9 @@ async def on_ready():
     # 1 seul enregistrement couvre TOUS les pid via le template ticket_toggle_<pid>. 2026-06-16.
     try:
         bot.add_dynamic_items(TicketToggleDynamic)
+        bot.add_dynamic_items(DossierCompromisBouton, DossierCompromisAncien)  # dossiers « compte suspect »
     except Exception as ex:
         print(f"[on_ready add_dynamic_items TicketToggleDynamic] {ex}")
-    try:
-        async with get_db() as db:
-            async with db.execute('SELECT data FROM guild_config') as c:
-                for row in await c.fetchall():
-                    try:
-                        data = json.loads(row[0]) if row[0] else {}
-                        for pid in data.get('ticket_panels', {}):
-                            bot.add_view(TicketCreateView(pid))
-                    except: pass
             
     except: pass
     
@@ -20492,7 +19989,6 @@ async def on_ready():
         honeypot_module.setup(
             bot, get_db, db_get, _v2h,
             staff_sanction_module=staff_sanction_module,
-            freeze_fn=freeze_account,  # TASK A5 : gel économie sur hit honeypot
         )
         await honeypot_module.init_db()
         # Phase 158 : plus d'auto-create. Owner configure le salon via
@@ -22054,12 +21550,14 @@ async def on_member_join(m):
                 # par _kick_young_account (DM + immunités + kick direct) — surtout PAS par
                 # sanction(), qui dégraderait ce kick automatique en isolement.
                 if act == 'kick':
-                    await _kick_young_account(m, f"Compte trop récent ({age} j) — anti-raid auto")
+                    if await _kick_young_account(m, f"Compte trop récent ({age} j) — anti-raid auto"):
+                        return  # parti : plus rien à faire
                 elif act in ('mute', 'ban'):
                     await sanction(m, act, int(c.get('newaccount_mute_duration', 60) or 60),
                                    f"Compte trop récent ({age} j)", m.guild)
-                # act == 'delete' : surveillance seule, aucune sanction à l'arrivée.
-                return  # Ne pas continuer
+                # act == 'delete' : surveillance seule. Toujours là (surveillé, exclu, ou expulsion
+                # refusée) : la suite de l'arrivée continue — l'anti-double-compte compte surtout pour
+                # les comptes récents (audit 19/10/2026).
         
         # ═══════════════ ANTI-ALT (Comptes Secondaires) ═══════════════
         # Toujours sauvegarder le fingerprint du nouveau membre
@@ -22251,34 +21749,26 @@ async def _handle_antiraid_join(member):
     # Appliquer l'action
     applied = 0
     failed = 0
-    for m in recent_members:
+    isoles = set()
+    if action == 'lockdown':
+        # Une fois par vague, que des comptes récents soient là ou non.
         try:
-            if action in ('kick', 'ban'):
-                # RÈGLE FONDATEUR-ONLY : raid → on ISOLE chaque compte (jamais kick/ban auto).
-                await isolate_member(m, f"Anti-Raid auto : {len(joins)} joins en {window}s")
-            elif action == 'lockdown':
-                # Lockdown = élève verification level + auto-restore après 10 min
-                try:
-                    previous_level = member.guild.verification_level
-                    await member.guild.edit(verification_level=discord.VerificationLevel.highest, reason="Anti-Raid lockdown")
-                    # Schedule restoration
-                    async def _restore_lockdown(guild, prev):
-                        try:
-                            await asyncio.sleep(600)  # 10 minutes
-                            await guild.edit(verification_level=prev, reason="Anti-Raid lockdown terminé")
-                            print(f"[ANTIRAID] guild={guild.id} lockdown restauré à {prev}")
-                        except Exception as ex:
-                            # CRITIQUE : si la restauration échoue, le serveur reste verrouillé.
-                            _logerr("security.lockdown_restore", ex, guild_id=getattr(guild, "id", 0))
-                    asyncio.create_task(_restore_lockdown(member.guild, previous_level))
-                except Exception as ex:
-                    _logerr("security.lockdown_set", ex, guild_id=getattr(member.guild, "id", 0))
-                # Pas d'action sur le membre individuellement en lockdown mode
-                break
-            applied += 1
-        except Exception as ex:
-            print(f"[ANTIRAID action] {ex}")
-            failed += 1
+            await _verrou_raid(member.guild)
+        except discord.HTTPException as ex:
+            _logerr("security.lockdown_set", ex, guild_id=member.guild.id)
+    elif action in ('kick', 'ban'):
+        for m in recent_members:
+            # RÈGLE FONDATEUR-ONLY : raid → on ISOLE chaque compte récent (jamais kick/ban auto).
+            try:
+                res = await isolate_member(m, f"Anti-Raid auto : {len(joins)} joins en {window}s")
+            except Exception as ex:
+                _logerr("security.raid_isolement", ex, guild_id=member.guild.id)
+                res = {}
+            if res.get("isolated"):
+                applied += 1
+                isoles.add(m.id)
+            else:
+                failed += 1
 
     # Journal unifié + casier. L'ancien système alimentait send_log('anti_raid'),
     # pas celui-ci : les raids n'apparaissaient donc ni dans le journal unifié ni
@@ -22315,6 +21805,41 @@ async def _handle_antiraid_join(member):
 
     # Reset le tracker après action
     _recent_joins[member.guild.id] = []
+    return member.id in isoles  # isolé : l'arrivée s'arrête là (l'isolement garde les preuves)
+
+
+VERROU_RAID_MINUTES = 10
+
+
+async def _verrou_raid(guild) -> None:
+    """Niveau de vérification au maximum pendant VERROU_RAID_MINUTES. Le niveau d'AVANT est noté en
+    base au premier déclenchement seulement : un 2e raid prolonge le verrou sans écraser ce niveau,
+    et un redémarrage ne le fait pas oublier (audit 19/10/2026)."""
+    c = await cfg(guild.id)
+    if not c.get('antiraid_verrou_actif'):
+        await db_set(guild.id, 'antiraid_niveau_avant', int(guild.verification_level.value))
+        await db_set(guild.id, 'antiraid_verrou_actif', 1)
+    await db_set(guild.id, 'antiraid_verrou_fin', time.time() + VERROU_RAID_MINUTES * 60)
+    if guild.verification_level != discord.VerificationLevel.highest:
+        await guild.edit(verification_level=discord.VerificationLevel.highest, reason="Anti-Raid lockdown")
+
+
+async def _lever_verrou_raid(guild) -> None:
+    """Le verrou est échu : le niveau d'avant revient (appelé par `server_controls_task`)."""
+    c = await cfg(guild.id)
+    if not c.get('antiraid_verrou_actif') or time.time() < float(c.get('antiraid_verrou_fin', 0) or 0):
+        return
+    try:
+        niveau = discord.VerificationLevel(int(c.get('antiraid_niveau_avant', 1) or 0))
+    except ValueError:
+        niveau = discord.VerificationLevel.low
+    try:
+        await guild.edit(verification_level=niveau, reason="Anti-Raid lockdown terminé")
+    except discord.HTTPException as ex:  # l'appelant avale ses erreurs : on la dit ici
+        _logerr("security.lockdown_restore", ex, guild_id=guild.id)
+        return
+    await db_set(guild.id, 'antiraid_verrou_actif', 0)
+    print(f"[ANTIRAID] guild={guild.id} verrou levé")
 
 
 def _welcome_quick_buttons(guild):
@@ -22922,7 +22447,8 @@ async def on_guild_channel_create(channel):
         # Salon d'entraide 🆘 éphémère créé par le bot → jamais loggé (anti-bruit).
         if (getattr(channel, 'name', '') or '').startswith('🆘'):
             return
-        await _antinuke_check(channel.guild, 'channel_create')  # owner 2026-06-27 : nuke par création massive
+        if channel.id not in temp_voice_channels:  # les vocaux temporaires sont l'œuvre du bot
+            await _antinuke_check(channel.guild, 'channel_create', channel.id)  # nuke par création massive
         # RADIATION (/off) : si le rôle « 🚫 Radié » existe, poser le DENY sur ce NOUVEAU salon.
         # Sans ça, un membre radié verrait tout salon créé APRÈS sa radiation (audit 2026-06-21 :
         # _ensure_radie_role ne couvrait que les salons EXISTANTS — fuite de lecture). Idempotent,
@@ -22956,8 +22482,9 @@ _antinuke_triggered = {}   # (guild_id, actor_id) -> dernier déclenchement (ant
 _webhook_guard_cd = {}     # guild_id -> dernière alerte webhook (cooldown anti-bruit)
 
 
-async def _antinuke_check(guild, kind):
-    """kind = 'channel' | 'role'. Appelé depuis on_guild_*_delete (hors salons d'event du bot)."""
+async def _antinuke_check(guild, kind, cible_id=None):
+    """kind = 'channel' | 'role' | 'channel_create' | 'role_create'. `cible_id` : le salon ou le rôle
+    concerné — l'auteur est celui de CETTE entrée d'audit, pas le dernier venu (19/10/2026)."""
     try:
         if guild is None:
             return
@@ -22973,7 +22500,7 @@ async def _antinuke_check(guild, kind):
         act = _ANTINUKE_ACTS.get(kind)
         if act is None:
             return
-        actor, _r = await _audit_actor(guild, act, within_sec=12)
+        actor, _r = await _audit_actor(guild, act, target_id=cible_id, within_sec=12)
         if actor is None:
             return  # auteur non identifiable (perm audit manquante) → on n'agit pas (fail-open)
         me = guild.me
@@ -23241,7 +22768,8 @@ async def on_guild_channel_delete(channel):
             return
         if (getattr(channel, 'name', '') or '').startswith('🆘'):
             return  # salon d'entraide éphémère supprimé par le bot → pas de log
-        await _antinuke_check(channel.guild, 'channel')
+        if channel.id not in temp_voice_channels:
+            await _antinuke_check(channel.guild, 'channel', channel.id)
         await _log_audited(
             channel.guild, ulogger2026.EventType.CHAN_DELETE,
             discord.AuditLogAction.channel_delete, channel.id,
@@ -23282,7 +22810,7 @@ async def on_guild_channel_update(before, after):
 @bot.event
 async def on_guild_role_create(role):
     try:
-        await _antinuke_check(role.guild, 'role_create')  # owner 2026-06-27 : nuke par création massive
+        await _antinuke_check(role.guild, 'role_create', role.id)  # owner 2026-06-27 : nuke par création massive
         await _log_audited(
             role.guild, ulogger2026.EventType.ROLE_CREATE,
             discord.AuditLogAction.role_create, role.id,
@@ -23296,7 +22824,7 @@ async def on_guild_role_create(role):
 @bot.event
 async def on_guild_role_delete(role):
     try:
-        await _antinuke_check(role.guild, 'role')  # anti-nuke : suppression massive de rôles
+        await _antinuke_check(role.guild, 'role', role.id)  # anti-nuke : suppression massive de rôles
         await _log_audited(
             role.guild, ulogger2026.EventType.ROLE_DELETE,
             discord.AuditLogAction.role_delete, role.id,
@@ -23530,17 +23058,6 @@ async def _check_compromised_account(msg):
     _compromised_alert_cooldown[key] = now_ts
     _evict_if_big(_compromised_alert_cooldown)  # audit 2026-07-03 : borne mémoire
 
-    # TASK A5 : GEL ÉCONOMIE immédiat (anti-drain) — placé AVANT les checks de salon/perms
-    # pour qu'un compte au score ≥ seuil soit gelé MÊME si l'alerte ne peut pas être postée
-    # (salon mal configuré). Fail-safe : ne casse jamais la suite. Dégel = fondateur.
-    try:
-        await freeze_account(
-            msg.guild.id, msg.author.id,
-            reason=f"compromised_detector score={score}",
-        )
-    except Exception as ex_fz:
-        print(f"[CAD] gel compte échoué (non bloquant) : {ex_fz}")
-
     # Récupérer le salon dédié
     alert_channel = msg.guild.get_channel(channel_id)
     if not alert_channel:
@@ -23558,7 +23075,7 @@ async def _check_compromised_account(msg):
     # Construire le dossier
     try:
         e = compromised2026.build_dossier_embed(msg.author, msg, score, reasons, signals)
-        v = CompromisedAccountActionView(target_user_id=msg.author.id)
+        v = _dossier_vue(msg.author.id)
         sent = await alert_channel.send(embed=e, view=v)
         print(f"[CAD] alerte créée guild={msg.guild.id} user={msg.author.id} score={score}")
 
@@ -29710,8 +29227,10 @@ async def on_voice_state_update(member, before, after):
                 'can_rename': True, 'can_limit': True, 'can_mute': True, 'can_kick': True
             })
             
-            # Vérifier si l'utilisateur rejoint un des hubs configurés
-            if after.channel:
+            # Vérifier si l'utilisateur REJOINT un des hubs configurés. 19/10/2026 (audit) : couper
+            # son micro ou allumer sa caméra dans le hub n'est pas une arrivée — ça créait un salon de
+            # plus, et au 6e en 10 min le membre était déconnecté sans un mot.
+            if after.channel and (before.channel is None or before.channel.id != after.channel.id):
                 hub_data = hubs.get(str(after.channel.id))
                 
                 if hub_data:

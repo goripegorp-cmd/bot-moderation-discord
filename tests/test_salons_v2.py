@@ -116,7 +116,8 @@ def test_V5_une_seconde_fois_rien_ne_change():
 
 def test_V6_branchements():
     src = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")
-    assert "await _configurer_salons_v2(g)" in src and "await _salon_aide(g)" in src
+    travaux = src.split("_TRAVAUX = (")[1].split(")")[0]
+    assert '"_configurer_salons_v2"' in travaux and '"_salon_aide"' in travaux
     fn = next(ast.unparse(n) for n in ARBRE.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_configurer_salons_v2")
     assert "'anti_invite', 1" in fn and "required_role=clan_role.id" in fn and "config_salons_historique" in fn
     aide = next(ast.unparse(n) for n in ARBRE.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_vue_aide")

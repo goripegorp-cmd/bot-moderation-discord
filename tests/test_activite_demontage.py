@@ -403,10 +403,10 @@ def _fonction(nom):
 
 
 def test_W1_le_demontage_passe_au_demarrage_avant_le_bilan():
-    corps = _fonction("_travaux_de_demarrage")
-    i_dem = corps.index("await _demonter_activite(g)")
-    i_vis = corps.index("await _verifier_visibilite(g)")
-    i_bil = corps.index("await _publier_bilan_sante(g)")
+    travaux = _SRC_BOT.split("_TRAVAUX = (")[1].split(")")[0]  # l'ordre des travaux de démarrage
+    i_dem = travaux.index('"_demonter_activite"')
+    i_vis = travaux.index('"_verifier_visibilite"')
+    i_bil = travaux.index('"_publier_bilan_sante"')
     assert i_dem < i_vis < i_bil
 
 

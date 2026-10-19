@@ -118,7 +118,7 @@ def test_le_bouton_historique_delegue_au_chemin_unique():
     """Un seul corps pour toutes les portes : sinon la blacklist, les horaires
     ou le maximum divergent — et c'est la blacklist qui se contourne en
     premier."""
-    corps = ast.unparse(_classe("TicketCreateButton"))
+    corps = ast.unparse(_classe("TicketCreateDynamic"))  # le seul capteur du bouton (19/10/2026)
     assert "_ticket_ouvrir(i, self.pid)" in corps
     #  Les règles ne doivent PAS être recopiées dans le bouton.
     for regle in ("blacklist", "_ticket_hours_allows", "count_user_tickets"):

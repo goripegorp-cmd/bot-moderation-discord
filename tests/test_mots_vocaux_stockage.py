@@ -93,8 +93,7 @@ def test_M6_branchement_dans_le_bot():
     ajout = next(ast.unparse(n) for n in ast.walk(ast.parse(SRC_BOT))
                  if isinstance(n, ast.ClassDef) and n.name == "_BadwordsAddListModal")
     assert "new, refuses = mots_interdits.trier_liste(new)" in ajout
-    demarrage = _fonction(SRC_BOT, "_travaux_de_demarrage")
-    assert "await _retirer_exclamations(g)" in demarrage
+    assert '"_retirer_exclamations"' in SRC_BOT.split("_TRAVAUX = (")[1].split(")")[0]
     assert "gardes, retires = mots_interdits.trier_liste(mots)" in _fonction(
         SRC_BOT, "_retirer_exclamations")
 

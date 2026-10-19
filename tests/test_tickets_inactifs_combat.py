@@ -200,6 +200,6 @@ def test_K1_les_salons_de_combat_sont_retires_et_pas_le_reste():
 
 
 def test_K2_appele_au_demarrage():
-    assert "await _retirer_salons_combat(g)" in _source("_travaux_de_demarrage")
+    assert '"_retirer_salons_combat"' in SRC.split("_TRAVAUX = (")[1].split(")")[0]
     assert "_ensure_combat_channel(" not in SRC.replace("async def _ensure_combat_channel(", ""), \
         "plus rien ne crée de salon de combat"

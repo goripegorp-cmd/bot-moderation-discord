@@ -248,7 +248,8 @@ def test_B8_branche_dans_le_bot_et_plus_d_appel_public_a_l_arret():
     assert "boosts.retirer(member.guild, member.id)" in fns["_handle_boost_stopped"]
     assert "boosts.ajouter(member, mentionner=True)" in fns["_handle_boost_started"]
     assert "boosts.retirer(m.guild, m.id)" in fns["on_member_remove"]
-    assert "boosts.installer(" in fns["_travaux_de_demarrage"]
+    assert "boosts.installer(" in fns["_boosts_au_demarrage"]
+    assert '"_boosts_au_demarrage"' in src.split("_TRAVAUX = (")[1].split(")")[0]
     assert "boosts.synchroniser(g)" in fns["menage_salons_task"]
     assert 'bot.add_listener(boosts.sur_maj_serveur, "on_guild_update")' in src
 

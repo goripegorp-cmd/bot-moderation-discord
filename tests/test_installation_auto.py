@@ -400,8 +400,9 @@ def test_B4c_un_manque_NOUVEAU_est_dit_le_jour_meme():
 
 def test_B5_le_bilan_est_APPELE_au_demarrage():
     """Une fonction non appelée n'est pas opérationnelle."""
-    corps = _src("_travaux_de_demarrage")
-    assert "_migrer_panneaux_tickets" in corps and "_publier_bilan_sante" in corps
+    travaux = SRC.split("_TRAVAUX = (")[1].split(")")[0]
+    assert "_migrer_panneaux_tickets" in travaux and "_publier_bilan_sante" in travaux
+    assert "_TRAVAUX" in _src("_travaux_de_demarrage")
     assert "_travaux_de_demarrage()" in SRC.split("async def _travaux_de_demarrage")[0] \
         or "asyncio.create_task(_travaux_de_demarrage())" in SRC
     assert "_TACHES_DEMARRAGE.add(" in SRC, "tâche non retenue : ramassable en plein await"

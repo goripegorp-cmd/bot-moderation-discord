@@ -89,8 +89,8 @@ def test_F4_aucun_ban_ni_renvoi_automatique_d_un_membre():
             parcourir(ch, p)
     parcourir(ARBRE, [])
     assert appels["ban"] <= {"RadieDecisionButton.callback", "sanction", "_action_moderer",
-                             "CompromisedAccountActionView.ban_btn"}, appels["ban"]
-    assert appels["kick"] <= {"sanction", "_action_moderer", "CompromisedAccountActionView.kick_btn",
+                             "_dossier_agir"}, appels["ban"]
+    assert appels["kick"] <= {"sanction", "_action_moderer", "_dossier_agir",
                               "_kick_young_account", "_handle_rogue_bot"}, appels["kick"]
     f = _fonctions()
     assert "timeout(timedelta(hours=heures)" in f["_isoler_par_securite"]

@@ -217,7 +217,7 @@ def test_M7_menage_unique_roles_salon_des_accessoires_et_logs():
 
 
 def test_M8_branchements():
-    assert "await _menage_unique(g)" in _source("_travaux_de_demarrage")
+    assert '"_menage_unique"' in SRC.split("_TRAVAUX = (")[1].split(")")[0]
     assert '"menage_salons_task",' in SRC and "menage_salons_task.start()" in SRC
     assert "_backfill_events_role(" not in SRC, "plus aucun rôle d'événement distribué"
 
