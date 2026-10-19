@@ -179,6 +179,7 @@ import mots_interdits  # 14/10/2026 : liste du serveur — exclamations libres, 
 import acces_direction  # 14/10/2026 : Direction + Fondateur déplacent dans les vocaux créés
 import stockage as stockage_module  # 14/10/2026 : part du volume par poste + bilan quotidien
 import tickets_fils  # 19/10/2026 : un fil privé par ticket, un salon par équipe
+import nettoyage  # 19/10/2026 : journal en fils, rétention 30 jours, remise à neuf
 import offtopic_filter as offtopic_filter  # Filtre politique/religion/militantisme (owner 2026-06-21, slogans + slugs de GIF, anti-FP gaming)
 import trust_system as trust_system  # Confiance progressive des nouveaux + politique liens/invitations (owner 2026-06-21)
 import behavior_guard as behavior_guard  # Anti-crash (zalgo/invisible) + spam inter-salons + anti-automation (owner 2026-06-21)
@@ -12488,61 +12489,6 @@ async def _ensure_notify_role(guild, tier: str) -> Optional[discord.Role]:
         return None
 
 
-async def _backfill_events_role(guild):
-    """Phase 256 : abonne TOUS les membres existants au rôle « 📢 Tous les
-    Événements » (opt-out) — UNE seule fois par serveur (flag de config) — pour
-    que les pings d'événements atteignent l'intégralité du serveur, y compris
-    les membres INACTIFS et HORS-LIGNE. Idempotent, throttlé (anti-429),
-    fail-open. Opt-out individuel ensuite : /notify niveau:🔕 Aucun.
-    À l'arrivée d'un nouveau membre, on_member_join l'abonne aussi."""
-    try:
-        if guild is None:
-            return
-        c = await cfg(guild.id)
-        if int(c.get('events_role_backfilled', 0) or 0) == 1:
-            return
-        role = await _ensure_notify_role(guild, 'all')
-        if role is None:
-            # Perm « Gérer les rôles » manquante → on NE pose PAS le flag, on
-            # réessaiera au prochain boot une fois la perm accordée.
-            return
-        # S'assurer que le cache des membres est peuplé (intent members requis).
-        try:
-            if not guild.chunked:
-                await guild.chunk()
-        except Exception:
-            pass
-        added = 0
-        attempted = 0
-        for member in list(guild.members):
-            try:
-                if member.bot or role in member.roles:
-                    continue
-                # Respecter un opt-out PRÉALABLE (membre ayant coupé « events »
-                # via /notifs) → on ne le réabonne pas de force. Défaut = True.
-                if not await _member_wants_notif(guild.id, member.id, 'events'):
-                    continue
-                attempted += 1
-                await member.add_roles(
-                    role, reason="Phase 256 : abonnement events par défaut (opt-out)")
-                added += 1
-                await asyncio.sleep(0.6)   # throttle doux anti rate-limit
-            except Exception:
-                continue
-        # Phase 258 : si on AVAIT des membres à abonner mais que TOUT a échoué, le bot
-        # n'a probablement pas « Gérer les rôles » OU son rôle est SOUS « 📢 Tous les
-        # Événements » dans la hiérarchie. On NE pose PAS le flag → réessai au prochain
-        # boot une fois corrigé (sinon le rôle reste vide et les events ne touchent
-        # personne — c'est exactement le bug « 2-3 mentionnés sur des centaines »).
-        if attempted > 0 and added == 0:
-            print(f"[events_role_backfill] {guild.name}: ÉCHEC ({attempted} membres, 0 ajout) "
-                  f"— vérifie la perm « Gérer les rôles » + la hiérarchie du rôle du bot. "
-                  f"Non marqué → réessai au prochain boot.")
-            return
-        await db_set(guild.id, 'events_role_backfilled', 1)
-        print(f"[events_role_backfill] {guild.name}: +{added} membres abonnés (opt-out)")
-    except Exception as ex:
-        print(f"[events_role_backfill] {ex}")
 
 
 # Phase 258 — MENTION MÉTHODIQUE (directive owner : « les events ne touchent que
@@ -14285,6 +14231,102 @@ async def _rendre_roles_au_retour(member):
                 guild_id=getattr(getattr(member, "guild", None), "id", 0))
 
 
+_ROLES_OBSOLETES = frozenset({
+    "🔔 Boss", "🔔 World Boss", "🔔 Climax", "🔔 Coffres & Trésors", "🔔 Quiz & Énigmes",
+    "🔔 Chasses", "🔔 Invasions", "🔔 Conseil", "🔔 Events Collaboratifs",
+    "🔔 Événements Important", "📢 Tous les Événements",
+    "💎 Passages Limited", "🆕 Nouveaux accessoires"})
+_CLES_ACCESSOIRES = ("roblox_salon_nouveautes", "roblox_salon_bascules",
+                     "roblox_salon_accessoires", "roblox_salon_surveiller")
+
+
+async def _salons_de_logs(g, c) -> set:
+    ids = set(ulogger2026.salons_de_logs(g.id))
+    ids |= {int(v) for k, v in c.items() if (str(k).startswith('log_') or k == 'ticket_log')
+            and str(v).isdigit() and int(v)}
+    return {g.get_channel(i) for i in ids} - {None}
+
+
+async def _salons_de_flux(g, c) -> set:
+    ids = {int(c.get('roblox_news_salon', 0) or 0)}
+    try:
+        p = social2026._subs_path(g.id)
+        if p.exists():
+            for sub in json.loads(p.read_text(encoding="utf-8")) or []:
+                ids.add(int(sub.get("target_channel_id", 0) or 0))
+    except (OSError, ValueError, TypeError, AttributeError) as ex:
+        _logerr("menage.flux", ex, guild_id=g.id)
+    return {g.get_channel(i) for i in ids if i} - {None}
+
+
+async def _remplacer_salon_partout(g, ancien: int, nouveau: int):
+    ulogger2026.remplacer_salon(g.id, ancien, nouveau)
+    for k, v in (await cfg(g.id)).items():
+        v2 = nettoyage.remplacer_id(v, ancien, nouveau)
+        if v2 != v:
+            await db_set(g.id, k, v2)
+
+
+async def _menage_unique(g):
+    """19/10/2026, une fois par serveur : rôles des systèmes retirés, salon des accessoires
+    (s'il n'a vu que le bot), salons de logs PURS de plus de 30 jours remis à neuf."""
+    try:
+        c = await cfg(g.id)
+        if c.get('menage_v1'):
+            return
+        me = g.me
+        if me and me.guild_permissions.manage_roles:
+            for r in list(g.roles):
+                if r.name in _ROLES_OBSOLETES and not r.managed and r < me.top_role:
+                    try:
+                        await r.delete(reason="Système retiré : rôle inutile")
+                        await asyncio.sleep(0.5)
+                    except discord.HTTPException as ex:
+                        _logerr("menage.roles", ex, guild_id=g.id)
+        actu = int(c.get('roblox_news_salon', 0) or 0)
+        for k in _CLES_ACCESSOIRES:
+            ch = g.get_channel(int(c.get(k, 0) or 0))
+            if ch is not None and ch.id != actu and isinstance(ch, discord.TextChannel):
+                recents = [m async for m in ch.history(limit=100)]
+                if all(nettoyage._du_bot(m, bot.user.id) for m in recents):
+                    await ch.delete(reason="Veille des accessoires retirée")
+            if c.get(k):
+                await db_set(g.id, k, 0)
+        for ch in await _salons_de_logs(g, c):
+            if isinstance(ch, discord.TextChannel) and await nettoyage.a_remettre_a_neuf(ch, bot.user.id):
+                nouveau = await nettoyage.remettre_a_neuf(ch)
+                await _remplacer_salon_partout(g, ch.id, nouveau.id)
+                await asyncio.sleep(2)
+        await db_set(g.id, 'menage_v1', now().isoformat())
+    except Exception as ex:
+        _logerr("menage.unique", ex, guild_id=getattr(g, 'id', 0))
+
+
+@tasks.loop(hours=12)
+async def menage_salons_task():
+    """19/10/2026 : « dès qu'elles sont vieilles d'un mois, tu les enlèves ». Fils de logs de
+    plus de 30 jours supprimés ; messages du bot de plus de 30 jours retirés des salons de flux
+    (actualités, sneak peeks) et de la racine des salons de logs."""
+    for g in list(bot.guilds):
+        try:
+            c = await cfg(g.id)
+            for ch in await _salons_de_logs(g, c):
+                if isinstance(ch, discord.TextChannel):
+                    await nettoyage.supprimer_vieux_fils(ch)
+                    await nettoyage.purger_salon(ch, bot.user.id)
+            for ch in await _salons_de_flux(g, c):
+                if isinstance(ch, (discord.TextChannel, discord.Thread)):
+                    await nettoyage.purger_salon(ch, bot.user.id)
+        except Exception as ex:
+            _logerr("menage.salons", ex, guild_id=g.id)
+
+
+@menage_salons_task.before_loop
+async def _menage_salons_wait():
+    await bot.wait_until_ready()
+    await asyncio.sleep(600)
+
+
 async def _retirer_salons_combat(g):
     """19/10/2026 : « les salons de combat temporaires, tu les enlèves — je ne veux plus de
     système de combat ». Plus rien ne les crée ; on retire ceux qui restent (par nom ou par
@@ -14364,6 +14406,7 @@ async def _travaux_de_demarrage():
                 await _publier_bilan_sante(g)
                 await _retirer_exclamations(g)
                 await _retirer_salons_combat(g)
+                await _menage_unique(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
     except Exception as ex:
@@ -14579,6 +14622,7 @@ _SUPERVISED_LOOP_NAMES = [
     #  qui ment sur ce qu'elle surveille finit par tromper une relecture.
     "db_optimizer_task",
     "tickets_inactifs_task",
+    "menage_salons_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -23989,13 +24033,6 @@ async def on_ready():
         # au rôle « 📢 Tous les Événements » (opt-out) une fois par serveur, pour
         # que chaque event mentionne l'intégralité du serveur (même inactifs /
         # hors-ligne). Guardé par flag global → ne se relance pas aux reconnexions.
-        try:
-            if not getattr(bot, '_events_role_backfill_started', False):
-                bot._events_role_backfill_started = True
-                for _g in list(bot.guilds):
-                    asyncio.create_task(_backfill_events_role(_g))
-        except Exception as ex:
-            print(f"[on_ready 256 events_role_backfill] {ex}")
 
         # owner 2026-06-30 : abonne TOUS les membres existants au rôle « 🛒 Collectionneur UGC »
         # (opt-out) une fois par serveur → le ping spotlight atteint enfin tout le monde (avant :
@@ -24135,6 +24172,8 @@ async def on_ready():
         db_optimizer_task.start()
     if not tickets_inactifs_task.is_running():
         tickets_inactifs_task.start()
+    if not menage_salons_task.is_running():
+        menage_salons_task.start()
 
     # Phase 45 : Camouflage de salon + Vocal Spotlight + Compliment + failsafe
     # Phase 48 : Compliment du jour DÉSACTIVÉ (système Saint-Valentin retiré)

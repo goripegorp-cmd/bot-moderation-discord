@@ -203,6 +203,37 @@ async def get_log_channel(guild_id: int) -> Optional[int]:
         return None
 
 
+def salons_de_logs(guild_id: int) -> set[int]:
+    """Tous les salons où ce journal écrit : global, par catégorie, par évènement."""
+    p = _cfg_path(guild_id)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        return set()
+    ids = {data.get("channel_id")}
+    for cle in ("category_channels", "event_channels"):
+        ids |= set((data.get(cle) or {}).values())
+    out = set()
+    for v in ids:
+        try:
+            if int(v or 0):
+                out.add(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def remplacer_salon(guild_id: int, ancien: int, nouveau: int) -> None:
+    """Un salon de logs recréé : sa nouvelle identité partout dans la configuration."""
+    import nettoyage
+    p = _cfg_path(guild_id)
+    if not p.exists():
+        return
+    data = json.loads(p.read_text(encoding="utf-8"))
+    p.write_text(json.dumps(nettoyage.remplacer_id(data, ancien, nouveau), indent=2,
+                            ensure_ascii=False), encoding="utf-8")
+
+
 async def set_log_channel(guild_id: int, channel_id: int) -> None:
     """Configure le salon de logs pour ce serveur (preserve les autres champs)."""
     p = _cfg_path(guild_id)
@@ -643,18 +674,27 @@ async def log_event(
         )
         # Mode webhook (Phase 268) : poster via un expéditeur au nom de la catégorie.
         # OFF par défaut → on garde l'envoi normal. Repli auto sur target.send si échec.
+        #  19/10/2026 : un fil par jour (« 📋 JJ/MM/AAAA ») — supprimé d'un coup à 30 jours.
         try:
-            if meta and await get_webhook_mode(guild.id) and hasattr(target, "create_webhook"):
-                wh = await _get_or_create_log_webhook(target)
+            import nettoyage
+            target = await nettoyage.fil_du_jour(target)
+        except discord.HTTPException as ex:
+            print(f"[unified_logger fil du jour] {ex}")
+        parent = target.parent if isinstance(target, discord.Thread) else target
+        try:
+            if meta and await get_webhook_mode(guild.id) and hasattr(parent, "create_webhook"):
+                wh = await _get_or_create_log_webhook(parent)
                 if wh is not None:
                     cat = meta["cat"]
                     uname = f"{_CAT_ICON.get(cat, '📋')} {cat}"[:80]
                     av = guild.icon.url if guild.icon else None
+                    kw = {"embed": embed, "username": uname, "avatar_url": av, "wait": True}
+                    if isinstance(target, discord.Thread):
+                        kw["thread"] = target
                     try:
-                        return await wh.send(embed=embed, username=uname,
-                                             avatar_url=av, wait=True)
+                        return await wh.send(**kw)
                     except Exception:
-                        _log_webhook_cache.pop(target.id, None)  # webhook périmé → repli
+                        _log_webhook_cache.pop(parent.id, None)  # webhook périmé → repli
         except Exception:
             pass
         return await target.send(embed=embed)
