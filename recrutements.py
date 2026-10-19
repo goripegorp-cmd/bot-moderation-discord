@@ -9,13 +9,14 @@ Une ligne par ticket Rell Seas clôturé : qui, quand, par qui, ses réponses, l
 la conversation (elle reste dans le transcript). Les tickets fermés avant ce suivi sont
 rattrapés une fois depuis l'historique des tickets.
 
-Statut d'un candidat : parti du serveur → Parti ; porte le rôle du clan → Accepté ; sinon le
-motif de fermeture tranche (« refus » → Non retenu, « accepté » → Accepté) ; sinon Non retenu.
-Un ticket encore ouvert → En cours.
+« Garder uniquement les personnes qui ont été acceptées ou refusées » : une fiche n'existe que
+pour une décision claire — décision prise avec les boutons du ticket ou du tableau de bord ;
+pour les anciens tickets, le rôle du clan (accepté) ou le motif de fermeture (« accepté »,
+« refusé »). Un ticket encore ouvert → En cours. Le reste (sans suite, vide, doublon) est
+écarté et seulement compté. Un candidat parti du serveur garde sa décision, marquée « parti ».
 
-Nettoyage : ticket où le candidat n'a rien écrit ou doublon → écarté (compté) ; un candidat =
-une fiche (avec ses candidatures précédentes) ; réponses bornées ; lignes de plus d'un an
-effacées par la rétention RGPD (`gdpr.RETENTION`).
+Nettoyage : un candidat = une fiche (avec ses candidatures précédentes) ; réponses bornées ;
+lignes de plus d'un an effacées par la rétention RGPD (`gdpr.RETENTION`).
 """
 from __future__ import annotations
 
@@ -31,8 +32,7 @@ import visuels
 
 MOIS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
         "septembre", "octobre", "novembre", "décembre")
-STATUTS = {"acceptes": "Accepté", "non_retenus": "Non retenu", "partis": "Parti",
-           "en_cours": "En cours"}
+STATUTS = {"acceptes": "Accepté", "refuses": "Refusé", "en_cours": "En cours"}
 REPONSES_MAX, QUESTION_MAX, REPONSE_MAX = 10, 120, 600
 APERCU_MAX = 10
 CLE_EXPORT = "recrutements_export"
@@ -42,17 +42,19 @@ ACCEPTE = re.compile(r"accept|admis|bienvenue dans|recrut[ée]", re.I)
 REFUS = re.compile(r"refus|pas retenu|non retenu|rejet", re.I)
 DOUBLON = re.compile(r"doublon", re.I)
 
-_get_db = _cfg = _db_set = _salon = _role = _panneaux = _lien = None
+_get_db = _cfg = _db_set = _salon = _role = _panneaux = _lien = _decider = _autorise = None
 _bot = None
 _log = print
 
 
-def setup(*, get_db, cfg, db_set, salon, role, panneaux, lien=None, log=None):
+def setup(*, get_db, cfg, db_set, salon, role, panneaux, lien=None, decider=None, autorise=None,
+          log=None):
     """`salon(g, c)` → salon des transcripts Rell Seas ; `role(g, c)` → rôle du clan ;
-    `panneaux(c)` → panneaux de tickets Rell Seas ; `lien(i)` → (lien du tableau de bord, refus)."""
-    global _get_db, _cfg, _db_set, _salon, _role, _panneaux, _lien, _log
+    `panneaux(c)` → panneaux de tickets Rell Seas ; `lien(i)` → (lien du tableau de bord, refus) ;
+    `decider(g, ticket, auteur, accepte, motif)` → (ok, message) ; `autorise(i)` → peut décider."""
+    global _get_db, _cfg, _db_set, _salon, _role, _panneaux, _lien, _decider, _autorise, _log
     _get_db, _cfg, _db_set, _salon, _role = get_db, cfg, db_set, salon, role
-    _panneaux, _lien = panneaux, lien
+    _panneaux, _lien, _decider, _autorise = panneaux, lien, decider, autorise
     _log = log or print
 
 
@@ -234,20 +236,19 @@ async def lire(guild_id: int, mois: str = "tout") -> list[dict]:
     return out
 
 
-def statut(present: bool, a_le_role: bool, raison: str) -> str:
-    if not present:
-        return "partis"
-    if a_le_role:
-        return "acceptes"
+def decision(a_le_role: bool, raison: str) -> str | None:
+    """La décision prise, ou None quand rien ne l'établit (ticket sans suite)."""
     if REFUS.search(raison or ""):
-        return "non_retenus"
-    return "acceptes" if ACCEPTE.search(raison or "") else "non_retenus"
+        return "refuses"
+    if a_le_role or ACCEPTE.search(raison or ""):
+        return "acceptes"
+    return None
 
 
 def nettoyer(lignes: list[dict], statut_de) -> tuple[list[dict], int, int]:
-    """Une fiche par candidat (son dernier ticket, la liste de ses candidatures) ; un ticket où
-    le candidat n'a rien écrit, ou un doublon, est écarté et seulement compté."""
-    vides = doublons = 0
+    """Une fiche par candidat (son dernier ticket décidé, la liste de ses candidatures). Écartés,
+    seulement comptés : ticket vide, doublon, et ticket fermé sans décision établie."""
+    vides = doublons = sans_suite = 0
     par_candidat: dict = {}
     for d in lignes:
         if d["msg_candidat"] == 0:
@@ -255,6 +256,10 @@ def nettoyer(lignes: list[dict], statut_de) -> tuple[list[dict], int, int]:
             continue
         if DOUBLON.search(d.get("raison") or ""):
             doublons += 1
+            continue
+        d = dict(d, statut=statut_de(d["candidat_id"], d.get("raison") or ""))
+        if d["statut"] is None:
+            sans_suite += 1
             continue
         prec = par_candidat.get(d["candidat_id"])
         dates = (prec["dates"] if prec else []) + [d["ferme"]]
@@ -265,8 +270,7 @@ def nettoyer(lignes: list[dict], statut_de) -> tuple[list[dict], int, int]:
     fiches = sorted(par_candidat.values(), key=lambda d: -d["ferme"])
     for d in fiches:
         d["dates"] = sorted(d["dates"])
-        d["statut"] = statut_de(d["candidat_id"], d.get("raison") or "")
-    return fiches, vides, doublons
+    return fiches, vides + sans_suite, doublons
 
 
 async def en_cours(g, c=None) -> list[dict]:
@@ -299,10 +303,21 @@ async def candidatures(g, mois: str = "tout") -> dict:
 
     def statut_de(uid, raison):
         m = g.get_member(int(uid))
-        return statut(m is not None, role is not None and m is not None and role in m.roles, raison)
+        return decision(role is not None and m is not None and role in m.roles, raison)
     fiches, vides, doublons = nettoyer(await lire(g.id, mois), statut_de)
+    for d in fiches:
+        d["parti"] = g.get_member(int(d["candidat_id"])) is None
     return {"fiches": fiches, "vides": vides, "doublons": doublons,
             "en_cours": await en_cours(g, c) if mois == "tout" else []}
+
+
+async def retirer_fiche(guild_id: int, candidat_id: int) -> int:
+    """« Enlever des fiches » : toutes les lignes de ce candidat. Rend le nombre retiré."""
+    async with _get_db() as db:
+        cur = await db.execute("DELETE FROM recrutements WHERE guild_id=? AND candidat_id=?",
+                               (guild_id, candidat_id))
+        await db.commit()
+        return int(cur.rowcount or 0)
 
 
 def compter(fiches: list[dict], ouverts: list[dict]) -> dict:
@@ -321,7 +336,7 @@ def resume(fiches: list[dict], ouverts: list[dict], vides: int = 0, doublons: in
               for k in STATUTS if n[k]]
     ecartes = vides + doublons
     if ecartes:
-        parts.append(f"{ecartes} écarté{'s' if ecartes > 1 else ''} (vides ou doublons)")
+        parts.append(f"{ecartes} écarté{'s' if ecartes > 1 else ''} (sans décision, vides ou doublons)")
     return " · ".join(parts)
 
 
@@ -356,6 +371,57 @@ async def envoyer_lien(i: discord.Interaction) -> None:
     v.add_item(discord.ui.Button(label="Ouvrir le tableau de bord", url=url, emoji=visuels.icone("lien")))
     await i.response.send_message("Ton lien personnel — valable 24 h. Ne le partage pas.",
                                   view=v, ephemeral=True)
+
+
+class BoutonDecision(discord.ui.DynamicItem[discord.ui.Button],
+                     template=r"recr:dec:(?P<d>[ar]):(?P<tid>\d+)"):
+    """« Les nouveaux tickets avec les nouvelles mécaniques » : la décision se prend dans le
+    ticket. Accepter donne le rôle du clan et ferme ; refuser ferme avec le motif."""
+
+    def __init__(self, decision: str, ticket: int):
+        self.decision, self.ticket = decision, int(ticket)
+        accepte = decision == "a"
+        super().__init__(discord.ui.Button(
+            label="Accepter" if accepte else "Refuser", custom_id=f"recr:dec:{decision}:{self.ticket}",
+            style=discord.ButtonStyle.success if accepte else discord.ButtonStyle.danger,
+            emoji=visuels.icone("valider" if accepte else "interdit")))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["d"], int(match["tid"]))
+
+    async def callback(self, i: discord.Interaction):
+        if _autorise is None or not await _autorise(i):
+            return await i.response.send_message("Réservé à l'équipe de recrutement Rell Seas.", ephemeral=True)
+        if self.decision == "r":
+            return await i.response.send_modal(MotifRefus(self.ticket))
+        await i.response.defer(ephemeral=True)
+        ok, message = await _decider(i.guild, self.ticket, i.user, True, "")
+        await i.followup.send(message, ephemeral=True)
+
+
+class MotifRefus(discord.ui.Modal, title="Refuser la candidature"):
+    motif = discord.ui.TextInput(label="Motif (le candidat ne le voit pas)", required=False,
+                                 max_length=150, placeholder="Niveau insuffisant, trop jeune…")
+
+    def __init__(self, ticket: int):
+        super().__init__()
+        self.ticket = ticket
+
+    async def on_submit(self, i: discord.Interaction):
+        await i.response.defer(ephemeral=True)
+        ok, message = await _decider(i.guild, self.ticket, i.user, False, str(self.motif.value or "").strip())
+        await i.followup.send(message, ephemeral=True)
+
+
+def carte_decision(ticket: int) -> discord.ui.LayoutView:
+    v = discord.ui.LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(
+        discord.ui.TextDisplay("### Décision de recrutement\n-# Réservé à l'équipe Rell Seas. Accepter donne "
+                               "le rôle du clan et ferme le ticket ; refuser ferme le ticket avec le motif."),
+        discord.ui.ActionRow(BoutonDecision("a", ticket), BoutonDecision("r", ticket)),
+        accent_color=0x0EA5E9))
+    return v
 
 
 def carte(g, titre: str, donnees: dict) -> discord.ui.LayoutView:

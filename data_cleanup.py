@@ -65,6 +65,21 @@ CLEANUP_RULES = [
     ("sondages",                  "cree_le",     90),
 ]
 
+#  19/10/2026 : « que ça s'auto-nettoie automatiquement et que ça puisse durer dans le temps ».
+#  (nom, requête, jours, format de l'horodatage) — la borne est calculée ici, dans le format
+#  de la colonne : jamais une comparaison texte/entier (un entier est toujours « plus petit »
+#  qu'un texte pour SQLite, tout partirait). Les tickets ouverts ne sont jamais touchés ; le
+#  casier garde les sanctions du staff deux ans, les détections automatiques un an.
+PURGES_CIBLEES = [
+    ("tickets fermés", "DELETE FROM tickets WHERE status='closed' AND created_at < ?", 365, "sqlite"),
+    ("ticket_log_events", "DELETE FROM ticket_log_events WHERE created_unix < ?", 365, "unix"),
+    ("ticket_audit", "DELETE FROM ticket_audit WHERE at < ?", 365, "sqlite"),
+    ("ticket_log_msgs", "DELETE FROM ticket_log_msgs WHERE ticket_id NOT IN (SELECT id FROM tickets)", None, None),
+    ("casier : détections", "DELETE FROM infractions WHERE created_at < ?"
+                            " AND type NOT IN ('warn', 'mute', 'kick', 'ban')", 365, "sqlite"),
+    ("casier : sanctions", "DELETE FROM infractions WHERE created_at < ?", 730, "sqlite"),
+]
+
 # Day-of-week for the task (6 = Sunday) + hour (FR)
 CLEANUP_WEEKDAY = 6
 CLEANUP_HOUR_FR = 4
@@ -135,6 +150,25 @@ async def _purge_table(
         return 0
 
 
+def _borne(jours: int, fmt: str):
+    t = datetime.now(timezone.utc) - timedelta(days=jours)
+    return int(t.timestamp()) if fmt == "unix" else t.strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def _purges_ciblees() -> dict[str, int]:
+    out: dict[str, int] = {}
+    for nom, sql, jours, fmt in PURGES_CIBLEES:
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(sql, (_borne(jours, fmt),) if jours else ())
+                out[nom] = int(cur.rowcount or 0)
+                await db.commit()
+        except Exception as ex:  # table absente sur une base ancienne : rien à purger
+            print(f"[data_cleanup purge {nom}] {type(ex).__name__} {ex}")
+            out[nom] = 0
+    return out
+
+
 async def run_cleanup() -> dict[str, int]:
     """Exécute le cleanup complet. Retourne {table: rows_deleted}.
 
@@ -150,6 +184,7 @@ async def run_cleanup() -> dict[str, int]:
         except Exception as ex:
             print(f"[data_cleanup run_cleanup {table}] {ex}")
             results[table] = 0
+    results.update(await _purges_ciblees())
     return results
 
 

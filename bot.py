@@ -6240,6 +6240,147 @@ def _staff_ou_plus(g, membre, c) -> bool:
     return any(r.position >= plancher.position for r in getattr(membre, "roles", []) or [])
 
 
+def _direction_ou_plus(g, membre, c) -> bool:
+    """19/10/2026 : « seulement le fondateur et le rôle direction » ont le droit d'agir depuis le
+    tableau de bord (supprimer, retirer) — et les rôles placés au-dessus de la direction."""
+    if membre is None or g is None:
+        return False
+    if membre.id == g.owner_id or owner_ids_module.is_super_owner(membre.id):
+        return True
+    direction = g.get_role(int(c.get('direction_allowed_role', 0) or 0))
+    return direction is not None and any(r.position >= direction.position
+                                         for r in getattr(membre, "roles", []) or [])
+
+
+async def _journal_rellseas(g, texte: str) -> None:
+    c = await cfg(g.id)
+    salon = g.get_channel(int(c.get(rellseas_ui.CLE_SALON_LOG, 0) or 0))
+    if salon is not None:
+        try:
+            await salon.send(texte, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as ex:
+            _logerr("rellseas.journal", ex, guild_id=g.id)
+
+
+async def _ticket_ouvert(g, ticket_id: int):
+    """(salon, ticket) d'un ticket encore ouvert de ce serveur, ou (None, None)."""
+    async with get_db() as db:
+        async with db.execute("SELECT channel_id FROM tickets WHERE id=? AND guild_id=? AND status='open'",
+                              (int(ticket_id), g.id)) as cur:
+            r = await cur.fetchone()
+    if not r:
+        return None, None
+    ch = g.get_channel(int(r[0])) or g.get_thread(int(r[0]))
+    tk = await get_ticket(int(r[0])) if ch is not None else None
+    return (ch, tk) if tk else (None, None)
+
+
+async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif: str = ""):
+    """Accepter (rôle du clan, puis fermeture) ou refuser (fermeture) une candidature : la
+    fermeture passe par le circuit normal — dossier, transcript, suivi des recrutements."""
+    ch, tk = await _ticket_ouvert(g, ticket_id)
+    if ch is None:
+        return False, "Ce ticket n'est plus ouvert."
+    candidat = g.get_member(int(tk['user']))
+    if accepte:
+        c = await cfg(g.id)
+        role = g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
+        if role is None:
+            return False, "Aucun rôle Rell Seas réglé dans /configure."
+        if candidat is None:
+            return False, "Le candidat a quitté le serveur : rien à donner."
+        if g.me is None or role >= g.me.top_role or not g.me.guild_permissions.manage_roles:
+            return False, "Je ne peux pas donner ce rôle (permission ou hiérarchie)."
+        try:
+            await candidat.add_roles(role, reason=f"Candidature acceptée par {auteur} ({auteur.id})")
+        except discord.HTTPException as ex:
+            _logerr("recrutement.role", ex, guild_id=g.id)
+            return False, "Discord a refusé de donner le rôle."
+    raison = "Accepté" if accepte else ("Refusé" + (f" : {motif[:150]}" if motif else ""))
+    asyncio.create_task(_fermer_ticket(g, ch, tk, auteur, raison))
+    await _journal_rellseas(g, f"**Candidature {'acceptée' if accepte else 'refusée'}** · <@{tk['user']}> "
+                               f"par {auteur.mention}" + (f" — {motif[:150]}" if motif and not accepte else ""))
+    await log_staff_action(g.id, auteur.id, int(tk['user']), "recrutement_" + ("accepte" if accepte else "refuse"),
+                           raison, surface="recrutement")
+    return True, ("Candidature acceptée : rôle donné, ticket fermé." if accepte
+                  else "Candidature refusée : ticket fermé.")
+
+
+async def _peut_decider(i) -> bool:
+    """Décider d'une candidature : l'équipe /rellseas, ou la direction et au-dessus."""
+    if await _rellseas_autorise(i):
+        return True
+    return _direction_ou_plus(i.guild, i.user, await cfg(i.guild.id))
+
+
+async def _action_ticket_fermer(g, auteur, d):
+    ch, tk = await _ticket_ouvert(g, int(d.get("ticket", 0) or 0))
+    if ch is None:
+        return False, "Ce ticket n'est plus ouvert."
+    motif = str(d.get("motif") or "").strip()[:150] or "Fermé depuis le tableau de bord"
+    asyncio.create_task(_fermer_ticket(g, ch, tk, auteur, motif))
+    await log_staff_action(g.id, auteur.id, int(tk['user']), "ticket_ferme", motif, surface="tableau")
+    return True, "Ticket fermé : transcript et journal comme d'habitude."
+
+
+async def _action_candidature(g, auteur, d):
+    return await _decision_recrutement(g, int(d.get("ticket", 0) or 0), auteur,
+                                       d.get("decision") == "accepter", str(d.get("motif") or "").strip())
+
+
+async def _action_clan_retirer(g, auteur, d):
+    c = await cfg(g.id)
+    role = g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
+    membre = g.get_member(int(d.get("membre", 0) or 0))
+    if role is None or membre is None or role not in membre.roles:
+        return False, "Ce membre n'a pas (ou plus) le rôle du clan."
+    try:
+        await membre.remove_roles(role, reason=f"Retiré du clan par {auteur} ({auteur.id}) — tableau de bord")
+    except discord.HTTPException as ex:
+        _logerr("clan.retirer", ex, guild_id=g.id)
+        return False, "Discord a refusé de retirer le rôle (hiérarchie)."
+    await _journal_rellseas(g, f"**Retiré du clan** · {membre.mention} par {auteur.mention} (tableau de bord)")
+    await log_staff_action(g.id, auteur.id, membre.id, "clan_retire", role.name, surface="tableau")
+    return True, f"{membre.display_name} n'a plus le rôle du clan."
+
+
+async def _action_fiche_retirer(g, auteur, d):
+    cid = int(d.get("candidat", 0) or 0)
+    n = await recrutements.retirer_fiche(g.id, cid)
+    if not n:
+        return False, "Fiche déjà retirée."
+    await _journal_rellseas(g, f"**Fiche de candidature retirée** · <@{cid}> par {auteur.mention} (tableau de bord)")
+    await log_staff_action(g.id, auteur.id, cid, "fiche_retiree", f"{n} ligne(s)", surface="tableau")
+    return True, "Fiche retirée."
+
+
+async def _action_sanction_retirer(g, auteur, d):
+    sid = int(d.get("sanction", 0) or 0)
+    async with get_db() as db:
+        async with db.execute("SELECT user_id, type, reason FROM infractions WHERE id=? AND guild_id=?",
+                              (sid, g.id)) as cur:
+            r = await cur.fetchone()
+        if not r:
+            return False, "Sanction déjà retirée."
+        await db.execute("DELETE FROM infractions WHERE id=? AND guild_id=?", (sid, g.id))
+        await db.commit()
+    await log_staff_action(g.id, auteur.id, int(r[0] or 0), "sanction_retiree",
+                           f"{r[1]} — {str(r[2] or '')[:120]}", surface="tableau")
+    logs = g.get_channel(int((await cfg(g.id)).get('mod_log_channel', 0) or 0))
+    if logs is not None:
+        try:
+            await logs.send(f"**Sanction retirée du casier** · <@{r[0]}> · {r[1]} par {auteur.mention} "
+                            f"(tableau de bord)", allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as ex:
+            _logerr("sanction.retirer", ex, guild_id=g.id)
+    return True, "Sanction retirée du casier."
+
+
+_ACTIONS_TABLEAU = {"ticket_fermer": _action_ticket_fermer, "candidature": _action_candidature,
+                    "clan_retirer": _action_clan_retirer, "fiche_retirer": _action_fiche_retirer,
+                    "sanction_retirer": _action_sanction_retirer}
+
+
 async def _salon_tableau(g) -> None:
     """19/10/2026 : « que le site soit accessible pour nous, qu'on puisse le voir dans le serveur
     Discord ». Un salon que seuls le staff et les rôles au-dessus voient, un message épinglé :
@@ -6969,6 +7110,11 @@ async def create_ticket(i, pid, ans=None):
         # ping de masse inutile à chaque ticket). L'embed indique déjà qui a ouvert ; le staff
         # voit le ticket dans la catégorie + le salon de logs (send_ticket_log 'create' ci-dessous).
         await webhook_send(ch, 'ticket', embed=emb, view=TicketControlView())
+        if str(pid) in rellseas_ui.panneaux_tickets(await cfg(i.guild.id)):
+            try:
+                await ch.send(view=recrutements.carte_decision(tid), allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException as ex:
+                _logerr("recrutement.carte", ex, guild_id=i.guild.id)
         
         # ═══════════════════════════════════════════════════════════════════════════════
         #                    👋 MESSAGE D'ACCUEIL PERSONNALISÉ
@@ -18579,13 +18725,14 @@ async def _activite_boot():
     rellseas_ui.set_retour(_retour_vers_configure)
     recrutements.setup(get_db=get_db, cfg=cfg, db_set=db_set, salon=_salon_transcripts_rellseas,
                        role=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
-                       panneaux=rellseas_ui.panneaux_tickets, lien=tableau.lien_pour, log=print)
+                       panneaux=rellseas_ui.panneaux_tickets, lien=tableau.lien_pour,
+                       decider=_decision_recrutement, autorise=_peut_decider, log=print)
     await recrutements.init_db()
     recrutements.demarrer(bot)
     tableau.setup(bot=bot, base_url=transcript_store.public_base_url(), cfg=cfg, get_db=get_db,
                   cle=os.getenv("TABLEAU_CLE") or hashlib.sha256((TOKEN or "").encode() + b"|tableau").hexdigest(),
                   mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_staff_ou_plus,
-                  radie=_RADIE_ROLE_NAME, log=print)
+                  radie=_RADIE_ROLE_NAME, direction=_direction_ou_plus, actions=_ACTIONS_TABLEAU, log=print)
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()
 
@@ -18691,7 +18838,7 @@ async def on_ready():
                               sondages.BoutonFinAnonyme, suggestions.BoutonProposer,
                               suggestions.BoutonPour, suggestions.BoutonContre,
                               suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig,
-                              recrutements.BoutonTableau)
+                              recrutements.BoutonTableau, recrutements.BoutonDecision)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:

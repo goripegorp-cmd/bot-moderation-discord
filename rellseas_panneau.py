@@ -974,7 +974,7 @@ class RellseasGestionV2(LayoutView):
         _DERNIER[k] = (
             "**Activité sur les 7 derniers jours** · lecture seule, personne "
             "n'est prévenu\n" + "\n".join(lignes)
-            + "\n-# 🟢 actif · 🟠 peu présent · 🔴 absent · ⚪ pas assez de "
+            + "\n-# 🟢 vu cette semaine · 🟠 vu ce mois-ci · 🔴 inactif depuis un mois ou plus · ⚪ pas assez de "
               "recul pour juger\n"
               "-# Mesuré par le système d'activité du serveur — aucun "
               "compteur séparé.")
@@ -1020,19 +1020,19 @@ def _etiquette_activite(mes: dict) -> str:
     """Une mesure → une pastille et son chiffre. FONCTION PURE, donc testable.
 
     « Pas encore jugeable » n'est PAS « absent » : reprocher une absence sur
-    des journées qu'on n'a pas observées serait un verdict fabriqué.
+    des journées qu'on n'a pas observées serait un verdict fabriqué. Mêmes seuils
+    que `statut_activite` : inactif seulement après un mois sans rien.
     """
-    presents = mes.get("presents", 0)
-    fenetre = mes.get("fenetre", 7)
-    if not mes.get("jugeable"):
+    rang = statut_activite(mes)
+    if rang == 4:
         return f"⚪ `{mes.get('observables', 0)}j observés` —"
-    if mes.get("silence") is None:
+    if rang == 3:
         return "⚪ `jamais vu` —"
-    if presents == 0:
-        return f"🔴 `0/{fenetre}` —"
-    if presents <= 2:
-        return f"🟠 `{presents}/{fenetre}` —"
-    return f"🟢 `{presents}/{fenetre}` —"
+    if rang == 2:
+        return f"🔴 `inactif depuis {mes.get('silence')} j` —"
+    if rang == 1:
+        return f"🟠 `vu il y a {mes.get('silence')} j` —"
+    return f"🟢 `{mes.get('presents', 0)}/{mes.get('fenetre', 7)}` —"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1042,20 +1042,24 @@ def _etiquette_activite(mes: dict) -> str:
 #  téléphone, chaque nom reste en face de son identifiant. Pas de tableur : un
 #  identifiant Discord (18 chiffres) y serait arrondi.
 
-STATUTS = (("Actif", "🟢"), ("Peu présent", "🟠"), ("Absent", "🔴"),
+STATUTS = (("Actif", "🟢"), ("Peu présent", "🟠"), ("Inactif", "🔴"),
            ("Jamais vu", "⚪"), ("Trop récent", "⚪"))
+#  19/10/2026 : « absent pendant un certain temps, c'est minimum un mois l'inactivité.
+#  Pas 12 jours. » Actif = vu cette semaine ; peu présent = vu ce mois-ci ; inactif = rien
+#  depuis au moins 30 jours.
+SEMAINE, INACTIF_JOURS = 7, 30
 
 
 def statut_activite(mes: dict | None) -> int:
-    """Rang dans STATUTS — mêmes seuils que `_etiquette_activite`."""
+    """Rang dans STATUTS, selon les jours sans le moindre geste (`silence`)."""
     if not mes:
         return 3
     if not mes.get("jugeable"):
         return 4
-    if mes.get("silence") is None:
+    silence = mes.get("silence")
+    if silence is None:
         return 3
-    p = mes.get("presents", 0)
-    return 2 if p == 0 else 1 if p <= 2 else 0
+    return 2 if silence >= INACTIF_JOURS else 1 if silence > SEMAINE else 0
 
 
 def _derniere(mes: dict | None) -> str:
@@ -1108,6 +1112,8 @@ def texte_fichier(serveur: str, role: str, lignes: list[dict], quand) -> str:
         compte(lignes).replace("🟢 ", "").replace("🟠 ", "").replace("🔴 ", "").replace("⚪ ", ""),
         "Activité : jours où le membre a écrit, parlé en vocal, réagi ou utilisé une commande,"
         " sur les 7 derniers jours complets.",
+        "Statut : actif = vu cette semaine · peu présent = vu ce mois-ci · inactif = rien depuis"
+        " au moins un mois.",
         "",
         entete,
         "-" * largeur(entete),

@@ -83,9 +83,21 @@ select{padding:9px 12px;border-radius:12px;background:var(--fond2);border:1px so
   color:var(--teinte);background:color-mix(in srgb,var(--teinte) 15%,transparent);border:1px solid color-mix(in srgb,var(--teinte) 40%,transparent)}
 .statut::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--teinte)}
 [data-statut="acceptes"],[data-rang="0"]{--teinte:var(--vert)}
-[data-statut="non_retenus"],[data-rang="2"]{--teinte:var(--rouge)}
-[data-statut="partis"],[data-rang="3"],[data-rang="4"]{--teinte:var(--gris)}
+[data-statut="refuses"],[data-rang="2"]{--teinte:var(--rouge)}
+[data-rang="3"],[data-rang="4"]{--teinte:var(--gris)}
 [data-statut="en_cours"],[data-rang="1"]{--teinte:var(--ambre)}
+.bouton.danger{border-color:rgba(244,63,94,.5);color:#fecdd3;background:rgba(244,63,94,.12)}
+.bouton.danger:hover{background:rgba(244,63,94,.22)}
+.bouton.vert{border-color:rgba(34,197,94,.5);color:#bbf7d0;background:rgba(34,197,94,.12)}
+.bouton.petit-b{padding:5px 10px;font-size:12px;border-radius:9px}
+.tag{font-size:11px;padding:1px 7px;border-radius:999px;background:rgba(148,163,184,.15);color:var(--doux);margin-left:6px}
+.confirmation{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,calc(100% - 32px));z-index:41;
+  padding:20px;border-radius:18px;background:var(--fond2);border:1px solid var(--bord2);box-shadow:var(--ombre)}
+.confirmation h3{margin:0 0 6px;font-size:17px}
+.confirmation p{margin:0 0 14px;color:var(--doux)}
+.confirmation textarea{width:100%;margin:6px 0 14px;padding:10px;border-radius:10px;background:var(--carte);border:1px solid var(--bord);color:var(--texte);font:inherit;resize:vertical}
+.confirmation .actions{justify-content:flex-end}
+#voile-confirm{z-index:40}
 
 /* Fiches */
 .grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
@@ -243,7 +255,7 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
   <nav class="onglets" role="tablist" aria-label="Sections">
     <button class="onglet" role="tab" data-onglet="candidatures" aria-selected="true">Candidatures<span class="nb" id="nb-candidatures">0</span></button>
     <button class="onglet" role="tab" data-onglet="tickets" aria-selected="false">Tickets<span class="nb" id="nb-tickets">0</span></button>
-    <button class="onglet" role="tab" data-onglet="sanctions" aria-selected="false">Sanctions<span class="nb" id="nb-sanctions">0</span></button>
+    <button class="onglet" role="tab" data-onglet="sanctions" aria-selected="false">Modération<span class="nb" id="nb-sanctions">0</span></button>
     <button class="onglet" role="tab" data-onglet="clan" aria-selected="false">Clan<span class="nb" id="nb-clan">0</span></button>
     <button class="onglet" role="tab" data-onglet="stats" aria-selected="false">Statistiques</button>
   </nav>
@@ -266,6 +278,8 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
     <div class="grille-types" id="types"></div>
     <div class="titre-section"><h2>Tickets ouverts</h2><span class="etiquette" id="nb-ouverts"></span></div>
     <div class="liste" id="liste-ouverts"></div>
+    <div class="titre-section"><h2>Derniers tickets fermés</h2><span class="etiquette" id="nb-fermes"></span></div>
+    <div class="liste" id="liste-fermes"></div>
   </section>
 
   <section id="vue-sanctions" role="tabpanel" hidden>
@@ -304,7 +318,7 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
     </div>
     <div class="puces" id="puces-clan" style="margin-bottom:10px"></div>
     <table class="table" id="table-clan">
-      <thead><tr><th>Membre</th><th>Identifiant</th><th>7 derniers jours</th><th>Statut</th><th>Dernière activité</th><th>Arrivée</th></tr></thead>
+      <thead><tr><th>Membre</th><th>Identifiant</th><th>7 derniers jours</th><th>Statut</th><th>Dernière activité</th><th>Arrivée</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
   </section>
@@ -320,7 +334,7 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
     <div class="panneaux2" style="margin-top:12px">
       <div class="cadre"><h3>Candidatures par mois</h3><p class="aide">Selon la date de fermeture du ticket.</p>
         <div id="graphe"></div>
-        <div class="legende"><span><i style="background:var(--vert)"></i>Acceptés</span><span><i style="background:var(--rouge)"></i>Non retenus</span><span><i style="background:var(--gris)"></i>Partis</span></div>
+        <div class="legende"><span><i style="background:var(--vert)"></i>Acceptés</span><span><i style="background:var(--rouge)"></i>Refusés</span></div>
       </div>
       <div class="cadre"><h3>Délais par type</h3><p class="aide">Médianes : de l'ouverture à la prise en charge, et à la fermeture.</p><div id="delais"></div></div>
     </div>
@@ -332,12 +346,19 @@ footer{margin-top:28px;color:var(--pale);font-size:12px;text-align:center}
 <div class="voile" id="voile"></div>
 <div class="porte-tiroir"><aside class="tiroir" id="tiroir" role="dialog" aria-modal="true" aria-labelledby="t-nom" aria-hidden="true"></aside></div>
 <div class="toast" id="toast" role="status"></div>
+<div class="voile" id="voile-confirm"></div>
+<div class="confirmation" id="confirmation" role="alertdialog" aria-modal="true" aria-labelledby="c-titre" hidden>
+  <h3 id="c-titre"></h3><p id="c-texte"></p>
+  <label id="c-motif-bloc" hidden><span class="pseudo">Motif (facultatif)</span><textarea id="c-motif" maxlength="150" rows="2"></textarea></label>
+  <div class="actions"><button class="bouton" id="c-annuler" type="button">Annuler</button><button class="bouton danger" id="c-ok" type="button">Confirmer</button></div>
+</div>
 
 <script>
 "use strict";
-const STATUTS = {en_cours:"En cours", acceptes:"Accepté", non_retenus:"Non retenu", partis:"Parti"};
-const PLURIELS = {en_cours:"En cours", acceptes:"Acceptés", non_retenus:"Non retenus", partis:"Partis"};
-const RANGS = ["Actif","Peu présent","Absent","Jamais vu","Trop récent"];
+const STATUTS = {en_cours:"En cours", acceptes:"Accepté", refuses:"Refusé"};
+const PLURIELS = {en_cours:"En cours", acceptes:"Acceptés", refuses:"Refusés"};
+const peutAgir = () => !!(etat.donnees && etat.donnees.droits && etat.donnees.droits.actions);
+const RANGS = ["Actif","Peu présent","Inactif","Jamais vu","Trop récent"];
 const $ = (s) => document.querySelector(s);
 const etat = {donnees:null, onglet:"candidatures", statut:"tous", rang:"tous", type:"tous", groupe:"tous", charge:false};
 const GROUPES = ["Avertissements", "Mutes", "Expulsions et bans", "Détections"];
@@ -409,9 +430,9 @@ function compteur(el, cible, suffixe){
   requestAnimationFrame(pas);
 }
 function chiffres(d){
-  const tous = d.candidats, n = {acceptes:0, non_retenus:0, partis:0};
+  const tous = d.candidats, n = {acceptes:0, refuses:0};
   tous.forEach(c => n[c.statut] = (n[c.statut] || 0) + 1);
-  const decides = n.acceptes + n.non_retenus;
+  const decides = n.acceptes + n.refuses;
   const taux = decides ? Math.round(100 * n.acceptes / decides) : 0;
   const ouverts = d.tickets.ouverts, rell = ouverts.filter(t => t.rellseas).length, nonPris = ouverts.filter(t => !t.pris_par).length;
   const prises = d.tickets.types.filter(t => t.prise_mediane).map(t => t.prise_mediane).sort((a, b) => a - b);
@@ -419,9 +440,9 @@ function chiffres(d){
   const tuiles = [
     ["Tickets ouverts", ouverts.length, rell + " Rell Seas · " + nonPris + " non pris", "var(--ambre)"],
     ["Prise en charge", 0, "Délai médian, tous types", "#38bdf8", "", formatDuree(prise)],
-    ["Candidatures", tous.length + d.en_cours.length, d.ecartes ? d.ecartes + " écartée(s) : vides ou doublons" : "Depuis le début", "var(--cyan)"],
-    ["Acceptés", n.acceptes, "Portent le rôle du clan", "var(--vert)"],
-    ["Non retenus", n.non_retenus, "Refusés ou sans suite", "var(--rouge)"],
+    ["Candidatures", tous.length + d.en_cours.length, d.ecartes ? d.ecartes + " écartée(s) : sans décision, vides, doublons" : "Décidées ou en cours", "var(--cyan)"],
+    ["Acceptés", n.acceptes, "Décision : accepté", "var(--vert)"],
+    ["Refusés", n.refuses, "Décision : refusé", "var(--rouge)"],
     ["Taux d'acceptation", taux, decides + " décision(s)", "#a78bfa", " %"],
   ];
   const zone = $("#chiffres"); zone.replaceChildren();
@@ -436,10 +457,10 @@ function chiffres(d){
 function toutesLesFiches(){ return etat.donnees.en_cours.concat(etat.donnees.candidats); }
 function rendreCandidatures(){
   const d = etat.donnees, q = $("#q-candidatures").value.trim().toLowerCase(), mois = $("#mois").value, tri = $("#tri").value;
-  const nb = {tous:0, en_cours:0, acceptes:0, non_retenus:0, partis:0};
+  const nb = {tous:0, en_cours:0, acceptes:0, refuses:0};
   toutesLesFiches().forEach(c => { nb.tous++; nb[c.statut]++; });
   const puces = $("#puces-statut"); puces.replaceChildren();
-  ["tous","en_cours","acceptes","non_retenus","partis"].forEach(s => puces.append(h("button", {classe:"puce", type:"button", "data-statut":s === "tous" ? null : s,
+  ["tous","en_cours","acceptes","refuses"].forEach(s => puces.append(h("button", {classe:"puce", type:"button", "data-statut":s === "tous" ? null : s,
     "aria-pressed":String(etat.statut === s), onclick:() => { etat.statut = s; rendreCandidatures(); }},
     s === "tous" ? null : h("i"), s === "tous" ? "Toutes" : PLURIELS[s], " · " + nb[s])));
   let liste = toutesLesFiches().filter(c => etat.statut === "tous" || c.statut === etat.statut);
@@ -450,7 +471,7 @@ function rendreCandidatures(){
   const grille = $("#grille"); grille.replaceChildren();
   if (!liste.length){ grille.append(h("div", {classe:"vide", style:"grid-column:1/-1"}, h("b", {}, "Aucune candidature ici"), "Change le filtre ou la recherche.")); return; }
   liste.forEach(c => grille.append(h("button", {classe:"fiche", type:"button", onclick:() => ouvrirFiche(c)},
-    h("div", {classe:"qui"}, avatar(c), h("div", {classe:"bloc"}, h("div", {classe:"nom"}, c.nom), h("div", {classe:"pseudo"}, (c.pseudo ? "@" + c.pseudo + " · " : "") + date(c.ferme || c.ouvert))), pastille(c.statut)),
+    h("div", {classe:"qui"}, avatar(c), h("div", {classe:"bloc"}, h("div", {classe:"nom"}, c.nom, c.parti ? h("span", {classe:"tag"}, "parti") : null), h("div", {classe:"pseudo"}, (c.pseudo ? "@" + c.pseudo + " · " : "") + date(c.ferme || c.ouvert))), pastille(c.statut)),
     (c.reponses || []).length ? h("div", {classe:"apercu"}, c.reponses.slice(0, 2).map(([qq, r]) => h("div", {}, h("b", {}, qq + " : "), r))) : h("div", {classe:"apercu"}, h("div", {}, "Formulaire non rempli")),
     h("div", {classe:"pied"}, h("span", {}, c.statut === "en_cours" ? (c.pris_par ? "Pris par " + c.pris_par : "Pas encore pris en charge") : (c.pris_par || c.ferme_par ? "Traité par " + (c.pris_par || c.ferme_par) : "Traitement non renseigné")),
       h("span", {}, (c.candidatures || []).length > 1 ? c.candidatures.length + " candidatures" : (c.statut === "en_cours" ? depuis(c.ouvert) : "")))
@@ -467,6 +488,20 @@ function ouvrirFiche(c){
     c.transcript ? h("a", {classe:"bouton principal", href:c.transcript, target:"_blank", rel:"noopener noreferrer"}, "Ouvrir le transcript") : null,
     c.salon ? h("a", {classe:"bouton principal", href:c.salon, target:"_blank", rel:"noopener noreferrer"}, "Ouvrir le ticket") : null,
     h("a", {classe:"bouton", href:"https://discord.com/users/" + c.id, target:"_blank", rel:"noopener noreferrer"}, "Profil Discord"));
+  const gestes = !peutAgir() ? null : h("div", {classe:"actions"},
+    c.statut === "en_cours" ? [
+      h("button", {classe:"bouton vert", type:"button", onclick:() => agir({action:"candidature", ticket:c.ticket, decision:"accepter"},
+        "Accepter " + c.nom + " ?", "Le rôle du clan lui est donné et son ticket est fermé (transcript et dossier gardés).", false, "Accepter")}, "Accepter"),
+      h("button", {classe:"bouton danger", type:"button", onclick:() => agir({action:"candidature", ticket:c.ticket, decision:"refuser"},
+        "Refuser " + c.nom + " ?", "Son ticket est fermé avec ce motif (transcript et dossier gardés).", true, "Refuser")}, "Refuser"),
+      h("button", {classe:"bouton", type:"button", onclick:() => agir({action:"ticket_fermer", ticket:c.ticket},
+        "Fermer le ticket #" + c.ticket + " ?", "Fermeture sans décision : le transcript est gardé.", true, "Fermer")}, "Fermer sans décider")
+    ] : [
+      c.statut === "acceptes" && !c.parti ? h("button", {classe:"bouton", type:"button", onclick:() => agir({action:"clan_retirer", membre:c.id},
+        "Retirer " + c.nom + " du clan ?", "Le rôle du clan lui est retiré sur Discord.", false, "Retirer du clan")}, "Retirer du clan") : null,
+      h("button", {classe:"bouton danger", type:"button", onclick:() => agir({action:"fiche_retirer", candidat:c.id},
+        "Retirer la fiche de " + c.nom + " ?", "Ses candidatures disparaissent du tableau de bord. Les transcripts restent.", false, "Retirer la fiche")}, "Retirer la fiche")
+    ]);
   const info = (k, v) => h("div", {classe:"info"}, h("div", {classe:"k"}, k), h("div", {classe:"v"}, v || "—"));
   const infos = h("div", {classe:"infos"},
     info("Candidature déposée", date(c.ouvert, true)),
@@ -484,7 +519,7 @@ function ouvrirFiche(c){
       h("div", {classe:"ident"}, (c.pseudo ? "@" + c.pseudo + " · " : "") + c.id, boutonCopie(c.id, "Identifiant copié")),
       h("div", {style:"margin-top:6px"}, pastille(c.statut))),
       h("button", {classe:"fermer", type:"button", "aria-label":"Fermer", onclick:fermerFiche}, "×")),
-    h("div", {classe:"corps"}, actions, infos,
+    h("div", {classe:"corps"}, actions, gestes, infos,
       (c.candidatures || []).length > 1 ? h("div", {}, h("div", {classe:"titre-section", style:"margin:0 0 8px"}, h("h2", {}, "Candidatures précédentes")),
         h("div", {classe:"dates"}, c.candidatures.map(x => h("span", {classe:"etiquette"}, date(x))))) : null,
       h("div", {}, h("div", {classe:"titre-section", style:"margin:0 0 8px"}, h("h2", {}, "Réponses au formulaire")), reponses)));
@@ -508,7 +543,9 @@ function ligneTicket(c){
     h("span", {classe:"etiquette", style:c.rellseas ? "color:#67e8f9" : null}, c.type),
     h("span", {classe:"statut", "data-statut":c.pris_par ? "acceptes" : "en_cours"}, c.pris_par ? "Pris par " + c.pris_par : "Non pris"),
     fiche ? h("button", {classe:"bouton", type:"button", onclick:() => ouvrirFiche(fiche)}, "Fiche") : null,
-    c.salon ? h("a", {classe:"bouton", href:c.salon, target:"_blank", rel:"noopener noreferrer"}, "Ouvrir") : null);
+    c.salon ? h("a", {classe:"bouton", href:c.salon, target:"_blank", rel:"noopener noreferrer"}, "Ouvrir") : null,
+    peutAgir() ? h("button", {classe:"bouton danger", type:"button", onclick:() => agir({action:"ticket_fermer", ticket:c.ticket},
+      "Fermer le ticket #" + c.ticket + " de " + c.nom + " ?", "Le salon du ticket est supprimé ; le transcript est gardé.", true, "Fermer")}, "Fermer") : null);
 }
 function garde(t){ return etat.type === "tous" || (etat.type === "rell" && t.rellseas) || (etat.type === "normaux" && !t.rellseas) || etat.type === "t:" + t.nom || etat.type === "t:" + t.type; }
 function rendreTickets(){
@@ -534,9 +571,38 @@ function rendreTickets(){
   $("#nb-ouverts").textContent = ouverts.length + " ouvert(s)";
   if (!ouverts.length) liste.append(h("div", {classe:"vide"}, h("b", {}, "Aucun ticket ouvert ici"), "Tout est traité."));
   ouverts.forEach(c => liste.append(ligneTicket(c)));
+  const fermes = (tk.fermes_recents || []).filter(garde), zf = $("#liste-fermes"); zf.replaceChildren();
+  $("#nb-fermes").textContent = fermes.length + " · les 40 derniers";
+  if (!fermes.length) zf.append(h("div", {classe:"vide"}, h("b", {}, "Aucun ticket fermé ici"), "Ils apparaîtront à la première fermeture."));
+  fermes.forEach(c => zf.append(h("div", {classe:"ligne"}, avatar(c),
+    h("div", {classe:"bloc"}, h("div", {classe:"nom"}, c.nom),
+      h("div", {classe:"motif", title:c.motif}, c.motif || "Sans motif"),
+      h("div", {classe:"meta"}, "Ticket #" + c.ticket + " · fermé " + depuis(c.ferme) + (c.ferme_par ? " par " + c.ferme_par : "") + " · durée " + duree(c.ouvert, c.ferme))),
+    h("span", {classe:"etiquette", style:c.rellseas ? "color:#67e8f9" : null}, c.type),
+    c.transcript ? h("a", {classe:"bouton", href:c.transcript, target:"_blank", rel:"noopener noreferrer"}, "Transcript") : h("span", {classe:"pseudo"}, "pas de transcript"))));
 }
 
-/* Sanctions */
+/* Modération */
+const boutonRetirerSanction = (x, nom) => h("button", {classe:"bouton danger petit-b", type:"button", onclick:(e) => { e.stopPropagation();
+  agir({action:"sanction_retirer", sanction:x.sanction}, "Retirer cette sanction ?", x.libelle + " de " + nom + " — " + (x.raison || "sans motif") + ". Elle sort du casier.", false, "Retirer"); }}, "Retirer");
+function ouvrirModerateur(x){
+  dernierFocus = document.activeElement;
+  const t = $("#tiroir"); t.replaceChildren();
+  t.append(
+    h("header", {}, h("div", {classe:"avatar grand", "aria-hidden":"true"}, (x.nom || "?").slice(0, 2).toUpperCase()), h("div", {classe:"bloc", style:"min-width:0"},
+      h("div", {classe:"nom", id:"t-nom", style:"font-size:20px"}, x.nom),
+      h("div", {classe:"pseudo", style:"margin-top:4px"}, x.total + " sanction(s) décidée(s)")),
+      h("button", {classe:"fermer", type:"button", "aria-label":"Fermer", onclick:fermerFiche}, "×")),
+    h("div", {classe:"corps"},
+      h("div", {classe:"dates"}, Object.entries(x.types).sort((a, b) => b[1] - a[1]).map(([k, n]) => h("span", {classe:"etiquette"}, n + " × " + libelleType(k)))),
+      h("div", {}, h("div", {classe:"titre-section", style:"margin:0 0 8px"}, h("h2", {}, "Ses dernières sanctions")),
+        h("div", {classe:"liste"}, (x.dernieres || []).map(y => h("div", {classe:"reponse"},
+          h("div", {classe:"q"}, y.libelle + " · " + y.nom + " · " + date(y.date, true) + (y.duree ? " · " + y.duree : "")),
+          h("div", {classe:"r"}, y.raison || "Sans motif"),
+          peutAgir() ? h("div", {style:"margin-top:8px"}, boutonRetirerSanction(y, y.nom)) : null))))));
+  t.classList.add("ouvert"); t.setAttribute("aria-hidden", "false"); $("#voile").classList.add("ouvert");
+  t.querySelector(".fermer").focus({preventScroll:true});
+}
 const libelleType = (k) => ((etat.donnees.sanctions || {}).libelles || {})[k] || k;
 function petitMembre(m, extra){ return h("span", {classe:"petit", title:m.nom + " · " + m.id}, avatar(m), m.nom + (extra ? " · " + extra : "")); }
 function ouvrirSanctions(m){
@@ -547,14 +613,15 @@ function ouvrirSanctions(m){
     h("header", {}, avatar(m, true), h("div", {classe:"bloc", style:"min-width:0"},
       h("div", {classe:"nom", id:"t-nom", style:"font-size:20px"}, m.nom),
       h("div", {classe:"ident"}, (m.pseudo ? "@" + m.pseudo + " · " : "") + m.id, boutonCopie(m.id, "Identifiant copié")),
-      h("div", {style:"margin-top:6px", classe:"pseudo"}, m.total + " passage(s) au casier sur 90 jours")),
+      h("div", {style:"margin-top:6px", classe:"pseudo"}, m.total + " passage(s) au casier sur 90 jours" + (m.total_tout ? " · " + m.total_tout + " au total" : ""))),
       h("button", {classe:"fermer", type:"button", "aria-label":"Fermer", onclick:fermerFiche}, "×")),
     h("div", {classe:"corps"},
       h("div", {classe:"dates"}, types.map(([ty, n]) => h("span", {classe:"etiquette"}, n + " × " + libelleType(ty)))),
       h("div", {}, h("div", {classe:"titre-section", style:"margin:0 0 8px"}, h("h2", {}, "Historique récent")),
         h("div", {classe:"liste"}, (m.historique || []).map(x => h("div", {classe:"reponse"},
           h("div", {classe:"q"}, x.libelle + " · " + date(x.date, true) + " · " + x.par + (x.duree ? " · " + x.duree : "")),
-          h("div", {classe:"r"}, x.raison || "Sans motif")))))));
+          h("div", {classe:"r"}, x.raison || "Sans motif"),
+          peutAgir() && x.sanction ? h("div", {style:"margin-top:8px"}, boutonRetirerSanction(x, m.nom)) : null))))));
   t.classList.add("ouvert"); t.setAttribute("aria-hidden", "false"); $("#voile").classList.add("ouvert");
   t.querySelector(".fermer").focus({preventScroll:true});
 }
@@ -592,12 +659,14 @@ function rendreSanctions(){
     avatar(m), h("div", {classe:"bloc"}, h("div", {classe:"nom"}, m.nom),
       h("div", {classe:"meta"}, Object.entries(m.types).sort((a, b) => b[1] - a[1]).slice(0, 3)
         .map(([k, n]) => n + " × " + libelleType(k)).join(" · "))),
-    h("span", {classe:"statut", "data-statut":m.total >= 5 ? "non_retenus" : "en_cours"}, m.total + " en 90 j"))));
+    h("span", {classe:"statut", "data-statut":m.total >= 5 ? "refuses" : "en_cours"}, m.total + " en 90 j"))));
   const md = $("#moderateurs"); md.replaceChildren();
   const maxM = Math.max(1, ...s.staff.map(x => x.total));
   if (!s.staff.length) md.append(h("div", {classe:"vide"}, h("b", {}, "Rien à afficher"), "Aucune sanction décidée à la main."));
-  s.staff.forEach(x => md.append(h("div", {classe:"barre-h", title:Object.entries(x.types).map(([k, n]) => n + " " + k).join(" · ")},
+  s.staff.forEach(x => md.append(h("button", {classe:"barre-h", type:"button", style:"width:100%;border:0;background:none;color:inherit;cursor:pointer;padding:0;text-align:left",
+    title:"Voir ses sanctions", onclick:() => ouvrirModerateur(x)},
     h("span", {classe:"lib", title:x.nom}, x.nom), h("div", {classe:"fond"}, h("div", {classe:"plein", style:"width:" + Math.round(100 * x.total / maxM) + "%"})), h("b", {}, x.total))));
+  if (s.staff.length) md.append(h("p", {classe:"aide", style:"margin:10px 0 0"}, "Clique sur un modérateur pour voir tout ce qu'il a attribué."));
   rendreRecentes();
 }
 function rendreRecentes(){
@@ -615,7 +684,8 @@ function rendreRecentes(){
   liste.forEach(x => zone.append(h("div", {classe:"ligne"}, avatar(x),
     h("div", {classe:"bloc"}, h("div", {classe:"nom"}, x.nom), h("div", {classe:"motif", title:x.raison}, x.raison || "Sans motif"),
       h("div", {classe:"meta"}, date(x.date, true) + " · " + (x.auto ? "automatique" : "par " + x.par) + (x.duree ? " · " + x.duree : ""))),
-    h("span", {classe:"statut", "data-groupe":x.groupe}, x.libelle))));
+    h("span", {classe:"statut", "data-groupe":x.groupe}, x.libelle),
+    peutAgir() ? boutonRetirerSanction(x, x.nom) : null)));
 }
 ["#q-sanctions", "#origine"].forEach(s => $(s).addEventListener("input", rendreRecentes));
 
@@ -629,8 +699,8 @@ function rendreClan(){
     onclick:() => { etat.rang = r; rendreClan(); }}, h("i"), lib + " · " + nb[r])); });
   const corps = $("#table-clan tbody"); corps.replaceChildren();
   const liste = c.membres.filter(m => (etat.rang === "tous" || m.rang === etat.rang) && (!q || (m.nom + " " + m.pseudo + " " + m.id).toLowerCase().includes(q)));
-  if (!c.role){ corps.append(h("tr", {}, h("td", {colspan:"6"}, "Aucun rôle Rell Seas réglé dans /configure."))); return; }
-  if (!liste.length){ corps.append(h("tr", {}, h("td", {colspan:"6"}, "Personne pour ce filtre."))); return; }
+  if (!c.role){ corps.append(h("tr", {}, h("td", {colspan:"7"}, "Aucun rôle Rell Seas réglé dans /configure."))); return; }
+  if (!liste.length){ corps.append(h("tr", {}, h("td", {colspan:"7"}, "Personne pour ce filtre."))); return; }
   liste.forEach(m => {
     const presents = /^\d+\/\d+$/.test(m.jours) ? +m.jours.split("/")[0] : 0;
     const jauge = h("div", {classe:"jauge", "data-rang":m.rang, title:m.jours + " jour(s) actifs"},
@@ -641,7 +711,9 @@ function rendreClan(){
       h("td", {}, m.jours === "—" ? h("span", {classe:"pseudo"}, "—") : jauge),
       h("td", {}, h("span", {classe:"statut", "data-rang":m.rang}, m.statut)),
       h("td", {classe:"pseudo", "data-k":"Dernière activité"}, m.derniere),
-      h("td", {classe:"pseudo", "data-k":"Arrivée"}, m.arrivee)));
+      h("td", {classe:"pseudo", "data-k":"Arrivée"}, m.arrivee),
+      h("td", {}, peutAgir() ? h("button", {classe:"bouton danger petit-b", type:"button", onclick:() => agir({action:"clan_retirer", membre:m.id},
+        "Retirer " + m.nom + " du clan ?", "Le rôle du clan lui est retiré sur Discord.", false, "Retirer du clan")}, "Retirer") : null)));
   });
 }
 $("#copier-clan").addEventListener("click", () => {
@@ -674,8 +746,8 @@ function barres(zone, parMois, series, vide){
 }
 function rendreStats(){
   const d = etat.donnees, parMois = {};
-  d.candidats.forEach(c => { if (!c.ferme) return; const k = moisDe(c.ferme); (parMois[k] = parMois[k] || {acceptes:0, non_retenus:0, partis:0})[c.statut]++; });
-  barres($("#graphe"), parMois, [["acceptes", "#22c55e", "Acceptés"], ["non_retenus", "#f43f5e", "Non retenus"], ["partis", "#94a3b8", "Partis"]],
+  d.candidats.forEach(c => { if (!c.ferme) return; const k = moisDe(c.ferme); (parMois[k] = parMois[k] || {acceptes:0, refuses:0})[c.statut]++; });
+  barres($("#graphe"), parMois, [["acceptes", "#22c55e", "Acceptés"], ["refuses", "#f43f5e", "Refusés"]],
     "Les mois apparaîtront avec les premières candidatures fermées.");
   barres($("#graphe-tickets"), d.tickets.mois, [["Rell Seas", "#06b6d4", "Rell Seas"], ["Tickets normaux", "#818cf8", "Tickets normaux"]],
     "Les mois apparaîtront avec les premiers tickets.");
@@ -697,6 +769,34 @@ function rendreStats(){
     h("div", {classe:"fond", style:"height:8px;border-radius:999px;background:rgba(148,163,184,.15);overflow:hidden;margin-top:6px;position:relative"},
       h("div", {style:"position:absolute;inset:0 auto 0 0;width:" + Math.round(100 * (t.fermeture_mediane || 0) / maxD) + "%;background:#818cf8;opacity:.55;border-radius:999px"}),
       h("div", {style:"position:absolute;inset:0 auto 0 0;width:" + Math.round(100 * (t.prise_mediane || 0) / maxD) + "%;background:" + (t.rellseas ? "var(--cyan)" : "#38bdf8") + ";border-radius:999px"})))));
+}
+
+/* Actions : fondateur et direction, toujours confirmées */
+function confirmer(titre, texte, avecMotif, libelleOk){
+  return new Promise(fin => {
+    const c = $("#confirmation"), voile = $("#voile-confirm");
+    $("#c-titre").textContent = titre; $("#c-texte").textContent = texte;
+    $("#c-motif-bloc").hidden = !avecMotif; $("#c-motif").value = ""; $("#c-ok").textContent = libelleOk || "Confirmer";
+    c.hidden = false; voile.classList.add("ouvert");
+    const finir = (v) => { c.hidden = true; voile.classList.remove("ouvert"); document.removeEventListener("keydown", echap); fin(v); };
+    const echap = (e) => { if (e.key === "Escape"){ e.stopPropagation(); finir(null); } };
+    document.addEventListener("keydown", echap);
+    $("#c-ok").onclick = () => finir({motif:$("#c-motif").value.trim()});
+    $("#c-annuler").onclick = () => finir(null);
+    (avecMotif ? $("#c-motif") : $("#c-annuler")).focus();
+  });
+}
+async function agir(corps, titre, texte, avecMotif, libelleOk){
+  const r = await confirmer(titre, texte, avecMotif, libelleOk);
+  if (!r) return;
+  if (avecMotif && r.motif) corps.motif = r.motif;
+  try {
+    const rep = await fetch(location.pathname.replace(/\/$/, "") + "/action",
+      {method:"POST", headers:{"Content-Type":"application/json", "X-Tableau":"1"}, body:JSON.stringify(corps), cache:"no-store"});
+    const j = await rep.json();
+    toast(j.message || (j.ok ? "C'est fait." : "Refusé."));
+    if (j.ok){ fermerFiche(); setTimeout(charger, 2500); }
+  } catch (e) { toast("L'action n'a pas pu être envoyée."); }
 }
 
 /* Navigation, chargement */
@@ -723,7 +823,8 @@ function rendre(){
   mois.value = cles.includes(choisi) ? choisi : "tous";
   $("#nb-sanctions").textContent = d.sanctions.trente_jours;
   chiffres(d); rendreCandidatures(); rendreTickets(); rendreSanctions(); rendreClan(); rendreStats();
-  $("#pied").textContent = "Lien personnel, valable jusqu'au " + date(d.expire, true) + " · données lues en direct dans la base du bot · ne le partage pas.";
+  $("#pied").textContent = "Lien personnel, valable jusqu'au " + date(d.expire, true) + " · données lues en direct dans la base du bot · ne le partage pas · "
+    + (peutAgir() ? "tu peux agir (fondateur ou direction) : chaque action est confirmée et tracée dans Discord." : "consultation : les actions sont réservées au fondateur et à la direction.");
 }
 async function charger(){
   const b = $("#actualiser"); b.classList.add("tourne"); b.disabled = true;

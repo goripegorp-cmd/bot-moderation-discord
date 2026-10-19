@@ -212,7 +212,10 @@ def test_T7_sanctions_en_chiffres_et_en_cours(tmp_path):
     assert (s["total"], s["trente_jours"], s["auto"], s["manuel"]) == (5, 3, 2, 3)
     types = {t["type"]: t for t in s["types"]}
     assert types["insulte"]["detection"] and not types["warn"]["detection"] and types["ban"]["libelle"] == "Bannissement"
-    assert s["staff"] == [{"nom": "M2", "total": 3, "types": {"warn": 1, "mute": 1, "ban": 1}}], "le bot n'est pas un modérateur"
+    assert [(x["nom"], x["total"], x["types"]) for x in s["staff"]] == \
+        [("M2", 3, {"warn": 1, "mute": 1, "ban": 1})], "le bot n'est pas un modérateur"
+    assert [y["type"] for y in s["staff"][0]["dernieres"]] == ["ban", "mute", "warn"], "tout ce qu'il a attribué"
+    assert s["surveiller"][0]["total_tout"] == 3
     assert s["surveiller"][0]["id"] == "7" and s["surveiller"][0]["total"] == 3, "90 jours seulement"
     assert s["recentes"][0]["libelle"] == "Bannissement" and s["recentes"][-1]["auto"] is False
     assert [m["id"] for m in s["actives"]["mutes"]] == ["7"] and s["actives"]["mutes"][0]["jusqu"]
@@ -277,3 +280,56 @@ def test_T8_le_salon_du_tableau_reserve_au_staff_et_epingle():
     assert len(envois) == 1 and epingles, "un seul message, épinglé"
     composants = list(envois[0]["view"].walk_children())
     assert any(getattr(c, "custom_id", "") == "recr:web" for c in composants)
+
+
+def test_T9_seuls_le_fondateur_et_la_direction_agissent():
+    ns = {"owner_ids_module": Obj(is_super_owner=lambda uid: uid == 42)}
+    exec(_source("_direction_ou_plus"), ns)  # noqa: S102 — code du dépôt
+    direction = ns["_direction_ou_plus"]
+    staff, dir_r, haut = Role(10, 5), Role(11, 8), Role(12, 9)
+    g = Obj(owner_id=1, get_role={10: staff, 11: dir_r}.get)
+    c = {"ticket_staff": 10, "direction_allowed_role": 11}
+    assert direction(g, _membre(1), c) and direction(g, _membre(42), c), "fondateur"
+    assert direction(g, _membre(3, dir_r), c) and direction(g, _membre(4, haut), c)
+    assert not direction(g, _membre(5, staff), c), "le staff voit, mais n'agit pas"
+    assert not direction(g, _membre(6, admin=True), {}), "sans rôle direction : le fondateur seul"
+
+
+def test_T10_actions_verifiees_tracees_et_limitees(tmp_path):
+    env = Env(tmp_path)
+    appels = []
+
+    async def fermer(g, auteur, corps):
+        appels.append((auteur.id, corps))
+        return True, "Ticket fermé."
+    tableau._actions = {"ticket_fermer": fermer}
+    tableau._direction = lambda g, m, c: m is not None and m.id == 2
+    tableau._cadence.clear()
+
+    class Requete:
+        def __init__(self, j, corps, entete=True):
+            self.match_info = {"jeton": j}
+            self.headers = {"X-Tableau": "1"} if entete else {}
+            self._corps = corps
+            self.content_length = len(json.dumps(corps))
+
+        async def json(self):
+            return self._corps
+
+    async def scenario():
+        bon, staff_simple = tableau.jeton(1, 2, "tout"), tableau.jeton(1, 8, "tout")
+        env.membres[8].roles = [env.staff]
+        sans_entete = await tableau.action(Requete(bon, {"action": "ticket_fermer", "ticket": 5}, entete=False))
+        refuse = await tableau.action(Requete(staff_simple, {"action": "ticket_fermer", "ticket": 5}))
+        inconnue = await tableau.action(Requete(bon, {"action": "tout_supprimer"}))
+        ok = await tableau.action(Requete(bon, {"action": "ticket_fermer", "ticket": 5}))
+        for _ in range(25):
+            dernier = await tableau.action(Requete(bon, {"action": "ticket_fermer", "ticket": 5}))
+        return sans_entete, refuse, inconnue, ok, dernier
+    sans_entete, refuse, inconnue, ok, dernier = asyncio.run(scenario())
+    assert sans_entete.status == 400, "une requête venue d'ailleurs que la page est refusée"
+    assert refuse.status == 403 and "direction" in json.loads(refuse.text)["message"]
+    assert inconnue.status == 400
+    assert ok.status == 200 and json.loads(ok.text) == {"ok": True, "message": "Ticket fermé."}
+    assert appels[0] == (2, {"action": "ticket_fermer", "ticket": 5})
+    assert dernier.status == 429, "pas plus de 20 actions par minute"

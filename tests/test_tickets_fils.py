@@ -14,6 +14,8 @@ import aiosqlite
 import discord
 import pytest
 
+import recrutements
+import rellseas_panneau
 import tickets_fils as tf
 
 RACINE = Path(__file__).resolve().parent.parent
@@ -239,6 +241,7 @@ def _executer(get_db, conf, guilde):
           "_access_gate_reason": rien, "count_user_tickets_today": zero,
           "count_user_tickets": zero, "send_ticket_log": rien,
           "TicketControlView": lambda: "vue", "now": lambda: None,
+          "rellseas_ui": rellseas_panneau, "recrutements": recrutements,
           "_logerr": lambda *a, **k: journaux.append(a)}
     exec(_fonction("create_ticket"), ns)  # noqa: S102 — code du dépôt
     user = Obj(id=3, name="kolax_", mention="@kolax", display_avatar=Obj(url="u"))

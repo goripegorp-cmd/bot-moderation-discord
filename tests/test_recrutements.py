@@ -75,12 +75,13 @@ def test_E1_reponses_gardees_entieres_mais_bornees():
     assert len(r) == R.REPONSES_MAX
 
 
-def test_E2_statut_role_motif_et_depart():
-    assert R.statut(False, True, "Accepté") == "partis"
-    assert R.statut(True, True, "Refusé") == "acceptes", "le rôle prime"
-    assert R.statut(True, False, "Refusé : niveau trop bas") == "non_retenus"
-    assert R.statut(True, False, "Accepté, bienvenue dans l'équipage") == "acceptes"
-    assert R.statut(True, False, "Pas de réponse de l'utilisateur") == "non_retenus"
+def test_E2_seules_les_decisions_claires_comptent():
+    """« Garder uniquement les personnes qui ont été acceptées ou refusées »."""
+    assert R.decision(True, "") == "acceptes", "porte le rôle du clan"
+    assert R.decision(False, "Refusé : niveau trop bas") == "refuses"
+    assert R.decision(False, "Accepté, bienvenue dans l'équipage") == "acceptes"
+    assert R.decision(False, "Pas de réponse de l'utilisateur") is None, "sans suite : écarté"
+    assert R.decision(False, "Résolu") is None
 
 
 def test_E3_une_fiche_par_candidat_vides_et_doublons_ecartes():
@@ -89,10 +90,11 @@ def test_E3_une_fiche_par_candidat_vides_et_doublons_ecartes():
               dict(candidat_id=8, nom="M", ferme=15, msg_candidat=0, reponses={}, raison=""),
               dict(candidat_id=9, nom="Z", ferme=5, msg_candidat=2, reponses={}, raison="Doublon d'un autre ticket"),
               dict(candidat_id=6, nom="A", ferme=8, msg_candidat=None, reponses={}, raison="")]
-    fiches, vides, doublons = R.nettoyer(lignes, lambda uid, raison: "acceptes" if uid == 7 else "non_retenus")
+    fiches, vides, doublons = R.nettoyer(lignes, lambda uid, raison: "acceptes" if uid == 7 else
+                                          ("refuses" if uid == 6 else None))
     assert (vides, doublons) == (1, 1)
     assert [(d["candidat_id"], d["ferme"], d["dates"]) for d in fiches] == [(7, 20, [10, 20]), (6, 8, [8])]
-    assert fiches[0]["statut"] == "acceptes"
+    assert [d["statut"] for d in fiches] == ["acceptes", "refuses"]
 
 
 def test_E4_le_mois_a_l_heure_de_paris():
@@ -131,7 +133,8 @@ def test_E5_rattrapage_des_tickets_fermes_avant_le_suivi(tmp_path):
     fiches = {d["candidat_id"]: d for d in donnees["fiches"]}
     assert fiches[7]["statut"] == "acceptes" and fiches[7]["reponses"] == {"Pseudo Roblox": "Kolax_RS"}
     assert fiches[7]["ferme"] - fiches[7]["ouvert"] == 9000, "ouvert 10 h, fermé 12 h 30"
-    assert fiches[8]["statut"] == "non_retenus" and fiches[8]["raison"].startswith("Refusé")
+    assert fiches[8]["statut"] == "refuses" and fiches[8]["raison"].startswith("Refusé")
+    assert not fiches[8]["parti"]
     assert [o["candidat_id"] for o in donnees["en_cours"]] == [9]
     assert donnees["en_cours"][0]["reponses"] == {"Pseudo Roblox": "Zed"}
 

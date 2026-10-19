@@ -183,7 +183,10 @@ async def marquer_actif(guild_id: int, user_id: int, source: str) -> None:
 
 
 async def dernier_jour_actif(guild_id: int, user_id: int) -> str | None:
-    """Dernier jour où le membre a été actif ('YYYY-MM-DD'), ou None."""
+    """Dernier jour où le membre a été actif ('YYYY-MM-DD'), ou None.
+
+    19/10/2026 : les journées de plus de 90 jours sont purgées ; `activite_etat` garde le
+    dernier jour actif, sinon un membre inactif depuis quatre mois passerait pour « jamais vu »."""
     try:
         async with _get_db() as db:
             async with db.execute(
@@ -191,7 +194,14 @@ async def dernier_jour_actif(guild_id: int, user_id: int) -> str | None:
                 (guild_id, user_id),
             ) as cur:
                 row = await cur.fetchone()
-                return row[0] if row and row[0] else None
+            if row and row[0]:
+                return row[0]
+            async with db.execute(
+                "SELECT dernier_actif FROM activite_etat WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+            return row[0] if row and row[0] else None
     except Exception as ex:
         _log(f"[activite dernier_jour_actif] {ex}")
         return None
@@ -376,6 +386,12 @@ async def presences(guild_id: int, membres, cfg_act: dict) -> dict:
                         f"SELECT user_id, MAX(jour) FROM activite_jours WHERE guild_id=?"
                         f" AND user_id IN ({marques}) GROUP BY user_id", (guild_id, *lot)) as cur:
                     derniers.update({int(u): j for u, j in await cur.fetchall()})
+                async with db.execute(
+                        f"SELECT user_id, dernier_actif FROM activite_etat WHERE guild_id=?"
+                        f" AND user_id IN ({marques})", (guild_id, *lot)) as cur:
+                    for u, j in await cur.fetchall():
+                        if j and (int(u) not in derniers or str(j) > str(derniers[int(u)])):
+                            derniers[int(u)] = str(j)[:10]
                 async with db.execute(
                         f"SELECT user_id, jour FROM activite_jours WHERE guild_id=?"
                         f" AND user_id IN ({marques}) AND jour BETWEEN ? AND ?",

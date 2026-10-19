@@ -34,7 +34,8 @@ def test_R1_tri_par_statut_puis_nom_et_identifiants_alignes():
            111: {"jugeable": True, "silence": 0, "presents": 6, "fenetre": 7, "dernier": _il_y_a(1)},
            222: {"jugeable": False, "silence": 0, "presents": 0, "fenetre": 1}}
     lignes = R.lignes_clan(ms, mes)
-    assert [x["statut"] for x in lignes] == ["Actif", "Actif", "Absent", "Trop récent"]
+    assert [x["statut"] for x in lignes] == ["Actif", "Actif", "Peu présent", "Trop récent"], \
+        "12 jours sans rien : peu présent, pas inactif — inactif à partir d'un mois"
     assert [x["nom"] for x in lignes[:2]] == ["Alix", "zoé"]
     assert lignes[0]["derniere"] == "hier" and lignes[1]["derniere"] == "aujourd'hui"
     texte = R.texte_fichier("GoRP SEA", "Rell Seas", lignes, cal.maintenant())

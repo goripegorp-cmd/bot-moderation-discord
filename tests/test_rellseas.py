@@ -430,8 +430,10 @@ async def test_le_panneau_nappelle_aucun_compteur_a_lui():
 
 @pytest.mark.parametrize("mesure,attendu", [
     ({"presents": 6, "fenetre": 7, "jugeable": True, "silence": 0}, "🟢"),
-    ({"presents": 1, "fenetre": 7, "jugeable": True, "silence": 3}, "🟠"),
-    ({"presents": 0, "fenetre": 7, "jugeable": True, "silence": 9}, "🔴"),
+    ({"presents": 1, "fenetre": 7, "jugeable": True, "silence": 3}, "🟢"),
+    ({"presents": 0, "fenetre": 7, "jugeable": True, "silence": 12}, "🟠"),
+    ({"presents": 0, "fenetre": 7, "jugeable": True, "silence": 29}, "🟠"),
+    ({"presents": 0, "fenetre": 7, "jugeable": True, "silence": 30}, "🔴"),
     ({"presents": 0, "fenetre": 7, "jugeable": False, "observables": 2}, "⚪"),
     ({"presents": 0, "fenetre": 7, "jugeable": True, "silence": None}, "⚪"),
 ])

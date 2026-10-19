@@ -46,7 +46,9 @@ _cle = b""
 _base = ""
 _bot = None
 _radie = "🚫 Radié"
-_cfg = _get_db = _mesurer_groupe = _autorise_membre = None
+_cfg = _get_db = _mesurer_groupe = _autorise_membre = _direction = None
+_actions: dict = {}
+_cadence: dict = {}
 
 #  Le casier mélange les sanctions décidées (staff ou escalade) et les détections du bot.
 SANCTIONS = {"warn": "Avertissement", "mute": "Mute", "kick": "Expulsion", "ban": "Bannissement"}
@@ -60,9 +62,12 @@ _log = print
 
 
 def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_membre, radie=None,
-          log=None):
-    """`autorise_membre(g, membre, c)` → la personne est-elle staff ou au-dessus ?"""
+          direction=None, actions=None, log=None):
+    """`autorise_membre(g, membre, c)` → staff ou au-dessus (voir) ; `direction(g, membre, c)` →
+    fondateur ou direction (agir) ; `actions` : {nom: async (g, auteur, données) → (ok, message)}."""
     global _bot, _cle, _base, _cfg, _get_db, _mesurer_groupe, _autorise_membre, _log, _radie
+    global _direction, _actions
+    _direction, _actions = direction, dict(actions or {})
     _bot, _cle, _base = bot, cle.encode(), (base_url or "").rstrip("/")
     _radie = radie or _radie
     _cfg, _get_db, _mesurer_groupe, _autorise_membre = cfg, get_db, mesurer_groupe, autorise_membre
@@ -155,16 +160,20 @@ async def _tickets(g, c) -> dict:
             db, "SELECT ticket_id, kind, actor_id, created_unix FROM ticket_log_events"
                 " WHERE guild_id=? AND kind IN ('claim', 'close') ORDER BY id", (g.id,))
         audit = await recrutements._lignes(
-            db, "SELECT channel_id, action, actor_id, at FROM ticket_audit"
+            db, "SELECT channel_id, action, actor_id, at, detail FROM ticket_audit"
                 " WHERE guild_id=? AND action IN ('claim', 'close') ORDER BY id", (g.id,))
+        transcripts = dict(await recrutements._lignes(
+            db, "SELECT ticket_id, url FROM ticket_transcripts WHERE guild_id=? AND url != ''", (g.id,)))
     prises, fins = {}, {}
     for tid, kind, actor, t in evts:
         (prises if kind == "claim" else fins).setdefault(tid, (int(t or 0), int(actor or 0)))
-    prises_salon, fins_salon = {}, {}
-    for salon, action, actor, at in audit:
+    prises_salon, fins_salon, motifs = {}, {}, {}
+    for salon, action, actor, at, detail in audit:
         (prises_salon if action == "claim" else fins_salon).setdefault(
             salon, (recrutements._unix(at), int(actor or 0)))
-    types, ouverts, staff, mois = {}, [], {}, {}
+        if action == "close" and detail:
+            motifs[salon] = str(detail)[:150]
+    types, ouverts, staff, mois, fermes = {}, [], {}, {}, []
     debut_mois = time.time() - 365 * 86400
     for tid, uid, pid, pris, statut, cree, salon in tickets:
         nom = str((panneaux.get(pid) or {}).get("name") or "Sans type")
@@ -192,6 +201,8 @@ async def _tickets(g, c) -> dict:
                 staff.setdefault(fin_t[1], {"pris": 0, "fermes": 0})["fermes"] += 1
             if ouvert and fin_t and fin_t[0]:
                 t["_fin"].append(fin_t[0] - ouvert)
+            fermes.append((fin_t[0] if fin_t and fin_t[0] else (ouvert or 0), tid, uid, nom, est_rell, ouvert,
+                           fin_t[1] if fin_t else 0, motifs.get(salon, ""), transcripts.get(tid, "")))
         if ouvert and prise and prise[0]:
             t["_prise"].append(prise[0] - ouvert)
         if ouvert and ouvert >= debut_mois:
@@ -207,6 +218,10 @@ async def _tickets(g, c) -> dict:
         "staff": sorted(({"nom": _nom(g, k), **v} for k, v in staff.items()),
                         key=lambda x: -(x["pris"] + x["fermes"]))[:15],
         "mois": dict(sorted(mois.items())[-12:]),
+        "fermes_recents": [dict(_ident(g, uid), ticket=tid, type=nom, rellseas=est_rell, ouvert=ouvert,
+                                ferme=ferme or None, ferme_par=_nom(g, par), motif=motif, transcript=url)
+                           for ferme, tid, uid, nom, est_rell, ouvert, par, motif, url
+                           in sorted(fermes, reverse=True)[:40]],
     }
 
 
@@ -226,7 +241,7 @@ async def _sanctions(g) -> dict:
             db, "SELECT user_id, restricted_at, duration, reason, restricted_by FROM restricted_members"
                 " WHERE guild_id=?", (g.id,))
     maintenant = time.time()
-    par_type, mois, staff, membres = {}, {}, {}, {}
+    par_type, mois, staff, membres, tout_temps = {}, {}, {}, {}, {}
     auto = manuel = recents_30 = 0
     recentes = []
     for iid, uid, mod, typ, raison, duree, cree in rows:
@@ -243,15 +258,20 @@ async def _sanctions(g) -> dict:
             mois.setdefault(cle_m, {"Avertissements": 0, "Mutes": 0, "Expulsions et bans": 0,
                                     "Détections": 0})[groupe] += 1
         if not est_auto:
-            st = staff.setdefault(int(mod), {"total": 0, "types": {}})
+            st = staff.setdefault(int(mod), {"total": 0, "types": {}, "dernieres": []})
             st["total"] += 1
             st["types"][typ] = st["types"].get(typ, 0) + 1
+            if len(st["dernieres"]) < 15:
+                st["dernieres"].append(dict(_ident(g, uid), sanction=iid, type=typ, libelle=_libelle(typ),
+                                            raison=str(raison or "")[:200], duree=str(duree or ""), date=quand))
+        tout_temps[int(uid or 0)] = tout_temps.get(int(uid or 0), 0) + 1
         if quand and maintenant - quand <= 90 * 86400:
             fiche = membres.setdefault(int(uid or 0), {"total": 0, "types": {}, "historique": []})
             fiche["total"] += 1
             fiche["types"][typ] = fiche["types"].get(typ, 0) + 1
             if len(fiche["historique"]) < 12:
-                fiche["historique"].append({"type": typ, "libelle": _libelle(typ), "raison": str(raison or "")[:200],
+                fiche["historique"].append({"sanction": iid, "type": typ, "libelle": _libelle(typ),
+                                            "raison": str(raison or "")[:200],
                                             "duree": str(duree or ""), "date": quand,
                                             "par": "Automatique" if est_auto else _nom(g, mod)})
         if len(recentes) < 150:
@@ -259,7 +279,7 @@ async def _sanctions(g) -> dict:
                                  groupe=GROUPES.get(typ, "Détections"), raison=str(raison or "")[:300],
                                  duree=str(duree or ""), date=quand, auto=est_auto,
                                  par="Automatique" if est_auto else _nom(g, mod)))
-    a_surveiller = sorted(membres.items(), key=lambda kv: -kv[1]["total"])[:15]
+    a_surveiller = sorted(membres.items(), key=lambda kv: -kv[1]["total"])[:30]
     radie = next((r for r in getattr(g, "roles", []) if r.name == _radie), None)
     mutes = [m for m in getattr(g, "members", []) if getattr(m, "is_timed_out", lambda: False)()]
     return {
@@ -269,7 +289,8 @@ async def _sanctions(g) -> dict:
                          for k, v in par_type.items()), key=lambda t: -t["n"]),
         "mois": dict(sorted(mois.items())[-12:]),
         "staff": sorted(({"nom": _nom(g, k), **v} for k, v in staff.items()), key=lambda x: -x["total"])[:15],
-        "surveiller": [dict(_ident(g, uid), **f) for uid, f in a_surveiller if uid],
+        "surveiller": [dict(_ident(g, uid), **f, total_tout=tout_temps.get(uid, f["total"]))
+                       for uid, f in a_surveiller if uid],
         "recentes": recentes,
         "actives": {
             "mutes": [dict(_ident(g, m.id), jusqu=int(m.timed_out_until.timestamp()) if m.timed_out_until else None)
@@ -339,10 +360,50 @@ async def api(request):
     j, g = await _acces(request)
     if j is None:
         return web.json_response({"erreur": "lien expiré"}, status=403, headers=ENTETES)
+    droits = {"actions": bool(_direction and _direction(g, g.get_member(j["u"]), await _cfg(g.id)))}
     try:
         d = await donnees(g, j["p"])
     except Exception as ex:  # la page affiche l'erreur ; le détail part au journal
         _log("[TABLEAU][E1] données indisponibles")
         _log(f"[TABLEAU][E1:DETAIL] {type(ex).__name__} {ex}")
         return web.json_response({"erreur": "données indisponibles"}, status=500, headers=ENTETES)
-    return web.json_response(dict(d, expire=j["e"]), headers=ENTETES)
+    r = web.json_response(dict(d, expire=j["e"], droits=droits), headers=ENTETES)
+    r.enable_compression()
+    return r
+
+
+async def action(request):
+    """« Seulement le fondateur et le rôle direction » : chaque action est revérifiée ici, tracée
+    dans Discord, et refusée si elle ne vient pas de la page elle-même (en-tête X-Tableau)."""
+    from aiohttp import web
+    j, g = await _acces(request)
+    if j is None:
+        return web.json_response({"ok": False, "message": "Lien expiré."}, status=403, headers=ENTETES)
+    if request.headers.get("X-Tableau") != "1":
+        return web.json_response({"ok": False, "message": "Requête refusée."}, status=400, headers=ENTETES)
+    auteur = g.get_member(j["u"])
+    if _direction is None or not _direction(g, auteur, await _cfg(g.id)):
+        return web.json_response({"ok": False, "message": "Réservé au fondateur et à la direction."},
+                                 status=403, headers=ENTETES)
+    maintenant = time.time()
+    recents = [t for t in _cadence.get(auteur.id, []) if maintenant - t < 60]
+    if len(recents) >= 20:
+        return web.json_response({"ok": False, "message": "Trop d'actions d'un coup, attends une minute."},
+                                 status=429, headers=ENTETES)
+    _cadence[auteur.id] = recents + [maintenant]
+    try:
+        corps = await request.json() if request.content_length and request.content_length <= 4096 else {}
+    except ValueError:
+        corps = {}
+    fn = _actions.get(str(corps.get("action") or ""))
+    if fn is None:
+        return web.json_response({"ok": False, "message": "Action inconnue."}, status=400, headers=ENTETES)
+    try:
+        ok, message = await fn(g, auteur, corps)
+    except Exception as ex:  # l'action échoue : la page le dit, le détail part au journal
+        _log("[TABLEAU][E2] action impossible")
+        _log(f"[TABLEAU][E2:DETAIL] {corps.get('action')} {type(ex).__name__} {ex}")
+        ok, message = False, "L'action n'a pas pu être faite."
+    for cle in [k for k in _cache if k[0] == g.id]:
+        _cache.pop(cle, None)
+    return web.json_response({"ok": bool(ok), "message": str(message)}, headers=ENTETES)
