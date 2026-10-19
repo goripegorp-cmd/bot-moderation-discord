@@ -424,7 +424,7 @@ const etat = {
     jour: {q: "", periode: "7", cat: "tous", vue: "personnes", grave: false},
     ques: {q: "", statut: "ouverte"},
     sond: {q: "", statut: "en_cours"},
-    clan: {q: "", rang: "tous"}
+    clan: {q: "", rang: "tous", ajout: ""}
   }
 };
 try {
@@ -670,7 +670,8 @@ function majBadges() {
     journal: [((d.journal && d.journal.evenements) || []).filter(e => cleJour(e.quand) === today).length, false],
     questions: [qOuvertes, qOuvertes > 0],
     sondages: [((d.sondages && d.sondages.stats) || {}).en_cours || 0, false],
-    clan: [d.clan.membres.length, false]
+    clan: [(d.clan.membres.filter(m => m.rappel && m.rappel.statut === "echu").length) || d.clan.membres.length,
+      d.clan.membres.some(m => m.rappel && m.rappel.statut === "echu")]
   };
   for (const [cle, [v, chaud]] of Object.entries(valeurs)) {
     const b = $("#badge-" + cle);
@@ -1226,13 +1227,25 @@ RENDUS.clan = (vue, plein) => {
         const l = c.membres, larg = Math.max(4, ...l.map(x => x.nom.length));
         copier(l.map(x => x.nom.padEnd(larg + 2) + x.id + "  " + x.statut).join("\n"), l.length + " membre(s) copié(s)");
       }}, icone("copier"), "Copier la liste")));
-    if (agir_) vue.append(h("p", {classe: "aide"}, "Coche des membres pour leur retirer le rôle du clan d'un coup (25 au plus). Le fondateur et la direction ne sont jamais touchés."));
+    if (agir_ && c.role) vue.append(cadreAjout());
+    if (agir_) vue.append(h("p", {classe: "aide"}, "Coche des membres pour les prévenir de leur inactivité ou leur retirer le rôle du clan (25 au plus d'un coup). Le fondateur et la direction ne sont jamais touchés."));
     vue.append(h("div", {classe: "pile resultats"}));
     if ((c.direction || []).length) vue.append(h("div", {classe: "cadre pile"}, h("h3", {}, "Direction et fondateur"), h("p", {classe: "aide"}, "Mis à part : hors statistiques, intouchables depuis le site."),
       h("div", {classe: "pastilles"}, c.direction.map(m => h("span", {classe: "puce"}, avatar(m, "xs"), m.nom)))));
   }
   const zone = zoneResultats(vue);
   if (!c.role) { zone.append(vide("Aucun rôle Rell Seas réglé", "Choisis-le dans /configure.")); return; }
+  const echus = c.membres.filter(m => m.rappel && m.rappel.statut === "echu");
+  if (echus.length) zone.append(h("div", {classe: "cadre pile", style: "border-color:rgba(251,113,133,.45)"},
+    h("h3", {}, "À décider · " + echus.length),
+    h("p", {classe: "aide"}, "Prévenus il y a une semaine, toujours inactifs : l'expulsion du clan est proposée."),
+    h("div", {classe: "lignes"}, echus.map(m => h("div", {classe: "ligne"}, avatar(m, "p"),
+      h("div", {classe: "bloc", style: "min-width:0"}, h("div", {classe: "nom"}, lienNom(m.id)),
+        h("div", {classe: "sous-nom"}, "Prévenu le " + date(m.rappel.envoye_le) + (m.rappel.mode === "mp" ? " par message privé" : " dans #" + m.rappel.salon) + " · dernière activité : " + m.derniere)),
+      h("div", {classe: "droite"},
+        h("button", {classe: "bouton p discret", type: "button", onclick: () => agir({action: "clan_rappel_annuler", membre: m.id}, "", "", {direct: true})}, "Le garder"),
+        h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "clan_retirer", membre: m.id},
+          "Retirer " + m.nom + " du clan ?", "Prévenu il y a une semaine, toujours inactif. Seul le rôle du clan lui est retiré.", {}, "Retirer du clan", "danger")}, "Retirer du clan")))))));
   const nb = [0, 0, 0, 0, 0]; c.membres.forEach(m => { nb[m.rang]++; });
   zone.append(puces([["tous", "Tous", c.membres.length], ...RANGS.map(([lib, t], r) => nb[r] ? [String(r), lib, nb[r], t] : null).filter(Boolean)], String(f.rang),
     (v) => { f.rang = v; changer(); }));
@@ -1261,9 +1274,78 @@ function ligneClan(m, teinte) {
       h("div", {classe: "sous-nom"}, "Dernière activité : " + m.derniere + " · arrivé " + m.arrivee)),
     h("div", {classe: "droite"},
       m.jours !== "—" ? h("span", {classe: "jauge", style: "--teinte:" + teinte, title: m.jours + " jour(s) actifs sur 7"}, Array.from({length: 7}, (_, k) => h("span", {classe: k < presents ? "on" : ""}))) : null,
+      pastilleRappel(m.rappel),
       pastille(m.statut, teinte, null, true),
       peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "clan_retirer", membre: m.id},
         "Retirer " + m.nom + " du clan ?", "Seul le rôle du clan lui est retiré, sur Discord.", {}, "Retirer du clan", "danger")}, "Retirer") : null));
+}
+function pastilleRappel(r) {
+  if (!r) return null;
+  if (r.statut === "echu") return pastille("Délai écoulé", "var(--rouge)", "Prévenu le " + date(r.envoye_le), true);
+  if (r.statut === "en_attente") return pastille("Prévenu · " + date(r.echeance), "var(--ambre)", r.remis ? "Expulsion proposée le " + date(r.echeance) : "Message privé refusé", true);
+  if (r.statut === "revenu") return pastille("Revenu", "var(--vert)", "Actif depuis le rappel du " + date(r.envoye_le), true);
+  return null;
+}
+function cadreAjout() {
+  const f = etat.f.clan, res = h("div", {classe: "lignes"});
+  let minuteur, dernier = null;
+  const lancer = async (q) => {
+    dernier = q;
+    try {
+      const r = await fetch(BASE + "/recherche?q=" + encodeURIComponent(q), {cache: "no-store", credentials: "same-origin"});
+      if (r.status === 403) { expire(); return; }
+      const j = await r.json();
+      if (q !== dernier) return;
+      const l = j.membres || [];
+      res.replaceChildren(...(l.length ? l.map(ligneAjout) : [vide("Personne", "Essaie un autre nom ou l'identifiant.")]));
+    } catch (e) { if (q === dernier) res.replaceChildren(vide("Recherche indisponible", "Réessaie dans un instant.")); }
+  };
+  const i = h("input", {type: "search", name: "chercher-membre", value: f.ajout, placeholder: "Nom, pseudo ou identifiant…", "aria-label": "Chercher dans tout le serveur", autocomplete: "off", spellcheck: "false"});
+  i.addEventListener("input", () => { clearTimeout(minuteur); minuteur = setTimeout(() => { f.ajout = i.value.trim(); sauver(); lancer(f.ajout); }, 250); });
+  lancer(f.ajout);
+  return h("div", {classe: "cadre pile"}, h("h3", {}, "Ajouter au clan"),
+    h("p", {classe: "aide"}, "Tout le serveur : cherche une personne, ou parcours les arrivées récentes. Seul le rôle du clan est donné."),
+    h("label", {classe: "recherche"}, icone("recherche"), i), res);
+}
+function ligneAjout(x) {
+  const [lib, teinte] = RANGS[x.rang] || ["", null];
+  return h("div", {classe: "ligne"}, avatar(x, "p"),
+    h("div", {classe: "bloc", style: "min-width:0"},
+      h("div", {classe: "nom"}, h("button", {classe: "lien-nom", type: "button", title: "Ouvrir sa fiche", onclick: () => ouvrirFiche(x.id)}, x.nom)),
+      h("div", {classe: "sous-nom"}, (x.pseudo ? "@" + x.pseudo + " · " : "") + "arrivé " + (x.arrivee ? depuis(x.arrivee) : "—"))),
+    h("div", {classe: "droite"}, lib ? pastille(lib, teinte, null, true) : null,
+      x.clan ? pastille("Déjà au clan", "var(--cyan)") : x.a_part ? pastille("Direction", "var(--violet)")
+        : h("button", {classe: "bouton p vert", type: "button", onclick: () => agir({action: "clan_ajouter", membre: x.id}, "Ajouter " + x.nom + " au clan ?",
+          "Il reçoit le rôle du clan sur Discord, et l'accès à ses salons.", {}, "Ajouter au clan", "vert")}, "Ajouter au clan")));
+}
+function dialoguePrevenir(n) {
+  const salons = (etat.d.clan && etat.d.clan.salons) || [];
+  return new Promise((fin) => {
+    const hote = $("#dialogue-hote"), voile = $("#voile-dialogue");
+    const mode = h("select", {name: "mode"}, [["mp", "Message privé"], ["salon", "Ping dans un salon"]].map(([v, l]) => h("option", {value: v}, l)));
+    const salon = h("select", {name: "salon"}, salons.map(s => h("option", {value: s.id}, "#" + s.nom + (s.cat ? " · " + s.cat : ""))));
+    const champSalon = h("label", {}, "Salon", salon);
+    const apercu = h("p", {});
+    const ok = h("button", {classe: "bouton principal", type: "button"}, "Prévenir");
+    const maj = () => {
+      champSalon.hidden = mode.value !== "salon";
+      apercu.textContent = mode.value === "mp" ? "« Attention, vous êtes inactif : vous allez être expulsé du clan d'ici une semaine. »"
+        : salons.length ? "Un seul message qui les mentionne, dans le salon choisi." : "Aucun salon du clan où je peux écrire.";
+      ok.disabled = mode.value === "salon" && !salons.length;
+    };
+    const finir = (v) => { hote.replaceChildren(); voile.classList.remove("ouvert"); document.removeEventListener("keydown", echap, true); fin(v); };
+    const echap = (e) => { if (e.key === "Escape") { e.stopPropagation(); finir(null); } };
+    mode.addEventListener("change", maj);
+    ok.addEventListener("click", () => { if (!ok.disabled) finir({mode: mode.value, salon: mode.value === "salon" ? salon.value : ""}); });
+    hote.replaceChildren(h("div", {classe: "dialogue", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "d-titre"},
+      h("h3", {id: "d-titre"}, "Prévenir " + n + " membre(s) de leur inactivité"),
+      h("p", {}, "Sans activité d'ici une semaine, le site te rappelle et propose de les retirer du clan."),
+      h("label", {}, "Comment", mode), champSalon, apercu,
+      h("div", {classe: "actions"}, h("button", {classe: "bouton discret", type: "button", onclick: () => finir(null)}, "Annuler"), ok)));
+    voile.classList.add("ouvert");
+    document.addEventListener("keydown", echap, true);
+    maj(); mode.focus();
+  });
 }
 function barreLot() {
   const n = etat.selection.size;
@@ -1271,6 +1353,12 @@ function barreLot() {
     h("span", {}, h("b", {}, n), " membre(s) sélectionné(s)"),
     h("div", {classe: "actions"},
       h("button", {classe: "bouton p discret", type: "button", onclick: () => { etat.selection.clear(); rendre("clan"); }}, "Annuler"),
+      h("button", {classe: "bouton p", type: "button", onclick: async () => {
+        const r = await dialoguePrevenir(n);
+        if (!r) return;
+        const ok = await agir(Object.assign({action: "clan_prevenir", membres: [...etat.selection]}, r), "", "", {direct: true});
+        if (ok) { etat.selection.clear(); rendre("clan"); }
+      }}, "Prévenir"),
       h("button", {classe: "bouton p danger", type: "button", onclick: async () => {
         const ok = await agir({action: "clan_retirer_lot", membres: [...etat.selection]}, "Retirer " + n + " membre(s) du clan ?",
           "Seul le rôle du clan leur est retiré, sur Discord. Chacun est vérifié : le fondateur et la direction ne sont jamais touchés.", {}, "Retirer " + n + " du clan", "danger");
@@ -1284,7 +1372,7 @@ const ONGLETS_FICHE = [["chrono", "Chronologie"], ["sanctions", "Sanctions"], ["
 function enteteFiche(p, f) {
   const m = f && f.membre;
   const pastilles_ = !m ? [] : [
-    m.a_part ? pastille("Direction · protégé", "var(--violet)", "Aucune action possible depuis le site", true) : m.protege ? pastille("Staff · protégé", "var(--indigo)", "Se gère sur Discord", true) : null,
+    m.a_part ? pastille("Direction · protégé", "var(--violet)", "Aucune action possible depuis le site", true) : null,
     m.clan ? pastille("Clan Rell Seas", "var(--cyan)") : null,
     m.mute_jusqu ? pastille("Muté jusqu'à " + date(m.mute_jusqu, true), "var(--ambre)", null, true) : null,
     !m.present ? pastille(m.banni ? "Banni" : "A quitté le serveur", m.banni ? "var(--rouge)" : "var(--gris)", null, true) : null,

@@ -107,13 +107,14 @@ class Monde:
             return None
         self.ns = {
             "cfg": cfg, "get_db": get_db, "is_fully_immune": immunise, "timedelta": timedelta, "registre": registre,
-            "owner_ids_module": Obj(is_super_owner=lambda uid: uid == 42),
+            "owner_ids_module": Obj(is_super_owner=lambda uid: uid == 42), "TETE_IDS": frozenset(),
             "_direction_ou_plus": lambda g, m, c: m.id in (3, 99, 42),
             "_staff_ou_plus": lambda g, m, c: m.id in (2, 3, 99, 42),
             "_dm_sanction": rien, "_escalade_warns": enregistre, "send_mod_log": rien, "log_staff_action": rien,
             "_journal_rellseas": rien, "_logerr": lambda *a, **k: None, "rellseas_ui": rellseas_panneau,
             "ulogger2026": Obj(log_member_escalation=rien), "bot": None, "asyncio": Obj(sleep=dormir),
             "_decision_recrutement": rien, "now": lambda: datetime.now(timezone.utc),
+            "clan": Obj(clore=rien),
         }
         for nom in ("_cible_site", "_retirer_du_clan", "_action_clan_retirer", "_action_clan_retirer_lot", "_SANCTIONS_SITE",
                     "_DUREES_MUTE", "_inscrire_sanction", "_format_warn_id", "_action_moderer", "_action_candidature"):

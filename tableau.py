@@ -47,6 +47,7 @@ import questions
 import recrutements
 import registre
 import casier
+import clan
 import rellseas_panneau
 import sondages
 import vigilance
@@ -56,7 +57,7 @@ ESPACE = "/tableau/espace"
 COOKIE = "__Host-tableau"
 LIMITE_REQUETES = 240          # par minute et par session
 LIMITE_ESSAIS = 30             # liens invalides par adresse et par 10 minutes
-LIMITES_GRAVES = {"exclusion": 5, "roles": 25, "casier": 10}  # par 10 minutes et par personne
+LIMITES_GRAVES = {"exclusion": 5, "roles": 25, "casier": 10, "rappels": 50}  # par 10 minutes et par personne
 BLOCAGE = 3600
 PAGE_BRUTE = (Path(__file__).resolve().parent / "tableau_page.html").read_text(encoding="utf-8")
 VERSION = hashlib.sha256(PAGE_BRUTE.encode()).hexdigest()[:12]
@@ -98,7 +99,9 @@ _cle = b""
 _base = ""
 _bot = None
 _radie = "🚫 Radié"
-_cfg = _get_db = _mesurer_groupe = _autorise_membre = _direction = _alerte_securite = None
+_cfg = _get_db = _mesurer_groupe = _autorise_membre = _direction = _alerte_securite = _mis_a_part = None
+_tete: frozenset = frozenset()
+_alertes_tete: dict = {}
 _actions: dict = {}
 _cadence: dict = {}
 _sessions: dict = {}
@@ -125,14 +128,16 @@ _log = print
 
 
 def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_membre, radie=None,
-          direction=None, actions=None, alerte_securite=None, log=None):
-    """`autorise_membre(g, membre, c)` → qui entre sur le site (« restreindre le site au fondateur et
-    à la direction ; les staffs n'auront pas accès ») ; `direction(g, membre, c)` → qui agit, et qui
-    est « mis à part » des statistiques ; `actions` : {nom: async (g, auteur, données) → (ok,
-    message)} ; `alerte_securite(g, membre, texte)` : prévient dans « 📋logs »."""
+          direction=None, mis_a_part=None, tete=(), actions=None, alerte_securite=None, log=None):
+    """`autorise_membre(g, membre, c)` → qui entre sur le site ; `direction(g, membre, c)` → qui agit ;
+    `mis_a_part(g, membre, c)` → hors statistiques et intouchable (par défaut : `direction`) ; `tete` :
+    les identifiants « à la tête » (« c'est ceux-là et uniquement eux »), jamais suspendus ;
+    `actions` : {nom: async (g, auteur, données) → (ok, message)} ; `alerte_securite(g, membre,
+    texte, suspendu=True)` : prévient dans « 📋logs »."""
     global _bot, _cle, _base, _cfg, _get_db, _mesurer_groupe, _autorise_membre, _log, _radie
-    global _direction, _actions, _alerte_securite
+    global _direction, _actions, _alerte_securite, _mis_a_part, _tete
     _direction, _actions = direction, dict(actions or {})
+    _mis_a_part, _tete = mis_a_part or direction, frozenset(int(x) for x in tete)
     _bot, _cle, _base = bot, cle.encode(), (base_url or "").rstrip("/")
     _radie = radie or _radie
     _cfg, _get_db, _mesurer_groupe, _autorise_membre = cfg, get_db, mesurer_groupe, autorise_membre
@@ -149,7 +154,14 @@ async def init_db():
         await db.execute("CREATE TABLE IF NOT EXISTS tableau_jetons (nonce TEXT PRIMARY KEY, expire_le INTEGER)")
         await db.execute("CREATE TABLE IF NOT EXISTS tableau_blocages (guild_id INTEGER, user_id INTEGER, jusqu INTEGER,"
                          " raison TEXT, PRIMARY KEY (guild_id, user_id))")
+        for uid in _tete:
+            await db.execute("DELETE FROM tableau_blocages WHERE user_id=?", (uid,))
         await db.commit()
+
+
+def a_la_tete(g, user_id: int) -> bool:
+    """Le fondateur et la direction, par identifiant (et le propriétaire du serveur)."""
+    return int(user_id) in _tete or int(user_id) == int(getattr(g, "owner_id", 0) or 0)
 
 
 # ─── Le lien personnel, à usage unique ──────────────────────────────────────
@@ -185,8 +197,11 @@ def lire_jeton(j: str, maintenant: float | None = None) -> dict | None:
 
 
 async def suspendu(guild_id: int, user_id: int, maintenant: float | None = None) -> int:
-    """L'heure de fin de suspension, ou 0."""
+    """L'heure de fin de suspension, ou 0. Jamais pour ceux qui sont à la tête."""
     t = maintenant or time.time()
+    g = _bot.get_guild(guild_id) if _bot is not None else None
+    if int(user_id) in _tete or (g is not None and a_la_tete(g, user_id)):
+        return 0
     jusqu = _blocages.get((guild_id, user_id))
     if jusqu is None and _get_db is not None:
         async with _get_db() as db:
@@ -357,7 +372,7 @@ class _Personnes(dict):
 
 def a_part(g, c) -> set:
     """« Direction et fondateur : mis à part, pas pris pour les stats. »"""
-    out = {m.id for m in getattr(g, "members", []) or [] if _direction is not None and _direction(g, m, c)}
+    out = {m.id for m in getattr(g, "members", []) or [] if _mis_a_part is not None and _mis_a_part(g, m, c)}
     return out | ({g.owner_id} if getattr(g, "owner_id", 0) else set())
 
 
@@ -380,11 +395,54 @@ async def _clan(g, c, apart: set) -> dict:
     membres = [m for m in tous if m.id not in apart]
     mesures = await _mesurer_groupe(g.id, membres) if _mesurer_groupe and membres else {}
     avatars = {m.id: str(m.display_avatar.with_size(64).url) for m in tous}
+    try:
+        rappels = await clan.rappels(g.id, {uid: (mes or {}).get("dernier") for uid, mes in mesures.items()},
+                                     {m.id for m in tous})
+    except Exception as ex:  # sans les rappels, la liste du clan reste lisible ; le détail part au journal
+        _log("[TABLEAU][E8] rappels du clan illisibles")
+        _log(f"[TABLEAU][E8:DETAIL] {type(ex).__name__} {ex}")
+        rappels = {}
+    for r in rappels.values():
+        r["par"] = _nom(g, r["par"])
+        r["salon"] = getattr(g.get_channel(int(r["salon"] or 0)), "name", "") if r["salon"] else ""
     return {"role": role.name, "role_id": str(role.id),
             "membres": [{"id": str(x["id"]), "nom": x["nom"], "pseudo": x["pseudo"], "avatar": avatars.get(x["id"], ""),
                          "statut": x["statut"], "rang": x["rang"], "jours": x["jours"], "derniere": x["derniere"],
-                         "arrivee": x["arrivee"]} for x in rellseas_panneau.lignes_clan(membres, mesures)],
-            "direction": [_ident(g, m.id) for m in tous if m.id in apart]}
+                         "arrivee": x["arrivee"], "rappel": rappels.get(x["id"])}
+                        for x in rellseas_panneau.lignes_clan(membres, mesures)],
+            "direction": [_ident(g, m.id) for m in tous if m.id in apart], "salons": _salons_du_clan(g, role)}
+
+
+def _salons_du_clan(g, role) -> list:
+    """Où pinger les inactifs : les salons texte que le clan voit et où le bot peut écrire."""
+    me, out = getattr(g, "me", None), []
+    for s in getattr(g, "text_channels", None) or []:
+        if me is not None and s.permissions_for(role).view_channel and s.permissions_for(me).send_messages:
+            out.append({"id": str(s.id), "nom": s.name, "cat": s.category.name if s.category else ""})
+    return out[:60]
+
+
+async def recherche(request):
+    """« Filtrer tout le serveur ou rechercher une personne en particulier » pour l'ajouter au clan."""
+    try:
+        j, g = await _verifier(request)
+    except _Refus as r:
+        return _json({"erreur": r.message}, r.status)
+    c = await _cfg(g.id)
+    role = g.get_role(int(c.get(rellseas_panneau.CLE_ROLE_CIBLE, 0) or 0))
+    dans = {m.id for m in role.members} if role is not None else set()
+    apart = a_part(g, c)
+    trouves = clan.chercher(getattr(g, "members", None) or [], request.query.get("q", "")[:64], dans)
+    try:
+        mesures = await _mesurer_groupe(g.id, trouves) if _mesurer_groupe and trouves else {}
+    except Exception as ex:  # sans mesure, la recherche reste utile ; le détail part au journal
+        _log("[TABLEAU][E7] activité illisible")
+        _log(f"[TABLEAU][E7:DETAIL] {type(ex).__name__} {ex}")
+        mesures = {}
+    lignes = {x["id"]: x for x in rellseas_panneau.lignes_clan(trouves, mesures)}
+    return _json({"role": role.name if role is not None else "", "membres": [
+        dict(_ident(g, m.id), clan=m.id in dans, a_part=m.id in apart, statut=lignes[m.id]["statut"], rang=lignes[m.id]["rang"],
+             arrivee=int(m.joined_at.timestamp()) if getattr(m, "joined_at", None) else None) for m in trouves]})
 
 
 def _mediane(valeurs) -> int:
@@ -701,12 +759,12 @@ async def fiche(g, uid: int, auteur) -> dict:
     qui = _Personnes(g)
     qui(uid)
     m = g.get_member(int(uid))
-    protege = m is not None and (int(uid) == getattr(g, "owner_id", 0) or bool(_direction and _direction(g, m, c)))
+    protege = m is not None and (int(uid) == getattr(g, "owner_id", 0) or bool(_mis_a_part and _mis_a_part(g, m, c)))
     agir = (bool(_direction and auteur is not None and _direction(g, auteur, c))
             and not await suspendu(g.id, getattr(auteur, "id", 0)))
     clan = g.get_role(int(c.get(rellseas_panneau.CLE_ROLE_CIBLE, 0) or 0))
     infos = {"present": m is not None, "a_part": bool(m is not None and (int(uid) == getattr(g, "owner_id", 0)
-                                                                         or (_direction and _direction(g, m, c)))),
+                                                                         or (_mis_a_part and _mis_a_part(g, m, c)))),
              "protege": protege, "bot": bool(getattr(m, "bot", False)), "roles": [], "arrivee": None, "cree": None,
              "mute_jusqu": None, "clan": bool(m is not None and clan is not None and clan in m.roles)}
     if m is not None:
@@ -987,8 +1045,10 @@ def _origine_ok(request) -> bool:
 def _genre_grave(nom: str, corps: dict) -> tuple[str, int] | None:
     if nom == "moderer" and corps.get("sanction") in ("kick", "ban"):
         return "exclusion", 1
-    if nom == "clan_retirer":
+    if nom in ("clan_retirer", "clan_ajouter"):
         return "roles", 1
+    if nom == "clan_prevenir":
+        return "rappels", len(corps.get("membres") or [])
     if nom == "clan_retirer_lot":
         return "roles", len(corps.get("membres") or [])
     if nom in ("casier_effacer", "casier_restaurer"):
@@ -1034,9 +1094,21 @@ async def action(request):
         cle = (g.id, auteur.id, genre)
         faits = [t for t in _graves.get(cle, []) if maintenant - t < 600]
         if len(faits) + n > LIMITES_GRAVES[genre]:
-            await suspendre(g, auteur, f"{len(faits) + n} actions graves ({genre}) en moins de 10 minutes")
-            return _json({"ok": False, "message": "Trop d'actions graves en peu de temps : accès au site suspendu "
-                                                  "une heure, le fondateur est prévenu."}, 403)
+            raison = f"{len(faits) + n} actions graves ({genre}) en moins de 10 minutes"
+            if not a_la_tete(g, auteur.id):
+                await suspendre(g, auteur, raison)
+                return _json({"ok": False, "message": "Trop d'actions graves en peu de temps : accès au site suspendu "
+                                                      "une heure, le fondateur est prévenu."}, 403)
+            #  « Si tu es suspendu alors que je suis le fondateur, il y a un petit problème » : jamais de
+            #  suspension pour la tête ; la direction est seulement signalée au fondateur, une fois.
+            cle_alerte = (g.id, auteur.id, genre)
+            if _alerte_securite is not None and maintenant - _alertes_tete.get(cle_alerte, 0) > 600:
+                _alertes_tete[cle_alerte] = maintenant
+                try:
+                    await _alerte_securite(g, auteur, raison, suspendu=False)
+                except Exception as ex:  # l'alerte ne bloque jamais l'action
+                    _log("[TABLEAU][E6] alerte de sécurité impossible")
+                    _log(f"[TABLEAU][E6:DETAIL] {type(ex).__name__} {ex}")
         _graves[cle] = faits + [maintenant] * n
     try:
         ok, message = await fn(g, auteur, corps)

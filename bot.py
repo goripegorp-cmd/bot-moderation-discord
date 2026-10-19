@@ -111,6 +111,7 @@ import registre  # le journal du serveur, lu sur le site (19/10/2026)
 import questions  # les questions posées dans les salons publics (onglet du site)
 import publications  # une publication des réseaux = un seul message (réservation atomique)
 import casier  # amnistie de 3 mois, effacer une personne ou une zone du casier, défaire pendant 30 jours
+import clan  # le clan Rell Seas depuis le site : ajouter, prévenir les inactifs, rappel à 7 jours
 import websub_youtube  # YouTube prévient le bot dès qu'une vidéo sort
 import vigilance  # un membre qui cumule les évènements graves : alerte dans « 📋logs »
 import tableau  # tableau de bord web : candidatures, tickets par type, clan
@@ -6246,6 +6247,16 @@ def _staff_ou_plus(g, membre, c) -> bool:
     return any(r.position >= plancher.position for r in getattr(membre, "roles", []) or [])
 
 
+#  19/10/2026 : « je vais t'envoyer les ID, c'est ceux-là et uniquement eux qui sont à la tête…
+#  premier, c'est moi, le fondateur même, et le deuxième, c'est la direction ». Eux seuls entrent sur
+#  le site ; jamais suspendus.
+TETE_IDS = frozenset({781205382923288593, 827633340797681714})
+
+
+def _a_la_tete(g, membre, c=None) -> bool:
+    return membre is not None and g is not None and (membre.id in TETE_IDS or membre.id == g.owner_id)
+
+
 def _direction_ou_plus(g, membre, c) -> bool:
     """19/10/2026 : « seulement le fondateur et le rôle direction » ont le droit d'agir depuis le
     tableau de bord (supprimer, retirer) — et les rôles placés au-dessus de la direction."""
@@ -6365,7 +6376,8 @@ async def _cible_site(g, auteur, membre_id, c):
         return None, "Ce membre n'est plus sur le serveur."
     if cible.bot:
         return None, "Un bot ne se gère pas depuis le site."
-    if cible.id == g.owner_id or owner_ids_module.is_super_owner(cible.id) or _direction_ou_plus(g, cible, c):
+    if (cible.id == g.owner_id or owner_ids_module.is_super_owner(cible.id) or cible.id in TETE_IDS
+            or _direction_ou_plus(g, cible, c)):
         return None, "Le fondateur et la direction sont protégés : aucune action possible depuis le site."
     if await is_fully_immune(cible):
         return None, "Membre immunisé : à voir sur Discord."
@@ -6394,7 +6406,98 @@ async def _retirer_du_clan(g, auteur, membre_id, c, role):
     await _journal_rellseas(g, f"**Retiré du clan** · {membre.mention} par {auteur.mention} (tableau de bord)",
                             membre_id=membre.id, auteur_id=auteur.id)
     await log_staff_action(g.id, auteur.id, membre.id, "clan_retire", role.name, surface="tableau")
+    await clan.clore(g.id, membre.id, "retire", auteur.id)
     return True, f"{membre.display_name} n'a plus le rôle du clan."
+
+
+async def _action_clan_ajouter(g, auteur, d):
+    """« La direction et le fondateur peuvent ajouter le rôle RILSI… » Le seul rôle que le site donne."""
+    c = await cfg(g.id)
+    role = g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
+    if role is None:
+        return False, "Aucun rôle Rell Seas réglé dans /configure."
+    membre, refus = await _cible_site(g, auteur, d.get("membre", 0), c)
+    if membre is None:
+        return False, refus
+    if role in membre.roles:
+        return False, f"{membre.display_name} est déjà dans le clan."
+    if role >= g.me.top_role or not g.me.guild_permissions.manage_roles:
+        return False, "Je ne peux pas donner ce rôle (permission ou hiérarchie)."
+    try:
+        await membre.add_roles(role, reason=f"Ajouté au clan par {auteur} ({auteur.id}) — tableau de bord")
+    except discord.HTTPException as ex:
+        _logerr("clan.ajouter", ex, guild_id=g.id)
+        return False, "Discord a refusé de donner le rôle (hiérarchie)."
+    if rellseas_ui._marquer_suivi is not None:
+        await rellseas_ui._marquer_suivi(g.id, membre.id)
+    await _journal_rellseas(g, f"**Ajouté au clan** · {membre.mention} par {auteur.mention} (tableau de bord)",
+                            membre_id=membre.id, auteur_id=auteur.id)
+    await log_staff_action(g.id, auteur.id, membre.id, "clan_ajoute", role.name, surface="tableau")
+    return True, f"{membre.display_name} a rejoint le clan."
+
+
+async def _action_clan_prevenir(g, auteur, d):
+    """« Ping dans un salon spécifique… ou un message en privé : attention, vous êtes inactif, vous allez
+    être expulsé du clan d'ici une semaine. » Le site rappelle l'échéance et propose le retrait."""
+    c = await cfg(g.id)
+    role = g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
+    mode = str(d.get("mode") or "")
+    ids = list(dict.fromkeys(int(x) for x in (d.get("membres") or []) if str(x).isdigit()))[:clan.MAX_LOT]
+    if role is None or mode not in ("mp", "salon") or not ids:
+        return False, "Demande invalide."
+    salon = None
+    if mode == "salon":
+        salon = g.get_channel(int(d.get("salon", 0) or 0))
+        if not isinstance(salon, discord.TextChannel) or not salon.permissions_for(g.me).send_messages:
+            return False, "Je ne peux pas écrire dans ce salon."
+    cibles, refus = [], []
+    for uid in ids:
+        m = g.get_member(uid)
+        if m is None or role not in m.roles:
+            refus.append(uid)
+        elif m.id == g.owner_id or _direction_ou_plus(g, m, c):
+            refus.append(uid)
+        else:
+            cibles.append(m)
+    if not cibles:
+        return False, "Personne à prévenir : ils ne sont plus dans le clan, ou sont de la direction."
+    echeance = int(time.time()) + clan.DELAI
+    remis = {}
+    if mode == "mp":
+        for m in cibles:
+            v = LayoutView(timeout=None)
+            v.add_item(discord.ui.Container(discord.ui.TextDisplay(clan.texte_mp(g.name, role.name, echeance)),
+                                            accent_color=Palette.WARNING))
+            try:
+                await m.send(view=v)
+                remis[m.id] = True
+            except discord.HTTPException:
+                remis[m.id] = False
+            await asyncio.sleep(0.5)
+    else:
+        for k in range(0, len(cibles), 20):
+            lot = cibles[k:k + 20]
+            await salon.send(clan.texte_salon([m.mention for m in lot], role.name, echeance),
+                             allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=lot))
+    await clan.prevenir(g.id, [m.id for m in cibles], auteur.id, mode, salon.id if salon else 0, remis)
+    comment = "message privé" if mode == "mp" else f"ping dans #{salon.name}"
+    for m in cibles:
+        await _au_journal(g, "Clan", "clan.prevenu", f"Prévenu de son inactivité ({comment}) par {auteur.display_name}"
+                          + ("" if remis.get(m.id, True) else " — message privé refusé"), membre_id=m.id, auteur_id=auteur.id)
+    fermes = sum(1 for v in remis.values() if not v)
+    texte = f"{len(cibles)} membre(s) prévenu(s) : retrait proposé le {_heure_courte(echeance)[:5]} s'ils ne reviennent pas."
+    if fermes:
+        texte += f" {fermes} message(s) privé(s) refusé(s) : préviens-les par un ping dans un salon."
+    return True, texte
+
+
+async def _action_clan_rappel_annuler(g, auteur, d):
+    uid = int(d.get("membre", 0) or 0)
+    if not await clan.clore(g.id, uid, "annule", auteur.id):
+        return False, "Aucun rappel en cours pour ce membre."
+    await _au_journal(g, "Clan", "clan.rappel_annule", f"Rappel d'inactivité annulé par {auteur.display_name}",
+                      membre_id=uid, auteur_id=auteur.id)
+    return True, "Rappel annulé."
 
 
 async def _action_clan_retirer(g, auteur, d):
@@ -6736,7 +6839,8 @@ _ACTIONS_TABLEAU = {"ticket_fermer": _action_ticket_fermer, "candidature": _acti
                     "moderer": _action_moderer, "question": _action_question, "alerte_geree": _action_alerte_geree,
                     "sondage_retirer": _action_sondage_retirer, "casier_effacer": _action_casier_effacer,
                     "casier_serveur": _action_casier_serveur, "casier_restaurer": _action_casier_restaurer,
-                    "debannir": _action_debannir}
+                    "debannir": _action_debannir, "clan_ajouter": _action_clan_ajouter,
+                    "clan_prevenir": _action_clan_prevenir, "clan_rappel_annuler": _action_clan_rappel_annuler}
 
 
 async def _salon_alertes_site(g):
@@ -6782,15 +6886,17 @@ def _vue_alerte(membre_id: int = 0):
     return v
 
 
-async def _alerte_securite_site(g, membre, raison: str):
-    """Trop d'actions graves depuis le site : le signe d'un compte volé. Le fondateur est prévenu."""
+async def _alerte_securite_site(g, membre, raison: str, suspendu: bool = True):
+    """Trop d'actions graves depuis le site : le signe d'un compte volé. Le fondateur est prévenu —
+    sauf de ses propres actions. La tête n'est jamais suspendue, seulement signalée."""
     salon = await _salon_alertes_site(g)
-    if salon is None:
+    if salon is None or membre.id == g.owner_id or owner_ids_module.is_super_owner(membre.id):
         return
     proprio = g.owner_id
+    titre = "🔒 Accès au site suspendu une heure" if suspendu else "⚠️ Beaucoup d'actions graves depuis le site"
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"### 🔒 Accès au site suspendu une heure\n{membre.mention} — {raison}.\n"
+        discord.ui.TextDisplay(f"### {titre}\n{membre.mention} — {raison}.\n"
                                "Si ce n'est pas lui, son compte est peut-être volé : vérifie avec lui avant tout."),
         discord.ui.ActionRow(BoutonGere(0)), accent_color=Palette.DANGER))
     await salon.send(content=f"<@{proprio}>", view=v,
@@ -19582,12 +19688,15 @@ async def _activite_boot():
     ulogger2026.vue_alerte = _vue_alerte
     tableau.setup(bot=bot, base_url=transcript_store.public_base_url(), cfg=cfg, get_db=get_db,
                   cle=os.getenv("TABLEAU_CLE") or hashlib.sha256((TOKEN or "").encode() + b"|tableau").hexdigest(),
-                  mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_direction_ou_plus,
-                  radie=_RADIE_ROLE_NAME, direction=_direction_ou_plus, actions=_ACTIONS_TABLEAU,
-                  alerte_securite=_alerte_securite_site, log=print)
+                  mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_a_la_tete,
+                  radie=_RADIE_ROLE_NAME, direction=_a_la_tete, tete=TETE_IDS,
+                  mis_a_part=lambda g, m, c: _a_la_tete(g, m, c) or _direction_ou_plus(g, m, c),
+                  actions=_ACTIONS_TABLEAU, alerte_securite=_alerte_securite_site, log=print)
     await tableau.init_db()
     casier.setup(get_db=get_db, log=print)
     await casier.init_db()
+    clan.setup(get_db=get_db, log=print)
+    await clan.init_db()
     publications.setup(get_db=get_db, instance=_INSTANCE_ID, log=print)
     await publications.init_db()
     websub_youtube.setup(secret=os.getenv("WEBSUB_SECRET") or hashlib.sha256((TOKEN or "").encode() + b"|websub").hexdigest()[:40],
@@ -27250,6 +27359,9 @@ async def _rellseas_autorise(i) -> bool:
     except Exception as ex:
         print(f"[_rellseas_autorise cfg] {ex}")
         return False
+    #  19/10/2026 : « la direction et le fondateur peuvent ajouter le rôle… via la commande ».
+    if _direction_ou_plus(i.guild, i.user, c):
+        return True
     permis = set(rellseas_ui.roles_autorises(c))
     if not permis:
         return False

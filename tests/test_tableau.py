@@ -13,6 +13,8 @@ from pathlib import Path
 
 import aiosqlite
 
+import casier
+import clan
 import questions
 import recrutements
 import registre
@@ -134,8 +136,8 @@ class Env:
         exec(_source("_staff_ou_plus"), ns)  # noqa: S102 — code du dépôt
         self.alertes = []
 
-        async def alerte(g, m, raison):
-            self.alertes.append((m.id, raison))
+        async def alerte(g, m, raison, suspendu=True):
+            self.alertes.append((m.id, raison, suspendu))
 
         def direction(g, m, c):
             return m is not None and m.id == 3
@@ -143,6 +145,8 @@ class Env:
                       base_url="https://bot.exemple", cfg=cfg, get_db=get_db, mesurer_groupe=mesurer,
                       autorise_membre=direction, direction=direction, alerte_securite=alerte, log=lambda *a: None)
         questions.setup(get_db=get_db, est_staff=ns["_staff_ou_plus"], log=lambda *a: None)
+        clan.setup(get_db=get_db, log=lambda *a: None)
+        casier.setup(get_db=get_db, log=lambda *a: None)
 
         async def salon(_g):
             return None
@@ -154,6 +158,8 @@ class Env:
             await tableau.init_db()
             await questions.init_db()
             await vigilance.init_db()
+            await clan.init_db()
+            await casier.init_db()
             async with get_db() as db:
                 await db.execute("CREATE TABLE tickets(id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER,"
                                  " user_id INTEGER, panel_id TEXT, claimed_by INTEGER, status TEXT, answers TEXT,"
@@ -463,6 +469,37 @@ def test_T11_trop_d_actions_graves_suspend_l_acces(tmp_path):
     assert apres.status == 403, "sessions fermées sur-le-champ"
     assert lien[0] is None and "suspendu" in lien[1]
     assert env.alertes and env.alertes[0][0] == 3, "le fondateur est prévenu dans le salon des logs"
+
+
+def test_T14_la_tete_n_est_jamais_suspendue(tmp_path):
+    """« Si tu es suspendu alors que je suis le fondateur, bon, il y a un petit problème… c'est ceux-là et
+    uniquement eux qui sont à la tête. »"""
+    env = Env(tmp_path)
+    tableau._tete = frozenset({3})
+
+    async def deja_suspendu():
+        async with env.get_db() as db:
+            await db.execute("INSERT INTO tableau_blocages VALUES (1, 3, ?, 'ancienne')",
+                             (int(datetime.now(timezone.utc).timestamp()) + 3600,))
+            await db.commit()
+        tableau._blocages.clear()
+        await tableau.init_db()
+        return await tableau.suspendu(1, 3)
+    assert asyncio.run(deja_suspendu()) == 0, "une suspension en cours est levée au démarrage"
+    faits = []
+
+    async def moderer(g, auteur, corps):
+        faits.append(corps["membre"])
+        return True, "Banni."
+    tableau._actions = {"moderer": moderer}
+    sid = env.session(3)
+
+    async def scenario():
+        return [await tableau.action(Requete(cookie=sid, corps={"action": "moderer", "sanction": "ban", "membre": k},
+                                             entetes=ORIGINE)) for k in range(8)]
+    reps = asyncio.run(scenario())
+    assert [r.status for r in reps] == [200] * 8 and len(faits) == 8, "jamais suspendu"
+    assert env.alertes == [(3, "6 actions graves (exclusion) en moins de 10 minutes", False)], "signalé une fois, pas suspendu"
 
 
 def test_T12_export_propre_et_reserve(tmp_path):
