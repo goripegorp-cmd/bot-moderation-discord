@@ -106,7 +106,7 @@ def test_H6_logs_et_alertes_sans_emoji_decoratif():
     e = U.build_log_embed(next(iter(U.EVENT_META)), user=None, reason="test", content="x")
     assert not EMOJI.match(e.author.name or ""), e.author.name
     assert all(not EMOJI.match(f.name) for f in e.fields)
-    publics = {"_build_boost_support_embed", "_handle_boost_stopped", "_handle_boost_started",
+    publics = {"_handle_boost_stopped", "_handle_boost_started",
                "_handle_welcome", "birthday_announcer", "check_twitch_feeds", "check_youtube_feeds",
                "check_tiktok_feeds", "check_twitter_feeds", "check_reddit_feeds",
                "check_creator_spotlight_feeds", "relay_discord_message", "handle_auto_help",

@@ -104,6 +104,7 @@ import nettoyage  # journal en fils, rétention 30 jours, remise à neuf
 import sondages  # les sondages Discord des membres, vérifiés puis suivis sur le site
 import salutations  # un 👋 sous chaque « bonjour », là où tout le monde peut écrire
 import suggestions  # idées des membres : votes, fil de discussion, décision du staff
+import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
 import config_salons  # @everyone voit tout sauf le réservé ; communautaire ouvert
@@ -1868,17 +1869,7 @@ async def cfg(gid):
         'badwords_sanction_action': 'mute',  # 'mute' / 'kick' / 'ban'
         'badwords_sanction_duration': 60,  # minutes (utilisé seulement pour mute)
         'badwords_strikes': {},            # { str(user_id): {"count": int, "last_at": float} }
-        # Phase 26.1 : messages de boost serveur
-        'boost_enabled': False,
-        'boost_channel': 0,
-        'boost_message': "🎉 Merci {user} pour avoir boosté le serveur ! 💎\nLe serveur a maintenant **{count}** boost(s).",
-        # owner 2026-06-30 : célébration RICHE des boosts (remercier + informer sans mendier +
-        # célébrer les paliers de niveau). Actif par défaut, salon auto si boost_channel non réglé.
-        'boost_celebrate': True,           # 0 = désactive toute la célébration de boost
-        # owner 2026-07-17 : quand un membre ARRÊTE de booster (« on descend »), nudge GENTIL 1×/jour
-        # citant le niveau à risque + les avantages (serveur ET boosteurs). Actif par défaut.
-        'boost_rally_enabled': True,       # 0 = désactive le nudge à la baisse de boost
-        'boost_rally_last_day': '',        # throttle interne (date UTC du dernier nudge)
+        'boost_celebrate': True,           # 0 = plus de carte de remerciement dans 🚀boosts
         # Phase 26.2 : Spotlight créateurs (role-gated)
         'creator_role': 0,                 # rôle "créateur de contenu"
         'creator_channel': 0,              # salon destination
@@ -12080,6 +12071,7 @@ async def menage_salons_task():
                 if isinstance(ch, (discord.TextChannel, discord.Thread)):
                     await nettoyage.purger_salon(ch, bot.user.id)
             await suggestions.assurer_panneau(g)
+            await boosts.synchroniser(g)
         except Exception as ex:
             _logerr("menage.salons", ex, guild_id=g.id)
 
@@ -12294,6 +12286,7 @@ _LIEN_OU_MENTION = re.compile(
 
 bot.add_listener(sondages.sur_message, "on_message")
 bot.add_listener(salutations.sur_message, "on_message")
+bot.add_listener(boosts.sur_maj_serveur, "on_guild_update")
 bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_add")
 bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_remove")
 bot.add_listener(sondages.sur_suppression, "on_raw_message_delete")
@@ -12867,7 +12860,8 @@ async def _etat_public():
             "salons_v2": any(c.get('config_salons_v2') for c in confs),
             "aide": any(c.get('aide_message') for c in confs),
             "automod_invitations": any(c.get('automod_invitations_v1') for c in confs),
-            "suggestions_v3": any(c.get('suggestions_v3') for c in confs)})
+            "suggestions_v3": any(c.get('suggestions_v3') for c in confs),
+            "boosts": any(c.get('boosts_entete') for c in confs)})
     except Exception as ex:
         _logerr("etat.public", ex)
 
@@ -12906,6 +12900,7 @@ async def _travaux_de_demarrage():
                 await _configurer_salons_v2(g)
                 await _automod_invitations(g)
                 await _salon_aide(g)
+                await boosts.installer(g, _roles_staff_et_plus(g, await cfg(g.id)))
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
         await _etat_public()
@@ -20002,6 +19997,8 @@ async def _activite_boot():
                       controle=_access_gate_reason, salon_logs=_salon_logs_dedie, log=print)
     suggestions.set_retour(_retour_vers_configure)
     await suggestions.init_db()
+    boosts.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
+    await boosts.init_db()
 
     await activite_module.init_db()
 
@@ -21504,6 +21501,11 @@ async def on_member_ban(guild, user):
 
 @bot.event
 async def on_member_remove(m):
+    # Parti du serveur : son boost s'arrête, sa carte de remerciement aussi.
+    try:
+        await boosts.retirer(m.guild, m.id)
+    except Exception as ex:
+        _logerr("boosts.depart", ex, guild_id=m.guild.id)
     # VEILLEUR questions sans réponse : l'auteur quitte → on ne suit plus ses questions.
     try:
         _unanswered_clear_for_author(m.guild.id, m.id)
@@ -21857,179 +21859,19 @@ async def on_user_update(before, after):
         print(f"[on_user_update impersonation] {ex}")
 
 
-# ═══ NITRO BOOST — soutien du serveur (owner 2026-06-30) ════════════════════════════════════
-# Paliers Discord (nb de boosts → niveau) + avantages débloqués POUR TOUT LE MONDE. Pédagogie
-# voulue par l'owner : « faire savoir que le boost débloque bannière / lien permanent / etc. »
-_BOOST_LEVELS = [
-    (2,  1, "🎨 Bannière de serveur · 😄 +50 emojis · 🎙️ audio 128 kbps · 📺 stream 720p60"),
-    (7,  2, "🔗 **Lien permanent (vanity URL)** + bannière d'invitation · 😄 100 emojis · 🎙️ audio 256 kbps · 📺 stream 1080p60"),
-    (14, 3, "✨ 150 emojis · 🎙️ audio 384 kbps · 📁 upload 100 Mo pour TOUS · 🖼️ bannière animée"),
-]
-
-
-def _boost_level_info(count: int):
-    """(niveau_actuel, avantages_du_niveau_actuel, prochain=(seuil, niveau, perks)|None)."""
-    level, cur_perks = 0, ""
-    for thr, lvl, perks in _BOOST_LEVELS:
-        if count >= thr:
-            level, cur_perks = lvl, perks
-    nxt = next(((thr, lvl, perks) for thr, lvl, perks in _BOOST_LEVELS if count < thr), None)
-    return level, cur_perks, nxt
-
-
-async def _build_boost_support_embed(guild) -> discord.Embed:
-    """Panneau « Soutenir le serveur » : progrès + avantages de chaque palier + mur des soutiens +
-    comment booster. INFORMATIF, jamais mendiant. FAIL-SAFE (renvoie au moins un embed minimal)."""
-    count = guild.premium_subscription_count or 0
-    level, _cur, nxt = _boost_level_info(count)
-    boosters = [m for m in guild.members if m.premium_since]
-    e = discord.Embed(
-        title="💎 Soutenir le serveur (Nitro Boost)",
-        description=("Booster, c'est le **plus grand coup de pouce** que tu peux donner — ça débloque "
-                     "des avantages **pour tout le monde** et met le serveur en avant. **Aucune "
-                     "obligation** : juste un immense merci à celles et ceux qui le font 💜"),
-        color=0xF47FFF)
-    e.add_field(
-        name="📊 Où on en est",
-        value=(f"💎 **{count}** boost(s) · **Niveau {level}**" +
-               (f"\n→ encore **{nxt[0] - count}** pour le **Niveau {nxt[1]}** : {nxt[2]}" if nxt
-                else "\n🏆 **Niveau maximum atteint — merci infiniment !**")),
-        inline=False)
-    e.add_field(
-        name="🎁 Ce que le boost débloque",
-        value="\n".join(f"**Niv {lvl}** ({thr} boosts) : {perks}" for thr, lvl, perks in _BOOST_LEVELS),
-        inline=False)
-    if boosters:
-        wall = ", ".join(m.mention for m in boosters[:12])
-        if len(boosters) > 12:
-            wall += f" +{len(boosters) - 12}"
-        e.add_field(name=f"💜 Nos {len(boosters)} soutien(s) — MERCI", value=wall, inline=False)
-    e.add_field(
-        name="❓ Comment booster",
-        value=("Clique sur le **nom du serveur** (en haut à gauche) → **Booster le serveur**, ou "
-               "Paramètres du serveur → **Améliorations de boost**. Un abonnement **Nitro** est requis 💎."),
-        inline=False)
-    e.set_footer(text="Merci de faire vivre le serveur 💜")
-    return e
-
-
-async def _handle_boost_stopped(member):
-    """owner 2026-07-17 : un membre a ARRÊTÉ de booster (« on commence à descendre ») → NUDGE GENTIL,
-    jamais mendiant, qui cite le NIVEAU à risque + les avantages du boost (pour le SERVEUR et pour
-    les BOOSTEURS). Réutilise `_boost_level_info` / `_BOOST_LEVELS`.
-
-    ⚠️ ANTI-SPAM : au plus **1 nudge par jour** (throttle persistant `boost_rally_last_day`) — c'est
-    précisément la réserve qui faisait qu'on ne postait rien avant. Actif par défaut, salon résolu
-    auto (même cascade que la célébration). FAIL-SAFE : aucune erreur ne remonte."""
-    try:
-        guild = member.guild
-        c = await cfg(guild.id)
-        if not c.get('boost_rally_enabled', True):
-            return
-        _today = now().strftime('%Y-%m-%d')
-        if str(c.get('boost_rally_last_day', '') or '') == _today:
-            return  # déjà nudgé aujourd'hui → on n'insiste pas
-
-        def _ok(x):
-            try:
-                return (x is not None and guild.me is not None
-                        and x.permissions_for(guild.me).send_messages
-                        and x.permissions_for(guild.me).embed_links)
-            except Exception:
-                return False
-        ch = guild.get_channel(int(c.get('boost_channel', 0) or 0))
-        if not _ok(ch):
-            ch = guild.get_channel(int(c.get('hub_channel', 0) or 0))
-        if not _ok(ch):
-            ch = guild.system_channel if _ok(guild.system_channel) else None
-        if not _ok(ch):
-            return  # aucun salon sûr → on ne poste RIEN (jamais de nudge à l'aveugle)
-
-        count = guild.premium_subscription_count or 0
-        level, _cur, nxt = _boost_level_info(count)
-        # Marge avant de perdre le niveau actuel = boosts au-dessus de son seuil.
-        _cur_thr, _lvl_perks = 0, ""
-        for _thr, _lvl, _perks in _BOOST_LEVELS:
-            if count >= _thr:
-                _cur_thr, _lvl_perks = _thr, _perks
-        _spare = count - _cur_thr
-
-        e = discord.Embed(
-            title="📉 On perd un peu de soutien — un coup de pouce ?",
-            description=("Un membre vient d'arrêter de booster. **Aucun reproche** 💜 — mais si "
-                         "quelques personnes (re)boostent, on garde et on débloque plein "
-                         "d'avantages **pour tout le monde**."),
-            color=0xF47FFF)
-        if level >= 1 and _spare <= 1:
-            e.add_field(
-                name="⚠️ Niveau en danger",
-                value=(f"💎 **{count}** boost(s) · **Niveau {level}**.\n"
-                       f"Encore **{_spare + 1}** perte(s) et on **repasse au Niveau {level - 1}** — "
-                       f"on perdrait alors : {_lvl_perks}"),
-                inline=False)
-        elif nxt:
-            e.add_field(
-                name="📊 Où on en est",
-                value=(f"💎 **{count}** boost(s) · **Niveau {level}**.\n"
-                       f"→ encore **{nxt[0] - count}** boost(s) pour le **Niveau {nxt[1]}** : {nxt[2]}"),
-                inline=False)
-        else:
-            e.add_field(name="📊 Où on en est",
-                        value=f"💎 **{count}** boost(s) · **Niveau {level}**.", inline=False)
-        e.add_field(
-            name="🎁 Ce que le boost débloque (pour TOUT le serveur)",
-            value="\n".join(f"**Niv {_l}** ({_t} boosts) : {_p}" for _t, _l, _p in _BOOST_LEVELS),
-            inline=False)
-        e.add_field(
-            name="💜 Et pour TOI qui boostes",
-            value=("🚀 Un **rôle de booster** à part + ta place sur le **mur des soutiens**, la "
-                   "**reconnaissance** de la commu, et la fierté de faire vivre le serveur. Merci 💜"),
-            inline=False)
-        e.add_field(
-            name="❓ Comment booster",
-            value=("Clique sur le **nom du serveur** (en haut à gauche) → **Booster le serveur** "
-                   "(abonnement **Nitro** requis). Aucune obligation — juste un immense merci 💜"),
-            inline=False)
-        e.set_footer(text="Message automatique · au plus 1×/jour")
-
-        _v = None
-        try:
-            _v = discord.ui.View(timeout=None)
-            _v.add_item(discord.ui.Button(
-                emoji=visuels.icone("etoile"), label="Soutenir / en savoir plus", style=discord.ButtonStyle.secondary,
-                custom_id="boostinfo:open"))   # capté par BoostSupportButton (persistant, boot)
-        except Exception:
-            _v = None
-        try:
-            await ch.send(embed=e, view=_v)
-            await db_set(guild.id, 'boost_rally_last_day', _today)
-            try:
-                diag.event("boost", "rally", f"nudge posté (baisse) → #{getattr(ch, 'name', '?')} "
-                                             f"· {count} boosts · niv {level}")
-            except Exception:
-                pass
-        except Exception as _sx:
-            try:
-                diag.error("boost", "rally", "échec d'envoi du nudge", exc=_sx)
-            except Exception:
-                pass
-    except Exception as ex:
-        print(f"[_handle_boost_stopped] {ex}", file=_sys.stderr, flush=True)
-
-
+# ═══ BOOSTS (19/10/2026) — le salon 🚀boosts : une carte par booster, voir boosts.py ═══════════
 async def _open_boost_panel(i: discord.Interaction):
-    """Ouvre le panneau « Soutenir » en éphémère (defer-first). FAIL-SAFE."""
+    """Le bouton « Soutenir / en savoir plus » des anciens messages : où en est le serveur."""
     try:
         if not await _safe_defer(i, ephemeral=True):
             return
-        e = await _build_boost_support_embed(i.guild)
-        await _safe_followup(i, embed=e)
+        await _safe_followup(i, view=boosts.vue_entete(i.guild))
     except Exception as ex:
-        print(f"[_open_boost_panel] {ex}")
+        _logerr("boosts.panneau", ex, guild_id=getattr(i.guild, 'id', 0))
 
 
 class BoostSupportButton(discord.ui.DynamicItem[discord.ui.Button], template=r"boostinfo:(?P<x>open)"):
-    """Bouton persistant « 💎 Soutenir / en savoir plus » → ouvre le panneau boost (éphémère)."""
+    """Bouton persistant des anciens messages de boost → où en est le serveur (éphémère)."""
     def __init__(self):
         super().__init__(discord.ui.Button(
             emoji=visuels.icone("etoile"), label="Soutenir / en savoir plus", style=discord.ButtonStyle.secondary,
@@ -22043,112 +21885,28 @@ class BoostSupportButton(discord.ui.DynamicItem[discord.ui.Button], template=r"b
         await _open_boost_panel(i)
 
 
-# ═══ « FAIRE GRANDIR LE SERVEUR » — regroupe les leviers SOUS-EXPLOITÉS (owner 2026-06-30) ════
-# Owner : « il y a pas mal de choses que les gens n'utilisent pas et qui me mettent en avant ».
-# On rassemble en UN endroit clair, chacun en ACTION concrète : boost · parrainage · bump ·
-# kit promo · suivre le créateur. Aucune obligation, jamais de spam.
-
-
 async def _handle_boost_started(member):
-    """owner 2026-06-30 : à chaque boost — REMERCIER chaleureusement + INFORMER (sans mendier) sur
-    les avantages débloqués + RÉCOMPENSER le booster ; célèbre aussi les paliers de NIVEAU
-    (bannière, lien permanent…). Actif par défaut, salon résolu auto. FAIL-SAFE."""
+    """À chaque boost, sa carte de remerciement dans 🚀boosts ; il est mentionné une fois."""
     try:
         guild = member.guild
-        c = await cfg(guild.id)
-        if not c.get('boost_celebrate', True):
+        if not (await cfg(guild.id)).get('boost_celebrate', True):
             return
-
-        def _ok(x):
-            try:
-                return (x is not None and guild.me is not None
-                        and x.permissions_for(guild.me).send_messages
-                        and x.permissions_for(guild.me).embed_links)
-            except Exception:
-                return False
-        # Canal festif : boost_channel > hub > système > 1er salon « chatty ».
-        ch = guild.get_channel(int(c.get('boost_channel', 0) or 0))
-        if not _ok(ch):
-            ch = guild.get_channel(int(c.get('hub_channel', 0) or 0))
-        if not _ok(ch):
-            ch = guild.system_channel if _ok(guild.system_channel) else None
-        if not _ok(ch):
-            ch = None
-            for cand in guild.text_channels:
-                try:
-                    if _ok(cand) and await _is_chatty_channel(cand):
-                        ch = cand
-                        break
-                except Exception:
-                    continue
-        if ch is None:
-            return
-
-        count = guild.premium_subscription_count or 0
-        total_boosters = len([m for m in guild.members if m.premium_since])
-        level, cur_perks, nxt = _boost_level_info(count)
-
-        tpl = (c.get('boost_message', '') or '').strip()
-        try:
-            thanks = (tpl.format(user=member.mention, user_name=member.display_name, count=count,
-                                 guild=guild.name, total_boosters=total_boosters) if tpl else '')
-        except Exception:
-            thanks = ''
-        if not thanks:
-            thanks = (f"🎉 **Merci {member.mention}** d'avoir boosté le serveur ! 💜 "
-                      f"Tu fais partie de nos **{total_boosters}** soutien(s).")
-
-        e = discord.Embed(description=thanks, color=0xF47FFF, timestamp=now())
-        e.set_author(name="💎 Nouveau boost — merci !", icon_url=member.display_avatar.url)
-        e.set_thumbnail(url=member.display_avatar.url)
-        if nxt:
-            e.add_field(name="📊 Progression",
-                        value=(f"💎 **{count}** boost(s) · **Niveau {level}** — encore "
-                               f"**{nxt[0] - count}** pour le **Niveau {nxt[1]}** :\n{nxt[2]}"),
-                        inline=False)
-        else:
-            e.add_field(name="📊 Progression",
-                        value=f"💎 **{count}** boost(s) · 🏆 **Niveau {level} (max)** — merci infiniment !",
-                        inline=False)
-        e.set_footer(text="Booster = soutenir + débloquer des avantages pour tous · aucune obligation 💜")
-
-        _v = discord.ui.View(timeout=None)
-        _v.add_item(BoostSupportButton())
-        await ch.send(content=member.mention, embed=e, view=_v,
-                      allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
-
-        # 🎉 Palier de NIVEAU franchi → annonce dédiée (anti-doublon via cfg boost_level_reached).
-        try:
-            if level > int(c.get('boost_level_reached', 0) or 0):
-                await db_set(guild.id, 'boost_level_reached', level)
-                le = discord.Embed(
-                    title=f"🎉 NIVEAU DE BOOST {level} ATTEINT ! 💎",
-                    description=(f"Grâce à **{total_boosters}** soutien(s), le serveur passe **Niveau {level}** "
-                                 f"et débloque pour TOUT LE MONDE :\n{cur_perks}\n\nUn immense **merci** 💜"),
-                    color=0xFFD700)
-                lev_view = discord.ui.View(timeout=None)
-                lev_view.add_item(BoostSupportButton())
-                await ch.send(embed=le, view=lev_view, allowed_mentions=discord.AllowedMentions.none())
-        except Exception:
-            pass
-
-        try:
-            await ulogger2026.log_event(
-                bot, guild,
-                ulogger2026.EventType.MEMBER_BOOSTED
-                if hasattr(ulogger2026.EventType, 'MEMBER_BOOSTED')
-                else ulogger2026.EventType.SEC_SPAM,
-                title_override="💎 Boost serveur",
-                description=f"{member.mention} a boosté ! ({count} boosts, niveau {level})",
-                user=member, channel=ch)
-        except Exception:
-            pass
-        print(f"[BOOST] {member} a boosté {guild.name} (total={count}, niveau={level})")
-        return
+        await boosts.ajouter(member, mentionner=True)
+        await ulogger2026.log_event(
+            bot, guild, ulogger2026.EventType.MEMBER_BOOSTED,
+            description=f"{member.mention} a boosté le serveur ({guild.premium_subscription_count or 0} boosts).",
+            user=member, channel=await boosts.salon_de(guild))
     except Exception as ex:
-        print(f"[_handle_boost_started] {ex}")
-        import traceback
-        traceback.print_exc()
+        _logerr("boosts.debut", ex, guild_id=getattr(member.guild, 'id', 0))
+
+
+async def _handle_boost_stopped(member):
+    """« S'il ne booste plus, son remerciement s'enlève. Ce qui est normal. » Sa carte part, sans
+    message : plus d'appel public à reprendre le boost."""
+    try:
+        await boosts.retirer(member.guild, member.id)
+    except Exception as ex:
+        _logerr("boosts.fin", ex, guild_id=getattr(member.guild, 'id', 0))
 
 
 @bot.event

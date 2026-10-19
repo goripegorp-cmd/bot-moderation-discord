@@ -209,6 +209,8 @@ def plan_v2(guild, clan_role, equipe: list, hubs: set, deplacer: bool, ids_prive
             raison = "le bouton seulement"
         elif "aide" in mots:
             raison = "lecture seule (panneau d'aide)"
+        elif any(m.startswith("boost") for m in mots):
+            raison = "lecture seule (merci aux boosters)"
         elif "chat" in mots:
             regler(salon, tous, PAROLE, "messages, images, liens")
             continue
