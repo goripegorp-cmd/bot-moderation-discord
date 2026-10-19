@@ -12030,6 +12030,7 @@ async def salon_logs_task():
     for g in list(bot.guilds):
         try:
             await _salon_tableau(g)
+            await _salon_aide(g)
         except Exception as ex:
             _logerr("logs.salon", ex, guild_id=g.id)
 
@@ -12445,6 +12446,168 @@ async def _configurer_salons(g) -> None:
         _logerr("salons.config", ex, guild_id=getattr(g, 'id', 0))
 
 
+def _roles_staff_et_plus(g, c) -> list:
+    """Les rôles du staff et au-dessus (rôle staff des tickets, sinon la direction), hors intégrations."""
+    seuils = [g.get_role(int(c.get(k, 0) or 0)) for k in ('ticket_staff', 'direction_allowed_role')]
+    seuils = [r for r in seuils if r is not None]
+    if not seuils:
+        return []
+    plancher = min(r.position for r in seuils)
+    return [r for r in g.roles if r.position >= plancher and not r.managed and not r.is_default()]
+
+
+async def _configurer_salons_v2(g) -> None:
+    """19/10/2026, une fois par serveur : les salons comme le fondateur les a décrits (voir
+    `config_salons.plan_v2`), le Join du clan réservé au clan, les invitations interdites partout.
+    L'état d'avant est gardé : « Annuler » dans 📋logs remet tout comme avant."""
+    try:
+        c = await cfg(g.id)
+        if c.get('config_salons_v2'):
+            return
+        me = g.me
+        if not (me and me.guild_permissions.manage_roles and me.guild_permissions.manage_channels):
+            return
+        clan_role = g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
+        voix = dict(c.get('temp_voice_config') or {})
+        hubs = {int(k) for k in (voix.get('hubs') or {}) if str(k).isdigit()}
+        ids_prives = {int(c.get(k, 0) or 0) for k in ('sondages_salon', 'tableau_salon')}
+        ids_prives |= {ch.id for ch in await _salons_de_logs(g, c)}
+        actions = config_salons.plan_v2(g, clan_role, _roles_staff_et_plus(g, c), hubs,
+                                        me.guild_permissions.move_members, ids_prives)
+        await db_set(g.id, 'config_salons_v2', now().isoformat())
+        if not c.get('anti_invite'):
+            await db_set(g.id, 'anti_invite', 1)
+        if clan_role is not None and hubs:
+            hubs_cfg = dict(voix.get('hubs') or {})
+            for k, v in list(hubs_cfg.items()):
+                hub = g.get_channel(int(k)) if str(k).isdigit() else None
+                if hub is not None and hub.category is not None and config_salons.est_clan(hub.category.name):
+                    hubs_cfg[k] = dict(v, required_role=clan_role.id)
+            voix['hubs'] = hubs_cfg
+            await db_set(g.id, 'temp_voice_config', voix)
+        resume = "Invitations Discord interdites partout."
+        if actions:
+            avant = config_salons.instantane(actions)
+            async with get_db() as db:
+                await db.execute("CREATE TABLE IF NOT EXISTS config_salons_historique ("
+                                 "id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, avant TEXT,"
+                                 " cree_le TEXT DEFAULT CURRENT_TIMESTAMP)")
+                cur = await db.execute("INSERT INTO config_salons_historique(guild_id, avant) VALUES(?,?)",
+                                       (g.id, avant))
+                hid = cur.lastrowid
+                await db.commit()
+            faits = await config_salons.appliquer(actions)
+            resume = config_salons.resume(actions) + "\n" + resume
+            salon = await _salon_alertes_site(g)
+            if salon is not None:
+                v = LayoutView(timeout=None)
+                v.add_item(discord.ui.Container(
+                    discord.ui.TextDisplay(f"### Salons réglés comme décrit\n-# {faits} réglage(s) · l'état d'avant est gardé"),
+                    discord.ui.TextDisplay(resume), discord.ui.ActionRow(BoutonAnnulerConfig(hid)),
+                    accent_color=Palette.INFO))
+                await salon.send(view=v, allowed_mentions=discord.AllowedMentions.none())
+        await _au_journal(g, "Config", "salons.v2", f"Salons réglés selon le récapitulatif : {len(actions)} réglage(s). "
+                                                    "Invitations interdites partout.")
+        print(f"[SALONS] v2 : {g.id} · {len(actions)} réglage(s)")
+    except Exception as ex:  # un serveur en échec n'empêche pas le démarrage ; réessai au suivant
+        _logerr("salons.v2", ex, guild_id=getattr(g, 'id', 0))
+
+
+NOM_AIDE = "aide"
+AIDE_VERSION = 1
+
+
+def _salon_par_nom(g, *mots, exclus=("log", "transcript")):
+    for ch in getattr(g, "text_channels", []) or []:
+        n = config_salons.normaliser(ch.name)
+        if all(m in n for m in mots) and not any(x in n for x in exclus):
+            return ch
+    return None
+
+
+async def _vue_aide(g, c):
+    """« Il faudrait que tu refasses le salon aide. » Une ligne par besoin, un bouton qui mène au
+    bon salon ; une ligne n'apparaît que si son salon existe (aucun bouton qui ment)."""
+    hub = None
+    for k in ((c.get('temp_voice_config') or {}).get('hubs') or {}):
+        ch = g.get_channel(int(k)) if str(k).isdigit() else None
+        if ch is not None and not (ch.category is not None and config_salons.est_clan(ch.category.name)):
+            hub = ch
+            break
+    ticket = _salon_par_nom(g, "ticket")
+    lignes = [
+        (ticket, "🎫 **Un problème, une question**\nOuvre un ticket : le staff te répond en privé.", "Ouvrir un ticket"),
+        (ticket if rellseas_ui.panneaux_tickets(c) else None,
+         "🌊 **Rejoindre Rell Seas**\nLa candidature se fait par ticket « Rell Seas ».", "Postuler"),
+        (hub, "🔊 **Ton vocal à toi**\nEntre dans Join : ton salon se crée, tu en es le chef.", "Créer mon vocal"),
+        (g.get_channel(int(c.get('sondages_salon', 0) or 0)), "📊 **Un sondage**\nBouton ➕ puis « Sondage ».", "Sondages"),
+        (g.get_channel(int(c.get('suggestions_salon', 0) or 0)), "💡 **Une idée pour le serveur**\nPropose-la, tout le monde vote.",
+         "Suggestions"),
+        (_salon_par_nom(g, "regle") or _salon_par_nom(g, "rules"), "📜 **Les règles**\nÀ lire avant tout.", "Lire"),
+    ]
+    items = [visuels.bandeau("aide", "Besoin d'aide ?")]
+    for salon, texte, libelle in lignes:
+        if salon is not None:
+            items.append(discord.ui.Section(discord.ui.TextDisplay(texte),
+                                            accessory=Button(label=libelle, url=salon.jump_url)))
+    items.append(discord.ui.TextDisplay("-# Les invitations vers d'autres serveurs sont interdites partout."))
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(*items, accent_color=Palette.INFO))
+    signature = f"{AIDE_VERSION}|" + "|".join(str(getattr(s, 'id', 0)) for s, _t, _l in lignes)
+    return v, signature
+
+
+async def _retirer_recherche_de_groupe(salon) -> int:
+    """L'ancien tableau « Recherche de groupe / Alertes groupes (on/off) » : son bouton ne répond
+    plus depuis le 11/08, il part."""
+    n = 0
+    async for m in salon.history(limit=100):
+        composants = " ".join(getattr(x, "custom_id", "") or "" for r in getattr(m, "components", []) or []
+                              for x in getattr(r, "children", []) or [])
+        textes = " ".join([m.content or ""] + [(e.title or "") + (e.description or "") for e in m.embeds])
+        if nettoyage._du_bot(m, bot.user.id) and ("szone_" in composants or "Recherche de groupe" in textes):
+            try:
+                await m.delete()
+                n += 1
+            except discord.HTTPException as ex:
+                _logerr("aide.ancien", ex, guild_id=salon.guild.id)
+    return n
+
+
+async def _salon_aide(g) -> None:
+    """Le panneau d'aide reste en place : posé une fois (l'ancien « Recherche de groupe » retiré),
+    reposé s'il disparaît, réécrit si un salon cité change."""
+    try:
+        c = await cfg(g.id)
+        salon = g.get_channel(int(c.get('aide_salon', 0) or 0))
+        if salon is None:
+            ancien_lfg = g.get_channel(int(c.get('lfg_board_channel', 0) or 0))
+            salon = next((ch for ch in getattr(g, "text_channels", []) or []
+                          if NOM_AIDE in config_salons.normaliser(ch.name).split()), None) or ancien_lfg
+            if salon is None:
+                return
+            await db_set(g.id, 'aide_salon', salon.id)
+            await db_set(g.id, 'lfg_board_channel', 0)
+            for ch in {salon, ancien_lfg} - {None}:
+                await _retirer_recherche_de_groupe(ch)
+        vue, signature = await _vue_aide(g, c)
+        mid = int(c.get('aide_message', 0) or 0)
+        if mid:
+            try:
+                msg = await salon.fetch_message(mid)
+                if str(c.get('aide_message_v', '')) != signature:
+                    await msg.edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
+                    await db_set(g.id, 'aide_message_v', signature)
+                return
+            except discord.NotFound:
+                pass
+        msg = await salon.send(view=vue, allowed_mentions=discord.AllowedMentions.none())
+        await db_set(g.id, 'aide_message', msg.id)
+        await db_set(g.id, 'aide_message_v', signature)
+    except discord.HTTPException as ex:
+        _logerr("aide.salon", ex, guild_id=getattr(g, 'id', 0))
+
+
 class BoutonAnnulerConfig(discord.ui.DynamicItem[Button], template=r"cfgsal:annuler:(?P<hid>\d+)"):
     def __init__(self, hid: int):
         self.hid = int(hid)
@@ -12457,8 +12620,8 @@ class BoutonAnnulerConfig(discord.ui.DynamicItem[Button], template=r"cfgsal:annu
 
     async def callback(self, i: discord.Interaction):
         p = getattr(i.user, "guild_permissions", None)
-        if not (p and (p.administrator or p.manage_guild)):
-            return await i.response.send_message("Réservé à l'administration.", ephemeral=True)
+        if not (p and (p.administrator or p.manage_guild)) and not _direction_ou_plus(i.guild, i.user, await cfg(i.guild.id)):
+            return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
         await i.response.defer(ephemeral=True)
         async with get_db() as db:
             async with db.execute("SELECT avant FROM config_salons_historique WHERE id=? AND guild_id=?",
@@ -12585,7 +12748,9 @@ async def _etat_public():
         confs = [await cfg(g.id) for g in list(bot.guilds)]
         health_server_module.ETAT_PUBLIC.update({
             "logs_direction": any(c.get('logs_direction_v1') for c in confs),
-            "sondages_discord": any(c.get('sondages_natifs_v2') for c in confs)})
+            "sondages_discord": any(c.get('sondages_natifs_v2') for c in confs),
+            "salons_v2": any(c.get('config_salons_v2') for c in confs),
+            "aide": any(c.get('aide_message') for c in confs)})
     except Exception as ex:
         _logerr("etat.public", ex)
 
@@ -12621,6 +12786,8 @@ async def _travaux_de_demarrage():
                     await recrutements.publier_recap(g)
                 await _salon_tableau(g)
                 await _logs_direction_seule(g)
+                await _configurer_salons_v2(g)
+                await _salon_aide(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
         await _etat_public()
@@ -30061,6 +30228,9 @@ async def on_voice_state_update(member, before, after):
                         #  staff tient « Déplacer ») ne le suivent pas.
                         for _r in acces_direction.roles(member.guild):
                             overwrites[_r] = acces_direction.permission(_me_perms)
+                        #  19/10/2026 : « les staffs et ceux plus hauts que staff peuvent déplacer ».
+                        for _r in _roles_staff_et_plus(member.guild, c):
+                            overwrites.setdefault(_r, acces_direction.permission(_me_perms))
 
                         # Phase 221 : création ROBUSTE. Si Discord refuse les overwrites
                         # (perm manquante au bot → 403), on retente avec des overwrites

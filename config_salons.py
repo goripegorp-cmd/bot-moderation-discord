@@ -110,6 +110,118 @@ def plan(guild, ids_prives: set, ids_lecture: set, radie=None) -> list:
     return actions
 
 
+# ─── Configuration v2 (19/10/2026, récapitulatif du fondateur) ─────────────
+#  « Information (annonce, target-roblox, ambrebois, sneak-fix, ticket) et Sneak Peek (goripe,
+#  sneak-news-roblox, sneak-rellseas) : voir et lire l'historique, ni écrire ni réagir. Le chat :
+#  écrire, images, liens. Suggestions : seulement le bouton. Join : chacun crée son vocal, le staff
+#  et au-dessus peuvent déplacer. Live, Vidéo, 3 frères, GoRPC, Taverne : visibles, on n'y entre pas.
+#  GoRp_SEA : le clan et le staff seulement — info en lecture, chat ouvert, Join du clan. »
+LECTURE = {"view_channel": True, "read_message_history": True, "send_messages": False, "add_reactions": False,
+           "create_public_threads": False, "create_private_threads": False, "send_messages_in_threads": False,
+           "send_polls": False}
+PAROLE = {"view_channel": True, "read_message_history": True, "send_messages": True, "attach_files": True,
+          "embed_links": True}
+VOCAL_OUVERT = {"view_channel": True, "connect": True, "speak": True}
+VITRINE = {"view_channel": True, "connect": False}
+EQUIPE_TEXTE = {"view_channel": True, "read_message_history": True, "send_messages": True, "embed_links": True,
+                "attach_files": True, "add_reactions": True}
+BOT_TEXTE = {"view_channel": True, "read_message_history": True, "send_messages": True, "embed_links": True,
+             "attach_files": True}
+VITRINES = ("live", "video", "3 freres", "gorpc", "taverne")
+
+
+def _mots(nom: str) -> list:
+    return normaliser(nom).split()
+
+
+def est_clan(nom_categorie: str) -> bool:
+    n = normaliser(nom_categorie)
+    return "gorp" in n and "sea" in n
+
+
+def plan_v2(guild, clan_role, equipe: list, hubs: set, deplacer: bool, ids_prives: set = frozenset()) -> list:
+    """[(salon, cible, nouvel overwrite, raison)] — seuls les droits nommés changent, le reste reste.
+    `equipe` : les rôles du staff et au-dessus ; `hubs` : les salons « Join » ; `deplacer` : le bot
+    peut accorder « Déplacer des membres » ; `ids_prives` : salons du bot jamais touchés (logs,
+    sondages…), comme tout salon réservé à des rôles hors du clan."""
+    tous, me = guild.default_role, guild.me
+    exclus = {getattr(me, "id", 0)} | {r.id for r in getattr(me, "roles", []) or []}
+    bot_admin = bool(getattr(getattr(me, "guild_permissions", None), "administrator", False))
+    actions = []
+
+    def regler(salon, cible, droits, raison):
+        if cible is None:
+            return
+        o = salon.overwrites_for(cible)
+        neuf = discord.PermissionOverwrite(**dict(o))
+        for k, v in droits.items():
+            setattr(neuf, k, v)
+        if neuf != o:
+            actions.append((salon, cible, neuf, raison))
+
+    def equipe_vocal(salon, raison):
+        for r in equipe:
+            regler(salon, r, dict(VOCAL_OUVERT, **({"move_members": True} if deplacer else {})), raison)
+
+    for salon in guild.channels:
+        type_ = getattr(salon, "type", None)
+        cat = salon if type_ == discord.ChannelType.category else getattr(salon, "category", None)
+        mots, nc = _mots(salon.name), normaliser(cat.name) if cat is not None else ""
+        if cat is not None and est_clan(cat.name):
+            if clan_role is None:
+                continue
+            regler(salon, tous, {"view_channel": False}, "clan : invisible pour les autres")
+            if type_ == discord.ChannelType.category:
+                droits, raison = {"view_channel": True, "read_message_history": True, "connect": True}, "clan : voit tout"
+            elif type_ in VOCAL:
+                droits, raison = VOCAL_OUVERT, "clan : rejoint et parle"
+            elif "info" in " ".join(mots):
+                droits, raison = LECTURE, "clan : lecture seule"
+            elif "chat" in " ".join(mots):
+                droits, raison = PAROLE, "clan : messages, images, liens"
+            else:
+                droits, raison = {"view_channel": True, "read_message_history": True}, "clan : voit"
+            regler(salon, clan_role, droits, raison)
+            for r in equipe:
+                regler(salon, r, EQUIPE_TEXTE if type_ in TEXTE else dict(VOCAL_OUVERT, **(
+                    {"move_members": True} if deplacer and type_ in VOCAL else {})), "staff et au-dessus")
+            if not bot_admin:
+                regler(salon, me, dict(BOT_TEXTE, **({"connect": True, **({"move_members": True} if deplacer else {})}
+                                                    if type_ != discord.ChannelType.text else {})),
+                       "le bot y voit et y agit")
+            continue
+        if type_ == discord.ChannelType.category or salon.id in ids_prives:
+            continue
+        if salon.id not in hubs and prive(salon, tous, ids_prives, exclus):
+            continue
+        if type_ in VOCAL:
+            if salon.id in hubs:
+                regler(salon, tous, VOCAL_OUVERT, "Join : chacun crée son vocal")
+                equipe_vocal(salon, "staff et au-dessus : déplacent")
+            elif "taverne" in nc or " ".join(mots) in VITRINES:
+                regler(salon, tous, VITRINE, "visible, on n'y entre pas")
+            continue
+        if type_ not in TEXTE and type_ != discord.ChannelType.news:
+            continue
+        if cat is not None and ("information" in nc or "sneak" in nc):
+            raison = "lecture seule"
+        elif any("suggestion" in m for m in mots):
+            raison = "le bouton seulement"
+        elif "aide" in mots:
+            raison = "lecture seule (panneau d'aide)"
+        elif "chat" in mots:
+            regler(salon, tous, PAROLE, "messages, images, liens")
+            continue
+        else:
+            continue
+        regler(salon, tous, LECTURE, raison)
+        for r in equipe:
+            regler(salon, r, EQUIPE_TEXTE, "staff et au-dessus : écrivent")
+        if not bot_admin:
+            regler(salon, me, BOT_TEXTE, "le bot y publie")
+    return actions
+
+
 def _radie(o):
     neuf = discord.PermissionOverwrite(**dict(o))
     for p in ("view_channel", "read_message_history", "send_messages", "add_reactions",
