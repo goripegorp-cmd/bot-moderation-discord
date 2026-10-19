@@ -101,6 +101,7 @@ import acces_direction  # Direction + Fondateur déplacent dans les vocaux cré�
 import stockage as stockage_module  # part du volume par poste + bilan quotidien
 import tickets_fils  # un fil privé par ticket, un salon par équipe
 import nettoyage  # journal en fils, rétention 30 jours, remise à neuf
+import sondages  # sondages natifs créés par les membres en un bouton
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
@@ -1125,21 +1126,6 @@ async def db_init():
         )''')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_rr_msg ON reaction_roles(message_id)')
 
-        # Phase 28.6 : Polls (sondages)
-        await db.execute('''CREATE TABLE IF NOT EXISTS polls (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            channel_id INTEGER,
-            message_id INTEGER,
-            author_id INTEGER,
-            question TEXT,
-            options_json TEXT,
-            votes_json TEXT,
-            multi INTEGER DEFAULT 0,
-            ends_at DATETIME,
-            ended INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
 
 
         # Phase 102 : nouveaux slots équipement (Helmet, Boots, Accessory, Trinket)
@@ -9542,6 +9528,7 @@ _CONFIG_SECTIONS = [
     ("tickets",     "🎫", "Tickets",           "Panneaux d'ouverture · rôle staff · logs · blacklist"),
     ("logs",        "📋", "Logs & Audit",      "Un salon · toutes les catégories d'événements"),
     ("roblox",      "📰", "Actualités Roblox", "Blog, forum et notes de version · salon de publication"),
+    ("sondages",    "📊", "Sondages",          "Salon dédié · création en un bouton"),
     ("social",      "📡", "Réseaux sociaux",   "YouTube · Twitch · X · TikTok · Instagram → salon d'annonces"),
     ("rellseas",    "🎭", "Rellseas",          "Qui peut donner, retirer, vérifier l'activité"),
     ("rgpd",        "🔒", "Données & RGPD",    "Droit à l'effacement (art. 17) · rétention"),
@@ -9738,6 +9725,7 @@ class MainPanelV2(LayoutView):
             'tickets':     lambda: TicketMainPanelV2(self.u, self.g),
             'logs':        lambda: LogsPanelV2(self.u, self.g),
             'roblox':      lambda: roblox_ui.RobloxPanelV2(self.u, self.g),
+            'sondages':    lambda: sondages.SondagesPanelV2(self.u, self.g),
             #  Le panneau social n'était PAS à écrire : il existait déjà,
             #  complet et branché sur le vrai manager par `set_social_manager`.
             #  Il était seulement devenu inatteignable quand `/admin` a été
@@ -11077,7 +11065,7 @@ async def _salons_de_logs(g, c) -> set:
 
 
 async def _salons_de_flux(g, c) -> set:
-    ids = {int(c.get('roblox_news_salon', 0) or 0)}
+    ids = {int(c.get('roblox_news_salon', 0) or 0), int(c.get('sondages_salon', 0) or 0)}
     try:
         p = social2026._subs_path(g.id)
         if p.exists():
@@ -11146,6 +11134,7 @@ async def menage_salons_task():
             for ch in await _salons_de_flux(g, c):
                 if isinstance(ch, (discord.TextChannel, discord.Thread)):
                     await nettoyage.purger_salon(ch, bot.user.id)
+            await sondages.assurer_panneau(g)
         except Exception as ex:
             _logerr("menage.salons", ex, guild_id=g.id)
 
@@ -11247,7 +11236,7 @@ _TABLES_MORTES = frozenset({
     "player_stash", "player_styles", "player_voice_optin", "prediction_bets", "predictions",
     "presence_chain", "promo_sources", "publish_config", "pvp_duels", "raffle_draws",
     "raffle_tickets", "referral_links", "referrals", "regional_state", "reputation",
-    "reputation_history", "rift_contributors", "rift_events", "rivalries", "roadmap_items",
+    "reputation_history", "rift_contributors", "polls", "rift_events", "rivalries", "roadmap_items",
     "roadmap_votes", "roblox_account_links", "roblox_articles", "roblox_cartes_annonces",
     "roblox_curseurs", "roblox_game_library", "roblox_game_stats",
     "roblox_game_stats_snapshots", "roblox_games", "roblox_link_pending",
@@ -11336,6 +11325,56 @@ async def _menage_v2(g):
         _logerr("menage.v2", ex, guild_id=getattr(g, 'id', 0))
 
 
+_LIEN_OU_MENTION = re.compile(
+    r"(https?://|www\.|discord(?:app)?\.(?:gg|com/invite)|<@|<#|@everyone|@here)", re.I)
+
+
+bot.add_listener(sondages.sur_message, "on_message")
+bot.add_listener(sondages.sur_suppression, "on_raw_message_delete")
+bot.add_listener(sondages.sur_salon_supprime, "on_guild_channel_delete")
+
+
+async def _texte_sondage_refuse(g, texte: str) -> str:
+    """Les filtres du serveur, appliqués au texte d'un sondage. Raison du refus, ou ""."""
+    if _LIEN_OU_MENTION.search(texte):
+        return "Pas de lien ni de mention dans un sondage."
+    c = await cfg(g.id)
+    if c.get('anti_badwords'):
+        trouve, _ = check_badwords(texte, c.get('badwords_list', []),
+                                   whitelist=c.get('badwords_whitelist', []))
+        if trouve:
+            return "Ton sondage contient un mot interdit sur le serveur."
+    norm = _normalize_for_scan(texte)
+    if c.get('anti_insults', 1) and insult_filter.scan(texte, norm)[0] >= 2:
+        return "Ton sondage contient une insulte."
+    if c.get('anti_offtopic', 1) and offtopic_filter.scan(texte, norm):
+        return "Politique, religion et militantisme n'ont pas leur place ici."
+    return ""
+
+
+async def _fermer_anciens_sondages():
+    """19/10/2026 : l'ancien sondage à boutons est remplacé par les sondages natifs. Les
+    messages encore ouverts perdent leurs boutons (plus rien ne les traiterait)."""
+    try:
+        async with get_db() as db:
+            async with db.execute("SELECT name FROM sqlite_master "
+                                  "WHERE type='table' AND name='polls'") as cur:
+                if not await cur.fetchone():
+                    return
+            async with db.execute("SELECT channel_id, message_id FROM polls WHERE ended=0") as cur:
+                ouverts = await cur.fetchall()
+        for cid, mid in ouverts:
+            ch = bot.get_channel(int(cid or 0))
+            if ch is None:
+                continue
+            try:
+                await ch.get_partial_message(int(mid)).edit(view=None)
+            except discord.HTTPException:
+                pass
+    except Exception as ex:
+        _logerr("sondages.anciens", ex)
+
+
 async def _retirer_tables_mortes():
     """19/10/2026 : tables que plus aucun code n'écrit ni ne lit (jeux, combat, économie,
     niveaux, activité, accessoires…). Idempotent : seules celles encore présentes partent."""
@@ -11349,6 +11388,8 @@ async def _retirer_tables_mortes():
             await db.commit()
         if a_retirer:
             print("[DATA] tables mortes retirées :", len(a_retirer))
+        if await cleanup_module.part_libre() > 0.20:
+            await cleanup_module.vacuum_db()
     except Exception as ex:
         _logerr("data.tables_mortes", ex)
 
@@ -11370,8 +11411,10 @@ async def _travaux_de_demarrage():
                 await _retirer_salons_combat(g)
                 await _menage_unique(g)
                 await _menage_v2(g)
+                await sondages.installer(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
+        await _fermer_anciens_sondages()
         await _retirer_tables_mortes()
     except Exception as ex:
         print(f"[demarrage travaux] {ex}")
@@ -11594,14 +11637,13 @@ _SUPERVISED_LOOP_NAMES = [
     #   • check_expired_roles     → un rôle boutique temporaire ne s'enlève jamais
     #   • check_expired_restrictions → une sanction temporaire ne se lève jamais (SÉCU)
     #   • check_scheduled_messages → un message programmé ne part jamais
-    #   • poll_closer             → un sondage ne se clôture jamais
     #   • temp_voice_watchdog     → les vocaux temporaires s'empilent (plainte owner)
     # Toutes sont lancées INCONDITIONNELLEMENT au boot (garde is_running() seule) →
     # les superviser est sans effet de bord (no-op si déjà vivantes, resurrection sinon).
     "check_social_feeds",
     "cleanup_old_db_data", "check_scheduled_messages",
     "check_expired_roles", "cleanup_deals_task", "check_expired_restrictions",
-    "birthday_announcer", "poll_closer", "temp_voice_watchdog",     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
+    "birthday_announcer", "temp_voice_watchdog",     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
     # que la date n'est pas configurée/atteinte.
     # Entraide : édite les posts des demandes expirées + supprime les vocaux temp
     # orphelins (vides) de la catégorie configurée. Fail-open, no-op si non configuré.
@@ -18466,6 +18508,11 @@ async def _activite_boot():
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()
 
+    sondages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_sondage_refuse,
+                   controle=_access_gate_reason, log=print)
+    sondages.set_retour(_retour_vers_configure)
+    await sondages.init_db()
+
     await activite_module.init_db()
 
 
@@ -18549,8 +18596,9 @@ async def on_ready():
     # Boutons persistants encore utiles (19/10/2026 : jeux, événements, UGC et hub retirés).
     try:
         bot.add_dynamic_items(BoostSupportButton)  # 💎 panneau « Soutenir le serveur » (boost)
+        bot.add_dynamic_items(sondages.BoutonCreer, sondages.BoutonTerminer)
     except Exception as ex:
-        print(f"[on_ready add_dynamic_items BoostSupportButton] {ex}")
+        print(f"[on_ready add_dynamic_items] {ex}")
     try:
         #  ⚠️ LES TROIS CAPTEURS DU SYSTÈME DE TICKETS. `TicketCreateDynamic`
         #  RÉPARE une panne existante : le bouton « Créer un ticket » des
@@ -18870,13 +18918,6 @@ async def on_ready():
     if not birthday_announcer.is_running():
         birthday_announcer.start()
 
-    # Phase 28.6 : auto-clôture des polls expirés + restauration des views
-    if not poll_closer.is_running():
-        poll_closer.start()
-    try:
-        await restore_active_polls()
-    except Exception as ex:
-        print(f"[on_ready restore_active_polls] {ex}")
 
 
     # Phase 203 — superviseur : ressuscite toute boucle critique morte
@@ -24228,230 +24269,6 @@ except Exception as ex:
 # (cherche `bot.tree.add_command(mod_group)` plus bas dans le fichier).
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  /poll — Phase 28.6 : sondages avancés
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_POLL_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-
-
-def _build_poll_view(poll_id: int, options: list) -> 'PollVoteView':
-    """Construit un PollVoteView avec ses boutons (capture idx correctement)."""
-    v = PollVoteView(poll_id)
-    for idx, opt in enumerate(options[:10]):
-        b = Button(
-            label=f"{idx+1}. {opt[:60]}",
-            emoji=_POLL_EMOJIS[idx],
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"poll_{poll_id}_{idx}",
-        )
-        # closure-safe via default arg
-        b.callback = (lambda i_, idx=idx, view=v: view._vote(i_, idx))
-        v.add_item(b)
-    return v
-
-
-async def restore_active_polls():
-    """Phase 28.6 — restaure les boutons des sondages actifs au boot."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT id, options_json FROM polls WHERE ended=0'
-            ) as cur:
-                rows = await cur.fetchall()
-        count = 0
-        for poll_id, options_json in rows:
-            try:
-                opts = json.loads(options_json) if options_json else []
-                if not opts:
-                    continue
-                v = _build_poll_view(int(poll_id), opts)
-                bot.add_view(v)
-                count += 1
-            except Exception as ex:
-                print(f"[restore_active_polls poll_id={poll_id}] {ex}")
-        if count:
-            print(f"[POLLS] {count} sondage(s) actif(s) restauré(s)")
-    except Exception as ex:
-        print(f"[restore_active_polls] {ex}")
-
-
-class PollVoteView(View):
-    """Phase 28.6 : View persistante pour voter via boutons."""
-
-    def __init__(self, poll_id: int):
-        super().__init__(timeout=None)
-        self.poll_id = poll_id
-
-    async def _vote(self, i: discord.Interaction, option_idx: int):
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    'SELECT options_json, votes_json, multi, ended FROM polls WHERE id=?',
-                    (self.poll_id,),
-                ) as cur:
-                    row = await cur.fetchone()
-            if not row:
-                return await i.response.send_message("❌ Sondage introuvable.", ephemeral=True)
-            options = json.loads(row[0]) if row[0] else []
-            votes = json.loads(row[1]) if row[1] else {}
-            multi = bool(row[2])
-            ended = bool(row[3])
-            if ended:
-                return await i.response.send_message("⏰ Ce sondage est terminé.", ephemeral=True)
-            if option_idx >= len(options):
-                return await i.response.send_message("❌ Option invalide.", ephemeral=True)
-
-            user_key = str(i.user.id)
-            cur_votes = votes.get(user_key, [])
-            if not isinstance(cur_votes, list):
-                cur_votes = [cur_votes] if cur_votes is not None else []
-
-            if multi:
-                # Multi-vote : toggle
-                if option_idx in cur_votes:
-                    cur_votes.remove(option_idx)
-                    msg = f"❌ Vote retiré pour : **{options[option_idx]}**"
-                else:
-                    cur_votes.append(option_idx)
-                    msg = f"✅ Vote ajouté pour : **{options[option_idx]}**"
-            else:
-                # Single-vote : replace
-                cur_votes = [option_idx]
-                msg = f"✅ Tu as voté pour : **{options[option_idx]}**"
-
-            if cur_votes:
-                votes[user_key] = cur_votes
-            else:
-                votes.pop(user_key, None)
-
-            async with get_db() as db:
-                await db.execute(
-                    'UPDATE polls SET votes_json=? WHERE id=?',
-                    (json.dumps(votes), self.poll_id),
-                )
-                await db.commit()
-
-            await i.response.send_message(msg, ephemeral=True)
-
-            # Refresh le message du sondage
-            try:
-                await _refresh_poll_message(self.poll_id)
-            except Exception as ex:
-                print(f"[PollVoteView refresh] {ex}")
-        except Exception as ex:
-            print(f"[PollVoteView _vote] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
-
-
-async def _refresh_poll_message(poll_id: int):
-    """Re-render l'embed du sondage avec les votes à jour."""
-    async with get_db() as db:
-        async with db.execute(
-            'SELECT guild_id, channel_id, message_id, question, options_json, votes_json, ended, ends_at, multi FROM polls WHERE id=?',
-            (poll_id,),
-        ) as cur:
-            row = await cur.fetchone()
-    if not row:
-        return
-    guild_id, channel_id, message_id, question, options_json, votes_json, ended, ends_at, multi = row
-    options = json.loads(options_json) if options_json else []
-    votes = json.loads(votes_json) if votes_json else {}
-
-    guild = bot.get_guild(int(guild_id))
-    if not guild:
-        return
-    channel = guild.get_channel(int(channel_id))
-    if not channel:
-        return
-    try:
-        msg = await channel.fetch_message(int(message_id))
-    except Exception:
-        return
-
-    # Compter votes par option
-    counts = [0] * len(options)
-    for u_votes in votes.values():
-        if isinstance(u_votes, list):
-            for idx in u_votes:
-                if 0 <= idx < len(options):
-                    counts[idx] += 1
-    total = sum(counts)
-
-    desc_lines = [f"**{question}**", ""]
-    for idx, opt in enumerate(options):
-        c = counts[idx]
-        pct = (c / total * 100) if total > 0 else 0
-        bar_len = int(round(pct / 5))
-        bar = '█' * bar_len + '░' * (20 - bar_len)
-        desc_lines.append(f"{_POLL_EMOJIS[idx]} **{opt}**\n`{bar}` `{c}` vote(s) · `{pct:.0f}%`")
-    desc_lines.append("")
-    desc_lines.append(f"📊 **Total** : `{total}` vote(s){'  ·  🔢 multi-choix' if multi else ''}")
-    if ended:
-        desc_lines.append("⏰ **Sondage terminé**")
-    elif ends_at:
-        desc_lines.append(f"⏰ Se termine <t:{int(datetime.fromisoformat(ends_at).timestamp())}:R>")
-
-    e = msg.embeds[0] if msg.embeds else discord.Embed()
-    e.description = "\n".join(desc_lines)[:4000]
-    e.color = 0x95A5A6 if ended else 0x5865F2
-
-    try:
-        await msg.edit(embed=e)
-    except Exception as ex:
-        print(f"[_refresh_poll_message edit] {ex}")
-
-
-async def _announce_poll_winner(poll_id: int):
-    """#10 : à la clôture d'un sondage, annonce le gagnant dans son salon (gère l'égalité ET le
-    cas 0 vote). Lecture seule + 1 message, sans ping. Aucune récompense (anti-exploit éco)."""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT guild_id, channel_id, question, options_json, votes_json FROM polls WHERE id=?',
-                (poll_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            return
-        guild_id, channel_id, question, options_json, votes_json = row
-        options = json.loads(options_json) if options_json else []
-        votes = json.loads(votes_json) if votes_json else {}
-        if not options:
-            return
-        counts = [0] * len(options)
-        for u_votes in votes.values():
-            if isinstance(u_votes, list):
-                for idx in u_votes:
-                    if 0 <= idx < len(options):
-                        counts[idx] += 1
-        total = sum(counts)
-        guild = bot.get_guild(int(guild_id))
-        channel = guild.get_channel(int(channel_id)) if guild else None
-        if channel is None:
-            return
-        if total == 0:
-            txt = f"📊 **Sondage terminé** — _{question}_\nAucun vote n'a été enregistré."
-        else:
-            best = max(counts)
-            winners = [options[idx] for idx, c in enumerate(counts) if c == best]
-            if len(winners) == 1:
-                txt = (f"📊 **Sondage terminé** — _{question}_\n"
-                       f"🥇 **{winners[0]}** l'emporte avec `{best}` vote(s) sur `{total}` !")
-            else:
-                _w = ", ".join(f"**{w}**" for w in winners[:5])
-                txt = (f"📊 **Sondage terminé** — _{question}_\n"
-                       f"🤝 Égalité à `{best}` vote(s) entre {_w} !")
-        try:
-            await channel.send(txt[:1900], allowed_mentions=discord.AllowedMentions.none())
-        except Exception:
-            pass
-    except Exception as ex:
-        print(f"[_announce_poll_winner poll={poll_id}] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -24563,33 +24380,6 @@ async def _birthday_announcer_wait():
     await bot.wait_until_ready()
 
 
-# Phase 28.6 : auto-close polls expirés
-@tasks.loop(minutes=5)
-async def poll_closer():
-    try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT id FROM polls WHERE ended=0 AND ends_at IS NOT NULL AND ends_at < ?',
-                (now_iso,),
-            ) as cur:
-                rows = await cur.fetchall()
-        for (poll_id,) in rows:
-            try:
-                async with get_db() as db:
-                    await db.execute('UPDATE polls SET ended=1 WHERE id=?', (poll_id,))
-                    await db.commit()
-                await _refresh_poll_message(poll_id)
-                await _announce_poll_winner(poll_id)  # #10 : annonce le gagnant à la clôture
-            except Exception as ex:
-                print(f"[poll_closer poll={poll_id}] {ex}")
-    except Exception as ex:
-        print(f"[poll_closer] {ex}")
-
-
-@poll_closer.before_loop
-async def _poll_closer_wait():
-    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

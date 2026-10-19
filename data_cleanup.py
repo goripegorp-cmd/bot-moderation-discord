@@ -62,6 +62,7 @@ CLEANUP_RULES = [
     ("health_check_log",          "check_at",    30),
     #  Les transcripts sur disque vivent 120 jours (transcript_store) : leur index aussi.
     ("ticket_transcripts",        "closed_at",   120),
+    ("sondages",                  "cree_le",     90),
 ]
 
 # Day-of-week for the task (6 = Sunday) + hour (FR)

@@ -28,6 +28,7 @@ import time
 #    (OR entre colonnes si plusieurs). Scopé par guild_id SAUF tables globales (cf. GLOBAL_NO_GUILD).
 # ─────────────────────────────────────────────────────────────────────────────
 DELETE_SUBJECT = {
+    "sondages": ["auteur_id"],
     # bot.py — cœur joueur / modération-sujet / social
     "immune_users": ["user_id"],
     "account_freeze": ["user_id"],
@@ -105,7 +106,6 @@ HMAC_ANONYMIZE = {
 #    contenant une clé user_id).
 # ─────────────────────────────────────────────────────────────────────────────
 JSON_BLOBS = [
-    {"table": "polls", "col": "votes_json", "kind": "dict_key"},
     {"table": "raid_alerts", "col": "members_jsonb", "kind": "list_dict"},
 ]
 # blobs "scan libre" (structure variable) traités au mieux : on remplace l'uid s'il apparaît
@@ -115,9 +115,7 @@ JSON_BLOBS_SCAN = [
 ]
 
 # Pour les tables qui ont AUSSI une colonne directe à traiter avant le filtrage de blob.
-JSON_BLOB_PRECOLUMN = {
-    "polls": {"delete": ["author_id"]},           # supprime les sondages créés par le membre
-}
+JSON_BLOB_PRECOLUMN = {}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5) RÉTENTION — purge auto des données sensibles datées (minimisation). {table: (col_ts, jours)}.

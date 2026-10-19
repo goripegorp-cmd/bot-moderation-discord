@@ -38,16 +38,17 @@ def test_C1_aucune_table_morte_n_est_encore_lue_ni_ecrite():
     mortes = _tables_mortes()
     assert {"economy", "level_rewards", "activity_tracking", "events", "vip_status",
             "player_inventory", "world_bosses", "ui_usage"} <= mortes
+    assert "polls" in mortes, "l'ancien sondage à boutons est remplacé par les sondages natifs"
     assert not mortes & {"infractions", "tickets", "guild_config", "live_announcements",
-                         "realsy_tracking", "health_check_log", "shop_purchases", "polls"}
+                         "realsy_tracking", "health_check_log", "shop_purchases", "sondages"}
     sql = re.compile(r"\b(?:INTO|FROM|JOIN|UPDATE|TABLE IF NOT EXISTS|ON)\s+(\w+)")
     trouves = []
     for f in sorted(RACINE.glob("*.py")):
         for n in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(n, ast.Constant) and isinstance(n.value, str):
                 trouves += [(f.name, n.lineno, t) for t in sql.findall(n.value) if t in mortes]
-    assert [t for f, ligne, t in trouves if t != "level_rewards"] == [], trouves
-    assert {t for f, _, t in trouves} <= {"level_rewards"}, "lu une fois, avant d'être retiré"
+    lus_une_fois = {"level_rewards", "polls"}       # lus avant d'être retirés
+    assert [t for f, ligne, t in trouves if t not in lus_une_fois] == [], trouves
 
 
 def test_C2_les_tables_mortes_partent_les_autres_restent(tmp_path):
@@ -66,15 +67,25 @@ def test_C2_les_tables_mortes_partent_les_autres_restent(tmp_path):
         finally:
             await db.close()
 
-    erreurs = []
+    erreurs, vacuums = [], []
+
+    async def part_libre():
+        return 0.5
+
+    async def vacuum_db():
+        vacuums.append(1)
+        return True
+
     ns = {"get_db": get_db, "_TABLES_MORTES": _tables_mortes(),
-          "_logerr": lambda *a, **k: erreurs.append(a)}
+          "_logerr": lambda *a, **k: erreurs.append(a),
+          "cleanup_module": Obj(part_libre=part_libre, vacuum_db=vacuum_db)}
     exec(_source("_retirer_tables_mortes"), ns)  # noqa: S102 — code du dépôt
     asyncio.run(ns["_retirer_tables_mortes"]())
     asyncio.run(ns["_retirer_tables_mortes"]())
     with sqlite3.connect(p) as c:
         restantes = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert restantes == {"infractions", "tickets"} and not erreurs
+    assert vacuums, "la place des tables retirées est rendue tout de suite"
 
 
 def test_C3_roles_vip_niveaux_ugc_partent_jamais_un_role_d_equipe():
