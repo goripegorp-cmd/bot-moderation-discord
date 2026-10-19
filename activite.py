@@ -345,11 +345,56 @@ async def presence(guild_id: int, member, cfg_act: dict,
     """
     fenetre_voulue = max(1, int(cfg_act.get("activite_fenetre")
                                 or FENETRE_PRESENCE_DEFAUT))
-
     if observation is None:
         observation = await observation_jours(guild_id)
+    if suivi_jours is None:
+        suivi_jours = await anciennete_du_suivi(guild_id)
+    dernier = await dernier_jour_actif(guild_id, member.id)
+    vus = await jours_vus(guild_id, member.id, _jour_decale(fenetre_voulue), _jour_decale(1))
+    return _mesure(member, dernier, vus, fenetre_voulue, observation, suivi_jours)
 
-    silence_brut = await jours_inactif(guild_id, member)
+
+async def presences(guild_id: int, membres, cfg_act: dict) -> dict:
+    """`presence()` pour tout un groupe, en deux requêtes : {user_id: mesure}.
+
+    19/10/2026 — la liste du clan de /rellseas mesure chaque membre du rôle d'un coup ;
+    un appel par membre ouvrirait la base des centaines de fois. Même calcul (`_mesure`)."""
+    membres = list(membres)
+    if not membres:
+        return {}
+    fenetre_voulue = max(1, int(cfg_act.get("activite_fenetre") or FENETRE_PRESENCE_DEFAUT))
+    observation = await observation_jours(guild_id)
+    suivi_jours = await anciennete_du_suivi(guild_id)
+    ids = [m.id for m in membres]
+    derniers, vus = {}, {}
+    try:
+        async with _get_db() as db:
+            for k in range(0, len(ids), 400):
+                lot = ids[k:k + 400]
+                marques = ",".join("?" * len(lot))
+                async with db.execute(
+                        f"SELECT user_id, MAX(jour) FROM activite_jours WHERE guild_id=?"
+                        f" AND user_id IN ({marques}) GROUP BY user_id", (guild_id, *lot)) as cur:
+                    derniers.update({int(u): j for u, j in await cur.fetchall()})
+                async with db.execute(
+                        f"SELECT user_id, jour FROM activite_jours WHERE guild_id=?"
+                        f" AND user_id IN ({marques}) AND jour BETWEEN ? AND ?",
+                        (guild_id, *lot, _jour_decale(fenetre_voulue), _jour_decale(1))) as cur:
+                    for u, j in await cur.fetchall():
+                        vus.setdefault(int(u), set()).add(j)
+    except Exception as ex:
+        _log(f"[activite presences] {ex}")
+        return {}
+    return {m.id: _mesure(m, derniers.get(m.id), vus.get(m.id, ()), fenetre_voulue,
+                          observation, suivi_jours) for m in membres}
+
+
+def _mesure(member, dernier, vus, fenetre_voulue: int, observation: int, suivi_jours) -> dict:
+    """Le calcul, sans base : les deux mesures d'un membre à partir de son dernier jour vu
+    et des journées vues sur la fenêtre voulue."""
+    arrivee = getattr(member, "joined_at", None)
+    depuis_arrivee = cal.jours_entre(cal.jour(arrivee)) if arrivee is not None else None
+    silence_brut = jours_ecoules(dernier) if dernier else depuis_arrivee
     #  ⚠️ LE PLAFONNEMENT — voir `observation_jours`. On garde la valeur brute
     #  pour l'affichage staff (« absent depuis 2 ans, observé depuis 3 jours »
     #  est une information utile), mais on ne JUGE que sur ce qu'on a vu.
@@ -358,38 +403,30 @@ async def presence(guild_id: int, member, cfg_act: dict,
 
     #  Combien de journées COMPLÈTES ce membre pouvait-il seulement remplir ?
     #  On prend la plus contraignante : son arrivée, l'âge du suivi, l'ancre.
-    bornes = [observation]
-    arrivee = getattr(member, "joined_at", None)
-    if arrivee is not None:
-        depuis_arrivee = cal.jours_entre(cal.jour(arrivee))
-        if depuis_arrivee is not None:
-            bornes.append(depuis_arrivee)
-    if suivi_jours is None:
-        suivi_jours = await anciennete_du_suivi(guild_id)
-    #  ⚠️ FAIL-OPEN CORRIGÉ : `None` veut dire « le journal est VIDE », pas
-    #  « borne inconnue, passe ». L'ignorer faisait juger tout le monde sur des
-    #  journées dont on n'a strictement aucune trace.
-    bornes.append(suivi_jours if suivi_jours is not None else 0)
-    observables = min(bornes) if bornes else 0
+    #  ⚠️ FAIL-OPEN CORRIGÉ : `suivi_jours` à None veut dire « le journal est
+    #  VIDE », pas « borne inconnue, passe ».
+    bornes = [observation, suivi_jours if suivi_jours is not None else 0]
+    if depuis_arrivee is not None:
+        bornes.append(depuis_arrivee)
+    observables = min(bornes)
 
     fenetre = max(1, min(fenetre_voulue, observables))
     jugeable = observables >= ANCIENNETE_MINIMALE
-
-    vus = await jours_vus(guild_id, member.id, _jour_decale(fenetre), _jour_decale(1))
+    debut, fin = _jour_decale(fenetre), _jour_decale(1)
+    vus = sorted({j for j in vus if debut <= j <= fin})
     return {
         "silence": silence,
         "silence_brut": silence_brut,
-        "presents": len(set(vus)),
+        "presents": len(vus),
         "fenetre": fenetre,
         #  ⚠️ LA FENÊTRE DEMANDÉE, À CÔTÉ DE LA FENÊTRE RÉELLE.
         #  `fenetre` est plafonnée par ce qu'on a pu observer ; `verdict` a
-        #  besoin des deux pour mettre le seuil à l'échelle. Sans elle, un
-        #  serveur observé depuis 3 jours exige 3 présences sur 3 — la
-        #  perfection — pour échapper au palier doux.
+        #  besoin des deux pour mettre le seuil à l'échelle.
         "fenetre_voulue": fenetre_voulue,
         "jugeable": jugeable,
         "observables": observables,
         "observation": observation,
-        "jours_vus": sorted(set(vus)),
+        "jours_vus": vus,
+        "dernier": dernier,
     }
 

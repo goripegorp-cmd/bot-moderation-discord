@@ -78,6 +78,8 @@ def test_V1_bandeau_anime_ou_titre_si_rien_n_est_servi(tmp_path, monkeypatch):
     monkeypatch.setattr(visuels, "DOSSIER", tmp_path)
     (tmp_path / "sondages.gif").write_bytes(b"GIF89a")
     visuels.setup(base_url="https://bot.example/", log=lambda *a: None)
+    assert isinstance(visuels.bandeau("sondages", "Sondages"), discord.ui.TextDisplay),         "pas d'image avant d'avoir vérifié qu'elle est servie"
+    monkeypatch.setattr(visuels, "_servi", True)
     b = visuels.bandeau("sondages", "Sondages")
     assert isinstance(b, discord.ui.MediaGallery)
     assert b.items[0].media.url == f"https://bot.example/v/sondages.gif?v={visuels.VERSION}"
@@ -93,3 +95,29 @@ def test_V2_le_serveur_ne_sert_que_les_images_du_dossier(tmp_path, monkeypatch):
         assert visuels.fichier(nom) is None, nom
     hs = (Path(__file__).resolve().parent.parent / "health_server.py").read_text(encoding="utf-8")
     assert "app.router.add_get('/v/{nom}', _visuel_handler)" in hs
+
+
+def test_V3_l_adresse_publique_est_verifiee_avant_d_afficher(tmp_path, monkeypatch):
+    from aiohttp import web
+    monkeypatch.setattr(visuels, "DOSSIER", tmp_path)
+    (tmp_path / "a.gif").write_bytes(b"GIF89a")
+
+    async def scenario(statut):
+        async def image(_r):
+            if statut != 200:
+                return web.Response(status=statut)
+            return web.Response(body=b"GIF89a", content_type="image/gif")
+        app = web.Application()
+        app.router.add_get("/v/{nom}", image)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        visuels.setup(base_url=f"http://127.0.0.1:{port}", log=lambda *a: None)
+        try:
+            return await visuels.verifier(essais=2, pause=0)
+        finally:
+            await runner.cleanup()
+    assert asyncio.run(scenario(200)) is True and visuels.url("a") is not None
+    assert asyncio.run(scenario(404)) is False and visuels.url("a") is None

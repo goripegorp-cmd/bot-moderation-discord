@@ -334,6 +334,8 @@ async def test_une_source_jamais_relevee_est_echue():
 def test_toutes_les_sources_ont_un_format_connu_et_un_rythme():
     for s in news.SOURCES:
         assert s.get("format") in ("discourse", "rss", "newsroom"), s["cle"]
-        assert int(s.get("minutes") or 0) >= 30, s["cle"]
+        #  19/10/2026 : « dès qu'ils sortent un truc, on est directement au courant » —
+        #  10 min reste poli pour un JSON Discourse ou un flux RSS.
+        assert int(s.get("minutes") or 0) >= 10, s["cle"]
         assert s["url"].startswith(("https://devforum.roblox.com/",
                                     news.DOMAINE_PRESSE, news.DOMAINE_NEWSROOM))

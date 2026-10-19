@@ -14,6 +14,8 @@ from pathlib import Path
 import aiosqlite
 import discord
 
+import rellseas_panneau
+
 SRC = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")
 
 
@@ -65,13 +67,13 @@ def test_T1_le_transcript_porte_le_nom_et_se_retrouve_par_membre(tmp_path):
             get_member=lambda i: membre if i == 7 else None)
 
     async def cfg(_g):
-        return {"ticket_log": 55, "ticket_panels": {"p1": {"name": "Rell Seas"}}}
+        return {"ticket_log": 55, "ticket_panels": {"p1": {"name": "Support"}}}
 
     async def rendu(*_a, **_k):
         return "<html>conversation</html>"
 
     ns = {"cfg": cfg, "get_db": get_db, "now": lambda: datetime(2026, 10, 19, tzinfo=timezone.utc),
-          "discord": discord, "io": io, "re": re, "asyncio": asyncio,
+          "discord": discord, "io": io, "re": re, "asyncio": asyncio, "rellseas_ui": rellseas_panneau,
           "_ticket_event_parts": lambda *a: (7, ""), "_ticket_timeline_line": lambda *a: "ligne",
           "C": Obj(GREEN=1, BLUE=2, RED=3, BLURPLE=4), "_recent_transcript_urls": {},
           "_render_ticket_transcript_html": rendu, "_ticket_transcript_file": rendu,
@@ -83,14 +85,14 @@ def test_T1_le_transcript_porte_le_nom_et_se_retrouve_par_membre(tmp_path):
     asyncio.run(ns["send_ticket_log"](g, "close", membre, {"id": 5, "panel_id": "p1"},
                                       closer=Obj(id=2), ch=Obj(id=77)))
     transcripts = [c for c, _kw in envois if c and str(c).startswith("📄")]
-    assert transcripts == ["📄 Transcript #5 · Kolax (7) · Rell Seas"], envois
+    assert transcripts == ["📄 Transcript #5 · Kolax (7) · Support"], envois
 
     async def lire():
         async with get_db() as db:
             async with db.execute("SELECT ticket_id, user_id, user_name, panel, url "
                                   "FROM ticket_transcripts") as cur:
                 return await cur.fetchall()
-    assert asyncio.run(lire()) == [(5, 7, "Kolax", "Rell Seas", "https://bot.exemple/t/tok")]
+    assert asyncio.run(lire()) == [(5, 7, "Kolax", "Support", "https://bot.exemple/t/tok")]
 
     reponses = []
 
@@ -108,7 +110,7 @@ def test_T1_le_transcript_porte_le_nom_et_se_retrouve_par_membre(tmp_path):
     inter = Obj(user=Obj(), guild=Obj(id=1), response=Obj(defer=defer, send_message=suivre),
                 followup=Obj(send=suivre))
     asyncio.run(ns2["ticket_transcripts_cmd"](inter, Obj(id=7, mention="@Kolax")))
-    assert "🎫 #5 · **Kolax** (`7`) · Rell Seas" in reponses[0]
+    assert "🎫 #5 · **Kolax** (`7`) · Support" in reponses[0]
     assert "[ouvrir](https://bot.exemple/t/tok)" in reponses[0]
     reponses.clear()
     asyncio.run(ns2["ticket_transcripts_cmd"](inter, Obj(id=8, mention="@Autre")))

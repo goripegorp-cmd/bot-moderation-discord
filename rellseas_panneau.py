@@ -18,9 +18,15 @@ Ce qui existait déjà et n'a pas été réécrit : la table `realsy_tracking` e
 """
 from __future__ import annotations
 
+import io
+import unicodedata
+
 import discord
 from discord.ui import Button, ChannelSelect, RoleSelect, UserSelect
 
+import activite_calendrier as cal
+import config_salons
+import visuels
 from ui_v2 import (
     LayoutView, Palette, body as v2_body, container as v2_container,
     divider as v2_divider, subtitle as v2_subtitle, title as v2_title,
@@ -32,6 +38,7 @@ _log = print
 #  Injectés par bot.py — le module ne connaît ni la base ni le système
 #  d'activité, il ne fait que les appeler.
 _mesurer = None        # (guild_id, member) -> dict, via activite.presence()
+_mesurer_groupe = None  # (guild_id, [member]) -> {user_id: dict}, via activite.presences()
 _marquer_suivi = None  # (guild_id, user_id) -> None, écrit realsy_tracking
 #  ⚠️ La garde ne peut plus passer par le constructeur : la vue est
 #  PERSISTANTE et partagée, elle est construite au boot sans contexte.
@@ -43,6 +50,9 @@ _autorise = None       # (interaction) -> bool
 CLE_ROLES_AUTORISES = "rellseas_roles_autorises"
 CLE_ROLE_CIBLE = "rellseas_role"
 CLE_SALON_LOG = "rellseas_log_channel"
+CLE_TICKETS = "rellseas_tickets_panneaux"
+CLE_SALON_TRANSCRIPTS = "rellseas_transcripts_salon"
+MOTS_TICKETS = ("rell", "rils", "realsy", "reelsy", "seas")
 
 #  ⚠️ PLUSIEURS RÔLES, PAS UN SEUL. Demande explicite du propriétaire :
 #  « on peut être plusieurs à pouvoir utiliser cette commande ». 25 est la
@@ -57,10 +67,11 @@ MAX_MEMBRES = 25
 
 
 def setup(*, cfg, db_set, get_db=None, mesurer=None, marquer_suivi=None,
-          autorise=None, log=None):
-    global _cfg, _db_set, _log, _mesurer, _marquer_suivi, _autorise
+          autorise=None, log=None, mesurer_groupe=None):
+    global _cfg, _db_set, _log, _mesurer, _marquer_suivi, _autorise, _mesurer_groupe
     _cfg, _db_set = cfg, db_set
     _mesurer = mesurer
+    _mesurer_groupe = mesurer_groupe
     _marquer_suivi = marquer_suivi
     _autorise = autorise
     if log is not None:
@@ -73,6 +84,17 @@ _retour_configure = None
 def set_retour(fn):
     global _retour_configure
     _retour_configure = fn
+
+
+def panneaux_tickets(c: dict) -> set[str]:
+    """Les panneaux de tickets « Rell Seas » (19/10/2026) : le choix fait dans /configure,
+    sinon ceux dont le nom parle de Rell Seas."""
+    panels = c.get("ticket_panels") or {}
+    choisis = c.get(CLE_TICKETS)
+    if isinstance(choisis, list):
+        return {str(p) for p in choisis if str(p) in panels}
+    return {str(pid) for pid, p in panels.items()
+            if isinstance(p, dict) and config_salons.contient(p.get("name", ""), MOTS_TICKETS)}
 
 
 def roles_autorises(c: dict) -> list[int]:
@@ -125,6 +147,10 @@ class RellseasPanelV2(LayoutView):
 
             role_cible = self.g.get_role(int(c.get(CLE_ROLE_CIBLE, 0) or 0))
             salon_log = self.g.get_channel(int(c.get(CLE_SALON_LOG, 0) or 0))
+            panels = c.get("ticket_panels") or {}
+            tickets = panneaux_tickets(c)
+            salon_tr = self.g.get_channel(int(c.get(CLE_SALON_TRANSCRIPTS, 0) or 0))
+            noms_tickets = [str((panels.get(p) or {}).get("name") or p) for p in sorted(tickets)]
             autorises = roles_autorises(c)
             noms = []
             for rid in autorises:
@@ -147,6 +173,14 @@ class RellseasPanelV2(LayoutView):
                     + (" · ".join(noms) if noms
                        else "⚪ _aucun_ — seuls les administrateurs et le "
                             "propriétaire du serveur peuvent s'en servir")),
+                v2_divider(),
+                v2_body(
+                    "**Tickets Rell Seas** · "
+                    + (" · ".join(f"« {n} »" for n in noms_tickets) if noms_tickets else "⚪ _aucun panneau_")
+                    + "\n**Transcripts** · "
+                    + (salon_tr.mention if salon_tr else "⚪ _créé au premier ticket Rell Seas_")
+                    + ("" if isinstance(c.get(CLE_TICKETS), list)
+                       else "\n-# Panneaux reconnus à leur nom · le menu ci-dessous permet de choisir")),
             ]
 
             if self._dernier:
@@ -180,8 +214,18 @@ class RellseasPanelV2(LayoutView):
                 discord.ui.ActionRow(sel_roles),
                 discord.ui.ActionRow(sel_cible),
                 discord.ui.ActionRow(sel_log),
-                discord.ui.ActionRow(b_back),
             ]
+            if panels:
+                options = [discord.SelectOption(label=str(p.get("name") or pid)[:100], value=str(pid),
+                                                default=str(pid) in tickets)
+                           for pid, p in list(panels.items())[:25] if isinstance(p, dict)]
+                if options:
+                    sel_tickets = discord.ui.Select(
+                        placeholder="Panneaux de tickets Rell Seas…", options=options,
+                        min_values=0, max_values=len(options), custom_id="rellseas_tickets")
+                    sel_tickets.callback = self._cb_tickets
+                    items.append(discord.ui.ActionRow(sel_tickets))
+            items.append(discord.ui.ActionRow(b_back))
 
             self.clear_items()
             self.add_item(v2_container(*items, color=Palette.INFO))
@@ -226,6 +270,13 @@ class RellseasPanelV2(LayoutView):
             await self.render_to(i, edit=True)
         except Exception as ex:
             _log(f"[rellseas roles] {ex}")
+
+    async def _cb_tickets(self, i):
+        ids = [str(v) for v in (i.data.get("values") or [])]
+        await _db_set(self.g.id, CLE_TICKETS, ids)
+        self._dernier = (f"✅ `{len(ids)}` panneau(x) de tickets Rell Seas." if ids
+                         else "✅ Aucun panneau : tous les transcripts restent dans le salon des tickets.")
+        await self.render_to(i, edit=True)
 
     def _faire_cle(self, cle: str, libelle: str):
         async def _cb(i):
@@ -574,14 +625,16 @@ class RellseasGestionV2(LayoutView):
                         ("rellseas_g_donner", v._cb_donner),
                         ("rellseas_g_retirer", v._cb_retirer),
                         ("rellseas_g_activite", v._cb_activite),
-                        ("rellseas_g_vider", v._cb_vider)):
+                        ("rellseas_g_vider", v._cb_vider),
+                        ("rellseas_g_liste", v._cb_liste)):
             b = Button(label="—", custom_id=cid)
             b.callback = cb
             boutons.append(b)
         v.add_item(v2_container(discord.ui.ActionRow(sel),
                                 discord.ui.ActionRow(ici),
                                 discord.ui.ActionRow(res),
-                                discord.ui.ActionRow(*boutons),
+                                discord.ui.ActionRow(*boutons[:5]),
+                                discord.ui.ActionRow(*boutons[5:]),
                                 color=Palette.INFO))
         return v
 
@@ -742,6 +795,12 @@ class RellseasGestionV2(LayoutView):
         b_vider.callback = self._cb_vider
         lignes.append(discord.ui.ActionRow(
             b_chercher, b_donner, b_retirer, b_activite, b_vider))
+        nb = len([m for m in getattr(role, "members", []) or [] if not m.bot]) if role else 0
+        b_liste = Button(label=f"Liste du clan · {nb}" if role else "Liste du clan",
+                         emoji=visuels.icone("membres"), style=discord.ButtonStyle.primary,
+                         disabled=role is None, custom_id="rellseas_g_liste")
+        b_liste.callback = self._cb_liste
+        lignes.append(discord.ui.ActionRow(b_liste))
 
         items += lignes
         self.clear_items()
@@ -916,6 +975,27 @@ class RellseasGestionV2(LayoutView):
               "compteur séparé.")
         await RellseasGestionV2().render_to(i, edit=True)
 
+    async def _cb_liste(self, i):
+        """19/10/2026 : « savoir combien il y a de personnes à l'intérieur… les copier avec
+        leur ID… un fichier correct avec les noms bien rangés devant leur ID… leur activité »."""
+        await i.response.defer()
+        g, u = i.guild, i.user
+        c = await _cfg(g.id)
+        role = g.get_role(int(c.get(CLE_ROLE_CIBLE, 0) or 0))
+        if role is None:
+            return await i.followup.send("Aucun rôle Rell Seas réglé — `/configure` → Rellseas.",
+                                         ephemeral=True)
+        membres = [m for m in role.members if not m.bot]
+        mesures = await _mesurer_groupe(g.id, membres) if _mesurer_groupe and membres else {}
+        lignes = lignes_clan(membres, mesures)
+        quand = cal.maintenant()
+        nom = f"clan-rellseas-{quand.strftime('%Y-%m-%d-%Hh%M')}.txt"
+        f = discord.File(io.BytesIO(texte_fichier(g.name, role.name, lignes, quand).encode("utf-8")),
+                         filename=nom)
+        await i.followup.send(view=vue_liste(role, lignes, nom), file=f, ephemeral=True,
+                              allowed_mentions=discord.AllowedMentions.none())
+        await self._journal(g, f"📋 **Liste du clan** · `{len(lignes)}` membre(s) · exportée par {u.mention}")
+
     async def _journal(self, g, texte: str) -> None:
         """Trace nominative. Fail-open : jamais bloquant."""
         try:
@@ -944,3 +1024,131 @@ def _etiquette_activite(mes: dict) -> str:
     if presents <= 2:
         return f"🟠 `{presents}/{fenetre}` —"
     return f"🟢 `{presents}/{fenetre}` —"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LA LISTE DU CLAN — 19/10/2026
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Un fichier texte à colonnes fixes : collé dans un bloc-notes ou ouvert sur
+#  téléphone, chaque nom reste en face de son identifiant. Pas de tableur : un
+#  identifiant Discord (18 chiffres) y serait arrondi.
+
+STATUTS = (("Actif", "🟢"), ("Peu présent", "🟠"), ("Absent", "🔴"),
+           ("Jamais vu", "⚪"), ("Trop récent", "⚪"))
+
+
+def statut_activite(mes: dict | None) -> int:
+    """Rang dans STATUTS — mêmes seuils que `_etiquette_activite`."""
+    if not mes:
+        return 3
+    if not mes.get("jugeable"):
+        return 4
+    if mes.get("silence") is None:
+        return 3
+    p = mes.get("presents", 0)
+    return 2 if p == 0 else 1 if p <= 2 else 0
+
+
+def _derniere(mes: dict | None) -> str:
+    dernier = (mes or {}).get("dernier")
+    if not dernier:
+        return "jamais vu"
+    n = cal.jours_entre(dernier)
+    if n is None:
+        return dernier
+    return "aujourd'hui" if n <= 0 else "hier" if n == 1 else f"il y a {n} j"
+
+
+def lignes_clan(membres, mesures: dict) -> list[dict]:
+    out = []
+    for m in membres:
+        mes = mesures.get(m.id)
+        rang = statut_activite(mes)
+        arrivee = getattr(m, "joined_at", None)
+        out.append({
+            "nom": m.display_name, "pseudo": m.name, "id": m.id, "rang": rang,
+            "statut": STATUTS[rang][0], "pastille": STATUTS[rang][1],
+            "jours": (f"{mes.get('presents', 0)}/{mes.get('fenetre', 7)}"
+                      if mes and rang in (0, 1, 2) else "—"),
+            "derniere": _derniere(mes),
+            "arrivee": arrivee.astimezone(cal.FUSEAU).strftime("%d/%m/%Y") if arrivee else "—",
+        })
+    out.sort(key=lambda x: (x["rang"], x["nom"].casefold(), x["id"]))
+    return out
+
+
+def largeur(t: str) -> int:
+    """Colonnes occupées à l'écran : un émoji ou un idéogramme en prend deux."""
+    n = 0
+    for ch in t:
+        if unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Me", "Cf"):
+            continue
+        n += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return n
+
+
+def cadrer(t: str, n: int) -> str:
+    """Le texte tient dans `n` colonnes : coupé (…) ou complété d'espaces."""
+    t = "".join(ch for ch in str(t) if ch.isprintable()).replace("`", "ˋ").strip()
+    if largeur(t) > n:
+        coupe = ""
+        for ch in t:
+            if largeur(coupe + ch) > n - 1:
+                break
+            coupe += ch
+        t = coupe + "…"
+    return t + " " * (n - largeur(t))
+
+
+_COLONNES = (("N°", 5), ("NOM", 26), ("PSEUDO", 22), ("IDENTIFIANT", 21), ("7 JOURS", 9),
+             ("STATUT", 13), ("DERNIÈRE ACTIVITÉ", 19), ("ARRIVÉE", 10))
+
+
+def compte(lignes: list[dict]) -> str:
+    n = [sum(1 for x in lignes if x["rang"] == r) for r in range(len(STATUTS))]
+    morceaux = [f"{STATUTS[r][1]} {STATUTS[r][0]}{'s' if n[r] > 1 else ''} {n[r]}"
+                for r in range(len(STATUTS)) if n[r]]
+    return " · ".join(morceaux) or "Personne"
+
+
+def texte_fichier(serveur: str, role: str, lignes: list[dict], quand) -> str:
+    entete = "".join(cadrer(t, w) + " " for t, w in _COLONNES).rstrip()
+    corps = ["".join(cadrer(v, w) + " " for v, (_t, w) in zip(
+        (n, x["nom"], "@" + x["pseudo"], x["id"], x["jours"], x["statut"], x["derniere"], x["arrivee"]),
+        _COLONNES)).rstrip() for n, x in enumerate(lignes, 1)]
+    return "\n".join([
+        f"CLAN RELL SEAS · {serveur}",
+        f"Rôle « {role} » · {len(lignes)} membre(s) · liste du {quand.strftime('%d/%m/%Y à %H:%M')} (heure de Paris)",
+        compte(lignes).replace("🟢 ", "").replace("🟠 ", "").replace("🔴 ", "").replace("⚪ ", ""),
+        "Activité : jours où le membre a écrit, parlé en vocal, réagi ou utilisé une commande,"
+        " sur les 7 derniers jours complets.",
+        "",
+        entete,
+        "-" * largeur(entete),
+        *corps,
+        "",
+    ])
+
+
+def vue_liste(role, lignes: list[dict], nom_fichier: str):
+    """L'aperçu à l'écran (ce qui tient dans un message) et le fichier complet."""
+    apercu, total = [], 0
+    for x in lignes:
+        ligne = f"{cadrer(x['nom'], 20)} {x['id']:<20} {x['jours']:<4} {x['statut']}"
+        if total + len(ligne) > 2600:
+            break
+        apercu.append(ligne)
+        total += len(ligne) + 1
+    reste = len(lignes) - len(apercu)
+    v = discord.ui.LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(
+        visuels.bandeau("clan", "Liste du clan"),
+        discord.ui.TextDisplay(f"### {len(lignes)} membre(s) · {role.mention}\n{compte(lignes)}"),
+        discord.ui.Separator(),
+        discord.ui.TextDisplay("```\n" + ("\n".join(apercu) or "Personne") + "\n```"
+                               + (f"\n-# … et {reste} autre(s) dans le fichier" if reste else "")),
+        discord.ui.File(f"attachment://{nom_fichier}"),
+        discord.ui.TextDisplay("-# Activité sur les 7 derniers jours complets · le fichier se colle tel quel,"
+                               " chaque nom reste en face de son identifiant."),
+        accent_color=Palette.INFO))
+    return v

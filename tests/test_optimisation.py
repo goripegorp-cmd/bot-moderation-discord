@@ -123,3 +123,21 @@ def test_O3_boucles_a_la_minute_muettes_quand_plus_rien_ne_peut_arriver():
         n = len(db.requetes)
         asyncio.run(ns[boucle]())
         assert len(db.requetes) == n, f"{boucle} relit la base pour rien"
+
+
+def test_O4_publication_rapide_des_reseaux_et_des_actualites():
+    """19/10/2026 : « dès qu'ils sortent un truc, on est directement au courant »."""
+    import roblox_news
+    assert "@tasks.loop(minutes=1)\nasync def check_social_feeds():" in SRC
+    assert "@tasks.loop(minutes=5)\nasync def veille_roblox_task():" in SRC
+    assert 'os.getenv("SOCIAL_POLL_SECONDS", "60")' in SRC
+    assert all(s["minutes"] <= 10 for s in roblox_news.SOURCES
+               if s["cle"] in ("ressources", "newsroom", "newsroom_fr"))
+    horloge = [0.0]
+    ns = {"time": Obj(monotonic=lambda: horloge[0])}
+    exec("_PAGES_LIVE = {}", ns)  # noqa: S102
+    exec(_source("_page_live_due"), ns)  # noqa: S102 — code du dépôt
+    f = ns["_page_live_due"]
+    assert f("yt_1") is True and f("yt_1") is False and f("tk_1") is True
+    horloge[0] += 181
+    assert f("yt_1") is True, "une page live lourde : au plus une lecture par 3 minutes"

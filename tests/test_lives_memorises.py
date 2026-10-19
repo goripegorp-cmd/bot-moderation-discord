@@ -61,8 +61,10 @@ def test_L2_une_annonce_par_live_et_retrait_a_la_fin():
     async def get_db():
         yield Db()
 
+    mono = [1000.0]
     ns = {"_live_state": {}, "now": lambda: horloge[0], "get_db": get_db, "bot": Bot(),
-          "discord": discord, "timezone": timezone, "LIVE_END_THRESHOLD": 36,
+          "discord": discord, "timezone": timezone, "LIVE_FIN_SECONDES": 2700,
+          "LIVE_FIN_PASSAGES": 3, "time": type("T", (), {"monotonic": staticmethod(lambda: mono[0])}),
           "LIVE_ANNOUNCE_COOLDOWN": 64800, "_logerr": lambda *a, **k: None}
     for nom in ("save_live_state", "mark_live_announced", "check_live_ended",
                 "should_announce_live"):
@@ -75,9 +77,11 @@ def test_L2_une_annonce_par_live_et_retrait_a_la_fin():
     assert run(ns["should_announce_live"](cle)) is True
     run(ns["mark_live_announced"](cle, 1, "youtube", "X", message_id=555, live_channel_id=9))
     assert run(ns["should_announce_live"](cle)) is False, "déjà annoncé"
-    for _ in range(35):
+    for _ in range(10):
         run(ns["check_live_ended"](cle, 1, "youtube", "X"))
-    assert ns["_live_state"][cle]["is_live"] and not retires, "un clignotement ne clôt pas"
+        mono[0] += 60
+    assert ns["_live_state"][cle]["is_live"] and not retires, "dix minutes d'absence ne closent pas"
+    mono[0] += 35 * 60
     run(ns["check_live_ended"](cle, 1, "youtube", "X"))
     assert retires == [1] and ns["_live_state"][cle]["is_live"] is False
     assert run(ns["should_announce_live"](cle)) is False, "18 h de délai après une annonce"

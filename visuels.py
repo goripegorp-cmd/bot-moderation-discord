@@ -7,27 +7,60 @@ fichier, chaque menu retombe sur un titre texte.
 """
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+
+import aiohttp
 
 import discord
 
 DOSSIER = Path(__file__).resolve().parent / "visuels"
 VERSION = "1"
 _base = ""
+_servi = None
 _icones: dict = {}
 _log = print
 
 
 def setup(*, base_url, log=None):
-    global _base, _log
+    global _base, _log, _servi
     _base = (base_url or "").rstrip("/")
+    _servi = None
     _log = log or print
 
 
 def url(cle: str):
-    if _base and (DOSSIER / f"{cle}.gif").is_file():
+    if _servi and _base and (DOSSIER / f"{cle}.gif").is_file():
         return f"{_base}/v/{cle}.gif?v={VERSION}"
     return None
+
+
+async def verifier(essais: int = 10, pause: float = 30.0) -> bool:
+    """Les bandeaux ne s'affichent qu'une fois l'adresse publique vérifiée de l'extérieur :
+    une image cassée dans un menu ment. Au déploiement, l'ancienne instance répond encore
+    quelques instants — d'où les essais espacés."""
+    global _servi
+    temoin = next(iter(sorted(DOSSIER.glob("*.gif"))), None) if DOSSIER.is_dir() else None
+    if not _base or temoin is None:
+        _servi = False
+        return False
+    adresse = f"{_base}/v/{temoin.name}?v={VERSION}"
+    for n in range(max(1, essais)):
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+                async with s.get(adresse) as r:
+                    if r.status == 200 and r.headers.get("Content-Type", "").startswith("image/"):
+                        _servi = True
+                        _log("[VISUELS] bandeaux servis")
+                        return True
+                    _log(f"[VISUELS:DETAIL] statut={r.status} essai={n + 1}")
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
+            _log(f"[VISUELS:DETAIL] {type(ex).__name__} essai={n + 1}")
+        if n + 1 < essais:
+            await asyncio.sleep(pause)
+    _servi = False
+    _log("[VISUELS][E1] bandeaux injoignables, titres en texte")
+    return False
 
 
 def bandeau(cle: str, titre: str):

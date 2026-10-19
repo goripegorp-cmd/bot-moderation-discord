@@ -1581,12 +1581,15 @@ class SocialMediaManager:
         """Poll toutes les souscriptions de tous les guilds charges."""
         results: dict[int, int] = {}
         _total_subs = 0
+        borne = asyncio.Semaphore(4)
+
+        async def _un(sub):
+            async with borne:
+                return await self.poll_subscription(sub)
         for guild_id, subs in list(self._subs.items()):
-            count = 0
-            for sub in subs.values():
-                _total_subs += 1
-                count += await self.poll_subscription(sub)
-            results[guild_id] = count
+            liste = list(subs.values())
+            _total_subs += len(liste)
+            results[guild_id] = sum(await asyncio.gather(*(_un(s) for s in liste)))
         # owner 2026-07-18 : battement de cycle (visible dans [DIAG]) — PROUVE que le poller du
         # manager tourne. En usage « panneau seul » ce total reste 0 (le manager ne sert que
         # /social add) → confirme empiriquement quel système gère les pseudos de l'owner.

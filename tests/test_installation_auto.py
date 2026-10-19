@@ -68,9 +68,10 @@ def test_L1_toutes_les_boucles_supervisees_portent_leur_decorateur():
             f"décorateurs = {decos}")
 
 
-def test_L2_la_veille_roblox_est_une_boucle_de_30_minutes():
-    """Elle a perdu son décorateur pendant cette session. Jamais deux fois."""
-    assert any("tasks.loop(minutes=30)" in d
+def test_L2_la_veille_roblox_est_une_boucle_de_5_minutes():
+    """Elle a perdu son décorateur pendant cette session. Jamais deux fois.
+    19/10/2026 : « dès qu'ils sortent un truc, on est directement au courant » — 5 min."""
+    assert any("tasks.loop(minutes=5)" in d
                for d in _decorateurs("veille_roblox_task"))
     #  L'installateur du salon UGC, sur lequel le décorateur avait glissé, a
     #  été RETIRÉ le 23/09 avec son flux : il ne doit pas revenir.

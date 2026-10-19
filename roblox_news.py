@@ -67,7 +67,7 @@ SOURCES = [
      "minutes": 60},
     {"cle": "ressources", "domaine": "Développeurs", "format": "discourse",
      "url": f"{DOMAINE_FORUM}/c/resources/roblox-staff/278.json?order=created",
-     "minutes": 120},
+     "minutes": 10},
     #  ── Sources OFFICIELLES hors forum — ajoutées le 16/08/2026, chacune
     #     ouverte et lue ce jour-là (HTTP 200, extrait réel à l'appui).
     #
@@ -87,10 +87,10 @@ SOURCES = [
     #  cite. Demande du propriétaire : « des actualités US, français ».
     {"cle": "newsroom_fr", "domaine": "Salle de presse (FR)", "format": "newsroom",
      "url": f"{DOMAINE_NEWSROOM}/fr/newsroom", "prefixe": "/fr/newsroom/",
-     "minutes": 120},
+     "minutes": 10},
     {"cle": "newsroom", "domaine": "Newsroom Roblox", "format": "newsroom",
      "url": f"{DOMAINE_NEWSROOM}/newsroom", "prefixe": "/newsroom/",
-     "minutes": 120},
+     "minutes": 10},
 ]
 
 #  Combien de pages ARTICLE du newsroom on ouvre au plus par relevé et par

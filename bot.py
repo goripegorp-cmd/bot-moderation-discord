@@ -105,6 +105,7 @@ import sondages  # sondages créés par les membres en un bouton (visibles ou an
 import suggestions  # idées des membres : votes, fil de discussion, décision du staff
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
+import config_salons  # @everyone voit tout sauf le réservé ; communautaire ouvert
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
@@ -6219,13 +6220,146 @@ def _ticket_timeline_line(kind, actor_id, detail, ts):
     return lab + t
 
 
+async def _salon_transcripts_rellseas(g, c, ref=None):
+    """19/10/2026 : « un salon transcript pour les tickets de type Rell Seas ». Créé une fois à
+    côté du salon des logs de tickets, mêmes droits que lui."""
+    salon = g.get_channel(int(c.get(rellseas_ui.CLE_SALON_TRANSCRIPTS, 0) or 0))
+    if isinstance(salon, discord.TextChannel):
+        return salon
+    me = g.me
+    if not (me and me.guild_permissions.manage_channels):
+        return None
+    ref = ref or g.get_channel(int(c.get('ticket_log', 0) or 0))
+    nom = "📜transcripts-rellseas"
+    try:
+        if isinstance(ref, discord.TextChannel):
+            try:
+                salon = await g.create_text_channel(nom, category=ref.category, overwrites=ref.overwrites,
+                                                    reason="Transcripts des tickets Rell Seas")
+            except discord.Forbidden:
+                salon = await g.create_text_channel(nom, category=ref.category,
+                                                    reason="Transcripts des tickets Rell Seas")
+        else:
+            salon = await _salon_logs_dedie(g, "rellseas_transcripts", nom)
+    except discord.HTTPException as ex:
+        _logerr("tickets.rellseas_salon", ex, guild_id=g.id)
+        return None
+    if salon is not None:
+        await db_set(g.id, rellseas_ui.CLE_SALON_TRANSCRIPTS, salon.id)
+    return salon
+
+
+def _heure_paris(d) -> str:
+    if ZoneInfo is not None:
+        d = d.astimezone(ZoneInfo(_TICKET_TZ))
+    return d.strftime('%d/%m/%Y %H:%M')
+
+
+def _nom_et_id(g, uid) -> str:
+    m = g.get_member(int(uid)) if uid else None
+    return f"{m.display_name} ({uid})" if m else (f"membre parti ({uid})" if uid else "—")
+
+
+_EVENEMENTS_TICKET = {'create': "Ouvert par", 'claim': "Pris en charge par", 'close': "Fermé par",
+                      'leave': "Parti du ticket :", 'add_staff': "Staff ajouté par",
+                      'blacklist': "Blacklisté par", 'priority': "Priorité changée par", 'note': "Note de"}
+
+
+async def _dossier_recrutement(ch, g, tid, uid, panel_name, answers, events):
+    """Le dossier d'un recrutement Rell Seas : candidat, réponses, historique, participants et
+    toute la conversation, ligne à ligne — qui a dit quoi. Rend (texte, participants)."""
+    participants, conversation, jour = {}, [], None
+    async for m in ch.history(limit=5000, oldest_first=True):
+        a = m.author
+        p = participants.setdefault(a.id, {"nom": a.display_name, "id": a.id,
+                                           "bot": bool(getattr(a, 'bot', False)), "n": 0})
+        p["n"] += 1
+        quand = _heure_paris(m.created_at)
+        if quand[:10] != jour:
+            jour = quand[:10]
+            conversation += ["", f"── {jour} ──"]
+        corps = _resolve_transcript_text(m.content or '', g)
+        for emb in (m.embeds or []):
+            parts = [str(x) for x in (emb.title, emb.description) if x]
+            parts += [f"{f.name} : {f.value}" for f in (getattr(emb, 'fields', None) or [])]
+            if parts:
+                corps += ("\n" if corps else "") + _resolve_transcript_text(" · ".join(parts), g)
+        for x in (m.attachments or []):
+            corps += ("\n" if corps else "") + f"[fichier] {x.filename} {x.url}"
+        etiquette = " (candidat)" if a.id == uid else (" [bot]" if p["bot"] else "")
+        conversation.append(f"[{quand[11:]}] {a.display_name}{etiquette} : "
+                            + (corps.strip() or "[média]").replace("\n", "\n" + " " * 10))
+    ordre = sorted(participants.values(), key=lambda p: (p["id"] != uid, p["bot"], -p["n"]))
+    debut = next((t for k, _a, _d, t in events if k == 'create'), None)
+    fin = next((t for k, _a, _d, t in reversed(events) if k == 'close'), None)
+    lignes = [f"DOSSIER DE RECRUTEMENT RELL SEAS · Ticket #{tid}",
+              f"Candidat : {_nom_et_id(g, uid)}",
+              f"Panneau : {panel_name or '—'}"]
+    if debut:
+        lignes.append(f"Ouvert le {_heure_paris(datetime.fromtimestamp(debut, timezone.utc))}"
+                      + (f" · fermé le {_heure_paris(datetime.fromtimestamp(fin, timezone.utc))}" if fin else ""))
+    lignes += ["", "PARTICIPANTS"]
+    lignes += [f"  {p['nom'][:28]:<28} {p['id']:<20} {p['n']} message(s)"
+               + (" · candidat" if p['id'] == uid else " · bot" if p['bot'] else "") for p in ordre]
+    if answers:
+        lignes += ["", "RÉPONSES DU FORMULAIRE"]
+        for q, rep_ in answers.items():
+            lignes += [f"  {q}", "    " + str(rep_).replace("\n", "\n    ")]
+    lignes += ["", "HISTORIQUE DU TICKET"]
+    for k, a_, d_, t_ in events:
+        quand = _heure_paris(datetime.fromtimestamp(t_, timezone.utc)) if t_ else "—"
+        lignes.append(f"  {quand}  {_EVENEMENTS_TICKET.get(k, k)} {_nom_et_id(g, a_)}"
+                      + (f" — {d_}" if d_ and k in ('note', 'priority', 'blacklist') else ""))
+    lignes += ["", "CONVERSATION"] + conversation + [""]
+    return "\n".join(lignes), ordre
+
+
+def _vue_recrutement(g, tid, uid, qui, panel_name, answers, events, participants, nom_fichier, url):
+    """La fiche du recrutement dans le salon des transcripts Rell Seas."""
+    debut = next((t for k, _a, _d, t in events if k == 'create'), None)
+    fin = next((t for k, _a, _d, t in reversed(events) if k == 'close'), None)
+    ferme_par = next((a for k, a, _d, _t in reversed(events) if k == 'close'), 0)
+    duree = ""
+    if debut and fin and fin >= debut:
+        h, mn = divmod(int(fin - debut) // 60, 60)
+        duree = f" · {h} h {mn:02d}" if h else f" · {mn} min"
+    tete = (f"### {qui}\n<@{uid}> · `{uid}`\n-# Ticket #{tid}" + (f" · {panel_name}" if panel_name else "")
+            + (f" · ouvert <t:{int(debut)}:f>" if debut else "")
+            + (f" · fermé <t:{int(fin)}:f>" if fin else "")
+            + (f" par <@{ferme_par}>" if ferme_par else "") + duree)
+    qui_parle = "\n".join(
+        f"{'**' if p['id'] == uid else ''}{p['nom'][:40]}{'**' if p['id'] == uid else ''} · `{p['id']}`"
+        f" — {p['n']} message(s)" + (" · candidat" if p['id'] == uid else " · bot" if p['bot'] else "")
+        for p in participants[:15])
+    reponses = "\n".join(f"**{str(q)[:80]}**\n{str(a)[:300]}" for q, a in list((answers or {}).items())[:8])
+    histo = "\n".join(_ticket_timeline_line(k, a, d, t) for (k, a, d, t) in events[-15:])
+    items = [visuels.bandeau("recrutement", "Recrutement Rell Seas"),
+             discord.ui.TextDisplay(tete[:500]), discord.ui.Separator(),
+             discord.ui.TextDisplay(("**Qui a parlé**\n" + (qui_parle or "Personne"))[:900])]
+    if reponses:
+        items += [discord.ui.Separator(), discord.ui.TextDisplay(("**Réponses**\n" + reponses)[:1200])]
+    items += [discord.ui.Separator(), discord.ui.TextDisplay(("**Historique**\n" + histo)[:900]),
+              discord.ui.File(f"attachment://{nom_fichier}")]
+    if url:
+        items.append(discord.ui.ActionRow(discord.ui.Button(
+            style=discord.ButtonStyle.link, url=url, label="Ouvrir le transcript",
+            emoji=visuels.icone("journal"))))
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(*items, accent_color=Palette.INFO))
+    return v
+
+
 async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
     """owner 2026-06-29 : LOG REGROUPÉ — tous les événements d'un ticket dans UN SEUL message
     qui se met à jour (timeline créé→pris→note→fermé), au lieu d'un message par événement (qui
-    se mélangeaient entre tickets). À la fermeture : transcript PRO en pièce jointe. FAIL-SAFE."""
+    se mélangeaient entre tickets). À la fermeture : transcript PRO en pièce jointe. FAIL-SAFE.
+    19/10/2026 : un ticket Rell Seas va tout entier dans son propre salon de transcripts."""
     try:
         c = await cfg(g.id)
         lch = g.get_channel(c.get('ticket_log', 0))
+        rellseas = str(ti.get('panel_id', '') or '') in rellseas_ui.panneaux_tickets(c)
+        if rellseas:
+            lch = await _salon_transcripts_rellseas(g, c, ref=lch) or lch
         if not lch:
             return
         try:
@@ -6351,6 +6485,17 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                         _recent_transcript_urls[str(_tid)] = url
                     except Exception:
                         pass
+                if rellseas:
+                    texte, participants = await _dossier_recrutement(
+                        ch, g, _tid, int(uid) if str(uid).isdigit() else 0, panel_name,
+                        ti.get('answers') or {}, events)
+                    nom_fichier = f"recrutement-{_slug}-{_tid}.txt"
+                    vue = _vue_recrutement(g, _tid, uid, _qui, panel_name, ti.get('answers') or {},
+                                           events, participants, nom_fichier, url)
+                    await lch.send(view=vue, file=discord.File(io.BytesIO(texte.encode('utf-8')),
+                                                               filename=nom_fichier),
+                                   allowed_mentions=discord.AllowedMentions.none())
+                elif url:
                     # LIEN prioritaire : GROS bouton, PAS de fichier .html joint (sinon Discord
                     # affiche le code brut qui masque le lien — owner 2026-07-01).
                     e = discord.Embed(
@@ -10573,9 +10718,8 @@ async def _bilan_sante_serveur(guild) -> list:
         if _orphelins:
             manques.append(
                 f"📺 **Flux YouTube sans salon** : "
-                f"{', '.join(f'« {n} »' for n in _orphelins[:3])} — il ne "
-                f"publie rien. `/configure` → **Réseaux sociaux** : choisissez "
-                f"son salon, ou retirez le flux.")
+                f"{', '.join(f'« {n} »' for n in _orphelins[:3])} — aucun autre "
+                f"flux ne donne de salon où le rattacher · `/configure` → Réseaux sociaux.")
     except Exception as ex:
         _logerr("_bilan_sante_serveur", ex, guild_id=getattr(guild, "id", 0))
     return manques
@@ -11005,6 +11149,128 @@ class BoutonArchive(discord.ui.DynamicItem[Button],
             _logerr("archives.bouton", ex)
 
 
+async def _actus_en_annonces(g) -> None:
+    """Le salon des actualités devient un salon d'annonces (suivable depuis d'autres
+    serveurs), une fois — le serveur doit être communautaire."""
+    try:
+        c = await cfg(g.id)
+        if c.get('actus_annonces_v1'):
+            return
+        salon = g.get_channel(int((await roblox_news_module.config(g.id)).get("roblox_news_salon", 0) or 0))
+        me = g.me
+        if not isinstance(salon, discord.TextChannel) or not (me and me.guild_permissions.manage_channels):
+            return
+        if not salon.is_news() and "COMMUNITY" in g.features:
+            await salon.edit(type=discord.ChannelType.news, reason="Actualités : salon d'annonces")
+        await db_set(g.id, 'actus_annonces_v1', 1)
+    except discord.HTTPException as ex:
+        _logerr("actus.annonces", ex, guild_id=g.id)
+
+
+_FLUX_RESEAUX = ("youtube", "twitch", "tiktok", "twitter", "reddit")
+
+
+async def _rattacher_flux_orphelins(g) -> int:
+    """Un flux de réseau sans salon ne publie rien : il prend le salon où publient les autres."""
+    from collections import Counter
+    c = await cfg(g.id)
+    vus = Counter()
+    for p in _FLUX_RESEAUX:
+        for f in (c.get(f'ads_{p}_feeds') or []):
+            cid = int((f.get('channel_id', 0) if isinstance(f, dict) else 0) or 0)
+            if g.get_channel(cid) is not None:
+                vus[cid] += 1
+        defaut = int(c.get(f'ads_{p}_channel', 0) or 0)
+        if g.get_channel(defaut) is not None:
+            vus[defaut] += 1
+    if not vus:
+        return 0
+    cible = vus.most_common(1)[0][0]
+    rattaches = 0
+    for p in _FLUX_RESEAUX:
+        flux = c.get(f'ads_{p}_feeds') or []
+        defaut = g.get_channel(int(c.get(f'ads_{p}_channel', 0) or 0))
+        live = g.get_channel(int(c.get(f'ads_{p}_live_channel', 0) or 0))
+        change = False
+        for f in flux:
+            if isinstance(f, dict) and g.get_channel(int(f.get('channel_id', 0) or 0)) is None \
+                    and defaut is None and live is None:
+                f['channel_id'] = cible
+                change, rattaches = True, rattaches + 1
+        if change:
+            await db_set(g.id, f'ads_{p}_feeds', flux)
+    return rattaches
+
+
+async def _configurer_salons(g) -> None:
+    """Une fois par serveur : @everyone voit tous les salons sauf ceux réservés à des rôles,
+    communautaire ouvert à la parole, radié aveugle partout. Résumé et « Annuler » aux logs."""
+    try:
+        c = await cfg(g.id)
+        if c.get('config_salons_v1'):
+            return
+        me = g.me
+        if not (me and me.guild_permissions.manage_roles and me.guild_permissions.manage_channels):
+            return
+        ids_prives = {i for i in _ids_configures(dict(c)) if g.get_channel(i) is not None}
+        ids_prives |= {ch.id for ch in await _salons_de_logs(g, c)}
+        ids_lecture = {ch.id for ch in await _salons_de_flux(g, c)}
+        radie = discord.utils.get(g.roles, name=_RADIE_ROLE_NAME)
+        actions = config_salons.plan(g, ids_prives, ids_lecture, radie)
+        await db_set(g.id, 'config_salons_v1', now().isoformat())
+        if not actions:
+            return
+        avant = config_salons.instantane(actions)
+        async with get_db() as db:
+            await db.execute("CREATE TABLE IF NOT EXISTS config_salons_historique ("
+                             "id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, avant TEXT,"
+                             " cree_le TEXT DEFAULT CURRENT_TIMESTAMP)")
+            cur = await db.execute("INSERT INTO config_salons_historique(guild_id, avant) VALUES(?,?)",
+                                   (g.id, avant))
+            hid = cur.lastrowid
+            await db.commit()
+        faits = await config_salons.appliquer(actions)
+        logs = g.get_channel(int(await ulogger2026.get_log_channel(g.id) or 0))
+        if logs is not None:
+            v = LayoutView(timeout=None)
+            v.add_item(discord.ui.Container(
+                discord.ui.TextDisplay(f"### Configuration des salons\n-# {faits} réglage(s) appliqué(s)"),
+                discord.ui.TextDisplay(config_salons.resume(actions)),
+                discord.ui.ActionRow(BoutonAnnulerConfig(hid)), accent_color=Palette.INFO))
+            await logs.send(view=v, allowed_mentions=discord.AllowedMentions.none())
+    except Exception as ex:
+        _logerr("salons.config", ex, guild_id=getattr(g, 'id', 0))
+
+
+class BoutonAnnulerConfig(discord.ui.DynamicItem[Button], template=r"cfgsal:annuler:(?P<hid>\d+)"):
+    def __init__(self, hid: int):
+        self.hid = int(hid)
+        super().__init__(Button(label="Annuler", style=discord.ButtonStyle.secondary,
+                                emoji=visuels.icone("annuler"), custom_id=f"cfgsal:annuler:{self.hid}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["hid"]))
+
+    async def callback(self, i: discord.Interaction):
+        p = getattr(i.user, "guild_permissions", None)
+        if not (p and (p.administrator or p.manage_guild)):
+            return await i.response.send_message("Réservé à l'administration.", ephemeral=True)
+        await i.response.defer(ephemeral=True)
+        async with get_db() as db:
+            async with db.execute("SELECT avant FROM config_salons_historique WHERE id=? AND guild_id=?",
+                                  (self.hid, i.guild.id)) as cur:
+                r = await cur.fetchone()
+        if r is None:
+            return await i.followup.send("Rien à annuler.", ephemeral=True)
+        faits = await config_salons.restaurer(i.guild, r[0])
+        try:
+            await i.message.edit(view=None)
+        except discord.HTTPException:
+            pass
+        await i.followup.send(f"Annulé : {faits} réglage(s) remis comme avant.", ephemeral=True)
+
+
 async def _salon_logs_dedie(g, cle: str, nom: str):
     """Un salon de logs propre à un système (sondages, suggestions), créé une fois à côté du
     salon de logs principal — mêmes droits que sa catégorie."""
@@ -11126,6 +11392,12 @@ async def _travaux_de_demarrage():
                 await _menage_v2(g)
                 await sondages.installer(g)
                 await suggestions.installer(g)
+                await _actus_en_annonces(g)
+                await _rattacher_flux_orphelins(g)
+                await _configurer_salons(g)
+                _c = await cfg(g.id)
+                if rellseas_ui.panneaux_tickets(_c):
+                    await _salon_transcripts_rellseas(g, _c)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
         await _fermer_anciens_sondages()
@@ -11163,9 +11435,9 @@ async def _relever_actus() -> dict:
     return out
 
 
-@tasks.loop(minutes=30)
+@tasks.loop(minutes=5)
 async def veille_roblox_task():
-    """L'actualité Roblox (blog, forum, notes de version), toutes les 30 min ; l'éclaireur
+    """L'actualité Roblox (blog, forum, notes de version), toutes les 5 min ; l'éclaireur
     d'actualités voit les nouveaux billets dans la minute. 19/10/2026 : les accessoires
     (nouveautés, passages Limited, cartes cadeaux, marché) sont retirés."""
     try:
@@ -15574,7 +15846,8 @@ _live_state = {}
 # on ne re-annonce JAMAIS avant 18h. Un stream de 24h = 1 seule annonce.
 LIVE_ANNOUNCE_COOLDOWN = 64800  # 18 heures en secondes
 # Passages d'affilée sans live avant d'en déclarer la fin (anti-clignotement du HTML).
-LIVE_END_THRESHOLD = 36
+LIVE_FIN_SECONDES = 45 * 60
+LIVE_FIN_PASSAGES = 3
 # Lock pour empêcher les exécutions concurrentes du task
 _feeds_lock = asyncio.Lock()
 
@@ -15638,13 +15911,15 @@ async def mark_live_announced(cache_key: str, guild_id: int = 0, platform: str =
 
 
 async def check_live_ended(cache_key: str, guild_id: int = 0, platform: str = '', username: str = ''):
-    """Un passage sans live : après LIVE_END_THRESHOLD d'affilée, le live est fini et son
+    """Un passage sans live : 45 min d'absence (et 3 passages au moins), le live est fini et son
     message d'annonce est retiré."""
     state = _live_state.get(cache_key)
     if not state or not state.get('is_live'):
         return
     state['fail_count'] = state.get('fail_count', 0) + 1
-    if state['fail_count'] >= LIVE_END_THRESHOLD:
+    state.setdefault('absent_depuis', time.monotonic())
+    if (state['fail_count'] >= LIVE_FIN_PASSAGES
+            and time.monotonic() - state['absent_depuis'] >= LIVE_FIN_SECONDES):
         msg_id = state.get('message_id', 0)
         ch_id = state.get('live_channel_id', 0)
         guild = bot.get_guild(guild_id) if guild_id else None
@@ -15657,6 +15932,7 @@ async def check_live_ended(cache_key: str, guild_id: int = 0, platform: str = ''
             except discord.HTTPException as ex:
                 _logerr("live.fin", ex, guild_id=guild_id)
         state.update(is_live=False, fail_count=0, message_id=0, live_channel_id=0)
+        state.pop('absent_depuis', None)
     await save_live_state(cache_key, guild_id, platform, username)
 
 
@@ -15702,6 +15978,7 @@ def mark_live_still_active(cache_key: str):
     state = _live_state.get(cache_key)
     if state:
         state['fail_count'] = 0
+        state.pop('absent_depuis', None)
         state['is_live'] = True  # CRUCIAL : maintenir le flag live actif
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -18132,6 +18409,11 @@ async def _activite_boot():
         conf["activite_fenetre"] = 7
         return await activite_module.presence(guild_id, membre, conf)
 
+    async def _rellseas_mesurer_groupe(guild_id, membres):
+        conf = dict(await activite_module.config(guild_id))
+        conf["activite_fenetre"] = 7
+        return await activite_module.presences(guild_id, membres, conf)
+
     async def _rellseas_marquer_suivi(guild_id, user_id):
         async with get_db() as db:
             await db.execute(
@@ -18142,6 +18424,7 @@ async def _activite_boot():
 
     rellseas_ui.setup(cfg=cfg, db_set=db_set, get_db=get_db,
                       mesurer=_rellseas_mesurer,
+                      mesurer_groupe=_rellseas_mesurer_groupe,
                       marquer_suivi=_rellseas_marquer_suivi,
                       #  ⚠️ La garde passe par le setup, plus par le
                       #  constructeur : le panneau est PERSISTANT, il est
@@ -18252,7 +18535,7 @@ async def on_ready():
         bot.add_dynamic_items(sondages.BoutonCreer, sondages.BoutonTerminer, sondages.BoutonVote,
                               sondages.BoutonFinAnonyme, suggestions.BoutonProposer,
                               suggestions.BoutonPour, suggestions.BoutonContre,
-                              suggestions.BoutonGerer, notifs.BoutonNotif)
+                              suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
@@ -18578,6 +18861,7 @@ async def on_ready():
     try:
         port = int(os.environ.get('PORT', '8000') or 8000)
         await health_server_module.start(bot, port=port)
+        asyncio.create_task(visuels.verifier())
     except Exception as ex:
         print(f"[on_ready health_server.start] {ex}")
     # Phase 281 : purge de rétention des transcripts de tickets (RGPD-friendly, boot one-shot).
@@ -25954,10 +26238,23 @@ async def on_raw_reaction_remove(payload):
 #                           📢 TÂCHE VÉRIFICATION FEEDS SOCIAUX
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@tasks.loop(minutes=5)
+_PAGES_LIVE: dict = {}
+
+
+def _page_live_due(cle: str, secondes: int = 180) -> bool:
+    """Une page « live » (YouTube, TikTok) pèse ~600 Ko : au plus une lecture par 3 minutes."""
+    t = time.monotonic()
+    if t - _PAGES_LIVE.get(cle, -1e9) < secondes:
+        return False
+    _PAGES_LIVE[cle] = t
+    return True
+
+
+@tasks.loop(minutes=1)
 async def check_social_feeds():
-    """Vérifie les nouveaux posts YouTube, Twitch, Twitter, Reddit, Discord et RoSocial"""
-    # Lock : empêche les exécutions concurrentes si le check prend plus de 5min
+    """Nouveaux posts YouTube, Twitch, TikTok, X, Reddit — chaque minute (19/10/2026 : « dès
+    qu'ils sortent un truc, on est directement au courant »)."""
+    # Lock : un passage plus long qu'une minute fait sauter le suivant
     if _feeds_lock.locked():
         return  # Déjà en cours → skip ce cycle
     
@@ -26187,7 +26484,7 @@ async def check_youtube_feeds(session, guild, data):
                 continue
             
             # ═══════════════ DÉTECTION LIVE YOUTUBE ═══════════════
-            if live_channel:
+            if live_channel and _page_live_due(f"yt_{guild.id}_{channel_id}"):
                 live_cache_key = f"yt_live_{guild.id}_{channel_id}"
                 try:
                     yt_page_url = f"https://www.youtube.com/channel/{channel_id}/live"
@@ -26616,7 +26913,7 @@ async def check_tiktok_feeds(session, guild, data):
                 continue
             
             # ═══════════════ DÉTECTION LIVE TIKTOK ═══════════════
-            if live_channel:
+            if live_channel and _page_live_due(f"tk_{guild.id}_{username}"):
                 live_cache_key = f"tiktok_live_{guild.id}_{username}"
                 try:
                     live_url = f"https://www.tiktok.com/@{username}/live"
@@ -28772,7 +29069,7 @@ async def _2026_on_ready_addon():
             print(f"[social] chargement RSSHUB_BASE_URL config : {_rsex}")
         print("[2026] on_ready_addon : init SocialMediaManager...")
         mgr = social2026.SocialMediaManager(
-            poll_interval_seconds=int(os.getenv("SOCIAL_POLL_SECONDS", "300")),
+            poll_interval_seconds=int(os.getenv("SOCIAL_POLL_SECONDS", "60")),
             cleanup_interval_seconds=int(os.getenv("SOCIAL_CLEANUP_SECONDS", "1800")),
         )
         # Adapters réels si credentials présents, sinon manuel. owner 2026-06-27 : l'owner met
