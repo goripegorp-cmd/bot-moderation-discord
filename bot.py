@@ -3392,7 +3392,7 @@ async def cfg(gid):
         'alt_config': {'auto_action': False, 'min_confidence': 70},
         'channel_configs': {},
         'ticket_staff': 0, 'ticket_log': 0, 'ticket_panels': {},
-        'tickets_fils': 1, 'tickets_fils_parents': {},
+        'tickets_fils': 1, 'tickets_fils_parents': {}, 'tickets_inactivite_jours': 7,
         'mod_warn_role': 0, 'mod_mute_role': 0, 'mod_infractions_role': 0, 'mod_log_channel': 0,
         # Phase 23 : salon dédié aux alertes de comptes suspects/piratés
         'compromised_alerts_channel': 0,
@@ -9335,12 +9335,86 @@ async def _ticket_transcript_html(ch, tid):
         return None
 
 
+async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours=0):
+    """Fermeture d'un ticket : log staff + transcript, MP au créateur, base, suppression.
+    Partagée par le bouton 🔒 et la fermeture après `inactif_jours` jours sans message."""
+    tid = tk.get('id', '?')
+    try:
+        tu_log = guild.get_member(tk['user'])
+        await send_ticket_log(guild, 'close', tu_log or tk['user'], tk, closer=closer, ch=ch)
+    except Exception as ex:
+        _logerr("ticket.close_log", ex, guild_id=guild.id)
+    try:
+        creator = guild.get_member(tk['user'])
+        if creator:
+            _dm_url = _recent_transcript_urls.pop(str(tid), None)
+            f = None
+            if not _dm_url:
+                f = await _ticket_transcript_html(ch, tid) or await _ticket_transcript_file(ch, tid)
+            _dm_link_line = (
+                f"🔗 **Transcript complet (page web) :** {_dm_url}\n"
+                if _dm_url else
+                "_Transcript de la conversation ci-joint._\n")
+            if inactif_jours:
+                dm_txt = (
+                    f"🔒 Ton ticket **#{tid}** sur **{guild.name}** a été fermé automatiquement "
+                    f"après **{inactif_jours} jours sans message**.\n\n{_dm_link_line}"
+                    f"_Tu peux rouvrir un ticket si tu as encore besoin d'aide._")
+                _fbview = None
+            else:
+                dm_txt = (
+                    f"🔒 Ton ticket **#{tid}** sur **{guild.name}** a été fermé par "
+                    f"**{closer.display_name}**.\n**Raison :** {reason}\n\n"
+                    f"{_dm_link_line}"
+                    f"_Tu peux rouvrir un ticket si tu as encore besoin d'aide._\n\n"
+                    f"**Comment s'est passée la prise en charge ?** _(un clic — ça nous aide)_")
+                try:
+                    _fbview = _ticket_feedback_view(guild.id, int(tid), closer.id)
+                except Exception:
+                    _fbview = None
+            _kw = {"content": dm_txt}
+            if f:
+                _kw["file"] = f
+            if _fbview:
+                _kw["view"] = _fbview
+            try:
+                await creator.send(**_kw)
+            except discord.HTTPException:
+                pass
+    except Exception as ex:
+        _logerr("ticket.close_dm", ex, guild_id=guild.id)
+    try:
+        async with get_db() as db:
+            await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (ch.id,))
+            await db.commit()
+    except Exception as _e:
+        _logerr("ticket.close_db", _e)
+    try:
+        await tix_module.log_action(guild.id, ch.id, closer.id, "close", reason[:200])
+    except Exception as ex:
+        _logerr("ticket.close_audit", ex, guild_id=guild.id)
+    try:
+        await ch.send(
+            (f"🔒 **Ticket fermé** : {inactif_jours} jours sans message.\n"
+             if inactif_jours else
+             f"🔒 **Ticket fermé** par {closer.mention}\n**Raison :** {reason}\n")
+            + "_Transcript envoyé en MP au créateur. Suppression dans 5 s…_")
+    except discord.HTTPException:
+        pass
+    await asyncio.sleep(5)
+    try:
+        await ch.delete()
+    except discord.HTTPException as ex:
+        _logerr("ticket.close_delete", ex, guild_id=guild.id)
+
+
 class TicketCloseModal(Modal):
     """Fermeture de ticket EN 2 TEMPS (quick-win pro) : le bouton 🔒 ouvre ce modal —
     la SOUMISSION = la confirmation, le ✖ annule (fini le delete instantané sans filet).
     À la fermeture : transcript .txt envoyé en DM au CRÉATEUR + récap (avec transcript)
     dans le salon de logs, puis suppression après un court délai. NB : ceci n'a RIEN à
-    voir avec l'auto-close (désactivé) — c'est une fermeture 100 % MANUELLE par le staff."""
+    voir avec la fermeture après N jours sans message (`tickets_inactifs_task`), qui passe par
+    la même `_fermer_ticket`."""
     def __init__(self, tk, prefill: str = ""):
         super().__init__(title="🔒 Fermer le ticket")
         self.tk = tk
@@ -9358,74 +9432,8 @@ class TicketCloseModal(Modal):
             await i.response.defer()
         except Exception:
             pass
-        ch = i.channel
-        tk = self.tk
         reason = (self.reason.value or '').strip() or "Aucune raison précisée"
-        tid = tk.get('id', '?')
-        # 1) Log staff (envoie déjà l'embed + transcript dans le salon de logs).
-        try:
-            tu_log = i.guild.get_member(tk['user'])
-            await send_ticket_log(i.guild, 'close', tu_log or tk['user'], tk, closer=i.user, ch=ch)
-        except Exception:
-            pass
-        # 2) Transcript en DM au CRÉATEUR (fallback silencieux si DM fermés).
-        try:
-            creator = i.guild.get_member(tk['user'])
-            if creator:
-                # Réutilise l'URL rendue par send_ticket_log (sinon rend un fichier de repli).
-                _dm_url = _recent_transcript_urls.pop(str(tid), None)
-                f = None
-                if not _dm_url:
-                    f = await _ticket_transcript_html(ch, tid) or await _ticket_transcript_file(ch, tid)
-                _dm_link_line = (
-                    f"🔗 **Transcript complet (page web) :** {_dm_url}\n"
-                    if _dm_url else
-                    "_Transcript de la conversation ci-joint._\n")
-                dm_txt = (
-                    f"🔒 Ton ticket **#{tid}** sur **{i.guild.name}** a été fermé par "
-                    f"**{i.user.display_name}**.\n**Raison :** {reason}\n\n"
-                    f"{_dm_link_line}"
-                    f"_Tu peux rouvrir un ticket si tu as encore besoin d'aide._\n\n"
-                    f"**Comment s'est passée la prise en charge ?** _(un clic — ça nous aide)_")
-                # #16 : note de satisfaction (boutons persistants) si l'id de ticket est numérique.
-                _fbview = None
-                try:
-                    _fbview = _ticket_feedback_view(i.guild.id, int(tid), i.user.id)
-                except Exception:
-                    _fbview = None
-                try:
-                    _kw = {"content": dm_txt}
-                    if f:
-                        _kw["file"] = f
-                    if _fbview:
-                        _kw["view"] = _fbview
-                    await creator.send(**_kw)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        # 3) Marquer fermé (DB) + annonce dans le salon + suppression différée.
-        try:
-            async with get_db() as db:
-                await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (ch.id,))
-                await db.commit()
-        except Exception as _e:
-            _logerr("ticket.close_db", _e)
-        try:  # Lot 2 : audit-trail (qui a fermé, motif)
-            await tix_module.log_action(i.guild.id, ch.id, i.user.id, "close", reason[:200])
-        except Exception:
-            pass
-        try:
-            await ch.send(
-                f"🔒 **Ticket fermé** par {i.user.mention}\n**Raison :** {reason}\n"
-                f"_Transcript envoyé en MP au créateur. Suppression du salon dans 5 s…_")
-        except Exception:
-            pass
-        await asyncio.sleep(5)
-        try:
-            await ch.delete()
-        except Exception:
-            pass
+        await _fermer_ticket(i.guild, i.channel, self.tk, i.user, reason)
 
 
 class TicketControlView(View):
@@ -14682,6 +14690,36 @@ async def _rendre_roles_au_retour(member):
                 guild_id=getattr(getattr(member, "guild", None), "id", 0))
 
 
+async def _retirer_salons_combat(g):
+    """19/10/2026 : « les salons de combat temporaires, tu les enlèves — je ne veux plus de
+    système de combat ». Plus rien ne les crée ; on retire ceux qui restent (par nom ou par
+    identifiant enregistré), puis la catégorie des événements si elle est vide."""
+    try:
+        c = await cfg(g.id)
+        ids = {int(v) for k, v in c.items()
+               if str(k).startswith('combat_channel_id') and str(v).isdigit() and int(v)}
+        noms = _ALL_COMBAT_CHANNEL_NAMES | _LEGACY_COMBAT_CHANNEL_NAMES | {"⚔️-arène"}
+        retires = 0
+        for ch in list(g.channels):
+            if isinstance(ch, discord.CategoryChannel):
+                continue
+            nom = getattr(ch, 'name', '') or ''
+            if ch.id in ids or nom in noms or nom == "🔊 Combat" or nom.startswith("🔊 Combat "):
+                try:
+                    await ch.delete(reason="Système de combat retiré")
+                    retires += 1
+                    await asyncio.sleep(0.5)
+                except discord.HTTPException as ex:
+                    _logerr("combat.retrait", ex, guild_id=g.id)
+        for k in [k for k in c if str(k).startswith('combat_channel_id') and c.get(k)]:
+            await db_set(g.id, k, 0)
+        cat = g.get_channel(int(c.get('events_category', 0) or 0))
+        if isinstance(cat, discord.CategoryChannel) and not cat.channels:
+            await cat.delete(reason="Système de combat retiré")
+    except Exception as ex:
+        _logerr("combat.retrait", ex, guild_id=getattr(g, 'id', 0))
+
+
 async def _retirer_exclamations(g):
     """14/10/2026 : « Damn c'est magnifique ✨ » supprimé comme mot interdit.
     Une exclamation sort de la liste du serveur (et ne peut plus y entrer :
@@ -14718,6 +14756,7 @@ async def _travaux_de_demarrage():
                 await _verifier_visibilite(g)
                 await _publier_bilan_sante(g)
                 await _retirer_exclamations(g)
+                await _retirer_salons_combat(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")
     except Exception as ex:
@@ -16271,6 +16310,7 @@ _SUPERVISED_LOOP_NAMES = [
     #  la moitié exacte du piège n°2 du dépôt, dans l'autre sens — et une liste
     #  qui ment sur ce qu'elle surveille finit par tromper une relecture.
     "db_optimizer_task",
+    "tickets_inactifs_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -25841,6 +25881,8 @@ async def on_ready():
     # Phase 44 : Daily Quest push proactif + DB optimizer
     if not db_optimizer_task.is_running():
         db_optimizer_task.start()
+    if not tickets_inactifs_task.is_running():
+        tickets_inactifs_task.start()
 
     # Phase 45 : Camouflage de salon + Vocal Spotlight + Compliment + failsafe
     # Phase 48 : Compliment du jour DÉSACTIVÉ (système Saint-Valentin retiré)
@@ -26489,25 +26531,23 @@ async def ticket_stats_cmd(i: discord.Interaction):
 
 @ticket_group.command(
     name="auto_close_config",
-    description="ℹ️ [Staff] L'auto-fermeture des tickets est désactivée (info)",
+    description="⏱️ [Staff] Fermeture des tickets sans message (jours ; 0 = jamais)",
 )
-@app_commands.describe(jours="(sans effet) — la fermeture auto est désactivée")
-async def ticket_auto_close_cmd(i: discord.Interaction, jours: int = 0):
+@app_commands.describe(jours="Jours sans message avant fermeture (0 = jamais ; vide = voir)")
+async def ticket_auto_close_cmd(i: discord.Interaction, jours: int | None = None):
     if not i.guild or not isinstance(i.user, discord.Member):
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     if not _tix_is_staff(i.user):
         return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
     try:
-        # DÉSACTIVÉ (directive owner) : le bot ne ferme JAMAIS un ticket pour inactivité.
-        # On n'arme plus aucune fermeture auto ; la commande devient purement informative.
+        if jours is not None:
+            await db_set(i.guild.id, 'tickets_inactivite_jours', max(0, min(int(jours), 365)))
+        j = int((await cfg(i.guild.id)).get('tickets_inactivite_jours', 7) or 0)
         await i.response.send_message(
-            "ℹ️ **L'auto-fermeture des tickets est désactivée.** Le bot ne ferme jamais "
-            "un ticket pour inactivité — ils restent ouverts aussi longtemps que nécessaire. "
-            "La fermeture est **100 % manuelle** (bouton 🔒 par le staff).\n"
-            "_Rappel automatique conservé : le staff est pingé si un ticket n'est **pas pris "
-            "en charge**._",
-            ephemeral=True,
-        )
+            (f"⏱️ Un ticket sans message depuis **{j} jours** est fermé automatiquement "
+             f"(log + transcript au staff, MP au créateur)." if j else
+             "⏱️ Fermeture automatique **désactivée** : la fermeture est manuelle (🔒)."),
+            ephemeral=True)
     except Exception as ex:
         print(f"[ticket_auto_close_cmd] {ex}")
 
@@ -28788,6 +28828,51 @@ async def on_webhooks_update(channel):
         #  part déjà dans le journal de sécurité juste au-dessus — rien n'est perdu.)
     except Exception as ex:
         print(f"[on_webhooks_update] {ex}")
+
+
+@tasks.loop(hours=6)
+async def tickets_inactifs_task():
+    """19/10/2026 : un ticket sans message depuis `tickets_inactivite_jours` jours (7 par
+    défaut, 0 = jamais) est fermé comme au bouton 🔒 : log + transcript, MP au créateur."""
+    for g in list(bot.guilds):
+        try:
+            jours = int((await cfg(g.id)).get('tickets_inactivite_jours', 7) or 0)
+            if jours <= 0:
+                continue
+            async with get_db() as db:
+                async with db.execute(
+                        "SELECT id, channel_id, user_id, claimed_by, answers, panel_id FROM tickets "
+                        "WHERE guild_id=? AND status='open'", (g.id,)) as cur:
+                    lignes = await cur.fetchall()
+            fermes = 0
+            for tid, chid, uid, claimed, answers, pid in lignes:
+                if fermes >= 25:
+                    break
+                ch = await tickets_fils.salon(g, chid)
+                if ch is None:
+                    async with get_db() as db:
+                        await db.execute("UPDATE tickets SET status='closed' WHERE id=?", (tid,))
+                        await db.commit()
+                    continue
+                dernier = discord.utils.snowflake_time(getattr(ch, 'last_message_id', None) or ch.id)
+                if (now() - dernier).days < jours:
+                    continue
+                try:
+                    ans = json.loads(answers) if answers else {}
+                except ValueError:
+                    ans = {}
+                tk = {'id': tid, 'user': uid, 'claimed': claimed or 0, 'answers': ans,
+                      'panel_id': pid or ''}
+                await _fermer_ticket(g, ch, tk, g.me, f"{jours} jours sans message", inactif_jours=jours)
+                fermes += 1
+                await asyncio.sleep(3)
+        except Exception as ex:
+            _logerr("ticket.inactifs", ex, guild_id=g.id)
+
+
+@tickets_inactifs_task.before_loop
+async def _tickets_inactifs_wait():
+    await bot.wait_until_ready()
 
 
 @bot.event

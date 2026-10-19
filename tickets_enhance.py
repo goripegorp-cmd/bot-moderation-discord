@@ -1018,12 +1018,8 @@ async def _try_close_channel(channel_id: int):
 
 @tasks.loop(hours=AUTO_CLOSE_CHECK_HOURS)
 async def auto_close_inactive_task():
-    """DÉSACTIVÉ (directive owner) : le bot ne ferme JAMAIS un ticket pour inactivité.
-    Les tickets peuvent rester ouverts aussi longtemps que nécessaire — c'est VOULU.
-    Boucle conservée en no-op (références boot/historique préservées, zéro risque de
-    NameError) ; elle n'est même plus lancée au boot. Le SEUL rappel automatique sur
-    les tickets = `sla_reminder_task` (ping staff sur un ticket NON PRIS EN CHARGE).
-    La fermeture reste 100 % MANUELLE (bouton 🔒 par le staff)."""
+    """No-op, jamais lancée : depuis le 19/10/2026 la fermeture après N jours sans message
+    est `tickets_inactifs_task` (bot.py), qui passe par la même fermeture que le bouton 🔒."""
     return
 
 
