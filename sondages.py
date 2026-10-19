@@ -468,14 +468,16 @@ def demarrer(bot) -> None:
         cloture_task.start()
 
 
-async def lister(guild_id: int, limite: int = 60) -> dict:
-    """Pour le site : les sondages, du plus récent au plus ancien, et quelques chiffres."""
+async def lister(guild_id: int, limite: int = 60, auteur_id: int = 0) -> dict:
+    """Pour le site : les sondages (d'un membre, si demandé), du plus récent au plus ancien, et quelques
+    chiffres."""
     maintenant = _maintenant().strftime(_FORMAT)
+    filtre, args = ("AND auteur_id=? ", (int(auteur_id),)) if auteur_id else ("", ())
+    requete = ("SELECT id, channel_id, message_id, auteur_id, question, choix, comptes, total, multiple, cree_le,"
+               " fin_le, termine, retire_le, retire_par FROM sondages WHERE guild_id=? " + filtre
+               + "ORDER BY cree_le DESC LIMIT ?")
     async with _get_db() as db:
-        async with db.execute(
-                "SELECT id, channel_id, message_id, auteur_id, question, choix, comptes, total, multiple, cree_le,"
-                " fin_le, termine, retire_le, retire_par FROM sondages WHERE guild_id=? ORDER BY cree_le DESC LIMIT ?",
-                (guild_id, limite)) as cur:
+        async with db.execute(requete, (guild_id, *args, limite)) as cur:
             lignes = await cur.fetchall()
         async with db.execute("SELECT COUNT(*), COALESCE(SUM(total), 0) FROM sondages WHERE guild_id=? AND cree_le>?",
                               (guild_id, (_maintenant() - timedelta(days=30)).strftime(_FORMAT))) as cur:

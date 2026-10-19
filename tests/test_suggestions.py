@@ -1,6 +1,7 @@
 """19/10/2026 : « on mettra que les nouvelles suggestions, de vraies suggestions » ; « un rôle
 ping, personne n'est ping au début » ; « logs suggestions… qui a créé la suggestion… au
-propre, un vrai suivi »."""
+propre, un vrai suivi » ; puis « l'affichage dans suggestion, il est moche… que tous les salons
+soient beaux » et « ils ne peuvent que cocher la suggestion, ni messages ni réactions »."""
 from __future__ import annotations
 
 import asyncio
@@ -47,7 +48,11 @@ def run(coro):
 
 
 def _textes(vue):
-    return " ".join(c.get("content", "") for c in vue.to_components()[0]["components"])
+    def tout(c):
+        yield c.get("content", "")
+        for x in c.get("components", []) or []:
+            yield from tout(x)
+    return " ".join(t for t in tout(vue.to_components()[0]) if t)
 
 
 def _ids(vue):
@@ -55,16 +60,17 @@ def _ids(vue):
             for b in r["components"]]
 
 
-def test_G1_une_idee_devient_une_fiche_avec_son_fil_et_sa_trace(env):
+def test_G1_une_idee_devient_une_carte_propre_et_sa_trace(env):
     i = interaction(env.g, Membre())
     run(G.publier(i, "Un salon musique", "Pour partager des sons."))
     vue = env.salon.envois[0][1]["view"]
     texte = _textes(vue)
-    assert "<@&" in texte and "### Un salon musique" in texte and "Pour partager des sons." in texte
-    assert "Idée n°1 de <@7> · 🟡 En attente" in texte
+    assert "### Un salon musique" in texte and "Pour partager des sons." in texte
+    assert "🟡 En attente · idée n°1 · proposée par <@7>" in texte and "Pas encore de vote" in texte
+    assert "-# <@&" in texte, "le rôle prévenu en bas, discrètement"
+    assert "▰" not in texte and "▱" not in texte, "plus de barre en caractères"
     assert _ids(vue) == ["sug:p:1", "sug:c:1", "sug:g:1"]
-    fil = next(iter(env.salon.fils.values()))
-    assert fil.name == "Idée n°1 · Un salon musique"
+    assert not env.salon.fils, "plus de fil : on ne discute pas dans le salon"
     assert i.suivis[0].startswith("Idée publiée")
 
 
@@ -79,10 +85,18 @@ def test_G2_un_vote_par_membre_modifiable(env):
     s, pour, contre = asyncio.run(scenario())
     assert (pour, contre) == (2, 0), "12 change d'avis, 11 retire son vote"
     carte = env.salon.edites[-1][1]["view"]
-    assert "Pour **2** · Contre **0**" in _textes(carte)
+    assert "100 % d'accord · 2 votes" in _textes(carte)
+    libelles = [b.get("label") for r in carte.to_components()[0]["components"] if r.get("type") == 1 for b in r["components"]]
+    assert libelles[:2] == ["Pour · 2", "Contre · 0"]
 
 
 def test_G3_le_staff_tranche_l_auteur_est_prevenu_les_logs_suivent(env):
+    auteur, recus = Membre(), []
+
+    async def send(view=None, **kw):
+        recus.append(view)
+    auteur.send = send
+    env.g.get_member = {7: auteur}.get
     run(G.publier(interaction(env.g, Membre()), "Idée", "Détails"))
     assert "Idée n°1 · 🟡 En attente" in _textes(env.logs.envois[0][1]["view"])
     refus = interaction(env.g, Membre(8))
@@ -93,8 +107,9 @@ def test_G3_le_staff_tranche_l_auteur_est_prevenu_les_logs_suivent(env):
     carte = env.salon.edites[-1][1]["view"]
     assert "🟢 Acceptée" in _textes(carte) and "Prévu pour samedi." in _textes(carte)
     assert _ids(carte) == ["sug:g:1"], "votes clos après la décision"
-    fil = next(iter(env.salon.fils.values()))
-    assert fil.envois[-1].startswith("<@7> Ton idée est maintenant **Acceptée**")
+    assert "Réponse du staff · Acceptée" in _textes(carte) and "Votes clos" in _textes(carte)
+    prive = _textes(recus[-1])
+    assert "Ton idée a une réponse" in prive and "🟢 **Acceptée**" in prive and "Prévu pour samedi." in prive
     journal = _textes(env.logs.edites[-1][1]["view"])
     assert "Idée n°1 · 🟢 Acceptée" in journal and "Décision : <@9>" in journal and "`7`" in journal
 
@@ -116,15 +131,16 @@ def test_G4_limites_et_filtres(env):
     assert "Mot interdit." in _textes(refus[4][0][1]["view"])
 
 
-def test_G5_salon_cree_une_fois_discussion_dans_les_fils(tmp_path):
+def test_G5_salon_cree_une_fois_sans_messages(tmp_path):
     get_db, cfg, db_set, conf = base(tmp_path)
     G.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=None, controle=None,
             salon_logs=None, log=lambda *a: None)
+    asyncio.run(G.init_db())
     g = Guilde()
     asyncio.run(G.installer(g))
     nom, kw = g.crees[0]
     tous = kw["overwrites"][g.default_role]
-    assert nom == "💡suggestions" and tous.send_messages is False and tous.send_messages_in_threads is True
+    assert nom == "💡suggestions" and tous.send_messages is False and tous.send_messages_in_threads is False
     salon = g.salons[conf["suggestions_salon"]]
 
     class Msg:
@@ -138,3 +154,16 @@ def test_G5_salon_cree_une_fois_discussion_dans_les_fils(tmp_path):
     asyncio.run(G.sur_message(dans_salon))
     asyncio.run(G.sur_message(dans_fil))
     assert dans_salon.supprime and not dans_fil.supprime
+
+
+def test_G6_les_anciennes_cartes_sont_refaites_une_fois(env):
+    for k in range(2):
+        run(G.publier(interaction(env.g, Membre(30 + k)), f"Idée {k}", ""))
+    env.conf.pop("suggestions_v3", None)
+    avant = len(env.salon.edites)
+    run(G.installer(env.g))
+    refaites = env.salon.edites[avant:]
+    assert len(refaites) == 2 and env.conf["suggestions_v3"] == 1
+    assert all("Pas encore de vote" in _textes(kw["view"]) for _mid, kw in refaites)
+    run(G.installer(env.g))
+    assert len(env.salon.edites) == avant + 2, "une seule fois"

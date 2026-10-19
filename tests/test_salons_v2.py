@@ -121,3 +121,47 @@ def test_V6_branchements():
     assert "'anti_invite', 1" in fn and "required_role=clan_role.id" in fn and "config_salons_historique" in fn
     aide = next(ast.unparse(n) for n in ARBRE.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_vue_aide")
     assert "url=salon.jump_url" in aide and "if salon is not None" in aide, "chaque ligne mène à un vrai salon"
+
+
+def test_V7_automod_bloque_les_invitations_avant_l_envoi():
+    import asyncio
+    from datetime import datetime, timezone
+    fn = next(ast.unparse(n) for n in ARBRE.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_automod_invitations")
+    crees, conf, journal = [], {}, []
+    staff = Obj(id=10)
+
+    async def cfg(_g):
+        return conf
+
+    async def db_set(_g, k, v):
+        conf[k] = v
+
+    async def noter(*a, **k):
+        journal.append(a)
+
+    def monde(regles=(), refuse_regex=False, gerer=True):
+        async def fetch():
+            return list(regles)
+
+        async def creer(**kw):
+            if refuse_regex and kw["trigger"].regex_patterns:
+                raise discord.HTTPException(Obj(status=400, reason="x"), "regex")
+            crees.append(kw)
+        return Obj(id=1, me=Obj(guild_permissions=Obj(manage_guild=gerer)), fetch_automod_rules=fetch, create_automod_rule=creer)
+    ns = {"cfg": cfg, "db_set": db_set, "discord": discord, "_au_journal": noter, "_logerr": lambda *a, **k: None,
+          "now": lambda: datetime.now(timezone.utc), "_roles_staff_et_plus": lambda g, c: [staff]}
+    for nom in ("INVITATIONS_MOTS", "INVITATIONS_REGEX"):
+        exec(next(ast.unparse(n) for n in ARBRE.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", None) == nom), ns)  # noqa: S102
+    exec(fn, ns)  # noqa: S102 — code du dépôt
+    assert asyncio.run(ns["_automod_invitations"](monde(gerer=False))) is False and not conf, "sans droit : réessai plus tard"
+    assert asyncio.run(ns["_automod_invitations"](monde())) is True
+    regle = crees[0]
+    assert regle["enabled"] and "discord.gg/*" in regle["trigger"].keyword_filter and regle["trigger"].regex_patterns
+    assert regle["exempt_roles"] == [staff], "le staff et au-dessus restent libres, comme pour le bot"
+    assert asyncio.run(ns["_automod_invitations"](monde())) is False and len(crees) == 1, "une seule fois"
+    conf.clear()
+    asyncio.run(ns["_automod_invitations"](monde(refuse_regex=True)))
+    assert not crees[-1]["trigger"].regex_patterns, "motif refusé : la règle part sur les mots seuls"
+    conf.clear()
+    existante = Obj(trigger=Obj(keyword_filter=["discord.gg/*"], regex_patterns=[]))
+    assert asyncio.run(ns["_automod_invitations"](monde(regles=[existante]))) is False and len(crees) == 2, "déjà en place"

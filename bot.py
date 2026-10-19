@@ -12513,6 +12513,52 @@ async def _configurer_salons_v2(g) -> None:
         _logerr("salons.v2", ex, guild_id=getattr(g, 'id', 0))
 
 
+INVITATIONS_MOTS = ["discord.gg/*", "discord.com/invite/*", "discordapp.com/invite/*", "dsc.gg/*"]
+INVITATIONS_REGEX = [r"(discord\.gg|discord(app)?\.com/invite|dsc\.gg)/[a-z0-9-]+"]
+
+
+async def _automod_invitations(g) -> bool:
+    """« Les invitations Discord sont interdites… partout » : en plus du bot (qui retire après coup),
+    une règle AutoMod de Discord les bloque AVANT l'envoi, même si le bot est éteint. Une fois par
+    serveur ; une règle d'invitations déjà en place est gardée. Le staff et au-dessus restent libres,
+    comme pour le bot. Sans « Gérer le serveur », rien n'est posé et on réessaie au démarrage suivant."""
+    try:
+        c = await cfg(g.id)
+        if c.get('automod_invitations_v1'):
+            return False
+        me = g.me
+        if not (me and me.guild_permissions.manage_guild):
+            print("[AUTOMOD] invitations : il me manque « Gérer le serveur »")
+            return False
+        regles = await g.fetch_automod_rules()
+        deja = any("discord.gg" in " ".join(getattr(r.trigger, "keyword_filter", None) or [])
+                   + " ".join(getattr(r.trigger, "regex_patterns", None) or []) for r in regles)
+        if not deja:
+            exempts = _roles_staff_et_plus(g, c)[:20]
+            action = discord.AutoModRuleAction(custom_message="Les invitations vers d'autres serveurs sont interdites ici.")
+            for regex in (INVITATIONS_REGEX, None):
+                try:
+                    await g.create_automod_rule(
+                        name="🛡️ Invitations interdites", event_type=discord.AutoModRuleEventType.message_send,
+                        trigger=discord.AutoModTrigger(type=discord.AutoModRuleTriggerType.keyword,
+                                                       keyword_filter=INVITATIONS_MOTS, regex_patterns=regex),
+                        actions=[action], enabled=True, exempt_roles=exempts,
+                        reason="Invitations interdites partout (fondateur, 19/10)")
+                    break
+                except discord.HTTPException as ex:
+                    if regex is None or ex.status != 400:
+                        raise
+                    print("[AUTOMOD] motif refusé par Discord, règle posée sur les mots seuls")
+        await db_set(g.id, 'automod_invitations_v1', now().isoformat())
+        await _au_journal(g, "Config", "automod.invitations",
+                          "Règle AutoMod des invitations déjà en place." if deja else
+                          "Invitations bloquées par Discord avant l'envoi, même bot éteint (règle AutoMod).")
+        return not deja
+    except discord.HTTPException as ex:
+        _logerr("automod.invitations", ex, guild_id=getattr(g, 'id', 0))
+        return False
+
+
 NOM_AIDE = "aide"
 AIDE_VERSION = 1
 
@@ -12750,7 +12796,9 @@ async def _etat_public():
             "logs_direction": any(c.get('logs_direction_v1') for c in confs),
             "sondages_discord": any(c.get('sondages_natifs_v2') for c in confs),
             "salons_v2": any(c.get('config_salons_v2') for c in confs),
-            "aide": any(c.get('aide_message') for c in confs)})
+            "aide": any(c.get('aide_message') for c in confs),
+            "automod_invitations": any(c.get('automod_invitations_v1') for c in confs),
+            "suggestions_v3": any(c.get('suggestions_v3') for c in confs)})
     except Exception as ex:
         _logerr("etat.public", ex)
 
@@ -12787,6 +12835,7 @@ async def _travaux_de_demarrage():
                 await _salon_tableau(g)
                 await _logs_direction_seule(g)
                 await _configurer_salons_v2(g)
+                await _automod_invitations(g)
                 await _salon_aide(g)
             except Exception as ex:
                 print(f"[demarrage travaux {getattr(g, 'id', '?')}] {ex}")

@@ -16,6 +16,7 @@ import aiosqlite
 import casier
 import clan
 import questions
+import sondages
 import recrutements
 import registre
 import rellseas_panneau
@@ -146,6 +147,7 @@ class Env:
                       autorise_membre=direction, direction=direction, alerte_securite=alerte, log=lambda *a: None)
         questions.setup(get_db=get_db, est_staff=ns["_staff_ou_plus"], log=lambda *a: None)
         clan.setup(get_db=get_db, log=lambda *a: None)
+        sondages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=None, controle=None, log=lambda *a: None)
         casier.setup(get_db=get_db, log=lambda *a: None)
 
         async def salon(_g):
@@ -160,6 +162,7 @@ class Env:
             await vigilance.init_db()
             await clan.init_db()
             await casier.init_db()
+            await sondages.init_db()
             async with get_db() as db:
                 await db.execute("CREATE TABLE tickets(id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER,"
                                  " user_id INTEGER, panel_id TEXT, claimed_by INTEGER, status TEXT, answers TEXT,"
@@ -500,6 +503,27 @@ def test_T14_la_tete_n_est_jamais_suspendue(tmp_path):
     reps = asyncio.run(scenario())
     assert [r.status for r in reps] == [200] * 8 and len(faits) == 8, "jamais suspendu"
     assert env.alertes == [(3, "6 actions graves (exclusion) en moins de 10 minutes", False)], "signalé une fois, pas suspendu"
+
+
+def test_T15_la_fiche_montre_les_sondages_du_membre(tmp_path):
+    """« Ajouter un onglet Sondages dans la fiche de chaque membre. »"""
+    env = Env(tmp_path)
+    salon = Obj(id=50, name="📊sondages")
+    env.g.get_channel = lambda cid: salon if cid == 50 else None
+
+    async def scenario():
+        async with env.get_db() as db:
+            await db.executemany(
+                "INSERT INTO sondages(message_id, guild_id, channel_id, auteur_id, question, choix, comptes, total, cree_le,"
+                " fin_le) VALUES (?,1,50,?,?,'[\"Oui\", \"Non\"]','[3, 1]',4,'2026-10-19 10:00:00','2026-10-20 10:00:00')",
+                [(901, 7, "On fait un event ?"), (902, 8, "Autre membre ?")])
+            await db.commit()
+        return await tableau.fiche(env.g, 7, env.membres[3])
+    f = asyncio.run(scenario())
+    assert [x["question"] for x in f["sondages"]] == ["On fait un event ?"], "seulement les siens"
+    assert f["sondages"][0]["salon"] == "#📊sondages" and f["sondages"][0]["comptes"] == [3, 1]
+    page = tableau.PAGE
+    assert '["sondages", "Sondages"]' in page and "function entreeSondage" in page
 
 
 def test_T12_export_propre_et_reserve(tmp_path):

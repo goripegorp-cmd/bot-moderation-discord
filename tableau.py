@@ -812,9 +812,19 @@ async def fiche(g, uid: int, auteur) -> dict:
     journal = await _journal(g, qui, int(uid), 300)
     qs = [_question(g, q, qui) for q in await questions.du_membre(g.id, int(uid))]
     alerte = next((a for a in await _alertes(g, qui) if a["id"] == str(int(uid))), None)
+    try:
+        ses_sondages = (await sondages.lister(g.id, 30, int(uid)))["liste"]
+        for x in ses_sondages:
+            ch = g.get_channel(int(x["salon_id"])) or g.get_thread(int(x["salon_id"]))
+            x["salon"] = f"#{ch.name}" if ch is not None else "#salon supprimé"
+    except Exception as ex:  # sans ses sondages, la fiche reste lisible ; le détail part au journal
+        _log("[TABLEAU][E9] sondages du membre illisibles")
+        _log(f"[TABLEAU][E9:DETAIL] {type(ex).__name__} {ex}")
+        ses_sondages = []
     return {"membre": dict(qui[str(int(uid))], **infos), "agir": agir and not protege, "sanctions": sanctions,
             "donnees": donnees_par_lui, "tickets": tickets, "candidatures": candidatures,
-            "journal": journal["evenements"], "questions": qs, "alerte": alerte, "personnes": qui}
+            "journal": journal["evenements"], "questions": qs, "sondages": ses_sondages, "alerte": alerte,
+            "personnes": qui}
 
 
 # ─── L'export : un fichier propre, à garder ou à m'envoyer ──────────────────

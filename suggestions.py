@@ -1,10 +1,12 @@
 """suggestions.py — de vraies suggestions (19/10/2026).
 
 Un salon « 💡suggestions » créé une fois par le bot, puis à son propriétaire. Le panneau du
-bas ouvre un formulaire (titre, détails). Chaque idée devient une fiche : vote Pour/Contre
-(un par membre, modifiable), un fil pour en discuter, et le staff qui tranche — à l'étude,
-acceptée, refusée, réalisée — avec sa réponse, annoncée à l'auteur dans le fil.
-Chaque idée a sa fiche dans « 💡logs-suggestions », tenue à jour jusqu'à la décision.
+bas ouvre un formulaire (titre, détails). Chaque idée devient une carte : l'avatar de l'auteur,
+son statut, le vote Pour/Contre (un par membre, modifiable) en pourcentage, et la réponse du
+staff qui tranche — à l'étude, acceptée, refusée, réalisée — envoyée aussi à l'auteur en privé.
+19/10 (soir) : « l'affichage dans suggestion, il est moche… que tous les salons soient beaux » ;
+et dans le salon, « ils ne peuvent que cocher la suggestion, ni messages ni réactions » : plus
+de fil de discussion, plus de barre en caractères ; les anciennes cartes sont refaites une fois.
 Rôle « 🔔 Suggestions » pris d'un clic ; personne n'est prévenu au départ.
 """
 from __future__ import annotations
@@ -81,11 +83,6 @@ def est_staff(membre) -> bool:
     return bool(p and (p.administrator or p.manage_messages))
 
 
-def barre(part: float, largeur: int = 16) -> str:
-    plein = round(max(0.0, min(1.0, part)) * largeur)
-    return "▰" * plein + "▱" * (largeur - plein)
-
-
 def verifier(titre: str, details: str) -> str:
     if not (titre or "").strip():
         return "Donne un titre à ton idée."
@@ -115,8 +112,9 @@ def vue_panneau(ouvert: bool = True) -> LayoutView:
     proposer.item.emoji = visuels.icone("idee")
     v.add_item(discord.ui.Container(
         visuels.bandeau("suggestions", "Suggestions"),
-        discord.ui.TextDisplay("Une idée pour le serveur ? Propose-la, la communauté vote."
+        discord.ui.TextDisplay("Une idée pour le serveur ? Propose-la : tout le monde vote, le staff répond."
                                if ouvert else "Les suggestions sont fermées pour le moment."),
+        discord.ui.TextDisplay(f"-# {PAR_JOUR} idées par jour · un vote par personne, modifiable à tout moment"),
         discord.ui.ActionRow(proposer,
                              notifs.BoutonNotif("suggestions", emoji=visuels.icone("cloche"))),
         accent_color=Palette.WARNING))
@@ -164,14 +162,14 @@ async def assurer_panneau(g) -> None:
 
 
 async def creer_salon(g):
-    """Les membres n'écrivent pas dans le salon, mais discutent dans le fil de chaque idée."""
+    """Les membres n'écrivent pas dans le salon : ils proposent avec le bouton et votent."""
     me = g.me
     salon = await g.create_text_channel(
         NOM_SALON, reason="Suggestions : salon dédié",
         topic="Les idées de la communauté — bouton tout en bas.",
         overwrites={
             g.default_role: discord.PermissionOverwrite(
-                send_messages=False, add_reactions=False, send_messages_in_threads=True,
+                send_messages=False, add_reactions=False, send_messages_in_threads=False,
                 create_public_threads=False, create_private_threads=False),
             me: discord.PermissionOverwrite(
                 view_channel=True, send_messages=True, manage_messages=True,
@@ -192,9 +190,38 @@ async def installer(g) -> None:
             if me and me.guild_permissions.manage_channels and not c.get("suggestions_salon"):
                 await creer_salon(g)
             await _db_set(g.id, "suggestions_installees", 1)
+        if not c.get("suggestions_v3"):
+            await moderniser(g)
         await assurer_panneau(g)
     except discord.HTTPException as ex:
         _log(f"[SUGGESTIONS] installation : {type(ex).__name__} {ex}")
+
+
+async def moderniser(g) -> int:
+    """Une fois : les cartes déjà publiées prennent la nouvelle présentation, le panneau aussi."""
+    salon = await salon_de(g)
+    await _db_set(g.id, "suggestions_v3", 1)
+    if salon is None:
+        return 0
+    async with _get_db() as db:
+        async with db.execute("SELECT id FROM suggestions_v2 WHERE guild_id=? AND channel_id=? AND message_id IS NOT NULL"
+                              " ORDER BY id DESC LIMIT 100", (g.id, salon.id)) as cur:
+            ids = [r[0] for r in await cur.fetchall()]
+    faits = 0
+    for sid in ids:
+        s, pour, contre = await charger(sid)
+        try:
+            await salon.get_partial_message(s["message_id"]).edit(
+                view=vue_carte(s, pour, contre, avatar=_avatar(g, s["auteur_id"])))
+            faits += 1
+        except discord.NotFound:
+            pass
+        except discord.HTTPException as ex:
+            _log(f"[SUGGESTIONS] carte {sid} : {ex}")
+        await asyncio.sleep(1)
+    await reposer_panneau(g, salon)
+    _log(f"[SUGGESTIONS] {faits} carte(s) refaite(s) : {g.id}")
+    return faits
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -222,20 +249,32 @@ async def charger(sid: int):
 #  La fiche publique
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def vue_carte(s: dict, pour: int, contre: int, *, ping: str = "") -> LayoutView:
-    libelle, pastille, couleur = STATUTS.get(s["statut"], STATUTS["attente"])
+def _avatar(g, uid) -> str:
+    chercher = getattr(g, "get_member", None)
+    m = chercher(int(uid)) if chercher is not None and uid else None
+    image = getattr(m, "display_avatar", None)
+    return str(image.with_size(128).url) if image is not None else ""
+
+
+def resume_votes(pour: int, contre: int, clos: bool = False) -> str:
     total = pour + contre
-    v = LayoutView(timeout=None)
-    tete = f"{ping}\n" if ping else ""
-    items = [discord.ui.TextDisplay(f"{tete}### {s['titre']}\n-# Idée n°{s['id']} de "
-                                    f"<@{s['auteur_id']}> · {pastille} {libelle}")]
-    if s["details"]:
-        items.append(discord.ui.TextDisplay(s["details"]))
-    items += [discord.ui.Separator(),
-              discord.ui.TextDisplay(f"`{barre(pour / total if total else 0.5)}`\n"
-                                     f"Pour **{pour}** · Contre **{contre}**")]
+    if not total:
+        return "-# Votes clos · aucun vote" if clos else "-# Pas encore de vote · sois le premier"
+    accord = round(100 * pour / total)
+    return (f"-# {'Votes clos · ' if clos else ''}{accord} % d'accord · {total} vote{'s' if total > 1 else ''}")
+
+
+def vue_carte(s: dict, pour: int, contre: int, *, ping: str = "", avatar: str = "") -> LayoutView:
+    """Une idée : l'avatar de l'auteur, le titre, le statut, les détails, les votes en pourcentage,
+    la réponse du staff mise en avant. Pas de barre en caractères, pas de fil."""
+    libelle, pastille, couleur = STATUTS.get(s["statut"], STATUTS["attente"])
+    tete = (f"### {s['titre']}\n-# {pastille} {libelle} · idée n°{s['id']} · proposée par <@{s['auteur_id']}>"
+            + (f"\n{s['details'][:800]}" if s["details"] else ""))
+    items = [discord.ui.Section(discord.ui.TextDisplay(tete), accessory=discord.ui.Thumbnail(avatar))
+             if avatar else discord.ui.TextDisplay(tete)]
     if s["note"]:
-        items.append(discord.ui.TextDisplay(f"**Réponse du staff** — {s['note']}"))
+        items.append(discord.ui.TextDisplay(f"> **Réponse du staff · {libelle}**\n> " + s["note"].replace("\n", "\n> ")))
+    items += [discord.ui.Separator(visible=False), discord.ui.TextDisplay(resume_votes(pour, contre, s["statut"] in FINAUX))]
     boutons = []
     if s["statut"] not in FINAUX:
         p, c = BoutonPour(s["id"]), BoutonContre(s["id"])
@@ -246,6 +285,9 @@ def vue_carte(s: dict, pour: int, contre: int, *, ping: str = "") -> LayoutView:
     g.item.emoji = visuels.icone("reglages")
     boutons.append(g)
     items.append(discord.ui.ActionRow(*boutons))
+    if ping:
+        items.append(discord.ui.TextDisplay(f"-# {ping}"))
+    v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(*items, accent_color=couleur))
     return v
 
@@ -257,7 +299,8 @@ async def _rafraichir(salon, sid: int, attendre: float = 3):
     if s is None or not s["message_id"]:
         return
     try:
-        await salon.get_partial_message(s["message_id"]).edit(view=vue_carte(s, pour, contre))
+        await salon.get_partial_message(s["message_id"]).edit(
+            view=vue_carte(s, pour, contre, avatar=_avatar(getattr(salon, "guild", None), s["auteur_id"])))
     except discord.HTTPException as ex:
         _log(f"[SUGGESTIONS] rafraîchir : {ex}")
 
@@ -348,7 +391,7 @@ async def publier(i, titre, details):
         await db.commit()
     s, _, _ = await charger(sid)
     try:
-        msg = await salon.send(view=vue_carte(s, 0, 0, ping=notifs.ping(role)),
+        msg = await salon.send(view=vue_carte(s, 0, 0, ping=notifs.ping(role), avatar=_avatar(g, m.id)),
                                allowed_mentions=notifs.mentions(role))
     except discord.HTTPException as ex:
         _log(f"[SUGGESTIONS] envoi : {type(ex).__name__} {ex}")
@@ -356,14 +399,8 @@ async def publier(i, titre, details):
             await db.execute("DELETE FROM suggestions_v2 WHERE id=?", (sid,))
             await db.commit()
         return await i.followup.send("Impossible de publier ton idée pour le moment.", ephemeral=True)
-    fil = None
-    try:
-        fil = await msg.create_thread(name=f"Idée n°{sid} · {titre}"[:100], auto_archive_duration=10080)
-    except discord.HTTPException as ex:
-        _log(f"[SUGGESTIONS] fil : {ex}")
     async with _get_db() as db:
-        await db.execute("UPDATE suggestions_v2 SET message_id=?, thread_id=? WHERE id=?",
-                         (msg.id, getattr(fil, "id", None), sid))
+        await db.execute("UPDATE suggestions_v2 SET message_id=? WHERE id=?", (msg.id, sid))
         await db.commit()
     await i.followup.send(f"Idée publiée : {msg.jump_url}", ephemeral=True)
     asyncio.create_task(reposer_panneau(g, salon))
@@ -490,23 +527,33 @@ async def decider(i, sid: int, statut: str, note: str):
     salon = g.get_channel(s["channel_id"]) if g else None
     if salon is not None:
         await _rafraichir(salon, sid, attendre=0)
-        fil = g.get_thread(s["thread_id"]) if s["thread_id"] else None
-        if fil is None and s["thread_id"]:
-            try:
-                fil = await g.fetch_channel(s["thread_id"])
-            except discord.HTTPException:
-                fil = None
-        if fil is not None:
-            libelle, pastille, _ = STATUTS[statut]
-            texte = f"<@{s['auteur_id']}> Ton idée est maintenant **{libelle}** {pastille}"
-            if note:
-                texte += f"\n> {note}"
-            try:
-                await fil.send(texte, allowed_mentions=discord.AllowedMentions(users=True))
-            except discord.HTTPException as ex:
-                _log(f"[SUGGESTIONS] fil : {ex}")
+    await prevenir_auteur(g, s, statut, note)
     await journaliser(g, sid)
     await i.followup.send(f"Idée n°{sid} : {STATUTS[statut][0]}.", ephemeral=True)
+
+
+async def prevenir_auteur(g, s: dict, statut: str, note: str) -> bool:
+    """La réponse du staff arrive à l'auteur en privé, avec un lien vers son idée."""
+    chercher = getattr(g, "get_member", None)
+    m = chercher(int(s["auteur_id"])) if chercher is not None else None
+    if m is None:
+        return False
+    libelle, pastille, couleur = STATUTS[statut]
+    texte = f"### Ton idée a une réponse\n**{s['titre']}** est maintenant {pastille} **{libelle}**."
+    if note:
+        texte += "\n> " + note.replace("\n", "\n> ")
+    items = [discord.ui.TextDisplay(texte)]
+    if s.get("message_id"):
+        items.append(discord.ui.ActionRow(Button(
+            label="Voir mon idée", url=f"https://discord.com/channels/{g.id}/{s['channel_id']}/{s['message_id']}")))
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(*items, accent_color=couleur))
+    try:
+        await m.send(view=v)
+        return True
+    except discord.HTTPException as ex:
+        _log(f"[SUGGESTIONS] message privé : {type(ex).__name__}")
+        return False
 
 
 class BoutonGerer(discord.ui.DynamicItem[Button], template=r"sug:g:(?P<sid>\d+)"):
@@ -609,8 +656,7 @@ async def sur_message(msg: discord.Message) -> None:
         cle = (g.id, msg.author.id)
         if time.monotonic() - _rappels.get(cle, -1e9) > 600:
             _rappels[cle] = time.monotonic()
-            await salon.send(f"{msg.author.mention} Propose ton idée avec le bouton en bas ; "
-                             "on en discute dans son fil.", delete_after=10,
+            await salon.send(f"{msg.author.mention} Ici, on propose son idée avec le bouton en bas.", delete_after=10,
                              allowed_mentions=discord.AllowedMentions(users=True))
     except Exception as ex:
         _log(f"[SUGGESTIONS] message : {type(ex).__name__} {ex}")
