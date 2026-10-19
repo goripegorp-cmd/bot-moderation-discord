@@ -103,9 +103,12 @@ def test_T1_le_transcript_porte_le_nom_et_se_retrouve_par_membre(tmp_path):
     async def defer(**kw):
         return None
 
+    async def _oui(_i):
+        return True
+
     sans_effet = Obj(command=lambda **k: (lambda f: f), describe=lambda **k: (lambda f: f))
     ns2 = {"get_db": get_db, "discord": discord, "datetime": datetime,
-           "_tix_is_staff": lambda u: True, "ticket_group": sans_effet,
+           "_tix_direction": _oui, "ticket_group": sans_effet,
            "app_commands": sans_effet}
     exec(_source("ticket_transcripts_cmd"), ns2)  # noqa: S102 — code du dépôt
     inter = Obj(user=Obj(), guild=Obj(id=1), response=Obj(defer=defer, send_message=suivre),

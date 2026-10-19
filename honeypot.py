@@ -126,9 +126,11 @@ async def apply_honeypot_perms(
             )
         except Exception:
             pass
-        # Tous les rôles deny
-        for role in guild.roles:
-            if role == guild.default_role:
+        # Seuls les rôles qui VOIENT ce salon par une exception du salon sont à refermer : le refus de
+        # @everyone ci-dessus suffit pour tous les autres (20/10/2026 : un appel par rôle du serveur,
+        # 0,5 s chacun — l'interaction de /configure expirait au-delà de 6 rôles).
+        for role, ow in list(channel.overwrites.items()):
+            if not isinstance(role, discord.Role) or role == guild.default_role or not ow.view_channel:
                 continue
             try:
                 await channel.set_permissions(

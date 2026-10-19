@@ -52,3 +52,15 @@ def test_D2_deux_fermetures_simultanees_une_seule_passe():
         return r, await ns["_fermer_ticket"](None, ch, {}, None, "encore")
     (a, b), c = asyncio.run(scenario())
     assert fermes == ["Résolu"] and (a, b, c) == (True, False, False)
+
+
+def test_D3_les_commandes_ticket_ne_suffisent_plus_de_gerer_les_messages():
+    """Audit 1 #21/#23 : « Gerer les messages » ouvrait tous les transcripts et le reglage de la
+    fermeture automatique ; /ticket priority renommait avant de repondre."""
+    src = ast.unparse(ARBRE)
+    assert "manage_messages" not in _source("_tix_staff") and "_tix_is_staff" not in src
+    assert "_tix_direction(i)" in _source("ticket_transcripts_cmd")
+    assert "_tix_staff(i)" in _source("ticket_templates_cmd")
+    assert "jours is not None and (not await _tix_direction(i))" in _source("ticket_auto_close_cmd")
+    corps = _source("ticket_priority_cmd")
+    assert corps.index("await i.response.defer()") < corps.index("update_channel_name_for_priority")

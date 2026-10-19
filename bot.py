@@ -1334,41 +1334,6 @@ async def set_strikes(gid, uid, count, last_at):
 # ── anniversaires ─────────────────────────────────────────────────────────────
 
 
-async def list_birthdays(gid):
-    """Retourne { str(user_id): 'MM-DD' } pour la guilde.
-
-    UNION table + REPLI blob : la table prime (valeur la plus récente), le blob
-    comble les entrées non encore migrées → aucune perte d'affichage/annonce.
-    """
-    out = {}
-    try:
-        gid = validate_id(gid)
-        if gid is None:
-            return out
-        # REPLI blob d'abord (sera écrasé par la table si doublon)
-        try:
-            data = await db_get(gid)
-            for uid_str, day in (data.get('birthdays', {}) or {}).items():
-                if day:
-                    out[str(uid_str)] = str(day)
-        except Exception:
-            pass
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT user_id, day FROM member_birthdays WHERE guild_id=?',
-                (gid,)
-            ) as c:
-                async for row in c:
-                    if row[1]:
-                        out[str(row[0])] = str(row[1])
-    except Exception as ex:
-        print(f"[list_birthdays] {ex}")
-    return out
-
-
-# ── creator links ─────────────────────────────────────────────────────────────
-
-
 async def set_creator_links(gid, uid, links_list):
     """UPSERT atomique de la liste de liens d'un créateur (écriture table-only).
 
@@ -6846,13 +6811,52 @@ def _carte_vigilance(g, membre_id, incidents, points, evenements):
     return v
 
 
+_BOTS_REFUSES: dict = {}  # {bot_id: instant} — expulsés par l'anti-bot-voyou, approuvables depuis l'alerte
+
+
 def _vue_alerte(membre_id: int = 0):
-    """Sous chaque alerte du salon des logs : la fiche sur le site, et « Géré »."""
+    """Sous chaque alerte du salon des logs : la fiche sur le site, et « Géré » — plus « Approuver ce
+    bot » sous l'alerte d'un bot que l'anti-bot-voyou vient d'arrêter."""
     v = discord.ui.View(timeout=None)
-    if membre_id:
+    if membre_id and int(membre_id) in _BOTS_REFUSES:
+        v.add_item(BoutonApprouverBot(int(membre_id)))
+    elif membre_id:
         v.add_item(BoutonFicheSite(int(membre_id)))
     v.add_item(BoutonGere(int(membre_id or 0)))
     return v
+
+
+class BoutonApprouverBot(discord.ui.DynamicItem[Button], template=r"alerte:botok:(?P<b>\d+)"):
+    """20/10/2026 : l'alerte disait « ajoute son ID à `approved_bots` (/configure) », réglage que rien
+    n'écrivait — un bot voulu ne pouvait jamais entrer. Réservé à la tête : un compte de staff volé ne
+    doit pas pouvoir faire entrer un bot de nuke."""
+
+    def __init__(self, bot_id: int):
+        self.bot_id = int(bot_id)
+        super().__init__(Button(label="Approuver ce bot", style=discord.ButtonStyle.primary,
+                                emoji=visuels.icone("valider"), custom_id=f"alerte:botok:{self.bot_id}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["b"]))
+
+    async def callback(self, i: discord.Interaction):
+        if not _a_la_tete(i.guild, i.user):
+            return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
+        await i.response.defer(ephemeral=True)
+        c = await cfg(i.guild.id)
+        approuves = [int(x) for x in (c.get('approved_bots') or []) if str(x).isdigit()]
+        if self.bot_id not in approuves and not await db_set(i.guild.id, 'approved_bots', approuves + [self.bot_id]):
+            return await i.followup.send("❌ L'approbation n'a pas pu être enregistrée. Réessaie.", ephemeral=True)
+        _BOTS_REFUSES.pop(self.bot_id, None)
+        await _au_journal(i.guild, "Sécurité", "bot.approuve", f"Bot {self.bot_id} approuvé par {i.user.display_name}",
+                          membre_id=self.bot_id, auteur_id=i.user.id)
+        try:
+            await i.message.edit(view=_vue_alerte(self.bot_id))
+        except discord.HTTPException as ex:
+            _logerr("alerte.bot_approuve", ex, guild_id=i.guild.id)
+        await i.followup.send("✅ Bot approuvé : il ne sera plus expulsé. S'il l'a été, ré-ajoute-le.",
+                              ephemeral=True)
 
 
 async def _alerte_securite_site(g, membre, raison: str, suspendu: bool = True):
@@ -11503,8 +11507,14 @@ _INSTANCE_DEMARRE = datetime.now(timezone.utc)
 SENTINELLE_FRAICHEUR_S = 180
 
 
+_SENTINELLE_PRETE = False
+
+
 async def _init_sentinelle():
-    """Crée la table des instances. Idempotent, jamais bloquant."""
+    """Crée la table des instances — une fois par démarrage (avant : toutes les 5 min). Jamais bloquant."""
+    global _SENTINELLE_PRETE
+    if _SENTINELLE_PRETE:
+        return
     try:
         async with get_db() as db:
             await db.execute(
@@ -11513,6 +11523,7 @@ async def _init_sentinelle():
                 " vu_le TEXT NOT NULL,"
                 " demarre_le TEXT NOT NULL)")
             await db.commit()
+        _SENTINELLE_PRETE = True
     except Exception as ex:
         print(f"[sentinelle] init impossible : {type(ex).__name__}: {ex}")
 
@@ -11565,8 +11576,6 @@ async def _enfiler_billets(guildes, rel: dict) -> dict:
     """
     res = {"deja": 0, "absorbes": 0, "enfiles": 0, "plafonnes": 0}
     for g in guildes:
-        c = await roblox_news_module.config(g.id)
-        salon = g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
         #  Même règle que les articles : les plus récents sont
         #  SÉLECTIONNÉS, mais ENVOYÉS du plus ancien au plus
         #  récent — un salon d'actualité se lit aussi de haut en
@@ -13138,7 +13147,7 @@ _SUPERVISED_LOOP_NAMES = [
     "check_social_feeds",
     "cleanup_old_db_data",
     "check_expired_roles", "cleanup_deals_task", "check_expired_restrictions",
-    "birthday_announcer", "temp_voice_watchdog",     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
+    "persistent_msg_cleaner", "temp_voice_watchdog",     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
     # que la date n'est pas configurée/atteinte.
     # Entraide : édite les posts des demandes expirées + supprime les vocaux temp
     # orphelins (vides) de la catégorie configurée. Fail-open, no-op si non configuré.
@@ -13653,6 +13662,15 @@ class SecurityChannelsPanelV2(LayoutView):
     async def _open_picker(
         self, i: discord.Interaction, cfg_key: str, label: str,
     ):
+        async def _salon_habite(ch) -> bool:
+            """Des membres ont-ils déjà écrit ici (50 derniers messages) ? Illisible : oui, par prudence."""
+            try:
+                async for m in ch.history(limit=50):
+                    if not m.author.bot and m.webhook_id is None:
+                        return True
+                return False
+            except discord.HTTPException:
+                return True
         """Ouvre un ChannelSelect pour définir le salon."""
         sel = discord.ui.ChannelSelect(
             channel_types=[discord.ChannelType.text],
@@ -13666,39 +13684,34 @@ class SecurityChannelsPanelV2(LayoutView):
                     "❌ Aucun salon choisi.", ephemeral=True
                 )
             picked = sel.values[0]
+            # Répondre d'abord : verrouiller le salon-piège pose des droits un par un (20/10/2026 :
+            # l'interaction expirait au-delà de 6 rôles).
+            await i_pick.response.defer(ephemeral=True)
             try:
-                await db_set(self.g.id, cfg_key, int(picked.id))
-                # Si honeypot → applique les perms restrictives
+                real_ch = self.g.get_channel(int(picked.id))
                 if cfg_key == "honeypot_channel_id":
-                    real_ch = self.g.get_channel(int(picked.id))
-                    if real_ch:
-                        result = await honeypot_module.apply_honeypot_perms(
-                            real_ch
-                        )
-                        extra = (
-                            f"\n🔒 Permissions verrouillées : "
-                            f"{'OK' if result['success'] else 'partiel'}"
-                            f" ({len(result.get('errors', []))} erreurs)"
-                        )
-                    else:
-                        extra = ""
-                else:
-                    extra = ""
-                await i_pick.response.send_message(
-                    f"✅ **{label}** défini : <#{picked.id}>{extra}",
-                    ephemeral=True,
-                )
+                    if real_ch is None:
+                        return await i_pick.followup.send("❌ Salon introuvable.", ephemeral=True)
+                    if await _salon_habite(real_ch):
+                        return await i_pick.followup.send(
+                            "❌ Des membres ont déjà écrit dans ce salon. Le salon-piège devient invisible "
+                            "pour tout le monde : crée un salon neuf et vide pour lui.", ephemeral=True)
+                if not await db_set(self.g.id, cfg_key, int(picked.id)):
+                    return await i_pick.followup.send("❌ Le salon n'a pas pu être enregistré.", ephemeral=True)
+                extra = ""
+                if cfg_key == "honeypot_channel_id":
+                    result = await honeypot_module.apply_honeypot_perms(real_ch)
+                    extra = (f"\n🔒 Salon verrouillé : {'OK' if result['success'] else 'partiel'}"
+                             f" ({len(result.get('errors', []))} erreur(s))")
+                await i_pick.followup.send(f"✅ **{label}** défini : <#{picked.id}>{extra}", ephemeral=True)
                 # Re-render le panel parent
-                new_v = SecurityChannelsPanelV2(self.u, self.g)
                 try:
-                    await i.edit_original_response(view=new_v)
-                except Exception:
-                    pass
+                    await i.edit_original_response(view=SecurityChannelsPanelV2(self.u, self.g))
+                except discord.HTTPException as ex:
+                    _logerr("salons_securite.rendu", ex, guild_id=self.g.id)
             except Exception as ex:
-                print(f"[secch _on_pick {cfg_key}] {ex}")
-                await i_pick.response.send_message(
-                    f"❌ Erreur : `{ex}`", ephemeral=True
-                )
+                _logerr("salons_securite.choix", ex, guild_id=self.g.id)
+                await i_pick.followup.send("❌ Le salon n'a pas pu être réglé.", ephemeral=True)
 
         sel.callback = _on_pick
         view = View(timeout=120)
@@ -14264,6 +14277,7 @@ class LogsExclusionsPanelV2(LayoutView):
         self.u = u
         self.g = g
         self.selected_event = selected_event  # ex: 'msg.delete'
+        self.selected_cat = None              # ex: 'Messages' (étape 1)
 
     async def interaction_check(self, i):
         return i.user.id == self.u.id
@@ -14278,23 +14292,19 @@ class LogsExclusionsPanelV2(LayoutView):
             v2_divider(),
         ]
 
-        if not self.selected_event:
-            # Étape 1 : choisir un event
-            opts = []
-            for ev, meta in list(ulogger2026.EVENT_META.items())[:25]:
-                excl_count = len(exclusions.get(ev.value, []) or [])
-                desc = f"{meta['cat']}"
-                if excl_count:
-                    desc += f" · {excl_count} rôle(s) épargné(s)"
-                opts.append(discord.SelectOption(
-                    label=f"{meta['label']}"[:80],
-                    value=ev.value,
-                    description=desc[:90],
-                    emoji=meta["icon"],
-                ))
-
-            sel = Select(placeholder="Choisis un type d'évènement…", options=opts)
-            sel.callback = self._cb_pick_event
+        if not self.selected_event and not self.selected_cat:
+            # Étape 1 : la catégorie. 50 évènements, un menu Discord en montre 25 : avant le
+            # 20/10/2026, seuls Modération et Sécurité étaient réglables.
+            cats: dict = {}
+            for ev, meta in ulogger2026.EVENT_META.items():
+                compte = cats.setdefault(meta['cat'], [0, 0])
+                compte[0] += 1
+                compte[1] += 1 if exclusions.get(ev.value) else 0
+            opts = [discord.SelectOption(label=cat[:80], value=cat[:100],
+                                         description=(f"{n} évènement(s)" + (f" · {k} avec rôles épargnés" if k else ""))[:90])
+                    for cat, (n, k) in sorted(cats.items())][:25]
+            sel = Select(placeholder="Choisis une catégorie…", options=opts)
+            sel.callback = self._cb_pick_cat
 
             # Résumé : combien d'events ont des exclusions
             with_excl = sum(1 for v in exclusions.values() if v)
@@ -14305,6 +14315,22 @@ class LogsExclusionsPanelV2(LayoutView):
             ))
             items.append(v2_divider())
             items.append(discord.ui.ActionRow(sel))
+        elif not self.selected_event:
+            # Étape 2 : un évènement de cette catégorie
+            opts = []
+            for ev, meta in ulogger2026.EVENT_META.items():
+                if meta['cat'] != self.selected_cat:
+                    continue
+                excl_count = len(exclusions.get(ev.value, []) or [])
+                opts.append(discord.SelectOption(
+                    label=f"{meta['label']}"[:80], value=ev.value, emoji=meta["icon"],
+                    description=(f"{excl_count} rôle(s) épargné(s)" if excl_count else "aucun rôle épargné")[:90]))
+            sel = Select(placeholder=f"{self.selected_cat} : choisis un évènement…", options=opts[:25])
+            sel.callback = self._cb_pick_event
+            b_cats = Button(emoji=visuels.icone("annuler"), label="Autre catégorie", style=discord.ButtonStyle.secondary)
+            b_cats.callback = self._cb_change_cat
+            items.append(discord.ui.ActionRow(sel))
+            items.append(discord.ui.ActionRow(b_cats))
         else:
             # Étape 2 : RoleSelect pour cet event
             meta = ulogger2026.EVENT_META.get(_resolve_event_type(self.selected_event), {})
@@ -14341,13 +14367,17 @@ class LogsExclusionsPanelV2(LayoutView):
 
         await _afficher_panneau(self, interaction, edit)
 
+    async def _cb_pick_cat(self, i):
+        self.selected_cat = i.data['values'][0]
+        await self.render_to(i, edit=True)
+
+    async def _cb_change_cat(self, i):
+        self.selected_cat = None
+        await self.render_to(i, edit=True)
+
     async def _cb_pick_event(self, i):
-        try:
-            ev_value = i.data['values'][0]
-            self.selected_event = ev_value
-            await self.render_to(i, edit=True)
-        except Exception as ex:
-            print(f"[LogsExclusionsPanelV2 _cb_pick_event] {ex}")
+        self.selected_event = i.data['values'][0]
+        await self.render_to(i, edit=True)
 
     async def _cb_pick_roles(self, i):
         try:
@@ -14355,12 +14385,14 @@ class LogsExclusionsPanelV2(LayoutView):
             exclusions = await ulogger2026.get_role_exclusions(self.g.id)
             exclusions[self.selected_event] = role_ids
             await ulogger2026.set_role_exclusions(self.g.id, exclusions)
-            await self.render_to(i, edit=True)
         except Exception as ex:
-            print(f"[LogsExclusionsPanelV2 _cb_pick_roles] {ex}")
+            _logerr("logs.exclusions", ex, guild_id=self.g.id)
+            return await i.response.send_message("❌ Les rôles épargnés n'ont pas pu être enregistrés.",
+                                                 ephemeral=True)
+        await self.render_to(i, edit=True)
 
     async def _cb_change_event(self, i):
-        self.selected_event = None
+        self.selected_event = None  # retour aux évènements de la même catégorie
         await self.render_to(i, edit=True)
 
     async def _cb_back(self, i):
@@ -15815,9 +15847,9 @@ class AltScanResultsPanelV2(LayoutView):
         b_page = Button(label=f"Page {self.page + 1}/{max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="asrv2_page")
         b_next = Button(emoji=visuels.icone("activer", '▶️'), style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="asrv2_next")
         b_next.callback = self._cb_next
-        b_kick70 = Button(emoji=visuels.icone("expulser"), label="Kick tous (>=70%)", style=discord.ButtonStyle.danger, disabled=(high_conf == 0), custom_id="asrv2_kick70")
+        b_kick70 = Button(emoji=visuels.icone("expulser"), label="Isoler ≥ 70 %", style=discord.ButtonStyle.danger, disabled=(high_conf == 0), custom_id="asrv2_kick70")
         b_kick70.callback = self._cb_kick70
-        b_ban80 = Button(emoji=visuels.icone("interdit"), label="Ban tous (>=80%)", style=discord.ButtonStyle.danger, disabled=(very_high == 0), custom_id="asrv2_ban80")
+        b_ban80 = Button(emoji=visuels.icone("interdit"), label="Isoler ≥ 80 %", style=discord.ButtonStyle.danger, disabled=(very_high == 0), custom_id="asrv2_ban80")
         b_ban80.callback = self._cb_ban80
         b_back = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary, custom_id="asrv2_back")
         b_back.callback = self._cb_back
@@ -15857,83 +15889,84 @@ class AltScanResultsPanelV2(LayoutView):
         high_conf = [d for d in self.detected if d['confidence'] >= 70]
         if not high_conf:
             return await i.response.send_message("✅ Aucun compte avec >=70% de confiance", ephemeral=True)
-        v = ConfirmAltActionView(self.u, self.g, high_conf, 'kick')
-        await i.response.send_message(
-            embed=discord.Embed(
-                title="⚠️ Confirmation",
-                description=f"Voulez-vous **KICK** {len(high_conf)} compte(s) secondaire(s) avec >=70% de confiance ?",
-                color=0xE74C3C,
-            ),
-            view=v,
-            ephemeral=True,
-        )
+        await i.response.send_message(view=ConfirmerIsolementV2(self.u, self.g, high_conf, 'alts'), ephemeral=True)
 
     async def _cb_ban80(self, i):
         very_high = [d for d in self.detected if d['confidence'] >= 80]
         if not very_high:
             return await i.response.send_message("✅ Aucun compte avec >=80% de confiance", ephemeral=True)
-        v = ConfirmAltActionView(self.u, self.g, very_high, 'ban')
-        await i.response.send_message(
-            embed=discord.Embed(
-                title="⚠️ Confirmation",
-                description=f"Voulez-vous **BAN** {len(very_high)} compte(s) secondaire(s) avec >=80% de confiance ?",
-                color=0xE74C3C,
-            ),
-            view=v,
-            ephemeral=True,
-        )
+        await i.response.send_message(view=ConfirmerIsolementV2(self.u, self.g, very_high, 'alts'), ephemeral=True)
 
     async def _cb_back(self, i):
         v = AltConfigPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
 
-class ConfirmAltActionView(View):
-    def __init__(self, u, g, targets, action):
+class ConfirmerIsolementV2(LayoutView):
+    """Isoler en masse (règle fondateur-only : quarantaine RÉVERSIBLE, jamais de renvoi ni de ban) — ou
+    renvoyer les bots non vérifiés, réservé au fondateur. 20/10/2026 : les confirmations disaient
+    « KICK », « BAN », « irréversible » pour un isolement, comptaient réussi ce qui avait échoué, et
+    « Kick Bots » ne faisait rien. `genre` : 'suspects', 'alts' ou 'bots'."""
+
+    def __init__(self, u, g, cibles, genre: str):
         super().__init__(timeout=60)
-        self.u = u
-        self.g = g
-        self.targets = targets
-        self.action = action
-    
+        self.u, self.g, self.cibles, self.genre = u, g, list(cibles), genre
+        if genre == 'bots':
+            texte = (f"### Renvoyer {len(self.cibles)} bot(s) non vérifié(s) ?\n"
+                     "Ils quittent le serveur et peuvent être ré-invités. Réservé au fondateur.")
+        else:
+            texte = (f"### Isoler {len(self.cibles)} compte(s) ?\n"
+                     "Quarantaine réversible : ils ne voient plus aucun salon. Le bannissement reste au fondateur.")
+        ok = Button(label="Confirmer", style=discord.ButtonStyle.danger, emoji=visuels.icone("valider"))
+        ok.callback = self._confirmer
+        non = Button(label="Annuler", style=discord.ButtonStyle.secondary, emoji=visuels.icone("fermer"))
+        non.callback = self._annuler
+        self.add_item(v2_container(v2_body(texte), discord.ui.ActionRow(ok, non), color=Palette.DANGER))
+
     async def interaction_check(self, i) -> bool:
-        # Garde : seul l'ouvrant peut confirmer (anti-clic d'un tiers sur ce message).
-        try:
-            if i.user.id != self.u.id:
-                await i.response.send_message("⛔ Ce panneau ne t'est pas destiné.", ephemeral=True)
-                return False
-        except Exception:
+        if i.user.id != self.u.id:  # anti-clic d'un tiers
+            await i.response.send_message("⛔ Ce panneau ne t'est pas destiné.", ephemeral=True)
             return False
         return True
 
-    @discord.ui.button(emoji=visuels.icone("valider"), label="Confirmer", style=discord.ButtonStyle.danger, row=0)
-    async def confirm(self, i, b):
-        await i.response.edit_message(content="⏳ Exécution en cours...", embed=None, view=None)
+    def _fin(self, texte: str, couleur) -> None:
+        self.clear_items()
+        self.add_item(v2_container(v2_body(texte), color=couleur))
 
-        success = 0
-        failed = 0
+    async def _annuler(self, i):
+        self._fin("Action annulée.", Palette.NEUTRAL)
+        await i.response.edit_message(view=self)
 
-        for item in self.targets:
-            member = item['member']
+    async def _confirmer(self, i):
+        if self.genre == 'bots' and not owner_ids_module.is_super_owner(i.user.id):
+            return await i.response.send_message("Renvoyer des bots est réservé au fondateur.", ephemeral=True)
+        self._fin("⏳ En cours…", Palette.NEUTRAL)
+        await i.response.edit_message(view=self)
+        faits = rates = 0
+        for t in self.cibles:
+            membre = t['member']
             try:
-                # RÈGLE FONDATEUR-ONLY (2026-06-13) : on ne kick/ban JAMAIS en masse →
-                # on ISOLE (réversible ; les alts sont souvent des faux positifs). Le
-                # fondateur reste seul à pouvoir bannir, au cas par cas.
-                if self.action in ('kick', 'ban'):
-                    await isolate_member(member, f"Compte secondaire (confiance: {item['confidence']}%)")
-                await update_alt_status(self.g.id, member.id, 'actioned', 'isolate')
-                success += 1
-            except Exception:
-                failed += 1
+                if self.genre == 'bots':
+                    await membre.kick(reason=f"Bot non vérifié renvoyé par {i.user} ({i.user.id})")
+                    faits += 1
+                    continue
+                motif = (f"Compte secondaire (confiance: {t.get('confidence')}%)" if self.genre == 'alts'
+                         else f"Anti-Raid: {t.get('reason', 'Compte suspect')} (score: {t.get('score', 'N/A')})")
+                res = await isolate_member(membre, motif)
+                if not (res or {}).get('isolated'):
+                    rates += 1  # bot, hiérarchie : rien n'a été fait, on ne le compte pas réussi
+                    continue
+                if self.genre == 'alts':
+                    await update_alt_status(self.g.id, membre.id, 'actioned', 'isolate')
+                faits += 1
+            except Exception as ex:
+                _logerr("isolement.masse", ex, guild_id=self.g.id)
+                rates += 1
+        verbe = "renvoyé(s)" if self.genre == 'bots' else "isolé(s)"
+        self._fin(f"### Terminé\n**{faits}** {verbe} · **{rates}** échec(s)",
+                  Palette.SUCCESS if not rates else Palette.WARNING)
+        await i.edit_original_response(view=self)
 
-        await i.edit_original_response(
-            content=f"🔒 **{success}** compte(s) isolé(s) (quarantaine)\n❌ **{failed}** échec(s)\n"
-                    f"_Le bannissement éventuel reste au fondateur._"
-        )
-    
-    @discord.ui.button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary, row=0)
-    async def cancel(self, i, b):
-        await i.response.edit_message(content="❌ Action annulée", embed=None, view=None)
 
 class AltDetectionsPanelV2(LayoutView):
     """Historique des detections d'alts en V2."""
@@ -16091,11 +16124,11 @@ class SuspectScanPanelV2(LayoutView):
         b_next.callback = self._cb_next
         b_rescan = Button(emoji=visuels.icone("actualiser"), label="Re-scanner", style=discord.ButtonStyle.primary, custom_id="sspv2_rescan")
         b_rescan.callback = self._cb_rescan
-        b_kick_crit = Button(emoji=visuels.icone("expulser"), label="Kick Critiques", style=discord.ButtonStyle.danger, disabled=(critical == 0), custom_id="sspv2_kick_crit")
+        b_kick_crit = Button(emoji=visuels.icone("expulser"), label="Isoler critiques", style=discord.ButtonStyle.danger, disabled=(critical == 0), custom_id="sspv2_kick_crit")
         b_kick_crit.callback = self._cb_kick_crit
-        b_kick_bots = Button(emoji=visuels.icone("robot"), label="Kick Bots", style=discord.ButtonStyle.danger, disabled=(not self.bots), custom_id="sspv2_kick_bots")
+        b_kick_bots = Button(emoji=visuels.icone("robot"), label="Renvoyer les bots", style=discord.ButtonStyle.danger, disabled=(not self.bots), custom_id="sspv2_kick_bots")
         b_kick_bots.callback = self._cb_kick_bots
-        b_kick_all = Button(emoji=visuels.icone("expulser"), label="Kick Tous Suspects", style=discord.ButtonStyle.danger, disabled=((critical + high) == 0), custom_id="sspv2_kick_all")
+        b_kick_all = Button(emoji=visuels.icone("expulser"), label="Isoler les suspects", style=discord.ButtonStyle.danger, disabled=((critical + high) == 0), custom_id="sspv2_kick_all")
         b_kick_all.callback = self._cb_kick_all
         b_close = Button(emoji=visuels.icone("fermer"), label="Fermer", style=discord.ButtonStyle.secondary, custom_id="sspv2_close")
         b_close.callback = self._cb_close
@@ -16147,44 +16180,28 @@ class SuspectScanPanelV2(LayoutView):
     async def _cb_kick_crit(self, i):
         critical = [s for s in self.suspects if s['severity'] == 'critical']
         if not critical:
-            return await i.response.send_message("✅ Aucun compte critique à kick", ephemeral=True)
-        v = ConfirmKickView(self.u, self.g, critical, 'critical')
-        await i.response.send_message(
-            embed=discord.Embed(title="⚠️ Confirmer le kick", description=f"Tu vas kick **{len(critical)}** compte(s) critique(s).", color=0xFF0000),
-            view=v, ephemeral=True,
-        )
+            return await i.response.send_message("✅ Aucun compte critique à isoler", ephemeral=True)
+        await i.response.send_message(view=ConfirmerIsolementV2(self.u, self.g, critical, 'suspects'), ephemeral=True)
 
     async def _cb_kick_bots(self, i):
         if not self.bots:
-            return await i.response.send_message("✅ Aucun bot non vérifié à kick", ephemeral=True)
-        v = ConfirmKickView(self.u, self.g, self.bots, 'bots')
-        await i.response.send_message(
-            embed=discord.Embed(title="⚠️ Confirmer le kick des bots", description=f"Tu vas kick **{len(self.bots)}** bot(s) non vérifié(s).", color=0xFF0000),
-            view=v, ephemeral=True,
-        )
+            return await i.response.send_message("✅ Aucun bot non vérifié", ephemeral=True)
+        await i.response.send_message(view=ConfirmerIsolementV2(self.u, self.g, self.bots, 'bots'), ephemeral=True)
 
     async def _cb_kick_all(self, i):
         high_and_critical = [s for s in self.suspects if s['severity'] in ['critical', 'high']]
         if not high_and_critical:
-            return await i.response.send_message("✅ Aucun compte à kick", ephemeral=True)
-        v = ConfirmKickView(self.u, self.g, high_and_critical, 'all')
-        await i.response.send_message(
-            embed=discord.Embed(
-                title="⚠️ Confirmer le kick massif",
-                description=f"Tu vas kick **{len(high_and_critical)}** compte(s) suspects (critiques + élevés).\n\n**⚠️ Action irréversible !**",
-                color=0xFF0000,
-            ),
-            view=v, ephemeral=True,
-        )
+            return await i.response.send_message("✅ Aucun compte à isoler", ephemeral=True)
+        await i.response.send_message(view=ConfirmerIsolementV2(self.u, self.g, high_and_critical, 'suspects'),
+                                      ephemeral=True)
 
     async def _cb_close(self, i):
         await i.response.edit_message(content="✅ Scan fermé", embed=None, view=None, attachments=[])
 
 
-class SuspectScanPanel(View):
-    """Panel pour scanner et afficher les comptes suspects"""
+class SuspectScanPanel:
+    """Le scanner des comptes suspects (l'affichage est `SuspectScanPanelV2`)."""
     def __init__(self, u, g):
-        super().__init__(timeout=300)
         self.u = u
         self.g = g
         self.suspects = []
@@ -16325,172 +16342,6 @@ class SuspectScanPanel(View):
             import traceback
             traceback.print_exc()
             self.scan_complete = True
-    
-    async def embed(self):
-        e = discord.Embed(title="Scan des Comptes Suspects", color=0xE74C3C)
-        
-        # Résumé
-        critical = len([s for s in self.suspects if s['severity'] == 'critical'])
-        high = len([s for s in self.suspects if s['severity'] == 'high'])
-        medium = len([s for s in self.suspects if s['severity'] == 'medium'])
-        
-        summary = f"**🚨 Critiques:** {critical}\n**⚠️ Élevés:** {high}\n**⚡ Moyens:** {medium}\n**🤖 Bots non vérifiés:** {len(self.bots)}"
-        e.add_field(name="Résumé", value=summary, inline=False)
-        
-        # Liste des suspects (paginée)
-        if self.suspects:
-            start = self.page * self.per_page
-            end = start + self.per_page
-            page_suspects = self.suspects[start:end]
-            
-            lines = []
-            for s in page_suspects:
-                member = s['member']
-                severity_emoji = {'critical': '🚨', 'high': '⚠️', 'medium': '⚡', 'low': '📋'}.get(s['severity'], '📋')
-                reasons_short = ", ".join(s['reasons'][:2])
-                lines.append(f"{severity_emoji} **{member.display_name}** (`{member.id}`)\n   └ {reasons_short}")
-            
-            e.add_field(
-                name=f"Suspects ({len(self.suspects)}) - Page {self.page + 1}/{max(1, (len(self.suspects) - 1) // self.per_page + 1)}",
-                value="\n".join(lines) if lines else "*Aucun*",
-                inline=False
-            )
-        else:
-            e.add_field(name="Suspects", value="✅ Aucun compte suspect détecté !", inline=False)
-        
-        # Bots non vérifiés
-        if self.bots:
-            bot_lines = [f"🤖 **{b['member'].name}** (`{b['member'].id}`)" for b in self.bots[:5]]
-            if len(self.bots) > 5:
-                bot_lines.append(f"*... et {len(self.bots) - 5} autres*")
-            e.add_field(name="Bots non vérifiés", value="\n".join(bot_lines), inline=False)
-        
-        e.set_footer(text="⚠️ Vérifiez manuellement avant d'agir • Les scores sont indicatifs")
-        return e
-    
-    @discord.ui.button(emoji=visuels.icone("retour"), label="Préc.", style=discord.ButtonStyle.secondary, row=0)
-    async def prev_page(self, i, b):
-        if self.page > 0:
-            self.page -= 1
-        await i.response.edit_message(embed=await self.embed(), view=self)
-    
-    @discord.ui.button(emoji=visuels.icone("activer"), label="Suiv.", style=discord.ButtonStyle.secondary, row=0)
-    async def next_page(self, i, b):
-        max_page = max(0, (len(self.suspects) - 1) // self.per_page)
-        if self.page < max_page:
-            self.page += 1
-        await i.response.edit_message(embed=await self.embed(), view=self)
-    
-    @discord.ui.button(emoji=visuels.icone("actualiser"), label="Re-scanner", style=discord.ButtonStyle.primary, row=0)
-    async def rescan(self, i, b):
-        await i.response.defer()
-        await self.scan_members()
-        await i.edit_original_response(embed=await self.embed(), view=self)
-    
-    @discord.ui.button(emoji=visuels.icone("expulser"), label="Kick Critiques", style=discord.ButtonStyle.danger, row=1)
-    async def kick_critical(self, i, b):
-        critical = [s for s in self.suspects if s['severity'] == 'critical']
-        if not critical:
-            return await i.response.send_message("✅ Aucun compte critique à kick", ephemeral=True)
-        
-        v = ConfirmKickView(self.u, self.g, critical, 'critical')
-        await i.response.send_message(
-            embed=discord.Embed(
-                title="⚠️ Confirmer le kick",
-                description=f"Vous allez kick **{len(critical)}** compte(s) critique(s).\n\nÊtes-vous sûr ?",
-                color=0xFF0000
-            ),
-            view=v,
-            ephemeral=True
-        )
-    
-    @discord.ui.button(emoji=visuels.icone("robot"), label="Kick Bots", style=discord.ButtonStyle.danger, row=1)
-    async def kick_bots(self, i, b):
-        if not self.bots:
-            return await i.response.send_message("✅ Aucun bot non vérifié à kick", ephemeral=True)
-        
-        v = ConfirmKickView(self.u, self.g, self.bots, 'bots')
-        await i.response.send_message(
-            embed=discord.Embed(
-                title="⚠️ Confirmer le kick des bots",
-                description=f"Vous allez kick **{len(self.bots)}** bot(s) non vérifié(s).\n\nÊtes-vous sûr ?",
-                color=0xFF0000
-            ),
-            view=v,
-            ephemeral=True
-        )
-    
-    @discord.ui.button(emoji=visuels.icone("expulser"), label="Kick Tous Suspects", style=discord.ButtonStyle.danger, row=1)
-    async def kick_all(self, i, b):
-        high_and_critical = [s for s in self.suspects if s['severity'] in ['critical', 'high']]
-        if not high_and_critical:
-            return await i.response.send_message("✅ Aucun compte à kick", ephemeral=True)
-        
-        v = ConfirmKickView(self.u, self.g, high_and_critical, 'all')
-        await i.response.send_message(
-            embed=discord.Embed(
-                title="⚠️ Confirmer le kick massif",
-                description=f"Vous allez kick **{len(high_and_critical)}** compte(s) suspects (critiques + élevés).\n\n**⚠️ Cette action est irréversible !**",
-                color=0xFF0000
-            ),
-            view=v,
-            ephemeral=True
-        )
-    
-    @discord.ui.button(emoji=visuels.icone("fermer"), label="Fermer", style=discord.ButtonStyle.secondary, row=2)
-    async def close(self, i, b):
-        await i.response.edit_message(content="✅ Scan fermé", embed=None, view=None)
-
-class ConfirmKickView(View):
-    """Vue de confirmation pour kick les suspects"""
-    def __init__(self, u, g, targets, kick_type):
-        super().__init__(timeout=60)
-        self.u = u
-        self.g = g
-        self.targets = targets
-        self.kick_type = kick_type
-    
-    async def interaction_check(self, i) -> bool:
-        # Garde : seul l'ouvrant peut confirmer (anti-clic d'un tiers).
-        try:
-            if i.user.id != self.u.id:
-                await i.response.send_message("⛔ Ce panneau ne t'est pas destiné.", ephemeral=True)
-                return False
-        except Exception:
-            return False
-        return True
-
-    @discord.ui.button(emoji=visuels.icone("valider"), label="Confirmer", style=discord.ButtonStyle.danger)
-    async def confirm(self, i, b):
-        await i.response.defer()
-
-        kicked = 0
-        failed = 0
-
-        for t in self.targets:
-            member = t['member']
-            try:
-                reason = f"Anti-Raid: {t.get('reason', 'Compte suspect')} (score: {t.get('score', 'N/A')})"
-                # RÈGLE FONDATEUR-ONLY (2026-06-13) : pas de kick de masse → on ISOLE
-                # (réversible). Le fondateur reste seul à pouvoir bannir/kicker.
-                await isolate_member(member, reason)
-                kicked += 1
-            except Exception:
-                failed += 1
-
-        await i.edit_original_response(
-            embed=discord.Embed(
-                title="Isolement terminé",
-                description=f"**{kicked}** membre(s) isolé(s) en quarantaine\n**{failed}** échec(s)\n"
-                            f"_Le bannissement éventuel reste au fondateur._",
-                color=0x2ECC71 if failed == 0 else 0xE67E22
-            ),
-            view=None
-        )
-    
-    @discord.ui.button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary)
-    async def cancel(self, i, b):
-        await i.response.edit_message(content="❌ Kick annulé", embed=None, view=None)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -17192,8 +17043,8 @@ async def load_live_state_from_db():
                         'live_channel_id': row[5] or 0
                     }
         print(f"✅ Live state loaded: {len(_live_state)} entries")
-    except:
-        pass
+    except Exception as ex:  # 20/10/2026 : `except: pass` — chaque live en cours redevenait « nouveau »
+        _logerr("lives.chargement", ex)
 
 
 async def save_live_state(cache_key: str, guild_id: int = 0, platform: str = '', username: str = ''):
@@ -19548,7 +19399,7 @@ async def on_ready():
                               suggestions.BoutonPour, suggestions.BoutonContre,
                               suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig,
                               recrutements.BoutonTableau, recrutements.BoutonDecision,
-                              BoutonAnciensSalons, BoutonGere, BoutonFicheSite)
+                              BoutonAnciensSalons, BoutonGere, BoutonFicheSite, BoutonApprouverBot)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
@@ -19848,9 +19699,6 @@ async def on_ready():
     if not check_expired_restrictions.is_running():
         check_expired_restrictions.start()
 
-    # Phase 28.5 : tâche annonce anniversaires (1x/heure mais agit à 9h UTC)
-    if not birthday_announcer.is_running():
-        birthday_announcer.start()
 
 
     # Phase 203 — superviseur : ressuscite toute boucle critique morte
@@ -20226,6 +20074,8 @@ async def on_ready():
             await asyncio.sleep(1)  # léger délai pour pas saturer
     except Exception as ex:
         print(f"[on_ready boot cleanup] {ex}")
+    if not persistent_msg_cleaner.is_running():
+        persistent_msg_cleaner.start()  # puis toutes les 30 min, sans attendre un redémarrage
 
     # (Game Night retiré avec les événements.)
 
@@ -20450,16 +20300,22 @@ ticket_group = app_commands.Group(
 )
 
 
-def _tix_is_staff(member: discord.Member) -> bool:
-    """True si peut gérer templates + voir stats."""
+async def _tix_staff(i) -> bool:
+    """Le staff des tickets : rôle staff (ou au-dessus), propriétaire, administration. 20/10/2026 :
+    « Gérer les messages » suffisait — n'importe quel modérateur de salon y avait accès."""
     try:
-        return (
-            member.id == SUPER_OWNER_ID
-            or (member.guild and member.id == member.guild.owner_id)
-            or member.guild_permissions.administrator
-            or member.guild_permissions.manage_messages
-        )
-    except Exception:
+        return i.user.id == SUPER_OWNER_ID or _staff_ou_plus(i.guild, i.user, await cfg(i.guild.id))
+    except Exception as ex:
+        _logerr("ticket.droit", ex, guild_id=getattr(i.guild, 'id', 0))
+        return False
+
+
+async def _tix_direction(i) -> bool:
+    """Transcripts (le contenu privé des tickets) et réglages : direction et au-dessus, comme les logs."""
+    try:
+        return i.user.id in TETE_IDS or _direction_ou_plus(i.guild, i.user, await cfg(i.guild.id))
+    except Exception as ex:
+        _logerr("ticket.droit", ex, guild_id=getattr(i.guild, 'id', 0))
         return False
 
 
@@ -20483,8 +20339,8 @@ async def _tix_is_in_ticket(channel) -> bool:
 async def ticket_transcripts_cmd(i: discord.Interaction, membre: discord.User | None = None):
     """19/10/2026 : « qu'on sache quel transcript appartient à qui, que si on a besoin de
     filtrer, on sache exactement »."""
-    if not _tix_is_staff(i.user):
-        return await i.response.send_message("❌ Réservé au staff.", ephemeral=True)
+    if not await _tix_direction(i):
+        return await i.response.send_message("❌ Réservé à la direction et au fondateur.", ephemeral=True)
     await i.response.defer(ephemeral=True)
     q = ("SELECT ticket_id, user_id, user_name, panel, url, closed_at FROM ticket_transcripts "
          "WHERE guild_id=?" + (" AND user_id=?" if membre else "")
@@ -20513,7 +20369,7 @@ async def ticket_transcripts_cmd(i: discord.Interaction, membre: discord.User | 
 @app_commands.describe(non_pris="N'afficher que les tickets PAS encore pris en charge")
 async def ticket_search_cmd(i: discord.Interaction, non_pris: bool = False):
     # #18 : triage des tickets — LECTURE SEULE (le bot ne ferme/mute jamais un ticket).
-    if not _tix_is_staff(i.user):
+    if not await _tix_staff(i):
         return await i.response.send_message("❌ Réservé au staff.", ephemeral=True)
     try:
         await i.response.defer(ephemeral=True)
@@ -20555,7 +20411,7 @@ async def ticket_search_cmd(i: discord.Interaction, non_pris: bool = False):
 @ticket_group.command(name="queue", description="📊 Charge des tickets par staff + nombre de non assignés")
 async def ticket_queue_cmd(i: discord.Interaction):
     # #19 : équilibrage de charge — LECTURE SEULE.
-    if not _tix_is_staff(i.user):
+    if not await _tix_staff(i):
         return await i.response.send_message("❌ Réservé au staff.", ephemeral=True)
     try:
         await i.response.defer(ephemeral=True)
@@ -20605,23 +20461,25 @@ async def ticket_priority_cmd(
 ):
     if not i.guild or not isinstance(i.user, discord.Member):
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if not _tix_is_staff(i.user):
+    if not await _tix_staff(i):
         return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
     if not await _tix_is_in_ticket(i.channel):
         return await i.response.send_message(
             "❌ Cette commande s'utilise dans un salon de ticket ouvert.",
             ephemeral=True,
         )
+    await i.response.defer()  # le renommage peut attendre (2 par 10 min) : répondre d'abord
     try:
         await tix_module.set_priority(i.channel.id, niveau.value)
-        await tix_module.update_channel_name_for_priority(i.channel, niveau.value)
-        emoji, label = tix_module.PRIORITY_LEVELS[niveau.value]
-        await i.response.send_message(
-            f"✅ Priorité réglée : {emoji} **{label}**",
-            ephemeral=False,
-        )
     except Exception as ex:
-        print(f"[ticket_priority_cmd] {ex}")
+        _logerr("ticket.priorite", ex, guild_id=i.guild.id)
+        return await i.followup.send("❌ La priorité n'a pas pu être enregistrée.", ephemeral=True)
+    emoji, label = tix_module.PRIORITY_LEVELS[niveau.value]
+    await i.followup.send(f"✅ Priorité réglée : {emoji} **{label}**")
+    try:
+        await tix_module.update_channel_name_for_priority(i.channel, niveau.value)
+    except discord.HTTPException as ex:
+        _logerr("ticket.priorite_nom", ex, guild_id=i.guild.id)
 
 
 @ticket_group.command(
@@ -20631,6 +20489,8 @@ async def ticket_priority_cmd(
 async def ticket_templates_cmd(i: discord.Interaction):
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _tix_staff(i):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
     try:
         templates = await tix_module.list_templates(i.guild.id)
         view = tix_module.build_templates_panel(templates, i.guild.name)
@@ -20649,7 +20509,7 @@ async def ticket_templates_cmd(i: discord.Interaction):
 async def ticket_reply_cmd(i: discord.Interaction, template_name: str):
     if not i.guild or not isinstance(i.user, discord.Member):
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if not _tix_is_staff(i.user):
+    if not await _tix_staff(i):
         return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
     if not await _tix_is_in_ticket(i.channel):
         return await i.response.send_message(
@@ -20677,7 +20537,7 @@ async def ticket_reply_cmd(i: discord.Interaction, template_name: str):
 async def ticket_template_add_cmd(i: discord.Interaction):
     if not i.guild or not isinstance(i.user, discord.Member):
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if not _tix_is_staff(i.user):
+    if not await _tix_staff(i):
         return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
 
     class _TplModal(discord.ui.Modal, title="Nouveau template ticket"):
@@ -20712,7 +20572,7 @@ async def ticket_template_add_cmd(i: discord.Interaction):
 async def ticket_template_remove_cmd(i: discord.Interaction, name: str):
     if not i.guild or not isinstance(i.user, discord.Member):
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if not _tix_is_staff(i.user):
+    if not await _tix_staff(i):
         return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
     try:
         ok = await tix_module.delete_template(i.guild.id, name)
@@ -20730,7 +20590,7 @@ async def ticket_template_remove_cmd(i: discord.Interaction, name: str):
 async def ticket_stats_cmd(i: discord.Interaction):
     if not i.guild or not isinstance(i.user, discord.Member):
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if not _tix_is_staff(i.user):
+    if not await _tix_staff(i):
         return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
     try:
         await i.response.defer(ephemeral=True)
@@ -20751,7 +20611,9 @@ async def ticket_stats_cmd(i: discord.Interaction):
 async def ticket_auto_close_cmd(i: discord.Interaction, jours: int | None = None):
     if not i.guild or not isinstance(i.user, discord.Member):
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if not _tix_is_staff(i.user):
+    if jours is not None and not await _tix_direction(i):
+        return await i.response.send_message("❌ Le réglage est réservé à la direction.", ephemeral=True)
+    if not await _tix_staff(i):
         return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
     try:
         if jours is not None:
@@ -21167,104 +21029,77 @@ async def on_member_update(before, after):
     except Exception as ex:
         print(f"[on_member_update profile scan] {ex}")
 
-    # LOGS unifiés (quick-win pro) : changements de RÔLES et de PSEUDO — donnée d'audit
-    # clé (« qui a donné le rôle Staff ? »). DANS ce handler existant (jamais un 2e
-    # @bot.event). FAIL-SAFE : log_event no-op si logs non configurés / catégorie off.
-    try:
-        if not after.bot:
-            default_role = after.guild.default_role
-            bset, aset = set(before.roles), set(after.roles)
-            added = [r for r in after.roles if r not in bset and r != default_role]
-            removed = [r for r in before.roles if r not in aset and r != default_role]
-            if added or removed:
-                # QUI a donné/retiré le rôle ? (audit). Changement AUTOMATIQUE par le bot
-                # (rôles d'event, auto-rôle, dé-impersonation…) = bruit → on NE loggue PAS.
-                actor, reason = await _audit_actor(
-                    after.guild, discord.AuditLogAction.member_role_update, target_id=after.id)
-                _me = after.guild.me
-                _is_bot = actor is not None and _me is not None and actor.id == _me.id
-                # On loggue UNIQUEMENT si un AUTEUR HUMAIN est identifié : actor None (pas
-                # d'audit / introuvable) OU bot automatique (rôles d'event, auto-rôle…) =
-                # bruit → PAS de log. Évite le spam du backfill de rôles + le « inconnu ».
-                if actor is None or _is_bot:
-                    pass
-                else:
-                    parts = []
-                    if added:
-                        parts.append("➕ " + ", ".join(r.mention for r in added[:10]))
-                    if removed:
-                        parts.append("➖ " + ", ".join(r.mention for r in removed[:10]))
-                    _extra = {"👤 Par": actor.mention}
-                    if reason:
-                        _extra["📝 Raison"] = str(reason)[:300]
-                    await ulogger2026.log_event(
-                        bot, after.guild, ulogger2026.EventType.MEMBER_UPDATE,
-                        description=f"🎭 **{actor}** a modifié les rôles de {after.mention} :\n" + "\n".join(parts),
-                        user=after, extra=_extra,
-                    )
-            if (before.nick or '') != (after.nick or ''):
-                # Pseudo : on ne loggue QUE si c'est QUELQU'UN D'AUTRE (staff) qui l'a changé
-                # — un membre qui change SON propre pseudo = bruit inutile (anti-spam owner).
-                nactor, _nr = await _audit_actor(
-                    after.guild, discord.AuditLogAction.member_update, target_id=after.id)
-                _me = after.guild.me
-                _is_bot = nactor is not None and _me is not None and nactor.id == _me.id
-                _is_self = nactor is not None and nactor.id == after.id
-                if nactor is not None and not _is_bot and not _is_self:
-                    await ulogger2026.log_event(
-                        bot, after.guild, ulogger2026.EventType.MEMBER_UPDATE,
-                        description=(f"✏️ **{nactor}** a changé le pseudo de {after.mention} : "
-                                     f"`{before.nick or before.name}` → `{after.nick or after.name}`"),
-                        user=after, extra={"👤 Par": nactor.mention},
-                    )
-    except Exception as ex:
-        print(f"[on_member_update log] {ex}")
+    # Rôles, pseudo et exclusion temporaire changés à la main : journalisés par
+    # `on_audit_log_entry_create` (20/10/2026 : plus une lecture du journal d'audit par changement).
 
-    # ⏱️ TIMEOUT NATIF Discord (clic droit → « Exclure temporairement », owner 2026-06-21).
-    # On détecte qu'un MODÉRATEUR a posé/retiré un timeout À LA MAIN (hors commandes du bot,
-    # qui se loggent déjà via leur propre flux de sanction → on saute l'auteur = bot pour
-    # éviter le double-log). On veut QUI / QUOI / QUAND / COMBIEN / SUR QUI, avec la personne
-    # ET le modérateur en @mention cliquable (rendu par _format_user). Catégorie Modération
-    # = « logs moyens ». FAIL-SAFE : sans perm audit → pas d'auteur → on ne loggue pas (plutôt
-    # qu'un « inconnu » trompeur).
+
+@bot.event
+async def on_audit_log_entry_create(entry):
+    """Rôles, pseudo, exclusion temporaire changés À LA MAIN : Discord pousse l'entrée d'audit avec
+    son auteur exact (20/10/2026). Avant : une lecture du journal d'audit à chaque changement de
+    membre, même fait par le bot, avec une fenêtre de 15 s. Les actions du bot ne sont pas
+    journalisées ici : elles ont leur propre trace."""
     try:
-        if not after.bot:
-            _bt = getattr(before, 'timed_out_until', None)
-            _at = getattr(after, 'timed_out_until', None)
-            if _bt != _at:
-                _nowu = discord.utils.utcnow()
-                _at_active = bool(_at and _at > _nowu)
-                _bt_active = bool(_bt and _bt > _nowu)
-                if _at_active:
-                    # POSÉ ou PROLONGÉ → qui l'a fait, pourquoi, jusqu'à quand.
-                    tactor, treason = await _audit_actor(
-                        after.guild, discord.AuditLogAction.member_update, target_id=after.id)
-                    _me = after.guild.me
-                    if tactor is not None and not (_me is not None and tactor.id == _me.id):
-                        _ts = int(_at.timestamp())
-                        await ulogger2026.log_event(
-                            bot, after.guild, ulogger2026.EventType.MOD_TIMEOUT,
-                            description=(f"⏱️ **{tactor}** a exclu temporairement {after.mention} "
-                                         f"jusqu'au <t:{_ts}:F> (<t:{_ts}:R>)."),
-                            user=after, moderator=tactor,
-                            reason=(str(treason)[:300] if treason else None),
-                            extra={"⏳ Fin de l'exclusion": f"<t:{_ts}:F> · <t:{_ts}:R>"},
-                        )
-                elif _bt_active and not _at_active:
-                    # RETIRÉ À LA MAIN avant son terme (un mod lève l'exclusion) → qui l'a levée.
-                    uactor, ureason = await _audit_actor(
-                        after.guild, discord.AuditLogAction.member_update, target_id=after.id)
-                    _me = after.guild.me
-                    if uactor is not None and not (_me is not None and uactor.id == _me.id):
-                        await ulogger2026.log_event(
-                            bot, after.guild, ulogger2026.EventType.MOD_UNMUTE,
-                            description=(f"🔊 **{uactor}** a levé l'exclusion temporaire de "
-                                         f"{after.mention} (avant son terme)."),
-                            user=after, moderator=uactor,
-                            reason=(str(ureason)[:300] if ureason else None),
-                        )
+        g = entry.guild
+        me = g.me
+        if entry.user_id is None or (me is not None and entry.user_id == me.id):
+            return
+        A = discord.AuditLogAction
+        if entry.action not in (A.member_role_update, A.member_update):
+            return
+        cible = entry.target
+        cible_id = int(getattr(cible, 'id', 0) or 0)
+        membre = g.get_member(cible_id)
+        if not cible_id or getattr(membre, 'bot', False):
+            return
+        auteur = entry.user or g.get_member(entry.user_id)
+        auteur_txt = str(auteur) if auteur is not None else f"<@{entry.user_id}>"
+        auteur_mention = getattr(auteur, 'mention', f"<@{entry.user_id}>")
+        mention = getattr(membre, 'mention', f"<@{cible_id}>")
+        qui = membre or cible
+        raison = str(entry.reason)[:300] if entry.reason else None
+        avant, apres = entry.changes.before, entry.changes.after
+        if entry.action == A.member_role_update:
+            def _roles(liste):
+                return ", ".join(getattr(r, 'mention', f"<@&{r.id}>") for r in liste[:10])
+            ajoutes = list(getattr(apres, 'roles', None) or [])
+            retires = list(getattr(avant, 'roles', None) or [])
+            parts = ([f"➕ {_roles(ajoutes)}"] if ajoutes else []) + ([f"➖ {_roles(retires)}"] if retires else [])
+            if not parts:
+                return
+            extra = {"👤 Par": auteur_mention}
+            if raison:
+                extra["📝 Raison"] = raison
+            await ulogger2026.log_event(
+                bot, g, ulogger2026.EventType.MEMBER_UPDATE,
+                description=f"🎭 **{auteur_txt}** a modifié les rôles de {mention} :\n" + "\n".join(parts),
+                user=qui, extra=extra)
+            return
+        # Pseudo : seulement si QUELQU'UN D'AUTRE l'a changé (son propre pseudo = bruit)
+        if (hasattr(avant, 'nick') or hasattr(apres, 'nick')) and entry.user_id != cible_id:
+            await ulogger2026.log_event(
+                bot, g, ulogger2026.EventType.MEMBER_UPDATE,
+                description=(f"✏️ **{auteur_txt}** a changé le pseudo de {mention} : "
+                             f"`{getattr(avant, 'nick', None) or '—'}` → `{getattr(apres, 'nick', None) or '—'}`"),
+                user=qui, extra={"👤 Par": auteur_mention})
+        if hasattr(avant, 'timed_out_until') or hasattr(apres, 'timed_out_until'):
+            fin = getattr(apres, 'timed_out_until', None)
+            if fin is not None and fin > discord.utils.utcnow():
+                ts = int(fin.timestamp())
+                await ulogger2026.log_event(
+                    bot, g, ulogger2026.EventType.MOD_TIMEOUT,
+                    description=(f"⏱️ **{auteur_txt}** a exclu temporairement {mention} "
+                                 f"jusqu'au <t:{ts}:F> (<t:{ts}:R>)."),
+                    user=qui, moderator=auteur, reason=raison,
+                    extra={"⏳ Fin de l'exclusion": f"<t:{ts}:F> · <t:{ts}:R>"})
+            elif getattr(avant, 'timed_out_until', None) is not None:
+                # Levée à la main avant son terme (la fin naturelle n'écrit rien au journal d'audit)
+                await ulogger2026.log_event(
+                    bot, g, ulogger2026.EventType.MOD_UNMUTE,
+                    description=f"🔊 **{auteur_txt}** a levé l'exclusion temporaire de {mention} (avant son terme).",
+                    user=qui, moderator=auteur, reason=raison)
     except Exception as ex:
-        print(f"[on_member_update timeout] {ex}")
+        _logerr("audit.entree", ex, guild_id=getattr(getattr(entry, 'guild', None), 'id', 0))
 
 
 @bot.event
@@ -21326,7 +21161,6 @@ async def _handle_boost_stopped(member):
         _logerr("boosts.fin", ex, guild_id=getattr(member.guild, 'id', 0))
 
 
-@bot.event
 async def _handle_rogue_bot(m):
     """ANTI-BOT-VOYOU (owner 2026-06-21) : un BOT tiers NON approuvé qui arrive avec des
     permissions DANGEREUSES (admin/gestion/ban/kick/webhooks) = vecteur de nuke n°1 (ajouté
@@ -21381,7 +21215,10 @@ async def _handle_rogue_bot(m):
             pass
         txt = (f"🚨 **BOT NON APPROUVÉ À PERMISSIONS DANGEREUSES** — {m.mention} (`{m.id}`)"
                + (f", ajouté par {actor.mention} (`{actor.id}`)" if actor else "") + f". {action_txt}\n"
-               f"_Si c'était volontaire : ajoute son ID à `approved_bots` (/configure) puis ré-ajoute-le._")
+               f"_Si c'était voulu : « Approuver ce bot » sous cette alerte, puis ré-ajoute-le._")
+        _BOTS_REFUSES[m.id] = time.time()
+        while len(_BOTS_REFUSES) > 100:
+            _BOTS_REFUSES.pop(next(iter(_BOTS_REFUSES)))
         try:
             await ulogger2026.log_event(bot, guild, ulogger2026.EventType.SEC_ESCALATION,
                                         description=txt, user=m, moderator=(actor or bot.user))
@@ -21676,20 +21513,6 @@ async def on_member_join(m):
                     
                     return  # Ne pas continuer
 
-        # ═══════════════ AUTO-RÔLE D'ACTIVITÉ (donné dès l'arrivée) ═══════════════
-        # Si un activity_role est configuré, on l'attribue automatiquement
-        # au nouveau membre sans qu'il ait besoin d'envoyer un message au préalable.
-        try:
-            stat_cfg = c.get('stat_config', {})
-            role_id = stat_cfg.get('activity_role', 0)
-            if role_id:
-                role = m.guild.get_role(role_id)
-                if role and role not in m.roles and role < m.guild.me.top_role:
-                    await m.add_roles(role, reason="Rôle d'activité automatique à l'arrivée")
-        except discord.Forbidden:
-            print(f"[AUTOROLE] Permission refusée pour {m} dans {m.guild.name}")
-        except Exception as ex:
-            print(f"[AUTOROLE] Erreur ajout rôle d'activité: {ex}")
 
     except Exception as ex:
         print(f"Erreur on_member_join: {ex}")
@@ -24886,111 +24709,6 @@ except Exception as ex:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 28.5 : Task daily — annonce des anniversaires
 # ═══════════════════════════════════════════════════════════════════════════════
-
-@tasks.loop(hours=1)
-async def birthday_announcer():
-    """Annonce les anniversaires du jour à 9h **heure FR** (Europe/Paris) et donne
-    le rôle du jour. TASK C.2 : l'annonce était calée sur 9h UTC → en été (CEST,
-    UTC+2) elle tombait à 11h FR, et le « jour » était calculé en UTC (décalé près
-    de minuit). On calcule désormais l'heure ET la date dans la TZ du serveur
-    (`event_timezone`, défaut Europe/Paris). FAIL-SAFE : si zoneinfo indispo, on
-    retombe sur l'ancien comportement UTC. Pas de DM (règle zéro MP membre)."""
-    try:
-        now_utc = datetime.now(timezone.utc)
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('birthday_enabled', False):
-                    continue
-
-                # ── Heure + date en heure FR (par serveur, via event_timezone) ──
-                tz_name = c.get('event_timezone', 'Europe/Paris') or 'Europe/Paris'
-                if ZoneInfo is not None:
-                    try:
-                        now_local = now_utc.astimezone(ZoneInfo(tz_name))
-                    except Exception:
-                        now_local = now_utc  # TZ invalide → fallback UTC
-                else:
-                    now_local = now_utc      # zoneinfo indispo → fallback UTC
-                # On n'annonce qu'une fois par jour, dans la tranche 9h-10h locale.
-                if now_local.hour != 9:
-                    continue
-                today_str = now_local.strftime('%m-%d')
-                ch_id = int(c.get('birthday_channel', 0) or 0)
-                ch = guild.get_channel(ch_id) if ch_id else None
-                if not ch:
-                    continue
-                bdays = await list_birthdays(guild.id)  # D4 : table-backed (+REPLI blob)
-
-                celebrants = []
-                for uid_str, date_str in bdays.items():
-                    if str(date_str) == today_str:
-                        try:
-                            member = guild.get_member(int(uid_str))
-                            if member:
-                                celebrants.append(member)
-                        except Exception:
-                            continue
-
-                if not celebrants:
-                    continue
-
-                tpl = c.get('birthday_message', '') or '🎂 Joyeux anniversaire {user} !'
-                role_id = int(c.get('birthday_role', 0) or 0)
-                bday_role = guild.get_role(role_id) if role_id else None
-
-                # Anniversaire de la veille → retirer le rôle des non-célébrants
-                # (utilise role.members pour ne pas itérer tous les membres du serveur)
-                if bday_role:
-                    for m in list(bday_role.members):
-                        if bdays.get(str(m.id)) != today_str:
-                            try:
-                                await m.remove_roles(bday_role, reason="Anniversaire terminé")
-                                await asyncio.sleep(0.5)  # audit 2026-07-03 : throttle anti-429
-                            except Exception:
-                                pass
-
-                for member in celebrants:
-                    try:
-                        text = tpl.format(
-                            user=member.mention,
-                            user_name=member.display_name,
-                            date=today_str,
-                            guild=guild.name,
-                        )
-                    except Exception:
-                        text = f"🎂 Joyeux anniversaire {member.mention} !"
-
-                    e = discord.Embed(
-                        description=text,
-                        color=0xF1C40F,
-                        timestamp=now_utc,
-                    )
-                    e.set_author(name="🎂 Joyeux anniversaire !", icon_url=member.display_avatar.url)
-                    e.set_thumbnail(url=member.display_avatar.url)
-                    e.set_footer(text=guild.name, icon_url=(guild.icon.url if guild.icon else None))
-                    try:
-                        await ch.send(content=member.mention, embed=e)
-                    except Exception as ex:
-                        print(f"[birthday send] {ex}")
-
-                    # Donner le rôle du jour
-                    if bday_role:
-                        try:
-                            await member.add_roles(bday_role, reason="Anniversaire aujourd'hui")
-                        except Exception:
-                            pass
-                    await asyncio.sleep(0.5)  # audit 2026-07-03 : throttle anti-429 (send+role/membre)
-            except Exception as ex:
-                print(f"[birthday_announcer guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[birthday_announcer] {ex}")
-
-
-@birthday_announcer.before_loop
-async def _birthday_announcer_wait():
-    await bot.wait_until_ready()
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  /event /inventory /event_start — Phase 30
@@ -30387,7 +30105,7 @@ async def _register_for_cleanup(message, delay_seconds: int, reason: str = 'even
     """Enregistre un message en DB pour suppression différée GARANTIE.
 
     À utiliser EN PLUS du delete_after natif Discord. Si le bot redémarre
-    pendant l'attente, le loop persistent_msg_cleaner prend le relais.
+    pendant l'attente, `persistent_msg_cleaner` (toutes les 30 min) prend le relais.
 
     À appeler systématiquement après chaque send() avec delete_after sur
     un message d'event (> 1h surtout).
@@ -30423,9 +30141,24 @@ async def _register_for_cleanup(message, delay_seconds: int, reason: str = 'even
     return False
 
 
+@tasks.loop(minutes=30)
+async def persistent_msg_cleaner():
+    """Les suppressions différées (le rapport de sécurité, effacé après 48 h). 20/10/2026 : la boucle
+    que décrivaient les commentaires n'existait plus — rien ne partait avant le redémarrage suivant."""
+    try:
+        await _run_persistent_cleanup_once()
+    except Exception as ex:
+        _logerr("nettoyage.differe", ex)
+
+
+@persistent_msg_cleaner.before_loop
+async def _persistent_msg_cleaner_wait():
+    await bot.wait_until_ready()
+
+
 async def _run_persistent_cleanup_once() -> dict:
     """Scan tous les messages expirés et tente la suppression. Appelé au boot
-    et toutes les 2 min via persistent_msg_cleaner.
+    et toutes les 30 min via persistent_msg_cleaner.
 
     Retourne {'scanned': N, 'deleted': N, 'gone': N, 'forbidden': N, 'errors': N}.
     Phase 55 : LIMIT 500 (batch plus large), retry sur les rate limits, logs détaillés.

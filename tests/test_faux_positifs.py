@@ -90,8 +90,11 @@ def test_F4_aucun_ban_ni_renvoi_automatique_d_un_membre():
     parcourir(ARBRE, [])
     assert appels["ban"] <= {"RadieDecisionButton.callback", "sanction", "_action_moderer",
                              "_dossier_agir"}, appels["ban"]
+    # ConfirmerIsolementV2._confirmer : renvoi MANUEL des bots non verifies, par le fondateur seul.
     assert appels["kick"] <= {"sanction", "_action_moderer", "_dossier_agir",
-                              "_kick_young_account", "_handle_rogue_bot"}, appels["kick"]
+                              "_kick_young_account", "_handle_rogue_bot",
+                              "ConfirmerIsolementV2._confirmer"}, appels["kick"]
+    assert "if self.genre == 'bots' and (not owner_ids_module.is_super_owner(i.user.id))" in         ast.unparse(next(n for n in ARBRE.body if getattr(n, "name", "") == "ConfirmerIsolementV2"))
     f = _fonctions()
     assert "timeout(timedelta(hours=heures)" in f["_isoler_par_securite"]
 
