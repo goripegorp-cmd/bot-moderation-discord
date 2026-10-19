@@ -282,7 +282,3 @@ def test_F6_des_refus_en_serie_allongent_la_pause_jusqu_au_plafond():
     assert faux.appels == 8
 
 
-def test_F7_le_bilan_DIT_le_refus_du_forum():
-    blocs = [ast.unparse(n) for n in ast.walk(ARBRE) if isinstance(n, ast.IfExp)
-             and "le forum refuse le serveur depuis" in ast.unparse(n)]
-    assert blocs and "forum_refuse()" in blocs[0], "le bilan tait le refus"

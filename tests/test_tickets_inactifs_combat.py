@@ -135,10 +135,14 @@ def test_I2_la_fermeture_partagee_log_mp_base_puis_suppression(base):
     tk = {"id": 1, "user": 7}
     asyncio.run(ns["_fermer_ticket"](g, Salon(), tk, Obj(id=2, mention="@bot", display_name="Bot"),
                                      "7 jours sans message", inactif_jours=7))
-    assert [e[0] for e in journal] == ["log", "mp", "audit", "annonce", "supprime"], journal
-    assert "fermé automatiquement après **7 jours sans message**" in journal[1][1]
-    assert journal[1][2] is False, "pas de note de satisfaction pour une fermeture auto"
+    #  19/10 : « ils n'ont pas à le savoir » — un nettoyage : ni MP, ni annonce.
+    assert [e[0] for e in journal] == ["log", "audit", "supprime"], journal
     assert asyncio.run(_statuts(base))[0] == (1, "closed")
+    journal.clear()
+    asyncio.run(ns["_fermer_ticket"](g, Salon(), tk, Obj(id=2, mention="@staff", display_name="Staff"),
+                                     "Résolu"))
+    assert [e[0] for e in journal] == ["log", "mp", "audit", "annonce", "supprime"], journal
+    assert journal[1][2] is True, "la note de satisfaction après une vraie prise en charge"
 
 
 def test_I3_branchements():

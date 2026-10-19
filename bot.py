@@ -86,16 +86,9 @@ import activite as activite_module
 import activite_demontage as activite_demontage_module
 #  Ce qu'un NOUVEL ARRIVANT voit du serveur (03/10/2026).
 import visibilite_serveur as visibilite_module
-#  Veille Roblox (12/08/2026) — voir ROBLOX.md. Reintroduction EXPLICITEMENT
-#  demandee par le proprietaire : le HANDOFF classe « Roblox » dans le perimetre
-#  supprime, ce module n'est donc PAS un reste oublie.
-import roblox_veille as roblox_module
 import roblox_news as roblox_news_module
 import roblox_pings as roblox_pings_module
 import roblox_panneau as roblox_ui
-import roblox_commandes as roblox_cmds
-import roblox_marche as roblox_marche_module
-import roblox_cartes as roblox_cartes_module
 import protection_mineurs as pmineurs
 import rellseas_panneau as rellseas_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
@@ -9345,7 +9338,10 @@ async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours=0):
     except Exception as ex:
         _logerr("ticket.close_log", ex, guild_id=guild.id)
     try:
-        creator = guild.get_member(tk['user'])
+        #  19/10 : une fermeture pour inactivité est un nettoyage — aucun MP.
+        if inactif_jours:
+            _recent_transcript_urls.pop(str(tid), None)
+        creator = None if inactif_jours else guild.get_member(tk['user'])
         if creator:
             _dm_url = _recent_transcript_urls.pop(str(tid), None)
             f = None
@@ -9355,23 +9351,16 @@ async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours=0):
                 f"🔗 **Transcript complet (page web) :** {_dm_url}\n"
                 if _dm_url else
                 "_Transcript de la conversation ci-joint._\n")
-            if inactif_jours:
-                dm_txt = (
-                    f"🔒 Ton ticket **#{tid}** sur **{guild.name}** a été fermé automatiquement "
-                    f"après **{inactif_jours} jours sans message**.\n\n{_dm_link_line}"
-                    f"_Tu peux rouvrir un ticket si tu as encore besoin d'aide._")
+            dm_txt = (
+                f"🔒 Ton ticket **#{tid}** sur **{guild.name}** a été fermé par "
+                f"**{closer.display_name}**.\n**Raison :** {reason}\n\n"
+                f"{_dm_link_line}"
+                f"_Tu peux rouvrir un ticket si tu as encore besoin d'aide._\n\n"
+                f"**Comment s'est passée la prise en charge ?** _(un clic — ça nous aide)_")
+            try:
+                _fbview = _ticket_feedback_view(guild.id, int(tid), closer.id)
+            except Exception:
                 _fbview = None
-            else:
-                dm_txt = (
-                    f"🔒 Ton ticket **#{tid}** sur **{guild.name}** a été fermé par "
-                    f"**{closer.display_name}**.\n**Raison :** {reason}\n\n"
-                    f"{_dm_link_line}"
-                    f"_Tu peux rouvrir un ticket si tu as encore besoin d'aide._\n\n"
-                    f"**Comment s'est passée la prise en charge ?** _(un clic — ça nous aide)_")
-                try:
-                    _fbview = _ticket_feedback_view(guild.id, int(tid), closer.id)
-                except Exception:
-                    _fbview = None
             _kw = {"content": dm_txt}
             if f:
                 _kw["file"] = f
@@ -9393,15 +9382,13 @@ async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours=0):
         await tix_module.log_action(guild.id, ch.id, closer.id, "close", reason[:200])
     except Exception as ex:
         _logerr("ticket.close_audit", ex, guild_id=guild.id)
-    try:
-        await ch.send(
-            (f"🔒 **Ticket fermé** : {inactif_jours} jours sans message.\n"
-             if inactif_jours else
-             f"🔒 **Ticket fermé** par {closer.mention}\n**Raison :** {reason}\n")
-            + "_Transcript envoyé en MP au créateur. Suppression dans 5 s…_")
-    except discord.HTTPException:
-        pass
-    await asyncio.sleep(5)
+    if not inactif_jours:
+        try:
+            await ch.send(f"🔒 **Ticket fermé** par {closer.mention}\n**Raison :** {reason}\n"
+                          "_Transcript envoyé en MP au créateur. Suppression dans 5 s…_")
+        except discord.HTTPException:
+            pass
+        await asyncio.sleep(5)
     try:
         await ch.delete()
     except discord.HTTPException as ex:
@@ -13178,32 +13165,6 @@ async def restore_active_comebacks():
 
 
 
-async def _roblox_cmds_autorise(i) -> bool:
-    """Qui a le droit d'interroger la veille Roblox.
-
-    ⚠️ FAIL-CLOSED, ET LA GARDE EST DANS LA COMMANDE. Ces réponses exposent la
-    configuration du serveur (salons réglés, interrupteurs, état de la base) :
-    ce n'est pas de l'information publique. Masquer une commande n'empêche
-    personne de la taper — c'est la règle posée pour `/rellseas`, elle vaut ici.
-    """
-    if i.guild is None:
-        return False
-    try:
-        p = i.user.guild_permissions
-        return bool(p.administrator or p.manage_guild
-                    or i.user.id == i.guild.owner_id)
-    except Exception as ex:
-        print(f"[_roblox_cmds_autorise] {ex}")
-        return False
-
-
-roblox_cmds.setup(autorise=_roblox_cmds_autorise, log=print)
-#  ⚠️ AU NIVEAU MODULE, comme les autres commandes. Ajouter le groupe depuis
-#  `on_ready` le ferait arriver APRÈS `tree.sync()` selon l'ordre de démarrage :
-#  la commande existerait dans le code et pas chez Discord — le pire des deux
-#  mondes, parce que rien ne le signalerait.
-bot.tree.add_command(roblox_cmds.groupe)
-
 
 @bot.tree.command(name="help", description="❓ Voir ce que le bot sait faire")
 async def help_cmd(i: discord.Interaction):
@@ -13803,45 +13764,6 @@ def _budget_veille(stats: dict, releve: dict) -> None:
         stats["reste_min"] = r if actuel is None else min(actuel, r)
 
 
-async def _diag_veille_serveurs(limite: int = 10) -> None:
-    """Dit, SERVEUR PAR SERVEUR, ce qui est allumé et ce qui manque.
-
-    ⚠️ « Aucun serveur n'a allumé » a fait deviner le propriétaire le 18/08 :
-    interrupteur éteint, ou salon manquant ? Une ligne par serveur tranche
-    sans ouvrir /configure.
-
-    ⚠️ Ce diagnostic était ENFERMÉ dans le cas « personne n'a rien allumé ».
-    Or le cas qui fait mal est l'autre : un flux allumé, l'autre éteint, un
-    passage qui se termine à zéro publication — et là, rien ne sortait. Il est
-    donc appelé aussi depuis le bilan quand le passage n'a rien publié.
-    """
-    for g in list(bot.guilds)[:limite]:
-        try:
-            _ca = await roblox_module.config(g.id)
-            _cn = await roblox_news_module.config(g.id)
-            #  ⚠️ PLUS « le salon des nouveautés » : avec les nouveautés
-            #  éteintes sur demande, ce test aurait crié « AUCUN salon » sur
-            #  un serveur qui publie ses Limited normalement.
-            _flux_on = [n for f, n in (("bascules", "💎 Limited"),
-                                       ("nouveautes", "🆕 nouveautés"),
-                                       ("surveiller", "👀 à surveiller"))
-                        if roblox_module.salon_du_flux(_ca, f)]
-            _acc = ((f"OK ({', '.join(_flux_on)})") if _ca.get("roblox_veille_enabled")
-                    and _flux_on
-                    else ("éteint" if not _ca.get("roblox_veille_enabled")
-                          else "allumé mais AUCUN flux ne publie "
-                               "(interrupteur ou salon)"))
-            _act = ("OK" if _cn.get("roblox_news_enabled")
-                    and int(_cn.get("roblox_news_salon") or 0)
-                    else ("éteintes" if not _cn.get("roblox_news_enabled")
-                          else "allumées mais AUCUN salon"))
-            print(f"[veille_roblox_task]   {g.name} ({g.id}) : "
-                  f"accessoires={_acc} · actualités={_act}")
-        except Exception as _dex:
-            print(f"[veille_roblox_task]   {getattr(g, 'id', '?')} : {_dex}")
-
-
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  La sentinelle d'instance — « sommes-nous seuls à tourner ? »
@@ -13936,347 +13858,6 @@ async def _battre_sentinelle() -> list[str]:
     return autres
 
 
-async def _publier_file_accessoires(guildes, budget: int, *,
-                                    pause_fiches: float,
-                                    etiquette: str = "veille_roblox_task") -> dict:
-    """Tire de la file d'envoi et publie — LE corps partagé (étapes 2 et 3).
-
-    ⚠️ DEUX APPELANTS, UN SEUL CORPS. Le passage de 30 minutes et
-    l'éclaireur (voir `eclaireur_task`) publient par CETTE fonction, et
-    par elle seule. Une copie aurait divergé à la première correction — et
-    la première chose à diverger aurait été la réservation avant envoi,
-    donc les doublons mesurés le 30/08 (6 messages pour une file de 3).
-
-    `pause_fiches` : la respiration avant l'enrichissement. Le passage
-    complet vient de consommer ~18 requêtes de catalogue et DOIT attendre
-    (429 mesuré le 16/08) ; l'éclaireur n'en a fait que deux, sur un autre
-    quota, et passe 0.
-
-    Rend `{publies, reportes, echecs, simules, non_marquees, file, budget}`.
-    """
-    res = {"publies": 0, "reportes": 0, "echecs": 0, "simules": 0,
-           "non_marquees": 0, "file": None, "budget": budget}
-    if not guildes:
-        return res
-    # ═══════════════════════════════════════════════════════════
-    #  ÉTAPE 2 — TIRER DE LA FILE ce que le budget permet
-    # ═══════════════════════════════════════════════════════════
-    #  ⚠️ CETTE ÉTAPE ET LA SUIVANTE SONT HORS DU `if rel["code"] ==
-    #  200`, ET C'EST LE CORRECTIF. Elles y étaient : un 429 terminal
-    #  sur le relevé du catalogue général — celui qui pagine neuf
-    #  pages, donc le plus exposé — et la file ne se vidait PAS, alors
-    #  que survivre à une panne de relevé est exactement la raison
-    #  d'être d'une file d'attente. Pire, `res["file"]` restait None :
-    #  la ligne « file d'envoi » n'était même pas imprimée, et le
-    #  bilan disait « 0 publication » sans dire que N fiches
-    #  attendaient. Trouvé en réfutation adverse le 30/08.
-    #
-    #  ⚠️ ET LE BUDGET EST PARTAGÉ ÉQUITABLEMENT, PAS PREMIER ARRIVÉ.
-    #  Il partait à 12 et se vidait serveur par serveur dans l'ordre
-    #  de `bot.guilds` : un serveur en simulation, avec un arriéré ou
-    #  un salon cassé consommait les douze à chaque passage, et le
-    #  suivant recevait zéro fiche — définitivement. On donne donc une
-    #  part à chacun, et on fait tourner le point de départ pour que
-    #  le reste de la division ne profite pas toujours au même.
-    global _veille_tour
-    _veille_tour = (_veille_tour + 1) % max(1, len(guildes))
-    _ordre = guildes[_veille_tour:] + guildes[:_veille_tour]
-    _part = max(1, roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE
-                // max(1, len(guildes)))
-    _reste, _tirage = budget, {}
-    for g in _ordre:
-        if _reste <= 0:
-            break
-        #  ⚠️ UN FLUX ÉTEINT NE LAISSE RIEN PARTIR (23/09). Sans ce
-        #  ménage, l'arriéré d'un flux qu'on vient d'éteindre sortait quand
-        #  même — et d'anciennes fiches « ugc » seraient tombées par repli
-        #  dans le salon des créations officielles.
-        try:
-            _cg = await roblox_module.config(g.id)
-            _oubli = await roblox_module.oublier_flux_eteints(
-                g.id, [f for f in roblox_module.FLUX_OFFICIELS
-                       if roblox_module.flux_allume(_cg, f)])
-            if _oubli:
-                print(f"[{etiquette}]   🧹 {_oubli} fiche(s) d'un flux éteint "
-                      f"retirée(s) de la file de {g.id}")
-        except Exception as ex:
-            print(f"[{etiquette}] ménage des flux éteints : {ex}")
-        _lot_g = await roblox_module.a_envoyer(
-            g.id, limite=min(_part, _reste))
-        if _lot_g:
-            _tirage[g.id] = _lot_g
-            _reste -= len(_lot_g)
-
-    #  ⚠️ LES CHIFFRES DE TRADING — UN APPEL PAR ARTICLE.
-    #  Stock émis et prix de revente ne sont PAS dans le catalogue :
-    #  ils vivent sur `economy.roblox.com`. On n'enrichit donc que
-    #  ce qu'on va réellement publier — et une seule fois par
-    #  article même si deux serveurs l'attendent, sinon deux
-    #  serveurs doubleraient la facture de requêtes pour rien.
-    #  `enrichir` pose sa propre pause entre les appels.
-    _lot = [e["article"] for _l in _tirage.values() for e in _l]
-    _uniques = {}
-    for _x in _lot:
-        _uniques.setdefault(_x["asset_id"], _x)
-    _repr = list(_uniques.values())
-    #  ⚠️ RESPIRER AVANT LA PHASE « FICHES ». Les deux relevés
-    #  paginés viennent de consommer ~18 requêtes ; enchaîner
-    #  ici tombait en plein 429 et les fiches partaient sans
-    #  chiffres ni image, SANS BRUIT. Mesuré le 16/08.
-    if _repr and pause_fiches > 0:
-        await asyncio.sleep(pause_fiches)
-    await roblox_module.enrichir(_repr)
-    #  Le nom français officiel, en UN appel pour tout le lot.
-    #  ⚠️ Il ne se pose plus pendant le relevé : avec la pagination,
-    #  redemander chaque page en français doublait les requêtes et
-    #  déclenchait le HTTP 429 mesuré le 16/08.
-    await roblox_module.traduire(_repr)
-    #  On passe les ARTICLES : `item_type` décide du point
-    #  d'API (assets ou bundles). Avec des identifiants nus,
-    #  les bundles revenaient sans image.
-    _imgs = await roblox_module.vignettes(_repr)
-    #  Report de l'enrichissement sur les copies des autres serveurs.
-    for _x in _lot:
-        _r = _uniques.get(_x["asset_id"])
-        if _r is not None and _r is not _x:
-            _x.update(_r)
-
-    # ═══════════════════════════════════════════════════════════
-    #  ÉTAPE 3 — PUBLIER, et n'effacer de la file qu'après succès
-    # ═══════════════════════════════════════════════════════════
-    for g in guildes:
-        if not _tirage.get(g.id):
-            continue
-        c = await roblox_module.config(g.id)
-        _simu = bool(c.get("roblox_veille_simulation"))
-        for _e in _tirage[g.id]:
-            a, flux = _e["article"], _e["flux"]
-            salon = g.get_channel(roblox_module.salon_du_flux(c, flux))
-            if budget <= 0:
-                #  Reste en file : c'est maintenant VRAI.
-                res["reportes"] += 1
-                continue
-            #  ⚠️ MODE SIMULATION — on va jusqu'ici et pas plus loin.
-            #  La fiche N'EST PAS marquée envoyée : elle reste en
-            #  file, et le jour où l'interrupteur retombe, elle part
-            #  pour de vrai, dans l'ordre. Éprouver la chaîne ne
-            #  doit jamais coûter une fausse annonce publique.
-            if _simu:
-                res["simules"] += 1
-                print(f"[{etiquette}]   🧪 SIMULATION — "
-                      f"aurait publié « {a.get('nom')} » "
-                      f"({a['asset_id']}) en {flux} dans "
-                      f"#{getattr(salon, 'name', 'salon absent')} "
-                      f"— rien n'est parti, la fiche reste en file")
-                #  ⚠️ ON NE CONSOMME PAS LE BUDGET. Une simulation qui
-                #  mange les douze unités du passage affamerait les
-                #  autres serveurs sans jamais rien publier nulle part.
-                continue
-            #  ⚠️ RÉSERVER AVANT D'ENVOYER. `a_envoyer` n'est qu'un
-            #  SELECT : la boucle et le bouton « Relever maintenant »
-            #  pouvaient tirer les MÊMES lignes et publier deux fois —
-            #  rejoué en réfutation, 6 messages pour une file de 3. La
-            #  contrainte d'unicité ne protégeait pas : elle empêche
-            #  d'ENFILER deux fois, pas d'ENVOYER deux fois.
-            if not await roblox_module.reserver(_e["id"], _e["essais"]):
-                #  Quelqu'un d'autre l'a prise : ce n'est pas un échec.
-                continue
-            #  L'annonce du forum ou du newsroom qui parle de
-            #  cet accessoire, si la veille d'actualité l'a lue.
-            _lies = roblox_news_module.billets_lies(a.get("nom") or "")
-            _trace = {}
-            if await roblox_ui.publier(g, salon, a, flux,
-                                       image=_imgs.get(a["asset_id"]),
-                                       lies=_lies, trace=_trace):
-                #  ⚠️ L'ORDRE COMPTE. On sort de la file APRÈS
-                #  l'envoi réussi, jamais avant : un plantage entre
-                #  les deux fait au pire réessayer, jamais perdre.
-                if not await roblox_module.marquer_envoye(
-                        _e["id"], _trace.get("message_id")):
-                    #  La fiche est PARTIE mais la base n'a pas pris la
-                    #  marque : elle repartira. Le dire, sinon le
-                    #  doublon à venir n'aura aucune trace.
-                    res["non_marquees"] += 1
-                await roblox_module.marquer_publie(
-                    g.id, a["asset_id"], flux)
-                budget -= 1
-                res["publies"] += 1
-            else:
-                #  ⚠️ `publier` avale ses erreurs et rend False.
-                #  Sans ce compteur, un salon devenu interdit
-                #  ressemblerait à « rien à publier ». La ligne
-                #  reste en file et sera réessayée — bornée par
-                #  MAX_ESSAIS_ENVOI, sinon un salon supprimé la
-                #  ferait grossir sans fin.
-                await roblox_module.noter_echec_envoi(
-                    _e["id"], f"publier a rendu False "
-                              f"(salon {getattr(salon, 'id', None)})")
-                res["echecs"] += 1
-            await asyncio.sleep(roblox_module.PAUSE_ENTRE_PUBLICATIONS)
-    #  L'état de la file, pour le bilan : c'est lui qui remplace le
-    #  compteur « plafonnés » d'avant, et il ne ment pas.
-    res["file"] = await roblox_module.etat_file()
-    res["budget"] = budget
-    return res
-
-
-#  🎁 LES CARTES CADEAUX (29/09) — voir `roblox_cartes`. En mémoire : le
-#  dernier script lu (son empreinte) et son offre, l'heure de la dernière
-#  lecture, le dernier état DIT au journal (une ligne par changement), et les
-#  noms déjà demandés pour cet état (un envoi raté ne les redemande pas).
-_CARTES = {"script": None, "offre": None, "lu_le": None, "dit": None,
-           "fiches_de": None, "fiches": None}
-
-
-async def _cartes_cadeaux(guildes, vus=()) -> dict:
-    """Ce que donne une carte cadeau Roblox — et le mois suivant, si Roblox
-    l'a écrit. UNE fiche courte par liste, complétée sur place.
-
-    Demandes du 29/09 : « affiche les items disponibles dans les cartes
-    cadeaux. Que ce soit optimisé », puis « on peut mettre les prochains,
-    mais il faut que tu sois sûr de toi […] tu ne dois pas non plus envoyer
-    un maximum de requêtes ».
-
-      · les annonces du mois suivant sont relevées dans `vus` — ce que le
-        relevé de 30 min vient de lire : ZÉRO requête ;
-      · la page officielle au plus toutes les `HEURES_ENTRE_LECTURES` (son
-        script seulement si son empreinte change) ; les noms seulement quand
-        une fiche doit partir ou changer, et une seule image ;
-      · une NOUVELLE liste → une fiche neuve, avec ping ; le mois suivant
-        annoncé (ou une nouvelle présentation) → la fiche déjà publiée est
-        MODIFIÉE, sans message ni ping de plus ; introuvable → reposée, sans
-        ping.
-    Tout est noté en base : jamais deux fois, même après un redémarrage.
-    Ne lève jamais : une panne ici ne gêne pas la veille.
-    Rend `{"lu", "publies", "completees", "reposees", "annonces", "motif"}`.
-    """
-    res = {"lu": False, "publies": 0, "completees": 0, "reposees": 0,
-           "annonces": 0, "motif": None}
-    C = roblox_cartes_module
-    H = C.HEURES_ENTRE_LECTURES
-    try:
-        res["annonces"] = await C.noter_annonces(vus)
-        _maint = datetime.now(timezone.utc)
-        _der = _CARTES.get("lu_le")
-        if _der is not None and (_maint - _der).total_seconds() < H * 3600:
-            return res
-        _CARTES["lu_le"] = _maint
-        res["lu"] = True
-        r = await C.lire_offre(_CARTES)
-        offre = r.get("offre")
-        if not offre:
-            res["motif"] = r.get("motif") or "page illisible"
-            if _CARTES.get("dit") != "illisible":
-                _CARTES["dit"] = "illisible"
-                print(f"[veille_roblox_task]   🎁 cartes cadeaux : page officielle "
-                      f"illisible ({res['motif']}) — nouvel essai dans {H:.0f} h, "
-                      f"sans insister")
-            return res
-        sig = C.signature(offre)
-        ids = C.ids_de(offre)
-        #  ⚠️ LE MOIS SUIVANT N'EST JAMAIS DÉDUIT DE NOTRE HORLOGE. Il suit le
-        #  mois ÉCRIT par Roblox dans la description d'un article de l'offre :
-        #  la page change autour du 1er, pas à minuit pile — le 1er octobre,
-        #  une page encore en septembre aurait fait annoncer novembre.
-        _am = await C.mois_de_l_offre(offre)
-        _sv = C.mois_suivant(*_am) if _am else None
-        prochains = ([p for p in await C.annonces_du_mois(*_sv)
-                      if p["asset_id"] not in ids][:C.MAX_PROCHAINS]
-                     if _sv else [])
-        suite = C.signature_suite(prochains)
-        _etat_dit = f"{sig}|{suite}"
-        _en = (f" + {len(prochains)} annoncé(s) pour {C.nom_du_mois(*_sv)}"
-               if prochains else "")
-        cibles = []
-        for g in guildes:
-            etat = await C.etat_affiche(g.id)
-            if etat["signature"] == sig and etat["suite"] == suite:
-                continue
-            c = await roblox_module.config(g.id)
-            salon = g.get_channel(roblox_module.salon_du_flux(c, "nouveautes")
-                                  or roblox_module.salon_du_flux(c, "bascules"))
-            if salon is not None:
-                cibles.append((g, salon, bool(c.get("roblox_veille_simulation")),
-                               etat))
-        if not cibles:
-            if _CARTES.get("dit") != _etat_dit:
-                _CARTES["dit"] = _etat_dit
-                print(f"[veille_roblox_task]   🎁 cartes cadeaux (France) : "
-                      f"{len(ids)} article(s) offert(s){_en}, déjà affichés · "
-                      f"relus toutes les {H:.0f} h")
-            return res
-        #  Les noms (anglais + français officiel) : seulement maintenant qu'une
-        #  fiche doit partir ou changer — et une seule fois par état, même si
-        #  l'envoi rate et se retente trois heures plus tard.
-        if _CARTES.get("fiches_de") == _etat_dit and _CARTES.get("fiches"):
-            articles = _CARTES["fiches"]
-        else:
-            articles = await C.fiches(offre, en_plus=prochains)
-        #  ⚠️ JAMAIS UNE FICHE INCOMPLÈTE NOTÉE « AFFICHÉE ». Un article absent
-        #  (coupure réseau au milieu) : rien n'est envoyé, nouvel essai à la
-        #  lecture suivante. Un article sans nom (Roblox n'a rendu ni l'anglais
-        #  ni le français) : on attend aussi, au plus `ESSAIS_NOMS` lectures —
-        #  ensuite la fiche part, l'article avec son seul lien.
-        _manque = len(ids) + len(prochains) - len(articles)
-        _sans_nom = sum(1 for a in articles if not a.get("nom_lu", True))
-        if _manque > 0 or _sans_nom:
-            _essais = _CARTES.setdefault("essais", {})
-            _essais[_etat_dit] = _essais.get(_etat_dit, 0) + 1
-            if _manque > 0 or _essais[_etat_dit] < C.ESSAIS_NOMS:
-                res["motif"] = "noms incomplets"
-                print(f"[veille_roblox_task]   🎁 cartes cadeaux : noms incomplets "
-                      f"({max(_manque, 0)} absent(s), {_sans_nom} sans nom) — rien "
-                      f"envoyé, nouvel essai dans {H:.0f} h")
-                return res
-            print(f"[veille_roblox_task]   🎁 cartes cadeaux : {_sans_nom} nom(s) "
-                  f"toujours indisponible(s) après {C.ESSAIS_NOMS} lectures — la "
-                  f"fiche part avec leur lien seul")
-        _CARTES["fiches_de"], _CARTES["fiches"] = _etat_dit, articles
-        arts = [a for a in articles if a["asset_id"] in ids]
-        arts_suite = [a for a in articles if a["asset_id"] not in ids]
-        mois = C.nom_du_mois(*_am) if _am else C.mois_de(arts)
-        vue = {"prochains": arts_suite, "mois": mois,
-               "mois_prochain": C.mois_seul(*_sv) if _sv else None}
-        #  Une seule image sur la fiche : une seule demandée.
-        images = await roblox_module.vignettes(arts[:1])
-        for g, salon, simu, etat in cibles:
-            if simu:
-                print(f"[veille_roblox_task]   🧪 SIMULATION — aurait affiché les "
-                      f"{len(ids)} article(s) des cartes cadeaux{_en} dans "
-                      f"#{getattr(salon, 'name', '?')}")
-                continue
-            neuve = etat["signature"] != sig
-            if not neuve:
-                #  Même liste : on COMPLÈTE la fiche publiée. Son identifiant
-                #  est noté depuis le 29/09 après-midi ; la toute première (le
-                #  matin) se retrouve une fois dans l'historique du salon.
-                mid = etat["message"] or await roblox_ui.retrouver_carte(salon)
-                if mid and await roblox_ui.editer_cartes(
-                        g, salon, mid, arts, offre, images, **vue):
-                    await C.noter_affichee(g.id, sig, suite, mid)
-                    res["completees"] += 1
-                    continue
-            trace = {}
-            if await roblox_ui.publier_cartes(g, salon, arts, offre, images,
-                                              trace=trace, ping=neuve, **vue):
-                await C.noter_affichee(g.id, sig, suite,
-                                       int(trace.get("message_id") or 0))
-                res["publies" if neuve else "reposees"] += 1
-        _faites = res["publies"] + res["completees"] + res["reposees"]
-        _CARTES["dit"] = _etat_dit if _faites == len(cibles) else None
-        _bilan = ", ".join(t for t in (
-            f"{res['publies']} publiée(s)" if res["publies"] else "",
-            f"{res['completees']} complétée(s) sur place" if res["completees"] else "",
-            f"{res['reposees']} reposée(s) sans ping (l'ancienne introuvable)"
-            if res["reposees"] else "") if t) or "aucune envoyée"
-        print(f"[veille_roblox_task]   🎁 cartes cadeaux (France) : {len(ids)} "
-              f"article(s) offert(s)" + (f" en {mois}" if mois else "") + _en
-              + f" · fiche : {_bilan} — {len(cibles)} serveur(s) visé(s)")
-    except Exception as ex:
-        res["motif"] = f"{type(ex).__name__}: {ex}"
-        print(f"[veille_roblox_task] 🎁 cartes cadeaux : {res['motif']}")
-    return res
-
 
 async def _enfiler_billets(guildes, rel: dict) -> dict:
     """Dédupliquer, absorber les trop vieux, ENFILER — le corps partagé.
@@ -14341,11 +13922,11 @@ async def _enfiler_billets(guildes, rel: dict) -> dict:
         #  « ♻️ Tout republier » promettait le contraire.
         #  Désormais tout billet frais est PERSISTÉ tout de suite :
         #  il n'a plus besoin d'être re-relevé pour sortir.
-        for _b in roblox_module.ordonner_publication(
+        for _b in roblox_news_module.ordonner_publication(
                 _frais_b, len(_frais_b)):
             if await roblox_news_module.enfiler_actu(g.id, _b):
                 res["enfiles"] = res.get("enfiles", 0) + 1
-        _lot_b = roblox_module.ordonner_publication(
+        _lot_b = roblox_news_module.ordonner_publication(
             _frais_b, roblox_news_module.MAX_BILLETS_PAR_PASSAGE)
         res["plafonnes"] += max(0, len(_frais_b) - len(_lot_b))
         #  ⚠️ LA SIMULATION COUVRE AUSSI LES ACTUALITÉS. Elle ne
@@ -14372,15 +13953,10 @@ async def _publier_file_actualites(guildes, etiquette: str = "veille_roblox_task
     for g in guildes:
         c = await roblox_news_module.config(g.id)
         salon = g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
-        _simu_n = bool((await roblox_module.config(g.id))
-                       .get("roblox_veille_simulation"))
         _attente_n = await roblox_news_module.actus_a_envoyer(
             g.id, limite=roblox_news_module.MAX_BILLETS_PAR_PASSAGE)
         for _e in _attente_n:
             b = _e["billet"]
-            if _simu_n:
-                res["simules"] = res.get("simules", 0) + 1
-                continue
             if salon is None:
                 #  Compter l'échec, sinon la file se fige sur les mêmes
                 #  billets et plus rien d'autre ne sort jamais.
@@ -14406,7 +13982,7 @@ async def _publier_file_actualites(guildes, etiquette: str = "veille_roblox_task
                 await roblox_news_module.noter_echec_actu(
                     _e["id"], "publier_actu a rendu False")
                 res["echecs"] += 1
-            await asyncio.sleep(roblox_module.PAUSE_ENTRE_PUBLICATIONS)
+            await asyncio.sleep(roblox_news_module.PAUSE_ENTRE_PUBLICATIONS)
         res["file"] = await roblox_news_module.etat_file_actu(g.id)
     return res
 
@@ -14736,19 +14312,31 @@ async def _retirer_exclamations(g):
         print(f"[anti_badwords exclamations {getattr(g, 'id', '?')}] {ex}")
 
 
+_TABLES_ACCESSOIRES = ("roblox_articles", "roblox_cartes_annonces", "roblox_curseurs",
+                       "roblox_marche_retenue", "roblox_marche_tete", "roblox_mesures",
+                       "roblox_migrations", "roblox_publies", "roblox_sante",
+                       "roblox_transitions")
+
+
+async def _retirer_tables_accessoires():
+    """19/10/2026 : la veille des accessoires est retirée ; ses tables aussi."""
+    try:
+        async with get_db() as db:
+            for t in _TABLES_ACCESSOIRES:
+                await db.execute(f"DROP TABLE IF EXISTS {t}")
+            await db.commit()
+    except Exception as ex:
+        _logerr("accessoires.tables", ex)
+
+
 async def _travaux_de_demarrage():
     """Les migrations, en tâche de fond, serveur par serveur."""
     try:
         await bot.wait_until_ready()
+        await _retirer_tables_accessoires()
         for g in list(bot.guilds):
             try:
                 await _migrer_panneaux_tickets(g)
-                #  « Dans la même catégorie » : nouveautés et passages Limited
-                #  dans le même salon. Une fois par serveur.
-                _u = await roblox_module.unifier_salons(g.id)
-                if _u.get("fait"):
-                    print(f"[veille] {g.id} : nouveautés et passages Limited "
-                          f"réunis dans le salon {_u['salon']}")
                 #  🧹 03/10/2026 : le système d'activité est retiré — on
                 #  défait ce qu'il avait posé (rôles, masquage, salons), puis
                 #  on regarde ce qu'un nouvel arrivant voit du serveur.
@@ -14763,25 +14351,41 @@ async def _travaux_de_demarrage():
         print(f"[demarrage travaux] {ex}")
 
 
+async def _relever_actus() -> dict:
+    """Un passage de l'actualité Roblox : toutes les sources, mise en file, publication."""
+    out = {"lus": 0, "enfiles": 0, "publies": 0, "pannes": 0}
+    guildes = []
+    for g in list(bot.guilds):
+        try:
+            if await roblox_news_module.actif(g.id):
+                guildes.append(g)
+        except Exception as ex:
+            _logerr("veille.actif", ex, guild_id=g.id)
+    if not guildes:
+        return out
+    for src in roblox_news_module.SOURCES:
+        rel = await roblox_news_module.relever(src)
+        if rel.get("sautee"):
+            continue
+        if rel["code"] != 200:
+            out["pannes"] += 1
+            await asyncio.sleep(2)
+            continue
+        out["lus"] += len(rel.get("billets") or [])
+        out["enfiles"] += (await _enfiler_billets(guildes, rel)).get("enfiles", 0)
+        await asyncio.sleep(2)
+    out["publies"] = (await _publier_file_actualites(guildes))["publies"]
+    await roblox_news_module.purger()
+    await roblox_news_module.purger_file_actu()
+    return out
+
+
 @tasks.loop(minutes=30)
 async def veille_roblox_task():
-    """Veille Roblox : nouveautes du catalogue, bascules, et actualite.
-
-    ⚠️ UNE SOURCE A LA FOIS, JAMAIS DE RAFALE. Mesure du 12/08 : c'est la
-    CONCURRENCE qui declenche le pare-feu d'AWS, pas le volume. 60 requetes en
-    parallele passent ; 200 en salves rendent des reponses vides et collent
-    21 a 41 secondes sur l'IP. On enchaine donc en serie, avec une pause.
-
-    REPOS ABSOLU : si aucune guilde n'a allume quoi que ce soit, on sort sans
-    ouvrir la moindre connexion.
-    """
+    """L'actualité Roblox (blog, forum, notes de version), toutes les 30 min ; l'éclaireur
+    d'actualités voit les nouveaux billets dans la minute. 19/10/2026 : les accessoires
+    (nouveautés, passages Limited, cartes cadeaux, marché) sont retirés."""
     try:
-        #  ⚠️ D'ABORD : SOMMES-NOUS SEULS À TOURNER ?
-        #  Si deux conteneurs tournent, TOUT ce que dit ce bilan est faux d'un
-        #  facteur deux — le débit, les tours de rotation, le nombre de
-        #  passages — et on chercherait la cause dans le code pendant des
-        #  jours. Cette ligne coûte une écriture et répond une fois pour
-        #  toutes. Voir `_battre_sentinelle`.
         await _init_sentinelle()
         _autres = await _battre_sentinelle()
         if _autres:
@@ -14791,688 +14395,9 @@ async def veille_roblox_task():
                   f"compteurs de ce bilan comptent deux fois, et un doublon "
                   f"de publication devient possible. C'est un problème de "
                   f"DÉPLOIEMENT (deux conteneurs actifs), pas de code.")
-
-        #  Compteur PARTAGE par tous les flux et toutes les guildes du passage.
-        #  C'est le seul garde-fou qui tienne si plusieurs guildes rattrapent
-        #  du retard en meme temps.
-        _budget = roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE
-        #  ⚠️ DEUX PAIRES DE COMPTEURS, PAS UNE. Ils étaient partagés entre
-        #  accessoires et actualités, et ça produisait deux mensonges :
-        #    · `if _publies == 0: _diag_veille_serveurs()` — UN SEUL billet
-        #      d'actualité publié supprimait le diagnostic par serveur des
-        #      accessoires, exactement le cas qui a coûté onze heures au
-        #      propriétaire le 19/08 ;
-        #    · « N publication(s) reportée(s) » pouvait n'être composé que de
-        #      billets d'actualité, tout en étant adossé au nombre de fiches
-        #      d'ACCESSOIRES en file. Le chiffre cité ne mesurait pas ce qu'il
-        #      prétendait rassurer.
-        _reporte_a = _reporte_n = 0
-        guildes_items = []
-        guildes_news = []
-        for g in list(bot.guilds):
-            try:
-                if await roblox_module.actif(g.id):
-                    guildes_items.append(g)
-                if await roblox_news_module.actif(g.id):
-                    guildes_news.append(g)
-            except Exception:
-                continue
-        if not guildes_items and not guildes_news:
-            #  ⚠️ LE DIRE. Cette boucle était muette : elle sortait sans un mot,
-            #  et depuis les logs Railway rien ne distinguait « personne n'a
-            #  allumé » de « la boucle est morte ». Une ligne toutes les 30 min
-            #  ne coûte rien et répond à la question avant qu'on la pose.
-            print(f"[veille_roblox_task] passage sans travail — aucun des "
-                  f"{len(bot.guilds)} serveur(s) n'a allumé accessoires ni "
-                  f"actualités (interrupteur + salon requis)")
-            await _diag_veille_serveurs()
-            return
-        _publies_a = _publies_n = 0
-        #  ⚠️ COMPTER À CHAQUE ÉTAGE. « 0 publication » recouvrait six
-        #  situations dont une seule est une panne (mesuré le 19/08) : le
-        #  propriétaire ne pouvait pas trancher, donc il supposait la panne.
-        #  Ces compteurs nomment l'étage exact où le passage s'est arrêté.
-        _sa = {"lus": 0, "candidats": 0, "hors_fenetre": 0, "deja": 0,
-               "echecs": 0, "plafonnes": 0, "pages": 0, "tronque": False,
-               "req": 0, "n429": 0, "reste_min": None,
-               #  Ce que la DÉTECTION a vu, avant le moindre filtre — voir le
-               #  commentaire à l'endroit où ils sont posés.
-               "detectes": 0, "bascules": 0, "bascules_anciennes": 0,
-               #  Ce que le troisieme releve (hors vente) a rendu.
-               "lus_hors_vente": 0,
-               "plus_frais_h": None,
-               #  La file d'attente d'envoi : ce qui y entre à ce passage, et
-               #  ce qu'elle contient à la fin. Remplace « plafonnés », qui
-               #  désignait des fiches PERDUES en les appelant reportées.
-               "enfiles": 0, "file": None, "simules": 0,
-               #  Fiches PARTIES dont la base n'a pas pris la marque : elles
-               #  repartiront. C'est la seule trace d'un doublon à venir.
-               "non_marquees": 0}
-        _sn = {"lus": 0, "sautees": 0, "pannes": 0, "deja": 0,
-               "echecs": 0, "plafonnes": 0, "absorbes": 0, "simules": 0,
-               #  La file d'attente des actualités — même dessin que celle des
-               #  accessoires. `enfiles` = ce qui y entre à ce passage.
-               "enfiles": 0, "file": None, "non_marquees": 0,
-               "pointeurs": 0,
-               #  Récaps et tutoriels écartés (23/09) : « on s'en fout ».
-               "sans_interet": 0}
-
-        # ── Les articles ────────────────────────────────────────────────────
-        if guildes_items:
-            #  ⚠️ ON RÉSERVE LE BUDGET DU CHEMIN. `veille_marche_task` tape la
-            #  même route et s'efface tant que ce drapeau est levé — voir son
-            #  commentaire. Il est abaissé dans le `finally` en fin de bloc :
-            #  le laisser levé sur une exception tuerait le suivi jusqu'au
-            #  prochain redémarrage, en silence.
-            roblox_module.catalogue_occupe(True)
-            rel = await roblox_module.relever_nouveautes(limite=120)
-            #  🎁 Ce que ce passage lit sert aussi aux cartes cadeaux : Roblox y
-            #  écrit le mois suivant (« … in October 2026 »). Zéro requête.
-            _vus_cartes = list(rel.get("articles") or [])
-            _sa["lus"] = len(rel.get("articles") or [])
-            _sa["pages"] = rel.get("pages", 0)
-            _sa["tronque"] = bool(rel.get("tronque"))
-            _budget_veille(_sa, rel)
-            if rel["code"] == 200:
-                evts = await roblox_module.comparer_et_enregistrer(rel["articles"])
-
-                #  ⚠️ SECOND RELEVE, ET IL EST INDISPENSABLE — POUR DETECTER.
-                #  Le relevé ci-dessus trie par date de CREATION. Un accessoire
-                #  créé il y a six mois qui passe Limited aujourd'hui peut en
-                #  être absent (183 Limiteds hors du catalogue général, mesuré
-                #  le 16/08) : sans ce second relevé, sa bascule ne serait
-                #  jamais VUE.
-                #  ⚠️ Depuis le 18/08, il ne PUBLIE plus rien par lui-même :
-                #  « uniquement les accessoires qui deviennent limited, pas ceux
-                #  qui le sont déjà devenus ». Il nourrit
-                #  `comparer_et_enregistrer`, qui pose `bascule_detectee` sur un
-                #  article connu non collectionnable devenu collectionnable —
-                #  et SEUL ce marqueur fait sortir une fiche « bascules ». Un
-                #  Limited vu pour la première fois déjà Limited est enregistré,
-                #  jamais publié. La première version rattrapait tous les
-                #  Limiteds récents ; le propriétaire a tranché contre.
-                await asyncio.sleep(roblox_module.PAUSE_ENTRE_RELEVES)
-                relc = await roblox_module.relever_collectionnables(limite=120)
-                _sa["tronque"] = _sa.get("tronque") or bool(relc.get("tronque"))
-                _budget_veille(_sa, relc)
-                if relc["code"] == 200:
-                    evts_c = await roblox_module.comparer_et_enregistrer(relc["articles"])
-                    _vus = {x["asset_id"] for x in (evts.get("bascules") or [])}
-                    for _a in (evts_c.get("bascules") or []):
-                        if _a["asset_id"] not in _vus:
-                            evts.setdefault("bascules", []).append(_a)
-                            _vus.add(_a["asset_id"])
-                    #  Les bascules VRAIES mais vues trop tard (article revu il
-                    #  y a plus de six heures) : elles se perdaient ici, alors
-                    #  que ce sont elles qui disent qu'une interruption nous a
-                    #  coûté une annonce. On les rassemble pour le bilan.
-                    _anc = {x["asset_id"]
-                            for x in (evts.get("bascules_anciennes") or [])}
-                    for _a in (evts_c.get("bascules_anciennes") or []):
-                        if _a["asset_id"] not in _anc:
-                            evts.setdefault("bascules_anciennes", []).append(_a)
-                            _anc.add(_a["asset_id"])
-
-                # ═══════════════════════════════════════════════════════════
-                #  TROISIÈME RELEVÉ — LES CRÉATIONS RETIRÉES DE LA VENTE
-                # ═══════════════════════════════════════════════════════════
-                #  ⚠️ SANS LUI, LE BOT MONTRE LES DERNIERS ACCESSOIRES DU
-                #  MARCHÉ, PAS LES DERNIERS CRÉÉS. Signalé par le propriétaire
-                #  le 30/08, et mesuré le jour même :
-                #    · relevé général              → plus récent du 22/07
-                #    · avec `IncludeNotForSale`    → plus récent du **12/08**
-                #  Les deux dernières créations de Roblox sont hors vente, donc
-                #  invisibles. Sur les articles de moins de 30 jours : 0 sans
-                #  le drapeau, 2 avec.
-                #  Deux pages seulement : les créations récentes sont en tête,
-                #  et paginer ce flux en entier doublerait le relevé pour un
-                #  recouvrement de 95 %.
-                await asyncio.sleep(roblox_module.PAUSE_ENTRE_APPELS_CATALOGUE)
-                relhv = await roblox_module.relever_hors_vente(limite=120)
-                _sa["tronque"] = _sa.get("tronque") or bool(relhv.get("tronque"))
-                _budget_veille(_sa, relhv)
-                if relhv["code"] == 200:
-                    _sa["lus_hors_vente"] = len(relhv.get("articles") or [])
-                    #  C'est ICI que vivent les articles des cartes du mois
-                    #  suivant : hors vente jusqu'au jour où une carte les donne.
-                    _vus_cartes += list(relhv.get("articles") or [])
-                    evts_h = await roblox_module.comparer_et_enregistrer(
-                        relhv["articles"])
-                    #  ⚠️ ON FUSIONNE LES NOUVEAUTÉS AUSSI, pas seulement les
-                    #  bascules : c'est précisément ICI que vivent les
-                    #  créations récentes que l'autre relevé ne voit pas.
-                    for _cle in ("nouveaux", "bascules", "bascules_anciennes"):
-                        _deja = {x["asset_id"] for x in (evts.get(_cle) or [])}
-                        for _a in (evts_h.get(_cle) or []):
-                            if _a["asset_id"] not in _deja:
-                                evts.setdefault(_cle, []).append(_a)
-                                _deja.add(_a["asset_id"])
-
-                #  ⚠️ CE QUE LA DÉTECTION A TROUVÉ, AVANT TOUT FILTRE.
-                #  Le bilan ne l'imprimait nulle part : « 964 lu(s) · 0
-                #  candidat(s) » s'affichait à l'identique que la détection
-                #  n'ait rien vu, ou qu'elle ait vu une bascule et qu'un filtre
-                #  l'ait étouffée. C'est ce trou qui a rendu invisible pendant
-                #  des semaines le blocage de l'amorce (corrigé le 30/08) :
-                #  les bascules étaient DÉTECTÉES, puis rangées sous « déjà
-                #  sorti ». Sans ces trois nombres, on ne peut pas distinguer
-                #  « Roblox est calme » de « le bot s'auto-censure ».
-                _sa["detectes"] = len(evts.get("nouveaux") or [])
-                _sa["bascules"] = len(evts.get("bascules") or [])
-                _sa["bascules_anciennes"] = len(evts.get("bascules_anciennes") or [])
-                #  Ce que la détection voit depuis le 27/09 : un UGC Limited
-                #  de Roblox devenu Limited, un passage daté par ROBLOX (notre
-                #  mémoire ne suffisait pas), une création mise en vente.
-                _bas = evts.get("bascules") or []
-                _sa["promotions"] = sum(1 for x in _bas if x.get("classe_avant"))
-                _sa["datees_roblox"] = sum(1 for x in _bas if x.get("date_roblox"))
-                _sa["sorties"] = sum(1 for x in (evts.get("nouveaux") or [])
-                                     if x.get("sortie_le"))
-                #  L'âge de l'article le plus récent du catalogue Roblox. C'est
-                #  LA réponse à « est-ce cassé, ou Roblox ne crée rien ? » —
-                #  mesuré le 30/08 : 38 jours depuis la dernière création.
-                #  ⚠️ SUR LES DEUX RELEVÉS, PAS SUR UN SEUL. Le calculer sur le
-                #  seul relevé général annoncerait « 38 jours » alors qu'une
-                #  création de 18 jours existe, retirée de la vente — soit
-                #  exactement le mensonge que le propriétaire a repéré.
-                _frais = [roblox_module._heures_depuis(x.get("cree_le"))
-                          for x in ((rel.get("articles") or [])
-                                    + (relhv.get("articles") or []))]
-                _frais = [h for h in _frais if h is not None]
-                _sa["plus_frais_h"] = min(_frais) if _frais else None
-
-                #  Les images en UN SEUL appel pour tout le passage : une
-                #  requete pour cent articles, jamais cent requetes. C'est la
-                #  concurrence que le pare-feu punit, pas le volume.
-                #  Même sélection que la publication : les vignettes doivent
-                #  couvrir exactement les articles qui vont sortir, ni plus
-                #  (requête gâchée) ni moins (fiche sans image).
-                #  Deux flux, et c'est tout — tranché le 18/08 : « ce sera tout
-                #  pour les accessoires ». Le flux « à surveiller » (indice) ne
-                #  publie plus.
-                # ═══════════════════════════════════════════════════════════
-                #  ÉTAPE 1 — METTRE EN FILE. Aucun réseau, aucun plafond.
-                # ═══════════════════════════════════════════════════════════
-                #  ⚠️ C'EST LA RÉPARATION DE LA FAMINE, ET L'ORDRE EST TOUT.
-                #  Avant le 30/08, on TRONQUAIT à 5 nouveautés / 10 bascules
-                #  AVANT de publier — alors que `comparer_et_enregistrer` avait
-                #  DÉJÀ écrit l'article en base au même passage. Au passage
-                #  suivant l'article n'était plus « jamais vu » : il ne pouvait
-                #  plus JAMAIS revenir. Rejoué en exécution : 20 nouveautés
-                #  dans la fenêtre → 5 publiées, puis 0, puis 0. 15 perdues,
-                #  pendant que le journal imprimait « Rien n'est perdu. »
-                #  Désormais TOUT ce qui passe les filtres entre en file, qui
-                #  vit en base. Le plafond ne s'applique plus qu'à la SORTIE :
-                #  ce qui déborde attend son tour au lieu de disparaître.
-                #  L'ordre bascules → nouveautés est conservé : il fixe la
-                #  priorité (voir `publiable_dans`) et l'ordre de tirage.
-                #  ⚠️ LES ACCESSOIRES RÉCENTS SONT RÉEXAMINÉS (06/10) — voir
-                #  `roblox_veille.a_reexaminer`. Une seule fois par serveur,
-                #  la fenêtre s'élargit à 24 h : c'est ce qui rattrape la
-                #  citrouille que l'ancienne règle avait écartée.
-                _lus_tous = ((rel.get("articles") or [])
-                             + (relhv.get("articles") or []))
-                _reex = roblox_module.a_reexaminer(
-                    _lus_tous, roblox_module.FENETRE_DIRECTE_HEURES)
-                _reex_unique = roblox_module.a_reexaminer(
-                    _lus_tous, roblox_module.RATTRAPAGE_UNIQUE_HEURES)
-                for g in guildes_items:
-                    _unique = not (await roblox_module.config(g.id)).get(
-                        roblox_module.MARQUE_RATTRAPAGE_ACCESSOIRES)
-                    for flux, cle in (("bascules", "bascules"),
-                                      ("nouveautes", "nouveaux")):
-                        #  ⚠️ L'ORDRE D'ENTRÉE EN FILE EST L'ORDRE D'ENVOI.
-                        #  La file se vide par `detecte_le ASC, id ASC`, donc
-                        #  c'est ICI que se décide l'ordre du salon. Demande du
-                        #  propriétaire (16/08) : « mets le plus ancien posté en
-                        #  premier jusqu'au plus récent, comme ça quand on
-                        #  scroll on voit pas un vieil item avec un nouveau ».
-                        #  `ordonner_publication` rend justement du plus ANCIEN
-                        #  au plus récent — et on lui passe la longueur totale,
-                        #  parce que sa tranche est précisément ce qui affamait
-                        #  le système : ici on ordonne, on ne coupe plus.
-                        _brut = evts.get(cle) or []
-                        _rattrapes = set()
-                        if flux == "nouveautes":
-                            _deja_la = {x.get("asset_id") for x in _brut}
-                            _plus = [x for x in (_reex_unique if _unique else _reex)
-                                     if x.get("asset_id") not in _deja_la]
-                            _rattrapes = {x.get("asset_id") for x in _plus}
-                            _brut = _brut + _plus
-                        for a in roblox_module.ordonner_publication(
-                                _brut, len(_brut)):
-                            #  Trop vieux = plus une nouvelle. Pour
-                            #  « bascules » : seule une bascule VUE EN DIRECT.
-                            #  Le rattrapage unique (24 h) passe outre la
-                            #  fenêtre, une fois — et seulement lui.
-                            _sa["candidats"] += 1
-                            if not ((_unique and a.get("asset_id") in _rattrapes)
-                                    or roblox_module.age_publiable(a, flux)):
-                                _sa["hors_fenetre"] += 1
-                                continue
-                            #  Les nouveautés : des ACCESSOIRES, et une fiche
-                            #  par nom (06/10). `enfiler` décide ; ici on
-                            #  COMPTE, pour que le journal le dise.
-                            if flux == "nouveautes":
-                                if not roblox_module.est_accessoire(a):
-                                    _sa["ecartes_type"] = _sa.get("ecartes_type", 0) + 1
-                                    continue
-                                if await roblox_module.meme_nom_recent(g.id, a):
-                                    _sa["doublons_nom"] = _sa.get("doublons_nom", 0) + 1
-                                    continue
-                            #  Déjà sorti ici, OU déjà sorti dans un flux plus
-                            #  fort : on ne le republie pas ailleurs.
-                            if not await roblox_module.publiable_dans(
-                                    g.id, a["asset_id"], flux, article=a):
-                                _sa["deja"] += 1
-                                continue
-                            #  `enfiler` rend False si la transition est DÉJÀ
-                            #  en file : la contrainte d'unicité en base est ce
-                            #  qui garantit « jamais deux annonces », même après
-                            #  un redémarrage.
-                            if await roblox_module.enfiler(g.id, a, flux):
-                                _sa["enfiles"] += 1
-                                if a.get("asset_id") in _rattrapes:
-                                    _sa["rattrapes"] = _sa.get("rattrapes", 0) + 1
-                            elif a.get("hors_vente") and not a.get("collectionnable"):
-                                #  Écarté par la règle d'`enfiler` (il décide ;
-                                #  ici on ne fait que COMPTER) : sans ce compte,
-                                #  « 5 candidat(s) · 0 mise(s) en file »
-                                #  ressemblait à une panne (23/09).
-                                _sa["ecartes_regle"] = _sa.get("ecartes_regle", 0) + 1
-                    if _unique:
-                        await db_set(g.id, roblox_module.MARQUE_RATTRAPAGE_ACCESSOIRES,
-                                     datetime.now(timezone.utc).isoformat())
-
-            #  ⚠️ L'ANCIENNE « ÉTAPE 1 bis » — le flux UGC, le catalogue de
-            #  TOUS les créateurs — A ÉTÉ RETIRÉE le 23/09 à la demande du
-            #  propriétaire : « ce qui est créé par d'autres joueurs ne
-            #  m'intéresse pas », et ce relevé « consomme des données
-            #  monstrueuses ». Plus une requête, plus un salon, plus un rôle.
-
-            # ═══════════════════════════════════════════════════════════
-            #  ÉTAPES 2 et 3 — TIRER DE LA FILE ET PUBLIER
-            # ═══════════════════════════════════════════════════════════
-            #  ⚠️ EXTRAITES le 14/09/2026 dans `_publier_file_accessoires`,
-            #  partagée avec l'éclaireur. Un seul corps : réservation avant
-            #  envoi, marquage après succès, simulation, budget équitable.
-            _rp = await _publier_file_accessoires(
-                guildes_items, _budget,
-                pause_fiches=roblox_module.PAUSE_AVANT_FICHES)
-            _publies_a += _rp["publies"]
-            _reporte_a += _rp["reportes"]
-            _sa["echecs"] += _rp["echecs"]
-            _sa["simules"] += _rp["simules"]
-            _sa["non_marquees"] += _rp["non_marquees"]
-            _sa["file"] = _rp["file"]
-            _budget = _rp["budget"]
-            await roblox_module.purger()
-            #  Le chemin du catalogue est rendu au suivi de la tête de
-            #  classement. Voir `roblox_veille.catalogue_occupe`.
-            roblox_module.catalogue_occupe(False)
-            #  🎁 Les cartes cadeaux (29/09) : la page officielle au plus
-            #  toutes les 3 h, une fiche seulement quand sa liste change ; le
-            #  mois suivant, lu dans ce que ce passage vient de relever.
-            await _cartes_cadeaux(guildes_items, _vus_cartes)
-
-        # ── L'actualite ─────────────────────────────────────────────────────
-        if guildes_news:
-            for src in roblox_news_module.SOURCES:
-                rel = await roblox_news_module.relever(src)
-                #  Source non échue selon son propre rythme : on passe, sans
-                #  la compter en panne et sans dormir pour rien.
-                if rel.get("sautee"):
-                    _sn["sautees"] += 1
-                    continue
-                if rel["code"] != 200:
-                    _sn["pannes"] += 1
-                    await asyncio.sleep(2)
-                    continue
-                _sn["lus"] += len(rel.get("billets") or [])
-                #  ⚠️ LE COMPTEUR EXISTAIT, PERSONNE NE LE LISAIT. `relever`
-                #  rend `pointeurs` depuis le 18/08 ; la boucle ne le
-                #  ramassait pas. Résultat : trois semaines de notes de version
-                #  écartées sans qu'une seule ligne de journal le dise.
-                _sn["pointeurs"] = _sn.get("pointeurs", 0) + int(
-                    rel.get("pointeurs") or 0)
-                _sn["sans_interet"] = _sn.get("sans_interet", 0) + int(
-                    rel.get("sans_interet") or 0)
-                #  ⚠️ EXTRAIT le 14/09/2026 dans `_enfiler_billets`, partagé
-                #  avec l'éclaireur d'actualités. Un seul corps.
-                _re = await _enfiler_billets(guildes_news, rel)
-                for _k in ("deja", "absorbes", "enfiles", "plafonnes"):
-                    _sn[_k] = _sn.get(_k, 0) + _re[_k]
-                #  Pause ENTRE LES SOURCES : c'est elle qui evite le pare-feu.
-                await asyncio.sleep(2)
-
-            # ═══════════════════════════════════════════════════════════════
-            #  L'ENVOI DES ACTUALITÉS — une fois par serveur, sur SON budget
-            # ═══════════════════════════════════════════════════════════════
-            #  ⚠️ UN BUDGET PROPRE, ET C'EST LE CORRECTIF DE LA FAMINE.
-            #  Les deux flux se partageaient `MAX_PUBLICATIONS_PAR_PASSAGE`,
-            #  et les accessoires passaient EN PREMIER : douze fiches
-            #  d'accessoires en file, et les actualités recevaient ZÉRO
-            #  publication — passage après passage, sans que rien ne le dise.
-            #  L'envoi vit aussi HORS de la boucle des sources : il ne dépend
-            #  plus qu'une source réponde pour vider ce qui attend déjà.
-            #  ⚠️ EXTRAIT le 14/09/2026 dans `_publier_file_actualites`,
-            #  partagé avec l'éclaireur d'actualités. Un seul corps.
-            _rn = await _publier_file_actualites(guildes_news)
-            _publies_n += _rn["publies"]
-            for _k in ("echecs", "simules", "non_marquees"):
-                _sn[_k] = _sn.get(_k, 0) + _rn[_k]
-            _sn["file"] = _rn["file"]
-            await roblox_news_module.purger()
-            await roblox_news_module.purger_file_actu()
-
-        #  Le bilan, TOUJOURS — pas seulement quand quelque chose déborde.
-        #  C'est cette ligne qu'on cherche dans Railway quand « rien ne sort ».
-        print(f"[veille_roblox_task] passage terminé — accessoires sur "
-              f"{len(guildes_items)} serveur(s), actualités sur "
-              f"{len(guildes_news)} · {_publies_a} fiche(s) accessoire(s) et "
-              f"{_publies_n} actualité(s) réellement publiée(s) · "
-              f"{_reporte_a + _reporte_n} reportée(s)")
-        #  ⚠️ LE DÉTAIL, TOUJOURS. C'est lui qui répond à « pourquoi zéro ».
-        #  ⚠️ CES LIGNES DOIVENT S'ADDITIONNER, ET VOICI L'INVARIANT EXACT.
-        #  Par serveur : `candidats` = hors_fenetre + deja + (enfilés OU déjà
-        #  en file). `lus` compte le relevé UNE fois, `candidats` compte par
-        #  serveur — avec plusieurs serveurs, `candidats` peut donc dépasser
-        #  `lus`, et ce n'est pas une anomalie. Ce qui sort réellement se lit
-        #  sur la ligne « file d'envoi », pas ici. Un bilan qu'on croit
-        #  additif alors qu'il ne l'est pas fait chercher une panne là où il
-        #  n'y en a pas — c'est arrivé le 19/08 avec « 11 lus · 6 déjà
-        #  publiés · 0 publication ».
-        if guildes_items:
-            #  ⚠️ UN RELEVÉ TRONQUÉ NE DOIT PAS RESSEMBLER À UN RELEVÉ ENTIER.
-            #  Sur 429, la pagination s'arrête et garde ce qu'elle a — le bon
-            #  choix — mais rien ne le disait : « 964 lus » et « 720 lus »
-            #  s'affichaient pareil, alors que le second signifie qu'un quart
-            #  du catalogue n'a pas été comparé et qu'une nouveauté a pu passer
-            #  inaperçue.
-            if _sa.get("tronque"):
-                print(f"[veille_roblox_task]   ⚠️ relevé TRONQUÉ par un 429 "
-                      f"({_sa.get('pages', 0)} page(s) lues) — une nouveauté a "
-                      f"pu être manquée, reprise au prochain passage")
-            #  ⚠️ LA LIGNE QUI DIT SI LE CORRECTIF DU 20/08 TIENT.
-            #  `429=0` est le critère de réussite : avant, 48 passages sur 48
-            #  portaient `429=1`. `reste_min` dit s'il reste du budget — c'est
-            #  la seule chose qui distingue « notre cadence est trop rapide »
-            #  de « un voisin de l'IP Railway partagée a mangé le budget ».
-            _rm = _sa.get("reste_min")
-            print(f"[veille_roblox_task]   débit catalogue : {_sa.get('req', 0)} "
-                  f"requête(s) · 429={_sa.get('n429', 0)} · "
-                  f"pause {roblox_module.PAUSE_ENTRE_APPELS_CATALOGUE:.0f} s/page · "
-                  f"reste_min="
-                  + (f"{_rm}/12" if _rm is not None
-                     else "inconnu (en-têtes absents)"))
-            #  ⚠️ LA DÉTECTION D'ABORD, LES FILTRES ENSUITE. Cette ligne-ci dit
-            #  ce que Roblox a réellement changé ; la suivante dit ce que NOUS
-            #  en avons fait. Les confondre, c'est ce qui a masqué pendant des
-            #  semaines une auto-censure prise pour un catalogue calme.
-            print(f"[veille_roblox_task]   détection : "
-                  f"{_sa.get('detectes', 0)} article(s) jamais vu(s) · "
-                  f"{_sa.get('bascules', 0)} bascule(s) EN DIRECT · "
-                  f"{_sa.get('bascules_anciennes', 0)} bascule(s) vue(s) trop "
-                  f"tard (article revu il y a plus de "
-                  f"{roblox_module.FENETRE_DIRECTE_HEURES} h)"
-                  + (f" · dont {_sa['promotions']} UGC Limited devenu(s) "
-                     f"Limited" if _sa.get("promotions") else "")
-                  + (f" · {_sa['datees_roblox']} datée(s) par Roblox"
-                     if _sa.get("datees_roblox") else "")
-                  + (f" · {_sa['sorties']} création(s) mise(s) en vente"
-                     if _sa.get("sorties") else ""))
-            #  L'âge du plus récent : la seule ligne qui répond à « est-ce
-            #  cassé, ou Roblox ne crée rien ? » sans ouvrir la base.
-            _pf = _sa.get("plus_frais_h")
-            if _pf is not None:
-                print(f"[veille_roblox_task]   catalogue Roblox : création la "
-                      f"plus récente il y a {_pf / 24:.1f} jour(s) "
-                      f"({_pf:.0f} h) — la fenêtre de publication est de "
-                      f"{roblox_module.FENETRE_DIRECTE_HEURES} h"
-                      + ("" if _pf <= roblox_module.FENETRE_DIRECTE_HEURES
-                         else ", donc AUCUNE nouveauté n'est publiable "
-                              "aujourd'hui, et c'est la source qui est calme, "
-                              "pas le bot"))
-            #  ⚠️ L'ÉCLAIREUR DOIT PROUVER QU'IL VIT — même leçon que pour le
-            #  suivi de marché. Un éclaireur muet depuis plus de cinq passages
-            #  est un éclaireur mort, et le délai est revenu à 30 minutes sans
-            #  que rien ne le dise.
-            _E = _ECLAIREUR
-            _ap = _age_s(_E.get("dernier_passage"))
-            print(f"[veille_roblox_task]   éclaireur : {_E['passages']} passage(s) "
-                  f"à {ECLAIREUR_SECONDES} s · {_E['nouveautes']} nouveauté(s) · "
-                  f"{_E['bascules']} bascule(s) · {_E['publies']} publiée(s) sur "
-                  f"l'instant · {_E['sautes']} passage(s) cédé(s) au relevé · "
-                  f"{_E['erreurs']} erreur(s) · dernier passage "
-                  + (f"il y a {_ap:.0f} s" if _ap is not None else "JAMAIS")
-                  #  ⚠️ LE COMPTE DES REFUS REMPLACE 1 152 LIGNES PAR JOUR.
-                  #  C'est ici qu'on voit si l'IP partagée nous étrangle, et
-                  #  `reste` dit combien de requêtes l'API nous laissait.
-                  + (f" · 🚦 {_E['refus']} refus (429) dont "
-                     f"{_E.get('rattrapes', 0)} rattrapé(s) par le second "
-                     f"seau · plus longue série aveugle "
-                     f"{_E.get('serie_max', 0)} passage(s) · reste annoncé "
-                     f"{_E.get('reste')}/12"
-                     if _E.get("refus") else "")
-                  + (f" · 💎 surveillance : {_E.get('surveilles', 0)} article(s) "
-                     f"retiré(s) de la vente suivi(s), "
-                     f"{_E.get('verifs_surveillance', 0)} vérification(s), "
-                     f"{_E.get('bascules_surveillance', 0)} passage(s) en "
-                     f"Limited vu(s)"
-                     + (f", {_E['erreurs_surveillance']} échec(s)"
-                        if _E.get("erreurs_surveillance") else "")
-                     + (f", {_E['refus_surveillance']} refus du seau des fiches "
-                        f"(plus longue série {_E.get('serie_refus_fiches_max', 0)} "
-                        f"passage(s)"
-                        + (f", quota annoncé « {_E['quota_fiches']} »"
-                           if _E.get("quota_fiches") else "")
-                        + f") → {_E.get('verifs_economie', 0)} "
-                        f"vérification(s) par l'économie"
-                        + _bilan_economie(_E)
-                        if _E.get("refus_surveillance") else ""))
-                  + (f" · 📚 flux Limited : {_E.get('recensement_pages', 0)} "
-                     f"page(s) relue(s)"
-                     + (f", {_E['recensement_refus']} refus"
-                        if _E.get("recensement_refus") else "")
-                     + (f", 💎 {_E['promotions']} UGC Limited devenu(s) "
-                        f"Limited" if _E.get("promotions") else "")
-                     if (_E.get("recensement_pages")
-                         or _E.get("recensement_refus")) else "")
-                  + (f" · {_E['secours_retenus']} secours retenu(s) pour "
-                     f"protéger le relevé complet"
-                     if _E.get("secours_retenus") else "")
-                  + (f" · 🆕 {_E.get('fiches_tete', 0)} fiche(s) de nouveauté "
-                     f"reprise(s) à la tête"
-                     if _E.get("fiches_tete") else "")
-                  + (f" · {_E['fiches_ratees']} passage(s) sans fiche de "
-                     f"nouveauté"
-                     if _E.get("fiches_ratees") else "")
-                  + (f" · ralenti (palier {_E['palier']})" if _E.get("palier") else "")
-                  + (" · ⚠️ ÉCLAIREUR MUET : le délai est revenu à 30 min"
-                     if _ap is None
-                     or _ap > 5 * ECLAIREUR_SECONDES + ECLAIREUR_PAUSES[-1]
-                     else ""))
-            print(f"[veille_roblox_task]   accessoires : {_sa['lus']} lu(s) "
-                  f"(+{_sa.get('lus_hors_vente', 0)} hors vente) · "
-                  f"{_sa['candidats']} candidat(s) · {_sa['hors_fenetre']} hors "
-                  f"fenêtre ({roblox_module.FENETRE_DIRECTE_HEURES} h) · "
-                  f"{_sa['deja']} déjà sorti(s) · "
-                  + (f"{_sa['ecartes_type']} écarté(s) : pas un accessoire "
-                     f"(visage, sourcils, cils, pack…) · "
-                     if _sa.get("ecartes_type") else "")
-                  + (f"{_sa['doublons_nom']} doublon(s) de nom · "
-                     if _sa.get("doublons_nom") else "")
-                  + (f"{_sa['rattrapes']} rattrapé(s) · "
-                     if _sa.get("rattrapes") else "")
-                  + (f"{_sa['ecartes_regle']} écarté(s) : hors vente et pas "
-                     f"Limited · " if _sa.get("ecartes_regle") else "")
-                  + f"{_sa['enfiles']} mise(s) en "
-                  f"file · {_sa['echecs']} échec(s) d'envoi")
-
-            #  ⚠️ LA PREUVE DE VIE DE `veille_marche_task`. Elle ne parle que
-            #  quand la tête du classement CHANGE : sur cinq heures de journaux
-            #  du 01/09, zéro ligne. Silence normal et boucle morte étaient
-            #  indistinguables. Cette ligne-ci tranche, sans une seule requête
-            #  de plus vers Roblox (elle lit la base).
-            try:
-                _tete = await roblox_marche_module.tete_memorisee()
-            except Exception as _ex_tete:
-                _tete = None
-                print(f"[veille_roblox_task]   ⚠️ tête du marché illisible : "
-                      f"{type(_ex_tete).__name__}: {_ex_tete}")
-            if _tete is None:
-                print("[veille_roblox_task]   ⚠️ MARCHÉ : aucune tête de "
-                      "classement n'a JAMAIS été confirmée. La boucle "
-                      "`veille_marche_task` n'a pas encore abouti une seule "
-                      "fois — vérifiez qu'elle est démarrée et que le "
-                      "catalogue répond.")
-            else:
-                _age_min = None
-                try:
-                    _vu = datetime.fromisoformat(_tete["vu_le"])
-                    if _vu.tzinfo is None:
-                        _vu = _vu.replace(tzinfo=timezone.utc)
-                    _age_min = (datetime.now(timezone.utc)
-                                - _vu).total_seconds() / 60.0
-                except Exception:
-                    pass
-                print(f"[veille_roblox_task]   marché « Publié récemment » : "
-                      f"tête = « {_tete['nom']} » (#{_tete['asset_id']}, rang "
-                      f"{_tete['rang_marche']}, "
-                      f"{'en vente' if _tete['en_vente'] else 'hors vente'})"
-                      + (f" · confirmée il y a {_age_min:.0f} min"
-                         if _age_min is not None else " · date de contrôle illisible"))
-                if _age_min is not None and _age_min > MARCHE_FRAICHEUR_MIN:
-                    print(f"[veille_roblox_task]   ⚠️ MARCHÉ MUET depuis "
-                          f"{_age_min:.0f} min alors que la boucle passe "
-                          f"toutes les 4 min : `veille_marche_task` ne "
-                          f"confirme plus rien. La tête ci-dessus est un "
-                          f"souvenir, pas une mesure fraîche.")
-            #  ⚠️ LA FILE, TOUJOURS. Une fiche en attente est une fiche vivante :
-            #  tant que cette ligne existe, « reporté » n'est plus un
-            #  euphémisme pour « perdu » — c'est vérifiable en base.
-            if _sa.get("simules") or _sn.get("simules"):
-                print(f"[veille_roblox_task]   🧪 MODE SIMULATION ACTIF — "
-                      f"{_sa.get('simules', 0)} fiche(s) accessoire(s) et "
-                      f"{_sn.get('simules', 0)} actualité(s) retenue(s), "
-                      f"aucune n'est partie. Éteins « simulation » pour "
-                      f"qu'elles sortent.")
-            if _sa.get("non_marquees"):
-                print(f"[veille_roblox_task]   ⚠️ {_sa['non_marquees']} fiche(s) "
-                      f"PARTIE(S) que la base n'a pas pu marquer — elles "
-                      f"repartiront au prochain passage, donc un doublon est "
-                      f"probable. Cherchez « marquer_envoye » juste au-dessus.")
-            #  ⚠️ OÙ EN EST LA ROTATION DU FLUX LIMITED. Sans ces deux
-            #  nombres, un rembobinage silencieux sur 429 était indiscernable
-            #  d'un tour qui avance : personne ne pouvait dire si une bascule
-            #  manquée venait de Roblox ou du bot.
-            try:
-                _cur, _tours = await roblox_module._curseur_lu(
-                    roblox_module.SOURCE_RECENSEMENT)
-                _part, _c = roblox_module._position_recensement(_cur)
-                print(f"[veille_roblox_task]   flux Limited (3 parties, lu "
-                      f"par morceaux) : {_tours} tour(s) complet(s) · en "
-                      f"cours : « {roblox_module.PARTITIONS_LIMITED[_part][0]} »"
-                      + ("" if _tours else " · premier tour pas encore fini : "
-                         "un Limited jamais vu n'est pas encore daté par "
-                         "Roblox"))
-            except Exception as _ex_rot:
-                print(f"[veille_roblox_task]   ⚠️ flux Limited illisible : "
-                      f"{type(_ex_rot).__name__}: {_ex_rot}")
-            _f = _sa.get("file") or {}
-            if _f:
-                _vieille = _f.get("plus_vieille")
-                print(f"[veille_roblox_task]   file d'envoi : "
-                      f"{_f.get('attente', 0)} en attente · "
-                      f"{_f.get('envoyees', 0)} envoyée(s) au total · "
-                      f"{_f.get('abandonnees', 0)} abandonnée(s) après "
-                      f"{roblox_module.MAX_ESSAIS_ENVOI} essais"
-                      + (f" · la plus ancienne attend depuis {_vieille}"
-                         if _vieille else ""))
-        if guildes_news:
-            #  ⚠️ « repris au prochain passage » N'EST VRAI QUE DEPUIS LE
-            #  CORRECTIF DU 19/08. Tant que la troncature précédait la
-            #  déduplication, un billet plafonné était perdu — le journal
-            #  affirmait exactement l'inverse de ce que faisait le code.
-            print(f"[veille_roblox_task]   actualités : {_sn['lus']} billet(s) lu(s) · "
-                  f"{_sn['sautees']} source(s) sautée(s) (cadence) · "
-                  f"{_sn['pannes']} source(s) en panne · {_sn['deja']} déjà "
-                  f"publié(s) · {_sn['absorbes']} absorbé(s) (trop vieux, "
-                  f"> {roblox_news_module.AMORCE_GARDE_JOURS} j) · "
-                  f"{_sn['plafonnes']} au-delà du quota "
-                  f"({roblox_news_module.MAX_BILLETS_PAR_PASSAGE}/source, frais et non "
-                  f"publiés — repris au prochain passage) · "
-                  f"{_sn['echecs']} échec(s) d'envoi · "
-                  #  ⚠️ LES « POINTEURS » N'ÉTAIENT IMPRIMÉS NULLE PART.
-                  #  `grep -c pointeur bot.py` rendait 0 : le compteur existait
-                  #  dans le module, n'était lu que par le bouton manuel, et le
-                  #  bilan automatique n'en disait rien. Trois semaines de notes
-                  #  de version ont ainsi disparu sans laisser une ligne.
-                  f"{_sn.get('sans_interet', 0)} écarté(s) comme récap ou "
-                  f"tutoriel · "
-                  f"{_sn.get('pointeurs', 0)} écarté(s) comme « allez voir ce "
-                  f"lien » · {_sn.get('enfiles', 0)} mise(s) en file")
-            _fn = _sn.get("file") or {}
-            if _fn:
-                _EA = _ECLAIREUR_ACTU
-                _apa = _age_s(_EA.get("dernier_passage"))
-                print(f"[veille_roblox_task]   éclaireur d'actualités : "
-                      f"{_EA['passages']} passage(s) à {ECLAIREUR_ACTU_SECONDES} s · "
-                      f"{_EA['billets']} billet(s) vu(s) en premier · "
-                      f"{_EA['publies']} publié(s) sur l'instant · "
-                      f"{_EA['erreurs']} erreur(s) · dernier passage "
-                      + (f"il y a {_apa:.0f} s" if _apa is not None else "JAMAIS")
-                      + (f" · 🚧 le forum refuse le serveur depuis "
-                         f"{_age_s(roblox_news_module.FORUM['refus_depuis']) / 60:.0f} "
-                         f"min (HTTP {roblox_news_module.FORUM['code']}, "
-                         f"{roblox_news_module.FORUM['refus']} refus) — éclaireur "
-                         f"ralenti, {_EA.get('sautes', 0)} passage(s) sautés"
-                         if roblox_news_module.forum_refuse() else "")
-                      + (" · ⚠️ ÉCLAIREUR MUET"
-                         if _apa is None or _apa > 5 * ECLAIREUR_ACTU_SECONDES else ""))
-                print(f"[veille_roblox_task]   file d'actualités : "
-                      f"{_fn.get('attente', 0)} en attente · "
-                      f"{_fn.get('envoyees', 0)} envoyée(s) au total"
-                      + (f" · ⚠️ {_fn['abandonnees']} abandonnée(s) après "
-                         f"{roblox_news_module.MAX_ESSAIS_ACTU} essais"
-                         if _fn.get("abandonnees") else ""))
-            if _sn.get("non_marquees"):
-                print(f"[veille_roblox_task]   ⚠️ {_sn['non_marquees']} "
-                      f"actualité(s) PARTIE(S) que la base n'a pas pu marquer "
-                      f"— elles repartiront, donc un doublon est probable.")
-        #  ⚠️ ZÉRO PUBLICATION → ON DIT L'ÉTAT DE CHAQUE SERVEUR. Le cas qui a
-        #  coûté onze heures au propriétaire : un flux allumé, l'autre éteint,
-        #  et un bilan qui ne montrait que le total.
-        #  ⚠️ SUR LES ACCESSOIRES SEULS. Avec le compteur commun, un unique
-        #  billet d'actualité publié suffisait à supprimer ce diagnostic —
-        #  précisément dans le cas qu'il existe pour éclairer.
-        if _publies_a == 0 and guildes_items:
-            await _diag_veille_serveurs()
-        if _reporte_a or _reporte_n:
-            #  ⚠️ « Rien n'est perdu » A ÉTÉ UN MENSONGE PENDANT DES SEMAINES,
-            #  côté accessoires : la tranche jetait les fiches en trop, et le
-            #  journal affirmait le contraire. La phrase n'est vraie que depuis
-            #  que la file d'attente vit en base (30/08) — et elle ne s'écrit
-            #  plus qu'adossée au nombre de lignes réellement en attente.
-            #  ⚠️ ET LE CHIFFRE DE RASSURANCE NE COUVRE QUE LES ACCESSOIRES.
-            #  Il vient de `roblox_transitions`, où les actualités n'entrent
-            #  pas : l'adosser à un total mêlant les deux flux ferait dire à
-            #  la file qu'elle protège des billets qu'elle n'a jamais vus.
-            _att = (_sa.get("file") or {}).get("attente")
-            print(f"[veille_roblox_task] plafond atteint — "
-                  f"{_reporte_a} fiche(s) accessoire(s) et {_reporte_n} "
-                  f"actualité(s) reportée(s) au prochain passage (30 min)"
-                  + (f" · {_att} fiche(s) accessoire(s) en file en base, "
-                     f"donc rien n'est perdu de ce côté"
-                     if _att is not None else ""))
+        await _relever_actus()
     except Exception as ex:
         print(f"[veille_roblox_task] {ex}")
-    finally:
-        #  ⚠️ TOUJOURS RENDRE LE CHEMIN. Une exception entre la levée et
-        #  l'abaissement du drapeau laisserait `veille_marche_task` s'effacer
-        #  À CHAQUE passage, pour toujours, et EN SILENCE — c'est-à-dire une
-        #  boucle vivante qui ne fait plus rien. Le `finally` ferme ce trou.
-        roblox_module.catalogue_occupe(False)
 
 
 @veille_roblox_task.before_loop
@@ -15510,198 +14435,6 @@ async def _veille_roblox_wait():
 #   panneau puisse le lever lui aussi — il ne le pouvait pas depuis ici.)
 
 
-@tasks.loop(minutes=4)
-async def veille_marche_task():
-    """Suit le premier du classement officiel. Ne publie rien : il observe."""
-    if roblox_module.catalogue_est_occupe():
-        #  Silencieux à dessein : ce n'est pas un incident, c'est une priorité.
-        return
-    try:
-        #  Aucun serveur n'a allumé la veille → rien à observer, on ne tape pas
-        #  l'API pour rien. C'est la consigne « ne pas spammer une recherche
-        #  qui sert à rien », appliquée à la lettre.
-        _actifs = False
-        for g in list(bot.guilds):
-            try:
-                if await roblox_module.actif(g.id):
-                    _actifs = True
-                    break
-            except Exception:
-                continue
-        if not _actifs:
-            return
-
-        rep = await roblox_marche_module.relever_page(limite=120)
-        if rep["code"] != 200:
-            #  ⚠️ ON GARDE LE DERNIER CONFIRMÉ. « Une erreur API conserve le
-            #  dernier résultat confirmé » — on ne remplace pas une vérité
-            #  connue par un trou.
-            print(f"[veille_marche_task] classement injoignable — HTTP "
-                  f"{rep['code']} · le dernier confirmé est conservé")
-            return
-        chg = await roblox_marche_module.noter_tete(rep["items"])
-        if chg["change"]:
-            _tete = next((x for x in rep["items"] if x["accepte"]), None)
-            print(f"[veille_marche_task] 🏪 LA TÊTE DU CLASSEMENT A CHANGÉ — "
-                  f"{chg['avant']} → {chg['maintenant']}"
-                  + (f" « {_tete['nom']} » ({_tete['motif']})" if _tete else ""))
-    except Exception as ex:
-        print(f"[veille_marche_task] {type(ex).__name__}: {ex}")
-
-
-@veille_marche_task.before_loop
-async def _veille_marche_wait():
-    await bot.wait_until_ready()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  L'ÉCLAIREUR — savoir À L'INSTANT, sans relevé complet
-# ═══════════════════════════════════════════════════════════════════════════
-#  DEMANDE DU PROPRIÉTAIRE (14/09/2026) : « ça prend beaucoup plus de temps
-#  que d'autres serveurs et il faut que ce soit sur l'instant t […] sans que
-#  ça envoie trop de demandes ».
-#
-#  CE QUI COÛTAIT DU TEMPS, MESURÉ DANS LE CODE : le passage complet tourne
-#  toutes les 30 minutes, pagine 9 à 12 pages à 8 s de pause chacune (~100 s),
-#  puis attend 60 s avant les fiches. Une création survenant juste après un
-#  passage attendait donc jusqu'à 33 minutes. Rien n'était cassé : c'était
-#  l'architecture — un seul rythme pour DÉTECTER et pour RELEVER.
-#
-#  LE PRINCIPE : séparer les deux. L'éclaireur pose UNE question toutes les
-#  75 s — « y a-t-il un identifiant que je n'ai jamais vu ? » — via
-#  `/v1/search/items`, identifiants seuls, quelques kilo-octets, et SON PROPRE
-#  quota de 12/min (mesuré le 14/09 : distinct de celui des fiches). Quand la
-#  réponse est non — la quasi-totalité des passages — il s'arrête là. Quand
-#  elle est oui, il va chercher LES fiches concernées (une requête pour tout le
-#  lot), les passe dans la MÊME détection, la MÊME file et le MÊME corps de
-#  publication que le passage complet. Celui-ci reste, toutes les 30 minutes :
-#  c'est la réconciliation, le filet.
-#
-#  COÛT : 2 requêtes par passage (créations + collectionnables), soit 1,6/min
-#  sur un quota de 12 — et zéro sur le quota des fiches tant que rien ne bouge.
-#  `tour` : l'alternance créations/collectionnables. `palier` : où en est le
-#  ralentissement. `pause_jusqu` : quand on se réveille. `refus` : combien de
-#  429 depuis le démarrage — il part dans le bilan, plus dans 1 152 lignes.
-_ECLAIREUR = {"amorce": False, "vus": set(), "vus_limited": set(),
-              "tour": 0, "palier": 0, "pause_jusqu": None, "refus": 0,
-              "reste": None,
-              #  `rattrapes` : refus sauvés par le SECOND SEAU (les fiches).
-              #  `serie` / `serie_max` : passages aveugles d'affilée.
-              #  `dernier_succes` : l'horloge de l'alerte d'aveuglement.
-              "rattrapes": 0, "serie": 0, "serie_max": 0, "alerte": False,
-              "dernier_refus": None, "dernier_succes": None,
-              #  Secours retenus pour protéger le relevé complet, et la pause
-              #  du second seau quand il annonce lui-même peu de jetons.
-              "secours_retenus": 0, "secours_pause_jusqu": None,
-              #  La surveillance des articles retirés de la vente (23/09) :
-              #  combien on en suit, combien de vérifications, combien de
-              #  passages en Limited vus par ELLE.
-              "surveilles": 0, "verifs_surveillance": 0,
-              "bascules_surveillance": 0, "erreurs_surveillance": 0,
-              #  Le relais par l'économie quand le seau des fiches est refusé.
-              "refus_surveillance": 0, "verifs_economie": 0,
-              "curseur_surveillance": 0,
-              #  Pourquoi le relais s'arrête (23/09 : 2 articles par relais sur
-              #  Railway, 9 sur 9 ailleurs) et combien de temps les fiches
-              #  restent refusées d'affilée — le pire retard de la surveillance.
-              "arrets_economie": 0, "dernier_arret_economie": None,
-              "codes_economie": {},
-              "serie_refus_fiches": 0, "serie_refus_fiches_max": 0,
-              #  Le quota annoncé au dernier refus de la requête groupée.
-              "quota_fiches": None,
-              #  Les nouveautés dont la fiche manque encore (23/09) : combien
-              #  d'essais, le dernier lot DIT (une ligne par lot, plus une par
-              #  passage), et combien de fiches reprises à la tête.
-              "fiches_ratees": 0, "dernier_lot_rate": None, "fiches_tete": 0,
-              #  Le flux Limited relu par morceaux (27/09) : pages lues,
-              #  refus, pages retenues pour le relevé, et combien d'UGC
-              #  Limited de Roblox vus devenir de vrais Limited.
-              "recensement_pages": 0, "recensement_refus": 0,
-              "recensement_retenus": 0, "promotions": 0,
-              "passages": 0, "sautes": 0, "erreurs": 0,
-              "nouveautes": 0, "bascules": 0, "publies": 0,
-              "dernier_passage": None, "dernier_signal": None}
-#  45 s au lieu de 75 : avec UNE requête par passage (alternance), la
-#  consommation tombe de 1,6 à 1,3 requête/min sur un seau de 12 — et chaque
-#  file est regardée toutes les 90 s au pire, tout de suite quand le quota est
-#  large. Mesuré le 22/09 : `x-ratelimit-limit: 12, 12;w=60`.
-ECLAIREUR_SECONDES = 45
-#  Le ralentissement en cas de refus, en secondes de pause SUPPLÉMENTAIRE.
-#  Dernier palier : dix minutes — au-delà, le relevé complet reprend la main
-#  de toute façon, et marteler une IP saturée n'a jamais rendu un quota.
-ECLAIREUR_PAUSES = (0, 45, 135, 315, 555)
-#  (`ECLAIREUR_RESTE_CONFORTABLE` et `ECLAIREUR_SOBRIETE_S` ont été RETIRÉS le
-#  23/09 avec la seconde sonde qu'ils réglaient : le tri de Roblox étant
-#  l'ordre de création, la tête des collectionnables n'apprenait rien que la
-#  tête générale ne dise déjà. Un réglage sans effet est un réglage qui ment.)
-#  ⚠️ LE SECOURS NE DOIT PAS MANGER LA MARGE DU RELEVÉ COMPLET. Mesuré en
-#  production (22/09 → 23/09) : depuis le second seau, le relevé complet est
-#  passé de `reste_min=3/12` à 1 ou 2 — la fenêtre glissante de 60 s compte
-#  encore une requête de secours faite juste AVANT lui. Pas de secours dans
-#  les 75 s qui précèdent un relevé : il regardera lui-même, rien n'est perdu.
-ECLAIREUR_AVANT_RELEVE_S = 75
-#  Jusqu'à ce nombre d'articles surveillés (~30 Ko la requête), on vérifie à
-#  CHAQUE passage ; au-delà, un passage sur deux — la réponse grossit avec la
-#  liste, et le seau des fiches (10/min) sert aussi aux nouveautés.
-#  Mesuré le 23/09 : 28 articles retirés de la vente avec un vrai prix.
-ECLAIREUR_SURVEILLANCE_LEGERE = 40
-#  Le relais par l'économie : combien d'articles par passage, AU PLUS. 9 ×
-#  toutes les 45 s = 12 requêtes/min sur un quota mesuré à 1000/min depuis un
-#  poste résidentiel. ⚠️ SUR L'IP DE RAILWAY, l'économie s'arrête au 3ᵉ
-#  (production du 23/09 : 18 vérifications pour 9 relais) : le curseur avance
-#  donc de ce qui a été VU, et la liste entière est quand même revue — plus
-#  lentement, deux articles par relais. Le bilan dit pourquoi elle s'arrête.
-ECLAIREUR_TRANCHE_ECONOMIE = 9
-#  ⚠️ LE FLUX LIMITED, UNE PAGE TOUS LES QUATRE PASSAGES (27/09). Le relevé de
-#  30 min en lit deux : seul, il mettait ~4 h 30 à faire le tour des 1 997
-#  Limiteds (18 pages en trois parties, mesuré). Avec une page toutes les
-#  3 min ici, le tour prend ~45 min : un passage en Limited sort dans l'heure.
-#  Même seau que le secours (`/v2/search/items/details`), mêmes gardes.
-ECLAIREUR_RECENSEMENT_PASSAGES = 4
-
-
-def _bilan_economie(E) -> str:
-    """Ce que le relais par l'économie a rencontré, pour le bilan de 30 min.
-
-    ⚠️ C'EST ICI QU'ON SAURA POURQUOI ELLE S'ARRÊTE SUR RAILWAY. Depuis un
-    poste résidentiel : 27 requêtes sur 27, quota « 1000, 1000;w=60 » (mesuré
-    le 23/09) ; en production : 2 articles par relais, exactement. Le quota
-    que Roblox annonce AU MOMENT du refus départage « l'IP partagée l'a
-    vidé » (reste 0 sur 1000) d'« une autre limite pour les hébergeurs ».
-    Les autres codes (404…) étaient avalés sans un mot : ils sont comptés.
-    """
-    morceaux = []
-    n = E.get("arrets_economie", 0)
-    if n:
-        a = E.get("dernier_arret_economie") or {}
-        _reste = a.get("reste")
-        morceaux.append(
-            f"arrêtée {n} fois par un 429 (la dernière après "
-            f"{a.get('apres', '?')} article(s) · quota annoncé "
-            f"« {a.get('limite') or '?'} » · reste "
-            f"{_reste if _reste is not None else '?'} · retry-after "
-            f"{a.get('retry_after') or '—'})")
-    autres = {c: k for c, k in (E.get("codes_economie") or {}).items()
-              if c not in (200, 429)}
-    if autres:
-        morceaux.append("autres réponses : " + ", ".join(
-            f"HTTP {c} ×{k}" for c, k in sorted(autres.items())))
-    #  Suit « → N vérification(s) par l'économie » dans le bilan.
-    return (", " + ", ".join(morceaux)) if morceaux else ""
-#  Si le second seau annonce lui-même 3 jetons ou moins, on le laisse souffler
-#  une minute : le relevé complet et le suivi de marché en dépendent.
-ECLAIREUR_SECOURS_RESTE_MIN = 3
-ECLAIREUR_SECOURS_PAUSE_S = 60
-#  ⚠️ LE SEUIL DE L'ALERTE, EN TEMPS ET PAS EN PASSAGES. Un refus isolé sur
-#  une IP partagée est la météo ; dix minutes sans rien voir, c'est une panne.
-#  Mesuré le 22/09 : avec « une ligne à chaque changement d'état », l'état
-#  basculait à chaque passage et le journal portait ~1 100 lignes par jour.
-ECLAIREUR_ALERTE_APRES_S = 600
-#  ⚠️ LA LIGNE DE VIE — la leçon de `veille_marche_task`, qui n'a rien écrit
-#  pendant cinq heures : une boucle muette est indiscernable d'une boucle
-#  morte. Toutes les 24 × 75 s = 30 min sans rien, une ligne quand même.
-ECLAIREUR_BATTEMENT = 24
-
 
 def _age_s(quand) -> float | None:
     if quand is None:
@@ -15711,482 +14444,6 @@ def _age_s(quand) -> float | None:
     except Exception:
         return None
 
-
-def _second_seau_libre(E) -> bool:
-    """Le second seau peut-il servir MAINTENANT ?
-
-    ⚠️ DEUX GARDES, PARCE QU'IL N'EST PAS À NOUS SEULS : le relevé complet et
-    le suivi de marché passent par lui. Pas dans les 75 s qui précèdent un
-    relevé (mesuré : un secours juste avant lui coûtait sa marge, reste_min
-    3 → 1), et pas pendant la pause qu'il a lui-même demandée.
-    """
-    _maint = datetime.now(timezone.utc)
-    _prochain = getattr(veille_roblox_task, "next_iteration", None)
-    try:
-        if (_prochain is not None and 0 <= (
-                _prochain - _maint).total_seconds() < ECLAIREUR_AVANT_RELEVE_S):
-            return False
-    except Exception:
-        pass
-    _p = E.get("secours_pause_jusqu")
-    return not (_p is not None and _maint < _p)
-
-
-def _noter_second_seau(E, r) -> None:
-    """Après une requête au second seau : une minute de répit s'il annonce
-    lui-même 3 jetons ou moins."""
-    if r.get("code") == 200:
-        _rs = r.get("reste")
-        if _rs is not None and _rs <= ECLAIREUR_SECOURS_RESTE_MIN:
-            E["secours_pause_jusqu"] = datetime.now(timezone.utc) + timedelta(
-                seconds=ECLAIREUR_SECOURS_PAUSE_S)
-
-
-async def _surveiller_retires(guildes, E) -> int:
-    """Vérifie d'UN coup les articles retirés de la vente. Rend les publiés.
-
-    ⚠️ C'EST ELLE QUI VOIT LES VRAIS « PASSE LIMITED ». Le propriétaire
-    (23/09) : « en vente, retirés de la vente, et d'un seul coup ils passent
-    Limited ». Or le tri « récents » de Roblox est l'ordre de CRÉATION
-    (mesuré) : un article retiré depuis des mois qui passe Limited ne
-    remonte en tête d'aucune liste. Aucune sonde de tête ne le verrait ; le
-    relevé de 30 min était le seul filet. Ici on va le regarder, LUI, avec
-    tous les autres, en UNE requête (120 max, seau des fiches, 10/min).
-
-    La MÊME détection que partout : `comparer_et_enregistrer` pose
-    `bascule_detectee` quand un article connu non Limited le devient — et la
-    surveillance le revoit toutes les 45 s, donc la bascule est toujours
-    observée « en direct ». Aucune règle nouvelle, aucun doublon possible.
-    """
-    try:
-        ids = await roblox_module.liste_de_surveillance()
-        E["surveilles"] = len(ids)
-        if not ids:
-            return 0
-        if len(ids) > ECLAIREUR_SURVEILLANCE_LEGERE and E["passages"] % 2:
-            return 0                  # liste longue : un passage sur deux
-        fiches = await roblox_module.fiches_par_ids(ids)
-        E["verifs_surveillance"] += 1
-        if fiches:
-            E["serie_refus_fiches"] = 0
-        elif roblox_module.DERNIER_CODE_FICHES == 429:
-            #  ⚠️ LE SEAU DES FICHES EST REFUSÉ SUR L'IP PARTAGÉE (mesuré en
-            #  production le 23/09). L'économie a son propre quota : elle prend
-            #  le relais par tranches, en rotation, et ne rend que les articles
-            #  DEVENUS Limited.
-            E["refus_surveillance"] += 1
-            E["quota_fiches"] = getattr(roblox_module, "DERNIER_QUOTA_FICHES",
-                                        None) or E.get("quota_fiches")
-            E["serie_refus_fiches"] = E.get("serie_refus_fiches", 0) + 1
-            E["serie_refus_fiches_max"] = max(E.get("serie_refus_fiches_max", 0),
-                                              E["serie_refus_fiches"])
-            c = E.get("curseur_surveillance", 0) % len(ids)
-            tranche = (ids[c:] + ids[:c])[:ECLAIREUR_TRANCHE_ECONOMIE]
-            _r = await roblox_module.verifier_par_economie(tranche)
-            #  ⚠️ LE CURSEUR AVANCE DE CE QUI A ÉTÉ REGARDÉ, PAS DE LA TRANCHE.
-            #  Production du 23/09 : 9 relais → 18 vérifications. L'économie
-            #  s'arrêtait au 3ᵉ article, le curseur sautait quand même de 9 ;
-            #  27 = 3 × 9, les tranches étaient toujours les trois mêmes, et 21
-            #  articles sur 27 n'étaient JAMAIS regardés par le relais.
-            E["curseur_surveillance"] = (c + int(_r.get("avance") or 0)) % len(ids)
-            E["verifs_economie"] += int(_r.get("vus") or 0)
-            if _r.get("arret"):
-                E["arrets_economie"] = E.get("arrets_economie", 0) + 1
-                E["dernier_arret_economie"] = _r["arret"]
-            _codes = E.setdefault("codes_economie", {})
-            for _code, _n in (_r.get("codes") or {}).items():
-                _codes[_code] = _codes.get(_code, 0) + _n
-            fiches = _r.get("devenus") or []
-            if not fiches:
-                return 0
-        else:
-            E["erreurs_surveillance"] += 1
-            return 0
-        evts = await roblox_module.comparer_et_enregistrer(fiches)
-        bascules = evts.get("bascules") or []
-        if not bascules:
-            return 0
-        E["bascules_surveillance"] += len(bascules)
-        E["bascules"] += len(bascules)
-        rp = await _publier_bascules(guildes, bascules, E, "surveillance")
-        print(f"[eclaireur] 💎 {len(bascules)} passage(s) en Limited vu(s) par "
-              f"la surveillance · {rp['enfiles']} mis en file · "
-              f"{rp['publies']} publié(s) sur l'instant")
-        return rp["publies"]
-    except Exception as ex:
-        E["erreurs_surveillance"] += 1
-        print(f"[eclaireur surveillance] {type(ex).__name__}: {ex}")
-        return 0
-
-
-async def _publier_bascules(guildes, bascules, E, etiquette: str) -> dict:
-    """Met en file et publie des passages en Limited. Rend `{enfiles, publies}`.
-
-    ⚠️ DEUX APPELANTS, UN SEUL CORPS (27/09) : la surveillance des articles
-    retirés de la vente et la relecture du flux Limited. Mêmes filtres que le
-    passage complet — fenêtre, « déjà sorti » (la promotion d'un UGC Limited
-    passe : `article=`), unicité en base — et même publication.
-    """
-    enfiles = 0
-    for g in guildes:
-        for a in roblox_module.ordonner_publication(bascules, len(bascules)):
-            if not roblox_module.age_publiable(a, "bascules"):
-                continue
-            if not await roblox_module.publiable_dans(
-                    g.id, a["asset_id"], "bascules", article=a):
-                continue
-            if await roblox_module.enfiler(g.id, a, "bascules"):
-                enfiles += 1
-    rp = {"publies": 0}
-    if enfiles:
-        rp = await _publier_file_accessoires(
-            guildes, roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE,
-            pause_fiches=0, etiquette=etiquette)
-        E["publies"] += rp["publies"]
-        E["dernier_signal"] = datetime.now(timezone.utc)
-    return {"enfiles": enfiles, "publies": int(rp.get("publies", 0))}
-
-
-async def _recenser_limited(guildes, E) -> int:
-    """Une page du flux Limited, tous les ECLAIREUR_RECENSEMENT_PASSAGES
-    passages. Rend les publiés.
-
-    ⚠️ C'EST ELLE QUI VOIT LES PROMOTIONS À TEMPS (27/09). Le 22/09 vers
-    23:05 UTC, Roblox a reclassé des « UGC Limited » à lui en Limited U :
-    ils étaient dans ce flux avant ET après, seule leur classe a changé. La
-    surveillance ne regarde que des articles NON collectionnables, et le
-    relevé de 30 min, seul, faisait le tour du flux en ~4 h 30.
-    """
-    if E["passages"] % ECLAIREUR_RECENSEMENT_PASSAGES:
-        return 0
-    if not _second_seau_libre(E):
-        E["recensement_retenus"] = E.get("recensement_retenus", 0) + 1
-        return 0
-    try:
-        r = await roblox_module.relever_collectionnables(
-            limite=120, pages=1, reprises=False)
-        _noter_second_seau(E, {"code": r.get("code"),
-                               "reste": r.get("reste_min")})
-        if r.get("code") != 200:
-            E["recensement_refus"] = E.get("recensement_refus", 0) + 1
-            return 0
-        E["recensement_pages"] = (E.get("recensement_pages", 0)
-                                  + int(r.get("pages") or 0))
-        evts = await roblox_module.comparer_et_enregistrer(
-            r.get("articles") or [])
-        bascules = evts.get("bascules") or []
-        if not bascules:
-            return 0
-        E["bascules"] += len(bascules)
-        E["promotions"] = E.get("promotions", 0) + sum(
-            1 for a in bascules if a.get("classe_avant"))
-        rp = await _publier_bascules(guildes, bascules, E, "flux Limited")
-        print(f"[eclaireur] 💎 {len(bascules)} passage(s) en Limited vu(s) "
-              f"dans le flux Limited (partie « {r.get('partie')} ») · "
-              f"{rp['enfiles']} mis en file · {rp['publies']} publié(s) sur "
-              f"l'instant")
-        return rp["publies"]
-    except Exception as ex:
-        E["erreurs"] += 1
-        print(f"[eclaireur flux Limited] {type(ex).__name__}: {ex}")
-        return 0
-
-
-@tasks.loop(seconds=ECLAIREUR_SECONDES)
-async def eclaireur_task():
-    """Toutes les 75 s : deux requêtes d'identifiants, et rien de plus si rien
-    n'a bougé. Voir le cadre ci-dessus."""
-    E = _ECLAIREUR
-    try:
-        #  Le passage complet tient le chemin des fiches : on lui laisse la
-        #  place. Il publiera lui-même ce qu'il trouve — au pire, 4 minutes
-        #  de retard toutes les 30, jamais un doublon.
-        if roblox_module.catalogue_est_occupe():
-            E["sautes"] += 1
-            return
-        #  Le ralentissement après refus : on saute les passages au lieu de
-        #  marteler une IP saturée.
-        if E["pause_jusqu"] and datetime.now(timezone.utc) < E["pause_jusqu"]:
-            E["sautes"] += 1
-            return
-        guildes = []
-        for g in list(bot.guilds):
-            try:
-                if await roblox_module.actif(g.id):
-                    guildes.append(g)
-            except Exception:
-                continue
-        if not guildes:
-            return
-
-        #  ⚠️ L'AMORCE : on part de ce que le relevé complet connaît déjà.
-        #  Sans elle, le premier passage verrait 120 identifiants « jamais
-        #  vus » et irait chercher 120 fiches pour rien.
-        if not E["amorce"]:
-            tous, lim = await roblox_module.identifiants_connus()
-            E["vus"] |= tous
-            E["vus_limited"] |= lim
-            E["amorce"] = True
-            E["dernier_succes"] = datetime.now(timezone.utc)
-            print(f"[eclaireur] amorcé : {len(tous)} identifiant(s) connu(s), "
-                  f"{len(lim)} collectionnable(s) — je ne réagirai qu'à ce que "
-                  f"le relevé complet n'a jamais vu")
-
-        #  ⚠️ UNE REQUÊTE PAR PASSAGE, EN ALTERNANCE. Les deux collées se
-        #  faisaient refuser la seconde à CHAQUE passage en production : le
-        #  seau de 12/min est par IP, et l'IP de Railway est partagée. Une
-        #  requête qu'on sait condamnée est une requête gâchée.
-        #  ⚠️ UNE SEULE FILE UTILE → ON NE REGARDE QU'ELLE (23/09). Les
-        #  nouveautés éteintes partout, interroger les créations ne
-        #  publierait rien et coûterait une requête sur deux : les Limited
-        #  sont alors regardés à CHAQUE passage — deux fois plus vite, pour
-        #  le même débit.
-        _cfgs = []
-        for _g in guildes:
-            try:
-                _cfgs.append(await roblox_module.config(_g.id))
-            except Exception:
-                continue
-        _veut_n = any(roblox_module.flux_allume(_c, "nouveautes") for _c in _cfgs)
-        _veut_b = any(roblox_module.flux_allume(_c, "bascules") for _c in _cfgs)
-        if not (_veut_n or _veut_b):
-            return                    # rien que l'éclaireur sache regarder
-        #  ⚠️ LA SURVEILLANCE PASSE D'ABORD, ET SUR SON PROPRE SEAU. Elle ne
-        #  dépend pas de la sonde de tête : si l'IP partagée refuse la sonde,
-        #  les passages en Limited continuent d'être vus.
-        if _veut_b:
-            await _surveiller_retires(guildes, E)
-            await _recenser_limited(guildes, E)
-        if not _veut_n:
-            #  Nouveautés éteintes partout : la sonde de tête ne publierait
-            #  rien. La surveillance a fait le travail utile de ce passage.
-            E["passages"] += 1
-            E["dernier_passage"] = datetime.now(timezone.utc)
-            return
-        #  ⚠️ UNE SEULE SONDE DE TÊTE, À CHAQUE PASSAGE (23/09, MESURÉ). La tête
-        #  des collectionnables ne contient que des Limited NOUVEAUX, qui sont
-        #  aussi en tête de la liste générale ; et un vieil article qui passe
-        #  Limited n'apparaît en tête d'AUCUNE des deux. La seconde sonde
-        #  coûtait une requête sur deux pour ne rien voir de plus.
-        collect = False
-        E["tour"] += 1
-        if E.get("dernier_succes") is None:
-            E["dernier_succes"] = datetime.now(timezone.utc)
-        _r0 = await roblox_module.relever_identifiants(collectionnables=collect)
-        E["reste"] = _r0.get("reste")
-        _retenu = False
-        if _r0["code"] == 429:
-            #  ⚠️ LE SECOND SEAU, TOUT DE SUITE — ET PAS `retry-after`.
-            #  Mesuré le 23/09 : attendre le `retry-after: 5` annoncé puis
-            #  réessayer rend encore 429 (2 essais sur 2) — l'en-tête ment,
-            #  c'est la fenêtre de 60 s qui décide. En revanche le point d'API
-            #  des fiches a son propre compteur, rend la même tête (10/10 et
-            #  8/8), et n'est PAS disputé en production (relevé complet :
-            #  429=0). Même question, autre seau, zéro attente.
-            E["refus"] += 1
-            E["dernier_refus"] = datetime.now(timezone.utc)
-            #  ⚠️ LES DEUX GARDES DU SECOND SEAU : voir `_second_seau_libre`.
-            if not _second_seau_libre(E):
-                #  Rien n'est perdu : le relevé regarde lui-même dans 75 s au
-                #  plus, ou le passage suivant réessaiera le premier seau.
-                E["secours_retenus"] = E.get("secours_retenus", 0) + 1
-                _retenu = True
-            else:
-                _r0 = await roblox_module.relever_identifiants(
-                    collectionnables=collect, seau="fiches")
-                if _r0["code"] == 200:
-                    E["rattrapes"] += 1
-                    _noter_second_seau(E, _r0)
-                elif _r0["code"] == 429:
-                    E["refus"] += 1
-        reponses = [(collect, _r0)]
-        E["passages"] += 1
-        E["dernier_passage"] = datetime.now(timezone.utc)
-
-        ok = [(c, r) for c, r in reponses if r["code"] == 200]
-        if not ok and _retenu:
-            #  ⚠️ UNE RETENUE N'EST PAS UN ÉCHEC (28/09). Journal de ce jour :
-            #  « 14 erreur(s) · ralenti (palier 1) », une par relevé, toujours
-            #  le passage des 75 s qui le précèdent — là où le secours est
-            #  RETENU exprès, et où le relevé regarde lui-même juste après. La
-            #  compter en erreur et ralentir accusait le bot d'une panne qui
-            #  n'existe pas. Le refus reste compté (`refus`, `secours_retenus`).
-            return
-        if not ok:
-            #  ⚠️ SILENCE SUR LES REFUS PASSAGERS. « Une ligne au changement
-            #  d'état » a été réfuté par la production : sur une IP partagée
-            #  l'état bascule à chaque passage, et on retombait à ~1 100 lignes
-            #  par jour. Les chiffres vont dans le bilan de 30 min ; le journal
-            #  ne parle que d'un aveuglement qui DURE.
-            E["erreurs"] += 1
-            E["serie"] += 1
-            E["serie_max"] = max(E["serie_max"], E["serie"])
-            E["palier"] = min(E["palier"] + 1, len(ECLAIREUR_PAUSES) - 1)
-            _sup = ECLAIREUR_PAUSES[E["palier"]]
-            if _sup:
-                E["pause_jusqu"] = (datetime.now(timezone.utc)
-                                    + timedelta(seconds=_sup))
-            _aveugle = (datetime.now(timezone.utc)
-                        - E["dernier_succes"]).total_seconds()
-            if _aveugle >= ECLAIREUR_ALERTE_APRES_S and not E["alerte"]:
-                E["alerte"] = True
-                print(f"[eclaireur] ⚠️ AVEUGLE depuis {_aveugle / 60:.0f} min "
-                      f"({E['serie']} passage(s) refusé(s) d'affilée, HTTP "
-                      f"{reponses[0][1]['code']}) — les nouveautés attendent "
-                      f"le relevé de 30 min. Cause probable : l'IP partagée de "
-                      f"Railway, pas le code.")
-            return
-        E["serie"] = 0
-        E["dernier_succes"] = datetime.now(timezone.utc)
-        if E["palier"]:
-            E["palier"] = 0
-            E["pause_jusqu"] = None
-        if E["alerte"]:
-            #  Une ligne de fin, SEULEMENT s'il y a eu une ligne de début.
-            E["alerte"] = False
-            print(f"[eclaireur] ✅ de nouveau lisible — fin de l'aveuglement "
-                  f"({E['serie_max']} passage(s) refusé(s) au plus fort)")
-
-        #  ⚠️ CHAQUE RÉUSSITE COMPTE POUR SA PROPRE FILE. Verser des
-        #  identifiants de créations dans la mémoire des collectionnables
-        #  masquerait une bascule Limited pour toujours.
-        neufs = set()
-        for c, r in ok:
-            cle = "vus_limited" if c else "vus"
-            neufs |= (r["ids"] - E[cle])
-            E[cle] |= r["ids"]
-        if not neufs:
-            if E["passages"] % ECLAIREUR_BATTEMENT == 0:
-                _ds = _age_s(E["dernier_signal"])
-                print(f"[eclaireur] {E['passages']} passage(s) · rien de nouveau · "
-                      + (f"seau des identifiants {E.get('reste')}/12 "
-                         f"(saturé par l'IP partagée — le second seau prend "
-                         f"le relais) · " if E.get("reste") == 0
-                         else f"seau des identifiants {E.get('reste')}/12 · ")
-                      + f"dernier "
-                      f"signal : "
-                      + (f"il y a {_ds / 60:.0f} min" if _ds is not None
-                         else "jamais depuis le démarrage"))
-            return
-
-        # ── QUELQUE CHOSE A BOUGÉ : LES fiches, et seulement elles ────────
-        bundles_ids = set()
-        en_main = {}
-        for _c, _r in ok:
-            bundles_ids |= _r.get("bundles", set())
-            for _f in (_r.get("fiches") or []):
-                en_main[_f.get("asset_id")] = _f
-        #  ⚠️ D'ABORD LES FICHES DÉJÀ EN MAIN (23/09). Le second seau rend la
-        #  tête AVEC ses fiches. Les redemander coûtait la requête groupée —
-        #  la seconde du passage, refusée à CHAQUE essai sur l'IP de Railway :
-        #  60 fois en 1 h 15, alors qu'elle passe 12 fois sur 12 ailleurs.
-        fiches = [en_main[a] for a in sorted(neufs) if a in en_main]
-        manquants = neufs - set(en_main)
-        if manquants:
-            _as = sorted(manquants - bundles_ids)[:120]
-            _bs_ids = sorted(manquants & bundles_ids)[:120]
-            if _as:
-                fiches += await roblox_module.fiches_par_ids(_as)
-            if _bs_ids:
-                fiches += await roblox_module.fiches_par_ids(
-                    _bs_ids, item_type="Bundle")
-            manquants = neufs - {f.get("asset_id") for f in fiches}
-        if manquants and _second_seau_libre(E):
-            #  La requête groupée refusée : la TÊTE, avec ses fiches, sur le
-            #  second seau. Une création apparaît en tête par construction.
-            _t = await roblox_module.relever_identifiants(
-                collectionnables=False, seau="fiches")
-            _noter_second_seau(E, _t)
-            _reprises = [f for f in (_t.get("fiches") or [])
-                         if f.get("asset_id") in manquants]
-            fiches += _reprises
-            E["fiches_tete"] = E.get("fiches_tete", 0) + len(_reprises)
-            manquants = neufs - {f.get("asset_id") for f in fiches}
-        if manquants:
-            #  ⚠️ CE QUE LE RELEVÉ COMPLET A DÉJÀ ENREGISTRÉ EST TRAITÉ : il
-            #  l'a publié s'il le fallait. Le redemander à chaque passage était
-            #  la boucle du 23/09.
-            try:
-                _connus, _ = await roblox_module.identifiants_connus()
-            except Exception:
-                _connus = set()
-            manquants -= _connus
-        if manquants:
-            E["erreurs"] += 1
-            E["fiches_ratees"] = E.get("fiches_ratees", 0) + 1
-            #  ⚠️ ON LES REND À « JAMAIS VUS ». Sinon un échec de fiches les
-            #  ferait passer pour traités, et le seul rattrapage serait le
-            #  passage complet — 30 minutes, le délai qu'on chasse.
-            E["vus"] -= manquants
-            E["vus_limited"] -= manquants
-            #  ⚠️ UNE LIGNE PAR LOT, PAS PAR PASSAGE : la même ligne 60 fois en
-            #  1 h 15 noyait tout le reste du journal.
-            _lot = tuple(sorted(manquants))
-            if E.get("dernier_lot_rate") != _lot:
-                E["dernier_lot_rate"] = _lot
-                print(f"[eclaireur] {len(manquants)} nouveauté(s) sans fiche "
-                      f"pour l'instant — j'y retourne à chaque passage, en "
-                      f"silence ; au pire le relevé de 30 min les prend")
-        else:
-            E["dernier_lot_rate"] = None
-        if not fiches:
-            return
-
-        #  La MÊME détection que le passage complet : elle juge chaque article
-        #  seul (nouveau, bascule, retiré), un petit lot ne fausse rien.
-        evts = await roblox_module.comparer_et_enregistrer(fiches)
-        _nv = len(evts.get("nouveaux") or [])
-        _bs = len(evts.get("bascules") or [])
-        E["nouveautes"] += _nv
-        E["bascules"] += _bs
-
-        #  La MÊME mise en file que l'étape 1 du passage complet : fenêtre
-        #  d'âge, « déjà sorti », unicité en base.
-        enfiles = 0
-        #  06/10 : une nouveauté qui n'est pas un accessoire (sourcils, cils,
-        #  visage, pack) est écartée — et le journal le DIT. « 1 nouveauté ·
-        #  0 mise en file » se lisait comme une panne.
-        _hors_type = set()
-        for g in guildes:
-            for flux, cle in (("bascules", "bascules"),
-                              ("nouveautes", "nouveaux")):
-                _brut = evts.get(cle) or []
-                for a in roblox_module.ordonner_publication(_brut, len(_brut)):
-                    if not roblox_module.age_publiable(a, flux):
-                        continue
-                    if (flux == "nouveautes"
-                            and not roblox_module.est_accessoire(a)):
-                        _hors_type.add(a.get("asset_id"))
-                        continue
-                    if not await roblox_module.publiable_dans(
-                            g.id, a["asset_id"], flux, article=a):
-                        continue
-                    if await roblox_module.enfiler(g.id, a, flux):
-                        enfiles += 1
-        E["dernier_signal"] = datetime.now(timezone.utc)
-
-        #  Le MÊME corps de publication — sans la respiration de 60 s : on n'a
-        #  fait que deux requêtes, sur un autre quota.
-        rp = {"publies": 0}
-        if enfiles:
-            rp = await _publier_file_accessoires(
-                guildes, roblox_module.MAX_PUBLICATIONS_PAR_PASSAGE,
-                pause_fiches=0, etiquette="eclaireur")
-            E["publies"] += rp["publies"]
-        print(f"[eclaireur] 🔔 {len(neufs)} identifiant(s) jamais vu(s) → "
-              f"{len(fiches)} fiche(s) · {_nv} nouveauté(s) · {_bs} bascule(s) "
-              f"· {enfiles} mise(s) en file · {rp.get('publies', 0)} "
-              f"publiée(s) sur l'instant"
-              + (f" · {len(_hors_type)} écartée(s) : pas un accessoire "
-                 f"(visage, sourcils, cils, pack…)" if _hors_type else ""))
-    except Exception as ex:
-        E["erreurs"] += 1
-        print(f"[eclaireur] {type(ex).__name__}: {ex}")
-
-
-@eclaireur_task.before_loop
-async def _eclaireur_wait():
-    await bot.wait_until_ready()
 
 
 # ── L'éclaireur d'ACTUALITÉS ─────────────────────────────────────────────────
@@ -16294,14 +14551,6 @@ _SUPERVISED_LOOP_NAMES = [
     "weekly_security_report",
     "veille_roblox_task",
     #  ⚠️ PIÈGE N°2 DU DÉPÔT : le superviseur relance les boucles PAR LEUR NOM.
-    #  Ajouter une boucle sans l'inscrire ici la laisse morte à la première
-    #  exception non gérée, jusqu'au prochain redémarrage — et une tête de
-    #  classement qui cesse d'être suivie ne se remarque pas.
-    "veille_marche_task",
-    #  Les deux éclaireurs (14/09/2026). Sans cette entrée, une exception non
-    #  gérée les arrêterait jusqu'au prochain redémarrage — et un éclaireur
-    #  mort, c'est le retour silencieux aux 33 minutes de délai.
-    "eclaireur_task",
     "eclaireur_actu_task",
     "ui_usage_flush_task",
     #  ⚠️ `event_auto_scheduler` et `world_boss_scheduler` retirés le 16/08/2026 :
@@ -24747,21 +22996,10 @@ async def _activite_boot():
     async def _retour_vers_configure(u, g, inter):
         await MainPanelV2(u, g).render_to(inter, edit=True)
 
-    #  Veille Roblox : meme patron que l'activite. `webhook_send` est passe pour
-    #  que les fiches sortent sous un nom propre a chaque flux (exigence ROBLOX.md).
-    roblox_module.setup(get_db=get_db, cfg=cfg, db_set=db_set,
-                        session=None, log=print)
-    #  `webhook_edit` : la fiche des cartes cadeaux se COMPLÈTE sur place.
     roblox_ui.setup(db_set=db_set, webhook_send=webhook_send,
                     webhook_edit=webhook_edit, log=print)
-    #  ⚠️ LE FILTRE OFFICIEL « PUBLIÉ RÉCEMMENT » — module à part, exprès.
-    #  Il répond à une question DIFFÉRENTE de `roblox_veille` : « qui est en
-    #  tête du Marketplace » et non « qui a la date de création la plus
-    #  récente ». Les mélanger conduirait à retrier l'un avec l'autre, ce qui
-    #  est exactement l'erreur signalée par le propriétaire le 30/08.
-    roblox_marche_module.setup(session=None, log=print)
-    roblox_marche_module.brancher_base(get_db)
     roblox_ui.set_retour(_retour_vers_configure)
+    roblox_ui.set_relever(_relever_actus)
 
     #  ⚠️ LES RÔLES DE PING SONT INJECTÉS, PAS DEVINÉS. `roblox_pings` ne
     #  connaît ni la base ni la config : sans ce `setup`, `role_de` planterait
@@ -24804,8 +23042,6 @@ async def _activite_boot():
                       #  construit au démarrage sans savoir qui l'ouvrira.
                       autorise=_rellseas_autorise, log=print)
     rellseas_ui.set_retour(_retour_vers_configure)
-    await roblox_module.init_db()
-    await roblox_marche_module.init_db()
     roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await roblox_news_module.init_db()
 
@@ -25585,10 +23821,6 @@ async def on_ready():
         # guilde n'a rien allume : cout nul au repos.
         if not veille_roblox_task.is_running():
             veille_roblox_task.start()
-        if not veille_marche_task.is_running():
-            veille_marche_task.start()
-        if not eclaireur_task.is_running():
-            eclaireur_task.start()
         if not eclaireur_actu_task.is_running():
             eclaireur_actu_task.start()
 

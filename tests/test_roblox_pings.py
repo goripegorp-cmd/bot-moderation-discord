@@ -116,12 +116,6 @@ def test_les_deux_salles_de_presse_partagent_un_seul_role():
             == pings.CLE_PAR_DOMAINE["Newsroom Roblox"] == "presse")
 
 
-def test_les_deux_flux_daccessoires_ont_chacun_le_leur():
-    """Demande explicite : « qui deviennent limited OU alors qui viennent juste
-    de sortir » — deux publics distincts, deux rôles."""
-    assert pings.cle_du_flux("bascules") == "limited"
-    assert pings.cle_du_flux("nouveautes") == "nouveaux"
-    assert pings.cle_du_flux("bascules") != pings.cle_du_flux("nouveautes")
 
 
 def test_un_flux_inconnu_ne_ping_personne():
@@ -314,7 +308,7 @@ async def test_le_role_nest_pas_mentionnable_a_la_creation(branche):
             return _FauxRoleRang(10)
 
     g = _G(None)
-    await pings.role_de(g, "limited")
+    await pings.role_de(g, "annonces")
     assert cree.get("mentionable") is False
     assert cree.get("hoist") is False
 
@@ -351,11 +345,6 @@ def _custom_ids(vue) -> list:
     return trouves
 
 
-def test_la_fiche_daccessoire_porte_le_bouton():
-    v = rp.construire_fiche(
-        {"asset_id": 123, "nom": "Chapeau", "prix": 84, "cree_le": None},
-        "bascules", ping_cle="limited", ping_role=_FauxRole())
-    assert "rbxping:limited" in _custom_ids(v)
 
 
 def test_la_fiche_dactualite_porte_le_bouton():

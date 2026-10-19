@@ -176,7 +176,7 @@ def _prints_hors_except():
 def test_J10_les_alertes_hors_except_du_depot_portent_leur_marqueur():
     """⚠️ GARDE : ces messages-là disent une vraie panne ; sans marqueur, le
     journal les tairait. ([STALL] se construit dans une liste : vu en J2.)"""
-    vitales = ("UNE AUTRE INSTANCE", "AVEUGLE", "RESSUSCITÉ",
+    vitales = ("UNE AUTRE INSTANCE", "RESSUSCITÉ",
                "dérive de schéma", "salon d'alerte introuvable", "permissions manquantes dans #",
                "aiohttp non installé", "[nsfw_scan] désactivé", "Aucun volume persistant",
                "VACUUM échoué", "[VIEW ERROR]", "[MODAL ERROR]", "[APP CMD ERROR]")

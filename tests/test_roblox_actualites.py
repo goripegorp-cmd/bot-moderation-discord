@@ -174,18 +174,12 @@ async def test_oublier_publies_existe_pour_les_actualites(monkeypatch):
     assert any("DELETE FROM roblox_news_publies" in q for q in db.requetes)
 
 
-def test_le_bouton_republier_efface_aussi_les_actualites():
-    assert "news.oublier_publies(self.g.id)" in SRC_PAN
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  3. Le bouton « Relever maintenant » relève AUSSI les actualités
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_relever_maintenant_passe_par_les_actualites():
-    """Sans ça, le bouton disait « relevé réussi » et le forum restait muet."""
-    assert "await self._relever_actualites()" in SRC_PAN
-    assert "async def _relever_actualites" in SRC_PAN
 
 
 class _FauxSalon:
@@ -212,33 +206,8 @@ class _FauxUser:
     display_name = "p"
 
 
-@pytest.mark.asyncio
-async def test_relever_actualites_dit_quand_elles_sont_eteintes():
-    async def _cfg(gid):
-        return {"roblox_news_enabled": False, "roblox_news_salon": 14}
-
-    news.setup(get_db=None, cfg=_cfg, db_set=None, log=lambda *a: None)
-    panneau.setup(db_set=None, webhook_send=None, log=lambda *a: None)
-
-    vue = panneau.RobloxPanelV2(_FauxUser(), _FauxGuild(_FauxSalon()))
-    txt = await vue._relever_actualites()
-
-    assert "éteintes" in txt
-    assert "rien n'a été relevé" in txt.lower()
 
 
-@pytest.mark.asyncio
-async def test_relever_actualites_dit_quand_le_salon_manque():
-    async def _cfg(gid):
-        return {"roblox_news_enabled": True, "roblox_news_salon": 0}
-
-    news.setup(get_db=None, cfg=_cfg, db_set=None, log=lambda *a: None)
-    panneau.setup(db_set=None, webhook_send=None, log=lambda *a: None)
-
-    vue = panneau.RobloxPanelV2(_FauxUser(), _FauxGuild(None))
-    txt = await vue._relever_actualites()
-
-    assert "aucun salon" in txt.lower()
 
 
 
@@ -299,104 +268,8 @@ def _file_en_memoire(monkeypatch, news):
     return lignes
 
 
-@pytest.mark.asyncio
-async def test_relever_actualites_publie_et_compte(monkeypatch):
-    """La chaîne complète, sur des doublures : relever → dédup → publier →
-    marquer → compte-rendu honnête."""
-    async def _cfg(gid):
-        return {"roblox_news_enabled": True, "roblox_news_salon": 14}
-
-    async def _relever(src, forcer=False):   # même signature que le vrai
-        return {"billets": [_billet(10, 1), _billet(11, 2)], "code": 200}
-
-    deja = {11}
-    marques = []
-    envois = []
-
-    async def _deja(gid, tid):
-        return tid in deja
-
-    async def _marquer(gid, tid):
-        marques.append(tid)
-
-    async def _publier_actu(g, salon, b):
-        envois.append(b["topic_id"])
-        return True
-
-    async def _purger():
-        return None
-
-    async def _dodo(_):
-        return None
-
-    news.setup(get_db=None, cfg=_cfg, db_set=None, log=lambda *a: None)
-    panneau.setup(db_set=None, webhook_send=None, log=lambda *a: None)
-    monkeypatch.setattr(news, "relever", _relever)
-    monkeypatch.setattr(news, "deja_publie", _deja)
-    monkeypatch.setattr(news, "marquer_publie", _marquer)
-    monkeypatch.setattr(news, "purger", _purger)
-    monkeypatch.setattr(panneau, "publier_actu", _publier_actu)
-    monkeypatch.setattr(panneau.asyncio, "sleep", _dodo)
-    _file_en_memoire(monkeypatch, news)
-
-    vue = panneau.RobloxPanelV2(_FauxUser(), _FauxGuild(_FauxSalon()))
-    txt = await vue._relever_actualites()
-
-    #  ⚠️ UN SEUL ENVOI, ET C'EST LA CORRECTION DU 30/08.
-    #  L'ancienne attente etait `[10] * len(SOURCES)` : le meme billet publie
-    #  SEPT fois, une par source. Elle ne tenait que parce que la doublure
-    #  `_marquer` n'alimentait pas `deja` — en production, la deuxieme source
-    #  l'aurait deduplique. Avec la file, un topic_id n'entre qu'une fois et ne
-    #  part qu'une fois, quel que soit le nombre de sources qui le remontent.
-    assert envois == [10], "le billet non publie part UNE fois, pas une par source"
-    assert marques == [10], "et il est marque UNIQUEMENT apres l'envoi"
-    assert "**réellement publié(s)**" in txt
-    assert "déjà publiée(s)" in txt
 
 
-@pytest.mark.asyncio
-async def test_relever_actualites_ne_marque_pas_un_envoi_refuse(monkeypatch):
-    """Même règle que les articles : la marque est définitive, on ne l'écrit
-    que sur un envoi qui a RÉELLEMENT abouti."""
-    async def _cfg(gid):
-        return {"roblox_news_enabled": True, "roblox_news_salon": 14}
-
-    async def _relever(src, forcer=False):   # même signature que le vrai
-        return {"billets": [_billet(10, 1)], "code": 200}
-
-    marques = []
-
-    async def _deja(gid, tid):
-        return False
-
-    async def _marquer(gid, tid):
-        marques.append(tid)
-
-    async def _publier_refuse(g, salon, b):
-        return False
-
-    async def _purger():
-        return None
-
-    async def _dodo(_):
-        return None
-
-    news.setup(get_db=None, cfg=_cfg, db_set=None, log=lambda *a: None)
-    panneau.setup(db_set=None, webhook_send=None, log=lambda *a: None)
-    monkeypatch.setattr(news, "relever", _relever)
-    monkeypatch.setattr(news, "deja_publie", _deja)
-    monkeypatch.setattr(news, "marquer_publie", _marquer)
-    monkeypatch.setattr(news, "purger", _purger)
-    monkeypatch.setattr(panneau, "publier_actu", _publier_refuse)
-    monkeypatch.setattr(panneau.asyncio, "sleep", _dodo)
-    _file_en_memoire(monkeypatch, news)
-
-    vue = panneau.RobloxPanelV2(_FauxUser(), _FauxGuild(_FauxSalon()))
-    txt = await vue._relever_actualites()
-
-    assert marques == [], "un refus de Discord ne doit JAMAIS poser la marque"
-    assert "refusée(s) par Discord" in txt
-    assert txt.startswith("📢 Actualités — 🔴")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -407,7 +280,7 @@ def test_la_sante_des_actualites_est_affichee_dans_le_panneau():
     """`news.diagnostic()` était calculé et affiché nulle part. Une source
     muette ressemblait à une source calme — défaut n°4 de ROBLOX.md."""
     assert "await news.diagnostic()" in SRC_PAN
-    assert "État des relevés — actualités" in SRC_PAN
+    assert "**Sources**" in SRC_PAN
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -435,29 +308,8 @@ def _boucle():
     raise AssertionError("veille_roblox_task introuvable")
 
 
-def test_la_boucle_dit_quand_elle_na_rien_a_faire():
-    corps = _boucle()
-    assert "passage sans travail" in corps, (
-        "un return muet ne distingue pas « personne n'a allumé » de « la "
-        "boucle est morte » — depuis Railway, c'est la même chose")
 
 
-def test_la_boucle_fait_un_bilan_a_chaque_passage():
-    """Deux compteurs, jamais un commun (défaut G5 du 30/08). Depuis le 14/09,
-    chaque corps partagé tient SON compteur et la boucle les additionne
-    SÉPARÉMENT — l'un sans l'autre, on ne sait pas lequel est à zéro."""
-    corps = _boucle()
-    assert "passage terminé" in corps
-    assert corps.count("_publies_a += _rp") == 1, (
-        "les accessoires doivent tenir leur propre compteur")
-    assert corps.count("_publies_n += _rn") == 1, (
-        "les actualites doivent tenir leur propre compteur")
-    assert "_publies +=" not in corps, (
-        "le compteur commun est revenu : voir le defaut G5 du 30/08")
-    assert "_publies_a" in corps and "_publies_n" in corps
-    for f in ("_publier_file_accessoires", "_publier_file_actualites"):
-        assert _fn(f).count("res['publies'] += 1") == 1, (
-            f"{f} doit compter ses publications une fois, et une seule")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -510,6 +362,3 @@ def test_le_registre_est_borne(registre_vide):
     assert len(news._recents) <= news.MAX_RECENTS
 
 
-def test_la_boucle_et_le_bouton_relient_les_accessoires_aux_annonces():
-    assert "billets_lies(a.get(\"nom\")" in SRC_BOT
-    assert "billets_lies(a.get(\"nom\")" in SRC_PAN

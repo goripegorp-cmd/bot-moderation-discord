@@ -170,12 +170,6 @@ async def test_le_bouton_tout_republier_ramene_vraiment_les_abandonnees(banc):
     assert len(await news.actus_a_envoyer(GUILDE)) == 1
 
 
-def test_le_bouton_appelle_les_deux_relances():
-    pan = (RACINE / "roblox_panneau.py").read_text(encoding="utf-8")
-    assert "veille.relancer_abandonnees(" in pan
-    assert "news.relancer_actus_abandonnees(" in pan, (
-        "le bouton ne relance que les accessoires : sa promesse reste fausse "
-        "pour les actualités")
 
 
 @pytest.mark.asyncio
@@ -208,60 +202,12 @@ async def test_la_purge_efface_ce_qui_est_parti(banc):
 #  P4 — la famine par budget partagé
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_les_actualites_ont_leur_propre_budget():
-    """⚠️ DOUZE FICHES D'ACCESSOIRES = ZÉRO ACTUALITÉ, passage après passage.
-    L'envoi doit tirer sur le plafond des actualités, pas sur le budget commun.
-    Depuis le 14/09 l'envoi vit dans `_publier_file_actualites` (partagée avec
-    l'éclaireur) : c'est ELLE qui ne doit connaître aucun budget d'accessoires."""
-    envoi = _fn("_publier_file_actualites")
-    assert "roblox_news_module.actus_a_envoyer(" in envoi, (
-        "l'envoi des actualités ne tire plus depuis leur file")
-    assert "budget" not in envoi, (
-        "l'envoi des actualités consomme encore le budget des accessoires")
-    assert "MAX_BILLETS_PAR_PASSAGE" in envoi
-    assert "_publier_file_actualites(" in _boucle(), (
-        "la boucle n'appelle plus l'envoi des actualités")
 
 
-def test_l_envoi_ne_depend_plus_qu_une_source_reponde():
-    """L'envoi vivait DANS la boucle des sources : une source en panne, et
-    rien ne se vidait — même ce qui attendait depuis des jours. L'appel
-    d'envoi doit être HORS de cette boucle. On le vérifie sur l'ARBRE : la
-    boucle `for src in …` ne doit contenir aucun appel d'envoi."""
-    boucle = next(n for n in ast.walk(ast.parse(SRC_BOT))
-                  if isinstance(n, ast.AsyncFunctionDef)
-                  and n.name == "veille_roblox_task")
-    fors = [f for f in ast.walk(boucle)
-            if isinstance(f, ast.For) and getattr(f.target, "id", "") == "src"]
-    assert fors, "boucle des sources introuvable"
-    for f in fors:
-        assert "_publier_file_actualites(" not in ast.unparse(f), (
-            "l'envoi vit dans la boucle des sources : une source en panne "
-            "bloque tout ce qui attend")
-    assert "_publier_file_actualites(" in ast.unparse(boucle)
 
 
-def test_on_enfile_avant_de_tronquer():
-    """La mise en file (`_enfiler_billets`) précède le tirage
-    (`_publier_file_actualites`), et la boucle les appelle dans cet ordre."""
-    b = _boucle()
-    assert b.index("_enfiler_billets(") < b.index("_publier_file_actualites(")
-    assert "roblox_news_module.enfiler_actu(" in _fn("_enfiler_billets")
-    assert "roblox_news_module.actus_a_envoyer(" in _fn("_publier_file_actualites")
 
 
-def test_le_bilan_dit_enfin_les_ecartes_et_la_file():
-    """⚠️ `grep -c pointeur bot.py` rendait 0. Le compteur existait dans le
-    module, n'était lu que par le bouton manuel, et le bilan automatique n'en
-    disait rien. Trois semaines de notes de version ont disparu sans une ligne."""
-    #  ⚠️  NORMALISE LES GUILLEMETS : chercher la forme
-    #  double-quote contre du source réécrit échouerait toujours.
-    corps = _boucle().replace(chr(34), chr(39))
-    assert "rel.get('pointeurs')" in corps, (
-        "le bilan ne ramasse toujours pas le compteur des écartés")
-    bilan = corps.split('passage terminé')[-1]
-    assert 'allez voir ce' in bilan, 'les écartés ne sont pas imprimés'
-    assert "file d'actualités" in bilan
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -418,21 +364,3 @@ def test_les_sources_hors_forum_fabriquent_bien_des_identifiants_textuels():
     assert "topic_id TEXT NOT NULL" in src
 
 
-def test_le_bouton_manuel_ne_publie_plus_hors_file():
-    """⚠️ MESURÉ EN RÉFUTATION : 3 doublons sur 8 billets frais. Le bouton
-    appelait `publier_actu` directement pendant que la boucle publiait depuis
-    la file sans revérifier `deja_publie`. Le bouton des ACCESSOIRES avait été
-    corrigé le matin même — la correction n'avait pas été portée ici."""
-    import ast as _ast
-    pan = (RACINE / "roblox_panneau.py").read_text(encoding="utf-8")
-    corps = next(_ast.unparse(n) for n in _ast.walk(_ast.parse(pan))
-                 if isinstance(n, _ast.AsyncFunctionDef)
-                 and n.name == "_relever_actualites")
-    assert "news.enfiler_actu(" in corps, "le bouton n'enfile pas"
-    assert "news.reserver_actu(" in corps, (
-        "le bouton publie sans réserver : il doublera la boucle")
-    #  L'envoi doit venir de la file, pas de la liste fraîche.
-    assert "news.actus_a_envoyer(" in corps
-    i_enfile = corps.index("news.enfiler_actu(")
-    i_tire = corps.index("news.actus_a_envoyer(")
-    assert i_enfile < i_tire, "on enfile d'abord, on tire ensuite"

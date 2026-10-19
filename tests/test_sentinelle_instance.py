@@ -64,7 +64,7 @@ def test_la_sentinelle_est_appelee_AVANT_le_travail():
     les requêtes qu'il sert à expliquer."""
     corps = _fonction("veille_roblox_task")
     i_sent = corps.index("_battre_sentinelle()")
-    i_travail = corps.index("relever_nouveautes(")
+    i_travail = corps.index("_relever_actus()")
     assert i_sent < i_travail, (
         "la sentinelle bat après le travail : son avertissement arriverait "
         "trop tard pour expliquer le débit doublé")
@@ -209,87 +209,16 @@ def test_l_identite_est_imprimee_AVANT_la_connexion():
 #  La réfutation, exécutable
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_la_repetition_des_ages_ne_prouve_rien():
-    """⚠️ FIGE LE CALCUL QUI M'A FAIT ANNONCER UN FAUX DIAGNOSTIC.
-
-    Tant que la boucle tourne toutes les 30 min et que l'âge est imprimé en
-    heures entières, chaque valeur SORT DEUX FOIS avec une seule instance. Si
-    un jour la cadence ou le format change, ce test tombe — et c'est voulu :
-    le raisonnement de la docstring devra être refait, pas recopié.
-    """
-    import re
-    m = re.search(r"@tasks\.loop\(minutes=(\d+)\)\s*\nasync def veille_roblox_task",
-                  SRC)
-    assert m, "cadence de veille_roblox_task introuvable"
-    minutes = int(m.group(1))
-    assert "f'{_pf:.0f} h'" in SRC or 'f"{_pf:.0f} h"' in SRC or "{_pf:.0f} h" in SRC, (
-        "l'âge n'est plus imprimé en heures entières : le calcul ci-dessous "
-        "ne vaut plus")
-
-    pas = minutes / 60.0
-    depart = 422.13                      # âge réel au premier passage du 01/09
-    rendu = [f"{depart + pas * k:.0f}" for k in range(11)]
-    observe = ["422", "423", "423", "424", "424", "425",
-               "425", "426", "426", "427", "427"]
-    assert rendu == observe, (
-        "la suite observée en production ne s'explique plus par une seule "
-        f"instance : {rendu} != {observe}")
-
-    #  Le cœur de la réfutation : des doublons SANS second processus.
-    assert len(rendu) > len(set(rendu)), (
-        "sans répétition, la déduction « doublons donc deux instances » "
-        "n'aurait jamais eu lieu — ce test ne garde plus rien")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  `veille_marche_task` doit pouvoir prouver qu'elle vit
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_le_bilan_dit_ou_en_est_la_tete_du_marche():
-    """⚠️ CINQ HEURES DE JOURNAUX (01/09), ZÉRO LIGNE `[veille_marche_task]`.
-
-    La boucle ne parle que si la tête du classement CHANGE. Silence normal et
-    boucle morte étaient donc indistinguables — et une fonctionnalité qui ne
-    peut pas prouver qu'elle tourne n'est pas livrée. Le bilan de 30 min dit
-    maintenant ce que le marché retient, et depuis quand.
-    """
-    corps = _fonction("veille_roblox_task")
-    assert "tete_memorisee()" in corps, (
-        "le bilan ne lit pas la tête du marché : rien ne prouve que la boucle "
-        "de 4 minutes tourne")
-    assert "Publié récemment" in corps
 
 
-def test_une_tete_jamais_confirmee_est_dite_FORT():
-    """Le cas qui compte : la boucle n'a jamais abouti. Un affichage vide
-    passerait pour « rien de neuf » alors que rien ne fonctionne."""
-    corps = _fonction("veille_roblox_task")
-    assert "JAMAIS été confirmée" in corps
-    assert "veille_marche_task" in corps, (
-        "l'avertissement ne nomme pas la boucle en cause : on chercherait au "
-        "mauvais endroit")
 
 
-def test_une_tete_perimee_ne_passe_pas_pour_une_mesure_fraiche():
-    """⚠️ LE PIÈGE DU REPLI. `tete_memorisee` rend le dernier confirmé même
-    très vieux — c'est voulu (une panne d'API ne doit pas effacer ce qu'on
-    savait). Mais l'afficher sans son âge la ferait passer pour une mesure du
-    jour."""
-    corps = _fonction("veille_roblox_task")
-    assert "MARCHÉ MUET" in corps
-    assert "souvenir, pas une mesure" in corps
-    assert "MARCHE_FRAICHEUR_MIN" in corps
-
-    for ligne in SRC.splitlines():
-        if ligne.startswith("MARCHE_FRAICHEUR_MIN"):
-            valeur = int(ligne.split("=")[1].split("#")[0].strip())
-            #  La boucle passe toutes les 4 min mais s'efface pendant un
-            #  passage de veille (~4 min mesurées). Trop court : l'alerte
-            #  crierait à chaque relevé. Trop long : une boucle morte
-            #  passerait une demi-journée inaperçue.
-            assert 15 <= valeur <= 120, "seuil de fraîcheur du marché absurde"
-            return
-    raise AssertionError("MARCHE_FRAICHEUR_MIN introuvable")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

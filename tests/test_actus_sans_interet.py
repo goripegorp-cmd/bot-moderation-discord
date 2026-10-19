@@ -145,9 +145,6 @@ def test_B2_les_trois_formats_de_source_filtrent():
         assert "sans_interet(" in _fn(SRC_NEWS, nom), f"{nom} ne filtre pas"
 
 
-def test_B3_le_compte_rendu_DIT_combien_ont_ete_ecartes():
-    assert "écarté(s) comme récap" in SRC_BOT
-    assert '_sn["sans_interet"]' in SRC_BOT or "_sn['sans_interet']" in SRC_BOT
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

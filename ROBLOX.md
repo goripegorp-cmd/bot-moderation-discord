@@ -1,5 +1,12 @@
 # 🎯 VEILLE ROBLOX — LE CAHIER DES CHARGES
 
+> 🛑 **19/10/2026 — LES ACCESSOIRES SONT RETIRÉS.** « Tu m'enlèves cette mécanique,
+> on supprime complètement cette idée, tu ne me gardes que les news. » Nouveautés,
+> passages Limited, cartes cadeaux, marché « Publié récemment », éclaireur du
+> catalogue et commandes `/roblox` : supprimés (code, tests, tables). Seul reste
+> le système **B. L'actualité** ; les sections sur les accessoires ci-dessous sont
+> de l'historique.
+
 > Deux systèmes distincts, demandés le 12/08/2026. Ce fichier fixe ce qui est
 > **non négociable**. Il se lit AVANT d'écrire une ligne de code, et il prime sur
 > toute facilité d'implémentation.

@@ -11,7 +11,6 @@ PHASE_163_MODULES = [
     "activite",
     "activite_demontage",    # 03/10 : défait ce que le système d'activité avait posé
     "visibilite_serveur",    # 03/10 : ce que voit un nouvel arrivant
-    "roblox_veille",
     "roblox_news",
     "roblox_panneau",
     "roblox_pings",          # 19/08 : un rôle de notification par type d'annonce

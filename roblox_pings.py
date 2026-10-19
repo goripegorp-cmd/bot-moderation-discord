@@ -83,14 +83,6 @@ CATEGORIES: dict[str, dict] = {
         "role": "🟡 Presse Roblox", "couleur": 0xF1C40F,
         "quoi": "les communiqués de la salle de presse Roblox",
     },
-    "limited": {
-        "role": "💎 Passages Limited", "couleur": 0x1ABC9C,
-        "quoi": "les accessoires qui viennent de passer Limited",
-    },
-    "nouveaux": {
-        "role": "🆕 Nouveaux accessoires", "couleur": 0x3498DB,
-        "quoi": "les accessoires que Roblox vient de créer",
-    },
     #  ⚠️ PLUS DE CATÉGORIE « ugc » (retirée le 23/09 avec son flux) : c'est
     #  elle qui créait le rôle « 🎨 Nouveautés UGC » à la première fiche. Sans
     #  elle, ce rôle ne peut plus jamais être recréé.
@@ -113,10 +105,7 @@ CLE_PAR_DOMAINE: dict[str, str] = {
     "Communiqués officiels": "presse",
 }
 
-CLE_PAR_FLUX: dict[str, str] = {
-    "bascules": "limited",
-    "nouveautes": "nouveaux",
-}
+CLE_PAR_FLUX: dict[str, str] = {}
 
 #  Le préfixe du `custom_id`. Partagé avec `bot.py` (le DynamicItem qui capte le
 #  clic) et `roblox_panneau.py` (qui pose le bouton) : une seule vérité.

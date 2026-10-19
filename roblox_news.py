@@ -116,6 +116,15 @@ def _memoriser(cache: dict, cle, valeur, maximum: int) -> None:
     cache[cle] = valeur
 
 MAX_BILLETS_PAR_PASSAGE = 5
+PAUSE_ENTRE_PUBLICATIONS = 2.0
+
+
+def ordonner_publication(billets: list[dict], tranche: int) -> list[dict]:
+    """Les `tranche` plus RÉCENTS, rendus du plus ANCIEN au plus récent : Discord empile
+    vers le bas, le salon se lit alors dans l'ordre (16/08)."""
+    recents = sorted(billets or [], key=lambda b: str(b.get("cree_le") or ""),
+                     reverse=True)[:max(0, int(tranche))]
+    return list(reversed(recents))
 MAX_PUBLIES_GARDES = 4000
 
 #  ⚠️ FRAÎCHEUR MAXIMALE — NE PAS RETIRER CE GARDE-FOU.

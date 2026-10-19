@@ -64,7 +64,7 @@ GARDER = {
     #    supprimé, et ROBLOX.md dit noir sur blanc « ne pas les purger en croyant
     #    bien faire ». Un outil de suppression qui a raison sur 90 % des modules
     #    est plus dangereux qu'un outil qui n'existe pas.
-    "roblox_veille", "roblox_news", "roblox_panneau",   # ROBLOX.md, réintroduction demandée
+    "roblox_news", "roblox_panneau",   # ROBLOX.md (accessoires retirés le 19/10/2026)
     "social_media", "social_zones", "social_match",     # /social + onglet /configure
     "activite", "activite_calendrier", "activite_escalade", "activite_message",
     "activite_niveaux", "activite_panneau", "activite_passage",

@@ -114,7 +114,7 @@ def _veille_roblox_sans_reseau(monkeypatch):
     ce qui remplace ce refus.
     """
     try:
-        import roblox_veille
+        import roblox_news
     except Exception:
         return
 
@@ -130,4 +130,4 @@ def _veille_roblox_sans_reseau(monkeypatch):
         async def __aexit__(self, *a):
             return False
 
-    monkeypatch.setattr(roblox_veille, "_ouvrir", lambda: _Interdit())
+    monkeypatch.setattr(roblox_news, "_ouvrir", lambda: _Interdit())

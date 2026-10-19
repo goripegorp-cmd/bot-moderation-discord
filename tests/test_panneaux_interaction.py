@@ -155,21 +155,18 @@ def veille_branchee(monkeypatch):
     """Remplace les quatre lectures que fait le panneau. Ce sont ELLES qui
     faisaient dépasser les 3 secondes en production."""
     async def _cfg(gid):
-        return {"roblox_veille_enabled": True, "roblox_salon_nouveautes": 11,
-                "roblox_salon_bascules": 12, "roblox_salon_surveiller": 13,
-                "roblox_news_salon": 14, "roblox_veille_amorcee": True}
+        return {"roblox_news_enabled": True, "roblox_news_salon": 14}
 
     async def _diag():
-        return {"sources": [{"source": "catalogue", "code": 200, "echecs": 0}],
-                "articles_connus": 110}
+        return [{"cle": "updates", "code": 200, "echecs": 0},
+                {"cle": "annonces", "code": 503, "echecs": 2}]
 
-    async def _actif(gid):
-        return True
+    async def _file(gid):
+        return {"attente": 1, "envoyees": 40}
 
-    monkeypatch.setattr(rp.veille, "config", _cfg)
     monkeypatch.setattr(rp.news, "config", _cfg)
-    monkeypatch.setattr(rp.veille, "diagnostic", _diag)
-    monkeypatch.setattr(rp.veille, "actif", _actif)
+    monkeypatch.setattr(rp.news, "diagnostic", _diag)
+    monkeypatch.setattr(rp.news, "etat_file_actu", _file)
     rp.setup(db_set=None, webhook_send=None, log=lambda *a: None)
 
 
@@ -203,9 +200,7 @@ async def test_le_panneau_roblox_reste_sous_la_limite_avec_un_message_detat(
         veille_branchee):
     """Le compte-rendu de relevé ajoute un bloc : il ne doit pas faire déborder."""
     vue = rp.RobloxPanelV2(FauxUser(), FauxGuild())
-    vue._dernier = vue._compte_rendu(
-        30, 2, {"sans_salon": 1, "salon_introuvable": 1, "age": 3,
-                "seuil": 2, "deja": 4, "envoi": 1}, ["555"])
+    vue._dernier = "✅ `12` billet(s) lu(s) · `3` nouveau(x) · `3` publié(s) · ⚠️ `1` source(s) en panne"
 
     await vue.render_to(FausseInteraction())
 
@@ -218,7 +213,7 @@ async def test_le_panneau_roblox_souvre_meme_si_le_diagnostic_casse(monkeypatch)
     async def _boum(*a, **kw):
         raise RuntimeError("base indisponible")
 
-    monkeypatch.setattr(rp.veille, "config", _boum)
+    monkeypatch.setattr(rp.news, "config", _boum)
     rp.setup(db_set=None, webhook_send=None, log=lambda *a: None)
 
     vue = rp.RobloxPanelV2(FauxUser(), FauxGuild())
