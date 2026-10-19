@@ -20,6 +20,8 @@ pour un défaut de droits.
 """
 from __future__ import annotations
 
+import asyncio
+import time
 
 import discord
 from discord.ui import Button, ChannelSelect
@@ -33,18 +35,13 @@ from ui_v2 import (
 
 _db_set = None
 _webhook_send = None
-#  Pour COMPLÉTER une fiche déjà publiée (cartes cadeaux) au lieu d'en poster
-#  une nouvelle. Même profil de webhook que l'envoi : un message se modifie
-#  par le webhook qui l'a posté.
-_webhook_edit = None
 _log = print
 
 
-def setup(*, db_set, webhook_send=None, webhook_edit=None, log=None):
-    global _db_set, _webhook_send, _webhook_edit, _log
+def setup(*, db_set, webhook_send=None, log=None):
+    global _db_set, _webhook_send, _log
     _db_set = db_set
     _webhook_send = webhook_send
-    _webhook_edit = webhook_edit
     if log is not None:
         _log = log
 
@@ -108,6 +105,32 @@ def _autorisation_mention(ping_role):
         return None
 
 
+#  Salon d'annonces : un message n'atteint les serveurs abonnés que publié. Discord n'en
+#  accepte que 10 par heure et par salon ; au-delà, le billet reste dans le salon.
+PUBLICATIONS_PAR_HEURE = 10
+_publications: dict = {}
+
+
+async def _diffuser(salon, message_id) -> bool:
+    """Publie le message aux serveurs qui suivent le salon. Rend True s'il est parti."""
+    if not message_id or not getattr(salon, "is_news", lambda: False)():
+        return False
+    maintenant = time.monotonic()
+    fenetre = [t for t in _publications.get(salon.id, ()) if maintenant - t < 3600]
+    if len(fenetre) >= PUBLICATIONS_PAR_HEURE:
+        _publications[salon.id] = fenetre
+        _log("[roblox diffusion] limite de 10 publications par heure atteinte")
+        return False
+    fenetre.append(maintenant)
+    _publications[salon.id] = fenetre
+    try:
+        await asyncio.wait_for(salon.get_partial_message(int(message_id)).publish(), timeout=10)
+        return True
+    except Exception as ex:
+        _log(f"[roblox diffusion] {type(ex).__name__}: {ex}")
+        return False
+
+
 async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
                    ping_role=None, trace: dict | None = None) -> bool:
     """L'envoi réel. Rend `True` UNIQUEMENT si un message est parti.
@@ -152,11 +175,13 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
             #  d'attente — voyage donc par ce dictionnaire, pas par le retour.
             if trace is not None:
                 trace["message_id"] = getattr(res, "id", None)
+            await _diffuser(salon, getattr(res, "id", None))
             return True
         _msg = await salon.send(
             view=vue, allowed_mentions=_autorisation_mention(ping_role))
         if trace is not None:
             trace["message_id"] = getattr(_msg, "id", None)
+        await _diffuser(salon, getattr(_msg, "id", None))
         return True
     except Exception as ex:
         #  Repli : un défaut de webhook ne doit pas faire taire le flux.
@@ -165,6 +190,7 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
             _m2 = await salon.send(view=vue)
             if trace is not None:
                 trace["message_id"] = getattr(_m2, "id", None)
+            await _diffuser(salon, getattr(_m2, "id", None))
             return True
         except Exception as ex2:
             _log(f"[roblox {etiquette}] {ex2}")

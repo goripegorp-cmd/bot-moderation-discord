@@ -16373,30 +16373,6 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
             print(f"[webhook_send] {platform} {chan_info}: fallback channel.send échoué : {ex2}")
             return None
 
-async def webhook_edit(channel, platform: str, message_id: int, embed=None, content=None, view=discord.utils.MISSING):
-    """Édite un message envoyé par webhook. Fallback sur channel.fetch_message().edit()"""
-    try:
-        wh = await get_webhook(channel, platform)
-        if wh:
-            kw = {}
-            if embed: kw['embed'] = embed
-            if content is not None: kw['content'] = content
-            if view is not discord.utils.MISSING: kw['view'] = view
-            return await wh.edit_message(message_id, **kw)
-    except:
-        pass
-    
-    # Fallback: essayer d'éditer directement le message
-    try:
-        msg = await channel.fetch_message(message_id)
-        kw = {}
-        if embed: kw['embed'] = embed
-        if content is not None: kw['content'] = content
-        if view is not discord.utils.MISSING: kw['view'] = view
-        await msg.edit(**kw)
-        return msg
-    except:
-        return None
 
 
 # ─────────────────────────────── YOUTUBE ───────────────────────────────
@@ -18442,8 +18418,7 @@ async def _activite_boot():
     async def _retour_vers_configure(u, g, inter):
         await MainPanelV2(u, g).render_to(inter, edit=True)
 
-    roblox_ui.setup(db_set=db_set, webhook_send=webhook_send,
-                    webhook_edit=webhook_edit, log=print)
+    roblox_ui.setup(db_set=db_set, webhook_send=webhook_send, log=print)
     roblox_ui.set_retour(_retour_vers_configure)
     roblox_ui.set_relever(_relever_actus)
 
