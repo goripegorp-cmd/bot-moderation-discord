@@ -243,6 +243,8 @@ def _executer(get_db, conf, guilde):
           "TicketControlView": lambda: "vue", "now": lambda: None,
           "rellseas_ui": rellseas_panneau, "recrutements": recrutements,
           "_logerr": lambda *a, **k: journaux.append(a)}
+    ns["_tickets_en_creation"] = set()
+    exec(_fonction("_create_ticket_corps"), ns)  # noqa: S102 — code du dépôt
     exec(_fonction("create_ticket"), ns)  # noqa: S102 — code du dépôt
     user = Obj(id=3, name="kolax_", mention="@kolax", display_avatar=Obj(url="u"))
     guilde.salons[40] = SimpleNamespace(id=40)

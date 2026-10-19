@@ -101,12 +101,27 @@ class _Adaptateur(sm.PlatformAdapter):
         return post.post_id in self.actifs
 
 
-def _annonce(gid, pid):
+def _annonce(gid, pid, live=True):
     return sm.Announcement(
         sub_id="s", post_id=pid, platform=sm.Platform.YOUTUBE, handle="h",
         guild_id=gid, discord_channel_id=1, discord_message_id=2, post_url="u",
-        post_title="t", post_type=sm.PostType.VIDEO,
-        posted_at="2026-09-29T00:00:00+00:00", last_checked_at="")
+        post_title="t", post_type=sm.PostType.LIVE if live else sm.PostType.VIDEO,
+        posted_at="2026-09-29T00:00:00+00:00", last_checked_at="", is_currently_live=live)
+
+
+def test_W3b_seuls_les_lives_sont_reverifies_et_les_vieux_retraits_oublies(ecritures):
+    """20/10/2026 : chaque annonce jamais faite était revérifiée toutes les 30 min (une requête par
+    annonce pour l'API YouTube) et le fichier réécrit ; la liste ne raccourcissait jamais."""
+    from datetime import datetime, timedelta, timezone
+    m = _gestionnaire(actifs=set(), n=0)
+    m._anns = {1: {a.unique_key: a for a in (_annonce(1, "video", live=False), _annonce(1, "ancien_live"))}}
+    m._anns[1]["youtube:h:ancien_live"].deleted = True
+    m._anns[1]["youtube:h:ancien_live"].last_checked_at = (
+        datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+    assert asyncio.run(m.cleanup_all()) == {1: 0}
+    assert list(m._anns[1]) == ["youtube:h:video"], "la vidéo reste (anti-doublon), le vieux live part"
+    ecritures.clear()
+    assert asyncio.run(m.cleanup_all()) == {1: 0} and ecritures == [], "plus rien à vérifier : aucune écriture"
 
 
 @pytest.fixture

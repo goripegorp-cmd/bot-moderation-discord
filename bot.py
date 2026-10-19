@@ -1661,43 +1661,55 @@ async def fetch_avatar_url(platform: str, username: str, session) -> str:
             _avatar_echecs.clear()
     return avatar_url
 
-async def db_get(gid):
-    """Récupère la configuration brute d'un serveur (sans defaults).
+_config_secours: dict = {}  # dernière config lue EN BASE, par serveur (sans délai d'expiration)
 
-    Phase 163.7 : cache LRU partagé avec cfg(). La clé est négative
-    (-gid) pour ne pas collisionner avec cfg() qui stocke par gid positif.
-    Les invalidations de db_set() invalident les DEUX entrées.
-    """
+
+class ConfigIllisible(RuntimeError):
+    """Base illisible et aucune copie : mieux vaut s'arrêter que de croire le serveur vierge."""
+
+
+async def _lire_config(gid):
+    """(config brute, lue_en_base). Base illisible : la dernière copie lue (lue_en_base=False, à ne
+    pas mettre en cache), ou ConfigIllisible s'il n'y en a aucune. Avant (20/10/2026) : {} — et
+    cfg() gardait 30 s un serveur « vierge » (salon de logs perdu, installations rejouées)."""
+    gid = validate_id(gid)
+    if gid is None:
+        return {}, True
+    cache_key = -int(gid)  # Phase 163.7 : clé négative, cfg() stocke par gid positif
+    cached = _config_cache.get(cache_key)
+    if cached is not None:
+        return cached, True
     try:
-        # Valider l'ID
-        gid = validate_id(gid)
-        if gid is None:
-            return {}
-
-        # Phase 163.7 : check cache (clé négative pour distinguer de cfg())
-        cache_key = -int(gid)
-        cached = _config_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config WHERE guild_id=?', (gid,)) as c:
                 r = await c.fetchone()
-                if r and r[0]:
-                    try:
-                        data = json.loads(r[0])
-                        _config_cache.set(cache_key, data)
-                        return data
-                    except json.JSONDecodeError:
-                        print(f"[DB] JSON invalide pour guild {gid}")
-                        return {}
-                # Vide aussi cache (évite les requêtes DB répétées pour
-                # des guilds sans config)
-                _config_cache.set(cache_key, {})
-                return {}
     except Exception as ex:
-        print(f"[DB GET ERROR] {ex}")
-        return {}
+        _logerr("config.lecture", ex, guild_id=gid)
+        if gid in _config_secours:
+            return dict(_config_secours[gid]), False
+        raise ConfigIllisible("[DATA][E201] Guild config unreadable") from ex
+    data = {}
+    if r and r[0]:
+        try:
+            data = json.loads(r[0])
+        except json.JSONDecodeError:
+            print(f"[DB] JSON invalide pour guild {gid}")
+            if gid in _config_secours:
+                return dict(_config_secours[gid]), False
+            return {}, True
+    # Un serveur sans config se met AUSSI en cache (évite les requêtes répétées)
+    _config_cache.set(cache_key, data)
+    _config_secours[gid] = dict(data)
+    return data, True
+
+
+async def db_get(gid):
+    """Récupère la configuration brute d'un serveur (sans defaults).
+
+    Phase 163.7 : cache LRU partagé avec cfg(). Les invalidations de db_set() invalident les DEUX
+    entrées. Base illisible : la dernière copie lue, sinon ConfigIllisible (jamais {} « vierge »).
+    """
+    return (await _lire_config(gid))[0]
 
 async def db_set(gid, key, val):
     """Enregistre une valeur de configuration de manière sécurisée"""
@@ -1780,6 +1792,7 @@ async def db_set(gid, key, val):
             # Phase 163.7 : invalide AUSSI la clé négative utilisée par db_get
             _config_cache.invalidate(gid)
             _config_cache.invalidate(-int(gid))
+            _config_secours[gid] = dict(data)
         return True
     except Exception as ex:
         print(f"[DB SET ERROR] {ex}")
@@ -1793,7 +1806,7 @@ async def cfg(gid):
         return cached
     
     # Si pas en cache, récupérer de la DB
-    data = await db_get(gid)
+    data, lue_en_base = await _lire_config(gid)
     defaults = {
         'anti_link': 0, 'anti_invite': 0, 'anti_image': 0, 'anti_phishing': 1, 'anti_scam': 1,
         #  ⚠️ ALLUMÉ PAR DÉFAUT, contrairement à la plupart des protections.
@@ -1979,8 +1992,9 @@ async def cfg(gid):
     for k, v in defaults.items():
         if k not in data: data[k] = v
     
-    # Mettre en cache
-    _config_cache.set(gid, data)
+    # Mettre en cache — jamais une copie de secours : on relira la base au prochain appel
+    if lue_en_base:
+        _config_cache.set(gid, data)
     return data
 
 # ── CACHE D'IMMUNITÉ (owner 2026-07-12 — cause des « Échec de l'interaction ») ────────────────
@@ -2978,7 +2992,14 @@ class RadieDecisionButton(discord.ui.DynamicItem[Button],
                 #  ⚠️ LE BANNISSEMENT EST DÉFINITIF ET IRRÉVERSIBLE CÔTÉ MEMBRE :
                 #  on le prévient AVANT de bannir, sinon le message ne part
                 #  jamais (on ne peut plus écrire à quelqu'un qui n'a plus
-                #  aucun serveur en commun).
+                #  aucun serveur en commun). Donc on vérifie d'abord que le
+                #  bannissement PASSERA : sinon le membre lirait un mensonge.
+                moi = i.guild.me
+                if not moi.guild_permissions.ban_members or (membre is not None and (
+                        membre.id == i.guild.owner_id or membre.top_role >= moi.top_role)):
+                    return await i.followup.send(
+                        "❌ Je ne peux pas bannir ce membre (permission « Bannir » ou rôle plus haut "
+                        "que le mien). Rien n'a été envoyé.", ephemeral=True)
                 await _prevenir_radie(
                     i.guild, self.uid,
                     "⛔ **Votre recours a été rejeté.** Vous êtes banni "
@@ -2987,6 +3008,13 @@ class RadieDecisionButton(discord.ui.DynamicItem[Button],
                     discord.Object(id=self.uid),
                     reason=f"Recours rejeté — décision de {i.user} ({i.user.id})",
                     delete_message_seconds=0)
+                try:  # banni : il n'est plus « actuellement radié » (/off list)
+                    async with get_db() as db:
+                        await db.execute("DELETE FROM radiated_members WHERE guild_id=? AND user_id=?",
+                                         (i.guild.id, self.uid))
+                        await db.commit()
+                except Exception as ex:
+                    _logerr("radie.bannir.fiche", ex, guild_id=i.guild.id)
                 await i.followup.send(
                     f"⛔ <@{self.uid}> est **banni définitivement**.",
                     ephemeral=True)
@@ -3227,78 +3255,96 @@ bot.tree.add_command(off_group)
 # ═══════════════ BOUCLIER ANTI-RAID MANUEL (owner 2026-06-21 #11) ═══════════════
 # Verrouille TOUT le serveur en 1 commande (salons en lecture seule + pause des arrivées via
 # run_lockdown) le temps d'une attaque, et lève en 1 commande. Réservé (admin via Intégrations).
-async def _shield_lock(guild):
-    """Passe les salons texte en lecture seule pour @everyone (sauf ceux DÉJÀ refusés, qu'on
-    ne touche pas pour ne pas les rouvrir au unlock) et mémorise lesquels (DB, reboot-proof).
-    Renvoie le nombre de salons verrouillés. FAIL-SAFE."""
-    locked = []
-    ev = guild.default_role
-    me = guild.me
-    for ch in list(getattr(guild, 'text_channels', [])):
-        try:
-            cur = ch.overwrites_for(ev)
-            if cur.send_messages is False:
-                continue
-            if me is not None and not ch.permissions_for(me).manage_roles:
-                continue
-            cur.send_messages = False
-            cur.send_messages_in_threads = False
-            cur.create_public_threads = False
-            cur.create_private_threads = False
-            cur.add_reactions = False
-            await ch.set_permissions(ev, overwrite=cur, reason="Bouclier anti-raid (lecture seule)")
-            locked.append(ch.id)
-            await asyncio.sleep(0.25)
-        except Exception:
-            continue
-    try:
-        async with get_db() as db:
-            await db.execute("CREATE TABLE IF NOT EXISTS raid_shield("
-                             "guild_id INTEGER PRIMARY KEY, channels TEXT, started_at TEXT)")
+_BOUCLIER_DROITS = ("send_messages", "send_messages_in_threads", "create_public_threads",
+                    "create_private_threads", "add_reactions")
+
+
+async def _bouclier_lire(gid: int) -> dict:
+    """{salon: droits d'avant}. L'ancien format (une simple liste de salons) se relit sans droits :
+    ces salons reviennent à neutre, comme avant."""
+    async with get_db() as db:
+        await db.execute("CREATE TABLE IF NOT EXISTS raid_shield("
+                         "guild_id INTEGER PRIMARY KEY, channels TEXT, started_at TEXT)")
+        async with db.execute("SELECT channels FROM raid_shield WHERE guild_id=?", (gid,)) as cur:
+            row = await cur.fetchone()
+    donnees = json.loads(row[0]) if row and row[0] else {}
+    return {str(c): {} for c in donnees} if isinstance(donnees, list) else donnees
+
+
+async def _bouclier_ecrire(gid: int, donnees: dict) -> None:
+    async with get_db() as db:
+        if donnees:
             await db.execute(
                 "INSERT INTO raid_shield(guild_id, channels, started_at) VALUES(?,?,?) "
-                "ON CONFLICT(guild_id) DO UPDATE SET channels=excluded.channels, started_at=excluded.started_at",
-                (guild.id, json.dumps(locked), now().isoformat()))
-            await db.commit()
-    except Exception:
-        pass
-    return len(locked)
+                "ON CONFLICT(guild_id) DO UPDATE SET channels=excluded.channels",
+                (gid, json.dumps(donnees), now().isoformat()))
+        else:
+            await db.execute("DELETE FROM raid_shield WHERE guild_id=?", (gid,))
+        await db.commit()
+
+
+async def _shield_lock(guild):
+    """Passe les salons texte en lecture seule pour @everyone et note, salon par salon, les droits
+    d'AVANT — en base AVANT d'y toucher : même un arrêt en plein milieu laisse « /bouclier off »
+    tout retrouver. Un salon déjà en lecture seule n'est pas touché ; un second « /bouclier on »
+    COMPLÈTE la liste au lieu de l'écraser (19/10/2026). Rend le nombre de salons verrouillés."""
+    ev, me = guild.default_role, guild.me
+    avant = await _bouclier_lire(guild.id)
+    cibles, nouveaux = [], set()
+    for ch in list(getattr(guild, 'text_channels', [])):
+        cur = ch.overwrites_for(ev)
+        if cur.send_messages is False:
+            continue
+        if me is not None and not ch.permissions_for(me).manage_roles:
+            continue
+        cibles.append(ch)
+        if str(ch.id) not in avant:
+            avant[str(ch.id)] = {d: getattr(cur, d) for d in _BOUCLIER_DROITS}
+            nouveaux.add(str(ch.id))
+    await _bouclier_ecrire(guild.id, avant)
+    verrouilles, rates = 0, False
+    for ch in cibles:
+        cur = ch.overwrites_for(ev)
+        for d in _BOUCLIER_DROITS:
+            setattr(cur, d, False)
+        try:
+            await ch.set_permissions(ev, overwrite=cur, reason="Bouclier anti-raid (lecture seule)")
+        except discord.HTTPException as ex:
+            _logerr("bouclier.verrou", ex, guild_id=guild.id)
+            if str(ch.id) in nouveaux:
+                avant.pop(str(ch.id), None)
+                rates = True
+            continue
+        verrouilles += 1
+        await asyncio.sleep(0.25)
+    if rates:
+        await _bouclier_ecrire(guild.id, avant)
+    return verrouilles
 
 
 async def _shield_unlock(guild):
-    """Rétablit les salons verrouillés par le bouclier (send_messages → neutre). FAIL-SAFE."""
-    ids = []
-    try:
-        async with get_db() as db:
-            await db.execute("CREATE TABLE IF NOT EXISTS raid_shield("
-                             "guild_id INTEGER PRIMARY KEY, channels TEXT, started_at TEXT)")
-            async with db.execute("SELECT channels FROM raid_shield WHERE guild_id=?", (guild.id,)) as cur:
-                row = await cur.fetchone()
-            if row and row[0]:
-                ids = json.loads(row[0])
-            await db.execute("DELETE FROM raid_shield WHERE guild_id=?", (guild.id,))
-            await db.commit()
-    except Exception:
-        pass
+    """Rétablit chaque salon verrouillé par le bouclier avec SES droits d'avant. Un salon qui n'a pas
+    pu être rouvert reste noté pour le prochain « /bouclier off ». Rend (rouverts, à réessayer)."""
+    avant = await _bouclier_lire(guild.id)
     ev = guild.default_role
-    reopened = 0
-    for cid in ids:
-        try:
-            ch = guild.get_channel(int(cid))
-            if ch is None:
-                continue
-            cur = ch.overwrites_for(ev)
-            cur.send_messages = None
-            cur.send_messages_in_threads = None
-            cur.create_public_threads = None
-            cur.create_private_threads = None
-            cur.add_reactions = None
-            await ch.set_permissions(ev, overwrite=cur, reason="Bouclier anti-raid levé")
-            reopened += 1
-            await asyncio.sleep(0.25)
-        except Exception:
+    rouverts, restants = 0, {}
+    for cid, droits in avant.items():
+        ch = guild.get_channel(int(cid))
+        if ch is None:
             continue
-    return reopened
+        cur = ch.overwrites_for(ev)
+        for d in _BOUCLIER_DROITS:
+            setattr(cur, d, (droits or {}).get(d))
+        try:
+            await ch.set_permissions(ev, overwrite=cur, reason="Bouclier anti-raid levé")
+        except discord.HTTPException as ex:
+            _logerr("bouclier.retrait", ex, guild_id=guild.id)
+            restants[cid] = droits
+            continue
+        rouverts += 1
+        await asyncio.sleep(0.25)
+    await _bouclier_ecrire(guild.id, restants)
+    return rouverts, len(restants)
 
 
 bouclier_group = app_commands.Group(
@@ -3314,26 +3360,26 @@ async def bouclier_on(i: discord.Interaction):
     g = i.guild
     if g is None:
         return await i.followup.send("Serveur uniquement.", ephemeral=True)
-    n = 0
+    n, pause = None, False
     try:
         n = await _shield_lock(g)
     except Exception as ex:
-        print(f"[bouclier_on lock] {ex}")
+        _logerr("bouclier.on", ex, guild_id=g.id)
     try:
-        await raid_module.run_lockdown(g, 120)
+        pause = bool((await raid_module.run_lockdown(g, 120) or {}).get("invites_disabled"))
     except Exception as ex:
-        print(f"[bouclier_on lockdown] {ex}")
+        _logerr("bouclier.on.arrivees", ex, guild_id=g.id)
+    bilan = (f"{n} salon(s) en lecture seule" if n is not None else "⚠️ salons NON verrouillés (erreur notée)")
+    bilan += " · " + ("arrivées en pause" if pause else "⚠️ arrivées NON mises en pause")
     try:
         await ulogger2026.log_event(
             bot, g, ulogger2026.EventType.SEC_ESCALATION,
-            description=(f"🛡️ **BOUCLIER ACTIVÉ** par {i.user.mention} — {n} salon(s) en lecture "
-                         f"seule + arrivées en pause. `/bouclier off` pour lever."),
+            description=f"🛡️ **BOUCLIER ACTIVÉ** par {i.user.mention} — {bilan}. `/bouclier off` pour lever.",
             moderator=i.user)
-    except Exception:
-        pass
+    except Exception as ex:
+        _logerr("bouclier.on.journal", ex, guild_id=g.id)
     await i.followup.send(
-        f"🛡️ **Bouclier activé** — {n} salon(s) verrouillé(s) en lecture seule + arrivées en "
-        f"pause.\nLève-le avec `/bouclier off` dès que c'est calme.", ephemeral=True)
+        f"🛡️ **Bouclier activé** — {bilan}.\nLève-le avec `/bouclier off` dès que c'est calme.", ephemeral=True)
 
 
 @bouclier_group.command(name="off", description="🔓 Lève le bouclier (rétablit l'écriture + les arrivées)")
@@ -3342,23 +3388,25 @@ async def bouclier_off(i: discord.Interaction):
     g = i.guild
     if g is None:
         return await i.followup.send("Serveur uniquement.", ephemeral=True)
-    n = 0
+    bilan, reprise = "⚠️ salons NON rouverts (erreur notée)", False
     try:
-        n = await _shield_unlock(g)
+        n, reste = await _shield_unlock(g)
+        bilan = f"{n} salon(s) rouvert(s)" + (f", {reste} à réessayer (`/bouclier off`)" if reste else "")
     except Exception as ex:
-        print(f"[bouclier_off unlock] {ex}")
+        _logerr("bouclier.off", ex, guild_id=g.id)
     try:
-        await raid_module.end_lockdown(g)
+        reprise = bool(await raid_module.end_lockdown(g))
     except Exception as ex:
-        print(f"[bouclier_off endlock] {ex}")
+        _logerr("bouclier.off.arrivees", ex, guild_id=g.id)
+    bilan += " · " + ("arrivées rétablies" if reprise else "⚠️ arrivées NON rétablies")
     try:
         await ulogger2026.log_event(
             bot, g, ulogger2026.EventType.SEC_ESCALATION,
-            description=f"🛡️ **BOUCLIER LEVÉ** par {i.user.mention} — {n} salon(s) rouvert(s) + arrivées rétablies.",
+            description=f"🛡️ **BOUCLIER LEVÉ** par {i.user.mention} — {bilan}.",
             moderator=i.user)
-    except Exception:
-        pass
-    await i.followup.send(f"🔓 **Bouclier levé** — {n} salon(s) rouvert(s), arrivées rétablies.", ephemeral=True)
+    except Exception as ex:
+        _logerr("bouclier.off.journal", ex, guild_id=g.id)
+    await i.followup.send(f"🔓 **Bouclier levé** — {bilan}.", ephemeral=True)
 
 
 @bouclier_group.command(name="secours", description="🧱 Installe un filet AutoMod natif (protège même quand le bot est éteint)")
@@ -3434,6 +3482,25 @@ bot.tree.add_command(bouclier_group)
 # Le bot ne voit PAS les MP → un membre (surtout un jeune) peut signaler une arnaque, du grooming
 # ou un malaise reçu en privé. Le signalement part DISCRÈTEMENT au staff (salon Sécurité), jamais
 # en public. Accessible à TOUS les membres. FAIL-SAFE.
+_signalements: dict = {}             # {(guild_id, user_id): ts} — /signaler
+_SIGNALEMENT_CD = 120.0              # 1 signalement / 2 min / personne (le salon d'alertes reste lisible)
+_SIGNALEMENT_RATE = ("⚠️ Ton signalement n'a pas pu être transmis à l'équipe. Ouvre un **ticket** "
+                     "pour qu'elle le voie.")
+
+
+def _signalement_recent(registre: dict, gid: int, uid: int, delai: float) -> bool:
+    return time.time() - registre.get((gid, uid), 0) < delai
+
+
+def _signalement_note(registre: dict, gid: int, uid: int) -> None:
+    """Noté seulement une fois PARTI : un échec ne bloque pas le nouvel essai."""
+    maintenant = time.time()
+    registre[(gid, uid)] = maintenant
+    if len(registre) > 5000:  # borne mémoire
+        for k in [k for k, v in list(registre.items()) if maintenant - v > 600]:
+            registre.pop(k, None)
+
+
 @bot.tree.command(
     name="signaler",
     description="🚨 Signaler discrètement une arnaque, un message gênant ou quelqu'un de suspect")
@@ -3445,8 +3512,13 @@ async def signaler_cmd(i: discord.Interaction, description: str):
         await i.response.defer(ephemeral=True)
     except Exception:
         pass
+    if _signalement_recent(_signalements, i.guild.id, i.user.id, _SIGNALEMENT_CD):
+        return await i.followup.send(
+            "⏳ Ton signalement vient de partir, l'équipe le lit. Un détail à ajouter ? Ouvre un **ticket**.",
+            ephemeral=True)
+    envoye = None
     try:
-        await ulogger2026.log_event(
+        envoye = await ulogger2026.log_event(
             bot, i.guild, ulogger2026.EventType.SEC_ESCALATION,
             description=(f"🚨 **Signalement d'un membre** — {i.user.mention} (`{i.user.id}`)\n"
                          f"**Salon :** {i.channel.mention if getattr(i, 'channel', None) else '—'}\n"
@@ -3455,7 +3527,10 @@ async def signaler_cmd(i: discord.Interaction, description: str):
                          f"Si grooming/arnaque confirmé : `/off` ou bannis.)_"),
             user=i.user, moderator=bot.user, channel=getattr(i, 'channel', None))
     except Exception as ex:
-        print(f"[signaler] {ex}")
+        _logerr("signaler", ex, guild_id=i.guild.id)
+    if envoye is None:
+        return await i.followup.send(_SIGNALEMENT_RATE, ephemeral=True)
+    _signalement_note(_signalements, i.guild.id, i.user.id)
     try:
         await i.followup.send(
             "✅ Merci, ton signalement a été transmis **en privé au staff**. Tu as bien fait. 💚\n"
@@ -3485,6 +3560,7 @@ async def signaler_vocal_cmd(i: discord.Interaction, membre: discord.Member, rai
         await i.response.defer(ephemeral=True)
     except Exception:
         pass
+    envoye = None
     try:
         # Le rapporteur doit être EN vocal (témoin). Sinon → /signaler générique.
         _vs = getattr(i.user, 'voice', None)
@@ -3498,27 +3574,18 @@ async def signaler_vocal_cmd(i: discord.Interaction, membre: discord.Member, rai
             await i.followup.send("ℹ️ Choisis une **autre personne** (pas un bot, pas toi).",
                                   ephemeral=True)
             return
-        # Anti-spam de signalement (anti-harcèlement par faux signalements). Fail-open.
-        try:
-            _now = time.time()
-            _k = (i.guild.id, i.user.id)
-            if _now - _voice_report_cd.get(_k, 0) < _VOICE_REPORT_CD:
-                await i.followup.send(
-                    "⏳ Tu viens déjà d'envoyer un signalement — laisse le staff regarder. Merci !",
-                    ephemeral=True)
-                return
-            _voice_report_cd[_k] = _now
-            if len(_voice_report_cd) > 5000:          # borne mémoire
-                for _kk in [k for k, v in list(_voice_report_cd.items()) if _now - v > 300]:
-                    _voice_report_cd.pop(_kk, None)
-        except Exception:
-            pass
+        # Anti-spam de signalement (anti-harcèlement par faux signalements).
+        if _signalement_recent(_voice_report_cd, i.guild.id, i.user.id, _VOICE_REPORT_CD):
+            await i.followup.send(
+                "⏳ Tu viens déjà d'envoyer un signalement — laisse le staff regarder. Merci !",
+                ephemeral=True)
+            return
         # La cible est-elle dans le MÊME vocal ? (contexte pour le staff)
         _tvs = getattr(membre, 'voice', None)
         tgt_ch = getattr(_tvs, 'channel', None) if _tvs else None
         same = (tgt_ch is not None and tgt_ch.id == my_ch.id)
         loc = my_ch.mention if same else (tgt_ch.mention if tgt_ch else my_ch.mention)
-        await ulogger2026.log_event(
+        envoye = await ulogger2026.log_event(
             bot, i.guild, ulogger2026.EventType.SEC_ESCALATION,
             description=(f"🔇 **Signalement VOCAL** — nuisance sonore\n"
                          f"**Signalé :** {membre.mention} (`{membre.id}`)\n"
@@ -3530,7 +3597,10 @@ async def signaler_vocal_cmd(i: discord.Interaction, membre: discord.Member, rai
                            "décide : rappel, server-mute manuel, ou sanction.)_"),
             user=i.user, moderator=bot.user, channel=my_ch)
     except Exception as ex:
-        print(f"[signaler-vocal] {ex}")
+        _logerr("signaler.vocal", ex, guild_id=i.guild.id)
+    if envoye is None:
+        return await i.followup.send(_SIGNALEMENT_RATE, ephemeral=True)
+    _signalement_note(_voice_report_cd, i.guild.id, i.user.id)
     try:
         await i.followup.send(
             "✅ Merci, ton signalement est parti **discrètement au staff**. Ils vont écouter et agir "
@@ -5526,7 +5596,7 @@ _OCR_SEM = asyncio.Semaphore(2)
 _IMG_EXTS = ('png', 'jpg', 'jpeg', 'webp', 'bmp')
 
 
-async def _ocr_scam_check(msg, immune: bool = False):
+async def _ocr_scam_check(msg, immune: bool = False, lire=None):
     """Tâche de fond : lit le texte DANS les images (et les QR codes) et retire une image d'arnaque.
     19/10/2026 : plus de ban sur une lecture d'image (« ça expulse des gens qui n'ont rien fait »).
     Image retirée et direction alertée ; l'infraction compte pour la rafale (bot ou compte piraté →
@@ -5559,7 +5629,7 @@ async def _ocr_scam_check(msg, immune: bool = False):
         # ≤8 Mo/image).
         for a in atts[:4]:
             try:
-                data = await a.read()
+                data = await (lire(a) if lire else a.read())
             except Exception:
                 continue
             try:
@@ -5641,6 +5711,27 @@ _NSFW_SEM = asyncio.Semaphore(1)
 _bg_scan_tasks: set = set()
 
 
+def _lecteur_partage(lecteurs: int):
+    """Un téléchargement par image pour plusieurs analyses du MÊME message (OCR et NSFW) — avant :
+    chaque image (≤ 8 Mo) téléchargée deux fois. Oubliée dès que le dernier lecteur l'a reçue."""
+    if lecteurs < 2:
+        return None
+    deja: dict = {}
+
+    async def lire(a):
+        cle = getattr(a, "id", None) or id(a)
+        entree = deja.get(cle)
+        if entree is None:
+            entree = deja[cle] = [asyncio.ensure_future(a.read()), 0]
+        entree[1] += 1
+        try:
+            return await entree[0]
+        finally:
+            if entree[1] >= lecteurs:
+                deja.pop(cle, None)
+    return lire
+
+
 def _spawn_bg_scan(coro):
     """Lance un scan d'image en arrière-plan en gardant une référence (anti-GC). FAIL-SAFE."""
     try:
@@ -5654,7 +5745,7 @@ def _spawn_bg_scan(coro):
 _NSFW_BAN_LABELS = {"FEMALE_GENITALIA_EXPOSED", "MALE_GENITALIA_EXPOSED", "ANUS_EXPOSED"}
 
 
-async def _nsfw_image_check(msg):
+async def _nsfw_image_check(msg, lire=None):
     """Tâche de fond : détecte une image sexuellement explicite et AGIT. Génitalité/anus → exclusion 24 h ;
     seins/fessiers → suppression + alerte owner. Ne tourne que si le moteur est dispo (garde RAM).
     Immunisés exclus en amont. FAIL-SAFE."""
@@ -5676,7 +5767,7 @@ async def _nsfw_image_check(msg):
         loop = asyncio.get_event_loop()
         for a in atts[:2]:
             try:
-                data = await a.read()
+                data = await (lire(a) if lire else a.read())
             except Exception:
                 continue
             try:
@@ -5726,11 +5817,28 @@ async def _nsfw_image_check(msg):
 # un nombre brut de 10 chiffres (seed de jeu, ID…) ferait un faux positif. +33 accepté.
 _PII_PHONE_RE = re.compile(r'(?<!\d)(?:\+33\s?|0)[67](?:[ .\-]\d{2}){4}(?!\d)')
 _PII_EMAIL_RE = re.compile(r'\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b', re.IGNORECASE)
-# Adresse : numéro + TYPE DE VOIE SANS AMBIGUÏTÉ. On EXCLUT « cours/place/quai » (FP : « 3 cours
-# demain », « 4 place de libre »).
+# Adresse : numéro + TYPE DE VOIE. On EXCLUT « cours/place/quai » (FP : « 3 cours demain »,
+# « 4 place de libre »). « bd / av / chemin » sont aussi des mots du quotidien (« 3 bd de one
+# piece », « 2 chemin pour l'obby ») : il leur faut une suite de nom de voie (« du », « des »,
+# « de la », « de l' ») ou une majuscule (« 12 bd Haussmann ») — 20/10/2026.
+_VOIE_SURE = r"(?:rue|avenue|av\.|boulevard|impasse|all[ée]e|r[ée]sidence)\s+[a-zà-ÿ]"
+_VOIE_AMBIGUE = r"(?:bd|av|chemin)\s+(?:d(?:u|es|e\s+la|e\s+l['’])\s*[a-zà-ÿ]|(?-i:[A-ZÀ-Ý]))"
 _PII_ADDR_RE = re.compile(
-    r'\b\d{1,4}\s*,?\s*(?:rue|avenue|av\.?|bd|boulevard|impasse|all[ée]e|chemin|'
-    r'r[ée]sidence)\s+[a-zà-ÿ]', re.IGNORECASE)
+    r"\b\d{1,4}\s*(?:bis|ter)?\s*,?\s*(?:" + _VOIE_SURE + "|" + _VOIE_AMBIGUE + ")", re.IGNORECASE)
+# Une adresse de SERVICE (support@roblox.com, contact@…) n'est pas une coordonnée personnelle.
+_EMAIL_DE_SERVICE = frozenset((
+    "support", "contact", "info", "infos", "help", "aide", "noreply", "no-reply", "abuse", "privacy",
+    "security", "securite", "press", "presse", "hello", "bonjour", "team", "equipe", "admin", "legal",
+    "dpo", "rgpd", "gdpr", "service", "sav", "partners", "partenariat", "partenariats", "business",
+    "jobs", "careers", "recrutement", "feedback", "webmaster", "postmaster", "communication",
+    "marketing", "sales", "commercial", "accueil", "billing", "facturation", "news", "newsletter",
+    "media", "medias", "creators", "developers", "appeals", "safety", "trust", "moderation"))
+
+
+def _email_perso(ct: str) -> bool:
+    """Au moins une adresse e-mail qui n'est pas celle d'un service."""
+    return any(m.group(0).split("@", 1)[0].split("+", 1)[0].lower() not in _EMAIL_DE_SERVICE
+               for m in _PII_EMAIL_RE.finditer(ct))
 
 
 async def _doxxing_check(msg, ct):
@@ -5741,7 +5849,7 @@ async def _doxxing_check(msg, ct):
             kind = "numéro de téléphone"
         elif _PII_ADDR_RE.search(ct):
             kind = "adresse postale"
-        elif _PII_EMAIL_RE.search(ct):
+        elif _email_perso(ct):
             kind = "adresse e-mail"
         if not kind:
             return False
@@ -7727,7 +7835,23 @@ async def _gdpr_retention_wait():
     await bot.wait_until_ready()
 
 
+_tickets_en_creation: set = set()   # {(guild_id, user_id)}
+
+
 async def create_ticket(i, pid, ans=None):
+    """Un seul ticket en cours d'ouverture par membre : deux clics rapprochés passaient tous deux le
+    contrôle « max tickets » (la base n'avait pas encore le premier) et ouvraient deux tickets."""
+    cle = (i.guild.id, i.user.id)
+    if cle in _tickets_en_creation:
+        return None, "⏳ Ton ticket est en cours d'ouverture…"
+    _tickets_en_creation.add(cle)
+    try:
+        return await _create_ticket_corps(i, pid, ans)
+    finally:
+        _tickets_en_creation.discard(cle)
+
+
+async def _create_ticket_corps(i, pid, ans=None):
     ch = None
     try:
         # ⏰ FENÊTRE HORAIRE (owner) : filet AUTORITATIF — couvre TOUS les chemins de
@@ -8589,7 +8713,26 @@ async def _ticket_transcript_html(ch, tid):
         return None
 
 
-async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours=0):
+_tickets_en_fermeture: set = set()  # {channel_id}
+
+
+async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours=0) -> bool:
+    """Une seule fermeture par ticket : deux envois, deux membres du staff, ou la fermeture pour
+    inactivité pendant les 5 s d'attente envoyaient deux logs et deux MP. Rend False si le ticket
+    est déjà fermé ou en cours de fermeture."""
+    if ch.id in _tickets_en_fermeture:
+        return False
+    _tickets_en_fermeture.add(ch.id)
+    try:
+        if await get_ticket(ch.id) is None:
+            return False
+        await _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours)
+        return True
+    finally:
+        _tickets_en_fermeture.discard(ch.id)
+
+
+async def _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours=0):
     """Fermeture d'un ticket : log staff + transcript, MP au créateur, base, suppression.
     Partagée par le bouton 🔒 et la fermeture après `inactif_jours` jours sans message."""
     tid = tk.get('id', '?')
@@ -8681,7 +8824,11 @@ class TicketCloseModal(Modal):
         except Exception:
             pass
         reason = (self.reason.value or '').strip() or "Aucune raison précisée"
-        await _fermer_ticket(i.guild, i.channel, self.tk, i.user, reason)
+        if not await _fermer_ticket(i.guild, i.channel, self.tk, i.user, reason):
+            try:
+                await i.followup.send("ℹ️ Ce ticket est déjà fermé ou en cours de fermeture.", ephemeral=True)
+            except discord.HTTPException:
+                pass
 
 
 class TicketControlView(View):
@@ -10469,9 +10616,13 @@ class MainPanelV2(LayoutView):
             etat['tickets'] = "⚪ _non configuré_"
 
         try:
-            log_id = await ulogger2026.get_log_channel(self.g.id)
-            log_ch = self.g.get_channel(log_id) if log_id else None
-            etat['logs'] = log_ch.mention if log_ch else "⚪ _non défini_"
+            if await ulogger2026.mode_site(self.g.id):
+                alertes = self.g.get_channel(await ulogger2026.salon_alertes(self.g.id) or 0)
+                etat['logs'] = "🌐 sur le site" + (f" · alertes {alertes.mention}" if alertes else "")
+            else:
+                log_id = await ulogger2026.get_log_channel(self.g.id)
+                log_ch = self.g.get_channel(log_id) if log_id else None
+                etat['logs'] = log_ch.mention if log_ch else "⚪ _non défini_"
         except Exception as ex:
             print(f"[MainPanelV2 _collect_etat logs] {ex}")
             etat['logs'] = "⚪ _indisponible_"
@@ -12757,8 +12908,9 @@ async def _travaux_de_demarrage():
             _logerr(f"demarrage.{etape.__name__}", ex)
 
 
-async def _relever_actus() -> dict:
-    """Un passage de l'actualité Roblox : toutes les sources, mise en file, publication."""
+async def _relever_actus(forcer: bool = False) -> dict:
+    """Un passage de l'actualité Roblox : toutes les sources, mise en file, publication.
+    `forcer` (le bouton « Relever maintenant ») ignore la cadence de chaque source."""
     out = {"lus": 0, "enfiles": 0, "publies": 0, "pannes": 0}
     guildes = []
     for g in list(bot.guilds):
@@ -12770,7 +12922,7 @@ async def _relever_actus() -> dict:
     if not guildes:
         return out
     for src in roblox_news_module.SOURCES:
-        rel = await roblox_news_module.relever(src)
+        rel = await roblox_news_module.relever(src, forcer=forcer)
         if rel.get("sautee"):
             continue
         if rel["code"] != 200:
@@ -17289,7 +17441,6 @@ def _compute_tree_hash(tree) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-_api_warning_cooldown_seconds = 24 * 3600  # 24h
 _api_warning_state: dict[str, float] = {}  # key = "guild_id:platform" → timestamp
 _api_warning_state_loaded = False
 
@@ -17320,18 +17471,22 @@ def _save_api_warning_state():
         print(f"[_save_api_warning_state] {ex}")
 
 
-async def _warn_api_dead(guild, platform: str, reason: str):
-    """Envoie UN seul warning par 24h par guild/plateforme dans le salon de logs.
+def _api_retablie(guild, platform: str) -> None:
+    """La plateforme répond de nouveau : la prochaine panne sera signalée."""
+    _load_api_warning_state()
+    if _api_warning_state.pop(f"{guild.id}:{platform}", None) is not None:
+        _save_api_warning_state()
 
-    Phase 15 : persisté sur disque pour survivre aux redémarrages.
+
+async def _warn_api_dead(guild, platform: str, reason: str):
+    """UNE alerte par panne et par serveur/plateforme (persistée : survit aux redémarrages), réarmée
+    par `_api_retablie`. 20/10/2026 : elle se répétait toutes les 24 h, à vie, pour une panne durable.
     """
     _load_api_warning_state()
     key = f"{guild.id}:{platform}"
-    now_ts = time.time()
-    last_ts = _api_warning_state.get(key, 0)
-    if now_ts - last_ts < _api_warning_cooldown_seconds:
-        return  # Déjà warn dans les 24h
-    _api_warning_state[key] = now_ts
+    if key in _api_warning_state:
+        return  # déjà signalée : rien de neuf tant que la plateforme n'est pas revenue
+    _api_warning_state[key] = time.time()
     _save_api_warning_state()
     try:
         await ulogger2026.log_event(
@@ -17343,7 +17498,7 @@ async def _warn_api_dead(guild, platform: str, reason: str):
                 "💡 Solution : publie manuellement dans le salon configuré. "
                 "Le bot continuera de vérifier en arrière-plan au cas où l'API revient."
             ),
-            extra={"🛠️ Action": "Aucune (la détection auto est en panne) · Prochaine alerte dans 24h max"},
+            extra={"🛠️ Action": "Aucune (la détection auto est en panne) · Une seule alerte par panne"},
         )
     except Exception as ex:
         print(f"[_warn_api_dead] {platform}: {ex}")
@@ -17415,6 +17570,24 @@ async def get_webhook(channel, platform: str):
         print(f"Erreur webhook {platform} dans #{channel.name}: {ex}")
         return None
 
+async def _deja_poste(channel, kw: dict, depuis):
+    """Après un 5xx ou un délai dépassé, Discord a pu garder le message : on le cherche parmi les
+    derniers du salon avant de renvoyer (sinon deux exemplaires). Rend le message trouvé, ou None."""
+    e = kw.get('embed') or next(iter(kw.get('embeds') or []), None)
+    cle = (getattr(e, 'url', None) or getattr(e, 'title', None)) if e is not None else kw.get('content')
+    if not cle:
+        return None
+    try:
+        async for m in channel.history(limit=10, after=depuis):
+            if m.webhook_id is None and m.author.id != bot.user.id:
+                continue
+            if m.content == cle or any((x.url or x.title) == cle for x in m.embeds):
+                return m
+    except discord.HTTPException as ex:
+        _logerr("webhook.verif", ex, guild_id=getattr(getattr(channel, 'guild', None), 'id', 0))
+    return None
+
+
 async def webhook_send(channel, platform: str, embed=None, content=None, file=None, files=None, embeds=None, view=None,
                        allowed_mentions=None):
     """Envoie un message via webhook avec le profil de la plateforme.
@@ -17485,6 +17658,7 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
             print(f"[webhook_send] {platform} {chan_info}: erreur inattendue channel.send : {type(ex).__name__}: {ex}")
             return None
 
+    _avant = discord.utils.utcnow() - timedelta(seconds=10)
     try:
         return await wh.send(**_build_kwargs(True))
     except (discord.NotFound, discord.InvalidData) as ex:
@@ -17519,6 +17693,10 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
     except discord.HTTPException as ex:
         # Inclut 40062 (rate-limited), 50013 (perms), etc.
         print(f"[webhook_send] {platform} {chan_info}: HTTPException status={getattr(ex, 'status', '?')} code={getattr(ex, 'code', '?')} : {ex}")
+        if (getattr(ex, 'status', 0) or 0) >= 500:
+            deja = await _deja_poste(channel, _build_kwargs(False), _avant)
+            if deja is not None:
+                return deja
         try:
             return await channel.send(**_build_kwargs(False))
         except Exception as ex2:
@@ -17526,6 +17704,9 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
             return None
     except Exception as ex:
         print(f"[webhook_send] {platform} {chan_info}: erreur inattendue webhook : {type(ex).__name__}: {ex}")
+        deja = await _deja_poste(channel, _build_kwargs(False), _avant)  # délai dépassé : peut-être reçu
+        if deja is not None:
+            return deja
         try:
             return await channel.send(**_build_kwargs(False))
         except Exception as ex2:
@@ -19169,7 +19350,7 @@ async def _activite_boot():
 
     roblox_ui.setup(db_set=db_set, webhook_send=webhook_send, log=print)
     roblox_ui.set_retour(_retour_vers_configure)
-    roblox_ui.set_relever(_relever_actus)
+    roblox_ui.set_relever(lambda: _relever_actus(forcer=True))
 
     #  ⚠️ LES RÔLES DE PING SONT INJECTÉS, PAS DEVINÉS. `roblox_pings` ne
     #  connaît ni la base ni la config : sans ce `setup`, `role_de` planterait
@@ -23251,14 +23432,17 @@ async def on_message(msg):
         # On scanne désormais TOUT LE MONDE ; la POLITIQUE DE SANCTION suit le précédent owner
         # de anti_scam_image (l.58098) : immunisé = retrait + ALERTE « compte piraté » (traitement
         # MANUEL fondateur, AUCUNE sanction) ; non-immunisé = ban sécurité (récupérable).
-        if c.get('anti_scam_ocr', 1) and (not is_ticket) and _msg_has_image(msg):
-            _spawn_bg_scan(_ocr_scam_check(msg, immune=user_immune))
+        _ocr = bool(c.get('anti_scam_ocr', 1) and (not is_ticket) and _msg_has_image(msg))
+        _nsfw = bool(c.get('anti_nsfw_image', 1) and (not user_immune) and (not is_ticket) and _msg_has_image(msg))
+        _lire = _lecteur_partage(_ocr + _nsfw)
+        if _ocr:
+            _spawn_bg_scan(_ocr_scam_check(msg, immune=user_immune, lire=_lire))
 
         # DÉTECTION IMAGE NSFW PAR IA (owner 2026-06-27 — protection mineurs) : en arrière-plan,
         # repère une photo sexuellement explicite (que l'OCR ne voit pas). Garde RAM côté module
         # (auto-OFF si peu de RAM). Immunisés/tickets exclus. FAIL-SAFE.
-        if c.get('anti_nsfw_image', 1) and (not user_immune) and (not is_ticket) and _msg_has_image(msg):
-            _spawn_bg_scan(_nsfw_image_check(msg))
+        if _nsfw:
+            _spawn_bg_scan(_nsfw_image_check(msg, lire=_lire))
 
         # ═══════════════ PROTECTIONS CRITIQUES (JAMAIS IGNORÉES) ═══════════════
         
@@ -26689,11 +26873,26 @@ async def rellseas_cmd(i: discord.Interaction):
 #                              📊 SUGGESTION VOTE TRACKING
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_rr_messages = None  # messages porteurs de rôles-réactions, lus une fois (plus aucun code n'en crée :
+#                      un futur écrivain de `reaction_roles` doit remettre ceci à None).
+
+
+async def _rr_messages_connus() -> set:
+    global _rr_messages
+    if _rr_messages is None:
+        async with get_db() as db:
+            async with db.execute('SELECT DISTINCT message_id FROM reaction_roles') as cur:
+                _rr_messages = {int(r[0]) for r in await cur.fetchall()}
+    return _rr_messages
+
+
 async def _handle_reaction_role(payload, *, add: bool):
     """Phase 28.4 — applique/retire un rôle quand emoji = match."""
     try:
         if payload.user_id == bot.user.id or not payload.guild_id:
             return
+        if payload.message_id not in await _rr_messages_connus():
+            return  # 20/10/2026 : une requête par réaction du serveur, pour rien
         emoji_str = str(payload.emoji)
         async with get_db() as db:
             async with db.execute(
@@ -27657,6 +27856,7 @@ async def check_tiktok_feeds(session, guild, data):
                                   f"@{username}: RSSHub injoignable ({type(_tkex).__name__})")
                 if _tk_it is not None:
                     _TIKTOK_WARN_CD.pop((guild.id, username), None)   # flux OK → réarme le warn
+                    _api_retablie(guild, "tiktok")
                     try:
                         _tk_link = (_tk_it.findtext('link') or '').strip()
                         _tk_m = (re.search(r'/video/(\d{6,})', _tk_link)
@@ -27727,6 +27927,10 @@ async def check_tiktok_feeds(session, guild, data):
                     # RSSHub a répondu → on NE tente PAS le scrape direct (bloqué de toute façon).
                     continue
 
+            # La page tiktok.com est presque toujours bloquée (Cloudflare) : une tentative par 30 min
+            # et par compte, plus chaque minute (~0,5 Mo lu et analysé à chaque fois — 20/10/2026).
+            if not _page_live_due(f"tiktok_page:{username}", 1800):
+                continue
             # Méthode RSS via proxitok/instances ou scrape léger
             try:
                 # Essayer via la page profil TikTok
@@ -28089,6 +28293,7 @@ async def check_twitter_feeds(session, guild, data):
                     pass
                 continue
 
+            _api_retablie(guild, "twitter")
             # Rien de ce que renvoie un service tiers ne devient tel quel un lien ou une image : le
             # lien est reconstruit depuis l'identifiant, le texte neutralisé (pas de [lien](piège)
             # ni de @everyone), les images acceptées seulement chez X.

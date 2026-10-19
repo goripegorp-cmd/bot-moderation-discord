@@ -40,7 +40,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -831,7 +831,7 @@ class RSSHubAdapter(PlatformAdapter):
         self._base_override = ((base_url or "").strip().rstrip("/")) or None
         self.route = RSSHUB_ROUTES.get(platform, "")
         self._session = None  # type: Any
-        self._seen: dict[str, set] = {}      # handle -> set des guid deja vus (baseline en memoire)
+        self._seen: dict[str, set] = {}      # handle#abonnement -> guid deja vus (baseline en memoire)
 
     @property
     def base_url(self) -> str:
@@ -956,13 +956,15 @@ class RSSHubAdapter(PlatformAdapter):
             return out
         return out
 
-    async def fetch_posts(self, handle: str) -> list[SocialPost]:
+    async def fetch_posts(self, handle: str, abonne: str = "") -> list[SocialPost]:
+        """`abonne` : la mémoire « déjà vu » est propre à chaque abonnement (20/10/2026 : partagée
+        par compte, le premier abonnement lu privait les autres de chaque nouveau post)."""
         if not self.configured:
             return []
         items = await self._fetch_items(handle)
         if not items:
             return []
-        key = _clean_handle(handle).lower()
+        key = f"{_clean_handle(handle).lower()}#{abonne}"
         seen = self._seen.get(key)
         ids = [p.post_id for p in items]
         if seen is None:
@@ -1547,7 +1549,10 @@ class SocialMediaManager:
                 pass
             return 0
         try:
-            posts = await adapter.fetch_posts(sub.handle)
+            if isinstance(adapter, RSSHubAdapter):
+                posts = await adapter.fetch_posts(sub.handle, abonne=str(sub.sub_id))
+            else:
+                posts = await adapter.fetch_posts(sub.handle)
         except Exception as _ex:
             # 🎯 Avant : erreur avalee → « pourquoi rien ne remonte de cette chaine ? » invisible.
             try:
@@ -1673,13 +1678,25 @@ class SocialMediaManager:
         return ann.deleted
 
     async def cleanup_all(self) -> dict[int, int]:
-        """Cleanup pour toutes les annonces des guilds charges."""
+        """Seul un LIVE se termine : seules ses annonces sont revérifiées (20/10/2026 : chaque annonce
+        jamais faite l'était, toutes les 30 min, avec une réécriture du fichier de chaque serveur). Une
+        annonce de live retirée depuis 30 jours est oubliée : ce live-là ne reviendra pas."""
         results: dict[int, int] = {}
+        limite = datetime.now(timezone.utc) - timedelta(days=30)
         for guild_id, anns in list(self._anns.items()):
             removed = 0
             vues = 0
-            for ann in list(anns.values()):
+            for cle, ann in list(anns.items()):
                 if ann.deleted:
+                    try:
+                        vieille = datetime.fromisoformat(str(ann.last_checked_at)) < limite
+                    except (TypeError, ValueError):
+                        vieille = False
+                    if vieille:
+                        del anns[cle]
+                        vues += 1
+                    continue
+                if not ann.is_currently_live:
                     continue
                 vues += 1
                 if await self.cleanup_announcement(ann, sauver=False):

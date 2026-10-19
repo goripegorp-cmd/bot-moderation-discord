@@ -494,3 +494,11 @@ def test_L9_logs_reserve_au_fondateur_et_a_la_direction():
     assert "Staff" in journal[-1][2] and "Administrateur" in journal[-1][2], "un rôle admin sous la direction est signalé"
     appels = len(salon.appels)
     assert asyncio.run(ns["_logs_direction_seule"](g)) is False and len(salon.appels) == appels, "une seule fois"
+
+
+def test_L10_le_panneau_principal_dit_ou_sont_les_logs():
+    """Mode site : plus aucun salon de logs — le panneau affichait « Logs · non défini »."""
+    arbre = ast.parse((Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8"))
+    classe = next(n for n in arbre.body if isinstance(n, ast.ClassDef) and n.name == "MainPanelV2")
+    corps = next(ast.unparse(f) for f in classe.body if getattr(f, "name", "") == "_collect_etat")
+    assert "ulogger2026.mode_site(self.g.id)" in corps and "sur le site" in corps

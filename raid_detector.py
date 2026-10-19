@@ -498,6 +498,7 @@ async def run_lockdown(guild: discord.Guild, duration_min: int = 30) -> dict:
 
 async def end_lockdown(guild: discord.Guild) -> bool:
     """Fin du lockdown : les invitations reprennent — appelé par l'échéance ou par /bouclier off."""
+    ok = True
     try:
         # Les invitations reprennent. On ne supprime plus aucun rôle : « Vérification » est aussi
         # le rôle de quarantaine, et le supprimer libérait chaque membre isolé (19/10/2026).
@@ -505,6 +506,7 @@ async def end_lockdown(guild: discord.Guild) -> bool:
             await guild.edit(invites_disabled=False, reason="Fin du lockdown anti-raid")
         except discord.HTTPException as ex:
             print(f"[raid_detector end_lockdown invitations] {ex}")
+            ok = False  # « arrivées rétablies » serait un mensonge
         # Marquer les alerts comme resolved
         async with _get_db() as db:
             await db.execute(
@@ -513,7 +515,7 @@ async def end_lockdown(guild: discord.Guild) -> bool:
                 (guild.id,),
             )
             await db.commit()
-        return True
+        return ok
     except Exception as ex:
         print(f"[raid_detector end_lockdown] {ex}")
         return False

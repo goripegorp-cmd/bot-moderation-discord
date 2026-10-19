@@ -47,8 +47,8 @@ def test_N2_un_passage_releve_enfile_publie_et_dit_les_pannes():
     async def actif(gid):
         return gid == 1
 
-    async def relever(src):
-        appels.append(("relever", src["cle"]))
+    async def relever(src, forcer=False):
+        appels.append(("relever", src["cle"], forcer))
         return reponses[src["cle"]]
 
     async def enfiler(guildes, rel):
@@ -73,6 +73,11 @@ def test_N2_un_passage_releve_enfile_publie_et_dit_les_pannes():
     exec(_fonction("_relever_actus"), ns)  # noqa: S102 — code du dépôt
     res = asyncio.run(ns["_relever_actus"]())
     assert res == {"lus": 3, "enfiles": 2, "publies": 2, "pannes": 1}
+    assert all(a[2] is False for a in appels if a[0] == "relever"), "la boucle respecte la cadence"
+    appels.clear()
+    asyncio.run(ns["_relever_actus"](forcer=True))
+    assert all(a[2] is True for a in appels if a[0] == "relever"), "« Relever maintenant » relève tout"
+    assert "roblox_ui.set_relever(lambda: _relever_actus(forcer=True))" in SRC
     assert ("enfiler", [1]) in appels and ("publier",) in appels
     assert appels.count(("purge",)) == 2
 
@@ -113,4 +118,4 @@ async def test_N5_le_bouton_relever_passe_par_la_vraie_veille(monkeypatch):
     assert rendus == ["🔄 Relevé en cours…",
                       "✅ `12` billet(s) lu(s) · `3` nouveau(x) · `3` publié(s) · "
                       "⚠️ `1` source(s) en panne"]
-    assert "roblox_ui.set_relever(_relever_actus)" in SRC
+    assert "roblox_ui.set_relever(lambda: _relever_actus(forcer=True))" in SRC

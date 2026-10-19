@@ -229,3 +229,20 @@ def test_F19_les_lexiques_se_chargent_a_l_import():
             "assert O._RE is not None")
     r = subprocess.run([sys.executable, "-c", code], cwd=RACINE, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_F20_bd_chemin_et_adresses_de_service_ne_sont_pas_des_coordonnees():
+    ns = _extraire("_PII_EMAIL_RE", "_VOIE_SURE", "_VOIE_AMBIGUE", "_PII_ADDR_RE", "_EMAIL_DE_SERVICE",
+                   "_email_perso")
+    adresse, mail = ns["_PII_ADDR_RE"].search, ns["_email_perso"]
+    for phrase in ("j'ai lu 3 bd de one piece", "j'ai 10 bd manga", "il reste 2 chemin pour finir l'obby",
+                   "prends le 2 av le boss", "4 BD manga", "3 cours demain", "4 place de libre"):
+        assert not adresse(phrase), phrase
+    for phrase in ("écris à support@roblox.com", "contact@studio.fr pour les partenariats",
+                   "appeals+fr@roblox.com"):
+        assert not mail(phrase), phrase
+    for phrase in ("j'habite au 12 rue victor hugo", "12 bd Haussmann", "5 chemin des vignes",
+                   "3 av. de la république", "12 bis rue de la paix", "8 allée des roses"):
+        assert adresse(phrase), phrase
+    assert mail("mon mail c'est lucas.martin2012@gmail.com")
+    assert mail("support@roblox.com ou moi : lea.d@hotmail.fr"), "une adresse perso parmi d'autres"

@@ -131,22 +131,22 @@ def test_I2_la_fermeture_partagee_log_mp_base_puis_suppression(base):
           "_ticket_transcript_file": transcript, "_ticket_feedback_view": lambda *a: "notes",
           "get_db": base, "tix_module": Obj(log_action=audit), "asyncio": Obj(sleep=dormir),
           "discord": discord, "_logerr": lambda *a, **k: journal.append(("ERREUR", a))}
-    exec(_source("_fermer_ticket"), ns)  # noqa: S102 — code du dépôt
+    exec(_source("_fermer_ticket_corps"), ns)  # noqa: S102 — code du dépôt
     tk = {"id": 1, "user": 7}
-    asyncio.run(ns["_fermer_ticket"](g, Salon(), tk, Obj(id=2, mention="@bot", display_name="Bot"),
-                                     "7 jours sans message", inactif_jours=7))
+    asyncio.run(ns["_fermer_ticket_corps"](g, Salon(), tk, Obj(id=2, mention="@bot", display_name="Bot"),
+                                           "7 jours sans message", inactif_jours=7))
     #  19/10 : « ils n'ont pas à le savoir » — un nettoyage : ni MP, ni annonce.
     assert [e[0] for e in journal] == ["log", "audit", "supprime"], journal
     assert asyncio.run(_statuts(base))[0] == (1, "closed")
     journal.clear()
-    asyncio.run(ns["_fermer_ticket"](g, Salon(), tk, Obj(id=2, mention="@staff", display_name="Staff"),
-                                     "Résolu"))
+    asyncio.run(ns["_fermer_ticket_corps"](g, Salon(), tk, Obj(id=2, mention="@staff", display_name="Staff"),
+                                           "Résolu"))
     assert [e[0] for e in journal] == ["log", "mp", "audit", "annonce", "supprime"], journal
     assert journal[1][2] is True, "la note de satisfaction après une vraie prise en charge"
 
 
 def test_I3_branchements():
-    assert "await _fermer_ticket(i.guild, i.channel, self.tk, i.user, reason)" in SRC
+    assert "if not await _fermer_ticket(i.guild, i.channel, self.tk, i.user, reason):" in SRC
     assert '"tickets_inactifs_task",' in SRC and "tickets_inactifs_task.start()" in SRC
     assert "'tickets_inactivite_jours': 7" in SRC
 
