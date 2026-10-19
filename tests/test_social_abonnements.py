@@ -58,3 +58,14 @@ def test_A2_une_alerte_par_panne_puis_reamorcee_au_retablissement():
     assert len(alertes) == 2, alertes
     src = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")
     assert 'if not _page_live_due(f"tiktok_page:{username}", 1800):' in src
+
+
+def test_A3_la_boucle_ne_lit_plus_rien_pour_rien():
+    """Audit 6 #8/#15 : avatar YouTube cherche chaque minute sans rien a publier ; liens des
+    createurs lus en base pour chaque serveur, meme jamais regle."""
+    import ast
+    from pathlib import Path
+    src = ast.unparse(ast.parse((Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")))
+    assert "yt_avatar = await fetch_avatar_url('youtube', channel_id, session) if posts_to_publish else None" in src
+    corps = src[src.index("async def check_creator_spotlight_feeds"):]
+    assert corps.index("if not (role_id and ch_id):") < corps.index("await list_creator_links(guild.id)")

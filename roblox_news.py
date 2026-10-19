@@ -354,7 +354,7 @@ async def relever_mises_a_jour(leger: bool = True) -> dict:
            "domaine": SOURCE_MISES_A_JOUR["domaine"]}
     try:
         await _relever_discourse(SOURCE_MISES_A_JOUR, out, leger=leger,
-                                 par_categorie=par_cat)
+                                 par_categorie=par_cat, connus=await _connus_recents())
     except Exception as ex:
         _log(f"[roblox_news updates] {type(ex).__name__}: {ex}")
     return out
@@ -387,6 +387,19 @@ async def echue(source: dict) -> bool:
         return True
 
 
+_CONNUS = {"t": -1e9, "ids": frozenset()}
+
+
+async def _connus_recents() -> frozenset:
+    """Les billets déjà publiés ou en file (tous serveurs), relus au plus une fois par minute : leur
+    corps n'est plus relu ni retraduit après un redémarrage (20/10/2026)."""
+    import time as _t
+    if _t.monotonic() - _CONNUS["t"] > 60:
+        _CONNUS["ids"] = frozenset(await identifiants_connus_actus())
+        _CONNUS["t"] = _t.monotonic()
+    return _CONNUS["ids"]
+
+
 async def relever(source: dict, forcer: bool = False,
                   leger: bool = False) -> dict:
     """Lit une source. Rend {"billets": [...], "code": int|None, "sautee": bool}.
@@ -408,11 +421,11 @@ async def relever(source: dict, forcer: bool = False,
     fmt = source.get("format", "discourse")
     try:
         if fmt == "discourse":
-            await _relever_discourse(source, out, leger=leger)
+            await _relever_discourse(source, out, leger=leger, connus=await _connus_recents())
         elif fmt == "rss":
             await _relever_rss(source, out)
         elif fmt == "newsroom":
-            await _relever_newsroom(source, out)
+            await _relever_newsroom(source, out, connus=await _connus_recents())
         else:
             _log(f"[roblox_news {source['cle']}] format inconnu : {fmt}")
     except Exception as ex:
@@ -422,7 +435,8 @@ async def relever(source: dict, forcer: bool = False,
 
 
 async def _relever_discourse(source: dict, out: dict, leger: bool = False,
-                             par_categorie: dict | None = None) -> None:
+                             par_categorie: dict | None = None,
+                             connus: frozenset = frozenset()) -> None:
     #  ⚠️ `per_page=5` NE CHANGE QUE LE NOMBRE DE BILLETS RENDUS, pas
     #  leur ordre ni leur contenu : mesuré catégorie par catégorie le
     #  22/09, les cinq plus récents sont exactement les mêmes.
@@ -469,6 +483,8 @@ async def _relever_discourse(source: dict, out: dict, leger: bool = False,
         for b in frais:
             enrichi = _cache_forum.get(b["topic_id"])
             if enrichi is None:
+                if str(b["topic_id"]) in connus:
+                    continue  # déjà publié ou en file : son corps ne servirait plus à rien
                 if lus >= MAX_BILLETS_PAR_PASSAGE:
                     break
                 lus += 1
@@ -683,7 +699,7 @@ def _lire_page_article(html: str) -> dict:
             "corps_html": art.group(1) if art else ""}
 
 
-async def _relever_newsroom(source: dict, out: dict) -> None:
+async def _relever_newsroom(source: dict, out: dict, connus: frozenset = frozenset()) -> None:
     prefixe = source["prefixe"]
     async with _ouvrir() as sess:
         async with sess.get(source["url"]) as r:
@@ -706,6 +722,8 @@ async def _relever_newsroom(source: dict, out: dict) -> None:
             cle_cache = f"{source['cle']}:{slug}"
             b = _cache_newsroom.get(cle_cache)
             if b is None:
+                if f"newsroom:{slug}" in connus:
+                    continue  # déjà publié ou en file : la page ne servirait plus à rien
                 #  Une page article, UNE fois, avec pause : c'est la
                 #  concurrence que le pare-feu punit.
                 if ouverts >= MAX_ARTICLES_NEWSROOM_PAR_RELEVE:
@@ -1173,12 +1191,14 @@ async def marquer_actu_envoyee(ligne_id: int, message_id=None) -> bool:
         return False
 
 
-async def noter_echec_actu(ligne_id: int, motif: str) -> None:
+async def noter_echec_actu(ligne_id: int, motif: str, compter: bool = True) -> None:
+    """`compter=False` après `reserver_actu`, qui a DÉJÀ compté cet essai (20/10/2026 : chaque échec
+    comptait double, la limite de 5 essais en valait 3)."""
     try:
         async with _get_db() as db:
             await db.execute(
-                "UPDATE roblox_news_file SET essais=essais+1, dernier_echec=?"
-                " WHERE id=?", (str(motif)[:200], int(ligne_id)))
+                "UPDATE roblox_news_file SET essais=essais+?, dernier_echec=?"
+                " WHERE id=?", (1 if compter else 0, str(motif)[:200], int(ligne_id)))
             await db.commit()
     except Exception as ex:
         _log(f"[roblox_news noter_echec_actu] {ex}")

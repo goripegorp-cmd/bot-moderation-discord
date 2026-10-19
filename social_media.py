@@ -17,7 +17,7 @@ Architecture :
 - Subscription            : "ce serveur veut tracker tel compte dans tel salon"
 - Announcement            : trace d'une annonce postee (couple sub_id+post_id)
 - PlatformAdapter (ABC)   : interface adapter
-- TwitchAdapter / YouTubeAdapter / ManualAdapter : implementations
+- TwitchAdapter / RSSHubAdapter / YouTubeRSSAdapter / ManualAdapter : implementations
 - SocialMediaManager      : orchestration (subs, anns, polling, cleanup)
 
 Hooks Discord (a fournir par bot.py au demarrage) :
@@ -26,7 +26,7 @@ Hooks Discord (a fournir par bot.py au demarrage) :
 
 Variables d'environnement :
 - TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET (optionnel)
-- YOUTUBE_API_KEY                          (optionnel)
+- YouTube : flux RSS officiel, sans clé (20/10/2026 : l'API épuisait son quota en une heure)
 
 Sans ces variables, les plateformes correspondantes acceptent uniquement le
 mode manuel (l'owner publie a la main, le bot tracke et auto-clean).
@@ -458,166 +458,6 @@ class TwitchAdapter(PlatformAdapter):
 # =============================================================================
 # YOUTUBE ADAPTER (videos + lives via API v3 / cle)
 # =============================================================================
-
-class YouTubeAdapter(PlatformAdapter):
-    """Adapter YouTube via l'API Data v3 (cle simple).
-
-    Recupere les videos et lives recents d'une chaine. Le `handle` peut etre :
-    - un channel_id (UC...)
-    - un handle @username (resolu via search)
-    """
-
-    platform = Platform.YOUTUBE
-
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.environ.get("YOUTUBE_API_KEY")
-        self._session = None  # type: Any
-        self._channel_id_cache: dict[str, str] = {}
-
-    @property
-    def configured(self) -> bool:
-        return bool(self.api_key)
-
-    async def setup(self, session=None) -> None:
-        if session is not None:
-            self._session = session
-        else:
-            import aiohttp
-            self._session = aiohttp.ClientSession()
-
-    async def _resolve_channel_id(self, handle: str) -> Optional[str]:
-        if handle.startswith("UC") and len(handle) > 20:
-            return handle
-        if handle in self._channel_id_cache:
-            return self._channel_id_cache[handle]
-        if not self._session:
-            return None
-        h = handle.lstrip("@").strip()
-        _chan = "https://www.googleapis.com/youtube/v3/channels"
-        _srch = "https://www.googleapis.com/youtube/v3/search"
-        # Ordre de resolution (du plus PRECIS + moins cher au plus large) :
-        #  1) forHandle=@pseudo  → resout PILE la bonne chaine, 1 unite de quota.
-        #  2) forUsername=pseudo → ancien pseudo « legacy » (chaines historiques).
-        #  3) search q=nom       → nom libre, 100 unites de quota → dernier recours.
-        # C'est ce qui fait « juste marcher » aussi bien le @pseudo que le NOM officiel.
-        attempts = [
-            (_chan, {"part": "id", "forHandle": "@" + h}),
-            (_chan, {"part": "id", "forUsername": h}),
-            (_srch, {"part": "snippet", "type": "channel", "q": h, "maxResults": 1}),
-        ]
-        for url, params in attempts:
-            q = {**params, "key": self.api_key}
-            try:
-                async with self._session.get(url, params=q, timeout=10) as resp:
-                    if resp.status != 200:
-                        continue
-                    data = await resp.json()
-            except Exception:
-                continue
-            items = data.get("items", [])
-            if not items:
-                continue
-            _id = items[0].get("id")
-            channel_id = (_id if isinstance(_id, str) else None) \
-                or items[0].get("snippet", {}).get("channelId") \
-                or (items[0].get("id", {}) or {}).get("channelId")
-            if channel_id and str(channel_id).startswith("UC"):
-                self._channel_id_cache[handle] = channel_id
-                try:
-                    import diag
-                    diag.event("social", "youtube_api_resolve", f"@{h} → {channel_id}")
-                except Exception:
-                    pass
-                return channel_id
-        try:
-            import diag
-            diag.warn("social", "youtube_api_resolve",
-                      f"@{h} introuvable via l'API (clé posée mais 0 résultat sur forHandle/forUsername/search)")
-        except Exception:
-            pass
-        return None
-
-    async def fetch_posts(self, handle: str) -> list[SocialPost]:
-        if not self.configured or not self._session:
-            return []
-        channel_id = await self._resolve_channel_id(handle)
-        if not channel_id:
-            return []
-        url = "https://www.googleapis.com/youtube/v3/search"
-        params = {
-            "part": "snippet",
-            "channelId": channel_id,
-            "type": "video",
-            "order": "date",
-            "maxResults": 5,
-            "key": self.api_key,
-        }
-        try:
-            async with self._session.get(url, params=params, timeout=10) as resp:
-                if resp.status != 200:
-                    return []
-                data = await resp.json()
-        except Exception:
-            return []
-
-        posts: list[SocialPost] = []
-        for item in data.get("items", []):
-            snippet = item.get("snippet", {})
-            video_id = item.get("id", {}).get("videoId")
-            if not video_id:
-                continue
-            live_state = snippet.get("liveBroadcastContent", "none")
-            is_live_now = (live_state == "live")
-            ptype = PostType.LIVE if is_live_now else PostType.VIDEO
-
-            thumbs = snippet.get("thumbnails", {})
-            thumb_url = (
-                thumbs.get("maxres", {}).get("url")
-                or thumbs.get("high", {}).get("url")
-                or thumbs.get("default", {}).get("url")
-            )
-
-            posts.append(SocialPost(
-                platform=Platform.YOUTUBE,
-                handle=handle,
-                post_id=video_id,
-                post_type=ptype,
-                title=snippet.get("title", ""),
-                url=f"https://www.youtube.com/watch?v={video_id}",
-                thumbnail_url=thumb_url,
-                posted_at=snippet.get("publishedAt"),
-                is_live=is_live_now,
-                metadata={
-                    "channel_id": channel_id,
-                    "channel_title": snippet.get("channelTitle"),
-                },
-            ))
-        return posts
-
-    async def is_post_active(self, post: SocialPost) -> bool:
-        """Pour YouTube, on verifie que la video est toujours publiee."""
-        if not self.configured or not self._session:
-            return True
-        url = "https://www.googleapis.com/youtube/v3/videos"
-        params = {
-            "part": "status,snippet",
-            "id": post.post_id,
-            "key": self.api_key,
-        }
-        try:
-            async with self._session.get(url, params=params, timeout=10) as resp:
-                if resp.status != 200:
-                    return True
-                data = await resp.json()
-        except Exception:
-            return True
-        items = data.get("items", [])
-        if not items:
-            return False  # plus dispo => annonce a supprimer
-        status = items[0].get("status", {})
-        privacy = status.get("privacyStatus")
-        return privacy in ("public", "unlisted")
-
 
 # =============================================================================
 # RSSHUB ADAPTER (Twitter/X, TikTok, Instagram... via flux RSS - owner 2026-06-27)
@@ -1149,12 +989,12 @@ class YouTubeRSSAdapter(RSSHubAdapter):
                 pass
             return cid
         # Échec de résolution — visible dans [DIAG] (le mur de consentement UE bloque le @pseudo ;
-        # la voie SÛRE = l'URL youtube.com/channel/UC... ou une clé YOUTUBE_API_KEY).
+        # la voie SÛRE = l'URL youtube.com/channel/UC...).
         try:
             import diag
             diag.warn("social", "youtube_resolve",
                       f"@{h} NON résolu (mur de consentement UE) → colle l'URL "
-                      f"youtube.com/channel/UC... ou pose YOUTUBE_API_KEY")
+                      f"youtube.com/channel/UC...")
         except Exception:
             pass
         return None
@@ -1232,17 +1072,6 @@ class YouTubeRSSAdapter(RSSHubAdapter):
             except Exception:
                 pass
         return []
-
-
-# =============================================================================
-# TWITTER / X ADAPTER DIRECT (syndication - owner 2026-06-27)
-# =============================================================================
-# LA solution Twitter qui marche GRATUITEMENT en 2026, SANS API, SANS instance a heberger,
-# SANS jeton : le point d'entree "syndication" de Twitter (celui qui sert a afficher les
-# tweets embarques sur les sites web) renvoie les derniers tweets d'un compte en JSON, sans
-# authentification. L'owner met juste le @pseudo dans le panneau -> le bot va chercher les
-# tweets tout seul et les poste. 100% FAIL-SAFE. (Endpoint non officiel : si X le coupe un
-# jour, on bascule sur RSSHub ; le code reste, il suffit de rebrancher l'adapter.)
 
 
 # =============================================================================
@@ -1565,45 +1394,65 @@ class SocialMediaManager:
 
         created = 0
         for post in posts:
-            if not sub.matches(post):
-                continue
-            # Dedup strict
-            already = await self.has_announcement(
-                sub.guild_id, post.platform, post.handle, post.post_id
-            )
-            if already:
-                continue
-            # Post via callback
-            if self._post_callback is None:
-                continue
-            plateforme = getattr(post.platform, "value", str(post.platform))
-            if self._reserver is not None and not await self._reserver(sub.guild_id, plateforme, post.post_id, "abonnement"):
-                continue
-            try:
-                msg_id = await self._post_callback(sub, post)
-            except Exception as _ex:
-                if self._annuler is not None:
-                    await self._annuler(sub.guild_id, plateforme, post.post_id)
-                # owner 2026-07-18 : un échec d'envoi Discord (perms, 429, salon supprimé)
-                # faisait disparaître le post SANS trace → désormais visible dans [DIAG].
-                try:
-                    import diag
-                    diag.error("social", "post_callback",
-                               f"{getattr(sub.platform, 'value', '?')} @{getattr(sub, 'handle', '?')}"
-                               f" → salon {getattr(sub, 'target_channel_id', '?')} : échec d'envoi",
-                               exc=_ex)
-                except Exception:
-                    pass
-                continue
-            if msg_id is None:
-                if self._annuler is not None:
-                    await self._annuler(sub.guild_id, plateforme, post.post_id)
-                continue
-            if self._confirmer is not None:
-                await self._confirmer(sub.guild_id, plateforme, post.post_id, msg_id, sub.target_channel_id)
-            await self._record_announcement(sub, post, msg_id)
-            created += 1
+            if await self.publier_post(sub, post):
+                created += 1
         return created
+
+    async def publier_post(self, sub: Subscription, post: SocialPost) -> bool:
+        """Annonce UN post pour un abonnement : filtre, anti-doublon, réservation, envoi, confirmation.
+        Partagé par le relevé et la notification instantanée YouTube (20/10/2026)."""
+        if not sub.matches(post):
+            return False
+        # Dedup strict
+        if await self.has_announcement(sub.guild_id, post.platform, post.handle, post.post_id):
+            return False
+        # Post via callback
+        if self._post_callback is None:
+            return False
+        plateforme = getattr(post.platform, "value", str(post.platform))
+        if self._reserver is not None and not await self._reserver(sub.guild_id, plateforme, post.post_id, "abonnement"):
+            return False
+        try:
+            msg_id = await self._post_callback(sub, post)
+        except Exception as _ex:
+            if self._annuler is not None:
+                await self._annuler(sub.guild_id, plateforme, post.post_id)
+            # owner 2026-07-18 : un échec d'envoi Discord (perms, 429, salon supprimé)
+            # faisait disparaître le post SANS trace → désormais visible dans [DIAG].
+            try:
+                import diag
+                diag.error("social", "post_callback",
+                           f"{getattr(sub.platform, 'value', '?')} @{getattr(sub, 'handle', '?')}"
+                           f" → salon {getattr(sub, 'target_channel_id', '?')} : échec d'envoi",
+                           exc=_ex)
+            except Exception:
+                pass
+            return False
+        if msg_id is None:
+            if self._annuler is not None:
+                await self._annuler(sub.guild_id, plateforme, post.post_id)
+            return False
+        if self._confirmer is not None:
+            await self._confirmer(sub.guild_id, plateforme, post.post_id, msg_id, sub.target_channel_id)
+        await self._record_announcement(sub, post, msg_id)
+        return True
+
+    def abonnements_youtube(self) -> list:
+        """[(UC…, abonnement)] des abonnements YouTube actifs dont la chaîne est connue — pour la
+        notification instantanée. Résolutions DÉJÀ en cache seulement (le relevé les remplit) :
+        aucune requête ici, appelée à chaque notification."""
+        lecteur = self._adapters.get(Platform.YOUTUBE)
+        connus = getattr(lecteur, "_cid", {}) or {}
+        out = []
+        for subs in self._subs.values():
+            for sub in subs.values():
+                if sub.platform != Platform.YOUTUBE or not sub.enabled:
+                    continue
+                h = _clean_yt_handle(sub.handle)
+                uc = h if (h.startswith("UC") and len(h) > 20) else connus.get(h.lower())
+                if uc:
+                    out.append((uc, sub))
+        return out
 
     async def poll_all(self) -> dict[int, int]:
         """Poll toutes les souscriptions de tous les guilds charges."""
@@ -1814,7 +1663,6 @@ __all__ = [
     "PlatformAdapter",
     "ManualAdapter",
     "TwitchAdapter",
-    "YouTubeAdapter",
     "RSSHubAdapter",
     "SocialMediaManager",
     "default_template",

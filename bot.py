@@ -11646,6 +11646,10 @@ async def _publier_file_actualites(guildes, etiquette: str = "veille_roblox_task
     for g in guildes:
         c = await roblox_news_module.config(g.id)
         salon = g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
+        #  Un billet abandonné (5 échecs : panne Discord, salon interdit) repart de lui-même une
+        #  fois par heure — avant, seul un clic sur « Relever maintenant » le sauvait (20/10/2026).
+        if _page_live_due(f"actus_relance:{g.id}", 3600):
+            await roblox_news_module.relancer_actus_abandonnees(g.id)
         _attente_n = await roblox_news_module.actus_a_envoyer(
             g.id, limite=roblox_news_module.MAX_BILLETS_PAR_PASSAGE)
         for _e in _attente_n:
@@ -11673,7 +11677,7 @@ async def _publier_file_actualites(guildes, etiquette: str = "veille_roblox_task
                 #  Un salon supprimé ou interdit se voit ICI, et nulle
                 #  part ailleurs : `publier_actu` rend None sans lever.
                 await roblox_news_module.noter_echec_actu(
-                    _e["id"], "publier_actu a rendu False")
+                    _e["id"], "publier_actu a rendu False", compter=False)
                 res["echecs"] += 1
             await asyncio.sleep(roblox_news_module.PAUSE_ENTRE_PUBLICATIONS)
         res["file"] = await roblox_news_module.etat_file_actu(g.id)
@@ -27322,29 +27326,7 @@ async def check_youtube_feeds(session, guild, data):
                     continue
 
                 # Description nettoyee
-                media_group = entry.find('media:group', ns)
-                description = ""
-                if media_group is not None:
-                    desc_elem = media_group.find('media:description', ns)
-                    if desc_elem is not None and desc_elem.text:
-                        raw = desc_elem.text.strip()
-                        clean_lines = []
-                        for line in raw.split('\n'):
-                            line = line.strip()
-                            if not line:
-                                break
-                            skip_words = ['abonne', 'subscribe', 'like', 'commentes', 'rejoins',
-                                          'follow', 'clique', 'activer', 'merci de']
-                            if any(sw in line.lower() for sw in skip_words):
-                                continue
-                            if len(line) < 5 or line.startswith('-') or line.startswith('='):
-                                continue
-                            clean_lines.append(line)
-                            if len('\n'.join(clean_lines)) >= 150:
-                                break
-                        description = '\n'.join(clean_lines)[:150]
-                        if len(description) < len('\n'.join(clean_lines)):
-                            description += "..."
+                description = _description_entree(entry, ns)
 
                 video_url = f"https://www.youtube.com/watch?v={video_id}"
 
@@ -27378,7 +27360,8 @@ async def check_youtube_feeds(session, guild, data):
             posts_to_publish.reverse()
 
             cache_key = f"yt_{guild.id}_{channel_id}"
-            yt_avatar = await fetch_avatar_url('youtube', channel_id, session)
+            # Seulement s'il y a quelque chose à publier (avant : chaque minute, pour chaque chaîne)
+            yt_avatar = await fetch_avatar_url('youtube', channel_id, session) if posts_to_publish else None
 
             for video_id, title, description, video_url in posts_to_publish:
                 posted_content[cache_key] = video_id
@@ -27425,6 +27408,59 @@ async def _deja_dans_le_salon(salon, url: str) -> int:
     except discord.HTTPException as ex:
         _logerr("youtube.verifier_envoi", ex, guild_id=getattr(getattr(salon, 'guild', None), 'id', 0))
     return 0
+
+
+_NS_YT = {'atom': 'http://www.w3.org/2005/Atom', 'yt': 'http://www.youtube.com/xml/schemas/2015',
+          'media': 'http://search.yahoo.com/mrss/'}
+
+
+def _description_entree(entry, ns) -> str:
+    """La description d'une vidéo du flux RSS YouTube, sans les appels à s'abonner (≤ 150 car.)."""
+    media_group = entry.find('media:group', ns)
+    desc_elem = media_group.find('media:description', ns) if media_group is not None else None
+    if desc_elem is None or not desc_elem.text:
+        return ""
+    clean_lines = []
+    for line in desc_elem.text.strip().split('\n'):
+        line = line.strip()
+        if not line:
+            break
+        skip_words = ['abonne', 'subscribe', 'like', 'commentes', 'rejoins',
+                      'follow', 'clique', 'activer', 'merci de']
+        if any(sw in line.lower() for sw in skip_words):
+            continue
+        if len(line) < 5 or line.startswith('-') or line.startswith('='):
+            continue
+        clean_lines.append(line)
+        if len('\n'.join(clean_lines)) >= 150:
+            break
+    description = '\n'.join(clean_lines)[:150]
+    if len(description) < len('\n'.join(clean_lines)):
+        description += "..."
+    return description
+
+
+async def _details_websub(uc: str, video_id: str) -> tuple:
+    """(description, avatar) d'une vidéo annoncée par WebSub : la notification ne porte que le titre.
+    Le flux de la chaîne peut ne pas l'avoir encore (cache YouTube) : description vide, sans plus."""
+    description, avatar = "", None
+    async with aiohttp.ClientSession() as session:
+        try:
+            avatar = await fetch_avatar_url('youtube', uc, session)
+        except Exception as ex:
+            _logerr("websub.avatar", ex)
+        try:
+            async with session.get(f"https://www.youtube.com/feeds/videos.xml?channel_id={uc}",
+                                   headers=_YT_RESOLVE_CONSENT, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                texte = await r.text() if r.status == 200 else ""
+            if texte:
+                for entry in ET.fromstring(texte).findall('atom:entry', _NS_YT):
+                    if entry.findtext('yt:videoId', '', _NS_YT) == video_id:
+                        description = _description_entree(entry, _NS_YT)
+                        break
+        except (aiohttp.ClientError, asyncio.TimeoutError, ET.ParseError) as ex:
+            _logerr("websub.description", ex)
+    return description, avatar
 
 
 async def _annoncer_video_youtube(guild, feed: dict, target_channel, video_id: str, title: str,
@@ -27501,21 +27537,42 @@ async def _feeds_youtube():
     return out
 
 
+_SOCIAL: dict = {}  # {"mgr": SocialMediaManager} une fois démarré
+
+
 async def _chaines_youtube_suivies() -> set:
-    return {str(f['id']) for _g, f, _c in await _feeds_youtube()}
+    """Les chaînes YouTube suivies : ancienne configuration ET abonnements du panneau (20/10/2026 :
+    ces derniers n'avaient pas la notification instantanée)."""
+    chaines = {str(f['id']) for _g, f, _c in await _feeds_youtube()}
+    if _SOCIAL.get("mgr") is not None:
+        chaines |= {uc for uc, _sub in _SOCIAL["mgr"].abonnements_youtube()}
+    return chaines
 
 
 async def _annoncer_websub(uc: str, video: dict) -> bool:
     """La notification instantanée de YouTube : publiée partout où la chaîne est suivie."""
     fait = False
+    details = None
     for guild, feed, cible in await _feeds_youtube():
         if str(feed.get('id')) != uc:
             continue
         filtre = feed.get('keyword_filter', '')
         if filtre and not _matches_keyword_filter(video.get('titre', ''), filtre):
             continue
+        if details is None:  # une seule lecture, pour tous les serveurs qui suivent la chaîne
+            details = await _details_websub(uc, video['video_id'])
         fait = await _annoncer_video_youtube(guild, feed, cible, video['video_id'], video.get('titre') or '',
-                                             chemin="websub") or fait
+                                             details[0], chemin="websub", avatar=details[1]) or fait
+    mgr = _SOCIAL.get("mgr")
+    for _uc, sub in (mgr.abonnements_youtube() if mgr is not None else []):
+        if _uc != uc:
+            continue
+        post = social2026.SocialPost(
+            platform=social2026.Platform.YOUTUBE, handle=sub.handle,
+            post_id=f"yt:video:{video['video_id']}", post_type=social2026.PostType.POST,
+            title=video.get('titre') or "Nouvelle vidéo",
+            url=f"https://www.youtube.com/watch?v={video['video_id']}")
+        fait = await mgr.publier_post(sub, post) or fait
     return fait
 
 
@@ -28650,10 +28707,12 @@ async def check_creator_spotlight_feeds(session, guild, data):
     role_id = int(data.get('creator_role', 0) or 0)
     ch_id = int(data.get('creator_channel', 0) or 0)
     keyword = (data.get('creator_keyword', '') or '').strip().lower()
+    if not (role_id and ch_id):
+        return  # jamais réglée : plus de lecture en base chaque minute (20/10/2026)
     # D4 : liens lus en table (creator_links), REPLI blob pour les non-migrés.
     links = await list_creator_links(guild.id)
 
-    if not (role_id and ch_id and links):
+    if not links:
         return
 
     creator_role = guild.get_role(role_id)
@@ -29859,8 +29918,9 @@ async def _2026_on_ready_addon():
                 # depuis le panneau « Réseaux sociaux », alors que le boot affichait « RSS auto ✅ ».
                 # Désormais : RSS OFFICIEL sans clé par défaut ; l'API Data v3 seulement si la clé
                 # est posée (elle apporte les lives + la résolution native des @pseudos).
-                mgr.register_adapter(social2026.YouTubeAdapter() if os.getenv("YOUTUBE_API_KEY")
-                                     else social2026.YouTubeRSSAdapter())
+                # 20/10/2026 : le RSS TOUJOURS. Avec la clé, la recherche de l'API (100 unités,
+                # toutes les 60 s, par abonnement) épuisait le quota du jour en une heure.
+                mgr.register_adapter(social2026.YouTubeRSSAdapter())
             elif plat in _RSSHUB_PLATFORMS:
                 mgr.register_adapter(social2026.RSSHubAdapter(plat))
             else:
@@ -29921,6 +29981,7 @@ async def _2026_on_ready_addon():
         mgr.set_delete_callback(_delete_cb)
         mgr.set_reservation(publications.reserver, publications.confirmer, publications.annuler)
         panels2026.set_social_manager(mgr)
+        _SOCIAL["mgr"] = mgr  # la notification instantanée YouTube suit aussi ses abonnements
 
         # Charge les guilds connues
         for g in bot.guilds:
@@ -29941,11 +30002,10 @@ async def _2026_on_ready_addon():
         # owner 2026-06-24 : état CLAIR de chaque réseau (publication auto → Discord), pour
         # vérifier d'un coup d'œil au boot lesquels marchent en API et lesquels = manuel.
         _has_twitch = bool(os.getenv("TWITCH_CLIENT_ID") and os.getenv("TWITCH_CLIENT_SECRET"))
-        _has_yt_api = bool(os.getenv("YOUTUBE_API_KEY"))
         print("[social] Réseaux sociaux — état de la publication automatique vers Discord :"
               + ("\n   Twitch  : API officielle ✅" if _has_twitch else
                  "\n   Twitch  : MANUEL (/publish) — ajoute TWITCH_CLIENT_ID + TWITCH_CLIENT_SECRET (Railway) pour l'auto")
-              + "\n   YouTube : RSS auto ✅ (vidéos + lives, sans clé)" + (" + Data API" if _has_yt_api else "")
+              + "\n   YouTube : RSS auto ✅ (vidéos + lives, sans clé ni quota)"
               + ("\n   Twitter/X · TikTok · Instagram : via RSSHub ✅ — RSSHUB_BASE_URL = "
                  f"{os.getenv('RSSHUB_BASE_URL')}" if os.getenv("RSSHUB_BASE_URL")
                  else "\n   Twitter/X · TikTok · Instagram : ⚠️ nécessitent une instance RSSHub "
