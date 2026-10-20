@@ -10,8 +10,8 @@ channel_id, user_id, panel_id, claimed_by, status, answers, created_at) avec :
 2. **TEMPLATES DE RÉPONSES** : staff définit des réponses pré-rédigées
    ("Règle 5", "Ban Appeal", "Voir vidéo"), peut les invoquer en 1 commande
 
-3. **AUTO-CLOSE INACTIVITÉ** : task quotidienne qui ferme les tickets sans
-   activité (configurable par guild, défaut 7 jours sans message)
+3. (La fermeture des tickets sans message vit dans bot.py : `tickets_inactifs_task`,
+   réglée par `tickets_inactivite_jours`.)
 
 4. **STATS DASHBOARD** : staff voit avg temps de résolution, top staff,
    distribution open/closed, tickets actifs sans claim, etc.
@@ -19,15 +19,12 @@ channel_id, user_id, panel_id, claimed_by, status, answers, created_at) avec :
 DB tables (créées à la volée) :
 - ticket_extras            (channel_id PK, priority, last_activity_at, closed_at, claimed_at)
 - ticket_response_templates (id, guild_id, name, content, added_by, created_at)
-- ticket_auto_close_config  (guild_id PK, inactivity_days)
 
 API publique :
 - setup(bot_instance, get_db_fn, db_get_fn, db_set_fn, v2_helpers)
 - set_priority(channel_id, priority) -> bool
 - get_priority(channel_id) -> str
-- touch_activity(channel_id) — update last_activity_at (hook on_message)
 - add_template / get_template / list_templates / delete_template
-- set_inactivity_days(guild_id, days) / get_inactivity_days(guild_id)
 - collect_ticket_stats(guild_id) -> dict
 - build_stats_panel / build_templates_panel
 
@@ -49,7 +46,6 @@ PRIORITY_LEVELS = {
     "normal": ("🟡", "NORMALE"),
     "low":    ("🔵", "BASSE"),
 }
-DEFAULT_INACTIVITY_DAYS = 7
 # Phase 245 : rappel SLA — un ticket OUVERT et NON PRIS EN CHARGE depuis ce délai
 # déclenche UN rappel staff (un seul, jamais de spam). Vérification toutes les 2 h.
 SLA_UNCLAIMED_HOURS = 24
@@ -122,19 +118,6 @@ async def _ensure_tables():
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_templates_uniq "
                 "ON ticket_response_templates(guild_id, name)"
             )
-            await db.execute('''CREATE TABLE IF NOT EXISTS ticket_auto_close_config (
-                guild_id INTEGER PRIMARY KEY,
-                inactivity_days INTEGER DEFAULT 7
-            )''')
-            await db.execute('''CREATE TABLE IF NOT EXISTS ticket_sla_reminded (
-                channel_id INTEGER PRIMARY KEY,
-                reminded_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )''')
-            # Lot 2 (2/2) : escalade 2e palier (1 ping owner max par ticket).
-            await db.execute('''CREATE TABLE IF NOT EXISTS ticket_sla_escalated (
-                channel_id INTEGER PRIMARY KEY,
-                escalated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )''')
             # Lot 2 (owner 2026-06-15) : tags internes (classification par sujet).
             await db.execute('''CREATE TABLE IF NOT EXISTS ticket_tags (
                 channel_id INTEGER,
@@ -418,29 +401,6 @@ def build_ticket_manage_panel(channel_id: int, guild_id: int, staff_role_id: int
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACTIVITÉ — pour auto-close
-# ═══════════════════════════════════════════════════════════════════════════════
-
-async def touch_activity(channel_id: int):
-    """Met à jour last_activity_at d'un ticket. À call depuis on_message."""
-    if _get_db is None:
-        return
-    await _ensure_tables()
-    try:
-        async with _get_db() as db:
-            await db.execute(
-                "INSERT INTO ticket_extras(channel_id, last_activity_at) "
-                "VALUES(?, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(channel_id) DO UPDATE SET "
-                "last_activity_at=CURRENT_TIMESTAMP",
-                (channel_id,),
-            )
-            await db.commit()
-    except Exception:
-        pass
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # TEMPLATES — réponses pré-rédigées staff
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -553,46 +513,6 @@ async def delete_template(guild_id: int, name: str) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# AUTO-CLOSE CONFIG
-# ═══════════════════════════════════════════════════════════════════════════════
-
-async def get_inactivity_days(guild_id: int) -> int:
-    if _get_db is None:
-        return DEFAULT_INACTIVITY_DAYS
-    await _ensure_tables()
-    try:
-        async with _get_db() as db:
-            async with db.execute(
-                "SELECT inactivity_days FROM ticket_auto_close_config "
-                "WHERE guild_id=?",
-                (guild_id,),
-            ) as cur:
-                row = await cur.fetchone()
-        return int(row[0]) if row and row[0] else DEFAULT_INACTIVITY_DAYS
-    except Exception:
-        return DEFAULT_INACTIVITY_DAYS
-
-
-async def set_inactivity_days(guild_id: int, days: int) -> bool:
-    if _get_db is None:
-        return False
-    d = max(1, min(90, int(days or DEFAULT_INACTIVITY_DAYS)))
-    await _ensure_tables()
-    try:
-        async with _get_db() as db:
-            await db.execute(
-                "INSERT INTO ticket_auto_close_config(guild_id, inactivity_days) "
-                "VALUES(?, ?) "
-                "ON CONFLICT(guild_id) DO UPDATE SET inactivity_days=excluded.inactivity_days",
-                (guild_id, d),
-            )
-            await db.commit()
-        return True
-    except Exception:
-        return False
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # STATS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -671,18 +591,17 @@ async def collect_ticket_stats(guild_id: int) -> dict:
                 for prio, cnt in await cur.fetchall():
                     out["by_priority"][prio or "normal"] = int(cnt or 0)
 
-            # Avg resolution time (closed_at - created_at)
-            try:
-                async with db.execute(
-                    "SELECT AVG((julianday(te.closed_at) - julianday(t.created_at)) * 24) "
-                    "FROM tickets t JOIN ticket_extras te ON te.channel_id = t.channel_id "
-                    "WHERE t.guild_id=? AND t.status='closed' AND te.closed_at IS NOT NULL",
-                    (guild_id,),
-                ) as cur:
-                    row = await cur.fetchone()
-                out["avg_resolution_hours"] = round(float(row[0] or 0), 1) if row else 0
-            except Exception:
-                pass
+            # Durée moyenne de résolution : de l'ouverture à la fermeture notée au journal du ticket
+            # (20/10/2026 : `ticket_extras.closed_at` n'était écrit nulle part — la moyenne valait 0).
+            async with db.execute(
+                "SELECT AVG((julianday(a.fin) - julianday(t.created_at)) * 24) FROM tickets t "
+                "JOIN (SELECT channel_id, MAX(at) AS fin FROM ticket_audit WHERE action='close' "
+                "GROUP BY channel_id) a ON a.channel_id = t.channel_id "
+                "WHERE t.guild_id=? AND t.status='closed'",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+            out["avg_resolution_hours"] = round(float(row[0] or 0), 1) if row else 0
     except Exception as ex:
         print(f"[tickets_enhance collect_ticket_stats] {ex}")
     # Lot 2 : répartition par TAG (hors bloc DB ci-dessus → pas de connexion imbriquée).
@@ -970,12 +889,8 @@ __all__ = [
     # Priorities
     "PRIORITY_LEVELS",
     "get_priority", "set_priority", "update_channel_name_for_priority",
-    # Activity
-    "touch_activity",
     # Templates
     "add_template", "get_template", "list_templates", "delete_template",
-    # Auto-close
-    "get_inactivity_days", "set_inactivity_days",
     # Stats
     "collect_ticket_stats",
     # Panels

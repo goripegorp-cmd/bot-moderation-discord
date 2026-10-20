@@ -301,6 +301,9 @@ class _Refus(Exception):
 
 
 def _ip(request) -> str:
+    """Le client : la PREMIÈRE adresse de X-Forwarded-For. Vérifié le 20/10/2026 : le proxy de Railway
+    retire l'en-tête envoyé par le client, et la DERNIÈRE adresse est celle du CDN — partagée par
+    beaucoup de visiteurs (la prendre aurait mis tout le monde dans un seul compteur d'essais)."""
     fwd = request.headers.get("X-Forwarded-For", "") if hasattr(request, "headers") else ""
     return (fwd.split(",")[0].strip() or getattr(request, "remote", "") or "?")[:64]
 
@@ -315,8 +318,9 @@ def _trop_essais(request, compter: bool = False, maintenant: float | None = None
         _essais[ip] = recents
     else:
         _essais.pop(ip, None)
-    if len(_essais) > 5000:
-        _essais.clear()
+    if len(_essais) > 5000:  # les plus anciennes d'abord — tout vider remettait l'attaquant à zéro
+        for k in sorted(_essais, key=lambda k: _essais[k][-1])[:1000]:
+            _essais.pop(k, None)
     return len(recents) > LIMITE_ESSAIS
 
 
@@ -436,15 +440,19 @@ async def recherche(request):
     dans = {m.id for m in role.members} if role is not None else set()
     apart = a_part(g, c)
     trouves = clan.chercher(getattr(g, "members", None) or [], request.query.get("q", "")[:64], dans)
+    # L'activité n'est suivie QUE pour le clan : hors du clan, un badge dirait « Jamais vu » à tort
+    # (20/10/2026) — on ne mesure, et n'affiche, que les membres du clan.
+    du_clan = [m for m in trouves if m.id in dans]
     try:
-        mesures = await _mesurer_groupe(g.id, trouves) if _mesurer_groupe and trouves else {}
+        mesures = await _mesurer_groupe(g.id, du_clan) if _mesurer_groupe and du_clan else {}
     except Exception as ex:  # sans mesure, la recherche reste utile ; le détail part au journal
         _log("[TABLEAU][E7] activité illisible")
         _log(f"[TABLEAU][E7:DETAIL] {type(ex).__name__} {ex}")
         mesures = {}
-    lignes = {x["id"]: x for x in rellseas_panneau.lignes_clan(trouves, mesures)}
+    lignes = {x["id"]: x for x in rellseas_panneau.lignes_clan(du_clan, mesures)}
     return _json({"role": role.name if role is not None else "", "membres": [
-        dict(_ident(g, m.id), clan=m.id in dans, a_part=m.id in apart, statut=lignes[m.id]["statut"], rang=lignes[m.id]["rang"],
+        dict(_ident(g, m.id), clan=m.id in dans, a_part=m.id in apart, statut=lignes.get(m.id, {}).get("statut"),
+             rang=lignes.get(m.id, {}).get("rang"),
              arrivee=int(m.joined_at.timestamp()) if getattr(m, "joined_at", None) else None) for m in trouves]})
 
 

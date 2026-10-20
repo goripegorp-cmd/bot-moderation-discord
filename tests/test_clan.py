@@ -184,3 +184,13 @@ def test_K5_branchements():
     import tableau
     assert tableau._genre_grave("clan_ajouter", {}) == ("roles", 1)
     assert tableau._genre_grave("clan_prevenir", {"membres": [1, 2]}) == ("rappels", 2)
+
+
+def test_K6_pas_de_badge_d_activite_hors_du_clan():
+    """Audit 3 #6 : l'activite n'est suivie que pour le clan ; hors du clan, le badge disait « Jamais vu »."""
+    import ast as _a
+    from pathlib import Path as _P
+    arbre = _a.parse((_P(__file__).resolve().parent.parent / "tableau.py").read_text(encoding="utf-8"))
+    corps = _a.unparse(next(n for n in arbre.body if getattr(n, "name", "") == "recherche"))
+    assert "_mesurer_groupe(g.id, du_clan)" in corps and "lignes_clan(du_clan, mesures)" in corps
+    assert "lignes.get(m.id, {}).get('statut')" in corps

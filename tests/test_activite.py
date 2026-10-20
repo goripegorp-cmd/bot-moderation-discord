@@ -226,3 +226,32 @@ class _Membre2:
 # ─── restitution : le role de clan ne revient pas tout seul ─────────────────
 
 
+
+
+def test_une_ecriture_ratee_est_retentee_a_la_prochaine_activite(tmp_path):
+    """Audit 3 #23 : la marque du jour restait posee apres un echec d'ecriture."""
+    import asyncio
+    import contextlib
+
+    import activite as A
+    from conftest_discord import base
+    get_db, cfg, db_set, _ = base(tmp_path)
+    panne = [True]
+
+    @contextlib.asynccontextmanager
+    async def db_capricieuse():
+        if panne[0]:
+            raise TimeoutError("base verrouillee")
+        async with get_db() as db:
+            yield db
+
+    async def scenario():
+        A.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=lambda *a: None)
+        await A.init_db()
+        A.setup(get_db=db_capricieuse, cfg=cfg, db_set=db_set, log=lambda *a: None)
+        A._marques_du_jour.clear()
+        await A.marquer_actif(1, 7, A.SOURCE_MESSAGE)
+        panne[0] = False
+        await A.marquer_actif(1, 7, A.SOURCE_MESSAGE)
+        return await A.dernier_jour_actif(1, 7)
+    assert asyncio.run(scenario()) == A._aujourdhui()

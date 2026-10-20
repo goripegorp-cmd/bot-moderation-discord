@@ -69,9 +69,6 @@ _db_set = None
 _v2_helpers = None
 _tables_initialized = False
 
-# Super-owner unique (cf. owner_ids.py / bot.py SUPER_OWNER_ID)
-_SUPER_OWNER_ID = 781205382923288593
-# Anti-doublon DM anomalie : pas 2 DM du même `kind` high dans cette fenêtre
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, db_set_fn, v2_helpers: dict):
@@ -189,15 +186,25 @@ async def record_leave(guild_id: int, user_id: int):
 # SNAPSHOT QUOTIDIEN
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def capture_snapshot(guild) -> dict:
-    """Capture un snapshot des stats du jour pour ce guild.
+def _bornes_utc(jour) -> tuple[str, str]:
+    """[minuit, minuit du lendemain) d'une journée PARIS, au format des horodatages SQLite (UTC,
+    « AAAA-MM-JJ HH:MM:SS ») — c'est ce format que la comparaison de texte doit voir."""
+    debut = datetime(jour.year, jour.month, jour.day, tzinfo=_PARIS_TZ)
+    fin = debut + timedelta(days=1)
+    return tuple(d.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") for d in (debut, fin))
 
-    Le snapshot couvre la journée Paris courante (en cours), donc à 23h59
-    juste avant minuit, les valeurs sont quasi-finales.
+
+async def capture_snapshot(guild, jour=None) -> dict:
+    """Les stats d'UNE journée Paris (`jour`, une date ; défaut : aujourd'hui, en cours).
+
+    20/10/2026 : infractions et tickets valaient toujours 0 (borne ISO avec fuseau comparée en texte
+    à des horodatages SQLite UTC) ; le rapport de minuit capturait la journée qui commence.
     """
+    jour = jour or datetime.now(_PARIS_TZ).date()
+    debut, fin = _bornes_utc(jour)
     out = {
         "guild_id": guild.id,
-        "day": _today_paris(),
+        "day": jour.strftime("%Y-%m-%d"),
         "member_count": 0,
         "joined": 0,
         "left_count": 0,
@@ -233,16 +240,11 @@ async def capture_snapshot(guild) -> dict:
                 row = await cur.fetchone()
             out["left_count"] = int(row[0] or 0) if row else 0
 
-            # infractions aujourd'hui
-            cutoff_iso = (
-                datetime.now(_PARIS_TZ).replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                )
-            ).isoformat()
+            # infractions de la journée
             async with db.execute(
                 "SELECT COUNT(*) FROM infractions "
-                "WHERE guild_id=? AND created_at >= ?",
-                (guild.id, cutoff_iso),
+                "WHERE guild_id=? AND created_at >= ? AND created_at < ?",
+                (guild.id, debut, fin),
             ) as cur:
                 row = await cur.fetchone()
             out["infractions"] = int(row[0] or 0) if row else 0
@@ -250,25 +252,20 @@ async def capture_snapshot(guild) -> dict:
             # tickets opened/closed today (par created_at)
             async with db.execute(
                 "SELECT COUNT(*) FROM tickets "
-                "WHERE guild_id=? AND created_at >= ?",
-                (guild.id, cutoff_iso),
+                "WHERE guild_id=? AND created_at >= ? AND created_at < ?",
+                (guild.id, debut, fin),
             ) as cur:
                 row = await cur.fetchone()
             out["tickets_opened"] = int(row[0] or 0) if row else 0
 
             async with db.execute(
                 "SELECT COUNT(*) FROM tickets "
-                "WHERE guild_id=? AND status='closed' AND created_at >= ?",
-                (guild.id, cutoff_iso),
+                "WHERE guild_id=? AND status='closed' AND created_at >= ? AND created_at < ?",
+                (guild.id, debut, fin),
             ) as cur:
                 row = await cur.fetchone()
             out["tickets_closed"] = int(row[0] or 0) if row else 0
-
-            # events finished today
-            try:
-                out["events_finished"] = int(row[0] or 0) if row else 0
-            except Exception:
-                pass
+            # (« évènements terminés » recopiait les tickets fermés ; les évènements sont retirés : 0)
 
             # Upsert snapshot
             await db.execute(
@@ -343,11 +340,13 @@ async def detect_anomalies(guild_id: int) -> list[dict]:
     Retourne liste d'anomalies [{kind, severity, detail, today, baseline}].
     """
     out = []
-    snapshots = await get_recent_snapshots(guild_id, days=8)
+    # Des journées COMPLÈTES seulement : la journée en cours, comparée à des journées entières,
+    # donnait de fausses « baisses » toutes les 6 h (20/10/2026).
+    snapshots = [s for s in await get_recent_snapshots(guild_id, days=9) if s["day"] != _today_paris()]
     if len(snapshots) < 4:  # pas assez de data pour comparer
         return out
 
-    today_snap = snapshots[0]
+    today_snap = snapshots[0]  # la dernière journée complète (hier)
     baseline = snapshots[1:8]  # 7 jours précédents
 
     metrics = [
@@ -374,7 +373,7 @@ async def detect_anomalies(guild_id: int) -> list[dict]:
                 "baseline": round(avg, 1),
                 "ratio": round(ratio, 2),
                 "detail": (
-                    f"Spike détecté : `{today_val}` aujourd'hui vs "
+                    f"Spike détecté : `{today_val}` le {today_snap['day']} vs "
                     f"moyenne `{avg:.1f}` ({ratio:.1f}×)"
                 ),
             })
@@ -388,7 +387,7 @@ async def detect_anomalies(guild_id: int) -> list[dict]:
                 "baseline": round(avg, 1),
                 "ratio": round(ratio, 2),
                 "detail": (
-                    f"Drop détecté : `{today_val}` aujourd'hui vs "
+                    f"Drop détecté : `{today_val}` le {today_snap['day']} vs "
                     f"moyenne `{avg:.1f}` ({ratio:.1f}×)"
                 ),
             })
@@ -405,6 +404,11 @@ async def log_anomaly(
     await _ensure_tables()
     try:
         async with _get_db() as db:
+            # Une fois : le contrôle des 6 h revoit la même journée jusqu'à 4 fois (20/10/2026)
+            async with db.execute("SELECT 1 FROM anomaly_log WHERE guild_id=? AND kind=? AND detail=?",
+                                  (guild_id, kind, detail)) as cur:
+                if await cur.fetchone():
+                    return
             await db.execute(
                 "INSERT INTO anomaly_log(guild_id, kind, severity, detail) "
                 "VALUES(?, ?, ?, ?)",
@@ -777,11 +781,12 @@ async def daily_snapshot_task():
                 # Capture snapshot (de hier en fait, donc on regarde la
                 # journée Paris qui vient de se terminer)
                 yesterday_dt = now_local - timedelta(days=1)
-                snapshot = await capture_snapshot(guild)
+                snapshot = await capture_snapshot(guild, yesterday_dt.date())
 
                 # Récupère snapshot de l'avant-veille pour les diffs
-                prev_list = await get_recent_snapshots(guild.id, days=3)
-                prev = prev_list[1] if len(prev_list) >= 2 else None
+                avant_hier = (yesterday_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+                prev = next((s for s in await get_recent_snapshots(guild.id, days=5)
+                             if s["day"] == avant_hier), None)
 
                 # Post dans hub
                 hub_ch_id = int(cfg_data.get("hub_channel", 0) or 0)

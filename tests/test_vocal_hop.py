@@ -31,7 +31,8 @@ class Monde:
         self.sanctions, self.alertes, self.deplacements = [], [], list(deplacements)
         moi = Obj(guild_permissions=Obj(view_audit_log=audit))
 
-        def audit_logs(limit=25, action=None, after=None):
+        def audit_logs(limit=25, action=None, after=None, oldest_first=True):
+            assert oldest_first is False, "les plus récents d'abord (20/10/2026)"
             async def gen():
                 for e in self.deplacements:
                     yield e

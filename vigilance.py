@@ -101,6 +101,9 @@ async def _examiner_plus_tard(cle) -> None:
 
 async def examiner(guild_id: int, membre_id: int, g=None, maintenant: float | None = None):
     """Compte, puis poste ou met à jour la carte d'alerte. Rend le message, ou None."""
+    if len(_verrous) > 500:  # 20/10/2026 : un verrou par membre un jour alerté, à vie
+        for k in [k for k, v in _verrous.items() if not v.locked()]:
+            _verrous.pop(k, None)
     async with _verrous.setdefault((guild_id, membre_id), asyncio.Lock()):
         try:
             return await _examiner(guild_id, membre_id, g, maintenant)

@@ -20525,7 +20525,6 @@ async def ticket_reply_cmd(i: discord.Interaction, template_name: str):
                 ephemeral=True,
             )
         await i.response.send_message(tpl["content"], ephemeral=False)
-        await tix_module.touch_activity(i.channel.id)
     except Exception as ex:
         print(f"[ticket_reply_cmd] {ex}")
 
@@ -29853,7 +29852,10 @@ async def _sauts_imposes(guild, member, salons, depuis):
         return None
     n = 0
     try:
-        async for e in guild.audit_logs(limit=25, action=discord.AuditLogAction.member_move, after=depuis):
+        # Les PLUS RÉCENTS d'abord : avec `after`, discord.py rend sinon les plus anciens, et sur un
+        # serveur actif les déplacements récents du staff tombaient hors des 25 (20/10/2026).
+        async for e in guild.audit_logs(limit=50, action=discord.AuditLogAction.member_move, after=depuis,
+                                        oldest_first=False):
             salon = getattr(getattr(e, 'extra', None), 'channel', None)
             if e.user_id != member.id and getattr(salon, 'id', None) in salons:
                 n += int(getattr(e.extra, 'count', 1) or 1)

@@ -148,6 +148,10 @@ def record(user_id: int, action: str) -> bool:
     if len(buf) >= max_count:
         # Lock soft
         _locked[user_id] = now_ts + LOCK_DURATION_SEC
+        if len(_locked) > 500:  # verrous expirés : avant, nettoyés seulement au retour de la personne
+            for uid in [u for u, fin in _locked.items() if fin <= now_ts]:
+                _locked.pop(uid, None)
+                _dm_sent.pop(uid, None)
         return False
 
     buf.append(now_ts)

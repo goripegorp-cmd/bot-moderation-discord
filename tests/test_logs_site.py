@@ -502,3 +502,21 @@ def test_L10_le_panneau_principal_dit_ou_sont_les_logs():
     classe = next(n for n in arbre.body if isinstance(n, ast.ClassDef) and n.name == "MainPanelV2")
     corps = next(ast.unparse(f) for f in classe.body if getattr(f, "name", "") == "_collect_etat")
     assert "ulogger2026.mode_site(self.g.id)" in corps and "sur le site" in corps
+
+
+def test_L11_le_limiteur_du_site_compte_par_client_et_ne_se_vide_plus_d_un_coup():
+    """Audit 3 #8 : sur Railway, la premiere adresse est le client (l'en-tete du client est retire a
+    l'entree), la derniere celle du CDN, partagee. Un trop-plein n'efface plus les compteurs de tous."""
+    tableau._essais.clear()
+    cdn = "151.101.2.15"
+    assert tableau._ip(Obj(headers={"X-Forwarded-For": f"203.0.113.7, {cdn}"})) == "203.0.113.7"
+    assert tableau._ip(Obj(headers={}, remote="198.51.100.4")) == "198.51.100.4"
+    for k in range(tableau.LIMITE_ESSAIS + 1):
+        bloque = tableau._trop_essais(Obj(headers={"X-Forwarded-For": f"203.0.113.7, {cdn}"}),
+                                      compter=True, maintenant=1000.0 + k)
+    assert bloque
+    for k in range(5001):  # un trop-plein d'autres adresses, plus anciennes que le dernier essai
+        tableau._trop_essais(Obj(headers={"X-Forwarded-For": f"10.{k // 250}.{k % 250}.1, {cdn}"}),
+                             compter=True, maintenant=1000.0 + k / 1000)
+    assert tableau._trop_essais(Obj(headers={"X-Forwarded-For": f"203.0.113.7, {cdn}"}), maintenant=1031.0),         "le trop-plein oublie les plus anciens, pas celui qui insiste"
+    tableau._essais.clear()

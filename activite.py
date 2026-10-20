@@ -179,6 +179,9 @@ async def marquer_actif(guild_id: int, user_id: int, source: str) -> None:
             )
             await db.commit()
     except Exception as ex:
+        # Non écrit : la prochaine activité réessaie (20/10/2026 : la marque restait posée et
+        # la journée était perdue — un membre du clan pouvait glisser vers « inactif »).
+        _marques_du_jour.discard(cle)
         _log(f"[activite marquer_actif] {ex}")
 
 

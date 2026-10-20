@@ -726,6 +726,9 @@ async def sur_message(msg: discord.Message) -> None:
         cle = (g.id, msg.author.id)
         if time.monotonic() - _rappels.get(cle, -1e9) > 600:
             _rappels[cle] = time.monotonic()
+            if len(_rappels) > 500:  # 20/10/2026 : une entrée par personne, à vie
+                for k in [k for k, v in _rappels.items() if time.monotonic() - v > 600]:
+                    _rappels.pop(k, None)
             await salon.send(f"{msg.author.mention} Ici, on propose son idée avec le bouton en bas.", delete_after=10,
                              allowed_mentions=discord.AllowedMentions(users=True))
     except Exception as ex:

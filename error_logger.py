@@ -28,6 +28,7 @@ DB :
 from __future__ import annotations
 
 import json
+import time
 import traceback as _tb
 from datetime import datetime, timezone
 from typing import Optional
@@ -41,9 +42,7 @@ _db_get = None
 _v2 = None
 
 # Threshold burst : si > N erreurs/heure du même `source`, alerte owner
-BURST_THRESHOLD_PER_HOUR = 10
 # Cooldown anti-spam : pas 2 alertes burst du même source dans 4h
-BURST_ALERT_COOLDOWN_HOURS = 4
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict):
@@ -91,6 +90,11 @@ async def init_db():
         print(f"[error_logger init_db] {ex}")
 
 
+REPETITION_S = 60.0
+_ECRITES: dict = {}  # (source, type, serveur) → dernière écriture en base
+_TUES: dict = {}     # (source, type, serveur) → répétitions non écrites depuis
+
+
 async def log_error(
     source: str,
     exception: Exception,
@@ -104,6 +108,19 @@ async def log_error(
     """
     if _get_db is None or exception is None:
         return None
+    # Une même erreur au plus une fois par minute en base (20/10/2026 : une rafale prenait une
+    # connexion du pool par erreur et pouvait aggraver la panne qu'elle décrivait).
+    cle = (str(source)[:100], type(exception).__name__, int(guild_id or 0))
+    t = time.monotonic()
+    if t - _ECRITES.get(cle, -1e9) < REPETITION_S:
+        _TUES[cle] = _TUES.get(cle, 0) + 1
+        return None
+    _ECRITES[cle] = t
+    if _TUES.get(cle):
+        context = dict(context or {}, repetitions_non_ecrites=_TUES.pop(cle))
+    if len(_ECRITES) > 500:
+        for k in [k for k, v in _ECRITES.items() if t - v >= REPETITION_S]:
+            _ECRITES.pop(k, None)
     try:
         err_type = type(exception).__name__
         msg = str(exception)[:1000]
@@ -140,5 +157,4 @@ __all__ = [
     "setup",
     "init_db",
     "log_error",
-    "BURST_THRESHOLD_PER_HOUR",
 ]

@@ -536,6 +536,9 @@ async def sur_message(msg: discord.Message) -> None:
         cle = (g.id, msg.author.id)
         if time.monotonic() - _rappels.get(cle, -1e9) > RAPPEL:
             _rappels[cle] = time.monotonic()
+            if len(_rappels) > 500:  # 20/10/2026 : une entrée par personne, à vie
+                for k in [k for k, v in _rappels.items() if time.monotonic() - v > RAPPEL]:
+                    _rappels.pop(k, None)
             await _dire(salon, f"{msg.author.mention} Ici, seulement des sondages : bouton ➕ puis « Sondage ».",
                         msg.author, 10)
     except Exception as ex:  # un message ne casse jamais rien

@@ -25,6 +25,7 @@ API :
 """
 from __future__ import annotations
 
+import copy
 import json
 from datetime import datetime, timezone
 from enum import Enum
@@ -34,6 +35,7 @@ from typing import Optional, Any
 import discord
 
 import registre
+import stockage
 from paths import module_dir
 
 
@@ -190,16 +192,51 @@ def _cfg_path(guild_id: int) -> Path:
     return DATA_DIR / f"{guild_id}.json"
 
 
+_CFG: dict = {}  # guild_id → (date de modification, configuration) : relue seulement si elle change
+
+
+def _lire(guild_id: int) -> dict:
+    """La configuration (une COPIE). 20/10/2026 : relue à chaque appel, jusqu'à 4 fois par évènement.
+    Abîmée : la copie .bak, puis la dernière version lue ; sinon `stockage.Illisible` — jamais {},
+    sinon le réglage suivant écraserait tout (mode site compris)."""
+    p = _cfg_path(guild_id)
+    try:
+        cle = p.stat().st_mtime_ns
+    except FileNotFoundError:
+        _CFG.pop(guild_id, None)
+        return {}
+    connu = _CFG.get(guild_id)
+    if connu is not None and connu[0] == cle:
+        return copy.deepcopy(connu[1])
+    try:
+        data = stockage.lire_json_sur(p) or {}
+    except stockage.Illisible:
+        if connu is None:
+            raise
+        print("[UNIFIED_LOGGER][E3] configuration illisible, dernière version gardée")
+        print(f"[UNIFIED_LOGGER][E3:DETAIL] {guild_id}")
+        return copy.deepcopy(connu[1])
+    _CFG[guild_id] = (cle, data)
+    return copy.deepcopy(data)
+
+
+def _ecrire(guild_id: int, data: dict) -> None:
+    """Écriture sûre (nom temporaire unique, fsync, .bak) — avant : `write_text`, et une coupure en
+    pleine écriture abîmait le fichier."""
+    stockage.ecrire_json_sur(_cfg_path(guild_id), json.dumps(data, indent=2, ensure_ascii=False))
+    _CFG.pop(guild_id, None)
+
+
 async def get_log_channel(guild_id: int) -> Optional[int]:
     """Recupere l'ID du salon de logs configure pour ce serveur."""
     p = _cfg_path(guild_id)
     if not p.exists():
         return None
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = _lire(guild_id)
         cid = data.get("channel_id", 0)
         return int(cid) if cid else None
-    except (json.JSONDecodeError, OSError, ValueError):
+    except (stockage.Illisible, OSError, ValueError):
         return None
 
 
@@ -207,8 +244,8 @@ def salons_de_logs(guild_id: int) -> set[int]:
     """Tous les salons où ce journal écrit : global, par catégorie, par évènement."""
     p = _cfg_path(guild_id)
     try:
-        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except (json.JSONDecodeError, OSError):
+        data = _lire(guild_id)
+    except (stockage.Illisible, OSError):
         return set()
     ids = {data.get("channel_id")}
     for cle in ("category_channels", "event_channels"):
@@ -229,9 +266,7 @@ def remplacer_salon(guild_id: int, ancien: int, nouveau: int) -> None:
     p = _cfg_path(guild_id)
     if not p.exists():
         return
-    data = json.loads(p.read_text(encoding="utf-8"))
-    p.write_text(json.dumps(nettoyage.remplacer_id(data, ancien, nouveau), indent=2,
-                            ensure_ascii=False), encoding="utf-8")
+    _ecrire(guild_id, nettoyage.remplacer_id(_lire(guild_id), ancien, nouveau))
 
 
 #  19/10/2026 : « il n'y aura plus de logs sur le serveur Discord, tout sera sur le site ».
@@ -244,10 +279,11 @@ vue_alerte = None
 
 
 def _lire_cfg(guild_id: int) -> dict:
-    p = _cfg_path(guild_id)
     try:
-        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except (json.JSONDecodeError, OSError):
+        return _lire(guild_id)
+    except stockage.Illisible:
+        print("[UNIFIED_LOGGER][E4] configuration illisible")
+        print(f"[UNIFIED_LOGGER][E4:DETAIL] {guild_id}")
         return {}
 
 
@@ -270,7 +306,7 @@ async def activer_site(guild_id: int, alertes_id: int) -> set[int]:
     data.update({"site": True, "alertes": int(alertes_id or 0), "channel_id": 0,
                  "category_channels": {}, "event_channels": {},
                  "updated_at": datetime.now(timezone.utc).isoformat()})
-    _cfg_path(guild_id).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _ecrire(guild_id, data)
     return anciens
 
 
@@ -315,14 +351,10 @@ async def _consigner(guild, event_type, meta, *, title_override, description, us
 
 async def set_log_channel(guild_id: int, channel_id: int) -> None:
     """Configure le salon de logs pour ce serveur (preserve les autres champs)."""
-    p = _cfg_path(guild_id)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except Exception:
-        data = {}
+    data = _lire(guild_id)  # illisible : Illisible — jamais {}, on écraserait tout
     data["channel_id"] = int(channel_id)  # le mode (site ou Discord) ne change pas : il a son propre réglage
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _ecrire(guild_id, data)
 
 
 async def get_enabled_categories(guild_id: int) -> set[str]:
@@ -331,7 +363,7 @@ async def get_enabled_categories(guild_id: int) -> set[str]:
     if not p.exists():
         return set(c["cat"] for c in EVENT_META.values())
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = _lire(guild_id)
         cats = data.get("enabled_categories")
         if cats is None:
             return set(c["cat"] for c in EVENT_META.values())
@@ -342,14 +374,10 @@ async def get_enabled_categories(guild_id: int) -> set[str]:
 
 async def set_enabled_categories(guild_id: int, categories: set[str]) -> None:
     """Configure les categories de logs activees."""
-    p = _cfg_path(guild_id)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except Exception:
-        data = {}
+    data = _lire(guild_id)  # illisible : Illisible — jamais {}, on écraserait tout
     data["enabled_categories"] = sorted(categories)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _ecrire(guild_id, data)
 
 
 # =============================================================================
@@ -372,7 +400,7 @@ async def get_category_channels(guild_id: int) -> dict[str, int]:
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = _lire(guild_id)
         raw = data.get("category_channels", {}) or {}
         out: dict[str, int] = {}
         for k, v in raw.items():
@@ -390,11 +418,7 @@ async def get_category_channels(guild_id: int) -> dict[str, int]:
 async def set_category_channel(guild_id: int, category: str, channel_id: Optional[int]) -> None:
     """Route une categorie vers un salon. channel_id None/0 => retire le routage
     (la categorie retombe alors sur le salon global)."""
-    p = _cfg_path(guild_id)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except Exception:
-        data = {}
+    data = _lire(guild_id)  # illisible : Illisible — jamais {}, on écraserait tout
     cc = data.get("category_channels", {}) or {}
     if channel_id:
         cc[str(category)] = int(channel_id)
@@ -402,7 +426,7 @@ async def set_category_channel(guild_id: int, category: str, channel_id: Optiona
         cc.pop(str(category), None)
     data["category_channels"] = cc
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _ecrire(guild_id, data)
 
 
 async def resolve_channel_for_category(guild_id: int, category: Optional[str]) -> Optional[int]:
@@ -426,7 +450,7 @@ async def get_event_channels(guild_id: int) -> dict[str, int]:
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = _lire(guild_id)
         raw = data.get("event_channels", {}) or {}
         out: dict[str, int] = {}
         for k, v in raw.items():
@@ -444,11 +468,7 @@ async def get_event_channels(guild_id: int) -> dict[str, int]:
 async def set_event_channel(guild_id: int, event_value: str, channel_id: Optional[int]) -> None:
     """Route un évènement précis vers un salon. channel_id None/0 ⇒ retire l'override
     (l'évènement retombe alors sur le salon de sa catégorie, sinon le salon global)."""
-    p = _cfg_path(guild_id)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except Exception:
-        data = {}
+    data = _lire(guild_id)  # illisible : Illisible — jamais {}, on écraserait tout
     ec = data.get("event_channels", {}) or {}
     if channel_id:
         ec[str(event_value)] = int(channel_id)
@@ -456,7 +476,7 @@ async def set_event_channel(guild_id: int, event_value: str, channel_id: Optiona
         ec.pop(str(event_value), None)
     data["event_channels"] = ec
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _ecrire(guild_id, data)
 
 
 async def resolve_channel_for_event(guild_id: int, event_value: Optional[str],
@@ -491,20 +511,16 @@ async def get_webhook_mode(guild_id: int) -> bool:
     if not p.exists():
         return False
     try:
-        return bool(json.loads(p.read_text(encoding="utf-8")).get("webhook_mode", False))
+        return bool(_lire(guild_id).get("webhook_mode", False))
     except Exception:
         return False
 
 
 async def set_webhook_mode(guild_id: int, on: bool) -> None:
-    p = _cfg_path(guild_id)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except Exception:
-        data = {}
+    data = _lire(guild_id)  # illisible : Illisible — jamais {}, on écraserait tout
     data["webhook_mode"] = bool(on)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _ecrire(guild_id, data)
 
 
 async def _get_or_create_log_webhook(channel):
@@ -542,7 +558,7 @@ async def get_disabled_events(guild_id: int) -> set[str]:
     if not p.exists():
         return set()
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = _lire(guild_id)
         return set(data.get("disabled_events", []) or [])
     except Exception:
         return set()
@@ -550,14 +566,10 @@ async def get_disabled_events(guild_id: int) -> set[str]:
 
 async def set_disabled_events(guild_id: int, events: set[str]) -> None:
     """Persiste la liste des event_type desactives."""
-    p = _cfg_path(guild_id)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except Exception:
-        data = {}
+    data = _lire(guild_id)  # illisible : Illisible — jamais {}, on écraserait tout
     data["disabled_events"] = sorted(events)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _ecrire(guild_id, data)
 
 
 async def get_role_exclusions(guild_id: int) -> dict:
@@ -566,7 +578,7 @@ async def get_role_exclusions(guild_id: int) -> dict:
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = _lire(guild_id)
         raw = data.get("role_exclusions", {}) or {}
         # Sanitize : convertir les role_id en int
         out = {}
@@ -580,18 +592,14 @@ async def get_role_exclusions(guild_id: int) -> dict:
 
 async def set_role_exclusions(guild_id: int, exclusions: dict) -> None:
     """Persiste { event_type_str: [role_id, ...] }."""
-    p = _cfg_path(guild_id)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except Exception:
-        data = {}
+    data = _lire(guild_id)  # illisible : Illisible — jamais {}, on écraserait tout
     sanitized = {}
     for k, v in (exclusions or {}).items():
         if isinstance(v, list):
             sanitized[str(k)] = [int(x) for x in v if str(x).lstrip('-').isdigit()]
     data["role_exclusions"] = sanitized
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _ecrire(guild_id, data)
 
 
 def _user_has_excluded_role(user, excluded_role_ids: list[int]) -> bool:
