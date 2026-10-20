@@ -140,6 +140,178 @@ def save_asset(token: str, idx: int, data: bytes, ext: str):
         return None
 
 
+class _Lecteur:
+    """Relit un transcript écrit par `_render_ticket_transcript_html` (bot.py) : div.msg > img.avatar
+    + div.mbody > [div.mhead > span.author, span.bot, span.ts] + div.content + div.embed (div.etitle,
+    div, div.efield > b, div.efooter, img.att) + img.att | video.att | div > a. Le texte du message
+    est échappé à l'écriture : rien dedans ne peut passer pour une balise."""
+
+    _VIDES = {"img", "br", "video", "source", "meta", "link", "hr", "input"}
+
+    def __init__(self):
+        from html.parser import HTMLParser
+        lecteur = self
+
+        class _P(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                lecteur._ouvre(tag, dict(attrs))
+
+            def handle_startendtag(self, tag, attrs):
+                lecteur._ouvre(tag, dict(attrs))
+
+            def handle_endtag(self, tag):
+                lecteur._ferme(tag)
+
+            def handle_data(self, data):
+                lecteur._texte(data)
+        self._p = _P(convert_charrefs=True)
+        self.messages: list = []
+        self._m = None
+        self._e = None
+        self._pile: list = []  # [(balise, rôle)]
+
+    def lire(self, html: str) -> list:
+        self._p.feed(html)
+        self._p.close()
+        for m in self.messages:
+            m["texte"] = m["texte"].strip()
+            if m["texte"] == "[média]":
+                m["texte"] = ""
+            m["auteur"] = m["auteur"].strip()
+            ts = m.pop("_ts").strip()
+            if m["quand"] is None and ts:
+                try:  # anciens transcripts : l'heure UTC de Discord, sans attribut
+                    from datetime import datetime, timezone
+                    m["quand"] = int(datetime.strptime(ts, "%d/%m/%Y %H:%M").replace(tzinfo=timezone.utc).timestamp())
+                except ValueError:
+                    m["quand"] = None
+            for e in m["embeds"]:
+                e["titre"], e["texte"], e["pied"] = e["titre"].strip(), e["texte"].strip(), e["pied"].strip()
+                e["champs"] = [[n.strip(), v.strip()] for n, v in e["champs"]]
+            m["embeds"] = [e for e in m["embeds"] if e["titre"] or e["texte"] or e["champs"] or e["pied"]]
+            for f in m["fichiers"]:
+                f["nom"] = f["nom"].replace("📎", "").strip() or "fichier"
+        return self.messages
+
+    def _role(self):
+        for _tag, role in reversed(self._pile):
+            if role:
+                return role
+        return None
+
+    def _ouvre(self, tag, a):
+        classes = set((a.get("class") or "").split())
+        if tag == "br":
+            self._texte("\n")
+            return
+        m = self._m
+        if tag == "img":
+            src = a.get("src") or ""
+            if m is not None and "avatar" in classes:
+                m["avatar"] = src
+            elif m is not None and src:
+                m["images"].append(src)
+            return
+        if tag == "video":
+            if m is not None and a.get("src"):
+                m["videos"].append(a["src"])
+            return
+        if tag in self._VIDES:
+            return
+        role = None
+        if tag == "div" and "msg" in classes:
+            t = a.get("data-t")
+            self._m = m = {"auteur": "", "avatar": "", "bot": False,
+                           "quand": int(t) if t and t.isdigit() else None, "texte": "", "images": [],
+                           "videos": [], "fichiers": [], "embeds": [], "_ts": ""}
+            self._e = None
+            self.messages.append(m)
+            role = "msg"
+        elif m is not None:
+            parent = self._role()
+            if tag == "span" and "author" in classes:
+                role = "auteur"
+            elif tag == "span" and "bot" in classes:
+                m["bot"], role = True, "muet"
+            elif tag == "span" and "ts" in classes:
+                role = "ts"
+            elif tag == "div" and "content" in classes:
+                role = "texte"
+            elif tag == "div" and "embed" in classes:
+                self._e = {"titre": "", "texte": "", "champs": [], "pied": ""}
+                m["embeds"].append(self._e)
+                role = "embed"
+            elif tag == "div" and "etitle" in classes:
+                role = "etitre"
+            elif tag == "div" and "efield" in classes:
+                if self._e is not None:
+                    self._e["champs"].append(["", ""])
+                role = "echamp"
+            elif tag == "b" and parent == "echamp":
+                role = "echamp_nom"
+            elif tag == "div" and "efooter" in classes:
+                role = "epied"
+            elif tag == "div" and parent == "embed":
+                role = "etexte"
+            elif tag == "a" and a.get("href"):
+                m["fichiers"].append({"nom": "", "url": a["href"]})
+                role = "fichier"
+            elif tag == "i" and parent == "texte":
+                role = "muet"
+        self._pile.append((tag, role))
+
+    def _ferme(self, tag):
+        for k in range(len(self._pile) - 1, -1, -1):
+            if self._pile[k][0] == tag:
+                role = self._pile[k][1]
+                del self._pile[k:]
+                if role == "msg":
+                    self._m, self._e = None, None
+                elif role == "embed":
+                    self._e = None
+                return
+
+    def _texte(self, data):
+        m, role = self._m, self._role()
+        if m is None or role in (None, "msg", "muet", "embed"):
+            return
+        if role == "auteur":
+            m["auteur"] += data
+        elif role == "ts":
+            m["_ts"] += data
+        elif role == "texte":
+            m["texte"] += data
+        elif role == "fichier" and m["fichiers"]:
+            m["fichiers"][-1]["nom"] += data
+        elif self._e is not None:
+            if role == "etitre":
+                self._e["titre"] += data
+            elif role == "etexte":
+                self._e["texte"] += data
+            elif role == "epied":
+                self._e["pied"] += data
+            elif role == "echamp_nom" and self._e["champs"]:
+                self._e["champs"][-1][0] += data
+            elif role == "echamp" and self._e["champs"]:
+                self._e["champs"][-1][1] += data
+
+
+def lire_conversation(token: str):
+    """Les messages d'un transcript enregistré (liste de dicts), ou None s'il n'existe plus (purge
+    de rétention) ou si le jeton est invalide. Sync (via to_thread) — lecture d'un fichier."""
+    p = transcript_path(token)
+    if not p or not os.path.isfile(p):
+        return None
+    with open(p, encoding="utf-8") as f:
+        return _Lecteur().lire(f.read())
+
+
+def jeton_de(url: str):
+    """Le jeton d'une adresse de transcript (« …/t/<jeton> »), ou None."""
+    jeton = str(url or "").rstrip("/").rsplit("/t/", 1)[-1] if "/t/" in str(url or "") else ""
+    return jeton if _valid(jeton) else None
+
+
 def public_base_url():
     """URL publique de base (sans slash final), ou None si aucun domaine configuré.
     Priorité : TRANSCRIPT_BASE_URL (manuel) puis RAILWAY_PUBLIC_DOMAIN (auto Railway)."""

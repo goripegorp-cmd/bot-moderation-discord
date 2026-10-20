@@ -48,7 +48,7 @@ def test_T1_le_transcript_porte_le_nom_et_se_retrouve_par_membre(tmp_path):
             await db.execute("CREATE TABLE ticket_log_msgs (guild_id, ticket_id, message_id, "
                              "PRIMARY KEY (guild_id, ticket_id))")
             await db.execute("CREATE TABLE ticket_transcripts (guild_id, ticket_id, user_id, "
-                             "user_name, panel, url, closed_at, PRIMARY KEY (guild_id, ticket_id))")
+                             "user_name, panel, url, closed_at, jeton TEXT, PRIMARY KEY (guild_id, ticket_id))")
             await db.commit()
     asyncio.run(preparer())
 

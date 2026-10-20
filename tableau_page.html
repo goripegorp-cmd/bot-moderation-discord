@@ -317,6 +317,27 @@ details.repli[open]>.contenu{animation:monte .4s var(--ease) both}
 .choix button{padding:10px;border-radius:12px;border:1px solid var(--b1);background:var(--s1);cursor:pointer;font-weight:650;font-size:13px}
 .choix button[aria-pressed="true"]{border-color:var(--rouge);background:rgba(251,113,133,.14)}
 #voile-dialogue{z-index:50}
+/* Conversation d'un ticket : tout ce qui a été écrit */
+.dialogue.conv{width:min(760px,calc(100% - 24px));height:min(86vh,calc(100% - 24px));display:flex;flex-direction:column;padding:0;overflow:hidden}
+.conv-tete{display:flex;align-items:center;gap:12px;padding:16px 18px 12px;border-bottom:1px solid var(--b1)}
+.conv-tete h3{margin:0;flex:1;min-width:0}
+.dialogue p.conv-sous{margin:0;padding:8px 18px 0;font-size:12px;color:var(--t3)}
+.conv-liste{flex:1;overflow:auto;overscroll-behavior:contain;padding:12px 18px 16px;display:grid;gap:14px;align-content:start}
+.conv-msg{display:grid;grid-template-columns:36px minmax(0,1fr);gap:10px;min-width:0}
+.conv-av{width:36px;height:36px;border-radius:50%;background:var(--s2);object-fit:cover}
+.conv-haut{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;min-width:0}
+.conv-haut b{font-size:14px;overflow-wrap:anywhere}
+.conv-bot{font-size:10px;font-weight:800;padding:1px 6px;border-radius:6px;background:var(--indigo);color:#0b1020}
+.conv-haut .quand{font-size:12px;color:var(--t3);font-variant-numeric:tabular-nums}
+.conv-texte{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;margin-top:2px}
+.conv-embed{margin-top:6px;padding:8px 10px;border-left:3px solid var(--indigo);border-radius:8px;background:var(--s1);display:grid;gap:4px;font-size:13px;color:var(--t2);white-space:pre-wrap;overflow-wrap:anywhere}
+.conv-embed b{color:var(--t1)}
+.conv-champ span{display:block;font-weight:700;color:#7dd3fc;font-size:12px}
+.conv-medias{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.dialogue .conv-msg .actions{justify-content:flex-start}
+.conv-medias img{max-width:min(320px,100%);max-height:260px;border-radius:10px;border:1px solid var(--b1);object-fit:contain;background:var(--s1)}
+.conv-pied{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding:10px 18px;border-top:1px solid var(--b1)}
+@media (max-width:640px){.dialogue.conv{width:100%;height:92%;top:auto;bottom:0;left:0;transform:none;border-radius:22px 22px 0 0;animation:none}}
 
 .toast{position:fixed;left:50%;bottom:max(20px,env(safe-area-inset-bottom));z-index:60;transform:translate(-50%,20px);opacity:0;padding:11px 16px;border-radius:14px;
   background:#111c33;border:1px solid var(--b2);box-shadow:var(--ombre);transition:.3s var(--ease);pointer-events:none;max-width:calc(100% - 24px);text-align:center}
@@ -387,7 +408,7 @@ function h(tag, attrs, ...enfants) {
     else if (k === "style") e.style.cssText = v;
     else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
     else if (k === "href") { if (/^https:\/\//.test(v) || String(v).startsWith(BASE + "/")) e.setAttribute("href", v); }
-    else if (k === "src") { if (/^https:\/\/(cdn\.discordapp\.com|media\.discordapp\.net)\//.test(v)) e.setAttribute("src", v); }
+    else if (k === "src") { if (/^https:\/\/(cdn\.discordapp\.com|media\.discordapp\.net)\//.test(v) || /^\/ta\/[A-Za-z0-9_-]{16,86}\/\d{1,4}$/.test(v)) e.setAttribute("src", v); }
     else e.setAttribute(k, v === true ? "" : String(v));
   }
   for (const c of enfants.flat(4)) {
@@ -967,6 +988,7 @@ function carteTicketOuvert(t) {
       : pastille(tard ? "Personne depuis plus de 24 h" : "Pas encore pris", "var(--ambre)", null, true)),
     h("div", {classe: "actions", style: "margin-top:12px"},
       t.salon ? h("a", {classe: "bouton p", href: t.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir sur Discord") : null,
+      h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + t.nom)}, icone("ticket", 14), "Conversation"),
       h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirFiche(t.id, "tickets")}, "Fiche"),
       peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "ticket_fermer", ticket: t.ticket},
         "Fermer le ticket #" + t.ticket + " ?", "Le salon du ticket est supprimé ; le transcript est gardé.", {motif: true}, "Fermer", "danger")}, "Fermer") : null));
@@ -980,8 +1002,8 @@ function carteTicketsFermes(id, liste) {
       h("div", {classe: "haut"}, h("span", {classe: "quoi"}, "#" + t.ticket + " · " + t.type), h("span", {classe: "quand"}, date(t.ferme || t.ouvert, true))),
       h("div", {classe: "texte clamp2"}, t.motif || "Sans motif"),
       h("div", {classe: "meta"}, (t.ferme_par ? "fermé par " + t.ferme_par + " · " : "") + "durée " + duree(t.ferme && t.ouvert ? t.ferme - t.ouvert : 0)),
-      t.transcript ? h("div", {}, h("a", {classe: "bouton p discret", href: t.transcript, target: "_blank", rel: "noopener noreferrer", onclick: (e) => e.stopPropagation()},
-        icone("lien", 14), "Transcript")) : null))),
+      h("div", {}, h("button", {classe: "bouton p discret", type: "button", onclick: (e) => { e.stopPropagation(); ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + p.nom); }},
+        icone("ticket", 14), "Conversation"))))),
     liste.length > 3 ? h("div", {classe: "compte", style: "margin-top:8px"}, "+ " + (liste.length - 3) + " autre(s) dans la fiche") : null);
 }
 
@@ -1656,7 +1678,9 @@ function rendreFiche() {
         !m.present && m.banni ? h("button", {classe: "bouton p vert", type: "button", onclick: () => agir({action: "debannir", membre: m.id},
           "Lever son bannissement ?", "Il pourra revenir sur le serveur.", {}, "Débannir", "vert")}, "Lever le bannissement") : null)));
   }
-  const nb = {chrono: null, sanctions: f.sanctions.length, tickets: f.tickets.length, candidatures: f.candidatures.length, questions: f.questions.length,
+  //  Une candidature EN COURS compte aussi : sans elle, un premier candidat n'avait pas d'onglet et son dossier restait invisible.
+  const enCours = ((etat.d && etat.d.en_cours) || []).some(c => c.id === f.membre.id);
+  const nb = {chrono: null, sanctions: f.sanctions.length, tickets: f.tickets.length, candidatures: f.candidatures.length + (enCours ? 1 : 0), questions: f.questions.length,
     sondages: (f.sondages || []).length + (f.idees || []).length, journal: f.journal.length, donnees: f.donnees.length};
   const dispo = ONGLETS_FICHE.filter(([k]) => k === "chrono" || nb[k]);
   if (!dispo.some(([k]) => k === etat.ficheOnglet)) etat.ficheOnglet = "chrono";
@@ -1673,7 +1697,7 @@ function rendreFiche() {
     h("div", {classe: "haut"}, h("span", {classe: "quoi"}, "#" + x.ticket + " · " + x.type), h("span", {classe: "quand"}, x.statut)),
     h("div", {classe: "texte"}, x.motif || (x.statut === "ouvert" ? "En cours" : "Sans motif")),
     h("div", {classe: "meta"}, "ouvert le " + date(x.ouvert, true) + (x.ferme ? " · fermé le " + date(x.ferme, true) + (x.ferme_par ? " par " + x.ferme_par : "") : "") + (x.pris_par ? " · pris par " + x.pris_par : "")),
-    h("div", {classe: "actions"}, x.transcript ? h("a", {classe: "bouton p discret", href: x.transcript, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Transcript") : null,
+    h("div", {classe: "actions"}, h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirConversation(x.ticket, "Ticket #" + x.ticket + " · " + p.nom)}, icone("ticket", 14), "Conversation"),
       x.salon ? h("a", {classe: "bouton p discret", href: x.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir le ticket") : null))));
   else if (o === "candidatures") corps.append(...rendreCandidaturesFiche(f));
   else if (o === "questions") corps.append(listeParJour(f.questions.map(q => Object.assign({t: q.quand}, q)), (q) => h("li", {classe: "entree"},
@@ -1723,7 +1747,8 @@ function rendreCandidaturesFiche(f) {
   if (enCours) blocs.push(h("div", {classe: "cadre pile", style: "padding:14px"}, h("h3", {}, "Candidature en cours · ticket #" + enCours.ticket),
     h("p", {classe: "aide"}, "Ouverte " + depuis(enCours.ouvert) + (enCours.pris_par ? " · prise par " + enCours.pris_par : " · pas encore prise") + ". Accepter donne le rôle du clan : ça se fait dans le ticket, sur Discord."),
     reponses(enCours.reponses),
-    h("div", {classe: "actions"}, enCours.salon ? h("a", {classe: "bouton p principal", href: enCours.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir le ticket") : null,
+    h("div", {classe: "actions"}, h("button", {classe: "bouton p principal", type: "button", onclick: () => ouvrirConversation(enCours.ticket, "Candidature · ticket #" + enCours.ticket)}, icone("ticket", 14), "Conversation"),
+      enCours.salon ? h("a", {classe: "bouton p", href: enCours.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir le ticket") : null,
       peutAgir() ? [h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "candidature", ticket: enCours.ticket, decision: "refuser"},
         "Refuser la candidature ?", "Le ticket est fermé avec ce motif (transcript et dossier gardés).", {motif: true}, "Refuser", "danger")}, "Refuser"),
         h("button", {classe: "bouton p", type: "button", onclick: () => agir({action: "ticket_fermer", ticket: enCours.ticket}, "Fermer sans décider ?",
@@ -1732,7 +1757,7 @@ function rendreCandidaturesFiche(f) {
   if (fiche) blocs.push(h("div", {classe: "cadre pile", style: "padding:14px"}, h("h3", {}, "Dernière décision : " + (STATUTS[fiche.statut] || [fiche.statut])[0]),
     h("p", {classe: "aide"}, "Fermée le " + date(fiche.ferme, true) + (fiche.ferme_par ? " par " + fiche.ferme_par : "") + (fiche.motif ? " — " + fiche.motif : "")),
     reponses(fiche.reponses),
-    h("div", {classe: "actions"}, fiche.transcript ? h("a", {classe: "bouton p", href: fiche.transcript, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Transcript") : null,
+    h("div", {classe: "actions"}, h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirConversation(fiche.ticket, "Candidature · ticket #" + fiche.ticket)}, icone("ticket", 14), "Conversation"),
       peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "fiche_retirer", candidat: fiche.id}, "Retirer ses fiches de candidature ?",
         "Elles disparaissent du site. Les transcripts restent.", {}, "Retirer", "danger")}, "Retirer ses fiches") : null)));
   f.candidatures.forEach(c => blocs.push(h("div", {classe: "entree"}, h("div", {classe: "haut"}, h("span", {classe: "quoi"}, "Ticket #" + c.ticket), h("span", {classe: "quand"}, date(c.ferme, true))),
@@ -1742,6 +1767,56 @@ function rendreCandidaturesFiche(f) {
 function reponses(liste) {
   return (liste || []).length ? h("div", {classe: "pile", style: "gap:8px"}, liste.map(([q, r]) => h("div", {classe: "reponse"}, h("div", {classe: "q"}, q), h("div", {classe: "r"}, r))))
     : h("p", {classe: "aide"}, "Formulaire non rempli.");
+}
+/* ── Conversation d'un ticket : tout ce qui a été écrit, pas seulement le questionnaire ── */
+const SRC_SITE = /^\/ta\/[A-Za-z0-9_-]{16,86}\/\d{1,4}$/;
+function imageConv(u) {
+  if (/^https:\/\/(cdn\.discordapp\.com|media\.discordapp\.net)\//.test(u) || SRC_SITE.test(u)) return h("img", {src: u, alt: "", loading: "lazy", referrerpolicy: "no-referrer"});
+  return /^https:\/\//.test(u) ? h("a", {classe: "bouton p", href: u, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Image") : null;
+}
+function messageConv(m) {
+  const liens = [...(m.videos || []).map(u => ({nom: "Vidéo", url: u})), ...(m.fichiers || [])].filter(f => /^https:\/\//.test(f.url));
+  return h("div", {classe: "conv-msg"},
+    m.avatar ? h("img", {classe: "conv-av", src: m.avatar, alt: "", loading: "lazy", referrerpolicy: "no-referrer"}) : h("div", {classe: "conv-av"}),
+    h("div", {style: "min-width:0"},
+      h("div", {classe: "conv-haut"}, h("b", {}, m.auteur || "?"), m.bot ? h("span", {classe: "conv-bot"}, "BOT") : null, h("span", {classe: "quand"}, m.quand ? date(m.quand, true) : "")),
+      m.texte ? h("div", {classe: "conv-texte"}, m.texte) : null,
+      (m.embeds || []).map(e => h("div", {classe: "conv-embed"}, e.titre ? h("b", {}, e.titre) : null, e.texte || null,
+        (e.champs || []).map(([n, v]) => h("div", {classe: "conv-champ"}, h("span", {}, n), v)), e.pied ? h("div", {classe: "meta"}, e.pied) : null)),
+      (m.images || []).length ? h("div", {classe: "conv-medias"}, m.images.map(imageConv)) : null,
+      liens.length ? h("div", {classe: "actions", style: "margin-top:6px"}, liens.map(f => h("a", {classe: "bouton p", href: f.url, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), f.nom))) : null));
+}
+async function ouvrirConversation(ticket, titre) {
+  const hote = $("#dialogue-hote"), voile = $("#voile-dialogue");
+  const sous = h("p", {classe: "conv-sous"}, "Chargement de la conversation…");
+  const liste = h("div", {classe: "conv-liste"}, h("div", {classe: "squelette", style: "height:72px"}), h("div", {classe: "squelette", style: "height:72px"}));
+  const avant = document.activeElement;
+  const fermer = () => { hote.replaceChildren(); voile.classList.remove("ouvert"); document.removeEventListener("keydown", echap, true);
+    if (avant && avant.isConnected && avant.focus) avant.focus({preventScroll: true}); };
+  const echap = (e) => { if (e.key === "Escape") { e.stopPropagation(); fermer(); } };
+  const pied = h("div", {classe: "conv-pied"}, h("button", {classe: "bouton discret", type: "button", onclick: fermer}, "Fermer"));
+  hote.replaceChildren(h("div", {classe: "dialogue conv", role: "dialog", "aria-modal": "true", "aria-labelledby": "c-titre"},
+    h("div", {classe: "conv-tete"}, h("h3", {id: "c-titre"}, titre), h("button", {classe: "fermer", type: "button", "aria-label": "Fermer", onclick: fermer}, icone("fermer", 18))),
+    sous, liste, pied));
+  voile.classList.add("ouvert");
+  document.addEventListener("keydown", echap, true);
+  $("#dialogue-hote .fermer").focus();
+  let d;
+  try {
+    const r = await fetch(BASE + "/conversation?ticket=" + encodeURIComponent(ticket), {cache: "no-store", credentials: "same-origin"});
+    if (r.status === 403) { fermer(); expire(); return; }
+    d = await r.json();
+    if (!r.ok) throw new Error(d.erreur || "erreur");
+  } catch (e) {
+    if (hote.contains(sous)) { sous.textContent = "Conversation indisponible. Réessaie dans un instant."; liste.replaceChildren(); }
+    return;
+  }
+  if (!hote.contains(liste)) return;  // fermée pendant le chargement
+  const msgs = d.messages || [];
+  sous.textContent = d.absent || (nombre(msgs.length) + " message(s) · " + (d.source === "discord" ? "en direct de Discord" : "transcript enregistré à la fermeture")
+    + (d.tronque ? " · les " + nombre(msgs.length) + " premiers" : ""));
+  liste.replaceChildren(...(msgs.length ? msgs.map(messageConv) : [vide(d.absent ? "Pas de conversation" : "Aucun message")]));
+  if (d.lien && /^https:\/\//.test(d.lien)) pied.prepend(h("a", {classe: "bouton p", href: d.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Page du transcript"));
 }
 async function moderer(m, sanction) {
   const p = P(m.id), noms = {warn: "Avertir", mute: "Muter", unmute: "Lever le mute de", kick: "Expulser", ban: "Bannir"};

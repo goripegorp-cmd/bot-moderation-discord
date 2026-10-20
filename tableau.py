@@ -92,7 +92,7 @@ ENTETES = {
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
-    "Content-Security-Policy": ("default-src 'none'; img-src https://cdn.discordapp.com "
+    "Content-Security-Policy": ("default-src 'none'; img-src 'self' https://cdn.discordapp.com "
                                 "https://media.discordapp.net data:; style-src 'unsafe-inline'; "
                                 "script-src 'none'; connect-src 'self'; base-uri 'none'; "
                                 "form-action 'none'; frame-ancestors 'none'"),
@@ -131,14 +131,17 @@ _log = print
 
 
 def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_membre, radie=None,
-          direction=None, mis_a_part=None, tete=(), actions=None, alerte_securite=None, log=None):
+          direction=None, mis_a_part=None, tete=(), actions=None, alerte_securite=None, conversation=None,
+          log=None):
     """`autorise_membre(g, membre, c)` → qui entre sur le site ; `direction(g, membre, c)` → qui agit ;
     `mis_a_part(g, membre, c)` → hors statistiques et intouchable (par défaut : `direction`) ; `tete` :
     les identifiants « à la tête » (« c'est ceux-là et uniquement eux »), jamais suspendus ;
     `actions` : {nom: async (g, auteur, données) → (ok, message)} ; `alerte_securite(g, membre,
-    texte, suspendu=True)` : prévient dans « 📋logs »."""
+    texte, suspendu=True)` : prévient dans « 📋logs » ; `conversation(g, ticket)` → toute la conversation
+    d'un ticket (ouvert : en direct ; fermé : le transcript enregistré)."""
     global _bot, _cle, _base, _cfg, _get_db, _mesurer_groupe, _autorise_membre, _log, _radie
-    global _direction, _actions, _alerte_securite, _mis_a_part, _tete
+    global _direction, _actions, _alerte_securite, _mis_a_part, _tete, _conversation
+    _conversation = conversation
     _direction, _actions = direction, dict(actions or {})
     _mis_a_part, _tete = mis_a_part or direction, frozenset(int(x) for x in tete)
     _bot, _cle, _base = bot, cle.encode(), (base_url or "").rstrip("/")
@@ -1063,6 +1066,26 @@ async def membre(request):
         _log("[TABLEAU][E3] fiche indisponible")
         _log(f"[TABLEAU][E3:DETAIL] {type(ex).__name__} {ex}")
         return _json({"erreur": "fiche indisponible"}, 500)
+
+
+_conversation = None
+
+
+async def conversation(request):
+    """Toute la conversation d'un ticket (20/10/2026 : « on n'a que le questionnaire »)."""
+    try:
+        j, g = await _verifier(request)
+    except _Refus as r:
+        return _json({"erreur": r.message}, r.status)
+    ticket = request.query.get("ticket", "")
+    if not ticket.isdigit() or len(ticket) > 12 or _conversation is None:
+        return _json({"erreur": "ticket invalide"}, 400)
+    try:
+        return _json(await _conversation(g, int(ticket)))
+    except Exception as ex:  # la page le dit ; le détail part au journal du bot
+        _log("[TABLEAU][E10] conversation indisponible")
+        _log(f"[TABLEAU][E10:DETAIL] {ticket} {type(ex).__name__} {ex}")
+        return _json({"erreur": "conversation indisponible"}, 500)
 
 
 async def export(request):

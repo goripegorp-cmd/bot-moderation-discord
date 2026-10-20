@@ -1040,6 +1040,9 @@ async def db_init():
         )''')
         await db.execute("CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_user "
                          "ON ticket_transcripts(guild_id, user_id)")
+        async with db.execute("PRAGMA table_info(ticket_transcripts)") as _cur:
+            if "jeton" not in {r[1] for r in await _cur.fetchall()}:
+                await db.execute("ALTER TABLE ticket_transcripts ADD COLUMN jeton TEXT")
 
 
         # Phase 235.5 : vocaux temporaires « Voc Build » (join-to-create) persistés
@@ -7506,12 +7509,14 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                 token = transcript_store.new_token()
                 html = await _render_ticket_transcript_html(
                     ch, _tid, token=token, base_url=base_url)
-                url = None
-                if html and base_url:
+                url, jeton = None, ''
+                if html:  # enregistré même sans adresse publique : le site le relit par son jeton
                     try:
                         if await asyncio.to_thread(transcript_store.save_html, token, html):
+                            jeton = token
                             url = transcript_store.transcript_url(token)
-                    except Exception:
+                    except Exception as ex:
+                        _logerr("ticket.transcript_fichier", ex, guild_id=g.id)
                         url = None
                 if url:
                     # Passe l'URL au MP créateur (évite un 2e rendu + fichier code en MP).
@@ -7571,9 +7576,9 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                     async with get_db() as db:
                         await db.execute(
                             "INSERT OR REPLACE INTO ticket_transcripts(guild_id, ticket_id, user_id, "
-                            "user_name, panel, url, closed_at) VALUES (?,?,?,?,?,?,?)",
+                            "user_name, panel, url, closed_at, jeton) VALUES (?,?,?,?,?,?,?,?)",
                             (g.id, int(_tid), int(uid) if str(uid).isdigit() else 0, str(_qui)[:100],
-                             panel_name or '', url or '', now().isoformat()))
+                             panel_name or '', url or '', now().isoformat(), jeton))
                         await db.commit()
             except Exception as ex:
                 _logerr("ticket.transcript", ex, guild_id=g.id)
@@ -8584,6 +8589,78 @@ a{color:#00a8fc;text-decoration:none}
 """
 
 
+CONVERSATION_MAX = 1000  # messages lus en direct pour un ticket ouvert (comme le transcript)
+
+
+def _message_en_donnees(m, guild) -> dict:
+    """Un message Discord, dans la forme que le site affiche (la même que `lire_conversation`)."""
+    out = {"auteur": getattr(m.author, "display_name", None) or str(m.author), "bot": bool(getattr(m.author, "bot", False)),
+           "avatar": "", "quand": int(m.created_at.timestamp()),
+           "texte": (_resolve_transcript_text(m.content or "", guild) or "").strip(), "images": [], "videos": [],
+           "fichiers": [], "embeds": []}
+    try:
+        out["avatar"] = m.author.display_avatar.url
+    except AttributeError:
+        pass
+    # Dans l'ordre de la page du transcript : encadrés, pièces jointes, autocollants
+    for e in (m.embeds or []):
+        bloc = {"titre": _resolve_transcript_text(str(e.title or ""), guild).strip(),
+                "texte": _resolve_transcript_text(str(e.description or ""), guild).strip(),
+                "champs": [[str(f.name).strip(), _resolve_transcript_text(str(f.value), guild).strip()]
+                           for f in (e.fields or [])],
+                "pied": str(getattr(e.footer, "text", "") or "").strip()}
+        if any((bloc["titre"], bloc["texte"], bloc["champs"], bloc["pied"])):
+            out["embeds"].append(bloc)
+        image = getattr(getattr(e, "image", None), "url", None) or getattr(getattr(e, "thumbnail", None), "url", None)
+        if image:
+            out["images"].append(image)
+    for a in (m.attachments or []):
+        genre = (a.content_type or "").split("/")[0]
+        nom = (a.filename or "").lower()
+        if genre == "image" or nom.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+            out["images"].append(a.url)
+        elif genre == "video" or nom.endswith((".mp4", ".webm", ".mov")):
+            out["videos"].append(a.url)
+        else:
+            out["fichiers"].append({"nom": a.filename or "fichier", "url": a.url})
+    for st in (getattr(m, "stickers", None) or []):
+        if getattr(st, "url", None):
+            out["images"].append(st.url)
+    return out
+
+
+async def _conversation_ticket(g, ticket_id: int) -> dict:
+    """TOUTE la conversation d'un ticket, pour le site (20/10/2026 : « on n'a que le questionnaire »).
+    Ouvert : en direct depuis Discord. Fermé : le transcript enregistré à la fermeture."""
+    async with get_db() as db:
+        async with db.execute("SELECT channel_id, status FROM tickets WHERE id=? AND guild_id=?",
+                              (int(ticket_id), g.id)) as cur:
+            ticket = await cur.fetchone()
+        async with db.execute("SELECT url, jeton FROM ticket_transcripts WHERE guild_id=? AND ticket_id=?",
+                              (g.id, int(ticket_id))) as cur:
+            transcript = await cur.fetchone()
+    if ticket is None:
+        return {"ticket": int(ticket_id), "messages": [], "absent": "Ticket introuvable."}
+    lien = (transcript[0] if transcript else "") or ""
+    if ticket[1] == "open":
+        ch = await tickets_fils.salon(g, ticket[0])
+        if ch is not None:
+            messages = [_message_en_donnees(m, g) async for m in ch.history(limit=CONVERSATION_MAX, oldest_first=True)]
+            return {"ticket": int(ticket_id), "source": "discord", "messages": messages,
+                    "tronque": len(messages) >= CONVERSATION_MAX}
+    jeton = (transcript[1] if transcript and transcript[1] else None) or transcript_store.jeton_de(lien)
+    messages = await asyncio.to_thread(transcript_store.lire_conversation, jeton) if jeton else None
+    if messages is None:
+        return {"ticket": int(ticket_id), "messages": [], "lien": lien, "absent": (
+            "Aucun transcript enregistré pour ce ticket." if not jeton else
+            "Le transcript a été effacé (conservation de 120 jours).")}
+    base = transcript_store.public_base_url() or ""
+    for m in messages:  # images ré-hébergées chez nous : adresse relative (le site n'accepte que la sienne)
+        m["images"] = [u[len(base):] if base and u.startswith(base + "/ta/") else u for u in m["images"]]
+    return {"ticket": int(ticket_id), "source": "transcript", "messages": messages, "lien": lien,
+            "tronque": len(messages) >= CONVERSATION_MAX}
+
+
 async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None):
     """Construit la CHAÎNE HTML du transcript (thème Discord) : avatars, pseudos, horodatage,
     contenu RÉSOLU (mentions/rôles/emojis) et ÉCHAPPÉ (anti-injection), embeds stylés, images/
@@ -8600,7 +8677,9 @@ async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None):
         rehosted_bytes = 0
         async for m in ch.history(limit=1000, oldest_first=True):
             n += 1
-            stamp = m.created_at.strftime('%d/%m/%Y %H:%M')
+            # L'heure de Paris (avant : l'heure UTC) ; l'heure exacte part en `data-t` (site)
+            stamp = (m.created_at.astimezone(ZoneInfo("Europe/Paris")) if ZoneInfo else m.created_at
+                     ).strftime('%d/%m/%Y %H:%M')
             try:
                 avatar = m.author.display_avatar.url  # CDN stable (pas d'expiration signée)
             except Exception:
@@ -8680,7 +8759,8 @@ async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None):
             if not content_html.strip() and not embeds_html and not att_html:
                 content_html = '<i style="color:#949ba4">[média]</i>'
             rows.append(
-                f'<div class="msg"><img class="avatar" loading="lazy" src="{_hesc(avatar)}" alt="">'
+                f'<div class="msg" data-t="{int(m.created_at.timestamp())}">'
+                f'<img class="avatar" loading="lazy" src="{_hesc(avatar)}" alt="">'
                 f'<div class="mbody"><div class="mhead"><span class="author">{name}</span>{badge}'
                 f'<span class="ts">{stamp}</span></div>'
                 f'<div class="content">{content_html}</div>{embeds_html}{att_html}</div></div>')
@@ -19217,7 +19297,8 @@ async def _activite_boot():
                   mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_a_la_tete,
                   radie=_RADIE_ROLE_NAME, direction=_a_la_tete, tete=TETE_IDS,
                   mis_a_part=lambda g, m, c: _a_la_tete(g, m, c) or _direction_ou_plus(g, m, c),
-                  actions=_ACTIONS_TABLEAU, alerte_securite=_alerte_securite_site, log=print)
+                  actions=_ACTIONS_TABLEAU, alerte_securite=_alerte_securite_site,
+                  conversation=_conversation_ticket, log=print)
     await tableau.init_db()
     casier.setup(get_db=get_db, log=print)
     await casier.init_db()

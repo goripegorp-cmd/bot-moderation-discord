@@ -96,7 +96,7 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path, sit
             await db.execute("CREATE TABLE ticket_log_msgs (guild_id, ticket_id, message_id, "
                              "PRIMARY KEY (guild_id, ticket_id))")
             await db.execute("CREATE TABLE ticket_transcripts (guild_id, ticket_id, user_id, "
-                             "user_name, panel, url, closed_at, PRIMARY KEY (guild_id, ticket_id))")
+                             "user_name, panel, url, closed_at, jeton TEXT, PRIMARY KEY (guild_id, ticket_id))")
             await db.commit()
     asyncio.run(preparer())
 
@@ -171,9 +171,9 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path, sit
 
     async def index():
         async with get_db() as db:
-            async with db.execute("SELECT ticket_id, user_id, url FROM ticket_transcripts") as cur:
+            async with db.execute("SELECT ticket_id, user_id, url, jeton FROM ticket_transcripts") as cur:
                 return await cur.fetchall()
-    assert asyncio.run(index()) == [(5, 7, "https://bot.exemple/t/tok")], "le transcript est indexé pour le site"
+    assert asyncio.run(index()) == [(5, 7, "https://bot.exemple/t/tok", "tok")], "le transcript est indexé pour le site, avec son jeton (conversation)"
     if site:
         assert logs.envois == [] and 56 not in salons, "plus rien sur Discord, aucun salon créé"
         asyncio.run(ns["send_ticket_log"](g, "create", candidat, {"id": 6, "panel_id": "p2"}))

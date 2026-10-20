@@ -209,6 +209,7 @@ def construire_app():
     app.router.add_get('/tableau/espace/membre', _tableau, name="tableau:membre")
     app.router.add_get('/tableau/espace/recherche', _tableau, name="tableau:recherche")
     app.router.add_get('/tableau/espace/export', _tableau, name="tableau:export")
+    app.router.add_get('/tableau/espace/conversation', _tableau, name="tableau:conversation")
     app.router.add_post('/tableau/espace/action', _tableau, name="tableau:action")
     app.router.add_post('/tableau/espace/sortir', _tableau, name="tableau:sortir")
     app.router.add_get('/tableau/{jeton}', _tableau, name="tableau:entree")
