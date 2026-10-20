@@ -285,13 +285,19 @@ class SocialAddPanel(_OwnerView):
         self.clear_items()
 
         if self.platform is None:
+            # Seules les plateformes qui RELÈVENT vraiment (20/10/2026 : Kick et Twitch sans clés
+            # étaient proposés — un abonnement qui ne publierait jamais rien, sans le dire).
+            mgr = _get_or_create_manager()
+            actives = [p for p in Platform if mgr.get_adapter(p) is not None
+                       and not isinstance(mgr.get_adapter(p), ManualAdapter)]
+            absentes = [PLATFORM_LABELS[p] for p in Platform if p not in actives]
             options = [
                 discord.SelectOption(
                     label=PLATFORM_LABELS[p], value=p.value,
                     emoji=PLATFORM_ICONS[p],
-                ) for p in Platform
-            ]
-            sel = ui.Select(placeholder="Choisis la plateforme", options=options)
+                ) for p in actives
+            ] or [discord.SelectOption(label="Aucune plateforme disponible", value="aucune")]
+            sel = ui.Select(placeholder="Choisis la plateforme", options=options, disabled=not actives)
             async def _on_platform(i: discord.Interaction):
                 self.platform = Platform(sel.values[0])
                 # Ouvre directement le modal pour saisir le handle
@@ -309,8 +315,12 @@ class SocialAddPanel(_OwnerView):
                 _subtitle("Étape 1/3 : choisis la plateforme"),
                 _divider(),
                 ui.ActionRow(sel),
-                ui.ActionRow(b_back),
             ]
+            if absentes:
+                items.append(ui.TextDisplay(
+                    "-# Non proposées : " + ", ".join(absentes)
+                    + " — pas de flux à relever (Twitch : il faut ses clés dans Railway)."))
+            items.append(ui.ActionRow(b_back))
             self.add_item(_container(*items, color=Palette.ACCENT))
         elif self._handle is None:
             # Pas encore de handle, on attend le modal (ne devrait pas arriver normalement)

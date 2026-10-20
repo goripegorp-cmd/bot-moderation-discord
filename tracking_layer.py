@@ -21,8 +21,6 @@ API :
     await mark_deleted(guild_id, platform, username, post_id) -> None
     await prune_old(guild_id, max_days=180) -> int
 
-Cleanup helper (a brancher dans une boucle bot.py) :
-    await cleanup_deleted_sources(guild, fetch_url_alive_callback) -> int
 """
 from __future__ import annotations
 
@@ -321,86 +319,6 @@ async def prune_old(guild_id: int, max_days: int = 180) -> int:
 # CLEANUP HELPER
 # =============================================================================
 
-# Callback type : prend un TrackedPost, retourne True si la source existe encore.
-# Si retourne False, on supprime le message Discord et on marque deleted.
-SourceLivenessCallback = Callable[[TrackedPost], Awaitable[bool]]
-
-
-async def cleanup_deleted_sources(
-    guild,
-    is_alive_cb: SourceLivenessCallback,
-    *,
-    bot_get_channel_cb: Callable[[int], Any] = None,
-    only_platforms: Optional[list[str]] = None,
-    max_to_check: int = 50,
-) -> dict:
-    """Pour chaque annonce active, verifie si la source existe encore.
-
-    - `is_alive_cb` : async callable, prend un TrackedPost, retourne bool
-    - `bot_get_channel_cb` : optionnel, pour resoudre les channels (bot.get_channel)
-    - `only_platforms` : limite aux plateformes specifiees
-    - `max_to_check` : limite par run pour eviter rate-limit
-
-    Retourne {"checked": N, "deleted": M, "errors": [...]}.
-    """
-    await _load_guild(guild.id)
-    report = {"checked": 0, "deleted": 0, "errors": []}
-
-    candidates = []
-    for tp in _cache.get(guild.id, {}).values():
-        if tp.deleted:
-            continue
-        if only_platforms and tp.platform not in only_platforms:
-            continue
-        candidates.append(tp)
-
-    # Sort par anciennete (oldest first - plus susceptibles d'etre deja supprimes)
-    candidates.sort(key=lambda t: t.posted_at)
-    candidates = candidates[:max_to_check]
-
-    for tp in candidates:
-        report["checked"] += 1
-        try:
-            still_alive = await is_alive_cb(tp)
-        except Exception as ex:
-            report["errors"].append(f"{tp.key}: liveness check failed ({ex})")
-            continue
-
-        if still_alive:
-            continue
-
-        # La source n'existe plus -> supprimer le message Discord
-        try:
-            chan = None
-            if bot_get_channel_cb:
-                chan = bot_get_channel_cb(tp.discord_channel_id)
-            if chan is None:
-                chan = guild.get_channel(tp.discord_channel_id)
-            if chan is None:
-                # Salon plus accessible : on marque quand meme deleted pour eviter de re-check
-                tp.deleted = True
-                report["deleted"] += 1
-                continue
-
-            try:
-                msg = await chan.fetch_message(tp.discord_message_id)
-                await msg.delete()
-            except Exception:
-                # Message deja supprime / inaccessible : on marque quand meme
-                pass
-
-            tp.deleted = True
-            report["deleted"] += 1
-            await asyncio.sleep(0.3)  # throttle anti-429 (DELETE messages même salon)
-        except Exception as ex:
-            report["errors"].append(f"{tp.key}: delete failed ({ex})")
-
-    if report["deleted"] > 0:
-        await _save_guild(guild.id)
-
-    return report
-
-
 __all__ = [
     "TrackedPost",
     "was_posted",
@@ -408,5 +326,4 @@ __all__ = [
     "list_announcements",
     "mark_deleted",
     "prune_old",
-    "cleanup_deleted_sources",
 ]

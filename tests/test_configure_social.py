@@ -263,3 +263,22 @@ async def test_le_panneau_previent_quand_le_releve_nest_pas_branche():
     texte = str(vue.to_components())
 
     assert "n'est pas branché" in texte
+
+
+@pytest.mark.asyncio
+async def test_seules_les_plateformes_qui_relevent_sont_proposees():
+    """20/10/2026 : Kick (aucun flux) et Twitch sans cles etaient proposes — un abonnement qui ne
+    publierait jamais rien, sans le dire."""
+    from discord import ui as _ui
+    mgr = social_media.SocialMediaManager()
+    for p in social_media.Platform:
+        mgr.register_adapter(social_media.ManualAdapter(p))
+    mgr.register_adapter(social_media.YouTubeRSSAdapter())
+    mgr.register_adapter(social_media.RSSHubAdapter(social_media.Platform.TWITTER, base_url="https://rsshub.exemple"))
+    panels.set_social_manager(mgr)
+    vue = panels.SocialAddPanel(FauxUser(), FauxGuild())
+    await vue.render_to(FausseInteraction())
+    sel = next(x for x in vue.walk_children() if isinstance(x, _ui.Select))
+    assert sorted(o.value for o in sel.options) == ["twitter", "youtube"]
+    note = " ".join(getattr(x, "content", "") for x in vue.walk_children())
+    assert "Kick" in note and "Twitch" in note

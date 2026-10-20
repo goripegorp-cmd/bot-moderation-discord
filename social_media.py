@@ -311,11 +311,8 @@ aiohttp_ClientSession_T = Any
 # =============================================================================
 
 class ManualAdapter(PlatformAdapter):
-    """Adapter manuel : pas d'API, l'owner declare les posts a la main.
-
-    Utile pour les plateformes sans API publique fiable (TikTok, Instagram,
-    Twitter sans cle, etc.). Le bot ne dedup que sur les declarations explicites.
-    """
+    """Plateforme sans flux à relever (Kick, Twitch sans clés) : ne publie rien. Le panneau ne la
+    propose pas (20/10/2026 : ses méthodes de déclaration à la main n'étaient appelées nulle part)."""
 
     def __init__(self, platform: Platform):
         self.platform = platform
@@ -324,21 +321,6 @@ class ManualAdapter(PlatformAdapter):
     @property
     def configured(self) -> bool:
         return True
-
-    def declare_post(self, post: SocialPost) -> None:
-        """L'owner declare manuellement un post a tracker."""
-        if post.platform != self.platform:
-            raise ValueError(f"post platform {post.platform} != adapter {self.platform}")
-        key = post.handle.lower()
-        self._manual_posts.setdefault(key, []).append(post)
-
-    def remove_post(self, handle: str, post_id: str) -> None:
-        """L'owner declare qu'un post manuel n'est plus actif."""
-        key = handle.lower()
-        if key in self._manual_posts:
-            self._manual_posts[key] = [
-                p for p in self._manual_posts[key] if p.post_id != post_id
-            ]
 
     async def fetch_posts(self, handle: str) -> list[SocialPost]:
         return list(self._manual_posts.get(handle.lower(), []))

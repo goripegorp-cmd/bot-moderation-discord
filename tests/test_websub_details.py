@@ -83,3 +83,13 @@ def test_W4_seules_les_chaines_deja_resolues_sont_suivies_sans_requete():
     m._subs = {1: {s.sub_id: s for s in subs}}
     assert sorted(uc for uc, _ in m.abonnements_youtube()) == ["UCabcdefghijklmnopqrstuv",
                                                               "UCzzzzzzzzzzzzzzzzzzzzzz"]
+
+
+def test_W5_stats_montre_l_etat_de_websub_sans_rien_d_identifiant():
+    import json as _json
+
+    import health_server as H
+    reponse = asyncio.run(H._stats_handler(None))
+    donnees = _json.loads(reponse.body)
+    assert set(donnees["websub"]) == {"actif", "abonnes", "notifications", "annonces", "rejetees"}
+    assert all(isinstance(v, (bool, int)) for v in donnees["websub"].values())

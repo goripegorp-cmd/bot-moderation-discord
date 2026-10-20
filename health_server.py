@@ -102,6 +102,15 @@ async def _stats_handler(request):
             pass
         if ETAT_PUBLIC:
             data["travaux"] = dict(ETAT_PUBLIC)
+        #  20/10/2026 : la notification instantanée YouTube — des compteurs seulement.
+        try:
+            import websub_youtube
+            e = websub_youtube.etat()
+            data["websub"] = {k: (bool(e.get(k)) if k == "actif" else int(e.get(k) or 0))
+                              for k in ("actif", "abonnes", "notifications", "annonces", "rejetees")}
+        except Exception as ex:
+            print("[HEALTH][E1] état WebSub illisible")
+            print(f"[HEALTH][E1:DETAIL] {type(ex).__name__} {ex}")
         return web.json_response(data)
     except Exception as ex:
         return web.json_response({"status": "error", "error": str(ex)}, status=500)
