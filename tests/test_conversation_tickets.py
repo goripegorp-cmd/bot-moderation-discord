@@ -198,7 +198,10 @@ def test_C4_la_route_est_reservee_a_la_session_de_la_tete(tmp_path):
     assert "img-src 'self'" in ok.headers["Content-Security-Policy"]
     assert "tableau:conversation" in (RACINE / "health_server.py").read_text(encoding="utf-8")
     page = (RACINE / "tableau_page.html").read_text(encoding="utf-8")
-    assert page.count("ouvrirConversation(") >= 6, "ouverts, fermés, fiche, candidature en cours et décidée"
+    assert page.count("ouvrirConversation(") >= 4, "cartes des tickets ouverts et fermés + « Agrandir »"
+    assert page.count("transcriptEnLigne(") >= 5, "dans la fiche : tickets, candidature en cours, décidée, anciennes"
+    assert 'transcriptEnLigne(enCours.ticket, "Candidature · ticket #" + enCours.ticket, true)' in page, \
+        "« on clique sur quelqu'un » : le transcript s'affiche d'office sous le questionnaire"
     assert '"/conversation?ticket="' in page and "\\/ta\\/[A-Za-z0-9_-]{16,86}" in page
     assert "candidatures: f.candidatures.length + (enCours ? 1 : 0)" in page, \
         "une candidature EN COURS ouvre l'onglet Candidatures de la fiche : sinon un premier candidat n'a ni dossier ni conversation"

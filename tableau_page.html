@@ -335,6 +335,9 @@ details.repli[open]>.contenu{animation:monte .4s var(--ease) both}
 .conv-champ span{display:block;font-weight:700;color:#7dd3fc;font-size:12px}
 .conv-medias{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .dialogue .conv-msg .actions{justify-content:flex-start}
+.conv-bloc{display:grid;gap:10px;margin-top:4px;padding-top:12px;border-top:1px solid var(--b1);min-width:0}
+.conv-bloc p.aide{margin:0}
+.conv-liste.enligne{overflow:visible;padding:0;flex:none}
 .conv-medias img{max-width:min(320px,100%);max-height:260px;border-radius:10px;border:1px solid var(--b1);object-fit:contain;background:var(--s1)}
 .conv-pied{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding:10px 18px;border-top:1px solid var(--b1)}
 @media (max-width:640px){.dialogue.conv{width:100%;height:92%;top:auto;bottom:0;left:0;transform:none;border-radius:22px 22px 0 0;animation:none}}
@@ -988,7 +991,7 @@ function carteTicketOuvert(t) {
       : pastille(tard ? "Personne depuis plus de 24 h" : "Pas encore pris", "var(--ambre)", null, true)),
     h("div", {classe: "actions", style: "margin-top:12px"},
       t.salon ? h("a", {classe: "bouton p", href: t.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir sur Discord") : null,
-      h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + t.nom)}, icone("ticket", 14), "Conversation"),
+      h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + t.nom)}, icone("ticket", 14), "Transcript complet"),
       h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirFiche(t.id, "tickets")}, "Fiche"),
       peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "ticket_fermer", ticket: t.ticket},
         "Fermer le ticket #" + t.ticket + " ?", "Le salon du ticket est supprimé ; le transcript est gardé.", {motif: true}, "Fermer", "danger")}, "Fermer") : null));
@@ -1003,7 +1006,7 @@ function carteTicketsFermes(id, liste) {
       h("div", {classe: "texte clamp2"}, t.motif || "Sans motif"),
       h("div", {classe: "meta"}, (t.ferme_par ? "fermé par " + t.ferme_par + " · " : "") + "durée " + duree(t.ferme && t.ouvert ? t.ferme - t.ouvert : 0)),
       h("div", {}, h("button", {classe: "bouton p discret", type: "button", onclick: (e) => { e.stopPropagation(); ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + p.nom); }},
-        icone("ticket", 14), "Conversation"))))),
+        icone("ticket", 14), "Transcript complet"))))),
     liste.length > 3 ? h("div", {classe: "compte", style: "margin-top:8px"}, "+ " + (liste.length - 3) + " autre(s) dans la fiche") : null);
 }
 
@@ -1693,12 +1696,15 @@ function rendreFiche() {
     s.raison ? h("div", {classe: "texte"}, s.raison) : null, h("div", {classe: "meta"}, s.auto ? "Automatique" : "Par " + s.par),
     peutAgir() ? h("div", {}, h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "sanction_retirer", sanction: s.sanction}, "Retirer cette sanction du casier ?",
       s.libelle + " — " + (s.raison || "sans motif") + ". Elle sort du casier.", {}, "Retirer", "danger")}, "Retirer du casier")) : null)));
-  else if (o === "tickets") corps.append(listeParJour(f.tickets.map(x => Object.assign({t: x.ferme || x.ouvert}, x)), (x) => h("li", {classe: "entree"},
+  else if (o === "tickets") {
+    const dernier = (f.tickets.slice().sort((a, b) => (b.ouvert || 0) - (a.ouvert || 0))[0] || {}).ticket;
+    corps.append(listeParJour(f.tickets.map(x => Object.assign({t: x.ferme || x.ouvert}, x)), (x) => h("li", {classe: "entree"},
     h("div", {classe: "haut"}, h("span", {classe: "quoi"}, "#" + x.ticket + " · " + x.type), h("span", {classe: "quand"}, x.statut)),
     h("div", {classe: "texte"}, x.motif || (x.statut === "ouvert" ? "En cours" : "Sans motif")),
     h("div", {classe: "meta"}, "ouvert le " + date(x.ouvert, true) + (x.ferme ? " · fermé le " + date(x.ferme, true) + (x.ferme_par ? " par " + x.ferme_par : "") : "") + (x.pris_par ? " · pris par " + x.pris_par : "")),
-    h("div", {classe: "actions"}, h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirConversation(x.ticket, "Ticket #" + x.ticket + " · " + p.nom)}, icone("ticket", 14), "Conversation"),
-      x.salon ? h("a", {classe: "bouton p discret", href: x.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir le ticket") : null))));
+    x.salon ? h("div", {classe: "actions"}, h("a", {classe: "bouton p discret", href: x.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir le ticket")) : null,
+    transcriptEnLigne(x.ticket, "Ticket #" + x.ticket + " · " + p.nom, x.ticket === dernier))));
+  }
   else if (o === "candidatures") corps.append(...rendreCandidaturesFiche(f));
   else if (o === "questions") corps.append(listeParJour(f.questions.map(q => Object.assign({t: q.quand}, q)), (q) => h("li", {classe: "entree"},
     h("div", {classe: "haut"}, h("span", {classe: "quoi"}, q.salon), h("span", {classe: "quand"}, heure(q.quand))), h("div", {classe: "texte"}, q.texte),
@@ -1747,21 +1753,22 @@ function rendreCandidaturesFiche(f) {
   if (enCours) blocs.push(h("div", {classe: "cadre pile", style: "padding:14px"}, h("h3", {}, "Candidature en cours · ticket #" + enCours.ticket),
     h("p", {classe: "aide"}, "Ouverte " + depuis(enCours.ouvert) + (enCours.pris_par ? " · prise par " + enCours.pris_par : " · pas encore prise") + ". Accepter donne le rôle du clan : ça se fait dans le ticket, sur Discord."),
     reponses(enCours.reponses),
-    h("div", {classe: "actions"}, h("button", {classe: "bouton p principal", type: "button", onclick: () => ouvrirConversation(enCours.ticket, "Candidature · ticket #" + enCours.ticket)}, icone("ticket", 14), "Conversation"),
-      enCours.salon ? h("a", {classe: "bouton p", href: enCours.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir le ticket") : null,
+    h("div", {classe: "actions"}, enCours.salon ? h("a", {classe: "bouton p", href: enCours.salon, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Ouvrir le ticket") : null,
       peutAgir() ? [h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "candidature", ticket: enCours.ticket, decision: "refuser"},
         "Refuser la candidature ?", "Le ticket est fermé avec ce motif (transcript et dossier gardés).", {motif: true}, "Refuser", "danger")}, "Refuser"),
         h("button", {classe: "bouton p", type: "button", onclick: () => agir({action: "ticket_fermer", ticket: enCours.ticket}, "Fermer sans décider ?",
-          "Le ticket est fermé ; le transcript est gardé.", {motif: true}, "Fermer")}, "Fermer sans décider")] : null)));
+          "Le ticket est fermé ; le transcript est gardé.", {motif: true}, "Fermer")}, "Fermer sans décider")] : null),
+    transcriptEnLigne(enCours.ticket, "Candidature · ticket #" + enCours.ticket, true)));
   const fiche = (etat.d.candidats || []).find(c => c.id === f.membre.id);
   if (fiche) blocs.push(h("div", {classe: "cadre pile", style: "padding:14px"}, h("h3", {}, "Dernière décision : " + (STATUTS[fiche.statut] || [fiche.statut])[0]),
     h("p", {classe: "aide"}, "Fermée le " + date(fiche.ferme, true) + (fiche.ferme_par ? " par " + fiche.ferme_par : "") + (fiche.motif ? " — " + fiche.motif : "")),
     reponses(fiche.reponses),
-    h("div", {classe: "actions"}, h("button", {classe: "bouton p", type: "button", onclick: () => ouvrirConversation(fiche.ticket, "Candidature · ticket #" + fiche.ticket)}, icone("ticket", 14), "Conversation"),
-      peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "fiche_retirer", candidat: fiche.id}, "Retirer ses fiches de candidature ?",
-        "Elles disparaissent du site. Les transcripts restent.", {}, "Retirer", "danger")}, "Retirer ses fiches") : null)));
+    peutAgir() ? h("div", {classe: "actions"}, h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "fiche_retirer", candidat: fiche.id}, "Retirer ses fiches de candidature ?",
+      "Elles disparaissent du site. Les transcripts restent.", {}, "Retirer", "danger")}, "Retirer ses fiches")) : null,
+    transcriptEnLigne(fiche.ticket, "Candidature · ticket #" + fiche.ticket, true)));
   f.candidatures.forEach(c => blocs.push(h("div", {classe: "entree"}, h("div", {classe: "haut"}, h("span", {classe: "quoi"}, "Ticket #" + c.ticket), h("span", {classe: "quand"}, date(c.ferme, true))),
-    h("div", {classe: "texte"}, c.raison || "Sans motif"))));
+    h("div", {classe: "texte"}, c.raison || "Sans motif"),
+    fiche && fiche.ticket === c.ticket ? null : transcriptEnLigne(c.ticket, "Candidature · ticket #" + c.ticket, false))));
   return blocs.length ? blocs : [vide("Aucune candidature")];
 }
 function reponses(liste) {
@@ -1786,9 +1793,66 @@ function messageConv(m) {
       (m.images || []).length ? h("div", {classe: "conv-medias"}, m.images.map(imageConv)) : null,
       liens.length ? h("div", {classe: "actions", style: "margin-top:6px"}, liens.map(f => h("a", {classe: "bouton p", href: f.url, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), f.nom))) : null));
 }
+/* Lecture partagée (fenêtre et fiche). 60 s de mémoire : la fiche se redessine souvent. null = session expirée. */
+const CONV_MEMOIRE = new Map();
+async function lireConversation(ticket) {
+  const m = CONV_MEMOIRE.get(ticket);
+  if (m && Date.now() - m.t < 60000) return m.d;
+  const r = await fetch(BASE + "/conversation?ticket=" + encodeURIComponent(ticket), {cache: "no-store", credentials: "same-origin"});
+  if (r.status === 403) return null;
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.erreur || "erreur");
+  CONV_MEMOIRE.set(ticket, {t: Date.now(), d});
+  return d;
+}
+function resumeConversation(d) {
+  const n = (d.messages || []).length;
+  return d.absent || (nombre(n) + " message(s) · " + (d.source === "discord" ? "en direct de Discord" : "transcript enregistré à la fermeture")
+    + (d.tronque ? " · les " + nombre(n) + " premiers" : ""));
+}
+/* Dans la fiche : le transcript complet SOUS le questionnaire, sans bouton à chercher (`ouvert`),
+   ou replié derrière un bouton pour les anciens tickets. */
+const CONV_DEPLIES = new Set();
+function transcriptEnLigne(ticket, titre, ouvert) {
+  const bascule = h("button", {classe: "bouton p", type: "button", "aria-expanded": "false"});
+  const outils = h("div", {classe: "actions"}, bascule);
+  const meta = h("p", {classe: "aide"});
+  const liste = h("div", {classe: "conv-liste enligne"});
+  const bloc = h("div", {classe: "conv-bloc"}, outils, meta, liste);
+  let charge = false;
+  const masquer = () => {
+    CONV_DEPLIES.delete(ticket); liste.hidden = meta.hidden = true;
+    bascule.replaceChildren(icone("ticket", 14), "Transcript complet"); bascule.setAttribute("aria-expanded", "false");
+  };
+  const montrer = async () => {
+    CONV_DEPLIES.add(ticket); liste.hidden = meta.hidden = false;
+    bascule.replaceChildren(icone("ticket", 14), "Masquer le transcript"); bascule.setAttribute("aria-expanded", "true");
+    if (charge) return;
+    charge = true;
+    meta.textContent = "Chargement du transcript…";
+    liste.replaceChildren(h("div", {classe: "squelette", style: "height:64px"}), h("div", {classe: "squelette", style: "height:64px"}));
+    let d;
+    try { d = await lireConversation(ticket); } catch (e) { d = undefined; }
+    if (d === null) { expire(); return; }
+    if (!bloc.isConnected) return;  // fiche fermée ou redessinée pendant la lecture
+    if (d === undefined) {
+      charge = false;
+      meta.replaceChildren("Transcript indisponible. ", h("button", {classe: "bouton p", type: "button", onclick: () => montrer()}, "Réessayer"));
+      liste.replaceChildren();
+      return;
+    }
+    meta.textContent = resumeConversation(d);
+    liste.replaceChildren(...(d.messages || []).map(messageConv));
+    outils.append(h("button", {classe: "bouton p discret", type: "button", onclick: () => ouvrirConversation(ticket, titre)}, "Agrandir"));
+    if (d.lien && /^https:\/\//.test(d.lien)) outils.append(h("a", {classe: "bouton p discret", href: d.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Page du transcript"));
+  };
+  bascule.addEventListener("click", () => { if (liste.hidden) montrer(); else masquer(); });
+  if (ouvert || CONV_DEPLIES.has(ticket)) montrer(); else masquer();
+  return bloc;
+}
 async function ouvrirConversation(ticket, titre) {
   const hote = $("#dialogue-hote"), voile = $("#voile-dialogue");
-  const sous = h("p", {classe: "conv-sous"}, "Chargement de la conversation…");
+  const sous = h("p", {classe: "conv-sous"}, "Chargement du transcript…");
   const liste = h("div", {classe: "conv-liste"}, h("div", {classe: "squelette", style: "height:72px"}), h("div", {classe: "squelette", style: "height:72px"}));
   const avant = document.activeElement;
   const fermer = () => { hote.replaceChildren(); voile.classList.remove("ouvert"); document.removeEventListener("keydown", echap, true);
@@ -1803,19 +1867,16 @@ async function ouvrirConversation(ticket, titre) {
   $("#dialogue-hote .fermer").focus();
   let d;
   try {
-    const r = await fetch(BASE + "/conversation?ticket=" + encodeURIComponent(ticket), {cache: "no-store", credentials: "same-origin"});
-    if (r.status === 403) { fermer(); expire(); return; }
-    d = await r.json();
-    if (!r.ok) throw new Error(d.erreur || "erreur");
+    d = await lireConversation(ticket);
   } catch (e) {
-    if (hote.contains(sous)) { sous.textContent = "Conversation indisponible. Réessaie dans un instant."; liste.replaceChildren(); }
+    if (hote.contains(sous)) { sous.textContent = "Transcript indisponible. Réessaie dans un instant."; liste.replaceChildren(); }
     return;
   }
+  if (d === null) { fermer(); expire(); return; }
   if (!hote.contains(liste)) return;  // fermée pendant le chargement
   const msgs = d.messages || [];
-  sous.textContent = d.absent || (nombre(msgs.length) + " message(s) · " + (d.source === "discord" ? "en direct de Discord" : "transcript enregistré à la fermeture")
-    + (d.tronque ? " · les " + nombre(msgs.length) + " premiers" : ""));
-  liste.replaceChildren(...(msgs.length ? msgs.map(messageConv) : [vide(d.absent ? "Pas de conversation" : "Aucun message")]));
+  sous.textContent = resumeConversation(d);
+  liste.replaceChildren(...(msgs.length ? msgs.map(messageConv) : [vide(d.absent ? "Pas de transcript" : "Aucun message")]));
   if (d.lien && /^https:\/\//.test(d.lien)) pied.prepend(h("a", {classe: "bouton p", href: d.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Page du transcript"));
 }
 async function moderer(m, sanction) {
