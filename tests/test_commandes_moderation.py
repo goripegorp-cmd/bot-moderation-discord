@@ -127,3 +127,14 @@ def test_C9_les_interdictions_de_tickets_ne_disent_plus_qui_a_agi():
     assert "i.user.mention" not in corps and "/ticketblacklist add" not in corps
     assert corps.count("ephemeral=True") >= 8 and "_au_journal" in corps
     assert 'name="Par", value=i.user.mention' not in src
+
+
+def test_C10_la_duree_d_une_protection_s_ecrit_dans_la_cle_que_lisent_les_filtres():
+    """La fenetre « Duree » ecrivait `badwords_mute_duration` (rien ne la lit) au lieu de
+    `badwords_sanction_duration` : le reglage des insultes n'avait aucun effet."""
+    import ast as _a
+    arbre = _a.parse((Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8"))
+    classe = next(n for n in arbre.body if isinstance(n, _a.ClassDef) and n.name == "DurationConfigModal")
+    assert "self.dur_key = get_prot_duration_key(key)" in _a.unparse(classe)
+    table = next(n for n in arbre.body if isinstance(n, _a.Assign) and getattr(n.targets[0], "id", "") == "_PROT_DURATION_KEYS")
+    assert _a.literal_eval(table.value)["anti_badwords"] == "badwords_sanction_duration"

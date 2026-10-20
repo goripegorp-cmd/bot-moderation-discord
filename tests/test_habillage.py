@@ -15,7 +15,7 @@ RACINE = Path(__file__).resolve().parent.parent
 MENUS = ["bot.py", "admin_panels_v2.py", "error_logger.py",
          "mod_dashboard.py", "observability.py", "raid_detector.py", "rellseas_panneau.py",
          "roblox_panneau.py", "staff_sanction.py", "tickets_enhance.py", "webhook_tracker.py",
-         "social_zones.py", "sondages.py", "suggestions.py", "notifs.py"]
+         "sondages.py", "suggestions.py", "notifs.py"]
 EMOJI = re.compile(r"^[\U0001F000-\U0001F1E5\U0001F200-\U0001FAFF☀-➿⬀-⯿"
                    r"←-⇿⌀-⏿]")
 ETATS = set("🟢🔴🟠🟡⚪🔵🟣⚫✅❌⚠🔘")

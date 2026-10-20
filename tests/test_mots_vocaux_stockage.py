@@ -28,7 +28,6 @@ import stockage
 
 RACINE = Path(__file__).resolve().parent.parent
 SRC_BOT = (RACINE / "bot.py").read_text(encoding="utf-8")
-SRC_ZONES = (RACINE / "social_zones.py").read_text(encoding="utf-8")
 
 
 def _fonction(src, nom):
@@ -129,8 +128,6 @@ def test_V3_les_deux_vocaux_crees_par_le_bot_les_recoivent():
     i_acces = SRC_BOT.index("overwrites[_r] = acces_direction.permission(_me_perms)")
     i_creer = SRC_BOT.index("new_channel = await member.guild.create_voice_channel(")
     assert i_acces < i_creer, "les permissions doivent partir AVEC la création"
-    assert SRC_ZONES.index("acces_direction.roles(guild)") < SRC_ZONES.index(
-        "vc = await guild.create_voice_channel(")
 
 
 # ═══ Stockage ══════════════════════════════════════════════════════════════════

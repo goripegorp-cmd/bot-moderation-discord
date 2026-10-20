@@ -84,8 +84,6 @@ import honeypot as honeypot_module
 import anti_token_leak as anti_token_leak_module
 import error_logger as error_logger_module
 import recidivism as recidivism_module
-import social_zones as social_zones_module  # groupes et échanges privés, 100 % boutons
-import social_match as social_match_module  # appariement croisé (2 personnes qui se répondent/se ressemblent)
 import transcript_store  # stockage et service web des transcripts de tickets
 import insult_filter as insult_filter  # filtre insultes/haine gradué multilingue
 import mots_interdits  # liste du serveur — exclamations libres, plus de mots recollés
@@ -1583,14 +1581,6 @@ async def fetch_avatar_url(platform: str, username: str, session) -> str:
                     if m:
                         avatar_url = m.group(1)
 
-        elif platform == 'roblox_user':
-            url = f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={username}&size=150x150&format=Png"
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get('data') and len(data['data']) > 0:
-                        avatar_url = data['data'][0].get('imageUrl')
-
         elif platform == 'twitter':
             pass  # l'avatar vient du flux RSSHub (image du canal) ; plus de miroirs Nitter
 
@@ -1603,20 +1593,9 @@ async def fetch_avatar_url(platform: str, username: str, session) -> str:
                     if icon:
                         avatar_url = icon.split('?')[0]
 
-        elif platform == 'rosocial':
-            url = f"https://rosocial.net/{username}"
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    html = await resp.text()
-                    import re
-                    m = re.search(r'<img[^>]+class="[^"]*avatar[^"]*"[^>]+src="([^"]+)"', html, re.IGNORECASE)
-                    if not m:
-                        m = re.search(r'<img[^>]+src="([^"]+)"[^>]+class="[^"]*avatar[^"]*"', html, re.IGNORECASE)
-                    if m:
-                        avatar_url = m.group(1)
-
-    except:
-        pass
+    except Exception as ex:  # 20/10/2026 : `except: pass` — une panne d'avatar ne se voyait nulle part
+        print("[AVATAR][E1] avatar illisible")
+        print(f"[AVATAR][E1:DETAIL] {platform} {username} {type(ex).__name__} {ex}")
 
     if avatar_url:
         await save_avatar_cache(platform, username, avatar_url)
@@ -12812,27 +12791,6 @@ async def _texte_sondage_refuse(g, texte: str) -> str:
     return ""
 
 
-async def _fermer_anciens_sondages():
-    """19/10/2026 : l'ancien sondage à boutons est remplacé par les sondages natifs. Les
-    messages encore ouverts perdent leurs boutons (plus rien ne les traiterait)."""
-    try:
-        async with get_db() as db:
-            async with db.execute("SELECT name FROM sqlite_master "
-                                  "WHERE type='table' AND name='polls'") as cur:
-                if not await cur.fetchone():
-                    return
-            async with db.execute("SELECT channel_id, message_id FROM polls WHERE ended=0") as cur:
-                ouverts = await cur.fetchall()
-        for cid, mid in ouverts:
-            ch = bot.get_channel(int(cid or 0))
-            if ch is None:
-                continue
-            try:
-                await ch.get_partial_message(int(mid)).edit(view=None)
-            except discord.HTTPException:
-                pass
-    except Exception as ex:
-        _logerr("sondages.anciens", ex)
 
 
 async def _retirer_tables_mortes():
@@ -12914,7 +12872,7 @@ async def _travaux_de_demarrage():
                 await etape(g)
             except Exception as ex:
                 _logerr(f"demarrage.{nom}", ex, guild_id=g.id)
-    for etape in (_etat_public, _fermer_anciens_sondages, _retirer_tables_mortes):
+    for etape in (_etat_public, _retirer_tables_mortes):
         try:
             await etape()
         except Exception as ex:
@@ -15596,21 +15554,9 @@ class DurationConfigModal(Modal, title="Durée du Mute"):
         self.g = g
         self.u = u
         self.key = key
-        # Clé de durée
-        dur_keys = {
-            'anti_phishing': 'phishing_mute_duration',
-            'anti_scam': 'scam_mute_duration',
-            'anti_compromised': 'compromised_mute_duration',
-            'anti_qrcode': 'qrcode_mute_duration',
-            'anti_spam': 'spam_mute_duration',
-            'anti_mass_mention': 'mention_mute_duration',
-            'anti_link': 'link_mute_duration',
-            'anti_invite': 'invite_mute_duration',
-            'anti_image': 'image_mute_duration',
-            'anti_badwords': 'badwords_mute_duration',
-            'anti_caps': 'caps_mute_duration',
-        }
-        self.dur_key = dur_keys.get(key, f'{key.replace("anti_", "")}_mute_duration')
+        # La table centrale : celle que lisent les filtres (20/10/2026 : une copie locale écrivait,
+        # pour les insultes, une clé que rien ne lit — le réglage n'avait aucun effet).
+        self.dur_key = get_prot_duration_key(key)
 
     async def on_submit(self, i):
         val = self.dur_input.value.strip()
@@ -17001,7 +16947,6 @@ class PaginatedImmuneRemoveView(LayoutView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Cache pour éviter de republier les mêmes posts
-posted_content = {}
 
 # Cache des webhooks par (channel_id, platform) pour éviter de les recréer
 _webhook_cache = {}
@@ -17370,7 +17315,6 @@ WEBHOOK_PROFILES = {
     'twitter': {'name': '𝕏'},
     'reddit': {'name': 'Reddit'},
     'discord_relay': {'name': 'Discord Relay'},
-    'rosocial': {'name': 'RoSocial'},
     'roblox_ugc': {'name': 'Roblox UGC'},
     # ─── Veille Roblox (12/08/2026) — un profil PAR FLUX, pour qu'on voie d'ou
     #     vient la fiche sans lire une ligne. Les cles doivent correspondre a
@@ -19681,8 +19625,6 @@ async def on_ready():
     # Phase 20 : tâche journalière de cleanup DB
     if not cleanup_old_db_data.is_running():
         cleanup_old_db_data.start()
-    if not _nudge_stats_flusher.is_running():   # Lot 2 : flush périodique des compteurs de nudges
-        _nudge_stats_flusher.start()
 
     # Lancer la tâche des giveaways
     
@@ -19960,20 +19902,7 @@ async def on_ready():
         # ════════════════════════════════════════════════════════════════
 
 
-        # OPT-OUT « propositions d'aide » par membre (owner 2026-06-15) : charge le set en
-        # mémoire + re-capte le bouton toggle (DynamicItem persistant → aucun bouton mort).
-        try:
-            await _help_optout_load()
-            bot.add_dynamic_items(HelpOptOutButton, NudgePrefButton, ZoneMusicButton)
-            print("[help_optout] OK (réglage perso : ne plus me proposer d'aide, toggle)")
-        except Exception as ex:
-            print(f"[on_ready help_optout] {ex}")
 
-        # Appariement croisé (owner 2026-07-02) : boutons « toujours besoin ? » persistants.
-        try:
-            bot.add_dynamic_items(SmStillOkButton, SmStillNoButton)
-        except Exception as ex:
-            print(f"[on_ready social_match buttons] {ex}")
 
         # i18n : socle multilingue (serveur INTERNATIONAL). On injecte les deps
         # (DB pour la préférence par membre + cfg/db_set pour les langues officielles
@@ -21959,25 +21888,6 @@ async def on_bulk_message_delete(messages):
         print(f"[UNIFIED LOG on_bulk_message_delete] {ex}")
 
 
-@bot.event
-async def on_raw_message_delete(payload):
-    """owner 2026-07-03 : un utilisateur supprime son message → on retire AUSSI le nudge (aide/trade/
-    groupe) que le bot y avait attaché → pas de « ↰ message original supprimé » orphelin dans le chat.
-    RAW (fonctionne même si le message n'était pas en cache). Fail-safe, O(1)."""
-    try:
-        await _delete_nudge_for_original(int(getattr(payload, "message_id", 0) or 0))
-    except Exception as ex:
-        print(f"[on_raw_message_delete nudge] {ex}")
-
-
-@bot.event
-async def on_raw_bulk_message_delete(payload):
-    """Idem pour une purge : chaque message d'origine supprimé emmène son nudge. Fail-safe."""
-    try:
-        for mid in list(getattr(payload, "message_ids", []) or []):
-            await _delete_nudge_for_original(int(mid))
-    except Exception as ex:
-        print(f"[on_raw_bulk_message_delete nudge] {ex}")
 
 
 async def _scan_security_on_edit(after) -> bool:
@@ -26737,10 +26647,6 @@ async def check_social_feeds():
                         # Reddit
                         await check_reddit_feeds(session, guild, data)
                             
-                        # RoSocial
-                            
-                        # Roblox UGC
-                            
                         # Réductions de jeux (vérifiée moins souvent via counter)
                         await check_game_deals(session, guild, data)
 
@@ -27074,7 +26980,6 @@ async def check_youtube_feeds(session, guild, data):
             yt_avatar = await fetch_avatar_url('youtube', channel_id, session) if posts_to_publish else None
 
             for video_id, title, description, video_url in posts_to_publish:
-                posted_content[cache_key] = video_id
                 await _annoncer_video_youtube(guild, feed, target_channel, video_id, title, description,
                                               chemin="rss", avatar=yt_avatar)
                 await asyncio.sleep(1)
@@ -27770,7 +27675,6 @@ async def check_tiktok_feeds(session, guild, data):
                 # Dedup persistant (Phase 1.8) - garde l'historique entre redemarrages
                 if await tracking2026.was_posted(guild.id, "tiktok", username, latest_video_id):
                     continue
-                posted_content[cache_key] = latest_video_id  # back-compat RAM
                 
                 # Extraire le titre de la vidéo (pas la bio du profil)
                 # Chercher le "desc" qui apparaît APRÈS l'ID vidéo dans le HTML
@@ -27919,7 +27823,6 @@ async def check_reddit_feeds(session, guild, data):
             if await tracking2026.was_posted(guild.id, "reddit", subreddit, post_id):
                 continue
             cache_key = f"rd_{guild.id}_{subreddit}"
-            posted_content[cache_key] = post_id  # back-compat RAM
 
             # ═══════════════ EMBED REDDIT PROFESSIONNEL ═══════════════
             rd_avatar = await fetch_avatar_url('reddit', subreddit, session)
@@ -28084,7 +27987,6 @@ async def check_twitter_feeds(session, guild, data):
             if await tracking2026.was_posted(guild.id, "twitter", username, tweet_id):
                 continue
             cache_key = f"twitter_{guild.id}_{username}"
-            posted_content[cache_key] = tweet_id  # back-compat RAM
 
             # ═══════════════ EMBED TWITTER PROFESSIONNEL ═══════════════
             if not tw_avatar_url:
@@ -29592,8 +29494,8 @@ async def _2026_on_ready_addon():
         return
     _social2026_booted = True   # posé AVANT le corps : un échec partiel ne doit pas relancer un 2e manager
     try:
-        # owner 2026-07-12 : RSSHUB_BASE_URL peut être posée DEPUIS DISCORD (`/social rsshub_url:…`)
-        # et vivre en BASE (config guilde) → l'owner n'a plus JAMAIS à toucher aux variables Railway.
+        # owner 2026-07-12 : une adresse RSSHub posée autrefois depuis Discord (ancienne commande
+        # /social, retirée) vit en BASE (config guilde) : elle sert si la variable Railway est vide.
         # Si l'env est vide, on charge la valeur enregistrée et on la pousse dans os.environ AVANT de
         # construire les adapters (tous les consommateurs lisent os.getenv). FAIL-SAFE.
         try:
@@ -29721,7 +29623,7 @@ async def _2026_on_ready_addon():
         _has_twitch = bool(os.getenv("TWITCH_CLIENT_ID") and os.getenv("TWITCH_CLIENT_SECRET"))
         print("[social] Réseaux sociaux — état de la publication automatique vers Discord :"
               + ("\n   Twitch  : API officielle ✅" if _has_twitch else
-                 "\n   Twitch  : MANUEL (/publish) — ajoute TWITCH_CLIENT_ID + TWITCH_CLIENT_SECRET (Railway) pour l'auto")
+                 "\n   Twitch  : inactif — ajoute TWITCH_CLIENT_ID + TWITCH_CLIENT_SECRET (Railway) pour l'auto")
               + "\n   YouTube : RSS auto ✅ (vidéos + lives, sans clé ni quota)"
               + ("\n   Twitter/X · TikTok · Instagram : via RSSHub ✅ — RSSHUB_BASE_URL = "
                  f"{os.getenv('RSSHUB_BASE_URL')}" if os.getenv("RSSHUB_BASE_URL")
@@ -30103,7 +30005,7 @@ async def _safe_followup(i: discord.Interaction, **kwargs) -> bool:
 # ─── Phase 47.3 : delete persistant (survit aux redémarrages bot) ─────────────
 
 
-async def _register_for_cleanup(message, delay_seconds: int, reason: str = 'event', reply_to=None):
+async def _register_for_cleanup(message, delay_seconds: int, reason: str = 'event'):
     """Enregistre un message en DB pour suppression différée GARANTIE.
 
     À utiliser EN PLUS du delete_after natif Discord. Si le bot redémarre
@@ -30113,15 +30015,9 @@ async def _register_for_cleanup(message, delay_seconds: int, reason: str = 'even
     un message d'event (> 1h surtout).
 
     Phase 55 : retry x3 avec backoff si INSERT échoue. Log explicite.
-
-    owner 2026-07-03 : `reply_to` = le message d'origine auquel ce message RÉPOND (nudge aide/trade/
-    groupe). Si fourni, on note le lien → on supprimera ce nudge immédiatement si l'utilisateur
-    supprime son message (pas d'orphelin), en plus de l'expiration différée normale.
     """
     if message is None:
         return False
-    if reply_to is not None:
-        _track_nudge_reply(reply_to, message)
     delay_seconds = max(60, int(delay_seconds))  # min 60s pour éviter spam DB
     expires_at = (datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)).isoformat()
     guild_id = message.guild.id if message.guild else 0
@@ -30401,151 +30297,6 @@ async def _entraide_maybe_delete_empty_voice(guild, channel):
         print(f"[_entraide_maybe_delete_empty_voice] {ex}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ENTRAIDE — NUDGE auto sur appel à l'aide détecté en chat (non intrusif)
-#
-#  Quand _entraide_detect_help capte un appel à l'aide FORT dans un salon chatty,
-#  on poste un petit nudge EN REPLY au message de l'auteur (jamais de MP, zéro ping
-#  aidant/@everyone — au plus l'auteur). Le nudge s'AUTO-SUPPRIME ~5 min. Son bouton
-#  « 🆘 Trouver de l'aide » (DynamicItem entr_detect:<uid>) ouvre le flux « J'ai besoin
-#  d'aide » EXISTANT en éphémère, PRÉ-REMPLI avec le jeu détecté si on en a un.
-#
-#  Anti-spam : cooldown mémoire 30 min/utilisateur + on ne nudge JAMAIS si l'auteur a
-#  déjà une demande open. FAIL-SAFE : si l'entraide est OFF / autodetect OFF → rien.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-
-
-# Fallback /groupe : suggère le matchmaking quand l'entraide n'est PAS configurée et qu'une
-# demande de COORDINATION gaming est détectée (boss/raid/groupe…). Anti-spam mémoire borné.
-_GROUPE_SUGGEST_COOLDOWN: dict = {}  # (guild_id, user_id) -> ts du dernier conseil
-
-
-#   édite le nudge en « expiré »/« accepté » AVANT que le nettoyeur ne le supprime (état visible).
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  APPARIEMENT CROISÉ (owner 2026-07-02) — réunir 2 personnes qui cherchent la même
-#  chose (groupe/aide) ou qui parlent d'échange (réponse). Anti-FP : social_match (node-testé).
-# ═══════════════════════════════════════════════════════════════════════════════
-_SM_TRADE_CD: dict = {}   # {frozenset(paire): epoch} anti-spam des nudges d'échange appariés
-
-# owner 2026-07-03 : quand le bot répond à un message (nudge aide/trade/groupe) et que l'utilisateur
-# SUPPRIME son message d'origine, on supprime AUSSI le nudge → pas de « ↰ message original supprimé »
-# orphelin qui encombre le chat. Map bornée en mémoire (le nudge s'auto-expire de toute façon via
-# _register_for_cleanup, donc un reboot qui vide la map ne laisse rien de permanent).
-_NUDGE_REPLY_TO: dict = {}       # {id message d'origine: (channel_id, id du nudge)}
-_NUDGE_REPLY_TO_MAX = 2000
-
-
-def _track_nudge_reply(original_msg, nudge_msg):
-    """Mémorise « nudge_msg répond à original_msg » → on retirera le nudge si l'utilisateur supprime
-    son message. Dict ordonné (Py3.7+) → éviction FIFO. Fail-safe (best-effort)."""
-    try:
-        oid = int(getattr(original_msg, "id", 0) or 0)
-        nid = int(getattr(nudge_msg, "id", 0) or 0)
-        cid = int(getattr(getattr(nudge_msg, "channel", None), "id", 0) or 0)
-        if not (oid and nid and cid):
-            return
-        _NUDGE_REPLY_TO.pop(oid, None)          # ré-insère en fin (récence)
-        _NUDGE_REPLY_TO[oid] = (cid, nid)
-        while len(_NUDGE_REPLY_TO) > _NUDGE_REPLY_TO_MAX:
-            _NUDGE_REPLY_TO.pop(next(iter(_NUDGE_REPLY_TO)), None)
-    except Exception:
-        pass
-
-
-async def _delete_nudge_for_original(original_msg_id: int):
-    """Supprime le nudge attaché à `original_msg_id` (message d'origine supprimé). Best-effort."""
-    try:
-        entry = _NUDGE_REPLY_TO.pop(int(original_msg_id), None)
-        if not entry:
-            return
-        cid, nid = entry
-        ch = bot.get_channel(int(cid))
-        if ch is not None:
-            try:
-                await ch.get_partial_message(int(nid)).delete()
-            except Exception:
-                pass
-        # Le message n'existe plus → on retire aussi sa ligne de suppression différée.
-        try:
-            async with get_db() as db:
-                await db.execute("DELETE FROM event_message_cleanup WHERE message_id=?", (int(nid),))
-                await db.commit()
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-
-def _group_pair_view(author_id: int):
-    v = discord.ui.View(timeout=None)
-    v.add_item(discord.ui.Button(
-        emoji=visuels.icone("membres"), label="Créer le groupe", style=discord.ButtonStyle.success,
-        custom_id=f"szone_create:group:{int(author_id)}:0"))
-    return v
-
-
-
-
-async def _sm_still_ok(i, older_id: int, newer_id: int):
-    """L'ancien confirme qu'il cherche toujours → on transforme la question en invitation de groupe."""
-    try:
-        try:
-            await i.response.defer(ephemeral=True)
-        except Exception:
-            pass
-        if int(i.user.id) != int(older_id):
-            return await i.followup.send("ℹ️ Cette question s'adresse à l'autre joueur.", ephemeral=True)
-        guild = i.guild
-        older = guild.get_member(int(older_id)) if guild else None
-        newer = guild.get_member(int(newer_id)) if guild else None
-        # L'autre joueur a pu se désinscrire (« ne plus me proposer ») entre-temps → on ne le re-ping pas.
-        try:
-            if newer is not None and guild is not None \
-                    and _help_optout_is(int(guild.id), int(newer_id), 'trade'):
-                newer = None
-        except Exception:
-            pass
-        mentions = [m for m in (older, newer) if m is not None]
-        try:
-            await i.message.edit(
-                content=(f"👥 {older.mention if older else 'Joueur'}"
-                         + (f" et {newer.mention}" if newer else "")
-                         + " — montez un **groupe** ensemble ! Cliquez pour lancer."),
-                view=_group_pair_view(int(older_id)),
-                allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=mentions))
-        except Exception:
-            pass
-        await i.followup.send("👍 Super — clique sur « Créer le groupe » pour lancer.", ephemeral=True)
-    except Exception as ex:
-        print(f"[_sm_still_ok] {ex}")
-
-
-async def _sm_still_no(i, older_id: int):
-    """L'ancien n'a plus besoin → on clôture ses demandes (retire de l'index) + on éteint le message."""
-    try:
-        try:
-            await i.response.defer(ephemeral=True)
-        except Exception:
-            pass
-        if int(i.user.id) != int(older_id):
-            return await i.followup.send("ℹ️ Cette question s'adresse à l'autre joueur.", ephemeral=True)
-        try:
-            if i.guild:
-                social_match_module.drop(i.guild.id, int(older_id))
-        except Exception:
-            pass
-        try:
-            await i.message.edit(content="👍 Ok, demande **clôturée**. Reviens quand tu veux !",
-                                 view=None, allowed_mentions=discord.AllowedMentions.none())
-        except Exception:
-            pass
-        await i.followup.send("👍 Ta demande est clôturée.", ephemeral=True)
-    except Exception as ex:
-        print(f"[_sm_still_no] {ex}")
 
 
 
@@ -30554,19 +30305,6 @@ async def _sm_still_no(i, older_id: int):
 
 
 
-
-
-
-
-_TRADE_SUGGEST_COOLDOWN: dict = {}  # (guild_id, user_id) -> ts du dernier nudge trade
-
-
-
-
-
-
-_learned_items: dict = {}          # {(guild_id, token): count}
-_learned_items_dirty = False
 
 
 
@@ -30654,574 +30392,46 @@ def _unanswered_clear_for_author(guild_id: int, author_id: int) -> None:
         pass
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  OPT-OUT par membre des PROPOSITIONS D'AIDE (owner 2026-06-15)
-#  Un membre (FONDATEUR inclus) peut demander que le bot ARRÊTE de lui proposer
-#  de l'aide et de le mentionner sur ses questions sans réponse. Réglage PERSONNEL,
-#  toggle (oui/non). Stocké en DB (help_nudge_optout) + CACHÉ en mémoire (set) car
-#  testé sur le CHEMIN CHAUD (chaque question suivie + chaque tick du veilleur).
-#  Bouton sur le nudge (DynamicItem help_optout:<uid>) + accès permanent dans /profile.
-# ═══════════════════════════════════════════════════════════════════════════
-# owner 2026-07-03 — REFONTE : le bouton « ne plus me proposer » n'est plus un interrupteur GLOBAL et
-# DÉFINITIF. On gère des préférences GRANULAIRES par type (aide / échange / groupe) avec une PAUSE
-# temporaire (snooze). Un clic sur un nudge = PAUSE 7 j de CE type (jamais un mur ni « plus rien »).
-# Le panneau permet de couper un type définitivement, de tout mettre en pause, de tout réactiver — et
-# l'AIDE À LA DEMANDE reste TOUJOURS possible (bouton dédié). Rétro-compat : `_help_optout_is(g,u)`
-# sans `kind` = « au moins un type coupé » (anciens appels), avec `kind` = ce type seulement.
-_NUDGE_KINDS = ('help', 'trade', 'group')
-_NUDGE_KIND_LABEL = {'help': "aide", 'trade': "échange", 'group': "groupe"}
-_NUDGE_MUTE_FOREVER = 4102444800        # 2100-01-01 → « coupé » (réactivable à tout moment)
-_NUDGE_SNOOZE_DEFAULT = 7 * 24 * 3600   # clic sur un nudge = pause 7 j de ce type
-_nudge_mute: dict = {}  # {(guild_id, user_id, kind): muted_until_epoch}  (0/absent = actif)
-
-# ═══ Lot 2 (owner 2026-07-03) — MESURE des nudges (pt 8/9) + REPLI automatique (pt 4) ═══
-# Compteurs AGRÉGÉS en mémoire (flush périodique → pas d'écriture DB par nudge sur le hot-path, leçon
-# scale) : {(guild, kind, metric): count} avec metric ∈ posted/engaged/muted. + STREAK par (guild,user)
-# = nb de nudges postés depuis le dernier ENGAGEMENT → au-delà d'un seuil, on ESPACE (cooldown allongé,
-# plafonné) au lieu de bombarder ; reset dès que l'utilisateur clique une action de nudge.
-_nudge_stats: dict = {}
-_nudge_stats_dirty = False
-_nudge_streak: dict = {}       # {(guild_id, user_id): nb de nudges sans engagement}
-
-
-def _nudge_stat_bump(guild_id, kind, metric):
-    try:
-        global _nudge_stats_dirty
-        k = (int(guild_id), str(kind), str(metric))
-        _nudge_stats[k] = _nudge_stats.get(k, 0) + 1
-        _nudge_stats_dirty = True
-    except Exception:
-        pass
-
-
-
-
-def _nudge_on_engaged(guild_id, user_id, kind):
-    """L'utilisateur a CLIQUÉ l'action d'un nudge → +1 engaged + reset streak (il est intéressé)."""
-    try:
-        _nudge_stat_bump(guild_id, kind, 'engaged')
-        _nudge_streak.pop((int(guild_id), int(user_id)), None)
-    except Exception:
-        pass
-
-
-try:
-    # Zones sociales (groupe/échange) : le clic « créer » = engagement → reset du repli côté bot.
-    social_zones_module.nudge_engaged_cb = _nudge_on_engaged
-except Exception:
-    pass
-
-
-# ═══ PONT MUSIQUE (owner 2026-07-03, pt 12) — le bot de modération demande au BOT MUSIQUE (séparé) de
-# jouer dans le vocal d'une zone privée. DORMANT tant que les 3 variables ne sont pas posées. ═══
-MUSIC_BRIDGE_URL = os.environ.get("MUSIC_BRIDGE_URL", "").strip().rstrip("/")
-MUSIC_BRIDGE_SECRET = os.environ.get("MUSIC_BRIDGE_SECRET", "").strip()
-try:
-    MUSIC_BOT_USER_ID = int(os.environ.get("MUSIC_BOT_USER_ID", "0") or 0)
-except Exception:
-    MUSIC_BOT_USER_ID = 0
-
-
-def _music_bridge_ready() -> bool:
-    return bool(MUSIC_BRIDGE_URL and MUSIC_BRIDGE_SECRET)
-
-
-async def _music_bridge_play(guild_id, vc_id, url, requester_id):
-    """POST /play vers le bot musique. Retourne (ok, message). FAIL-SAFE (jamais d'exception dehors)."""
-    if not _music_bridge_ready():
-        return (False, "Musique non configurée (l'admin doit relier le bot musique).")
-    try:
-        import aiohttp
-        payload = {"guild_id": int(guild_id), "voice_channel_id": int(vc_id),
-                   "url": str(url), "requester_id": int(requester_id)}
-        to = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=to) as s:
-            async with s.post(f"{MUSIC_BRIDGE_URL}/play", json=payload,
-                              headers={"X-Bridge-Secret": MUSIC_BRIDGE_SECRET}) as r:
-                try:
-                    data = await r.json()
-                except Exception:
-                    data = {}
-                if r.status == 200 and data.get("ok"):
-                    return (True, str(data.get("title", "musique")))
-                return (False, str(data.get("error", f"erreur (http {r.status})")))
-    except Exception as ex:
-        print(f"[music bridge post] {ex}")
-        return (False, "le bot musique ne répond pas (est-il déployé ?).")
-
-
-def _zone_music_view(vc_id):
-    v = discord.ui.View(timeout=None)
-    v.add_item(discord.ui.Button(emoji=visuels.icone("musique"), label="Ajouter une musique", style=discord.ButtonStyle.success,
-                                 custom_id=f"zmusic:{int(vc_id)}"))
-    return v
-
-
-async def _post_zone_music_panel(vc_channel):
-    """Poste le panneau musique dans le CHAT du vocal de zone (si le pont est configuré). FAIL-SAFE.
-    Appelé par social_zones à la création du vocal (via le hook music_panel_cb)."""
-    try:
-        if not _music_bridge_ready() or vc_channel is None:
-            return
-        await vc_channel.send(
-            "🎵 **Musique** — colle un lien (**SoundCloud / Bandcamp / .mp3 …**, pas YouTube) et le "
-            "bot musique le joue ici. _Chacun gère sa musique ; sources légales uniquement._",
-            view=_zone_music_view(vc_channel.id))
-    except Exception as ex:
-        print(f"[zone music panel] {ex}")
-
-
-class ZoneMusicModal(discord.ui.Modal, title="Ajouter une musique"):
-    lien = discord.ui.TextInput(
-        label="Lien (SoundCloud / Bandcamp / .mp3 …)",
-        placeholder="https://…  (pas YouTube)", style=discord.TextStyle.short,
-        required=True, max_length=400)
-
-    def __init__(self, vc_id: int):
-        super().__init__()
-        self.vc_id = int(vc_id)
-
-    async def on_submit(self, i: discord.Interaction):
-        try:
-            await i.response.defer(ephemeral=True, thinking=True)
-        except Exception:
-            pass
-        async def _reply(txt):
-            try:
-                await i.followup.send(txt, ephemeral=True)
-            except Exception:
-                pass
-        uvc = getattr(getattr(i.user, "voice", None), "channel", None)
-        if uvc is None or int(uvc.id) != self.vc_id:
-            return await _reply("🔊 Rejoins d'abord CE salon vocal pour ajouter une musique.")
-        ok, msg = await _music_bridge_play(i.guild.id, self.vc_id, str(self.lien.value or ""), i.user.id)
-        await _reply(f"🎵 Ajouté : **{msg}**" if ok else f"❌ {msg}")
-
-
-class ZoneMusicButton(discord.ui.DynamicItem[Button], template=r"zmusic:(?P<vc>\d+)"):
-    """Bouton « 🎵 Ajouter une musique » du vocal de zone → modal → pont vers le bot musique. Persistant."""
-    def __init__(self, vc_id: int):
-        super().__init__(Button(emoji=visuels.icone("musique"), label="Ajouter une musique", style=discord.ButtonStyle.success,
-                                custom_id=f"zmusic:{int(vc_id)}"))
-        self.vc_id = int(vc_id)
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["vc"]))
-
-    async def callback(self, i: discord.Interaction):
-        await i.response.send_modal(ZoneMusicModal(self.vc_id))
-
-
-try:
-    # Zones sociales : à la création du vocal → poste le panneau musique + connaît l'id du bot musique.
-    social_zones_module.music_panel_cb = _post_zone_music_panel
-    social_zones_module.music_bot_user_id = MUSIC_BOT_USER_ID
-except Exception:
-    pass
-
-
-
-
-async def _nudge_stats_load():
-    """Table nudge_stats + chargement mémoire (boot). FAIL-OPEN. Appelé depuis _help_optout_load."""
-    try:
-        async with get_db() as db:
-            await db.execute(
-                "CREATE TABLE IF NOT EXISTS nudge_stats ("
-                "guild_id INTEGER NOT NULL, kind TEXT NOT NULL, metric TEXT NOT NULL, "
-                "count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, kind, metric))")
-            await db.execute(
-                "CREATE TABLE IF NOT EXISTS learned_items ("
-                "guild_id INTEGER NOT NULL, token TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, "
-                "PRIMARY KEY (guild_id, token))")
-            await db.commit()
-            async with db.execute("SELECT guild_id, kind, metric, count FROM nudge_stats") as cur:
-                rows = await cur.fetchall()
-            async with db.execute("SELECT guild_id, token, count FROM learned_items") as cur:
-                irows = await cur.fetchall()
-        _nudge_stats.clear()
-        for gid, kind, metric, cnt in (rows or []):
-            _nudge_stats[(int(gid), str(kind), str(metric))] = int(cnt or 0)
-        _learned_items.clear()
-        for gid, token, cnt in (irows or []):
-            _learned_items[(int(gid), str(token))] = int(cnt or 0)
-        print(f"[learned_items] {len(_learned_items)} objet(s) de jeu appris")
-    except Exception as ex:
-        print(f"[_nudge_stats_load] {ex}")
-
-
-async def _nudge_stats_flush():
-    """UPSERT des compteurs + objets appris (total courant en mémoire) → DB. Périodique, idempotent."""
-    global _nudge_stats_dirty, _learned_items_dirty
-    try:
-        if _nudge_stats_dirty:
-            items = list(_nudge_stats.items())
-            async with get_db() as db:
-                for (gid, kind, metric), cnt in items:
-                    await db.execute(
-                        "INSERT INTO nudge_stats(guild_id,kind,metric,count) VALUES(?,?,?,?) "
-                        "ON CONFLICT(guild_id,kind,metric) DO UPDATE SET count=excluded.count",
-                        (gid, kind, metric, int(cnt)))
-                await db.commit()
-            _nudge_stats_dirty = False
-    except Exception as ex:
-        print(f"[_nudge_stats_flush] {ex}")
-    try:
-        if _learned_items_dirty:
-            litems = list(_learned_items.items())
-            async with get_db() as db:
-                for (gid, token), cnt in litems:
-                    await db.execute(
-                        "INSERT INTO learned_items(guild_id,token,count) VALUES(?,?,?) "
-                        "ON CONFLICT(guild_id,token) DO UPDATE SET count=excluded.count",
-                        (gid, token, int(cnt)))
-                await db.commit()
-            _learned_items_dirty = False
-    except Exception as ex:
-        print(f"[_learned_items_flush] {ex}")
-
-
-@tasks.loop(minutes=5)
-async def _nudge_stats_flusher():
-    """Flush périodique des compteurs de nudges (pas d'écriture DB par nudge → scale-safe)."""
-    try:
-        await _nudge_stats_flush()
-    except Exception as ex:
-        print(f"[_nudge_stats_flusher] {ex}")
-
-
-@_nudge_stats_flusher.before_loop
-async def _nudge_stats_flusher_wait():
-    await bot.wait_until_ready()
-
-
-def _nudge_now() -> int:
-    try:
-        return int(datetime.now(timezone.utc).timestamp())
-    except Exception:
-        return 0
-
-
-def _nudge_muted(guild_id, user_id, kind: str) -> bool:
-    """True si les propositions de type `kind` sont en pause/coupées pour ce membre. FAIL-OPEN=False."""
-    try:
-        return _nudge_mute.get((int(guild_id), int(user_id), kind), 0) > _nudge_now()
-    except Exception:
-        return False
-
-
-async def _help_optout_load():
-    """Table `nudge_prefs` + chargement mémoire + MIGRATION one-shot de l'ancien opt-out global
-    (help_nudge_optout → coupe les 3 types, réactivable). Nom conservé (appelé au boot). FAIL-OPEN."""
-    try:
-        async with get_db() as db:
-            await db.execute(
-                "CREATE TABLE IF NOT EXISTS nudge_prefs ("
-                "guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, kind TEXT NOT NULL, "
-                "muted_until INTEGER NOT NULL DEFAULT 0, "
-                "PRIMARY KEY (guild_id, user_id, kind))")
-            await db.execute(
-                "CREATE TABLE IF NOT EXISTS help_nudge_optout ("
-                "guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
-                "opted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (guild_id, user_id))")
-            await db.commit()
-            try:
-                async with db.execute("SELECT guild_id, user_id FROM help_nudge_optout") as cur:
-                    old = await cur.fetchall()
-                for gid, uid in (old or []):
-                    for k in _NUDGE_KINDS:
-                        await db.execute(
-                            "INSERT OR IGNORE INTO nudge_prefs(guild_id,user_id,kind,muted_until) "
-                            "VALUES(?,?,?,?)", (int(gid), int(uid), k, _NUDGE_MUTE_FOREVER))
-                await db.commit()
-            except Exception as _mex:
-                print(f"[nudge_prefs migrate] {_mex}")
-            async with db.execute(
-                    "SELECT guild_id, user_id, kind, muted_until FROM nudge_prefs") as cur:
-                rows = await cur.fetchall()
-        _nudge_mute.clear()
-        for gid, uid, kind, until in (rows or []):
-            _nudge_mute[(int(gid), int(uid), str(kind))] = int(until or 0)
-        print(f"[nudge_prefs] {len(_nudge_mute)} préférence(s) chargée(s)")
-    except Exception as ex:
-        print(f"[_help_optout_load] {ex}")
-    try:
-        await _nudge_stats_load()   # Lot 2 : compteurs des nudges (tableau de bord + repli)
-    except Exception as ex:
-        print(f"[_help_optout_load stats] {ex}")
-
-
-async def _nudge_set_mute(guild_id, user_id, kind: str, muted_until: int):
-    """Fixe muted_until pour (guild,user,kind). <=0 = réactive. Met à jour DB + mémoire. FAIL-SAFE."""
-    g, u = int(guild_id), int(user_id)
-    mu = int(muted_until or 0)
-    try:
-        async with get_db() as db:
-            if mu <= 0:
-                await db.execute("DELETE FROM nudge_prefs WHERE guild_id=? AND user_id=? AND kind=?",
-                                 (g, u, kind))
-            else:
-                await db.execute(
-                    "INSERT INTO nudge_prefs(guild_id,user_id,kind,muted_until) VALUES(?,?,?,?) "
-                    "ON CONFLICT(guild_id,user_id,kind) DO UPDATE SET muted_until=excluded.muted_until",
-                    (g, u, kind, mu))
-            await db.commit()
-    except Exception as ex:
-        print(f"[_nudge_set_mute] {ex}")
-        return
-    if mu <= 0:
-        _nudge_mute.pop((g, u, kind), None)
-    else:
-        _nudge_mute[(g, u, kind)] = mu
-
-
-def _help_optout_is(guild_id, user_id, kind=None) -> bool:
-    """Compat : True si les propositions sont coupées/en pause. `kind` précis (help/trade/group) →
-    ce type ; None (anciens appels) → n'importe quel type coupé. FAIL-OPEN → False (= on aide)."""
-    try:
-        g, u = int(guild_id), int(user_id)
-        if kind is None:
-            return any(_nudge_muted(g, u, k) for k in _NUDGE_KINDS)
-        return _nudge_muted(g, u, kind)
-    except Exception:
-        return False
-
-
-def _nudge_state_str(guild_id, user_id, kind) -> str:
-    """État lisible d'un type de proposition : actif / en pause (~N j) / coupé."""
-    until = _nudge_mute.get((int(guild_id), int(user_id), kind), 0)
-    now = _nudge_now()
-    if until <= now:
-        return "🔔 actif"
-    if until >= _NUDGE_MUTE_FOREVER - 1:
-        return "🔇 coupé"
-    days = max(1, (until - now + 86399) // 86400)
-    return f"😴 pause (~{int(days)} j)"
-
-
-def _help_optout_build_panel(guild_id, user_id, header=None):
-    """Panneau ÉPHÉMÈRE « Mes préférences » (owner 2026-07-03) : état + réglages GRANULAIRES par type
-    (aide/échange/groupe), pause 7 j de tout, tout réactiver, ET « J'ai besoin d'aide » (toujours
-    possible, même en pause). Réutilisé depuis le nudge ET /profile. Boutons = DynamicItems persistants.
-    `header` : texte optionnel affiché EN HAUT (Composants V2 → le texte doit être DANS la vue, pas en
-    `content` sépararé, sinon Discord 50035)."""
-    g, u = int(guild_id), int(user_id)
-    lines = []
-    if header:
-        lines.append(str(header))
-        lines.append("")
-    lines.append("⚙️ **Mes préférences — propositions du bot**")
-    lines.append("")
-    for k in _NUDGE_KINDS:
-        lines.append(f"• **{_NUDGE_KIND_LABEL[k].capitalize()}** : {_nudge_state_str(g, u, k)}")
-    lines.append("")
-    lines.append("🆘 _Même en pause, tu peux **demander de l'aide toi-même** à tout moment "
-                 "(bouton ci-dessous)._")
-    body = "\n".join(lines)
-    any_muted = any(_nudge_muted(g, u, k) for k in _NUDGE_KINDS)
-
-    class _NudgePrefPanel(LayoutView):
-        def __init__(self):
-            super().__init__(timeout=None)
-            row1 = discord.ui.ActionRow()
-            for k in _NUDGE_KINDS:
-                muted = _nudge_muted(g, u, k)
-                row1.add_item(Button(
-                    emoji=(visuels.icone("cloche") if muted else visuels.icone("cloche_off")), label=(f"{_NUDGE_KIND_LABEL[k].capitalize()}" if muted
-                           else f"{_NUDGE_KIND_LABEL[k].capitalize()}"),
-                    style=(discord.ButtonStyle.success if muted else discord.ButtonStyle.secondary),
-                    custom_id=f"nudgepref:{u}:tog_{k}"))
-            row2 = discord.ui.ActionRow()
-            row2.add_item(Button(emoji=visuels.icone("sommeil"), label="Pause tout 7 j", style=discord.ButtonStyle.secondary,
-                                 custom_id=f"nudgepref:{u}:snz7"))
-            row2.add_item(Button(emoji=visuels.icone("aide"), label="J'ai besoin d'aide", style=discord.ButtonStyle.primary,
-                                 custom_id=f"nudgepref:{u}:help"))
-            if any_muted:
-                row2.add_item(Button(emoji=visuels.icone("cloche"), label="Tout réactiver", style=discord.ButtonStyle.success,
-                                     custom_id=f"nudgepref:{u}:onall"))
-            self.add_item(v2_container(v2_body(body), row1, row2, color=0x5865F2))
-
-    return _NudgePrefPanel()
-
-
-async def _nudge_help_on_demand(i: discord.Interaction):
-    """« J'ai besoin d'aide » — accessible MÊME en pause. Ouvre l'entrée d'aide existante (bouton
-    entr_detect) → l'aide à la demande n'est jamais bloquée par une mise en pause. FAIL-SAFE."""
-    # ⚠️ NEUTRALISÉE LE 12/08/2026 — NE PAS RETIRER CE RETURN SANS REBRANCHER.
-    #
-    # Cette fonction posait un bouton « Plutôt de l'aide » que PLUS PERSONNE N'ÉCOUTE :
-    # le câblage des zones sociales a été retiré d'on_ready le 11/08 (7b036f8), pas le
-    # message. Résultat mesuré : le clic renvoie « L'interaction a échoué », en public,
-    # dans le salon, et se répète toutes les 30 minutes par membre.
-    #
-    # Le message entier est supprimé, pas seulement le bouton : il promet « en un clic »,
-    # donc sans bouton il ment. Tout le code en dessous est INTACT — `social_zones.py`
-    # (2 789 lignes) n'a jamais été supprimé, seulement débranché. Retirer ce return et
-    # réenregistrer les DynamicItem au boot suffit à tout rallumer.
-    return None
-    try:
-        class _AskHelpView(LayoutView):
-            def __init__(self):
-                super().__init__(timeout=None)
-                self.add_item(v2_container(
-                    v2_body("**Besoin d'aide ?** Clique pour créer ta demande — la communauté "
-                            "pourra t'aider (ça marche même si tu as mis les propositions en pause)."),
-                    discord.ui.ActionRow(Button(
-                        emoji=visuels.icone("aide"), label="Créer ma demande d'aide", style=discord.ButtonStyle.primary,
-                        custom_id=f"entr_detect:{int(i.user.id)}")),
-                    color=0x2ECC71))
-        if not i.response.is_done():
-            await i.response.send_message(view=_AskHelpView(), ephemeral=True)
-    except Exception as ex:
-        print(f"[_nudge_help_on_demand] {ex}")
-        try:
-            if not i.response.is_done():
-                await i.response.send_message(
-                    "🆘 Pose ta question dans le chat, quelqu'un t'aidera !", ephemeral=True)
-        except Exception:
-            pass
-
-
-async def _help_optout_on_click(i: discord.Interaction, target_id: int, kind: str = 'help'):
-    """Clic « ne plus me proposer » sur un NUDGE PUBLIC. NOMINATIF. N'est PLUS un mur : met CE type
-    en PAUSE 7 jours puis ouvre le panneau (éphémère) pour ajuster. Anti Échec-interaction / FAIL-SAFE."""
-    try:
-        if i.user.id != int(target_id):
-            if not i.response.is_done():
-                await i.response.send_message(
-                    "ℹ️ Ce réglage est personnel. Pour gérer TES propositions, ouvre ton **/profile**.",
-                    ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
-            return
-        if i.guild is None:
-            if not i.response.is_done():
-                await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-            return
-        if kind not in _NUDGE_KINDS:
-            kind = 'help'
-        await _nudge_set_mute(i.guild.id, i.user.id, kind, _nudge_now() + _NUDGE_SNOOZE_DEFAULT)
-        _nudge_stat_bump(i.guild.id, kind, 'muted')  # Lot 2 : mesure des mises en pause/coupures
-        # Composants V2 : le texte va DANS le panneau (header), pas en `content` (sinon 50035).
-        _hdr = (f"😴 **{_NUDGE_KIND_LABEL[kind].capitalize()} en pause 7 jours.** "
-                "Tu peux ajuster ci-dessous (couper définitivement, tout réactiver…) :")
-        panel = _help_optout_build_panel(i.guild.id, i.user.id, header=_hdr)
-        if not i.response.is_done():
-            await i.response.send_message(view=panel, ephemeral=True)
-    except Exception as ex:
-        print(f"[_help_optout_on_click] {ex}")
-        try:
-            if not i.response.is_done():
-                await i.response.send_message("✅ C'est pris en compte.", ephemeral=True)
-        except Exception:
-            pass
-
-
-async def _nudge_pref_action(i: discord.Interaction, uid: int, act: str):
-    """Boutons du panneau « Mes préférences » (NOMINATIF). Édite le panneau à jour. FAIL-SAFE."""
-    try:
-        if i.user.id != int(uid):
-            if not i.response.is_done():
-                await i.response.send_message(
-                    "ℹ️ Réglage personnel — ouvre ton **/profile**.", ephemeral=True,
-                    allowed_mentions=discord.AllowedMentions.none())
-            return
-        if i.guild is None:
-            return
-        g, u = i.guild.id, i.user.id
-        now = _nudge_now()
-        if act == 'help':
-            return await _nudge_help_on_demand(i)     # 1re réponse = ouvre le flux d'aide
-        if act == 'onall':
-            for k in _NUDGE_KINDS:
-                await _nudge_set_mute(g, u, k, 0)
-        elif act == 'snz7':
-            for k in _NUDGE_KINDS:
-                await _nudge_set_mute(g, u, k, now + 7 * 24 * 3600)
-        elif act.startswith('tog_'):
-            k = act[4:]
-            if k in _NUDGE_KINDS:
-                await _nudge_set_mute(g, u, k, 0 if _nudge_muted(g, u, k) else _NUDGE_MUTE_FOREVER)
-        panel = _help_optout_build_panel(g, u)
-        if not i.response.is_done():
-            await i.response.edit_message(view=panel)
-    except Exception as ex:
-        print(f"[_nudge_pref_action] {ex}")
-        try:
-            if not i.response.is_done():
-                await i.response.send_message("✅ Pris en compte.", ephemeral=True)
-        except Exception:
-            pass
-
-
-class HelpOptOutButton(discord.ui.DynamicItem[Button],
-                       template=r"help_optout:(?P<uid>\d+)(?::(?P<kind>help|trade|group))?"):
-    """Bouton « ne plus me proposer » d'un NUDGE. Rétro-compat : sans suffixe = type 'help'. Met CE
-    type en PAUSE 7 j (plus un mur définitif) puis ouvre le panneau. Persistant (re-capté au reboot)."""
-    def __init__(self, uid: int, kind: str = 'help'):
-        k = kind if kind in _NUDGE_KINDS else 'help'
-        super().__init__(Button(
-            emoji=visuels.icone("cloche_off"), label="Ne plus me proposer", style=discord.ButtonStyle.secondary,
-            custom_id=(f"help_optout:{int(uid)}:{k}" if k != 'help' else f"help_optout:{int(uid)}")))
-        self.uid = int(uid)
-        self.kind = k
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["uid"]), (match["kind"] or 'help'))
-
-    async def callback(self, i: discord.Interaction):
-        await _help_optout_on_click(i, self.uid, self.kind)
-
-
-class NudgePrefButton(discord.ui.DynamicItem[Button],
-                      template=r"nudgepref:(?P<uid>\d+):(?P<act>[a-z0-9_]+)"):
-    """Boutons du panneau « Mes préférences » (toggle aide/échange/groupe, pause 7 j, tout réactiver,
-    « J'ai besoin d'aide »). NOMINATIF, persistant (re-capté au reboot)."""
-    def __init__(self, uid: int, act: str):
-        super().__init__(Button(emoji=visuels.icone("reglages", '⚙️'), style=discord.ButtonStyle.secondary,
-                                custom_id=f"nudgepref:{int(uid)}:{act}"))
-        self.uid = int(uid)
-        self.act = act
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["uid"]), match["act"])
-
-    async def callback(self, i: discord.Interaction):
-        await _nudge_pref_action(i, self.uid, self.act)
-
-
-class SmStillOkButton(discord.ui.DynamicItem[Button],
-                      template=r"sm_still_ok:(?P<older>\d+):(?P<newer>\d+)"):
-    """Appariement croisé : l'ancien confirme « oui, toujours besoin » → propose le groupe."""
-    def __init__(self, older: int, newer: int):
-        super().__init__(Button(emoji=visuels.icone("valider"), label="Oui, toujours", style=discord.ButtonStyle.success,
-                                custom_id=f"sm_still_ok:{int(older)}:{int(newer)}"))
-        self.older = int(older)
-        self.newer = int(newer)
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["older"]), int(match["newer"]))
-
-    async def callback(self, i: discord.Interaction):
-        await _sm_still_ok(i, self.older, self.newer)
-
-
-class SmStillNoButton(discord.ui.DynamicItem[Button],
-                      template=r"sm_still_no:(?P<older>\d+)"):
-    """Appariement croisé : l'ancien répond « non, c'est bon » → clôture sa demande."""
-    def __init__(self, older: int):
-        super().__init__(Button(emoji=visuels.icone("fermer"), label="Non, c'est bon", style=discord.ButtonStyle.secondary,
-                                custom_id=f"sm_still_no:{int(older)}"))
-        self.older = int(older)
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["older"]))
-
-    async def callback(self, i: discord.Interaction):
-        await _sm_still_no(i, self.older)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
