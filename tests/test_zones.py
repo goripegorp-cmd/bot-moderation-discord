@@ -399,7 +399,8 @@ def test_Z13_branche_dans_le_bot():
     assert "await zones.entretenir(g)" in boucle
     installer = _source("_installer_zones")
     assert installer.index("db_set(g.id, 'zones_v2'") < installer.index("zones.installer(g)")
-    assert "bot.add_dynamic_items(BoutonArchives)" in SRC and "BoutonArchives(len(archives))" in _source("_menu_logs")
+    assert "bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)" in SRC
+    assert "BoutonArchives(len(archives))" in _source("_menu_logs")
     aide = _source("_salon_aide")
     assert "get_channel_or_thread(aide_id)" in aide and "c.get('zones_v2')" in aide, "le panneau vit dans son post"
     assert '"deux_forums": any(' in SRC and '"menage": any(' in SRC, "/stats dit ce qui est en place"

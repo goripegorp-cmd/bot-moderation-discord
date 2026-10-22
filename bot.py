@@ -98,6 +98,7 @@ import entraide  # l'entraide Rell Seas : help et trade, guides qui certifient, 
 import equipages  # les équipages de Rell Seas : Pirates ou Marine, un post par équipage
 import zones  # les compartiments : Communautaire et Rell Seas, rangés par priorité
 import annonces  # les annonces en un clic : bandeau, texte, liens, « ✅ Vu », un fil par annonce
+import faq  # les questions fréquentes : une carte qui mène au bon endroit (ticket, crews, trade…)
 import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -7862,7 +7863,8 @@ async def _salon_panneau_tickets(g):
         return None
     try:
         async for msg in ch.history(limit=25):
-            if getattr(msg.author, "id", 0) == bot.user.id and "tickethub:open" in _custom_ids_du_message(msg):
+            if getattr(msg.author, "id", 0) == bot.user.id and \
+                    {"tickethub:open", "tickethub:gerer"} & _custom_ids_du_message(msg):
                 return ch
     except discord.HTTPException as ex:
         _logerr("tickets.panneau", ex, guild_id=g.id)
@@ -8224,9 +8226,10 @@ async def _ticket_ouvrir(i, pid):
         # ⏸️ DÉSACTIVATION TEMPORAIRE (fondateur) : si le panneau est désactivé, on
         # refuse la création avec un message clair (le fondateur a coupé via le toggle).
         if pnl.get('disabled'):
+            nom = (pnl.get('name') or "ce type")[:40]
             return await i.response.send_message(
-                "⏸️ **Ce ticket est désactivé temporairement.**\nVeuillez revenir plus tard.",
-                ephemeral=True)
+                f"🔒 **Les tickets « {nom} » sont fermés pour le moment.** Reviens un peu plus tard.\n"
+                f"-# {nom} tickets are closed for now. Please come back later.", ephemeral=True)
 
         # ═══════════════════════════════════════════════════════════════════════════════
         #                    🚫 VÉRIFICATION BLACKLIST
@@ -8383,6 +8386,15 @@ async def _build_ticket_hub_view(guild):
                if total else
                "_Aucun type n'a encore été créé par l'équipe._")))
 
+    fermes = [(p.get('name') or pid)[:32] for pid, p in (c.get('ticket_panels', {}) or {}).items()
+              if isinstance(p, dict) and p.get('disabled')]
+    if types and fermes:
+        items.append(v2_body("🔒 **Fermés pour le moment · Closed for now :** " + ", ".join(fermes)))
+    #  22/10/2026 : « un bouton, nous, la direction, et le fondateur… bloquer la création des tickets…
+    #  cibler ce qu'on bloque ». Le bouton dit à qui il sert ; un membre qui clique reçoit un refus clair.
+    items.append(v2_divider())
+    items.append(discord.ui.Section(discord.ui.TextDisplay("-# Ouvrir ou fermer un type de ticket : direction et "
+                                                           "fondateur"), accessory=TicketHubGererDynamic().item))
     accent = C.BLURPLE if types else 0xED4245
 
     class _TicketHubLayout(LayoutView):
@@ -8390,6 +8402,109 @@ async def _build_ticket_hub_view(guild):
             super().__init__(timeout=None)
             self.add_item(v2_container(*items, color=accent))
     return _TicketHubLayout()
+
+
+class TicketHubGererDynamic(discord.ui.DynamicItem[Button], template=r"tickethub:gerer"):
+    """Sur le panneau unifié : la direction et le fondateur ouvrent ou ferment chaque type (même
+    montage que « tickethub:open » : la vue porte le composant nu)."""
+
+    def __init__(self):
+        super().__init__(Button(label="Direction", style=discord.ButtonStyle.secondary, emoji="⚙️",
+                                custom_id="tickethub:gerer"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, i):
+        g = i.guild
+        c = await cfg(g.id) if g is not None else {}
+        if g is None or not _direction_ou_plus(g, i.user, c):
+            return await i.response.send_message("Réservé à la direction et au fondateur.", ephemeral=True)
+        if not (c.get('ticket_panels') or {}):
+            return await i.response.send_message("Aucun type de ticket n'existe encore.", ephemeral=True)
+        await i.response.send_message(view=VueTypesTickets(i.user.id, c), ephemeral=True)
+
+
+class VueTypesTickets(LayoutView):
+    """Un bouton par type : ouvert ✅ ou fermé 🔒. Fermé : le type disparaît du menu, un membre qui
+    insiste lit qu'il est fermé ; les tickets déjà ouverts continuent."""
+
+    def __init__(self, auteur_id: int, c: dict):
+        super().__init__(timeout=600)
+        self.auteur_id = auteur_id
+        panels = [(pid, p) for pid, p in (c.get('ticket_panels') or {}).items() if isinstance(p, dict)][:15]
+        items = [discord.ui.TextDisplay("### 🎫 Ouvrir ou fermer les tickets\nFermé : le type disparaît du menu ; "
+                                        "un membre qui essaie lit qu'il est fermé. Les tickets déjà ouverts "
+                                        "continuent.")]
+        for pid, p in panels:
+            ferme = bool(p.get('disabled'))
+            b = Button(label="Fermé · rouvrir" if ferme else "Ouvert · fermer",
+                       style=discord.ButtonStyle.danger if ferme else discord.ButtonStyle.success,
+                       emoji="🔒" if ferme else "✅")
+            b.callback = self._basculer(pid)
+            items.append(discord.ui.Section(discord.ui.TextDisplay(f"**{(p.get('name') or pid)[:60]}**"), accessory=b))
+        tout_fermer = Button(label="Tout fermer", style=discord.ButtonStyle.secondary, emoji="🔒")
+        tout_fermer.callback = self._tout(True)
+        tout_ouvrir = Button(label="Tout rouvrir", style=discord.ButtonStyle.secondary, emoji="✅")
+        tout_ouvrir.callback = self._tout(False)
+        items.append(discord.ui.ActionRow(tout_fermer, tout_ouvrir))
+        self.add_item(discord.ui.Container(*items, accent_color=Palette.INFO))
+
+    async def interaction_check(self, i):
+        return i.user.id == self.auteur_id
+
+    def _basculer(self, pid):
+        async def _cb(i):
+            await self._appliquer(i, {pid: None})
+        return _cb
+
+    def _tout(self, fermer: bool):
+        async def _cb(i):
+            c = await cfg(i.guild.id)
+            await self._appliquer(i, {pid: fermer for pid in (c.get('ticket_panels') or {})})
+        return _cb
+
+    async def _appliquer(self, i, choix: dict):
+        g = i.guild
+        c = await cfg(g.id)
+        if not _direction_ou_plus(g, i.user, c):
+            return await i.response.send_message("Réservé à la direction et au fondateur.", ephemeral=True)
+        panels = dict(c.get('ticket_panels') or {})
+        changes = []
+        for pid, fermer in choix.items():
+            p = panels.get(pid)
+            if not isinstance(p, dict):
+                continue
+            fermer = (not p.get('disabled')) if fermer is None else fermer
+            if bool(p.get('disabled')) == fermer:
+                continue
+            panels[pid] = dict(p, disabled=fermer, ferme_par=i.user.id if fermer else 0,
+                               ferme_le=int(time.time()) if fermer else 0)
+            changes.append(f"{(p.get('name') or pid)[:40]} : {'fermé' if fermer else 'rouvert'}")
+        if changes:
+            await db_set(g.id, 'ticket_panels', panels)
+            await _au_journal(g, "Tickets", "tickets.types", f"{i.user.mention} — " + ", ".join(changes) + ".",
+                              auteur_id=i.user.id)
+        await i.response.edit_message(view=VueTypesTickets(self.auteur_id, await cfg(g.id)))
+        if changes:
+            await _rafraichir_hub_tickets(g)
+
+
+async def _rafraichir_hub_tickets(g) -> bool:
+    """Le panneau unifié suit : les types ouverts dans le menu, les fermés dits fermés."""
+    ch = _salon_des_tickets(g)
+    if not isinstance(ch, discord.TextChannel):
+        return False
+    try:
+        async for msg in ch.history(limit=25):
+            ids = _custom_ids_du_message(msg)
+            if getattr(msg.author, "id", 0) == bot.user.id and ({"tickethub:open", "tickethub:gerer"} & ids):
+                await msg.edit(view=await _build_ticket_hub_view(g))
+                return True
+    except discord.HTTPException as ex:
+        _logerr("tickets.hub", ex, guild_id=g.id)
+    return False
 
 
 class TicketHubOpenDynamic(discord.ui.DynamicItem[Button],
@@ -12525,6 +12640,16 @@ _LIEN_OU_MENTION = re.compile(
 
 bot.add_listener(sondages.sur_message, "on_message")
 bot.add_listener(salutations.sur_message, "on_message")
+
+
+async def _faq_hook(msg):
+    try:
+        await faq.sur_message(msg)
+    except Exception as ex:
+        _logerr("faq.message", ex, guild_id=getattr(getattr(msg, "guild", None), "id", 0))
+
+
+bot.add_listener(_faq_hook, "on_message")
 bot.add_listener(boosts.sur_maj_serveur, "on_guild_update")
 bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_add")
 bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_remove")
@@ -13156,6 +13281,31 @@ async def _installer_clan(g, c) -> None:
         return
     if faits:
         await _au_journal(g, "Clan", "clan.zone", "Zone du clan mise en place : " + ", ".join(faits) + ".")
+
+
+def _faq_destinations(g, c) -> dict:
+    """Où mènent les réponses toutes faites : le salon des tickets, les posts du forum Rell Seas et de
+    la communauté — et le nom du type de ticket du clan, s'il existe."""
+    posts = c.get('zones_posts') or {}
+
+    def lien(cle):
+        pid = int((posts.get(cle) or {}).get('id', 0) or 0)
+        return f"https://discord.com/channels/{g.id}/{pid}" if pid else ""
+    ticket = _salon_des_tickets(g)
+    out = {"ticket": ticket.jump_url if ticket is not None else "", "crews": lien("crews"), "trade": lien("trade"),
+           "suggestions": lien("suggestions"), "help": lien("help")}
+    clan = next((p.get('name') for p in (c.get('ticket_panels') or {}).values() if isinstance(p, dict)
+                 and not p.get('disabled') and any(m in config_salons.normaliser(p.get('name') or '')
+                                                   for m in ("rell", "clan", "candid", "gorp"))), "")
+    if clan:
+        out["type_clan"] = clan
+    return out
+
+
+async def _langue_de_membre(m) -> str:
+    langue = await i18n_module.lang_of(user_id=getattr(m, "id", None), guild_id=getattr(getattr(m, "guild", None),
+                                                                                         "id", None))
+    return "fr" if langue == "fr" else "en"
 
 
 async def _annonces_journal(g, type_: str, texte: str, **kw) -> None:
@@ -19832,6 +19982,7 @@ async def _activite_boot():
                    role_clan=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
                    langue=_langue_membre, log=print)
     await annonces.init_db()
+    faq.setup(cfg=cfg, destinations=_faq_destinations, est_staff=_staff_ou_plus, langue=_langue_de_membre, log=print)
 
     await activite_module.init_db()
 
@@ -19936,7 +20087,7 @@ async def on_ready():
         bot.add_dynamic_items(equipages.BoutonPublier, equipages.BoutonRejoindre, equipages.BoutonRecrutement,
                               equipages.BoutonModifier, equipages.BoutonRetirer)
         bot.add_dynamic_items(annonces.BoutonComposer, annonces.BoutonVu)
-        bot.add_dynamic_items(BoutonArchives)
+        bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
