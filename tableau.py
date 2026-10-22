@@ -728,7 +728,7 @@ async def _annonces(g, qui) -> dict:
     """Les annonces publiées depuis 📋logs et qui a cliqué « ✅ Vu »."""
     liste = []
     for a in await annonces.recentes(g.id, 60):
-        ch = g.get_channel(int(a["salon_id"]))
+        ch = g.get_channel(int(a["salon_id"])) or g.get_thread(int(a["salon_id"]))
         vus = await annonces.qui_a_vu(a["id"])
         liste.append({"id": a["id"], "titre": a["titre"], "texte": a["texte"][:1500],
                       "salon": f"#{ch.name}" if ch is not None else "#salon supprimé", "auteur": qui(a["auteur_id"]),

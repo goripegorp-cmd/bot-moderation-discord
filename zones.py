@@ -77,21 +77,31 @@ BOT = discord.PermissionOverwrite(view_channel=True, read_message_history=True, 
 LECTURE_CLAN = discord.PermissionOverwrite(**config_salons.LECTURE)
 EQUIPE_CLAN = discord.PermissionOverwrite(**config_salons.EQUIPE_TEXTE, send_messages_in_threads=True)
 
-#  La zone du clan GoRP (sa catégorie existe : 📢 info, ✍ chat, 🔊 Join réservé au clan).
-CLAN_ANNONCES = "📣▷・annonces-gorp"
-CLAN_FORUM = "🧵▷・discussions-gorp"
-CLAN_FILS = (
-    ("economie", "💰 Économie · Economy",
+#  La zone du clan GoRP (22/10/2026, nuit) : le fondateur a choisi « Un seul forum » — comme
+#  Communautaire, un forum du clan et ses posts ; le 🔊 Join reste ; les anciens salons partent.
+CLAN_FORUM = "🦜▷・clan-gorp"
+SUJET_CLAN = ("🇫🇷 Le clan GoRP : guide, infos, annonces, chat, économie, trade, taverne. On écrit dans les posts.\n"
+              "🇬🇧 The GoRP clan: guide, info, announcements, chat, economy, trade, tavern. Write in the posts.")
+CLAN_POSTS = (
+    ("guide", "🧭 Guide du clan · Clan guide", True, ""),
+    ("infos", "📢 Infos · Info", True,
+     "🇫🇷 Ce qu'il faut savoir sur le clan.\n🇬🇧 What to know about the clan."),
+    ("annonces", "📣 Annonces · Announcements", True,
+     "🇫🇷 Les annonces du clan : lis-les, clique « ✅ Vu ».\n🇬🇧 Clan announcements: read them, click “✅ Seen”."),
+    ("chat", "💬 Chat", False,
+     "🇫🇷 Le chat du clan : on parle de tout, entre nous.\n🇬🇧 The clan chat: talk about anything, among us."),
+    ("economie", "💰 Économie · Economy", False,
      "🇫🇷 L'économie du clan : objectifs, dons, dépenses.\n🇬🇧 The clan's economy: goals, donations, spending."),
-    ("trade", "🤝 Trade du clan · Clan trade",
+    ("trade", "🤝 Trade du clan · Clan trade", False,
      "🇫🇷 Les échanges entre membres du clan : propose, demande.\n🇬🇧 Trades between clan members: offer, ask."),
-    ("taverne", "🍺 Taverne · Tavern",
+    ("taverne", "🍺 Taverne · Tavern", False,
      "🇫🇷 On se pose, on raconte ses aventures en mer.\n🇬🇧 Sit down and tell your adventures at sea."),
 )
-SUJET_CLAN_ANNONCES = ("🇫🇷 Les annonces du clan GoRP : lis-les, clique « ✅ Vu ».\n"
-                       "🇬🇧 GoRP clan announcements: read them, click “✅ Seen”.")
-SUJET_CLAN_FORUM = ("🇫🇷 Économie, trade, taverne… et tes propres sujets (bouton « Nouveau post »).\n"
-                    "🇬🇧 Economy, trade, tavern… and your own topics (« New post » button).")
+#  Le staff du clan écrit aussi dans les posts verrouillés (infos, annonces) : « Gérer les fils ».
+EQUIPE_FORUM_CLAN = discord.PermissionOverwrite(**config_salons.EQUIPE_TEXTE, send_messages_in_threads=True,
+                                                manage_threads=True)
+GUIDE_CLAN_VERSION = 1
+INFOS_MAX = 100       # messages d'info-gorp recopiés au plus
 
 #  Un post, même endormi (hors mémoire) : son identifiant et son lien suffisent au panneau ❓ aide.
 Post = namedtuple("Post", "id jump_url")
@@ -131,7 +141,7 @@ async def conf(g) -> dict:
 def ids_salons(c: dict) -> set:
     """Les salons des zones (et ce qui a été rangé aux archives) : aucun réglage de masse n'y touche."""
     cles = ("zones_forum_commu", "zones_forum_rell", "zones_categorie_archives", "clan_annonces", "clan_forum",
-            "zones_rell", "zones_chat", "zones_vocal", "zones_forum")
+            "clan_forum_v2", "zones_rell", "zones_chat", "zones_vocal", "zones_forum")
     ids = {int(c.get(k, 0) or 0) for k in cles} | {int(x) for x in c.get("zones_archives") or []}
     return {i for i in ids if i} | entraide.ids_salons(c) | ({int(c["eq_forum"])} if c.get("eq_forum") else set())
 
@@ -323,10 +333,13 @@ def _correspondances(avant: dict, posts: dict, commu) -> dict:
     return paires
 
 
-async def _reporter(g, paires: dict) -> list:
+async def _reporter(g, paires: dict, *, fusion: bool = False) -> list:
     """Les réglages qui visaient un ancien salon le suivent dans son post : liens et images permis,
-    l'accueil et l'au revoir. (L'immunité, gardée en base, suit avec `bot._reporter_immunites`.)"""
-    await _db_set(g.id, "zones_correspondances", {str(k): v for k, v in paires.items()})
+    l'accueil et l'au revoir. (L'immunité, gardée en base, suit avec `bot._reporter_immunites`.)
+    `fusion` : les correspondances déjà notées restent (la zone du clan s'ajoute à celle des forums)."""
+    toutes = dict((await _cfg(g.id)).get("zones_correspondances") or {}) if fusion else {}
+    toutes.update({str(k): v for k, v in paires.items()})
+    await _db_set(g.id, "zones_correspondances", toutes)
     if not paires:
         return []
     c = await _cfg(g.id)
@@ -502,18 +515,21 @@ async def ordonner(g) -> bool:
 
 
 async def entretenir(g) -> None:
-    """Toutes les 30 minutes : les posts (et les fils du clan) restent ouverts ; un post qui doit
-    rester verrouillé l'est. Jamais l'inverse : un post que le staff a verrouillé le reste. Le guide
-    de Rell Seas suit les posts et les rôles."""
-    try:
-        await assurer_guide(g)
-    except discord.HTTPException as ex:
-        _log(f"[ZONES:DETAIL] guide {type(ex).__name__} {ex}")
+    """Toutes les 30 minutes : les posts (des deux forums et du forum du clan) restent ouverts ; un post
+    qui doit rester verrouillé l'est. Jamais l'inverse : un post que le staff a verrouillé le reste. Les
+    deux guides suivent les posts et les rôles."""
+    for guide in (assurer_guide, assurer_guide_clan):
+        try:
+            await guide(g)
+        except discord.HTTPException as ex:
+            _log(f"[ZONES:DETAIL] guide {type(ex).__name__} {ex}")
     cfz, c = await conf(g), await _cfg(g.id)
     verrous = {cle for cle, _t, v, _x in POSTS_COMMU + POSTS_RELL if v}
-    a_suivre = [(cle, info.get("id", 0)) for cle, info in cfz["posts"].items()]
-    a_suivre += list(dict(c.get("clan_fils") or {}).items())
-    for cle, fid in a_suivre:
+    verrous_clan = {cle for cle, _t, v, _x in CLAN_POSTS if v}
+    a_suivre = [(cle, info.get("id", 0), cle in verrous) for cle, info in cfz["posts"].items()]
+    a_suivre += [(f"clan {cle}", (info or {}).get("id", 0), cle in verrous_clan)
+                 for cle, info in dict(c.get("clan_posts") or {}).items()]
+    for cle, fid, verrou in a_suivre:
         try:
             fil = await _resoudre(g, fid)
         except discord.HTTPException as ex:
@@ -524,7 +540,7 @@ async def entretenir(g) -> None:
         reglage = {}
         if getattr(fil, "archived", False):
             reglage["archived"] = False
-        if cle in verrous and cle in cfz["posts"] and not getattr(fil, "locked", False):
+        if verrou and not getattr(fil, "locked", False):
             reglage["locked"] = True
         if reglage:
             try:
@@ -643,89 +659,249 @@ def lignes_aide(g, c: dict, cfz: dict) -> dict:
 #  La zone du clan GoRP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def _fils_prets(g, ch, existants: dict, definitions) -> tuple:
-    """Les fils déjà ouverts d'un forum (ou, hors forum, d'un salon) : créés s'ils manquent,
-    réveillés s'ils dorment. Rend (les fils, ce qui a été créé)."""
-    fils, faits = dict(existants or {}), []
-    for cle, titre, texte in definitions:
-        fil = g.get_channel_or_thread(int(fils.get(cle, 0) or 0))
-        if fil is None and fils.get(cle):
-            try:
-                fil = await g.fetch_channel(int(fils[cle]))
-            except discord.NotFound:
-                fil = None
-        if fil is not None:
-            if getattr(fil, "archived", False):
-                try:
-                    await fil.edit(archived=False)
-                except discord.HTTPException as ex:
-                    _log(f"[ZONES:DETAIL] réveil du fil {cle} {ex}")
-            continue
-        if isinstance(ch, discord.ForumChannel):
-            fil = (await ch.create_thread(name=titre, content=texte, reason="Fil prêt à l'emploi")).thread
-        else:
-            msg = await ch.send(f"**{titre}**\n{texte}")
-            fil = await msg.create_thread(name=titre, auto_archive_duration=10080, reason="Fil prêt à l'emploi")
-        fils[cle] = fil.id
-        faits.append(f"fil {titre}")
-    return fils, faits
-
-
 def categorie_clan(g):
     """La catégorie du clan (« 🦜 · GoRp_SEA »), même règle que `config_salons.est_clan`."""
     return next((cat for cat in getattr(g, "categories", []) or [] if config_salons.est_clan(cat.name)), None)
 
 
+def _vocal_clan(g, c: dict):
+    """Le 🔊 Join du clan : le salon « créer un vocal » rangé dans la catégorie du clan."""
+    hubs = (c.get("temp_voice_config") or {}).get("hubs") or {}
+    return next((ch for ch in (g.get_channel(int(k)) for k in hubs if str(k).isdigit())
+                 if ch is not None and config_salons.est_clan(getattr(getattr(ch, "category", None), "name", ""))),
+                None)
+
+
 async def installer_clan(g, role, equipe=(), *, forum: bool | None = None) -> list:
-    """22/10/2026 : « retape la zone GoRP… un salon des annonces du clan, automatisé, propre…
-    économie, trade propre au clan, discussion, taverne… le vocal propre à eux ». Dans la catégorie
-    du clan : 📣 annonces (lecture seule : l'annonce en un clic, la bienvenue des arrivées) et
-    🧵 discussions (forum : économie, trade du clan, taverne déjà ouverts ; chacun ouvre ses sujets).
-    Le Join du clan existe déjà. Réservé au rôle du clan et au staff ; rien n'est supprimé."""
+    """22/10/2026 (nuit), le fondateur : « Un seul forum ». Dans la catégorie du clan, 🦜▷・clan-gorp et
+    ses posts (guide, infos, annonces, chat, économie, trade du clan, taverne), réservés au clan et au
+    staff ; les annonces du clan visent leur post. Ne supprime rien : les anciens salons partent avec
+    `demenager_clan`. Le 🔊 Join ne bouge pas. Rend ce qui a été fait."""
     cat = categorie_clan(g)
     if cat is None or role is None:
         return []
     forum = ("COMMUNITY" in g.features) if forum is None else forum
-    c = await _cfg(g.id)
     faits = []
-
-    def droits(ouvert: discord.PermissionOverwrite) -> dict:
-        ows = {g.default_role: discord.PermissionOverwrite(view_channel=False), role: ouvert, g.me: BOT}
+    async with _verrou(("clan", g.id)):
+        c = await _cfg(g.id)
+        ows = {g.default_role: discord.PermissionOverwrite(view_channel=False), role: OUVERT, g.me: BOT}
         for r in equipe or ():
             if r is not None and r != role:
-                ows[r] = EQUIPE_CLAN
-        return ows
-
-    annonces = g.get_channel(int(c.get("clan_annonces", 0) or 0))
-    if annonces is None:
-        annonces = await g.create_text_channel(CLAN_ANNONCES, category=cat, topic=SUJET_CLAN_ANNONCES,
-                                               overwrites=droits(LECTURE_CLAN), reason="Clan GoRP : ses annonces")
-        await _db_set(g.id, "clan_annonces", annonces.id)
-        faits.append(f"salon {annonces.name}")
-    discussions = g.get_channel(int(c.get("clan_forum", 0) or 0))
-    if discussions is None:
-        if forum:
-            discussions = await g.create_forum(CLAN_FORUM, category=cat, topic=SUJET_CLAN_FORUM,
-                                               overwrites=droits(PAROLE), default_auto_archive_duration=10080,
+                ows[r] = EQUIPE_FORUM_CLAN
+        porteur = await _resoudre(g, c.get("clan_forum_v2", 0))
+        if porteur is None:
+            if forum:
+                porteur = await g.create_forum(CLAN_FORUM, category=cat, topic=SUJET_CLAN, overwrites=ows,
+                                               default_auto_archive_duration=10080,
                                                default_layout=discord.ForumLayoutType.list_view,
-                                               default_sort_order=discord.ForumOrderType.latest_activity,
-                                               reason="Clan GoRP : des fils plutôt que des salons")
-        else:
-            discussions = await g.create_text_channel(CLAN_FORUM, category=cat, topic=SUJET_CLAN_FORUM[:1024],
-                                                      overwrites=droits(PAROLE),
-                                                      reason="Clan GoRP : des fils plutôt que des salons")
-        await _db_set(g.id, "clan_forum", discussions.id)
-        faits.append(f"salon {discussions.name}")
-    fils, f2 = await _fils_prets(g, discussions, c.get("clan_fils") or {}, CLAN_FILS)
-    await _db_set(g.id, "clan_fils", fils)
-    faits += f2
-    texte = [ch for ch in cat.channels if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel))]
+                                               default_sort_order=discord.ForumOrderType.creation_date,
+                                               reason="Clan GoRP : un seul forum")
+            else:
+                porteur = await g.create_text_channel(CLAN_FORUM, category=cat, topic=SUJET_CLAN[:1024],
+                                                      overwrites=ows, reason="Clan GoRP : un seul salon, en fils")
+            await _db_set(g.id, "clan_forum_v2", porteur.id)
+            faits.append(f"salon {porteur.name}")
+        posts = {k: dict(v) for k, v in (c.get("clan_posts") or {}).items()}
+        await _posts(g, porteur, CLAN_POSTS, posts, faits)
+        await _db_set(g.id, "clan_posts", posts)
+        if not c.get("clan_anciens"):
+            #  Avant de rebrancher : où étaient les annonces et les discussions d'avant.
+            await _db_set(g.id, "clan_anciens", {"annonces": int(c.get("clan_annonces", 0) or 0),
+                                                 "forum": int(c.get("clan_forum", 0) or 0)})
+        if int(c.get("clan_annonces", 0) or 0) != posts["annonces"]["id"]:
+            await _db_set(g.id, "clan_annonces", posts["annonces"]["id"])
+        await _db_set(g.id, "clan_v2", 1)
+    try:
+        await assurer_guide_clan(g)
+    except discord.HTTPException as ex:
+        _log("[ZONES][E6] guide du clan non posé")
+        _log(f"[ZONES][E6:DETAIL] {type(ex).__name__} {ex}")
+    return faits
+
+
+def _morceaux(texte: str, n: int = 2000) -> list:
+    """Un texte long (Nitro : 4 000 caractères) en messages de 2 000 au plus, coupés à la ligne."""
+    out, reste = [], texte or ""
+    while len(reste) > n:
+        coupe = reste.rfind("\n", 0, n)
+        if coupe <= 0:
+            coupe = n
+        out.append(reste[:coupe])
+        reste = reste[coupe:].lstrip("\n")
+    if reste:
+        out.append(reste)
+    return out
+
+
+async def _recopier(g, source, fil) -> tuple:
+    """Les messages de `source`, du plus ancien au plus récent, recopiés dans `fil` : le texte, les
+    images et fichiers, les cartes. Reprend où il s'était arrêté (`clan_infos_dernier`). Un message qu'on
+    ne sait pas recopier en entier (un panneau de bot, un autocollant, un fichier trop lourd) compte
+    comme resté : l'ancien salon ne sera pas supprimé. Rend (recopiés, restés)."""
+    c = await _cfg(g.id)
+    dernier = int(c.get("clan_infos_dernier", 0) or 0)
+    limite = int(getattr(g, "filesize_limit", 0) or 8 * 1024 * 1024)
+    copies = restes = 0
+    if getattr(fil, "archived", False):
+        await fil.edit(archived=False)
+    async for m in source.history(limit=INFOS_MAX, oldest_first=True,
+                                  after=discord.Object(dernier) if dernier else None):
+        if getattr(m, "type", discord.MessageType.default) not in (discord.MessageType.default,
+                                                                   discord.MessageType.reply):
+            continue  # « X a épinglé un message » : rien à recopier
+        texte = (m.content or "").strip()
+        embeds = [e for e in (m.embeds or []) if getattr(e, "type", "") == "rich"][:10]
+        pieces = list(m.attachments or [])
+        a_joindre = [p for p in pieces if int(p.size or 0) <= limite][:10]
+        incomplet = bool(getattr(m, "components", None) or getattr(m, "stickers", None)
+                         or getattr(m, "poll", None) or len(a_joindre) < len(pieces))
+        try:
+            fichiers = [await p.to_file() for p in a_joindre]
+            morceaux = _morceaux(texte)
+            if morceaux or embeds or fichiers:
+                for n, morceau in enumerate(morceaux or [None]):
+                    envoi = {"content": morceau, "allowed_mentions": discord.AllowedMentions.none()}
+                    if n == len(morceaux or [None]) - 1:  # les cartes et les fichiers avec le dernier morceau
+                        if embeds:
+                            envoi["embeds"] = embeds
+                        if fichiers:
+                            envoi["files"] = fichiers
+                    await fil.send(**envoi)
+        except discord.HTTPException as ex:
+            restes += 1
+            _log("[ZONES][E8] message d'info non recopié")
+            _log(f"[ZONES][E8:DETAIL] {m.id} {type(ex).__name__} {ex}")
+            continue
+        await _db_set(g.id, "clan_infos_dernier", m.id)
+        if incomplet:
+            restes += 1
+        elif texte or embeds or a_joindre:
+            copies += 1
+    return copies, restes
+
+
+async def demenager_clan(g, *, deplacer_annonces=None) -> list:
+    """Une fois, après `installer_clan` — le choix du fondateur : « les 4 salons actuels sont supprimés :
+    le texte d'info-gorp est recopié dans 📢 Infos, l'historique du chat est perdu ». info-gorp est
+    recopié (texte, images, liens) ; les annonces déjà publiées passent dans 📣 Annonces avec leurs
+    « ✅ Vu » (`deplacer_annonces`) ; les réglages suivent ; puis info, annonces, chat et discussions
+    sont supprimés. Une recopie incomplète garde l'ancien salon d'info. Le 🔊 Join ne bouge pas."""
+    c = await _cfg(g.id)
+    cat = categorie_clan(g)
+    posts = c.get("clan_posts") or {}
+    if cat is None or not posts or c.get("clan_demenage_v2"):
+        return []
+    anciens = dict(c.get("clan_anciens") or {})
+    garder = {int(c.get("clan_forum_v2", 0) or 0)}
+    texte = [ch for ch in cat.channels if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel))
+             and ch.id not in garder]
     info = next((ch for ch in texte if "info" in config_salons.normaliser(ch.name).split()), None)
     chat = next((ch for ch in texte if "chat" in config_salons.normaliser(ch.name).split()), None)
-    try:
-        await _ranger(cat, [info, _dans(annonces, cat), chat, _dans(discussions, cat)])
-    except discord.HTTPException as ex:
-        _log("[ZONES][E2] zone du clan non rangée")
-        _log(f"[ZONES][E2:DETAIL] {type(ex).__name__} {ex}")
-    await _db_set(g.id, "clan_v1", 1)
+    v1_annonces = g.get_channel(int(anciens.get("annonces", 0) or 0))
+    v1_forum = g.get_channel(int(anciens.get("forum", 0) or 0))
+    faits, garder_info = [], False
+    infos = await _resoudre(g, (posts.get("infos") or {}).get("id", 0))
+    if isinstance(info, discord.TextChannel) and infos is not None:
+        copies, restes = await _recopier(g, info, infos)
+        if copies:
+            faits.append(f"{copies} message(s) d'info recopié(s) dans 📢 Infos")
+        if restes:
+            garder_info = True
+            faits.append(f"{info.name} gardé : {restes} message(s) pas entièrement recopié(s), à vérifier")
+    annonces_post = await _resoudre(g, (posts.get("annonces") or {}).get("id", 0))
+    if isinstance(v1_annonces, discord.TextChannel) and annonces_post is not None and deplacer_annonces is not None:
+        n = await deplacer_annonces(g, v1_annonces, annonces_post)
+        if n:
+            faits.append(f"{n} annonce(s) passée(s) dans 📣 Annonces avec leurs « ✅ Vu »")
+    paires = {}
+    for ancien, cle in ((info, "infos"), (chat, "chat"), (v1_annonces, "annonces"), (v1_forum, "chat")):
+        if ancien is not None and (posts.get(cle) or {}).get("id"):
+            paires[ancien.id] = int(posts[cle]["id"])
+    faits += await _reporter(g, paires, fusion=True)
+    partants = [ch for ch in (info if not garder_info else None, v1_annonces, chat, v1_forum) if ch is not None]
+    for ch in dict.fromkeys(partants):
+        try:
+            await ch.delete(reason="Clan GoRP : un seul forum (choix du fondateur)")
+            faits.append(f"{ch.name} supprimé")
+        except discord.NotFound:
+            pass
+        except discord.HTTPException as ex:
+            _log("[ZONES][E7] ancien salon du clan non supprimé")
+            _log(f"[ZONES][E7:DETAIL] {ch.id} {type(ex).__name__} {ex}")
+    await _db_set(g.id, "clan_demenage_v2", 1)
     return faits
+
+
+def vue_guide_clan(g, c: dict, posts: dict) -> tuple:
+    """Le guide du clan, en tête de 🦜▷・clan-gorp : chaque post et à quoi il sert, le vocal, à qui
+    s'adresser. Une ligne n'apparaît que si son post existe (aucun bouton qui ment). Rend (vue, signature)."""
+    vocal = _vocal_clan(g, c)
+    ticket = _ticket(g) if _ticket else None
+
+    def lien(cle):
+        pid = int((posts.get(cle) or {}).get("id", 0) or 0)
+        return Post(pid, f"https://discord.com/channels/{g.id}/{pid}") if pid else None
+    lignes = [
+        (lien("infos"), "### 📢 Infos · Info\nCe qu'il faut savoir sur le clan : à lire en arrivant.\n-# What to "
+         "know about the clan: read it first.", "Lire · Read"),
+        (lien("annonces"), "### 📣 Annonces · Announcements\nLes nouvelles du clan. Lis-les et clique « ✅ Vu ».\n-# "
+         "Clan news: read them and click “✅ Seen”.", "Lire · Read"),
+        (lien("chat"), "### 💬 Chat\nLe chat du clan, entre nous"
+         + (f". Le vocal : 🔊 <#{vocal.id}>." if vocal is not None else ".") + "\n-# The clan chat, among us.",
+         "Ouvrir · Open"),
+        (lien("economie"), "### 💰 Économie · Economy\nLes objectifs, les dons et les dépenses du clan.\n-# Goals, "
+         "donations and spending.", "Ouvrir · Open"),
+        (lien("trade"), "### 🤝 Trade du clan · Clan trade\nLes échanges entre membres : propose, demande.\n-# Trades "
+         "between members: offer, ask.", "Échanger · Trade"),
+        (lien("taverne"), "### 🍺 Taverne · Tavern\nOn se pose, on raconte ses aventures en mer.\n-# Sit down and "
+         "tell your adventures at sea.", "Entrer · Enter"),
+    ]
+    items = [visuels.bandeau("clan_guide", "Guide du clan"),
+             discord.ui.TextDisplay("🇫🇷 **Bienvenue dans l'équipage.** Tout le clan se retrouve ici : les infos, les "
+                                    "annonces, le chat et nos posts — en français ou en anglais. On écrit dans les "
+                                    "posts.\n🇬🇧 **Welcome aboard.** The whole clan meets here: info, announcements, "
+                                    "chat and our posts — in French or English. Write in the posts.")]
+    if _boutons_langue is not None:
+        items.append(discord.ui.ActionRow(*_boutons_langue()))
+    presentes = [(p, t, b) for p, t, b in lignes if p is not None]
+    if presentes:
+        items.append(discord.ui.Separator())
+        for p, texte, libelle in presentes:
+            items.append(discord.ui.Section(discord.ui.TextDisplay(texte),
+                                            accessory=discord.ui.Button(label=libelle, url=p.jump_url)))
+    items.append(discord.ui.Separator())
+    if ticket is not None:
+        items.append(discord.ui.Section(
+            discord.ui.TextDisplay("### 🎫 Une question, un souci ? · A question?\nOuvre un ticket : le staff du clan "
+                                   "te répond en privé.\n-# Open a ticket: the clan staff answers privately."),
+            accessory=discord.ui.Button(label="Ticket", url=ticket.jump_url)))
+    items.append(discord.ui.TextDisplay("-# 🛡️ Personne du staff ne te demandera ton mot de passe · No staff will ever "
+                                        "ask for your password"))
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(*items, accent_color=discord.Color(0x14B8A6)))
+    signature = "|".join([str(GUIDE_CLAN_VERSION), *(str(p.id) for p, _t, _b in presentes),
+                          str(getattr(vocal, "id", 0)), str(getattr(ticket, "id", 0)),
+                          str(int(_boutons_langue is not None))])
+    return v, signature
+
+
+async def assurer_guide_clan(g) -> bool:
+    """Le message d'ouverture du post 🧭 Guide du clan suit les posts, le vocal et le salon des tickets
+    (réécrit seulement quand quelque chose a changé). Rend True s'il a été réécrit."""
+    c = await _cfg(g.id)
+    posts = c.get("clan_posts") or {}
+    info = posts.get("guide") or {}
+    if not info.get("id"):
+        return False
+    vue, signature = vue_guide_clan(g, c, posts)
+    if c.get("clan_guide_v") == signature:
+        return False
+    fil = await _resoudre(g, info["id"])
+    if fil is None:
+        return False
+    if getattr(fil, "archived", False):
+        await fil.edit(archived=False)
+    await fil.get_partial_message(int(info.get("ouverture") or info["id"])).edit(
+        view=vue, allowed_mentions=discord.AllowedMentions.none())
+    await _db_set(g.id, "clan_guide_v", signature)
+    return True

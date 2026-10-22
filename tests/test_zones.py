@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import io
 from pathlib import Path
 
 import discord
 import pytest
 
+import annonces as A
 import boosts
 import config_salons
 import entraide as E
@@ -402,31 +404,191 @@ def test_Z13_branche_dans_le_bot():
     assert all((RACINE / "visuels" / f"{k}.gif").is_file() for k in ("orientation", "rs_crews"))
 
 
-def test_Z12_la_zone_du_clan_annonces_et_discussions_reservees_au_clan(env):
+def _v1_du_clan(g, conf):
+    """La zone du clan telle que le lot 20 l'avait laissée : 📣 annonces et 🧵 discussions en plus."""
+    clan = ZN.categorie_clan(g)
+    v1_annonces = g._salon(Texte, "📣▷・annonces-gorp", {"category": clan})
+    v1_forum = g._salon(Forum, "🧵▷・discussions-gorp", {"category": clan})
+    conf.update(clan_annonces=v1_annonces.id, clan_forum=v1_forum.id, clan_v1=1)
+    return clan, v1_annonces, v1_forum
+
+
+def test_Z12_la_zone_du_clan_un_seul_forum(env):
+    """« Un seul forum (Recommandé) » : 🦜▷・clan-gorp, guide, infos, annonces, chat, économie, trade du
+    clan, taverne ; le 🔊 Join reste."""
     g = Monde()
-    _clan_et_vocaux(g, env.conf)
+    _join, hub_clan = _clan_et_vocaux(g, env.conf)
     role = run(g.create_role(name="GoRPC"))
     staff = run(g.create_role(name="Staff"))
     assert run(ZN.installer_clan(g, None)) == [], "sans rôle du clan, rien"
+    clan, v1_annonces, v1_forum = _v1_du_clan(g, env.conf)
     faits = run(ZN.installer_clan(g, role, [staff]))
-    clan = ZN.categorie_clan(g)
-    assert noms(clan) == ["📢▷・info-gorp", "📣▷・annonces-gorp", "✍▷・chat-gorpsea", "🧵▷・discussions-gorp", "🔊Join"]
-    annonces = g.get_channel(env.conf["clan_annonces"])
-    ows = annonces.kw["overwrites"]
-    assert ows[g.default_role].view_channel is False and ows[role].view_channel and ows[role].send_messages is False
-    assert ows[staff].send_messages, "le staff écrit, le clan lit"
-    forum = g.get_channel(env.conf["clan_forum"])
-    assert forum.kw["overwrites"][role].send_messages and forum.kw["overwrites"][g.default_role].view_channel is False
-    assert [c.fil.name for c in forum.crees] == ["💰 Économie · Economy", "🤝 Trade du clan · Clan trade",
-                                                 "🍺 Taverne · Tavern"]
-    assert faits == ["salon 📣▷・annonces-gorp", "salon 🧵▷・discussions-gorp", "fil 💰 Économie · Economy",
-                     "fil 🤝 Trade du clan · Clan trade", "fil 🍺 Taverne · Tavern"] and env.conf["clan_v1"] == 1
-    assert run(ZN.installer_clan(g, role, [staff])) == [], "relancer ne crée rien"
-    eco = g.fils[env.conf["clan_fils"]["economie"]]
-    eco.archived = True
+    c = env.conf
+    forum = g.get_channel(c["clan_forum_v2"])
+    assert forum.name == "🦜▷・clan-gorp" and forum.category_id == clan.id and faits[0] == "salon 🦜▷・clan-gorp"
+    assert [x.fil.name for x in forum.crees][::-1] == [t for _c, t, _v, _x in ZN.CLAN_POSTS], \
+        "créés du dernier au premier : le forum les montre dans l'ordre"
+    ows = forum.kw["overwrites"]
+    assert ows[g.default_role].view_channel is False
+    assert (ows[role].send_messages, ows[role].send_messages_in_threads) == (False, True), \
+        "le clan écrit dans les posts, il n'en crée pas"
+    assert ows[staff].manage_threads, "le staff écrit aussi dans les posts verrouillés"
+    posts = c["clan_posts"]
+    assert {k: g.fils[p["id"]].locked for k, p in posts.items()} == {
+        "guide": True, "infos": True, "annonces": True, "chat": False, "economie": False, "trade": False,
+        "taverne": False}
+    assert c["clan_annonces"] == posts["annonces"]["id"], "les annonces du clan visent leur post"
+    assert c["clan_anciens"] == {"annonces": v1_annonces.id, "forum": v1_forum.id} and c["clan_v2"] == 1
+    assert not hub_clan.supprime and hub_clan.category_id == clan.id, "le Join ne bouge pas"
+    n = (len(g.salons), len(g.fils))
+    assert run(ZN.installer_clan(g, role, [staff])) == [] and (len(g.salons), len(g.fils)) == n, "relancer : rien"
+    assert c["clan_anciens"]["annonces"] == v1_annonces.id, "l'ancien salon des annonces reste noté"
+    assert c["clan_forum_v2"] in ZN.ids_salons(c)
+    eco, ann = g.fils[posts["economie"]["id"]], g.fils[posts["annonces"]["id"]]
+    eco.archived, ann.locked = True, False
     run(ZN.entretenir(g))
-    assert not eco.archived, "les fils du clan restent ouverts"
-    assert {env.conf["clan_annonces"], env.conf["clan_forum"]} <= ZN.ids_salons(env.conf)
+    assert not eco.archived and ann.locked, "réveillé ; le post des annonces se reverrouille"
+
+
+class Piece:
+    def __init__(self, nom, taille=10):
+        self.filename, self.size = nom, taille
+
+    async def to_file(self):
+        return discord.File(io.BytesIO(b"x"), filename=self.filename)
+
+
+def _message(mid, texte="", pieces=(), type_=discord.MessageType.default, components=()):
+    return Obj(id=mid, content=texte, embeds=[], attachments=list(pieces), components=list(components),
+               stickers=[], poll=None, type=type_)
+
+
+def _annonces_pretes(env, monkeypatch, role=None):
+    monkeypatch.setattr(A, "MAJ_VUES_S", 0)
+    monkeypatch.setattr(A, "ARRIVEES_S", 0)
+    A._fils_connus.clear()
+    A._arrivees.clear()
+
+    async def noter(*_a, **_k):
+        return None
+    A.setup(get_db=env.get_db, cfg=env.cfg, db_set=env.db_set, est_tete=lambda g, m: True, journal=noter,
+            role_clan=lambda g, c: role, log=lambda *a: None)
+    run(A.init_db())
+
+
+def test_Z18_les_quatre_anciens_salons_partent_info_est_recopie(env, monkeypatch):
+    """« Les 4 salons actuels sont supprimés : le texte d'info-gorp est recopié dans 📢 Infos,
+    l'historique du chat est perdu. »"""
+    g = Monde()
+    _join, hub_clan = _clan_et_vocaux(g, env.conf)
+    info, chat = g.nom("📢▷・info-gorp"), g.nom("✍▷・chat-gorpsea")
+    info.historique = [_message(11, "Bienvenue dans le clan !"), _message(12, pieces=[Piece("regles.png")]),
+                       _message(13, "x" * 1500 + "\n" + "y" * 1000),
+                       _message(14, type_=discord.MessageType.pins_add)]
+    clan, v1_annonces, v1_forum = _v1_du_clan(g, env.conf)
+    env.conf.update(link_allowed_channels=[chat.id], zones_correspondances={"5": 6})
+    role = run(g.create_role(name="GoRPC"))
+    _annonces_pretes(env, monkeypatch, role)
+    run(A.publier(g, g.membre(1), A.Brouillon(salon_id=v1_annonces.id, titre="Sortie", texte="Ce soir 21 h", fil=False)))
+    run(A.marquer_vu(interaction(g, g.membre(7)), 1))
+    run(ZN.installer_clan(g, role, []))
+    faits = run(ZN.demenager_clan(g, deplacer_annonces=A.deplacer))
+    c = env.conf
+    posts = c["clan_posts"]
+    infos = g.fils[posts["infos"]["id"]]
+    assert [x for x, _kw in infos.envois] == ["Bienvenue dans le clan !", None, "x" * 1500, "y" * 1000], \
+        "dans l'ordre ; le texte long coupé à la ligne ; l'épinglage ignoré"
+    assert infos.envois[1][1]["files"][0].filename == "regles.png", "l'image suit"
+    assert all(ch.supprime for ch in (info, chat, v1_annonces, v1_forum)), "les quatre anciens salons partent"
+    assert [s.name for s in clan.channels] == ["🦜▷・clan-gorp", "🔊Join"] and not hub_clan.supprime
+    fil = g.fils[posts["annonces"]["id"]]
+    a = run(A.charger(1))
+    assert (a["salon_id"], a["message_id"]) == (fil.id, fil.messages[-1].id) and run(A.compter_vues(1)) == 1, \
+        "l'annonce passe dans 📣 Annonces avec son « ✅ Vu »"
+    assert c["link_allowed_channels"] == [chat.id, posts["chat"]["id"]], "les réglages suivent le chat"
+    assert c["zones_correspondances"]["5"] == 6 and c["zones_correspondances"][str(info.id)] == posts["infos"]["id"]
+    assert "3 message(s) d'info recopié(s) dans 📢 Infos" in faits and c["clan_demenage_v2"] == 1
+    assert run(ZN.demenager_clan(g, deplacer_annonces=A.deplacer)) == [], "une fois"
+
+
+def test_Z18b_une_recopie_incomplete_garde_info_gorp(env, monkeypatch):
+    g = Monde()
+    _clan_et_vocaux(g, env.conf)
+    info, chat = g.nom("📢▷・info-gorp"), g.nom("✍▷・chat-gorpsea")
+    info.historique = [_message(11, "Règles"), _message(12, components=["un panneau de bot"])]
+    role = run(g.create_role(name="GoRPC"))
+    _annonces_pretes(env, monkeypatch, role)
+    run(ZN.installer_clan(g, role, []))
+    faits = run(ZN.demenager_clan(g, deplacer_annonces=A.deplacer))
+    assert not info.supprime and chat.supprime, "rien n'est perdu : info-gorp reste"
+    assert any("📢▷・info-gorp gardé : 1 message(s)" in x for x in faits)
+    assert env.conf["clan_infos_dernier"] == 12, "reprendrait après le dernier message lu"
+
+
+def test_Z19_le_guide_du_clan_en_tete_du_forum(env):
+    g = Monde()
+    _join, hub_clan = _clan_et_vocaux(g, env.conf)
+    ticket = g._salon(Texte, "🏷ticket", {"category": g.categorie("🎫 TICKETS")})
+    ZN.setup(cfg=env.cfg, db_set=env.db_set, lecteurs=lambda g, c: [], ticket=lambda _g: ticket, log=lambda *a: None)
+    role = run(g.create_role(name="GoRPC"))
+    run(ZN.installer_clan(g, role, []))
+    c = env.conf
+    posts = c["clan_posts"]
+    forum = g.get_channel(c["clan_forum_v2"])
+    guide = posts["guide"]
+    assert forum.crees[-1].fil.id == guide["id"], "le plus récent : en tête du forum"
+    fil = g.fils[guide["id"]]
+    assert fil.locked and fil.name == "🧭 Guide du clan · Clan guide"
+    vue = [k for mid, k in fil.cartes if mid == guide["ouverture"]][-1]["view"]
+    t = textes(vue)
+    for morceau in ("Bienvenue dans l'équipage", "Welcome aboard", "### 📢 Infos · Info", "### 📣 Annonces",
+                    "### 💬 Chat", f"🔊 <#{hub_clan.id}>", "### 💰 Économie", "### 🤝 Trade du clan",
+                    "### 🍺 Taverne", "### 🎫 Une question"):
+        assert morceau in t, morceau
+    liens = [b.url for b in vue.walk_children() if isinstance(b, discord.ui.Button) and b.url]
+    assert liens == [f"https://discord.com/channels/1/{posts[k]['id']}"
+                     for k in ("infos", "annonces", "chat", "economie", "trade", "taverne")] + [ticket.jump_url]
+    assert compter(vue) <= 40 and c["clan_guide_v"].startswith(f"{ZN.GUIDE_CLAN_VERSION}|")
+    assert not run(ZN.assurer_guide_clan(g)), "rien n'a changé : pas de réécriture"
+    del g.fils[posts["taverne"]["id"]]
+    posts.pop("taverne")
+    assert run(ZN.assurer_guide_clan(g)) and "Taverne" not in textes(fil.cartes[-1][1]["view"]), \
+        "un post parti : sa ligne part (aucun bouton qui ment)"
+
+
+def test_Z20_les_annonces_du_clan_vivent_dans_leur_post(env, monkeypatch):
+    g = Monde()
+    _clan_et_vocaux(g, env.conf)
+    role = run(g.create_role(name="GoRPC"))
+    _annonces_pretes(env, monkeypatch, role)
+    run(ZN.installer_clan(g, role, []))
+    fil = g.fils[env.conf["clan_posts"]["annonces"]["id"]]
+    assert fil in A.destinations(g, env.conf), "le post 📣 Annonces est proposé"
+    vue = A.VueApercu(g.membre(1), g, A.Brouillon(salon_id=fil.id, titre="t", texte="x"), (), env.conf)
+    assert not any("Fil de suite" in (getattr(b, "label", "") or "") for b in vue.walk_children()), \
+        "pas de fil dans un fil : le bouton n'est pas proposé"
+    fil.archived = True
+    lien, erreur = run(A.publier(g, g.membre(1), A.Brouillon(salon_id=fil.id, titre="Raid", texte="Ce soir", fil=True)))
+    a = run(A.charger(1))
+    assert erreur == "" and not fil.archived, "le post endormi se rouvre"
+    assert (a["salon_id"], a["fil_id"]) == (fil.id, 0) and "Raid" in textes(fil.messages[-1].kw["view"])
+    nouveau = g.membre(50)
+    avant = Obj(roles=[])
+    nouveau.roles = [role]
+    run(A.sur_maj_membre(avant, nouveau))
+    assert "Bienvenue dans l'équipage" in textes(fil.messages[-1].kw["view"]), "l'arrivée s'annonce dans le post"
+
+
+def test_Z21_branche_dans_le_bot():
+    boucle = _source("entraide_task")
+    assert "not c.get('clan_v2')" in boucle and "await _installer_clan(g, c)" in boucle
+    assert "c.get('clan_v2') and (not c.get('clan_demenage_v2'))" in boucle and "await _demenager_clan(g, c)" in boucle
+    assert "zones.demenager_clan(g, deplacer_annonces=annonces.deplacer)" in _source("_demenager_clan")
+    assert "_reporter_immunites(g, await cfg(g.id))" in _source("_demenager_clan"), "l'immunité suit aussi"
+    for cle in ('"clan_forum": any(', '"clan_propre": any(', '"post_crews": any(', '"porteurs_sans_direction": sum(',
+                '"clan_anciens_salons": sum('):
+        assert cle in SRC, cle
+    assert (RACINE / "visuels" / "clan_guide.gif").is_file() and (RACINE / "visuels" / "cadeaux.gif").is_file()
 
 
 def test_Z14_un_salon_immunise_son_post_l_est_aussi(env):

@@ -64,6 +64,7 @@ _get_db = _cfg = _db_set = _est_tete = _journal = _langue = _role_clan = None
 _log = print
 _maj_prevues: dict = {}
 _arrivees: dict = {}
+_fils_connus: dict = {}   # les posts déjà demandés à Discord (un post endormi n'est pas en mémoire)
 
 
 def setup(*, get_db, cfg, db_set, est_tete, journal, role_clan=None, langue=None, log=None):
@@ -96,6 +97,8 @@ _SQL_UNE = ("SELECT id, guild_id, salon_id, message_id, fil_id, auteur_id, titre
             " cree FROM annonces WHERE id=?")
 _SQL_RECENTES = ("SELECT id, guild_id, salon_id, message_id, fil_id, auteur_id, titre, texte, liens, image,"
                  " mention, cree FROM annonces WHERE guild_id=? AND message_id>0 ORDER BY id DESC LIMIT ?")
+_SQL_DU_SALON = ("SELECT id, guild_id, salon_id, message_id, fil_id, auteur_id, titre, texte, liens, image,"
+                 " mention, cree FROM annonces WHERE guild_id=? AND salon_id=? AND message_id>0 ORDER BY id")
 
 
 async def init_db():
@@ -163,9 +166,44 @@ def _mots(nom: str) -> list:
     return config_salons.normaliser(nom).split()
 
 
+def _trouver(g, sid):
+    """Un salon ou un post : la mémoire de Discord, sinon celui qu'on est déjà allé chercher."""
+    sid = int(sid or 0)
+    return (g.get_channel_or_thread(sid) or _fils_connus.get(sid)) if sid else None
+
+
+async def _salon(g, sid):
+    """Comme `_trouver`, et demandé à Discord s'il n'est pas en mémoire (un post endormi)."""
+    ch = _trouver(g, sid)
+    if ch is not None or not int(sid or 0):
+        return ch
+    try:
+        ch = await g.fetch_channel(int(sid))
+    except discord.NotFound:
+        return None
+    except discord.HTTPException as ex:
+        _log(f"[ANNONCES:DETAIL] salon {sid} {type(ex).__name__} {ex}")
+        return None
+    if isinstance(ch, discord.Thread):
+        _fils_connus[ch.id] = ch
+    return ch
+
+
+async def _reveiller(salon) -> bool:
+    """Un post archivé se rouvre avant qu'on y écrive. False s'il reste fermé."""
+    if not (isinstance(salon, discord.Thread) and salon.archived):
+        return True
+    try:
+        await salon.edit(archived=False)
+        return True
+    except discord.HTTPException as ex:
+        _log(f"[ANNONCES:DETAIL] post {salon.id} non rouvert {type(ex).__name__} {ex}")
+        return False
+
+
 def destinations(g, c: dict) -> list:
     """Les salons où l'on annonce, dans l'ordre du serveur : Information, Sneak Peek (sauf les actus
-    Roblox automatiques), les annonces du clan, et tout salon dont le nom dit « annonce »."""
+    Roblox automatiques), tout salon dont le nom dit « annonce » — et le post 📣 Annonces du clan."""
     clan = int(c.get("clan_annonces", 0) or 0)
     out = []
     for ch in getattr(g, "text_channels", []) or []:
@@ -176,7 +214,11 @@ def destinations(g, c: dict) -> list:
         if ch.id == clan or "information" in nc or "sneak" in nc or any(m.startswith("annonce") for m in mots):
             out.append(ch)
     out.sort(key=lambda s: (getattr(getattr(s, "category", None), "position", -1), s.position))
-    return out[:25]
+    out = out[:24]
+    fil = _trouver(g, clan) if clan else None
+    if isinstance(fil, discord.Thread):
+        out.append(fil)
+    return out
 
 
 def style_de(salon, c: dict) -> tuple:
@@ -292,8 +334,8 @@ async def _maj_apres(g, aid: int) -> None:
 
 async def maj_annonce(g, aid: int) -> bool:
     a = await charger(aid)
-    salon = g.get_channel(int(a["salon_id"])) if a else None
-    if a is None or salon is None or not a["message_id"]:
+    salon = await _salon(g, a["salon_id"]) if a else None
+    if a is None or salon is None or not a["message_id"] or not await _reveiller(salon):
         return False
     vue = vue_annonce(a, style_de(salon, await _cfg(g.id)), serveur=g.name, vues=await compter_vues(aid))
     try:
@@ -342,7 +384,13 @@ async def ouvrir(i) -> None:
     g, m = i.guild, i.user
     if g is None or not _est_tete(g, m):
         return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
-    salons = destinations(g, await _cfg(g.id))
+    c = await _cfg(g.id)
+    salons = destinations(g, c)
+    clan = int(c.get("clan_annonces", 0) or 0)
+    if clan and all(s.id != clan for s in salons):
+        fil = await _salon(g, clan)  # le post 📣 Annonces du clan, endormi
+        if fil is not None:
+            salons.append(fil)
     if not salons:
         return await i.response.send_message("Aucun salon d'annonces trouvé (Information, Sneak Peek, annonces du "
                                              "clan).", ephemeral=True)
@@ -354,7 +402,8 @@ class VueComposer(LayoutView):
         super().__init__(timeout=1800)
         self.auteur, self.g, self.b = auteur, g, b or Brouillon()
         choix = Select(placeholder="Dans quel salon ?", options=[
-            discord.SelectOption(label=f"#{ch.name}"[:100], value=str(ch.id),
+            discord.SelectOption(label=(f"{getattr(ch.parent, 'name', '')} › {ch.name}" if isinstance(ch, discord.Thread)
+                                        else f"#{ch.name}")[:100], value=str(ch.id),
                                  description=(getattr(getattr(ch, "category", None), "name", "") or None))
             for ch in salons])
         choix.callback = self._cb_salon
@@ -443,7 +492,7 @@ class VueApercu(LayoutView):
     def __init__(self, auteur, g, b: Brouillon, erreurs=(), c: dict | None = None):
         super().__init__(timeout=1800)
         self.auteur, self.g, self.b = auteur, g, b
-        salon = g.get_channel(b.salon_id)
+        salon = _trouver(g, b.salon_id)
         c = c or {}
         texte_mention, _m, avertissement = _mention(g, salon, c, b) if salon is not None else ("", None, "")
         a = {"id": 0, "titre": b.titre or "(sans titre)", "texte": b.texte or "(sans texte)", "liens": b.liens,
@@ -471,9 +520,11 @@ class VueApercu(LayoutView):
         fil = Button(label="Fil de suite : " + ("oui" if b.fil else "non"), style=discord.ButtonStyle.secondary,
                      emoji="🧵")
         fil.callback = self._cb_fil
+        #  Dans un post (📣 Annonces du clan), pas de fil dans le fil : le bouton n'est pas proposé.
+        reglages = [mention] if isinstance(salon, discord.Thread) else [mention, fil]
         self.add_item(discord.ui.Container(discord.ui.TextDisplay("\n".join(notes)),
                                            discord.ui.ActionRow(publier_b, modifier, annuler),
-                                           discord.ui.ActionRow(mention, fil), accent_color=Palette.NEUTRAL))
+                                           discord.ui.ActionRow(*reglages), accent_color=Palette.NEUTRAL))
 
     async def interaction_check(self, i):
         return i.user.id == self.auteur.id
@@ -507,13 +558,16 @@ class VueApercu(LayoutView):
 
 async def publier(g, auteur, b: Brouillon) -> tuple:
     """Publie l'annonce (et son fil). Rend (lien, "") ou ("", raison)."""
-    salon = g.get_channel(int(b.salon_id or 0))
-    if not isinstance(salon, discord.TextChannel):
+    salon = await _salon(g, int(b.salon_id or 0))
+    if not isinstance(salon, (discord.TextChannel, discord.Thread)):
         return "", "Ce salon n'existe plus."
     if not (b.titre and b.texte):
         return "", "Il faut un titre et un texte."
+    if not await _reveiller(salon):
+        return "", "Ce post est archivé et je ne peux pas le rouvrir."
     droits = salon.permissions_for(g.me)
-    if not (droits.send_messages and droits.embed_links and (droits.attach_files or not b.image)):
+    ecrire = droits.send_messages_in_threads if isinstance(salon, discord.Thread) else droits.send_messages
+    if not (ecrire and droits.embed_links and (droits.attach_files or not b.image)):
         return "", f"Je ne peux pas publier dans {salon.mention} (droits du salon)."
     c = await _cfg(g.id)
     texte_mention, mentions, _avert = _mention(g, salon, c, b)
@@ -535,7 +589,7 @@ async def publier(g, auteur, b: Brouillon) -> tuple:
         await _ecrire("DELETE FROM annonces WHERE id=?", (aid,))
         return "", "Discord a refusé la publication : réessaie dans un instant."
     fil_id = 0
-    if b.fil:
+    if b.fil and not isinstance(salon, discord.Thread):
         try:
             fil = await msg.create_thread(name=f"📌 {b.titre}"[:100], auto_archive_duration=10080,
                                           reason="Annonce : la suite dans son fil")
@@ -577,7 +631,7 @@ async def sur_maj_membre(before, after) -> None:
     role = _role_clan(g, c)
     if role is None or role in before.roles or role not in after.roles:
         return
-    if g.get_channel(int(c.get("clan_annonces", 0) or 0)) is None:
+    if not int(c.get("clan_annonces", 0) or 0):
         return
     file = _arrivees.setdefault(g.id, [])
     if after.id not in file:
@@ -590,9 +644,9 @@ async def _annoncer_arrivees(g) -> None:
     await asyncio.sleep(ARRIVEES_S)
     ids = _arrivees.pop(g.id, [])
     c = await _cfg(g.id)
-    salon = g.get_channel(int(c.get("clan_annonces", 0) or 0))
+    salon = await _salon(g, int(c.get("clan_annonces", 0) or 0))
     membres = [m for m in (g.get_member(x) for x in ids) if m is not None]
-    if salon is None or not membres:
+    if salon is None or not membres or not await _reveiller(salon):
         return
     noms = ", ".join(m.mention for m in membres)
     items = []
@@ -613,3 +667,40 @@ async def _annoncer_arrivees(g) -> None:
     except discord.HTTPException as ex:
         _log("[ANNONCES][E3] bienvenue du clan non publiée")
         _log(f"[ANNONCES][E3:DETAIL] {type(ex).__name__} {ex}")
+
+
+async def deplacer(g, ancien, salon) -> int:
+    """Les annonces publiées dans `ancien` repassent dans `salon` (les plus anciennes d'abord), avec leur
+    image et leurs « ✅ Vu » : l'ancien salon peut partir sans rien perdre. Rend le nombre déplacé."""
+    async with _get_db() as db:
+        async with db.execute(_SQL_DU_SALON, (g.id, ancien.id)) as cur:
+            lignes = [_ligne(r) for r in await cur.fetchall()]
+    if not lignes or not await _reveiller(salon):
+        return 0
+    c = await _cfg(g.id)
+    n = 0
+    for a in lignes:
+        fichier = None
+        if a["image"]:
+            try:
+                msg = await ancien.fetch_message(int(a["message_id"]))
+                piece = next((p for p in msg.attachments if p.filename == a["image"]), None)
+                fichier = await piece.to_file() if piece is not None else None
+            except discord.HTTPException as ex:
+                _log(f"[ANNONCES:DETAIL] image de l'annonce {a['id']} illisible {type(ex).__name__} {ex}")
+            if fichier is None:
+                a = dict(a, image="")  # sans son image : le bandeau du clan
+        envoi = {"view": vue_annonce(a, style_de(salon, c), serveur=g.name, vues=await compter_vues(a["id"])),
+                 "allowed_mentions": discord.AllowedMentions.none()}
+        if fichier is not None:
+            envoi["file"] = fichier
+        try:
+            msg = await salon.send(**envoi)
+        except discord.HTTPException as ex:
+            _log("[ANNONCES][E4] annonce non déplacée")
+            _log(f"[ANNONCES][E4:DETAIL] annonce={a['id']} {type(ex).__name__} {ex}")
+            continue
+        await _ecrire("UPDATE annonces SET salon_id=?, message_id=?, fil_id=0, image=? WHERE id=?",
+                      (salon.id, msg.id, a["image"], a["id"]))
+        n += 1
+    return n

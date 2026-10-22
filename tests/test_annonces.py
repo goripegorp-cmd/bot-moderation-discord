@@ -79,11 +79,11 @@ def test_N1_les_salons_d_annonces_et_leur_bandeau(env):
     run(ZN.installer_clan(g, env.clan["role"]))
     salons = A.destinations(g, env.conf)
     assert [s.name for s in salons] == ["📜annonce", "🟢target-roblox", "🟠ambrebois", "🧾sneak-fix", "🎥goripe",
-                                        "📀sneak-rellseas", "📣▷・annonces-gorp"], "les actus Roblox arrivent seules"
+                                        "📀sneak-rellseas", "📣 Annonces · Announcements"],         "les actus Roblox arrivent seules ; le post 📣 Annonces du forum du clan en dernier"
     styles = {s.name: A.style_de(s, env.conf)[0] for s in salons}
     assert styles == {"📜annonce": "an_annonce", "🟢target-roblox": "an_target", "🟠ambrebois": "an_ambrebois",
                       "🧾sneak-fix": "an_sneakfix", "🎥goripe": "an_goripe", "📀sneak-rellseas": "an_rellseas",
-                      "📣▷・annonces-gorp": "an_clan"}
+                      "📣 Annonces · Announcements": "an_clan"}
     assert all((RACINE / "visuels" / f"{k}.gif").is_file() for k in styles.values()), "chaque bandeau existe"
 
 
@@ -148,8 +148,8 @@ def test_N4_la_coche_verte_une_fois_par_membre_le_compteur_suit(env, monkeypatch
     salon = g.nom("🟢target-roblox")
     lien, erreur = run(A.publier(g, tete, A.Brouillon(salon_id=salon.id, titre="Objectif atteint",
                                                       texte="Merci à tous !", fil=False)))
-    assert erreur == "" and lien.startswith("https://") and salon.envois[-1][2].get("file") is None
-    assert "Target Roblox" in str(salon.envois[-1][2]["view"].to_components()), "le bandeau du salon"
+    assert erreur == "" and lien.startswith("https://") and salon.envois[-1][-1].get("file") is None
+    assert "Target Roblox" in str(salon.envois[-1][-1]["view"].to_components()), "le bandeau du salon"
     env.langues[8] = "en"
     reponses = []
     for uid in (7, 8, 7):
@@ -178,18 +178,18 @@ def test_N5_les_annonces_du_clan_le_clan_mentionne_les_arrivees_annoncees(env, m
     g = serveur(env)
     role = env.clan["role"]
     run(ZN.installer_clan(g, role))
-    salon = g.get_channel(env.conf["clan_annonces"])
+    salon = g.get_channel_or_thread(env.conf["clan_annonces"])  # le post 📣 Annonces du forum du clan
     tete = g.membre(FONDATEUR)
     b = A.Brouillon(salon_id=salon.id, titre="Réunion du clan", texte="Ce soir, 21 h.", mention="clan")
     vue = A.VueApercu(tete, g, b, (), env.conf)
     assert vue.options_mention == ["", "everyone", "clan"] and "Mention : le clan" in textes(vue)
     assert run(A.publier(g, tete, b))[1] == ""
-    envoi = salon.envois[-1][2]
+    envoi = salon.envois[-1][-1]
     assert envoi["allowed_mentions"].roles == [role] and role.mention in textes(envoi["view"])
     assert "Annonce du clan" in str(envoi["view"].to_components())
     n = len(salon.envois)
     run(A.sur_maj_membre(g.membre(40), g.membre(40, role)))
-    carte = salon.envois[-1][2]
+    carte = salon.envois[-1][-1]
     assert len(salon.envois) == n + 1 and "Bienvenue dans l'équipage · Welcome aboard" in textes(carte["view"])
     assert "<@40> rejoint le clan GoRP" in textes(carte["view"]) and [u.id for u in carte["allowed_mentions"].users] == [40]
     monkeypatch.setattr(A, "ARRIVEES_S", 0.3)
@@ -198,7 +198,7 @@ def test_N5_les_annonces_du_clan_le_clan_mentionne_les_arrivees_annoncees(env, m
         await A.sur_maj_membre(g.membre(41), g.membre(41, role))
         await A.sur_maj_membre(g.membre(42), g.membre(42, role))
     run(deux())
-    assert len(salon.envois) == n + 2 and "<@41>, <@42> rejoignent" in textes(salon.envois[-1][2]["view"]), \
+    assert len(salon.envois) == n + 2 and "<@41>, <@42> rejoignent" in textes(salon.envois[-1][-1]["view"]), \
         "les arrivées d'une minute partagent une carte"
     run(A.sur_maj_membre(g.membre(40, role), g.membre(40, role)))
     assert len(salon.envois) == n + 2, "un rôle déjà là n'annonce rien"

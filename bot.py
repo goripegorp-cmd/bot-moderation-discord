@@ -13209,8 +13209,12 @@ async def entraide_task():
             if g.owner_id in TETE_IDS and (c.get('zones_v1') or c.get('zones_v2')) and not c.get('menage_v1'):
                 await db_set(g.id, 'menage_v1', now().isoformat())
                 await _menage_categories(g)
-            if g.owner_id in TETE_IDS and not c.get('clan_v1') and int(c.get('clan_essais', 0) or 0) < ZONES_ESSAIS:
+            if g.owner_id in TETE_IDS and not c.get('clan_v2') and int(c.get('clan_v2_essais', 0) or 0) < ZONES_ESSAIS:
+                # 22/10 (nuit), le fondateur choisit « Un seul forum » pour la zone du clan.
                 await _installer_clan(g, c)
+            elif g.owner_id in TETE_IDS and c.get('clan_v2') and not c.get('clan_demenage_v2') and \
+                    int(c.get('clan_demenage_essais', 0) or 0) < ZONES_ESSAIS:
+                await _demenager_clan(g, c)
             await entraide.entretenir(g)
             if time.monotonic() - _zones_entretenues.get(g.id, -1e9) > 1800:
                 _zones_entretenues[g.id] = time.monotonic()
@@ -13431,19 +13435,34 @@ class ConfirmerArchives(LayoutView):
 
 
 async def _installer_clan(g, c) -> None:
-    """22/10/2026 : « retape la zone GoRP… annonces du clan, économie, trade, discussion, taverne ».
-    Dès que la catégorie du clan et son rôle existent ; trois essais si Discord casse."""
+    """22/10/2026 (nuit), le fondateur choisit « Un seul forum » : 🦜▷・clan-gorp et ses posts dans la
+    catégorie du clan, puis les anciens salons partent (`_demenager_clan`). Trois essais."""
     role = g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
     if role is None or zones.categorie_clan(g) is None:
         return
+    await db_set(g.id, 'clan_v2_essais', int(c.get('clan_v2_essais', 0) or 0) + 1)
     try:
         faits = await zones.installer_clan(g, role, _roles_staff_et_plus(g, c))
     except (discord.HTTPException, PermissionError) as ex:
-        await db_set(g.id, 'clan_essais', int(c.get('clan_essais', 0) or 0) + 1)
         _logerr("clan.zone", ex, guild_id=g.id)
         return
+    await _au_journal(g, "Clan", "clan.zone", "Forum du clan en place : " + (", ".join(faits) or "rien ne manquait")
+                      + ".")
+    await _demenager_clan(g, await cfg(g.id))
+
+
+async def _demenager_clan(g, c) -> None:
+    """Une fois : info-gorp recopié dans 📢 Infos, les annonces dans 📣 Annonces, les réglages suivent, les
+    quatre anciens salons partent (choix du fondateur). Trois essais."""
+    await db_set(g.id, 'clan_demenage_essais', int(c.get('clan_demenage_essais', 0) or 0) + 1)
+    try:
+        faits = await zones.demenager_clan(g, deplacer_annonces=annonces.deplacer)
+    except discord.HTTPException as ex:
+        _logerr("clan.demenage", ex, guild_id=g.id)
+        return
     if faits:
-        await _au_journal(g, "Clan", "clan.zone", "Zone du clan mise en place : " + ", ".join(faits) + ".")
+        await _au_journal(g, "Clan", "clan.demenage", "Zone du clan au propre : " + ", ".join(faits) + ".")
+    await _reporter_immunites(g, await cfg(g.id))
 
 
 def _faq_destinations(g, c) -> dict:
@@ -13709,10 +13728,37 @@ async def _etat_public():
             "tickets_direction": any(c.get('tickets_visibilite_v1') for c in confs),
             "menage": any(c.get('menage_v1') for c in confs),
             "clan_zone": any(c.get('clan_v1') for c in confs),
+            "clan_forum": any(c.get('clan_v2') for c in confs),
+            "clan_propre": any(c.get('clan_demenage_v2') for c in confs),
+            #  L'état réel, pas un drapeau : ce que le serveur montre à l'instant.
+            "post_crews": any('crews' in (c.get('zones_posts') or {}) for c in confs),
+            "porteurs_sans_direction": sum(_porteurs_sans_direction(g, c) for g, c in zip(list(bot.guilds), confs)),
+            "clan_anciens_salons": sum(_anciens_salons_clan(g, c) for g, c in zip(list(bot.guilds), confs)),
             "entraide_salons": max([len(c.get('rs_salons') or {}) for c in confs] or [0]),
             "tickets_regroupes": any(c.get('tickets_categorie') for c in confs)})
     except Exception as ex:
         _logerr("etat.public", ex)
+
+
+def _porteurs_sans_direction(g, c) -> int:
+    """Combien de salons de tickets ne montrent pas encore tout à la direction (attendu : 0)."""
+    direction = _equipe_direction(g, c)
+    n = 0
+    for cid in dict.fromkeys(int(v) for v in (c.get(tickets_fils.CLE_PARENTS) or {}).values() if str(v).isdigit()):
+        ch = g.get_channel(cid)
+        if isinstance(ch, discord.TextChannel):
+            n += sum(1 for x in direction if not ch.overwrites_for(x).manage_threads)
+    return n
+
+
+def _anciens_salons_clan(g, c) -> int:
+    """Les salons texte restés dans la catégorie du clan à côté du forum (attendu : 0 une fois au propre)."""
+    if not c.get('clan_v2'):
+        return 0
+    cat = zones.categorie_clan(g)
+    forum = int(c.get('clan_forum_v2', 0) or 0)
+    return sum(1 for ch in (cat.channels if cat is not None else [])
+               if ch.id != forum and not isinstance(ch, (discord.VoiceChannel, discord.StageChannel)))
 
 
 async def _recrutement_rellseas(g) -> None:

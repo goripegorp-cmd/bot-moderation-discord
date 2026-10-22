@@ -86,6 +86,10 @@ class Fil(discord.Thread):
     async def add_user(self, m):
         self.membres.append(m.id)
 
+    def permissions_for(self, membre):
+        #  discord.Thread demande au salon parent (GuildChannel) : ici, au faux parent.
+        return self.parent.permissions_for(membre) if self.parent is not None else Droits()
+
     async def delete(self, *, reason=None):  # comme discord.Thread.delete (2.7.1)
         self.monde.fils.pop(self.id, None)
         self.monde.effaces.add(self.id)
@@ -152,6 +156,9 @@ class Forum(Rangeable, discord.ForumChannel):
 
     available_tags = property(lambda self: self._tags_)
 
+    def permissions_for(self, _membre):
+        return Droits(getattr(self, "refus", ()))
+
     async def create_thread(self, *, name, view=None, content=None, allowed_mentions=None, applied_tags=(),
                             reason=None, **_kw):
         fil = self.monde.nouveau_fil(self, name, contenu=content)
@@ -201,7 +208,7 @@ class Texte(Rangeable, discord.TextChannel):
             raise discord.NotFound(Obj(status=404, reason="x"), "absent")
         return Message(self, mid)
 
-    def history(self, limit=None, after=None):
+    def history(self, limit=None, after=None, oldest_first=None):
         async def gen():
             n = 0
             for m in self.historique:

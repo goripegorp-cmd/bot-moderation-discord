@@ -105,6 +105,11 @@ BANDEAUX = {
     "an_clan": ("CLAN GORP", "Annonce du clan", "Clan announcement", "\uEC24", (6, 182, 212), (20, 184, 166)),
     "rs_guide": ("RELL SEAS", "Guide", "Bienvenue à bord · Welcome aboard", "\uE8F1", (6, 182, 212), (37, 99, 235)),
     "rs_trade": ("RELL SEAS", "Trade", "Fruits et objets · Fruits & items", "\uE8AB", (245, 158, 11), (234, 88, 12)),
+    #  22/10/2026 (nuit) : le forum du clan et le salon des cadeaux.
+    "clan_guide": ("CLAN GORP", "Guide du clan", "Bienvenue dans l'équipage · Welcome aboard", "\uE7C1",
+                   (6, 182, 212), (20, 184, 166)),
+    "cadeaux": ("GIVEAWAYS", "Cadeaux", "Participe et tente ta chance · Join and win", "\uF133",
+                (236, 72, 153), (245, 158, 11)),
 }
 
 #  Icônes des boutons : (glyphe, famille de couleur)
