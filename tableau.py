@@ -45,14 +45,18 @@ except Exception:  # sans base de fuseaux : l'heure UTC
 
 import discord
 
+import annonces
 import casier
 import clan
+import entraide
+import equipages
 import questions
 import recrutements
 import registre
 import rellseas_panneau
 import sondages
 import suggestions
+import transcript_store
 import vigilance
 
 DUREE = 24 * 3600
@@ -702,6 +706,55 @@ async def _suggestions(g, qui) -> dict:
     return d
 
 
+async def _entraide(g, qui) -> dict:
+    """« Nous, on a toutes les informations des salons trade et entraide au propre » : chaque demande,
+    ouverte ou close — qui, quoi, qui est venu, qui l'a certifiée, avec qui l'échange s'est fait."""
+    liste = []
+    for d in await entraide.recentes(g.id, 300):
+        z = entraide.ZONES.get(d["zone"])
+        liste.append({"id": d["id"], "zone": d["zone"], "type": z.nom if z else d["zone"], "emoji": z.emoji if z else "",
+                      "auteur": qui(d["auteur_id"]), "titre": d["titre"],
+                      "champs": [[str(lib), str(v)] for lib, v in d["champs"] if str(v or "").strip()],
+                      "statut": d["statut"], "libelle": entraide.STATUTS.get(d["statut"], (d["statut"], ""))[0],
+                      "aidants": [qui(x) for x in d["aidants"]], "credites": [qui(x) for x in d["credites"]],
+                      "certifie_par": qui(d["certifie_par"]), "partenaire": qui(d["partenaire_id"]),
+                      "ferme_par": qui(d["ferme_par"]), "cree": d["cree"], "ferme": d["ferme"] or None,
+                      "lien": "" if d["supprime"] else entraide.lien(g, d),
+                      "transcript": transcript_store.transcript_url(d["jeton"]) if d["jeton"] else ""})
+    return {"liste": liste, "stats": {"ouvertes": sum(1 for x in liste if x["statut"] in entraide.OUVERTS),
+                                      "total": len(liste), "certifiees": sum(1 for x in liste if x["certifie_par"])}}
+
+
+async def _equipages(g, qui) -> dict:
+    """Les équipages du post ⚓ Crews : faction, capitaine, s'ils recrutent."""
+    cf = await equipages.conf(g)
+    liste = []
+    for e in await equipages.lister(g.id):
+        champs = e["champs"] or {}
+        lien = (f"https://discord.com/channels/{g.id}/{cf['forum']}/{e['fil_id']}" if e["mode"] == "carte"
+                else f"https://discord.com/channels/{g.id}/{e['fil_id']}")
+        liste.append({"id": e["id"], "nom": e["nom"], "faction": equipages.FACTIONS.get(e["faction"], ("", e["faction"]))[1],
+                      "capitaine": qui(e["capitaine_id"]), "recrute": bool(e["recrute"]),
+                      "champs": {c.carte: str(champs.get(c.cle)) for c in equipages.CHAMPS
+                                 if c.carte and str(champs.get(c.cle) or "").strip()},
+                      "presentation": str(champs.get("presentation") or ""), "cree": e["cree"], "lien": lien})
+    return {"liste": liste, "stats": {"total": len(liste), "recrutent": sum(1 for x in liste if x["recrute"])}}
+
+
+async def _annonces(g, qui) -> dict:
+    """Les annonces publiées depuis 📋logs et qui a cliqué « ✅ Vu »."""
+    liste = []
+    for a in await annonces.recentes(g.id, 60):
+        ch = g.get_channel(int(a["salon_id"]))
+        vus = await annonces.qui_a_vu(a["id"])
+        liste.append({"id": a["id"], "titre": a["titre"], "texte": a["texte"][:1500],
+                      "salon": f"#{ch.name}" if ch is not None else "#salon supprimé", "auteur": qui(a["auteur_id"]),
+                      "cree": a["cree"], "vues": len(vus), "vus": [qui(m) for m, _q in vus[:40]],
+                      "mention": "@everyone" if a["mention"] == "@everyone" else ("le clan" if a["mention"] else ""),
+                      "lien": f"https://discord.com/channels/{g.id}/{a['salon_id']}/{a['message_id']}"})
+    return {"liste": liste, "stats": {"total": len(liste), "vues": sum(x["vues"] for x in liste)}}
+
+
 async def _droits_salons(g, c) -> list:
     """« Des vrais trucs bien propres par salon, qu'on comprenne bien » : chaque catégorie, chaque
     salon, ce que @everyone (et le clan) peut y faire. Lecture seule : rien ne se règle d'ici."""
@@ -755,7 +808,8 @@ async def donnees(g, portee: str = "tout") -> dict:
     for nom, fn in (("journal", lambda: _journal(g, qui)), ("questions", lambda: _questions(g, qui)),
                     ("alertes", lambda: _alertes(g, qui)), ("sondages", lambda: _sondages(g, qui)),
                     ("casier", lambda: _casier(g, qui)), ("suggestions", lambda: _suggestions(g, qui)),
-                    ("salons", lambda: _droits_salons(g, c))):
+                    ("entraide", lambda: _entraide(g, qui)), ("equipages", lambda: _equipages(g, qui)),
+                    ("annonces", lambda: _annonces(g, qui)), ("salons", lambda: _droits_salons(g, c))):
         try:
             parties[nom] = await fn()
         except Exception as ex:  # une partie illisible n'emporte pas le reste du tableau

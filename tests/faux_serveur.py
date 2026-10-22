@@ -256,8 +256,9 @@ class Role:
 
 class Membre:
     def __init__(self, uid, *roles):
-        self.id, self.mention, self.display_name = uid, f"<@{uid}>", f"Pirate{uid}"
+        self.id, self.mention, self.display_name, self.name = uid, f"<@{uid}>", f"Pirate{uid}", f"pirate{uid}"
         self.display_avatar = Obj(url=f"https://cdn.discordapp.com/avatars/{uid}.png")
+        self.display_avatar.with_size = lambda _n: self.display_avatar
         self.roles, self.guild_permissions, self.bot = list(roles), Obj(administrator=False), False
         for r in roles:
             r.members.append(self)

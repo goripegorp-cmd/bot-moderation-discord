@@ -472,7 +472,7 @@ const etat = {
     mod: {q: "", periode: "90", groupe: "tous", origine: "tous", tri: "recent"},
     jour: {q: "", periode: "7", cat: "tous", vue: "personnes", grave: false},
     ques: {q: "", statut: "ouverte"},
-    sond: {q: "", statut: "en_cours", idees: "ouvertes"},
+    sond: {q: "", statut: "en_cours", idees: "ouvertes", entr: "ouvertes"},
     clan: {q: "", rang: "tous", ajout: ""}
   }
 };
@@ -742,7 +742,7 @@ const INTROS = {
   moderation: ["Modération", "Le casier par membre, les modérateurs, et le nettoyage.", "bouclier", "#fbbf24"],
   journal: ["Journal", "Tout ce qui s'est passé sur le serveur, jour par jour.", "journal", "#38bdf8"],
   questions: ["Questions", "Les questions posées dans les salons publics, et leur réponse.", "question", "#60a5fa"],
-  sondages: ["Salons", "Salon par salon : les sondages, les idées, et ce que chacun peut y faire.", "sondage", "#818cf8"],
+  sondages: ["Salons", "Salon par salon : les sondages, les idées, l'entraide et le trade, les équipages, les annonces, et ce que chacun peut y faire.", "sondage", "#818cf8"],
   clan: ["Clan Rell Seas", "Les membres du clan, leur activité, les rappels d'inactivité.", "personnes", "#2dd4bf"]
 };
 function introOnglet(cle) {
@@ -1285,13 +1285,15 @@ const PROFILS = {ouvert: ["Ouvert à tous", "var(--vert)"], lecture: ["Lecture s
 RENDUS.sondages = (vue, plein) => {
   const s = etat.d.sondages || {}, liste = s.liste || [], st = s.stats || {}, f = etat.f.sond;
   const idees = etat.d.suggestions || {}, si = idees.stats || {};
-  const changer = () => { reinitPages("sond"); reinitPages("idee"); sauver(); rendre("sondages"); };
+  const changer = () => { ["sond", "idee", "entr", "equi", "anno"].forEach(reinitPages); sauver(); rendre("sondages"); };
+  const en = etat.d.entraide || {}, le = en.liste || [], enCours = le.filter(x => x.statut === "ouverte" || x.statut === "prise").length;
   if (plein) {
     vue.replaceChildren();
     vue.append(h("div", {classe: "tuiles"},
       tuile({cle: "s1", lib: "Sondages en cours", val: st.en_cours || 0, teinte: "var(--vert)"}),
       tuile({cle: "s2", lib: "Idées à traiter", val: si.ouvertes || 0, teinte: "var(--ambre)"}),
-      tuile({cle: "s3", lib: "Votes aux sondages · 30 jours", val: st.votes_mois || 0, teinte: "var(--cyan)"})));
+      tuile({cle: "s3", lib: "Votes aux sondages · 30 jours", val: st.votes_mois || 0, teinte: "var(--cyan)"}),
+      tuile({cle: "s4", lib: "Entraide et trade en cours", val: enCours, teinte: "#84cc16"})));
     vue.append(h("div", {classe: "outils"}, recherche(f.q, "Question, idée, membre…", (v) => { f.q = v; changer(); })));
     vue.append(h("div", {classe: "pile resultats"}));
   }
@@ -1325,6 +1327,42 @@ RENDUS.sondages = (vue, plein) => {
     else sectI.append(vide(f.idees === "ouvertes" ? "Aucune idée à traiter" : "Rien ici", "Change le filtre ou la recherche."));
   }
   zone.append(sectI);
+  // 🛟 L'entraide et le trade : « toutes les informations au propre »
+  const sectE = h("section", {classe: "section"}, sectionTete("Entraide et trade", "personnes", le.length ? nombre(le.length) + " demande(s)" : null),
+    h("p", {classe: "aide"}, "Chaque demande des posts 🛟 Help et 🤝 Trade : qui l'a faite, qui est venu, qui l'a certifiée, avec qui l'échange s'est fait. Close, elle disparaît de Discord ; elle reste ici."));
+  if (en.erreur) sectE.append(vide("Entraide momentanément illisible"));
+  else {
+    const ouverte = (x) => x.statut === "ouverte" || x.statut === "prise";
+    sectE.append(puces([["ouvertes", "En cours", enCours, "var(--vert)"], ["trade", "Trade", le.filter(x => x.zone === "trade").length, "var(--ambre)"],
+      ["toutes", "Toutes", le.length]], f.entr, (v) => { f.entr = v; changer(); }));
+    const filtre = le.filter(x => (f.entr === "toutes" || (f.entr === "ouvertes" ? ouverte(x) : x.zone === f.entr))
+      && cherche(x, x.titre, x.type, x.champs.map(c => c[1]).join(" ")));
+    if (filtre.length) paginer("entr", filtre, carteDemande, sectE);
+    else sectE.append(vide(f.entr === "ouvertes" ? "Aucune demande en cours" : "Rien ici", "Change le filtre ou la recherche."));
+  }
+  zone.append(sectE);
+  // ⚓ Les équipages
+  const eq = etat.d.equipages || {}, lq = eq.liste || [];
+  const sectQ = h("section", {classe: "section"}, sectionTete("Équipages", "personnes", lq.length ? nombre(lq.length) + " équipage(s)" : null),
+    h("p", {classe: "aide"}, "Les équipages du post ⚓ Crews, Pirates ou Marine, et s'ils recrutent."));
+  if (eq.erreur) sectQ.append(vide("Équipages momentanément illisibles"));
+  else {
+    const filtre = lq.filter(x => !f.q || [x.nom, x.faction, P(x.capitaine).nom, P(x.capitaine).pseudo].join(" ").toLowerCase().includes(f.q));
+    if (filtre.length) paginer("equi", filtre, carteEquipage, sectQ);
+    else sectQ.append(vide("Aucun équipage", "Ils se publient dans le post ⚓ Crews."));
+  }
+  zone.append(sectQ);
+  // 📣 Les annonces et leurs « ✅ Vu »
+  const an = etat.d.annonces || {}, la = an.liste || [];
+  const sectA = h("section", {classe: "section"}, sectionTete("Annonces", "journal", la.length ? nombre(la.length) + " annonce(s)" : null),
+    h("p", {classe: "aide"}, "Les annonces publiées depuis 📋logs, et combien de membres ont cliqué « ✅ Vu »."));
+  if (an.erreur) sectA.append(vide("Annonces momentanément illisibles"));
+  else {
+    const filtre = la.filter(x => !f.q || [x.titre, x.texte, x.salon].join(" ").toLowerCase().includes(f.q));
+    if (filtre.length) paginer("anno", filtre, carteAnnonce, sectA);
+    else sectA.append(vide("Aucune annonce", "« Nouvelle annonce » dans 📋logs."));
+  }
+  zone.append(sectA);
   // 🔐 Ce que chacun peut faire, salon par salon
   const cats = etat.d.salons || [];
   if (Array.isArray(cats) && cats.length) zone.append(repli("Droits des salons · ce que @everyone peut faire", false,
@@ -1353,6 +1391,49 @@ function carteIdee(x) {
         "Envoyer la réponse")}, "Répondre") : null,
       peutAgir() ? h("button", {classe: "bouton p danger", type: "button", onclick: () => agir({action: "suggestion_retirer", suggestion: x.id},
         "Retirer cette idée du salon ?", "Sa carte disparaît de Discord ; elle reste ici.", {}, "Retirer du salon", "danger")}, "Retirer") : null) : null);
+}
+const STATUTS_E = {ouverte: ["Ouverte", "var(--vert)"], prise: ["En cours", "var(--ambre)"], terminee: ["Terminée", "var(--cyan)"],
+  fermee: ["Fermée", "var(--gris)"], expiree: ["Fermée sans activité", "var(--gris)"], retiree: ["Retirée", "var(--gris)"]};
+function lignesChamps(paires) {
+  return paires.length ? h("div", {classe: "texte", style: "font-size:13px;color:var(--t2)"},
+    paires.map(([l, v]) => h("div", {}, h("b", {}, l + " : "), v))) : null;
+}
+function carteDemande(x) {
+  const p = P(x.auteur), [lib, teinte] = STATUTS_E[x.statut] || [x.libelle, null];
+  const ouverte = x.statut === "ouverte" || x.statut === "prise";
+  const fin = x.certifie_par ? "certifiée par " + P(x.certifie_par).nom : x.ferme_par ? "close par " + P(x.ferme_par).nom : "";
+  return h("article", {classe: "carte" + (ouverte ? " chaude" : "")},
+    h("div", {classe: "qui"}, avatar(p), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, lienNom(x.auteur)),
+      h("div", {classe: "sous-nom"}, (x.emoji ? x.emoji + " " : "") + x.type + " · n°" + x.id + " · " + depuis(x.cree)))),
+    h("div", {classe: "question-sondage"}, x.titre),
+    lignesChamps(x.champs),
+    x.aidants.length ? h("div", {classe: "meta"}, (x.zone === "trade" ? "Intéressés : " : "Venus aider : ") + x.aidants.map(a => P(a).nom).join(", ")) : null,
+    x.partenaire ? h("div", {classe: "meta"}, "Échange avec " + P(x.partenaire).nom) : null,
+    h("div", {classe: "pastilles"}, pastille(lib, teinte, null, true), fin ? h("span", {classe: "meta"}, fin + (x.ferme ? " · " + depuis(x.ferme) : "")) : null),
+    (x.lien || x.transcript) ? h("div", {classe: "actions", style: "margin-top:10px"},
+      x.lien ? h("a", {classe: "bouton p", href: x.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Voir sur Discord") : null,
+      x.transcript ? h("a", {classe: "bouton p discret", href: x.transcript, target: "_blank", rel: "noopener noreferrer"}, icone("ticket", 14), "Historique") : null) : null);
+}
+function carteEquipage(x) {
+  const p = P(x.capitaine);
+  return h("article", {classe: "carte"},
+    h("div", {classe: "qui"}, avatar(p), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, x.nom),
+      h("div", {classe: "sous-nom"}, x.faction + " · capitaine " + p.nom + " · " + depuis(x.cree)))),
+    lignesChamps(Object.entries(x.champs)),
+    x.presentation ? h("div", {classe: "texte clamp3 deplier", style: "font-size:13px;color:var(--t2)", onclick: deplier}, x.presentation) : null,
+    h("div", {classe: "pastilles"}, pastille(x.recrute ? "Recrute" : "Complet", x.recrute ? "var(--vert)" : "var(--gris)", null, true)),
+    x.lien ? h("div", {classe: "actions", style: "margin-top:10px"},
+      h("a", {classe: "bouton p", href: x.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Voir sur Discord")) : null);
+}
+function carteAnnonce(x) {
+  return h("article", {classe: "carte"},
+    h("div", {classe: "qui"}, avatar(P(x.auteur)), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, x.titre),
+      h("div", {classe: "sous-nom"}, x.salon + " · " + depuis(x.cree) + " · par " + P(x.auteur).nom))),
+    h("div", {classe: "texte clamp3 deplier", style: "font-size:13px;color:var(--t2)", onclick: deplier}, x.texte),
+    h("div", {classe: "pastilles"}, pastille("✅ Vu par " + nombre(x.vues), "var(--vert)", x.vus.length ? x.vus.map(v => P(v).nom).join(", ") : null, true),
+      x.mention ? h("span", {classe: "meta"}, "mention " + x.mention) : null),
+    x.lien ? h("div", {classe: "actions", style: "margin-top:10px"},
+      h("a", {classe: "bouton p", href: x.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Voir sur Discord")) : null);
 }
 function carteCategorie(cat) {
   return h("article", {classe: "carte"}, h("h3", {style: "margin:0 0 8px;font-size:14px"}, cat.categorie),

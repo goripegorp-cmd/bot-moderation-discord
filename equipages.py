@@ -710,6 +710,11 @@ async def retirer(g, eid: int, par_id: int = 0) -> bool:
     return True
 
 
+async def lister(guild_id: int) -> list:
+    """Pour le site : les équipages en place."""
+    return await _lignes(_SQL_ACTIFS, (int(guild_id),))
+
+
 async def demenager(g) -> int:
     """22/10/2026, « deux fils seulement » : les équipages de l'ancien forum deviennent des cartes du
     post ⚓ Crews — rien n'est perdu (nom, faction, champs, recrutement, capitaine)."""
