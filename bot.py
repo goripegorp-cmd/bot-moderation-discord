@@ -12972,6 +12972,7 @@ async def entraide_task():
             await entraide.entretenir(g)
         except Exception as ex:
             _logerr("entraide.entretien", ex, guild_id=g.id)
+    await _etat_public()  # /stats dit si l'entraide est en place et les tickets regroupés
 
 
 @entraide_task.before_loop
@@ -13138,7 +13139,10 @@ async def _etat_public():
             "aide": any(c.get('aide_message') for c in confs),
             "automod_invitations": any(c.get('automod_invitations_v1') for c in confs),
             "suggestions_v3": any(c.get('suggestions_v3') for c in confs),
-            "boosts": any(c.get('boosts_entete') for c in confs)})
+            "boosts": any(c.get('boosts_entete') for c in confs),
+            "entraide": any(c.get('rs_actif') for c in confs),
+            "entraide_salons": max([len(c.get('rs_salons') or {}) for c in confs] or [0]),
+            "tickets_regroupes": any(c.get('tickets_categorie') for c in confs)})
     except Exception as ex:
         _logerr("etat.public", ex)
 
