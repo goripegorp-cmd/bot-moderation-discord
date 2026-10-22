@@ -49,7 +49,6 @@ import annonces
 import casier
 import clan
 import entraide
-import equipages
 import questions
 import recrutements
 import registre
@@ -725,22 +724,6 @@ async def _entraide(g, qui) -> dict:
                                       "total": len(liste), "certifiees": sum(1 for x in liste if x["certifie_par"])}}
 
 
-async def _equipages(g, qui) -> dict:
-    """Les équipages du post ⚓ Crews : faction, capitaine, s'ils recrutent."""
-    cf = await equipages.conf(g)
-    liste = []
-    for e in await equipages.lister(g.id):
-        champs = e["champs"] or {}
-        lien = (f"https://discord.com/channels/{g.id}/{cf['forum']}/{e['fil_id']}" if e["mode"] == "carte"
-                else f"https://discord.com/channels/{g.id}/{e['fil_id']}")
-        liste.append({"id": e["id"], "nom": e["nom"], "faction": equipages.FACTIONS.get(e["faction"], ("", e["faction"]))[1],
-                      "capitaine": qui(e["capitaine_id"]), "recrute": bool(e["recrute"]),
-                      "champs": {c.carte: str(champs.get(c.cle)) for c in equipages.CHAMPS
-                                 if c.carte and str(champs.get(c.cle) or "").strip()},
-                      "presentation": str(champs.get("presentation") or ""), "cree": e["cree"], "lien": lien})
-    return {"liste": liste, "stats": {"total": len(liste), "recrutent": sum(1 for x in liste if x["recrute"])}}
-
-
 async def _annonces(g, qui) -> dict:
     """Les annonces publiées depuis 📋logs et qui a cliqué « ✅ Vu »."""
     liste = []
@@ -808,7 +791,7 @@ async def donnees(g, portee: str = "tout") -> dict:
     for nom, fn in (("journal", lambda: _journal(g, qui)), ("questions", lambda: _questions(g, qui)),
                     ("alertes", lambda: _alertes(g, qui)), ("sondages", lambda: _sondages(g, qui)),
                     ("casier", lambda: _casier(g, qui)), ("suggestions", lambda: _suggestions(g, qui)),
-                    ("entraide", lambda: _entraide(g, qui)), ("equipages", lambda: _equipages(g, qui)),
+                    ("entraide", lambda: _entraide(g, qui)),
                     ("annonces", lambda: _annonces(g, qui)), ("salons", lambda: _droits_salons(g, c))):
         try:
             parties[nom] = await fn()

@@ -33,12 +33,13 @@ QUESTIONS = {
     "Comment on fait pour rejoindre le clan ?": ("clan", "fr"),
     "how can I join the clan?": ("clan", "en"),
     "comment créer un ticket staff ?": ("ticket", "fr"),
-    "Comment je fais pour venir dans un équipage ?": ("equipage", "fr"),
+    "Comment je fais pour venir dans un équipage ?": ("clan", "fr"),  # l'équipage, c'est le clan
     "comment on peut faire du trading ?": ("trade", "fr"),
     "comment faire une suggestion ?": ("suggestion", "fr"),
     "quelqu'un peut m'aider pour le boss ?": ("aide_jeu", "fr"),
     "comment on peut demander de l'aide pour le clan ?": ("aide_clan", "fr"),
-    "where is the crew list?": ("equipage", "en"),
+    "how do I join your crew?": ("clan", "en"),
+    "where is the crew list?": (None, ""),  # plus de liste d'équipages
     "ça va ?": (None, ""),
     "tu as farm combien aujourd'hui ?": (None, ""),
     "quel est le meilleur fruit du jeu ?": (None, ""),
@@ -82,8 +83,7 @@ def faq_env():
         return conf
 
     def destinations(g, _c):
-        return {"ticket": "https://discord.com/channels/1/40", "crews": "https://discord.com/channels/1/41",
-                "trade": "https://discord.com/channels/1/42", "suggestions": "https://discord.com/channels/1/43",
+        return {"ticket": "https://discord.com/channels/1/40", "trade": "https://discord.com/channels/1/42", "suggestions": "https://discord.com/channels/1/43",
                 "help": "", "type_clan": "Rell Seas"}
 
     async def langue(m):

@@ -86,7 +86,7 @@ class Fil(discord.Thread):
     async def add_user(self, m):
         self.membres.append(m.id)
 
-    async def delete(self):
+    async def delete(self, *, reason=None):  # comme discord.Thread.delete (2.7.1)
         self.monde.fils.pop(self.id, None)
         self.monde.effaces.add(self.id)
 

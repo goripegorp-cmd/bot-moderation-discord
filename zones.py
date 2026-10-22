@@ -9,10 +9,9 @@ fonctionnalités qui sont liées à ça fonctionnent, et ça cible bien les salo
 
 · Communautaire : 💬communautaire et 🌊rell-seas (deux forums), puis 🔊Join, inchangé.
   💬communautaire : ❓ Aide · 💬 Chat · 📸 Médias · 💡 Suggestions · 🚀 Boosts · 🤖 Commandes.
-  🌊rell-seas : 🌊 Chat Rell Seas · 🛟 Help · 🤝 Trade · ⚓ Crews.
+  🌊rell-seas : 🧭 Guide · 🌊 Chat Rell Seas · 🛟 Help · 🤝 Trade.
 On écrit dans les posts, on n'en crée pas. Chaque fonction du bot vise son post : l'orientation, les
-suggestions, les boosts, l'entraide et le trade (une carte par demande), les équipages (une carte par
-équipage). Les anciens salons partent dans « 📦 Archives », cachée aux membres : rien n'est perdu, le
+suggestions, les boosts, l'entraide et le trade (une carte par demande). Les anciens salons partent dans « 📦 Archives », cachée aux membres : rien n'est perdu, le
 fondateur choisit ce qu'il supprime, d'un clic, dans 📋logs.
 
 La zone du clan GoRP (sa catégorie existe) : 📣 annonces et 🧵 discussions, voir `installer_clan`.
@@ -27,7 +26,6 @@ import discord
 import boosts
 import config_salons
 import entraide
-import equipages
 import suggestions
 import visuels
 from ui_v2 import LayoutView
@@ -39,8 +37,8 @@ ARCHIVES = "📦 Archives"
 SUJET_COMMU = ("🇫🇷 Le serveur au même endroit : aide, chat, médias, suggestions, boosts, commandes. On écrit dans "
                "les posts.\n🇬🇧 The server in one place: help, chat, media, suggestions, boosts, commands. Write in "
                "the posts.")
-SUJET_RELL = ("🇫🇷 Tout Rell Seas : le chat du jeu, l'entraide, le trade, les équipages. On écrit dans les posts.\n"
-              "🇬🇧 All of Rell Seas: the game chat, help, trade, crews. Write in the posts.")
+SUJET_RELL = ("🇫🇷 Tout Rell Seas : le guide, le chat du jeu, l'entraide, le trade. On écrit dans les posts.\n"
+              "🇬🇧 All of Rell Seas: the guide, the game chat, help, trade. Write in the posts.")
 #  Les posts, dans l'ordre d'affichage : (clé, titre, verrouillé, texte d'ouverture — vide : la
 #  fonction qui l'habite donne le sien). Verrouillé : on y clique, on n'y écrit pas.
 POSTS_COMMU = (
@@ -63,7 +61,6 @@ POSTS_RELL = (
      "updates, tips."),
     ("help", "🛟 Help · Entraide", False, ""),
     ("trade", "🤝 Trade · Échanges", False, ""),
-    ("crews", "⚓ Crews · Équipages", True, ""),
 )
 #  Dans les deux forums : on lit, on écrit dans les posts, on montre (images, liens), on réagit, on
 #  utilise les commandes — mais on n'ouvre pas de nouveau post (« il n'y a que deux fils »).
@@ -181,8 +178,6 @@ async def _ouverture(g, cle: str, titre: str, texte: str) -> LayoutView:
         return boosts.vue_entete(g)
     if cle in ("help", "trade"):
         return entraide.vue_panneau("entraide" if cle == "help" else "trade", await entraide.conf(g), g)
-    if cle == "crews":
-        return equipages.vue_panneau()
     return _vue_texte(titre, "")
 
 
@@ -257,17 +252,12 @@ async def _brancher(g, posts: dict) -> None:
         await _db_set(g.id, "rs_salons", salons)
         await _db_set(g.id, "rs_panneaux", dict(ouvertures))
         await _db_set(g.id, "rs_ouvertures", ouvertures)
-    if int(c.get("eq_forum", 0) or 0) != p["crews"]["id"]:
-        await _db_set(g.id, "eq_forum", p["crews"]["id"])
-        await _db_set(g.id, "eq_panneau", p["crews"]["ouverture"])
-        await _db_set(g.id, "eq_ouverture", p["crews"]["ouverture"])
 
 
 async def installer(g, *, forum: bool | None = None) -> list:
     """Crée ce qui manque — les deux forums, leurs posts, les rôles de guide —, branche chaque
     fonction sur son post, range ; la première fois, ferme proprement l'ancienne installation (les
-    demandes à republier, les équipages devenus cartes) et met ses salons aux archives. Ne supprime
-    rien. Rend la liste de ce qui a été fait."""
+    demandes à republier) et range ses salons. Ne supprime rien. Rend la liste de ce qui a été fait."""
     p = getattr(g.me, "guild_permissions", None)
     if not (p and p.manage_channels and p.manage_roles):
         raise PermissionError("Il me faut « Gérer les salons » et « Gérer les rôles ».")
@@ -293,7 +283,6 @@ async def installer(g, *, forum: bool | None = None) -> list:
             faits += await _demenager(g, avant)
             faits += await _archiver(g, cat, {f_commu.id, f_rell.id})
         await entraide.assurer_panneaux(g, forcer=True)
-        await equipages.assurer_panneau(g, forcer=True)
         await _db_set(g.id, "zones_v2", 1)
     try:
         await assurer_guide(g)
@@ -321,7 +310,7 @@ def _correspondances(avant: dict, posts: dict, commu) -> dict:
         if ancien and cle in posts and ancien != int(posts[cle]["id"]):
             paires[ancien] = int(posts[cle]["id"])
     for cle_cfg, cle in (("aide_salon", "aide"), ("suggestions_salon", "suggestions"), ("boosts_salon", "boosts"),
-                         ("zones_forum", "medias"), ("zones_chat", "rell_chat"), ("eq_forum", "crews")):
+                         ("zones_forum", "medias"), ("zones_chat", "rell_chat")):
         lier(avant.get(cle_cfg), cle)
     rs = dict(avant.get("rs_salons") or {})
     lier(rs.get("entraide"), "help")
@@ -358,16 +347,13 @@ async def _reporter(g, paires: dict) -> list:
 
 async def _demenager(g, avant: dict) -> list:
     """L'ancienne installation se ferme proprement : les demandes ouvertes (un post par demande) se
-    ferment en disant où republier, les équipages deviennent des cartes du post ⚓ Crews, les idées
-    encore en vote passent dans le post 💡 Suggestions avec leurs votes."""
+    ferment en disant où republier, les idées encore en vote passent dans le post 💡 Suggestions avec
+    leurs votes."""
     faits = []
     n = await entraide.fermer_anciennes(g, "🔒 L'entraide déménage : republie ta demande dans 🌊rell-seas › 🛟 Help."
                                            " · Moved: post again in 🌊rell-seas › 🛟 Help.")
     if n:
         faits.append(f"{n} ancienne(s) demande(s) fermée(s)")
-    n = await equipages.demenager(g)
-    if n:
-        faits.append(f"{n} équipage(s) passé(s) en cartes")
     ancien = int(avant.get("suggestions_salon", 0) or 0)
     if ancien:
         n = await suggestions.demenager(g, ancien)
@@ -569,15 +555,12 @@ def vue_guide(g, c: dict, cfz: dict, cfe: dict) -> tuple:
         (post(g, cfz, "trade"), "### 🤝 Échanger · Trade\nPropose ton échange. Avec un inconnu, ne donne jamais en "
          "premier : appelle un middleman. Bon des deux côtés ? « Échange conclu ».\n-# Never give first to a stranger: "
          "call a middleman. Both happy? “Trade done”.", "Échanger · Trade"),
-        (post(g, cfz, "crews"), "### ⚓ Équipages · Crews\nPirates ou Marine : publie ton équipage, recrute, ou clique "
-         "« Rejoindre » sur une carte — le capitaine est prévenu.\n-# Post your crew or join one: the captain is "
-         "notified.", "Équipages · Crews"),
     ]
     items = [visuels.bandeau("rs_guide", "Guide Rell Seas"),
              discord.ui.TextDisplay("🇫🇷 **Bienvenue à bord.** Ici, tout se passe dans les posts de ce forum : on "
-                                    "discute, on s'entraide, on échange, on monte son équipage — en français ou en "
-                                    "anglais.\n🇬🇧 **Welcome aboard.** Everything happens in this forum's posts: chat, "
-                                    "help each other, trade, build your crew — in French or English.")]
+                                    "discute, on s'entraide, on échange — en français ou en anglais.\n🇬🇧 **Welcome "
+                                    "aboard.** Everything happens in this forum's posts: chat, help each other, trade "
+                                    "— in French or English.")]
     if _boutons_langue is not None:
         items.append(discord.ui.ActionRow(*_boutons_langue()))
     presentes = [(p, t, b) for p, t, b in lignes if p is not None]
@@ -652,8 +635,6 @@ def lignes_aide(g, c: dict, cfz: dict) -> dict:
                                    "farming, chilling", "Demander · Ask"),
             (post(g, cfz, "trade"), "🤝 **Trade** — fruits et objets, avec middleman · fruits & items, with a "
                                     "middleman", "Échanger · Trade"),
-            (post(g, cfz, "crews"), "⚓ **Crews** — Pirates ou Marine : publie ou rejoins · post or join",
-             "Équipages · Crews"),
         ],
     }
 

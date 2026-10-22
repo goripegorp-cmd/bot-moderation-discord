@@ -98,7 +98,7 @@ import entraide  # l'entraide Rell Seas : help et trade, guides qui certifient, 
 import equipages  # les équipages de Rell Seas : Pirates ou Marine, un post par équipage
 import zones  # les compartiments : Communautaire et Rell Seas, rangés par priorité
 import annonces  # les annonces en un clic : bandeau, texte, liens, « ✅ Vu », un fil par annonce
-import faq  # les questions fréquentes : une carte qui mène au bon endroit (ticket, crews, trade…)
+import faq  # les questions fréquentes : une carte qui mène au bon endroit (ticket, trade…)
 import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -7642,16 +7642,22 @@ async def _ticket_hours_allows(user_id, guild):
     """(autorisé: bool, message_refus: str). Exempte propriétaire serveur + super-owner.
     #4 : désactivable via cfg `ticket_hours_enabled` (défaut True)."""
     try:
-        if user_id == SUPER_OWNER_ID or (guild is not None and user_id == getattr(guild, 'owner_id', 0)):
+        if user_id == SUPER_OWNER_ID or user_id in TETE_IDS or \
+                (guild is not None and user_id == getattr(guild, 'owner_id', 0)):
             return (True, "")
     except Exception:
         pass
     # Restriction désactivable par l'owner (toggle de config) — défaut activée.
     try:
-        if guild is not None and not (await cfg(guild.id)).get('ticket_hours_enabled', True):
-            return (True, "")
-    except Exception:
-        pass
+        if guild is not None:
+            _c = await cfg(guild.id)
+            if not _c.get('ticket_hours_enabled', True):
+                return (True, "")
+            #  22/10/2026 : la direction et le fondateur n'ont « aucune restriction d'heure ».
+            if _ticket_sans_limite(guild, guild.get_member(user_id), _c):
+                return (True, "")
+    except Exception as _ex:
+        _logerr("ticket.horaires", _ex, guild_id=getattr(guild, 'id', 0))
     ok, now_l, next_l = _ticket_hours_status()
     if ok:
         return (True, "")
@@ -8008,6 +8014,37 @@ async def _vue_dossier_ticket_de(g, tk: dict, pris_par: int = 0) -> LayoutView:
                                      pris_par)
 
 
+def _ticket_sans_limite(g, membre, c) -> bool:
+    """22/10/2026, le fondateur : la direction et le fondateur « n'ont aucune restriction d'heure ou autre
+    pour créer des tickets ». Ni horaires, ni type fermé, ni délai, ni quota, ni maximum, ni blacklist."""
+    return membre is not None and (getattr(membre, 'id', 0) in TETE_IDS or _direction_ou_plus(g, membre, c))
+
+
+def _equipe_direction(g, c) -> list:
+    """Qui voit TOUS les tickets : la direction et les rôles au-dessus (le fondateur), plus les deux
+    comptes de tête présents (même si leur rôle change un jour)."""
+    out = []
+    direction = g.get_role(int(c.get('direction_allowed_role', 0) or 0))
+    if direction is not None:
+        out += [r for r in g.roles if r.position >= direction.position and not r.managed and not r.is_default()]
+    out += [m for m in (g.get_member(x) for x in sorted(TETE_IDS)) if m is not None]
+    return out
+
+
+def _equipe_du_type(g, c, pid):
+    """Le rôle staff du type (sinon celui des tickets) et, pour un ticket Rell Seas, les rôles qui gèrent
+    le clan (ceux de /rellseas) : (staff, rôles en plus, groupe du salon porteur)."""
+    pnl = (c.get('ticket_panels') or {}).get(pid) or {}
+    staff = g.get_role(int(pnl.get('staff_role', 0) or c.get('ticket_staff', 0) or 0))
+    extras = []
+    if str(pid) in rellseas_ui.panneaux_tickets(c):
+        for rid in rellseas_ui.roles_autorises(c):
+            r = g.get_role(rid)
+            if r is not None and r != staff and not r.is_default() and r not in extras:
+                extras.append(r)
+    return staff, extras, ("rell" if extras else "")
+
+
 async def create_ticket(i, pid, ans=None):
     """Un seul ticket en cours d'ouverture par membre : deux clics rapprochés passaient tous deux le
     contrôle « max tickets » (la base n'avait pas encore le premier) et ouvraient deux tickets."""
@@ -8024,50 +8061,59 @@ async def create_ticket(i, pid, ans=None):
 async def _create_ticket_corps(i, pid, ans=None):
     ch = None
     try:
+        c = await cfg(i.guild.id)
+        #  22/10/2026 : la direction et le fondateur n'ont « aucune restriction d'heure ou autre ».
+        libre = _ticket_sans_limite(i.guild, i.user, c)
         # ⏰ FENÊTRE HORAIRE (owner) : filet AUTORITATIF — couvre TOUS les chemins de
         # création (bouton direct + soumission du questionnaire). Hors créneau → refus.
-        _ok_h, _msg_h = await _ticket_hours_allows(i.user.id, i.guild)
-        if not _ok_h:
-            return None, _msg_h
+        if not libre:
+            _ok_h, _msg_h = await _ticket_hours_allows(i.user.id, i.guild)
+            if not _ok_h:
+                return None, _msg_h
         # 🚦 COOLDOWN anti-rafale (owner 2026-06-29, audit) : filet AUTORITATIF couvrant les 2
         # chemins (bouton + questionnaire). Empêche le spam fermer→rouvrir. Owner/super-owner
         # exemptés. 100% mémoire (zéro DB, zéro 429, zéro MP).
-        if getattr(i.user, 'id', 0) not in (SUPER_OWNER_ID, getattr(i.guild, 'owner_id', 0)):
+        if not libre and getattr(i.user, 'id', 0) not in (SUPER_OWNER_ID, getattr(i.guild, 'owner_id', 0)):
             if not check_rate_limit(i.guild.id, i.user.id, 'ticket_create'):
                 return None, ("⏳ Tu viens d'ouvrir un ticket — patiente un court instant avant "
                               "d'en rouvrir un 🙏")
-        c = await cfg(i.guild.id)
         # #9/#11 GATE accès (compte récent / niveau de jeu) + #5 QUOTA tickets/jour.
         # Tout OFF par défaut ; owner/super-owner jamais bloqués. Fail-open.
-        _gate = await _access_gate_reason(getattr(i, 'user', None), c)
+        _gate = "" if libre else await _access_gate_reason(getattr(i, 'user', None), c)
         if _gate:
             return None, _gate
         try:
             _qpd = int(c.get('tickets_per_day', 0) or 0)
-            if _qpd > 0 and getattr(i.user, 'id', 0) not in (SUPER_OWNER_ID, getattr(i.guild, 'owner_id', 0)):
+            if _qpd > 0 and not libre and getattr(i.user, 'id', 0) not in (SUPER_OWNER_ID, getattr(i.guild, 'owner_id', 0)):
                 if await count_user_tickets_today(i.guild, i.user.id) >= _qpd:
                     return None, (f"📊 Tu as atteint la limite de **{_qpd} ticket(s) par jour**. "
                                   f"Réessaie demain, ou contacte le staff autrement 🙏")
-        except Exception:
-            pass
+        except Exception as _ex:
+            _logerr("ticket.quota", _ex, guild_id=i.guild.id)
         pnl = c.get('ticket_panels', {}).get(pid, {})
+        if pnl.get('disabled') and not libre:
+            #  Le type a été fermé entre le menu et la confirmation : fermé veut dire fermé.
+            nom = (pnl.get('name') or "ce type")[:40]
+            return None, (f"🔒 Les tickets « {nom} » sont fermés pour le moment.\n"
+                          f"-# {nom} tickets are closed for now.")
         # 🚫 BLACKLIST — filet AUTORITATIF (owner 2026-06-29, audit) : re-vérifie dans le SINK
         # (le check du bouton reste pour le feedback immédiat avant le formulaire). Défense en
         # profondeur : si create_ticket est un jour appelé par un autre chemin, le blacklisté
         # ne passe pas. Owner/super-owner exemptés. Blacklist per-panel indexée par pid.
-        if i.user.id in (pnl.get('blacklist') or []) and \
+        if i.user.id in (pnl.get('blacklist') or []) and not libre and \
                 getattr(i.user, 'id', 0) not in (SUPER_OWNER_ID, getattr(i.guild, 'owner_id', 0)):
             return None, ("🚫 Vous avez été blacklisté de ce panel de tickets. "
                           "Contactez un administrateur si vous pensez que c'est une erreur.")
         cat = await _categorie_tickets(i.guild) or i.guild.get_channel(pnl.get('category', 0))
         
-        # Utiliser le rôle staff du panel, sinon le rôle staff global
-        staff_role_id = pnl.get('staff_role', 0) or c.get('ticket_staff', 0)
-        staff = i.guild.get_role(staff_role_id)
-        
+        # Le rôle staff du panel (sinon le rôle staff global) ; pour Rell Seas, les rôles du clan en
+        # plus ; la direction et le fondateur voient TOUS les tickets (22/10/2026).
+        staff, equipe_type, groupe = _equipe_du_type(i.guild, c, pid)
+        direction = _equipe_direction(i.guild, c)
+
         mx = pnl.get('max', 1)
         if not cat: return None, "❌ Catégorie non configurée"
-        if await count_user_tickets(i.guild, i.user.id, pid) >= mx:
+        if not libre and await count_user_tickets(i.guild, i.user.id, pid) >= mx:
             return None, f"❌ Max {mx} ticket(s)"
         # owner 2026-07-09 : dans un ticket, l'ouvreur ET le staff peuvent envoyer IMAGES / GIFs /
         # vidéos / liens (utile pour des PREUVES). On accorde attach_files + embed_links + réactions +
@@ -8087,6 +8133,9 @@ async def _create_ticket_corps(i, pid, ans=None):
                 view_channel=True, send_messages=True, read_message_history=True,
                 attach_files=True, embed_links=True, add_reactions=True,
                 use_external_emojis=True, use_external_stickers=True)
+        for _cible in (*equipe_type, *direction):
+            if _cible is not None and _cible not in ow:
+                ow[_cible] = discord.PermissionOverwrite(**tickets_fils.DROITS_SALON)
         if i.guild.owner:
             ow[i.guild.owner] = discord.PermissionOverwrite(
                 view_channel=True, send_messages=True, read_message_history=True, manage_channels=True,
@@ -8096,7 +8145,9 @@ async def _create_ticket_corps(i, pid, ans=None):
             try:
                 _par = await tickets_fils.parent(
                     i.guild, cat, staff, c.get(tickets_fils.CLE_PARENTS) or {},
-                    lambda p: db_set(i.guild.id, tickets_fils.CLE_PARENTS, p))
+                    lambda p: db_set(i.guild.id, tickets_fils.CLE_PARENTS, p),
+                    voient=(*equipe_type, *direction), groupe=groupe,
+                    nom="🎫・tickets-rell-seas" if groupe == "rell" else "")
                 if _par is not None:
                     ch = await tickets_fils.ouvrir(_par, i.user, f"ticket-{i.user.name}")
             except discord.HTTPException as _fx:
@@ -8223,9 +8274,12 @@ async def _ticket_ouvrir(i, pid):
         if not pnl:
             return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
 
+        #  22/10/2026 : la direction et le fondateur n'ont « aucune restriction d'heure ou autre ».
+        libre = _ticket_sans_limite(i.guild, i.user, c)
+
         # ⏸️ DÉSACTIVATION TEMPORAIRE (fondateur) : si le panneau est désactivé, on
         # refuse la création avec un message clair (le fondateur a coupé via le toggle).
-        if pnl.get('disabled'):
+        if pnl.get('disabled') and not libre:
             nom = (pnl.get('name') or "ce type")[:40]
             return await i.response.send_message(
                 f"🔒 **Les tickets « {nom} » sont fermés pour le moment.** Reviens un peu plus tard.\n"
@@ -8235,7 +8289,7 @@ async def _ticket_ouvrir(i, pid):
         #                    🚫 VÉRIFICATION BLACKLIST
         # ═══════════════════════════════════════════════════════════════════════════════
         blacklist = pnl.get('blacklist', [])
-        if i.user.id in blacklist:
+        if i.user.id in blacklist and not libre:
             return await i.response.send_message(
                 "🚫 **Accès refusé**\n\nVous avez été blacklisté de ce panel de tickets.\nContactez un administrateur si vous pensez que c'est une erreur.",
                 ephemeral=True
@@ -8244,13 +8298,14 @@ async def _ticket_ouvrir(i, pid):
         # ⏰ FENÊTRE HORAIRE (owner) : refus hors 07h–12h / 13h–22h30 (Paris) — feedback
         # IMMÉDIAT avant le modal/la création (pour ne pas faire remplir un formulaire
         # pour rien). Le filet dans create_ticket reste l'enforcement autoritatif.
-        _ok_h, _msg_h = await _ticket_hours_allows(i.user.id, i.guild)
-        if not _ok_h:
-            return await i.response.send_message(_msg_h, ephemeral=True)
+        if not libre:
+            _ok_h, _msg_h = await _ticket_hours_allows(i.user.id, i.guild)
+            if not _ok_h:
+                return await i.response.send_message(_msg_h, ephemeral=True)
 
         qs = pnl.get('questions', [])
         mx = pnl.get('max', 1)
-        if await count_user_tickets(i.guild, i.user.id, pid) >= mx:
+        if not libre and await count_user_tickets(i.guild, i.user.id, pid) >= mx:
             return await i.response.send_message(f"❌ Max {mx} ticket(s)", ephemeral=True)
         if qs:
             await i.response.send_modal(TicketQuestionnaireModal(pid, qs))
@@ -8262,6 +8317,8 @@ async def _ticket_ouvrir(i, pid):
             _dsc = (pnl.get('embed_description') or '').strip()
             _recap = (f"📩 Tu vas ouvrir un ticket **« {_nm} »**."
                       + (f"\n> _{_dsc[:200]}_" if _dsc else "")
+                      + ("\n-# 🔒 Fermé aux membres pour le moment : la direction peut quand même l'ouvrir."
+                         if pnl.get('disabled') else "")
                       + "\n\nUn **salon privé** sera créé et le **staff prévenu**. "
                         "Confirme si c'est bien ce que tu veux 👇")
             await i.response.send_message(
@@ -8322,7 +8379,7 @@ class TicketCreateDynamic(discord.ui.DynamicItem[Button],
 HUB_PID = "__hub__"          # sentinelle : « le panneau unifié », pas un type
 
 
-def _types_tickets(cfg_guild) -> list:
+def _types_tickets(cfg_guild, tous: bool = False) -> list:
     """Les types proposables, dans un ordre STABLE, désactivés exclus.
 
     ⚠️ L'ORDRE VIENT DU DICTIONNAIRE DE CONFIGURATION, PAS D'UN TRI. Un tri
@@ -8334,6 +8391,8 @@ def _types_tickets(cfg_guild) -> list:
         if not isinstance(pnl, dict):
             continue
         if pnl.get('disabled'):
+            if tous:  # la direction et le fondateur : le type fermé reste là, dit fermé
+                out.append((pid, dict(pnl, embed_description="🔒 Fermé aux membres — toi, tu peux l'ouvrir.")))
             continue
         out.append((pid, pnl))
     return out
@@ -8533,7 +8592,7 @@ class TicketHubOpenDynamic(discord.ui.DynamicItem[Button],
     async def callback(self, i):
         try:
             c = await cfg(i.guild.id)
-            types = _types_tickets(c)
+            types = _types_tickets(c, tous=_ticket_sans_limite(i.guild, i.user, c))
 
             if not types:
                 return await i.response.send_message(
@@ -13133,6 +13192,16 @@ async def entraide_task():
                 faits = await zones.installer(g)
                 await _entraide_journal(g, "zones.guide", "Guide Rell Seas en place : " + (", ".join(faits) or
                                                                                           "rien ne manquait") + ".")
+            if g.owner_id in TETE_IDS and c.get('zones_v2') and not c.get('equipages_retires_v1'):
+                # 22/10 (nuit), le fondateur : « le crew équipage… pour éviter que les gens fassent leur pub…
+                # c'est une mauvaise idée ». Plus de post ⚓ Crews, plus de lien qui y mène.
+                await db_set(g.id, 'equipages_retires_v1', now().isoformat())
+                await _retirer_equipages(g)
+            if not c.get('tickets_visibilite_v1'):
+                # 22/10 (nuit), le fondateur : « que les tickets soient bien vus par le rôle administrateur
+                # en question… la direction et le fondateur voient les tickets ».
+                await db_set(g.id, 'tickets_visibilite_v1', now().isoformat())
+                await _tickets_visibilite(g)
             if g.owner_id in TETE_IDS and c.get('zones_archives') and not c.get('archives_supprimees_v1'):
                 # 22/10 (nuit), le fondateur : « je veux pas d'archive, tu peux tout enlever ».
                 await db_set(g.id, 'archives_supprimees_v1', now().isoformat())
@@ -13146,7 +13215,6 @@ async def entraide_task():
             if time.monotonic() - _zones_entretenues.get(g.id, -1e9) > 1800:
                 _zones_entretenues[g.id] = time.monotonic()
                 await zones.entretenir(g)
-                await equipages.entretenir(g)
         except Exception as ex:
             _logerr("entraide.entretien", ex, guild_id=g.id)
     await _etat_public()  # /stats dit si l'entraide est en place et les tickets regroupés
@@ -13195,6 +13263,78 @@ async def _reporter_immunites(g, c) -> int:
                 n += 1
         await db.commit()
     _immunity_cache.pop(g.id, None)
+    return n
+
+
+async def _tickets_visibilite(g) -> int:
+    """Les salons qui portent les fils donnent « Gérer les fils » à la direction et au-dessus (et aux deux
+    comptes de tête) ; un ticket Rell Seas encore ouvert accueille les rôles du clan s'ils ne le voient
+    pas ; un ticket en salon classique reçoit les mêmes droits. Rien n'est retiré."""
+    c = await cfg(g.id)
+    direction = _equipe_direction(g, c)
+    n = 0
+    porteurs = dict.fromkeys(int(v) for v in (c.get(tickets_fils.CLE_PARENTS) or {}).values() if str(v).isdigit())
+    for cid in porteurs:
+        ch = g.get_channel(cid)
+        if not isinstance(ch, discord.TextChannel):
+            continue
+        try:
+            n += await tickets_fils.completer(ch, direction)
+        except discord.HTTPException as ex:
+            _logerr("tickets.visibilite", ex, guild_id=g.id)
+    async with get_db() as db:
+        async with db.execute("SELECT channel_id, panel_id FROM tickets WHERE guild_id=? AND status='open'",
+                              (g.id,)) as cur:
+            ouverts = await cur.fetchall()
+    for chid, pid in ouverts:
+        staff, equipe_type, _groupe = _equipe_du_type(g, c, str(pid))
+        try:
+            ch = await tickets_fils.salon(g, chid)
+            if isinstance(ch, discord.Thread):
+                porteur = ch.parent
+                for role in equipe_type:
+                    if porteur is not None and porteur.permissions_for(role).manage_threads:
+                        continue
+                    for m in [m for m in role.members if not m.bot][:25]:
+                        await ch.add_user(m)
+                        n += 1
+            elif isinstance(ch, discord.TextChannel):
+                n += await tickets_fils.completer(ch, (staff, *equipe_type, *direction), tickets_fils.DROITS_SALON)
+        except discord.HTTPException as ex:
+            _logerr("tickets.visibilite", ex, guild_id=g.id)
+    await _au_journal(g, "Tickets", "tickets.visibilite",
+                      "Tickets : la direction et le fondateur voient tous les tickets, l'équipe Rell Seas les siens"
+                      + (f" ({n} accès ajouté(s))." if n else " (rien ne manquait)."))
+    return n
+
+
+async def _retirer_equipages(g) -> int:
+    """Le post ⚓ Crews (s'il reste) et les équipages partent ; le guide Rell Seas et ❓ aide suivent."""
+    c = await cfg(g.id)
+    posts = dict(c.get('zones_posts') or {})
+    info = posts.pop('crews', None) or {}
+    pid = int(info.get('id', 0) or 0)
+    if pid:
+        fil = g.get_channel_or_thread(pid)
+        try:
+            if fil is None:
+                fil = await g.fetch_channel(pid)
+            await fil.delete(reason="Équipages retirés : pas de pub")
+        except discord.NotFound:
+            pass
+        except discord.HTTPException as ex:
+            _logerr("zones.equipages", ex, guild_id=g.id)
+        await db_set(g.id, 'zones_posts', posts)
+    for cle in ('eq_forum', 'eq_panneau', 'eq_ouverture'):
+        await db_set(g.id, cle, 0)
+    n = await equipages.tout_retirer(g.id)
+    await _au_journal(g, "Config", "zones.equipages", "Équipages retirés de 🌊rell-seas (éviter la pub)"
+                      + (f" : {n} équipage(s) sorti(s) de la liste." if n else "."))
+    try:
+        await zones.assurer_guide(g)
+    except discord.HTTPException as ex:
+        _logerr("zones.guide", ex, guild_id=g.id)
+    await _salon_aide(g)
     return n
 
 
@@ -13315,7 +13455,7 @@ def _faq_destinations(g, c) -> dict:
         pid = int((posts.get(cle) or {}).get('id', 0) or 0)
         return f"https://discord.com/channels/{g.id}/{pid}" if pid else ""
     ticket = _salon_des_tickets(g)
-    out = {"ticket": ticket.jump_url if ticket is not None else "", "crews": lien("crews"), "trade": lien("trade"),
+    out = {"ticket": ticket.jump_url if ticket is not None else "", "trade": lien("trade"),
            "suggestions": lien("suggestions"), "help": lien("help")}
     clan = next((p.get('name') for p in (c.get('ticket_panels') or {}).values() if isinstance(p, dict)
                  and not p.get('disabled') and any(m in config_salons.normaliser(p.get('name') or '')
@@ -13565,7 +13705,8 @@ async def _etat_public():
             "deux_forums": any(c.get('zones_v2') for c in confs),
             "guide_rell": any(c.get('zones_guide_v') for c in confs),
             "archives": sum(len(c.get('zones_archives') or []) for c in confs),
-            "equipages": any(c.get('eq_forum') for c in confs),
+            "sans_equipages": any(c.get('equipages_retires_v1') for c in confs),
+            "tickets_direction": any(c.get('tickets_visibilite_v1') for c in confs),
             "menage": any(c.get('menage_v1') for c in confs),
             "clan_zone": any(c.get('clan_v1') for c in confs),
             "entraide_salons": max([len(c.get('rs_salons') or {}) for c in confs] or [0]),

@@ -130,6 +130,7 @@ def test_Z1_ce_soir_tout_passe_dans_deux_forums_le_vocal_reste(env):
     g, join, vocal_rell, rell = serveur_de_ce_soir(env)
     anciens = {n: g.nom(n) for n in ("❓aide", "💬chat", "💡suggestions", "🚀boosts", "🧵discussions",
                                      "🌊chat-rellseas", "🛟help", "🤝trade", "⚓crews")}
+    #  « Le crew équipage… une mauvaise idée » : l'ancien forum ⚓crews part avec le reste, sans successeur.
     vieux_chat = anciens["💬chat"].id
     env.conf.update(link_allowed_channels=[vieux_chat], image_allowed_channels=[vieux_chat, 999],
                     welcome_channel=vieux_chat)
@@ -149,14 +150,13 @@ def test_Z1_ce_soir_tout_passe_dans_deux_forums_le_vocal_reste(env):
     posts = c["zones_posts"]
     verrous = {cle: g.fils[p["id"]].locked for cle, p in posts.items()}
     assert verrous == {"aide": True, "chat": False, "medias": False, "suggestions": True, "boosts": True,
-                       "commandes": False, "guide": True, "rell_chat": False, "help": False, "trade": False,
-                       "crews": True}
+                       "commandes": False, "guide": True, "rell_chat": False, "help": False, "trade": False}
     assert (c["aide_salon"], c["aide_message"]) == (posts["aide"]["id"], posts["aide"]["id"])
     assert c["suggestions_salon"] == posts["suggestions"]["id"]
     assert c["suggestions_panneau"] == g.fils[posts["suggestions"]["id"]].messages[-1].id,         "sous l'idée déménagée, le bouton « Proposer » redescend"
     assert (c["boosts_salon"], c["boosts_entete"]) == (posts["boosts"]["id"],) * 2
     assert c["rs_salons"] == {"entraide": posts["help"]["id"], "trade": posts["trade"]["id"]} == c["rs_ouvertures"]
-    assert (c["eq_forum"], c["eq_ouverture"]) == (posts["crews"]["id"],) * 2, "chaque fonction vise son post"
+    assert not any("⚓" in x.fil.name for x in rell_forum.crees), "plus de post ⚓ Crews"
     archives = g.get_channel(c["zones_categorie_archives"])
     assert archives.name == "📦 Archives" and archives.kw["overwrites"][g.default_role].view_channel is False
     for nom, ch in anciens.items():
@@ -167,14 +167,12 @@ def test_Z1_ce_soir_tout_passe_dans_deux_forums_le_vocal_reste(env):
     assert rell.supprime and rell not in g.categories
     d = run(E.charger(1))
     assert d["statut"] == "fermee" and "republie ta demande dans 🌊rell-seas" in g.fils[d["fil_id"]].envois[-1][0]
-    e = run(Q.charger(1))
-    crews = g.fils[posts["crews"]["id"]]
-    assert e["mode"] == "carte" and e["fil_id"] == crews.messages[0].id, "l'équipage devient une carte"
+    assert run(Q.charger(1))["mode"] != "carte", "l'équipage ne devient pas une carte : il n'y a plus d'équipages"
     s, pour, _contre = run(S.charger(1))
     idees = g.fils[posts["suggestions"]["id"]]
     assert s["channel_id"] == idees.id and s["message_id"] == idees.messages[0].id and pour == 1, \
         "l'idée en vote passe dans le post, avec ses votes"
-    assert c["zones_v2"] == 1 and "1 équipage(s) passé(s) en cartes" in faits
+    assert c["zones_v2"] == 1 and not any("équipage" in f for f in faits)
     n_salons, n_fils = len(g.salons), len(g.fils)
     assert run(ZN.installer(g)) == [] and (len(g.salons), len(g.fils)) == (n_salons, n_fils), "relancer : rien"
 
@@ -183,7 +181,7 @@ def test_Z2_les_fonctions_marchent_dans_leurs_posts(env):
     g, _join, _v, _r = serveur_de_ce_soir(env)
     run(ZN.installer(g))
     posts = env.conf["zones_posts"]
-    aide, trade, crews = (g.fils[posts[k]["id"]] for k in ("help", "trade", "crews"))
+    aide, trade = (g.fils[posts[k]["id"]] for k in ("help", "trade"))
     E._creations.clear()
     run(E.publier(interaction(g, g.membre(20)), E.ZONES["farm"], {"titre": "Niveaux", "pseudo": "P", "niveau": "",
                                                                      "duree": "", "details": ""}))
@@ -192,9 +190,6 @@ def test_Z2_les_fonctions_marchent_dans_leurs_posts(env):
     run(E.publier(interaction(g, g.membre(21)), E.ZONES["trade"], {"donne": "A", "cherche": "B", "pseudo": "P",
                                                                       "details": ""}))
     assert run(E.charger(3))["salon_id"] == trade.id
-    run(Q.publier(interaction(g, g.membre(22)), "marine", {"nom": "La Flotte", "pseudo": "P", "membres": "",
-                                                            "niveau": "", "presentation": "Ordre et honneur."}))
-    assert run(Q.charger(2))["mode"] == "carte" and "La Flotte" in textes(crews.messages[-2].kw["view"])
     assert run(S.salon_de(g)).id == posts["suggestions"]["id"] and run(boosts.salon_de(g)).id == posts["boosts"]["id"]
 
 
@@ -238,8 +233,7 @@ def test_Z6_le_panneau_aide_mene_aux_posts(env):
     groupes = ZN.lignes_aide(g, c, run(ZN.conf(g)))
     assert list(groupes) == ["Communautaire · Community", "Rell Seas"]
     posts = c["zones_posts"]
-    assert [p.id for p, _t, _b in groupes["Rell Seas"]] == [posts[k]["id"] for k in ("rell_chat", "help", "trade",
-                                                                                     "crews")]
+    assert [p.id for p, _t, _b in groupes["Rell Seas"]] == [posts[k]["id"] for k in ("rell_chat", "help", "trade")]
     assert groupes["Communautaire · Community"][0][0].jump_url == f"https://discord.com/channels/1/{posts['chat']['id']}"
     join = next(s for s in g.commu.channels if s.name == "🔊Join")
     assert groupes["Communautaire · Community"][0][1].endswith(f"🔊 <#{join.id}>"), "le vocal, pas celui du clan"
@@ -269,7 +263,7 @@ def test_Z7_le_panneau_aide_bilingue_la_langue_d_un_clic_de_la_marge(env):
     assert "Serveur international" in t and "International server" in t
     assert ids(vue)[:2] == ["i18n_setlang:fr", "i18n_setlang:en"], "le choix de la langue, en tête"
     assert t.index("### Communautaire") < t.index("### Rell Seas") < t.index("### Staff")
-    assert f"<#{g.rules_channel.id}>" in t and "join the clan" in t and "Équipages · Crews" in t
+    assert f"<#{g.rules_channel.id}>" in t and "join the clan" in t and "Crews" not in t, "plus d'équipages"
     assert signature.startswith(f"{ns['AIDE_VERSION']}|")
 
 
@@ -474,19 +468,20 @@ def test_Z15_le_guide_de_rell_seas_en_tete_du_forum(env):
     vue = [k for mid, k in fil.cartes if mid == guide["ouverture"]][-1]["view"]
     t = textes(vue)
     for morceau in ("Bienvenue à bord", "Welcome aboard", "### 🌊 Discuter · Talk", "### 🛟 S'entraider · Get help",
-                    "### 🤝 Échanger · Trade", "### ⚓ Équipages · Crews", "### 🏅 Qui certifie", "### 🏴‍☠️ Le clan GoRP",
+                    "### 🤝 Échanger · Trade", "### 🏅 Qui certifie", "### 🏴‍☠️ Le clan GoRP",
                     "ne donne jamais en premier"):
         assert morceau in t, morceau
+    assert "Équipages" not in t and "Crews" not in t and "crew" not in t, "plus d'équipages"
     roles = c["rs_roles"]
     assert f"<@&{roles['boss']}>" in t and f"<@&{roles['trade']}>" in t, "les rôles qui certifient sont cités"
     liens = [b.url for b in vue.walk_children() if isinstance(b, discord.ui.Button) and b.url]
-    assert liens == [f"https://discord.com/channels/1/{c['zones_posts'][k]['id']}" for k in ("rell_chat", "help", "trade",
-                                                                                           "crews")] + [ticket.jump_url]
+    assert liens == [f"https://discord.com/channels/1/{c['zones_posts'][k]['id']}" for k in ("rell_chat", "help", "trade")
+                     ] + [ticket.jump_url]
     assert compter(vue) <= 40 and c["zones_guide_v"].startswith(f"{ZN.GUIDE_VERSION}|")
     assert not run(ZN.assurer_guide(g)), "rien n'a changé : pas de réécriture"
-    del g.fils[c["zones_posts"]["crews"]["id"]]
-    c["zones_posts"].pop("crews")
-    assert run(ZN.assurer_guide(g)) and "Équipages · Crews" not in textes(fil.cartes[-1][1]["view"]),         "un post parti : sa ligne part (aucun bouton qui ment)"
+    del g.fils[c["zones_posts"]["trade"]["id"]]
+    c["zones_posts"].pop("trade")
+    assert run(ZN.assurer_guide(g)) and "Échanger · Trade" not in textes(fil.cartes[-1][1]["view"]),         "un post parti : sa ligne part (aucun bouton qui ment)"
 
 
 def test_Z16_plus_d_archives_tout_part_meme_si_discord_tarde(env):
@@ -516,3 +511,36 @@ def test_Z16_plus_d_archives_tout_part_meme_si_discord_tarde(env):
     assert "Archives supprimées à la demande du fondateur (9)" in journal[-1][3]
     boucle = next(ast.unparse(n) for n in ARBRE.body if getattr(n, "name", "") == "entraide_task")
     assert boucle.index("db_set(g.id, 'archives_supprimees_v1'") < boucle.index("_supprimer_toutes_archives(g)"),         "une fois, témoin d'abord"
+
+
+def test_Z17_les_equipages_partent_une_fois_et_ne_reviennent_pas(env):
+    """« Le crew équipage… pour éviter que les gens fassent leur pub… c'est une mauvaise idée. »"""
+    g = Monde()
+    _clan_et_vocaux(g, env.conf)
+    run(ZN.installer(g))
+    c = env.conf
+    rell = g.nom("🌊rell-seas")
+    crews = run(rell.create_thread(name="⚓ Crews · Équipages")).thread  # le post d'avant, s'il restait
+    c["zones_posts"]["crews"] = {"id": crews.id, "ouverture": crews.id}
+    c.update(eq_forum=crews.id, eq_panneau=crews.id, eq_ouverture=crews.id)
+    run(Q.publier(interaction(g, g.membre(22)), "marine", {"nom": "La Flotte", "pseudo": "P", "membres": "",
+                                                            "niveau": "", "presentation": "Ordre et honneur."}))
+    journal, aides = [], []
+
+    async def _au_journal(*a, **_k):
+        journal.append(a)
+
+    async def _salon_aide(_g):
+        aides.append(1)
+    ns = {"cfg": env.cfg, "db_set": env.db_set, "zones": ZN, "equipages": Q, "discord": discord,
+          "_au_journal": _au_journal, "_salon_aide": _salon_aide, "_logerr": lambda *a, **k: None}
+    exec(_source("_retirer_equipages"), ns)  # noqa: S102 — code du dépôt
+    assert run(ns["_retirer_equipages"](g)) == 1
+    assert crews.id not in g.fils and "crews" not in c["zones_posts"], "le post ⚓ part"
+    assert (c["eq_forum"], c["eq_panneau"], c["eq_ouverture"]) == (0, 0, 0) and run(Q.lister(1)) == []
+    assert "Équipages retirés" in journal[-1][3] and aides, "noté au journal ; ❓ aide réécrit"
+    run(ZN.entretenir(g))
+    assert not any("⚓" in f.name for f in g.fils.values()), "l'entretien ne le recrée pas"
+    boucle = next(ast.unparse(n) for n in ARBRE.body if getattr(n, "name", "") == "entraide_task")
+    assert boucle.index("db_set(g.id, 'equipages_retires_v1'") < boucle.index("_retirer_equipages(g)"), "une fois"
+    assert "equipages.entretenir" not in boucle and '"crews"' not in _source("_faq_destinations")

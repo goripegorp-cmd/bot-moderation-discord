@@ -742,7 +742,7 @@ const INTROS = {
   moderation: ["Modération", "Le casier par membre, les modérateurs, et le nettoyage.", "bouclier", "#fbbf24"],
   journal: ["Journal", "Tout ce qui s'est passé sur le serveur, jour par jour.", "journal", "#38bdf8"],
   questions: ["Questions", "Les questions posées dans les salons publics, et leur réponse.", "question", "#60a5fa"],
-  sondages: ["Salons", "Salon par salon : les sondages, les idées, l'entraide et le trade, les équipages, les annonces, et ce que chacun peut y faire.", "sondage", "#818cf8"],
+  sondages: ["Salons", "Salon par salon : les sondages, les idées, l'entraide et le trade, les annonces, et ce que chacun peut y faire.", "sondage", "#818cf8"],
   clan: ["Clan Rell Seas", "Les membres du clan, leur activité, les rappels d'inactivité.", "personnes", "#2dd4bf"]
 };
 function introOnglet(cle) {
@@ -1285,7 +1285,7 @@ const PROFILS = {ouvert: ["Ouvert à tous", "var(--vert)"], lecture: ["Lecture s
 RENDUS.sondages = (vue, plein) => {
   const s = etat.d.sondages || {}, liste = s.liste || [], st = s.stats || {}, f = etat.f.sond;
   const idees = etat.d.suggestions || {}, si = idees.stats || {};
-  const changer = () => { ["sond", "idee", "entr", "equi", "anno"].forEach(reinitPages); sauver(); rendre("sondages"); };
+  const changer = () => { ["sond", "idee", "entr", "anno"].forEach(reinitPages); sauver(); rendre("sondages"); };
   const en = etat.d.entraide || {}, le = en.liste || [], enCours = le.filter(x => x.statut === "ouverte" || x.statut === "prise").length;
   if (plein) {
     vue.replaceChildren();
@@ -1341,17 +1341,6 @@ RENDUS.sondages = (vue, plein) => {
     else sectE.append(vide(f.entr === "ouvertes" ? "Aucune demande en cours" : "Rien ici", "Change le filtre ou la recherche."));
   }
   zone.append(sectE);
-  // ⚓ Les équipages
-  const eq = etat.d.equipages || {}, lq = eq.liste || [];
-  const sectQ = h("section", {classe: "section"}, sectionTete("Équipages", "personnes", lq.length ? nombre(lq.length) + " équipage(s)" : null),
-    h("p", {classe: "aide"}, "Les équipages du post ⚓ Crews, Pirates ou Marine, et s'ils recrutent."));
-  if (eq.erreur) sectQ.append(vide("Équipages momentanément illisibles"));
-  else {
-    const filtre = lq.filter(x => !f.q || [x.nom, x.faction, P(x.capitaine).nom, P(x.capitaine).pseudo].join(" ").toLowerCase().includes(f.q));
-    if (filtre.length) paginer("equi", filtre, carteEquipage, sectQ);
-    else sectQ.append(vide("Aucun équipage", "Ils se publient dans le post ⚓ Crews."));
-  }
-  zone.append(sectQ);
   // 📣 Les annonces et leurs « ✅ Vu »
   const an = etat.d.annonces || {}, la = an.liste || [];
   const sectA = h("section", {classe: "section"}, sectionTete("Annonces", "journal", la.length ? nombre(la.length) + " annonce(s)" : null),
@@ -1413,17 +1402,6 @@ function carteDemande(x) {
     (x.lien || x.transcript) ? h("div", {classe: "actions", style: "margin-top:10px"},
       x.lien ? h("a", {classe: "bouton p", href: x.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Voir sur Discord") : null,
       x.transcript ? h("a", {classe: "bouton p discret", href: x.transcript, target: "_blank", rel: "noopener noreferrer"}, icone("ticket", 14), "Historique") : null) : null);
-}
-function carteEquipage(x) {
-  const p = P(x.capitaine);
-  return h("article", {classe: "carte"},
-    h("div", {classe: "qui"}, avatar(p), h("div", {classe: "bloc"}, h("div", {classe: "nom"}, x.nom),
-      h("div", {classe: "sous-nom"}, x.faction + " · capitaine " + p.nom + " · " + depuis(x.cree)))),
-    lignesChamps(Object.entries(x.champs)),
-    x.presentation ? h("div", {classe: "texte clamp3 deplier", style: "font-size:13px;color:var(--t2)", onclick: deplier}, x.presentation) : null,
-    h("div", {classe: "pastilles"}, pastille(x.recrute ? "Recrute" : "Complet", x.recrute ? "var(--vert)" : "var(--gris)", null, true)),
-    x.lien ? h("div", {classe: "actions", style: "margin-top:10px"},
-      h("a", {classe: "bouton p", href: x.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Voir sur Discord")) : null);
 }
 function carteAnnonce(x) {
   return h("article", {classe: "carte"},

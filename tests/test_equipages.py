@@ -251,5 +251,5 @@ def test_Q8_branche_dans_le_bot():
         assert f"equipages.{nom}" in src, f"{nom} doit être réenregistré au démarrage"
     assert "await equipages.init_db()" in src and "await equipages.sur_depart(m)" in src
     boucle = next(ast.unparse(n) for n in ast.parse(src).body if getattr(n, "name", "") == "entraide_task")
-    assert "await equipages.entretenir(g)" in boucle
+    assert "await equipages.entretenir(g)" not in boucle, "22/10 : les équipages sont retirés, plus d'entretien"
     assert (RACINE / "visuels" / "rs_crews.gif").is_file()

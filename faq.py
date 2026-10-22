@@ -36,7 +36,7 @@ class Sujet:
     titre_en: str
     texte_fr: str
     texte_en: str
-    vers: str            # la destination : « ticket », « crews », « trade », « suggestions », « help »
+    vers: str            # la destination : « ticket », « trade », « suggestions », « help »
     motifs: tuple        # une question qui en parle (français ou anglais)
 
 
@@ -49,6 +49,9 @@ SUJETS = (
           "ticket",
           (r"\b(rejoindre|int[ée]grer|entrer dans|faire partie d[ue]|candidat\w*|postuler|recrut\w*)\b.{0,40}"
            r"\b(clan|gorp\w*|team|guilde)\b",
+           #  « Comment je fais pour venir dans l'équipage » : l'équipage, c'est le clan.
+           r"\b(rejoindre|venir dans|entrer dans|int[ée]grer|faire partie d[ue])\b.{0,30}\b([ée]quipage|crew)\b",
+           r"\b(join|get into|be part of)\b.{0,30}\bcrew\b",
            r"\b(clan|gorp\w*)\b.{0,40}\b(rejoindre|recrut\w*|candidat\w*|postuler)\b",
            r"\b(join|apply|get into|be part of)\b.{0,40}\b(clan|gorp\w*|team|guild)\b")),
     Sujet("aide_clan", "🏴‍☠️", "Une question sur le clan", "A question about the clan",
@@ -64,12 +67,6 @@ SUJETS = (
           (r"\b(cr[ée]er|ouvrir|faire|mettre|open|create|make)\b.{0,20}\btickets?\b",
            r"\b(contacter|parler (au|à|a)|joindre|[ée]crire (au|à|a))\b.{0,20}\b(staff|modo\w*|mod[ée]rat\w*|admin\w*)\b",
            r"\b(contact|reach|talk to)\b.{0,20}\b(staff|mods?|admins?)\b")),
-    Sujet("equipage", "⚓", "Les équipages", "Crews",
-          "Dans ⚓ Crews : publie ton équipage (Pirates ou Marine) ou clique « Rejoindre » sur une carte — le "
-          "capitaine est prévenu.",
-          "In ⚓ Crews: post your crew (Pirates or Marine) or click “Join” on a card — the captain is notified.",
-          "crews",
-          (r"\b[ée]quipages?\b", r"\bcrews?\b")),
     Sujet("trade", "🤝", "Échanger", "Trading",
           "Dans 🤝 Trade : « Proposer » ta carte. Avec un inconnu, ne donne jamais en premier : appelle un "
           "middleman.",
@@ -90,8 +87,7 @@ SUJETS = (
            r"\b(aide|aider|help|besoin)\b.{0,30}\b(boss|farm\w*|qu[eê]tes?|quests?)\b",
            r"\b(boss|farm\w*|qu[eê]tes?|quests?)\b.{0,30}\b(aide|aider|help)\b")),
 )
-BOUTONS = {"ticket": ("Ouvrir un ticket", "Open a ticket"), "crews": ("Équipages", "Crews"),
-           "trade": ("Trade", "Trade"), "suggestions": ("Suggestions", "Suggestions"), "help": ("Help", "Help")}
+BOUTONS = {"ticket": ("Ouvrir un ticket", "Open a ticket"), "trade": ("Trade", "Trade"), "suggestions": ("Suggestions", "Suggestions"), "help": ("Help", "Help")}
 #  La langue de la question : ses petits mots (« comment », « je »… ou « how », « the »…).
 MOTS_FR = re.compile(r"\b(comment|je|j|tu|on|le|la|les|des|pour|est|un|une|du|faire|quoi|o[uù]|qui|peut)\b")
 MOTS_EN = re.compile(r"\b(how|what|where|can|could|the|is|do|does|i|you|to|an|who|which)\b")
@@ -103,7 +99,7 @@ _salons: dict = {}
 
 
 def setup(*, cfg, destinations, est_staff, langue=None, log=None):
-    """`destinations(g, c)` → {« ticket » | « crews » | … : lien, « type_clan » : nom du type de ticket
+    """`destinations(g, c)` → {« ticket » | « trade » | … : lien, « type_clan » : nom du type de ticket
     du clan} ; `est_staff(g, membre, c)` → bool ; `langue(membre)` (async) → « fr » ou « en »."""
     global _cfg, _destinations, _est_staff, _langue, _log
     _cfg, _destinations, _est_staff, _langue = cfg, destinations, est_staff, langue

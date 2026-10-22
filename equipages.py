@@ -710,6 +710,15 @@ async def retirer(g, eid: int, par_id: int = 0) -> bool:
     return True
 
 
+async def tout_retirer(guild_id: int) -> int:
+    """22/10/2026 : « le crew équipage… une mauvaise idée » — tous les équipages sortent de la liste."""
+    async with _get_db() as db:
+        cur = await db.execute("UPDATE equipages SET supprime=1 WHERE guild_id=? AND supprime=0", (int(guild_id),))
+        n = cur.rowcount or 0
+        await db.commit()
+    return n
+
+
 async def lister(guild_id: int) -> list:
     """Pour le site : les équipages en place."""
     return await _lignes(_SQL_ACTIFS, (int(guild_id),))
