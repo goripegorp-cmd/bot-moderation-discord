@@ -92,7 +92,7 @@
 | `roblox_news_contenu.py` | 782 | 0 | 23 |
 | `roblox_panneau.py` | 549 | 1 | 13 |
 | `roblox_pings.py` | 247 | 0 | 9 |
-| `salutations.py` | 104 | 0 | 5 |
+| `salutations.py` | 106 | 0 | 5 |
 | `social_media.py` | 1653 | 11 | 13 |
 | `sondages.py` | 658 | 1 | 33 |
 | `staff_sanction.py` | 562 | 1 | 8 |
@@ -164,7 +164,7 @@
 | `tests/test_roblox_pings.py` | 363 | 6 | 26 |
 | `tests/test_roblox_sources_officielles.py` | 342 | 0 | 16 |
 | `tests/test_salons_v2.py` | 169 | 2 | 9 |
-| `tests/test_salutations.py` | 71 | 2 | 3 |
+| `tests/test_salutations.py` | 91 | 2 | 4 |
 | `tests/test_sauvegardes_sures.py` | 131 | 0 | 7 |
 | `tests/test_sentinelle_instance.py` | 284 | 0 | 15 |
 | `tests/test_signalements.py` | 75 | 0 | 5 |
@@ -205,9 +205,9 @@
 | `webhook_leak.py` | 271 | 0 | 6 |
 | `webhook_tracker.py` | 389 | 0 | 8 |
 | `websub_youtube.py` | 190 | 0 | 13 |
-| **TOTAL (198 files)** | **83734** | **298** | **2456** |
+| **TOTAL (198 files)** | **83756** | **298** | **2457** |
 
-## Alphabetical lookup (3743 symbols)
+## Alphabetical lookup (3744 symbols)
 
 - `_2026_on_ready_addon` — `bot.py`:29555  (async def)
 - `StubDB.__aenter__` — `tests/conftest.py`:67  (method)
@@ -3100,6 +3100,7 @@
 - `test_A3_les_sneaks_ne_gardent_que_le_studio_rell_et_effacent_le_reste` — `tests/test_autos.py`:54  (def)
 - `test_A3_message_retire_entre_temps` — `tests/test_salutations.py`:63  (def)
 - `test_A4_la_boucle_rend_sa_connexion_et_garde_les_modifications_du_panneau` — `tests/test_social_abonnements.py`:74  (def)
+- `test_A4_membre_qui_a_bloque_le_bot_sans_bruit` — `tests/test_salutations.py`:73  (def)
 - `test_actif_exige_interrupteur_ET_salon` — `tests/test_roblox_actualites.py`:53  (async def)
 - `test_actif_ne_tombe_pas_sur_une_config_partielle` — `tests/test_roblox_actualites.py`:72  (async def)
 - `test_annee_bissextile` — `tests/test_activite.py`:140  (def)
@@ -7622,6 +7623,7 @@
 - L13  `def test_A1_ce_qui_est_une_salutation()`
 - L46  `def test_A2_un_main_qui_salue_seulement_ou_tout_le_monde_ecrit()`
 - L63  `def test_A3_message_retire_entre_temps()`
+- L73  `def test_A4_membre_qui_a_bloque_le_bot_sans_bruit(monkeypatch)`
 - L26  `class Salon`
     - L27  `def __init__(self, ecrire, reagir)`
     - L30  `def permissions_for(self, cible)`
