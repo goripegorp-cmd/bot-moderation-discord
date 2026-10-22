@@ -68,3 +68,23 @@ def test_A3_message_retire_entre_temps():
         raise discord.NotFound(Obj(status=404, reason="x"), "parti")
     m.add_reaction = retire
     assert asyncio.run(S.sur_message(m)) is False
+
+
+def test_A4_membre_qui_a_bloque_le_bot_sans_bruit(monkeypatch):
+    """22/10 : « [SALUT] réaction impossible · 403 (90001) Reaction blocked » en boucle dans les logs.
+    Un membre qui a bloqué le bot : Discord refuse la réaction, c'est normal — rien au journal.
+    Une autre erreur reste signalée."""
+    S._derniers.clear()
+    journal = []
+    monkeypatch.setattr(S, "_log", journal.append)
+
+    def refus(code):
+        async def f(_e):
+            raise discord.Forbidden(Obj(status=403, reason="Forbidden"), {"code": code, "message": "x"})
+        return f
+    bloque = Message("salut", Salon(), auteur=20)
+    bloque.add_reaction = refus(90001)
+    assert asyncio.run(S.sur_message(bloque)) is False and journal == []
+    autre = Message("salut", Salon(), auteur=21)
+    autre.add_reaction = refus(50013)
+    assert asyncio.run(S.sur_message(autre)) is False and journal[0] == "[SALUT] réaction impossible"

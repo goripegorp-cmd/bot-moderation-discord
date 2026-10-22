@@ -98,6 +98,8 @@ async def sur_message(msg) -> bool:
     except discord.NotFound:
         return False  # message retiré entre-temps (modération) : rien à faire
     except discord.HTTPException as ex:
+        if getattr(ex, "code", 0) == 90001:
+            return False  # 90001 : l'auteur a bloqué le bot, Discord refuse la réaction — normal, rien à signaler
         _log("[SALUT] réaction impossible")
         _log(f"[SALUT:DETAIL] {type(ex).__name__} {ex}")
         return False
