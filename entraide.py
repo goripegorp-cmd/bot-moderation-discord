@@ -1,21 +1,20 @@
 """entraide.py — l'entraide Rell Seas (22/10/2026).
 
-Demandé par le fondateur : « un salon ultra bien optimisé ou une catégorie qui regroupe plusieurs
-sous-salons… demander de l'aide, faire du trading (s'échanger des fruits), des demandes de farm, de
-boss, de chill, une zone discussion pour le jeu… ultra compact pour éviter des milliers de salons…
-un vrai salon tout en haut, de redirection : ils cliquent sur trade, ça les amène dans la zone
-trade… des joueurs qualifiés avec des rôles, plusieurs sous-rôles en fonction des zones : ils
-pourront certifier que l'aide a bien été faite et clôturer la demande… un nettoyage automatique. »
+Demandé par le fondateur : « demander de l'aide, faire du trading (s'échanger des fruits), des demandes
+de farm, de boss, de chill… ultra compact pour éviter des milliers de salons… des joueurs qualifiés
+avec des rôles, plusieurs sous-rôles en fonction des zones : ils pourront certifier que l'aide a bien
+été faite et clôturer la demande… un nettoyage automatique. » Puis, le soir même : « ça me fait trop
+de salons… tout mettre dans Communautaire… que ça ne se chevauche pas… rangé par ordre de priorité ».
 
-Une catégorie, sept salons, quel que soit le nombre de demandes :
-  🧭 orientation — une ligne par zone, un bouton qui y mène ;
-  💬 discussion  — le chat du jeu ;
-  🆘 aide · ⚔️ boss · 🌾 farm · 🤝 trade · 🌴 chill — une zone par besoin.
-Une demande = UN fil (post de forum si le serveur est communautaire, sinon fil sous une carte),
-jamais un salon. « ➕ Publier une demande » ouvre le formulaire de la zone ; la carte montre
-l'auteur, sa demande, qui vient aider. Un guide de la zone (son rôle) certifie l'aide et clôt —
-le middleman pour un échange ; l'auteur peut fermer ; le staff peut tout. Nettoyage : une demande
-sans activité se ferme, une demande close disparaît après un délai ; la base garde la trace.
+Deux forums dans la catégorie Communautaire, quel que soit le nombre de demandes :
+  🆘 entraide — aide, boss, farm, chill (une étiquette par type, une par statut) ;
+  🤝 trade    — les échanges, avec middleman.
+L'orientation, c'est le panneau ❓ aide du serveur (bot.py `_vue_aide`, lignes de `lignes_aide`) ;
+on parle du jeu dans 💬 chat. Une demande = un fil (post de forum, sinon fil sous une carte), jamais
+un salon. Le post épinglé ouvre le formulaire du type ; la carte montre l'auteur, sa demande, qui
+vient aider. Un guide du type (son rôle) certifie l'aide et clôt — le middleman pour un échange ;
+l'auteur peut fermer ; le staff peut tout. Nettoyage : une demande sans activité se ferme, une
+demande close disparaît après un délai ; la base garde la trace.
 """
 from __future__ import annotations
 
@@ -27,6 +26,7 @@ from dataclasses import dataclass
 import discord
 from discord.ui import Button, RoleSelect, Select, UserSelect
 
+import config_salons
 import visuels
 from ui_v2 import LayoutView, Palette
 
@@ -50,15 +50,14 @@ class Zone:
     cle: str
     nom: str
     emoji: str
-    salon: str
-    phrase: str           # la ligne de l'orientation
-    consigne: str         # le panneau de la zone
+    salon: str            # le forum qui la porte : « entraide » ou « trade »
     couleur: int
     expire_h: int         # fermée après autant d'heures sans activité
     champs: tuple
     titre: str            # le nom du fil, à partir des champs
     certif: str = ""      # « guide », « middleman » ou rien
     role: str = ""        # le rôle créé à l'installation
+    bouton: str = ""      # son bouton dans le post épinglé
     rejoindre: str = "Je viens aider"
     icone_rejoindre: str = "accueil"
     annonce: str = "🙋 {qui} vient t'aider, {auteur} !"
@@ -68,46 +67,40 @@ PSEUDO = Champ("pseudo", "Ton pseudo Roblox", "Pour qu'on te trouve en jeu", max
 NIVEAU = Champ("niveau", "Ton niveau", "Ex. 1 250", max=20, requis=False)
 
 ZONES = {z.cle: z for z in (
-    Zone("aide", "Aide", "🆘", "🆘・aide", "Une question, un blocage",
-         "Bloqué ou perdu ? Publie ta demande : un joueur vient t'aider, un guide certifie l'aide.",
-         0x22C55E, 24,
-         (Champ("titre", "Ton problème", "En une phrase", max=90),
+    Zone("aide", "Aide", "🆘", "entraide", 0x22C55E, 24,
+         (Champ("titre", "Ta question ou ton problème", "En une phrase", max=90),
           Champ("details", "Explique", "Où tu es, ce que tu as déjà essayé…", long=True, max=800, requis=False),
           PSEUDO, NIVEAU),
-         "{titre}", certif="guide", role="🆘 Guide Aide"),
-    Zone("boss", "Boss", "⚔️", "⚔️・boss", "Du renfort contre un boss",
-         "Un boss te résiste ? Dis lequel : des joueurs viennent t'épauler, un guide certifie.",
-         0xEF4444, 6,
+         "{titre}", certif="guide", role="🆘 Guide Aide", bouton="Une question"),
+    Zone("boss", "Boss", "⚔️", "entraide", 0xEF4444, 6,
          (Champ("titre", "Quel boss ?", "Son nom", max=60), PSEUDO, NIVEAU,
           Champ("joueurs", "Joueurs voulus", "Combien en plus de toi ? Ex. 2", max=10, requis=False),
           Champ("details", "Précisions", "Île, heure, conditions…", long=True, max=500, requis=False)),
-         "Boss {titre}", certif="guide", role="⚔️ Guide Boss"),
-    Zone("farm", "Farm", "🌾", "🌾・farm", "Farmer à plusieurs",
-         "Niveaux, argent, objets : trouve des joueurs pour farmer avec toi.",
-         0x84CC16, 12,
+         "Boss {titre}", certif="guide", role="⚔️ Guide Boss", bouton="Boss"),
+    Zone("farm", "Farm", "🌾", "entraide", 0x84CC16, 12,
          (Champ("titre", "Quoi farmer ?", "Niveaux, argent, un objet…", max=80), PSEUDO, NIVEAU,
           Champ("duree", "Combien de temps ?", "Ex. 1 h", max=30, requis=False),
           Champ("details", "Précisions", "Où, comment…", long=True, max=500, requis=False)),
-         "Farm {titre}", certif="guide", role="🌾 Guide Farm"),
-    Zone("trade", "Trade", "🤝", "🤝・trade", "Échanger fruits et objets",
-         "Propose un échange. Avec un inconnu, ne donne jamais en premier : appelle un middleman.",
-         0xF59E0B, 48,
-         (Champ("donne", "Je donne", "Fruits, objets…", max=120),
-          Champ("cherche", "Je cherche", "Ce que tu veux en échange", max=120), PSEUDO,
-          Champ("details", "Précisions", "Valeur, conditions…", long=True, max=400, requis=False)),
-         "{donne} ⇄ {cherche}", certif="middleman", role="🛡️ Middleman",
-         rejoindre="Intéressé", icone_rejoindre="pour", annonce="💬 {qui} est intéressé par ton échange, {auteur} !"),
-    Zone("chill", "Chill", "🌴", "🌴・chill", "Jouer tranquille ensemble",
-         "Envie de naviguer, discuter, explorer ? Trouve des joueurs pour jouer tranquille.",
-         0x38BDF8, 6,
+         "Farm {titre}", certif="guide", role="🌾 Guide Farm", bouton="Farm"),
+    Zone("chill", "Chill", "🌴", "entraide", 0x38BDF8, 6,
          (Champ("titre", "Ce que tu veux faire", "Naviguer, discuter, explorer…", max=90), PSEUDO,
           Champ("quand", "Quand ?", "Maintenant, ce soir 21 h…", max=40, requis=False),
           Champ("details", "Précisions", "Ce que tu aimes, ton style…", long=True, max=400, requis=False)),
-         "{titre}", rejoindre="Je viens", annonce="🌴 {qui} te rejoint, {auteur} !"),
+         "{titre}", bouton="Chill", rejoindre="Je viens", annonce="🌴 {qui} te rejoint, {auteur} !"),
+    Zone("trade", "Trade", "🤝", "trade", 0xF59E0B, 48,
+         (Champ("donne", "Je donne", "Fruits, objets…", max=120),
+          Champ("cherche", "Je cherche", "Ce que tu veux en échange", max=120), PSEUDO,
+          Champ("details", "Précisions", "Valeur, conditions…", long=True, max=400, requis=False)),
+         "{donne} ⇄ {cherche}", certif="middleman", role="🛡️ Middleman", bouton="Proposer un échange",
+         rejoindre="Intéressé", icone_rejoindre="pour", annonce="💬 {qui} est intéressé par ton échange, {auteur} !"),
 )}
-CATEGORIE = "🏴‍☠️ RELL SEAS"
-ORIENTATION = "🧭・orientation"
-DISCUSSION = "💬・discussion"
+#  Les deux forums : (nom, ce qu'on y fait, bandeau, titre du bandeau, couleur)
+SALONS = {
+    "entraide": ("🆘・entraide", "Une question, un boss, du farm, ou juste jouer ensemble : choisis, remplis, "
+                 "des joueurs viennent t'aider.", "rs_entraide", "Entraide", 0x22C55E),
+    "trade": ("🤝・trade", "Propose un échange. Avec un inconnu, ne donne jamais en premier : appelle un middleman.",
+              "rs_trade", "Trade", 0xF59E0B),
+}
 
 STATUTS = {
     "ouverte": ("Ouverte", "🟢"),
@@ -118,9 +111,19 @@ STATUTS = {
     "retiree": ("Retirée", "🗑️"),
 }
 OUVERTS = ("ouverte", "prise")
-#  Étiquettes des forums : réservées au bot et au staff (« modérées »).
+#  Étiquettes des forums, réservées au bot et au staff (« modérées ») : le type, puis le statut.
 TAGS = (("Ouverte", "🟢"), ("En cours", "🟡"), ("Terminée", "✅"), ("Fermée", "🔒"))
 ETIQUETTE = {"ouverte": "Ouverte", "prise": "En cours", "terminee": "Terminée"}
+
+
+def types_du_salon(cle: str) -> list:
+    return [z for z in ZONES.values() if z.salon == cle]
+
+
+def tags_du_salon(cle: str) -> list:
+    types = types_du_salon(cle) if len(types_du_salon(cle)) > 1 else []
+    return ([discord.ForumTag(name=z.nom, emoji=z.emoji, moderated=True) for z in types]
+            + [discord.ForumTag(name=n, emoji=e, moderated=True) for n, e in TAGS])
 
 MAX_OUVERTES = 3          # par membre, toutes zones
 ATTENTE_S = 120           # entre deux demandes d'un même membre
@@ -177,6 +180,10 @@ _SQL_DE_L_AUTEUR = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut
                     " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime"
                     " FROM entraide_demandes WHERE guild_id=? AND auteur_id=? AND statut IN ('ouverte', 'prise')"
                     " AND fil_id>0")
+_SQL_OUVERTES_DU_SALON = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id,"
+                          " aidants, cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm,"
+                          " supprime FROM entraide_demandes WHERE guild_id=? AND salon_id=?"
+                          " AND statut IN ('ouverte', 'prise')")
 _SQL_A_EFFACER = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants,"
                   " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime"
                   " FROM entraide_demandes WHERE guild_id=? AND statut NOT IN ('ouverte', 'prise')"
@@ -255,8 +262,7 @@ async def conf(g) -> dict:
     c = await _cfg(g.id)
     return {"actif": bool(c.get("rs_actif")), "categorie": int(c.get("rs_categorie", 0) or 0),
             "salons": dict(c.get("rs_salons") or {}), "roles": dict(c.get("rs_roles") or {}),
-            "panneaux": dict(c.get("rs_panneaux") or {}), "orientation": int(c.get("rs_orientation", 0) or 0),
-            "orientation_v": str(c.get("rs_orientation_v", "") or ""), "reglages": dict(c.get("rs_reglages") or {})}
+            "panneaux": dict(c.get("rs_panneaux") or {}), "reglages": dict(c.get("rs_reglages") or {})}
 
 
 def ids_salons(c: dict) -> set:
@@ -382,42 +388,33 @@ def vue_carte(d: dict, z: Zone, *, avatar: str = "", ping: str = "", rep: int | 
     return v
 
 
-def vue_panneau(z: Zone, cf: dict, g=None) -> LayoutView:
-    r = role_zone(g, cf, z.cle) if g is not None and z.role else None
-    pied = ["une demande à la fois", f"fermée après {expire_h(cf, z)} h sans activité"]
-    if r is not None:
-        pied.append(f"{'middlemen' if z.certif == 'middleman' else 'guides'} : {r.mention}")
+def vue_panneau(cle: str, cf: dict, g=None) -> LayoutView:
+    """Le post épinglé d'un forum : un bouton par type, le délai de chacun, qui certifie."""
+    _nom, texte, bandeau, titre, couleur = SALONS[cle]
+    types = types_du_salon(cle)
+    roles = [r for r in (role_zone(g, cf, z.cle) for z in types if z.role) if r is not None] if g is not None else []
+    delais = (" · ".join(f"{z.nom.lower()} {expire_h(cf, z)} h" for z in types) if len(types) > 1
+              else f"{expire_h(cf, types[0])} h")
+    pied = ["une demande à la fois" + (" par type" if len(types) > 1 else ""), f"fermée sans activité : {delais}"]
+    if roles:
+        pied.append(("middlemen" if cle == "trade" else "guides") + " : " + " ".join(r.mention for r in roles))
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
-        visuels.bandeau(f"rs_{z.cle}", f"{z.emoji} {z.nom}"),
-        discord.ui.TextDisplay(z.consigne),
-        discord.ui.TextDisplay("-# " + " · ".join(pied)),
-        discord.ui.ActionRow(BoutonNouvelle(z.cle)),
-        accent_color=discord.Color(z.couleur)))
+        visuels.bandeau(bandeau, titre), discord.ui.TextDisplay(texte),
+        discord.ui.ActionRow(*[BoutonNouvelle(z.cle, z) for z in types]),
+        discord.ui.TextDisplay("-# " + " · ".join(pied)), accent_color=discord.Color(couleur)))
     return v
 
 
-def vue_orientation(g, cf: dict, ouvertes: dict | None = None):
-    """Une ligne par zone et un bouton qui y mène — une ligne n'apparaît que si son salon existe."""
-    ouvertes = ouvertes or {}
-    lignes = [(salon(g, cf, "discussion"), "💬", "Discussion", "Parler du jeu", None)]
-    lignes += [(salon(g, cf, z.cle), z.emoji, z.nom, z.phrase, ouvertes.get(z.cle, 0)) for z in ZONES.values()]
-    ticket = _salon_ticket(g) if _salon_ticket else None
-    lignes.append((ticket, "🎫", "Un souci avec un joueur ?", "Ouvre un ticket : le staff répond en privé", None))
-    items = [visuels.bandeau("rs_port", "Entraide Rell Seas"),
-             discord.ui.TextDisplay("Choisis ta zone : le bouton t'y emmène.")]
-    for ch, emoji, nom, phrase, n in lignes:
-        if ch is None:
-            continue
-        compte = "" if n is None else (" · aucune demande en cours" if not n else f" · {n} demande(s) en cours")
-        items.append(discord.ui.Section(discord.ui.TextDisplay(f"{emoji} **{nom}**\n-# {phrase}{compte}"),
-                                        accessory=Button(label="Y aller", url=ch.jump_url)))
-    items.append(discord.ui.TextDisplay("-# Respect · une demande à la fois par zone · les guides certifient "
-                                        "l'aide · jamais d'échange sans middleman avec un inconnu"))
-    v = LayoutView(timeout=None)
-    v.add_item(discord.ui.Container(*items, accent_color=discord.Color(0x0EA5E9)))
-    signature = "1|" + "|".join(f"{getattr(ch, 'id', 0)}:{n}" for ch, _e, _no, _p, n in lignes)
-    return v, signature
+def lignes_aide(g, cf: dict) -> list:
+    """Les lignes de l'entraide en tête du panneau ❓ aide (salon, texte, bouton) — c'est
+    l'orientation du serveur. Une ligne n'apparaît que si son forum existe."""
+    if not cf["actif"]:
+        return []
+    return [(salon(g, cf, "entraide"), "🆘 **Une question, besoin d'aide en jeu ?**\nAide, boss, farm, chill : publie "
+             "ta demande, des joueurs t'aident.", "Demander"),
+            (salon(g, cf, "trade"), "🤝 **Échanger fruits et objets**\nAvec un inconnu, toujours un middleman.",
+             "Échanger")]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -458,10 +455,11 @@ def _porteur(fil):
     return fil if isinstance(parent, discord.ForumChannel) or parent is None else parent
 
 
-def _tags(forum, statut: str) -> list:
-    nom = ETIQUETTE.get(statut, "Fermée")
-    t = discord.utils.get(getattr(forum, "available_tags", []) or [], name=nom)
-    return [t] if t is not None else []
+def _tags(forum, statut: str, z: Zone | None = None) -> list:
+    """Le type (forum à plusieurs types) puis le statut — seulement les étiquettes qui existent."""
+    dispo = {t.name: t for t in getattr(forum, "available_tags", []) or []}
+    noms = ([z.nom] if z is not None and len(types_du_salon(z.salon)) > 1 else []) + [ETIQUETTE.get(statut, "Fermée")]
+    return [dispo[n] for n in noms if n in dispo]
 
 
 async def _maj_carte(g, d: dict, fil=None) -> None:
@@ -496,7 +494,7 @@ async def _clore_sur_discord(g, d: dict, note: str = "") -> None:
             _log(f"[ENTRAIDE:DETAIL] mot de fin demande={d['id']} {ex}")
     reglage = {"locked": True, "archived": True}
     if isinstance(fil.parent, discord.ForumChannel):
-        reglage["applied_tags"] = _tags(fil.parent, d["statut"])
+        reglage["applied_tags"] = _tags(fil.parent, d["statut"], ZONES.get(d["zone"]))
     try:
         await fil.edit(**reglage)
     except discord.HTTPException as ex:
@@ -513,7 +511,7 @@ async def peut_publier(i, z: Zone) -> str:
     if g is None or getattr(m, "guild_permissions", None) is None:
         return "L'entraide se fait sur le serveur."
     cf = await conf(g)
-    if not cf["actif"] or salon(g, cf, z.cle) is None:
+    if not cf["actif"] or salon(g, cf, z.salon) is None:
         return "Cette zone est fermée pour le moment."
     if m.is_timed_out():
         return "Pas de demande pendant une exclusion temporaire."
@@ -593,7 +591,7 @@ async def publier(i, z: Zone, valeurs: dict):
             await db.commit()
         _creations[(g.id, m.id)] = time.monotonic()
     cf = await conf(g)
-    ch = salon(g, cf, z.cle)
+    ch = salon(g, cf, z.salon)
     d = await charger(did)
     role = role_zone(g, cf, z.cle) if prevenir(cf, z) else None
     if role is not None and not (role.mentionable or g.me.guild_permissions.mention_everyone):
@@ -605,7 +603,7 @@ async def publier(i, z: Zone, valeurs: dict):
     try:
         if isinstance(ch, discord.ForumChannel):
             fil = (await ch.create_thread(name=nom_du_fil(m, titre), view=vue, allowed_mentions=mentions,
-                                          applied_tags=_tags(ch, "ouverte"),
+                                          applied_tags=_tags(ch, "ouverte", z),
                                           reason=f"Entraide : demande n°{did}")).thread
         elif isinstance(ch, discord.TextChannel):
             carte = await ch.send(view=vue, allowed_mentions=mentions)
@@ -626,16 +624,18 @@ async def publier(i, z: Zone, valeurs: dict):
         _log(f"[ENTRAIDE:DETAIL] auteur non ajouté au fil demande={did} {ex}")
     await i.followup.send(f"Demande publiée : {fil.jump_url}", ephemeral=True)
     if isinstance(ch, discord.TextChannel):
-        asyncio.create_task(reposer_panneau_texte(g, z))
+        asyncio.create_task(reposer_panneau_texte(g, z.salon))
     await _journal(g, "entraide.demande", f"{m.mention} a publié une demande · {z.nom} : {titre}",
                    membre_id=m.id)
 
 
 class BoutonNouvelle(discord.ui.DynamicItem[Button], template=r"rs:n:(?P<zone>[a-z]+)"):
-    def __init__(self, zone: str):
+    def __init__(self, zone: str, z: Zone | None = None):
         self.zone = zone
-        super().__init__(Button(label="Publier une demande", style=discord.ButtonStyle.primary,
-                                emoji=visuels.icone("ajouter"), custom_id=f"rs:n:{zone}"))
+        z = z or ZONES.get(zone)
+        super().__init__(Button(label=(z.bouton if z else "") or "Publier une demande",
+                                style=discord.ButtonStyle.primary,
+                                emoji=(z.emoji if z else None) or visuels.icone("ajouter"), custom_id=f"rs:n:{zone}"))
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match):
@@ -691,7 +691,7 @@ async def rejoindre(i, did: int):
         await _maj_carte(g, d, fil)
         try:
             if isinstance(fil.parent, discord.ForumChannel):
-                await fil.edit(applied_tags=_tags(fil.parent, "prise"))
+                await fil.edit(applied_tags=_tags(fil.parent, "prise", z))
             await fil.add_user(m)
             await fil.send(z.annonce.format(qui=m.mention, auteur=_mention(d["auteur_id"])),
                            allowed_mentions=discord.AllowedMentions(users=[discord.Object(d["auteur_id"])]))
@@ -982,7 +982,7 @@ async def _effacer(g, d: dict) -> None:
 
 async def entretenir(g, maintenant: float | None = None) -> dict:
     """Toutes les 5 minutes : les demandes sans activité se ferment, les demandes closes disparaissent
-    après le délai, l'orientation suit les compteurs, les panneaux restent en place (toutes les 30 min)."""
+    après le délai, les posts épinglés restent en place (vérifiés toutes les 30 min)."""
     cf = await conf(g)
     bilan = {"expirees": 0, "retirees": 0, "effacees": 0}
     if not cf["actif"]:
@@ -1019,7 +1019,6 @@ async def entretenir(g, maintenant: float | None = None) -> dict:
         bilan["effacees"] += 1
     #  Une publication interrompue (redémarrage entre l'écriture et le fil) ne bloque personne.
     await _ecrire("DELETE FROM entraide_demandes WHERE guild_id=? AND fil_id=0 AND cree<?", (g.id, int(t) - 600))
-    await rafraichir_orientation(g)
     if t - _verifies.get(g.id, 0) > 1800:
         _verifies[g.id] = t
         await assurer_panneaux(g)
@@ -1036,43 +1035,13 @@ async def sur_depart(member) -> int:
     return n
 
 
-async def rafraichir_orientation(g, forcer: bool = False, verifier_present: bool = False) -> None:
-    """Le panneau d'orientation : posé s'il manque, réécrit quand un salon ou un compteur change.
-    Ses clés sont à part (`rs_orientation`) : il ne se dispute jamais `rs_panneaux` avec les zones."""
-    async with _verrou(("orientation", g.id)):
-        cf = await conf(g)
-        ch = salon(g, cf, "orientation")
-        if not isinstance(ch, discord.TextChannel):
-            return
-        vue, signature = vue_orientation(g, cf, await compter_ouvertes(g.id))
-        mid = cf["orientation"]
-        try:
-            if mid and not forcer and cf["orientation_v"] == signature:
-                if not verifier_present:
-                    return
-                try:
-                    await ch.fetch_message(mid)
-                    return
-                except discord.NotFound:
-                    mid = 0
-            if mid:
-                try:
-                    await ch.get_partial_message(mid).edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
-                except discord.NotFound:
-                    mid = 0
-            if not mid:
-                mid = (await ch.send(view=vue, allowed_mentions=discord.AllowedMentions.none())).id
-        except discord.HTTPException as ex:
-            _log("[ENTRAIDE][E6] orientation non posée")
-            _log(f"[ENTRAIDE][E6:DETAIL] {type(ex).__name__} {ex}")
-            return
-        await _db_set(g.id, "rs_orientation", mid)
-        await _db_set(g.id, "rs_orientation_v", signature)
+def _nom_panneau(cle: str) -> str:
+    return "📌 Proposer un échange" if cle == "trade" else "📌 Publier une demande"
 
 
-async def _panneau_forum(g, cf: dict, z: Zone, forum, forcer: bool) -> None:
-    """Le post épinglé, en tête du forum, avec son bouton « Publier une demande »."""
-    tid = int(cf["panneaux"].get(z.cle, 0) or 0)
+async def _panneau_forum(g, cf: dict, cle: str, forum, forcer: bool) -> None:
+    """Le post épinglé, en tête du forum, avec un bouton par type."""
+    tid = int(cf["panneaux"].get(cle, 0) or 0)
     fil = None
     if tid:
         fil = g.get_channel_or_thread(tid)
@@ -1081,29 +1050,38 @@ async def _panneau_forum(g, cf: dict, z: Zone, forum, forcer: bool) -> None:
                 fil = await g.fetch_channel(tid)
             except discord.NotFound:
                 fil = None
-    vue = vue_panneau(z, cf, g)
+    vue = vue_panneau(cle, cf, g)
     if fil is None:
-        fil = (await forum.create_thread(name=f"📌 Publier une demande · {z.nom}", view=vue,
+        fil = (await forum.create_thread(name=_nom_panneau(cle), view=vue,
                                          allowed_mentions=discord.AllowedMentions.none(),
-                                         reason="Entraide : panneau de la zone")).thread
-        cf["panneaux"][z.cle] = fil.id
+                                         reason="Entraide : post épinglé")).thread
+        cf["panneaux"][cle] = fil.id
         try:
             await fil.edit(pinned=True, locked=True)
         except discord.HTTPException as ex:
-            _log(f"[ENTRAIDE:DETAIL] panneau non épinglé zone={z.cle} {ex}")
+            _log(f"[ENTRAIDE:DETAIL] post non épinglé salon={cle} {ex}")
         return
-    if fil.archived or not fil.locked or not fil.flags.pinned:
+    reglage = {}
+    if fil.archived:
+        reglage["archived"] = False
+    if not fil.locked:
+        reglage["locked"] = True
+    if not fil.flags.pinned:
+        reglage["pinned"] = True
+    if fil.name != _nom_panneau(cle):
+        reglage["name"] = _nom_panneau(cle)
+    if reglage:
         try:
-            await fil.edit(archived=False, locked=True, pinned=True)
+            await fil.edit(**reglage)
         except discord.HTTPException as ex:
-            _log(f"[ENTRAIDE:DETAIL] panneau non rétabli zone={z.cle} {ex}")
+            _log(f"[ENTRAIDE:DETAIL] post non rétabli salon={cle} {ex}")
     if forcer:
         await fil.get_partial_message(fil.id).edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
 
 
-async def _panneau_texte(g, cf: dict, z: Zone, ch, forcer: bool, reposer: bool = False) -> None:
+async def _panneau_texte(g, cf: dict, cle: str, ch, forcer: bool, reposer: bool = False) -> None:
     """Hors forum : le panneau reste en bas du salon, sous les cartes."""
-    mid = int(cf["panneaux"].get(z.cle, 0) or 0)
+    mid = int(cf["panneaux"].get(cle, 0) or 0)
     if mid and reposer:
         try:
             await ch.get_partial_message(mid).delete()
@@ -1113,58 +1091,48 @@ async def _panneau_texte(g, cf: dict, z: Zone, ch, forcer: bool, reposer: bool =
     if mid:
         try:
             if forcer:
-                await ch.get_partial_message(mid).edit(view=vue_panneau(z, cf, g),
+                await ch.get_partial_message(mid).edit(view=vue_panneau(cle, cf, g),
                                                        allowed_mentions=discord.AllowedMentions.none())
             else:
                 await ch.fetch_message(mid)
             return
         except discord.NotFound:
             pass
-    cf["panneaux"][z.cle] = (await ch.send(view=vue_panneau(z, cf, g),
-                                           allowed_mentions=discord.AllowedMentions.none())).id
+    cf["panneaux"][cle] = (await ch.send(view=vue_panneau(cle, cf, g),
+                                         allowed_mentions=discord.AllowedMentions.none())).id
 
 
-async def reposer_panneau_texte(g, z: Zone) -> None:
+async def reposer_panneau_texte(g, cle: str) -> None:
     async with _verrou(("panneaux", g.id)):
         try:
             cf = await conf(g)
-            ch = salon(g, cf, z.cle)
+            ch = salon(g, cf, cle)
             if isinstance(ch, discord.TextChannel):
-                await _panneau_texte(g, cf, z, ch, False, reposer=True)
+                await _panneau_texte(g, cf, cle, ch, False, reposer=True)
                 await _db_set(g.id, "rs_panneaux", cf["panneaux"])
         except discord.HTTPException as ex:
-            _log(f"[ENTRAIDE:DETAIL] panneau non reposé zone={z.cle} {ex}")
+            _log(f"[ENTRAIDE:DETAIL] panneau non reposé salon={cle} {ex}")
 
 
 async def assurer_panneaux(g, forcer: bool = False) -> None:
     async with _verrou(("panneaux", g.id)):
         cf = await conf(g)
-        for z in ZONES.values():
-            ch = salon(g, cf, z.cle)
+        for cle in SALONS:
+            ch = salon(g, cf, cle)
             try:
                 if isinstance(ch, discord.ForumChannel):
-                    await _panneau_forum(g, cf, z, ch, forcer)
+                    await _panneau_forum(g, cf, cle, ch, forcer)
                 elif isinstance(ch, discord.TextChannel):
-                    await _panneau_texte(g, cf, z, ch, forcer)
+                    await _panneau_texte(g, cf, cle, ch, forcer)
             except discord.HTTPException as ex:
-                _log("[ENTRAIDE][E7] panneau de zone non posé")
-                _log(f"[ENTRAIDE][E7:DETAIL] zone={z.cle} {type(ex).__name__} {ex}")
+                _log("[ENTRAIDE][E7] post épinglé non posé")
+                _log(f"[ENTRAIDE][E7:DETAIL] salon={cle} {type(ex).__name__} {ex}")
         await _db_set(g.id, "rs_panneaux", cf["panneaux"])
-    await rafraichir_orientation(g, forcer=forcer, verifier_present=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Installation
+#  Installation, regroupement, ordre de Communautaire
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def droits_orientation(g) -> dict:
-    return {g.default_role: discord.PermissionOverwrite(
-                send_messages=False, add_reactions=False, create_public_threads=False,
-                create_private_threads=False, send_messages_in_threads=False),
-            g.me: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, embed_links=True, attach_files=True,
-                read_message_history=True, manage_messages=True)}
-
 
 def droits_zone(g) -> dict:
     """On ne publie que par le bouton ; on parle dans les fils (preuves et captures comprises)."""
@@ -1177,14 +1145,30 @@ def droits_zone(g) -> dict:
                 read_message_history=True, embed_links=True, attach_files=True)}
 
 
-def sujet(z: Zone, cf: dict) -> str:
-    return (f"{z.emoji} {z.phrase}. Publie avec le bouton « Publier une demande » ; on répond dans le fil. "
-            f"Une demande à la fois, fermée après {expire_h(cf, z)} h sans activité.")
+def sujet(cle: str, cf: dict) -> str:
+    types = types_du_salon(cle)
+    delais = " · ".join(f"{z.nom.lower()} {expire_h(cf, z)} h" for z in types)
+    return (f"{SALONS[cle][1]} Publie avec le post épinglé, on répond dans le fil. Une demande à la fois"
+            f"{' par type' if len(types) > 1 else ''} ; fermée sans activité ({delais}).")
+
+
+def categorie_communautaire(g):
+    """La catégorie « Communautaire » (même règle que `config_salons.communautaire`)."""
+    for cat in getattr(g, "categories", []) or []:
+        if "communaut" in config_salons.normaliser(cat.name):
+            return cat
+    return None
+
+
+async def _categorie_cible(g):
+    brut = await _cfg(g.id)
+    aide = g.get_channel(int(brut.get("aide_salon", 0) or 0))
+    return categorie_communautaire(g) or getattr(aide, "category", None)
 
 
 async def installer(g, *, forum: bool | None = None) -> list:
-    """Crée ce qui manque — catégorie, salons, rôles, panneaux — et ne supprime jamais rien.
-    Relancer répare : un salon effacé à la main revient. Rend la liste de ce qui a été créé."""
+    """Crée ce qui manque — deux forums rangés dans Communautaire, quatre rôles, les posts épinglés —
+    et ne supprime jamais rien. Relancer répare. Rend la liste de ce qui a été créé."""
     me = g.me
     p = getattr(me, "guild_permissions", None)
     if not (p and p.manage_channels and p.manage_roles):
@@ -1193,11 +1177,7 @@ async def installer(g, *, forum: bool | None = None) -> list:
     faits = []
     async with _verrou(("installer", g.id)):
         cf = await conf(g)
-        cat = g.get_channel(cf["categorie"])
-        if not isinstance(cat, discord.CategoryChannel):
-            cat = await g.create_category(CATEGORIE, reason="Entraide Rell Seas")
-            await _db_set(g.id, "rs_categorie", cat.id)
-            faits.append(f"catégorie {cat.name}")
+        cat = await _categorie_cible(g)
         roles = cf["roles"]
         for z in ZONES.values():
             if z.role and role_zone(g, cf, z.cle) is None:
@@ -1207,35 +1187,134 @@ async def installer(g, *, forum: bool | None = None) -> list:
                 await _db_set(g.id, "rs_roles", roles)
                 faits.append(f"rôle {r.name}")
         salons = cf["salons"]
-
-        async def _garder(cle, ch):
-            salons[cle] = ch.id
-            await _db_set(g.id, "rs_salons", salons)
-            faits.append(f"salon {ch.name}")
-        if salon(g, cf, "orientation") is None:
-            await _garder("orientation", await g.create_text_channel(
-                ORIENTATION, category=cat, overwrites=droits_orientation(g), reason="Entraide Rell Seas",
-                topic="Choisis ta zone : un bouton t'y emmène."))
-        if salon(g, cf, "discussion") is None:
-            await _garder("discussion", await g.create_text_channel(
-                DISCUSSION, category=cat, slowmode_delay=2, reason="Entraide Rell Seas",
-                topic="Parler de Rell Seas : îles, fruits, mises à jour, astuces."))
-        for z in ZONES.values():
-            if salon(g, cf, z.cle) is not None:
+        for cle, (nom, *_reste) in SALONS.items():
+            if salon(g, cf, cle) is not None:
                 continue
             if forum:
                 ch = await g.create_forum(
-                    z.salon, category=cat, topic=sujet(z, cf), overwrites=droits_zone(g),
+                    nom, category=cat, topic=sujet(cle, cf), overwrites=droits_zone(g),
                     default_auto_archive_duration=ARCHIVE_MIN, default_layout=discord.ForumLayoutType.list_view,
-                    default_sort_order=discord.ForumOrderType.latest_activity,
-                    available_tags=[discord.ForumTag(name=n, emoji=e, moderated=True) for n, e in TAGS],
+                    default_sort_order=discord.ForumOrderType.latest_activity, available_tags=tags_du_salon(cle),
                     reason="Entraide Rell Seas")
             else:
-                ch = await g.create_text_channel(z.salon, category=cat, topic=sujet(z, cf),
+                ch = await g.create_text_channel(nom, category=cat, topic=sujet(cle, cf),
                                                  overwrites=droits_zone(g), reason="Entraide Rell Seas")
-            await _garder(z.cle, ch)
+            salons[cle] = ch.id
+            await _db_set(g.id, "rs_salons", salons)
+            faits.append(f"salon {ch.name}")
         await _db_set(g.id, "rs_actif", 1)
+        await _db_set(g.id, "rs_v2", 1)
     await assurer_panneaux(g, forcer=True)
+    try:
+        await ordonner(g)
+    except discord.HTTPException as ex:
+        _log("[ENTRAIDE][E10] Communautaire non rangée")
+        _log(f"[ENTRAIDE][E10:DETAIL] {type(ex).__name__} {ex}")
+    return faits
+
+
+async def ordonner(g) -> bool:
+    """Communautaire par ordre de priorité : ❓ aide (l'orientation), 💬 chat, 🆘 entraide, 🤝 trade,
+    💡 suggestions, 🚀 boosts ; les autres salons suivent dans leur ordre, les vocaux restent en bas."""
+    cat = categorie_communautaire(g)
+    if cat is None:
+        return False
+    brut, cf = await _cfg(g.id), await conf(g)
+
+    def ici(ch):
+        return ch if ch is not None and getattr(ch, "category_id", None) == cat.id else None
+    texte = [ch for ch in sorted(cat.channels, key=lambda c: c.position)
+             if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel))]
+    chat = next((ch for ch in texte if "chat" in config_salons.normaliser(ch.name).split()), None)
+    voulu = [ici(g.get_channel(int(brut.get("aide_salon", 0) or 0))), chat, ici(salon(g, cf, "entraide")),
+             ici(salon(g, cf, "trade")), ici(g.get_channel(int(brut.get("suggestions_salon", 0) or 0))),
+             ici(g.get_channel(int(brut.get("boosts_salon", 0) or 0)))]
+    voulu = list(dict.fromkeys(ch for ch in voulu if ch is not None))
+    if texte[:len(voulu)] == voulu:
+        return False
+    for n, ch in enumerate(voulu):
+        if n == 0:
+            await ch.move(beginning=True, category=cat, sync_permissions=False, reason="Communautaire par priorité")
+        else:
+            await ch.move(after=voulu[n - 1], category=cat, sync_permissions=False,
+                          reason="Communautaire par priorité")
+    return True
+
+
+async def migrer_v2(g) -> list:
+    """22/10 (soir) : « ça me fait trop de salons… tout mettre dans Communautaire… que ça ne se
+    chevauche pas ». La première installation (une catégorie, sept salons) devient deux forums rangés
+    dans Communautaire : 🆘 aide devient 🆘 entraide (boss, farm, chill y entrent avec leur étiquette),
+    🤝 trade y est rangé ; 🧭 orientation laisse la place au panneau ❓ aide, 💬 discussion au 💬 chat.
+    Seuls les salons créés par le bot partent ; la discussion seulement si aucun membre n'y a écrit
+    (sinon elle est rangée dans Communautaire et signalée)."""
+    brut = await _cfg(g.id)
+    p = getattr(g.me, "guild_permissions", None)
+    if brut.get("rs_v2") or not brut.get("rs_actif") or not (p and p.manage_channels):
+        return []
+    faits, traites = [], set()
+    cf = await conf(g)
+    anciens = dict(cf["salons"])
+    cat = await _categorie_cible(g)
+    for cle in ("boss", "farm", "chill"):
+        ch = g.get_channel(int(anciens.get(cle, 0) or 0))
+        if ch is None:
+            continue
+        for d in await _lignes(_SQL_OUVERTES_DU_SALON, (g.id, ch.id)):
+            await fermer(g, d["id"], 0, "fermee", "🔒 Cette zone rejoint 🆘 entraide : republie ta demande là-bas.")
+        await ch.delete(reason="Entraide regroupée : un forum pour l'aide, le boss, le farm et le chill")
+        traites.add(ch.id)
+        faits.append(f"{ch.name} retiré")
+    orientation = g.get_channel(int(anciens.get("orientation", 0) or 0))
+    if orientation is not None:
+        await orientation.delete(reason="L'orientation rejoint le panneau ❓ aide")
+        traites.add(orientation.id)
+        faits.append(f"{orientation.name} retiré")
+    discussion = g.get_channel(int(anciens.get("discussion", 0) or 0))
+    if discussion is not None:
+        a_parle = False
+        async for m in discussion.history(limit=200):
+            if not getattr(m.author, "bot", False):
+                a_parle = True
+                break
+        if a_parle:
+            await discussion.edit(category=cat, sync_permissions=False, reason="Rangé dans Communautaire")
+            faits.append(f"{discussion.name} gardé et rangé (des membres y ont écrit)")
+        else:
+            await discussion.delete(reason="On parle du jeu dans 💬 chat")
+            faits.append(f"{discussion.name} retiré")
+        traites.add(discussion.id)
+    entraide_ch = g.get_channel(int(anciens.get("aide", 0) or 0))
+    trade_ch = g.get_channel(int(anciens.get("trade", 0) or 0))
+    if entraide_ch is not None:
+        reglage = {"name": SALONS["entraide"][0], "category": cat, "sync_permissions": False,
+                   "topic": sujet("entraide", cf)}
+        if isinstance(entraide_ch, discord.ForumChannel):
+            gardes = list(entraide_ch.available_tags)
+            noms = {t.name for t in gardes}
+            reglage["available_tags"] = ([discord.ForumTag(name=z.nom, emoji=z.emoji, moderated=True)
+                                          for z in types_du_salon("entraide") if z.nom not in noms] + gardes)[:20]
+        await entraide_ch.edit(reason="Entraide regroupée dans Communautaire", **reglage)
+        traites.add(entraide_ch.id)
+        faits.append(f"{entraide_ch.name} devient {SALONS['entraide'][0]}")
+    if trade_ch is not None:
+        await trade_ch.edit(category=cat, sync_permissions=False, topic=sujet("trade", cf),
+                            reason="Entraide regroupée dans Communautaire")
+        traites.add(trade_ch.id)
+    await _db_set(g.id, "rs_salons", {k: ch.id for k, ch in (("entraide", entraide_ch), ("trade", trade_ch))
+                                      if ch is not None})
+    await _db_set(g.id, "rs_panneaux", {k: cf["panneaux"][ancien] for k, ancien in (("entraide", "aide"),
+                                                                                     ("trade", "trade"))
+                                        if cf["panneaux"].get(ancien)})
+    ancienne = g.get_channel(cf["categorie"])
+    if isinstance(ancienne, discord.CategoryChannel) and ancienne is not cat and \
+            all(c.id in traites for c in ancienne.channels):
+        await ancienne.delete(reason="Entraide rangée dans Communautaire")
+        faits.append(f"catégorie {ancienne.name} retirée")
+    await _db_set(g.id, "rs_categorie", 0)
+    await _db_set(g.id, "rs_orientation", 0)
+    await _db_set(g.id, "rs_v2", 1)
+    faits += await installer(g)
     return faits
 
 
@@ -1255,14 +1334,14 @@ class EntraidePanelV2(LayoutView):
         try:
             cf = await conf(self.g)
             items = [visuels.bandeau("rs_port", "Entraide Rell Seas")]
-            installe = cf["actif"] and salon(self.g, cf, "orientation") is not None
+            installe = cf["actif"] and salon(self.g, cf, "entraide") is not None
             if not installe:
                 items.append(discord.ui.TextDisplay(
-                    "Pas encore installée.\n-# Une catégorie, sept salons (orientation, discussion, aide, boss, "
-                    "farm, trade, chill) et quatre rôles de guide."))
+                    "Pas encore installée.\n-# Deux forums dans Communautaire — 🆘 entraide (aide, boss, farm, "
+                    "chill) et 🤝 trade — et quatre rôles de guide."))
             else:
                 ouvertes = await compter_ouvertes(self.g.id)
-                forum = isinstance(salon(self.g, cf, "aide"), discord.ForumChannel)
+                forum = isinstance(salon(self.g, cf, "entraide"), discord.ForumChannel)
                 lignes = [f"🟢 Installée · {'forums' if forum else 'salons et fils'} · "
                           f"{sum(ouvertes.values())} demande(s) en cours"]
                 for z in ZONES.values():
@@ -1373,9 +1452,10 @@ class EntraidePanelV2(LayoutView):
     async def _cb_installer(self, i):
         cf = await conf(self.g)
         repare = cf["actif"]
-        texte = ("Réparer l'entraide ? Ce qui manque est recréé (salons, rôles, panneaux) ; rien n'est supprimé."
-                 if repare else "Installer l'entraide ? Une catégorie, sept salons et quatre rôles de guide "
-                                "sont créés ; rien n'est supprimé.")
+        texte = ("Réparer l'entraide ? Ce qui manque est recréé (forums, rôles, posts épinglés) et Communautaire "
+                 "est remise dans l'ordre ; rien n'est supprimé." if repare else
+                 "Installer l'entraide ? Deux forums dans Communautaire (🆘 entraide, 🤝 trade) et quatre rôles de "
+                 "guide ; rien n'est supprimé.")
         panneau = self
 
         async def _action(_i):

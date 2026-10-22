@@ -12851,7 +12851,7 @@ async def _automod_invitations(g) -> bool:
 
 
 NOM_AIDE = "aide"
-AIDE_VERSION = 1
+AIDE_VERSION = 2
 
 
 def _salon_des_tickets(g):
@@ -12872,7 +12872,10 @@ def _salon_par_nom(g, *mots, exclus=("log", "transcript")):
 
 async def _vue_aide(g, c):
     """« Il faudrait que tu refasses le salon aide. » Une ligne par besoin, un bouton qui mène au
-    bon salon ; une ligne n'apparaît que si son salon existe (aucun bouton qui ment)."""
+    bon salon ; une ligne n'apparaît que si son salon existe (aucun bouton qui ment).
+    22/10/2026 : c'est aussi l'orientation de l'entraide (« un vrai salon tout en haut, de
+    redirection »), par ordre de priorité : aide en jeu, échanges, ticket, candidature, vocal,
+    suggestions, sondages, règles."""
     hub = None
     for k in ((c.get('temp_voice_config') or {}).get('hubs') or {}):
         ch = g.get_channel(int(k)) if str(k).isdigit() else None
@@ -12882,15 +12885,15 @@ async def _vue_aide(g, c):
     ticket = _salon_des_tickets(g)
     cf_entraide = await entraide.conf(g)
     lignes = [
-        (ticket, "🎫 **Un problème, une question**\nOuvre un ticket : le staff te répond en privé.", "Ouvrir un ticket"),
+        *entraide.lignes_aide(g, cf_entraide),
+        (ticket, "🎫 **Un souci avec un joueur, une question au staff**\nOuvre un ticket : le staff te répond en privé.",
+         "Ouvrir un ticket"),
         (ticket if rellseas_ui.panneaux_tickets(c) else None,
          "🌊 **Rejoindre Rell Seas**\nLa candidature se fait par ticket « Rell Seas ».", "Postuler"),
-        (entraide.salon(g, cf_entraide, "orientation") if cf_entraide["actif"] else None,
-         "🏴‍☠️ **Entraide Rell Seas**\nAide, trade, boss, farm, chill : un bouton par zone.", "Y aller"),
         (hub, "🔊 **Ton vocal à toi**\nEntre dans Join : ton salon se crée, tu en es le chef.", "Créer mon vocal"),
-        (g.get_channel(int(c.get('sondages_salon', 0) or 0)), "📊 **Un sondage**\nBouton ➕ puis « Sondage ».", "Sondages"),
         (g.get_channel(int(c.get('suggestions_salon', 0) or 0)), "💡 **Une idée pour le serveur**\nPropose-la, tout le monde vote.",
          "Suggestions"),
+        (g.get_channel(int(c.get('sondages_salon', 0) or 0)), "📊 **Un sondage**\nBouton ➕ puis « Sondage ».", "Sondages"),
         (_salon_par_nom(g, "regle") or _salon_par_nom(g, "rules"), "📜 **Les règles**\nÀ lire avant tout.", "Lire"),
     ]
     items = [visuels.bandeau("aide", "Besoin d'aide ?")]
@@ -12969,6 +12972,14 @@ async def entraide_task():
                     faits = await entraide.installer(g)
                     await _entraide_journal(g, "entraide.installation",
                                             "Entraide Rell Seas installée : " + (", ".join(faits) or "rien ne manquait") + ".")
+                    await _salon_aide(g)
+            if c.get('rs_actif') and not c.get('rs_v2'):
+                # 22/10 (soir) : « trop de salons… tout dans Communautaire » — deux forums, rangés.
+                faits = await entraide.migrer_v2(g)
+                if faits:
+                    await _entraide_journal(g, "entraide.regroupement",
+                                            "Entraide regroupée dans Communautaire : " + ", ".join(faits) + ".")
+                    await _salon_aide(g)
             await entraide.entretenir(g)
         except Exception as ex:
             _logerr("entraide.entretien", ex, guild_id=g.id)
@@ -13141,6 +13152,7 @@ async def _etat_public():
             "suggestions_v3": any(c.get('suggestions_v3') for c in confs),
             "boosts": any(c.get('boosts_entete') for c in confs),
             "entraide": any(c.get('rs_actif') for c in confs),
+            "entraide_v2": any(c.get('rs_v2') for c in confs),
             "entraide_salons": max([len(c.get('rs_salons') or {}) for c in confs] or [0]),
             "tickets_regroupes": any(c.get('tickets_categorie') for c in confs)})
     except Exception as ex:
@@ -30554,15 +30566,15 @@ _ENTR_NORM_CACHE: dict = {}
 
 
 async def _entraide_request_channel(guild):
-    """Le salon où demander de l'aide : l'orientation de l'entraide Rell Seas si elle est installée,
-    sinon l'ancien réglage, sinon None. FAIL-SAFE : None sur tout problème → l'appelant n'envoie rien."""
+    """Le salon où demander de l'aide : le forum 🆘 entraide s'il est installé, sinon l'ancien
+    réglage, sinon None. FAIL-SAFE : None sur tout problème → l'appelant n'envoie rien."""
     try:
         if guild is None:
             return None
         cf_entraide = await entraide.conf(guild)
-        orientation = entraide.salon(guild, cf_entraide, "orientation") if cf_entraide["actif"] else None
-        if isinstance(orientation, discord.TextChannel):
-            return orientation
+        forum = entraide.salon(guild, cf_entraide, "entraide") if cf_entraide["actif"] else None
+        if isinstance(forum, (discord.TextChannel, discord.ForumChannel)):
+            return forum
         c = await cfg(guild.id)
         # Interrupteur maître : si l'owner a désactivé l'entraide, la feature est OFF
         # (aucun post, aucune action) même si un salon est encore réglé.
