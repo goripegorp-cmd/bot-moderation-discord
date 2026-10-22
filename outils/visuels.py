@@ -91,6 +91,13 @@ BANDEAUX = {
     "clan": ("RELL SEAS", "Liste du clan", "Qui est dedans, qui est actif", "\uE8FD", (6, 182, 212), (37, 99, 235)),
     "recrutement": ("RELL SEAS", "Recrutement", "Le dossier complet du candidat", "\uE77B", (6, 182, 212), (79, 70, 229)),
     "tableau": ("STAFF", "Tableau de bord", "Candidatures · tickets · sanctions · clan", "\uE9D2", (14, 165, 233), (99, 102, 241)),
+    #  Entraide Rell Seas (22/10/2026) : l'orientation et une zone par besoin.
+    "rs_port": ("RELL SEAS", "Entraide", "Aide · Trade · Boss · Farm · Chill", "\uEB48", (6, 182, 212), (37, 99, 235)),
+    "rs_aide": ("RELL SEAS", "Aide", "Un joueur qualifié t'aide", "\uE9CE", (34, 197, 94), (16, 185, 129)),
+    "rs_boss": ("RELL SEAS", "Boss", "Du renfort contre les boss", "\uECAD", (239, 68, 68), (249, 115, 22)),
+    "rs_farm": ("RELL SEAS", "Farm", "Farmer à plusieurs, plus vite", "\uEC0A", (132, 204, 22), (234, 179, 8)),
+    "rs_trade": ("RELL SEAS", "Trade", "Échanger fruits et objets", "\uE8AB", (245, 158, 11), (234, 88, 12)),
+    "rs_chill": ("RELL SEAS", "Chill", "Naviguer et jouer tranquille", "\uE706", (56, 189, 248), (45, 212, 191)),
 }
 
 #  Icônes des boutons : (glyphe, famille de couleur)

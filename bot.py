@@ -94,6 +94,7 @@ import nettoyage  # journal en fils, rétention 30 jours, remise à neuf
 import sondages  # les sondages Discord des membres, vérifiés puis suivis sur le site
 import salutations  # un 👋 sous chaque « bonjour », là où tout le monde peut écrire
 import suggestions  # idées des membres : votes, fil de discussion, décision du staff
+import entraide  # l'entraide Rell Seas : orientation, zones, guides qui certifient, nettoyage
 import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -10547,12 +10548,13 @@ _CONFIG_SECTIONS = [
     ("suggestions", "💡", "Suggestions",       "Idées des membres · votes · décisions du staff"),
     ("social",      "📡", "Réseaux sociaux",   "YouTube · Twitch · X · TikTok · Instagram → salon d'annonces"),
     ("rellseas",    "🎭", "Rellseas",          "Qui peut donner, retirer, vérifier l'activité"),
+    ("entraide",    "🏴‍☠️", "Entraide Rell Seas", "Aide · trade · boss · farm · chill · guides qui certifient"),
     ("rgpd",        "🔒", "Données & RGPD",    "Droit à l'effacement (art. 17) · rétention"),
 ]
 _ICONES_SECTIONS = {"protections": "bouclier", "sanctions": "sanction", "immunites": "staff",
                     "antiraid": "alerte", "tickets": "ticket", "logs": "journal", "roblox": "actu",
                     "sondages": "sondage", "suggestions": "idee", "social": "globe",
-                    "rellseas": "navire", "rgpd": "verrou"}
+                    "rellseas": "navire", "entraide": "navire", "rgpd": "verrou"}
 
 
 class MainPanelV2(LayoutView):
@@ -10751,6 +10753,7 @@ class MainPanelV2(LayoutView):
             #  retiré — un panneau orphelin, pas un panneau manquant.
             'social':      lambda: panels2026.SocialMediaPanelV2(self.u, self.g),
             'rellseas':    lambda: rellseas_ui.RellseasPanelV2(self.u, self.g),
+            'entraide':    lambda: entraide.EntraidePanelV2(self.u, self.g),
             'rgpd':        lambda: RgpdPanelV2(self.u, self.g),
         }
         fabrique = panneaux.get(valeur)
@@ -12580,6 +12583,7 @@ async def _configurer_salons_v2(g) -> None:
         hubs = {int(k) for k in (voix.get('hubs') or {}) if str(k).isdigit()}
         ids_prives = {int(c.get(k, 0) or 0) for k in ('sondages_salon', 'tableau_salon')}
         ids_prives |= {ch.id for ch in await _salons_de_logs(g, c)}
+        ids_prives |= entraide.ids_salons(c)
         actions = config_salons.plan_v2(g, clan_role, _roles_staff_et_plus(g, c), hubs,
                                         me.guild_permissions.move_members, ids_prives)
         await db_set(g.id, 'config_salons_v2', now().isoformat())
@@ -12671,6 +12675,14 @@ NOM_AIDE = "aide"
 AIDE_VERSION = 1
 
 
+def _salon_des_tickets(g):
+    """Le salon où l'on ouvre un ticket (« ticket »), pas un « 🎫・tickets-staff » qui porte les fils."""
+    for ch in getattr(g, "text_channels", []) or []:
+        if "ticket" in config_salons.normaliser(ch.name).split():
+            return ch
+    return _salon_par_nom(g, "ticket")
+
+
 def _salon_par_nom(g, *mots, exclus=("log", "transcript")):
     for ch in getattr(g, "text_channels", []) or []:
         n = config_salons.normaliser(ch.name)
@@ -12688,11 +12700,14 @@ async def _vue_aide(g, c):
         if ch is not None and not (ch.category is not None and config_salons.est_clan(ch.category.name)):
             hub = ch
             break
-    ticket = _salon_par_nom(g, "ticket")
+    ticket = _salon_des_tickets(g)
+    cf_entraide = await entraide.conf(g)
     lignes = [
         (ticket, "🎫 **Un problème, une question**\nOuvre un ticket : le staff te répond en privé.", "Ouvrir un ticket"),
         (ticket if rellseas_ui.panneaux_tickets(c) else None,
          "🌊 **Rejoindre Rell Seas**\nLa candidature se fait par ticket « Rell Seas ».", "Postuler"),
+        (entraide.salon(g, cf_entraide, "orientation") if cf_entraide["actif"] else None,
+         "🏴‍☠️ **Entraide Rell Seas**\nAide, trade, boss, farm, chill : un bouton par zone.", "Y aller"),
         (hub, "🔊 **Ton vocal à toi**\nEntre dans Join : ton salon se crée, tu en es le chef.", "Créer mon vocal"),
         (g.get_channel(int(c.get('sondages_salon', 0) or 0)), "📊 **Un sondage**\nBouton ➕ puis « Sondage ».", "Sondages"),
         (g.get_channel(int(c.get('suggestions_salon', 0) or 0)), "💡 **Une idée pour le serveur**\nPropose-la, tout le monde vote.",
@@ -12760,6 +12775,22 @@ async def _salon_aide(g) -> None:
         await db_set(g.id, 'aide_message_v', signature)
     except discord.HTTPException as ex:
         _logerr("aide.salon", ex, guild_id=getattr(g, 'id', 0))
+
+
+@tasks.loop(minutes=5)
+async def entraide_task():
+    """L'entraide Rell Seas : les demandes sans activité se ferment, les demandes closes disparaissent
+    après leur délai, l'orientation suit les compteurs, les panneaux restent en place."""
+    for g in list(bot.guilds):
+        try:
+            await entraide.entretenir(g)
+        except Exception as ex:
+            _logerr("entraide.entretien", ex, guild_id=g.id)
+
+
+@entraide_task.before_loop
+async def _entraide_task_attente():
+    await bot.wait_until_ready()
 
 
 class BoutonAnnulerConfig(discord.ui.DynamicItem[Button], template=r"cfgsal:annuler:(?P<hid>\d+)"):
@@ -12853,22 +12884,39 @@ async def _publier_reserve(guild, plateforme: str, post_id, salon, profil: str, 
     return msg
 
 
-async def _texte_sondage_refuse(g, texte: str) -> str:
-    """Les filtres du serveur, appliqués au texte d'un sondage. Raison du refus, ou ""."""
+async def _texte_refuse_pour(g, texte: str, dans: str = "un sondage", ton: str = "Ton sondage") -> str:
+    """Les filtres du serveur, appliqués au texte d'un membre. Raison du refus, ou ""."""
     if _LIEN_OU_MENTION.search(texte):
-        return "Pas de lien ni de mention dans un sondage."
+        return f"Pas de lien ni de mention dans {dans}."
     c = await cfg(g.id)
     if c.get('anti_badwords'):
         trouve, _ = check_badwords(texte, c.get('badwords_list', []),
                                    whitelist=c.get('badwords_whitelist', []))
         if trouve:
-            return "Ton sondage contient un mot interdit sur le serveur."
+            return f"{ton} contient un mot interdit sur le serveur."
     norm = _normalize_for_scan(texte)
     if c.get('anti_insults', 1) and insult_filter.scan(texte, norm)[0] >= 2:
-        return "Ton sondage contient une insulte."
+        return f"{ton} contient une insulte."
     if c.get('anti_offtopic', 1) and offtopic_filter.scan(texte, norm):
         return "Politique, religion et militantisme n'ont pas leur place ici."
     return ""
+
+
+async def _texte_sondage_refuse(g, texte: str) -> str:
+    return await _texte_refuse_pour(g, texte)
+
+
+async def _texte_demande_refusee(g, texte: str) -> str:
+    return await _texte_refuse_pour(g, texte, "une demande", "Ta demande")
+
+
+async def _entraide_staff(g, membre) -> bool:
+    """La tête, le staff et au-dessus : ils ferment et certifient dans toutes les zones."""
+    return _a_la_tete(g, membre) or _staff_ou_plus(g, membre, await cfg(g.id))
+
+
+async def _entraide_journal(g, type_: str, texte: str, **kw) -> bool:
+    return await _au_journal(g, "Entraide", type_, texte, **kw)
 
 
 
@@ -13170,6 +13218,7 @@ _SUPERVISED_LOOP_NAMES = [
     "salon_logs_task",
     "websub_task",
     "amnistie_task",
+    "entraide_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -19326,6 +19375,11 @@ async def _activite_boot():
     await suggestions.init_db()
     boosts.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
     await boosts.init_db()
+    entraide.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_demande_refusee,
+                   controle=_access_gate_reason, est_staff=_entraide_staff, journal=_entraide_journal,
+                   salon_ticket=_salon_des_tickets, log=print)
+    entraide.set_retour(_retour_vers_configure)
+    await entraide.init_db()
 
     await activite_module.init_db()
 
@@ -19425,6 +19479,8 @@ async def on_ready():
                               suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig,
                               recrutements.BoutonTableau, recrutements.BoutonDecision,
                               BoutonAnciensSalons, BoutonGere, BoutonFicheSite, BoutonApprouverBot)
+        bot.add_dynamic_items(entraide.BoutonNouvelle, entraide.BoutonRejoindre, entraide.BoutonCertifier,
+                              entraide.BoutonFermer, entraide.BoutonMiddleman)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
@@ -20789,6 +20845,11 @@ async def on_member_ban(guild, user):
 
 @bot.event
 async def on_member_remove(m):
+    # Entraide : ses demandes ouvertes se ferment (personne n'attendrait un joueur parti).
+    try:
+        await entraide.sur_depart(m)
+    except Exception as ex:
+        _logerr("entraide.depart", ex, guild_id=m.guild.id)
     # Parti du serveur : son boost s'arrête, sa carte de remerciement aussi.
     try:
         await boosts.retirer(m.guild, m.id)
@@ -30303,11 +30364,15 @@ _ENTR_NORM_CACHE: dict = {}
 
 
 async def _entraide_request_channel(guild):
-    """Salon texte configuré pour les demandes d'aide, ou None (feature OFF).
-    FAIL-SAFE : None sur tout problème → l'appelant n'envoie rien."""
+    """Le salon où demander de l'aide : l'orientation de l'entraide Rell Seas si elle est installée,
+    sinon l'ancien réglage, sinon None. FAIL-SAFE : None sur tout problème → l'appelant n'envoie rien."""
     try:
         if guild is None:
             return None
+        cf_entraide = await entraide.conf(guild)
+        orientation = entraide.salon(guild, cf_entraide, "orientation") if cf_entraide["actif"] else None
+        if isinstance(orientation, discord.TextChannel):
+            return orientation
         c = await cfg(guild.id)
         # Interrupteur maître : si l'owner a désactivé l'entraide, la feature est OFF
         # (aucun post, aucune action) même si un salon est encore réglé.
