@@ -22,13 +22,13 @@ from conftest_discord import Obj
 RACINE = Path(__file__).resolve().parent.parent
 ARBRE = ast.parse((RACINE / "bot.py").read_text(encoding="utf-8"))
 NOMS = ("_resolve_transcript_text", "_TRANSCRIPT_CSS", "CONVERSATION_MAX", "_message_en_donnees",
-        "_conversation_ticket", "_render_ticket_transcript_html")
+        "_conversation_ticket", "_conversation_seule", "_suivi_ticket", "_render_ticket_transcript_html")
 
 
 def _ns(**autres):
     ns = {"re": re, "datetime": datetime, "timezone": timezone, "asyncio": asyncio, "ZoneInfo": None,
           "transcript_store": transcript_store, "now": lambda: datetime(2026, 10, 20, tzinfo=timezone.utc),
-          "print": lambda *a, **k: None, **autres}
+          "print": lambda *a, **k: None, "_logerr": lambda *a, **k: None, **autres}
     for n in ARBRE.body:
         nom = getattr(n, "name", None) or (getattr(n.targets[0], "id", None) if isinstance(n, ast.Assign) else None)
         if nom in NOMS:
@@ -121,6 +121,13 @@ def _base(tmp_path):
             await db.execute("CREATE TABLE tickets(id INTEGER PRIMARY KEY, guild_id, channel_id, status)")
             await db.execute("CREATE TABLE ticket_transcripts(guild_id, ticket_id, user_id, user_name, panel, url,"
                              " closed_at, jeton TEXT, PRIMARY KEY (guild_id, ticket_id))")
+            await db.execute("CREATE TABLE ticket_log_events(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id,"
+                             " ticket_id, kind, actor_id, detail, created_unix)")
+            await db.executemany("INSERT INTO ticket_log_events(guild_id, ticket_id, kind, actor_id, detail,"
+                                 " created_unix) VALUES(?,?,?,?,?,?)",
+                                 [(1, 2, "create", 7, "", 1_800_000_000), (1, 2, "claim", 8, "", 1_800_000_600),
+                                  (1, 2, "close", 8, "Accepté, bienvenue", 1_800_003_600),
+                                  (2, 2, "close", 9, "autre serveur", 1_800_000_000)])
             await db.executemany("INSERT INTO tickets VALUES(?,?,?,?)",
                                  [(1, 1, 500, "open"), (2, 1, 501, "closed"), (3, 1, 502, "closed"), (4, 1, 503, "closed"),
                                   (5, 2, 504, "closed")])
@@ -158,6 +165,11 @@ def test_C3_ouvert_en_direct_ferme_relu_absent_dit_pourquoi(tmp_path, monkeypatc
     assert ferme_ancien["source"] == "transcript", "ancienne ligne : le jeton se lit dans l'adresse"
     assert sans["messages"] == [] and "Aucun transcript" in sans["absent"]
     assert autre_serveur["absent"] == "Ticket introuvable.", "un ticket d'un autre serveur ne se lit pas"
+    assert "suivi" not in autre_serveur
+    assert [(e["quoi"], e["qui"], e["detail"]) for e in ferme["suivi"]] == [
+        ("create", "Kolax", ""), ("claim", "membre parti", ""), ("close", "membre parti", "Accepté, bienvenue")], \
+        "22/10 : chaque étape du ticket, dans l'ordre, et pas celles d'un autre serveur"
+    assert ouvert["suivi"] == [] and sans["suivi"] == []
 
 
 def test_C4_la_route_est_reservee_a_la_session_de_la_tete(tmp_path):
@@ -200,6 +212,7 @@ def test_C4_la_route_est_reservee_a_la_session_de_la_tete(tmp_path):
     page = (RACINE / "tableau_page.html").read_text(encoding="utf-8")
     assert page.count("ouvrirConversation(") >= 4, "cartes des tickets ouverts et fermés + « Agrandir »"
     assert page.count("transcriptEnLigne(") >= 5, "dans la fiche : tickets, candidature en cours, décidée, anciennes"
+    assert page.count("const suivi = suiviConv(d);") == 2, "le suivi au-dessus de la conversation, dans la fenêtre et la fiche"
     assert 'transcriptEnLigne(enCours.ticket, "Candidature · ticket #" + enCours.ticket, true)' in page, \
         "« on clique sur quelqu'un » : le transcript s'affiche d'office sous le questionnaire"
     assert '"/conversation?ticket="' in page and "\\/ta\\/[A-Za-z0-9_-]{16,86}" in page

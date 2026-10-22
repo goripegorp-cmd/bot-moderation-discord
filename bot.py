@@ -7840,6 +7840,161 @@ async def _gdpr_retention_wait():
 _tickets_en_creation: set = set()   # {(guild_id, user_id)}
 
 
+TICKETS_CATEGORIE = "🎫 TICKETS"
+_verrous_tickets_cat: dict = {}
+
+
+async def _salon_panneau_tickets(g):
+    """Le salon où l'on ouvre un ticket, reconnu à son panneau (« tickethub:open »)."""
+    ch = _salon_des_tickets(g)
+    if not isinstance(ch, discord.TextChannel):
+        return None
+    try:
+        async for msg in ch.history(limit=25):
+            if getattr(msg.author, "id", 0) == bot.user.id and "tickethub:open" in _custom_ids_du_message(msg):
+                return ch
+    except discord.HTTPException as ex:
+        _logerr("tickets.panneau", ex, guild_id=g.id)
+    return None
+
+
+async def _ranger_tickets(g, cat) -> int:
+    """Le salon d'ouverture, les salons qui portent les fils et les anciens tickets encore ouverts
+    rejoignent la catégorie unique. Rien n'est supprimé ; chaque salon garde ses droits."""
+    c = await cfg(g.id)
+    parents = dict(c.get(tickets_fils.CLE_PARENTS) or {})
+    ids = [int(v) for v in parents.values() if str(v).isdigit()]
+    async with get_db() as db:
+        async with db.execute("SELECT channel_id FROM tickets WHERE guild_id=? AND status='open'", (g.id,)) as cur:
+            ids += [int(r[0]) for r in await cur.fetchall() if r[0]]
+    panneau = await _salon_panneau_tickets(g)
+    salons = ([panneau] if panneau is not None else []) + [g.get_channel(x) for x in dict.fromkeys(ids)]
+    deplaces = 0
+    for ch in salons:
+        if not isinstance(ch, discord.TextChannel) or ch.category_id == cat.id:
+            continue
+        try:
+            await ch.edit(category=cat, sync_permissions=False, reason="Tickets regroupés au même endroit")
+            deplaces += 1
+        except discord.HTTPException as ex:
+            _logerr("tickets.regrouper", ex, guild_id=g.id)
+    #  Les nouveaux tickets d'une équipe vont dans le salon qu'elle avait déjà : pas de doublon.
+    nouveaux = dict(parents)
+    for cle, cid in parents.items():
+        nouveaux.setdefault(f"{cat.id}:{cle.split(':', 1)[1] if ':' in cle else '0'}", cid)
+    if nouveaux != parents:
+        await db_set(g.id, tickets_fils.CLE_PARENTS, nouveaux)
+    if deplaces:
+        await _au_journal(g, "Tickets", "tickets.regroupes",
+                          f"Tickets regroupés dans « {cat.name} » : {deplaces} salon(s) rangé(s).")
+    return deplaces
+
+
+async def _categorie_tickets(g):
+    """22/10/2026 : « les tickets, que tu compactes… tous les salons de tickets à un endroit nickel ».
+    La catégorie unique, créée au besoin — et ce qui existait déjà y est rangé. None si le bot ne
+    peut pas gérer les salons : on garde alors la catégorie du panneau."""
+    c = await cfg(g.id)
+    cat = g.get_channel(int(c.get('tickets_categorie', 0) or 0))
+    if isinstance(cat, discord.CategoryChannel):
+        return cat
+    me = g.me
+    if not (me and me.guild_permissions.manage_channels):
+        return None
+    async with _verrous_tickets_cat.setdefault(g.id, asyncio.Lock()):
+        c = await cfg(g.id)
+        cat = g.get_channel(int(c.get('tickets_categorie', 0) or 0))
+        if isinstance(cat, discord.CategoryChannel):
+            return cat
+        try:
+            cat = await g.create_category(TICKETS_CATEGORIE, reason="Tickets regroupés au même endroit")
+        except discord.HTTPException as ex:
+            _logerr("tickets.categorie", ex, guild_id=g.id)
+            return None
+        await db_set(g.id, 'tickets_categorie', cat.id)
+        await _ranger_tickets(g, cat)
+    return cat
+
+
+_CASIER_MOTS = {"warn": ("avertissement", "avertissements"), "mute": ("mute", "mutes"),
+                "kick": ("expulsion", "expulsions"), "ban": ("bannissement", "bannissements")}
+_BOUTONS_TICKET = ("ticket_ctrl_claim", "ticket_ctrl_add", "ticket_ctrl_transfer", "ticket_ctrl_priority",
+                   "ticket_ctrl_note", "ticket_ctrl_blacklist", "ticket_ctrl_manage", "ticket_ctrl_close")
+
+
+async def _contexte_ticket(g, uid: int, tid: int) -> list:
+    """Ce que le staff doit savoir d'un coup d'œil : l'âge du compte, l'ancienneté sur le serveur,
+    les tickets d'avant et le casier."""
+    m = g.get_member(int(uid))
+    lignes = []
+    if m is not None:
+        arrive = f" · sur le serveur depuis <t:{int(m.joined_at.timestamp())}:R>" if m.joined_at else ""
+        lignes.append(f"Compte créé <t:{int(m.created_at.timestamp())}:R>{arrive}")
+    async with get_db() as db:
+        async with db.execute("SELECT COUNT(*) FROM tickets WHERE guild_id=? AND user_id=? AND id<?",
+                              (g.id, int(uid), int(tid))) as cur:
+            avant = int((await cur.fetchone())[0])
+        async with db.execute("SELECT type, COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? GROUP BY type",
+                              (g.id, int(uid))) as cur:
+            casier = {str(t or ""): int(n) for t, n in await cur.fetchall()}
+    parts = [f"{casier[t]} {_CASIER_MOTS[t][casier[t] > 1]}" for t in _CASIER_MOTS if casier.get(t)]
+    lignes.append(("premier ticket" if not avant else f"{avant} ticket(s) avant") + " · "
+                  + ("casier vide" if not parts else "casier : " + ", ".join(parts)))
+    return lignes
+
+
+async def _vue_dossier_ticket(g, tid: int, uid: int, panel_name: str, ans: dict, ouvert: int,
+                              pris_par: int = 0) -> LayoutView:
+    """22/10/2026 : « qu'on sache exactement à quoi on a affaire ». Le dossier en tête du ticket :
+    qui, son historique, ses réponses, qui s'en occupe ; les boutons du staff dessous. Ce sont ceux
+    de TicketControlView, rattachés à ses gestionnaires — après un redémarrage, le même identifiant
+    retrouve la vue persistante."""
+    m = g.get_member(int(uid))
+    entete = [discord.ui.TextDisplay(f"### 🎫 Ticket n°{int(tid)} · {discord.utils.escape_markdown(str(panel_name))}"),
+              discord.ui.TextDisplay(f"<@{int(uid)}> · ouvert <t:{int(ouvert)}:R>")]
+    items = [discord.ui.Section(*entete, accessory=discord.ui.Thumbnail(m.display_avatar.url))] if m else list(entete)
+    items.append(discord.ui.TextDisplay("\n".join("-# " + x for x in await _contexte_ticket(g, uid, tid))))
+    reponses = [(str(q), str(a)) for q, a in list((ans or {}).items())[:5] if str(a or "").strip()]
+    if reponses:
+        items.append(discord.ui.Separator())
+        items.append(discord.ui.TextDisplay("\n".join(
+            f"**{discord.utils.escape_markdown(q)[:100]}**\n{discord.utils.escape_mentions(a)[:700]}" for q, a in reponses)))
+    items.append(discord.ui.Separator())
+    items.append(discord.ui.TextDisplay(f"🟢 **Pris en charge** par <@{int(pris_par)}>" if pris_par
+                                        else "🟡 **En attente du staff**"))
+    ctrl = TicketControlView()
+    boutons = {b.custom_id: b for b in list(ctrl.children) if isinstance(b, discord.ui.Button)}
+    if pris_par and "ticket_ctrl_claim" in boutons:
+        b = boutons["ticket_ctrl_claim"]
+        nom = getattr(g.get_member(int(pris_par)), "display_name", "") or "le staff"
+        b.label, b.disabled, b.style = f"Pris par {nom}"[:80], True, discord.ButtonStyle.secondary
+    rangs = [[boutons[k] for k in _BOUTONS_TICKET[:4] if k in boutons],
+             [boutons[k] for k in _BOUTONS_TICKET[4:] if k in boutons]]
+    for b in boutons.values():
+        ctrl.remove_item(b)
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(*items, *[discord.ui.ActionRow(*r) for r in rangs if r],
+                                    accent_color=Palette.SUCCESS if pris_par else Palette.WARNING))
+    return v
+
+
+async def _vue_dossier_ticket_de(g, tk: dict, pris_par: int = 0) -> LayoutView:
+    """Le dossier refait depuis la base (prise en charge, transfert…)."""
+    c = await cfg(g.id)
+    nom = ((c.get('ticket_panels') or {}).get(tk.get('panel_id', ''), {}) or {}).get('name', 'Support')
+    ouvert = int(now().timestamp())
+    async with get_db() as db:
+        async with db.execute("SELECT created_at FROM tickets WHERE id=?", (int(tk['id']),)) as cur:
+            r = await cur.fetchone()
+    try:
+        if r and r[0]:
+            ouvert = int(datetime.fromisoformat(str(r[0])).replace(tzinfo=timezone.utc).timestamp())
+    except ValueError:
+        pass
+    return await _vue_dossier_ticket(g, int(tk['id']), int(tk['user']), nom, tk.get('answers') or {}, ouvert,
+                                     pris_par)
+
+
 async def create_ticket(i, pid, ans=None):
     """Un seul ticket en cours d'ouverture par membre : deux clics rapprochés passaient tous deux le
     contrôle « max tickets » (la base n'avait pas encore le premier) et ouvraient deux tickets."""
@@ -7891,7 +8046,7 @@ async def _create_ticket_corps(i, pid, ans=None):
                 getattr(i.user, 'id', 0) not in (SUPER_OWNER_ID, getattr(i.guild, 'owner_id', 0)):
             return None, ("🚫 Vous avez été blacklisté de ce panel de tickets. "
                           "Contactez un administrateur si vous pensez que c'est une erreur.")
-        cat = i.guild.get_channel(pnl.get('category', 0))
+        cat = await _categorie_tickets(i.guild) or i.guild.get_channel(pnl.get('category', 0))
         
         # Utiliser le rôle staff du panel, sinon le rôle staff global
         staff_role_id = pnl.get('staff_role', 0) or c.get('ticket_staff', 0)
@@ -7949,18 +8104,12 @@ async def _create_ticket_corps(i, pid, ans=None):
         #                    📨 EMBED PRINCIPAL DU TICKET
         # ═══════════════════════════════════════════════════════════════════════════════
         panel_name = pnl.get('name', 'Support')
-        emb = discord.Embed(color=0x5865F2, timestamp=now())
-        emb.set_author(name=f"Ticket #{tid} • {panel_name}", icon_url=i.guild.icon.url if i.guild.icon else None)
-        emb.description = f"Ouvert par {i.user.mention} · panel **{panel_name}**"
-        emb.set_thumbnail(url=i.user.display_avatar.url)
-        if ans:
-            for t, a in ans.items():
-                emb.add_field(name=f"{t}", value=a[:1024], inline=False)
-        emb.set_footer(text="En attente du staff")
         # owner 2026-07-20 : PLUS de ping à la création (avant : ouvreur + ROLE staff entier =
-        # ping de masse inutile à chaque ticket). L'embed indique déjà qui a ouvert ; le staff
-        # voit le ticket dans la catégorie + le salon de logs (send_ticket_log 'create' ci-dessous).
-        await webhook_send(ch, 'ticket', embed=emb, view=TicketControlView())
+        # ping de masse inutile à chaque ticket). 22/10/2026 : le dossier dit qui, son historique,
+        # ses réponses et qui s'en occupe ; le staff voit le ticket dans « 🎫 TICKETS ».
+        await webhook_send(ch, 'ticket', view=await _vue_dossier_ticket(
+            i.guild, tid, i.user.id, panel_name, ans or {}, int(now().timestamp())),
+            allowed_mentions=discord.AllowedMentions.none())
         if str(pid) in rellseas_ui.panneaux_tickets(await cfg(i.guild.id)):
             try:
                 await ch.send(view=recrutements.carte_decision(tid), allowed_mentions=discord.AllowedMentions.none())
@@ -7972,14 +8121,12 @@ async def _create_ticket_corps(i, pid, ans=None):
         # ═══════════════════════════════════════════════════════════════════════════════
         welcome_message = pnl.get('welcome_message', '').strip()
         if welcome_message:
-            # Créer un embed pour le message d'accueil
-            welcome_emb = discord.Embed(
-                title="Bienvenue !",
-                description=welcome_message,
-                color=0x3498DB  # Bleu clair
-            )
-            welcome_emb.set_footer(text=f"Panel: {pnl.get('name', 'Support')}")
-            await webhook_send(ch, 'ticket', embed=welcome_emb)
+            # Le mot d'accueil du panneau, sous le dossier (Components V2 comme le reste).
+            accueil = LayoutView(timeout=None)
+            accueil.add_item(discord.ui.Container(
+                discord.ui.TextDisplay("### Bienvenue !"), discord.ui.TextDisplay(welcome_message[:3500]),
+                discord.ui.TextDisplay(f"-# {pnl.get('name', 'Support')}"), accent_color=Palette.INFO))
+            await webhook_send(ch, 'ticket', view=accueil, allowed_mentions=discord.AllowedMentions.none())
         
         await send_ticket_log(i.guild, 'create', i.user, {'id': tid, 'answers': ans or {}, 'panel_id': pid})
         return ch, None
@@ -8630,9 +8777,35 @@ def _message_en_donnees(m, guild) -> dict:
     return out
 
 
+async def _suivi_ticket(g, ticket_id: int) -> list:
+    """22/10/2026 : « un vrai suivi parfait de chaque ticket ». Ses étapes dans l'ordre — ouvert,
+    pris en charge, note, priorité, staff ajouté, fermé et pourquoi — pour le site."""
+    try:
+        async with get_db() as db:
+            async with db.execute("SELECT kind, actor_id, detail, created_unix FROM ticket_log_events"
+                                  " WHERE guild_id=? AND ticket_id=? ORDER BY id", (g.id, int(ticket_id))) as cur:
+                lignes = await cur.fetchall()
+    except Exception as ex:
+        _logerr("ticket.suivi", ex, guild_id=g.id)
+        return []
+
+    def nom(uid):
+        m = g.get_member(int(uid or 0))
+        return m.display_name if m is not None else ("membre parti" if uid else "")
+    return [{"quoi": str(k or ""), "qui": nom(a), "quand": int(t or 0), "detail": str(d or "")[:300]}
+            for k, a, d, t in lignes[-40:]]
+
+
 async def _conversation_ticket(g, ticket_id: int) -> dict:
-    """TOUTE la conversation d'un ticket, pour le site (20/10/2026 : « on n'a que le questionnaire »).
-    Ouvert : en direct depuis Discord. Fermé : le transcript enregistré à la fermeture."""
+    """TOUTE la conversation d'un ticket, pour le site (20/10/2026 : « on n'a que le questionnaire »),
+    et son suivi (22/10). Ouvert : en direct depuis Discord. Fermé : le transcript de la fermeture."""
+    res = await _conversation_seule(g, ticket_id)
+    if res.get("absent") != "Ticket introuvable.":
+        res["suivi"] = await _suivi_ticket(g, ticket_id)
+    return res
+
+
+async def _conversation_seule(g, ticket_id: int) -> dict:
     async with get_db() as db:
         async with db.execute("SELECT channel_id, status FROM tickets WHERE id=? AND guild_id=?",
                               (int(ticket_id), g.id)) as cur:
@@ -8973,11 +9146,15 @@ class TicketControlView(View):
             # éditer le message d'un AUTRE auteur). On met à jour le bouton via la
             # RÉPONSE d'interaction (autorisée sur le message du composant, même
             # webhook), PUIS on annonce dans le salon. Plus de 50005.
-            btn.disabled = True
-            btn.label = f"Pris par {i.user.display_name}"[:80]
-            btn.style = discord.ButtonStyle.secondary
+            if getattr(getattr(i.message, "flags", None), "components_v2", False):
+                vue = await _vue_dossier_ticket_de(i.guild, tk, pris_par=i.user.id)
+            else:  # ancien ticket (encadré + boutons)
+                btn.disabled = True
+                btn.label = f"Pris par {i.user.display_name}"[:80]
+                btn.style = discord.ButtonStyle.secondary
+                vue = self
             try:
-                await i.response.edit_message(view=self)
+                await i.response.edit_message(view=vue)
             except Exception:
                 # Filet : si l'édition du panneau échoue, on acquitte quand même
                 # l'interaction pour éviter « Échec de l'interaction ».
@@ -12139,6 +12316,8 @@ async def salon_logs_task():
         try:
             await _salon_tableau(g)
             await _salon_aide(g)
+            if _types_tickets(await cfg(g.id)):
+                await _categorie_tickets(g)
         except Exception as ex:
             _logerr("logs.salon", ex, guild_id=g.id)
 
@@ -12783,6 +12962,13 @@ async def entraide_task():
     après leur délai, l'orientation suit les compteurs, les panneaux restent en place."""
     for g in list(bot.guilds):
         try:
+            c = await cfg(g.id)
+            if g.owner_id in TETE_IDS and not c.get('rs_installation_auto'):
+                await db_set(g.id, 'rs_installation_auto', now().isoformat())
+                if not c.get('rs_actif'):
+                    faits = await entraide.installer(g)
+                    await _entraide_journal(g, "entraide.installation",
+                                            "Entraide Rell Seas installée : " + (", ".join(faits) or "rien ne manquait") + ".")
             await entraide.entretenir(g)
         except Exception as ex:
             _logerr("entraide.entretien", ex, guild_id=g.id)

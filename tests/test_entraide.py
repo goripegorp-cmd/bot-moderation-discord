@@ -544,6 +544,11 @@ def test_E12_branche_dans_le_bot():
     assert "await entraide.sur_depart(m)" in src and "ids_prives |= entraide.ids_salons(c)" in src
     assert 'await _texte_refuse_pour(g, texte, "une demande", "Ta demande")' in src
     assert "entraide.salon(g, cf_entraide, \"orientation\")" in src, "le panneau d'aide mène à l'entraide"
+    boucle = next(ast.unparse(n) for n in arbre.body if getattr(n, "name", "") == "entraide_task")
+    assert "g.owner_id in TETE_IDS and (not c.get('rs_installation_auto'))" in boucle, \
+        "installée d'elle-même, une fois, sur le serveur du fondateur seulement"
+    assert boucle.index("db_set(g.id, 'rs_installation_auto'") < boucle.index("entraide.installer(g)"), \
+        "le drapeau d'abord : un échec ne relance pas l'installation en boucle"
     assert (RACINE / "visuels" / "rs_port.gif").is_file() and all(
         (RACINE / "visuels" / f"rs_{z}.gif").is_file() for z in Z)
     assert '"Entraide": "#84cc16"' in (RACINE / "tableau_page.html").read_text(encoding="utf-8")

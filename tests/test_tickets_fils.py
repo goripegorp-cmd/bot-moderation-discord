@@ -7,6 +7,7 @@ import ast
 import asyncio
 import contextlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -235,14 +236,18 @@ def _executer(get_db, conf, guilde):
     async def zero(*_a, **_k):
         return 0
 
+    async def dossier(*_a, **_k):
+        return "dossier"
+
     ns = {"discord": discord, "json": json, "get_db": get_db, "cfg": cfg, "db_set": db_set,
           "tickets_fils": tf, "webhook_send": webhook_send, "SUPER_OWNER_ID": 0,
           "_ticket_hours_allows": oui, "check_rate_limit": lambda *a: True,
           "_access_gate_reason": rien, "count_user_tickets_today": zero,
           "count_user_tickets": zero, "send_ticket_log": rien,
-          "TicketControlView": lambda: "vue", "now": lambda: None,
+          "TicketControlView": lambda: "vue", "now": lambda: datetime(2026, 10, 22, tzinfo=timezone.utc),
           "rellseas_ui": rellseas_panneau, "recrutements": recrutements,
-          "_logerr": lambda *a, **k: journaux.append(a)}
+          "_logerr": lambda *a, **k: journaux.append(a), "_categorie_tickets": rien,
+          "_vue_dossier_ticket": dossier, "int": int}
     ns["_tickets_en_creation"] = set()
     exec(_fonction("_create_ticket_corps"), ns)  # noqa: S102 — code du dépôt
     exec(_fonction("create_ticket"), ns)  # noqa: S102 — code du dépôt
@@ -275,7 +280,7 @@ def test_C1_le_ticket_s_ouvre_en_fil_prive(banc):
         "UN salon pour l'équipe, aucun salon pour le ticket"
     assert ecrits[tf.CLE_PARENTS] == {"40:7": g.crees[0].id}
     assert _ligne(banc) == [(ch.id, 3, "p1", "open")]
-    assert envois and envois[0][0] is ch and envois[0][2]["view"] == "vue"
+    assert envois and envois[0][0] is ch and envois[0][2]["view"] == "dossier", "le dossier en tête du fil"
 
 
 def test_C2_dix_tickets_un_seul_salon(banc):

@@ -338,6 +338,11 @@ details.repli[open]>.contenu{animation:monte .4s var(--ease) both}
 .conv-bloc{display:grid;gap:10px;margin-top:4px;padding-top:12px;border-top:1px solid var(--b1);min-width:0}
 .conv-bloc p.aide{margin:0}
 .conv-liste.enligne{overflow:visible;padding:0;flex:none}
+.conv-suivi{display:grid;gap:6px;padding:10px 12px;border-radius:12px;background:var(--s1);border:1px solid var(--b1);font-size:13px;min-width:0}
+.conv-etape{overflow-wrap:anywhere}
+.conv-etape b{margin:0 4px}
+.conv-etape .quand{color:var(--t3);font-size:12px}
+.conv-etape .meta{margin-left:24px}
 .conv-medias img{max-width:min(320px,100%);max-height:260px;border-radius:10px;border:1px solid var(--b1);object-fit:contain;background:var(--s1)}
 .conv-pied{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding:10px 18px;border-top:1px solid var(--b1)}
 @media (max-width:640px){.dialogue.conv{width:100%;height:92%;top:auto;bottom:0;left:0;transform:none;border-radius:22px 22px 0 0;animation:none}}
@@ -1805,6 +1810,18 @@ async function lireConversation(ticket) {
   CONV_MEMOIRE.set(ticket, {t: Date.now(), d});
   return d;
 }
+/* Le suivi du ticket : chaque étape, dans l'ordre (22/10 : « un vrai suivi parfait de chaque ticket »). */
+const ETAPES = {create: ["🟢", "Ouvert"], claim: ["🙋", "Pris en charge"], close: ["🔒", "Fermé"], add_staff: ["➕", "Staff ajouté"],
+  priority: ["🚩", "Priorité"], note: ["📌", "Note interne"], leave: ["🚪", "A quitté le ticket"], blacklist: ["⛔", "Blacklisté"]};
+function suiviConv(d) {
+  const ev = d.suivi || [];
+  if (!ev.length) return null;
+  return h("div", {classe: "conv-suivi"}, h("b", {}, "Suivi du ticket"), ev.map(e => {
+    const [ic, lib] = ETAPES[e.quoi] || ["•", e.quoi];
+    return h("div", {classe: "conv-etape"}, ic, h("b", {}, lib), e.qui ? "par " + e.qui : "", h("span", {classe: "quand"}, " · " + date(e.quand, true)),
+      e.detail ? h("div", {classe: "meta"}, e.detail) : null);
+  }));
+}
 function resumeConversation(d) {
   const n = (d.messages || []).length;
   return d.absent || (nombre(n) + " message(s) · " + (d.source === "discord" ? "en direct de Discord" : "transcript enregistré à la fermeture")
@@ -1842,7 +1859,8 @@ function transcriptEnLigne(ticket, titre, ouvert) {
       return;
     }
     meta.textContent = resumeConversation(d);
-    liste.replaceChildren(...(d.messages || []).map(messageConv));
+    const suivi = suiviConv(d);
+    liste.replaceChildren(...(suivi ? [suivi] : []), ...(d.messages || []).map(messageConv));
     outils.append(h("button", {classe: "bouton p discret", type: "button", onclick: () => ouvrirConversation(ticket, titre)}, "Agrandir"));
     if (d.lien && /^https:\/\//.test(d.lien)) outils.append(h("a", {classe: "bouton p discret", href: d.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Page du transcript"));
   };
@@ -1876,7 +1894,8 @@ async function ouvrirConversation(ticket, titre) {
   if (!hote.contains(liste)) return;  // fermée pendant le chargement
   const msgs = d.messages || [];
   sous.textContent = resumeConversation(d);
-  liste.replaceChildren(...(msgs.length ? msgs.map(messageConv) : [vide(d.absent ? "Pas de transcript" : "Aucun message")]));
+  const suivi = suiviConv(d);
+  liste.replaceChildren(...(suivi ? [suivi] : []), ...(msgs.length ? msgs.map(messageConv) : [vide(d.absent ? "Pas de transcript" : "Aucun message")]));
   if (d.lien && /^https:\/\//.test(d.lien)) pied.prepend(h("a", {classe: "bouton p", href: d.lien, target: "_blank", rel: "noopener noreferrer"}, icone("lien", 14), "Page du transcript"));
 }
 async function moderer(m, sanction) {
