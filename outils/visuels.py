@@ -103,6 +103,7 @@ BANDEAUX = {
     "an_goripe": ("GORIPE", "GoRipe", "Twitch · YouTube · TikTok", "\uE714", (168, 85, 247), (236, 72, 153)),
     "an_rellseas": ("RELL SEAS", "Rell Seas", "Le studio · The studio", "\uEB48", (6, 182, 212), (37, 99, 235)),
     "an_clan": ("CLAN GORP", "Annonce du clan", "Clan announcement", "\uEC24", (6, 182, 212), (20, 184, 166)),
+    "rs_guide": ("RELL SEAS", "Guide", "Bienvenue à bord · Welcome aboard", "\uE8F1", (6, 182, 212), (37, 99, 235)),
     "rs_trade": ("RELL SEAS", "Trade", "Fruits et objets · Fruits & items", "\uE8AB", (245, 158, 11), (234, 88, 12)),
 }
 

@@ -149,7 +149,8 @@ def test_Z1_ce_soir_tout_passe_dans_deux_forums_le_vocal_reste(env):
     posts = c["zones_posts"]
     verrous = {cle: g.fils[p["id"]].locked for cle, p in posts.items()}
     assert verrous == {"aide": True, "chat": False, "medias": False, "suggestions": True, "boosts": True,
-                       "commandes": False, "rell_chat": False, "help": False, "trade": False, "crews": True}
+                       "commandes": False, "guide": True, "rell_chat": False, "help": False, "trade": False,
+                       "crews": True}
     assert (c["aide_salon"], c["aide_message"]) == (posts["aide"]["id"], posts["aide"]["id"])
     assert c["suggestions_salon"] == posts["suggestions"]["id"]
     assert c["suggestions_panneau"] == g.fils[posts["suggestions"]["id"]].messages[-1].id,         "sous l'idée déménagée, le bouton « Proposer » redescend"
@@ -392,7 +393,7 @@ def test_Z11_les_deux_forums_se_reposent_si_l_installation_casse_trois_essais(en
 
 
 def test_Z13_branche_dans_le_bot():
-    assert "zones.setup(cfg=cfg, db_set=db_set, lecteurs=_lecteurs_archives, log=print)" in SRC
+    assert "zones.setup(cfg=cfg, db_set=db_set, lecteurs=_lecteurs_archives, ticket=_salon_des_tickets," in SRC
     boucle = next(ast.unparse(n) for n in ARBRE.body if getattr(n, "name", "") == "entraide_task")
     assert "g.owner_id in TETE_IDS and c.get('rs_actif') and (not c.get('zones_v2'))" in boucle
     assert boucle.index("db_set(g.id, 'menage_v1'") < boucle.index("_menage_categories(g)"), "témoin d'abord"
@@ -455,3 +456,63 @@ def test_Z14_un_salon_immunise_son_post_l_est_aussi(env):
     assert run(ns["_reporter_immunites"](Obj(id=1), c)) == 1 and run(lire()) == [50, 500]
     assert caches == {}, "le cache des immunités est vidé : effet immédiat"
     assert run(ns["_reporter_immunites"](Obj(id=1), c)) == 0, "une fois"
+
+
+def test_Z15_le_guide_de_rell_seas_en_tete_du_forum(env):
+    g = Monde()
+    _clan_et_vocaux(g, env.conf)
+    tickets = g.categorie("🎫 TICKETS")
+    ticket = g._salon(Texte, "🏷ticket", {"category": tickets})
+    ZN.setup(cfg=env.cfg, db_set=env.db_set, lecteurs=lambda g, c: [], ticket=lambda _g: ticket, log=lambda *a: None)
+    run(ZN.installer(g))
+    c = env.conf
+    rell = g.nom("🌊rell-seas")
+    guide = c["zones_posts"]["guide"]
+    assert rell.crees[-1].fil.id == guide["id"], "le plus récent : en tête du forum"
+    fil = g.fils[guide["id"]]
+    assert fil.locked and fil.name == "🧭 Guide · Rell Seas"
+    vue = [k for mid, k in fil.cartes if mid == guide["ouverture"]][-1]["view"]
+    t = textes(vue)
+    for morceau in ("Bienvenue à bord", "Welcome aboard", "### 🌊 Discuter · Talk", "### 🛟 S'entraider · Get help",
+                    "### 🤝 Échanger · Trade", "### ⚓ Équipages · Crews", "### 🏅 Qui certifie", "### 🏴‍☠️ Le clan GoRP",
+                    "ne donne jamais en premier"):
+        assert morceau in t, morceau
+    roles = c["rs_roles"]
+    assert f"<@&{roles['boss']}>" in t and f"<@&{roles['trade']}>" in t, "les rôles qui certifient sont cités"
+    liens = [b.url for b in vue.walk_children() if isinstance(b, discord.ui.Button) and b.url]
+    assert liens == [f"https://discord.com/channels/1/{c['zones_posts'][k]['id']}" for k in ("rell_chat", "help", "trade",
+                                                                                           "crews")] + [ticket.jump_url]
+    assert compter(vue) <= 40 and c["zones_guide_v"].startswith(f"{ZN.GUIDE_VERSION}|")
+    assert not run(ZN.assurer_guide(g)), "rien n'a changé : pas de réécriture"
+    del g.fils[c["zones_posts"]["crews"]["id"]]
+    c["zones_posts"].pop("crews")
+    assert run(ZN.assurer_guide(g)) and "Équipages · Crews" not in textes(fil.cartes[-1][1]["view"]),         "un post parti : sa ligne part (aucun bouton qui ment)"
+
+
+def test_Z16_plus_d_archives_tout_part_meme_si_discord_tarde(env):
+    g, _join, _v, _r = serveur_de_ce_soir(env)
+    run(ZN.installer(g))
+    c = env.conf
+    archives = ZN.archives(g, c)
+    cat = g.get_channel(c["zones_categorie_archives"])
+    assert len(archives) == 9 and cat is not None
+    for ch in archives:  # Discord efface, mais son cache garde encore le salon un instant
+
+        async def effacer_sans_cache(ch=ch, **_k):
+            ch.supprime = True
+        ch.delete = effacer_sans_cache
+    tableau, journal = [], []
+
+    async def _salon_tableau(_g):
+        tableau.append(1)
+
+    async def _au_journal(*a, **_k):
+        journal.append(a)
+    ns = {"zones": ZN, "cfg": env.cfg, "_au_journal": _au_journal, "_salon_tableau": _salon_tableau}
+    exec(_source("_supprimer_toutes_archives"), ns)  # noqa: S102 — code du dépôt
+    assert run(ns["_supprimer_toutes_archives"](g)) == 9
+    assert all(ch.supprime for ch in archives) and cat.supprime, "les salons et la catégorie : plus d'archive"
+    assert c["zones_archives"] == [] and c["zones_categorie_archives"] == 0 and tableau
+    assert "Archives supprimées à la demande du fondateur (9)" in journal[-1][3]
+    boucle = next(ast.unparse(n) for n in ARBRE.body if getattr(n, "name", "") == "entraide_task")
+    assert boucle.index("db_set(g.id, 'archives_supprimees_v1'") < boucle.index("_supprimer_toutes_archives(g)"),         "une fois, témoin d'abord"

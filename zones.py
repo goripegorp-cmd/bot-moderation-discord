@@ -29,6 +29,7 @@ import config_salons
 import entraide
 import equipages
 import suggestions
+import visuels
 from ui_v2 import LayoutView
 
 FORUM_COMMU = "💬communautaire"
@@ -56,6 +57,7 @@ POSTS_COMMU = (
      "stays readable."),
 )
 POSTS_RELL = (
+    ("guide", "🧭 Guide · Rell Seas", True, ""),
     ("rell_chat", "🌊 Chat Rell Seas", False,
      "🇫🇷 Le chat de Rell Seas : îles, fruits, mises à jour, astuces.\n🇬🇧 The Rell Seas chat: islands, fruits, "
      "updates, tips."),
@@ -96,16 +98,18 @@ SUJET_CLAN_FORUM = ("🇫🇷 Économie, trade, taverne… et tes propres sujets
 
 #  Un post, même endormi (hors mémoire) : son identifiant et son lien suffisent au panneau ❓ aide.
 Post = namedtuple("Post", "id jump_url")
+GUIDE_VERSION = 1
 
-_cfg = _db_set = _lecteurs = None
+_cfg = _db_set = _lecteurs = _ticket = _boutons_langue = None
 _log = print
 _verrous: dict = {}
 
 
-def setup(*, cfg, db_set, lecteurs=None, log=None):
-    """`lecteurs(g, c)` → les rôles qui voient « 📦 Archives » (la direction et au-dessus)."""
-    global _cfg, _db_set, _lecteurs, _log
-    _cfg, _db_set, _lecteurs = cfg, db_set, lecteurs
+def setup(*, cfg, db_set, lecteurs=None, ticket=None, boutons_langue=None, log=None):
+    """`lecteurs(g, c)` → les rôles qui voient « 📦 Archives » (la direction et au-dessus) ;
+    `ticket(g)` → le salon des tickets ; `boutons_langue()` → les boutons 🇫🇷 / 🇬🇧 du bot."""
+    global _cfg, _db_set, _lecteurs, _ticket, _boutons_langue, _log
+    _cfg, _db_set, _lecteurs, _ticket, _boutons_langue = cfg, db_set, lecteurs, ticket, boutons_langue
     _log = log or print
 
 
@@ -169,8 +173,8 @@ async def _ouverture(g, cle: str, titre: str, texte: str) -> LayoutView:
     """Le message d'ouverture d'un post : son texte, ou ce que la fonction qui l'habite affiche."""
     if texte:
         return _vue_texte(titre, texte)
-    if cle == "aide":
-        return _vue_texte(titre, "🇫🇷 L'orientation du serveur arrive…\n🇬🇧 The server guide is on its way…")
+    if cle in ("aide", "guide"):
+        return _vue_texte(titre, "🇫🇷 Le guide arrive…\n🇬🇧 The guide is on its way…")
     if cle == "suggestions":
         return suggestions.vue_panneau(await suggestions.ouvertes(g))
     if cle == "boosts":
@@ -291,6 +295,11 @@ async def installer(g, *, forum: bool | None = None) -> list:
         await entraide.assurer_panneaux(g, forcer=True)
         await equipages.assurer_panneau(g, forcer=True)
         await _db_set(g.id, "zones_v2", 1)
+    try:
+        await assurer_guide(g)
+    except discord.HTTPException as ex:
+        _log("[ZONES][E5] guide non posé")
+        _log(f"[ZONES][E5:DETAIL] {type(ex).__name__} {ex}")
     try:
         await ordonner(g)
     except discord.HTTPException as ex:
@@ -449,21 +458,23 @@ async def supprimer_archives(g, ids: list) -> int:
     """Le fondateur l'a confirmé : ces salons d'archives disparaissent, et la catégorie si elle est vide."""
     cfz, c = await conf(g), await _cfg(g.id)
     gardes = {ch.id: ch for ch in archives(g, c)}
-    n = 0
+    n, supprimes = 0, set()
     for cid in ids:
         ch = gardes.get(int(cid))
         if ch is None:
             continue
         try:
             await ch.delete(reason="Archives supprimées par le fondateur")
+            supprimes.add(ch.id)
             n += 1
         except discord.HTTPException as ex:
             _log("[ZONES][E4] archive non supprimée")
             _log(f"[ZONES][E4:DETAIL] {cid} {type(ex).__name__} {ex}")
-    restants = [cid for cid in cfz["archives"] if g.get_channel(cid) is not None]
+    #  Le cache de Discord suit l'effacement avec un temps de retard : on compte ce qu'on vient d'effacer.
+    restants = [cid for cid in cfz["archives"] if cid not in supprimes and g.get_channel(cid) is not None]
     await _db_set(g.id, "zones_archives", restants)
     cat = g.get_channel(cfz["categorie_archives"])
-    if isinstance(cat, discord.CategoryChannel) and not cat.channels:
+    if isinstance(cat, discord.CategoryChannel) and not [ch for ch in cat.channels if ch.id not in supprimes]:
         try:
             await cat.delete(reason="Archives vides")
             await _db_set(g.id, "zones_categorie_archives", 0)
@@ -506,7 +517,12 @@ async def ordonner(g) -> bool:
 
 async def entretenir(g) -> None:
     """Toutes les 30 minutes : les posts (et les fils du clan) restent ouverts ; un post qui doit
-    rester verrouillé l'est. Jamais l'inverse : un post que le staff a verrouillé le reste."""
+    rester verrouillé l'est. Jamais l'inverse : un post que le staff a verrouillé le reste. Le guide
+    de Rell Seas suit les posts et les rôles."""
+    try:
+        await assurer_guide(g)
+    except discord.HTTPException as ex:
+        _log(f"[ZONES:DETAIL] guide {type(ex).__name__} {ex}")
     cfz, c = await conf(g), await _cfg(g.id)
     verrous = {cle for cle, _t, v, _x in POSTS_COMMU + POSTS_RELL if v}
     a_suivre = [(cle, info.get("id", 0)) for cle, info in cfz["posts"].items()]
@@ -529,6 +545,90 @@ async def entretenir(g) -> None:
                 await fil.edit(**reglage)
             except discord.HTTPException as ex:
                 _log(f"[ZONES:DETAIL] réveil du fil {cle} {ex}")
+
+
+def vue_guide(g, c: dict, cfz: dict, cfe: dict) -> tuple:
+    """« Un fil ultra professionnel » : le guide de Rell Seas, en tête du forum 🌊rell-seas. Chaque
+    post, comment il marche, qui certifie, le clan ; un bouton par post (jamais un bouton qui ment :
+    une ligne n'apparaît que si son post existe). Rend (la vue, sa signature)."""
+    hubs = (c.get("temp_voice_config") or {}).get("hubs") or {}
+    vocal = next((ch for ch in (g.get_channel(int(k)) for k in hubs if str(k).isdigit())
+                  if ch is not None and not config_salons.est_clan(getattr(getattr(ch, "category", None), "name", ""))),
+                 None)
+    roles = {cle: entraide.role_zone(g, cfe, cle) for cle in ("aide", "boss", "farm", "trade")}
+    guides = " ".join(r.mention for cle, r in roles.items() if r is not None and cle != "trade")
+    mm = roles.get("trade")
+    ticket = _ticket(g) if _ticket else None
+    lignes = [
+        (post(g, cfz, "rell_chat"), "### 🌊 Discuter · Talk\nLe chat du jeu : îles, fruits, mises à jour, astuces"
+         + (f". Le vocal : 🔊 <#{vocal.id}>." if vocal is not None else ".")
+         + "\n-# The game chat: islands, fruits, updates, tips.", "Ouvrir · Open"),
+        (post(g, cfz, "help"), "### 🛟 S'entraider · Get help\nChoisis Aide, Boss, Farm ou Chill et remplis : ta carte "
+         "s'affiche, des joueurs cliquent « J'aide ». C'est réglé ? Tu la clôtures toi-même.\n-# Pick a type and fill "
+         "in: your card shows up, players click “I'll help”. Close it yourself when done.", "Demander · Ask"),
+        (post(g, cfz, "trade"), "### 🤝 Échanger · Trade\nPropose ton échange. Avec un inconnu, ne donne jamais en "
+         "premier : appelle un middleman. Bon des deux côtés ? « Échange conclu ».\n-# Never give first to a stranger: "
+         "call a middleman. Both happy? “Trade done”.", "Échanger · Trade"),
+        (post(g, cfz, "crews"), "### ⚓ Équipages · Crews\nPirates ou Marine : publie ton équipage, recrute, ou clique "
+         "« Rejoindre » sur une carte — le capitaine est prévenu.\n-# Post your crew or join one: the captain is "
+         "notified.", "Équipages · Crews"),
+    ]
+    items = [visuels.bandeau("rs_guide", "Guide Rell Seas"),
+             discord.ui.TextDisplay("🇫🇷 **Bienvenue à bord.** Ici, tout se passe dans les posts de ce forum : on "
+                                    "discute, on s'entraide, on échange, on monte son équipage — en français ou en "
+                                    "anglais.\n🇬🇧 **Welcome aboard.** Everything happens in this forum's posts: chat, "
+                                    "help each other, trade, build your crew — in French or English.")]
+    if _boutons_langue is not None:
+        items.append(discord.ui.ActionRow(*_boutons_langue()))
+    presentes = [(p, t, b) for p, t, b in lignes if p is not None]
+    if presentes:
+        items.append(discord.ui.Separator())
+        for p, texte, libelle in presentes:
+            items.append(discord.ui.Section(discord.ui.TextDisplay(texte),
+                                            accessory=discord.ui.Button(label=libelle, url=p.jump_url)))
+    items.append(discord.ui.Separator())
+    certif = ["### 🏅 Qui certifie · Who certifies"]
+    if guides:
+        certif.append(f"Les guides {guides} certifient l'aide · certify the help.")
+    if mm is not None:
+        certif.append(f"{mm.mention} sécurise les échanges · secures trades.")
+    certif.append("-# Sans activité, une demande se ferme seule ; close, elle disparaît — le staff en garde la trace. "
+                  "· Inactive requests close by themselves; closed ones disappear, the staff keeps a record.")
+    items.append(discord.ui.TextDisplay("\n".join(certif)))
+    if ticket is not None:
+        items.append(discord.ui.Section(
+            discord.ui.TextDisplay("### 🏴‍☠️ Le clan GoRP · The GoRP clan\nTu veux nous rejoindre ? Une candidature par "
+                                   "ticket.\n-# Want to join us? Apply with a ticket."),
+            accessory=discord.ui.Button(label="Postuler · Apply", url=ticket.jump_url)))
+    items.append(discord.ui.TextDisplay("-# 🛡️ Personne du staff ne te demandera ton mot de passe · No staff will ever "
+                                        "ask for your password · pas d'invitation vers d'autres serveurs · no invites"))
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(*items, accent_color=discord.Color(0x06B6D4)))
+    signature = "|".join([str(GUIDE_VERSION), *(str(p.id) for p, _t, _b in presentes),
+                          str(getattr(vocal, "id", 0)), *(str(getattr(r, "id", 0)) for r in roles.values()),
+                          str(getattr(ticket, "id", 0)), str(int(_boutons_langue is not None))])
+    return v, signature
+
+
+async def assurer_guide(g) -> bool:
+    """Le message d'ouverture du post 🧭 Guide suit les posts, le vocal et les rôles (réécrit seulement
+    quand quelque chose a changé). Rend True s'il a été réécrit."""
+    cfz, c = await conf(g), await _cfg(g.id)
+    info = cfz["posts"].get("guide") or {}
+    if not info.get("id"):
+        return False
+    vue, signature = vue_guide(g, c, cfz, await entraide.conf(g))
+    if c.get("zones_guide_v") == signature:
+        return False
+    fil = await _resoudre(g, info["id"])
+    if fil is None:
+        return False
+    if getattr(fil, "archived", False):
+        await fil.edit(archived=False)
+    await fil.get_partial_message(int(info.get("ouverture") or info["id"])).edit(
+        view=vue, allowed_mentions=discord.AllowedMentions.none())
+    await _db_set(g.id, "zones_guide_v", signature)
+    return True
 
 
 def lignes_aide(g, c: dict, cfz: dict) -> dict:

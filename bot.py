@@ -13127,6 +13127,16 @@ async def entraide_task():
                     await _salon_aide(g)
             if g.owner_id in TETE_IDS and c.get('rs_actif') and not c.get('zones_v2'):
                 await _installer_zones(g, c)
+            if g.owner_id in TETE_IDS and c.get('zones_v2') and not c.get('zones_guide_v1'):
+                # 22/10 (nuit) : « dans Rell Seas, la même chose… un fil ultra professionnel » — le post guide.
+                await db_set(g.id, 'zones_guide_v1', now().isoformat())
+                faits = await zones.installer(g)
+                await _entraide_journal(g, "zones.guide", "Guide Rell Seas en place : " + (", ".join(faits) or
+                                                                                          "rien ne manquait") + ".")
+            if g.owner_id in TETE_IDS and c.get('zones_archives') and not c.get('archives_supprimees_v1'):
+                # 22/10 (nuit), le fondateur : « je veux pas d'archive, tu peux tout enlever ».
+                await db_set(g.id, 'archives_supprimees_v1', now().isoformat())
+                await _supprimer_toutes_archives(g)
             if g.owner_id in TETE_IDS and (c.get('zones_v1') or c.get('zones_v2')) and not c.get('menage_v1'):
                 await db_set(g.id, 'menage_v1', now().isoformat())
                 await _menage_categories(g)
@@ -13185,6 +13195,19 @@ async def _reporter_immunites(g, c) -> int:
                 n += 1
         await db.commit()
     _immunity_cache.pop(g.id, None)
+    return n
+
+
+async def _supprimer_toutes_archives(g) -> int:
+    """« Je veux pas d'archive, tu peux tout enlever » (le fondateur, 22/10) : les salons de « 📦 Archives »
+    — seulement ceux que le bot y a rangés — partent, et la catégorie avec eux."""
+    salons = zones.archives(g, await cfg(g.id))
+    noms = [f"#{ch.name}" for ch in salons]
+    n = await zones.supprimer_archives(g, [ch.id for ch in salons])
+    if n:
+        await _au_journal(g, "Config", "zones.archives", f"Archives supprimées à la demande du fondateur ({n}) : "
+                          + ", ".join(noms))
+    await _salon_tableau(g)
     return n
 
 
@@ -13540,6 +13563,8 @@ async def _etat_public():
             "entraide_v2": any(c.get('rs_v2') for c in confs),
             "zones": any(c.get('zones_v1') for c in confs),
             "deux_forums": any(c.get('zones_v2') for c in confs),
+            "guide_rell": any(c.get('zones_guide_v') for c in confs),
+            "archives": sum(len(c.get('zones_archives') or []) for c in confs),
             "equipages": any(c.get('eq_forum') for c in confs),
             "menage": any(c.get('menage_v1') for c in confs),
             "clan_zone": any(c.get('clan_v1') for c in confs),
@@ -19977,7 +20002,8 @@ async def _activite_boot():
                     controle=_access_gate_reason, est_staff=_entraide_staff, journal=_entraide_journal,
                     langue=_langue_membre, log=print)
     await equipages.init_db()
-    zones.setup(cfg=cfg, db_set=db_set, lecteurs=_lecteurs_archives, log=print)
+    zones.setup(cfg=cfg, db_set=db_set, lecteurs=_lecteurs_archives, ticket=_salon_des_tickets,
+                boutons_langue=lambda: [LangSelectButton("fr"), LangSelectButton("en")], log=print)
     annonces.setup(get_db=get_db, cfg=cfg, db_set=db_set, est_tete=_a_la_tete, journal=_annonces_journal,
                    role_clan=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
                    langue=_langue_membre, log=print)
