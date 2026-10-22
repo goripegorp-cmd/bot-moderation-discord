@@ -1,20 +1,23 @@
 """entraide.py — l'entraide Rell Seas (22/10/2026).
 
 Demandé par le fondateur : « demander de l'aide, faire du trading (s'échanger des fruits), des demandes
-de farm, de boss, de chill… ultra compact pour éviter des milliers de salons… des joueurs qualifiés
-avec des rôles, plusieurs sous-rôles en fonction des zones : ils pourront certifier que l'aide a bien
-été faite et clôturer la demande… un nettoyage automatique. » Puis, le soir même : « ça me fait trop
-de salons… tout mettre dans Communautaire… que ça ne se chevauche pas… rangé par ordre de priorité ».
+de farm, de boss, de chill… ultra compact… des joueurs qualifiés avec des rôles, plusieurs sous-rôles
+en fonction des zones : ils pourront certifier que l'aide a bien été faite et clôturer la demande…
+un nettoyage automatique. » Puis : « trop de salons… que ça ne se chevauche pas » et « le serveur est
+international, mais aussi français… une fois que le trading est bon des deux côtés, les gens peuvent
+clôturer leur propre ticket… quand les demandes sont clôturées, le fil se ferme aussi… un vrai
+système de nettoyage ultra propre… nous, on a toutes les informations au propre ».
 
-Deux forums dans la catégorie Communautaire, quel que soit le nombre de demandes :
-  🆘 entraide — aide, boss, farm, chill (une étiquette par type, une par statut) ;
-  🤝 trade    — les échanges, avec middleman.
-L'orientation, c'est le panneau ❓ aide du serveur (bot.py `_vue_aide`, lignes de `lignes_aide`) ;
-on parle du jeu dans 💬 chat. Une demande = un fil (post de forum, sinon fil sous une carte), jamais
-un salon. Le post épinglé ouvre le formulaire du type ; la carte montre l'auteur, sa demande, qui
-vient aider. Un guide du type (son rôle) certifie l'aide et clôt — le middleman pour un échange ;
-l'auteur peut fermer ; le staff peut tout. Nettoyage : une demande sans activité se ferme, une
-demande close disparaît après un délai ; la base garde la trace.
+Deux forums, dans la zone Rell Seas (`zones.py`), quel que soit le nombre de demandes :
+  🛟 help  — aide, boss, farm, chill (une étiquette par type, une par statut) ;
+  🤝 trade — les échanges, avec middleman.
+Tout ce qui est public est en français · anglais ; formulaires et réponses parlent la langue du
+membre (sa préférence, sinon celle de son Discord). Une demande = un fil, jamais un salon. Le post
+épinglé ouvre le formulaire du type ; la carte montre l'auteur, sa demande, qui vient aider.
+L'auteur clôt lui-même (« c'est réglé », « échange conclu », ou il annule) ; un guide du type (son
+rôle) certifie l'aide — le middleman pour un échange ; le staff peut tout. À la clôture, le fil
+se verrouille, son historique est enregistré pour le site, puis il disparaît au passage suivant
+(moins de 5 minutes). Une demande sans activité se ferme d'elle-même.
 """
 from __future__ import annotations
 
@@ -32,25 +35,119 @@ from ui_v2 import LayoutView, Palette
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Zones
+#  Textes (français, anglais)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+TEXTES = {
+    "form.titre": {"fr": "{emoji} {nom} · nouvelle demande", "en": "{emoji} {nom} · new request"},
+    "facultatif": {"fr": "Facultatif", "en": "Optional"},
+    "sur_serveur": {"fr": "L'entraide se fait sur le serveur.", "en": "Help requests happen on the server."},
+    "zone_fermee": {"fr": "Cette zone est fermée pour le moment.", "en": "This area is closed for now."},
+    "exclu": {"fr": "Pas de demande pendant une exclusion temporaire.", "en": "No requests while you are timed out."},
+    "attendre": {"fr": "Attends deux minutes entre deux demandes.", "en": "Wait two minutes between two requests."},
+    "deja_ici": {"fr": "Tu as déjà une demande ouverte ici. Clôture-la avant d'en publier une autre.{lien}",
+                 "en": "You already have an open request here. Close it before posting another one.{lien}"},
+    "trop": {"fr": "Tu as déjà {n} demandes ouvertes. Clôtures-en une d'abord.",
+             "en": "You already have {n} open requests. Close one first."},
+    "obligatoire": {"fr": "« {champ} » est obligatoire.", "en": "“{champ}” is required."},
+    "trop_long": {"fr": "« {champ} » est trop long.", "en": "“{champ}” is too long."},
+    "corriger": {"fr": "Corriger", "en": "Edit"},
+    "publiee": {"fr": "Demande publiée : {lien}", "en": "Request posted: {lien}"},
+    "impossible": {"fr": "Impossible de publier ta demande pour le moment.", "en": "Can't post your request right now."},
+    "plus_de_zone": {"fr": "Cette zone n'existe plus.", "en": "This area no longer exists."},
+    "introuvable": {"fr": "Demande introuvable.", "en": "Request not found."},
+    "close": {"fr": "Cette demande est close.", "en": "This request is closed."},
+    "deja_close": {"fr": "Cette demande est déjà close.", "en": "This request is already closed."},
+    "ta_demande": {"fr": "C'est ta demande : attends qu'un joueur se manifeste.",
+                   "en": "It's your request: wait for a player to step in."},
+    "deja_dessus": {"fr": "Tu es déjà dessus.{lien}", "en": "You're already on it.{lien}"},
+    "complet": {"fr": "Il y a déjà assez de monde sur cette demande.", "en": "There are already enough people on it."},
+    "note": {"fr": "C'est noté, rendez-vous dans le fil.{lien}", "en": "Got it, see you in the thread.{lien}"},
+    "mm_qui": {"fr": "Seuls l'auteur et les intéressés appellent un middleman.",
+               "en": "Only the author and interested players can call a middleman."},
+    "mm_deja": {"fr": "Un middleman a déjà été appelé il y a peu.", "en": "A middleman was called a moment ago."},
+    "mm_aucun": {"fr": "Aucun middleman n'est désigné pour le moment.", "en": "No middleman is assigned yet."},
+    "mm_fil": {"fr": "Le fil de cet échange est introuvable pour le moment.",
+               "en": "This trade's thread can't be found right now."},
+    "mm_echec": {"fr": "Impossible de prévenir les middlemen pour le moment.",
+                 "en": "Can't notify the middlemen right now."},
+    "mm_ok": {"fr": "Middlemen prévenus : attends-en un avant d'échanger.",
+              "en": "Middlemen notified: wait for one before trading."},
+    "certif_type": {"fr": "Ce type ne se certifie pas : l'auteur clôture sa demande.",
+                    "en": "This type isn't certified: the author closes the request."},
+    "certif_reserve_mm": {"fr": "Réservé aux middlemen{role}.", "en": "Only for middlemen{role}."},
+    "certif_reserve": {"fr": "Réservé aux guides {nom}{role}.", "en": "Only for {nom} guides{role}."},
+    "certif_soi": {"fr": "Tu ne peux pas certifier ta propre demande.", "en": "You can't certify your own request."},
+    "certif_titre": {"fr": "Certifier · n°{id}", "en": "Certify · #{id}"},
+    "certif_texte": {"fr": "Certifier que l'aide a été faite ? La demande se clôt ; les joueurs cochés sont remerciés.",
+                     "en": "Certify the help was given? The request closes; the selected players are thanked."},
+    "certif_texte_trade": {"fr": "Certifier cet échange ? La demande se clôt et compte pour la confiance des deux joueurs.",
+                           "en": "Certify this trade? The request closes and counts toward both players' trust."},
+    "certif_qui": {"fr": "Qui a aidé ?", "en": "Who helped?"},
+    "certif_qui_trade": {"fr": "Avec qui l'échange s'est fait ?", "en": "Who was the trade with?"},
+    "certif_ok": {"fr": "Certifier l'aide", "en": "Certify the help"},
+    "certif_ok_trade": {"fr": "Certifier l'échange", "en": "Certify the trade"},
+    "certifie": {"fr": "Certifié ✅", "en": "Certified ✅"},
+    "annuler": {"fr": "Annuler", "en": "Cancel"},
+    "rien": {"fr": "Rien n'a changé.", "en": "Nothing changed."},
+    "clore_reserve": {"fr": "Seuls l'auteur, les guides du type et le staff clôturent une demande.",
+                      "en": "Only the author, this type's guides and the staff can close a request."},
+    "clore_titre": {"fr": "Clôturer ta demande", "en": "Close your request"},
+    "clore_texte": {"fr": "C'est réglé ? Le fil se ferme et disparaît ; l'historique reste au staff.",
+                    "en": "All done? The thread closes and disappears; the staff keeps the history."},
+    "clore_titre_trade": {"fr": "Clôturer ton échange", "en": "Close your trade"},
+    "clore_texte_trade": {"fr": "L'échange s'est bien passé des deux côtés ? Dis avec qui, puis clôture.",
+                          "en": "Did the trade go well on both sides? Say who with, then close."},
+    "clore_regle": {"fr": "C'est réglé", "en": "Solved"},
+    "clore_conclu": {"fr": "Échange conclu", "en": "Trade done"},
+    "clore_annuler": {"fr": "Annuler ma demande", "en": "Cancel my request"},
+    "clore_avec": {"fr": "Avec qui ? (facultatif)", "en": "Who with? (optional)"},
+    "clore_titre_autre": {"fr": "Clôturer cette demande", "en": "Close this request"},
+    "clore_texte_autre": {"fr": "Clôturer sans certifier ? Le fil se ferme et disparaît ; l'historique reste au staff.",
+                          "en": "Close without certifying? The thread closes and disappears; the staff keeps the history."},
+    "clore_sans": {"fr": "Clôturer sans certifier", "en": "Close without certifying"},
+    "cloturee": {"fr": "Demande clôturée ✅ Le fil se ferme.", "en": "Request closed ✅ The thread is closing."},
+}
+
+
+def tr(cle: str, langue: str = "fr", **kw) -> str:
+    e = TEXTES.get(cle) or {}
+    texte = e.get(langue) or e.get("fr") or cle
+    try:
+        return texte.format(**kw) if kw else texte
+    except (KeyError, IndexError, ValueError):
+        return texte
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Types et forums
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @dataclass(frozen=True)
 class Champ:
     cle: str
-    libelle: str          # ≤ 45 caractères (titre du champ)
-    aide: str = ""        # ≤ 100 caractères (texte d'exemple)
+    fr: str               # le titre du champ (≤ 45), en français
+    en: str               # … et en anglais
+    aide_fr: str = ""     # l'exemple (≤ 100)
+    aide_en: str = ""
+    carte: str = ""       # le libellé sur la carte publique, français · anglais
     long: bool = False
     max: int = 100
     requis: bool = True
+
+    def libelle(self, langue: str) -> str:
+        return self.en if langue == "en" else self.fr
+
+    def exemple(self, langue: str) -> str:
+        return self.aide_en if langue == "en" else self.aide_fr
 
 
 @dataclass(frozen=True)
 class Zone:
     cle: str
-    nom: str
+    nom: str              # français · anglais : l'étiquette du forum, le titre de la carte
     emoji: str
-    salon: str            # le forum qui la porte : « entraide » ou « trade »
+    salon: str            # le forum qui la porte : « entraide » (🛟 help) ou « trade »
     couleur: int
     expire_h: int         # fermée après autant d'heures sans activité
     champs: tuple
@@ -58,62 +155,95 @@ class Zone:
     certif: str = ""      # « guide », « middleman » ou rien
     role: str = ""        # le rôle créé à l'installation
     bouton: str = ""      # son bouton dans le post épinglé
-    rejoindre: str = "Je viens aider"
+    rejoindre: str = "J'aide · I'll help"
     icone_rejoindre: str = "accueil"
-    annonce: str = "🙋 {qui} vient t'aider, {auteur} !"
+    annonce: str = "🙋 {qui} vient t'aider · is coming to help — {auteur}"
 
 
-PSEUDO = Champ("pseudo", "Ton pseudo Roblox", "Pour qu'on te trouve en jeu", max=40)
-NIVEAU = Champ("niveau", "Ton niveau", "Ex. 1 250", max=20, requis=False)
+PSEUDO = Champ("pseudo", "Ton pseudo Roblox", "Your Roblox username", "Pour qu'on te trouve en jeu",
+               "So players can find you in game", "Pseudo Roblox", max=40)
+NIVEAU = Champ("niveau", "Ton niveau", "Your level", "Ex. 1 250", "E.g. 1250", "Niveau · Level", max=20, requis=False)
+
+
+def _details(fr_ex: str, en_ex: str, mx: int = 500) -> Champ:
+    return Champ("details", "Précisions", "Details", fr_ex, en_ex, "Précisions · Details", long=True, max=mx,
+                 requis=False)
+
 
 ZONES = {z.cle: z for z in (
-    Zone("aide", "Aide", "🆘", "entraide", 0x22C55E, 24,
-         (Champ("titre", "Ta question ou ton problème", "En une phrase", max=90),
-          Champ("details", "Explique", "Où tu es, ce que tu as déjà essayé…", long=True, max=800, requis=False),
+    Zone("aide", "Aide · Help", "🛟", "entraide", 0x22C55E, 24,
+         (Champ("titre", "Ta question ou ton problème", "Your question or problem", "En une phrase",
+                "In one sentence", "Question", max=90),
+          _details("Où tu es, ce que tu as déjà essayé…", "Where you are, what you already tried…", 800),
           PSEUDO, NIVEAU),
-         "{titre}", certif="guide", role="🆘 Guide Aide", bouton="Une question"),
+         "{titre}", certif="guide", role="🛟 Guide Aide", bouton="Aide · Help"),
     Zone("boss", "Boss", "⚔️", "entraide", 0xEF4444, 6,
-         (Champ("titre", "Quel boss ?", "Son nom", max=60), PSEUDO, NIVEAU,
-          Champ("joueurs", "Joueurs voulus", "Combien en plus de toi ? Ex. 2", max=10, requis=False),
-          Champ("details", "Précisions", "Île, heure, conditions…", long=True, max=500, requis=False)),
+         (Champ("titre", "Quel boss ?", "Which boss?", "Son nom", "Its name", "Boss", max=60), PSEUDO, NIVEAU,
+          Champ("joueurs", "Joueurs voulus", "Players needed", "Combien en plus de toi ? Ex. 2",
+                "How many besides you? E.g. 2", "Joueurs · Players", max=10, requis=False),
+          _details("Île, heure, conditions…", "Island, time, conditions…")),
          "Boss {titre}", certif="guide", role="⚔️ Guide Boss", bouton="Boss"),
     Zone("farm", "Farm", "🌾", "entraide", 0x84CC16, 12,
-         (Champ("titre", "Quoi farmer ?", "Niveaux, argent, un objet…", max=80), PSEUDO, NIVEAU,
-          Champ("duree", "Combien de temps ?", "Ex. 1 h", max=30, requis=False),
-          Champ("details", "Précisions", "Où, comment…", long=True, max=500, requis=False)),
+         (Champ("titre", "Quoi farmer ?", "What to farm?", "Niveaux, argent, un objet…", "Levels, money, an item…",
+                "Farm", max=80), PSEUDO, NIVEAU,
+          Champ("duree", "Combien de temps ?", "How long?", "Ex. 1 h", "E.g. 1 h", "Durée · Duration", max=30,
+                requis=False),
+          _details("Où, comment…", "Where, how…")),
          "Farm {titre}", certif="guide", role="🌾 Guide Farm", bouton="Farm"),
     Zone("chill", "Chill", "🌴", "entraide", 0x38BDF8, 6,
-         (Champ("titre", "Ce que tu veux faire", "Naviguer, discuter, explorer…", max=90), PSEUDO,
-          Champ("quand", "Quand ?", "Maintenant, ce soir 21 h…", max=40, requis=False),
-          Champ("details", "Précisions", "Ce que tu aimes, ton style…", long=True, max=400, requis=False)),
-         "{titre}", bouton="Chill", rejoindre="Je viens", annonce="🌴 {qui} te rejoint, {auteur} !"),
+         (Champ("titre", "Ce que tu veux faire", "What you want to do", "Naviguer, discuter, explorer…",
+                "Sail, chat, explore…", "Activité · Activity", max=90), PSEUDO,
+          Champ("quand", "Quand ?", "When?", "Maintenant, ce soir 21 h…", "Now, tonight 9 pm…", "Quand · When",
+                max=40, requis=False),
+          _details("Ce que tu aimes, ton style…", "What you like, your style…", 400)),
+         "{titre}", bouton="Chill", rejoindre="Je viens · I'm in",
+         annonce="🌴 {qui} te rejoint · is joining you — {auteur}"),
     Zone("trade", "Trade", "🤝", "trade", 0xF59E0B, 48,
-         (Champ("donne", "Je donne", "Fruits, objets…", max=120),
-          Champ("cherche", "Je cherche", "Ce que tu veux en échange", max=120), PSEUDO,
-          Champ("details", "Précisions", "Valeur, conditions…", long=True, max=400, requis=False)),
-         "{donne} ⇄ {cherche}", certif="middleman", role="🛡️ Middleman", bouton="Proposer un échange",
-         rejoindre="Intéressé", icone_rejoindre="pour", annonce="💬 {qui} est intéressé par ton échange, {auteur} !"),
+         (Champ("donne", "Je donne", "I give", "Fruits, objets…", "Fruits, items…", "Je donne · I give", max=120),
+          Champ("cherche", "Je cherche", "I want", "Ce que tu veux en échange", "What you want in return",
+                "Je cherche · I want", max=120), PSEUDO,
+          _details("Valeur, conditions…", "Value, conditions…", 400)),
+         "{donne} ⇄ {cherche}", certif="middleman", role="🛡️ Middleman", bouton="Proposer · Post a trade",
+         rejoindre="Intéressé · Interested", icone_rejoindre="pour",
+         annonce="💬 {qui} est intéressé · is interested — {auteur}"),
 )}
-#  Les deux forums : (nom, ce qu'on y fait, bandeau, titre du bandeau, couleur)
+#  Les deux forums : (nom, texte du post épinglé, bandeau, titre du bandeau, couleur)
 SALONS = {
-    "entraide": ("🆘・entraide", "Une question, un boss, du farm, ou juste jouer ensemble : choisis, remplis, "
-                 "des joueurs viennent t'aider.", "rs_entraide", "Entraide", 0x22C55E),
-    "trade": ("🤝・trade", "Propose un échange. Avec un inconnu, ne donne jamais en premier : appelle un middleman.",
+    "entraide": ("🛟help",
+                 "🇫🇷 Une question, un boss, du farm, ou juste jouer ensemble ? Choisis, remplis : des joueurs t'aident.\n"
+                 "🇬🇧 A question, a boss, farming, or just playing together? Pick, fill in: players help you.",
+                 "rs_entraide", "Entraide · Help", 0x22C55E),
+    "trade": ("🤝trade",
+              "🇫🇷 Propose un échange. Avec un inconnu, ne donne jamais en premier : appelle un middleman.\n"
+              "🇬🇧 Post a trade. With a stranger, never give first: call a middleman.",
               "rs_trade", "Trade", 0xF59E0B),
 }
 
 STATUTS = {
-    "ouverte": ("Ouverte", "🟢"),
-    "prise": ("En cours", "🟡"),
-    "terminee": ("Terminée", "✅"),
-    "fermee": ("Fermée", "🔒"),
-    "expiree": ("Expirée", "⌛"),
-    "retiree": ("Retirée", "🗑️"),
+    "ouverte": ("Ouverte · Open", "🟢"),
+    "prise": ("En cours · Ongoing", "🟡"),
+    "terminee": ("Terminée · Done", "✅"),
+    "fermee": ("Fermée · Closed", "🔒"),
+    "expiree": ("Fermée · Closed", "⌛"),
+    "retiree": ("Retirée · Removed", "🗑️"),
 }
 OUVERTS = ("ouverte", "prise")
 #  Étiquettes des forums, réservées au bot et au staff (« modérées ») : le type, puis le statut.
-TAGS = (("Ouverte", "🟢"), ("En cours", "🟡"), ("Terminée", "✅"), ("Fermée", "🔒"))
-ETIQUETTE = {"ouverte": "Ouverte", "prise": "En cours", "terminee": "Terminée"}
+TAGS = (("Ouverte · Open", "🟢"), ("En cours · Ongoing", "🟡"), ("Terminée · Done", "✅"), ("Fermée · Closed", "🔒"))
+ETIQUETTE = {"ouverte": "Ouverte · Open", "prise": "En cours · Ongoing", "terminee": "Terminée · Done"}
+#  Les noms d'avant (22/10, première version), pour renommer sans perdre les étiquettes posées.
+ANCIENS_TAGS = {"Aide": "Aide · Help", "Ouverte": "Ouverte · Open", "En cours": "En cours · Ongoing",
+                "Terminée": "Terminée · Done", "Fermée": "Fermée · Closed"}
+
+MAX_OUVERTES = 3          # par membre, tous types
+ATTENTE_S = 120           # entre deux demandes d'un même membre
+MAX_AIDANTS = 10
+GARDER_H = 0              # une demande close disparaît au passage suivant (l'historique reste au site)
+APPEL_MM_S = 900          # un appel au middleman par quart d'heure et par échange
+ARCHIVE_MIN = 10080       # Discord n'archive jamais avant nous
+DELAIS = (2, 6, 12, 24, 48, 72)
+GARDES = (0, 1, 24)
+PAR_PASSAGE = 15          # fermetures ou suppressions par passage de la boucle
 
 
 def types_du_salon(cle: str) -> list:
@@ -125,31 +255,26 @@ def tags_du_salon(cle: str) -> list:
     return ([discord.ForumTag(name=z.nom, emoji=z.emoji, moderated=True) for z in types]
             + [discord.ForumTag(name=n, emoji=e, moderated=True) for n, e in TAGS])
 
-MAX_OUVERTES = 3          # par membre, toutes zones
-ATTENTE_S = 120           # entre deux demandes d'un même membre
-MAX_AIDANTS = 10
-GARDER_H = 24             # une demande close disparaît après ce délai
-APPEL_MM_S = 900          # un appel au middleman par quart d'heure et par échange
-ARCHIVE_MIN = 10080       # Discord n'archive jamais avant nous
-DELAIS = (2, 6, 12, 24, 48, 72)
-PAR_PASSAGE = 15          # fermetures ou suppressions par passage de la boucle
 
 _get_db = _cfg = _db_set = None
-_texte_refuse = _controle = _est_staff = _journal = _salon_ticket = _retour = None
+_texte_refuse = _controle = _est_staff = _journal = _retour = _archiver = None
+_langue = None
 _log = print
 _verrous: dict = {}
 _creations: dict = {}
 _verifies: dict = {}
 
 
-def setup(*, get_db, cfg, db_set, texte_refuse, controle, est_staff, journal, salon_ticket=None, log=None):
+def setup(*, get_db, cfg, db_set, texte_refuse, controle, est_staff, journal, langue=None, archiver=None,
+          salon_ticket=None, log=None):
     """`texte_refuse(g, texte)` → raison ou "" ; `controle(membre, cfg)` → raison ou "" ;
     `est_staff(g, membre)` (async) ; `journal(g, type_, texte, membre_id=, auteur_id=)` ;
-    `salon_ticket(g)` → le salon où s'ouvrent les tickets, ou None."""
-    global _get_db, _cfg, _db_set, _texte_refuse, _controle, _est_staff, _journal, _salon_ticket, _log
+    `langue(interaction)` (async) → « fr » ou « en » ; `archiver(fil, titre)` (async) → le jeton du
+    transcript enregistré, ou ""."""
+    global _get_db, _cfg, _db_set, _texte_refuse, _controle, _est_staff, _journal, _log, _langue, _archiver
     _get_db, _cfg, _db_set = get_db, cfg, db_set
     _texte_refuse, _controle, _est_staff, _journal = texte_refuse, controle, est_staff, journal
-    _salon_ticket = salon_ticket
+    _langue, _archiver = langue, archiver
     _log = log or print
 
 
@@ -158,8 +283,29 @@ def set_retour(fn):
     _retour = fn
 
 
+_installateur = None
+
+
+def set_installateur(fn):
+    """Le bouton « Installer / Réparer » de /configure installe toute la structure (`zones.installer`)."""
+    global _installateur
+    _installateur = fn
+
+
 def _verrou(cle):
     return _verrous.setdefault(cle, asyncio.Lock())
+
+
+async def langue_de(i) -> str:
+    """La langue du membre : sa préférence, sinon celle de son Discord ; français ou anglais."""
+    try:
+        if _langue is not None:
+            return "en" if await _langue(i) == "en" else "fr"
+        loc = str(getattr(getattr(i, "locale", None), "value", getattr(i, "locale", "")) or "")
+        return "fr" if loc.lower().startswith("fr") else "en"
+    except Exception as ex:
+        _log(f"[ENTRAIDE:DETAIL] langue {type(ex).__name__} {ex}")
+        return "fr"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -168,26 +314,29 @@ def _verrou(cle):
 
 _COLONNES = ("id", "guild_id", "zone", "auteur_id", "titre", "champs", "statut", "salon_id", "fil_id",
              "aidants", "cree", "maj", "ferme", "ferme_par", "certifie_par", "credites", "partenaire_id",
-             "appel_mm", "supprime")
+             "appel_mm", "supprime", "jeton")
 _SQL_UNE = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants, cree,"
-            " maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime"
+            " maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton"
             " FROM entraide_demandes WHERE id=?")
 _SQL_OUVERTES = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants,"
-                 " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime"
+                 " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton"
                  " FROM entraide_demandes WHERE guild_id=? AND statut IN ('ouverte', 'prise')"
                  " AND fil_id>0 ORDER BY id LIMIT 300")
 _SQL_DE_L_AUTEUR = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants,"
-                    " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime"
+                    " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton"
                     " FROM entraide_demandes WHERE guild_id=? AND auteur_id=? AND statut IN ('ouverte', 'prise')"
                     " AND fil_id>0")
 _SQL_OUVERTES_DU_SALON = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id,"
                           " aidants, cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm,"
-                          " supprime FROM entraide_demandes WHERE guild_id=? AND salon_id=?"
+                          " supprime, jeton FROM entraide_demandes WHERE guild_id=? AND salon_id=?"
                           " AND statut IN ('ouverte', 'prise')")
 _SQL_A_EFFACER = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants,"
-                  " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime"
+                  " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton"
                   " FROM entraide_demandes WHERE guild_id=? AND statut NOT IN ('ouverte', 'prise')"
-                  " AND supprime=0 AND ferme>0 AND ferme<? ORDER BY ferme LIMIT ?")
+                  " AND supprime=0 AND ferme>0 AND ferme<=? ORDER BY ferme LIMIT ?")
+_SQL_RECENTES = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants,"
+                 " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton"
+                 " FROM entraide_demandes WHERE guild_id=? AND fil_id>0 ORDER BY id DESC LIMIT ?")
 
 
 async def init_db():
@@ -201,7 +350,10 @@ async def init_db():
             " cree INTEGER NOT NULL, maj INTEGER NOT NULL, ferme INTEGER NOT NULL DEFAULT 0,"
             " ferme_par INTEGER NOT NULL DEFAULT 0, certifie_par INTEGER NOT NULL DEFAULT 0,"
             " credites TEXT NOT NULL DEFAULT '[]', partenaire_id INTEGER NOT NULL DEFAULT 0,"
-            " appel_mm INTEGER NOT NULL DEFAULT 0, supprime INTEGER NOT NULL DEFAULT 0)")
+            " appel_mm INTEGER NOT NULL DEFAULT 0, supprime INTEGER NOT NULL DEFAULT 0, jeton TEXT NOT NULL DEFAULT '')")
+        async with db.execute("PRAGMA table_info(entraide_demandes)") as cur:
+            if "jeton" not in {r[1] for r in await cur.fetchall()}:
+                await db.execute("ALTER TABLE entraide_demandes ADD COLUMN jeton TEXT NOT NULL DEFAULT ''")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_entraide_statut ON entraide_demandes(guild_id, statut)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_entraide_auteur ON entraide_demandes(guild_id, auteur_id, statut)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_entraide_fil ON entraide_demandes(fil_id)")
@@ -215,6 +367,7 @@ def _ligne(r) -> dict:
             d[k] = json.loads(d[k] or "[]")
         except (TypeError, ValueError):
             d[k] = []
+    d["jeton"] = d.get("jeton") or ""
     return d
 
 
@@ -237,11 +390,16 @@ async def _ecrire(sql: str, args: tuple) -> None:
         await db.commit()
 
 
+async def recentes(guild_id: int, limite: int = 300) -> list:
+    """Les dernières demandes, ouvertes ou closes — pour le site du staff."""
+    return await _lignes(_SQL_RECENTES, (int(guild_id), int(limite)))
+
+
 async def reputation(guild_id: int, membre_id: int) -> int:
     """Échanges certifiés par un middleman, comme vendeur ou comme acheteur."""
     async with _get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM entraide_demandes WHERE guild_id=? AND zone='trade'"
-                              " AND statut='terminee' AND (auteur_id=? OR partenaire_id=?)",
+                              " AND statut='terminee' AND certifie_par!=0 AND (auteur_id=? OR partenaire_id=?)",
                               (int(guild_id), int(membre_id), int(membre_id))) as cur:
             return int((await cur.fetchone())[0])
 
@@ -286,7 +444,7 @@ def expire_h(cf: dict, z: Zone) -> int:
 
 def garder_h(cf: dict) -> int:
     v = cf["reglages"].get("garder_h")
-    return int(v) if str(v).isdigit() and int(v) > 0 else GARDER_H
+    return int(v) if str(v).isdigit() and int(v) in GARDES else GARDER_H
 
 
 def prevenir(cf: dict, z: Zone) -> bool:
@@ -324,42 +482,45 @@ def nom_du_fil(auteur, titre: str) -> str:
     return _une_ligne(f"{titre} · {getattr(auteur, 'display_name', '') or 'membre'}")[:100]
 
 
-def verifier(z: Zone, valeurs: dict) -> str:
+def verifier(z: Zone, valeurs: dict, langue: str = "fr") -> str:
     for c in z.champs:
         v = valeurs.get(c.cle, "")
         if c.requis and not v.strip():
-            return f"« {c.libelle} » est obligatoire."
+            return tr("obligatoire", langue, champ=c.libelle(langue))
         if len(v) > c.max:
-            return f"« {c.libelle} » est trop long."
+            return tr("trop_long", langue, champ=c.libelle(langue))
     return ""
 
 
-def _ligne_statut(d: dict, z: Zone, garder: int = GARDER_H) -> str:
+def _ligne_statut(d: dict, z: Zone) -> str:
     lib, pastille = STATUTS.get(d["statut"], (d["statut"], "•"))
     if d["statut"] in OUVERTS:
         if not d["aidants"]:
-            return f"{pastille} **{lib}** · personne pour l'instant"
-        mot = "intéressé(s)" if z.cle == "trade" else "en route"
+            return f"{pastille} **{lib}** · personne pour l'instant · nobody yet"
+        mot = "intéressé(s) · interested" if z.cle == "trade" else "en route · on the way"
         return f"{pastille} **{lib}** · {mot} : " + ", ".join(_mention(a) for a in d["aidants"][:MAX_AIDANTS])
-    fin = f"\n-# Ce fil disparaît <t:{d['ferme'] + garder * 3600}:R>." if d["ferme"] and not d["supprime"] else ""
+    fin = "\n-# Fil fermé · Thread closed" if d["ferme"] else ""
     if d["statut"] == "terminee":
-        quoi = "Échange certifié" if z.cle == "trade" else "Aide certifiée"
-        s = f"✅ **{quoi}** par {_mention(d['certifie_par'])} · <t:{d['ferme']}:R>"
+        if d["certifie_par"]:
+            quoi = "Échange certifié · Trade certified" if z.cle == "trade" else "Aide certifiée · Help certified"
+            s = f"✅ **{quoi}** — {_mention(d['certifie_par'])} · <t:{d['ferme']}:R>"
+        else:
+            quoi = "Échange conclu · Trade done" if z.cle == "trade" else "Résolue · Solved"
+            s = f"✅ **{quoi}** · <t:{d['ferme']}:R>"
         if z.cle == "trade" and d["partenaire_id"]:
-            s += f"\n-# Échange avec {_mention(d['partenaire_id'])}"
+            s += f"\n-# Avec · With {_mention(d['partenaire_id'])}"
         elif d["credites"]:
-            s += "\n-# Ont aidé : " + ", ".join(_mention(x) for x in d["credites"])
+            s += "\n-# Ont aidé · Helped : " + ", ".join(_mention(x) for x in d["credites"])
         return s + fin
     if d["statut"] == "expiree":
-        return "⌛ **Fermée** · plus d'activité" + fin
+        return "⌛ **Fermée · Closed** — plus d'activité · no activity" + fin
     if d["statut"] == "retiree":
-        return "🗑️ **Retirée** par le staff" + fin
-    par = f" par {_mention(d['ferme_par'])}" if d["ferme_par"] and d["ferme_par"] != d["auteur_id"] else ""
-    return f"🔒 **Fermée**{par} · <t:{d['ferme']}:R>" + fin
+        return "🗑️ **Retirée · Removed**" + fin
+    par = f" — {_mention(d['ferme_par'])}" if d["ferme_par"] and d["ferme_par"] != d["auteur_id"] else ""
+    return f"🔒 **Fermée · Closed**{par} · <t:{d['ferme']}:R>" + fin
 
 
-def vue_carte(d: dict, z: Zone, *, avatar: str = "", ping: str = "", rep: int | None = None,
-              garder: int = GARDER_H) -> LayoutView:
+def vue_carte(d: dict, z: Zone, *, avatar: str = "", ping: str = "", rep: int | None = None) -> LayoutView:
     ouvert = d["statut"] in OUVERTS
     entete = [discord.ui.TextDisplay(f"### {z.emoji} {z.nom} · n°{d['id']}"),
               discord.ui.TextDisplay(f"{_mention(d['auteur_id'])} · <t:{d['cree']}:R>")]
@@ -368,11 +529,13 @@ def vue_carte(d: dict, z: Zone, *, avatar: str = "", ping: str = "", rep: int | 
     if lignes:
         items.append(discord.ui.TextDisplay("\n".join(lignes)))
     if z.cle == "trade" and ouvert:
-        confiance = "premier échange certifié à venir" if not rep else f"{rep} échange(s) certifié(s)"
-        items.append(discord.ui.TextDisplay(f"-# 🛡️ {confiance} · avec un inconnu, ne donne jamais en "
-                                            "premier : appelle un middleman"))
+        confiance = ("aucun échange certifié · no certified trade yet" if not rep
+                     else f"{rep} échange(s) certifié(s) · certified trade(s)")
+        items.append(discord.ui.TextDisplay(f"-# 🛡️ {confiance} · Avec un inconnu, ne donne jamais en premier : "
+                                            "appelle un middleman. · With a stranger, never give first: call a "
+                                            "middleman."))
     items.append(discord.ui.Separator())
-    items.append(discord.ui.TextDisplay(_ligne_statut(d, z, garder)))
+    items.append(discord.ui.TextDisplay(_ligne_statut(d, z)))
     if ouvert:
         boutons = [BoutonRejoindre(d["id"], z)]
         if z.cle == "trade":
@@ -382,7 +545,7 @@ def vue_carte(d: dict, z: Zone, *, avatar: str = "", ping: str = "", rep: int | 
         boutons.append(BoutonFermer(d["id"]))
         items.append(discord.ui.ActionRow(*boutons))
         if ping:
-            items.append(discord.ui.TextDisplay(f"-# Guides prévenus : {ping}"))
+            items.append(discord.ui.TextDisplay(f"-# Guides prévenus · Guides notified : {ping}"))
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(*items, accent_color=discord.Color(z.couleur) if ouvert else Palette.NEUTRAL))
     return v
@@ -393,9 +556,9 @@ def vue_panneau(cle: str, cf: dict, g=None) -> LayoutView:
     _nom, texte, bandeau, titre, couleur = SALONS[cle]
     types = types_du_salon(cle)
     roles = [r for r in (role_zone(g, cf, z.cle) for z in types if z.role) if r is not None] if g is not None else []
-    delais = (" · ".join(f"{z.nom.lower()} {expire_h(cf, z)} h" for z in types) if len(types) > 1
-              else f"{expire_h(cf, types[0])} h")
-    pied = ["une demande à la fois" + (" par type" if len(types) > 1 else ""), f"fermée sans activité : {delais}"]
+    delais = " · ".join(f"{z.nom.split(' · ')[0].lower()} {expire_h(cf, z)} h" for z in types)
+    pied = ["Une demande à la fois · One request at a time",
+            f"fermée sans activité · closes when inactive : {delais}"]
     if roles:
         pied.append(("middlemen" if cle == "trade" else "guides") + " : " + " ".join(r.mention for r in roles))
     v = LayoutView(timeout=None)
@@ -404,17 +567,6 @@ def vue_panneau(cle: str, cf: dict, g=None) -> LayoutView:
         discord.ui.ActionRow(*[BoutonNouvelle(z.cle, z) for z in types]),
         discord.ui.TextDisplay("-# " + " · ".join(pied)), accent_color=discord.Color(couleur)))
     return v
-
-
-def lignes_aide(g, cf: dict) -> list:
-    """Les lignes de l'entraide en tête du panneau ❓ aide (salon, texte, bouton) — c'est
-    l'orientation du serveur. Une ligne n'apparaît que si son forum existe."""
-    if not cf["actif"]:
-        return []
-    return [(salon(g, cf, "entraide"), "🆘 **Une question, besoin d'aide en jeu ?**\nAide, boss, farm, chill : publie "
-             "ta demande, des joueurs t'aident.", "Demander"),
-            (salon(g, cf, "trade"), "🤝 **Échanger fruits et objets**\nAvec un inconnu, toujours un middleman.",
-             "Échanger")]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -458,7 +610,8 @@ def _porteur(fil):
 def _tags(forum, statut: str, z: Zone | None = None) -> list:
     """Le type (forum à plusieurs types) puis le statut — seulement les étiquettes qui existent."""
     dispo = {t.name: t for t in getattr(forum, "available_tags", []) or []}
-    noms = ([z.nom] if z is not None and len(types_du_salon(z.salon)) > 1 else []) + [ETIQUETTE.get(statut, "Fermée")]
+    noms = ([z.nom] if z is not None and len(types_du_salon(z.salon)) > 1 else []) + [
+        ETIQUETTE.get(statut, "Fermée · Closed")]
     return [dispo[n] for n in noms if n in dispo]
 
 
@@ -467,10 +620,9 @@ async def _maj_carte(g, d: dict, fil=None) -> None:
     fil = fil or await _fil_ou_rien(g, d)
     if z is None or fil is None:
         return
-    cf = await conf(g)
     auteur = g.get_member(int(d["auteur_id"]))
     rep = await reputation(g.id, d["auteur_id"]) if z.cle == "trade" else None
-    vue = vue_carte(d, z, avatar=auteur.display_avatar.url if auteur else "", rep=rep, garder=garder_h(cf))
+    vue = vue_carte(d, z, avatar=auteur.display_avatar.url if auteur else "", rep=rep)
     try:
         await _porteur(fil).get_partial_message(fil.id).edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
     except discord.NotFound:
@@ -481,8 +633,9 @@ async def _maj_carte(g, d: dict, fil=None) -> None:
 
 
 async def _clore_sur_discord(g, d: dict, note: str = "") -> None:
-    """La carte d'abord (un message d'un fil archivé ne s'édite plus), puis le mot de fin, puis le
-    fil verrouillé et archivé — étiquette comprise, en un seul appel."""
+    """La carte d'abord (un message d'un fil archivé ne s'édite plus), puis le mot de fin, puis
+    l'historique enregistré pour le site, puis le fil verrouillé et archivé (étiquette comprise, en
+    un seul appel). Il disparaît au passage suivant de l'entretien."""
     fil = await _fil_ou_rien(g, d)
     if fil is None:
         return
@@ -492,6 +645,17 @@ async def _clore_sur_discord(g, d: dict, note: str = "") -> None:
             await fil.send(note, allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException as ex:
             _log(f"[ENTRAIDE:DETAIL] mot de fin demande={d['id']} {ex}")
+    if _archiver is not None and not d.get("jeton"):
+        z = ZONES.get(d["zone"])
+        try:
+            jeton = await _archiver(fil, f"Entraide n°{d['id']} · {getattr(z, 'nom', d['zone'])} · {d['titre']}")
+        except Exception as ex:
+            _log("[ENTRAIDE][E11] historique non enregistré")
+            _log(f"[ENTRAIDE][E11:DETAIL] demande={d['id']} {type(ex).__name__} {ex}")
+            jeton = ""
+        if jeton:
+            d["jeton"] = jeton
+            await _ecrire("UPDATE entraide_demandes SET jeton=? WHERE id=?", (jeton, d["id"]))
     reglage = {"locked": True, "archived": True}
     if isinstance(fil.parent, discord.ForumChannel):
         reglage["applied_tags"] = _tags(fil.parent, d["statut"], ZONES.get(d["zone"]))
@@ -506,83 +670,82 @@ async def _clore_sur_discord(g, d: dict, note: str = "") -> None:
 #  Publier
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def peut_publier(i, z: Zone) -> str:
+async def peut_publier(i, z: Zone, langue: str = "fr") -> str:
     g, m = i.guild, i.user
     if g is None or getattr(m, "guild_permissions", None) is None:
-        return "L'entraide se fait sur le serveur."
+        return tr("sur_serveur", langue)
     cf = await conf(g)
     if not cf["actif"] or salon(g, cf, z.salon) is None:
-        return "Cette zone est fermée pour le moment."
+        return tr("zone_fermee", langue)
     if m.is_timed_out():
-        return "Pas de demande pendant une exclusion temporaire."
-    return await _controle(m, await _cfg(g.id)) or await limite(g, m, z)
+        return tr("exclu", langue)
+    return await _controle(m, await _cfg(g.id)) or await limite(g, m, z, langue)
 
 
-async def limite(g, m, z: Zone) -> str:
+async def limite(g, m, z: Zone, langue: str = "fr") -> str:
     if await _est_staff(g, m):
         return ""
     t0 = _creations.get((g.id, m.id))
     if t0 is not None and time.monotonic() - t0 < ATTENTE_S:
-        return "Attends deux minutes entre deux demandes."
+        return tr("attendre", langue)
     ouvertes = await _lignes(_SQL_DE_L_AUTEUR, (g.id, m.id))
     ici = next((d for d in ouvertes if d["zone"] == z.cle), None)
     if ici is not None:
         fil = g.get_channel_or_thread(int(ici["fil_id"] or 0))
-        lien = f" : {fil.jump_url}" if fil is not None else ""
-        return f"Tu as déjà une demande ouverte ici{lien}. Ferme-la avant d'en publier une autre."
+        return tr("deja_ici", langue, lien=f"\n{fil.jump_url}" if fil is not None else "")
     if len(ouvertes) >= MAX_OUVERTES:
-        return f"Tu as déjà {MAX_OUVERTES} demandes ouvertes. Ferme-en une d'abord."
+        return tr("trop", langue, n=MAX_OUVERTES)
     return ""
 
 
 class Formulaire(discord.ui.Modal):
-    def __init__(self, z: Zone, valeurs: dict | None = None):
-        super().__init__(title=f"{z.emoji} {z.nom} · nouvelle demande"[:45], timeout=900)
-        self.zone, self.entrees = z, {}
+    def __init__(self, z: Zone, langue: str = "fr", valeurs: dict | None = None):
+        super().__init__(title=tr("form.titre", langue, emoji=z.emoji, nom=z.nom)[:45], timeout=900)
+        self.zone, self.langue, self.entrees = z, langue, {}
         valeurs = valeurs or {}
         for c in z.champs[:5]:
             t = discord.ui.TextInput(style=discord.TextStyle.paragraph if c.long else discord.TextStyle.short,
-                                     max_length=c.max, required=c.requis, placeholder=c.aide[:100] or None,
-                                     default=valeurs.get(c.cle) or None)
+                                     max_length=c.max, required=c.requis,
+                                     placeholder=c.exemple(langue)[:100] or None, default=valeurs.get(c.cle) or None)
             self.entrees[c.cle] = t
-            self.add_item(discord.ui.Label(text=c.libelle[:45], component=t,
-                                           description=None if c.requis else "Facultatif"))
+            self.add_item(discord.ui.Label(text=c.libelle(langue)[:45], component=t,
+                                           description=None if c.requis else tr("facultatif", langue)))
 
     async def on_submit(self, i: discord.Interaction):
-        await publier(i, self.zone, {k: (t.value or "").strip() for k, t in self.entrees.items()})
+        await publier(i, self.zone, {k: (t.value or "").strip() for k, t in self.entrees.items()}, self.langue)
 
 
-def vue_corriger(auteur_id: int, z: Zone, erreur: str, valeurs: dict) -> LayoutView:
+def vue_corriger(auteur_id: int, z: Zone, erreur: str, valeurs: dict, langue: str = "fr") -> LayoutView:
     v = LayoutView(timeout=900)
-    b = Button(label="Corriger", style=discord.ButtonStyle.primary, emoji=visuels.icone("modifier"))
+    b = Button(label=tr("corriger", langue), style=discord.ButtonStyle.primary, emoji=visuels.icone("modifier"))
 
     async def _cb(i: discord.Interaction):
         if i.user.id != auteur_id:
             return await i.response.defer()
-        await i.response.send_modal(Formulaire(z, valeurs))
+        await i.response.send_modal(Formulaire(z, langue, valeurs))
     b.callback = _cb
     v.add_item(discord.ui.Container(discord.ui.TextDisplay(erreur), discord.ui.ActionRow(b),
                                     accent_color=Palette.WARNING))
     return v
 
 
-async def publier(i, z: Zone, valeurs: dict):
+async def publier(i, z: Zone, valeurs: dict, langue: str = "fr"):
     g, m = i.guild, i.user
     valeurs = {c.cle: (valeurs.get(c.cle, "") if c.long else _une_ligne(valeurs.get(c.cle, ""))) for c in z.champs}
-    erreur = verifier(z, valeurs) or await _texte_refuse(g, "\n".join(v for v in valeurs.values() if v))
+    erreur = verifier(z, valeurs, langue) or await _texte_refuse(g, "\n".join(v for v in valeurs.values() if v))
     if erreur:
-        return await i.response.send_message(view=vue_corriger(m.id, z, erreur, valeurs), ephemeral=True)
-    refus = await peut_publier(i, z)
+        return await i.response.send_message(view=vue_corriger(m.id, z, erreur, valeurs, langue), ephemeral=True)
+    refus = await peut_publier(i, z, langue)
     if refus:
         return await i.response.send_message(refus, ephemeral=True)
     await i.response.defer(ephemeral=True, thinking=True)
     titre = titre_de(z, valeurs)
     async with _verrou(("publier", g.id)):
-        refus = await limite(g, m, z)
+        refus = await limite(g, m, z, langue)
         if refus:
             return await i.followup.send(refus, ephemeral=True)
         t = int(time.time())
-        champs = [[c.libelle, valeurs.get(c.cle, "")] for c in z.champs]
+        champs = [[c.carte or c.fr, valeurs.get(c.cle, "")] for c in z.champs]
         async with _get_db() as db:
             cur = await db.execute(
                 "INSERT INTO entraide_demandes(guild_id, zone, auteur_id, titre, champs, cree, maj)"
@@ -597,8 +760,7 @@ async def publier(i, z: Zone, valeurs: dict):
     if role is not None and not (role.mentionable or g.me.guild_permissions.mention_everyone):
         role = None
     rep = await reputation(g.id, m.id) if z.cle == "trade" else None
-    vue = vue_carte(d, z, avatar=m.display_avatar.url, ping=role.mention if role else "", rep=rep,
-                    garder=garder_h(cf))
+    vue = vue_carte(d, z, avatar=m.display_avatar.url, ping=role.mention if role else "", rep=rep)
     mentions = discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False)
     try:
         if isinstance(ch, discord.ForumChannel):
@@ -616,13 +778,13 @@ async def publier(i, z: Zone, valeurs: dict):
         _log(f"[ENTRAIDE][E1:DETAIL] zone={z.cle} {type(ex).__name__} {ex}")
         await _ecrire("DELETE FROM entraide_demandes WHERE id=?", (did,))
         _creations.pop((g.id, m.id), None)
-        return await i.followup.send("Impossible de publier ta demande pour le moment.", ephemeral=True)
+        return await i.followup.send(tr("impossible", langue), ephemeral=True)
     await _ecrire("UPDATE entraide_demandes SET salon_id=?, fil_id=? WHERE id=?", (ch.id, fil.id, did))
     try:
         await fil.add_user(m)  # l'auteur suit son fil : il est prévenu de chaque réponse
     except discord.HTTPException as ex:
         _log(f"[ENTRAIDE:DETAIL] auteur non ajouté au fil demande={did} {ex}")
-    await i.followup.send(f"Demande publiée : {fil.jump_url}", ephemeral=True)
+    await i.followup.send(tr("publiee", langue, lien=fil.jump_url), ephemeral=True)
     if isinstance(ch, discord.TextChannel):
         asyncio.create_task(reposer_panneau_texte(g, z.salon))
     await _journal(g, "entraide.demande", f"{m.mention} a publié une demande · {z.nom} : {titre}",
@@ -633,7 +795,7 @@ class BoutonNouvelle(discord.ui.DynamicItem[Button], template=r"rs:n:(?P<zone>[a
     def __init__(self, zone: str, z: Zone | None = None):
         self.zone = zone
         z = z or ZONES.get(zone)
-        super().__init__(Button(label=(z.bouton if z else "") or "Publier une demande",
+        super().__init__(Button(label=(z.bouton if z else "") or "Publier · Post",
                                 style=discord.ButtonStyle.primary,
                                 emoji=(z.emoji if z else None) or visuels.icone("ajouter"), custom_id=f"rs:n:{zone}"))
 
@@ -642,26 +804,27 @@ class BoutonNouvelle(discord.ui.DynamicItem[Button], template=r"rs:n:(?P<zone>[a
         return cls(match["zone"])
 
     async def callback(self, i: discord.Interaction):
+        langue = await langue_de(i)
         z = ZONES.get(self.zone)
         if z is None:
-            return await i.response.send_message("Cette zone n'existe plus.", ephemeral=True)
-        refus = await peut_publier(i, z)
+            return await i.response.send_message(tr("plus_de_zone", langue), ephemeral=True)
+        refus = await peut_publier(i, z, langue)
         if refus:
             return await i.response.send_message(refus, ephemeral=True)
-        await i.response.send_modal(Formulaire(z))
+        await i.response.send_modal(Formulaire(z, langue))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Rejoindre, appeler un middleman
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def _demande_ouverte(i, did: int):
+async def _demande_ouverte(i, did: int, langue: str):
     d = await charger(did)
     if d is None or i.guild is None or d["guild_id"] != i.guild.id:
-        await i.followup.send("Demande introuvable.", ephemeral=True)
+        await i.followup.send(tr("introuvable", langue), ephemeral=True)
         return None
     if d["statut"] not in OUVERTS:
-        await i.followup.send("Cette demande est close.", ephemeral=True)
+        await i.followup.send(tr("close", langue), ephemeral=True)
         return None
     return d
 
@@ -669,19 +832,20 @@ async def _demande_ouverte(i, did: int):
 async def rejoindre(i, did: int):
     await i.response.defer(ephemeral=True)
     g, m = i.guild, i.user
+    langue = await langue_de(i)
     async with _verrou(("demande", did)):
-        d = await _demande_ouverte(i, did)
+        d = await _demande_ouverte(i, did, langue)
         if d is None:
             return
         z = ZONES[d["zone"]]
         if m.id == d["auteur_id"]:
-            return await i.followup.send("C'est ta demande : attends qu'un joueur se manifeste.", ephemeral=True)
+            return await i.followup.send(tr("ta_demande", langue), ephemeral=True)
         fil = g.get_channel_or_thread(int(d["fil_id"]))
         lien = f" {fil.jump_url}" if fil is not None else ""
         if m.id in d["aidants"]:
-            return await i.followup.send(f"Tu es déjà dessus.{lien}", ephemeral=True)
+            return await i.followup.send(tr("deja_dessus", langue, lien=lien), ephemeral=True)
         if len(d["aidants"]) >= MAX_AIDANTS:
-            return await i.followup.send("Il y a déjà assez de monde sur cette demande.", ephemeral=True)
+            return await i.followup.send(tr("complet", langue), ephemeral=True)
         d["aidants"].append(m.id)
         d["statut"], d["maj"] = "prise", int(time.time())
         await _ecrire("UPDATE entraide_demandes SET aidants=?, statut=?, maj=? WHERE id=?",
@@ -697,7 +861,7 @@ async def rejoindre(i, did: int):
                            allowed_mentions=discord.AllowedMentions(users=[discord.Object(d["auteur_id"])]))
         except discord.HTTPException as ex:
             _log(f"[ENTRAIDE:DETAIL] annonce demande={did} {ex}")
-    await i.followup.send(f"C'est noté, rendez-vous dans le fil.{lien}", ephemeral=True)
+    await i.followup.send(tr("note", langue, lien=lien), ephemeral=True)
 
 
 class BoutonRejoindre(discord.ui.DynamicItem[Button], template=r"rs:j:(?P<did>\d+)"):
@@ -718,31 +882,31 @@ class BoutonRejoindre(discord.ui.DynamicItem[Button], template=r"rs:j:(?P<did>\d
 async def appeler_middleman(i, did: int):
     await i.response.defer(ephemeral=True)
     g, m = i.guild, i.user
+    langue = await langue_de(i)
     async with _verrou(("demande", did)):
-        d = await _demande_ouverte(i, did)
+        d = await _demande_ouverte(i, did, langue)
         if d is None:
             return
         if m.id != d["auteur_id"] and m.id not in d["aidants"]:
-            return await i.followup.send("Seuls l'auteur et les intéressés appellent un middleman.", ephemeral=True)
+            return await i.followup.send(tr("mm_qui", langue), ephemeral=True)
         t = int(time.time())
         if t - int(d["appel_mm"] or 0) < APPEL_MM_S:
-            return await i.followup.send("Un middleman a déjà été appelé il y a peu.", ephemeral=True)
-        cf = await conf(g)
-        role = role_zone(g, cf, "trade")
+            return await i.followup.send(tr("mm_deja", langue), ephemeral=True)
+        role = role_zone(g, await conf(g), "trade")
         if role is None or not role.members:
-            return await i.followup.send("Aucun middleman n'est désigné pour le moment.", ephemeral=True)
+            return await i.followup.send(tr("mm_aucun", langue), ephemeral=True)
         fil = await _fil_ou_rien(g, d)
         if fil is None:
-            return await i.followup.send("Le fil de cet échange est introuvable pour le moment.", ephemeral=True)
+            return await i.followup.send(tr("mm_fil", langue), ephemeral=True)
         try:
-            await fil.send(f"🛡️ {role.mention} — {m.mention} demande un middleman pour cet échange.",
+            await fil.send(f"🛡️ {role.mention} — {m.mention} demande un middleman · needs a middleman.",
                            allowed_mentions=discord.AllowedMentions(roles=[role]))
         except discord.HTTPException as ex:
             _log("[ENTRAIDE][E4] middleman non appelé")
             _log(f"[ENTRAIDE][E4:DETAIL] demande={did} {ex}")
-            return await i.followup.send("Impossible de prévenir les middlemen pour le moment.", ephemeral=True)
+            return await i.followup.send(tr("mm_echec", langue), ephemeral=True)
         await _ecrire("UPDATE entraide_demandes SET appel_mm=? WHERE id=?", (t, did))
-    await i.followup.send("Middlemen prévenus : attends-en un avant d'échanger.", ephemeral=True)
+    await i.followup.send(tr("mm_ok", langue), ephemeral=True)
 
 
 class BoutonMiddleman(discord.ui.DynamicItem[Button], template=r"rs:m:(?P<did>\d+)"):
@@ -760,28 +924,30 @@ class BoutonMiddleman(discord.ui.DynamicItem[Button], template=r"rs:m:(?P<did>\d
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Certifier, fermer
+#  Certifier, clôturer
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def peut_certifier(g, m, d: dict) -> str:
+async def peut_certifier(g, m, d: dict, langue: str = "fr") -> str:
     z = ZONES.get(d["zone"])
     if z is None or not z.certif:
-        return "Cette zone ne se certifie pas : l'auteur ferme sa demande."
+        return tr("certif_type", langue)
     staff = await _est_staff(g, m)
     role = role_zone(g, await conf(g), z.cle)
     if not staff and (role is None or role not in getattr(m, "roles", [])):
-        qui = "middlemen" if z.certif == "middleman" else f"guides de la zone {z.nom}"
-        return f"Réservé aux {qui}" + (f" ({role.mention})." if role else ".")
+        quel = f" ({role.mention})" if role else ""
+        if z.certif == "middleman":
+            return tr("certif_reserve_mm", langue, role=quel)
+        return tr("certif_reserve", langue, nom=z.nom, role=quel)
     if m.id == d["auteur_id"] and not staff:
-        return "Tu ne peux pas certifier ta propre demande."
+        return tr("certif_soi", langue)
     return ""
 
 
-async def certifier(g, did: int, par, credites: list, partenaire: int = 0) -> str:
+async def certifier(g, did: int, par, credites: list, partenaire: int = 0, langue: str = "fr") -> str:
     async with _verrou(("demande", did)):
         d = await charger(did)
         if d is None or d["statut"] not in OUVERTS:
-            return "Cette demande est déjà close."
+            return tr("deja_close", langue)
         t = int(time.time())
         credites = [int(x) for x in dict.fromkeys(credites) if int(x) != d["auteur_id"]][:MAX_AIDANTS]
         d.update(statut="terminee", ferme=t, ferme_par=par.id, certifie_par=par.id, credites=credites,
@@ -791,16 +957,44 @@ async def certifier(g, did: int, par, credites: list, partenaire: int = 0) -> st
                       (d["statut"], t, par.id, par.id, json.dumps(credites), d["partenaire_id"], t, did))
     z = ZONES[d["zone"]]
     if z.cle == "trade":
-        note = f"✅ Échange certifié par {par.mention}" + (
-            f" — avec {_mention(d['partenaire_id'])}." if d["partenaire_id"] else ".")
+        note = f"✅ Échange certifié par {par.mention} · Trade certified by {par.mention}" + (
+            f" — avec · with {_mention(d['partenaire_id'])}" if d["partenaire_id"] else "")
     else:
-        note = f"✅ Aide certifiée par {par.mention}" + (
-            " — merci à " + ", ".join(_mention(x) for x in credites) + " !" if credites else ".")
+        note = f"✅ Aide certifiée par {par.mention} · Help certified by {par.mention}" + (
+            " — merci · thanks " + ", ".join(_mention(x) for x in credites) if credites else "")
     await _clore_sur_discord(g, d, note)
     aides = (" — aidé par " + ", ".join(_mention(x) for x in credites)) if credites and z.cle != "trade" else ""
     await _journal(g, "entraide.certifiee", f"{par.mention} a certifié la demande de {_mention(d['auteur_id'])}"
                                             f" · {z.nom} : {d['titre']}{aides}",
                    membre_id=d["auteur_id"], auteur_id=par.id)
+    return ""
+
+
+async def resoudre(g, did: int, par, partenaire: int = 0, langue: str = "fr") -> str:
+    """L'auteur clôt sa demande : c'est réglé (les joueurs qui sont venus sont remerciés), ou
+    l'échange est conclu (avec qui, s'il le dit). Ça ne compte pas dans la confiance : seul un
+    middleman la certifie."""
+    async with _verrou(("demande", did)):
+        d = await charger(did)
+        if d is None or d["statut"] not in OUVERTS:
+            return tr("deja_close", langue)
+        t = int(time.time())
+        z = ZONES[d["zone"]]
+        credites = [] if z.cle == "trade" else [int(x) for x in d["aidants"]][:MAX_AIDANTS]
+        d.update(statut="terminee", ferme=t, ferme_par=par.id, certifie_par=0, credites=credites,
+                 partenaire_id=int(partenaire or 0), maj=t)
+        await _ecrire("UPDATE entraide_demandes SET statut=?, ferme=?, ferme_par=?, certifie_par=0, credites=?,"
+                      " partenaire_id=?, maj=? WHERE id=?",
+                      (d["statut"], t, par.id, json.dumps(credites), d["partenaire_id"], t, did))
+    if z.cle == "trade":
+        note = "✅ Échange conclu · Trade done" + (
+            f" — avec · with {_mention(d['partenaire_id'])}" if d["partenaire_id"] else "")
+    else:
+        note = "✅ Résolu par l'auteur · Solved by the author" + (
+            " — merci · thanks " + ", ".join(_mention(x) for x in credites) if credites else "")
+    await _clore_sur_discord(g, d, note)
+    await _journal(g, "entraide.resolue", f"{par.mention} a clôturé sa demande (réglée) · {z.nom} : {d['titre']}",
+                   membre_id=par.id, auteur_id=par.id)
     return ""
 
 
@@ -816,33 +1010,37 @@ async def fermer(g, did: int, par_id: int, statut: str = "fermee", note: str = "
                       (statut, t, d["ferme_par"], t, did))
     await _clore_sur_discord(g, d, note)
     if par_id and par_id != d["auteur_id"]:
-        await _journal(g, "entraide.fermee", f"{_mention(par_id)} a fermé la demande de "
+        await _journal(g, "entraide.fermee", f"{_mention(par_id)} a clôturé la demande de "
                                              f"{_mention(d['auteur_id'])} · {ZONES[d['zone']].nom} : {d['titre']}",
                        membre_id=d["auteur_id"], auteur_id=par_id)
     return True
 
 
+def _vue_message(texte: str, couleur) -> LayoutView:
+    v = LayoutView(timeout=60)
+    v.add_item(discord.ui.Container(discord.ui.TextDisplay(texte), accent_color=couleur))
+    return v
+
+
 class VueCertifier(LayoutView):
     """Qui a aidé (ou avec qui l'échange s'est fait) — la liste est déjà cochée, on corrige au besoin."""
 
-    def __init__(self, d: dict, z: Zone, par):
+    def __init__(self, d: dict, z: Zone, par, langue: str = "fr"):
         super().__init__(timeout=300)
-        self.d, self.z, self.par, self.choisis = d, z, par, None
+        self.d, self.z, self.par, self.langue, self.choisis = d, z, par, langue, None
         echange = z.cle == "trade"
         defauts = [discord.Object(id=int(x)) for x in d["aidants"][:1 if echange else MAX_AIDANTS]]
-        self.qui = UserSelect(placeholder="Avec qui l'échange s'est fait ?" if echange else "Qui a aidé ?",
+        self.qui = UserSelect(placeholder=tr("certif_qui_trade" if echange else "certif_qui", langue),
                               min_values=0, max_values=1 if echange else MAX_AIDANTS, default_values=defauts)
         self.qui.callback = self._cb_qui
-        ok = Button(label="Certifier l'échange" if echange else "Certifier l'aide",
+        ok = Button(label=tr("certif_ok_trade" if echange else "certif_ok", langue),
                     style=discord.ButtonStyle.success, emoji=visuels.icone("valider"))
         ok.callback = self._cb_ok
-        non = Button(label="Annuler", style=discord.ButtonStyle.secondary, emoji=visuels.icone("annuler"))
+        non = Button(label=tr("annuler", langue), style=discord.ButtonStyle.secondary, emoji=visuels.icone("annuler"))
         non.callback = self._cb_non
-        texte = ("Certifier cet échange ? La demande se ferme et compte dans la confiance des deux joueurs."
-                 if echange else "Certifier que l'aide a été faite ? La demande se ferme ; les joueurs cochés "
-                                 "sont remerciés.")
         self.add_item(discord.ui.Container(
-            discord.ui.TextDisplay(f"### {z.emoji} Certifier · n°{d['id']}\n{texte}"),
+            discord.ui.TextDisplay(f"### {z.emoji} {tr('certif_titre', langue, id=d['id'])}\n"
+                                   + tr("certif_texte_trade" if echange else "certif_texte", langue)),
             discord.ui.ActionRow(self.qui), discord.ui.ActionRow(ok, non), accent_color=Palette.SUCCESS))
 
     async def interaction_check(self, i):
@@ -856,20 +1054,78 @@ class VueCertifier(LayoutView):
         await i.response.defer()
         choisis = self.choisis if self.choisis is not None else [int(x) for x in self.d["aidants"]]
         if self.z.cle == "trade":
-            erreur = await certifier(i.guild, self.d["id"], i.user, [], partenaire=(choisis or [0])[0])
+            erreur = await certifier(i.guild, self.d["id"], i.user, [], partenaire=(choisis or [0])[0],
+                                     langue=self.langue)
         else:
-            erreur = await certifier(i.guild, self.d["id"], i.user, choisis)
-        await i.edit_original_response(view=_vue_message(erreur or "Certifié ✅", Palette.WARNING if erreur
-                                                         else Palette.SUCCESS))
+            erreur = await certifier(i.guild, self.d["id"], i.user, choisis, langue=self.langue)
+        await i.edit_original_response(view=_vue_message(erreur or tr("certifie", self.langue),
+                                                         Palette.WARNING if erreur else Palette.SUCCESS))
 
     async def _cb_non(self, i):
-        await i.response.edit_message(view=_vue_message("Rien n'a changé.", Palette.NEUTRAL))
+        await i.response.edit_message(view=_vue_message(tr("rien", self.langue), Palette.NEUTRAL))
 
 
-def _vue_message(texte: str, couleur) -> LayoutView:
-    v = LayoutView(timeout=60)
-    v.add_item(discord.ui.Container(discord.ui.TextDisplay(texte), accent_color=couleur))
-    return v
+class VueCloturer(LayoutView):
+    """« Une fois que le trading est bon des deux côtés, les gens peuvent clôturer leur propre ticket. »
+    L'auteur : c'est réglé / échange conclu (avec qui, s'il veut), ou il annule. Un guide ou le staff :
+    clôturer sans certifier. Chaque choix est déjà la confirmation : rien sur un mauvais clic."""
+
+    def __init__(self, d: dict, z: Zone, membre, langue: str, sienne: bool):
+        super().__init__(timeout=300)
+        self.d, self.z, self.m, self.langue, self.partenaire = d, z, membre, langue, None
+        echange = z.cle == "trade"
+        items = []
+        if sienne:
+            items.append(discord.ui.TextDisplay(
+                f"### {z.emoji} {tr('clore_titre_trade' if echange else 'clore_titre', langue)}\n"
+                + tr("clore_texte_trade" if echange else "clore_texte", langue)))
+            if echange:
+                self.avec = UserSelect(placeholder=tr("clore_avec", langue), min_values=0, max_values=1,
+                                       default_values=[discord.Object(id=int(x)) for x in d["aidants"][:1]])
+                self.avec.callback = self._cb_avec
+                items.append(discord.ui.ActionRow(self.avec))
+            ok = Button(label=tr("clore_conclu" if echange else "clore_regle", langue),
+                        style=discord.ButtonStyle.success, emoji=visuels.icone("valider"))
+            ok.callback = self._cb_regle
+            annule = Button(label=tr("clore_annuler", langue), style=discord.ButtonStyle.danger,
+                            emoji=visuels.icone("supprimer"))
+            annule.callback = self._cb_annuler
+            items.append(discord.ui.ActionRow(ok, annule))
+        else:
+            items.append(discord.ui.TextDisplay(f"### {z.emoji} {tr('clore_titre_autre', langue)}\n"
+                                                + tr("clore_texte_autre", langue)))
+            b = Button(label=tr("clore_sans", langue), style=discord.ButtonStyle.danger, emoji=visuels.icone("verrou"))
+            b.callback = self._cb_autre
+            items.append(discord.ui.ActionRow(b))
+        self.add_item(discord.ui.Container(*items, accent_color=Palette.WARNING))
+
+    async def interaction_check(self, i):
+        return i.user.id == self.m.id
+
+    async def _fin(self, i, texte):
+        await i.edit_original_response(view=_vue_message(texte, Palette.NEUTRAL))
+
+    async def _cb_avec(self, i):
+        self.partenaire = self.avec.values[0].id if self.avec.values else 0
+        await i.response.defer()
+
+    async def _cb_regle(self, i):
+        await i.response.defer()
+        partenaire = self.partenaire if self.partenaire is not None else int((self.d["aidants"] or [0])[0])
+        erreur = await resoudre(i.guild, self.d["id"], i.user, partenaire if self.z.cle == "trade" else 0,
+                                self.langue)
+        await self._fin(i, erreur or tr("cloturee", self.langue))
+
+    async def _cb_annuler(self, i):
+        await i.response.defer()
+        ok = await fermer(i.guild, self.d["id"], i.user.id, "fermee", "🔒 Annulée par l'auteur · Cancelled by the author")
+        await self._fin(i, tr("cloturee" if ok else "deja_close", self.langue))
+
+    async def _cb_autre(self, i):
+        await i.response.defer()
+        ok = await fermer(i.guild, self.d["id"], i.user.id, "fermee",
+                          f"🔒 Clôturée par {i.user.mention} · Closed by {i.user.mention}")
+        await self._fin(i, tr("cloturee" if ok else "deja_close", self.langue))
 
 
 def vue_confirmer(texte: str, libelle: str, action, auteur_id: int, *, icone: str = "verrou",
@@ -899,8 +1155,7 @@ def vue_confirmer(texte: str, libelle: str, action, auteur_id: int, *, icone: st
 class BoutonCertifier(discord.ui.DynamicItem[Button], template=r"rs:c:(?P<did>\d+)"):
     def __init__(self, did: int, z: Zone | None = None):
         self.did = int(did)
-        qui = "middleman" if z is not None and z.certif == "middleman" else "guide"
-        super().__init__(Button(label=f"Certifier · {qui}", style=discord.ButtonStyle.primary,
+        super().__init__(Button(label="Certifier · Certify", style=discord.ButtonStyle.primary,
                                 emoji=visuels.icone("valider"), custom_id=f"rs:c:{int(did)}"))
 
     @classmethod
@@ -908,22 +1163,23 @@ class BoutonCertifier(discord.ui.DynamicItem[Button], template=r"rs:c:(?P<did>\d
         return cls(int(match["did"]))
 
     async def callback(self, i: discord.Interaction):
+        langue = await langue_de(i)
         d = await charger(self.did)
         if d is None or i.guild is None or d["guild_id"] != i.guild.id:
-            return await i.response.send_message("Demande introuvable.", ephemeral=True)
+            return await i.response.send_message(tr("introuvable", langue), ephemeral=True)
         if d["statut"] not in OUVERTS:
-            return await i.response.send_message("Cette demande est close.", ephemeral=True)
-        refus = await peut_certifier(i.guild, i.user, d)
+            return await i.response.send_message(tr("close", langue), ephemeral=True)
+        refus = await peut_certifier(i.guild, i.user, d, langue)
         if refus:
             return await i.response.send_message(refus, ephemeral=True,
                                                  allowed_mentions=discord.AllowedMentions.none())
-        await i.response.send_message(view=VueCertifier(d, ZONES[d["zone"]], i.user), ephemeral=True)
+        await i.response.send_message(view=VueCertifier(d, ZONES[d["zone"]], i.user, langue), ephemeral=True)
 
 
 class BoutonFermer(discord.ui.DynamicItem[Button], template=r"rs:f:(?P<did>\d+)"):
     def __init__(self, did: int):
         self.did = int(did)
-        super().__init__(Button(label="Fermer", style=discord.ButtonStyle.secondary,
+        super().__init__(Button(label="Clôturer · Close", style=discord.ButtonStyle.secondary,
                                 emoji=visuels.icone("verrou"), custom_id=f"rs:f:{int(did)}"))
 
     @classmethod
@@ -932,31 +1188,22 @@ class BoutonFermer(discord.ui.DynamicItem[Button], template=r"rs:f:(?P<did>\d+)"
 
     async def callback(self, i: discord.Interaction):
         g, m = i.guild, i.user
+        langue = await langue_de(i)
         d = await charger(self.did)
         if d is None or g is None or d["guild_id"] != g.id:
-            return await i.response.send_message("Demande introuvable.", ephemeral=True)
+            return await i.response.send_message(tr("introuvable", langue), ephemeral=True)
         if d["statut"] not in OUVERTS:
-            return await i.response.send_message("Cette demande est déjà close.", ephemeral=True)
+            return await i.response.send_message(tr("deja_close", langue), ephemeral=True)
         z = ZONES[d["zone"]]
         role = role_zone(g, await conf(g), z.cle)
-        autorise = m.id == d["auteur_id"] or await _est_staff(g, m) or (role is not None and role in m.roles)
-        if not autorise:
-            return await i.response.send_message("Seuls l'auteur, les guides de la zone et le staff ferment "
-                                                 "une demande.", ephemeral=True)
         sienne = m.id == d["auteur_id"]
-        did = self.did
-
-        async def _action(_i):
-            note = "🔒 Demande fermée par son auteur." if sienne else f"🔒 Demande fermée par {m.mention}."
-            ok = await fermer(g, did, m.id, "fermee", note)
-            return "Demande fermée." if ok else "Cette demande était déjà close."
-        texte = ("Fermer ta demande ? Le fil se verrouille puis disparaît." if sienne
-                 else "Fermer cette demande sans certifier l'aide ? Le fil se verrouille puis disparaît.")
-        await i.response.send_message(view=vue_confirmer(texte, "Oui, fermer", _action, m.id), ephemeral=True)
+        if not (sienne or await _est_staff(g, m) or (role is not None and role in m.roles)):
+            return await i.response.send_message(tr("clore_reserve", langue), ephemeral=True)
+        await i.response.send_message(view=VueCloturer(d, z, m, langue, sienne), ephemeral=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Entretien : expiration, suppression, panneaux
+#  Entretien : expiration, suppression, posts épinglés
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def _effacer(g, d: dict) -> None:
@@ -982,7 +1229,7 @@ async def _effacer(g, d: dict) -> None:
 
 async def entretenir(g, maintenant: float | None = None) -> dict:
     """Toutes les 5 minutes : les demandes sans activité se ferment, les demandes closes disparaissent
-    après le délai, les posts épinglés restent en place (vérifiés toutes les 30 min)."""
+    (au passage suivant, par défaut), les posts épinglés restent en place (vérifiés toutes les 30 min)."""
     cf = await conf(g)
     bilan = {"expirees": 0, "retirees": 0, "effacees": 0}
     if not cf["actif"]:
@@ -1009,11 +1256,13 @@ async def entretenir(g, maintenant: float | None = None) -> dict:
         derniere = max(float(d["maj"]), _horodatage(getattr(fil, "last_message_id", None)))
         delai = expire_h(cf, z)
         if t - derniere > delai * 3600:
-            if await fermer(g, d["id"], 0, "expiree", f"⌛ Fermée faute d'activité depuis {delai} h. "
-                                                      "Republie-la si tu as encore besoin.", maintenant=t):
+            note = (f"⌛ Fermée faute d'activité ({delai} h) · Closed for inactivity ({delai} h) — "
+                    "republie si besoin · post again if needed")
+            if await fermer(g, d["id"], 0, "expiree", note, maintenant=t):
                 bilan["expirees"] += 1
                 actions += 1
-    limite_t = int(t - garder_h(cf) * 3600)
+    #  Clos à l'instant (garder 0 h) : effacé au passage SUIVANT — le mot de fin a le temps d'être vu.
+    limite_t = int(t - max(garder_h(cf) * 3600, 60))
     for d in await _lignes(_SQL_A_EFFACER, (g.id, limite_t, PAR_PASSAGE)):
         await _effacer(g, d)
         bilan["effacees"] += 1
@@ -1030,13 +1279,13 @@ async def sur_depart(member) -> int:
     g = member.guild
     n = 0
     for d in await _lignes(_SQL_DE_L_AUTEUR, (g.id, member.id)):
-        if await fermer(g, d["id"], 0, "fermee", "🔒 Fermée : son auteur a quitté le serveur."):
+        if await fermer(g, d["id"], 0, "fermee", "🔒 Fermée : l'auteur a quitté le serveur · Closed: the author left"):
             n += 1
     return n
 
 
 def _nom_panneau(cle: str) -> str:
-    return "📌 Proposer un échange" if cle == "trade" else "📌 Publier une demande"
+    return "📌 Proposer un échange · Post a trade" if cle == "trade" else "📌 Publier une demande · Ask for help"
 
 
 async def _panneau_forum(g, cf: dict, cle: str, forum, forcer: bool) -> None:
@@ -1131,25 +1380,40 @@ async def assurer_panneaux(g, forcer: bool = False) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Installation, regroupement, ordre de Communautaire
+#  Installation et mise à niveau des forums
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def droits_zone(g) -> dict:
     """On ne publie que par le bouton ; on parle dans les fils (preuves et captures comprises)."""
     return {g.default_role: discord.PermissionOverwrite(
                 send_messages=False, create_public_threads=False, create_private_threads=False,
-                send_messages_in_threads=True),
+                send_messages_in_threads=True, read_message_history=True, attach_files=True, embed_links=True,
+                add_reactions=True),
             g.me: discord.PermissionOverwrite(
                 view_channel=True, send_messages=True, send_messages_in_threads=True,
                 create_public_threads=True, manage_threads=True, manage_messages=True,
                 read_message_history=True, embed_links=True, attach_files=True)}
 
 
+async def completer_droits(ch, g, droits: discord.PermissionOverwrite, raison: str) -> bool:
+    """Ajoute à @everyone les droits nommés (preuves, captures…) sans toucher aux autres cibles —
+    le refus posé au rôle « Radié » ou à la quarantaine reste."""
+    o = ch.overwrites_for(g.default_role)
+    neuf = discord.PermissionOverwrite(**dict(o))
+    for k, v in droits:
+        if v is not None:
+            setattr(neuf, k, v)
+    if neuf == o:
+        return False
+    await ch.set_permissions(g.default_role, overwrite=neuf, reason=raison)
+    return True
+
+
 def sujet(cle: str, cf: dict) -> str:
     types = types_du_salon(cle)
-    delais = " · ".join(f"{z.nom.lower()} {expire_h(cf, z)} h" for z in types)
-    return (f"{SALONS[cle][1]} Publie avec le post épinglé, on répond dans le fil. Une demande à la fois"
-            f"{' par type' if len(types) > 1 else ''} ; fermée sans activité ({delais}).")
+    delais = " · ".join(f"{z.nom.split(' · ')[0].lower()} {expire_h(cf, z)} h" for z in types)
+    return (f"{SALONS[cle][1]}\nPublie avec le post épinglé · Post with the pinned post. Une demande à la fois · "
+            f"One request at a time ({delais}).")
 
 
 def categorie_communautaire(g):
@@ -1160,15 +1424,15 @@ def categorie_communautaire(g):
     return None
 
 
-async def _categorie_cible(g):
+async def categorie_cible(g):
     brut = await _cfg(g.id)
     aide = g.get_channel(int(brut.get("aide_salon", 0) or 0))
     return categorie_communautaire(g) or getattr(aide, "category", None)
 
 
-async def installer(g, *, forum: bool | None = None) -> list:
-    """Crée ce qui manque — deux forums rangés dans Communautaire, quatre rôles, les posts épinglés —
-    et ne supprime jamais rien. Relancer répare. Rend la liste de ce qui a été créé."""
+async def installer(g, *, forum: bool | None = None, categorie=None) -> list:
+    """Crée ce qui manque — les deux forums (dans `categorie`, la zone Rell Seas), quatre rôles, les
+    posts épinglés — et ne supprime jamais rien. Relancer répare. Rend la liste de ce qui a été créé."""
     me = g.me
     p = getattr(me, "guild_permissions", None)
     if not (p and p.manage_channels and p.manage_roles):
@@ -1177,7 +1441,7 @@ async def installer(g, *, forum: bool | None = None) -> list:
     faits = []
     async with _verrou(("installer", g.id)):
         cf = await conf(g)
-        cat = await _categorie_cible(g)
+        cat = categorie or await categorie_cible(g)
         roles = cf["roles"]
         for z in ZONES.values():
             if z.role and role_zone(g, cf, z.cle) is None:
@@ -1197,7 +1461,7 @@ async def installer(g, *, forum: bool | None = None) -> list:
                     default_sort_order=discord.ForumOrderType.latest_activity, available_tags=tags_du_salon(cle),
                     reason="Entraide Rell Seas")
             else:
-                ch = await g.create_text_channel(nom, category=cat, topic=sujet(cle, cf),
+                ch = await g.create_text_channel(nom, category=cat, topic=sujet(cle, cf)[:1024],
                                                  overwrites=droits_zone(g), reason="Entraide Rell Seas")
             salons[cle] = ch.id
             await _db_set(g.id, "rs_salons", salons)
@@ -1205,49 +1469,77 @@ async def installer(g, *, forum: bool | None = None) -> list:
         await _db_set(g.id, "rs_actif", 1)
         await _db_set(g.id, "rs_v2", 1)
     await assurer_panneaux(g, forcer=True)
-    try:
-        await ordonner(g)
-    except discord.HTTPException as ex:
-        _log("[ENTRAIDE][E10] Communautaire non rangée")
-        _log(f"[ENTRAIDE][E10:DETAIL] {type(ex).__name__} {ex}")
     return faits
 
 
-async def ordonner(g) -> bool:
-    """Communautaire par ordre de priorité : ❓ aide (l'orientation), 💬 chat, 🆘 entraide, 🤝 trade,
-    💡 suggestions, 🚀 boosts ; les autres salons suivent dans leur ordre, les vocaux restent en bas."""
-    cat = categorie_communautaire(g)
-    if cat is None:
-        return False
-    brut, cf = await _cfg(g.id), await conf(g)
+def _copie_etiquette(t) -> discord.ForumTag:
+    """Une copie (même identifiant) : l'étiquette du cache reste telle quelle tant que Discord n'a pas
+    accepté le changement — un échec ne fait pas croire que c'est déjà fait."""
+    n = discord.ForumTag(name=t.name, emoji=t.emoji, moderated=t.moderated)
+    n.id = t.id
+    return n
 
-    def ici(ch):
-        return ch if ch is not None and getattr(ch, "category_id", None) == cat.id else None
-    texte = [ch for ch in sorted(cat.channels, key=lambda c: c.position)
-             if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel))]
-    chat = next((ch for ch in texte if "chat" in config_salons.normaliser(ch.name).split()), None)
-    voulu = [ici(g.get_channel(int(brut.get("aide_salon", 0) or 0))), chat, ici(salon(g, cf, "entraide")),
-             ici(salon(g, cf, "trade")), ici(g.get_channel(int(brut.get("suggestions_salon", 0) or 0))),
-             ici(g.get_channel(int(brut.get("boosts_salon", 0) or 0)))]
-    voulu = list(dict.fromkeys(ch for ch in voulu if ch is not None))
-    if texte[:len(voulu)] == voulu:
-        return False
-    for n, ch in enumerate(voulu):
-        if n == 0:
-            await ch.move(beginning=True, category=cat, sync_permissions=False, reason="Communautaire par priorité")
-        else:
-            await ch.move(after=voulu[n - 1], category=cat, sync_permissions=False,
-                          reason="Communautaire par priorité")
-    return True
+
+def _signature_etiquettes(tags) -> list:
+    return [(t.name, str(t.emoji), bool(t.moderated), int(t.id or 0)) for t in tags]
+
+
+def etiquettes_a_jour(existantes, cle: str) -> list:
+    """Les étiquettes d'un forum, au propre : celles qui existent gardent leur identifiant (les posts
+    étiquetés le restent) mais prennent le nom bilingue et l'émoji du type — plus de badge 🆘 ;
+    l'ordre devient types puis statuts ; une étiquette ajoutée par le staff reste, à la fin."""
+    gardes = [_copie_etiquette(t) for t in existantes or []]
+    par_nom = {}
+    for t in gardes:
+        t.name = ANCIENS_TAGS.get(t.name, t.name)
+        par_nom.setdefault(t.name, t)
+    voulus = []
+    for canon in tags_du_salon(cle):
+        t = par_nom.get(canon.name)
+        if t is None:
+            voulus.append(canon)
+            continue
+        t.emoji, t.moderated = canon.emoji, True
+        voulus.append(t)
+    autres = [t for t in gardes if all(t is not v for v in voulus) and t.name not in {v.name for v in voulus}]
+    return (voulus + autres)[:20]
+
+
+async def mettre_a_niveau(g, categorie=None) -> list:
+    """22/10 (nuit) : « universel, que tout le monde comprenne ». Les forums prennent leur nom et leurs
+    étiquettes en français · anglais (les étiquettes déjà posées sont RENOMMÉES, pas remplacées), leur
+    consigne, et rejoignent `categorie` (la zone Rell Seas). Les posts épinglés se réécrivent."""
+    cf = await conf(g)
+    faits = []
+    for cle, (nom, *_reste) in SALONS.items():
+        ch = salon(g, cf, cle)
+        if ch is None:
+            continue
+        reglage = {}
+        consigne = sujet(cle, cf)[:1024 if isinstance(ch, discord.TextChannel) else 4096]
+        if (getattr(ch, "topic", None) or "") != consigne:
+            reglage["topic"] = consigne
+        if ch.name != nom:
+            reglage["name"] = nom
+        if categorie is not None and getattr(ch, "category_id", None) != categorie.id:
+            reglage["category"], reglage["sync_permissions"] = categorie, False
+        if isinstance(ch, discord.ForumChannel):
+            tags = etiquettes_a_jour(ch.available_tags, cle)
+            if _signature_etiquettes(tags) != _signature_etiquettes(ch.available_tags):
+                reglage["available_tags"] = tags
+        if reglage:
+            await ch.edit(reason="Entraide : français · anglais, zone Rell Seas", **reglage)
+        droits = await completer_droits(ch, g, droits_zone(g)[g.default_role],
+                                        "Entraide : preuves et captures dans les fils")
+        if reglage or droits:
+            faits.append(f"{nom} mis à niveau")
+    await assurer_panneaux(g, forcer=True)
+    return faits
 
 
 async def migrer_v2(g) -> list:
-    """22/10 (soir) : « ça me fait trop de salons… tout mettre dans Communautaire… que ça ne se
-    chevauche pas ». La première installation (une catégorie, sept salons) devient deux forums rangés
-    dans Communautaire : 🆘 aide devient 🆘 entraide (boss, farm, chill y entrent avec leur étiquette),
-    🤝 trade y est rangé ; 🧭 orientation laisse la place au panneau ❓ aide, 💬 discussion au 💬 chat.
-    Seuls les salons créés par le bot partent ; la discussion seulement si aucun membre n'y a écrit
-    (sinon elle est rangée dans Communautaire et signalée)."""
+    """22/10 (soir) : la première installation (une catégorie, sept salons) devient deux forums.
+    Seuls les salons créés par le bot partent ; la discussion seulement si aucun membre n'y a écrit."""
     brut = await _cfg(g.id)
     p = getattr(g.me, "guild_permissions", None)
     if brut.get("rs_v2") or not brut.get("rs_actif") or not (p and p.manage_channels):
@@ -1255,13 +1547,13 @@ async def migrer_v2(g) -> list:
     faits, traites = [], set()
     cf = await conf(g)
     anciens = dict(cf["salons"])
-    cat = await _categorie_cible(g)
+    cat = await categorie_cible(g)
     for cle in ("boss", "farm", "chill"):
         ch = g.get_channel(int(anciens.get(cle, 0) or 0))
         if ch is None:
             continue
         for d in await _lignes(_SQL_OUVERTES_DU_SALON, (g.id, ch.id)):
-            await fermer(g, d["id"], 0, "fermee", "🔒 Cette zone rejoint 🆘 entraide : republie ta demande là-bas.")
+            await fermer(g, d["id"], 0, "fermee", "🔒 Cette zone rejoint 🛟 help : republie ta demande là-bas.")
         await ch.delete(reason="Entraide regroupée : un forum pour l'aide, le boss, le farm et le chill")
         traites.add(ch.id)
         faits.append(f"{ch.name} retiré")
@@ -1286,21 +1578,10 @@ async def migrer_v2(g) -> list:
         traites.add(discussion.id)
     entraide_ch = g.get_channel(int(anciens.get("aide", 0) or 0))
     trade_ch = g.get_channel(int(anciens.get("trade", 0) or 0))
-    if entraide_ch is not None:
-        reglage = {"name": SALONS["entraide"][0], "category": cat, "sync_permissions": False,
-                   "topic": sujet("entraide", cf)}
-        if isinstance(entraide_ch, discord.ForumChannel):
-            gardes = list(entraide_ch.available_tags)
-            noms = {t.name for t in gardes}
-            reglage["available_tags"] = ([discord.ForumTag(name=z.nom, emoji=z.emoji, moderated=True)
-                                          for z in types_du_salon("entraide") if z.nom not in noms] + gardes)[:20]
-        await entraide_ch.edit(reason="Entraide regroupée dans Communautaire", **reglage)
-        traites.add(entraide_ch.id)
-        faits.append(f"{entraide_ch.name} devient {SALONS['entraide'][0]}")
-    if trade_ch is not None:
-        await trade_ch.edit(category=cat, sync_permissions=False, topic=sujet("trade", cf),
-                            reason="Entraide regroupée dans Communautaire")
-        traites.add(trade_ch.id)
+    for ch in (entraide_ch, trade_ch):
+        if ch is not None:
+            await ch.edit(category=cat, sync_permissions=False, reason="Entraide regroupée")
+            traites.add(ch.id)
     await _db_set(g.id, "rs_salons", {k: ch.id for k, ch in (("entraide", entraide_ch), ("trade", trade_ch))
                                       if ch is not None})
     await _db_set(g.id, "rs_panneaux", {k: cf["panneaux"][ancien] for k, ancien in (("entraide", "aide"),
@@ -1309,12 +1590,13 @@ async def migrer_v2(g) -> list:
     ancienne = g.get_channel(cf["categorie"])
     if isinstance(ancienne, discord.CategoryChannel) and ancienne is not cat and \
             all(c.id in traites for c in ancienne.channels):
-        await ancienne.delete(reason="Entraide rangée dans Communautaire")
+        await ancienne.delete(reason="Entraide regroupée")
         faits.append(f"catégorie {ancienne.name} retirée")
     await _db_set(g.id, "rs_categorie", 0)
     await _db_set(g.id, "rs_orientation", 0)
     await _db_set(g.id, "rs_v2", 1)
     faits += await installer(g)
+    faits += await mettre_a_niveau(g)
     return faits
 
 
@@ -1337,7 +1619,7 @@ class EntraidePanelV2(LayoutView):
             installe = cf["actif"] and salon(self.g, cf, "entraide") is not None
             if not installe:
                 items.append(discord.ui.TextDisplay(
-                    "Pas encore installée.\n-# Deux forums dans Communautaire — 🆘 entraide (aide, boss, farm, "
+                    "Pas encore installée.\n-# Deux forums dans la zone Rell Seas — 🛟 help (aide, boss, farm, "
                     "chill) et 🤝 trade — et quatre rôles de guide."))
             else:
                 ouvertes = await compter_ouvertes(self.g.id)
@@ -1349,12 +1631,15 @@ class EntraidePanelV2(LayoutView):
                     qui = f" · {r.mention} ({len(r.members)})" if r else (" · rôle manquant" if z.role else "")
                     ping = " · 🔔" if prevenir(cf, z) else ""
                     lignes.append(f"{z.emoji} **{z.nom}** · {expire_h(cf, z)} h{qui}{ping}")
-                lignes.append(f"-# Les demandes closes disparaissent après {garder_h(cf)} h.")
+                g_h = garder_h(cf)
+                lignes.append("-# Les demandes closes disparaissent " + ("tout de suite (au passage suivant)" if not g_h
+                                                                         else f"après {g_h} h")
+                              + " ; leur historique reste sur le site.")
                 items.append(discord.ui.TextDisplay("\n".join(lignes)))
             if self._note:
                 items.append(discord.ui.TextDisplay(self._note))
             if installe:
-                choix = Select(placeholder="Régler une zone…", options=[
+                choix = Select(placeholder="Régler un type…", options=[
                     discord.SelectOption(label=z.nom, value=z.cle, emoji=z.emoji, default=self.zone == z.cle)
                     for z in ZONES.values()])
                 choix.callback = self._cb_zone
@@ -1377,9 +1662,9 @@ class EntraidePanelV2(LayoutView):
                                    emoji=visuels.icone("cloche" if prevenir(cf, z) else "cloche_off"))
                         b.callback = self._cb_ping
                         items.append(discord.ui.ActionRow(b))
-                garder = Select(placeholder="Les demandes closes disparaissent après…", options=[
-                    discord.SelectOption(label=f"{h} h", value=str(h), default=h == garder_h(cf))
-                    for h in (6, 24, 72)])
+                garder = Select(placeholder="Les demandes closes disparaissent…", options=[
+                    discord.SelectOption(label="tout de suite" if h == 0 else f"après {h} h", value=str(h),
+                                         default=h == garder_h(cf)) for h in GARDES])
                 garder.callback = self._cb_garder
                 items.append(discord.ui.ActionRow(garder))
             b_inst = Button(label="Réparer" if installe else "Installer", style=discord.ButtonStyle.primary,
@@ -1452,15 +1737,15 @@ class EntraidePanelV2(LayoutView):
     async def _cb_installer(self, i):
         cf = await conf(self.g)
         repare = cf["actif"]
-        texte = ("Réparer l'entraide ? Ce qui manque est recréé (forums, rôles, posts épinglés) et Communautaire "
-                 "est remise dans l'ordre ; rien n'est supprimé." if repare else
-                 "Installer l'entraide ? Deux forums dans Communautaire (🆘 entraide, 🤝 trade) et quatre rôles de "
+        texte = ("Réparer l'entraide ? Ce qui manque est recréé (forums, rôles, posts épinglés) ; rien n'est "
+                 "supprimé." if repare else
+                 "Installer l'entraide ? Deux forums (🛟 help, 🤝 trade) dans la zone Rell Seas et quatre rôles de "
                  "guide ; rien n'est supprimé.")
         panneau = self
 
         async def _action(_i):
             try:
-                faits = await installer(panneau.g)
+                faits = await (_installateur or installer)(panneau.g)
             except PermissionError as ex:
                 return str(ex)
             except discord.HTTPException as ex:

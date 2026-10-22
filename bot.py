@@ -94,7 +94,9 @@ import nettoyage  # journal en fils, rétention 30 jours, remise à neuf
 import sondages  # les sondages Discord des membres, vérifiés puis suivis sur le site
 import salutations  # un 👋 sous chaque « bonjour », là où tout le monde peut écrire
 import suggestions  # idées des membres : votes, fil de discussion, décision du staff
-import entraide  # l'entraide Rell Seas : orientation, zones, guides qui certifient, nettoyage
+import entraide  # l'entraide Rell Seas : help et trade, guides qui certifient, nettoyage, bilingue
+import equipages  # les équipages de Rell Seas : Pirates ou Marine, un post par équipage
+import zones  # les compartiments : Communautaire et Rell Seas, rangés par priorité
 import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -8835,7 +8837,7 @@ async def _conversation_seule(g, ticket_id: int) -> dict:
             "tronque": len(messages) >= CONVERSATION_MAX}
 
 
-async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None):
+async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None, titre=None):
     """Construit la CHAÎNE HTML du transcript (thème Discord) : avatars, pseudos, horodatage,
     contenu RÉSOLU (mentions/rôles/emojis) et ÉCHAPPÉ (anti-injection), embeds stylés, images/
     GIFs/vidéos/stickers. Si (token ET base_url) → RÉ-HÉBERGE les images/GIFs sur le volume
@@ -8938,7 +8940,7 @@ async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None):
                 f'<div class="mbody"><div class="mhead"><span class="author">{name}</span>{badge}'
                 f'<span class="ts">{stamp}</span></div>'
                 f'<div class="content">{content_html}</div>{embeds_html}{att_html}</div></div>')
-        title = _hesc(f"Ticket #{tid}") + (f" — {_hesc(guild.name)}" if guild else "")
+        title = _hesc(titre or f"Ticket #{tid}") + (f" — {_hesc(guild.name)}" if guild else "")
         body = ''.join(rows) or '<i style="color:#949ba4">(aucun message)</i>'
         return (
             "<!DOCTYPE html><html lang='fr'><head><meta charset='utf-8'>"
@@ -12762,7 +12764,7 @@ async def _configurer_salons_v2(g) -> None:
         hubs = {int(k) for k in (voix.get('hubs') or {}) if str(k).isdigit()}
         ids_prives = {int(c.get(k, 0) or 0) for k in ('sondages_salon', 'tableau_salon')}
         ids_prives |= {ch.id for ch in await _salons_de_logs(g, c)}
-        ids_prives |= entraide.ids_salons(c)
+        ids_prives |= zones.ids_salons(c)
         actions = config_salons.plan_v2(g, clan_role, _roles_staff_et_plus(g, c), hubs,
                                         me.guild_permissions.move_members, ids_prives)
         await db_set(g.id, 'config_salons_v2', now().isoformat())
@@ -12851,7 +12853,7 @@ async def _automod_invitations(g) -> bool:
 
 
 NOM_AIDE = "aide"
-AIDE_VERSION = 2
+AIDE_VERSION = 3
 
 
 def _salon_des_tickets(g):
@@ -12871,40 +12873,41 @@ def _salon_par_nom(g, *mots, exclus=("log", "transcript")):
 
 
 async def _vue_aide(g, c):
-    """« Il faudrait que tu refasses le salon aide. » Une ligne par besoin, un bouton qui mène au
-    bon salon ; une ligne n'apparaît que si son salon existe (aucun bouton qui ment).
-    22/10/2026 : c'est aussi l'orientation de l'entraide (« un vrai salon tout en haut, de
-    redirection »), par ordre de priorité : aide en jeu, échanges, ticket, candidature, vocal,
-    suggestions, sondages, règles."""
-    hub = None
-    for k in ((c.get('temp_voice_config') or {}).get('hubs') or {}):
-        ch = g.get_channel(int(k)) if str(k).isdigit() else None
-        if ch is not None and not (ch.category is not None and config_salons.est_clan(ch.category.name)):
-            hub = ch
-            break
+    """« Il faudrait que tu refasses le salon aide. » 22/10/2026 : « mieux fait, plus beau… séparer les
+    deux compartiments au propre, expliquer bien l'international ». L'orientation du serveur en
+    français · anglais : la langue (le bot parle celle de chacun), puis Communautaire, Rell Seas et le
+    staff — une ligne par besoin, un bouton qui y mène ; une ligne n'apparaît que si son salon existe
+    (aucun bouton qui ment)."""
     ticket = _salon_des_tickets(g)
-    cf_entraide = await entraide.conf(g)
-    lignes = [
-        *entraide.lignes_aide(g, cf_entraide),
-        (ticket, "🎫 **Un souci avec un joueur, une question au staff**\nOuvre un ticket : le staff te répond en privé.",
-         "Ouvrir un ticket"),
-        (ticket if rellseas_ui.panneaux_tickets(c) else None,
-         "🌊 **Rejoindre Rell Seas**\nLa candidature se fait par ticket « Rell Seas ».", "Postuler"),
-        (hub, "🔊 **Ton vocal à toi**\nEntre dans Join : ton salon se crée, tu en es le chef.", "Créer mon vocal"),
-        (g.get_channel(int(c.get('suggestions_salon', 0) or 0)), "💡 **Une idée pour le serveur**\nPropose-la, tout le monde vote.",
-         "Suggestions"),
-        (g.get_channel(int(c.get('sondages_salon', 0) or 0)), "📊 **Un sondage**\nBouton ➕ puis « Sondage ».", "Sondages"),
-        (_salon_par_nom(g, "regle") or _salon_par_nom(g, "rules"), "📜 **Les règles**\nÀ lire avant tout.", "Lire"),
+    cfz, cfe, cfq = await zones.conf(g), await entraide.conf(g), await equipages.conf(g)
+    groupes = zones.lignes_aide(g, c, cfz, cfe, cfq)
+    clan = bool(rellseas_ui.panneaux_tickets(c))
+    groupes["Staff"] = [
+        (ticket, "🎫 **Ticket** — une question, un souci" + (", rejoindre le clan" if clan else "")
+         + " · a question, a problem" + (", join the clan" if clan else ""), "Ouvrir · Open"),
     ]
-    items = [visuels.bandeau("aide", "Besoin d'aide ?")]
-    for salon, texte, libelle in lignes:
-        if salon is not None:
+    regles = getattr(g, "rules_channel", None) or _salon_par_nom(g, "regle") or _salon_par_nom(g, "rules")
+    items = [visuels.bandeau("orientation", "Bienvenue · Welcome"),
+             discord.ui.TextDisplay("🇫🇷 **Serveur international** : écris en français ou en anglais, tout le monde "
+                                    "se comprend. Le bot te parle dans ta langue :\n"
+                                    "🇬🇧 **International server**: write in French or English, everyone gets along. "
+                                    "The bot speaks your language:"),
+             discord.ui.ActionRow(LangSelectButton("fr"), LangSelectButton("en"))]
+    for titre, lignes in groupes.items():
+        presentes = [(salon, texte, libelle) for salon, texte, libelle in lignes if salon is not None]
+        if not presentes:
+            continue
+        items.append(discord.ui.Separator())
+        items.append(discord.ui.TextDisplay(f"### {titre}"))
+        for salon, texte, libelle in presentes:
             items.append(discord.ui.Section(discord.ui.TextDisplay(texte),
                                             accessory=Button(label=libelle, url=salon.jump_url)))
-    items.append(discord.ui.TextDisplay("-# Les invitations vers d'autres serveurs sont interdites partout."))
+    items.append(discord.ui.TextDisplay("-# " + (f"📜 Règles · Rules : <#{regles.id}> · " if regles else "")
+                                        + "pas d'invitation vers d'autres serveurs · no invites to other servers"))
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(*items, accent_color=Palette.INFO))
-    signature = f"{AIDE_VERSION}|" + "|".join(str(getattr(s, 'id', 0)) for s, _t, _l in lignes)
+    signature = f"{AIDE_VERSION}|" + "|".join(str(getattr(s, 'id', 0)) for lignes in groupes.values()
+                                              for s, _t, _l in lignes) + f"|{getattr(regles, 'id', 0)}"
     return v, signature
 
 
@@ -12969,7 +12972,7 @@ async def entraide_task():
             if g.owner_id in TETE_IDS and not c.get('rs_installation_auto'):
                 await db_set(g.id, 'rs_installation_auto', now().isoformat())
                 if not c.get('rs_actif'):
-                    faits = await entraide.installer(g)
+                    faits = await zones.installer(g)
                     await _entraide_journal(g, "entraide.installation",
                                             "Entraide Rell Seas installée : " + (", ".join(faits) or "rien ne manquait") + ".")
                     await _salon_aide(g)
@@ -12980,10 +12983,103 @@ async def entraide_task():
                     await _entraide_journal(g, "entraide.regroupement",
                                             "Entraide regroupée dans Communautaire : " + ", ".join(faits) + ".")
                     await _salon_aide(g)
+            if g.owner_id in TETE_IDS and c.get('rs_actif') and not c.get('zones_v1'):
+                await _installer_zones(g, c)
+            if g.owner_id in TETE_IDS and c.get('zones_v1') and not c.get('menage_v1'):
+                await db_set(g.id, 'menage_v1', now().isoformat())
+                await _menage_categories(g)
             await entraide.entretenir(g)
+            if time.monotonic() - _zones_entretenues.get(g.id, -1e9) > 1800:
+                _zones_entretenues[g.id] = time.monotonic()
+                await zones.entretenir(g)
+                await equipages.entretenir(g)
         except Exception as ex:
             _logerr("entraide.entretien", ex, guild_id=g.id)
     await _etat_public()  # /stats dit si l'entraide est en place et les tickets regroupés
+
+
+_zones_entretenues: dict = {}
+ZONES_ESSAIS = 3
+MENAGE_MOTS = ("echange", "echanges", "groupe", "groupes")
+EMOJI_ANCIEN_TICKET = "\N{ADMISSION TICKETS}"
+
+
+async def _installer_zones(g, c) -> None:
+    """22/10 (nuit) : « international… deux compartiments au propre… les équipages ». Une fois ; le
+    témoin est posé AVANT (jamais deux installations en parallèle), retiré si l'installation casse
+    — elle reprend au passage suivant, trois essais au plus (elle ne recrée que ce qui manque)."""
+    await db_set(g.id, 'zones_v1', now().isoformat())
+    try:
+        faits = await zones.installer(g)
+    except (discord.HTTPException, PermissionError) as ex:
+        essais = int(c.get('zones_essais', 0) or 0) + 1
+        await db_set(g.id, 'zones_essais', essais)
+        if essais < ZONES_ESSAIS:
+            await db_set(g.id, 'zones_v1', "")
+        _logerr("zones.installation", ex, guild_id=g.id)
+        return
+    await _entraide_journal(g, "zones.installation",
+                            "Zones mises en place : " + (", ".join(faits) or "rien ne manquait") + ".")
+    await _salon_aide(g)
+
+
+async def _menage_categories(g) -> list:
+    """22/10/2026 : « deux catégories, échange et groupe… servent à rien… jamais remplies » et « Rell
+    Seas et Ticket… est-ce qu'ils servent à quelque chose si en bas tu as créé une catégorie Ticket
+    au propre ? ». Les panneaux de tickets sont d'abord rebranchés sur 🎫 TICKETS ; puis les
+    catégories VIDES devenues inutiles partent : Échanges, Groupes, les anciennes catégories de
+    tickets (🎟). Une catégorie qui contient un salon n'est jamais touchée. Rend les noms retirés."""
+    me = g.me
+    if not (me and me.guild_permissions.manage_channels):
+        return []
+    tickets = await _categorie_tickets(g)
+    if tickets is None:
+        return []
+    c = await cfg(g.id)
+    panels = dict(c.get('ticket_panels') or {})
+    anciennes = set()
+    for pid, pnl in list(panels.items()):
+        cid = int((pnl or {}).get('category', 0) or 0)
+        if cid and cid != tickets.id:
+            anciennes.add(cid)
+            panels[pid] = dict(pnl, category=tickets.id)
+    if anciennes:
+        await db_set(g.id, 'ticket_panels', panels)
+    garder = {tickets.id, int(c.get('zones_rell', 0) or 0)}
+    retirees = []
+    for cat in list(g.categories):
+        if cat.id in garder or cat.channels:
+            continue
+        mots = config_salons.normaliser(cat.name).split()
+        if cat.id in anciennes or cat.name.lstrip().startswith(EMOJI_ANCIEN_TICKET) or \
+                any(m in MENAGE_MOTS for m in mots):
+            try:
+                await cat.delete(reason="Catégorie vide devenue inutile")
+                retirees.append(cat.name)
+            except discord.HTTPException as ex:
+                _logerr("menage.categorie", ex, guild_id=g.id)
+    if anciennes or retirees:
+        await _au_journal(g, "Config", "serveur.menage",
+                          ("Panneaux de tickets rebranchés sur « " + tickets.name + " ». " if anciennes else "")
+                          + ("Catégories vides retirées : " + ", ".join(retirees) + "." if retirees else ""))
+    return retirees
+
+
+async def _langue_membre(i) -> str:
+    """La langue d'un membre pour l'entraide et les équipages : sa préférence, sinon son Discord."""
+    langue = await i18n_module.lang_of(user_id=getattr(getattr(i, "user", None), "id", None), interaction=i,
+                                       guild_id=getattr(getattr(i, "guild", None), "id", None))
+    return "fr" if langue == "fr" else "en"
+
+
+async def _archiver_fil(fil, titre: str) -> str:
+    """Le fil d'une demande d'entraide, enregistré comme un transcript : le site le relit. Le jeton, ou ""."""
+    token = transcript_store.new_token()
+    html = await _render_ticket_transcript_html(fil, 0, token=token, base_url=transcript_store.public_base_url(),
+                                                titre=titre)
+    if html and await asyncio.to_thread(transcript_store.save_html, token, html):
+        return token
+    return ""
 
 
 @entraide_task.before_loop
@@ -13153,6 +13249,9 @@ async def _etat_public():
             "boosts": any(c.get('boosts_entete') for c in confs),
             "entraide": any(c.get('rs_actif') for c in confs),
             "entraide_v2": any(c.get('rs_v2') for c in confs),
+            "zones": any(c.get('zones_v1') for c in confs),
+            "equipages": any(c.get('eq_forum') for c in confs),
+            "menage": any(c.get('menage_v1') for c in confs),
             "entraide_salons": max([len(c.get('rs_salons') or {}) for c in confs] or [0]),
             "tickets_regroupes": any(c.get('tickets_categorie') for c in confs)})
     except Exception as ex:
@@ -19579,9 +19678,15 @@ async def _activite_boot():
     await boosts.init_db()
     entraide.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_demande_refusee,
                    controle=_access_gate_reason, est_staff=_entraide_staff, journal=_entraide_journal,
-                   salon_ticket=_salon_des_tickets, log=print)
+                   langue=_langue_membre, archiver=_archiver_fil, log=print)
     entraide.set_retour(_retour_vers_configure)
+    entraide.set_installateur(zones.installer)
     await entraide.init_db()
+    equipages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_demande_refusee,
+                    controle=_access_gate_reason, est_staff=_entraide_staff, journal=_entraide_journal,
+                    langue=_langue_membre, log=print)
+    await equipages.init_db()
+    zones.setup(cfg=cfg, db_set=db_set, log=print)
 
     await activite_module.init_db()
 
@@ -19683,6 +19788,8 @@ async def on_ready():
                               BoutonAnciensSalons, BoutonGere, BoutonFicheSite, BoutonApprouverBot)
         bot.add_dynamic_items(entraide.BoutonNouvelle, entraide.BoutonRejoindre, entraide.BoutonCertifier,
                               entraide.BoutonFermer, entraide.BoutonMiddleman)
+        bot.add_dynamic_items(equipages.BoutonPublier, equipages.BoutonRejoindre, equipages.BoutonRecrutement,
+                              equipages.BoutonModifier, equipages.BoutonRetirer)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
@@ -21052,6 +21159,10 @@ async def on_member_remove(m):
         await entraide.sur_depart(m)
     except Exception as ex:
         _logerr("entraide.depart", ex, guild_id=m.guild.id)
+    try:
+        await equipages.sur_depart(m)  # un capitaine emporte son équipage
+    except Exception as ex:
+        _logerr("equipages.depart", ex, guild_id=m.guild.id)
     # Parti du serveur : son boost s'arrête, sa carte de remerciement aussi.
     try:
         await boosts.retirer(m.guild, m.id)
@@ -30566,7 +30677,7 @@ _ENTR_NORM_CACHE: dict = {}
 
 
 async def _entraide_request_channel(guild):
-    """Le salon où demander de l'aide : le forum 🆘 entraide s'il est installé, sinon l'ancien
+    """Le salon où demander de l'aide : le forum 🛟help s'il est installé, sinon l'ancien
     réglage, sinon None. FAIL-SAFE : None sur tout problème → l'appelant n'envoie rien."""
     try:
         if guild is None:

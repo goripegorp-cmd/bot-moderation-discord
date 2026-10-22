@@ -93,8 +93,10 @@ BANDEAUX = {
     "tableau": ("STAFF", "Tableau de bord", "Candidatures · tickets · sanctions · clan", "\uE9D2", (14, 165, 233), (99, 102, 241)),
     #  Entraide Rell Seas (22/10/2026) : l'orientation et une zone par besoin.
     "rs_port": ("RELL SEAS", "Entraide", "Aide · Trade · Boss · Farm · Chill", "\uEB48", (6, 182, 212), (37, 99, 235)),
-    "rs_entraide": ("RELL SEAS", "Entraide", "Aide · Boss · Farm · Chill", "\uEB48", (34, 197, 94), (16, 185, 129)),
-    "rs_trade": ("RELL SEAS", "Trade", "Échanger fruits et objets", "\uE8AB", (245, 158, 11), (234, 88, 12)),
+    "rs_entraide": ("RELL SEAS", "Entraide · Help", "Aide · Boss · Farm · Chill", "\uEB48", (34, 197, 94), (16, 185, 129)),
+    "rs_crews": ("RELL SEAS", "Équipages · Crews", "Pirates · Marine", "\uE7C1", (30, 41, 59), (37, 99, 235)),
+    "orientation": ("AIDE · HELP", "Bienvenue · Welcome", "Français · English — trouve ta place · find your way", "\uE909", (14, 165, 233), (99, 102, 241)),
+    "rs_trade": ("RELL SEAS", "Trade", "Fruits et objets · Fruits & items", "\uE8AB", (245, 158, 11), (234, 88, 12)),
 }
 
 #  Icônes des boutons : (glyphe, famille de couleur)

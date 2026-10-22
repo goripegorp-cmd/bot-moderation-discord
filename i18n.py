@@ -845,12 +845,12 @@ CATALOG = {
     # Renvoi vers le salon d'entraide (ajouté sous l'accueil si configuré).
     # {channel} = mention du salon (<#id>).
     "welcome.entraide_hint": {
-        "fr": "🆘 Besoin d'aide sur un jeu ? → {channel}",
-        "en": "🆘 Need help with a game? → {channel}",
-        "es": "🆘 ¿Necesitas ayuda con un juego? → {channel}",
-        "de": "🆘 Brauchst du Hilfe bei einem Spiel? → {channel}",
-        "it": "🆘 Hai bisogno di aiuto in un gioco? → {channel}",
-        "pt": "🆘 Precisa de ajuda num jogo? → {channel}",
+        "fr": "🛟 Besoin d'aide sur un jeu ? → {channel}",
+        "en": "🛟 Need help with a game? → {channel}",
+        "es": "🛟 ¿Necesitas ayuda con un juego? → {channel}",
+        "de": "🛟 Brauchst du Hilfe bei einem Spiel? → {channel}",
+        "it": "🛟 Hai bisogno di aiuto in un gioco? → {channel}",
+        "pt": "🛟 Precisa de ajuda num jogo? → {channel}",
     },
     # Accueil onboarding events (poste quand welcome_message n'est PAS configuré).
     # {user} = mention.
