@@ -3,7 +3,8 @@ avec des rôles… certifier que l'aide a bien été faite et clôturer la deman
 automatique ». Puis : « trop de salons » (deux forums) et, la nuit : « le serveur est international,
 mais aussi français… les gens peuvent clôturer leur propre ticket… quand les demandes sont
 clôturées, le fil se ferme aussi… un vrai système de nettoyage ultra propre… les badges SOS,
-horrible ». Le parcours entier, sur un faux serveur (`faux_serveur.py`)."""
+horrible ». Enfin : « deux fils seulement… plutôt que des milliers de fils » — une demande est une
+carte dans le post 🛟 Help ou 🤝 Trade. Le parcours entier, sur un faux serveur (`faux_serveur.py`)."""
 from __future__ import annotations
 
 import ast
@@ -58,13 +59,17 @@ def env(tmp_path):
     return Obj(conf=conf, journal=journal, staff=staff, langues=langues, archives=archives, get_db=get_db)
 
 
-def installe(env, forum=True):
-    g = Monde(forum)
-    env.conf.update(aide_salon=g.nom("❓aide").id, suggestions_salon=g.nom("💡suggestions").id,
-                    boosts_salon=g.nom("🚀boosts").id)
-    rell = g.categorie("· Rell Seas")
-    faits = run(E.installer(g, categorie=rell))
-    return g, rell, faits
+def installe(env):
+    """Le serveur comme les zones le laissent : les posts 🛟 Help et 🤝 Trade du forum 🌊rell-seas ; leur
+    message d'ouverture porte les boutons."""
+    g = Monde()
+    env.conf.update(aide_salon=g.nom("❓aide").id)
+    rell = g._salon(Forum, "🌊rell-seas", {"category": g.commu})
+    posts = {}
+    for cle, titre in (("entraide", "🛟 Help · Entraide"), ("trade", "🤝 Trade · Échanges")):
+        posts[cle] = run(rell.create_thread(name=titre)).thread.id
+    env.conf.update(rs_salons=dict(posts), rs_panneaux=dict(posts), rs_ouvertures=dict(posts))
+    return g, posts, run(E.installer(g, creer_salons=False))
 
 
 def demande_valeurs(zone):
@@ -160,158 +165,126 @@ def test_E2_la_carte_bilingue_montre_ce_qu_il_faut_et_seulement_les_boutons_util
     assert compter(E.vue_carte(_d("trade"), Z["trade"], avatar="https://x/a.png", ping="<@&9>", rep=2)) <= 40
 
 
-# ─── Installation dans la zone Rell Seas ─────────────────────────────────────
+# ─── Les posts 🛟 Help et 🤝 Trade : une carte par demande ─────────────────────
 
-def test_E3_deux_forums_dans_la_zone_rell_seas_rien_d_autre(env):
-    g, rell, faits = installe(env)
-    entr, trade = forum_de(g, env, "entraide"), forum_de(g, env, "trade")
-    assert (entr.name, trade.name) == ("🛟help", "🤝trade")
-    assert entr.category_id == trade.category_id == rell.id
-    assert len(faits) == 4 + 2, faits
-    assert sorted(r.name for r in g.roles.values()) == sorted(z.role for z in Z.values() if z.role)
-    droits = entr.kw["overwrites"][g.default_role]
-    assert (droits.send_messages, droits.send_messages_in_threads, droits.create_public_threads) == (False, True, False)
-    assert droits.attach_files and droits.embed_links, "preuves et captures dans les fils"
-    assert droits.view_channel is None, "la visibilité reste celle du serveur"
-    assert [t.name for t in entr.available_tags][:4] == ["Aide · Help", "Boss", "Farm", "Chill"]
-    post = g.fils[env.conf["rs_panneaux"]["entraide"]]
-    assert post.name == "📌 Publier une demande · Ask for help" and post.flags.pinned and post.locked
-    assert ids(entr.crees[0].view) == ["rs:n:aide", "rs:n:boss", "rs:n:farm", "rs:n:chill"], "un bouton par type"
-    assert "🇫🇷" in textes(entr.crees[0].view) and "🇬🇧" in textes(entr.crees[0].view)
-    assert ids(trade.crees[0].view) == ["rs:n:trade"]
-    assert g.fils[env.conf["rs_panneaux"]["trade"]].name == "📌 Proposer un échange · Post a trade"
-    assert "Post with the pinned post" in entr.kw["topic"]
-    n = len(g.salons)
-    assert run(E.installer(g, categorie=rell)) == [] and len(g.salons) == n, "relancer ne crée rien"
-    del g.salons[env.conf["rs_salons"]["trade"]]
-    g.ordre.remove(env.conf["rs_salons"]["trade"])
-    assert run(E.installer(g, categorie=rell)) == ["salon 🤝trade"], "un forum effacé à la main revient"
-
-
-def test_E3b_sans_zone_donnee_l_entraide_va_dans_communautaire(env):
-    g = Monde()
-    env.conf.update(aide_salon=g.nom("❓aide").id)
-    run(E.installer(g))
-    assert forum_de(g, env, "entraide").category_id == g.commu.id
-
-
-# ─── Publier ─────────────────────────────────────────────────────────────────
-
-def test_E4_publier_dans_sa_langue_previent_les_guides_etiquette_type_et_statut(env):
-    g, _r, _f = installe(env)
+def test_E3_une_demande_est_une_carte_dans_le_post_help_le_panneau_redescend(env):
+    g, posts, faits = installe(env)
+    assert sorted(faits) == sorted(f"rôle {z.role}" for z in Z.values() if z.role), "les rôles ; aucun salon créé"
+    aide = g.fils[posts["entraide"]]
+    assert ids(aide.cartes[-1][1]["view"]) == ["rs:n:aide", "rs:n:boss", "rs:n:farm", "rs:n:chill"], \
+        "le message d'ouverture du post porte les boutons"
     kolax = g.membre(7)
     i = publier(g, kolax, "boss")
-    assert i.suivis[0][0].startswith("Demande publiée : https://discord.com/channels/1/")
-    forum = forum_de(g, env, "entraide")
-    post = forum.crees[-1]
-    assert post.fil.name == "Boss Akuma · Pirate7" and post.fil.applied_tags == ["Boss", "Ouverte · Open"]
-    guide = g.get_role(env.conf["rs_roles"]["boss"])
-    assert post.allowed_mentions.roles == [guide] and "Guides prévenus" in textes(post.view)
-    assert post.fil.membres == [7], "l'auteur suit son fil"
     d = run(E.charger(1))
-    assert (d["zone"], d["statut"], d["fil_id"], d["jeton"]) == ("boss", "ouverte", post.fil.id, "")
-    assert d["champs"][1] == ["Pseudo Roblox", "Kolax_RS"]
-    assert env.journal[-1][0] == "entraide.demande" and env.journal[-1][2]["membre_id"] == 7
+    carte = aide.messages[0]
+    assert (d["mode"], d["salon_id"], d["fil_id"]) == ("carte", aide.id, carte.id)
+    assert ids(carte.kw["view"]) == ["rs:j:1", "rs:c:1", "rs:f:1"] and "Boss" in textes(carte.kw["view"])
+    assert i.suivis[0][0] == f"Demande publiée : https://discord.com/channels/1/{aide.id}/{carte.id}"
+    guide = g.get_role(env.conf["rs_roles"]["boss"])
+    assert carte.kw["allowed_mentions"].roles == [guide] and "Guides prévenus" in textes(carte.kw["view"])
+    panneau = aide.messages[1]
+    assert ids(panneau.kw["view"]) == ["rs:n:aide", "rs:n:boss", "rs:n:farm", "rs:n:chill"]
+    assert env.conf["rs_panneaux"]["entraide"] == panneau.id and aide.id not in g.effaces, \
+        "le panneau redescend sous la carte ; le message d'ouverture reste"
+    assert len(g.fils) == 2, "aucun fil de plus : « plutôt que des milliers de fils »"
+    assert env.journal[-1][0] == "entraide.demande"
     E._creations.clear()
     i2 = publier(g, kolax, "boss")
-    assert "déjà une demande ouverte ici" in str(i2.response.messages) + str(i2.suivis), "une à la fois par type"
+    assert f"https://discord.com/channels/1/{aide.id}/{carte.id}" in i2.response.messages[0][0], \
+        "« déjà une demande ici » mène à sa carte"
     E._creations.clear()
     publier(g, kolax, "farm")
-    assert forum.crees[-1].fil.applied_tags == ["Farm", "Ouverte · Open"], "un autre type, dans le même forum"
-    i3 = publier(g, g.membre(8), "boss", {"titre": "Une insulte", "pseudo": "x", "niveau": "", "joueurs": "",
-                                          "details": ""})
-    assert "insulte" in textes(i3.response.messages[0][1]["view"]), "le texte est filtré, on peut corriger"
-    # En anglais : le formulaire, les erreurs et la réponse
+    assert panneau.id in g.effaces and aide.messages[-1].id == env.conf["rs_panneaux"]["entraide"]
     env.langues[9] = "en"
     i = interaction(g, g.membre(9))
     run(E.BoutonNouvelle("farm").callback(i))
     assert i.response.modals[0].title == "🌾 Farm · new request"
     i = publier(g, g.membre(9), "trade", {"donne": "", "cherche": "x", "pseudo": "y", "details": ""}, "en")
     assert "“I give” is required." in textes(i.response.messages[0][1]["view"])
-    assert "Edit" in textes(i.response.messages[0][1]["view"])
     i = publier(g, g.membre(9), "trade", langue="en")
-    assert i.suivis[0][0].startswith("Request posted: https://")
-    E._creations.clear()
-    i = publier(g, g.membre(9), "trade", langue="en")
-    assert "You already have an open request here" in i.response.messages[0][0]
+    assert i.suivis[0][0].startswith(f"Request posted: https://discord.com/channels/1/{posts['trade']}/")
+    i3 = publier(g, g.membre(8), "boss", {"titre": "Une insulte", "pseudo": "x", "niveau": "", "joueurs": "",
+                                          "details": ""})
+    assert "insulte" in textes(i3.response.messages[0][1]["view"]), "le texte est filtré, on peut corriger"
 
 
-# ─── Rejoindre, certifier, clôturer ──────────────────────────────────────────
-
-def test_E5_rejoindre_puis_un_guide_certifie_le_fil_se_ferme_et_l_historique_reste(env):
-    g, _r, _f = installe(env)
-    kolax, ami, curieux = g.membre(7), g.membre(8), g.membre(9)
+def test_E4_rejoindre_un_mot_sous_la_carte_puis_tout_part_avec_elle(env):
+    g, posts, _f = installe(env)
+    aide = g.fils[posts["entraide"]]
+    kolax, ami = g.membre(7), g.membre(8)
     guide = g.membre(10, g.get_role(env.conf["rs_roles"]["boss"]))
     publier(g, kolax, "boss")
-    fil = forum_de(g, env, "entraide").crees[-1].fil
+    carte = aide.messages[0]
     i = interaction(g, kolax)
     run(E.rejoindre(i, 1))
     assert "C'est ta demande" in i.suivis[0][0]
     env.langues[8] = "en"
     i = interaction(g, ami)
     run(E.rejoindre(i, 1))
-    assert i.suivis[0][0].startswith("Got it, see you in the thread.")
+    assert i.suivis[0][0] == f"Got it, see you in the thread. https://discord.com/channels/1/{aide.id}/{carte.id}"
+    mot = aide.messages[-1]
+    assert mot.content == "🙋 <@8> vient t'aider · is coming to help — <@7>" and mot.reference.message_id == carte.id
+    assert [u.id for u in mot.kw["allowed_mentions"].users] == [7] and mot.kw["mention_author"] is False
+    assert run(E._notes(1)) == [mot.id]
     d = run(E.charger(1))
-    assert (d["statut"], d["aidants"]) == ("prise", [8]) and fil.applied_tags == ["Boss", "En cours · Ongoing"]
-    assert fil.envois[-1][0] == "🙋 <@8> vient t'aider · is coming to help — <@7>" and 8 in fil.membres
-    i = interaction(g, ami)
-    run(E.rejoindre(i, 1))
-    assert "already on it" in i.suivis[0][0]
-    assert "Réservé aux guides Boss" in run(E.peut_certifier(g, curieux, d))
-    assert "Only for Boss guides" in run(E.peut_certifier(g, curieux, d, "en"))
-    assert run(E.peut_certifier(g, guide, d)) == ""
+    assert (d["statut"], d["aidants"]) == ("prise", [8])
+    assert aide.cartes[-1][0] == carte.id and "en route · on the way : <@8>" in textes(aide.cartes[-1][1]["view"])
+    merci = aide.repondre(7, mot.id, "merci !")
+    question = aide.repondre(9, carte.id, "je peux venir ?")
+    bavard = aide.repondre(9, None, "quelqu'un pour farmer ?")
     vue = E.VueCertifier(d, Z["boss"], guide)
-    j = interaction(g, guide)
-    run(vue._cb_ok(j))  # la liste pré-cochée (les aidants) est gardée telle quelle
-    assert "Certifié ✅" in textes(_vue_de(j))
+    run(vue._cb_ok(interaction(g, guide)))
     d = run(E.charger(1))
     assert (d["statut"], d["certifie_par"], d["credites"]) == ("terminee", 10, [8])
-    assert fil.locked and fil.archived and fil.applied_tags == ["Boss", "Terminée · Done"]
-    assert fil.envois[-1][0] == "✅ Aide certifiée par <@10> · Help certified by <@10> — merci · thanks <@8>"
-    assert ids(fil.cartes[-1][1]["view"]) == [], "la carte close n'a plus de bouton"
-    assert d["jeton"] == "jeton1" and env.archives == [(fil.id, "Entraide n°1 · Boss · Boss Akuma")], \
-        "l'historique du fil est enregistré pour le site, mot de fin compris"
-    assert env.journal[-1][0] == "entraide.certifiee" and env.journal[-1][2] == {"membre_id": 7, "auteur_id": 10}
+    assert ids(aide.cartes[-1][1]["view"]) == [] and "Aide certifiée · Help certified" in textes(aide.cartes[-1][1]["view"])
+    assert env.archives == [], "une carte n'a pas de fil à enregistrer : la base garde tout pour le site"
+    bilan = run(E.entretenir(g, maintenant=time.time() + 61))
+    assert bilan["effacees"] == 1
+    assert {carte.id, mot.id, merci.id, question.id} <= g.effaces, "la carte, le mot du bot, les réponses"
+    assert bavard.id not in g.effaces and aide.id not in g.effaces, "le reste du post ne bouge pas"
+    assert run(E.charger(1))["supprime"] == 1 and run(E._notes(1)) == []
     assert run(E.certifier(g, 1, guide, [])) == "Cette demande est déjà close."
 
 
-def test_E6_echange_certifie_par_un_middleman_compte_conclu_par_l_auteur_non(env):
-    g, _r, _f = installe(env)
+def test_E5_echange_le_middleman_sous_la_carte_seul_lui_fait_la_confiance(env):
+    g, posts, _f = installe(env)
+    trade = g.fils[posts["trade"]]
     vendeur, acheteur, curieux = g.membre(7), g.membre(8), g.membre(9)
     mm = g.membre(11, g.get_role(env.conf["rs_roles"]["trade"]))
     publier(g, vendeur, "trade")
-    fil = forum_de(g, env, "trade").crees[-1].fil
-    assert fil.name == "Fruit Dragon ⇄ Fruit Dough · Pirate7" and fil.applied_tags == ["Ouverte · Open"]
+    carte = trade.messages[0]
+    assert ids(carte.kw["view"]) == ["rs:j:1", "rs:m:1", "rs:c:1", "rs:f:1"]
     run(E.rejoindre(interaction(g, acheteur), 1))
-    assert fil.envois[-1][0] == "💬 <@8> est intéressé · is interested — <@7>"
+    assert trade.messages[-1].content == "💬 <@8> est intéressé · is interested — <@7>"
     i = interaction(g, curieux)
     run(E.appeler_middleman(i, 1))
     assert "Seuls l'auteur et les intéressés" in i.suivis[0][0]
-    run(E.appeler_middleman(interaction(g, vendeur), 1))
+    i = interaction(g, vendeur)
+    run(E.appeler_middleman(i, 1))
     role = g.get_role(env.conf["rs_roles"]["trade"])
-    assert fil.envois[-1][0].startswith(f"🛡️ {role.mention}") and fil.envois[-1][1]["allowed_mentions"].roles == [role]
+    appel = trade.messages[-1]
+    assert appel.content.startswith(f"🛡️ {role.mention}") and appel.kw["allowed_mentions"].roles == [role]
+    assert appel.reference.message_id == carte.id and i.suivis[-1][0].startswith("Middlemen prévenus")
     i = interaction(g, acheteur)
     run(E.appeler_middleman(i, 1))
     assert "déjà été appelé" in i.suivis[0][0], "un appel par quart d'heure"
     assert run(E.certifier(g, 1, mm, [], partenaire=8)) == ""
     assert run(E.reputation(1, 7)) == 1 and run(E.reputation(1, 8)) == 1 and run(E.reputation(1, 9)) == 0
-    assert fil.envois[-1][0] == "✅ Échange certifié par <@11> · Trade certified by <@11> — avec · with <@8>"
+    assert "Échange certifié · Trade certified" in textes(trade.cartes[-1][1]["view"])
     E._creations.clear()
     publier(g, vendeur, "trade")
     run(E.rejoindre(interaction(g, acheteur), 2))
     assert run(E.resoudre(g, 2, vendeur, partenaire=8)) == ""
     d = run(E.charger(2))
-    assert (d["statut"], d["certifie_par"], d["partenaire_id"], d["credites"]) == ("terminee", 0, 8, [])
-    assert run(E.reputation(1, 7)) == 1, "seul un middleman fait la confiance"
-    fil2 = g.fils[d["fil_id"]]
-    assert fil2.locked and fil2.archived and fil2.applied_tags == ["Terminée · Done"]
-    assert fil2.envois[-1][0] == "✅ Échange conclu · Trade done — avec · with <@8>"
+    assert (d["statut"], d["certifie_par"], d["partenaire_id"]) == ("terminee", 0, 8)
+    assert run(E.reputation(1, 7)) == 1, "conclu par l'auteur : ça ne compte pas dans la confiance"
+    assert "Échange conclu · Trade done" in textes(trade.cartes[-1][1]["view"])
     assert env.journal[-1][0] == "entraide.resolue"
-    assert run(E.resoudre(g, 2, vendeur)) == "Cette demande est déjà close."
 
 
-def test_E7_l_auteur_cloture_lui_meme_un_guide_sans_certifier_un_passant_non(env):
-    g, _r, _f = installe(env)
+def test_E6_l_auteur_cloture_lui_meme_un_guide_sans_certifier_un_passant_non(env):
+    g, posts, _f = installe(env)
+    aide = g.fils[posts["entraide"]]
     auteur, ami, passant = g.membre(7), g.membre(8), g.membre(9)
     guide = g.membre(10, g.get_role(env.conf["rs_roles"]["aide"]))
     publier(g, auteur, "aide")
@@ -321,8 +294,7 @@ def test_E7_l_auteur_cloture_lui_meme_un_guide_sans_certifier_un_passant_non(env
     assert i.response.messages[0][0] == E.tr("clore_reserve", "fr")
     i = interaction(g, guide)
     run(E.BoutonFermer(1).callback(i))
-    vue = i.response.messages[0][1]["view"]
-    assert isinstance(vue, E.VueCloturer) and "Clôturer sans certifier" in textes(vue) and "C'est réglé" not in textes(vue)
+    assert "Clôturer sans certifier" in textes(i.response.messages[0][1]["view"])
     env.langues[7] = "en"
     i = interaction(g, auteur)
     run(E.BoutonFermer(1).callback(i))
@@ -330,33 +302,26 @@ def test_E7_l_auteur_cloture_lui_meme_un_guide_sans_certifier_un_passant_non(env
     assert "Solved" in textes(vue) and "Cancel my request" in textes(vue)
     j = interaction(g, auteur)
     run(vue._cb_regle(j))
-    assert "Request closed ✅ The thread is closing." in textes(_vue_de(j))
+    assert "Request closed ✅" in textes(_vue_de(j))
     d = run(E.charger(1))
     assert (d["statut"], d["certifie_par"], d["credites"], d["ferme_par"]) == ("terminee", 0, [8], 7)
-    fil = g.fils[d["fil_id"]]
-    assert fil.locked and fil.archived and fil.applied_tags == ["Aide · Help", "Terminée · Done"]
-    assert fil.envois[-1][0] == "✅ Résolu par l'auteur · Solved by the author — merci · thanks <@8>"
-    assert env.journal[-1][0] == "entraide.resolue" and d["jeton"]
+    assert ids(aide.cartes[-1][1]["view"]) == [] and "Résolue · Solved" in textes(aide.cartes[-1][1]["view"])
     E._creations.clear()
     publier(g, auteur, "chill")
     vue = E.VueCloturer(run(E.charger(2)), Z["chill"], auteur, "fr", True)
-    j = interaction(g, auteur)
-    run(vue._cb_annuler(j))
-    d2 = run(E.charger(2))
-    assert d2["statut"] == "fermee" and g.fils[d2["fil_id"]].locked
-    assert g.fils[d2["fil_id"]].envois[-1][0] == "🔒 Annulée par l'auteur · Cancelled by the author"
+    run(vue._cb_annuler(interaction(g, auteur)))
+    assert run(E.charger(2))["statut"] == "fermee"
     E._creations.clear()
     publier(g, auteur, "trade")
     run(E.rejoindre(interaction(g, ami), 3))
     vue = E.VueCloturer(run(E.charger(3)), Z["trade"], auteur, "fr", True)
     assert any(isinstance(c, discord.ui.UserSelect) for c in vue.walk_children()), "avec qui l'échange s'est fait"
-    assert "Échange conclu" in textes(vue)
     run(vue._cb_regle(interaction(g, auteur)))
     assert run(E.charger(3))["partenaire_id"] == 8, "par défaut, le joueur intéressé"
 
 
-def test_E7b_fermer_l_auteur_sans_bruit_le_staff_au_journal(env):
-    g, _r, _f = installe(env)
+def test_E7_fermer_l_auteur_sans_bruit_le_staff_au_journal(env):
+    g, _p, _f = installe(env)
     a, b = g.membre(7), g.membre(8)
     env.staff.add(12)
     g.membre(12)
@@ -364,77 +329,92 @@ def test_E7b_fermer_l_auteur_sans_bruit_le_staff_au_journal(env):
     E._creations.clear()
     publier(g, b, "chill")
     n = len(env.journal)
-    assert run(E.fermer(g, 1, 7, "fermee", "🔒 Demande fermée par son auteur."))
+    assert run(E.fermer(g, 1, 7, "fermee"))
     assert len(env.journal) == n, "fermer sa propre demande ne remplit pas le journal"
-    assert run(E.fermer(g, 2, 12, "fermee", "🔒 Demande fermée par <@12>."))
+    assert run(E.fermer(g, 2, 12, "fermee"))
     assert env.journal[-1][0] == "entraide.fermee"
     assert not run(E.fermer(g, 2, 12)), "déjà close"
 
 
-# ─── Nettoyage ───────────────────────────────────────────────────────────────
-
-def test_E8_le_nettoyage_ferme_l_inactif_et_efface_le_clos_au_passage_suivant(env):
-    g, _r, _f = installe(env)
+def test_E8_le_nettoyage_ferme_l_inactif_efface_le_clos_rattrape_l_oublie(env):
+    g, posts, _f = installe(env)
+    aide = g.fils[posts["entraide"]]
     for uid, zone in ((7, "boss"), (8, "aide"), (9, "farm")):
         E._creations.clear()
         publier(g, g.membre(uid), zone)
     t0 = time.time()
-    fil_farm = g.fils[run(E.charger(3))["fil_id"]]
-    run(fil_farm.delete())  # supprimé à la main par le staff
+    carte_farm = run(E.charger(3))["fil_id"]
+    run(aide.get_partial_message(carte_farm).delete())  # effacée à la main par le staff
     run(E._ecrire("INSERT INTO entraide_demandes(guild_id, zone, auteur_id, titre, cree, maj) VALUES(1,'aide',5,'x',?,?)",
                   (int(t0) - 3600, int(t0) - 3600)))
     bilan = run(E.entretenir(g, maintenant=t0 + 7 * 3600))  # boss : 6 h ; aide : 24 h
-    assert bilan == {"expirees": 1, "retirees": 1, "effacees": 0}, "le mot de fin a le temps d'être vu"
+    assert bilan == {"expirees": 1, "retirees": 1, "effacees": 0}, "la carte close reste le temps d'être vue"
     assert [run(E.charger(n))["statut"] for n in (1, 2, 3)] == ["expiree", "ouverte", "retiree"]
     assert run(E.charger(4)) is None, "une publication interrompue ne bloque personne"
-    fil_boss = g.fils[run(E.charger(1))["fil_id"]]
-    assert fil_boss.locked and fil_boss.archived and fil_boss.applied_tags == ["Boss", "Fermée · Closed"]
-    assert "Closed for inactivity (6 h)" in fil_boss.envois[-1][0]
-    assert run(E.charger(1))["jeton"] == "jeton1", "l'historique est enregistré avant la disparition"
+    carte_boss = run(E.charger(1))["fil_id"]
+    derniere = [k for mid, k in aide.cartes if mid == carte_boss][-1]
+    assert ids(derniere["view"]) == [] and "plus d'activité · no activity" in textes(derniere["view"])
     bilan = run(E.entretenir(g, maintenant=t0 + 7 * 3600 + 61))
-    assert bilan == {"expirees": 0, "retirees": 0, "effacees": 1}, bilan
-    assert fil_boss.id not in g.fils, "le fil clos disparaît au passage suivant"
+    assert bilan == {"expirees": 0, "retirees": 0, "effacees": 1} and carte_boss in g.effaces
     assert run(E.charger(1))["supprime"] == 1 and run(E.charger(2))["statut"] == "ouverte", "la base garde la trace"
     run(E._regler(g, "garder_h", 24))
     run(E.fermer(g, 2, 8, "fermee", maintenant=t0 + 8 * 3600))
-    assert run(E.entretenir(g, maintenant=t0 + 9 * 3600))["effacees"] == 0, "réglé à 24 h : il reste"
+    assert run(E.entretenir(g, maintenant=t0 + 9 * 3600))["effacees"] == 0, "réglé à 24 h : elle reste"
     assert run(E.entretenir(g, maintenant=t0 + 33 * 3600))["effacees"] == 1
 
 
 def test_E9_un_membre_qui_part_ferme_ses_demandes(env):
-    g, _r, _f = installe(env)
+    g, _p, _f = installe(env)
     m = g.membre(7)
     publier(g, m, "aide")
     assert run(E.sur_depart(m)) == 1 and run(E.charger(1))["statut"] == "fermee"
-    assert "the author left" in g.fils[run(E.charger(1))["fil_id"]].envois[-1][0]
 
 
-def test_E10_sans_communaute_des_salons_et_des_fils_le_panneau_reste_en_bas(env):
-    g, rell, _f = installe(env, forum=False)
-    salon = forum_de(g, env, "entraide")
-    assert isinstance(salon, Texte) and salon.category_id == rell.id and len(salon.envois) == 1
-    assert ids(salon.envois[0][2]["view"]) == ["rs:n:aide", "rs:n:boss", "rs:n:farm", "rs:n:chill"]
+def test_E10_seule_sans_les_zones_des_salons_avec_les_memes_cartes(env):
+    g = Monde(forum=False)
+    env.conf.update(aide_salon=g.nom("❓aide").id)
+    faits = run(E.installer(g))
+    salon = g.get_channel(env.conf["rs_salons"]["entraide"])
+    assert isinstance(salon, Texte) and salon.category_id == g.commu.id and "salon 🛟help" in faits
+    assert len(salon.envois) == 1 and ids(salon.envois[0][2]["view"]) == ["rs:n:aide", "rs:n:boss", "rs:n:farm",
+                                                                           "rs:n:chill"]
     ancien = env.conf["rs_panneaux"]["entraide"]
     publier(g, g.membre(7), "aide")
     d = run(E.charger(1))
-    carte = next(e for e in salon.envois if e[0] == d["fil_id"])
-    assert "rs:j:1" in ids(carte[2]["view"]) and g.fils[d["fil_id"]].parent is salon
-    assert ancien in g.effaces and env.conf["rs_panneaux"]["entraide"] != ancien, "le panneau est reposé sous la carte"
+    assert d["mode"] == "carte" and any(e[0] == d["fil_id"] for e in salon.envois) and len(g.fils) == 0
+    assert ancien in g.effaces and env.conf["rs_panneaux"]["entraide"] != ancien, "le panneau redescend"
     run(E.fermer(g, 1, 7, "fermee"))
-    assert salon.cartes[-1][0] == d["fil_id"], "hors forum, la carte se met à jour dans le salon"
+    assert salon.cartes[-1][0] == d["fil_id"]
     run(E.entretenir(g, maintenant=time.time() + 120))
-    assert d["fil_id"] in g.effaces, "le fil et sa carte disparaissent"
+    assert d["fil_id"] in g.effaces, "la carte close disparaît"
 
 
-def test_E11_l_historique_reste_meme_si_l_enregistrement_echoue(env):
-    g, _r, _f = installe(env)
-    publier(g, g.membre(7), "aide")
+def test_E11_l_ancienne_installation_un_post_par_demande_marche_toujours(env):
+    """Les demandes déjà ouvertes dans les anciens forums (avant les deux forums) se ferment
+    proprement : historique enregistré pour le site, post verrouillé puis effacé."""
+    g = Monde(forum=True)
+    env.conf.update(aide_salon=g.nom("❓aide").id)
+    rell = g.categorie("· Rell Seas")
+    assert run(E.installer(g, categorie=rell)) and isinstance(forum_de(g, env, "entraide"), Forum)
+    publier(g, g.membre(7), "boss")
+    forum = forum_de(g, env, "entraide")
+    post = forum.crees[-1]
+    d = run(E.charger(1))
+    assert d["mode"] == "" and post.fil.applied_tags == ["Boss", "Ouverte · Open"] and post.fil.membres == [7]
+    run(E.rejoindre(interaction(g, g.membre(8)), 1))
+    assert post.fil.applied_tags == ["Boss", "En cours · Ongoing"]
     env.langues["archive"] = "panne"
     assert run(E.fermer(g, 1, 7, "fermee", "🔒 fin"))
-    d = run(E.charger(1))
-    fil = g.fils[d["fil_id"]]
-    assert d["jeton"] == "" and fil.locked and fil.archived, "une panne d'enregistrement ne bloque pas la clôture"
-    assert [x["id"] for x in run(E.recentes(1))] == [1], "le site liste aussi les demandes closes"
+    assert run(E.charger(1))["jeton"] == "" and post.fil.locked and post.fil.archived, \
+        "une panne d'enregistrement ne bloque pas la clôture"
+    del env.langues["archive"]
+    E._creations.clear()
+    publier(g, g.membre(9), "aide")
+    assert run(E.fermer_anciennes(g, "🔒 L'entraide déménage")) == 1
+    fil = forum.crees[-1].fil
+    assert fil.envois[-1][0] == "🔒 L'entraide déménage" and run(E.charger(2))["jeton"] == "jeton1"
+    run(E.entretenir(g, maintenant=time.time() + 120))
+    assert fil.id not in g.fils and post.fil.id not in g.fils, "les posts clos disparaissent"
 
 
 def test_E12_langue_preference_sinon_discord_sinon_francais(env):

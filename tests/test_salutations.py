@@ -88,3 +88,25 @@ def test_A4_membre_qui_a_bloque_le_bot_sans_bruit(monkeypatch):
     autre = Message("salut", Salon(), auteur=21)
     autre.add_reaction = refus(50013)
     assert asyncio.run(S.sur_message(autre)) is False and journal[0] == "[SALUT] réaction impossible"
+
+
+def test_A5_le_post_chat_d_un_forum_recoit_son_salut():
+    """22/10/2026, les deux forums : dans 💬 Chat on n'ouvre pas de post (send_messages refusé au forum)
+    mais on y écrit (send_messages_in_threads) — le 👋 y a sa place ; pas dans un post verrouillé."""
+    import discord as _d
+
+    from faux_serveur import Fil, Monde
+
+    class Forum:
+        def __init__(self, dans_les_fils=True):
+            self.dans_les_fils = dans_les_fils
+
+        def permissions_for(self, _role):
+            return _d.Permissions(view_channel=True, send_messages=False,
+                                  send_messages_in_threads=self.dans_les_fils)
+    g = Monde()
+    chat = Fil(g, 1, Forum(), "💬 Chat")
+    assert S.salon_ouvert(chat, g)
+    chat.locked = True
+    assert not S.salon_ouvert(chat, g), "un post verrouillé (❓ Aide, 🚀 Boosts) : pas de 👋"
+    assert not S.salon_ouvert(Fil(g, 2, Forum(False), "x"), g)

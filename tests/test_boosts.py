@@ -80,6 +80,8 @@ class Serveur:
     def get_channel(self, cid):
         return self.salons.get(cid)
 
+    get_channel_or_thread = get_channel
+
     async def create_text_channel(self, nom, **kw):
         s = SalonB(80, nom, kw.get("category"))
         self.salons[s.id] = s

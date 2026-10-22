@@ -210,12 +210,15 @@ ZONES = {z.cle: z for z in (
 #  Les deux forums : (nom, texte du post épinglé, bandeau, titre du bandeau, couleur)
 SALONS = {
     "entraide": ("🛟help",
-                 "🇫🇷 Une question, un boss, du farm, ou juste jouer ensemble ? Choisis, remplis : des joueurs t'aident.\n"
-                 "🇬🇧 A question, a boss, farming, or just playing together? Pick, fill in: players help you.",
+                 "🇫🇷 Une question, un boss, du farm, ou juste jouer ensemble ? Choisis, remplis : ta demande "
+                 "s'affiche ici et des joueurs viennent t'aider.\n"
+                 "🇬🇧 A question, a boss, farming, or just playing together? Pick, fill in: your request shows "
+                 "up here and players come to help.",
                  "rs_entraide", "Entraide · Help", 0x22C55E),
     "trade": ("🤝trade",
-              "🇫🇷 Propose un échange. Avec un inconnu, ne donne jamais en premier : appelle un middleman.\n"
-              "🇬🇧 Post a trade. With a stranger, never give first: call a middleman.",
+              "🇫🇷 Propose un échange : ta carte s'affiche ici. Avec un inconnu, ne donne jamais en premier : "
+              "appelle un middleman.\n"
+              "🇬🇧 Post a trade: your card shows up here. With a stranger, never give first: call a middleman.",
               "rs_trade", "Trade", 0xF59E0B),
 }
 
@@ -314,29 +317,31 @@ async def langue_de(i) -> str:
 
 _COLONNES = ("id", "guild_id", "zone", "auteur_id", "titre", "champs", "statut", "salon_id", "fil_id",
              "aidants", "cree", "maj", "ferme", "ferme_par", "certifie_par", "credites", "partenaire_id",
-             "appel_mm", "supprime", "jeton")
+             "appel_mm", "supprime", "jeton", "mode")
+#  `mode` « carte » : la demande est une carte dans son post (`salon_id` = le post, `fil_id` = la carte).
+#  Vide : l'ancienne installation, un post de forum par demande (`fil_id` = ce post).
 _SQL_UNE = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants, cree,"
-            " maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton"
+            " maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton, mode"
             " FROM entraide_demandes WHERE id=?")
 _SQL_OUVERTES = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants,"
-                 " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton"
-                 " FROM entraide_demandes WHERE guild_id=? AND statut IN ('ouverte', 'prise')"
+                 " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton,"
+                 " mode FROM entraide_demandes WHERE guild_id=? AND statut IN ('ouverte', 'prise')"
                  " AND fil_id>0 ORDER BY id LIMIT 300")
 _SQL_DE_L_AUTEUR = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants,"
-                    " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton"
-                    " FROM entraide_demandes WHERE guild_id=? AND auteur_id=? AND statut IN ('ouverte', 'prise')"
+                    " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton,"
+                    " mode FROM entraide_demandes WHERE guild_id=? AND auteur_id=? AND statut IN ('ouverte', 'prise')"
                     " AND fil_id>0")
 _SQL_OUVERTES_DU_SALON = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id,"
                           " aidants, cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm,"
-                          " supprime, jeton FROM entraide_demandes WHERE guild_id=? AND salon_id=?"
+                          " supprime, jeton, mode FROM entraide_demandes WHERE guild_id=? AND salon_id=?"
                           " AND statut IN ('ouverte', 'prise')")
 _SQL_A_EFFACER = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants,"
-                  " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton"
-                  " FROM entraide_demandes WHERE guild_id=? AND statut NOT IN ('ouverte', 'prise')"
+                  " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton,"
+                  " mode FROM entraide_demandes WHERE guild_id=? AND statut NOT IN ('ouverte', 'prise')"
                   " AND supprime=0 AND ferme>0 AND ferme<=? ORDER BY ferme LIMIT ?")
 _SQL_RECENTES = ("SELECT id, guild_id, zone, auteur_id, titre, champs, statut, salon_id, fil_id, aidants,"
-                 " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton"
-                 " FROM entraide_demandes WHERE guild_id=? AND fil_id>0 ORDER BY id DESC LIMIT ?")
+                 " cree, maj, ferme, ferme_par, certifie_par, credites, partenaire_id, appel_mm, supprime, jeton,"
+                 " mode FROM entraide_demandes WHERE guild_id=? AND fil_id>0 ORDER BY id DESC LIMIT ?")
 
 
 async def init_db():
@@ -352,8 +357,14 @@ async def init_db():
             " credites TEXT NOT NULL DEFAULT '[]', partenaire_id INTEGER NOT NULL DEFAULT 0,"
             " appel_mm INTEGER NOT NULL DEFAULT 0, supprime INTEGER NOT NULL DEFAULT 0, jeton TEXT NOT NULL DEFAULT '')")
         async with db.execute("PRAGMA table_info(entraide_demandes)") as cur:
-            if "jeton" not in {r[1] for r in await cur.fetchall()}:
-                await db.execute("ALTER TABLE entraide_demandes ADD COLUMN jeton TEXT NOT NULL DEFAULT ''")
+            colonnes = {r[1] for r in await cur.fetchall()}
+        if "jeton" not in colonnes:
+            await db.execute("ALTER TABLE entraide_demandes ADD COLUMN jeton TEXT NOT NULL DEFAULT ''")
+        if "mode" not in colonnes:
+            await db.execute("ALTER TABLE entraide_demandes ADD COLUMN mode TEXT NOT NULL DEFAULT ''")
+        #  Les mots du bot sous une carte (qui vient aider, un middleman appelé) : effacés avec elle.
+        await db.execute("CREATE TABLE IF NOT EXISTS entraide_notes (demande_id INTEGER NOT NULL,"
+                         " message_id INTEGER NOT NULL)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_entraide_statut ON entraide_demandes(guild_id, statut)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_entraide_auteur ON entraide_demandes(guild_id, auteur_id, statut)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_entraide_fil ON entraide_demandes(fil_id)")
@@ -368,6 +379,7 @@ def _ligne(r) -> dict:
         except (TypeError, ValueError):
             d[k] = []
     d["jeton"] = d.get("jeton") or ""
+    d["mode"] = d.get("mode") or ""
     return d
 
 
@@ -420,7 +432,8 @@ async def conf(g) -> dict:
     c = await _cfg(g.id)
     return {"actif": bool(c.get("rs_actif")), "categorie": int(c.get("rs_categorie", 0) or 0),
             "salons": dict(c.get("rs_salons") or {}), "roles": dict(c.get("rs_roles") or {}),
-            "panneaux": dict(c.get("rs_panneaux") or {}), "reglages": dict(c.get("rs_reglages") or {})}
+            "panneaux": dict(c.get("rs_panneaux") or {}), "reglages": dict(c.get("rs_reglages") or {}),
+            "ouvertures": dict(c.get("rs_ouvertures") or {})}
 
 
 def ids_salons(c: dict) -> set:
@@ -430,7 +443,52 @@ def ids_salons(c: dict) -> set:
 
 
 def salon(g, cf: dict, cle: str):
-    return g.get_channel(int(cf["salons"].get(cle, 0) or 0))
+    """Le post (ou le salon) d'un type, s'il est en mémoire — un post endormi n'y est pas : voir
+    `conteneur`."""
+    return g.get_channel_or_thread(int(cf["salons"].get(cle, 0) or 0))
+
+
+async def _resoudre(g, cid):
+    """Un salon ou un post, même endormi (hors mémoire) ; None s'il n'existe plus. Une panne lève."""
+    cid = int(cid or 0)
+    if not cid:
+        return None
+    ch = g.get_channel_or_thread(cid)
+    if ch is not None:
+        return ch
+    try:
+        return await g.fetch_channel(cid)
+    except discord.NotFound:
+        return None
+
+
+async def conteneur(g, cf: dict, cle: str):
+    """Là où vivent les demandes d'un type — le post, réveillé s'il dormait. None s'il n'existe plus
+    (ou si Discord ne répond pas : c'est noté)."""
+    try:
+        ch = await _resoudre(g, cf["salons"].get(cle, 0))
+    except discord.HTTPException as ex:
+        _log(f"[ENTRAIDE:DETAIL] lecture du salon {cle} {type(ex).__name__} {ex}")
+        return None
+    if isinstance(ch, discord.Thread) and ch.archived:
+        try:
+            await ch.edit(archived=False)
+        except discord.HTTPException as ex:
+            _log(f"[ENTRAIDE:DETAIL] réveil du post {cle} {ex}")
+    return ch
+
+
+def en_cartes(ch) -> bool:
+    """« Plutôt que des milliers de fils » : une demande est une carte dans son post (ou son salon).
+    Seule l'ancienne installation — un forum par type — ouvrait un post par demande."""
+    return ch is not None and not isinstance(ch, discord.ForumChannel)
+
+
+def lien(g, d: dict) -> str:
+    """Le lien d'une demande : sa carte (ou, ancienne installation, son post)."""
+    if d.get("mode") == "carte":
+        return f"https://discord.com/channels/{g.id}/{int(d['salon_id'])}/{int(d['fil_id'])}"
+    return f"https://discord.com/channels/{g.id}/{int(d['fil_id'])}"
 
 
 def role_zone(g, cf: dict, cle: str):
@@ -558,6 +616,7 @@ def vue_panneau(cle: str, cf: dict, g=None) -> LayoutView:
     roles = [r for r in (role_zone(g, cf, z.cle) for z in types if z.role) if r is not None] if g is not None else []
     delais = " · ".join(f"{z.nom.split(' · ')[0].lower()} {expire_h(cf, z)} h" for z in types)
     pied = ["Une demande à la fois · One request at a time",
+            "réponds sous une carte pour en parler · reply under a card to talk",
             f"fermée sans activité · closes when inactive : {delais}"]
     if roles:
         pied.append(("middlemen" if cle == "trade" else "guides") + " : " + " ".join(r.mention for r in roles))
@@ -617,14 +676,25 @@ def _tags(forum, statut: str, z: Zone | None = None) -> list:
 
 async def _maj_carte(g, d: dict, fil=None) -> None:
     z = ZONES.get(d["zone"])
-    fil = fil or await _fil_ou_rien(g, d)
-    if z is None or fil is None:
+    if z is None:
+        return
+    if d.get("mode") == "carte":
+        try:
+            porteur = await _resoudre(g, d["salon_id"])
+        except discord.HTTPException as ex:
+            _log(f"[ENTRAIDE:DETAIL] lecture du post demande={d['id']} {ex}")
+            return
+        mid = int(d["fil_id"])
+    else:
+        fil = fil or await _fil_ou_rien(g, d)
+        porteur, mid = (_porteur(fil), fil.id) if fil is not None else (None, 0)
+    if porteur is None:
         return
     auteur = g.get_member(int(d["auteur_id"]))
     rep = await reputation(g.id, d["auteur_id"]) if z.cle == "trade" else None
     vue = vue_carte(d, z, avatar=auteur.display_avatar.url if auteur else "", rep=rep)
     try:
-        await _porteur(fil).get_partial_message(fil.id).edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
+        await porteur.get_partial_message(mid).edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
     except discord.NotFound:
         pass
     except discord.HTTPException as ex:
@@ -633,9 +703,13 @@ async def _maj_carte(g, d: dict, fil=None) -> None:
 
 
 async def _clore_sur_discord(g, d: dict, note: str = "") -> None:
-    """La carte d'abord (un message d'un fil archivé ne s'édite plus), puis le mot de fin, puis
-    l'historique enregistré pour le site, puis le fil verrouillé et archivé (étiquette comprise, en
-    un seul appel). Il disparaît au passage suivant de l'entretien."""
+    """Une carte : elle passe au statut final, sans bouton, puis disparaît au passage suivant avec les
+    mots du bot et les réponses qu'on lui a faites. L'ancienne installation (un post par demande) :
+    la carte d'abord (un message d'un fil archivé ne s'édite plus), le mot de fin, l'historique
+    enregistré pour le site, puis le post verrouillé et archivé."""
+    if d.get("mode") == "carte":
+        await _maj_carte(g, d)
+        return
     fil = await _fil_ou_rien(g, d)
     if fil is None:
         return
@@ -675,7 +749,7 @@ async def peut_publier(i, z: Zone, langue: str = "fr") -> str:
     if g is None or getattr(m, "guild_permissions", None) is None:
         return tr("sur_serveur", langue)
     cf = await conf(g)
-    if not cf["actif"] or salon(g, cf, z.salon) is None:
+    if not cf["actif"] or not cf["salons"].get(z.salon):
         return tr("zone_fermee", langue)
     if m.is_timed_out():
         return tr("exclu", langue)
@@ -691,8 +765,7 @@ async def limite(g, m, z: Zone, langue: str = "fr") -> str:
     ouvertes = await _lignes(_SQL_DE_L_AUTEUR, (g.id, m.id))
     ici = next((d for d in ouvertes if d["zone"] == z.cle), None)
     if ici is not None:
-        fil = g.get_channel_or_thread(int(ici["fil_id"] or 0))
-        return tr("deja_ici", langue, lien=f"\n{fil.jump_url}" if fil is not None else "")
+        return tr("deja_ici", langue, lien=f"\n{lien(g, ici)}")
     if len(ouvertes) >= MAX_OUVERTES:
         return tr("trop", langue, n=MAX_OUVERTES)
     return ""
@@ -754,7 +827,7 @@ async def publier(i, z: Zone, valeurs: dict, langue: str = "fr"):
             await db.commit()
         _creations[(g.id, m.id)] = time.monotonic()
     cf = await conf(g)
-    ch = salon(g, cf, z.salon)
+    ch = await conteneur(g, cf, z.salon)
     d = await charger(did)
     role = role_zone(g, cf, z.cle) if prevenir(cf, z) else None
     if role is not None and not (role.mentionable or g.me.guild_permissions.mention_everyone):
@@ -762,31 +835,33 @@ async def publier(i, z: Zone, valeurs: dict, langue: str = "fr"):
     rep = await reputation(g.id, m.id) if z.cle == "trade" else None
     vue = vue_carte(d, z, avatar=m.display_avatar.url, ping=role.mention if role else "", rep=rep)
     mentions = discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False)
+    mode, fil = ("carte" if en_cartes(ch) else ""), None
     try:
-        if isinstance(ch, discord.ForumChannel):
+        if ch is None:
+            raise discord.ClientException("zone sans salon")
+        if mode == "carte":
+            carte_id = (await ch.send(view=vue, allowed_mentions=mentions)).id
+        else:
             fil = (await ch.create_thread(name=nom_du_fil(m, titre), view=vue, allowed_mentions=mentions,
                                           applied_tags=_tags(ch, "ouverte", z),
                                           reason=f"Entraide : demande n°{did}")).thread
-        elif isinstance(ch, discord.TextChannel):
-            carte = await ch.send(view=vue, allowed_mentions=mentions)
-            fil = await carte.create_thread(name=nom_du_fil(m, titre), auto_archive_duration=ARCHIVE_MIN,
-                                            reason=f"Entraide : demande n°{did}")
-        else:
-            raise discord.ClientException("zone sans salon")
+            carte_id = fil.id
     except (discord.HTTPException, discord.ClientException) as ex:
         _log("[ENTRAIDE][E1] demande non publiée")
         _log(f"[ENTRAIDE][E1:DETAIL] zone={z.cle} {type(ex).__name__} {ex}")
         await _ecrire("DELETE FROM entraide_demandes WHERE id=?", (did,))
         _creations.pop((g.id, m.id), None)
         return await i.followup.send(tr("impossible", langue), ephemeral=True)
-    await _ecrire("UPDATE entraide_demandes SET salon_id=?, fil_id=? WHERE id=?", (ch.id, fil.id, did))
-    try:
-        await fil.add_user(m)  # l'auteur suit son fil : il est prévenu de chaque réponse
-    except discord.HTTPException as ex:
-        _log(f"[ENTRAIDE:DETAIL] auteur non ajouté au fil demande={did} {ex}")
-    await i.followup.send(tr("publiee", langue, lien=fil.jump_url), ephemeral=True)
-    if isinstance(ch, discord.TextChannel):
-        asyncio.create_task(reposer_panneau_texte(g, z.salon))
+    await _ecrire("UPDATE entraide_demandes SET salon_id=?, fil_id=?, mode=? WHERE id=?", (ch.id, carte_id, mode, did))
+    d.update(salon_id=ch.id, fil_id=carte_id, mode=mode)
+    if fil is not None:
+        try:
+            await fil.add_user(m)  # l'auteur suit son post : il est prévenu de chaque réponse
+        except discord.HTTPException as ex:
+            _log(f"[ENTRAIDE:DETAIL] auteur non ajouté au fil demande={did} {ex}")
+    await i.followup.send(tr("publiee", langue, lien=lien(g, d)), ephemeral=True)
+    if mode == "carte":
+        asyncio.create_task(reposer_panneau(g, z.salon))
     await _journal(g, "entraide.demande", f"{m.mention} a publié une demande · {z.nom} : {titre}",
                    membre_id=m.id)
 
@@ -840,28 +915,54 @@ async def rejoindre(i, did: int):
         z = ZONES[d["zone"]]
         if m.id == d["auteur_id"]:
             return await i.followup.send(tr("ta_demande", langue), ephemeral=True)
-        fil = g.get_channel_or_thread(int(d["fil_id"]))
-        lien = f" {fil.jump_url}" if fil is not None else ""
+        url = f" {lien(g, d)}"
         if m.id in d["aidants"]:
-            return await i.followup.send(tr("deja_dessus", langue, lien=lien), ephemeral=True)
+            return await i.followup.send(tr("deja_dessus", langue, lien=url), ephemeral=True)
         if len(d["aidants"]) >= MAX_AIDANTS:
             return await i.followup.send(tr("complet", langue), ephemeral=True)
         d["aidants"].append(m.id)
         d["statut"], d["maj"] = "prise", int(time.time())
         await _ecrire("UPDATE entraide_demandes SET aidants=?, statut=?, maj=? WHERE id=?",
                       (json.dumps(d["aidants"]), d["statut"], d["maj"], did))
-    fil = await _fil_ou_rien(g, d)
-    if fil is not None:
-        await _maj_carte(g, d, fil)
-        try:
-            if isinstance(fil.parent, discord.ForumChannel):
-                await fil.edit(applied_tags=_tags(fil.parent, "prise", z))
-            await fil.add_user(m)
-            await fil.send(z.annonce.format(qui=m.mention, auteur=_mention(d["auteur_id"])),
-                           allowed_mentions=discord.AllowedMentions(users=[discord.Object(d["auteur_id"])]))
-        except discord.HTTPException as ex:
-            _log(f"[ENTRAIDE:DETAIL] annonce demande={did} {ex}")
-    await i.followup.send(tr("note", langue, lien=lien), ephemeral=True)
+    annonce = z.annonce.format(qui=m.mention, auteur=_mention(d["auteur_id"]))
+    pour_l_auteur = discord.AllowedMentions(users=[discord.Object(d["auteur_id"])])
+    if d["mode"] == "carte":
+        await _maj_carte(g, d)
+        await _annoncer(g, d, annonce, pour_l_auteur)
+    else:
+        fil = await _fil_ou_rien(g, d)
+        if fil is not None:
+            await _maj_carte(g, d, fil)
+            try:
+                if isinstance(fil.parent, discord.ForumChannel):
+                    await fil.edit(applied_tags=_tags(fil.parent, "prise", z))
+                await fil.add_user(m)
+                await fil.send(annonce, allowed_mentions=pour_l_auteur)
+            except discord.HTTPException as ex:
+                _log(f"[ENTRAIDE:DETAIL] annonce demande={did} {ex}")
+    await i.followup.send(tr("note", langue, lien=url), ephemeral=True)
+
+
+async def _annoncer(g, d: dict, texte: str, mentions) -> bool:
+    """Un mot en réponse à la carte (qui vient aider, un middleman appelé) : il prévient la bonne
+    personne, et il disparaîtra avec la carte."""
+    try:
+        porteur = await _resoudre(g, d["salon_id"])
+        if porteur is None:
+            return False
+        msg = await porteur.send(texte, reference=porteur.get_partial_message(int(d["fil_id"])),
+                                 allowed_mentions=mentions, mention_author=False)
+    except discord.HTTPException as ex:
+        _log(f"[ENTRAIDE:DETAIL] mot sous la carte demande={d['id']} {type(ex).__name__} {ex}")
+        return False
+    await _ecrire("INSERT INTO entraide_notes(demande_id, message_id) VALUES(?,?)", (int(d["id"]), msg.id))
+    return True
+
+
+async def _notes(did: int) -> list:
+    async with _get_db() as db:
+        async with db.execute("SELECT message_id FROM entraide_notes WHERE demande_id=?", (int(did),)) as cur:
+            return [int(r[0]) for r in await cur.fetchall()]
 
 
 class BoutonRejoindre(discord.ui.DynamicItem[Button], template=r"rs:j:(?P<did>\d+)"):
@@ -895,16 +996,21 @@ async def appeler_middleman(i, did: int):
         role = role_zone(g, await conf(g), "trade")
         if role is None or not role.members:
             return await i.followup.send(tr("mm_aucun", langue), ephemeral=True)
-        fil = await _fil_ou_rien(g, d)
-        if fil is None:
-            return await i.followup.send(tr("mm_fil", langue), ephemeral=True)
-        try:
-            await fil.send(f"🛡️ {role.mention} — {m.mention} demande un middleman · needs a middleman.",
-                           allowed_mentions=discord.AllowedMentions(roles=[role]))
-        except discord.HTTPException as ex:
-            _log("[ENTRAIDE][E4] middleman non appelé")
-            _log(f"[ENTRAIDE][E4:DETAIL] demande={did} {ex}")
-            return await i.followup.send(tr("mm_echec", langue), ephemeral=True)
+        texte = f"🛡️ {role.mention} — {m.mention} demande un middleman · needs a middleman."
+        if d["mode"] == "carte":
+            if not await _annoncer(g, d, texte, discord.AllowedMentions(roles=[role])):
+                _log("[ENTRAIDE][E4] middleman non appelé")
+                return await i.followup.send(tr("mm_echec", langue), ephemeral=True)
+        else:
+            fil = await _fil_ou_rien(g, d)
+            if fil is None:
+                return await i.followup.send(tr("mm_fil", langue), ephemeral=True)
+            try:
+                await fil.send(texte, allowed_mentions=discord.AllowedMentions(roles=[role]))
+            except discord.HTTPException as ex:
+                _log("[ENTRAIDE][E4] middleman non appelé")
+                _log(f"[ENTRAIDE][E4:DETAIL] demande={did} {ex}")
+                return await i.followup.send(tr("mm_echec", langue), ephemeral=True)
         await _ecrire("UPDATE entraide_demandes SET appel_mm=? WHERE id=?", (t, did))
     await i.followup.send(tr("mm_ok", langue), ephemeral=True)
 
@@ -1207,17 +1313,23 @@ class BoutonFermer(discord.ui.DynamicItem[Button], template=r"rs:f:(?P<did>\d+)"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def _effacer(g, d: dict) -> None:
-    """Le fil (et, hors forum, la carte qui le porte). Une erreur passagère : on réessaiera."""
+    """La demande close disparaît : sa carte, les mots du bot et les réponses qu'on lui a faites (ou,
+    ancienne installation, son post). Une erreur passagère : on réessaiera au passage suivant."""
     try:
-        fil = await _fil(g, d)
-        if fil is not None:
-            parent = fil.parent
-            await fil.delete()
-            if parent is not None and not isinstance(parent, discord.ForumChannel):
-                try:
-                    await parent.get_partial_message(int(d["fil_id"])).delete()
-                except discord.NotFound:
-                    pass
+        if d["mode"] == "carte":
+            porteur = await _resoudre(g, d["salon_id"])
+            if porteur is not None:
+                await _effacer_carte(porteur, d)
+        else:
+            fil = await _fil(g, d)
+            if fil is not None:
+                parent = fil.parent
+                await fil.delete()
+                if parent is not None and not isinstance(parent, discord.ForumChannel):
+                    try:
+                        await parent.get_partial_message(int(d["fil_id"])).delete()
+                    except discord.NotFound:
+                        pass
     except discord.Forbidden as ex:
         _log("[ENTRAIDE][E5] fil non supprimé (droits)")
         _log(f"[ENTRAIDE][E5:DETAIL] demande={d['id']} {ex}")
@@ -1225,6 +1337,43 @@ async def _effacer(g, d: dict) -> None:
         _log(f"[ENTRAIDE:DETAIL] suppression reportée demande={d['id']} {type(ex).__name__} {ex}")
         return
     await _ecrire("UPDATE entraide_demandes SET supprime=1 WHERE id=?", (d["id"],))
+    await _ecrire("DELETE FROM entraide_notes WHERE demande_id=?", (d["id"],))
+
+
+async def _effacer_carte(porteur, d: dict) -> None:
+    """« Un vrai système de nettoyage ultra propre » : la carte, les mots du bot dessous, et les
+    messages qui y répondaient (ou répondaient à ces réponses)."""
+    carte = int(d["fil_id"])
+    a_effacer = [carte] + await _notes(d["id"])
+    try:
+        async for msg in porteur.history(limit=200, after=discord.Object(id=carte)):
+            ref = getattr(getattr(msg, "reference", None), "message_id", None)
+            if ref in a_effacer:
+                a_effacer.append(msg.id)
+    except discord.HTTPException as ex:
+        _log(f"[ENTRAIDE:DETAIL] lecture des réponses demande={d['id']} {ex}")
+    for mid in dict.fromkeys(a_effacer):
+        try:
+            await porteur.get_partial_message(mid).delete()
+        except discord.NotFound:
+            pass
+        except discord.Forbidden as ex:
+            _log(f"[ENTRAIDE:DETAIL] message non effacé demande={d['id']} {ex}")
+
+
+async def _existe(g, d: dict):
+    """La demande est encore sur Discord : son post (ancienne installation) ou le post qui porte sa
+    carte. None si elle a disparu. Une panne réseau lève."""
+    if d["mode"] != "carte":
+        return await _fil(g, d)
+    porteur = await _resoudre(g, d["salon_id"])
+    if porteur is None:
+        return None
+    try:
+        await porteur.fetch_message(int(d["fil_id"]))
+    except discord.NotFound:
+        return None
+    return porteur
 
 
 async def entretenir(g, maintenant: float | None = None) -> dict:
@@ -1243,17 +1392,19 @@ async def entretenir(g, maintenant: float | None = None) -> dict:
         if z is None:
             continue
         try:
-            fil = await _fil(g, d)
+            trouve = await _existe(g, d)
         except discord.HTTPException as ex:
-            _log(f"[ENTRAIDE:DETAIL] lecture du fil demande={d['id']} {ex}")
+            _log(f"[ENTRAIDE:DETAIL] lecture de la demande={d['id']} {ex}")
             continue
-        if fil is None:
+        if trouve is None:
             await _ecrire("UPDATE entraide_demandes SET statut='retiree', ferme=?, maj=?, supprime=1 WHERE id=?",
                           (int(t), int(t), d["id"]))
             bilan["retirees"] += 1
             actions += 1
             continue
-        derniere = max(float(d["maj"]), _horodatage(getattr(fil, "last_message_id", None)))
+        derniere = float(d["maj"])
+        if d["mode"] != "carte":
+            derniere = max(derniere, _horodatage(getattr(trouve, "last_message_id", None)))
         delai = expire_h(cf, z)
         if t - derniere > delai * 3600:
             note = (f"⌛ Fermée faute d'activité ({delai} h) · Closed for inactivity ({delai} h) — "
@@ -1272,6 +1423,16 @@ async def entretenir(g, maintenant: float | None = None) -> dict:
         _verifies[g.id] = t
         await assurer_panneaux(g)
     return bilan
+
+
+async def fermer_anciennes(g, note: str) -> int:
+    """22/10/2026, les deux forums : les demandes de l'ancienne installation (un post par demande) se
+    ferment en disant où republier."""
+    n = 0
+    for d in await _lignes(_SQL_OUVERTES, (g.id,)):
+        if d["mode"] != "carte" and await fermer(g, d["id"], 0, "fermee", note):
+            n += 1
+    return n
 
 
 async def sur_depart(member) -> int:
@@ -1328,37 +1489,48 @@ async def _panneau_forum(g, cf: dict, cle: str, forum, forcer: bool) -> None:
         await fil.get_partial_message(fil.id).edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
 
 
-async def _panneau_texte(g, cf: dict, cle: str, ch, forcer: bool, reposer: bool = False) -> None:
-    """Hors forum : le panneau reste en bas du salon, sous les cartes."""
-    mid = int(cf["panneaux"].get(cle, 0) or 0)
-    if mid and reposer:
+async def _panneau_conteneur(g, cf: dict, cle: str, ch, forcer: bool) -> None:
+    """Un post (ou un salon) : les boutons « publier » sont sur son message d'ouverture et sous la
+    dernière carte — ce panneau-là redescend à chaque nouvelle carte."""
+    vue = vue_panneau(cle, cf, g)
+    ouverture = int(cf["ouvertures"].get(cle, 0) or 0)
+    if forcer and ouverture:
         try:
-            await ch.get_partial_message(mid).delete()
+            await ch.get_partial_message(ouverture).edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
         except discord.NotFound:
             pass
-        mid = 0
+    mid = int(cf["panneaux"].get(cle, 0) or 0)
+    if mid and mid == ouverture:
+        return
     if mid:
         try:
             if forcer:
-                await ch.get_partial_message(mid).edit(view=vue_panneau(cle, cf, g),
-                                                       allowed_mentions=discord.AllowedMentions.none())
+                await ch.get_partial_message(mid).edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
             else:
                 await ch.fetch_message(mid)
             return
         except discord.NotFound:
             pass
-    cf["panneaux"][cle] = (await ch.send(view=vue_panneau(cle, cf, g),
-                                         allowed_mentions=discord.AllowedMentions.none())).id
+    cf["panneaux"][cle] = (await ch.send(view=vue, allowed_mentions=discord.AllowedMentions.none())).id
 
 
-async def reposer_panneau_texte(g, cle: str) -> None:
+async def reposer_panneau(g, cle: str) -> None:
+    """Après une nouvelle carte, le panneau redescend dessous (le message d'ouverture reste)."""
     async with _verrou(("panneaux", g.id)):
         try:
             cf = await conf(g)
-            ch = salon(g, cf, cle)
-            if isinstance(ch, discord.TextChannel):
-                await _panneau_texte(g, cf, cle, ch, False, reposer=True)
-                await _db_set(g.id, "rs_panneaux", cf["panneaux"])
+            ch = await conteneur(g, cf, cle)
+            if not en_cartes(ch):
+                return
+            mid = int(cf["panneaux"].get(cle, 0) or 0)
+            if mid and mid != int(cf["ouvertures"].get(cle, 0) or 0):
+                try:
+                    await ch.get_partial_message(mid).delete()
+                except discord.NotFound:
+                    pass
+            cf["panneaux"][cle] = (await ch.send(view=vue_panneau(cle, cf, g),
+                                                 allowed_mentions=discord.AllowedMentions.none())).id
+            await _db_set(g.id, "rs_panneaux", cf["panneaux"])
         except discord.HTTPException as ex:
             _log(f"[ENTRAIDE:DETAIL] panneau non reposé salon={cle} {ex}")
 
@@ -1367,12 +1539,12 @@ async def assurer_panneaux(g, forcer: bool = False) -> None:
     async with _verrou(("panneaux", g.id)):
         cf = await conf(g)
         for cle in SALONS:
-            ch = salon(g, cf, cle)
+            ch = await conteneur(g, cf, cle)
             try:
                 if isinstance(ch, discord.ForumChannel):
                     await _panneau_forum(g, cf, cle, ch, forcer)
-                elif isinstance(ch, discord.TextChannel):
-                    await _panneau_texte(g, cf, cle, ch, forcer)
+                elif ch is not None:
+                    await _panneau_conteneur(g, cf, cle, ch, forcer)
             except discord.HTTPException as ex:
                 _log("[ENTRAIDE][E7] post épinglé non posé")
                 _log(f"[ENTRAIDE][E7:DETAIL] salon={cle} {type(ex).__name__} {ex}")
@@ -1430,9 +1602,10 @@ async def categorie_cible(g):
     return categorie_communautaire(g) or getattr(aide, "category", None)
 
 
-async def installer(g, *, forum: bool | None = None, categorie=None) -> list:
-    """Crée ce qui manque — les deux forums (dans `categorie`, la zone Rell Seas), quatre rôles, les
-    posts épinglés — et ne supprime jamais rien. Relancer répare. Rend la liste de ce qui a été créé."""
+async def installer(g, *, forum: bool | None = None, categorie=None, creer_salons: bool = True) -> list:
+    """Crée ce qui manque — quatre rôles, les panneaux, et (seul, sans les zones) ses deux salons —
+    sans jamais rien supprimer. Relancer répare. Rend la liste de ce qui a été créé. Les zones
+    (`zones.py`) donnent elles-mêmes les posts 🛟 Help et 🤝 Trade : `creer_salons=False`."""
     me = g.me
     p = getattr(me, "guild_permissions", None)
     if not (p and p.manage_channels and p.manage_roles):
@@ -1452,7 +1625,7 @@ async def installer(g, *, forum: bool | None = None, categorie=None) -> list:
                 faits.append(f"rôle {r.name}")
         salons = cf["salons"]
         for cle, (nom, *_reste) in SALONS.items():
-            if salon(g, cf, cle) is not None:
+            if not creer_salons or await _resoudre(g, salons.get(cle, 0)) is not None:
                 continue
             if forum:
                 ch = await g.create_forum(
@@ -1616,15 +1789,14 @@ class EntraidePanelV2(LayoutView):
         try:
             cf = await conf(self.g)
             items = [visuels.bandeau("rs_port", "Entraide Rell Seas")]
-            installe = cf["actif"] and salon(self.g, cf, "entraide") is not None
+            installe = cf["actif"] and bool(cf["salons"].get("entraide"))
             if not installe:
                 items.append(discord.ui.TextDisplay(
                     "Pas encore installée.\n-# Deux forums dans la zone Rell Seas — 🛟 help (aide, boss, farm, "
                     "chill) et 🤝 trade — et quatre rôles de guide."))
             else:
                 ouvertes = await compter_ouvertes(self.g.id)
-                forum = isinstance(salon(self.g, cf, "entraide"), discord.ForumChannel)
-                lignes = [f"🟢 Installée · {'forums' if forum else 'salons et fils'} · "
+                lignes = [f"🟢 Installée · une carte par demande dans 🛟 Help et 🤝 Trade · "
                           f"{sum(ouvertes.values())} demande(s) en cours"]
                 for z in ZONES.values():
                     r = role_zone(self.g, cf, z.cle)

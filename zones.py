@@ -1,53 +1,83 @@
 """zones.py — les compartiments du serveur (22/10/2026).
 
-« Le serveur est international, mais aussi français… une zone communautaire… un espèce de fil où
-les gens puissent discuter un peu comme dans le chat, médias pour les photos, commandes pour les
-bots… boost et suggestions… regroupe à l'intérieur ; puis une zone Rell Seas, avec un chat dédié au
-jeu et leur propre système vocal — quelqu'un qui fait du Rell Seas peut aussi rejoindre l'autre
-vocal… limiter les salons, mais un plus gros système de fil… des salons déjà pré-créés et utilisés…
-séparer les deux compartiments au propre. »
+Le fondateur, dans la nuit : « je veux une catégorie… tu enlèves tout ce qui est dans Communautaire et
+dans Rell Seas… tu crées uniquement un fil qui s'appelle communautaire et un fil qui s'appelle Rell
+Seas. Dans le fil communautaire… le chat, médias, tout ce qui est lié au serveur… c'est les salons
+dans un fil… dans le fil Rell Seas… trade, crew… et à l'intérieur, dans chacun des fils, tout va être
+super bien fait… il n'y a que deux fils… le vocal, tu le laisses tel qu'il est… toutes les
+fonctionnalités qui sont liées à ça fonctionnent, et ça cible bien les salons. »
 
-· Communautaire : ❓aide (l'orientation), 💬chat, 🧵discussions (forum : 📸 Médias · Media et
-🤖 Commandes · Commands déjà ouverts ; chacun peut ouvrir un sujet), 💡suggestions, 🚀boosts,
-puis 🔊Join.
-· Rell Seas (juste après) : 🌊chat-rellseas (le jeu), 🛟help, 🤝trade, ⚓crews, puis 🔊Join (son propre
-vocal ; tout le monde entre partout). Noms au style du serveur : « · Nom » pour une catégorie, l'émoji
-collé au nom pour un salon. Rien de ce que les membres ont créé n'est supprimé.
+· Communautaire : 💬communautaire et 🌊rell-seas (deux forums), puis 🔊Join, inchangé.
+  💬communautaire : ❓ Aide · 💬 Chat · 📸 Médias · 💡 Suggestions · 🚀 Boosts · 🤖 Commandes.
+  🌊rell-seas : 🌊 Chat Rell Seas · 🛟 Help · 🤝 Trade · ⚓ Crews.
+On écrit dans les posts, on n'en crée pas. Chaque fonction du bot vise son post : l'orientation, les
+suggestions, les boosts, l'entraide et le trade (une carte par demande), les équipages (une carte par
+équipage). Les anciens salons partent dans « 📦 Archives », cachée aux membres : rien n'est perdu, le
+fondateur choisit ce qu'il supprime, d'un clic, dans 📋logs.
+
+La zone du clan GoRP (sa catégorie existe) : 📣 annonces et 🧵 discussions, voir `installer_clan`.
 """
 from __future__ import annotations
 
+import asyncio
+from collections import namedtuple
+
 import discord
 
+import boosts
 import config_salons
 import entraide
 import equipages
+import suggestions
+from ui_v2 import LayoutView
 
-RELL_CATEGORIE = "· Rell Seas"
-RELL_CHAT = "🌊chat-rellseas"
-RELL_VOCAL = "🔊Join"
-FORUM = "🧵discussions"
-#  On parle, on montre (images, liens), on réagit, on utilise les commandes : comme au 💬chat.
+FORUM_COMMU = "💬communautaire"
+FORUM_RELL = "🌊rell-seas"
+CATEGORIE = "· Communautaire"
+ARCHIVES = "📦 Archives"
+SUJET_COMMU = ("🇫🇷 Le serveur au même endroit : aide, chat, médias, suggestions, boosts, commandes. On écrit dans "
+               "les posts.\n🇬🇧 The server in one place: help, chat, media, suggestions, boosts, commands. Write in "
+               "the posts.")
+SUJET_RELL = ("🇫🇷 Tout Rell Seas : le chat du jeu, l'entraide, le trade, les équipages. On écrit dans les posts.\n"
+              "🇬🇧 All of Rell Seas: the game chat, help, trade, crews. Write in the posts.")
+#  Les posts, dans l'ordre d'affichage : (clé, titre, verrouillé, texte d'ouverture — vide : la
+#  fonction qui l'habite donne le sien). Verrouillé : on y clique, on n'y écrit pas.
+POSTS_COMMU = (
+    ("aide", "❓ Aide · Help", True, ""),
+    ("chat", "💬 Chat", False,
+     "🇫🇷 Discute de tout, en français ou en anglais. Bienvenue !\n🇬🇧 Talk about anything, in French or English. "
+     "Welcome!"),
+    ("medias", "📸 Médias · Media", False,
+     "🇫🇷 Partage ici tes captures, clips et vidéos.\n🇬🇧 Share your screenshots, clips and videos here."),
+    ("suggestions", "💡 Suggestions", True, ""),
+    ("boosts", "🚀 Boosts", True, ""),
+    ("commandes", "🤖 Commandes · Commands", False,
+     "🇫🇷 Les commandes des bots, c'est ici : le chat reste lisible.\n🇬🇧 Use the bots' commands here: the chat "
+     "stays readable."),
+)
+POSTS_RELL = (
+    ("rell_chat", "🌊 Chat Rell Seas", False,
+     "🇫🇷 Le chat de Rell Seas : îles, fruits, mises à jour, astuces.\n🇬🇧 The Rell Seas chat: islands, fruits, "
+     "updates, tips."),
+    ("help", "🛟 Help · Entraide", False, ""),
+    ("trade", "🤝 Trade · Échanges", False, ""),
+    ("crews", "⚓ Crews · Équipages", True, ""),
+)
+#  Dans les deux forums : on lit, on écrit dans les posts, on montre (images, liens), on réagit, on
+#  utilise les commandes — mais on n'ouvre pas de nouveau post (« il n'y a que deux fils »).
+OUVERT = discord.PermissionOverwrite(view_channel=True, read_message_history=True, send_messages=False,
+                                     send_messages_in_threads=True, create_public_threads=False,
+                                     create_private_threads=False, attach_files=True, embed_links=True,
+                                     add_reactions=True, use_application_commands=True)
 PAROLE = discord.PermissionOverwrite(view_channel=True, read_message_history=True, send_messages=True,
                                      send_messages_in_threads=True, attach_files=True, embed_links=True,
                                      add_reactions=True, use_application_commands=True)
-VOCAL = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
 BOT = discord.PermissionOverwrite(view_channel=True, read_message_history=True, send_messages=True,
                                   send_messages_in_threads=True, create_public_threads=True, manage_threads=True,
-                                  embed_links=True, attach_files=True)
+                                  manage_messages=True, embed_links=True, attach_files=True)
 LECTURE_CLAN = discord.PermissionOverwrite(**config_salons.LECTURE)
 EQUIPE_CLAN = discord.PermissionOverwrite(**config_salons.EQUIPE_TEXTE, send_messages_in_threads=True)
-#  Les fils déjà ouverts du forum des discussions : (clé, titre, premier message)
-FILS = (
-    ("medias", "📸 Médias · Media",
-     "🇫🇷 Partage ici tes captures, clips et vidéos.\n🇬🇧 Share your screenshots, clips and videos here."),
-    ("commandes", "🤖 Commandes · Commands",
-     "🇫🇷 Les commandes des bots, c'est ici : le chat reste lisible.\n"
-     "🇬🇧 Use the bots' commands here: the chat stays readable."),
-)
-SUJET_FORUM = ("🇫🇷 Des fils pour tout : médias, commandes, et tes propres sujets (bouton « Nouveau post »).\n"
-               "🇬🇧 Threads for everything: media, commands, and your own topics (« New post » button).")
-SUJET_CHAT = ("🇫🇷 Le chat de Rell Seas : îles, fruits, mises à jour, astuces. Français ou anglais.\n"
-              "🇬🇧 The Rell Seas chat: islands, fruits, updates, tips. French or English.")
+
 #  La zone du clan GoRP (sa catégorie existe : 📢 info, ✍ chat, 🔊 Join réservé au clan).
 CLAN_ANNONCES = "📣▷・annonces-gorp"
 CLAN_FORUM = "🧵▷・discussions-gorp"
@@ -64,14 +94,23 @@ SUJET_CLAN_ANNONCES = ("🇫🇷 Les annonces du clan GoRP : lis-les, clique « 
 SUJET_CLAN_FORUM = ("🇫🇷 Économie, trade, taverne… et tes propres sujets (bouton « Nouveau post »).\n"
                     "🇬🇧 Economy, trade, tavern… and your own topics (« New post » button).")
 
-_cfg = _db_set = None
+#  Un post, même endormi (hors mémoire) : son identifiant et son lien suffisent au panneau ❓ aide.
+Post = namedtuple("Post", "id jump_url")
+
+_cfg = _db_set = _lecteurs = None
 _log = print
+_verrous: dict = {}
 
 
-def setup(*, cfg, db_set, log=None):
-    global _cfg, _db_set, _log
-    _cfg, _db_set = cfg, db_set
+def setup(*, cfg, db_set, lecteurs=None, log=None):
+    """`lecteurs(g, c)` → les rôles qui voient « 📦 Archives » (la direction et au-dessus)."""
+    global _cfg, _db_set, _lecteurs, _log
+    _cfg, _db_set, _lecteurs = cfg, db_set, lecteurs
     _log = log or print
+
+
+def _verrou(gid):
+    return _verrous.setdefault(gid, asyncio.Lock())
 
 
 def communautaire(g):
@@ -80,72 +119,448 @@ def communautaire(g):
 
 async def conf(g) -> dict:
     c = await _cfg(g.id)
-    return {"rell": int(c.get("zones_rell", 0) or 0), "chat": int(c.get("zones_chat", 0) or 0),
-            "vocal": int(c.get("zones_vocal", 0) or 0), "forum": int(c.get("zones_forum", 0) or 0),
-            "fils": dict(c.get("zones_fils") or {}), "actif": bool(c.get("zones_v1"))}
+    return {"forums": {"commu": int(c.get("zones_forum_commu", 0) or 0),
+                       "rell": int(c.get("zones_forum_rell", 0) or 0)},
+            "posts": {k: dict(v) for k, v in (c.get("zones_posts") or {}).items()},
+            "archives": [int(x) for x in c.get("zones_archives") or []],
+            "categorie_archives": int(c.get("zones_categorie_archives", 0) or 0),
+            "actif": bool(c.get("zones_v2"))}
 
 
 def ids_salons(c: dict) -> set:
-    """Les salons des zones, pour qu'aucun réglage de masse ne touche à leurs droits."""
-    ids = {int(c.get(k, 0) or 0) for k in ("zones_rell", "zones_chat", "zones_vocal", "zones_forum", "clan_annonces",
-                                           "clan_forum")}
+    """Les salons des zones (et ce qui a été rangé aux archives) : aucun réglage de masse n'y touche."""
+    cles = ("zones_forum_commu", "zones_forum_rell", "zones_categorie_archives", "clan_annonces", "clan_forum",
+            "zones_rell", "zones_chat", "zones_vocal", "zones_forum")
+    ids = {int(c.get(k, 0) or 0) for k in cles} | {int(x) for x in c.get("zones_archives") or []}
     return {i for i in ids if i} | entraide.ids_salons(c) | ({int(c["eq_forum"])} if c.get("eq_forum") else set())
 
 
-async def _rell(g, cf: dict):
-    cat = g.get_channel(cf["rell"])
-    if isinstance(cat, discord.CategoryChannel):
-        return cat, False
-    cat = await g.create_category(RELL_CATEGORIE, reason="Zone Rell Seas : le jeu, à part de la communauté")
-    await _db_set(g.id, "zones_rell", cat.id)
-    commu = communautaire(g)
-    if commu is not None:
-        try:
-            await cat.edit(position=commu.position + 1, reason="Juste après Communautaire")
-        except discord.HTTPException as ex:
-            _log(f"[ZONES:DETAIL] position de la zone {ex}")
-    return cat, True
+def post(g, cfz: dict, cle: str):
+    pid = int((cfz["posts"].get(cle) or {}).get("id", 0) or 0)
+    return Post(pid, f"https://discord.com/channels/{g.id}/{pid}") if pid else None
 
 
-async def _vocal_rell(g, cat, cf: dict):
-    """Le vocal du jeu : un « Join » comme celui de la communauté, ses salons naissent dans la zone."""
-    v = g.get_channel(cf["vocal"])
-    cree = False
-    if v is None:
-        v = await g.create_voice_channel(RELL_VOCAL, category=cat, overwrites={g.default_role: VOCAL},
-                                         reason="Zone Rell Seas : son propre vocal")
-        await _db_set(g.id, "zones_vocal", v.id)
-        cree = True
+async def _resoudre(g, cid):
+    """Un salon ou un post, même endormi ; None s'il n'existe plus. Une panne lève."""
+    cid = int(cid or 0)
+    if not cid:
+        return None
+    ch = g.get_channel_or_thread(cid)
+    if ch is not None:
+        return ch
+    try:
+        return await g.fetch_channel(cid)
+    except discord.NotFound:
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Les deux forums et leurs posts
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _vue_texte(titre: str, texte: str) -> LayoutView:
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(discord.ui.TextDisplay(f"### {titre}\n{texte}" if texte else f"### {titre}"),
+                                    accent_color=discord.Color(0x5865F2)))
+    return v
+
+
+async def _ouverture(g, cle: str, titre: str, texte: str) -> LayoutView:
+    """Le message d'ouverture d'un post : son texte, ou ce que la fonction qui l'habite affiche."""
+    if texte:
+        return _vue_texte(titre, texte)
+    if cle == "aide":
+        return _vue_texte(titre, "🇫🇷 L'orientation du serveur arrive…\n🇬🇧 The server guide is on its way…")
+    if cle == "suggestions":
+        return suggestions.vue_panneau(await suggestions.ouvertes(g))
+    if cle == "boosts":
+        return boosts.vue_entete(g)
+    if cle in ("help", "trade"):
+        return entraide.vue_panneau("entraide" if cle == "help" else "trade", await entraide.conf(g), g)
+    if cle == "crews":
+        return equipages.vue_panneau()
+    return _vue_texte(titre, "")
+
+
+async def _forum(g, cat, nom: str, sujet: str, cle_cfg: str, forum: bool, faits: list):
     c = await _cfg(g.id)
-    voix = dict(c.get("temp_voice_config") or {})
-    hubs = dict(voix.get("hubs") or {})
-    if str(v.id) not in hubs or not voix.get("enabled"):
-        hubs[str(v.id)] = dict(hubs.get(str(v.id)) or {}, category=cat.id, default_name="🌊 {user}")
-        voix.update(enabled=True, hubs=hubs)
-        await _db_set(g.id, "temp_voice_config", voix)
-    return v, cree
+    ch = await _resoudre(g, c.get(cle_cfg, 0))
+    if ch is not None:
+        return ch
+    droits = {g.default_role: OUVERT, g.me: BOT}
+    if forum:
+        ch = await g.create_forum(nom, category=cat, topic=sujet, overwrites=droits,
+                                  default_auto_archive_duration=10080,
+                                  default_layout=discord.ForumLayoutType.list_view,
+                                  default_sort_order=discord.ForumOrderType.creation_date,
+                                  reason="Deux forums : tout le serveur dedans")
+    else:
+        ch = await g.create_text_channel(nom, category=cat, topic=sujet[:1024], overwrites=droits,
+                                         reason="Deux salons : tout le serveur dedans, en fils")
+    await _db_set(g.id, cle_cfg, ch.id)
+    faits.append(f"salon {ch.name}")
+    return ch
 
 
-async def _forum_commu(g, cf: dict, commu, forum: bool):
-    ch = g.get_channel(cf["forum"])
+async def _posts(g, porteur, definitions, posts: dict, faits: list) -> None:
+    """Les posts d'un forum : créés s'ils manquent — du dernier au premier, le forum les montre du plus
+    récent au plus ancien —, réveillés s'ils dorment, verrouillés s'il le faut."""
+    for cle, titre, verrou, texte in reversed(definitions):
+        fil = await _resoudre(g, (posts.get(cle) or {}).get("id", 0))
+        if fil is None:
+            vue = await _ouverture(g, cle, titre, texte)
+            if isinstance(porteur, discord.ForumChannel):
+                fil = (await porteur.create_thread(name=titre, view=vue, auto_archive_duration=10080,
+                                                   allowed_mentions=discord.AllowedMentions.none(),
+                                                   reason="Un post du forum")).thread
+                ouverture = fil.id
+            else:
+                fil = await porteur.create_thread(name=titre, type=discord.ChannelType.public_thread,
+                                                  auto_archive_duration=10080, reason="Un fil du salon")
+                ouverture = (await fil.send(view=vue, allowed_mentions=discord.AllowedMentions.none())).id
+            posts[cle] = {"id": fil.id, "ouverture": ouverture}
+            faits.append(f"post {titre}")
+        reglage = {}
+        if getattr(fil, "archived", False):
+            reglage["archived"] = False
+        if verrou and not getattr(fil, "locked", False):
+            reglage["locked"] = True
+        if reglage:
+            try:
+                await fil.edit(**reglage)
+            except discord.HTTPException as ex:
+                _log(f"[ZONES:DETAIL] post {cle} {type(ex).__name__} {ex}")
+
+
+async def _brancher(g, posts: dict) -> None:
+    """« Ça cible bien les salons » : chaque fonction du bot vise son post."""
+    c = await _cfg(g.id)
+    p = posts
+    if int(c.get("aide_salon", 0) or 0) != p["aide"]["id"]:
+        await _db_set(g.id, "aide_salon", p["aide"]["id"])
+        await _db_set(g.id, "aide_message", p["aide"]["ouverture"])
+        await _db_set(g.id, "aide_message_v", "")
+    if int(c.get("suggestions_salon", 0) or 0) != p["suggestions"]["id"]:
+        await _db_set(g.id, "suggestions_salon", p["suggestions"]["id"])
+        await _db_set(g.id, "suggestions_panneau", p["suggestions"]["ouverture"])
+    if int(c.get("boosts_salon", 0) or 0) != p["boosts"]["id"]:
+        await _db_set(g.id, "boosts_salon", p["boosts"]["id"])
+        await _db_set(g.id, "boosts_entete", p["boosts"]["ouverture"])
+        await _db_set(g.id, "boosts_entete_v", boosts._signature(g))
+    salons = {"entraide": p["help"]["id"], "trade": p["trade"]["id"]}
+    if {k: int(v) for k, v in dict(c.get("rs_salons") or {}).items()} != salons:
+        ouvertures = {"entraide": p["help"]["ouverture"], "trade": p["trade"]["ouverture"]}
+        await _db_set(g.id, "rs_salons", salons)
+        await _db_set(g.id, "rs_panneaux", dict(ouvertures))
+        await _db_set(g.id, "rs_ouvertures", ouvertures)
+    if int(c.get("eq_forum", 0) or 0) != p["crews"]["id"]:
+        await _db_set(g.id, "eq_forum", p["crews"]["id"])
+        await _db_set(g.id, "eq_panneau", p["crews"]["ouverture"])
+        await _db_set(g.id, "eq_ouverture", p["crews"]["ouverture"])
+
+
+async def installer(g, *, forum: bool | None = None) -> list:
+    """Crée ce qui manque — les deux forums, leurs posts, les rôles de guide —, branche chaque
+    fonction sur son post, range ; la première fois, ferme proprement l'ancienne installation (les
+    demandes à republier, les équipages devenus cartes) et met ses salons aux archives. Ne supprime
+    rien. Rend la liste de ce qui a été fait."""
+    p = getattr(g.me, "guild_permissions", None)
+    if not (p and p.manage_channels and p.manage_roles):
+        raise PermissionError("Il me faut « Gérer les salons » et « Gérer les rôles ».")
+    forum = ("COMMUNITY" in g.features) if forum is None else forum
     faits = []
-    if ch is None:
-        droits = {g.default_role: PAROLE, g.me: BOT}
-        if forum:
-            ch = await g.create_forum(FORUM, category=commu, topic=SUJET_FORUM, overwrites=droits,
-                                      default_auto_archive_duration=10080,
-                                      default_layout=discord.ForumLayoutType.list_view,
-                                      default_sort_order=discord.ForumOrderType.latest_activity,
-                                      reason="Communautaire : des fils plutôt que des salons")
-        else:
-            ch = await g.create_text_channel(FORUM, category=commu, topic=SUJET_FORUM[:1024], overwrites=droits,
-                                             reason="Communautaire : des fils plutôt que des salons")
-        await _db_set(g.id, "zones_forum", ch.id)
-        faits.append(f"salon {ch.name}")
-    fils, f2 = await _fils_prets(g, ch, cf["fils"], FILS)
-    await _db_set(g.id, "zones_fils", fils)
-    return ch, faits + f2
+    async with _verrou(g.id):
+        cat = communautaire(g) or await entraide.categorie_cible(g)
+        if cat is None:
+            cat = await g.create_category(CATEGORIE, reason="Le serveur en deux forums")
+            faits.append(f"catégorie {cat.name}")
+        faits += await entraide.installer(g, forum=forum, creer_salons=False)
+        f_commu = await _forum(g, cat, FORUM_COMMU, SUJET_COMMU, "zones_forum_commu", forum, faits)
+        f_rell = await _forum(g, cat, FORUM_RELL, SUJET_RELL, "zones_forum_rell", forum, faits)
+        posts = (await conf(g))["posts"]
+        await _posts(g, f_commu, POSTS_COMMU, posts, faits)
+        await _posts(g, f_rell, POSTS_RELL, posts, faits)
+        await _db_set(g.id, "zones_posts", posts)
+        avant = dict(await _cfg(g.id))
+        await _brancher(g, posts)
+        if not avant.get("zones_demenage"):
+            await _db_set(g.id, "zones_demenage", 1)
+            faits += await _reporter(g, _correspondances(avant, posts, cat))
+            faits += await _demenager(g, avant)
+            faits += await _archiver(g, cat, {f_commu.id, f_rell.id})
+        await entraide.assurer_panneaux(g, forcer=True)
+        await equipages.assurer_panneau(g, forcer=True)
+        await _db_set(g.id, "zones_v2", 1)
+    try:
+        await ordonner(g)
+    except discord.HTTPException as ex:
+        _log("[ZONES][E1] compartiments non rangés")
+        _log(f"[ZONES][E1:DETAIL] {type(ex).__name__} {ex}")
+    try:
+        await boosts.synchroniser(g)
+    except discord.HTTPException as ex:
+        _log(f"[ZONES:DETAIL] boosts {type(ex).__name__} {ex}")
+    return faits
 
+
+def _correspondances(avant: dict, posts: dict, commu) -> dict:
+    """Ancien salon → son post (💬chat → 💬 Chat, 🛟help → 🛟 Help…) : ce qui visait l'un suivra l'autre."""
+    paires = {}
+
+    def lier(ancien, cle):
+        ancien = int(ancien or 0)
+        if ancien and cle in posts and ancien != int(posts[cle]["id"]):
+            paires[ancien] = int(posts[cle]["id"])
+    for cle_cfg, cle in (("aide_salon", "aide"), ("suggestions_salon", "suggestions"), ("boosts_salon", "boosts"),
+                         ("zones_forum", "medias"), ("zones_chat", "rell_chat"), ("eq_forum", "crews")):
+        lier(avant.get(cle_cfg), cle)
+    rs = dict(avant.get("rs_salons") or {})
+    lier(rs.get("entraide"), "help")
+    lier(rs.get("trade"), "trade")
+    if commu is not None:
+        chat = next((ch for ch in commu.channels if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel))
+                     and "chat" in config_salons.normaliser(ch.name).split()), None)
+        if chat is not None:
+            lier(chat.id, "chat")
+    return paires
+
+
+async def _reporter(g, paires: dict) -> list:
+    """Les réglages qui visaient un ancien salon le suivent dans son post : liens et images permis,
+    l'accueil et l'au revoir. (L'immunité, gardée en base, suit avec `bot._reporter_immunites`.)"""
+    await _db_set(g.id, "zones_correspondances", {str(k): v for k, v in paires.items()})
+    if not paires:
+        return []
+    c = await _cfg(g.id)
+    faits = []
+    for cle in ("link_allowed_channels", "image_allowed_channels"):
+        liste = [int(x) for x in c.get(cle) or [] if str(x).isdigit()]
+        neufs = [paires[x] for x in liste if x in paires and paires[x] not in liste]
+        if neufs:
+            await _db_set(g.id, cle, liste + neufs)
+            faits.append(f"{cle} suit ({len(neufs)})")
+    for cle in ("welcome_channel", "goodbye_channel"):
+        ancien = int(c.get(cle, 0) or 0)
+        if ancien in paires:
+            await _db_set(g.id, cle, paires[ancien])
+            faits.append(f"{cle} suit")
+    return faits
+
+
+async def _demenager(g, avant: dict) -> list:
+    """L'ancienne installation se ferme proprement : les demandes ouvertes (un post par demande) se
+    ferment en disant où republier, les équipages deviennent des cartes du post ⚓ Crews, les idées
+    encore en vote passent dans le post 💡 Suggestions avec leurs votes."""
+    faits = []
+    n = await entraide.fermer_anciennes(g, "🔒 L'entraide déménage : republie ta demande dans 🌊rell-seas › 🛟 Help."
+                                           " · Moved: post again in 🌊rell-seas › 🛟 Help.")
+    if n:
+        faits.append(f"{n} ancienne(s) demande(s) fermée(s)")
+    n = await equipages.demenager(g)
+    if n:
+        faits.append(f"{n} équipage(s) passé(s) en cartes")
+    ancien = int(avant.get("suggestions_salon", 0) or 0)
+    if ancien:
+        n = await suggestions.demenager(g, ancien)
+        if n:
+            faits.append(f"{n} idée(s) en vote republiée(s)")
+    return faits
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Les archives : l'ancienne installation, cachée, supprimée quand le fondateur le décide
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _categorie_archives(g):
+    c = await _cfg(g.id)
+    cat = g.get_channel(int(c.get("zones_categorie_archives", 0) or 0))
+    if isinstance(cat, discord.CategoryChannel):
+        return cat
+    ows = {g.default_role: discord.PermissionOverwrite(view_channel=False),
+           g.me: discord.PermissionOverwrite(view_channel=True, read_message_history=True, manage_channels=True)}
+    for r in (_lecteurs(g, c) if _lecteurs else []) or []:
+        ows[r] = discord.PermissionOverwrite(view_channel=True, read_message_history=True, send_messages=False,
+                                             connect=False)
+    cat = await g.create_category(ARCHIVES, overwrites=ows, reason="L'ancienne installation, cachée aux membres")
+    await _db_set(g.id, "zones_categorie_archives", cat.id)
+    return cat
+
+
+async def _archiver(g, commu, garder: set) -> list:
+    """« Tu enlèves tout ce qui est dans Communautaire et dans Rell Seas… le vocal, tu le laisses. »
+    Les salons partent aux archives (cachés aux membres, leur historique intact) ; le vocal de
+    Communautaire ne bouge pas ; celui de l'ancienne zone Rell Seas, vide, part ; la zone aussi."""
+    c = await _cfg(g.id)
+    vocaux = (discord.VoiceChannel, discord.StageChannel)
+    a_ranger = [ch for ch in (commu.channels if commu is not None else [])
+                if ch.id not in garder and not isinstance(ch, vocaux)]
+    rell = g.get_channel(int(c.get("zones_rell", 0) or 0))
+    vocal_rell = None
+    if isinstance(rell, discord.CategoryChannel):
+        for ch in rell.channels:
+            if not isinstance(ch, vocaux):
+                a_ranger.append(ch)
+            elif ch.id == int(c.get("zones_vocal", 0) or 0):
+                vocal_rell = ch
+    faits = []
+    if a_ranger:
+        archives = await _categorie_archives(g)
+        ranges = [int(x) for x in c.get("zones_archives") or []]
+        for ch in a_ranger:
+            try:
+                await ch.edit(category=archives, sync_permissions=True,
+                              reason="Aux archives : tout passe par les deux forums")
+            except discord.HTTPException as ex:
+                _log("[ZONES][E3] salon non rangé aux archives")
+                _log(f"[ZONES][E3:DETAIL] {ch.id} {type(ex).__name__} {ex}")
+                continue
+            ranges.append(ch.id)
+            faits.append(f"{ch.name} aux archives")
+        await _db_set(g.id, "zones_archives", list(dict.fromkeys(ranges)))
+    if vocal_rell is not None and not getattr(vocal_rell, "members", []):
+        voix = dict(c.get("temp_voice_config") or {})
+        hubs = dict(voix.get("hubs") or {})
+        if hubs.pop(str(vocal_rell.id), None) is not None:
+            voix["hubs"] = hubs
+            await _db_set(g.id, "temp_voice_config", voix)
+        await vocal_rell.delete(reason="Un seul vocal : celui de Communautaire")
+        await _db_set(g.id, "zones_vocal", 0)
+        faits.append("vocal de l'ancienne zone Rell Seas retiré")
+    if isinstance(rell, discord.CategoryChannel) and not rell.channels:
+        await rell.delete(reason="Rell Seas vit maintenant dans le forum 🌊rell-seas")
+        await _db_set(g.id, "zones_rell", 0)
+        faits.append(f"catégorie {rell.name} retirée")
+    return faits
+
+
+def archives(g, c: dict) -> list:
+    """Les salons encore aux archives (ceux qu'on en a sortis à la main n'y sont plus). `c` : la
+    configuration du serveur."""
+    cat = g.get_channel(int(c.get("zones_categorie_archives", 0) or 0))
+    out = []
+    for cid in [int(x) for x in c.get("zones_archives") or []]:
+        ch = g.get_channel(cid)
+        if ch is not None and cat is not None and getattr(ch, "category_id", None) == cat.id:
+            out.append(ch)
+    return out
+
+
+async def supprimer_archives(g, ids: list) -> int:
+    """Le fondateur l'a confirmé : ces salons d'archives disparaissent, et la catégorie si elle est vide."""
+    cfz, c = await conf(g), await _cfg(g.id)
+    gardes = {ch.id: ch for ch in archives(g, c)}
+    n = 0
+    for cid in ids:
+        ch = gardes.get(int(cid))
+        if ch is None:
+            continue
+        try:
+            await ch.delete(reason="Archives supprimées par le fondateur")
+            n += 1
+        except discord.HTTPException as ex:
+            _log("[ZONES][E4] archive non supprimée")
+            _log(f"[ZONES][E4:DETAIL] {cid} {type(ex).__name__} {ex}")
+    restants = [cid for cid in cfz["archives"] if g.get_channel(cid) is not None]
+    await _db_set(g.id, "zones_archives", restants)
+    cat = g.get_channel(cfz["categorie_archives"])
+    if isinstance(cat, discord.CategoryChannel) and not cat.channels:
+        try:
+            await cat.delete(reason="Archives vides")
+            await _db_set(g.id, "zones_categorie_archives", 0)
+        except discord.HTTPException as ex:
+            _log(f"[ZONES:DETAIL] catégorie d'archives {type(ex).__name__} {ex}")
+    return n
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Rangement, entretien, panneau ❓ aide
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _dans(ch, cat):
+    return ch if ch is not None and cat is not None and getattr(ch, "category_id", None) == cat.id else None
+
+
+async def _ranger(cat, voulu: list) -> bool:
+    """Les salons de `voulu` en tête de `cat`, dans cet ordre ; les autres suivent, les vocaux en bas."""
+    voulu = list(dict.fromkeys(ch for ch in voulu if ch is not None))
+    texte = [ch for ch in sorted(cat.channels, key=lambda c: c.position)
+             if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel))]
+    if not voulu or texte[:len(voulu)] == voulu:
+        return False
+    for n, ch in enumerate(voulu):
+        if n == 0:
+            await ch.move(beginning=True, category=cat, sync_permissions=False, reason="Rangé par priorité")
+        else:
+            await ch.move(after=voulu[n - 1], category=cat, sync_permissions=False, reason="Rangé par priorité")
+    return True
+
+
+async def ordonner(g) -> bool:
+    """Communautaire : 💬communautaire, 🌊rell-seas, puis le vocal."""
+    cfz, commu = await conf(g), communautaire(g)
+    if commu is None:
+        return False
+    return await _ranger(commu, [_dans(g.get_channel(cfz["forums"]["commu"]), commu),
+                                 _dans(g.get_channel(cfz["forums"]["rell"]), commu)])
+
+
+async def entretenir(g) -> None:
+    """Toutes les 30 minutes : les posts (et les fils du clan) restent ouverts ; un post qui doit
+    rester verrouillé l'est. Jamais l'inverse : un post que le staff a verrouillé le reste."""
+    cfz, c = await conf(g), await _cfg(g.id)
+    verrous = {cle for cle, _t, v, _x in POSTS_COMMU + POSTS_RELL if v}
+    a_suivre = [(cle, info.get("id", 0)) for cle, info in cfz["posts"].items()]
+    a_suivre += list(dict(c.get("clan_fils") or {}).items())
+    for cle, fid in a_suivre:
+        try:
+            fil = await _resoudre(g, fid)
+        except discord.HTTPException as ex:
+            _log(f"[ZONES:DETAIL] lecture du fil {cle} {ex}")
+            continue
+        if fil is None:
+            continue
+        reglage = {}
+        if getattr(fil, "archived", False):
+            reglage["archived"] = False
+        if cle in verrous and cle in cfz["posts"] and not getattr(fil, "locked", False):
+            reglage["locked"] = True
+        if reglage:
+            try:
+                await fil.edit(**reglage)
+            except discord.HTTPException as ex:
+                _log(f"[ZONES:DETAIL] réveil du fil {cle} {ex}")
+
+
+def lignes_aide(g, c: dict, cfz: dict) -> dict:
+    """Le contenu du panneau ❓ aide, par forum : {titre: [(post, texte, bouton)]}. Une ligne n'apparaît
+    que si son post existe."""
+    hubs = (c.get("temp_voice_config") or {}).get("hubs") or {}
+    vocal = next((ch for ch in (g.get_channel(int(k)) for k in hubs if str(k).isdigit())
+                  if ch is not None and not config_salons.est_clan(getattr(getattr(ch, "category", None), "name", ""))),
+                 None)
+    voc = f" · 🔊 <#{vocal.id}>" if vocal is not None else ""
+    return {
+        "Communautaire · Community": [
+            (post(g, cfz, "chat"), "💬 **Chat** — discuter de tout · talk about anything" + voc, "Ouvrir · Open"),
+            (post(g, cfz, "medias"), "📸 **Médias** — captures, clips · screenshots, clips", "Ouvrir · Open"),
+            (post(g, cfz, "suggestions"), "💡 **Suggestions** — propose une idée · suggest an idea", "Ouvrir · Open"),
+            (post(g, cfz, "commandes"), "🤖 **Commandes** — les commandes des bots · bot commands", "Ouvrir · Open"),
+        ],
+        "Rell Seas": [
+            (post(g, cfz, "rell_chat"), "🌊 **Chat Rell Seas** — le jeu · the game", "Ouvrir · Open"),
+            (post(g, cfz, "help"), "🛟 **Help** — une question, un boss, du farm, du chill · a question, a boss, "
+                                   "farming, chilling", "Demander · Ask"),
+            (post(g, cfz, "trade"), "🤝 **Trade** — fruits et objets, avec middleman · fruits & items, with a "
+                                    "middleman", "Échanger · Trade"),
+            (post(g, cfz, "crews"), "⚓ **Crews** — Pirates ou Marine : publie ou rejoins · post or join",
+             "Équipages · Crews"),
+        ],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La zone du clan GoRP
+# ═══════════════════════════════════════════════════════════════════════════════
 
 async def _fils_prets(g, ch, existants: dict, definitions) -> tuple:
     """Les fils déjà ouverts d'un forum (ou, hors forum, d'un salon) : créés s'ils manquent,
@@ -233,140 +648,3 @@ async def installer_clan(g, role, equipe=(), *, forum: bool | None = None) -> li
         _log(f"[ZONES][E2:DETAIL] {type(ex).__name__} {ex}")
     await _db_set(g.id, "clan_v1", 1)
     return faits
-
-
-async def installer(g, *, forum: bool | None = None) -> list:
-    """Crée ce qui manque — zone Rell Seas (chat, vocal, entraide, équipages) et forum des discussions —
-    puis range les deux compartiments. Ne supprime rien. Rend la liste de ce qui a été fait."""
-    p = getattr(g.me, "guild_permissions", None)
-    if not (p and p.manage_channels and p.manage_roles):
-        raise PermissionError("Il me faut « Gérer les salons » et « Gérer les rôles ».")
-    forum = ("COMMUNITY" in g.features) if forum is None else forum
-    cf = await conf(g)
-    faits = []
-    rell, cree = await _rell(g, cf)
-    if cree:
-        faits.append(f"catégorie {rell.name}")
-    chat = g.get_channel(cf["chat"])
-    if chat is None:
-        chat = await g.create_text_channel(RELL_CHAT, category=rell, topic=SUJET_CHAT, slowmode_delay=2,
-                                           overwrites={g.default_role: PAROLE},
-                                           reason="Zone Rell Seas : le chat du jeu")
-        await _db_set(g.id, "zones_chat", chat.id)
-        faits.append(f"salon {chat.name}")
-    _v, cree = await _vocal_rell(g, rell, cf)
-    if cree:
-        faits.append(f"vocal {RELL_VOCAL}")
-    faits += await entraide.installer(g, forum=forum, categorie=rell)
-    faits += await entraide.mettre_a_niveau(g, categorie=rell)
-    faits += await equipages.installer(g, rell, forum=forum)
-    commu = communautaire(g) or await entraide.categorie_cible(g)
-    _f, f2 = await _forum_commu(g, cf, commu, forum)
-    faits += f2
-    await _db_set(g.id, "zones_v1", 1)
-    try:
-        await ordonner(g)
-    except discord.HTTPException as ex:
-        _log("[ZONES][E1] compartiments non rangés")
-        _log(f"[ZONES][E1:DETAIL] {type(ex).__name__} {ex}")
-    return faits
-
-
-def _dans(ch, cat):
-    return ch if ch is not None and cat is not None and getattr(ch, "category_id", None) == cat.id else None
-
-
-async def _ranger(cat, voulu: list) -> bool:
-    """Les salons de `voulu` en tête de `cat`, dans cet ordre ; les autres suivent, les vocaux en bas."""
-    voulu = list(dict.fromkeys(ch for ch in voulu if ch is not None))
-    texte = [ch for ch in sorted(cat.channels, key=lambda c: c.position)
-             if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel))]
-    if not voulu or texte[:len(voulu)] == voulu:
-        return False
-    for n, ch in enumerate(voulu):
-        if n == 0:
-            await ch.move(beginning=True, category=cat, sync_permissions=False, reason="Rangé par priorité")
-        else:
-            await ch.move(after=voulu[n - 1], category=cat, sync_permissions=False, reason="Rangé par priorité")
-    return True
-
-
-async def ordonner(g) -> bool:
-    """Communautaire : ❓aide, 💬chat, 🧵discussions, 💡suggestions, 🚀boosts. Rell Seas : 🌊chat-rellseas,
-    🛟help, 🤝trade, ⚓crews. Les vocaux restent en bas de chaque zone."""
-    c, cf = await _cfg(g.id), await conf(g)
-    cfe, cfq = await entraide.conf(g), await equipages.conf(g)
-    commu, rell = communautaire(g), g.get_channel(cf["rell"])
-    fait = False
-    if commu is not None:
-        chat = next((ch for ch in commu.channels if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel))
-                     and "chat" in config_salons.normaliser(ch.name).split()), None)
-        fait |= await _ranger(commu, [_dans(g.get_channel(int(c.get("aide_salon", 0) or 0)), commu), chat,
-                                      _dans(g.get_channel(cf["forum"]), commu),
-                                      _dans(g.get_channel(int(c.get("suggestions_salon", 0) or 0)), commu),
-                                      _dans(g.get_channel(int(c.get("boosts_salon", 0) or 0)), commu)])
-    if isinstance(rell, discord.CategoryChannel):
-        fait |= await _ranger(rell, [_dans(g.get_channel(cf["chat"]), rell),
-                                     _dans(entraide.salon(g, cfe, "entraide"), rell),
-                                     _dans(entraide.salon(g, cfe, "trade"), rell),
-                                     _dans(equipages.forum_de(g, cfq), rell)])
-    return fait
-
-
-async def entretenir(g) -> None:
-    """Toutes les 30 minutes : les fils prêts à l'emploi (Communautaire, clan) restent ouverts et visibles."""
-    cf, c = await conf(g), await _cfg(g.id)
-    a_suivre = (list(cf["fils"].items()) if cf["actif"] else []) + list(dict(c.get("clan_fils") or {}).items())
-    for cle, fid in a_suivre:
-        fid = int(fid or 0)
-        fil = g.get_channel_or_thread(fid) if fid else None
-        if fil is None and fid:
-            try:
-                fil = await g.fetch_channel(fid)
-            except discord.NotFound:
-                fil = None
-            except discord.HTTPException as ex:
-                _log(f"[ZONES:DETAIL] lecture du fil {cle} {ex}")
-                continue
-        if fil is not None and getattr(fil, "archived", False):
-            try:
-                await fil.edit(archived=False)
-            except discord.HTTPException as ex:
-                _log(f"[ZONES:DETAIL] réveil du fil {cle} {ex}")
-
-
-def lignes_aide(g, c: dict, cfz: dict, cfe: dict, cfq: dict) -> dict:
-    """Le contenu du panneau ❓ aide, par compartiment : {titre: [(salon, texte, bouton)]}. Une ligne
-    n'apparaît que si son salon existe."""
-    chat_commu = None
-    commu = communautaire(g)
-    if commu is not None:
-        chat_commu = next((ch for ch in commu.channels if not isinstance(ch, (discord.VoiceChannel,
-                                                                             discord.StageChannel))
-                           and "chat" in config_salons.normaliser(ch.name).split()), None)
-    vocal_commu = next((g.get_channel(int(k)) for k in ((c.get("temp_voice_config") or {}).get("hubs") or {})
-                        if str(k).isdigit() and int(k) != cfz["vocal"] and g.get_channel(int(k)) is not None
-                        and not config_salons.est_clan(getattr(getattr(g.get_channel(int(k)), "category", None),
-                                                               "name", ""))), None)
-    vocal_rell = g.get_channel(cfz["vocal"])
-
-    def voc(v):
-        return f" · 🔊 <#{v.id}>" if v is not None else ""
-    return {
-        "Communautaire · Community": [
-            (chat_commu, "💬 **Chat** — discuter de tout · talk about anything" + voc(vocal_commu), "Ouvrir · Open"),
-            (g.get_channel(cfz["forum"]), "🧵 **Discussions** — médias, commandes, tes sujets · media, commands, "
-                                          "your topics", "Ouvrir · Open"),
-            (g.get_channel(int(c.get("suggestions_salon", 0) or 0)), "💡 **Suggestions** — propose une idée · "
-                                                                    "suggest an idea", "Ouvrir · Open"),
-        ],
-        "Rell Seas": [
-            (g.get_channel(cfz["chat"]), "🌊 **Chat Rell Seas** — le jeu · the game" + voc(vocal_rell), "Ouvrir · Open"),
-            (entraide.salon(g, cfe, "entraide"), "🛟 **Help** — une question, un boss, du farm, du chill · a question, "
-                                                 "a boss, farming, chilling", "Demander · Ask"),
-            (entraide.salon(g, cfe, "trade"), "🤝 **Trade** — fruits et objets, avec middleman · fruits & items, "
-                                              "with a middleman", "Échanger · Trade"),
-            (equipages.forum_de(g, cfq), "⚓ **Crews** — Pirates ou Marine : publie ou rejoins · post or join",
-             "Équipages · Crews"),
-        ],
-    }

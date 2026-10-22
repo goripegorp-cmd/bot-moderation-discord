@@ -102,6 +102,9 @@ class Guilde:
     def get_channel(self, cid):
         return self.salons.get(cid)
 
+    def get_channel_or_thread(self, cid):
+        return self.get_channel(cid) or self.get_thread(cid)
+
     def get_thread(self, tid):
         for s in self.salons.values():
             if tid in s.fils:

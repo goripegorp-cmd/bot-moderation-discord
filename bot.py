@@ -6975,11 +6975,16 @@ async def _menu_logs(g, c):
     boutons = [recrutements.BoutonTableau(), annonces.BoutonComposer()]
     if anciens:
         boutons.append(BoutonAnciensSalons(len(anciens)))
+    archives = zones.archives(g, c)
+    if archives:
+        texte += ("\n-# 📦 Les anciens salons de Communautaire et de Rell Seas sont aux archives, cachés aux "
+                  "membres : tu choisis ce que tu supprimes.")
+        boutons.append(BoutonArchives(len(archives)))
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(visuels.bandeau("logs", "Les logs du serveur"),
                                     discord.ui.TextDisplay(texte), discord.ui.ActionRow(*boutons),
                                     accent_color=Palette.INFO))
-    return v, f"{MENU_LOGS_VERSION}|{int(site)}|{len(anciens)}"
+    return v, f"{MENU_LOGS_VERSION}|{int(site)}|{len(anciens)}|{len(archives)}"
 
 
 async def _salon_tableau(g):
@@ -12883,8 +12888,7 @@ async def _vue_aide(g, c):
     staff — une ligne par besoin, un bouton qui y mène ; une ligne n'apparaît que si son salon existe
     (aucun bouton qui ment)."""
     ticket = _salon_des_tickets(g)
-    cfz, cfe, cfq = await zones.conf(g), await entraide.conf(g), await equipages.conf(g)
-    groupes = zones.lignes_aide(g, c, cfz, cfe, cfq)
+    groupes = zones.lignes_aide(g, c, await zones.conf(g))
     clan = bool(rellseas_ui.panneaux_tickets(c))
     groupes["Staff"] = [
         (ticket, "🎫 **Ticket** — une question, un souci" + (", rejoindre le clan" if clan else "")
@@ -12902,9 +12906,8 @@ async def _vue_aide(g, c):
         if not presentes:
             continue
         items.append(discord.ui.Separator())
-        items.append(discord.ui.TextDisplay(f"### {titre}"))
-        for salon, texte, libelle in presentes:
-            items.append(discord.ui.Section(discord.ui.TextDisplay(texte),
+        for n, (salon, texte, libelle) in enumerate(presentes):
+            items.append(discord.ui.Section(discord.ui.TextDisplay(f"### {titre}\n{texte}" if n == 0 else texte),
                                             accessory=Button(label=libelle, url=salon.jump_url)))
     items.append(discord.ui.TextDisplay("-# " + (f"📜 Règles · Rules : <#{regles.id}> · " if regles else "")
                                         + "pas d'invitation vers d'autres serveurs · no invites to other servers"))
@@ -12937,7 +12940,17 @@ async def _salon_aide(g) -> None:
     reposé s'il disparaît, réécrit si un salon cité change."""
     try:
         c = await cfg(g.id)
-        salon = g.get_channel(int(c.get('aide_salon', 0) or 0))
+        aide_id = int(c.get('aide_salon', 0) or 0)
+        salon = g.get_channel_or_thread(aide_id) if aide_id else None
+        if salon is None and aide_id:
+            try:
+                salon = await g.fetch_channel(aide_id)
+            except discord.NotFound:
+                salon = None
+        if salon is None and c.get('zones_v2'):
+            return  # le post ❓ Aide revient avec « Réparer » (/configure → Entraide Rell Seas)
+        if isinstance(salon, discord.Thread) and salon.archived:
+            await salon.edit(archived=False)
         if salon is None:
             ancien_lfg = g.get_channel(int(c.get('lfg_board_channel', 0) or 0))
             salon = next((ch for ch in getattr(g, "text_channels", []) or []
@@ -12987,9 +13000,9 @@ async def entraide_task():
                     await _entraide_journal(g, "entraide.regroupement",
                                             "Entraide regroupée dans Communautaire : " + ", ".join(faits) + ".")
                     await _salon_aide(g)
-            if g.owner_id in TETE_IDS and c.get('rs_actif') and not c.get('zones_v1'):
+            if g.owner_id in TETE_IDS and c.get('rs_actif') and not c.get('zones_v2'):
                 await _installer_zones(g, c)
-            if g.owner_id in TETE_IDS and c.get('zones_v1') and not c.get('menage_v1'):
+            if g.owner_id in TETE_IDS and (c.get('zones_v1') or c.get('zones_v2')) and not c.get('menage_v1'):
                 await db_set(g.id, 'menage_v1', now().isoformat())
                 await _menage_categories(g)
             if g.owner_id in TETE_IDS and not c.get('clan_v1') and int(c.get('clan_essais', 0) or 0) < ZONES_ESSAIS:
@@ -13011,22 +13024,122 @@ EMOJI_ANCIEN_TICKET = "\N{ADMISSION TICKETS}"
 
 
 async def _installer_zones(g, c) -> None:
-    """22/10 (nuit) : « international… deux compartiments au propre… les équipages ». Une fois ; le
-    témoin est posé AVANT (jamais deux installations en parallèle), retiré si l'installation casse
-    — elle reprend au passage suivant, trois essais au plus (elle ne recrée que ce qui manque)."""
-    await db_set(g.id, 'zones_v1', now().isoformat())
+    """22/10 (nuit) : « une catégorie… deux fils seulement, communautaire et Rell Seas… tout dedans…
+    le vocal, tu le laisses ». Une fois ; le témoin est posé AVANT (jamais deux installations en
+    parallèle), retiré si l'installation casse — elle reprend au passage suivant, trois essais au
+    plus (elle ne recrée que ce qui manque)."""
+    await db_set(g.id, 'zones_v2', now().isoformat())
     try:
         faits = await zones.installer(g)
     except (discord.HTTPException, PermissionError) as ex:
-        essais = int(c.get('zones_essais', 0) or 0) + 1
-        await db_set(g.id, 'zones_essais', essais)
+        essais = int(c.get('zones_v2_essais', 0) or 0) + 1
+        await db_set(g.id, 'zones_v2_essais', essais)
         if essais < ZONES_ESSAIS:
-            await db_set(g.id, 'zones_v1', "")
+            await db_set(g.id, 'zones_v2', "")
         _logerr("zones.installation", ex, guild_id=g.id)
         return
     await _entraide_journal(g, "zones.installation",
-                            "Zones mises en place : " + (", ".join(faits) or "rien ne manquait") + ".")
+                            "Deux forums en place : " + (", ".join(faits) or "rien ne manquait") + ".")
+    await _reporter_immunites(g, await cfg(g.id))
     await _salon_aide(g)
+    await _salon_tableau(g)
+
+
+async def _reporter_immunites(g, c) -> int:
+    """Un ancien salon immunisé (l'automodération s'y tait) : son post l'est aussi."""
+    paires = {int(k): int(v) for k, v in (c.get('zones_correspondances') or {}).items() if str(k).isdigit()}
+    if not paires:
+        return 0
+    n = 0
+    async with get_db() as db:
+        async with db.execute("SELECT channel_id FROM immune_channels WHERE guild_id=?", (g.id,)) as cur:
+            immunises = {int(r[0]) for r in await cur.fetchall()}
+        for ancien, neuf in paires.items():
+            if ancien in immunises and neuf not in immunises:
+                await db.execute("INSERT INTO immune_channels(guild_id, channel_id) VALUES(?, ?)", (g.id, neuf))
+                n += 1
+        await db.commit()
+    _immunity_cache.pop(g.id, None)
+    return n
+
+
+def _lecteurs_archives(g, c) -> list:
+    """Qui voit « 📦 Archives » : la direction et au-dessus (le fondateur voit tout)."""
+    direction = g.get_role(int(c.get('direction_allowed_role', 0) or 0))
+    if direction is None:
+        return []
+    return [r for r in g.roles if r.position >= direction.position and not r.managed and not r.is_default()]
+
+
+class BoutonArchives(discord.ui.DynamicItem[Button], template=r"zn:archives"):
+    """« Tu enlèves tout ce qui est dans Communautaire et dans Rell Seas » : les anciens salons sont
+    cachés aux archives ; les supprimer (historique compris) est le geste du fondateur seul."""
+
+    def __init__(self, n: int = 0):
+        super().__init__(Button(label=f"Supprimer les archives ({n})" if n else "Supprimer les archives",
+                                style=discord.ButtonStyle.danger, custom_id="zn:archives",
+                                emoji=visuels.icone("supprimer")))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, i: discord.Interaction):
+        g = i.guild
+        if g is None or i.user.id != g.owner_id:
+            return await i.response.send_message("Réservé au fondateur.", ephemeral=True)
+        salons = zones.archives(g, await cfg(g.id))
+        if not salons:
+            await _salon_tableau(g)
+            return await i.response.send_message("Il n'y a plus rien aux archives.", ephemeral=True)
+        await i.response.send_message(view=ConfirmerArchives(i.user.id, salons), ephemeral=True)
+
+
+class ConfirmerArchives(LayoutView):
+    def __init__(self, auteur_id: int, salons: list):
+        super().__init__(timeout=300)
+        self.auteur_id, self.salons = auteur_id, salons[:25]
+        self.choix = [ch.id for ch in self.salons]
+        sel = discord.ui.Select(placeholder="Salons à supprimer", min_values=0, max_values=len(self.salons),
+                                options=[discord.SelectOption(label=f"#{ch.name}"[:100], value=str(ch.id),
+                                                              default=True) for ch in self.salons])
+        sel.callback = self._choisir
+        ok = Button(label="Supprimer la sélection", style=discord.ButtonStyle.danger, emoji=visuels.icone("supprimer"))
+        ok.callback = self._supprimer
+        non = Button(label="Annuler", style=discord.ButtonStyle.secondary, emoji=visuels.icone("annuler"))
+        non.callback = self._annuler
+        self.add_item(discord.ui.Container(
+            discord.ui.TextDisplay("### Supprimer les archives\nLes anciens salons de Communautaire et de Rell Seas, "
+                                   "cachés aux membres depuis les deux forums.\n"
+                                   "-# Décoche ceux à garder. Irréversible : leur historique (le chat compris) part "
+                                   "avec eux."),
+            discord.ui.ActionRow(sel), discord.ui.ActionRow(ok, non), accent_color=Palette.DANGER))
+
+    async def interaction_check(self, i):
+        return i.user.id == self.auteur_id
+
+    async def _choisir(self, i):
+        self.choix = [int(v) for v in i.data.get("values", [])]
+        await i.response.defer()
+
+    async def _annuler(self, i):
+        await i.response.edit_message(view=entraide._vue_message("Rien n'a été supprimé.", Palette.NEUTRAL))
+        self.stop()
+
+    async def _supprimer(self, i):
+        g = i.guild
+        if i.user.id != g.owner_id:
+            return await i.response.send_message("Réservé au fondateur.", ephemeral=True)
+        await i.response.edit_message(view=entraide._vue_message("Suppression en cours…", Palette.NEUTRAL))
+        self.stop()
+        noms = {ch.id: ch.name for ch in self.salons}
+        n = await zones.supprimer_archives(g, self.choix)
+        await _salon_tableau(g)
+        if n:
+            await _au_journal(g, "Config", "zones.archives", f"Archives supprimées ({n}) : "
+                              + ", ".join(f"#{noms[c]}" for c in self.choix if c in noms), auteur_id=i.user.id)
+        await i.edit_original_response(view=entraide._vue_message(
+            f"{n} salon(s) supprimé(s)." if n else "Rien n'a été supprimé.", Palette.SUCCESS if n else Palette.NEUTRAL))
 
 
 async def _installer_clan(g, c) -> None:
@@ -13276,6 +13389,7 @@ async def _etat_public():
             "entraide": any(c.get('rs_actif') for c in confs),
             "entraide_v2": any(c.get('rs_v2') for c in confs),
             "zones": any(c.get('zones_v1') for c in confs),
+            "deux_forums": any(c.get('zones_v2') for c in confs),
             "equipages": any(c.get('eq_forum') for c in confs),
             "menage": any(c.get('menage_v1') for c in confs),
             "clan_zone": any(c.get('clan_v1') for c in confs),
@@ -19713,7 +19827,7 @@ async def _activite_boot():
                     controle=_access_gate_reason, est_staff=_entraide_staff, journal=_entraide_journal,
                     langue=_langue_membre, log=print)
     await equipages.init_db()
-    zones.setup(cfg=cfg, db_set=db_set, log=print)
+    zones.setup(cfg=cfg, db_set=db_set, lecteurs=_lecteurs_archives, log=print)
     annonces.setup(get_db=get_db, cfg=cfg, db_set=db_set, est_tete=_a_la_tete, journal=_annonces_journal,
                    role_clan=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
                    langue=_langue_membre, log=print)
@@ -19822,6 +19936,7 @@ async def on_ready():
         bot.add_dynamic_items(equipages.BoutonPublier, equipages.BoutonRejoindre, equipages.BoutonRecrutement,
                               equipages.BoutonModifier, equipages.BoutonRetirer)
         bot.add_dynamic_items(annonces.BoutonComposer, annonces.BoutonVu)
+        bot.add_dynamic_items(BoutonArchives)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
@@ -21284,7 +21399,7 @@ async def _handle_goodbye(member):
     ch_id = int(c.get('goodbye_channel', 0) or 0)
     if not ch_id:
         return
-    ch = member.guild.get_channel(ch_id)
+    ch = member.guild.get_channel_or_thread(ch_id)  # un post de forum (💬 Chat) compris
     if not ch:
         return
     perms = ch.permissions_for(member.guild.me)
@@ -22246,7 +22361,7 @@ async def _handle_welcome(member):
     ch_id = int(c.get('welcome_channel', 0) or 0)
     if not ch_id:
         return
-    ch = member.guild.get_channel(ch_id)
+    ch = member.guild.get_channel_or_thread(ch_id)  # un post de forum (💬 Chat) compris
     if not ch:
         return
     perms = ch.permissions_for(member.guild.me)
@@ -30721,7 +30836,7 @@ async def _entraide_request_channel(guild):
             return None
         cf_entraide = await entraide.conf(guild)
         forum = entraide.salon(guild, cf_entraide, "entraide") if cf_entraide["actif"] else None
-        if isinstance(forum, (discord.TextChannel, discord.ForumChannel)):
+        if isinstance(forum, (discord.TextChannel, discord.ForumChannel, discord.Thread)):
             return forum
         c = await cfg(guild.id)
         # Interrupteur maître : si l'owner a désactivé l'entraide, la feature est OFF

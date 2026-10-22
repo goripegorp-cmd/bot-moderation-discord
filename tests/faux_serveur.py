@@ -22,7 +22,10 @@ class Partiel:
         self.porteur.monde.effaces.add(self.id)
 
 
-class Fil:
+class Fil(discord.Thread):
+    """Un fil (ou un post de forum) : un vrai `discord.Thread` pour les `isinstance` du bot."""
+    parent = jump_url = flags = applied_tags = None   # masquent les propriétés de discord.Thread
+
     def __init__(self, monde, tid, parent, name, contenu=None):
         self.monde, self.id, self.parent, self.name, self.contenu = monde, tid, parent, name, contenu
         self.envois, self.edits, self.membres, self.cartes = [], [], [], []
@@ -31,9 +34,44 @@ class Fil:
         self.last_message_id = None
         self.jump_url = f"https://discord.com/channels/1/{tid}"
         self.applied_tags = []
+        self.messages = []
 
     async def send(self, content=None, **kw):
         self.envois.append((content, kw))
+        m = Message(self, self.monde.nouvel_id())
+        m.content, m.kw = content, kw
+        ref = kw.get("reference")
+        m.reference = Obj(message_id=getattr(ref, "id", None)) if ref is not None else None
+        self.messages.append(m)
+        return m
+
+    def repondre(self, membre_id: int, a: int, texte: str = "ok"):
+        """Un membre répond à un message du post (une carte, un mot du bot)."""
+        m = Message(self, self.monde.nouvel_id(), auteur_bot=False)
+        m.content, m.kw, m.reference = texte, {}, Obj(message_id=a)
+        m.author.id = membre_id
+        self.messages.append(m)
+        return m
+
+    def visibles(self) -> list:
+        return [m for m in self.messages if m.id not in self.monde.effaces]
+
+    async def fetch_message(self, mid):
+        if mid in self.monde.effaces or not (mid == self.id or any(m.id == mid for m in self.messages)):
+            raise discord.NotFound(Obj(status=404, reason="x"), "absent")
+        return next((m for m in self.messages if m.id == mid), Message(self, mid))
+
+    def history(self, limit=None, after=None):
+        async def gen():
+            n = 0
+            for m in self.visibles():
+                if after is not None and m.id <= after.id:
+                    continue
+                yield m
+                n += 1
+                if limit and n >= limit:
+                    return
+        return gen()
 
     async def edit(self, **kw):
         self.edits.append(kw)
@@ -115,7 +153,7 @@ class Forum(Rangeable, discord.ForumChannel):
     available_tags = property(lambda self: self._tags_)
 
     async def create_thread(self, *, name, view=None, content=None, allowed_mentions=None, applied_tags=(),
-                            reason=None):
+                            reason=None, **_kw):
         fil = self.monde.nouveau_fil(self, name, contenu=content)
         fil.applied_tags = [t.name for t in applied_tags or []]
         self.crees.append(Obj(fil=fil, view=view, content=content, allowed_mentions=allowed_mentions))
@@ -163,11 +201,22 @@ class Texte(Rangeable, discord.TextChannel):
             raise discord.NotFound(Obj(status=404, reason="x"), "absent")
         return Message(self, mid)
 
-    def history(self, limit=None):
+    def history(self, limit=None, after=None):
         async def gen():
-            for m in self.historique[:limit]:
+            n = 0
+            for m in self.historique:
+                if after is not None and m.id <= after.id:
+                    continue
+                if m.id in self.monde.effaces:
+                    continue
                 yield m
+                n += 1
+                if limit and n >= limit:
+                    return
         return gen()
+
+    async def create_thread(self, *, name, type=None, auto_archive_duration=None, reason=None):
+        return self.monde.nouveau_fil(self, name)
 
 
 class Vocal(Rangeable, discord.VoiceChannel):
@@ -220,6 +269,7 @@ class Membre:
 class Monde:
     def __init__(self, forum=True, communautaire=True):
         self.id, self.name, self.features = 1, "GoRP SEA", ["COMMUNITY"] if forum else []
+        self.premium_subscription_count, self.premium_tier, self.members, self.chunked = 0, 0, [], True
         self.salons, self.fils, self.roles, self.membres, self.effaces = {}, {}, {}, {}, set()
         self.ordre, self.categories_, self.mouvements = [], [], []
         self.default_role = Obj(id=1)
@@ -285,7 +335,9 @@ class Monde:
         return self.roles.get(int(rid or 0))
 
     async def create_category(self, name, **kw):
-        return self.categorie(name)
+        c = self.categorie(name)
+        c.kw = kw
+        return c
 
     async def create_role(self, *, name, **kw):
         r = Role(self.nouvel_id(), name, kw)

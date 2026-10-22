@@ -1,8 +1,9 @@
 """equipages.py — les équipages de Rell Seas (22/10/2026).
 
 « Les gens peuvent publier leur équipage, que ce soit la marine ou les pirateries… un vrai système,
-un fil dédié… ultra complet. » Un forum ⚓crews dans la zone Rell Seas : un post par équipage,
-étiquettes Pirates / Marine et Recrute / Complet. Le post épinglé : « Pirates » ou « Marine », un
+un fil dédié… ultra complet. » Puis : « deux fils seulement… plutôt que des milliers de fils ». Le post
+⚓ Crews du forum Rell Seas : une carte par équipage (l'ancienne installation, un forum ⚓crews, ouvrait
+un post par équipage, étiquettes Pirates / Marine et Recrute / Complet). Le post épinglé : « Pirates » ou « Marine », un
 formulaire dans la langue du membre, une carte en français · anglais. Le capitaine modifie son
 équipage, ouvre ou ferme le recrutement, le retire ; un joueur demande à rejoindre d'un clic (le
 capitaine est prévenu dans le fil). Un équipage par capitaine ; il part avec son capitaine.
@@ -24,6 +25,7 @@ NOM_FORUM = "⚓crews"
 FACTIONS = {"pirate": ("🏴‍☠️", "Pirates", 0x111827), "marine": ("⚓", "Marine", 0x2563EB)}
 TAGS = (("Pirates", "🏴‍☠️"), ("Marine", "⚓"), ("Recrute · Recruiting", "📣"), ("Complet · Full", "🔒"))
 ATTENTE_REJOINDRE_S = 600
+MOT_H = 24          # le mot « veut rejoindre » sous une carte : effacé après 24 h (le capitaine a été prévenu)
 NOM_PANNEAU = "📌 Publier ton équipage · Post your crew"
 
 TEXTES = {
@@ -121,12 +123,14 @@ async def langue_de(i) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _COLONNES = ("id", "guild_id", "capitaine_id", "faction", "nom", "champs", "recrute", "fil_id", "cree", "maj",
-             "supprime")
-_SQL_UN = ("SELECT id, guild_id, capitaine_id, faction, nom, champs, recrute, fil_id, cree, maj, supprime"
+             "supprime", "mode")
+#  `mode` « carte » : l'équipage est une carte dans le post ⚓ Crews (`fil_id` = la carte, `salon` = le
+#  post réglé) ; vide : l'ancienne installation, un post de forum par équipage (`fil_id` = ce post).
+_SQL_UN = ("SELECT id, guild_id, capitaine_id, faction, nom, champs, recrute, fil_id, cree, maj, supprime, mode"
            " FROM equipages WHERE id=?")
-_SQL_DU_CAPITAINE = ("SELECT id, guild_id, capitaine_id, faction, nom, champs, recrute, fil_id, cree, maj, supprime"
-                     " FROM equipages WHERE guild_id=? AND capitaine_id=? AND supprime=0 AND fil_id>0")
-_SQL_ACTIFS = ("SELECT id, guild_id, capitaine_id, faction, nom, champs, recrute, fil_id, cree, maj, supprime"
+_SQL_DU_CAPITAINE = ("SELECT id, guild_id, capitaine_id, faction, nom, champs, recrute, fil_id, cree, maj, supprime,"
+                     " mode FROM equipages WHERE guild_id=? AND capitaine_id=? AND supprime=0 AND fil_id>0")
+_SQL_ACTIFS = ("SELECT id, guild_id, capitaine_id, faction, nom, champs, recrute, fil_id, cree, maj, supprime, mode"
                " FROM equipages WHERE guild_id=? AND supprime=0 AND fil_id>0 ORDER BY id LIMIT 500")
 
 
@@ -138,6 +142,11 @@ async def init_db():
             " DEFAULT '{}', recrute INTEGER NOT NULL DEFAULT 1, fil_id INTEGER NOT NULL DEFAULT 0,"
             " cree INTEGER NOT NULL, maj INTEGER NOT NULL, supprime INTEGER NOT NULL DEFAULT 0)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_equipages_capitaine ON equipages(guild_id, capitaine_id)")
+        async with db.execute("PRAGMA table_info(equipages)") as cur:
+            if "mode" not in {r[1] for r in await cur.fetchall()}:
+                await db.execute("ALTER TABLE equipages ADD COLUMN mode TEXT NOT NULL DEFAULT ''")
+        await db.execute("CREATE TABLE IF NOT EXISTS equipages_notes (equipage_id INTEGER NOT NULL,"
+                         " salon_id INTEGER NOT NULL, message_id INTEGER NOT NULL, expire INTEGER NOT NULL)")
         await db.commit()
 
 
@@ -147,6 +156,7 @@ def _ligne(r) -> dict:
         d["champs"] = json.loads(d["champs"] or "{}")
     except (TypeError, ValueError):
         d["champs"] = {}
+    d["mode"] = d.get("mode") or ""
     return d
 
 
@@ -171,11 +181,53 @@ async def _ecrire(sql: str, args: tuple) -> None:
 
 async def conf(g) -> dict:
     c = await _cfg(g.id)
-    return {"forum": int(c.get("eq_forum", 0) or 0), "panneau": int(c.get("eq_panneau", 0) or 0)}
+    return {"forum": int(c.get("eq_forum", 0) or 0), "panneau": int(c.get("eq_panneau", 0) or 0),
+            "ouverture": int(c.get("eq_ouverture", 0) or 0)}
 
 
 def forum_de(g, cf: dict):
-    return g.get_channel(cf["forum"])
+    """Le post ⚓ Crews (ou l'ancien forum), s'il est en mémoire — un post endormi n'y est pas."""
+    return g.get_channel_or_thread(cf["forum"])
+
+
+async def _resoudre(g, cid):
+    """Un salon ou un post, même endormi ; None s'il n'existe plus. Une panne lève."""
+    cid = int(cid or 0)
+    if not cid:
+        return None
+    ch = g.get_channel_or_thread(cid)
+    if ch is not None:
+        return ch
+    try:
+        return await g.fetch_channel(cid)
+    except discord.NotFound:
+        return None
+
+
+async def conteneur(g, cf: dict):
+    """Là où vivent les cartes des équipages — le post, réveillé s'il dormait — ou None."""
+    try:
+        ch = await _resoudre(g, cf["forum"])
+    except discord.HTTPException as ex:
+        _log(f"[EQUIPAGES:DETAIL] lecture du salon {type(ex).__name__} {ex}")
+        return None
+    if isinstance(ch, discord.Thread) and ch.archived:
+        try:
+            await ch.edit(archived=False)
+        except discord.HTTPException as ex:
+            _log(f"[EQUIPAGES:DETAIL] réveil du post {ex}")
+    return ch
+
+
+def en_cartes(ch) -> bool:
+    """Un équipage est une carte dans son post (ou son salon) ; seul l'ancien forum ouvrait un post."""
+    return ch is not None and not isinstance(ch, discord.ForumChannel)
+
+
+async def lien(g, e: dict) -> str:
+    if e.get("mode") == "carte":
+        return f"https://discord.com/channels/{g.id}/{(await conf(g))['forum']}/{int(e['fil_id'])}"
+    return f"https://discord.com/channels/{g.id}/{int(e['fil_id'])}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -267,11 +319,25 @@ def _porteur(fil):
 
 
 async def _maj(g, e: dict, renommer: bool = False) -> None:
-    """La carte, les étiquettes et le nom du post suivent l'équipage."""
+    """La carte suit l'équipage (et, ancienne installation, les étiquettes et le nom de son post)."""
+    capitaine = g.get_member(int(e["capitaine_id"]))
+    if e.get("mode") == "carte":
+        porteur = await conteneur(g, await conf(g))
+        if porteur is None:
+            return
+        try:
+            await porteur.get_partial_message(int(e["fil_id"])).edit(
+                view=vue_carte(e, avatar=capitaine.display_avatar.url if capitaine else ""),
+                allowed_mentions=discord.AllowedMentions.none())
+        except discord.NotFound:
+            pass
+        except discord.HTTPException as ex:
+            _log("[EQUIPAGES][E2] carte non mise à jour")
+            _log(f"[EQUIPAGES][E2:DETAIL] equipage={e['id']} {type(ex).__name__} {ex}")
+        return
     fil = await _fil_ou_rien(g, e)
     if fil is None:
         return
-    capitaine = g.get_member(int(e["capitaine_id"]))
     try:
         if fil.archived:
             await fil.edit(archived=False)
@@ -323,7 +389,7 @@ CHAMPS_PAR_CLE = {c.cle: c for c in CHAMPS}
 
 async def _refus(i, langue: str) -> str:
     g, m = i.guild, i.user
-    if g is None or getattr(m, "guild_permissions", None) is None or forum_de(g, await conf(g)) is None:
+    if g is None or getattr(m, "guild_permissions", None) is None or not (await conf(g))["forum"]:
         return tr("zone_fermee", langue)
     if m.is_timed_out():
         return tr("exclu", langue)
@@ -344,9 +410,7 @@ async def publier(i, faction: str, valeurs: dict, langue: str = "fr"):
     async with _verrou(("publier", g.id)):
         deja = await _lignes(_SQL_DU_CAPITAINE, (g.id, m.id))
         if deja:
-            fil = g.get_channel_or_thread(int(deja[0]["fil_id"]))
-            return await i.followup.send(tr("deja", langue, lien=getattr(fil, "jump_url", deja[0]["nom"])),
-                                         ephemeral=True)
+            return await i.followup.send(tr("deja", langue, lien=await lien(g, deja[0])), ephemeral=True)
         t = int(time.time())
         async with _get_db() as db:
             cur = await db.execute("INSERT INTO equipages(guild_id, capitaine_id, faction, nom, champs, cree, maj)"
@@ -355,31 +419,35 @@ async def publier(i, faction: str, valeurs: dict, langue: str = "fr"):
             eid = cur.lastrowid
             await db.commit()
     e = await charger(eid)
-    forum = forum_de(g, await conf(g))
+    forum = await conteneur(g, await conf(g))
+    mode, fil = ("carte" if en_cartes(forum) else ""), None
     try:
-        if isinstance(forum, discord.ForumChannel):
+        if forum is None:
+            raise discord.ClientException("équipages sans salon")
+        if mode == "carte":
+            carte_id = (await forum.send(view=vue_carte(e, avatar=m.display_avatar.url),
+                                         allowed_mentions=discord.AllowedMentions.none())).id
+        else:
             fil = (await forum.create_thread(name=nom_du_fil(e, m), view=vue_carte(e, avatar=m.display_avatar.url),
                                              applied_tags=_tags(forum, e),
                                              allowed_mentions=discord.AllowedMentions.none(),
                                              reason=f"Équipage n°{eid}")).thread
-        else:
-            carte = await forum.send(view=vue_carte(e, avatar=m.display_avatar.url),
-                                     allowed_mentions=discord.AllowedMentions.none())
-            fil = await carte.create_thread(name=nom_du_fil(e, m), auto_archive_duration=10080,
-                                            reason=f"Équipage n°{eid}")
-    except (discord.HTTPException, AttributeError) as ex:
+            carte_id = fil.id
+    except (discord.HTTPException, discord.ClientException) as ex:
         _log("[EQUIPAGES][E1] équipage non publié")
         _log(f"[EQUIPAGES][E1:DETAIL] {type(ex).__name__} {ex}")
         await _ecrire("DELETE FROM equipages WHERE id=?", (eid,))
         return await i.followup.send(tr("impossible", langue), ephemeral=True)
-    await _ecrire("UPDATE equipages SET fil_id=? WHERE id=?", (fil.id, eid))
-    try:
-        await fil.add_user(m)
-    except discord.HTTPException as ex:
-        _log(f"[EQUIPAGES:DETAIL] capitaine non ajouté equipage={eid} {ex}")
-    await i.followup.send(tr("publie", langue, lien=fil.jump_url), ephemeral=True)
-    if isinstance(forum, discord.TextChannel):
-        asyncio.create_task(reposer_panneau_texte(g))
+    await _ecrire("UPDATE equipages SET fil_id=?, mode=? WHERE id=?", (carte_id, mode, eid))
+    e.update(fil_id=carte_id, mode=mode)
+    if fil is not None:
+        try:
+            await fil.add_user(m)
+        except discord.HTTPException as ex:
+            _log(f"[EQUIPAGES:DETAIL] capitaine non ajouté equipage={eid} {ex}")
+    await i.followup.send(tr("publie", langue, lien=await lien(g, e)), ephemeral=True)
+    if mode == "carte":
+        asyncio.create_task(reposer_panneau(g))
     await _journal(g, "equipage.publie", f"{m.mention} a publié son équipage {FACTIONS[faction][1]} : {e['nom']}",
                    membre_id=m.id)
 
@@ -433,8 +501,7 @@ class BoutonPublier(discord.ui.DynamicItem[Button], template=r"eq:p:(?P<faction>
             return await i.response.send_message(refus, ephemeral=True)
         deja = await _lignes(_SQL_DU_CAPITAINE, (i.guild.id, i.user.id))
         if deja:
-            fil = i.guild.get_channel_or_thread(int(deja[0]["fil_id"]))
-            return await i.response.send_message(tr("deja", langue, lien=getattr(fil, "jump_url", deja[0]["nom"])),
+            return await i.response.send_message(tr("deja", langue, lien=await lien(i.guild, deja[0])),
                                                  ephemeral=True)
         await i.response.send_modal(Formulaire(self.faction, langue))
 
@@ -463,19 +530,21 @@ class BoutonRejoindre(discord.ui.DynamicItem[Button], template=r"eq:j:(?P<eid>\d
         if t - _demandes.get(cle, -1e9) < ATTENTE_REJOINDRE_S:
             return await i.followup.send(tr("deja_demande", langue), ephemeral=True)
         _demandes[cle] = t
-        fil = await _fil_ou_rien(i.guild, e)
-        lien = f" {fil.jump_url}" if fil is not None else ""
-        if fil is not None:
-            try:
-                if fil.archived:
-                    await fil.edit(archived=False)
-                await fil.add_user(i.user)
-                await fil.send(f"🙋 {i.user.mention} veut rejoindre l'équipage · wants to join — "
-                               f"<@{int(e['capitaine_id'])}>",
-                               allowed_mentions=discord.AllowedMentions(users=[discord.Object(e["capitaine_id"])]))
-            except discord.HTTPException as ex:
-                _log(f"[EQUIPAGES:DETAIL] demande equipage={e['id']} {ex}")
-        await i.followup.send(tr("demande_ok", langue, lien=lien), ephemeral=True)
+        texte = (f"🙋 {i.user.mention} veut rejoindre l'équipage · wants to join — <@{int(e['capitaine_id'])}>")
+        mentions = discord.AllowedMentions(users=[discord.Object(e["capitaine_id"])])
+        if e["mode"] == "carte":
+            await _mot_sous_la_carte(i.guild, e, texte, mentions)
+        else:
+            fil = await _fil_ou_rien(i.guild, e)
+            if fil is not None:
+                try:
+                    if fil.archived:
+                        await fil.edit(archived=False)
+                    await fil.add_user(i.user)
+                    await fil.send(texte, allowed_mentions=mentions)
+                except discord.HTTPException as ex:
+                    _log(f"[EQUIPAGES:DETAIL] demande equipage={e['id']} {ex}")
+        await i.followup.send(tr("demande_ok", langue, lien=f" {await lien(i.guild, e)}"), ephemeral=True)
 
 
 class BoutonRecrutement(discord.ui.DynamicItem[Button], template=r"eq:r:(?P<eid>\d+)"):
@@ -555,6 +624,47 @@ class BoutonRetirer(discord.ui.DynamicItem[Button], template=r"eq:x:(?P<eid>\d+)
         await i.response.send_message(view=v, ephemeral=True)
 
 
+async def _mot_sous_la_carte(g, e: dict, texte: str, mentions) -> bool:
+    """Le mot du bot en réponse à la carte (le capitaine est prévenu) ; effacé après un jour."""
+    try:
+        porteur = await conteneur(g, await conf(g))
+        if porteur is None:
+            return False
+        msg = await porteur.send(texte, reference=porteur.get_partial_message(int(e["fil_id"])),
+                                 allowed_mentions=mentions, mention_author=False)
+    except discord.HTTPException as ex:
+        _log(f"[EQUIPAGES:DETAIL] mot sous la carte equipage={e['id']} {type(ex).__name__} {ex}")
+        return False
+    await _ecrire("INSERT INTO equipages_notes(equipage_id, salon_id, message_id, expire) VALUES(?,?,?,?)",
+                  (int(e["id"]), porteur.id, msg.id, int(time.time()) + MOT_H * 3600))
+    return True
+
+
+async def _effacer_mots(g, eid: int = 0, maintenant: float | None = None) -> int:
+    """Les mots « veut rejoindre » d'un équipage (tous), ou ceux dont le jour est passé."""
+    if eid:
+        sql, args = "SELECT salon_id, message_id FROM equipages_notes WHERE equipage_id=?", (int(eid),)
+    else:
+        sql, args = "SELECT salon_id, message_id FROM equipages_notes WHERE expire<=?", (int(maintenant or time.time()),)
+    async with _get_db() as db:
+        async with db.execute(sql, args) as cur:
+            mots = [(int(a), int(b)) for a, b in await cur.fetchall()]
+    n = 0
+    for salon_id, mid in mots:
+        try:
+            porteur = await _resoudre(g, salon_id)
+            if porteur is not None:
+                await porteur.get_partial_message(mid).delete()
+                n += 1
+        except discord.NotFound:
+            pass
+        except discord.HTTPException as ex:
+            _log(f"[EQUIPAGES:DETAIL] mot non effacé {type(ex).__name__} {ex}")
+            continue
+        await _ecrire("DELETE FROM equipages_notes WHERE message_id=?", (mid,))
+    return n
+
+
 def _vue_message(texte: str) -> LayoutView:
     v = LayoutView(timeout=60)
     v.add_item(discord.ui.Container(discord.ui.TextDisplay(texte), accent_color=Palette.NEUTRAL))
@@ -567,7 +677,16 @@ async def retirer(g, eid: int, par_id: int = 0) -> bool:
         if e is None or e["supprime"]:
             return False
         try:
-            fil = await _fil(g, e)
+            if e["mode"] == "carte":
+                porteur = await _resoudre(g, (await conf(g))["forum"])
+                if porteur is not None:
+                    try:
+                        await porteur.get_partial_message(int(e["fil_id"])).delete()
+                    except discord.NotFound:
+                        pass
+                fil = None
+            else:
+                fil = await _fil(g, e)
             if fil is not None:
                 parent = fil.parent
                 try:
@@ -584,10 +703,35 @@ async def retirer(g, eid: int, par_id: int = 0) -> bool:
             _log(f"[EQUIPAGES][E3:DETAIL] equipage={eid} {type(ex).__name__} {ex}")
             return False
         await _ecrire("UPDATE equipages SET supprime=1, maj=? WHERE id=?", (int(time.time()), eid))
+    await _effacer_mots(g, eid)
     if par_id and par_id != e["capitaine_id"]:
         await _journal(g, "equipage.retire", f"<@{par_id}> a retiré l'équipage {e['nom']} de <@{e['capitaine_id']}>",
                        membre_id=e["capitaine_id"], auteur_id=par_id)
     return True
+
+
+async def demenager(g) -> int:
+    """22/10/2026, « deux fils seulement » : les équipages de l'ancien forum deviennent des cartes du
+    post ⚓ Crews — rien n'est perdu (nom, faction, champs, recrutement, capitaine)."""
+    porteur = await conteneur(g, await conf(g))
+    if not en_cartes(porteur):
+        return 0
+    n = 0
+    for e in await _lignes(_SQL_ACTIFS, (g.id,)):
+        if e["mode"] == "carte":
+            continue
+        capitaine = g.get_member(int(e["capitaine_id"]))
+        try:
+            carte = await porteur.send(view=vue_carte(e, avatar=capitaine.display_avatar.url if capitaine else ""),
+                                       allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as ex:
+            _log(f"[EQUIPAGES:DETAIL] équipage non déménagé equipage={e['id']} {type(ex).__name__} {ex}")
+            continue
+        await _ecrire("UPDATE equipages SET fil_id=?, mode='carte' WHERE id=?", (carte.id, e["id"]))
+        n += 1
+    if n:
+        await reposer_panneau(g)
+    return n
 
 
 async def sur_depart(member) -> int:
@@ -615,14 +759,15 @@ def droits(g) -> dict:
                 attach_files=True)}
 
 
-async def installer(g, categorie=None, *, forum: bool | None = None) -> list:
-    """Le forum ⚓crews (dans la zone Rell Seas) et son post épinglé ; rien n'est supprimé."""
+async def installer(g, categorie=None, *, forum: bool | None = None, creer: bool = True) -> list:
+    """Seul (sans les zones) : le forum ⚓crews et son post épinglé. Les zones donnent elles-mêmes le
+    post ⚓ Crews (`creer=False`). Rien n'est supprimé."""
     forum = ("COMMUNITY" in g.features) if forum is None else forum
     faits = []
     async with _verrou(("installer", g.id)):
         cf = await conf(g)
-        ch = forum_de(g, cf)
-        if ch is None:
+        ch = await _resoudre(g, cf["forum"])
+        if ch is None and creer:
             sujet = ("🇫🇷 Publie ton équipage avec le post épinglé ; on parle dans le fil de chaque équipage.\n"
                      "🇬🇧 Post your crew with the pinned post; talk in each crew's thread.")
             if forum:
@@ -637,26 +782,23 @@ async def installer(g, categorie=None, *, forum: bool | None = None) -> list:
                                                  reason="Équipages Rell Seas")
             await _db_set(g.id, "eq_forum", ch.id)
             faits.append(f"salon {ch.name}")
-        elif categorie is not None and getattr(ch, "category_id", None) != categorie.id:
+        elif (isinstance(ch, discord.ForumChannel) and categorie is not None
+              and getattr(ch, "category_id", None) != categorie.id):
             await ch.edit(category=categorie, sync_permissions=False, reason="Rangé dans la zone Rell Seas")
     await assurer_panneau(g)
     return faits
 
 
-async def assurer_panneau(g) -> None:
-    """Le post épinglé (forum) — ou, hors forum, le message du bas — qui ouvre le formulaire."""
+async def assurer_panneau(g, forcer: bool = False) -> None:
+    """Le post épinglé (ancien forum) — ou, dans un post, son message d'ouverture et le panneau qui
+    redescend sous la dernière carte."""
     cf = await conf(g)
-    ch = forum_de(g, cf)
+    ch = await conteneur(g, cf)
     if ch is None:
         return
     try:
         if isinstance(ch, discord.ForumChannel):
-            fil = g.get_channel_or_thread(cf["panneau"]) if cf["panneau"] else None
-            if fil is None and cf["panneau"]:
-                try:
-                    fil = await g.fetch_channel(cf["panneau"])
-                except discord.NotFound:
-                    fil = None
+            fil = await _resoudre(g, cf["panneau"]) if cf["panneau"] else None
             if fil is None:
                 fil = (await ch.create_thread(name=NOM_PANNEAU, view=vue_panneau(),
                                               allowed_mentions=discord.AllowedMentions.none(),
@@ -665,29 +807,37 @@ async def assurer_panneau(g) -> None:
                 await fil.edit(pinned=True, locked=True)
             elif fil.archived or not fil.locked or not fil.flags.pinned:
                 await fil.edit(archived=False, locked=True, pinned=True)
-        elif isinstance(ch, discord.TextChannel):
-            if cf["panneau"]:
-                try:
-                    await ch.fetch_message(cf["panneau"])
-                    return
-                except discord.NotFound:
-                    pass
-            msg = await ch.send(view=vue_panneau(), allowed_mentions=discord.AllowedMentions.none())
-            await _db_set(g.id, "eq_panneau", msg.id)
+            return
+        if forcer and cf["ouverture"]:
+            try:
+                await ch.get_partial_message(cf["ouverture"]).edit(view=vue_panneau(),
+                                                                    allowed_mentions=discord.AllowedMentions.none())
+            except discord.NotFound:
+                pass
+        if cf["panneau"]:
+            if cf["panneau"] == cf["ouverture"]:
+                return
+            try:
+                await ch.fetch_message(cf["panneau"])
+                return
+            except discord.NotFound:
+                pass
+        msg = await ch.send(view=vue_panneau(), allowed_mentions=discord.AllowedMentions.none())
+        await _db_set(g.id, "eq_panneau", msg.id)
     except discord.HTTPException as ex:
         _log("[EQUIPAGES][E4] post épinglé non posé")
         _log(f"[EQUIPAGES][E4:DETAIL] {type(ex).__name__} {ex}")
 
 
-async def reposer_panneau_texte(g) -> None:
-    """Hors forum : le message qui ouvre le formulaire reste en bas, sous les cartes."""
+async def reposer_panneau(g) -> None:
+    """Après une nouvelle carte, le panneau redescend dessous (le message d'ouverture reste)."""
     async with _verrou(("panneau", g.id)):
         cf = await conf(g)
-        ch = forum_de(g, cf)
-        if not isinstance(ch, discord.TextChannel):
+        ch = await conteneur(g, cf)
+        if not en_cartes(ch):
             return
         try:
-            if cf["panneau"]:
+            if cf["panneau"] and cf["panneau"] != cf["ouverture"]:
                 try:
                     await ch.get_partial_message(cf["panneau"]).delete()
                 except discord.NotFound:
@@ -703,9 +853,17 @@ async def entretenir(g) -> int:
     """Les équipages restent visibles (Discord archive un post resté calme 7 jours : on le réveille) ;
     un équipage dont le post a disparu sort de la liste — pas sur une panne réseau."""
     n = 0
+    await _effacer_mots(g)
     for e in await _lignes(_SQL_ACTIFS, (g.id,)):
         try:
-            fil = await _fil(g, e)
+            if e["mode"] == "carte":
+                porteur = await _resoudre(g, (await conf(g))["forum"])
+                try:
+                    fil = await porteur.fetch_message(int(e["fil_id"])) if porteur is not None else None
+                except discord.NotFound:
+                    fil = None
+            else:
+                fil = await _fil(g, e)
         except discord.HTTPException as ex:
             _log(f"[EQUIPAGES:DETAIL] lecture du fil equipage={e['id']} {type(ex).__name__} {ex}")
             continue

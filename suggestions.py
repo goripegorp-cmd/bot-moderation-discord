@@ -99,9 +99,23 @@ def verifier(titre: str, details: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def salon_de(g):
+    """Le salon des idées — ou, depuis le 22/10/2026, le post 💡 Suggestions du forum communautaire
+    (réveillé s'il dormait)."""
     c = await _cfg(g.id)
-    salon = g.get_channel(int(c.get("suggestions_salon", 0) or 0))
-    return salon if isinstance(salon, discord.TextChannel) else None
+    sid = int(c.get("suggestions_salon", 0) or 0)
+    salon = g.get_channel_or_thread(sid) if sid else None
+    if salon is None and sid:
+        try:
+            salon = await g.fetch_channel(sid)
+        except discord.HTTPException as ex:
+            _log(f"[SUGGESTIONS] lecture du salon : {type(ex).__name__} {ex}")
+            salon = None
+    if isinstance(salon, discord.Thread) and salon.archived:
+        try:
+            await salon.edit(archived=False)
+        except discord.HTTPException as ex:
+            _log(f"[SUGGESTIONS] réveil du post : {ex}")
+    return salon if isinstance(salon, (discord.TextChannel, discord.Thread)) else None
 
 
 async def ouvertes(g) -> bool:
@@ -136,7 +150,7 @@ async def reposer_panneau(g, salon=None) -> None:
                 return
             c = await _cfg(g.id)
             ancien = int(c.get("suggestions_panneau", 0) or 0)
-            if ancien:
+            if ancien and ancien != salon.id:  # le message d'ouverture d'un post reste
                 try:
                     await salon.get_partial_message(ancien).delete()
                 except discord.NotFound:
@@ -162,6 +176,36 @@ async def assurer_panneau(g) -> None:
             _log(f"[SUGGESTIONS] lecture du panneau : {ex}")
             return
     await reposer_panneau(g, salon)
+
+
+async def demenager(g, ancien_id: int) -> int:
+    """22/10/2026, les deux forums : les idées encore en vote (en attente, à l'étude) de l'ancien salon
+    sont republiées dans le post 💡 Suggestions, avec leurs votes ; les décidées restent sur le site."""
+    salon = await salon_de(g)
+    if salon is None or salon.id == int(ancien_id or 0):
+        return 0
+    async with _get_db() as db:
+        async with db.execute("SELECT id FROM suggestions_v2 WHERE guild_id=? AND channel_id=?"
+                              " AND message_id IS NOT NULL AND COALESCE(retire_le, 0)=0"
+                              " AND statut IN ('attente', 'etude') ORDER BY id LIMIT 50",
+                              (g.id, int(ancien_id))) as cur:
+            ids = [r[0] for r in await cur.fetchall()]
+    n = 0
+    for sid in ids:
+        s, pour, contre = await charger(sid)
+        try:
+            msg = await salon.send(view=vue_carte(s, pour, contre, avatar=_avatar(g, s["auteur_id"])),
+                                   allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as ex:
+            _log(f"[SUGGESTIONS] idée {sid} non déménagée : {type(ex).__name__} {ex}")
+            continue
+        async with _get_db() as db:
+            await db.execute("UPDATE suggestions_v2 SET channel_id=?, message_id=? WHERE id=?", (salon.id, msg.id, sid))
+            await db.commit()
+        n += 1
+    if n:
+        await reposer_panneau(g, salon)
+    return n
 
 
 async def creer_salon(g):
@@ -537,7 +581,7 @@ async def appliquer_decision(g, sid: int, statut: str, note: str, par: int) -> b
         if not cur.rowcount:
             return False
     s, pour, contre = await charger(sid)
-    salon = g.get_channel(s["channel_id"]) if g else None
+    salon = g.get_channel_or_thread(int(s["channel_id"])) if g else None
     if salon is not None and not s.get("retire_le"):
         await _rafraichir(salon, sid, attendre=0)
     await prevenir_auteur(g, s, statut, note)
@@ -552,7 +596,7 @@ async def retirer(g, sid: int, auteur) -> tuple[bool, str]:
         return False, "Idée introuvable."
     if s.get("retire_le"):
         return False, "Cette idée est déjà retirée du salon."
-    salon = g.get_channel(int(s["channel_id"]))
+    salon = g.get_channel_or_thread(int(s["channel_id"]))
     if salon is not None and s["message_id"]:
         try:
             await salon.get_partial_message(int(s["message_id"])).delete()
@@ -716,9 +760,10 @@ async def sur_message(msg: discord.Message) -> None:
     if g is None or _cfg is None or msg.author.bot or msg.webhook_id:
         return
     try:
-        salon = await salon_de(g)
-        if salon is None or msg.channel.id != salon.id or est_staff(msg.author):
+        #  Sans lire Discord : à chaque message du serveur, on compare seulement l'identifiant.
+        if msg.channel.id != int((await _cfg(g.id)).get("suggestions_salon", 0) or 0) or est_staff(msg.author):
             return
+        salon = msg.channel
         try:
             await msg.delete()
         except discord.HTTPException:

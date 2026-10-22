@@ -94,8 +94,22 @@ async def _oublier(gid: int, uid: int) -> None:
 
 
 async def salon_de(g):
+    """Le salon des boosts — ou, depuis le 22/10/2026, le post 🚀 Boosts du forum communautaire
+    (réveillé s'il dormait)."""
     sid = int((await _cfg(g.id)).get("boosts_salon", 0) or 0)
-    return g.get_channel(sid) if sid else None
+    salon = g.get_channel_or_thread(sid) if sid else None
+    if salon is None and sid:
+        try:
+            salon = await g.fetch_channel(sid)
+        except discord.HTTPException as ex:
+            _log(f"[BOOSTS] lecture du salon : {type(ex).__name__} {ex}")
+            return None
+    if isinstance(salon, discord.Thread) and salon.archived:
+        try:
+            await salon.edit(archived=False)
+        except discord.HTTPException as ex:
+            _log(f"[BOOSTS] réveil du post : {ex}")
+    return salon
 
 
 def _categorie(g):
@@ -169,8 +183,9 @@ async def synchroniser(g) -> dict:
         entete = await _message(salon, presents, eid) if eid else None
         if entete is None:
             # Plus d'en-tête en haut : on repart de zéro, l'en-tête puis les cartes dans l'ordre des boosts.
+            # (Le message d'ouverture d'un post — même identifiant que le post — n'est jamais effacé.)
             for m in list(presents.values()):
-                if getattr(m.author, "id", 0) == moi:
+                if getattr(m.author, "id", 0) == moi and m.id != salon.id:
                     await _effacer(m)
             for uid in lignes:
                 await _oublier(g.id, uid)
@@ -205,7 +220,7 @@ async def synchroniser(g) -> dict:
             await _noter(g.id, m.id, msg.id, _avatar(m))
             lignes[m.id] = (msg.id, _avatar(m))
             bilan["ajoutees"] += 1
-        gardes = {eid} | {mid for mid, _a in lignes.values()}
+        gardes = {eid, salon.id} | {mid for mid, _a in lignes.values()}
         for m in list(presents.values()):
             if getattr(m.author, "id", 0) == moi and m.id not in gardes:
                 await _effacer(m)

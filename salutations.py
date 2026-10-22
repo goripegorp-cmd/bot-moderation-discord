@@ -68,11 +68,18 @@ def est_salutation(texte: str) -> bool:
 
 
 def salon_ouvert(salon, guild) -> bool:
-    """Un salon où @everyone peut écrire (les fils suivent leur salon)."""
-    parent = getattr(salon, "parent", None) if isinstance(salon, discord.Thread) else salon
-    if parent is None or guild is None:
+    """Un salon où @everyone peut écrire. Un fil (ou un post de forum, comme 💬 Chat du forum
+    communautaire, où l'on n'ouvre pas de post mais où l'on écrit) : écrire dans les fils de son salon,
+    et le fil n'est pas verrouillé."""
+    if guild is None or salon is None:
         return False
-    p = parent.permissions_for(guild.default_role)
+    if isinstance(salon, discord.Thread):
+        parent = getattr(salon, "parent", None)
+        if parent is None or getattr(salon, "locked", False):
+            return False
+        p = parent.permissions_for(guild.default_role)
+        return bool(p.view_channel and p.send_messages_in_threads)
+    p = salon.permissions_for(guild.default_role)
     return bool(p.view_channel and p.send_messages)
 
 

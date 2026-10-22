@@ -1,12 +1,14 @@
-"""22/10/2026 (nuit) : « Un vrai système ultra bien concernant le jeu. Les gens, ils peuvent publier
-leur équipage, que ce soit la marine ou les pirateries… » Un forum ⚓crews dans la zone Rell Seas :
-un post par équipage, publié dans sa langue, carte en français · anglais ; le capitaine le modifie,
-ouvre ou ferme le recrutement, le retire ; rejoindre prévient le capitaine. Sur un faux serveur."""
+"""22/10/2026 (nuit) : « Les gens peuvent publier leur équipage, que ce soit la marine ou les
+pirateries… un vrai système ultra complet », puis « deux fils seulement… plutôt que des milliers de
+fils ». Le post ⚓ Crews du forum 🌊rell-seas : une carte par équipage, publiée dans sa langue ; le
+capitaine la modifie, ouvre ou ferme le recrutement, la retire ; rejoindre le prévient sous sa
+carte. Sur un faux serveur."""
 from __future__ import annotations
 
 import ast
 import asyncio
 import re
+import time
 from pathlib import Path
 
 import discord
@@ -14,7 +16,7 @@ import pytest
 
 import equipages as Q
 from conftest_discord import Obj, base
-from faux_serveur import Forum, Monde, Texte, compter, ids, interaction, run, textes
+from faux_serveur import Forum, Monde, compter, ids, interaction, run, textes
 
 RACINE = Path(__file__).resolve().parent.parent
 VALEURS = {"nom": "Les Requins Rouges", "pseudo": "Kolax_RS", "membres": "6 / 10", "niveau": "500",
@@ -48,21 +50,22 @@ def env(tmp_path):
     return Obj(conf=conf, journal=journal, staff=staff, langues=langues)
 
 
-def installe(env, forum=True):
-    g = Monde(forum)
-    rell = g.categorie("· Rell Seas")
-    faits = run(Q.installer(g, rell))
-    return g, rell, faits
+def installe(env):
+    """Comme les zones le laissent : le post ⚓ Crews (verrouillé) du forum 🌊rell-seas ; son message
+    d'ouverture porte « Pirates » et « Marine »."""
+    g = Monde()
+    rell = g._salon(Forum, "🌊rell-seas", {"category": g.commu})
+    crews = run(rell.create_thread(name="⚓ Crews · Équipages")).thread
+    crews.locked = True
+    env.conf.update(eq_forum=crews.id, eq_panneau=crews.id, eq_ouverture=crews.id)
+    assert run(Q.installer(g, creer=False)) == [], "les zones donnent le post : rien à créer"
+    return g, crews
 
 
 def publier(g, membre, faction="pirate", valeurs=None, langue="fr"):
     i = interaction(g, membre)
     run(Q.publier(i, faction, dict(valeurs or VALEURS), langue))
     return i
-
-
-def forum_de(g, env):
-    return g.get_channel(env.conf["eq_forum"])
 
 
 def _vue_de(i):
@@ -81,136 +84,86 @@ def test_Q1_deux_factions_un_formulaire_court_dans_les_deux_langues():
             f = Q.Formulaire(faction, langue)
             assert len(f.title) <= 45 and len(f.children) == len(Q.CHAMPS)
             assert all(len(lab.text) <= 45 for lab in f.children)
-    assert Q.Formulaire("marine", "en").title == "⚓ Marine crew"
-    assert Q.Formulaire("pirate").title == "🏴‍☠️ Équipage Pirates"
-    assert [lab.text for lab in Q.Formulaire("pirate", "en").children][:2] == ["Crew name",
-                                                                               "Your Roblox username (captain)"]
+    assert Q.Formulaire("marine", "en").title == "⚓ Marine crew" and Q.Formulaire("pirate").title == \
+        "🏴‍☠️ Équipage Pirates"
     assert all(set(v) == {"fr", "en"} for v in Q.TEXTES.values()), "chaque texte existe dans les deux langues"
     for item, gabarit in ((Q.BoutonPublier("marine"), r"eq:p:(?P<faction>pirate|marine)"),
                           (Q.BoutonRejoindre(3), r"eq:j:(?P<eid>\d+)"), (Q.BoutonRecrutement(3), r"eq:r:(?P<eid>\d+)"),
                           (Q.BoutonModifier(3), r"eq:m:(?P<eid>\d+)"), (Q.BoutonRetirer(3), r"eq:x:(?P<eid>\d+)")):
         assert re.fullmatch(gabarit, item.item.custom_id)
-    assert [b.item.label for b in (Q.BoutonRejoindre(1), Q.BoutonRecrutement(1), Q.BoutonModifier(1),
-                                   Q.BoutonRetirer(1))] == ["Rejoindre · Join", "Recrutement · Recruiting",
-                                                            "Modifier · Edit", "Retirer · Remove"]
 
 
-def test_Q2_un_forum_dans_la_zone_rell_seas_un_post_epingle_deux_boutons(env):
-    g, rell, faits = installe(env)
-    forum = forum_de(g, env)
-    assert faits == ["salon ⚓crews"] and isinstance(forum, Forum) and forum.category_id == rell.id
-    assert [t.name for t in forum.available_tags] == ["Pirates", "Marine", "Recrute · Recruiting", "Complet · Full"]
-    droits = forum.kw["overwrites"][g.default_role]
-    assert (droits.send_messages, droits.send_messages_in_threads, droits.attach_files) == (False, True, True), \
-        "on publie par le bouton, on parle (et on montre) dans les fils"
-    post = g.fils[env.conf["eq_panneau"]]
-    assert post.name == "📌 Publier ton équipage · Post your crew" and post.flags.pinned and post.locked
-    assert ids(forum.crees[0].view) == ["eq:p:pirate", "eq:p:marine"]
-    t = textes(forum.crees[0].view)
-    assert "🇫🇷" in t and "🇬🇧" in t and "Un équipage par capitaine · One crew per captain" in t
-    assert run(Q.installer(g, rell)) == [] and len(forum.crees) == 1, "relancer ne crée rien"
-    forum.category_id = g.commu.id
-    run(Q.installer(g, rell))
-    assert forum.category_id == rell.id and forum.edits[-1]["sync_permissions"] is False, "il revient dans sa zone"
-    post.archived = True
-    run(Q.assurer_panneau(g))
-    assert not post.archived and post.flags.pinned
-
-
-def test_Q3_publier_son_equipage_carte_etiquettes_un_par_capitaine(env):
-    g, _r, _f = installe(env)
+def test_Q2_publier_une_carte_dans_le_post_crews_le_bouton_redescend(env):
+    g, crews = installe(env)
     kolax = g.membre(7)
     i = publier(g, kolax)
-    assert i.suivis[0][0].startswith("Équipage publié : https://discord.com/channels/1/")
-    forum = forum_de(g, env)
-    post = forum.crees[-1]
-    assert post.fil.name == "🏴‍☠️ Les Requins Rouges · Pirate7" and post.fil.membres == [7]
-    assert post.fil.applied_tags == ["Pirates", "Recrute · Recruiting"]
-    assert ids(post.view) == ["eq:j:1", "eq:r:1", "eq:m:1", "eq:x:1"]
-    t = textes(post.view)
-    assert "## 🏴‍☠️ Les Requins Rouges" in t and "**Capitaine · Captain** · Kolax\\_RS" in t
-    assert "📣 **Recrute · Recruiting**" in t and "On chasse les boss le soir." in t
-    assert compter(post.view) <= 40
-    assert env.journal[-1][0] == "equipage.publie" and env.journal[-1][2]["membre_id"] == 7
     e = run(Q.charger(1))
-    assert (e["faction"], e["recrute"], e["fil_id"], e["nom"]) == ("pirate", 1, post.fil.id, "Les Requins Rouges")
+    carte = crews.messages[0]
+    assert (e["mode"], e["fil_id"]) == ("carte", carte.id) and len(g.fils) == 1, "une carte, pas un fil"
+    assert i.suivis[0][0] == f"Équipage publié : https://discord.com/channels/1/{crews.id}/{carte.id}"
+    assert ids(carte.kw["view"]) == ["eq:j:1", "eq:r:1", "eq:m:1", "eq:x:1"] and compter(carte.kw["view"]) <= 40
+    t = textes(carte.kw["view"])
+    assert "## 🏴‍☠️ Les Requins Rouges" in t and "**Capitaine · Captain** · Kolax\\_RS" in t
+    assert "📣 **Recrute · Recruiting**" in t and carte.kw["allowed_mentions"].everyone is False
+    panneau = crews.messages[1]
+    assert ids(panneau.kw["view"]) == ["eq:p:pirate", "eq:p:marine"] and env.conf["eq_panneau"] == panneau.id
+    assert crews.id not in g.effaces, "le message d'ouverture du post reste"
+    assert env.journal[-1][0] == "equipage.publie"
     i = publier(g, kolax, "marine")
-    assert i.suivis[0][0].startswith("Tu as déjà un équipage"), "un équipage par capitaine"
-    i = interaction(g, kolax)
-    run(Q.BoutonPublier("marine").callback(i))
-    assert i.response.messages[0][0].startswith("Tu as déjà un équipage") and not i.response.modals
+    assert f"https://discord.com/channels/1/{crews.id}/{carte.id}" in i.suivis[0][0], "un équipage par capitaine"
     env.langues[8] = "en"
     i = interaction(g, g.membre(8))
     run(Q.BoutonPublier("marine").callback(i))
     assert i.response.modals[0].title == "⚓ Marine crew"
     i = publier(g, g.membre(8), "marine", dict(VALEURS, nom=""), "en")
     assert i.response.messages[0][0] == "“Crew name” is required."
-    i = publier(g, g.membre(8), "marine", dict(VALEURS, nom="Navy insulte"), "en")
-    assert "insulte" in i.response.messages[0][0], "le texte passe le même filtre que le reste"
     i = publier(g, g.membre(8), "marine", dict(VALEURS, nom="Blue Navy", presentation="<@123456789012345678> @everyone"),
                 "en")
     assert i.suivis[0][0].startswith("Crew posted: https://")
-    assert forum.crees[-1].fil.applied_tags == ["Marine", "Recrute · Recruiting"]
-    t = textes(forum.crees[-1].view)
+    t = textes(crews.messages[-2].kw["view"])
     assert "<@123456789012345678>" not in t and "@everyone" not in t, "le texte d'un membre ne mentionne personne"
-    assert forum.crees[-1].allowed_mentions.everyone is False
+    assert panneau.id in g.effaces, "le bouton redescend sous la dernière carte"
 
 
-def test_Q4_demander_a_rejoindre_previent_le_capitaine_une_fois(env):
-    g, _r, _f = installe(env)
+def test_Q3_rejoindre_un_mot_sous_la_carte_qui_previent_le_capitaine(env):
+    g, crews = installe(env)
     cap, matelot = g.membre(7), g.membre(8)
     publier(g, cap)
-    fil = forum_de(g, env).crees[-1].fil
+    carte = crews.messages[0]
     i = interaction(g, cap)
     run(Q.BoutonRejoindre(1).callback(i))
     assert i.suivis[0][0] == "C'est ton équipage."
     i = interaction(g, matelot)
     run(Q.BoutonRejoindre(1).callback(i))
-    assert i.suivis[0][0].startswith("Le capitaine est prévenu, rendez-vous dans le fil.")
-    assert fil.envois[-1][0] == "🙋 <@8> veut rejoindre l'équipage · wants to join — <@7>" and 8 in fil.membres
-    assert [u.id for u in fil.envois[-1][1]["allowed_mentions"].users] == [7], "seul le capitaine est notifié"
-    n = len(fil.envois)
+    assert i.suivis[0][0] == f"Le capitaine est prévenu, rendez-vous dans le fil. " \
+                             f"https://discord.com/channels/1/{crews.id}/{carte.id}"
+    mot = crews.messages[-1]
+    assert mot.content == "🙋 <@8> veut rejoindre l'équipage · wants to join — <@7>" and mot.reference.message_id == carte.id
+    assert [u.id for u in mot.kw["allowed_mentions"].users] == [7], "seul le capitaine est notifié"
+    n = len(crews.messages)
     i = interaction(g, matelot)
     run(Q.BoutonRejoindre(1).callback(i))
-    assert "déjà demandé" in i.suivis[0][0] and len(fil.envois) == n, "pas de rafale de notifications"
-    fil.archived = True
-    env.langues[9] = "en"
-    i = interaction(g, g.membre(9))
-    run(Q.BoutonRejoindre(1).callback(i))
-    assert not fil.archived and i.suivis[0][0].startswith("The captain has been notified"), \
-        "un post endormi se réveille pour la demande"
+    assert "déjà demandé" in i.suivis[0][0] and len(crews.messages) == n, "pas de rafale de notifications"
+    assert run(Q._effacer_mots(g, maintenant=time.time() + 23 * 3600)) == 0
+    assert run(Q._effacer_mots(g, maintenant=time.time() + 25 * 3600)) == 1 and mot.id in g.effaces, \
+        "le mot du bot part après un jour"
 
 
-def test_Q5_le_capitaine_ferme_et_rouvre_le_recrutement(env):
-    g, _r, _f = installe(env)
+def test_Q4_le_capitaine_ferme_rouvre_modifie_sa_carte_suit(env):
+    g, crews = installe(env)
     cap, autre = g.membre(7), g.membre(8)
     publier(g, cap)
-    fil = forum_de(g, env).crees[-1].fil
+    carte = crews.messages[0]
     i = interaction(g, autre)
     run(Q.BoutonRecrutement(1).callback(i))
     assert i.response.messages[0][0] == "Réservé au capitaine de l'équipage."
     i = interaction(g, cap)
     run(Q.BoutonRecrutement(1).callback(i))
-    assert i.suivis[0][0] == "Recrutement fermé." and fil.applied_tags == ["Pirates", "Complet · Full"]
-    vue = fil.cartes[-1][1]["view"]
-    assert ids(vue) == ["eq:r:1", "eq:m:1", "eq:x:1"] and "🔒 **Complet · Full**" in textes(vue)
+    assert i.suivis[0][0] == "Recrutement fermé."
+    assert crews.cartes[-1][0] == carte.id and ids(crews.cartes[-1][1]["view"]) == ["eq:r:1", "eq:m:1", "eq:x:1"]
     i = interaction(g, autre)
     run(Q.BoutonRejoindre(1).callback(i))
     assert i.suivis[0][0] == "Cet équipage ne recrute pas pour le moment."
-    i = interaction(g, cap)
-    run(Q.BoutonRecrutement(1).callback(i))
-    assert i.suivis[0][0] == "Recrutement ouvert." and fil.applied_tags == ["Pirates", "Recrute · Recruiting"]
-    assert ids(fil.cartes[-1][1]["view"])[0] == "eq:j:1"
-
-
-def test_Q6_modifier_renomme_le_post_et_refait_la_carte(env):
-    g, _r, _f = installe(env)
-    cap = g.membre(7)
-    publier(g, cap)
-    fil = forum_de(g, env).crees[-1].fil
-    i = interaction(g, g.membre(8))
-    run(Q.BoutonModifier(1).callback(i))
-    assert i.response.messages[0][0] == "Réservé au capitaine de l'équipage."
     i = interaction(g, cap)
     run(Q.BoutonModifier(1).callback(i))
     modal = i.response.modals[0]
@@ -218,54 +171,49 @@ def test_Q6_modifier_renomme_le_post_et_refait_la_carte(env):
     i = interaction(g, cap)
     run(Q.modifier(i, 1, dict(VALEURS, nom="Les Requins Noirs", membres="8 / 10"), "fr"))
     assert i.suivis[0][0] == "Équipage mis à jour."
-    assert fil.name == "🏴‍☠️ Les Requins Noirs · Pirate7"
-    t = textes(fil.cartes[-1][1]["view"])
-    assert "Les Requins Noirs" in t and "8 / 10" in t and run(Q.charger(1))["nom"] == "Les Requins Noirs"
+    t = textes(crews.cartes[-1][1]["view"])
+    assert "Les Requins Noirs" in t and "8 / 10" in t and crews.name == "⚓ Crews · Équipages", "le post ne bouge pas"
     i = interaction(g, cap)
     run(Q.modifier(i, 1, dict(VALEURS, nom="Les insulte"), "fr"))
     assert "insulte" in i.response.messages[0][0] and run(Q.charger(1))["nom"] == "Les Requins Noirs"
 
 
-def test_Q7_retirer_le_capitaine_sans_bruit_le_staff_au_journal_le_depart_aussi(env):
-    g, _r, _f = installe(env)
+def test_Q5_retirer_la_carte_et_ses_mots_partent_le_depart_aussi(env):
+    g, crews = installe(env)
     a, b, c = g.membre(7), g.membre(8), g.membre(9)
     env.staff.add(12)
     g.membre(12)
     publier(g, a)
     publier(g, b, "marine")
     publier(g, c)
-    fil_a = g.fils[run(Q.charger(1))["fil_id"]]
+    carte_a = run(Q.charger(1))["fil_id"]
+    run(Q.BoutonRejoindre(1).callback(interaction(g, b)))
+    mot = crews.messages[-1]
     i = interaction(g, c)
     run(Q.BoutonRetirer(1).callback(i))
     assert i.response.messages[0][0] == "Réservé au capitaine de l'équipage."
     i = interaction(g, a)
     run(Q.BoutonRetirer(1).callback(i))
     vue = i.response.messages[0][1]["view"]
-    assert "Retirer cet équipage ? Son post disparaît." in textes(vue)
     oui = next(x for x in vue.walk_children() if isinstance(x, discord.ui.Button) and x.label == "Oui, retirer")
     n = len(env.journal)
     j = interaction(g, a)
     run(oui.callback(j))
-    assert "Équipage retiré." in textes(_vue_de(j)) and fil_a.id not in g.fils and len(env.journal) == n
+    assert "Équipage retiré." in textes(_vue_de(j)) and {carte_a, mot.id} <= g.effaces and len(env.journal) == n
     assert run(Q.charger(1))["supprime"] == 1 and not run(Q.retirer(g, 1, 7)), "déjà retiré"
-    i = interaction(g, g.membre(12))
-    run(Q.BoutonRetirer(2).callback(i))
-    assert "Retirer cet équipage" in textes(i.response.messages[0][1]["view"]), "le staff peut retirer"
-    assert run(Q.retirer(g, 2, 12)) and env.journal[-1][0] == "equipage.retire"
+    assert run(Q.retirer(g, 2, 12)) and env.journal[-1][0] == "equipage.retire", "le staff, au journal"
     assert run(Q.sur_depart(c)) == 1 and run(Q.charger(3))["supprime"] == 1, "il part avec son capitaine"
     assert publier(g, a).suivis[0][0].startswith("Équipage publié"), "après l'avoir retiré, on peut en republier un"
 
 
-def test_Q8_l_entretien_reveille_les_posts_oublie_les_disparus_pas_sur_une_panne(env):
-    g, _r, _f = installe(env)
+def test_Q6_l_entretien_oublie_les_cartes_effacees_pas_sur_une_panne(env):
+    g, crews = installe(env)
     publier(g, g.membre(7))
     publier(g, g.membre(8))
-    f1, f2 = (g.fils[run(Q.charger(n))["fil_id"]] for n in (1, 2))
-    f1.archived = True
-    run(f2.delete())  # supprimé à la main
-    assert run(Q.entretenir(g)) == 1 and not f1.archived
+    run(crews.get_partial_message(run(Q.charger(2))["fil_id"]).delete())  # effacée à la main
+    run(Q.entretenir(g))
     assert run(Q.charger(2))["supprime"] == 1 and run(Q.charger(1))["supprime"] == 0
-    del g.fils[f1.id]  # plus dans le cache : il faut le demander à Discord, qui ne répond pas
+    del g.fils[crews.id]  # plus en mémoire : il faut demander à Discord, qui ne répond pas
 
     async def panne(_cid):
         raise discord.HTTPException(Obj(status=503, reason="x"), "panne")
@@ -275,30 +223,33 @@ def test_Q8_l_entretien_reveille_les_posts_oublie_les_disparus_pas_sur_une_panne
     assert not run(Q.retirer(g, 1, 7)) and run(Q.charger(1))["supprime"] == 0, "ni un retrait qui n'a pas abouti"
 
 
-def test_Q9_sans_communaute_un_salon_des_cartes_et_le_bouton_en_bas(env):
-    g, _r, faits = installe(env, forum=False)
-    salon = forum_de(g, env)
-    assert isinstance(salon, Texte) and faits == ["salon ⚓crews"] and len(salon.envois) == 1
-    ancien = env.conf["eq_panneau"]
+def test_Q7_l_ancien_forum_un_post_par_equipage_demenage_en_cartes(env):
+    g = Monde()
+    rell = g.categorie("· Rell Seas")
+    assert run(Q.installer(g, rell)) == ["salon ⚓crews"]
+    forum = g.get_channel(env.conf["eq_forum"])
+    assert isinstance(forum, Forum) and [t.name for t in forum.available_tags] == [
+        "Pirates", "Marine", "Recrute · Recruiting", "Complet · Full"]
     publier(g, g.membre(7))
-    e = run(Q.charger(1))
-    carte = next(x for x in salon.envois if x[0] == e["fil_id"])
-    assert ids(carte[2]["view"])[0] == "eq:j:1" and g.fils[e["fil_id"]].parent is salon
-    assert ancien in g.effaces and env.conf["eq_panneau"] != ancien, "le bouton redescend sous la carte"
+    ancien = forum.crees[-1].fil
+    assert ancien.applied_tags == ["Pirates", "Recrute · Recruiting"] and run(Q.charger(1))["mode"] == ""
     run(Q.BoutonRecrutement(1).callback(interaction(g, g.membre(7))))
-    assert salon.cartes[-1][0] == e["fil_id"], "la carte se met à jour dans le salon, pas dans le fil"
-    run(Q.assurer_panneau(g))
-    assert len([x for x in salon.envois if ids(x[2].get("view")) == ["eq:p:pirate", "eq:p:marine"]]) == 2, \
-        "un bouton toujours là n'est pas reposé"
-    assert run(Q.retirer(g, 1, 7)) and e["fil_id"] in g.effaces
+    assert ancien.applied_tags == ["Pirates", "Complet · Full"]
+    neuf = g._salon(Forum, "🌊rell-seas", {"category": g.commu})
+    crews = run(neuf.create_thread(name="⚓ Crews · Équipages")).thread
+    env.conf.update(eq_forum=crews.id, eq_panneau=crews.id, eq_ouverture=crews.id)
+    assert run(Q.demenager(g)) == 1
+    e = run(Q.charger(1))
+    assert e["mode"] == "carte" and e["fil_id"] == crews.messages[0].id and e["recrute"] == 0, "rien n'est perdu"
+    assert "Les Requins Rouges" in textes(crews.messages[0].kw["view"])
+    assert run(Q.demenager(g)) == 0, "une fois"
 
 
-def test_Q10_branche_dans_le_bot():
+def test_Q8_branche_dans_le_bot():
     src = (RACINE / "bot.py").read_text(encoding="utf-8")
     for nom in ("BoutonPublier", "BoutonRejoindre", "BoutonRecrutement", "BoutonModifier", "BoutonRetirer"):
         assert f"equipages.{nom}" in src, f"{nom} doit être réenregistré au démarrage"
     assert "await equipages.init_db()" in src and "await equipages.sur_depart(m)" in src
-    arbre = ast.parse(src)
-    boucle = next(ast.unparse(n) for n in arbre.body if getattr(n, "name", "") == "entraide_task")
+    boucle = next(ast.unparse(n) for n in ast.parse(src).body if getattr(n, "name", "") == "entraide_task")
     assert "await equipages.entretenir(g)" in boucle
     assert (RACINE / "visuels" / "rs_crews.gif").is_file()
