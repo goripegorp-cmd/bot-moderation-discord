@@ -312,3 +312,29 @@ def test_Z10_branche_dans_le_bot():
     assert installer.index("db_set(g.id, 'zones_v1'") < installer.index("zones.installer(g)")
     assert '"zones": any(' in SRC and '"menage": any(' in SRC, "/stats dit ce qui est en place"
     assert all((RACINE / "visuels" / f"{k}.gif").is_file() for k in ("orientation", "rs_crews"))
+
+
+def test_Z11_la_zone_du_clan_annonces_et_discussions_reservees_au_clan(env):
+    g = serveur(env)
+    role = run(g.create_role(name="GoRPC"))
+    staff = run(g.create_role(name="Staff"))
+    assert run(ZN.installer_clan(g, None)) == [], "sans rôle du clan, rien"
+    faits = run(ZN.installer_clan(g, role, [staff]))
+    clan = ZN.categorie_clan(g)
+    assert noms(clan) == ["📢▷・info-gorp", "📣▷・annonces-gorp", "✍▷・chat-gorpsea", "🧵▷・discussions-gorp", "🔊Join"]
+    annonces = g.get_channel(env.conf["clan_annonces"])
+    ows = annonces.kw["overwrites"]
+    assert ows[g.default_role].view_channel is False and ows[role].view_channel and ows[role].send_messages is False
+    assert ows[staff].send_messages, "le staff écrit, le clan lit"
+    forum = g.get_channel(env.conf["clan_forum"])
+    assert forum.kw["overwrites"][role].send_messages and forum.kw["overwrites"][g.default_role].view_channel is False
+    assert [c.fil.name for c in forum.crees] == ["💰 Économie · Economy", "🤝 Trade du clan · Clan trade",
+                                                 "🍺 Taverne · Tavern"]
+    assert faits == ["salon 📣▷・annonces-gorp", "salon 🧵▷・discussions-gorp", "fil 💰 Économie · Economy",
+                     "fil 🤝 Trade du clan · Clan trade", "fil 🍺 Taverne · Tavern"] and env.conf["clan_v1"] == 1
+    assert run(ZN.installer_clan(g, role, [staff])) == [], "relancer ne crée rien"
+    eco = g.fils[env.conf["clan_fils"]["economie"]]
+    eco.archived = True
+    run(ZN.entretenir(g))
+    assert not eco.archived, "les fils du clan restent ouverts"
+    assert {env.conf["clan_annonces"], env.conf["clan_forum"]} <= ZN.ids_salons(env.conf)

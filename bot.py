@@ -97,6 +97,7 @@ import suggestions  # idées des membres : votes, fil de discussion, décision d
 import entraide  # l'entraide Rell Seas : help et trade, guides qui certifient, nettoyage, bilingue
 import equipages  # les équipages de Rell Seas : Pirates ou Marine, un post par équipage
 import zones  # les compartiments : Communautaire et Rell Seas, rangés par priorité
+import annonces  # les annonces en un clic : bandeau, texte, liens, « ✅ Vu », un fil par annonce
 import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -6927,7 +6928,7 @@ class BoutonFicheSite(discord.ui.DynamicItem[Button], template=r"alerte:fiche:(?
 
 NOM_SALON_LOGS = "📋logs"
 #  Le menu est réécrit quand sa signature change (texte, mode, nombre d'anciens salons).
-MENU_LOGS_VERSION = 3
+MENU_LOGS_VERSION = 4
 #  Les alertes qui demandent une réaction humaine (raid, compte piraté, escalade, staff) : en
 #  mode site, elles arrivent dans le salon unique. Tous les autres salons de logs sont mis à 0.
 CLES_ALERTES = ('mod_log_channel', 'antiraid_log_channel', 'log_anti_raid', 'log_anti_alt',
@@ -6964,11 +6965,14 @@ async def _menu_logs(g, c):
     texte = ("### Les logs du serveur, sur le site\n"
              "Tickets et transcripts · candidatures · sanctions par modérateur et par membre · "
              "journal de tout ce qui s'est passé, lisible par personne.\n"
-             "-# Un clic : ton lien personnel, valable 24 h. Réservé au fondateur et à la direction.")
+             "-# Un clic : ton lien personnel, valable 24 h. Réservé au fondateur et à la direction.\n"
+             "### 📣 Les annonces\n"
+             "Un salon, un titre, un texte (et une image si tu veux) : l'annonce part avec son bandeau, "
+             "« ✅ Vu » pour savoir qui l'a lue, et un fil pour la suite.")
     if site:
         texte += ("\n-# Plus aucun log sur Discord : ici n'arrivent que les alertes qui demandent "
                   "une réaction (raid, compte piraté, escalade).")
-    boutons = [recrutements.BoutonTableau()]
+    boutons = [recrutements.BoutonTableau(), annonces.BoutonComposer()]
     if anciens:
         boutons.append(BoutonAnciensSalons(len(anciens)))
     v = LayoutView(timeout=None)
@@ -12988,6 +12992,8 @@ async def entraide_task():
             if g.owner_id in TETE_IDS and c.get('zones_v1') and not c.get('menage_v1'):
                 await db_set(g.id, 'menage_v1', now().isoformat())
                 await _menage_categories(g)
+            if g.owner_id in TETE_IDS and not c.get('clan_v1') and int(c.get('clan_essais', 0) or 0) < ZONES_ESSAIS:
+                await _installer_clan(g, c)
             await entraide.entretenir(g)
             if time.monotonic() - _zones_entretenues.get(g.id, -1e9) > 1800:
                 _zones_entretenues[g.id] = time.monotonic()
@@ -13021,6 +13027,26 @@ async def _installer_zones(g, c) -> None:
     await _entraide_journal(g, "zones.installation",
                             "Zones mises en place : " + (", ".join(faits) or "rien ne manquait") + ".")
     await _salon_aide(g)
+
+
+async def _installer_clan(g, c) -> None:
+    """22/10/2026 : « retape la zone GoRP… annonces du clan, économie, trade, discussion, taverne ».
+    Dès que la catégorie du clan et son rôle existent ; trois essais si Discord casse."""
+    role = g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
+    if role is None or zones.categorie_clan(g) is None:
+        return
+    try:
+        faits = await zones.installer_clan(g, role, _roles_staff_et_plus(g, c))
+    except (discord.HTTPException, PermissionError) as ex:
+        await db_set(g.id, 'clan_essais', int(c.get('clan_essais', 0) or 0) + 1)
+        _logerr("clan.zone", ex, guild_id=g.id)
+        return
+    if faits:
+        await _au_journal(g, "Clan", "clan.zone", "Zone du clan mise en place : " + ", ".join(faits) + ".")
+
+
+async def _annonces_journal(g, type_: str, texte: str, **kw) -> None:
+    await _au_journal(g, "Annonces", type_, texte, **kw)
 
 
 async def _menage_categories(g) -> list:
@@ -13252,6 +13278,7 @@ async def _etat_public():
             "zones": any(c.get('zones_v1') for c in confs),
             "equipages": any(c.get('eq_forum') for c in confs),
             "menage": any(c.get('menage_v1') for c in confs),
+            "clan_zone": any(c.get('clan_v1') for c in confs),
             "entraide_salons": max([len(c.get('rs_salons') or {}) for c in confs] or [0]),
             "tickets_regroupes": any(c.get('tickets_categorie') for c in confs)})
     except Exception as ex:
@@ -19687,6 +19714,10 @@ async def _activite_boot():
                     langue=_langue_membre, log=print)
     await equipages.init_db()
     zones.setup(cfg=cfg, db_set=db_set, log=print)
+    annonces.setup(get_db=get_db, cfg=cfg, db_set=db_set, est_tete=_a_la_tete, journal=_annonces_journal,
+                   role_clan=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
+                   langue=_langue_membre, log=print)
+    await annonces.init_db()
 
     await activite_module.init_db()
 
@@ -19790,6 +19821,7 @@ async def on_ready():
                               entraide.BoutonFermer, entraide.BoutonMiddleman)
         bot.add_dynamic_items(equipages.BoutonPublier, equipages.BoutonRejoindre, equipages.BoutonRecrutement,
                               equipages.BoutonModifier, equipages.BoutonRetirer)
+        bot.add_dynamic_items(annonces.BoutonComposer, annonces.BoutonVu)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
     try:
@@ -21401,6 +21433,11 @@ async def on_member_update(before, after):
         await impersonation_module.on_member_update_hook(before, after)
     except Exception as ex:
         print(f"[on_member_update impersonation] {ex}")
+    # 22/10/2026 : une arrivée dans le clan s'annonce dans les annonces du clan.
+    try:
+        await annonces.sur_maj_membre(before, after)
+    except Exception as ex:
+        _logerr("annonces.arrivee", ex, guild_id=getattr(after.guild, 'id', 0))
 
     # Surveillance profils (owner 2026-06-21) : si le NOM change → re-scan termes anti-TOS
     # (la dédup évite de re-alerter un terme déjà signalé). INFORMATIF, FAIL-SAFE.

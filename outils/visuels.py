@@ -96,6 +96,13 @@ BANDEAUX = {
     "rs_entraide": ("RELL SEAS", "Entraide · Help", "Aide · Boss · Farm · Chill", "\uEB48", (34, 197, 94), (16, 185, 129)),
     "rs_crews": ("RELL SEAS", "Équipages · Crews", "Pirates · Marine", "\uE7C1", (30, 41, 59), (37, 99, 235)),
     "orientation": ("AIDE · HELP", "Bienvenue · Welcome", "Français · English — trouve ta place · find your way", "\uE909", (14, 165, 233), (99, 102, 241)),
+    "an_annonce": ("GORP SEA", "Annonce", "Les nouvelles du serveur · Server news", "\uE789", (245, 158, 11), (234, 88, 12)),
+    "an_target": ("ROBLOX", "Target Roblox", "Annonce · Announcement", "\uF158", (34, 197, 94), (16, 185, 129)),
+    "an_ambrebois": ("AMBREBOIS", "Ambrebois", "Annonce · Announcement", "\uEC0A", (249, 115, 22), (220, 38, 38)),
+    "an_sneakfix": ("SNEAK FIX", "Correctifs · Fixes", "Ce qui a été réparé · What got fixed", "\uE90F", (59, 130, 246), (100, 116, 139)),
+    "an_goripe": ("GORIPE", "GoRipe", "Twitch · YouTube · TikTok", "\uE714", (168, 85, 247), (236, 72, 153)),
+    "an_rellseas": ("RELL SEAS", "Rell Seas", "Le studio · The studio", "\uEB48", (6, 182, 212), (37, 99, 235)),
+    "an_clan": ("CLAN GORP", "Annonce du clan", "Clan announcement", "\uEC24", (6, 182, 212), (20, 184, 166)),
     "rs_trade": ("RELL SEAS", "Trade", "Fruits et objets · Fruits & items", "\uE8AB", (245, 158, 11), (234, 88, 12)),
 }
 

@@ -34,6 +34,8 @@ VOCAL = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
 BOT = discord.PermissionOverwrite(view_channel=True, read_message_history=True, send_messages=True,
                                   send_messages_in_threads=True, create_public_threads=True, manage_threads=True,
                                   embed_links=True, attach_files=True)
+LECTURE_CLAN = discord.PermissionOverwrite(**config_salons.LECTURE)
+EQUIPE_CLAN = discord.PermissionOverwrite(**config_salons.EQUIPE_TEXTE, send_messages_in_threads=True)
 #  Les fils déjà ouverts du forum des discussions : (clé, titre, premier message)
 FILS = (
     ("medias", "📸 Médias · Media",
@@ -46,6 +48,21 @@ SUJET_FORUM = ("🇫🇷 Des fils pour tout : médias, commandes, et tes propres
                "🇬🇧 Threads for everything: media, commands, and your own topics (« New post » button).")
 SUJET_CHAT = ("🇫🇷 Le chat de Rell Seas : îles, fruits, mises à jour, astuces. Français ou anglais.\n"
               "🇬🇧 The Rell Seas chat: islands, fruits, updates, tips. French or English.")
+#  La zone du clan GoRP (sa catégorie existe : 📢 info, ✍ chat, 🔊 Join réservé au clan).
+CLAN_ANNONCES = "📣▷・annonces-gorp"
+CLAN_FORUM = "🧵▷・discussions-gorp"
+CLAN_FILS = (
+    ("economie", "💰 Économie · Economy",
+     "🇫🇷 L'économie du clan : objectifs, dons, dépenses.\n🇬🇧 The clan's economy: goals, donations, spending."),
+    ("trade", "🤝 Trade du clan · Clan trade",
+     "🇫🇷 Les échanges entre membres du clan : propose, demande.\n🇬🇧 Trades between clan members: offer, ask."),
+    ("taverne", "🍺 Taverne · Tavern",
+     "🇫🇷 On se pose, on raconte ses aventures en mer.\n🇬🇧 Sit down and tell your adventures at sea."),
+)
+SUJET_CLAN_ANNONCES = ("🇫🇷 Les annonces du clan GoRP : lis-les, clique « ✅ Vu ».\n"
+                       "🇬🇧 GoRP clan announcements: read them, click “✅ Seen”.")
+SUJET_CLAN_FORUM = ("🇫🇷 Économie, trade, taverne… et tes propres sujets (bouton « Nouveau post »).\n"
+                    "🇬🇧 Economy, trade, tavern… and your own topics (« New post » button).")
 
 _cfg = _db_set = None
 _log = print
@@ -70,7 +87,8 @@ async def conf(g) -> dict:
 
 def ids_salons(c: dict) -> set:
     """Les salons des zones, pour qu'aucun réglage de masse ne touche à leurs droits."""
-    ids = {int(c.get(k, 0) or 0) for k in ("zones_rell", "zones_chat", "zones_vocal", "zones_forum")}
+    ids = {int(c.get(k, 0) or 0) for k in ("zones_rell", "zones_chat", "zones_vocal", "zones_forum", "clan_annonces",
+                                           "clan_forum")}
     return {i for i in ids if i} | entraide.ids_salons(c) | ({int(c["eq_forum"])} if c.get("eq_forum") else set())
 
 
@@ -124,8 +142,16 @@ async def _forum_commu(g, cf: dict, commu, forum: bool):
                                              reason="Communautaire : des fils plutôt que des salons")
         await _db_set(g.id, "zones_forum", ch.id)
         faits.append(f"salon {ch.name}")
-    fils = dict(cf["fils"])
-    for cle, titre, texte in FILS:
+    fils, f2 = await _fils_prets(g, ch, cf["fils"], FILS)
+    await _db_set(g.id, "zones_fils", fils)
+    return ch, faits + f2
+
+
+async def _fils_prets(g, ch, existants: dict, definitions) -> tuple:
+    """Les fils déjà ouverts d'un forum (ou, hors forum, d'un salon) : créés s'ils manquent,
+    réveillés s'ils dorment. Rend (les fils, ce qui a été créé)."""
+    fils, faits = dict(existants or {}), []
+    for cle, titre, texte in definitions:
         fil = g.get_channel_or_thread(int(fils.get(cle, 0) or 0))
         if fil is None and fils.get(cle):
             try:
@@ -146,8 +172,67 @@ async def _forum_commu(g, cf: dict, commu, forum: bool):
             fil = await msg.create_thread(name=titre, auto_archive_duration=10080, reason="Fil prêt à l'emploi")
         fils[cle] = fil.id
         faits.append(f"fil {titre}")
-    await _db_set(g.id, "zones_fils", fils)
-    return ch, faits
+    return fils, faits
+
+
+def categorie_clan(g):
+    """La catégorie du clan (« 🦜 · GoRp_SEA »), même règle que `config_salons.est_clan`."""
+    return next((cat for cat in getattr(g, "categories", []) or [] if config_salons.est_clan(cat.name)), None)
+
+
+async def installer_clan(g, role, equipe=(), *, forum: bool | None = None) -> list:
+    """22/10/2026 : « retape la zone GoRP… un salon des annonces du clan, automatisé, propre…
+    économie, trade propre au clan, discussion, taverne… le vocal propre à eux ». Dans la catégorie
+    du clan : 📣 annonces (lecture seule : l'annonce en un clic, la bienvenue des arrivées) et
+    🧵 discussions (forum : économie, trade du clan, taverne déjà ouverts ; chacun ouvre ses sujets).
+    Le Join du clan existe déjà. Réservé au rôle du clan et au staff ; rien n'est supprimé."""
+    cat = categorie_clan(g)
+    if cat is None or role is None:
+        return []
+    forum = ("COMMUNITY" in g.features) if forum is None else forum
+    c = await _cfg(g.id)
+    faits = []
+
+    def droits(ouvert: discord.PermissionOverwrite) -> dict:
+        ows = {g.default_role: discord.PermissionOverwrite(view_channel=False), role: ouvert, g.me: BOT}
+        for r in equipe or ():
+            if r is not None and r != role:
+                ows[r] = EQUIPE_CLAN
+        return ows
+
+    annonces = g.get_channel(int(c.get("clan_annonces", 0) or 0))
+    if annonces is None:
+        annonces = await g.create_text_channel(CLAN_ANNONCES, category=cat, topic=SUJET_CLAN_ANNONCES,
+                                               overwrites=droits(LECTURE_CLAN), reason="Clan GoRP : ses annonces")
+        await _db_set(g.id, "clan_annonces", annonces.id)
+        faits.append(f"salon {annonces.name}")
+    discussions = g.get_channel(int(c.get("clan_forum", 0) or 0))
+    if discussions is None:
+        if forum:
+            discussions = await g.create_forum(CLAN_FORUM, category=cat, topic=SUJET_CLAN_FORUM,
+                                               overwrites=droits(PAROLE), default_auto_archive_duration=10080,
+                                               default_layout=discord.ForumLayoutType.list_view,
+                                               default_sort_order=discord.ForumOrderType.latest_activity,
+                                               reason="Clan GoRP : des fils plutôt que des salons")
+        else:
+            discussions = await g.create_text_channel(CLAN_FORUM, category=cat, topic=SUJET_CLAN_FORUM[:1024],
+                                                      overwrites=droits(PAROLE),
+                                                      reason="Clan GoRP : des fils plutôt que des salons")
+        await _db_set(g.id, "clan_forum", discussions.id)
+        faits.append(f"salon {discussions.name}")
+    fils, f2 = await _fils_prets(g, discussions, c.get("clan_fils") or {}, CLAN_FILS)
+    await _db_set(g.id, "clan_fils", fils)
+    faits += f2
+    texte = [ch for ch in cat.channels if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel))]
+    info = next((ch for ch in texte if "info" in config_salons.normaliser(ch.name).split()), None)
+    chat = next((ch for ch in texte if "chat" in config_salons.normaliser(ch.name).split()), None)
+    try:
+        await _ranger(cat, [info, _dans(annonces, cat), chat, _dans(discussions, cat)])
+    except discord.HTTPException as ex:
+        _log("[ZONES][E2] zone du clan non rangée")
+        _log(f"[ZONES][E2:DETAIL] {type(ex).__name__} {ex}")
+    await _db_set(g.id, "clan_v1", 1)
+    return faits
 
 
 async def installer(g, *, forum: bool | None = None) -> list:
@@ -229,12 +314,11 @@ async def ordonner(g) -> bool:
 
 
 async def entretenir(g) -> None:
-    """Toutes les 30 minutes : les fils prêts à l'emploi restent ouverts et visibles."""
-    cf = await conf(g)
-    if not cf["actif"]:
-        return
-    for cle, _titre, _texte in FILS:
-        fid = int(cf["fils"].get(cle, 0) or 0)
+    """Toutes les 30 minutes : les fils prêts à l'emploi (Communautaire, clan) restent ouverts et visibles."""
+    cf, c = await conf(g), await _cfg(g.id)
+    a_suivre = (list(cf["fils"].items()) if cf["actif"] else []) + list(dict(c.get("clan_fils") or {}).items())
+    for cle, fid in a_suivre:
+        fid = int(fid or 0)
         fil = g.get_channel_or_thread(fid) if fid else None
         if fil is None and fid:
             try:

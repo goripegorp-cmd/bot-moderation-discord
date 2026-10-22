@@ -125,17 +125,32 @@ class Forum(Rangeable, discord.ForumChannel):
 class Message:
     def __init__(self, salon, mid, auteur_bot=True):
         self.salon, self.id, self.author = salon, mid, Obj(bot=auteur_bot)
+        self.jump_url = f"https://discord.com/channels/1/{salon.id}/{mid}"
 
     async def create_thread(self, *, name, auto_archive_duration=None, reason=None):
         return self.salon.monde.nouveau_fil(self.salon, name, self.id)
 
 
+class Droits:
+    """Les droits du bot dans un salon : tous, sauf ceux qu'un test retire."""
+    def __init__(self, refus=()):
+        self.refus = set(refus)
+
+    def __getattr__(self, nom):
+        return nom not in self.refus
+
+
 class Texte(Rangeable, discord.TextChannel):
     def __init__(self, monde, cid, name, kw):
         self._init(monde, cid, name, kw)
-        self.envois, self.cartes, self.historique = [], [], []
+        self.envois, self.cartes, self.historique, self.refus, self.panne = [], [], [], set(), False
+
+    def permissions_for(self, _membre):
+        return Droits(self.refus)
 
     async def send(self, content=None, **kw):
+        if self.panne:
+            raise discord.HTTPException(Obj(status=500, reason="x"), "panne")
         mid = self.monde.nouvel_id()
         self.envois.append((mid, content, kw))
         return Message(self, mid)
@@ -204,7 +219,7 @@ class Membre:
 
 class Monde:
     def __init__(self, forum=True, communautaire=True):
-        self.id, self.features = 1, ["COMMUNITY"] if forum else []
+        self.id, self.name, self.features = 1, "GoRP SEA", ["COMMUNITY"] if forum else []
         self.salons, self.fils, self.roles, self.membres, self.effaces = {}, {}, {}, {}, set()
         self.ordre, self.categories_, self.mouvements = [], [], []
         self.default_role = Obj(id=1)
@@ -287,8 +302,19 @@ class Monde:
         return self._salon(Vocal, name, kw)
 
 
+class ReponseV2(Reponse):
+    """La réponse d'une interaction, qui sait aussi réécrire le message du bouton."""
+    def __init__(self):
+        super().__init__()
+        self.edits = []
+
+    async def edit_message(self, **kw):
+        self.fait = True
+        self.edits.append(kw)
+
+
 def interaction(g, membre):
-    suivis, reponse = [], Reponse()
+    suivis, reponse = [], ReponseV2()
 
     async def suivi(content=None, **kw):
         suivis.append((content, kw))
