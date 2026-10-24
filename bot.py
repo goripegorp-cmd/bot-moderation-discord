@@ -8209,6 +8209,24 @@ async def _create_ticket_corps(i, pid, ans=None):
             except: pass
         return None, f"❌ {ex}"
 
+def _vue_ticket_message(texte: str, couleur=None) -> LayoutView:
+    """Une réponse courte (Components V2) : « Ticket créé », « Annulé », « Priorité réglée »…"""
+    v = LayoutView(timeout=60)
+    v.add_item(discord.ui.Container(discord.ui.TextDisplay(texte), accent_color=couleur or Palette.SUCCESS))
+    return v
+
+
+def _carte_ticket(titre: str, texte: str, couleur, avatar: str | None = None) -> LayoutView:
+    """Une trace dans le ticket — prise en charge, staff ajouté, transfert, priorité, note — qui entre au
+    transcript comme le reste."""
+    corps = discord.ui.TextDisplay(f"### {titre}\n{texte}")
+    tete = discord.ui.Section(corps, accessory=discord.ui.Thumbnail(avatar)) if avatar else corps
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(tete, discord.ui.TextDisplay(f"-# <t:{int(time.time())}:f>"),
+                                    accent_color=couleur))
+    return v
+
+
 class TicketQuestionnaireModal(Modal):
     def __init__(self, pid, qs):
         super().__init__(title="Créer un ticket")
@@ -8228,38 +8246,48 @@ class TicketQuestionnaireModal(Modal):
             ans = {self.qs[j].get('title', f'Q{j+1}'): ch.value for j, ch in enumerate(self.children) if j < len(self.qs)}
             await i.response.defer(ephemeral=True)
             ch, err = await create_ticket(i, self.pid, ans)
-            await i.followup.send(err if err else f"✅ Ticket créé: {ch.mention}", ephemeral=True)
+            await i.followup.send(view=_vue_ticket_message(err if err else f"✅ Ticket créé : {ch.mention}",
+                                                           Palette.WARNING if err else Palette.SUCCESS), ephemeral=True)
         except Exception as ex:
-            try: await i.followup.send(f"❌ {ex}", ephemeral=True)
-            except: pass
+            _logerr("ticket.questionnaire", ex, guild_id=getattr(i.guild, 'id', 0))
+            try:
+                await i.followup.send(view=_vue_ticket_message(f"❌ {ex}", Palette.DANGER), ephemeral=True)
+            except discord.HTTPException as ex2:
+                _logerr("ticket.questionnaire.reponse", ex2, guild_id=getattr(i.guild, 'id', 0))
 
-class TicketConfirmCreateView(View):
+class TicketConfirmCreateView(LayoutView):
     """Confirmation ÉPHÉMÈRE avant création d'un ticket SANS questionnaire (owner 2026-06-29,
     audit) : évite les tickets ouverts par erreur (« il se trompe / crée pour rien »). Le bouton
     Confirmer appelle create_ticket INCHANGÉ (re-checks autoritatifs heures/cooldown/gate/quota/
-    max/blacklist conservés). Non persistant (vue courte, éphémère) → callbacks locaux OK."""
-    def __init__(self, pid):
+    max/blacklist conservés). Components V2 (24/10/2026). Non persistant (vue courte, éphémère)."""
+    def __init__(self, pid, recap: str = ""):
         super().__init__(timeout=120)
         self.pid = pid
+        oui = Button(emoji=visuels.icone("valider"), label="Confirmer l'ouverture", style=discord.ButtonStyle.success)
+        oui.callback = self._confirm
+        non = Button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary)
+        non.callback = self._cancel
+        self.add_item(discord.ui.Container(discord.ui.TextDisplay(recap or "📩 Ouvrir ce ticket ?"),
+                                           discord.ui.ActionRow(oui, non), accent_color=Palette.INFO))
 
-    @discord.ui.button(emoji=visuels.icone("valider"), label="Confirmer l'ouverture", style=discord.ButtonStyle.success)
-    async def _confirm(self, i, button):
+    async def _confirm(self, i):
         try:
             await i.response.defer(ephemeral=True)
             ch, err = await create_ticket(i, self.pid)
-            await i.followup.send(err if err else f"✅ Ticket créé : {ch.mention}", ephemeral=True)
+            await i.followup.send(view=_vue_ticket_message(err if err else f"✅ Ticket créé : {ch.mention}",
+                                                           Palette.WARNING if err else Palette.SUCCESS), ephemeral=True)
         except Exception as ex:
+            _logerr("ticket.confirmer", ex, guild_id=getattr(i.guild, 'id', 0))
             try:
-                await i.followup.send(f"❌ {ex}", ephemeral=True)
-            except Exception:
-                pass
+                await i.followup.send(view=_vue_ticket_message(f"❌ {ex}", Palette.DANGER), ephemeral=True)
+            except discord.HTTPException as ex2:
+                _logerr("ticket.confirmer.reponse", ex2, guild_id=getattr(i.guild, 'id', 0))
 
-    @discord.ui.button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary)
-    async def _cancel(self, i, button):
+    async def _cancel(self, i):
         try:
-            await i.response.edit_message(content="Annulé — aucun ticket créé.", view=None)
-        except Exception:
-            pass
+            await i.response.edit_message(view=_vue_ticket_message("Annulé — aucun ticket créé.", Palette.NEUTRAL))
+        except discord.HTTPException as ex:
+            _logerr("ticket.annuler", ex, guild_id=getattr(i.guild, 'id', 0))
 
 
 async def _ticket_ouvrir(i, pid):
@@ -8327,10 +8355,9 @@ async def _ticket_ouvrir(i, pid):
                       + (f"\n> _{_dsc[:200]}_" if _dsc else "")
                       + ("\n-# 🔒 Fermé aux membres pour le moment : la direction peut quand même l'ouvrir."
                          if pnl.get('disabled') else "")
-                      + "\n\nUn **salon privé** sera créé et le **staff prévenu**. "
+                      + "\n\nUn **espace privé** s'ouvre : seuls toi et l'équipe concernée le voyez. "
                         "Confirme si c'est bien ce que tu veux 👇")
-            await i.response.send_message(
-                _recap, view=TicketConfirmCreateView(pid), ephemeral=True)
+            await i.response.send_message(view=TicketConfirmCreateView(pid, _recap), ephemeral=True)
     except Exception as ex:
         # Phase 263 : TOUJOURS accuser réception même si cfg/DB plante AVANT l'ack,
         # sinon « Échec de l'interaction » et le bouton paraît cassé.
@@ -8615,10 +8642,7 @@ class TicketHubOpenDynamic(discord.ui.DynamicItem[Button],
             if len(types) == 1:
                 return await _ticket_ouvrir(i, types[0][0])
 
-            await i.response.send_message(
-                "🎫 **Quel type de ticket veux-tu ouvrir ?**\n"
-                "-# Choisis ci-dessous — ce message n'est visible que par toi.",
-                view=TicketHubTypeView(types), ephemeral=True)
+            await i.response.send_message(view=TicketHubTypeView(types), ephemeral=True)
         except Exception as ex:
             _logerr("ticket.hub_open", ex)
             try:
@@ -8693,12 +8717,15 @@ class TicketHubTypeDynamic(discord.ui.DynamicItem[discord.ui.Select],
                 pass
 
 
-class TicketHubTypeView(View):
-    """Le porteur éphémère du menu. `timeout=None` : c'est le `DynamicItem`
-    qui garantit la reprise, pas cette instance."""
+class TicketHubTypeView(LayoutView):
+    """Le porteur éphémère du menu (Components V2). `timeout=None` : c'est le `DynamicItem`
+    qui garantit la reprise, pas cette instance — la vue porte son composant NU (`.item`)."""
     def __init__(self, types):
         super().__init__(timeout=None)
-        self.add_item(TicketHubTypeDynamic(types).item)
+        self.add_item(discord.ui.Container(
+            discord.ui.TextDisplay("### 🎫 Quel type de ticket veux-tu ouvrir ?\n"
+                                   "-# Choisis ci-dessous — ce message n'est visible que par toi."),
+            discord.ui.ActionRow(TicketHubTypeDynamic(types).item), accent_color=Palette.INFO))
 
 
 async def _build_ticket_panel_view(guild, pid):
@@ -9308,7 +9335,9 @@ class TicketControlView(View):
                         ephemeral=True
                     )
                 # Sur-claim autorisé
-                await i.channel.send(f"⚠️ **Sur-claim** : {i.user.mention} reprend ce ticket (anciennement <@{tk['claimed']}>)")
+                await i.channel.send(view=_carte_ticket("⚠️ Reprise", f"{i.user.mention} reprend ce ticket (avant : "
+                                                                      f"<@{tk['claimed']}>).", Palette.WARNING),
+                                     allowed_mentions=discord.AllowedMentions.none())
             
             tu = i.guild.get_member(tk['user'])
             ow = {
@@ -9327,6 +9356,10 @@ class TicketControlView(View):
                 ow[i.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
             if sr:
                 ow[sr] = discord.PermissionOverwrite(view_channel=False)
+            #  24/10/2026 : la direction et le fondateur voient TOUS les tickets, pris en charge compris.
+            for _cible in _equipe_direction(i.guild, c):
+                if _cible not in ow:
+                    ow[_cible] = discord.PermissionOverwrite(**tickets_fils.DROITS_SALON)
             if isinstance(i.channel, discord.Thread):
                 await i.channel.add_user(i.user)
             else:
@@ -9356,12 +9389,15 @@ class TicketControlView(View):
                         await i.response.defer()
                 except Exception:
                     pass
+            #  En fil privé, l'équipe voit toujours le fil : on ne prétend pas le contraire.
+            reste = ("" if isinstance(i.channel, discord.Thread)
+                     else "\n-# Les autres membres du staff ne le voient plus ; la direction, si.")
             try:
-                await i.channel.send(
-                    f"✅ **{i.user.display_name}** prend ce ticket en charge\n\n"
-                    "*Les autres staffs ne peuvent plus voir ce ticket.*")
-            except Exception:
-                pass
+                await i.channel.send(view=_carte_ticket("✅ Pris en charge", f"**{i.user.display_name}** prend ce ticket "
+                                                                          f"en charge.{reste}", Palette.SUCCESS),
+                                     allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException as ex:
+                _logerr("ticket.claim.annonce", ex, guild_id=i.guild.id)
             await send_ticket_log(i.guild, 'claim', tk['user'], tk, extra=i.user.id)
             try:  # Lot 2 : audit-trail (qui a pris en charge, quand)
                 await tix_module.log_action(i.guild.id, i.channel.id, i.user.id, "claim")
@@ -9404,7 +9440,7 @@ class TicketControlView(View):
             if not staffs:
                 return await i.response.send_message("❌ Aucun autre staff disponible", ephemeral=True)
             opts = [discord.SelectOption(label=f"@{m.display_name}"[:25], value=str(m.id)) for m in staffs]
-            await i.response.send_message("👥 Choisir un staff:", view=AddStaffView(opts, i.channel.id), ephemeral=True)
+            await i.response.send_message(view=AddStaffView(opts, i.channel.id), ephemeral=True)
         except Exception as _tk_ex:
             _logerr("ticket.add_staff_open", _tk_ex)
             import traceback; traceback.print_exc()
@@ -9447,7 +9483,7 @@ class TicketControlView(View):
             if not staffs:
                 return await i.response.send_message("❌ Aucun autre staff disponible", ephemeral=True)
             opts = [discord.SelectOption(label=f"@{m.display_name}"[:25], value=str(m.id)) for m in staffs]
-            await i.response.send_message("🔄 Transférer la prise en charge à :", view=TransferTicketView(opts, i.channel.id), ephemeral=True)
+            await i.response.send_message(view=TransferTicketView(opts, i.channel.id), ephemeral=True)
         except Exception as _tk_ex:
             _logerr("ticket.transfer_open", _tk_ex)
             import traceback; traceback.print_exc()
@@ -9478,9 +9514,7 @@ class TicketControlView(View):
             is_s = sr and sr in i.user.roles
             if not (is_s or is_o or is_a or is_immune):
                 return await i.response.send_message("❌ Réservé au staff", ephemeral=True)
-            await i.response.send_message(
-                "🚩 **Choisis la priorité** de ce ticket :",
-                view=TicketPriorityView(i.channel.id), ephemeral=True)
+            await i.response.send_message(view=TicketPriorityView(i.channel.id), ephemeral=True)
         except Exception as _tk_ex:
             print(f"[ticket_btn priority] {type(_tk_ex).__name__}: {_tk_ex}")
             try:
@@ -9617,10 +9651,7 @@ class TicketControlView(View):
             # MOTIFS RAPIDES : on propose d'abord un petit choix éphémère (résolu / doublon /
             # pas de réponse / hors-sujet / autre) qui pré-remplit le modal — gain de temps
             # staff sans casser le flux 2-temps (le modal reste la confirmation finale).
-            await i.response.send_message(
-                "🔒 **Fermer ce ticket** — choisis un motif rapide (il pré-remplira la raison, "
-                "que tu pourras éditer) :",
-                view=TicketCloseReasonView(tk), ephemeral=True)
+            await i.response.send_message(view=TicketCloseReasonView(tk), ephemeral=True)
         except Exception as _tk_ex:
             print(f"[ticket_close] {type(_tk_ex).__name__}: {_tk_ex}")
             try:
@@ -9658,10 +9689,13 @@ class TicketControlView(View):
             except Exception:
                 pass
 
-class AddStaffView(View):
+class AddStaffView(LayoutView):
     def __init__(self, opts, chid):
         super().__init__(timeout=60)
-        self.add_item(AddStaffSelect(opts, chid))
+        self.add_item(discord.ui.Container(
+            discord.ui.TextDisplay("### 👥 Ajouter un staff\nIl verra le ticket et pourra y écrire (images et liens "
+                                   "compris)."),
+            discord.ui.ActionRow(AddStaffSelect(opts, chid)), accent_color=Palette.INFO))
 
 class AddStaffSelect(Select):
     def __init__(self, opts, chid):
@@ -9676,11 +9710,11 @@ class AddStaffSelect(Select):
                 # owner 2026-07-20 : un staff ajouté au ticket doit pouvoir poster images/vidéos/
                 # GIF/liens (mêmes droits média que l'ouvreur), pas seulement du texte.
                 await tickets_fils.ajouter(ch, st)
-                await i.response.send_message(f"✅ {st.mention} ajouté au ticket!", ephemeral=True)
-                add_e = discord.Embed(color=0x2ECC71, description=f"**{st.display_name}** a été ajouté au ticket par {i.user.mention}")
-                add_e.set_footer(text="Staff ajouté")
-                add_e.timestamp = now()
-                await webhook_send(ch, 'ticket', embed=add_e)
+                await i.response.send_message(view=_vue_ticket_message(f"✅ {st.mention} ajouté au ticket."),
+                                              ephemeral=True)
+                await webhook_send(ch, 'ticket', view=_carte_ticket(
+                    "👥 Staff ajouté", f"**{st.display_name}** a été ajouté au ticket par {i.user.mention}.",
+                    Palette.SUCCESS), allowed_mentions=discord.AllowedMentions.none())
                 tk = await get_ticket(self.chid)
                 if tk:
                     await send_ticket_log(i.guild, 'add_staff', tk['user'], tk, extra=st.id)
@@ -9695,10 +9729,13 @@ class AddStaffSelect(Select):
             except Exception:
                 pass
 
-class TransferTicketView(View):
+class TransferTicketView(LayoutView):
     def __init__(self, opts, chid):
         super().__init__(timeout=60)
-        self.add_item(TransferTicketSelect(opts, chid))
+        self.add_item(discord.ui.Container(
+            discord.ui.TextDisplay("### 🔄 Transférer la prise en charge\nLe nouveau staff en charge voit le ticket "
+                                   "et y répond."),
+            discord.ui.ActionRow(TransferTicketSelect(opts, chid)), accent_color=Palette.INFO))
 
 class TransferTicketSelect(Select):
     def __init__(self, opts, chid):
@@ -9749,6 +9786,9 @@ class TransferTicketSelect(Select):
                 ow[i.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
             if sr:
                 ow[sr] = discord.PermissionOverwrite(view_channel=False)
+            for _cible in _equipe_direction(i.guild, c):  # la direction garde la vue
+                if _cible not in ow:
+                    ow[_cible] = discord.PermissionOverwrite(**tickets_fils.DROITS_SALON)
             if isinstance(ch, discord.Thread):
                 await ch.add_user(new_staff)
             else:
@@ -9757,14 +9797,14 @@ class TransferTicketSelect(Select):
             async with get_db() as db:
                 await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (new_staff.id, self.chid))
                 await db.commit()
-            await i.response.send_message(f"✅ Prise en charge transférée à {new_staff.mention}", ephemeral=True)
+            await i.response.send_message(view=_vue_ticket_message(f"✅ Prise en charge transférée à {new_staff.mention}."),
+                                          ephemeral=True)
             try:
-                tr_e = discord.Embed(color=0x5865F2, description=f"Prise en charge **transférée de <@{old_id}> à {new_staff.mention}** par {i.user.mention}")
-                tr_e.set_footer(text="Transfert de prise en charge")
-                tr_e.timestamp = now()
-                await webhook_send(ch, 'ticket', embed=tr_e)
-            except Exception:
-                pass
+                await webhook_send(ch, 'ticket', view=_carte_ticket(
+                    "🔄 Prise en charge transférée", f"De <@{old_id}> à {new_staff.mention}, par {i.user.mention}.",
+                    Palette.INFO), allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException as ex:
+                _logerr("ticket.transfert.annonce", ex, guild_id=i.guild.id)
             # Log type 'claim' (mention « transféré de X à Y »).
             await send_ticket_log(i.guild, 'claim', tk['user'], tk, extra=new_staff.id)
         except Exception as _tk_ex:
@@ -9783,12 +9823,14 @@ class TransferTicketSelect(Select):
 #       🚩 PRIORITÉ TICKET (bouton) — réutilise le backend tickets_enhance
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TicketPriorityView(View):
-    """Vue éphémère (timeout 60s) : un select des 4 niveaux de priorité.
+class TicketPriorityView(LayoutView):
+    """Vue éphémère (timeout 60s, Components V2) : un select des 4 niveaux de priorité.
     Ouverte par le bouton 🚩 Priorité de TicketControlView."""
     def __init__(self, chid):
         super().__init__(timeout=60)
-        self.add_item(TicketPrioritySelect(chid))
+        self.add_item(discord.ui.Container(
+            discord.ui.TextDisplay("### 🚩 La priorité du ticket\nElle s'affiche devant le nom du ticket."),
+            discord.ui.ActionRow(TicketPrioritySelect(chid)), accent_color=Palette.WARNING))
 
 
 class TicketPrioritySelect(Select):
@@ -9821,14 +9863,14 @@ class TicketPrioritySelect(Select):
             await tix_module.set_priority(self.chid, level)
             await tix_module.update_channel_name_for_priority(ch, level)
             emoji, label = tix_module.PRIORITY_LEVELS.get(level, ("⚪", level.upper()))
-            await i.followup.send(f"✅ Priorité réglée : {emoji} **{label}**", ephemeral=True)
+            await i.followup.send(view=_vue_ticket_message(f"✅ Priorité réglée : {emoji} **{label}**"), ephemeral=True)
             # Trace visible dans le salon (entre au transcript) + log staff.
             try:
-                pr_e = discord.Embed(color=C.GOLD, description=f"Priorité passée à {emoji} **{label}** par {i.user.mention}")
-                pr_e.timestamp = now()
-                await webhook_send(ch, 'ticket', embed=pr_e)
-            except Exception:
-                pass
+                await webhook_send(ch, 'ticket', view=_carte_ticket(
+                    "🚩 Priorité", f"Passée à {emoji} **{label}** par {i.user.mention}.", Palette.WARNING),
+                    allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException as ex:
+                _logerr("ticket.priorite.annonce", ex, guild_id=i.guild.id)
             tk = await get_ticket(self.chid)
             if tk:
                 await send_ticket_log(i.guild, 'priority', tk['user'], tk, extra=(i.user.id, f"{emoji} {label}"))
@@ -9871,16 +9913,12 @@ class TicketNoteModal(Modal):
             return
         ch = i.channel
         try:
-            note_e = discord.Embed(
-                title="Note interne (staff)",
-                description=txt[:4000],
-                color=C.BLURPLE, timestamp=now())
-            note_e.set_footer(text=f"Ajoutée par {i.user.display_name}")
-            if hasattr(i.user, 'display_avatar'):
-                note_e.set_author(name=i.user.display_name, icon_url=i.user.display_avatar.url)
             # Postée par webhook 'ticket' comme le reste → cohérence + entre au transcript.
-            await webhook_send(ch, 'ticket', embed=note_e)
-            await i.followup.send("✅ Note interne ajoutée au ticket.", ephemeral=True)
+            avatar = i.user.display_avatar.url if hasattr(i.user, 'display_avatar') else None
+            await webhook_send(ch, 'ticket', view=_carte_ticket(
+                "📌 Note interne (staff)", f"{txt[:3500]}\n-# Ajoutée par {i.user.display_name}", Palette.INFO, avatar),
+                allowed_mentions=discord.AllowedMentions.none())
+            await i.followup.send(view=_vue_ticket_message("✅ Note interne ajoutée au ticket."), ephemeral=True)
         except Exception as _tk_ex:
             print(f"[ticket_note_submit] {type(_tk_ex).__name__}: {_tk_ex}")
             try:
@@ -9909,13 +9947,16 @@ TICKET_CLOSE_REASONS = [
 ]
 
 
-class TicketCloseReasonView(View):
-    """Vue éphémère (timeout 60s) montrée AVANT le modal de fermeture : un select
+class TicketCloseReasonView(LayoutView):
+    """Vue éphémère (timeout 60s, Components V2) montrée AVANT le modal de fermeture : un select
     de motifs rapides. Le choix ouvre TicketCloseModal pré-rempli → le flux 2-temps
     (modal = confirmation) reste intact, on gagne juste du temps de saisie."""
     def __init__(self, tk):
         super().__init__(timeout=60)
-        self.add_item(TicketCloseReasonSelect(tk))
+        self.add_item(discord.ui.Container(
+            discord.ui.TextDisplay("### 🔒 Fermer ce ticket\nChoisis un motif : il pré-remplit la raison, que tu "
+                                   "pourras modifier avant de confirmer."),
+            discord.ui.ActionRow(TicketCloseReasonSelect(tk)), accent_color=Palette.DANGER))
 
 
 class TicketCloseReasonSelect(Select):
@@ -13266,6 +13307,9 @@ async def entraide_task():
                     int(c.get('clan_demenage_essais', 0) or 0) < ZONES_ESSAIS:
                 await _demenager_clan(g, c)
             await entraide.entretenir(g)
+            await _lire_commandes(g)
+            if g.owner_id in TETE_IDS:
+                _faq_vus[g.id] = _faq_trouves(g, await cfg(g.id))
             if time.monotonic() - _zones_entretenues.get(g.id, -1e9) > 1800:
                 _zones_entretenues[g.id] = time.monotonic()
                 await zones.entretenir(g)
@@ -13276,6 +13320,25 @@ async def entraide_task():
 
 _zones_entretenues: dict = {}
 ZONES_ESSAIS = 3
+_commandes_vues: dict = {}   # guild_id → les commandes que Discord a vraiment (lues toutes les 5 minutes)
+_faq_vus: dict = {}          # guild_id → ce que les réponses toutes faites trouvent (oui/non)
+
+
+def _faq_trouves(g, c) -> dict:
+    """Les endroits que les réponses toutes faites trouvent sur ce serveur : oui ou non, rien d'autre."""
+    d = _faq_destinations(g, c)
+    out = {k: bool(d.get(k)) for k in ("ticket", "suggestions", "game_link", "annonces", "roblox", "goripe")}
+    out["jeux"] = {j["cle"]: {k: bool(j.get(k)) for k in ("trade", "help", "annonces", "lien")}
+                   for j in d.get("jeux", [])}
+    return out
+
+
+async def _lire_commandes(g) -> None:
+    """Les commandes enregistrées chez Discord pour ce serveur : l'état réel, pas l'arbre du code."""
+    try:
+        _commandes_vues[g.id] = sorted(c.name for c in await bot.tree.fetch_commands(guild=g))
+    except discord.HTTPException as ex:
+        _logerr("commandes.lecture", ex, guild_id=g.id)
 MENAGE_MOTS = ("echange", "echanges", "groupe", "groupes")
 EMOJI_ANCIEN_TICKET = "\N{ADMISSION TICKETS}"
 
@@ -13882,6 +13945,8 @@ async def _etat_public():
             "cadeaux_salon": sum(1 for g, c in zip(list(bot.guilds), confs)
                                  if g.get_channel(int(c.get('cadeaux_salon', 0) or 0)) is not None),
             "cadeaux_en_cours": cadeaux.nb_actifs(),
+            "cmd_giveaway": any("giveaway" in noms for noms in _commandes_vues.values()),
+            "faq_trouve": next(iter(_faq_vus.values()), {}),
             "game_link": sum(1 for g, c in zip(list(bot.guilds), confs)
                              if g.get_channel(int(c.get('game_link_salon', 0) or 0)) is not None),
             "jeux_liens": max([len(liens_jeux.liens(c)) for c in confs] or [0]),

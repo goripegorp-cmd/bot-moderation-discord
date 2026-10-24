@@ -174,7 +174,7 @@ def test_les_vues_portent_le_composant_NU_pas_le_DynamicItem():
     assert "TicketHubOpenDynamic().item" in hub, (
         "la vue porte le DynamicItem : son callback partira deux fois")
     vue = ast.unparse(_classe("TicketHubTypeView"))
-    assert ".item" in vue and "add_item(TicketHubTypeDynamic(types).item)" in vue
+    assert ".item" in vue and "ActionRow(TicketHubTypeDynamic(types).item)" in vue
 
 
 def test_un_seul_type_ne_fait_pas_choisir_dans_une_liste_dun_element():
