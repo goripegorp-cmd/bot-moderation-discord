@@ -133,7 +133,7 @@ async def _diffuser(salon, message_id) -> bool:
 
 
 async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
-                   ping_role=None, trace: dict | None = None) -> bool:
+                   ping_role=None, trace: dict | None = None, cle: str | None = None) -> bool:
     """L'envoi réel. Rend `True` UNIQUEMENT si un message est parti.
 
     ⚠️ PIÈGE À NE PAS DÉFAIRE — LE RETOUR DE `webhook_send` COMPTE.
@@ -152,6 +152,10 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
     `WebhookMessage`, et le repli `channel.send` rend un `Message`.
     Pas de nouvelle tentative ici quand elle rend `None` : `webhook_send` a
     déjà essayé `channel.send` de son côté, la refaire échouerait pareil.
+
+    `cle` (24/10/2026) : l'URL de l'article. Après un 5xx ou un délai dépassé,
+    `webhook_send` la cherche dans les dernières cartes du salon avant de
+    renvoyer — sans elle, une fiche V2 partait en deux exemplaires.
     """
     try:
         if _webhook_send is not None:
@@ -162,7 +166,7 @@ async def _envoyer(salon, profil: str, vue: LayoutView, etiquette: str,
             #  utilise alors que c'etait la demande. Le nom vient donc du profil
             #  declare dans WEBHOOK_PROFILES, choisi par la CLE de plateforme.
             res = await _webhook_send(salon, profil, view=vue,
-                                      allowed_mentions=_autorisation_mention(ping_role))
+                                      allowed_mentions=_autorisation_mention(ping_role), cle=cle)
             if res is None:
                 _log(f"[roblox {etiquette}] webhook_send a rendu None — RIEN "
                      f"n'est parti dans #{getattr(salon, 'name', '?')} "
@@ -387,9 +391,11 @@ async def publier_actu(guild, salon, billet: dict) -> bool:
     cle = pings.cle_du_billet(billet)
     role = await pings.role_de(guild, cle) if cle else None
     #  Meme raison que ci-dessus : le nom vient du profil, pas d'un kwarg.
+    #  L'URL de l'article sert de cle anti-doublon apres un 5xx (24/10/2026).
     return await _envoyer(salon, "roblox_actu",
                           construire_actu(billet, ping_cle=cle, ping_role=role),
-                          "publier_actu", ping_role=role)
+                          "publier_actu", ping_role=role,
+                          cle=billet.get("lien") or news.lien_billet(billet.get("topic_id")))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

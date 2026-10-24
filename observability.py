@@ -7,12 +7,13 @@ Trois features d'observabilité pour le staff owner :
    • member_count, joined, left, infractions (24h), tickets_opened,
      tickets_closed, events_won (24h), msgs cumul, voice_min cumul
    • Stocké dans daily_stats_snapshot pour historique
-   • Posté dans hub_channel sous forme de rapport V2
+   • Consultable à la demande (rapport V2) — plus posté dans un salon (24/10/2026 :
+     le salon « hub » est retiré, et les journaux vont sur le site)
 
 2. **DÉTECTION D'ANOMALIES** — task toutes les 6h
    • Compare aujourd'hui vs moyenne 7 jours précédents
    • Spike détecté si valeur > 2× la moyenne (ou drop < 50%)
-   • Stocké dans anomaly_log + alerté dans hub_channel si severity élevée
+   • Stocké dans anomaly_log, consultable dans le panneau des anomalies
 
 3. **RÉTENTION MEMBRES** — calcul depuis daily_join_log
    • % de nouveaux membres restés 7j / 30j / 90j
@@ -41,7 +42,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import discord
 from discord.ext import tasks
 import visuels
 
@@ -451,7 +451,7 @@ async def get_recent_anomalies(
 #  `_dm_owner_anomaly` ont été supprimés avec le MP qu'ils servaient. Le bloc envoyait
 #  par DEUX chemins — `dm_digest.send_urgent_now` puis `owner.send` en repli : couper la
 #  seule ligne `owner.send` n'aurait rien coupé du tout.
-#  `daily_snapshot_task`, qui poste en SALON, n'est pas touchée.)
+#  `daily_snapshot_task` ne poste plus dans aucun salon depuis le 24/10/2026.)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -759,7 +759,11 @@ def build_anomalies_panel(anomalies: list[dict], guild_name: str = ""):
 
 @tasks.loop(minutes=30)
 async def daily_snapshot_task():
-    """Tourne toutes les 30 min — capture + post à 00h00-00h30 FR (chaque jour)."""
+    """Tourne toutes les 30 min — capture la journée écoulée à 00h00-00h30 FR (chaque jour).
+
+    24/10/2026 : le rapport partait dans `hub_channel` — le salon « hub » est retiré, et la clé
+    n'était remise à zéro par aucune migration (un vieux réglage aurait continué à poster). Plus
+    aucun envoi dans un salon : `/server report` l'affiche à la demande, l'historique est en base."""
     try:
         if _bot is None or _db_get is None or _db_set is None:
             return
@@ -781,24 +785,7 @@ async def daily_snapshot_task():
                 # Capture snapshot (de hier en fait, donc on regarde la
                 # journée Paris qui vient de se terminer)
                 yesterday_dt = now_local - timedelta(days=1)
-                snapshot = await capture_snapshot(guild, yesterday_dt.date())
-
-                # Récupère snapshot de l'avant-veille pour les diffs
-                avant_hier = (yesterday_dt - timedelta(days=1)).strftime("%Y-%m-%d")
-                prev = next((s for s in await get_recent_snapshots(guild.id, days=5)
-                             if s["day"] == avant_hier), None)
-
-                # Post dans hub
-                hub_ch_id = int(cfg_data.get("hub_channel", 0) or 0)
-                if hub_ch_id:
-                    ch = guild.get_channel(hub_ch_id)
-                    if ch:
-                        view = build_daily_report_panel(snapshot, prev, guild.name)
-                        if view is not None:
-                            try:
-                                await ch.send(view=view)
-                            except (discord.Forbidden, discord.HTTPException) as ex:
-                                print(f"[observability daily send guild={guild.id}] {ex}")
+                await capture_snapshot(guild, yesterday_dt.date())
 
                 await _db_set(guild.id, "obs_report_last_day", day_id)
             except Exception as ex:

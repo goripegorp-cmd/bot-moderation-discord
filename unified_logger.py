@@ -228,12 +228,16 @@ def _ecrire(guild_id: int, data: dict) -> None:
 
 
 async def get_log_channel(guild_id: int) -> Optional[int]:
-    """Recupere l'ID du salon de logs configure pour ce serveur."""
+    """Recupere l'ID du salon de logs configure pour ce serveur.
+    Mode site : aucun (24/10/2026 — un salon posé après le passage au site recevait encore la purge
+    des 30 jours et, en repli, les alertes d'escalade)."""
     p = _cfg_path(guild_id)
     if not p.exists():
         return None
     try:
         data = _lire(guild_id)
+        if data.get("site"):
+            return None
         cid = data.get("channel_id", 0)
         return int(cid) if cid else None
     except (stockage.Illisible, OSError, ValueError):
@@ -241,11 +245,15 @@ async def get_log_channel(guild_id: int) -> Optional[int]:
 
 
 def salons_de_logs(guild_id: int) -> set[int]:
-    """Tous les salons où ce journal écrit : global, par catégorie, par évènement."""
+    """Tous les salons où ce journal écrit : global, par catégorie, par évènement.
+    Mode site : aucun — les alertes ont leur propre salon (`salon_alertes`). 24/10/2026 : un salon
+    choisi par `/logs setchannel` après le passage au site était purgé toutes les 12 h (`menage`)."""
     p = _cfg_path(guild_id)
     try:
         data = _lire(guild_id)
     except (stockage.Illisible, OSError):
+        return set()
+    if data.get("site"):
         return set()
     ids = {data.get("channel_id")}
     for cle in ("category_channels", "event_channels"):

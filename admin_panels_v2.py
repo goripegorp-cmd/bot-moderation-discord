@@ -254,7 +254,9 @@ class SocialMediaPanelV2(_OwnerView):
             _title("Abonnements (10 premiers)", level=3),
             _body(subs_block),
             _divider(),
-            _subtitle("Anti-doublons (ID unique par post) et auto-clean si la source supprime."),
+            #  24/10/2026 : « auto-clean si la source supprime » était faux — `cleanup_all` ne
+            #  revérifie que les lives (un post supprimé à la source reste annoncé).
+            _subtitle("Une seule annonce par post · l'annonce d'un live s'efface quand il se termine."),
             _divider(),
             ui.ActionRow(b_add, b_manage, b_back),
         ]

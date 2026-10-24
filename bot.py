@@ -11184,24 +11184,19 @@ class MainPanelV2(LayoutView):
 
     async def _close(self, i):
         # Phase 3.9 : `i.message.delete()` échoue silencieusement sur un message
-        # éphémère et provoque « Échec de l'interaction ». Pattern éprouvé :
+        # éphémère et provoque « Échec de l'interaction ».
+        # 24/10/2026 : le panneau est une carte V2 — ni `content=` (400), ni `view=None` (carte
+        # vidée) ; `embed=None` + `embeds=[]` levait même un TypeError avalé : « Fermer » ne
+        # fermait rien. Le panneau devient une carte d'une ligne.
+        ferme = carte_texte("✅ Configuration fermée.")
         try:
-            await i.response.edit_message(
-                content="✅ Configuration fermée. Tu peux fermer ce message via *Dismiss*.",
-                embed=None, embeds=[], view=None, attachments=[],
-            )
-        except discord.InteractionResponded:
-            try:
-                await i.edit_original_response(content="✅ Fermé", embed=None, view=None)
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[MainPanelV2 _close] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.defer()
-            except Exception:
-                pass
+            if i.response.is_done():
+                await i.edit_original_response(view=ferme, attachments=[])
+            else:
+                await i.response.edit_message(view=ferme, attachments=[])
+            self.stop()
+        except discord.HTTPException as ex:
+            _logerr("configure.fermer", ex, guild_id=getattr(i.guild, 'id', 0))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -12274,7 +12269,8 @@ async def _bilan_sante_serveur(guild) -> list:
             ("manage_roles", "Gérer les rôles",
              "aucune radiation, ni rôle d'arrivée posé aux nouveaux"),
             ("manage_channels", "Gérer les salons",
-             "le salon des nouveautés UGC ne peut pas être créé"),
+             "les vocaux temporaires, le mode lent anti-spam et la création de "
+             "salons (tickets, 📋logs…) échoueront"),
         ):
             if not getattr(p, attr, False):
                 manques.append(f"🔑 **{nom}** manque — {pourquoi}.")
@@ -12297,10 +12293,13 @@ async def _bilan_sante_serveur(guild) -> list:
             if not (_cible or _defaut_yt or _live_yt):
                 _orphelins.append(str(_f.get('name') or _f.get('id') or '?'))
         if _orphelins:
+            #  24/10/2026 : ces flux sont l'ancien réglage (`ads_youtube_feeds`), qu'aucun écran ne
+            #  modifie — le panneau « Réseaux sociaux » gère ses propres abonnements.
             manques.append(
                 f"📺 **Flux YouTube sans salon** : "
-                f"{', '.join(f'« {n} »' for n in _orphelins[:3])} — aucun autre "
-                f"flux ne donne de salon où le rattacher · `/configure` → Réseaux sociaux.")
+                f"{', '.join(f'« {n} »' for n in _orphelins[:3])} — ancien réglage, sans "
+                f"salon, il ne publie rien. Pour suivre la chaîne : `/configure` → Réseaux "
+                f"sociaux → Ajouter un abonnement.")
     except Exception as ex:
         _logerr("_bilan_sante_serveur", ex, guild_id=getattr(guild, "id", 0))
     return manques
@@ -12431,6 +12430,8 @@ _CLES_ACCESSOIRES = ("roblox_salon_nouveautes", "roblox_salon_bascules",
 
 
 async def _salons_de_logs(g, c) -> set:
+    #  Mode site : `salons_de_logs` ne rend aucun salon, même posé après le passage (24/10/2026 : un
+    #  salon choisi par `/logs setchannel` était purgé ici toutes les 12 h). Restent les alertes (`log_*`).
     ids = set(ulogger2026.salons_de_logs(g.id))
     ids |= {int(v) for k, v in c.items() if (str(k).startswith('log_') or k == 'ticket_log')
             and str(v).isdigit() and int(v)}
@@ -14057,8 +14058,9 @@ async def _publier_social(salon, profil: str, embed):
     if embed.url:
         boutons.insert(0, discord.ui.Button(style=discord.ButtonStyle.link, url=str(embed.url), label="Ouvrir · Open",
                                             emoji=visuels.icone("lien")))
+    #  `cle` : l'URL publiée — après un 5xx, la carte déjà reçue par Discord n'est pas renvoyée (24/10/2026).
     return await webhook_send(salon, profil, view=carte_embed(embed, boutons, haut=ping or ""),
-                              allowed_mentions=notifs.mentions(role))
+                              allowed_mentions=notifs.mentions(role), cle=str(embed.url) if embed.url else None)
 
 
 async def _publier_reserve(guild, plateforme: str, post_id, salon, profil: str, embed, chemin: str):
@@ -14890,13 +14892,14 @@ class LogsPanelV2(LayoutView):
         await _afficher_panneau(self, interaction, edit)
 
     async def _rendre_site(self, interaction, edit):
-        """19/10/2026 : plus aucun log sur Discord. Ce qui reste réglable filtre le journal du site."""
+        """19/10/2026 : plus aucun log sur Discord. Ce qui reste réglable filtre le journal du site.
+        24/10/2026 : plus de bouton « Catégories » — le site garde tout (`log_event` consigne avant ce
+        filtre) et les alertes passent toujours : il ne changeait rien."""
         self.clear_items()
         c = await cfg(self.g.id)
         salon = self.g.get_channel(int(c.get('tableau_salon', 0) or 0))
         boutons = []
-        for emoji, label, cid, cb in (("curseurs", "Catégories", "logsv2_cats", self._cb_categories),
-                                      ("recherche", "Détail par évènement", "logsv2_evts", self._cb_events),
+        for emoji, label, cid, cb in (("recherche", "Détail par évènement", "logsv2_evts", self._cb_events),
                                       ("bouclier", "Rôles épargnés", "logsv2_excl", self._cb_exclusions),
                                       ("alerte", "Salons sécurité", "logsv2_sec", self._cb_security_channels),
                                       ("retour", "Retour", "logsv2_back", self._cb_back)):
@@ -14911,8 +14914,8 @@ class LogsPanelV2(LayoutView):
             v2_body("🌐 **Tout est consigné sur le site**, lisible par personne, nettoyé tout seul "
                     "(messages et vocal 30 jours, le reste 90 jours).\n"
                     + (f"Lien personnel : {salon.mention} → « Ouvrir le tableau de bord ».\n" if salon else "")
-                    + "-# Discord ne reçoit plus que les alertes qui demandent une réaction. Catégories, "
-                      "évènements et rôles épargnés filtrent ce qui est consigné."),
+                    + "-# Discord ne reçoit plus que les alertes qui demandent une réaction. Le détail par "
+                      "évènement et les rôles épargnés choisissent ce qui n'est pas consigné."),
             v2_divider(),
             discord.ui.ActionRow(*boutons[:3]), discord.ui.ActionRow(*boutons[3:]),
             color=Palette.INFO))
@@ -15069,16 +15072,18 @@ class SecurityChannelsPanelV2(LayoutView):
             self.add_item(discord.ui.ActionRow(*_sec_btns[_k:_k + 5]))
 
         if edit:
+            #  `_afficher_panneau` : aussi après un `defer()` (retour du sélecteur ci-dessous).
             try:
-                await interaction.response.edit_message(
-                    content=None, view=self, embed=None, attachments=[],
-                )
-            except Exception:
-                pass
+                await _afficher_panneau(self, interaction, True)
+            except discord.HTTPException as ex:
+                _logerr("salons_securite.panneau", ex, guild_id=self.g.id)
 
     async def _open_picker(
         self, i: discord.Interaction, cfg_key: str, label: str,
     ):
+        """Le choix du salon, à la place du panneau ; le panneau revient ensuite, relu en base.
+        24/10/2026 : le sélecteur partait dans un message à part, remplacé après le choix par un
+        panneau jamais construit (vide) — et le vrai panneau affichait toujours « non défini »."""
         async def _salon_habite(ch) -> bool:
             """Des membres ont-ils déjà écrit ici (50 derniers messages) ? Illisible : oui, par prudence."""
             try:
@@ -15088,7 +15093,6 @@ class SecurityChannelsPanelV2(LayoutView):
                 return False
             except discord.HTTPException:
                 return True
-        """Ouvre un ChannelSelect pour définir le salon."""
         sel = discord.ui.ChannelSelect(
             channel_types=[discord.ChannelType.text],
             placeholder=f"Choisir le salon pour {label}",
@@ -15103,7 +15107,7 @@ class SecurityChannelsPanelV2(LayoutView):
             picked = sel.values[0]
             # Répondre d'abord : verrouiller le salon-piège pose des droits un par un (20/10/2026 :
             # l'interaction expirait au-delà de 6 rôles).
-            await i_pick.response.defer(ephemeral=True)
+            await i_pick.response.defer()
             try:
                 real_ch = self.g.get_channel(int(picked.id))
                 if cfg_key == "honeypot_channel_id":
@@ -15121,22 +15125,24 @@ class SecurityChannelsPanelV2(LayoutView):
                     extra = (f"\n🔒 Salon verrouillé : {'OK' if result['success'] else 'partiel'}"
                              f" ({len(result.get('errors', []))} erreur(s))")
                 await i_pick.followup.send(f"✅ **{label}** défini : <#{picked.id}>{extra}", ephemeral=True)
-                # Re-render le panel parent
-                try:
-                    await i.edit_original_response(view=SecurityChannelsPanelV2(self.u, self.g))
-                except discord.HTTPException as ex:
-                    _logerr("salons_securite.rendu", ex, guild_id=self.g.id)
             except Exception as ex:
                 _logerr("salons_securite.choix", ex, guild_id=self.g.id)
                 await i_pick.followup.send("❌ Le salon n'a pas pu être réglé.", ephemeral=True)
+            finally:
+                # Le vrai panneau, reconstruit et relu en base, revient à la place du sélecteur :
+                # l'état réel, choix refusé compris.
+                await SecurityChannelsPanelV2(self.u, self.g).render_to(i_pick, edit=True)
 
         sel.callback = _on_pick
-        view = View(timeout=120)
-        view.add_item(sel)
-        await i.response.send_message(
-            f"Choisis le salon pour **{label}** :",
-            view=view, ephemeral=True,
-        )
+        b_retour = Button(emoji=visuels.icone("retour"), label="Retour", style=discord.ButtonStyle.secondary)
+
+        async def _retour(i_ret: discord.Interaction):
+            await SecurityChannelsPanelV2(self.u, self.g).render_to(i_ret, edit=True)
+        b_retour.callback = _retour
+        self.clear_items()
+        self.add_item(v2_container(v2_body(f"Choisis le salon pour **{label}** :"),
+                                   discord.ui.ActionRow(sel), discord.ui.ActionRow(b_retour), color=0xE74C3C))
+        await _afficher_panneau(self, i, True)
 
     async def _cb_back(self, i):
         v = LogsPanelV2(self.u, self.g)
@@ -18825,29 +18831,42 @@ async def get_webhook(channel, platform: str):
         print(f"Erreur webhook {platform} dans #{channel.name}: {ex}")
         return None
 
-async def _deja_poste(channel, kw: dict, depuis):
+async def _deja_poste(channel, kw: dict, depuis, cle=None):
     """Après un 5xx ou un délai dépassé, Discord a pu garder le message : on le cherche parmi les
-    derniers du salon avant de renvoyer (sinon deux exemplaires). Rend le message trouvé, ou None."""
-    e = kw.get('embed') or next(iter(kw.get('embeds') or []), None)
-    cle = (getattr(e, 'url', None) or getattr(e, 'title', None)) if e is not None else kw.get('content')
+    derniers du salon avant de renvoyer (sinon deux exemplaires). Rend le message trouvé, ou None.
+    24/10/2026 : une carte V2 n'a ni contenu ni embed — la clé valait None et chaque annonce repartait
+    en double. `cle` (l'URL publiée) se cherche dans le texte des cartes récentes ; une carte envoyée
+    sans clé se reconnaît à son texte entier."""
+    guild = getattr(channel, 'guild', None)
+    explicite = bool(cle)
     if not cle:
+        e = kw.get('embed') or next(iter(kw.get('embeds') or []), None)
+        cle = (getattr(e, 'url', None) or getattr(e, 'title', None)) if e is not None else kw.get('content')
+    carte = "" if cle or kw.get('view') is None else _texte_v2(getattr(kw['view'], 'children', None) or [], guild)
+    if not (cle or carte):
         return None
     try:
         async for m in channel.history(limit=10, after=depuis):
             if m.webhook_id is None and m.author.id != bot.user.id:
                 continue
-            if m.content == cle or any((x.url or x.title) == cle for x in m.embeds):
+            if cle and (m.content == cle or any((x.url or x.title) == cle for x in m.embeds)):
                 return m
+            if (explicite or carte) and getattr(m, 'components', None):
+                texte = _texte_v2(m.components, guild)
+                if (explicite and cle in texte) or (carte and texte == carte):
+                    return m
     except discord.HTTPException as ex:
-        _logerr("webhook.verif", ex, guild_id=getattr(getattr(channel, 'guild', None), 'id', 0))
+        _logerr("webhook.verif", ex, guild_id=getattr(guild, 'id', 0))
     return None
 
 
 async def webhook_send(channel, platform: str, embed=None, content=None, file=None, files=None, embeds=None, view=None,
-                       allowed_mentions=None):
+                       allowed_mentions=None, cle=None):
     """Envoie un message via webhook avec le profil de la plateforme.
     Supporte: content, embed, embeds, file, files, view, allowed_mentions
     Fallback automatique sur channel.send si webhook impossible.
+    `cle` (24/10/2026) : ce qui identifie une publication (son URL). Après un 5xx ou un délai dépassé,
+    on la cherche dans les derniers messages du salon avant de renvoyer (`_deja_poste`).
 
     Phase 3.8 : logging exhaustif des échecs pour traquer les publications fantômes.
 
@@ -18949,7 +18968,7 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
         # Inclut 40062 (rate-limited), 50013 (perms), etc.
         print(f"[webhook_send] {platform} {chan_info}: HTTPException status={getattr(ex, 'status', '?')} code={getattr(ex, 'code', '?')} : {ex}")
         if (getattr(ex, 'status', 0) or 0) >= 500:
-            deja = await _deja_poste(channel, _build_kwargs(False), _avant)
+            deja = await _deja_poste(channel, _build_kwargs(False), _avant, cle)
             if deja is not None:
                 return deja
         try:
@@ -18959,7 +18978,7 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
             return None
     except Exception as ex:
         print(f"[webhook_send] {platform} {chan_info}: erreur inattendue webhook : {type(ex).__name__}: {ex}")
-        deja = await _deja_poste(channel, _build_kwargs(False), _avant)  # délai dépassé : peut-être reçu
+        deja = await _deja_poste(channel, _build_kwargs(False), _avant, cle)  # délai dépassé : peut-être reçu
         if deja is not None:
             return deja
         try:
@@ -21313,13 +21332,18 @@ async def on_ready():
         # langue (DynamicItem persistant → survit au reboot, aucun bouton mort).
         # MÊME patron que dm_notify/entraide. FAIL-SAFE : tout échec → repli FR géré
         # par i18n lui-même, le reste du bot n'est pas impacté.
+        # 24/10/2026 : le bouton d'abord, dans son propre try — une base occupée au
+        # chevauchement de deux instances (init_db > 3 s) tuait tous les boutons drapeau.
+        try:
+            bot.add_dynamic_items(LangSelectButton)
+        except Exception as ex:
+            _logerr("on_ready.i18n_bouton", ex)
         try:
             i18n_module.setup(get_db, cfg_fn=cfg, db_set_fn=db_set)
             await i18n_module.init_db()
-            bot.add_dynamic_items(LangSelectButton)
             print("[i18n] i18n OK (préférence de langue par membre + sélecteur persistant)")
         except Exception as ex:
-            print(f"[on_ready i18n] {ex}")
+            _logerr("on_ready.i18n", ex)
 
 
         try:
@@ -21537,15 +21561,15 @@ async def owner_mod_stats_cmd(i: discord.Interaction, jours: int = 30):
     if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
         return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
     jours = max(1, min(365, int(jours or 30)))
+    #  24/10/2026 : une dizaine de lectures (jusqu'à 365 jours) avant la première réponse — au-delà
+    #  de 3 s, « l'application ne répond plus ». On acquitte d'abord ; `show` passe ensuite par le followup.
+    if not await _safe_defer(i, ephemeral=True):
+        return
     try:
         await mod_dashboard_module.show(i, days=jours)
     except Exception as ex:
-        print(f"[owner mod_stats] {ex}")
-        try:
-            if not i.response.is_done():
-                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
-        except Exception:
-            pass
+        _logerr("owner.mod_stats", ex, guild_id=i.guild.id)
+        await _safe_followup(i, content="❌ Le tableau de bord n'a pas pu s'afficher.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -25566,6 +25590,19 @@ async def configure_cmd(i: discord.Interaction):
 logs_group = app_commands.Group(name="logs", description="📋 Logs unifiés du serveur")
 
 
+async def _logs_sur_le_site(g) -> str:
+    """Mode site : la réponse honnête des commandes /logs qui ne règlent plus rien (24/10/2026 :
+    elles disaient « Salon de logs unifié défini », et ce salon était ensuite purgé toutes les 12 h).
+    Rend "" hors mode site."""
+    if not await ulogger2026.mode_site(g.id):
+        return ""
+    alertes = g.get_channel(int(await ulogger2026.salon_alertes(g.id) or 0))
+    return ("📋 Les journaux sont **sur le site**, qui garde tout : plus de salon de logs ni de catégories à "
+            "régler, rien n'a été changé.\n"
+            f"-# Discord ne reçoit que les alertes{f', dans {alertes.mention}' if alertes else ''}. "
+            "Pour ne plus consigner un évènement : `/configure` → Logs → Détail par évènement.")
+
+
 @logs_group.command(name="setchannel", description="📍 Définir le salon unique où vont TOUS les logs")
 @app_commands.describe(salon="Salon de destination (laisser vide pour désactiver)")
 async def logs_setchannel(i: discord.Interaction, salon: discord.TextChannel = None):
@@ -25574,6 +25611,9 @@ async def logs_setchannel(i: discord.Interaction, salon: discord.TextChannel = N
             "⛔ Cette commande est réservée au propriétaire du serveur.", ephemeral=True,
         )
     try:
+        site = await _logs_sur_le_site(i.guild)
+        if site:
+            return await i.response.send_message(site, ephemeral=True)
         if salon is None:
             await ulogger2026.set_log_channel(i.guild.id, 0)
             return await i.response.send_message(
@@ -25625,7 +25665,8 @@ async def logs_status(i: discord.Interaction):
         cats = await ulogger2026.get_enabled_categories(i.guild.id)
         all_cats = sorted(set(m["cat"] for m in ulogger2026.EVENT_META.values()))
         chan_txt = "🔴 _non configuré_"
-        if (await cfg(i.guild.id)).get('logs_sur_site_v1'):
+        site = bool((await cfg(i.guild.id)).get('logs_sur_site_v1'))
+        if site:
             chan_txt = "📋 **sur le site** (journal) — seules les alertes de sécurité arrivent dans Discord"
         elif chan_id:
             ch = i.guild.get_channel(chan_id)
@@ -25639,8 +25680,13 @@ async def logs_status(i: discord.Interaction):
         cats_txt = "\n".join(
             f"{'✅' if c in cats else '❌'} **{c}**" for c in all_cats
         )
-        e.add_field(name="Catégories", value=cats_txt or "_aucune_", inline=False)
-        e.set_footer(text="/logs setchannel · /logs categories")
+        if site:  # 24/10/2026 : le site garde tout, les catégories ne trient que les salons Discord
+            e.add_field(name="Catégories", value="Sans effet : le site garde tout. Pour ne plus consigner un "
+                                                 "évènement : `/configure` → Logs → Détail par évènement.",
+                        inline=False)
+        else:
+            e.add_field(name="Catégories", value=cats_txt or "_aucune_", inline=False)
+            e.set_footer(text="/logs setchannel · /logs categories")
         await i.response.send_message(view=carte_embed(e), ephemeral=True)
     except Exception as ex:
         print(f"[LOGS status] {ex}")
@@ -25698,6 +25744,11 @@ async def logs_categories(i: discord.Interaction):
             "⛔ Cette commande est réservée au propriétaire du serveur.", ephemeral=True,
         )
     try:
+        #  Mode site : le site garde tout (`log_event` consigne avant ce filtre) et les alertes passent
+        #  toujours — les catégories ne changeraient rien. On le dit au lieu d'ouvrir le menu.
+        site = await _logs_sur_le_site(i.guild)
+        if site:
+            return await i.response.send_message(site, ephemeral=True)
         cats = await ulogger2026.get_enabled_categories(i.guild.id)
         v = View(timeout=180)
         v.add_item(LogsCategoriesSelect(cats))
