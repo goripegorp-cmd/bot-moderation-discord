@@ -248,7 +248,9 @@ def test_L5_branche_dans_le_bot_l_etat_et_l_arret_propre(env):
                                                  "BoutonChercher"))
     assert "await cadeaux.elaguer(g)" in SRC and "'cadeaux_elagage_v1'" in SRC
     assert '"cadeaux_detail"' in SRC and '"erreurs_ui": diag.releve("ui")' in SRC
-    assert "await cadeaux.init_db()\n    _installer_arret_propre()" in SRC.replace("\r\n", "\n")
+    #  24/10/2026 (revue) : le démarrage se fait par étapes (`_Etape`) — l'arrêt propre a la sienne, après les cadeaux.
+    plat = SRC.replace("\r\n", "\n")
+    assert plat.index("await cadeaux.init_db()") < plat.index('with _Etape("arret_propre"):\n        _installer_arret_propre()')
     g = serveur()
     _lancer(g, msg_min=2)
     _ecrire(env, g, 11, 3)
