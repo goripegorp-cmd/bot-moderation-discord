@@ -67,8 +67,6 @@ def test_A3_la_boucle_ne_lit_plus_rien_pour_rien():
     from pathlib import Path
     src = ast.unparse(ast.parse((Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")))
     assert "yt_avatar = await fetch_avatar_url('youtube', channel_id, session) if posts_to_publish else None" in src
-    corps = src[src.index("async def check_creator_spotlight_feeds"):]
-    assert corps.index("if not (role_id and ch_id):") < corps.index("await list_creator_links(guild.id)")
 
 
 def test_A4_la_boucle_rend_sa_connexion_et_garde_les_modifications_du_panneau():

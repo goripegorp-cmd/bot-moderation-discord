@@ -124,7 +124,7 @@ tables mortes.
 **Gardé et vérifié** : activité · Roblox · social · rellseas · sécurité ·
 sanctions · logs · tickets · RGPD · sondages · messages programmés · rôles et
 restrictions expirés · vocaux temporaires · anniversaires **des membres** ·
-bons plans · rappel `/bump` · nettoyage d'accueil · infra base.
+bons plans (retirés le 24/10/2026) · rappel `/bump` · nettoyage d'accueil · infra base.
 
 ⚠️ **`activity_tracker` était un SECOND système de suivi** (projecteurs,
 digests). Vérifié avant de couper : le système d'activité gardé passe par

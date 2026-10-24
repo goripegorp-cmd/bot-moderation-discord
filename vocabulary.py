@@ -117,7 +117,6 @@ class Module:
     CENTER = "Centre d'animation"
     LEVELING = "Niveaux & Economie"
     TEMPVOICE = "Voix temporaires"
-    AUTOHELP = "Aide automatique"
     PERMISSIONS = "Permissions"
     BACKUP = "Sauvegarde & Restauration"
     HELP = "Aide & Documentation"

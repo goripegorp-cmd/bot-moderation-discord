@@ -109,7 +109,6 @@ def test_H6_logs_et_alertes_sans_emoji_decoratif():
     publics = {"_handle_boost_stopped", "_handle_boost_started",
                "_handle_welcome", "check_twitch_feeds", "check_youtube_feeds",
                "check_tiktok_feeds", "check_twitter_feeds", "check_reddit_feeds",
-               "check_creator_spotlight_feeds", "relay_discord_message", "handle_auto_help",
                "on_interaction", "_flush_welcome_raid_recap", "_envoyer_recours_radie"}
     fautes = []
     arbre = ast.parse((RACINE / "bot.py").read_text(encoding="utf-8"))

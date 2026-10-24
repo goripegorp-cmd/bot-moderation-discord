@@ -43,7 +43,6 @@ DELETE_SUBJECT = {
     "user_fingerprints": ["user_id"],
     "badword_strikes": ["user_id"],
     "member_birthdays": ["user_id"],
-    "creator_links": ["user_id"],
     "behavior_profile": ["user_id"],
     "behavior_alerts": ["user_id"],
     "dm_digest_queue": ["user_id"],

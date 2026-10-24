@@ -1164,32 +1164,6 @@ async def db_init():
             banned_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
         
-        # ═══════════════ TABLE DEALS PERSISTANTE ═══════════════
-        # Stocke chaque deal posté pour ne jamais re-publier le même jeu
-        await db.execute('''CREATE TABLE IF NOT EXISTS posted_deals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            platform TEXT,
-            game_id TEXT,
-            game_name TEXT,
-            message_id INTEGER DEFAULT 0,
-            channel_id INTEGER DEFAULT 0,
-            discount INTEGER DEFAULT 0,
-            original_price REAL DEFAULT 0,
-            final_price REAL DEFAULT 0,
-            game_url TEXT DEFAULT "",
-            image_url TEXT DEFAULT "",
-            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-            expired INTEGER DEFAULT 0,
-            UNIQUE(guild_id, platform, game_id)
-        )''')
-        try:
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_posted_deals_guild ON posted_deals(guild_id, platform, game_id)')
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_posted_deals_expired ON posted_deals(guild_id, expired)')
-        except:
-            pass
-        
         # ═══════════════ TABLE ANTI-SPAM LIVE ═══════════════
         # Persiste l'état des lives pour survivre aux redémarrages du bot
         await db.execute('''CREATE TABLE IF NOT EXISTS live_announcements (
@@ -1240,7 +1214,7 @@ async def db_init():
 
 
         # ── D4 : extraction des dicts indexés par user_id hors du blob config ──
-        # Ces 3 clés (badwords_strikes / birthdays / creator_links) grossissaient
+        # Ces clés (badwords_strikes / birthdays) grossissaient
         # sans fin dans le blob par-guilde et menaçaient le plafond dur 100Ko
         # (db_set REFUSE l'écriture au-delà = config perdue). On les sort vers de
         # vraies tables. Le blob reste lu uniquement en REPLI (filet zéro-perte).
@@ -1257,20 +1231,14 @@ async def db_init():
             day TEXT DEFAULT '',
             PRIMARY KEY (guild_id, user_id)
         )''')
-        await db.execute('''CREATE TABLE IF NOT EXISTS creator_links (
-            guild_id INTEGER,
-            user_id INTEGER,
-            links_json TEXT DEFAULT '[]',
-            PRIMARY KEY (guild_id, user_id)
-        )''')
 
         await db.commit()
     print("✅ DB OK")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  D4 : helpers table-backed pour les 3 dicts sortis du blob config
-#  (badword_strikes / member_birthdays / creator_links)
+#  D4 : helpers table-backed pour les dicts sortis du blob config
+#  (badword_strikes / member_birthdays)
 #
 #  Contrat : tous fail-safe (jamais d'exception remontée aux call sites), tous
 #  atomiques (UPSERT en table). La LECTURE retombe sur le blob config si la ligne
@@ -1339,83 +1307,6 @@ async def set_strikes(gid, uid, count, last_at):
         return False
 
 
-# ── anniversaires ─────────────────────────────────────────────────────────────
-
-
-async def set_creator_links(gid, uid, links_list):
-    """UPSERT atomique de la liste de liens d'un créateur (écriture table-only).
-
-    Liste vide → on supprime la ligne (évite des lignes orphelines).
-    """
-    try:
-        gid = validate_id(gid)
-        uid = validate_id(uid)
-        if gid is None or uid is None:
-            return False
-        links_list = list(links_list or [])
-        async with get_db() as db:
-            if not links_list:
-                await db.execute(
-                    'DELETE FROM creator_links WHERE guild_id=? AND user_id=?',
-                    (gid, uid)
-                )
-            else:
-                jd = json.dumps(links_list, ensure_ascii=False)
-                await db.execute(
-                    'INSERT INTO creator_links(guild_id, user_id, links_json) VALUES(?,?,?) '
-                    'ON CONFLICT(guild_id, user_id) DO UPDATE SET links_json=?',
-                    (gid, uid, jd, jd)
-                )
-            await db.commit()
-        # Si on vide la liste, purge AUSSI le REPLI blob (sinon une liste non-migrée
-        # resurgirait via get/list_creator_links après suppression du dernier lien).
-        if not links_list:
-            try:
-                data = await db_get(gid)
-                cl = data.get('creator_links', {}) or {}
-                if str(uid) in cl:
-                    cl = dict(cl)
-                    cl.pop(str(uid), None)
-                    await db_set(gid, 'creator_links', cl)
-            except Exception:
-                pass
-        return True
-    except Exception as ex:
-        print(f"[set_creator_links] {ex}")
-        return False
-
-
-async def list_creator_links(gid):
-    """Retourne { str(user_id): [links...] } pour la guilde (UNION table + blob)."""
-    out = {}
-    try:
-        gid = validate_id(gid)
-        if gid is None:
-            return out
-        # REPLI blob d'abord (écrasé par la table si doublon)
-        try:
-            data = await db_get(gid)
-            for uid_str, lst in (data.get('creator_links', {}) or {}).items():
-                if lst:
-                    out[str(uid_str)] = list(lst)
-        except Exception:
-            pass
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT user_id, links_json FROM creator_links WHERE guild_id=?',
-                (gid,)
-            ) as c:
-                async for row in c:
-                    try:
-                        parsed = list(json.loads(row[1]) or [])
-                    except Exception:
-                        parsed = []
-                    out[str(row[0])] = parsed
-    except Exception as ex:
-        print(f"[list_creator_links] {ex}")
-    return out
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 #  D4 : migration BOOT idempotente blob → tables
 #  One-shot par guilde : copie les entrées existantes du blob vers les tables
@@ -1459,16 +1350,6 @@ async def _d4_migrate_blob_to_tables():
                             'INSERT OR IGNORE INTO member_birthdays(guild_id, user_id, day) '
                             'VALUES(?,?,?)',
                             (gid, uid, str(day))
-                        )
-                    # creator_links → creator_links table
-                    for uid_str, lst in (data.get('creator_links', {}) or {}).items():
-                        uid = validate_id(uid_str)
-                        if uid is None or not lst:
-                            continue
-                        await db.execute(
-                            'INSERT OR IGNORE INTO creator_links(guild_id, user_id, links_json) '
-                            'VALUES(?,?,?)',
-                            (gid, uid, json.dumps(list(lst), ensure_ascii=False))
                         )
                     await db.commit()
                 # Flag la migration faite (via db_set → respecte le verrou par-guilde)
@@ -1856,11 +1737,6 @@ async def cfg(gid):
         'badwords_sanction_duration': 60,  # minutes (utilisé seulement pour mute)
         'badwords_strikes': {},            # { str(user_id): {"count": int, "last_at": float} }
         'boost_celebrate': True,           # 0 = plus de carte de remerciement dans 🚀boosts
-        # Phase 26.2 : Spotlight créateurs (role-gated)
-        'creator_role': 0,                 # rôle "créateur de contenu"
-        'creator_channel': 0,              # salon destination
-        'creator_keyword': '',             # filtre mot-clé (optionnel)
-        'creator_links': {},               # { str(user_id): [ {platform, url, last_post_id} ] }
         # Dégradation crescendo des récidivistes (owner 2026-06-30) — restriction PERSISTANTE et progressive.
         'recidivism_enabled': 1,           # 1 = restreindre auto les récidivistes chroniques (score 90j)
         'recidivism_t1': 3,                # seuil palier 🟡 Surveillé (plus d'images + cooldown léger)
@@ -12781,7 +12657,7 @@ _TABLES_MORTES = frozenset({
     "citadelle_wallet", "climax_attackers", "climax_events", "climax_titles", "combat_arenas",
     "combat_ping_log", "combat_recall", "comeback_dms", "community_goal_progress",
     "community_goals", "compliments_log", "confession_replies", "confessions", "config",
-    "conv_starter_log", "council_sessions", "council_votes", "cross_post_groups",
+    "conv_starter_log", "council_sessions", "council_votes", "creator_links", "cross_post_groups",
     "cross_post_targets", "daily_boss_attackers", "daily_boss_events", "daily_encounters_log",
     "daily_greeting_log", "daily_prompt_votes", "daily_prompts", "daily_quest_progress",
     "daily_quest_pushes", "daily_riddle_answered", "daily_riddles_log", "dm_event_optin",
@@ -12807,7 +12683,7 @@ _TABLES_MORTES = frozenset({
     "onboarding_journey", "owner_digest_log", "owner_monthly_log", "patrol_contributions",
     "patrol_sessions", "personal_events_log", "pet_eggs", "pet_evolution", "player_badges",
     "player_class_choice", "player_classes", "player_event_stats", "player_inventory",
-    "player_stash", "player_styles", "player_voice_optin", "prediction_bets", "predictions",
+    "player_stash", "player_styles", "player_voice_optin", "posted_deals", "prediction_bets", "predictions",
     "presence_chain", "promo_sources", "publish_config", "pvp_duels", "raffle_draws",
     "raffle_tickets", "referral_links", "referrals", "regional_state", "reputation",
     "reputation_history", "rift_contributors", "polls", "rellseas_quizzes", "rift_events", "rivalries", "scheduled_messages", "suggestions", "roadmap_items",
@@ -12861,6 +12737,40 @@ def _role_supprimable(r, me, configures: set) -> bool:
     return (not r.managed and not r.is_default() and r < me.top_role
             and r.id not in configures
             and not any(getattr(perms, p, False) for p in _PERMS_STAFF))
+
+
+async def _retirer_fonctions_mortes(g) -> None:
+    """24/10/2026, le fondateur : « le truc des créateurs de contenu, les bons plans, tout ce que tu me dis à
+    retirer, fais-le ». L'aide automatique, les bons plans, le relais entre serveurs et la mise en avant des
+    créateurs sont sortis du code (leurs réglages ne se changeaient plus depuis le 11/08). Une fois par
+    serveur : le dernier message de l'aide automatique (« se repositionne automatiquement ») part, sinon il
+    mentirait ; le nombre effacé est noté."""
+    c = await cfg(g.id)
+    if c.get('fonctions_mortes_v1'):
+        return
+    salons = c.get('auto_help_channels') or {}
+    if isinstance(salons, str):
+        try:
+            salons = json.loads(salons)
+        except ValueError:
+            salons = {}
+    effaces = 0
+    for cid in list(salons) if isinstance(salons, dict) else []:
+        ch = g.get_channel(int(cid)) if str(cid).isdigit() else None
+        if not isinstance(ch, discord.TextChannel):
+            continue
+        try:
+            async for m in ch.history(limit=50):
+                pied = m.embeds[0].footer.text if m.embeds and m.embeds[0].footer else ""
+                if (m.webhook_id or m.author.id == bot.user.id) and "repositionne automatiquement" in str(pied or ""):
+                    await m.delete()
+                    effaces += 1
+        except discord.HTTPException as ex:
+            _logerr("menage.aide_auto", ex, guild_id=g.id)
+    await db_set(g.id, 'fonctions_mortes_v1', {"le": now().isoformat(), "aide_effaces": effaces})
+    if effaces:
+        await _au_journal(g, "Config", "config.fonctions_retirees",
+                          f"Aide automatique retirée : {effaces} message(s) effacé(s).")
 
 
 async def _menage_v2(g):
@@ -14104,6 +14014,7 @@ async def _etat_public():
             "cmd_giveaway": any("giveaway" in noms for noms in _commandes_vues.values()),
             "faq_trouve": next(iter(_faq_vus.values()), {}),
             "roles_zones_manquants": await _roles_zones_manquants(),
+            "fonctions_mortes": next((c['fonctions_mortes_v1'] for c in confs if c.get('fonctions_mortes_v1')), None),
             "game_link": sum(1 for g, c in zip(list(bot.guilds), confs)
                              if g.get_channel(int(c.get('game_link_salon', 0) or 0)) is not None),
             "jeux_liens": max([len(liens_jeux.liens(c)) for c in confs] or [0]),
@@ -14167,7 +14078,7 @@ _TRAVAUX = (
     "suggestions.installer", "_actus_en_annonces", "_flux_studio_rell", "_rattacher_flux_orphelins",
     "_configurer_salons", "_passer_logs_sur_site", "_recrutement_rellseas", "_salon_tableau",
     "_logs_direction_seule", "_configurer_salons_v2", "_automod_invitations", "_salon_aide",
-    "_boosts_au_demarrage",
+    "_boosts_au_demarrage", "_retirer_fonctions_mortes",
 )
 
 
@@ -14425,7 +14336,7 @@ _SUPERVISED_LOOP_NAMES = [
     # les superviser est sans effet de bord (no-op si déjà vivantes, resurrection sinon).
     "check_social_feeds",
     "cleanup_old_db_data",
-    "check_expired_roles", "cleanup_deals_task", "check_expired_restrictions",
+    "check_expired_roles", "check_expired_restrictions",
     "persistent_msg_cleaner", "temp_voice_watchdog",     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
     # que la date n'est pas configurée/atteinte.
     # Entraide : édite les posts des demandes expirées + supprime les vocaux temp
@@ -18635,7 +18546,6 @@ WEBHOOK_PROFILES = {
     'tiktok_live': {'name': '🔴 TikTok Live'},
     'twitter': {'name': '𝕏'},
     'reddit': {'name': 'Reddit'},
-    'discord_relay': {'name': 'Discord Relay'},
     'roblox_ugc': {'name': 'Roblox UGC'},
     # ─── Veille Roblox (12/08/2026) — un profil PAR FLUX, pour qu'on voie d'ou
     #     vient la fiche sans lire une ligne. Les cles doivent correspondre a
@@ -18645,7 +18555,6 @@ WEBHOOK_PROFILES = {
     'roblox_bascules':   {'name': '💎 Passes collectionnables'},
     'roblox_surveiller': {'name': '👀 A surveiller'},
     'roblox_actu':       {'name': '📢 Actualite Roblox'},
-    'deals': {'name': 'Bons Plans'},
     'game_updates': {'name': '🎮 Mises à jour'},
     # ─── Modération & Sécurité ───
     'mod_log': {'name': '🔨 Modération'},
@@ -18661,7 +18570,6 @@ WEBHOOK_PROFILES = {
     'level_up': {'name': '⭐ Niveau'},
     'ticket': {'name': '🎫 Tickets'},
     'realsy': {'name': '🎭 Activité'},
-    'auto_help': {'name': '❓ Aide Auto'},
 }
 
 async def get_webhook(channel, platform: str):
@@ -19229,116 +19137,11 @@ temp_voice_channels = {}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           💡 SYSTÈME D'AIDE AUTOMATIQUE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Cache pour stocker les IDs des messages d'aide actuels
-auto_help_messages = {}  # {channel_id: message_id}
-# Locks par salon pour éviter les exécutions concurrentes d'auto-help
-_auto_help_locks = {}  # {channel_id: asyncio.Lock}
-
-# NOTE: AutoHelpPanel (View V1) supprime — remplace par AutoHelpPanelV2 (LayoutView). Jamais instancie.
-
-
-async def handle_auto_help(message):
-    """Gère le repositionnement automatique des messages d'aide"""
-
-    try:
-        c = await cfg(message.guild.id)
-        auto_helps = c.get('auto_help_channels', {})
-
-        channel_id_str = str(message.channel.id)
-        if channel_id_str not in auto_helps:
-            return
-
-        help_data = auto_helps[channel_id_str]
-        if not help_data.get('enabled', True):
-            return
-
-        channel_id = message.channel.id
-
-        # Vérifier si le message n'est pas le message d'aide lui-même
-        if channel_id in auto_help_messages:
-            if message.id == auto_help_messages[channel_id]:
-                return  # C'est notre propre message d'aide, ne pas boucler
-
-        # Ignorer les messages envoyés par nos propres webhooks
-        if message.webhook_id and message.embeds:
-            footer_text = str(message.embeds[0].footer.text) if message.embeds[0].footer else ""
-            if "repositionne automatiquement" in footer_text:
-                auto_help_messages[channel_id] = message.id
-                return
-
-        # ═══════════════ LOCK PAR SALON — ANTI-DUPLICATION ═══════════════
-        if channel_id not in _auto_help_locks:
-            _auto_help_locks[channel_id] = asyncio.Lock()
-
-        lock = _auto_help_locks[channel_id]
-        if lock.locked():
-            return  # Une autre tâche gère déjà ce salon, on skip
-
-        async with lock:
-            # ═══════════════ SUPPRESSION ROBUSTE DE TOUS LES ANCIENS MESSAGES ═══════════════
-
-            # 1. D'abord supprimer via le cache si on a l'ID
-            old_msg_id = auto_help_messages.pop(channel_id, None)
-
-            # 2. Chercher et supprimer TOUS les messages d'aide dans ce salon
-            messages_to_delete = []
-            try:
-                async for msg in message.channel.history(limit=30):
-                    # Ne pas supprimer le message qui vient d'arriver
-                    if msg.id == message.id:
-                        continue
-                    # Vérifier si c'est un message d'aide (bot direct ou webhook)
-                    has_embeds = bool(msg.embeds)
-                    is_bot_or_webhook = msg.author.id == bot.user.id or bool(msg.webhook_id)
-                    if is_bot_or_webhook and has_embeds:
-                        embed = msg.embeds[0]
-                        footer_text = str(embed.footer.text) if embed.footer else ""
-                        if "repositionne automatiquement" in footer_text:
-                            messages_to_delete.append(msg)
-            except Exception as ex:
-                print(f"[AUTO_HELP] Erreur recherche anciens messages: {ex}")
-
-            # 3. Supprimer tous les anciens messages d'aide trouvés
-            for old_msg in messages_to_delete:
-                try:
-                    await old_msg.delete()
-                except (discord.NotFound, discord.Forbidden):
-                    pass
-                except Exception as ex:
-                    print(f"[AUTO_HELP] Erreur suppression: {ex}")
-
-            # 4. Petit délai pour s'assurer que les suppressions sont effectuées
-            await asyncio.sleep(0.5)
-
-            # ═══════════════ ENVOI DU NOUVEAU MESSAGE D'AIDE ═══════════════
-
-            e = discord.Embed(
-                color=help_data.get('color', 0x3498DB)
-            )
-            e.set_author(name=f"💡 {help_data.get('title', 'Aide')}", icon_url=message.guild.icon.url if message.guild.icon else None)
-            e.description = help_data.get('content', '')
-            e.set_footer(text="Ce message se repositionne automatiquement")
-
-            try:
-                new_msg = await webhook_send(message.channel, 'auto_help', embed=e)
-                if new_msg:
-                    auto_help_messages[channel_id] = new_msg.id
-            except Exception as ex:
-                print(f"[AUTO_HELP] Erreur envoi nouveau message: {ex}")
-
-    except Exception as ex:
-        print(f"[AUTO_HELP] Erreur générale: {ex}")
-
-# ═══════════════════════════════════════════════════════════════════════════════
 #  🧹 CLEANUP AUTO DES DB ANCIENNES (Phase 20)
 #
 #  Pour éviter que les tables grossissent indéfiniment (RAM + disque) :
 #  - member_activity : prune > 30 jours (lots de writes, juste pour stats)
 #  - security_logs : prune > 90 jours (audit trail mais pas éternel)
-#  - posted_deals expirés : déjà géré ailleurs
 #  - tracking_layer : prune_old(180j) pour les entries deleted
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -19363,17 +19166,7 @@ async def cleanup_old_db_data():
             except Exception as ex:
                 print(f"[cleanup security_logs] {ex}")
 
-            # 3. posted_deals expirés > 30 jours
-            try:
-                cur = await db.execute(
-                    "DELETE FROM posted_deals WHERE expired=1 AND last_seen < datetime('now', '-30 days')"
-                )
-                deleted_total += cur.rowcount or 0
-                await db.commit()
-            except Exception as ex:
-                print(f"[cleanup posted_deals] {ex}")
-
-        # 4. tracking_layer : prune les entries deleted > 180j (par guild)
+        # 3. tracking_layer : prune les entries deleted > 180j (par guild)
         try:
             for guild in bot.guilds:
                 pruned = await tracking2026.prune_old(guild.id, max_days=180)
@@ -20623,7 +20416,7 @@ async def on_ready():
         await _db_pool.init()  # Initialise le pool de connexions DB
     except Exception as ex:
         print(f"[on_ready pool init] {ex}")
-    # D4 : migration one-shot blob→tables (badwords_strikes/birthdays/creator_links)
+    # D4 : migration one-shot blob→tables (badwords_strikes/birthdays)
     # APRÈS init DB (les tables existent) et le pool. Idempotente + fail-safe.
     try:
         await _d4_migrate_blob_to_tables()
@@ -20986,10 +20779,6 @@ async def on_ready():
     if not check_expired_roles.is_running():
         check_expired_roles.start()
     
-    # Lancer la tâche de nettoyage des deals expirés
-    if not cleanup_deals_task.is_running():
-        cleanup_deals_task.start()
-
     # Lancer la tâche des directions expirées
     if not check_expired_restrictions.is_running():
         check_expired_restrictions.start()
@@ -21437,7 +21226,7 @@ async def on_raw_poll_vote_add(payload):
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
-    """Repositionne les messages d'aide après les interactions (commandes slash, boutons, etc.)"""
+    """Une interaction (commande, bouton, menu) est un geste délibéré : elle compte pour l'activité."""
     if not interaction.channel or not interaction.guild:
         return
 
@@ -21453,72 +21242,6 @@ async def on_interaction(interaction: discord.Interaction):
     except Exception as _ex_act:
         print(f"[activite on_interaction] {_ex_act}")
 
-    try:
-        c = await cfg(interaction.guild.id)
-        auto_helps = c.get('auto_help_channels', {})
-        channel_id_str = str(interaction.channel.id)
-
-        if channel_id_str not in auto_helps:
-            return
-
-        help_data = auto_helps[channel_id_str]
-        if not help_data.get('enabled', True):
-            return
-
-        channel_id = interaction.channel.id
-
-        # Lock par salon — même lock que handle_auto_help
-        if channel_id not in _auto_help_locks:
-            _auto_help_locks[channel_id] = asyncio.Lock()
-
-        lock = _auto_help_locks[channel_id]
-        if lock.locked():
-            return  # Déjà en cours de repositionnement
-
-        async with lock:
-            # Attendre que la réponse de l'interaction soit envoyée
-            await asyncio.sleep(1.5)
-
-            # Vérifier si le dernier message n'est pas déjà notre message d'aide
-            try:
-                last_msg = [m async for m in interaction.channel.history(limit=1)]
-                if last_msg:
-                    last_msg = last_msg[0]
-                    if channel_id in auto_help_messages:
-                        if last_msg.id == auto_help_messages[channel_id]:
-                            return
-
-                    # Supprimer TOUS les anciens messages d'aide (scan historique)
-                    messages_to_delete = []
-                    async for msg in interaction.channel.history(limit=30):
-                        is_bot_or_webhook = msg.author.id == bot.user.id or bool(msg.webhook_id)
-                        if is_bot_or_webhook and msg.embeds:
-                            footer_text = str(msg.embeds[0].footer.text) if msg.embeds[0].footer else ""
-                            if "repositionne automatiquement" in footer_text:
-                                messages_to_delete.append(msg)
-
-                    for old_msg in messages_to_delete:
-                        try:
-                            await old_msg.delete()
-                        except (discord.NotFound, discord.Forbidden):
-                            pass
-
-                    auto_help_messages.pop(channel_id, None)
-                    await asyncio.sleep(0.3)
-
-                    # Envoyer le nouveau message d'aide
-                    e = discord.Embed(color=help_data.get('color', 0x3498DB))
-                    e.set_author(name=f"💡 {help_data.get('title', 'Aide')}", icon_url=interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None)
-                    e.description = help_data.get('content', '')
-                    e.set_footer(text="Ce message se repositionne automatiquement")
-
-                    new_msg = await webhook_send(interaction.channel, 'auto_help', embed=e)
-                    if new_msg:
-                        auto_help_messages[channel_id] = new_msg.id
-            except:
-                pass
-    except Exception as ex:
-        print(f"Erreur on_interaction auto_help: {ex}")
 
 # Phase 254 HOTFIX : le lancement du tournoi N'EST PLUS une sous-commande /owner —
 # le groupe /owner était DÉJÀ à la limite Discord de 25 sous-commandes (ajouter
@@ -24084,86 +23807,6 @@ async def _perm_escalation_guard(guild, before, after):
     #  déjà journalisée en SEC_ESCALATION juste au-dessus, avec plus de détail.)
 
 
-async def relay_discord_message(msg):
-    """Relaie un message vers les serveurs qui suivent ce salon. La configuration vient du
-    cache de `cfg` : avant le 19/10/2026, chaque message relisait et décodait TOUTE la
-    table guild_config."""
-    if len(bot.guilds) < 2:
-        return
-    channel_id = str(msg.channel.id)
-    for dest_guild in list(bot.guilds):
-        if dest_guild.id == msg.guild.id:
-            continue
-        try:
-            data = await cfg(dest_guild.id)
-            feeds = data.get('ads_discord_feeds', [])
-            dest_channel_id = data.get('ads_discord_channel', 0)
-            
-            is_followed = any(f['channel_id'] == channel_id for f in feeds)
-            if not is_followed or not dest_channel_id:
-                continue
-            
-            dest_channel = dest_guild.get_channel(dest_channel_id)
-            if not dest_channel:
-                continue
-            
-            # ═══════════════ EMBED DISCORD RELAY PROFESSIONNEL ═══════════════
-            e = discord.Embed(color=0x5865F2)
-            
-            # Auteur avec le nom du serveur
-            e.set_author(
-                name=f"📡 DISCORD • {msg.guild.name}",
-                icon_url=msg.guild.icon.url if msg.guild.icon else "https://discord.com/assets/847541504914fd33810e70a0ea73177e.ico"
-            )
-            
-            # Thumbnail avec avatar de l'auteur
-            if msg.author.display_avatar:
-                e.set_thumbnail(url=msg.author.display_avatar.url)
-            
-            # Info du message — FIX sécu P1-5 : on ÉCHAPPE le markdown du
-            # contenu d'un AUTRE serveur avant de le réinjecter dans l'embed.
-            # Les embeds rendent les liens masqués [texte](url) CLIQUABLES →
-            # sans escape, un message relayé pouvait glisser un faux-lien de
-            # phishing crédibilisé par « 📡 DISCORD • <serveur source> ».
-            e.add_field(
-                name="👤 Auteur",
-                value=f"**{_escape_md(msg.author.display_name, 60)}**",
-                inline=True
-            )
-            e.add_field(
-                name="📍 Salon",
-                value=f"#{_escape_md(msg.channel.name, 60)}",
-                inline=True
-            )
-
-            # Contenu du message (échappé : pas de lien masqué / markdown injecté)
-            content = _escape_md(msg.content, 1500) if msg.content else ""
-            if content:
-                e.add_field(
-                    name="💬 Message",
-                    value=content,
-                    inline=False
-                )
-            
-            # Images
-            if msg.attachments:
-                for att in msg.attachments[:1]:
-                    if att.content_type and att.content_type.startswith('image'):
-                        e.set_image(url=att.url)
-                        break
-            
-            e.set_footer(
-                text=f"Discord • {msg.guild.name}",
-                icon_url="https://discord.com/assets/847541504914fd33810e70a0ea73177e.ico"
-            )
-            e.timestamp = msg.created_at
-            
-            await webhook_send(dest_channel, 'discord_relay', embed=e)
-            
-        except Exception as ex:
-            _logerr("relais", ex, guild_id=dest_guild.id)
-
-
 # Phase 23 : cache de cooldown par (guild_id, user_id) → timestamp dernière alerte
 _compromised_alert_cooldown: dict[tuple[int, int], float] = {}
 
@@ -24349,12 +23992,6 @@ async def on_message(msg):
         # silencieux si pas d'URL Roblox dans le message)
 
 
-    # ═══════════════ MESSAGES D'AIDE AUTOMATIQUES ═══════════════
-    # Doit être appelé AVANT le filtre bot pour repositionner après les messages de bots
-    # Mais on ignore le propre message du bot (éviter boucle infinie)
-    if msg.author.id != bot.user.id:
-        asyncio.create_task(handle_auto_help(msg))
-
     #  ⚠️ RÉCOMPENSE « COMEBACK » RETIRÉE — VESTIGE DE PURGE, 19/08/2026.
     #  Le bloc annonçait « +N coins de bienvenue » à un dormant qui revient.
     #  Le calcul de `ok` et `amount` vivait dans le système de coins, purgé
@@ -24386,13 +24023,6 @@ async def on_message(msg):
     # plus qu'un `pass`. La réaction ne traduisait donc PLUS RIEN — elle se contentait de se
     # poser sur chaque annonce du serveur. Un bouton qui ment, au sens de UI.md.
     # Ne pas la remettre sans avoir d'abord rebranché une vraie traduction derrière.
-
-    # Relay Discord - Vérifier si ce salon est suivi par d'autres serveurs.
-    # PERF (revue totale) : backgroundé (create_task) — relay_discord_message scanne
-    # guild_config + json.loads par guild ; le sortir du chemin BLOQUANT on_message évite
-    # de retarder le traitement de CHAQUE message. Lecture seule + webhook_send, try/except interne.
-    asyncio.create_task(relay_discord_message(msg))
-
 
     # Rell Seas : présence du clan, hors du chemin bloquant (une écriture / 10 min / membre).
     asyncio.create_task(update_realsy_activity(msg.guild.id, msg.author.id))
@@ -28014,15 +27644,6 @@ async def check_social_feeds():
                         # Reddit
                         await check_reddit_feeds(session, guild, data)
                             
-                        # Réductions de jeux (vérifiée moins souvent via counter)
-                        await check_game_deals(session, guild, data)
-
-
-                        # owner 2026-07-17 : statut « jeu down » (poste/supprime l'alerte)
-
-                        # Phase 26.2 : Spotlight Créateurs (role-gated YT)
-                        await check_creator_spotlight_feeds(session, guild, data)
-
                     except Exception as ex:
                         print(f"Erreur feed {guild_id}: {ex}")
                         continue
@@ -29426,802 +29047,8 @@ async def check_twitter_feeds(session, guild, data):
             continue
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#              🎮 SYSTÈME DE DEALS PERSISTANT (anti-doublon en DB)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_deals_last_check = {}  # Throttle en mémoire (pour ne pas spam les API)
-
-async def is_deal_already_posted(guild_id, platform, game_id):
-    """Vérifie en DB si un deal a déjà été posté et n'est pas expiré"""
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT id, message_id, channel_id, discount FROM posted_deals WHERE guild_id=? AND platform=? AND game_id=? AND expired=0',
-                (guild_id, platform, str(game_id))
-            ) as cur:
-                row = await cur.fetchone()
-                if row:
-                    # Mettre à jour last_seen pour savoir que le deal est encore actif
-                    await db.execute('UPDATE posted_deals SET last_seen=? WHERE id=?', (now().isoformat(), row[0]))
-                    await db.commit()
-                    return True, row  # (True, (id, message_id, channel_id, discount))
-    except:
-        pass
-    return False, None
-
-async def save_posted_deal(guild_id, platform, game_id, game_name, message_id, channel_id, discount, original_price, final_price, game_url, image_url):
-    """Enregistre un deal posté en DB"""
-    try:
-        async with get_db() as db:
-            await db.execute('''
-                INSERT OR REPLACE INTO posted_deals 
-                (guild_id, platform, game_id, game_name, message_id, channel_id, discount, original_price, final_price, game_url, image_url, posted_at, last_seen, expired)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-            ''', (guild_id, platform, str(game_id), game_name, message_id, channel_id, discount, original_price, final_price, game_url, image_url, now().isoformat(), now().isoformat()))
-            await db.commit()
-    except Exception as ex:
-        print(f"[DEALS DB] Erreur save: {ex}")
-
-
-async def cleanup_expired_deals_db(bot_instance):
-    """Supprime les messages des deals qui ne sont plus actifs (pas vus depuis 6h)"""
-    try:
-        cutoff = (now() - timedelta(hours=6)).isoformat()
-        async with get_db() as db:
-            # Récupérer les deals expirés (pas vus depuis 6h et non déjà marqués expired)
-            async with db.execute(
-                'SELECT id, guild_id, message_id, channel_id, game_name, platform FROM posted_deals WHERE expired=0 AND last_seen < ?',
-                (cutoff,)
-            ) as cur:
-                expired_deals = await cur.fetchall()
-            
-            for deal_id, guild_id, message_id, channel_id, game_name, platform in expired_deals:
-                # Essayer de supprimer le message Discord
-                try:
-                    guild = bot_instance.get_guild(guild_id)
-                    if guild:
-                        channel = guild.get_channel(channel_id)
-                        if channel and message_id:
-                            try:
-                                msg = await channel.fetch_message(message_id)
-                                await msg.delete()
-                                print(f"[DEALS CLEANUP] 🗑️ Supprimé: {game_name} ({platform}) - promo terminée")
-                            except discord.NotFound:
-                                pass  # Message déjà supprimé
-                            except:
-                                pass
-                except:
-                    pass
-
-                await asyncio.sleep(0.3)  # throttle anti-429 (DELETE messages deals en boucle)
-
-                # Marquer comme expiré en DB
-                await db.execute('UPDATE posted_deals SET expired=1 WHERE id=?', (deal_id,))
-            
-            # Nettoyer les très vieux deals expirés (>7 jours)
-            old_cutoff = (now() - timedelta(days=7)).isoformat()
-            await db.execute('DELETE FROM posted_deals WHERE expired=1 AND last_seen < ?', (old_cutoff,))
-            
-            await db.commit()
-            
-            if expired_deals:
-                print(f"[DEALS CLEANUP] {len(expired_deals)} deal(s) expiré(s) nettoyé(s)")
-    except Exception as ex:
-        print(f"[DEALS CLEANUP] Erreur: {ex}")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                    🎮 CONFIGURATION DES PLATEFORMES DE JEUX
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Mapping CheapShark Store IDs vers nos configs
-CHEAPSHARK_STORES = {
-    '1': 'steam',
-    '2': 'gamersgate',
-    '3': 'greenmangaming',
-    '7': 'gog',
-    '8': 'origin',
-    '11': 'humble',
-    '13': 'uplay',
-    '15': 'fanatical',
-    '21': 'wingamestore',
-    '23': 'gamebillet',
-    '24': 'voidu',
-    '25': 'epic',
-    '27': 'gamesplanet',
-    '28': 'gamesload',
-    '29': '2game',
-    '30': 'indiegala',
-    '31': 'blizzard',
-    '33': 'dlgamer',
-    '34': 'noctre',
-    '35': 'dreamgame',
-}
-
-GAME_PLATFORMS = {
-    # === PLATEFORMES MAJEURES ===
-    'steam': {
-        'name': 'Steam',
-        'color': 0x1B2838,
-        'icon': 'https://store.steampowered.com/favicon.ico',
-        'emoji': '🎮',
-    },
-    'epic': {
-        'name': 'Epic Games',
-        'color': 0x0078F2,
-        'icon': 'https://static-assets-prod.epicgames.com/epic-store/static/favicon.ico',
-        'emoji': '🎯',
-    },
-    'gog': {
-        'name': 'GOG',
-        'color': 0x86328A,
-        'icon': 'https://www.gog.com/favicon.ico',
-        'emoji': '🟣',
-    },
-    'uplay': {
-        'name': 'Ubisoft Connect',
-        'color': 0x0070FF,
-        'icon': 'https://ubistatic3-a.akamaihd.net/orbit/uplay_launcher_3_0/prod/latest/assets/favicon.ico',
-        'emoji': '🔵',
-    },
-    'origin': {
-        'name': 'EA App / Origin',
-        'color': 0xFF4747,
-        'icon': 'https://www.ea.com/favicon.ico',
-        'emoji': '🔴',
-    },
-    'blizzard': {
-        'name': 'Battle.net',
-        'color': 0x00AEFF,
-        'icon': 'https://www.blizzard.com/favicon.ico',
-        'emoji': '❄️',
-    },
-    
-    # === REVENDEURS CLÉS OFFICIELLES ===
-    'instant': {
-        'name': 'Instant Gaming',
-        'color': 0xFF6B00,
-        'icon': 'https://www.instant-gaming.com/favicon.ico',
-        'emoji': '⚡',
-    },
-    'humble': {
-        'name': 'Humble Bundle',
-        'color': 0xCC2929,
-        'icon': 'https://humblebundle-a.akamaihd.net/static/hashed/47e474bc43d5b4a7.ico',
-        'emoji': '❤️',
-    },
-    'fanatical': {
-        'name': 'Fanatical',
-        'color': 0xFF5500,
-        'icon': 'https://www.fanatical.com/favicon.ico',
-        'emoji': '🔥',
-    },
-    'greenmangaming': {
-        'name': 'Green Man Gaming',
-        'color': 0x2ECC71,
-        'icon': 'https://www.greenmangaming.com/favicon.ico',
-        'emoji': '🟢',
-    },
-    'gamesplanet': {
-        'name': 'Gamesplanet',
-        'color': 0x3498DB,
-        'icon': 'https://www.gamesplanet.com/favicon.ico',
-        'emoji': '🌍',
-    },
-    'gamersgate': {
-        'name': 'GamersGate',
-        'color': 0x2C3E50,
-        'icon': 'https://www.gamersgate.com/favicon.ico',
-        'emoji': '🚪',
-    },
-    'gamebillet': {
-        'name': 'GameBillet',
-        'color': 0x9B59B6,
-        'icon': 'https://www.gamebillet.com/favicon.ico',
-        'emoji': '🎫',
-    },
-    'voidu': {
-        'name': 'Voidu',
-        'color': 0x1ABC9C,
-        'icon': 'https://www.voidu.com/favicon.ico',
-        'emoji': '🎪',
-    },
-    'wingamestore': {
-        'name': 'WinGameStore',
-        'color': 0x3498DB,
-        'icon': 'https://www.wingamestore.com/favicon.ico',
-        'emoji': '🏪',
-    },
-    'indiegala': {
-        'name': 'IndieGala',
-        'color': 0xE74C3C,
-        'icon': 'https://www.indiegala.com/favicon.ico',
-        'emoji': '🎭',
-    },
-    '2game': {
-        'name': '2Game',
-        'color': 0xF39C12,
-        'icon': 'https://2game.com/favicon.ico',
-        'emoji': '2️⃣',
-    },
-    'gamesload': {
-        'name': 'Gamesload',
-        'color': 0x27AE60,
-        'icon': 'https://www.gamesload.com/favicon.ico',
-        'emoji': '📥',
-    },
-    'dlgamer': {
-        'name': 'DLGamer',
-        'color': 0x8E44AD,
-        'icon': 'https://www.dlgamer.com/favicon.ico',
-        'emoji': '💾',
-    },
-    'noctre': {
-        'name': 'Noctre',
-        'color': 0x2C3E50,
-        'icon': 'https://www.noctre.com/favicon.ico',
-        'emoji': '🌙',
-    },
-    'dreamgame': {
-        'name': 'DreamGame',
-        'color': 0x9B59B6,
-        'icon': 'https://www.dreamgame.com/favicon.ico',
-        'emoji': '💭',
-    },
-    
-    # === FALLBACK ===
-    'unknown': {
-        'name': 'Boutique',
-        'color': 0x7F8C8D,
-        'icon': 'https://cdn-icons-png.flaticon.com/512/3081/3081559.png',
-        'emoji': '🛒',
-    },
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 26.2 : SPOTLIGHT CRÉATEURS — polling YouTube RSS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-async def check_creator_spotlight_feeds(session, guild, data):
-    """Vérifie les chaînes YouTube des membres-créateurs et poste les nouvelles vidéos.
-
-    Phase 26.2 :
-      - Seuls les membres avec `creator_role` sont surveillés
-      - Filtre `creator_keyword` (optionnel) sur le titre
-      - Publication dans `creator_channel`
-    """
-    role_id = int(data.get('creator_role', 0) or 0)
-    ch_id = int(data.get('creator_channel', 0) or 0)
-    keyword = (data.get('creator_keyword', '') or '').strip().lower()
-    if not (role_id and ch_id):
-        return  # jamais réglée : plus de lecture en base chaque minute (20/10/2026)
-    # D4 : liens lus en table (creator_links), REPLI blob pour les non-migrés.
-    links = await list_creator_links(guild.id)
-
-    if not links:
-        return
-
-    creator_role = guild.get_role(role_id)
-    creator_channel = guild.get_channel(ch_id)
-    if not (creator_role and creator_channel):
-        return
-
-    # Permissions
-    perms = creator_channel.permissions_for(guild.me)
-    if not (perms.send_messages and perms.embed_links):
-        return
-
-    headers_yt = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-    # D4 : on persiste par-membre (écriture table-only), donc on note les uid touchés.
-    modified_uids = set()
-
-    for uid_str, link_list in list(links.items()):
-        try:
-            uid = int(uid_str)
-        except Exception:
-            continue
-        member = guild.get_member(uid)
-        # Le membre doit toujours avoir le rôle créateur
-        if not member or creator_role not in member.roles:
-            continue
-
-        for idx, entry in enumerate(link_list or []):
-            try:
-                platform = entry.get('platform', '')
-                ident = entry.get('id', '')
-                last_id = entry.get('last_post_id', '')
-
-                # Pour l'instant on ne polle que YouTube avec channel ID (UCxxx)
-                if platform != 'youtube' or not ident.startswith('UC'):
-                    continue
-
-                rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={ident}"
-                async with session.get(rss_url, headers=headers_yt, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status != 200:
-                        continue
-                    xml_text = await resp.text()
-
-                root = ET.fromstring(xml_text)
-                ns = {'atom': 'http://www.w3.org/2005/Atom', 'yt': 'http://www.youtube.com/xml/schemas/2015'}
-                entries = root.findall('atom:entry', ns)
-                if not entries:
-                    continue
-
-                latest = entries[0]
-                video_id_elem = latest.find('yt:videoId', ns)
-                title_elem = latest.find('atom:title', ns)
-                if video_id_elem is None or title_elem is None:
-                    continue
-                video_id = video_id_elem.text or ''
-                title = (title_elem.text or '').strip()
-
-                # Premier check : on enregistre juste le dernier ID, pas de spam
-                if not last_id:
-                    entry['last_post_id'] = video_id
-                    modified_uids.add(uid)
-                    continue
-
-                if video_id == last_id:
-                    continue
-
-                # Filtre keyword
-                if keyword and keyword not in title.lower():
-                    # On met à jour quand même pour ne pas le checker à chaque fois
-                    entry['last_post_id'] = video_id
-                    modified_uids.add(uid)
-                    continue
-
-                # Nouvelle vidéo qui passe le filtre → publier
-                video_url = f"https://www.youtube.com/watch?v={video_id}"
-                e = discord.Embed(
-                    title=title[:256],
-                    url=video_url,
-                    color=0xFF0000,
-                    timestamp=now(),
-                )
-                e.set_author(
-                    name=f"🎬 Nouveau contenu de {member.display_name}",
-                    icon_url=member.display_avatar.url,
-                    url=video_url,
-                )
-                e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
-                e.add_field(name="👤 Créateur", value=member.mention, inline=True)
-                e.add_field(name="📺 Plateforme", value="YouTube", inline=True)
-                if keyword:
-                    e.add_field(name="🔎 Filtre actif", value=f"`{keyword}`", inline=True)
-                e.set_footer(text="Spotlight Créateurs", icon_url=(guild.icon.url if guild.icon else None))
-
-                try:
-                    await creator_channel.send(
-                        content=f"📢 {member.mention} vient de publier !",
-                        embed=e,
-                    )
-                    entry['last_post_id'] = video_id
-                    modified_uids.add(uid)
-                except Exception as ex:
-                    print(f"[creator_spotlight] envoi échoué : {ex}")
-
-            except Exception as ex:
-                print(f"[creator_spotlight] erreur entry {entry}: {ex}")
-                continue
-
-    # D4 : persister les last_post_id en table, par-membre (écriture table-only).
-    for uid in modified_uids:
-        try:
-            await set_creator_links(guild.id, uid, links.get(str(uid), []))
-        except Exception as ex:
-            print(f"[creator_spotlight] persist error: {ex}")
-
-
-def _valid_embed_image_url(u, base: str = "") -> str:
-    """Valide/normalise une URL d'image de FLUX avant `set_image` (les flux RSS livrent
-    souvent des URLs relatives `/img.png`, protocole-relatives `//cdn/x.png`, des `&amp;`
-    ou du `data:` → Discord rejette TOUT l'embed avec 50035 « Not a well formed URL » et la
-    publication entière est PERDUE). Retourne une URL http(s) absolue propre, ou '' si invalide
-    (→ on poste l'embed SANS image au lieu de tout faire échouer). FAIL-SAFE."""
-    try:
-        if not u or not isinstance(u, str):
-            return ""
-        u = u.strip().replace("&amp;", "&")
-        if not u:
-            return ""
-        if u.startswith("//"):
-            u = "https:" + u
-        # Relatif → résout contre l'URL de l'article (absolue) si on l'a.
-        if not u.lower().startswith(("http://", "https://")) and base:
-            try:
-                from urllib.parse import urljoin
-                u = urljoin(base, u)
-            except Exception:
-                return ""
-        if not re.match(r'^https?://[^\s<>"\']+$', u):
-            return ""
-        if len(u) > 2000:
-            return ""
-        return u
-    except Exception:
-        return ""
-
-
-async def check_game_deals(session, guild, data):
-    """Vérifie les réductions de jeux — PERSISTANT, ne re-publie JAMAIS le même deal"""
-    if not data.get('ads_deals_enabled', False):
-        return
-    
-    channel = guild.get_channel(data.get('ads_deals_channel', 0))
-    if not channel:
-        return
-    
-    min_discount = data.get('ads_deals_min_discount', 50)
-    
-    # Throttle: vérifier seulement toutes les 30 minutes par serveur
-    cache_key = f"deals_{guild.id}"
-    last_check = _deals_last_check.get(cache_key, 0)
-    if time.time() - last_check < 1800:
-        return
-    _deals_last_check[cache_key] = time.time()
-    
-    print(f"[DEALS] 🔍 Vérification des promos pour {guild.name}...")
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'fr-FR,fr;q=0.9'
-    }
-    
-    deals_posted = 0
-    max_deals = 10
-    active_deal_keys = set()  # Tous les deals actuellement actifs (pour détecter les expirés)
-    
-    # ═══════════════════════════════════════════════════════════════════════════════
-    #                              🎮 STEAM API
-    # ═══════════════════════════════════════════════════════════════════════════════
-    try:
-        steam_url = "https://store.steampowered.com/api/featuredcategories?cc=fr&l=french"
-        async with session.get(steam_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status == 200:
-                steam_data = await resp.json()
-                specials = steam_data.get('specials', {}).get('items', [])
-                
-                for game in specials[:15]:
-                    if deals_posted >= max_deals:
-                        break
-                    try:
-                        game_id = str(game.get('id', ''))
-                        game_name = game.get('name', 'Jeu inconnu')
-                        discount = game.get('discount_percent', 0)
-                        
-                        original_price = game.get('original_price', 0)
-                        final_price = game.get('final_price', 0)
-                        if original_price > 100:
-                            original_price = original_price / 100
-                            final_price = final_price / 100
-                        
-                        if discount < min_discount:
-                            continue
-                        
-                        active_deal_keys.add(('steam', game_id))
-                        
-                        # Vérifier en DB si déjà posté
-                        already_posted, existing = await is_deal_already_posted(guild.id, 'steam', game_id)
-                        if already_posted:
-                            continue
-                        
-                        game_url = f"https://store.steampowered.com/app/{game_id}"
-                        image_url = game.get('large_capsule_image') or game.get('header_image') or f"https://cdn.akamai.steamstatic.com/steam/apps/{game_id}/header.jpg"
-                        
-                        e = await create_deal_embed(
-                            platform='steam', game_name=game_name, game_url=game_url,
-                            image_url=image_url, original_price=original_price,
-                            final_price=final_price, discount=discount
-                        )
-                        
-                        msg = await webhook_send(channel, 'deals', embed=e)
-                        await save_posted_deal(guild.id, 'steam', game_id, game_name, msg.id if msg else 0, channel.id, discount, original_price, final_price, game_url, image_url)
-                        deals_posted += 1
-                        print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) Steam")
-                        await asyncio.sleep(2)
-                    except Exception as ex:
-                        print(f"[DEALS] Erreur Steam: {ex}")
-                        continue
-    except Exception as ex:
-        print(f"[DEALS] Erreur Steam API: {ex}")
-    
-    # ═══════════════════════════════════════════════════════════════════════════════
-    #                         🎯 EPIC GAMES - JEUX GRATUITS & PROMOS
-    # ═══════════════════════════════════════════════════════════════════════════════
-    try:
-        epic_url = "https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=fr&country=FR&allowCountries=FR"
-        async with session.get(epic_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status == 200:
-                epic_data = await resp.json()
-                games = epic_data.get('data', {}).get('Catalog', {}).get('searchStore', {}).get('elements', [])
-                
-                for game in games[:10]:
-                    if deals_posted >= max_deals:
-                        break
-                    try:
-                        game_name = game.get('title', 'Jeu inconnu')
-                        
-                        promotions = game.get('promotions')
-                        if not promotions:
-                            continue
-                        promo_offers = promotions.get('promotionalOffers', [])
-                        if not promo_offers or not promo_offers[0].get('promotionalOffers'):
-                            continue
-                        
-                        price_info = game.get('price', {}).get('totalPrice', {})
-                        original_price = price_info.get('originalPrice', 0) / 100
-                        final_price = price_info.get('discountPrice', 0) / 100
-                        
-                        if original_price <= 0:
-                            continue
-                        
-                        discount = 100 if final_price == 0 else int((1 - final_price / original_price) * 100)
-                        if discount < min_discount:
-                            continue
-                        
-                        slug = game.get('productSlug') or game.get('urlSlug') or ''
-                        if not slug or slug == '[]':
-                            mappings = game.get('catalogNs', {}).get('mappings', [])
-                            if mappings:
-                                slug = mappings[0].get('pageSlug', '')
-                        if not slug:
-                            continue
-                        
-                        active_deal_keys.add(('epic', slug))
-                        
-                        already_posted, existing = await is_deal_already_posted(guild.id, 'epic', slug)
-                        if already_posted:
-                            continue
-                        
-                        game_url = f"https://store.epicgames.com/fr/p/{slug}"
-                        images = game.get('keyImages', [])
-                        image_url = None
-                        for img in images:
-                            if img.get('type') in ['OfferImageWide', 'DieselStoreFrontWide', 'Thumbnail']:
-                                image_url = img.get('url')
-                                break
-                        if not image_url and images:
-                            image_url = images[0].get('url')
-                        
-                        e = await create_deal_embed(
-                            platform='epic', game_name=game_name, game_url=game_url,
-                            image_url=image_url, original_price=original_price,
-                            final_price=final_price, discount=discount
-                        )
-                        
-                        msg = await webhook_send(channel, 'deals', embed=e)
-                        await save_posted_deal(guild.id, 'epic', slug, game_name, msg.id if msg else 0, channel.id, discount, original_price, final_price, game_url, image_url)
-                        deals_posted += 1
-                        print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) Epic Games")
-                        await asyncio.sleep(2)
-                    except Exception as ex:
-                        print(f"[DEALS] Erreur Epic: {ex}")
-                        continue
-    except Exception as ex:
-        print(f"[DEALS] Erreur Epic API: {ex}")
-    
-    # ═══════════════════════════════════════════════════════════════════════════════
-    #                               🟣 GOG
-    # ═══════════════════════════════════════════════════════════════════════════════
-    try:
-        gog_url = "https://www.gog.com/games/ajax/filtered?mediaType=game&sort=discount&page=1"
-        async with session.get(gog_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status == 200:
-                gog_data = await resp.json()
-                products = gog_data.get('products', [])
-                
-                for game in products[:15]:
-                    if deals_posted >= max_deals:
-                        break
-                    try:
-                        game_name = game.get('title', 'Jeu inconnu')
-                        discount_raw = game.get('price', {}).get('discountPercentage', 0)
-                        discount = int(discount_raw) if discount_raw else 0
-                        
-                        if discount < min_discount:
-                            continue
-                        
-                        price_data = game.get('price', {})
-                        price_str = price_data.get('finalAmount') or price_data.get('amount', '0')
-                        original_str = price_data.get('baseAmount', '0')
-                        try:
-                            final_price = float(str(price_str).replace(',', '.')) if price_str else 0
-                            original_price = float(str(original_str).replace(',', '.')) if original_str else final_price
-                        except:
-                            final_price = 0
-                            original_price = 0
-                        
-                        slug = game.get('slug', '')
-                        if not slug:
-                            continue
-                        
-                        active_deal_keys.add(('gog', slug))
-                        
-                        already_posted, existing = await is_deal_already_posted(guild.id, 'gog', slug)
-                        if already_posted:
-                            continue
-                        
-                        game_url = f"https://www.gog.com/game/{slug}"
-                        image_url = None
-                        if game.get('image'):
-                            image_url = "https:" + game.get('image') + "_product_card_v2_mobile_slider_639.jpg"
-                        
-                        e = await create_deal_embed(
-                            platform='gog', game_name=game_name, game_url=game_url,
-                            image_url=image_url, original_price=original_price,
-                            final_price=final_price, discount=discount
-                        )
-                        
-                        msg = await webhook_send(channel, 'deals', embed=e)
-                        await save_posted_deal(guild.id, 'gog', slug, game_name, msg.id if msg else 0, channel.id, discount, original_price, final_price, game_url, image_url)
-                        deals_posted += 1
-                        print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) GOG")
-                        await asyncio.sleep(2)
-                    except Exception as ex:
-                        print(f"[DEALS] Erreur GOG: {ex}")
-                        continue
-    except Exception as ex:
-        print(f"[DEALS] Erreur GOG API: {ex}")
-    
-    # ═══════════════════════════════════════════════════════════════════════════════
-    #                    ⚡ CHEAPSHARK API (Instant Gaming, Humble, Fanatical, etc.)
-    # ═══════════════════════════════════════════════════════════════════════════════
-    try:
-        cheapshark_url = f"https://www.cheapshark.com/api/1.0/deals?onSale=1&sortBy=Savings&pageSize=20&upperPrice=60"
-        async with session.get(cheapshark_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status == 200:
-                cs_deals = await resp.json()
-
-                for deal in cs_deals:
-                    if deals_posted >= max_deals:
-                        break
-                    try:
-                        store_id = deal.get('storeID', '1')
-                        platform_key = CHEAPSHARK_STORES.get(store_id, '')
-                        # Ne pas dupliquer Steam/Epic/GOG — déjà gérés par APIs directes
-                        if platform_key in ('steam', 'epic', 'gog', ''):
-                            continue
-
-                        game_name = deal.get('title', 'Jeu inconnu')
-                        savings_pct = float(deal.get('savings', 0))
-                        discount = int(savings_pct)
-
-                        if discount < min_discount:
-                            continue
-
-                        original_price = float(deal.get('normalPrice', 0))
-                        final_price = float(deal.get('salePrice', 0))
-
-                        deal_id = deal.get('dealID', '')
-                        game_id = f"cs_{deal.get('gameID', '')}"
-
-                        active_deal_keys.add((platform_key, game_id))
-
-                        already_posted, existing = await is_deal_already_posted(guild.id, platform_key, game_id)
-                        if already_posted:
-                            continue
-
-                        game_url = f"https://www.cheapshark.com/redirect?dealID={deal_id}"
-                        image_url = deal.get('thumb', '')
-                        if image_url and not image_url.startswith('http'):
-                            image_url = 'https:' + image_url
-
-                        metacritic = deal.get('metacriticScore', None)
-
-                        e = await create_deal_embed(
-                            platform=platform_key, game_name=game_name, game_url=game_url,
-                            image_url=image_url, original_price=original_price,
-                            final_price=final_price, discount=discount, metacritic=metacritic
-                        )
-
-                        msg = await webhook_send(channel, 'deals', embed=e)
-                        await save_posted_deal(guild.id, platform_key, game_id, game_name, msg.id if msg else 0, channel.id, discount, original_price, final_price, game_url, image_url)
-                        deals_posted += 1
-                        plat_name = GAME_PLATFORMS.get(platform_key, {}).get('name', platform_key)
-                        print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) {plat_name}")
-                        await asyncio.sleep(2)
-                    except Exception as ex:
-                        print(f"[DEALS] Erreur CheapShark: {ex}")
-                        continue
-    except Exception as ex:
-        print(f"[DEALS] Erreur CheapShark API: {ex}")
-
-    print(f"[DEALS] ✅ Terminé: {deals_posted} nouvelle(s) promo(s) postée(s) pour {guild.name}")
-
-    # Nettoyage automatique des deals expirés
-    await cleanup_expired_deals_db(bot)
-
-async def create_deal_embed(platform: str, game_name: str, game_url: str, image_url: str, original_price: float, final_price: float, discount: int, metacritic: str = None):
-    """Crée un embed premium pour les deals de jeux"""
-    
-    plat = GAME_PLATFORMS.get(platform, GAME_PLATFORMS.get('unknown', GAME_PLATFORMS['steam']))
-    
-    e = discord.Embed(color=plat['color'])
-    
-    # ═══════════════ HEADER PREMIUM ═══════════════
-    e.set_author(
-        name=f"{plat['emoji']} {plat['name']}  ━━━  PROMO EN COURS",
-        icon_url=plat.get('icon')
-    )
-    
-    # Titre du jeu
-    e.title = game_name
-    e.url = game_url
-    
-    # Image (validée : une URL de deal malformée ne doit pas faire échouer l'embed)
-    _img = _valid_embed_image_url(image_url, base=game_url)
-    if _img:
-        e.set_image(url=_img)
-
-    # ═══════════════ BADGE RÉDUCTION ═══════════════
-    if discount == 100:
-        disc_text = "🎁  **GRATUIT**  🎁"
-    elif discount >= 90:
-        disc_text = f"🔥🔥🔥  **-{discount}%**  🔥🔥🔥"
-    elif discount >= 75:
-        disc_text = f"🔥🔥  **-{discount}%**  🔥🔥"
-    elif discount >= 50:
-        disc_text = f"⭐  **-{discount}%**  ⭐"
-    else:
-        disc_text = f"💰  **-{discount}%**"
-    
-    e.description = f"## {disc_text}"
-    
-    # ═══════════════ PRIX ═══════════════
-    if final_price == 0:
-        price_text = f"~~{original_price:.2f}€~~ → **GRATUIT** 🎁"
-    else:
-        price_text = f"~~{original_price:.2f}€~~ → **{final_price:.2f}€**"
-    
-    savings = original_price - final_price
-    
-    e.add_field(name="Prix", value=price_text, inline=True)
-    if savings > 0:
-        e.add_field(name="Économie", value=f"**{savings:.2f}€**", inline=True)
-    e.add_field(name="Réduction", value=f"**-{discount}%**", inline=True)
-    
-    # Metacritic
-    if metacritic and metacritic not in ['0', '']:
-        try:
-            score = int(metacritic)
-            score_emoji = "🟢" if score >= 75 else ("🟡" if score >= 50 else "🔴")
-            e.add_field(name="Metacritic", value=f"{score_emoji} **{score}/100**", inline=True)
-        except:
-            pass
-    
-    # Lien d'achat
-    e.add_field(
-        name="",
-        value=f"[{plat['emoji']} **Acheter sur {plat['name']}**]({game_url})",
-        inline=False
-    )
-    
-    # Footer
-    e.set_footer(text=f"{plat['name']}  •  Offre limitée  •  Prix en EUR", icon_url=plat['icon'])
-    e.timestamp = now()
-    
-    return e
-
 @check_social_feeds.before_loop
 async def before_social_check():
-    await bot.wait_until_ready()
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                    🗑️ NETTOYAGE AUTOMATIQUE DES DEALS EXPIRÉS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@tasks.loop(hours=1)
-async def cleanup_deals_task():
-    """Nettoie les deals expirés toutes les heures"""
-    try:
-        await cleanup_expired_deals_db(bot)
-    except Exception as ex:
-        print(f"[CLEANUP DEALS] Erreur: {ex}")
-
-@cleanup_deals_task.before_loop
-async def before_cleanup_deals():
     await bot.wait_until_ready()
 
 
@@ -32765,8 +31592,6 @@ if __name__ == "__main__":
     print("👑 Système d'immunités complet")
     print("🎙️ Vocaux temporaires multi-hubs")
     print("🛡️ Anti-badwords amélioré (mots entiers)")
-    print("🎮 Système de deals PERSISTANT (anti-doublon DB)")
-    print("🗑️ Nettoyage auto des deals expirés")
     print("👥 Roblox UGC - Support des groupes")
     print("📋 Navigation par menus déroulants (Select)")
     print("🎵 TikTok - Vidéos + détection lives")

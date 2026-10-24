@@ -63,36 +63,6 @@ def _get_db(db):
     return get_db
 
 
-def test_O1_le_relais_lit_la_configuration_en_cache():
-    envois, lus = [], []
-    salon_dest = Obj(id=900)
-    a = Obj(id=1, name="A", icon=None)
-    b = Obj(id=2, name="B", icon=None, get_channel=lambda i: salon_dest if i == 900 else None)
-
-    async def cfg(gid):
-        lus.append(gid)
-        return {"ads_discord_feeds": [{"channel_id": "10"}], "ads_discord_channel": 900} if gid == 2 else {}
-
-    async def webhook_send(ch, profil, embed=None):
-        envois.append((ch.id, profil, embed.fields[2].value))
-
-    ns = {"bot": Obj(guilds=[a]), "cfg": cfg, "webhook_send": webhook_send, "discord": discord,
-          "_escape_md": lambda t, n: str(t)[:n], "_logerr": lambda *x, **k: envois.append(("ERREUR", x))}
-    exec(_source("relay_discord_message"), ns)  # noqa: S102 — code du dépôt
-    auteur = Obj(display_name="Zed", display_avatar=None)
-    msg = Obj(guild=a, channel=Obj(id=10, name="annonces"), author=auteur, content="Salut",
-              attachments=[], created_at=None)
-    asyncio.run(ns["relay_discord_message"](msg))
-    assert lus == [] and envois == [], "un seul serveur : rien à relayer, rien à lire"
-    ns["bot"] = Obj(guilds=[a, b])
-    asyncio.run(ns["relay_discord_message"](msg))
-    assert lus == [2] and envois == [(900, "discord_relay", "Salut")]
-    msg.channel = Obj(id=11, name="autre")
-    asyncio.run(ns["relay_discord_message"](msg))
-    assert len(envois) == 1, "salon non suivi : rien"
-    assert "SELECT guild_id, data FROM guild_config" not in _source("relay_discord_message")
-
-
 def test_O2_salon_de_ticket_une_lecture_par_salon_et_par_2_minutes():
     horloge = [100.0]
     db = Db([(1,)])
