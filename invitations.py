@@ -1,11 +1,18 @@
-"""invitations.py — Les invitations de chaque membre (24/10/2026, le fondateur : « des conditions pour que les
-gens invitent des gens sur le serveur, et combien ils doivent avoir d'invitations au total sur leur lien… de
-vrais systèmes de conditions qui valorisent le serveur »).
+"""invitations.py — Qui a fait venir qui (24/10/2026, le fondateur : « des conditions pour que les gens invitent
+des gens… combien ils doivent avoir d'invitations », puis : « attention aux faux comptes, les comptes doubles,
+il faut vraiment que ce soit sûr. Les gens qui sont invités puis qui quittent directement, il faut que ce soit
+bien enlevé des statistiques »).
 
-Discord donne, pour chaque lien d'invitation, son auteur et son nombre d'utilisations. Un lien expiré ou
-supprimé disparaît avec son compteur : on garde donc, par lien, le plus haut nombre vu. Le total d'un membre
-= la somme de ses liens. Relevé toutes les 5 minutes, et 10 s après une arrivée (une rafale d'arrivées n'en
-fait qu'un). Il faut au bot « Gérer le serveur » pour lire les liens.
+À chaque arrivée, les compteurs des liens d'invitation sont comparés à ceux d'avant : le lien qui a pris UNE
+utilisation, et lui seul, est celui de l'arrivant — son auteur l'a invité. Rien n'est deviné : deux liens qui
+bougent (deux arrivées à la fois), aucun lien qui bouge (le lien personnalisé du serveur), un lien épuisé qui
+disparaît, une rafale d'arrivées, pas de photo d'avant (le démarrage) — l'arrivée n'est rattachée à personne.
+
+Une invitation compte seulement si l'invité est TOUJOURS sur le serveur (un départ l'enlève aussitôt, et le
+ménage horaire rattrape ceux partis pendant une coupure), que son compte Discord avait au moins COMPTE_MIN_J
+jours à son arrivée (les faux comptes sont neufs), que ce n'est ni un bot ni l'auteur lui-même. Un membre ne
+compte qu'une fois : revenu par un autre lien, il compte pour le dernier. Comptées depuis le 24/10/2026.
+Il faut au bot « Gérer le serveur » pour lire les liens.
 """
 from __future__ import annotations
 
@@ -14,13 +21,14 @@ import time
 
 import discord
 
-RELEVE_S = 300.0      # un relevé toutes les 5 minutes…
-APRES_ARRIVEE_S = 10.0  # …et 10 s après une arrivée
+COMPTE_MIN_J = 7          # un compte Discord plus jeune à son arrivée ne compte pas (faux compte)
+MENAGE_S = 3600.0         # les départs manqués (bot coupé) sont rattrapés toutes les heures
 
 _get_db = None
 _log = print
-_derniers: dict = {}   # guild_id → time.monotonic() du dernier relevé
-_prevus: dict = {}     # guild_id → la tâche du relevé qui suit une arrivée
+_photos: dict = {}        # guild_id → {code: (auteur_id, utilisations, max_utilisations)}
+_verrous: dict = {}
+_menages: dict = {}       # guild_id → time.monotonic() du dernier ménage
 
 
 def setup(*, get_db, log=None):
@@ -31,88 +39,156 @@ def setup(*, get_db, log=None):
 async def init_db():
     async with _get_db() as db:
         await db.execute(
-            "CREATE TABLE IF NOT EXISTS invitations_liens (guild_id INTEGER NOT NULL, code TEXT NOT NULL,"
-            " auteur_id INTEGER NOT NULL, utilisations INTEGER NOT NULL DEFAULT 0, vu INTEGER NOT NULL,"
-            " PRIMARY KEY (guild_id, code))")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_invitations_auteur ON invitations_liens(guild_id, auteur_id)")
+            "CREATE TABLE IF NOT EXISTS invitations_arrivees (guild_id INTEGER NOT NULL, membre_id INTEGER NOT NULL,"
+            " auteur_id INTEGER NOT NULL, code TEXT NOT NULL, arrive INTEGER NOT NULL, compte_cree INTEGER NOT NULL,"
+            " parti INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, membre_id))")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_invitations_auteur ON invitations_arrivees(guild_id, auteur_id)")
         await db.commit()
 
 
-_SQL = ("INSERT INTO invitations_liens(guild_id, code, auteur_id, utilisations, vu) VALUES(?,?,?,?,?)"
-        " ON CONFLICT(guild_id, code) DO UPDATE SET utilisations=MAX(utilisations, excluded.utilisations),"
-        " auteur_id=excluded.auteur_id, vu=excluded.vu")
+def _verrou(gid: int) -> asyncio.Lock:
+    return _verrous.setdefault(int(gid), asyncio.Lock())
 
 
-async def _ecrire(lignes: list) -> None:
-    if not lignes:
-        return
+async def _ecrire(sql: str, args: tuple) -> int:
     async with _get_db() as db:
-        await db.executemany(_SQL, lignes)
+        cur = await db.execute(sql, args)
         await db.commit()
+        return int(cur.rowcount or 0)
 
 
-async def relever(g, *, forcer: bool = False) -> int:
-    """Les liens du serveur et leurs utilisations. Rend le nombre de liens lus ; 0 si ce n'est pas encore
-    l'heure ; -1 si Discord refuse (droits) ou ne répond pas."""
-    maintenant = time.monotonic()
-    if not forcer and maintenant - _derniers.get(g.id, -1e9) < RELEVE_S:
-        return 0
-    _derniers[g.id] = maintenant
+async def _lire_liens(g):
+    """{code: (auteur, utilisations, maximum)} ; None si le bot n'a pas « Gérer le serveur » ou si Discord ne
+    répond pas."""
     me = getattr(g, "me", None)
     if me is None or not me.guild_permissions.manage_guild:
-        return -1
+        return None
     try:
         liens = await g.invites()
     except discord.HTTPException as ex:
         _log("[INVITES][E1] liens d'invitation non lus")
         _log(f"[INVITES][E1:DETAIL] guild={g.id} {type(ex).__name__} {ex}")
-        return -1
-    t = int(time.time())
-    lignes = [(g.id, str(x.code), int(x.inviter.id), int(x.uses or 0), t) for x in liens
-              if getattr(x, "inviter", None) is not None and not getattr(x.inviter, "bot", False)]
-    await _ecrire(lignes)
-    return len(lignes)
+        return None
+    return {str(x.code): (int(getattr(x.inviter, "id", 0) or 0), int(x.uses or 0), int(x.max_uses or 0))
+            for x in liens}
 
 
-async def sur_lien(invite) -> None:
-    """Un lien créé : il entre dans le relevé tout de suite (avec 0 utilisation)."""
-    g, auteur = getattr(invite, "guild", None), getattr(invite, "inviter", None)
-    if g is None or auteur is None or getattr(auteur, "bot", False):
-        return
-    await _ecrire([(g.id, str(invite.code), int(auteur.id), int(invite.uses or 0), int(time.time()))])
+def lien_utilise(avant: dict, apres: dict):
+    """Le code du lien qui a servi à UNE arrivée, ou None dès que ce n'est pas sûr. Fonction pure."""
+    servis = []
+    for code, (_auteur, n, _mx) in apres.items():
+        n0 = avant[code][1] if code in avant else 0
+        if n - n0 == 1:
+            servis.append(code)
+        elif n - n0 > 1:
+            return None          # plusieurs arrivées par ce lien depuis la photo : on ne sait pas laquelle
+    return servis[0] if len(servis) == 1 else None
 
 
-def planifier(g) -> None:
-    """Une arrivée : un relevé dans 10 s. Une rafale d'arrivées (un raid) n'en fait qu'un."""
-    if g.id in _prevus:
-        return
+async def photographier(g) -> int:
+    """La photo des liens, point de départ des comparaisons (au démarrage). Rend le nombre de liens, -1 sinon."""
+    async with _verrou(g.id):
+        photo = await _lire_liens(g)
+        if photo is None:
+            return -1
+        _photos[g.id] = photo
+        return len(photo)
 
-    async def _plus_tard():
-        try:
-            await asyncio.sleep(APRES_ARRIVEE_S)
-            await relever(g, forcer=True)
-        finally:
-            _prevus.pop(g.id, None)
-    _prevus[g.id] = asyncio.create_task(_plus_tard())
+
+async def sur_arrivee(membre) -> int:
+    """Rattache l'arrivée à son lien, si c'est sûr. Rend l'auteur (0 : personne). Une arrivée pendant qu'une
+    autre est en cours n'interroge pas Discord : la rafale n'est rattachée à personne (raid, faux comptes)."""
+    g = getattr(membre, "guild", None)
+    if g is None or getattr(membre, "bot", False):
+        return 0
+    verrou = _verrou(g.id)
+    if verrou.locked():
+        return 0
+    async with verrou:
+        avant, apres = _photos.get(g.id), await _lire_liens(g)
+        if apres is None:
+            return 0
+        _photos[g.id] = apres
+        code = lien_utilise(avant, apres) if avant is not None else None
+        auteur = apres[code][0] if code else 0
+        if not auteur or auteur == membre.id:
+            return 0
+        cree = getattr(membre, "created_at", None)
+        await _ecrire("INSERT OR REPLACE INTO invitations_arrivees(guild_id, membre_id, auteur_id, code, arrive,"
+                      " compte_cree, parti) VALUES(?,?,?,?,?,?,0)",
+                      (g.id, membre.id, auteur, code, int(time.time()),
+                       int(cree.timestamp()) if cree is not None else int(time.time())))
+        return auteur
+
+
+async def sur_depart(membre) -> None:
+    """Un invité qui part ne compte plus — tout de suite."""
+    g = getattr(membre, "guild", None)
+    if g is not None:
+        await _ecrire("UPDATE invitations_arrivees SET parti=? WHERE guild_id=? AND membre_id=? AND parti=0",
+                      (int(time.time()), g.id, membre.id))
+
+
+def sur_lien(invite) -> None:
+    """Un lien créé entre dans la photo, avec ses utilisations."""
+    g = getattr(invite, "guild", None)
+    photo = _photos.get(getattr(g, "id", 0))
+    if photo is not None:
+        photo[str(invite.code)] = (int(getattr(invite.inviter, "id", 0) or 0), int(invite.uses or 0),
+                                   int(invite.max_uses or 0))
+
+
+async def reconcilier(g) -> int:
+    """Les invités qui ne sont plus sur le serveur (partis pendant une coupure du bot) sont enlevés. Rend le
+    nombre enlevé."""
+    if not getattr(g, "chunked", True):
+        return 0                 # la liste des membres n'est pas encore complète : on ne conclut rien
+    async with _get_db() as db:
+        async with db.execute("SELECT membre_id FROM invitations_arrivees WHERE guild_id=? AND parti=0",
+                              (g.id,)) as cur:
+            absents = [int(r[0]) for r in await cur.fetchall() if g.get_member(int(r[0])) is None]
+        if absents:
+            t = int(time.time())
+            await db.executemany("UPDATE invitations_arrivees SET parti=? WHERE guild_id=? AND membre_id=?",
+                                 [(t, g.id, u) for u in absents])
+            await db.commit()
+    return len(absents)
+
+
+async def entretenir(g) -> None:
+    """Appelé souvent (la boucle des cadeaux) : la photo au premier passage, le ménage toutes les heures."""
+    if g.id not in _photos:
+        await photographier(g)
+    if time.monotonic() - _menages.get(g.id, -1e9) > MENAGE_S:
+        _menages[g.id] = time.monotonic()
+        await reconcilier(g)
+
+
+_VALIDE = "parti=0 AND arrive - compte_cree >= ?"
 
 
 async def total(guild_id: int, membre_id: int) -> int:
-    """Toutes les personnes venues par les liens de ce membre (le plus haut compteur vu de chaque lien)."""
+    """Les invités de ce membre qui comptent : toujours là, comptes de COMPTE_MIN_J jours et plus."""
     async with _get_db() as db:
-        async with db.execute("SELECT COALESCE(SUM(utilisations), 0) FROM invitations_liens"
-                              " WHERE guild_id=? AND auteur_id=?", (int(guild_id), int(membre_id))) as cur:
+        async with db.execute(f"SELECT COUNT(*) FROM invitations_arrivees WHERE guild_id=? AND auteur_id=? AND {_VALIDE}",
+                              (int(guild_id), int(membre_id), COMPTE_MIN_J * 86400)) as cur:
             return int((await cur.fetchone())[0] or 0)
 
 
 async def totaux(guild_id: int) -> dict:
-    """{membre: total} pour tout le serveur, d'une seule lecture."""
+    """{membre: invités qui comptent} pour tout le serveur, d'une seule lecture."""
     async with _get_db() as db:
-        async with db.execute("SELECT auteur_id, SUM(utilisations) FROM invitations_liens WHERE guild_id=?"
-                              " GROUP BY auteur_id", (int(guild_id),)) as cur:
-            return {int(u): int(n or 0) for u, n in await cur.fetchall()}
+        async with db.execute(f"SELECT auteur_id, COUNT(*) FROM invitations_arrivees WHERE guild_id=? AND {_VALIDE}"
+                              " GROUP BY auteur_id", (int(guild_id), COMPTE_MIN_J * 86400)) as cur:
+            return {int(u): int(n) for u, n in await cur.fetchall()}
 
 
-async def nb_liens(guild_id: int) -> int:
+async def releve(guild_id: int) -> dict:
+    """Pour /stats (des chiffres) : arrivées rattachées, celles qui comptent, partis, comptes trop neufs."""
     async with _get_db() as db:
-        async with db.execute("SELECT COUNT(*) FROM invitations_liens WHERE guild_id=?", (int(guild_id),)) as cur:
-            return int((await cur.fetchone())[0] or 0)
+        async with db.execute("SELECT COUNT(*), SUM(parti=0 AND arrive - compte_cree >= ?), SUM(parti>0),"
+                              " SUM(parti=0 AND arrive - compte_cree < ?) FROM invitations_arrivees WHERE guild_id=?",
+                              (COMPTE_MIN_J * 86400, COMPTE_MIN_J * 86400, int(guild_id))) as cur:
+            n, ok, partis, neufs = await cur.fetchone()
+    return {"rattachees": int(n or 0), "comptent": int(ok or 0), "parties": int(partis or 0),
+            "comptes_neufs": int(neufs or 0), "photo": int(guild_id) in _photos}

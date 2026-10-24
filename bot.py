@@ -1676,10 +1676,6 @@ async def cfg(gid):
         'anti_offtopic': 1,  # owner 2026-06-21 : filtre politique/religion/militantisme (slogans + GIFs) — ON
         'anti_threat': 1,  # owner 2026-06-27 : menaces / intimidation IRL (pas le banter gaming) → action forte — ON
         'anti_harassment': 1,  # owner 2026-06-27 : détection harcèlement (acharnement 1v1 + meute sur une victime) — ON
-        # owner 2026-06-27 : croissance — rappel auto de /bump (Disboard) pour la visibilité annuaire.
-        'bump_reminder_channel': 0,  # salon où poster le rappel de bump (0 = OFF)
-        'bump_interval_min': 120,    # intervalle (min) entre 2 bumps (Disboard = 120)
-        'bump_reminder_role': 0,     # rôle à ping pour le rappel (0 = aucun)
         # owner 2026-06-21 : confiance progressive (nouveaux limités sur images/GIF jusqu'à
         # confiance) + liens/invitations interdits pour tous (sauf médias gif/image). ON.
         'trust_system': 1, 'trust_age_hours': 24, 'trust_fast_hours': 2, 'trust_fast_msgs': 12,
@@ -3465,68 +3461,6 @@ async def signaler_vocal_cmd(i: discord.Interaction, membre: discord.Member, rai
             ephemeral=True)
     except Exception:
         pass
-
-
-# ═══════════════ /promo — PROMOTION EXTERNE (owner 2026-06-29) ═══════════════
-# Suivi par-annuaire (lien d'invit unique → on lit .uses) + checklist + kit de fiche.
-# ZÉRO bot ajouté : tout via NOTRE bot. Le bump reste manuel/humain (cf. /rappel-bump).
-
-
-_DISBOARD_ID = 302050872383242240
-_bump_last = {}
-
-
-async def _bump_detect_listener(message):
-    """Détecte une confirmation de /bump Disboard → on réarme le rappel à partir de CE moment
-    (rappel précis, pas un simple intervalle depuis le boot). FAIL-SAFE."""
-    try:
-        if getattr(message, 'guild', None) is None or message.author.id != _DISBOARD_ID:
-            return
-        txt = (message.content or "")
-        for e in (getattr(message, 'embeds', None) or []):
-            txt += " " + (getattr(e, 'description', '') or "")
-        if re.search(r'bump|remont|effectu', txt, re.IGNORECASE):
-            _bump_last[message.guild.id] = discord.utils.utcnow().timestamp()
-    except Exception:
-        pass
-
-
-@tasks.loop(minutes=10)
-async def bump_reminder_task():
-    """Rappel auto de /bump (owner 2026-06-27, croissance). Poste dans le salon configuré quand
-    l'intervalle est écoulé depuis le dernier bump détecté. FAIL-SAFE, anti-429."""
-    try:
-        for g in list(bot.guilds):
-            try:
-                conf = await cfg(g.id)
-                ch_id = int(conf.get('bump_reminder_channel', 0) or 0)
-                if not ch_id:
-                    continue
-                interval = max(60, int(conf.get('bump_interval_min', 120) or 120)) * 60
-                now_ts = discord.utils.utcnow().timestamp()
-                if now_ts - _bump_last.get(g.id, 0) < interval:
-                    continue
-                ch = bot.get_channel(ch_id)
-                if ch is None:
-                    continue
-                _bump_last[g.id] = now_ts   # évite de re-poster avant le prochain intervalle
-                role_id = int(conf.get('bump_reminder_role', 0) or 0)
-                head = f"<@&{role_id}> " if role_id else ""
-                am = discord.AllowedMentions(roles=bool(role_id), everyone=False, users=False)
-                await ch.send(
-                    f"{head}⏰ **C'est l'heure de bump !** Pense à bumper le serveur pour nous "
-                    f"remonter dans l'annuaire et gagner en visibilité. 🚀", allowed_mentions=am)
-                await asyncio.sleep(1)
-            except Exception:
-                continue
-    except Exception as ex:
-        print(f"[bump_reminder_task] {ex}")
-
-
-@bump_reminder_task.before_loop
-async def _before_bump_reminder():
-    await bot.wait_until_ready()
-    await asyncio.sleep(30)
 
 
 # ═══════════════ RAPPORT SÉCURITÉ HEBDOMADAIRE (owner 2026-06-21 #12) ═══════════════
@@ -12694,7 +12628,7 @@ _TABLES_MORTES = frozenset({
     "onboarding_journey", "owner_digest_log", "owner_monthly_log", "patrol_contributions",
     "patrol_sessions", "personal_events_log", "pet_eggs", "pet_evolution", "player_badges",
     "player_class_choice", "player_classes", "player_event_stats", "player_inventory",
-    "player_stash", "player_styles", "player_voice_optin", "posted_deals", "prediction_bets", "predictions",
+    "player_stash", "player_styles", "player_voice_optin", "posted_deals", "invitations_liens", "prediction_bets", "predictions",
     "presence_chain", "promo_sources", "publish_config", "pvp_duels", "raffle_draws",
     "raffle_tickets", "referral_links", "referrals", "regional_state", "reputation",
     "reputation_history", "rift_contributors", "polls", "rellseas_quizzes", "rift_events", "rivalries", "scheduled_messages", "suggestions", "roadmap_items",
@@ -12840,20 +12774,28 @@ bot.add_listener(_faq_hook, "on_message")
 
 async def _invitations_lien(invite):
     try:
-        await invitations.sur_lien(invite)
+        invitations.sur_lien(invite)
     except Exception as ex:
         _logerr("invitations.lien", ex, guild_id=getattr(getattr(invite, "guild", None), "id", 0))
 
 
 async def _invitations_arrivee(membre):
     try:
-        invitations.planifier(membre.guild)
+        await invitations.sur_arrivee(membre)
     except Exception as ex:
         _logerr("invitations.arrivee", ex, guild_id=getattr(getattr(membre, "guild", None), "id", 0))
 
 
+async def _invitations_depart(membre):
+    try:
+        await invitations.sur_depart(membre)
+    except Exception as ex:
+        _logerr("invitations.depart", ex, guild_id=getattr(getattr(membre, "guild", None), "id", 0))
+
+
 bot.add_listener(_invitations_lien, "on_invite_create")
 bot.add_listener(_invitations_arrivee, "on_member_join")
+bot.add_listener(_invitations_depart, "on_member_remove")
 
 
 #  Les cadeaux comptent les messages et le vocal depuis le lancement de chaque cadeau (rien de lourd :
@@ -13889,10 +13831,10 @@ async def cadeaux_task():
     except Exception as ex:
         _logerr("cadeaux.tic", ex)
     for g in list(bot.guilds):
-        try:   # les liens d'invitation : un relevé toutes les 5 minutes (la condition « invitations »)
-            await invitations.relever(g)
+        try:   # les invitations : la photo des liens au démarrage, les départs manqués rattrapés chaque heure
+            await invitations.entretenir(g)
         except Exception as ex:
-            _logerr("invitations.releve", ex, guild_id=g.id)
+            _logerr("invitations.entretien", ex, guild_id=g.id)
     for g in list(bot.guilds):
         try:
             c = await cfg(g.id)
@@ -14191,8 +14133,8 @@ async def _etat_public():
             "cadeaux_elagage": next((c['cadeaux_elagage_v1'] for c in confs if c.get('cadeaux_elagage_v1')), None),
             "erreurs_ui": diag.releve("ui"),
             "cadeaux_avis": next((c['cadeaux_avis_v1'] for c in confs if c.get('cadeaux_avis_v1')), None),
-            "invitations_liens": sum([await invitations.nb_liens(g.id) for g in list(bot.guilds)
-                                      if g.owner_id in TETE_IDS] or [0]),
+            "invitations": next(iter([await invitations.releve(g.id) for g in list(bot.guilds)
+                                      if g.owner_id in TETE_IDS]), None),
             "vocaux_hubs": sorted(str((v or {}).get('contexte') or '-') for g, c in zip(list(bot.guilds), confs)
                                   if g.owner_id in TETE_IDS
                                   for k, v in ((c.get('temp_voice_config') or {}).get('hubs') or {}).items()
@@ -20586,7 +20528,7 @@ async def _activite_boot():
     await invitations.init_db()
     cadeaux.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_cadeaux_journal,
                   ticket=_salon_des_tickets, langue=_langue_membre, log=print, invitations=invitations.total,
-                  invitations_tous=invitations.totaux, relever=lambda g: invitations.relever(g, forcer=True))
+                  invitations_tous=invitations.totaux, relever=invitations.reconcilier)
     await cadeaux.init_db()
     _installer_arret_propre()
     vocaux.setup(proprio=_vocal_info, est_staff=_entraide_staff, log=print)
@@ -21335,15 +21277,6 @@ async def on_ready():
     if not temp_voice_watchdog.is_running():
         temp_voice_watchdog.start()
 
-
-    # Rappel auto de /bump (owner 2026-06-27, croissance) — démarrage de la tâche. FAIL-SAFE.
-    try:
-        if not bump_reminder_task.is_running():
-            bump_reminder_task.start()
-        # UGC : créateur du mois (votes ❤️) + paliers de membres (owner 2026-06-29)
-        print("[bump_reminder] OK (rappel /bump si bump_reminder_channel configuré)")
-    except Exception as ex:
-        print(f"[on_ready bump_reminder] {ex}")
 
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
     # Phase 55 : boucle jusqu'à plus rien à supprimer (par batch de 500)
@@ -30296,7 +30229,6 @@ bot.add_listener(_voice_log_listener, "on_voice_state_update")
 bot.add_listener(_voice_hop_listener, "on_voice_state_update")
 bot.add_listener(_role_mentionable_guard, "on_guild_role_create")
 bot.add_listener(_role_mentionable_guard, "on_guild_role_update")
-bot.add_listener(_bump_detect_listener, "on_message")  # réarme le rappel de bump (Disboard)
 
 
 # ─── Boucle d'auto-clean : detecte si une source (tweet/video/post) a ete
