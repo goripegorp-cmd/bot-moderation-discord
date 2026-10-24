@@ -144,7 +144,8 @@ def test_L2b_l_avis_public_part_ses_membres_notes_les_annonces_s_effacent(env):
         return m
     avis = message(501, g.me.id, [C._component_factory(d) for d in v.to_components()], Obj(message_id=carte))
     salon.historique = [message(500, 77, []), avis]
-    assert run(K.nettoyer_avis(g)) == 1 and effaces == [501], "seul l'avis du bot part"
+    assert run(K.nettoyer_avis(g)) == {"lus": 2, "du_bot": 1, "effaces": 1} and effaces == [501], \
+        "seul l'avis du bot part ; le relevé dit ce qui a été lu"
     i = interaction(g, g.membre(13))
     run(K.montrer_stats(i, 1))
     assert "Ta participation a été retirée" in textes(_vue(i)), "ceux qu'il nommait le liront en cliquant"

@@ -1118,17 +1118,19 @@ def _texte_composants(m) -> str:
     return "\n".join(out)
 
 
-async def nettoyer_avis(g) -> int:
-    """Une fois : l'avis public « Participation retirée » du 24/10 part du salon ; les membres qu'il nommait
-    sont notés et le liront en cliquant, pour eux seuls. Rend le nombre d'avis effacés."""
+async def nettoyer_avis(g) -> dict:
+    """L'avis public « Participation retirée » part du salon ; les membres qu'il nommait sont notés et le
+    liront en cliquant, pour eux seuls. Rend le relevé : messages lus, ceux du bot, avis effacés."""
     salon = await salon_cadeaux(g)
     moi = getattr(getattr(g, "me", None), "id", 0)
+    releve = {"lus": 0, "du_bot": 0, "effaces": 0}
     if salon is None:
-        return 0
-    n = 0
+        return releve
     async for m in salon.history(limit=100):
+        releve["lus"] += 1
         if getattr(m.author, "id", 0) != moi:
             continue
+        releve["du_bot"] += 1
         texte = _texte_composants(m)
         if "Participation retirée" not in texte:
             continue
@@ -1141,11 +1143,11 @@ async def nettoyer_avis(g) -> int:
                 await _noter_retires(int(r[0]), [int(u) for u in re.findall(r"<@!?(\d+)>", texte)])
         try:
             await m.delete()
-            n += 1
+            releve["effaces"] += 1
         except discord.HTTPException as ex:
             _log("[CADEAUX][E9] avis non effacé")
             _log(f"[CADEAUX][E9:DETAIL] message={m.id} {type(ex).__name__} {ex}")
-    return n
+    return releve
 
 
 async def etat(g) -> list:

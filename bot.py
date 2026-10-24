@@ -101,6 +101,7 @@ import annonces  # les annonces en un clic : bandeau, texte, liens, « ✅ Vu »
 import faq  # les questions fréquentes : une carte qui mène au bon endroit (ticket, trade…)
 import cadeaux  # les cadeaux (giveaways) : conditions, stats en direct, tirage pondéré
 import liens_jeux  # 🎮 game-link : les liens officiels pour rejoindre nos jeux
+import vocaux  # les vocaux à la demande : un Join par jeu, la Demande du clan, le but de chaque vocal
 import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -13737,6 +13738,70 @@ for _journal_ui in ("discord.ui.view", "discord.ui.modal", "discord.app_commands
     logging.getLogger(_journal_ui).addHandler(_ErreursInteractions())
 
 
+async def _vocal_info(salon):
+    """(propriétaire, contexte) d'un vocal créé par un Join, ou None : pour son panneau."""
+    info = temp_voice_channels.get(salon.id) or {}
+    proprio, hub = info.get('owner'), info.get('hub_id')
+    if proprio is None:
+        async with get_db() as db:
+            async with db.execute("SELECT owner_id, hub_id FROM temp_voice_rooms WHERE channel_id=?",
+                                  (salon.id,)) as cur:
+                r = await cur.fetchone()
+        if r is None:
+            return None
+        proprio, hub = r
+    hubs = ((await cfg(salon.guild.id)).get('temp_voice_config') or {}).get('hubs') or {}
+    return int(proprio), str((hubs.get(str(hub)) or {}).get('contexte') or 'commu')
+
+
+async def _vocaux_par_contexte(g) -> None:
+    """24/10/2026, le fondateur : « plusieurs sous-salons automatiques… un vocal communautaire… un vocal
+    concernant les deux jeux… » et, pour le clan, « un vocal join pour le clan et après un vocal de demande ».
+    Une fois par serveur : chaque Join reçoit son contexte (`vocaux.CONTEXTES`) et son nom ; un Join par jeu
+    naît à côté de celui de la communauté, une « Demande » à côté de celui du clan, avec les droits de leur
+    voisin. Le panneau de chaque vocal créé fait choisir son but."""
+    c = await cfg(g.id)
+    voix = dict(c.get('temp_voice_config') or {})
+    hubs = dict(voix.get('hubs') or {})
+    if c.get('vocaux_v2') or not voix.get('enabled') or not hubs:
+        return
+    me = g.me
+    if not (me and me.guild_permissions.manage_channels):
+        return
+    commu, clan = zones._vocal_commu(g, c), zones._vocal_clan(g, c)
+    faits = []
+
+    async def hub(modele, cle, apres):
+        ctx = vocaux.contexte(cle)
+        cat = modele.category
+        ch = next((x for x in (getattr(cat, "channels", None) or []) if isinstance(x, discord.VoiceChannel)
+                   and x.name == ctx.hub), None) if cat is not None else None
+        if ch is None:
+            ch = await g.create_voice_channel(ctx.hub, category=cat, overwrites=dict(modele.overwrites),
+                                              reason="Vocaux à la demande : un Join de plus")
+            await ch.move(after=apres, sync_permissions=False, reason="À côté de son voisin")
+            faits.append(ctx.hub)
+        hubs[str(ch.id)] = dict(hubs.get(str(modele.id)) or {}, contexte=cle, default_name=ctx.defaut)
+        return ch
+
+    for modele, cle, voisins in ((commu, "commu", [j.cle for j in zones.JEUX]), (clan, "clan", ["clan_demande"])):
+        if modele is None:
+            continue
+        ctx = vocaux.contexte(cle)
+        hubs[str(modele.id)] = dict(hubs.get(str(modele.id)) or {}, contexte=cle, default_name=ctx.defaut)
+        if modele.name != ctx.hub:
+            await modele.edit(name=ctx.hub, reason="Vocaux à la demande : chaque Join dit le sien")
+        apres = modele
+        for v in voisins:
+            apres = await hub(modele, v, apres)
+    voix['hubs'] = hubs
+    await db_set(g.id, 'temp_voice_config', voix)
+    await db_set(g.id, 'vocaux_v2', {"le": now().isoformat(), "crees": faits})
+    await _au_journal(g, "Config", "config.vocaux",
+                      "Vocaux à la demande : " + (", ".join(faits) + " créés" if faits else "rien à créer")
+                      + " ; chaque vocal créé fait choisir son but (aide, farm, chill…).")
+
+
 def _installer_arret_propre() -> None:
     """24/10/2026 : Railway arrête le bot par SIGTERM à chaque mise en ligne. Sans ce gestionnaire, les
     compteurs des cadeaux encore en mémoire (jusqu'à 30 s de messages et de vocal) étaient perdus."""
@@ -13803,11 +13868,14 @@ async def cadeaux_task():
                 #  sont retirés et prévenus sous la carte (après `tic` : les compteurs sont en base).
                 n = await cadeaux.elaguer(g)
                 await db_set(g.id, 'cadeaux_elagage_v1', {"le": now().isoformat(), "retires": n})
-            if not c.get('cadeaux_avis_v1'):
-                #  24/10/2026 : « je veux que ce soit vu individuellement » — l'avis public part ; les
-                #  retirés qu'il nommait le liront en cliquant, pour eux seuls.
-                n = await cadeaux.nettoyer_avis(g)
-                await db_set(g.id, 'cadeaux_avis_v1', {"le": now().isoformat(), "effaces": n})
+            if time.monotonic() - _cadeaux_avis.get(g.id, -1e9) > 3600:
+                #  24/10/2026 : « je veux que ce soit vu individuellement » — un avis public part ; les
+                #  retirés qu'il nommait le liront en cliquant, pour eux seuls. Toutes les heures, et le
+                #  relevé dit ce qui a été lu (la preuve que le salon est propre).
+                _cadeaux_avis[g.id] = time.monotonic()
+                releve = await cadeaux.nettoyer_avis(g)
+                if releve["effaces"] or not c.get('cadeaux_avis_v1'):
+                    await db_set(g.id, 'cadeaux_avis_v1', dict(releve, le=now().isoformat()))
         except Exception as ex:
             _logerr("cadeaux.elagage", ex, guild_id=g.id)
     if time.monotonic() - _cadeaux_purge[0] > 3600:
@@ -13820,6 +13888,7 @@ async def cadeaux_task():
 
 
 _cadeaux_purge = [-1e9]
+_cadeaux_avis: dict = {}   # guild_id → dernier passage du ménage des avis
 
 
 async def _annonces_journal(g, type_: str, texte: str, **kw) -> None:
@@ -14084,6 +14153,10 @@ async def _etat_public():
             "cadeaux_elagage": next((c['cadeaux_elagage_v1'] for c in confs if c.get('cadeaux_elagage_v1')), None),
             "erreurs_ui": diag.releve("ui"),
             "cadeaux_avis": next((c['cadeaux_avis_v1'] for c in confs if c.get('cadeaux_avis_v1')), None),
+            "vocaux_hubs": sorted(str((v or {}).get('contexte') or '-') for g, c in zip(list(bot.guilds), confs)
+                                  if g.owner_id in TETE_IDS
+                                  for k, v in ((c.get('temp_voice_config') or {}).get('hubs') or {}).items()
+                                  if str(k).isdigit() and g.get_channel(int(k)) is not None),
             "cmd_giveaway": any("giveaway" in noms for noms in _commandes_vues.values()),
             "faq_trouve": next(iter(_faq_vus.values()), {}),
             "roles_zones_manquants": await _roles_zones_manquants(),
@@ -14151,7 +14224,7 @@ _TRAVAUX = (
     "suggestions.installer", "_actus_en_annonces", "_flux_studio_rell", "_rattacher_flux_orphelins",
     "_configurer_salons", "_passer_logs_sur_site", "_recrutement_rellseas", "_salon_tableau",
     "_logs_direction_seule", "_configurer_salons_v2", "_automod_invitations", "_salon_aide",
-    "_boosts_au_demarrage", "_retirer_fonctions_mortes",
+    "_boosts_au_demarrage", "_retirer_fonctions_mortes", "_vocaux_par_contexte",
 )
 
 
@@ -20454,6 +20527,7 @@ async def _activite_boot():
                   ticket=_salon_des_tickets, langue=_langue_membre, log=print)
     await cadeaux.init_db()
     _installer_arret_propre()
+    vocaux.setup(proprio=_vocal_info, est_staff=_entraide_staff, log=print)
     liens_jeux.setup(cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_liens_journal, jeux=zones.JEUX,
                      log=print)
 
@@ -20563,6 +20637,7 @@ async def on_ready():
         bot.add_dynamic_items(cadeaux.BoutonCadeaux, cadeaux.BoutonParticiper, cadeaux.BoutonStats,
                               cadeaux.BoutonActualiser, cadeaux.BoutonQuitter, cadeaux.BoutonParticipants,
                               cadeaux.BoutonPage, cadeaux.ChoixParticipant, cadeaux.BoutonChercher)
+        bot.add_dynamic_items(vocaux.ChoixBut)
         bot.add_dynamic_items(liens_jeux.BoutonLiens)
         bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)
     except Exception as ex:
@@ -29526,6 +29601,13 @@ async def on_voice_state_update(member, before, after):
                                     f"**{member.guild.name}** : rejoins-le directement.")
                             except Exception as ex_m:
                                 print(f"[TEMP VOICE] move échoué : {ex_m}")
+                            #  24/10/2026 : le panneau du vocal — son but (aide, farm, chill…), visible
+                            #  dans son nom, pour que ceux qui ont le même besoin le rejoignent.
+                            try:
+                                await vocaux.poser_panneau(new_channel, str(hub_data.get('contexte') or 'commu'),
+                                                           member)
+                            except discord.HTTPException as _pex:
+                                _logerr("vocaux.panneau", _pex, guild_id=member.guild.id)
             
             # Si l'utilisateur quitte un vocal temporaire → vérifier si vide et supprimer.
             # owner 2026-06-18 (« les vocaux ne se suppriment pas ») : on reconnaît le vocal

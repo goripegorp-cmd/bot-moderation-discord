@@ -713,12 +713,22 @@ def lien_jouer(g, c: dict, j: Jeu):
     return lien_salon(g, ch) if isinstance(ch, discord.TextChannel) else None
 
 
-def _vocal_commu(g, c: dict):
-    """Le 🔊 Join de la communauté (pas celui du clan)."""
+def _hubs(g, c: dict, clan: bool) -> list:
+    """Les « Join » qui existent, avec leur contexte (vocaux.py), dans la catégorie du clan ou hors d'elle."""
     hubs = (c.get("temp_voice_config") or {}).get("hubs") or {}
-    return next((ch for ch in (g.get_channel(int(k)) for k in hubs if str(k).isdigit())
-                 if ch is not None and not config_salons.est_clan(getattr(getattr(ch, "category", None), "name", ""))),
-                None)
+    out = []
+    for k, v in hubs.items():
+        ch = g.get_channel(int(k)) if str(k).isdigit() else None
+        if ch is not None and config_salons.est_clan(getattr(getattr(ch, "category", None), "name", "")) == clan:
+            out.append((ch, str((v or {}).get("contexte") or ("clan" if clan else "commu"))))
+    return out
+
+
+def _vocal_commu(g, c: dict, contexte: str = "commu"):
+    """Le 🔊 Join de la communauté (pas celui du clan) ; pour un jeu, son Join à lui s'il existe."""
+    hubs = _hubs(g, c, False)
+    return (next((ch for ch, x in hubs if x == contexte), None) or next((ch for ch, x in hubs if x == "commu"), None)
+            or next((ch for ch, _x in hubs), None))
 
 
 def vue_guide(g, c: dict, cfz: dict, cfe: dict, j: Jeu | None = None) -> tuple:
@@ -726,7 +736,7 @@ def vue_guide(g, c: dict, cfz: dict, cfe: dict, j: Jeu | None = None) -> tuple:
     marche, qui certifie, le clan ou le staff ; un bouton par post (jamais un bouton qui ment : une ligne
     n'apparaît que si son post existe). Rend (la vue, sa signature)."""
     j = j or JEUX[0]
-    vocal = _vocal_commu(g, c)
+    vocal = _vocal_commu(g, c, j.cle)
     roles = {cle: entraide.role_zone(g, cfe, cle) for cle in j.zones}
     guides = " ".join(r.mention for cle, r in roles.items() if r is not None and cle != j.zones[-1])
     mm = roles.get(j.zones[-1])
@@ -843,12 +853,11 @@ def categorie_clan(g):
     return next((cat for cat in getattr(g, "categories", []) or [] if config_salons.est_clan(cat.name)), None)
 
 
-def _vocal_clan(g, c: dict):
-    """Le 🔊 Join du clan : le salon « créer un vocal » rangé dans la catégorie du clan."""
-    hubs = (c.get("temp_voice_config") or {}).get("hubs") or {}
-    return next((ch for ch in (g.get_channel(int(k)) for k in hubs if str(k).isdigit())
-                 if ch is not None and config_salons.est_clan(getattr(getattr(ch, "category", None), "name", ""))),
-                None)
+def _vocal_clan(g, c: dict, contexte: str = "clan"):
+    """Le 🔊 Join du clan (ou sa « Demande ») : un salon « créer un vocal » de la catégorie du clan."""
+    hubs = _hubs(g, c, True)
+    return (next((ch for ch, x in hubs if x == contexte), None)
+            or (next((ch for ch, x in hubs if x != "clan_demande"), None) if contexte == "clan" else None))
 
 
 async def installer_clan(g, role, equipe=(), *, forum: bool | None = None) -> list:
@@ -1015,6 +1024,7 @@ def vue_guide_clan(g, c: dict, posts: dict) -> tuple:
     """Le guide du clan, en tête de 🦜▷・clan-gorp : chaque post et à quoi il sert, le vocal, à qui
     s'adresser. Une ligne n'apparaît que si son post existe (aucun bouton qui ment). Rend (vue, signature)."""
     vocal = _vocal_clan(g, c)
+    demande = _vocal_clan(g, c, "clan_demande")
     ticket = _ticket(g) if _ticket else None
 
     def lien(cle):
@@ -1026,7 +1036,9 @@ def vue_guide_clan(g, c: dict, posts: dict) -> tuple:
         (lien("annonces"), "### 📣 Annonces · Announcements\nLes nouvelles du clan. Lis-les et clique « ✅ Vu ».\n-# "
          "Clan news: read them and click “✅ Seen”.", "Lire · Read"),
         (lien("chat"), "### 💬 Chat\nLe chat du clan, entre nous"
-         + (f". Le vocal : 🔊 <#{vocal.id}>." if vocal is not None else ".") + "\n-# The clan chat, among us.",
+         + (f". Le vocal : 🔊 <#{vocal.id}>" if vocal is not None else "")
+         + (f" · une demande (aide, farm, boss…) : 🙋 <#{demande.id}>" if demande is not None else "")
+         + ".\n-# The clan chat, among us.",
          "Ouvrir · Open"),
         (lien("economie"), "### 💰 Économie · Economy\nLes objectifs, les dons et les dépenses du clan.\n-# Goals, "
          "donations and spending.", "Ouvrir · Open"),
@@ -1059,7 +1071,7 @@ def vue_guide_clan(g, c: dict, posts: dict) -> tuple:
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(*items, accent_color=discord.Color(0x14B8A6)))
     signature = "|".join([str(GUIDE_CLAN_VERSION), *(str(p.id) for p, _t, _b in presentes),
-                          str(getattr(vocal, "id", 0)), str(getattr(ticket, "id", 0)),
+                          str(getattr(vocal, "id", 0)), str(getattr(demande, "id", 0)), str(getattr(ticket, "id", 0)),
                           str(int(_boutons_langue is not None))])
     return v, signature
 
