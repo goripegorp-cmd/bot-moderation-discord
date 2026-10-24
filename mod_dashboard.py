@@ -458,6 +458,15 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
     return _ModDashboardLayout()
 
 
+async def _repondre(interaction: discord.Interaction, **kw) -> None:
+    """Répondre en éphémère, que l'interaction soit déjà acquittée ou non (24/10/2026 : après un `defer`,
+    `send_message` levait — le membre voyait une erreur technique)."""
+    if interaction.response.is_done():
+        await interaction.followup.send(ephemeral=True, **kw)
+    else:
+        await interaction.response.send_message(ephemeral=True, **kw)
+
+
 async def show(interaction: discord.Interaction, days: int = WINDOW_DAYS) -> bool:
     """Affiche le dashboard à l'utilisateur (ephemeral).
 
@@ -490,30 +499,17 @@ async def show(interaction: discord.Interaction, days: int = WINDOW_DAYS) -> boo
             print(f"[mod_dashboard tickets] {_tex}")
         view = _build_layout(stats, interaction.guild, tickets=tickets)
         if view is None:
-            await interaction.response.send_message(
-                "❌ Dashboard indisponible (module non initialisé).",
-                ephemeral=True,
-            )
+            await _repondre(interaction, content="❌ Tableau de bord indisponible pour le moment.")
             return False
-
-        if not interaction.response.is_done():
-            await interaction.response.send_message(view=view, ephemeral=True)
-        else:
-            await interaction.followup.send(view=view, ephemeral=True)
+        await _repondre(interaction, view=view)
         return True
     except Exception as ex:
-        print(f"[mod_dashboard show] {ex}")
+        print("[MODDASH][E1] tableau de bord en échec")
+        print(f"[MODDASH][E1:DETAIL] {type(ex).__name__} {ex}")
         try:
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    f"❌ Erreur : `{ex}`", ephemeral=True
-                )
-            else:
-                await interaction.followup.send(
-                    f"❌ Erreur : `{ex}`", ephemeral=True
-                )
-        except Exception:
-            pass
+            await _repondre(interaction, content="❌ Tableau de bord indisponible pour le moment. Réessaie dans un instant.")
+        except discord.HTTPException as ex2:
+            print(f"[MODDASH][E1:DETAIL] réponse impossible {ex2}")
         return False
 
 

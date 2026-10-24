@@ -29962,14 +29962,25 @@ async def _2026_on_ready_addon():
             content = social2026.render_template(sub, post)
             ping, role, vue = await _ping_social(chan)
             roles = [role] if role else []
+            haut = [ping] if ping else []
             if sub.role_to_ping:
-                content = f"<@&{sub.role_to_ping}> {content}"
+                haut.append(f"<@&{sub.role_to_ping}>")
                 roles.append(discord.Object(id=int(sub.role_to_ping)))
-            if ping:
-                content = f"{ping} {content}"
+            #  24/10/2026 (revue) : une carte Components V2 comme les autres publications — le texte du modèle,
+            #  la vignette du post, « Ouvrir · Open » et la cloche (avant : un message texte classique).
+            e = discord.Embed(description=content[:3500])
+            if post.thumbnail_url:
+                e.set_image(url=str(post.thumbnail_url))
+            boutons = list(vue.children)
+            for b in boutons:
+                vue.remove_item(b)
+            if post.url and str(post.url).startswith("http") and len(str(post.url)) <= 512:
+                boutons.insert(0, discord.ui.Button(style=discord.ButtonStyle.link, url=str(post.url),
+                                                    label="Ouvrir · Open", emoji=visuels.icone("lien")))
             try:
-                msg = await chan.send(content, view=vue, allowed_mentions=discord.AllowedMentions(
-                    everyone=False, users=False, roles=roles or False))
+                msg = await chan.send(view=carte_embed(e, boutons, haut=" ".join(haut)),
+                                      allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
+                                                                               roles=roles or False))
                 diag.event("social", f"{_plat}_post",
                            f"@{_who} → #{getattr(chan, 'name', '?')} (msg {getattr(msg, 'id', 0)})")
                 return msg.id
