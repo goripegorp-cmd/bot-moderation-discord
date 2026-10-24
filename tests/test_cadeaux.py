@@ -41,7 +41,8 @@ def env(tmp_path, monkeypatch):
     async def noter(_g, type_, texte, **_kw):
         journal.append((type_, texte))
     K.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=autorise, journal=noter, log=lambda *a: None)
-    for d in (K._actifs, K._tampon, K._dernier_msg, K._comptes, K._vocal, K._maj_prevues):
+    for d in (K._actifs, K._tampon, K._dernier_msg, K._comptes, K._vocal, K._maj_prevues, K._verrous,
+              K._en_cours, K._annonces_faites):
         d.clear()
     K._charges.clear()
     monkeypatch.setattr(K, "MAJ_CARTE_S", 0)
@@ -69,6 +70,10 @@ def _c(**kw):
 
 
 def _vue(i):
+    """Ce que voit le membre : la réponse différée (acquittée d'abord, puis le message pour soi), sinon la
+    réponse directe."""
+    if i.suivis:
+        return i.suivis[-1][1]["view"]
     return i.response.messages[-1][1]["view"]
 
 

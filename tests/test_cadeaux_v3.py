@@ -36,7 +36,8 @@ def env(tmp_path, monkeypatch):
     async def noter(_g, type_, texte, **_kw):
         journal.append((type_, texte))
     K.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=autorise, journal=noter, log=lambda *a: None)
-    for d in (K._actifs, K._tampon, K._dernier_msg, K._comptes, K._vocal, K._maj_prevues):
+    for d in (K._actifs, K._tampon, K._dernier_msg, K._comptes, K._vocal, K._maj_prevues, K._verrous,
+              K._en_cours, K._annonces_faites):
         d.clear()
     K._charges.clear()
     monkeypatch.setattr(K, "MAJ_CARTE_S", 0)
@@ -74,6 +75,10 @@ def _select(v):
 
 
 def _vue(i):
+    """Ce que voit le membre : la réponse différée (acquittée d'abord, puis réécrite ou envoyée pour soi),
+    sinon la réponse directe."""
+    if i.suivis:
+        return i.suivis[-1][1]["view"]
     return (i.response.edits or [m[1] for m in i.response.messages])[-1]["view"]
 
 
@@ -115,7 +120,7 @@ def test_L2_le_cadeau_en_cours_est_elague_chacun_le_lit_pour_lui_seul(env):
     i = interaction(g, g.membre(12))
     run(K.montrer_stats(i, 1))
     t = textes(_vue(i))
-    assert "Ta participation a été retirée" in t and "**1 / 2**" in t and i.response.messages[-1][1]["ephemeral"]
+    assert "Ta participation a été retirée" in t and "**1 / 2**" in t and i.suivis[-1][1]["ephemeral"]
     i = interaction(g, g.membre(12))
     run(K.montrer_stats(i, 1))
     assert "retirée" not in textes(_vue(i)), "lu une fois : le mot part"
@@ -213,21 +218,29 @@ def test_L4_tout_se_clique_la_liste_les_pages_la_fiche_la_recherche(env):
         run(K._ecrire("INSERT INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(1, ?, ?)", (uid, uid)))
     i = interaction(g, g.membre(7))
     run(K.BoutonParticipants(1).callback(i))
-    contenu, kw = i.response.messages[-1]
+    contenu, kw = i.suivis[-1]
     assert kw["ephemeral"] and "30 participants" in textes(kw["view"]), "depuis la carte : un message pour soi"
-    i.message = Obj(flags=Obj(ephemeral=True))
+
+    def clic():   # chaque clic est une nouvelle interaction, depuis le message pour soi
+        j = interaction(g, g.membre(7))
+        j.message = Obj(flags=Obj(ephemeral=True))
+        return j
+    i = clic()
     run(K.BoutonPage(1, 1).callback(i))
-    assert "page 2/2" in textes(i.response.edits[-1]["view"]), "◀ ▶ réécrivent la liste"
+    assert i.suivis[-1][0] == "edit" and "page 2/2" in textes(i.suivis[-1][1]["view"]), "◀ ▶ réécrivent la liste"
+    i = clic()
     i.data = {"values": ["127"]}
     run(K.ChoixParticipant(1, 1).callback(i))
-    fiche = i.response.edits[-1]["view"]
+    fiche = i.suivis[-1][1]["view"]
     assert "28. <@127>" in textes(fiche) and "Inscrit <t:" in textes(fiche) and "**1 / 1**" in textes(fiche)
     assert ids(fiche) == ["cd:lp:1:1"], "◀ Retour à la liste, à la même page"
+    i = clic()
     run(K.BoutonChercher(1).callback(i))
     formulaire = i.response.modals[-1]
+    i = clic()
     formulaire.q._value = "pirate12"
     run(formulaire.on_submit(i))
-    assert "10 sur 30" in textes(i.response.edits[-1]["view"])
+    assert "10 sur 30" in textes(i.suivis[-1][1]["view"])
 
 
 def test_L5_branche_dans_le_bot_l_etat_et_l_arret_propre(env):

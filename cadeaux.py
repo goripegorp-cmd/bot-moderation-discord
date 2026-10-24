@@ -48,6 +48,7 @@ SUJET_SALON = ("🇫🇷 Les cadeaux du serveur : « Participer », puis « Mes 
 COULEUR = 0xEC4899
 LOT_MAX, DETAILS_MAX = 100, 1000
 GAGNANTS_MAX = 20
+GAGNANTS_CARTE = 60        # nommés sur la carte d'un cadeau terminé (nouveaux tirages compris), puis « +N »
 DUREE_MIN_S, DUREE_MAX_S = 60, 60 * 86400
 MULT_MIN, MULT_MAX = 1.1, 10.0
 ROLES_MAX = 5
@@ -104,6 +105,8 @@ TEXTES = {
     "participer": {"fr": "Participer", "en": "Enter"},
     "actualiser": {"fr": "Actualiser", "en": "Refresh"},
     "quitter": {"fr": "Ne plus participer", "en": "Leave"},
+    "demarre": {"fr": "Le bot démarre, réessaie dans quelques secondes.",
+                "en": "The bot is starting, try again in a few seconds."},
 }
 
 
@@ -129,9 +132,12 @@ _charges: set = set()                             # les serveurs dont les cadeau
 _maj_prevues: dict = {}
 _verrous: dict = {}
 _minuteurs: dict = {}                             # cadeau_id → la tâche qui tire à la seconde près
+_en_cours: set = set()                            # les gestes du panneau en cours : un clic à la fois
 MINUTEUR_S = 40.0     # à moins de 40 s de la fin, un minuteur exact prend le relais de la boucle (30 s)
 AVIS_S = 180.0        # un mot pour soi (refus, participation retirée) s'efface après 3 minutes
+DEMARRE_S = 30.0      # « le bot démarre » s'efface plus vite : dans 30 s, il marche
 ANNONCE_S = 86400     # l'annonce des gagnants s'efface au bout de 24 h : la carte, elle, les garde
+ANNONCE_A_FAIRE = '"annonce_id": 0'   # dans le résultat d'un tirage dont l'annonce n'est pas encore partie
 
 
 def setup(*, get_db, cfg, db_set, autorise, journal, ticket=None, langue=None, log=None, invitations=None,
@@ -157,6 +163,12 @@ def _verrou(cle):
     return _verrous.setdefault(cle, asyncio.Lock())
 
 
+def pret() -> bool:
+    """Le module est branché (`setup`, pendant le démarrage du bot). Avant, les boutons déjà posés répondent
+    « le bot démarre » et les écouteurs ne font rien : rien n'est encore chargé."""
+    return _get_db is not None
+
+
 async def langue_de(i) -> str:
     try:
         if _langue is not None:
@@ -178,7 +190,9 @@ _COLONNES = ("id", "guild_id", "salon_id", "message_id", "auteur_id", "lot", "de
 _SQL_UN = ("SELECT id, guild_id, salon_id, message_id, auteur_id, lot, details, image, gagnants, debut, fin,"
            " roles, msg_min, voc_min, logique, chance_roles, multiplicateur, mention, statut, resultat, roles_exclus,"
            " inv_min, anc_min FROM cadeaux WHERE id=?")
-_SQL_ACTIFS = ("SELECT id, debut FROM cadeaux WHERE guild_id=? AND statut='actif' ORDER BY id")
+_SQL_ACTIFS = ("SELECT id, debut, fin FROM cadeaux WHERE guild_id=? AND statut='actif' ORDER BY id")
+_SQL_A_ANNONCER = ("SELECT id, resultat FROM cadeaux WHERE guild_id=? AND statut='fini' AND resultat LIKE ?"
+                   " ORDER BY id")
 _SQL_RECENTS = ("SELECT id, guild_id, salon_id, message_id, auteur_id, lot, details, image, gagnants, debut, fin,"
                 " roles, msg_min, voc_min, logique, chance_roles, multiplicateur, mention, statut, resultat,"
                 " roles_exclus, inv_min, anc_min FROM cadeaux WHERE guild_id=? ORDER BY id DESC LIMIT ?")
@@ -428,7 +442,16 @@ def _demarrer_vocaux(g) -> int:
 
 async def vider() -> int:
     """Les compteurs en mémoire vont en base ; les segments vocaux en cours sont crédités jusqu'à
-    maintenant (les stats montent en direct). Rend le nombre de lignes écrites."""
+    maintenant (les stats montent en direct). Rend le nombre de lignes écrites.
+
+    Un seul passage à la fois (le verrou « vider ») : un tirage attend que les compteurs déjà sortis de la
+    mémoire soient en base avant de les lire, et aucun passage n'écrit pour un cadeau en train de se clore."""
+    async with _verrou("vider"):
+        return max(0, await _vider())
+
+
+async def _vider() -> int:
+    """`vider`, le verrou « vider » déjà pris. Rend -1 si la base a refusé (les compteurs restent en mémoire)."""
     maintenant = _mur()
     for (gid, uid), depuis in list(_vocal.items()):
         _crediter(gid, uid, depuis, maintenant)
@@ -456,7 +479,7 @@ async def vider() -> int:
             for cid, uid, m, s in lignes:  # rien n'est perdu : ils repartent au prochain passage
                 _tampon[(cid, uid)][0] += m
                 _tampon[(cid, uid)][1] += s
-            return 0
+            return -1
     return len(lignes)
 
 
@@ -496,18 +519,43 @@ async def stats_de_tous(cid: int) -> dict:
     return {u: (max(0, m), s) for u, (m, s) in tous.items()}
 
 
-async def charger_actifs(g) -> int:
-    """Au démarrage : les cadeaux en cours reviennent en mémoire, les membres en vocal recommencent à compter."""
-    async with _get_db() as db:
-        async with db.execute(_SQL_ACTIFS, (g.id,)) as cur:
-            lignes = await cur.fetchall()
-    _actifs[g.id] = {int(cid): float(debut) for cid, debut in lignes}
-    if not _actifs[g.id]:
-        _actifs.pop(g.id, None)
-    else:
-        _demarrer_vocaux(g)
+async def charger_actifs(g) -> dict:
+    """La liste des cadeaux en cours, relue en base à chaque passage de la boucle (une requête légère) : la
+    mémoire suit la base. Un cadeau en cours absent de la mémoire (un démarrage ou un lancement qui s'est mal
+    passé) y entre, ses compteurs partant de son lancement ; un cadeau qui n'est plus en cours en sort (le
+    vocal, lui, suit avec `_reprendre_vocaux`). Rend {cadeau: fin}.
+
+    Sous le verrou « vider » : un tirage qui se clôt (même verrou) n'est jamais remis en mémoire par une
+    lecture faite juste avant sa clôture, ni un cadeau qui vient d'être lancé retiré par une lecture faite
+    juste avant son lancement."""
+    async with _verrou("vider"):
+        async with _get_db() as db:
+            async with db.execute(_SQL_ACTIFS, (g.id,)) as cur:
+                lignes = await cur.fetchall()
+        en_base = {int(cid): float(debut) for cid, debut, _fin in lignes}
+        for cid in [x for x in (_actifs.get(g.id) or {}) if x not in en_base]:
+            _oublier(g.id, cid)
+        if en_base:
+            _actifs.setdefault(g.id, {}).update(en_base)
     _charges.add(g.id)
-    return len(lignes)
+    return {int(cid): float(fin) for cid, _debut, fin in lignes}
+
+
+def _reprendre_vocaux(g) -> tuple:
+    """Après une reconnexion complète, discord.py reconstruit son cache sans annoncer ceux qui ont quitté le
+    vocal pendant la coupure : leur segment resterait ouvert et `vider` les créditerait sans fin. À chaque
+    passage, la mémoire suit l'état réel — mêmes règles qu'à l'arrivée (hors AFK, casque non coupé) : le
+    segment de celui qui ne compte plus s'arrête (sans crédit : on ne sait pas quand il est parti), celui qui
+    compte sans segment commence maintenant. Rend (arrêtés, commencés)."""
+    if not _actifs.get(g.id):
+        return 0, 0
+    arretes = 0
+    for cle in [k for k in _vocal if k[0] == g.id]:
+        m = g.get_member(cle[1])
+        if m is None or getattr(m, "bot", False) or not compte_en_vocal(g, getattr(m, "voice", None)):
+            _vocal.pop(cle, None)
+            arretes += 1
+    return arretes, _demarrer_vocaux(g)
 
 
 def _oublier(gid: int, cid: int) -> None:
@@ -658,7 +706,7 @@ class BoutonParticiper(discord.ui.DynamicItem[Button], template=r"cd:p:(?P<cid>\
         return cls(int(match["cid"]))
 
     async def callback(self, i: discord.Interaction):
-        await participer(i, self.cid)
+        await _sans_echec(i, participer(i, self.cid))
 
 
 class BoutonStats(discord.ui.DynamicItem[Button], template=r"cd:s:(?P<cid>\d+)"):
@@ -672,7 +720,7 @@ class BoutonStats(discord.ui.DynamicItem[Button], template=r"cd:s:(?P<cid>\d+)")
         return cls(int(match["cid"]))
 
     async def callback(self, i: discord.Interaction):
-        await montrer_stats(i, self.cid)
+        await _sans_echec(i, montrer_stats(i, self.cid))
 
 
 class BoutonActualiser(discord.ui.DynamicItem[Button], template=r"cd:r:(?P<cid>\d+)"):
@@ -686,7 +734,7 @@ class BoutonActualiser(discord.ui.DynamicItem[Button], template=r"cd:r:(?P<cid>\
         return cls(int(match["cid"]))
 
     async def callback(self, i: discord.Interaction):
-        await montrer_stats(i, self.cid)
+        await _sans_echec(i, montrer_stats(i, self.cid))
 
 
 class BoutonQuitter(discord.ui.DynamicItem[Button], template=r"cd:q:(?P<cid>\d+)"):
@@ -699,7 +747,7 @@ class BoutonQuitter(discord.ui.DynamicItem[Button], template=r"cd:q:(?P<cid>\d+)
         return cls(int(match["cid"]))
 
     async def callback(self, i: discord.Interaction):
-        await quitter(i, self.cid)
+        await _sans_echec(i, quitter(i, self.cid))
 
 
 class BoutonCadeaux(discord.ui.DynamicItem[Button], template=r"cd:menu"):
@@ -713,7 +761,7 @@ class BoutonCadeaux(discord.ui.DynamicItem[Button], template=r"cd:menu"):
         return cls()
 
     async def callback(self, i: discord.Interaction):
-        await ouvrir_gestion(i)
+        await _sans_echec(i, ouvrir_gestion(i))
 
 
 class BoutonParticipants(discord.ui.DynamicItem[Button], template=r"cd:l:(?P<cid>\d+)"):
@@ -729,7 +777,7 @@ class BoutonParticipants(discord.ui.DynamicItem[Button], template=r"cd:l:(?P<cid
         return cls(int(match["cid"]))
 
     async def callback(self, i: discord.Interaction):
-        await montrer_participants(i, self.cid, 0)
+        await _sans_echec(i, montrer_participants(i, self.cid, 0))
 
 
 class BoutonPage(discord.ui.DynamicItem[Button], template=r"cd:lp:(?P<cid>\d+):(?P<page>\d+)"):
@@ -745,7 +793,7 @@ class BoutonPage(discord.ui.DynamicItem[Button], template=r"cd:lp:(?P<cid>\d+):(
         return cls(int(match["cid"]), int(match["page"]))
 
     async def callback(self, i: discord.Interaction):
-        await montrer_participants(i, self.cid, self.page)
+        await _sans_echec(i, montrer_participants(i, self.cid, self.page))
 
 
 class ChoixParticipant(discord.ui.DynamicItem[discord.ui.Select], template=r"cd:ls:(?P<cid>\d+):(?P<page>\d+)"):
@@ -764,7 +812,7 @@ class ChoixParticipant(discord.ui.DynamicItem[discord.ui.Select], template=r"cd:
     async def callback(self, i: discord.Interaction):
         valeurs = (getattr(i, "data", None) or {}).get("values") or []
         uid = int(valeurs[0]) if valeurs and str(valeurs[0]).isdigit() else 0
-        await montrer_participant(i, self.cid, uid, self.page)
+        await _sans_echec(i, montrer_participant(i, self.cid, uid, self.page))
 
 
 class BoutonChercher(discord.ui.DynamicItem[Button], template=r"cd:lq:(?P<cid>\d+)"):
@@ -780,6 +828,8 @@ class BoutonChercher(discord.ui.DynamicItem[Button], template=r"cd:lq:(?P<cid>\d
         return cls(int(match["cid"]))
 
     async def callback(self, i: discord.Interaction):
+        if not pret():
+            return await _pas_pret(i)
         await i.response.send_modal(FormulaireRecherche(self.cid))
 
 
@@ -791,7 +841,7 @@ class FormulaireRecherche(discord.ui.Modal):
         self.add_item(discord.ui.Label(text="Pseudo ou identifiant", component=self.q))
 
     async def on_submit(self, i: discord.Interaction):
-        await montrer_participants(i, self.cid, 0, str(self.q.value or "").strip())
+        await _sans_echec(i, montrer_participants(i, self.cid, 0, str(self.q.value or "").strip()))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -865,7 +915,7 @@ def composants_carte(c: dict, nb: int, *, apercu: bool = False) -> list:
         gagnants = r.get("gagnants") or []
         items.append(discord.ui.TextDisplay(
             ("🏆 **Gagnant" + ("s" if len(gagnants) > 1 else "") + " · Winner" + ("s" if len(gagnants) > 1 else "")
-             + "** : " + ", ".join(f"<@{u}>" for u in gagnants)) if gagnants
+             + "** : " + _liste_gagnants(gagnants, GAGNANTS_CARTE)) if gagnants
             else "🏆 Personne ne remplissait les conditions · Nobody met the conditions"))
         items.append(discord.ui.TextDisplay(
             f"-# 🎟️ {r.get('inscrits', 0)} participant(s) · {r.get('eligibles_n', len(r.get('eligibles') or []))}"
@@ -956,13 +1006,67 @@ def _vue_message(texte: str, couleur=Palette.NEUTRAL) -> LayoutView:
     return v
 
 
-async def _repondre(i, vue) -> None:
-    """Depuis un message éphémère (les stats) : on le réécrit ; depuis la carte : un message pour soi."""
+def _depuis_ephemere(i) -> bool:
+    """Le clic vient d'un message pour soi (les stats, la liste) : on le réécrit au lieu d'en ajouter un."""
     msg = getattr(i, "message", None)
-    if msg is not None and getattr(getattr(msg, "flags", None), "ephemeral", False):
-        await i.response.edit_message(view=vue)
+    return msg is not None and bool(getattr(getattr(msg, "flags", None), "ephemeral", False))
+
+
+async def _acquitter(i, *, nouveau: bool = False) -> None:
+    """Répondre d'abord, travailler ensuite (Discord n'attend que 3 s, et une rafale de clics fait attendre la
+    base) : depuis un message pour soi, il sera réécrit ; depuis la carte (ou `nouveau`), un message pour soi
+    suivra, éphémère (« … réfléchit »)."""
+    if i.response.is_done():
+        return
+    if _depuis_ephemere(i) and not nouveau:
+        await i.response.defer()
+    else:
+        await i.response.defer(ephemeral=True, thinking=True)
+
+
+async def _repondre(i, vue, *, nouveau: bool = False) -> None:
+    """Depuis un message éphémère (les stats) : on le réécrit ; depuis la carte : un message pour soi. Après
+    `_acquitter`, par la réponse différée."""
+    reecrire = _depuis_ephemere(i) and not nouveau
+    if not i.response.is_done():
+        if reecrire:
+            await i.response.edit_message(view=vue)
+        else:
+            await i.response.send_message(view=vue, ephemeral=True)
+    elif reecrire:
+        await i.edit_original_response(view=vue)
+    else:
+        await i.followup.send(view=vue, ephemeral=True)
+
+
+async def _sans_echec(i, travail) -> None:
+    """Le filet des boutons persistants (aucun filet de vue ne les couvre) : acquittés d'abord, une erreur
+    laisserait « … réfléchit » tourner — elle répond quand même, pour soi, puis remonte (discord.py la
+    journalise, /stats la compte)."""
+    try:
+        await travail
+    except Exception as ex:
+        _log("[CADEAUX][E19] bouton en échec")
+        _log(f"[CADEAUX][E19:DETAIL] {type(ex).__name__} {ex}")
+        vue = _vue_message("⚠️ Un souci est survenu : réessaie dans quelques secondes.", Palette.WARNING)
+        try:
+            if i.response.is_done():
+                await i.followup.send(view=vue, ephemeral=True)
+            else:
+                await i.response.send_message(view=vue, ephemeral=True)
+        except discord.HTTPException as ex2:
+            _log(f"[CADEAUX][E19:DETAIL] réponse impossible {type(ex2).__name__} {ex2}")
+        raise
+
+
+async def _pas_pret(i) -> None:
+    """Un bouton cliqué avant le branchement du module (le démarrage) : un mot pour soi, qui s'efface."""
+    vue = _vue_message("⏳ " + tr("demarre", await langue_de(i)), Palette.WARNING)
+    if i.response.is_done():
+        await i.followup.send(view=vue, ephemeral=True)
     else:
         await i.response.send_message(view=vue, ephemeral=True)
+    _effacer_plus_tard(i, DEMARRE_S)
 
 
 _taches: set = set()
@@ -985,7 +1089,17 @@ def _effacer_plus_tard(i, delai: float | None = None) -> None:
     t.add_done_callback(_taches.discard)
 
 
+async def _statut(cid: int) -> str:
+    async with _get_db() as db:
+        async with db.execute("SELECT statut FROM cadeaux WHERE id=?", (int(cid),)) as cur:
+            r = await cur.fetchone()
+    return str(r[0]) if r else ""
+
+
 async def participer(i, cid: int) -> None:
+    if not pret():
+        return await _pas_pret(i)
+    await _acquitter(i)
     langue = await langue_de(i)
     c = await charger(cid)
     if c is None or i.guild is None or c["guild_id"] != i.guild.id:
@@ -1011,21 +1125,42 @@ async def participer(i, cid: int) -> None:
         await _repondre(i, vue_stats(c, i.user, messages, secondes, False, langue,
                                      entete=tr("retiree" if retire else "manque", langue), invitations=inv))
         return _effacer_plus_tard(i)
-    cur_id = await _ecrire("INSERT OR IGNORE INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(?,?,?)",
-                           (int(cid), i.user.id, int(_mur())))
+    async with _verrou(("cadeau", int(cid))):
+        #  Sous le verrou du tirage, le statut relu : l'inscription arrive avant le tirage (elle est tirée) ou
+        #  le cadeau est fini (elle est refusée) — jamais « Tu participes » pour un tirage déjà fait.
+        ouvert = await _statut(cid) == "actif"
+        nouvelle = ouvert and await _inscrire(cid, i.user.id)
+    if not ouvert:
+        return await _repondre(i, _vue_message(tr("fini", langue)))
     await _repondre(i, vue_stats(c, i.user, messages, secondes, True, langue, entete=tr("inscrit", langue),
                                  invitations=inv))
-    if cur_id:
+    if nouvelle:
         planifier_maj(i.guild, cid)
 
 
+async def _inscrire(cid: int, uid: int) -> bool:
+    """L'inscription, une seule par membre. Rend True si elle est nouvelle."""
+    async with _get_db() as db:
+        cur = await db.execute("INSERT OR IGNORE INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(?,?,?)",
+                               (int(cid), int(uid), int(_mur())))
+        await db.commit()
+        return (cur.rowcount or 0) > 0
+
+
 async def quitter(i, cid: int) -> None:
+    if not pret():
+        return await _pas_pret(i)
+    await _acquitter(i)
     langue = await langue_de(i)
     c = await charger(cid)
     if c is None or i.guild is None or c["guild_id"] != i.guild.id:
         return await _repondre(i, _vue_message(tr("introuvable", langue)))
-    await _ecrire("DELETE FROM cadeaux_inscrits WHERE cadeau_id=? AND membre_id=?", (int(cid), i.user.id))
-    if c["statut"] != "actif":
+    async with _verrou(("cadeau", int(cid))):
+        #  Comme l'inscription : avant le tirage, il n'est pas tiré ; après, le cadeau est fini.
+        ouvert = await _statut(cid) == "actif"
+        if ouvert:
+            await _ecrire("DELETE FROM cadeaux_inscrits WHERE cadeau_id=? AND membre_id=?", (int(cid), i.user.id))
+    if not ouvert:
         return await _repondre(i, _vue_message(tr("fini", langue)))
     messages, secondes = await stats(cid, i.user.id)
     await _repondre(i, vue_stats(c, i.user, messages, secondes, False, langue, entete=tr("quitte", langue),
@@ -1034,6 +1169,9 @@ async def quitter(i, cid: int) -> None:
 
 
 async def montrer_stats(i, cid: int) -> None:
+    if not pret():
+        return await _pas_pret(i)
+    await _acquitter(i)
     langue = await langue_de(i)
     c = await charger(cid)
     if c is None or i.guild is None or c["guild_id"] != i.guild.id:
@@ -1059,15 +1197,14 @@ def _nom(g, uid: int) -> str:
 
 async def montrer_participants(i, cid: int, page: int = 0, recherche: str = "", *, nouveau: bool = False) -> None:
     """La liste exacte des participants (24/10/2026 : « une belle liste déroulante… sans limite »)."""
+    if not pret():
+        return await _pas_pret(i)
+    await _acquitter(i, nouveau=nouveau)
     langue = await langue_de(i)
     c = await charger(cid)
     if c is None or i.guild is None or c["guild_id"] != i.guild.id:
-        return await _repondre(i, _vue_message(tr("introuvable", langue)))
-    vue = await vue_participants(i.guild, c, page, recherche)
-    if nouveau:
-        await i.response.send_message(view=vue, ephemeral=True)
-    else:
-        await _repondre(i, vue)
+        return await _repondre(i, _vue_message(tr("introuvable", langue)), nouveau=nouveau)
+    await _repondre(i, await vue_participants(i.guild, c, page, recherche), nouveau=nouveau)
 
 
 async def vue_participants(g, c: dict, page: int = 0, recherche: str = "") -> LayoutView:
@@ -1140,6 +1277,9 @@ async def vue_participants(g, c: dict, page: int = 0, recherche: str = "") -> La
 
 async def montrer_participant(i, cid: int, uid: int, page: int = 0) -> None:
     """La fiche d'un participant : son rang, depuis quand, ses messages et son vocal, sa chance."""
+    if not pret():
+        return await _pas_pret(i)
+    await _acquitter(i)
     langue = await langue_de(i)
     c = await charger(cid)
     if c is None or i.guild is None or c["guild_id"] != i.guild.id:
@@ -1323,10 +1463,13 @@ def vue_gagnants(c: dict, gagnants: list, *, relance: bool = False, ticket=None)
     return v
 
 
-async def _annoncer(g, c: dict, gagnants: list, *, relance: bool = False) -> bool:
+async def _annoncer(g, c: dict, gagnants: list, *, relance: bool = False) -> int:
+    """L'annonce des gagnants sous la carte (ils sont pingés, eux seuls). Rend son identifiant, 0 en échec."""
     salon = await _salon(g, c["salon_id"])
     if salon is None:
-        return False
+        _log("[CADEAUX][E3] gagnants non annoncés")
+        _log(f"[CADEAUX][E3:DETAIL] cadeau={c['id']} salon introuvable")
+        return 0
     ticket = _ticket(g) if _ticket else None
     envoi = {"view": vue_gagnants(c, gagnants, relance=relance, ticket=ticket),
              "allowed_mentions": discord.AllowedMentions(everyone=False, roles=False,
@@ -1336,62 +1479,153 @@ async def _annoncer(g, c: dict, gagnants: list, *, relance: bool = False) -> boo
                                                       fail_if_not_exists=False)
     try:
         msg = await salon.send(**envoi)
-        await _ecrire("INSERT OR REPLACE INTO cadeaux_messages(message_id, salon_id, effacer_a) VALUES(?,?,?)",
-                      (int(msg.id), int(salon.id), int(_mur() + ANNONCE_S)))
-        return True
     except discord.HTTPException as ex:
         _log("[CADEAUX][E3] gagnants non annoncés")
         _log(f"[CADEAUX][E3:DETAIL] cadeau={c['id']} {type(ex).__name__} {ex}")
-        return False
+        return 0
+    try:   # l'annonce est partie : son effacement dans 24 h n'est qu'un ménage
+        await _ecrire("INSERT OR REPLACE INTO cadeaux_messages(message_id, salon_id, effacer_a) VALUES(?,?,?)",
+                      (int(msg.id), int(salon.id), int(_mur() + ANNONCE_S)))
+    except Exception as ex:
+        _log("[CADEAUX][E12] effacement de l'annonce non prévu")
+        _log(f"[CADEAUX][E12:DETAIL] message={msg.id} {type(ex).__name__} {ex}")
+    return int(msg.id)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Le tirage, un nouveau tirage, l'annulation
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_annonces_faites: dict = {}     # cadeau → l'annonce partie dont la note en base n'est pas encore écrite
+
+
+async def _clore(g, cid: int, statut: str, resultat: dict) -> None:
+    """La clôture d'un cadeau d'une seule transaction : le statut et le résultat ET le ménage des compteurs et
+    des inscrits — tout ou rien (une base occupée, une coupure ne laissent jamais un cadeau fini à moitié).
+    Le verrou « vider » est tenu par l'appelant : aucun passage n'écrit plus de compteurs pour ce cadeau."""
+    async with _get_db() as db:
+        await db.execute("UPDATE cadeaux SET statut=?, resultat=? WHERE id=?",
+                         (statut, json.dumps(resultat), int(cid)))
+        await db.execute("DELETE FROM cadeaux_stats WHERE cadeau_id=?", (int(cid),))
+        await db.execute("DELETE FROM cadeaux_inscrits WHERE cadeau_id=?", (int(cid),))
+        await db.commit()
+    _oublier(g.id, int(cid))
+
+
+async def _publier_resultat(g, cid: int, *, dernier_essai: bool = False):
+    """Après le tirage : la carte passe à « terminé » et les gagnants sont annoncés (pingés) — une seule fois.
+    L'annonce partie est notée dans le résultat (`annonce_id`) ; ratée, la boucle la retente une fois
+    (`dernier_essai`), puis c'est noté aussi (-1 : impossible). Rend le cadeau relu."""
+    c = await charger(cid)
+    if c is None:
+        return None
+    await maj_carte(g, cid)
+    r = dict(c["resultat"] or {})
+    mid = _annonces_faites.get(int(cid)) or await _annoncer(g, c, list(r.get("gagnants") or []))
+    if mid:
+        _annonces_faites[int(cid)] = mid   # partie : jamais renvoyée, même si la note ci-dessous échoue
+    if mid or dernier_essai:
+        r["annonce_id"] = int(mid) if mid else -1
+        await _ecrire("UPDATE cadeaux SET resultat=? WHERE id=?", (json.dumps(r), int(cid)))
+        _annonces_faites.pop(int(cid), None)
+        c["resultat"] = r
+    return c
+
+
 async def terminer(g, cid: int, *, par: int = 0):
     """Le tirage. Puis « ça nettoie toutes les données » : compteurs et inscrits effacés ; le résultat
-    reste (les gagnables gardés 7 jours pour un nouveau tirage)."""
-    async with _verrou(("cadeau", cid)):
+    reste (les gagnables gardés 7 jours pour un nouveau tirage). Le résultat et le ménage s'écrivent d'un
+    seul coup ; l'annonce, ensuite, est notée dans le résultat : interrompue, la boucle la refait."""
+    async with _verrou(("cadeau", int(cid))):
         c = await charger(cid)
         if c is None or c["statut"] != "actif":
             return None
-        await vider()
-        if c.get("inv_min") and _inv_relever is not None:
-            await _inv_relever(g)   # les invités partis ne comptent plus, à l'instant du tirage
-        liste, compteurs, invs = await inscrits(cid), await _stats_en_base(cid), await invitations_tous(c)
-        eligibles = []
-        for uid in liste:
-            m = g.get_member(uid)
-            if m is None or getattr(m, "bot", False) or not peut_participer(c, m):
-                continue
-            messages, secondes = compteurs.get(uid, (0, 0.0))
-            if remplit(c, messages, secondes, invs.get(uid, 0), m):
-                eligibles.append((uid, chance(c, m)))
-        gagnants = tirer(eligibles, c["gagnants"])
-        resultat = {"gagnants": gagnants, "eligibles": [[u, p] for u, p in eligibles], "eligibles_n": len(eligibles),
-                    "inscrits": len(liste), "fini": int(_mur()), "par": int(par)}
-        await _ecrire("UPDATE cadeaux SET statut='fini', resultat=? WHERE id=?", (json.dumps(resultat), int(cid)))
-        await _ecrire("DELETE FROM cadeaux_stats WHERE cadeau_id=?", (int(cid),))
-        await _ecrire("DELETE FROM cadeaux_inscrits WHERE cadeau_id=?", (int(cid),))
-        _oublier(g.id, cid)
-    c = await charger(cid)
-    await maj_carte(g, cid)
-    await _annoncer(g, c, gagnants)
+        async with _verrou("vider"):
+            #  Les compteurs encore en mémoire d'abord — un passage déjà commencé a fini (même verrou) : le
+            #  tirage lit la base complète, et plus rien n'y est écrit pour ce cadeau jusqu'à sa clôture.
+            if await _vider() < 0:
+                _log("[CADEAUX][E13] tirage reporté : compteurs non enregistrés")
+                _log(f"[CADEAUX][E13:DETAIL] cadeau={cid}")
+                return None   # la boucle le retente au passage suivant
+            if c.get("inv_min") and _inv_relever is not None:
+                await _inv_relever(g)   # les invités partis ne comptent plus, à l'instant du tirage
+            liste, compteurs, invs = await inscrits(cid), await _stats_en_base(cid), await invitations_tous(c)
+            eligibles = []
+            for uid in liste:
+                m = g.get_member(uid)
+                if m is None or getattr(m, "bot", False) or not peut_participer(c, m):
+                    continue
+                messages, secondes = compteurs.get(uid, (0, 0.0))
+                if remplit(c, messages, secondes, invs.get(uid, 0), m):
+                    eligibles.append((uid, chance(c, m)))
+            gagnants = tirer(eligibles, c["gagnants"])
+            resultat = {"gagnants": gagnants, "eligibles": [[u, p] for u, p in eligibles],
+                        "eligibles_n": len(eligibles), "inscrits": len(liste), "fini": int(_mur()), "par": int(par),
+                        "annonce_id": 0}
+            await _clore(g, cid, "fini", resultat)
+        fini = dict(c, statut="fini", resultat=resultat)
+        try:
+            c = await _publier_resultat(g, cid) or fini
+        except Exception as ex:   # le tirage est fait et noté : la boucle refera la carte et l'annonce
+            _log("[CADEAUX][E15] annonce du tirage en échec")
+            _log(f"[CADEAUX][E15:DETAIL] cadeau={cid} {type(ex).__name__} {ex}")
+            c = fini
     noms = ", ".join(f"<@{u}>" for u in gagnants) or "personne (aucun ne remplissait les conditions)"
     await _journal(g, "cadeaux.tirage", f"🎁 « {c['lot']} » : {len(liste)} participant(s), {len(eligibles)} "
                    f"rempli(ssai)ent les conditions — gagnant(s) : {noms}.", auteur_id=int(par))
     return c
 
 
-async def relancer(g, cid: int, *, par: int = 0) -> tuple:
+async def _rattraper_annonces(g) -> int:
+    """Un tirage interrompu entre son résultat (enregistré) et son annonce — une mise en ligne qui coupe le
+    minuteur, une base occupée, Discord qui refuse : la carte est remise à jour et les gagnants annoncés, une
+    seule fois (partie, l'annonce est notée ; impossible, c'est noté aussi et le journal le dit). Rend le
+    nombre d'annonces rattrapées."""
+    async with _get_db() as db:
+        async with db.execute(_SQL_A_ANNONCER, (g.id, f"%{ANNONCE_A_FAIRE}%")) as cur:
+            lignes = await cur.fetchall()
+    n = 0
+    for cid, brut in lignes:
+        try:
+            r = json.loads(brut or "{}")
+        except ValueError:
+            continue
+        if not isinstance(r, dict) or r.get("annonce_id") != 0:
+            continue
+        verrou = _verrou(("cadeau", int(cid)))
+        if verrou.locked():
+            continue            # le tirage est en train d'annoncer : on regarde au passage suivant
+        async with verrou:
+            c = await charger(cid)
+            if c is None or c["statut"] != "fini" or (c["resultat"] or {}).get("annonce_id") != 0:
+                continue
+            c = await _publier_resultat(g, int(cid), dernier_essai=True)
+        if c is None:
+            continue
+        r = c["resultat"] or {}
+        noms = _liste_gagnants(r.get("gagnants") or [], 25) or "personne"
+        if int(r.get("annonce_id") or 0) > 0:
+            n += 1
+            await _journal(g, "cadeaux.annonce", f"🎁 « {c['lot']} » : le tirage avait été interrompu — carte et "
+                           f"annonce des gagnants refaites ({noms}).")
+        else:
+            await _journal(g, "cadeaux.annonce", f"🎁 « {c['lot']} » : l'annonce des gagnants est impossible "
+                           f"(salon introuvable ou refus de Discord) — préviens-les toi-même : {noms}.")
+    return n
+
+
+async def relancer(g, cid: int, *, par: int = 0, attendu: int | None = None) -> tuple:
     """Un nouveau tirage (un gagnant absent, un lot en plus) : un gagnant de plus parmi les gagnables qui
-    n'ont pas encore gagné. Rend (gagnant ou None, raison)."""
-    async with _verrou(("cadeau", cid)):
+    n'ont pas encore gagné. `attendu` : le nombre de gagnants que montrait le panneau — s'il a changé (un
+    double clic, quelqu'un d'autre de la direction), rien n'est tiré. Rend (gagnant ou None, raison)."""
+    async with _verrou(("cadeau", int(cid))):
         c = await charger(cid)
         if c is None or c["statut"] != "fini":
             return None, "Ce cadeau n'est pas terminé."
         r = dict(c["resultat"] or {})
+        if attendu is not None and len(r.get("gagnants") or []) != int(attendu):
+            return None, ("Un nouveau tirage vient déjà d'être fait : la liste des gagnants a changé. Regarde-la "
+                          "avant d'en refaire un.")
         deja = set(r.get("gagnants") or [])
         reste = [(int(u), float(p)) for u, p in r.get("eligibles") or [] if int(u) not in deja
                  and g.get_member(int(u)) is not None]
@@ -1408,14 +1642,12 @@ async def relancer(g, cid: int, *, par: int = 0) -> tuple:
 
 
 async def annuler(g, cid: int, *, par: int = 0) -> bool:
-    async with _verrou(("cadeau", cid)):
+    async with _verrou(("cadeau", int(cid))):
         c = await charger(cid)
         if c is None or c["statut"] != "actif":
             return False
-        await _ecrire("UPDATE cadeaux SET statut='annule' WHERE id=?", (int(cid),))
-        await _ecrire("DELETE FROM cadeaux_stats WHERE cadeau_id=?", (int(cid),))
-        await _ecrire("DELETE FROM cadeaux_inscrits WHERE cadeau_id=?", (int(cid),))
-        _oublier(g.id, cid)
+        async with _verrou("vider"):
+            await _clore(g, cid, "annule", c["resultat"] or {})   # d'un seul coup, comme le tirage
     await maj_carte(g, cid)
     await _journal(g, "cadeaux.annule", f"🎁 « {c['lot']} » annulé par <@{par}>.", auteur_id=int(par))
     return True
@@ -1427,8 +1659,11 @@ async def purger(g) -> int:
     part aussi : il ne reste que le lot et ses gagnants."""
     n = 0
     async with _get_db() as db:
-        async with db.execute("SELECT message_id, salon_id FROM cadeaux_messages WHERE effacer_a<=?",
-                              (int(_mur()),)) as cur:
+        #  Les annonces de CE serveur : leur salon est celui d'un de ses cadeaux (la table des annonces ne
+        #  garde pas le serveur). Celles des autres serveurs attendent leur propre passage.
+        async with db.execute("SELECT m.message_id, m.salon_id FROM cadeaux_messages m WHERE m.effacer_a<=? AND "
+                              "EXISTS (SELECT 1 FROM cadeaux c WHERE c.salon_id=m.salon_id AND c.guild_id=?)",
+                              (int(_mur()), g.id)) as cur:
             echus = [(int(a), int(b)) for a, b in await cur.fetchall()]
         await db.execute("DELETE FROM cadeaux_retires WHERE cadeau_id NOT IN "
                          "(SELECT id FROM cadeaux WHERE statut='actif')")
@@ -1436,53 +1671,74 @@ async def purger(g) -> int:
     for mid, sid in echus:
         salon = g.get_channel(sid)
         if salon is None:
-            continue   # un autre serveur (ou un salon disparu : la ligne part ci-dessous)
-        try:
-            await salon.get_partial_message(mid).delete()
-            n += 1
-        except discord.NotFound:
-            pass
-        except discord.HTTPException as ex:
-            _log("[CADEAUX][E10] annonce non effacée")
-            _log(f"[CADEAUX][E10:DETAIL] message={mid} {type(ex).__name__} {ex}")
-            continue
+            try:
+                salon = await g.fetch_channel(sid)
+            except discord.NotFound:
+                salon = None    # le salon a été supprimé : l'annonce est partie avec lui, la ligne part aussi
+            except discord.HTTPException as ex:
+                _log("[CADEAUX][E10] annonce non effacée")
+                _log(f"[CADEAUX][E10:DETAIL] message={mid} salon={sid} {type(ex).__name__} {ex}")
+                continue        # Discord ne répond pas : au prochain passage
+        if salon is not None:
+            try:
+                await salon.get_partial_message(mid).delete()
+                n += 1
+            except discord.NotFound:
+                pass
+            except discord.HTTPException as ex:
+                _log("[CADEAUX][E10] annonce non effacée")
+                _log(f"[CADEAUX][E10:DETAIL] message={mid} {type(ex).__name__} {ex}")
+                continue
         await _ecrire("DELETE FROM cadeaux_messages WHERE message_id=?", (mid,))
     for c in await recents(g.id, 50):
         r = c["resultat"] or {}
         if c["statut"] == "fini" and r.get("eligibles") and _mur() - int(r.get("fini") or 0) > GARDER_RESULTAT_S:
-            r = dict(r, eligibles=[])
-            await _ecrire("UPDATE cadeaux SET resultat=? WHERE id=?", (json.dumps(r), c["id"]))
+            async with _verrou(("cadeau", int(c["id"]))):   # relu sous le verrou : rien d'autre n'est écrasé
+                c = await charger(c["id"])
+                if c is None:
+                    continue
+                r = dict(c["resultat"] or {}, eligibles=[])
+                await _ecrire("UPDATE cadeaux SET resultat=? WHERE id=?", (json.dumps(r), c["id"]))
             n += 1
     return n
 
 
 async def tic(guilds) -> int:
-    """Toutes les 30 s : les compteurs en base ; un cadeau arrivé à sa fin est tiré. Rend le nombre tiré."""
+    """Toutes les 30 s : la liste des cadeaux en cours relue en base ; une annonce interrompue rattrapée ; le
+    vocal remis d'accord avec l'état réel ; les compteurs en base ; un cadeau arrivé à sa fin est tiré. Rend le
+    nombre tiré."""
+    fins: dict = {}
     for g in guilds:
-        if g.id not in _charges:
-            try:
-                await charger_actifs(g)
-            except Exception as ex:
-                _log("[CADEAUX][E4] cadeaux en cours non rechargés")
-                _log(f"[CADEAUX][E4:DETAIL] {g.id} {type(ex).__name__} {ex}")
+        try:
+            fins[g.id] = await charger_actifs(g)
+        except Exception as ex:
+            _log("[CADEAUX][E4] cadeaux en cours non rechargés")
+            _log(f"[CADEAUX][E4:DETAIL] {g.id} {type(ex).__name__} {ex}")
+        try:
+            await _rattraper_annonces(g)
+        except Exception as ex:
+            _log("[CADEAUX][E14] annonce non rattrapée")
+            _log(f"[CADEAUX][E14:DETAIL] {g.id} {type(ex).__name__} {ex}")
+        try:
+            _reprendre_vocaux(g)
+        except Exception as ex:
+            _log("[CADEAUX][E16] vocal non remis d'accord")
+            _log(f"[CADEAUX][E16:DETAIL] {g.id} {type(ex).__name__} {ex}")
     await vider()
     _elaguer(_mono())
     tires = 0
     maintenant = _mur()
     for g in guilds:
-        for cid in list(_actifs.get(g.id) or {}):
-            c = await charger(cid)
-            if c is None or c["statut"] != "actif":
-                _oublier(g.id, cid)
-            elif c["fin"] <= maintenant:
+        for cid, fin in (fins.get(g.id) or {}).items():
+            if fin <= maintenant:
                 try:
                     if await terminer(g, cid) is not None:
                         tires += 1
                 except Exception as ex:
                     _log("[CADEAUX][E5] tirage en échec")
                     _log(f"[CADEAUX][E5:DETAIL] cadeau={cid} {type(ex).__name__} {ex}")
-            elif c["fin"] - maintenant <= MINUTEUR_S and cid not in _minuteurs:
-                _minuteurs[cid] = asyncio.create_task(_minuteur(g, cid, float(c["fin"])))
+            elif fin - maintenant <= MINUTEUR_S and cid not in _minuteurs:
+                _minuteurs[cid] = asyncio.create_task(_minuteur(g, cid, fin))
     return tires
 
 
@@ -1570,6 +1826,8 @@ class Brouillon:
     chance_roles: list = field(default_factory=list)
     multiplicateur: float = 2.0
     mention: str = ""            # "" · "everyone"
+    envoi_en_cours: bool = False  # « Lancer » cliqué, la publication n'est pas finie : un seul envoi
+    lien_publie: str = ""         # publié : le lien de la carte (un clic resté en route ne republie pas)
 
     @property
     def image_nom(self) -> str:
@@ -1614,22 +1872,39 @@ async def lancer(g, auteur, b: Brouillon) -> tuple:
         (g.id, salon.id, auteur.id, b.lot, b.details, b.image_nom, int(b.gagnants), maintenant, fin,
          json.dumps(b.roles), int(b.msg_min), int(b.voc_min), b.logique, json.dumps(b.chance_roles),
          float(b.multiplicateur), mention, json.dumps(b.exclus), int(b.inv_min), int(b.anc_min)))
-    c = await charger(cid)
+    c = dict(b.comme_cadeau(fin), id=cid)    # la carte telle qu'enregistrée, sans relire la base
     envoi = {"view": vue_carte(c, 0),
              "allowed_mentions": discord.AllowedMentions(everyone=bool(mention), users=False, roles=False)}
     if b.image:
         envoi["file"] = b.fichier()
     try:
         msg = await salon.send(**envoi)
-    except discord.HTTPException as ex:
+    except Exception as ex:   # refus de Discord ou réseau coupé : le cadeau n'existe pas, rien ne reste
         _log("[CADEAUX][E6] cadeau non publié")
         _log(f"[CADEAUX][E6:DETAIL] salon={salon.id} {type(ex).__name__} {ex}")
-        await _ecrire("DELETE FROM cadeaux WHERE id=?", (cid,))
+        async with _verrou("vider"):
+            async with _get_db() as db:
+                await db.execute("DELETE FROM cadeaux WHERE id=?", (cid,))
+                await db.execute("DELETE FROM cadeaux_stats WHERE cadeau_id=?", (cid,))
+                await db.execute("DELETE FROM cadeaux_inscrits WHERE cadeau_id=?", (cid,))
+                await db.commit()
+            _oublier(g.id, cid)    # la boucle a pu le lire entre-temps
         return "", "Discord a refusé la publication : réessaie dans un instant."
-    await _ecrire("UPDATE cadeaux SET message_id=? WHERE id=?", (msg.id, cid))
-    _actifs.setdefault(g.id, {})[cid] = float(maintenant)
-    _charges.add(g.id)
-    _demarrer_vocaux(g)
+    #  Publié : le cadeau existe. La suite ne peut plus le faire échouer (sinon un nouveau clic sur « Lancer »
+    #  en publierait un second) ; la liste des cadeaux en cours, elle, est relue en base à chaque passage.
+    for essai in (1, 2):
+        try:
+            await _ecrire("UPDATE cadeaux SET message_id=? WHERE id=?", (msg.id, cid))
+            break
+        except Exception as ex:
+            if essai == 2:
+                _log("[CADEAUX][E17] carte publiée non notée")
+                _log(f"[CADEAUX][E17:DETAIL] cadeau={cid} message={msg.id} {type(ex).__name__} {ex}")
+            else:
+                await asyncio.sleep(1)
+    async with _verrou("vider"):   # comme la relecture de la boucle : jamais retiré par une lecture d'avant
+        _actifs.setdefault(g.id, {})[cid] = float(maintenant)
+        _demarrer_vocaux(g)
     await _journal(g, "cadeaux.lance", f"{auteur.mention} a lancé le cadeau « {b.lot} » dans {salon.mention} "
                    f"(fin <t:{fin}:f>).", auteur_id=auteur.id)
     return msg.jump_url, ""
@@ -1656,8 +1931,10 @@ class FormulaireLot(discord.ui.Modal):
                                        else "Sinon, le bandeau des cadeaux."))
 
     async def on_submit(self, i: discord.Interaction):
-        await i.response.defer()
         p = self.porteur
+        if await p._fige(i):   # publié entre-temps : le formulaire ne change plus rien
+            return
+        await i.response.defer()
         b, erreurs = p.b, []
         b.lot = " ".join(str(self.lot.value or "").split())[:LOT_MAX]
         b.details = str(self.details.value or "").strip()[:DETAILS_MAX]
@@ -1708,6 +1985,8 @@ class FormulaireConditions(discord.ui.Modal):
 
     async def on_submit(self, i: discord.Interaction):
         p, erreurs = self.porteur, []
+        if await p._fige(i):
+            return
         for cle, champ, nom in (("msg_min", self.msg, "messages"), ("voc_min", self.voc, "minutes"),
                                 ("inv_min", self.inv, "invitations"), ("anc_min", self.anc, "jours")):
             try:
@@ -1727,6 +2006,8 @@ class FormulaireChance(discord.ui.Modal):
 
     async def on_submit(self, i: discord.Interaction):
         p, erreurs = self.porteur, []
+        if await p._fige(i):
+            return
         try:
             p.b.multiplicateur = round(max(MULT_MIN, min(MULT_MAX, float(str(self.mult.value).replace(",", ".")))), 2)
         except ValueError:
@@ -1792,53 +2073,96 @@ class VueCadeau(LayoutView):
                  discord.ui.ActionRow(chanceux),
                  discord.ui.Separator(),
                  discord.ui.ActionRow(lancer_b, lot, logique, mention, annuler_b)]
-        if erreurs:
+        if b.envoi_en_cours:
+            #  « Lancer » cliqué : tout s'éteint le temps de publier (un second clic ne publie pas un second cadeau).
+            for x in [qui, pas, chanceux, modifier, logique, mult, lancer_b, lot, mention, annuler_b]:
+                x.disabled = True
+            items.append(discord.ui.TextDisplay("⏳ **Publication du cadeau…**"))
+        elif erreurs:
             items.append(discord.ui.TextDisplay("\n".join(f"⚠️ {e}" for e in erreurs)))
         self.add_item(discord.ui.Container(*items, accent_color=Palette.NEUTRAL))
 
     async def interaction_check(self, i):
         return i.user.id == self.auteur.id
 
+    async def _fige(self, i) -> bool:
+        """Publié, ou en train de l'être : le brouillon ne bouge plus. Un clic resté en route (un double clic)
+        est acquitté sans rien changer — le message dit déjà « Publication… » ou « Cadeau lancé »."""
+        if not (self.b.envoi_en_cours or self.b.lien_publie):
+            return False
+        await i.response.defer()
+        return True
+
     async def _reafficher(self, i, erreurs=()):
         await i.response.edit_message(view=VueCadeau(self.auteur, self.g, self.b, erreurs))
 
     async def _cb_roles(self, i):
+        if await self._fige(i):
+            return
         self.b.roles = [int(v) for v in (i.data or {}).get("values") or []][:ROLES_MAX]
         await self._reafficher(i)
 
     async def _cb_exclus(self, i):
+        if await self._fige(i):
+            return
         self.b.exclus = [int(v) for v in (i.data or {}).get("values") or []][:ROLES_MAX]
         await self._reafficher(i)
 
     async def _cb_chance(self, i):
+        if await self._fige(i):
+            return
         self.b.chance_roles = [int(v) for v in (i.data or {}).get("values") or []][:ROLES_MAX]
         await self._reafficher(i)
 
     async def _cb_conditions(self, i):
+        if await self._fige(i):
+            return
         await i.response.send_modal(FormulaireConditions(self))
 
     async def _cb_logique(self, i):
+        if await self._fige(i):
+            return
         self.b.logique = "ou" if self.b.logique == "et" else "et"
         await self._reafficher(i)
 
     async def _cb_mult(self, i):
+        if await self._fige(i):
+            return
         await i.response.send_modal(FormulaireChance(self))
 
     async def _cb_lot(self, i):
+        if await self._fige(i):
+            return
         await i.response.send_modal(FormulaireLot(self))
 
     async def _cb_mention(self, i):
+        if await self._fige(i):
+            return
         self.b.mention = "" if self.b.mention else "everyone"
         await self._reafficher(i)
 
     async def _cb_annuler(self, i):
+        if await self._fige(i):
+            return
         await i.response.edit_message(view=_vue_message("Cadeau abandonné : rien n'a été publié."), attachments=[])
 
     async def _cb_lancer(self, i):
-        await i.response.defer()
-        lien, erreur = await lancer(self.g, self.auteur, self.b)
+        b = self.b
+        if await self._fige(i):
+            return
+        b.envoi_en_cours = True   # posé avant le premier await : un seul envoi par composeur, même en rafale
+        try:
+            await i.response.edit_message(view=VueCadeau(self.auteur, self.g, b))   # tout éteint : « Publication… »
+            lien, erreur = await lancer(self.g, self.auteur, b)
+        except Exception as ex:
+            _log("[CADEAUX][E11] lancement en échec")
+            _log(f"[CADEAUX][E11:DETAIL] {type(ex).__name__} {ex}")
+            lien, erreur = "", "Le lancement a échoué : réessaie dans un instant."
+        finally:
+            b.envoi_en_cours = False
         if erreur:
-            return await i.edit_original_response(view=VueCadeau(self.auteur, self.g, self.b, [erreur]))
+            return await i.edit_original_response(view=VueCadeau(self.auteur, self.g, b, [erreur]))
+        b.lien_publie = lien
         await i.edit_original_response(view=_vue_message(f"✅ Cadeau lancé : {lien}", Palette.SUCCESS), attachments=[])
 
 
@@ -1854,6 +2178,8 @@ def _brouillon_neuf(g) -> Brouillon:
 
 async def ouvrir_composeur(i) -> None:
     """/giveaway lancer : le panneau de création, tout de suite (les boosters ×2 proposés d'office)."""
+    if not pret():
+        return await _pas_pret(i)
     g = i.guild
     if g is None or not await _autorise(g, i.user):
         return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
@@ -1861,10 +2187,49 @@ async def ouvrir_composeur(i) -> None:
 
 
 async def ouvrir_gestion(i) -> None:
+    if not pret():
+        return await _pas_pret(i)
     g = i.guild
     if g is None or not await _autorise(g, i.user):
         return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
-    await i.response.send_message(view=await vue_gestion(i.user, g), ephemeral=True)
+    await i.response.defer(ephemeral=True, thinking=True)    # la liste relit la base : répondre d'abord
+    await i.followup.send(view=await vue_gestion(i.user, g), ephemeral=True)
+
+
+async def _reecrire(i, fabrique) -> None:
+    """Un panneau pour soi qui relit la base : acquitté d'abord (la limite des 3 s), réécrit ensuite."""
+    await i.response.defer()
+    await i.edit_original_response(view=await fabrique())
+
+
+async def _geste(i, cle, attente: str, action):
+    """Un geste sans retour du panneau (tirer, annuler, nouveau tirage) : un clic à la fois. Le premier clic
+    éteint le panneau (« ⏳ … ») avant le moindre accès à la base ; un double clic est acquitté sans rien
+    refaire. Rend la note à afficher, ou None quand ce clic n'avait rien à faire."""
+    if cle in _en_cours:
+        await i.response.defer()
+        return None
+    _en_cours.add(cle)
+    try:
+        await i.response.edit_message(view=_vue_message(attente))
+        return await action()
+    except Exception as ex:
+        _log("[CADEAUX][E18] geste du panneau en échec")
+        _log(f"[CADEAUX][E18:DETAIL] {cle} {type(ex).__name__} {ex}")
+        return "⚠️ Ça n'a pas marché : réessaie dans un instant."
+    finally:
+        _en_cours.discard(cle)
+
+
+def _liste_gagnants(gagnants: list, n_max: int) -> str:
+    """« <@a>, <@b> +3 » : au plus `n_max` gagnants nommés (un texte Discord tient en 4000 caractères)."""
+    gagnants = list(gagnants or [])
+    noms = ", ".join(f"<@{int(u)}>" for u in gagnants[:n_max])
+    return noms + (f" +{len(gagnants) - n_max}" if len(gagnants) > n_max else "")
+
+
+def _borner(texte: str, n: int) -> str:
+    return texte if len(texte) <= n else texte[:n - 1].rstrip() + "…"
 
 
 async def vue_gestion(auteur, g) -> LayoutView:
@@ -1887,13 +2252,15 @@ async def vue_gestion(auteur, g) -> LayoutView:
         if c["statut"] == "actif":
             ligne = f"**{c['lot']}** — fin <t:{c['fin']}:R> · 🎟️ {await nb_inscrits(c['id'])} inscrit(s)"
         elif c["statut"] == "fini":
+            #  Trois gagnants nommés par ligne (« +N » pour les autres) : huit cadeaux à 20 gagnants dépassaient
+            #  les 4000 caractères d'un message — le panneau ne s'ouvrait plus (400). « Gérer » en nomme 25.
             gagnants = (c["resultat"] or {}).get("gagnants") or []
-            ligne = f"**{c['lot']}** — terminé · " + (", ".join(f"<@{u}>" for u in gagnants) or "pas de gagnant")
+            ligne = f"**{c['lot']}** — terminé · " + (_liste_gagnants(gagnants, 3) or "pas de gagnant")
         else:
             ligne = f"**{c['lot']}** — annulé"
         b = Button(label="Gérer", style=discord.ButtonStyle.secondary, disabled=c["statut"] == "annule")
         b.callback = _gerer(auteur, g, c["id"])
-        items.append(discord.ui.Section(discord.ui.TextDisplay(ligne), accessory=b))
+        items.append(discord.ui.Section(discord.ui.TextDisplay(_borner(ligne, 300)), accessory=b))
     v.add_item(discord.ui.Container(*items, accent_color=discord.Color(COULEUR)))
     return v
 
@@ -1902,7 +2269,7 @@ def _gerer(auteur, g, cid):
     async def _cb(i):
         if i.user.id != auteur.id:
             return await i.response.send_message("Ce panneau n'est pas le tien.", ephemeral=True)
-        await i.response.edit_message(view=await vue_un_cadeau(auteur, g, cid))
+        await _reecrire(i, lambda: vue_un_cadeau(auteur, g, cid))
     return _cb
 
 
@@ -1922,9 +2289,13 @@ async def vue_un_cadeau(auteur, g, cid: int, *, confirmer: str = "", note: str =
         lignes.append(texte_conditions(c))
     elif c["statut"] == "fini":
         r = c["resultat"] or {}
-        lignes.append("🏆 " + (", ".join(f"<@{u}>" for u in r.get("gagnants") or []) or "pas de gagnant"))
+        lignes.append("🏆 " + (_liste_gagnants(r.get("gagnants") or [], 25) or "pas de gagnant"))
         lignes.append(f"-# {r.get('inscrits', 0)} participant(s) · {r.get('eligibles_n', 0)} rempli(ssai)ent les "
                       "conditions")
+        if r.get("annonce_id") == 0:
+            lignes.append("⏳ L'annonce des gagnants n'est pas encore partie : la boucle la refait (30 s).")
+        elif r.get("annonce_id") == -1:
+            lignes.append("⚠️ L'annonce des gagnants n'a pas pu partir (salon ou droits) : préviens-les toi-même.")
     if note:
         lignes.append(note)
     boutons = []
@@ -1940,30 +2311,33 @@ async def vue_un_cadeau(auteur, g, cid: int, *, confirmer: str = "", note: str =
         boutons.append(b)
 
     async def retour(i):
-        await i.response.edit_message(view=await vue_gestion(auteur, g))
+        await _reecrire(i, lambda: vue_gestion(auteur, g))
 
     if confirmer:
         async def oui(i):
-            await i.response.defer()
-            if confirmer == "tirer":
-                fait = await terminer(g, cid, par=auteur.id)
-                note_ = "✅ Tirage fait." if fait is not None else "Ce cadeau n'était plus en cours."
-            else:
-                note_ = "✅ Cadeau annulé." if await annuler(g, cid, par=auteur.id) else "Ce cadeau n'était plus en cours."
-            await i.edit_original_response(view=await vue_un_cadeau(auteur, g, cid, note=note_))
+            async def faire():
+                if confirmer == "tirer":
+                    fait = await terminer(g, cid, par=auteur.id)
+                    return "✅ Tirage fait." if fait is not None else "Ce cadeau n'était plus en cours."
+                return "✅ Cadeau annulé." if await annuler(g, cid, par=auteur.id) else "Ce cadeau n'était plus en cours."
+            note_ = await _geste(i, (confirmer, int(cid), auteur.id),
+                                 "⏳ Tirage au sort…" if confirmer == "tirer" else "⏳ Annulation…", faire)
+            if note_ is not None:
+                await i.edit_original_response(view=await vue_un_cadeau(auteur, g, cid, note=note_))
 
         async def non(i):
-            await i.response.edit_message(view=await vue_un_cadeau(auteur, g, cid))
+            await _reecrire(i, lambda: vue_un_cadeau(auteur, g, cid))
         quoi = "Tirer au sort maintenant" if confirmer == "tirer" else "Annuler ce cadeau (sans gagnant)"
         lignes.append(f"**{quoi} ?** C'est définitif.")
         bouton("Oui", discord.ButtonStyle.danger if confirmer == "annuler" else discord.ButtonStyle.success, oui)
         bouton("Non", discord.ButtonStyle.secondary, non)
     elif c["statut"] == "actif":
         async def tirer_cb(i):
-            await i.response.edit_message(view=await vue_un_cadeau(auteur, g, cid, confirmer="tirer"))
+            await _reecrire(i, lambda: vue_un_cadeau(auteur, g, cid, confirmer="tirer"))
 
         async def annuler_cb(i):
-            await i.response.edit_message(view=await vue_un_cadeau(auteur, g, cid, confirmer="annuler"))
+            await _reecrire(i, lambda: vue_un_cadeau(auteur, g, cid, confirmer="annuler"))
+
         async def participants_cb(i):
             await montrer_participants(i, cid, 0, nouveau=True)
         bouton("Tirer maintenant", discord.ButtonStyle.success, tirer_cb, "🎲")
@@ -1971,11 +2345,17 @@ async def vue_un_cadeau(auteur, g, cid: int, *, confirmer: str = "", note: str =
         bouton("Annuler le cadeau", discord.ButtonStyle.danger, annuler_cb)
         bouton("Retour", discord.ButtonStyle.secondary, retour)
     else:
+        #  Le nombre de gagnants que montre ce panneau : un nouveau tirage n'en ajoute qu'un à CETTE liste. Un
+        #  double clic (ou un autre membre de la direction, entre-temps) ne fait pas deux gagnants.
+        n_gagnants = len((c["resultat"] or {}).get("gagnants") or [])
+
         async def relancer_cb(i):
-            await i.response.defer()
-            nouveau, raison = await relancer(g, cid, par=auteur.id)
-            note_ = f"✅ Nouveau gagnant : <@{nouveau}>." if nouveau else f"⚠️ {raison}"
-            await i.edit_original_response(view=await vue_un_cadeau(auteur, g, cid, note=note_))
+            async def faire():
+                nouveau, raison = await relancer(g, cid, par=auteur.id, attendu=n_gagnants)
+                return f"✅ Nouveau gagnant : <@{nouveau}>." if nouveau else f"⚠️ {raison}"
+            note_ = await _geste(i, ("relance", int(cid), auteur.id), "⏳ Nouveau tirage…", faire)
+            if note_ is not None:
+                await i.edit_original_response(view=await vue_un_cadeau(auteur, g, cid, note=note_))
         if c["statut"] == "fini":
             bouton("Nouveau tirage (+1 gagnant)", discord.ButtonStyle.primary, relancer_cb, "🔁")
         bouton("Retour", discord.ButtonStyle.secondary, retour)

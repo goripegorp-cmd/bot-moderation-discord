@@ -153,17 +153,24 @@ async def poser_panneau(salon, cle: str, membre) -> None:
                      allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=[membre]))
 
 
-async def _dire(i, texte: str) -> None:
+async def _dire(i, texte: str, *, effacer: float | None = None) -> None:
     v = LayoutView(timeout=60)
     v.add_item(discord.ui.Container(discord.ui.TextDisplay(texte), accent_color=Palette.WARNING))
     if i.response.is_done():
         await i.followup.send(view=v, ephemeral=True)
+    elif effacer:
+        await i.response.send_message(view=v, ephemeral=True, delete_after=effacer)
     else:
         await i.response.send_message(view=v, ephemeral=True)
 
 
 async def choisir(i, salon_id: int, cle: str) -> None:
     """Le propriétaire (ou le staff) choisit le but : le salon est renommé, le panneau le montre."""
+    if _proprio is None:
+        #  Le menu est persistant : cliqué pendant le démarrage du bot, avant `setup`, il le dit (pour soi, et
+        #  le mot s'efface) au lieu d'échouer.
+        return await _dire(i, "Le bot démarre, réessaie dans quelques secondes. · The bot is starting, try again "
+                              "in a few seconds.", effacer=30)
     g = i.guild
     salon = g.get_channel(int(salon_id)) if g is not None else None
     if salon is None:

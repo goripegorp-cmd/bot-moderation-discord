@@ -21,7 +21,7 @@ SRC = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="ut
 def env(tmp_path, monkeypatch):
     get_db, cfg, db_set, _conf = base(tmp_path)
     I.setup(get_db=get_db, log=lambda *a: None)
-    for d in (I._photos, I._verrous, I._menages):
+    for d in (I._photos, I._verrous, I._menages, I._perimees):
         d.clear()
     run(I.init_db())
 
@@ -32,7 +32,8 @@ def env(tmp_path, monkeypatch):
         return None
     K.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=autorise, journal=noter, log=lambda *a: None,
             invitations=I.total, invitations_tous=I.totaux, relever=I.reconcilier)
-    for d in (K._actifs, K._tampon, K._dernier_msg, K._comptes, K._vocal, K._maj_prevues):
+    for d in (K._actifs, K._tampon, K._dernier_msg, K._comptes, K._vocal, K._maj_prevues, K._verrous,
+              K._en_cours, K._annonces_faites):
         d.clear()
     K._charges.clear()
     monkeypatch.setattr(K, "MAJ_CARTE_S", 0)
@@ -122,11 +123,11 @@ def test_I4_cadeau_invitations_et_anciennete(env):
     ancien.joined_at = datetime.now(timezone.utc) - timedelta(days=45)
     i = interaction(g, nouveau)
     run(K.participer(i, 1))
-    t = textes(i.response.messages[-1][1]["view"])
+    t = textes(i.suivis[-1][1]["view"])
     assert "Invitations : **0 / 1**" in t and "Ancienneté · Seniority : **10 / 30 j**" in t and run(K.inscrits(1)) == []
     i = interaction(g, ancien)
     run(K.participer(i, 1))
-    assert "Tu participes" in textes(i.response.messages[-1][1]["view"]) and run(K.inscrits(1)) == [11]
+    assert "Tu participes" in textes(i.suivis[-1][1]["view"]) and run(K.inscrits(1)) == [11]
     del g.membres[40]                   # son invité est parti : au tirage, il ne compte plus
     run(K.terminer(g, 1))
     assert run(K.charger(1))["resultat"]["gagnants"] == []

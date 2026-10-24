@@ -27,6 +27,7 @@ MENAGE_S = 3600.0         # les départs manqués (bot coupé) sont rattrapés t
 _get_db = None
 _log = print
 _photos: dict = {}        # guild_id → {code: (auteur_id, utilisations, max_utilisations)}
+_perimees: set = set()    # guild_id dont la photo a pu manquer une arrivée : la suivante ne crédite personne
 _verrous: dict = {}
 _menages: dict = {}       # guild_id → time.monotonic() du dernier ménage
 
@@ -88,6 +89,7 @@ def lien_utilise(avant: dict, apres: dict):
 async def photographier(g) -> int:
     """La photo des liens, point de départ des comparaisons (au démarrage). Rend le nombre de liens, -1 sinon."""
     async with _verrou(g.id):
+        _perimees.discard(g.id)   # la photo qui suit est neuve (une arrivée pendant la lecture la re-marque)
         photo = await _lire_liens(g)
         if photo is None:
             return -1
@@ -97,19 +99,29 @@ async def photographier(g) -> int:
 
 async def sur_arrivee(membre) -> int:
     """Rattache l'arrivée à son lien, si c'est sûr. Rend l'auteur (0 : personne). Une arrivée pendant qu'une
-    autre est en cours n'interroge pas Discord : la rafale n'est rattachée à personne (raid, faux comptes)."""
+    autre est en cours n'interroge pas Discord : la rafale n'est rattachée à personne (raid, faux comptes).
+
+    Ignorée, elle rend aussi la photo « périmée » : la lecture en cours a pu se faire avant elle, et la
+    comparaison suivante verrait son lien bouger — l'arrivée d'après (lien personnalisé, Discovery…) serait
+    créditée au propriétaire de ce lien. La comparaison suivante ne crédite donc personne et repart d'une
+    photo neuve. Même chose quand les liens n'ont pas pu être lus."""
     g = getattr(membre, "guild", None)
-    if g is None or getattr(membre, "bot", False):
-        return 0
+    if g is None or getattr(membre, "bot", False) or _get_db is None:
+        return 0                  # avant le branchement (le démarrage) : rien n'est suivi encore
     verrou = _verrou(g.id)
     if verrou.locked():
+        _perimees.add(g.id)
         return 0
     async with verrou:
+        #  Lu AVANT la lecture des liens : une arrivée ignorée pendant cette lecture re-marque la photo.
+        perimee = g.id in _perimees
+        _perimees.discard(g.id)
         avant, apres = _photos.get(g.id), await _lire_liens(g)
         if apres is None:
+            _perimees.add(g.id)
             return 0
         _photos[g.id] = apres
-        code = lien_utilise(avant, apres) if avant is not None else None
+        code = lien_utilise(avant, apres) if avant is not None and not perimee else None
         auteur = apres[code][0] if code else 0
         if not auteur or auteur == membre.id:
             return 0
@@ -124,7 +136,7 @@ async def sur_arrivee(membre) -> int:
 async def sur_depart(membre) -> None:
     """Un invité qui part ne compte plus — tout de suite."""
     g = getattr(membre, "guild", None)
-    if g is not None:
+    if g is not None and _get_db is not None:   # avant le branchement : le ménage horaire rattrapera
         await _ecrire("UPDATE invitations_arrivees SET parti=? WHERE guild_id=? AND membre_id=? AND parti=0",
                       (int(time.time()), g.id, membre.id))
 

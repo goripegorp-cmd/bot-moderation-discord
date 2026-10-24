@@ -12861,9 +12861,20 @@ async def _cadeaux_effacement(payload):
         _logerr("cadeaux.effacement", ex, guild_id=getattr(payload, "guild_id", 0) or 0)
 
 
+async def _cadeaux_effacement_masse(payload):
+    """`/mod clear` (et toute purge en masse) : Discord n'envoie qu'un seul événement pour tous les messages
+    purgés — chacun, supprimé dans les 10 minutes, ne compte plus non plus."""
+    try:
+        for mid in getattr(payload, "message_ids", None) or ():
+            cadeaux.sur_suppression(mid)
+    except Exception as ex:
+        _logerr("cadeaux.effacement_masse", ex, guild_id=getattr(payload, "guild_id", 0) or 0)
+
+
 bot.add_listener(_cadeaux_message, "on_message")
 bot.add_listener(_cadeaux_vocal, "on_voice_state_update")
 bot.add_listener(_cadeaux_effacement, "on_raw_message_delete")
+bot.add_listener(_cadeaux_effacement_masse, "on_raw_bulk_message_delete")
 bot.add_listener(boosts.sur_maj_serveur, "on_guild_update")
 bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_add")
 bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_remove")
