@@ -2043,7 +2043,22 @@ function pied() {
     h("p", {}, "Session personnelle jusqu'au " + date(d.expire, true) + ". Données lues en direct, mises à jour toutes les minutes ; la page se relance seule toutes les 30 minutes. "
       + (peutAgir() ? "Tu peux agir (fondateur ou direction) : chaque action est confirmée et inscrite au journal ; le fondateur et la direction ne peuvent pas être touchés depuis le site."
         : "Consultation : agir est réservé au fondateur et à la direction.")),
-    h("button", {classe: "bouton p discret", type: "button", onclick: deconnecter}, icone("sortir", 14), "Se déconnecter"));
+    h("div", {classe: "actions"},
+      h("button", {classe: "bouton p discret", type: "button", onclick: fermerPartout}, icone("bouclier", 14), "Fermer toutes mes sessions"),
+      h("button", {classe: "bouton p discret", type: "button", onclick: deconnecter}, icone("sortir", 14), "Se déconnecter")));
+}
+/* Un navigateur oublié ou une session volée : tout couper d'un coup, celle-ci comprise. */
+async function fermerPartout() {
+  const r = await dialogue({titre: "Fermer toutes tes sessions ?", texte: "Chaque navigateur connecté au site avec ton compte est déconnecté, celui-ci compris. Pour revenir : salon 📋logs → « Ouvrir le tableau de bord ».",
+    libelleOk: "Tout fermer", style: "danger"});
+  if (!r) return;
+  try {
+    const rep = await fetch(BASE + "/sortir?partout=1", {method: "POST", credentials: "same-origin", cache: "no-store", headers: {"X-Tableau": "1"}});
+    const j = await rep.json().catch(() => ({}));
+    if (rep.status === 403) { expire(); return; }
+    if (!rep.ok || !j.ok) { toast(j.message || "Les sessions n'ont pas pu être fermées."); return; }
+    expire("Toutes tes sessions sont fermées, celle-ci comprise. Pour revenir : salon 📋logs → « Ouvrir le tableau de bord ».");
+  } catch (e) { toast("Les sessions n'ont pas pu être fermées."); }
 }
 async function deconnecter() {
   try { await fetch(BASE + "/sortir", {method: "POST", credentials: "same-origin", headers: {"X-Tableau": "1"}}); } catch (e) { /* la session expirera d'elle-même */ }
@@ -2056,6 +2071,8 @@ function expire(texte) {
   $("#onglets").hidden = true;
   $("#sous-titre").textContent = "Session terminée";
   $("#point").classList.add("panne");
+  $("#etat-direct").textContent = "Hors ligne";
+  $("#pied").replaceChildren();  // plus de « Session personnelle jusqu'au… » ni de boutons sur une session finie
   $("#bandeaux").replaceChildren(h("div", {classe: "bandeau rouge", role: "alert"}, icone("alerte"),
     h("div", {}, texte || "Ta session est terminée ou ton accès a changé. Demande un nouveau lien dans Discord : salon 📋logs → « Ouvrir le tableau de bord ».")));
 }

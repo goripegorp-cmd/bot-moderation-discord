@@ -14,6 +14,7 @@ qui vise un membre prévient `vigilance` (l'alerte « cumule des évènements gr
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from datetime import datetime, timezone
@@ -103,7 +104,12 @@ async def noter(guild_id: int, categorie: str, type_: str, texte: str, *, membre
     if _get_db is None or type_ in INUTILES or not texte:
         return False
     maintenant = time.time()
-    cle = (guild_id, type_, int(membre_id or 0), texte[:80])
+    texte, detail = str(texte)[:300], str(detail or "")[:600]
+    #  Un doublon = la même phrase ET le même détail (condensés). 24/10/2026 : la clé ignorait le
+    #  détail ; deux suppressions du même auteur dans le même salon ont la même phrase mais pas le
+    #  même contenu — la 2ᵉ, la 3ᵉ… disparaissaient en moins de 5 s, avec leur contenu (des preuves).
+    condense = hashlib.blake2b(f"{texte}\x00{detail}".encode("utf-8", "replace"), digest_size=8).digest()
+    cle = (guild_id, type_, int(membre_id or 0), condense)
     if maintenant - _derniers.get(cle, 0) < DOUBLON_SECONDES:
         return False
     _derniers[cle] = maintenant
@@ -117,8 +123,7 @@ async def noter(guild_id: int, categorie: str, type_: str, texte: str, *, membre
                 "INSERT INTO registre (guild_id, quand, categorie, type, membre_id, auteur_id, salon_id,"
                 " texte, detail, gravite) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (int(guild_id), int(maintenant), str(categorie or "Autre")[:40], str(type_)[:40],
-                 int(membre_id or 0), int(auteur_id or 0), int(salon_id or 0), str(texte)[:300],
-                 str(detail or "")[:600], gravite))
+                 int(membre_id or 0), int(auteur_id or 0), int(salon_id or 0), texte, detail, gravite))
             await db.commit()
         _ecritures += 1
         if _ecritures % PURGE_TOUTES == 0:
@@ -172,22 +177,27 @@ async def graves(guild_id: int, membre_id: int, depuis: int) -> list[dict]:
                         " AND gravite>=1 AND quand>=? ORDER BY quand, id", (int(guild_id), int(membre_id), int(depuis)))
 
 
-async def par_jour(guild_id: int, jours: int = 30, decalage: int = 0, maintenant: float | None = None) -> dict:
-    """{« AAAA-MM-JJ » : {catégorie : nombre}} sur `jours` jours ; `decalage` : secondes ajoutées
-    à l'heure UTC pour couper les journées à minuit, heure de Paris."""
+async def par_jour(guild_id: int, jours: int = 30, fuseau=timezone.utc, maintenant: float | None = None) -> dict:
+    """{« AAAA-MM-JJ » : {catégorie : nombre}} sur `jours` jours, journées coupées à minuit dans
+    `fuseau` (l'heure de Paris pour le site), changements d'heure compris.
+
+    24/10/2026 : on ajoutait à tout l'historique le décalage d'AUJOURD'HUI — au passage à l'heure
+    d'hiver (25/10), chaque jour d'avant perdait sa première heure au profit de la veille. La base
+    compte par heure UTC ; chaque heure prend la date de son propre décalage (l'heure de Paris
+    change à l'heure pleine : une heure UTC tombe toujours dans un seul jour)."""
     debut = int((maintenant or time.time()) - jours * 86400)
     try:
         async with _get_db() as db:
-            async with db.execute("SELECT (quand + ?) / 86400 AS j, categorie, COUNT(*) FROM registre"
-                                  " WHERE guild_id=? AND quand>=? GROUP BY j, categorie",
-                                  (int(decalage), int(guild_id), debut)) as cur:
+            async with db.execute("SELECT quand / 3600 AS h, categorie, COUNT(*) FROM registre"
+                                  " WHERE guild_id=? AND quand>=? GROUP BY h, categorie",
+                                  (int(guild_id), debut)) as cur:
                 rows = await cur.fetchall()
     except Exception as ex:
         _log("[REGISTRE][E4] comptage impossible")
         _log(f"[REGISTRE][E4:DETAIL] {type(ex).__name__} {ex}")
         return {}
     out: dict = {}
-    for j, cat, n in rows:
-        cle = datetime.fromtimestamp(int(j) * 86400, timezone.utc).strftime("%Y-%m-%d")
-        out.setdefault(cle, {})[cat or "Autre"] = int(n)
+    for h, cat, n in rows:
+        jour = out.setdefault(datetime.fromtimestamp(int(h) * 3600, fuseau).strftime("%Y-%m-%d"), {})
+        jour[cat or "Autre"] = jour.get(cat or "Autre", 0) + int(n)
     return dict(sorted(out.items()))

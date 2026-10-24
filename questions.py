@@ -185,18 +185,36 @@ async def sur_message(msg, c, maintenant: float | None = None) -> str | None:
 
 
 async def marquer(guild_id: int, qid: int, statut: str, par: int, maintenant: float | None = None) -> bool:
+    """Le geste du site : « traitée », « pas une question » — ou « rouvrir ».
+
+    24/10/2026 : rouvrir gardait l'ancienne réponse (lien, « par le staff ») et inscrivait celui qui
+    rouvrait comme répondant ; la question sortait de la liste suivie sans y revenir — la réponse
+    suivante du staff ne la fermait plus. Rouverte, elle repart de zéro, et son salon est relu au
+    prochain message (dans la fenêtre de détection, elle y est de nouveau suivie)."""
     if statut not in STATUTS:
         return False
     t = int(maintenant or time.time())
+    salon = None
     async with _get_db() as db:
-        cur = await db.execute("UPDATE questions SET statut=?, repondu_par=?, repondu_le=? WHERE id=? AND guild_id=?",
-                               (statut, int(par), t if statut != "ouverte" else 0, int(qid), int(guild_id)))
+        if statut == "ouverte":
+            cur = await db.execute("UPDATE questions SET statut='ouverte', repondu_par=0, repondu_le=0, par_staff=0,"
+                                   " lien='' WHERE id=? AND guild_id=?", (int(qid), int(guild_id)))
+            n = cur.rowcount
+            async with db.execute("SELECT salon_id FROM questions WHERE id=? AND guild_id=?",
+                                  (int(qid), int(guild_id))) as lu:
+                salon = await lu.fetchone()
+        else:
+            cur = await db.execute("UPDATE questions SET statut=?, repondu_par=?, repondu_le=? WHERE id=? AND guild_id=?",
+                                   (statut, int(par), t, int(qid), int(guild_id)))
+            n = cur.rowcount
         await db.commit()
     for liste in _ouvertes.values():
         for q in list(liste):
             if q["id"] == int(qid):
                 liste.remove(q)
-    return bool(cur.rowcount)
+    if salon is not None and salon[0]:
+        _charges.discard(int(salon[0]))  # relu au prochain message (la liste est remplacée, pas vidée ici)
+    return bool(n)
 
 
 async def _lignes(sql: str, args: tuple) -> list[dict]:

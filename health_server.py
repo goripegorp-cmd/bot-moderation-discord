@@ -66,8 +66,10 @@ async def _health_handler(request):
             except Exception:
                 pass
         return web.json_response(data)
-    except Exception as ex:
-        return web.json_response({"status": "error", "error": str(ex)}, status=500)
+    except Exception as ex:  # 24/10/2026 : adresse PUBLIQUE — le texte de l'exception va au journal, jamais dehors
+        print("[HEALTH][E2] /health en échec")
+        print(f"[HEALTH][E2:DETAIL] {type(ex).__name__} {ex}")
+        return web.json_response({"status": "error", "error": "erreur interne"}, status=500)
 
 
 #  Les travaux uniques passés (oui/non), posés par le bot : vérifier un déploiement sans Railway.
@@ -112,8 +114,10 @@ async def _stats_handler(request):
             print("[HEALTH][E1] état WebSub illisible")
             print(f"[HEALTH][E1:DETAIL] {type(ex).__name__} {ex}")
         return web.json_response(data)
-    except Exception as ex:
-        return web.json_response({"status": "error", "error": str(ex)}, status=500)
+    except Exception as ex:  # 24/10/2026 : adresse PUBLIQUE — le texte de l'exception va au journal, jamais dehors
+        print("[HEALTH][E3] /stats en échec")
+        print(f"[HEALTH][E3:DETAIL] {type(ex).__name__} {ex}")
+        return web.json_response({"status": "error", "error": "erreur interne"}, status=500)
 
 
 async def _transcript_handler(request):

@@ -6009,7 +6009,10 @@ TETE_IDS = frozenset({781205382923288593, 827633340797681714})
 
 
 def _a_la_tete(g, membre, c=None) -> bool:
-    return membre is not None and g is not None and (membre.id in TETE_IDS or membre.id == g.owner_id)
+    """« C'est ceux-là et uniquement eux » : les deux comptes de TETE_IDS, par identifiant. 24/10/2026 :
+    le propriétaire du serveur en faisait aussi partie — celui d'un autre serveur où se trouve le bot
+    entrait sur le site et y lisait les erreurs du bot entier."""
+    return membre is not None and g is not None and membre.id in TETE_IDS
 
 
 def _direction_ou_plus(g, membre, c) -> bool:
@@ -6380,8 +6383,11 @@ async def _action_question(g, auteur, d):
         return False, "Statut inconnu."
     if not await questions.marquer(g.id, int(d.get("question", 0) or 0), statut, auteur.id):
         return False, "Question introuvable."
-    await _au_journal(g, "Questions", "question." + statut,
-                      f"Question {questions.STATUTS[statut].lower()} par {auteur.display_name}", auteur_id=auteur.id)
+    #  24/10/2026 : le libellé du statut donnait « Question sans réponse par X » pour une réouverture
+    #  et « Question pas une question par X ».
+    geste = {"traitee": "marquée traitée", "ignoree": "retirée (pas une question)", "ouverte": "rouverte"}[statut]
+    await _au_journal(g, "Questions", "question." + statut, f"Question {geste} par {auteur.display_name}",
+                      auteur_id=auteur.id)
     return True, {"traitee": "Question marquée traitée.", "ignoree": "Retirée : ce n'était pas une question.",
                   "ouverte": "Question rouverte."}[statut]
 
@@ -6700,7 +6706,9 @@ class BoutonApprouverBot(discord.ui.DynamicItem[Button], template=r"alerte:botok
 
 async def _alerte_securite_site(g, membre, raison: str, suspendu: bool = True):
     """Trop d'actions graves depuis le site : le signe d'un compte volé. Le fondateur est prévenu —
-    sauf de ses propres actions. La tête n'est jamais suspendue, seulement signalée."""
+    sauf de ses propres actions. La tête n'est jamais suspendue, seulement signalée.
+    24/10/2026 : la mention partait en `content=` à côté de la carte V2 — refusé (400) par Discord,
+    l'alerte ne partait jamais. Elle est DANS la carte ; seul le fondateur est pingé."""
     salon = await _salon_alertes_site(g)
     if salon is None or membre.id == g.owner_id or owner_ids_module.is_super_owner(membre.id):
         return
@@ -6708,12 +6716,11 @@ async def _alerte_securite_site(g, membre, raison: str, suspendu: bool = True):
     titre = "🔒 Accès au site suspendu une heure" if suspendu else "⚠️ Beaucoup d'actions graves depuis le site"
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"### {titre}\n{membre.mention} — {raison}.\n"
-                               "Si ce n'est pas lui, son compte est peut-être volé : vérifie avec lui avant tout."),
+        discord.ui.TextDisplay(f"### {titre}\n{membre.mention} — {raison}.\n<@{proprio}>, si ce n'est pas "
+                               "lui, son compte est peut-être volé : vérifie avec lui avant tout."),
         discord.ui.ActionRow(BoutonGere(0)), accent_color=Palette.DANGER))
-    await salon.send(content=f"<@{proprio}>", view=v,
-                     allowed_mentions=discord.AllowedMentions(everyone=False, roles=False,
-                                                              users=[discord.Object(id=proprio)]))
+    await salon.send(view=v, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False,
+                                                                     users=[discord.Object(id=proprio)]))
 
 
 class BoutonGere(discord.ui.DynamicItem[Button], template=r"alerte:gere:(?P<m>\d+)"):

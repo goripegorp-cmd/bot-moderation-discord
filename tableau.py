@@ -7,16 +7,20 @@ l'infrastructure du site, qu'il soit impeccable : quelqu'un qui n'a pas les acc�
 tout ».
 
 L'ACCÈS
+  · Les deux comptes « à la tête » (TETE_IDS : le fondateur et la direction), par identifiant, et
+    personne d'autre — 24/10/2026 : le propriétaire d'un autre serveur où se trouve le bot y entrait.
   · Le bouton du salon « 📋logs » donne un lien PERSONNEL, signé, valable 24 h et À USAGE UNIQUE.
     Ouvert une fois, il devient une session (cookie HttpOnly, Secure, SameSite) et disparaît de la
     barre d'adresse : copié, photographié ou retrouvé dans l'historique, il ne sert plus à rien.
-  · Chaque requête revérifie : session valide, personne toujours sur le serveur, toujours staff ou
-    au-dessus, pas suspendue. Perdre le rôle coupe l'accès à la requête suivante.
-  · Agir : le fondateur et la direction seulement (sauf gestes sans risque ouverts au staff :
-    question traitée, alerte gérée). Trop d'actions graves en peu de temps — le signe d'un compte
-    volé — suspend l'accès au site une heure et prévient dans « 📋logs ».
+  · Chaque requête revérifie : session valide (relue en base au moins chaque minute : fermée
+    ailleurs, elle est coupée), personne toujours sur le serveur et à la tête, pas suspendue.
+    « Fermer toutes mes sessions » (pied de page) déconnecte tous ses navigateurs d'un coup.
+  · Agir : les mêmes, revérifiés à chaque action. Trop d'actions graves en peu de temps — le signe
+    d'un compte volé — est signalé au fondateur dans « 📋logs » (la tête n'est jamais suspendue ;
+    tout autre compte le serait une heure).
   · Défenses : CSP à nonce (aucun script injecté ne s'exécute), en-têtes stricts, origine vérifiée
-    sur les écritures, cadence limitée par session et par adresse, rien en cache, rien d'indexé.
+    sur les écritures (déconnexion comprise), cadence limitée par session et par adresse (faux liens
+    et faux cookies : un cookie mal formé ne touche jamais la base), rien en cache, rien d'indexé.
 
 LES DONNÉES
   Lues en direct dans la base du bot. Chaque réponse porte une empreinte (ETag) : la page qui se
@@ -49,6 +53,7 @@ import annonces
 import casier
 import clan
 import entraide
+import owner_ids
 import questions
 import recrutements
 import registre
@@ -62,7 +67,9 @@ DUREE = 24 * 3600
 ESPACE = "/tableau/espace"
 COOKIE = "__Host-tableau"
 LIMITE_REQUETES = 240          # par minute et par session
-LIMITE_ESSAIS = 30             # liens invalides par adresse et par 10 minutes
+LIMITE_ESSAIS = 30             # liens ou cookies invalides par adresse et par 10 minutes
+RELIRE = 60                    # s : une session gardée en mémoire est relue en base au-delà
+FORMAT_SESSION = re.compile(r"[A-Za-z0-9_-]{43}")  # ce que donne secrets.token_urlsafe(32)
 LIMITES_GRAVES = {"exclusion": 5, "roles": 25, "casier": 10, "rappels": 50}  # par 10 minutes et par personne
 BLOCAGE = 3600
 PAGE_BRUTE = (Path(__file__).resolve().parent / "tableau_page.html").read_text(encoding="utf-8")
@@ -169,8 +176,10 @@ async def init_db():
 
 
 def a_la_tete(g, user_id: int) -> bool:
-    """Le fondateur et la direction, par identifiant (et le propriétaire du serveur)."""
-    return int(user_id) in _tete or int(user_id) == int(getattr(g, "owner_id", 0) or 0)
+    """Le fondateur et la direction, par identifiant — eux seuls. 24/10/2026 : le propriétaire du
+    serveur en faisait aussi partie ; celui d'un autre serveur où se trouve le bot n'est pas à la
+    tête. `g` reste dans la signature pour les appelants."""
+    return int(user_id) in _tete
 
 
 # ─── Le lien personnel, à usage unique ──────────────────────────────────────
@@ -208,8 +217,7 @@ def lire_jeton(j: str, maintenant: float | None = None) -> dict | None:
 async def suspendu(guild_id: int, user_id: int, maintenant: float | None = None) -> int:
     """L'heure de fin de suspension, ou 0. Jamais pour ceux qui sont à la tête."""
     t = maintenant or time.time()
-    g = _bot.get_guild(guild_id) if _bot is not None else None
-    if int(user_id) in _tete or (g is not None and a_la_tete(g, user_id)):
+    if a_la_tete(None, user_id):
         return 0
     jusqu = _blocages.get((guild_id, user_id))
     if jusqu is None and _get_db is not None:
@@ -250,35 +258,60 @@ async def _ouvrir_session(guild_id: int, user_id: int, expire: int, maintenant: 
         await db.execute("INSERT INTO tableau_sessions (empreinte, guild_id, user_id, cree_le, expire_le)"
                          " VALUES (?,?,?,?,?)", (emp, guild_id, user_id, int(maintenant or time.time()), int(expire)))
         await db.commit()
-    _sessions[emp] = (guild_id, user_id, int(expire))
+    _sessions[emp] = (guild_id, user_id, int(expire), float(maintenant or time.time()))
     return sid
 
 
 async def _session(request, maintenant: float | None = None):
+    """(empreinte, (serveur, membre, fin)) — ou None.
+
+    24/10/2026 : n'importe quel cookie occupait une connexion de la base, sans limite par adresse,
+    et une session effacée de la base restait ouverte jusqu'au redémarrage (cache en mémoire). Un
+    cookie mal formé ne touche plus la base ; un cookie inconnu compte comme un faux lien (même
+    limite par adresse, et au-delà plus aucune lecture) ; une session en mémoire est relue en base
+    au-delà de RELIRE secondes."""
+    t = maintenant or time.time()
     sid = request.cookies.get(COOKIE, "") if hasattr(request, "cookies") else ""
-    if not sid or len(sid) > 100:
+    if not sid:
+        return None
+    if not FORMAT_SESSION.fullmatch(sid):
+        _trop_essais(request, compter=True, maintenant=t)
         return None
     emp = _empreinte(sid)
     s = _sessions.get(emp)
-    if s is None:
+    if s is None or t - s[3] > RELIRE:
+        if s is None and _trop_essais(request, maintenant=t):
+            return None
         async with _get_db() as db:
             async with db.execute("SELECT guild_id, user_id, expire_le FROM tableau_sessions WHERE empreinte=?",
                                   (emp,)) as cur:
                 r = await cur.fetchone()
         if r is None:
+            if s is None:
+                _trop_essais(request, compter=True, maintenant=t)
+            _sessions.pop(emp, None)
             return None
-        s = _sessions[emp] = (int(r[0]), int(r[1]), int(r[2]))
-    if s[2] < (maintenant or time.time()):
+        s = _sessions[emp] = (int(r[0]), int(r[1]), int(r[2]), t)
+    if s[2] < t:
         return None
-    return emp, s
+    return emp, s[:3]
 
 
-async def fermer_sessions(guild_id: int, user_id: int) -> None:
+async def fermer_sessions(guild_id: int | None, user_id: int) -> int:
+    """Ferme les sessions d'une personne sur ce serveur — sur tous si `guild_id` est None —, en base
+    ET en mémoire : coupées à la requête suivante. Rend leur nombre."""
     async with _get_db() as db:
-        await db.execute("DELETE FROM tableau_sessions WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+        if guild_id is None:
+            cur = await db.execute("DELETE FROM tableau_sessions WHERE user_id=?", (int(user_id),))
+        else:
+            cur = await db.execute("DELETE FROM tableau_sessions WHERE guild_id=? AND user_id=?",
+                                   (int(guild_id), int(user_id)))
+        n = max(cur.rowcount or 0, 0)
         await db.commit()
-    for emp in [e for e, s in _sessions.items() if s[0] == guild_id and s[1] == user_id]:
+    for emp in [e for e, s in _sessions.items()
+                if s[1] == int(user_id) and (guild_id is None or s[0] == int(guild_id))]:
         _sessions.pop(emp, None)
+    return n
 
 
 async def suspendre(g, membre, raison: str, maintenant: float | None = None) -> None:
@@ -335,6 +368,8 @@ async def _verifier(request, maintenant: float | None = None):
     t = maintenant or time.time()
     ses = await _session(request, t)
     if ses is None:
+        if _trop_essais(request, maintenant=t):
+            raise _Refus(429, "Trop d'essais.")
         raise _Refus(403, "Session expirée.")
     emp, (gid, uid, expire) = ses
     g = _bot.get_guild(gid) if _bot else None
@@ -387,11 +422,6 @@ def a_part(g, c) -> set:
     """« Direction et fondateur : mis à part, pas pris pour les stats. »"""
     out = {m.id for m in getattr(g, "members", []) or [] if _mis_a_part is not None and _mis_a_part(g, m, c)}
     return out | ({g.owner_id} if getattr(g, "owner_id", 0) else set())
-
-
-def _paris_decalage(t: float | None = None) -> int:
-    d = datetime.fromtimestamp(t or time.time(), PARIS).utcoffset()
-    return int(d.total_seconds()) if d else 0
 
 
 def _quand(t) -> str:
@@ -652,7 +682,9 @@ async def _journal(g, qui, membre_id: int | None = None, limite: int = 400) -> d
     """« Il n'y aura plus de logs sur Discord : tout sur le site, traduit par personne. »"""
     out = {"evenements": [_evenement(g, r, qui) for r in await registre.lire(g.id, limite, membre_id)]}
     if membre_id is None:
-        out["par_jour"] = await registre.par_jour(g.id, 30, _paris_decalage())
+        #  Le fuseau, pas le décalage du jour : au changement d'heure (25/10/2026), le décalage
+        #  d'aujourd'hui appliqué à 30 jours d'historique faisait glisser une heure par jour sur la veille.
+        out["par_jour"] = await registre.par_jour(g.id, 30, PARIS)
     return out
 
 
@@ -987,10 +1019,14 @@ async def exporter(g, quoi: str, auteur, jours: int = 30, membre: int = 0, categ
                    q["message"]] for q in d["liste"]]
         brut = [dict(zip(entetes, lg)) for lg in lignes]
     elif quoi == "erreurs" and _direction and auteur is not None and _direction(g, auteur, c):
+        #  Les erreurs de CE serveur. Celles du bot entier (sans serveur : guild_id 0) : le fondateur
+        #  seul — 24/10/2026 : elles partaient vers quiconque ouvrait le site (tous serveurs confondus).
+        globales = owner_ids.is_super_owner(getattr(auteur, "id", 0))
         async with _get_db() as db:
             rows = await recrutements._lignes(
                 db, "SELECT occurred_at, source, error_type, message, traceback FROM error_log"
-                    " WHERE guild_id IN (?, 0) ORDER BY id DESC LIMIT 2000", (g.id,))
+                    + (" WHERE guild_id IN (?, 0)" if globales else " WHERE guild_id=?")
+                    + " ORDER BY id DESC LIMIT 2000", (g.id,))
         entetes = ["Date (UTC)", "Source", "Type", "Message", "Trace"]
         lignes = [[str(a), s, t, str(msg or "")[:1000], str(tb or "")[:4000]] for a, s, t, msg, tb in rows]
         brut = [dict(zip(entetes, lg)) for lg in lignes]
@@ -1247,14 +1283,32 @@ async def action(request):
 
 
 async def sortir(request):
-    """Se déconnecter : la session de ce navigateur est effacée."""
+    """Se déconnecter : la session de ce navigateur est effacée — avec `?partout=1`, TOUTES les
+    sessions de la personne (« Fermer toutes mes sessions » : une session volée est coupée).
+
+    Une écriture comme les autres : elle doit venir de la page elle-même, sinon rien n'est touché,
+    pas même le cookie (24/10/2026 : un autre site pouvait déconnecter de force)."""
     from aiohttp import web
+    if not _origine_ok(request):
+        return _json({"ok": False, "message": "Requête refusée."}, 400)
     ses = await _session(request)
-    if ses is not None and _origine_ok(request):
-        async with _get_db() as db:
-            await db.execute("DELETE FROM tableau_sessions WHERE empreinte=?", (ses[0],))
-            await db.commit()
-        _sessions.pop(ses[0], None)
-    r = web.Response(status=204, headers=ENTETES)
+    if getattr(request, "query", {}).get("partout") == "1":
+        if ses is None:
+            return _json({"ok": False, "message": "Session expirée."}, 403)
+        _emp, (gid, uid, _fin) = ses
+        n = await fermer_sessions(None, uid)
+        g = _bot.get_guild(gid) if _bot is not None else None
+        m = g.get_member(uid) if g is not None else None
+        await registre.noter(gid, "Accès", "site.sessions_fermees",
+                             f"Toutes les sessions du site fermées par {getattr(m, 'display_name', None) or uid}",
+                             auteur_id=uid, detail=f"{n} session(s) fermée(s)")
+        r = _json({"ok": True, "message": "Toutes tes sessions sont fermées."})
+    else:
+        if ses is not None:
+            async with _get_db() as db:
+                await db.execute("DELETE FROM tableau_sessions WHERE empreinte=?", (ses[0],))
+                await db.commit()
+            _sessions.pop(ses[0], None)
+        r = web.Response(status=204, headers=ENTETES)
     r.del_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="Lax")  # __Host- exige Secure
     return r
