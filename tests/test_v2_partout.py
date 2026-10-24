@@ -74,7 +74,7 @@ def test_W3_plus_un_seul_envoi_d_embed_dans_le_bot():
     for nom in ("ClearAllConfirmView", "_CasierManageView"):
         classe = next(n for n in ARBRE.body if isinstance(n, ast.ClassDef) and n.name == nom)
         assert [ast.unparse(b) for b in classe.bases] == ["LayoutView"], nom
-    assert "for x in list(AccueilLangueView().children):" in SRC, "le vrai bouton « Ma langue » sur l'accueil"
+    assert "_welcome_quick_buttons" not in SRC, "24/10 : l'accueil est une ligne de texte, sans bouton (test_accueil_court)"
     ul = (RACINE / "unified_logger.py").read_text(encoding="utf-8")
     assert "send(embed=" not in ul and '"embed": embed' not in ul
     assert "📋 **sur le site** (journal)" in SRC, "/logs status ne dit plus « non configuré » en mode site"

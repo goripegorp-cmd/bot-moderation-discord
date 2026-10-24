@@ -56,13 +56,12 @@ def _fonction(nom: str):
 #  1. Le raccord : le bouton émis a bien un capteur enregistré au boot
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_la_carte_daccueil_pose_toujours_le_bouton_langue():
-    """Si ce bouton disparaît, le membre international n'a plus rien. Il DOIT
-    rester — c'est son capteur qui doit exister, pas lui qui doit partir."""
-    corps = ast.unparse(_fonction("_welcome_quick_buttons"))
-    #  24/10/2026 : le VRAI bouton de AccueilLangueView (son custom_id `onb_lang` est vérifié plus bas) —
-    #  un bouton vide au même identifiant, gardé par le message, ne répondait pas avant un redémarrage.
-    assert "for x in list(AccueilLangueView().children):" in corps
+def test_la_langue_reste_choisissable_ailleurs_que_sous_l_accueil():
+    """24/10/2026, le fondateur : l'accueil devient une ligne de texte, « c'est tout » — plus de bouton dessous.
+    Le membre international choisit sa langue avec les boutons 🇫🇷 / 🇬🇧 des guides (zones), et les cartes
+    d'accueil déjà postées gardent un bouton vivant (la vue reste enregistrée au boot, tests suivants)."""
+    assert "_welcome_quick_buttons" not in SRC
+    assert "boutons_langue=lambda: [LangSelectButton(" in SRC
 
 
 def test_la_vue_du_bouton_langue_existe_et_porte_le_bon_custom_id():

@@ -842,6 +842,23 @@ CATALOG = {
         "it": "Benvenuto {user}! Ora siamo {count} membri su {guild}. 🎉",
         "pt": "Bem-vindo {user}! Agora somos {count} membros em {guild}. 🎉",
     },
+    # 24/10/2026 : l'accueil = UNE ligne de texte (le fondateur). {user} = mention, {count} = membres.
+    "welcome.short": {
+        "fr": "👋 Bienvenue {user} sur le serveur ! Nous sommes maintenant **{count}** membres.",
+        "en": "👋 Welcome {user} to the server! We are now **{count}** members.",
+        "es": "👋 ¡Bienvenido {user} al servidor! Ahora somos **{count}** miembros.",
+        "de": "👋 Willkommen {user} auf dem Server! Wir sind jetzt **{count}** Mitglieder.",
+        "it": "👋 Benvenuto {user} nel server! Ora siamo **{count}** membri.",
+        "pt": "👋 Bem-vindo {user} ao servidor! Agora somos **{count}** membros.",
+    },
+    "welcome.wave": {
+        "fr": "👋 Bienvenue aux **{n}** nouveaux arrivés ! Nous sommes maintenant **{count}** membres.",
+        "en": "👋 Welcome to the **{n}** newcomers! We are now **{count}** members.",
+        "es": "👋 ¡Bienvenidos a los **{n}** recién llegados! Ahora somos **{count}** miembros.",
+        "de": "👋 Willkommen an die **{n}** Neuen! Wir sind jetzt **{count}** Mitglieder.",
+        "it": "👋 Benvenuti ai **{n}** nuovi arrivati! Ora siamo **{count}** membri.",
+        "pt": "👋 Bem-vindos aos **{n}** recém-chegados! Agora somos **{count}** membros.",
+    },
     # Renvoi vers le salon d'entraide (ajouté sous l'accueil si configuré).
     # {channel} = mention du salon (<#id>).
     "welcome.entraide_hint": {

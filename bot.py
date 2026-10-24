@@ -1758,15 +1758,8 @@ async def cfg(gid):
         # Phase 28.3 : Welcome / Goodbye
         'welcome_enabled': False,
         'welcome_channel': 0,
-        'welcome_message': "👋 Bienvenue {user} sur **{guild}** ! Nous sommes maintenant **{count}** membres 🎉",
-        # TASK C.4 : accueil bilingue FR/EN (ligne EN ajoutée sous la FR, ou EN d'abord
-        # si la locale Discord du membre est anglophone). welcome_bilingual=False désactive.
-        'welcome_bilingual': True,
-        'welcome_message_en': "👋 Welcome {user} to **{guild}**! We're now **{count}** members 🎉",
-        # owner 2026-06-30 : accueil MINIMAL. welcome_compact=1 → une seule ligne dans un petit
-        # encadrement (pas d'avatar, pas de 2e langue ni d'astuce entraide). welcome_lifetime_minutes
-        # → la carte RESTE visible ce temps-là puis est supprimée par la purge périodique (anti-clutter).
-        'welcome_compact': True,
+        # 24/10/2026 (le fondateur) : l'accueil est UNE ligne de texte — mention, bienvenue, nombre de membres
+        # (`welcome.short`). Elle reste `welcome_lifetime_minutes` puis la purge périodique la retire.
         'welcome_lifetime_minutes': 60,
         # owner 2026-06-30 : INTERNATIONAL — ajoute auto une réaction 🌐 sur les annonces (ping
         # @everyone ou salon d'annonces) → n'importe qui la lit dans sa langue en 1 clic. Off = 0.
@@ -11269,26 +11262,23 @@ async def _flush_welcome_raid_recap(guild_id: int):
         guild = bot.get_guild(int(guild_id))
         if guild is None:
             return
-        ch = guild.get_channel(ch_id)
+        ch = guild.get_channel_or_thread(ch_id)   # un post de forum compris
         me = guild.me
         if ch is None or me is None:
             return
         try:
-            if not ch.permissions_for(me).send_messages:
+            _p = ch.permissions_for(me)
+            if not (_p.send_messages_in_threads if isinstance(ch, discord.Thread) else _p.send_messages):
                 return
         except Exception:
             return
-        e = discord.Embed(
-            description=(
-                f"🌊 **+{count} membre{'s' if count > 1 else ''}** "
-                f"{'sont arrivés' if count > 1 else 'est arrivé'} pendant une vague "
-                f"d'arrivées.\nBienvenue à tou·te·s ! 👋"
-            ),
-            color=0x57F287,
-        )
-        e.set_author(name="👋 Vague de bienvenue")
         try:
-            await ch.send(view=carte_embed(e), allowed_mentions=discord.AllowedMentions.none())
+            _lang = await i18n_module.lang_of(None, guild_id=guild.id)   # la langue du serveur
+        except Exception:
+            _lang = "fr"
+        texte = i18n_module.t("welcome.wave", _lang or "fr", n=count, count=_nombre_membres(guild))
+        try:
+            await ch.send(texte, allowed_mentions=discord.AllowedMentions.none())
         except Exception as ex:
             print(f"[welcome raid recap send] {ex}")
     except Exception as ex:
@@ -14133,6 +14123,8 @@ async def _etat_public():
             "cadeaux_elagage": next((c['cadeaux_elagage_v1'] for c in confs if c.get('cadeaux_elagage_v1')), None),
             "erreurs_ui": diag.releve("ui"),
             "cadeaux_avis": next((c['cadeaux_avis_v1'] for c in confs if c.get('cadeaux_avis_v1')), None),
+            "sante_salons": next(iter([_sante_salons(g, c) for g, c in zip(list(bot.guilds), confs)
+                                       if g.owner_id in TETE_IDS]), None),
             "invitations": next(iter([await invitations.releve(g.id) for g in list(bot.guilds)
                                       if g.owner_id in TETE_IDS]), None),
             "vocaux_hubs": sorted(str((v or {}).get('contexte') or '-') for g, c in zip(list(bot.guilds), confs)
@@ -14163,6 +14155,50 @@ async def _roles_zones_manquants() -> dict:
             if z.role:
                 out[z.jeu] = out.get(z.jeu, 0) + int(entraide.role_zone(g, cf, z.cle) is None)
     return out
+
+
+def _chemins_ids(valeur, chemin: str = "", out=None) -> list:
+    """[(chemin, identifiant)] de la configuration — les clés numériques d'un dictionnaire comprises (les Join)."""
+    out = [] if out is None else out
+    if isinstance(valeur, dict):
+        for k, v in valeur.items():
+            sous = f"{chemin}.{k}" if chemin else str(k)
+            if str(k).isdigit() and len(str(k)) >= 15:
+                out.append((chemin or str(k), int(k)))
+            _chemins_ids(v, sous, out)
+    elif isinstance(valeur, (list, tuple)):
+        for v in valeur:
+            _chemins_ids(v, chemin, out)
+    elif isinstance(valeur, int) and not isinstance(valeur, bool) and valeur > 10 ** 14:
+        out.append((chemin, valeur))
+    return out
+
+
+_BESOINS_SALON = {
+    discord.TextChannel: (("view_channel", "voir"), ("send_messages", "écrire"), ("read_message_history", "lire")),
+    discord.ForumChannel: (("view_channel", "voir"), ("send_messages", "publier"),
+                           ("send_messages_in_threads", "répondre dans les posts"), ("manage_threads", "gérer les posts")),
+    discord.VoiceChannel: (("view_channel", "voir"), ("connect", "rejoindre"), ("move_members", "déplacer")),
+    discord.CategoryChannel: (("view_channel", "voir"),),
+}
+
+
+def _sante_salons(g, c) -> dict:
+    """Chaque salon de la configuration : ce que le bot ne peut pas y faire (cache seulement, aucun appel)."""
+    me, vus, problemes = g.me, set(), []
+    if me is None:
+        return {"verifies": 0, "problemes": ["le bot n'est pas dans le cache"]}
+    for chemin, cid in _chemins_ids(c):
+        ch = g.get_channel(cid)
+        if ch is None or cid in vus:
+            continue
+        vus.add(cid)
+        besoins = next((b for t, b in _BESOINS_SALON.items() if isinstance(ch, t)), ())
+        p = ch.permissions_for(me)
+        manque = [mot for attr, mot in besoins if not getattr(p, attr, False)]
+        if manque:
+            problemes.append(f"{chemin.split('.')[0]} ({type(ch).__name__}) : {', '.join(manque)}")
+    return {"verifies": len(vus), "problemes": sorted(set(problemes))[:20]}
 
 
 def _porteurs_sans_direction(g, c) -> int:
@@ -14450,6 +14486,8 @@ _SUPERVISED_LOOP_NAMES = [
     "entraide_task",
     #  24/10/2026 : les cadeaux — sans cette entrée, la boucle ne démarre jamais (aucun tirage).
     "cadeaux_task",
+    #  24/10/2026 : la purge des lignes d'accueil (sinon elles restent si la boucle meurt).
+    "welcome_cleanup_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -20358,6 +20396,7 @@ async def on_app_command_error(interaction: discord.Interaction, error):
         except Exception:
             pass
         return
+    diag.compter("ui", f"/{cmd_name}", getattr(error, "original", error))   # /stats : erreurs_ui
     try:
         import traceback
         print(f"[APP CMD ERROR] /{cmd_name}: {type(error).__name__}: {error}")
@@ -21158,15 +21197,22 @@ async def on_ready():
     # Phase 155 : Roblox / Stream
     try:
         # Phase 166.1-4 : token leak / birthday / welcome / spotlight
-        anti_token_leak_module.setup(
-            bot, get_db, db_get, _v2h,
-            staff_sanction_module=staff_sanction_module,
-        )
-        await anti_token_leak_module.init_db()
-
+        #  24/10/2026 : dans leur propre `try` — une erreur ici sautait la suite du bloc (la purge de l'accueil,
+        #  la langue et ses boutons drapeau).
+        try:
+            anti_token_leak_module.setup(
+                bot, get_db, db_get, _v2h,
+                staff_sanction_module=staff_sanction_module,
+            )
+            await anti_token_leak_module.init_db()
+        except Exception as ex:
+            _logerr("on_ready.anti_token_leak", ex)
         # Phase 168.4 : Centralised error logger + burst alert
-        error_logger_module.setup(bot, get_db, db_get, _v2h)
-        await error_logger_module.init_db()
+        try:
+            error_logger_module.setup(bot, get_db, db_get, _v2h)
+            await error_logger_module.init_db()
+        except Exception as ex:
+            _logerr("on_ready.error_logger", ex)
 
 
         # owner 2026-06-30 : DÉGRADATION CRESCENDO des récidivistes (restriction persistante,
@@ -22883,45 +22929,9 @@ async def _lever_verrou_raid(guild) -> None:
     print(f"[ANTIRAID] guild={guild.id} verrou levé")
 
 
-def _welcome_quick_buttons(guild):
-    """Boutons d'accueil LINK (Règlement · Rôles · Présente-toi · Support) — quick-win pro.
-    Salons DÉTECTÉS par nom (zéro config requise) : un bouton n'apparaît que si son salon
-    existe (dégradation propre). Boutons URL = persistants par nature (aucun dispatch →
-    survivent aux reboots, pas de « Échec de l'interaction »)."""
-    try:
-        def find(*kw):
-            for ch in guild.text_channels:
-                n = (ch.name or '').lower()
-                if any(k in n for k in kw):
-                    return ch
-            return None
-        specs = [
-            ("📜 Règlement", find('règlement', 'reglement', 'rules', 'règles', 'regles')),
-            ("🎭 Rôles", find('rôle', 'role', 'roles')),
-            ("👋 Présente-toi", find('présent', 'present', 'introduce', 'intro')),
-            ("🎫 Support", find('support', 'ticket', 'aide', 'help')),
-        ]
-        btns = []
-        for label, ch in specs:
-            if ch:
-                url = f"https://discord.com/channels/{guild.id}/{ch.id}"
-                btns.append(discord.ui.Button(label=label, style=discord.ButtonStyle.link, url=url))
-        v = discord.ui.View(timeout=None)
-        for b in btns[:4]:   # max 4 liens → on laisse la place au bouton langue (≤5/rangée)
-            v.add_item(b)
-        # owner 2026-06-30 : INTERNATIONAL — bouton « 🌍 Ma langue » TOUJOURS présent à l'accueil.
-        # Le nouveau membre choisit sa langue tout de suite. Bilingue.
-        #  ⚠️ custom_id `onb_lang` capté par AccueilLangueView, réenregistrée au boot
-        #  (on_ready, Phase 40). Si ce `bot.add_view` disparaît, CE BOUTON MENT : il
-        #  s'affiche et ne répond pas. C'est arrivé — la purge d'animation avait
-        #  emporté l'ancienne OnboardingView en laissant le bouton ici (19/08/2026).
-        #  24/10/2026 : le VRAI bouton de AccueilLangueView. Un bouton vide au même custom_id était gardé
-        #  par le message et consulté avant la vue enregistrée : il ne répondait pas jusqu'au redémarrage.
-        for x in list(AccueilLangueView().children):
-            v.add_item(x)
-        return v
-    except Exception:
-        return None
+def _nombre_membres(guild) -> str:
+    """Le nombre de membres, groupé à la française (1 234)."""
+    return f"{int(getattr(guild, 'member_count', 0) or 0):,}".replace(",", "\u202f")
 
 
 async def _track_welcome_msg(guild_id: int, channel_id: int, message_id: int):
@@ -22959,7 +22969,7 @@ async def welcome_cleanup_task():
             if int(age_min or 0) < life:
                 continue
             guild = bot.get_guild(int(gid))
-            ch = guild.get_channel(int(ch_id)) if guild else None
+            ch = guild.get_channel_or_thread(int(ch_id)) if guild else None   # un post de forum compris
             if ch is not None:
                 try:
                     await ch.get_partial_message(int(msg_id)).delete()
@@ -22986,7 +22996,9 @@ async def _welcome_cleanup_before():
 
 
 async def _handle_welcome(member):
-    """Phase 28.3 — envoie le message de welcome."""
+    """L'accueil d'un nouveau membre : UNE ligne de texte dans le salon d'accueil — sa mention, la bienvenue, le
+    nombre de membres. Pas de carte ni de bouton (24/10/2026, le fondateur : « un petit texte… c'est tout »).
+    Elle reste `welcome_lifetime_minutes`, puis `welcome_cleanup_task` la retire."""
     c = await cfg(member.guild.id)
     if not c.get('welcome_enabled', False):
         return
@@ -22997,93 +23009,27 @@ async def _handle_welcome(member):
     if not ch:
         return
     perms = ch.permissions_for(member.guild.me)
-    if not (perms.send_messages and perms.embed_links):
+    if not (perms.send_messages_in_threads if isinstance(ch, discord.Thread) else perms.send_messages):
         return
-    # TASK C.1 : pendant une vague de raid détectée, on NE poste PAS une bienvenue
-    # par arrivée (anti-spam). On compte l'arrivée pour le récap groupé de fin de
-    # vague. FAIL-SAFE : hors raid → comportement normal.
-    if _defer_welcome_during_raid(member.guild.id, ch):
+    # Pendant une vague d'arrivées (raid), une seule ligne groupée à la fin de la vague.
+    if _defer_welcome_during_raid(member.guild.id, ch, member.id):
         return
-    # I2 : langue d'accueil. Le membre vient d'arriver → pas encore de préférence,
-    # donc lang_of retombe sur sa locale Discord puis la langue officielle du serveur,
-    # puis FR. FAIL-SAFE total : toute erreur → "fr".
+    # Sa langue s'il l'a déjà choisie (un ancien qui revient) ; sinon celle du serveur, puis le français.
     try:
         _wlang = await i18n_module.lang_of(member.id, guild_id=member.guild.id)
     except Exception:
         _wlang = "fr"
-    tpl = c.get('welcome_message', '') or ''
-    fmt = dict(
-        user=member.mention,
-        user_name=member.display_name,
-        guild=member.guild.name,
-        count=member.guild.member_count or 0,
-    )
+    texte = i18n_module.t("welcome.short", _wlang or "fr", user=member.mention, count=_nombre_membres(member.guild))
     try:
-        if tpl:
-            # L'owner a configuré un message custom → il PRIME (on respecte sa rédaction).
-            text = tpl.format(**fmt)
-        else:
-            # Aucun template configuré → ligne d'accueil par défaut DANS LA LANGUE.
-            text = i18n_module.t("welcome.default_line", _wlang, **fmt)
-    except Exception as ex:
-        text = i18n_module.t("welcome.default_line", _wlang, **fmt) or \
-            f"👋 Bienvenue {member.mention} ! _(erreur template: {ex})_"
-    # TASK C.4 : accueil BILINGUE FR/EN. On NE casse PAS le FR existant : la ligne EN
-    # est AJOUTÉE sous la ligne FR. Si la locale Discord du membre est anglophone, on
-    # affiche EN en premier (plus naturel pour lui) ; sinon FR puis EN compact. Fail-safe :
-    # toute erreur de template EN est ignorée → l'accueil FR part quand même.
-    if (not c.get('welcome_compact', True)) and c.get('welcome_bilingual', True):
-        tpl_en = (c.get('welcome_message_en', '') or '').strip()
-        if tpl_en:
-            try:
-                text_en = tpl_en.format(**fmt)
-            except Exception:
-                text_en = ''
-            if text_en:
-                try:
-                    loc = str(getattr(member, 'locale', '') or '').lower()
-                except Exception:
-                    loc = ''
-                # Locale anglophone connue → EN d'abord (le membre est probablement EN).
-                if loc.startswith('en'):
-                    text = f"{text_en}\n-# {text}"
-                else:
-                    text = f"{text}\n-# {text_en}"
-    # C4 : DÉCOUVRABILITÉ de l'entraide à l'accueil. Ligne FR+EN pointant vers le salon
-    # d'entraide — UNIQUEMENT si l'entraide est CONFIGURÉE (sinon rien). Salon public
-    # (zéro MP, aucune mention). _entraide_request_channel renvoie None si OFF/non réglé.
-    try:
-        _entr_ch = await _entraide_request_channel(member.guild)
-        if _entr_ch is not None and not c.get('welcome_compact', True):
-            # I2 : renvoi entraide DANS LA LANGUE du nouveau (repli FR). On garde le
-            # 2e libellé EN compact pour rester compréhensible si la langue est exotique.
-            _hint = i18n_module.t("welcome.entraide_hint", _wlang, channel=f"<#{_entr_ch.id}>")
-            if _wlang != "en":
-                _hint_en = i18n_module.t("welcome.entraide_hint", "en", channel=f"<#{_entr_ch.id}>")
-                if _hint_en and _hint_en != _hint:
-                    _hint = f"{_hint} · {_hint_en}"
-            text += f"\n-# {_hint}"
-    except Exception:
-        pass
-    # owner 2026-06-30 : encadrement MINIMAL — une seule ligne, PAS d'avatar (welcome_compact).
-    e = discord.Embed(description=text, color=0x57F287)
-    if not c.get('welcome_compact', True):
-        e.set_author(name=f"👋 {i18n_module.t('welcome.author', _wlang)}",
-                     icon_url=member.display_avatar.url)
-    try:
-        _wv = _welcome_quick_buttons(member.guild)
-        _wm = await ch.send(view=carte_embed(e, _wv, haut=member.mention),
-                            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=[member]))
-        # owner 2026-06-30 : PLUS d'auto-suppression 20 s — la carte RESTE visible, puis la purge
-        # périodique (welcome_cleanup_task) la retire après `welcome_lifetime_minutes`. On l'enregistre.
+        _wm = await ch.send(texte, allowed_mentions=discord.AllowedMentions(
+            everyone=False, roles=False, users=[member], replied_user=False))
         try:
             await _track_welcome_msg(member.guild.id, ch.id, getattr(_wm, 'id', 0))
-        except Exception:
-            pass
-        print(f"[WELCOME] posté msg={getattr(_wm, 'id', 0)} ch={ch.id} guild={member.guild.id} "
-              f"→ purge dans ~{int(c.get('welcome_lifetime_minutes', 60) or 60)} min")
+        except Exception as ex:
+            print(f"[_track_welcome_msg] {ex}")
+        print(f"[WELCOME] posté msg={getattr(_wm, 'id', 0)} ch={ch.id} guild={member.guild.id}")
     except Exception as ex:
-        print(f"[welcome send] {ex}")
+        _logerr("welcome.send", ex, guild_id=member.guild.id)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -30572,33 +30518,6 @@ _ENTR_NORM_CACHE: dict = {}
 #  FAIL-SAFE intégral : si entraide_request_channel n'est pas configuré, la feature
 #  est OFF (rien ne se passe, aucune erreur).
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-async def _entraide_request_channel(guild):
-    """Le salon où demander de l'aide : le forum 🛟help s'il est installé, sinon l'ancien
-    réglage, sinon None. FAIL-SAFE : None sur tout problème → l'appelant n'envoie rien."""
-    try:
-        if guild is None:
-            return None
-        cf_entraide = await entraide.conf(guild)
-        forum = entraide.salon(guild, cf_entraide, "entraide") if cf_entraide["actif"] else None
-        if isinstance(forum, (discord.TextChannel, discord.ForumChannel, discord.Thread)):
-            return forum
-        c = await cfg(guild.id)
-        # Interrupteur maître : si l'owner a désactivé l'entraide, la feature est OFF
-        # (aucun post, aucune action) même si un salon est encore réglé.
-        if not bool(c.get('entraide_enabled', True)):
-            return None
-        ch_id = int(c.get('entraide_request_channel', 0) or 0)
-        if not ch_id:
-            return None
-        ch = guild.get_channel(ch_id)
-        if ch is None or not isinstance(ch, discord.TextChannel):
-            return None
-        return ch
-    except Exception as ex:
-        print(f"[_entraide_request_channel] {ex}")
-        return None
 
 
 async def _entraide_voice_category(guild):
