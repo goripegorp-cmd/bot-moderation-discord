@@ -70,7 +70,7 @@ async def completer(ch, cibles, droits=None) -> int:
     return n
 
 
-async def retirer(ch, cibles, droits=None) -> int:
+async def retirer(ch, cibles, droits=None, noms: list | None = None) -> int:
     """L'inverse de `completer`, pour qui n'a plus à voir les tickets (24/10/2026 : tout rôle placé au-dessus
     de la direction recevait « Gérer les fils » et lisait — ou supprimait — tous les tickets privés). Seulement
     quand TOUS les droits que pose le bot sont là : on les enlève, le reste d'un réglage posé à la main reste
@@ -85,6 +85,8 @@ async def retirer(ch, cibles, droits=None) -> int:
             setattr(actuel, k, None)
         await ch.set_permissions(cible, overwrite=None if actuel.is_empty() else actuel,
                                  reason="Tickets : seuls la direction et l'équipe du type voient tout")
+        if noms is not None:
+            noms.append(str(getattr(cible, "name", "") or getattr(cible, "id", "")))
         n += 1
     return n
 

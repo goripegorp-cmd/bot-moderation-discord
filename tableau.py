@@ -102,8 +102,11 @@ ENTETES = {
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    #  24/10/2026 (revue) : `*.discordapp.net` couvre media.discordapp.net ET le relais images-ext-* — les images
+    #  d'encadré des tickets passent désormais par lui (l'IP du lecteur ne part plus chez l'hébergeur d'origine).
     "Content-Security-Policy": ("default-src 'none'; img-src 'self' https://cdn.discordapp.com "
-                                "https://media.discordapp.net data:; style-src 'unsafe-inline'; "
+                                "https://*.discordapp.net data:; media-src 'self' https://cdn.discordapp.com "
+                                "https://*.discordapp.net; style-src 'unsafe-inline'; "
                                 "script-src 'none'; connect-src 'self'; base-uri 'none'; "
                                 "form-action 'none'; frame-ancestors 'none'"),
 }

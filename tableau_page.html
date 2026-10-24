@@ -1883,8 +1883,7 @@ function suiviConv(d) {
 }
 function resumeConversation(d) {
   const n = (d.messages || []).length;
-  return d.absent || (nombre(n) + " message(s) · " + (d.source === "discord" ? "en direct de Discord" : "transcript enregistré à la fermeture")
-    + (d.tronque ? " · les " + nombre(n) + " premiers" : ""));
+  return d.absent || (nombre(n) + " message(s) · " + (d.source === "discord" ? "en direct de Discord" : "transcript enregistré à la fermeture"));
 }
 /* Dans la fiche : le transcript complet SOUS le questionnaire, sans bouton à chercher (`ouvert`),
    ou replié derrière un bouton pour les anciens tickets. */

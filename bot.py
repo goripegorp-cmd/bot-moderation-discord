@@ -13784,6 +13784,7 @@ async def _tickets_visibilite(g) -> int:
     direction = _equipe_direction(g, c)
     anciens = _au_dessus_de_la_direction(g, c)
     n = retires = 0
+    noms: list = []   # les rôles qui perdent l'accès : nommés au journal, pour pouvoir les rendre à la main
     porteurs = dict.fromkeys(int(v) for v in (c.get(tickets_fils.CLE_PARENTS) or {}).values() if str(v).isdigit())
     for cid in porteurs:
         ch = g.get_channel(cid)
@@ -13791,7 +13792,7 @@ async def _tickets_visibilite(g) -> int:
             continue
         try:
             n += await tickets_fils.completer(ch, direction)
-            retires += await tickets_fils.retirer(ch, anciens)
+            retires += await tickets_fils.retirer(ch, anciens, noms=noms)
         except discord.HTTPException as ex:
             _logerr("tickets.visibilite", ex, guild_id=g.id)
     async with get_db() as db:
@@ -13812,14 +13813,14 @@ async def _tickets_visibilite(g) -> int:
                         n += 1
             elif isinstance(ch, discord.TextChannel):
                 n += await tickets_fils.completer(ch, (staff, *equipe_type, *direction), tickets_fils.DROITS_SALON)
-                retires += await tickets_fils.retirer(ch, anciens, tickets_fils.DROITS_SALON)
+                retires += await tickets_fils.retirer(ch, anciens, tickets_fils.DROITS_SALON, noms=noms)
         except discord.HTTPException as ex:
             _logerr("tickets.visibilite", ex, guild_id=g.id)
     await _au_journal(g, "Tickets", "tickets.visibilite",
                       "Tickets : la direction et le fondateur voient tous les tickets, l'équipe Rell Seas les siens"
                       + (f" ({n} accès ajouté(s))" if n else " (rien ne manquait)")
-                      + (f" ; {retires} accès retiré(s) à des rôles placés au-dessus de la direction." if retires
-                         else "."))
+                      + (f" ; {retires} accès retiré(s) à des rôles placés au-dessus de la direction ("
+                         + ", ".join(sorted(set(noms)))[:900] + ")." if retires else "."))
     return n
 
 
