@@ -92,6 +92,9 @@ TEXTES = {
     "pas_inscrit_cond": {"fr": "🎟️ Pas encore inscrit : remplis les conditions, puis clique « Participer ».",
                          "en": "🎟️ Not entered yet: meet the conditions, then click “Enter”."},
     "pas_encore_autre": {"fr": "⏳ **Pas encore**", "en": "⏳ **Not yet**"},
+    "retiree": {"fr": "⚠️ **Ta participation a été retirée** : remplis d'abord les conditions, puis reclique "
+                      "« Participer ».",
+                "en": "⚠️ **Your entry was removed**: meet the conditions first, then click “Enter” again."},
     "participer": {"fr": "Participer", "en": "Enter"},
     "actualiser": {"fr": "Actualiser", "en": "Refresh"},
     "quitter": {"fr": "Ne plus participer", "en": "Leave"},
@@ -120,6 +123,8 @@ _maj_prevues: dict = {}
 _verrous: dict = {}
 _minuteurs: dict = {}                             # cadeau_id → la tâche qui tire à la seconde près
 MINUTEUR_S = 40.0     # à moins de 40 s de la fin, un minuteur exact prend le relais de la boucle (30 s)
+AVIS_S = 180.0        # un mot pour soi (refus, participation retirée) s'efface après 3 minutes
+ANNONCE_S = 86400     # l'annonce des gagnants s'efface au bout de 24 h : la carte, elle, les garde
 
 
 def setup(*, get_db, cfg, db_set, autorise, journal, ticket=None, langue=None, log=None):
@@ -188,6 +193,12 @@ async def init_db():
             "CREATE TABLE IF NOT EXISTS cadeaux_stats (cadeau_id INTEGER NOT NULL, membre_id INTEGER NOT NULL,"
             " messages INTEGER NOT NULL DEFAULT 0, vocal_s INTEGER NOT NULL DEFAULT 0,"
             " PRIMARY KEY (cadeau_id, membre_id))")
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS cadeaux_retires (cadeau_id INTEGER NOT NULL, membre_id INTEGER NOT NULL,"
+            " quand INTEGER NOT NULL, PRIMARY KEY (cadeau_id, membre_id))")
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS cadeaux_messages (message_id INTEGER PRIMARY KEY, salon_id INTEGER NOT NULL,"
+            " effacer_a INTEGER NOT NULL)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_cadeaux_guild ON cadeaux(guild_id, statut)")
         await db.commit()
 
@@ -253,6 +264,24 @@ async def _retirer_inscriptions(cid: int, uids: list) -> int:
             n += max(0, cur.rowcount or 0)
         await db.commit()
     return n
+
+
+async def _noter_retires(cid: int, uids: list) -> None:
+    """Ceux dont la participation est retirée : ils le liront en cliquant, pour eux seuls."""
+    if not uids:
+        return
+    async with _get_db() as db:
+        await db.executemany("INSERT OR REPLACE INTO cadeaux_retires(cadeau_id, membre_id, quand) VALUES(?,?,?)",
+                             [(int(cid), int(u), int(_mur())) for u in uids])
+        await db.commit()
+
+
+async def _vu_retire(cid: int, uid: int) -> bool:
+    """Ce membre a-t-il été retiré de ce cadeau ? Il le lit une fois : la note part."""
+    async with _get_db() as db:
+        cur = await db.execute("DELETE FROM cadeaux_retires WHERE cadeau_id=? AND membre_id=?", (int(cid), int(uid)))
+        await db.commit()
+        return (cur.rowcount or 0) > 0
 
 
 async def nb_inscrits(cid: int) -> int:
@@ -857,6 +886,26 @@ async def _repondre(i, vue) -> None:
         await i.response.send_message(view=vue, ephemeral=True)
 
 
+_taches: set = set()
+
+
+def _effacer_plus_tard(i, delai: float | None = None) -> None:
+    """Un mot pour soi s'efface tout seul (24/10/2026 : « après, ça s'enlève tout seul »)."""
+    supprimer = getattr(i, "delete_original_response", None)
+    if supprimer is None:
+        return
+
+    async def _plus_tard():
+        await asyncio.sleep(AVIS_S if delai is None else delai)
+        try:
+            await supprimer()
+        except discord.HTTPException:
+            pass  # déjà fermé par le membre, ou le jeton de l'interaction a expiré : il n'y a rien à faire
+    t = asyncio.create_task(_plus_tard())
+    _taches.add(t)
+    t.add_done_callback(_taches.discard)
+
+
 async def participer(i, cid: int) -> None:
     langue = await langue_de(i)
     c = await charger(cid)
@@ -871,13 +920,17 @@ async def participer(i, cid: int) -> None:
         roles = " ".join(f"<@&{r}>" for r in c["roles"])
         return await _repondre(i, _vue_message(tr("reserve", langue, roles=roles), Palette.WARNING))
     messages, secondes = await stats(cid, i.user.id)
+    retire = await _vu_retire(cid, i.user.id)
     if not remplit(c, messages, secondes):
         #  24/10/2026, le fondateur : sans les messages (ou le vocal) demandés, on ne participe pas — et on
         #  voit tout de suite ce qu'il faut, et où on en est. Une inscription d'avant la règle part aussi.
+        #  Ce mot n'est que pour lui, et il s'efface.
         if await _retirer_inscriptions(cid, [i.user.id]):
             planifier_maj(i.guild, cid)
-        return await _repondre(i, vue_stats(c, i.user, messages, secondes, False, langue,
-                                            entete=tr("manque", langue)))
+            retire = True
+        await _repondre(i, vue_stats(c, i.user, messages, secondes, False, langue,
+                                     entete=tr("retiree" if retire else "manque", langue)))
+        return _effacer_plus_tard(i)
     cur_id = await _ecrire("INSERT OR IGNORE INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(?,?,?)",
                            (int(cid), i.user.id, int(_mur())))
     await _repondre(i, vue_stats(c, i.user, messages, secondes, True, langue, entete=tr("inscrit", langue)))
@@ -906,7 +959,11 @@ async def montrer_stats(i, cid: int) -> None:
     if c["statut"] != "actif":
         return await _repondre(i, _vue_message(tr("fini", langue)))
     messages, secondes = await stats(cid, i.user.id)
-    await _repondre(i, vue_stats(c, i.user, messages, secondes, await est_inscrit(cid, i.user.id), langue))
+    retire = await _vu_retire(cid, i.user.id)
+    await _repondre(i, vue_stats(c, i.user, messages, secondes, await est_inscrit(cid, i.user.id), langue,
+                                 entete=tr("retiree", langue) if retire else ""))
+    if retire:
+        _effacer_plus_tard(i)
 
 
 PAR_PAGE = 25          # une liste déroulante Discord : 25 choix ; au-delà, des pages
@@ -1022,46 +1079,11 @@ async def montrer_participant(i, cid: int, uid: int, page: int = 0) -> None:
     await _repondre(i, v)
 
 
-async def _prevenir_retires(g, c: dict, retires: list) -> int:
-    """Sous la carte, en réponse, jamais en privé : chacun voit pourquoi sa participation est retirée et ce
-    qu'il lui faut (24/10/2026). 30 personnes par message. Rend le nombre de messages postés."""
-    salon = await _salon(g, c["salon_id"])
-    if salon is None:
-        return 0
-    besoins = []
-    if c["msg_min"]:
-        besoins.append(f"💬 **{c['msg_min']}** messages")
-    if c["voc_min"]:
-        besoins.append(f"🔊 **{duree_txt(c['voc_min'])}** en vocal · in voice")
-    besoin = (" **et · and** " if c["logique"] == "et" else " **ou · or** ").join(besoins)
-    ref = (discord.MessageReference(message_id=int(c["message_id"]), channel_id=salon.id, guild_id=g.id,
-                                    fail_if_not_exists=False) if c.get("message_id") else None)
-    n = 0
-    for k_ in range(0, len(retires), 30):
-        groupe = retires[k_:k_ + 30]
-        texte = ("### ⚠️ Participation retirée · Entry removed\n"
-                 f"Pour **{c['lot']}**, il faut d'abord · you first need : {besoin}\n"
-                 + "\n".join(f"<@{u}> : {progres(c, m, s)}" for u, m, s in groupe)
-                 + "\n-# Reclique « Participer » quand c'est bon · Click “Enter” again once done")
-        v = LayoutView(timeout=None)
-        v.add_item(discord.ui.Container(discord.ui.TextDisplay(texte), accent_color=Palette.WARNING))
-        try:
-            await salon.send(view=v, reference=ref, mention_author=False,
-                             allowed_mentions=discord.AllowedMentions(
-                                 everyone=False, roles=False, replied_user=False,
-                                 users=[discord.Object(id=int(u)) for u, _m, _s in groupe]))
-            n += 1
-        except discord.HTTPException as ex:
-            _log("[CADEAUX][E8] retirés non prévenus")
-            _log(f"[CADEAUX][E8:DETAIL] cadeau={c['id']} {type(ex).__name__} {ex}")
-    return n
-
-
 async def elaguer(g) -> int:
     """24/10/2026, le fondateur : « s'il y a des gens qui participent et qui n'ont pas les messages, tu les
-    retires et ça envoie un message pour leur dire, pas en privé, mais en dessous ». Pour les cadeaux en
-    cours : ceux qui ne remplissent pas les conditions sont retirés, prévenus sous la carte, et la carte se
-    met à jour. Rend le nombre retiré."""
+    retires » — puis : « je veux que ce soit vu individuellement… quand ils cliquent ». Pour les cadeaux en
+    cours : ceux qui ne remplissent pas les conditions sont retirés et notés ; chacun le lit en cliquant,
+    pour lui seul. Aucun message public. Rend le nombre retiré."""
     total = 0
     for cid in list(_actifs.get(g.id) or {}):
         c = await charger(cid)
@@ -1076,10 +1098,54 @@ async def elaguer(g) -> int:
         if not retires:
             continue
         total += len(retires)
-        await _prevenir_retires(g, c, retires)
+        await _noter_retires(cid, [u for u, _m, _s in retires])
         await _journal(g, "cadeaux.retires", f"🎁 « {c['lot']} » : {len(retires)} participation(s) retirée(s), "
-                       "conditions pas encore remplies — prévenus sous la carte.")
+                       "conditions pas encore remplies — chacun le lit en cliquant, pour lui seul.")
     return total
+
+
+def _texte_composants(m) -> str:
+    """Le texte d'un message Components V2 (ses TextDisplay)."""
+    out = []
+
+    def parcourir(c):
+        if getattr(c, "type", None) == discord.ComponentType.text_display:
+            out.append(str(getattr(c, "content", "") or ""))
+        for x in getattr(c, "children", None) or []:
+            parcourir(x)
+    for c in getattr(m, "components", None) or []:
+        parcourir(c)
+    return "\n".join(out)
+
+
+async def nettoyer_avis(g) -> int:
+    """Une fois : l'avis public « Participation retirée » du 24/10 part du salon ; les membres qu'il nommait
+    sont notés et le liront en cliquant, pour eux seuls. Rend le nombre d'avis effacés."""
+    salon = await salon_cadeaux(g)
+    moi = getattr(getattr(g, "me", None), "id", 0)
+    if salon is None:
+        return 0
+    n = 0
+    async for m in salon.history(limit=100):
+        if getattr(m.author, "id", 0) != moi:
+            continue
+        texte = _texte_composants(m)
+        if "Participation retirée" not in texte:
+            continue
+        carte = getattr(getattr(m, "reference", None), "message_id", None)
+        if carte:
+            async with _get_db() as db:
+                async with db.execute("SELECT id FROM cadeaux WHERE message_id=?", (int(carte),)) as cur:
+                    r = await cur.fetchone()
+            if r is not None:
+                await _noter_retires(int(r[0]), [int(u) for u in re.findall(r"<@!?(\d+)>", texte)])
+        try:
+            await m.delete()
+            n += 1
+        except discord.HTTPException as ex:
+            _log("[CADEAUX][E9] avis non effacé")
+            _log(f"[CADEAUX][E9:DETAIL] message={m.id} {type(ex).__name__} {ex}")
+    return n
 
 
 async def etat(g) -> list:
@@ -1177,7 +1243,9 @@ async def _annoncer(g, c: dict, gagnants: list, *, relance: bool = False) -> boo
         envoi["reference"] = discord.MessageReference(message_id=int(c["message_id"]), channel_id=salon.id,
                                                       fail_if_not_exists=False)
     try:
-        await salon.send(**envoi)
+        msg = await salon.send(**envoi)
+        await _ecrire("INSERT OR REPLACE INTO cadeaux_messages(message_id, salon_id, effacer_a) VALUES(?,?,?)",
+                      (int(msg.id), int(salon.id), int(_mur() + ANNONCE_S)))
         return True
     except discord.HTTPException as ex:
         _log("[CADEAUX][E3] gagnants non annoncés")
@@ -1260,9 +1328,31 @@ async def annuler(g, cid: int, *, par: int = 0) -> bool:
 
 
 async def purger(g) -> int:
-    """Après 7 jours, la liste des gagnables d'un cadeau terminé part aussi : il ne reste que le lot et
-    ses gagnants."""
+    """Le ménage, toutes les heures : l'annonce des gagnants s'efface après 24 h (la carte les garde) ; les
+    notes des retirés d'un cadeau fini partent ; après 7 jours, la liste des gagnables d'un cadeau terminé
+    part aussi : il ne reste que le lot et ses gagnants."""
     n = 0
+    async with _get_db() as db:
+        async with db.execute("SELECT message_id, salon_id FROM cadeaux_messages WHERE effacer_a<=?",
+                              (int(_mur()),)) as cur:
+            echus = [(int(a), int(b)) for a, b in await cur.fetchall()]
+        await db.execute("DELETE FROM cadeaux_retires WHERE cadeau_id NOT IN "
+                         "(SELECT id FROM cadeaux WHERE statut='actif')")
+        await db.commit()
+    for mid, sid in echus:
+        salon = g.get_channel(sid)
+        if salon is None:
+            continue   # un autre serveur (ou un salon disparu : la ligne part ci-dessous)
+        try:
+            await salon.get_partial_message(mid).delete()
+            n += 1
+        except discord.NotFound:
+            pass
+        except discord.HTTPException as ex:
+            _log("[CADEAUX][E10] annonce non effacée")
+            _log(f"[CADEAUX][E10:DETAIL] message={mid} {type(ex).__name__} {ex}")
+            continue
+        await _ecrire("DELETE FROM cadeaux_messages WHERE message_id=?", (mid,))
     for c in await recents(g.id, 50):
         r = c["resultat"] or {}
         if c["statut"] == "fini" and r.get("eligibles") and _mur() - int(r.get("fini") or 0) > GARDER_RESULTAT_S:

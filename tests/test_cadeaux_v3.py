@@ -99,24 +99,80 @@ def test_L1_les_conditions_d_abord_le_refus_dit_ce_qu_il_faut_et_ou_on_en_est(en
     assert "Pas encore" in textes(_vue(i)) and run(K.inscrits(1)) == [11]
 
 
-def test_L2_le_cadeau_en_cours_est_elague_les_retires_prevenus_sous_la_carte(env):
+def test_L2_le_cadeau_en_cours_est_elague_chacun_le_lit_pour_lui_seul(env):
     g = serveur()
     salon = _lancer(g, msg_min=2)
+    envois = len(salon.envois)
     for uid, n in ((11, 2), (12, 1), (13, 0)):
         _ecrire(env, g, uid, n)
         g.membre(uid)
         run(K._ecrire("INSERT INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(1, ?, ?)", (uid, uid)))
-    carte = run(K.charger(1))["message_id"]
     assert run(K.elaguer(g)) == 2
     assert run(K.inscrits(1)) == [11], "seul celui qui a ses messages reste"
-    _mid, _contenu, kw = salon.envois[-1]
-    t = textes(kw["view"])
-    assert "Participation retirée" in t and "<@12> : 💬 1/2" in t and "<@13> : 💬 0/2" in t and "**2** messages" in t
-    assert kw["reference"].message_id == carte, "en dessous de la carte, pas en privé"
-    assert sorted(u.id for u in kw["allowed_mentions"].users) == [12, 13] and not kw["allowed_mentions"].everyone
+    assert len(salon.envois) == envois, "24/10 : aucun message public — personne n'est nommé devant tout le monde"
     assert "1 participant" in textes(salon.cartes[-1][1]["view"]), "la carte suit"
     assert any(type_ == "cadeaux.retires" for type_, _x in env.journal)
+    i = interaction(g, g.membre(12))
+    run(K.montrer_stats(i, 1))
+    t = textes(_vue(i))
+    assert "Ta participation a été retirée" in t and "**1 / 2**" in t and i.response.messages[-1][1]["ephemeral"]
+    i = interaction(g, g.membre(12))
+    run(K.montrer_stats(i, 1))
+    assert "retirée" not in textes(_vue(i)), "lu une fois : le mot part"
+    i = interaction(g, g.membre(13))
+    run(K.participer(i, 1))
+    assert "Ta participation a été retirée" in textes(_vue(i)) and "**0 / 2**" in textes(_vue(i))
     assert run(K.elaguer(g)) == 0, "plus personne à retirer"
+
+
+def test_L2b_l_avis_public_part_ses_membres_notes_les_annonces_s_effacent(env):
+    from discord import components as C
+    g = serveur()
+    salon = _lancer(g, msg_min=2)
+    carte = run(K.charger(1))["message_id"]
+    v = discord.ui.LayoutView()
+    v.add_item(discord.ui.Container(discord.ui.TextDisplay(
+        "### ⚠️ Participation retirée · Entry removed\n<@12> : 💬 1/2\n<@13> : 💬 0/2")))
+    effaces = []
+
+    def message(mid, auteur, composants, ref=None):
+        m = Obj(id=mid, author=Obj(id=auteur), components=composants, reference=ref)
+
+        async def delete():
+            effaces.append(mid)
+        m.delete = delete
+        return m
+    avis = message(501, g.me.id, [C._component_factory(d) for d in v.to_components()], Obj(message_id=carte))
+    salon.historique = [message(500, 77, []), avis]
+    assert run(K.nettoyer_avis(g)) == 1 and effaces == [501], "seul l'avis du bot part"
+    i = interaction(g, g.membre(13))
+    run(K.montrer_stats(i, 1))
+    assert "Ta participation a été retirée" in textes(_vue(i)), "ceux qu'il nommait le liront en cliquant"
+    #  L'annonce des gagnants s'efface au bout de 24 h ; la carte garde les gagnants.
+    run(K.terminer(g, 1))
+    annonce = salon.envois[-1][0]
+    assert run(K.purger(g)) == 0 and annonce not in g.effaces, "pas avant 24 h"
+    run(K._ecrire("UPDATE cadeaux_messages SET effacer_a=0", ()))
+    assert run(K.purger(g)) == 1 and annonce in g.effaces
+
+
+def test_L2c_le_mot_pour_soi_s_efface_tout_seul(env, monkeypatch):
+    monkeypatch.setattr(K, "AVIS_S", 0)
+    g = serveur()
+    _lancer(g, msg_min=2)
+    effaces = []
+
+    async def scenario():
+        i = interaction(g, g.membre(12))
+
+        async def supprimer():
+            effaces.append("refus")
+        i.delete_original_response = supprimer
+        await K.participer(i, 1)
+        await asyncio.sleep(0.05)
+        return i
+    i = asyncio.run(scenario())
+    assert "Pas encore" in textes(_vue(i)) and effaces == ["refus"], "« après, ça s'enlève tout seul »"
 
 
 def test_L3_la_liste_des_participants_sans_limite_25_par_page(env):

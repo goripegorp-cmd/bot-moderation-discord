@@ -13803,6 +13803,11 @@ async def cadeaux_task():
                 #  sont retirés et prévenus sous la carte (après `tic` : les compteurs sont en base).
                 n = await cadeaux.elaguer(g)
                 await db_set(g.id, 'cadeaux_elagage_v1', {"le": now().isoformat(), "retires": n})
+            if not c.get('cadeaux_avis_v1'):
+                #  24/10/2026 : « je veux que ce soit vu individuellement » — l'avis public part ; les
+                #  retirés qu'il nommait le liront en cliquant, pour eux seuls.
+                n = await cadeaux.nettoyer_avis(g)
+                await db_set(g.id, 'cadeaux_avis_v1', {"le": now().isoformat(), "effaces": n})
         except Exception as ex:
             _logerr("cadeaux.elagage", ex, guild_id=g.id)
     if time.monotonic() - _cadeaux_purge[0] > 3600:
@@ -14078,6 +14083,7 @@ async def _etat_public():
             "cadeaux_detail": [x for g in list(bot.guilds) if g.owner_id in TETE_IDS for x in await cadeaux.etat(g)],
             "cadeaux_elagage": next((c['cadeaux_elagage_v1'] for c in confs if c.get('cadeaux_elagage_v1')), None),
             "erreurs_ui": diag.releve("ui"),
+            "cadeaux_avis": next((c['cadeaux_avis_v1'] for c in confs if c.get('cadeaux_avis_v1')), None),
             "cmd_giveaway": any("giveaway" in noms for noms in _commandes_vues.values()),
             "faq_trouve": next(iter(_faq_vus.values()), {}),
             "roles_zones_manquants": await _roles_zones_manquants(),
