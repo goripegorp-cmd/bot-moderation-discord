@@ -23691,10 +23691,13 @@ async def on_member_join(m):
         print(f"Erreur on_member_join: {ex}")
 
     # ═══ Phase 28.3 : Welcome message ═══
+    #  24/10/2026 (revue) : pas de « Bienvenue » public pour un sanctionné qui revient (sa sanction vient d'être
+    #  reposée) ; et une erreur de l'accueil se dit.
     try:
-        await _handle_welcome(m)
+        if not _sanctionne:
+            await _handle_welcome(m)
     except Exception as ex:
-        print(f"[welcome] {ex}")
+        _logerr("welcome.arrivee", ex, guild_id=getattr(m.guild, "id", 0))
 
     # ═══ Phase 64 : alt detection heuristic ═══
     try:
@@ -25080,12 +25083,15 @@ async def on_message(msg):
     # son cooldown de messages + suppression images/liens selon son palier. Check O(1) (dict RAM)
     # pour les 99 % de membres libres → coût négligeable. Tôt = on n'exécute pas tout le pipeline
     # sur un message qu'on supprime. Immunisés jamais restreints (géré à l'application). FAIL-OPEN.
+    #  24/10/2026 (revue) : jamais dans un ticket — ses captures y sont des preuves (le reste du pipeline les
+    #  épargne déjà) ; et une erreur se dit au lieu de se taire.
     try:
-        if msg.guild is not None and recidivism_module.tier_of(msg.guild.id, msg.author.id):
+        if msg.guild is not None and recidivism_module.tier_of(msg.guild.id, msg.author.id) \
+                and not await is_ticket_channel(msg.channel):
             if await recidivism_module.enforce_on_message(msg, msg.content or ''):
                 return
-    except Exception:
-        pass
+    except Exception as ex:
+        _logerr("recidive.application", ex, guild_id=getattr(msg.guild, "id", 0))
 
     # (Réaction 🌐 sur les annonces SUPPRIMÉE le 12/08/2026, à la demande du propriétaire.)
     #

@@ -80,3 +80,16 @@ def test_X3_le_demarrage_par_etapes_une_erreur_n_arrete_pas_les_suivantes():
     else:
         raise AssertionError("un arrêt du bot n'est pas avalé")
     assert '"demarrage": {"etapes_ratees": list(_Etape.ratees)}' in SRC
+
+
+def test_X4_recidiviste_epargne_dans_son_ticket_et_sanctionne_sans_accueil():
+    import ast as _ast
+    arbre = _ast.parse(SRC)
+    corps = {n.name: _ast.unparse(n) for n in arbre.body if isinstance(n, _ast.AsyncFunctionDef)}
+    om = corps["on_message"]
+    assert "not await is_ticket_channel(msg.channel)" in om.split("recidivism_module.enforce_on_message")[0][-400:], \
+        "la restriction des récidivistes ne touche pas leurs preuves dans un ticket"
+    assert "_logerr('recidive.application'" in om
+    arrivee = corps["on_member_join"]
+    assert "if not _sanctionne:\n            await _handle_welcome(m)" in arrivee, \
+        "pas de « Bienvenue » public pour un sanctionné qui revient"
