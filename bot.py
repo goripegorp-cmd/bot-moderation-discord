@@ -14496,6 +14496,7 @@ async def _etat_public():
             "erreurs_ui": diag.releve("ui"),
             "cadeaux_avis": next((c['cadeaux_avis_v1'] for c in confs if c.get('cadeaux_avis_v1')), None),
             "accueil": dict(_DERNIER_ACCUEIL) or None,
+            "demarrage": {"etapes_ratees": list(_Etape.ratees)},
             "entraide_suivi": entraide.releve(),
             "sante_salons": next(iter([_sante_salons(g, c) for g, c in zip(list(bot.guilds), confs)
                                        if g.owner_id in TETE_IDS]), None),
@@ -20820,17 +20821,41 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 #                    la ré-inscription des vues persistantes (nécessaire à chaque reconnexion).
 
 
+class _Etape:
+    """Une étape du démarrage : son erreur est journalisée (`_logerr`) et notée (/stats « demarrage »), et
+    n'arrête pas les suivantes. Une annulation (arrêt du bot) passe, elle."""
+    ratees: list = []
+
+    def __init__(self, nom: str):
+        self.nom = nom
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type_, ex, tb):
+        if ex is None or not isinstance(ex, Exception):
+            return False
+        _logerr("demarrage." + self.nom, ex)
+        _Etape.ratees.append(self.nom)
+        return True
+
+
 async def _activite_boot():
-    """Câble les modules à leur base. Appelé une fois au boot.
+    """Câble les modules à leur base. Appelé une fois au boot. 24/10/2026 (revue) : un module = une étape
+    (`_Etape`) — l'erreur de l'un est journalisée et notée dans /stats « demarrage » ; les suivants
+    s'installent quand même (avant : la première erreur laissait tous les suivants sans réglages).
 
     ⚠️ LE SYSTÈME D'ACTIVITÉ EST RETIRÉ (03/10/2026) : ne restent que le
     COMPTAGE des jours d'activité (bouton « Activité » de /rellseas) et le
     démontage de ce que le système avait posé (`_travaux_de_demarrage`).
     """
-    activite_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print,
-                          suivi=_activite_suivi)
-    activite_demontage_module.setup(log=print)
-    visibilite_module.setup(log=print)
+    with _Etape("activite"):
+        activite_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print,
+                              suivi=_activite_suivi)
+    with _Etape("activite_demontage"):
+        activite_demontage_module.setup(log=print)
+    with _Etape("visibilite"):
+        visibilite_module.setup(log=print)
 
     #  Le bouton « Retour » des panneaux doit rouvrir /configure. On l'injecte
     #  plutôt que de laisser un module importer MainPanelV2 : ça créerait un
@@ -20838,20 +20863,23 @@ async def _activite_boot():
     async def _retour_vers_configure(u, g, inter):
         await MainPanelV2(u, g).render_to(inter, edit=True)
 
-    roblox_ui.setup(db_set=db_set, webhook_send=webhook_send, log=print)
-    roblox_ui.set_retour(_retour_vers_configure)
-    roblox_ui.set_relever(lambda: _relever_actus(forcer=True))
+    with _Etape("roblox_ui"):
+        roblox_ui.setup(db_set=db_set, webhook_send=webhook_send, log=print)
+        roblox_ui.set_retour(_retour_vers_configure)
+        roblox_ui.set_relever(lambda: _relever_actus(forcer=True))
 
     #  ⚠️ LES RÔLES DE PING SONT INJECTÉS, PAS DEVINÉS. `roblox_pings` ne
     #  connaît ni la base ni la config : sans ce `setup`, `role_de` planterait
     #  sur `_cfg = None` et chaque annonce sortirait SANS ping, en silence —
     #  la fiche partirait quand même, donc personne ne verrait le défaut.
-    roblox_pings_module.setup(cfg=cfg, db_set=db_set, log=print)
+    with _Etape("roblox_pings"):
+        roblox_pings_module.setup(cfg=cfg, db_set=db_set, log=print)
 
     #  Réseaux sociaux : même injection. Sans elle, le « ◀️ Retour » du panneau
     #  social ramène vers `AdminMasterPanelV2`, ouvert par `/admin` — commande
     #  RETIRÉE. Le bouton menait donc à un écran que plus rien n'atteint.
-    panels2026.set_retour(_retour_vers_configure)
+    with _Etape("panels2026"):
+        panels2026.set_retour(_retour_vers_configure)
 
     #  Rellseas : le panneau de /configure ne fait que RÉGLER qui a le droit ;
     #  la garde vit dans `/rellseas` elle-même (`_rellseas_autorise`).
@@ -20880,92 +20908,120 @@ async def _activite_boot():
                 (guild_id, user_id, datetime.now(timezone.utc).isoformat()))
             await db.commit()
 
-    rellseas_ui.setup(cfg=cfg, db_set=db_set, get_db=get_db,
-                      mesurer=_rellseas_mesurer,
-                      mesurer_groupe=_rellseas_mesurer_groupe,
-                      marquer_suivi=_rellseas_marquer_suivi,
-                      #  ⚠️ La garde passe par le setup, plus par le
-                      #  constructeur : le panneau est PERSISTANT, il est
-                      #  construit au démarrage sans savoir qui l'ouvrira.
-                      autorise=_rellseas_autorise, log=print)
-    rellseas_ui.set_retour(_retour_vers_configure)
-    recrutements.setup(get_db=get_db, cfg=cfg, db_set=db_set, salon=_salon_transcripts_rellseas,
-                       role=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
-                       panneaux=rellseas_ui.panneaux_tickets, lien=tableau.lien_pour,
-                       decider=_decision_recrutement, autorise=_peut_decider, log=print)
-    await recrutements.init_db()
-    recrutements.demarrer(bot)
-    registre.setup(get_db=get_db, log=print, apres_grave=vigilance.planifier)
-    await registre.init_db()
-    vigilance.setup(get_db=get_db, salon=_salon_alertes_site, carte=_carte_vigilance, bot=bot,
-                    epargne=_epargne_vigilance, log=print)
-    await vigilance.init_db()
-    questions.setup(get_db=get_db, est_staff=_staff_ou_plus, log=print)
-    await questions.init_db()
-    ulogger2026.vue_alerte = _vue_alerte
-    tableau.setup(bot=bot, base_url=transcript_store.public_base_url(), cfg=cfg, get_db=get_db,
-                  cle=os.getenv("TABLEAU_CLE") or hashlib.sha256((TOKEN or "").encode() + b"|tableau").hexdigest(),
-                  mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_a_la_tete,
-                  radie=_RADIE_ROLE_NAME, direction=_a_la_tete, tete=TETE_IDS,
-                  mis_a_part=lambda g, m, c: _a_la_tete(g, m, c) or _direction_ou_plus(g, m, c),
-                  actions=_ACTIONS_TABLEAU, alerte_securite=_alerte_securite_site,
-                  conversation=_conversation_ticket, log=print)
-    await tableau.init_db()
-    casier.setup(get_db=get_db, log=print)
-    await casier.init_db()
-    clan.setup(get_db=get_db, log=print)
-    await clan.init_db()
-    publications.setup(get_db=get_db, instance=_INSTANCE_ID, log=print)
-    await publications.init_db()
-    websub_youtube.setup(secret=os.getenv("WEBSUB_SECRET") or hashlib.sha256((TOKEN or "").encode() + b"|websub").hexdigest()[:40],
-                         base_url=transcript_store.public_base_url(), chaines=_chaines_youtube_suivies,
-                         annoncer=_annoncer_websub, log=print)
-    roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
-    await roblox_news_module.init_db()
+    with _Etape("rellseas_ui"):
+        rellseas_ui.setup(cfg=cfg, db_set=db_set, get_db=get_db,
+                          mesurer=_rellseas_mesurer,
+                          mesurer_groupe=_rellseas_mesurer_groupe,
+                          marquer_suivi=_rellseas_marquer_suivi,
+                          #  ⚠️ La garde passe par le setup, plus par le
+                          #  constructeur : le panneau est PERSISTANT, il est
+                          #  construit au démarrage sans savoir qui l'ouvrira.
+                          autorise=_rellseas_autorise, log=print)
+        rellseas_ui.set_retour(_retour_vers_configure)
+    with _Etape("recrutements"):
+        recrutements.setup(get_db=get_db, cfg=cfg, db_set=db_set, salon=_salon_transcripts_rellseas,
+                           role=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
+                           panneaux=rellseas_ui.panneaux_tickets, lien=tableau.lien_pour,
+                           decider=_decision_recrutement, autorise=_peut_decider, log=print)
+        await recrutements.init_db()
+        recrutements.demarrer(bot)
+    with _Etape("registre"):
+        registre.setup(get_db=get_db, log=print, apres_grave=vigilance.planifier)
+        await registre.init_db()
+    with _Etape("vigilance"):
+        vigilance.setup(get_db=get_db, salon=_salon_alertes_site, carte=_carte_vigilance, bot=bot,
+                        epargne=_epargne_vigilance, log=print)
+        await vigilance.init_db()
+    with _Etape("questions"):
+        questions.setup(get_db=get_db, est_staff=_staff_ou_plus, log=print)
+        await questions.init_db()
+    with _Etape("ulogger2026"):
+        ulogger2026.vue_alerte = _vue_alerte
+    with _Etape("tableau"):
+        tableau.setup(bot=bot, base_url=transcript_store.public_base_url(), cfg=cfg, get_db=get_db,
+                      cle=os.getenv("TABLEAU_CLE") or hashlib.sha256((TOKEN or "").encode() + b"|tableau").hexdigest(),
+                      mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_a_la_tete,
+                      radie=_RADIE_ROLE_NAME, direction=_a_la_tete, tete=TETE_IDS,
+                      mis_a_part=lambda g, m, c: _a_la_tete(g, m, c) or _direction_ou_plus(g, m, c),
+                      actions=_ACTIONS_TABLEAU, alerte_securite=_alerte_securite_site,
+                      conversation=_conversation_ticket, log=print)
+        await tableau.init_db()
+    with _Etape("casier"):
+        casier.setup(get_db=get_db, log=print)
+        await casier.init_db()
+    with _Etape("clan"):
+        clan.setup(get_db=get_db, log=print)
+        await clan.init_db()
+    with _Etape("publications"):
+        publications.setup(get_db=get_db, instance=_INSTANCE_ID, log=print)
+        await publications.init_db()
+    with _Etape("websub_youtube"):
+        websub_youtube.setup(secret=os.getenv("WEBSUB_SECRET") or hashlib.sha256((TOKEN or "").encode() + b"|websub").hexdigest()[:40],
+                             base_url=transcript_store.public_base_url(), chaines=_chaines_youtube_suivies,
+                             annoncer=_annoncer_websub, log=print)
+    with _Etape("roblox_news"):
+        roblox_news_module.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
+        await roblox_news_module.init_db()
 
-    visuels.setup(base_url=transcript_store.public_base_url(), log=print)
-    asyncio.create_task(visuels.installer_icones(bot))
-    notifs.setup(cfg=cfg, db_set=db_set, log=print)
-    sondages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_sondage_refuse,
-                   controle=_access_gate_reason, log=print)
-    sondages.set_retour(_retour_vers_configure)
-    await sondages.init_db()
-    sondages.demarrer(bot)
-    suggestions.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_sondage_refuse,
-                      controle=_access_gate_reason, salon_logs=_salon_logs_dedie, log=print)
-    suggestions.set_retour(_retour_vers_configure)
-    await suggestions.init_db()
-    boosts.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
-    await boosts.init_db()
-    entraide.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_demande_refusee,
-                   controle=_access_gate_reason, est_staff=_entraide_staff, journal=_entraide_journal,
-                   langue=_langue_membre, archiver=_archiver_fil, log=print)
-    entraide.set_retour(_retour_vers_configure)
-    entraide.set_installateur(zones.installer)
-    await entraide.init_db()
-    equipages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_demande_refusee,
-                    controle=_access_gate_reason, est_staff=_entraide_staff, journal=_entraide_journal,
-                    langue=_langue_membre, log=print)
-    await equipages.init_db()
-    zones.setup(cfg=cfg, db_set=db_set, lecteurs=_lecteurs_archives, ticket=_salon_des_tickets,
-                boutons_langue=lambda: [LangSelectButton("fr"), LangSelectButton("en")], log=print)
-    annonces.setup(get_db=get_db, cfg=cfg, db_set=db_set, est_tete=_a_la_tete, journal=_annonces_journal,
-                   role_clan=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
-                   langue=_langue_membre, log=print)
-    await annonces.init_db()
-    faq.setup(cfg=cfg, destinations=_faq_destinations, est_staff=_staff_ou_plus, langue=_langue_de_membre, log=print)
-    invitations.setup(get_db=get_db, log=print)
-    await invitations.init_db()
-    cadeaux.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_cadeaux_journal,
-                  ticket=_salon_des_tickets, langue=_langue_membre, log=print, invitations=invitations.total,
-                  invitations_tous=invitations.totaux, relever=invitations.reconcilier)
-    await cadeaux.init_db()
-    _installer_arret_propre()
-    vocaux.setup(proprio=_vocal_info, est_staff=_entraide_staff, log=print)
-    liens_jeux.setup(cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_liens_journal, jeux=zones.JEUX,
-                     log=print)
+    with _Etape("visuels"):
+        visuels.setup(base_url=transcript_store.public_base_url(), log=print)
+        asyncio.create_task(visuels.installer_icones(bot))
+    with _Etape("notifs"):
+        notifs.setup(cfg=cfg, db_set=db_set, log=print)
+    with _Etape("sondages"):
+        sondages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_sondage_refuse,
+                       controle=_access_gate_reason, log=print)
+        sondages.set_retour(_retour_vers_configure)
+        await sondages.init_db()
+        sondages.demarrer(bot)
+    with _Etape("suggestions"):
+        suggestions.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_sondage_refuse,
+                          controle=_access_gate_reason, salon_logs=_salon_logs_dedie, log=print)
+        suggestions.set_retour(_retour_vers_configure)
+        await suggestions.init_db()
+    with _Etape("boosts"):
+        boosts.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=print)
+        await boosts.init_db()
+    with _Etape("entraide"):
+        entraide.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_demande_refusee,
+                       controle=_access_gate_reason, est_staff=_entraide_staff, journal=_entraide_journal,
+                       langue=_langue_membre, archiver=_archiver_fil, log=print)
+        entraide.set_retour(_retour_vers_configure)
+        entraide.set_installateur(zones.installer)
+        await entraide.init_db()
+    with _Etape("equipages"):
+        equipages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=_texte_demande_refusee,
+                        controle=_access_gate_reason, est_staff=_entraide_staff, journal=_entraide_journal,
+                        langue=_langue_membre, log=print)
+        await equipages.init_db()
+    with _Etape("zones"):
+        zones.setup(cfg=cfg, db_set=db_set, lecteurs=_lecteurs_archives, ticket=_salon_des_tickets,
+                    boutons_langue=lambda: [LangSelectButton("fr"), LangSelectButton("en")], log=print)
+    with _Etape("annonces"):
+        annonces.setup(get_db=get_db, cfg=cfg, db_set=db_set, est_tete=_a_la_tete, journal=_annonces_journal,
+                       role_clan=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
+                       langue=_langue_membre, log=print)
+        await annonces.init_db()
+    with _Etape("faq"):
+        faq.setup(cfg=cfg, destinations=_faq_destinations, est_staff=_staff_ou_plus, langue=_langue_de_membre, log=print)
+    with _Etape("invitations"):
+        invitations.setup(get_db=get_db, log=print)
+        await invitations.init_db()
+    with _Etape("cadeaux"):
+        cadeaux.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_cadeaux_journal,
+                      ticket=_salon_des_tickets, langue=_langue_membre, log=print, invitations=invitations.total,
+                      invitations_tous=invitations.totaux, relever=invitations.reconcilier)
+        await cadeaux.init_db()
+    with _Etape("arret_propre"):
+        _installer_arret_propre()
+    with _Etape("vocaux"):
+        vocaux.setup(proprio=_vocal_info, est_staff=_entraide_staff, log=print)
+    with _Etape("liens_jeux"):
+        liens_jeux.setup(cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_liens_journal, jeux=zones.JEUX,
+                         log=print)
 
-    await activite_module.init_db()
+    with _Etape("activite"):
+        await activite_module.init_db()
 
 
 _PRET_UNE_FOIS = False
