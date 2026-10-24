@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import discord
@@ -78,6 +79,8 @@ TEXTES = {
     "certif_reserve_mm": {"fr": "Réservé aux middlemen{role}.", "en": "Only for middlemen{role}."},
     "certif_reserve": {"fr": "Réservé aux guides {nom}{role}.", "en": "Only for {nom} guides{role}."},
     "certif_soi": {"fr": "Tu ne peux pas certifier ta propre demande.", "en": "You can't certify your own request."},
+    "certif_partie": {"fr": "Tu ne peux pas certifier un échange dont tu es l'une des parties.",
+                      "en": "You can't certify a trade you're part of."},
     "certif_titre": {"fr": "Certifier · n°{id}", "en": "Certify · #{id}"},
     "certif_texte": {"fr": "Certifier que l'aide a été faite ? La demande se clôt ; les joueurs cochés sont remerciés.",
                      "en": "Certify the help was given? The request closes; the selected players are thanked."},
@@ -93,8 +96,8 @@ TEXTES = {
     "clore_reserve": {"fr": "Seuls l'auteur, les guides du type et le staff clôturent une demande.",
                       "en": "Only the author, this type's guides and the staff can close a request."},
     "clore_titre": {"fr": "Clôturer ta demande", "en": "Close your request"},
-    "clore_texte": {"fr": "C'est réglé ? Le fil se ferme et disparaît ; l'historique reste au staff.",
-                    "en": "All done? The thread closes and disappears; the staff keeps the history."},
+    "clore_texte": {"fr": "C'est réglé ? Ta demande se ferme ; sa carte et les réponses s'effacent peu après.",
+                    "en": "All done? Your request closes; its card and the replies are removed shortly after."},
     "clore_titre_trade": {"fr": "Clôturer ton échange", "en": "Close your trade"},
     "clore_texte_trade": {"fr": "L'échange s'est bien passé des deux côtés ? Dis avec qui, puis clôture.",
                           "en": "Did the trade go well on both sides? Say who with, then close."},
@@ -103,10 +106,12 @@ TEXTES = {
     "clore_annuler": {"fr": "Annuler ma demande", "en": "Cancel my request"},
     "clore_avec": {"fr": "Avec qui ? (facultatif)", "en": "Who with? (optional)"},
     "clore_titre_autre": {"fr": "Clôturer cette demande", "en": "Close this request"},
-    "clore_texte_autre": {"fr": "Clôturer sans certifier ? Le fil se ferme et disparaît ; l'historique reste au staff.",
-                          "en": "Close without certifying? The thread closes and disappears; the staff keeps the history."},
+    "clore_texte_autre": {"fr": "Clôturer sans certifier ? La demande se ferme ; sa carte et les réponses s'effacent "
+                                "peu après.",
+                          "en": "Close without certifying? The request closes; its card and the replies are removed "
+                                "shortly after."},
     "clore_sans": {"fr": "Clôturer sans certifier", "en": "Close without certifying"},
-    "cloturee": {"fr": "Demande clôturée ✅ Le fil se ferme.", "en": "Request closed ✅ The thread is closing."},
+    "cloturee": {"fr": "Demande clôturée ✅", "en": "Request closed ✅"},
 }
 
 
@@ -1114,8 +1119,12 @@ async def certifier(g, did: int, par, credites: list, partenaire: int = 0, langu
         d = await charger(did)
         if d is None or d["statut"] not in OUVERTS:
             return tr("deja_close", langue)
+        #  24/10/2026 (revue) : un guide ne se crédite pas lui-même, et un échange ne se certifie pas par l'une
+        #  de ses deux parties (l'auteur, ou celui qu'on désigne comme partenaire) — même pour le staff.
+        if ZONES[d["zone"]].echange and par.id in (d["auteur_id"], int(partenaire or 0)):
+            return tr("certif_partie", langue)
         t = int(time.time())
-        credites = [int(x) for x in dict.fromkeys(credites) if int(x) != d["auteur_id"]][:MAX_AIDANTS]
+        credites = [int(x) for x in dict.fromkeys(credites) if int(x) not in (d["auteur_id"], par.id)][:MAX_AIDANTS]
         d.update(statut="terminee", ferme=t, ferme_par=par.id, certifie_par=par.id, credites=credites,
                  partenaire_id=int(partenaire or 0), maj=t)
         await _ecrire("UPDATE entraide_demandes SET statut=?, ferme=?, ferme_par=?, certifie_par=?, credites=?,"
@@ -1195,7 +1204,8 @@ class VueCertifier(LayoutView):
         super().__init__(timeout=300)
         self.d, self.z, self.par, self.langue, self.choisis = d, z, par, langue, None
         echange = z.echange
-        defauts = [discord.Object(id=int(x)) for x in d["aidants"][:1 if echange else MAX_AIDANTS]]
+        defauts = [discord.Object(id=int(x)) for x in d["aidants"]
+                   if int(x) != par.id][:1 if echange else MAX_AIDANTS]
         self.qui = UserSelect(placeholder=tr("certif_qui_trade" if echange else "certif_qui", langue),
                               min_values=0, max_values=1 if echange else MAX_AIDANTS, default_values=defauts)
         self.qui.callback = self._cb_qui
@@ -1218,7 +1228,8 @@ class VueCertifier(LayoutView):
 
     async def _cb_ok(self, i):
         await i.response.defer()
-        choisis = self.choisis if self.choisis is not None else [int(x) for x in self.d["aidants"]]
+        choisis = self.choisis if self.choisis is not None else [int(x) for x in self.d["aidants"]
+                                                                   if int(x) != i.user.id]
         if self.z.echange:
             erreur = await certifier(i.guild, self.d["id"], i.user, [], partenaire=(choisis or [0])[0],
                                      langue=self.langue)
@@ -1404,9 +1415,9 @@ async def _effacer_carte(porteur, d: dict) -> None:
     """« Un vrai système de nettoyage ultra propre » : la carte, les mots du bot dessous, et les
     messages qui y répondaient (ou répondaient à ces réponses)."""
     carte = int(d["fil_id"])
-    a_effacer = [carte] + await _notes(d["id"])
+    a_effacer = [carte] + await _notes(d["id"]) + [m for m, did in list(_REPONSES.items()) if did == d["id"]]
     try:
-        async for msg in porteur.history(limit=200, after=discord.Object(id=carte)):
+        async for msg in porteur.history(limit=1000, after=discord.Object(id=carte)):
             ref = getattr(getattr(msg, "reference", None), "message_id", None)
             if ref in a_effacer:
                 a_effacer.append(msg.id)
@@ -1445,19 +1456,33 @@ async def entretenir(g, maintenant: float | None = None) -> dict:
         return bilan
     t = maintenant or time.time()
     actions = 0
-    for d in await _lignes(_SQL_OUVERTES, (g.id,)):
+    ouvertes = await _lignes(_SQL_OUVERTES, (g.id,))
+    await _rafraichir_reperes(g, ouvertes)
+    verifiees = _VERIFIEES.setdefault(g.id, {})
+    for k in set(verifiees) - {d["id"] for d in ouvertes}:
+        verifiees.pop(k, None)
+    if len(_ACTIVITE) > REPONSES_MAX:
+        for k in [k for k, v in _ACTIVITE.items() if t - v > ACTIVITE_S]:
+            _ACTIVITE.pop(k, None)
+    for d in ouvertes:
         if actions >= PAR_PASSAGE:
             break
         z = ZONES.get(d["zone"])
         if z is None:
             continue
-        try:
-            trouve = await _existe(g, d)
-        except discord.HTTPException as ex:
-            _log(f"[ENTRAIDE:DETAIL] lecture de la demande={d['id']} {ex}")
-            continue
+        if d["mode"] == "carte" and t - verifiees.get(d["id"], -1e18) < VERIF_S:
+            trouve = True          # relue il y a moins de 30 min ; une suppression arrive par `sur_suppression`
+        else:
+            try:
+                trouve = await _existe(g, d)
+            except discord.HTTPException as ex:
+                _log(f"[ENTRAIDE:DETAIL] lecture de la demande={d['id']} {ex}")
+                continue
+            if trouve is not None:
+                verifiees[d["id"]] = t
         if trouve is None:
-            await _ecrire("UPDATE entraide_demandes SET statut='retiree', ferme=?, maj=?, supprime=1 WHERE id=?",
+            #  Retirée (sa carte supprimée) : le passage suivant efface les mots du bot et les réponses.
+            await _ecrire("UPDATE entraide_demandes SET statut='retiree', ferme=?, maj=? WHERE id=?",
                           (int(t), int(t), d["id"]))
             bilan["retirees"] += 1
             actions += 1
@@ -1483,6 +1508,73 @@ async def entretenir(g, maintenant: float | None = None) -> dict:
         _verifies[g.id] = t
         await assurer_panneaux(g)
     return bilan
+
+
+#  24/10/2026 (revue) : les réponses faites sous une carte gardent la demande vivante. Seul `maj` comptait, et une
+#  réponse ne le touchait pas : une demande où l'on discutait encore fermait « faute d'activité ».
+REPONSES_MAX = 5000
+ACTIVITE_S = 300          # `maj` écrit au plus une fois toutes les 5 minutes par demande
+VERIF_S = 1800            # une carte ouverte est relue sur Discord toutes les 30 minutes (sa suppression arrive en direct)
+_REPONSES: "OrderedDict[int, int]" = OrderedDict()   # réponse → demande (les dernières)
+_REPERES: dict = {}       # serveur → {carte ou mot du bot → demande}
+_CARTES: dict = {}        # serveur → {carte → demande}
+_ACTIVITE: dict = {}      # demande → dernière écriture de `maj`
+_VERIFIEES: dict = {}     # serveur → {demande → dernière lecture de sa carte}
+_SUIVI = {"reponses": 0, "retirees_en_direct": 0}   # depuis le démarrage, pour /stats
+
+
+def releve() -> dict:
+    """/stats : les cartes ouvertes suivies, les réponses vues et les cartes retirées en direct depuis le démarrage."""
+    return {"cartes_suivies": sum(len(x) for x in _CARTES.values()), **_SUIVI}
+
+
+async def _rafraichir_reperes(g, ouvertes: list) -> None:
+    """Les cartes ouvertes et les mots du bot dessous : à quelle demande répond un message."""
+    cartes = {int(d["fil_id"]): d["id"] for d in ouvertes if d["mode"] == "carte" and int(d["fil_id"] or 0)}
+    reperes = dict(cartes)
+    ids = [d["id"] for d in ouvertes]
+    if ids:
+        async with _get_db() as db:
+            async with db.execute("SELECT demande_id, message_id FROM entraide_notes WHERE demande_id IN ("
+                                  + ",".join("?" * len(ids)) + ")", tuple(ids)) as cur:
+                for did, mid in await cur.fetchall():
+                    reperes[int(mid)] = int(did)
+    _CARTES[g.id], _REPERES[g.id] = cartes, reperes
+
+
+async def sur_message(msg) -> int:
+    """Une réponse à une carte ouverte, à un mot du bot dessous ou à une autre réponse : la demande reste vivante
+    (son `maj` avance). Rend la demande, ou 0."""
+    g = getattr(msg, "guild", None)
+    ref = getattr(getattr(msg, "reference", None), "message_id", None)
+    if g is None or not ref or getattr(getattr(msg, "author", None), "bot", False) or _get_db is None:
+        return 0
+    did = _REPONSES.get(int(ref)) or (_REPERES.get(g.id) or {}).get(int(ref))
+    if not did:
+        return 0
+    _REPONSES[int(msg.id)] = did
+    _SUIVI["reponses"] += 1
+    while len(_REPONSES) > REPONSES_MAX:
+        _REPONSES.popitem(last=False)
+    t = time.time()
+    if t - _ACTIVITE.get(did, 0) >= ACTIVITE_S:
+        _ACTIVITE[did] = t
+        await _ecrire("UPDATE entraide_demandes SET maj=? WHERE id=? AND statut IN ('ouverte', 'prise')",
+                      (int(t), did))
+    return did
+
+
+async def sur_suppression(guild_id: int, message_id: int) -> int:
+    """La carte d'une demande ouverte supprimée (un modérateur) : la demande est retirée tout de suite, et le
+    passage suivant efface les mots du bot et les réponses. Rend la demande, ou 0."""
+    did = (_CARTES.get(int(guild_id or 0)) or {}).pop(int(message_id), 0)
+    if not did or _get_db is None:
+        return 0
+    t = int(time.time())
+    await _ecrire("UPDATE entraide_demandes SET statut='retiree', ferme=?, maj=? WHERE id=?"
+                  " AND statut IN ('ouverte', 'prise')", (t, t, did))
+    _SUIVI["retirees_en_direct"] += 1
+    return did
 
 
 async def fermer_anciennes(g, note: str) -> int:

@@ -357,8 +357,11 @@ def test_E8_le_nettoyage_ferme_l_inactif_efface_le_clos_rattrape_l_oublie(env):
     derniere = [k for mid, k in aide.cartes if mid == carte_boss][-1]
     assert ids(derniere["view"]) == [] and "plus d'activité · no activity" in textes(derniere["view"])
     bilan = run(E.entretenir(g, maintenant=t0 + 7 * 3600 + 61))
-    assert bilan == {"expirees": 0, "retirees": 0, "effacees": 1} and carte_boss in g.effaces
-    assert run(E.charger(1))["supprime"] == 1 and run(E.charger(2))["statut"] == "ouverte", "la base garde la trace"
+    #  24/10/2026 (revue) : la demande dont la carte a été effacée à la main part aussi au passage suivant, avec
+    #  les mots du bot et les réponses (avant, elle était marquée effacée sans que rien ne soit retiré).
+    assert bilan == {"expirees": 0, "retirees": 0, "effacees": 2} and carte_boss in g.effaces
+    assert run(E.charger(1))["supprime"] == 1 and run(E.charger(3))["supprime"] == 1
+    assert run(E.charger(2))["statut"] == "ouverte", "la base garde la trace"
     run(E._regler(g, "garder_h", 24))
     run(E.fermer(g, 2, 8, "fermee", maintenant=t0 + 8 * 3600))
     assert run(E.entretenir(g, maintenant=t0 + 9 * 3600))["effacees"] == 0, "réglé à 24 h : elle reste"

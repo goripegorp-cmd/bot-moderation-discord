@@ -6045,7 +6045,10 @@ _TACHES_QUESTIONS: set = set()
 
 async def _questions_hook(msg):
     try:
-        await questions.sur_message(msg, await cfg(msg.guild.id))
+        c = await cfg(msg.guild.id)
+        if _dans_entraide(msg.channel, c):   # 24/10/2026 (revue) : on y répond aux cartes, pas au staff
+            return
+        await questions.sur_message(msg, c)
     except Exception as ex:
         _logerr("questions.message", ex, guild_id=getattr(msg.guild, 'id', 0))
 
@@ -12762,6 +12765,45 @@ async def _faq_hook(msg):
 bot.add_listener(_faq_hook, "on_message")
 
 
+def _dans_entraide(ch, c) -> bool:
+    """Un post (ou salon) 🛟 Help / 🤝 Trade : on y répond aux cartes — ni FAQ, ni « question » pour le site."""
+    ici = {getattr(ch, "id", 0), getattr(ch, "parent_id", 0) or 0} - {0}
+    return bool(ici & (entraide.ids_salons(c) - {0}))
+
+
+#  24/10/2026 (revue) : la FAQ se tait dans 🛟 Help / 🤝 Trade, et l'effacement de ses réponses survit à un
+#  redémarrage (avant : `delete_after` seul, perdu au redémarrage — la carte restait pour toujours).
+faq.set_hooks(exclus=lambda g, c: entraide.ids_salons(c) - {0},
+              effacer_plus_tard=lambda m, secondes: _register_for_cleanup(m, secondes, "faq"))
+
+
+async def _entraide_message(msg):
+    try:
+        await entraide.sur_message(msg)
+    except Exception as ex:
+        _logerr("entraide.message", ex, guild_id=getattr(getattr(msg, "guild", None), "id", 0))
+
+
+async def _entraide_effacement(payload):
+    try:
+        await entraide.sur_suppression(payload.guild_id or 0, payload.message_id)
+    except Exception as ex:
+        _logerr("entraide.effacement", ex, guild_id=getattr(payload, "guild_id", 0) or 0)
+
+
+async def _entraide_effacement_masse(payload):
+    try:
+        for mid in list(payload.message_ids or ()):
+            await entraide.sur_suppression(payload.guild_id or 0, mid)
+    except Exception as ex:
+        _logerr("entraide.effacement_masse", ex, guild_id=getattr(payload, "guild_id", 0) or 0)
+
+
+bot.add_listener(_entraide_message, "on_message")
+bot.add_listener(_entraide_effacement, "on_raw_message_delete")
+bot.add_listener(_entraide_effacement_masse, "on_raw_bulk_message_delete")
+
+
 async def _invitations_lien(invite):
     try:
         invitations.sur_lien(invite)
@@ -13186,12 +13228,18 @@ async def _vue_aide(g, c):
                                     "The bot speaks your language:"),
              discord.ui.ActionRow(LangSelectButton("fr"), LangSelectButton("en"))]
     ids = []
+
+    def _composants(xs) -> int:   # le conteneur compris (limite Discord : 40)
+        return 1 + sum(getattr(x, "_total_count", 1) for x in xs)
     for titre, phrase, boutons in zones.groupes_aide(g, c, await zones.conf(g)):
         if not boutons:
             continue
-        items.append(discord.ui.Separator())
-        items.append(discord.ui.TextDisplay(f"### {titre}\n{phrase}"))
-        items.append(discord.ui.ActionRow(*[Button(label=libelle, url=x.jump_url) for x, libelle in boutons[:5]]))
+        groupe = [discord.ui.Separator(), discord.ui.TextDisplay(f"### {titre}\n{phrase}"),
+                  discord.ui.ActionRow(*[Button(label=libelle, url=x.jump_url) for x, libelle in boutons[:5]])]
+        if _composants(items + groupe) + 5 > 40:   # 5 : le staff (séparateur, section, bouton) et la ligne du bas
+            print("[AIDE][E1] panneau plein : un compartiment n'entre pas")
+            break
+        items += groupe
         ids += [x.jump_url for x, _l in boutons[:5]]
     if ticket is not None:
         items.append(discord.ui.Separator())
@@ -13339,6 +13387,10 @@ async def entraide_task():
                 _faq_vus[g.id] = _faq_trouves(g, await cfg(g.id))
             if time.monotonic() - _zones_entretenues.get(g.id, -1e9) > 1800:
                 _zones_entretenues[g.id] = time.monotonic()
+                try:
+                    await suggestions.assurer_panneau(g)   # 24/10/2026 (revue) : 30 min au lieu de 12 h
+                except Exception as ex:
+                    _logerr("suggestions.panneau", ex, guild_id=g.id)
                 await zones.entretenir(g)
         except Exception as ex:
             _logerr("entraide.entretien", ex, guild_id=g.id)
@@ -14123,6 +14175,8 @@ async def _etat_public():
             "cadeaux_elagage": next((c['cadeaux_elagage_v1'] for c in confs if c.get('cadeaux_elagage_v1')), None),
             "erreurs_ui": diag.releve("ui"),
             "cadeaux_avis": next((c['cadeaux_avis_v1'] for c in confs if c.get('cadeaux_avis_v1')), None),
+            "accueil": dict(_DERNIER_ACCUEIL) or None,
+            "entraide_suivi": entraide.releve(),
             "sante_salons": next(iter([_sante_salons(g, c) for g, c in zip(list(bot.guilds), confs)
                                        if g.owner_id in TETE_IDS]), None),
             "invitations": next(iter([await invitations.releve(g.id) for g in list(bot.guilds)
@@ -22995,6 +23049,9 @@ async def _welcome_cleanup_before():
     await bot.wait_until_ready()
 
 
+_DERNIER_ACCUEIL: dict = {}
+
+
 async def _handle_welcome(member):
     """L'accueil d'un nouveau membre : UNE ligne de texte dans le salon d'accueil — sa mention, la bienvenue, le
     nombre de membres. Pas de carte ni de bouton (24/10/2026, le fondateur : « un petit texte… c'est tout »).
@@ -23027,6 +23084,8 @@ async def _handle_welcome(member):
             await _track_welcome_msg(member.guild.id, ch.id, getattr(_wm, 'id', 0))
         except Exception as ex:
             print(f"[_track_welcome_msg] {ex}")
+        _DERNIER_ACCUEIL.update(quand=int(time.time()), lignes=texte.count("\n") + 1, boutons=0,
+                                mention=member.mention in texte, membres=int(member.guild.member_count or 0))
         print(f"[WELCOME] posté msg={getattr(_wm, 'id', 0)} ch={ch.id} guild={member.guild.id}")
     except Exception as ex:
         _logerr("welcome.send", ex, guild_id=member.guild.id)
@@ -24126,23 +24185,10 @@ async def on_message(msg):
     except Exception as ex:
         print(f"[_check_auto_slow_mode] {ex}")
 
-    # ═══════════════ ENTRAIDE : détection d'appel à l'aide en chat ═══════════════
-    # Détecte « besoin d'aide / help me / quelqu'un peut m'aider… » en langage naturel
-    # et NUDGE l'auteur vers l'entraide (zéro MP, zéro ping aidant, auto-supprimé 5 min).
-    # Backgroundé (create_task) : CHEAP-FIRST en mémoire, ne bloque jamais on_message ;
-    # toutes les gardes (config/chatty/cooldown/DB) vivent dans le hook (fail-safe).
-
     # Questions posées dans les salons publics : l'onglet « Questions » du site (19/10/2026).
     _tq = asyncio.create_task(_questions_hook(msg))
     _TACHES_QUESTIONS.add(_tq)
     _tq.add_done_callback(_TACHES_QUESTIONS.discard)
-
-    # ═══════════════ ZONES SOCIALES : détection TRADE + maintien d'activité ═══════════════
-    # (1) Détecte « je trade X contre Y / wts / wtb / wtt / j'échange… » → propose un BOUTON
-    #     « Ouvrir un trade » (salon privé à 2, modéré, auto-fermé). (2) Rafraîchit l'activité
-    #     d'une zone quand on y parle (anti-fermeture prématurée). Backgroundé, fail-safe.
-    # Appariement croisé : une RÉPONSE à un message d'échange → propose de réunir les 2 (anti-arnaque
-    # via le flux de consentement existant). Backgroundé, fail-safe (toutes les gardes dans le hook).
 
     # ═══════════════ Phase 23 : DÉTECTION COMPTES PIRATÉS ═══════════════
     try:
@@ -30382,7 +30428,16 @@ async def _run_persistent_cleanup_once() -> dict:
             _done = True  # par défaut on solde la ligne ; False = on RÉESSAIE au prochain tour
             try:
                 guild = bot.get_guild(int(gid)) if gid else None
-                ch = guild.get_channel(int(ch_id)) if guild else None
+                ch = guild.get_channel_or_thread(int(ch_id)) if guild else None
+                if ch is None and guild is not None:
+                    #  24/10/2026 (revue) : un post endormi n'est pas en mémoire — le chercher avant de conclure
+                    #  qu'il a été supprimé (la réponse de la FAQ y restait pour toujours).
+                    try:
+                        ch = await guild.fetch_channel(int(ch_id))
+                    except discord.NotFound:
+                        ch = None
+                    except discord.HTTPException:
+                        ch, guild = None, None   # passager : on réessaiera
                 if ch and msg_id:
                     try:
                         msg = await ch.fetch_message(int(msg_id))

@@ -138,8 +138,11 @@ class FormulaireLiens(discord.ui.Modal):
 
     async def on_submit(self, i: discord.Interaction):
         g = i.guild
+        await i.response.defer(ephemeral=True, thinking=True)   # la base, la carte, le journal : > 3 s possible
         if g is None or not await _autorise(g, i.user):
-            return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
+            return await i.followup.send("Réservé au fondateur et à la direction.", ephemeral=True)
+        #  24/10/2026 (revue) : une adresse mal saisie garde le lien d'avant (« Ignoré ») au lieu de l'effacer.
+        actuels = dict((await _cfg(g.id)).get("jeux_liens") or {})
         nouveaux, refus = {}, []
         for cle, t in self.champs.items():
             v = str(t.value or "").strip()
@@ -149,6 +152,8 @@ class FormulaireLiens(discord.ui.Modal):
                 nouveaux[cle] = v
             else:
                 refus.append(next((j.nom for j in _jeux if j.cle == cle), cle))
+                if actuels.get(cle):
+                    nouveaux[cle] = actuels[cle]
         await _db_set(g.id, "jeux_liens", nouveaux)
         await assurer_carte(g)
         noms = ", ".join(j.nom for j in _jeux if j.cle in nouveaux) or "aucun"
@@ -156,11 +161,11 @@ class FormulaireLiens(discord.ui.Modal):
                        auteur_id=i.user.id)
         texte = f"✅ Liens enregistrés : {noms}. La carte de 🎮 game-link suit."
         if refus:
-            texte += "\n⚠️ Ignoré (une adresse https:// est attendue) : " + ", ".join(refus)
+            texte += "\n⚠️ Ignoré, le lien d'avant reste (une adresse https:// est attendue) : " + ", ".join(refus)
         v = LayoutView(timeout=60)
         v.add_item(discord.ui.Container(discord.ui.TextDisplay(texte),
                                         accent_color=Palette.WARNING if refus else Palette.SUCCESS))
-        await i.response.send_message(view=v, ephemeral=True)
+        await i.followup.send(view=v, ephemeral=True)
 
 
 class BoutonLiens(discord.ui.DynamicItem[Button], template=r"gl:liens"):

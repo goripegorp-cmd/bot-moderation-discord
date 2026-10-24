@@ -103,7 +103,9 @@ SUJETS = (
           "Dans 💡 Suggestions : bouton « Proposer », tout le monde vote, le staff répond.",
           "In 💡 Suggestions: “Suggest” button, everyone votes, the staff answers.",
           "suggestions",
-          (r"\b(suggestions?|suggest|propos(er|e) (une |des )?(id[ée]es?|am[ée]liorations?))\b",
+          #  « suggest » seul répondait à « can you suggest a build? » : il faut une idée à proposer.
+          (r"\b(suggestions?|propos(er|e) (une |des )?(id[ée]es?|am[ée]liorations?))\b",
+           r"\b(suggest (an? )?(ideas?|features?|improvements?)|make a suggestion)\b",
            r"\b(sugerencias?|sugerir|sugest[aã]o|sugest[oõ]es|vorschl[aä]ge?|vorschlagen|suggeriment[oi]|"
            r"suggerire)\b")),
     Sujet("aide_jeu", "🛟", "De l'aide en jeu", "Help in game",
@@ -134,8 +136,11 @@ SUJETS = (
           "Les vidéos et les lives de GoRipe sont publiés dans le salon GoRipe.",
           "GoRipe's videos and lives are posted in the GoRipe channel.",
           "goripe",
-          (r"\b(vid[ée]os?|lives?|streams?|twitch|youtube|tiktok|goripe)\b",
-           r"\b(directos?|transmisi[oó]n|transmiss[aã]o|livestreams?|dirette?)\b")),
+          #  24/10/2026 (revue) : « live » / « stream » seuls attrapaient « combien de lives ai-je ? » (les vies
+          #  d'un jeu) — il faut un déterminant (« le live », « en stream », « the live »…).
+          (r"\b(vid[ée]os?|twitch|youtube|tiktok|goripe|livestreams?)\b",
+           r"\b(le|les|en|un|ses|ton|tes|son|prochain|prochains|the|a|your|his|next)\s+(lives?|streams?)\b",
+           r"\b(directos?|transmisi[oó]n|transmiss[aã]o|dirette?)\b")),
 )
 #  Les textes quand le jeu est connu (« {jeu} ») et les actus Roblox.
 TEXTES_JEU = {
@@ -162,6 +167,7 @@ MOTS_AUTRES = re.compile(r"[¿¡]|\b(d[oó]nde|c[oó]mo|cu[aá]ndo|est[aá]n?|ha
 ROBLOX = re.compile(r"\broblox\b")
 
 _cfg = _langue = _est_staff = _destinations = None
+_exclus = _effacer_plus_tard = None
 _log = print
 _membres: dict = {}
 _salons: dict = {}
@@ -175,6 +181,17 @@ def setup(*, cfg, destinations, est_staff, langue=None, log=None):
     global _cfg, _destinations, _est_staff, _langue, _log
     _cfg, _destinations, _est_staff, _langue = cfg, destinations, est_staff, langue
     _log = log or print
+
+
+def set_hooks(*, exclus=None, effacer_plus_tard=None) -> None:
+    """`exclus(g, c)` → les salons et posts où la FAQ se tait (🛟 Help, 🤝 Trade : on y répond aux cartes) ;
+    `effacer_plus_tard(message, secondes)` (async) → la suppression différée qui survit à un redémarrage."""
+    global _exclus, _effacer_plus_tard
+    _exclus, _effacer_plus_tard = exclus, effacer_plus_tard
+
+
+def _attente(cle: tuple, delai: float, registre: dict, t: float) -> bool:
+    return t - registre.get(cle, -1e9) < delai
 
 
 def langue_du_texte(t: str) -> str:
@@ -318,6 +335,10 @@ async def sur_message(msg, maintenant: float | None = None) -> bool:
     c = await _cfg(g.id)
     if _est_staff(g, m, c):
         return False
+    if _exclus is not None:
+        ici = {getattr(msg.channel, "id", 0), getattr(msg.channel, "parent_id", 0) or 0} - {0}
+        if ici & set(_exclus(g, c) or ()):
+            return False
     langue = langue_q or "fr"
     if not langue_q and _langue is not None:  # rien dans la question : sa langue à lui
         try:
@@ -328,15 +349,23 @@ async def sur_message(msg, maintenant: float | None = None) -> bool:
     if r is None:
         return False
     t = maintenant or time.monotonic()
-    if not _libre((g.id, msg.channel.id, s.cle), SALON_S, _salons, t):
+    #  Les deux délais sont vérifiés AVANT d'en prendre un : un membre retenu ne bloque plus le salon.
+    cle_salon, cle_membre = (g.id, msg.channel.id, s.cle), (g.id, m.id, s.cle)
+    if _attente(cle_salon, SALON_S, _salons, t) or _attente(cle_membre, MEMBRE_S, _membres, t):
         return False
-    if not _libre((g.id, m.id, s.cle), MEMBRE_S, _membres, t):
-        return False
+    _libre(cle_salon, SALON_S, _salons, t)
+    _libre(cle_membre, MEMBRE_S, _membres, t)
     try:
-        await msg.reply(view=vue_reponse(*r), mention_author=False, allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=EFFACER_S)
+        rep = await msg.reply(view=vue_reponse(*r), mention_author=False,
+                              allowed_mentions=discord.AllowedMentions.none(), delete_after=EFFACER_S)
     except discord.HTTPException as ex:
         _log("[FAQ][E1] réponse non posée")
         _log(f"[FAQ][E1:DETAIL] sujet={s.cle} {type(ex).__name__} {ex}")
         return False
+    if rep is not None and _effacer_plus_tard is not None:   # un redémarrage n'oublie pas l'effacement
+        try:
+            await _effacer_plus_tard(rep, EFFACER_S)
+        except Exception as ex:
+            _log("[FAQ][E2] effacement différé non noté")
+            _log(f"[FAQ][E2:DETAIL] {type(ex).__name__} {ex}")
     return True

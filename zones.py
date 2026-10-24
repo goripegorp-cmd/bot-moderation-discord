@@ -670,19 +670,16 @@ async def ordonner(g) -> bool:
 
 async def entretenir(g) -> None:
     """Toutes les 30 minutes : les posts (des deux forums et du forum du clan) restent ouverts ; un post
-    qui doit rester verrouillé l'est. Jamais l'inverse : un post que le staff a verrouillé le reste. Les
-    deux guides suivent les posts et les rôles."""
-    for guide in (assurer_guide, assurer_guide_clan):
-        try:
-            await guide(g)
-        except discord.HTTPException as ex:
-            _log(f"[ZONES:DETAIL] guide {type(ex).__name__} {ex}")
+    qui doit rester verrouillé l'est. Jamais l'inverse : un post que le staff a verrouillé le reste. Un post
+    supprimé sort de la configuration (24/10/2026, revue : les guides gardaient un bouton vers un post disparu).
+    Puis les deux guides suivent les posts et les rôles."""
     cfz, c = await conf(g), await _cfg(g.id)
     verrous = {cle for j in JEUX for cle, _t, v, _x in j.posts if v}
     verrous_clan = {cle for cle, _t, v, _x in CLAN_POSTS if v}
     a_suivre = [(cle, info.get("id", 0), cle in verrous) for cle, info in cfz["posts"].items()]
     a_suivre += [(f"clan {cle}", (info or {}).get("id", 0), cle in verrous_clan)
                  for cle, info in dict(c.get("clan_posts") or {}).items()]
+    disparus = []
     for cle, fid, verrou in a_suivre:
         try:
             fil = await _resoudre(g, fid)
@@ -690,6 +687,8 @@ async def entretenir(g) -> None:
             _log(f"[ZONES:DETAIL] lecture du fil {cle} {ex}")
             continue
         if fil is None:
+            if int(fid or 0):
+                disparus.append(cle)
             continue
         reglage = {}
         if getattr(fil, "archived", False):
@@ -701,6 +700,28 @@ async def entretenir(g) -> None:
                 await fil.edit(**reglage)
             except discord.HTTPException as ex:
                 _log(f"[ZONES:DETAIL] réveil du fil {cle} {ex}")
+    if disparus:
+        await _oublier_posts(g, c, disparus)
+    for guide in (assurer_guide, assurer_guide_clan):
+        try:
+            await guide(g)
+        except discord.HTTPException as ex:
+            _log(f"[ZONES:DETAIL] guide {type(ex).__name__} {ex}")
+
+
+async def _oublier_posts(g, c: dict, cles: list) -> None:
+    """Les posts supprimés quittent la configuration : plus aucun bouton n'y mène (les guides, ❓aide, la FAQ)."""
+    posts = {k: dict(v) for k, v in (c.get("zones_posts") or {}).items()}
+    clan = dict(c.get("clan_posts") or {})
+    for cle in cles:
+        if cle.startswith("clan "):
+            clan.pop(cle[5:], None)
+        else:
+            posts.pop(cle, None)
+    await _db_set(g.id, "zones_posts", posts)
+    await _db_set(g.id, "clan_posts", clan)
+    _log("[ZONES][E7] post supprimé : retiré des guides")
+    _log(f"[ZONES][E7:DETAIL] serveur={g.id} posts={', '.join(cles)}")
 
 
 def lien_jouer(g, c: dict, j: Jeu):

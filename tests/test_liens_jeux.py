@@ -60,12 +60,18 @@ def test_L2_la_direction_regle_les_liens_la_carte_suit(env):
     j = interaction(g, g.membre(1))
     run(form.on_submit(j))
     assert env.conf["jeux_liens"] == {"rell": "https://www.roblox.com/games/123/Rell-Seas"}
-    retour = textes(j.response.messages[-1][1]["view"])
+    retour = textes(j.suivis[-1][1]["view"])   # 24/10/2026 (revue) : acquitté d'abord, la réponse suit
     assert "Ignoré" in retour and "Clover RPG" in retour, "une adresse fausse le dit"
     vue = ch.cartes[-1][1]["view"]
     assert [b.url for b in vue.walk_children() if isinstance(b, discord.ui.Button)] == \
         ["https://www.roblox.com/games/123/Rell-Seas"] and "Le lien arrive bientôt" in textes(vue)
     assert "Rell Seas" in env.journal[-1][1]
+    env.conf["jeux_liens"] = {"rell": "https://www.roblox.com/games/123/Rell-Seas",
+                              "clover": "https://www.roblox.com/games/9/Clover"}
+    k = interaction(g, g.membre(1))
+    run(form.on_submit(k))
+    assert env.conf["jeux_liens"]["clover"] == "https://www.roblox.com/games/9/Clover",         "une adresse mal saisie garde le lien d'avant"
+    assert "le lien d'avant reste" in textes(k.suivis[-1][1]["view"])
 
 
 def test_L3_branche_dans_le_bot():
