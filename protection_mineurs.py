@@ -186,15 +186,27 @@ _SECRET = [
 #  entre les mailles au calibrage. Or demander à un enfant s'il est SEUL CHEZ
 #  LUI est le marqueur le plus caractéristique du grooming : mélangé au
 #  sondage d'âge, il n'ajoutait rien ; séparé, il fait basculer.
+#  ⚠️ LA PRÉCISION EST OBLIGATOIRE (revue 24/10/2026). Facultative, « t'es seul ? mp moi on fait le
+#  donjon » — un joueur qui cherche un coéquipier — déclenchait une alerte « approche prédatrice ».
+#  « Seul » tout court veut dire « en solo » sur un serveur de jeu ; « seul CHEZ TOI », non.
 _ISOLEMENT = [
-    r"\bt(?:u\s+es|es)\s+(?:tout\s+)?seul(?:e)?\s*(?:chez\s+toi|a\s+la\s+maison|"
-    r"dans\s+ta\s+chambre)?\b",
+    r"\bt(?:u\s+es|es)\s+(?:tout\s+)?seul(?:e)?\s+(?:chez\s+toi|a\s+la\s+maison|"
+    r"dans\s+ta\s+chambre)\b",
     r"\btes\s+parents\s+(?:sont\s+la|dorment|travaillent|sont\s+pas\s+la|"
     r"sont\s+absents)\b",
     r"\bpersonne\s+(?:ne\s+)?(?:te\s+)?(?:regarde|voit|ecoute)\b",
     r"\byaa?\s+personne\s+(?:avec\s+toi|chez\s+toi)\b",
-    r"\bare\s+(?:you|u)\s+alone\b", r"\bis\s+anyone\s+(?:with|near)\s+you\b",
+    r"\bare\s+(?:you|u)\s+(?:home\s+alone|alone\s+(?:at\s+home|in\s+your\s+room))\b",
+    r"\bis\s+anyone\s+(?:with|near)\s+you\b",
 ]
+
+#  « Seul » NU : ne compte qu'à côté d'un SONDAGE D'ÂGE (« how old are you ? are you alone »,
+#  le cas manqué au calibrage). Avec un simple « mp moi », c'est la recherche d'un coéquipier.
+_SEUL_NU = [
+    r"\bt(?:u\s+es|es)\s+(?:tout\s+)?seul(?:e)?\b",
+    r"\bare\s+(?:you|u)\s+alone\b",
+]
+_RE_SEUL_NU = re.compile(r"(?:" + "|".join(_SEUL_NU) + r")", re.IGNORECASE)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  LES QUATRE FAMILLES QUI NE COMPTENT QU'À DEUX
@@ -317,6 +329,14 @@ def analyser(texte: str, deja_normalise: str | None = None) -> dict:
             m = rx.search(norm) or rx.search(brut.lower())
             if m:
                 out["familles"].append(nom)
+                out["extraits"].append(m.group(0)[:60])
+
+        #  « Seul » nu ne compte qu'avec le sondage d'âge (cf. `_SEUL_NU`).
+        isolement = "sondage d'isolement (seul chez toi ?)"
+        if "sondage d'âge" in out["familles"] and isolement not in out["familles"]:
+            m = _RE_SEUL_NU.search(norm) or _RE_SEUL_NU.search(brut.lower())
+            if m:
+                out["familles"].append(isolement)
                 out["extraits"].append(m.group(0)[:60])
 
         fortes = [f for f in out["familles"] if f in FAMILLES_FORTES]

@@ -106,10 +106,18 @@ _BELITTLE_TERMS = frozenset({
 # aussi dans _INSULT_TARGET_RE) → suppression + warn → mute en cas de récidive.
 _TIER2_EXTRA = frozenset({
     "ta gueule", "tagueule", "ta geule", "ta gueule sale", "ferme ta gueule",
-    "ferme ta grande gueule", "ferme ta bouche", "ferme-la", "ferme la", "ferme sa gueule",
+    "ferme ta grande gueule", "ferme ta bouche", "ferme sa gueule",
     "vos gueules", "fermez vos gueules", "ferme ta gueule toi", "nique ta race",
     "ta gueule connard", "grosse merde toi",
 })
+# « Ferme-la » (24/10/2026, revue) : « ferme la porte, tu laisses entrer le froid » était une insulte
+# ciblée (le « tu » suffisait), donc supprimée et inscrite au casier. Ce n'est un « tais-toi » que dans
+# un message court (≤ 4 mots, comme une réponse sèche), et jamais devant ce qu'on ferme.
+_FERME_LA_RE = re.compile(r"(?<!\w)ferme[\s-]+la(?!\w)(?!\s+(?:porte|fen[êe]tre|lumi[èe]re|bo[iî]te|"
+                          r"session|page|partie|map|carte|base|zone|salle|chambre|maison|voiture|"
+                          r"discussion|conv|conversation|boutique|trappe|grille|barri[èe]re)\b)",
+                          re.IGNORECASE | re.UNICODE)
+_FERME_LA_MOTS_MAX = 4
 # Abréviations de 2 lettres SANS ambiguïté (échappent au plancher de 3 lettres). « tg » =
 # « ta gueule » dans le chat FR. Matching FRONTIÈRE DE MOT strict → ne touche jamais un mot.
 _TIER2_ABBR = frozenset({"tg"})
@@ -191,6 +199,17 @@ def _compile_abbr(terms):
                           re.IGNORECASE | re.UNICODE)
     except Exception:
         return None
+
+
+def _ferme_la(texte: str):
+    """« ferme la » dans un message court (≤ 4 mots), jamais « ferme la porte… ». Le terme, ou None."""
+    try:
+        m = _FERME_LA_RE.search(texte or "")
+        if m and sum(1 for t in texte.split() if re.search(r"\w", t)) <= _FERME_LA_MOTS_MAX:
+            return m.group(0)
+    except Exception:
+        return None
+    return None
 
 
 def _fold(s: str) -> str:
@@ -324,6 +343,10 @@ def scan(raw: str, normalized: str | None = None):
                         best, term = 2, m.group(0)
                 except Exception:
                     pass
+            if best < 2:
+                h = _ferme_la(v)                       # « ferme la » : seul ou presque
+                if h:
+                    best, term = 2, h
         if best < 1:
             h = _hit(_RE1, v)
             if h:

@@ -13,11 +13,22 @@ import visuels
 from conftest_discord import Obj
 
 ARBRE = ast.parse((Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8"))
-NOMS = ("TETE_IDS", "_a_la_tete", "_BOTS_REFUSES", "_vue_alerte", "BoutonApprouverBot", "BoutonGere",
-        "BoutonFicheSite")
+NOMS = ("TETE_IDS", "_a_la_tete", "_BOTS_REFUSES", "_vue_alerte", "_carte_alerte_decidee", "BoutonApprouverBot",
+        "BoutonGere", "BoutonFicheSite")
+
+
+class _LayoutViewDuMessage:
+    """`LayoutView.from_message` : rend la carte que porte le faux message (boutons ordinaires, comme
+    ceux que Discord renvoie)."""
+
+    @staticmethod
+    def from_message(message, *, timeout=None):
+        return message.carte
 
 
 def _ns(conf, ecrits, journal):
+    import time
+
     async def cfg(_g):
         return conf
 
@@ -29,7 +40,8 @@ def _ns(conf, ecrits, journal):
     async def au_journal(*a, **k):
         journal.append(a[2])
     ns = {"discord": discord, "Button": Button, "visuels": visuels, "cfg": cfg, "db_set": db_set,
-          "_au_journal": au_journal, "_logerr": lambda *a, **k: None}
+          "_au_journal": au_journal, "_logerr": lambda *a, **k: None, "time": time,
+          "LayoutView": _LayoutViewDuMessage}
     for n in ARBRE.body:
         nom = getattr(n, "name", None) or (getattr(n.targets[0], "id", None) if isinstance(n, ast.Assign) else
                                            getattr(getattr(n, "target", None), "id", None))
@@ -61,16 +73,34 @@ def test_B2_seule_la_tete_approuve_et_l_approbation_est_ecrite():
     async def rien(*a, **k):
         return None
 
+    edits = []
+
+    async def edit(**kw):
+        edits.append(kw)
+    import ui_v2
+    #  La carte V2 de l'alerte, telle que Discord la renvoie (boutons ordinaires).
+    carte = ui_v2.carte_embed(discord.Embed(description="🚨 BOT NON APPROUVÉ À PERMISSIONS DANGEREUSES — <@55>"),
+                              [Button(label="Approuver ce bot", custom_id="alerte:botok:55"),
+                               Button(label="Géré", custom_id="alerte:gere:55")])
+
     def inter(uid):
-        return Obj(guild=Obj(id=1, owner_id=0), user=Obj(id=uid, display_name="x"),
+        return Obj(guild=Obj(id=1, owner_id=0), user=Obj(id=uid, display_name="x", mention=f"<@{uid}>"),
                    response=Obj(send_message=envoyer, defer=rien), followup=Obj(send=envoyer),
-                   message=Obj(edit=rien))
+                   message=Obj(embeds=[], carte=carte, edit=edit))
     bouton = ns["BoutonApprouverBot"](55)
     asyncio.run(bouton.callback(inter(123)))
     assert ecrits == [] and "Réservé" in recus[-1], "un membre du staff ne fait pas entrer un bot"
     asyncio.run(bouton.callback(inter(781205382923288593)))
     assert ecrits == [("approved_bots", [11, 55])] and recus[-1].startswith("✅")
     assert 55 not in ns["_BOTS_REFUSES"] and journal == ["bot.approuve"]
+    # 24/10/2026 (revue) : la carte V2 n'est plus remplacée par une vue classique (son texte disparaissait).
+    vue = edits[-1]["view"]
+    textes = " ".join(x.content for x in vue.walk_children() if isinstance(x, discord.ui.TextDisplay))
+    assert "BOT NON APPROUVÉ" in textes, "le texte de l'alerte reste"
+    assert "Bot approuvé** par <@781205382923288593>" in textes, "la décision s'inscrit dans la carte"
+    boutons = {b.custom_id: b.disabled for b in vue.walk_children() if isinstance(b, discord.ui.Button)}
+    assert boutons == {"alerte:botok:55": True, "alerte:gere:55": False}, "« Approuver » s'éteint, « Géré » reste"
+    assert edits[-1]["allowed_mentions"].users is False
 
 
 def test_B3_le_texte_ne_renvoie_plus_vers_un_reglage_fantome():

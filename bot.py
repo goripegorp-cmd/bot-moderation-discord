@@ -1698,7 +1698,7 @@ async def cfg(gid):
         'link_whitelist': [], 'image_allowed': [], 'badwords_list': [],
         'link_allowed_channels': [], 'image_allowed_channels': [],
         'phishing_action': 'delete', 'scam_action': 'mute', 'spam_action': 'mute',
-        'compromised_action': 'mute', 'qrcode_action': 'mute', 'alt_action': 'kick',
+        'compromised_action': 'mute', 'qrcode_action': 'delete', 'alt_action': 'kick',
         # anti_newaccount : rendu configurable 08/2026. « kick » = comportement historique,
         # à l'octet près (DM + immunités via _kick_young_account).
         'newaccount_action': 'kick', 'newaccount_mute_duration': 60,
@@ -3024,13 +3024,30 @@ async def _lever_radiation(guild, membre, auteur, raison: str) -> str | None:
     me = guild.me
     role = discord.utils.get(guild.roles, name=_RADIE_ROLE_NAME)
     saved_ids, ancien = [], None
-    async with get_db() as db:
-        async with db.execute("SELECT saved_roles, saved_nick FROM radiated_members WHERE guild_id=? AND user_id=?",
-                              (guild.id, membre.id)) as cur:
-            row = await cur.fetchone()
+    try:
+        async with get_db() as db:
+            async with db.execute("SELECT saved_roles, saved_nick FROM radiated_members WHERE guild_id=? AND user_id=?",
+                                  (guild.id, membre.id)) as cur:
+                row = await cur.fetchone()
+    except aiosqlite.OperationalError as ex:
+        if "no such table" not in str(ex):
+            raise
+        row = None  # personne n'a encore été radié sur ce serveur
+    #  24/10/2026 (revue) : sans radiation active, rien à lever. Avant, la commande levait l'exclusion
+    #  posée par un autre modérateur, effaçait le pseudo et répondait « rôles restaurés ».
+    if row is None and not (role is not None and role in membre.roles):
+        return "Ce membre n'est pas radié : il n'y a rien à lever."
     if row:
         saved_ids = json.loads(row[0] or "[]") or []
         ancien = (row[1] or "").strip() or None
+    #  Hiérarchie : lever, c'est rendre les rôles gardés. Qui n'aurait pas pu radier la personne (rang
+    #  égal ou supérieur, AVANT sa radiation) ne la lève pas non plus ; le propriétaire, si.
+    if not (auteur.id == guild.owner_id or owner_ids_module.is_super_owner(auteur.id)
+            or getattr(getattr(auteur, "guild_permissions", None), "administrator", False)):
+        rangs = [membre.top_role] + [r for r in (guild.get_role(int(x)) for x in saved_ids) if r is not None]
+        if any(r >= auteur.top_role for r in rangs):
+            return ("Cette personne a (ou avait avant sa radiation) un rôle égal ou supérieur au vôtre — "
+                    "seul le propriétaire peut lever sa radiation.")
     try:
         if role and role in membre.roles:
             await membre.remove_roles(role, reason=f"/off levée — {raison}"[:400])
@@ -3072,7 +3089,9 @@ async def off_off_cmd(i: discord.Interaction, membre: discord.Member, raison: st
     guild, me = i.guild, i.guild.me
     try:
         #  Lever une radiation est aussi sensible que la poser : c'est rendre
-        #  la parole à quelqu'un qu'on venait d'arrêter.
+        #  la parole à quelqu'un qu'on venait d'arrêter. La hiérarchie (rôles
+        #  actuels ET rôles gardés) se vérifie dans `_lever_radiation`, commune à
+        #  cette commande et au bouton du recours (revue 24/10/2026).
         refus = await _autorise_radiation(i)
         if refus:
             return await i.followup.send(refus, ephemeral=True)
@@ -3647,15 +3666,57 @@ async def _before_weekly_security_report():
     await asyncio.sleep(3600)  # 1er rapport ~1 h après le boot (pas de spam au démarrage)
 
 
+def _quarantaine_overwrite():
+    """Le refus du rôle de quarantaine sur chaque salon : écrire, ouvrir ou répondre à un fil, créer un
+    post de forum (« écrire » dans un forum), réagir, rejoindre et parler en vocal. 24/10/2026 (revue) :
+    seuls l'écriture, les réactions et la parole étaient refusées — un membre isolé ouvrait des fils,
+    postait sur les forums, écoutait les vocaux. La lecture reste : un isolement n'est pas une radiation."""
+    return discord.PermissionOverwrite(
+        send_messages=False, send_messages_in_threads=False, create_public_threads=False,
+        create_private_threads=False, add_reactions=False, connect=False, speak=False)
+
+
+_VERROUS_QUARANTAINE: dict = {}  # guild_id -> tâche de pose du refus (une à la fois, référence gardée)
+
+
+async def _verrouiller_salons_quarantaine(guild, role):
+    """Complète le refus là où il manque (un rôle créé par une version antérieure ne refusait que
+    l'écriture). Lent, donc en tâche de fond : le timeout a déjà neutralisé le membre."""
+    voulu = {k: v for k, v in _quarantaine_overwrite() if v is not None}
+    poses = echecs = 0
+    for ch in list(getattr(guild, "channels", []) or []):
+        try:
+            actuel = ch.overwrites_for(role)
+            if all(getattr(actuel, k) is v for k, v in voulu.items()):
+                continue
+            actuel.update(**voulu)
+            await ch.set_permissions(role, overwrite=actuel, reason="Isolement sécurité : refus complet")
+            poses += 1
+            await asyncio.sleep(0.3)  # throttle anti-429 (set_permissions = endpoint lourd)
+        except Exception as ex:  # un salon en échec n'arrête pas les autres
+            echecs += 1
+            if echecs == 1:
+                _logerr("quarantaine.salons", ex, guild_id=guild.id)
+    if poses or echecs:
+        print(f"[isolement] salons {guild.id} : {poses} complété(s) · {echecs} échec(s)")
+
+
+def _lancer_verrou_quarantaine(guild, role) -> None:
+    t = _VERROUS_QUARANTAINE.get(guild.id)
+    if t is None or t.done():
+        _VERROUS_QUARANTAINE[guild.id] = asyncio.create_task(_verrouiller_salons_quarantaine(guild, role))
+
+
 async def _ensure_quarantine_role(guild):
-    """Trouve (ou crée) le rôle de quarantaine — MÊME rôle que raid_detector. Pose
-    des overwrites send_messages=False sur les salons. Renvoie le rôle ou None."""
+    """Trouve (ou crée) le rôle de quarantaine — MÊME rôle que raid_detector — et fait poser, en fond,
+    le refus complet (`_quarantaine_overwrite`) sur les salons qui ne l'ont pas. Le rôle ou None."""
     try:
         for r in guild.roles:
             if (r.name or "").lower() in _QUARANTINE_ROLE_NAMES:
+                _lancer_verrou_quarantaine(guild, r)
                 return r
-    except Exception:
-        pass
+    except Exception as ex:
+        _logerr("quarantaine.role", ex, guild_id=getattr(guild, "id", 0))
     # Création (nécessite Manage Roles côté bot).
     try:
         role = await guild.create_role(
@@ -3663,19 +3724,87 @@ async def _ensure_quarantine_role(guild):
             reason="Isolement sécurité (quarantaine founder-only)",
             color=discord.Color.dark_grey(),
         )
-        for ch in guild.channels:
-            try:
-                await ch.set_permissions(
-                    role, send_messages=False, add_reactions=False, speak=False,
-                    reason="Isolement sécurité (quarantaine)",
-                )
-            except Exception:
-                pass
-            await asyncio.sleep(0.5)  # throttle anti-429 (set_permissions = endpoint lourd)
+        _lancer_verrou_quarantaine(guild, role)
         return role
     except Exception as ex:
         print(f"[isolate_member] création rôle quarantaine impossible : {ex}")
         return None
+
+
+_SQL_ISOLEMENTS = ("CREATE TABLE IF NOT EXISTS isolements (guild_id INTEGER, user_id INTEGER, saved_roles TEXT, "
+                   "genre TEXT, reason TEXT, by_user_id INTEGER, isolated_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                   "PRIMARY KEY (guild_id, user_id))")
+
+
+async def _noter_isolement(guild_id, user_id, roles_ids, raison, genre="securite", par=0) -> bool:
+    """Retient un isolement en cours et les rôles qu'il a retirés : la levée les rend, et un retour sur
+    le serveur repose la quarantaine (24/10/2026, revue : les rôles partaient pour de bon). Un second
+    isolement ne remplace jamais les rôles gardés, il ajoute ceux qu'il retire. Genre « securite »
+    (levée par la tête) ou « escalade » (le mute permanent des récidivistes, que le staff peut lever) ;
+    « securite » l'emporte."""
+    try:
+        async with get_db() as db:
+            await db.execute(_SQL_ISOLEMENTS)
+            async with db.execute("SELECT saved_roles, genre FROM isolements WHERE guild_id=? AND user_id=?",
+                                  (int(guild_id), int(user_id))) as cur:
+                row = await cur.fetchone()
+            gardes = [int(x) for x in json.loads(row[0] or "[]")] if row else []
+            gardes += [int(r) for r in roles_ids if int(r) not in gardes]
+            if row and row[1] == "securite":
+                genre = "securite"
+            await db.execute(
+                "INSERT INTO isolements(guild_id, user_id, saved_roles, genre, reason, by_user_id) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "saved_roles=excluded.saved_roles, genre=excluded.genre, reason=excluded.reason, "
+                "by_user_id=excluded.by_user_id",
+                (int(guild_id), int(user_id), json.dumps(gardes), genre, str(raison or "")[:300], int(par or 0)))
+            await db.commit()
+        return True
+    except Exception as ex:
+        _logerr("isolement.sauvegarde", ex, guild_id=guild_id)
+        return False
+
+
+async def _isolement_actif(guild_id, user_id):
+    """{"roles": [ids gardés], "genre": …} de l'isolement en cours, ou None."""
+    try:
+        async with get_db() as db:
+            async with db.execute("SELECT saved_roles, genre FROM isolements WHERE guild_id=? AND user_id=?",
+                                  (int(guild_id), int(user_id))) as cur:
+                row = await cur.fetchone()
+    except aiosqlite.OperationalError as ex:
+        if "no such table" not in str(ex):   # table jamais créée : personne n'a encore été isolé
+            _logerr("isolement.lecture", ex, guild_id=guild_id)
+        return None
+    if row is None:
+        return None
+    return {"roles": [int(x) for x in json.loads(row[0] or "[]")], "genre": row[1] or "securite"}
+
+
+async def _rendre_roles_isolement(member) -> list:
+    """Rend les rôles que l'isolement avait retirés, puis efface la fiche. Les noms rendus."""
+    guild = member.guild
+    fiche = await _isolement_actif(guild.id, member.id)
+    if fiche is None:
+        return []
+    me = guild.me
+    rendre = [guild.get_role(rid) for rid in fiche["roles"]]
+    rendre = [r for r in rendre if r is not None and not r.is_default() and not r.managed
+              and me is not None and r < me.top_role and r not in member.roles]
+    if rendre:
+        try:
+            await member.add_roles(*rendre, reason="Levée d'isolement — rôles rendus")
+        except discord.HTTPException as ex:
+            _logerr("isolement.rendre", ex, guild_id=guild.id)
+            print("[isolement:DETAIL] rôles non rendus", member.id, [r.name for r in rendre])
+            rendre = []
+    try:
+        async with get_db() as db:
+            await db.execute("DELETE FROM isolements WHERE guild_id=? AND user_id=?", (guild.id, member.id))
+            await db.commit()
+    except Exception as ex:
+        _logerr("isolement.effacer", ex, guild_id=guild.id)
+    return [r.name for r in rendre]
 
 
 async def _record_infraction(guild_id, user_id, typ, reason, duration=''):
@@ -3935,6 +4064,7 @@ async def isolate_member(member, reason, *, actor=None):
         me = guild.me
         can_manage_roles = bool(me and me.guild_permissions.manage_roles)
         role_applied = False
+        non_sauves = ""
 
         # 1) Rôle de quarantaine + retrait des rôles sensibles (si Manage Roles).
         if can_manage_roles:
@@ -3949,6 +4079,13 @@ async def isolate_member(member, reason, *, actor=None):
                         if r.id != role.id and not r.is_default()
                         and _is_sensitive_role(r) and (me is None or r < me.top_role)
                     ]
+                    #  24/10/2026 (revue) : GARDÉS AVANT d'être retirés — la levée (« Faux positif »,
+                    #  /mod unmute de la tête) les rend ; un retour sur le serveur repose la quarantaine.
+                    #  Sauvegarde ratée : on isole quand même (sécurité d'abord), l'alerte les nomme.
+                    if not await _noter_isolement(guild.id, member.id, [r.id for r in to_strip], reason,
+                                                  "securite", getattr(actor, "id", 0)) and to_strip:
+                        non_sauves = ", ".join(r.name for r in to_strip)[:300]
+                        out["errors"].append("rôles retirés NON sauvegardés")
                     if to_strip:
                         try:
                             await member.remove_roles(
@@ -4000,7 +4137,9 @@ async def isolate_member(member, reason, *, actor=None):
             await ulogger2026.log_member_escalation(
                 bot, guild, member, 0, "ISOLEMENT",
                 reason=f"🛡️ Membre ISOLÉ (quarantaine) au lieu de kick/ban — {reason} "
-                       f"· méthode : {out['method']}",
+                       f"· méthode : {out['method']}"
+                       + (f" · ⚠️ rôles retirés NON sauvegardés, à rendre à la main : {non_sauves}"
+                          if non_sauves else ""),
                 moderator=(actor or bot.user), severity="critique",
             )
         except Exception as ex:
@@ -4014,7 +4153,8 @@ async def isolate_member(member, reason, *, actor=None):
 
 
 async def lift_isolation(member):
-    """Lève l'isolement : retire le rôle de quarantaine + le timeout natif.
+    """Lève l'isolement : retire le rôle de quarantaine + le timeout natif, et REND les rôles que
+    l'isolement avait retirés (24/10/2026, revue : ils partaient pour de bon).
     FAIL-SAFE. Renvoie True si au moins une action a réussi."""
     ok = False
     try:
@@ -4038,6 +4178,9 @@ async def lift_isolation(member):
             ok = True
         except Exception as ex:
             print(f"[lift_isolation] retrait timeout : {ex}")
+        # Rendre les rôles retirés par l'isolement (et effacer sa fiche).
+        if await _rendre_roles_isolement(member):
+            ok = True
     except Exception as ex:
         _logerr("lift_isolation", ex,
                 context={"target": getattr(member, "id", None)},
@@ -4882,34 +5025,38 @@ def _deobfuscate_for_insult(text: str) -> str:
         return ""
 
 
-def check_phishing(ct):
-    """Vérification de phishing améliorée"""
+def analyse_phishing(ct):
+    """(trouvé, détail, type). Type « domain » = domaine piège connu, une certitude ; « homoglyph »,
+    « typosquatting », « suspect_tld », « url_pattern », « message_pattern » = des ressemblances —
+    jamais assez pour présumer un compte volé (cf. `_vol_de_compte_prouve`)."""
     ct = sans_liens_officiels(ct)
     if not ct.strip():
-        return False, None
-    # Utiliser la fonction avancée
-    found, detail, ptype = advanced_phishing_check(ct)
-    if found:
-        return True, detail
-
-    # FIX sécu P1-1 : re-scan sur la version normalisée (anti-homoglyphe/zero-width/[.]/hxxp)
-    norm = _normalize_for_scan(ct)
-    if norm and norm != ct:
-        found, detail, ptype = advanced_phishing_check(norm)
+        return False, None, None
+    # FIX sécu P1-1 : liens démaquillés (invisibles, points Unicode, [.], hxxp). Les lettres
+    # trompeuses se lisent nom par nom dans `_analyse_hote`, jamais sur tout le message.
+    demasque = _normaliser_liens(ct)
+    textes = list(dict.fromkeys((ct, demasque)))
+    for texte in textes:
+        found, detail, ptype = advanced_phishing_check(texte)
         if found:
-            return True, detail
+            return True, detail, ptype
+    # Domaines pièges connus écrits sans « https:// » : nom de domaine entier, jamais un bout de mot.
+    for texte in textes:
+        pieges = _domaines_pieges_cites(texte)
+        if pieges:
+            return True, pieges[0], "domain"
+    # Phrases d'appât maquillées (homoglyphes), toujours accompagnées d'un lien douteux.
+    if _URL_COMPLETE.search(demasque):
+        motif = _phrase_de_phishing(_normalize_for_scan(ct).lower())
+        if motif:
+            return True, f"Pattern phishing: {motif}", "message_pattern"
+    return False, None, None
 
-    # Fallback sur les domaines basiques (brut PUIS normalisé)
-    ct_lower = ct.lower()
-    for d in PHISHING_DOMAINS:
-        if d in ct_lower:
-            return True, d
-    norm_lower = norm.lower()
-    if norm_lower and norm_lower != ct_lower:
-        for d in PHISHING_DOMAINS:
-            if d in norm_lower:
-                return True, d
-    return False, None
+
+def check_phishing(ct):
+    """Vérification de phishing améliorée : (trouvé, détail)."""
+    found, detail, _type = analyse_phishing(ct)
+    return found, detail
 
 def check_scam(ct):
     """Vérification de scam améliorée"""
@@ -5559,6 +5706,32 @@ async def _supprimer_filtre(msg) -> bool:
         return False
 
 
+async def _retirer_fichier_dangereux(msg) -> bool:
+    """Un exécutable (ou un nom déguisé) est retiré, avec un avertissement de 10 s dans le salon.
+    Aucune sanction : c'est aussi ce qui reste actif pour le staff (compte volé ?). True si retiré."""
+    for att in (getattr(msg, 'attachments', None) or []):
+        is_dangerous, ext = check_dangerous_file(att.filename)
+        if not is_dangerous:
+            continue
+        await _supprimer_filtre(msg)
+        await send_log(msg.guild, 'anti_phishing', msg.author, msg,
+                       "Fichier dangereux détecté", f"Extension: {ext}")
+        warn_e = discord.Embed(color=0xE74C3C, description=f"⚠️ {msg.author.mention} a envoyé un fichier potentiellement dangereux (`{ext}`).\nLe fichier a été **supprimé** automatiquement.")
+        warn_e.set_footer(text="Protection anti-phishing")
+        warn_msg = await webhook_send(msg.channel, 'protection', view=carte_embed(warn_e),
+                                      allowed_mentions=discord.AllowedMentions.none())
+        if warn_msg:
+            async def _del_warn(m):
+                await asyncio.sleep(10)
+                try:
+                    await m.delete()
+                except discord.HTTPException:
+                    pass  # déjà retiré : rien à faire
+            asyncio.create_task(_del_warn(warn_msg))
+        return True
+    return False
+
+
 def _spawn_bg_scan(coro):
     """Lance un scan d'image en arrière-plan en gardant une référence (anti-GC). FAIL-SAFE."""
     try:
@@ -5875,6 +6048,8 @@ async def _cumulative_offense_sanction(guild, member, channel, label='infraction
             _qr = await _ensure_quarantine_role(guild)
             if _qr is not None and _qr not in member.roles:
                 await member.add_roles(_qr, reason="Blacklist (infractions répétées)")
+                # Retenu : un départ puis un retour ne l'efface pas ; le staff peut le lever (revue 24/10).
+                await _noter_isolement(guild.id, member.id, [], f"Blacklist ({n} infractions en 14 j)", "escalade")
         except Exception:
             pass
         try:
@@ -6713,6 +6888,28 @@ def _vue_alerte(membre_id: int = 0):
     return v
 
 
+async def _carte_alerte_decidee(message, ligne: str) -> None:
+    """Après « Approuver ce bot » : la carte d'alerte garde son texte, la décision s'y inscrit au-dessus
+    des boutons, « Approuver » s'éteint (« Géré » reste, pour retirer l'alerte). 24/10/2026 (revue) : la
+    carte V2 était remplacée par une vue classique et tout le texte de l'alerte disparaissait. Une
+    alerte en ancien format (embed) garde son embed et perd seulement ses boutons."""
+    if message.embeds:
+        await message.edit(view=None)
+        return
+    v = LayoutView.from_message(message, timeout=None)
+    for bloc_ in v.children:
+        if isinstance(bloc_, discord.ui.Container):
+            for x in list(bloc_.walk_children()):
+                if isinstance(x, discord.ui.Button) and str(x.custom_id or "").startswith("alerte:botok:"):
+                    x.disabled = True
+            enfants = list(bloc_.children)
+            place = next((k for k, x in enumerate(enfants) if isinstance(x, discord.ui.ActionRow)), len(enfants))
+            bloc_.clear_items()
+            for x in enfants[:place] + [discord.ui.TextDisplay(ligne)] + enfants[place:]:
+                bloc_.add_item(x)
+    await message.edit(view=v, allowed_mentions=discord.AllowedMentions.none())
+
+
 class BoutonApprouverBot(discord.ui.DynamicItem[Button], template=r"alerte:botok:(?P<b>\d+)"):
     """20/10/2026 : l'alerte disait « ajoute son ID à `approved_bots` (/configure) », réglage que rien
     n'écrivait — un bot voulu ne pouvait jamais entrer. Réservé à la tête : un compte de staff volé ne
@@ -6738,8 +6935,9 @@ class BoutonApprouverBot(discord.ui.DynamicItem[Button], template=r"alerte:botok
         _BOTS_REFUSES.pop(self.bot_id, None)
         await _au_journal(i.guild, "Sécurité", "bot.approuve", f"Bot {self.bot_id} approuvé par {i.user.display_name}",
                           membre_id=self.bot_id, auteur_id=i.user.id)
-        try:
-            await i.message.edit(view=_vue_alerte(self.bot_id))
+        try:  # la carte garde son texte ; la décision s'y inscrit et « Approuver » s'éteint
+            await _carte_alerte_decidee(i.message, f"✅ **Bot approuvé** par {i.user.mention} · "
+                                                   f"<t:{int(time.time())}:R> — il ne sera plus expulsé.")
         except discord.HTTPException as ex:
             _logerr("alerte.bot_approuve", ex, guild_id=i.guild.id)
         await i.followup.send("✅ Bot approuvé : il ne sera plus expulsé. S'il l'a été, ré-ajoute-le.",
@@ -10291,7 +10489,8 @@ PHISHING_DOMAINS = [
     # Faux Discord (classiques)
     'discord-gift.com', 'discord-nitro.gift', 'discordgift.site', 'discordnitro.com',
     'dlscord.com', 'dlscord.gift', 'discorcl.com', 'discrod.com', 'discordc.com',
-    'discord-app.com', 'discordapp.gift', 'discord.gift', 'discord-airdrop.com',
+    # (« discord.gift » retiré le 24/10/2026 : c'est le VRAI domaine des cadeaux Discord, cf. DOMAINES_OFFICIELS.)
+    'discord-app.com', 'discordapp.gift', 'discord-airdrop.com',
     'discordn.com', 'discordi.com', 'discord-claim.com', 'discordnitros.com',
     'dlscord-nitro.com', 'discordd.gift', 'disc0rd.gift', 'disc0rd-nitro.com',
     'discorid.gift', 'discordl.com', 'discord-free.com', 'discordgiveaway.com',
@@ -10323,28 +10522,34 @@ PHISHING_DOMAINS = [
     'bit.do', 'adf.ly', 'bc.vc', 'j.gs', 'sh.st', 'ouo.io',
 ]
 
-# Patterns de phishing dans les URLs
+#  Mouchards d'adresse IP et raccourcisseurs : retirés comme les autres, mais leur présence ne prouve
+#  pas qu'un compte a été volé — jamais de riposte « compte piraté » sur eux (revue 24/10/2026).
+_DOMAINES_SANS_PREUVE_DE_VOL = frozenset({
+    'grabify.link', 'iplogger.org', 'blasze.tk', '2no.co', 'iplogger.com', 'ps3cfw.com', 'urlz.fr',
+    'webresolver.nl', 'ezstat.ru', 'bit.do', 'adf.ly', 'bc.vc', 'j.gs', 'sh.st', 'ouo.io',
+})
+
+#  Motifs lus sur le NOM D'HÔTE seul, jamais sur le chemin (revue 24/10/2026). Testés sur l'adresse
+#  entière, ils prenaient un article de presse (« …/discord-nitro-gratuit-arnaque »), une page d'aide
+#  Microsoft (« …/manage-…-verification-code ») pour du phishing — et la riposte « compte piraté »
+#  retirait ses rôles au staff qui les postait. Les motifs de chemin (« .gift/ », « .ru/…discord »),
+#  de message (« @everyone…http », « powershell -e ») et « steam…trade » (steamtrades.com) sont partis.
 PHISHING_URL_PATTERNS = [
-    # Classiques
     r'discord.*gift', r'discord.*nitro', r'discord.*free', r'discord.*claim',
-    r'steam.*community.*login', r'steam.*guard', r'steam.*trade',
+    r'steam.*community.*login', r'steam.*guard',
     r'free.*nitro', r'nitro.*free', r'claim.*nitro', r'get.*nitro',
-    r'crypto.*airdrop', r'free.*eth', r'free.*btc', r'nft.*drop',
+    r'crypto.*airdrop', r'free-?eth(?:ereum)?(?:[.-]|$)', r'free-?btc(?:[.-]|$)', r'nft.*drop',
     r'discord.*airdrop', r'discord.*giveaway',
     r'paypal.*verify', r'amazon.*gift', r'netflix.*free',
-    r'@everyone.*http', r'@here.*http',
-    r'\.gift\/', r'\.ru\/.*discord', r'\.tk\/.*gift',
-    # 2026 — Scams vérification âge / Safeguard / ClickFix
-    r'verify.*age.*group', r'age.*verif', r'discord.*age.*check',
-    r'discord.*verify.*bot', r'safeguard.*verify', r'discord.*safeguard',
+    # 2026 — Scams vérification âge / Safeguard / ClickFix : toujours accrochés à une marque.
+    r'verify.*age.*group', r'(?:discord|roblox|steam).*age.*verif', r'age.*verif.*(?:discord|roblox|steam)',
+    r'discord.*age.*check', r'discord.*verify.*bot', r'safeguard.*verify', r'discord.*safeguard',
     r'captcha.*fix.*discord', r'discord.*captcha',
     r'discord.*login.*verify', r'discord.*security.*check',
-    # pages.dev phishing (hébergement gratuit Cloudflare abusé)
-    r'\.pages\.dev.*(discord|nitro|steam|verify|login)',
-    # Fake game / playtest download
-    r'playtest.*download', r'test.*my.*game.*http',
-    # PowerShell / terminal commands
-    r'powershell.*-e', r'cmd.*\/c.*http',
+    # Hébergement gratuit Cloudflare abusé : « discord-nitro.pages.dev »
+    r'(?:discord|nitro|steam|roblox|verify|login).*\.pages\.dev$',
+    # Faux jeu / playtest à télécharger
+    r'playtest.*download',
 ]
 
 # Mots-clés de scam dans les messages
@@ -10511,66 +10716,251 @@ def sans_liens_officiels(texte: str) -> str:
     return _URL_COMPLETE.sub(lambda m: " " if domaine_officiel(_hote(m.group(0))) else m.group(0), texte or "")
 
 
+#  ─── LIRE UNE ADRESSE COMME UN HUMAIN (revue 24/10/2026) ──────────────────────────────────────
+#  Un domaine piège ne se reconnaît pas à un mot DANS l'adresse (« disc » + « app » prenait
+#  discohook.app et discussions.apple.com, « steam » + « gift » steamgifts.com) mais à sa
+#  RESSEMBLANCE avec un vrai : le même nom à une lettre près (« discrod »), des lettres trompeuses
+#  (« dlscord », « rоblox » cyrillique, « d1sc0rd »), une marque collée à un appât (« discord-gift »),
+#  ou le vrai domaine glissé dans un faux (« roblox.com.ru-login.xyz »). Seul le NOM D'HÔTE compte.
+
+#  Marques imitées → fautes de frappe tolérées. « steam » seul n'y est pas : steamgifts, steamdb,
+#  steamcharts… sont des sites honnêtes ; « epicgames » non plus (« epicgamer » est un nom banal).
+_MARQUES_IMITEES = {"discord": 1, "discordapp": 2, "roblox": 1, "steampowered": 2, "steamcommunity": 2}
+#  Vrais domaines qu'on glisse dans une fausse adresse pour tromper l'œil.
+_DOMAINES_MARQUES = ("discord.com", "discord.gg", "discordapp.com", "discord.gift", "steampowered.com",
+                     "steamcommunity.com", "roblox.com", "epicgames.com")
+#  Appâts collés à une marque : « discord-gift », « robloxlogin », « steamcommunity-trade ».
+_MOTS_APPAT = ("gift", "nitro", "free", "claim", "login", "signin", "verify", "verif", "airdrop", "giveaway",
+               "promo", "reward", "bonus", "secure", "security", "safeguard", "captcha", "auth", "account",
+               "wallet", "robux", "trade", "support", "appeal", "unban", "staff", "recovery")
+#  Extensions abusées (gratuites ou presque) : avec un appât dans le nom, c'est un piège.
+_TLD_SUSPECTS = (".ru", ".tk", ".ml", ".ga", ".cf", ".gq", ".xyz", ".top", ".buzz", ".gift", ".click", ".icu")
+_APPATS_TLD = frozenset({"discord", "nitro", "steam", "gift", "gifts", "free", "crypto", "roblox", "robux",
+                         "airdrop"})
+#  Sites honnêtes au nom proche d'une marque : jamais suspects.
+_SERVICES_LEGITIMES = (
+    "discohook.app", "discohook.org", "disboard.org", "discords.com", "discord.me", "discord.bio",
+    "discordbotlist.com", "discord.bots.gg", "top.gg", "discordjs.guide", "discord.js.org", "noblox.js.org",
+    "discordpy.readthedocs.io", "discordlookup.com", "discordtemplates.me", "discordservers.com",
+    "steamgifts.com", "steamtrades.com", "steamdb.info", "steamcharts.com", "steamid.io", "steamid.xyz",
+    "steamrep.com", "steamladder.com", "rolimons.com", "rblx.trade", "fandom.com", "roblox.github.io",
+)
+#  Noms honnêtes à une lettre d'une marque (« discords », la bibliothèque Roblox « noblox »).
+_JETONS_LEGITIMES = frozenset({"discords", "noblox", "dischord"})
+#  Marques sans autre domaine que les leurs : « steamcommunity.co », « roblox.ru » sont des faux.
+#  (« discord » n'y est pas : discord.me, discord.bio… sont des annuaires honnêtes.)
+_MARQUES_SANS_AUTRE_DOMAINE = frozenset({"steamcommunity", "steampowered", "roblox", "discordapp"})
+#  Suffixes en deux étiquettes : le nom ENREGISTRÉ est celui d'avant (« evil » dans evil.co.uk).
+_SUFFIXES_DOUBLES = ("co.uk", "org.uk", "com.br", "com.au", "co.jp", "com.tr", "com.mx", "com.ar", "co.za",
+                     "co.kr", "com.ru", "ru.com", "com.de", "com.pl", "co.in", "com.cn", "com.tw", "com.hk",
+                     "co.nz", "com.sg", "js.org")
+#  Lettres cyrilliques et grecques qui imitent le latin (« disсord » avec un с cyrillique).
+_LETTRES_TROMPEUSES = str.maketrans({
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s",
+    "һ": "h", "ԁ": "d", "ӏ": "l", "к": "k", "м": "m", "т": "t", "в": "b", "н": "h", "п": "n", "г": "r",
+    "α": "a", "ο": "o", "ε": "e", "ι": "i", "κ": "k", "ν": "v", "τ": "t", "υ": "u", "ρ": "p",
+})
+#  Chiffres et signes qui passent pour des lettres (« d1sc0rd »).
+_CHIFFRES_TROMPEURS = str.maketrans({"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "9": "g",
+                                     "$": "s", "@": "a", "!": "l", "|": "l"})
+#  Un nom de domaine écrit sans « https:// » (« discord-nitro.gift/claim »).
+_HOTE_NU_RE = re.compile(r"(?<![\w.@-])((?:[a-z0-9-]+\.)+[a-z]{2,})(?![\w-])")
+#  Phrases d'appât : elles ne comptent qu'avec un lien douteux (« félicitations, t'as gagné la
+#  partie » n'est pas une arnaque).
+_PHRASES_DE_PHISHING = (
+    r'(click|cliquez).*link.*claim', r'congratulations.*won', r'félicitations.*gagné',
+    r'verify.*account.*http', r'vérifier.*compte.*http', r'@everyone.*free.*http', r'@here.*free.*http',
+    r'limited.*time.*http', r'expire.*24.*hour',
+)
+
+
+def _texte_lisible(texte: str) -> str:
+    """Le texte tel qu'on le lit : formes Unicode réduites, accents ôtés (« dìscord »), minuscules,
+    lettres cyrilliques et grecques qui imitent le latin remplacées. Les chiffres restent : « d1scord »
+    se lit d1scord."""
+    s = unicodedata.normalize("NFKD", unicodedata.normalize("NFKC", texte or ""))
+    return "".join(c for c in s if not unicodedata.combining(c)).lower().translate(_LETTRES_TROMPEUSES)
+
+
+def _hote_lisible(hote: str) -> str:
+    """Un nom d'hôte lisible : punycode décodé (« xn--… »), puis `_texte_lisible`."""
+    h = (hote or "").strip(".").lower()
+    if "xn--" in h:
+        try:
+            h = ".".join(p.encode("ascii").decode("idna") if p.startswith("xn--") else p for p in h.split("."))
+        except (UnicodeError, ValueError):
+            pass  # punycode invalide : la forme brute est analysée telle quelle
+    return _texte_lisible(h)
+
+
+def _squelette(texte: str) -> str:
+    """Ce qu'un œil pressé confond : chiffres en lettres, « i » et « l », « rn » et « m », « vv » et
+    « w », « cl » et « d ». Sert à COMPARER deux noms, jamais à les afficher."""
+    s = _texte_lisible(texte).translate(_CHIFFRES_TROMPEURS)
+    return s.replace("rn", "m").replace("vv", "w").replace("cl", "d").replace("i", "l")
+
+
+_SQUELETTES_OFFICIELS = tuple(_squelette(d) for d in DOMAINES_OFFICIELS)
+_SQUELETTES_MARQUES = tuple((m, t, _squelette(m)) for m, t in _MARQUES_IMITEES.items())
+_SQUELETTES_APPAT = tuple(_squelette(a) for a in _MOTS_APPAT)
+
+
+def _distance_osa(a: str, b: str) -> int:
+    """Distance d'édition avec transposition (« discrod » est à 1 de « discord »). Plafonnée à 3."""
+    if a == b:
+        return 0
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 2:
+        return 3
+    d = [[0] * (lb + 1) for _ in range(la + 1)]
+    for i in range(la + 1):
+        d[i][0] = i
+    for j in range(lb + 1):
+        d[0][j] = j
+    for i in range(1, la + 1):
+        for j in range(1, lb + 1):
+            d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] != b[j - 1]))
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1)
+    return min(d[la][lb], 3)
+
+
+def _domaine_enregistrable(hote: str) -> str:
+    """Le nom réellement enregistré : « ru-login.xyz » dans roblox.com.ru-login.xyz, et
+    « discord-nitro.pages.dev » sur un hébergement gratuit."""
+    for suffixe in _SUFFIXES_DOUBLES + _FREE_HOST_DOMAINS:
+        if hote.endswith("." + suffixe):
+            return hote[: -len(suffixe) - 1].rsplit(".", 1)[-1] + "." + suffixe
+    return ".".join(hote.split(".")[-2:])
+
+
+def _service_legitime(hote: str) -> bool:
+    return any(hote == s or hote.endswith("." + s) for s in _SERVICES_LEGITIMES)
+
+
+def _imitation_de_marque(hote: str) -> str | None:
+    """La raison si le nom (déjà lisible) imite Discord, Steam ou Roblox, sinon None."""
+    for vrai in _DOMAINES_MARQUES:
+        if re.search(r"(?:^|[.-])" + re.escape(vrai) + r"(?:[.-]|$)", hote):
+            return f"Vrai domaine {vrai} glissé dans une fausse adresse"
+    enregistre = _domaine_enregistrable(hote)
+    suffixe = enregistre.split(".", 1)[1] if "." in enregistre else ""
+    if suffixe and enregistre.split(".", 1)[0] in _MARQUES_SANS_AUTRE_DOMAINE:
+        return f"Faux domaine {enregistre.split('.', 1)[0]} (autre extension)"
+    noms = (hote[: -len(suffixe) - 1] if suffixe else hote).split(".")
+    tous = [j for nom in noms for j in nom.split("-") if j]
+    appat = any(j in _MOTS_APPAT for j in tous) or any(hote.endswith(t) for t in _TLD_SUSPECTS)
+    for nom in noms:
+        jetons = [j for j in nom.split("-") if j]
+        for j in jetons + ([nom.replace("-", "")] if len(jetons) > 1 else []):
+            sq = _squelette(j)
+            for marque, tolere, sqm in _SQUELETTES_MARQUES:
+                if j == marque:
+                    if appat:
+                        return f"Marque {marque} + appât"
+                    continue
+                if sq == sqm:
+                    return f"Imitation de {marque} (lettres trompeuses)"
+                if len(j) >= 4 and j not in _JETONS_LEGITIMES and _distance_osa(sq, sqm) <= tolere:
+                    return f"Faute de frappe sur {marque}"
+                if sqm in sq and any(a in sq.replace(sqm, " ", 1) for a in _SQUELETTES_APPAT):
+                    return f"Marque {marque} + appât"
+                # Marque mal écrite collée à un appât : « discrodnitro », « nitrodlscord ».
+                for k in {len(sqm) - 1, len(sqm), len(sqm) + 1}:
+                    for morceau, reste in ((sq[:k], sq[k:]), (sq[-k:], sq[:-k])):
+                        if (reste and _distance_osa(morceau, sqm) <= tolere
+                                and any(a in reste for a in _SQUELETTES_APPAT)):
+                            return f"Faute de frappe sur {marque} + appât"
+    return None
+
+
+def _analyse_hote(hote: str):
+    """Le verdict sur un NOM D'HÔTE, jamais sur le chemin : (détail, type) ou None. Seul le type
+    « domain » (domaine piège connu) est une certitude ; les autres sont des ressemblances."""
+    brut = (hote or "").strip(".").lower()
+    brut = brut[4:] if brut.startswith("www.") else brut
+    if not brut or domaine_officiel(brut):
+        return None
+    lisible = _hote_lisible(brut)
+    for h in dict.fromkeys((brut, lisible)):
+        if any(h == p or h.endswith("." + p) for p in PHISHING_DOMAINS):
+            return f"Domaine phishing: {brut}", "domain"
+    if _service_legitime(lisible):
+        return None
+    sq = _squelette(lisible)
+    if any(sq == v or sq.endswith("." + v) for v in _SQUELETTES_OFFICIELS):
+        return f"Domaine imité (lettres trompeuses) : {brut}", "homoglyph"
+    raison = _imitation_de_marque(lisible)
+    if raison:
+        return f"{raison} : {brut}", "typosquatting"
+    jetons = {j for nom in lisible.split(".") for j in nom.split("-") if j}
+    if any(lisible.endswith(t) for t in _TLD_SUSPECTS) and jetons & _APPATS_TLD:
+        return f"TLD suspect: {brut}", "suspect_tld"
+    for motif in PHISHING_URL_PATTERNS:
+        if re.search(motif, lisible):
+            return f"Adresse suspecte: {brut[:50]}", "url_pattern"
+    return None
+
+
+def _domaines_pieges_cites(texte: str) -> list:
+    """Les domaines pièges CONNUS cités dans le texte, avec ou sans « https:// » : nom de domaine
+    entier ou sous-domaine (« orbit.door.com » contenait « bit.do » et passait pour un piège)."""
+    trouves = []
+    for source in dict.fromkeys(((texte or "").lower(), _texte_lisible(texte))):
+        for h in _HOTE_NU_RE.findall(source):
+            h = h[4:] if h.startswith("www.") else h
+            if domaine_officiel(h):
+                continue
+            trouves += [p for p in PHISHING_DOMAINS if h == p or h.endswith("." + p)]
+    return trouves
+
+
+def _normaliser_liens(texte: str) -> str:
+    """Les liens démaquillés SANS toucher aux lettres : invisibles retirés, points Unicode et « [.] »
+    rendus, « hxxp » réparé. (`_normalize_for_scan` replie aussi les homoglyphes, et change « l » en
+    « i » : « roblox » y devient « robiox ». Les noms de domaine se lisent par `_hote_lisible`.)"""
+    s = unicodedata.normalize("NFKC", texte or "")
+    s = _ZERO_WIDTH_RE.sub("", s)
+    s = _DOT_LOOKALIKE_RE.sub(".", s)
+    s = _DEFANG_DOT_RE.sub(".", s)
+    return _DEFANG_SCHEME_RE.sub(r"http\1://", s)
+
+
+def _phrase_de_phishing(texte_min: str) -> str | None:
+    return next((m for m in _PHRASES_DE_PHISHING if re.search(m, texte_min)), None)
+
+
+def _vol_de_compte_prouve(ct: str) -> bool:
+    """Un LIEN CLIQUABLE vers un domaine piège CONNU (faux Discord/Steam/Roblox, arnaque crypto) : le
+    seul cas où l'on présume le compte de l'auteur volé (revue 24/10/2026 : une simple heuristique
+    d'adresse retirait ses rôles au staff). Ni une ressemblance, ni un mouchard d'IP, ni un
+    raccourcisseur, ni un domaine cité pour mettre en garde (sans « https:// », ou désamorcé)."""
+    for url in _URL_COMPLETE.findall(sans_liens_officiels(ct or "")):
+        h = _hote(url)
+        for x in dict.fromkeys((h, _hote_lisible(h))):
+            if any(x == p or x.endswith("." + p) for p in PHISHING_DOMAINS if p not in _DOMAINES_SANS_PREUVE_DE_VOL):
+                return True
+    return False
+
+
 def advanced_phishing_check(content):
-    """Vérifie le contenu pour détecter le phishing avec analyse avancée"""
+    """(trouvé, détail, type) : chaque lien est jugé sur son NOM D'HÔTE (`_analyse_hote`) ; les phrases
+    d'appât ne comptent qu'avec un lien douteux."""
     content_lower = content.lower()
     suspects = []
-    
-    # 1. Vérifier les domaines de phishing connus
-    urls = re.findall(r'https?://([^\s<>"\']+)', content_lower)
-    for url in urls:
+    for url in re.findall(r'https?://([^\s<>"\']+)', content_lower):
         domain = _hote(url)
-        if domaine_officiel(domain):
+        if not domain or domaine_officiel(domain):
             continue
         suspects.append(url)
-        
-        # Domaines exacts
-        for phish_domain in PHISHING_DOMAINS:
-            if phish_domain in domain:
-                return True, f"Domaine phishing: {domain}", "domain"
-        
-        # Patterns d'URL suspects
-        for pattern in PHISHING_URL_PATTERNS:
-            if re.search(pattern, url):
-                return True, f"URL suspecte: {url[:50]}", "url_pattern"
-        
-        # Typosquatting Discord
-        if 'disc' in domain and 'discord.com' not in domain and 'discord.gg' not in domain:
-            if any(x in domain for x in ['gift', 'nitro', 'free', 'claim', 'app']):
-                return True, f"Typosquatting Discord: {domain}", "typosquatting"
-        
-        # Typosquatting Steam
-        if 'steam' in domain and 'steampowered.com' not in domain and 'steamcommunity.com' not in domain:
-            if any(x in domain for x in ['community', 'trade', 'gift', 'login']):
-                return True, f"Typosquatting Steam: {domain}", "typosquatting"
-        
-        # TLD suspects avec mots-clés
-        suspect_tlds = ['.ru', '.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.buzz']
-        if any(domain.endswith(tld) for tld in suspect_tlds):
-            if any(kw in domain for kw in ['discord', 'nitro', 'steam', 'gift', 'free', 'crypto']):
-                return True, f"TLD suspect: {domain}", "suspect_tld"
-    
-    # 2. Vérifier les patterns de messages phishing
-    # Les phrases de phishing ne comptent qu'accompagnées d'un lien douteux (« félicitations,
-    # t'as gagné la partie » n'est pas une arnaque).
+        verdict = _analyse_hote(domain)
+        if verdict:
+            return True, verdict[0], verdict[1]
     if not suspects:
         return False, None, None
-    phishing_message_patterns = [
-        r'(click|cliquez).*link.*claim',
-        r'congratulations.*won',
-        r'félicitations.*gagné',
-        r'verify.*account.*http',
-        r'vérifier.*compte.*http',
-        r'@everyone.*free.*http',
-        r'@here.*free.*http',
-        r'limited.*time.*http',
-        r'expire.*24.*hour',
-    ]
-    
-    for pattern in phishing_message_patterns:
-        if re.search(pattern, content_lower):
-            return True, f"Pattern phishing: {pattern}", "message_pattern"
-    
+    motif = _phrase_de_phishing(content_lower)
+    if motif:
+        return True, f"Pattern phishing: {motif}", "message_pattern"
     return False, None, None
 
 
@@ -10698,8 +11088,18 @@ def check_shortener(ct):
         pass
     return False, None
 
-def check_qr_code_scam(content):
-    """Détecte les tentatives de scam par QR code"""
+#  Ce qu'une arnaque au QR code donne à scanner : un lien, une invitation (ou une image, vue par
+#  l'appelant). Sans support, une phrase sur les QR codes n'est qu'une phrase. (Pas d'exemption
+#  « mise en garde » : « don't scan this QR with your camera, use the Discord app » EST l'arnaque.)
+_QR_SUPPORT_RE = re.compile(r"https?://\S|\bdiscord(?:app)?\.(?:gg|com/invite)/\w", re.IGNORECASE)
+
+
+def check_qr_code_scam(content, image=False):
+    """Détecte les tentatives de scam par QR code.
+
+    24/10/2026 (revue) : « ne scannez jamais un QR code qu'on vous envoie » valait une suppression,
+    30 min d'exclusion et une infraction — on punissait qui met en garde. Il faut désormais quelque
+    chose à scanner : un lien, une invitation, ou une image (`image`, vue par l'appelant)."""
     # 19/10/2026 : « qr » dans chaque motif (« scanner le code promo », « le token de mon bot discord »
     # étaient pris pour une arnaque), et des écarts bornés plutôt que tout le message.
     qr_patterns = [
@@ -10708,12 +11108,14 @@ def check_qr_code_scam(content):
         r'\b(?:login|connexion|authenticate|v[ée]rifi\w*)\b.{0,30}\bqr\b',
         r'\bqr\b.{0,30}\b(?:gift|nitro|robux|cadeau)\b',
     ]
-    
-    content_lower = content.lower()
+
+    content_lower = (content or "").lower()
+    if not (image or _QR_SUPPORT_RE.search(content_lower)):
+        return False, None
     for pattern in qr_patterns:
         if re.search(pattern, content_lower):
             return True, pattern
-    
+
     return False, None
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -17186,7 +17588,7 @@ _PROT_DURATION_KEYS = {
 }
 _PROT_DEFAULT_ACTIONS = {
     'anti_phishing': 'delete', 'anti_scam': 'mute',
-    'anti_compromised': 'mute', 'anti_qrcode': 'mute',
+    'anti_compromised': 'mute', 'anti_qrcode': 'delete',  # revue 24/10/2026 : plus de mute par défaut
     'anti_spam': 'mute', 'anti_mass_mention': 'mute',
     'anti_link': 'delete', 'anti_invite': 'delete',
     # anti_badwords : le panneau annonçait « delete / 5 min » alors que le chemin réel
@@ -17639,7 +18041,8 @@ class ConfirmerIsolementV2(LayoutView):
                      "Ils quittent le serveur et peuvent être ré-invités. Réservé au fondateur.")
         else:
             texte = (f"### Isoler {len(self.cibles)} compte(s) ?\n"
-                     "Quarantaine réversible : ils ne voient plus aucun salon. Le bannissement reste au fondateur.")
+                     "Quarantaine réversible : ils lisent encore, mais ne peuvent plus écrire, réagir ni parler "
+                     "en vocal ; leurs rôles leur sont rendus à la levée. Le bannissement reste au fondateur.")
         ok = Button(label="Confirmer", style=discord.ButtonStyle.danger, emoji=visuels.icone("valider"))
         ok.callback = self._confirmer
         non = Button(label="Annuler", style=discord.ButtonStyle.secondary, emoji=visuels.icone("fermer"))
@@ -17919,7 +18322,8 @@ class SuspectScanPanelV2(LayoutView):
                                       ephemeral=True)
 
     async def _cb_close(self, i):
-        await i.response.edit_message(content="✅ Scan fermé", embed=None, view=None, attachments=[])
+        # Une carte V2 n'a ni texte ni embed : `content=` valait une erreur 400 (revue 24/10/2026).
+        await i.response.edit_message(view=carte_texte("✅ Scan fermé"), attachments=[])
 
 
 class SuspectScanPanel:
@@ -21520,7 +21924,7 @@ async def on_ready():
             'v2_divider': v2_divider, 'v2_container': v2_container,
             'LayoutView': LayoutView,
         }
-        staff_sanction_module.setup(bot, get_db, db_get, _v2h)
+        staff_sanction_module.setup(bot, get_db, db_get, _v2h, avertir=_avertissement_staff)
         await staff_sanction_module.init_db()
         staff_sanction_module.register_persistent_views(bot)
 
@@ -22944,6 +23348,93 @@ async def _age_gate_nsfw(member):
         print(f"[_age_gate_nsfw] {ex}")
 
 
+async def _reposer_sanction_au_retour(m) -> str:
+    """Une sanction ne s'efface pas en quittant le serveur (24/10/2026, revue : un radié qui partait
+    puis revenait retrouvait tout, auto-rôle compris). À l'arrivée, AVANT tout rôle : la radiation
+    (/off), l'isolement (quarantaine) ou la restriction (/mod direction) encore actifs sont reposés.
+    Rend la sanction trouvée ('radiation', 'isolement', 'restriction') — même si la reposer a échoué,
+    pour que l'arrivée ne donne aucun rôle — ou '' . Base illisible : on laisse entrer, et on le dit."""
+    g = m.guild
+    fiches = {}
+    try:
+        async with get_db() as db:
+            for nom, sql in (
+                    ("radiation", "SELECT 1 FROM radiated_members WHERE guild_id=? AND user_id=?"),
+                    ("isolement", "SELECT genre FROM isolements WHERE guild_id=? AND user_id=?"),
+                    ("restriction", "SELECT duration, restricted_at FROM restricted_members "
+                                    "WHERE guild_id=? AND user_id=?")):
+                try:
+                    async with db.execute(sql, (g.id, m.id)) as cur:
+                        fiches[nom] = await cur.fetchone()
+                except aiosqlite.OperationalError as ex:
+                    if "no such table" not in str(ex):
+                        raise
+                    fiches[nom] = None  # table jamais créée : personne n'a reçu cette sanction ici
+    except Exception as ex:
+        _logerr("arrivee.sanctions", ex, guild_id=g.id)
+        return ""
+    sanction = next((nom for nom in ("radiation", "isolement") if fiches.get(nom)), "")
+    restriction = fiches.get("restriction")
+    if not sanction and restriction:
+        duree, debut = int(restriction[0] or 0), restriction[1]
+        depuis = None
+        try:
+            depuis = datetime.fromisoformat(debut) if debut else None
+        except ValueError as ex:
+            _logerr("arrivee.restriction_date", ex, guild_id=g.id)
+        if depuis is not None and depuis.tzinfo is None:
+            depuis = depuis.replace(tzinfo=timezone.utc)
+        # Échue : rien à reposer, la boucle de levée efface la fiche.
+        if duree <= 0 or depuis is None or (now() - depuis).total_seconds() / 60 < duree:
+            sanction = "restriction"
+    if not sanction:
+        return ""
+    raison = "Sanction toujours active — reposée au retour sur le serveur"
+    repose = False
+    try:
+        if sanction == "radiation":
+            role = discord.utils.get(g.roles, name=_RADIE_ROLE_NAME)
+            nouveau = role is None
+            if nouveau:
+                role = await g.create_role(name=_RADIE_ROLE_NAME, colour=discord.Colour(_RADIE_COULEUR),
+                                           hoist=False, mentionable=False, reason=raison)
+            await m.add_roles(role, reason=raison)
+            if nouveau:  # refus pas encore posés sur les salons : le silence d'abord, les salons en fond
+                await m.timeout(timedelta(days=28), reason=raison)
+                t = asyncio.create_task(_verrouiller_salons_radie(g, role, m.id))
+                _VERROUS_RADIATION.add(t)
+                t.add_done_callback(_VERROUS_RADIATION.discard)
+            try:
+                await m.edit(nick=_radie_pseudo(m), reason=raison)
+            except discord.HTTPException as ex:
+                _logerr("arrivee.radie_pseudo", ex, guild_id=g.id)
+        elif sanction == "isolement":
+            role = await _ensure_quarantine_role(g)
+            if role is None:
+                raise RuntimeError("Quarantine role unavailable")
+            await m.add_roles(role, reason=raison)
+        else:
+            role = discord.utils.get(g.roles, name="🔒 Restricted")
+            if role is None:
+                raise RuntimeError("Restricted role missing")
+            await m.add_roles(role, reason=raison)
+        repose = True
+    except (discord.HTTPException, RuntimeError) as ex:
+        _logerr("arrivee.sanction_reposee", ex, guild_id=g.id)
+    quoi = {"radiation": "une radiation", "isolement": "un isolement"}.get(sanction, "une restriction")
+    try:
+        await ulogger2026.log_event(
+            bot, g, ulogger2026.EventType.SEC_ESCALATION,
+            description=(f"🔁 {m.mention} (`{m.id}`) est revenu sur le serveur avec **{quoi}** en cours : "
+                         + ("reposée, et l'arrivée ne lui a donné aucun rôle."
+                            if repose else "⚠️ elle n'a **pas pu** être reposée (rôle ou permission) — aucun "
+                                           "rôle d'arrivée donné, intervenez.")),
+            user=m, moderator=bot.user)
+    except Exception as ex:
+        _logerr("arrivee.sanction_alerte", ex, guild_id=g.id)
+    return sanction
+
+
 @bot.event
 async def on_member_join(m):
     """⚠️ CE DÉCORATEUR A ÉTÉ RÉTABLI LE 12/08/2026. NE JAMAIS LE RETIRER.
@@ -22989,11 +23480,21 @@ async def on_member_join(m):
     except Exception:
         pass
 
+    # ── UNE SANCTION NE S'EFFACE PAS EN QUITTANT LE SERVEUR (revue 24/10/2026) ──
+    # Radiation, isolement, restriction : reposés AVANT tout rôle d'arrivée. Un
+    # membre sanctionné ne reçoit ni ses anciens rôles, ni l'auto-rôle, ni son
+    # rôle de langue (un rôle qui « autorise » un salon rouvrirait ce salon).
+    try:
+        _sanctionne = await _reposer_sanction_au_retour(m) if not m.bot else ""
+    except Exception as ex:  # l'arrivée continue (anti-raid, empreinte…) quoi qu'il arrive
+        _logerr("on_member_join.sanction", ex, guild_id=getattr(m.guild, "id", 0))
+        _sanctionne = ""
+
     # ── UN MEMBRE QUE L'ANCIEN SYSTÈME D'ACTIVITÉ AVAIT DÉPOUILLÉ REVIENT ───
     # Il récupère ses rôles dès l'arrivée (voir `activite_demontage`) : une
     # lecture en base par arrivée. En tâche de fond, APRÈS l'anti-raid.
     try:
-        if not m.bot:
+        if not m.bot and not _sanctionne:
             _t_ret = asyncio.create_task(_rendre_roles_au_retour(m))
             _TACHES_RETOUR_ROLES.add(_t_ret)
             _t_ret.add_done_callback(_TACHES_RETOUR_ROLES.discard)
@@ -23004,7 +23505,7 @@ async def on_member_join(m):
     # (welcome_autorole) à chaque nouveau. FAIL-SAFE : no-op si non configuré / rôle
     # introuvable / au-dessus du bot / géré par une intégration / perms manquantes.
     try:
-        if not m.bot:
+        if not m.bot and not _sanctionne:
             c = await cfg(m.guild.id)
             rid = int(c.get('welcome_autorole', 0) or 0)
             if rid:
@@ -23052,7 +23553,7 @@ async def on_member_join(m):
     # se fait au 1er clic (interaction porteuse de locale). Ici on se contente de
     # REPOSER le rôle drapeau si le membre avait DÉJÀ choisi une langue auparavant
     # (préférence persistée globale). Aucun spam, aucun MP. FAIL-SAFE : no-op total.
-    if not m.bot:
+    if not m.bot and not _sanctionne:
         try:
             _pref = await i18n_module.get_user_lang(m.id)
             if _pref:
@@ -23550,7 +24051,7 @@ async def _scan_security_on_edit(after) -> bool:
     Retourne True si un scanner a agi (message supprimé/sanctionné) → l'appelant NE
     doit alors PAS logger `after.content` en clair. Fail-safe : une exception d'un
     scanner ne bloque jamais la chaîne (sécurité best-effort, comme on_message)."""
-    if after.author is None or after.author.bot or not after.content:
+    if after.author is None or after.author.bot:
         return False
     # 1) Scanners de secrets/grabber auto-suppresseurs (mêmes que on_message), avec les mêmes
     #    exemptions qu'à l'envoi : le piège à bots épargne la tête, le staff et les immunisés, et le
@@ -23563,6 +24064,10 @@ async def _scan_security_on_edit(after) -> bool:
         (token_grabber_module, "token_grabber"),
     ):
         if _mod is honeypot_module and exempt:
+            continue
+        #  Le salon-piège juge aussi un message SANS texte (image, sticker, transfert) ; les
+        #  scanners de texte, eux, n'ont rien à lire (revue 24/10/2026).
+        if _mod is not honeypot_module and not after.content:
             continue
         try:
             if _mod is token_grabber_module:
@@ -23618,7 +24123,9 @@ async def _scan_security_on_edit(after) -> bool:
         author = after.author
         if guild is None or author is None:
             return False
-        if await is_immune(author, 'general', after.channel):
+        #  Même exemption qu'à l'envoi : la tête et le staff ne sont jamais sanctionnés par un
+        #  automatisme (revue 24/10/2026, règle du 19/10).
+        if await is_immune(author, 'general', after.channel) or await is_fully_immune(author):
             return False
         if await is_ticket_channel(after.channel):
             return False
@@ -23909,7 +24416,8 @@ async def on_guild_channel_create(channel):
         try:
             quar = next((r for r in channel.guild.roles if (r.name or "").lower() in _QUARANTINE_ROLE_NAMES), None)
             if quar is not None and hasattr(channel, 'set_permissions'):
-                await channel.set_permissions(quar, send_messages=False, add_reactions=False, speak=False,
+                # Le refus complet (fils, forums, vocal compris), comme sur les salons existants.
+                await channel.set_permissions(quar, overwrite=_quarantaine_overwrite(),
                                               reason="Isolement sécurité (nouveau salon)")
         except discord.HTTPException as _qex:
             _logerr("quarantaine.nouveau_salon", _qex, guild_id=channel.guild.id)
@@ -24494,8 +25002,10 @@ async def on_message(msg):
     # Webhook leak scan + token grabber scan AVANT tout autre traitement.
     # Si détecté → message supprimé, on stoppe le pipeline ici (les autres
     # handlers ne traiteront pas un message déjà supprimé).
-    if not msg.author.bot and msg.content:
-        # Phase 154 : honeypot first (le plus rapide)
+    if not msg.author.bot:
+        # Phase 154 : honeypot first (le plus rapide) — et AVANT le test du texte (revue 24/10/2026) :
+        # une image, un sticker ou un transfert posté dans le salon-piège passait (la vague « casino »
+        # poste des images).
         # ⚠️ IMMUNITÉ (owner 2026-06-16) : le honeypot inflige delete + timeout 24h + gel
         # éco + panel sanction. On ÉPARGNE owner serveur / super-owner / admin / membres
         # immunisés (ils peuvent poster par erreur ou pour tester le salon-piège). Les
@@ -24517,6 +25027,7 @@ async def on_message(msg):
             except Exception as ex:
                 print(f"[on_message honeypot] {ex}")
 
+    if not msg.author.bot and msg.content:
         # Phase 166.1 : anti-token-leak — delete + DM + alert staff
         try:
             handled = await anti_token_leak_module.on_message_hook(msg)
@@ -24662,7 +25173,12 @@ async def on_message(msg):
         is_ticket = await is_ticket_channel(msg.channel)
         
         # 3. Vérifier immunité de l'utilisateur
-        user_immune = await is_immune(msg.author, 'general', msg.channel)
+        #  24/10/2026 (revue, règle du 19/10) : la tête et le staff ne sont jamais sanctionnés par un
+        #  automatisme. `is_immune` ne couvrait que l'immunité RÉGLÉE (propriétaire, admins, rôles et
+        #  membres immunisés) : un modérateur était exclu pour « menace », « hors-sujet », vitesse, et
+        #  ses liens, invitations et mentions de rôle lui valaient une infraction.
+        _immunite_reglee = await is_immune(msg.author, 'general', msg.channel)
+        user_immune = _immunite_reglee or await is_fully_immune(msg.author)
 
         # ═══ ANTI PING DE RÔLE / @everyone ═══
         # Personne en dehors du staff ne mentionne un rôle ni @everyone : message retiré et rappel.
@@ -24713,7 +25229,9 @@ async def on_message(msg):
         # de anti_scam_image (l.58098) : immunisé = retrait + ALERTE « compte piraté » (traitement
         # MANUEL fondateur, AUCUNE sanction) ; non-immunisé = ban sécurité (récupérable).
         _ocr = bool(c.get('anti_scam_ocr', 1) and (not is_ticket) and _msg_has_image(msg))
-        _nsfw = bool(c.get('anti_nsfw_image', 1) and (not user_immune) and (not is_ticket) and _msg_has_image(msg))
+        # Une image sexuelle reste retirée même postée par le staff (protection des mineurs) ; elle ne
+        # lui vaut aucune sanction : `_isoler_par_securite` épargne le staff et la tête.
+        _nsfw = bool(c.get('anti_nsfw_image', 1) and (not _immunite_reglee) and (not is_ticket) and _msg_has_image(msg))
         _lire = _lecteur_partage(_ocr + _nsfw)
         if _ocr:
             _spawn_bg_scan(_ocr_scam_check(msg, immune=user_immune, lire=_lire))
@@ -24737,10 +25255,14 @@ async def on_message(msg):
                 await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Lien de phishing détecté", f"`{d}`")
                 dur = c.get('phishing_mute_duration', 60)
                 await sanction(msg.author, c.get('phishing_action', 'delete'), dur, "Phishing", msg.guild)
-                await _compromised_riposte(msg, "phishing")
+                #  24/10/2026 (revue) : « compte piraté » seulement sur un domaine piège CONNU — une
+                #  ressemblance d'adresse retirait ses rôles de modération au staff qui postait un article.
+                if _vol_de_compte_prouve(ct):
+                    await _compromised_riposte(msg, "phishing")
                 return
 
-            # Vérifier les liens masqués en markdown [texte](url)
+            # Vérifier les liens masqués en markdown [texte](url) — retirés, mais une adresse masquée
+            # n'est pas une preuve de vol de compte : pas de riposte « compte piraté » (revue 24/10/2026).
             f_mask, d_mask = check_masked_links(ct)
             if f_mask:
                 try:
@@ -24750,7 +25272,6 @@ async def on_message(msg):
                 await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Lien masqué détecté (phishing)", f"`{d_mask}`")
                 dur = c.get('phishing_mute_duration', 60)
                 await sanction(msg.author, c.get('phishing_action', 'delete'), dur, "Lien masqué phishing", msg.guild)
-                await _compromised_riposte(msg, "lien masqué")
                 return
 
             # Vérifier les URLs dans les embeds du message
@@ -24766,7 +25287,8 @@ async def on_message(msg):
                             await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Phishing dans embed", f"`{d_emb}`")
                             dur = c.get('phishing_mute_duration', 60)
                             await sanction(msg.author, c.get('phishing_action', 'delete'), dur, "Phishing embed", msg.guild)
-                            await _compromised_riposte(msg, "phishing (embed)")
+                            if _vol_de_compte_prouve(emb_url):
+                                await _compromised_riposte(msg, "phishing (embed)")
                             return
 
         # Raccourcisseurs d'URL (owner 2026-06-21 #6) : destination masquée = vecteur phishing.
@@ -24926,8 +25448,13 @@ async def on_message(msg):
 
         # Si utilisateur immunisé OU dans un ticket = ignorer les autres protections
         if user_immune or is_ticket:
+            #  Le staff n'est jamais sanctionné, mais un exécutable qu'il poste (compte volé ?) reste
+            #  retiré, comme avant la règle du 19/10 ; l'immunité réglée et les tickets, eux, n'ont
+            #  jamais été filtrés ici (revue 24/10/2026).
+            if not _immunite_reglee and not is_ticket and msg.attachments:
+                await _retirer_fichier_dangereux(msg)
             return  # Accès total (liens, images, etc.)
-        
+
         # ═══════════════ PROTECTIONS STANDARD (IGNORÉES SI IMMUNISÉ) ═══════════════
         
         # Config salon spécifique (commandes uniquement, pas de messages, etc.)
@@ -25839,36 +26366,21 @@ async def on_message(msg):
                 return
 
         # Anti-QRCode (détection de scams par QR code) - Actif pour tous
+        # 24/10/2026 (revue) : il faut un lien, une invitation ou une image ; par défaut on supprime.
         if c.get('anti_qrcode'):
-            is_qr_scam, qr_pattern = check_qr_code_scam(ct)
+            is_qr_scam, qr_pattern = check_qr_code_scam(ct, _msg_has_image(msg))
             if is_qr_scam:
                 await _supprimer_filtre(msg)
                 await send_log(msg.guild, 'anti_qrcode', msg.author, msg,
                               "Scam QR Code détecté", f"Pattern: {qr_pattern}")
                 dur = c.get('qrcode_mute_duration', 30)
-                await sanction(msg.author, c.get('qrcode_action', 'mute'), dur, "Scam QR Code", msg.guild)
+                await sanction(msg.author, c.get('qrcode_action', 'delete'), dur, "Scam QR Code", msg.guild)
                 return
         
         # Fichiers dangereux - Actif pour tous
-        if msg.attachments:
-            for att in msg.attachments:
-                is_dangerous, ext = check_dangerous_file(att.filename)
-                if is_dangerous:
-                    await _supprimer_filtre(msg)
-                    await send_log(msg.guild, 'anti_phishing', msg.author, msg, 
-                                  "Fichier dangereux détecté", f"Extension: {ext}")
-                    warn_e = discord.Embed(color=0xE74C3C, description=f"⚠️ {msg.author.mention} a envoyé un fichier potentiellement dangereux (`{ext}`).\nLe fichier a été **supprimé** automatiquement.")
-                    warn_e.set_footer(text="Protection anti-phishing")
-                    warn_msg = await webhook_send(msg.channel, 'protection', view=carte_embed(warn_e),
-                                                  allowed_mentions=discord.AllowedMentions.none())
-                    if warn_msg:
-                        async def _del_warn(m):
-                            await asyncio.sleep(10)
-                            try: await m.delete()
-                            except: pass
-                        asyncio.create_task(_del_warn(warn_msg))
-                    return
-        
+        if msg.attachments and await _retirer_fichier_dangereux(msg):
+            return
+
     except Exception as ex:  # 20/10/2026 : `except: pass`
         _logerr("filtres.message", ex, guild_id=getattr(msg.guild, 'id', 0))
 
@@ -26484,6 +26996,9 @@ async def _escalade_warns(guild, membre, warn_count: int):
                     _qr = await _ensure_quarantine_role(membre.guild)
                     if _qr is not None and _qr not in membre.roles:
                         await membre.add_roles(_qr, reason="Mute permanent (≥6 warns)")
+                        # Retenu : un départ puis un retour ne l'efface pas (revue 24/10/2026).
+                        await _noter_isolement(guild.id, membre.id, [], f"Mute permanent ({warn_count} warns)",
+                                               "escalade")
                 except Exception:
                     pass
                 try:
@@ -26503,6 +27018,18 @@ async def _escalade_warns(guild, membre, warn_count: int):
             _auto_txt = (f"🔇 **Mute automatique : {_label}** (palier **{warn_count} warns**)."
                          + (" À vous de décider de la suite (ban ?)." if warn_count >= 6 else ""))
     return _auto_txt
+
+
+async def _avertissement_staff(g, membre_id, mod_id, raison):
+    """Le « Warn » des panneaux d'action staff (`staff_sanction`) : la fiche au casier et l'escalade,
+    comme /mod warn et le site (24/10/2026, revue : rien n'était inscrit). (total, phrase d'escalade)."""
+    await _inscrire_sanction(g, membre_id, mod_id, "warn", raison)
+    async with get_db() as db:
+        async with db.execute("SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND type='warn'",
+                              (g.id, int(membre_id))) as cur:
+            total = (await cur.fetchone())[0]
+    membre = g.get_member(int(membre_id))
+    return total, (await _escalade_warns(g, membre, total) if membre is not None else None)
 
 
 @mod_group.command(name="warn", description="⚠️ Avertir un membre (crée une fiche, aucun rôle attribué)")
@@ -26828,12 +27355,32 @@ async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str
     quarantaine = next((r for r in membre.roles if (r.name or "").lower() in _QUARANTINE_ROLE_NAMES), None)
     if not membre.is_timed_out() and quarantaine is None:
         return await i.response.send_message(f"❌ {membre.mention} n'est pas mute", ephemeral=True)
+    #  24/10/2026 (revue) : la garde de hiérarchie de /mod mute manquait ici, et une radiation (son
+    #  exclusion de 28 jours) se levait à moitié par cette porte.
+    tete = _a_la_tete(i.guild, i.user)
+    if not tete and membre.top_role >= i.user.top_role:
+        return await i.response.send_message(
+            "❌ Ce membre a un rang égal ou supérieur au tien : demande à la direction.", ephemeral=True)
+    if any(r.name == _RADIE_ROLE_NAME for r in membre.roles):
+        return await i.response.send_message(
+            f"❌ {membre.mention} est **radié** : la levée passe par `/off off`.", ephemeral=True)
     await i.response.defer(ephemeral=True, thinking=True)
-    
+    #  Un isolement de SÉCURITÉ (raid, compte suspect, kick/ban d'un modérateur changé en isolement) ne
+    #  se lève que par le fondateur et la direction, comme « Lever l'isolement » sur le dossier ; le mute
+    #  permanent des récidivistes (genre « escalade ») reste levable par le staff.
+    if quarantaine is not None and not tete:
+        fiche = await _isolement_actif(i.guild.id, membre.id)
+        if fiche is None or fiche["genre"] == "securite":
+            return await i.followup.send(
+                "🔒 C'est un **isolement de sécurité** : seuls le fondateur et la direction le lèvent.",
+                ephemeral=True)
+    rendus = []
     try:
         if quarantaine is not None:
             await membre.remove_roles(quarantaine, reason=f"Unmute par {i.user.name}: {raison}")
         await membre.timeout(None, reason=f"Unmute par {i.user.name}: {raison}")
+        if quarantaine is not None:
+            rendus = await _rendre_roles_isolement(membre)  # les rôles que l'isolement avait retirés
     except discord.Forbidden:
         return await i.followup.send("❌ Je ne peux pas unmute ce membre (hiérarchie des rôles)", ephemeral=True)
     except discord.HTTPException as ex:
@@ -26848,7 +27395,9 @@ async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str
     e.set_thumbnail(url=membre.display_avatar.url)
 
     await i.followup.send(
-        f"✅ {membre.mention} a été unmute. L'annonce publique ne te nomme pas.", ephemeral=True)
+        f"✅ {membre.mention} a été unmute."
+        + (f" Rôles rendus : {', '.join(rendus)}." if rendus else "")
+        + " L'annonce publique ne te nomme pas.", ephemeral=True)
     await _announce_sanction_public(i, e)
 
     # Log
@@ -27187,9 +27736,18 @@ class _StaffSanctionModal(discord.ui.Modal):
                 else:
                     dur_txt = f"{mute_minutes} minute(s)"
 
-            # (c) _dm_sanction AVANT le ban (sinon le membre est déjà parti). On le
-            # fait pour les 3 types — pour kick/ban c'est le SEUL moment utile.
-            await _dm_sanction(target, guild, label_dm, reason, duration_text=dur_txt)
+            # (c) Le message privé dit ce qui est RÉELLEMENT fait, une fois que c'est fait (revue
+            #     24/10/2026 : il partait avant — « Expulsion » pour un membre en fait isolé, ou pour
+            #     une action ratée). Seul le kick/ban du FONDATEUR part avant (après, plus aucun serveur
+            #     en commun : il n'arriverait pas), une fois vérifié qu'il passera, et corrigé sinon.
+            fondateur = owner_ids_module.is_super_owner(moderator.id)
+            avant = action in ('kick', 'ban') and fondateur
+            if avant:
+                if not getattr(guild.me.guild_permissions, 'kick_members' if action == 'kick' else 'ban_members', False):
+                    return await modal_i.followup.send(
+                        f"❌ Il me manque la permission « {'Expulser' if action == 'kick' else 'Bannir'} des "
+                        "membres ». Rien n'a été envoyé au membre.", ephemeral=True)
+                await _dm_sanction(target, guild, label_dm, reason, duration_text=dur_txt)
 
             # (d) Appliquer via la MÊME mécanique que le filtre badwords / les commandes.
             #     actor_id = le modérateur : si action ∈ {kick,ban} et que ce n'est PAS
@@ -27197,6 +27755,13 @@ class _StaffSanctionModal(discord.ui.Modal):
             applied = await sanction(target, action, mute_minutes, reason, guild,
                                      actor_id=moderator.id)
             if not applied:
+                if avant:  # il a été prévenu : on corrige, pour ne pas lui laisser croire une sanction
+                    try:
+                        await target.send(
+                            f"**{guild.name}** — ⚠️ Correction : la sanction annoncée ({label_dm}) n'a "
+                            "finalement **pas** été appliquée.", allowed_mentions=discord.AllowedMentions.none())
+                    except discord.HTTPException:
+                        pass  # messages privés fermés : rien d'autre à faire
                 return await modal_i.followup.send(
                     "❌ Action impossible (permissions/hiérarchie du bot). "
                     "Aucune trace enregistrée.", ephemeral=True
@@ -27204,7 +27769,8 @@ class _StaffSanctionModal(discord.ui.Modal):
 
             # Règle dure : seul le FONDATEUR peut kick/ban. Pour un staff non-fondateur,
             # kick/ban est converti en ISOLEMENT (quarantaine) + alerte fondateur.
-            if action in ('kick', 'ban') and not owner_ids_module.is_super_owner(moderator.id):
+            if action in ('kick', 'ban') and not fondateur:
+                await _dm_sanction(target, guild, "Isolement 🛡️ (en attente de la décision du fondateur)", reason)
                 return await modal_i.followup.send(
                     "🛡️ **Membre isolé (quarantaine)** au lieu de "
                     f"{'l’expulsion' if action == 'kick' else 'le bannissement'}.\n"
@@ -27213,6 +27779,8 @@ class _StaffSanctionModal(discord.ui.Modal):
                     f"📝 Raison : {reason}",
                     ephemeral=True,
                 )
+            if not avant:  # le mute, maintenant qu'il est posé
+                await _dm_sanction(target, guild, label_dm, reason, duration_text=dur_txt)
 
             # (e) INSERT dans infractions pour la traçabilité (fiche du membre).
             infraction_id = None

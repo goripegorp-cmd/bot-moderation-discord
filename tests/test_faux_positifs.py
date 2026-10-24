@@ -26,13 +26,27 @@ def _fonctions():
     return {n.name: ast.unparse(n) for n in ast.walk(ARBRE) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
 
 
+#  24/10/2026 (revue) : l'anti-phishing lit le NOM D'HÔTE (`_analyse_hote` et ses tables).
+_NOMS_ANALYSE_LIENS = (
+    "_ZERO_WIDTH_RE", "_DOT_LOOKALIKE_RE", "_DEFANG_DOT_RE", "_DEFANG_SCHEME_RE", "_MARQUES_IMITEES",
+    "_DOMAINES_MARQUES", "_MOTS_APPAT", "_TLD_SUSPECTS", "_APPATS_TLD", "_SERVICES_LEGITIMES", "_JETONS_LEGITIMES",
+    "_MARQUES_SANS_AUTRE_DOMAINE", "_SUFFIXES_DOUBLES", "_LETTRES_TROMPEUSES", "_CHIFFRES_TROMPEURS", "_HOTE_NU_RE",
+    "_PHRASES_DE_PHISHING", "_texte_lisible", "_hote_lisible", "_squelette", "_SQUELETTES_OFFICIELS",
+    "_SQUELETTES_MARQUES", "_SQUELETTES_APPAT", "_distance_osa", "_domaine_enregistrable", "_service_legitime",
+    "_imitation_de_marque", "_analyse_hote", "_domaines_pieges_cites", "_normaliser_liens", "_phrase_de_phishing",
+    "_DOMAINES_SANS_PREUVE_DE_VOL", "_vol_de_compte_prouve",
+)
+
+
 def _filtres_liens():
+    import unicodedata
     ns = _extraire("DOMAINES_OFFICIELS", "_URL_COMPLETE", "_hote", "domaine_officiel", "sans_liens_officiels",
                    "PHISHING_DOMAINS", "PHISHING_URL_PATTERNS", "advanced_phishing_check", "_SCAM_SANS_LIEN",
                    "SCAM_KEYWORDS", "_FREE_HOST_DOMAINS", "_FREE_HOST_SCAM_RE", "advanced_scam_check",
-                   "COMPROMISED_PATTERNS", ns={"_normalize_for_scan": lambda t: t})
+                   "COMPROMISED_PATTERNS", *_NOMS_ANALYSE_LIENS,
+                   ns={"_normalize_for_scan": lambda t: t, "unicodedata": unicodedata})
     ns["SCAM_PATTERNS"] = [re.compile(p, re.IGNORECASE) for p in ns["COMPROMISED_PATTERNS"]]
-    return _extraire("check_phishing", "check_scam", ns=ns)
+    return _extraire("analyse_phishing", "check_phishing", "check_scam", ns=ns)
 
 
 def test_F1_liens_officiels_et_phrases_de_jeu_jamais_pris_pour_du_phishing():
@@ -182,11 +196,14 @@ def test_F14_liens_masques_par_nom_de_domaine():
 
 
 def test_F15_qr_seulement_quand_on_parle_de_qr():
-    qr = _extraire("check_qr_code_scam")["check_qr_code_scam"]
+    qr = _extraire("_QR_SUPPORT_RE", "check_qr_code_scam")["check_qr_code_scam"]
     for t in ("scanner le code promo du jeu", "le token de mon bot discord ne marche plus", "qr"):
         assert not qr(t)[0], t
-    assert qr("scan this qr code to claim your nitro")[0]
-    assert qr("connexion par qr code obligatoire, scanne-le")[0]
+        assert not qr(t, True)[0], t
+    # 24/10/2026 (revue) : il faut quelque chose à scanner — un lien, une invitation ou une image.
+    assert not qr("scan this qr code to claim your nitro")[0], "une phrase seule n'est pas une arnaque"
+    assert qr("scan this qr code to claim your nitro https://nitro-claim.xyz/qr")[0]
+    assert qr("connexion par qr code obligatoire, scanne-le", True)[0]
 
 
 def test_F16_un_message_court_dans_trois_salons_n_est_pas_du_spam():

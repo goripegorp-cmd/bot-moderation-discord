@@ -50,6 +50,10 @@ _bot = None
 _get_db = None
 _db_get = None
 _v2 = None
+#  (guild, membre_id, mod_id, raison) -> (total des avertissements, phrase d'escalade | None) : la
+#  fiche et l'escalade de /mod warn, branchées par bot.py (24/10/2026, revue : « Warn » n'inscrivait
+#  rien au casier).
+_avertir = None
 
 import owner_ids as _owner_ids  # FIX sécu : source UNIQUE (incluait GoRipe non protégé avant)
 import visuels
@@ -63,12 +67,13 @@ except Exception:
 STAFF_CHANNEL_NAME = "🚨-actions-staff"
 
 
-def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict):
-    global _bot, _get_db, _db_get, _v2
+def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, avertir=None):
+    global _bot, _get_db, _db_get, _v2, _avertir
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
+    _avertir = avertir
 
 
 async def init_db():
@@ -309,7 +314,18 @@ async def _handle_sanction_click(
 
         elif action == "warn":
             applied = "warned"
-            details = "Avertissement noté"
+            #  Inscrit au casier comme /mod warn, avec la même escalade (24/10/2026, revue : « Avertissement
+            #  noté » n'écrivait rien — invisible dans /mod infractions, jamais compté).
+            details = "⚠️ Avertissement NON inscrit au casier (module non branché)"
+            if _avertir is not None:
+                try:
+                    total, auto = await _avertir(i.guild, target_id, i.user.id, str(reason or "")[:300])
+                    details = (f"Avertissement inscrit au casier ({total} au total)"
+                               + (f" · {auto}" if auto else ""))
+                except Exception as ex:
+                    print("[staff_sanction][E1] Warn not recorded")
+                    print(f"[staff_sanction][E1:DETAIL] {type(ex).__name__} {ex}")
+                    details = "⚠️ Avertissement NON inscrit au casier (erreur)"
             if target:
                 try:
                     await target.send(
@@ -523,7 +539,8 @@ async def create_sanction_panel(
             _v2, sanction_id, target, reason, evidence_text,
             evidence_channel_id or 0, auto_action_taken, source,
         )
-        msg = await ch.send(view=view)
+        # La carte nomme la cible : sans ceci, elle était PINGUÉE (24/10/2026, revue).
+        msg = await ch.send(view=view, allowed_mentions=discord.AllowedMentions.none())
 
         # 4) Stocke le message_id pour retrouver le panel
         async with _get_db() as db:
