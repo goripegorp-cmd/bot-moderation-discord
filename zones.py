@@ -703,6 +703,16 @@ async def entretenir(g) -> None:
                 _log(f"[ZONES:DETAIL] réveil du fil {cle} {ex}")
 
 
+def lien_jouer(g, c: dict, j: Jeu):
+    """« Jouer » : le lien officiel du jeu s'il est réglé (🎮 Liens des jeux), sinon le salon 🎮game-link ;
+    None si aucun des deux (aucun bouton qui ment)."""
+    lien = str(dict(c.get("jeux_liens") or {}).get(j.cle) or "")
+    if lien.startswith("https://"):
+        return Post(0, lien)
+    ch = g.get_channel(int(c.get("game_link_salon", 0) or 0))
+    return lien_salon(g, ch) if isinstance(ch, discord.TextChannel) else None
+
+
 def _vocal_commu(g, c: dict):
     """Le 🔊 Join de la communauté (pas celui du clan)."""
     hubs = (c.get("temp_voice_config") or {}).get("hubs") or {}
@@ -721,7 +731,10 @@ def vue_guide(g, c: dict, cfz: dict, cfe: dict, j: Jeu | None = None) -> tuple:
     guides = " ".join(r.mention for cle, r in roles.items() if r is not None and cle != j.zones[-1])
     mm = roles.get(j.zones[-1])
     ticket = _ticket(g) if _ticket else None
+    jouer = lien_jouer(g, c, j)
     lignes = [
+        (jouer, f"### 🎮 Jouer · Play\nLe lien officiel de {j.nom}, en un clic.\n-# The official {j.nom} link, in one "
+         "click.", "Jouer · Play"),
         (post(g, cfz, j.chat), f"### {j.emoji} Discuter · Talk\n{j.chat_fr}"
          + (f". Le vocal : 🔊 <#{vocal.id}>." if vocal is not None else ".") + f"\n-# {j.chat_en}", "Ouvrir · Open"),
         (post(g, cfz, j.help), "### 🛟 S'entraider · Get help\nChoisis Aide, Boss, Farm ou Chill et remplis : ta carte "
@@ -767,7 +780,7 @@ def vue_guide(g, c: dict, cfz: dict, cfe: dict, j: Jeu | None = None) -> tuple:
                                         "ask for your password · pas d'invitation vers d'autres serveurs · no invites"))
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(*items, accent_color=discord.Color(j.couleur)))
-    signature = "|".join([str(GUIDE_VERSION), *(str(p.id) for p, _t, _b in presentes),
+    signature = "|".join([str(GUIDE_VERSION), *(p.jump_url for p, _t, _b in presentes),
                           str(getattr(vocal, "id", 0)), *(str(getattr(r, "id", 0)) for r in roles.values()),
                           str(getattr(ticket, "id", 0)), str(int(_boutons_langue is not None))])
     return v, signature
@@ -815,8 +828,9 @@ def groupes_aide(g, c: dict, cfz: dict) -> list:
         groupes.append((f"{j.emoji} {j.nom}",
                         "Le guide, le chat du jeu, l'entraide (boss, farm…) et le trade avec middleman · The guide, "
                         "the game chat, help and trades",
-                        [(post(g, cfz, j.guide), "🧭 Guide"), (post(g, cfz, j.chat), f"{j.emoji} Chat"),
-                         (post(g, cfz, j.help), "🛟 Help"), (post(g, cfz, j.trade), "🤝 Trade")]))
+                        [(lien_jouer(g, c, j), "🎮 Jouer"), (post(g, cfz, j.guide), "🧭 Guide"),
+                         (post(g, cfz, j.chat), f"{j.emoji} Chat"), (post(g, cfz, j.help), "🛟 Help"),
+                         (post(g, cfz, j.trade), "🤝 Trade")]))
     return [(t, p, [(x, b) for x, b in boutons if x is not None]) for t, p, boutons in groupes]
 
 

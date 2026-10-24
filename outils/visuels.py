@@ -112,6 +112,8 @@ BANDEAUX = {
     "cl_guide": ("CLOVER RPG", "Guide", "Bienvenue · Welcome", "\uE8F1", (132, 204, 22), (16, 185, 129)),
     "cl_entraide": ("CLOVER RPG", "Entraide · Help", "Aide · Boss · Farm · Chill", "\uE716", (34, 197, 94), (132, 204, 22)),
     "cl_trade": ("CLOVER RPG", "Trade", "Objets · Items", "\uE8AB", (132, 204, 22), (245, 158, 11)),
+    "game_link": ("GAME LINK", "Nos jeux · Our games", "Rejoins-nous en un clic · Join in one click", "\uE7FC",
+                  (139, 92, 246), (59, 130, 246)),
     "cadeaux": ("GIVEAWAYS", "Cadeaux", "Participe et tente ta chance · Join and win", "\uF133",
                 (236, 72, 153), (245, 158, 11)),
 }

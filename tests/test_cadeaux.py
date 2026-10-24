@@ -266,7 +266,7 @@ def test_K10_branche_dans_le_bot():
                    'bot.add_listener(_cadeaux_effacement, "on_raw_message_delete")'):
         assert ecoute in SRC, ecoute
     assert "bot.add_dynamic_items(cadeaux.BoutonCadeaux, cadeaux.BoutonParticiper" in SRC
-    assert "cadeaux.BoutonCadeaux()]" in _source("_menu_logs")
+    assert "cadeaux.BoutonCadeaux()" in _source("_menu_logs")
     boucle = _source("cadeaux_task")
     assert boucle.index("db_set(g.id, 'cadeaux_salon_v1'") < boucle.index("cadeaux.salon_cadeaux(g, creer=True)")
     assert "await cadeaux.tic(list(bot.guilds))" in boucle

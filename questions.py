@@ -20,7 +20,10 @@ import discord
 INTERROGATIFS = re.compile(
     r"^(comment|pourquoi|quand|o[uù]|qui|quel(le)?s?|combien|est[- ]ce|c'?est quoi|quoi|peut[- ]on|on peut"
     r"|je peux|puis[- ]je|y a[- ]t[- ]il|il y a|y'?a|sait[- ]on|qqn sait|quelqu'?un sait|how|what|why|when"
-    r"|where|who|which|can|could|is there|are there|does|do|should)\b", re.I)
+    r"|where|who|which|can|could|is there|are there|does|do|should"
+    #  24/10/2026 : « il y a plusieurs types de langues… l'international » — espagnol, portugais, allemand, italien.
+    r"|d[oó]nde|c[oó]mo|cu[aá]ndo|cu[aá]l|onde|quando|qual|wo|wie|wann|warum|welche[rsn]?|gibt es"
+    r"|dove|perch[eé])\b", re.I)
 BAVARDAGE = re.compile(
     r"^(ça|ca|sa|cv|tu|t'?es|tes|vous|wsh|slt|salut|yo|hey|re|bjr|bonjour|bonsoir|hello|hi|mdr|ptdr|lol)\b"
     r".{0,25}$|\b(ça va|ca va|tu fais quoi|vous faites quoi|t'?es o[uù]|qui (joue|veut jouer|est co|est l[aà])"

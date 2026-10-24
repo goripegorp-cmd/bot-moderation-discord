@@ -14,6 +14,7 @@ import pytest
 
 import faq
 from conftest_discord import Obj
+import questions
 from faux_serveur import Fil, Monde, interaction, run, textes
 from ui_v2 import LayoutView, Palette
 
@@ -83,8 +84,10 @@ def faq_env():
         return conf
 
     def destinations(g, _c):
-        return {"ticket": "https://discord.com/channels/1/40", "trade": "https://discord.com/channels/1/42", "suggestions": "https://discord.com/channels/1/43",
-                "help": "", "type_clan": "Rell Seas"}
+        return {"ticket": "https://discord.com/channels/1/40", "suggestions": "https://discord.com/channels/1/43",
+                "type_clan": "Rell Seas",
+                "jeux": [{"cle": "rell", "nom": "Rell Seas", "emoji": "🌊", "mots": ("rell",), "forum": 0,
+                          "trade": "https://discord.com/channels/1/42", "help": "", "annonces": "", "lien": ""}]}
 
     async def langue(m):
         return langues.get(m.id, "fr")
@@ -193,3 +196,99 @@ def test_T2_branche_dans_le_bot():
     assert "bot.add_listener(_faq_hook, 'on_message')" in ast.unparse(ARBRE) and "faq.setup(" in SRC
     dest = _source("_faq_destinations")
     assert "zones_posts" in dest and "_salon_des_tickets(g)" in dest
+
+
+# ─── 24/10 : le bon salon, selon le jeu et la langue ─────────────────────────
+
+DEST = {"ticket": "https://t/40", "suggestions": "https://t/43", "game_link": "https://t/60", "annonces": "https://t/61",
+        "roblox": "https://t/62", "goripe": "https://t/63",
+        "jeux": [{"cle": "rell", "nom": "Rell Seas", "emoji": "🌊", "mots": ("rell", "rellseas", "reelsy"), "forum": 70,
+                  "trade": "https://t/71", "help": "https://t/72", "annonces": "https://t/73",
+                  "lien": "https://www.roblox.com/games/1"},
+                 {"cle": "clover", "nom": "Clover RPG", "emoji": "🍀", "mots": ("clover",), "forum": 80,
+                  "trade": "https://t/81", "help": "https://t/82", "annonces": "", "lien": ""}]}
+
+
+def _repond(texte, salon=None, d=DEST):
+    s, langue = faq.reconnaitre(texte)
+    assert s is not None, texte
+    return faq.reponse(s, questions.nettoyer(texte).lower(), salon, d, langue or "fr")
+
+
+def _liens(r):
+    return [u for _b, u in r[2]]
+
+
+def test_F6_six_langues_le_bon_sujet():
+    """« Fais attention, il y a plusieurs types de langues… l'international. »"""
+    attendus = {
+        "Ils sont où les liens pour rejoindre le jeu ?": ("lien_jeu", "fr"),
+        "where are the game links?": ("lien_jeu", "en"),
+        "¿Dónde están los enlaces para jugar?": ("lien_jeu", "en"),
+        "Onde estão os anúncios do jogo?": ("annonces", "en"),
+        "Wo sind die Ankündigungen?": ("annonces", "en"),
+        "dove sono i video di goripe?": ("videos", "en"),
+        "Elles sont où les annonces de Rell Seas ?": ("annonces", "fr"),
+        "où sont les vidéos et les lives de goripe ?": ("videos", "fr"),
+        "comment je demande de l'aide ?": ("aide_jeu", "fr"),
+        "où sont les salons pour échanger ?": ("trade", "fr"),
+        "¿Cómo puedo intercambiar objetos?": ("trade", "en"),
+    }
+    for q, (cle, langue) in attendus.items():
+        s, l = faq.reconnaitre(q)
+        assert (getattr(s, "cle", None), l) == (cle, langue), q
+    assert faq.reconnaitre("Que c'est beau ce soir les amis")[0] is None, "une exclamation n'est pas une question"
+
+
+def test_F7_general_tous_les_jeux_un_jeu_nomme_son_salon():
+    """« Si c'est général… tous les salons pour échanger ; s'il cible un jeu, le salon du jeu. »"""
+    titre, corps, boutons = _repond("où sont les salons pour échanger ?")
+    assert _liens((titre, corps, boutons)) == ["https://t/71", "https://t/81"] and "Chaque jeu" in corps
+    assert [b for b, _u in boutons] == ["🤝 Rell Seas", "🤝 Clover RPG"]
+    r = _repond("comment on trade sur clover ?")
+    assert _liens(r) == ["https://t/81"] and "Clover RPG" in r[1], "un jeu nommé : son salon"
+    fil = Fil(Monde(), 901, Obj(id=70), "🌊 Chat Rell Seas")
+    r = _repond("comment on fait pour échanger ?", fil)
+    assert _liens(r) == ["https://t/71"], "écrit dans un post de 🌊rell-seas : Rell Seas"
+    r = _repond("how do I trade?")
+    assert r[0] == "🤝 Trading" and "Each game" in r[1], "en anglais"
+
+
+def test_F8_les_annonces_d_un_jeu_de_roblox_du_serveur():
+    assert _liens(_repond("Elles sont où les annonces de Rell Seas ?")) == ["https://t/73"], "Sneak Rell Seas"
+    r = _repond("où sont les annonces de roblox ?")
+    assert _liens(r) == ["https://t/62"] and "Roblox" in r[0], "Sneak News Roblox"
+    assert _liens(_repond("où sont les annonces ?")) == ["https://t/61", "https://t/73"], \
+        "le serveur, puis chaque jeu qui a son salon (Clover RPG n'en a pas : pas de bouton)"
+    assert _repond("où sont les annonces de clover ?") is None, "aucun salon connu : pas de carte"
+
+
+def test_F9_les_liens_les_videos_l_aide():
+    r = _repond("Ils sont où les liens pour rejoindre le jeu ?")
+    assert _liens(r) == ["https://t/60", "https://www.roblox.com/games/1"] and "game-link" in r[1], \
+        "🎮 Game Link, et le lien direct de chaque jeu qui en a un"
+    r = _repond("where is the link to play rell seas?")
+    assert _liens(r) == ["https://t/60", "https://www.roblox.com/games/1"] and "Rell Seas's official link" in r[1]
+    assert _liens(_repond("where is the link to play clover?")) == ["https://t/60"]
+    assert _liens(_repond("où sont les vidéos et les lives de goripe ?")) == ["https://t/63"]
+    r = _repond("comment je demande de l'aide ?")
+    assert _liens(r) == ["https://t/72", "https://t/82", "https://t/40"] and "Pour le staff" in r[1]
+    r = _repond("comment je demande de l'aide sur clover ?")
+    assert _liens(r) == ["https://t/82"] and "Clover RPG" in r[1] and "staff" not in r[1]
+
+
+def test_F10_les_salons_reconnus_par_leur_nom():
+    noms = ["📜annonce", "🟢target-roblox", "📀sneak-rellseas", "sneak-news-roblox", "🎥goripe", "🎮game-link",
+            "📣▷・annonces-gorp", "💬discussion"]
+    salons = [Obj(id=n, name=nom) for n, nom in enumerate(noms, 1)]
+    t = faq.salons_du_serveur(salons, [("rell", "rellseas"), ("clover",)])
+    assert (t["game_link"].name, t["roblox"].name, t["goripe"].name, t["annonces"].name) == \
+        ("🎮game-link", "sneak-news-roblox", "🎥goripe", "📜annonce")
+    assert t["jeux"][0].name == "📀sneak-rellseas" and t["jeux"][1] is None
+
+
+def test_F11_branche_dans_le_bot():
+    dest = _source("_faq_destinations")
+    for morceau in ("faq.salons_du_serveur(publics", "zones.JEUX", "liens_jeux.liens(c)",
+                    "permissions_for(g.default_role).view_channel"):
+        assert morceau in dest, morceau

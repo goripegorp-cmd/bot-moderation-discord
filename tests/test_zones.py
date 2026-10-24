@@ -245,6 +245,21 @@ def test_Z6_le_panneau_aide_un_groupe_par_compartiment(env):
     assert "💬chat" in noms(g.commu), "un ancien salon qu'on ne sait pas reprendre reste là : rien n'est supprimé"
 
 
+def test_Z6b_jouer_le_lien_du_jeu_sinon_game_link(env):
+    g = Monde()
+    _clan_et_vocaux(g, env.conf)
+    run(ZN.installer(g))
+    c = env.conf
+    gl = g._salon(Texte, "🎮game-link", {})
+    c.update(game_link_salon=gl.id, jeux_liens={"rell": "https://www.roblox.com/games/1"})
+    groupes = ZN.groupes_aide(g, c, run(ZN.conf(g)))
+    assert groupes[1][2][0] == (ZN.Post(0, "https://www.roblox.com/games/1"), "🎮 Jouer"), "le lien direct du jeu"
+    assert groupes[2][2][0][0].jump_url == f"https://discord.com/channels/1/{gl.id}", "pas encore de lien : 🎮 game-link"
+    vue, _sig = ZN.vue_guide(g, c, run(ZN.conf(g)), run(E.conf(g)), ZN.JEUX[0])
+    assert "### 🎮 Jouer · Play" in textes(vue) and "https://www.roblox.com/games/1" in \
+        [b.url for b in vue.walk_children() if isinstance(b, discord.ui.Button)], "et dans le guide du jeu"
+
+
 def _vue_aide_ns():
     ns = {"discord": discord, "Button": discord.ui.Button, "LayoutView": LayoutView, "Palette": Palette,
           "visuels": visuels, "zones": ZN, "entraide": E, "equipages": Q, "config_salons": config_salons,

@@ -1,15 +1,19 @@
-"""faq.py — les réponses toutes faites (22/10/2026).
+"""faq.py — les réponses toutes faites (22/10/2026, refaites le 24/10/2026).
 
-Demandé par le fondateur : « les gens qui posent des questions — comment on fait pour rejoindre le
-clan, pour créer un ticket staff, pour venir dans l'équipage — ça les renvoie dans le système de
-tickets… comment on peut demander de l'aide pour le clan, faire du trading, faire des suggestions…
-ça les renvoie au propre vers des salons, avec des réponses ultra bien faites ».
+Le 22/10, le fondateur : « les gens qui posent des questions — comment on fait pour rejoindre le clan, pour
+créer un ticket staff… — ça les renvoie… au propre vers des salons, avec des réponses ultra bien faites ».
+Le 24/10 : « Ils sont où les liens pour rejoindre le jeu ? Le salon Game Link… les annonces de Rell Seas,
+Sneak Rell Seas… les annonces de Roblox, Sneak News Roblox… les vidéos, les lives que GoRipe poste… les salons
+pour échanger : si c'est général, tous ; s'il cible un jeu, le salon du jeu… pour de futurs jeux… comment je
+demande de l'aide, en fonction du jeu… il y a plusieurs types de langues… l'international. »
 
-Dans un salon public (jamais un ticket ni un salon du staff), une vraie question
-(`questions.est_question`) sur un de ces sujets reçoit en réponse une carte courte, dans la langue
-de la question, avec un bouton qui mène au bon endroit. Une fois par membre et par sujet par
-demi-heure ; une fois par salon et par sujet toutes les 5 minutes (deux membres qui demandent la
-même chose : une carte). La carte s'efface d'elle-même au bout de 30 minutes : le chat reste propre.
+Dans un salon public (jamais un ticket ni un salon du staff), une vraie question (`questions.est_question`)
+sur un de ces sujets — en français, anglais, espagnol, portugais, allemand ou italien — reçoit une carte
+courte avec un bouton par bon endroit : celui du jeu nommé (ou du forum où l'on écrit), sinon ceux de tous
+les jeux (`zones.JEUX` : un nouveau jeu y entre tout seul). Réponse en français à une question en français,
+sinon en anglais. Une fois par membre et par sujet par demi-heure ; une fois par salon et par sujet toutes
+les 5 minutes. La carte s'efface au bout de 30 minutes : le chat reste propre. Jamais un bouton qui ment :
+un endroit inconnu n'a pas de bouton, et sans aucun bouton, pas de carte.
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ from dataclasses import dataclass
 import discord
 from discord.ui import Button
 
+import config_salons
 import questions
 from ui_v2 import LayoutView, Palette
 
@@ -36,8 +41,8 @@ class Sujet:
     titre_en: str
     texte_fr: str
     texte_en: str
-    vers: str            # la destination : « ticket », « trade », « suggestions », « help »
-    motifs: tuple        # une question qui en parle (français ou anglais)
+    vers: str            # « ticket », « suggestions », « goripe »… ou, par jeu, « jeu:trade », « jeu:help »…
+    motifs: tuple        # une question qui en parle (français, anglais, espagnol, portugais, allemand, italien)
 
 
 #  Du plus précis au plus général : le premier sujet reconnu répond.
@@ -53,7 +58,9 @@ SUJETS = (
            r"\b(rejoindre|venir dans|entrer dans|int[ée]grer|faire partie d[ue])\b.{0,30}\b([ée]quipage|crew)\b",
            r"\b(join|get into|be part of)\b.{0,30}\bcrew\b",
            r"\b(clan|gorp\w*)\b.{0,40}\b(rejoindre|recrut\w*|candidat\w*|postuler)\b",
-           r"\b(join|apply|get into|be part of)\b.{0,40}\b(clan|gorp\w*|team|guild)\b")),
+           r"\b(join|apply|get into|be part of)\b.{0,40}\b(clan|gorp\w*|team|guild)\b",
+           r"\b(unirme|unirse|entrar|ingresar|participar|beitreten|entrare|unirmi)\b.{0,30}\b(clan|cl[aã]|gorp\w*)\b",
+           r"\b(clan|gorp\w*)\b.{0,30}\b(beitreten)\b")),
     Sujet("aide_clan", "🏴‍☠️", "Une question sur le clan", "A question about the clan",
           "Pour une question ou un souci avec le clan, ouvre un ticket{type} : le staff du clan te répond.",
           "For a question or an issue with the clan, open a ticket{type}: the clan staff answers you.",
@@ -64,33 +71,95 @@ SUJETS = (
           "Dans 🏷ticket : bouton « Créer un ticket », puis choisis le type. Seuls toi et le staff le voyez.",
           "In 🏷ticket: “Create a ticket” button, then pick the type. Only you and the staff can see it.",
           "ticket",
-          (r"\b(cr[ée]er|ouvrir|faire|mettre|open|create|make)\b.{0,20}\btickets?\b",
+          (r"\b(cr[ée]er|ouvrir|faire|mettre|open|create|make|abrir|crear|criar|aprire|creare)\b.{0,20}\btickets?\b",
+           r"\btickets?\b.{0,20}\b(erstellen|[öo]ffnen|er[öo]ffnen)\b",
            r"\b(contacter|parler (au|à|a)|joindre|[ée]crire (au|à|a))\b.{0,20}\b(staff|modo\w*|mod[ée]rat\w*|admin\w*)\b",
            r"\b(contact|reach|talk to)\b.{0,20}\b(staff|mods?|admins?)\b")),
+    Sujet("lien_jeu", "🎮", "Rejoindre le jeu", "Join the game",
+          "Les liens pour rejoindre nos jeux sont dans 🎮 game-link.",
+          "The links to join our games are in 🎮 game-link.",
+          "jeu:lien",
+          (r"\b(liens?|links?)\b.{0,40}\b(jeux?|jouer|rejoindre|serveurs? priv[ée]s?|game|play|join|private server)\b",
+           r"\b(jeux?|game|games)\b.{0,20}\b(liens?|links?)\b",
+           r"\bgame ?link\b",
+           r"\b(comment|o[uù])\b.{0,30}\b(rejoindre|jouer [aà]|trouver)\b.{0,20}\b(jeux?|rell\w*|clover\w*)\b",
+           r"\bhow (do i|can i|to|do you) (join|play|get to)\b.{0,25}\b(game|rell\w*|clover\w*)\b",
+           r"\b(enlaces?|links?)\b.{0,40}\b(juegos?|jugar|unirme)\b",
+           r"\bc[oó]mo (entro|juego|me uno|puedo jugar)\b",
+           r"\b(links?)\b.{0,40}\b(jogos?|jogar|entrar)\b",
+           r"\bcomo (entro|jogo|posso jogar)\b",
+           r"\b(links?)\b.{0,40}\b(spiel\w*|beitreten)\b",
+           r"\bwie (komme|trete|spiele) ich\b",
+           r"\b(link)\b.{0,40}\b(gioco|giocare)\b",
+           r"\bcome (entro|gioco)\b")),
     Sujet("trade", "🤝", "Échanger", "Trading",
-          "Dans 🤝 Trade : « Proposer » ta carte. Avec un inconnu, ne donne jamais en premier : appelle un "
-          "middleman.",
-          "In 🤝 Trade: “Post a trade”. With a stranger, never give first: call a middleman.",
-          "trade",
-          (r"\b(trad(e|er|es|ing)|[ée]chang(er|e|es|ent)|middleman|swap)\b",)),
+          "Chaque jeu a son 🤝 Trade : « Proposer » ta carte. Avec un inconnu, ne donne jamais en premier : "
+          "appelle un middleman.",
+          "Each game has its 🤝 Trade: “Post a trade”. With a stranger, never give first: call a middleman.",
+          "jeu:trade",
+          (r"\b(trad(e|er|es|ing)|[ée]chang(er|e|es|ent)|middleman|swap)\b",
+           r"\b(intercambi(ar|o|os)|tradear|trocar|trocas?|tauschen|tausch|handeln|scambi(are|o)?)\b")),
     Sujet("suggestion", "💡", "Proposer une idée", "Suggest an idea",
           "Dans 💡 Suggestions : bouton « Proposer », tout le monde vote, le staff répond.",
           "In 💡 Suggestions: “Suggest” button, everyone votes, the staff answers.",
           "suggestions",
-          (r"\b(suggestions?|suggest|propos(er|e) (une |des )?(id[ée]es?|am[ée]liorations?))\b",)),
+          (r"\b(suggestions?|suggest|propos(er|e) (une |des )?(id[ée]es?|am[ée]liorations?))\b",
+           r"\b(sugerencias?|sugerir|sugest[aã]o|sugest[oõ]es|vorschl[aä]ge?|vorschlagen|suggeriment[oi]|"
+           r"suggerire)\b")),
     Sujet("aide_jeu", "🛟", "De l'aide en jeu", "Help in game",
-          "Dans 🛟 Help : choisis Aide, Boss, Farm ou Chill, remplis — des joueurs viennent t'aider.",
-          "In 🛟 Help: pick Help, Boss, Farm or Chill, fill in — players come to help you.",
-          "help",
+          "Chaque jeu a son 🛟 Help : choisis Aide, Boss, Farm ou Chill, remplis — des joueurs viennent t'aider. "
+          "Pour le staff : un ticket.",
+          "Each game has its 🛟 Help: pick Help, Boss, Farm or Chill, fill in — players come to help you. For the "
+          "staff: a ticket.",
+          "jeu:help",
           (r"\b(besoin d'aide|aide[rz]? (moi|pour|sur)|qui (peut|veut) m'aider)\b",
            r"\b(need help|help me|can someone help|who can help)\b",
            r"\b(aide|aider|help|besoin)\b.{0,30}\b(boss|farm\w*|qu[eê]tes?|quests?)\b",
-           r"\b(boss|farm\w*|qu[eê]tes?|quests?)\b.{0,30}\b(aide|aider|help)\b")),
+           r"\b(boss|farm\w*|qu[eê]tes?|quests?)\b.{0,30}\b(aide|aider|help)\b",
+           r"\b(comment|o[uù])\b.{0,25}\b(demand\w*|avoir|trouv\w*|obten\w*)\b.{0,15}\baide\b",
+           r"\bhow (do i|can i|to) (ask|get|find)\b.{0,10}\bhelp\b",
+           r"\b(necesito ayuda|ay[uú]dame|ayuda (con|para|en))\b",
+           r"\b(preciso de ajuda|me ajuda|ajuda (com|para|no))\b",
+           r"\b(ich brauche hilfe|hilfe (bei|mit|im))\b",
+           r"\b(ho bisogno di aiuto|aiutami|aiuto (con|per))\b")),
+    Sujet("annonces", "📢", "Les annonces", "Announcements",
+          "Les annonces du serveur, et celles de chaque jeu dans son salon.",
+          "Server announcements, and each game's in its own channel.",
+          "jeu:annonces",
+          (r"\b(annonces?|news|nouveaut[ée]s?|actus?|actualit[ée]s?|mises? [aà] jour|maj|patch(es)?|sneak|leaks?)\b",
+           r"\b(announcements?|updates?|patch notes?|sneak peeks?)\b",
+           r"\b(anuncios?|noticias|novedades|actualizaci[oó]n(es)?|an[uú]ncios?|not[ií]cias|novidades|"
+           r"atualiza[cç](ão|ões)|ank[uü]ndigungen?|neuigkeiten|annunci|notizie|novit[aà]|aggiornamenti)\b")),
+    Sujet("videos", "🎥", "Les vidéos et les lives", "Videos and lives",
+          "Les vidéos et les lives de GoRipe sont publiés dans le salon GoRipe.",
+          "GoRipe's videos and lives are posted in the GoRipe channel.",
+          "goripe",
+          (r"\b(vid[ée]os?|lives?|streams?|twitch|youtube|tiktok|goripe)\b",
+           r"\b(directos?|transmisi[oó]n|transmiss[aã]o|livestreams?|dirette?)\b")),
 )
-BOUTONS = {"ticket": ("Ouvrir un ticket", "Open a ticket"), "trade": ("Trade", "Trade"), "suggestions": ("Suggestions", "Suggestions"), "help": ("Help", "Help")}
-#  La langue de la question : ses petits mots (« comment », « je »… ou « how », « the »…).
+#  Les textes quand le jeu est connu (« {jeu} ») et les actus Roblox.
+TEXTES_JEU = {
+    "trade": ("Dans 🤝 Trade de {jeu} : « Proposer » ta carte. Avec un inconnu, ne donne jamais en premier : "
+              "appelle un middleman.",
+              "In {jeu}'s 🤝 Trade: “Post a trade”. With a stranger, never give first: call a middleman."),
+    "help": ("Dans 🛟 Help de {jeu} : choisis Aide, Boss, Farm ou Chill, remplis — des joueurs viennent t'aider.",
+             "In {jeu}'s 🛟 Help: pick Help, Boss, Farm or Chill, fill in — players come to help you."),
+    "annonces": ("Les annonces de {jeu} sont dans son salon.", "{jeu} announcements are in its channel."),
+    "lien": ("Le lien officiel de {jeu} : un clic sur « Jouer ».", "{jeu}'s official link: click “Play”."),
+    "roblox": ("Les actus Roblox arrivent toutes seules dans leur salon.",
+               "Roblox news arrive on their own in their channel."),
+}
+BOUTONS = {"ticket": ("Ouvrir un ticket", "Open a ticket"), "trade": ("Trade", "Trade"),
+           "suggestions": ("Suggestions", "Suggestions"), "help": ("Help", "Help"), "goripe": ("🎥 GoRipe", "🎥 GoRipe"),
+           "game_link": ("🎮 Game Link", "🎮 Game Link")}
+EMOJI_JEU = {"trade": "🤝", "help": "🛟", "annonces": "📢", "lien": "🎮"}
+#  La langue de la question : ses petits mots (« comment », « je »… ou « how », « the »…) ; une autre langue
+#  (espagnol, portugais, allemand, italien) reçoit l'anglais, la langue de l'international.
 MOTS_FR = re.compile(r"\b(comment|je|j|tu|on|le|la|les|des|pour|est|un|une|du|faire|quoi|o[uù]|qui|peut)\b")
 MOTS_EN = re.compile(r"\b(how|what|where|can|could|the|is|do|does|i|you|to|an|who|which)\b")
+MOTS_AUTRES = re.compile(r"[¿¡]|\b(d[oó]nde|c[oó]mo|cu[aá]ndo|est[aá]n?|hay|los|las|para|onde|voc[eê]|est[aã]o|tem"
+                         r"|wo|wie|ist|sind|gibt|kann|ich|dove|sono|posso|qual)\b")
+ROBLOX = re.compile(r"\broblox\b")
 
 _cfg = _langue = _est_staff = _destinations = None
 _log = print
@@ -99,16 +168,21 @@ _salons: dict = {}
 
 
 def setup(*, cfg, destinations, est_staff, langue=None, log=None):
-    """`destinations(g, c)` → {« ticket » | « trade » | … : lien, « type_clan » : nom du type de ticket
-    du clan} ; `est_staff(g, membre, c)` → bool ; `langue(membre)` (async) → « fr » ou « en »."""
+    """`destinations(g, c)` → {« ticket » | « suggestions » | « game_link » | « annonces » | « roblox » |
+    « goripe » : lien, « type_clan » : nom du type de ticket du clan, « jeux » : [{« cle », « nom », « emoji »,
+    « mots », « forum », « trade », « help », « annonces », « lien »}]} ; `est_staff(g, membre, c)` → bool ;
+    `langue(membre)` (async) → « fr » ou « en »."""
     global _cfg, _destinations, _est_staff, _langue, _log
     _cfg, _destinations, _est_staff, _langue = cfg, destinations, est_staff, langue
     _log = log or print
 
 
 def langue_du_texte(t: str) -> str:
-    """« fr », « en », ou "" si rien ne le dit."""
-    fr, en = len(MOTS_FR.findall(t)), len(MOTS_EN.findall(t))
+    """« fr », « en » (l'anglais aussi pour l'espagnol, le portugais, l'allemand, l'italien), ou "" si rien
+    ne le dit."""
+    fr, en, autres = len(MOTS_FR.findall(t)), len(MOTS_EN.findall(t)), len(MOTS_AUTRES.findall(t))
+    if autres > max(fr, en):
+        return "en"
     return "" if fr == en else ("en" if en > fr else "fr")
 
 
@@ -124,17 +198,102 @@ def reconnaitre(texte: str) -> tuple:
     return None, ""
 
 
+def salons_du_serveur(salons, mots_jeux) -> dict:
+    """FONCTION PURE : les salons d'information reconnus par leur nom, parmi `salons` (ceux que @everyone
+    voit) : {« game_link », « annonces » (le serveur), « roblox » (les actus), « goripe » (vidéos et lives),
+    « jeux » : [le salon des annonces de chaque jeu, dans l'ordre de `mots_jeux`]}. Absent : None."""
+    def mots(ch):
+        return config_salons.normaliser(getattr(ch, "name", "") or "").split()
+
+    def premier(test):
+        return next((ch for ch in salons if test(mots(ch))), None)
+
+    def du_jeu(m, prefixes):
+        return any(x.startswith(p) for x in m for p in prefixes)
+    tous = [p for jm in mots_jeux for p in jm]
+    return {
+        "game_link": premier(lambda m: ("game" in m and "link" in m) or "gamelink" in m),
+        "roblox": premier(lambda m: "roblox" in m and any(x in ("news", "actu", "actus") for x in m)),
+        "goripe": premier(lambda m: "goripe" in m and "sneak" not in m),
+        "annonces": premier(lambda m: any(x in ("annonce", "annonces", "announcements") for x in m)
+                            and not du_jeu(m, tous) and "clan" not in m and not any(x.startswith("gorp") for x in m)),
+        "jeux": [premier(lambda m, jm=jm: du_jeu(m, jm) and ("sneak" in m or "news" in m
+                                                             or any(x.startswith("annonce") for x in m)))
+                 for jm in mots_jeux],
+    }
+
+
+def jeux_nommes(texte: str, jeux: list) -> list:
+    """Les jeux dont la question parle (« rell », « rellseas », « clover »…)."""
+    return [j for j in jeux if any(re.search(r"\b" + re.escape(m), texte) for m in j.get("mots") or ())]
+
+
+def jeux_du_salon(salon, jeux: list) -> list:
+    """Le jeu du forum où l'on écrit (un post de 🌊rell-seas, de 🍀clover-rpg…)."""
+    parent = getattr(salon, "parent", None) if isinstance(salon, discord.Thread) else None
+    pid = getattr(parent, "id", 0)
+    return [j for j in jeux if pid and int(j.get("forum") or 0) == pid]
+
+
+def reponse(s: Sujet, texte: str, salon, liens: dict, langue: str) -> tuple | None:
+    """(titre, texte, [(bouton, lien)]) — un bouton par bon endroit, cinq au plus ; None si aucun endroit
+    n'est connu (jamais un bouton qui ment)."""
+    en = langue == "en"
+    titre = f"{s.emoji} {s.titre_en if en else s.titre_fr}"
+    precision = f" (type « {liens.get('type_clan')} »)" if liens.get("type_clan") and s.cle in ("clan", "aide_clan") \
+        else ""
+    corps = (s.texte_en if en else s.texte_fr).format(type=precision)
+    if not s.vers.startswith("jeu:"):
+        url = liens.get(s.vers)
+        return (titre, corps, [(BOUTONS.get(s.vers, ("Ouvrir", "Open"))[1 if en else 0], url)]) if url else None
+    cle = s.vers[4:]
+    jeux = list(liens.get("jeux") or [])
+    nommes = jeux_nommes(texte, jeux) or jeux_du_salon(salon, jeux)
+    if cle == "annonces" and not nommes and ROBLOX.search(texte):
+        url = liens.get("roblox")
+        return (f"📰 {'Roblox news' if en else 'Les actus Roblox'}", TEXTES_JEU["roblox"][1 if en else 0],
+                [("📰 Roblox", url)]) if url else None
+    choisis = nommes or jeux
+    if cle == "lien":
+        libelle = "Play" if en else "Jouer"
+        boutons = [(f"🎮 {libelle} · {j['nom']}", j.get("lien")) for j in choisis if j.get("lien")]
+    else:
+        boutons = [(f"{EMOJI_JEU[cle]} {j['nom']}", j.get(cle)) for j in choisis if j.get(cle)]
+    if len(nommes) == 1 and boutons:
+        corps = TEXTES_JEU[cle][1 if en else 0].format(jeu=nommes[0]["nom"])
+    if cle == "lien" and liens.get("game_link"):
+        boutons.insert(0, ("🎮 Game Link", liens["game_link"]))
+        if not nommes or len(boutons) == 1:
+            corps = s.texte_en if en else s.texte_fr
+    if cle == "annonces" and not nommes and liens.get("annonces"):
+        boutons.insert(0, ("📜 " + ("Server" if en else "Serveur"), liens["annonces"]))
+    if cle == "help" and not nommes and boutons and liens.get("ticket"):
+        boutons.append(("🎫 Ticket", liens["ticket"]))
+    if not boutons:
+        return None
+    if cle == "help" and nommes:
+        corps = TEXTES_JEU["help"][1 if en else 0].format(jeu=nommes[0]["nom"])
+    elif cle == "help" and not liens.get("ticket"):
+        corps = corps.replace(" Pour le staff : un ticket.", "").replace(" For the staff: a ticket.", "")
+    return titre, corps, boutons[:5]
+
+
+def vue_reponse(titre: str, corps: str, boutons: list) -> LayoutView:
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(
+        discord.ui.TextDisplay(f"### {titre}\n{corps}"),
+        discord.ui.ActionRow(*[Button(label=libelle[:80], url=url) for libelle, url in boutons[:5]]),
+        discord.ui.TextDisplay("-# Réponse automatique · Automatic answer"), accent_color=Palette.INFO))
+    return v
+
+
 def vue(s: Sujet, langue: str, lien: str, type_clan: str = "") -> LayoutView:
+    """Une réponse à un seul bouton (le clan, un ticket…)."""
     en = langue == "en"
     precision = f" (type « {type_clan} »)" if type_clan and s.cle in ("clan", "aide_clan") else ""
     texte = (s.texte_en if en else s.texte_fr).format(type=precision)
     libelle = BOUTONS.get(s.vers, ("Ouvrir", "Open"))[1 if en else 0]
-    v = LayoutView(timeout=None)
-    v.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"### {s.emoji} {s.titre_en if en else s.titre_fr}\n{texte}"),
-        discord.ui.ActionRow(Button(label=libelle, url=lien)),
-        discord.ui.TextDisplay("-# Réponse automatique · Automatic answer"), accent_color=Palette.INFO))
-    return v
+    return vue_reponse(f"{s.emoji} {s.titre_en if en else s.titre_fr}", texte, [(libelle, lien)])
 
 
 def _libre(cle: tuple, delai: float, registre: dict, t: float) -> bool:
@@ -152,20 +311,12 @@ async def sur_message(msg, maintenant: float | None = None) -> bool:
     g, m = getattr(msg, "guild", None), getattr(msg, "author", None)
     if g is None or m is None or getattr(m, "bot", False) or getattr(msg, "webhook_id", None) or _cfg is None:
         return False
-    s, langue_q = reconnaitre(getattr(msg, "content", "") or "")
+    texte = getattr(msg, "content", "") or ""
+    s, langue_q = reconnaitre(texte)
     if s is None or not questions.salon_public(msg.channel):
         return False
     c = await _cfg(g.id)
     if _est_staff(g, m, c):
-        return False
-    t = maintenant or time.monotonic()
-    if not _libre((g.id, msg.channel.id, s.cle), SALON_S, _salons, t):
-        return False
-    if not _libre((g.id, m.id, s.cle), MEMBRE_S, _membres, t):
-        return False
-    liens = _destinations(g, c) or {}
-    lien = liens.get(s.vers)
-    if not lien:
         return False
     langue = langue_q or "fr"
     if not langue_q and _langue is not None:  # rien dans la question : sa langue à lui
@@ -173,9 +324,17 @@ async def sur_message(msg, maintenant: float | None = None) -> bool:
             langue = "en" if await _langue(m) == "en" else "fr"
         except Exception as ex:
             _log(f"[FAQ:DETAIL] langue {type(ex).__name__} {ex}")
+    r = reponse(s, questions.nettoyer(texte).lower(), msg.channel, _destinations(g, c) or {}, langue)
+    if r is None:
+        return False
+    t = maintenant or time.monotonic()
+    if not _libre((g.id, msg.channel.id, s.cle), SALON_S, _salons, t):
+        return False
+    if not _libre((g.id, m.id, s.cle), MEMBRE_S, _membres, t):
+        return False
     try:
-        await msg.reply(view=vue(s, langue, lien, liens.get("type_clan", "")), mention_author=False,
-                        allowed_mentions=discord.AllowedMentions.none(), delete_after=EFFACER_S)
+        await msg.reply(view=vue_reponse(*r), mention_author=False, allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=EFFACER_S)
     except discord.HTTPException as ex:
         _log("[FAQ][E1] réponse non posée")
         _log(f"[FAQ][E1:DETAIL] sujet={s.cle} {type(ex).__name__} {ex}")

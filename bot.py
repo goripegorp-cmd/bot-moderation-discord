@@ -100,6 +100,7 @@ import zones  # les compartiments : Communautaire et Rell Seas, rangés par prio
 import annonces  # les annonces en un clic : bandeau, texte, liens, « ✅ Vu », un fil par annonce
 import faq  # les questions fréquentes : une carte qui mène au bon endroit (ticket, trade…)
 import cadeaux  # les cadeaux (giveaways) : conditions, stats en direct, tirage pondéré
+import liens_jeux  # 🎮 game-link : les liens officiels pour rejoindre nos jeux
 import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -6930,7 +6931,7 @@ class BoutonFicheSite(discord.ui.DynamicItem[Button], template=r"alerte:fiche:(?
 
 NOM_SALON_LOGS = "📋logs"
 #  Le menu est réécrit quand sa signature change (texte, mode, nombre d'anciens salons).
-MENU_LOGS_VERSION = 5  # 5 : 🎁 Cadeaux
+MENU_LOGS_VERSION = 6  # 5 : 🎁 Cadeaux · 6 : 🎮 Liens des jeux
 #  Les alertes qui demandent une réaction humaine (raid, compte piraté, escalade, staff) : en
 #  mode site, elles arrivent dans le salon unique. Tous les autres salons de logs sont mis à 0.
 CLES_ALERTES = ('mod_log_channel', 'antiraid_log_channel', 'log_anti_raid', 'log_anti_alt',
@@ -6973,11 +6974,14 @@ async def _menu_logs(g, c):
              "« ✅ Vu » pour savoir qui l'a lue, et un fil pour la suite.\n"
              "### 🎁 Les cadeaux\n"
              "Un lot, une durée, des conditions (rôle, messages, vocal, ET ou OU), plus de chances pour les "
-             "boosters : chacun suit ses stats, le tirage se fait seul.")
+             "boosters : chacun suit ses stats, le tirage se fait seul. Aussi : `/giveaway lancer`.\n"
+             "### 🎮 Game Link\n"
+             "Les liens officiels de nos jeux : un champ par jeu, la carte de 🎮 game-link suit.")
     if site:
         texte += ("\n-# Plus aucun log sur Discord : ici n'arrivent que les alertes qui demandent "
                   "une réaction (raid, compte piraté, escalade).")
-    boutons = [recrutements.BoutonTableau(), annonces.BoutonComposer(), cadeaux.BoutonCadeaux()]
+    boutons = [recrutements.BoutonTableau(), annonces.BoutonComposer(), cadeaux.BoutonCadeaux(),
+               liens_jeux.BoutonLiens()]
     if anciens:
         boutons.append(BoutonAnciensSalons(len(anciens)))
     archives = zones.archives(g, c)
@@ -6986,9 +6990,9 @@ async def _menu_logs(g, c):
                   "membres : tu choisis ce que tu supprimes.")
         boutons.append(BoutonArchives(len(archives)))
     v = LayoutView(timeout=None)
+    rangees = [discord.ui.ActionRow(*boutons[n:n + 5]) for n in range(0, len(boutons), 5)]  # cinq par rangée
     v.add_item(discord.ui.Container(visuels.bandeau("logs", "Les logs du serveur"),
-                                    discord.ui.TextDisplay(texte), discord.ui.ActionRow(*boutons),
-                                    accent_color=Palette.INFO))
+                                    discord.ui.TextDisplay(texte), *rangees, accent_color=Palette.INFO))
     return v, f"{MENU_LOGS_VERSION}|{int(site)}|{len(anciens)}|{len(archives)}"
 
 
@@ -12505,6 +12509,7 @@ async def salon_logs_task():
         try:
             await _salon_tableau(g)
             await _salon_aide(g)
+            await liens_jeux.assurer_carte(g)
             if _types_tickets(await cfg(g.id)):
                 await _categorie_tickets(g)
         except Exception as ex:
@@ -13119,7 +13124,7 @@ async def _vue_aide(g, c):
         items.append(discord.ui.Separator())
         items.append(discord.ui.TextDisplay(f"### {titre}\n{phrase}"))
         items.append(discord.ui.ActionRow(*[Button(label=libelle, url=x.jump_url) for x, libelle in boutons[:5]]))
-        ids += [x.id for x, _l in boutons[:5]]
+        ids += [x.jump_url for x, _l in boutons[:5]]
     if ticket is not None:
         items.append(discord.ui.Separator())
         items.append(discord.ui.Section(
@@ -13238,6 +13243,15 @@ async def entraide_task():
                 # en question… la direction et le fondateur voient les tickets ».
                 await db_set(g.id, 'tickets_visibilite_v1', now().isoformat())
                 await _tickets_visibilite(g)
+            if g.owner_id in TETE_IDS and not c.get('game_link_v1'):
+                # 24/10, le fondateur : « un nouveau salon avec un emoji de manette qui s'appelle Game Link ».
+                await db_set(g.id, 'game_link_v1', now().isoformat())
+                ch = await liens_jeux.salon(g, creer=True)
+                if ch is not None:
+                    await liens_jeux.assurer_carte(g)
+                    await _au_journal(g, "Config", "gamelink.salon", f"Salon {ch.mention} créé : les liens pour "
+                                                                     "rejoindre nos jeux (« 🎮 Liens des jeux » dans 📋logs).")
+                    await _salon_aide(g)
             if g.owner_id in TETE_IDS and c.get('zones_archives') and not c.get('archives_supprimees_v1'):
                 # 22/10 (nuit), le fondateur : « je veux pas d'archive, tu peux tout enlever ».
                 await db_set(g.id, 'archives_supprimees_v1', now().isoformat())
@@ -13503,18 +13517,33 @@ async def _demenager_clan(g, c) -> None:
 
 
 def _faq_destinations(g, c) -> dict:
-    """Où mènent les réponses toutes faites : le salon des tickets, les posts du forum Rell Seas et de
-    la communauté — et le nom du type de ticket du clan, s'il existe."""
+    """Où mènent les réponses toutes faites (24/10/2026) : les salons d'information reconnus par leur nom
+    (🎮 game-link, les annonces de chaque jeu, les actus Roblox, GoRipe, les annonces du serveur), les posts
+    de chaque jeu (`zones.JEUX` : un nouveau jeu y entre tout seul), les tickets, les suggestions — et le nom
+    du type de ticket du clan, s'il existe. Seuls les salons que @everyone voit."""
     posts = c.get('zones_posts') or {}
 
-    def lien(cle):
+    def lien_post(cle):
         pid = int((posts.get(cle) or {}).get('id', 0) or 0)
         return f"https://discord.com/channels/{g.id}/{pid}" if pid else ""
+
+    def url(ch):
+        return f"https://discord.com/channels/{g.id}/{ch.id}" if ch is not None else ""
+    publics = [ch for ch in (getattr(g, "text_channels", []) or [])
+               if ch.permissions_for(g.default_role).view_channel]
+    trouves = faq.salons_du_serveur(publics, [j.mots for j in zones.JEUX])
+    game_link = g.get_channel(int(c.get('game_link_salon', 0) or 0)) or trouves["game_link"]
+    jeux_liens = liens_jeux.liens(c)
     ticket = _salon_des_tickets(g)
-    out = {"ticket": ticket.jump_url if ticket is not None else "", "trade": lien("trade"),
-           "help": lien("help"), "cl_trade": lien("cl_trade"), "cl_help": lien("cl_help"),
-           "suggestions": (f"https://discord.com/channels/{g.id}/{int(c.get('suggestions_salon', 0) or 0)}"
-                           if c.get('suggestions_salon') else "")}
+    idees = int(c.get('suggestions_salon', 0) or 0)
+    out = {"ticket": ticket.jump_url if ticket is not None else "",
+           "suggestions": f"https://discord.com/channels/{g.id}/{idees}" if idees else "",
+           "game_link": url(game_link), "annonces": url(trouves["annonces"]), "roblox": url(trouves["roblox"]),
+           "goripe": url(trouves["goripe"]),
+           "jeux": [{"cle": j.cle, "nom": j.nom, "emoji": j.emoji, "mots": j.mots,
+                     "forum": int(c.get(j.cle_forum, 0) or 0), "trade": lien_post(j.trade),
+                     "help": lien_post(j.help), "annonces": url(trouves["jeux"][n]), "lien": jeux_liens.get(j.cle, "")}
+                    for n, j in enumerate(zones.JEUX)]}
     clan = next((p.get('name') for p in (c.get('ticket_panels') or {}).values() if isinstance(p, dict)
                  and not p.get('disabled') and any(m in config_salons.normaliser(p.get('name') or '')
                                                    for m in ("rell", "clan", "candid", "gorp"))), "")
@@ -13550,6 +13579,10 @@ bot.tree.add_command(giveaway_group)
 async def _cadeaux_autorise(g, membre) -> bool:
     """Lancer et gérer les cadeaux : le fondateur et la direction (et les rôles au-dessus)."""
     return _a_la_tete(g, membre) or _direction_ou_plus(g, membre, await cfg(g.id))
+
+
+async def _liens_journal(g, type_: str, texte: str, **kw) -> None:
+    await _au_journal(g, "Config", type_, texte, **kw)
 
 
 async def _cadeaux_journal(g, type_: str, texte: str, **kw) -> None:
@@ -13849,6 +13882,9 @@ async def _etat_public():
             "cadeaux_salon": sum(1 for g, c in zip(list(bot.guilds), confs)
                                  if g.get_channel(int(c.get('cadeaux_salon', 0) or 0)) is not None),
             "cadeaux_en_cours": cadeaux.nb_actifs(),
+            "game_link": sum(1 for g, c in zip(list(bot.guilds), confs)
+                             if g.get_channel(int(c.get('game_link_salon', 0) or 0)) is not None),
+            "jeux_liens": max([len(liens_jeux.liens(c)) for c in confs] or [0]),
             "entraide_salons": max([len(c.get('rs_salons') or {}) for c in confs] or [0]),
             "tickets_regroupes": any(c.get('tickets_categorie') for c in confs)})
     except Exception as ex:
@@ -20316,6 +20352,8 @@ async def _activite_boot():
     cadeaux.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_cadeaux_journal,
                   ticket=_salon_des_tickets, langue=_langue_membre, log=print)
     await cadeaux.init_db()
+    liens_jeux.setup(cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_liens_journal, jeux=zones.JEUX,
+                     log=print)
 
     await activite_module.init_db()
 
@@ -20422,6 +20460,7 @@ async def on_ready():
         bot.add_dynamic_items(annonces.BoutonComposer, annonces.BoutonVu)
         bot.add_dynamic_items(cadeaux.BoutonCadeaux, cadeaux.BoutonParticiper, cadeaux.BoutonStats,
                               cadeaux.BoutonActualiser, cadeaux.BoutonQuitter)
+        bot.add_dynamic_items(liens_jeux.BoutonLiens)
         bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
