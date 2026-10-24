@@ -36,7 +36,7 @@ def nom_parent(staff) -> str:
 
 def permissions_parent(guild, staff, voient=()) -> dict:
     """Lecture seule pour tous ; on parle dans SON fil (preuves comprises) ; le staff — et `voient` :
-    la direction, le fondateur, l'équipe du type — voit tous les fils (« Gérer les fils »)."""
+    le rôle direction, les comptes de tête, l'équipe du type — voit tous les fils (« Gérer les fils »)."""
     ow = {
         guild.default_role: discord.PermissionOverwrite(
             view_channel=True, read_message_history=True, send_messages=False,
@@ -66,6 +66,25 @@ async def completer(ch, cibles, droits=None) -> int:
         for k, v in droits.items():
             setattr(actuel, k, v)
         await ch.set_permissions(cible, overwrite=actuel, reason="Tickets : la direction et l'équipe du type voient tout")
+        n += 1
+    return n
+
+
+async def retirer(ch, cibles, droits=None) -> int:
+    """L'inverse de `completer`, pour qui n'a plus à voir les tickets (24/10/2026 : tout rôle placé au-dessus
+    de la direction recevait « Gérer les fils » et lisait — ou supprimait — tous les tickets privés). Seulement
+    quand TOUS les droits que pose le bot sont là : on les enlève, le reste d'un réglage posé à la main reste
+    (une permission vide disparaît). Rend le nombre de cibles retirées."""
+    droits = droits or DROITS_EQUIPE
+    n = 0
+    for cible in dict.fromkeys(c for c in cibles if c is not None):
+        actuel = ch.overwrites_for(cible)
+        if not all(getattr(actuel, k) is v for k, v in droits.items()):
+            continue
+        for k in droits:
+            setattr(actuel, k, None)
+        await ch.set_permissions(cible, overwrite=None if actuel.is_empty() else actuel,
+                                 reason="Tickets : seuls la direction et l'équipe du type voient tout")
         n += 1
     return n
 

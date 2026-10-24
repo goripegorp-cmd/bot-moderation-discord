@@ -120,6 +120,16 @@ async def _stats_handler(request):
         return web.json_response({"status": "error", "error": "erreur interne"}, status=500)
 
 
+#  24/10/2026 (revue) : les médias d'un transcript viennent de chez nous (images ré-hébergées) ou de Discord,
+#  jamais d'ailleurs — `img-src *` laissait l'hébergeur d'une image d'encadré voir l'adresse IP du lecteur
+#  (le fondateur). `*.discordapp.net` couvre media.discordapp.net et le relais images-ext-*.
+_MEDIAS_TRANSCRIPT = "'self' https://cdn.discordapp.com https://*.discordapp.net"
+CSP_TRANSCRIPT = (f"default-src 'none'; img-src {_MEDIAS_TRANSCRIPT} data:; media-src {_MEDIAS_TRANSCRIPT}; "
+                  "style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+#  Un transcript est privé : jamais dans un moteur de recherche, même si son lien circule.
+NON_INDEXE = "noindex, nofollow, noarchive"
+
+
 async def _transcript_handler(request):
     """GET /t/<token> → sert la PAGE HTML rendue du transcript de ticket (Phase 281).
     Rendu inline (text/html) → le navigateur affiche la vraie page, pas du code brut."""
@@ -129,15 +139,15 @@ async def _transcript_handler(request):
         p = transcript_store.transcript_path(token)
         if not p or not os.path.isfile(p):
             return web.Response(
-                text="Transcript introuvable ou expiré.", status=404, content_type="text/plain")
+                text="Transcript introuvable ou expiré.", status=404, content_type="text/plain",
+                headers={"X-Robots-Tag": NON_INDEXE})
         return web.FileResponse(p, headers={
             "Cache-Control": "private, max-age=3600",
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer",
-            # défense en profondeur : autorise images + CSS inline, bloque TOUT script/objet.
-            "Content-Security-Policy": (
-                "default-src 'none'; img-src * data:; style-src 'unsafe-inline'; "
-                "base-uri 'none'; form-action 'none'"),
+            "X-Robots-Tag": NON_INDEXE,
+            # défense en profondeur : images, vidéos et CSS inline, de chez nous ou de Discord ; aucun script.
+            "Content-Security-Policy": CSP_TRANSCRIPT,
         })
     except Exception as ex:
         print(f"[health_server transcript] {ex}")
@@ -152,11 +162,12 @@ async def _asset_handler(request):
         import transcript_store
         p = transcript_store.asset_file(token, idx)
         if not p or not os.path.isfile(p):
-            return web.Response(status=404, text="404")
+            return web.Response(status=404, text="404", headers={"X-Robots-Tag": NON_INDEXE})
         return web.FileResponse(p, headers={
             "Cache-Control": "private, max-age=86400",
             "X-Content-Type-Options": "nosniff",
             "Content-Disposition": "inline",
+            "X-Robots-Tag": NON_INDEXE,
             "Content-Security-Policy": "default-src 'none'; sandbox",
         })
     except Exception as ex:

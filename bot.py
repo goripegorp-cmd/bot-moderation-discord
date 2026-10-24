@@ -2552,8 +2552,16 @@ async def _journal_radiation(guild, membre, auteur, raison, res):
 #  pas en mémoire : un redémarrage ne doit pas rouvrir le droit.
 
 
+#  24/10/2026 (revue) : le ticket de recours a son propre « panneau » — il était enregistré sous celui du
+#  ticket « Serveur » et, jamais fermé, comptait dans son maximum : après « Lever la radiation », le
+#  prochain ticket Serveur répondait « ❌ Max 1 ticket(s) » pendant 7 jours. Il se ferme à la décision.
+RECOURS_PID = "recours"
+RECOURS_MARQUE = '"recours": true'   # les réponses d'un ticket de recours (json.dumps({"recours": True}))
+
+
 async def _panneau_ticket_serveur(guild):
-    """(pid, panneau) du ticket « serveur », ou (None, {}) — sans réseau.
+    """(pid, panneau) du ticket « serveur », ou (None, {}) — sans réseau. Sert à ranger le recours
+    (sa catégorie) ; le recours n'est pas compté comme un ticket de ce type (`RECOURS_PID`).
 
     Le propriétaire a dit « un ticket de type serveur ». On cherche donc CE
     type-là ; à défaut, le premier panneau configuré, parce qu'un recours qui
@@ -2717,7 +2725,7 @@ async def _ouvrir_ticket_recours(guild, membre, pourquoi: str,
             await db.execute(
                 'INSERT INTO tickets(guild_id, channel_id, user_id, panel_id, '
                 'claimed_by, status, answers) VALUES(?,?,?,?,0,"open",?)',
-                (guild.id, ch.id, membre.id, str(pid or "recours"),
+                (guild.id, ch.id, membre.id, RECOURS_PID,
                  json.dumps({"recours": True}, ensure_ascii=False)))
             await db.commit()
             async with db.execute(
@@ -2727,7 +2735,7 @@ async def _ouvrir_ticket_recours(guild, membre, pourquoi: str,
     except Exception as ex:
         #  Le salon existe : le recours n'est PAS perdu. On le dit et on
         #  continue — un ticket non enregistré reste lisible par le staff.
-        print(f"[radie recours enregistrement] {ex}")
+        _logerr("radie.recours_enregistrement", ex, guild_id=guild.id)
 
     #  Son texte ne mentionne personne : seul le rôle du staff est prévenu.
     corps = [discord.ui.TextDisplay("**Pourquoi avez-vous été sanctionné ?**\n"
@@ -2757,8 +2765,8 @@ async def _ouvrir_ticket_recours(guild, membre, pourquoi: str,
                 "UPDATE radiated_members SET appel_utilise=1 "
                 "WHERE guild_id=? AND user_id=?", (guild.id, membre.id))
             await db.commit()
-    except Exception as ex:
-        print(f"[radie recours marque] {ex}")
+    except Exception as ex:  # non marqué = un second recours possible : à savoir
+        _logerr("radie.recours_marque", ex, guild_id=guild.id)
 
     return ("✅ **Votre recours a été transmis à l'équipe.**\n"
             "-# C'était votre seule demande possible. Vous recevrez la "
@@ -2853,12 +2861,30 @@ class RadieDecisionButton(discord.ui.DynamicItem[Button],
                 await _carte_recours_decidee(i.message, ligne)
             except discord.HTTPException as ex:
                 _logerr("radie.decision_carte", ex, guild_id=i.guild.id)
+            await _fermer_recours(i, "Recours accepté : radiation levée" if self.act == "lever"
+                                  else "Recours rejeté : bannissement définitif")
         except Exception as ex:
             _logerr("radie.decision", ex, guild_id=getattr(i.guild, "id", 0))
             try:
                 await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
                 pass
+
+
+async def _fermer_recours(i, raison: str) -> bool:
+    """24/10/2026 (revue) : la décision ferme le ticket de recours (transcript au site, salon supprimé) — il
+    restait ouvert, sans bouton pour le fermer. Pas de MP de fermeture : la décision vient de lui être
+    envoyée. Rend True si la fermeture est lancée."""
+    try:
+        ch = getattr(i, "channel", None)
+        tk = await get_ticket(ch.id) if ch is not None else None
+        if not tk:
+            return False
+        _fermer_en_fond(_fermer_ticket(i.guild, ch, tk, i.user, raison, mp=False))
+        return True
+    except Exception as ex:
+        _logerr("radie.recours_fermer", ex, guild_id=getattr(getattr(i, "guild", None), "id", 0))
+        return False
 
 
 async def _carte_recours_decidee(message, ligne: str) -> None:
@@ -5928,8 +5954,9 @@ async def count_user_tickets(g, uid, pid=None):
         q = "SELECT id, channel_id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'"
         p = [g.id, uid]
         if pid:
-            q += " AND panel_id=?"
-            p.append(pid)
+            #  Un recours d'avant le 24/10/2026 porte le panneau « Serveur » : il ne compte pas dans son maximum.
+            q += " AND panel_id=? AND COALESCE(answers, '') NOT LIKE ?"
+            p += [pid, f"%{RECOURS_MARQUE}%"]
         async with get_db() as db:
             async with db.execute(q, p) as c:
                 tks = await c.fetchall()
@@ -6057,22 +6084,31 @@ async def _questions_hook(msg):
 
 
 async def _ticket_ouvert(g, ticket_id: int):
-    """(salon, ticket) d'un ticket encore ouvert de ce serveur, ou (None, None)."""
+    """(salon, ticket) d'un ticket encore ouvert de ce serveur, ou (None, None). 24/10/2026 (revue) : un fil
+    archivé (7 jours sans message) n'est pas en cache — `tickets_fils.salon` va le chercher ; avant, un
+    ticket bien ouvert répondait « Ce ticket n'est plus ouvert. ». Une panne de Discord lève."""
     async with get_db() as db:
         async with db.execute("SELECT channel_id FROM tickets WHERE id=? AND guild_id=? AND status='open'",
                               (int(ticket_id), g.id)) as cur:
             r = await cur.fetchone()
     if not r:
         return None, None
-    ch = g.get_channel(int(r[0])) or g.get_thread(int(r[0]))
+    ch = await tickets_fils.salon(g, int(r[0]))
     tk = await get_ticket(int(r[0])) if ch is not None else None
     return (ch, tk) if tk else (None, None)
 
 
 async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif: str = ""):
     """Accepter (rôle du clan, puis fermeture) ou refuser (fermeture) une candidature : la
-    fermeture passe par le circuit normal — dossier, transcript, suivi des recrutements."""
-    ch, tk = await _ticket_ouvert(g, ticket_id)
+    fermeture passe par le circuit normal — dossier, transcript, suivi des recrutements.
+    24/10/2026 (revue) : le motif d'un refus reste à l'équipe (historique, journal du site, suivi) ; le
+    candidat lit « Candidature refusée » (MP et fil) — le formulaire promet « le candidat ne le voit pas ».
+    La décision suit le ticket jusqu'au suivi des recrutements, qui ne la devine plus dans le texte."""
+    try:
+        ch, tk = await _ticket_ouvert(g, ticket_id)
+    except discord.HTTPException as ex:
+        _logerr("recrutement.ticket", ex, guild_id=g.id)
+        return False, "Discord ne répond pas : réessaie dans un instant."
     if ch is None:
         return False, "Ce ticket n'est plus ouvert."
     candidat = g.get_member(int(tk['user']))
@@ -6091,7 +6127,9 @@ async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif:
             _logerr("recrutement.role", ex, guild_id=g.id)
             return False, "Discord a refusé de donner le rôle."
     raison = "Accepté" if accepte else ("Refusé" + (f" : {motif[:150]}" if motif else ""))
-    asyncio.create_task(_fermer_ticket(g, ch, tk, auteur, raison))
+    tk = dict(tk, decision="acceptes" if accepte else "refuses")
+    _fermer_en_fond(_fermer_ticket(g, ch, tk, auteur, raison,
+                                   public="Candidature acceptée" if accepte else "Candidature refusée"))
     await _journal_rellseas(g, f"**Candidature {'acceptée' if accepte else 'refusée'}** · <@{tk['user']}> "
                                f"par {auteur.mention}" + (f" — {motif[:150]}" if motif and not accepte else ""),
                             membre_id=int(tk['user']), auteur_id=auteur.id)
@@ -6109,11 +6147,15 @@ async def _peut_decider(i) -> bool:
 
 
 async def _action_ticket_fermer(g, auteur, d):
-    ch, tk = await _ticket_ouvert(g, int(d.get("ticket", 0) or 0))
+    try:
+        ch, tk = await _ticket_ouvert(g, int(d.get("ticket", 0) or 0))
+    except discord.HTTPException as ex:
+        _logerr("ticket.site_fermer", ex, guild_id=g.id)
+        return False, "Discord ne répond pas : réessaie dans un instant."
     if ch is None:
         return False, "Ce ticket n'est plus ouvert."
     motif = str(d.get("motif") or "").strip()[:150] or "Fermé depuis le tableau de bord"
-    asyncio.create_task(_fermer_ticket(g, ch, tk, auteur, motif))
+    _fermer_en_fond(_fermer_ticket(g, ch, tk, auteur, motif))
     await log_staff_action(g.id, auteur.id, int(tk['user']), "ticket_ferme", motif, surface="tableau")
     return True, "Ticket fermé : transcript et journal comme d'habitude."
 
@@ -7162,9 +7204,13 @@ _EVENEMENTS_TICKET = {'create': "Ouvert par", 'claim': "Pris en charge par", 'cl
 
 async def _dossier_recrutement(ch, g, tid, uid, panel_name, answers, events):
     """Le dossier d'un recrutement Rell Seas : candidat, réponses, historique, participants et
-    toute la conversation, ligne à ligne — qui a dit quoi. Rend (texte, participants)."""
+    toute la conversation, ligne à ligne — qui a dit quoi. Rend (texte, participants).
+    24/10/2026 (revue) : au-delà de `CONVERSATION_MAX` messages, les plus récents (avant : les premiers)."""
     participants, conversation, jour = {}, [], None
-    async for m in ch.history(limit=5000, oldest_first=True):
+    lus, tronque = await _historique_ticket(ch, CONVERSATION_MAX)
+    if tronque:
+        conversation.append(_note_tronque(CONVERSATION_MAX))
+    for m in lus:
         a = m.author
         p = participants.setdefault(a.id, {"nom": a.display_name, "id": a.id,
                                            "bot": bool(getattr(a, 'bot', False)), "n": 0})
@@ -7253,7 +7299,11 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
     se mélangeaient entre tickets). À la fermeture : transcript PRO en pièce jointe. FAIL-SAFE.
     19/10/2026 : un ticket Rell Seas va tout entier dans son propre salon de transcripts.
     19/10/2026 (soir) : « plus de logs sur Discord, tout sur le site » — en mode site, rien
-    n'est posté ; l'historique, le transcript, l'index et le dossier de recrutement restent."""
+    n'est posté ; l'historique, le transcript, l'index et le dossier de recrutement restent.
+    24/10/2026 (revue) : rend True si la conversation est conservée — à la fermeture, le transcript
+    enregistré et indexé pour le site (ou son fichier posté au salon des logs) ; sinon False, et la
+    fermeture garde le salon au lieu de le supprimer. Les autres événements rendent True."""
+    conserve = lt != 'close'
     try:
         c = await cfg(g.id)
         site = bool(c.get('logs_sur_site_v1'))
@@ -7276,8 +7326,8 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                         "INSERT INTO ticket_log_events (guild_id, ticket_id, kind, actor_id, detail, created_unix) "
                         "VALUES (?,?,?,?,?,?)", (g.id, tid, lt, actor, detail, ts))
                     await db.commit()
-            except Exception:
-                pass
+            except Exception as ex:  # le suivi du ticket (site) perdrait cette étape sans le dire
+                _logerr("ticket.evenement", ex, guild_id=g.id)
         # 2) reconstruit la timeline depuis TOUS les événements du ticket
         events = []
         if tid:
@@ -7287,7 +7337,8 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                         "SELECT kind, actor_id, detail, created_unix FROM ticket_log_events "
                         "WHERE guild_id=? AND ticket_id=? ORDER BY id ASC", (g.id, tid)) as cur:
                         events = await cur.fetchall()
-            except Exception:
+            except Exception as ex:
+                _logerr("ticket.evenements", ex, guild_id=g.id)
                 events = []
         if not events:
             events = [(lt, actor, detail, ts)]
@@ -7297,6 +7348,8 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
             panels = c.get('ticket_panels', {})
             if pid and pid in panels:
                 panel_name = panels[pid].get('name', '')
+            elif pid == RECOURS_PID:
+                panel_name = "Recours de radiation"
         except Exception:
             panel_name = ''
         last_kind = events[-1][0]
@@ -7366,53 +7419,78 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
         #    /t/<token>) car Discord affiche un .html joint en CODE BRUT. La pièce jointe reste
         #    en bonus. owner 2026-07-01.
         if lt == 'close' and ch:
+            _tid = tid or ti.get('id', '?')
+            #  19/10/2026 : le transcript dit À QUI il appartient — nom et identifiant en
+            #  clair (cherchables dans Discord), et indexé pour `/ticket transcripts`.
+            _membre = g.get_member(int(uid)) if str(uid).isdigit() else None
+            _qui = (getattr(_membre, 'display_name', None) or getattr(user, 'name', None)
+                    or "membre parti")
+            _etiquette = (f"📄 Transcript #{_tid} · {_qui} ({uid})"
+                          + (f" · {panel_name}" if panel_name else ""))
+            _slug = re.sub(r"[^a-z0-9]+", "-", str(_qui).casefold()).strip("-")[:32] or "membre"
+            url, jeton, html, base_url = None, '', None, None
             try:
-                _tid = tid or ti.get('id', '?')
-                #  19/10/2026 : le transcript dit À QUI il appartient — nom et identifiant en
-                #  clair (cherchables dans Discord), et indexé pour `/ticket transcripts`.
-                _membre = g.get_member(int(uid)) if str(uid).isdigit() else None
-                _qui = (getattr(_membre, 'display_name', None) or getattr(user, 'name', None)
-                        or "membre parti")
-                _etiquette = (f"📄 Transcript #{_tid} · {_qui} ({uid})"
-                              + (f" · {panel_name}" if panel_name else ""))
-                _slug = re.sub(r"[^a-z0-9]+", "-", str(_qui).casefold()).strip("-")[:32] or "membre"
                 base_url = transcript_store.public_base_url()
                 token = transcript_store.new_token()
                 html = await _render_ticket_transcript_html(
                     ch, _tid, token=token, base_url=base_url)
-                url, jeton = None, ''
-                if html:  # enregistré même sans adresse publique : le site le relit par son jeton
-                    try:
-                        if await asyncio.to_thread(transcript_store.save_html, token, html):
-                            jeton = token
-                            url = transcript_store.transcript_url(token)
-                    except Exception as ex:
-                        _logerr("ticket.transcript_fichier", ex, guild_id=g.id)
-                        url = None
-                if url:
-                    # Passe l'URL au MP créateur (évite un 2e rendu + fichier code en MP).
-                    try:
-                        if len(_recent_transcript_urls) > 500:
-                            _recent_transcript_urls.clear()
-                        _recent_transcript_urls[str(_tid)] = url
-                    except Exception:
-                        pass
+                if html and await asyncio.to_thread(transcript_store.save_html, token, html):
+                    jeton = token  # enregistré même sans adresse publique : le site le relit par son jeton
+                    url = transcript_store.transcript_url(token)
+            except Exception as ex:
+                _logerr("ticket.transcript_fichier", ex, guild_id=g.id)
+
+            async def _indexer() -> bool:
+                if not str(_tid).isdigit():
+                    return False
+                try:
+                    async with get_db() as db:
+                        await db.execute(
+                            "INSERT OR REPLACE INTO ticket_transcripts(guild_id, ticket_id, user_id, "
+                            "user_name, panel, url, closed_at, jeton) VALUES (?,?,?,?,?,?,?,?)",
+                            (g.id, int(_tid), int(uid) if str(uid).isdigit() else 0, str(_qui)[:100],
+                             panel_name or '', url or '', now().isoformat(), jeton))
+                        await db.commit()
+                    return True
+                except Exception as ex_:
+                    _logerr("ticket.transcript_index", ex_, guild_id=g.id)
+                    return False
+            #  24/10/2026 (revue) : l'index d'abord, juste après le fichier — avant, il n'était écrit
+            #  qu'après le dossier de recrutement et l'envoi au salon : la moindre erreur laissait un
+            #  transcript écrit mais introuvable sur le site.
+            indexe = bool(jeton) and await _indexer()
+            conserve = indexe
+            if url:
+                # Passe l'URL au MP créateur (évite un 2e rendu + fichier code en MP).
+                if len(_recent_transcript_urls) > 500:
+                    _recent_transcript_urls.clear()
+                _recent_transcript_urls[str(_tid)] = url
+            try:
                 if rellseas:
-                    texte, participants = await _dossier_recrutement(
-                        ch, g, _tid, int(uid) if str(uid).isdigit() else 0, panel_name,
-                        ti.get('answers') or {}, events)
-                    nom_fichier = f"recrutement-{_slug}-{_tid}.txt"
-                    if lch is not None:
-                        vue = _vue_recrutement(g, _tid, uid, _qui, panel_name, ti.get('answers') or {},
-                                               events, participants, nom_fichier, url)
-                        await lch.send(view=vue, file=discord.File(io.BytesIO(texte.encode('utf-8')),
-                                                                   filename=nom_fichier),
-                                       allowed_mentions=discord.AllowedMentions.none())
+                    participants = None
+                    try:
+                        texte, participants = await _dossier_recrutement(
+                            ch, g, _tid, int(uid) if str(uid).isdigit() else 0, panel_name,
+                            ti.get('answers') or {}, events)
+                        nom_fichier = f"recrutement-{_slug}-{_tid}.txt"
+                        if lch is not None:
+                            vue = _vue_recrutement(g, _tid, uid, _qui, panel_name, ti.get('answers') or {},
+                                                   events, participants, nom_fichier, url)
+                            await lch.send(view=vue, file=discord.File(io.BytesIO(texte.encode('utf-8')),
+                                                                       filename=nom_fichier),
+                                           allowed_mentions=discord.AllowedMentions.none())
+                            conserve = True  # le dossier porte toute la conversation, ligne à ligne
+                    except Exception as ex:
+                        _logerr("ticket.dossier_recrutement", ex, guild_id=g.id)
                     if str(_tid).isdigit() and str(uid).isdigit():
-                        await recrutements.enregistrer(g.id, int(_tid), int(uid), _qui, events,
-                                                       ti.get('answers') or {}, participants, url)
+                        try:
+                            await recrutements.enregistrer(g.id, int(_tid), int(uid), _qui, events,
+                                                           ti.get('answers') or {}, participants, url,
+                                                           decision=str(ti.get('decision') or ''))
+                        except Exception as ex:
+                            _logerr("ticket.suivi_recrutement", ex, guild_id=g.id)
                 elif lch is None:
-                    if not url:
+                    if not jeton:
                         print("[TICKETS][E7] transcript non sauvegardé (logs sur le site)")
                         print(f"[TICKETS][E7:DETAIL] guild={g.id} ticket={_tid} html={bool(html)} base={bool(base_url)}")
                 elif url:
@@ -7428,6 +7506,7 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                         style=discord.ButtonStyle.link, url=url, emoji=visuels.icone("lien"), label="Ouvrir le transcript"))
                     await lch.send(view=carte_embed(e, v, haut=_etiquette),
                                    allowed_mentions=discord.AllowedMentions.none())
+                    conserve = True  # la page est écrite et son lien est au salon des logs
                 else:
                     # Pas de domaine public configuré → repli : pièce jointe téléchargeable.
                     f = None
@@ -7443,18 +7522,14 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                         f.filename = f"ticket-{_tid}-{_slug}.{f.filename.rsplit('.', 1)[-1]}"
                         await lch.send(content=_etiquette, file=f,
                                        allowed_mentions=discord.AllowedMentions.none())
-                if str(_tid).isdigit():
-                    async with get_db() as db:
-                        await db.execute(
-                            "INSERT OR REPLACE INTO ticket_transcripts(guild_id, ticket_id, user_id, "
-                            "user_name, panel, url, closed_at, jeton) VALUES (?,?,?,?,?,?,?,?)",
-                            (g.id, int(_tid), int(uid) if str(uid).isdigit() else 0, str(_qui)[:100],
-                             panel_name or '', url or '', now().isoformat(), jeton))
-                        await db.commit()
+                        conserve = True
             except Exception as ex:
                 _logerr("ticket.transcript", ex, guild_id=g.id)
-    except Exception:
-        pass
+            if conserve and not indexe:  # le fichier est au salon des logs : `/ticket transcripts` le retrouve
+                await _indexer()
+    except Exception as ex:
+        _logerr("ticket.log", ex, guild_id=getattr(g, 'id', 0))
+    return conserve
 
 # ─── ⏰ Fenêtre horaire de création de tickets (owner 2026-06-14) ─────────────────
 # Création de tickets autorisée UNIQUEMENT 07h–12h ET 13h–22h30 (HEURE DE PARIS), quel que
@@ -7872,6 +7947,30 @@ async def _vue_dossier_ticket_de(g, tk: dict, pris_par: int = 0) -> LayoutView:
                                      pris_par)
 
 
+async def _rafraichir_dossier(g, ch, tk, pris_par: int) -> bool:
+    """Le dossier en tête du ticket, réécrit avec son nouveau responsable (24/10/2026, revue : après un
+    transfert il disait encore « Pris par <l'ancien> »). Posté par le webhook du ticket dans un salon
+    classique, il se réécrit par ce webhook ; un ancien dossier (encadré) est laissé tel quel."""
+    try:
+        async for msg in ch.history(limit=10, oldest_first=True):
+            if "ticket_ctrl_claim" not in _custom_ids_du_message(msg):
+                continue
+            if not getattr(getattr(msg, "flags", None), "components_v2", False):
+                return False
+            vue = await _vue_dossier_ticket_de(g, tk, pris_par=pris_par)
+            if getattr(msg, "webhook_id", None):
+                wh = await get_webhook(ch, 'ticket')
+                if wh is None or wh.id != msg.webhook_id:
+                    return False
+                await wh.edit_message(msg.id, view=vue)
+            else:
+                await msg.edit(view=vue)
+            return True
+    except discord.HTTPException as ex:
+        _logerr("ticket.dossier_rafraichi", ex, guild_id=g.id)
+    return False
+
+
 def _ticket_sans_limite(g, membre, c) -> bool:
     """22/10/2026, le fondateur : la direction et le fondateur « n'ont aucune restriction d'heure ou autre
     pour créer des tickets ». Ni horaires, ni type fermé, ni délai, ni quota, ni maximum, ni blacklist."""
@@ -7879,14 +7978,30 @@ def _ticket_sans_limite(g, membre, c) -> bool:
 
 
 def _equipe_direction(g, c) -> list:
-    """Qui voit TOUS les tickets : la direction et les rôles au-dessus (le fondateur), plus les deux
-    comptes de tête présents (même si leur rôle change un jour)."""
+    """Qui voit TOUS les tickets : le rôle direction et les deux comptes de tête présents (même si leur
+    rôle change un jour). 24/10/2026 (revue) : plus « tout rôle placé au niveau de la direction ou
+    au-dessus » — un rôle décoratif rangé plus haut recevait « Gérer les fils » et lisait (ou supprimait)
+    tous les tickets privés."""
     out = []
     direction = g.get_role(int(c.get('direction_allowed_role', 0) or 0))
     if direction is not None:
-        out += [r for r in g.roles if r.position >= direction.position and not r.managed and not r.is_default()]
+        out.append(direction)
     out += [m for m in (g.get_member(x) for x in sorted(TETE_IDS)) if m is not None]
     return out
+
+
+def _au_dessus_de_la_direction(g, c) -> list:
+    """Les rôles que `_equipe_direction` donnait avant le 24/10/2026 et qui n'ont pas à voir tous les
+    tickets : au-dessus du rôle direction, ni gérés, ni @everyone, ni rôle staff d'un type, ni rôle du
+    clan. `_tickets_visibilite` leur retire ce que le bot leur avait posé."""
+    direction = g.get_role(int(c.get('direction_allowed_role', 0) or 0))
+    if direction is None:
+        return []
+    garder = {direction.id, int(c.get('ticket_staff', 0) or 0), *(int(x) for x in rellseas_ui.roles_autorises(c))}
+    garder |= {int((p or {}).get('staff_role', 0) or 0) for p in (c.get('ticket_panels') or {}).values()
+               if isinstance(p, dict)}
+    return [r for r in g.roles if r.position > direction.position and not r.managed and not r.is_default()
+            and r.id not in garder]
 
 
 def _equipe_du_type(g, c, pid):
@@ -7901,6 +8016,36 @@ def _equipe_du_type(g, c, pid):
             if r is not None and r != staff and not r.is_default() and r not in extras:
                 extras.append(r)
     return staff, extras, ("rell" if extras else "")
+
+
+async def _droit_ticket(i, tk, c=None) -> str:
+    """Qui peut agir sur ce ticket — UN calcul pour tous les boutons (24/10/2026, revue : seul le rôle staff
+    global était reconnu ; l'équipe propre d'un panneau, celle de Rell Seas, voyait ses tickets mais lisait
+    « Réservé au staff », et la direction se voyait refuser l'interdiction et les étiquettes).
+    « chef » : propriétaire, administration, immunisés, direction, comptes de tête — tout est permis, y compris
+    reprendre un ticket déjà pris. « equipe » : l'équipe du type (son rôle staff, sinon celui des tickets ;
+    pour Rell Seas, les rôles du clan) ou le rôle staff des tickets. « » : personne."""
+    g, m = i.guild, i.user
+    c = c if c is not None else await cfg(g.id)
+    if (m.id == g.owner_id or getattr(getattr(m, 'guild_permissions', None), 'administrator', False)
+            or m.id in TETE_IDS or _direction_ou_plus(g, m, c) or await is_fully_immune(m)):
+        return "chef"
+    staff, extras, _groupe = _equipe_du_type(g, c, str((tk or {}).get('panel_id', '') or ''))
+    globale = g.get_role(int(c.get('ticket_staff', 0) or 0))
+    roles = getattr(m, 'roles', None) or []
+    return "equipe" if any(r is not None and r in roles for r in (staff, globale, *extras)) else ""
+
+
+def _equipe_disponible(g, c, tk) -> list:
+    """Les membres de l'équipe du type qu'on peut ajouter au ticket ou à qui le transférer (ni le
+    responsable, ni le créateur, ni un bot) — 25 au plus, la limite d'un menu."""
+    staff, extras, _groupe = _equipe_du_type(g, c, str(tk.get('panel_id', '') or ''))
+    exclus, out = {int(tk.get('claimed') or 0), int(tk.get('user') or 0)}, {}
+    for r in (staff, *extras):
+        for m in (getattr(r, 'members', None) or []) if r is not None else []:
+            if m.id not in exclus and not getattr(m, 'bot', False):
+                out.setdefault(m.id, m)
+    return list(out.values())[:25]
 
 
 async def create_ticket(i, pid, ans=None):
@@ -8310,10 +8455,12 @@ async def _build_ticket_hub_view(guild):
     if types:
         lignes = "\n".join(f"**{(p.get('name') or pid)[:32]}** — {_resume_type(p)}"
                             for pid, p in types[:10])
+        #  24/10/2026 (revue) : « l'équipe prévenue » était faux — le fondateur a retiré le ping à la création
+        #  (20/07 : « ping de masse inutile à chaque ticket ») ; l'équipe voit le ticket, sans notification.
         items.append(_section_with_button(
             "Ouvrir un ticket",
             "Clique sur le bouton, puis **choisis le type** de ta demande.\n"
-            "Un salon privé sera créé et l'équipe prévenue.",
+            "Un espace privé s'ouvre : seuls toi et l'équipe concernée le voyez.",
             TicketHubOpenDynamic().item))
         items.append(v2_divider())
         items.append(v2_title("Types disponibles", level=3))
@@ -8372,22 +8519,44 @@ class TicketHubGererDynamic(discord.ui.DynamicItem[Button], template=r"tickethub
 
 class VueTypesTickets(LayoutView):
     """Un bouton par type : ouvert ✅ ou fermé 🔒. Fermé : le type disparaît du menu, un membre qui
-    insiste lit qu'il est fermé ; les tickets déjà ouverts continuent."""
+    insiste lit qu'il est fermé ; les tickets déjà ouverts continuent.
+    24/10/2026 (revue) : 3 composants par type dépassaient la limite de 40 de Discord dès 12 types (« Échec de
+    l'interaction » sur « Direction ») — au-delà de `BOUTONS_MAX` types, un menu déroulant les porte tous."""
+    BOUTONS_MAX = 10   # 3 × 10 + 5 = 35 composants ; le menu déroulant en compte 7, jusqu'à 25 types
+    MENU_MAX = 25      # la limite d'un menu déroulant
 
     def __init__(self, auteur_id: int, c: dict):
         super().__init__(timeout=600)
         self.auteur_id = auteur_id
-        panels = [(pid, p) for pid, p in (c.get('ticket_panels') or {}).items() if isinstance(p, dict)][:15]
+        panels = [(pid, p) for pid, p in (c.get('ticket_panels') or {}).items() if isinstance(p, dict)]
         items = [discord.ui.TextDisplay("### 🎫 Ouvrir ou fermer les tickets\nFermé : le type disparaît du menu ; "
                                         "un membre qui essaie lit qu'il est fermé. Les tickets déjà ouverts "
                                         "continuent.")]
-        for pid, p in panels:
-            ferme = bool(p.get('disabled'))
-            b = Button(label="Fermé · rouvrir" if ferme else "Ouvert · fermer",
-                       style=discord.ButtonStyle.danger if ferme else discord.ButtonStyle.success,
-                       emoji="🔒" if ferme else "✅")
-            b.callback = self._basculer(pid)
-            items.append(discord.ui.Section(discord.ui.TextDisplay(f"**{(p.get('name') or pid)[:60]}**"), accessory=b))
+        if len(panels) <= self.BOUTONS_MAX:
+            for pid, p in panels:
+                ferme = bool(p.get('disabled'))
+                b = Button(label="Fermé · rouvrir" if ferme else "Ouvert · fermer",
+                           style=discord.ButtonStyle.danger if ferme else discord.ButtonStyle.success,
+                           emoji="🔒" if ferme else "✅")
+                b.callback = self._basculer(pid)
+                items.append(discord.ui.Section(discord.ui.TextDisplay(f"**{(p.get('name') or pid)[:60]}**"), accessory=b))
+        else:
+            fermes = [(p.get('name') or pid)[:40] for pid, p in panels if p.get('disabled')]
+            items.append(discord.ui.TextDisplay(
+                (f"**{len(panels)} types** · {len(panels) - len(fermes)} ouvert(s) · {len(fermes)} fermé(s)"
+                 + (f"\n🔒 {', '.join(fermes)}" if fermes else ""))[:1500]))
+            self._valeurs = {str(pid)[:100]: pid for pid, _p in panels[:self.MENU_MAX]}
+            menu = discord.ui.Select(
+                placeholder="Choisis un type à ouvrir ou à fermer…", min_values=1, max_values=1,
+                options=[discord.SelectOption(
+                    label=(p.get('name') or pid)[:100], value=str(pid)[:100], emoji="🔒" if p.get('disabled') else "✅",
+                    description="Fermé — le choisir le rouvre" if p.get('disabled') else "Ouvert — le choisir le ferme")
+                    for pid, p in panels[:self.MENU_MAX]])
+            menu.callback = self._choisir
+            items.append(discord.ui.ActionRow(menu))
+            if len(panels) > self.MENU_MAX:
+                items.append(discord.ui.TextDisplay(f"-# … et {len(panels) - self.MENU_MAX} autre(s) : « Tout fermer » "
+                                                    "et « Tout rouvrir » les comptent aussi."))
         tout_fermer = Button(label="Tout fermer", style=discord.ButtonStyle.secondary, emoji="🔒")
         tout_fermer.callback = self._tout(True)
         tout_ouvrir = Button(label="Tout rouvrir", style=discord.ButtonStyle.secondary, emoji="✅")
@@ -8403,6 +8572,10 @@ class VueTypesTickets(LayoutView):
             await self._appliquer(i, {pid: None})
         return _cb
 
+    async def _choisir(self, i):
+        valeur = str(((i.data or {}).get('values') or [""])[0])
+        await self._appliquer(i, {self._valeurs.get(valeur, valeur): None})
+
     def _tout(self, fermer: bool):
         async def _cb(i):
             c = await cfg(i.guild.id)
@@ -8415,7 +8588,7 @@ class VueTypesTickets(LayoutView):
         if not _direction_ou_plus(g, i.user, c):
             return await i.response.send_message("Réservé à la direction et au fondateur.", ephemeral=True)
         panels = dict(c.get('ticket_panels') or {})
-        changes = []
+        changes, touches = [], set()
         for pid, fermer in choix.items():
             p = panels.get(pid)
             if not isinstance(p, dict):
@@ -8426,29 +8599,44 @@ class VueTypesTickets(LayoutView):
             panels[pid] = dict(p, disabled=fermer, ferme_par=i.user.id if fermer else 0,
                                ferme_le=int(time.time()) if fermer else 0)
             changes.append(f"{(p.get('name') or pid)[:40]} : {'fermé' if fermer else 'rouvert'}")
+            touches.add(str(pid))
         if changes:
             await db_set(g.id, 'ticket_panels', panels)
             await _au_journal(g, "Tickets", "tickets.types", f"{i.user.mention} — " + ", ".join(changes) + ".",
                               auteur_id=i.user.id)
         await i.response.edit_message(view=VueTypesTickets(self.auteur_id, await cfg(g.id)))
-        if changes:
-            await _rafraichir_hub_tickets(g)
+        if changes:  # le panneau unifié et les panneaux de ces types (« Tickets : ON/OFF ») suivent
+            await _rafraichir_hub_tickets(g, types=touches)
 
 
-async def _rafraichir_hub_tickets(g) -> bool:
-    """Le panneau unifié suit : les types ouverts dans le menu, les fermés dits fermés."""
+async def _rafraichir_hub_tickets(g, types=(), sauf: int = 0) -> bool:
+    """Le panneau unifié suit : les types ouverts dans le menu, les fermés dits fermés. 24/10/2026 (revue) :
+    les panneaux par type du même salon dont l'état a changé (`types`) aussi — leur « Tickets : ON/OFF » et
+    le menu « Direction » se suivent l'un l'autre. `sauf` : le message déjà réécrit par le clic."""
     ch = _salon_des_tickets(g)
     if not isinstance(ch, discord.TextChannel):
         return False
+    types, hub = {str(t) for t in types}, False
     try:
         async for msg in ch.history(limit=25):
+            if getattr(msg.author, "id", 0) != bot.user.id or msg.id == sauf:
+                continue
             ids = _custom_ids_du_message(msg)
-            if getattr(msg.author, "id", 0) == bot.user.id and ({"tickethub:open", "tickethub:gerer"} & ids):
-                await msg.edit(view=await _build_ticket_hub_view(g))
-                return True
+            if {"tickethub:open", "tickethub:gerer"} & ids:
+                if not hub:
+                    await msg.edit(view=await _build_ticket_hub_view(g))
+                    hub = True
+                continue
+            for pid in sorted(x[len("ticket_toggle_"):] for x in ids if x.startswith("ticket_toggle_")):
+                if pid in types:
+                    vue = await _build_ticket_panel_view(g, pid)
+                    if getattr(getattr(msg, "flags", None), "components_v2", False):
+                        await msg.edit(view=vue)
+                    else:  # un panneau d'avant les cartes : son encadré part avec
+                        await msg.edit(content=None, embed=None, attachments=[], view=vue)
     except discord.HTTPException as ex:
         _logerr("tickets.hub", ex, guild_id=g.id)
-    return False
+    return hub
 
 
 class TicketHubOpenDynamic(discord.ui.DynamicItem[Button],
@@ -8673,6 +8861,9 @@ async def _ticket_toggle_click(i, pid):
                 f"sur ce panneau.", ephemeral=True)
         except Exception:
             pass
+        #  24/10/2026 (revue) : le panneau unifié (et les autres copies de ce panneau) suit — avant, il
+        #  proposait encore un type fermé ici, ou taisait un type rouvert.
+        await _rafraichir_hub_tickets(i.guild, types={str(pid)}, sauf=getattr(i.message, 'id', 0) or 0)
     except Exception as ex:
         print(f"[_ticket_toggle_click] {ex}")
         try:
@@ -8784,8 +8975,8 @@ def _cartes_v2(composants, guild) -> tuple:
                 carte["lignes"].append(("texte", ""))
         elif t == T.media_gallery:
             for x in getattr(c, "items", None) or []:
-                url = str(getattr(getattr(x, "media", None), "url", "") or "")
-                if url.startswith("https://"):
+                url = _image_sure(getattr(x, "media", None))  # le relais de Discord, jamais l'hébergeur
+                if url:
                     carte["images"].append(url)
         elif t == T.action_row:
             for b in getattr(c, "children", None) or []:
@@ -8850,7 +9041,11 @@ async def _ticket_transcript_file(ch, tid):
     try:
         guild = getattr(ch, 'guild', None)
         lines = []
-        async for m in ch.history(limit=500, oldest_first=True):
+        #  24/10/2026 (revue) : les plus récents d'abord gardés (avant : les 500 premiers, la fin manquait).
+        lus, tronque = await _historique_ticket(ch, TRANSCRIPT_TXT_MAX)
+        if tronque:
+            lines.append(_note_tronque(TRANSCRIPT_TXT_MAX))
+        for m in lus:
             stamp = m.created_at.strftime('%Y-%m-%d %H:%M')
             body = _resolve_transcript_text(m.content or '', guild)
             # Embeds → texte lisible (titre · description · champs · footer), sinon « [embed] » vide.
@@ -8882,11 +9077,12 @@ async def _ticket_transcript_file(ch, tid):
             lines = ["(aucun message)"]
         header = (f"Transcript du ticket #{tid}\n"
                   + (f"Serveur : {guild.name}\n" if guild else "")
-                  + f"Généré le {now().strftime('%Y-%m-%d %H:%M')} · {len(lines)} message(s)\n"
+                  + f"Généré le {now().strftime('%Y-%m-%d %H:%M')} · {len(lus)} message(s)\n"
                   + "=" * 48 + "\n\n")
         data = header + "\n".join(lines)
         return discord.File(io.BytesIO(data.encode('utf-8')), filename=f"ticket-{tid}.txt")
-    except Exception:
+    except Exception as ex:
+        _logerr("ticket.transcript_texte", ex, guild_id=getattr(getattr(ch, 'guild', None), 'id', 0))
         return None
 
 
@@ -8917,7 +9113,36 @@ a{color:#00a8fc;text-decoration:none}
 """
 
 
-CONVERSATION_MAX = 1000  # messages lus en direct pour un ticket ouvert (comme le transcript)
+#  24/10/2026 (revue) : avant, `limit=1000, oldest_first=True` — un long ticket perdait ses DERNIERS messages
+#  sans le dire. Tout l'historique jusqu'à ce plafond ; au-delà, les plus récents, et on le dit.
+CONVERSATION_MAX = 5000  # messages d'un ticket repris (transcript, conversation en direct sur le site)
+TRANSCRIPT_TXT_MAX = 2000  # le transcript .txt de secours (pièce jointe : rester sous la taille d'un envoi)
+_HOTES_IMAGES = ("cdn.discordapp.com", "media.discordapp.net")
+
+
+async def _historique_ticket(ch, plafond: int = CONVERSATION_MAX):
+    """(messages du plus ancien au plus récent, tronqué ?) : les `plafond` messages les plus récents du
+    salon. Discord les rend du plus récent au plus ancien, 100 par appel (`history` pagine)."""
+    recus = [m async for m in ch.history(limit=plafond + 1)]
+    return list(reversed(recus[:plafond])), len(recus) > plafond
+
+
+def _note_tronque(n: int) -> str:
+    nombre = f"{int(n):,}".replace(",", " ")
+    return f"⚠️ Ticket très long : seuls les {nombre} derniers messages sont repris ici, les plus anciens n'y sont pas."
+
+
+def _image_sure(media) -> str:
+    """L'adresse d'une image d'encadré (image, vignette) ou d'une carte, à afficher sans exposer qui
+    regarde : le relais de Discord (`proxy_url`) plutôt que le site d'origine (24/10/2026, revue : la page
+    d'un transcript chargeait l'image chez son hébergeur, qui voyait l'adresse IP du lecteur). Une adresse
+    hors Discord sans relais n'est pas affichée (vide)."""
+    for cle in ("proxy_url", "url"):
+        u = str(getattr(media, cle, None) or "")
+        hote = u.split("/")[2].lower() if u.startswith("https://") and u.count("/") >= 2 else ""
+        if hote in _HOTES_IMAGES or hote.endswith(".discordapp.net"):
+            return u
+    return ""
 
 
 def _message_en_donnees(m, guild) -> dict:
@@ -8939,7 +9164,7 @@ def _message_en_donnees(m, guild) -> dict:
                 "pied": str(getattr(e.footer, "text", "") or "").strip()}
         if any((bloc["titre"], bloc["texte"], bloc["champs"], bloc["pied"])):
             out["embeds"].append(bloc)
-        image = getattr(getattr(e, "image", None), "url", None) or getattr(getattr(e, "thumbnail", None), "url", None)
+        image = _image_sure(getattr(e, "image", None)) or _image_sure(getattr(e, "thumbnail", None))
         if image:
             out["images"].append(image)
     # Les cartes Components V2 du bot (dossier du ticket, traces du staff…) : 24/10/2026
@@ -9012,9 +9237,15 @@ async def _conversation_seule(g, ticket_id: int) -> dict:
     if ticket[1] == "open":
         ch = await tickets_fils.salon(g, ticket[0])
         if ch is not None:
-            messages = [_message_en_donnees(m, g) async for m in ch.history(limit=CONVERSATION_MAX, oldest_first=True)]
-            return {"ticket": int(ticket_id), "source": "discord", "messages": messages,
-                    "tronque": len(messages) >= CONVERSATION_MAX}
+            #  Tout, jusqu'au plafond ; au-delà les plus récents, et une première ligne le dit — comme le
+            #  transcript, qui se relit pareil une fois le ticket fermé.
+            lus, tronque = await _historique_ticket(ch, CONVERSATION_MAX)
+            messages = [_message_en_donnees(m, g) for m in lus]
+            if tronque and messages:
+                messages.insert(0, {"auteur": "Transcript", "bot": False, "avatar": "", "quand": messages[0]["quand"],
+                                    "texte": _note_tronque(CONVERSATION_MAX), "images": [], "videos": [],
+                                    "fichiers": [], "embeds": []})
+            return {"ticket": int(ticket_id), "source": "discord", "messages": messages}
     jeton = (transcript[1] if transcript and transcript[1] else None) or transcript_store.jeton_de(lien)
     messages = await asyncio.to_thread(transcript_store.lire_conversation, jeton) if jeton else None
     if messages is None:
@@ -9024,8 +9255,7 @@ async def _conversation_seule(g, ticket_id: int) -> dict:
     base = transcript_store.public_base_url() or ""
     for m in messages:  # images ré-hébergées chez nous : adresse relative (le site n'accepte que la sienne)
         m["images"] = [u[len(base):] if base and u.startswith(base + "/ta/") else u for u in m["images"]]
-    return {"ticket": int(ticket_id), "source": "transcript", "messages": messages, "lien": lien,
-            "tronque": len(messages) >= CONVERSATION_MAX}
+    return {"ticket": int(ticket_id), "source": "transcript", "messages": messages, "lien": lien}
 
 
 async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None, titre=None):
@@ -9033,7 +9263,11 @@ async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None, tit
     contenu RÉSOLU (mentions/rôles/emojis) et ÉCHAPPÉ (anti-injection), embeds stylés, images/
     GIFs/vidéos/stickers. Si (token ET base_url) → RÉ-HÉBERGE les images/GIFs sur le volume
     (`transcript_store`) et pointe des URLs PERMANENTES servies ; sinon → URLs CDN Discord (qui
-    expirent ~24 h). Retourne str ou None. owner 2026-07-01."""
+    expirent ~24 h). Retourne str ou None. owner 2026-07-01.
+    24/10/2026 (revue) : tout l'historique jusqu'à `CONVERSATION_MAX` (avant : les 1 000 premiers — la fin
+    d'un long ticket manquait sans le dire) ; au-delà, les plus récents et une ligne qui le dit. Un message
+    illisible ne coûte plus le transcript entier : il est signalé à sa place. None = aucun transcript
+    (l'historique illisible) — la fermeture garde alors le salon."""
     try:
         from html import escape as _hesc
         guild = getattr(ch, 'guild', None)
@@ -9042,7 +9276,9 @@ async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None, tit
         n = 0
         asset_idx = 0
         rehosted_bytes = 0
-        async for m in ch.history(limit=1000, oldest_first=True):
+
+        async def _ligne(m):
+            nonlocal n, asset_idx, rehosted_bytes
             n += 1
             # L'heure de Paris (avant : l'heure UTC) ; l'heure exacte part en `data-t` (site)
             stamp = (m.created_at.astimezone(ZoneInfo("Europe/Paris")) if ZoneInfo else m.created_at
@@ -9071,14 +9307,11 @@ async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None, tit
                               + _hesc(_resolve_transcript_text(str(f.value), guild)).replace('\n', '<br>') + '</div>')
                 if getattr(emb, 'footer', None) and emb.footer.text:
                     ep.append(f'<div class="efooter">{_hesc(str(emb.footer.text))}</div>')
-                # image d'embed (ex. GIF Tenor rendu par Discord)
-                try:
-                    if getattr(emb, 'image', None) and emb.image.url:
-                        ep.append(f'<img class="att" loading="lazy" src="{_hesc(emb.image.url)}" alt="">')
-                    elif getattr(emb, 'thumbnail', None) and emb.thumbnail.url:
-                        ep.append(f'<img class="att" loading="lazy" src="{_hesc(emb.thumbnail.url)}" alt="">')
-                except Exception:
-                    pass
+                # image d'embed (ex. GIF Tenor rendu par Discord) — par le relais de Discord : l'adresse
+                # d'origine montrait l'IP du lecteur à son hébergeur (24/10/2026, revue)
+                image = _image_sure(getattr(emb, 'image', None)) or _image_sure(getattr(emb, 'thumbnail', None))
+                if image:
+                    ep.append(f'<img class="att" loading="lazy" src="{_hesc(image)}" alt="">')
                 if ep:
                     embeds_html += f'<div class="embed" style="border-left:4px solid {color}">' + ''.join(ep) + '</div>'
             # Les cartes Components V2 (dossier du ticket, traces du staff…) : 24/10/2026
@@ -9138,17 +9371,37 @@ async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None, tit
                 f'<div class="mbody"><div class="mhead"><span class="author">{name}</span>{badge}'
                 f'<span class="ts">{stamp}</span></div>'
                 f'<div class="content">{content_html}</div>{embeds_html}{att_html}</div></div>')
+
+        def _a_part(quand, auteur, texte):  # une ligne du transcript hors conversation (même forme)
+            return (f'<div class="msg" data-t="{int(quand)}"><div class="mbody"><div class="mhead">'
+                    f'<span class="author">{_hesc(auteur)}</span></div><div class="content">{_hesc(texte)}</div>'
+                    '</div></div>')
+        lus, tronque = await _historique_ticket(ch, CONVERSATION_MAX)
+        illisibles = 0
+        for m in lus:
+            try:
+                await _ligne(m)
+            except Exception as ex:
+                illisibles += 1
+                if illisibles == 1:
+                    _logerr("ticket.transcript_message", ex, guild_id=getattr(guild, 'id', 0))
+                rows.append(_a_part(m.created_at.timestamp(), getattr(m.author, 'display_name', None) or "?",
+                                    "[message non repris : illisible]"))
+        if tronque and lus:
+            rows.insert(0, _a_part(lus[0].created_at.timestamp(), "Transcript", _note_tronque(CONVERSATION_MAX)))
         title = _hesc(titre or f"Ticket #{tid}") + (f" — {_hesc(guild.name)}" if guild else "")
         body = ''.join(rows) or '<i style="color:#949ba4">(aucun message)</i>'
         return (
             "<!DOCTYPE html><html lang='fr'><head><meta charset='utf-8'>"
             "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<meta name='robots' content='noindex, nofollow'>"
             f"<title>{title}</title><style>{_TRANSCRIPT_CSS}</style></head><body>"
             f"<div class='header'><h1>🎫 {title}</h1>"
-            f"<div class='sub'>{n} message(s) · généré le {now().strftime('%d/%m/%Y %H:%M')}</div></div>"
+            f"<div class='sub'>{n} message(s)" + (" (les plus récents)" if tronque else "")
+            + f" · généré le {now().strftime('%d/%m/%Y %H:%M')}</div></div>"
             f"<div class='chat'>{body}</div></body></html>")
     except Exception as ex:
-        print(f"[_render_ticket_transcript_html] {ex}")
+        _logerr("ticket.transcript_rendu", ex, guild_id=getattr(getattr(ch, 'guild', None), 'id', 0))
         return None
 
 
@@ -9164,38 +9417,95 @@ async def _ticket_transcript_html(ch, tid):
 
 
 _tickets_en_fermeture: set = set()  # {channel_id}
+_claims_en_cours: set = set()  # {channel_id} : une prise en charge à la fois par ticket (24/10/2026)
+_TACHES_FERMETURE: set = set()
 
 
-async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours=0) -> bool:
+def _fermer_en_fond(coro):
+    """Une fermeture lancée sans l'attendre (la réponse part tout de suite) et gardée jusqu'au bout : une
+    tâche sans référence peut être ramassée en plein travail (doc asyncio) — et c'est le transcript."""
+    t = asyncio.create_task(coro)
+    _TACHES_FERMETURE.add(t)
+    t.add_done_callback(_TACHES_FERMETURE.discard)
+    return t
+
+
+async def _repondre_ticket(i, texte: str) -> None:
+    """Une réponse à soi seul après l'acquittement (`defer`) d'un bouton de ticket ; ne lève jamais."""
+    try:
+        await i.followup.send(texte, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+    except discord.HTTPException as ex:
+        _logerr("ticket.reponse", ex, guild_id=getattr(getattr(i, 'guild', None), 'id', 0))
+
+
+async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours=0, **options) -> bool:
     """Une seule fermeture par ticket : deux envois, deux membres du staff, ou la fermeture pour
     inactivité pendant les 5 s d'attente envoyaient deux logs et deux MP. Rend False si le ticket
-    est déjà fermé ou en cours de fermeture."""
+    est déjà fermé ou en cours de fermeture. `options` : voir `_fermer_ticket_corps`."""
     if ch.id in _tickets_en_fermeture:
         return False
     _tickets_en_fermeture.add(ch.id)
     try:
         if await get_ticket(ch.id) is None:
             return False
-        await _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours)
+        await _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours, **options)
         return True
     finally:
         _tickets_en_fermeture.discard(ch.id)
 
 
-async def _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours=0):
+async def _garder_ticket_sans_transcript(guild, ch, tid, prevenir=None) -> None:
+    """24/10/2026 (revue) : le transcript n'a pas pu être enregistré — on ne supprime pas, sinon la
+    conversation est perdue. Le salon est gardé et renommé (un fil : archivé et verrouillé), le journal
+    du site le dit et le staff qui fermait est prévenu (`prevenir` : un message éphémère)."""
+    print("[TICKETS][E8] transcript non enregistré : ticket gardé")
+    print(f"[TICKETS][E8:DETAIL] guild={guild.id} ticket={tid} salon={getattr(ch, 'id', 0)}")
+    nom = f"⚠️・sans-transcript-{getattr(ch, 'name', '') or tid}"[:100]
+    try:
+        if isinstance(ch, discord.Thread):
+            await ch.edit(name=nom, archived=True, locked=True)
+        else:
+            await ch.edit(name=nom)
+    except discord.HTTPException as ex:
+        _logerr("ticket.garde_renommer", ex, guild_id=guild.id)
+    try:
+        await _au_journal(guild, "Tickets", "ticket.sans_transcript",
+                          f"Ticket #{tid} fermé sans transcript enregistré : son salon « {nom} » est gardé pour ne "
+                          "rien perdre. À supprimer à la main une fois la conversation relue.",
+                          salon_id=getattr(ch, 'id', 0) or 0)
+    except Exception as ex:
+        _logerr("ticket.garde_journal", ex, guild_id=guild.id)
+    if prevenir is not None:
+        try:
+            await prevenir("⚠️ **Le transcript n'a pas pu être enregistré.** Le ticket est fermé, mais son salon "
+                           f"est gardé (« {nom} ») pour ne rien perdre : supprime-le à la main une fois relu.")
+        except discord.HTTPException as ex:
+            _logerr("ticket.garde_prevenir", ex, guild_id=guild.id)
+
+
+async def _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours=0, *, public=None, mp=True,
+                               prevenir=None):
     """Fermeture d'un ticket : log staff + transcript, MP au créateur, base, suppression.
-    Partagée par le bouton 🔒 et la fermeture après `inactif_jours` jours sans message."""
+    Partagée par le bouton 🔒 et la fermeture après `inactif_jours` jours sans message.
+    24/10/2026 (revue) : `reason` reste au staff (historique, journal du site, suivi des recrutements) ;
+    `public` est ce que lit le membre (MP, annonce dans le ticket) — par défaut la même chose. `mp=False` :
+    pas de MP (le recours, dont la décision part déjà en MP). Sans transcript enregistré, le salon est gardé
+    (`_garder_ticket_sans_transcript`) au lieu d'être supprimé."""
     tid = tk.get('id', '?')
+    public = public or reason
+    conserve = False
     try:
         tu_log = guild.get_member(tk['user'])
-        await send_ticket_log(guild, 'close', tu_log or tk['user'], tk, extra=reason, closer=closer, ch=ch)
+        conserve = bool(await send_ticket_log(guild, 'close', tu_log or tk['user'], tk, extra=reason,
+                                              closer=closer, ch=ch))
     except Exception as ex:
         _logerr("ticket.close_log", ex, guild_id=guild.id)
+    mp_parti = False
     try:
         #  19/10 : une fermeture pour inactivité est un nettoyage — aucun MP.
-        if inactif_jours:
+        if inactif_jours or not mp:
             _recent_transcript_urls.pop(str(tid), None)
-        creator = None if inactif_jours else guild.get_member(tk['user'])
+        creator = None if (inactif_jours or not mp) else guild.get_member(tk['user'])
         if creator:
             _dm_url = _recent_transcript_urls.pop(str(tid), None)
             f = None
@@ -9204,10 +9514,10 @@ async def _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours=0):
             _dm_link_line = (
                 f"🔗 **Transcript complet (page web) :** {_dm_url}\n"
                 if _dm_url else
-                "_Transcript de la conversation ci-joint._\n")
+                "_Transcript de la conversation ci-joint._\n" if f else "")
             dm_txt = (
                 f"🔒 Ton ticket **#{tid}** sur **{guild.name}** a été fermé par "
-                f"**{closer.display_name}**.\n**Raison :** {reason}\n\n"
+                f"**{closer.display_name}**.\n**Raison :** {public}\n\n"
                 f"{_dm_link_line}"
                 f"_Tu peux rouvrir un ticket si tu as encore besoin d'aide._\n\n"
                 f"**Comment s'est passée la prise en charge ?** _(un clic — ça nous aide)_")
@@ -9222,6 +9532,7 @@ async def _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours=0):
                 _kw["view"] = _fbview
             try:
                 await creator.send(**_kw)
+                mp_parti = True
             except discord.HTTPException:
                 pass
     except Exception as ex:
@@ -9236,10 +9547,13 @@ async def _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours=0):
         await tix_module.log_action(guild.id, ch.id, closer.id, "close", reason[:200])
     except Exception as ex:
         _logerr("ticket.close_audit", ex, guild_id=guild.id)
+    if not conserve:
+        return await _garder_ticket_sans_transcript(guild, ch, tid, prevenir)
     if not inactif_jours:
         try:
-            await ch.send(f"🔒 **Ticket fermé** par {closer.mention}\n**Raison :** {reason}\n"
-                          "_Transcript envoyé en MP au créateur. Suppression dans 5 s…_")
+            await ch.send(f"🔒 **Ticket fermé** par {closer.mention}\n**Raison :** {public}\n"
+                          + ("_Transcript envoyé en MP au créateur. " if mp_parti else "_") + "Suppression dans 5 s…_",
+                          allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
             pass
         await asyncio.sleep(5)
@@ -9274,7 +9588,10 @@ class TicketCloseModal(Modal):
         except Exception:
             pass
         reason = (self.reason.value or '').strip() or "Aucune raison précisée"
-        if not await _fermer_ticket(i.guild, i.channel, self.tk, i.user, reason):
+
+        async def _prevenir(texte):  # le transcript manque : le salon est gardé, on le dit au staff
+            await i.followup.send(texte, ephemeral=True)
+        if not await _fermer_ticket(i.guild, i.channel, self.tk, i.user, reason, prevenir=_prevenir):
             try:
                 await i.followup.send("ℹ️ Ce ticket est déjà fermé ou en cours de fermeture.", ephemeral=True)
             except discord.HTTPException:
@@ -9284,142 +9601,134 @@ class TicketCloseModal(Modal):
 class TicketControlView(View):
     def __init__(self):
         super().__init__(timeout=None)
-    
+
     @discord.ui.button(emoji=visuels.icone("membre"), label="Prendre en charge", style=discord.ButtonStyle.success, custom_id="ticket_ctrl_claim")
     async def claim(self, i, btn):
+        #  24/10/2026 (revue) : on acquitte d'abord — jusqu'à cinq accès base et deux appels réseau précédaient
+        #  la réponse (> 3 s sous charge : « Échec de l'interaction ») — puis UNE prise en charge à la fois par
+        #  ticket : deux clics simultanés réussissaient tous les deux.
         try:
-            tk = await get_ticket(i.channel.id)
-            if not tk: return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
-            c = await cfg(i.guild.id)
-            sr = i.guild.get_role(c.get('ticket_staff', 0))
-            
-            if i.user.id == tk['user']:
-                return await i.response.send_message("❌ Vous ne pouvez pas prendre votre propre ticket", ephemeral=True)
-            
-            # Vérifier si l'utilisateur est immunisé (peut tout faire sur les tickets)
-            is_immune = await is_fully_immune(i.user)
-            
-            is_s = sr and sr in i.user.roles
-            is_o = i.user.id == i.guild.owner_id
-            is_a = i.user.guild_permissions.administrator
-            
-            if not (is_s or is_o or is_a or is_immune):
-                return await i.response.send_message("❌ Réservé au staff", ephemeral=True)
-            
-            # Si le ticket est déjà claim, vérifier si on peut sur-claim
-            if tk['claimed'] and tk['claimed'] != i.user.id:
-                if not (is_immune or is_o or is_a):
-                    return await i.response.send_message(
-                        f"❌ Ce ticket est déjà pris par <@{tk['claimed']}>.\n"
-                        "*Seuls les immunisés/admins peuvent sur-claim.*",
-                        ephemeral=True
-                    )
-                # Sur-claim autorisé
-                await i.channel.send(view=_carte_ticket("⚠️ Reprise", f"{i.user.mention} reprend ce ticket (avant : "
-                                                                      f"<@{tk['claimed']}>).", Palette.WARNING),
-                                     allowed_mentions=discord.AllowedMentions.none())
-            
-            tu = i.guild.get_member(tk['user'])
-            ow = {
-                i.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                i.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True),
-                # owner 2026-07-20 : le staff qui CLAIM doit AUSSI pouvoir poster images/vidéos/GIF/
-                # liens (avant : send_messages seul → média bloqué pour le staff en charge).
-                i.user: discord.PermissionOverwrite(
-                    view_channel=True, send_messages=True, read_message_history=True,
-                    attach_files=True, embed_links=True, add_reactions=True,
-                    use_external_emojis=True, use_external_stickers=True)
-            }
-            if tu:
-                ow[tu] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True, embed_links=True, add_reactions=True, use_external_emojis=True, use_external_stickers=True)
-            if i.guild.owner and i.guild.owner != i.user:
-                ow[i.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
-            if sr:
-                ow[sr] = discord.PermissionOverwrite(view_channel=False)
-            #  24/10/2026 : la direction et le fondateur voient TOUS les tickets, pris en charge compris.
-            for _cible in _equipe_direction(i.guild, c):
-                if _cible not in ow:
-                    ow[_cible] = discord.PermissionOverwrite(**tickets_fils.DROITS_SALON)
-            if isinstance(i.channel, discord.Thread):
-                await i.channel.add_user(i.user)
-            else:
-                await i.channel.edit(overwrites=ow)
-            async with get_db() as db:
-                await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (i.user.id, i.channel.id))
-                await db.commit()
-            # Phase 235.4 : le panneau de ticket est posté par un WEBHOOK (nom custom
-            # « Tickets ») → i.message.edit() échouait (403 50005 : on ne peut pas
-            # éditer le message d'un AUTRE auteur). On met à jour le bouton via la
-            # RÉPONSE d'interaction (autorisée sur le message du composant, même
-            # webhook), PUIS on annonce dans le salon. Plus de 50005.
-            if getattr(getattr(i.message, "flags", None), "components_v2", False):
-                vue = await _vue_dossier_ticket_de(i.guild, tk, pris_par=i.user.id)
-            else:  # ancien ticket (encadré + boutons)
-                btn.disabled = True
-                btn.label = f"Pris par {i.user.display_name}"[:80]
-                btn.style = discord.ButtonStyle.secondary
-                vue = self
-            try:
-                await i.response.edit_message(view=vue)
-            except Exception:
-                # Filet : si l'édition du panneau échoue, on acquitte quand même
-                # l'interaction pour éviter « Échec de l'interaction ».
-                try:
-                    if not i.response.is_done():
-                        await i.response.defer()
-                except Exception:
-                    pass
-            #  En fil privé, l'équipe voit toujours le fil : on ne prétend pas le contraire.
-            reste = ("" if isinstance(i.channel, discord.Thread)
-                     else "\n-# Les autres membres du staff ne le voient plus ; la direction, si.")
-            try:
-                await i.channel.send(view=_carte_ticket("✅ Pris en charge", f"**{i.user.display_name}** prend ce ticket "
-                                                                          f"en charge.{reste}", Palette.SUCCESS),
-                                     allowed_mentions=discord.AllowedMentions.none())
-            except discord.HTTPException as ex:
-                _logerr("ticket.claim.annonce", ex, guild_id=i.guild.id)
-            await send_ticket_log(i.guild, 'claim', tk['user'], tk, extra=i.user.id)
-            try:  # Lot 2 : audit-trail (qui a pris en charge, quand)
-                await tix_module.log_action(i.guild.id, i.channel.id, i.user.id, "claim")
-            except Exception:
-                pass
+            await i.response.defer()
+        except discord.HTTPException as ex:
+            return _logerr("ticket.claim.defer", ex, guild_id=getattr(i.guild, 'id', 0))
+        if i.channel.id in _claims_en_cours:
+            return await _repondre_ticket(i, "⏳ Ce ticket est déjà en train d'être pris en charge.")
+        _claims_en_cours.add(i.channel.id)
+        try:
+            await self._prendre(i, btn)
         except Exception as _tk_ex:
-            _logerr("ticket.claim", _tk_ex)
-            import traceback; traceback.print_exc()
-            try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
-                else:
-                    await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
-            except Exception:
-                pass
-    
+            _logerr("ticket.claim", _tk_ex, guild_id=getattr(i.guild, 'id', 0))
+            await _repondre_ticket(i, f"❌ Erreur : `{type(_tk_ex).__name__}`")
+        finally:
+            _claims_en_cours.discard(i.channel.id)
+
+    async def _prendre(self, i, btn):
+        tk = await get_ticket(i.channel.id)
+        if not tk:
+            return await _repondre_ticket(i, "❌ Ticket non trouvé")
+        c = await cfg(i.guild.id)
+        if i.user.id == tk['user']:
+            return await _repondre_ticket(i, "❌ Vous ne pouvez pas prendre votre propre ticket")
+        droit = await _droit_ticket(i, tk, c)
+        if not droit:
+            return await _repondre_ticket(i, "❌ Réservé à l'équipe de ce ticket")
+        # Si le ticket est déjà claim, vérifier si on peut sur-claim
+        if tk['claimed'] and tk['claimed'] != i.user.id:
+            if droit != "chef":
+                return await _repondre_ticket(
+                    i, f"❌ Ce ticket est déjà pris par <@{tk['claimed']}>.\n"
+                       "*Seuls la direction et les administrateurs peuvent le reprendre.*")
+            # Sur-claim autorisé
+            await i.channel.send(view=_carte_ticket("⚠️ Reprise", f"{i.user.mention} reprend ce ticket (avant : "
+                                                                  f"<@{tk['claimed']}>).", Palette.WARNING),
+                                 allowed_mentions=discord.AllowedMentions.none())
+        #  En base d'abord, et seulement si personne d'autre ne l'a pris entre-temps (un sur-claim de la
+        #  direction remplace le responsable en connaissance de cause).
+        async with get_db() as db:
+            cur = await db.execute(
+                "UPDATE tickets SET claimed_by=? WHERE channel_id=? AND status='open'"
+                + ("" if droit == "chef" else " AND (claimed_by IS NULL OR claimed_by=0 OR claimed_by=?)"),
+                (i.user.id, i.channel.id) if droit == "chef" else (i.user.id, i.channel.id, i.user.id))
+            await db.commit()
+        if not getattr(cur, 'rowcount', 1):
+            return await _repondre_ticket(i, "❌ Ce ticket vient d'être pris (ou fermé) par quelqu'un d'autre.")
+        staff, _extras, _groupe = _equipe_du_type(i.guild, c, str(tk.get('panel_id', '') or ''))
+        sr = i.guild.get_role(int(c.get('ticket_staff', 0) or 0))
+        tu = i.guild.get_member(tk['user'])
+        ow = {
+            i.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            i.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True),
+            # owner 2026-07-20 : le staff qui CLAIM doit AUSSI pouvoir poster images/vidéos/GIF/
+            # liens (avant : send_messages seul → média bloqué pour le staff en charge).
+            i.user: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True,
+                attach_files=True, embed_links=True, add_reactions=True,
+                use_external_emojis=True, use_external_stickers=True)
+        }
+        if tu:
+            ow[tu] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True, embed_links=True, add_reactions=True, use_external_emojis=True, use_external_stickers=True)
+        if i.guild.owner and i.guild.owner != i.user:
+            ow[i.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
+        for r in (sr, staff):  # l'équipe du type ne le voit plus (salon classique) ; le staff global non plus
+            if r is not None:
+                ow[r] = discord.PermissionOverwrite(view_channel=False)
+        #  24/10/2026 : la direction et le fondateur voient TOUS les tickets, pris en charge compris.
+        for _cible in _equipe_direction(i.guild, c):
+            if _cible not in ow:
+                ow[_cible] = discord.PermissionOverwrite(**tickets_fils.DROITS_SALON)
+        if isinstance(i.channel, discord.Thread):
+            await i.channel.add_user(i.user)
+        else:
+            await i.channel.edit(overwrites=ow)
+        # Phase 235.4 : le panneau de ticket est posté par un WEBHOOK (nom custom
+        # « Tickets ») → i.message.edit() échouait (403 50005 : on ne peut pas
+        # éditer le message d'un AUTRE auteur). On met à jour le bouton via la
+        # RÉPONSE d'interaction (autorisée sur le message du composant, même
+        # webhook), PUIS on annonce dans le salon. Plus de 50005.
+        if getattr(getattr(i.message, "flags", None), "components_v2", False):
+            vue = await _vue_dossier_ticket_de(i.guild, tk, pris_par=i.user.id)
+        else:  # ancien ticket (encadré + boutons)
+            btn.disabled = True
+            btn.label = f"Pris par {i.user.display_name}"[:80]
+            btn.style = discord.ButtonStyle.secondary
+            vue = self
+        try:
+            await i.edit_original_response(view=vue)
+        except discord.HTTPException as ex:
+            _logerr("ticket.claim.carte", ex, guild_id=i.guild.id)
+        #  En fil privé, l'équipe voit toujours le fil : on ne prétend pas le contraire.
+        reste = ("" if isinstance(i.channel, discord.Thread)
+                 else "\n-# Les autres membres du staff ne le voient plus ; la direction, si.")
+        try:
+            await i.channel.send(view=_carte_ticket("✅ Pris en charge", f"**{i.user.display_name}** prend ce ticket "
+                                                                      f"en charge.{reste}", Palette.SUCCESS),
+                                 allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as ex:
+            _logerr("ticket.claim.annonce", ex, guild_id=i.guild.id)
+        await send_ticket_log(i.guild, 'claim', tk['user'], tk, extra=i.user.id)
+        try:  # Lot 2 : audit-trail (qui a pris en charge, quand)
+            await tix_module.log_action(i.guild.id, i.channel.id, i.user.id, "claim")
+        except Exception as ex:
+            _logerr("ticket.claim.audit", ex, guild_id=i.guild.id)
+
     @discord.ui.button(emoji=visuels.icone("ajouter"), label="Ajouter Staff", style=discord.ButtonStyle.primary, custom_id="ticket_ctrl_add")
     async def add_staff(self, i, btn):
         try:
             tk = await get_ticket(i.channel.id)
             if not tk: return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
-            
-            # Vérifier l'immunité
-            is_immune = await is_fully_immune(i.user)
-            is_o = i.user.id == i.guild.owner_id
-            is_c = i.user.id == tk['claimed']
-            is_a = i.user.guild_permissions.administrator
-            
-            # Les immunisés peuvent toujours ajouter du staff
-            if not tk['claimed'] and not is_immune:
-                return await i.response.send_message("❌ Le ticket doit d'abord être pris en charge", ephemeral=True)
-            
-            if not (is_c or is_o or is_a or is_immune):
-                return await i.response.send_message("❌ Seul le staff en charge peut ajouter quelqu'un", ephemeral=True)
             c = await cfg(i.guild.id)
-            sr = i.guild.get_role(c.get('ticket_staff', 0))
-            if not sr:
-                return await i.response.send_message("❌ Aucun rôle staff configuré", ephemeral=True)
-            staffs = [m for m in sr.members if m.id != tk['claimed'] and m.id != tk['user']][:25]
+            #  24/10/2026 (revue) : un seul calcul des droits (`_droit_ticket`), et la liste montre l'équipe du
+            #  type (son rôle staff, les rôles du clan pour Rell Seas) — plus seulement le staff global.
+            chef = await _droit_ticket(i, tk, c) == "chef"
+            is_c = i.user.id == tk['claimed']
+            if not tk['claimed'] and not chef:
+                return await i.response.send_message("❌ Le ticket doit d'abord être pris en charge", ephemeral=True)
+            if not (is_c or chef):
+                return await i.response.send_message("❌ Seul le staff en charge peut ajouter quelqu'un", ephemeral=True)
+            staffs = _equipe_disponible(i.guild, c, tk)
             if not staffs:
-                return await i.response.send_message("❌ Aucun autre staff disponible", ephemeral=True)
-            opts = [discord.SelectOption(label=f"@{m.display_name}"[:25], value=str(m.id)) for m in staffs]
+                return await i.response.send_message("❌ Personne d'autre dans l'équipe de ce ticket.", ephemeral=True)
+            opts = [discord.SelectOption(label=f"@{m.display_name}"[:100], value=str(m.id)) for m in staffs]
             await i.response.send_message(view=AddStaffView(opts, i.channel.id), ephemeral=True)
         except Exception as _tk_ex:
             _logerr("ticket.add_staff_open", _tk_ex)
@@ -9444,25 +9753,15 @@ class TicketControlView(View):
             # Garde : le ticket doit déjà être pris pour pouvoir être transféré.
             if not tk['claimed']:
                 return await i.response.send_message("❌ Personne n'a encore pris ce ticket", ephemeral=True)
-
-            is_immune = await is_fully_immune(i.user)
-            is_o = i.user.id == i.guild.owner_id
-            is_c = i.user.id == tk['claimed']
-            is_a = i.user.guild_permissions.administrator
-
-            # Seul le staff EN CHARGE (claimant) ou un admin/owner/immunisé peut transférer.
-            if not (is_c or is_o or is_a or is_immune):
-                return await i.response.send_message("❌ Seul le staff en charge peut transférer", ephemeral=True)
-
             c = await cfg(i.guild.id)
-            sr = i.guild.get_role(c.get('ticket_staff', 0))
-            if not sr:
-                return await i.response.send_message("❌ Aucun rôle staff configuré", ephemeral=True)
-            # Destinataires possibles : membres du rôle staff, hors claimant actuel et hors créateur.
-            staffs = [m for m in sr.members if m.id != tk['claimed'] and m.id != tk['user']][:25]
+            # Seul le staff EN CHARGE (claimant) ou la direction / l'administration peut transférer.
+            if not (i.user.id == tk['claimed'] or await _droit_ticket(i, tk, c) == "chef"):
+                return await i.response.send_message("❌ Seul le staff en charge peut transférer", ephemeral=True)
+            # Destinataires possibles : l'équipe du type, hors responsable actuel et hors créateur.
+            staffs = _equipe_disponible(i.guild, c, tk)
             if not staffs:
-                return await i.response.send_message("❌ Aucun autre staff disponible", ephemeral=True)
-            opts = [discord.SelectOption(label=f"@{m.display_name}"[:25], value=str(m.id)) for m in staffs]
+                return await i.response.send_message("❌ Personne d'autre dans l'équipe de ce ticket.", ephemeral=True)
+            opts = [discord.SelectOption(label=f"@{m.display_name}"[:100], value=str(m.id)) for m in staffs]
             await i.response.send_message(view=TransferTicketView(opts, i.channel.id), ephemeral=True)
         except Exception as _tk_ex:
             _logerr("ticket.transfer_open", _tk_ex)
@@ -9485,15 +9784,9 @@ class TicketControlView(View):
             tk = await get_ticket(i.channel.id)
             if not tk:
                 return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
-            # Garde staff : même logique que les autres boutons (immunisé / owner / admin / rôle staff).
-            is_immune = await is_fully_immune(i.user)
-            is_o = i.user.id == i.guild.owner_id
-            is_a = i.user.guild_permissions.administrator
-            c = await cfg(i.guild.id)
-            sr = i.guild.get_role(c.get('ticket_staff', 0))
-            is_s = sr and sr in i.user.roles
-            if not (is_s or is_o or is_a or is_immune):
-                return await i.response.send_message("❌ Réservé au staff", ephemeral=True)
+            # Garde : la même que les autres boutons (`_droit_ticket` : l'équipe du type, la direction…).
+            if not await _droit_ticket(i, tk):
+                return await i.response.send_message("❌ Réservé à l'équipe de ce ticket", ephemeral=True)
             await i.response.send_message(view=TicketPriorityView(i.channel.id), ephemeral=True)
         except Exception as _tk_ex:
             print(f"[ticket_btn priority] {type(_tk_ex).__name__}: {_tk_ex}")
@@ -9507,21 +9800,15 @@ class TicketControlView(View):
 
     @discord.ui.button(emoji=visuels.icone("epingle"), label="Note interne", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_note")
     async def internal_note(self, i, btn):
-        # POURQUOI : passage de relais entre staff. Ouvre un modal ; la note est postée
-        # DANS le salon du ticket → elle entre AUTOMATIQUEMENT dans le transcript (qui lit
-        # l'historique du salon). Aucune fermeture, aucune action destructrice.
+        # POURQUOI : passage de relais entre staff. Ouvre un modal ; la note va au suivi du ticket
+        # (site, historique « Gérer ») — jamais dans le ticket, que le membre lit (24/10/2026).
+        # Aucune fermeture, aucune action destructrice.
         try:
             tk = await get_ticket(i.channel.id)
             if not tk:
                 return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
-            is_immune = await is_fully_immune(i.user)
-            is_o = i.user.id == i.guild.owner_id
-            is_a = i.user.guild_permissions.administrator
-            c = await cfg(i.guild.id)
-            sr = i.guild.get_role(c.get('ticket_staff', 0))
-            is_s = sr and sr in i.user.roles
-            if not (is_s or is_o or is_a or is_immune):
-                return await i.response.send_message("❌ Réservé au staff", ephemeral=True)
+            if not await _droit_ticket(i, tk):
+                return await i.response.send_message("❌ Réservé à l'équipe de ce ticket", ephemeral=True)
             await i.response.send_modal(TicketNoteModal(tk))
         except Exception as _tk_ex:
             print(f"[ticket_btn note] {type(_tk_ex).__name__}: {_tk_ex}")
@@ -9546,19 +9833,14 @@ class TicketControlView(View):
             # ═══════════════════════════════════════════════════════════════════════════════
             #                    🔒 VÉRIFICATION DES PERMISSIONS
             # ═══════════════════════════════════════════════════════════════════════════════
-            is_admin = i.user.guild_permissions.administrator
-            is_owner = i.user.id == i.guild.owner_id
-            
-            blacklist_role_id = c.get('ticket_blacklist_role', 0)
-            staff_role_id = c.get('ticket_staff', 0)
-            
-            has_blacklist_role = blacklist_role_id and i.guild.get_role(blacklist_role_id) in i.user.roles
-            has_staff_role = staff_role_id and i.guild.get_role(staff_role_id) in i.user.roles
-            
-            if not (is_admin or is_owner or has_blacklist_role or has_staff_role):
+            #  24/10/2026 (revue) : la direction se voyait refuser ; `_droit_ticket` (l'équipe du type, la
+            #  direction, l'administration) ou le rôle « Blacklist » configuré.
+            blacklist_role_id = int(c.get('ticket_blacklist_role', 0) or 0)
+            has_blacklist_role = bool(blacklist_role_id) and i.guild.get_role(blacklist_role_id) in i.user.roles
+            if not (has_blacklist_role or await _droit_ticket(i, tk, c)):
                 return await i.response.send_message(
                     "❌ Vous n'avez pas la permission de blacklister.\n"
-                    "*Requis : Admin, rôle Staff, ou rôle Blacklist configuré*",
+                    "*Requis : l'équipe de ce ticket, la direction, ou le rôle Blacklist configuré*",
                     ephemeral=True
                 )
             
@@ -9598,9 +9880,14 @@ class TicketControlView(View):
             
             # Log
             await send_ticket_log(i.guild, 'blacklist', tk['user'], tk, extra=i.user.id)
-            
+
         except Exception as ex:
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            _logerr("ticket.blacklist", ex, guild_id=getattr(i.guild, 'id', 0))
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message("❌ L'interdiction n'a pas pu être appliquée.", ephemeral=True)
+            except discord.HTTPException as ex2:
+                _logerr("ticket.blacklist.reponse", ex2, guild_id=getattr(i.guild, 'id', 0))
     
     @discord.ui.button(emoji=visuels.icone("verrou"), label="Fermer", style=discord.ButtonStyle.danger, custom_id="ticket_ctrl_close")
     async def close(self, i, btn):
@@ -9608,22 +9895,13 @@ class TicketControlView(View):
             tk = await get_ticket(i.channel.id)
             if not tk: return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
             
-            # Vérifier l'immunité
-            is_immune = await is_fully_immune(i.user)
-            is_o = i.user.id == i.guild.owner_id
-            is_a = i.user.guild_permissions.administrator
-            is_c = i.user.id == tk['claimed']
-            c = await cfg(i.guild.id)
-            sr = i.guild.get_role(c.get('ticket_staff', 0))
-            is_s = sr and sr in i.user.roles
-            
-            # Les immunisés peuvent toujours fermer
+            # Un ticket pris : son responsable, ou la direction / l'administration ; sinon l'équipe du type.
+            droit = await _droit_ticket(i, tk)
             if tk['claimed']:
-                if not (is_c or is_o or is_a or is_immune):
-                    return await i.response.send_message("❌ Seul le staff en charge ou un admin peut fermer", ephemeral=True)
-            else:
-                if not (is_s or is_o or is_a or is_immune):
-                    return await i.response.send_message("❌ Seul le staff peut fermer", ephemeral=True)
+                if not (i.user.id == tk['claimed'] or droit == "chef"):
+                    return await i.response.send_message("❌ Seul le staff en charge ou la direction peut fermer", ephemeral=True)
+            elif not droit:
+                return await i.response.send_message("❌ Seule l'équipe de ce ticket peut le fermer", ephemeral=True)
             
             # FERMETURE EN 2 TEMPS (quick-win pro) : on ouvre un modal (raison + confirmation)
             # au lieu de supprimer le salon instantanément. Le travail réel (log + transcript
@@ -9651,15 +9929,13 @@ class TicketControlView(View):
             if not tk:
                 return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
             c = await cfg(i.guild.id)
-            sr = i.guild.get_role(c.get('ticket_staff', 0))
-            is_immune = await is_fully_immune(i.user)
-            is_s = sr and sr in i.user.roles
-            is_o = i.user.id == i.guild.owner_id
-            is_a = i.user.guild_permissions.administrator
-            if not (is_s or is_o or is_a or is_immune):
-                return await i.response.send_message("❌ Réservé au staff", ephemeral=True)
+            if not await _droit_ticket(i, tk, c):
+                return await i.response.send_message("❌ Réservé à l'équipe de ce ticket", ephemeral=True)
+
+            async def _autorise(i2):  # le menu des étiquettes revérifie avec la même règle que ce bouton
+                return await _droit_ticket(i2, tk)
             view = await tix_module.build_ticket_manage_panel(
-                i.channel.id, i.guild.id, c.get('ticket_staff', 0))
+                i.channel.id, i.guild.id, c.get('ticket_staff', 0), autorise=_autorise)
             await i.response.send_message(view=view, ephemeral=True)
         except Exception as _tk_ex:
             print(f"[ticket_manage] {type(_tk_ex).__name__}: {_tk_ex}")
@@ -9683,21 +9959,30 @@ class AddStaffSelect(Select):
         self.chid = chid
     
     async def callback(self, i):
+        #  24/10/2026 (revue) : on répond toujours — un fil archivé (hors cache) ou un membre hors cache
+        #  laissait l'interaction sans réponse (« Échec de l'interaction »).
         try:
-            st = i.guild.get_member(int(self.values[0]))
-            ch = i.guild.get_channel_or_thread(self.chid)
-            if st and ch:
-                # owner 2026-07-20 : un staff ajouté au ticket doit pouvoir poster images/vidéos/
-                # GIF/liens (mêmes droits média que l'ouvreur), pas seulement du texte.
-                await tickets_fils.ajouter(ch, st)
-                await i.response.send_message(view=_vue_ticket_message(f"✅ {st.mention} ajouté au ticket."),
-                                              ephemeral=True)
-                await webhook_send(ch, 'ticket', view=_carte_ticket(
-                    "👥 Staff ajouté", f"**{st.display_name}** a été ajouté au ticket par {i.user.mention}.",
-                    Palette.SUCCESS), allowed_mentions=discord.AllowedMentions.none())
-                tk = await get_ticket(self.chid)
-                if tk:
-                    await send_ticket_log(i.guild, 'add_staff', tk['user'], tk, extra=st.id)
+            await i.response.defer(ephemeral=True)
+            uid = int(self.values[0])
+            st = i.guild.get_member(uid)
+            if st is None:
+                try:
+                    st = await i.guild.fetch_member(uid)
+                except discord.NotFound:
+                    st = None
+            ch = await tickets_fils.salon(i.guild, self.chid)
+            if st is None or ch is None:
+                return await _repondre_ticket(i, "❌ Ce membre ou ce ticket n'existe plus.")
+            # owner 2026-07-20 : un staff ajouté au ticket doit pouvoir poster images/vidéos/
+            # GIF/liens (mêmes droits média que l'ouvreur), pas seulement du texte.
+            await tickets_fils.ajouter(ch, st)
+            await i.followup.send(view=_vue_ticket_message(f"✅ {st.mention} ajouté au ticket."), ephemeral=True)
+            await webhook_send(ch, 'ticket', view=_carte_ticket(
+                "👥 Staff ajouté", f"**{st.display_name}** a été ajouté au ticket par {i.user.mention}.",
+                Palette.SUCCESS), allowed_mentions=discord.AllowedMentions.none())
+            tk = await get_ticket(self.chid)
+            if tk:
+                await send_ticket_log(i.guild, 'add_staff', tk['user'], tk, extra=st.id)
         except Exception as _tk_ex:
             _logerr("ticket.add_staff_apply", _tk_ex)
             import traceback; traceback.print_exc()
@@ -9726,28 +10011,28 @@ class TransferTicketSelect(Select):
         # POURQUOI : réassigne claimed_by au nouveau staff + recalcule les overwrites
         # exactement comme Claim (visibilité au nouveau staff), puis log type 'claim'.
         # Aucune fermeture, aucun transfert d'argent/items.
+        # 24/10/2026 (revue) : acquitté d'abord (réseau et base avant la réponse), et le dossier en tête du
+        # ticket est réécrit — il disait encore « Pris par <l'ancien> ».
         try:
+            await i.response.defer(ephemeral=True)
             tk = await get_ticket(self.chid)
             if not tk:
-                return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
-            # Re-garde côté select (anti-contournement) : claimant actuel ou admin/owner/immunisé.
-            is_immune = await is_fully_immune(i.user)
-            is_o = i.user.id == i.guild.owner_id
-            is_c = i.user.id == tk['claimed']
-            is_a = i.user.guild_permissions.administrator
-            if not (is_c or is_o or is_a or is_immune):
-                return await i.response.send_message("❌ Seul le staff en charge peut transférer", ephemeral=True)
+                return await _repondre_ticket(i, "❌ Ticket non trouvé")
+            c = await cfg(i.guild.id)
+            # Re-garde côté select (anti-contournement) : le responsable actuel, ou la direction / l'administration.
+            if not (i.user.id == tk['claimed'] or await _droit_ticket(i, tk, c) == "chef"):
+                return await _repondre_ticket(i, "❌ Seul le staff en charge peut transférer")
             if not tk['claimed']:
-                return await i.response.send_message("❌ Personne n'a encore pris ce ticket", ephemeral=True)
+                return await _repondre_ticket(i, "❌ Personne n'a encore pris ce ticket")
 
             old_id = tk['claimed']
             new_staff = i.guild.get_member(int(self.values[0]))
-            ch = i.guild.get_channel_or_thread(self.chid)
+            ch = await tickets_fils.salon(i.guild, self.chid)
             if not new_staff or not ch:
-                return await i.response.send_message("❌ Staff ou salon introuvable", ephemeral=True)
+                return await _repondre_ticket(i, "❌ Staff ou salon introuvable")
 
-            c = await cfg(i.guild.id)
-            sr = i.guild.get_role(c.get('ticket_staff', 0))
+            staff, _extras, _groupe = _equipe_du_type(i.guild, c, str(tk.get('panel_id', '') or ''))
+            sr = i.guild.get_role(int(c.get('ticket_staff', 0) or 0))
             tu = i.guild.get_member(tk['user'])
             # Recalcul des overwrites comme Claim : seul le nouveau staff (+ bot/owner/créateur) voit.
             ow = {
@@ -9764,8 +10049,9 @@ class TransferTicketSelect(Select):
                 ow[tu] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True, embed_links=True, add_reactions=True, use_external_emojis=True, use_external_stickers=True)
             if i.guild.owner and i.guild.owner != new_staff:
                 ow[i.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
-            if sr:
-                ow[sr] = discord.PermissionOverwrite(view_channel=False)
+            for r in (sr, staff):  # comme la prise en charge : l'équipe du type ne le voit plus (salon classique)
+                if r is not None:
+                    ow[r] = discord.PermissionOverwrite(view_channel=False)
             for _cible in _equipe_direction(i.guild, c):  # la direction garde la vue
                 if _cible not in ow:
                     ow[_cible] = discord.PermissionOverwrite(**tickets_fils.DROITS_SALON)
@@ -9777,14 +10063,15 @@ class TransferTicketSelect(Select):
             async with get_db() as db:
                 await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (new_staff.id, self.chid))
                 await db.commit()
-            await i.response.send_message(view=_vue_ticket_message(f"✅ Prise en charge transférée à {new_staff.mention}."),
-                                          ephemeral=True)
+            await i.followup.send(view=_vue_ticket_message(f"✅ Prise en charge transférée à {new_staff.mention}."),
+                                  ephemeral=True)
             try:
                 await webhook_send(ch, 'ticket', view=_carte_ticket(
                     "🔄 Prise en charge transférée", f"De <@{old_id}> à {new_staff.mention}, par {i.user.mention}.",
                     Palette.INFO), allowed_mentions=discord.AllowedMentions.none())
             except discord.HTTPException as ex:
                 _logerr("ticket.transfert.annonce", ex, guild_id=i.guild.id)
+            await _rafraichir_dossier(i.guild, ch, tk, new_staff.id)
             # Log type 'claim' (mention « transféré de X à Y »).
             await send_ticket_log(i.guild, 'claim', tk['user'], tk, extra=new_staff.id)
         except Exception as _tk_ex:
@@ -9863,54 +10150,52 @@ class TicketPrioritySelect(Select):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#       📌 NOTE INTERNE STAFF (passage de relais) — postée dans le ticket
+#       📌 NOTE INTERNE STAFF (passage de relais) — au suivi du ticket, jamais dans le ticket
 # ═══════════════════════════════════════════════════════════════════════════════
 
+NOTE_MAX = 300  # ce que garde le suivi du ticket (`ticket_log_events`) et l'historique « Gérer »
+
+
 class TicketNoteModal(Modal):
-    """Note interne staff : modal → message épinglé visuellement dans le salon du
-    ticket (donc inclus au transcript). Sert au passage de relais entre staff.
+    """Note interne staff : passage de relais entre staff. 24/10/2026 (revue) : elle était postée DANS le
+    ticket — le membre la lisait, et elle partait dans le transcript qu'il reçoit. Elle va maintenant au
+    suivi du ticket (le site, l'historique du bouton « Gérer ») ; le staff reçoit une confirmation à lui seul.
     Jamais de fermeture, jamais d'action destructrice."""
     def __init__(self, tk):
         super().__init__(title="Note interne (staff)")
         self.tk = tk
         self.note = TextInput(
-            label="Note de relais",
-            placeholder="Ex. Client recontacté · en attente d'une preuve · escaladé à @admin…",
-            style=discord.TextStyle.paragraph, required=True, max_length=1000)
+            label="Note (le membre ne la voit pas)",
+            placeholder="Va au suivi : bouton « Gérer » et site. Ex. en attente d'une preuve…",
+            style=discord.TextStyle.paragraph, required=True, max_length=NOTE_MAX)
         self.add_item(self.note)
 
     async def on_submit(self, i):
         try:
             await i.response.defer(ephemeral=True)  # defer-first
-        except Exception:
-            pass
-        txt = (self.note.value or '').strip()
+        except discord.HTTPException as ex:
+            return _logerr("ticket.note.defer", ex, guild_id=getattr(i.guild, 'id', 0))
+        txt = (self.note.value or '').strip()[:NOTE_MAX]
         if not txt:
             try:
                 await i.followup.send("❌ Note vide.", ephemeral=True)
-            except Exception:
-                pass
+            except discord.HTTPException as ex:
+                _logerr("ticket.note.reponse", ex, guild_id=i.guild.id)
             return
-        ch = i.channel
+        ch_id = getattr(i.channel, 'id', 0) or 0
         try:
-            # Postée par webhook 'ticket' comme le reste → cohérence + entre au transcript.
-            avatar = i.user.display_avatar.url if hasattr(i.user, 'display_avatar') else None
-            await webhook_send(ch, 'ticket', view=_carte_ticket(
-                "📌 Note interne (staff)", f"{txt[:3500]}\n-# Ajoutée par {i.user.display_name}", Palette.INFO, avatar),
-                allowed_mentions=discord.AllowedMentions.none())
-            await i.followup.send(view=_vue_ticket_message("✅ Note interne ajoutée au ticket."), ephemeral=True)
-        except Exception as _tk_ex:
-            print(f"[ticket_note_submit] {type(_tk_ex).__name__}: {_tk_ex}")
-            try:
-                await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
-            except Exception:
-                pass
-            return
-        # Log staff (la note figure aussi dans le salon de logs pour traçabilité).
-        try:
+            # Le suivi du ticket (site, transcript du staff) et l'historique du bouton « Gérer ».
             await send_ticket_log(i.guild, 'note', self.tk['user'], self.tk, extra=(i.user.id, txt))
-        except Exception:
-            pass
+            await tix_module.log_action(i.guild.id, ch_id, i.user.id, "note", txt)
+            await i.followup.send(view=_vue_ticket_message(
+                "✅ Note enregistrée. Le membre ne la voit pas : elle est dans le suivi du ticket (bouton « Gérer » "
+                "et site)."), ephemeral=True)
+        except Exception as _tk_ex:
+            _logerr("ticket.note", _tk_ex, guild_id=getattr(i.guild, 'id', 0))
+            try:
+                await i.followup.send("❌ La note n'a pas pu être enregistrée.", ephemeral=True)
+            except discord.HTTPException as ex:
+                _logerr("ticket.note.reponse", ex, guild_id=getattr(i.guild, 'id', 0))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -13378,6 +13663,13 @@ async def entraide_task():
                 # en question… la direction et le fondateur voient les tickets ».
                 await db_set(g.id, 'tickets_visibilite_v1', now().isoformat())
                 await _tickets_visibilite(g)
+            if not c.get('tickets_visibilite_v2'):
+                # 24/10/2026 (revue) : seuls le rôle direction et les comptes de tête voient tout — les rôles
+                # rangés au-dessus de la direction perdent « Gérer les fils » posé le 22/10 ; le panneau
+                # unifié déjà posé perd sa promesse « l'équipe prévenue ».
+                await db_set(g.id, 'tickets_visibilite_v2', now().isoformat())
+                await _tickets_visibilite(g)
+                await _rafraichir_hub_tickets(g)
             if g.owner_id in TETE_IDS and not c.get('game_link_v1'):
                 # 24/10, le fondateur : « un nouveau salon avec un emoji de manette qui s'appelle Game Link ».
                 await db_set(g.id, 'game_link_v1', now().isoformat())
@@ -13483,12 +13775,15 @@ async def _reporter_immunites(g, c) -> int:
 
 
 async def _tickets_visibilite(g) -> int:
-    """Les salons qui portent les fils donnent « Gérer les fils » à la direction et au-dessus (et aux deux
-    comptes de tête) ; un ticket Rell Seas encore ouvert accueille les rôles du clan s'ils ne le voient
-    pas ; un ticket en salon classique reçoit les mêmes droits. Rien n'est retiré."""
+    """Les salons qui portent les fils donnent « Gérer les fils » au rôle direction et aux deux comptes de
+    tête ; un ticket Rell Seas encore ouvert accueille les rôles du clan s'ils ne le voient pas ; un ticket
+    en salon classique reçoit les mêmes droits. 24/10/2026 (revue) : les rôles placés au-dessus de la
+    direction (ni staff d'un type, ni clan) perdent ce que le bot leur avait posé le 22/10 — rien d'autre
+    n'est retiré."""
     c = await cfg(g.id)
     direction = _equipe_direction(g, c)
-    n = 0
+    anciens = _au_dessus_de_la_direction(g, c)
+    n = retires = 0
     porteurs = dict.fromkeys(int(v) for v in (c.get(tickets_fils.CLE_PARENTS) or {}).values() if str(v).isdigit())
     for cid in porteurs:
         ch = g.get_channel(cid)
@@ -13496,6 +13791,7 @@ async def _tickets_visibilite(g) -> int:
             continue
         try:
             n += await tickets_fils.completer(ch, direction)
+            retires += await tickets_fils.retirer(ch, anciens)
         except discord.HTTPException as ex:
             _logerr("tickets.visibilite", ex, guild_id=g.id)
     async with get_db() as db:
@@ -13516,11 +13812,14 @@ async def _tickets_visibilite(g) -> int:
                         n += 1
             elif isinstance(ch, discord.TextChannel):
                 n += await tickets_fils.completer(ch, (staff, *equipe_type, *direction), tickets_fils.DROITS_SALON)
+                retires += await tickets_fils.retirer(ch, anciens, tickets_fils.DROITS_SALON)
         except discord.HTTPException as ex:
             _logerr("tickets.visibilite", ex, guild_id=g.id)
     await _au_journal(g, "Tickets", "tickets.visibilite",
                       "Tickets : la direction et le fondateur voient tous les tickets, l'équipe Rell Seas les siens"
-                      + (f" ({n} accès ajouté(s))." if n else " (rien ne manquait)."))
+                      + (f" ({n} accès ajouté(s))" if n else " (rien ne manquait)")
+                      + (f" ; {retires} accès retiré(s) à des rôles placés au-dessus de la direction." if retires
+                         else "."))
     return n
 
 
@@ -21634,7 +21933,7 @@ async def ticket_transcripts_cmd(i: discord.Interaction, membre: discord.User | 
     if not await _tix_direction(i):
         return await i.response.send_message("❌ Réservé à la direction et au fondateur.", ephemeral=True)
     await i.response.defer(ephemeral=True)
-    q = ("SELECT ticket_id, user_id, user_name, panel, url, closed_at FROM ticket_transcripts "
+    q = ("SELECT ticket_id, user_id, user_name, panel, url, closed_at, jeton FROM ticket_transcripts "
          "WHERE guild_id=?" + (" AND user_id=?" if membre else "")
          + " ORDER BY closed_at DESC LIMIT 20")
     async with get_db() as db:
@@ -21644,12 +21943,13 @@ async def ticket_transcripts_cmd(i: discord.Interaction, membre: discord.User | 
         return await i.followup.send("📄 Aucun transcript" + (f" pour {membre.mention}." if membre else "."),
                                      ephemeral=True)
     lignes = []
-    for tid, uid, nom, panel, url, quand in rows:
+    for tid, uid, nom, panel, url, quand, jeton in rows:
         try:
             t = f"<t:{int(datetime.fromisoformat(quand).timestamp())}:d>"
         except (TypeError, ValueError):
             t = "?"
-        lien = f"[ouvrir]({url})" if url else "fichier dans le salon des logs"
+        #  Sans adresse publique, le transcript enregistré se lit sur le site (par son jeton).
+        lien = f"[ouvrir]({url})" if url else ("sur le site" if jeton else "fichier dans le salon des logs")
         lignes.append(f"🎫 #{tid} · **{nom}** (`{uid}`)" + (f" · {panel}" if panel else "")
                       + f" · {t} · {lien}")
     await i.followup.send(("**📄 Transcripts" + (f" de {membre.mention}" if membre else "")
@@ -21682,8 +21982,9 @@ async def ticket_search_cmd(i: discord.Interaction, non_pris: bool = False):
         return await i.followup.send("✅ Aucun ticket ouvert" + (" non pris." if non_pris else "."), ephemeral=True)
     lines = []
     for tid, chid, uid, claimed, cat in rows:
-        ch = i.guild.get_channel(int(chid)) if chid else None
-        chm = ch.mention if ch else f"`#{chid}`"
+        #  24/10/2026 (revue) : `get_channel` ne rend jamais un fil — les tickets en fil privé sortaient en
+        #  identifiants bruts. La mention marche pour un salon comme pour un fil (même archivé).
+        chm = f"<#{int(chid)}>" if chid else "`?`"
         claim_txt = f"pris par <@{int(claimed)}>" if claimed else "**non pris**"
         age = ""
         try:
@@ -21697,7 +21998,7 @@ async def ticket_search_cmd(i: discord.Interaction, non_pris: bool = False):
         lines.append(f"🎫 #{tid} {chm} · <@{int(uid)}> · {claim_txt}{age}")
     txt = ("**🔎 Tickets ouverts" + (" (non pris)" if non_pris else "") + f"** ({len(rows)})\n"
            + "\n".join(lines))
-    await i.followup.send(txt[:1900], ephemeral=True)
+    await i.followup.send(txt[:1900], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 @ticket_group.command(name="queue", description="📊 Charge des tickets par staff + nombre de non assignés")
@@ -21912,7 +22213,7 @@ async def ticket_auto_close_cmd(i: discord.Interaction, jours: int | None = None
         j = int((await cfg(i.guild.id)).get('tickets_inactivite_jours', 7) or 0)
         await i.response.send_message(
             (f"⏱️ Un ticket sans message depuis **{j} jours** est fermé automatiquement "
-             f"(log + transcript au staff, MP au créateur)." if j else
+             f"(transcript enregistré ; le créateur n'est pas prévenu, c'est un nettoyage)." if j else
              "⏱️ Fermeture automatique **désactivée** : la fermeture est manuelle (🔒)."),
             ephemeral=True)
     except Exception as ex:
@@ -22135,25 +22436,32 @@ async def on_member_remove(m):
     except Exception as ex:
         print(f"[UNIFIED LOG member_leave] {ex}")
     
+    #  Ses tickets ouverts le disent. 24/10/2026 (revue) : `get_channel` ne rend jamais un fil — dans un
+    #  ticket en fil privé, rien n'était posté et l'échec se taisait ; `tickets_fils.salon` va chercher le fil.
     try:
         async with get_db() as db:
-            async with db.execute("SELECT id, channel_id, claimed_by, answers FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (m.guild.id, m.id)) as c:
+            async with db.execute("SELECT id, channel_id, claimed_by, answers, panel_id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (m.guild.id, m.id)) as c:
                 tks = await c.fetchall()
         for tk in tks:
-            ans = {}
-            try: ans = json.loads(tk[3]) if tk[3] else {}
-            except: pass
-            ti = {'id': tk[0], 'user': m.id, 'claimed': tk[2] or 0, 'answers': ans}
-            ch = m.guild.get_channel(tk[1])
+            try:
+                ans = json.loads(tk[3]) if tk[3] else {}
+            except ValueError:
+                ans = {}
+            ti = {'id': tk[0], 'user': m.id, 'claimed': tk[2] or 0, 'answers': ans, 'panel_id': tk[4] or ''}
             await send_ticket_log(m.guild, 'leave', m, ti)
-            if ch:
-                leave_e = discord.Embed(color=C.ORANGE, timestamp=now())
-                leave_e.set_author(name="Utilisateur parti", icon_url=m.display_avatar.url if m.display_avatar else None)
-                leave_e.description = f"**{m.display_name}** (`{m.name}`) a quitté le serveur."
-                leave_e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
-                await webhook_send(ch, 'ticket', view=carte_embed(leave_e),
-                                   allowed_mentions=discord.AllowedMentions.none())
-    except: pass
+            try:
+                ch = await tickets_fils.salon(m.guild, tk[1])
+                if ch is not None:
+                    leave_e = discord.Embed(color=C.ORANGE, timestamp=now())
+                    leave_e.set_author(name="Utilisateur parti", icon_url=m.display_avatar.url if m.display_avatar else None)
+                    leave_e.description = f"**{m.display_name}** (`{m.name}`) a quitté le serveur."
+                    leave_e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
+                    await webhook_send(ch, 'ticket', view=carte_embed(leave_e),
+                                       allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException as ex:
+                _logerr("ticket.depart", ex, guild_id=m.guild.id)
+    except Exception as ex:
+        _logerr("ticket.depart", ex, guild_id=m.guild.id)
 
     # ═══ Phase 28.3 : Goodbye message ═══
     try:
@@ -23795,7 +24103,8 @@ async def on_webhooks_update(channel):
 @tasks.loop(hours=6)
 async def tickets_inactifs_task():
     """19/10/2026 : un ticket sans message depuis `tickets_inactivite_jours` jours (7 par
-    défaut, 0 = jamais) est fermé comme au bouton 🔒 : log + transcript, MP au créateur."""
+    défaut, 0 = jamais) est fermé comme au bouton 🔒 : log + transcript — sans MP au créateur ni annonce
+    (« ils n'ont pas à le savoir » : un nettoyage)."""
     for g in list(bot.guilds):
         try:
             jours = int((await cfg(g.id)).get('tickets_inactivite_jours', 7) or 0)

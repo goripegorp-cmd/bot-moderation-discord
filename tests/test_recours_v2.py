@@ -25,7 +25,8 @@ from ui_v2 import LayoutView, Palette
 RACINE = Path(__file__).resolve().parent.parent
 SRC = (RACINE / "bot.py").read_text(encoding="utf-8")
 ARBRE = ast.parse(SRC)
-LECTURE = ("_resolve_transcript_text", "_cartes_v2", "_texte_v2", "_html_lignes_v2", "_html_carte_v2")
+LECTURE = ("_resolve_transcript_text", "_cartes_v2", "_texte_v2", "_html_lignes_v2", "_html_carte_v2",
+           "_historique_ticket", "_note_tronque", "_image_sure")
 
 
 def _source(nom):
@@ -38,7 +39,9 @@ def _ns(*noms, **plus):
           "json": json, "time": __import__("time"), "datetime": datetime, "timezone": timezone,
           "Button": discord.ui.Button, "tickets_fils": tickets_fils, "transcript_store": transcript_store,
           "ZoneInfo": None, "_TRANSCRIPT_CSS": "", "_TICKET_TZ": "Europe/Paris", "_EVENEMENTS_TICKET": {},
-          "now": lambda: datetime(2026, 10, 24, 18, 0, tzinfo=timezone.utc), "_logerr": lambda *a, **k: None}
+          "now": lambda: datetime(2026, 10, 24, 18, 0, tzinfo=timezone.utc), "_logerr": lambda *a, **k: None,
+          "CONVERSATION_MAX": 5000, "TRANSCRIPT_TXT_MAX": 2000,
+          "_HOTES_IMAGES": ("cdn.discordapp.com", "media.discordapp.net"), "RECOURS_PID": "recours"}
     ns.update(plus)
     for nom in noms:
         exec(_source(nom), ns)  # noqa: S102 — code du dépôt
@@ -240,7 +243,7 @@ def test_R6_le_bouton_de_decision_inscrit_la_decision():
     async def send(*a, **k):
         suivis.append(a or k)
     ns = _ns("RadieDecisionButton", _autorise_radiation=rien, _lever_radiation=rien, _prevenir_radie=rien,
-             _carte_recours_decidee=carte)
+             _carte_recours_decidee=carte, _fermer_recours=rien)
     msg = Obj()
     i = Obj(response=Obj(defer=rien), followup=Obj(send=send), user=Obj(mention="<@50>"), message=msg,
             guild=Obj(id=1, get_member=lambda _uid: Obj(mention="<@42>")))

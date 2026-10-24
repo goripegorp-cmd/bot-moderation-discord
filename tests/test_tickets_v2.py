@@ -123,16 +123,24 @@ def test_V3_prendre_en_charge_la_direction_garde_la_vue():
 
         async def commit(self):
             return None
+    async def equipe(*_a, **_k):
+        return "equipe"
     ns = _ns(get_ticket=get_ticket, cfg=cfg, is_fully_immune=faux, send_ticket_log=rien,
              _vue_dossier_ticket_de=dossier, tix_module=Obj(log_action=rien), get_db=lambda: Db(),
-             _equipe_direction=lambda _g, _c: [direction, fondateur])
+             _equipe_direction=lambda _g, _c: [direction, fondateur], _droit_ticket=equipe,
+             _equipe_du_type=lambda _g, _c, _pid: (staff, [], ""), _claims_en_cours=set())
+    exec(_source("_repondre_ticket"), ns)  # noqa: S102 — code du dépôt
     exec(_source("TicketControlView"), ns)  # noqa: S102 — code du dépôt
     edits = []
 
     async def edit_message(**kw):
         edits.append(kw)
+
+    async def defer(**_k):
+        return None
     i = Obj(channel=salon, guild=g, user=pris, message=Obj(flags=Obj(components_v2=True)),
-            response=Obj(edit_message=edit_message, is_done=lambda: True))
+            response=Obj(edit_message=edit_message, defer=defer, is_done=lambda: True),
+            edit_original_response=edit_message, followup=Obj(send=rien))
     vue = ns["TicketControlView"]()
     asyncio.run(vue.claim.callback(i))
     ows = salon.edits[-1]["overwrites"]

@@ -128,15 +128,17 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path, sit
         return "<html>conversation</html>"
 
     class Ticket:
-        def history(self, **_k):
+        def history(self, limit=None, oldest_first=False, **_k):
+            """Comme Discord : du plus récent au plus ancien, sauf `oldest_first`."""
             async def gen():
-                for m in (_message(robot, "Bienvenue", 0), _message(candidat, "Bonjour, je veux rejoindre", 1),
-                          _message(staff, "Ton niveau ?", 2), _message(candidat, "2400\net je joue chaque soir", 3)):
+                messages = [_message(robot, "Bienvenue", 0), _message(candidat, "Bonjour, je veux rejoindre", 1),
+                            _message(staff, "Ton niveau ?", 2), _message(candidat, "2400\net je joue chaque soir", 3)]
+                for m in (messages if oldest_first else messages[::-1])[:limit]:
                     yield m
             return gen()
     enregistres = []
 
-    async def enregistrer(*a):
+    async def enregistrer(*a, **k):
         enregistres.append(a)
     ns = {"cfg": cfg, "get_db": get_db, "db_set": db_set, "discord": discord, "io": io, "re": re,
           "asyncio": asyncio, "datetime": datetime, "timezone": timezone, "ZoneInfo": ZoneInfo,
@@ -153,7 +155,8 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path, sit
           "recrutements": Obj(enregistrer=enregistrer), "registre": journal}
     for nom in ("_ticket_event_parts", "_ticket_timeline_line", "_salon_transcripts_rellseas",
                 "_heure_paris", "_nom_et_id", "_EVENEMENTS_TICKET", "_cartes_v2", "_texte_v2", "_dossier_recrutement",
-                "_vue_recrutement", "send_ticket_log"):
+                "_vue_recrutement", "send_ticket_log", "CONVERSATION_MAX", "_historique_ticket", "_note_tronque",
+                "_image_sure", "_HOTES_IMAGES"):
         exec(_source(nom), ns)  # noqa: S102 — code du dépôt
     tk = {"id": 5, "panel_id": "p1", "answers": {"Pseudo Roblox": "Kolax_RS", "Niveau": "2400"}}
     asyncio.run(ns["send_ticket_log"](g, "create", candidat, tk))

@@ -10,9 +10,11 @@ la conversation (elle reste dans le transcript). Les tickets fermés avant ce su
 rattrapés une fois depuis l'historique des tickets.
 
 « Garder uniquement les personnes qui ont été acceptées ou refusées » : une fiche n'existe que
-pour une décision claire — décision prise avec les boutons du ticket ou du tableau de bord ;
-pour les anciens tickets, le rôle du clan (accepté) ou le motif de fermeture (« accepté »,
-« refusé »). Un ticket encore ouvert → En cours. Le reste (sans suite, vide, doublon) est
+pour une décision claire — décision prise avec les boutons du ticket ou du tableau de bord,
+enregistrée telle quelle (colonne `decision`, 24/10/2026 : le texte libre « Non admis » ou
+« Recrutements fermés » passait pour un « Accepté ») ; pour les anciens tickets, le rôle du clan
+(accepté) ou une lecture prudente du motif de fermeture (« accepté », « refusé », négations
+comprises). Un ticket encore ouvert → En cours. Le reste (sans suite, vide, doublon) est
 écarté et seulement compté. Un candidat parti du serveur garde sa décision, marquée « parti ».
 
 Nettoyage : un candidat = une fiche (avec ses candidatures précédentes) ; réponses bornées ;
@@ -39,9 +41,14 @@ APERCU_MAX = 10
 CLE_EXPORT = "recrutements_export"
 CLE_RATTRAPAGE = "recrutements_rattrapage_v1"
 CLE_RECAP = "recrutements_recap_v1"
-ACCEPTE = re.compile(r"accept|admis|bienvenue dans|recrut[ée]", re.I)
-REFUS = re.compile(r"refus|pas retenu|non retenu|rejet", re.I)
+#  La lecture prudente des anciens motifs (sans décision enregistrée) : une négation devant « accepté »,
+#  « admis », « retenu » ou « recruté » est un refus ; « recrutement(s) » n'est pas une décision.
+ACCEPTE = re.compile(r"\baccept(?:é|ée|és|ées|e|er|ed)?\b|\badmise?s?\b|bienvenue dans|\brecrut(?:é|ée|és|ées)\b",
+                     re.I)
+REFUS = re.compile(r"refus|\brejet|\b(?:pas|non|plus|jamais)\s+(?:\S+\s+){0,2}?(?:retenu|accept|admis|recrut)",
+                   re.I)
 DOUBLON = re.compile(r"doublon", re.I)
+DECISIONS = ("acceptes", "refuses")
 
 _get_db = _cfg = _db_set = _salon = _role = _panneaux = _lien = _decider = _autorise = None
 _bot = None
@@ -67,10 +74,13 @@ async def init_db():
             " candidat_nom TEXT, ouvert_le INTEGER, ferme_le INTEGER NOT NULL, ferme_par INTEGER,"
             " pris_par INTEGER, reponses TEXT, msg_candidat INTEGER DEFAULT 0,"
             " msg_staff INTEGER DEFAULT 0, transcript TEXT, raison TEXT DEFAULT '',"
-            " PRIMARY KEY (guild_id, ticket_id))")
+            " decision TEXT DEFAULT '', PRIMARY KEY (guild_id, ticket_id))")
         async with db.execute("PRAGMA table_info(recrutements)") as cur:
-            if "raison" not in [r[1] for r in await cur.fetchall()]:
-                await db.execute("ALTER TABLE recrutements ADD COLUMN raison TEXT DEFAULT ''")
+            colonnes = [r[1] for r in await cur.fetchall()]
+        if "raison" not in colonnes:
+            await db.execute("ALTER TABLE recrutements ADD COLUMN raison TEXT DEFAULT ''")
+        if "decision" not in colonnes:  # 24/10/2026 : la décision des boutons, telle quelle
+            await db.execute("ALTER TABLE recrutements ADD COLUMN decision TEXT DEFAULT ''")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_recrutements_mois"
                          " ON recrutements(guild_id, ferme_le)")
         await db.commit()
@@ -117,23 +127,28 @@ def garder(reponses) -> dict:
 
 
 async def enregistrer(guild_id: int, ticket_id: int, candidat_id: int, candidat_nom: str,
-                      events, reponses, participants, url) -> None:
-    """À la clôture : une ligne par ticket, jamais la conversation."""
+                      events, reponses, participants, url, decision: str = "") -> None:
+    """À la clôture : une ligne par ticket, jamais la conversation. `decision` : celle des boutons
+    (« acceptes », « refuses »), sinon vide — le statut se lit alors prudemment dans le motif.
+    `participants` None : la conversation n'a pas pu être relue (compteurs inconnus, pas « vide »)."""
     ouvert = next((int(t) for k, _a, _d, t in events if k == "create" and t), None)
     fin = next(((int(t), int(a or 0), str(d or "")) for k, a, d, t in reversed(events)
                 if k == "close" and t), None)
     ferme_le, ferme_par, raison = fin or (int(datetime.now(timezone.utc).timestamp()), 0, "")
     pris_par = next((int(a or 0) for k, a, _d, _t in reversed(events) if k == "claim"), 0)
-    cand = sum(p["n"] for p in participants if p["id"] == candidat_id)
-    staff = sum(p["n"] for p in participants if p["id"] != candidat_id and not p["bot"])
+    if participants is None:
+        cand = staff = None
+    else:
+        cand = sum(p["n"] for p in participants if p["id"] == candidat_id)
+        staff = sum(p["n"] for p in participants if p["id"] != candidat_id and not p["bot"])
     async with _get_db() as db:
         await db.execute(
             "INSERT OR REPLACE INTO recrutements (guild_id, ticket_id, candidat_id, candidat_nom,"
             " ouvert_le, ferme_le, ferme_par, pris_par, reponses, msg_candidat, msg_staff,"
-            " transcript, raison) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " transcript, raison, decision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (guild_id, ticket_id, candidat_id, str(candidat_nom or "")[:100], ouvert, ferme_le,
              ferme_par, pris_par, json.dumps(garder(reponses), ensure_ascii=False), cand,
-             staff, url or "", raison[:200]))
+             staff, url or "", raison[:200], decision if decision in DECISIONS else ""))
         await db.commit()
 
 
@@ -221,12 +236,12 @@ async def lire(guild_id: int, mois: str = "tout") -> list[dict]:
     async with _get_db() as db:
         async with db.execute(
                 "SELECT ticket_id, candidat_id, candidat_nom, ouvert_le, ferme_le, ferme_par,"
-                " pris_par, reponses, msg_candidat, transcript, raison FROM recrutements"
+                " pris_par, reponses, msg_candidat, transcript, raison, decision FROM recrutements"
                 " WHERE guild_id=? AND ferme_le >= ? AND ferme_le < ? ORDER BY ferme_le",
                 (guild_id, debut, fin)) as cur:
             rows = await cur.fetchall()
     cles = ("ticket", "candidat_id", "nom", "ouvert", "ferme", "ferme_par", "pris_par",
-            "reponses", "msg_candidat", "transcript", "raison")
+            "reponses", "msg_candidat", "transcript", "raison", "decision")
     out = []
     for r in rows:
         d = dict(zip(cles, r))
@@ -235,6 +250,7 @@ async def lire(guild_id: int, mois: str = "tout") -> list[dict]:
         except ValueError:
             d["reponses"] = {}
         d["raison"] = d["raison"] or ""
+        d["decision"] = d["decision"] or ""
         out.append(d)
     return out
 
@@ -242,22 +258,28 @@ async def lire(guild_id: int, mois: str = "tout") -> list[dict]:
 async def du_candidat(guild_id: int, candidat_id: int) -> list[dict]:
     """Toutes les candidatures fermées d'une personne, de la plus récente à la plus ancienne."""
     async with _get_db() as db:
-        rows = await _lignes(db, "SELECT ticket_id, ouvert_le, ferme_le, raison, reponses, transcript"
+        rows = await _lignes(db, "SELECT ticket_id, ouvert_le, ferme_le, raison, reponses, transcript, decision"
                                  " FROM recrutements WHERE guild_id=? AND candidat_id=? ORDER BY ferme_le DESC",
                              (int(guild_id), int(candidat_id)))
     out = []
-    for tid, ouvert, ferme, raison, reponses, transcript in rows:
+    for tid, ouvert, ferme, raison, reponses, transcript, prise in rows:
         try:
             rep = json.loads(reponses or "{}")
         except ValueError:
             rep = {}
         out.append({"ticket": tid, "ouvert": ouvert, "ferme": ferme, "raison": raison or "",
-                    "statut": decision(False, raison or "") or "", "reponses": rep, "transcript": transcript or ""})
+                    "statut": decision(False, raison or "", prise or "") or "", "reponses": rep,
+                    "transcript": transcript or ""})
     return out
 
 
-def decision(a_le_role: bool, raison: str) -> str | None:
-    """La décision prise, ou None quand rien ne l'établit (ticket sans suite)."""
+def decision(a_le_role: bool, raison: str, prise: str = "") -> str | None:
+    """La décision prise, ou None quand rien ne l'établit (ticket sans suite). `prise` : la décision
+    enregistrée par les boutons — elle fait foi. Sans elle (anciens tickets), une lecture prudente : un
+    refus ou une négation (« Non admis », « pas acceptée ») l'emporte ; puis le rôle du clan ou un
+    « accepté » explicite ; « Recrutements fermés » n'est pas une décision."""
+    if prise in DECISIONS:
+        return prise
     if REFUS.search(raison or ""):
         return "refuses"
     if a_le_role or ACCEPTE.search(raison or ""):
@@ -277,7 +299,8 @@ def nettoyer(lignes: list[dict], statut_de) -> tuple[list[dict], int, int]:
         if DOUBLON.search(d.get("raison") or ""):
             doublons += 1
             continue
-        d = dict(d, statut=statut_de(d["candidat_id"], d.get("raison") or ""))
+        d = dict(d, statut=d["decision"] if d.get("decision") in DECISIONS
+                 else statut_de(d["candidat_id"], d.get("raison") or ""))
         if d["statut"] is None:
             sans_suite += 1
             continue
@@ -438,7 +461,8 @@ def carte_decision(ticket: int) -> discord.ui.LayoutView:
     v = discord.ui.LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
         discord.ui.TextDisplay("### Décision de recrutement\n-# Réservé à l'équipe Rell Seas. Accepter donne "
-                               "le rôle du clan et ferme le ticket ; refuser ferme le ticket avec le motif."),
+                               "le rôle du clan et ferme le ticket ; refuser ferme le ticket — le candidat lit "
+                               "« Candidature refusée », le motif reste à l'équipe."),
         discord.ui.ActionRow(BoutonDecision("a", ticket), BoutonDecision("r", ticket)),
         accent_color=0x0EA5E9))
     return v

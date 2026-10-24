@@ -195,7 +195,8 @@ def test_D3_branche_dans_le_bot():
     corps = _source("_create_ticket_corps")
     assert "cat = await _categorie_tickets(i.guild) or i.guild.get_channel(pnl.get('category', 0))" in corps
     assert "await _vue_dossier_ticket(" in corps and "discord.Embed(" not in corps
-    claim = next(ast.unparse(n) for n in ast.walk(ARBRE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "claim")
+    #  24/10/2026 : `claim` acquitte et pose la garde ; `_prendre` fait la prise en charge.
+    claim = next(ast.unparse(n) for n in ast.walk(ARBRE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "_prendre")
     assert "_vue_dossier_ticket_de(i.guild, tk, pris_par=i.user.id)" in claim and "components_v2" in claim, \
         "la prise en charge réécrit le dossier au lieu de le remplacer par de simples boutons"
     assert "await _categorie_tickets(g)" in _source("salon_logs_task"), "le rangement se fait sans attendre un ticket"

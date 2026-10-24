@@ -152,8 +152,8 @@ def _ns_tickets(conf, direction: set):
     async def _au_journal(*a, **k):
         journal.append((a, k))
 
-    async def _rafraichir_hub_tickets(_g):
-        rafraichis.append(1)
+    async def _rafraichir_hub_tickets(_g, **k):
+        rafraichis.append(k.get("types"))
     ns = {"discord": discord, "Button": discord.ui.Button, "LayoutView": LayoutView, "Palette": Palette,
           "cfg": cfg, "db_set": db_set, "time": time, "_au_journal": _au_journal,
           "_rafraichir_hub_tickets": _rafraichir_hub_tickets,
@@ -179,7 +179,8 @@ def test_T1_la_direction_ferme_un_type_le_panneau_suit(tmp_path):
     run(boutons[1].callback(j))  # Rell Seas : fermer
     assert conf["ticket_panels"]["2"]["disabled"] is True and conf["ticket_panels"]["2"]["ferme_par"] == 11
     assert conf["ticket_panels"]["1"].get("disabled") is not True, "seul ce type"
-    assert rafraichis and "Rell Seas : fermé" in journal[-1][0][3]
+    assert rafraichis == [{"2"}] and "Rell Seas : fermé" in journal[-1][0][3], \
+        "le panneau unifié et le panneau de ce type suivent (24/10/2026)"
     assert "Fermé · rouvrir" in textes(j.response.edits[-1]["view"])
     tout = next(b for b in boutons if b.label == "Tout rouvrir")
     run(tout.callback(interaction(g, g.membre(11))))

@@ -23,7 +23,8 @@ RACINE = Path(__file__).resolve().parent.parent
 ARBRE = ast.parse((RACINE / "bot.py").read_text(encoding="utf-8"))
 NOMS = ("_resolve_transcript_text", "_TRANSCRIPT_CSS", "CONVERSATION_MAX", "_message_en_donnees",
         "_conversation_ticket", "_conversation_seule", "_suivi_ticket", "_render_ticket_transcript_html",
-        "_cartes_v2", "_html_lignes_v2", "_html_carte_v2")
+        "_cartes_v2", "_html_lignes_v2", "_html_carte_v2", "_historique_ticket", "_note_tronque", "_image_sure",
+        "_HOTES_IMAGES")
 
 
 def _ns(**autres):
@@ -69,8 +70,9 @@ class _Salon:
         self._m, self.guild = messages, guild
 
     def history(self, limit=None, oldest_first=False):
+        """Comme Discord : du plus récent au plus ancien, sauf `oldest_first`."""
         async def gen():
-            for m in self._m[:limit]:
+            for m in (self._m if oldest_first else list(reversed(self._m)))[:limit]:
                 yield m
         return gen()
 

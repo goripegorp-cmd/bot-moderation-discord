@@ -104,7 +104,7 @@ def test_I2_la_fermeture_partagee_log_mp_base_puis_suppression(base):
     class Salon:
         id = 101
 
-        async def send(self, texte):
+        async def send(self, texte, **kw):
             journal.append(("annonce", texte))
 
         async def delete(self):
@@ -116,6 +116,7 @@ def test_I2_la_fermeture_partagee_log_mp_base_puis_suppression(base):
 
     async def log(*a, **k):
         journal.append(("log",))
+        return True  # 24/10/2026 : le transcript est enregistré (sinon le salon est gardé)
 
     async def transcript(*_a):
         return "fichier"
@@ -146,7 +147,7 @@ def test_I2_la_fermeture_partagee_log_mp_base_puis_suppression(base):
 
 
 def test_I3_branchements():
-    assert "if not await _fermer_ticket(i.guild, i.channel, self.tk, i.user, reason):" in SRC
+    assert "if not await _fermer_ticket(i.guild, i.channel, self.tk, i.user, reason, prevenir=_prevenir):" in SRC
     assert '"tickets_inactifs_task",' in SRC and "tickets_inactifs_task.start()" in SRC
     assert "'tickets_inactivite_jours': 7" in SRC
 

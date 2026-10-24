@@ -258,7 +258,7 @@ def _ns_direction(ns):
     import owner_ids
     ns.update(TETE_IDS=frozenset({781205382923288593, 827633340797681714}), owner_ids_module=owner_ids)
     for nom in ("_direction_ou_plus", "_ticket_sans_limite", "_equipe_direction", "_equipe_du_type",
-                "_types_tickets"):
+                "_types_tickets", "_au_dessus_de_la_direction"):
         exec(_fonction_def(nom), ns)  # noqa: S102 — code du dépôt
 
 
@@ -413,9 +413,10 @@ def test_D2_un_ticket_rell_seas_est_vu_par_les_roles_du_clan_et_la_direction(ban
     assert porteur.name == "🎫・tickets-rell-seas" and ecrits[tf.CLE_PARENTS] == {"40:7:rell": porteur.id}, \
         "les tickets Rell Seas ont leur salon : le clan ne voit pas les autres"
     ows = porteur.kw["overwrites"]
-    for rid in (7, 8, 20, 30):
+    for rid in (7, 8, 20):
         assert ows[g.par_id[rid]].manage_threads and ows[g.par_id[rid]].view_channel, rid
     assert ows[g.fondateur].manage_threads, "le compte du fondateur aussi"
+    assert g.par_id[30] not in ows, "24/10 (revue) : un rôle rangé au-dessus de la direction ne voit plus tout"
     conf["ticket_panels"]["p2"] = {"category": 40, "staff_role": 7, "name": "Support"}
     ch2, err, *_ = _executer(banc, conf, g, pid="p2")
     assert err is None and ch2.parent_id != porteur.id and g.par_id[8] not in g.crees[1].kw["overwrites"], \
@@ -434,11 +435,12 @@ def test_D3_un_salon_porteur_d_avant_est_complete_jamais_retire(banc):
     conf[tf.CLE_PARENTS] = {"40:7": 77}
     ch, err, *_ = _executer(banc, conf, g)
     assert err is None and ch.parent_id == 77 and not g.crees, "le salon d'avant sert toujours"
-    complete = {c.id for c, _kw in ancien.perms if hasattr(c, "position")}
-    assert complete == {20, 30} and ancien.ows[g.par_id[30]].manage_threads, "ce qui manquait est ajouté"
-    assert ancien.ows[g.par_id[30]].send_messages is False, "un réglage posé à la main reste"
+    complete = {c.id for c, _kw in ancien.perms}
+    assert complete == {20, 781205382923288593} and ancien.ows[g.par_id[20]].manage_threads, \
+        "ce qui manquait est ajouté : le rôle direction et le compte du fondateur (24/10 : pas les rôles au-dessus)"
+    assert ancien.overwrites_for(g.par_id[30]).send_messages is False, "un réglage posé à la main reste"
     _executer(banc, conf, g)
-    assert len(ancien.perms) == 3, "la fois suivante : rien à refaire"
+    assert len(ancien.perms) == 2, "la fois suivante : rien à refaire"
 
 
 def test_D4_le_menu_du_panneau_montre_les_types_fermes_a_la_direction():
@@ -490,10 +492,12 @@ def test_D5_une_fois_les_tickets_ouverts_et_les_salons_recoivent_ce_qui_manque(b
     _ns_direction(ns)
     exec(_fonction("_tickets_visibilite"), ns)  # noqa: S102 — code du dépôt
     n = asyncio.run(ns["_tickets_visibilite"](g))
-    assert {c.id for c, _kw in porteur.perms} == {20, 30, 781205382923288593}, "la direction voit le salon porteur"
+    assert {c.id for c, _kw in porteur.perms} == {20, 781205382923288593}, \
+        "la direction (le rôle, pas ceux au-dessus — 24/10) et le fondateur voient le salon porteur"
     assert fil.membres == [g.recrue], "le ticket Rell Seas ouvert accueille le recruteur du clan"
-    assert {c.id for c, _kw in classique.perms} >= {7, 8, 20, 30} and classique.ows[g.par_id[8]].send_messages
-    assert n == 3 + 1 + 5 and "la direction et le fondateur voient tous les tickets" in journal[-1][3]
+    assert {c.id for c, _kw in classique.perms} >= {7, 8, 20} and classique.ows[g.par_id[8]].send_messages
+    assert g.par_id[30] not in classique.ows
+    assert n == 2 + 1 + 4 and "la direction et le fondateur voient tous les tickets" in journal[-1][3]
     boucle = _fonction("entraide_task")
     assert boucle.index("db_set(g.id, 'tickets_visibilite_v1'") < boucle.index("_tickets_visibilite(g)"), "une fois"
     assert '"tickets_direction": any(' in SRC, "/stats le dit"

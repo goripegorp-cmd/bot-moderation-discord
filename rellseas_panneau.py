@@ -18,6 +18,7 @@ Ce qui existait déjà et n'a pas été réécrit : la table `realsy_tracking` e
 """
 from __future__ import annotations
 
+import asyncio
 import io
 
 import discord
@@ -395,7 +396,7 @@ def _poser(i, ids: list[int]) -> None:
     _SELECTIONS[_cle(i)] = propre
 
 
-def _membres_du_salon(i) -> list:
+def _membres_du_salon(i, bruts=None) -> list:
     """Les membres qui voient le salon où la commande a été tapée.
 
     ⚠️ POURQUOI CE RACCOURCI EXISTE. Demande du propriétaire (24/08) : « si on
@@ -405,8 +406,8 @@ def _membres_du_salon(i) -> list:
     Dans un ticket, les gens concernés sont déjà là : les retrouver à la main
     dans un serveur de mille membres n'a aucun sens.
 
-    Les tickets de ce bot sont des SALONS TEXTE avec permissions
-    (`create_text_channel(..., overwrites=ow)`), donc `channel.members` rend
+    Les tickets de ce bot sont des FILS PRIVÉS (19/10/2026, `tickets_fils`) —
+    et, en repli, des salons texte avec permissions, dont `channel.members` rend
     exactement les participants.
 
     ⚠️ TROIS TYPES, TROIS COMPORTEMENTS — et un seul rend des `Member` :
@@ -414,7 +415,9 @@ def _membres_du_salon(i) -> list:
       · `VoiceChannel.members` → ceux actuellement CONNECTÉS dedans ;
       · `Thread.members`       → des `ThreadMember`, PAS des `Member` : pas de
         `.display_name`, pas de `.bot`. On repasse donc par
-        `guild.get_member` dans tous les cas.
+        `guild.get_member` dans tous les cas. Et ce n'est qu'un CACHE, vide
+        après chaque redémarrage : `_membres_du_salon_frais` le demande à
+        Discord et le passe ici (`bruts`).
 
     Rend `[]` si le salon est public : `channel.members` y vaut presque tout le
     serveur, et proposer neuf cents personnes ne rendrait service à personne.
@@ -424,7 +427,7 @@ def _membres_du_salon(i) -> list:
     if g is None or salon is None:
         return []
     try:
-        bruts = list(getattr(salon, "members", []) or [])
+        bruts = list(getattr(salon, "members", []) or []) if bruts is None else list(bruts)
     except Exception:
         return []
     if not bruts or len(bruts) > MAX_RESULTATS:
@@ -435,6 +438,26 @@ def _membres_du_salon(i) -> list:
         if m is not None and not getattr(m, "bot", False):
             out.append(m)
     return out
+
+
+#  Le temps laissé à Discord pour rendre les membres d'un fil : le panneau répond à un clic (3 s en tout).
+DELAI_MEMBRES_FIL = 1.5
+
+
+async def _membres_du_salon_frais(i) -> list:
+    """`_membres_du_salon`, cache vide compris (24/10/2026, revue) : `Thread.members` ne se remplit qu'au fil
+    des évènements et vaut `[]` après chaque redémarrage — le raccourci « Ce salon » disparaissait des
+    tickets de recrutement. Un fil au cache vide est demandé à Discord, borné dans le temps ; sur un refus
+    ou un délai dépassé, pas de raccourci (jamais une erreur)."""
+    salon = getattr(i, "channel", None)
+    if isinstance(salon, discord.Thread) and not list(getattr(salon, "members", None) or []):
+        try:
+            frais = await asyncio.wait_for(salon.fetch_members(), DELAI_MEMBRES_FIL)
+        except (discord.HTTPException, asyncio.TimeoutError) as ex:
+            _log(f"[RELLSEAS:DETAIL] membres du fil illisibles : {type(ex).__name__}")
+            return []
+        return _membres_du_salon(i, frais)
+    return _membres_du_salon(i)
 
 
 def _sans_accents(s: str) -> str:
@@ -735,7 +758,7 @@ class RellseasGestionV2(LayoutView):
         #  serveur de mille membres n'a aucun sens. Il n'apparaît QUE si le
         #  salon a peu de monde (voir `_membres_du_salon`), donc jamais dans un
         #  salon public où il listerait tout le serveur.
-        ici = _membres_du_salon(i)
+        ici = await _membres_du_salon_frais(i)
         if ici:
             opts = [discord.SelectOption(
                 label=m.display_name[:100], description=f"@{m.name}"[:100],
