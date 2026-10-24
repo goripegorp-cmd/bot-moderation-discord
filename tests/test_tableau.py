@@ -325,6 +325,7 @@ def test_T7_casier_par_membre_direction_a_part(tmp_path):
 def test_T8_un_seul_salon_de_logs_le_menu_epingle_toujours_a_jour():
     """« Il n'y aura qu'un seul salon, qui mettra le lien correctement… tout le temps opérationnel. »"""
     import annonces
+    import cadeaux
     import zones
     import discord
     import visuels
@@ -376,7 +377,7 @@ def test_T8_un_seul_salon_de_logs_le_menu_epingle_toujours_a_jour():
     async def db_set(_g, k, v):
         conf[k] = v
     ns = {"cfg": cfg, "db_set": db_set, "discord": discord, "visuels": visuels, "LayoutView": LayoutView,
-          "Palette": Palette, "recrutements": recrutements, "annonces": annonces, "zones": zones,
+          "Palette": Palette, "recrutements": recrutements, "annonces": annonces, "cadeaux": cadeaux, "zones": zones,
           "_logerr": lambda *a, **k: None,
           "ulogger2026": Obj(mode_site=mode_site), "now": lambda: datetime.now(timezone.utc)}
     for nom in ("NOM_SALON_LOGS", "MENU_LOGS_VERSION", "_anciens_salons", "_menu_logs", "_salon_tableau"):

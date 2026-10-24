@@ -99,6 +99,7 @@ import equipages  # les équipages de Rell Seas : Pirates ou Marine, un post par
 import zones  # les compartiments : Communautaire et Rell Seas, rangés par priorité
 import annonces  # les annonces en un clic : bandeau, texte, liens, « ✅ Vu », un fil par annonce
 import faq  # les questions fréquentes : une carte qui mène au bon endroit (ticket, trade…)
+import cadeaux  # les cadeaux (giveaways) : conditions, stats en direct, tirage pondéré
 import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -6929,7 +6930,7 @@ class BoutonFicheSite(discord.ui.DynamicItem[Button], template=r"alerte:fiche:(?
 
 NOM_SALON_LOGS = "📋logs"
 #  Le menu est réécrit quand sa signature change (texte, mode, nombre d'anciens salons).
-MENU_LOGS_VERSION = 4
+MENU_LOGS_VERSION = 5  # 5 : 🎁 Cadeaux
 #  Les alertes qui demandent une réaction humaine (raid, compte piraté, escalade, staff) : en
 #  mode site, elles arrivent dans le salon unique. Tous les autres salons de logs sont mis à 0.
 CLES_ALERTES = ('mod_log_channel', 'antiraid_log_channel', 'log_anti_raid', 'log_anti_alt',
@@ -6969,11 +6970,14 @@ async def _menu_logs(g, c):
              "-# Un clic : ton lien personnel, valable 24 h. Réservé au fondateur et à la direction.\n"
              "### 📣 Les annonces\n"
              "Un salon, un titre, un texte (et une image si tu veux) : l'annonce part avec son bandeau, "
-             "« ✅ Vu » pour savoir qui l'a lue, et un fil pour la suite.")
+             "« ✅ Vu » pour savoir qui l'a lue, et un fil pour la suite.\n"
+             "### 🎁 Les cadeaux\n"
+             "Un lot, une durée, des conditions (rôle, messages, vocal, ET ou OU), plus de chances pour les "
+             "boosters : chacun suit ses stats, le tirage se fait seul.")
     if site:
         texte += ("\n-# Plus aucun log sur Discord : ici n'arrivent que les alertes qui demandent "
                   "une réaction (raid, compte piraté, escalade).")
-    boutons = [recrutements.BoutonTableau(), annonces.BoutonComposer()]
+    boutons = [recrutements.BoutonTableau(), annonces.BoutonComposer(), cadeaux.BoutonCadeaux()]
     if anciens:
         boutons.append(BoutonAnciensSalons(len(anciens)))
     archives = zones.archives(g, c)
@@ -12709,6 +12713,34 @@ async def _faq_hook(msg):
 
 
 bot.add_listener(_faq_hook, "on_message")
+
+
+#  Les cadeaux comptent les messages et le vocal depuis le lancement de chaque cadeau (rien de lourd :
+#  tout reste en mémoire et part en base toutes les 30 s).
+async def _cadeaux_message(msg):
+    try:
+        cadeaux.sur_message(msg)
+    except Exception as ex:
+        _logerr("cadeaux.message", ex, guild_id=getattr(getattr(msg, "guild", None), "id", 0))
+
+
+async def _cadeaux_vocal(membre, avant, apres):
+    try:
+        cadeaux.sur_vocal(membre, avant, apres)
+    except Exception as ex:
+        _logerr("cadeaux.vocal", ex, guild_id=getattr(getattr(membre, "guild", None), "id", 0))
+
+
+async def _cadeaux_effacement(payload):
+    try:
+        cadeaux.sur_suppression(payload.message_id)
+    except Exception as ex:
+        _logerr("cadeaux.effacement", ex, guild_id=getattr(payload, "guild_id", 0) or 0)
+
+
+bot.add_listener(_cadeaux_message, "on_message")
+bot.add_listener(_cadeaux_vocal, "on_voice_state_update")
+bot.add_listener(_cadeaux_effacement, "on_raw_message_delete")
 bot.add_listener(boosts.sur_maj_serveur, "on_guild_update")
 bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_add")
 bot.add_listener(sondages.sur_vote, "on_raw_poll_vote_remove")
@@ -13490,6 +13522,50 @@ async def _langue_de_membre(m) -> str:
     return "fr" if langue == "fr" else "en"
 
 
+async def _cadeaux_autorise(g, membre) -> bool:
+    """Lancer et gérer les cadeaux : le fondateur et la direction (et les rôles au-dessus)."""
+    return _a_la_tete(g, membre) or _direction_ou_plus(g, membre, await cfg(g.id))
+
+
+async def _cadeaux_journal(g, type_: str, texte: str, **kw) -> None:
+    await _au_journal(g, "Cadeaux", type_, texte, **kw)
+
+
+@tasks.loop(seconds=30)
+async def cadeaux_task():
+    """Les cadeaux : une fois, le salon 🎁giveaways (sans catégorie, à ranger où le fondateur veut) ;
+    toutes les 30 s, les compteurs en base et le tirage des cadeaux arrivés à leur fin."""
+    if not bot.is_ready():
+        return
+    for g in list(bot.guilds):
+        try:
+            c = await cfg(g.id)
+            if g.owner_id in TETE_IDS and not c.get('cadeaux_salon_v1'):
+                # 22/10 (nuit), le fondateur : « un salon unique… tu me le crées, après, moi, je le place
+                # où je veux ».
+                await db_set(g.id, 'cadeaux_salon_v1', now().isoformat())
+                ch = await cadeaux.salon_cadeaux(g, creer=True)
+                if ch is not None:
+                    await _au_journal(g, "Cadeaux", "cadeaux.salon",
+                                      f"Salon des cadeaux créé : {ch.mention} — à ranger où tu veux.")
+        except Exception as ex:
+            _logerr("cadeaux.salon", ex, guild_id=g.id)
+    try:
+        await cadeaux.tic(list(bot.guilds))
+    except Exception as ex:
+        _logerr("cadeaux.tic", ex)
+    if time.monotonic() - _cadeaux_purge[0] > 3600:
+        _cadeaux_purge[0] = time.monotonic()
+        for g in list(bot.guilds):
+            try:
+                await cadeaux.purger(g)
+            except Exception as ex:
+                _logerr("cadeaux.purge", ex, guild_id=g.id)
+
+
+_cadeaux_purge = [-1e9]
+
+
 async def _annonces_journal(g, type_: str, texte: str, **kw) -> None:
     await _au_journal(g, "Annonces", type_, texte, **kw)
 
@@ -13734,6 +13810,11 @@ async def _etat_public():
             "post_crews": any('crews' in (c.get('zones_posts') or {}) for c in confs),
             "porteurs_sans_direction": sum(_porteurs_sans_direction(g, c) for g, c in zip(list(bot.guilds), confs)),
             "clan_anciens_salons": sum(_anciens_salons_clan(g, c) for g, c in zip(list(bot.guilds), confs)),
+            "clan_infos_recopiees": any(c.get('clan_infos_dernier') for c in confs),
+            "direction_cibles": max([len(_equipe_direction(g, c)) for g, c in zip(list(bot.guilds), confs)] or [0]),
+            "cadeaux_salon": sum(1 for g, c in zip(list(bot.guilds), confs)
+                                 if g.get_channel(int(c.get('cadeaux_salon', 0) or 0)) is not None),
+            "cadeaux_en_cours": cadeaux.nb_actifs(),
             "entraide_salons": max([len(c.get('rs_salons') or {}) for c in confs] or [0]),
             "tickets_regroupes": any(c.get('tickets_categorie') for c in confs)})
     except Exception as ex:
@@ -14023,6 +14104,8 @@ _SUPERVISED_LOOP_NAMES = [
     "websub_task",
     "amnistie_task",
     "entraide_task",
+    #  24/10/2026 : les cadeaux — sans cette entrée, la boucle ne démarre jamais (aucun tirage).
+    "cadeaux_task",
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -20196,6 +20279,9 @@ async def _activite_boot():
                    langue=_langue_membre, log=print)
     await annonces.init_db()
     faq.setup(cfg=cfg, destinations=_faq_destinations, est_staff=_staff_ou_plus, langue=_langue_de_membre, log=print)
+    cadeaux.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_cadeaux_journal,
+                  ticket=_salon_des_tickets, langue=_langue_membre, log=print)
+    await cadeaux.init_db()
 
     await activite_module.init_db()
 
@@ -20300,6 +20386,8 @@ async def on_ready():
         bot.add_dynamic_items(equipages.BoutonPublier, equipages.BoutonRejoindre, equipages.BoutonRecrutement,
                               equipages.BoutonModifier, equipages.BoutonRetirer)
         bot.add_dynamic_items(annonces.BoutonComposer, annonces.BoutonVu)
+        bot.add_dynamic_items(cadeaux.BoutonCadeaux, cadeaux.BoutonParticiper, cadeaux.BoutonStats,
+                              cadeaux.BoutonActualiser, cadeaux.BoutonQuitter)
         bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")
