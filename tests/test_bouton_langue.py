@@ -60,7 +60,9 @@ def test_la_carte_daccueil_pose_toujours_le_bouton_langue():
     """Si ce bouton disparaît, le membre international n'a plus rien. Il DOIT
     rester — c'est son capteur qui doit exister, pas lui qui doit partir."""
     corps = ast.unparse(_fonction("_welcome_quick_buttons"))
-    assert "onb_lang" in corps
+    #  24/10/2026 : le VRAI bouton de AccueilLangueView (son custom_id `onb_lang` est vérifié plus bas) —
+    #  un bouton vide au même identifiant, gardé par le message, ne répondait pas avant un redémarrage.
+    assert "for x in list(AccueilLangueView().children):" in corps
 
 
 def test_la_vue_du_bouton_langue_existe_et_porte_le_bon_custom_id():

@@ -241,3 +241,97 @@ __all__ = [
     "BasePanel",
     "header",
 ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🔁 Un ancien embed en carte Components V2 (24/10/2026 : « Components V2 partout »)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+TEXTE_MAX = 3900   # Discord : 4 000 caractères de texte pour tout un message Components V2
+
+
+def _rangees(r) -> list:
+    """Les boutons d'une ancienne vue (rangée par rangée), une liste de boutons, ou une ActionRow."""
+    if r is None:
+        return []
+    if isinstance(r, ui.ActionRow):
+        return [r]
+    if isinstance(r, (list, tuple)):
+        return [ui.ActionRow(*r)] if r else []
+    if isinstance(r, ui.View):
+        lignes: dict = {}
+        for item in list(r.children):
+            r.remove_item(item)
+            cle = item.row if item.row is not None else (100 + len(lignes) if isinstance(item, ui.Select) else 99)
+            lignes.setdefault(cle, []).append(item)
+        out = []
+        for cle in sorted(lignes):
+            items = lignes[cle]
+            if cle == 99:  # les boutons sans rangée : cinq par rangée
+                out += [ui.ActionRow(*items[k:k + 5]) for k in range(0, len(items), 5)]
+            else:
+                out.append(ui.ActionRow(*items))
+        return out
+    return [ui.ActionRow(r)]
+
+
+def carte_embed(e: discord.Embed, *rangees, haut: str = "", timeout: Optional[float] = None) -> "LayoutView":
+    """Un embed en carte Components V2, pour finir de convertir les anciens messages sans réécrire leur
+    contenu : l'auteur, le titre (avec son lien) et le texte, la vignette à côté, les champs (« **nom** :
+    valeur »), l'image, le pied et l'heure, la couleur ; puis les boutons. `rangees` : des vues classiques
+    (leurs boutons et menus, rangée par rangée), des listes de boutons, des ActionRow. `haut` : une ligne
+    au-dessus de la carte (une mention qui doit prévenir). Le texte tient dans la limite de Discord."""
+    tete = []
+    auteur = str(getattr(e.author, "name", None) or "").strip()
+    titre = str(e.title or "").strip()
+    if titre:
+        if auteur:
+            tete.append(f"-# {auteur}")
+        tete.append(f"### [{titre}]({e.url})" if e.url else f"### {titre}")
+    elif auteur:
+        tete.append(f"### [{auteur}]({e.url})" if e.url else f"### {auteur}")
+    if e.description:
+        tete.append(str(e.description).strip())
+    champs = []
+    for f in e.fields:
+        nom, val = str(f.name or "").strip(), str(f.value or "").strip()
+        if nom in ("", "​"):
+            champs.append(val)
+        elif "\n" not in val and len(val) <= 60:
+            champs.append(f"**{nom}** : {val}")
+        else:
+            champs.append(f"**{nom}**\n{val}")
+    pied = str(getattr(e.footer, "text", None) or "").strip()
+    if e.timestamp:
+        pied = (pied + " · " if pied else "") + f"<t:{int(e.timestamp.timestamp())}:f>"
+    texte_tete, texte_champs = "\n".join(tete).strip(), "\n".join(c for c in champs if c).strip()
+    reste = TEXTE_MAX - len(haut) - len(pied) - 8
+    if len(texte_tete) + len(texte_champs) > reste:   # la limite de Discord : on coupe la fin, jamais tout
+        texte_champs = texte_champs[:max(0, reste - len(texte_tete) - 1)].rstrip() + ("…" if texte_champs else "")
+        texte_tete = texte_tete[:max(0, reste)].rstrip()
+    image = getattr(e.thumbnail, "url", None) or getattr(e.author, "icon_url", None)
+    items = []
+    if texte_tete:
+        td = ui.TextDisplay(texte_tete)
+        items.append(ui.Section(td, accessory=ui.Thumbnail(str(image))) if image else td)
+    if texte_champs:
+        items.append(ui.TextDisplay(texte_champs))
+    if getattr(e.image, "url", None):
+        items.append(ui.MediaGallery(discord.MediaGalleryItem(str(e.image.url))))
+    if pied:
+        items.append(ui.TextDisplay(f"-# {pied}"))
+    vues = [r for r in rangees if isinstance(r, ui.View)]
+    for r in rangees:
+        items += _rangees(r)
+    if not items:
+        items.append(ui.TextDisplay("​"))
+    v = LayoutView(timeout=vues[0].timeout if vues and timeout is None else timeout)
+    if haut:
+        v.add_item(ui.TextDisplay(haut))
+    v.add_item(ui.Container(*items, accent_color=e.color))
+    return v
+
+
+def carte_texte(texte: str, *rangees, couleur=None, timeout: Optional[float] = None) -> "LayoutView":
+    """Un texte (et ses boutons) en carte Components V2."""
+    return carte_embed(discord.Embed(description=texte, color=couleur), *rangees, timeout=timeout)

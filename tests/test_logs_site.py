@@ -25,7 +25,8 @@ import unified_logger as UL
 import vigilance
 import visuels
 from conftest_discord import Obj
-from ui_v2 import LayoutView, Palette
+from faux_serveur import textes
+from ui_v2 import LayoutView, Palette, carte_embed
 
 RACINE = Path(__file__).resolve().parent.parent
 ARBRE = ast.parse((RACINE / "bot.py").read_text(encoding="utf-8"))
@@ -176,7 +177,7 @@ def test_L3_en_mode_site_rien_sur_discord_sauf_les_alertes(tmp_path, monkeypatch
         return anciens, site, await UL.mode_site(1), await registre.lire(1)
     anciens, (site, salons), apres, lignes = asyncio.run(scenario())
     assert anciens == {55, 56, 57} and site and salons == set(), "plus aucun salon de logs"
-    assert len(envois) == 1 and envois[0]["embed"].description == "Palier critique", "seule l'alerte part"
+    assert len(envois) == 1 and "Palier critique" in textes(envois[0]["view"]), "seule l'alerte part"
     assert [x["type"] for x in lignes] == ["sec.escalation", "member.join"], "un évènement désactivé n'est pas noté"
     assert lignes[1]["texte"] == "Arrivée · Arrivée de @Kolax" or "Kolax" in lignes[1]["texte"]
     assert lignes[1]["membre_id"] == 7
@@ -373,7 +374,7 @@ def test_L7_les_anciens_envoyeurs_se_taisent_en_mode_site():
     cible = Obj(mention="<@7>", id=7, display_avatar=Obj(url="https://x"), __str__=lambda: "k")
     mod = Obj(mention="<@2>", id=2)
     g = Obj(id=1, icon=None, get_channel=lambda cid: salon if cid == 77 else None)
-    ns = {"cfg": cfg, "discord": discord, "now": lambda: datetime.now(timezone.utc),
+    ns = {"cfg": cfg, "discord": discord, "now": lambda: datetime.now(timezone.utc), "carte_embed": carte_embed,
           "webhook_send": webhook_send, "C": Obj(ORANGE=1), "bot": None,
           "ulogger2026": Obj(log_event=log_event, EventType=UL.EventType)}
     exec(_source("send_mod_log"), ns)  # noqa: S102 — code du dépôt

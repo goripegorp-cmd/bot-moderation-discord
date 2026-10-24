@@ -740,10 +740,11 @@ async def log_event(
             if cible is None:
                 return None
             vue = vue_alerte(getattr(user, "id", 0) or 0) if vue_alerte is not None else None
-            return await cible.send(embed=build_log_embed(
+            from ui_v2 import carte_embed
+            return await cible.send(view=carte_embed(build_log_embed(
                 event_type, title_override=title_override, description=description, fields=fields,
                 user=user, moderator=moderator, channel=channel, reason=reason, content=content,
-                extra=extra), **({"view": vue} if vue is not None else {}))
+                extra=extra), vue), allowed_mentions=discord.AllowedMentions.none())
 
         # Phase 268 : routage évènement > catégorie > salon global.
         chan_id = await resolve_channel_for_event(guild.id, _ev_val, meta["cat"] if meta else None)
@@ -781,7 +782,9 @@ async def log_event(
                     cat = meta["cat"]
                     uname = f"{_CAT_ICON.get(cat, '📋')} {cat}"[:80]
                     av = guild.icon.url if guild.icon else None
-                    kw = {"embed": embed, "username": uname, "avatar_url": av, "wait": True}
+                    from ui_v2 import carte_embed
+                    kw = {"view": carte_embed(embed), "username": uname, "avatar_url": av, "wait": True,
+                          "allowed_mentions": discord.AllowedMentions.none()}
                     if isinstance(target, discord.Thread):
                         kw["thread"] = target
                     try:
@@ -790,7 +793,8 @@ async def log_event(
                         _log_webhook_cache.pop(parent.id, None)  # webhook périmé → repli
         except Exception:
             pass
-        return await target.send(embed=embed)
+        from ui_v2 import carte_embed
+        return await target.send(view=carte_embed(embed), allowed_mentions=discord.AllowedMentions.none())
     except Exception as ex:
         import traceback
         print(f"[UNIFIED_LOGGER] erreur log_event {event_type}: {ex}")
@@ -997,7 +1001,8 @@ async def log_member_escalation(bot, guild, member, total_warns, palier,
                         description=desc, fields=fields,
                         user=member, moderator=moderator, reason=reason,
                     )
-                    sent = await target.send(embed=embed)
+                    from ui_v2 import carte_embed
+                    sent = await target.send(view=carte_embed(embed), allowed_mentions=discord.AllowedMentions.none())
                     # TASK A8 : ping fondateur (haute/critique) dans ce même salon.
                     try:
                         if str(severity).lower() in _ESCALATION_PING_SEVERITIES:

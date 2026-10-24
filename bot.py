@@ -38,6 +38,8 @@ from ui_v2 import (
     View,
     LayoutView,
     Palette,
+    carte_embed,
+    carte_texte,
     title as v2_title,
     subtitle as v2_subtitle,
     body as v2_body,
@@ -3567,7 +3569,7 @@ class SecReportView(discord.ui.View):
                 title="Sanctions récentes (7 j)", color=0xE74C3C,
                 description=f"{who} (`{uid}`) — **{len(rows)}** sanction(s)\n\n" + "\n".join(lines[:15]))
             e.set_footer(text="Visibilité seule · clic droit sur le membre pour agir (mute/kick…).")
-            await i.followup.send(embed=e, ephemeral=True)
+            await i.followup.send(view=carte_embed(e), ephemeral=True)
         except Exception as ex:
             print(f"[SecReportView pick] {ex}")
             try:
@@ -3585,6 +3587,7 @@ async def _purge_old_sec_reports(channel):
                 txt = (m.content or "")
                 for emb in (m.embeds or []):
                     txt += " " + (emb.title or "") + " " + (emb.description or "")
+                txt += " " + _texte_v2(getattr(m, "components", None) or [], channel.guild)
                 if "Rapport sécurité hebdomadaire" in txt:
                     await m.delete()
                     await asyncio.sleep(0.3)  # anti-429
@@ -3657,7 +3660,7 @@ async def _post_weekly_security_report(guild):
     except Exception:
         pass
     try:
-        msg = await channel.send(embed=e, view=SecReportView(guild.id, top_players),
+        msg = await channel.send(view=carte_embed(e, SecReportView(guild.id, top_players)),
                                  allowed_mentions=discord.AllowedMentions.none())
     except Exception as ex:
         print(f"[_post_weekly_security_report send] {ex}")
@@ -4378,9 +4381,11 @@ async def _dm_sanction(member, guild, action_label, reason, duration_text=None):
                           color=0xE67E22, timestamp=now())
         if guild.icon:
             e.set_footer(text=guild.name, icon_url=guild.icon.url)
-        await member.send(embed=e)
-    except Exception:
-        pass
+        await member.send(view=carte_embed(e), allowed_mentions=discord.AllowedMentions.none())
+    except discord.Forbidden:
+        pass  # ses messages privés sont fermés : c'est son choix, rien à signaler
+    except Exception as ex:
+        _logerr("sanction.mp", ex, guild_id=getattr(guild, "id", 0))
 
 
 async def _announce_sanction_public(interaction, embed):
@@ -4407,7 +4412,7 @@ async def _announce_sanction_public(interaction, embed):
         ch = getattr(interaction, 'channel', None)
         if ch is None or not hasattr(ch, 'send'):
             return None
-        return await ch.send(embed=embed)
+        return await ch.send(view=carte_embed(embed), allowed_mentions=discord.AllowedMentions.none())
     except Exception as ex:
         print(f"[_announce_sanction_public] {ex}", file=_sys.stderr, flush=True)
         return None
@@ -4730,7 +4735,7 @@ async def send_log(g, key, m, msg, reason, extra=None):
         e.set_thumbnail(url=m.display_avatar.url)
         e.set_footer(text=f"Protection {g.name} • ID: {m.id}", icon_url=g.icon.url if g.icon else None)
         
-        await webhook_send(ch, 'protection', embed=e)
+        await webhook_send(ch, 'protection', view=carte_embed(e), allowed_mentions=discord.AllowedMentions.none())
     except Exception as ex:
         print(f"[LOG ERROR] {key}: {ex}")
 
@@ -5223,7 +5228,8 @@ async def _warn_calm_down(channel, text):
     try:
         warn_e = discord.Embed(color=0xF1C40F, description=text)
         warn_e.set_footer(text="Protection — reste cool 🙏")
-        warn_msg = await webhook_send(channel, 'protection', embed=warn_e)
+        warn_msg = await webhook_send(channel, 'protection', view=carte_embed(warn_e),
+                                      allowed_mentions=discord.AllowedMentions.none())
         if warn_msg:
             async def _del_warn(m):
                 await asyncio.sleep(10)
@@ -7398,13 +7404,16 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
         if msg_id:
             try:
                 old = await lch.fetch_message(msg_id)
-                await old.edit(embed=e)
+                if old.embeds:   # un ancien message (embed) reste un embed ; les nouveaux sont des cartes
+                    await old.edit(embed=e)
+                else:
+                    await old.edit(view=carte_embed(e), allowed_mentions=discord.AllowedMentions.none())
                 edited = True
             except Exception:
                 edited = False
         if not edited:
             try:
-                m = await lch.send(embed=e)
+                m = await lch.send(view=carte_embed(e), allowed_mentions=discord.AllowedMentions.none())
             except Exception:
                 m = None
             if m is not None and tid:
@@ -7480,7 +7489,7 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                     v = discord.ui.View(timeout=None)
                     v.add_item(discord.ui.Button(
                         style=discord.ButtonStyle.link, url=url, emoji=visuels.icone("lien"), label="Ouvrir le transcript"))
-                    await lch.send(content=_etiquette, embed=e, view=v,
+                    await lch.send(view=carte_embed(e, v, haut=_etiquette),
                                    allowed_mentions=discord.AllowedMentions.none())
                 else:
                     # Pas de domaine public configuré → repli : pièce jointe téléchargeable.
@@ -11345,7 +11354,7 @@ async def _flush_welcome_raid_recap(guild_id: int):
         )
         e.set_author(name="👋 Vague de bienvenue")
         try:
-            await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+            await ch.send(view=carte_embed(e), allowed_mentions=discord.AllowedMentions.none())
         except Exception as ex:
             print(f"[welcome raid recap send] {ex}")
     except Exception as ex:
@@ -14051,7 +14060,13 @@ async def _ping_social(salon):
 
 async def _publier_social(salon, profil: str, embed):
     ping, role, vue = await _ping_social(salon)
-    return await webhook_send(salon, profil, embed=embed, content=ping or None, view=vue,
+    boutons = list(vue.children)
+    for b in boutons:
+        vue.remove_item(b)
+    if embed.url:
+        boutons.insert(0, discord.ui.Button(style=discord.ButtonStyle.link, url=str(embed.url), label="Ouvrir · Open",
+                                            emoji=visuels.icone("lien")))
+    return await webhook_send(salon, profil, view=carte_embed(embed, boutons, haut=ping or ""),
                               allowed_mentions=notifs.mentions(role))
 
 
@@ -17780,7 +17795,7 @@ async def send_mod_log(guild, action, mod, target, reason=None, duration=None, e
 
         e.set_thumbnail(url=target.display_avatar.url)
         e.set_footer(text=f"ID cible: {target.id}")
-        await webhook_send(log_ch, 'mod_log', embed=e)
+        await webhook_send(log_ch, 'mod_log', view=carte_embed(e), allowed_mentions=discord.AllowedMentions.none())
     except Exception as ex:
         print(f"[MOD LOG ERROR] {ex}")
 
@@ -18984,7 +18999,7 @@ class V2GenericChannelPicker(LayoutView):
             await v.render_to(i, edit=True)
         elif hasattr(v, 'embed'):
             emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-            await i.response.edit_message(embed=emb, view=v, attachments=[])
+            await i.response.edit_message(view=carte_embed(emb, v), attachments=[])
         else:
             await i.response.edit_message(view=v, attachments=[])
 
@@ -19102,7 +19117,7 @@ class V2GenericRolePicker(LayoutView):
             await v.render_to(i, edit=True)
         elif hasattr(v, 'embed'):
             emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-            await i.response.edit_message(embed=emb, view=v, attachments=[])
+            await i.response.edit_message(view=carte_embed(emb, v), attachments=[])
         else:
             await i.response.edit_message(view=v, attachments=[])
 
@@ -19247,7 +19262,26 @@ async def _dossier_agir(i, act: str, uid: int) -> None:
 async def _dossier_traite(i, fait: str, uid: int) -> None:
     """Le dossier passe en gris avec sa décision, ses boutons éteints."""
     msg = i.message
-    if msg is None or not msg.embeds:
+    if msg is None:
+        return
+    if not msg.embeds:   # une carte Components V2 : elle reste, en gris, boutons éteints, la décision dedans
+        v = LayoutView.from_message(msg, timeout=None)
+        ligne = f"**Statut** : {fait} par {i.user.mention} · <t:{int(time.time())}:R>"
+        for bloc_ in v.children:
+            if isinstance(bloc_, discord.ui.Container):
+                bloc_.accent_colour = discord.Colour(0x95A5A6)
+                for x in list(bloc_.walk_children()):
+                    if isinstance(x, discord.ui.Button) and not x.url:
+                        x.disabled = True
+                enfants = list(bloc_.children)
+                bloc_.clear_items()
+                place = next((k for k, x in enumerate(enfants) if isinstance(x, discord.ui.ActionRow)), len(enfants))
+                for x in enfants[:place] + [discord.ui.TextDisplay(ligne)] + enfants[place:]:
+                    bloc_.add_item(x)
+        try:
+            await msg.edit(view=v, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as ex:
+            _logerr("dossier.statut", ex, guild_id=i.guild.id)
         return
     old = msg.embeds[0]
     new = discord.Embed(title=old.title or "Compte suspect détecté", description=old.description, color=0x95A5A6)
@@ -22042,7 +22076,8 @@ async def on_member_remove(m):
                 leave_e.set_author(name="Utilisateur parti", icon_url=m.display_avatar.url if m.display_avatar else None)
                 leave_e.description = f"**{m.display_name}** (`{m.name}`) a quitté le serveur."
                 leave_e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
-                await webhook_send(ch, 'ticket', embed=leave_e)
+                await webhook_send(ch, 'ticket', view=carte_embed(leave_e),
+                                   allowed_mentions=discord.AllowedMentions.none())
     except: pass
 
     # ═══ Phase 28.3 : Goodbye message ═══
@@ -22684,7 +22719,8 @@ async def on_member_join(m):
                     e.add_field(name="Action auto", value="✅ Activée" if auto_action else "❌ Désactivée", inline=True)
                     e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
                     e.timestamp = now()
-                    await log_ch.send(embed=e, view=_vue_alerte(m.id))
+                    await log_ch.send(view=carte_embed(e, _vue_alerte(m.id)),
+                                      allowed_mentions=discord.AllowedMentions.none())
                 
                 # Appliquer l'action automatique si activée
                 if auto_action:
@@ -22871,7 +22907,7 @@ async def _handle_antiraid_join(member):
             e.add_field(name="Membres concernés", value="\n".join(f"• {m.mention} (`{m.id}`)" for m in recent_members[:10]) or "_aucun_", inline=False)
             if is_suspect:
                 e.add_field(name="⚠️ Compte suspect", value=f"Le dernier compte a `{account_age_days}`j d'âge (seuil : `{min_age_days}`j)", inline=False)
-            await log_ch.send(embed=e, view=_vue_alerte(0))
+            await log_ch.send(view=carte_embed(e, _vue_alerte(0)), allowed_mentions=discord.AllowedMentions.none())
         except Exception as ex:
             print(f"[ANTIRAID log] {ex}")
 
@@ -22946,8 +22982,10 @@ def _welcome_quick_buttons(guild):
         #  (on_ready, Phase 40). Si ce `bot.add_view` disparaît, CE BOUTON MENT : il
         #  s'affiche et ne répond pas. C'est arrivé — la purge d'animation avait
         #  emporté l'ancienne OnboardingView en laissant le bouton ici (19/08/2026).
-        v.add_item(discord.ui.Button(emoji=visuels.icone("globe"), label="Ma langue / My language",
-                                     style=discord.ButtonStyle.secondary, custom_id="onb_lang"))
+        #  24/10/2026 : le VRAI bouton de AccueilLangueView. Un bouton vide au même custom_id était gardé
+        #  par le message et consulté avant la vue enregistrée : il ne répondait pas jusqu'au redémarrage.
+        for x in list(AccueilLangueView().children):
+            v.add_item(x)
         return v
     except Exception:
         return None
@@ -23101,10 +23139,8 @@ async def _handle_welcome(member):
                      icon_url=member.display_avatar.url)
     try:
         _wv = _welcome_quick_buttons(member.guild)
-        if _wv is not None:
-            _wm = await ch.send(content=member.mention, embed=e, view=_wv)
-        else:
-            _wm = await ch.send(content=member.mention, embed=e)
+        _wm = await ch.send(view=carte_embed(e, _wv, haut=member.mention),
+                            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=[member]))
         # owner 2026-06-30 : PLUS d'auto-suppression 20 s — la carte RESTE visible, puis la purge
         # périodique (welcome_cleanup_task) la retire après `welcome_lifetime_minutes`. On l'enregistre.
         try:
@@ -24067,7 +24103,7 @@ async def _check_compromised_account(msg):
     try:
         e = compromised2026.build_dossier_embed(msg.author, msg, score, reasons, signals)
         v = _dossier_vue(msg.author.id)
-        sent = await alert_channel.send(embed=e, view=v)
+        sent = await alert_channel.send(view=carte_embed(e, v), allowed_mentions=discord.AllowedMentions.none())
         print(f"[CAD] alerte créée guild={msg.guild.id} user={msg.author.id} score={score}")
 
         # Log unifié aussi
@@ -25490,7 +25526,8 @@ async def on_message(msg):
                                   "Fichier dangereux détecté", f"Extension: {ext}")
                     warn_e = discord.Embed(color=0xE74C3C, description=f"⚠️ {msg.author.mention} a envoyé un fichier potentiellement dangereux (`{ext}`).\nLe fichier a été **supprimé** automatiquement.")
                     warn_e.set_footer(text="Protection anti-phishing")
-                    warn_msg = await webhook_send(msg.channel, 'protection', embed=warn_e)
+                    warn_msg = await webhook_send(msg.channel, 'protection', view=carte_embed(warn_e),
+                                                  allowed_mentions=discord.AllowedMentions.none())
                     if warn_msg:
                         async def _del_warn(m):
                             await asyncio.sleep(10)
@@ -25656,7 +25693,9 @@ async def logs_status(i: discord.Interaction):
         cats = await ulogger2026.get_enabled_categories(i.guild.id)
         all_cats = sorted(set(m["cat"] for m in ulogger2026.EVENT_META.values()))
         chan_txt = "🔴 _non configuré_"
-        if chan_id:
+        if (await cfg(i.guild.id)).get('logs_sur_site_v1'):
+            chan_txt = "📋 **sur le site** (journal) — seules les alertes de sécurité arrivent dans Discord"
+        elif chan_id:
             ch = i.guild.get_channel(chan_id)
             chan_txt = ch.mention if ch else f"⚠️ `{chan_id}` (introuvable)"
         e = discord.Embed(
@@ -25670,7 +25709,7 @@ async def logs_status(i: discord.Interaction):
         )
         e.add_field(name="Catégories", value=cats_txt or "_aucune_", inline=False)
         e.set_footer(text="/logs setchannel · /logs categories")
-        await i.response.send_message(embed=e, ephemeral=True)
+        await i.response.send_message(view=carte_embed(e), ephemeral=True)
     except Exception as ex:
         print(f"[LOGS status] {ex}")
         try:
@@ -25711,7 +25750,7 @@ class LogsCategoriesSelect(Select):
                 color=0x2ECC71,
                 timestamp=now(),
             )
-            await ix.response.edit_message(embed=e, view=None)
+            await ix.response.edit_message(view=carte_embed(e))
         except Exception as ex:
             print(f"[LOGS categories cb] {ex}")
             try:
@@ -25739,7 +25778,7 @@ async def logs_categories(i: discord.Interaction):
             ),
             color=0x9B59B6,
         )
-        await i.response.send_message(embed=e, view=v, ephemeral=True)
+        await i.response.send_message(view=carte_embed(e, v), ephemeral=True)
     except Exception as ex:
         print(f"[LOGS categories] {ex}")
         try:
@@ -25923,7 +25962,7 @@ async def _clear_audit_log(guild, ch, moderator, deleted: int, limit) -> bool:
             e.set_footer(text=f"Mod: {moderator} · {getattr(moderator, 'id', '?')}")
         except Exception:
             pass
-        await lch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+        await lch.send(view=carte_embed(e), allowed_mentions=discord.AllowedMentions.none())
         return True
     except Exception as ex:
         print(f"[_clear_audit_log] {ex}")
@@ -25945,40 +25984,46 @@ async def _run_clear_and_report(guild, ch, limit, moderator) -> int:
     return deleted
 
 
-class ClearAllConfirmView(discord.ui.View):
-    """Confirmation « tout supprimer » (destructif/irréversible) — auteur uniquement, 60 s."""
+class ClearAllConfirmView(LayoutView):
+    """Confirmation « tout supprimer » (destructif, irréversible) — l'auteur seul, 60 s. Components V2."""
+
     def __init__(self, user_id: int, channel_id: int):
         super().__init__(timeout=60)
         self.user_id = int(user_id)
         self.channel_id = int(channel_id)
+        oui = Button(emoji=visuels.icone("supprimer"), label="Tout supprimer", style=discord.ButtonStyle.danger)
+        oui.callback = self._confirm
+        non = Button(label="Annuler", style=discord.ButtonStyle.secondary)
+        non.callback = self._cancel
+        self.add_item(discord.ui.Container(
+            discord.ui.TextDisplay(f"### ⚠️ Supprimer TOUS les messages de <#{self.channel_id}> ?\n"
+                                   "Tous les messages seront effacés (ceux de plus de 14 jours un par un si "
+                                   "besoin). Le salon n'est pas recréé. **Irréversible.**"),
+            discord.ui.ActionRow(oui, non), accent_color=Palette.DANGER))
 
-    @discord.ui.button(emoji=visuels.icone("supprimer"), label="Tout supprimer", style=discord.ButtonStyle.danger)
-    async def _confirm(self, i: discord.Interaction, b: discord.ui.Button):
+    async def _confirm(self, i: discord.Interaction):
         if i.user.id != self.user_id:
             return await i.response.send_message("❌ Ce n'est pas ta confirmation.", ephemeral=True)
         if not await check_mod_perm(i, 'mod_clear_role'):
             return await i.response.send_message("❌ Permission requise.", ephemeral=True)
         ch = i.guild.get_channel(self.channel_id) if i.guild else None
         if ch is None:
-            return await i.response.edit_message(content="❌ Salon introuvable.", view=None)
-        me = i.guild.me
-        if not ch.permissions_for(me).manage_messages:
+            return await i.response.edit_message(view=carte_texte("❌ Salon introuvable.", couleur=Palette.DANGER))
+        if not ch.permissions_for(i.guild.me).manage_messages:
             return await i.response.edit_message(
-                content="❌ Il me manque « Gérer les messages » ici.", view=None)
-        await i.response.edit_message(
-            content=(f"🧹 Suppression de **tous** les messages de {ch.mention} lancée…\n"
-                     f"_S'il y a beaucoup d'anciens messages (> 14 j), ça se fait un par un et peut "
-                     f"prendre du temps. Le résultat s'affichera dans le salon de logs de modération._"),
-            view=None)
+                view=carte_texte("❌ Il me manque « Gérer les messages » ici.", couleur=Palette.DANGER))
+        await i.response.edit_message(view=carte_texte(
+            f"🧹 Suppression de **tous** les messages de {ch.mention} lancée…\n-# Les messages de plus de 14 jours "
+            "partent un par un : ça peut prendre du temps. Le résultat arrive au journal de modération.",
+            couleur=Palette.SUCCESS))
         t = asyncio.create_task(_run_clear_and_report(i.guild, ch, None, i.user))
         _clear_tasks.add(t)
         t.add_done_callback(_clear_tasks.discard)
 
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
-    async def _cancel(self, i: discord.Interaction, b: discord.ui.Button):
+    async def _cancel(self, i: discord.Interaction):
         if i.user.id != self.user_id:
             return await i.response.send_message("❌", ephemeral=True)
-        await i.response.edit_message(content="✋ Annulé — rien n'a été supprimé.", view=None)
+        await i.response.edit_message(view=carte_texte("✋ Annulé — rien n'a été supprimé.", couleur=Palette.NEUTRAL))
 
 
 @mod_group.command(
@@ -26004,11 +26049,7 @@ async def mod_clear(i: discord.Interaction,
             ephemeral=True)
     # CLEAR TOUT → confirmation (destructif, irréversible).
     if nombre is None:
-        return await i.response.send_message(
-            f"⚠️ **Supprimer TOUS les messages** de {ch.mention} ?\n"
-            f"_Tous les messages seront effacés (les > 14 j un par un si besoin). Le salon **n'est "
-            f"pas** recréé/rafraîchi. Action **irréversible**._",
-            view=ClearAllConfirmView(i.user.id, ch.id), ephemeral=True)
+        return await i.response.send_message(view=ClearAllConfirmView(i.user.id, ch.id), ephemeral=True)
     # CLEAR N → direct.
     await i.response.defer(ephemeral=True)
     deleted = await _run_clear_and_report(i.guild, ch, int(nombre), i.user)
@@ -26216,7 +26257,7 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
         pass
 
     # Confirmation ÉPHÉMÈRE au staff (avec son nom + les notes) …
-    await i.followup.send(embed=_staff_e, ephemeral=True)
+    await i.followup.send(view=carte_embed(_staff_e), ephemeral=True)
     # … puis la fiche PUBLIQUE, en message SÉPARÉ du bot : aucun en-tête « <mod> a utilisé
     # /mod warn », donc aucune fuite du nom du modérateur.
     await _announce_sanction_public(i, e)
@@ -26285,7 +26326,7 @@ async def unwarn_cmd(i: discord.Interaction, membre: discord.Member):
     e.set_thumbnail(url=membre.display_avatar.url)
     
     v = UnwarnSelectView(membre, opts)
-    await i.response.send_message(embed=e, view=v, ephemeral=True)
+    await i.response.send_message(view=carte_embed(e, v), ephemeral=True)
 
 class UnwarnSelectView(View):
     def __init__(self, membre, opts):
@@ -26320,7 +26361,7 @@ class UnwarnSelect(Select):
         e.add_field(name="Warns restants", value=str(warn_count), inline=True)
         e.add_field(name="Warn supprimé", value=reason[:1024], inline=False)
         
-        await i.response.edit_message(embed=e, view=None)
+        await i.response.edit_message(view=carte_embed(e))
         
         # Log
         await send_mod_log(i.guild, 'unwarn', i.user, self.membre, reason, extra=f"Warns restants: {warn_count}")
@@ -26579,7 +26620,7 @@ async def direction_cmd(i: discord.Interaction, membre: discord.Member, duree: i
     e.set_footer(text=f"Par {i.user.display_name}", icon_url=i.user.display_avatar.url)
     e.timestamp = now()
 
-    await i.followup.send(embed=e, ephemeral=True)
+    await i.followup.send(view=carte_embed(e), ephemeral=True)
 
     # Log modération
     await send_mod_log(i.guild, 'direction', i.user, membre, raison)
@@ -26650,7 +26691,7 @@ async def undirection_cmd(i: discord.Interaction, membre: discord.Member, raison
     e.set_thumbnail(url=membre.display_avatar.url)
     e.timestamp = now()
 
-    await i.followup.send(embed=e, ephemeral=True)
+    await i.followup.send(view=carte_embed(e), ephemeral=True)
     await send_mod_log(i.guild, 'undirection', i.user, membre, raison)
 
 
@@ -26936,7 +26977,7 @@ _CASIER_TYPE_EMOJI = {
 }
 
 
-async def _build_casier_panel(staff, member, guild):
+async def _build_casier_panel(staff, member, guild, note: str = ""):
     """(contenu, view) du panneau de gestion. Re-query À CHAQUE fois → toujours à jour."""
     rows = []
     try:
@@ -26965,14 +27006,15 @@ async def _build_casier_panel(staff, member, guild):
     else:
         lines.append("✅ _Casier vierge._")
 
-    view = _CasierManageView(staff, member, guild, rows)
-    return "\n".join(lines), view
+    contenu = "\n".join(lines)
+    return contenu, _CasierManageView(staff, member, guild, rows, (f"{note}\n\n" if note else "") + contenu)
 
 
-class _CasierManageView(View):
-    """Panneau STAFF (éphémère) : retirer une infraction ciblée ou effacer tout le casier. Timeout 5 min. Re-vérifie la permission à CHAQUE interaction."""
+class _CasierManageView(LayoutView):
+    """Panneau STAFF (éphémère, Components V2) : retirer une infraction ciblée ou effacer tout le casier.
+    Timeout 5 min. Re-vérifie la permission à CHAQUE interaction."""
 
-    def __init__(self, staff, member, guild, rows):
+    def __init__(self, staff, member, guild, rows, contenu: str = ""):
         super().__init__(timeout=300)
         self.staff_id = int(staff.id)
         self.member = member
@@ -26985,18 +27027,20 @@ class _CasierManageView(View):
             _desc = (str(reason or '').strip() or 'sans détail')[:90]
             opts.append(discord.SelectOption(
                 label=_lbl[:100], description=_desc, value=f"inf:{int(infr_id)}", emoji=_emo))
+        items = [discord.ui.TextDisplay(contenu or "🗂️ **Gestion du casier**")]
         if opts:
             sel = discord.ui.Select(placeholder="Retirer une infraction…", min_values=1,
                                     max_values=1, options=opts[:25])
             sel.callback = self._on_select
-            self.add_item(sel)
+            items.append(discord.ui.ActionRow(sel))
         # Bouton « tout effacer » : seulement s'il y a quelque chose à effacer.
         if rows:
             _clear = discord.ui.Button(
                 label="Effacer TOUT le casier", emoji=visuels.icone("balai"),
                 style=discord.ButtonStyle.danger, custom_id="casier_clear_all")
             _clear.callback = self._on_clear_all
-            self.add_item(_clear)
+            items.append(discord.ui.ActionRow(_clear))
+        self.add_item(discord.ui.Container(*items, accent_color=Palette.WARNING))
 
     async def interaction_check(self, i) -> bool:
         # Seul le staff qui a ouvert le panneau, ET toujours titulaire du rôle de modération.
@@ -27015,8 +27059,8 @@ class _CasierManageView(View):
         return True
 
     async def _reafficher(self, i: discord.Interaction, note: str):
-        contenu, vue = await _build_casier_panel(i.user, self.member, self.guild)
-        await i.response.edit_message(content=f"{note}\n\n{contenu}", view=vue)
+        _contenu, vue = await _build_casier_panel(i.user, self.member, self.guild, note)
+        await i.response.edit_message(view=vue)
 
     async def _on_select(self, i: discord.Interaction):
         val = str((i.data or {}).get("values", [""])[0])
@@ -27032,8 +27076,7 @@ class _CasierManageView(View):
         await self._reafficher(i, f"✅ Infraction **#{infr_id}** retirée.")
 
     async def _on_clear_all(self, i: discord.Interaction):
-        # Action DESTRUCTIVE → confirmation explicite (2 temps).
-        vue = View(timeout=60)
+        # Action DESTRUCTIVE → confirmation explicite (2 temps), en bas.
         oui = discord.ui.Button(label="Oui, tout effacer", emoji=visuels.icone("balai"),
                                 style=discord.ButtonStyle.danger)
         non = discord.ui.Button(label="Annuler", style=discord.ButtonStyle.secondary)
@@ -27053,11 +27096,9 @@ class _CasierManageView(View):
             await self._reafficher(i2, "↩️ Rien n'a été effacé.")
 
         oui.callback, non.callback = _oui, _non
-        vue.add_item(oui)
-        vue.add_item(non)
-        await i.response.edit_message(
-            content=f"⚠️ Effacer **tout** le casier de {self.member.mention} ? Irréversible.",
-            view=vue)
+        await i.response.edit_message(view=carte_texte(
+            f"⚠️ Effacer **tout** le casier de {self.member.mention} ? Irréversible.", [oui, non],
+            couleur=Palette.DANGER, timeout=60))
 
 
 @mod_group.command(name="infractions", description="📋 Voir la fiche d'infractions d'un membre")
@@ -27325,7 +27366,7 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
                     return await inter.response.send_message(
                         "❌ Vous n'avez pas la permission", ephemeral=True)
                 _content, _view = await _build_casier_panel(inter.user, membre, inter.guild)
-                await inter.response.send_message(content=_content, view=_view, ephemeral=True)
+                await inter.response.send_message(view=_view, ephemeral=True)
             except Exception as _ex2:
                 print(f"[infractions casier btn] {_ex2}", file=_sys.stderr, flush=True)
                 try:
@@ -27393,7 +27434,7 @@ async def mod_note_cmd(i: discord.Interaction, membre: discord.Member, texte: st
     e.add_field(name="Note", value=texte[:1024], inline=False)
     e.add_field(name="Total notes", value=f"`{ncount}`", inline=True)
     e.set_thumbnail(url=membre.display_avatar.url)
-    await i.response.send_message(embed=e, ephemeral=True)
+    await i.response.send_message(view=carte_embed(e), ephemeral=True)
     try:
         await send_mod_log(i.guild, 'note', i.user, membre, texte, extra=f"Total notes: {ncount}")
     except Exception:
@@ -28191,7 +28232,8 @@ async def _deja_dans_le_salon(salon, url: str) -> int:
     """Après un envoi au résultat incertain : le message est-il quand même arrivé ? Son id, ou 0."""
     try:
         async for m in salon.history(limit=15):
-            if any(getattr(e, "url", None) == url for e in m.embeds) or url in (m.content or ""):
+            if (any(getattr(e, "url", None) == url for e in m.embeds) or url in (m.content or "")
+                    or url in _texte_v2(getattr(m, "components", None) or [], salon.guild)):
                 return m.id
     except discord.HTTPException as ex:
         _logerr("youtube.verifier_envoi", ex, guild_id=getattr(getattr(salon, 'guild', None), 'id', 0))
@@ -31502,7 +31544,8 @@ async def _check_alt_account(member: discord.Member):
                 _lch = member.guild.get_channel(_lid) if _lid else None
                 if _lch is not None:
                     await _lch.send(
-                        embed=discord.Embed(
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        view=carte_embed(discord.Embed(
                             title="Compte secondaire présumé — nouveau membre",
                             description=(
                                 f"**Nouveau :** {member.mention} (`{member.name}`)" + chr(10) +
@@ -31510,8 +31553,7 @@ async def _check_alt_account(member: discord.Member):
                                 f"**Similarité :** `{ratio:.0%}` · compte de moins de 7 jours"
                             ),
                             color=0xE67E22,
-                        ),
-                        view=_vue_alerte(member.id),
+                        ), _vue_alerte(member.id)),
                     )
             except Exception as _exalt:
                 print(f"[alt detection salon] {_exalt}")

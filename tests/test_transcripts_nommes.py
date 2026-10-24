@@ -16,6 +16,8 @@ import discord
 
 import rellseas_panneau
 import visuels
+from faux_serveur import textes
+from ui_v2 import carte_embed
 
 SRC = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")
 
@@ -81,12 +83,14 @@ def test_T1_le_transcript_porte_le_nom_et_se_retrouve_par_membre(tmp_path):
           "transcript_store": Obj(public_base_url=lambda: "https://bot.exemple",
                                   new_token=lambda: "tok", save_html=lambda t, h: True,
                                   transcript_url=lambda t: f"https://bot.exemple/t/{t}"),
-          "_logerr": lambda *a, **k: envois.append(("ERREUR", a))}
+          "_logerr": lambda *a, **k: envois.append(("ERREUR", a)), "carte_embed": carte_embed}
     exec(_source("send_ticket_log"), ns)  # noqa: S102 — code du dépôt
     asyncio.run(ns["send_ticket_log"](g, "close", membre, {"id": 5, "panel_id": "p1"},
                                       closer=Obj(id=2), ch=Obj(id=77)))
-    transcripts = [c for c, _kw in envois if c and str(c).startswith("📄")]
-    assert transcripts == ["📄 Transcript #5 · Kolax (7) · Support"], envois
+    #  24/10/2026 : la carte du transcript porte son nom en tête (Components V2).
+    transcripts = [textes(kw["view"]) for c, kw in envois if c != "ERREUR" and "view" in kw
+                   and textes(kw["view"]).startswith("📄")]
+    assert len(transcripts) == 1 and transcripts[0].startswith("📄 Transcript #5 · Kolax (7) · Support"), envois
 
     async def lire():
         async with get_db() as db:

@@ -18,7 +18,7 @@ import discord
 import registre
 import rellseas_panneau
 import visuels
-from ui_v2 import LayoutView, Palette
+from ui_v2 import LayoutView, Palette, carte_embed
 
 SRC = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")
 ARBRE = ast.parse(SRC)
@@ -141,7 +141,7 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path, sit
     ns = {"cfg": cfg, "get_db": get_db, "db_set": db_set, "discord": discord, "io": io, "re": re,
           "asyncio": asyncio, "datetime": datetime, "timezone": timezone, "ZoneInfo": ZoneInfo,
           "_TICKET_TZ": "Europe/Paris", "rellseas_ui": rellseas_panneau, "visuels": visuels,
-          "LayoutView": LayoutView, "Palette": Palette,
+          "LayoutView": LayoutView, "Palette": Palette, "carte_embed": carte_embed,
           "now": lambda: datetime(2026, 10, 19, 12, 30, tzinfo=timezone.utc),
           "C": Obj(GREEN=1, BLUE=2, RED=3, BLURPLE=4), "_recent_transcript_urls": {},
           "_render_ticket_transcript_html": rendu, "_ticket_transcript_file": rendu,
