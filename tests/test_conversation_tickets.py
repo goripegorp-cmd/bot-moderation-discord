@@ -22,11 +22,12 @@ from conftest_discord import Obj
 RACINE = Path(__file__).resolve().parent.parent
 ARBRE = ast.parse((RACINE / "bot.py").read_text(encoding="utf-8"))
 NOMS = ("_resolve_transcript_text", "_TRANSCRIPT_CSS", "CONVERSATION_MAX", "_message_en_donnees",
-        "_conversation_ticket", "_conversation_seule", "_suivi_ticket", "_render_ticket_transcript_html")
+        "_conversation_ticket", "_conversation_seule", "_suivi_ticket", "_render_ticket_transcript_html",
+        "_cartes_v2", "_html_lignes_v2", "_html_carte_v2")
 
 
 def _ns(**autres):
-    ns = {"re": re, "datetime": datetime, "timezone": timezone, "asyncio": asyncio, "ZoneInfo": None,
+    ns = {"re": re, "datetime": datetime, "timezone": timezone, "asyncio": asyncio, "ZoneInfo": None, "discord": discord,
           "transcript_store": transcript_store, "now": lambda: datetime(2026, 10, 20, tzinfo=timezone.utc),
           "print": lambda *a, **k: None, "_logerr": lambda *a, **k: None, **autres}
     for n in ARBRE.body:

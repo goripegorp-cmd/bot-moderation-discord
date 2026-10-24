@@ -2835,6 +2835,9 @@ async def _ouvrir_ticket_recours(guild, membre, pourquoi: str,
             view_channel=True, send_messages=True, read_message_history=True,
             manage_channels=True)
 
+    for _cible in _equipe_direction(guild, c):  # la direction et le fondateur voient tous les tickets (22/10)
+        ow.setdefault(_cible, discord.PermissionOverwrite(**tickets_fils.DROITS_SALON))
+
     ch = await guild.create_text_channel(
         f"recours-{membre.name}"[:50], category=cat, overwrites=ow,
         reason=f"Recours de radiation — {membre.id}")
@@ -2857,26 +2860,27 @@ async def _ouvrir_ticket_recours(guild, membre, pourquoi: str,
         #  continue — un ticket non enregistré reste lisible par le staff.
         print(f"[radie recours enregistrement] {ex}")
 
-    e = discord.Embed(color=0x010101, timestamp=now())
-    e.set_author(name=f"RECOURS DE RADIATION · ticket #{tid}",
-                 icon_url=membre.display_avatar.url)
-    e.description = (f"{membre.mention} · `{membre.id}`\n"
-                     f"Compte Discord : `{membre}`\n"
-                     f"-# Cette personne est radiée : elle ne voit aucun salon "
-                     f"et ne peut écrire nulle part. Ce texte est son UNIQUE "
-                     f"prise de parole.")
-    e.add_field(name="Pourquoi avez-vous été sanctionné ?",
-                value=(pourquoi or "—")[:1024], inline=False)
+    #  Son texte ne mentionne personne : seul le rôle du staff est prévenu.
+    corps = [discord.ui.TextDisplay("**Pourquoi avez-vous été sanctionné ?**\n"
+                                    + discord.utils.escape_mentions(pourquoi or "—")[:1000])]
     if (conteste or "").strip():
-        e.add_field(name="Ce qu'il conteste", value=conteste[:1024],
-                    inline=False)
-    e.set_footer(text="Décision : lever la radiation, ou bannir définitivement.")
-
-    vue = View(timeout=None)
-    vue.add_item(RadieDecisionButton("lever", membre.id).item)
-    vue.add_item(RadieDecisionButton("bannir", membre.id).item)
-    await ch.send(content=(staff.mention if staff else None), embed=e, view=vue,
-                  allowed_mentions=discord.AllowedMentions(roles=True))
+        corps.append(discord.ui.TextDisplay("**Ce qu'il conteste**\n" + discord.utils.escape_mentions(conteste)[:1000]))
+    tete = discord.ui.TextDisplay(
+        f"### ⚖️ Recours de radiation · ticket n°{tid}\n{membre.mention} · `{membre.id}` · compte `{membre}`\n"
+        "-# Cette personne est radiée : elle ne voit aucun salon et ne peut écrire nulle part. "
+        "Ce texte est son unique prise de parole.")
+    vue = LayoutView(timeout=None)
+    if staff:
+        vue.add_item(discord.ui.TextDisplay(f"{staff.mention} · un recours à trancher"))
+    vue.add_item(discord.ui.Container(
+        discord.ui.Section(tete, accessory=discord.ui.Thumbnail(membre.display_avatar.url)),
+        discord.ui.Separator(), *corps, discord.ui.Separator(),
+        discord.ui.TextDisplay("-# Décision : lever la radiation, ou bannir définitivement."),
+        discord.ui.ActionRow(RadieDecisionButton("lever", membre.id).item,
+                             RadieDecisionButton("bannir", membre.id).item),
+        accent_color=0x010101))
+    await ch.send(view=vue, allowed_mentions=discord.AllowedMentions(
+        everyone=False, users=False, roles=[staff] if staff else False))
 
     try:
         async with get_db() as db:
@@ -2973,16 +2977,36 @@ class RadieDecisionButton(discord.ui.DynamicItem[Button],
                     f"⛔ <@{self.uid}> est **banni définitivement**.",
                     ephemeral=True)
 
-            try:
-                await i.message.edit(view=None)
-            except Exception:
-                pass
+            quand = f"<t:{int(time.time())}:f>"
+            ligne = (f"✅ **Radiation levée** par {i.user.mention} · {quand}" if self.act == "lever"
+                     else f"⛔ **Banni définitivement** par {i.user.mention} · {quand}")
+            try:  # la décision prend la place des boutons : on ne tranche pas deux fois
+                await _carte_recours_decidee(i.message, ligne)
+            except discord.HTTPException as ex:
+                _logerr("radie.decision_carte", ex, guild_id=i.guild.id)
         except Exception as ex:
             _logerr("radie.decision", ex, guild_id=getattr(i.guild, "id", 0))
             try:
                 await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
                 pass
+
+
+async def _carte_recours_decidee(message, ligne: str) -> None:
+    """Après la décision : les boutons partent et la décision s'inscrit à leur place, dans la carte.
+    `edit(view=None)` viderait une carte Components V2 entière (Discord refuse un message vide) : les
+    boutons resteraient actifs. Un ancien recours (embed) garde son embed et perd seulement ses boutons."""
+    if message.embeds:
+        await message.edit(view=None)
+        return
+    v = LayoutView.from_message(message, timeout=None)
+    for bloc_ in v.children:
+        if isinstance(bloc_, discord.ui.Container):
+            for x in bloc_.children:
+                if isinstance(x, discord.ui.ActionRow):
+                    bloc_.remove_item(x)
+            bloc_.add_item(discord.ui.TextDisplay(ligne))
+    await message.edit(view=v, allowed_mentions=discord.AllowedMentions.none())
 
 
 async def _prevenir_radie(guild, user_id: int, texte: str) -> bool:
@@ -3005,22 +3029,21 @@ async def _envoyer_recours_radie(guild, membre, raison: str) -> bool:
     pas.
     """
     try:
-        e = discord.Embed(color=0x010101, timestamp=now())
-        e.set_author(name=f"⛔ Vous avez été radié de {guild.name}",
-                     icon_url=guild.icon.url if guild.icon else None)
-        e.description = (
-            f"**Motif indiqué :** {str(raison or 'non précisé')[:500]}\n\n"
-            f"Vous ne voyez plus aucun salon et ne pouvez plus écrire sur le "
-            f"serveur.\n\n"
-            f"**Vous avez droit à UN recours, un seul.** Cliquez ci-dessous et "
-            f"expliquez pourquoi vous pensez avoir été sanctionné, et ce que "
-            f"vous contestez. L'équipe lira votre message et tranchera.\n"
-            f"-# Si la sanction est confirmée, elle devient un bannissement "
-            f"définitif.")
-        v = View(timeout=None)
-        v.add_item(RadieAppelButton(guild.id).item)
+        tete = discord.ui.TextDisplay(
+            f"### ⛔ Vous avez été radié de {discord.utils.escape_markdown(guild.name)}\n"
+            f"**Motif indiqué :** {discord.utils.escape_mentions(str(raison or 'non précisé'))[:500]}")
+        v = LayoutView(timeout=None)
+        v.add_item(discord.ui.Container(
+            discord.ui.Section(tete, accessory=discord.ui.Thumbnail(guild.icon.url)) if guild.icon else tete,
+            discord.ui.TextDisplay(
+                "Vous ne voyez plus aucun salon et ne pouvez plus écrire sur le serveur.\n\n"
+                "**Vous avez droit à UN recours, un seul.** Cliquez ci-dessous et expliquez pourquoi vous pensez "
+                "avoir été sanctionné, et ce que vous contestez. L'équipe lira votre message et tranchera."),
+            discord.ui.TextDisplay("-# Si la sanction est confirmée, elle devient un bannissement définitif."),
+            discord.ui.ActionRow(RadieAppelButton(guild.id).item),
+            accent_color=0x010101))
         u = bot.get_user(membre.id) or await bot.fetch_user(membre.id)
-        await u.send(embed=e, view=v)
+        await u.send(view=v, allowed_mentions=discord.AllowedMentions.none())
         return True
     except Exception as ex:
         print(f"[radie recours dm] {ex}")
@@ -7335,6 +7358,9 @@ async def _dossier_recrutement(ch, g, tid, uid, panel_name, answers, events):
             parts += [f"{f.name} : {f.value}" for f in (getattr(emb, 'fields', None) or [])]
             if parts:
                 corps += ("\n" if corps else "") + _resolve_transcript_text(" · ".join(parts), g)
+        v2 = _texte_v2(getattr(m, 'components', None) or [], g)
+        if v2:
+            corps += ("\n" if corps else "") + v2
         for x in (m.attachments or []):
             corps += ("\n" if corps else "") + f"[fichier] {x.filename} {x.url}"
         etiquette = " (candidat)" if a.id == uid else (" [bot]" if p["bot"] else "")
@@ -8887,6 +8913,113 @@ def _resolve_transcript_text(text, guild):
     return text
 
 
+def _cartes_v2(composants, guild) -> tuple:
+    """Un message Components V2 (les cartes du bot) en données simples, pour les transcripts et le site :
+    `(libre, cartes)`. `libre` = ce qui est hors encadré ; une carte = un encadré : sa couleur, son titre
+    (le premier `###` en tête), ses lignes (texte · gras · petit), ses images et ses boutons-liens.
+    24/10/2026 : sans ça, le dossier d'un ticket et les traces du staff sortaient vides (« [média] »)."""
+    T = discord.ComponentType
+    libre = {"cadre": False, "couleur": None, "titre": "", "lignes": [], "images": [], "liens": []}
+    cartes: list = []
+
+    def ecrire(texte, carte):
+        for ligne in (_resolve_transcript_text(str(texte or ""), guild) or "").split("\n"):
+            titre = re.match(r"#{1,3} +(.+)", ligne)
+            if titre and carte["cadre"] and not carte["titre"] and not carte["lignes"]:
+                carte["titre"] = titre.group(1).strip()
+            elif titre:
+                carte["lignes"].append(("gras", titre.group(1).strip()))
+            elif ligne.startswith("-# "):
+                carte["lignes"].append(("petit", ligne[3:].strip()))
+            else:
+                carte["lignes"].append(("texte", ligne))
+
+    def bouton(b, carte):
+        url = str(getattr(b, "url", None) or "")
+        if url.startswith("https://"):
+            carte["liens"].append((str(getattr(b, "label", None) or "Lien"), url))
+
+    def parcourir(c, carte):
+        t = getattr(c, "type", None)
+        if t == T.container:
+            couleur = getattr(c, "accent_colour", None)
+            neuve = {"cadre": True, "couleur": couleur.value if couleur is not None else None, "titre": "",
+                     "lignes": [], "images": [], "liens": []}
+            cartes.append(neuve)
+            for x in getattr(c, "children", None) or []:
+                parcourir(x, neuve)
+        elif t == T.text_display:
+            ecrire(getattr(c, "content", ""), carte)
+        elif t == T.section:
+            for x in getattr(c, "children", None) or []:
+                parcourir(x, carte)
+            if getattr(getattr(c, "accessory", None), "type", None) == T.button:
+                bouton(c.accessory, carte)
+        elif t == T.separator:
+            if carte["lignes"]:
+                carte["lignes"].append(("texte", ""))
+        elif t == T.media_gallery:
+            for x in getattr(c, "items", None) or []:
+                url = str(getattr(getattr(x, "media", None), "url", "") or "")
+                if url.startswith("https://"):
+                    carte["images"].append(url)
+        elif t == T.action_row:
+            for b in getattr(c, "children", None) or []:
+                if getattr(b, "type", None) == T.button:
+                    bouton(b, carte)
+
+    try:
+        for c in composants or []:
+            parcourir(c, libre)
+    except Exception as ex:  # une carte illisible ne coûte jamais le transcript entier
+        _logerr("transcript.cartes_v2", ex)
+    for carte in (libre, *cartes):
+        while carte["lignes"] and not carte["lignes"][-1][1].strip():
+            carte["lignes"].pop()
+    return libre, cartes
+
+
+def _texte_v2(composants, guild, sep: str = "\n") -> str:
+    """Le texte lisible d'un message Components V2 (transcript .txt, dossier de recrutement)."""
+    libre, cartes = _cartes_v2(composants, guild)
+    lignes = []
+    for carte in (libre, *cartes):
+        lignes += [carte["titre"], *(t for _g, t in carte["lignes"]), *(f"{nom} : {url}" for nom, url in carte["liens"])]
+    return sep.join(x.replace("**", "").strip() for x in lignes if x and x.strip())
+
+
+def _html_lignes_v2(lignes) -> str:
+    """Les lignes d'une carte V2 en HTML échappé : gras, petites lignes grises, retours à la ligne."""
+    from html import escape
+    out = []
+    for genre, t in lignes:
+        h = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escape(t))
+        if genre == "gras":
+            h = f"<b>{h}</b>"
+        elif genre == "petit":
+            h = f'<span style="color:#949ba4;font-size:12px">{h}</span>'
+        out.append(h)
+    return "<br>".join(out)
+
+
+def _html_carte_v2(carte: dict) -> str:
+    """Une carte V2 dans le transcript HTML, avec les balises des encadrés : le site la relit telle quelle
+    (`transcript_store._Lecteur`)."""
+    from html import escape
+    ep = []
+    if carte["titre"]:
+        ep.append(f'<div class="etitle">{escape(carte["titre"].replace("**", ""))}</div>')
+    if carte["lignes"]:
+        ep.append(f'<div>{_html_lignes_v2(carte["lignes"])}</div>')
+    ep += [f'<img class="att" loading="lazy" src="{escape(u)}" alt="">' for u in carte["images"]]
+    ep += [f'<div><a href="{escape(u)}" target="_blank" rel="noopener">{escape(nom)}</a></div>'
+           for nom, u in carte["liens"]]
+    if not ep:
+        return ""
+    couleur = "#5865f2" if carte["couleur"] is None else f"#{int(carte['couleur']):06x}"
+    return f'<div class="embed" style="border-left:4px solid {couleur}">' + "".join(ep) + "</div>"
+
+
 async def _ticket_transcript_file(ch, tid):
     """Transcript .txt PROFESSIONNEL d'un salon de ticket (log + DM au créateur) : mentions/rôles/
     salons/emojis RÉSOLUS en clair + contenu des embeds inclus. Renvoie un discord.File ou None."""
@@ -8910,6 +9043,9 @@ async def _ticket_transcript_file(ch, tid):
                 if parts:
                     body += (("\n      " if body.strip() else "")
                              + _resolve_transcript_text(" · ".join(parts), guild).replace("\n", " "))
+            v2 = _texte_v2(getattr(m, 'components', None) or [], guild, sep=" · ")
+            if v2:
+                body += ("\n      " if body.strip() else "") + v2
             if m.attachments:
                 body += ' ' + ' '.join(a.url for a in m.attachments)
             if not body.strip():
@@ -8982,6 +9118,19 @@ def _message_en_donnees(m, guild) -> dict:
         image = getattr(getattr(e, "image", None), "url", None) or getattr(getattr(e, "thumbnail", None), "url", None)
         if image:
             out["images"].append(image)
+    # Les cartes Components V2 du bot (dossier du ticket, traces du staff…) : 24/10/2026
+    libre, cartes = _cartes_v2(getattr(m, "components", None) or [], guild)
+    hors = "\n".join(t for _g, t in libre["lignes"]).replace("**", "").strip()
+    if hors:
+        out["texte"] = (out["texte"] + "\n" + hors).strip()
+    for carte in cartes:
+        bloc_ = {"titre": carte["titre"].replace("**", ""), "champs": [], "pied": "",
+                 "texte": "\n".join(t for _g, t in carte["lignes"]).replace("**", "").strip()}
+        if bloc_["titre"] or bloc_["texte"]:
+            out["embeds"].append(bloc_)
+    for carte in (*cartes, libre):
+        out["images"] += carte["images"]
+        out["fichiers"] += [{"nom": nom, "url": u} for nom, u in carte["liens"]]
     for a in (m.attachments or []):
         genre = (a.content_type or "").split("/")[0]
         nom = (a.filename or "").lower()
@@ -9108,7 +9257,14 @@ async def _render_ticket_transcript_html(ch, tid, token=None, base_url=None, tit
                     pass
                 if ep:
                     embeds_html += f'<div class="embed" style="border-left:4px solid {color}">' + ''.join(ep) + '</div>'
-            att_html = ''
+            # Les cartes Components V2 (dossier du ticket, traces du staff…) : 24/10/2026
+            libre, cartes = _cartes_v2(getattr(m, 'components', None) or [], guild)
+            if libre["lignes"]:
+                content_html += ('<br>' if content_html else '') + _html_lignes_v2(libre["lignes"])
+            embeds_html += ''.join(_html_carte_v2(carte) for carte in cartes)
+            att_html = ''.join(f'<img class="att" loading="lazy" src="{_hesc(u)}" alt="">' for u in libre["images"])
+            att_html += ''.join(f'<div><a href="{_hesc(u)}" target="_blank" rel="noopener">{_hesc(nom)}</a></div>'
+                                for nom, u in libre["liens"])
             for a in (m.attachments or []):
                 fn = (a.filename or '').lower()
                 is_img = (a.content_type or '').startswith('image') or \
@@ -13947,6 +14103,7 @@ async def _etat_public():
             "cadeaux_en_cours": cadeaux.nb_actifs(),
             "cmd_giveaway": any("giveaway" in noms for noms in _commandes_vues.values()),
             "faq_trouve": next(iter(_faq_vus.values()), {}),
+            "roles_zones_manquants": await _roles_zones_manquants(),
             "game_link": sum(1 for g, c in zip(list(bot.guilds), confs)
                              if g.get_channel(int(c.get('game_link_salon', 0) or 0)) is not None),
             "jeux_liens": max([len(liens_jeux.liens(c)) for c in confs] or [0]),
@@ -13954,6 +14111,19 @@ async def _etat_public():
             "tickets_regroupes": any(c.get('tickets_categorie') for c in confs)})
     except Exception as ex:
         _logerr("etat.public", ex)
+
+
+async def _roles_zones_manquants() -> dict:
+    """Les rôles des guides et des middlemen (entraide, trade) absents du serveur, par jeu (attendu : 0)."""
+    out: dict = {}
+    for g in list(bot.guilds):
+        if g.owner_id not in TETE_IDS:
+            continue
+        cf = await entraide.conf(g)
+        for z in entraide.ZONES.values():
+            if z.role:
+                out[z.jeu] = out.get(z.jeu, 0) + int(entraide.role_zone(g, cf, z.cle) is None)
+    return out
 
 
 def _porteurs_sans_direction(g, c) -> int:

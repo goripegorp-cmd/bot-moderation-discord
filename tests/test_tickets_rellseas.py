@@ -152,7 +152,7 @@ def test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet(tmp_path, sit
           "_logerr": lambda *a, **k: (_ for _ in ()).throw(AssertionError(a)),
           "recrutements": Obj(enregistrer=enregistrer), "registre": journal}
     for nom in ("_ticket_event_parts", "_ticket_timeline_line", "_salon_transcripts_rellseas",
-                "_heure_paris", "_nom_et_id", "_EVENEMENTS_TICKET", "_dossier_recrutement",
+                "_heure_paris", "_nom_et_id", "_EVENEMENTS_TICKET", "_cartes_v2", "_texte_v2", "_dossier_recrutement",
                 "_vue_recrutement", "send_ticket_log"):
         exec(_source(nom), ns)  # noqa: S102 — code du dépôt
     tk = {"id": 5, "panel_id": "p1", "answers": {"Pseudo Roblox": "Kolax_RS", "Niveau": "2400"}}
