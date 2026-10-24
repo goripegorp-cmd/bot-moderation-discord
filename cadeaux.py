@@ -87,6 +87,11 @@ TEXTES = {
                      "plus ; le vocal hors AFK, casque non coupé.",
                "en": "Counted since the launch: a message of 2+ characters, one every 3 s at most; voice "
                      "outside AFK, not deafened."},
+    "manque": {"fr": "⛔ **Pas encore** : il te faut d'abord ceci. Reclique « Participer » quand c'est bon.",
+               "en": "⛔ **Not yet**: you need this first. Click “Enter” again once it's done."},
+    "pas_inscrit_cond": {"fr": "🎟️ Pas encore inscrit : remplis les conditions, puis clique « Participer ».",
+                         "en": "🎟️ Not entered yet: meet the conditions, then click “Enter”."},
+    "pas_encore_autre": {"fr": "⏳ **Pas encore**", "en": "⏳ **Not yet**"},
     "participer": {"fr": "Participer", "en": "Enter"},
     "actualiser": {"fr": "Actualiser", "en": "Refresh"},
     "quitter": {"fr": "Ne plus participer", "en": "Leave"},
@@ -226,6 +231,28 @@ async def inscrits(cid: int) -> list:
         async with db.execute("SELECT membre_id FROM cadeaux_inscrits WHERE cadeau_id=? ORDER BY quand",
                               (int(cid),)) as cur:
             return [int(r[0]) for r in await cur.fetchall()]
+
+
+async def inscrits_quand(cid: int) -> list:
+    """[(membre, heure d'inscription)], dans l'ordre d'inscription."""
+    async with _get_db() as db:
+        async with db.execute("SELECT membre_id, quand FROM cadeaux_inscrits WHERE cadeau_id=? "
+                              "ORDER BY quand, membre_id", (int(cid),)) as cur:
+            return [(int(u), int(q or 0)) for u, q in await cur.fetchall()]
+
+
+async def _retirer_inscriptions(cid: int, uids: list) -> int:
+    """Retire ces membres d'un cadeau, en une écriture. Rend le nombre retiré."""
+    if not uids:
+        return 0
+    async with _get_db() as db:
+        n = 0
+        for uid in uids:
+            cur = await db.execute("DELETE FROM cadeaux_inscrits WHERE cadeau_id=? AND membre_id=?",
+                                   (int(cid), int(uid)))
+            n += max(0, cur.rowcount or 0)
+        await db.commit()
+    return n
 
 
 async def nb_inscrits(cid: int) -> int:
@@ -398,6 +425,23 @@ async def stats(cid: int, uid: int) -> tuple:
         if u == int(uid) and debut is not None:
             s += max(0.0, maintenant - max(depuis, debut))
     return max(0, m), s
+
+
+async def stats_de_tous(cid: int) -> dict:
+    """{membre: (messages, secondes en vocal)} pour tout un cadeau, d'une seule lecture : la base, ce qui
+    attend en mémoire et les segments vocaux en cours (comme `stats`, pour toute la liste)."""
+    tous = await _stats_en_base(cid)
+    for (c_, uid), (m, s) in list(_tampon.items()):
+        if c_ == int(cid):
+            m0, s0 = tous.get(uid, (0, 0.0))
+            tous[uid] = (m0 + m, s0 + s)
+    maintenant = _mur()
+    for (gid, uid), depuis in list(_vocal.items()):
+        debut = (_actifs.get(gid) or {}).get(int(cid))
+        if debut is not None:
+            m0, s0 = tous.get(uid, (0, 0.0))
+            tous[uid] = (m0, s0 + max(0.0, maintenant - max(depuis, debut)))
+    return {u: (max(0, m), s) for u, (m, s) in tous.items()}
 
 
 async def charger_actifs(g) -> int:
@@ -591,6 +635,84 @@ class BoutonCadeaux(discord.ui.DynamicItem[Button], template=r"cd:menu"):
         await ouvrir_gestion(i)
 
 
+class BoutonParticipants(discord.ui.DynamicItem[Button], template=r"cd:l:(?P<cid>\d+)"):
+    """« Qui participe ? » : la liste exacte, ouverte à tous (24/10/2026)."""
+
+    def __init__(self, cid: int):
+        self.cid = int(cid)
+        super().__init__(Button(label="Participants", emoji="👥", style=discord.ButtonStyle.secondary,
+                                custom_id=f"cd:l:{int(cid)}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["cid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await montrer_participants(i, self.cid, 0)
+
+
+class BoutonPage(discord.ui.DynamicItem[Button], template=r"cd:lp:(?P<cid>\d+):(?P<page>\d+)"):
+    """◀ ▶ dans la liste, et « Retour à la liste » depuis la fiche d'un participant."""
+
+    def __init__(self, cid: int, page: int, label: str = "", emoji=None):
+        self.cid, self.page = int(cid), int(page)
+        super().__init__(Button(label=label or None, emoji=emoji, style=discord.ButtonStyle.secondary,
+                                custom_id=f"cd:lp:{int(cid)}:{int(page)}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["cid"]), int(match["page"]))
+
+    async def callback(self, i: discord.Interaction):
+        await montrer_participants(i, self.cid, self.page)
+
+
+class ChoixParticipant(discord.ui.DynamicItem[discord.ui.Select], template=r"cd:ls:(?P<cid>\d+):(?P<page>\d+)"):
+    """La liste déroulante : 25 participants par page ; en choisir un ouvre sa fiche."""
+
+    def __init__(self, cid: int, page: int, options=None, placeholder: str = "Voir un participant"):
+        self.cid, self.page = int(cid), int(page)
+        super().__init__(discord.ui.Select(custom_id=f"cd:ls:{int(cid)}:{int(page)}", placeholder=placeholder[:150],
+                                           options=options or [discord.SelectOption(label="—", value="0")],
+                                           min_values=1, max_values=1))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["cid"]), int(match["page"]))
+
+    async def callback(self, i: discord.Interaction):
+        valeurs = (getattr(i, "data", None) or {}).get("values") or []
+        uid = int(valeurs[0]) if valeurs and str(valeurs[0]).isdigit() else 0
+        await montrer_participant(i, self.cid, uid, self.page)
+
+
+class BoutonChercher(discord.ui.DynamicItem[Button], template=r"cd:lq:(?P<cid>\d+)"):
+    """🔎 Un nom (ou un identifiant) parmi tous les participants."""
+
+    def __init__(self, cid: int):
+        self.cid = int(cid)
+        super().__init__(Button(label="Chercher", emoji="🔎", style=discord.ButtonStyle.secondary,
+                                custom_id=f"cd:lq:{int(cid)}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["cid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await i.response.send_modal(FormulaireRecherche(self.cid))
+
+
+class FormulaireRecherche(discord.ui.Modal):
+    def __init__(self, cid: int):
+        super().__init__(title="🔎 Chercher un participant", timeout=600)
+        self.cid = int(cid)
+        self.q = discord.ui.TextInput(max_length=32, placeholder="Un bout du pseudo, ou l'identifiant")
+        self.add_item(discord.ui.Label(text="Pseudo ou identifiant", component=self.q))
+
+    async def on_submit(self, i: discord.Interaction):
+        await montrer_participants(i, self.cid, 0, str(self.q.value or "").strip())
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  La carte du cadeau (publique), les stats (éphémères), les gagnants
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -609,7 +731,8 @@ def texte_conditions(c: dict) -> str:
     if besoins:
         lien = " **et · and** " if c["logique"] == "et" else " **ou · or** "
         lignes.append("• " + lien.join(besoins))
-        lignes.append("-# Comptés depuis le lancement, sur tout le serveur · Counted since the launch, server-wide")
+        lignes.append("-# Comptés depuis le lancement, sur tout le serveur ; puis « Participer » · "
+                      "Counted since the launch, server-wide; then “Enter”")
     if not c["roles"] and not besoins:
         lignes.append("• Ouvert à tous : clique « Participer » · Open to everyone: click “Enter”")
     return "\n".join(lignes)
@@ -641,9 +764,10 @@ def composants_carte(c: dict, nb: int, *, apercu: bool = False) -> list:
         if apercu:
             boutons = [Button(label="Participer · Enter", emoji="🎉", style=discord.ButtonStyle.success, disabled=True),
                        Button(label="Mes stats · My stats", emoji="📊", style=discord.ButtonStyle.secondary,
-                              disabled=True)]
+                              disabled=True),
+                       Button(label="Participants", emoji="👥", style=discord.ButtonStyle.secondary, disabled=True)]
         else:
-            boutons = [BoutonParticiper(c["id"]), BoutonStats(c["id"])]
+            boutons = [BoutonParticiper(c["id"]), BoutonStats(c["id"]), BoutonParticipants(c["id"])]
         items.append(discord.ui.ActionRow(*boutons))
     elif statut == "fini":
         r = c.get("resultat") or {}
@@ -668,9 +792,19 @@ def vue_carte(c: dict, nb: int, **kw) -> LayoutView:
     return v
 
 
-def vue_stats(c: dict, membre, messages: int, secondes: float, inscrit: bool, langue: str = "fr",
-              entete: str = "") -> LayoutView:
-    lignes = ([entete] if entete else []) + [f"### 🎁 {c['lot']} — {tr('tes_stats', langue)}"]
+def progres(c: dict, messages: int, secondes: float) -> str:
+    """« 💬 12/50 · 🔊 3 min/30 min » : où en est un membre, en une ligne (vide sans condition)."""
+    morceaux = []
+    if c["msg_min"]:
+        morceaux.append(f"💬 {messages}/{c['msg_min']}")
+    if c["voc_min"]:
+        morceaux.append(f"🔊 {duree_txt(int(secondes // 60))}/{duree_txt(c['voc_min'])}")
+    return " · ".join(morceaux)
+
+
+def lignes_progres(c: dict, messages: int, secondes: float, langue: str = "fr", *, soi: bool = True) -> list:
+    """Où en est un membre : les barres des messages et du vocal, puis rempli ou pas encore."""
+    lignes = []
     if c["msg_min"]:
         pct = min(100, int(100 * messages / c["msg_min"]))
         lignes.append(f"💬 Messages : **{messages} / {c['msg_min']}**  {barre(messages, c['msg_min'])} {pct} %")
@@ -681,13 +815,22 @@ def vue_stats(c: dict, membre, messages: int, secondes: float, inscrit: bool, la
     if c["msg_min"] and c["voc_min"]:
         lignes.append("-# " + tr("les_deux" if c["logique"] == "et" else "l_un", langue))
     if c["msg_min"] or c["voc_min"]:
-        lignes.append(tr("rempli" if remplit(c, messages, secondes) else "pas_encore", langue))
+        lignes.append(tr("rempli" if remplit(c, messages, secondes) else ("pas_encore" if soi else "pas_encore_autre"),
+                         langue))
     else:
         lignes.append(tr("sans", langue))
+    return lignes
+
+
+def vue_stats(c: dict, membre, messages: int, secondes: float, inscrit: bool, langue: str = "fr",
+              entete: str = "") -> LayoutView:
+    lignes = ([entete] if entete else []) + [f"### 🎁 {c['lot']} — {tr('tes_stats', langue)}"]
+    lignes += lignes_progres(c, messages, secondes, langue)
     mult = chance(c, membre)
     if mult > 1:
         lignes.append(tr("chance", langue, mult=_nombre(mult)))
-    lignes.append(tr("est_inscrit" if inscrit else "pas_inscrit", langue))
+    lignes.append(tr("est_inscrit", langue) if inscrit
+                  else tr("pas_inscrit" if remplit(c, messages, secondes) else "pas_inscrit_cond", langue))
     lignes.append(f"{tr('tirage', langue)} <t:{int(c['fin'])}:R>")
     lignes.append("-# " + tr("regles", langue))
     boutons = [BoutonActualiser(c["id"], tr("actualiser", langue))]
@@ -727,9 +870,16 @@ async def participer(i, cid: int) -> None:
     if not peut_participer(c, i.user):
         roles = " ".join(f"<@&{r}>" for r in c["roles"])
         return await _repondre(i, _vue_message(tr("reserve", langue, roles=roles), Palette.WARNING))
+    messages, secondes = await stats(cid, i.user.id)
+    if not remplit(c, messages, secondes):
+        #  24/10/2026, le fondateur : sans les messages (ou le vocal) demandés, on ne participe pas — et on
+        #  voit tout de suite ce qu'il faut, et où on en est. Une inscription d'avant la règle part aussi.
+        if await _retirer_inscriptions(cid, [i.user.id]):
+            planifier_maj(i.guild, cid)
+        return await _repondre(i, vue_stats(c, i.user, messages, secondes, False, langue,
+                                            entete=tr("manque", langue)))
     cur_id = await _ecrire("INSERT OR IGNORE INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(?,?,?)",
                            (int(cid), i.user.id, int(_mur())))
-    messages, secondes = await stats(cid, i.user.id)
     await _repondre(i, vue_stats(c, i.user, messages, secondes, True, langue, entete=tr("inscrit", langue)))
     if cur_id:
         planifier_maj(i.guild, cid)
@@ -757,6 +907,196 @@ async def montrer_stats(i, cid: int) -> None:
         return await _repondre(i, _vue_message(tr("fini", langue)))
     messages, secondes = await stats(cid, i.user.id)
     await _repondre(i, vue_stats(c, i.user, messages, secondes, await est_inscrit(cid, i.user.id), langue))
+
+
+PAR_PAGE = 25          # une liste déroulante Discord : 25 choix ; au-delà, des pages
+
+
+def _nom(g, uid: int) -> str:
+    m = g.get_member(int(uid))
+    return m.display_name if m is not None else f"parti · {uid}"
+
+
+async def montrer_participants(i, cid: int, page: int = 0, recherche: str = "", *, nouveau: bool = False) -> None:
+    """La liste exacte des participants (24/10/2026 : « une belle liste déroulante… sans limite »)."""
+    langue = await langue_de(i)
+    c = await charger(cid)
+    if c is None or i.guild is None or c["guild_id"] != i.guild.id:
+        return await _repondre(i, _vue_message(tr("introuvable", langue)))
+    vue = await vue_participants(i.guild, c, page, recherche)
+    if nouveau:
+        await i.response.send_message(view=vue, ephemeral=True)
+    else:
+        await _repondre(i, vue)
+
+
+async def vue_participants(g, c: dict, page: int = 0, recherche: str = "") -> LayoutView:
+    """25 par page dans une liste déroulante (le rang, le nom, où il en est), ◀ ▶ pour les pages, 🔎 pour un
+    nom. Deux lectures de la base par page, quel que soit le nombre de participants."""
+    cid = int(c["id"])
+    liste = await inscrits_quand(cid)
+    conditions = bool(c["msg_min"] or c["voc_min"])
+    tous = await stats_de_tous(cid) if conditions else {}
+    rangs = {u: k_ + 1 for k_, (u, _q) in enumerate(liste)}
+    lignes = [f"### 👥 Participants · {c['lot']}"]
+    boutons: list = []
+    if recherche:
+        q = recherche.casefold()
+
+        def trouve(u):
+            m = g.get_member(u)
+            noms = (_nom(g, u), getattr(m, "name", "") or "", getattr(m, "global_name", "") or "")
+            return q == str(u) or any(q in str(n).casefold() for n in noms)
+        choisis = [x for x in liste if trouve(x[0])]
+        tranche, page = choisis[:PAR_PAGE], 0
+        lignes.append(f"-# 🔎 « {discord.utils.escape_markdown(recherche)} » : {len(choisis)} sur {len(liste)}"
+                      + (" · les 25 premiers : précise la recherche" if len(choisis) > PAR_PAGE else ""))
+        boutons = [BoutonPage(cid, 0, "Toute la liste", "📋"), BoutonChercher(cid)]
+    else:
+        pages = max(1, -(-len(liste) // PAR_PAGE))
+        page = min(max(0, int(page)), pages - 1)
+        tranche = liste[page * PAR_PAGE:(page + 1) * PAR_PAGE]
+        ok = sum(1 for u, _q in liste if remplit(c, *tous.get(u, (0, 0.0)))) if conditions else len(liste)
+        lignes.append(f"-# 🎟️ {len(liste)} participant{'s' if len(liste) > 1 else ''}"
+                      + (f" · ✅ {ok} rempli{'ssent' if ok > 1 else 't'} les conditions" if conditions else "")
+                      + (f" · page {page + 1}/{pages}" if pages > 1 else ""))
+        if pages > 1:
+            boutons = [BoutonPage(cid, page - 1, emoji="◀") if page > 0
+                       else Button(emoji="◀", style=discord.ButtonStyle.secondary, disabled=True,
+                                   custom_id=f"cd:lx:{cid}:a"),
+                       Button(label=f"{page + 1} / {pages}", style=discord.ButtonStyle.secondary, disabled=True,
+                              custom_id=f"cd:lx:{cid}:p"),
+                       BoutonPage(cid, page + 1, emoji="▶") if page + 1 < pages
+                       else Button(emoji="▶", style=discord.ButtonStyle.secondary, disabled=True,
+                                   custom_id=f"cd:lx:{cid}:b")]
+        boutons.append(BoutonChercher(cid))
+    items = [discord.ui.TextDisplay("\n".join(lignes))]
+    if tranche:
+        options = []
+        for u, _quand in tranche:
+            m_, s_ = tous.get(u, (0, 0.0))
+            membre = g.get_member(u)
+            mult = chance(c, membre) if membre is not None else 1.0
+            desc = " · ".join(x for x in (progres(c, m_, s_), f"🍀 ×{_nombre(mult)}" if mult > 1 else "") if x)
+            options.append(discord.SelectOption(
+                label=f"{rangs[u]}. {_nom(g, u)}"[:100], value=str(u), description=(desc or "Inscrit")[:100],
+                emoji=("✅" if remplit(c, m_, s_) else "⏳") if conditions else "🎟️"))
+        debut = rangs[tranche[0][0]]
+        espace = (f"{debut}–{rangs[tranche[-1][0]]} sur {len(liste)}" if not recherche
+                  else f"{len(tranche)} résultat{'s' if len(tranche) > 1 else ''}")
+        items.append(discord.ui.ActionRow(ChoixParticipant(cid, page, options,
+                                                           f"Voir un participant · {espace}")))
+    else:
+        items.append(discord.ui.TextDisplay("Personne pour l'instant." if not recherche else "Aucun participant à ce nom."))
+    if boutons:
+        items.append(discord.ui.ActionRow(*boutons))
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(*items, accent_color=discord.Color(COULEUR)))
+    return v
+
+
+async def montrer_participant(i, cid: int, uid: int, page: int = 0) -> None:
+    """La fiche d'un participant : son rang, depuis quand, ses messages et son vocal, sa chance."""
+    langue = await langue_de(i)
+    c = await charger(cid)
+    if c is None or i.guild is None or c["guild_id"] != i.guild.id:
+        return await _repondre(i, _vue_message(tr("introuvable", langue)))
+    liste = await inscrits_quand(cid)
+    rang = next((k_ + 1 for k_, (u, _q) in enumerate(liste) if u == int(uid)), 0)
+    quand = next((q for u, q in liste if u == int(uid)), 0)
+    messages, secondes = await stats(cid, uid)
+    membre = i.guild.get_member(int(uid))
+    lignes = [f"### {f'{rang}. ' if rang else ''}<@{int(uid)}>",
+              f"🎟️ Inscrit <t:{quand}:R>" if rang and quand else "🎟️ N'est plus inscrit"]
+    lignes += lignes_progres(c, messages, secondes, langue, soi=False)
+    mult = chance(c, membre) if membre is not None else 1.0
+    if mult > 1:
+        lignes.append(f"🍀 Chance : ×{_nombre(mult)}")
+    tete = discord.ui.TextDisplay("\n".join(lignes))
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(
+        discord.ui.Section(tete, accessory=discord.ui.Thumbnail(membre.display_avatar.url)) if membre is not None
+        else tete,
+        discord.ui.ActionRow(BoutonPage(cid, page, "Retour à la liste", "◀")),
+        accent_color=discord.Color(COULEUR)))
+    await _repondre(i, v)
+
+
+async def _prevenir_retires(g, c: dict, retires: list) -> int:
+    """Sous la carte, en réponse, jamais en privé : chacun voit pourquoi sa participation est retirée et ce
+    qu'il lui faut (24/10/2026). 30 personnes par message. Rend le nombre de messages postés."""
+    salon = await _salon(g, c["salon_id"])
+    if salon is None:
+        return 0
+    besoins = []
+    if c["msg_min"]:
+        besoins.append(f"💬 **{c['msg_min']}** messages")
+    if c["voc_min"]:
+        besoins.append(f"🔊 **{duree_txt(c['voc_min'])}** en vocal · in voice")
+    besoin = (" **et · and** " if c["logique"] == "et" else " **ou · or** ").join(besoins)
+    ref = (discord.MessageReference(message_id=int(c["message_id"]), channel_id=salon.id, guild_id=g.id,
+                                    fail_if_not_exists=False) if c.get("message_id") else None)
+    n = 0
+    for k_ in range(0, len(retires), 30):
+        groupe = retires[k_:k_ + 30]
+        texte = ("### ⚠️ Participation retirée · Entry removed\n"
+                 f"Pour **{c['lot']}**, il faut d'abord · you first need : {besoin}\n"
+                 + "\n".join(f"<@{u}> : {progres(c, m, s)}" for u, m, s in groupe)
+                 + "\n-# Reclique « Participer » quand c'est bon · Click “Enter” again once done")
+        v = LayoutView(timeout=None)
+        v.add_item(discord.ui.Container(discord.ui.TextDisplay(texte), accent_color=Palette.WARNING))
+        try:
+            await salon.send(view=v, reference=ref, mention_author=False,
+                             allowed_mentions=discord.AllowedMentions(
+                                 everyone=False, roles=False, replied_user=False,
+                                 users=[discord.Object(id=int(u)) for u, _m, _s in groupe]))
+            n += 1
+        except discord.HTTPException as ex:
+            _log("[CADEAUX][E8] retirés non prévenus")
+            _log(f"[CADEAUX][E8:DETAIL] cadeau={c['id']} {type(ex).__name__} {ex}")
+    return n
+
+
+async def elaguer(g) -> int:
+    """24/10/2026, le fondateur : « s'il y a des gens qui participent et qui n'ont pas les messages, tu les
+    retires et ça envoie un message pour leur dire, pas en privé, mais en dessous ». Pour les cadeaux en
+    cours : ceux qui ne remplissent pas les conditions sont retirés, prévenus sous la carte, et la carte se
+    met à jour. Rend le nombre retiré."""
+    total = 0
+    for cid in list(_actifs.get(g.id) or {}):
+        c = await charger(cid)
+        if c is None or c["statut"] != "actif" or not (c["msg_min"] or c["voc_min"]):
+            continue
+        async with _verrou(("cadeau", cid)):
+            tous = await stats_de_tous(cid)
+            retires = [(u, *tous.get(u, (0, 0.0))) for u in await inscrits(cid)
+                       if not remplit(c, *tous.get(u, (0, 0.0)))]
+            await _retirer_inscriptions(cid, [u for u, _m, _s in retires])
+        await maj_carte(g, cid)
+        if not retires:
+            continue
+        total += len(retires)
+        await _prevenir_retires(g, c, retires)
+        await _journal(g, "cadeaux.retires", f"🎁 « {c['lot']} » : {len(retires)} participation(s) retirée(s), "
+                       "conditions pas encore remplies — prévenus sous la carte.")
+    return total
+
+
+async def etat(g) -> list:
+    """Pour /stats (des chiffres, aucun nom) : chaque cadeau en cours, ses conditions, ses inscrits, combien
+    les remplissent, et ce qui a été compté — la preuve que le comptage tourne."""
+    out = []
+    for cid in list(_actifs.get(g.id) or {}):
+        c = await charger(cid)
+        if c is None or c["statut"] != "actif":
+            continue
+        tous, liste = await stats_de_tous(cid), await inscrits(cid)
+        out.append({"msg_min": c["msg_min"], "voc_min": c["voc_min"], "logique": c["logique"],
+                    "inscrits": len(liste), "remplissent": sum(1 for u in liste if remplit(c, *tous.get(u, (0, 0.0)))),
+                    "membres_comptes": len(tous), "messages": sum(m for m, _s in tous.values()),
+                    "vocal_min": int(sum(s for _m, s in tous.values()) // 60),
+                    "fin_dans_min": max(0, int((c["fin"] - _mur()) // 60))})
+    return out
 
 
 def planifier_maj(g, cid: int) -> None:
@@ -1426,7 +1766,10 @@ async def vue_un_cadeau(auteur, g, cid: int, *, confirmer: str = "", note: str =
 
         async def annuler_cb(i):
             await i.response.edit_message(view=await vue_un_cadeau(auteur, g, cid, confirmer="annuler"))
+        async def participants_cb(i):
+            await montrer_participants(i, cid, 0, nouveau=True)
         bouton("Tirer maintenant", discord.ButtonStyle.success, tirer_cb, "🎲")
+        bouton("Participants", discord.ButtonStyle.secondary, participants_cb, "👥")
         bouton("Annuler le cadeau", discord.ButtonStyle.danger, annuler_cb)
         bouton("Retour", discord.ButtonStyle.secondary, retour)
     else:

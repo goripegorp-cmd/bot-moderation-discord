@@ -13705,6 +13705,60 @@ async def giveaway_gerer(i: discord.Interaction):
 bot.tree.add_command(giveaway_group)
 
 
+class _ErreursInteractions(logging.Handler):
+    """24/10/2026 : « vérifier que tout soit bien opérationnel ». discord.py écrit dans ses journaux l'erreur
+    d'un bouton, d'un menu persistant, d'un formulaire ou d'une commande (le membre voit « L'interaction a
+    échoué ») : elle est aussi comptée dans `diag`, et /stats la montre (l'endroit, le type, aucun contenu)."""
+
+    def __init__(self):
+        super().__init__(level=logging.ERROR)
+
+    def emit(self, record):
+        try:
+            quoi = record.name.rsplit(".", 1)[-1]
+            for a in (record.args if isinstance(record.args, tuple) else ()):
+                if isinstance(a, discord.ui.Modal):
+                    quoi = type(a).__name__
+                    break
+                if isinstance(a, str):
+                    quoi = a
+                    break
+                cid = getattr(a, "custom_id", None)
+                if cid and not isinstance(a, discord.ui.view.BaseView):
+                    quoi = str(cid)
+                    break
+            exc = record.exc_info[1] if record.exc_info else None
+            diag.compter("ui", quoi, exc)
+        except Exception:
+            pass
+
+
+for _journal_ui in ("discord.ui.view", "discord.ui.modal", "discord.app_commands.tree", "discord.client"):
+    logging.getLogger(_journal_ui).addHandler(_ErreursInteractions())
+
+
+def _installer_arret_propre() -> None:
+    """24/10/2026 : Railway arrête le bot par SIGTERM à chaque mise en ligne. Sans ce gestionnaire, les
+    compteurs des cadeaux encore en mémoire (jusqu'à 30 s de messages et de vocal) étaient perdus."""
+    import signal as _signal
+    try:
+        asyncio.get_running_loop().add_signal_handler(_signal.SIGTERM,
+                                                      lambda: asyncio.ensure_future(_arret_propre()))
+    except (NotImplementedError, RuntimeError, ValueError) as ex:   # Windows, ou pas de boucle
+        print("[BOOT] arrêt propre indisponible")
+        print(f"[BOOT:DETAIL] {type(ex).__name__} {ex}")
+
+
+async def _arret_propre() -> None:
+    try:
+        n = await cadeaux.vider()
+        print("[BOOT] arrêt demandé : compteurs des cadeaux enregistrés")
+        print(f"[BOOT:DETAIL] lignes={n}")
+    except Exception as ex:
+        _logerr("arret.cadeaux", ex)
+    await bot.close()
+
+
 async def _cadeaux_autorise(g, membre) -> bool:
     """Lancer et gérer les cadeaux : le fondateur et la direction (et les rôles au-dessus)."""
     return _a_la_tete(g, membre) or _direction_ou_plus(g, membre, await cfg(g.id))
@@ -13741,6 +13795,16 @@ async def cadeaux_task():
         await cadeaux.tic(list(bot.guilds))
     except Exception as ex:
         _logerr("cadeaux.tic", ex)
+    for g in list(bot.guilds):
+        try:
+            c = await cfg(g.id)
+            if not c.get('cadeaux_elagage_v1'):
+                #  24/10/2026 : « les conditions d'abord ». Une fois : ceux déjà inscrits sans les remplir
+                #  sont retirés et prévenus sous la carte (après `tic` : les compteurs sont en base).
+                n = await cadeaux.elaguer(g)
+                await db_set(g.id, 'cadeaux_elagage_v1', {"le": now().isoformat(), "retires": n})
+        except Exception as ex:
+            _logerr("cadeaux.elagage", ex, guild_id=g.id)
     if time.monotonic() - _cadeaux_purge[0] > 3600:
         _cadeaux_purge[0] = time.monotonic()
         for g in list(bot.guilds):
@@ -14011,6 +14075,9 @@ async def _etat_public():
             "cadeaux_salon": sum(1 for g, c in zip(list(bot.guilds), confs)
                                  if g.get_channel(int(c.get('cadeaux_salon', 0) or 0)) is not None),
             "cadeaux_en_cours": cadeaux.nb_actifs(),
+            "cadeaux_detail": [x for g in list(bot.guilds) if g.owner_id in TETE_IDS for x in await cadeaux.etat(g)],
+            "cadeaux_elagage": next((c['cadeaux_elagage_v1'] for c in confs if c.get('cadeaux_elagage_v1')), None),
+            "erreurs_ui": diag.releve("ui"),
             "cmd_giveaway": any("giveaway" in noms for noms in _commandes_vues.values()),
             "faq_trouve": next(iter(_faq_vus.values()), {}),
             "roles_zones_manquants": await _roles_zones_manquants(),
@@ -20380,6 +20447,7 @@ async def _activite_boot():
     cadeaux.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_cadeaux_journal,
                   ticket=_salon_des_tickets, langue=_langue_membre, log=print)
     await cadeaux.init_db()
+    _installer_arret_propre()
     liens_jeux.setup(cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_liens_journal, jeux=zones.JEUX,
                      log=print)
 
@@ -20487,7 +20555,8 @@ async def on_ready():
                               equipages.BoutonModifier, equipages.BoutonRetirer)
         bot.add_dynamic_items(annonces.BoutonComposer, annonces.BoutonVu)
         bot.add_dynamic_items(cadeaux.BoutonCadeaux, cadeaux.BoutonParticiper, cadeaux.BoutonStats,
-                              cadeaux.BoutonActualiser, cadeaux.BoutonQuitter)
+                              cadeaux.BoutonActualiser, cadeaux.BoutonQuitter, cadeaux.BoutonParticipants,
+                              cadeaux.BoutonPage, cadeaux.ChoixParticipant, cadeaux.BoutonChercher)
         bot.add_dynamic_items(liens_jeux.BoutonLiens)
         bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)
     except Exception as ex:

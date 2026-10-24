@@ -1,0 +1,224 @@
+"""24/10/2026, le fondateur, pendant son premier vrai cadeau :
+- « que les gens ne puissent pas cliquer ou que ça leur envoie un message d'erreur leur disant qu'ils n'ont pas
+  les statistiques, et combien ils ont » → les conditions d'abord, un message pour soi avec ses chiffres ;
+- « ceux qui participent et qui n'ont pas les messages, tu les retires et ça envoie un message… pas en privé,
+  mais en dessous » → l'élagage, une fois, et un mot sous la carte ;
+- « voir la liste des participants exacts… une belle liste déroulante… sans limite… optimisé » → 👥 ;
+et les compteurs enregistrés à l'arrêt, les erreurs des boutons comptées pour /stats."""
+from __future__ import annotations
+
+import ast
+import asyncio
+import logging
+
+import discord
+import pytest
+
+import cadeaux as K
+import diag
+from conftest_discord import Obj, base
+from faux_serveur import Monde, ids, interaction, run, textes
+
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parent.parent
+SRC = (RACINE / "bot.py").read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    get_db, cfg, db_set, _conf = base(tmp_path)
+    journal = []
+
+    async def autorise(_g, m):
+        return m.id in (1, 781205382923288593)
+
+    async def noter(_g, type_, texte, **_kw):
+        journal.append((type_, texte))
+    K.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=autorise, journal=noter, log=lambda *a: None)
+    for d in (K._actifs, K._tampon, K._dernier_msg, K._comptes, K._vocal, K._maj_prevues):
+        d.clear()
+    K._charges.clear()
+    monkeypatch.setattr(K, "MAJ_CARTE_S", 0)
+    horloge = [5000.0]
+    monkeypatch.setattr(K, "_mono", lambda: horloge[0])
+    run(K.init_db())
+    return Obj(journal=journal, horloge=horloge)
+
+
+def serveur():
+    g = Monde()
+    g.voice_channels, g.stage_channels, g.afk_channel, g.premium_subscriber_role = [], [], None, None
+    return g
+
+
+def _lancer(g, **kw):
+    salon = run(K.salon_cadeaux(g, creer=True))
+    lien, erreur = run(K.lancer(g, g.membre(1), K.Brouillon(lot="Nitro", duree="2h", **kw)))
+    assert erreur == "" and lien
+    return salon
+
+
+def _ecrire(env, g, uid, n):
+    for _k in range(n):
+        env.horloge[0] += 5
+        assert K.sur_message(Obj(id=int(env.horloge[0] * 10) + uid, guild=g, author=Obj(id=uid, bot=False),
+                                 content="bonjour", webhook_id=None, type=discord.MessageType.default,
+                                 attachments=[], stickers=[]))
+
+
+def _select(v):
+    """La liste déroulante d'une vue (un DynamicItem enveloppe le Select)."""
+    return next(getattr(x, "item", x) for x in v.walk_children()
+                if isinstance(getattr(x, "item", x), discord.ui.Select))
+
+
+def _vue(i):
+    return (i.response.edits or [m[1] for m in i.response.messages])[-1]["view"]
+
+
+def test_L1_les_conditions_d_abord_le_refus_dit_ce_qu_il_faut_et_ou_on_en_est(env):
+    g = serveur()
+    _lancer(g, msg_min=3, voc_min=10, logique="ou")
+    m = g.membre(11)
+    _ecrire(env, g, 11, 1)
+    i = interaction(g, m)
+    run(K.participer(i, 1))
+    t = textes(_vue(i))
+    assert "Pas encore" in t and "**1 / 3**" in t and "0 min / 10 min" in t and "remplis les conditions" in t
+    assert ids(_vue(i)) == ["cd:r:1", "cd:p:1"], "Actualiser, et Participer pour recliquer"
+    assert run(K.inscrits(1)) == []
+    _ecrire(env, g, 11, 2)
+    i = interaction(g, m)
+    run(K.participer(i, 1))
+    assert "Tu participes" in textes(_vue(i)) and run(K.inscrits(1)) == [11], "l'un ou l'autre suffit"
+    #  Une inscription d'avant la règle, sans les conditions : un clic la retire.
+    run(K._ecrire("INSERT INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(1, 12, 1)", ()))
+    i = interaction(g, g.membre(12))
+    run(K.participer(i, 1))
+    assert "Pas encore" in textes(_vue(i)) and run(K.inscrits(1)) == [11]
+
+
+def test_L2_le_cadeau_en_cours_est_elague_les_retires_prevenus_sous_la_carte(env):
+    g = serveur()
+    salon = _lancer(g, msg_min=2)
+    for uid, n in ((11, 2), (12, 1), (13, 0)):
+        _ecrire(env, g, uid, n)
+        g.membre(uid)
+        run(K._ecrire("INSERT INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(1, ?, ?)", (uid, uid)))
+    carte = run(K.charger(1))["message_id"]
+    assert run(K.elaguer(g)) == 2
+    assert run(K.inscrits(1)) == [11], "seul celui qui a ses messages reste"
+    _mid, _contenu, kw = salon.envois[-1]
+    t = textes(kw["view"])
+    assert "Participation retirée" in t and "<@12> : 💬 1/2" in t and "<@13> : 💬 0/2" in t and "**2** messages" in t
+    assert kw["reference"].message_id == carte, "en dessous de la carte, pas en privé"
+    assert sorted(u.id for u in kw["allowed_mentions"].users) == [12, 13] and not kw["allowed_mentions"].everyone
+    assert "1 participant" in textes(salon.cartes[-1][1]["view"]), "la carte suit"
+    assert any(type_ == "cadeaux.retires" for type_, _x in env.journal)
+    assert run(K.elaguer(g)) == 0, "plus personne à retirer"
+
+
+def test_L3_la_liste_des_participants_sans_limite_25_par_page(env):
+    g = serveur()
+    salon = _lancer(g, msg_min=1)
+    for uid in range(100, 160):
+        g.membre(uid)
+        _ecrire(env, g, uid, 1 if uid % 2 == 0 else 0)
+        run(K._ecrire("INSERT INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(1, ?, ?)", (uid, uid)))
+    assert ids(salon.envois[-1][2]["view"]) == ["cd:p:1", "cd:s:1", "cd:l:1"], "👥 sur la carte"
+    c = run(K.charger(1))
+    v = run(K.vue_participants(g, c, 0))
+    t = textes(v)
+    assert "60 participants" in t and "✅ 30 remplissent les conditions" in t and "page 1/3" in t
+    choix = _select(v)
+    assert len(choix.options) == 25 and choix.options[0].label == "1. Pirate100" and choix.options[0].value == "100"
+    assert choix.options[0].description == "💬 1/1" and str(choix.options[0].emoji) == "✅"
+    assert str(choix.options[1].emoji) == "⏳" and "1–25 sur 60" in choix.placeholder
+    assert ids(v) == ["cd:ls:1:0", "cd:lx:1:a", "cd:lx:1:p", "cd:lp:1:1", "cd:lq:1"]
+    v = run(K.vue_participants(g, c, 2))
+    choix = _select(v)
+    assert len(choix.options) == 10 and choix.options[0].label.startswith("51. ") and "page 3/3" in textes(v)
+    assert ids(v) == ["cd:ls:1:2", "cd:lp:1:1", "cd:lx:1:p", "cd:lx:1:b", "cd:lq:1"]
+    assert "page 3/3" in textes(run(K.vue_participants(g, c, 99))), "une page trop loin : la dernière"
+    v = run(K.vue_participants(g, c, 0, "pirate15"))
+    t = textes(v)
+    assert "10 sur 60" in t and ids(v)[-2:] == ["cd:lp:1:0", "cd:lq:1"], "🔎 : les noms qui contiennent"
+    assert "Aucun participant" in textes(run(K.vue_participants(g, c, 0, "zzz")))
+
+
+def test_L4_tout_se_clique_la_liste_les_pages_la_fiche_la_recherche(env):
+    g = serveur()
+    _lancer(g, msg_min=1)
+    for uid in range(100, 130):
+        g.membre(uid)
+        _ecrire(env, g, uid, 1)
+        run(K._ecrire("INSERT INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(1, ?, ?)", (uid, uid)))
+    i = interaction(g, g.membre(7))
+    run(K.BoutonParticipants(1).callback(i))
+    contenu, kw = i.response.messages[-1]
+    assert kw["ephemeral"] and "30 participants" in textes(kw["view"]), "depuis la carte : un message pour soi"
+    i.message = Obj(flags=Obj(ephemeral=True))
+    run(K.BoutonPage(1, 1).callback(i))
+    assert "page 2/2" in textes(i.response.edits[-1]["view"]), "◀ ▶ réécrivent la liste"
+    i.data = {"values": ["127"]}
+    run(K.ChoixParticipant(1, 1).callback(i))
+    fiche = i.response.edits[-1]["view"]
+    assert "28. <@127>" in textes(fiche) and "Inscrit <t:" in textes(fiche) and "**1 / 1**" in textes(fiche)
+    assert ids(fiche) == ["cd:lp:1:1"], "◀ Retour à la liste, à la même page"
+    run(K.BoutonChercher(1).callback(i))
+    formulaire = i.response.modals[-1]
+    formulaire.q._value = "pirate12"
+    run(formulaire.on_submit(i))
+    assert "10 sur 30" in textes(i.response.edits[-1]["view"])
+
+
+def test_L5_branche_dans_le_bot_l_etat_et_l_arret_propre(env):
+    assert all(f"cadeaux.{x}" in SRC for x in ("BoutonParticipants", "BoutonPage", "ChoixParticipant",
+                                                 "BoutonChercher"))
+    assert "await cadeaux.elaguer(g)" in SRC and "'cadeaux_elagage_v1'" in SRC
+    assert '"cadeaux_detail"' in SRC and '"erreurs_ui": diag.releve("ui")' in SRC
+    assert "await cadeaux.init_db()\n    _installer_arret_propre()" in SRC.replace("\r\n", "\n")
+    g = serveur()
+    _lancer(g, msg_min=2)
+    _ecrire(env, g, 11, 3)
+    run(K._ecrire("INSERT INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(1, 11, 1)", ()))
+    e = run(K.etat(g))[0]
+    assert e["inscrits"] == 1 and e["remplissent"] == 1 and e["messages"] == 3 and e["membres_comptes"] == 1
+    #  L'arrêt : les compteurs en base d'abord, puis la fermeture.
+    arbre = ast.parse(SRC)
+    src = next(ast.unparse(n) for n in arbre.body if getattr(n, "name", "") == "_arret_propre")
+    ordre = []
+
+    async def vider():
+        ordre.append("vider")
+        return 1
+
+    async def close():
+        ordre.append("close")
+    ns = {"cadeaux": Obj(vider=vider), "bot": Obj(close=close), "_logerr": lambda *a, **k: None}
+    exec(src, ns)  # noqa: S102 — code du dépôt
+    asyncio.run(ns["_arret_propre"]())
+    assert ordre == ["vider", "close"]
+
+
+def test_L6_les_erreurs_des_boutons_sont_comptees_pour_stats():
+    diag._COMPTES.clear()
+    arbre = ast.parse(SRC)
+    src = next(ast.unparse(n) for n in arbre.body if getattr(n, "name", "") == "_ErreursInteractions")
+    ns = {"logging": logging, "discord": discord, "diag": diag}
+    exec(src, ns)  # noqa: S102 — code du dépôt
+    h = ns["_ErreursInteractions"]()
+    bouton = discord.ui.Button(label="x", custom_id="rs:n:farm")
+    try:
+        raise RuntimeError("panne")
+    except RuntimeError:
+        import sys
+        rec = logging.LogRecord("discord.ui.view", logging.ERROR, __file__, 1,
+                                "Ignoring exception in view %r for item %r", (object(), bouton),
+                                sys.exc_info())
+    h.emit(rec)
+    h.emit(rec)
+    assert diag.releve("ui") == {"ui/rs:n:farm:RuntimeError": [2, diag._COMPTES["ui/rs:n:farm:RuntimeError"][1]]}
+    diag.compter("ui", "radiedec:lever:781205382923288593", ValueError())
+    assert "ui/radiedec:lever:#:ValueError" in diag.releve("ui"), "aucun identifiant"

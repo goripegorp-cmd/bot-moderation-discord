@@ -38,6 +38,30 @@ from datetime import datetime, timezone
 
 _VERBOSE = _os.getenv("DIAG_VERBOSE", "0") == "1"
 _PREFIX = "[DIAG]"
+_COMPTES: dict = {}       # « module/endroit:TypeErreur » → [nombre, heure de la dernière] — depuis le démarrage
+_COMPTES_MAX = 300
+
+
+def compter(module: str, endroit: str, exc=None) -> None:
+    """Une erreur de plus à cet endroit (24/10/2026 : /stats montre ce qui casse, sans aucun contenu). Les
+    identifiants (4 chiffres ou plus) deviennent « # » : un bouton par demande ne fait qu'une ligne."""
+    try:
+        import re as _re
+        import time as _time
+        cle = f"{module}/{_re.sub(r'[0-9]{4,}', '#', str(endroit))[:60]}:{type(exc).__name__ if exc is not None else '-'}"
+        n = _COMPTES.setdefault(cle, [0, 0])
+        n[0] += 1
+        n[1] = int(_time.time())
+        if len(_COMPTES) > _COMPTES_MAX:
+            _COMPTES.pop(next(iter(_COMPTES)))
+    except Exception:
+        pass
+
+
+def releve(module: str = "", n: int = 20) -> dict:
+    """Les erreurs comptées depuis le démarrage (les plus fréquentes d'abord) : {endroit: [nombre, heure]}."""
+    lignes = [(k, v) for k, v in list(_COMPTES.items()) if not module or k.startswith(module + "/")]
+    return {k: list(v) for k, v in sorted(lignes, key=lambda x: -x[1][0])[:n]}
 
 
 def _emit(level: str, module: str, event: str, detail: str = "", exc=None) -> None:
@@ -66,6 +90,7 @@ def warn(module: str, event_name: str, detail: str = "") -> None:
 
 
 def error(module: str, event_name: str, detail: str = "", exc=None) -> None:
+    compter(module, event_name, exc)
     _emit("ERROR", module, event_name, detail, exc)
 
 
@@ -82,4 +107,4 @@ def boot(detail: str = "") -> None:
           + f"actif (verbose={'ON' if _VERBOSE else 'OFF'}) — filtre Railway : grep [DIAG]")
 
 
-__all__ = ["event", "warn", "error", "trace", "boot"]
+__all__ = ["event", "warn", "error", "trace", "boot", "compter", "releve"]

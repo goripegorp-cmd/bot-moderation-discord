@@ -184,18 +184,24 @@ def test_K6_un_cadeau_de_bout_en_bout(env, monkeypatch):
     run(K.participer(i, 1))
     assert "réservé" in textes(_vue(i)) and run(K.inscrits(1)) == [], "sans le rôle demandé : refusé"
     a, bb = g.membre(11, membre_role), g.membre(12, membre_role, booster)
-    for m in (a, bb):
-        i = interaction(g, m)
-        run(K.participer(i, 1))
-        assert "Tu participes" in textes(_vue(i))
-    run(K.participer(interaction(g, a), 1))
-    assert run(K.inscrits(1)) == [11, 12], "deux clics : une inscription"
-    assert "2 participants" in textes(salon.cartes[-1][1]["view"]), "la carte suit"
+    i = interaction(g, a)
+    run(K.participer(i, 1))
+    assert "Pas encore" in textes(_vue(i)) and "**0 / 2**" in textes(_vue(i)) and run(K.inscrits(1)) == [], \
+        "24/10 : sans les messages demandés, refusé — et il voit ce qu'il lui faut"
     horloge = [5000.0]
     monkeypatch.setattr(K, "_mono", lambda: horloge[0])
     for mid, auteur in ((101, 11), (102, 12), (103, 11)):
         assert K.sur_message(_msg(g, mid, auteur))
         horloge[0] += 5
+    i = interaction(g, a)
+    run(K.participer(i, 1))
+    assert "Tu participes" in textes(_vue(i))
+    i = interaction(g, bb)
+    run(K.participer(i, 1))
+    assert "**1 / 2**" in textes(_vue(i)) and "Pas encore" in textes(_vue(i))
+    run(K.participer(interaction(g, a), 1))
+    assert run(K.inscrits(1)) == [11], "deux clics : une inscription ; sans les messages, aucune"
+    assert "1 participant" in textes(salon.cartes[-1][1]["view"]), "la carte suit"
     i = interaction(g, a)
     run(K.montrer_stats(i, 1))
     t = textes(_vue(i))
