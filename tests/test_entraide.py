@@ -111,10 +111,12 @@ def _vue_de(i):
 # ─── Les types, en français · anglais ────────────────────────────────────────
 
 def test_E1_cinq_types_deux_forums_des_formulaires_dans_les_deux_langues():
-    assert list(Z) == ["aide", "boss", "farm", "chill", "trade"]
+    assert [k for k, z in Z.items() if z.jeu == "rell"] == ["aide", "boss", "farm", "chill", "trade"]
+    assert [k for k, z in Z.items() if z.jeu == "clover"] == ["cl_aide", "cl_boss", "cl_farm", "cl_chill", "cl_trade"],         "Clover RPG : les mêmes types, à lui"
+    assert [z.salon for z in Z.values() if z.echange] == ["trade", "cl_trade"] and Z["cl_aide"].libelle ==         "Aide · Help · Clover RPG"
     assert [z.cle for z in E.types_du_salon("entraide")] == ["aide", "boss", "farm", "chill"]
-    assert [z.cle for z in E.types_du_salon("trade")] == ["trade"] and list(E.SALONS) == ["entraide", "trade"]
-    assert [v[0] for v in E.SALONS.values()] == ["🛟help", "🤝trade"], "au style du serveur : l'émoji collé au nom"
+    assert [z.cle for z in E.types_du_salon("trade")] == ["trade"] and list(E.SALONS) == ["entraide", "trade", "cl_entraide", "cl_trade"]
+    assert [v[0] for v in E.SALONS.values()] == ["🛟help", "🤝trade", "🛟help-clover", "🤝trade-clover"],         "au style du serveur : l'émoji collé au nom"
     assert Z["aide"].emoji == "🛟", "plus de badge 🆘"
     for z in Z.values():
         assert 1 <= len(z.champs) <= 5 and any(c.cle == "pseudo" for c in z.champs)

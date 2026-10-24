@@ -13078,7 +13078,7 @@ async def _automod_invitations(g) -> bool:
 
 
 NOM_AIDE = "aide"
-AIDE_VERSION = 3
+AIDE_VERSION = 4  # 4 : salons simples, un groupe par jeu (24/10)
 
 
 def _salon_des_tickets(g):
@@ -13099,17 +13099,12 @@ def _salon_par_nom(g, *mots, exclus=("log", "transcript")):
 
 async def _vue_aide(g, c):
     """« Il faudrait que tu refasses le salon aide. » 22/10/2026 : « mieux fait, plus beau… séparer les
-    deux compartiments au propre, expliquer bien l'international ». L'orientation du serveur en
-    français · anglais : la langue (le bot parle celle de chacun), puis Communautaire, Rell Seas et le
-    staff — une ligne par besoin, un bouton qui y mène ; une ligne n'apparaît que si son salon existe
-    (aucun bouton qui ment)."""
+    compartiments au propre, expliquer bien l'international ». 24/10 : Communautaire en salons simples, un
+    forum par jeu. L'orientation en français · anglais : la langue (le bot parle celle de chacun), puis un
+    groupe par compartiment — un titre, une phrase, une rangée de boutons —, puis le staff. Un bouton
+    n'apparaît que si son salon existe (aucun bouton qui ment)."""
     ticket = _salon_des_tickets(g)
-    groupes = zones.lignes_aide(g, c, await zones.conf(g))
     clan = bool(rellseas_ui.panneaux_tickets(c))
-    groupes["Staff"] = [
-        (ticket, "🎫 **Ticket** — une question, un souci" + (", rejoindre le clan" if clan else "")
-         + " · a question, a problem" + (", join the clan" if clan else ""), "Ouvrir · Open"),
-    ]
     regles = getattr(g, "rules_channel", None) or _salon_par_nom(g, "regle") or _salon_par_nom(g, "rules")
     items = [visuels.bandeau("orientation", "Bienvenue · Welcome"),
              discord.ui.TextDisplay("🇫🇷 **Serveur international** : écris en français ou en anglais, tout le monde "
@@ -13117,20 +13112,26 @@ async def _vue_aide(g, c):
                                     "🇬🇧 **International server**: write in French or English, everyone gets along. "
                                     "The bot speaks your language:"),
              discord.ui.ActionRow(LangSelectButton("fr"), LangSelectButton("en"))]
-    for titre, lignes in groupes.items():
-        presentes = [(salon, texte, libelle) for salon, texte, libelle in lignes if salon is not None]
-        if not presentes:
+    ids = []
+    for titre, phrase, boutons in zones.groupes_aide(g, c, await zones.conf(g)):
+        if not boutons:
             continue
         items.append(discord.ui.Separator())
-        for n, (salon, texte, libelle) in enumerate(presentes):
-            items.append(discord.ui.Section(discord.ui.TextDisplay(f"### {titre}\n{texte}" if n == 0 else texte),
-                                            accessory=Button(label=libelle, url=salon.jump_url)))
+        items.append(discord.ui.TextDisplay(f"### {titre}\n{phrase}"))
+        items.append(discord.ui.ActionRow(*[Button(label=libelle, url=x.jump_url) for x, libelle in boutons[:5]]))
+        ids += [x.id for x, _l in boutons[:5]]
+    if ticket is not None:
+        items.append(discord.ui.Separator())
+        items.append(discord.ui.Section(
+            discord.ui.TextDisplay("### Staff\n🎫 **Ticket** — une question, un souci" + (", rejoindre le clan" if clan else "")
+                                   + " · a question, a problem" + (", join the clan" if clan else "")),
+            accessory=Button(label="Ouvrir · Open", url=ticket.jump_url)))
     items.append(discord.ui.TextDisplay("-# " + (f"📜 Règles · Rules : <#{regles.id}> · " if regles else "")
                                         + "pas d'invitation vers d'autres serveurs · no invites to other servers"))
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(*items, accent_color=Palette.INFO))
-    signature = f"{AIDE_VERSION}|" + "|".join(str(getattr(s, 'id', 0)) for lignes in groupes.values()
-                                              for s, _t, _l in lignes) + f"|{getattr(regles, 'id', 0)}"
+    signature = (f"{AIDE_VERSION}|" + "|".join(str(x) for x in ids)
+                 + f"|{getattr(ticket, 'id', 0)}|{getattr(regles, 'id', 0)}")
     return v, signature
 
 
@@ -13216,7 +13217,10 @@ async def entraide_task():
                     await _entraide_journal(g, "entraide.regroupement",
                                             "Entraide regroupée dans Communautaire : " + ", ".join(faits) + ".")
                     await _salon_aide(g)
-            if g.owner_id in TETE_IDS and c.get('rs_actif') and not c.get('zones_v2'):
+            if g.owner_id in TETE_IDS and c.get('rs_actif') and not c.get('zones_v3') and \
+                    int(c.get('zones_v3_essais', 0) or 0) < ZONES_ESSAIS:
+                # 24/10, le fondateur : « refais tout l'onglet communautaire… avec des salons simples… la
+                # même chose pour un nouveau jeu… Clover RPG ».
                 await _installer_zones(g, c)
             if g.owner_id in TETE_IDS and c.get('zones_v2') and not c.get('zones_guide_v1'):
                 # 22/10 (nuit) : « dans Rell Seas, la même chose… un fil ultra professionnel » — le post guide.
@@ -13263,22 +13267,23 @@ EMOJI_ANCIEN_TICKET = "\N{ADMISSION TICKETS}"
 
 
 async def _installer_zones(g, c) -> None:
-    """22/10 (nuit) : « une catégorie… deux fils seulement, communautaire et Rell Seas… tout dedans…
-    le vocal, tu le laisses ». Une fois ; le témoin est posé AVANT (jamais deux installations en
-    parallèle), retiré si l'installation casse — elle reprend au passage suivant, trois essais au
-    plus (elle ne recrée que ce qui manque)."""
-    await db_set(g.id, 'zones_v2', now().isoformat())
+    """24/10/2026 : « refais tout l'onglet communautaire… avec des salons simples… un salon discussion,
+    média… Boost, Suggestion… en dehors… un forum pour Rell Seas… la même chose pour un nouveau jeu…
+    Clover RPG ». Une fois ; le témoin est posé AVANT (jamais deux installations en parallèle), retiré si
+    l'installation casse — elle reprend au passage suivant, trois essais au plus (elle ne recrée que ce
+    qui manque)."""
+    await db_set(g.id, 'zones_v3', now().isoformat())
     try:
         faits = await zones.installer(g)
     except (discord.HTTPException, PermissionError) as ex:
-        essais = int(c.get('zones_v2_essais', 0) or 0) + 1
-        await db_set(g.id, 'zones_v2_essais', essais)
+        essais = int(c.get('zones_v3_essais', 0) or 0) + 1
+        await db_set(g.id, 'zones_v3_essais', essais)
         if essais < ZONES_ESSAIS:
-            await db_set(g.id, 'zones_v2', "")
+            await db_set(g.id, 'zones_v3', "")
         _logerr("zones.installation", ex, guild_id=g.id)
         return
-    await _entraide_journal(g, "zones.installation",
-                            "Deux forums en place : " + (", ".join(faits) or "rien ne manquait") + ".")
+    await _entraide_journal(g, "zones.installation", "Communautaire en salons simples, un forum par jeu (Rell Seas, "
+                            "Clover RPG) : " + (", ".join(faits) or "rien ne manquait") + ".")
     await _reporter_immunites(g, await cfg(g.id))
     await _salon_aide(g)
     await _salon_tableau(g)
@@ -13507,7 +13512,9 @@ def _faq_destinations(g, c) -> dict:
         return f"https://discord.com/channels/{g.id}/{pid}" if pid else ""
     ticket = _salon_des_tickets(g)
     out = {"ticket": ticket.jump_url if ticket is not None else "", "trade": lien("trade"),
-           "suggestions": lien("suggestions"), "help": lien("help")}
+           "help": lien("help"), "cl_trade": lien("cl_trade"), "cl_help": lien("cl_help"),
+           "suggestions": (f"https://discord.com/channels/{g.id}/{int(c.get('suggestions_salon', 0) or 0)}"
+                           if c.get('suggestions_salon') else "")}
     clan = next((p.get('name') for p in (c.get('ticket_panels') or {}).values() if isinstance(p, dict)
                  and not p.get('disabled') and any(m in config_salons.normaliser(p.get('name') or '')
                                                    for m in ("rell", "clan", "candid", "gorp"))), "")
@@ -13520,6 +13527,24 @@ async def _langue_de_membre(m) -> str:
     langue = await i18n_module.lang_of(user_id=getattr(m, "id", None), guild_id=getattr(getattr(m, "guild", None),
                                                                                          "id", None))
     return "fr" if langue == "fr" else "en"
+
+
+giveaway_group = app_commands.Group(
+    name="giveaway", description="🎁 Les cadeaux : lancer, gérer (fondateur et direction)", guild_only=True,
+    default_permissions=discord.Permissions(manage_guild=True))
+
+
+@giveaway_group.command(name="lancer", description="🎁 Lancer un cadeau : lot, durée, conditions, rôles autorisés et exclus")
+async def giveaway_lancer(i: discord.Interaction):
+    await cadeaux.ouvrir_composeur(i)
+
+
+@giveaway_group.command(name="gerer", description="🎁 Les cadeaux en cours et terminés : tirer, annuler, nouveau tirage")
+async def giveaway_gerer(i: discord.Interaction):
+    await cadeaux.ouvrir_gestion(i)
+
+
+bot.tree.add_command(giveaway_group)
 
 
 async def _cadeaux_autorise(g, membre) -> bool:
@@ -13798,6 +13823,15 @@ async def _etat_public():
             "entraide_v2": any(c.get('rs_v2') for c in confs),
             "zones": any(c.get('zones_v1') for c in confs),
             "deux_forums": any(c.get('zones_v2') for c in confs),
+            "zones_v3": any(c.get('zones_v3') for c in confs),
+            #  L'état réel : les salons simples là, l'ancien forum parti, le forum Clover RPG là.
+            "commu_salons": max([sum(1 for v in (c.get('zones_salons') or {}).values()
+                                     if str(v).isdigit() and isinstance(g.get_channel(int(v)), discord.TextChannel))
+                                 for g, c in zip(list(bot.guilds), confs)] or [0]),
+            "forum_commu": any(g.get_channel(int(c.get('zones_forum_commu', 0) or 0)) is not None
+                               for g, c in zip(list(bot.guilds), confs)),
+            "forum_clover": any(g.get_channel(int(c.get('zones_forum_clover', 0) or 0)) is not None
+                                for g, c in zip(list(bot.guilds), confs)),
             "guide_rell": any(c.get('zones_guide_v') for c in confs),
             "archives": sum(len(c.get('zones_archives') or []) for c in confs),
             "sans_equipages": any(c.get('equipages_retires_v1') for c in confs),

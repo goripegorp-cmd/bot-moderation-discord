@@ -1,4 +1,4 @@
-"""entraide.py — l'entraide Rell Seas (22/10/2026).
+"""entraide.py — l'entraide des jeux : Rell Seas (22/10/2026), Clover RPG (24/10/2026).
 
 Demandé par le fondateur : « demander de l'aide, faire du trading (s'échanger des fruits), des demandes
 de farm, de boss, de chill… ultra compact… des joueurs qualifiés avec des rôles, plusieurs sous-rôles
@@ -158,6 +158,16 @@ class Zone:
     rejoindre: str = "J'aide · I'll help"
     icone_rejoindre: str = "accueil"
     annonce: str = "🙋 {qui} vient t'aider · is coming to help — {auteur}"
+    jeu: str = "rell"     # « rell » (Rell Seas) ou « clover » (Clover RPG)
+    echange: bool = False  # un échange : middleman, confiance, « intéressé »
+
+    @property
+    def libelle(self) -> str:
+        """Le type, et son jeu s'il n'est pas Rell Seas (le site, les réglages)."""
+        return self.nom if self.jeu == "rell" else f"{self.nom} · {JEUX_NOMS.get(self.jeu, self.jeu)}"
+
+
+JEUX_NOMS = {"rell": "Rell Seas", "clover": "Clover RPG"}
 
 
 PSEUDO = Champ("pseudo", "Ton pseudo Roblox", "Your Roblox username", "Pour qu'on te trouve en jeu",
@@ -205,7 +215,44 @@ ZONES = {z.cle: z for z in (
           _details("Valeur, conditions…", "Value, conditions…", 400)),
          "{donne} ⇄ {cherche}", certif="middleman", role="🛡️ Middleman", bouton="Proposer · Post a trade",
          rejoindre="Intéressé · Interested", icone_rejoindre="pour",
-         annonce="💬 {qui} est intéressé · is interested — {auteur}"),
+         annonce="💬 {qui} est intéressé · is interested — {auteur}", echange=True),
+    #  Clover RPG (24/10/2026) : les mêmes types, ses posts, ses rôles.
+    Zone("cl_aide", "Aide · Help", "🛟", "cl_entraide", 0x22C55E, 24,
+         (Champ("titre", "Ta question ou ton problème", "Your question or problem", "En une phrase",
+                "In one sentence", "Question", max=90),
+          _details("Où tu es, ce que tu as déjà essayé…", "Where you are, what you already tried…", 800),
+          PSEUDO, NIVEAU),
+         "{titre}", certif="guide", role="🛟 Guide Aide · Clover", bouton="Aide · Help", jeu="clover"),
+    Zone("cl_boss", "Boss", "⚔️", "cl_entraide", 0xEF4444, 6,
+         (Champ("titre", "Quel boss ?", "Which boss?", "Son nom", "Its name", "Boss", max=60), PSEUDO, NIVEAU,
+          Champ("joueurs", "Joueurs voulus", "Players needed", "Combien en plus de toi ? Ex. 2",
+                "How many besides you? E.g. 2", "Joueurs · Players", max=10, requis=False),
+          _details("Zone, heure, conditions…", "Area, time, conditions…")),
+         "Boss {titre}", certif="guide", role="⚔️ Guide Boss · Clover", bouton="Boss", jeu="clover"),
+    Zone("cl_farm", "Farm", "🌾", "cl_entraide", 0x84CC16, 12,
+         (Champ("titre", "Quoi farmer ?", "What to farm?", "Niveaux, argent, un objet…", "Levels, money, an item…",
+                "Farm", max=80), PSEUDO, NIVEAU,
+          Champ("duree", "Combien de temps ?", "How long?", "Ex. 1 h", "E.g. 1 h", "Durée · Duration", max=30,
+                requis=False),
+          _details("Où, comment…", "Where, how…")),
+         "Farm {titre}", certif="guide", role="🌾 Guide Farm · Clover", bouton="Farm", jeu="clover"),
+    Zone("cl_chill", "Chill", "🌴", "cl_entraide", 0x38BDF8, 6,
+         (Champ("titre", "Ce que tu veux faire", "What you want to do", "Explorer, discuter, s'entraîner…",
+                "Explore, chat, train…", "Activité · Activity", max=90), PSEUDO,
+          Champ("quand", "Quand ?", "When?", "Maintenant, ce soir 21 h…", "Now, tonight 9 pm…", "Quand · When",
+                max=40, requis=False),
+          _details("Ce que tu aimes, ton style…", "What you like, your style…", 400)),
+         "{titre}", bouton="Chill", rejoindre="Je viens · I'm in",
+         annonce="🌴 {qui} te rejoint · is joining you — {auteur}", jeu="clover"),
+    Zone("cl_trade", "Trade", "🤝", "cl_trade", 0xF59E0B, 48,
+         (Champ("donne", "Je donne", "I give", "Objets, ressources…", "Items, resources…", "Je donne · I give",
+                max=120),
+          Champ("cherche", "Je cherche", "I want", "Ce que tu veux en échange", "What you want in return",
+                "Je cherche · I want", max=120), PSEUDO,
+          _details("Valeur, conditions…", "Value, conditions…", 400)),
+         "{donne} ⇄ {cherche}", certif="middleman", role="🛡️ Middleman · Clover", bouton="Proposer · Post a trade",
+         rejoindre="Intéressé · Interested", icone_rejoindre="pour",
+         annonce="💬 {qui} est intéressé · is interested — {auteur}", jeu="clover", echange=True),
 )}
 #  Les deux forums : (nom, texte du post épinglé, bandeau, titre du bandeau, couleur)
 SALONS = {
@@ -220,6 +267,18 @@ SALONS = {
               "appelle un middleman.\n"
               "🇬🇧 Post a trade: your card shows up here. With a stranger, never give first: call a middleman.",
               "rs_trade", "Trade", 0xF59E0B),
+    "cl_entraide": ("🛟help-clover",
+                    "🇫🇷 Une question, un boss, du farm, ou juste jouer ensemble sur Clover RPG ? Choisis, remplis : "
+                    "ta demande s'affiche ici et des joueurs viennent t'aider.\n"
+                    "🇬🇧 A question, a boss, farming, or just playing together on Clover RPG? Pick, fill in: your "
+                    "request shows up here and players come to help.",
+                    "cl_entraide", "Entraide · Help", 0x22C55E),
+    "cl_trade": ("🤝trade-clover",
+                 "🇫🇷 Propose un échange Clover RPG : ta carte s'affiche ici. Avec un inconnu, ne donne jamais en "
+                 "premier : appelle un middleman.\n"
+                 "🇬🇧 Post a Clover RPG trade: your card shows up here. With a stranger, never give first: call a "
+                 "middleman.",
+                 "cl_trade", "Trade", 0xF59E0B),
 }
 
 STATUTS = {
@@ -407,12 +466,12 @@ async def recentes(guild_id: int, limite: int = 300) -> list:
     return await _lignes(_SQL_RECENTES, (int(guild_id), int(limite)))
 
 
-async def reputation(guild_id: int, membre_id: int) -> int:
-    """Échanges certifiés par un middleman, comme vendeur ou comme acheteur."""
+async def reputation(guild_id: int, membre_id: int, zone: str = "trade") -> int:
+    """Échanges certifiés par un middleman dans ce trade (chaque jeu le sien), comme vendeur ou acheteur."""
     async with _get_db() as db:
-        async with db.execute("SELECT COUNT(*) FROM entraide_demandes WHERE guild_id=? AND zone='trade'"
+        async with db.execute("SELECT COUNT(*) FROM entraide_demandes WHERE guild_id=? AND zone=?"
                               " AND statut='terminee' AND certifie_par!=0 AND (auteur_id=? OR partenaire_id=?)",
-                              (int(guild_id), int(membre_id), int(membre_id))) as cur:
+                              (int(guild_id), str(zone), int(membre_id), int(membre_id))) as cur:
             return int((await cur.fetchone())[0])
 
 
@@ -555,17 +614,17 @@ def _ligne_statut(d: dict, z: Zone) -> str:
     if d["statut"] in OUVERTS:
         if not d["aidants"]:
             return f"{pastille} **{lib}** · personne pour l'instant · nobody yet"
-        mot = "intéressé(s) · interested" if z.cle == "trade" else "en route · on the way"
+        mot = "intéressé(s) · interested" if z.echange else "en route · on the way"
         return f"{pastille} **{lib}** · {mot} : " + ", ".join(_mention(a) for a in d["aidants"][:MAX_AIDANTS])
     fin = "\n-# Fil fermé · Thread closed" if d["ferme"] else ""
     if d["statut"] == "terminee":
         if d["certifie_par"]:
-            quoi = "Échange certifié · Trade certified" if z.cle == "trade" else "Aide certifiée · Help certified"
+            quoi = "Échange certifié · Trade certified" if z.echange else "Aide certifiée · Help certified"
             s = f"✅ **{quoi}** — {_mention(d['certifie_par'])} · <t:{d['ferme']}:R>"
         else:
-            quoi = "Échange conclu · Trade done" if z.cle == "trade" else "Résolue · Solved"
+            quoi = "Échange conclu · Trade done" if z.echange else "Résolue · Solved"
             s = f"✅ **{quoi}** · <t:{d['ferme']}:R>"
-        if z.cle == "trade" and d["partenaire_id"]:
+        if z.echange and d["partenaire_id"]:
             s += f"\n-# Avec · With {_mention(d['partenaire_id'])}"
         elif d["credites"]:
             s += "\n-# Ont aidé · Helped : " + ", ".join(_mention(x) for x in d["credites"])
@@ -586,7 +645,7 @@ def vue_carte(d: dict, z: Zone, *, avatar: str = "", ping: str = "", rep: int | 
     lignes = [f"**{lib}** · {_echapper(v)}" for lib, v in d["champs"] if str(v or "").strip()]
     if lignes:
         items.append(discord.ui.TextDisplay("\n".join(lignes)))
-    if z.cle == "trade" and ouvert:
+    if z.echange and ouvert:
         confiance = ("aucun échange certifié · no certified trade yet" if not rep
                      else f"{rep} échange(s) certifié(s) · certified trade(s)")
         items.append(discord.ui.TextDisplay(f"-# 🛡️ {confiance} · Avec un inconnu, ne donne jamais en premier : "
@@ -596,7 +655,7 @@ def vue_carte(d: dict, z: Zone, *, avatar: str = "", ping: str = "", rep: int | 
     items.append(discord.ui.TextDisplay(_ligne_statut(d, z)))
     if ouvert:
         boutons = [BoutonRejoindre(d["id"], z)]
-        if z.cle == "trade":
+        if z.echange:
             boutons.append(BoutonMiddleman(d["id"]))
         if z.certif:
             boutons.append(BoutonCertifier(d["id"], z))
@@ -619,7 +678,8 @@ def vue_panneau(cle: str, cf: dict, g=None) -> LayoutView:
             "réponds sous une carte pour en parler · reply under a card to talk",
             f"fermée sans activité · closes when inactive : {delais}"]
     if roles:
-        pied.append(("middlemen" if cle == "trade" else "guides") + " : " + " ".join(r.mention for r in roles))
+        pied.append(("middlemen" if any(z.echange for z in types) else "guides") + " : "
+                    + " ".join(r.mention for r in roles))
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
         visuels.bandeau(bandeau, titre), discord.ui.TextDisplay(texte),
@@ -691,7 +751,7 @@ async def _maj_carte(g, d: dict, fil=None) -> None:
     if porteur is None:
         return
     auteur = g.get_member(int(d["auteur_id"]))
-    rep = await reputation(g.id, d["auteur_id"]) if z.cle == "trade" else None
+    rep = await reputation(g.id, d["auteur_id"], z.cle) if z.echange else None
     vue = vue_carte(d, z, avatar=auteur.display_avatar.url if auteur else "", rep=rep)
     try:
         await porteur.get_partial_message(mid).edit(view=vue, allowed_mentions=discord.AllowedMentions.none())
@@ -832,7 +892,7 @@ async def publier(i, z: Zone, valeurs: dict, langue: str = "fr"):
     role = role_zone(g, cf, z.cle) if prevenir(cf, z) else None
     if role is not None and not (role.mentionable or g.me.guild_permissions.mention_everyone):
         role = None
-    rep = await reputation(g.id, m.id) if z.cle == "trade" else None
+    rep = await reputation(g.id, m.id, z.cle) if z.echange else None
     vue = vue_carte(d, z, avatar=m.display_avatar.url, ping=role.mention if role else "", rep=rep)
     mentions = discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else False)
     mode, fil = ("carte" if en_cartes(ch) else ""), None
@@ -866,7 +926,7 @@ async def publier(i, z: Zone, valeurs: dict, langue: str = "fr"):
                    membre_id=m.id)
 
 
-class BoutonNouvelle(discord.ui.DynamicItem[Button], template=r"rs:n:(?P<zone>[a-z]+)"):
+class BoutonNouvelle(discord.ui.DynamicItem[Button], template=r"rs:n:(?P<zone>[a-z_]+)"):
     def __init__(self, zone: str, z: Zone | None = None):
         self.zone = zone
         z = z or ZONES.get(zone)
@@ -993,7 +1053,7 @@ async def appeler_middleman(i, did: int):
         t = int(time.time())
         if t - int(d["appel_mm"] or 0) < APPEL_MM_S:
             return await i.followup.send(tr("mm_deja", langue), ephemeral=True)
-        role = role_zone(g, await conf(g), "trade")
+        role = role_zone(g, await conf(g), d["zone"])  # le middleman du trade de ce jeu
         if role is None or not role.members:
             return await i.followup.send(tr("mm_aucun", langue), ephemeral=True)
         texte = f"🛡️ {role.mention} — {m.mention} demande un middleman · needs a middleman."
@@ -1062,14 +1122,14 @@ async def certifier(g, did: int, par, credites: list, partenaire: int = 0, langu
                       " partenaire_id=?, maj=? WHERE id=?",
                       (d["statut"], t, par.id, par.id, json.dumps(credites), d["partenaire_id"], t, did))
     z = ZONES[d["zone"]]
-    if z.cle == "trade":
+    if z.echange:
         note = f"✅ Échange certifié par {par.mention} · Trade certified by {par.mention}" + (
             f" — avec · with {_mention(d['partenaire_id'])}" if d["partenaire_id"] else "")
     else:
         note = f"✅ Aide certifiée par {par.mention} · Help certified by {par.mention}" + (
             " — merci · thanks " + ", ".join(_mention(x) for x in credites) if credites else "")
     await _clore_sur_discord(g, d, note)
-    aides = (" — aidé par " + ", ".join(_mention(x) for x in credites)) if credites and z.cle != "trade" else ""
+    aides = (" — aidé par " + ", ".join(_mention(x) for x in credites)) if credites and not z.echange else ""
     await _journal(g, "entraide.certifiee", f"{par.mention} a certifié la demande de {_mention(d['auteur_id'])}"
                                             f" · {z.nom} : {d['titre']}{aides}",
                    membre_id=d["auteur_id"], auteur_id=par.id)
@@ -1086,13 +1146,13 @@ async def resoudre(g, did: int, par, partenaire: int = 0, langue: str = "fr") ->
             return tr("deja_close", langue)
         t = int(time.time())
         z = ZONES[d["zone"]]
-        credites = [] if z.cle == "trade" else [int(x) for x in d["aidants"]][:MAX_AIDANTS]
+        credites = [] if z.echange else [int(x) for x in d["aidants"]][:MAX_AIDANTS]
         d.update(statut="terminee", ferme=t, ferme_par=par.id, certifie_par=0, credites=credites,
                  partenaire_id=int(partenaire or 0), maj=t)
         await _ecrire("UPDATE entraide_demandes SET statut=?, ferme=?, ferme_par=?, certifie_par=0, credites=?,"
                       " partenaire_id=?, maj=? WHERE id=?",
                       (d["statut"], t, par.id, json.dumps(credites), d["partenaire_id"], t, did))
-    if z.cle == "trade":
+    if z.echange:
         note = "✅ Échange conclu · Trade done" + (
             f" — avec · with {_mention(d['partenaire_id'])}" if d["partenaire_id"] else "")
     else:
@@ -1134,7 +1194,7 @@ class VueCertifier(LayoutView):
     def __init__(self, d: dict, z: Zone, par, langue: str = "fr"):
         super().__init__(timeout=300)
         self.d, self.z, self.par, self.langue, self.choisis = d, z, par, langue, None
-        echange = z.cle == "trade"
+        echange = z.echange
         defauts = [discord.Object(id=int(x)) for x in d["aidants"][:1 if echange else MAX_AIDANTS]]
         self.qui = UserSelect(placeholder=tr("certif_qui_trade" if echange else "certif_qui", langue),
                               min_values=0, max_values=1 if echange else MAX_AIDANTS, default_values=defauts)
@@ -1159,7 +1219,7 @@ class VueCertifier(LayoutView):
     async def _cb_ok(self, i):
         await i.response.defer()
         choisis = self.choisis if self.choisis is not None else [int(x) for x in self.d["aidants"]]
-        if self.z.cle == "trade":
+        if self.z.echange:
             erreur = await certifier(i.guild, self.d["id"], i.user, [], partenaire=(choisis or [0])[0],
                                      langue=self.langue)
         else:
@@ -1179,7 +1239,7 @@ class VueCloturer(LayoutView):
     def __init__(self, d: dict, z: Zone, membre, langue: str, sienne: bool):
         super().__init__(timeout=300)
         self.d, self.z, self.m, self.langue, self.partenaire = d, z, membre, langue, None
-        echange = z.cle == "trade"
+        echange = z.echange
         items = []
         if sienne:
             items.append(discord.ui.TextDisplay(
@@ -1218,7 +1278,7 @@ class VueCloturer(LayoutView):
     async def _cb_regle(self, i):
         await i.response.defer()
         partenaire = self.partenaire if self.partenaire is not None else int((self.d["aidants"] or [0])[0])
-        erreur = await resoudre(i.guild, self.d["id"], i.user, partenaire if self.z.cle == "trade" else 0,
+        erreur = await resoudre(i.guild, self.d["id"], i.user, partenaire if self.z.echange else 0,
                                 self.langue)
         await self._fin(i, erreur or tr("cloturee", self.langue))
 
@@ -1446,7 +1506,8 @@ async def sur_depart(member) -> int:
 
 
 def _nom_panneau(cle: str) -> str:
-    return "📌 Proposer un échange · Post a trade" if cle == "trade" else "📌 Publier une demande · Ask for help"
+    return ("📌 Proposer un échange · Post a trade" if any(z.echange for z in types_du_salon(cle))
+            else "📌 Publier une demande · Ask for help")
 
 
 async def _panneau_forum(g, cf: dict, cle: str, forum, forcer: bool) -> None:
@@ -1619,7 +1680,7 @@ async def installer(g, *, forum: bool | None = None, categorie=None, creer_salon
         for z in ZONES.values():
             if z.role and role_zone(g, cf, z.cle) is None:
                 r = await g.create_role(name=z.role, colour=discord.Colour(z.couleur), mentionable=False,
-                                        hoist=False, reason="Entraide Rell Seas : guides de la zone")
+                                        hoist=False, reason="Entraide : guides de la zone")
                 roles[z.cle] = r.id
                 await _db_set(g.id, "rs_roles", roles)
                 faits.append(f"rôle {r.name}")
@@ -1627,6 +1688,9 @@ async def installer(g, *, forum: bool | None = None, categorie=None, creer_salon
         for cle, (nom, *_reste) in SALONS.items():
             if not creer_salons or await _resoudre(g, salons.get(cle, 0)) is not None:
                 continue
+            if any(z.jeu != "rell" for z in types_du_salon(cle)):
+                continue  # seul, sans les zones : l'entraide Rell Seas d'origine ; les autres jeux ont leur forum
+
             if forum:
                 ch = await g.create_forum(
                     nom, category=cat, topic=sujet(cle, cf), overwrites=droits_zone(g),
@@ -1802,7 +1866,7 @@ class EntraidePanelV2(LayoutView):
                     r = role_zone(self.g, cf, z.cle)
                     qui = f" · {r.mention} ({len(r.members)})" if r else (" · rôle manquant" if z.role else "")
                     ping = " · 🔔" if prevenir(cf, z) else ""
-                    lignes.append(f"{z.emoji} **{z.nom}** · {expire_h(cf, z)} h{qui}{ping}")
+                    lignes.append(f"{z.emoji} **{z.libelle}** · {expire_h(cf, z)} h{qui}{ping}")
                 g_h = garder_h(cf)
                 lignes.append("-# Les demandes closes disparaissent " + ("tout de suite (au passage suivant)" if not g_h
                                                                          else f"après {g_h} h")
@@ -1812,7 +1876,7 @@ class EntraidePanelV2(LayoutView):
                 items.append(discord.ui.TextDisplay(self._note))
             if installe:
                 choix = Select(placeholder="Régler un type…", options=[
-                    discord.SelectOption(label=z.nom, value=z.cle, emoji=z.emoji, default=self.zone == z.cle)
+                    discord.SelectOption(label=z.libelle, value=z.cle, emoji=z.emoji, default=self.zone == z.cle)
                     for z in ZONES.values()])
                 choix.callback = self._cb_zone
                 items.append(discord.ui.ActionRow(choix))
@@ -1820,7 +1884,7 @@ class EntraidePanelV2(LayoutView):
                 if z is not None:
                     if z.role:
                         rs = RoleSelect(placeholder=f"Rôle des {'middlemen' if z.certif == 'middleman' else 'guides'}"
-                                                    f" · {z.nom}", min_values=1, max_values=1)
+                                                    f" · {z.libelle}", min_values=1, max_values=1)
                         rs.callback = self._cb_role
                         items.append(discord.ui.ActionRow(rs))
                     delai = Select(placeholder=f"Fermée après… · {z.nom}", options=[
@@ -1879,7 +1943,7 @@ class EntraidePanelV2(LayoutView):
         cf = await conf(self.g)
         cf["roles"][z.cle] = rid
         await _db_set(self.g.id, "rs_roles", cf["roles"])
-        self._note = f"{z.emoji} {z.nom} : {r.mention} certifie désormais."
+        self._note = f"{z.emoji} {z.libelle} : {r.mention} certifie désormais."
         await assurer_panneaux(self.g, forcer=True)
         await self.render_to(i)
 

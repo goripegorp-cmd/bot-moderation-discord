@@ -31,8 +31,9 @@ from ui_v2 import LayoutView, Palette
 RACINE = Path(__file__).resolve().parent.parent
 SRC = (RACINE / "bot.py").read_text(encoding="utf-8")
 ARBRE = ast.parse(SRC)
-POSTS_COMMU = [t for _c, t, _v, _x in ZN.POSTS_COMMU]
 POSTS_RELL = [t for _c, t, _v, _x in ZN.POSTS_RELL]
+POSTS_CLOVER = [t for _c, t, _v, _x in ZN.POSTS_CLOVER]
+SALONS_COMMU = ["❓aide", "💬discussion", "📸médias", "💡suggestions", "🚀boosts", "🤖commandes"]
 
 
 def _source(nom):
@@ -89,157 +90,159 @@ def _clan_et_vocaux(g, conf):
     return join, hub_clan
 
 
-def serveur_de_ce_soir(env):
-    """Le serveur tel que le lot 19 l'a laissé : Communautaire (❓aide, 💬chat, 🧵discussions, 💡suggestions,
-    🚀boosts, 🔊Join) et la zone · Rell Seas (🌊chat-rellseas, 🛟help, 🤝trade, ⚓crews, 🔊Join) — avec une
-    demande ouverte, un équipage et une idée en vote."""
+def serveur_v2(env):
+    """Le serveur tel que les lots 21 à 27 l'ont laissé : 💬communautaire et 🌊rell-seas (deux forums) puis
+    🔊Join dans Communautaire ; une idée en vote dans 💡 Suggestions ; des réglages qui visent les posts ;
+    les rôles des guides de Rell Seas."""
     g = Monde()
     c = env.conf
-    c.update(aide_salon=g.nom("❓aide").id, suggestions_salon=g.nom("💡suggestions").id,
-             boosts_salon=g.nom("🚀boosts").id, rs_installation_auto="x", zones_v1=1, menage_v1="x")
-    join, _hub_clan = _clan_et_vocaux(g, c)
-    c["zones_forum"] = g._salon(Forum, "🧵discussions", {"category": g.commu}).id
-    rell = g.categorie("· Rell Seas")
-    c["zones_rell"] = rell.id
-    c["zones_chat"] = g._salon(Texte, "🌊chat-rellseas", {"category": rell}).id
-    vocal = g._salon(Vocal, "🔊Join", {"category": rell})
-    c["zones_vocal"] = vocal.id
-    c["temp_voice_config"]["hubs"][str(vocal.id)] = {"category": rell.id, "default_name": "🌊 {user}"}
-    run(E.installer(g, categorie=rell))
-    run(Q.installer(g, rell))
-    run(E.publier(interaction(g, g.membre(7)), E.ZONES["boss"], {"titre": "Akuma", "pseudo": "K", "niveau": "",
-                                                                    "joueurs": "", "details": ""}))
-    run(Q.publier(interaction(g, g.membre(8)), "pirate", {"nom": "Les Requins", "pseudo": "K", "membres": "",
-                                                           "niveau": "", "presentation": "On navigue."}))
+    _clan_et_vocaux(g, c)
+    for nom in ("💬chat", "💡suggestions", "🚀boosts", "❓aide"):  # partis avec les archives, le 22/10
+        run(g.nom(nom).delete())
+    commu = g._salon(Forum, "💬communautaire", {"category": g.commu})
+    rell = g._salon(Forum, "🌊rell-seas", {"category": g.commu})
+    posts = {}
+    for forum, defs in ((commu, (("aide", "❓ Aide · Help"), ("chat", "💬 Chat"), ("medias", "📸 Médias · Media"),
+                                 ("suggestions", "💡 Suggestions"), ("boosts", "🚀 Boosts"),
+                                 ("commandes", "🤖 Commandes · Commands"))),
+                        (rell, (("guide", "🧭 Guide · Rell Seas"), ("rell_chat", "🌊 Chat Rell Seas"),
+                                ("help", "🛟 Help · Entraide"), ("trade", "🤝 Trade · Échanges")))):
+        for cle, titre in defs:
+            fil = run(forum.create_thread(name=titre)).thread
+            posts[cle] = {"id": fil.id, "ouverture": fil.id}
+    roles = {cle: run(g.create_role(name=nom)).id for cle, nom in (("aide", "🛟 Guide Aide"), ("boss", "⚔️ Guide Boss"),
+                                                                   ("farm", "🌾 Guide Farm"), ("trade", "🛡️ Middleman"))}
+    c.update(zones_v2=1, zones_demenage=1, rs_actif=1, rs_v2=1, zones_forum_commu=commu.id, zones_forum_rell=rell.id,
+             zones_posts=posts, aide_salon=posts["aide"]["id"], aide_message=posts["aide"]["id"],
+             suggestions_salon=posts["suggestions"]["id"], suggestions_panneau=posts["suggestions"]["id"],
+             boosts_salon=posts["boosts"]["id"], boosts_entete=posts["boosts"]["id"], rs_roles=roles,
+             rs_salons={"entraide": posts["help"]["id"], "trade": posts["trade"]["id"]},
+             rs_ouvertures={"entraide": posts["help"]["id"], "trade": posts["trade"]["id"]},
+             rs_panneaux={"entraide": 4242, "trade": posts["trade"]["id"]},
+             link_allowed_channels=[posts["chat"]["id"]], image_allowed_channels=[posts["medias"]["id"]],
+             welcome_channel=posts["chat"]["id"])
 
     async def idee():
         async with env.get_db() as db:
             await db.execute("INSERT INTO suggestions_v2(guild_id, channel_id, message_id, auteur_id, titre, cree_le)"
-                             " VALUES(1, ?, 5, 9, 'Un mode PvP', '2026-10-22 18:00:00')", (c["suggestions_salon"],))
+                             " VALUES(1, ?, 5, 9, 'Un mode PvP', '2026-10-23 18:00:00')", (posts["suggestions"]["id"],))
             await db.execute("INSERT INTO suggestions_votes(suggestion_id, user_id, vote) VALUES(1, 4, 1)")
             await db.commit()
     run(idee())
-    return g, join, vocal, rell
+    return g, commu, rell
 
 
 def noms(cat):
     return [s.name for s in cat.channels]
 
 
-# ─── Les deux forums ─────────────────────────────────────────────────────────
+# ─── Communautaire en salons simples, un forum par jeu ──────────────────────
 
-def test_Z1_ce_soir_tout_passe_dans_deux_forums_le_vocal_reste(env):
-    g, join, vocal_rell, rell = serveur_de_ce_soir(env)
-    anciens = {n: g.nom(n) for n in ("❓aide", "💬chat", "💡suggestions", "🚀boosts", "🧵discussions",
-                                     "🌊chat-rellseas", "🛟help", "🤝trade", "⚓crews")}
-    #  « Le crew équipage… une mauvaise idée » : l'ancien forum ⚓crews part avec le reste, sans successeur.
-    vieux_chat = anciens["💬chat"].id
-    env.conf.update(link_allowed_channels=[vieux_chat], image_allowed_channels=[vieux_chat, 999],
-                    welcome_channel=vieux_chat)
-    faits = run(ZN.installer(g))
+def test_Z1_communautaire_en_salons_simples_l_ancien_forum_part(env):
+    """24/10 : « refais tout l'onglet communautaire… avec des salons simples… un salon discussion, média…
+    Boost, Suggestion… en dehors » — et l'ancien forum supprimé (« Le supprimer », choix du fondateur)."""
+    g, commu, _rell = serveur_v2(env)
     c = env.conf
-    chat_post = c["zones_posts"]["chat"]["id"]
-    assert c["link_allowed_channels"] == [vieux_chat, chat_post] and c["image_allowed_channels"] ==         [vieux_chat, 999, chat_post] and c["welcome_channel"] == chat_post, "les réglages suivent le chat dans son post"
-    assert c["zones_correspondances"][str(anciens["🛟help"].id)] == c["zones_posts"]["help"]["id"]
-    assert noms(g.commu) == ["💬communautaire", "🌊rell-seas", "🔊Join"], "une catégorie : deux forums et le vocal"
-    assert join.category_id == g.commu.id and str(join.id) in c["temp_voice_config"]["hubs"], "le vocal reste tel quel"
-    commu, rell_forum = g.nom("💬communautaire"), g.nom("🌊rell-seas")
-    assert [x.fil.name for x in commu.crees][::-1] == POSTS_COMMU and [x.fil.name for x in rell_forum.crees][::-1] == \
-        POSTS_RELL, "créés du dernier au premier : le forum les montre dans l'ordre"
-    droits = commu.kw["overwrites"][g.default_role]
-    assert (droits.send_messages, droits.send_messages_in_threads) == (False, True), \
-        "on écrit dans les posts, on n'en crée pas"
-    posts = c["zones_posts"]
-    verrous = {cle: g.fils[p["id"]].locked for cle, p in posts.items()}
-    assert verrous == {"aide": True, "chat": False, "medias": False, "suggestions": True, "boosts": True,
-                       "commandes": False, "guide": True, "rell_chat": False, "help": False, "trade": False}
-    assert (c["aide_salon"], c["aide_message"]) == (posts["aide"]["id"], posts["aide"]["id"])
-    assert c["suggestions_salon"] == posts["suggestions"]["id"]
-    assert c["suggestions_panneau"] == g.fils[posts["suggestions"]["id"]].messages[-1].id,         "sous l'idée déménagée, le bouton « Proposer » redescend"
-    assert (c["boosts_salon"], c["boosts_entete"]) == (posts["boosts"]["id"],) * 2
-    assert c["rs_salons"] == {"entraide": posts["help"]["id"], "trade": posts["trade"]["id"]} == c["rs_ouvertures"]
-    assert not any("⚓" in x.fil.name for x in rell_forum.crees), "plus de post ⚓ Crews"
-    archives = g.get_channel(c["zones_categorie_archives"])
-    assert archives.name == "📦 Archives" and archives.kw["overwrites"][g.default_role].view_channel is False
-    for nom, ch in anciens.items():
-        assert ch.id in g.salons and ch.category_id == archives.id, f"{nom} : caché aux archives, pas effacé"
-        assert ch.edits[-1]["sync_permissions"] is True, "il prend les droits de la catégorie cachée"
-    assert sorted(c["zones_archives"]) == sorted(ch.id for ch in anciens.values())
-    assert vocal_rell.supprime and str(vocal_rell.id) not in c["temp_voice_config"]["hubs"], "un seul vocal"
-    assert rell.supprime and rell not in g.categories
-    d = run(E.charger(1))
-    assert d["statut"] == "fermee" and "republie ta demande dans 🌊rell-seas" in g.fils[d["fil_id"]].envois[-1][0]
-    assert run(Q.charger(1))["mode"] != "carte", "l'équipage ne devient pas une carte : il n'y a plus d'équipages"
+    anciens = dict(c["zones_posts"])
+    faits = run(ZN.installer(g))
+    salons = c["zones_salons"]
+    assert noms(g.commu) == SALONS_COMMU + ["🌊rell-seas", "🍀clover-rpg", "🔊Join"], \
+        "des salons simples, les forums des jeux, puis le vocal"
+    assert commu.supprime and c["zones_forum_commu"] == 0 and "💬communautaire supprimé" in faits
+    assert set(c["zones_posts"]) == {"guide", "rell_chat", "help", "trade", "cl_guide", "cl_chat", "cl_help", "cl_trade"}
+    assert (c["aide_salon"], c["aide_message"]) == (salons["aide"], 0), "le panneau ❓ aide se repose dans son salon"
+    assert c["suggestions_salon"] == salons["suggestions"] and c["boosts_salon"] == salons["boosts"]
+    assert c["link_allowed_channels"] == [anciens["chat"]["id"], salons["discussion"]], "les réglages suivent"
+    assert c["image_allowed_channels"] == [anciens["medias"]["id"], salons["medias"]]
+    assert c["welcome_channel"] == salons["discussion"]
+    assert c["zones_correspondances"][str(anciens["commandes"]["id"])] == salons["commandes"], "l'immunité suivra"
     s, pour, _contre = run(S.charger(1))
-    idees = g.fils[posts["suggestions"]["id"]]
-    assert s["channel_id"] == idees.id and s["message_id"] == idees.messages[0].id and pour == 1, \
-        "l'idée en vote passe dans le post, avec ses votes"
-    assert c["zones_v2"] == 1 and not any("équipage" in f for f in faits)
-    n_salons, n_fils = len(g.salons), len(g.fils)
-    assert run(ZN.installer(g)) == [] and (len(g.salons), len(g.fils)) == (n_salons, n_fils), "relancer : rien"
+    assert s["channel_id"] == salons["suggestions"] and pour == 1, "l'idée en vote passe dans 💡suggestions, avec son vote"
+
+    def parole(nom):
+        return g.nom(nom).kw["overwrites"][g.default_role].send_messages
+    assert parole("💬discussion") and parole("📸médias") and parole("🤖commandes")
+    assert not parole("❓aide") and not parole("💡suggestions") and not parole("🚀boosts"), "on y lit, on clique"
+    clover = g.nom("🍀clover-rpg")
+    assert [x.fil.name for x in clover.crees][::-1] == POSTS_CLOVER, "créés du dernier au premier : dans l'ordre"
+    posts = c["zones_posts"]
+    assert {k: g.fils[posts[k]["id"]].locked for k in ("cl_guide", "cl_chat", "cl_help", "cl_trade")} == \
+        {"cl_guide": True, "cl_chat": False, "cl_help": False, "cl_trade": False}
+    assert c["rs_salons"] == {"entraide": posts["help"]["id"], "trade": posts["trade"]["id"],
+                              "cl_entraide": posts["cl_help"]["id"], "cl_trade": posts["cl_trade"]["id"]}
+    assert c["rs_panneaux"]["entraide"] == 4242, "le panneau de Rell Seas, sous sa dernière carte, ne bouge pas"
+    roles = c["rs_roles"]
+    assert g.get_role(roles["cl_trade"]).name == "🛡️ Middleman · Clover" and {"cl_aide", "cl_boss", "cl_farm"} <= set(roles)
+    n = (len(g.salons), len(g.fils), len(g.roles))
+    assert run(ZN.installer(g)) == [] and (len(g.salons), len(g.fils), len(g.roles)) == n, "relancer : rien"
 
 
-def test_Z2_les_fonctions_marchent_dans_leurs_posts(env):
-    g, _join, _v, _r = serveur_de_ce_soir(env)
+def test_Z2_chaque_fonction_marche_a_sa_place(env):
+    g, _c, _r = serveur_v2(env)
     run(ZN.installer(g))
-    posts = env.conf["zones_posts"]
-    aide, trade = (g.fils[posts[k]["id"]] for k in ("help", "trade"))
+    c = env.conf
+    posts = c["zones_posts"]
     E._creations.clear()
-    run(E.publier(interaction(g, g.membre(20)), E.ZONES["farm"], {"titre": "Niveaux", "pseudo": "P", "niveau": "",
-                                                                     "duree": "", "details": ""}))
-    d = run(E.charger(2))
-    assert (d["mode"], d["salon_id"]) == ("carte", aide.id) and d["fil_id"] == aide.messages[0].id
-    run(E.publier(interaction(g, g.membre(21)), E.ZONES["trade"], {"donne": "A", "cherche": "B", "pseudo": "P",
-                                                                      "details": ""}))
-    assert run(E.charger(3))["salon_id"] == trade.id
-    assert run(S.salon_de(g)).id == posts["suggestions"]["id"] and run(boosts.salon_de(g)).id == posts["boosts"]["id"]
+    run(E.publier(interaction(g, g.membre(20)), E.ZONES["cl_farm"], {"titre": "Niveaux", "pseudo": "P", "niveau": "",
+                                                                        "duree": "", "details": ""}))
+    aide = g.fils[posts["cl_help"]["id"]]
+    d = run(E.charger(1))
+    assert (d["mode"], d["salon_id"]) == ("carte", aide.id) and d["fil_id"] == aide.messages[0].id, \
+        "une demande Clover RPG : une carte dans 🛟 Help de Clover"
+    run(E.publier(interaction(g, g.membre(21)), E.ZONES["cl_trade"], {"donne": "Épée", "cherche": "Bouclier",
+                                                                         "pseudo": "P", "details": ""}))
+    assert run(E.charger(2))["salon_id"] == posts["cl_trade"]["id"]
+    assert run(E.reputation(1, 21, "cl_trade")) == 0 and run(E.reputation(1, 21, "trade")) == 0
+    assert run(S.salon_de(g)).id == c["zones_salons"]["suggestions"]
+    assert run(boosts.salon_de(g)).id == c["zones_salons"]["boosts"]
 
 
-def test_Z3_un_serveur_neuf_la_categorie_est_creee(env):
+def test_Z3_un_serveur_neuf_tout_est_cree(env):
     g = Monde(communautaire=False)
     faits = run(ZN.installer(g))
-    cat = g.get_channel(g.nom("💬communautaire").category_id)
+    cat = g.get_channel(g.nom("💬discussion").category_id)
     assert cat.name == "· Communautaire" and faits[0] == "catégorie · Communautaire"
-    assert noms(cat) == ["💬communautaire", "🌊rell-seas"] and "zones_categorie_archives" not in env.conf, \
-        "rien à archiver"
+    assert noms(cat) == SALONS_COMMU + ["🌊rell-seas", "🍀clover-rpg"] and "zones_categorie_archives" not in env.conf, \
+        "jamais d'archives"
 
 
 def test_Z4_sans_communaute_discord_des_salons_et_leurs_fils(env):
     g = Monde(forum=False, communautaire=False)
     run(ZN.installer(g))
-    salon = g.nom("💬communautaire")
+    salon = g.nom("🍀clover-rpg")
     assert isinstance(salon, Texte)
-    aide = env.conf["zones_posts"]["aide"]
+    aide = env.conf["zones_posts"]["cl_help"]
     fil = g.fils[aide["id"]]
     assert fil.parent is salon and aide["ouverture"] == fil.messages[0].id != fil.id, "l'ouverture : son 1er message"
-    assert env.conf["rs_panneaux"]["entraide"] == env.conf["zones_posts"]["help"]["ouverture"]
+    assert env.conf["rs_panneaux"]["cl_entraide"] == aide["ouverture"]
 
 
 def test_Z5_l_entretien_reveille_reverrouille_jamais_ne_deverrouille(env):
     g = Monde(communautaire=False)
     run(ZN.installer(g))
     posts = env.conf["zones_posts"]
-    chat, aide = g.fils[posts["chat"]["id"]], g.fils[posts["aide"]["id"]]
+    chat, guide = g.fils[posts["cl_chat"]["id"]], g.fils[posts["cl_guide"]["id"]]
     chat.archived, chat.locked = True, True  # le staff a verrouillé le chat (un raid)
-    aide.locked = False
+    guide.locked = False
     run(ZN.entretenir(g))
     assert not chat.archived and chat.locked, "réveillé, et toujours verrouillé : c'est le choix du staff"
-    assert aide.locked, "le post ❓ Aide se reverrouille"
+    assert guide.locked, "le guide se reverrouille"
 
 
-def test_Z6_le_panneau_aide_mene_aux_posts(env):
+def test_Z6_le_panneau_aide_un_groupe_par_compartiment(env):
     g = Monde()
-    _clan_et_vocaux(g, env.conf)
+    join, _hub = _clan_et_vocaux(g, env.conf)
     run(ZN.installer(g))
     c = env.conf
-    groupes = ZN.lignes_aide(g, c, run(ZN.conf(g)))
-    assert list(groupes) == ["Communautaire · Community", "Rell Seas"]
+    c["cadeaux_salon"] = g._salon(Texte, "🎁giveaways", {}).id
+    groupes = ZN.groupes_aide(g, c, run(ZN.conf(g)))
+    assert [titre for titre, _p, _b in groupes] == ["Communautaire · Community", "🌊 Rell Seas", "🍀 Clover RPG"]
+    _t, phrase, boutons = groupes[0]
+    assert [b for _x, b in boutons] == ["💬 Discussion", "📸 Médias", "💡 Suggestions", "🤖 Commandes", "🎁 Cadeaux"]
+    assert f"🔊 <#{join.id}>" in phrase, "le vocal de la communauté, pas celui du clan"
     posts = c["zones_posts"]
-    assert [p.id for p, _t, _b in groupes["Rell Seas"]] == [posts[k]["id"] for k in ("rell_chat", "help", "trade")]
-    assert groupes["Communautaire · Community"][0][0].jump_url == f"https://discord.com/channels/1/{posts['chat']['id']}"
-    join = next(s for s in g.commu.channels if s.name == "🔊Join")
-    assert groupes["Communautaire · Community"][0][1].endswith(f"🔊 <#{join.id}>"), "le vocal, pas celui du clan"
-    assert all(" · " in t and " · " in b for v in groupes.values() for _p, t, b in v), "tout en français · anglais"
+    assert [x.id for x, _b in groupes[2][2]] == [posts[k]["id"] for k in ("cl_guide", "cl_chat", "cl_help", "cl_trade")]
+    assert "💬chat" in noms(g.commu), "un ancien salon qu'on ne sait pas reprendre reste là : rien n'est supprimé"
 
 
 def _vue_aide_ns():
@@ -251,7 +254,7 @@ def _vue_aide_ns():
     return ns
 
 
-def test_Z7_le_panneau_aide_bilingue_la_langue_d_un_clic_de_la_marge(env):
+def test_Z7_le_panneau_aide_bilingue_des_rangees_de_boutons(env):
     g = Monde()
     _clan_et_vocaux(g, env.conf)
     run(ZN.installer(g))
@@ -261,17 +264,34 @@ def test_Z7_le_panneau_aide_bilingue_la_langue_d_un_clic_de_la_marge(env):
     ns = _vue_aide_ns()
     vue, signature = run(ns["_vue_aide"](g, env.conf))
     t = textes(vue)
-    assert compter(vue) <= 37, f"{compter(vue)} composants : Discord en refuse plus de 40, on garde de la marge"
+    assert compter(vue) <= 40, f"{compter(vue)} composants : Discord en refuse plus de 40"
     assert "Serveur international" in t and "International server" in t
     assert ids(vue)[:2] == ["i18n_setlang:fr", "i18n_setlang:en"], "le choix de la langue, en tête"
-    assert t.index("### Communautaire") < t.index("### Rell Seas") < t.index("### Staff")
-    assert f"<#{g.rules_channel.id}>" in t and "join the clan" in t and "Crews" not in t, "plus d'équipages"
+    assert t.index("### Communautaire") < t.index("### 🌊 Rell Seas") < t.index("### 🍀 Clover RPG") < t.index("### Staff")
+    assert f"<#{g.rules_channel.id}>" in t and "join the clan" in t and "Crews" not in t
+    liens = [b.url for b in vue.walk_children() if isinstance(b, discord.ui.Button) and b.url]
+    assert len(liens) == 4 + 4 + 4 + 1, "Communautaire, Rell Seas, Clover RPG, le ticket"
     assert signature.startswith(f"{ns['AIDE_VERSION']}|")
 
 
+def _archives_d_avant(env):
+    """Les archives du 22/10 (supprimées depuis, à la demande du fondateur) : la fonction reste — on la
+    garde vérifiée sur neuf anciens salons rangés à la main."""
+    g = Monde()
+    _clan_et_vocaux(g, env.conf)
+    cat = g.categorie("📦 Archives")
+    ranges = []
+    for nom in ("❓aide", "💬chat", "💡suggestions", "🚀boosts", "🧵discussions", "🌊chat-rellseas", "🛟help", "🤝trade",
+                "⚓crews"):
+        ch = g.nom(nom) if nom in ("❓aide", "💬chat", "💡suggestions", "🚀boosts") else g._salon(Texte, nom, {})
+        ch.category_id = cat.id
+        ranges.append(ch.id)
+    env.conf.update(zones_archives=ranges, zones_categorie_archives=cat.id)
+    return g
+
+
 def test_Z8_les_archives_le_fondateur_choisit_ce_qui_part(env):
-    g, _join, _v, _r = serveur_de_ce_soir(env)
-    run(ZN.installer(g))
+    g = _archives_d_avant(env)
     c = env.conf
     archives = ZN.archives(g, c)
     assert len(archives) == 9
@@ -284,8 +304,7 @@ def test_Z8_les_archives_le_fondateur_choisit_ce_qui_part(env):
 
 
 def test_Z9_le_bouton_des_archives_est_au_fondateur_seul(env):
-    g, _join, _v, _r = serveur_de_ce_soir(env)
-    run(ZN.installer(g))
+    g = _archives_d_avant(env)
     tableau = []
 
     async def _salon_tableau(_g):
@@ -361,7 +380,7 @@ def test_Z10_les_categories_vides_et_inutiles_partent_rien_qui_contient_un_salon
     assert run(ns["_menage_categories"](g)) == [] and len(journal) == 1, "une fois suffit"
 
 
-def test_Z11_les_deux_forums_se_reposent_si_l_installation_casse_trois_essais(env):
+def test_Z11_l_installation_reprend_si_elle_casse_trois_essais(env):
     essais, ecrits = [], {}
 
     async def casse(_g):
@@ -382,26 +401,28 @@ def test_Z11_les_deux_forums_se_reposent_si_l_installation_casse_trois_essais(en
     g = Obj(id=1)
     for n in (1, 2):
         run(ns["_installer_zones"](g, dict(env.conf)))
-        assert env.conf["zones_v2"] == "" and env.conf["zones_v2_essais"] == n, "le passage suivant réessaie"
+        assert env.conf["zones_v3"] == "" and env.conf["zones_v3_essais"] == n, "le passage suivant réessaie"
     run(ns["_installer_zones"](g, dict(env.conf)))
-    assert env.conf["zones_v2"] == "t" and env.conf["zones_v2_essais"] == 3, "au troisième échec, on arrête"
+    assert env.conf["zones_v3"] == "t" and env.conf["zones_v3_essais"] == 3, "au troisième échec, on arrête"
     assert len(essais) == 3
 
 
 def test_Z13_branche_dans_le_bot():
     assert "zones.setup(cfg=cfg, db_set=db_set, lecteurs=_lecteurs_archives, ticket=_salon_des_tickets," in SRC
     boucle = next(ast.unparse(n) for n in ARBRE.body if getattr(n, "name", "") == "entraide_task")
-    assert "g.owner_id in TETE_IDS and c.get('rs_actif') and (not c.get('zones_v2'))" in boucle
+    assert "g.owner_id in TETE_IDS and c.get('rs_actif') and (not c.get('zones_v3'))" in boucle
     assert boucle.index("db_set(g.id, 'menage_v1'") < boucle.index("_menage_categories(g)"), "témoin d'abord"
     assert "await zones.entretenir(g)" in boucle
     installer = _source("_installer_zones")
-    assert installer.index("db_set(g.id, 'zones_v2'") < installer.index("zones.installer(g)")
+    assert installer.index("db_set(g.id, 'zones_v3'") < installer.index("zones.installer(g)")
     assert "bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)" in SRC
     assert "BoutonArchives(len(archives))" in _source("_menu_logs")
     aide = _source("_salon_aide")
     assert "get_channel_or_thread(aide_id)" in aide and "c.get('zones_v2')" in aide, "le panneau vit dans son post"
     assert '"deux_forums": any(' in SRC and '"menage": any(' in SRC, "/stats dit ce qui est en place"
-    assert all((RACINE / "visuels" / f"{k}.gif").is_file() for k in ("orientation", "rs_crews"))
+    for etat in ('"commu_salons": max(', '"forum_commu": any(', '"forum_clover": any('):
+        assert etat in SRC, etat
+    assert all((RACINE / "visuels" / f"{k}.gif").is_file() for k in ("orientation", "cl_guide", "cl_entraide", "cl_trade"))
 
 
 def _v1_du_clan(g, conf):
@@ -646,9 +667,35 @@ def test_Z15_le_guide_de_rell_seas_en_tete_du_forum(env):
     assert run(ZN.assurer_guide(g)) and "Échanger · Trade" not in textes(fil.cartes[-1][1]["view"]),         "un post parti : sa ligne part (aucun bouton qui ment)"
 
 
-def test_Z16_plus_d_archives_tout_part_meme_si_discord_tarde(env):
-    g, _join, _v, _r = serveur_de_ce_soir(env)
+def test_Z15b_le_guide_de_clover_rpg_le_meme_sans_le_clan(env):
+    g = Monde()
+    _clan_et_vocaux(g, env.conf)
+    ticket = g._salon(Texte, "🏷ticket", {"category": g.categorie("🎫 TICKETS")})
+    ZN.setup(cfg=env.cfg, db_set=env.db_set, lecteurs=lambda g, c: [], ticket=lambda _g: ticket, log=lambda *a: None)
     run(ZN.installer(g))
+    c = env.conf
+    guide = c["zones_posts"]["cl_guide"]
+    assert g.nom("🍀clover-rpg").crees[-1].fil.id == guide["id"], "le plus récent : en tête du forum"
+    fil = g.fils[guide["id"]]
+    assert fil.locked and fil.name == "🧭 Guide · Clover RPG"
+    vue = [k for mid, k in fil.cartes if mid == guide["ouverture"]][-1]["view"]
+    t = textes(vue)
+    for morceau in ("Bienvenue sur Clover RPG", "Welcome to Clover RPG", "### 🍀 Discuter · Talk", "quêtes, objets",
+                    "### 🛟 S'entraider · Get help", "### 🤝 Échanger · Trade", "### 🏅 Qui certifie",
+                    "### 🎫 Une question ?"):
+        assert morceau in t, morceau
+    roles = c["rs_roles"]
+    assert "Le clan GoRP" not in t, "le clan, c'est Rell Seas"
+    assert f"<@&{roles['cl_boss']}>" in t and f"<@&{roles['cl_trade']}>" in t and f"<@&{roles['boss']}>" not in t, \
+        "les guides de Clover RPG, pas ceux de Rell Seas"
+    liens = [b.url for b in vue.walk_children() if isinstance(b, discord.ui.Button) and b.url]
+    assert liens == [f"https://discord.com/channels/1/{c['zones_posts'][k]['id']}"
+                     for k in ("cl_chat", "cl_help", "cl_trade")] + [ticket.jump_url]
+    assert compter(vue) <= 40 and c["zones_guide_v_clover"].startswith(f"{ZN.GUIDE_VERSION}|")
+
+
+def test_Z16_plus_d_archives_tout_part_meme_si_discord_tarde(env):
+    g = _archives_d_avant(env)
     c = env.conf
     archives = ZN.archives(g, c)
     cat = g.get_channel(c["zones_categorie_archives"])

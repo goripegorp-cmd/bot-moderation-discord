@@ -6,6 +6,7 @@ ou… un multiplicateur… ceux qui offrent le nitro »."""
 from __future__ import annotations
 
 import ast
+import asyncio
 import random
 import time
 from datetime import datetime
@@ -314,3 +315,66 @@ def test_K11_le_panneau_de_creation_de_bout_en_bout(env):
     assert "Cadeau lancé" in textes(i.suivis[-1][1]["view"])
     c = run(K.charger(1))
     assert (c["roles"], c["msg_min"], c["voc_min"], c["logique"], c["gagnants"]) == ([77], 10, 30, "ou", 1)
+
+
+def test_K12_ceux_qui_peuvent_et_ceux_qui_peuvent_pas(env):
+    """« Que je peux blacklist un rôle, que je peux whitelist un rôle. »"""
+    g = serveur()
+    membre_role, puni = run(g.create_role(name="Membre")), run(g.create_role(name="Puni"))
+    f = g.membre(1)
+    run(K.salon_cadeaux(g, creer=True))
+    b = K.Brouillon(lot="Skin", duree="1h", roles=[membre_role.id], exclus=[puni.id])
+    vue = K.VueCadeau(f, g, b)
+    assert compter(vue) <= 40, f"{compter(vue)} composants"
+    run(K.lancer(g, f, b))
+    carte = textes(g.nom("🎁giveaways").envois[-1][2]["view"])
+    assert f"✅ <@&{membre_role.id}>" in carte and f"🚫 <@&{puni.id}>" in carte and "### ⏳ Fin <t:" in carte, \
+        "qui peut, qui ne peut pas, et le compte à rebours en tête"
+    i = interaction(g, g.membre(30, membre_role, puni))
+    run(K.participer(i, 1))
+    assert "n'est pas ouvert" in textes(_vue(i)) and run(K.inscrits(1)) == [], "un rôle exclu l'emporte"
+    m = g.membre(31, membre_role)
+    run(K.participer(interaction(g, m), 1))
+    assert run(K.inscrits(1)) == [31]
+    m.roles.append(puni)  # puni après s'être inscrit
+    run(K.terminer(g, 1))
+    assert run(K.charger(1))["resultat"]["gagnants"] == [], "au tirage, un exclu ne gagne pas"
+
+
+def test_K13_le_tirage_tombe_a_la_seconde(env):
+    """« Un vrai timer » : à moins de 40 s de la fin, un minuteur exact prend le relais de la boucle."""
+    g = serveur()
+    run(K.salon_cadeaux(g, creer=True))
+    run(K.lancer(g, g.membre(1), K.Brouillon(lot="Pass", duree="1h")))
+
+    async def bientot():
+        await K._ecrire("UPDATE cadeaux SET fin=? WHERE id=1", (time.time() + 1.2,))
+        assert await K.tic([g]) == 0 and 1 in K._minuteurs, "le minuteur est posé"
+        await asyncio.sleep(2.5)
+        return await K.charger(1)
+    assert run(bientot())["statut"] == "fini" and not K._minuteurs, "tiré à l'heure, sans attendre la boucle"
+    run(K.lancer(g, g.membre(1), K.Brouillon(lot="Skin", duree="1h")))
+
+    async def annule():
+        await K._ecrire("UPDATE cadeaux SET fin=? WHERE id=2", (time.time() + 30,))
+        await K.tic([g])
+        tache = K._minuteurs[2]
+        await K.annuler(g, 2, par=1)
+        await asyncio.sleep(0)
+        return tache
+    assert run(annule()).cancelled() and run(K.charger(2))["statut"] == "annule", "annulé : le minuteur s'arrête"
+
+
+def test_K14_la_commande_giveaway(env):
+    """« J'ai pas de commande pour lancer des cadeaux. »"""
+    assert 'giveaway_group = app_commands.Group(' in SRC and 'name="giveaway"' in SRC
+    assert '@giveaway_group.command(name="lancer"' in SRC and '@giveaway_group.command(name="gerer"' in SRC
+    assert "await cadeaux.ouvrir_composeur(i)" in SRC and "bot.tree.add_command(giveaway_group)" in SRC
+    g = serveur()
+    i = interaction(g, g.membre(50))
+    run(K.ouvrir_composeur(i))
+    assert i.response.messages[-1][0] == "Réservé au fondateur et à la direction."
+    i = interaction(g, g.membre(1))
+    run(K.ouvrir_composeur(i))
+    vue = _vue(i)
+    assert isinstance(vue, K.VueCadeau) and "Rôles exclus" in textes(vue) and "Rôles autorisés" in textes(vue)

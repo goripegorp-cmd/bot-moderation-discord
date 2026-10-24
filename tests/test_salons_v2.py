@@ -121,7 +121,10 @@ def test_V6_branchements():
     fn = next(ast.unparse(n) for n in ARBRE.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_configurer_salons_v2")
     assert "'anti_invite', 1" in fn and "required_role=clan_role.id" in fn and "config_salons_historique" in fn
     aide = next(ast.unparse(n) for n in ARBRE.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_vue_aide")
-    assert "url=salon.jump_url" in aide and "if salon is not None" in aide, "chaque ligne mène à un vrai salon"
+    assert "url=x.jump_url" in aide and "if not boutons" in aide, "chaque bouton mène à un vrai salon"
+    import zones
+    import inspect
+    assert "if x is not None" in inspect.getsource(zones.groupes_aide), "un salon absent : pas de bouton"
 
 
 def test_V7_automod_bloque_les_invitations_avant_l_envoi():

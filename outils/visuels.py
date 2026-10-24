@@ -108,6 +108,10 @@ BANDEAUX = {
     #  22/10/2026 (nuit) : le forum du clan et le salon des cadeaux.
     "clan_guide": ("CLAN GORP", "Guide du clan", "Bienvenue dans l'équipage · Welcome aboard", "\uE7C1",
                    (6, 182, 212), (20, 184, 166)),
+    #  24/10/2026 : Clover RPG, le deuxième jeu (vert trèfle).
+    "cl_guide": ("CLOVER RPG", "Guide", "Bienvenue · Welcome", "\uE8F1", (132, 204, 22), (16, 185, 129)),
+    "cl_entraide": ("CLOVER RPG", "Entraide · Help", "Aide · Boss · Farm · Chill", "\uE716", (34, 197, 94), (132, 204, 22)),
+    "cl_trade": ("CLOVER RPG", "Trade", "Objets · Items", "\uE8AB", (132, 204, 22), (245, 158, 11)),
     "cadeaux": ("GIVEAWAYS", "Cadeaux", "Participe et tente ta chance · Join and win", "\uF133",
                 (236, 72, 153), (245, 158, 11)),
 }

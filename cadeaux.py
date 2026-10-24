@@ -68,6 +68,7 @@ TEXTES = {
     "introuvable": {"fr": "Ce cadeau n'existe plus.", "en": "This giveaway no longer exists."},
     "fini": {"fr": "Ce cadeau est terminé.", "en": "This giveaway has ended."},
     "reserve": {"fr": "🔒 Ce cadeau est réservé à {roles}.", "en": "🔒 This giveaway is for {roles} only."},
+    "exclu": {"fr": "🚫 Ce cadeau n'est pas ouvert à {roles}.", "en": "🚫 This giveaway isn't open to {roles}."},
     "inscrit": {"fr": "🎉 **Tu participes !** Voici où tu en es :", "en": "🎉 **You're in!** Here's your progress:"},
     "quitte": {"fr": "Tu ne participes plus à ce cadeau.", "en": "You left this giveaway."},
     "tes_stats": {"fr": "tes stats", "en": "your stats"},
@@ -112,6 +113,8 @@ _vocal: dict = {}                                 # (guild_id, membre_id) → _m
 _charges: set = set()                             # les serveurs dont les cadeaux actifs sont en mémoire
 _maj_prevues: dict = {}
 _verrous: dict = {}
+_minuteurs: dict = {}                             # cadeau_id → la tâche qui tire à la seconde près
+MINUTEUR_S = 40.0     # à moins de 40 s de la fin, un minuteur exact prend le relais de la boucle (30 s)
 
 
 def setup(*, get_db, cfg, db_set, autorise, journal, ticket=None, langue=None, log=None):
@@ -144,14 +147,14 @@ async def langue_de(i) -> str:
 
 _COLONNES = ("id", "guild_id", "salon_id", "message_id", "auteur_id", "lot", "details", "image", "gagnants",
              "debut", "fin", "roles", "msg_min", "voc_min", "logique", "chance_roles", "multiplicateur",
-             "mention", "statut", "resultat")
+             "mention", "statut", "resultat", "roles_exclus")
 _SQL_UN = ("SELECT id, guild_id, salon_id, message_id, auteur_id, lot, details, image, gagnants, debut, fin,"
-           " roles, msg_min, voc_min, logique, chance_roles, multiplicateur, mention, statut, resultat"
+           " roles, msg_min, voc_min, logique, chance_roles, multiplicateur, mention, statut, resultat, roles_exclus"
            " FROM cadeaux WHERE id=?")
 _SQL_ACTIFS = ("SELECT id, debut FROM cadeaux WHERE guild_id=? AND statut='actif' ORDER BY id")
 _SQL_RECENTS = ("SELECT id, guild_id, salon_id, message_id, auteur_id, lot, details, image, gagnants, debut, fin,"
-                " roles, msg_min, voc_min, logique, chance_roles, multiplicateur, mention, statut, resultat"
-                " FROM cadeaux WHERE guild_id=? ORDER BY id DESC LIMIT ?")
+                " roles, msg_min, voc_min, logique, chance_roles, multiplicateur, mention, statut, resultat,"
+                " roles_exclus FROM cadeaux WHERE guild_id=? ORDER BY id DESC LIMIT ?")
 _SQL_VIDER = ("INSERT INTO cadeaux_stats(cadeau_id, membre_id, messages, vocal_s) VALUES(?,?,?,?)"
               " ON CONFLICT(cadeau_id, membre_id) DO UPDATE SET messages=MAX(0, messages+excluded.messages),"
               " vocal_s=vocal_s+excluded.vocal_s")
@@ -167,7 +170,12 @@ async def init_db():
             " roles TEXT NOT NULL DEFAULT '[]', msg_min INTEGER NOT NULL DEFAULT 0, voc_min INTEGER NOT NULL DEFAULT 0,"
             " logique TEXT NOT NULL DEFAULT 'et', chance_roles TEXT NOT NULL DEFAULT '[]',"
             " multiplicateur REAL NOT NULL DEFAULT 1, mention TEXT NOT NULL DEFAULT '',"
-            " statut TEXT NOT NULL DEFAULT 'actif', resultat TEXT NOT NULL DEFAULT '{}')")
+            " statut TEXT NOT NULL DEFAULT 'actif', resultat TEXT NOT NULL DEFAULT '{}',"
+            " roles_exclus TEXT NOT NULL DEFAULT '[]')")
+        async with db.execute("PRAGMA table_info(cadeaux)") as cur:
+            colonnes = {r[1] for r in await cur.fetchall()}
+        if "roles_exclus" not in colonnes:  # la table du 24/10 au matin
+            await db.execute("ALTER TABLE cadeaux ADD COLUMN roles_exclus TEXT NOT NULL DEFAULT '[]'")
         await db.execute(
             "CREATE TABLE IF NOT EXISTS cadeaux_inscrits (cadeau_id INTEGER NOT NULL, membre_id INTEGER NOT NULL,"
             " quand INTEGER NOT NULL, PRIMARY KEY (cadeau_id, membre_id))")
@@ -181,13 +189,14 @@ async def init_db():
 
 def _ligne(r) -> dict:
     c = dict(zip(_COLONNES, r))
-    for cle, defaut in (("roles", []), ("chance_roles", []), ("resultat", {})):
+    for cle, defaut in (("roles", []), ("chance_roles", []), ("resultat", {}), ("roles_exclus", [])):
         try:
             c[cle] = json.loads(c[cle] or json.dumps(defaut))
         except (TypeError, ValueError):
             c[cle] = defaut
     c["roles"] = [int(x) for x in c["roles"]]
     c["chance_roles"] = [int(x) for x in c["chance_roles"]]
+    c["roles_exclus"] = [int(x) for x in c["roles_exclus"]]
     c["multiplicateur"] = float(c["multiplicateur"] or 1)
     return c
 
@@ -406,6 +415,9 @@ async def charger_actifs(g) -> int:
 
 
 def _oublier(gid: int, cid: int) -> None:
+    t = _minuteurs.pop(int(cid), None)
+    if t is not None and t is not asyncio.current_task():
+        t.cancel()
     d = _actifs.get(gid) or {}
     d.pop(int(cid), None)
     for cle in [k for k in _tampon if k[0] == int(cid)]:
@@ -435,8 +447,14 @@ def _ids_roles(membre) -> set:
     return {r.id for r in getattr(membre, "roles", []) or []}
 
 
+def exclu(c: dict, membre) -> bool:
+    """« Ceux qui peuvent pas » : un rôle de la liste noire suffit à exclure."""
+    return bool(_ids_roles(membre) & set(c.get("roles_exclus") or []))
+
+
 def peut_participer(c: dict, membre) -> bool:
-    return not c["roles"] or bool(_ids_roles(membre) & set(c["roles"]))
+    """« Ceux qui peuvent » : sans liste blanche, tout le monde ; jamais un rôle de la liste noire."""
+    return not exclu(c, membre) and (not c["roles"] or bool(_ids_roles(membre) & set(c["roles"])))
 
 
 def chance(c: dict, membre) -> float:
@@ -580,7 +598,9 @@ class BoutonCadeaux(discord.ui.DynamicItem[Button], template=r"cd:menu"):
 def texte_conditions(c: dict) -> str:
     lignes = ["**🎟️ Pour participer · To enter**"]
     if c["roles"]:
-        lignes.append("• " + " ".join(f"<@&{r}>" for r in c["roles"]) + " — rôle demandé · role required")
+        lignes.append("• ✅ " + " ".join(f"<@&{r}>" for r in c["roles"]) + " — rôle demandé · role required")
+    if c.get("roles_exclus"):
+        lignes.append("• 🚫 " + " ".join(f"<@&{r}>" for r in c["roles_exclus"]) + " — exclus · excluded")
     besoins = []
     if c["msg_min"]:
         besoins.append(f"💬 **{c['msg_min']}** messages")
@@ -607,9 +627,10 @@ def composants_carte(c: dict, nb: int, *, apercu: bool = False) -> list:
         items.append(discord.ui.TextDisplay(c["details"]))
     items.append(discord.ui.Separator())
     if statut == "actif":
+        #  « Un vrai timer » : Discord fait défiler ce compte à rebours chez chacun, dans sa langue.
         items.append(discord.ui.TextDisplay(
-            f"🏆 **{c['gagnants']} gagnant{'s' if c['gagnants'] > 1 else ''} · winner{'s' if c['gagnants'] > 1 else ''}**"
-            f" · ⏳ Fin · Ends <t:{int(c['fin'])}:R> — <t:{int(c['fin'])}:f>"))
+            f"### ⏳ Fin <t:{int(c['fin'])}:R>\n-# Fin · Ends : <t:{int(c['fin'])}:F> · 🏆 {c['gagnants']} "
+            f"gagnant{'s' if c['gagnants'] > 1 else ''} · winner{'s' if c['gagnants'] > 1 else ''}"))
         items.append(discord.ui.TextDisplay(texte_conditions(c)))
         if c["chance_roles"] and c["multiplicateur"] > 1:
             items.append(discord.ui.TextDisplay(
@@ -700,6 +721,9 @@ async def participer(i, cid: int) -> None:
         return await _repondre(i, _vue_message(tr("introuvable", langue)))
     if c["statut"] != "actif":
         return await _repondre(i, _vue_message(tr("fini", langue)))
+    if exclu(c, i.user):
+        roles = " ".join(f"<@&{r}>" for r in c["roles_exclus"])
+        return await _repondre(i, _vue_message(tr("exclu", langue, roles=roles), Palette.WARNING))
     if not peut_participer(c, i.user):
         roles = " ".join(f"<@&{r}>" for r in c["roles"])
         return await _repondre(i, _vue_message(tr("reserve", langue, roles=roles), Palette.WARNING))
@@ -933,7 +957,23 @@ async def tic(guilds) -> int:
                 except Exception as ex:
                     _log("[CADEAUX][E5] tirage en échec")
                     _log(f"[CADEAUX][E5:DETAIL] cadeau={cid} {type(ex).__name__} {ex}")
+            elif c["fin"] - maintenant <= MINUTEUR_S and cid not in _minuteurs:
+                _minuteurs[cid] = asyncio.create_task(_minuteur(g, cid, float(c["fin"])))
     return tires
+
+
+async def _minuteur(g, cid: int, fin: float) -> None:
+    """« Un vrai timer » : le tirage tombe à la seconde de la fin, pas au passage suivant de la boucle."""
+    try:
+        await asyncio.sleep(max(0.0, fin - _mur()))
+        await terminer(g, cid)
+    except asyncio.CancelledError:
+        raise
+    except Exception as ex:
+        _log("[CADEAUX][E7] minuteur en échec")
+        _log(f"[CADEAUX][E7:DETAIL] cadeau={cid} {type(ex).__name__} {ex}")
+    finally:
+        _minuteurs.pop(cid, None)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -997,6 +1037,7 @@ class Brouillon:
     image: bytes = b""
     image_ext: str = ""
     roles: list = field(default_factory=list)
+    exclus: list = field(default_factory=list)
     msg_min: int = 0
     voc_min: int = 0
     logique: str = "et"
@@ -1013,7 +1054,8 @@ class Brouillon:
 
     def comme_cadeau(self, fin: int) -> dict:
         return {"id": 0, "lot": self.lot or "(le lot)", "details": self.details, "image": self.image_nom,
-                "gagnants": self.gagnants, "fin": fin, "roles": list(self.roles), "msg_min": self.msg_min,
+                "gagnants": self.gagnants, "fin": fin, "roles": list(self.roles),
+                "roles_exclus": list(self.exclus), "msg_min": self.msg_min,
                 "voc_min": self.voc_min, "logique": self.logique, "chance_roles": list(self.chance_roles),
                 "multiplicateur": self.multiplicateur, "statut": "actif",
                 "mention": "@everyone" if self.mention == "everyone" else "", "resultat": {}}
@@ -1040,10 +1082,11 @@ async def lancer(g, auteur, b: Brouillon) -> tuple:
     mention = "@everyone" if b.mention == "everyone" else ""
     cid = await _ecrire(
         "INSERT INTO cadeaux(guild_id, salon_id, auteur_id, lot, details, image, gagnants, debut, fin, roles,"
-        " msg_min, voc_min, logique, chance_roles, multiplicateur, mention) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " msg_min, voc_min, logique, chance_roles, multiplicateur, mention, roles_exclus)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (g.id, salon.id, auteur.id, b.lot, b.details, b.image_nom, int(b.gagnants), maintenant, fin,
          json.dumps(b.roles), int(b.msg_min), int(b.voc_min), b.logique, json.dumps(b.chance_roles),
-         float(b.multiplicateur), mention))
+         float(b.multiplicateur), mention, json.dumps(b.exclus)))
     c = await charger(cid)
     envoi = {"view": vue_carte(c, 0),
              "allowed_mentions": discord.AllowedMentions(everyone=bool(mention), users=False, roles=False)}
@@ -1166,9 +1209,12 @@ class VueCadeau(LayoutView):
         fin = lire_duree(b.duree, _mur()) or int(_mur()) + 86400
         for x in composants_carte(b.comme_cadeau(fin), 0, apercu=True):
             self.add_item(x)
-        qui = discord.ui.RoleSelect(placeholder="Qui peut participer ? Vide : tout le monde", min_values=0,
+        qui = discord.ui.RoleSelect(placeholder="✅ Rôles autorisés (vide : tout le monde)", min_values=0,
                                     max_values=ROLES_MAX, default_values=[discord.Object(r) for r in b.roles])
         qui.callback = self._cb_roles
+        pas = discord.ui.RoleSelect(placeholder="🚫 Rôles exclus (vide : personne)", min_values=0,
+                                    max_values=ROLES_MAX, default_values=[discord.Object(r) for r in b.exclus])
+        pas.callback = self._cb_exclus
         chanceux = discord.ui.RoleSelect(placeholder="Rôles chanceux ? Vide : aucun", min_values=0,
                                          max_values=ROLES_MAX,
                                          default_values=[discord.Object(r) for r in b.chance_roles])
@@ -1180,7 +1226,7 @@ class VueCadeau(LayoutView):
             conditions.append(f"🔊 {duree_txt(b.voc_min)} en vocal")
         modifier = Button(label="Modifier", style=discord.ButtonStyle.secondary, emoji="✏️")
         modifier.callback = self._cb_conditions
-        logique = Button(label="Il faut les deux (ET)" if b.logique == "et" else "L'un ou l'autre (OU)",
+        logique = Button(label="ET : les deux" if b.logique == "et" else "OU : l'un ou l'autre",
                          style=discord.ButtonStyle.secondary, emoji="🔀", disabled=len(conditions) < 2)
         logique.callback = self._cb_logique
         mult = Button(label=f"×{_nombre(b.multiplicateur)}", style=discord.ButtonStyle.secondary, emoji="🍀")
@@ -1194,19 +1240,20 @@ class VueCadeau(LayoutView):
         mention.callback = self._cb_mention
         annuler_b = Button(label="Annuler", style=discord.ButtonStyle.secondary)
         annuler_b.callback = self._cb_annuler
-        items = [discord.ui.TextDisplay("### ⚙️ Réglages · seul toi vois ce panneau"),
+        items = [discord.ui.TextDisplay("### ⚙️ Réglages · seul toi vois ce panneau\n**Qui peut participer** — "
+                                        "les rôles autorisés, puis les rôles exclus"),
                  discord.ui.ActionRow(qui),
+                 discord.ui.ActionRow(pas),
                  discord.ui.Section(discord.ui.TextDisplay(
                      "**📊 Conditions** — comptées depuis le lancement\n"
                      + (" · ".join(conditions) if conditions else "Aucune : il suffit de participer.")),
                      accessory=modifier),
-                 discord.ui.ActionRow(logique),
                  discord.ui.Section(discord.ui.TextDisplay(
                      "**🍀 Plus de chances** pour ces rôles"
                      + ("" if b.chance_roles else " — aucun choisi")), accessory=mult),
                  discord.ui.ActionRow(chanceux),
                  discord.ui.Separator(),
-                 discord.ui.ActionRow(lancer_b, lot, mention, annuler_b)]
+                 discord.ui.ActionRow(lancer_b, lot, logique, mention, annuler_b)]
         if erreurs:
             items.append(discord.ui.TextDisplay("\n".join(f"⚠️ {e}" for e in erreurs)))
         self.add_item(discord.ui.Container(*items, accent_color=Palette.NEUTRAL))
@@ -1219,6 +1266,10 @@ class VueCadeau(LayoutView):
 
     async def _cb_roles(self, i):
         self.b.roles = [int(v) for v in (i.data or {}).get("values") or []][:ROLES_MAX]
+        await self._reafficher(i)
+
+    async def _cb_exclus(self, i):
+        self.b.exclus = [int(v) for v in (i.data or {}).get("values") or []][:ROLES_MAX]
         await self._reafficher(i)
 
     async def _cb_chance(self, i):
@@ -1261,6 +1312,14 @@ def _brouillon_neuf(g) -> Brouillon:
     """Les boosters ×2, proposés d'office (« par exemple, ceux qui offrent le nitro ») : on les retire d'un clic."""
     booster = getattr(g, "premium_subscriber_role", None)
     return Brouillon(chance_roles=[booster.id] if booster is not None else [])
+
+
+async def ouvrir_composeur(i) -> None:
+    """/giveaway lancer : le panneau de création, tout de suite (les boosters ×2 proposés d'office)."""
+    g = i.guild
+    if g is None or not await _autorise(g, i.user):
+        return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
+    await i.response.send_message(view=VueCadeau(i.user, g, _brouillon_neuf(g)), ephemeral=True)
 
 
 async def ouvrir_gestion(i) -> None:

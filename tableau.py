@@ -711,7 +711,7 @@ async def _entraide(g, qui) -> dict:
     liste = []
     for d in await entraide.recentes(g.id, 300):
         z = entraide.ZONES.get(d["zone"])
-        liste.append({"id": d["id"], "zone": d["zone"], "type": z.nom if z else d["zone"], "emoji": z.emoji if z else "",
+        liste.append({"id": d["id"], "zone": d["zone"], "type": z.libelle if z else d["zone"], "emoji": z.emoji if z else "",
                       "auteur": qui(d["auteur_id"]), "titre": d["titre"],
                       "champs": [[str(lib), str(v)] for lib, v in d["champs"] if str(v or "").strip()],
                       "statut": d["statut"], "libelle": entraide.STATUTS.get(d["statut"], (d["statut"], ""))[0],
