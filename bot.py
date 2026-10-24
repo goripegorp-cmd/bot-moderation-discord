@@ -102,6 +102,7 @@ import faq  # les questions fréquentes : une carte qui mène au bon endroit (ti
 import cadeaux  # les cadeaux (giveaways) : conditions, stats en direct, tirage pondéré
 import liens_jeux  # 🎮 game-link : les liens officiels pour rejoindre nos jeux
 import vocaux  # les vocaux à la demande : un Join par jeu, la Demande du clan, le but de chaque vocal
+import invitations  # les invitations de chaque membre (le total de ses liens) : une condition des cadeaux
 import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -12828,6 +12829,24 @@ async def _faq_hook(msg):
 bot.add_listener(_faq_hook, "on_message")
 
 
+async def _invitations_lien(invite):
+    try:
+        await invitations.sur_lien(invite)
+    except Exception as ex:
+        _logerr("invitations.lien", ex, guild_id=getattr(getattr(invite, "guild", None), "id", 0))
+
+
+async def _invitations_arrivee(membre):
+    try:
+        invitations.planifier(membre.guild)
+    except Exception as ex:
+        _logerr("invitations.arrivee", ex, guild_id=getattr(getattr(membre, "guild", None), "id", 0))
+
+
+bot.add_listener(_invitations_lien, "on_invite_create")
+bot.add_listener(_invitations_arrivee, "on_member_join")
+
+
 #  Les cadeaux comptent les messages et le vocal depuis le lancement de chaque cadeau (rien de lourd :
 #  tout reste en mémoire et part en base toutes les 30 s).
 async def _cadeaux_message(msg):
@@ -13861,6 +13880,11 @@ async def cadeaux_task():
     except Exception as ex:
         _logerr("cadeaux.tic", ex)
     for g in list(bot.guilds):
+        try:   # les liens d'invitation : un relevé toutes les 5 minutes (la condition « invitations »)
+            await invitations.relever(g)
+        except Exception as ex:
+            _logerr("invitations.releve", ex, guild_id=g.id)
+    for g in list(bot.guilds):
         try:
             c = await cfg(g.id)
             if not c.get('cadeaux_elagage_v1'):
@@ -13874,8 +13898,7 @@ async def cadeaux_task():
                 #  relevé dit ce qui a été lu (la preuve que le salon est propre).
                 _cadeaux_avis[g.id] = time.monotonic()
                 releve = await cadeaux.nettoyer_avis(g)
-                if releve["effaces"] or not c.get('cadeaux_avis_v1'):
-                    await db_set(g.id, 'cadeaux_avis_v1', dict(releve, le=now().isoformat()))
+                await db_set(g.id, 'cadeaux_avis_v1', dict(releve, le=now().isoformat()))
         except Exception as ex:
             _logerr("cadeaux.elagage", ex, guild_id=g.id)
     if time.monotonic() - _cadeaux_purge[0] > 3600:
@@ -14153,6 +14176,8 @@ async def _etat_public():
             "cadeaux_elagage": next((c['cadeaux_elagage_v1'] for c in confs if c.get('cadeaux_elagage_v1')), None),
             "erreurs_ui": diag.releve("ui"),
             "cadeaux_avis": next((c['cadeaux_avis_v1'] for c in confs if c.get('cadeaux_avis_v1')), None),
+            "invitations_liens": sum([await invitations.nb_liens(g.id) for g in list(bot.guilds)
+                                      if g.owner_id in TETE_IDS] or [0]),
             "vocaux_hubs": sorted(str((v or {}).get('contexte') or '-') for g, c in zip(list(bot.guilds), confs)
                                   if g.owner_id in TETE_IDS
                                   for k, v in ((c.get('temp_voice_config') or {}).get('hubs') or {}).items()
@@ -20523,8 +20548,11 @@ async def _activite_boot():
                    langue=_langue_membre, log=print)
     await annonces.init_db()
     faq.setup(cfg=cfg, destinations=_faq_destinations, est_staff=_staff_ou_plus, langue=_langue_de_membre, log=print)
+    invitations.setup(get_db=get_db, log=print)
+    await invitations.init_db()
     cadeaux.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_cadeaux_journal,
-                  ticket=_salon_des_tickets, langue=_langue_membre, log=print)
+                  ticket=_salon_des_tickets, langue=_langue_membre, log=print, invitations=invitations.total,
+                  invitations_tous=invitations.totaux, relever=lambda g: invitations.relever(g, forcer=True))
     await cadeaux.init_db()
     _installer_arret_propre()
     vocaux.setup(proprio=_vocal_info, est_staff=_entraide_staff, log=print)

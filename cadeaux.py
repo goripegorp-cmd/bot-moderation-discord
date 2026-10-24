@@ -75,6 +75,10 @@ TEXTES = {
     "vocal": {"fr": "Vocal", "en": "Voice"},
     "les_deux": {"fr": "Il faut les deux.", "en": "Both are needed."},
     "l_un": {"fr": "L'un ou l'autre suffit.", "en": "One of the two is enough."},
+    "tout": {"fr": "Il faut tout.", "en": "All are needed."},
+    "une": {"fr": "Une seule suffit.", "en": "One is enough."},
+    "regle_inv": {"fr": "Invitations : toutes les personnes arrivées par tes liens d'invitation, au total.",
+                  "en": "Invites: everyone who joined through your invite links, in total."},
     "rempli": {"fr": "✅ **Conditions remplies**", "en": "✅ **Conditions met**"},
     "pas_encore": {"fr": "⏳ **Pas encore** : continue !", "en": "⏳ **Not yet**: keep going!"},
     "sans": {"fr": "✅ Aucune condition : il suffit de participer.", "en": "✅ No condition: just enter."},
@@ -108,6 +112,7 @@ def tr(cle: str, langue: str = "fr", **kw) -> str:
 
 
 _get_db = _cfg = _db_set = _autorise = _journal = _ticket = _langue = None
+_inv_un = _inv_tous = _inv_relever = None
 _log = print
 _mono = time.monotonic    # les horloges, remplaçables dans les tests
 _mur = time.time
@@ -127,7 +132,17 @@ AVIS_S = 180.0        # un mot pour soi (refus, participation retirée) s'efface
 ANNONCE_S = 86400     # l'annonce des gagnants s'efface au bout de 24 h : la carte, elle, les garde
 
 
-def setup(*, get_db, cfg, db_set, autorise, journal, ticket=None, langue=None, log=None):
+def setup(*, get_db, cfg, db_set, autorise, journal, ticket=None, langue=None, log=None, invitations=None,
+          invitations_tous=None, relever=None):
+    """`invitations(guild_id, membre_id)` / `invitations_tous(guild_id)` (async) : le total des personnes venues
+    par les liens d'un membre ; `relever(g)` (async) : un relevé frais des liens (avant un tirage)."""
+    global _inv_un, _inv_tous, _inv_relever
+    _inv_un, _inv_tous, _inv_relever = invitations, invitations_tous, relever
+    _setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=autorise, journal=journal, ticket=ticket, langue=langue,
+           log=log)
+
+
+def _setup(*, get_db, cfg, db_set, autorise, journal, ticket=None, langue=None, log=None):
     """`autorise(g, membre)` (async) → le fondateur ou la direction ; `journal(g, type_, texte, **kw)`
     (async) ; `ticket(g)` → le salon des tickets (récupérer son lot) ; `langue(i)` (async) → fr | en."""
     global _get_db, _cfg, _db_set, _autorise, _journal, _ticket, _langue, _log
@@ -157,14 +172,14 @@ async def langue_de(i) -> str:
 
 _COLONNES = ("id", "guild_id", "salon_id", "message_id", "auteur_id", "lot", "details", "image", "gagnants",
              "debut", "fin", "roles", "msg_min", "voc_min", "logique", "chance_roles", "multiplicateur",
-             "mention", "statut", "resultat", "roles_exclus")
+             "mention", "statut", "resultat", "roles_exclus", "inv_min")
 _SQL_UN = ("SELECT id, guild_id, salon_id, message_id, auteur_id, lot, details, image, gagnants, debut, fin,"
-           " roles, msg_min, voc_min, logique, chance_roles, multiplicateur, mention, statut, resultat, roles_exclus"
-           " FROM cadeaux WHERE id=?")
+           " roles, msg_min, voc_min, logique, chance_roles, multiplicateur, mention, statut, resultat, roles_exclus,"
+           " inv_min FROM cadeaux WHERE id=?")
 _SQL_ACTIFS = ("SELECT id, debut FROM cadeaux WHERE guild_id=? AND statut='actif' ORDER BY id")
 _SQL_RECENTS = ("SELECT id, guild_id, salon_id, message_id, auteur_id, lot, details, image, gagnants, debut, fin,"
                 " roles, msg_min, voc_min, logique, chance_roles, multiplicateur, mention, statut, resultat,"
-                " roles_exclus FROM cadeaux WHERE guild_id=? ORDER BY id DESC LIMIT ?")
+                " roles_exclus, inv_min FROM cadeaux WHERE guild_id=? ORDER BY id DESC LIMIT ?")
 _SQL_VIDER = ("INSERT INTO cadeaux_stats(cadeau_id, membre_id, messages, vocal_s) VALUES(?,?,?,?)"
               " ON CONFLICT(cadeau_id, membre_id) DO UPDATE SET messages=MAX(0, messages+excluded.messages),"
               " vocal_s=vocal_s+excluded.vocal_s")
@@ -186,6 +201,8 @@ async def init_db():
             colonnes = {r[1] for r in await cur.fetchall()}
         if "roles_exclus" not in colonnes:  # la table du 24/10 au matin
             await db.execute("ALTER TABLE cadeaux ADD COLUMN roles_exclus TEXT NOT NULL DEFAULT '[]'")
+        if "inv_min" not in colonnes:  # 24/10 au soir : les invitations
+            await db.execute("ALTER TABLE cadeaux ADD COLUMN inv_min INTEGER NOT NULL DEFAULT 0")
         await db.execute(
             "CREATE TABLE IF NOT EXISTS cadeaux_inscrits (cadeau_id INTEGER NOT NULL, membre_id INTEGER NOT NULL,"
             " quand INTEGER NOT NULL, PRIMARY KEY (cadeau_id, membre_id))")
@@ -214,6 +231,7 @@ def _ligne(r) -> dict:
     c["chance_roles"] = [int(x) for x in c["chance_roles"]]
     c["roles_exclus"] = [int(x) for x in c["roles_exclus"]]
     c["multiplicateur"] = float(c["multiplicateur"] or 1)
+    c["inv_min"] = int(c.get("inv_min") or 0)
     return c
 
 
@@ -505,12 +523,31 @@ def _oublier(gid: int, cid: int) -> None:
 #  Les règles : qui peut participer, qui remplit les conditions, qui a plus de chances
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def remplit(c: dict, messages: int, secondes: float) -> bool:
+def nb_conditions(c: dict) -> int:
+    return sum(1 for cle in ("msg_min", "voc_min", "inv_min") if int(c.get(cle) or 0) > 0)
+
+
+async def invitations_de(c: dict, uid: int) -> int:
+    """Le total des invitations d'un membre — lu seulement si le cadeau en demande."""
+    if not c.get("inv_min") or _inv_un is None:
+        return 0
+    return int(await _inv_un(c["guild_id"], uid))
+
+
+async def invitations_tous(c: dict) -> dict:
+    if not c.get("inv_min") or _inv_tous is None:
+        return {}
+    return await _inv_tous(c["guild_id"])
+
+
+def remplit(c: dict, messages: int, secondes: float, invitations: int = 0) -> bool:
     besoins = []
     if c["msg_min"] > 0:
         besoins.append(messages >= c["msg_min"])
     if c["voc_min"] > 0:
         besoins.append(secondes >= c["voc_min"] * 60)
+    if c.get("inv_min", 0) > 0:
+        besoins.append(invitations >= c["inv_min"])
     if not besoins:
         return True
     return all(besoins) if c["logique"] == "et" else any(besoins)
@@ -757,11 +794,18 @@ def texte_conditions(c: dict) -> str:
         besoins.append(f"💬 **{c['msg_min']}** messages")
     if c["voc_min"]:
         besoins.append(f"🔊 **{duree_txt(c['voc_min'])}** en vocal · in voice")
+    if c.get("inv_min"):
+        besoins.append(f"📨 **{c['inv_min']}** invitation{'s' if c['inv_min'] > 1 else ''} · invite"
+                       f"{'s' if c['inv_min'] > 1 else ''}")
     if besoins:
         lien = " **et · and** " if c["logique"] == "et" else " **ou · or** "
         lignes.append("• " + lien.join(besoins))
-        lignes.append("-# Comptés depuis le lancement, sur tout le serveur ; puis « Participer » · "
-                      "Counted since the launch, server-wide; then “Enter”")
+        if c["msg_min"] or c["voc_min"]:
+            lignes.append("-# Messages et vocal comptés depuis le lancement, sur tout le serveur ; puis "
+                          "« Participer » · Counted since the launch, server-wide; then “Enter”")
+        if c.get("inv_min"):
+            lignes.append("-# Invitations : le total des personnes venues par tes liens · Invites: everyone who "
+                          "joined through your links")
     if not c["roles"] and not besoins:
         lignes.append("• Ouvert à tous : clique « Participer » · Open to everyone: click “Enter”")
     return "\n".join(lignes)
@@ -821,17 +865,20 @@ def vue_carte(c: dict, nb: int, **kw) -> LayoutView:
     return v
 
 
-def progres(c: dict, messages: int, secondes: float) -> str:
-    """« 💬 12/50 · 🔊 3 min/30 min » : où en est un membre, en une ligne (vide sans condition)."""
+def progres(c: dict, messages: int, secondes: float, invitations: int = 0) -> str:
+    """« 💬 12/50 · 🔊 3 min/30 min · 📨 2/5 » : où en est un membre, en une ligne (vide sans condition)."""
     morceaux = []
     if c["msg_min"]:
         morceaux.append(f"💬 {messages}/{c['msg_min']}")
     if c["voc_min"]:
         morceaux.append(f"🔊 {duree_txt(int(secondes // 60))}/{duree_txt(c['voc_min'])}")
+    if c.get("inv_min"):
+        morceaux.append(f"📨 {invitations}/{c['inv_min']}")
     return " · ".join(morceaux)
 
 
-def lignes_progres(c: dict, messages: int, secondes: float, langue: str = "fr", *, soi: bool = True) -> list:
+def lignes_progres(c: dict, messages: int, secondes: float, langue: str = "fr", *, soi: bool = True,
+                   invitations: int = 0) -> list:
     """Où en est un membre : les barres des messages et du vocal, puis rempli ou pas encore."""
     lignes = []
     if c["msg_min"]:
@@ -841,27 +888,35 @@ def lignes_progres(c: dict, messages: int, secondes: float, langue: str = "fr", 
         pct = min(100, int(100 * secondes / (c["voc_min"] * 60)))
         lignes.append(f"🔊 {tr('vocal', langue)} : **{duree_txt(int(secondes // 60))} / {duree_txt(c['voc_min'])}**"
                       f"  {barre(secondes, c['voc_min'] * 60)} {pct} %")
-    if c["msg_min"] and c["voc_min"]:
-        lignes.append("-# " + tr("les_deux" if c["logique"] == "et" else "l_un", langue))
-    if c["msg_min"] or c["voc_min"]:
-        lignes.append(tr("rempli" if remplit(c, messages, secondes) else ("pas_encore" if soi else "pas_encore_autre"),
-                         langue))
+    if c.get("inv_min"):
+        pct = min(100, int(100 * invitations / c["inv_min"]))
+        lignes.append(f"📨 Invitations : **{invitations} / {c['inv_min']}**  {barre(invitations, c['inv_min'])} {pct} %")
+    n = nb_conditions(c)
+    if n >= 2:
+        lignes.append("-# " + tr(("les_deux" if c["logique"] == "et" else "l_un") if n == 2
+                                 else ("tout" if c["logique"] == "et" else "une"), langue))
+    if n:
+        lignes.append(tr("rempli" if remplit(c, messages, secondes, invitations)
+                         else ("pas_encore" if soi else "pas_encore_autre"), langue))
     else:
         lignes.append(tr("sans", langue))
     return lignes
 
 
 def vue_stats(c: dict, membre, messages: int, secondes: float, inscrit: bool, langue: str = "fr",
-              entete: str = "") -> LayoutView:
+              entete: str = "", invitations: int = 0) -> LayoutView:
     lignes = ([entete] if entete else []) + [f"### 🎁 {c['lot']} — {tr('tes_stats', langue)}"]
-    lignes += lignes_progres(c, messages, secondes, langue)
+    lignes += lignes_progres(c, messages, secondes, langue, invitations=invitations)
     mult = chance(c, membre)
     if mult > 1:
         lignes.append(tr("chance", langue, mult=_nombre(mult)))
     lignes.append(tr("est_inscrit", langue) if inscrit
-                  else tr("pas_inscrit" if remplit(c, messages, secondes) else "pas_inscrit_cond", langue))
+                  else tr("pas_inscrit" if remplit(c, messages, secondes, invitations) else "pas_inscrit_cond",
+                          langue))
     lignes.append(f"{tr('tirage', langue)} <t:{int(c['fin'])}:R>")
     lignes.append("-# " + tr("regles", langue))
+    if c.get("inv_min"):
+        lignes.append("-# " + tr("regle_inv", langue))
     boutons = [BoutonActualiser(c["id"], tr("actualiser", langue))]
     boutons.append(BoutonQuitter(c["id"], tr("quitter", langue)) if inscrit
                    else BoutonParticiper(c["id"], tr("participer", langue)))
@@ -920,8 +975,9 @@ async def participer(i, cid: int) -> None:
         roles = " ".join(f"<@&{r}>" for r in c["roles"])
         return await _repondre(i, _vue_message(tr("reserve", langue, roles=roles), Palette.WARNING))
     messages, secondes = await stats(cid, i.user.id)
+    inv = await invitations_de(c, i.user.id)
     retire = await _vu_retire(cid, i.user.id)
-    if not remplit(c, messages, secondes):
+    if not remplit(c, messages, secondes, inv):
         #  24/10/2026, le fondateur : sans les messages (ou le vocal) demandés, on ne participe pas — et on
         #  voit tout de suite ce qu'il faut, et où on en est. Une inscription d'avant la règle part aussi.
         #  Ce mot n'est que pour lui, et il s'efface.
@@ -929,11 +985,12 @@ async def participer(i, cid: int) -> None:
             planifier_maj(i.guild, cid)
             retire = True
         await _repondre(i, vue_stats(c, i.user, messages, secondes, False, langue,
-                                     entete=tr("retiree" if retire else "manque", langue)))
+                                     entete=tr("retiree" if retire else "manque", langue), invitations=inv))
         return _effacer_plus_tard(i)
     cur_id = await _ecrire("INSERT OR IGNORE INTO cadeaux_inscrits(cadeau_id, membre_id, quand) VALUES(?,?,?)",
                            (int(cid), i.user.id, int(_mur())))
-    await _repondre(i, vue_stats(c, i.user, messages, secondes, True, langue, entete=tr("inscrit", langue)))
+    await _repondre(i, vue_stats(c, i.user, messages, secondes, True, langue, entete=tr("inscrit", langue),
+                                 invitations=inv))
     if cur_id:
         planifier_maj(i.guild, cid)
 
@@ -947,7 +1004,8 @@ async def quitter(i, cid: int) -> None:
     if c["statut"] != "actif":
         return await _repondre(i, _vue_message(tr("fini", langue)))
     messages, secondes = await stats(cid, i.user.id)
-    await _repondre(i, vue_stats(c, i.user, messages, secondes, False, langue, entete=tr("quitte", langue)))
+    await _repondre(i, vue_stats(c, i.user, messages, secondes, False, langue, entete=tr("quitte", langue),
+                                 invitations=await invitations_de(c, i.user.id)))
     planifier_maj(i.guild, cid)
 
 
@@ -961,7 +1019,8 @@ async def montrer_stats(i, cid: int) -> None:
     messages, secondes = await stats(cid, i.user.id)
     retire = await _vu_retire(cid, i.user.id)
     await _repondre(i, vue_stats(c, i.user, messages, secondes, await est_inscrit(cid, i.user.id), langue,
-                                 entete=tr("retiree", langue) if retire else ""))
+                                 entete=tr("retiree", langue) if retire else "",
+                                 invitations=await invitations_de(c, i.user.id)))
     if retire:
         _effacer_plus_tard(i)
 
@@ -992,8 +1051,9 @@ async def vue_participants(g, c: dict, page: int = 0, recherche: str = "") -> La
     nom. Deux lectures de la base par page, quel que soit le nombre de participants."""
     cid = int(c["id"])
     liste = await inscrits_quand(cid)
-    conditions = bool(c["msg_min"] or c["voc_min"])
+    conditions = bool(nb_conditions(c))
     tous = await stats_de_tous(cid) if conditions else {}
+    invs = await invitations_tous(c)
     rangs = {u: k_ + 1 for k_, (u, _q) in enumerate(liste)}
     lignes = [f"### 👥 Participants · {c['lot']}"]
     boutons: list = []
@@ -1013,7 +1073,8 @@ async def vue_participants(g, c: dict, page: int = 0, recherche: str = "") -> La
         pages = max(1, -(-len(liste) // PAR_PAGE))
         page = min(max(0, int(page)), pages - 1)
         tranche = liste[page * PAR_PAGE:(page + 1) * PAR_PAGE]
-        ok = sum(1 for u, _q in liste if remplit(c, *tous.get(u, (0, 0.0)))) if conditions else len(liste)
+        ok = (sum(1 for u, _q in liste if remplit(c, *tous.get(u, (0, 0.0)), invs.get(u, 0))) if conditions
+              else len(liste))
         lignes.append(f"-# 🎟️ {len(liste)} participant{'s' if len(liste) > 1 else ''}"
                       + (f" · ✅ {ok} rempli{'ssent' if ok > 1 else 't'} les conditions" if conditions else "")
                       + (f" · page {page + 1}/{pages}" if pages > 1 else ""))
@@ -1034,10 +1095,11 @@ async def vue_participants(g, c: dict, page: int = 0, recherche: str = "") -> La
             m_, s_ = tous.get(u, (0, 0.0))
             membre = g.get_member(u)
             mult = chance(c, membre) if membre is not None else 1.0
-            desc = " · ".join(x for x in (progres(c, m_, s_), f"🍀 ×{_nombre(mult)}" if mult > 1 else "") if x)
+            desc = " · ".join(x for x in (progres(c, m_, s_, invs.get(u, 0)), f"🍀 ×{_nombre(mult)}" if mult > 1
+                                          else "") if x)
             options.append(discord.SelectOption(
                 label=f"{rangs[u]}. {_nom(g, u)}"[:100], value=str(u), description=(desc or "Inscrit")[:100],
-                emoji=("✅" if remplit(c, m_, s_) else "⏳") if conditions else "🎟️"))
+                emoji=("✅" if remplit(c, m_, s_, invs.get(u, 0)) else "⏳") if conditions else "🎟️"))
         debut = rangs[tranche[0][0]]
         espace = (f"{debut}–{rangs[tranche[-1][0]]} sur {len(liste)}" if not recherche
                   else f"{len(tranche)} résultat{'s' if len(tranche) > 1 else ''}")
@@ -1065,7 +1127,7 @@ async def montrer_participant(i, cid: int, uid: int, page: int = 0) -> None:
     membre = i.guild.get_member(int(uid))
     lignes = [f"### {f'{rang}. ' if rang else ''}<@{int(uid)}>",
               f"🎟️ Inscrit <t:{quand}:R>" if rang and quand else "🎟️ N'est plus inscrit"]
-    lignes += lignes_progres(c, messages, secondes, langue, soi=False)
+    lignes += lignes_progres(c, messages, secondes, langue, soi=False, invitations=await invitations_de(c, uid))
     mult = chance(c, membre) if membre is not None else 1.0
     if mult > 1:
         lignes.append(f"🍀 Chance : ×{_nombre(mult)}")
@@ -1087,12 +1149,12 @@ async def elaguer(g) -> int:
     total = 0
     for cid in list(_actifs.get(g.id) or {}):
         c = await charger(cid)
-        if c is None or c["statut"] != "actif" or not (c["msg_min"] or c["voc_min"]):
+        if c is None or c["statut"] != "actif" or not nb_conditions(c):
             continue
         async with _verrou(("cadeau", cid)):
-            tous = await stats_de_tous(cid)
+            tous, invs = await stats_de_tous(cid), await invitations_tous(c)
             retires = [(u, *tous.get(u, (0, 0.0))) for u in await inscrits(cid)
-                       if not remplit(c, *tous.get(u, (0, 0.0)))]
+                       if not remplit(c, *tous.get(u, (0, 0.0)), invs.get(u, 0))]
             await _retirer_inscriptions(cid, [u for u, _m, _s in retires])
         await maj_carte(g, cid)
         if not retires:
@@ -1158,9 +1220,10 @@ async def etat(g) -> list:
         c = await charger(cid)
         if c is None or c["statut"] != "actif":
             continue
-        tous, liste = await stats_de_tous(cid), await inscrits(cid)
-        out.append({"msg_min": c["msg_min"], "voc_min": c["voc_min"], "logique": c["logique"],
-                    "inscrits": len(liste), "remplissent": sum(1 for u in liste if remplit(c, *tous.get(u, (0, 0.0)))),
+        tous, liste, invs = await stats_de_tous(cid), await inscrits(cid), await invitations_tous(c)
+        out.append({"msg_min": c["msg_min"], "voc_min": c["voc_min"], "inv_min": c["inv_min"], "logique": c["logique"],
+                    "inscrits": len(liste),
+                    "remplissent": sum(1 for u in liste if remplit(c, *tous.get(u, (0, 0.0)), invs.get(u, 0))),
                     "membres_comptes": len(tous), "messages": sum(m for m, _s in tous.values()),
                     "vocal_min": int(sum(s for _m, s in tous.values()) // 60),
                     "fin_dans_min": max(0, int((c["fin"] - _mur()) // 60))})
@@ -1267,14 +1330,19 @@ async def terminer(g, cid: int, *, par: int = 0):
         if c is None or c["statut"] != "actif":
             return None
         await vider()
-        liste, compteurs = await inscrits(cid), await _stats_en_base(cid)
+        if c.get("inv_min") and _inv_relever is not None:
+            try:  # les invitations à l'instant du tirage
+                await _inv_relever(g)
+            except discord.HTTPException as ex:
+                _log(f"[CADEAUX:DETAIL] relevé des invitations avant le tirage {type(ex).__name__} {ex}")
+        liste, compteurs, invs = await inscrits(cid), await _stats_en_base(cid), await invitations_tous(c)
         eligibles = []
         for uid in liste:
             m = g.get_member(uid)
             if m is None or getattr(m, "bot", False) or not peut_participer(c, m):
                 continue
             messages, secondes = compteurs.get(uid, (0, 0.0))
-            if remplit(c, messages, secondes):
+            if remplit(c, messages, secondes, invs.get(uid, 0)):
                 eligibles.append((uid, chance(c, m)))
         gagnants = tirer(eligibles, c["gagnants"])
         resultat = {"gagnants": gagnants, "eligibles": [[u, p] for u, p in eligibles], "eligibles_n": len(eligibles),
@@ -1472,6 +1540,7 @@ class Brouillon:
     exclus: list = field(default_factory=list)
     msg_min: int = 0
     voc_min: int = 0
+    inv_min: int = 0
     logique: str = "et"
     chance_roles: list = field(default_factory=list)
     multiplicateur: float = 2.0
@@ -1488,7 +1557,8 @@ class Brouillon:
         return {"id": 0, "lot": self.lot or "(le lot)", "details": self.details, "image": self.image_nom,
                 "gagnants": self.gagnants, "fin": fin, "roles": list(self.roles),
                 "roles_exclus": list(self.exclus), "msg_min": self.msg_min,
-                "voc_min": self.voc_min, "logique": self.logique, "chance_roles": list(self.chance_roles),
+                "voc_min": self.voc_min, "inv_min": self.inv_min, "logique": self.logique,
+                "chance_roles": list(self.chance_roles),
                 "multiplicateur": self.multiplicateur, "statut": "actif",
                 "mention": "@everyone" if self.mention == "everyone" else "", "resultat": {}}
 
@@ -1514,11 +1584,11 @@ async def lancer(g, auteur, b: Brouillon) -> tuple:
     mention = "@everyone" if b.mention == "everyone" else ""
     cid = await _ecrire(
         "INSERT INTO cadeaux(guild_id, salon_id, auteur_id, lot, details, image, gagnants, debut, fin, roles,"
-        " msg_min, voc_min, logique, chance_roles, multiplicateur, mention, roles_exclus)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " msg_min, voc_min, logique, chance_roles, multiplicateur, mention, roles_exclus, inv_min)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (g.id, salon.id, auteur.id, b.lot, b.details, b.image_nom, int(b.gagnants), maintenant, fin,
          json.dumps(b.roles), int(b.msg_min), int(b.voc_min), b.logique, json.dumps(b.chance_roles),
-         float(b.multiplicateur), mention, json.dumps(b.exclus)))
+         float(b.multiplicateur), mention, json.dumps(b.exclus), int(b.inv_min)))
     c = await charger(cid)
     envoi = {"view": vue_carte(c, 0),
              "allowed_mentions": discord.AllowedMentions(everyone=bool(mention), users=False, roles=False)}
@@ -1600,14 +1670,18 @@ class FormulaireConditions(discord.ui.Modal):
         self.porteur, b = porteur, porteur.b
         self.msg = discord.ui.TextInput(max_length=6, default=str(b.msg_min), placeholder="0")
         self.voc = discord.ui.TextInput(max_length=6, default=str(b.voc_min), placeholder="0")
+        self.inv = discord.ui.TextInput(max_length=5, default=str(b.inv_min), placeholder="0")
         self.add_item(discord.ui.Label(text="Messages à envoyer (0 : aucun)", component=self.msg,
                                        description="Comptés depuis le lancement, sur tout le serveur."))
         self.add_item(discord.ui.Label(text="Minutes en vocal (0 : aucune)", component=self.voc,
                                        description="Hors salon AFK, casque non coupé."))
+        self.add_item(discord.ui.Label(text="Invitations au total (0 : aucune)", component=self.inv,
+                                       description="Les personnes venues par ses liens d'invitation."))
 
     async def on_submit(self, i: discord.Interaction):
         p, erreurs = self.porteur, []
-        for cle, champ, nom in (("msg_min", self.msg, "messages"), ("voc_min", self.voc, "minutes")):
+        for cle, champ, nom in (("msg_min", self.msg, "messages"), ("voc_min", self.voc, "minutes"),
+                                ("inv_min", self.inv, "invitations")):
             try:
                 setattr(p.b, cle, max(0, min(100000, int(str(champ.value or "0").strip() or 0))))
             except ValueError:
@@ -1656,6 +1730,8 @@ class VueCadeau(LayoutView):
             conditions.append(f"💬 {b.msg_min} messages")
         if b.voc_min:
             conditions.append(f"🔊 {duree_txt(b.voc_min)} en vocal")
+        if b.inv_min:
+            conditions.append(f"📨 {b.inv_min} invitation{'s' if b.inv_min > 1 else ''}")
         modifier = Button(label="Modifier", style=discord.ButtonStyle.secondary, emoji="✏️")
         modifier.callback = self._cb_conditions
         logique = Button(label="ET : les deux" if b.logique == "et" else "OU : l'un ou l'autre",
@@ -1677,7 +1753,7 @@ class VueCadeau(LayoutView):
                  discord.ui.ActionRow(qui),
                  discord.ui.ActionRow(pas),
                  discord.ui.Section(discord.ui.TextDisplay(
-                     "**📊 Conditions** — comptées depuis le lancement\n"
+                     "**📊 Conditions** — messages et vocal depuis le lancement, invitations au total\n"
                      + (" · ".join(conditions) if conditions else "Aucune : il suffit de participer.")),
                      accessory=modifier),
                  discord.ui.Section(discord.ui.TextDisplay(
