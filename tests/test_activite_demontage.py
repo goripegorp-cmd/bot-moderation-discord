@@ -444,7 +444,10 @@ def _banc_demonter(res, config):
     async def _cfg(_g):
         return config
 
-    ns = {"cfg": _cfg, "get_db": None, "db_set": None, "discord": discord,
+    async def _au_journal(_g, categorie, type_, texte, **_k):  # mode site (24/10/2026) : le journal du site
+        envois.append(("JOURNAL", categorie, type_, texte))
+
+    ns = {"cfg": _cfg, "get_db": None, "db_set": None, "discord": discord, "_au_journal": _au_journal,
           "_logerr": lambda *a, **k: envois.append(("ERREUR", a)),
           "print": lambda *a, **k: None,
           "activite_demontage_module": type("D", (), {

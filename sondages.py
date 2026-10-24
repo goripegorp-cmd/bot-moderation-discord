@@ -27,7 +27,7 @@ from discord.ui import Button, ChannelSelect
 
 import registre
 import visuels
-from ui_v2 import LayoutView, Palette
+from ui_v2 import LayoutView, Palette, carte_texte
 
 NOM_SALON = "📊sondages"
 ANCIENS_NOMS = ("📊・sondages",)
@@ -303,8 +303,11 @@ async def raison_du_refus(msg, s: dict) -> str:
 
 
 async def _dire(salon, texte: str, membre, secondes: int = 12) -> None:
+    """Un avis au membre, qui s'efface. 24/10/2026 (revue) : une carte V2, plus du texte brut ; seul le
+    membre est mentionné."""
     try:
-        await salon.send(texte, delete_after=secondes, allowed_mentions=discord.AllowedMentions(users=[membre]))
+        await salon.send(view=carte_texte(texte, couleur=Palette.WARNING), delete_after=secondes,
+                         allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=[membre]))
     except discord.HTTPException as ex:
         _log(f"[SONDAGES] message : {ex}")
 
@@ -432,20 +435,52 @@ async def sur_vote(payload) -> None:
 
 
 async def retirer(g, sid: int, auteur) -> tuple[bool, str]:
-    """Le site : retirer un sondage du salon (fondateur et direction)."""
+    """Le site : retirer un sondage du salon (fondateur et direction).
+
+    24/10/2026 (revue) : un post archivé n'est pas en mémoire — le message restait et le site disait
+    « Sondage retiré ». Le salon est demandé à Discord, le post réveillé le temps du retrait puis
+    rendormi ; tout échec est dit tel quel, et rien n'est marqué retiré."""
     s = await _ligne(sid=sid)
     if s is None or s["guild_id"] != g.id:
         return False, "Sondage introuvable."
     if s["retire_le"]:
         return False, "Ce sondage est déjà retiré du salon."
-    salon = g.get_channel(int(s["channel_id"])) or g.get_thread(int(s["channel_id"]))
+    cid = int(s["channel_id"])
+    salon = g.get_channel(cid) or g.get_thread(cid)
+    if salon is None:
+        try:
+            salon = await g.fetch_channel(cid)
+        except discord.NotFound:
+            salon = None  # le salon n'existe plus : le sondage non plus
+        except discord.HTTPException as ex:
+            _log("[SONDAGES][E5] salon du sondage illisible")
+            _log(f"[SONDAGES][E5:DETAIL] salon={cid} {type(ex).__name__} {ex}")
+            return False, "Je n'arrive pas à atteindre ce salon : rien n'a été retiré."
     if salon is not None:
+        endormi = isinstance(salon, discord.Thread) and salon.archived
+        if endormi:
+            try:
+                await salon.edit(archived=False)
+            except discord.HTTPException as ex:
+                _log("[SONDAGES][E6] post archivé non rouvert")
+                _log(f"[SONDAGES][E6:DETAIL] salon={cid} {type(ex).__name__} {ex}")
+                return False, "Ce sondage est dans un post archivé que je ne peux pas rouvrir : rien n'a été retiré."
         try:
             await salon.get_partial_message(int(s["message_id"])).delete()
         except discord.NotFound:
             pass
         except discord.Forbidden:
             return False, "Il me manque le droit de gérer les messages dans ce salon."
+        except discord.HTTPException as ex:
+            _log("[SONDAGES][E7] retrait refusé par Discord")
+            _log(f"[SONDAGES][E7:DETAIL] salon={cid} {type(ex).__name__} {ex}")
+            return False, "Discord a refusé le retrait : rien n'a été retiré, réessaie dans un instant."
+        finally:
+            if endormi:
+                try:
+                    await salon.edit(archived=True)
+                except discord.HTTPException as ex:
+                    _log(f"[SONDAGES:DETAIL] post {cid} non rendormi {type(ex).__name__} {ex}")
     await _marquer(sid, termine=1, retire_le=int(time.time()), retire_par=int(auteur.id))
     await registre.noter(g.id, "Sondages", "sondage.retire",
                          f"Sondage retiré du salon par {auteur.display_name} : {s['question']}",

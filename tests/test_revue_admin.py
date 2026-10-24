@@ -149,6 +149,7 @@ def test_L2_le_menage_des_12_h_ne_touche_plus_au_salon_choisi_en_mode_site(journ
     ns = _charger({"ulogger2026": UL, "cfg": cfg, "discord": discord, "bot": Obj(guilds=[g], user=Obj(id=9)),
                    "nettoyage": Obj(supprimer_vieux_fils=noter, purger_salon=noter), "_salons_de_flux": rien,
                    "suggestions": Obj(assurer_panneau=rien), "boosts": Obj(synchroniser=rien),
+                   "annonces": Obj(messages_publies=rien),
                    "_logerr": lambda *a, **k: purges.append(("ERREUR", a))},
                   "_salons_de_logs", "menage_salons_task")
     asyncio.run(ns["menage_salons_task"]())

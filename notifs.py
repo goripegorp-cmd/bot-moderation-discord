@@ -2,7 +2,7 @@
 
 Suggestions, et chaque salon de réseaux sociaux (les « sneaks » Rell Seas…) :
 un rôle par sujet, créé à la première utilisation, que personne ne porte au départ. Le
-bouton « Me prévenir » le donne ou le reprend ; les publications du sujet le mentionnent.
+bouton « Me prévenir · arrêter » le donne ou le reprend ; les publications du sujet le mentionnent.
 Les rôles sont non mentionnables : seul le bot (ou son webhook) peut les réveiller.
 """
 from __future__ import annotations
@@ -77,9 +77,13 @@ def ping(r) -> str:
 
 
 class BoutonNotif(discord.ui.DynamicItem[Button], template=r"notif:(?P<cle>[a-z0-9_]+)"):
+    """24/10/2026 (revue) : le bouton BASCULE — un abonné qui cliquait « Me prévenir » était désabonné.
+    Le libellé le dit (« · arrêter », comme celui des actualités Roblox) et la réponse donne l'état. Le
+    `custom_id` ne change pas : les boutons déjà posés (ancien libellé) répondent toujours."""
+
     def __init__(self, cle: str, emoji=None):
         self.cle = cle
-        super().__init__(Button(label="Me prévenir", emoji=emoji,
+        super().__init__(Button(label="Me prévenir · arrêter", emoji=emoji,
                                 style=discord.ButtonStyle.secondary, custom_id=f"notif:{cle}"))
 
     @classmethod
@@ -88,23 +92,30 @@ class BoutonNotif(discord.ui.DynamicItem[Button], template=r"notif:(?P<cle>[a-z0
 
     async def callback(self, i: discord.Interaction):
         await i.response.defer(ephemeral=True)
+        try:
+            texte = await self._basculer(i)
+        except Exception as ex:  # toujours une réponse (avant : rien après l'acquittement)
+            _log("[NOTIFS][E1] bascule impossible")
+            _log(f"[NOTIFS][E1:DETAIL] {self.cle} {type(ex).__name__} {ex}")
+            texte = "Impossible pour le moment."
+        await i.followup.send(texte, ephemeral=True)
+
+    async def _basculer(self, i) -> str:
         g, m = i.guild, i.user
         r = await role(g, self.cle)
         spec = _spec(g, self.cle) if g else None
         if r is None or spec is None:
-            return await i.followup.send("Impossible pour le moment.", ephemeral=True)
+            return "Impossible pour le moment."
         me = g.me
         if r >= me.top_role or r.managed:
             _log(f"[NOTIFS] rôle {r.name} au-dessus du bot")
-            return await i.followup.send("Impossible pour le moment.", ephemeral=True)
+            return "Impossible pour le moment."
         try:
             if r in getattr(m, "roles", []):
                 await m.remove_roles(r, reason="Notifications : désabonnement")
-                texte = f"Tu ne recevras plus {spec[2]}."
-            else:
-                await m.add_roles(r, reason="Notifications : abonnement")
-                texte = f"Tu recevras {spec[2]}."
+                return f"🔕 Tu ne recevras plus {spec[2]}.\n-# Reclique sur le même bouton pour te réabonner."
+            await m.add_roles(r, reason="Notifications : abonnement")
+            return f"🔔 Tu recevras {spec[2]}.\n-# Reclique sur le même bouton pour arrêter."
         except discord.HTTPException as ex:
             _log(f"[NOTIFS] bascule {self.cle} : {ex}")
-            texte = "Impossible pour le moment."
-        await i.followup.send(texte, ephemeral=True)
+            return "Impossible pour le moment."

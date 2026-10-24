@@ -103,7 +103,7 @@ def test_N3_un_clic_un_formulaire_l_apercu_exact_puis_publier(env):
     assert i.response.messages[0][0] == "Réservé au fondateur et à la direction.", "le bouton ne sert qu'à eux"
     i = interaction(g, tete)
     run(A.BoutonComposer().callback(i))
-    composer = i.response.messages[0][1]["view"]
+    composer = i.suivis[0][1]["view"]  # acquitté d'abord (24/10/2026), le composeur suit
     assert isinstance(composer, A.VueComposer) and "Nouvelle annonce" in textes(composer)
     salon = g.nom("📜annonce")
     j = interaction(g, tete)
@@ -155,7 +155,7 @@ def test_N4_la_coche_verte_une_fois_par_membre_le_compteur_suit(env, monkeypatch
     for uid in (7, 8, 7):
         i = interaction(g, g.membre(uid))
         run(A.BoutonVu(1).callback(i))
-        reponses.append(i.response.messages[0][0])
+        reponses.append(i.suivis[-1][0])  # acquitté avant la base (24/10/2026), la réponse suit
     assert reponses == ["✅ C'est noté, merci d'avoir lu.", "✅ Noted, thanks for reading.", "Déjà noté ✅"]
     assert run(A.compter_vues(1)) == 2 and [m for m, _q in run(A.qui_a_vu(1))] == [7, 8]
     mid = salon.envois[-1][0]
@@ -171,7 +171,7 @@ def test_N4_la_coche_verte_une_fois_par_membre_le_compteur_suit(env, monkeypatch
         "une rafale de clics : une seule réécriture"
     i = interaction(g, g.membre(9))
     run(A.BoutonVu(99).callback(i))
-    assert i.response.messages[0][0] == "Cette annonce n'existe plus."
+    assert i.suivis[-1][0] == "Cette annonce n'existe plus."
 
 
 def test_N5_les_annonces_du_clan_le_clan_mentionne_les_arrivees_annoncees(env, monkeypatch):

@@ -7,7 +7,7 @@ des millions de messages, qu'on regroupe l'essentiel et que ça se nettoie autom
     plus de RETENTION_JOURS est supprimé d'un seul appel (la journée entière part avec lui).
   · Salons de flux (actualités Roblox, sneak peeks) et racines des salons de logs : les messages
     du bot et de ses webhooks de plus de RETENTION_JOURS sont retirés, un par un — Discord
-    n'efface en groupe que les messages de moins de 14 jours.
+    n'efface en groupe que les messages de moins de 14 jours. Les annonces du composeur restent.
   · Remise à neuf : un salon de logs qui n'a JAMAIS connu que le bot et porte des messages de
     plus de RETENTION_JOURS est recréé à l'identique (une seule fois) — des millions de
     messages ne s'effacent pas un par un.
@@ -22,6 +22,9 @@ import discord
 RETENTION_JOURS = 30
 PREFIXE_FIL = "📋 "
 MAX_SUPPRESSIONS = 200
+#  Un message qui porte un de ces boutons ne part jamais : les annonces du composeur (« ✅ Vu »),
+#  publiées aussi dans les salons de sneaks — 24/10/2026 (revue) : purgées au bout de 30 jours.
+BOUTONS_GARDES = ("an:v:",)
 _fils: dict = {}
 _verrous: dict = {}
 
@@ -99,15 +102,42 @@ async def webhooks_du_bot(salon, bot_id: int) -> frozenset:
         return frozenset()
 
 
+def _identifiants(m) -> set:
+    """Les `custom_id` d'un message, Components V2 compris (Container → ActionRow → bouton)."""
+    out: set = set()
+
+    def voir(x, profondeur=0):
+        if x is None or profondeur > 6:
+            return
+        cid = getattr(x, "custom_id", None)
+        if isinstance(cid, str):
+            out.add(cid)
+        for attr in ("children", "components"):
+            for enfant in getattr(x, attr, None) or []:
+                voir(enfant, profondeur + 1)
+        voir(getattr(x, "accessory", None), profondeur + 1)
+
+    for comp in getattr(m, "components", None) or []:
+        voir(comp)
+    return out
+
+
+def _a_garder(m, garder) -> bool:
+    if garder and getattr(m, "id", None) in garder:
+        return True
+    return any(cid.startswith(BOUTONS_GARDES) for cid in _identifiants(m))
+
+
 async def purger_salon(salon, bot_id: int, jours: int = RETENTION_JOURS,
-                       maximum: int = MAX_SUPPRESSIONS) -> int:
+                       maximum: int = MAX_SUPPRESSIONS, garder=frozenset()) -> int:
     """Les messages du bot (et de ses webhooks) de plus de `jours`, du plus ancien au plus
     récent, `maximum` par passage. Les messages des membres ne sont jamais touchés, les messages
-    épinglés non plus (le menu du salon des logs)."""
+    épinglés non plus (le menu du salon des logs), ni ceux de `garder` (identifiants : les
+    annonces publiées) ou qui portent un bouton de `BOUTONS_GARDES`."""
     ids = await webhooks_du_bot(salon, bot_id)
     n = 0
     async for m in salon.history(limit=maximum * 5, before=_limite(jours), oldest_first=True):
-        if not _du_bot(m, bot_id, ids) or getattr(m, "pinned", False):
+        if not _du_bot(m, bot_id, ids) or getattr(m, "pinned", False) or _a_garder(m, garder):
             continue
         try:
             await m.delete()

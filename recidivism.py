@@ -32,6 +32,8 @@ from typing import Optional
 import discord
 from discord.ext import tasks
 
+import registre
+
 # ─── Références injectées par bot.py ───────────────────────────────────────
 _bot = None
 _get_db = None
@@ -49,6 +51,9 @@ _locks: dict = {}              # (gid, uid) -> asyncio.Lock — sérialise les r
 
 _SELF_TYPES = ('mute', 'unmute', 'ban', 'kick')   # byproducts de l'escalade → jamais comptés
 _ROLE_NAME = "🔇 Restreint (auto)"
+#  Juste après l'avoir posé, le rôle peut manquer au membre en mémoire (l'évènement de Discord n'est
+#  pas encore arrivé) : le reposer est sans effet, mais le journal ne dit « reposé » qu'au-delà.
+_GRACE_S = 120
 
 # défauts (réglables via cfg recidivism_*)
 _DEF = {
@@ -142,15 +147,16 @@ async def _conf(guild_id: int) -> dict:
     return out
 
 
-async def _score(guild_id: int, user_id: int) -> float:
+async def _score(guild_id: int, user_id: int) -> Optional[float]:
     """Score de toxicité = nombre de JOURS DISTINCTS avec ≥1 infraction AUTOMATIQUE (mod_id=bot,
     hors byproducts mute/ban/kick), chaque jour pondéré par sa RÉCENCE (1.0 frais → 0 à 90 j).
     Compter par JOUR (et non par message) cible le CHRONIQUE « X par jour sur PLUSIEURS jours »
     (la vraie cible owner) et neutralise une rafale d'un seul mauvais jour = 1 seul point
     (anti-faux-positif : un membre filtré 3× dans la même minute ne franchit pas le palier 1).
-    FAIL-OPEN → 0."""
+    None si le score ne se lit pas : l'appelant ne change RIEN (24/10/2026, revue : 0.0 sur une
+    erreur de base libérait un membre restreint — rôle retiré, ligne effacée)."""
     if _get_db is None or _bot is None or _bot.user is None:
-        return 0.0
+        return None
     try:
         async with _get_db() as db:
             async with db.execute(
@@ -163,8 +169,10 @@ async def _score(guild_id: int, user_id: int) -> float:
             ) as cur:
                 row = await cur.fetchone()
         return float(row[0]) if row and row[0] else 0.0
-    except Exception:
-        return 0.0
+    except Exception as ex:
+        print("[RECIDIVISM][E2] score illisible : palier inchangé")
+        print(f"[RECIDIVISM][E2:DETAIL] guild={guild_id} membre={user_id} {type(ex).__name__} {ex}")
+        return None
 
 
 def _tier_for(score: float, conf: dict) -> int:
@@ -273,17 +281,23 @@ async def _recompute_locked(guild, member):
             immune = True   # doute → on NE restreint PAS (fail-safe)
         new_tier = 0
         if not immune:
-            new_tier = _tier_for(await _score(gid, uid), conf)
+            score = await _score(gid, uid)
+            if score is None:      # base illisible : rien ne change (ni libération, ni restriction)
+                return
+            new_tier = _tier_for(score, conf)
         old_tier = _restricted.get((gid, uid), 0)
         if new_tier == old_tier:
+            if new_tier > 0:       # la ligne dit « restreint » : le rôle aussi
+                await _reposer_role(guild, member, new_tier)
             return
         role = await _ensure_role(guild)
         if new_tier > 0:
             if role is not None and role not in member.roles:
                 try:
                     await member.add_roles(role, reason=f"Récidive — palier {new_tier}")
-                except Exception:
-                    pass
+                except Exception as ex:
+                    print("[RECIDIVISM][E5] rôle de restriction non posé")
+                    print(f"[RECIDIVISM][E5:DETAIL] guild={gid} membre={uid} {type(ex).__name__} {ex}")
             _restricted[(gid, uid)] = new_tier
             try:
                 async with _get_db() as db:
@@ -293,8 +307,9 @@ async def _recompute_locked(guild, member):
                         "ON CONFLICT(guild_id,user_id) DO UPDATE SET tier=?, applied_at=CURRENT_TIMESTAMP",
                         (gid, uid, new_tier, new_tier))
                     await db.commit()
-            except Exception:
-                pass
+            except Exception as ex:
+                print("[RECIDIVISM][E6] palier non enregistré")
+                print(f"[RECIDIVISM][E6:DETAIL] guild={gid} membre={uid} {type(ex).__name__} {ex}")
             # Log owner/staff UNIQUEMENT quand ça MONTE (anti-flood géré par le logger).
             if new_tier > old_tier and _log_escalation_fn:
                 _labels = {1: "🟡 Surveillé", 2: "🟠 Restreint", 3: "🔴 Sous contrôle"}
@@ -310,17 +325,57 @@ async def _recompute_locked(guild, member):
             if role is not None and role in getattr(member, 'roles', []):
                 try:
                     await member.remove_roles(role, reason="Récidive : palier retombé à 0")
-                except Exception:
-                    pass
+                except Exception as ex:
+                    print("[RECIDIVISM][E7] rôle de restriction non retiré")
+                    print(f"[RECIDIVISM][E7:DETAIL] guild={gid} membre={uid} {type(ex).__name__} {ex}")
             try:
                 async with _get_db() as db:
                     await db.execute(
                         "DELETE FROM member_restrictions WHERE guild_id=? AND user_id=?", (gid, uid))
                     await db.commit()
-            except Exception:
-                pass
+            except Exception as ex:
+                print("[RECIDIVISM][E8] libération non enregistrée")
+                print(f"[RECIDIVISM][E8:DETAIL] guild={gid} membre={uid} {type(ex).__name__} {ex}")
     except Exception as ex:
         print(f"[recidivism recompute] {ex}")
+
+
+async def _reposer_role(guild, member, tier: int) -> None:
+    """La ligne dit « restreint » mais le rôle manque (24/10/2026, revue : la restriction continuait
+    côté bot, sans le rôle). Retiré à la main, ou emporté par une sanction qui retire TOUS les rôles
+    (`/off`, `/mod direction`) et les rend à la levée : le rôle est REPOSÉ. Libérer ici laisserait,
+    à cette levée, un rôle rendu sans ligne, que plus rien ne retirerait. Pour libérer quelqu'un :
+    effacer son casier (site), qui recalcule son palier. Le journal le dit au staff."""
+    role = await _ensure_role(guild)
+    if role is None or role in getattr(member, 'roles', []):
+        return
+    try:
+        await member.add_roles(role, reason=f"Récidive — palier {tier} : rôle reposé")
+    except Exception as ex:
+        print("[RECIDIVISM][E3] rôle de restriction non reposé")
+        print(f"[RECIDIVISM][E3:DETAIL] guild={guild.id} membre={member.id} {type(ex).__name__} {ex}")
+        return
+    depuis = await _applique_depuis(guild.id, member.id)
+    if depuis is not None and depuis >= _GRACE_S:
+        await registre.noter(
+            guild.id, "Modération", "recidive.role_repose",
+            f"Rôle « {_ROLE_NAME} » reposé : la restriction automatique (palier {tier}) court toujours. "
+            "Pour la lever : effacer son casier.", membre_id=member.id)
+
+
+async def _applique_depuis(guild_id: int, user_id: int) -> Optional[float]:
+    """Secondes depuis la dernière pose du palier (None si la base ne le dit pas)."""
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                    "SELECT (julianday('now') - julianday(applied_at)) * 86400 FROM member_restrictions"
+                    " WHERE guild_id=? AND user_id=?", (guild_id, user_id)) as cur:
+                row = await cur.fetchone()
+        return float(row[0]) if row and row[0] is not None else None
+    except Exception as ex:
+        print("[RECIDIVISM][E4] date de restriction illisible")
+        print(f"[RECIDIVISM][E4:DETAIL] guild={guild_id} membre={user_id} {type(ex).__name__} {ex}")
+        return None
 
 
 async def on_infraction(guild_id: int, user_id: int, typ: str):

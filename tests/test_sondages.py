@@ -124,6 +124,13 @@ def journal(types=None):
     return [e for e in asyncio.run(registre.lire(1)) if types is None or e["type"] in types]
 
 
+def dit(envoi) -> str:
+    """Le texte d'un avis du bot : une carte V2 depuis le 24/10/2026 (revue), plus de texte brut."""
+    contenu, kw = envoi
+    assert contenu is None and "view" in kw, "un avis est une carte V2"
+    return " ".join(c.content for c in kw["view"].walk_children() if isinstance(c, discord.ui.TextDisplay))
+
+
 def test_S1_un_sondage_discord_se_lit_tel_quel():
     m = Obj(poll=Sondage("Quelle map ?", [("Port", 3, "⚓"), "Forêt"], heures=4, multiple=True),
             created_at=datetime.now(timezone.utc))
@@ -144,7 +151,7 @@ def test_S2_le_sondage_d_un_membre_est_suivi_sans_un_mot_du_bot(env):
 def test_S3_un_sondage_qui_enfreint_les_regles_est_retire_raison_dite(env):
     run(S.sur_message(Msg(env.chat, 1002, Membre(7), Sondage("Mot interdit ?", ["a", "b"]))))
     assert env.chat.supprimes == [1002] and not asyncio.run(S.lister(1))["liste"]
-    texte, kw = env.chat.dits[0]
+    texte, kw = dit(env.chat.dits[0]), env.chat.dits[0][1]
     assert "Sondage retiré : ton sondage contient un mot interdit" in texte and kw["delete_after"] == 12
     assert [e["type"] for e in journal()] == ["sondage.refuse"]
 
@@ -152,13 +159,13 @@ def test_S3_un_sondage_qui_enfreint_les_regles_est_retire_raison_dite(env):
 def test_S4_un_en_cours_trois_par_jour_staff_libre(env):
     run(S.sur_message(Msg(env.salon, 2001, Membre(7), Sondage("Un ?", ["a", "b"]))))
     run(S.sur_message(Msg(env.salon, 2002, Membre(7), Sondage("Deux ?", ["a", "b"]))))
-    assert env.salon.supprimes == [2002] and "déjà un sondage en cours" in env.salon.dits[0][0]
+    assert env.salon.supprimes == [2002] and "déjà un sondage en cours" in dit(env.salon.dits[0])
     asyncio.run(S._marquer(1, termine=1))
     for k in (2003, 2004):
         run(S.sur_message(Msg(env.salon, k, Membre(7), Sondage(f"Q{k} ?", ["a", "b"]))))
         asyncio.run(S._marquer(len(asyncio.run(S.lister(1))["liste"]), termine=1))
     run(S.sur_message(Msg(env.salon, 2005, Membre(7), Sondage("Quatre ?", ["a", "b"]))))
-    assert 2005 in env.salon.supprimes and "3 sondages par jour" in env.salon.dits[-1][0]
+    assert 2005 in env.salon.supprimes and "3 sondages par jour" in dit(env.salon.dits[-1])
     for k in range(3000, 3005):
         run(S.sur_message(Msg(env.salon, k, Membre(8, staff=True), Sondage(f"Staff {k} ?", ["a", "b"]))))
     assert not any(k in env.salon.supprimes for k in range(3000, 3005)), "le staff est libre"
@@ -170,7 +177,7 @@ def test_S5_dans_le_salon_un_message_qui_n_est_pas_un_sondage_part_rappel_rare(e
     run(S.sur_message(Msg(env.salon, 4003, Membre(9, staff=True), texte="Rappel du staff")))
     run(S.sur_message(Msg(env.chat, 4004, Membre(7), texte="bonjour")))
     assert env.salon.supprimes == [4001, 4002] and not env.chat.supprimes
-    assert len(env.salon.dits) == 1 and "bouton ➕" in env.salon.dits[0][0], "un seul rappel par heure"
+    assert len(env.salon.dits) == 1 and "bouton ➕" in dit(env.salon.dits[0]), "un seul rappel par heure"
     assert env.salon.dits[0][1]["delete_after"] == 10
 
 
@@ -249,6 +256,8 @@ def test_S10_branchements():
     assert "sondages.BoutonCreer" not in SRC and "sondages.assurer_panneau" not in SRC
     assert '"sondage_retirer": _action_sondage_retirer' in SRC
     source = (RACINE / "sondages.py").read_text(encoding="utf-8")
-    assert "salon.send(view=" not in source and "Poll(" not in source, "le bot ne publie plus de sondage"
+    #  Le bot ne publie plus de sondage ; il n'écrit dans un salon que des avis qui s'effacent (`_dire`).
+    assert "Poll(" not in source and source.count(".send(") == 1, "le bot ne publie plus de sondage"
+    assert "await salon.send(view=carte_texte(texte, couleur=Palette.WARNING), delete_after=secondes," in source
     page = (RACINE / "tableau_page.html").read_text(encoding="utf-8")
     assert '["sondages", "Salons", "sondage"]' in page and 'action: "sondage_retirer"' in page

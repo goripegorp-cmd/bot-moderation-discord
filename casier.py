@@ -49,6 +49,9 @@ async def init_db():
         await db.execute("CREATE TABLE IF NOT EXISTS casier_lots (lot TEXT PRIMARY KEY, guild_id INTEGER, quand INTEGER,"
                          " par INTEGER, quoi TEXT, n INTEGER, personnes INTEGER, restaure_le INTEGER DEFAULT 0,"
                          " restaure_par INTEGER DEFAULT 0)")
+        #  Les entrées d'une amnistie défaite : plus jamais amnistiées (un nettoyage à la main, oui).
+        await db.execute("CREATE TABLE IF NOT EXISTS casier_exemptions (guild_id INTEGER, infraction_id INTEGER,"
+                         " lot TEXT, quand INTEGER, par INTEGER, PRIMARY KEY (guild_id, infraction_id))")
         await db.commit()
 
 
@@ -150,7 +153,10 @@ async def effacer_membre(guild_id: int, user_id: int, quoi: str, par: int) -> di
 
 
 async def restaurer(guild_id: int, lot: str, par: int) -> dict:
-    """Un nettoyage défait : chaque entrée revient au casier avec son identifiant d'origine."""
+    """Un nettoyage défait : chaque entrée revient au casier avec son identifiant d'origine.
+
+    24/10/2026 (revue) : une amnistie défaite ne tenait pas 24 h — les entrées remises gardent leur
+    date, et l'amnistie du lendemain les effaçait de nouveau. Défaire une amnistie les en exempte."""
     async with _get_db() as db:
         async with db.execute("SELECT restaure_le FROM casier_lots WHERE guild_id=? AND lot=?", (guild_id, lot)) as cur:
             r = await cur.fetchone()
@@ -162,6 +168,10 @@ async def restaurer(guild_id: int, lot: str, par: int) -> dict:
         remettre = f"INSERT OR IGNORE INTO infractions ({_COLS}) SELECT {_COLS} FROM infractions_archive WHERE guild_id=? AND lot=?"
         cur = await db.execute(remettre, (guild_id, lot))
         n = cur.rowcount or 0
+        if lot.startswith("amnistie-"):
+            await db.execute("INSERT OR IGNORE INTO casier_exemptions (guild_id, infraction_id, lot, quand, par)"
+                             " SELECT guild_id, id, ?, ?, ? FROM infractions_archive WHERE guild_id=? AND lot=?",
+                             (lot, int(time.time()), int(par or 0), guild_id, lot))
         await db.execute("DELETE FROM infractions_archive WHERE guild_id=? AND lot=?", (guild_id, lot))
         await db.execute("UPDATE casier_lots SET restaure_le=?, restaure_par=? WHERE guild_id=? AND lot=?",
                          (int(time.time()), int(par or 0), guild_id, lot))
@@ -184,11 +194,13 @@ async def amnistie(guild_id: int, presents: set, partis: dict, maintenant: float
     """· 3 mois sans infraction et jamais très agressif : tout le casier s'efface.
     · Parti depuis 3 mois (date de départ connue, sinon dernière entrée de plus de 3 mois) : ses
       avertissements et sanctions légères s'effacent ; les bannissements et faits graves restent.
-    `partis` : {membre: horodatage du départ ou None} pour les absents. Rend le bilan."""
+    `partis` : {membre: horodatage du départ ou None} pour les absents. Rend le bilan.
+    Les entrées d'une amnistie défaite (`casier_exemptions`) restent, toujours."""
     t = maintenant or time.time()
     borne = t - DELAI_JOURS * 86400
     lot = _lot("amnistie")
     effaces, gardes = {}, []
+    hors_exemptees = "id NOT IN (SELECT infraction_id FROM casier_exemptions WHERE guild_id=?)"
     async with _get_db() as db:
         async with db.execute("SELECT user_id, MAX(created_at) FROM infractions WHERE guild_id=? GROUP BY user_id",
                               (guild_id,)) as cur:
@@ -204,10 +216,11 @@ async def amnistie(guild_id: int, presents: set, partis: dict, maintenant: float
                 lignes = await cur.fetchall()
             raison = tres_agressif(lignes)
             if dernier <= borne and not raison:
-                touches = await _sortir(db, guild_id, "user_id=?", (uid,), lot)
+                touches = await _sortir(db, guild_id, f"user_id=? AND {hors_exemptees}", (uid, guild_id), lot)
             elif parti_longtemps:
                 garde = tuple(sorted(GRAVES | {"kick"}))
-                touches = await _sortir(db, guild_id, f"user_id=? AND type NOT IN {garde}", (uid,), lot)
+                touches = await _sortir(db, guild_id, f"user_id=? AND type NOT IN {garde} AND {hors_exemptees}",
+                                        (uid, guild_id), lot)
             else:
                 touches = {}
             if touches:

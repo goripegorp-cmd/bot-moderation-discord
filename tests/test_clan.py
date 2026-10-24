@@ -165,8 +165,10 @@ def test_K4_prevenir_par_message_prive_ou_ping(tmp_path):
     r = asyncio.run(clan.rappels(1, {}, {10, 11}))
     assert set(r) == {10, 11} and r[10]["remis"] and not r[11]["remis"], "hors clan et direction : jamais prévenus"
     ok, msg = asyncio.run(ns["_action_clan_prevenir"](g, gens[3], {"membres": [10, 11], "mode": "salon", "salon": 77}))
-    (texte, kw), = salon.envois
-    assert ok and texte.startswith("<@10> <@11>") and "vous serez expulsés du clan" in texte
+    (contenu, kw), = salon.envois
+    #  24/10/2026 (revue) : une carte V2, la mention dans la carte.
+    texte = " ".join(c.content for c in kw["view"].walk_children() if isinstance(c, discord.ui.TextDisplay))
+    assert contenu is None and ok and texte.startswith("<@10> <@11>") and "vous serez expulsés du clan" in texte
     assert kw["allowed_mentions"].everyone is False and kw["allowed_mentions"].roles is False
     assert asyncio.run(ns["_action_clan_prevenir"](g, gens[3], {"membres": [10], "mode": "salon", "salon": 5}))[0] is False
     assert asyncio.run(ns["_action_clan_rappel_annuler"](g, gens[3], {"membre": 10}))[0]

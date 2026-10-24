@@ -192,6 +192,9 @@ RETIRE = "retire"
 SANS_PERMISSION = "sans_permission"
 TROP_HAUT = "trop_haut"
 ERREUR = "erreur"
+#  24/10/2026 (revue) : le bouton d'une catégorie retirée (« ugc », « limited »…) reste posé sous
+#  les anciennes fiches ; il répondait à vie « réessaie dans un instant ».
+INCONNUE = "inconnue"
 
 
 async def basculer(guild, membre, cle: str) -> tuple[str, object]:
@@ -204,7 +207,7 @@ async def basculer(guild, membre, cle: str) -> tuple[str, object]:
         l'air normal, le rôle est là, et l'attribution échoue en silence.
     """
     if cle not in CATEGORIES:
-        return ERREUR, None
+        return INCONNUE, None
     try:
         role = await role_de(guild, cle, creer=True)
         if role is None:
@@ -243,4 +246,6 @@ def phrase(etat: str, cle: str) -> str:
         return (f"❌ Le rôle **{nom}** est placé au-dessus du mien dans la liste "
                 f"des rôles : je ne peux pas y toucher.\n"
                 f"-# Un administrateur doit remonter mon rôle au-dessus de lui.")
+    if etat == INCONNUE:
+        return "❌ Cette catégorie n'existe plus."
     return "❌ Impossible pour le moment — réessaie dans un instant."

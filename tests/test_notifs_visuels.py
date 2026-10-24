@@ -63,7 +63,9 @@ def test_N2_le_bouton_donne_puis_reprend_le_role():
     for _ in range(2):
         i = Obj(guild=g, user=m, response=Obj(defer=defer), followup=Obj(send=suivi))
         asyncio.run(notifs.BoutonNotif("suggestions").callback(i))
-    assert suivis == ["Tu recevras les nouvelles suggestions.", "Tu ne recevras plus les nouvelles suggestions."]
+    #  24/10/2026 (revue) : la réponse dit l'état ET comment revenir en arrière (le bouton bascule).
+    assert suivis[0].startswith("🔔 Tu recevras les nouvelles suggestions.") and "pour arrêter" in suivis[0]
+    assert suivis[1].startswith("🔕 Tu ne recevras plus les nouvelles suggestions.") and "réabonner" in suivis[1]
     assert len(ajoute) == len(retire) == 1
 
 

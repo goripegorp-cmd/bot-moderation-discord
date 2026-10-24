@@ -81,6 +81,15 @@ async def _lignes(gid: int) -> dict:
             return {r[0]: (r[1], r[2]) for r in await cur.fetchall()}
 
 
+async def _ligne(gid: int, uid: int):
+    """(message, avatar) de la carte d'un membre, ou None."""
+    async with _get_db() as db:
+        async with db.execute("SELECT message_id, avatar FROM boost_cartes WHERE guild_id=? AND user_id=?",
+                              (gid, uid)) as cur:
+            r = await cur.fetchone()
+    return (r[0], r[1]) if r else None
+
+
 async def _noter(gid: int, uid: int, mid: int, avatar: str) -> None:
     async with _get_db() as db:
         await db.execute("INSERT OR REPLACE INTO boost_cartes VALUES (?,?,?,?)", (gid, uid, mid, avatar))
@@ -101,6 +110,12 @@ async def salon_de(g):
     if salon is None and sid:
         try:
             salon = await g.fetch_channel(sid)
+        except discord.NotFound:
+            #  Supprimé à la main : oublié — il n'est pas recréé (24/10/2026, revue : chaque départ le
+            #  redemandait à Discord et écrivait une erreur).
+            _log("[BOOSTS] salon des boosts supprimé : oublié")
+            await _db_set(g.id, "boosts_salon", 0)
+            return None
         except discord.HTTPException as ex:
             _log(f"[BOOSTS] lecture du salon : {type(ex).__name__} {ex}")
             return None
@@ -248,10 +263,14 @@ async def ajouter(m, *, mentionner: bool = False) -> None:
 
 
 async def retirer(g, uid: int) -> bool:
-    """Il ne booste plus (ou il est parti) : sa carte s'enlève, sans un mot."""
+    """Il ne booste plus (ou il est parti) : sa carte s'enlève, sans un mot. La base d'abord
+    (24/10/2026, revue) : un départ sans carte ne touche pas Discord — chaque départ relisait le
+    salon (et réveillait le post)."""
+    if await _ligne(g.id, uid) is None:
+        return False
     salon = await salon_de(g)
     async with _verrou(g.id):
-        ligne = (await _lignes(g.id)).get(uid)
+        ligne = await _ligne(g.id, uid)
         if not ligne:
             return False
         if salon is not None:

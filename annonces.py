@@ -19,6 +19,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import discord
 from discord.ui import Button, Select
@@ -44,8 +45,15 @@ TYPES_IMAGE = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "ima
 IMAGE_MAX = 8 * 1024 * 1024
 LIENS_MAX = 5
 TITRE_MAX, TEXTE_MAX = 100, 3000    # Discord : 4 000 caractères pour tout le message
+#  Le champ « Liens » du formulaire. 24/10/2026 (revue) : 800 ; « Modifier » le pré-remplit en
+#  « nom | adresse », plus long que ce qui avait été tapé (759 → 959) : Discord refusait le formulaire.
+#  Cinq liens au plus, nom ≤ 80, adresse ≤ 512 : 2 980 caractères — tout tient.
+LIENS_TEXTE_MAX = 3000
 MAJ_VUES_S = 10.0          # le compteur « Vu » se réécrit au plus toutes les 10 s
 ARRIVEES_S = 60.0          # les arrivées d'une minute dans le clan : une seule carte
+ACCUEIL_LOT = 25           # mentions par carte d'accueil (Discord en refuse plus de 100 par message)
+RETOUR_JOURS = 30          # le rôle du clan rendu moins de 30 jours après son retrait : pas d'accueil
+ARRIVEE_RECENTE_S = 120    # le rôle posé dans les 2 min qui suivent l'arrivée sur le serveur : des rôles rendus
 URL = re.compile(r"^https?://\S+$", re.I)
 
 TEXTES = {
@@ -65,6 +73,7 @@ _log = print
 _maj_prevues: dict = {}
 _arrivees: dict = {}
 _fils_connus: dict = {}   # les posts déjà demandés à Discord (un post endormi n'est pas en mémoire)
+_taches: set = set()      # les accueils en attente (une tâche sans référence peut disparaître)
 
 
 def setup(*, get_db, cfg, db_set, est_tete, journal, role_clan=None, langue=None, log=None):
@@ -112,6 +121,10 @@ async def init_db():
             "CREATE TABLE IF NOT EXISTS annonces_vues (annonce_id INTEGER NOT NULL, membre_id INTEGER NOT NULL,"
             " quand INTEGER NOT NULL, PRIMARY KEY (annonce_id, membre_id))")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_annonces_guild ON annonces(guild_id, id)")
+        #  Le dernier retrait du rôle du clan, par membre : un rôle qui revient n'est pas une arrivée.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS annonces_clan_retraits (guild_id INTEGER NOT NULL, membre_id INTEGER NOT NULL,"
+            " quand INTEGER NOT NULL, PRIMARY KEY (guild_id, membre_id))")
         await db.commit()
 
 
@@ -149,6 +162,15 @@ async def qui_a_vu(aid: int) -> list:
         async with db.execute("SELECT membre_id, quand FROM annonces_vues WHERE annonce_id=? ORDER BY quand",
                               (int(aid),)) as cur:
             return [(int(m), int(q)) for m, q in await cur.fetchall()]
+
+
+async def messages_publies(guild_id: int) -> frozenset:
+    """Les messages des annonces publiées. 24/10/2026 (revue) : le ménage des salons de flux (sneaks,
+    actualités) retirait tout message du bot de plus de 30 jours — les annonces du composeur avec."""
+    async with _get_db() as db:
+        async with db.execute("SELECT message_id FROM annonces WHERE guild_id=? AND message_id>0",
+                              (int(guild_id),)) as cur:
+            return frozenset(int(r[0]) for r in await cur.fetchall())
 
 
 async def _ecrire(sql: str, args: tuple) -> int:
@@ -253,6 +275,20 @@ def lire_liens(texte: str) -> tuple:
     return liens, erreurs
 
 
+def liens_texte(liens, maximum: int = LIENS_TEXTE_MAX) -> str:
+    """Les liens tels que « Modifier » les remet dans le formulaire (« nom | adresse », un par ligne),
+    sans jamais dépasser `maximum` : une ligne qui ne tient pas est laissée entière de côté, jamais
+    coupée en deux (une adresse tronquée serait un lien faux)."""
+    lignes, total = [], 0
+    for nom, url in liens:
+        ligne = f"{nom} | {url}"
+        if total + len(ligne) + (1 if lignes else 0) > maximum:
+            break
+        total += len(ligne) + (1 if lignes else 0)
+        lignes.append(ligne)
+    return "\n".join(lignes)
+
+
 class BoutonVu(discord.ui.DynamicItem[Button], template=r"an:v:(?P<aid>\d+)"):
     """« Un système de coche verte pour que les gens aient vu l'annonce. »"""
 
@@ -266,7 +302,13 @@ class BoutonVu(discord.ui.DynamicItem[Button], template=r"an:v:(?P<aid>\d+)"):
         return cls(int(match["aid"]))
 
     async def callback(self, i: discord.Interaction):
-        await marquer_vu(i, self.aid)
+        try:
+            await marquer_vu(i, self.aid)
+        except Exception as ex:  # toujours une réponse au membre
+            _log("[ANNONCES][E8] « Vu » non noté")
+            _log(f"[ANNONCES][E8:DETAIL] annonce={self.aid} {type(ex).__name__} {ex}")
+            if i.response.is_done():
+                await i.followup.send("Impossible pour le moment : réessaie dans un instant.", ephemeral=True)
 
 
 def composants(a: dict, style: tuple, *, serveur: str = "", vues: int = 0, apercu: bool = False) -> list:
@@ -304,16 +346,18 @@ def vue_annonce(a: dict, style: tuple, **kw) -> LayoutView:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def marquer_vu(i, aid: int) -> None:
+    #  Acquitté avant la base (24/10/2026, revue) : une base occupée dépassait les 3 s de Discord.
+    await i.response.defer(ephemeral=True)
     langue = await langue_de(i)
     a = await charger(aid)
     if a is None or i.guild is None or a["guild_id"] != i.guild.id:
-        return await i.response.send_message(tr("introuvable", langue), ephemeral=True)
+        return await i.followup.send(tr("introuvable", langue), ephemeral=True)
     async with _get_db() as db:
         cur = await db.execute("INSERT OR IGNORE INTO annonces_vues(annonce_id, membre_id, quand) VALUES(?,?,?)",
                                (int(aid), i.user.id, int(time.time())))
         nouveau = (cur.rowcount or 0) > 0
         await db.commit()
-    await i.response.send_message(tr("vu_ok" if nouveau else "vu_deja", langue), ephemeral=True)
+    await i.followup.send(tr("vu_ok" if nouveau else "vu_deja", langue), ephemeral=True)
     if nouveau:
         planifier_maj(i.guild, aid)
 
@@ -364,6 +408,11 @@ class Brouillon:
     image_ext: str = ""
     mention: str = ""          # "" · "everyone" · "clan"
     fil: bool = True
+    #  24/10/2026 (revue) : un second clic sur « Publier » publiait une seconde annonce (second
+    #  @everyone). "" brouillon · "envoi" en cours · "publiee" · "incertaine" (Discord n'a pas
+    #  confirmé et le salon n'a pas pu être relu). Hors brouillon, l'aperçu ne bouge plus.
+    etat: str = ""
+    lien: str = ""
 
     @property
     def image_nom(self) -> str:
@@ -384,6 +433,8 @@ async def ouvrir(i) -> None:
     g, m = i.guild, i.user
     if g is None or not _est_tete(g, m):
         return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
+    #  Acquitté avant la base et Discord (24/10/2026, revue) : le post du clan, endormi, se redemande.
+    await i.response.defer(ephemeral=True)
     c = await _cfg(g.id)
     salons = destinations(g, c)
     clan = int(c.get("clan_annonces", 0) or 0)
@@ -392,9 +443,9 @@ async def ouvrir(i) -> None:
         if fil is not None:
             salons.append(fil)
     if not salons:
-        return await i.response.send_message("Aucun salon d'annonces trouvé (Information, Sneak Peek, annonces du "
-                                             "clan).", ephemeral=True)
-    await i.response.send_message(view=VueComposer(m, g, salons), ephemeral=True)
+        return await i.followup.send("Aucun salon d'annonces trouvé (Information, Sneak Peek, annonces du clan).",
+                                     ephemeral=True)
+    await i.followup.send(view=VueComposer(m, g, salons), ephemeral=True)
 
 
 class VueComposer(LayoutView):
@@ -429,8 +480,8 @@ class FormulaireAnnonce(discord.ui.Modal):
                                           placeholder="Ex. La mise à jour 2.4 est là")
         self.texte = discord.ui.TextInput(style=discord.TextStyle.paragraph, max_length=TEXTE_MAX,
                                           default=b.texte or None, placeholder="Le texte de l'annonce…")
-        self.liens = discord.ui.TextInput(style=discord.TextStyle.paragraph, max_length=800, required=False,
-                                          default="\n".join(f"{n} | {u}" for n, u in b.liens) or None,
+        self.liens = discord.ui.TextInput(style=discord.TextStyle.paragraph, max_length=LIENS_TEXTE_MAX,
+                                          required=False, default=liens_texte(b.liens) or None,
                                           placeholder="Un lien par ligne : Twitch | https://twitch.tv/…")
         self.image = discord.ui.FileUpload(required=False, max_values=1)
         self.add_item(discord.ui.Label(text="Titre", component=self.titre))
@@ -448,9 +499,13 @@ class FormulaireAnnonce(discord.ui.Modal):
 
 async def soumettre(i, f: FormulaireAnnonce) -> None:
     """Le formulaire envoyé : on lit tout, puis le message du composer devient l'aperçu."""
-    await i.response.defer()
     p = f.porteur
     b = p.b
+    if b.etat:  # publiée (ou en cours) pendant que le formulaire était ouvert : elle ne change plus
+        return await i.response.send_message("Cette annonce est déjà partie (ou en train de partir) : rien n'a "
+                                             "été changé. Pour une autre annonce : « Nouvelle annonce ».",
+                                             ephemeral=True)
+    await i.response.defer()
     b.titre = " ".join(str(f.titre.value or "").split())[:TITRE_MAX]
     b.texte = str(f.texte.value or "").strip()[:TEXTE_MAX]
     b.liens, erreurs = lire_liens(f.liens.value or "")
@@ -482,7 +537,12 @@ def _mention(g, salon, c: dict, b: Brouillon) -> tuple:
     if b.mention == "clan":
         role = _role_clan(g, c) if _role_clan else None
         if role is not None:
-            return role.mention, discord.AllowedMentions(everyone=False, users=False, roles=[role]), ""
+            #  24/10/2026 (revue) : un rôle non mentionnable ne réveille personne si le bot n'a pas
+            #  « Mentionner @everyone » ici — l'aperçu le dit, comme pour @everyone.
+            peut = bool(getattr(role, "mentionable", False)) or salon.permissions_for(g.me).mention_everyone
+            return (role.mention, discord.AllowedMentions(everyone=False, users=False, roles=[role]),
+                    "" if peut else "⚠️ Le rôle du clan n'est pas mentionnable et je n'ai pas le droit de mentionner "
+                                    "@everyone ici : personne ne sera notifié.")
     return "", discord.AllowedMentions.none(), ""
 
 
@@ -504,7 +564,7 @@ class VueApercu(LayoutView):
         notes += [f"⚠️ {e}" if not e.startswith("⚠️") else e for e in list(erreurs) + ([avertissement]
                                                                                          if avertissement else [])]
         publier_b = Button(label="Publier", style=discord.ButtonStyle.success, emoji=visuels.icone("valider"),
-                           disabled=salon is None or not (b.titre and b.texte))
+                           disabled=salon is None or not (b.titre and b.texte) or bool(b.etat))
         publier_b.callback = self._cb_publier
         modifier = Button(label="Modifier", style=discord.ButtonStyle.secondary, emoji=visuels.icone("modifier"))
         modifier.callback = self._cb_modifier
@@ -529,35 +589,120 @@ class VueApercu(LayoutView):
     async def interaction_check(self, i):
         return i.user.id == self.auteur.id
 
+    async def _fige(self, i) -> bool:
+        """Pendant la publication et après, l'aperçu ne bouge plus : ni seconde annonce, ni
+        « abandonnée » sur une annonce partie. Rend True (et répond) si le clic est refusé."""
+        if not self.b.etat:
+            return False
+        texte = {"envoi": "⏳ La publication est en cours.",
+                 "publiee": f"✅ Cette annonce est déjà publiée : {self.b.lien}",
+                 }.get(self.b.etat, "⚠️ Cette annonce est peut-être déjà partie : regarde le salon avant d'en refaire "
+                                    "une.")
+        await i.response.send_message(texte, ephemeral=True)
+        return True
+
     async def _reafficher(self, i):
         await i.response.edit_message(view=VueApercu(self.auteur, self.g, self.b, (), await _cfg(self.g.id)))
 
     async def _cb_mention(self, i):
+        if await self._fige(i):
+            return
         opts = self.options_mention
         self.b.mention = opts[(opts.index(self.b.mention) + 1) % len(opts)] if self.b.mention in opts else ""
         await self._reafficher(i)
 
     async def _cb_fil(self, i):
+        if await self._fige(i):
+            return
         self.b.fil = not self.b.fil
         await self._reafficher(i)
 
     async def _cb_modifier(self, i):
+        if await self._fige(i):
+            return
         await i.response.send_modal(FormulaireAnnonce(self))
 
     async def _cb_annuler(self, i):
+        if await self._fige(i):
+            return
         await i.response.edit_message(view=_vue_message("Annonce abandonnée : rien n'a été publié."), attachments=[])
 
     async def _cb_publier(self, i):
-        await i.response.defer()
-        lien, erreur = await publier(self.g, self.auteur, self.b)
-        if erreur:
+        """24/10/2026 (revue) : `defer()` laissait « Publier » actif 1 à 5 s — un second clic publiait une
+        seconde annonce. L'état change AVANT tout `await`, le bouton disparaît, PUIS on publie."""
+        if await self._fige(i):
+            return
+        b = self.b
+        b.etat = "envoi"
+        try:
+            await i.response.edit_message(view=_vue_message("⏳ Publication en cours…"), attachments=[])
+        except discord.HTTPException:
+            b.etat = ""  # pas d'acquittement : rien n'est parti, l'aperçu reste utilisable
+            raise
+        try:
+            lien, erreur = await publier(self.g, self.auteur, b)
+        except Exception as ex:  # `publier` ne lève qu'avant l'envoi : rien n'est parti
+            _log("[ANNONCES][E5] publication interrompue avant l'envoi")
+            _log(f"[ANNONCES][E5:DETAIL] {type(ex).__name__} {ex}")
+            lien, erreur = "", "Une erreur m'a arrêté avant l'envoi : rien n'a été publié, réessaie."
+        if lien:
+            b.etat, b.lien = "publiee", lien
+            return await i.edit_original_response(view=_vue_message(f"✅ Annonce publiée : {lien}", Palette.SUCCESS),
+                                                  attachments=[])
+        if b.etat == "incertaine":  # peut-être partie : pas de « Publier » à côté
             return await i.edit_original_response(view=_vue_message(erreur, Palette.WARNING), attachments=[])
-        await i.edit_original_response(view=_vue_message(f"✅ Annonce publiée : {lien}", Palette.SUCCESS),
-                                       attachments=[])
+        b.etat = ""  # rien n'est parti : l'aperçu revient avec la raison, « Publier » réessaie
+        piece = b.fichier()
+        await i.edit_original_response(view=VueApercu(self.auteur, self.g, b, [erreur], await _cfg(self.g.id)),
+                                       attachments=[piece] if piece else [])
+
+
+def _identifiants(msg) -> set:
+    """Les `custom_id` d'un message, Components V2 compris (Container → ActionRow → bouton)."""
+    out: set = set()
+
+    def voir(x, profondeur=0):
+        if x is None or profondeur > 6:
+            return
+        cid = getattr(x, "custom_id", None)
+        if isinstance(cid, str):
+            out.add(cid)
+        for attr in ("children", "components"):
+            for enfant in getattr(x, attr, None) or []:
+                voir(enfant, profondeur + 1)
+        voir(getattr(x, "accessory", None), profondeur + 1)
+
+    for comp in getattr(msg, "components", None) or []:
+        voir(comp)
+    return out
+
+
+_ILLISIBLE = object()
+
+
+async def _retrouver(g, salon, aid: int):
+    """Après une erreur d'envoi : l'annonce `aid` est-elle arrivée quand même (une erreur 5xx ou un délai
+    ne prouvent pas que Discord ne l'a pas reçue) ? Son message — son « ✅ Vu » porte `an:v:<aid>` —,
+    None si elle n'est pas dans les derniers messages, `_ILLISIBLE` si le salon ne se relit pas."""
+    cle, moi = f"an:v:{int(aid)}", getattr(getattr(g, "me", None), "id", None)
+    try:
+        async for m in salon.history(limit=20):
+            if getattr(getattr(m, "author", None), "id", None) == moi and cle in _identifiants(m):
+                return m
+    except Exception as ex:
+        _log("[ANNONCES][E7] salon non relu après une erreur d'envoi")
+        _log(f"[ANNONCES][E7:DETAIL] salon={salon.id} {type(ex).__name__} {ex}")
+        return _ILLISIBLE
+    return None
 
 
 async def publier(g, auteur, b: Brouillon) -> tuple:
-    """Publie l'annonce (et son fil). Rend (lien, "") ou ("", raison)."""
+    """Publie l'annonce (et son fil). Rend (lien, "") ou ("", raison).
+
+    24/10/2026 (revue) : une annonce ne part qu'une fois. Après une erreur d'envoi, le salon est relu
+    avant de dire « réessaie » ; s'il ne se relit pas, `b.etat` passe à « incertaine » (l'appelant ne
+    propose pas de republier). Une fois le message parti, plus rien ne fait échouer la publication :
+    le fil, la base et le journal ratés sont notés, l'annonce reste publiée."""
     salon = await _salon(g, int(b.salon_id or 0))
     if not isinstance(salon, (discord.TextChannel, discord.Thread)):
         return "", "Ce salon n'existe plus."
@@ -583,22 +728,37 @@ async def publier(g, auteur, b: Brouillon) -> tuple:
         envoi["file"] = b.fichier()
     try:
         msg = await salon.send(**envoi)
-    except discord.HTTPException as ex:
+    except Exception as ex:
         _log("[ANNONCES][E1] annonce non publiée")
         _log(f"[ANNONCES][E1:DETAIL] salon={salon.id} {type(ex).__name__} {ex}")
-        await _ecrire("DELETE FROM annonces WHERE id=?", (aid,))
-        return "", "Discord a refusé la publication : réessaie dans un instant."
+        msg = await _retrouver(g, salon, aid)
+        if msg is None:
+            await _ecrire("DELETE FROM annonces WHERE id=?", (aid,))
+            return "", "Discord a refusé la publication : rien n'est parti, réessaie dans un instant."
+        if msg is _ILLISIBLE:  # la ligne reste : si l'annonce est partie, son « ✅ Vu » répond
+            b.etat = "incertaine"
+            return "", (f"⚠️ Discord n'a pas confirmé la publication et je n'ai pas pu relire {salon.mention} : "
+                        "regarde le salon avant d'en refaire une.")
+        _log("[ANNONCES] annonce partie malgré l'erreur d'envoi : gardée")
     fil_id = 0
     if b.fil and not isinstance(salon, discord.Thread):
         try:
             fil = await msg.create_thread(name=f"📌 {b.titre}"[:100], auto_archive_duration=10080,
                                           reason="Annonce : la suite dans son fil")
             fil_id = fil.id
-        except discord.HTTPException as ex:
+        except Exception as ex:
             _log(f"[ANNONCES:DETAIL] fil non créé annonce={aid} {type(ex).__name__} {ex}")
-    await _ecrire("UPDATE annonces SET message_id=?, fil_id=? WHERE id=?", (msg.id, fil_id, aid))
-    await _journal(g, "annonce.publiee", f"{auteur.mention} a publié une annonce dans {salon.mention} : {b.titre}",
-                   auteur_id=auteur.id)
+    try:
+        await _ecrire("UPDATE annonces SET message_id=?, fil_id=? WHERE id=?", (msg.id, fil_id, aid))
+    except Exception as ex:
+        _log("[ANNONCES][E6] annonce publiée, message non noté en base")
+        _log(f"[ANNONCES][E6:DETAIL] annonce={aid} message={msg.id} {type(ex).__name__} {ex}")
+    try:
+        await _journal(g, "annonce.publiee", f"{auteur.mention} a publié une annonce dans {salon.mention} : "
+                                             f"{b.titre}", auteur_id=auteur.id)
+    except Exception as ex:
+        _log("[ANNONCES][E9] annonce publiée, journal non écrit")
+        _log(f"[ANNONCES][E9:DETAIL] annonce={aid} {type(ex).__name__} {ex}")
     return msg.jump_url, ""
 
 
@@ -614,7 +774,13 @@ class BoutonComposer(discord.ui.DynamicItem[Button], template=r"an:new"):
         return cls()
 
     async def callback(self, i: discord.Interaction):
-        await ouvrir(i)
+        try:
+            await ouvrir(i)
+        except Exception as ex:  # toujours une réponse après l'acquittement
+            _log("[ANNONCES][E10] composeur non ouvert")
+            _log(f"[ANNONCES][E10:DETAIL] {type(ex).__name__} {ex}")
+            if i.response.is_done():
+                await i.followup.send("Impossible pour le moment : réessaie dans un instant.", ephemeral=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -623,31 +789,82 @@ class BoutonComposer(discord.ui.DynamicItem[Button], template=r"an:new"):
 
 async def sur_maj_membre(before, after) -> None:
     """Le rôle du clan vient d'être donné : la bienvenue dans les annonces du clan (les arrivées
-    d'une même minute partagent une carte)."""
+    d'une même minute partagent une carte).
+
+    24/10/2026 (revue) : un rôle qui REVIENT n'est pas une arrivée — levée de radiation, fin de
+    restriction, rôles rendus au retour sur le serveur. Chaque retrait du rôle est noté en base ;
+    rendu moins de 30 jours après, ou posé dans les deux minutes qui suivent l'arrivée sur le
+    serveur (le rôle rendu au retour) : pas de « Bienvenue » publique."""
     g = getattr(after, "guild", None)
     if g is None or getattr(after, "bot", False) or _role_clan is None:
         return
     c = await _cfg(g.id)
     role = _role_clan(g, c)
-    if role is None or role in before.roles or role not in after.roles:
+    if role is None:
         return
-    if not int(c.get("clan_annonces", 0) or 0):
+    avait, a = role in before.roles, role in after.roles
+    if avait and not a:
+        await _noter_retrait(g.id, after.id)
+        return
+    if avait or not a or not int(c.get("clan_annonces", 0) or 0):
+        return
+    if _vient_d_arriver(after) or await _retire_recemment(g.id, after.id):
         return
     file = _arrivees.setdefault(g.id, [])
     if after.id not in file:
         file.append(after.id)
     if len(file) == 1:
-        asyncio.create_task(_annoncer_arrivees(g))
+        t = asyncio.create_task(_annoncer_arrivees(g))
+        _taches.add(t)
+        t.add_done_callback(_taches.discard)
+
+
+async def _noter_retrait(guild_id: int, membre_id: int) -> None:
+    t = int(time.time())
+    async with _get_db() as db:
+        await db.execute("INSERT OR REPLACE INTO annonces_clan_retraits(guild_id, membre_id, quand) VALUES(?,?,?)",
+                         (int(guild_id), int(membre_id), t))
+        await db.execute("DELETE FROM annonces_clan_retraits WHERE quand<?", (t - RETOUR_JOURS * 86400,))
+        await db.commit()
+
+
+async def _retire_recemment(guild_id: int, membre_id: int) -> bool:
+    async with _get_db() as db:
+        async with db.execute("SELECT quand FROM annonces_clan_retraits WHERE guild_id=? AND membre_id=?",
+                              (int(guild_id), int(membre_id))) as cur:
+            r = await cur.fetchone()
+    return r is not None and int(r[0]) >= time.time() - RETOUR_JOURS * 86400
+
+
+def _vient_d_arriver(membre) -> bool:
+    """Arrivé sur le serveur il y a moins de deux minutes : un rôle du clan posé là est un rôle rendu
+    au retour (une candidature prend un ticket et une décision du staff)."""
+    arrivee = getattr(membre, "joined_at", None)
+    return isinstance(arrivee, datetime) and (datetime.now(timezone.utc) - arrivee).total_seconds() < ARRIVEE_RECENTE_S
 
 
 async def _annoncer_arrivees(g) -> None:
-    await asyncio.sleep(ARRIVEES_S)
-    ids = _arrivees.pop(g.id, [])
-    c = await _cfg(g.id)
-    salon = await _salon(g, int(c.get("clan_annonces", 0) or 0))
-    membres = [m for m in (g.get_member(x) for x in ids) if m is not None]
-    if salon is None or not membres or not await _reveiller(salon):
-        return
+    try:
+        await asyncio.sleep(ARRIVEES_S)
+        ids = _arrivees.pop(g.id, [])
+        c = await _cfg(g.id)
+        role = _role_clan(g, c) if _role_clan else None
+        salon = await _salon(g, int(c.get("clan_annonces", 0) or 0))
+        #  Toujours dans le clan au moment de l'accueil : un rôle donné puis repris dans la minute, rien.
+        membres = [m for m in (g.get_member(x) for x in ids) if m is not None and role is not None
+                   and role in getattr(m, "roles", [])]
+        if salon is None or not membres or not await _reveiller(salon):
+            return
+        #  Par lots : Discord refuse un message qui autorise plus de 100 mentions (400, personne
+        #  n'était accueilli).
+        for k in range(0, len(membres), ACCUEIL_LOT):
+            await _accueillir(salon, membres[k:k + ACCUEIL_LOT])
+    except Exception as ex:
+        _log("[ANNONCES][E3] bienvenue du clan non publiée")
+        _log(f"[ANNONCES][E3:DETAIL] {type(ex).__name__} {ex}")
+
+
+async def _accueillir(salon, membres: list) -> None:
     noms = ", ".join(m.mention for m in membres)
     items = []
     if len(membres) == 1 and getattr(membres[0], "display_avatar", None) is not None:

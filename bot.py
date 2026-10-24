@@ -6455,8 +6455,13 @@ async def _action_clan_prevenir(g, auteur, d):
     else:
         for k in range(0, len(cibles), 20):
             lot = cibles[k:k + 20]
-            await salon.send(clan.texte_salon([m.mention for m in lot], role.name, echeance),
-                             allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=lot))
+            #  24/10/2026 (revue) : une carte V2 (plus un message texte) ; la mention, dans la carte,
+            #  ne réveille que ce lot.
+            v = LayoutView(timeout=None)
+            v.add_item(discord.ui.Container(
+                discord.ui.TextDisplay(clan.texte_salon([m.mention for m in lot], role.name, echeance)),
+                accent_color=Palette.WARNING))
+            await salon.send(view=v, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=lot))
     await clan.prevenir(g.id, [m.id for m in cibles], auteur.id, mode, salon.id if salon else 0, remis)
     comment = "message privé" if mode == "mp" else f"ping dans #{salon.name}"
     for m in cibles:
@@ -12775,53 +12780,62 @@ async def _enfiler_billets(guildes, rel: dict) -> dict:
     return res
 
 
+#  24/10/2026 (revue) : l'éclaireur, la veille et « Relever maintenant » publiaient EN MÊME TEMPS ;
+#  une ligne réservée en cours d'envoi restait sélectionnable (`essais` a déjà bougé, le jeton suivant
+#  la reprenait) : l'actualité partait deux fois. Un passage à la fois.
+_VERROU_ACTUS = asyncio.Lock()
+
+
 async def _publier_file_actualites(guildes, etiquette: str = "veille_roblox_task") -> dict:
     """Tirer de la file des actualités et ENVOYER — le corps partagé.
 
     Réservation avant envoi, marquage après succès, simulation respectée,
     échecs comptés (un salon supprimé se voit ICI et nulle part ailleurs).
+    Un seul passage à la fois (`_VERROU_ACTUS`) : un passage tire la file
+    une fois le précédent fini — chaque ligne y est envoyée ou notée en échec.
     Rend `{publies, echecs, simules, non_marquees, file}`.
     """
     res = {"publies": 0, "echecs": 0, "simules": 0, "non_marquees": 0,
            "file": None}
-    for g in guildes:
-        c = await roblox_news_module.config(g.id)
-        salon = g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
-        #  Un billet abandonné (5 échecs : panne Discord, salon interdit) repart de lui-même une
-        #  fois par heure — avant, seul un clic sur « Relever maintenant » le sauvait (20/10/2026).
-        if _page_live_due(f"actus_relance:{g.id}", 3600):
-            await roblox_news_module.relancer_actus_abandonnees(g.id)
-        _attente_n = await roblox_news_module.actus_a_envoyer(
-            g.id, limite=roblox_news_module.MAX_BILLETS_PAR_PASSAGE)
-        for _e in _attente_n:
-            b = _e["billet"]
-            if salon is None:
-                #  Compter l'échec, sinon la file se fige sur les mêmes
-                #  billets et plus rien d'autre ne sort jamais.
-                await roblox_news_module.noter_echec_actu(
-                    _e["id"], "aucun salon d'actualité réglé")
-                res["echecs"] += 1
-                continue
-            #  Réserver avant d'envoyer : la boucle et le bouton
-            #  « Relever maintenant » peuvent tirer la même ligne.
-            if not await roblox_news_module.reserver_actu(
-                    _e["id"], _e["essais"]):
-                continue
-            if await roblox_ui.publier_actu(g, salon, b):
-                if not await roblox_news_module.marquer_actu_envoyee(
-                        _e["id"]):
-                    res["non_marquees"] = res.get("non_marquees", 0) + 1
-                await roblox_news_module.marquer_publie(
-                    g.id, b["topic_id"])
-                res["publies"] += 1
-            else:
-                #  Un salon supprimé ou interdit se voit ICI, et nulle
-                #  part ailleurs : `publier_actu` rend None sans lever.
-                await roblox_news_module.noter_echec_actu(
-                    _e["id"], "publier_actu a rendu False", compter=False)
-                res["echecs"] += 1
-            await asyncio.sleep(roblox_news_module.PAUSE_ENTRE_PUBLICATIONS)
-        res["file"] = await roblox_news_module.etat_file_actu(g.id)
+    async with _VERROU_ACTUS:
+        for g in guildes:
+            c = await roblox_news_module.config(g.id)
+            salon = g.get_channel(int(c.get("roblox_news_salon", 0) or 0))
+            #  Un billet abandonné (5 échecs : panne Discord, salon interdit) repart de lui-même une
+            #  fois par heure — avant, seul un clic sur « Relever maintenant » le sauvait (20/10/2026).
+            if _page_live_due(f"actus_relance:{g.id}", 3600):
+                await roblox_news_module.relancer_actus_abandonnees(g.id)
+            _attente_n = await roblox_news_module.actus_a_envoyer(
+                g.id, limite=roblox_news_module.MAX_BILLETS_PAR_PASSAGE)
+            for _e in _attente_n:
+                b = _e["billet"]
+                if salon is None:
+                    #  Compter l'échec, sinon la file se fige sur les mêmes
+                    #  billets et plus rien d'autre ne sort jamais.
+                    await roblox_news_module.noter_echec_actu(
+                        _e["id"], "aucun salon d'actualité réglé")
+                    res["echecs"] += 1
+                    continue
+                #  Réserver avant d'envoyer : la boucle et le bouton
+                #  « Relever maintenant » peuvent tirer la même ligne.
+                if not await roblox_news_module.reserver_actu(
+                        _e["id"], _e["essais"]):
+                    continue
+                if await roblox_ui.publier_actu(g, salon, b):
+                    if not await roblox_news_module.marquer_actu_envoyee(
+                            _e["id"]):
+                        res["non_marquees"] = res.get("non_marquees", 0) + 1
+                    await roblox_news_module.marquer_publie(
+                        g.id, b["topic_id"])
+                    res["publies"] += 1
+                else:
+                    #  Un salon supprimé ou interdit se voit ICI, et nulle
+                    #  part ailleurs : `publier_actu` rend None sans lever.
+                    await roblox_news_module.noter_echec_actu(
+                        _e["id"], "publier_actu a rendu False", compter=False)
+                    res["echecs"] += 1
+                await asyncio.sleep(roblox_news_module.PAUSE_ENTRE_PUBLICATIONS)
+            res["file"] = await roblox_news_module.etat_file_actu(g.id)
     return res
 
 
@@ -13055,7 +13069,11 @@ async def _demonter_activite(guild):
             return res
         texte = activite_demontage_module.bilan_texte(res)
         print(f"[activite_demontage] {guild.name} ({guild.id}) : {texte}")
-        if activite_demontage_module.a_agi(res):
+        if activite_demontage_module.a_agi(res) and c.get('logs_sur_site_v1'):
+            #  24/10/2026 (revue) : en mode site, le compte rendu va au journal du site, pas dans un salon.
+            await _au_journal(guild, "Config", "activite.demontage",
+                              "Système d'activité retiré : plus de rôle AFK ni de salon masqué. " + texte)
+        elif activite_demontage_module.a_agi(res):
             salon = None
             for cle in ('mod_log_channel', 'ticket_log'):
                 salon = guild.get_channel(int(c.get(cle, 0) or 0))
@@ -13188,13 +13206,15 @@ async def menage_salons_task():
     for g in list(bot.guilds):
         try:
             c = await cfg(g.id)
+            #  24/10/2026 (revue) : les annonces du composeur ne partent jamais (lues une fois par passage).
+            garder = await annonces.messages_publies(g.id)
             for ch in await _salons_de_logs(g, c):
                 if isinstance(ch, discord.TextChannel):
                     await nettoyage.supprimer_vieux_fils(ch)
-                    await nettoyage.purger_salon(ch, bot.user.id)
+                    await nettoyage.purger_salon(ch, bot.user.id, garder=garder)
             for ch in await _salons_de_flux(g, c):
                 if isinstance(ch, (discord.TextChannel, discord.Thread)):
-                    await nettoyage.purger_salon(ch, bot.user.id)
+                    await nettoyage.purger_salon(ch, bot.user.id, garder=garder)
             await suggestions.assurer_panneau(g)
             await boosts.synchroniser(g)
         except Exception as ex:
