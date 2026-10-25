@@ -218,8 +218,16 @@ def construire_app():
     app.router.add_get('/websub/youtube', _websub)                # YouTube : vidéo publiée, à la seconde
     app.router.add_post('/websub/youtube', _websub)
     #  Site du staff : l'espace (session) AVANT le lien à usage unique, sinon « espace » serait
-    #  pris pour un jeton.
-    app.router.add_get('/tableau/espace', _tableau, name="tableau:page")
+    #  pris pour un jeton. 25/10/2026 (site v2) : la page est à `/tableau/espace/` (barre finale : ses
+    #  adresses relatives et la portée du service worker) ; sans la barre, on y renvoie.
+    app.router.add_get('/tableau/espace', _tableau, name="tableau:vers_espace")
+    app.router.add_get('/tableau/espace/', _tableau, name="tableau:page")
+    app.router.add_get('/tableau/espace/sw.js', _tableau, name="tableau:service_worker")
+    app.router.add_get('/tableau/espace/s/{chemin:.+}', _tableau, name="tableau:statique")
+    app.router.add_get('/tableau/espace/media/{media:.+}', _tableau, name="tableau:media")
+    app.router.add_route('GET', '/tableau/espace/api/{nom:.+}', _tableau, name="tableau:api_site")
+    app.router.add_route('POST', '/tableau/espace/api/{nom:.+}', _tableau, name="tableau:api_site_post")
+    app.router.add_post('/tableau/espace/sync', _tableau, name="tableau:sync")
     app.router.add_get('/tableau/espace/donnees', _tableau, name="tableau:api")
     app.router.add_get('/tableau/espace/membre', _tableau, name="tableau:membre")
     app.router.add_get('/tableau/espace/recherche', _tableau, name="tableau:recherche")
