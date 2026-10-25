@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "viewBox": [
+    0,
+    0,
+    600,
+    840
+  ],
+  "ratio": "5 / 7",
+  "calques": [
+    {
+      "ordre": 1,
+      "role": "papier",
+      "fichier": "../textures/papier_affiche.webp",
+      "pose": "fond 100 % × 100 % ; bords déchirés déjà transparents"
+    },
+    {
+      "ordre": 2,
+      "role": "portrait",
+      "zone": "portrait",
+      "pose": "image en object-fit: cover (avatar Roblox ou média), sous le cadre"
+    },
+    {
+      "ordre": 3,
+      "role": "cadre",
+      "fichier": "affiche.svg",
+      "pose": "100 % × 100 % par-dessus le portrait ; mix-blend-mode: multiply conseillé"
+    },
+    {
+      "ordre": 4,
+      "role": "textes",
+      "zones": [
+        "grade",
+        "surnom",
+        "nom",
+        "prime",
+        "icones"
+      ]
+    }
+  ],
+  "zones": {
+    "portrait": {
+      "x": 120,
+      "y": 206,
+      "l": 360,
+      "h": 324,
+      "pct": {
+        "left": 20.0,
+        "top": 24.524,
+        "width": 60.0,
+        "height": 38.571
+      },
+      "ajustement": "cover",
+      "rapport": 1.111
+    },
+    "grade": {
+      "x": 232,
+      "y": 527,
+      "l": 136,
+      "h": 24,
+      "pct": {
+        "left": 38.667,
+        "top": 62.738,
+        "width": 22.667,
+        "height": 2.857
+      },
+      "police": "Alegreya SC",
+      "graisse": 700,
+      "taille": 0.03,
+      "align": "center",
+      "couleur": "#2b1d12",
+      "note": "sur la plaque de laiton ; une ligne, ellipse"
+    },
+    "surnom": {
+      "x": 80,
+      "y": 562,
+      "l": 440,
+      "h": 30,
+      "pct": {
+        "left": 13.333,
+        "top": 66.905,
+        "width": 73.333,
+        "height": 3.571
+      },
+      "police": "Alegreya",
+      "style": "italic",
+      "taille": 0.042,
+      "align": "center",
+      "couleur": "#2b1d12",
+      "note": "entre guillemets « » ; une ligne"
+    },
+    "nom": {
+      "x": 56,
+      "y": 592,
+      "l": 488,
+      "h": 60,
+      "pct": {
+        "left": 9.333,
+        "top": 70.476,
+        "width": 81.333,
+        "height": 7.143
+      },
+      "police": "Rye",
+      "taille": 0.078,
+      "align": "center",
+      "couleur": "#2b1d12",
+      "note": "une ligne ; réduire la taille si le nom déborde"
+    },
+    "prime": {
+      "x": 90,
+      "y": 668,
+      "l": 420,
+      "h": 54,
+      "pct": {
+        "left": 15.0,
+        "top": 79.524,
+        "width": 70.0,
+        "height": 6.429
+      },
+      "police": "Rye",
+      "taille": 0.072,
+      "align": "center",
+      "couleur": "#2b1d12",
+      "symbole": "symbole-prime.svg",
+      "note": "le ฿ est un dessin (aucune police du site n'a ce signe) : l'insérer avant le nombre, haut de 0,8 em ; chiffres groupés par espaces fines"
+    },
+    "icones": {
+      "x": 120,
+      "y": 730,
+      "l": 360,
+      "h": 40,
+      "pct": {
+        "left": 20.0,
+        "top": 86.905,
+        "width": 60.0,
+        "height": 4.762
+      },
+      "taille_icone": 0.06,
+      "max": 6,
+      "ecart": 0.016,
+      "align": "center",
+      "note": "icônes officielles (métier, race, faction…) en ligne, centrées"
+    }
+  },
+  "dessines": {
+    "titre": {
+      "x": 60,
+      "y": 44,
+      "l": 480,
+      "h": 100,
+      "pct": {
+        "left": 10.0,
+        "top": 5.238,
+        "width": 80.0,
+        "height": 11.905
+      }
+    },
+    "sous_titre": {
+      "x": 90,
+      "y": 162,
+      "l": 420,
+      "h": 34,
+      "pct": {
+        "left": 15.0,
+        "top": 19.286,
+        "width": 70.0,
+        "height": 4.048
+      }
+    },
+    "mention": {
+      "x": 190,
+      "y": 774,
+      "l": 220,
+      "h": 30,
+      "pct": {
+        "left": 31.667,
+        "top": 92.143,
+        "width": 36.667,
+        "height": 3.571
+      }
+    }
+  },
+  "textes_dessines": {
+    "titre": "WANTED (Rye)",
+    "sous_titre": "AVIS DE L'ÉQUIPAGE (Alegreya SC 700)",
+    "mention": "RELL Seas (Pirata One)"
+  },
+  "tailles": "« taille » = fraction de la largeur de l'affiche (ex. font-size: calc(0.078 * 100cqw) avec container-type: inline-size sur l'affiche)",
+  "couleurs": {
+    "encre": "#2b1d12",
+    "laiton": "#a8823f",
+    "cire": "#8e2a24"
+  }
+}

@@ -1,0 +1,137 @@
+// noyau.js — l'état partagé, le bus d'événements, les catégories et rubriques, la navigation.
+
+/** La version des fichiers : celle de la balise <script> de la page (s/app.js?v=…), posée par le serveur. */
+export const V = (() => {
+  try {
+    const s = document.querySelector('script[type="module"][src*="/s/app.js"]');
+    return (s && new URL(s.src).searchParams.get("v")) || "dev";
+  } catch (e) { return "dev"; }
+})();
+
+export const CATEGORIES = [
+  {
+    cle: "port", titre: "Le Port", court: "Le Port", sous: "Discord", icone: "port",
+    rubriques: [
+      { cle: "apercu", titre: "Aperçu", icone: "apercu", phrase: "Ce qui demande ton attention, en un coup d'œil." },
+      { cle: "journal", titre: "Journal", icone: "journal", phrase: "Tout ce qui s'est passé sur le serveur : l'important d'abord, puis jour par jour." },
+      { cle: "sanctions", titre: "Sanctions", icone: "sanctions", phrase: "Le casier de chaque membre, les modérateurs, le nettoyage du casier." },
+      { cle: "tickets", titre: "Tickets", icone: "tickets", phrase: "Les tickets du serveur, ouverts et fermés, avec toute leur conversation." },
+      { cle: "repertoire", titre: "Répertoire", icone: "repertoire", phrase: "Toutes les personnes, de A à Z : chaque fiche réunit tout ce qui la concerne." },
+      { cle: "salons", titre: "Salons & questions", icone: "salons", phrase: "Questions, idées, sondages, entraide, annonces, et ce que chacun peut faire dans chaque salon." },
+      { cle: "nettoyage", titre: "Nettoyage", icone: "nettoyage", phrase: "Ce qui est gardé, combien de temps, et le grand ménage quand tu veux." },
+    ],
+  },
+  {
+    cle: "equipage", titre: "L'Équipage", court: "Équipage", sous: "Clan GoRP", icone: "equipage",
+    rubriques: [
+      { cle: "membres", titre: "Équipage", icone: "membres", phrase: "Les membres du clan, leur présence, les rappels d'inactivité." },
+      { cle: "fiches", titre: "Fiches techniques", icone: "fiches", phrase: "Chaque membre et son affiche : par métier, par grade, de A à Z." },
+      { cle: "candidatures", titre: "Candidatures", icone: "candidatures", phrase: "Le recrutement en deux étapes : décider, choisir les questions, corriger." },
+      { cle: "tickets", titre: "Tickets du clan", icone: "tickets", phrase: "Les tickets Rell Seas du clan, ouverts et fermés." },
+      { cle: "annonces", titre: "Annonces & événements", icone: "annonces", phrase: "Composer pour le salon Info : événements avec minuteur et réponses, annonces, métiers, listing." },
+    ],
+  },
+  {
+    cle: "capitainerie", titre: "La Capitainerie", court: "Capitainerie", sous: "Fondateur & direction", icone: "capitainerie",
+    rubriques: [
+      { cle: "affiches", titre: "Affiches", icone: "affiches", phrase: "L'atelier des avis de recherche de l'équipage : créer, modifier, ranger par métier." },
+      { cle: "catalogue", titre: "Catalogue RELL Seas", icone: "catalogue", phrase: "Tout ce qui existe dans le jeu, et seulement cela : types, éléments, icônes officielles." },
+      { cle: "roles", titre: "Rôles & métiers", icone: "roles", phrase: "Un rôle Discord par métier, donné tout seul si tu le veux." },
+    ],
+  },
+];
+
+export const categorie = (cle) => CATEGORIES.find((c) => c.cle === cle) || CATEGORIES[0];
+export const rubrique = (cat, cle) => categorie(cat).rubriques.find((r) => r.cle === cle) || categorie(cat).rubriques[0];
+
+// ─── L'état ─────────────────────────────────────────────────────────────────
+export const etat = {
+  d: null,            // GET donnees
+  etag: null,
+  dernier: 0,         // ms : dernière réponse fraîche du serveur
+  ageCache: 0,        // ms : âge des données servies hors ligne (0 = fraîches)
+  route: { cat: "port", rub: "apercu", sous: "" },
+  reseau: { enLigne: navigator.onLine !== false, depuis: Date.now(), raison: "" },
+  session: "ok",      // ok · expiree
+  versionNeuve: false,
+  ouverture: Date.now(),
+  pages: {},          // pagination « voir plus » par liste
+  selection: new Set(),
+};
+
+// ─── Le bus ─────────────────────────────────────────────────────────────────
+const bus = new EventTarget();
+export function emettre(nom, detail) { bus.dispatchEvent(new CustomEvent(nom, { detail })); }
+export function ecouter(nom, fn) {
+  const f = (e) => fn(e.detail);
+  bus.addEventListener(nom, f);
+  return () => bus.removeEventListener(nom, f);
+}
+
+// ─── Les droits ─────────────────────────────────────────────────────────────
+export const peutAgir = () => !!(etat.d && etat.d.droits && etat.d.droits.actions);
+export const enLigne = () => etat.reseau.enLigne && etat.session === "ok";
+export function raisonHorsLigne() {
+  if (etat.session !== "ok") return "Session terminée : ouvre un nouveau lien depuis le salon « logs » sur Discord.";
+  return "Hors ligne : cette action part sur Discord, elle attend le retour de la connexion.";
+}
+
+// ─── Les personnes citées ───────────────────────────────────────────────────
+export function P(id) {
+  const k = String(id || "");
+  const p = etat.d && etat.d.personnes && etat.d.personnes[k];
+  if (p) return p;
+  const autres = etat.personnesVues && etat.personnesVues[k];
+  return autres || { id: k, nom: k ? "Membre parti" : "Serveur", pseudo: "", avatar: "" };
+}
+export function retenirPersonnes(dico) {
+  if (!dico) return;
+  etat.personnesVues = Object.assign(etat.personnesVues || {}, dico);
+}
+export const aPart = (id) => !!(etat.d && (etat.d.a_part || []).includes(String(id)));
+
+// ─── La navigation (ancre) ──────────────────────────────────────────────────
+// Forme : #port/journal · #equipage/candidatures/questionnaire · &membre=123 (fiche ouverte) · ancien #membre=123
+export function lireAncre() {
+  const brut = location.hash.replace(/^#/, "");
+  const [chemin, ...reste] = brut.split("&");
+  const params = new URLSearchParams(reste.join("&"));
+  if (chemin.includes("=")) for (const [k, v] of new URLSearchParams(chemin)) params.set(k, v);
+  const morceaux = chemin.includes("=") ? [] : chemin.split("/").filter(Boolean);
+  const cat = CATEGORIES.some((c) => c.cle === morceaux[0]) ? morceaux[0] : null;
+  const rub = cat && categorie(cat).rubriques.some((r) => r.cle === morceaux[1]) ? morceaux[1] : null;
+  const membre = params.get("membre") || "";
+  const ancien = params.get("onglet") || "";
+  return { cat, rub, sous: morceaux[2] || "", membre: /^\d{5,22}$/.test(membre) ? membre : "", ancien };
+}
+export function ancre(cat, rub, sous, extra) {
+  return "#" + [cat, rub, sous].filter(Boolean).join("/") + (extra ? "&" + extra : "");
+}
+export function aller(cat, rub, sous) {
+  const a = ancre(cat, rub || categorie(cat).rubriques[0].cle, sous);
+  if (location.hash !== a) location.hash = a;
+  else emettre("route:meme");
+}
+export function poserAncre(extra) {
+  const r = etat.route;
+  const a = ancre(r.cat, r.rub, r.sous, extra);
+  try { history.replaceState(null, "", location.pathname + a); } catch (e) { /* adresse inchangée */ }
+}
+
+// ─── Préférences (par onglet du navigateur) ─────────────────────────────────
+const CLE_PREF = "capitainerie.filtres";
+let prefs = {};
+try { prefs = JSON.parse(sessionStorage.getItem(CLE_PREF) || "{}") || {}; } catch (e) { prefs = {}; }
+/** Les filtres d'une liste : gardés pendant la session de l'onglet. */
+export function filtres(cle, defaut) {
+  prefs[cle] = Object.assign({}, defaut, prefs[cle] || {});
+  return new Proxy(prefs[cle], {
+    set(o, k, v) { o[k] = v; sauverPrefs(); return true; },
+  });
+}
+let minuteurPrefs = 0;
+function sauverPrefs() {
+  clearTimeout(minuteurPrefs);
+  minuteurPrefs = setTimeout(() => { try { sessionStorage.setItem(CLE_PREF, JSON.stringify(prefs)); } catch (e) { /* rien à garder */ } }, 200);
+}
+export function oublierPrefs() { prefs = {}; try { sessionStorage.removeItem(CLE_PREF); } catch (e) { /* rien */ } }
