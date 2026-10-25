@@ -316,7 +316,8 @@ def _executer(get_db, conf, guilde, user=None, refus=False, pid="p1"):
           "TicketControlView": lambda: "vue", "now": lambda: datetime(2026, 10, 22, tzinfo=timezone.utc),
           "rellseas_ui": rellseas_panneau, "recrutements": recrutements,
           "_logerr": lambda *a, **k: journaux.append(a), "_categorie_tickets": rien,
-          "_vue_dossier_ticket": dossier, "int": int}
+          "_vue_dossier_ticket": dossier, "int": int,
+          "_accueil_recrutement": rien}  # 25/10 : l'accueil et la carte de l'étape 1 d'un ticket du clan (test_questionnaire)
     ns["_tickets_en_creation"] = set()
     ns["_faire_voir_plus_tard"] = lambda *a, **k: ns.setdefault("vus", []).append(a)  # 25/10 : l'équipe entre (fond)
     _ns_direction(ns)
