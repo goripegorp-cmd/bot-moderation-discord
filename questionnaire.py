@@ -2327,6 +2327,8 @@ async def dossier(g, tid: int) -> dict | None:
                               "carte_etape1": _lien_discord(g, salon, s["carte_id"]) if ouvert and s and s["carte_id"]
                               else ""},
             "exigence": EXIGENCE,
+            #  Les textes EXACTS que le candidat lira : la page les montre avant de refuser.
+            "message_refus_etape1": REFUS_ETAPE1, "message_refus": REFUS_FINAL,
             "peut": {"etape1": ouvert and etape == "etape1" and not fermeture,
                      "corriger": etape not in FINALES and any(e["statut"] == "repondu" for e in envois),
                      "accepter": ouvert and etape in OUVERTES and not fermeture,

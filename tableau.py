@@ -76,6 +76,7 @@ import entraide
 import owner_ids
 import paths
 import questions
+import questionnaire
 import recrutements
 import registre
 import rellseas_panneau
@@ -934,6 +935,43 @@ async def _sondages(g, qui) -> dict:
     return d
 
 
+_ETAPE1 = {"etape": 1, "recrutement": "etape1", "fermeture_prevue": False}
+_DECIDEES = frozenset({"accepte", "refuse", "refus_etape1", "ferme"})
+
+
+async def _etapes_recrutement(g) -> dict:
+    """ticket → {etape (1 | 2), recrutement (etape1 · etape2_attente · etape2_reponses · etape2_partiel · …),
+    fermeture_prevue} : l'étape tenue par le recrutement en deux étapes (questionnaire.py), s'il est branché. La page
+    range ainsi les candidatures en cours : « à décider », « questions envoyées », « à corriger »."""
+    if not questionnaire.pret():
+        return {}
+    try:
+        s = await questionnaire.suivi(g)
+    except Exception as ex:  # la liste reste lisible : chaque candidature retombe à l'étape 1
+        _log("[TABLEAU][E19] étapes du recrutement illisibles")
+        _log(f"[TABLEAU][E19:DETAIL] {type(ex).__name__} {ex}")
+        return {}
+    out = {}
+    for o in s.get("ouverts") or []:
+        etape = str(o.get("etape") or "etape1")
+        b = (o.get("envoi") or {}).get("bilan") or {}
+        rec = {"etape2": "etape2_attente",
+               "reponses": "etape2_partiel" if b.get("corrigees") else "etape2_reponses"}.get(etape, etape)
+        out[int(o["ticket"])] = {"etape": 1 if etape in ("etape1", "refus_etape1") else 2, "recrutement": rec,
+                                 "fermeture_prevue": bool(o.get("fermeture_prevue"))}
+    return out
+
+
+def candidatures_en_cours(en_cours: list, etapes: dict) -> list:
+    """Chaque candidature en cours avec son étape ; une candidature décidée (son ticket se ferme) n'y est plus."""
+    out = []
+    for o in en_cours:
+        e = etapes.get(int(o["ticket"]), _ETAPE1)
+        if e["recrutement"] not in _DECIDEES:
+            out.append(dict(o, **e))
+    return out
+
+
 async def donnees(g, portee: str = "tout") -> dict:
     cle = (g.id, portee)
     deja = _cache.get(cle)
@@ -966,6 +1004,10 @@ async def donnees(g, portee: str = "tout") -> dict:
                      reponses=list(o["reponses"].items()),
                      salon=f"https://discord.com/channels/{g.id}/{o['salon']}" if o["salon"] else "")
                 for o in cand["en_cours"]]
+    etapes = await _etapes_recrutement(g)
+    #  Décidée (acceptée, refusée) : son ticket se ferme dans quelques secondes — elle n'est plus « en cours »
+    #  (sinon la liste la rangeait parmi les questions envoyées, et l'aperçu la comptait « à décider »).
+    en_cours = candidatures_en_cours(en_cours, etapes)
     tickets = await _tickets(g, c, apart, qui)
     #  Site v2 : les tickets fermés depuis plus de N jours passent aux archives de la liste (règle « Nettoyage »).
     tickets["archives_jours"] = await jours_regle(g.id, "tickets_archives")

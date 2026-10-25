@@ -20,12 +20,17 @@ import { indisponible } from "./discord.js";
 export const THEMES = [["studio", "Studio RELL Games"], ["jeu", "Le jeu RELL Seas"], ["races", "Races"], ["factions", "Factions"], ["fruits", "Fruits"],
   ["combat", "Combat"], ["navires", "Navires"], ["monde", "Le monde"], ["evenements", "Évènements"], ["boss", "Boss"], ["personnages", "Personnages"], ["actualites", "Actualités · Movie 3"]];
 const DIFFICULTES = { 1: "Facile", 2: "Moyenne", 3: "Difficile" };
-const MESSAGE_REFUS_1 = "Tes réponses ne correspondent pas à ce que nous attendons : ce ticket va être clôturé. Merci d'avoir créé un ticket.\nYour answers do not match what we expect: this ticket will be closed. Thank you for opening a ticket.";
-const MESSAGE_REFUS_2 = "Merci pour ta candidature. Elle n'est pas retenue cette fois-ci : ce ticket va être clôturé.\nThank you for applying. Your application was not accepted this time: this ticket will be closed.";
+const MESSAGE_REFUS_1 = "Tes réponses ne correspondent pas à ce que nous attendons : ce ticket va être clôturé. Merci d'avoir créé un ticket.\nYour answers don't match what we are looking for: this ticket will be closed. Thank you for opening a ticket.";
+const MESSAGE_REFUS_2 = "La direction a étudié ta candidature : elle n'est pas retenue. Ce ticket va être clôturé. Merci d'avoir créé un ticket.\nThe leadership has reviewed your application: it was not accepted. This ticket will be closed. Thank you for opening a ticket.";
 const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(p)) delete etat.pages[k]; };
 
 // ─── Lire avec tolérance (les champs exacts viennent du serveur) ────────────
-const themesDe = (B) => (Array.isArray(B && B.themes) && B.themes.length ? B.themes.map((t) => (Array.isArray(t) ? t : [t.cle || t.id, t.nom || t.cle])) : THEMES);
+const themesDe = (B) => {
+  const t = B && B.themes;
+  if (Array.isArray(t) && t.length) return t.map((x) => (Array.isArray(x) ? x : [x.cle || x.id, x.nom || x.cle]));
+  if (t && typeof t === "object" && Object.keys(t).length) return Object.entries(t);   // le serveur : { cle: nom }
+  return THEMES;
+};
 const nomTheme = (B, k) => (themesDe(B).find(([c]) => c === k) || [k, k || "Sans thème"])[1];
 const qTexte = (q) => q.question || q.texte || q.intitule || "";
 const qReponse = (q) => q.reponse || q.reponse_attendue || q.attendue || "";
@@ -35,8 +40,20 @@ const qDifficulte = (q) => Number(q.difficulte) || ({ facile: 1, moyenne: 2, dif
 function qSource(q) {
   const s = q.source;
   if (s && typeof s === "object") return { titre: s.titre || s.nom || "", url: s.url || s.lien || "", minutage: s.minutage || s.temps || "" };
+  if (typeof s === "string" && /^https?:\/\//.test(s)) return { titre: q.source_titre || "", url: s, minutage: "" };
   return { titre: typeof s === "string" ? s : q.source_titre || "", url: q.source_url || q.lien || "", minutage: q.minutage || "" };
 }
+const qRetiree = (q) => !!q.retiree;
+const DIFF_NOMS = { 1: "facile", 2: "moyenne", 3: "difficile" };
+// Le dossier (questionnaire.py) : la réponse du candidat, l'attendue, la correction, l'indication — avec repli sur
+// les noms de la maquette d'origine.
+const repCandidat = (q) => (q.reponse_candidat !== undefined ? q.reponse_candidat : q.reponse);
+const repAttendue = (q) => q.attendue || q.reponse_attendue || "";
+const justeDe = (q) => ("juste" in q ? q.juste : q.correction ? q.correction.juste : null);
+const indicationDe = (q) => (q.indication && typeof q.indication === "object" ? q.indication : { niveau: q.indication || "", detail: "" });
+const etapeDossier = (D) => Number(D.etape) || (/^(etape1|refus_etape1)$/.test(String(D.etape || "")) ? 1 : (D.envois || []).length ? 2 : 1);
+const paires = (x) => (Array.isArray(x) ? x : x && typeof x === "object" ? Object.entries(x) : []);
+const lignesMessage = (t) => String(t || "").split("\n").map((l) => l.replace(/^-#\s*/, ""));
 const etapeDe = (c) => Number(c.etape) || (/etape2|reponse|partiel|corriger|attente/.test(c.recrutement || c.etat || "") ? 2 : 1);
 function etatCandidature(c) {
   const s = String(c.recrutement || c.etat || c.statut_recrutement || "");
@@ -195,16 +212,20 @@ async function rendreDossier(etatD, forcer) {
   if (etatD.vue === "choix") return rendreChoix(etatD, D, B);
   const envois = (D.envois || []).slice().sort((a, b) => (b.envoye_le || 0) - (a.envoye_le || 0));
   const dernier = envois[0];
-  const etape = Number(D.etape) || (envois.length ? 2 : 1);
+  const etape = etapeDossier(D);
+  const peut = D.peut || null;
+  const pe = (k) => (peut ? !!peut[k] : true);
+  etatD.peutCorriger = pe("corriger");
   const tete = h("div", { classe: "dossier-tete" }, avatar(cand, "g"),
-    h("div", { classe: "bloc" }, h("div", { classe: "fiche-nom" }, nomDe(cand)), h("div", { classe: "sous-nom" }, (cand.pseudo ? "@" + cand.pseudo + " · " : "") + "ticket #" + D.ticket + (D.ouvert ? " · ouvert " + depuis(D.ouvert) : "")),
+    h("div", { classe: "bloc" }, h("div", { classe: "fiche-nom" }, nomDe(cand)), h("div", { classe: "sous-nom" }, (cand.pseudo ? "@" + cand.pseudo + " · " : "") + "ticket #" + D.ticket + (D.ouvert || D.ouvert_le ? " · ouvert " + depuis(D.ouvert || D.ouvert_le) : "")),
       h("div", { classe: "rangee" }, tampon(etape === 1 ? "Étape 1" : "Étape 2", etape === 1 ? "ambre" : "mer", true),
         cand.id ? bouton("Sa fiche", { classe: "p discret", icone: "personne", onclick: () => { p.fermer(); ouvrirFiche(cand.id, "candidatures"); } }) : null)));
   const blocs = [tete];
+  if (D.fermeture_prevue) blocs.push(bandeau("Le message est parti dans le ticket : il se ferme dans quelques secondes.", ""));
   blocs.push(groupe({ titre: "Étape 1 · le questionnaire d'ouverture", icone: "candidatures", ouvert: etape === 1, cle: "dossier-e1" }, () => [
-    reponses((D.etape1 && D.etape1.reponses) || []),
+    reponses(paires(D.etape1 && D.etape1.reponses)),
     transcriptEnLigne(Number(D.ticket), "Ticket #" + D.ticket, false)]));
-  if (etape === 1) {
+  if (etape === 1 && pe("etape1")) {
     blocs.push(h("div", { classe: "cadre pile serree" }, h("h3", {}, "La décision de l'étape 1"),
       h("p", { classe: "aide" }, "Refuser envoie un message automatique dans le ticket, puis il se ferme. Passer à l'étape 2 ouvre le choix des questions."),
       h("div", { classe: "rangee" },
@@ -217,7 +238,7 @@ async function rendreDossier(etatD, forcer) {
   remplacer(p.corps, ...blocs);
   const pied = [bouton("Fermer", { classe: "discret", onclick: () => p.fermer() })];
   // Comme sur le site d'avant : fermer le ticket sans décider (transcript et dossier gardés).
-  if (peutAgir()) pied.unshift(bouton("Fermer le ticket sans décider", { classe: "discret danger gauche", icone: "cadenas", reseau: true, onclick: async () => {
+  if (peutAgir() && D.statut_ticket !== "ferme" && !D.fermeture_prevue) pied.unshift(bouton("Fermer le ticket sans décider", { classe: "discret danger gauche", icone: "cadenas", reseau: true, onclick: async () => {
     const r = await confirmer({ titre: "Fermer le ticket sans décider ?", texte: "Le ticket est fermé ; le transcript et le dossier sont gardés. Aucun message de refus n'est envoyé.", motif: true, libelleOk: "Fermer le ticket", style: "danger" });
     if (!r) return;
     const rep = await action({ action: "ticket_fermer", ticket: Number(D.ticket) || D.ticket, motif: r.motif || "" });
@@ -226,10 +247,10 @@ async function rendreDossier(etatD, forcer) {
   } }));
   if (etape === 2 && dernier) {
     const qs = dernier.questions || [];
-    const justes = qs.filter((q) => q.juste === true).length;
-    pied.splice(1, 0, bouton("Renvoyer d'autres questions", { icone: "parchemin", onclick: () => { etatD.vue = "choix"; etatD.mode = "renvoi"; rendreDossier(etatD); } }));
-    pied.push(bouton("Refuser", { classe: "danger", icone: "annuler", reseau: true, onclick: () => decision(etatD, D, "refuser") }),
-      bouton("Accepter" + (qs.length ? " · " + justes + "/" + qs.length : ""), { classe: "principal", icone: "valider", reseau: true, onclick: () => decision(etatD, D, "accepter", justes, qs.length) }));
+    const justes = qs.filter((q) => justeDe(q) === true).length;
+    if (pe("renvoyer")) pied.splice(1, 0, bouton("Renvoyer d'autres questions", { icone: "parchemin", onclick: () => { etatD.vue = "choix"; etatD.mode = "renvoi"; rendreDossier(etatD); } }));
+    if (pe("refuser")) pied.push(bouton("Refuser", { classe: "danger", icone: "annuler", reseau: true, onclick: () => decision(etatD, D, "refuser") }));
+    if (pe("accepter")) pied.push(bouton("Accepter" + (qs.length ? " · " + justes + "/" + qs.length : ""), { classe: "principal", icone: "valider", reseau: true, onclick: () => decision(etatD, D, "accepter", justes, qs.length) }));
   }
   remplacer(p.pied, ...pied);
   majBoutonsReseau(p.pied);
@@ -238,10 +259,12 @@ async function rendreDossier(etatD, forcer) {
 
 function blocEnvoi(etatD, D, e, courant) {
   const qs = e.questions || [];
-  const repondu = qs.some((q) => q.reponse !== null && q.reponse !== undefined) || /repondu|reponses/.test(e.statut || "");
-  const justes = qs.filter((q) => q.juste === true).length, faux = qs.filter((q) => q.juste === false).length;
+  const repondu = qs.some((q) => repCandidat(q) !== null && repCandidat(q) !== undefined) || /repondu|reponses/.test(e.statut || "");
+  const justes = qs.filter((q) => justeDe(q) === true).length, faux = qs.filter((q) => justeDe(q) === false).length;
+  const par = e.par ? sansEmoji(e.par) : e.envoye_par ? nomDe(P(e.envoye_par)) : "";
   const corps = [];
-  corps.push(h("p", { classe: "meta" }, "Envoyé " + depuis(e.envoye_le) + (e.par ? " par " + sansEmoji(e.par) : "") + " · " + compte(qs.length, "question") + (e.repondu_le ? " · réponses reçues " + depuis(e.repondu_le) : "")));
+  corps.push(h("p", { classe: "meta" }, "Envoyé " + depuis(e.envoye_le) + (par ? " par " + par : "") + " · " + compte(qs.length, "question") + (e.repondu_le ? " · réponses reçues " + depuis(e.repondu_le) : "")));
+  if (e.statut === "remplace") corps.push(h("p", { classe: "aide" }, "Remplacé par un questionnaire plus récent."));
   if (!repondu) {
     corps.push(bandeau("En attente des réponses du candidat. Il a reçu les " + qs.length + " questions et les liens où se trouvent toutes les réponses.", ""));
     corps.push(h("ol", { classe: "questions-envoyees" }, qs.map((q) => h("li", {}, q.question || qTexte(q)))));
@@ -254,37 +277,41 @@ function blocEnvoi(etatD, D, e, courant) {
     h("span", { classe: "meta" }, faux ? compte(faux, "faux", "faux") + " · " : "", compte(qs.length - justes - faux, "à corriger", "à corriger")));
   corps.push(barre);
   corps.push(h("p", { classe: "aide" }, "L'indication de proximité n'est qu'une aide (fautes, accents, mots proches) : c'est toi qui décides si c'est juste."));
-  corps.push(h("ol", { classe: "correction-liste" }, qs.map((q, i) => carteCorrection(etatD, e, q, i))));
+  corps.push(h("ol", { classe: "correction-liste" }, qs.map((q, i) => carteCorrection(etatD, e, q, i, courant && etatD.peutCorriger !== false))));
   return h("section", { classe: "cadre pile envoi" + (courant ? " courant" : "") }, h("h3", {}, courant ? "Étape 2 · la correction" : "Correction"), corps);
 }
-function carteCorrection(etatD, e, q, i) {
+function carteCorrection(etatD, e, q, i, modifiable = true) {
   const variantes = qVariantes(q);
-  const ind = q.indication || proximite(q.reponse, q.reponse_attendue || qReponse(q), variantes);
+  const rc = repCandidat(q), attendue = repAttendue(q) || qReponse(q), juste = justeDe(q);
+  const indic = indicationDe(q);
+  const ind = !String(rc || "").trim() ? "vide" : INDICATIONS[indic.niveau] ? indic.niveau : proximite(rc, attendue, variantes);
   const [lib, coul] = INDICATIONS[ind] || [ind, "encre"];
   const marquer = async (valeur) => {
-    const nouvelle = q.juste === valeur ? null : valeur;
+    const nouvelle = juste === valeur ? null : valeur;
     await mettreEnFile("recrutement/corriger", { envoi: e.id, question: q.id, juste: nouvelle }, { genre: "correction", cle: e.id + ":" + q.id, resume: "Correction de la question " + (i + 1) + (nouvelle === true ? " : juste" : nouvelle === false ? " : faux" : " : à revoir") });
     q.juste = nouvelle;
+    if (q.correction !== undefined) q.correction = Object.assign({}, q.correction || {}, { juste: nouvelle });
     rendreDossier(etatD);
   };
-  return h("li", { classe: "correction" + (q.juste === true ? " juste" : q.juste === false ? " faux" : "") + (q._attente ? " en-attente" : "") },
+  return h("li", { classe: "correction" + (juste === true ? " juste" : juste === false ? " faux" : "") + (q._attente ? " en-attente" : "") },
     h("div", { classe: "correction-tete" }, h("span", { classe: "correction-num" }, String(i + 1)), h("b", { classe: "correction-question" }, q.question || qTexte(q)), q.theme ? h("span", { classe: "meta" }, nomTheme(vueJeu("banque"), q.theme)) : null),
     h("div", { classe: "correction-corps" },
-      h("div", { classe: "correction-reponse" }, h("span", { classe: "champ-lib" }, "Réponse du candidat"), q.reponse ? h("p", {}, q.reponse) : h("p", { classe: "aide" }, "Pas de réponse.")),
-      h("div", { classe: "correction-attendue" }, h("span", { classe: "champ-lib" }, "Réponse attendue"), h("p", {}, q.reponse_attendue || qReponse(q) || "—"),
+      h("div", { classe: "correction-reponse" }, h("span", { classe: "champ-lib" }, "Réponse du candidat"), rc ? h("p", {}, rc) : h("p", { classe: "aide" }, "Pas de réponse.")),
+      h("div", { classe: "correction-attendue" }, h("span", { classe: "champ-lib" }, "Réponse attendue"), h("p", {}, attendue || "—"),
         variantes.length ? h("div", { classe: "variantes" }, h("span", { classe: "meta" }, "Variantes admises : "), variantes.map((v) => h("span", { classe: "variante" }, v))) : null)),
-    h("div", { classe: "correction-pied" }, h("span", { classe: "indication " + ind }, h("span", { classe: "meta" }, "Indication : "), tampon(lib, coul, true)),
+    h("div", { classe: "correction-pied" }, h("span", { classe: "indication " + ind }, h("span", { classe: "meta" }, "Indication : "), tampon(lib, coul, true),
+        indic.detail && ind !== "vide" ? h("span", { classe: "meta" }, " " + indic.detail) : null),
       h("div", { classe: "juste-faux", role: "group", "aria-label": "Correction de la question " + (i + 1) },
-        h("button", { type: "button", classe: "bouton-juste", "aria-pressed": String(q.juste === true), onclick: () => marquer(true) }, icone("valider"), "Juste"),
-        h("button", { type: "button", classe: "bouton-faux", "aria-pressed": String(q.juste === false), onclick: () => marquer(false) }, icone("annuler"), "Faux")),
+        h("button", { type: "button", classe: "bouton-juste", "aria-pressed": String(juste === true), disabled: !modifiable, onclick: () => marquer(true) }, icone("valider"), "Juste"),
+        h("button", { type: "button", classe: "bouton-faux", "aria-pressed": String(juste === false), disabled: !modifiable, onclick: () => marquer(false) }, icone("annuler"), "Faux")),
       q._attente ? h("span", { classe: "meta" }, q._attente === "conflit" ? "conflit" : "gardé sur l'appareil") : null));
 }
 
 async function refuserEtape1(etatD, D) {
-  const message = D.message_refus_etape1 || MESSAGE_REFUS_1;
+  const message = lignesMessage(D.message_refus_etape1 || MESSAGE_REFUS_1);
   const ok = await confirmer({ titre: "Refuser l'étape 1 ?", icone: "annuler", style: "danger", libelleOk: "Refuser et fermer le ticket", taille: "",
     texte: "Ce message part tout seul dans le ticket, puis le ticket se ferme (transcript et dossier gardés) :",
-    contenu: [h("blockquote", { classe: "message-auto" }, message.split("\n").map((l) => h("p", {}, l)))] });
+    contenu: [h("blockquote", { classe: "message-auto" }, message.map((l) => h("p", {}, l)))] });
   if (!ok) return;
   const r = await poster("recrutement/etape1", { ticket: Number(D.ticket) || D.ticket, decision: "refuser" });
   toast(r.ok ? (r.donnees.message || "Refus envoyé ; le ticket se ferme.") : r.erreur, r.ok ? "succes" : "erreur");
@@ -298,10 +325,12 @@ async function decision(etatD, D, quoi, justes, total) {
     if (!ok) return;
   } else {
     const ok = await confirmer({ titre: "Refuser la candidature ?", icone: "annuler", style: "danger", libelleOk: "Refuser et fermer le ticket",
-      texte: "Ce message neutre part dans le ticket (sans dire où il s'est trompé), puis le ticket se ferme :", contenu: [h("blockquote", { classe: "message-auto" }, (D.message_refus || MESSAGE_REFUS_2).split("\n").map((l) => h("p", {}, l)))] });
+      texte: "Ce message neutre part dans le ticket (sans dire où il s'est trompé), puis le ticket se ferme :", contenu: [h("blockquote", { classe: "message-auto" }, lignesMessage(D.message_refus || MESSAGE_REFUS_2).map((l) => h("p", {}, l)))] });
     if (!ok) return;
   }
-  const r = await poster("recrutement/decision", { ticket: Number(D.ticket) || D.ticket, decision: quoi });
+  const corps = { ticket: Number(D.ticket) || D.ticket, decision: quoi };
+  if (quoi === "accepter" && !(total && justes === total)) corps.forcer = true;  // confirmé malgré moins de 100 %
+  const r = await poster("recrutement/decision", corps);
   toast(r.ok ? (r.donnees.message || "C'est fait.") : r.erreur, r.ok ? "succes" : "erreur");
   if (r.ok) { etatD.p.fermer(); emettre("recharger"); }
 }
@@ -311,7 +340,7 @@ async function decision(etatD, D, quoi, justes, total) {
 function rendreChoix(etatD, D, B) {
   const p = etatD.p;
   if (!B || B.erreur) { remplacer(p.corps, vide("La banque de questions est indisponible", (B && B.erreur) || "", "hors_ligne")); return; }
-  const banque = (B.questions || []).filter(qActive);
+  const banque = (B.questions || []).filter((q) => qActive(q) && !qRetiree(q) && q.posable !== false);
   const parId = new Map((B.questions || []).map((q) => [String(q.id), q]));
   const dejaPosees = new Set(((D && D.envois) || []).flatMap((e) => (e.questions || []).map((q) => String(q.id))));
   if (!etatD.choix) {
@@ -404,9 +433,7 @@ function rendreChoix(etatD, D, B) {
 function modeleDefautObjet(B) { return (B.modeles || []).find((m) => m.par_defaut) || null; }
 function modeleDefaut(B) {
   const m = modeleDefautObjet(B);
-  if (m && (m.questions || []).length) return m.questions.map(String);
-  const r = B.reglages || {};
-  return (r.selection_defaut || []).map(String);
+  return m && (m.questions || []).length ? m.questions.map(String) : [];
 }
 async function enregistrerModele(ids, parDefaut, existant) {
   const nom = saisie({ value: existant ? existant.nom : "", maxlength: 60, placeholder: "Spécial Movie 3" });
@@ -453,7 +480,7 @@ function questionnaire(zone) {
     const B = await charger("banque", { forcer });
     if (!resultats.isConnected) return;
     if (!B || B.erreur) { remplacer(resultats, vide("Questionnaire indisponible", B && B.erreur, "hors_ligne")); return; }
-    const qs = B.questions || [];
+    const qs = (B.questions || []).filter((q) => !qRetiree(q));
     const nbTheme = {};
     qs.forEach((q) => { nbTheme[q.theme] = (nbTheme[q.theme] || 0) + 1; });
     const l = qs.filter((q) => (f.theme === "tous" || q.theme === f.theme) && (f.diff === "0" || String(qDifficulte(q)) === f.diff) && (f.statut === "tous" || (q.statut || "a_verifier") === f.statut)
@@ -465,7 +492,7 @@ function questionnaire(zone) {
     remplacer(resultats,
       tuiles(tuile({ cle: "b1", lib: "Questions actives", val: qs.filter(qActive).length, icone: "parchemin", sous: compte(qs.length, "question") + " dans la banque", teinte: "#1f4e5a" }),
         tuile({ cle: "b2", lib: "À vérifier", val: qs.filter((q) => (q.statut || "a_verifier") === "a_verifier").length, icone: "attention", teinte: "#a8641c", clic: () => { f.statut = "a_verifier"; changer(); } }),
-        tuile({ cle: "b3", lib: "Questions par candidat", val: reglages.nombre_defaut || 0, icone: "candidatures", sous: "nombre par défaut", teinte: "#7a4b2a" }),
+        tuile({ cle: "b3", lib: "Questions par candidat", val: Number(reglages.annonce || reglages.nombre || reglages.nombre_defaut) || 0, icone: "candidatures", sous: "annoncées au candidat", teinte: "#7a4b2a" }),
         tuile({ cle: "b4", lib: "Modèles", val: (B.modeles || []).length, icone: "etoile", teinte: "#7a5a22" })),
       section("La banque de questions", "parchemin", compte(l.length, "question"),
         h("div", { classe: "pile" },
@@ -497,7 +524,7 @@ function ligneBanque(B, q) {
       q.section ? " · " + q.section : "") : null,
     q.extrait ? h("p", { classe: "banque-extrait" }, q.extrait) : null,
     peutAgir() ? h("div", { classe: "rangee" },
-      interrupteur("Active", qActive(q), (v) => enregistrerQuestion(Object.assign({}, q, { active: v }), q)),
+      interrupteur("Active", qActive(q), (v) => enregistrerQuestion(Object.assign({}, q, { active: v, actif: v }), q)),
       bouton("Modifier", { classe: "p", icone: "plume", onclick: () => editerQuestion(B, q) }),
       bouton("Retirer", { classe: "p discret danger", icone: "supprimer", onclick: async () => {
         const ok = await confirmer({ titre: "Retirer cette question de la banque ?", texte: "« " + qTexte(q) + " » ne sera plus proposée. Les dossiers qui l'ont déjà gardent leur réponse.", libelleOk: "Retirer", style: "danger" });
@@ -505,8 +532,10 @@ function ligneBanque(B, q) {
       } })) : null);
 }
 async function enregistrerQuestion(v, q) {
-  const corps = { theme: v.theme, question: qTexte(v), reponse: qReponse(v), variantes: qVariantes(v), source: qSource(v), section: v.section || "", extrait: v.extrait || "",
-    difficulte: qDifficulte(v), statut: v.statut === "confirme" ? "confirme" : "a_verifier", active: qActive(v) };
+  const corps = { theme: v.theme, question: qTexte(v).trim(), reponse: qReponse(v).trim(), variantes: qVariantes(v), source: (qSource(v).url || "").trim(),
+    section: v.section || "", extrait: v.extrait || "", difficulte: DIFF_NOMS[qDifficulte(v)] || "moyenne", statut: v.statut === "confirme" ? "confirme" : "a_verifier",
+    actif: qActive(v) };
+  if (v.type) corps.type = v.type;
   if (q && q.id && !String(q.id).startsWith("tmp-")) { corps.id = q.id; corps.version = q.version; }
   const cle = q && q.id ? String(q.id) : "tmp-" + uuid();
   await mettreEnFile("recrutement/question", corps, { genre: "question", cle, resume: "Question : " + corps.question.slice(0, 60), objet: Object.assign({}, q || {}, corps, { id: q && q.id ? q.id : cle, _cle: cle }) });
@@ -533,13 +562,12 @@ function editerQuestion(B, q) {
     champ("La question", texte), champ("La réponse attendue", rep),
     h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Variantes admises"), variantesZone, ajout, h("span", { classe: "champ-aide" }, "D'autres façons justes de répondre (autre langue, abréviation…). Elles aident l'indication de proximité.")),
     h("fieldset", { classe: "cadre pile serree bloc-form" }, h("legend", { classe: "cadre-titre" }, "La source"),
-      h("div", { classe: "champs" }, champ("Titre", s(v.source, "titre", { maxlength: 120, placeholder: "Vidéo officielle du Movie 3" })), champ("Lien (https)", s(v.source, "url", { maxlength: 500, placeholder: "https://…", inputmode: "url" })),
-        champ("Minutage", s(v.source, "minutage", { maxlength: 12, placeholder: "12:40" }), { optionnel: true })),
+      champ("Lien (https)", s(v.source, "url", { maxlength: 500, placeholder: "https://rellseas.fandom.com/wiki/…", inputmode: "url" }), { aide: "La page du wiki, ou la vidéo avec son minutage dans l'adresse." }),
       h("div", { classe: "champs" }, champ("Section", s(v, "section", { maxlength: 120 }), { optionnel: true })),
       champ("Extrait", extrait, { optionnel: true })),
     radios("diff-q", [["1", "Facile"], ["2", "Moyenne"], ["3", "Difficile"]], String(v.difficulte), (x) => { v.difficulte = Number(x); }, "Difficulté"),
     radios("statut-q", [["confirme", "Confirmée", "vérifiée à la source"], ["a_verifier", "À vérifier"]], v.statut === "confirme" ? "confirme" : "a_verifier", (x) => { v.statut = x; }, "Statut"),
-    interrupteur("Active (proposée dans le choix des questions)", v.active !== false, (x) => { v.active = x; })]);
+    interrupteur("Active (proposée dans le choix des questions)", qActive(v), (x) => { v.active = x; v.actif = x; })]);
   ajouter(p.pied, [bouton("Annuler", { classe: "discret", onclick: () => p.fermer() }), bouton("Enregistrer", { classe: "principal", icone: "valider", onclick: async () => {
     if (!v.question.trim() || !v.reponse.trim()) { toast("La question et la réponse attendue sont obligatoires.", "erreur"); return; }
     if (v.source.url && !/^https:\/\//.test(v.source.url)) { toast("Le lien de la source doit commencer par https://", "erreur"); return; }
@@ -596,12 +624,14 @@ function blocLiens(B) {
     B._liensAttente ? bandeau("Liens gardés sur l'appareil : ils partiront au retour de la connexion.", "") : null,
     liens.length ? h("div", { classe: "pile serree" }, liens.map(ligne)) : vide("Aucun lien", "Ajoute la vidéo du Movie 3, le wiki, le guide du clan…", "lien"),
     peutAgir() ? h("div", { classe: "rangee" },
-      bouton("Ajouter un lien", { classe: "p", icone: "ajouter", onclick: () => { if (liens.length >= 20) { toast("20 liens au plus.", "erreur"); return; } liens.push({ titre: "", url: "", description: "" }); dessiner(); } }),
+      bouton("Ajouter un lien", { classe: "p", icone: "ajouter", onclick: () => { const max = (B.limites && B.limites.liens) || 10; if (liens.length >= max) { toast(max + " liens au plus.", "erreur"); return; } liens.push({ titre: "", url: "", description: "" }); dessiner(); } }),
       bouton("Enregistrer les liens", { classe: "p principal", icone: "valider", onclick: async () => {
-        const propres = liens.filter((l) => l.titre || l.url);
+        const propres = liens.filter((l) => (l.titre || "").trim() || l.url);
         const mauvais = propres.find((l) => !/^https:\/\/\S+$/.test(l.url || ""));
         if (mauvais) { toast("Chaque lien doit commencer par https:// (« " + (mauvais.titre || mauvais.url) + " »).", "erreur"); return; }
-        await mettreEnFile("recrutement/liens", { liens: propres.map((l) => ({ id: l.id, titre: (l.titre || "").trim(), url: l.url, description: (l.description || "").trim() })) }, { genre: "liens", cle: "liens", resume: "Les liens du questionnaire (" + propres.length + ")" });
+        const sansTitre = propres.find((l) => !(l.titre || "").trim());
+        if (sansTitre) { toast("Chaque lien a besoin d'un titre (« " + sansTitre.url + " »).", "erreur"); return; }
+        await mettreEnFile("recrutement/liens", { version: B.liens_version, liens: propres.map((l) => ({ id: l.id, titre: (l.titre || "").trim(), url: l.url, description: (l.description || "").trim() })) }, { genre: "liens", cle: "liens", resume: "Les liens du questionnaire (" + propres.length + ")" });
         toast("Liens enregistrés.", "succes");
         emettre("jeu", { nom: "banque" });
       } })) : null);
@@ -609,24 +639,26 @@ function blocLiens(B) {
   return zone;
 }
 function blocReglages(B) {
-  const r = Object.assign({ nombre_defaut: 10, selection_defaut: [] }, B.reglages || {});
-  const v = { nombre_defaut: Number(r.nombre_defaut) || 10, selection_defaut: (r.selection_defaut || []).map(String) };
-  const nombreE = h("input", { type: "number", classe: "saisie", min: 1, max: 40, value: v.nombre_defaut, inputmode: "numeric" });
-  nombreE.addEventListener("input", () => { v.nombre_defaut = Math.max(1, Math.min(40, Number(nombreE.value) || 1)); });
-  const pas = (d) => () => { v.nombre_defaut = Math.max(1, Math.min(40, v.nombre_defaut + d)); nombreE.value = v.nombre_defaut; };
-  const resume = h("span", { classe: "meta" }, quantite(v.selection_defaut.length, "question(s) choisie(s)"));
+  const r = B.reglages || {};
+  const max = (B.limites && B.limites.par_envoi) || 40;
+  const v = { nombre: Math.max(1, Math.min(max, Number(r.nombre || r.nombre_defaut) || 10)), version: r.version };
+  const nombreE = h("input", { type: "number", classe: "saisie", min: 1, max, value: v.nombre, inputmode: "numeric", "aria-label": "Nombre de questions par défaut" });
+  nombreE.addEventListener("input", () => { v.nombre = Math.max(1, Math.min(max, Number(nombreE.value) || 1)); });
+  const pas = (d) => () => { v.nombre = Math.max(1, Math.min(max, v.nombre + d)); nombreE.value = v.nombre; };
+  const defaut = modeleDefautObjet(B);
   return h("div", { classe: "cadre pile serree" },
     B._reglagesAttente ? bandeau("Réglages gardés sur l'appareil : ils partiront au retour de la connexion.", "") : null,
     h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Nombre de questions par défaut"),
       h("div", { classe: "pas-a-pas" }, boutonIcone("moins", "Une de moins", pas(-1)), nombreE, boutonIcone("plus", "Une de plus", pas(1))),
-      h("span", { classe: "champ-aide" }, "Annoncé au candidat dès l'ouverture du ticket.")),
-    h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Sélection par défaut"), h("div", { classe: "rangee" }, resume,
-      peutAgir() ? bouton("Choisir…", { classe: "p", icone: "plume", onclick: () => choisirHorsDossier("defaut", v.selection_defaut, (ids) => { v.selection_defaut = ids; resume.textContent = quantite(ids.length, "question(s) choisie(s)"); return enregistrerReglages(v); }, "Sélection par défaut") }) : null),
-      h("span", { classe: "champ-aide" }, "Utilisée si aucun modèle n'est « par défaut », et par Discord quand on passe à l'étape 2 depuis le ticket.")),
+      h("span", { classe: "champ-aide" }, "Tirées parmi les questions confirmées quand aucun modèle n'est « par défaut ». Le candidat lit dès l'ouverture du ticket combien de questions l'attendent"
+        + (r.annonce ? " (aujourd'hui : " + r.annonce + ")." : "."))),
+    h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Sélection par défaut"),
+      h("p", { classe: "aide" }, defaut ? "Le modèle « " + sansEmoji(defaut.nom) + " » (" + compte((defaut.questions || []).length, "question") + ") : proposé à chaque candidat, et envoyé quand on passe à l'étape 2 depuis Discord."
+        : "Aucun modèle par défaut : marque un modèle « Par défaut » pour choisir les questions envoyées d'office.")),
     peutAgir() ? h("div", { classe: "rangee" }, bouton("Enregistrer les réglages", { classe: "p principal", icone: "valider", onclick: () => enregistrerReglages(v) })) : null);
 }
 async function enregistrerReglages(v) {
-  await mettreEnFile("recrutement/reglages", { nombre_defaut: v.nombre_defaut, selection_defaut: v.selection_defaut }, { genre: "reglages", cle: "reglages", resume: "Réglages du questionnaire" });
+  await mettreEnFile("recrutement/reglages", { nombre: v.nombre, version: v.version }, { genre: "reglages", cle: "reglages", resume: "Réglages du questionnaire" });
   toast("Réglages enregistrés.", "succes");
   emettre("jeu", { nom: "banque" });
 }

@@ -1,0 +1,348 @@
+// outils/parcours_site.mjs — les VRAIS parcours du site v2, joués dans la vraie page contre le vrai serveur local.
+//
+// Un Edge (ou Chrome) SANS FENÊTRE ouvre le site local (`python outils/site_local.py` : le même serveur que le bot,
+// un faux Discord, une base neuve à chaque démarrage), clique comme une personne, puis RELIT l'état par l'API après
+// chaque geste : un bouton qui « marche » à l'écran sans rien changer au serveur est un échec. Une capture par étape.
+//
+//   node outils/parcours_site.mjs [--url http://localhost:8790] [--sortie <dossier>] [--parcours recrutement]
+//                                 [--navigateur <exe>]
+//
+// La base du site local change à chaque parcours : relancer le site local avant de rejouer.
+
+import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync, existsSync, rmSync, mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+const args = process.argv.slice(2);
+const opt = (nom, defaut) => { const i = args.indexOf("--" + nom); return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : true) : defaut; };
+const BASE = String(opt("url", "http://localhost:8790")).replace(/\/+$/, "");
+const SITE = BASE + "/tableau/espace/";
+const SORTIE = opt("sortie", join(tmpdir(), "capitainerie-parcours"));
+const PARCOURS = String(opt("parcours", "recrutement")).split(",");
+const PORT = 9739 + Math.floor(Math.random() * 200);
+const NAVIGATEURS = [opt("navigateur", ""), process.env.CHROME || "",
+  "C:/Program Files/Google/Chrome/Application/chrome.exe", "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+  "C:/Program Files (x86)/Microsoft/EdgeCore/155.0.4283.62/msedge.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean);
+
+// ─── Le protocole DevTools ──────────────────────────────────────────────────
+let ws, prochainId = 1;
+const attente = new Map();
+const ecouteurs = [];
+const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
+function envoyer(methode, params = {}, sessionId) {
+  const id = prochainId++;
+  ws.send(JSON.stringify({ id, method: methode, params, sessionId }));
+  return new Promise((ok, ko) => attente.set(id, { ok, ko, methode }));
+}
+async function lancerNavigateur() {
+  const exe = NAVIGATEURS.find((p) => existsSync(p));
+  if (!exe) throw new Error("Aucun Chrome ni Edge trouvé (option --navigateur <exe>).");
+  const profil = mkdtempSync(join(tmpdir(), "capitainerie-parcours-"));
+  const proc = spawn(exe, ["--headless=new", `--remote-debugging-port=${PORT}`, `--user-data-dir=${profil}`, "--no-first-run", "--no-default-browser-check",
+    "--disable-extensions", "--disable-sync", "--lang=fr-FR", "about:blank"], { stdio: "ignore" });
+  for (let i = 0; i < 60; i++) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${PORT}/json/version`);
+      if (r.ok) return { proc, profil, exe, wsUrl: (await r.json()).webSocketDebuggerUrl };
+    } catch (e) { /* pas encore */ }
+    await pause(250);
+  }
+  throw new Error("Le navigateur ne répond pas sur le port " + PORT);
+}
+async function connecter(wsUrl) {
+  ws = new WebSocket(wsUrl);
+  await new Promise((ok, ko) => { ws.onopen = ok; ws.onerror = ko; });
+  ws.onmessage = (m) => {
+    const d = JSON.parse(typeof m.data === "string" ? m.data : m.data.toString());
+    if (d.id && attente.has(d.id)) {
+      const a = attente.get(d.id);
+      attente.delete(d.id);
+      if (d.error) a.ko(new Error(a.methode + " : " + d.error.message)); else a.ok(d.result);
+    } else if (d.method) for (const f of ecouteurs) f(d);
+  };
+}
+const erreursPage = [];
+async function onglet() {
+  const { targetId } = await envoyer("Target.createTarget", { url: "about:blank" });
+  const { sessionId } = await envoyer("Target.attachToTarget", { targetId, flatten: true });
+  const s = (m, p) => envoyer(m, p, sessionId);
+  await s("Page.enable");
+  await s("Runtime.enable");
+  ecouteurs.push((d) => {
+    if (d.sessionId !== sessionId) return;
+    if (d.method === "Runtime.exceptionThrown") erreursPage.push("exception : " + ((d.params.exceptionDetails.exception || {}).description || d.params.exceptionDetails.text));
+    if (d.method === "Runtime.consoleAPICalled" && d.params.type === "error") erreursPage.push("console : " + d.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
+  });
+  await s("Emulation.setDeviceMetricsOverride", { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false });
+  return { s };
+}
+async function evaluer(o, expression) {
+  const r = await o.s("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+  if (r.exceptionDetails) throw new Error((r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text);
+  return r.result.value;
+}
+
+// ─── Les gestes, comme une personne ─────────────────────────────────────────
+// La zone : la dernière pancarte ouverte (une confirmation s'ouvre par-dessus le dossier), sinon la page.
+const ZONE = "([...document.querySelectorAll('dialog[open]')].pop() || document)";
+const visible = "(x) => x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden'";
+/** Cliquer l'élément visible (et actif) dont le texte contient `texte`. */
+function cliquer(o, selecteur, texte, { partout = false } = {}) {
+  return evaluer(o, `(() => { const z = ${partout ? "document" : ZONE}; const vis = ${visible};
+    const el = [...z.querySelectorAll(${JSON.stringify(selecteur)})].find((x) => vis(x) && !x.disabled && (x.textContent || x.getAttribute("aria-label") || "").replace(/\\s+/g, " ").includes(${JSON.stringify(texte)}));
+    if (!el) return false; el.scrollIntoView({ block: "center" }); el.click(); return true; })()`);
+}
+/** Écrire dans le champ (input / textarea) repéré par son texte d'exemple ou son libellé accessible. */
+function ecrire(o, repere, valeur) {
+  return evaluer(o, `(() => { const z = ${ZONE};
+    const el = [...z.querySelectorAll("input, textarea")].filter((x) => x.placeholder === ${JSON.stringify(repere)} || x.getAttribute("aria-label") === ${JSON.stringify(repere)}).pop();
+    if (!el) return false; el.focus(); el.value = ${JSON.stringify(valeur)}; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
+}
+const texteZone = (o) => evaluer(o, `${ZONE}.body ? document.body.innerText : ${ZONE}.innerText`);
+async function attendre(fn, ms = 15000, pas = 400) {
+  const t0 = Date.now();
+  let v = null;
+  while (Date.now() - t0 < ms) {
+    try { v = await fn(); } catch (e) { v = null; }
+    if (v) return v;
+    await pause(pas);
+  }
+  return v;
+}
+/** Lire l'API comme la page (même session, même en-tête). */
+function api(o, chemin) {
+  return evaluer(o, `fetch(${JSON.stringify(SITE + "api/" + chemin)}, { credentials: "same-origin", headers: { "X-Tableau": "1" } }).then((r) => r.json())`);
+}
+async function aller(o, ancre) {
+  await fermerTout(o).catch(() => null);   // une étape ratée ne laisse pas sa pancarte à la suivante
+  await o.s("Page.navigate", { url: SITE + ancre });
+  const pret = await attendre(() => evaluer(o, "!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 12000, 200);
+  await pause(600);
+  return pret;
+}
+const fermerTout = (o) => evaluer(o, "(() => { for (const d of [...document.querySelectorAll('dialog[open]')].reverse()) d.close(); return true; })()");
+
+// ─── Le rapport ─────────────────────────────────────────────────────────────
+const resultats = [];
+let numero = 0;
+async function etape(o, nom, fn) {
+  numero += 1;
+  const debut = erreursPage.length;
+  let ok = false, detail = "";
+  try {
+    const r = await fn();
+    ok = r === true || (r && r.ok === true);
+    detail = r && r !== true ? ("detail" in r ? String(r.detail || "") : JSON.stringify(r).slice(0, 300)) : "";
+  } catch (e) {
+    detail = "exception : " + e.message;
+  }
+  const erreurs = erreursPage.slice(debut);
+  if (erreurs.length) { ok = false; detail += (detail ? " · " : "") + erreurs.slice(0, 3).join(" | "); }
+  const fichier = join(SORTIE, String(numero).padStart(2, "0") + "-" + nom.replace(/[^a-z0-9]+/gi, "-").toLowerCase() + ".png");
+  try { const c = await o.s("Page.captureScreenshot", { format: "png" }); writeFileSync(fichier, Buffer.from(c.data, "base64")); } catch (e) { /* capture impossible */ }
+  resultats.push({ nom, ok, detail, capture: fichier });
+  console.log(`${ok ? "ok    " : "ÉCHEC "} ${nom}${detail ? "\n        · " + detail : ""}`);
+  return ok;
+}
+
+// ═══ LE RECRUTEMENT ═════════════════════════════════════════════════════════
+async function ouvrirCandidature(o, ticket, attendu) {
+  await fermerTout(o);
+  await aller(o, "#equipage/candidatures");
+  if (!await cliquer(o, ".feuillet.lien", "Ticket #" + ticket + " ")) return false;
+  return attendre(async () => (await texteZone(o)).includes(attendu), 10000);
+}
+async function parcoursRecrutement(o) {
+  const dossier = (t) => api(o, "recrutement/dossier?ticket=" + t);
+  const suivi = await api(o, "recrutement/suivi");
+  const parEtape = (e) => (suivi.ouverts || []).filter((x) => x.etape === e).map((x) => x.ticket);
+  const [t1, t1bis] = parEtape("etape1");
+  const [tAttente] = parEtape("etape2");
+  const [tCorr, tCorr2] = parEtape("reponses");
+
+  await etape(o, "Liste : les étapes du serveur", async () => {
+    await aller(o, "#equipage/candidatures");
+    const t = await evaluer(o, "document.querySelector('#contenu').innerText");
+    const nb = (lib) => { const m = t.match(new RegExp(lib + "\\s+(\\d+)")); return m ? Number(m[1]) : -1; };
+    const ok = nb("Étape 1 à décider") === parEtape("etape1").length && nb("Réponses à corriger") === parEtape("reponses").length && nb("Questions envoyées") === parEtape("etape2").length;
+    return { ok, detail: `page : ${nb("Étape 1 à décider")}/${nb("Réponses à corriger")}/${nb("Questions envoyées")} · serveur : ${parEtape("etape1").length}/${parEtape("reponses").length}/${parEtape("etape2").length}` };
+  });
+
+  await etape(o, "Étape 1 → étape 2 : la sélection précédente part", async () => {
+    if (!await ouvrirCandidature(o, t1, "La décision de l'étape 1")) return { ok: false, detail: "dossier de l'étape 1 introuvable (ticket " + t1 + ")" };
+    if (!await cliquer(o, "button", "Passer à l'étape 2")) return { ok: false, detail: "bouton « Passer à l'étape 2 » absent" };
+    if (!await attendre(() => cliquer(o, "button.depart", "Reprendre la sélection précédente"), 6000)) return { ok: false, detail: "départ « sélection précédente » absent" };
+    await pause(300);
+    if (!await cliquer(o, "button.envoyer", "Envoyer")) return { ok: false, detail: "bouton d'envoi absent ou inactif" };
+    const d = await attendre(async () => { const x = await dossier(t1); return x.etape === "etape2" && x.envois.length === 1 ? x : null; });
+    if (!d) return { ok: false, detail: "le serveur n'a pas l'envoi : " + JSON.stringify(await dossier(t1)).slice(0, 200) };
+    const vu = await attendre(async () => (await texteZone(o)).includes("questions envoyées"), 6000);
+    return { ok: !!vu, detail: d.envois[0].nb + " questions envoyées" + (vu ? "" : " — la page ne l'affiche pas") };
+  });
+
+  await etape(o, "En attente : questions listées, aucune correction possible", async () => {
+    if (!await ouvrirCandidature(o, tAttente, "questions envoyées")) return { ok: false, detail: "dossier en attente introuvable" };
+    const t = await texteZone(o);
+    return { ok: t.includes("En attente des réponses du candidat") && !t.includes("Réponse du candidat"), detail: "" };
+  });
+
+  await etape(o, "Correction : tout juste, puis accepter", async () => {
+    if (!await ouvrirCandidature(o, tCorr, "la correction")) return { ok: false, detail: "dossier à corriger introuvable" };
+    const avant = await dossier(tCorr);
+    const total = avant.envois[0].questions.length;
+    const rep = await evaluer(o, `[...${ZONE}.querySelectorAll(".correction-reponse p")].filter((p) => !p.classList.contains("aide")).length`);
+    if (rep !== total) return { ok: false, detail: `réponses du candidat affichées : ${rep}/${total}` };
+    for (let i = 0; i < total + 2; i++) {
+      const fait = await evaluer(o, `(() => { const b = ${ZONE}.querySelector('.bouton-juste[aria-pressed="false"]:not([disabled])'); if (!b) return false; b.click(); return true; })()`);
+      if (!fait) break;
+      await pause(250);
+    }
+    const corrige = await attendre(async () => { const x = await dossier(tCorr); const b = x.envois[0].bilan; return b.justes === b.total ? x : null; }, 20000);
+    if (!corrige) return { ok: false, detail: "corrections non arrivées au serveur : " + JSON.stringify((await dossier(tCorr)).envois[0].bilan) };
+    if (!await attendre(() => cliquer(o, "button", "Accepter · " + total + "/" + total), 6000)) return { ok: false, detail: "bouton « Accepter · " + total + "/" + total + " » absent" };
+    if (!await attendre(() => cliquer(o, "dialog[open] button", "Accepter"), 6000)) return { ok: false, detail: "confirmation absente" };
+    const d = await attendre(async () => { const x = await dossier(tCorr); return x.etape === "accepte" && x.statut_ticket === "ferme" ? x : null; }, 15000);
+    return { ok: !!d, detail: d ? "accepté, ticket fermé" : "état : " + JSON.stringify(await dossier(tCorr)).slice(0, 200) };
+  });
+
+  await etape(o, "Refuser après correction : message, fermeture", async () => {
+    if (!await ouvrirCandidature(o, tCorr2, "la correction")) return { ok: false, detail: "second dossier à corriger introuvable" };
+    if (!await cliquer(o, "button", "Refuser")) return { ok: false, detail: "bouton « Refuser » absent" };
+    const t = await attendre(async () => { const x = await texteZone(o); return x.includes("La direction a étudié ta candidature") ? x : null; }, 6000);
+    if (!t) return { ok: false, detail: "la confirmation ne montre pas le message exact du serveur" };
+    if (t.includes("-#")) return { ok: false, detail: "le message montre la syntaxe Discord « -# »" };
+    if (!await cliquer(o, "dialog[open] button", "Refuser et fermer le ticket")) return { ok: false, detail: "confirmation absente" };
+    const prevu = await attendre(async () => { const x = await dossier(tCorr2); return x.fermeture_prevue || x.etape === "refuse" ? x : null; }, 10000);
+    if (!prevu) return { ok: false, detail: "le serveur n'a pas prévu la fermeture" };
+    const ferme = await attendre(async () => { const x = await dossier(tCorr2); return x.statut_ticket === "ferme" && x.etape === "refuse" ? x : null; }, 45000, 1000);
+    return { ok: !!ferme, detail: ferme ? "refusé, ticket fermé" : "état : " + JSON.stringify(await dossier(tCorr2)).slice(0, 200) };
+  });
+
+  await etape(o, "Refuser l'étape 1 : message exact, fermeture prévue", async () => {
+    if (!await ouvrirCandidature(o, t1bis, "La décision de l'étape 1")) return { ok: false, detail: "second dossier de l'étape 1 introuvable" };
+    if (!await cliquer(o, "button", "Refuser l'étape 1")) return { ok: false, detail: "bouton absent" };
+    const t = await attendre(async () => { const x = await texteZone(o); return x.includes("ne correspondent pas à ce que nous attendons") ? x : null; }, 6000);
+    if (!t) return { ok: false, detail: "la confirmation ne montre pas le message du serveur" };
+    if (!await cliquer(o, "dialog[open] button", "Refuser et fermer le ticket")) return { ok: false, detail: "confirmation absente" };
+    const d = await attendre(async () => { const x = await dossier(t1bis); return x.etape === "refus_etape1" ? x : null; }, 10000);
+    return { ok: !!d, detail: d ? "étape 1 refusée" + (d.fermeture_prevue ? ", fermeture prévue" : ", ticket fermé") : "état : " + JSON.stringify(await dossier(t1bis)).slice(0, 200) };
+  });
+
+  // ─── La banque de questions ───
+  const QUESTION = "Combien de joueurs au plus un équipage du parcours compte-t-il ?";
+  const banque = () => api(o, "recrutement/banque");
+  const laQuestion = async () => ((await banque()).questions || []).find((q) => q.question === QUESTION);
+
+  await etape(o, "Banque : ajouter une question", async () => {
+    await fermerTout(o);
+    await aller(o, "#equipage/candidatures/questionnaire");
+    if (!await cliquer(o, "button", "Ajouter une question")) return { ok: false, detail: "bouton absent" };
+    await attendre(async () => (await texteZone(o)).includes("Nouvelle question"), 5000);
+    const champs = [await ecrire(o, "Quel studio développe RELL Seas ?", QUESTION), await ecrire(o, "RELL Games", "Huit"),
+      await ecrire(o, "https://rellseas.fandom.com/wiki/…", "https://rellseas.fandom.com/wiki/Crews")];
+    if (champs.includes(false)) return { ok: false, detail: "champ introuvable : " + JSON.stringify(champs) };
+    if (!await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "bouton « Enregistrer » absent" };
+    const q = await attendre(laQuestion, 15000);
+    if (!q) return { ok: false, detail: "le serveur n'a pas la question" };
+    const ok = q.reponse === "Huit" && q.difficulte === "facile" && q.source === "https://rellseas.fandom.com/wiki/Crews" && q.actif === true && q.statut === "a_verifier";
+    return { ok, detail: JSON.stringify({ reponse: q.reponse, difficulte: q.difficulte, source: q.source, actif: q.actif, statut: q.statut }) };
+  });
+
+  await etape(o, "Banque : désactiver puis réactiver", async () => {
+    await aller(o, "#equipage/candidatures/questionnaire");
+    if (!await ecrire(o, "Question, réponse, source…", QUESTION)) return { ok: false, detail: "recherche absente" };
+    await pause(700);
+    const basculer = () => evaluer(o, `(() => { const l = [...document.querySelectorAll(".banque-ligne")].find((x) => x.textContent.includes(${JSON.stringify(QUESTION)}));
+      const i = l && l.querySelector("input[type=checkbox], [role=switch], button[aria-pressed]"); if (!i) return false; i.click(); return true; })()`);
+    if (!await basculer()) return { ok: false, detail: "interrupteur « Active » introuvable" };
+    const off = await attendre(async () => { const q = await laQuestion(); return q && q.actif === false ? q : null; });
+    if (!off) return { ok: false, detail: "désactivation non reçue" };
+    await pause(800);
+    if (!await attendre(basculer, 5000)) return { ok: false, detail: "interrupteur introuvable après la désactivation" };
+    const on = await attendre(async () => { const q = await laQuestion(); return q && q.actif === true ? q : null; });
+    return { ok: !!on, detail: on ? "" : "réactivation non reçue" };
+  });
+
+  await etape(o, "Banque : retirer la question", async () => {
+    await aller(o, "#equipage/candidatures/questionnaire");
+    await ecrire(o, "Question, réponse, source…", QUESTION);
+    await pause(700);
+    const clic = await evaluer(o, `(() => { const l = [...document.querySelectorAll(".banque-ligne")].find((x) => x.textContent.includes(${JSON.stringify(QUESTION)}));
+      const b = l && [...l.querySelectorAll("button")].find((x) => x.textContent.includes("Retirer")); if (!b) return false; b.click(); return true; })()`);
+    if (!clic) return { ok: false, detail: "bouton « Retirer » introuvable" };
+    if (!await attendre(() => cliquer(o, "dialog[open] button", "Retirer"), 5000)) return { ok: false, detail: "confirmation absente" };
+    const q = await attendre(async () => { const x = await laQuestion(); return x && x.retiree ? x : null; });
+    if (!q) return { ok: false, detail: "retrait non reçu" };
+    await aller(o, "#equipage/candidatures/questionnaire");
+    await ecrire(o, "Question, réponse, source…", QUESTION);
+    await pause(700);
+    const encore = await evaluer(o, `[...document.querySelectorAll(".banque-ligne")].some((x) => x.textContent.includes(${JSON.stringify(QUESTION)}))`);
+    return { ok: !encore, detail: encore ? "la question retirée est encore affichée" : "" };
+  });
+
+  await etape(o, "Liens : en ajouter un", async () => {
+    await aller(o, "#equipage/candidatures/questionnaire");
+    const avant = (await banque()).liens.length;
+    if (!await cliquer(o, "button", "Ajouter un lien")) return { ok: false, detail: "bouton absent" };
+    await pause(300);
+    const ok1 = await ecrire(o, "Titre du lien", "Les équipages (wiki)");
+    const ok2 = await ecrire(o, "Adresse", "https://rellseas.fandom.com/wiki/Crews");
+    if (!ok1 || !ok2) return { ok: false, detail: "champs du lien introuvables" };
+    if (!await cliquer(o, "button", "Enregistrer les liens")) return { ok: false, detail: "bouton « Enregistrer les liens » absent" };
+    const b = await attendre(async () => { const x = await banque(); return x.liens.length === avant + 1 ? x : null; });
+    return { ok: !!b && b.liens.some((l) => l.url === "https://rellseas.fandom.com/wiki/Crews" && l.titre === "Les équipages (wiki)"), detail: b ? "" : "liens non reçus" };
+  });
+
+  await etape(o, "Réglages : une question de plus", async () => {
+    await aller(o, "#equipage/candidatures/questionnaire");
+    const avant = (await banque()).reglages.nombre;
+    if (!await cliquer(o, "button", "Une de plus")) return { ok: false, detail: "bouton « Une de plus » absent" };
+    if (!await cliquer(o, "button", "Enregistrer les réglages")) return { ok: false, detail: "bouton absent" };
+    const b = await attendre(async () => { const x = await banque(); return x.reglages.nombre === avant + 1 ? x : null; });
+    return { ok: !!b, detail: b ? avant + " → " + b.reglages.nombre : "réglages non reçus" };
+  });
+
+  await etape(o, "Modèles : enregistrer la sélection précédente, la mettre par défaut", async () => {
+    await aller(o, "#equipage/candidatures/questionnaire");
+    if (!await cliquer(o, "button", "Nouveau modèle")) return { ok: false, detail: "bouton « Nouveau modèle » absent" };
+    if (!await attendre(() => cliquer(o, "button.depart", "Reprendre la sélection précédente"), 6000)) return { ok: false, detail: "départ absent" };
+    if (!await cliquer(o, "button", "Enregistrer le modèle")) return { ok: false, detail: "bouton « Enregistrer le modèle » absent" };
+    if (!await attendre(() => ecrire(o, "Spécial Movie 3", "Parcours complet"), 5000)) return { ok: false, detail: "nom du modèle introuvable" };
+    if (!await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "confirmation absente" };
+    const m = await attendre(async () => ((await banque()).modeles || []).find((x) => x.nom === "Parcours complet"));
+    if (!m) return { ok: false, detail: "le serveur n'a pas le modèle" };
+    await fermerTout(o);
+    await aller(o, "#equipage/candidatures/questionnaire");
+    const clic = await evaluer(o, `(() => { const f = [...document.querySelectorAll(".feuillet")].find((x) => x.textContent.includes("Parcours complet"));
+      const b = f && [...f.querySelectorAll("button")].find((x) => x.textContent.trim() === "Par défaut"); if (!b) return false; b.click(); return true; })()`);
+    if (!clic) return { ok: false, detail: "bouton « Par défaut » introuvable" };
+    const d = await attendre(async () => ((await banque()).modeles || []).find((x) => x.nom === "Parcours complet" && x.par_defaut));
+    return { ok: !!d, detail: d ? d.questions.length + " questions, par défaut" : "« par défaut » non reçu" };
+  });
+}
+
+// ─── Le tout ────────────────────────────────────────────────────────────────
+async function principal() {
+  mkdirSync(SORTIE, { recursive: true });
+  const nav = await lancerNavigateur();
+  console.log("Navigateur : " + nav.exe + "\nCaptures : " + SORTIE);
+  try {
+    await connecter(nav.wsUrl);
+    const o = await onglet();
+    await o.s("Page.navigate", { url: BASE + "/tableau/demo" });
+    await pause(2000);
+    if (PARCOURS.includes("recrutement")) await parcoursRecrutement(o);
+  } finally {
+    try { await envoyer("Browser.close"); } catch (e) { /* déjà fermé */ }
+    await pause(400);
+    try { nav.proc.kill(); } catch (e) { /* rien */ }
+    try { rmSync(nav.profil, { recursive: true, force: true }); } catch (e) { /* le profil temporaire reste */ }
+  }
+  const echecs = resultats.filter((r) => !r.ok);
+  writeFileSync(join(SORTIE, "parcours.json"), JSON.stringify({ quand: new Date().toISOString(), base: BASE, resultats }, null, 1));
+  console.log(`\n${resultats.length} étape(s), ${echecs.length} en échec.`);
+  if (echecs.length) process.exitCode = 1;
+}
+principal().catch((e) => { console.error("Parcours interrompu : " + e.message); process.exitCode = 2; });

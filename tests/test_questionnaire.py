@@ -1205,3 +1205,47 @@ def test_Q21_phrases_du_journal_du_site_et_regle_de_nettoyage(tmp_path):
     assert corr[0] == 200 and corr[1]["_journal"] is None and acceptee[1]["_journal"] is None
     assert (avant, apres, retires) == (0, 1, 1), "un ticket ouvert garde son questionnaire ; un fermé part"
     assert restants == [t2] and reponses == 0
+
+
+
+# ═══ Le site : l'étape de chaque candidature en cours, les textes exacts du refus (25/10/2026) ══════════════════════
+
+def test_Q30_le_site_range_chaque_candidature_a_son_etape(tmp_path):
+    """La page range les candidatures (« à décider », « questions envoyées », « à corriger ») d'après l'étape tenue
+    par ce module : `tableau._etapes_recrutement`. Une candidature décidée dont le ticket se ferme n'est plus en cours.
+    Avant, la page ne recevait aucune étape : toutes paraissaient « à décider »."""
+    import tableau
+    b = Banc(tmp_path)
+
+    async def scenario():
+        await b.preparer()
+        t_e1, fil1 = await b.ouvrir()
+        await Q.poser_etape1(b.g, fil1, t_e1, CANDIDAT)
+        t_att, _f = await b.ouvrir(AUTRE)
+        assert (await Q.envoyer(b.g, t_att, b.fondateur, {}))[0] == 200
+        t_rep, _f = await b.ouvrir(RECRUTEUR)
+        assert (await Q.envoyer(b.g, t_rep, b.fondateur, {}))[0] == 200
+        e = (await Q._envois_du_ticket(b.g.id, t_rep))[-1]
+        assert await Q._garder_page(e, {int(q["rang"]): "une réponse" for q in e["questions"]})
+        async with b.get_db() as db:
+            await db.execute("UPDATE recrutement_envois SET statut='repondu' WHERE id=?", (e["id"],))
+            await db.execute("UPDATE recrutement_suivi SET etape='reponses' WHERE ticket_id=?", (t_rep,))
+            await db.commit()
+        etapes_avant = await tableau._etapes_recrutement(b.g)
+        await Q._r_corriger(b.g, b.fondateur, {}, {"envoi": e["id"], "question": e["questions"][0]["id"], "juste": True})
+        etapes_partiel = await tableau._etapes_recrutement(b.g)
+        assert (await Q.refuser(b.g, t_e1, b.fondateur, depuis="etape1"))[0] == 200
+        etapes_refus = await tableau._etapes_recrutement(b.g)
+        dossier = await Q.dossier(b.g, t_att)
+        return t_e1, t_att, t_rep, etapes_avant, etapes_partiel, etapes_refus, dossier
+    t_e1, t_att, t_rep, avant, partiel, refus, dossier = run(scenario())
+    assert avant[t_e1] == {"etape": 1, "recrutement": "etape1", "fermeture_prevue": False}
+    assert avant[t_att] == {"etape": 2, "recrutement": "etape2_attente", "fermeture_prevue": False}
+    assert avant[t_rep]["recrutement"] == "etape2_reponses" and partiel[t_rep]["recrutement"] == "etape2_partiel"
+    assert refus[t_e1]["recrutement"] == "refus_etape1" and refus[t_e1]["fermeture_prevue"]
+    liste = [{"ticket": t} for t in (t_e1, t_att, t_rep, 999)]
+    restent = tableau.candidatures_en_cours(liste, refus)
+    assert [o["ticket"] for o in restent] == [t_att, t_rep, 999], "décidée : plus en cours"
+    assert restent[-1]["etape"] == 1 and restent[-1]["recrutement"] == "etape1", "sans suivi : l'étape 1"
+    #  Les textes que le candidat lira, exacts, pour que la page les montre avant de refuser.
+    assert dossier["message_refus_etape1"] == Q.REFUS_ETAPE1 and dossier["message_refus"] == Q.REFUS_FINAL
