@@ -105,6 +105,7 @@ import cadeaux  # les cadeaux (giveaways) : conditions, stats en direct, tirage 
 import liens_jeux  # 🎮 game-link : les liens officiels pour rejoindre nos jeux
 import vocaux  # les vocaux à la demande : un Join par jeu, la Demande du clan, le but de chaque vocal
 import invitations  # les invitations de chaque membre (le total de ses liens) : une condition des cadeaux
+import evenements  # 25/10/2026 : annonces et événements du clan composés sur le site (minuteurs, rappels)
 import boosts  # le salon 🚀boosts : une carte de remerciement par booster
 import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
@@ -14838,6 +14839,19 @@ async def _annonces_journal(g, type_: str, texte: str, **kw) -> None:
     await _au_journal(g, "Annonces", type_, texte, **kw)
 
 
+@tasks.loop(minutes=1)
+async def evenements_task():
+    """25/10/2026 : les événements du clan — les rappels aux minutes choisies (les « Disponible » mentionnés), les
+    états (à venir → en cours → terminé) et l'évènement Discord tenus d'accord ; un minuteur exact prend le relais
+    à moins d'une minute. L'état est en base : après un redémarrage, rien ne repart deux fois."""
+    if not bot.is_ready():
+        return
+    try:
+        await evenements.tic(list(bot.guilds))
+    except Exception as ex:
+        _logerr("evenements.tic", ex)
+
+
 async def _menage_categories(g) -> list:
     """22/10/2026 : « deux catégories, échange et groupe… servent à rien… jamais remplies » et « Rell
     Seas et Ticket… est-ce qu'ils servent à quelque chose si en bas tu as créé une catégorie Ticket
@@ -15108,6 +15122,7 @@ async def _etat_public():
             "tickets_vus": dict(_TICKETS_VUS) or None,
             "erreurs_bot": diag.releve("bot"),
             "entraide_suivi": entraide.releve(),
+            "evenements": evenements.releve(),
             "sante_salons": next(iter([_sante_salons(g, c) for g, c in zip(list(bot.guilds), confs)
                                        if g.owner_id in TETE_IDS]), None),
             "invitations": next(iter([await invitations.releve(g.id) for g in list(bot.guilds)
@@ -15473,6 +15488,7 @@ _SUPERVISED_LOOP_NAMES = [
     "cadeaux_task",
     #  24/10/2026 : la purge des lignes d'accueil (sinon elles restent si la boucle meurt).
     "welcome_cleanup_task",
+    "evenements_task",  # 25/10/2026 : les événements du clan — sans cette entrée aucun rappel ne part
     # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
     # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
@@ -21624,6 +21640,16 @@ async def _activite_boot():
                       ticket=_salon_des_tickets, langue=_langue_membre, log=print, invitations=invitations.total,
                       invitations_tous=invitations.totaux, relever=invitations.reconcilier)
         await cadeaux.init_db()
+    with _Etape("evenements"):
+        #  Les fiches des affiches (métiers, grade, race) et le catalogue du jeu : `evenements.brancher(fiches=…,
+        #  catalogue=…, media=…)`, depuis l'étape des affiches (elle peut passer avant ou après celle-ci).
+        evenements.setup(get_db=get_db, cfg=cfg, est_tete=_a_la_tete,
+                         journal=lambda g, type_, texte, **kw: _au_journal(g, "Clan", type_, texte, **kw),
+                         role_clan=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
+                         langue=_langue_membre, log=print)
+        await evenements.init_db()
+        if hasattr(tableau, "monter"):
+            tableau.monter(evenements.ROUTES_SITE)
     with _Etape("arret_propre"):
         _installer_arret_propre()
     with _Etape("vocaux"):
@@ -21739,6 +21765,7 @@ async def on_ready():
         bot.add_dynamic_items(cadeaux.BoutonCadeaux, cadeaux.BoutonParticiper, cadeaux.BoutonStats,
                               cadeaux.BoutonActualiser, cadeaux.BoutonQuitter, cadeaux.BoutonParticipants,
                               cadeaux.BoutonPage, cadeaux.ChoixParticipant, cadeaux.BoutonChercher)
+        bot.add_dynamic_items(evenements.BoutonReponse, evenements.BoutonVu)
         bot.add_dynamic_items(vocaux.ChoixBut)
         bot.add_dynamic_items(liens_jeux.BoutonLiens)
         bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)
