@@ -8,6 +8,8 @@ fictives réalistes, en français, nombreuses (pour éprouver les regroupements)
 mémoire ; une version périmée donne un vrai conflit 409 ; la synchronisation est idempotente (`op_id`).
 
 Rien n'appelle Discord ni Roblox : avatars, portraits et icônes de démonstration sont dessinés ici (Pillow).
+Les annonces et événements du clan (`api/clan/...`) suivent `evenements.py` à la lettre : mêmes réponses, mêmes refus,
+et les cartes de l'aperçu rendues par le module lui-même (ses défauts, ses modèles et ses limites viennent de lui).
 
 Lancer :
     python outils/site_maquette.py            → http://localhost:8791/tableau/espace/
@@ -18,6 +20,8 @@ Bascules (hors de la portée du service worker, donc jamais mises en cache) :
     /maquette/session?etat=0|1     la session expire / revient (403 « Session expirée. »)
     /maquette/lent?ms=6000         chaque réponse attend (éprouve le délai de 4 s du service worker)
     /maquette/ailleurs?quoi=affiche&id=12   une modification « faite ailleurs » : la prochaine écriture → 409
+                                    (quoi=brouillon&id=3 : un brouillon d'annonce ou d'événement)
+    /maquette/incertain?etat=1      la prochaine publication du clan part sans confirmation de Discord (502 « incertaine »)
     /maquette/etat                  l'état des bascules
 """
 from __future__ import annotations
@@ -50,6 +54,30 @@ except ImportError:  # sans Pillow : pas d'images de démonstration (les pages r
     Image = ImageDraw = ImageFont = None
 
 RACINE = Path(__file__).resolve().parent.parent / "site"
+#  Les posts du forum du clan où les annonces et les événements se publient (zones.CLAN_POSTS, sans le guide).
+POSTS_CLAN = (("infos", "Infos · Info"), ("annonces", "Annonces · Announcements"), ("chat", "Chat"), ("economie", "Économie · Economy"),
+              ("trade", "Trade du clan · Clan trade"), ("taverne", "Taverne · Tavern"))
+_EV: list = []
+
+
+def _ev():
+    """Le module des événements du bot (`evenements.py`) : ses défauts, ses modèles, ses limites et le rendu de ses cartes.
+    La maquette répond ainsi avec les MÊMES formes que le serveur (25/10 : la page écrite contre une maquette qui
+    inventait les siennes lisait des champs que le serveur n'envoie pas). Chargé une fois ; None s'il ne se charge pas
+    (ses routes répondent alors 503, comme le serveur quand le module démarre)."""
+    if not _EV:
+        try:
+            import sys
+            racine = str(Path(__file__).resolve().parent.parent)
+            if racine not in sys.path:
+                sys.path.insert(0, racine)
+            import evenements
+            _EV.append(evenements)
+        except Exception as ex:  # la maquette reste utilisable : les annonces disent « indisponible »
+            print("[MAQUETTE][E1] module des événements illisible")
+            print(f"[MAQUETTE][E1:DETAIL] {type(ex).__name__} {ex}")
+            _EV.append(None)
+    return _EV[0]
 #  D'autres dossiers « site/ » qui complètent le nôtre (--extra), comme après la fusion des branches : icônes
 #  officielles et logos d'un autre agent. Un fichier absent partout reste un 404 (le repli gravé de la page s'affiche).
 EXTRA: list[Path] = []
@@ -787,67 +815,125 @@ class Monde:
                             {"type": "metier", "cle": "medecin", "role_id": self.roles[2]["id"], "role_nom": "Médecin", "couleur": self.roles[2]["couleur"], "auto": True},
                             {"type": "faction", "cle": "pirates", "role_id": self.roles[13]["id"], "role_nom": "Pirate", "couleur": "", "auto": False}]
 
-    # ── annonces et événements du clan (contrat d'evenements.py) ──
+    # ── annonces et événements du clan : le contrat d'evenements.py (mêmes routes, mêmes formes, mêmes refus) ──
+    #  Les éléments sont gardés comme le serveur les garde (valeurs, couleur en entier, statut, phase, messages…) ;
+    #  ses défauts, ses modèles et le rendu de ses cartes viennent du module lui-même (`_ev()`).
     def _evenements(self):
-        self.destinations = [{"id": "111", "nom": "📢 Infos", "defaut": True}, {"id": "112", "nom": "📣 Annonces", "defaut": False},
-                             {"id": "113", "nom": "Évènements du clan", "defaut": False}, {"id": "114", "nom": "Discussions", "defaut": False}]
+        self.destinations = [{"id": str(9111 + i), "cle": cle, "nom": nom, "defaut": cle == "infos"} for i, (cle, nom) in enumerate(POSTS_CLAN)]
+        self.role_clan = ("900000000000000001", "Clan GoRP")
         self.evts: dict[int, dict] = {}
+        self.reponses_evt: dict[int, dict] = {}
         self.prochain_evt = 1
-        brouillons = [
-            ("evenement", "Sortie en mer : le boss des abysses", int(MAINTENANT + 2 * JOUR + 3600),
-             {"texte": "Rendez-vous au port **15 minutes avant**.\nPrévoyez des vivres et vos meilleures armes.\n\n> Les absents non excusés passent leur tour.",
-              "lieu": "Port de l'île centrale", "places": 12}),
-            ("annonce", "Nouvelles règles du clan", None, {"texte": "Merci de lire les **nouvelles règles** épinglées dans le salon.", "mention": "clan"}),
-            ("metiers", "Les métiers de l'équipage", None, {"texte": "Voici les métiers officiels de chacun, à jour du Movie 3.", "groupement": "metier"}),
-        ]
-        for type_, titre, quand, val in brouillons:
-            self._nouvel_evt(type_, titre, quand, val, statut="brouillon", age=self.t(3))
+        self.prochain_message = 7_000_000
+        self.prochaine_incertaine = False
+        self.lieux_evt = [{"type": "ile", "cle": "port_central", "nom": "Port de l'île centrale"}, {"type": "ile", "cle": "forteresse", "nom": "Forteresse du centre"},
+                          {"type": "zone", "cle": "abysses", "nom": "Fosse des abysses"}, {"type": "lieu", "cle": "taverne", "nom": "Taverne du clan"}]
+        E = _ev()
+        if E is None:
+            return
+        self._nouvel_evt("evenement", {"titre": "Sortie en mer : le boss des abysses", "quand": int(MAINTENANT + 2 * JOUR + 3600),
+                                       "texte": "Rendez-vous au port **15 minutes avant**.\nPrévoyez des vivres et vos meilleures armes.\n\n> Les absents non excusés passent leur tour.",
+                                       "lieu": "Port de l'île centrale", "places": 12, "rappels": [1440, 60], "discord_event": True}, age=self.t(3))
+        self._nouvel_evt("annonce", {"titre": "Nouvelles règles du clan", "texte": "Merci de lire les **nouvelles règles** épinglées dans le post Infos.",
+                                     "mention": "clan"}, age=self.t(3))
+        self._nouvel_evt("metiers", {"texte": "Voici les métiers officiels de chacun, à jour du Movie 3."}, age=self.t(3))
         for k, (titre, dt, rep) in enumerate([("Entraînement de combat", 1.2, (9, 3, 2)), ("Chasse au trésor", 5, (4, 6, 1)), ("Guerre de factions", -3, (14, 2, 5)),
                                               ("Réunion de l'équipage", -9, (11, 0, 3)), ("Course de navires", -16, (7, 4, 4)), ("Soirée taverne", -25, (18, 3, 1))]):
-            e = self._nouvel_evt("evenement", titre, int(MAINTENANT + dt * JOUR), {"texte": "Tout l'équipage est attendu.", "places": 15 if k % 2 else 0},
-                                 statut="annule" if k == 4 else "publie", age=int(MAINTENANT + min(dt, 0) * JOUR - 3 * JOUR))
-            e["reponses"] = {"disponibles": rep[0], "peut_etre": rep[1], "pas_disponibles": rep[2], "vus": rep[0] + rep[1] + rep[2] + 6}
-            e["discord_event"] = {"id": "77" + str(e["id"]), "lien": "https://discord.com/events/1/77" + str(e["id"])} if k % 2 == 0 else None
-            e["rappels_faits"] = [1440] if dt < 1 else []
-        a = self._nouvel_evt("annonce", "Le Movie 3 est sorti !", None, {"texte": "**Le Movie 3 est là.** Toutes les nouveautés dans le salon dédié."}, statut="publie", age=self.t(1))
-        a["reponses"] = {"disponibles": 0, "peut_etre": 0, "pas_disponibles": 0, "vus": 41}
-        self.modeles = [{"id": "m1", "nom": "Sortie en mer", "type": "evenement", "titre": "Sortie en mer",
-                         "valeurs": {"texte": "Rendez-vous au port.", "duree_min": 90, "rappels": [1440, 60, 15], "reponses": True, "discord_event": True, "couleur": "#1f4e5a"}},
-                        {"id": "m2", "nom": "Annonce officielle", "type": "annonce", "titre": "Annonce", "valeurs": {"couleur": "#8e2a24"}},
-                        {"id": "m3", "nom": "Listing du dimanche", "type": "listing", "titre": "L'équipage au complet", "valeurs": {"groupement": "grade"}}]
-        self.prochaine_incertaine = False
+            quand = int(MAINTENANT + dt * JOUR)
+            e = self._nouvel_evt("evenement", {"titre": titre, "quand": quand, "texte": "Tout l'équipage est attendu.", "places": 15 if k % 2 else 0,
+                                               "mention": "clan" if k % 3 == 0 else "inscrits", "discord_event": k % 2 == 0, "lieu": "Taverne du clan" if k == 3 else ""},
+                                 age=int(min(MAINTENANT, quand) - 3 * JOUR))
+            self._publier_evt(e, int(min(MAINTENANT, quand) - 3 * JOUR))
+            ids = self.clan_ids
+            self.reponses_evt[e["id"]] = {"d": ids[:rep[0]], "p": ids[rep[0]:rep[0] + rep[1]], "n": ids[rep[0] + rep[1]:sum(rep)], "v": []}
+            if k == 4:
+                e.update(statut="annule", archive_le=int(quand - 5 * JOUR), version=e["version"] + 1)
+            self._suivre_evt(e)
+        a = self._nouvel_evt("annonce", {"titre": "Le Movie 3 est sorti !", "texte": "**Le Movie 3 est là.** Toutes les nouveautés dans le salon dédié.",
+                                         "mention": "clan"}, age=self.t(1))
+        self._publier_evt(a, a["cree"])
+        self.reponses_evt[a["id"]]["v"] = self.clan_ids[:41]
 
-    VALEURS_DEFAUT = {"texte": "", "duree_min": 60, "lieu": "", "image": "", "couleur": "#a8823f", "rappels": [60, 15], "mention": "clan",
-                      "reponses": True, "places": 0, "discord_event": True, "reserve_clan": False, "groupement": "metier", "champs": ["metiers", "grade"]}
-
-    def _nouvel_evt(self, type_, titre, quand, valeurs, statut="brouillon", age=None, cle_client=None):
+    def _nouvel_evt(self, type_, valeurs, age=None, cle_client=None, auteur=None):
+        E = _ev()
         i = self.prochain_evt
         self.prochain_evt += 1
         t = int(age or time.time())
-        val = dict(self.VALEURS_DEFAUT, **valeurs)
-        if type_ != "evenement":
-            val.update({"reponses": False, "discord_event": False})
-        e = {"id": i, "type": type_, "statut": statut, "version": 1, "cle_client": cle_client, "titre": titre, "quand": quand, "fin": None,
-             "valeurs": val, "destination": "111", "cree": t, "cree_par": self.fondateur["id"], "maj": t, "maj_par": self.fondateur["id"],
-             "publie": t if statut != "brouillon" else None, "publie_par": self.direction["id"] if statut != "brouillon" else None,
-             "lien": f"https://discord.com/channels/1/111/{9000 + i}" if statut != "brouillon" else "", "cartes": [],
-             "reponses": {"disponibles": 0, "peut_etre": 0, "pas_disponibles": 0, "vus": 0}, "discord_event": None, "rappels_faits": [], "note": ""}
+        v = {**E._defauts(type_), **valeurs}
+        qui = int(auteur or self.fondateur["id"])
+        e = {"id": i, "guild_id": 1, "type": type_, "statut": "brouillon", "phase": "", "valeurs": v, "version": 1, "cle_client": cle_client,
+             "cree": t, "cree_par": qui, "maj": t, "maj_par": qui, "publie": 0, "publie_par": 0, "salon_id": 0, "messages": [],
+             "discord_event_id": 0, "rappels_faits": [], "quand": int(v.get("quand") or 0), "fin": E._fin(v), "note": "", "envoi_le": 0, "archive_le": 0}
         self.evts[i] = e
-        self._phase(e)
+        self.reponses_evt[i] = {"d": [], "p": [], "n": [], "v": []}
         return e
 
-    def _phase(self, e):
-        q = e.get("quand")
-        e["fin"] = int(q + 60 * int(e["valeurs"].get("duree_min") or 0)) if q else None
+    def _publier_evt(self, e, t, auteur=None, n_cartes=1):
+        """Ce que `evenements.publier` laisse en base une fois les cartes parties."""
+        E = _ev()
+        dest = E._destination(self.destinations, e["valeurs"]) or self.destinations[0]
+        _r, faits = E._rappels_dus(e, t)
+        ids = list(range(self.prochain_message, self.prochain_message + n_cartes))
+        self.prochain_message += n_cartes
+        natif = 0
+        if e["type"] == "evenement" and e["valeurs"].get("discord_event"):
+            natif, self.prochain_message = self.prochain_message, self.prochain_message + 1
+        e.update(statut="publie", publie=int(t), publie_par=int(auteur or self.direction["id"]), salon_id=int(dest["id"]), messages=ids,
+                 phase="a_venir" if e["type"] == "evenement" else "", rappels_faits=sorted(faits), discord_event_id=natif, version=e["version"] + 2)
+
+    def _suivre_evt(self, e):
+        """Ce que la boucle du bot fait passer le temps venu : rappels faits, phase, archivage d'un événement fini."""
+        E = _ev()
+        if e["type"] != "evenement" or e["statut"] != "publie":
+            return
         maintenant = time.time()
-        if e["type"] != "evenement":
-            e["phase"] = "a_venir" if (e.get("publie") or maintenant) > maintenant - 7 * JOUR else "termine"
-        elif not q or maintenant < q:
-            e["phase"] = "a_venir"
-        elif maintenant < (e["fin"] or q):
-            e["phase"] = "en_cours"
-        else:
-            e["phase"] = "termine"
+        _r, faits = E._rappels_dus(e, maintenant)
+        e["rappels_faits"] = sorted(faits)
+        phase = E.phase_de(e, maintenant)
+        if phase != (e["phase"] or "a_venir"):
+            e["phase"] = phase
+            e["archive_le"] = int(maintenant) if phase == "termine" else 0
+
+    def evt_site(self, e) -> dict:
+        """Un élément tel que le site le lit (`evenements._vers_site`)."""
+        E = _ev()
+        dests = self.destinations
+        dest = next((d for d in dests if d["id"] == str(e["salon_id"])), None) if e["salon_id"] else E._destination(dests, e["valeurs"])
+        rep = self.reponses_evt.get(e["id"], {})
+        salon_id = e["salon_id"] or (int(dest["id"]) if dest else 0)
+
+        def qui(uid):
+            return {"id": str(uid), "nom": self.ident(str(uid))["nom"]} if uid else None
+        return {
+            "id": e["id"], "type": e["type"], "statut": e["statut"], "phase": E.phase_de(e, time.time()) if e["type"] == "evenement" else "",
+            "version": e["version"], "cle_client": e["cle_client"] or "", "titre": e["valeurs"]["titre"], "quand": e["valeurs"].get("quand") or None,
+            "fin": E._fin(e["valeurs"]) if e["type"] == "evenement" and e["valeurs"].get("quand") else None,
+            "valeurs": E._valeurs_site(e["valeurs"]), "destination": ({"id": dest["id"], "nom": dest["nom"]} if dest else None),
+            "cree": e["cree"], "cree_par": qui(e["cree_par"]), "maj": e["maj"], "maj_par": qui(e["maj_par"]),
+            "publie": e["publie"] or None, "publie_par": qui(e["publie_par"]),
+            "lien": f"https://discord.com/channels/1/{salon_id}/{e['messages'][0]}" if e["messages"] else "", "cartes": len(e["messages"]),
+            "reponses": {"disponibles": len(rep.get("d") or []), "peut_etre": len(rep.get("p") or []), "pas_disponibles": len(rep.get("n") or []),
+                         "vus": len(rep.get("v") or [])},
+            "discord_event": ({"id": str(e["discord_event_id"]), "lien": f"https://discord.com/events/1/{e['discord_event_id']}"} if e["discord_event_id"] else None),
+            "rappels_faits": e["rappels_faits"], "note": e["note"],
+        }
+
+    def evt_equipage(self) -> dict:
+        """Le clan tel que `evenements._equipage` le lit : les membres du rôle, leurs fiches (les affiches), le catalogue."""
+        from types import SimpleNamespace
+        membres = [SimpleNamespace(id=int(uid), display_name=self.nom(uid), bot=False) for uid in self.clan_ids]
+        fiches = {}
+        for a in self.affiches.values():
+            if a["retire_le"] or not a["membre"].get("id"):
+                continue
+            at = a.get("attributs") or {}
+            fiches[int(a["membre"]["id"])] = {"membre_id": a["membre"]["id"], "nom": a["membre"]["nom"], "metiers": list(at.get("metier") or []),
+                                              "race": (at.get("race") or [""])[0], "grade": a.get("grade") or ""}
+        catalogue: dict = {}
+        for el in self.cat_elements:
+            catalogue.setdefault(el["type"], {})[el["cle"]] = {"nom": el["nom"], "nom_en": el.get("nom_en", ""), "icone": el.get("icone", ""),
+                                                               "icone_emoji": "", "actif": el.get("actif", True)}
+        return {"role": self.role_clan, "membres": membres, "fiches": fiches, "catalogue": catalogue, "branche": True}
 
     # ── nettoyage ──
     def _nettoyage(self):
@@ -1592,242 +1678,441 @@ def r_metiers_reconcilier(m, q, c):
     return 200, {"ok": True, "message": "Vérification faite.", "bilan": {"membres": len(m.clan), "rendus": 2, "retires": 1}}
 
 
-def _evt_listes(m):
-    for e in m.evts.values():
-        m._phase(e)
-    brouillons = sorted([e for e in m.evts.values() if e["statut"] == "brouillon"], key=lambda e: -e["maj"])
-    a_venir = sorted([e for e in m.evts.values() if e["statut"] in ("publie", "incertain", "envoi") and e["phase"] != "termine"],
-                     key=lambda e: e.get("quand") or e.get("publie") or 0)
-    passes = sorted([e for e in m.evts.values() if e["statut"] in ("annule", "retire") or (e["statut"] == "publie" and e["phase"] == "termine")],
-                    key=lambda e: -(e.get("quand") or e.get("publie") or 0))
-    return brouillons, a_venir, passes
-
-
-LIMITES_TEXTE = {"evenement": 2000, "annonce": 3500, "metiers": 1500, "listing": 1500}
-CHAMPS_EVT = {"id", "version", "cle_client", "type", "titre", "texte", "quand", "duree_min", "lieu", "image", "couleur", "rappels", "mention",
-              "destination", "reponses", "discord_event", "reserve_clan", "places", "groupement", "champs"}
-
-
-def r_evenements(m, q, c):
-    brouillons, a_venir, passes = _evt_listes(m)
-    return 200, {"destinations": m.destinations, "brouillons": brouillons, "a_venir": a_venir, "passes": passes[:20], "passes_total": len(passes),
-                 "modeles": m.modeles, "lieux": ["Port de l'île centrale", "Taverne du clan", "Fosse des abysses", "Forteresse du centre"],
-                 "rappels_suggeres": [1440, 60, 15], "couleurs": ["#a8823f", "#8e2a24", "#1f4e5a", "#3f6b3a", "#a8641c", "#5e3a4e"],
-                 "defauts": dict(m.VALEURS_DEFAUT, destination="111"),
-                 "limites": {"titre": 100, "texte": LIMITES_TEXTE, "lieu": 100, "rappels": 5, "rappel_max": 20160, "places": 500, "duree_max": 10080},
-                 "maintenant": int(time.time()),
-                 "droits": {"discord_event": True, "role_clan": "900000000000000001", "role_clan_nom": "Clan GoRP",
-                            "fiches": len([a for a in m.affiches.values() if not a["retire_le"]])}}
-
-
-def _verifier_champs(c, type_):
-    inconnus = {k: "Champ inconnu." for k in c if k not in CHAMPS_EVT}
-    if inconnus:
-        return {"erreur": "Champ inconnu.", "champs": inconnus}
-    err = {}
-    if "titre" in c and len(str(c.get("titre") or "")) > 100:
-        err["titre"] = "100 caractères au plus."
-    if "texte" in c and len(str(c.get("texte") or "")) > LIMITES_TEXTE.get(type_, 2000):
-        err["texte"] = f"{LIMITES_TEXTE.get(type_, 2000)} caractères au plus."
-    if "duree_min" in c and not 0 <= int(c.get("duree_min") or 0) <= 10080:
-        err["duree_min"] = "Entre 0 et 10 080 minutes."
-    if "lieu" in c and len(str(c.get("lieu") or "")) > 100:
-        err["lieu"] = "100 caractères au plus."
-    if "couleur" in c and c.get("couleur") and not re.fullmatch(r"#[0-9a-fA-F]{6}", str(c["couleur"])):
-        err["couleur"] = "Couleur #RRGGBB."
-    if "rappels" in c and (not isinstance(c["rappels"], list) or len(c["rappels"]) > 5 or any(not 0 <= int(x) <= 20160 for x in c["rappels"])):
-        err["rappels"] = "5 rappels au plus, entre 0 et 20 160 minutes."
-    if "mention" in c and c["mention"] not in ("aucune", "clan", "inscrits"):
-        err["mention"] = "Mention inconnue."
-    if int(c.get("places") or 0) and not c.get("reponses", True):
-        err["places"] = "Les places demandent les boutons de réponse."
-    if "places" in c and not 0 <= int(c.get("places") or 0) <= 500:
-        err["places"] = "Entre 0 et 500."
-    return {"erreur": "Champs invalides.", "champs": err} if err else None
-
-
-def _trouver_evt(m, c):
-    if c.get("id"):
-        return m.evts.get(int(c["id"]))
-    if c.get("cle_client"):
-        return next((e for e in m.evts.values() if e.get("cle_client") == c["cle_client"]), None)
+def _evt_refus():
+    if _ev() is None:
+        return 503, {"erreur": "Le module des événements démarre : réessaie dans un instant."}
     return None
 
 
-def _appliquer_evt(m, e, c):
-    for k in ("titre", "quand", "destination"):
-        if k in c:
-            e[k] = c[k]
-    for k, v in c.items():
-        if k not in ("id", "version", "cle_client", "type", "titre", "quand", "destination"):
-            e["valeurs"][k] = v
-    if c.get("type") and e["statut"] == "brouillon":
-        e["type"] = c["type"]
-    e["maj"], e["maj_par"] = int(time.time()), m.moi
-    e["version"] += 1
-    m._phase(e)
+def _evt_valider(m, corps: dict, type_: str, avant: dict) -> tuple:
+    """`evenements._valider`, champ par champ, mêmes messages (la maquette n'a pas de fichiers d'images : ses médias)."""
+    E = _ev()
+    propres, erreurs = {}, {}
+    maintenant = time.time()
+    for cle, brut in corps.items():
+        if cle in E.CLES_CONTROLE:
+            continue
+        if cle not in E.CHAMPS:
+            erreurs[cle] = "Champ inconnu."
+            continue
+        if cle in ("titre", "lieu"):
+            if not isinstance(brut, str):
+                erreurs[cle] = "Un texte est attendu."
+                continue
+            v = E._une_ligne(brut)
+            limite = E.TITRE_MAX if cle == "titre" else E.LIEU_MAX
+            if len(v) > limite:
+                erreurs[cle] = f"{limite} caractères au plus."
+                continue
+            propres[cle] = v
+        elif cle == "texte":
+            if not isinstance(brut, str):
+                erreurs[cle] = "Un texte est attendu."
+                continue
+            v = E._paragraphes(brut)
+            if len(v) > E.TEXTE_MAX[type_]:
+                erreurs[cle] = f"{E.TEXTE_MAX[type_]} caractères au plus pour ce type de publication."
+                continue
+            propres[cle] = v
+        elif cle == "quand":
+            if brut in (None, "", 0):
+                propres[cle] = None
+                continue
+            v = E._entier(brut)
+            if v is None or v < 1_600_000_000:
+                erreurs[cle] = "Une date (horodatage Unix, en secondes) est attendue."
+            elif v > maintenant + E.HORIZON_S:
+                erreurs[cle] = "Un an à l'avance au plus."
+            else:
+                propres[cle] = v
+        elif cle in ("duree_min", "places"):
+            v = E._entier(brut)
+            borne = E.DUREE_MAX if cle == "duree_min" else E.PLACES_MAX
+            if v is None or not 0 <= v <= borne:
+                erreurs[cle] = f"Un nombre entier de 0 à {borne} est attendu."
+            else:
+                propres[cle] = v
+        elif cle == "image":
+            if brut in (None, ""):
+                propres[cle] = ""
+            elif not isinstance(brut, str) or not E._ID_MEDIA.fullmatch(brut):
+                erreurs[cle] = "Identifiant de média invalide."
+            elif brut != (avant or {}).get("image") and brut not in m.medias:
+                erreurs[cle] = "Image introuvable : renvoie-la."
+            else:
+                propres[cle] = brut
+        elif cle == "couleur":
+            v = E._couleur(brut)
+            if v is None:
+                erreurs[cle] = "Une couleur « #RRGGBB » est attendue."
+            else:
+                propres[cle] = v
+        elif cle == "rappels":
+            if brut is None:
+                propres[cle] = []
+                continue
+            vals = [E._entier(x) for x in brut] if isinstance(brut, list) else None
+            if vals is None or any(x is None or not 0 <= x <= E.RAPPEL_MAX for x in vals):
+                erreurs[cle] = f"Une liste de minutes avant le début (0 à {E.RAPPEL_MAX}) est attendue."
+            elif len(set(vals)) > E.RAPPELS_MAX:
+                erreurs[cle] = f"{E.RAPPELS_MAX} rappels au plus."
+            else:
+                propres[cle] = sorted(set(vals), reverse=True)
+        elif cle == "mention":
+            if brut not in E.MENTIONS:
+                erreurs[cle] = "aucune, clan ou inscrits."
+            elif brut == "inscrits" and type_ != "evenement":
+                erreurs[cle] = "« inscrits » ne vaut que pour un événement."
+            else:
+                propres[cle] = brut
+        elif cle == "destination":
+            if brut in (None, ""):
+                propres[cle] = ""
+                continue
+            v = str(brut).strip() if isinstance(brut, (str, int)) and not isinstance(brut, bool) else ""
+            if not v.isdigit() or all(d["id"] != v for d in m.destinations):
+                erreurs[cle] = "Ce post n'est pas une destination du forum du clan."
+            else:
+                propres[cle] = v
+        elif cle in ("reponses", "discord_event", "reserve_clan"):
+            if not isinstance(brut, bool):
+                erreurs[cle] = "Vrai ou faux est attendu."
+            else:
+                propres[cle] = brut
+        elif cle == "groupement":
+            if brut not in E.GROUPEMENTS:
+                erreurs[cle] = "metier, grade ou race."
+            elif type_ == "metiers" and brut != "metier":
+                erreurs[cle] = "L'annonce des métiers se range par métier."
+            else:
+                propres[cle] = brut
+        elif cle == "champs":
+            if not isinstance(brut, list) or any(x not in E.CHAMPS_LISTE for x in brut):
+                erreurs[cle] = "Une liste parmi metiers, grade, race est attendue."
+            else:
+                propres[cle] = list(dict.fromkeys(brut))
+    return {k: v for k, v in propres.items() if k in E.CHAMPS_TYPE[type_]}, erreurs
+
+
+def _evt_cartes(m, e) -> tuple:
+    """(cartes du modèle, avertissements, équipage) : le rendu d'`evenements.cartes`, sans Discord."""
+    E = _ev()
+    v = e["valeurs"]
+    haut, avert = ("", [])
+    if v.get("mention") == "clan":
+        haut = f"<@&{m.role_clan[0]}>"
+    rep = m.reponses_evt.get(e["id"]) or {"d": [], "p": [], "n": [], "v": []}
+    rep = {k: [int(x) for x in rep.get(k, [])] for k in ("d", "p", "n", "v")}
+    if e["type"] == "evenement":
+        return E._cartes_evenement(None, e, rep, time.time(), haut), avert, None
+    if e["type"] == "annonce":
+        return E._cartes_annonce(e, rep, haut), avert, None
+    eq = m.evt_equipage()
+    return E._cartes_liste(e, eq, haut), avert, eq
+
+
+def _evt_trouver(m, c):
+    E = _ev()
+    eid = E._id(c.get("id")) if isinstance(c, dict) else None
+    if eid is not None:
+        return eid, m.evts.get(eid)
+    cle = c.get("cle_client") if isinstance(c, dict) else None
+    if isinstance(cle, str):
+        e = next((x for x in m.evts.values() if x.get("cle_client") == cle), None)
+        return (e["id"] if e else None), e
+    return None, None
+
+
+def r_evenements(m, q, c):
+    refus = _evt_refus()
+    if refus:
+        return refus
+    E = _ev()
+    maintenant = time.time()
+    brouillons, a_venir, passes = [], [], []
+    for e in sorted(m.evts.values(), key=lambda x: -x["id"])[:E.LIGNES_MAX]:
+        m._suivre_evt(e)
+        item = m.evt_site(e)
+        if e["statut"] == "brouillon":
+            brouillons.append(item)
+        elif e["statut"] in ("envoi", "incertain") or (e["type"] == "evenement" and e["statut"] == "publie" and E.phase_de(e, maintenant) != "termine"):
+            a_venir.append(item)
+        else:
+            passes.append(item)
+    a_venir.sort(key=lambda x: (x["quand"] or 0, x["id"]))
+    brouillons.sort(key=lambda x: -(x["maj"] or 0))
+    passes.sort(key=lambda x: -max(x["quand"] or 0, x["publie"] or 0))
+    return 200, {
+        "destinations": [{"id": d["id"], "nom": d["nom"], "defaut": d["defaut"]} for d in m.destinations],
+        "brouillons": brouillons, "a_venir": a_venir, "passes": passes[:E.PASSES_MAX], "passes_total": len(passes),
+        "modeles": E.MODELES, "lieux": m.lieux_evt, "rappels_suggeres": E.RAPPELS_SUGGERES, "couleurs": E.COULEURS_SUGGEREES,
+        "defauts": {t: E._valeurs_site(E._defauts(t)) for t in E.TYPES},
+        "limites": {"titre": E.TITRE_MAX, "texte": E.TEXTE_MAX, "lieu": E.LIEU_MAX, "duree_min": E.DUREE_MAX, "rappel_min": E.RAPPEL_MAX,
+                    "rappels": E.RAPPELS_MAX, "places": E.PLACES_MAX, "composants": E.COMPOSANTS_MAX, "caracteres": E.CARACTERES_MAX},
+        "droits": {"discord_event": True, "role_clan": True, "role_clan_nom": m.role_clan[1], "fiches": True},
+        "maintenant": int(maintenant),
+    }
 
 
 def r_brouillon(m, q, c):
-    e = _trouver_evt(m, c)
-    type_ = c.get("type") or (e or {}).get("type") or "evenement"
-    if type_ not in ("evenement", "annonce", "metiers", "listing"):
-        return 400, {"erreur": "Type inconnu.", "champs": {"type": "Type inconnu."}}
-    err = _verifier_champs(c, type_)
-    if err:
-        return 400, err
+    """`evenements.route_brouillon` : crée ou modifie un brouillon (rejoué hors ligne, idempotent par cle_client)."""
+    refus = _evt_refus()
+    if refus:
+        return refus
+    E = _ev()
+    cle = c.get("cle_client")
+    if cle is not None and (not isinstance(cle, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", cle)):
+        return 400, {"erreur": "cle_client invalide.", "champs": {"cle_client": "8 à 64 caractères A-Z, 0-9, - ou _."}}
+    e = None
+    if c.get("id") is not None:
+        eid = E._id(c["id"])
+        if eid is None:
+            return 400, {"erreur": "Identifiant invalide.", "champs": {"id": "Identifiant invalide."}}
+        e = m.evts.get(eid)
+        if e is None:
+            return 404, {"erreur": "Brouillon introuvable."}
+        if E._entier(c.get("version")) is None:
+            return 400, {"erreur": "La version est demandée.", "champs": {"version": "La version est demandée."}}
+    elif cle:
+        e = next((x for x in m.evts.values() if x.get("cle_client") == cle), None)
+    if e is not None and ("brouillon", str(e["id"])) in m.ailleurs:   # bascule : modifié ailleurs entre-temps
+        m.ailleurs.discard(("brouillon", str(e["id"])))
+        e["valeurs"]["titre"] = (e["valeurs"]["titre"] + " (modifié ailleurs)")[:E.TITRE_MAX]
+        e["version"] += 1
+    if e is not None and e["statut"] != "brouillon":
+        return 409, {"erreur": "Déjà publiée : modifie-la en ligne (clan/modifier).", "publie": True, "actuelle": m.evt_site(e)}
+    if e is not None and c.get("version") is not None and E._entier(c["version"]) != e["version"]:
+        return 409, {"conflit": True, "actuelle": m.evt_site(e)}
+    type_ = c.get("type", e["type"] if e else None)
+    if type_ not in E.TYPES:
+        return 400, {"erreur": "Type inconnu.", "champs": {"type": "evenement, annonce, metiers ou listing."}}
+    avant = e["valeurs"] if e else {}
+    propres, erreurs = _evt_valider(m, c, type_, avant)
+    base = E._defauts(type_)
     if e is not None:
-        if e["statut"] != "brouillon":
-            return 409, {"erreur": "Déjà publié : modifie-le depuis « À venir ».", "publie": True}
-        if c.get("id") and c.get("version") is None:
-            return 400, {"erreur": "La version est obligatoire.", "champs": {"version": "Obligatoire."}}
-        cle = ("brouillon", str(e["id"]))
-        if cle in m.ailleurs:
-            m.ailleurs.discard(cle)
-            e["version"] += 1
-            e["titre"] = (e.get("titre") or "") + " (modifié ailleurs)"
-        if c.get("version") is not None and int(c["version"]) != e["version"]:
-            return 409, {"conflit": True, "actuelle": e}
-    elif c.get("id"):
-        return 404, {"erreur": "Brouillon introuvable."}
-    else:
-        e = m._nouvel_evt(type_, "", None, {}, cle_client=c.get("cle_client"))
-        e["version"] = 0
-    _appliquer_evt(m, e, c)
-    return 200, {"ok": True, "element": e}
+        base.update(e["valeurs"] if type_ == e["type"] else E._normaliser(type_, {k: x for k, x in e["valeurs"].items() if k in E.CHAMPS_TYPE[type_]}))
+    valeurs = {**base, **propres}
+    erreurs.update(E._croiser(type_, valeurs))
+    if erreurs:
+        return 400, {"erreur": next(iter(erreurs.values())), "champs": erreurs}
+    t = int(time.time())
+    if e is None:
+        e = m._nouvel_evt(type_, valeurs, age=t, cle_client=cle, auteur=m.moi)
+        return 200, {"ok": True, "element": m.evt_site(e)}
+    e.update(type=type_, valeurs=valeurs, quand=int(valeurs.get("quand") or 0), fin=E._fin(valeurs), version=e["version"] + 1, maj=t,
+             maj_par=int(m.moi), note="")
+    return 200, {"ok": True, "element": m.evt_site(e)}
 
 
 def r_supprimer_brouillon(m, q, c):
-    e = _trouver_evt(m, c)
+    refus = _evt_refus()
+    if refus:
+        return refus
+    E = _ev()
+    if c.get("id") is not None:
+        eid = E._id(c["id"])
+        if eid is None:
+            return 400, {"erreur": "Identifiant invalide."}
+        e = m.evts.get(eid)
+    elif isinstance(c.get("cle_client"), str):
+        e = next((x for x in m.evts.values() if x.get("cle_client") == c["cle_client"]), None)
+    else:
+        return 400, {"erreur": "Identifiant manquant."}
     if e is None:
         return 200, {"ok": True, "deja": True}
     if e["statut"] != "brouillon":
-        return 409, {"erreur": "Déjà publié.", "publie": True}
+        return 409, {"erreur": "Seul un brouillon se supprime : annule la publication.", "actuelle": m.evt_site(e)}
+    version = E._entier(c.get("version"))
+    if version is not None and version != e["version"]:
+        return 409, {"conflit": True, "actuelle": m.evt_site(e)}
     m.evts.pop(e["id"], None)
+    m.reponses_evt.pop(e["id"], None)
     return 200, {"ok": True}
 
 
-def _carte_evt(m, e) -> dict:
-    v = e["valeurs"]
-    blocs, lignes = [], []
-    if e.get("titre"):
-        lignes.append({"md": e["titre"], "icone": None, "niveau": 2, "jeu": None})
-    for l in str(v.get("texte") or "").split("\n"):
-        lignes.append({"md": l, "icone": None, "niveau": 0, "jeu": None})
-    if lignes:
-        blocs.append({"type": "texte", "lignes": lignes})
-    if e["type"] == "evenement" and e.get("quand"):
-        qd = int(e["quand"])
-        l2 = [{"md": f"**Quand · When** <t:{qd}:F> (<t:{qd}:R>)", "icone": "minuteur", "niveau": 0, "jeu": None}]
-        if v.get("lieu"):
-            l2.append({"md": f"**Lieu · Where** {v['lieu']}", "icone": "lieu", "niveau": 0, "jeu": None})
-        if v.get("duree_min"):
-            l2.append({"md": f"**Durée · Duration** {v['duree_min']} min", "icone": "calendrier", "niveau": 0, "jeu": None})
-        if v.get("reponses") and v.get("places"):
-            l2.append({"md": f"**Places · Spots** {e['reponses']['disponibles']}/{v['places']}", "icone": "membres", "niveau": 0, "jeu": None})
-        blocs += [{"type": "separateur"}, {"type": "texte", "lignes": l2}]
-    if e["type"] in ("metiers", "listing"):
-        grp = v.get("groupement") or "metier"
-        groupes: dict = {}
-        for a in m.affiches.values():
-            if a["retire_le"]:
-                continue
-            cles = [a["grade"]] if grp == "grade" else (a["attributs"].get(grp) or ["—"])
-            for k in cles:
-                groupes.setdefault(k, []).append(f"<@{a['membre']['id']}>" if a["membre"].get("id") else a["roblox"]["nom"])
-        l3 = []
-        for k, noms in sorted(groupes.items()):
-            el = m.element(grp, k)
-            l3.append({"md": f"**{el['nom'] if el else k}** · {len(noms)}", "icone": None, "niveau": 3, "jeu": {"type": grp, "cle": k} if el else None})
-            l3.append({"md": ", ".join(noms[:25]) + (f" et {len(noms) - 25} autres" if len(noms) > 25 else ""), "icone": None, "niveau": 0, "jeu": None})
-        blocs += [{"type": "separateur"}, {"type": "texte", "lignes": l3 or [{"md": "Aucune affiche pour l'instant.", "icone": None, "niveau": "petit", "jeu": None}]}]
-    if v.get("image"):
-        blocs.append({"type": "image", "media": v["image"], "url": f"media/{v['image']}"})
-    if e["type"] == "evenement" and v.get("reponses"):
-        blocs.append({"type": "boutons", "boutons": [{"label": "Dispo · Available", "style": "success", "icone": "valider", "desactive": False, "url": None},
-                                                     {"label": "Peut-être · Maybe", "style": "secondary", "icone": "peut_etre", "desactive": False, "url": None},
-                                                     {"label": "Pas dispo · Unavailable", "style": "danger", "icone": "annuler", "desactive": False, "url": None}]})
-    haut = "<@&900000000000000001>" if v.get("mention") == "clan" else ("Inscrits · Registered" if v.get("mention") == "inscrits" else "")
-    texte = sum(len(l.get("md") or "") for b in blocs for l in b.get("lignes", []))
-    return {"haut": haut, "couleur": v.get("couleur") or "#a8823f", "blocs": blocs, "composants": 3 + len(blocs), "caracteres": texte}
-
-
 def r_apercu(m, q, c):
-    try:
-        e = m.evts.get(int(q.get("id", "0")))
-    except ValueError:
-        e = None
+    """`evenements.route_apercu` : les cartes telles que Discord les affichera (le rendu même du module)."""
+    refus = _evt_refus()
+    if refus:
+        return refus
+    E = _ev()
+    eid = E._id((q or {}).get("id"))
+    if eid is None:
+        return 400, {"erreur": "Identifiant invalide.", "champs": {"id": "Identifiant invalide."}}
+    e = m.evts.get(eid)
     if e is None:
-        return 404, {"erreur": "Introuvable."}
-    carte = _carte_evt(m, e)
-    erreurs, avert = [], []
-    if not e.get("titre"):
-        erreurs.append("Le titre manque.")
-    if e["type"] == "evenement" and not e.get("quand"):
-        erreurs.append("La date manque.")
-    if e["type"] == "evenement" and e.get("quand") and e["quand"] < time.time():
-        avert.append("La date est déjà passée.")
-    personnes = {a["membre"]["id"]: a["membre"]["nom"] for a in m.affiches.values() if a["membre"].get("id")}
-    rappels = [{"minutes": mi, "quand": int(e["quand"] - mi * 60), "fait": mi in e["rappels_faits"], "passe": e["quand"] - mi * 60 < time.time()}
-               for mi in (e["valeurs"].get("rappels") or [])] if e.get("quand") else []
-    return 200, {"cartes": [carte], "personnes": personnes, "roles": {"900000000000000001": "Clan GoRP"}, "publiable": not erreurs, "erreurs": erreurs,
-                 "avertissements": avert, "rappels": rappels,
-                 "discord_event": {"demande": bool(e["valeurs"].get("discord_event")), "permission": True,
-                                   "id": (e.get("discord_event") or {}).get("id"), "lien": (e.get("discord_event") or {}).get("lien")},
-                 "limites": {"caracteres": 4000, "composants": 40}}
+        return 404, {"erreur": "Publication introuvable."}
+    maintenant = time.time()
+    cartes_, avertissements, eq = _evt_cartes(m, e)
+    erreurs = E._controle(e, maintenant, m.destinations, eq) if e["statut"] == "brouillon" else []
+    if e["statut"] == "brouillon" and e["valeurs"].get("image") and e["valeurs"]["image"] not in m.medias:
+        erreurs.append("L'image n'est plus sur le site : renvoie-la.")
+    v = e["valeurs"]
+    rappels = []
+    if e["type"] == "evenement":
+        qd = int(v.get("quand") or 0)
+        for mi in v.get("rappels") or []:
+            rappels.append({"minutes": mi, "quand": qd - mi * 60 if qd else None, "fait": mi in e["rappels_faits"], "passe": bool(qd) and qd - mi * 60 <= maintenant})
+        if e["statut"] == "brouillon" and qd:
+            passes = [r["minutes"] for r in rappels if r["passe"]]
+            if passes:
+                avertissements.append("Rappel(s) déjà passé(s), qui ne partiront pas : "
+                                      + ", ".join("au début" if mi == 0 else f"{E._duree_txt(mi)} avant" for mi in passes) + ".")
+        if v.get("rappels") and v.get("mention") != "aucune" and not v.get("reponses"):
+            avertissements.append("Sans boutons de réponse, les rappels ne mentionnent personne.")
+        if v.get("discord_event") and not v.get("duree_min"):
+            avertissements.append("Durée non précisée : l'évènement Discord affichera une fin deux heures après le début.")
+    if any(E.mesurer(x)[0] > E.COMPOSANTS_MAX or E.mesurer(x)[1] > E.CARACTERES_MAX for x in cartes_):
+        erreurs.append("Une carte dépasse les limites de Discord : raccourcis le texte.")
+    personnes, roles = {}, {}
+    for x in cartes_:
+        for b in x["blocs"]:
+            for ln in b.get("lignes") or []:
+                for uid in re.findall(r"<@!?(\d+)>", ln["md"]):
+                    personnes[uid] = m.ident(uid)["nom"]
+        for rid in re.findall(r"<@&(\d+)>", x.get("haut") or ""):
+            roles[rid] = m.role_clan[1] if rid == m.role_clan[0] else "rôle supprimé"
+    dest = E._destination(m.destinations, v)
+    return 200, {
+        "id": e["id"], "type": e["type"], "statut": e["statut"], "version": e["version"],
+        "phase": E.phase_de(e, maintenant) if e["type"] == "evenement" else "",
+        "destination": ({"id": dest["id"], "nom": dest["nom"]} if dest else None),
+        "cartes": [E._carte_site(x) for x in cartes_], "limites": {"composants": E.COMPOSANTS_MAX, "caracteres": E.CARACTERES_MAX},
+        "personnes": personnes, "roles": roles, "publiable": e["statut"] == "brouillon" and not erreurs, "erreurs": erreurs,
+        "avertissements": [a for a in avertissements if a], "rappels": rappels,
+        "discord_event": {"demande": bool(v.get("discord_event")), "permission": True, "id": str(e["discord_event_id"] or ""),
+                          "lien": f"https://discord.com/events/1/{e['discord_event_id']}" if e["discord_event_id"] else ""},
+        "maintenant": int(maintenant),
+    }
 
 
 def r_publier(m, q, c):
-    e = _trouver_evt(m, c)
+    """`evenements.route_publier` + `publier` : une fois ; incertaine si la bascule /maquette/incertain l'a demandé."""
+    refus = _evt_refus()
+    if refus:
+        return refus
+    E = _ev()
+    eid, e = _evt_trouver(m, c)
+    if eid is None:
+        return 400, {"erreur": "Identifiant manquant.", "champs": {"id": "Identifiant manquant."}}
+    version = c.get("version")
+    if version is not None and E._entier(version) is None:
+        return 400, {"erreur": "Version invalide.", "champs": {"version": "Un entier est attendu."}}
+    forcer = c.get("forcer") is True
     if e is None:
-        return 404, {"erreur": "Introuvable."}
-    if e["statut"] in ("publie", "envoi"):
-        return 409, {"erreur": "Déjà publié."}
-    if e["statut"] == "incertain" and not c.get("forcer"):
-        return 409, {"erreur": "Publication incertaine : vérifie, puis force.", "incertain": True}
-    if c.get("version") is not None and int(c["version"]) != e["version"]:
-        return 409, {"conflit": True, "actuelle": e}
-    if not e.get("titre"):
-        return 400, {"erreur": "À corriger.", "erreurs": ["Le titre manque."]}
-    if m.prochaine_incertaine and not c.get("forcer"):
+        return 404, {"erreur": "Publication introuvable."}
+    if e["statut"] == "envoi":
+        return 409, {"erreur": "La publication est déjà en cours.", "actuelle": m.evt_site(e)}
+    if e["statut"] != "brouillon" and not (forcer and e["statut"] == "incertain"):
+        site = m.evt_site(e)
+        return 409, {"erreur": "Déjà publiée." if e["statut"] == "publie" else "Ce n'est plus un brouillon.", "lien": site["lien"], "actuelle": site}
+    if version is not None and int(version) != e["version"]:
+        return 409, {"conflit": True, "actuelle": m.evt_site(e)}
+    maintenant = time.time()
+    cartes_, avertissements, eq = _evt_cartes(m, e)
+    erreurs = E._controle(e, maintenant, m.destinations, eq)
+    if e["valeurs"].get("image") and e["valeurs"]["image"] not in m.medias:
+        erreurs.append("L'image n'est plus sur le site : renvoie-la.")
+    if erreurs:
+        return 400, {"erreur": erreurs[0], "erreurs": erreurs}
+    if m.prochaine_incertaine and not forcer:
         m.prochaine_incertaine = False
-        e["statut"], e["note"] = "incertain", "Discord n'a pas confirmé l'envoi."
-        return 200, {"ok": False, "incertain": True, "element": e}
-    e.update({"statut": "publie", "publie": int(time.time()), "publie_par": m.moi, "lien": f"https://discord.com/channels/1/{e['destination']}/{9000 + e['id']}", "note": ""})
-    if e["type"] == "evenement" and e["valeurs"].get("discord_event"):
-        e["discord_event"] = {"id": "77" + str(e["id"]), "lien": "https://discord.com/events/1/77" + str(e["id"])}
-    e["version"] += 1
-    m._phase(e)
-    return 200, {"ok": True, "lien": e["lien"], "element": e, "avertissements": []}
+        e.update(statut="incertain", envoi_le=int(maintenant), version=e["version"] + 2,
+                 note="Discord n'a pas confirmé l'envoi et le post ne se relit pas : regarde le post avant de republier.")
+        return 502, {"erreur": "Discord n'a pas confirmé la publication et je n'ai pas pu relire le post : regarde-le avant de republier.", "incertain": True}
+    m._publier_evt(e, maintenant, auteur=m.moi, n_cartes=len(cartes_))
+    e.update(note="", maj=int(maintenant), maj_par=int(m.moi))
+    site = m.evt_site(e)
+    return 200, {"ok": True, "lien": site["lien"], "element": site, "avertissements": [a for a in avertissements if a]}
 
 
 def r_modifier(m, q, c):
-    e = m.evts.get(int(c.get("id") or 0))
+    """`evenements.route_modifier` + `modifier` : une publication en ligne ; sans champ, « Actualiser »."""
+    refus = _evt_refus()
+    if refus:
+        return refus
+    E = _ev()
+    inconnus = [k for k in c if k not in E.CHAMPS and k not in E.CLES_CONTROLE]
+    if inconnus:
+        return 400, {"erreur": f"Champ inconnu : {inconnus[0]}.", "champs": {k: "Champ inconnu." for k in inconnus}}
+    eid = E._id(c.get("id"))
+    if eid is None:
+        return 400, {"erreur": "Identifiant manquant.", "champs": {"id": "Identifiant manquant."}}
+    version = E._entier(c.get("version"))
+    e = m.evts.get(eid)
     if e is None:
-        return 404, {"erreur": "Introuvable."}
-    if e["statut"] == "brouillon":
-        return 400, {"erreur": "Encore un brouillon : utilise clan/brouillon."}
-    if c.get("version") is None or int(c["version"]) != e["version"]:
-        return 409, {"conflit": True, "actuelle": e}
-    err = _verifier_champs(c, e["type"])
-    if err:
-        return 400, err
-    if set(c) - {"id", "version"}:
-        _appliquer_evt(m, e, c)
-    else:
-        e["version"] += 1
-    return 200, {"ok": True, "element": e}
+        return 404, {"erreur": "Publication introuvable."}
+    maintenant = time.time()
+    if e["statut"] != "publie" or (e["type"] == "evenement" and "termine" in (e["phase"], E.phase_de(e, maintenant))):
+        return 409, {"erreur": "Seule une publication en ligne (événement pas encore terminé) se modifie.", "actuelle": m.evt_site(e)}
+    if version is None:
+        return 400, {"erreur": "La version est demandée.", "champs": {"version": "La version est demandée."}}
+    if version != e["version"]:
+        return 409, {"conflit": True, "actuelle": m.evt_site(e)}
+    if "type" in c and c["type"] != e["type"]:
+        return 400, {"erreur": "Le type d'une publication ne change pas.", "champs": {"type": "Immuable."}}
+    if "destination" in c and str(c["destination"] or "") not in ("", str(e["salon_id"])):
+        return 400, {"erreur": "Une publication ne change pas de post : annule-la et republie.", "champs": {"destination": "Immuable."}}
+    corps = {k: x for k, x in c.items() if k != "destination"}
+    propres, erreurs = _evt_valider(m, corps, e["type"], e["valeurs"])
+    avant = dict(e["valeurs"])
+    valeurs = {**avant, **propres}
+    erreurs.update(E._croiser(e["type"], valeurs))
+    q_change = e["type"] == "evenement" and valeurs.get("quand") != avant.get("quand")
+    if q_change and (not valeurs.get("quand") or valeurs["quand"] < maintenant + E.AVANCE_S):
+        erreurs["quand"] = "Le nouveau début doit être dans le futur (une minute au moins)."
+    if erreurs:
+        return 400, {"erreur": next(iter(erreurs.values())), "champs": erreurs}
+    e["valeurs"] = valeurs
+    if e["type"] == "evenement":
+        qd = int(valeurs.get("quand") or 0)
+        faits = set() if q_change else set(e["rappels_faits"])
+        faits |= {mi for mi in valeurs.get("rappels") or [] if qd and qd - mi * 60 <= maintenant}
+        e["rappels_faits"] = sorted(faits)
+        if q_change:
+            e["phase"] = "a_venir"
+        if valeurs.get("discord_event") and not e["discord_event_id"]:
+            e["discord_event_id"], m.prochain_message = m.prochain_message, m.prochain_message + 1
+        elif e["discord_event_id"] and not valeurs.get("discord_event"):
+            e["discord_event_id"] = 0
+    cartes_, avertissements, _eq = _evt_cartes(m, e)
+    n = len(cartes_)
+    if n > len(e["messages"]):
+        e["messages"] = e["messages"] + list(range(m.prochain_message, m.prochain_message + n - len(e["messages"])))
+        m.prochain_message += n
+    e.update(messages=e["messages"][:n], quand=int(valeurs.get("quand") or 0), fin=E._fin(valeurs), version=e["version"] + 1,
+             maj=int(maintenant), maj_par=int(m.moi), note="")
+    site = m.evt_site(e)
+    return 200, {"ok": True, "lien": site["lien"], "element": site, "avertissements": [a for a in avertissements if a]}
 
 
 def r_annuler(m, q, c):
-    e = m.evts.get(int(c.get("id") or 0))
+    """`evenements.route_annuler` + `annuler` : un événement annulé, une annonce (métiers, listing) retirée."""
+    refus = _evt_refus()
+    if refus:
+        return refus
+    E = _ev()
+    eid = E._id(c.get("id"))
+    if eid is None:
+        return 400, {"erreur": "Identifiant manquant.", "champs": {"id": "Identifiant manquant."}}
+    prevenir = c.get("prevenir", True)
+    if not isinstance(prevenir, bool):
+        return 400, {"erreur": "« prevenir » : vrai ou faux.", "champs": {"prevenir": "Vrai ou faux est attendu."}}
+    e = m.evts.get(eid)
     if e is None:
-        return 404, {"ok": False, "erreur": "Introuvable."}
+        return 404, {"erreur": "Publication introuvable."}
     if e["statut"] in ("annule", "retire"):
-        return 200, {"ok": True, "deja": True}
-    e["statut"] = "annule" if e["type"] == "evenement" else "retire"
-    e["version"] += 1
-    return 200, {"ok": True, "element": e}
+        return 200, {"ok": True, "deja": True, "element": m.evt_site(e)}
+    if e["statut"] == "brouillon":
+        return 409, {"erreur": "Un brouillon ne s'annule pas : supprime-le."}
+    if e["statut"] == "envoi":
+        return 409, {"erreur": "La publication est en cours : attends quelques secondes."}
+    maintenant = int(time.time())
+    if e["type"] == "evenement" and e["statut"] == "publie" and "termine" in (e["phase"], E.phase_de(e, maintenant)):
+        return 409, {"erreur": "Cet événement est déjà terminé."}
+    statut = "annule" if e["type"] == "evenement" and e["statut"] == "publie" else "retire"
+    e.update(statut=statut, archive_le=maintenant, version=e["version"] + 1, maj=maintenant, maj_par=int(m.moi))
+    return 200, {"ok": True, "element": m.evt_site(e)}
 
 
 def r_nettoyage(m, q, c):
@@ -1859,24 +2144,35 @@ def r_nettoyage_lancer(m, q, c):
 
 
 def r_media(m, q, c):
+    """`tableau._route_media` : mêmes refus (400, 413, 415), même réponse {id, url, largeur, hauteur, octets, type}."""
+    brut = c.get("base64")
+    if not isinstance(brut, str) or not brut:
+        return 400, {"erreur": "Image absente.", "champ": "base64"}
+    if brut.startswith("data:"):
+        brut = brut.split(",", 1)[1] if "," in brut else ""
     try:
-        octets = base64.b64decode(str(c.get("base64") or ""), validate=True)
+        octets = base64.b64decode("".join(brut.split()), validate=True)
     except ValueError:
-        return 400, {"ok": False, "erreur": "Image illisible."}
+        return 400, {"erreur": "Image illisible.", "champ": "base64"}
     if len(octets) > 8 * 1024 * 1024:
-        return 400, {"ok": False, "erreur": "8 Mo au plus."}
-    magiques = (b"\x89PNG", b"\xff\xd8\xff", b"RIFF", b"GIF8")
-    if not octets.startswith(magiques):
-        return 400, {"ok": False, "erreur": "Formats acceptés : PNG, JPEG, WebP, GIF."}
+        return 413, {"erreur": "Image trop lourde : 8 Mo au plus."}
+    magiques = (b"\x89PNG", b"\xff\xd8\xff", b"GIF8")
+    if not (octets.startswith(magiques) or (octets[:4] == b"RIFF" and octets[8:12] == b"WEBP")):
+        return 415, {"erreur": "Format refusé : PNG, JPEG, WebP ou GIF seulement."}
     mid = "m" + hashlib.sha256(octets).hexdigest()[:16]
+    largeur = hauteur = 0
     if Image is not None:
-        img = Image.open(io.BytesIO(octets))
-        img.thumbnail((2048, 2048))
-        f = io.BytesIO()
-        img.convert("RGBA").save(f, "WEBP", quality=86)
-        octets = f.getvalue()
+        try:
+            img = Image.open(io.BytesIO(octets))
+            img.thumbnail((2048, 2048))
+            f = io.BytesIO()
+            img.convert("RGBA").save(f, "WEBP", quality=86)
+            octets, (largeur, hauteur) = f.getvalue(), img.size
+        except Exception:  # comme le serveur : une image qui ne se lit pas est refusée
+            return 415, {"erreur": "Image illisible, ou trop grande à décoder."}
     m.medias[mid] = (octets, "image/webp")
-    return 200, {"ok": True, "id": mid, "url": f"media/{mid}"}
+    return 200, {"ok": True, "id": mid, "url": f"media/{mid}", "largeur": largeur, "hauteur": hauteur, "octets": len(octets),
+                 "type": "image/webp"}
 
 
 def _banque(m):
@@ -2179,6 +2475,16 @@ async def accueil(request):
     raise web.HTTPFound(ESPACE + "/")
 
 
+async def visuel(request):
+    """Comme le vrai serveur (`health_server`) : GET /v/<nom> → un bandeau ou une icône de `visuels/` (images publiques).
+    L'aperçu d'une annonce ou d'un listing sans image montre le bandeau du clan servi ici."""
+    nom = request.match_info.get("nom", "")
+    f = RACINE.parent / "visuels" / nom
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,60}\.(gif|png)", nom) or not f.is_file():
+        return web.Response(status=404, text="404")
+    return web.FileResponse(f, headers={"Cache-Control": "public, max-age=604800", "X-Content-Type-Options": "nosniff"})
+
+
 async def vers_espace(request):
     """Comme le vrai serveur : la page vit à /tableau/espace/ (la portée du service worker)."""
     raise web.HTTPSeeOther(ESPACE + "/")
@@ -2203,6 +2509,7 @@ def application() -> web.Application:
     r.add_post(ESPACE + "/sync", sync)
     r.add_route("*", ESPACE + "/api/{nom:.+}", api)
     r.add_get("/maquette/{quoi}", bascule)
+    r.add_get("/v/{nom}", visuel)
     return app
 
 

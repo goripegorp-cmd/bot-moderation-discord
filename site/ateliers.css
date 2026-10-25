@@ -52,6 +52,8 @@
 @media (pointer: coarse) { .md-bouton { height: 44px; min-width: 44px; } }
 .minuteur-vivant { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-left: 3px solid var(--laiton); background: rgba(248, 240, 221, .7); font-size: 15px; }
 .minuteur-vivant .ic { color: var(--encre-2); }
+.minuteur-vivant > span { flex: 1 1 12em; min-width: 0; } /* le texte reste à côté de son icône et passe à la ligne lui-même */
+.minuteur-vivant b { white-space: nowrap; } /* « dans 20 h 45 » d'un seul tenant */
 .minuteur-vivant.alerte { border-left-color: var(--cire); }
 .nuancier { display: flex; flex-wrap: wrap; gap: 8px; }
 .nuance {

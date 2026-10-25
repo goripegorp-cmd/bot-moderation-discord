@@ -111,6 +111,7 @@ def _faux():
             self.default_role = Role(SERVEUR_ID, "@everyone", 0)
             self._roles[SERVEUR_ID] = self.default_role
             self.owner_id = FONDATEUR
+            self.natifs = {}
 
         roles = property(lambda self: sorted(self._roles.values(), key=lambda r: r.position),
                          lambda self, v: None)  # Monde y range un dict : sans effet ici
@@ -153,6 +154,38 @@ def _faux():
 
         async def fetch_ban(self, objet):
             raise discord.NotFound(Obj(status=404, reason="x"), "absent")
+
+        #  Les évènements programmés de Discord (les événements du clan les créent quand on le demande).
+        async def create_scheduled_event(self, **kw):
+            ev = EvenementNatif(self.nouvel_id(), kw)
+            self.natifs[ev.id] = ev
+            return ev
+
+        def get_scheduled_event(self, ident):
+            return self.natifs.get(int(ident or 0))
+
+        async def fetch_scheduled_event(self, ident):
+            ev = self.natifs.get(int(ident or 0))
+            if ev is None:
+                raise discord.NotFound(Obj(status=404, reason="x"), "absent")
+            return ev
+
+    class EvenementNatif:
+        """Un évènement programmé : créé, modifié, démarré, terminé ou annulé avec l'événement du clan."""
+        def __init__(self, ident, kw):
+            self.id, self.kw, self.status = ident, dict(kw), discord.EventStatus.scheduled
+
+        async def edit(self, **kw):
+            self.kw.update(kw)
+
+        async def cancel(self, **_kw):
+            self.status = discord.EventStatus.canceled
+
+        async def start(self, **_kw):
+            self.status = discord.EventStatus.active
+
+        async def end(self, **_kw):
+            self.status = discord.EventStatus.completed
 
     return Obj(Role=Role, Membre=Membre, Serveur=Serveur, Obj=Obj, F=F)
 
@@ -240,7 +273,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     g.role("Notifications", 5)
     g.role("Bot musique", 20, managed=True)
     g.me = X.Obj(id=999, top_role=g.role("GoRP Bot", 80), guild_permissions=discord.Permissions(
-        manage_roles=True, manage_channels=True, ban_members=True, mention_everyone=True))
+        manage_roles=True, manage_channels=True, ban_members=True, mention_everyone=True, manage_events=True))
     g.membre(FONDATEUR, "GoRipe", direction_r, arrivee_jours=600)
     g.membre(DIRECTION, "Capitaine Direction", direction_r, arrivee_jours=420)
     hasard = random.Random(25102026)
@@ -252,6 +285,11 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
                  "ticket_panels": {"p1": {"name": "Recrutement Rell Seas"}, "p2": {"name": "Support"},
                                    "p3": {"name": "Signalement"}}})
     salon_annonces = g._salon(X.F.Texte, "📢・annonces", {"category": g.commu})
+    #  Le forum du clan et ses posts (📢 Infos d'abord) : là où partent les annonces et les événements du clan. Ses
+    #  posts seuls sont connus du serveur (le forum n'est pas rangé parmi les salons : les autres pages ne changent pas).
+    import zones
+    forum_clan = X.F.Forum(g, g.nouvel_id(), "🦜▷・clan-gorp", {})
+    conf["clan_posts"] = {cle: {"id": g.nouveau_fil(forum_clan, titre).id} for cle, titre, _v, _t in zones.CLAN_POSTS}
 
     #  Les modules, comme dans `_activite_boot`.
     silence = print
@@ -352,6 +390,8 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     await _remplir(get_db, g, clan_r, salon_annonces, X)
     await _recrutement_demo(get_db, g, ticket_ouvert)
     await _affiches_demo(g, X)
+    if evenements is not None and evenements.pret():
+        await _evenements_demo(evenements, g, clan_r, get_db)
 
     app = health_server.construire_app()
 
@@ -576,6 +616,102 @@ async def _affiches_demo(g, X) -> None:
     metier = g.role("Navigateur", 6, couleur=0x1F4E5A)
     await affiches._route_role(g, chef, {}, {"type": "metier", "cle": cle("metier", "navigation", "navigateur"), "role_id": str(metier.id),
                                              "auto": True})
+
+
+async def _evenements_demo(ev, g, clan_r, get_db) -> None:
+    """Les annonces et événements du clan, joués par le VRAI module (evenements.py) : trois brouillons, un événement
+    à venir avec des réponses et des places (et son évènement Discord), une annonce publiée avec son image et ses
+    « Vu », un événement terminé, un annulé. Les heures sont celles de Paris."""
+    import base64
+    import io
+    from zoneinfo import ZoneInfo
+
+    import tableau
+    chef = g.get_member(FONDATEUR)
+    paris = ZoneInfo("Europe/Paris")
+
+    def a_paris(jours, heure, minute=0, depuis=None):
+        d = datetime.fromtimestamp(depuis or time.time(), paris) + timedelta(days=jours)
+        return int(d.replace(hour=heure, minute=minute, second=0, microsecond=0).timestamp())
+
+    async def brouillon(**corps):
+        statut, rep = await ev.route_brouillon(g, chef, {}, corps)
+        if statut != 200:
+            print(f"[SITE LOCAL] brouillon de démonstration refusé : {rep}")
+            return None
+        return rep["element"]
+
+    async def publier(e):
+        statut, rep = await ev.publier(g, chef, e["id"])
+        if statut != 200:
+            print(f"[SITE LOCAL] publication de démonstration refusée : {rep}")
+            return None
+        return rep["element"]
+
+    async def repondre(eid, choix):
+        membres = [m for m in g.members if clan_r in m.roles]
+        async with get_db() as db:
+            k = 0
+            for c, n in choix:
+                for m in membres[k:k + n]:
+                    await db.execute("INSERT OR REPLACE INTO clan_evenements_reponses(evenement_id, membre_id, choix, quand)"
+                                     " VALUES (?,?,?,?)", (eid, m.id, c, int(time.time()) - 600))
+                k += n
+            await db.commit()
+        await ev.maj_carte(g, eid)
+
+    image = ""
+    try:
+        from PIL import Image, ImageDraw
+        im = Image.new("RGB", (960, 360), (31, 78, 90))
+        d = ImageDraw.Draw(im)
+        for y in range(0, 360, 6):
+            d.line((0, y, 960, y), fill=(31 + y // 12, 78 + y // 20, 90 + y // 24))
+        d.ellipse((380, 60, 580, 260), outline=(239, 226, 196), width=10)
+        d.line((480, 70, 480, 250), fill=(239, 226, 196), width=8)
+        tampon = io.BytesIO()
+        im.save(tampon, "PNG")
+        statut, rep = await tableau._route_media(g, chef, {}, {"nom": "movie3.png", "type": "image/png",
+                                                              "base64": base64.b64encode(tampon.getvalue()).decode()})
+        image = rep.get("id", "") if statut == 200 else ""
+    except Exception as ex:  # outil local : sans Pillow, l'annonce part sans image
+        print(f"[SITE LOCAL] image de démonstration non dessinée : {type(ex).__name__} {ex}")
+
+    await brouillon(type="evenement", titre="Sortie en mer : le boss des abysses", quand=a_paris(2, 21),
+                    texte="Rendez-vous au port **15 minutes avant**.\nPrévoyez des vivres et vos meilleures armes.\n\n"
+                          "> Les absents non excusés passent leur tour.",
+                    lieu="Fosse des abysses", duree_min=120, places=12, rappels=[1440, 60, 10], mention="inscrits",
+                    discord_event=True)
+    await brouillon(type="annonce", titre="Nouvelles règles du clan", mention="clan",
+                    texte="Merci de lire les **nouvelles règles** épinglées dans le post Infos.")
+    await brouillon(type="metiers", texte="Voici les métiers officiels de chacun, d'après les affiches.")
+    e = await brouillon(type="evenement", titre="Entraînement de combat", quand=a_paris(1, 20, 30), lieu="Taverne du clan",
+                        texte="Duels un contre un, puis en équipe.", duree_min=90, places=10, rappels=[60, 10],
+                        mention="clan", discord_event=True)
+    e = await publier(e) if e else None
+    if e:
+        await repondre(e["id"], (("d", 6), ("p", 2), ("n", 1)))
+    a = await brouillon(type="annonce", titre="Le Movie 3 est sorti", image=image, mention="clan",
+                        texte="**Le Movie 3 est là.** Toutes les nouveautés sont dans le post Infos.")
+    a = await publier(a) if a else None
+    if a:
+        await repondre(a["id"], (("v", 9),))
+    #  Un événement d'il y a cinq jours (publié à l'époque), puis un événement annulé.
+    vrai, passe = ev._mur, time.time() - 5 * 86400
+    ev._mur = lambda: passe
+    try:
+        p = await brouillon(type="evenement", titre="Guerre de factions", quand=a_paris(0, 21, depuis=passe + 86400),
+                            lieu="Forteresse du centre", duree_min=120, rappels=[60])
+        p = await publier(p) if p else None
+    finally:
+        ev._mur = vrai
+    if p:
+        await repondre(p["id"], (("d", 11), ("p", 3), ("n", 2)))
+        await ev.traiter(g, p["id"])
+    c = await brouillon(type="evenement", titre="Course de navires", quand=a_paris(4, 18), duree_min=60, rappels=[60])
+    c = await publier(c) if c else None
+    if c:
+        await ev.annuler(g, chef, c["id"], prevenir=False)
 
 
 def main() -> int:

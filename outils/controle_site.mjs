@@ -33,8 +33,10 @@ const NAVIGATEURS = [opt("navigateur", ""), process.env.CHROME || "",
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files (x86)/Microsoft/EdgeCore/155.0.4283.62/msedge.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean);
 
+// Ouvrir le brouillon « Sortie en mer » (le vrai site local et la maquette en ont un) dans le composeur.
+const OUVRIR_BROUILLON = "[...document.querySelectorAll('article.evt-carte')].find(a => a.textContent.includes('Sortie en mer')).querySelector('.feuillet-pied button').click()";
 // Ouvrir la première affiche (les groupes par métier sont repliés au départ).
-const OUVRIR_AFFICHE = "(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.affiche').click(); })()";
+const OUVRIR_AFFICHE ="(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.affiche').click(); })()";
 
 // Les scènes : une rubrique (ancre) et, au besoin, des gestes (code exécuté dans la page) avant le contrôle.
 // Les icônes officielles et les logos viennent d'une autre branche (et du wiki, plus tard) : leur 404 est attendu,
@@ -57,6 +59,12 @@ const SCENES = [
   { nom: "equipage-tickets", ancre: "#equipage/tickets" },
   { nom: "equipage-annonces", ancre: "#equipage/annonces" },
   { nom: "equipage-annonces-avenir", ancre: "#equipage/annonces/a-venir" },
+  { nom: "equipage-annonces-brouillons", ancre: "#equipage/annonces/brouillons" },
+  { nom: "equipage-annonces-passes", ancre: "#equipage/annonces/passes" },
+  // Un brouillon rouvert : le formulaire rempli et l'aperçu rendu par le serveur ; puis la confirmation de publication.
+  { nom: "equipage-annonces-ouvert", ancre: "#equipage/annonces/brouillons", geste: OUVRIR_BROUILLON },
+  { nom: "fenetre-publier", ancre: "#equipage/annonces/brouillons", geste: OUVRIR_BROUILLON,
+    geste2: "[...document.querySelectorAll('.composeur-actions button')].find(b => b.textContent.includes('Publier')).click()" },
   { nom: "capitainerie-affiches", ancre: "#capitainerie/affiches" },
   { nom: "capitainerie-catalogue", ancre: "#capitainerie/catalogue" },
   { nom: "capitainerie-roles", ancre: "#capitainerie/roles" },

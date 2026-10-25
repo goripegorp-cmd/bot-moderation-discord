@@ -447,7 +447,7 @@ function ligneOp(op, p) {
     h("div", { classe: "meta" }, "Faite " + depuis(op.cree / 1000) + (op.essais ? " · " + quantite(op.essais, "essai(s)") : "") + (op.erreur ? " · " + op.erreur : "")),
     op.etat === "conflit" && op.conflitGenre === "doublon" ? h("p", { classe: "aide" }, "Ce membre a déjà une affiche active : une seule par membre. Modifie celle qui existe, ou mets-la d'abord à la corbeille.") : null,
     op.etat === "conflit" && op.conflitGenre === "retiree" ? h("p", { classe: "aide" }, "Cette affiche est dans la corbeille : restaure-la, puis renvoie la modification.") : null,
-    op.etat === "conflit" && op.conflitGenre === "publie" ? h("p", { classe: "aide" }, "Cet élément a été publié entre-temps : modifie-le depuis « À venir ».") : null,
+    op.etat === "conflit" && op.conflitGenre === "publie" ? h("p", { classe: "aide" }, "Cet élément a été publié entre-temps : modifie-le depuis « À venir » (un événement) ou « Passés » (une annonce).") : null,
     h("div", { classe: "rangee" },
       op.etat === "conflit" && (!op.conflitGenre || op.conflitGenre === "version") ? bouton("Régler le conflit", { classe: "p principal", icone: "attention", onclick: () => reglerConflit(op) }) : null,
       op.etat === "conflit" && op.conflitGenre === "retiree" ? bouton("Restaurer puis renvoyer", { classe: "p principal", icone: "restaurer", reseau: true, onclick: async () => {
@@ -467,12 +467,15 @@ function ligneOp(op, p) {
 const FORMES = {
   affiche: (a) => ({ id: a.id, membre_id: String((a.membre && a.membre.id) || a.membre_id || ""), roblox: { nom: (a.roblox && a.roblox.nom) || "", id: String((a.roblox && a.roblox.id) || "") },
     surnom: a.surnom || "", prime: a.prime || 0, niveau: a.niveau || 0, grade: a.grade || "", statut: a.statut || "actif", attributs: a.attributs || {}, notes: a.notes || "", version: a.version }),
-  brouillon: (e) => Object.assign({}, e.valeurs || {}, { id: e.id, type: e.type, titre: e.titre, quand: e.quand, destination: e.destination, version: e.version }),
+  // Le post : l'identifiant des valeurs (la tête de l'élément porte l'objet { id, nom }, que le serveur refuserait).
+  brouillon: (e) => Object.assign({}, e.valeurs || {}, { id: e.id, type: e.type, titre: e.titre, quand: e.quand, version: e.version,
+    destination: e.valeurs && e.valeurs.destination !== undefined ? e.valeurs.destination : e.destination && typeof e.destination === "object" ? String(e.destination.id || "") : e.destination }),
   question: (q) => Object.assign({}, q, { question: q.question || q.texte || "", reponse: q.reponse || q.reponse_attendue || "" }),
 };
 const LIBELLES_CHAMPS = { membre_id: "Membre", roblox: "Nom Roblox", surnom: "Surnom", prime: "Prime", niveau: "Niveau", grade: "Grade", statut: "Statut", attributs: "Insignes",
   notes: "Notes", titre: "Titre", texte: "Texte", quand: "Date", duree_min: "Durée", lieu: "Lieu", image: "Image", couleur: "Couleur", rappels: "Rappels", mention: "Mention",
-  destination: "Salon", reponses: "Boutons de réponse", places: "Places", discord_event: "Évènement Discord", reserve_clan: "Réservé au clan", nom: "Nom", nom_en: "Nom en anglais",
+  destination: "Post", reponses: "Boutons de réponse", places: "Places", discord_event: "Évènement Discord", reserve_clan: "Réservé au clan", nom: "Nom",
+  groupement: "Rangé par", champs: "Montré pour chacun", nom_en: "Nom en anglais",
   description: "Description", categorie: "Catégorie", rarete: "Rareté", icone: "Icône", source: "Source", actif: "Présent dans le jeu", nouveau_movie3: "Nouveauté du Movie 3",
   question: "Question", reponse: "Réponse attendue", variantes: "Variantes", difficulte: "Difficulté", active: "Active", questions: "Questions", par_defaut: "Par défaut" };
 function valeurLisible(k, v) {
