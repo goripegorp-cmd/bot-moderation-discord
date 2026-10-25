@@ -1216,6 +1216,12 @@ async def _route_role(g, auteur, requete, corps):
         await db.execute("INSERT OR REPLACE INTO rell_roles (guild_id, type, cle, role_id, auto, maj_le, maj_par)"
                          " VALUES (?,?,?,?,?,?,?)", (g.id, type_, cle, role.id, int(auto), int(time.time()), auteur.id))
         await db.commit()
+    if type_ == TYPE_METIER and _metiers is not None and await _metiers.gere(g):
+        #  Un rôle de métier : créé ici, il se range juste sous le rôle du clan ; puis (attribution automatique) il est
+        #  donné tout de suite à ceux dont l'affiche porte ce métier — ce que la page annonce.
+        if cree:
+            await _metiers.placer_sous_le_clan(g, role, await _metiers.role_du_clan(g))
+        _metiers.planifier_attribution(g, cle)
     lien = {"type": type_, "cle": cle, "role_id": role.id, "auto": auto}
     return 200, {"ok": True, "lien": _sortie_lien(g, lien, elements),
                  "liens": [_sortie_lien(g, x, elements) for x in await _liens(g.id)],

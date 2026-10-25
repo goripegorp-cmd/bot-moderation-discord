@@ -239,6 +239,8 @@ class Banc:
         monkeypatch.setattr(tableau, "RACINE_DONNEES", tmp_path / "donnees")
         monkeypatch.setattr(tableau, "SITE", tmp_path / "site")
         monkeypatch.setattr(transcript_store, "_BASE_DIR", str(tmp_path / "transcripts"))
+        monkeypatch.setattr(visuels, "DOSSIER", tmp_path / "visuels")     # jamais les vraies icônes du dépôt
+        monkeypatch.setattr(affiches, "_PRESENTES", {})
         monkeypatch.setattr(metiers, "AVIS_S", 0.0)
         monkeypatch.setattr(metiers, "DEMARRE_S", 0.0)
         monkeypatch.setattr(metiers, "PAUSE_CHOIX_S", 0.0)
@@ -396,6 +398,7 @@ def test_M1c_noms_et_couleurs_des_metiers():
                 ("charpentier", "Charpentier"): "Charpentier"}
     for (cle, nom), role in attendus.items():
         assert metiers.nom_du_role(e(cle, nom)) == role, (cle, nom)
+    assert metiers.nom_du_role({"cle": "x1", "nom": "Cuisine de bord", "nom_en": "Cooking"}) == "Cuisinier",         "renommé sur le site : reconnu par son nom anglais"
     for cat, couleur in (("Production · soutien", LAITON), ("Soutien · santé", CIRE), ("Récolte", SAUGE),
                          ("Combat", AMBRE), ("Illégal · furtivité", PRUNE), ("Équipage", metiers.COULEUR_DEFAUT),
                          ("", metiers.COULEUR_DEFAUT)):
@@ -431,10 +434,15 @@ def test_M2_icone_officielle_si_le_serveur_a_les_icones_de_role(tmp_path, monkey
     with Image.open(io.BytesIO(icone)) as im:
         assert (im.format, im.size) == ("PNG", (128, 128)) and len(icone) <= 256 * 1024, "PNG carré, 256 Ko au plus"
     assert "display_icon" not in banc.g.crees[1], "pas d'icône officielle pour la pêche : rien (jamais un émoji)"
+    (tmp_path / "visuels" / "icones").mkdir(parents=True)
+    (tmp_path / "visuels" / "icones" / "rell_metier_thieving.png").write_bytes(_image("PNG", (512, 512)))
+    banc.choisir(banc.mira, "thieving")
+    with Image.open(io.BytesIO(banc.g.crees[2]["display_icon"])) as im:
+        assert (banc.g.crees[2]["name"], im.size) == ("Voleur", (128, 128)), "l'icône de l'émoji d'application du jeu"
     #  Discord refuse l'image : le rôle est créé quand même, sans icône.
     banc.g.refus_icone = True
     banc.choisir(banc.mira, "cooking")
-    assert len(banc.g.crees) == 2, "le Cuisinier existait déjà : aucun rôle neuf"
+    assert len(banc.g.crees) == 3, "le Cuisinier existait déjà : aucun rôle neuf"
     (dossier / "doctor.webp").write_bytes(_image("PNG"))
     tableau._statiques.clear()
     asyncio.run(affiches._route_element(banc.g, chef, {}, {"type": "metier", "cle": "doctor", "version": 1,
@@ -762,6 +770,8 @@ def test_M9_adresses_reglages_installer_reconcilier_et_droits(banc):
     assert "modération" in out["refus"][3][1]["erreur"] and "rôle du clan" in out["refus"][4][1]["erreur"]
     st, inst = out["installer"]
     assert st == 200 and [x["nom"] for x in inst["crees"]] == ["Cuisinier", "Voleur", "Pêcheur", "Médecin", "Harponnage"]
+    assert set(inst) == {"ok", "crees", "message"}, "les comptes que lit la page, sans zéro ni liste vide"
+    assert inst["message"].startswith("Attribution automatique sur NON") and not any(c.isdigit() for c in inst["message"])
     assert "Charpentier naval" not in [r.name for r in g._roles.values()], "un métier retiré n'a pas de rôle"
     ordre = g.ordre()
     i = ordre.index("GoRPC")
@@ -769,15 +779,15 @@ def test_M9_adresses_reglages_installer_reconcilier_et_droits(banc):
         "sous le rôle du clan, dans l'ordre du catalogue"
     assert not any(m.ajouts for m in g.members), "installés, donnés à personne"
     st, encore = out["encore"]
-    assert st == 200 and not encore["crees"] and len(encore["deja"]) == 5
+    assert st == 200 and "crees" not in encore and len(encore["deja"]) == 5
     assert [m["role"]["nom"] for m in out["lire2"][1]["metiers"] if m["role"]][:2] == ["Cuisinier", "Voleur"]
     assert [x["status"] for x in out["hors_ligne"][1]["resultats"]] == [400, 400], "jamais rejoué hors ligne"
     st, rec = out["reconcilier"]
-    assert st == 200 and rec["bilan"]["retires"] == 1 and banc.officier not in banc.intrus.roles
-    assert rec["message"].startswith("Rôles du clan remis en ordre : 1 rôle(s) retiré(s)")
+    assert st == 200 and rec["bilan"] == {"verifies": 5, "retires": 1} and banc.officier not in banc.intrus.roles,         "le bilan dans les mots de la page (vérifiés, retirés…), sans zéro"
+    assert rec["detail"]["anciens"] == 1 and rec["message"] == ""
     site = [x["texte"] for x in asyncio.run(registre.lire(1, 200)) if x["categorie"] == "Site"]
     assert any(t.startswith("Rôles & métiers : attribution automatique NON, 3 métier(s) au plus") for t in site)
-    assert any(t.startswith("Rôles des métiers installés : 5 créé(s)") for t in site)
+    assert any(t.startswith("Rôles des métiers installés : 5 créé(s), 0 relié(s), 0 déjà là, 0 donné(s)") for t in site)
     assert banc.guides, "le guide du clan se réécrit (la liste suit les réglages)"
 
 
@@ -796,6 +806,39 @@ def test_M9b_sans_role_du_clan_ni_module_les_adresses_le_disent(banc):
     assert reconcilier[0] == 409 and "Aucun rôle du clan" in reconcilier[1]["erreur"]
     assert absent[0] == 503
     assert not banc.g.crees
+
+
+def test_M9c_installer_et_creer_un_role_donnent_aussitot_a_ceux_qui_ont_le_metier(banc):
+    """Ce que la page annonce (« … puis donné à ceux qui ont ce métier ») : avec l'attribution automatique, le rôle
+    installé ou créé sur le site part tout de suite aux membres du clan dont l'affiche porte ce métier."""
+    g, chef = banc.g, banc.chef
+    asyncio.run(affiches.definir_metiers(g, banc.kolax, ["cooking", "fishing"], FONDATEUR))
+    asyncio.run(affiches.definir_metiers(g, banc.mira, ["thieving"], FONDATEUR))
+    asyncio.run(affiches.definir_metiers(g, banc.intrus, ["cooking"], FONDATEUR))
+    banc.sanctionnes = {banc.mira.id}
+    st, rep = run(metiers.route_installer(g, chef, {}, {}))
+    assert st == 200 and rep["donnes"] == 2 and len(rep["crees"]) == 5 and "deja" not in rep and rep["message"] == ""
+    assert {"Cuisinier", "Pêcheur"} <= {r.name for r in banc.kolax.roles}
+    assert banc.role_nomme("Voleur") not in banc.mira.roles, "une sanction en cours : rien"
+    assert banc.role_nomme("Cuisinier") not in banc.intrus.roles, "hors du clan : rien"
+    assert not banc.kolax.retraits, "l'installation ne retire rien"
+    #  « Créer le rôle… » sur le site, pour un métier ajouté plus tard : rangé sous le clan, donné tout de suite.
+    banc.conf[metiers.CLE_MAX] = 3
+    st, _r = run(affiches._route_element(g, chef, {}, {"type": "metier", "nom": "Plongée", "nom_en": "Diving",
+                                                      "categorie": "Récolte"}))
+    asyncio.run(affiches.definir_metiers(g, banc.kolax, ["cooking", "fishing", "plongee"], FONDATEUR))
+    st, rep = run(affiches._route_role(g, chef, {}, {"type": "metier", "cle": "plongee", "auto": True,
+                                                    "creer": {"nom": "Plongeur", "couleur": "#3F6B3A"}}))
+    plongeur = banc.role_nomme("Plongeur")
+    assert st == 200 and plongeur in banc.kolax.roles
+    assert banc.g.ordre()[banc.g.ordre().index("GoRPC") + 1] == "Plongeur", "juste sous le rôle du clan"
+    #  Attribution automatique NON : installé, donné à personne — et la réponse le dit (sans chiffre : la page l'affiche).
+    banc.conf[metiers.CLE_AUTO] = False
+    asyncio.run(affiches.definir_metiers(g, banc.direction, ["doctor"], FONDATEUR))
+    banc.direction.roles.append(banc.clan)
+    st, rep = run(metiers.route_installer(g, chef, {}, {}))
+    assert st == 200 and "donnes" not in rep and banc.role_nomme("Médecin") not in banc.direction.roles
+    assert rep["message"].startswith("Attribution automatique sur NON")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

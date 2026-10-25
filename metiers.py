@@ -277,9 +277,10 @@ def _norme(s) -> str:
 
 
 def nom_du_role(e: dict) -> str:
-    """« Un nom clair du métier en français — un nom de profession » : Cuisinier, Artisan, Médecin… ; pour un métier
-    ajouté plus tard sur le site, son nom du catalogue."""
-    for k in (e.get("cle"), _norme(e.get("nom"))):
+    """« Un nom clair du métier en français — un nom de profession » : Cuisinier, Artisan, Médecin… — reconnu par la
+    clé, le nom ou le nom anglais que donne le catalogue (aucune clé n'est supposée présente) ; pour un métier ajouté
+    plus tard sur le site, son nom du catalogue."""
+    for k in (e.get("cle"), _norme(e.get("nom")), _norme(e.get("nom_en"))):
         if k in _PROFESSIONS:
             return _PROFESSIONS[k]
     return str(e.get("nom") or e.get("cle") or "Métier")[:100]
@@ -645,8 +646,8 @@ async def reconcilier(g, *, auteur=None) -> dict:
     """Les rôles du clan remis d'accord avec le clan : un non-membre ne garde aucun rôle du clan ; un membre du clan
     qui a son affiche porte les rôles de ses métiers (attribution automatique). Un membre sous sanction, ou sans
     affiche, n'est pas touché. Rattrape ce qu'un redémarrage a manqué. → le bilan."""
-    bilan = {"actif": False, "retires": 0, "anciens": 0, "rendus": 0, "membres": 0, "crees": 0, "sanctions": 0,
-             "erreurs": 0, "details": []}
+    bilan = {"actif": False, "verifies": 0, "retires": 0, "anciens": 0, "rendus": 0, "membres": 0, "crees": 0,
+             "sanctions": 0, "epargnes": 0, "erreurs": 0, "details": []}
     if not pret():
         return dict(bilan, raison="Le module démarre.")
     c = await _cfg(g.id)
@@ -663,6 +664,7 @@ async def reconcilier(g, *, auteur=None) -> dict:
             return dict(bilan, erreurs=1, raison="Sanctions illisibles : rien n'a été touché.")
         ids_clan = await ids_roles_clan(g, c)
         membres = [m for m in list(getattr(g, "members", []) or []) if not getattr(m, "bot", False)]
+        bilan["verifies"] = len(membres)
 
         def detail(m, res):
             if len(bilan["details"]) < DETAILS_MAX:
@@ -677,6 +679,7 @@ async def reconcilier(g, *, auteur=None) -> dict:
                 bilan["sanctions"] += 1
                 continue
             if await epargne(g, m):          # le fondateur, la direction : jamais retirés automatiquement
+                bilan["epargnes"] += 1
                 continue
             async with _verrou_membre(g.id, m.id):
                 res = await retirer_roles_clan(g, m, cause="réconciliation : n'est plus dans le clan", journaliser=False)
@@ -724,11 +727,63 @@ async def reconcilier(g, *, auteur=None) -> dict:
                      auteur_id=getattr(auteur, "id", 0) or 0)
     if _db_set is not None:
         try:
-            await _db_set(g.id, CLE_BILAN, {k: bilan[k] for k in ("retires", "anciens", "rendus", "membres", "crees",
-                                                                 "sanctions", "erreurs")} | {"quand": int(time.time())})
+            await _db_set(g.id, CLE_BILAN, {k: bilan[k] for k in ("verifies", "retires", "anciens", "rendus", "membres",
+                                                                 "crees", "sanctions", "epargnes", "erreurs")}
+                          | {"quand": int(time.time())})
         except Exception as ex:
             _signaler("E6", "bilan de la réconciliation non gardé", f"serveur={g.id} {type(ex).__name__} {ex}")
     return bilan
+
+
+async def donner_aux_affiches(g, cles, *, cause: str = "installation") -> int:
+    """Les rôles de ces métiers (déjà liés) donnés aux membres du clan dont l'affiche les porte (parmi ses N premiers
+    métiers), avec l'attribution automatique — rien n'est retiré ni créé ; une sanction en cours : rien. → le nombre
+    de rôles donnés."""
+    c = await _cfg(g.id)
+    reg, clan = reglages_de(c), await role_du_clan(g, c)
+    cles = set(cles or ())
+    if clan is None or not reg["auto"] or not cles or not affiches._peut_gerer_roles(g):
+        return 0
+    sanctionnes = await _sanctionnes_de(g)
+    if sanctionnes is None:
+        return 0
+    liens = await _liens_metiers(g.id)
+    donnes = 0
+    for a in await affiches._affiches(g.id):
+        m = g.get_member(int(a["membre_id"])) if a["membre_id"] and not a["retire_le"] else None
+        if m is None or getattr(m, "bot", False) or not _du_clan(m, clan) or m.id in sanctionnes:
+            continue
+        voulus = [k for k in list(dict.fromkeys(a["attributs"].get(TYPE) or []))[:reg["max"]] if k in cles and k in liens]
+        roles = [r for r in (g.get_role(liens[k]) for k in voulus) if r is not None and r.id != clan.id
+                 and r not in m.roles and affiches.refus_role(g, r) is None]
+        if not roles:
+            continue
+        async with _verrou_membre(g.id, m.id):
+            try:
+                await m.add_roles(*roles, reason=f"Rôles des métiers du clan GoRP — {cause}"[:400])
+            except discord.HTTPException as ex:
+                _signaler("E3", "rôles des métiers non donnés", f"serveur={g.id} membre={m.id} {type(ex).__name__} {ex}")
+                continue
+        donnes += len(roles)
+        await _noter(g, "clan.metiers_roles", f"Rôles des métiers de {m.display_name} : "
+                     + ", ".join(f"+{r.name}" for r in roles) + f" ({cause})", membre_id=m.id)
+        await asyncio.sleep(PAUSE_RECONCILIATION)
+    return donnes
+
+
+def planifier_attribution(g, cle: str) -> None:
+    """Un métier vient d'avoir son rôle (créé ou lié sur le site) : donné tout de suite, en fond, à ceux qui l'ont."""
+    if g is None or not pret():
+        return
+
+    async def _faire():
+        try:
+            await donner_aux_affiches(g, {cle}, cause="rôle lié sur le site")
+        except Exception as ex:
+            _signaler("E3", "rôles des métiers non donnés", f"serveur={g.id} {cle} {type(ex).__name__} {ex}")
+    t = asyncio.create_task(_faire())
+    _taches.add(t)
+    t.add_done_callback(_taches.discard)
 
 
 def phrase_bilan(b: dict) -> str:
@@ -992,9 +1047,10 @@ async def etat(g) -> dict:
     reg = reglages_de(c)
     clan = await role_du_clan(g, c)
     liens = await _liens_metiers(g.id)
-    exclus = set(liens.values()) | ({clan.id} if clan is not None else set())
+    #  Tous les rôles attribuables, sauf le rôle du clan : la page s'en sert pour les rôles rattachés ET pour le rôle de
+    #  chaque métier (le rôle déjà lié doit y figurer).
     disponibles = [_role_sortie(r) for r in sorted(getattr(g, "roles", []) or [], key=lambda r: -int(r.position))
-                   if r.id not in exclus and affiches.refus_role(g, r) is None]
+                   if (clan is None or r.id != clan.id) and affiches.refus_role(g, r) is None]
     par_metier: dict = {}
     for a in await affiches._affiches(g.id):
         if not a["retire_le"]:
@@ -1004,7 +1060,7 @@ async def etat(g) -> dict:
     for e in await metiers_du_catalogue(actifs=False):
         role = g.get_role(liens[e["cle"]]) if e["cle"] in liens else None
         metiers.append({"cle": e["cle"], "nom": e["nom"], "nom_en": e["nom_en"], "actif": bool(e["actif"]),
-                        "categorie": e["categorie"], "icone": e["icone"], "role_nom": nom_du_role(e),
+                        "categorie": e["categorie"], "icone": affiches._icone_servie(e["icone"]), "role_nom": nom_du_role(e),
                         "couleur": f"#{couleur_du_role(e):06x}", "role": _role_sortie(role),
                         "lie": e["cle"] in liens, "attribuable": role is not None and affiches.refus_role(g, role) is None,
                         "affiches": par_metier.get(e["cle"], 0)})
@@ -1029,7 +1085,6 @@ async def _valider_rattaches(g, c: dict, v) -> list:
     if not isinstance(v, list) or len(v) > RATTACHES_MAX:
         raise affiches.Invalide("rattaches", f"Une liste de {RATTACHES_MAX} rôles au plus.")
     clan = await role_du_clan(g, c)
-    lies = set((await _liens_metiers(g.id)).values())
     out = []
     for x in v:
         rid = affiches._identifiant(x, "rattaches")
@@ -1038,9 +1093,7 @@ async def _valider_rattaches(g, c: dict, v) -> list:
             raise affiches.Invalide("rattaches", "Un de ces rôles n'existe plus.")
         if clan is not None and r.id == clan.id:
             raise affiches.Invalide("rattaches", "Le rôle du clan lui-même ne se rattache pas.")
-        if r.id in lies:
-            raise affiches.Invalide("rattaches", f"« {r.name} » est déjà le rôle d'un métier.")
-        refus = affiches.refus_role(g, r)
+        refus = affiches.refus_role(g, r)   # le rôle d'un métier coché aussi : accepté (il part déjà avec le clan)
         if refus is not None:
             raise affiches.Invalide("rattaches", f"« {r.name} » : {refus}")
         if r.id not in out:
@@ -1082,40 +1135,58 @@ async def route_regler(g, auteur, requete, corps):
     return 200, dict(nouveau, ok=True, _journal=phrase if changes else None)
 
 
+def _sans_zeros(d: dict, toujours=()) -> dict:
+    """La page (`bilanLisible`) compte chaque nombre et chaque liste d'un bilan : les zéros et les listes vides n'y vont
+    pas (« Rien à changer » plutôt que « 0 rôle retiré · 0 rôle rendu »)."""
+    return {k: v for k, v in d.items() if k in toujours or (v if isinstance(v, (int, list)) else True)}
+
+
 async def route_installer(g, auteur, requete, corps):
     """`POST rell/metiers/installer` : d'un coup, un rôle pour chaque métier actif qui n'en a pas (créé, ou relié à un
-    rôle du même nom) — sans le donner à personne. Ils se rangent dans l'ordre du catalogue, sous le rôle du clan."""
+    rôle du même nom), rangés dans l'ordre du catalogue sous le rôle du clan ; puis, avec l'attribution automatique,
+    donnés aux membres du clan dont l'affiche porte ces métiers (rien n'est retiré). → `{"crees", "lies", "deja",
+    "donnes", "erreurs"}` (les comptes que lit la page, sans zéro) et `message`."""
     if await role_du_clan(g) is None:
         return 409, {"erreur": "Règle d'abord le rôle du clan (/configure → Rell Seas)."}
     if not affiches._peut_gerer_roles(g):
         return 403, {"erreur": "Il me manque la permission « Gérer les rôles »."}
-    sortie = {"crees": [], "relies": [], "deja": [], "echecs": []}
+    sortie = {"crees": [], "lies": [], "deja": [], "erreurs": []}
     raisons = {"refuse": "Le rôle lié ne peut pas être donné (hiérarchie ou droits).", "droits": "Permission manquante.",
                "echec": "Discord a refusé de créer le rôle.", "inconnu": "Métier inconnu ou retiré."}
     #  Du dernier au premier : chacun se pose juste sous le rôle du clan, le premier métier finit le plus haut.
     for e in reversed(await metiers_du_catalogue()):
         role, quoi = await role_du_metier(g, e["cle"], creer=True, auteur=auteur)
         if role is None:
-            sortie["echecs"].append({"cle": e["cle"], "nom": e["nom"], "raison": raisons.get(quoi, quoi)})
+            sortie["erreurs"].append({"cle": e["cle"], "nom": e["nom"], "raison": raisons.get(quoi, quoi)})
         else:
-            sortie[{"cree": "crees", "relie": "relies"}.get(quoi, "deja")].append(
+            sortie[{"cree": "crees", "relie": "lies"}.get(quoi, "deja")].append(
                 {"cle": e["cle"], "role_id": str(role.id), "nom": role.name})
     for k in sortie:
         sortie[k].reverse()
-    if sortie["crees"] or sortie["relies"]:
+    if sortie["crees"] or sortie["lies"]:
         planifier_guide(g)
-    phrase = (f"Rôles des métiers installés : {len(sortie['crees'])} créé(s), {len(sortie['relies'])} relié(s), "
-              f"{len(sortie['deja'])} déjà là" + (f", {len(sortie['echecs'])} en échec" if sortie["echecs"] else ""))
-    return 200, dict(sortie, ok=True, metiers=(await etat(g))["metiers"],
-                     _journal=phrase if (sortie["crees"] or sortie["relies"] or sortie["echecs"]) else None)
+    auto = (await reglages(g))["auto"]
+    donnes = await donner_aux_affiches(g, {x["cle"] for x in sortie["crees"] + sortie["lies"] + sortie["deja"]}) \
+        if auto else 0
+    message = "" if auto else ("Attribution automatique sur NON : les rôles sont prêts, donnés à personne (« Appliquer »"
+                               " sur chaque affiche).")
+    phrase = (f"Rôles des métiers installés : {len(sortie['crees'])} créé(s), {len(sortie['lies'])} relié(s), "
+              f"{len(sortie['deja'])} déjà là, {donnes} donné(s)"
+              + (f", {len(sortie['erreurs'])} en échec" if sortie["erreurs"] else ""))
+    journal = phrase if (sortie["crees"] or sortie["lies"] or sortie["erreurs"] or donnes) else None
+    return 200, dict(_sans_zeros(dict(sortie, donnes=donnes)), ok=True, message=message, _journal=journal)
 
 
 async def route_reconcilier(g, auteur, requete, corps):
-    """`POST rell/metiers/reconcilier` : la réconciliation tout de suite → son bilan."""
+    """`POST rell/metiers/reconcilier` : la réconciliation tout de suite → `{"bilan": {"verifies", "retires", "rendus",
+    "crees", "ignores", "erreurs"}, "detail", "message"}` (le bilan dans les mots de la page, sans zéro)."""
     if await role_du_clan(g) is not None and not affiches._peut_gerer_roles(g):
         return 403, {"erreur": "Il me manque la permission « Gérer les rôles »."}
-    bilan = await reconcilier(g, auteur=auteur)
-    if not bilan["actif"]:
-        return 409, {"erreur": bilan.get("raison") or "Indisponible."}
-    return 200, {"ok": True, "bilan": bilan, "message": phrase_bilan(bilan),
-                 "_journal": f"{phrase_bilan(bilan)} (lancé depuis le site)"}
+    b = await reconcilier(g, auteur=auteur)
+    if not b["actif"]:
+        return 409, {"erreur": b.get("raison") or "Indisponible."}
+    bilan = _sans_zeros({"verifies": b["verifies"], "retires": b["retires"], "rendus": b["rendus"], "crees": b["crees"],
+                         "ignores": b["sanctions"] + b["epargnes"], "erreurs": b["erreurs"]}, toujours=("verifies",))
+    detail = {k: b[k] for k in ("anciens", "membres", "sanctions", "epargnes", "details")}
+    return 200, {"ok": True, "bilan": bilan, "detail": detail, "message": b.get("raison") or "",
+                 "_journal": f"{phrase_bilan(b)} (lancé depuis le site)"}
