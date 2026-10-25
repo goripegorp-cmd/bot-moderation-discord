@@ -13,6 +13,8 @@
 // Lancer (maquette démarrée : python outils/site_maquette.py) :
 //   node outils/controle_site.mjs [--url http://localhost:8791/tableau/espace/] [--sortie <dossier>] [--scenes a,b]
 //                                 [--tailles 375x812,1366x768] [--hors-ligne] [--seulement-hors-ligne] [--navigateur <exe>]
+//   Le VRAI site local (python outils/site_local.py) : ajouter --url http://localhost:8790/tableau/espace/
+//                                 --entree http://localhost:8790/tableau/demo   (pose la session d'abord)
 
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, rmSync, mkdtempSync } from "node:fs";
@@ -61,7 +63,9 @@ const SCENES = [
   // Les fenêtres (pancartes)
   { nom: "fenetre-fiche", ancre: "#port/sanctions", geste: "document.querySelector('.feuillet.lien').click()" },
   { nom: "fenetre-conversation", ancre: "#port/tickets", geste: "[...document.querySelectorAll('button')].find(b => b.textContent.includes('Conversation')).click()" },
-  { nom: "fenetre-affiche", ancre: "#capitainerie/affiches", geste: OUVRIR_AFFICHE },
+  // « Membre parti » pour l'auteur d'une affiche de démonstration (créée par la tête) : la page ne sait pas lire la
+  // personne envoyée par le serveur (25/10 : `cree_par` est un objet { id, nom }, P() attendait un identifiant).
+  { nom: "fenetre-affiche", ancre: "#capitainerie/affiches", geste: OUVRIR_AFFICHE, interdits: ["Membre parti", "[object Object]"] },
   { nom: "fenetre-editeur-affiche", ancre: "#capitainerie/affiches", geste: "[...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle affiche')).click()" },
   { nom: "fenetre-dossier-etape1", ancre: "#equipage/candidatures", geste: "[...document.querySelectorAll('.feuillet.lien')].find(x => x.textContent.includes('Étape 1')).click()" },
   { nom: "fenetre-dossier-correction", ancre: "#equipage/candidatures", geste: "[...document.querySelectorAll('.feuillet.lien')].find(x => x.textContent.includes('à corriger')).click()" },
@@ -241,6 +245,7 @@ async function controlerScene(o, scene, [l, hh]) {
   if (scene.geste) { try { await evaluer(o, scene.geste); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
   if (scene.geste2) { try { await evaluer(o, scene.geste2); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
   const res = await evaluer(o, CONTROLE);
+  const texteVu = scene.interdits ? await evaluer(o, "(document.querySelector('dialog[open]') || document.body).innerText") : "";
   const fichier = join(SORTIE, `${scene.nom}-${l}x${hh}.png`);
   await capture(o, fichier);
   const fautes = [];
@@ -255,6 +260,7 @@ async function controlerScene(o, scene, [l, hh]) {
   for (const x of (res.suspects || []).slice(0, 4)) fautes.push(`valeur absente affichée : ${x}`);
   for (const x of res.violations.slice(0, 4)) fautes.push(`violation CSP : ${x.directive} (${x.source}:${x.ligne})`);
   for (const x of [...new Set(erreursCourantes)].slice(0, 6)) fautes.push(x);
+  for (const x of scene.interdits || []) if (texteVu.includes(x)) fautes.push(`texte interdit affiché : « ${x} »`);
   const nb = { sortants: res.sortants.length, conteneurs: res.conteneurs.length, textes: res.textes.length, petits: res.petits.length };
   rapport.scenes.push({ scene: scene.nom, taille: `${l}x${hh}`, capture: fichier, fautes, nb, icones: res.icones });
   console.log(`${fautes.length ? "ÉCHEC " : "ok    "} ${scene.nom.padEnd(30)} ${String(l + "x" + hh).padEnd(10)} ${fautes.length ? fautes.length + " faute(s)" : ""}`);
@@ -351,6 +357,11 @@ async function principal() {
     await connecter(nav.wsUrl);
     brancherConsole();
     const o = await nouvelOnglet();
+    // --entree : une adresse ouverte d'abord (le vrai site local : /tableau/demo pose la session), puis les scènes.
+    if (opt("entree", "")) {
+      await o.s("Page.navigate", { url: String(opt("entree")) });
+      await pause(1500);
+    }
     if (!opt("seulement-hors-ligne", false)) {
       const filtre = opt("scenes", "") ? String(opt("scenes")).split(",") : null;
       for (const scene of SCENES.filter((s) => !filtre || filtre.some((f) => s.nom.includes(f)))) {

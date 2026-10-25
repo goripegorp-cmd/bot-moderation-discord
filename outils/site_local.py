@@ -202,6 +202,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     import clan
     import entraide
     import health_server
+    import questionnaire
     import questions
     import recrutements
     import registre
@@ -275,6 +276,35 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     annonces.setup(get_db=get_db, cfg=cfg, db_set=db_set, est_tete=a_la_tete, journal=journal,
                    role_clan=lambda _g, _c: clan_r, log=silence)
 
+    #  Le recrutement en deux étapes (questionnaire.py), branché comme l'étape « questionnaire » du bot. Les tickets
+    #  ouverts sont des fils de démonstration (les cartes y sont « postées » sans rien envoyer à Discord) ; décider
+    #  ferme le ticket de la base locale.
+    fils_tickets: dict = {}
+
+    async def ticket_ouvert(_g, tid):
+        async with get_db() as db:
+            async with db.execute("SELECT user_id, claimed_by, answers, panel_id FROM tickets WHERE id=? AND guild_id=?"
+                                  " AND status='open'", (int(tid), SERVEUR_ID)) as cur:
+                r = await cur.fetchone()
+        if r is None:
+            return None, None
+        if int(tid) not in fils_tickets:
+            fils_tickets[int(tid)] = await salon_annonces.create_thread(name=f"ticket-{int(tid)}")
+        try:
+            reponses = json.loads(r[2]) if r[2] else {}
+        except ValueError:
+            reponses = {}
+        return fils_tickets[int(tid)], {"id": int(tid), "user": r[0], "claimed": r[1] or 0, "answers": reponses,
+                                        "panel_id": r[3] or ""}
+
+    async def decider(_g, tid, auteur, accepte, motif=""):
+        async with get_db() as db:
+            await db.execute("UPDATE tickets SET status='closed' WHERE id=? AND guild_id=?", (int(tid), SERVEUR_ID))
+            await db.commit()
+        return True, "Candidature acceptée : rôle donné, ticket fermé." if accepte else "Candidature refusée : ticket fermé."
+    questionnaire.setup(get_db=get_db, cfg=cfg, panneaux=rellseas_panneau.panneaux_tickets, ticket_ouvert=ticket_ouvert,
+                        decider=decider, autorise=lambda _i: True, journal=journal, log=silence)
+
     async def alerte(_g, m, raison, suspendu=True):
         print(f"[SITE LOCAL] alerte de sécurité : {m.display_name} — {raison}")
 
@@ -290,9 +320,11 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
                   autorise_membre=a_la_tete, direction=a_la_tete, tete=TETE, alerte_securite=alerte,
                   conversation=conversation, log=print)
     for module in (registre, recrutements, questions, vigilance, clan, casier, sondages, suggestions, entraide,
-                   annonces, tableau):
+                   annonces, tableau, questionnaire):
         await module.init_db()
     await _tables_du_bot(get_db)
+    tableau.monter(questionnaire.ROUTES_SITE)
+    tableau.ajouter_regle(**questionnaire.REGLE_NETTOYAGE)
 
     affiches.setup(get_db=get_db, log=print)
     await affiches.init_db()
@@ -318,6 +350,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
             print(f"[SITE LOCAL] événements non branchés : {type(ex).__name__} {ex}")
 
     await _remplir(get_db, g, clan_r, salon_annonces, X)
+    await _recrutement_demo(get_db, g, ticket_ouvert)
     await _affiches_demo(g, X)
 
     app = health_server.construire_app()
@@ -442,6 +475,54 @@ async def _remplir(get_db, g, clan_r, salon_annonces, X) -> None:
                               salon_annonces.id, f"{cat} : {m.display_name}", "", gravite))
             await db.commit()
     registre._derniers.clear()
+
+
+async def _recrutement_demo(get_db, g, ticket_ouvert) -> None:
+    """Quatre candidatures du clan, jouées par le VRAI module (questionnaire.py) : une à l'étape 1, un questionnaire
+    envoyé sans réponse, des réponses à corriger (justes, approchées, fausses), une correction commencée."""
+    import questionnaire
+    chef = g.get_member(FONDATEUR)
+    maintenant = time.time()
+    candidats = [m for m in g.members if m.id not in TETE and not m.bot][14:18]
+    async with get_db() as db:
+        for k, m in enumerate(candidats):
+            await db.execute("INSERT INTO tickets VALUES (?,?,?,?,?,?,?,?,?)",
+                             (41 + k, SERVEUR_ID, 6041 + k, m.id, "p1", FONDATEUR, "open",
+                              json.dumps({"Pseudo Roblox": f"{m.display_name.split()[0]}_RS",
+                                          "Niveau": str(24 + 11 * k)}),
+                              _date(maintenant - (4 - k) * 5400)))
+        await db.commit()
+    for k, m in enumerate(candidats):
+        ch, _tk = await ticket_ouvert(g, 41 + k)
+        await questionnaire.poser_etape1(g, ch, 41 + k, m.id, nombre=await questionnaire.annonce(g.id))
+    for tid in (42, 43, 44):
+        st, rep = await questionnaire.envoyer(g, tid, chef, {}, depuis="etape1")
+        if st != 200:
+            print(f"[SITE LOCAL] questionnaire de démonstration non envoyé : {rep}")
+            return
+    for tid in (43, 44):
+        e = next(x for x in await questionnaire._envois_du_ticket(g.id, tid) if x["statut"] == "envoye")
+        textes = {}
+        for n, q in enumerate(e["questions"]):
+            juste = str(q.get("reponse") or "")
+            if n % 4 == 1 and len(juste) > 4:
+                textes[int(q["rang"])] = juste[:-2] + juste[-1]           # approchée : une lettre oubliée
+            elif n % 5 == 3:
+                textes[int(q["rang"])] = "Je ne sais pas"
+            else:
+                textes[int(q["rang"])] = juste or "?"
+        if not await questionnaire._garder_page(e, textes):
+            print("[SITE LOCAL] réponses de démonstration refusées")
+            return
+        t = int(time.time())
+        async with get_db() as db:   # ce que fait `_terminer` quand la dernière page arrive
+            await db.execute("UPDATE recrutement_envois SET statut='repondu', repondu_le=? WHERE id=?", (t, e["id"]))
+            await db.execute("UPDATE recrutement_suivi SET etape='reponses', maj_le=? WHERE guild_id=? AND ticket_id=?",
+                             (t, g.id, tid))
+            await db.commit()
+        if tid == 44:   # une correction commencée : les trois premières réponses cochées
+            for q in e["questions"][:3]:
+                await questionnaire.corriger(g, chef, {"envoi": e["id"], "question": q["id"], "juste": True})
 
 
 async def _affiches_demo(g, X) -> None:
