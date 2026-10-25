@@ -139,6 +139,7 @@ class Site:
         monkeypatch.setattr(tableau, "_SOURCES_MEDIAS", [])
         monkeypatch.setattr(tableau, "RACINE_DONNEES", tmp_path / "donnees")
         monkeypatch.setattr(tableau, "SITE", tmp_path / "site")
+        affiches._PRESENTES.clear()
         monkeypatch.setattr(transcript_store, "_BASE_DIR", str(tmp_path / "transcripts"))
         tableau._statiques.clear()
         tableau._page_site.clear()
@@ -363,7 +364,9 @@ def test_V3_cadence_et_limites_graves(tmp_path, monkeypatch):
     tete, intrus = site.biscuit(DIRECTION), site.biscuit(9)
 
     async def scenario(c):
-        cadence = [(await c.post("/tableau/espace/api/t/ecrire", json={}, headers=tete)).status for _ in range(6)]
+        reponses = [await c.post("/tableau/espace/api/t/ecrire", json={}, headers=tete) for _ in range(6)]
+        cadence = [r.status for r in reponses]
+        assert reponses[-1].headers.get("Retry-After") == "60" and "Retry-After" not in reponses[0].headers,             "un refus de cadence dit quand réessayer"
         monkeypatch.setattr(tableau, "LIMITE_ECRITURES", 1000)
         tableau._cadence.clear()
         graves_tete = [(await c.post("/tableau/espace/api/t/role", json={}, headers=tete)).status for _ in range(27)]
@@ -694,6 +697,9 @@ def test_V9_catalogue_de_depart_ajoute_suit_et_ne_remplace_jamais_le_site(site, 
 
 def test_V10_catalogue_sur_le_site_versions_conflits_et_validation(site):
     site.catalogue()
+    icone = tableau.SITE / "icones" / "rell" / "metier" / "canonnier.webp"   # l'icône existe : elle est servie
+    icone.parent.mkdir(parents=True, exist_ok=True)
+    icone.write_bytes(b"RIFF")
     avec = site.biscuit()
 
     async def post(c, api, corps):
@@ -1447,3 +1453,38 @@ def test_V21_les_purges_et_les_images_des_evenements_dans_le_nettoyage(site):
     #  Rebranché (le bot redémarre l'étape) : rien en double, la règle déjà réglée reste.
     affiches.brancher_evenements(module)
     assert list(tableau.REGLES).count("evenements_passes") == 1
+
+
+def test_V9b_le_vrai_catalogue_de_depart_entre_en_entier(site, monkeypatch):
+    """25/10 : le fichier écrit par outils/icones_rellseas.py donnait « icones/rell/… » alors que le serveur exige
+    « s/icones/… » : les 144 éléments illustrés étaient écartés au démarrage, sans bruit. Le VRAI fichier entre en
+    entier, et chaque icône annoncée existe dans site/."""
+    monkeypatch.setattr(tableau, "SITE", RACINE / "site")
+    affiches._PRESENTES.clear()
+    vrai = RACINE / "donnees_jeu" / "rell_catalogue.json"
+    depart = json.loads(vrai.read_text(encoding="utf-8"))
+    bilan = asyncio.run(affiches.charger_depart(vrai))
+    assert bilan["refuses"] == 0, bilan
+    assert bilan["elements"] == len(depart["elements"]) and bilan["types"] == len(depart["types"]), bilan
+    cat = asyncio.run(affiches.catalogue())
+    illustres = [e for e in cat["elements"] if e["icone"]]
+    assert len(illustres) >= 140
+    for e in illustres:
+        assert e["icone"].startswith("s/") and (RACINE / "site" / e["icone"][2:]).is_file(), e["icone"]
+
+
+def test_V9c_une_icone_absente_de_site_part_vide(site, tmp_path, monkeypatch):
+    """Une icône annoncée mais absente de site/ : le catalogue l'envoie vide (la page dessine la pastille gravée)."""
+    monkeypatch.setattr(tableau, "SITE", RACINE / "site")
+    affiches._PRESENTES.clear()
+    depart = json.loads(EXEMPLE.read_text(encoding="utf-8"))
+    depart["elements"].append({"type": "metier", "cle": "fantome", "nom": "Fantôme",
+                               "icone": "s/icones/rell/metier/fantome_absent.webp"})
+    vraie = next(e for e in json.loads((RACINE / "donnees_jeu" / "rell_catalogue.json").read_text(encoding="utf-8"))["elements"]
+                 if e["icone"])
+    depart["elements"].append({"type": "metier", "cle": "illustre", "nom": "Illustré", "icone": vraie["icone"]})
+    fichier = tmp_path / "depart.json"
+    fichier.write_text(json.dumps(depart), encoding="utf-8")
+    assert asyncio.run(affiches.charger_depart(fichier))["refuses"] == 0
+    par_cle = {e["cle"]: e for e in asyncio.run(affiches.catalogue())["elements"]}
+    assert par_cle["fantome"]["icone"] == "" and par_cle["illustre"]["icone"] == vraie["icone"]

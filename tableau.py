@@ -1166,9 +1166,16 @@ async def exporter(g, quoi: str, auteur, jours: int = 30, membre: int = 0, categ
 
 # ─── Les routes (servies par health_server) ─────────────────────────────────
 
+#  Un refus de cadence (429) dit QUAND réessayer : les cadences du site comptent sur une minute glissante, la page
+#  (et sa file hors ligne) attend ce délai au lieu de marteler le serveur.
+REESSAYER_S = 60
+
+
 def _json(corps, status: int = 200, etag: str | None = None):
     from aiohttp import web
     entetes = dict(ENTETES, **({"ETag": etag} if etag else {}))
+    if status == 429:
+        entetes["Retry-After"] = str(REESSAYER_S)
     r = web.Response(body=json.dumps(corps, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8"),
                      status=status, content_type="application/json", headers=entetes)
     r.enable_compression()
@@ -1178,6 +1185,8 @@ def _json(corps, status: int = 200, etag: str | None = None):
 def _html(texte: str, status: int = 200, nonce: str | None = None):
     from aiohttp import web
     entetes = dict(ENTETES)
+    if status == 429:
+        entetes["Retry-After"] = str(REESSAYER_S)
     if nonce:
         entetes["Content-Security-Policy"] = ENTETES["Content-Security-Policy"].replace(
             "script-src 'none'", f"script-src 'nonce-{nonce}'")

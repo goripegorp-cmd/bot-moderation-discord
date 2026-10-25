@@ -448,17 +448,33 @@ async def _affiches_demo(g, X) -> None:
     """Quelques affiches (et des portraits dessinés ici, à défaut de Roblox), un rôle de métier lié."""
     import affiches
     import tableau
+    #  Les clés viennent du catalogue chargé (le vrai, donnees_jeu/rell_catalogue.json, ou l'exemple des tests) :
+    #  une affiche de démonstration n'invente jamais un élément du jeu.
+    par_type: dict = {}
+    for e in (await affiches.catalogue())["elements"]:
+        if e["actif"]:
+            par_type.setdefault(e["type"], []).append(e["cle"])
+
+    def cle(type_, *voulues):
+        dispo = par_type.get(type_, [])
+        return next((k for k in voulues if k in dispo), dispo[0] if dispo else None)
+
+    def attributs(**voulus):
+        out = {t: [k for k in (cle(t, *v) for v in listes) if k] for t, listes in voulus.items()}
+        return {t: list(dict.fromkeys(ks)) for t, ks in out.items() if ks}
+
     corps = [
         {"id": "demo-kolax-01", "membre_id": "1000", "roblox_nom": "Kolax_RS", "roblox_id": "1000001", "surnom": "Le Requin",
          "prime": 1_500_000, "niveau": 72, "grade": "Second", "statut": "actif",
-         "attributs": {"race": ["humain"], "metier": ["navigateur", "canonnier"], "faction": ["pirates"]},
+         "attributs": attributs(race=[("human", "humain")], metier=[("navigation", "navigateur"), ("shipwright", "canonnier")],
+                                faction=[("pirates",)]),
          "notes": "Toujours à l'heure aux raids."},
         {"id": "demo-mira-002", "membre_id": "1001", "roblox_nom": "Mira_RS", "roblox_id": "1000002", "surnom": "L'Écume",
          "prime": 640_000, "niveau": 41, "grade": "Matelot", "statut": "actif",
-         "attributs": {"race": ["triton"], "metier": ["charpentier"], "faction": ["pirates"]}},
+         "attributs": attributs(race=[("marinian", "triton")], metier=[("fishing", "charpentier")], faction=[("pirates",)])},
         {"id": "demo-calico03", "membre_id": "1004", "roblox_nom": "Calico_Jack", "roblox_id": "1000003",
          "surnom": "Calico", "prime": 90_000, "niveau": 12, "grade": "Mousse", "statut": "nouveau",
-         "attributs": {"metier": ["cuisinier"], "faction": ["marine"]}},
+         "attributs": attributs(metier=[("cooking", "cuisinier")], faction=[("marines", "marine")])},
     ]
     chef = g.get_member(FONDATEUR)
     for c in corps:
@@ -477,7 +493,7 @@ async def _affiches_demo(g, X) -> None:
     except Exception as ex:  # outil local : sans Pillow, les affiches n'ont pas de portrait
         print(f"[SITE LOCAL] portraits de démonstration non dessinés : {type(ex).__name__} {ex}")
     metier = g.role("Navigateur", 6, couleur=0x1F4E5A)
-    await affiches._route_role(g, chef, {}, {"type": "metier", "cle": "navigateur", "role_id": str(metier.id),
+    await affiches._route_role(g, chef, {}, {"type": "metier", "cle": cle("metier", "navigation", "navigateur"), "role_id": str(metier.id),
                                              "auto": True})
 
 

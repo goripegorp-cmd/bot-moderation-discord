@@ -1250,7 +1250,7 @@ def catalogue(produits: dict) -> dict:
         elements.append({
             "type": e["type"], "cle": e["cle"], "nom": e["nom"], "nom_en": e["nom_en"],
             "description": e["description"], "categorie": e["categorie"], "rarete": e["rarete"],
-            "icone": f"icones/rell/{e['type']}/{e['cle']}.webp" if a_icone else "",
+            "icone": f"s/icones/rell/{e['type']}/{e['cle']}.webp" if a_icone else "",
             "statut": e["statut"], "source": e["source"], "ordre": rangs[e["type"]], "actif": True,
             "nouveau_movie3": e["nouveau_movie3"], "version": 1,
         })
@@ -1523,10 +1523,10 @@ def verifier_tout() -> list[str]:
             err.append(f"{nom} : émoji interdit")
         ordres.setdefault(e["type"], []).append(e["ordre"])
         if e["icone"]:
-            attendu = f"icones/rell/{e['type']}/{e['cle']}.webp"
+            attendu = f"s/icones/rell/{e['type']}/{e['cle']}.webp"   # la forme de la spécification §2.4
             if e["icone"] != attendu:
                 err.append(f"{nom} : icone {e['icone']!r} (attendu {attendu!r})")
-            fichier = SITE / e["icone"]
+            fichier = SITE / e["icone"].removeprefix("s/")
             icones_attendues.add(fichier.resolve())
             try:
                 with Image.open(fichier) as im:

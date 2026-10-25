@@ -15167,6 +15167,7 @@ async def _etat_public():
             "cadeaux_avis": next((c['cadeaux_avis_v1'] for c in confs if c.get('cadeaux_avis_v1')), None),
             "accueil": dict(_DERNIER_ACCUEIL) or None,
             "demarrage": {"etapes_ratees": list(_Etape.ratees)},
+            "catalogue_depart": dict(affiches.DERNIER_DEPART) or None,
             "tickets_vus": dict(_TICKETS_VUS) or None,
             "erreurs_bot": diag.releve("bot"),
             "entraide_suivi": entraide.releve(),
