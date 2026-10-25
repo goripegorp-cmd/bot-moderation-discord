@@ -110,6 +110,7 @@ import notifs  # rôles de notification pris d'un clic
 import visuels  # bandeaux animés des menus, icônes des boutons
 import config_salons  # @everyone voit tout sauf le réservé ; communautaire ouvert
 import recrutements  # suivi des candidatures Rell Seas, bilan du mois
+import questionnaire  # le recrutement du clan en deux étapes : banque de questions, cartes du ticket, site
 import registre  # le journal du serveur, lu sur le site (19/10/2026)
 import questions  # les questions posées dans les salons publics (onglet du site)
 import publications  # une publication des réseaux = un seul message (réservation atomique)
@@ -6315,6 +6316,28 @@ async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif:
                   else "Candidature refusée : ticket fermé.")
 
 
+async def _accueil_recrutement(g, ch, tid: int, candidat_id: int, pnl: dict) -> None:
+    """25/10/2026 (recrutement en deux étapes, questionnaire.py) : l'accueil d'un ticket du clan dit les deux étapes,
+    le nombre de questions de l'étape 2 et les liens où se trouvent les réponses ; la carte de l'étape 1 suit. Le
+    ticket est déjà ouvert : une erreur ici ne le défait jamais — elle est journalisée, et sans la nouvelle carte,
+    l'ancienne carte de décision (accepter, refuser) est posée pour que l'équipe puisse toujours trancher."""
+    n = 0
+    try:
+        accueil, n = await questionnaire.vue_accueil(g, str(pnl.get('welcome_message') or '').strip(),
+                                                     str(pnl.get('name') or ''))
+        await webhook_send(ch, 'ticket', view=accueil, allowed_mentions=discord.AllowedMentions.none())
+    except Exception as ex:
+        _logerr("recrutement.accueil", ex, guild_id=g.id)
+    try:
+        await questionnaire.poser_etape1(g, ch, tid, candidat_id, nombre=n)
+    except Exception as ex:
+        _logerr("recrutement.carte", ex, guild_id=g.id)
+        try:
+            await ch.send(view=recrutements.carte_decision(tid), allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as ex2:
+            _logerr("recrutement.carte_repli", ex2, guild_id=g.id)
+
+
 async def _peut_decider(i) -> bool:
     """Décider d'une candidature : l'équipe /rellseas, ou la direction et au-dessus."""
     if await _rellseas_autorise(i):
@@ -6337,10 +6360,13 @@ async def _action_ticket_fermer(g, auteur, d):
 
 
 async def _action_candidature(g, auteur, d):
-    """19/10/2026 : « ils ne peuvent attribuer de rôle à personne » — le site refuse ou ferme ;
-    accepter (qui donne le rôle du clan) se fait dans le ticket, sur Discord."""
+    """19/10/2026 : « ils ne peuvent attribuer de rôle à personne » — l'ancienne action du site refuse ou ferme.
+    25/10/2026 : accepter passe par le recrutement en deux étapes (questionnaire.py, `recrutement/decision`) : les
+    réponses de l'étape 2 corrigées, puis le circuit de `_decision_recrutement`. Le message le dit (la carte du
+    ticket n'a plus de bouton « Accepter »)."""
     if d.get("decision") == "accepter":
-        return False, "Accepter donne le rôle du clan : le site ne donne aucun rôle. Accepte dans le ticket, sur Discord."
+        return False, ("Cette action ne donne aucun rôle : accepter passe par l'étape 2 — corrige ses réponses dans "
+                       "la rubrique Candidatures du site, puis accepte (rôle du clan, fermeture).")
     return await _decision_recrutement(g, int(d.get("ticket", 0) or 0), auteur, False,
                                        str(d.get("motif") or "").strip())
 
@@ -8555,17 +8581,17 @@ async def _create_ticket_corps(i, pid, ans=None):
         await webhook_send(ch, 'ticket', view=await _vue_dossier_ticket(
             i.guild, tid, i.user.id, panel_name, ans or {}, int(now().timestamp())),
             allowed_mentions=discord.AllowedMentions.none())
-        if str(pid) in rellseas_ui.panneaux_tickets(await cfg(i.guild.id)):
-            try:
-                await ch.send(view=recrutements.carte_decision(tid), allowed_mentions=discord.AllowedMentions.none())
-            except discord.HTTPException as ex:
-                _logerr("recrutement.carte", ex, guild_id=i.guild.id)
-        
+        #  25/10/2026 : le recrutement du clan en deux étapes — l'accueil (les deux étapes, le nombre de questions de
+        #  l'étape 2, les liens des réponses ; le mot du panneau y est repris) puis la carte de l'étape 1.
+        recrutement = str(pid) in rellseas_ui.panneaux_tickets(await cfg(i.guild.id))
+        if recrutement:
+            await _accueil_recrutement(i.guild, ch, tid, i.user.id, pnl)
+
         # ═══════════════════════════════════════════════════════════════════════════════
         #                    👋 MESSAGE D'ACCUEIL PERSONNALISÉ
         # ═══════════════════════════════════════════════════════════════════════════════
         welcome_message = pnl.get('welcome_message', '').strip()
-        if welcome_message:
+        if welcome_message and not recrutement:
             # Le mot d'accueil du panneau, sous le dossier (Components V2 comme le reste).
             accueil = LayoutView(timeout=None)
             accueil.add_item(discord.ui.Container(
@@ -21537,6 +21563,18 @@ async def _activite_boot():
                            decider=_decision_recrutement, autorise=_peut_decider, log=print)
         await recrutements.init_db()
         recrutements.demarrer(bot)
+    with _Etape("questionnaire"):
+        #  25/10/2026 : le recrutement du clan en deux étapes — la banque de questions, les cartes du ticket, les
+        #  adresses du site (Clan GoRP, Candidatures). Les décisions passent par le circuit de `_decision_recrutement`.
+        questionnaire.setup(get_db=get_db, cfg=cfg, panneaux=rellseas_ui.panneaux_tickets, ticket_ouvert=_ticket_ouvert,
+                            decider=_decision_recrutement, autorise=_peut_decider, lien=tableau.lien_pour,
+                            journal=lambda g, type_, texte, **kw: _au_journal(g, "Clan", type_, texte, **kw), log=print)
+        await questionnaire.init_db()
+        if hasattr(tableau, "monter"):
+            tableau.monter(questionnaire.ROUTES_SITE)
+        if hasattr(tableau, "ajouter_regle"):   # la rubrique « Nettoyage » du site : les questionnaires des candidatures fermées
+            tableau.ajouter_regle(**questionnaire.REGLE_NETTOYAGE)
+        await questionnaire.demarrer(bot)
     with _Etape("registre"):
         registre.setup(get_db=get_db, log=print, apres_grave=vigilance.planifier)
         await registre.init_db()
@@ -21731,6 +21769,8 @@ async def on_ready():
                               suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig,
                               recrutements.BoutonTableau, recrutements.BoutonDecision,
                               BoutonAnciensSalons, BoutonGere, BoutonFicheSite, BoutonApprouverBot)
+        #  25/10/2026 : le recrutement en deux étapes — l'étape 1 (équipe), « Répondre » et « Continuer » (candidat).
+        bot.add_dynamic_items(questionnaire.BoutonEtape1, questionnaire.BoutonRepondre, questionnaire.BoutonPage)
         bot.add_dynamic_items(entraide.BoutonNouvelle, entraide.BoutonRejoindre, entraide.BoutonCertifier,
                               entraide.BoutonFermer, entraide.BoutonMiddleman)
         bot.add_dynamic_items(equipages.BoutonPublier, equipages.BoutonRejoindre, equipages.BoutonRecrutement,

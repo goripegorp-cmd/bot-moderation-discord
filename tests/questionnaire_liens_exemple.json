@@ -1,0 +1,12 @@
+{
+  "_note": "Liens d'EXEMPLE pour les tests de questionnaire.py — pas la liste réelle (donnees_jeu/questionnaire_liens.json).",
+  "liens": [
+    {"id": "l-wiki", "titre": "Wiki du jeu", "url": "https://exemple.fandom.com/wiki/Accueil",
+     "description": "Les mers, les métiers, les créatures"},
+    {"id": "l-film", "titre": "Le dernier film (vidéo)", "url": "https://www.youtube.com/watch?v=exemple",
+     "description": "Avec le minutage de chaque scène"},
+    {"titre": "Guide du clan", "url": "https://discord.com/channels/1/2", "description": "Les règles et les salons"},
+    {"titre": "Lien refusé (http)", "url": "http://exemple.com"},
+    {"titre": "", "url": "https://exemple.com/sans-titre"}
+  ]
+}
