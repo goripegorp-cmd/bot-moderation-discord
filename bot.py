@@ -8255,6 +8255,7 @@ def _equipe_disponible(g, c, tk) -> list:
 #  25/10/2026 : qui doit voir un ticket dans SA liste — les comptes de tête présents et l'équipe du type.
 EQUIPE_TICKET_MAX = 30
 _TICKETS_VUS: dict = {}                 # /stats « tickets_vus » : le dernier ticket ouvert et la vérification des ouverts
+_COMPTES_SUPPRIMES: set = set()         # Discord 10013 « Unknown User » : un compte supprimé qui garde un rôle
 _TACHES_TICKETS_VUS: set = set()
 
 
@@ -8269,7 +8270,7 @@ def _equipe_a_voir(g, c, pid, ouvreur_id: int = 0) -> tuple:
         gens += sorted((m for m in r.members if not m.bot), key=lambda m: m.id)
     vus, out = set(), []
     for m in gens:
-        if m.id in vus or m.id == int(ouvreur_id or 0):
+        if m.id in vus or m.id == int(ouvreur_id or 0) or m.id in _COMPTES_SUPPRIMES:
             continue
         vus.add(m.id)
         out.append(m)
@@ -8293,7 +8294,7 @@ async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0, carte: bool = Tru
     de salons — SANS notification : la carte est posée sans mention puis modifiée pour mentionner (une
     modification ne prévient personne, et Discord ajoute au fil privé qui y est mentionné). Ensuite on vérifie
     les membres du fil : qui manque encore est ajouté un par un. Rend {cibles, par_mention, un_par_un, erreurs}."""
-    out = {"cibles": 0, "par_mention": 0, "un_par_un": 0, "erreurs": 0, "detail": []}
+    out = {"cibles": 0, "par_mention": 0, "un_par_un": 0, "erreurs": 0, "inconnus": 0, "detail": []}
     if not isinstance(fil, discord.Thread):
         return out          # un ticket en salon classique est déjà dans la liste de qui y a droit
     c = await cfg(g.id)
@@ -8332,6 +8333,10 @@ async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0, carte: bool = Tru
             await fil.add_user(m)
             out["un_par_un"] += 1
         except discord.HTTPException as ex:
+            if isinstance(ex, discord.NotFound) and getattr(ex, "code", 0) == 10013:
+                _COMPTES_SUPPRIMES.add(m.id)   # un compte supprimé : rien à faire, ni à retenter
+                out["inconnus"] += 1
+                continue
             out["erreurs"] += 1
             qui = "fondateur" if m.id == g.owner_id else ("direction" if m.id in TETE_IDS else "equipe")
             out["detail"].append(_echec(ex, "ajout", qui))
@@ -8398,8 +8403,8 @@ async def _verifier_tickets_ouverts(g, carte: bool = True, cle: str = "verificat
             continue
         r = await _faire_voir_ticket(g, fil, pid, uid, carte=carte)
         bilan["completes"] += 1
-        for k in ("par_mention", "un_par_un", "erreurs"):
-            bilan[k] += r[k]
+        for k in ("par_mention", "un_par_un", "erreurs", "inconnus"):
+            bilan[k] = bilan.get(k, 0) + r[k]
         bilan["detail"] = (bilan["detail"] + r["detail"])[:12]
         try:
             if g.owner_id not in {tm.id for tm in await fil.fetch_members()}:
