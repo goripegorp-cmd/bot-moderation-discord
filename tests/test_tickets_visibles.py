@@ -59,7 +59,7 @@ class FilTicket(Fil):
 def _ns(g, staff, extras=()):
     ns = {"discord": discord, "LayoutView": LayoutView, "Palette": Palette, "TETE_IDS": {FONDATEUR, DIRECTION},
           "EQUIPE_TICKET_MAX": 30, "_logerr": lambda *a, **k: None}
-    for nom in ("_equipe_a_voir", "_carte_equipe", "_faire_voir_ticket"):
+    for nom in ("_equipe_a_voir", "_carte_equipe", "_faire_voir_ticket", "_echec", "_SansCarte"):
         exec(_source(nom), ns)  # noqa: S102 — code du dépôt
 
     async def cfg(_gid):
@@ -91,7 +91,7 @@ def test_V1_le_fondateur_la_direction_et_l_equipe_entrent_sans_notification():
     assert envoi["allowed_mentions"].users is False or not envoi["allowed_mentions"].users, \
         "la carte part SANS mention : personne n'est notifié"
     assert "<@&500>" in textes(modif["view"]) and f"<@{FONDATEUR}>" in textes(modif["view"])
-    assert r == {"cibles": 3, "par_mention": 3, "un_par_un": 0, "erreurs": 0}
+    assert r == {"cibles": 3, "par_mention": 3, "un_par_un": 0, "erreurs": 0, "detail": []}
 
 
 def test_V2_si_la_mention_ne_suffit_pas_chacun_est_ajoute_un_par_un():
@@ -113,3 +113,21 @@ def test_V3_un_ticket_en_salon_classique_n_est_pas_touche_et_c_est_branche():
     assert "db_set(g.id, 'tickets_vus_v1'" in boucle and "await _verifier_tickets_ouverts(g)" in boucle
     assert '"tickets_vus": dict(_TICKETS_VUS) or None' in SRC
     _ = asyncio
+
+
+def test_V4_une_passe_sans_carte_et_l_echec_dit_ce_qui_casse_sans_identifiant():
+    g, staff = _serveur()
+    ns = _ns(g, staff)
+    fil = FilTicket(g, 9003, None, "ticket-z")
+    fil.entrer_par_mention = False
+
+    async def refus(m):
+        raise discord.Forbidden(Obj(status=403, reason="x"), {"code": 50013, "message": "Missing Permissions"})
+    fil.add_user = refus
+    r = run(ns["_faire_voir_ticket"](g, fil, "1", ouvreur_id=0, carte=False))
+    assert fil.cartes_equipe == [], "aucune carte en plus dans un ticket déjà suivi"
+    assert r["erreurs"] == 4 and r["detail"][:2] == ["ajout:Forbidden:403:50013:fondateur", "ajout:Forbidden:403:50013:direction"]
+    assert all(str(FONDATEUR) not in d and str(DIRECTION) not in d for d in r["detail"])
+    assert "diag.compter('bot', where, ex)" in _source("_logerr") and '"erreurs_bot": diag.releve("bot")' in SRC
+    boucle = _source("entraide_task")
+    assert "db_set(g.id, 'tickets_vus_v2'" in boucle and "carte=False, cle='verification_2'" in boucle

@@ -280,6 +280,7 @@ def _logerr(where: str, ex: Exception, *, context: Optional[dict] = None,
         print(f"[{where}] {type(ex).__name__}: {ex}")
     except Exception:
         pass
+    diag.compter("bot", where, ex)   # 25/10/2026 : /stats « erreurs_bot » — l'endroit et le type, aucun contenu
     try:
         _el = globals().get("error_logger_module")
         if _el is None:
@@ -8281,12 +8282,18 @@ def _carte_equipe(texte: str) -> LayoutView:
     return v
 
 
-async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0) -> dict:
+def _echec(ex, quoi: str, qui: str = "") -> str:
+    """« étape:Type:statut:code[:qui] » — de quoi comprendre un échec, sans aucun identifiant."""
+    return ":".join(str(x) for x in (quoi, type(ex).__name__, getattr(ex, "status", ""), getattr(ex, "code", ""), qui)
+                    if x != "")
+
+
+async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0, carte: bool = True) -> dict:
     """Le fondateur, la direction et l'équipe du type entrent dans le fil du ticket — il apparaît dans leur liste
     de salons — SANS notification : la carte est posée sans mention puis modifiée pour mentionner (une
     modification ne prévient personne, et Discord ajoute au fil privé qui y est mentionné). Ensuite on vérifie
     les membres du fil : qui manque encore est ajouté un par un. Rend {cibles, par_mention, un_par_un, erreurs}."""
-    out = {"cibles": 0, "par_mention": 0, "un_par_un": 0, "erreurs": 0}
+    out = {"cibles": 0, "par_mention": 0, "un_par_un": 0, "erreurs": 0, "detail": []}
     if not isinstance(fil, discord.Thread):
         return out          # un ticket en salon classique est déjà dans la liste de qui y a droit
     c = await cfg(g.id)
@@ -8296,16 +8303,22 @@ async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0) -> dict:
         return out
     tete = [m for m in gens if m.id in TETE_IDS]
     try:
+        if not carte:
+            raise _SansCarte()
         msg = await fil.send(view=_carte_equipe("👥 **L'équipe suit ce ticket** · *The team follows this ticket*"),
                              allowed_mentions=discord.AllowedMentions.none())
         qui = " · ".join([r.mention for r in roles] + [m.mention for m in tete])
         await msg.edit(view=_carte_equipe("👥 **L'équipe suit ce ticket** · *The team follows this ticket*\n" + qui),
                        allowed_mentions=discord.AllowedMentions(everyone=False, users=tete, roles=roles,
                                                                 replied_user=False))
+    except _SansCarte:
+        pass
     except discord.HTTPException as ex:
         out["erreurs"] += 1
+        out["detail"].append(_echec(ex, "carte"))
         _logerr("ticket.equipe.carte", ex, guild_id=g.id)
-    await asyncio.sleep(2)
+    if carte:
+        await asyncio.sleep(2)
     try:
         membres = {tm.id for tm in await fil.fetch_members()}
     except discord.HTTPException as ex:
@@ -8320,8 +8333,15 @@ async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0) -> dict:
             out["un_par_un"] += 1
         except discord.HTTPException as ex:
             out["erreurs"] += 1
+            qui = "fondateur" if m.id == g.owner_id else ("direction" if m.id in TETE_IDS else "equipe")
+            out["detail"].append(_echec(ex, "ajout", qui))
             _logerr("ticket.equipe.ajout", ex, guild_id=g.id)
+    out["detail"] = out["detail"][:10]
     return out
+
+
+class _SansCarte(Exception):
+    """La passe de vérification complète sans reposer de carte (elle est déjà dans le ticket)."""
 
 
 def _faire_voir_plus_tard(g, fil, pid, ouvreur_id: int, tid: int) -> None:
@@ -8337,12 +8357,13 @@ def _faire_voir_plus_tard(g, fil, pid, ouvreur_id: int, tid: int) -> None:
     t.add_done_callback(_TACHES_TICKETS_VUS.discard)
 
 
-async def _verifier_tickets_ouverts(g) -> dict:
+async def _verifier_tickets_ouverts(g, carte: bool = True, cle: str = "verification") -> dict:
     """Une fois (25/10/2026, le fondateur : « vérifie les tickets qui sont actifs et ceux que je ne vois pas ») :
     chaque ticket ouvert est relu ; dans un fil où le fondateur n'était pas, l'équipe entre (sans notification).
     Le bilan va dans /stats « tickets_vus » (des nombres) et au journal du site (la liste, avec les liens)."""
     bilan = {"ouverts": 0, "fils": 0, "salons": 0, "introuvables": 0, "fondateur_absent": 0, "completes": 0,
-             "par_mention": 0, "un_par_un": 0, "erreurs": 0, "quand": int(time.time())}
+             "par_mention": 0, "un_par_un": 0, "erreurs": 0, "detail": [], "fondateur_absent_apres": 0,
+             "quand": int(time.time())}
     c = await cfg(g.id)
     async with get_db() as db:
         async with db.execute("SELECT id, channel_id, user_id, panel_id FROM tickets WHERE guild_id=? AND status='open'"
@@ -8375,15 +8396,21 @@ async def _verifier_tickets_ouverts(g) -> dict:
         gens, _roles = _equipe_a_voir(g, c, pid, uid)
         if all(m.id in dedans for m in gens):
             continue
-        r = await _faire_voir_ticket(g, fil, pid, uid)
+        r = await _faire_voir_ticket(g, fil, pid, uid, carte=carte)
         bilan["completes"] += 1
         for k in ("par_mention", "un_par_un", "erreurs"):
             bilan[k] += r[k]
+        bilan["detail"] = (bilan["detail"] + r["detail"])[:12]
+        try:
+            if g.owner_id not in {tm.id for tm in await fil.fetch_members()}:
+                bilan["fondateur_absent_apres"] += 1
+        except discord.HTTPException as ex:
+            _logerr("tickets.vus.apres", ex, guild_id=g.id)
         nom = ((c.get('ticket_panels') or {}).get(str(pid)) or {}).get('name') or "Ticket"
         lignes.append(f"#{tid} · <@{uid}> · {nom} · <#{fil.id}>" + (" · tu n'y étais pas : ajouté"
                                                                      if g.owner_id not in dedans else ""))
         await asyncio.sleep(1)
-    _TICKETS_VUS["verification"] = bilan
+    _TICKETS_VUS[cle] = bilan
     texte = (f"Tickets ouverts vérifiés : {bilan['ouverts']} ({bilan['fils']} en fil privé). "
              f"Tu n'étais pas dans {bilan['fondateur_absent']} d'entre eux ; l'équipe a été ajoutée à "
              f"{bilan['completes']} ticket(s), sans notification.")
@@ -14235,6 +14262,10 @@ async def entraide_task():
                 # 25/10/2026, le fondateur : « vérifie les tickets qui sont actifs et ceux que je ne vois pas ».
                 await db_set(g.id, 'tickets_vus_v1', now().isoformat())
                 await _verifier_tickets_ouverts(g)
+            if not c.get('tickets_vus_v2'):
+                # 25/10/2026 : la 1re passe a compté 4 erreurs sans détail — on complète sans nouvelle carte, et on dit.
+                await db_set(g.id, 'tickets_vus_v2', now().isoformat())
+                await _verifier_tickets_ouverts(g, carte=False, cle="verification_2")
             if not c.get('tickets_visibilite_v2'):
                 # 24/10/2026 (revue) : seuls le rôle direction et les comptes de tête voient tout — les rôles
                 # rangés au-dessus de la direction perdent « Gérer les fils » posé le 22/10 ; le panneau
@@ -15070,6 +15101,7 @@ async def _etat_public():
             "accueil": dict(_DERNIER_ACCUEIL) or None,
             "demarrage": {"etapes_ratees": list(_Etape.ratees)},
             "tickets_vus": dict(_TICKETS_VUS) or None,
+            "erreurs_bot": diag.releve("bot"),
             "entraide_suivi": entraide.releve(),
             "sante_salons": next(iter([_sante_salons(g, c) for g, c in zip(list(bot.guilds), confs)
                                        if g.owner_id in TETE_IDS]), None),
