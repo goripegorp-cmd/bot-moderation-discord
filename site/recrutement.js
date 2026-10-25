@@ -14,7 +14,7 @@ import {
   bouton, boutonIcone, avatar, pastille, tampon, vide, tuile, tuiles, puces, segment, recherche, liste, champ, saisie, zoneTexte, interrupteur,
   caseACocher, radios, confirmer, pancarte, toast, section, squelettes, paginer, groupe, bandeau, compteur, nomDe, majBoutonsReseau, barres, ENCRES,
 } from "./ui.js";
-import { ouvrirFiche, reponses, transcriptEnLigne, STATUTS_CAND } from "./fiche.js";
+import { ouvrirFiche, reponses, transcriptEnLigne, STATUTS_CAND, etapeCandidature, chargerSuivi } from "./fiche.js";
 import { indisponible } from "./discord.js";
 
 export const THEMES = [["studio", "Studio RELL Games"], ["jeu", "Le jeu RELL Seas"], ["races", "Races"], ["factions", "Factions"], ["fruits", "Fruits"],
@@ -54,13 +54,9 @@ const indicationDe = (q) => (q.indication && typeof q.indication === "object" ? 
 const etapeDossier = (D) => Number(D.etape) || (/^(etape1|refus_etape1)$/.test(String(D.etape || "")) ? 1 : (D.envois || []).length ? 2 : 1);
 const paires = (x) => (Array.isArray(x) ? x : x && typeof x === "object" ? Object.entries(x) : []);
 const lignesMessage = (t) => String(t || "").split("\n").map((l) => l.replace(/^-#\s*/, ""));
-const etapeDe = (c) => Number(c.etape) || (/etape2|reponse|partiel|corriger|attente/.test(c.recrutement || c.etat || "") ? 2 : 1);
-function etatCandidature(c) {
-  const s = String(c.recrutement || c.etat || c.statut_recrutement || "");
-  if (etapeDe(c) === 1) return "decider";
-  if (/reponse|partiel|corriger|repondu/.test(s)) return "corriger";
-  return "attente";
-}
+// L'étape d'une candidature : la même règle partout (aperçu, pastille, cette page) — `fiche.etapeCandidature` lit le
+// suivi du recrutement, sinon l'étape portée par les données. « decidee » : décidée, le ticket se ferme dans un instant.
+const etatCandidature = (c) => etapeCandidature(c);
 
 /** Une simple aide à la correction : identique, proche ou différent (casse, accents, espaces, ponctuation, distance). */
 export function proximite(reponse, attendue, variantes) {
@@ -101,7 +97,7 @@ export function candidatures(vue, ctx) {
   const majOnglets = () => {
     const d = etat.d;
     const nb = d ? { "en-cours": d.en_cours.length, decidees: d.candidats.length } : {};
-    const chaud = d ? d.en_cours.filter((c) => etatCandidature(c) !== "attente").length : 0;
+    const chaud = d ? d.en_cours.filter((c) => ["decider", "corriger"].includes(etatCandidature(c))).length : 0;
     remplacer(onglets, ...SOUS.map(([k, l, ic]) => h("a", { classe: "etiquette", role: "tab", href: "#equipage/candidatures/" + k, "aria-selected": String(k === sous) },
       icone(ic), l, nb[k] ? h("span", { classe: "compteur" + (k === "en-cours" && chaud ? " chaud" : " calme") }, String(nb[k])) : null)));
   };
@@ -123,7 +119,7 @@ function enCours(zone) {
     if (!d) { remplacer(resultats, indisponible()); return; }
     const l = d.en_cours.filter((c) => contient([c.nom, c.pseudo, c.id, ...(c.reponses || []).flat()].join(" "), f.q));
     const parEtat = { decider: [], corriger: [], attente: [] };
-    l.forEach((c) => parEtat[etatCandidature(c)].push(c));
+    l.forEach((c) => { const e = etatCandidature(c); if (parEtat[e]) parEtat[e].push(c); });   // « decidee » : plus en cours
     remplacer(resultats,
       tuiles(tuile({ cle: "r1", lib: "Étape 1 à décider", val: parEtat.decider.length, icone: "candidatures", teinte: "#a8641c" }),
         tuile({ cle: "r2", lib: "Réponses à corriger", val: parEtat.corriger.length, icone: "plume", teinte: "#8e2a24" }),
@@ -136,11 +132,13 @@ function enCours(zone) {
       parEtat.attente.length ? section("Étape 2 · questions envoyées", "minuteur", compte(parEtat.attente.length, "candidat"), h("div", { classe: "grille" }, parEtat.attente.map(carteCandidat))) : null);
   };
   maj();
-  return { maj };
+  chargerSuivi();   // l'étape la plus fraîche : la liste se redessine à son arrivée (« jeu »)
+  return { maj, majJeu: maj };
 }
 function carteCandidat(c) {
   const e = etatCandidature(c);
-  const [lib, coul] = { decider: ["Étape 1 · à décider", "ambre"], corriger: ["Étape 2 · à corriger", ""], attente: ["Étape 2 · en attente", "mer"] }[e];
+  const [lib, coul] = { decider: ["Étape 1 · à décider", "ambre"], corriger: ["Étape 2 · à corriger", ""], attente: ["Étape 2 · en attente", "mer"],
+    decidee: ["Décidée · fermeture prévue", "encre"] }[e] || ["Candidature", "encre"];
   const ouvrir = () => ouvrirDossier(c.ticket);
   return h("article", { classe: "feuillet lien" + (e === "corriger" ? " alerte" : e === "decider" ? " chaude" : ""), tabindex: 0, onclick: ouvrir, onkeydown: (ev) => { if (ev.key === "Enter") ouvrir(); } },
     h("div", { classe: "qui" }, avatar(c), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(c)), h("div", { classe: "sous-nom" }, "Ticket #" + c.ticket + " · ouvert " + depuis(c.ouvert))), tampon(lib, coul)),

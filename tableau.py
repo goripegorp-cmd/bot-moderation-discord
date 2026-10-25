@@ -973,8 +973,8 @@ def candidatures_en_cours(en_cours: list, etapes: dict) -> list:
     out = []
     for o in en_cours:
         e = etapes.get(int(o["ticket"]), _ETAPE1)
-        if e["recrutement"] not in _DECIDEES:
-            out.append(dict(o, **e))
+        if e["recrutement"] not in _DECIDEES:   # (« fermeture_prevue » ne vaut que pour une décidée : pas ici)
+            out.append(dict(o, etape=e["etape"], recrutement=e["recrutement"]))
     return out
 
 

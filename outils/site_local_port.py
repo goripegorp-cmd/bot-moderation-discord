@@ -118,10 +118,12 @@ def completer_faux_serveur(g, X) -> dict:
             raise discord.NotFound(X.Obj(status=404, reason="x"), "absent")
         return X.Obj(user=X.Obj(id=int(objet.id), name=b[0]), reason=b[1])
     g.ban, g.unban, g.fetch_ban = bannir, debannir, lire_ban
-    #  Le bot du site local peut tout ce que le vrai a sur GoRP (sinon « Il me manque la permission… »).
-    g.me.guild_permissions = discord.Permissions(manage_roles=True, manage_channels=True, ban_members=True,
-                                                 kick_members=True, moderate_members=True, mention_everyone=True,
-                                                 manage_messages=True)
+    #  Le bot du site local peut tout ce que le vrai a sur GoRP (sinon « Il me manque la permission… ») : ces droits
+    #  S'AJOUTENT à ceux déjà posés par site_local (gérer les évènements…), ils ne les remplacent pas.
+    droits = discord.Permissions(manage_roles=True, manage_channels=True, ban_members=True, kick_members=True,
+                                 moderate_members=True, mention_everyone=True, manage_messages=True)
+    droits.value |= int(getattr(getattr(g.me, "guild_permissions", None), "value", 0) or 0)
+    g.me.guild_permissions = droits
     return carnet
 
 
