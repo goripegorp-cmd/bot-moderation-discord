@@ -1291,13 +1291,19 @@ def test_V17_adresses_http_et_entetes():
                "rell/affiches": {"GET": False}, "rell/affiche": {"GET": False, "POST": True},
                "rell/affiche/retirer": {"POST": True}, "rell/affiche/restaurer": {"POST": True},
                "rell/avatar": {"POST": False}, "rell/roles": {"GET": False}, "rell/role": {"POST": False},
-               "rell/roles/appliquer": {"POST": False}}
+               "rell/roles/appliquer": {"POST": False},
+               #  25/10/2026 : les rôles des métiers du clan (metiers.py) — jamais rejoués hors ligne.
+               "rell/metiers/reglages": {"GET": False, "POST": False}, "rell/metiers/installer": {"POST": False},
+               "rell/metiers/reconcilier": {"POST": False}}
     vu = {nom: {x["methode"]: x["hors_ligne"] for x in tableau._definitions(nom, d)}
           for nom, d in affiches.ROUTES_SITE.items()}
     assert vu == attendu
     assert {nom: [x["grave"] for x in tableau._definitions(nom, d)] for nom, d in affiches.ROUTES_SITE.items()
             if any(x["grave"] for x in tableau._definitions(nom, d))} == {"rell/role": ["roles"],
-                                                                         "rell/roles/appliquer": ["roles"]}
+                                                                         "rell/roles/appliquer": ["roles"],
+                                                                         "rell/metiers/reglages": [None, "roles"],
+                                                                         "rell/metiers/installer": ["roles"],
+                                                                         "rell/metiers/reconcilier": ["roles"]}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

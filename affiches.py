@@ -27,6 +27,10 @@ LES RÔLES DES MÉTIERS
   · Un rôle Discord par élément (un métier surtout) : un rôle existant, ou créé SANS aucune permission.
     Jamais un rôle de gestion ou de modération, jamais au-dessus du bot. « Appliquer » donne les rôles des
     métiers de l'affiche et retire ceux qu'elle n'a plus ; « automatique » le fait à chaque enregistrement.
+  · Les MÉTIERS suivent le clan (`metiers.py`, branché par `brancher_metiers`, 25/10/2026) : dès que le rôle du
+    clan est réglé, le réglage « attribution automatique » (OUI par défaut) décide pour eux — rôle créé au premier
+    choix, donné, retiré —, N métiers au plus par membre, et un membre hors du clan n'en porte aucun. Ses adresses
+    (`rell/metiers/…`) sont dans `ROUTES_SITE` ci-dessous.
 
 Toutes les adresses passent par le registre du site (`tableau.monter`) : session, tête, origine,
 cadence, journal. Chaque champ est vérifié ici (type, longueur, clé du catalogue) ; une erreur de saisie
@@ -81,11 +85,13 @@ PERMISSIONS_INTERDITES = ("administrator", "manage_guild", "manage_roles", "mana
                           "create_events", "kick_members", "ban_members", "moderate_members", "mention_everyone",
                           "view_audit_log", "view_guild_insights", "mute_members", "deafen_members", "move_members",
                           "priority_speaker")
+TYPE_METIER = "metier"          # le type du catalogue dont les rôles suivent le clan (`metiers.py`)
 
 _get_db = None
 _log = print
 _actions_staff = None
 _verrou = None
+_metiers = None                 # le module des rôles de métier du clan, une fois branché (`brancher_metiers`)
 _cat: dict = {"types": None, "elements": None}
 _appels_roblox: list = []
 
@@ -93,10 +99,18 @@ _appels_roblox: list = []
 def setup(*, get_db, log=None, actions_staff=None):
     """`actions_staff(guild_id, auteur_id, cible_id, action, detail, surface=)` (async, facultatif) : la trace
     des rôles donnés ou retirés dans l'historique du staff."""
-    global _get_db, _log, _actions_staff
+    global _get_db, _log, _actions_staff, _metiers
     _get_db, _log, _actions_staff = get_db, log or print, actions_staff
+    _metiers = None                 # rebranché par `metiers.setup` (son étape vient après celle-ci au démarrage)
     _cat.update(types=None, elements=None)
     _appels_roblox.clear()
+
+
+def brancher_metiers(module) -> None:
+    """Le module des rôles de métier du clan (`metiers.setup` l'appelle) : les métiers des affiches suivent ses
+    réglages (création, attribution, limite, clan) et ses adresses répondent ; None le débranche."""
+    global _metiers
+    _metiers = module
 
 
 def _verrou_ecriture() -> asyncio.Lock:
@@ -514,6 +528,8 @@ async def _route_element(g, auteur, requete, corps):
             types, elements = await _catalogue()
     except Invalide as ex:
         return 400, ex.corps()
+    if v["type"] == TYPE_METIER and _metiers is not None:
+        _metiers.planifier_guide(g)     # la liste « Choisis ton métier » du guide du clan suit le catalogue
     nom_type = types[v["type"]]["nom"]
     return 200, {"ok": True, "element": _sortie_element(elements[(v["type"], v["cle"])]),
                  "_journal": f"Catalogue RELL Seas : « {v['nom']} » ({nom_type}) {'ajouté' if deja is None else 'modifié'}"}
@@ -542,6 +558,8 @@ async def _route_retirer_element(g, auteur, requete, corps):
             await db.commit()
         _oublier_catalogue()
         _t, elements = await _catalogue()
+    if type_ == TYPE_METIER and _metiers is not None:
+        _metiers.planifier_guide(g)     # un métier retiré n'est plus proposé dans le guide du clan
     return 200, {"ok": True, "element": _sortie_element(elements[(type_, cle)]),
                  "_journal": f"Catalogue RELL Seas : « {deja['nom']} » retiré"}
 
@@ -774,6 +792,13 @@ async def _route_affiche(g, auteur, requete, corps):
             types, elements = await _catalogue()
             deja = await _affiche(g.id, ident) if ident else None
             v = _valider_affiche(g, corps, types, elements, deja)
+            if _metiers is not None:
+                #  « Nombre maximum de métiers par membre » (Rôles & métiers) : vérifié quand ses métiers changent — une
+                #  affiche d'avant un abaissement de la limite reste modifiable pour le reste.
+                maxi = await _metiers.max_metiers(g)
+                metiers_v = v["attributs"].get(TYPE_METIER) or []
+                if len(metiers_v) > maxi and metiers_v != ((deja or {}).get("attributs") or {}).get(TYPE_METIER):
+                    raise Invalide("attributs", f"{maxi} métier(s) au plus par membre (réglage « Rôles & métiers »).")
             if deja is None and version:
                 return 409, {"conflit": True, "actuelle": None}
             if deja is not None and deja["retire_le"]:
@@ -876,6 +901,54 @@ async def _route_affiche_restaurer(g, auteur, requete, corps):
         a = await _affiche(g.id, ident)
     return 200, {"ok": True, "affiche": _sortie_affiche(g, a),
                  "_journal": {"texte": f"Affiche « {_titre(a)} » restaurée", "membre_id": a["membre_id"]}}
+
+
+async def definir_metiers(g, membre, metiers: list, par: int) -> tuple[dict | None, bool]:
+    """Les métiers d'un membre, choisis par lui-même dans le guide du clan (`metiers.py`) : son affiche les reçoit —
+    créée au minimum (le membre, son nom) s'il n'en a pas ; ses autres attributs ne bougent pas. Seulement des métiers
+    du catalogue (Invalide sinon). Même verrou, même version et même historique que le site : un écran ouvert sur son
+    affiche reçoit un conflit (409), jamais une modification écrasée en silence. → (l'affiche ou None, changée)."""
+    t = int(time.time())
+    async with _verrou_ecriture():
+        types, elements = await _catalogue()
+        if TYPE_METIER not in types:
+            raise Invalide("attributs", "Le catalogue n'a pas de métiers.")
+        cles = list(dict.fromkeys(x for x in metiers if isinstance(x, str)))
+        if any((TYPE_METIER, c) not in elements for c in cles):
+            raise Invalide("attributs", "Métier inconnu du catalogue.")
+        if len(cles) > 1 and not types[TYPE_METIER]["multiple"]:
+            raise Invalide("attributs", "Un seul métier.")
+        deja = await _affiche_du_membre(g.id, membre.id)
+        nom = str(getattr(membre, "display_name", "") or "")[:100]
+        if deja is None:
+            if not cles:
+                return None, False          # aucun métier, aucune affiche : rien à créer
+            ident = secrets.token_urlsafe(9)
+            v = {"membre_id": int(membre.id), "membre_nom": nom, "roblox_nom": "", "roblox_id": 0, "surnom": "",
+                 "prime": 0, "niveau": 0, "grade": "", "statut": "", "attributs": {TYPE_METIER: cles}, "notes": ""}
+            changements, action = _changements(None, v), "creee"
+        else:
+            ident = deja["id"]
+            attributs = {k: list(x) for k, x in deja["attributs"].items() if k != TYPE_METIER}
+            if cles:
+                attributs[TYPE_METIER] = cles
+            if attributs == deja["attributs"]:
+                return deja, False
+            changements, action = [{"champ": "attributs", "avant": deja["attributs"], "apres": attributs}], "modifiee"
+        async with _get_db() as db:
+            if deja is None:
+                await db.execute("INSERT INTO rell_affiches (guild_id, id, membre_id, membre_nom, attributs, cree_le,"
+                                 " cree_par, maj_le, maj_par, version) VALUES (?,?,?,?,?,?,?,?,?,1)",
+                                 (g.id, ident, int(membre.id), nom, json.dumps(v["attributs"], ensure_ascii=False), t,
+                                  int(par), t, int(par)))
+            else:
+                await db.execute("UPDATE rell_affiches SET attributs=?, membre_nom=?, maj_le=?, maj_par=?,"
+                                 " version=version+1 WHERE guild_id=? AND id=?",
+                                 (json.dumps(attributs, ensure_ascii=False), nom or deja["membre_nom"], t, int(par),
+                                  g.id, ident))
+            await _noter_historique(db, g.id, ident, int(par), action, changements, t)
+            await db.commit()
+        return await _affiche(g.id, ident), True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1115,6 +1188,9 @@ async def _route_role(g, auteur, requete, corps):
         refus = refus_role(g, role)
         if refus is not None:
             return 400, {"erreur": refus, "champ": "role_id"}
+        if _metiers is not None and type_ == TYPE_METIER and getattr(await _metiers.role_du_clan(g), "id", None) == role.id:
+            #  Le rôle d'un métier se retire quand on change de métier : ce serait sortir le membre du clan.
+            return 400, {"erreur": "Le rôle du clan ne peut pas être le rôle d'un métier.", "champ": "role_id"}
     async with _get_db() as db:
         await db.execute("INSERT OR REPLACE INTO rell_roles (guild_id, type, cle, role_id, auto, maj_le, maj_par)"
                          " VALUES (?,?,?,?,?,?,?)", (g.id, type_, cle, role.id, int(auto), int(time.time()), auteur.id))
@@ -1126,10 +1202,14 @@ async def _route_role(g, auteur, requete, corps):
                              + (" (attribution automatique)" if auto else "")}
 
 
-async def appliquer_roles(g, auteur, membre, attributs: dict, seulement_auto: bool = False) -> dict:
+async def appliquer_roles(g, auteur, membre, attributs: dict, seulement_auto: bool = False, *, types=None,
+                          exclure=(), raison: str | None = None, trace: bool = True, sauf_roles=()) -> dict:
     """Donne à `membre` les rôles liés aux éléments de `attributs` et retire les rôles liés qu'il n'a plus — jamais
-    un autre rôle. → `{"ajoutes", "retires", "ignores"}` ou `{"erreur"}`."""
-    liens = await _liens(g.id, seulement_auto)
+    un autre rôle. `types` : seulement les liens de ces types du catalogue ; `exclure` : sauf ceux-là ; `sauf_roles` :
+    des rôles jamais touchés (le rôle du clan) ; `trace` : une ligne dans l'historique du staff. → `{"ajoutes",
+    "retires", "ignores"}` ou `{"erreur"}`."""
+    liens = [x for x in await _liens(g.id, seulement_auto)
+             if (types is None or x["type"] in types) and x["type"] not in exclure and x["role_id"] not in sauf_roles]
     voulus = {x["role_id"] for x in liens if x["cle"] in (attributs.get(x["type"]) or [])}
     ajouter, retirer, ignores = [], [], []
     a_deja = {r.id for r in getattr(membre, "roles", []) or []}
@@ -1149,7 +1229,7 @@ async def appliquer_roles(g, auteur, membre, attributs: dict, seulement_auto: bo
         return {"ajoutes": [], "retires": [], "ignores": ignores}
     if not _peut_gerer_roles(g):
         return {"erreur": "Il me manque la permission « Gérer les rôles »."}
-    raison = f"Rôles des métiers — site de la direction ({auteur})"
+    raison = raison or f"Rôles des métiers — site de la direction ({auteur})"
     try:
         if ajouter:
             await membre.add_roles(*ajouter, reason=raison)
@@ -1159,7 +1239,7 @@ async def appliquer_roles(g, auteur, membre, attributs: dict, seulement_auto: bo
         _log("[AFFICHES][E5] rôles des métiers non appliqués")
         _log(f"[AFFICHES][E5:DETAIL] {type(ex).__name__} {ex}")
         return {"erreur": "Discord a refusé (hiérarchie ou permission)."}
-    if _actions_staff is not None:
+    if trace and _actions_staff is not None:
         try:
             await _actions_staff(g.id, auteur.id, membre.id, "roles_metiers",
                                  " ".join([f"+{r.name}" for r in ajouter] + [f"-{r.name}" for r in retirer])[:300],
@@ -1176,23 +1256,44 @@ def _phrase_roles(nom: str, res: dict) -> str:
     return f"Rôles des métiers de {nom} : {', '.join(morceaux)}"
 
 
+def _fusion(a: dict | None, b: dict | None) -> dict | None:
+    """Deux comptes rendus de rôles en un (les liens automatiques, puis les métiers)."""
+    if a is None or b is None:
+        return a if b is None else b
+    out = {k: list(a.get(k, [])) + list(b.get(k, [])) for k in ("ajoutes", "retires", "ignores", "crees", "manquants")}
+    erreur = a.get("erreur") or b.get("erreur")
+    return dict(out, erreur=erreur) if erreur else out
+
+
 async def _roles_automatiques(g, auteur, affiche: dict) -> dict | None:
-    """Après l'enregistrement d'une affiche : les liens « automatiques » appliqués à son membre (s'il est là)."""
+    """Après l'enregistrement d'une affiche : les liens « automatiques » appliqués à son membre (s'il est là). Les
+    métiers suivent le clan et le réglage « attribution automatique » quand `metiers.py` est branché et que le rôle du
+    clan est réglé ; sinon, comme les autres types, leurs liens « automatiques »."""
     m = g.get_member(int(affiche["membre_id"])) if affiche["membre_id"] else None
-    if m is None or not await _liens(g.id, True):
+    if m is None:
         return None
-    refus = await tableau.limite_grave(g, auteur, "roles", 1)
-    if refus is not None:
-        return {"erreur": refus}
-    res = await appliquer_roles(g, auteur, m, affiche["attributs"], seulement_auto=True)
-    if res.get("ajoutes") or res.get("retires"):
-        await registre.noter(g.id, "Site", "site.roles_metiers", f"{_phrase_roles(m.display_name, res)} (automatique)",
-                             membre_id=m.id, auteur_id=auteur.id)
+    metiers_geres = _metiers is not None and await _metiers.gere(g)
+    exclure = (TYPE_METIER,) if metiers_geres else ()
+    res = None
+    if [x for x in await _liens(g.id, True) if x["type"] not in exclure]:
+        refus = await tableau.limite_grave(g, auteur, "roles", 1)
+        if refus is not None:
+            return {"erreur": refus}
+        res = await appliquer_roles(g, auteur, m, affiche["attributs"], seulement_auto=True, exclure=exclure)
+        if res.get("ajoutes") or res.get("retires"):
+            await registre.noter(g.id, "Site", "site.roles_metiers",
+                                 f"{_phrase_roles(m.display_name, res)} (automatique)", membre_id=m.id, auteur_id=auteur.id)
+    if metiers_geres:
+        res_metiers = await _metiers.apres_affiche(g, auteur, m, affiche)   # il note lui-même au journal (Clan)
+        if res_metiers and (res_metiers.get("ajoutes") or res_metiers.get("retires")) and res is None:
+            await tableau.limite_grave(g, auteur, "roles", 1)   # compté seulement quand des rôles ont bougé
+        res = _fusion(res, res_metiers)
     return res
 
 
 async def _route_appliquer(g, auteur, requete, corps):
-    """`POST rell/roles/appliquer` `{"affiche_id"}` → `{"ok", "ajoutes", "retires", "ignores"}`."""
+    """`POST rell/roles/appliquer` `{"affiche_id"}` → `{"ok", "ajoutes", "retires", "ignores"}`. Les métiers suivent
+    le clan (`metiers.py` branché, rôle du clan réglé) : N au plus, aucun hors du clan, rien pendant une sanction."""
     ident = corps.get("affiche_id")
     if not isinstance(ident, str) or not FORMAT_AFFICHE.fullmatch(ident):
         return 400, {"erreur": "Identifiant d'affiche invalide.", "champ": "affiche_id"}
@@ -1202,7 +1303,14 @@ async def _route_appliquer(g, auteur, requete, corps):
     m = g.get_member(int(a["membre_id"])) if a["membre_id"] else None
     if m is None:
         return 409, {"erreur": "Cette affiche n'est liée à aucun membre présent sur le serveur."}
-    res = await appliquer_roles(g, auteur, m, a["attributs"])
+    attributs, exclure = a["attributs"], ()
+    if _metiers is not None and await _metiers.gere(g):
+        effectifs = await _metiers.effectifs(g, m, attributs.get(TYPE_METIER) or [])
+        if effectifs is None:       # une sanction en cours : la modération a gardé ses rôles, ils ne bougent pas
+            exclure = (TYPE_METIER,)
+        else:
+            attributs = dict(attributs, **{TYPE_METIER: effectifs})
+    res = await appliquer_roles(g, auteur, m, attributs, exclure=exclure)
     if "erreur" in res:
         return 502 if "Discord" in res["erreur"] else 403, {"erreur": res["erreur"]}
     change = res["ajoutes"] or res["retires"]
@@ -1333,6 +1441,16 @@ REGLES_NETTOYAGE = [
      "garde_jours": 180, "min": 30, "max": 365, "ordre": 61, "fn": _nettoyer_historique, "compter": _compter_historique},
 ]
 
+def _par_metiers(nom: str):
+    """Une adresse « Rôles & métiers » servie par `metiers.py` (branché au démarrage) ; avant : « réessaie »."""
+    async def route(g, auteur, requete, corps):
+        if _metiers is None:
+            return 503, {"erreur": "Les rôles des métiers démarrent : réessaie dans un instant."}
+        return await getattr(_metiers, nom)(g, auteur, requete, corps)
+    route.__name__ = route.__qualname__ = f"_route_metiers_{nom}"
+    return route
+
+
 ROUTES_SITE = {
     "rell/catalogue": {"methode": "GET", "fn": _route_catalogue},
     "rell/catalogue/element": {"methode": "POST", "fn": _route_element, "ecriture": True, "hors_ligne": True},
@@ -1347,4 +1465,12 @@ ROUTES_SITE = {
     "rell/roles": {"methode": "GET", "fn": _route_roles},
     "rell/role": {"methode": "POST", "fn": _route_role, "ecriture": True, "grave": "roles"},
     "rell/roles/appliquer": {"methode": "POST", "fn": _route_appliquer, "ecriture": True, "grave": "roles"},
+    #  25/10/2026 : les rôles des métiers du clan (`metiers.py`) — réglages, installation, réconciliation. Jamais
+    #  rejoués hors ligne (ils touchent aux rôles Discord), comptés dans les actions graves « roles ».
+    "rell/metiers/reglages": [{"methode": "GET", "fn": _par_metiers("route_reglages")},
+                              {"methode": "POST", "fn": _par_metiers("route_regler"), "ecriture": True, "grave": "roles"}],
+    "rell/metiers/installer": {"methode": "POST", "fn": _par_metiers("route_installer"), "ecriture": True,
+                               "grave": "roles"},
+    "rell/metiers/reconcilier": {"methode": "POST", "fn": _par_metiers("route_reconcilier"), "ecriture": True,
+                                 "grave": "roles"},
 }
