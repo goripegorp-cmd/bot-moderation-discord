@@ -318,6 +318,7 @@ def _executer(get_db, conf, guilde, user=None, refus=False, pid="p1"):
           "_logerr": lambda *a, **k: journaux.append(a), "_categorie_tickets": rien,
           "_vue_dossier_ticket": dossier, "int": int}
     ns["_tickets_en_creation"] = set()
+    ns["_faire_voir_plus_tard"] = lambda *a, **k: ns.setdefault("vus", []).append(a)  # 25/10 : l'équipe entre (fond)
     _ns_direction(ns)
     exec(_fonction("_create_ticket_corps"), ns)  # noqa: S102 — code du dépôt
     exec(_fonction("create_ticket"), ns)  # noqa: S102 — code du dépôt

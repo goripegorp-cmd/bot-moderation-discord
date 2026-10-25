@@ -8251,6 +8251,148 @@ def _equipe_disponible(g, c, tk) -> list:
     return list(out.values())[:25]
 
 
+#  25/10/2026 : qui doit voir un ticket dans SA liste — les comptes de tête présents et l'équipe du type.
+EQUIPE_TICKET_MAX = 30
+_TICKETS_VUS: dict = {}                 # /stats « tickets_vus » : le dernier ticket ouvert et la vérification des ouverts
+_TACHES_TICKETS_VUS: set = set()
+
+
+def _equipe_a_voir(g, c, pid, ouvreur_id: int = 0) -> tuple:
+    """([personnes], [rôles]) qui doivent voir ce ticket dans leur liste : les deux comptes de tête présents,
+    puis l'équipe du type (son rôle staff — sinon celui des tickets — et, pour Rell Seas, les rôles du clan).
+    Sans bots ni l'ouvreur, au plus EQUIPE_TICKET_MAX personnes (les comptes de tête d'abord)."""
+    staff, extras, _groupe = _equipe_du_type(g, c, str(pid))
+    roles = [r for r in (staff, *extras) if r is not None and not r.is_default()]
+    gens = [m for m in (g.get_member(x) for x in sorted(TETE_IDS)) if m is not None]
+    for r in roles:
+        gens += sorted((m for m in r.members if not m.bot), key=lambda m: m.id)
+    vus, out = set(), []
+    for m in gens:
+        if m.id in vus or m.id == int(ouvreur_id or 0):
+            continue
+        vus.add(m.id)
+        out.append(m)
+    return out[:EQUIPE_TICKET_MAX], roles
+
+
+def _carte_equipe(texte: str) -> LayoutView:
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(discord.ui.TextDisplay(texte), accent_color=Palette.INFO))
+    return v
+
+
+async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0) -> dict:
+    """Le fondateur, la direction et l'équipe du type entrent dans le fil du ticket — il apparaît dans leur liste
+    de salons — SANS notification : la carte est posée sans mention puis modifiée pour mentionner (une
+    modification ne prévient personne, et Discord ajoute au fil privé qui y est mentionné). Ensuite on vérifie
+    les membres du fil : qui manque encore est ajouté un par un. Rend {cibles, par_mention, un_par_un, erreurs}."""
+    out = {"cibles": 0, "par_mention": 0, "un_par_un": 0, "erreurs": 0}
+    if not isinstance(fil, discord.Thread):
+        return out          # un ticket en salon classique est déjà dans la liste de qui y a droit
+    c = await cfg(g.id)
+    gens, roles = _equipe_a_voir(g, c, pid, ouvreur_id)
+    out["cibles"] = len(gens)
+    if not gens:
+        return out
+    tete = [m for m in gens if m.id in TETE_IDS]
+    try:
+        msg = await fil.send(view=_carte_equipe("👥 **L'équipe suit ce ticket** · *The team follows this ticket*"),
+                             allowed_mentions=discord.AllowedMentions.none())
+        qui = " · ".join([r.mention for r in roles] + [m.mention for m in tete])
+        await msg.edit(view=_carte_equipe("👥 **L'équipe suit ce ticket** · *The team follows this ticket*\n" + qui),
+                       allowed_mentions=discord.AllowedMentions(everyone=False, users=tete, roles=roles,
+                                                                replied_user=False))
+    except discord.HTTPException as ex:
+        out["erreurs"] += 1
+        _logerr("ticket.equipe.carte", ex, guild_id=g.id)
+    await asyncio.sleep(2)
+    try:
+        membres = {tm.id for tm in await fil.fetch_members()}
+    except discord.HTTPException as ex:
+        _logerr("ticket.equipe.membres", ex, guild_id=g.id)
+        membres = set()
+    for m in gens:
+        if m.id in membres:
+            out["par_mention"] += 1
+            continue
+        try:
+            await fil.add_user(m)
+            out["un_par_un"] += 1
+        except discord.HTTPException as ex:
+            out["erreurs"] += 1
+            _logerr("ticket.equipe.ajout", ex, guild_id=g.id)
+    return out
+
+
+def _faire_voir_plus_tard(g, fil, pid, ouvreur_id: int, tid: int) -> None:
+    """En fond : l'ouvreur a déjà sa réponse ; l'équipe entre dans le fil juste après."""
+    async def _travail():
+        try:
+            r = await _faire_voir_ticket(g, fil, pid, ouvreur_id)
+            _TICKETS_VUS["dernier"] = {"ticket": int(tid), "quand": int(time.time()), **r}
+        except Exception as ex:
+            _logerr("ticket.equipe", ex, guild_id=g.id)
+    t = asyncio.create_task(_travail())
+    _TACHES_TICKETS_VUS.add(t)
+    t.add_done_callback(_TACHES_TICKETS_VUS.discard)
+
+
+async def _verifier_tickets_ouverts(g) -> dict:
+    """Une fois (25/10/2026, le fondateur : « vérifie les tickets qui sont actifs et ceux que je ne vois pas ») :
+    chaque ticket ouvert est relu ; dans un fil où le fondateur n'était pas, l'équipe entre (sans notification).
+    Le bilan va dans /stats « tickets_vus » (des nombres) et au journal du site (la liste, avec les liens)."""
+    bilan = {"ouverts": 0, "fils": 0, "salons": 0, "introuvables": 0, "fondateur_absent": 0, "completes": 0,
+             "par_mention": 0, "un_par_un": 0, "erreurs": 0, "quand": int(time.time())}
+    c = await cfg(g.id)
+    async with get_db() as db:
+        async with db.execute("SELECT id, channel_id, user_id, panel_id FROM tickets WHERE guild_id=? AND status='open'"
+                              " ORDER BY id", (g.id,)) as cur:
+            ouverts = await cur.fetchall()
+    bilan["ouverts"] = len(ouverts)
+    lignes = []
+    for tid, chid, uid, pid in ouverts:
+        try:
+            fil = await tickets_fils.salon(g, chid)
+        except discord.HTTPException as ex:
+            bilan["erreurs"] += 1
+            _logerr("tickets.vus.lecture", ex, guild_id=g.id)
+            continue
+        if fil is None:
+            bilan["introuvables"] += 1
+            lignes.append(f"#{tid} · <@{uid}> · introuvable sur Discord (supprimé ?)")
+            continue
+        if not isinstance(fil, discord.Thread):
+            bilan["salons"] += 1
+            continue
+        bilan["fils"] += 1
+        try:
+            dedans = {tm.id for tm in await fil.fetch_members()}
+        except discord.HTTPException as ex:
+            _logerr("tickets.vus.membres", ex, guild_id=g.id)
+            dedans = set()
+        if g.owner_id not in dedans:
+            bilan["fondateur_absent"] += 1
+        gens, _roles = _equipe_a_voir(g, c, pid, uid)
+        if all(m.id in dedans for m in gens):
+            continue
+        r = await _faire_voir_ticket(g, fil, pid, uid)
+        bilan["completes"] += 1
+        for k in ("par_mention", "un_par_un", "erreurs"):
+            bilan[k] += r[k]
+        nom = ((c.get('ticket_panels') or {}).get(str(pid)) or {}).get('name') or "Ticket"
+        lignes.append(f"#{tid} · <@{uid}> · {nom} · <#{fil.id}>" + (" · tu n'y étais pas : ajouté"
+                                                                     if g.owner_id not in dedans else ""))
+        await asyncio.sleep(1)
+    _TICKETS_VUS["verification"] = bilan
+    texte = (f"Tickets ouverts vérifiés : {bilan['ouverts']} ({bilan['fils']} en fil privé). "
+             f"Tu n'étais pas dans {bilan['fondateur_absent']} d'entre eux ; l'équipe a été ajoutée à "
+             f"{bilan['completes']} ticket(s), sans notification.")
+    if lignes:
+        texte += "\n" + "\n".join(lignes)[:3500]
+    await _au_journal(g, "Tickets", "tickets.vus", texte)
+    return bilan
+
+
 async def create_ticket(i, pid, ans=None):
     """Un seul ticket en cours d'ouverture par membre : deux clics rapprochés passaient tous deux le
     contrôle « max tickets » (la base n'avait pas encore le premier) et ouvraient deux tickets."""
@@ -8376,7 +8518,8 @@ async def _create_ticket_corps(i, pid, ans=None):
         panel_name = pnl.get('name', 'Support')
         # owner 2026-07-20 : PLUS de ping à la création (avant : ouvreur + ROLE staff entier =
         # ping de masse inutile à chaque ticket). 22/10/2026 : le dossier dit qui, son historique,
-        # ses réponses et qui s'en occupe ; le staff voit le ticket dans « 🎫 TICKETS ».
+        # ses réponses et qui s'en occupe. 25/10/2026 : l'équipe entre dans le fil sans notification
+        # (`_faire_voir_ticket`) — « Gérer les fils » seul ne le montrait dans la liste de personne.
         await webhook_send(ch, 'ticket', view=await _vue_dossier_ticket(
             i.guild, tid, i.user.id, panel_name, ans or {}, int(now().timestamp())),
             allowed_mentions=discord.AllowedMentions.none())
@@ -8399,6 +8542,9 @@ async def _create_ticket_corps(i, pid, ans=None):
             await webhook_send(ch, 'ticket', view=accueil, allowed_mentions=discord.AllowedMentions.none())
         
         await send_ticket_log(i.guild, 'create', i.user, {'id': tid, 'answers': ans or {}, 'panel_id': pid})
+        #  25/10/2026 : un fil privé n'apparaît que chez ses membres — le fondateur, la direction et l'équipe du
+        #  type y entrent maintenant (sans notification), sinon personne ne voyait le nouveau ticket.
+        _faire_voir_plus_tard(i.guild, ch, pid, i.user.id, tid)
         return ch, None
     except Exception as ex:
         _logerr("ticket.create", ex, guild_id=getattr(i.guild, "id", 0))
@@ -14085,6 +14231,10 @@ async def entraide_task():
                 # en question… la direction et le fondateur voient les tickets ».
                 await db_set(g.id, 'tickets_visibilite_v1', now().isoformat())
                 await _tickets_visibilite(g)
+            if not c.get('tickets_vus_v1'):
+                # 25/10/2026, le fondateur : « vérifie les tickets qui sont actifs et ceux que je ne vois pas ».
+                await db_set(g.id, 'tickets_vus_v1', now().isoformat())
+                await _verifier_tickets_ouverts(g)
             if not c.get('tickets_visibilite_v2'):
                 # 24/10/2026 (revue) : seuls le rôle direction et les comptes de tête voient tout — les rôles
                 # rangés au-dessus de la direction perdent « Gérer les fils » posé le 22/10 ; le panneau
@@ -14919,6 +15069,7 @@ async def _etat_public():
             "cadeaux_avis": next((c['cadeaux_avis_v1'] for c in confs if c.get('cadeaux_avis_v1')), None),
             "accueil": dict(_DERNIER_ACCUEIL) or None,
             "demarrage": {"etapes_ratees": list(_Etape.ratees)},
+            "tickets_vus": dict(_TICKETS_VUS) or None,
             "entraide_suivi": entraide.releve(),
             "sante_salons": next(iter([_sante_salons(g, c) for g, c in zip(list(bot.guilds), confs)
                                        if g.owner_id in TETE_IDS]), None),
