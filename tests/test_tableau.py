@@ -208,12 +208,13 @@ def test_T3_tickets_tries_par_type_et_direction_a_part(tmp_path):
     assert [c["nom"] for c in d["en_cours"]] == ["M8"] and list(map(list, d["en_cours"][0]["reponses"])) == [["Pseudo Roblox", "Mira_RS"]]
     assert d["clan"]["role"] == "Rell Seas" and [m["id"] for m in d["clan"]["membres"]] == ["7"]
     assert [m["id"] for m in d["clan"]["direction"]] == ["3"], "direction et fondateur : mis à part des stats"
-    assert set(d["a_part"]) == {"3", "99"} and d["personnes"]["8"]["nom"] == "M8" and d["version"] == tableau.VERSION
+    assert set(d["a_part"]) == {"3", "99"} and d["personnes"]["8"]["nom"] == "M8" and d["version"] == tableau.version_page()
     json.dumps(d)
 
 
-def test_T4_lien_a_usage_unique_puis_session(tmp_path):
+def test_T4_lien_a_usage_unique_puis_session(tmp_path, monkeypatch):
     env = Env(tmp_path)
+    monkeypatch.setattr(tableau, "SITE", tmp_path / "sans_site")  # l'ancienne page (la v2 : test_site_v2_serveur)
 
     async def scenario():
         j = tableau.jeton(1, 3, "tout")
@@ -586,7 +587,7 @@ def test_T13_les_adresses_du_site_par_http(tmp_path):
             out["apres"] = r.status
         return out
     out = asyncio.run(scenario())
-    assert out["entree"] == (303, "/tableau/espace")
+    assert out["entree"] == (303, "/tableau/espace/"), "la barre finale : adresses relatives et service worker"
     assert out["page"][0] == 200 and out["page"][1].startswith("text/html")
     assert out["donnees"][0] == 200 and out["membre"][0] == 200
     assert out["export"][0] == 200 and out["export"][1].startswith("text/csv") and "attachment" in out["export"][2]

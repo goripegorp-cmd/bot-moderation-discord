@@ -118,6 +118,7 @@ import clan  # le clan Rell Seas depuis le site : ajouter, prévenir les inactif
 import websub_youtube  # YouTube prévient le bot dès qu'une vidéo sort
 import vigilance  # un membre qui cumule les évènements graves : alerte dans « 📋logs »
 import tableau  # tableau de bord web : candidatures, tickets par type, clan
+import affiches  # le site, Capitainerie : catalogue RELL Seas, affiches, rôles des métiers
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
@@ -6843,6 +6844,23 @@ _ACTIONS_TABLEAU = {"ticket_fermer": _action_ticket_fermer, "candidature": _acti
                     "debannir": _action_debannir, "clan_ajouter": _action_clan_ajouter,
                     "clan_prevenir": _action_clan_prevenir, "clan_rappel_annuler": _action_clan_rappel_annuler,
                     "suggestion_repondre": _action_suggestion_repondre, "suggestion_retirer": _action_suggestion_retirer}
+
+
+@tasks.loop(hours=1)
+async def nettoyage_site_task():
+    """25/10/2026 (site v2) : « un vrai système de nettoyage ». Une fois par jour et par serveur (même après un
+    redémarrage), les règles de la rubrique « Nettoyage » du site ; le bilan va au journal du site."""
+    for g in list(bot.guilds):
+        try:
+            await tableau.nettoyer_si_du(g)
+        except Exception as ex:  # un serveur en échec n'arrête pas les autres ; réessai au tour suivant
+            _logerr("site.nettoyage", ex, guild_id=getattr(g, 'id', 0))
+
+
+@nettoyage_site_task.before_loop
+async def _nettoyage_site_attente():
+    await bot.wait_until_ready()
+    await asyncio.sleep(900)
 
 
 async def _salon_alertes_site(g):
@@ -15468,6 +15486,8 @@ _SUPERVISED_LOOP_NAMES = [
     "salon_logs_task",
     "websub_task",
     "amnistie_task",
+    #  25/10/2026 : le nettoyage quotidien du site (règles de la rubrique « Nettoyage »).
+    "nettoyage_site_task",
     "entraide_task",
     #  24/10/2026 : les cadeaux — sans cette entrée, la boucle ne démarre jamais (aucun tirage).
     "cadeaux_task",
@@ -21558,6 +21578,22 @@ async def _activite_boot():
                       actions=_ACTIONS_TABLEAU, alerte_securite=_alerte_securite_site,
                       conversation=_conversation_ticket, log=print)
         await tableau.init_db()
+    #  25/10/2026 (site v2) : la Capitainerie — catalogue RELL Seas (départ : donnees_jeu/rell_catalogue.json),
+    #  affiches, portraits Roblox, rôles des métiers — branchée sur le site (`/tableau/espace/api/rell/…`).
+    with _Etape("affiches"):
+        affiches.setup(get_db=get_db, actions_staff=log_staff_action, log=print)
+        await affiches.init_db()
+        tableau.monter(affiches)
+        await affiches.charger_depart()
+        #  Les annonces du clan (module des événements, s'il est là) lisent les fiches et le catalogue des affiches
+        #  (annonce des métiers, listing) et les images du site ; leurs images ne partent jamais au nettoyage, et
+        #  les événements passés y ont leur règle (60 jours, réglable).
+        try:
+            import evenements as _evenements
+        except ModuleNotFoundError:
+            _evenements = None
+        if _evenements is not None:
+            affiches.brancher_evenements(_evenements)
     with _Etape("casier"):
         casier.setup(get_db=get_db, log=print)
         await casier.init_db()

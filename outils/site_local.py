@@ -1,0 +1,518 @@
+"""outils/site_local.py — le VRAI site en local, sur http://localhost:8790 (25/10/2026).
+
+Le même serveur que le bot (`health_server.construire_app()` : tableau, affiches, événements s'il est là),
+branché sur un FAUX serveur Discord et une base TEMPORAIRE remplie de données de démonstration
+(membres, sanctions, tickets, candidatures, clan, journal, questions, sondages, idées, annonces, catalogue,
+affiches, rôles des métiers). Rien ne part chez Discord ; seul « portrait Roblox » interroge Roblox.
+
+⚠️ L'ENTRÉE DE DÉMONSTRATION (`/tableau/demo` : une session SANS lien signé) n'existe QUE dans ce
+script. Le bot ne l'expose jamais (`tests/test_site_v2_serveur.py` le vérifie) : ne jamais la copier
+ailleurs.
+
+Usage :
+    python outils/site_local.py                 → http://localhost:8790/tableau/demo
+    python outils/site_local.py --port 8791 --qui direction --garder C:\\chemin\\dossier
+Ouvrir par « localhost » (pas 127.0.0.1) : les écritures vérifient l'origine de la page.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import inspect
+import json
+import random
+import sys
+import tempfile
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parent.parent
+for _chemin in (RACINE, RACINE / "tests"):
+    if str(_chemin) not in sys.path:
+        sys.path.insert(0, str(_chemin))
+
+import aiosqlite  # noqa: E402
+import discord  # noqa: E402
+
+import paths  # noqa: E402
+
+FONDATEUR, DIRECTION = 781205382923288593, 827633340797681714
+TETE = frozenset({FONDATEUR, DIRECTION})
+SERVEUR_ID = 1
+PORT = 8790
+CATALOGUE_EXEMPLE = RACINE / "tests" / "donnees" / "rell_catalogue_exemple.json"
+PRENOMS = ("Kolax", "Mira", "Barbe-Grise", "Anne Bonny", "Calico", "Morgane", "Ishmael", "Tortuga", "Rackham",
+           "Salazar", "Hector", "Jade", "Corsaire", "Nemo", "Lysandre", "Océane", "Bastien", "Elio", "Zéphyr", "Ylva",
+           "Tobias", "Maëlle", "Rosalind", "Silas")
+CATEGORIES_JOURNAL = (("Modération", "mod.warn", 1), ("Modération", "mod.mute", 2), ("Membres", "member.join", 0),
+                      ("Membres", "member.leave", 0), ("Messages", "message.delete", 0), ("Vocal", "voice.join", 0),
+                      ("Tickets", "ticket.open", 0), ("Tickets", "ticket.close", 0), ("Sécurité", "sec.spam", 1),
+                      ("Clan", "clan.journal", 0), ("Site", "site.ouvert", 0))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Le faux serveur Discord (assez pour tout ce que le site lit et fait)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _faux():
+    """Les classes du faux serveur, bâties sur `tests/faux_serveur.py` (importé à la demande)."""
+    import faux_serveur as F
+    from conftest_discord import Obj
+
+    class Role(F.Role):
+        def __init__(self, rid, name, position, couleur=0, permissions=None, managed=False):
+            super().__init__(rid, name)
+            self.position, self.managed = position, managed
+            self.colour = self.color = discord.Colour(couleur)
+            self.permissions = permissions or discord.Permissions.none()
+
+        def is_default(self):
+            return self.position == 0
+
+    class Membre(F.Membre):
+        def __init__(self, uid, nom, *roles, arrivee_jours=30, bot=False):
+            super().__init__(uid, *roles)
+            self.display_name, self.name, self.bot = nom, nom.lower().replace(" ", "_"), bot
+            url = f"https://cdn.discordapp.com/embed/avatars/{uid % 6}.png"
+            self.display_avatar = Obj(url=url, with_size=lambda _n: Obj(url=url))
+            self.joined_at = datetime.now(timezone.utc) - timedelta(days=arrivee_jours)
+            self.created_at = self.joined_at - timedelta(days=400)
+            self.timed_out_until = None
+
+        @property
+        def top_role(self):
+            return max(self.roles, key=lambda r: r.position) if self.roles else self.guild.default_role
+
+        def is_timed_out(self):
+            return bool(self.timed_out_until and self.timed_out_until > datetime.now(timezone.utc))
+
+        async def add_roles(self, *roles, reason=None):
+            for r in roles:
+                if r not in self.roles:
+                    self.roles.append(r)
+                    r.members.append(self)
+
+        async def remove_roles(self, *roles, reason=None):
+            for r in roles:
+                if r in self.roles:
+                    self.roles.remove(r)
+                    r.members.remove(self)
+
+    class Serveur(F.Monde):
+        def __init__(self):
+            super().__init__(forum=False, communautaire=True)
+            self.id, self.name, self.icon, self.chunked = SERVEUR_ID, "GoRP SEA", None, True
+            for s in self.salons.values():
+                if isinstance(s, F.Vocal):  # le vrai `VoiceChannel.permissions_for` lirait `guild`
+                    s.permissions_for = lambda _cible: F.Droits()
+            self._roles = {}
+            self.default_role = Role(SERVEUR_ID, "@everyone", 0)
+            self._roles[SERVEUR_ID] = self.default_role
+            self.owner_id = FONDATEUR
+
+        roles = property(lambda self: sorted(self._roles.values(), key=lambda r: r.position),
+                         lambda self, v: None)  # Monde y range un dict : sans effet ici
+
+        def get_role(self, rid):
+            return self._roles.get(int(rid or 0))
+
+        def role(self, name, position, **kw):
+            r = Role(self.nouvel_id(), name, position, **kw)
+            self._roles[r.id] = r
+            return r
+
+        async def create_role(self, *, name, colour=None, permissions=None, **kw):
+            haut = max((r.position for r in self._roles.values() if r.position < 90), default=0)
+            r = Role(self.nouvel_id(), name, 1, couleur=getattr(colour, "value", 0) or 0, permissions=permissions)
+            for autre in self._roles.values():
+                if 0 < autre.position <= haut:
+                    autre.position += 1
+            self._roles[r.id] = r
+            return r
+
+        def membre(self, uid, nom, *roles, **kw):
+            m = Membre(uid, nom, *roles, **kw)
+            m.guild = self
+            self.membres[uid] = m
+            self.members.append(m)
+            return m
+
+        def get_thread(self, tid):
+            return self.fils.get(int(tid or 0))
+
+        def by_category(self):
+            sortie = []
+            for cat in self.categories_:
+                salons = sorted((s for s in self.salons.values() if getattr(s, "category_id", None) == cat.id),
+                                key=lambda s: s.position)
+                sortie.append((cat, salons))
+            sans = [s for s in self.salons.values() if getattr(s, "category_id", None) is None]
+            return ([(None, sans)] if sans else []) + sortie
+
+        async def fetch_ban(self, objet):
+            raise discord.NotFound(Obj(status=404, reason="x"), "absent")
+
+    return Obj(Role=Role, Membre=Membre, Serveur=Serveur, Obj=Obj, F=F)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  La base temporaire et les modules branchés comme dans bot.py
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _base(chemin: Path):
+    @contextlib.asynccontextmanager
+    async def get_db():
+        db = await aiosqlite.connect(chemin)
+        try:
+            yield db
+        finally:
+            await db.close()
+    return get_db
+
+
+async def _appeler_setup(module, deps: dict) -> bool:
+    """Le `setup` d'un module inconnu d'avance (les événements) : seulement les dépendances qu'il demande."""
+    setup = getattr(module, "setup", None)
+    if setup is not None:
+        noms = inspect.signature(setup).parameters
+        manquants = [n for n, p in noms.items() if p.default is inspect.Parameter.empty
+                     and p.kind is not inspect.Parameter.VAR_KEYWORD and n not in deps]
+        if manquants:
+            print(f"[SITE LOCAL] {module.__name__} : setup non appelé (dépendances inconnues : {', '.join(manquants)})")
+            return False
+        res = setup(**{n: deps[n] for n in noms if n in deps})
+        if inspect.isawaitable(res):
+            await res
+    if hasattr(module, "init_db"):
+        await module.init_db()
+    return True
+
+
+async def construire(dossier: Path | None = None, port: int = PORT, qui: int = FONDATEUR):
+    """(application aiohttp, contexte) : le site complet sur une base neuve, prêt à servir."""
+    dossier = Path(dossier or tempfile.mkdtemp(prefix="site_local_"))
+    (dossier / "data").mkdir(parents=True, exist_ok=True)
+    paths._RESOLVED_BASE = dossier / "data"
+
+    import affiches
+    import annonces
+    import casier
+    import clan
+    import entraide
+    import health_server
+    import questions
+    import recrutements
+    import registre
+    import rellseas_panneau
+    import sondages
+    import suggestions
+    import tableau
+    import transcript_store
+    import vigilance
+
+    transcript_store._BASE_DIR = str(dossier / "transcripts")
+    tableau.RACINE_DONNEES = dossier / "data" / "site"
+    X = _faux()
+    g = X.Serveur()
+    get_db = _base(dossier / "site_local.db")
+    conf = {}
+
+    async def cfg(_gid):
+        return conf
+
+    async def db_set(_gid, k, v):
+        conf[k] = v
+
+    def a_la_tete(_g, m, _c=None):
+        return m is not None and m.id in TETE
+
+    async def journal(_g, type_, texte, **kw):
+        await registre.noter(SERVEUR_ID, "Clan", type_, texte, **{k: v for k, v in kw.items()
+                                                                   if k in ("membre_id", "auteur_id", "salon_id", "detail")})
+
+    #  Les rôles et les membres.
+    direction_r = g.role("Direction", 60, couleur=0x8E2A24)
+    g.role("Staff", 40, couleur=0xA8823F, permissions=discord.Permissions(manage_messages=True))
+    clan_r = g.role("Rell Seas", 30, couleur=0x1F4E5A)
+    g.role("Notifications", 5)
+    g.role("Bot musique", 20, managed=True)
+    g.me = X.Obj(id=999, top_role=g.role("GoRP Bot", 80), guild_permissions=discord.Permissions(
+        manage_roles=True, manage_channels=True, ban_members=True, mention_everyone=True))
+    g.membre(FONDATEUR, "GoRipe", direction_r, arrivee_jours=600)
+    g.membre(DIRECTION, "Capitaine Direction", direction_r, arrivee_jours=420)
+    hasard = random.Random(25102026)
+    for k, nom in enumerate(PRENOMS):
+        roles = [clan_r] if k % 3 != 2 else []
+        g.membre(1000 + k, nom, *roles, arrivee_jours=hasard.randint(3, 500))
+    g.get_member(1003).timed_out_until = datetime.now(timezone.utc) + timedelta(hours=3)
+    conf.update({rellseas_panneau.CLE_ROLE_CIBLE: clan_r.id, "direction_allowed_role": direction_r.id,
+                 "ticket_panels": {"p1": {"name": "Recrutement Rell Seas"}, "p2": {"name": "Support"},
+                                   "p3": {"name": "Signalement"}}})
+    salon_annonces = g._salon(X.F.Texte, "📢・annonces", {"category": g.commu})
+
+    #  Les modules, comme dans `_activite_boot`.
+    silence = print
+    registre.setup(get_db=get_db, log=silence)
+    recrutements.setup(get_db=get_db, cfg=cfg, db_set=db_set, salon=None, role=lambda _g, _c: clan_r,
+                       panneaux=rellseas_panneau.panneaux_tickets, log=silence)
+    questions.setup(get_db=get_db, est_staff=lambda _g, m, _c: a_la_tete(_g, m), log=silence)
+
+    async def salon_alertes(_g):
+        return None
+    vigilance.setup(get_db=get_db, salon=salon_alertes, carte=lambda *a: None, log=silence)
+    clan.setup(get_db=get_db, log=silence)
+    casier.setup(get_db=get_db, log=silence)
+    sondages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=None, controle=None, log=silence)
+    suggestions.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=None, controle=None, salon_logs=None,
+                      log=silence)
+
+    async def est_staff(_g, m):
+        return a_la_tete(_g, m)
+    entraide.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=None, controle=None, est_staff=est_staff,
+                   journal=journal, log=silence)
+    annonces.setup(get_db=get_db, cfg=cfg, db_set=db_set, est_tete=a_la_tete, journal=journal,
+                   role_clan=lambda _g, _c: clan_r, log=silence)
+
+    async def alerte(_g, m, raison, suspendu=True):
+        print(f"[SITE LOCAL] alerte de sécurité : {m.display_name} — {raison}")
+
+    async def conversation(_g, ticket):
+        return {"ticket": ticket, "source": "demo", "messages": [
+            {"auteur": "Kolax", "avatar": "", "bot": False, "quand": int(time.time()) - 3600,
+             "texte": "Bonjour, je voudrais rejoindre l'équipage.", "images": [], "videos": [], "fichiers": [],
+             "embeds": []},
+            {"auteur": "GoRipe", "avatar": "", "bot": False, "quand": int(time.time()) - 3000,
+             "texte": "Bienvenue ! Ton pseudo Roblox ?", "images": [], "videos": [], "fichiers": [], "embeds": []}]}
+    tableau.setup(bot=X.Obj(get_guild=lambda gid: g if gid == SERVEUR_ID else None, user=X.Obj(id=999)),
+                  cle="site-local", base_url=f"http://localhost:{port}", cfg=cfg, get_db=get_db, mesurer_groupe=None,
+                  autorise_membre=a_la_tete, direction=a_la_tete, tete=TETE, alerte_securite=alerte,
+                  conversation=conversation, log=print)
+    for module in (registre, recrutements, questions, vigilance, clan, casier, sondages, suggestions, entraide,
+                   annonces, tableau):
+        await module.init_db()
+    await _tables_du_bot(get_db)
+
+    affiches.setup(get_db=get_db, log=print)
+    await affiches.init_db()
+    depart = affiches.DEPART if affiches.DEPART.is_file() else CATALOGUE_EXEMPLE
+    await affiches.charger_depart(depart)
+    tableau.monter(affiches)
+    try:
+        import evenements  # le module des événements du clan : branché s'il est là
+    except ModuleNotFoundError:
+        evenements = None
+    except Exception as ex:  # outil local : présent mais cassé — on le dit et on continue sans lui
+        print(f"[SITE LOCAL] événements illisibles : {type(ex).__name__} {ex}")
+        evenements = None
+    if evenements is not None:
+        deps = {"get_db": get_db, "cfg": cfg, "db_set": db_set, "bot": X.Obj(get_guild=lambda gid: g, user=X.Obj(id=999),
+                                                                               guilds=[g]),
+                "log": print, "est_tete": a_la_tete, "journal": journal, "role_clan": lambda _g, _c: clan_r,
+                "fiches": affiches.fiches_clan, "catalogue": affiches.catalogue_clan, "media": tableau.lire_media}
+        try:
+            if await _appeler_setup(evenements, deps) and hasattr(evenements, "ROUTES_SITE"):
+                affiches.brancher_evenements(evenements)  # comme l'étape « affiches » du bot
+        except Exception as ex:  # outil local : on le dit et on continue sans les événements
+            print(f"[SITE LOCAL] événements non branchés : {type(ex).__name__} {ex}")
+
+    await _remplir(get_db, g, clan_r, salon_annonces, X)
+    await _affiches_demo(g, X)
+
+    app = health_server.construire_app()
+
+    async def demo(request):
+        """L'entrée de démonstration : une session SANS lien — ce script seulement."""
+        from aiohttp import web
+        uid = DIRECTION if request.query.get("qui") == "direction" else qui
+        expire = int(time.time()) + tableau.DUREE
+        sid = await tableau._ouvrir_session(SERVEUR_ID, uid, expire)
+        r = web.Response(status=303, headers=dict(tableau.ENTETES, Location=tableau.ESPACE))
+        r.set_cookie(tableau.COOKIE, sid, max_age=tableau.DUREE, path="/", secure=True, httponly=True, samesite="Lax")
+        return r
+    app.router.add_get("/tableau/demo", demo)
+    return app, X.Obj(dossier=dossier, guild=g, get_db=get_db, conf=conf)
+
+
+async def _tables_du_bot(get_db) -> None:
+    """Les tables que `bot.py` crée lui-même (tickets, casier, restrictions, erreurs) : ce que le site en lit."""
+    async with get_db() as db:
+        for sql in (
+                "CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER,"
+                " user_id INTEGER, panel_id TEXT, claimed_by INTEGER, status TEXT, answers TEXT, created_at DATETIME)",
+                "CREATE TABLE IF NOT EXISTS ticket_log_events (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,"
+                " ticket_id INTEGER, kind TEXT, actor_id INTEGER, detail TEXT, created_unix INTEGER)",
+                "CREATE TABLE IF NOT EXISTS ticket_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,"
+                " channel_id INTEGER, action TEXT, actor_id INTEGER, at DATETIME, detail TEXT)",
+                "CREATE TABLE IF NOT EXISTS ticket_transcripts (guild_id INTEGER, ticket_id INTEGER, url TEXT,"
+                " user_name TEXT, closed_at DATETIME)",
+                "CREATE TABLE IF NOT EXISTS infractions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,"
+                " user_id INTEGER, mod_id INTEGER, type TEXT, reason TEXT, duration TEXT, created_at DATETIME)",
+                "CREATE TABLE IF NOT EXISTS restricted_members (guild_id INTEGER, user_id INTEGER, roles_backup TEXT,"
+                " restricted_at DATETIME, duration INTEGER, reason TEXT, restricted_by INTEGER)",
+                "CREATE TABLE IF NOT EXISTS error_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER DEFAULT 0,"
+                " source TEXT NOT NULL, error_type TEXT, message TEXT, traceback TEXT,"
+                " context_jsonb TEXT DEFAULT '{}', occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"):
+            await db.execute(sql)
+        await db.commit()
+
+
+def _date(t: float) -> str:
+    return datetime.fromtimestamp(int(t), timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def _remplir(get_db, g, clan_r, salon_annonces, X) -> None:
+    """Des données qui ressemblent au vrai serveur : de quoi voir chaque rubrique remplie."""
+    import registre
+    hasard = random.Random(2510)
+    maintenant = time.time()
+    membres = [m for m in g.members if m.id not in TETE]
+    async with get_db() as db:
+        #  Les tickets : ouverts et fermés, de chaque type, avec prise en charge et motif.
+        for n in range(1, 41):
+            m = hasard.choice(membres)
+            panneau = hasard.choice(("p1", "p1", "p2", "p3"))
+            ouvert = maintenant - hasard.randint(1, 80) * 86400 + hasard.randint(0, 80000)
+            ouvert_ticket = n > 34
+            reponses = json.dumps({"Pseudo Roblox": f"{m.display_name.split()[0]}_RS", "Niveau": str(hasard.randint(5, 80))}
+                                  if panneau == "p1" else {})
+            await db.execute("INSERT INTO tickets VALUES (?,?,?,?,?,?,?,?,?)",
+                             (n, SERVEUR_ID, 5000 + n, m.id, panneau, FONDATEUR if n % 2 else DIRECTION,
+                              "open" if ouvert_ticket else "closed", reponses, _date(ouvert)))
+            await db.execute("INSERT INTO ticket_log_events (guild_id, ticket_id, kind, actor_id, created_unix)"
+                             " VALUES (?,?,?,?,?)", (SERVEUR_ID, n, "claim", FONDATEUR if n % 2 else DIRECTION,
+                                                     int(ouvert + 1800)))
+            if not ouvert_ticket:
+                await db.execute("INSERT INTO ticket_log_events (guild_id, ticket_id, kind, actor_id, detail, created_unix)"
+                                 " VALUES (?,?,?,?,?,?)", (SERVEUR_ID, n, "close", DIRECTION, "Résolu",
+                                                           int(ouvert + hasard.randint(2, 40) * 3600)))
+        #  Le casier : avertissements, mutes, détections automatiques, un bannissement.
+        for n in range(60):
+            m = hasard.choice(membres)
+            typ = hasard.choice(("warn", "warn", "warn", "mute", "insulte", "protection", "kick"))
+            await db.execute("INSERT INTO infractions (guild_id, user_id, mod_id, type, reason, duration, created_at)"
+                             " VALUES (?,?,?,?,?,?,?)",
+                             (SERVEUR_ID, m.id, 999 if typ in ("insulte", "protection") else hasard.choice((FONDATEUR, DIRECTION)),
+                              typ, hasard.choice(("Spam dans le salon", "Insulte", "Lien interdit", "Pub", "Hors sujet")),
+                              "1h" if typ == "mute" else "", _date(maintenant - hasard.randint(0, 120) * 86400)))
+        await db.execute("INSERT INTO restricted_members VALUES (?,?,?,?,?,?,?)",
+                         (SERVEUR_ID, membres[4].id, "[]", _date(maintenant - 86400), 0, "Raid", DIRECTION))
+        #  Les candidatures fermées (acceptées, refusées).
+        for n in range(1, 13):
+            m = membres[n]
+            decision = "acceptes" if n % 3 else "refuses"
+            ferme = maintenant - hasard.randint(1, 200) * 86400
+            await db.execute("INSERT OR REPLACE INTO recrutements (guild_id, ticket_id, candidat_id, candidat_nom,"
+                             " ouvert_le, ferme_le, ferme_par, pris_par, reponses, msg_candidat, msg_staff, transcript,"
+                             " raison, decision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                             (SERVEUR_ID, 900 + n, m.id, m.display_name, int(ferme - 7200), int(ferme), DIRECTION,
+                              FONDATEUR, json.dumps({"Pseudo Roblox": f"{m.display_name.split()[0]}_RS",
+                                                     "Pourquoi nous ?": "J'aime naviguer en équipage."}),
+                              4, 3, "", "" if decision == "acceptes" else "Niveau insuffisant", decision))
+        #  Les questions, sondages et idées.
+        for n, texte in enumerate(("Comment on rejoint le clan Rell Seas ?", "C'est quand le prochain event ?",
+                                   "Quelqu'un sait où trouver le marchand ?")):
+            await db.execute("INSERT INTO questions (guild_id, salon_id, message_id, auteur_id, texte, quand, statut)"
+                             " VALUES (?,?,?,?,?,?,?)", (SERVEUR_ID, salon_annonces.id, 7000 + n, membres[n].id, texte,
+                                                         int(maintenant - n * 7200), "ouverte" if n else "repondue"))
+        await db.execute("INSERT INTO sondages (message_id, guild_id, channel_id, auteur_id, question, choix, comptes,"
+                         " total, cree_le, fin_le) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                         (8001, SERVEUR_ID, salon_annonces.id, FONDATEUR, "Un raid samedi soir ?",
+                          json.dumps(["Oui", "Non", "Dimanche plutôt"]), json.dumps([9, 2, 4]), 15,
+                          _date(maintenant - 86400), _date(maintenant + 86400)))
+        await db.execute("INSERT INTO suggestions_v2 (guild_id, channel_id, message_id, auteur_id, titre, details, statut,"
+                         " cree_le) VALUES (?,?,?,?,?,?,?,?)",
+                         (SERVEUR_ID, salon_annonces.id, 8101, membres[2].id, "Un salon pour les cartes au trésor",
+                          "Partager les cartes trouvées.", "attente", _date(maintenant - 3 * 86400)))
+        await db.execute("INSERT INTO annonces (guild_id, salon_id, message_id, fil_id, auteur_id, titre, texte, cree)"
+                         " VALUES (?,?,?,?,?,?,?,?)", (SERVEUR_ID, salon_annonces.id, 8201, 0, FONDATEUR,
+                                                        "Bienvenue sur GoRP SEA",
+                                                        "Le clan recrute : tickets ouverts.", int(maintenant - 5 * 86400)))
+        await db.commit()
+    #  Le journal : un mois d'évènements, de toutes les catégories.
+    for n in range(220):
+        cat, type_, gravite = hasard.choice(CATEGORIES_JOURNAL)
+        m = hasard.choice(membres)
+        quand = maintenant - hasard.randint(0, 30 * 86400)
+        async with get_db() as db:
+            await db.execute("INSERT INTO registre (guild_id, quand, categorie, type, membre_id, auteur_id, salon_id, texte,"
+                             " detail, gravite) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                             (SERVEUR_ID, int(quand), cat, type_, m.id, hasard.choice((0, FONDATEUR, DIRECTION)),
+                              salon_annonces.id, f"{cat} : {m.display_name}", "", gravite))
+            await db.commit()
+    registre._derniers.clear()
+
+
+async def _affiches_demo(g, X) -> None:
+    """Quelques affiches (et des portraits dessinés ici, à défaut de Roblox), un rôle de métier lié."""
+    import affiches
+    import tableau
+    corps = [
+        {"id": "demo-kolax-01", "membre_id": "1000", "roblox_nom": "Kolax_RS", "roblox_id": "1000001", "surnom": "Le Requin",
+         "prime": 1_500_000, "niveau": 72, "grade": "Second", "statut": "actif",
+         "attributs": {"race": ["humain"], "metier": ["navigateur", "canonnier"], "faction": ["pirates"]},
+         "notes": "Toujours à l'heure aux raids."},
+        {"id": "demo-mira-002", "membre_id": "1001", "roblox_nom": "Mira_RS", "roblox_id": "1000002", "surnom": "L'Écume",
+         "prime": 640_000, "niveau": 41, "grade": "Matelot", "statut": "actif",
+         "attributs": {"race": ["triton"], "metier": ["charpentier"], "faction": ["pirates"]}},
+        {"id": "demo-calico03", "membre_id": "1004", "roblox_nom": "Calico_Jack", "roblox_id": "1000003",
+         "surnom": "Calico", "prime": 90_000, "niveau": 12, "grade": "Mousse", "statut": "nouveau",
+         "attributs": {"metier": ["cuisinier"], "faction": ["marine"]}},
+    ]
+    chef = g.get_member(FONDATEUR)
+    for c in corps:
+        status, rep = await affiches._route_affiche(g, chef, {}, c)
+        if status != 200:
+            print(f"[SITE LOCAL] affiche de démonstration refusée : {rep}")
+    try:
+        from PIL import Image, ImageDraw
+        dossier = tableau.dossier_site("avatars")
+        for k, (rid, teinte) in enumerate(((1000001, (31, 78, 90)), (1000002, (142, 42, 36)), (1000003, (168, 130, 63)))):
+            im = Image.new("RGB", (420, 420), (239, 226, 196))
+            d = ImageDraw.Draw(im)
+            d.ellipse((110, 60, 310, 260), fill=teinte)
+            d.rectangle((90, 270, 330, 420), fill=teinte)
+            im.save(dossier / f"{rid}.webp", "WEBP", quality=85)
+    except Exception as ex:  # outil local : sans Pillow, les affiches n'ont pas de portrait
+        print(f"[SITE LOCAL] portraits de démonstration non dessinés : {type(ex).__name__} {ex}")
+    metier = g.role("Navigateur", 6, couleur=0x1F4E5A)
+    await affiches._route_role(g, chef, {}, {"type": "metier", "cle": "navigateur", "role_id": str(metier.id),
+                                             "auto": True})
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Le vrai site en local, avec un faux serveur Discord.")
+    parser.add_argument("--port", type=int, default=PORT, help=f"le port ({PORT} par défaut)")
+    parser.add_argument("--qui", choices=("fondateur", "direction"), default="fondateur",
+                        help="le compte de l'entrée de démonstration")
+    parser.add_argument("--garder", default="", help="dossier de travail gardé (sinon un dossier temporaire)")
+    parser.add_argument("--site", default="", help="servir un autre dossier « site/ » (sinon celui du dépôt)")
+    args = parser.parse_args()
+    from aiohttp import web
+
+    async def lancer():
+        if args.site:
+            import tableau
+            tableau.SITE = Path(args.site).resolve()
+        app, ctx = await construire(Path(args.garder) if args.garder else None, args.port,
+                                    DIRECTION if args.qui == "direction" else FONDATEUR)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        await web.TCPSite(runner, "localhost", args.port).start()
+        print(f"[SITE LOCAL] base et images : {ctx.dossier}")
+        print(f"[SITE LOCAL] ouvre http://localhost:{args.port}/tableau/demo   (Ctrl+C pour arrêter)")
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        finally:
+            await runner.cleanup()
+    try:
+        asyncio.run(lancer())
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -26,17 +26,36 @@ LES DONNÉES
   Lues en direct dans la base du bot. Chaque réponse porte une empreinte (ETag) : la page qui se
   rafraîchit ne retélécharge rien quand rien n'a changé ; la version de la page fait recharger
   celle qui est périmée.
+
+LE SITE V2, « LA CAPITAINERIE » (25/10/2026)
+  · La page vient du dossier `site/` (index.html, scripts et styles SANS rien en ligne) ; `{{V}}` y
+    devient l'empreinte du dossier : un fichier changé = de nouvelles adresses, jamais un vieux
+    script gardé en cache. Sans `site/index.html`, l'ancienne page reste servie.
+  · Les fichiers de `site/` (`/tableau/espace/s/…`) sont publics : rien de secret dedans, extensions
+    choisies, jamais un pas hors du dossier. Le service worker (`/tableau/espace/sw.js`) garde la
+    coquille pour travailler hors ligne.
+  · Les modules branchent leurs adresses (`monter`) sous `/tableau/espace/api/…` : session, tête,
+    origine pour toute écriture, taille du corps, cadence, limites graves, journal du site ; une
+    erreur reste ici (« indisponible » côté page, le détail au journal du bot).
+  · Hors ligne, la page garde ses modifications et les rejoue (`/tableau/espace/sync`) : chaque
+    opération a son identifiant, appliquée une seule fois même renvoyée dix fois.
+  · Les images envoyées sont refaites (Pillow) : jamais le fichier reçu tel quel.
+  · Le nettoyage : des règles bornées, réglables sur le site, appliquées chaque jour, bilan au journal.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import csv
 import hashlib
 import hmac
+import inspect
 import io
 import json
+import os
 import re
 import secrets
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,8 +71,10 @@ import discord
 import annonces
 import casier
 import clan
+import diag
 import entraide
 import owner_ids
+import paths
 import questions
 import recrutements
 import registre
@@ -64,7 +85,10 @@ import transcript_store
 import vigilance
 
 DUREE = 24 * 3600
-ESPACE = "/tableau/espace"
+#  25/10/2026 : la barre finale compte. La page est à `/tableau/espace/` : ses adresses relatives
+#  (`s/app.js`, `api/…`) restent dans l'espace, et le service worker (portée `/tableau/espace/`) la
+#  contrôle — sans la barre, ni l'un ni l'autre. `/tableau/espace` y renvoie.
+ESPACE = "/tableau/espace/"
 COOKIE = "__Host-tableau"
 LIMITE_REQUETES = 240          # par minute et par session
 LIMITE_ESSAIS = 30             # liens ou cookies invalides par adresse et par 10 minutes
@@ -72,7 +96,11 @@ RELIRE = 60                    # s : une session gardée en mémoire est relue e
 FORMAT_SESSION = re.compile(r"[A-Za-z0-9_-]{43}")  # ce que donne secrets.token_urlsafe(32)
 LIMITES_GRAVES = {"exclusion": 5, "roles": 25, "casier": 10, "rappels": 50}  # par 10 minutes et par personne
 BLOCAGE = 3600
-PAGE_BRUTE = (Path(__file__).resolve().parent / "tableau_page.html").read_text(encoding="utf-8")
+#  L'ancienne page (avant `site/`) : facultative — retirée un jour, l'import ne casse pas pour autant.
+try:
+    PAGE_BRUTE = (Path(__file__).resolve().parent / "tableau_page.html").read_text(encoding="utf-8")
+except OSError:
+    PAGE_BRUTE = ""
 VERSION = hashlib.sha256(PAGE_BRUTE.encode()).hexdigest()[:12]
 PAGE = PAGE_BRUTE.replace("__VERSION__", VERSION)
 
@@ -110,6 +138,62 @@ ENTETES = {
                                 "script-src 'none'; connect-src 'self'; base-uri 'none'; "
                                 "form-action 'none'; frame-ancestors 'none'"),
 }
+#  La page v2 : rien en ligne (ni script, ni style, ni attribut style=) — tout vient de `site/`.
+CSP_SITE = ("default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; "
+            "img-src 'self' data: blob: https://cdn.discordapp.com https://*.discordapp.net; "
+            "media-src 'self' https://cdn.discordapp.com https://*.discordapp.net; connect-src 'self'; "
+            "worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+#  Un fichier de `site/` ouvert seul (un SVG surtout) : aucun script, rien de chargé d'ailleurs.
+CSP_STATIQUE = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:"
+#  Le service worker a SA politique (celle de la page ne le suit pas) : ses requêtes restent chez nous
+#  et chez Discord (avatars), comme celles de la page.
+CSP_SW = "default-src 'none'; script-src 'self'; connect-src 'self' https://cdn.discordapp.com https://*.discordapp.net"
+CSP_MEDIA = "default-src 'none'; sandbox"
+SITE = Path(__file__).resolve().parent / "site"
+TYPES_STATIQUES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8", "woff2": "font/woff2",
+                   "webp": "image/webp", "png": "image/png", "svg": "image/svg+xml",
+                   "json": "application/json; charset=utf-8",
+                   "webmanifest": "application/manifest+json; charset=utf-8", "ico": "image/x-icon"}
+COMPRESSIBLES = {"js", "css", "svg", "json", "webmanifest"}
+STATIQUE_MAX = 6 * 1024 * 1024          # un fichier de `site/` (au-delà : refusé, jamais tout en mémoire)
+STATIQUES_CACHE = 48 * 1024 * 1024      # ce que la mémoire garde des fichiers de `site/`
+SEGMENT_STATIQUE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}")
+ENTETES_STATIQUES = {
+    "X-Content-Type-Options": "nosniff",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Referrer-Policy": "no-referrer",
+    "X-Robots-Tag": "noindex, nofollow",
+    "X-Frame-Options": "DENY",
+    "Strict-Transport-Security": "max-age=31536000",
+    "Content-Security-Policy": CSP_STATIQUE,
+}
+#  Le registre des adresses du site (`monter`).
+FORMAT_ROUTE = re.compile(r"[a-z0-9_]{1,40}(?:/[a-z0-9_]{1,40}){0,4}")
+CORPS_DEFAUT = 64 * 1024
+CORPS_PLAFOND = 12 * 1024 * 1024
+LIMITE_ECRITURES = 120     # écritures du site (adresses + synchronisation) par minute et par personne
+LIMITE_MEDIAS = 1500       # images servies par minute et par session (une galerie entière, pas plus)
+PARAMETRES_MAX = 20
+#  La synchronisation hors ligne.
+SYNC_OPS_MAX = 50
+SYNC_CORPS_MAX = 4 * 1024 * 1024
+FORMAT_OP = re.compile(r"[A-Za-z0-9_-]{8,64}")
+OP_GARDEE_MAX = 256 * 1024             # le résultat gardé d'une opération (au-delà : son seul statut)
+OPS_RECENTES = 600                     # s : les résultats tout frais restent aussi en mémoire
+#  Les images envoyées depuis le site.
+MEDIA_MAX = 8 * 1024 * 1024            # octets décodés
+MEDIA_COTE = 2048
+MEDIA_PIXELS = 24_000_000              # au-delà, l'image demanderait trop de mémoire à décoder
+MEDIAS_DOSSIER_MAX = 512 * 1024 * 1024
+MEDIAS_LIBRE_MIN = 300 * 1024 * 1024   # place libre minimale du volume pour accepter une image
+FORMAT_MEDIA = re.compile(r"[A-Za-z0-9_-]{16}")
+FORMAT_AVATAR = re.compile(r"avatar/([0-9]{1,20})")
+MAGIQUES = ((b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"), (b"GIF87a", "image/gif"),
+            (b"GIF89a", "image/gif"))
+#  Le nettoyage du site.
+NETTOYAGE_INTERVALLE = 23 * 3600       # la boucle horaire n'applique les règles qu'une fois par jour
+NETTOYAGE_MANUEL = 300                 # « Lancer maintenant » : une fois toutes les 5 minutes au plus
+NETTOYAGE_BILANS = 30                  # passages gardés par serveur (la rubrique en montre les 10 derniers)
 
 _cle = b""
 _base = ""
@@ -122,9 +206,24 @@ _actions: dict = {}
 _cadence: dict = {}
 _sessions: dict = {}
 _requetes: dict = {}
+_requetes_medias: dict = {}
 _essais: dict = {}
 _graves: dict = {}
 _blocages: dict = {}
+_ops_en_cours: dict = {}     # op_id → Future : la même opération renvoyée pendant qu'elle s'applique
+_ops_recentes: dict = {}     # op_id → (heure, utilisateur, statut, corps)
+_nettoyages: dict = {}       # serveur → heure du dernier « Lancer maintenant »
+_medias_vus: dict = {}       # image → dernière heure notée en base (une écriture par heure au plus)
+_statiques: dict = {}        # chemin → (taille, date, octets, etag) — les fichiers de `site/` en mémoire
+_page_site: dict = {}        # index.html et sw.js lus une fois par version du fichier
+_cache_empreinte: dict = {"signature": None, "v": "", "vu": 0.0}
+#  Ce que les modules branchent (pas de l'état de session : `setup` ne les efface pas).
+ROUTES: dict = {}            # nom → {méthode : définition normalisée} (modules)
+_INTERNES: dict = {}         # nom → {méthode : définition normalisée} (ce fichier : médias, nettoyage)
+REGLES: dict = {}            # clé → règle de nettoyage
+_SOURCES_MEDIAS: list = []   # async (guild_id) → set des images utilisées
+RACINE_DONNEES: Path | None = None   # tests : le dossier des images ; sinon `base_data_dir()/site`
+_verrous: dict = {}          # nom → (boucle, verrou) : un verrou né dans une autre boucle y lèverait une erreur
 
 #  Le casier mélange les sanctions décidées (staff ou escalade) et les détections du bot.
 SANCTIONS = {"warn": "Avertissement", "mute": "Mute", "kick": "Expulsion", "ban": "Bannissement"}
@@ -162,7 +261,8 @@ def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_memb
     _cfg, _get_db, _mesurer_groupe, _autorise_membre = cfg, get_db, mesurer_groupe, autorise_membre
     _alerte_securite = alerte_securite
     _log = log or print
-    for d in (_sessions, _requetes, _essais, _graves, _blocages, _cadence, _cache):
+    for d in (_sessions, _requetes, _requetes_medias, _essais, _graves, _blocages, _cadence, _cache, _ops_recentes,
+              _nettoyages, _medias_vus, _alertes_tete):
         d.clear()
 
 
@@ -173,6 +273,24 @@ async def init_db():
         await db.execute("CREATE TABLE IF NOT EXISTS tableau_jetons (nonce TEXT PRIMARY KEY, expire_le INTEGER)")
         await db.execute("CREATE TABLE IF NOT EXISTS tableau_blocages (guild_id INTEGER, user_id INTEGER, jusqu INTEGER,"
                          " raison TEXT, PRIMARY KEY (guild_id, user_id))")
+        #  25/10/2026 (site v2) : les opérations rejouées au retour du réseau, les images, le nettoyage.
+        await db.execute("CREATE TABLE IF NOT EXISTS tableau_ops (op_id TEXT PRIMARY KEY, guild_id INTEGER NOT NULL,"
+                         " user_id INTEGER NOT NULL, api TEXT NOT NULL, status INTEGER NOT NULL, corps TEXT NOT NULL,"
+                         " quand INTEGER NOT NULL)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_tableau_ops_quand ON tableau_ops(guild_id, quand)")
+        await db.execute("CREATE TABLE IF NOT EXISTS tableau_medias (id TEXT PRIMARY KEY, guild_id INTEGER NOT NULL,"
+                         " auteur_id INTEGER NOT NULL, nom TEXT NOT NULL DEFAULT '', type TEXT NOT NULL,"
+                         " octets INTEGER NOT NULL, largeur INTEGER NOT NULL, hauteur INTEGER NOT NULL,"
+                         " cree_le INTEGER NOT NULL, vu_le INTEGER NOT NULL DEFAULT 0)")
+        await db.execute("CREATE TABLE IF NOT EXISTS tableau_nettoyage (guild_id INTEGER NOT NULL, cle TEXT NOT NULL,"
+                         " jours INTEGER NOT NULL, maj_le INTEGER NOT NULL DEFAULT 0, maj_par INTEGER NOT NULL DEFAULT 0,"
+                         " PRIMARY KEY (guild_id, cle))")
+        await db.execute("CREATE TABLE IF NOT EXISTS tableau_nettoyage_etat (guild_id INTEGER PRIMARY KEY,"
+                         " dernier INTEGER NOT NULL DEFAULT 0, bilan TEXT NOT NULL DEFAULT '{}',"
+                         " par INTEGER NOT NULL DEFAULT 0)")
+        await db.execute("CREATE TABLE IF NOT EXISTS tableau_nettoyage_bilans (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         " guild_id INTEGER NOT NULL, quand INTEGER NOT NULL, total INTEGER NOT NULL,"
+                         " detail TEXT NOT NULL DEFAULT '', par INTEGER NOT NULL DEFAULT 0)")
         for uid in _tete:
             await db.execute("DELETE FROM tableau_blocages WHERE user_id=?", (uid,))
         await db.commit()
@@ -366,8 +484,9 @@ def _trop_essais(request, compter: bool = False, maintenant: float | None = None
     return len(recents) > LIMITE_ESSAIS
 
 
-async def _verifier(request, maintenant: float | None = None):
-    """Session valide, personne toujours fondateur ou direction, pas suspendue, cadence raisonnable."""
+async def _verifier(request, maintenant: float | None = None, medias: bool = False):
+    """Session valide, personne toujours fondateur ou direction, pas suspendue, cadence raisonnable.
+    `medias` : une image de la page (sa propre cadence : une galerie ne vide pas celle des données)."""
     t = maintenant or time.time()
     ses = await _session(request, t)
     if ses is None:
@@ -381,10 +500,11 @@ async def _verifier(request, maintenant: float | None = None):
         raise _Refus(403, "Accès retiré.")
     if await suspendu(gid, uid, t):
         raise _Refus(403, "Accès suspendu.")
-    recents = [x for x in _requetes.get(emp, []) if t - x < 60]
-    if len(recents) >= LIMITE_REQUETES:
+    seau, limite = (_requetes_medias, LIMITE_MEDIAS) if medias else (_requetes, LIMITE_REQUETES)
+    recents = [x for x in seau.get(emp, []) if t - x < 60]
+    if len(recents) >= limite:
         raise _Refus(429, "Trop de requêtes.")
-    _requetes[emp] = recents + [t]
+    seau[emp] = recents + [t]
     return {"g": gid, "u": uid, "e": expire, "p": "tout", "emp": emp}, g
 
 
@@ -847,6 +967,8 @@ async def donnees(g, portee: str = "tout") -> dict:
                      salon=f"https://discord.com/channels/{g.id}/{o['salon']}" if o["salon"] else "")
                 for o in cand["en_cours"]]
     tickets = await _tickets(g, c, apart, qui)
+    #  Site v2 : les tickets fermés depuis plus de N jours passent aux archives de la liste (règle « Nettoyage »).
+    tickets["archives_jours"] = await jours_regle(g.id, "tickets_archives")
     sanctions = await _sanctions(g, apart, qui)
     equipe: dict = {}
     for uid, v in tickets.pop("staff30").items():
@@ -857,7 +979,7 @@ async def donnees(g, portee: str = "tout") -> dict:
         if q["par_staff"] and q["par_id"] and q["repondu_le"] and time.time() - q["repondu_le"] <= 30 * 86400:
             equipe.setdefault(int(q["par_id"]), {"tickets": 0, "sanctions": 0, "questions": 0})["questions"] += 1
     out = {
-        "version": VERSION,
+        "version": version_page(),
         "serveur": {"nom": g.name, "icone": str(g.icon.with_size(128).url) if g.icon else ""},
         "genere": datetime.now(timezone.utc).isoformat(),
         "portee": portee,
@@ -1095,12 +1217,28 @@ async def entree(request):
 
 
 async def page(request):
+    """La page : celle de `site/` (v2) dès qu'elle existe — sinon l'ancienne, avec son nonce."""
+    from aiohttp import web
     try:
         await _verifier(request)
     except _Refus as r:
         return _html(EXPIRE if r.status != 429 else TROP, r.status)
+    neuve = _lire_page_site("index.html")
+    if neuve is None and not PAGE:
+        return _html(_message("Site en maintenance", "Réessaie dans quelques minutes."), 503)
+    if neuve is not None:
+        r = web.Response(text=neuve, content_type="text/html",
+                         headers=dict(ENTETES, **{"Content-Security-Policy": CSP_SITE}))
+        r.enable_compression()
+        return r
     nonce = _b64(secrets.token_bytes(16))
     return _html(PAGE.replace("__NONCE__", nonce), nonce=nonce)
+
+
+async def vers_espace(request):
+    """`/tableau/espace` sans la barre : la page est à `/tableau/espace/` (adresses relatives, service worker)."""
+    from aiohttp import web
+    return web.Response(status=303, headers=dict(ENTETES, Location=ESPACE))
 
 
 async def api(request):
@@ -1206,6 +1344,31 @@ def _origine_ok(request) -> bool:
     return origine == attendue
 
 
+async def limite_grave(g, auteur, genre: str, n: int = 1, maintenant: float | None = None) -> str | None:
+    """Compte `n` actions graves de ce genre. None : elles peuvent se faire. Sinon le refus à montrer
+    (accès au site suspendu une heure, le fondateur prévenu) — jamais pour la tête, seulement signalée
+    au fondateur, une fois par 10 minutes. Partagé par les actions et les adresses du site (`grave`)."""
+    t = maintenant or time.time()
+    cle = (g.id, auteur.id, genre)
+    faits = [x for x in _graves.get(cle, []) if t - x < 600]
+    if len(faits) + n > LIMITES_GRAVES[genre]:
+        raison = f"{len(faits) + n} actions graves ({genre}) en moins de 10 minutes"
+        if not a_la_tete(g, auteur.id):
+            await suspendre(g, auteur, raison)
+            return "Trop d'actions graves en peu de temps : accès au site suspendu une heure, le fondateur est prévenu."
+        #  « Si tu es suspendu alors que je suis le fondateur, il y a un petit problème » : jamais de
+        #  suspension pour la tête ; la direction est seulement signalée au fondateur, une fois.
+        if _alerte_securite is not None and t - _alertes_tete.get(cle, 0) > 600:
+            _alertes_tete[cle] = t
+            try:
+                await _alerte_securite(g, auteur, raison, suspendu=False)
+            except Exception as ex:  # l'alerte ne bloque jamais l'action
+                _log("[TABLEAU][E6] alerte de sécurité impossible")
+                _log(f"[TABLEAU][E6:DETAIL] {type(ex).__name__} {ex}")
+    _graves[cle] = faits + [t] * n
+    return None
+
+
 def _genre_grave(nom: str, corps: dict) -> tuple[str, int] | None:
     if nom == "moderer" and corps.get("sanction") in ("kick", "ban"):
         return "exclusion", 1
@@ -1254,26 +1417,9 @@ async def action(request):
     _cadence[auteur.id] = recents + [maintenant]
     grave = _genre_grave(nom, corps)
     if grave is not None:
-        genre, n = grave
-        cle = (g.id, auteur.id, genre)
-        faits = [t for t in _graves.get(cle, []) if maintenant - t < 600]
-        if len(faits) + n > LIMITES_GRAVES[genre]:
-            raison = f"{len(faits) + n} actions graves ({genre}) en moins de 10 minutes"
-            if not a_la_tete(g, auteur.id):
-                await suspendre(g, auteur, raison)
-                return _json({"ok": False, "message": "Trop d'actions graves en peu de temps : accès au site suspendu "
-                                                      "une heure, le fondateur est prévenu."}, 403)
-            #  « Si tu es suspendu alors que je suis le fondateur, il y a un petit problème » : jamais de
-            #  suspension pour la tête ; la direction est seulement signalée au fondateur, une fois.
-            cle_alerte = (g.id, auteur.id, genre)
-            if _alerte_securite is not None and maintenant - _alertes_tete.get(cle_alerte, 0) > 600:
-                _alertes_tete[cle_alerte] = maintenant
-                try:
-                    await _alerte_securite(g, auteur, raison, suspendu=False)
-                except Exception as ex:  # l'alerte ne bloque jamais l'action
-                    _log("[TABLEAU][E6] alerte de sécurité impossible")
-                    _log(f"[TABLEAU][E6:DETAIL] {type(ex).__name__} {ex}")
-        _graves[cle] = faits + [maintenant] * n
+        refus = await limite_grave(g, auteur, grave[0], grave[1], maintenant)
+        if refus is not None:
+            return _json({"ok": False, "message": refus}, 403)
     try:
         ok, message = await fn(g, auteur, corps)
     except Exception as ex:  # l'action échoue : la page le dit, le détail part au journal
@@ -1315,3 +1461,1123 @@ async def sortir(request):
         r = web.Response(status=204, headers=ENTETES)
     r.del_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="Lax")  # __Host- exige Secure
     return r
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Site v2 — la page de `site/`, ses fichiers, le service worker
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _fichiers_site() -> list:
+    """(chemin relatif, chemin, taille, date) de chaque fichier de `site/`, triés ; sans les cachés."""
+    racine, out, pile = SITE, [], [SITE]
+    while pile:
+        dossier = pile.pop()
+        try:
+            entrees = list(os.scandir(dossier))
+        except OSError:
+            continue
+        for e in entrees:
+            if e.name.startswith("."):
+                continue
+            try:
+                if e.is_dir(follow_symlinks=False):
+                    pile.append(Path(e.path))
+                elif e.is_file(follow_symlinks=False):
+                    st = e.stat(follow_symlinks=False)
+                    out.append((Path(e.path).relative_to(racine).as_posix(), Path(e.path), st.st_size, st.st_mtime_ns))
+            except OSError:
+                continue
+    return sorted(out)
+
+
+def empreinte_site(maintenant: float | None = None) -> str:
+    """L'empreinte du dossier `site/` (12 caractères), `{{V}}` de la page : le contenu de chaque fichier.
+    Un fichier changé, ajouté ou retiré = une autre empreinte = d'autres adresses (`?v=`), jamais un vieux
+    fichier gardé par le navigateur. Recalculée seulement quand un fichier change (taille, date)."""
+    t = maintenant or time.time()
+    racine = str(SITE)
+    deja = _cache_empreinte
+    if deja["signature"] is not None and deja.get("racine") == racine and t - deja["vu"] < 2:
+        return deja["v"]  # relue au plus toutes les 2 s : la page, les données et le service worker la demandent
+    fichiers = _fichiers_site()
+    signature = (racine, tuple((r, s, m) for r, _p, s, m in fichiers))
+    if signature != _cache_empreinte["signature"]:
+        h = hashlib.sha256()
+        for rel, p, _s, _m in fichiers:
+            h.update(rel.encode("utf-8") + b"\x00")
+            try:
+                h.update(p.read_bytes())
+            except OSError:
+                continue
+        _cache_empreinte.update(signature=signature, v=h.hexdigest()[:12] if fichiers else "")
+    _cache_empreinte.update(vu=t, racine=racine)
+    return _cache_empreinte["v"]
+
+
+def version_page() -> str:
+    """La version de la page servie : la page se recharge d'elle-même quand elle change."""
+    return empreinte_site() if (SITE / "index.html").is_file() else VERSION
+
+
+def _lire_page_site(nom: str) -> str | None:
+    """`site/index.html` ou `site/sw.js`, `{{V}}` remplacé — None s'il n'existe pas (ou illisible)."""
+    p = SITE / nom
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    cle = (str(p), st.st_size, st.st_mtime_ns)
+    deja = _page_site.get(nom)
+    if deja is None or deja[0] != cle:
+        try:
+            texte = p.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as ex:
+            _log("[TABLEAU][E13] page du site illisible")
+            _log(f"[TABLEAU][E13:DETAIL] {nom} {type(ex).__name__} {ex}")
+            return None
+        _page_site[nom] = deja = (cle, texte)
+    return deja[1].replace("{{V}}", empreinte_site())
+
+
+def _chemin_statique(brut) -> tuple[str, str] | None:
+    """(chemin relatif, extension) d'un fichier de `site/` demandé — None au moindre doute : segment
+    vide, `.` ou `..`, caché, caractère hors liste, extension non permise."""
+    brut = str(brut or "")
+    if not brut or len(brut) > 300:
+        return None
+    segments = brut.split("/")
+    if len(segments) > 8 or any(not SEGMENT_STATIQUE.fullmatch(s) or ".." in s for s in segments):
+        return None
+    nom = segments[-1]
+    ext = nom.rsplit(".", 1)[1].lower() if "." in nom else ""
+    if ext not in TYPES_STATIQUES:
+        return None
+    return "/".join(segments), ext
+
+
+def _lire_statique(rel: str):
+    """(octets, etag) d'un fichier de `site/`, gardés en mémoire tant qu'il ne change pas — ou None.
+    Le chemin résolu (liens suivis) doit rester DANS `site/`."""
+    try:
+        racine = SITE.resolve()
+        p = (SITE / rel).resolve()
+        if not p.is_relative_to(racine) or not p.is_file():
+            return None
+        st = p.stat()
+    except (OSError, ValueError, RuntimeError):
+        return None
+    if st.st_size > STATIQUE_MAX:
+        return None
+    deja = _statiques.get(str(p))
+    if deja is not None and deja[0] == st.st_size and deja[1] == st.st_mtime_ns:
+        return deja[2], deja[3]
+    try:
+        data = p.read_bytes()
+    except OSError:
+        return None
+    etag = '"' + hashlib.sha256(data).hexdigest()[:20] + '"'
+    _statiques.pop(str(p), None)
+    if sum(len(x[2]) for x in _statiques.values()) + len(data) <= STATIQUES_CACHE:
+        _statiques[str(p)] = (st.st_size, st.st_mtime_ns, data, etag)
+    return data, etag
+
+
+def _meme_etag(request, etag: str) -> bool:
+    vus = request.headers.get("If-None-Match", "") if hasattr(request, "headers") else ""
+    return bool(vus) and any(x.strip().removeprefix("W/") == etag for x in vus.split(","))
+
+
+def _introuvable(cache: str = "no-store"):
+    from aiohttp import web
+    return web.Response(status=404, text="Introuvable.", headers=dict(ENTETES_STATIQUES, **{"Cache-Control": cache}))
+
+
+async def statique(request):
+    """`/tableau/espace/s/{chemin}` : un fichier de `site/`. Public (rien de secret dedans, aucune
+    donnée), jamais hors du dossier, type exact ; gardé un an par le navigateur quand l'adresse porte
+    `?v=` (l'empreinte change avec le fichier), revalidé sinon."""
+    from aiohttp import web
+    demande = _chemin_statique(request.match_info.get("chemin", ""))
+    lu = _lire_statique(demande[0]) if demande else None
+    if lu is None:
+        return _introuvable()
+    data, etag = lu
+    entetes = dict(ENTETES_STATIQUES, ETag=etag, **{
+        "Cache-Control": "public, max-age=31536000, immutable" if "v" in request.query else "no-cache"})
+    if _meme_etag(request, etag):
+        return web.Response(status=304, headers=entetes)
+    entetes["Content-Type"] = TYPES_STATIQUES[demande[1]]
+    if demande[1] == "js":  # lancé en Web Worker, un script garde la politique du service worker
+        entetes["Content-Security-Policy"] = CSP_SW
+    r = web.Response(body=data, headers=entetes)
+    if demande[1] in COMPRESSIBLES:
+        r.enable_compression()
+    return r
+
+
+async def service_worker(request):
+    """`/tableau/espace/sw.js` : le service worker (portée `/tableau/espace/`), `{{V}}` remplacé pour qu'il
+    se renouvelle avec le site. Toujours revalidé ; sa propre politique de sécurité."""
+    from aiohttp import web
+    texte = _lire_page_site("sw.js")
+    if texte is None:
+        return _introuvable()
+    entetes = dict(ENTETES_STATIQUES, **{"Cache-Control": "no-cache", "Content-Type": "text/javascript; charset=utf-8",
+                                         "Content-Security-Policy": CSP_SW, "Service-Worker-Allowed": "/tableau/espace/"})
+    r = web.Response(body=texte.encode("utf-8"), headers=entetes)
+    r.enable_compression()
+    return r
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Site v2 — le registre des adresses (`/tableau/espace/api/…`)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_ABSENT = object()
+_REGLES_INTERNES: set = set()
+
+
+def _normaliser_route(nom, d) -> dict:
+    """Une adresse de `ROUTES_SITE`, vérifiée : une erreur ici est une erreur de câblage (au démarrage)."""
+    if not isinstance(nom, str) or not FORMAT_ROUTE.fullmatch(nom):
+        raise ValueError(f"route du site : nom invalide {nom!r}")
+    if not isinstance(d, dict):
+        raise ValueError(f"route du site : définition invalide ({nom})")
+    methode = str(d.get("methode", "GET")).upper()
+    fn = d.get("fn")
+    ecriture = d.get("ecriture", methode == "POST")
+    hors_ligne = d.get("hors_ligne", False)
+    corps_max = d.get("corps_max", CORPS_DEFAUT)
+    grave = d.get("grave")
+    if methode not in ("GET", "POST") or not callable(fn):
+        raise ValueError(f"route du site : méthode ou fonction invalide ({nom})")
+    if not isinstance(ecriture, bool) or not isinstance(hors_ligne, bool):
+        raise ValueError(f"route du site : « ecriture » et « hors_ligne » sont des booléens ({nom})")
+    if methode == "GET" and (ecriture or hors_ligne):
+        raise ValueError(f"route du site : une lecture (GET) n'écrit pas et ne se rejoue pas ({nom})")
+    if hors_ligne and not ecriture:
+        raise ValueError(f"route du site : seule une écriture se rejoue hors ligne ({nom})")
+    if isinstance(corps_max, bool) or not isinstance(corps_max, int) or not 0 <= corps_max <= CORPS_PLAFOND:
+        raise ValueError(f"route du site : corps_max hors bornes ({nom})")  # 0 : aucun corps (une lecture)
+    if grave is not None and grave not in LIMITES_GRAVES:
+        raise ValueError(f"route du site : genre grave inconnu ({nom})")
+    return {"nom": nom, "methode": methode, "fn": fn, "ecriture": ecriture, "hors_ligne": hors_ligne,
+            "corps_max": corps_max, "grave": grave}
+
+
+def _normaliser_regle(r) -> dict:
+    """Une règle de nettoyage : bornes cohérentes, fonctions appelables."""
+    if not isinstance(r, dict) or not isinstance(r.get("cle"), str) or not FORMAT_ROUTE.fullmatch(r["cle"]) \
+            or "/" in r["cle"]:
+        raise ValueError("règle de nettoyage : clé invalide")
+    cle = r["cle"]
+    nombres = [r.get(k) for k in ("garde_jours", "min", "max")]
+    if any(isinstance(x, bool) or not isinstance(x, int) for x in nombres):
+        raise ValueError(f"règle de nettoyage : durées entières attendues ({cle})")
+    garde, mini, maxi = nombres
+    if not 0 <= mini <= garde <= maxi <= 3650:
+        raise ValueError(f"règle de nettoyage : bornes incohérentes ({cle})")
+    fn, compter = r.get("fn"), r.get("compter")
+    if (fn is not None and not callable(fn)) or (compter is not None and not callable(compter)):
+        raise ValueError(f"règle de nettoyage : fonction invalide ({cle})")
+    return {"cle": cle, "nom": str(r.get("nom") or cle)[:60], "quoi": str(r.get("quoi") or "")[:300],
+            "garde_jours": garde, "min": mini, "max": maxi, "fn": fn, "compter": compter,
+            "ordre": int(r.get("ordre") or 0)}
+
+
+def _definitions(nom, d) -> list:
+    """Une adresse = une définition, ou une LISTE (une par méthode : `GET rell/affiche` et `POST rell/affiche`)."""
+    liste = [_normaliser_route(nom, x) for x in (d if isinstance(d, list) else [d])]
+    if not liste or len({x["methode"] for x in liste}) != len(liste):
+        raise ValueError(f"route du site : une définition par méthode ({nom})")
+    return liste
+
+
+def monter(*sources) -> int:
+    """Branche les adresses d'un ou plusieurs modules : `monter(affiches, evenements)`, ou une table seule
+    (`monter(module.ROUTES_SITE)`). Une adresse peut avoir une définition par méthode (une liste). Un module
+    peut aussi donner `REGLES_NETTOYAGE` (rubrique « Nettoyage ») et `medias_utilises(guild_id)` (ses
+    images ne partent jamais au nettoyage). Tout est vérifié AVANT d'enregistrer : une erreur (adresse en
+    double, définition invalide) n'en branche aucune. Rebrancher les mêmes fonctions ne change rien. Rend
+    le nombre de définitions de ces sources."""
+    routes, regles, sources_medias = {}, [], []
+    for s in sources:
+        table = s if isinstance(s, dict) else getattr(s, "ROUTES_SITE", None)
+        if not isinstance(table, dict):
+            raise ValueError("monter : un module avec ROUTES_SITE, ou une table d'adresses")
+        for nom, d in table.items():
+            for r in _definitions(nom, d):
+                deja = (_INTERNES.get(nom, {}).get(r["methode"]) or ROUTES.get(nom, {}).get(r["methode"])
+                        or routes.get(nom, {}).get(r["methode"]))
+                if deja is not None and deja["fn"] is not r["fn"]:
+                    raise ValueError(f"route du site en double : {r['methode']} {nom}")
+                routes.setdefault(nom, {})[r["methode"]] = r
+        if not isinstance(s, dict):
+            for x in getattr(s, "REGLES_NETTOYAGE", None) or []:
+                regle = _normaliser_regle(x)
+                if regle["cle"] in _REGLES_INTERNES or any(y["cle"] == regle["cle"] for y in regles):
+                    raise ValueError(f"règle de nettoyage en double : {regle['cle']}")
+                regles.append(regle)
+            f = getattr(s, "medias_utilises", None)
+            if callable(f):
+                sources_medias.append(f)
+    for nom, par_methode in routes.items():
+        ROUTES.setdefault(nom, {}).update(par_methode)
+    for regle in regles:
+        REGLES[regle["cle"]] = regle
+    for f in sources_medias:
+        if f not in _SOURCES_MEDIAS:
+            _SOURCES_MEDIAS.append(f)
+    return sum(len(x) for x in routes.values())
+
+
+def _routes_de(nom) -> dict:
+    """{méthode : définition} d'une adresse — vide si elle n'existe pas."""
+    if not isinstance(nom, str) or not FORMAT_ROUTE.fullmatch(nom):
+        return {}
+    return dict(ROUTES.get(nom, {}), **_INTERNES.get(nom, {}))
+
+
+def _route(nom, methode: str = "POST") -> dict | None:
+    return _routes_de(nom).get(methode)
+
+
+async def _lire_corps(request, maximum: int) -> bytes:
+    """Le corps de la requête, jamais plus de `maximum` octets lus (au-delà : 413, avant même de tout lire)."""
+    longueur = getattr(request, "content_length", None)
+    if longueur is not None and longueur > maximum:
+        raise _Refus(413, "Trop volumineux.")
+    flux = getattr(request, "content", None)
+    if flux is not None and hasattr(flux, "read"):
+        morceaux, total = [], 0
+        while True:
+            bloc = await flux.read(65536)
+            if not bloc:
+                break
+            total += len(bloc)
+            if total > maximum:
+                raise _Refus(413, "Trop volumineux.")
+            morceaux.append(bloc)
+        return b"".join(morceaux)
+    if hasattr(request, "read"):
+        data = await request.read()
+    else:  # requêtes simulées des tests : le corps déjà décodé
+        data = json.dumps(await request.json()).encode("utf-8") if hasattr(request, "json") else b""
+    if len(data) > maximum:
+        raise _Refus(413, "Trop volumineux.")
+    return data
+
+
+async def _lire_json(request, maximum: int) -> dict:
+    brut = await _lire_corps(request, maximum)
+    if not brut.strip():
+        return {}
+    try:
+        corps = json.loads(brut.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise _Refus(400, "Corps illisible.") from None
+    if not isinstance(corps, dict):
+        raise _Refus(400, "Corps illisible.")
+    return corps
+
+
+def _parametres(request) -> dict:
+    """Les paramètres d'adresse, bornés : 20 au plus, nom ≤ 40, valeur ≤ 512 caractères."""
+    q = getattr(request, "query", None) or {}
+    out = {}
+    for k in list(q.keys())[:PARAMETRES_MAX]:
+        if isinstance(k, str) and 0 < len(k) <= 40:
+            out[k] = str(q.get(k, ""))[:512]
+    return out
+
+
+async def _noter_ecriture(g, auteur, nom: str, journal) -> None:
+    """Le journal du site (catégorie « Site ») : la phrase donnée par l'adresse, ou une phrase par défaut."""
+    membre_id, detail = 0, ""
+    if isinstance(journal, dict):
+        texte = str(journal.get("texte") or "")
+        membre_id = int(journal.get("membre_id") or 0)
+        detail = str(journal.get("detail") or "")
+    elif isinstance(journal, str):
+        texte = journal
+    else:
+        texte = f"Site : {nom.replace('/', ' › ')}"
+    qui = getattr(auteur, "display_name", None) or str(getattr(auteur, "id", "?"))
+    await registre.noter(g.id, "Site", f"site.{nom.replace('/', '.')}"[:40], f"{texte or nom} (par {qui})",
+                         auteur_id=getattr(auteur, "id", 0) or 0, membre_id=membre_id, detail=detail)
+
+
+async def _executer(nom: str, route: dict, g, auteur, requete: dict, corps, maintenant: float | None = None):
+    """Une adresse du site appliquée : (statut, corps). Écriture : réservée à la tête (`direction`),
+    cadence par personne, limites graves, journal du site et données relues. Une exception reste ici
+    (« indisponible » pour la page, le détail au journal du bot). Les clés « _… » de la réponse ne sortent
+    jamais (`_journal` : la phrase du journal ; None : rien à noter)."""
+    t = maintenant or time.time()
+    if route["ecriture"]:
+        if auteur is None or _direction is None or not _direction(g, auteur, await _cfg(g.id)):
+            return 403, {"erreur": "Réservé au fondateur et à la direction."}
+        cle = ("site", auteur.id)
+        recents = [x for x in _cadence.get(cle, []) if t - x < 60]
+        if len(recents) >= LIMITE_ECRITURES:
+            return 429, {"erreur": "Trop de modifications d'un coup : attends une minute."}
+        _cadence[cle] = recents + [t]
+        if route["grave"]:
+            refus = await limite_grave(g, auteur, route["grave"], 1, t)
+            if refus is not None:
+                return 403, {"erreur": refus}
+    try:
+        res = route["fn"](g, auteur, requete, corps)
+        if inspect.isawaitable(res):
+            res = await res
+        status, rep = res
+        if isinstance(status, bool) or not isinstance(status, int) or not 200 <= status <= 599 \
+                or not isinstance(rep, dict):
+            raise TypeError("réponse mal formée")
+    except Exception as ex:  # l'adresse échoue : la page lit « indisponible », le détail part au journal
+        _log("[TABLEAU][E11] adresse du site en échec")
+        _log(f"[TABLEAU][E11:DETAIL] {nom} {type(ex).__name__} {ex}")
+        diag.compter("site", f"api.{nom}", ex)
+        return 500, {"erreur": "Indisponible pour le moment."}
+    journal = rep.get("_journal", _ABSENT)
+    rep = {k: v for k, v in rep.items() if not str(k).startswith("_")}
+    if route["ecriture"] and status < 400:
+        for k in [k for k in _cache if k[0] == g.id]:
+            _cache.pop(k, None)
+        if journal is not None:
+            await _noter_ecriture(g, auteur, nom, None if journal is _ABSENT else journal)
+    return status, rep
+
+
+async def api_site(request):
+    """`/tableau/espace/api/{nom}` (GET et POST) : les adresses branchées par les modules (`monter`) et
+    celles de ce fichier (images, nettoyage). Même porte que le reste : session, tête, origine de la page
+    pour toute écriture, taille du corps."""
+    from aiohttp import web
+    nom = str(request.match_info.get("nom", ""))
+    try:
+        j, g = await _verifier(request)
+    except _Refus as r:
+        return _json({"erreur": r.message}, r.status)
+    par_methode = _routes_de(nom)
+    if not par_methode:
+        return _json({"erreur": "Adresse inconnue."}, 404)
+    methode = "GET" if request.method == "HEAD" else request.method
+    route = par_methode.get(methode)
+    if route is None:
+        r = _json({"erreur": "Méthode refusée."}, 405)
+        r.headers["Allow"] = ", ".join(sorted(par_methode))
+        return r
+    if (route["ecriture"] or methode == "POST") and not _origine_ok(request):
+        return _json({"erreur": "Requête refusée."}, 400)
+    corps = None
+    if methode == "POST":
+        try:
+            corps = await _lire_json(request, route["corps_max"])
+        except _Refus as r:
+            return _json({"erreur": r.message}, r.status)
+    status, rep = await _executer(nom, route, g, g.get_member(j["u"]), _parametres(request), corps)
+    if methode == "GET" and status == 200:
+        etag = '"' + hashlib.sha256(json.dumps(rep, sort_keys=True, ensure_ascii=False, default=str)
+                                    .encode("utf-8")).hexdigest()[:20] + '"'
+        if _meme_etag(request, etag):
+            return web.Response(status=304, headers=dict(ENTETES, ETag=etag))
+        return _json(rep, 200, etag=etag)
+    return _json(rep, status)
+
+
+api_site_post = api_site  # le même, pour la route POST (aiohttp : un nom par route)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Site v2 — hors ligne : les opérations rejouées (`/tableau/espace/sync`)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _resultat_garde(status: int) -> bool:
+    """Un résultat qui ne changera pas si on rejoue (fait, refusé, en conflit) — pas une panne, ni une
+    cadence, ni une session tombée : ceux-là se retentent."""
+    return status < 500 and status not in (401, 403, 429)
+
+
+async def _op_connue(op_id: str):
+    async with _get_db() as db:
+        async with db.execute("SELECT user_id, status, corps FROM tableau_ops WHERE op_id=?", (op_id,)) as cur:
+            r = await cur.fetchone()
+    if r is None:
+        return None
+    try:
+        corps = json.loads(r[2] or "{}")
+    except ValueError:
+        corps = {}
+    return int(r[0]), int(r[1]), corps if isinstance(corps, dict) else {}
+
+
+async def _garder_op(guild_id: int, uid: int, op_id: str, api: str, status: int, corps: dict, t: float) -> None:
+    texte = json.dumps(corps, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(texte) > OP_GARDEE_MAX:
+        texte = json.dumps({"ok": status < 400, "trop_long": True})
+    async with _get_db() as db:
+        await db.execute("INSERT OR IGNORE INTO tableau_ops (op_id, guild_id, user_id, api, status, corps, quand)"
+                         " VALUES (?,?,?,?,?,?,?)", (op_id, int(guild_id), int(uid), api[:120], int(status), texte, int(t)))
+        await db.commit()
+
+
+async def _appliquer_op(g, auteur, uid: int, op_id: str, op: dict, maintenant: float | None = None):
+    """Une opération : appliquée UNE fois. Déjà faite (même renvoyée dix fois, ou en même temps) : le même
+    résultat, rien de refait. Seules les adresses `hors_ligne` se rejouent."""
+    t = maintenant or time.time()
+    for k in [k for k, v in _ops_recentes.items() if t - v[0] > OPS_RECENTES]:
+        _ops_recentes.pop(k, None)
+    deja = _ops_recentes.get(op_id)
+    if deja is not None:
+        return (deja[2], deja[3]) if deja[1] == uid else (409, {"erreur": "Identifiant d'opération déjà utilisé."})
+    if op_id in _ops_en_cours:
+        status, corps, auteur_op = await asyncio.shield(_ops_en_cours[op_id])
+        return (status, corps) if auteur_op == uid else (409, {"erreur": "Identifiant d'opération déjà utilisé."})
+    attente = asyncio.get_running_loop().create_future()
+    _ops_en_cours[op_id] = attente
+    res = (500, {"erreur": "Indisponible pour le moment."})
+    try:
+        connue = await _op_connue(op_id)
+        if connue is not None:
+            res = (connue[1], connue[2]) if connue[0] == uid else (409, {"erreur": "Identifiant d'opération déjà utilisé."})
+        else:
+            api = op.get("api")
+            route = _route(api)
+            corps = op.get("corps")
+            corps = {} if corps is None else corps
+            if route is None or not route["hors_ligne"]:
+                res = (400, {"erreur": "Cette opération ne se rejoue pas hors ligne."})
+            elif not isinstance(corps, dict):
+                res = (400, {"erreur": "Opération invalide."})
+            elif len(json.dumps(corps, ensure_ascii=False, default=str).encode("utf-8")) > route["corps_max"]:
+                res = (413, {"erreur": "Trop volumineux."})
+            else:
+                res = await _executer(api, route, g, auteur, {}, corps, t)
+            if _resultat_garde(res[0]):
+                #  D'abord en mémoire : appliquée, l'opération ne doit jamais l'être une seconde fois, même si sa
+                #  trace en base échoue (la page renverrait alors la même dans les minutes qui suivent).
+                _ops_recentes[op_id] = (t, uid, res[0], res[1])
+                try:
+                    await _garder_op(g.id, uid, op_id, str(api), res[0], res[1], t)
+                except Exception as ex:  # la trace manque en base ; la réponse, elle, reste la vraie
+                    _log("[TABLEAU][E18] trace d'une opération hors ligne non gardée")
+                    _log(f"[TABLEAU][E18:DETAIL] {type(ex).__name__} {ex}")
+                    diag.compter("site", "sync.trace", ex)
+    except Exception as ex:  # la base refuse : l'opération reste dans la file de la page, réessayée plus tard
+        _log("[TABLEAU][E12] opération hors ligne non appliquée")
+        _log(f"[TABLEAU][E12:DETAIL] {type(ex).__name__} {ex}")
+        diag.compter("site", "sync", ex)
+        res = (500, {"erreur": "Indisponible pour le moment."})
+    finally:
+        _ops_en_cours.pop(op_id, None)
+        if not attente.done():
+            attente.set_result((res[0], res[1], uid))
+    return res
+
+
+async def sync(request):
+    """`POST /tableau/espace/sync` `{"ops": [{"op_id", "api", "corps"}]}` (50 au plus) : les modifications
+    faites hors ligne, dans l'ordre. → `{"resultats": [{"op_id", "status", "corps"}]}`. Après une cadence
+    dépassée (429), les suivantes ne sont pas tentées : la page les garde et réessaie, dans le même ordre."""
+    try:
+        j, g = await _verifier(request)
+    except _Refus as r:
+        return _json({"erreur": r.message}, r.status)
+    if not _origine_ok(request):
+        return _json({"erreur": "Requête refusée."}, 400)
+    try:
+        corps = await _lire_json(request, SYNC_CORPS_MAX)
+    except _Refus as r:
+        return _json({"erreur": r.message}, r.status)
+    ops = corps.get("ops")
+    if not isinstance(ops, list) or len(ops) > SYNC_OPS_MAX:
+        return _json({"erreur": f"Demande invalide ({SYNC_OPS_MAX} opérations au plus)."}, 400)
+    auteur = g.get_member(j["u"])
+    resultats, arret = [], False
+    for op in ops:
+        op_id = op.get("op_id") if isinstance(op, dict) else None
+        if not isinstance(op_id, str) or not FORMAT_OP.fullmatch(op_id):
+            resultats.append({"op_id": op_id if isinstance(op_id, str) else "", "status": 400,
+                              "corps": {"erreur": "Opération invalide."}})
+            continue
+        if arret:
+            resultats.append({"op_id": op_id, "status": 429, "corps": {"erreur": "Plus tard : trop d'un coup."}})
+            continue
+        status, rep = await _appliquer_op(g, auteur, j["u"], op_id, op)
+        resultats.append({"op_id": op_id, "status": status, "corps": rep})
+        arret = status == 429
+    return _json({"resultats": resultats})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Site v2 — les images envoyées depuis le site (`api/media`, `/tableau/espace/media/…`)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def dossier_site(sous: str) -> Path:
+    """`base_data_dir()/site/<sous>` (créé au besoin) : `medias`, `avatars`."""
+    racine = RACINE_DONNEES if RACINE_DONNEES is not None else paths.base_data_dir() / "site"
+    d = Path(racine) / sous
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def type_image(data: bytes) -> str | None:
+    """Le type réel d'une image, par ses premiers octets (jamais le nom ni le type annoncé)."""
+    for magique, typ in MAGIQUES:
+        if data.startswith(magique):
+            return typ
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def reencoder_image(data: bytes, cote: int = MEDIA_COTE) -> tuple[bytes, int, int, str]:
+    """L'image REFAITE : premier cadre, orientation appliquée, toutes les métadonnées retirées (une image
+    neuve, pixel par pixel), `cote` px au plus, en WebP (PNG si Pillow n'a pas WebP). → (octets, largeur,
+    hauteur, type). ValueError si elle ne se lit pas, ou demanderait trop de mémoire."""
+    try:
+        from PIL import Image, ImageOps, features
+    except ImportError as ex:
+        raise ValueError("Pillow absent") from ex
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            if im.format not in ("PNG", "JPEG", "WEBP", "GIF"):
+                raise ValueError("format")
+            largeur, hauteur = im.size
+            if largeur < 1 or hauteur < 1 or largeur * hauteur > MEDIA_PIXELS:
+                raise ValueError("dimensions")
+            if im.format == "JPEG":
+                im.draft("RGB", (cote, cote))
+            im.seek(0)
+            cadre = ImageOps.exif_transpose(im)
+            alpha = cadre.mode in ("RGBA", "LA", "PA", "RGBa", "La") or "transparency" in cadre.info
+            cadre = cadre.convert("RGBA" if alpha else "RGB")
+            cadre.thumbnail((cote, cote), Image.Resampling.LANCZOS)
+            neuve = Image.new(cadre.mode, cadre.size)
+            neuve.paste(cadre)
+            sortie = io.BytesIO()
+            if features.check("webp"):
+                neuve.save(sortie, "WEBP", quality=88, method=4)
+                typ = "image/webp"
+            else:
+                neuve.save(sortie, "PNG", optimize=True)
+                typ = "image/png"
+            return sortie.getvalue(), neuve.width, neuve.height, typ
+    except ValueError:
+        raise
+    except Exception as ex:  # fichier tronqué, bombe de décompression, format trompeur…
+        raise ValueError("illisible") from ex
+
+
+def _ecrire_atomique(chemin: Path, data: bytes) -> None:
+    tmp = chemin.with_name(f"{chemin.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, chemin)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def _nom_fichier(nom: str) -> str:
+    nom = re.sub(r"[\x00-\x1f\x7f/\\]+", " ", nom)
+    return re.sub(r"\s+", " ", nom).strip()[:120]
+
+
+async def _place_medias(dossier: Path) -> bool:
+    """Assez de place : le dossier des images sous sa limite, et le volume pas plein."""
+    async with _get_db() as db:
+        async with db.execute("SELECT COALESCE(SUM(octets), 0) FROM tableau_medias") as cur:
+            occupe = int((await cur.fetchone())[0] or 0)
+    if occupe >= MEDIAS_DOSSIER_MAX:
+        return False
+    try:
+        return shutil.disk_usage(dossier).free >= MEDIAS_LIBRE_MIN
+    except OSError:
+        return True
+
+
+async def _route_media(g, auteur, requete, corps):
+    """`POST api/media` `{"nom", "type", "base64"}` → `{"id", "url", "largeur", "hauteur", "octets", "type"}`.
+    PNG, JPEG, WebP ou GIF (reconnus à leurs octets), 8 Mo au plus, refaits en WebP ≤ 2048 px."""
+    nom, brut = corps.get("nom", ""), corps.get("base64")
+    if nom is None:
+        nom = ""
+    if not isinstance(nom, str) or len(nom) > 200:
+        return 400, {"erreur": "Nom de fichier invalide.", "champ": "nom"}
+    if corps.get("type") is not None and not isinstance(corps.get("type"), str):
+        return 400, {"erreur": "Type invalide.", "champ": "type"}
+    if not isinstance(brut, str) or not brut:
+        return 400, {"erreur": "Image absente.", "champ": "base64"}
+    if brut.startswith("data:"):
+        brut = brut.split(",", 1)[1] if "," in brut else ""
+    brut = "".join(brut.split())
+    if len(brut) > (MEDIA_MAX + 2) // 3 * 4:
+        return 413, {"erreur": "Image trop lourde : 8 Mo au plus."}
+    try:
+        data = base64.b64decode(brut, validate=True)
+    except ValueError:  # binascii.Error en hérite
+        return 400, {"erreur": "Image illisible.", "champ": "base64"}
+    if not data:
+        return 400, {"erreur": "Image absente.", "champ": "base64"}
+    if len(data) > MEDIA_MAX:
+        return 413, {"erreur": "Image trop lourde : 8 Mo au plus."}
+    if type_image(data) is None:
+        return 415, {"erreur": "Format refusé : PNG, JPEG, WebP ou GIF seulement."}
+    dossier = dossier_site("medias")
+    if not await _place_medias(dossier):
+        return 507, {"erreur": "Plus de place pour les images : le nettoyage en libère."}
+    async with _verrou("media", lambda: asyncio.Semaphore(1)):  # une image refaite à la fois : la mémoire tenue
+        try:
+            sortie, largeur, hauteur, typ = await asyncio.to_thread(reencoder_image, data)
+        except ValueError:
+            return 415, {"erreur": "Image illisible, ou trop grande à décoder."}
+    ident = secrets.token_urlsafe(12)
+    await asyncio.to_thread(_ecrire_atomique, dossier / f"{ident}.{'webp' if typ == 'image/webp' else 'png'}", sortie)
+    t = int(time.time())
+    nom = _nom_fichier(nom)
+    async with _get_db() as db:
+        await db.execute("INSERT INTO tableau_medias (id, guild_id, auteur_id, nom, type, octets, largeur, hauteur,"
+                         " cree_le, vu_le) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                         (ident, g.id, auteur.id, nom, typ, len(sortie), largeur, hauteur, t, t))
+        await db.commit()
+    return 200, {"ok": True, "id": ident, "url": f"media/{ident}", "largeur": largeur, "hauteur": hauteur,
+                 "octets": len(sortie), "type": typ, "_journal": f"Image ajoutée au site : {nom or ident}"}
+
+
+async def lire_media(ident):
+    """(octets, extension) d'une image envoyée sur le site, ou None — pour le module des événements (une image
+    d'annonce part avec la carte Discord)."""
+    chemin, _typ = _chemin_media(str(ident or ""))
+    if chemin is None:
+        return None
+    try:
+        return await asyncio.to_thread(chemin.read_bytes), chemin.suffix.lstrip(".")
+    except OSError:
+        return None
+
+
+def _chemin_media(ident: str):
+    """(chemin, type) d'une image du site : `media/<id>` (envoyée) ou `media/avatar/<id Roblox>`."""
+    ident = str(ident or "")
+    m = FORMAT_AVATAR.fullmatch(ident)
+    if m:
+        sous, nom = "avatars", m.group(1)
+    elif FORMAT_MEDIA.fullmatch(ident):
+        sous, nom = "medias", ident
+    else:
+        return None, None
+    try:
+        dossier = dossier_site(sous)
+    except OSError:
+        return None, None
+    for ext, typ in (("webp", "image/webp"), ("png", "image/png")):
+        p = dossier / f"{nom}.{ext}"
+        if p.is_file():
+            return p, typ
+    return None, None
+
+
+async def media(request):
+    """`GET /tableau/espace/media/{id}` : une image du site — session exigée, rien gardé en cache."""
+    from aiohttp import web
+    try:
+        await _verifier(request, medias=True)
+    except _Refus as r:
+        return _json({"erreur": r.message}, r.status)
+    ident = str(request.match_info.get("media", ""))
+    chemin, typ = _chemin_media(ident)
+    if chemin is None:
+        return _json({"erreur": "Image introuvable."}, 404)
+    try:
+        data = await asyncio.to_thread(chemin.read_bytes)
+    except OSError:
+        return _json({"erreur": "Image introuvable."}, 404)
+    t = time.time()
+    if FORMAT_MEDIA.fullmatch(ident) and t - _medias_vus.get(ident, 0) > 3600:
+        _medias_vus[ident] = t
+        try:
+            async with _get_db() as db:
+                await db.execute("UPDATE tableau_medias SET vu_le=? WHERE id=?", (int(t), ident))
+                await db.commit()
+        except Exception as ex:  # seulement la date de dernière vue (pour le nettoyage) : l'image part quand même
+            _log("[TABLEAU][E16] date de vue d'une image non notée")
+            _log(f"[TABLEAU][E16:DETAIL] {type(ex).__name__} {ex}")
+    return web.Response(body=data, headers=dict(ENTETES, **{"Content-Type": typ, "Content-Security-Policy": CSP_MEDIA,
+                                                           "Content-Disposition": "inline"}))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Site v2 — le nettoyage (rubrique « Nettoyage » et boucle quotidienne)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _verrou(nom: str, fabrique):
+    """Le verrou `nom` de la boucle d'évènements en cours (créé au besoin)."""
+    boucle = asyncio.get_running_loop()
+    deja = _verrous.get(nom)
+    if deja is None or deja[0] is not boucle:
+        deja = _verrous[nom] = (boucle, fabrique())
+    return deja[1]
+
+
+async def _compter(sql: str, args: tuple) -> int:
+    async with _get_db() as db:
+        rows = await recrutements._lignes(db, sql, args)  # une table absente (base ancienne) : 0
+    return int(rows[0][0] or 0) if rows else 0
+
+
+async def _supprimer(sql: str, args: tuple) -> int:
+    async with _get_db() as db:
+        try:
+            cur = await db.execute(sql, args)
+        except Exception as ex:
+            if "no such table" in str(ex):
+                return 0
+            raise
+        n = max(cur.rowcount or 0, 0)
+        await db.commit()
+    return n
+
+
+def _sqlite_date(t: float) -> str:
+    return datetime.fromtimestamp(int(t), timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def jours_regle(guild_id: int, cle: str) -> int:
+    """La durée de garde d'une règle pour ce serveur (réglée sur le site, sinon celle par défaut), bornée."""
+    r = REGLES.get(cle)
+    if r is None:
+        return 0
+    if r["min"] == r["max"] or _get_db is None:
+        return r["garde_jours"]
+    try:
+        async with _get_db() as db:
+            async with db.execute("SELECT jours FROM tableau_nettoyage WHERE guild_id=? AND cle=?",
+                                  (int(guild_id), cle)) as cur:
+                row = await cur.fetchone()
+    except Exception as ex:  # réglage illisible : la durée par défaut (la plus prudente), et on le dit
+        _log("[TABLEAU][E14] réglage de nettoyage illisible")
+        _log(f"[TABLEAU][E14:DETAIL] {cle} {type(ex).__name__} {ex}")
+        return r["garde_jours"]
+    return max(r["min"], min(r["max"], int(row[0]))) if row else r["garde_jours"]
+
+
+async def etat_nettoyage(guild_id: int, maintenant: float | None = None) -> dict:
+    """Ce que la rubrique « Nettoyage » montre : les règles (durée, bornes), ce que chacune garde
+    aujourd'hui, le dernier passage et son bilan."""
+    t = maintenant or time.time()
+    regles, compteurs = [], {}
+    for r in sorted(REGLES.values(), key=lambda x: (x["ordre"], x["cle"])):
+        jours = await jours_regle(guild_id, r["cle"])
+        regles.append({"cle": r["cle"], "nom": r["nom"], "quoi": r["quoi"], "garde_jours": jours,
+                       "defaut": r["garde_jours"], "min": r["min"], "max": r["max"],
+                       "reglable": r["min"] < r["max"], "auto": r["fn"] is not None})
+        if r["compter"] is not None:
+            try:
+                n = r["compter"](int(guild_id), jours, t)
+                compteurs[r["cle"]] = int(((await n) if inspect.isawaitable(n) else n) or 0)
+            except Exception as ex:  # un compteur illisible n'empêche pas les autres
+                _log("[TABLEAU][E15] compteur de nettoyage illisible")
+                _log(f"[TABLEAU][E15:DETAIL] {r['cle']} {type(ex).__name__} {ex}")
+                compteurs[r["cle"]] = None
+    async with _get_db() as db:
+        async with db.execute("SELECT dernier, bilan, par FROM tableau_nettoyage_etat WHERE guild_id=?",
+                              (int(guild_id),)) as cur:
+            row = await cur.fetchone()
+        async with db.execute("SELECT quand, total, detail, par FROM tableau_nettoyage_bilans WHERE guild_id=?"
+                              " ORDER BY id DESC LIMIT 10", (int(guild_id),)) as cur:
+            bilans = [{"quand": int(q), "total": int(n), "detail": str(dt or ""), "par": str(par) if par else ""}
+                      for q, n, dt, par in await cur.fetchall()]
+    try:
+        bilan = json.loads(row[1]) if row else {}
+    except ValueError:
+        bilan = {}
+    return {"regles": regles, "compteurs": compteurs, "dernier": int(row[0]) if row and row[0] else None,
+            "bilan": bilan if isinstance(bilan, dict) else {}, "par": str(row[2]) if row and row[2] else "",
+            "bilans": bilans}
+
+
+async def nettoyer(g, auteur=None, maintenant: float | None = None) -> dict:
+    """Applique chaque règle à ce serveur ; le bilan (clé → éléments retirés, -1 : en échec) est gardé et
+    noté au journal du site. `auteur` None : la boucle quotidienne."""
+    t = maintenant or time.time()
+    bilan: dict = {}
+    async with _verrou("nettoyage", asyncio.Lock):
+        for r in sorted(REGLES.values(), key=lambda x: (x["ordre"], x["cle"])):
+            if r["fn"] is None:
+                continue
+            jours = await jours_regle(g.id, r["cle"])
+            try:
+                n = r["fn"](int(g.id), jours, t)
+                bilan[r["cle"]] = max(int(((await n) if inspect.isawaitable(n) else n) or 0), 0)
+            except Exception as ex:  # une règle en échec n'arrête pas les autres ; elle est dite dans le bilan
+                _log("[TABLEAU][E17] règle de nettoyage en échec")
+                _log(f"[TABLEAU][E17:DETAIL] {r['cle']} {type(ex).__name__} {ex}")
+                diag.compter("site", f"nettoyage.{r['cle']}", ex)
+                bilan[r["cle"]] = -1
+        async with _get_db() as db:
+            await db.execute("INSERT OR REPLACE INTO tableau_nettoyage_etat (guild_id, dernier, bilan, par)"
+                             " VALUES (?,?,?,?)", (int(g.id), int(t), json.dumps(bilan), int(getattr(auteur, "id", 0) or 0)))
+            await db.commit()
+    retires = {k: n for k, n in bilan.items() if n > 0}
+    echecs = [REGLES[k]["nom"] for k, n in bilan.items() if n < 0 and k in REGLES]
+    total = sum(retires.values())
+    resume = " · ".join(f"{REGLES[k]['nom']} {n}" for k, n in retires.items() if k in REGLES)
+    async with _get_db() as db:
+        await db.execute("INSERT INTO tableau_nettoyage_bilans (guild_id, quand, total, detail, par) VALUES (?,?,?,?,?)",
+                         (int(g.id), int(t), total, (resume + (" · en échec : " + ", ".join(echecs) if echecs else ""))[:600],
+                          int(getattr(auteur, "id", 0) or 0)))
+        await db.execute("DELETE FROM tableau_nettoyage_bilans WHERE guild_id=? AND id NOT IN (SELECT id FROM"
+                         " tableau_nettoyage_bilans WHERE guild_id=? ORDER BY id DESC LIMIT ?)",
+                         (int(g.id), int(g.id), NETTOYAGE_BILANS))
+        await db.commit()
+    texte = ("Nettoyage du site" + (" (automatique)" if auteur is None else f" lancé par {auteur.display_name}")
+             + (f" : {total} élément(s) retiré(s)" if total else " : rien à retirer"))
+    detail = " · ".join([f"{REGLES[k]['nom']} : {n}" for k, n in retires.items() if k in REGLES]
+                        + ([f"en échec : {', '.join(echecs)}"] if echecs else []))
+    await registre.noter(g.id, "Site", "site.nettoyage", texte, auteur_id=int(getattr(auteur, "id", 0) or 0),
+                         detail=detail, gravite=1 if echecs else 0)
+    return bilan
+
+
+async def nettoyer_si_du(g, maintenant: float | None = None) -> dict | None:
+    """La boucle (horaire) : les règles une fois par jour et par serveur, même après un redémarrage."""
+    t = maintenant or time.time()
+    async with _get_db() as db:
+        async with db.execute("SELECT dernier FROM tableau_nettoyage_etat WHERE guild_id=?", (int(g.id),)) as cur:
+            row = await cur.fetchone()
+    if row is not None and t - int(row[0] or 0) < NETTOYAGE_INTERVALLE:
+        return None
+    return await nettoyer(g, None, t)
+
+
+async def _route_nettoyage(g, auteur, requete, corps):
+    """`GET api/nettoyage` → `{"regles", "compteurs", "dernier", "bilan", "par"}`."""
+    return 200, await etat_nettoyage(g.id)
+
+
+async def _route_nettoyage_regle(g, auteur, requete, corps):
+    """`POST api/nettoyage/regle` `{"cle", "garde_jours"}` : une durée, dans les bornes de la règle."""
+    cle, jours = corps.get("cle"), corps.get("garde_jours")
+    r = REGLES.get(cle) if isinstance(cle, str) else None
+    if r is None:
+        return 404, {"erreur": "Règle inconnue.", "champ": "cle"}
+    if r["min"] == r["max"]:
+        return 400, {"erreur": "Cette durée est fixe.", "champ": "cle"}
+    if isinstance(jours, bool) or not isinstance(jours, int) or not r["min"] <= jours <= r["max"]:
+        return 400, {"erreur": f"Entre {r['min']} et {r['max']} jours.", "champ": "garde_jours"}
+    avant = await jours_regle(g.id, cle)
+    async with _get_db() as db:
+        await db.execute("INSERT OR REPLACE INTO tableau_nettoyage (guild_id, cle, jours, maj_le, maj_par)"
+                         " VALUES (?,?,?,?,?)", (int(g.id), cle, jours, int(time.time()), int(auteur.id)))
+        await db.commit()
+    rep = await etat_nettoyage(g.id)
+    rep.update(ok=True, regle=next(x for x in rep["regles"] if x["cle"] == cle),
+               _journal=f"Règle de nettoyage « {r['nom']} » : {jours} jours (avant : {avant})" if avant != jours else None)
+    return 200, rep
+
+
+async def _route_nettoyage_lancer(g, auteur, requete, corps):
+    """`POST api/nettoyage/lancer` : toutes les règles maintenant (une fois toutes les 5 minutes au plus)."""
+    t = time.time()
+    if t - _nettoyages.get(g.id, 0) < NETTOYAGE_MANUEL:
+        return 429, {"erreur": "Déjà lancé il y a moins de 5 minutes."}
+    _nettoyages[g.id] = t
+    await nettoyer(g, auteur, t)
+    rep = await etat_nettoyage(g.id)
+    rep.update(ok=True, _journal=None)  # `nettoyer` a déjà noté son bilan
+    return 200, rep
+
+
+#  Les règles de ce fichier (les modules ajoutent les leurs par `monter`).
+
+class _Serveur:
+    """Un serveur réduit à son identifiant (les lectures de tickets ne demandent que lui)."""
+
+    def __init__(self, gid: int):
+        self.id = int(gid)
+
+
+async def _purger_journal_messages(gid, jours, t):
+    return await _supprimer("DELETE FROM registre WHERE guild_id=? AND categorie IN ('Messages', 'Vocal') AND quand < ?",
+                            (gid, int(t - jours * 86400)))
+
+
+async def _compter_journal_messages(gid, jours, t):
+    return await _compter("SELECT COUNT(*) FROM registre WHERE guild_id=? AND categorie IN ('Messages', 'Vocal')", (gid,))
+
+
+async def _purger_journal(gid, jours, t):
+    return await _supprimer("DELETE FROM registre WHERE guild_id=? AND quand < ?", (gid, int(t - jours * 86400)))
+
+
+async def _compter_journal(gid, jours, t):
+    return await _compter("SELECT COUNT(*) FROM registre WHERE guild_id=? AND categorie NOT IN ('Messages', 'Vocal')",
+                          (gid,))
+
+
+async def _compter_archives(gid, jours, t):
+    """Les tickets fermés depuis plus de `jours` : rangés dans les archives de la liste (la page les replie)."""
+    borne = t - jours * 86400
+    return sum(1 for x in await _lignes_tickets(_Serveur(gid)) if x["statut"] != "open"
+               and ((x["fin"][0] if x["fin"] and x["fin"][0] else x["ouvert"]) or 0) < borne)
+
+
+async def _purger_transcripts(gid, jours, t):
+    return await asyncio.to_thread(transcript_store.purge_old)
+
+
+async def _compter_transcripts(gid, jours, t):
+    def compter():
+        try:
+            return sum(1 for n in os.listdir(transcript_store._BASE_DIR) if n.endswith(".html"))
+        except OSError:
+            return 0
+    return await asyncio.to_thread(compter)
+
+
+async def _candidatures_refusees(gid, jours, t) -> list:
+    async with _get_db() as db:
+        rows = await recrutements._lignes(db, "SELECT ticket_id, raison, decision FROM recrutements"
+                                              " WHERE guild_id=? AND ferme_le < ?", (gid, int(t - jours * 86400)))
+    return [int(tid) for tid, raison, prise in rows if recrutements.decision(False, raison or "", prise or "") == "refuses"]
+
+
+async def _purger_candidatures(gid, jours, t):
+    n = 0
+    for tid in await _candidatures_refusees(gid, jours, t):
+        n += await _supprimer("DELETE FROM recrutements WHERE guild_id=? AND ticket_id=?", (gid, tid))
+    return n
+
+
+async def _compter_candidatures(gid, jours, t):
+    return len(await _candidatures_refusees(gid, jours, t))
+
+
+def _avec_serveur(f) -> bool:
+    """`medias_utilises(guild_id)` ou `medias_utilises()` : les deux formes sont acceptées."""
+    try:
+        params = inspect.signature(f).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params)
+
+
+async def _medias_utilises(gid) -> set:
+    utilises: set = set()
+    for f in list(_SOURCES_MEDIAS):
+        res = f(gid) if _avec_serveur(f) else f()
+        utilises |= {str(x) for x in ((await res) if inspect.isawaitable(res) else res) or ()}
+    return utilises
+
+
+async def _purger_medias(gid, jours, t):
+    """Une image envoyée, plus utilisée nulle part (les modules le disent), ni vue depuis `jours` jours."""
+    borne = int(t - jours * 86400)
+    utilises = await _medias_utilises(gid)  # une source en échec : on ne retire RIEN (exception remontée)
+    async with _get_db() as db:
+        async with db.execute("SELECT id FROM tableau_medias WHERE guild_id=? AND cree_le < ? AND vu_le < ?",
+                              (gid, borne, borne)) as cur:
+            candidats = [str(r[0]) for r in await cur.fetchall()]
+    n = 0
+    for ident in candidats:
+        if ident in utilises or not FORMAT_MEDIA.fullmatch(ident):
+            continue
+        for ext in ("webp", "png"):
+            p = dossier_site("medias") / f"{ident}.{ext}"
+            if p.exists():
+                await asyncio.to_thread(p.unlink)
+        n += await _supprimer("DELETE FROM tableau_medias WHERE id=?", (ident,))
+    return n
+
+
+async def _compter_medias(gid, jours, t):
+    return await _compter("SELECT COUNT(*) FROM tableau_medias WHERE guild_id=?", (gid,))
+
+
+async def _purger_ops(gid, jours, t):
+    return await _supprimer("DELETE FROM tableau_ops WHERE guild_id=? AND quand < ?", (gid, int(t - jours * 86400)))
+
+
+async def _compter_ops(gid, jours, t):
+    return await _compter("SELECT COUNT(*) FROM tableau_ops WHERE guild_id=?", (gid,))
+
+
+async def _purger_sessions(gid, jours, t):
+    n = 0
+    for _nom, sql, _j, _f in PURGES:
+        n += await _supprimer(sql, (int(t),))
+    return n
+
+
+async def _compter_sessions(gid, jours, t):
+    return await _compter("SELECT COUNT(*) FROM tableau_sessions WHERE guild_id=? AND expire_le >= ?", (gid, int(t)))
+
+
+def _regle_interne(**r) -> None:
+    regle = _normaliser_regle(r)
+    REGLES[regle["cle"]] = regle
+    _REGLES_INTERNES.add(regle["cle"])
+
+
+def purges_en_regle(purges):
+    """Une règle de nettoyage tirée d'une liste `PURGES` (nom, requête, jours, format — celle du grand nettoyage) :
+    la durée réglée sur le site remplace celle de la liste ; une requête sans durée (orphelins) passe telle quelle."""
+    async def fn(_gid, jours, t):
+        n = 0
+        for _nom, sql, j, fmt in purges:
+            if j:
+                borne = t - jours * 86400
+                n += await _supprimer(sql, (int(borne) if fmt == "unix" else _sqlite_date(borne),))
+            else:
+                n += await _supprimer(sql, ())
+        return n
+    return fn
+
+
+def ajouter_regle(**r) -> None:
+    """Une règle de nettoyage donnée par un module (même forme que `REGLES_NETTOYAGE`) ; jamais une règle de
+    ce fichier remplacée. La même clé, redonnée : remplacée (un module rebranché)."""
+    regle = _normaliser_regle(r)
+    if regle["cle"] in _REGLES_INTERNES:
+        raise ValueError(f"règle de nettoyage en double : {regle['cle']}")
+    REGLES[regle["cle"]] = regle
+
+
+_regle_interne(cle="journal_messages", nom="Journal : messages et vocal",
+               quoi="Messages supprimés ou modifiés, allées et venues en vocal : effacés du journal après ce délai.",
+               garde_jours=registre.JOURS_COURTS, min=registre.JOURS_COURTS, max=registre.JOURS_COURTS, ordre=10,
+               fn=_purger_journal_messages, compter=_compter_journal_messages)
+_regle_interne(cle="journal", nom="Journal : tout le reste",
+               quoi="Sanctions, tickets, arrivées, sécurité, site… : effacés du journal après ce délai.",
+               garde_jours=registre.JOURS, min=registre.JOURS, max=registre.JOURS, ordre=11,
+               fn=_purger_journal, compter=_compter_journal)
+_regle_interne(cle="tickets_archives", nom="Tickets fermés : archives",
+               quoi="Un ticket fermé depuis plus longtemps passe dans les archives de la liste (il reste consultable).",
+               garde_jours=30, min=7, max=90, ordre=20, compter=_compter_archives)
+_regle_interne(cle="transcripts", nom="Conversations des tickets fermés",
+               quoi="Les pages des conversations (transcripts) : effacées après ce délai.",
+               garde_jours=transcript_store._RETENTION_DAYS, min=transcript_store._RETENTION_DAYS,
+               max=transcript_store._RETENTION_DAYS, ordre=21, fn=_purger_transcripts, compter=_compter_transcripts)
+_regle_interne(cle="candidatures_refusees", nom="Candidatures refusées",
+               quoi="Les fiches des candidatures refusées : effacées après ce délai (les acceptées restent).",
+               garde_jours=180, min=30, max=365, ordre=30, fn=_purger_candidatures, compter=_compter_candidatures)
+_regle_interne(cle="medias", nom="Images inutilisées",
+               quoi="Une image envoyée sur le site, utilisée nulle part et pas vue depuis ce délai : effacée.",
+               garde_jours=30, min=7, max=180, ordre=80, fn=_purger_medias, compter=_compter_medias)
+_regle_interne(cle="ops", nom="Modifications hors ligne",
+               quoi="La trace des modifications envoyées au retour du réseau (pour ne jamais les appliquer deux fois).",
+               garde_jours=30, min=7, max=90, ordre=90, fn=_purger_ops, compter=_compter_ops)
+_regle_interne(cle="sessions", nom="Sessions et liens du site",
+               quoi="Les sessions et les liens expirés : effacés dès leur fin.",
+               garde_jours=0, min=0, max=0, ordre=95, fn=_purger_sessions, compter=_compter_sessions)
+
+#  Les adresses de ce fichier, sous `/tableau/espace/api/`.
+_INTERNES.update({nom: {d["methode"]: _normaliser_route(nom, d)} for nom, d in {
+    "media": {"methode": "POST", "fn": _route_media, "ecriture": True, "corps_max": (MEDIA_MAX + 2) // 3 * 4 + 64 * 1024},
+    "nettoyage": {"methode": "GET", "fn": _route_nettoyage},
+    "nettoyage/regle": {"methode": "POST", "fn": _route_nettoyage_regle, "ecriture": True},
+    "nettoyage/lancer": {"methode": "POST", "fn": _route_nettoyage_lancer, "ecriture": True},
+}.items()})

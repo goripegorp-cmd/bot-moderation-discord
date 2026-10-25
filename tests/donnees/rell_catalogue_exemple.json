@@ -1,0 +1,39 @@
+{
+  "_note": "Catalogue d'EXEMPLE pour les tests et la démonstration locale : pas le vrai catalogue du jeu (donnees_jeu/rell_catalogue.json).",
+  "types": [
+    {"cle": "race", "nom": "Race", "nom_en": "Race", "champ": "identite", "multiple": false, "ordre": 1},
+    {"cle": "metier", "nom": "Métier", "nom_en": "Job", "champ": "metiers", "multiple": true, "ordre": 2},
+    {"cle": "faction", "nom": "Faction", "nom_en": "Faction", "champ": "identite", "multiple": false, "ordre": 3},
+    {"cle": "arme", "nom": "Arme", "nom_en": "Weapon", "champ": "inventaire", "multiple": true, "ordre": 4}
+  ],
+  "elements": [
+    {"type": "race", "cle": "humain", "nom": "Humain", "nom_en": "Human", "description": "Exemple.", "categorie": "",
+     "rarete": "commune", "icone": "s/icones/rell/race/humain.webp", "statut": "confirme", "source": "https://exemple.org/wiki/Humain",
+     "ordre": 1, "actif": true, "nouveau_movie3": false},
+    {"type": "race", "cle": "triton", "nom": "Triton", "nom_en": "Merfolk", "description": "Exemple.", "categorie": "",
+     "rarete": "rare", "icone": "s/icones/rell/race/triton.webp", "statut": "a_verifier", "source": "",
+     "ordre": 2, "actif": true, "nouveau_movie3": false},
+    {"type": "metier", "cle": "charpentier", "nom": "Charpentier", "nom_en": "Shipwright", "description": "Exemple.",
+     "categorie": "Navire", "rarete": "", "icone": "s/icones/rell/metier/charpentier.webp", "statut": "confirme",
+     "source": "https://exemple.org/wiki/Charpentier", "ordre": 1, "actif": true, "nouveau_movie3": false},
+    {"type": "metier", "cle": "navigateur", "nom": "Navigateur", "nom_en": "Navigator", "description": "Exemple.",
+     "categorie": "Navire", "rarete": "", "icone": "s/icones/rell/metier/navigateur.webp", "statut": "confirme",
+     "source": "", "ordre": 2, "actif": true, "nouveau_movie3": false},
+    {"type": "metier", "cle": "canonnier", "nom": "Canonnier", "nom_en": "Gunner", "description": "Exemple.",
+     "categorie": "Combat", "rarete": "", "icone": "s/icones/rell/metier/canonnier.webp", "statut": "a_verifier",
+     "source": "", "ordre": 3, "actif": true, "nouveau_movie3": true},
+    {"type": "metier", "cle": "cuisinier", "nom": "Cuisinier", "nom_en": "Cook", "description": "Exemple.",
+     "categorie": "Équipage", "rarete": "", "icone": "", "statut": "a_verifier", "source": "", "ordre": 4,
+     "actif": true, "nouveau_movie3": false},
+    {"type": "faction", "cle": "pirates", "nom": "Pirates", "nom_en": "Pirates", "description": "Exemple.", "categorie": "",
+     "rarete": "", "icone": "s/icones/rell/faction/pirates.webp", "statut": "confirme", "source": "", "ordre": 1,
+     "actif": true, "nouveau_movie3": false},
+    {"type": "faction", "cle": "marine", "nom": "Marine", "nom_en": "Navy", "description": "Exemple.", "categorie": "",
+     "rarete": "", "icone": "s/icones/rell/faction/marine.webp", "statut": "confirme", "source": "", "ordre": 2,
+     "actif": true, "nouveau_movie3": false},
+    {"type": "arme", "cle": "sabre", "nom": "Sabre", "nom_en": "Saber", "description": "Exemple.", "categorie": "Lame",
+     "rarete": "commune", "icone": "", "statut": "a_verifier", "source": "", "ordre": 1, "actif": true,
+     "nouveau_movie3": false}
+  ],
+  "maj": 1793000000
+}
