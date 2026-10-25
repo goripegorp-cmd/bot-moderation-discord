@@ -4,6 +4,7 @@ Le même serveur que le bot (`health_server.construire_app()` : tableau, affiche
 branché sur un FAUX serveur Discord et une base TEMPORAIRE remplie de données de démonstration
 (membres, sanctions, tickets, candidatures, clan, journal, questions, sondages, idées, annonces, catalogue,
 affiches, rôles des métiers). Rien ne part chez Discord ; seul « portrait Roblox » interroge Roblox.
+Les actions du tableau (`/tableau/espace/action`) sont les VRAIES, celles de bot.py : `outils/site_local_port.py`.
 
 ⚠️ L'ENTRÉE DE DÉMONSTRATION (`/tableau/demo` : une session SANS lien signé) n'existe QUE dans ce
 script. Le bot ne l'expose jamais (`tests/test_site_v2_serveur.py` le vérifie) : ne jamais la copier
@@ -229,9 +230,9 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     def a_la_tete(_g, m, _c=None):
         return m is not None and m.id in TETE
 
-    async def journal(_g, type_, texte, **kw):
-        await registre.noter(SERVEUR_ID, "Clan", type_, texte, **{k: v for k, v in kw.items()
-                                                                   if k in ("membre_id", "auteur_id", "salon_id", "detail")})
+    async def journal(_g, type_, texte, **kw):  # comme `_au_journal` de bot.py : les mentions deviennent des noms
+        await registre.noter(SERVEUR_ID, "Clan", type_, registre.propre(texte, _g), **{
+            k: v for k, v in kw.items() if k in ("membre_id", "auteur_id", "salon_id", "detail")})
 
     #  Les rôles et les membres.
     direction_r = g.role("Direction", 60, couleur=0x8E2A24)
@@ -260,14 +261,14 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
                        panneaux=rellseas_panneau.panneaux_tickets, log=silence)
     questions.setup(get_db=get_db, est_staff=lambda _g, m, _c: a_la_tete(_g, m), log=silence)
 
-    async def salon_alertes(_g):
+    async def salon_alertes(*_a):  # aucun salon des logs : alertes et idées restent sur le site
         return None
     vigilance.setup(get_db=get_db, salon=salon_alertes, carte=lambda *a: None, log=silence)
     clan.setup(get_db=get_db, log=silence)
     casier.setup(get_db=get_db, log=silence)
     sondages.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=None, controle=None, log=silence)
-    suggestions.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=None, controle=None, salon_logs=None,
-                      log=silence)
+    suggestions.setup(get_db=get_db, cfg=cfg, db_set=db_set, texte_refuse=None, controle=None,
+                      salon_logs=salon_alertes, log=silence)
 
     async def est_staff(_g, m):
         return a_la_tete(_g, m)
@@ -308,17 +309,15 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     async def alerte(_g, m, raison, suspendu=True):
         print(f"[SITE LOCAL] alerte de sécurité : {m.display_name} — {raison}")
 
-    async def conversation(_g, ticket):
-        return {"ticket": ticket, "source": "demo", "messages": [
-            {"auteur": "Kolax", "avatar": "", "bot": False, "quand": int(time.time()) - 3600,
-             "texte": "Bonjour, je voudrais rejoindre l'équipage.", "images": [], "videos": [], "fichiers": [],
-             "embeds": []},
-            {"auteur": "GoRipe", "avatar": "", "bot": False, "quand": int(time.time()) - 3000,
-             "texte": "Bienvenue ! Ton pseudo Roblox ?", "images": [], "videos": [], "fichiers": [], "embeds": []}]}
+    #  Le Port et l'Équipage : les VRAIES actions de bot.py, l'activité du clan, la conversation d'un ticket.
+    import site_local_port
+    carnet = site_local_port.completer_faux_serveur(g, X)
     tableau.setup(bot=X.Obj(get_guild=lambda gid: g if gid == SERVEUR_ID else None, user=X.Obj(id=999)),
-                  cle="site-local", base_url=f"http://localhost:{port}", cfg=cfg, get_db=get_db, mesurer_groupe=None,
-                  autorise_membre=a_la_tete, direction=a_la_tete, tete=TETE, alerte_securite=alerte,
-                  conversation=conversation, log=print)
+                  cle="site-local", base_url=f"http://localhost:{port}", cfg=cfg, get_db=get_db,
+                  mesurer_groupe=site_local_port.mesurer_groupe(), autorise_membre=a_la_tete, direction=a_la_tete,
+                  tete=TETE, alerte_securite=alerte, conversation=site_local_port.conversation(g=g, get_db=get_db),
+                  actions=site_local_port.actions_du_bot(g=g, X=X, get_db=get_db, cfg=cfg, tete=TETE,
+                                                         fondateur=FONDATEUR, carnet=carnet), log=print)
     for module in (registre, recrutements, questions, vigilance, clan, casier, sondages, suggestions, entraide,
                    annonces, tableau, questionnaire):
         await module.init_db()
@@ -352,6 +351,8 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     await _remplir(get_db, g, clan_r, salon_annonces, X)
     await _recrutement_demo(get_db, g, ticket_ouvert)
     await _affiches_demo(g, X)
+    await site_local_port.remplir(get_db=get_db, g=g, salon=salon_annonces, tete=TETE, fondateur=FONDATEUR,
+                                  direction=DIRECTION)
 
     app = health_server.construire_app()
 
@@ -373,15 +374,18 @@ async def _tables_du_bot(get_db) -> None:
     async with get_db() as db:
         for sql in (
                 "CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER,"
-                " user_id INTEGER, panel_id TEXT, claimed_by INTEGER, status TEXT, answers TEXT, created_at DATETIME)",
+                " user_id INTEGER, panel_id TEXT, claimed_by INTEGER, status TEXT, answers TEXT,"
+                " created_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
                 "CREATE TABLE IF NOT EXISTS ticket_log_events (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,"
                 " ticket_id INTEGER, kind TEXT, actor_id INTEGER, detail TEXT, created_unix INTEGER)",
                 "CREATE TABLE IF NOT EXISTS ticket_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,"
                 " channel_id INTEGER, action TEXT, actor_id INTEGER, at DATETIME, detail TEXT)",
                 "CREATE TABLE IF NOT EXISTS ticket_transcripts (guild_id INTEGER, ticket_id INTEGER, url TEXT,"
                 " user_name TEXT, closed_at DATETIME)",
+                #  Comme bot.py : une sanction posée depuis le site (sans date) prend l'heure de l'écriture.
                 "CREATE TABLE IF NOT EXISTS infractions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,"
-                " user_id INTEGER, mod_id INTEGER, type TEXT, reason TEXT, duration TEXT, created_at DATETIME)",
+                " user_id INTEGER, mod_id INTEGER, type TEXT, reason TEXT, duration TEXT DEFAULT '',"
+                " created_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
                 "CREATE TABLE IF NOT EXISTS restricted_members (guild_id INTEGER, user_id INTEGER, roles_backup TEXT,"
                 " restricted_at DATETIME, duration INTEGER, reason TEXT, restricted_by INTEGER)",
                 "CREATE TABLE IF NOT EXISTS error_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER DEFAULT 0,"

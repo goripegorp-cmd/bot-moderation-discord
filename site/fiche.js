@@ -4,6 +4,7 @@
 import { h, icone, date, heure, depuis, duree, nombre, cleJour, libelleJour, sansEmoji, maintenant, srcSure, BASE, remplacer, quantite, ajouter } from "./dom.js";
 import { etat, P, peutAgir, retenirPersonnes, poserAncre, aller, emettre } from "./noyau.js";
 import { lire, action as envoyerAction, lienExport } from "./api.js";
+import { charger, vue as vueJeu } from "./donnees.js";
 import { pancarte, confirmer, bouton, avatar, pastille, tampon, vide, squelettes, boutonCopie, nomDe, lienNom, toast, liste, champ, zoneTexte } from "./ui.js";
 
 // ─── Couleurs et libellés partagés ──────────────────────────────────────────
@@ -23,6 +24,39 @@ export const STATUTS_S = { en_cours: ["En cours", "#3f6b3a"], termine: ["Termin�
 export const STATUTS_I = { attente: ["En attente", "#a8641c"], etude: ["À l'étude", "#1f4e5a"], acceptee: ["Acceptée", "#3f6b3a"], refusee: ["Refusée", "#8e2a24"], realisee: ["Réalisée", "#3f6b3a"] };
 export const RANGS = [["Actif", "#3f6b3a"], ["Peu présent", "#a8641c"], ["Inactif", "#8e2a24"], ["Jamais vu", "#4a5560"], ["Trop récent", "#4a5560"]];
 export const deplier = (e) => { e.stopPropagation(); e.currentTarget.classList.toggle("ouvert"); };
+/** Un salon tel que le serveur l'écrit (« # », un émoji, « ・ », puis le nom) : « #annonces » — ni émoji ni séparateur
+ *  décoratif, même derrière le dièse (sansEmoji ne nettoie que le début du texte, et le dièse y est). */
+export function nomSalon(s) {
+  const t = String(s || "").trim();
+  const diese = t.startsWith("#");
+  const n = sansEmoji(diese ? t.slice(1) : t);
+  return n ? (diese ? "#" + n : n) : "";
+}
+/** Du plus récent au plus ancien, sans toucher à la liste reçue (`quand` absent : à la fin). */
+/** Un nom ou un libellé venu de Discord (pseudo, type de ticket) : sans émoji ni décor ; tel quel s'il n'est fait que de
+ *  cela (mieux qu'un vide). */
+export const propre = (s) => sansEmoji(s) || String(s ?? "");
+export const recentsDabord = (l, cle) => (l || []).slice().sort((a, b) => (Number(b[cle]) || 0) - (Number(a[cle]) || 0));
+
+// ─── L'étape d'une candidature en cours ─────────────────────────────────────
+// `donnees` ne porte pas l'étape des candidatures en cours : le serveur la tient dans le suivi du recrutement
+// (`api/recrutement/suivi` : « etape1 », « etape2 » questionnaire envoyé, « reponses » à corriger). Sans suivi lisible
+// (hors ligne, serveur plus ancien), les champs de la candidature servent (`etape`, `recrutement`).
+export const SUIVI_RECRUTEMENT = "recrutement/suivi";
+export const chargerSuivi = (forcer) => charger(SUIVI_RECRUTEMENT, { forcer: !!forcer });
+export const ETAPES_CANDIDATURE = { decider: ["Étape 1 à décider", "ambre"], attente: ["Étape 2 en cours", "mer"],
+  corriger: ["Étape 2 à corriger", "ambre"], decidee: ["Décidée · fermeture prévue", "encre"] };
+/** « decider » (questionnaire d'ouverture à juger), « attente » (questionnaire envoyé, pas encore de réponse),
+ *  « corriger » (réponses arrivées) ou « decidee » (décision prise, le ticket se ferme bientôt). */
+export function etapeCandidature(c) {
+  const v = vueJeu(SUIVI_RECRUTEMENT);
+  const s = v && Array.isArray(v.ouverts) ? v.ouverts.find((o) => String(o.ticket) === String(c && c.ticket)) : null;
+  const texte = String((s && s.etape) || (c && (c.recrutement || c.etape)) || "");
+  if ((s && s.fermeture_prevue) || /accepte|refus|ferme/.test(texte)) return "decidee";
+  if (/reponse|partiel|corrig/.test(texte)) return "corriger";
+  if (/etape2|attente|envoy/.test(texte) || Number(c && c.etape) === 2) return "attente";
+  return "decider";
+}
 
 /** Une action du tableau, confirmée puis envoyée ; prévient et rafraîchit. */
 export async function agir(corps, titre, texte, opts = {}, libelleOk, style) {
@@ -51,7 +85,7 @@ export function entreeJournal(e, sujet, ouvrir) {
     h("div", { classe: "haut" }, h("span", { classe: "quoi" }, e.cat), h("span", { classe: "quand" }, heure(e.quand) + " · " + libelleJour(cleJour(e.quand)))),
     h("div", { classe: "texte coupe3 deplier", onclick: deplier, title: "Afficher tout" }, e.texte),
     e.detail ? h("div", { classe: "meta coupe2 deplier", onclick: deplier }, e.detail) : null,
-    a || e.salon ? h("div", { classe: "meta" }, a ? ["par ", lienNom(a, ouvrir || ouvrirFiche)] : null, a && e.salon ? " · " : null, e.salon ? sansEmoji(e.salon) || e.salon : null) : null);
+    a || e.salon ? h("div", { classe: "meta" }, a ? ["par ", lienNom(a, ouvrir || ouvrirFiche)] : null, a && e.salon ? " · " : null, e.salon ? nomSalon(e.salon) || e.salon : null) : null);
 }
 
 // ─── La fiche ───────────────────────────────────────────────────────────────
@@ -178,24 +212,25 @@ function chronologie(f) {
   const tSanctions = f.sanctions.map((s) => s.date || 0);
   const proche = (t) => tSanctions.some((x) => Math.abs(x - t) < 120);
   f.sanctions.forEach((s) => items.push({ t: s.date, cat: s.libelle, teinte: teinteType(s.type), grave: ["kick", "ban"].includes(s.type),
-    texte: s.libelle + (s.duree ? " · " + s.duree : "") + (s.raison ? " — " + s.raison : ""), meta: s.auto ? "Automatique" : "Par " + s.par }));
+    texte: s.libelle + (s.duree ? " · " + s.duree : "") + (s.raison ? " — " + s.raison : ""), meta: s.auto ? "Automatique" : "Par " + propre(s.par) }));
   f.tickets.forEach((t) => {
-    items.push({ t: t.ouvert, cat: "Ticket", teinte: "#7a4b2a", texte: "Ticket #" + t.ticket + " ouvert · " + t.type, meta: t.pris_par ? "pris par " + t.pris_par : "" });
-    if (t.ferme) items.push({ t: t.ferme, cat: "Ticket", teinte: "#7a4b2a", texte: "Ticket #" + t.ticket + " fermé" + (t.motif ? " — " + t.motif : ""), meta: t.ferme_par ? "par " + t.ferme_par : "", lien: t.transcript });
+    items.push({ t: t.ouvert, cat: "Ticket", teinte: "#7a4b2a", texte: "Ticket #" + t.ticket + " ouvert · " + propre(t.type), meta: t.pris_par ? "pris par " + propre(t.pris_par) : "" });
+    if (t.ferme) items.push({ t: t.ferme, cat: "Ticket", teinte: "#7a4b2a", texte: "Ticket #" + t.ticket + " fermé" + (t.motif ? " — " + t.motif : ""), meta: t.ferme_par ? "par " + propre(t.ferme_par) : "", lien: t.transcript });
   });
   f.candidatures.forEach((c) => items.push({ t: c.ferme, cat: "Candidature", teinte: "#3f6b3a", texte: "Candidature fermée" + (c.raison ? " — " + c.raison : ""), lien: c.transcript }));
-  f.questions.forEach((q) => items.push({ t: q.quand, cat: "Question", teinte: "#1f4e5a", texte: q.texte, meta: sansEmoji(q.salon) + " · " + (STATUTS_Q[q.statut] || [q.libelle])[0], lien: q.message }));
-  (f.sondages || []).forEach((x) => items.push({ t: x.cree, cat: "Sondage", teinte: "#5e3a4e", texte: x.question, meta: sansEmoji(x.salon) + " · " + (STATUTS_S[x.statut] || [x.statut])[0] + " · " + quantite(x.total, "vote(s)"), lien: x.statut !== "retire" ? x.lien : "" }));
-  (f.idees || []).forEach((x) => items.push({ t: x.cree, cat: "Idée", teinte: "#7a5a22", texte: x.titre, meta: sansEmoji(x.salon) + " · " + (STATUTS_I[x.statut] || [x.libelle])[0] + " · " + x.pour + " pour, " + x.contre + " contre", lien: x.retire_le ? "" : x.lien }));
+  f.questions.forEach((q) => items.push({ t: q.quand, cat: "Question", teinte: "#1f4e5a", texte: q.texte, meta: nomSalon(q.salon) + " · " + (STATUTS_Q[q.statut] || [q.libelle])[0], lien: q.message }));
+  (f.sondages || []).forEach((x) => items.push({ t: x.cree, cat: "Sondage", teinte: "#5e3a4e", texte: x.question, meta: nomSalon(x.salon) + " · " + (STATUTS_S[x.statut] || [x.statut])[0] + " · " + quantite(x.total, "vote(s)"), lien: x.statut !== "retire" ? x.lien : "" }));
+  (f.idees || []).forEach((x) => items.push({ t: x.cree, cat: "Idée", teinte: "#7a5a22", texte: x.titre, meta: nomSalon(x.salon) + " · " + (STATUTS_I[x.statut] || [x.libelle])[0] + " · " + x.pour + " pour, " + x.contre + " contre", lien: x.retire_le ? "" : x.lien }));
   f.journal.forEach((e) => {
     if (/^(mod\.|ticket\.|question\.|sondage\.|suggestion\.)/.test(e.type || "") || (/^sec\./.test(e.type || "") && proche(e.quand))) return;
-    items.push({ t: e.quand, cat: e.cat, teinte: teinteCat(e.cat), grave: e.gravite >= 2, texte: e.texte, meta: [e.auteur && e.auteur !== f.membre.id ? "par " + nomDe(P(e.auteur)) : "", sansEmoji(e.salon)].filter(Boolean).join(" · ") });
+    items.push({ t: e.quand, cat: e.cat, teinte: teinteCat(e.cat), grave: e.gravite >= 2, texte: e.texte, meta: [e.auteur && e.auteur !== f.membre.id ? "par " + nomDe(P(e.auteur)) : "", nomSalon(e.salon)].filter(Boolean).join(" · ") });
   });
   return items.filter((x) => x.t).sort((a, b) => b.t - a.t);
 }
 
 function parJour(items, rendreUn) {
   if (!items.length) return vide("Rien ici", "Rien de conservé pour cette personne.");
+  items = recentsDabord(items, "t");
   const max = etatFiche.max, jours = new Map();
   items.slice(0, max).forEach((x) => { const k = cleJour(x.t); if (!jours.has(k)) jours.set(k, []); jours.get(k).push(x); });
   const fil = h("div", { classe: "fil" });
@@ -217,21 +252,21 @@ function contenuOnglet(f, m, p) {
   if (o === "chrono") return parJour(chronologie(f), entreeChrono);
   if (o === "sanctions") return parJour(f.sanctions.map((s) => Object.assign({ t: s.date }, s)), (s) => h("li", { classe: "entree" + (["kick", "ban"].includes(s.type) ? " grave" : ""), vars: { "--teinte": teinteType(s.type) } },
     h("div", { classe: "haut" }, h("span", { classe: "quoi" }, s.libelle + (s.duree ? " · " + s.duree : "")), h("span", { classe: "quand" }, heure(s.date))),
-    s.raison ? h("div", { classe: "texte" }, s.raison) : null, h("div", { classe: "meta" }, s.auto ? "Automatique" : "Par " + s.par),
+    s.raison ? h("div", { classe: "texte" }, s.raison) : null, h("div", { classe: "meta" }, s.auto ? "Automatique" : "Par " + propre(s.par)),
     peutAgir() ? h("div", {}, bouton("Retirer du casier", { classe: "p danger", reseau: true, onclick: () => agir({ action: "sanction_retirer", sanction: s.sanction }, "Retirer cette sanction du casier ?", s.libelle + " — " + (s.raison || "sans motif") + ". Elle sort du casier.", {}, "Retirer", "danger") })) : null));
   if (o === "tickets") {
     const dernier = (f.tickets.slice().sort((a, b) => (b.ouvert || 0) - (a.ouvert || 0))[0] || {}).ticket;
     return parJour(f.tickets.map((x) => Object.assign({ t: x.ferme || x.ouvert }, x)), (x) => h("li", { classe: "entree" },
-      h("div", { classe: "haut" }, h("span", { classe: "quoi" }, "#" + x.ticket + " · " + x.type), x.statut === "ouvert" ? tampon("Ouvert", "vert", true) : tampon("Fermé", "encre", true)),
+      h("div", { classe: "haut" }, h("span", { classe: "quoi" }, "#" + x.ticket + " · " + propre(x.type)), x.statut === "ouvert" ? tampon("Ouvert", "vert", true) : tampon("Fermé", "encre", true)),
       h("div", { classe: "texte" }, x.motif || (x.statut === "ouvert" ? "En cours" : "Sans motif")),
-      h("div", { classe: "meta" }, "ouvert le " + date(x.ouvert, true) + (x.ferme ? " · fermé le " + date(x.ferme, true) + (x.ferme_par ? " par " + x.ferme_par : "") : "") + (x.pris_par ? " · pris par " + x.pris_par : "")),
+      h("div", { classe: "meta" }, "ouvert le " + date(x.ouvert, true) + (x.ferme ? " · fermé le " + date(x.ferme, true) + (x.ferme_par ? " par " + propre(x.ferme_par) : "") : "") + (x.pris_par ? " · pris par " + propre(x.pris_par) : "")),
       x.salon ? h("div", { classe: "rangee" }, h("a", { classe: "bouton p discret", href: x.salon }, icone("ouvrir"), h("span", {}, "Ouvrir le ticket sur Discord"))) : null,
       transcriptEnLigne(x.ticket, "Ticket #" + x.ticket + " · " + nomDe(p), x.ticket === dernier)));
   }
   if (o === "candidatures") return h("div", { classe: "pile" }, candidaturesFiche(f));
   if (o === "questions") return parJour(f.questions.map((q) => Object.assign({ t: q.quand }, q)), (q) => h("li", { classe: "entree" },
-    h("div", { classe: "haut" }, h("span", { classe: "quoi" }, sansEmoji(q.salon)), h("span", { classe: "quand" }, heure(q.quand))), h("div", { classe: "texte" }, q.texte),
-    h("div", { classe: "pastilles" }, pastille((STATUTS_Q[q.statut] || [q.libelle])[0], (STATUTS_Q[q.statut] || [])[1]), q.par ? h("span", { classe: "meta" }, "par " + q.par) : null),
+    h("div", { classe: "haut" }, h("span", { classe: "quoi" }, nomSalon(q.salon)), h("span", { classe: "quand" }, heure(q.quand))), h("div", { classe: "texte" }, q.texte),
+    h("div", { classe: "pastilles" }, pastille((STATUTS_Q[q.statut] || [q.libelle])[0], (STATUTS_Q[q.statut] || [])[1]), q.par ? h("span", { classe: "meta" }, "par " + propre(q.par)) : null),
     q.message ? h("div", {}, h("a", { classe: "bouton p discret", href: q.message }, icone("lien"), h("span", {}, "Voir sur Discord"))) : null));
   if (o === "sondages") return parJour([...(f.sondages || []).map((x) => Object.assign({ t: x.cree, _type: "sondage" }, x)), ...(f.idees || []).map((x) => Object.assign({ t: x.cree, _type: "idee" }, x))].sort((a, b) => b.t - a.t),
     (x) => x._type === "idee" ? entreeIdee(x) : entreeSondage(x));
@@ -254,14 +289,14 @@ export function sondageVotes(x) {
 function entreeSondage(x) {
   const [lib, teinte] = STATUTS_S[x.statut] || [x.statut, null];
   return h("li", { classe: "entree", vars: { "--teinte": "#5e3a4e" } },
-    h("div", { classe: "haut" }, h("span", { classe: "quoi" }, "Sondage · " + sansEmoji(x.salon)), h("span", { classe: "quand" }, heure(x.cree))),
+    h("div", { classe: "haut" }, h("span", { classe: "quoi" }, "Sondage · " + nomSalon(x.salon)), h("span", { classe: "quand" }, heure(x.cree))),
     h("div", { classe: "texte titre-entree" }, x.question), sondageVotes(x),
     h("div", { classe: "pastilles" }, pastille(lib, teinte), h("span", { classe: "meta" }, quantite(x.total, "vote(s)") + (x.multiple ? " · plusieurs choix" : ""))));
 }
 function entreeIdee(x) {
   const [lib, teinte] = STATUTS_I[x.statut] || [x.libelle, null];
   return h("li", { classe: "entree", vars: { "--teinte": "#7a5a22" } },
-    h("div", { classe: "haut" }, h("span", { classe: "quoi" }, "Idée n°" + x.id + " · " + sansEmoji(x.salon)), h("span", { classe: "quand" }, heure(x.cree))),
+    h("div", { classe: "haut" }, h("span", { classe: "quoi" }, "Idée n°" + x.id + " · " + nomSalon(x.salon)), h("span", { classe: "quand" }, heure(x.cree))),
     h("div", { classe: "texte titre-entree" }, x.titre), x.details ? h("div", { classe: "texte coupe3 deplier", onclick: deplier }, x.details) : null,
     x.note ? h("div", { classe: "meta" }, "Réponse : " + x.note) : null,
     h("div", { classe: "pastilles" }, pastille(x.retire_le ? "Retirée du salon" : lib, x.retire_le ? "#4a5560" : teinte), h("span", { classe: "meta" }, x.pour + " pour · " + x.contre + " contre")));
@@ -270,14 +305,15 @@ function entreeIdee(x) {
 function candidaturesFiche(f) {
   const blocs = [];
   const enCours = ((etat.d && etat.d.en_cours) || []).find((c) => c.id === f.membre.id);
-  if (enCours) blocs.push(h("div", { classe: "cadre pile serree" }, h("h3", {}, "Candidature en cours · ticket #" + enCours.ticket),
-    h("p", { classe: "aide" }, "Ouverte " + depuis(enCours.ouvert) + (enCours.pris_par ? " · prise par " + enCours.pris_par : " · pas encore prise") + "."),
+  if (enCours) blocs.push(h("div", { classe: "cadre pile serree" }, h("div", { classe: "rangee entre" },
+    h("h3", {}, "Candidature en cours · ticket #" + enCours.ticket), tampon(...ETAPES_CANDIDATURE[etapeCandidature(enCours)])),
+    h("p", { classe: "aide" }, "Ouverte " + depuis(enCours.ouvert) + (enCours.pris_par ? " · prise par " + propre(enCours.pris_par) : " · pas encore prise") + "."),
     h("div", { classe: "rangee" }, bouton("Ouvrir le dossier de recrutement", { classe: "p principal", icone: "candidatures", onclick: () => { etatFiche.pan.fermer(); emettre("dossier:ouvrir", enCours.ticket); } }),
       enCours.salon ? h("a", { classe: "bouton p", href: enCours.salon }, icone("ouvrir"), h("span", {}, "Ouvrir le ticket")) : null),
     reponses(enCours.reponses), transcriptEnLigne(enCours.ticket, "Candidature · ticket #" + enCours.ticket, false)));
   const fiche = ((etat.d && etat.d.candidats) || []).find((c) => c.id === f.membre.id);
   if (fiche) blocs.push(h("div", { classe: "cadre pile serree" }, h("h3", {}, "Dernière décision : " + (STATUTS_CAND[fiche.statut] || [fiche.statut])[0]),
-    h("p", { classe: "aide" }, "Fermée le " + date(fiche.ferme, true) + (fiche.ferme_par ? " par " + fiche.ferme_par : "") + (fiche.motif ? " — " + fiche.motif : "")),
+    h("p", { classe: "aide" }, "Fermée le " + date(fiche.ferme, true) + (fiche.ferme_par ? " par " + propre(fiche.ferme_par) : "") + (fiche.motif ? " — " + fiche.motif : "")),
     reponses(fiche.reponses),
     peutAgir() ? h("div", { classe: "rangee" }, bouton("Retirer ses fiches", { classe: "p danger", reseau: true, onclick: () => agir({ action: "fiche_retirer", candidat: fiche.id }, "Retirer ses fiches de candidature ?", "Elles disparaissent du site. Les transcripts restent.", {}, "Retirer", "danger") })) : null,
     transcriptEnLigne(fiche.ticket, "Candidature · ticket #" + fiche.ticket, true)));
@@ -326,7 +362,7 @@ function suiviConv(d) {
   if (!ev.length) return null;
   return h("div", { classe: "conv-suivi" }, h("b", { classe: "conv-suivi-titre" }, "Suivi du ticket"), ev.map((e) => {
     const [ic, lib] = ETAPES[e.quoi] || ["info", e.quoi];
-    return h("div", { classe: "conv-etape" }, icone(ic, "ic-p"), h("b", {}, lib), e.qui ? h("span", {}, " par " + e.qui) : null, h("span", { classe: "quand" }, " · " + date(e.quand, true)),
+    return h("div", { classe: "conv-etape" }, icone(ic, "ic-p"), h("b", {}, lib), e.qui ? h("span", {}, " par " + propre(e.qui)) : null, h("span", { classe: "quand" }, " · " + date(e.quand, true)),
       e.detail ? h("div", { classe: "meta" }, e.detail) : null);
   }));
 }

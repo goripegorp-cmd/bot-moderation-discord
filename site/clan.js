@@ -76,7 +76,9 @@ export function membres(vue) {
       h("p", { classe: "aide" }, "Prévenus il y a une semaine, toujours inactifs : le retrait du clan est proposé."),
       h("div", { classe: "lignes" }, echus.map((m) => h("div", { classe: "ligne" }, avatar(m, "p"),
         h("div", { classe: "bloc" }, h("div", { classe: "nom" }, lienNom(m.id, ouvrirFiche)),
-          h("div", { classe: "sous-nom" }, "Prévenu le " + date(m.rappel.envoye_le) + (m.rappel.mode === "mp" ? " par message privé" : " dans #" + sansEmoji(m.rappel.salon)) + " · dernière activité : " + m.derniere)),
+          h("div", { classe: "sous-nom" }, "Prévenu le " + date(m.rappel.envoye_le) + (m.rappel.par ? " par " + sansEmoji(m.rappel.par) : "")
+            + (m.rappel.mode === "mp" ? ", en message privé" : sansEmoji(m.rappel.salon) ? ", dans #" + sansEmoji(m.rappel.salon) : ", dans un salon")
+            + " · dernière activité : " + m.derniere)),
         h("div", { classe: "droite" },
           bouton("Le garder", { classe: "p discret", reseau: true, onclick: () => agir({ action: "clan_rappel_annuler", membre: m.id }, "", "", { direct: true }) }),
           bouton("Retirer du clan", { classe: "p danger", reseau: true, onclick: () => agir({ action: "clan_retirer", membre: m.id }, "Retirer " + nomDe(m) + " du clan ?", "Prévenu il y a une semaine, toujours inactif. Seul le rôle du clan lui est retiré.", {}, "Retirer du clan", "danger") })))))));

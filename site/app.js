@@ -7,7 +7,7 @@ import { lire, poster, noterReseau } from "./api.js";
 import * as HL from "./hors_ligne.js";
 import { oublierTout, perime, vue as vueJeu } from "./donnees.js";
 import { bouton, boutonIcone, menu, pancarte, confirmer, toast, titreRubrique, vide, bandeau, majBoutonsReseau, pancartesOuvertes, chargement, nomDe, compteur } from "./ui.js";
-import { ouvrirFiche } from "./fiche.js";
+import { ouvrirFiche, etapeCandidature, chargerSuivi } from "./fiche.js";
 import { monogramme } from "./affiche.js";
 import * as port from "./discord.js";
 import * as clan from "./clan.js";
@@ -227,7 +227,7 @@ function compteurs() {
   const oublies = d.tickets.ouverts.filter((t) => !t.pris_par && t.ouvert && n - t.ouvert > 86400 && !t.rellseas).length;
   const ticketsClan = d.tickets.ouverts.filter((t) => t.rellseas).length;
   const echus = ((d.clan && d.clan.membres) || []).filter((m) => m.rappel && m.rappel.statut === "echu").length;
-  const aDecider = d.en_cours.filter((c) => (c.etape || 1) === 1 || /reponse|partiel/.test(c.recrutement || "")).length;
+  const aDecider = d.en_cours.filter((c) => ["decider", "corriger"].includes(etapeCandidature(c))).length;
   const alertes = (d.alertes || []).length;
   const att = HL.file.ops.length;
   const brouillons = ((vueJeu("evenements") || {}).brouillons || []).length;
@@ -339,6 +339,8 @@ async function chargerDonnees(manuel) {
   majPlaque();
   majCompteurs();
   if (etat.d && !courante) rendre(true);
+  // L'étape des candidatures en cours (compteurs, aperçu) : le suivi du recrutement, relu au plus toutes les 45 s.
+  if (etat.d && etat.session === "ok") chargerSuivi();
 }
 function accepter(d) {
   const premiere = !etat.d;

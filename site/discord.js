@@ -1,7 +1,7 @@
 // discord.js — « Le Port » : aperçu, journal, sanctions, tickets, répertoire, salons & questions, nettoyage.
 
 import { h, icone, date, heure, depuis, duree, nombre, cleJour, libelleJour, libelleMois, moisDe, maintenant, sansEmoji, norm, contient, lettre, trier, compte, remplacer, quantite, accord, ajouter } from "./dom.js";
-import { etat, P, peutAgir, aller, filtres, enLigne, emettre, ecouter } from "./noyau.js";
+import { etat, P, peutAgir, aller, filtres, enLigne, emettre, ecouter, retenirPersonnes } from "./noyau.js";
 import { lienExport, lire, poster } from "./api.js";
 import { charger, vue as vueJeu } from "./donnees.js";
 import { file } from "./hors_ligne.js";
@@ -11,7 +11,7 @@ import {
 } from "./ui.js";
 import {
   ouvrirFiche, ouvrirConversation, agir, entreeJournal, teinteCat, teinteType, libelleType, GROUPES_SANCTION, STATUTS_Q, STATUTS_S,
-  STATUTS_I, STATUTS_CAND, deplier, sondageVotes,
+  STATUTS_I, STATUTS_CAND, deplier, sondageVotes, etapeCandidature, ETAPES_CANDIDATURE, chargerSuivi, nomSalon, recentsDabord, propre,
 } from "./fiche.js";
 
 const JOUR = 86400;
@@ -32,8 +32,9 @@ export function apercu(vue) {
     const alertes = d.alertes || [], clan = (d.clan && d.clan.membres) || [];
     const inactifs = clan.filter((m) => m.rang === 2).length;
     const st = (d.questions && d.questions.stats) || {};
-    const aCorriger = d.en_cours.filter((c) => /reponse|partiel|corriger/.test(c.recrutement || "")).length;
-    const aDecider = d.en_cours.filter((c) => (c.etape || 1) === 1).length;
+    const etapes = new Map(d.en_cours.map((c) => [c, etapeCandidature(c)]));
+    const aCorriger = d.en_cours.filter((c) => etapes.get(c) === "corriger").length;
+    const aDecider = d.en_cours.filter((c) => etapes.get(c) === "decider").length;
     const attente = file.ops.length;
     const t = tuiles(
       tuile({ cle: "a1", lib: "Tickets ouverts", val: ouverts.length, icone: "tickets", sous: nonPris.length + " pas encore pris", teinte: "#a8641c", clic: () => aller("port", "tickets") }),
@@ -47,7 +48,8 @@ export function apercu(vue) {
     alertes.forEach((a) => items.push(carteAlerte(a)));
     nonPris.filter((x) => x.ouvert && n - x.ouvert > 6 * 3600).slice(0, 4).forEach((x) => items.push(carteTicketOuvert(x)));
     qOuvertes.filter((q) => n - q.quand > 1800).slice(0, 4).forEach((q) => items.push(carteQuestions(q.id, [q])));
-    d.en_cours.filter((c) => /reponse|partiel/.test(c.recrutement || "") || (c.ouvert && n - c.ouvert > 2 * JOUR && (c.etape || 1) === 1)).slice(0, 4).forEach((c) => items.push(carteCandidatureCourte(c)));
+    [...d.en_cours.filter((c) => etapes.get(c) === "corriger"), ...d.en_cours.filter((c) => c.ouvert && n - c.ouvert > 2 * JOUR && etapes.get(c) === "decider")]
+      .slice(0, 4).forEach((c) => items.push(carteCandidatureCourte(c)));
     const urgent = section("À traiter maintenant", "attention", items.length ? compte(items.length, "élément") : "",
       items.length ? h("div", { classe: "grille" }, items) : vide("Rien d'urgent", "Pas d'alerte, pas de ticket oublié, pas de question en attente.", "succes"));
     const pj = (d.journal && d.journal.par_jour) || {}, jours = [], fam = {};
@@ -69,7 +71,9 @@ export function apercu(vue) {
     remplacer(zone, t, urgent, graphes);
   };
   maj();
-  return { maj };
+  chargerSuivi();
+  // Le suivi du recrutement arrive après les données : l'aperçu se redessine quand il change (« jeu »).
+  return { maj, majJeu: maj };
 }
 
 function carteAlerte(a) {
@@ -84,9 +88,9 @@ function carteAlerte(a) {
       bouton("Gérée", { classe: "p vert", icone: "valider", reseau: true, onclick: () => agir({ action: "alerte_geree", membre: a.id }, "Alerte gérée ?", "Elle disparaît des alertes ; le compteur de " + nomDe(p) + " repart de zéro.", {}, "Gérée", "vert") })));
 }
 function carteCandidatureCourte(c) {
-  const etape = (c.etape || 1) === 1 ? "Étape 1 à décider" : /reponse|partiel/.test(c.recrutement || "") ? "Étape 2 à corriger" : "Étape 2 en cours";
+  const [etape, couleur] = ETAPES_CANDIDATURE[etapeCandidature(c)];
   return h("article", { classe: "feuillet lien chaude", tabindex: 0, onclick: () => emettre("dossier:ouvrir", c.ticket), onkeydown: (e) => { if (e.key === "Enter") emettre("dossier:ouvrir", c.ticket); } },
-    h("div", { classe: "qui" }, avatar(c), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(c)), h("div", { classe: "sous-nom" }, "Candidature · ouverte " + depuis(c.ouvert))), tampon(etape, "ambre")),
+    h("div", { classe: "qui" }, avatar(c), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(c)), h("div", { classe: "sous-nom" }, "Candidature · ouverte " + depuis(c.ouvert))), tampon(etape, couleur)),
     h("p", { classe: "aide" }, "Ouvre le dossier pour décider, choisir les questions ou corriger."));
 }
 
@@ -107,7 +111,7 @@ export function journal(vue) {
   const maj = () => {
     const d = etat.d;
     if (!d) { remplacer(resultats, indisponible()); return; }
-    const j = d.journal || {}, evts = j.evenements || [], n = maintenant();
+    const j = d.journal || {}, evts = recentsDabord(j.evenements, "quand"), n = maintenant();
     if (j.erreur) { remplacer(resultats, vide("Journal momentanément illisible", "Nouvel essai à la prochaine mise à jour.", "attention")); return; }
     const auj = cleJour(n), sept = evts.filter((e) => n - e.quand <= 7 * JOUR);
     remplacer(tete, tuiles(
@@ -183,7 +187,7 @@ export function sanctions(vue) {
     const enCeMoment = actives ? h("div", { classe: "cadre pile serree" }, h("h3", {}, "En ce moment"),
       groupeActif("Mutés", s.actives.mutes, (m) => (m.jusqu ? "jusqu'à " + heure(m.jusqu) : "")),
       groupeActif("Radiés", s.actives.radies, () => ""),
-      groupeActif("Restreints par la direction", s.actives.restreints, (m) => (m.par ? "par " + m.par : ""))) : null;
+      groupeActif("Restreints par la direction", s.actives.restreints, (m) => (m.par ? "par " + propre(m.par) : ""))) : null;
     remplacer(haut, tuiles(
       tuile({ cle: "m1", lib: "30 derniers jours", val: s.trente_jours, icone: "calendrier", sous: "tout le casier", teinte: "#1f4e5a" }),
       tuile({ cle: "m2", lib: "Avertissements", val: somme(["warn"]), icone: "plume", sous: "depuis le début", teinte: "#a8641c" }),
@@ -211,7 +215,7 @@ export function sanctions(vue) {
     for (const m of s.membres) {
       const p = P(m.id);
       if (f.q && !contient([p.nom, p.pseudo, m.id, ...m.liste.map((x) => x.raison + " " + x.par)].join(" "), f.q)) continue;
-      const dansPeriode = m.liste.filter(garde);
+      const dansPeriode = recentsDabord(m.liste, "date").filter(garde);
       if (!dansPeriode.length) continue;
       nbGroupe.tous++;
       new Set(dansPeriode.map((x) => x.groupe)).forEach((g) => { nbGroupe[g] = (nbGroupe[g] || 0) + 1; });
@@ -245,7 +249,7 @@ function cadreNettoyageCasier() {
     h("p", { classe: "aide" }, "Repartir de zéro ou nettoyer une zone ; les bannissements restent, tout se défait pendant 30 jours. Amnistie automatique : 3 mois sans infraction."),
     peutAgir() ? h("div", { classe: "rangee" }, bouton("Nettoyer le casier…", { classe: "p danger", icone: "nettoyage", reseau: true, onclick: nettoyerCasier })) : null,
     lots.length ? h("ul", { classe: "entrees" }, lots.map((l) => h("li", { classe: "entree" },
-      h("div", { classe: "haut" }, h("span", { classe: "quoi" }, l.quoi), h("span", { classe: "quand" }, depuis(l.quand))),
+      h("div", { classe: "haut" }, h("span", { classe: "quoi" }, l.membre ? [l.quoi + " de ", lienNom(l.membre, ouvrirFiche)] : l.quoi), h("span", { classe: "quand" }, depuis(l.quand))),
       h("div", { classe: "meta" }, quantite(l.n, "entrée(s)") + " · " + quantite(l.personnes, "personne(s)") + " · " + (l.par ? "par " + nomDe(P(l.par)) : "automatique")
         + (l.restaure_le ? " · annulé " + depuis(l.restaure_le) + (l.restaure_par ? " par " + nomDe(P(l.restaure_par)) : "") : "")),
       l.restaure_le ? tampon("Annulé", "encre") : peutAgir() ? h("div", {}, bouton("Annuler ce nettoyage", { classe: "p discret", icone: "synchro", reseau: true, onclick: () => agir({ action: "casier_restaurer", lot: l.lot }, "Annuler ce nettoyage ?", quantite(l.n, "entrée(s)") + (l.n > 1 ? " reviennent" : " revient") + " au casier.", {}, "Remettre au casier") })) : null))) : null);
@@ -272,7 +276,7 @@ function carteCasier(m, entrees, nbr) {
     h("div", { classe: "pastilles" }, types.slice(0, 4).map(([t, n]) => pastille(n + " × " + libelleType(t), teinteType(t)))),
     h("ul", { classe: "entrees" }, entrees.slice(0, 3).map((x) => h("li", { classe: "entree" + (["kick", "ban"].includes(x.type) ? " grave" : ""), vars: { "--teinte": teinteType(x.type) } },
       h("div", { classe: "haut" }, h("span", { classe: "quoi" }, x.libelle + (x.duree ? " · " + x.duree : "")), h("span", { classe: "quand" }, date(x.date, true))),
-      x.raison ? h("div", { classe: "texte coupe2" }, x.raison) : null, h("div", { classe: "meta" }, x.auto ? "Automatique" : "Par " + x.par)))),
+      x.raison ? h("div", { classe: "texte coupe2" }, x.raison) : null, h("div", { classe: "meta" }, x.auto ? "Automatique" : "Par " + propre(x.par))))),
     entrees.length > 3 ? h("div", { classe: "compte-pied" }, "+ " + quantite(entrees.length - 3, "autre(s)") + " — tout est dans la fiche") : null);
 }
 function carteModerateur(x) {
@@ -310,7 +314,7 @@ export function ticketsVue(vue, portee) {
       h("div", { classe: "cadre" }, h("h3", {}, "Staff"), h("p", { classe: "aide" }, "Tickets pris en charge et fermés, depuis le début. Direction et fondateur à part."),
         tk.staff.length ? barresH(tk.staff.map((x) => [sansEmoji(x.nom), x.pris + x.fermes, x.pris + " pris · " + x.fermes + " fermés"])) : vide("Rien à afficher")),
       h("div", { classe: "cadre" }, h("h3", {}, "Délais par type"), h("p", { classe: "aide" }, "Médianes : prise en charge, puis fermeture."),
-        h("ul", { classe: "entrees" }, types.map((t) => h("li", { classe: "entree" }, h("div", { classe: "haut" }, h("span", { classe: "quoi" }, t.nom), h("span", { classe: "quand" }, t.total + " au total")),
+        h("ul", { classe: "entrees" }, types.map((t) => h("li", { classe: "entree" }, h("div", { classe: "haut" }, h("span", { classe: "quoi" }, propre(t.nom)), h("span", { classe: "quand" }, t.total + " au total")),
           h("div", { classe: "meta" }, "prise en charge " + duree(t.prise_mediane) + " · fermeture " + duree(t.fermeture_mediane) + " · " + quantite(t.sans_prise, "fermé(s) sans prise")))))))));
   };
   const majResultats = () => {
@@ -321,9 +325,9 @@ export function ticketsVue(vue, portee) {
     const rell = types.filter((t) => t.rellseas), norm_ = types.filter((t) => !t.rellseas);
     const somme = (l) => l.reduce((a, t) => a + t.total, 0);
     const options = clan
-      ? [["tous", "Tous", somme(types)], ...(types.length > 1 ? types.map((t) => ["t:" + t.nom, t.nom, t.total, ENCRES.mer]) : [])]
+      ? [["tous", "Tous", somme(types)], ...(types.length > 1 ? types.map((t) => ["t:" + t.nom, propre(t.nom), t.total, ENCRES.mer]) : [])]
       : [["normaux", "Tickets normaux", somme(norm_), ENCRES.sienne], ["rell", "Rell Seas", somme(rell), ENCRES.mer], ["tous", "Tous", somme(types)],
-        ...(norm_.length > 1 ? norm_.map((t) => ["t:" + t.nom, t.nom, t.total, ENCRES.sienne]) : [])];
+        ...(norm_.length > 1 ? norm_.map((t) => ["t:" + t.nom, propre(t.nom), t.total, ENCRES.sienne]) : [])];
     if (!options.some((o) => o[0] === f.type)) f.type = options[0][0];
     const garde = (t) => dansPortee(t) && (f.type === "tous" || (f.type === "rell" && t.rellseas) || (f.type === "normaux" && !t.rellseas) || f.type === "t:" + t.type);
     const cherche = (t, p) => contient([p.nom, p.pseudo, p.id, "#" + t.ticket, t.motif, t.type].join(" "), f.q);
@@ -339,7 +343,7 @@ export function ticketsVue(vue, portee) {
       puces(options, f.type, (v) => { f.type = v; changer(); }, "Types de tickets"),
       section("Ouverts", "tickets", compte(ouverts.length, "ticket"), ouverts.length ? paginer(pre + "-o", ouverts, carteTicketOuvert) : vide("Aucun ticket ouvert ici", "Tout est traité.", "succes")),
       section("Fermés ces " + jours + " derniers jours", "cadenas", quantite(groupes.size, "personne(s)") + " · " + compte(recents.length, "ticket"),
-        groupes.size ? paginer(pre + "-f", [...groupes.entries()], ([id, l]) => carteTicketsFermes(id, l)) : vide("Aucun ticket fermé ces 30 derniers jours")),
+        groupes.size ? paginer(pre + "-f", [...groupes.entries()], ([id, l]) => carteTicketsFermes(id, l)) : vide("Aucun ticket fermé ces " + jours + " derniers jours")),
       section("Archives", "coffre", compte(archives.length, "ticket") + " · fermés depuis plus de " + jours + " jours",
         archives.length ? h("div", {}, [...parMois.entries()].map(([k, l]) => groupe({ titre: libelleMois(k), compte: l.length, cle: pre + "-a-" + k },
           () => paginer(pre + "-a-" + k, l, ligneArchive, { classe: "lignes", pas: 30 })))) : vide("Rien aux archives", "Les tickets y sont rangés " + jours + " jours après leur fermeture.")));
@@ -353,9 +357,9 @@ export const tickets = (vue) => ticketsVue(vue, "serveur");
 export function carteTicketOuvert(t) {
   const tard = !t.pris_par && t.ouvert && maintenant() - t.ouvert > JOUR;
   return h("article", { classe: "feuillet" + (tard ? " chaude" : "") },
-    h("div", { classe: "qui" }, avatar(t), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(t)), h("div", { classe: "sous-nom" }, "Ticket #" + t.ticket + " · ouvert " + depuis(t.ouvert))),
-      pastille(t.type, t.rellseas ? ENCRES.mer : ENCRES.sienne)),
-    h("div", { classe: "pastilles" }, t.pris_par ? pastille("Pris par " + sansEmoji(t.pris_par), "#3f6b3a") : pastille(tard ? "Personne depuis plus de 24 h" : "Pas encore pris", "#a8641c")),
+    h("div", { classe: "qui" }, avatar(t), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(t)), h("div", { classe: "sous-nom" }, "Ticket #" + t.ticket + " · ouvert " + depuis(t.ouvert)))),
+    h("div", { classe: "pastilles" }, pastille(propre(t.type), t.rellseas ? ENCRES.mer : ENCRES.sienne),
+      t.pris_par ? pastille("Pris par " + sansEmoji(t.pris_par), "#3f6b3a") : pastille(tard ? "Personne depuis plus de 24 h" : "Pas encore pris", "#a8641c")),
     h("div", { classe: "feuillet-pied" },
       t.salon ? h("a", { classe: "bouton p", href: t.salon }, icone("discord"), h("span", {}, "Sur Discord")) : null,
       bouton("Conversation", { classe: "p", icone: "parchemin", onclick: () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + nomDe(t)) }),
@@ -368,7 +372,7 @@ function carteTicketsFermes(id, l) {
     h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("button", { classe: "lien-nom nom", type: "button", onclick: ouvrir }, nomDe(p)),
       h("div", { classe: "sous-nom" }, quantite(l.length, "ticket(s)") + " · dernier fermé " + depuis(l[0].ferme || l[0].ouvert)))),
     h("ul", { classe: "entrees" }, l.slice(0, 3).map((t) => h("li", { classe: "entree" },
-      h("div", { classe: "haut" }, h("span", { classe: "quoi" }, "#" + t.ticket + " · " + t.type), h("span", { classe: "quand" }, date(t.ferme || t.ouvert, true))),
+      h("div", { classe: "haut" }, h("span", { classe: "quoi" }, "#" + t.ticket + " · " + propre(t.type)), h("span", { classe: "quand" }, date(t.ferme || t.ouvert, true))),
       h("div", { classe: "texte coupe2" }, t.motif || "Sans motif"),
       h("div", { classe: "meta" }, (t.ferme_par ? "fermé par " + sansEmoji(t.ferme_par) + " · " : "") + "durée " + duree(t.ferme && t.ouvert ? t.ferme - t.ouvert : 0)),
       h("div", {}, bouton("Conversation", { classe: "p discret", icone: "parchemin", onclick: () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + nomDe(p)) }))))),
@@ -378,7 +382,7 @@ function ligneArchive(t) {
   const p = P(t.id);
   return h("div", { classe: "ligne" }, avatar(p, "p"),
     h("div", { classe: "bloc" }, h("div", { classe: "nom une-ligne" }, "#" + t.ticket + " · " + nomDe(p)),
-      h("div", { classe: "sous-nom" }, t.type + " · fermé le " + date(t.ferme) + (t.motif ? " · " + t.motif : ""))),
+      h("div", { classe: "sous-nom" }, propre(t.type) + " · fermé le " + date(t.ferme) + (t.motif ? " · " + t.motif : ""))),
     h("div", { classe: "droite" }, tampon("Archivé", "encre", true),
       bouton("Conversation", { classe: "p discret", icone: "parchemin", onclick: () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + nomDe(p)) })));
 }
@@ -497,7 +501,7 @@ export function salons(vue, ctx) {
     const nb = d ? {
       questions: ((d.questions && d.questions.stats) || {}).ouvertes || 0, idees: ((d.suggestions && d.suggestions.stats) || {}).ouvertes || 0,
       sondages: ((d.sondages && d.sondages.stats) || {}).en_cours || 0, entraide: ((d.entraide && d.entraide.stats) || {}).ouvertes || 0,
-      annonces: ((d.annonces && d.annonces.stats) || {}).total || 0, droits: (d.salons || []).length,
+      annonces: ((d.annonces && d.annonces.stats) || {}).total || 0, droits: (Array.isArray(d.salons) ? d.salons : []).reduce((a, c) => a + ((c && c.salons) || []).length, 0),
     } : {};
     remplacer(onglets, ...SOUS_SALONS.map(([k, l, ic]) => h("a", { classe: "etiquette", role: "tab", href: "#port/salons/" + k, "aria-selected": String(k === sous) },
       icone(ic), l, nb[k] ? h("span", { classe: "compteur" + (k === "questions" && nb[k] ? " chaud" : " calme") }, String(nb[k])) : null)));
@@ -521,7 +525,7 @@ function sousQuestions(d, f, maj) {
     tuile({ cle: "q1", lib: "Sans réponse", val: st.ouvertes || 0, icone: "salons", teinte: "#a8641c" }),
     tuile({ cle: "q2", lib: "Répondues · 7 jours", val: st.repondues_7 || 0, icone: "valider", teinte: "#3f6b3a" }),
     tuile({ cle: "q3", lib: "Réponse du staff", texte: duree(st.delai_median), icone: "minuteur", sous: "délai médian", teinte: "#1f4e5a" }),
-    tuile({ cle: "q4", lib: "Salon le plus questionné", texte: top ? sansEmoji(top.salon) : "—", icone: "carte", sous: top ? quantite(top.n, "question(s)") + " sur 30 jours" : null, teinte: "#5e3a4e" })),
+    tuile({ cle: "q4", lib: "Salon le plus questionné", texte: top ? nomSalon(top.salon) : "—", icone: "carte", sous: top ? quantite(top.n, "question(s)") + " sur 30 jours" : null, teinte: "#5e3a4e" })),
   h("div", { classe: "rangee entre" }, puces([["ouverte", "Sans réponse", nb.ouverte || 0, "#a8641c"], ["repondue", "Répondues", nb.repondue || 0, "#3f6b3a"], ["resolue", "Résolues", nb.resolue || 0, "#3f6b3a"],
     ["traitee", "Traitées", nb.traitee || 0, "#1f4e5a"], ["ignoree", "Pas des questions", nb.ignoree || 0, "#4a5560"], ["tous", "Toutes", nb.tous]], f.ques, (v) => { f.ques = v; resetPages("sal"); maj(); }, "Statut"),
     exporter("Exporter", [["Questions · 30 jours (CSV)", { quoi: "questions" }], ["Questions · 30 jours (JSON)", { quoi: "questions", format: "json" }]])),
@@ -535,7 +539,7 @@ export function carteQuestions(id, qs) {
     h("ul", { classe: "entrees" }, qs.slice(0, 4).map((x) => {
       const [lib, teinte] = STATUTS_Q[x.statut] || [x.libelle, null];
       return h("li", { classe: "entree" },
-        h("div", { classe: "haut" }, h("span", { classe: "quoi" }, sansEmoji(x.salon)), h("span", { classe: "quand" }, depuis(x.quand))),
+        h("div", { classe: "haut" }, h("span", { classe: "quoi" }, nomSalon(x.salon)), h("span", { classe: "quand" }, depuis(x.quand))),
         h("div", { classe: "texte coupe3 deplier", onclick: deplier }, x.texte),
         h("div", { classe: "pastilles" }, pastille(lib, teinte), x.par ? h("span", { classe: "meta" }, "par " + sansEmoji(x.par) + (x.repondu_le && x.repondu_le >= x.quand ? " · en " + duree(x.repondu_le - x.quand) : "")) : null),
         h("div", { classe: "rangee" },
@@ -563,7 +567,7 @@ function carteIdee(x) {
   const total = x.pour + x.contre, pourcent = total ? Math.round(100 * x.pour / total) : 0;
   const ouverte = !x.retire_le && (x.statut === "attente" || x.statut === "etude");
   return h("article", { classe: "feuillet" + (ouverte ? " chaude" : "") },
-    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, lienNom(x.auteur, ouvrirFiche)), h("div", { classe: "sous-nom" }, "Idée n°" + x.id + " · " + sansEmoji(x.salon) + " · " + depuis(x.cree)))),
+    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, lienNom(x.auteur, ouvrirFiche)), h("div", { classe: "sous-nom" }, "Idée n°" + x.id + " · " + nomSalon(x.salon) + " · " + depuis(x.cree)))),
     h("h3", { classe: "titre-carte" }, x.titre),
     x.details ? h("p", { classe: "texte coupe3 deplier", onclick: deplier }, x.details) : null,
     h("div", { classe: "votes" }, h("div", { classe: "vote" + (total && pourcent >= 50 ? " tete" : "") },
@@ -593,7 +597,7 @@ function carteSondage(x) {
   const p = P(x.auteur), [lib, teinte] = STATUTS_S[x.statut] || [x.statut, null];
   const quand = x.statut === "en_cours" ? "fin le " + date(x.fin, true) : x.statut === "retire" ? "retiré " + depuis(x.retire_le) + (x.retire_par ? " par " + nomDe(P(x.retire_par)) : "") : "terminé le " + date(x.fin, true);
   return h("article", { classe: "feuillet" },
-    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, lienNom(x.auteur, ouvrirFiche)), h("div", { classe: "sous-nom" }, sansEmoji(x.salon) + " · " + depuis(x.cree)))),
+    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, lienNom(x.auteur, ouvrirFiche)), h("div", { classe: "sous-nom" }, nomSalon(x.salon) + " · " + depuis(x.cree)))),
     h("h3", { classe: "titre-carte" }, x.question), sondageVotes(x),
     h("div", { classe: "pastilles" }, pastille(lib, teinte), h("span", { classe: "meta" }, quantite(x.total, "vote(s)") + (x.multiple ? " · plusieurs choix" : "") + " · " + quand)),
     x.statut !== "retire" ? h("div", { classe: "feuillet-pied" },
@@ -601,13 +605,15 @@ function carteSondage(x) {
       peutAgir() ? bouton("Retirer du salon", { classe: "p danger", reseau: true, onclick: () => agir({ action: "sondage_retirer", sondage: x.id }, "Retirer ce sondage du salon ?", "Le message disparaît de Discord ; son résultat reste ici.", {}, "Retirer du salon", "danger") }) : null) : null);
 }
 const STATUTS_E = { ouverte: ["Ouverte", "#3f6b3a"], prise: ["En cours", "#a8641c"], terminee: ["Terminée", "#1f4e5a"], fermee: ["Fermée", "#4a5560"], expiree: ["Fermée sans activité", "#4a5560"], retiree: ["Retirée", "#4a5560"] };
+// Les zones d'échange du serveur : « trade » (Rell Seas) et « cl_trade » (Clover RPG) — entraide.ZONES.
+const estEchange = (x) => /(^|_)trade$/.test(String(x.zone || ""));
 function sousEntraide(d, f, maj) {
   const en = d.entraide || {}, le = en.liste || [];
   if (en.erreur) return vide("Entraide momentanément illisible");
   const ouverte = (x) => x.statut === "ouverte" || x.statut === "prise";
-  const filtre = le.filter((x) => (f.entr === "toutes" || (f.entr === "ouvertes" ? ouverte(x) : x.zone === f.entr)) && contient([x.titre, x.type, (x.champs || []).map((c) => c[1]).join(" "), P(x.auteur).nom].join(" "), f.q));
+  const filtre = le.filter((x) => (f.entr === "toutes" || (f.entr === "ouvertes" ? ouverte(x) : f.entr === "trade" ? estEchange(x) : x.zone === f.entr)) && contient([x.titre, x.type, (x.champs || []).map((c) => c[1]).join(" "), P(x.auteur).nom].join(" "), f.q));
   return [h("p", { classe: "aide" }, "Chaque demande d'aide et de trade : qui l'a faite, qui est venu, qui l'a certifiée, avec qui l'échange s'est fait. Close, elle disparaît de Discord ; elle reste ici."),
-    puces([["ouvertes", "En cours", le.filter(ouverte).length, "#3f6b3a"], ["trade", "Trade", le.filter((x) => x.zone === "trade").length, "#a8641c"], ["toutes", "Toutes", le.length]], f.entr, (v) => { f.entr = v; resetPages("sal"); maj(); }, "Statut"),
+    puces([["ouvertes", "En cours", le.filter(ouverte).length, "#3f6b3a"], ["trade", "Trade", le.filter(estEchange).length, "#a8641c"], ["toutes", "Toutes", le.length]], f.entr, (v) => { f.entr = v; resetPages("sal"); maj(); }, "Statut"),
     filtre.length ? paginer("sal-e", filtre, carteDemande) : vide(f.entr === "ouvertes" ? "Aucune demande en cours" : "Rien ici", "Change le filtre ou la recherche.")];
 }
 function carteDemande(x) {
@@ -617,7 +623,7 @@ function carteDemande(x) {
     h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, lienNom(x.auteur, ouvrirFiche)), h("div", { classe: "sous-nom" }, sansEmoji(x.type) + " · n°" + x.id + " · " + depuis(x.cree)))),
     h("h3", { classe: "titre-carte" }, x.titre),
     (x.champs || []).length ? h("dl", { classe: "champs-lus" }, x.champs.map(([l, v]) => h("div", {}, h("dt", {}, l), h("dd", {}, v)))) : null,
-    (x.aidants || []).length ? h("div", { classe: "meta" }, (x.zone === "trade" ? "Intéressés : " : "Venus aider : ") + x.aidants.map((a) => nomDe(P(a))).join(", ")) : null,
+    (x.aidants || []).length ? h("div", { classe: "meta" }, (estEchange(x) ? "Intéressés : " : "Venus aider : ") + x.aidants.map((a) => nomDe(P(a))).join(", ")) : null,
     x.partenaire ? h("div", { classe: "meta" }, "Échange avec " + nomDe(P(x.partenaire))) : null,
     h("div", { classe: "pastilles" }, pastille(lib, teinte), fin ? h("span", { classe: "meta" }, fin + (x.ferme ? " · " + depuis(x.ferme) : "")) : null),
     x.lien || x.transcript ? h("div", { classe: "feuillet-pied" },
@@ -631,9 +637,9 @@ function sousAnnonces(d, f) {
   return [h("p", { classe: "aide" }, "Les annonces publiées depuis le salon « logs », et combien de membres les ont vues. Pour composer une annonce du clan : L'Équipage, Annonces & événements."),
     filtre.length ? paginer("sal-a", filtre, (x) => h("article", { classe: "feuillet" },
       h("div", { classe: "qui" }, avatar(P(x.auteur)), h("div", { classe: "bloc" }, h("h3", { classe: "titre-carte" }, x.titre),
-        h("div", { classe: "sous-nom" }, sansEmoji(x.salon) + " · " + depuis(x.cree) + " · par " + nomDe(P(x.auteur))))),
+        h("div", { classe: "sous-nom" }, nomSalon(x.salon) + " · " + depuis(x.cree) + " · par " + nomDe(P(x.auteur))))),
       h("p", { classe: "texte coupe3 deplier", onclick: deplier }, x.texte),
-      h("div", { classe: "pastilles" }, pastille("Vue par " + nombre(x.vues), "#3f6b3a", (x.vus || []).length ? x.vus.map((v) => nomDe(P(v))).join(", ") : null),
+      h("div", { classe: "pastilles" }, pastille(x.vues ? "Vue par " + quantite(x.vues, "membre(s)") : "Pas encore vue", x.vues ? "#3f6b3a" : "#4a5560", (x.vus || []).length ? x.vus.map((v) => nomDe(P(v))).join(", ") : null),
         x.mention ? h("span", { classe: "meta" }, "mention " + x.mention.replace(/^@/, "")) : null),
       x.lien ? h("div", { classe: "feuillet-pied" }, h("a", { classe: "bouton p", href: x.lien }, icone("discord"), h("span", {}, "Sur Discord"))) : null)) : vide("Aucune annonce")];
 }
@@ -652,49 +658,68 @@ function sousDroits(d) {
 }
 
 // ─── Nettoyage ──────────────────────────────────────────────────────────────
+// `api/nettoyage` (tableau.etat_nettoyage) : `regles` (durée, bornes, réglable, `auto` : elle efface), `compteurs`
+// (ce que chaque règle GARDE aujourd'hui — null : compte illisible), `dernier` (le dernier passage, null : jamais),
+// `bilan` (ce passage : règle → éléments retirés, -1 : en échec), `par` (qui l'a lancé, vide : la boucle du jour),
+// `bilans` (les 10 derniers passages : quand, total, détail, par) et `personnes` (leurs noms).
+const parQui = (id) => (id ? "par " + nomDe(P(id)) : "automatique");
 export function nettoyage(vue) {
   const zone = h("div", { classe: "pile" }, squelettes(3));
   ajouter(vue, [zone]);
   const maj = async (forcer) => {
     const n = await charger("nettoyage", { forcer });
+    if (!zone.isConnected) return;
     if (!n || n.erreur) { remplacer(zone, n && n.erreur ? vide("Nettoyage indisponible", n.erreur, "hors_ligne") : squelettes(3)); return; }
-    const compteurs = n.compteurs || {};
-    const total = Object.values(compteurs).reduce((a, b) => a + (Number(b) || 0), 0);
-    const bilan = n.bilan && typeof n.bilan === "object" ? n.bilan : null;
+    retenirPersonnes(n.personnes);
+    const regles = n.regles || [], compteurs = n.compteurs || {};
+    const garde = regles.reduce((a, r) => a + (Number(compteurs[r.cle]) || 0), 0);
+    const dernier = (n.bilans || [])[0] || null;
+    const echecs = Object.entries(n.bilan || {}).filter(([, v]) => Number(v) < 0).map(([k]) => (regles.find((r) => r.cle === k) || { nom: k }).nom);
     remplacer(zone,
       tuiles(tuile({ cle: "n1", lib: "Dernier nettoyage", texte: n.dernier ? depuis(n.dernier) : "jamais", icone: "nettoyage",
-        sous: n.dernier ? date(n.dernier, true) + (n.par ? " · " + (/^\d{5,22}$/.test(String(n.par)) ? nomDe(P(n.par)) : sansEmoji(n.par)) : " · automatique") : "", teinte: "#3f6b3a" }),
-        tuile({ cle: "n2", lib: "À nettoyer maintenant", val: total, icone: "coffre", sous: "selon les règles ci-dessous", teinte: "#a8641c" }),
-        bilan && bilan.total !== undefined ? tuile({ cle: "n3", lib: "Dernier bilan", val: bilan.total, icone: "journal", sous: accord(bilan.total, "élément(s) nettoyé(s)"), teinte: "#4a5560" }) : null),
+        sous: n.dernier ? date(n.dernier, true) + " · " + parQui(n.par) : "il passe tout seul chaque jour", teinte: "#3f6b3a" }),
+        tuile({ cle: "n2", lib: "Gardé aujourd'hui", val: garde, icone: "coffre", sous: "sous les " + quantite(regles.length, "règle(s)") + " ci-dessous", teinte: "#a8641c" }),
+        dernier ? tuile({ cle: "n3", lib: "Dernier bilan", val: dernier.total, icone: "journal", sous: echecs.length ? "en échec : " + echecs.join(", ") : dernier.total ? accord(dernier.total, "élément(s) retiré(s)") : "rien à retirer",
+          teinte: echecs.length ? "#8e2a24" : "#4a5560" }) : null),
       h("div", { classe: "cadre pile serree" }, h("h3", {}, "Le grand ménage"),
-        h("p", { classe: "aide" }, "Il passe tout seul chaque jour. Tu peux aussi le lancer maintenant : il applique les règles ci-dessous et note son bilan."),
+        h("p", { classe: "aide" }, "Il passe tout seul chaque jour. Tu peux aussi le lancer maintenant : chaque règle efface ce qui a dépassé sa durée, et le bilan est noté au journal."),
         h("div", { classe: "rangee" }, bouton("Lancer le nettoyage maintenant", { classe: "principal", icone: "nettoyage", reseau: true, onclick: async () => {
-          const ok = await confirmer({ titre: "Lancer le nettoyage maintenant ?", texte: total ? quantite(total, "élément(s)") + (total > 1 ? " seront nettoyés" : " sera nettoyé") + " selon les règles." : "Rien n'est à nettoyer pour l'instant, le bilan le notera.", libelleOk: "Nettoyer", style: "principal" });
+          const ok = await confirmer({ titre: "Lancer le nettoyage maintenant ?", texte: "Chaque règle ci-dessous efface ce qui a dépassé sa durée ; les rangements n'effacent rien. Le casier ne se nettoie que depuis Sanctions.", libelleOk: "Nettoyer", style: "principal" });
           if (!ok) return;
           const r = await poster("nettoyage/lancer", {});
-          toast(r.ok ? (r.donnees.message || "Nettoyage fait.") : r.status === 429 ? "Un nettoyage vient d'être fait : attends quelques minutes avant le suivant." : r.erreur, r.ok ? "succes" : "erreur");
-          if (r.ok) maj(true);
+          if (!r.ok) { toast(r.erreur || "Le nettoyage n'a pas pu être lancé.", "erreur"); return; }
+          const b = ((r.donnees && r.donnees.bilans) || [])[0];
+          toast(b ? "Nettoyage fait : " + (b.total ? quantite(b.total, "élément(s) retiré(s)") : "rien à retirer") + "." : "Nettoyage fait.", "succes");
+          maj(true);
         } }), h("a", { classe: "bouton discret", href: "#port/sanctions" }, icone("sanctions"), h("span", {}, "Nettoyer le casier (Sanctions)")))),
-      section("Les règles", "parchemin", compte((n.regles || []).length, "règle"), h("div", { classe: "grille" }, (n.regles || []).map((r) => carteRegle(r, compteurs[r.cle], () => maj(true))))),
+      section("Les règles", "parchemin", compte(regles.length, "règle"), h("div", { classe: "grille" }, regles.map((r) => carteRegle(r, compteurs[r.cle], () => maj(true))))),
       (n.bilans || []).length ? groupe({ titre: "Les derniers bilans", compte: n.bilans.length, cle: "net-bilans", icone: "journal" }, () => h("ul", { classe: "entrees feuillet" }, n.bilans.map((b) => h("li", { classe: "entree" },
-        h("div", { classe: "haut" }, h("span", { classe: "quoi" }, quantite(b.total, "élément(s) nettoyé(s)")), h("span", { classe: "quand" }, date(b.quand, true))), b.detail ? h("div", { classe: "meta" }, b.detail) : null)))) : null);
+        h("div", { classe: "haut" }, h("span", { classe: "quoi" }, b.total ? quantite(b.total, "élément(s) retiré(s)") : "Rien à retirer"), h("span", { classe: "quand" }, date(b.quand, true))),
+        h("div", { classe: "meta" }, parQui(b.par) + (b.detail ? " · " + b.detail : "")))))) : null);
   };
   maj();
   return { maj: () => maj(false) };
 }
-function carteRegle(r, enAttente, recharger) {
+function carteRegle(r, garde, recharger) {
+  // Le compte : absent (la règle n'en donne pas), null (illisible côté serveur), ou ce que la règle garde aujourd'hui.
+  const rangement = r.auto === false;
+  const nb = garde === undefined ? "" : garde === null ? "compte indisponible"
+    : garde ? quantite(garde, rangement ? "élément(s) rangé(s)" : "élément(s) gardé(s)") : rangement ? "rien de rangé" : "rien de gardé";
+  const sorte = rangement ? "rangement : rien n'est effacé" : r.reglable === false ? "règle fixe, appliquée chaque jour" : "appliquée chaque jour";
+  const duree = (j) => (Number(j) ? j + " j" : "jusqu'à expiration");
   if (r.reglable === false) {
     return h("article", { classe: "feuillet regle" }, h("h3", { classe: "titre-carte" }, r.nom), h("p", { classe: "aide" }, r.quoi),
-      h("div", { classe: "regle-ligne" }, h("span", { classe: "champ-lib" }, "Garder"), h("b", { classe: "num regle-valeur" }, (r.garde_jours || 0) + " j")),
-      h("p", { classe: "meta" }, "Règle fixe" + (r.auto ? " · appliquée chaque jour" : "") + " · " + (enAttente ? nombre(enAttente) + " à nettoyer" : "rien à nettoyer")));
+      h("div", { classe: "regle-ligne" }, h("span", { classe: "champ-lib" }, "Garder"), h("b", { classe: "num regle-valeur" }, duree(r.garde_jours))),
+      h("p", { classe: "meta" }, [nb, sorte].filter(Boolean).join(" · ")));
   }
-  let jours = Number(r.garde_jours) || r.min || 1;
+  const mini = Number(r.min) || 1, maxi = Number(r.max) || 365;
+  let jours = Number(r.garde_jours) || mini;
   const valeur = h("b", { classe: "num regle-valeur" }, jours + " j");
-  const reg = h("input", { classe: "reglette", type: "range", min: r.min || 1, max: r.max || 365, step: 1, value: jours, "aria-label": "Garder pendant (jours)" });
+  const reg = h("input", { classe: "reglette", type: "range", min: mini, max: maxi, step: 1, value: jours, "aria-label": "Garder pendant (jours)" });
   const enregistrer = bouton("Enregistrer", { classe: "p", icone: "valider", disabled: true });
   const etatBouton = () => { enregistrer.disabled = jours === Number(r.garde_jours) || !enLigne(); enregistrer.title = enLigne() ? "" : "Hors ligne : à enregistrer au retour de la connexion."; };
   reg.addEventListener("input", () => { jours = Number(reg.value); valeur.textContent = jours + " j"; etatBouton(); });
-  ecouter("reseau", etatBouton);
+  const stop = ecouter("reseau", () => { if (!enregistrer.isConnected) { stop(); return; } etatBouton(); });
   enregistrer.addEventListener("click", async () => {
     const rep = await poster("nettoyage/regle", { cle: r.cle, garde_jours: jours });
     toast(rep.ok ? "Règle enregistrée : " + r.nom + ", " + jours + " jours." : rep.erreur, rep.ok ? "succes" : "erreur");
@@ -703,8 +728,8 @@ function carteRegle(r, enAttente, recharger) {
   return h("article", { classe: "feuillet regle" },
     h("h3", { classe: "titre-carte" }, r.nom), h("p", { classe: "aide" }, r.quoi),
     h("div", { classe: "regle-ligne" }, h("span", { classe: "champ-lib" }, "Garder"), valeur),
-    reg, h("div", { classe: "regle-bornes" }, h("span", {}, (r.min || 1) + " j"), h("span", {}, (r.max || 365) + " j")),
+    reg, h("div", { classe: "regle-bornes" }, h("span", {}, mini + " j"), h("span", {}, maxi + " j")),
     r.defaut && Number(r.defaut) !== Number(r.garde_jours) ? h("p", { classe: "meta" }, "Par défaut : " + r.defaut + " j ",
       h("button", { classe: "lien-nom", type: "button", onclick: () => { reg.value = r.defaut; reg.dispatchEvent(new Event("input")); } }, "remettre")) : null,
-    h("div", { classe: "rangee entre" }, h("span", { classe: "meta" }, (enAttente ? nombre(enAttente) + " à nettoyer" : "Rien à nettoyer") + (r.auto === false ? " · seulement à la main" : "")), enregistrer));
+    h("div", { classe: "rangee entre" }, h("span", { classe: "meta" }, [nb, sorte].filter(Boolean).join(" · ")), enregistrer));
 }

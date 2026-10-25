@@ -6,6 +6,8 @@ existantes (`donnees`, `membre`, `conversation`, `recherche`, `export`, `action`
 (`api/rell/...`, `api/clan/...`, `api/nettoyage...`, `api/recrutement/...`, `api/media`, `sync`) — avec des données
 fictives réalistes, en français, nombreuses (pour éprouver les regroupements). Les écritures modifient l'état en
 mémoire ; une version périmée donne un vrai conflit 409 ; la synchronisation est idempotente (`op_id`).
+Les formes suivent le VRAI serveur (`tests/test_site_v2_port.py` les compare) ; les actions (`action`) lisent les mêmes
+champs et répondent comme celles de bot.py : un corps mal formé est refusé ici aussi.
 
 Rien n'appelle Discord ni Roblox : avatars, portraits et icônes de démonstration sont dessinés ici (Pillow).
 
@@ -241,6 +243,11 @@ class Monde:
         self.medias: dict[str, tuple[bytes, str]] = {}
         self.ailleurs: set = set()
         self.compteur = 1000
+        #  Ce que les actions du tableau changent (comme bot.py) : alertes gérées, membres partis ou bannis.
+        self.alertes_gerees: set = set()
+        self.partis: set = set()
+        self.bannis: set = set()
+        self.archives: dict = {}   # nettoyage du casier → ses entrées (pour le défaire)
         self.fondateur = self._personne("781205382923288593", "Capitaine Corbeau", "corbeau")
         self.direction = self._personne("827633340797681714", "Second Marée", "maree.seconde")
         self.moi = self.fondateur["id"]
@@ -409,7 +416,10 @@ class Monde:
         self.lots = [{"lot": "zone-a1", "quand": self.t(9, 4), "par": self.fondateur["id"], "quoi": "Avertissements, plus de 90 jours",
                       "n": 42, "personnes": 31, "restaure_le": None, "restaure_par": ""},
                      {"lot": "amnistie-b2", "quand": self.t(20, 15), "par": "", "quoi": "Amnistie : 3 mois sans infraction",
-                      "n": 17, "personnes": 9, "restaure_le": self.t(14, 10), "restaure_par": self.direction["id"]}]
+                      "n": 17, "personnes": 9, "restaure_le": self.t(14, 10), "restaure_par": self.direction["id"]},
+                     #  Le casier d'une personne (comme `tableau._casier` : la personne à part, jamais son identifiant).
+                     {"lot": "membre-c3", "quand": self.t(3, 1), "par": self.direction["id"], "quoi": "Avertissements",
+                      "membre": cibles[0]["id"], "n": 3, "personnes": 1, "restaure_le": None, "restaure_par": ""}]
         self.restreints = [{"uid": self.serveur[1400]["id"], "depuis": self.t(3), "raison": "Comportement à surveiller", "par": self.direction["id"]}]
         self.mutes = {self.serveur[1401]["id"]: int(MAINTENANT + 3 * 3600), self.serveur[1402]["id"]: int(MAINTENANT + 86400)}
 
@@ -516,7 +526,8 @@ class Monde:
             t["fermeture_mediane"] = int(f[len(f) // 2]) if f else 0
         fermes.sort(key=lambda x: -x["fin"][0])
         self._staff30_tickets = staff30
-        return {"archives_jours": 30, "types": sorted(types.values(), key=lambda t: (not t["rellseas"], -t["total"], t["nom"])),
+        jours = next((r["garde_jours"] for r in self.regles if r["cle"] == "tickets_archives"), 30)  # la règle « Nettoyage »
+        return {"archives_jours": jours, "types": sorted(types.values(), key=lambda t: (not t["rellseas"], -t["total"], t["nom"])),
                 "ouverts": sorted(ouverts, key=lambda o: (not o["rellseas"], o["type"], o["ouvert"])),
                 "staff": sorted(({"nom": self.nom(k), **v} for k, v in staff.items()), key=lambda x: -(x["pris"] + x["fermes"]))[:15],
                 "mois": dict(sorted(mois.items())[-12:]),
@@ -561,6 +572,12 @@ class Monde:
                                       pris_par=self.nom(r.choice(self.staff)["id"]) if r.random() < .7 else "",
                                       reponses=self._reponses_etape1(p["nom"]), salon=f"https://discord.com/channels/1/{1600 + i}",
                                       etape=1 if etat == "etape1" else 2, recrutement=etat))
+            #  Comme sur le serveur : une candidature en cours est aussi un ticket ouvert « Recrutement Rell Seas ».
+            c = self.en_cours[-1]
+            pris = next((x["id"] for x in self.staff if x["nom"] == c["pris_par"]), "")
+            self.tickets.append({"ticket": c["ticket"], "uid": p["id"], "panel": "p4", "statut": "open", "ouvert": c["ouvert"],
+                                 "prise": (c["ouvert"] + 1800, pris) if pris else None, "fin": None, "pris_par": pris,
+                                 "motif": "", "transcript": ""})
 
     # ── questions ──
     def _questions(self):
@@ -577,7 +594,7 @@ class Monde:
             self.questions.append({"question": 300 + i, "id": r.choice(self.serveur[20:1500])["id"], "texte": r.choice(textes),
                                    "quand": quand, "statut": statut, "par_id": par, "par_staff": bool(par),
                                    "repondu_le": quand + int(r.uniform(120, 30000)) if par else None,
-                                   "salon": "#" + r.choice(["aide", "général", "rell-seas", "trade"]),
+                                   "salon": "#" + r.choice(["❓・aide", "💬・général", "🌊rell-seas", "trade"]),  # comme Discord : émoji et séparateur
                                    "message": f"https://discord.com/channels/1/2/{300 + i}", "reponse": ""})
         self.questions.sort(key=lambda q: -q["quand"])
 
@@ -631,7 +648,7 @@ class Monde:
                                   "choix": choix, "comptes": comptes, "total": sum(comptes), "multiple": r.random() < .3, "cree": cree,
                                   "fin": cree + 3 * JOUR if statut != "en_cours" else int(MAINTENANT + r.uniform(.2, 3) * JOUR), "statut": statut,
                                   "retire_le": cree + JOUR if statut == "retire" else None, "retire_par": self.direction["id"] if statut == "retire" else "",
-                                  "salon": "#sondages"})
+                                  "salon": "#📊・sondages"})
         lib = {"attente": "En attente", "etude": "À l'étude", "acceptee": "Acceptée", "refusee": "Refusée", "realisee": "Réalisée"}
         self.idees = []
         for i in range(34):
@@ -643,33 +660,42 @@ class Monde:
                                "statut": statut, "libelle": lib[statut], "note": "Bonne idée, on s'en occupe." if statut in ("acceptee", "realisee") else "",
                                "decide_par": self.direction["id"] if statut not in ("attente",) else "", "cree": self.t(90),
                                "decide_le": self.t(30) if statut != "attente" else None, "retire_le": self.t(10) if i % 11 == 5 else None,
-                               "pour": r.randint(0, 30), "contre": r.randint(0, 12), "salon": "#suggestions"})
+                               "pour": r.randint(0, 30), "contre": r.randint(0, 12), "salon": "#💡suggestions"})
 
     # ── entraide, annonces ──
     def _entraide_annonces(self):
         r = self.r
         self.entraide = []
-        lib = {"ouverte": "Ouverte", "prise": "En cours", "terminee": "Terminée", "fermee": "Fermée", "expiree": "Fermée sans activité"}
+        #  Comme `tableau._entraide` : les zones d'entraide.ZONES (Rell Seas, et Clover RPG en « cl_… »), leur libellé,
+        #  le statut et son libellé bilingue.
+        lib = {"ouverte": "Ouverte · Open", "prise": "En cours · Ongoing", "terminee": "Terminée · Done", "fermee": "Fermée · Closed",
+               "expiree": "Fermée · Closed", "retiree": "Retirée · Removed"}
+        zones = {"aide": "Aide · Help", "boss": "Boss", "farm": "Farm", "chill": "Chill", "trade": "Trade",
+                 "cl_aide": "Aide · Help · Clover RPG", "cl_trade": "Trade · Clover RPG"}
         for i in range(44):
-            zone = r.choice(["help", "help", "trade"])
-            statut = r.choice(list(lib))
-            self.entraide.append({"id": 600 + i, "zone": zone, "type": "Trade" if zone == "trade" else "Help", "emoji": "",
+            zone = r.choice(["aide", "aide", "boss", "farm", "chill", "trade", "trade", "cl_aide", "cl_trade"])
+            statut = r.choice(["ouverte", "prise", "terminee", "fermee", "expiree", "retiree"])
+            echange = zone.endswith("trade")
+            self.entraide.append({"id": 600 + i, "zone": zone, "type": zones[zone], "emoji": "",
                                   "auteur": r.choice(self.serveur[20:900])["id"],
-                                  "titre": r.choice(["Besoin d'aide pour le boss des abysses", "Échange fruit rare contre navire",
-                                                     "Quelqu'un pour farmer ce soir ?", "Vends sabre courbe"]),
-                                  "champs": [["Niveau", str(r.randint(20, 300))], ["Serveur", r.choice(["EU", "NA"])]],
+                                  "titre": r.choice(["Vends sabre courbe", "Échange fruit rare contre navire"] if echange else
+                                                    ["Besoin d'aide pour le boss des abysses", "Quelqu'un pour farmer ce soir ?",
+                                                     "Bloqué à la quête du phare"]),
+                                  "champs": [["Pseudo Roblox", _slug(r.choice(PRENOMS)) + "_RS"], ["Niveau · Level", str(r.randint(20, 300))]],
                                   "statut": statut, "libelle": lib[statut], "aidants": [p["id"] for p in r.sample(self.serveur[20:900], r.randint(0, 3))],
                                   "credites": [], "certifie_par": r.choice(self.staff)["id"] if statut == "terminee" else "",
-                                  "partenaire": r.choice(self.serveur[20:900])["id"] if zone == "trade" and statut == "terminee" else "",
-                                  "ferme_par": "", "cree": self.t(40), "ferme": self.t(5) if statut not in ("ouverte", "prise") else None,
-                                  "lien": "https://discord.com/channels/1/4/5" if statut in ("ouverte", "prise") else "", "transcript": ""})
+                                  "partenaire": r.choice(self.serveur[20:900])["id"] if echange and statut == "terminee" else "",
+                                  "ferme_par": r.choice(self.staff)["id"] if statut in ("fermee", "retiree") else "",
+                                  "cree": self.t(40), "ferme": self.t(5) if statut not in ("ouverte", "prise") else None,
+                                  "lien": "https://discord.com/channels/1/4/5" if statut != "retiree" else "",
+                                  "transcript": f"https://exemple.invalid/e/{600 + i}" if statut in ("terminee", "fermee") else ""})
         self.annonces = []
         for i in range(10):
             vus = [p["id"] for p in r.sample(self.serveur[20:400], r.randint(3, 60))]
             self.annonces.append({"id": 90 + i, "titre": r.choice(["Nouvelle saison du clan", "Évènement de ce week-end", "Rappel des règles du trade",
                                                                    "Le Movie 3 est sorti !"]),
                                   "texte": "**Bonjour à tous !**\nUne nouvelle annonce importante pour l'équipage. Lisez bien jusqu'au bout.",
-                                  "salon": "#annonces", "auteur": r.choice([self.fondateur, self.direction])["id"], "cree": self.t(45),
+                                  "salon": "#📢・annonces", "auteur": r.choice([self.fondateur, self.direction])["id"], "cree": self.t(45),
                                   "vues": len(vus), "vus": vus[:40], "mention": r.choice(["", "le clan", "@everyone"]),
                                   "lien": "https://discord.com/channels/1/5/6"})
 
@@ -851,23 +877,44 @@ class Monde:
 
     # ── nettoyage ──
     def _nettoyage(self):
-        self.regles = [
-            {"cle": "journal_messages", "nom": "Journal · messages et vocal", "quoi": "Messages supprimés ou modifiés, entrées et sorties des vocaux.", "garde_jours": 30, "min": 7, "max": 90},
-            {"cle": "journal", "nom": "Journal · le reste", "quoi": "Modération, sécurité, membres, tickets, clan…", "garde_jours": 90, "min": 30, "max": 365},
-            {"cle": "tickets_archives", "nom": "Tickets fermés → archives", "quoi": "Rangés dans les archives de la liste après ce délai.", "garde_jours": 30, "min": 7, "max": 120},
-            {"cle": "transcripts", "nom": "Transcripts des tickets", "quoi": "Les conversations enregistrées à la fermeture.", "garde_jours": 120, "min": 30, "max": 365},
-            {"cle": "candidatures_refusees", "nom": "Candidatures refusées", "quoi": "Les dossiers des candidats refusés.", "garde_jours": 180, "min": 30, "max": 730},
-            {"cle": "affiches_corbeille", "nom": "Affiches dans la corbeille", "quoi": "Effacées pour de bon après ce délai.", "garde_jours": 30, "min": 7, "max": 90},
-            {"cle": "affiches_historique", "nom": "Historique des affiches", "quoi": "Qui a changé quoi sur chaque affiche.", "garde_jours": 180, "min": 30, "max": 730},
-            {"cle": "evenements_passes", "nom": "Événements passés", "quoi": "Annonces et événements terminés du salon Info.", "garde_jours": 60, "min": 14, "max": 365},
-            {"cle": "medias", "nom": "Images inutilisées", "quoi": "Images envoyées sur le site et plus utilisées nulle part.", "garde_jours": 30, "min": 7, "max": 180},
-            {"cle": "ops", "nom": "Envois hors ligne", "quoi": "La trace des modifications envoyées au retour de la connexion.", "garde_jours": 30, "min": 7, "max": 90},
-        ]
+        """Comme `tableau.etat_nettoyage` : les règles du serveur (celles de tableau.py et des modules branchés), ce que
+        chacune GARDE aujourd'hui (`compteurs` ; une règle sans compte n'y est pas), le dernier passage (`bilan` : règle
+        → éléments retirés), qui l'a lancé (`par` : vide pour la boucle du jour) et les 10 derniers bilans."""
+        R = [("journal_messages", "Journal : messages et vocal", "Messages supprimés ou modifiés, allées et venues en vocal : effacés du journal après ce délai.", 30, 30, 30, True),
+             ("journal", "Journal : tout le reste", "Sanctions, tickets, arrivées, sécurité, site… : effacés du journal après ce délai.", 90, 90, 90, True),
+             ("tickets_archives", "Tickets fermés : archives", "Un ticket fermé depuis plus longtemps passe dans les archives de la liste (il reste consultable).", 30, 7, 90, False),
+             ("transcripts", "Conversations des tickets fermés", "Les pages des conversations (transcripts) : effacées après ce délai.", 120, 120, 120, True),
+             ("candidatures_refusees", "Candidatures refusées", "Les fiches des candidatures refusées : effacées après ce délai (les acceptées restent).", 180, 30, 365, True),
+             ("questionnaires", "Questionnaires de recrutement", "Les questions posées, les réponses et les corrections des candidatures fermées : effacées après ce délai.", 365, 30, 365, True),
+             ("evenements_passes", "Événements passés", "Annonces et événements du clan terminés, annulés ou retirés : effacés après ce délai (les brouillons et les annonces publiées restent).", 60, 14, 365, True),
+             ("affiches_corbeille", "Affiches en corbeille", "Une affiche retirée reste restaurable pendant ce délai, puis elle est effacée pour de bon.", 30, 7, 90, True),
+             ("affiches_historique", "Historique des affiches", "Qui a changé quoi sur chaque affiche : effacé après ce délai.", 180, 30, 365, True),
+             ("medias", "Images inutilisées", "Une image envoyée sur le site, utilisée nulle part et pas vue depuis ce délai : effacée.", 30, 7, 180, True),
+             ("ops", "Modifications hors ligne", "La trace des modifications envoyées au retour du réseau (pour ne jamais les appliquer deux fois).", 30, 7, 90, True),
+             ("sessions", "Sessions et liens du site", "Les sessions et les liens expirés : effacés dès leur fin.", 0, 0, 0, True)]
+        self.regles = [{"cle": c, "nom": n, "quoi": q, "garde_jours": g, "defaut": g, "min": mi, "max": ma, "reglable": mi < ma, "auto": a}
+                       for c, n, q, g, mi, ma, a in R]
         self.nettoyage_dernier = int(MAINTENANT - 9 * 3600)
-        self.nettoyage_compteurs = {"journal_messages": 214, "journal": 37, "tickets_archives": 58, "transcripts": 12, "candidatures_refusees": 4,
-                                    "affiches_corbeille": 0, "affiches_historique": 0, "evenements_passes": 2, "medias": 6, "ops": 31}
-        self.nettoyage_bilans = [{"quand": int(MAINTENANT - 9 * 3600), "total": 412, "detail": "journal 380 · médias 12 · envois 20"},
-                                 {"quand": int(MAINTENANT - 33 * 3600), "total": 377, "detail": "journal 351 · tickets archivés 26"}]
+        self.nettoyage_par = ""                      # le dernier passage : la boucle du jour
+        self.nettoyage_lance = 0.0                   # « Lancer maintenant » : une fois toutes les 5 minutes au plus
+        #  Ce que chaque règle garde aujourd'hui (« Événements passés » n'a pas de compte, comme sur le serveur).
+        self.nettoyage_compteurs = {"journal_messages": 214, "journal": 1630, "tickets_archives": 58, "transcripts": 212,
+                                    "candidatures_refusees": 4, "questionnaires": 31, "affiches_corbeille": 2,
+                                    "affiches_historique": 96, "medias": 18, "ops": 31, "sessions": 3}
+        #  Ce qu'un passage retirerait (ce qui a dépassé sa durée).
+        self.nettoyage_excedents = {"journal_messages": 12, "journal": 4, "candidatures_refusees": 1, "medias": 2, "ops": 6, "sessions": 1}
+        self.nettoyage_bilan = {r["cle"]: 0 for r in self.regles if r["auto"]}
+        self.nettoyage_bilan.update(journal_messages=380, medias=12, ops=20)
+        self.nettoyage_bilans = [{"quand": int(MAINTENANT - 9 * 3600), "total": 412, "par": "",
+                                  "detail": "Journal : messages et vocal 380 · Images inutilisées 12 · Modifications hors ligne 20"},
+                                 {"quand": int(MAINTENANT - 33 * 3600), "total": 377, "par": self.fondateur["id"],
+                                  "detail": "Journal : messages et vocal 351 · Candidatures refusées 26"}]
+
+    def etat_nettoyage(self) -> dict:
+        qui = {x: self.ident(x) for x in [self.nettoyage_par, *(b["par"] for b in self.nettoyage_bilans)] if x}
+        return {"regles": [dict(r) for r in self.regles], "compteurs": dict(self.nettoyage_compteurs),
+                "dernier": self.nettoyage_dernier, "bilan": dict(self.nettoyage_bilan), "par": self.nettoyage_par,
+                "bilans": [dict(b) for b in self.nettoyage_bilans[:10]], "personnes": qui}
 
     # ── recrutement en deux étapes : la banque, les dossiers ──
     THEMES = [("studio", "Studio RELL Games"), ("jeu", "Le jeu RELL Seas"), ("races", "Races"), ("factions", "Factions"),
@@ -975,9 +1022,23 @@ class Monde:
     def alertes(self) -> list:
         out = []
         for p in self.serveur[1410:1413]:
+            if p["id"] in self.alertes_gerees:
+                continue
             evts = [{"quand": self.t(1), "texte": t, "gravite": g} for t, g in
                     [("Insulte détectée par le filtre", 2), ("Mentions de masse bloquées", 2), ("Lien suspect supprimé", 1)]]
             out.append({"id": p["id"], "ouverte_le": self.t(1), "maj_le": self.t(.2), "incidents": 3, "points": 7, "evenements": evts})
+        return out
+
+    def compte_casier(self) -> dict:
+        """Comme `casier.comptes` : ce que chaque zone effacerait, selon l'âge (les bannissements jamais)."""
+        out = {}
+        for portee in ("warns", "auto", "tout"):
+            out[portee] = {}
+            for jours in (0, 30, 90):
+                borne = time.time() - jours * JOUR
+                out[portee][str(jours)] = sum(
+                    1 for x in self.infractions if x["type"] not in ("ban", "tempban", "softban") and (not jours or x["date"] < borne)
+                    and (x["type"] == "warn" if portee == "warns" else x["auto"] if portee == "auto" else True))
         return out
 
     def par_jour(self) -> dict:
@@ -1028,8 +1089,7 @@ class Monde:
             "journal": {"evenements": self.journal[:400], "par_jour": self.par_jour()},
             "questions": self.questions_donnees(), "alertes": self.alertes(),
             "sondages": {"liste": self.sondages, "stats": {"en_cours": sum(s["statut"] == "en_cours" for s in self.sondages), "mois": 9, "votes_mois": 312}},
-            "casier": {"lots": self.lots, "compte": {"warns": {"0": 312, "30": 260, "90": 171}, "auto": {"0": 205, "30": 180, "90": 133},
-                                                     "tout": {"0": 690, "30": 588, "90": 402}}},
+            "casier": {"lots": self.lots, "compte": self.compte_casier()},
             "suggestions": {"liste": self.idees, "stats": {"ouvertes": sum(1 for i in self.idees if i["statut"] in ("attente", "etude") and not i["retire_le"]),
                                                            "total": len(self.idees), "votes": sum(i["pour"] + i["contre"] for i in self.idees)}},
             "entraide": {"liste": self.entraide, "stats": {"ouvertes": sum(1 for x in self.entraide if x["statut"] in ("ouverte", "prise")),
@@ -1042,7 +1102,7 @@ class Monde:
 
     def fiche(self, uid: str) -> dict:
         p = self.personnes.get(uid)
-        present = p is not None and uid not in [x["id"] for x in self.serveur[1580:1590]]
+        present = p is not None and uid not in [x["id"] for x in self.serveur[1580:1590]] and uid not in self.partis | self.bannis
         a_part = uid in (self.fondateur["id"], self.direction["id"])
         sanctions = [self.entree(x) for x in self.infractions if x["uid"] == uid]
         par_lui = [dict(self.entree(x), id=x["uid"]) for x in self.infractions if x["mod"] == uid][:100]
@@ -1064,7 +1124,7 @@ class Monde:
                       arrivee=p["arrivee"] if p else None, cree=p["cree"] if p else None, mute_jusqu=self.mutes.get(uid),
                       clan=uid in self.clan)
         if not present:
-            membre["banni"] = uid in [x["id"] for x in self.serveur[1580:1584]]
+            membre["banni"] = uid in [x["id"] for x in self.serveur[1580:1584]] or uid in self.bannis
         return {"membre": membre, "agir": not a_part, "sanctions": sanctions, "donnees": par_lui, "tickets": tickets,
                 "candidatures": cands, "journal": [e for e in self.journal if e["membre"] == uid][:300],
                 "questions": [q for q in qd if q["id"] == uid], "sondages": [s for s in self.sondages if s["auteur"] == uid],
@@ -1227,39 +1287,58 @@ async def recherche(request):
 
 
 async def export(request):
+    """Comme `tableau.export` / `tableau.exporter` : mêmes colonnes, mêmes noms de fichier, mêmes refus."""
     if not _session_ok():
         return _json({"erreur": "Session expirée."}, 403)
     m, q = MONDE, request.query
-    quoi, fmt = q.get("quoi", ""), q.get("format", "csv")
+    quoi, fmt = q.get("quoi", ""), "json" if q.get("format") == "json" else "csv"
+    membre_, jours_ = q.get("membre", ""), q.get("jours", "30")
+    if (membre_ and (not membre_.isdigit() or len(membre_) > 20)) or not jours_.isdigit() or len(jours_) > 3:
+        return _json({"erreur": "demande invalide"}, 400)
+    jours = max(1, min(int(jours_ or 30), 365))
+    nom_id = lambda uid: f"{m.nom(uid)} ({uid})" if uid else ""  # noqa: E731
     if quoi == "journal":
-        jours = int(q.get("jours", "30") or 30)
-        rows = [e for e in m.journal if MAINTENANT - e["quand"] <= jours * JOUR]
+        rows = [e for e in m.journal if MAINTENANT - e["quand"] <= jours * JOUR and (not membre_ or membre_ in (e["membre"], e["auteur"]))]
         entetes = ["Date", "Catégorie", "Type", "Gravité", "Membre", "Auteur", "Salon", "Texte", "Détail"]
-        lignes = [[_quand(e["quand"]), e["cat"], e["type"], e["gravite"], m.nom(e["membre"]), m.nom(e["auteur"]), e["salon"], e["texte"], e["detail"]] for e in rows]
+        lignes = [[_quand(e["quand"]), e["cat"], e["type"], e["gravite"], nom_id(e["membre"]), nom_id(e["auteur"]), e["salon"],
+                   e["texte"], e["detail"]] for e in rows]
+        brut = [dict(e, date=_quand(e["quand"])) for e in rows]
+    elif quoi == "membre" and membre_:
+        f = m.fiche(membre_)
+        entetes = ["Rubrique", "Date", "Quoi", "Par", "Détail", "Lien"]
+        lignes = ([["Sanction", _quand(s["date"]), s["libelle"], s["par"], s["raison"], ""] for s in f["sanctions"]]
+                  + [["Ticket", _quand(t["ouvert"]), f"#{t['ticket']} {t['type']} ({t['statut']})", t["ferme_par"], t["motif"],
+                      t["transcript"]] for t in f["tickets"]]
+                  + [["Journal", _quand(e["quand"]), e["cat"], nom_id(e["auteur"]), e["texte"] + (f" — {e['detail']}" if e["detail"] else ""), ""]
+                     for e in f["journal"]]
+                  + [["Question", _quand(x["quand"]), x["libelle"], x["par"], x["texte"], x["message"]] for x in f["questions"]])
+        brut = f
     elif quoi == "sanctions":
         entetes = ["N°", "Date", "Membre", "Type", "Durée", "Par", "Raison"]
-        lignes = [[x["sanction"], _quand(x["date"]), m.nom(x["uid"]), m.LIB.get(x["type"], x["type"]), x["duree"],
-                   "Automatique" if x["auto"] else m.nom(x["mod"]), x["raison"]] for x in m.infractions]
+        lignes = [[x["sanction"], _quand(x["date"]), nom_id(x["uid"]), m.LIB.get(x["type"], x["type"]), x["duree"],
+                   nom_id(x["mod"]), x["raison"]] for x in m.infractions]
+        brut = [dict(zip(entetes, lg)) for lg in lignes]
     elif quoi == "questions":
-        entetes = ["Date", "Membre", "Salon", "Statut", "Question"]
-        lignes = [[_quand(x["quand"]), m.nom(x["id"]), x["salon"], x["statut"], x["texte"]] for x in m.questions]
-    elif quoi == "membre" and q.get("membre", "").isdigit():
-        f = m.fiche(q["membre"])
-        entetes = ["Rubrique", "Date", "Quoi", "Par", "Détail"]
-        lignes = [["Sanction", _quand(s["date"]), s["libelle"], s["par"], s["raison"]] for s in f["sanctions"]]
+        d = m.questions_donnees()
+        entetes = ["Date", "Membre", "Salon", "Statut", "Répondu par", "Question", "Lien"]
+        lignes = [[_quand(x["quand"]), nom_id(x["id"]), x["salon"], x["libelle"], x["par"], x["texte"], x["message"]] for x in d["liste"]]
+        brut = [dict(zip(entetes, lg)) for lg in lignes]
     elif quoi == "erreurs":
-        entetes = ["Date (UTC)", "Source", "Type", "Message"]
-        lignes = [["2026-10-25 10:00:00", "tableau", "TimeoutError", "démonstration"]]
+        entetes = ["Date (UTC)", "Source", "Type", "Message", "Trace"]
+        lignes = [["2026-10-25 10:00:00", "tableau", "TimeoutError", "démonstration", ""]]
+        brut = [dict(zip(entetes, lg)) for lg in lignes]
     else:
         return _json({"erreur": "export inconnu ou réservé"}, 404)
-    nom = f"{quoi}-maquette-{datetime.now(PARIS):%Y-%m-%d}"
+    nom = f"{quoi}-{_slug('GoRP · Rell Seas FR').replace('_', '-')}-{datetime.now(PARIS):%Y-%m-%d}"
     if fmt == "json":
-        corps, type_, nom = json.dumps([dict(zip(entetes, l)) for l in lignes], ensure_ascii=False, indent=1).encode(), "application/json", nom + ".json"
+        corps, type_, nom = json.dumps(brut, ensure_ascii=False, indent=1, default=str).encode(), "application/json", nom + ".json"
     else:
         f = io.StringIO()
         w = csv.writer(f, delimiter=";", lineterminator="\r\n")
         w.writerow(entetes)
-        w.writerows(lignes)
+        for ligne in lignes:  # comme `tableau._csv` : une cellule qui commencerait une formule est neutralisée
+            cellules = ["" if v is None else str(v).replace("\r", " ").replace("\n", " ") for v in ligne]
+            w.writerow(["'" + c if c[:1] in ("=", "+", "-", "@", "\t") else c for c in cellules])
         corps, type_, nom = ("\ufeff" + f.getvalue()).encode(), "text/csv", nom + ".csv"
     return web.Response(body=corps, content_type=type_, charset="utf-8",
                         headers=dict(ENTETES, **{"Content-Disposition": f'attachment; filename="{nom}"'}))
@@ -1283,62 +1362,313 @@ async def _corps(request, maximum: int = 65536):
     return c if isinstance(c, dict) else None
 
 
+#  Les actions du tableau, comme `_ACTIONS_TABLEAU` de bot.py : mêmes noms, mêmes champs lus, mêmes refus et mêmes
+#  messages (un corps mal formé est refusé ici aussi : le contrôle sur la maquette dit vrai). → (ok, message)
+_DUREES_MUTE = {10: "10 minutes", 60: "1 heure", 360: "6 heures", 1440: "1 jour", 10080: "7 jours"}
+_PROTEGE = "Le fondateur et la direction sont protégés : aucune action possible depuis le site."
+_PORTEES = ("warns", "auto", "tout")
+_BANS = ("ban", "tempban", "softban")
+
+
+def _entier(d, k) -> int:
+    try:
+        return int(d.get(k) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _cible(m, uid):
+    """(personne, None) ou (None, le refus) — comme `_cible_site` : présent, ni fondateur ni direction."""
+    p = m.personnes.get(str(uid))
+    if p is None or str(uid) in m.partis | m.bannis:
+        return None, "Ce membre n'est plus sur le serveur."
+    if str(uid) in (m.fondateur["id"], m.direction["id"]):
+        return None, _PROTEGE
+    return p, None
+
+
+def _lot_casier(m, entrees, quoi):
+    if not entrees:
+        return None
+    lot = f"zone-{int(time.time())}-{m.nouvel_id()}"
+    m.archives[lot] = entrees
+    m.lots.insert(0, {"lot": lot, "quand": int(time.time()), "par": m.moi, "quoi": quoi, "n": len(entrees),
+                      "personnes": len({x["uid"] for x in entrees}), "restaure_le": None, "restaure_par": ""})
+    return lot
+
+
+def a_ticket_fermer(m, d):
+    t = next((x for x in m.tickets if x["ticket"] == _entier(d, "ticket") and x["statut"] == "open"), None)
+    if t is None:
+        return False, "Ce ticket n'est plus ouvert."
+    t["statut"], t["fin"] = "closed", (int(time.time()), m.moi)
+    t["motif"] = str(d.get("motif") or "").strip()[:150] or "Fermé depuis le tableau de bord"
+    return True, "Ticket fermé : transcript et journal comme d'habitude."
+
+
+def a_candidature(m, d):
+    if d.get("decision") == "accepter":
+        return False, ("Cette action ne donne aucun rôle : accepter passe par l'étape 2 — corrige ses réponses dans la "
+                       "rubrique Candidatures du site, puis accepte (rôle du clan, fermeture).")
+    return True, "Candidature refusée : ticket fermé."
+
+
+def a_clan_retirer(m, d, uid=None):
+    uid = str(uid if uid is not None else d.get("membre") or "")
+    p, refus = _cible(m, uid)
+    if p is None:
+        return False, refus
+    if uid not in m.clan:
+        return False, f"{p['nom']} n'a pas (ou plus) le rôle du clan."
+    m.clan.pop(uid)
+    return True, f"{p['nom']} n'a plus le rôle du clan."
+
+
+def a_clan_retirer_lot(m, d):
+    ids = [str(x) for x in (d.get("membres") or []) if str(x).isdigit()][:25]
+    if not ids:
+        return False, "Rien à retirer."
+    faits, refus = 0, []
+    for uid in ids:
+        ok, message = a_clan_retirer(m, d, uid)
+        faits += ok
+        if not ok:
+            refus.append(message)
+    return faits > 0, f"{faits} membre(s) retiré(s) du clan." + (f" {len(refus)} refus : {refus[0]}" if refus else "")
+
+
+def a_clan_ajouter(m, d):
+    uid = str(d.get("membre") or "")
+    p, refus = _cible(m, uid)
+    if p is None:
+        return False, refus
+    if uid in m.clan:
+        return False, f"{p['nom']} est déjà dans le clan."
+    m.clan[uid] = {"rang": 4, "jours": "—", "derniere": "jamais vu", "rappel": None}
+    return True, f"{p['nom']} a rejoint le clan."
+
+
+def a_clan_prevenir(m, d):
+    mode = str(d.get("mode") or "")
+    ids = list(dict.fromkeys(str(x) for x in (d.get("membres") or []) if str(x).isdigit()))[:25]
+    if mode not in ("mp", "salon") or not ids:
+        return False, "Demande invalide."
+    salon = None
+    if mode == "salon":
+        salon = next((s for s in m.clan_donnees()["salons"] if s["id"] == str(d.get("salon") or "")), None)
+        if salon is None:
+            return False, "Je ne peux pas écrire dans ce salon."
+    cibles = [u for u in ids if u in m.clan and u not in (m.fondateur["id"], m.direction["id"])]
+    if not cibles:
+        return False, "Personne à prévenir : ils ne sont plus dans le clan, ou sont de la direction."
+    t = int(time.time())
+    for u in cibles:
+        m.clan[u]["rappel"] = {"envoye_le": t, "echeance": t + 7 * JOUR, "par": m.nom(m.moi), "mode": mode,
+                               "salon": salon["nom"] if salon else "", "remis": True, "statut": "en_attente",
+                               "resolu_le": None, "resolu_par": 0}
+    return True, (f"{len(cibles)} membre(s) prévenu(s) : retrait proposé le "
+                  f"{datetime.fromtimestamp(t + 7 * JOUR, PARIS).strftime('%d/%m')} s'ils ne reviennent pas.")
+
+
+def a_clan_rappel_annuler(m, d):
+    c = m.clan.get(str(d.get("membre") or ""))
+    if not c or not c["rappel"] or c["rappel"]["statut"] not in ("en_attente", "echu"):
+        return False, "Aucun rappel en cours pour ce membre."
+    c["rappel"] = None
+    return True, "Rappel annulé."
+
+
+def a_moderer(m, d):
+    sanction = str(d.get("sanction") or "")
+    if sanction not in ("warn", "mute", "unmute", "kick", "ban"):
+        return False, "Sanction inconnue."
+    raison = str(d.get("motif") or "").strip()[:300]
+    if sanction != "unmute" and len(raison) < 3:
+        return False, "Indique un motif (3 caractères au moins)."
+    uid = str(d.get("membre") or "")
+    p, refus = _cible(m, uid)
+    if p is None:
+        return False, refus
+
+    def inscrire(typ, duree=""):
+        m.infractions.insert(0, {"sanction": m.nouvel_id(), "uid": uid, "type": typ, "raison": raison, "duree": duree,
+                                 "date": int(time.time()), "auto": False, "mod": m.moi})
+    if sanction == "warn":
+        inscrire("warn")
+        total = sum(1 for x in m.infractions if x["uid"] == uid and x["type"] == "warn")
+        return True, f"Avertissement enregistré ({total} au total)."
+    if sanction == "mute":
+        minutes = _entier(d, "duree") or 60
+        if minutes not in _DUREES_MUTE:
+            return False, "Durée invalide."
+        inscrire("mute", _DUREES_MUTE[minutes])
+        m.mutes[uid] = int(time.time()) + minutes * 60
+        return True, f"{p['nom']} est muté {_DUREES_MUTE[minutes]}."
+    if sanction == "unmute":
+        if m.mutes.pop(uid, None) is None:
+            return False, "Ce membre n'est pas muté."
+        return True, f"Le mute de {p['nom']} est levé."
+    inscrire(sanction)
+    m.clan.pop(uid, None)
+    (m.bannis if sanction == "ban" else m.partis).add(uid)
+    return True, f"{p['nom']} est {'banni' if sanction == 'ban' else 'expulsé'}."
+
+
+def a_question(m, d):
+    statut = str(d.get("statut") or "")
+    if statut not in ("traitee", "ignoree", "ouverte"):
+        return False, "Statut inconnu."
+    q = next((x for x in m.questions if x["question"] == _entier(d, "question")), None)
+    if q is None:
+        return False, "Question introuvable."
+    q["statut"] = statut
+    if statut == "ouverte":
+        q.update(par_id="", par_staff=False, repondu_le=None)
+    else:
+        q.update(par_id=m.moi, repondu_le=int(time.time()))
+    return True, {"traitee": "Question marquée traitée.", "ignoree": "Retirée : ce n'était pas une question.",
+                  "ouverte": "Question rouverte."}[statut]
+
+
+def a_alerte_geree(m, d):
+    uid = str(d.get("membre") or "")
+    if not uid.isdigit():
+        return False, "Alerte inconnue."
+    m.alertes_gerees.add(uid)
+    return True, "Alerte gérée : elle disparaît du salon des logs."
+
+
+def a_fiche_retirer(m, d):
+    cid = str(d.get("candidat") or "")
+    avant = len(m.candidats)
+    m.candidats = [c for c in m.candidats if c["id"] != cid]
+    return (True, "Fiche retirée.") if len(m.candidats) < avant else (False, "Fiche déjà retirée.")
+
+
+def a_sanction_retirer(m, d):
+    sid = _entier(d, "sanction")
+    if not any(x["sanction"] == sid for x in m.infractions):
+        return False, "Sanction déjà retirée."
+    m.infractions = [x for x in m.infractions if x["sanction"] != sid]
+    return True, "Sanction retirée du casier."
+
+
+def a_casier_effacer(m, d):
+    quoi, uid = str(d.get("quoi") or ""), str(d.get("membre") or "")
+    if quoi not in ("warns", "tout") or not uid.isdigit():
+        return False, "Demande invalide."
+    if uid == m.fondateur["id"]:
+        return False, "Le fondateur n'a pas de casier à effacer."
+    entrees = [x for x in m.infractions if x["uid"] == uid and (quoi == "tout" or x["type"] == "warn")]
+    if not entrees:
+        return False, "Rien à effacer."
+    m.infractions = [x for x in m.infractions if x not in entrees]
+    _lot_casier(m, entrees, "Avertissements" if quoi == "warns" else "Casier entier")
+    m.lots[0]["membre"] = uid
+    quoi_txt = "avertissement(s)" if quoi == "warns" else "entrée(s) du casier"
+    if quoi == "tout":
+        m.mutes.pop(uid, None)
+    return True, f"{len(entrees)} {quoi_txt} effacé(s). Annulable pendant 30 jours."
+
+
+def a_casier_serveur(m, d):
+    portee = str(d.get("portee") or "")
+    jours = _entier(d, "jours") if str(d.get("jours", "0")).lstrip("-").isdigit() else -1
+    if portee not in _PORTEES or jours not in (0, 30, 90):
+        return False, "Demande invalide."
+    if str(d.get("confirmation") or "").strip().upper() != "EFFACER":
+        return False, "Écris EFFACER pour confirmer."
+    borne = time.time() - jours * JOUR
+
+    def dans(x):
+        if x["type"] in _BANS or (jours and x["date"] >= borne):
+            return False
+        return x["type"] == "warn" if portee == "warns" else x["auto"] if portee == "auto" else True
+    entrees = [x for x in m.infractions if dans(x)]
+    if not entrees:
+        return False, "Rien à effacer dans cette zone."
+    m.infractions = [x for x in m.infractions if not dans(x)]
+    quoi = {"warns": "Avertissements", "auto": "Détections automatiques", "tout": "Tout le casier (sauf bannissements)"}[portee]
+    _lot_casier(m, entrees, quoi + (f", plus de {jours} jours" if jours else ""))
+    return True, (f"{len(entrees)} entrée(s) effacée(s) pour {len({x['uid'] for x in entrees})} personne(s). "
+                  "Annulable pendant 30 jours.")
+
+
+def a_casier_restaurer(m, d):
+    lot = next((x for x in m.lots if x["lot"] == str(d.get("lot") or "")[:80]), None)
+    if lot is None or lot["restaure_le"]:
+        return False, "Ce nettoyage est déjà annulé, ou trop ancien."
+    entrees = m.archives.pop(lot["lot"], [])
+    m.infractions = sorted(m.infractions + entrees, key=lambda x: -x["date"])
+    lot.update(restaure_le=int(time.time()), restaure_par=m.moi)
+    return True, f"{len(entrees) or lot['n']} entrée(s) remise(s) au casier."
+
+
+def a_debannir(m, d):
+    uid = str(d.get("membre") or "")
+    banni = uid in m.bannis or uid in [x["id"] for x in m.serveur[1580:1584]]
+    if not uid.isdigit() or not banni:
+        return False, "Ce membre n'est pas banni."
+    m.bannis.discard(uid)
+    return True, "Bannissement levé : il peut revenir sur le serveur."
+
+
+_STATUTS_IDEES = {"attente": "En attente", "etude": "À l'étude", "acceptee": "Acceptée", "refusee": "Refusée",
+                  "realisee": "Réalisée"}
+
+
+def a_suggestion_repondre(m, d):
+    statut = str(d.get("statut") or "")
+    if statut not in _STATUTS_IDEES:
+        return False, "Statut inconnu."
+    i = next((x for x in m.idees if x["id"] == _entier(d, "suggestion")), None)
+    if i is None:
+        return False, "Idée introuvable."
+    i.update(statut=statut, libelle=_STATUTS_IDEES[statut], note=str(d.get("motif") or "").strip()[:800],
+             decide_par=m.moi, decide_le=int(time.time()))
+    return True, f"Idée : {_STATUTS_IDEES[statut]}. L'auteur est prévenu."
+
+
+def a_suggestion_retirer(m, d):
+    i = next((x for x in m.idees if x["id"] == _entier(d, "suggestion")), None)
+    if i is None:
+        return False, "Idée introuvable."
+    if i["retire_le"]:
+        return False, "Cette idée est déjà retirée du salon."
+    i["retire_le"] = int(time.time())
+    return True, "Idée retirée du salon."
+
+
+def a_sondage_retirer(m, d):
+    s = next((x for x in m.sondages if x["id"] == _entier(d, "sondage")), None)
+    if s is None:
+        return False, "Sondage introuvable."
+    if s["retire_le"]:
+        return False, "Ce sondage est déjà retiré du salon."
+    s.update(statut="retire", retire_le=int(time.time()), retire_par=m.moi)
+    return True, "Sondage retiré du salon."
+
+
+ACTIONS = {"ticket_fermer": a_ticket_fermer, "candidature": a_candidature, "clan_retirer": a_clan_retirer,
+           "clan_retirer_lot": a_clan_retirer_lot, "fiche_retirer": a_fiche_retirer, "sanction_retirer": a_sanction_retirer,
+           "moderer": a_moderer, "question": a_question, "alerte_geree": a_alerte_geree,
+           "sondage_retirer": a_sondage_retirer, "casier_effacer": a_casier_effacer, "casier_serveur": a_casier_serveur,
+           "casier_restaurer": a_casier_restaurer, "debannir": a_debannir, "clan_ajouter": a_clan_ajouter,
+           "clan_prevenir": a_clan_prevenir, "clan_rappel_annuler": a_clan_rappel_annuler,
+           "suggestion_repondre": a_suggestion_repondre, "suggestion_retirer": a_suggestion_retirer}
+
+
 async def action(request):
     if not _session_ok():
         return _json({"ok": False, "message": "Session expirée."}, 403)
     if not _origine_ok(request):
         return _json({"ok": False, "message": "Requête refusée."}, 400)
     c = await _corps(request, 4096) or {}
-    m, nom = MONDE, str(c.get("action") or "")
-    uid = str(c.get("membre") or "")
-    if nom == "moderer":
-        s = c.get("sanction")
-        if s in ("warn", "mute", "kick", "ban"):
-            m.infractions.insert(0, {"sanction": m.nouvel_id(), "uid": uid, "type": s, "raison": c.get("motif") or "",
-                                     "duree": f"{c.get('duree')} min" if s == "mute" else "", "date": int(time.time()),
-                                     "auto": False, "mod": m.moi})
-        if s == "unmute":
-            m.mutes.pop(uid, None)
-        return _json({"ok": True, "message": {"warn": "Avertissement envoyé.", "mute": "Membre muté.", "unmute": "Mute levé.",
-                                              "kick": "Membre expulsé.", "ban": "Membre banni."}.get(s, "C'est fait.")})
-    if nom == "clan_retirer":
-        m.clan.pop(uid, None)
-        return _json({"ok": True, "message": "Rôle du clan retiré."})
-    if nom == "clan_retirer_lot":
-        for x in c.get("membres") or []:
-            m.clan.pop(str(x), None)
-        return _json({"ok": True, "message": f"{len(c.get('membres') or [])} membre(s) retiré(s) du clan."})
-    if nom == "clan_ajouter":
-        m.clan[uid] = {"rang": 4, "jours": "—", "derniere": "aujourd'hui", "rappel": None}
-        return _json({"ok": True, "message": "Ajouté au clan."})
-    if nom == "clan_prevenir":
-        for x in c.get("membres") or []:
-            if str(x) in m.clan:
-                m.clan[str(x)]["rappel"] = {"envoye_le": int(time.time()), "echeance": int(time.time() + 7 * JOUR), "par": m.nom(m.moi),
-                                            "mode": c.get("mode", "mp"), "salon": "clan-gorp", "remis": True, "statut": "en_attente",
-                                            "resolu_le": None, "resolu_par": None}
-        return _json({"ok": True, "message": "Membres prévenus."})
-    if nom == "clan_rappel_annuler":
-        if uid in m.clan:
-            m.clan[uid]["rappel"] = None
-        return _json({"ok": True, "message": "Rappel annulé : il reste au clan."})
-    if nom == "question":
-        for q in m.questions:
-            if q["question"] == c.get("question"):
-                q["statut"] = c.get("statut", q["statut"])
-        return _json({"ok": True, "message": "Question mise à jour."})
-    if nom == "ticket_fermer":
-        for t in m.tickets:
-            if t["ticket"] == c.get("ticket") and t["statut"] == "open":
-                t["statut"], t["fin"], t["motif"] = "closed", (int(time.time()), m.moi), c.get("motif") or "Fermé depuis le site"
-        return _json({"ok": True, "message": "Ticket fermé."})
-    if nom == "sanction_retirer":
-        m.infractions = [x for x in m.infractions if x["sanction"] != c.get("sanction")]
-        return _json({"ok": True, "message": "Sanction retirée du casier."})
-    if nom in ("casier_effacer", "casier_serveur", "casier_restaurer", "debannir", "alerte_geree", "fiche_retirer",
-               "candidature", "sondage_retirer", "suggestion_repondre", "suggestion_retirer"):
-        return _json({"ok": True, "message": "C'est fait."})
-    return _json({"ok": False, "message": "Action inconnue."}, 400)
+    fn = ACTIONS.get(str(c.get("action") or ""))
+    if fn is None:
+        return _json({"ok": False, "message": "Action inconnue."}, 400)
+    ok, message = fn(MONDE, c)
+    return _json({"ok": bool(ok), "message": str(message)})
 
 
 async def sortir(request):
@@ -1831,31 +2161,44 @@ def r_annuler(m, q, c):
 
 
 def r_nettoyage(m, q, c):
-    regles = [dict(r, defaut=r.get("defaut", r["garde_jours"]), reglable=r["cle"] not in ("ops",), auto=True) for r in m.regles]
-    return 200, {"regles": regles, "dernier": m.nettoyage_dernier, "compteurs": m.nettoyage_compteurs, "bilan": m.nettoyage_bilans[0] if m.nettoyage_bilans else None,
-                 "par": None, "bilans": m.nettoyage_bilans}
+    return 200, m.etat_nettoyage()
 
 
 def r_nettoyage_regle(m, q, c):
-    rg = next((x for x in m.regles if x["cle"] == c.get("cle")), None)
+    """Comme `tableau._route_nettoyage_regle` : mêmes refus (règle inconnue, durée fixe, hors bornes), même réponse."""
+    rg = next((x for x in m.regles if x["cle"] == c.get("cle")), None) if isinstance(c.get("cle"), str) else None
     if rg is None:
-        return 404, {"ok": False, "erreur": "Règle inconnue."}
-    j = int(c.get("garde_jours") or 0)
-    if not rg["min"] <= j <= rg["max"]:
-        return 400, {"ok": False, "erreur": f"Entre {rg['min']} et {rg['max']} jours."}
+        return 404, {"erreur": "Règle inconnue.", "champ": "cle"}
+    if rg["min"] == rg["max"]:
+        return 400, {"erreur": "Cette durée est fixe.", "champ": "cle"}
+    j = c.get("garde_jours")
+    if isinstance(j, bool) or not isinstance(j, int) or not rg["min"] <= j <= rg["max"]:
+        return 400, {"erreur": f"Entre {rg['min']} et {rg['max']} jours.", "champ": "garde_jours"}
     rg["garde_jours"] = j
-    return 200, {"ok": True, "regle": rg}
+    rep = m.etat_nettoyage()
+    rep.update(ok=True, regle=dict(rg))
+    return 200, rep
 
 
 def r_nettoyage_lancer(m, q, c):
-    if time.time() - m.nettoyage_dernier < 300:
-        return 429, {"erreur": "Un nettoyage vient d'être fait : attends cinq minutes."}
-    total = sum(m.nettoyage_compteurs.values())
-    m.nettoyage_bilans.insert(0, {"quand": int(time.time()), "total": total, "detail": " · ".join(
-        f"{k} {v}" for k, v in m.nettoyage_compteurs.items() if v)})
-    m.nettoyage_compteurs = {k: 0 for k in m.nettoyage_compteurs}
-    m.nettoyage_dernier = int(time.time())
-    return 200, {"ok": True, "total": total, "message": f"{total} élément(s) nettoyé(s)."}
+    """Comme `tableau._route_nettoyage_lancer` : chaque règle qui efface retire ce qui a dépassé sa durée ; le bilan
+    est gardé ; une fois toutes les 5 minutes au plus (429)."""
+    if time.time() - m.nettoyage_lance < 300:
+        return 429, {"erreur": "Déjà lancé il y a moins de 5 minutes."}
+    m.nettoyage_lance = time.time()
+    noms = {r["cle"]: r["nom"] for r in m.regles}
+    bilan = {r["cle"]: 0 for r in m.regles if r["auto"]}
+    for k, n in m.nettoyage_excedents.items():
+        bilan[k] = n
+        m.nettoyage_compteurs[k] = max(0, m.nettoyage_compteurs.get(k, 0) - n)
+    m.nettoyage_excedents = {}
+    retires = {k: n for k, n in bilan.items() if n > 0}
+    m.nettoyage_dernier, m.nettoyage_par, m.nettoyage_bilan = int(time.time()), m.moi, bilan
+    m.nettoyage_bilans.insert(0, {"quand": int(time.time()), "total": sum(retires.values()), "par": m.moi,
+                                  "detail": " · ".join(f"{noms[k]} {n}" for k, n in retires.items())})
+    rep = m.etat_nettoyage()
+    rep.update(ok=True)
+    return 200, rep
 
 
 def r_media(m, q, c):
@@ -1981,6 +2324,34 @@ def r_dossier(m, q, c):
                        "Thank you for applying. Your application was not accepted this time: this ticket will be closed."))
 
 
+def r_suivi(m, q, c):
+    """Comme `questionnaire.suivi` (`GET recrutement/suivi`) : chaque candidature ouverte et son ÉTAPE — « etape1 »,
+    « etape2 » (questionnaire envoyé, pas de réponse), « reponses » (à corriger) — avec le résumé du dernier envoi.
+    `donnees` ne porte pas l'étape : l'aperçu et les compteurs du site la lisent ici."""
+    ouverts = []
+    for c_ in m.en_cours:
+        etat = str(c_.get("recrutement") or "etape1")
+        etape = "etape1" if etat == "etape1" else "etape2" if etat == "etape2_attente" else "reponses"
+        envois = (m.dossiers.get(c_["ticket"]) or {}).get("envois") or []
+        resume = None
+        if envois:
+            e = envois[-1]
+            qs = e.get("questions") or []
+            repondues = sum(1 for x in qs if str(x.get("reponse") or "").strip())
+            corrigees = [x for x in qs if x.get("juste") is not None]
+            justes = sum(1 for x in corrigees if x["juste"])
+            resume = {"id": e["id"], "nb": len(qs), "statut": "envoye" if e["statut"] == "attente" else "repondu",
+                      "envoye_le": e["envoye_le"], "repondu_le": e["repondu_le"],
+                      "bilan": {"total": len(qs), "repondues": repondues, "corrigees": len(corrigees), "justes": justes,
+                                "fausses": len(corrigees) - justes, "complet": bool(qs) and len(corrigees) == len(qs),
+                                "reussite": bool(qs) and justes == len(qs), "taux": round(100 * justes / len(qs)) if qs else 0,
+                                "exigence": 100}}
+        ouverts.append({"ticket": c_["ticket"], "candidat": dict(m.ident(c_["id"]), present=c_["id"] not in m.partis | m.bannis),
+                        "ouvert": c_["ouvert"], "etape": etape,
+                        "annonce": 0, "fermeture_prevue": False, "salon": c_.get("salon", ""), "envoi": resume})
+    return 200, {"ouverts": ouverts, "recents": [], "exigence": 100}
+
+
 def _selection(m, c) -> tuple[list, list]:
     if c.get("derniere"):
         voulues = list(m.derniere_selection["questions"])
@@ -2080,6 +2451,7 @@ ROUTES = {
     "recrutement/question/retirer": ("POST", r_question_retirer, True), "recrutement/liens": ("POST", r_liens, True),
     "recrutement/reglages": ("POST", r_reglages, True), "recrutement/modele": ("POST", r_modele, True),
     "recrutement/modele/retirer": ("POST", r_modele_retirer, True), "recrutement/dossier": ("GET", r_dossier, False),
+    "recrutement/suivi": ("GET", r_suivi, False),
     "recrutement/etape1": ("POST", r_etape1, False), "recrutement/corriger": ("POST", r_corriger, True),
     "recrutement/decision": ("POST", r_decision, False),
 }
