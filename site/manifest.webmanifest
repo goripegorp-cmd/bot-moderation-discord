@@ -1,0 +1,19 @@
+{
+  "name": "La Capitainerie",
+  "short_name": "Capitainerie",
+  "description": "Le livre de bord du fondateur et de la direction : le serveur, l'équipage, les affiches.",
+  "lang": "fr",
+  "dir": "ltr",
+  "id": "/tableau/espace/",
+  "start_url": "/tableau/espace/",
+  "scope": "/tableau/espace/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#2f1d10",
+  "theme_color": "#2f1d10",
+  "icons": [
+    { "src": "app-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
