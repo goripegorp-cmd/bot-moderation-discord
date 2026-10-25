@@ -138,13 +138,38 @@ async function chargerHistorique(a, zone) {
   if (!zone.isConnected) return;
   const hist = (r.ok && r.donnees && r.donnees.historique) || [];
   if (!r.ok) { remplacer(zone, h("p", { classe: "aide" }, r.status === 0 ? "Hors ligne : l'historique n'a pas encore été lu sur cet appareil." : r.erreur)); return; }
+  const cat = await charger("catalogue");
   const changements = (c) => (Array.isArray(c) ? c : c && typeof c === "object" ? Object.entries(c).map(([cle, v]) => Object.assign({ champ: cle }, v && typeof v === "object" ? v : { apres: v })) : []);
-  const valeur = (v) => (v === null || v === undefined || v === "" ? "(vide)" : typeof v === "object" ? JSON.stringify(v) : String(v));
-  const quiEst = (q) => (/^\d{5,22}$/.test(String(q)) ? nomDe(P(q)) : sansEmoji(q));
+  const quiEst = (q) => (q && typeof q === "object" ? nomDe(P(q)) : /^\d{5,22}$/.test(String(q)) ? nomDe(P(q)) : sansEmoji(q));
+  // Chaque changement en clair : les noms du catalogue (jamais la fiche brute), les primes en berrys, le membre par son nom.
+  const LIBELLES = { membre_id: "Membre", roblox_nom: "Pseudo Roblox", roblox_id: "Compte Roblox", surnom: "Surnom", prime: "Prime", niveau: "Niveau", grade: "Grade",
+    statut: "Statut", attributs: "Fiche du jeu", notes: "Notes" };
+  const vide_ = (v) => v === null || v === undefined || v === "" || v === 0;
+  const valeur = (champ, v) => {
+    if (vide_(v)) return "(vide)";
+    if (champ === "prime") return nombre(Number(v) || 0) + " berrys";
+    if (champ === "niveau") return nombre(Number(v) || 0);
+    if (champ === "membre_id") return nomDe(P(v));
+    if (champ === "statut") return STATUTS_AFFICHE[v] || String(v);
+    if (champ === "grade") { const tg = typeGrade(cat); const e = tg && element(cat, tg.cle, v); return e ? e.nom : String(v); }
+    return typeof v === "object" ? "" : String(v);
+  };
+  const nomsDe = (fiche) => { const out = new Map(); for (const [t, cles] of Object.entries(fiche || {})) for (const k of cles || []) { const e = element(cat, t, k); out.set(t + ":" + k, e ? e.nom : k); } return out; };
+  const ligne = (c) => {
+    const champ = c.champ || c.nom || "";
+    const lib = LIBELLES[champ] || champ || "Champ";
+    if (champ === "notes") return h("li", {}, h("b", {}, lib), " : modifiées");
+    if (champ === "attributs") {
+      const avant = nomsDe(c.avant), apres = nomsDe(c.apres);
+      const plus = [...apres].filter(([k]) => !avant.has(k)).map(([, n]) => n), moins = [...avant].filter(([k]) => !apres.has(k)).map(([, n]) => n);
+      return h("li", {}, h("b", {}, lib), " : ", plus.length ? "ajouté " + plus.join(", ") : "", plus.length && moins.length ? " · " : "", moins.length ? "retiré " + moins.join(", ") : "", !plus.length && !moins.length ? "réordonnée" : "");
+    }
+    // Une valeur d'avant vide (la création, un champ rempli pour la première fois) : la nouvelle seule, sans « (vide) → ».
+    return h("li", {}, h("b", {}, lib), " : ", !vide_(c.avant) ? [h("s", {}, valeur(champ, c.avant)), " → "] : null, valeur(champ, c.apres !== undefined ? c.apres : c.valeur));
+  };
   remplacer(zone, hist.length ? h("ul", { classe: "entrees" }, hist.map((x) => h("li", { classe: "entree" }, h("div", { classe: "haut" }, h("span", { classe: "quoi" }, x.quoi || "Modification"), h("span", { classe: "quand" }, date(x.quand, true))),
-    x.qui ? h("div", { classe: "meta" }, "par " + quiEst(x.qui)) : null,
-    changements(x.changements).length ? h("ul", { classe: "changements" }, changements(x.changements).slice(0, 8).map((c) => h("li", {}, h("b", {}, c.champ || c.nom || "champ"), " : ",
-      c.avant !== undefined ? [h("s", {}, valeur(c.avant)), " → "] : null, valeur(c.apres !== undefined ? c.apres : c.valeur)))) : null))) : h("p", { classe: "aide" }, "Aucun changement noté."));
+    x.par || x.qui ? h("div", { classe: "meta" }, "par " + quiEst(x.par || x.qui)) : null,
+    changements(x.changements).length ? h("ul", { classe: "changements" }, changements(x.changements).slice(0, 10).map(ligne)) : null))) : h("p", { classe: "aide" }, "Aucun changement noté."));
 }
 async function appliquerRoles(a) {
   const ok = await confirmer({ titre: "Appliquer les rôles de ses métiers ?", texte: "Les rôles Discord liés à ses métiers (rubrique Rôles & métiers) lui sont donnés ; ceux des métiers qu'il n'a plus lui sont retirés. C'est noté au journal.", libelleOk: "Appliquer", icone: "roles" });
@@ -561,7 +586,9 @@ function blocReglagesMetiers(M, rolesD, apres) {
   const nombreE = h("input", { type: "number", classe: "saisie", min: 1, max: 5, value: v.max_metiers, inputmode: "numeric", "aria-label": "Nombre de métiers par membre" });
   nombreE.addEventListener("input", () => { v.max_metiers = Math.max(1, Math.min(5, Number(nombreE.value) || 1)); etat_(); });
   const pas = (d) => () => { v.max_metiers = Math.max(1, Math.min(5, v.max_metiers + d)); nombreE.value = v.max_metiers; etat_(); };
-  const candidats = rolesD.filter((r) => !/^@?everyone$/i.test(r.nom || ""));
+  // Les rôles des métiers partent déjà avec le clan : ils ne se « rattachent » pas (sauf s'ils l'étaient déjà, pour les décocher).
+  const rolesMetiers = new Set((M.metiers || []).map((m) => m.role && m.role.id).filter(Boolean).map(String));
+  const candidats = rolesD.filter((r) => !/^@?everyone$/i.test(r.nom || "") && (!rolesMetiers.has(String(r.id)) || v.rattaches.has(String(r.id))));
   const grille = h("div", { classe: "roles-rattaches" }, candidats.map((r) => caseACocher(h("span", { classe: "role-nom" }, h("i", { classe: "pastille-couleur", vars: { "--teinte": r.couleur || "#6e553f" } }), sansEmoji(r.nom) || "Rôle"),
     v.rattaches.has(String(r.id)), (x) => { if (x) v.rattaches.add(String(r.id)); else v.rattaches.delete(String(r.id)); etat_(); })));
   enregistrer.addEventListener("click", async () => {
@@ -579,20 +606,37 @@ function blocReglagesMetiers(M, rolesD, apres) {
     apres(titreBilan + " : " + b);
   } });
   etat_();
+  // Ce que le serveur sait et que la personne doit voir avant de toucher aux rôles.
+  const alertes = [];
+  if (M.actif === false) alertes.push(bandeau("Le rôle du clan n'est pas réglé : les rôles de métier sont en sommeil (rien n'est créé, donné ni retiré). Règle-le dans la configuration du bot.", "rouge"));
+  if (M.gestion === false) alertes.push(bandeau("Le bot n'a pas la permission « Gérer les rôles » : il ne peut ni créer ni donner les rôles de métier.", "rouge"));
+  const details = new Map((M.rattaches_details || []).map((d) => [String(d.id), d]));
+  const avisRattaches = [...v.rattaches].map((id) => details.get(id)).filter(Boolean).map((d) => !d.existe
+    ? h("p", { classe: "meta alerte-texte" }, "Un rôle rattaché n'existe plus sur le serveur : décoche-le.")
+    : !d.attribuable ? h("p", { classe: "meta alerte-texte" }, "« " + sansEmoji(d.nom) + " » : " + (d.raison || "le bot ne peut pas le retirer."))
+      : d.non_membres ? h("p", { classe: "meta alerte-texte" }, "« " + sansEmoji(d.nom) + " » : " + compte(d.non_membres, "personne hors du clan l'a", "personnes hors du clan l'ont") + " — " + (d.non_membres > 1 ? "elles le perdront" : "elle le perdra") + " à la prochaine vérification.")
+        : null).filter(Boolean);
+  const derniere = M.derniere_reconciliation && M.derniere_reconciliation.quand ? M.derniere_reconciliation : null;
   return h("div", { classe: "cadre pile serree" }, h("h3", {}, "Les réglages"),
+    ...alertes,
     interrupteur("Attribution automatique des rôles de métier", v.auto, (x) => { v.auto = x; etat_(); }),
     h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Nombre de métiers par membre"),
       h("div", { classe: "pas-a-pas" }, boutonIcone("moins", "Un de moins", pas(-1)), nombreE, boutonIcone("plus", "Un de plus", pas(1))),
       h("span", { classe: "champ-aide" }, "De 1 à 5. L'atelier des affiches n'en laisse pas choisir davantage.")),
     h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Rôles rattachés au clan"),
       h("span", { classe: "champ-aide" }, "Coche les rôles qui partent avec le clan : quand quelqu'un quitte le clan, ils lui sont retirés en même temps que ses métiers."),
-      candidats.length ? grille : h("p", { classe: "aide" }, "Aucun rôle attribuable trouvé.")),
+      candidats.length ? grille : h("p", { classe: "aide" }, "Aucun rôle attribuable trouvé."), ...avisRattaches),
     h("p", { classe: "meta" }, icone(M.icones_roles ? "succes" : "info", "ic-p"), M.icones_roles
       ? " Ce serveur peut afficher une icône sur les rôles : chaque rôle de métier prend l'icône officielle de son métier."
       : " Ce serveur ne peut pas encore afficher d'icône sur les rôles (il faut le niveau 2 de boost) : les rôles de métier n'ont que leur couleur."),
+    derniere ? h("p", { classe: "meta" }, icone("synchro", "ic-p"), " Dernière vérification " + depuis(derniere.quand) + " : " + compte(derniere.verifies || derniere.membres || 0, "membre vérifié", "membres vérifiés")
+      + (derniere.rendus ? " · " + compte(derniere.rendus, "rôle rendu", "rôles rendus") : "") + (derniere.retires ? " · " + compte(derniere.retires, "rôle retiré", "rôles retirés") : "")
+      + (derniere.erreurs ? " · " + compte(derniere.erreurs, "erreur", "erreurs") : "") + ". Elle repasse toute seule toutes les 30 minutes.") : null,
     h("div", { classe: "rangee" }, enregistrer,
-      action("Créer les rôles manquants", "ajouter", "rell/metiers/installer", "Créer les rôles manquants ?", "Un rôle est créé pour chaque métier qui n'en a pas encore, puis donné à ceux qui ont ce métier.", "Rôles des métiers"),
-      action("Vérifier maintenant", "synchro", "rell/metiers/reconcilier", "Vérifier tous les rôles maintenant ?", "Chaque membre est comparé à son affiche : les rôles manquants sont rendus, ceux en trop retirés (métiers retirés, départs du clan).", "Vérification")));
+      action("Créer les rôles manquants", "ajouter", "rell/metiers/installer", "Créer les rôles manquants ?",
+        "Un rôle est créé pour chaque métier qui n'en a pas encore" + (v.auto ? ", puis donné à ceux qui ont ce métier (attribution automatique)." : ". L'attribution automatique est coupée : personne ne le reçoit pour l'instant."), "Rôles des métiers"),
+      action("Vérifier maintenant", "synchro", "rell/metiers/reconcilier", "Vérifier tous les rôles maintenant ?",
+        "Chaque membre est comparé à son affiche : les rôles en trop sont retirés (métiers abandonnés, départs du clan)" + (v.auto ? " et les rôles manquants rendus." : ". L'attribution automatique est coupée : les rôles manquants ne sont pas rendus."), "Vérification")));
 }
 
 function ligneRole(t, e, lien, rolesD, nbMembres, autoMetiers, recharger) {
@@ -619,7 +663,7 @@ function ligneRole(t, e, lien, rolesD, nbMembres, autoMetiers, recharger) {
     const ok = await confirmer({ titre: "Créer le rôle de « " + e.nom + " »", icone: "roles", libelleOk: "Créer le rôle", contenu: [champ("Nom du rôle", nom), h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Couleur"), nuancier)] });
     if (!ok) return;
     const r = await poster("rell/role", { type: t.cle, cle: e.cle, creer: { nom: nom.value.trim() || e.nom, couleur }, auto: true });
-    toast(r.ok ? "Rôle créé, lié, et donné à ceux qui ont ce métier." : r.erreur, r.ok ? "succes" : "erreur");
+    toast(r.ok ? (autoMetiers ? "Rôle créé, lié, et donné à ceux qui ont ce métier." : "Rôle créé et lié : il sera donné à l'enregistrement de chaque affiche concernée, ou avec « Appliquer les rôles ».") : r.erreur, r.ok ? "succes" : "erreur");
     if (r.ok) recharger();
   } });
   etatBouton();

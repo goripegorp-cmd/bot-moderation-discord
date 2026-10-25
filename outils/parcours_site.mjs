@@ -4,7 +4,7 @@
 // un faux Discord, une base neuve à chaque démarrage), clique comme une personne, puis RELIT l'état par l'API après
 // chaque geste : un bouton qui « marche » à l'écran sans rien changer au serveur est un échec. Une capture par étape.
 //
-//   node outils/parcours_site.mjs [--url http://localhost:8790] [--sortie <dossier>] [--parcours recrutement,capitainerie]
+//   node outils/parcours_site.mjs [--url http://localhost:8790] [--sortie <dossier>] [--parcours recrutement,capitainerie,metiers]
 //                                 [--navigateur <exe>]
 //
 // La base du site local change à chaque parcours : relancer le site local avant de rejouer.
@@ -395,7 +395,21 @@ async function parcoursCapitainerie(o) {
     const a = await laMienne();
     const r = await api(o, "rell/affiche?id=" + encodeURIComponent(a.id));
     const h = r.historique || [];
-    return { ok: h.length >= 2 && h.some((x) => /Prime/.test(x.quoi || "")), detail: h.map((x) => x.quoi).join(" | ").slice(0, 200) };
+    if (!(h.length >= 2 && h.some((x) => /Prime/.test(x.quoi || "")))) return { ok: false, detail: "API : " + h.map((x) => x.quoi).join(" | ").slice(0, 200) };
+    // La page : l'historique déplié, en clair (les noms du catalogue, jamais la fiche brute).
+    await aller(o, "#capitainerie/affiches");
+    await evaluer(o, `(() => { for (const g of document.querySelectorAll("details.groupe")) g.open = true; return true; })()`);
+    await pause(600);
+    await evaluer(o, `(() => { const b = [...document.querySelectorAll("button.affiche")].find((x) => x.textContent.toUpperCase().includes(${JSON.stringify((a.membre.nom || "").toUpperCase())})); if (b) b.click(); return !!b; })()`);
+    await pause(800);
+    const t = await attendre(async () => {
+      await evaluer(o, `(() => { const g = [...document.querySelectorAll("dialog[open] details.groupe")].find((x) => x.textContent.includes("Historique")); if (g && !g.open) g.open = true; return true; })()`);
+      const x = await evaluer(o, `(() => { const g = [...document.querySelectorAll("dialog[open] details.groupe")].find((y) => y.textContent.includes("Historique")); return g ? g.innerText : ""; })()`);
+      return x && x.includes("Fiche du jeu") ? x : null;
+    }, 8000);
+    if (!t) return { ok: false, detail: "historique non affiché dans la page" };
+    const brut = /[{}[\]]/.test(t);
+    return { ok: !brut && /retiré|ajouté/.test(t) && /berrys/.test(t), detail: t.replace(/\s+/g, " ").slice(0, 220) };
   });
 
   await etape(o, "Affiche : appliquer les rôles de ses métiers", async () => {
@@ -433,7 +447,8 @@ async function parcoursCapitainerie(o) {
     return { ok: !!r2, detail: r2 ? "restaurée" : "restauration non reçue" };
   });
 
-  const NOM = "Charpentier de démonstration";
+  // Un nom neuf à chaque passage : rejoué sur le même site local, l'élément d'avant (retiré) ferait un conflit.
+  const NOM = "Charpentier d'essai " + "abcdefghij".split("").map((_, i) => "abcdefghijklmnopqrstuvwxyz"[Math.floor(Math.random() * 26)]).slice(0, 5).join("");
   const lElement = async () => ((await catalogue()).elements || []).find((e) => e.nom === NOM);
   await etape(o, "Catalogue : ajouter, confirmer, retirer un élément", async () => {
     await aller(o, "#capitainerie/catalogue");
@@ -466,6 +481,61 @@ async function parcoursCapitainerie(o) {
   });
 }
 
+// ═══ LES RÔLES DES MÉTIERS ═════════════════════════════════════════════════
+async function parcoursMetiers(o) {
+  const reglages = () => api(o, "rell/metiers/reglages");
+  const r0 = await reglages();
+  if (r0.erreur) { await etape(o, "Rôles des métiers : réglages lisibles", async () => ({ ok: false, detail: r0.erreur })); return; }
+
+  await etape(o, "Rôles des métiers : couper puis remettre l'attribution automatique", async () => {
+    const basculer = async () => {
+      await aller(o, "#capitainerie/roles");
+      const fait = await evaluer(o, `(() => { const l = [...document.querySelectorAll("label, .interrupteur")].find((x) => x.textContent.includes("Attribution automatique des rôles de métier"));
+        const i = l && (l.querySelector("input") || (l.htmlFor && document.getElementById(l.htmlFor))); if (!i) return false; i.click(); return true; })()`);
+      if (!fait) return false;
+      await pause(300);
+      return cliquer(o, "button", "Enregistrer les réglages");
+    };
+    if (!await basculer()) return { ok: false, detail: "interrupteur ou « Enregistrer les réglages » introuvable" };
+    const coupe = await attendre(async () => { const x = await reglages(); return x.auto === !r0.auto ? x : null; });
+    if (!coupe) return { ok: false, detail: "le serveur n'a pas reçu le changement" };
+    if (!await basculer()) return { ok: false, detail: "second basculement impossible" };
+    const remis = await attendre(async () => { const x = await reglages(); return x.auto === r0.auto ? x : null; });
+    return { ok: !!remis, detail: remis ? "auto " + r0.auto + " → " + !r0.auto + " → " + r0.auto : "retour non reçu" };
+  });
+
+  await etape(o, "Rôles des métiers : un métier de plus par membre", async () => {
+    const avant = (await reglages()).max_metiers;
+    const vise = avant < 5 ? avant + 1 : avant - 1;
+    await aller(o, "#capitainerie/roles");
+    if (!await cliquer(o, "button", vise > avant ? "Un de plus" : "Un de moins")) return { ok: false, detail: "bouton du nombre absent" };
+    if (!await cliquer(o, "button", "Enregistrer les réglages")) return { ok: false, detail: "bouton absent" };
+    const x = await attendre(async () => { const y = await reglages(); return y.max_metiers === vise ? y : null; });
+    return { ok: !!x, detail: x ? avant + " → " + vise : "non reçu" };
+  });
+
+  await etape(o, "Rôles des métiers : créer les rôles manquants", async () => {
+    await aller(o, "#capitainerie/roles");
+    if (!await cliquer(o, "button", "Créer les rôles manquants")) return { ok: false, detail: "bouton absent" };
+    if (!await attendre(() => cliquer(o, "dialog[open] button", "Créer les rôles manquants"), 5000)) return { ok: false, detail: "confirmation absente" };
+    const x = await attendre(async () => { const y = await reglages(); const actifs = (y.metiers || []).filter((m) => m.actif); return actifs.length && actifs.every((m) => m.lie) ? y : null; }, 20000);
+    return { ok: !!x, detail: x ? compte_(x.metiers.filter((m) => m.lie).length) + " métiers ont leur rôle" : "des métiers restent sans rôle : " + JSON.stringify(((await reglages()).metiers || []).filter((m) => m.actif && !m.lie).map((m) => m.nom)) };
+  });
+
+  await etape(o, "Rôles des métiers : vérifier maintenant", async () => {
+    const avant = ((await reglages()).derniere_reconciliation || {}).quand || 0;
+    await aller(o, "#capitainerie/roles");
+    if (!await cliquer(o, "button", "Vérifier maintenant")) return { ok: false, detail: "bouton absent" };
+    if (!await attendre(() => cliquer(o, "dialog[open] button", "Vérifier maintenant"), 5000)) return { ok: false, detail: "confirmation absente" };
+    const x = await attendre(async () => { const y = await reglages(); const q = (y.derniere_reconciliation || {}).quand || 0; return q > avant ? y : null; }, 20000);
+    if (!x) return { ok: false, detail: "aucune vérification enregistrée" };
+    await aller(o, "#capitainerie/roles");
+    const vu = await evaluer(o, "document.querySelector('#contenu').innerText.includes('Dernière vérification')");
+    return { ok: vu, detail: JSON.stringify(x.derniere_reconciliation) + (vu ? "" : " — la page ne montre pas la dernière vérification") };
+  });
+}
+const compte_ = (n) => String(n);
+
 // ─── Le tout ────────────────────────────────────────────────────────────────
 async function principal() {
   mkdirSync(SORTIE, { recursive: true });
@@ -478,6 +548,7 @@ async function principal() {
     await pause(2000);
     if (PARCOURS.includes("recrutement")) await parcoursRecrutement(o);
     if (PARCOURS.includes("capitainerie")) await parcoursCapitainerie(o);
+    if (PARCOURS.includes("metiers")) await parcoursMetiers(o);
   } finally {
     try { await envoyer("Browser.close"); } catch (e) { /* déjà fermé */ }
     await pause(400);

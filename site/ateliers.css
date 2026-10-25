@@ -206,6 +206,7 @@ button.element-carte:hover { border-color: var(--trait-fort); box-shadow: var(--
 }
 .icone-choix { align-items: center; }
 .roles-rattaches { display: grid; gap: 0 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); max-height: 260px; overflow: auto; padding: 4px 6px; border: 1px solid var(--trait); border-radius: var(--rayon); background: rgba(248, 240, 221, .6); }
+.alerte-texte { color: var(--cire); }
 .role-nom { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .role-lie { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--encre-2); min-width: 0; }
 .role-lie.a-venir { font-style: italic; color: var(--encre-3); }
