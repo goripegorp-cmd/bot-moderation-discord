@@ -847,6 +847,12 @@ async def _casier(g, qui) -> dict:
     for x in lots:
         x["par"] = qui(int(x["par"])) if x["par"] else ""
         x["restaure_par"] = qui(int(x["restaure_par"])) if x["restaure_par"] else ""
+        #  « Avertissements de 1234… » (`casier.effacer_membre`) : la personne à part, nommée par la page (25/10/2026 :
+        #  le site affichait l'identifiant brut).
+        cible = re.search(r" de (\d+)$", str(x["quoi"] or ""))
+        if cible:
+            x["membre"] = qui(int(cible.group(1)))
+            x["quoi"] = str(x["quoi"])[:cible.start()]
     return {"lots": lots, "compte": await casier.comptes(g.id, getattr(getattr(_bot, "user", None), "id", 0) or 0)}
 
 
@@ -2404,9 +2410,21 @@ async def nettoyer_si_du(g, maintenant: float | None = None) -> dict | None:
     return await nettoyer(g, None, t)
 
 
+def _noms_nettoyage(g, etat: dict) -> dict:
+    """Qui a lancé les nettoyages (`par`, et celui de chaque bilan), avec son nom : la page ne connaît que les personnes
+    citées dans ses données (25/10/2026 : le fondateur, absent des 400 derniers évènements, s'y lisait « Membre parti »)."""
+    qui = _Personnes(g)
+    for uid in [etat.get("par"), *(b.get("par") for b in etat.get("bilans") or [])]:
+        if str(uid or "").isdigit():
+            qui(int(uid))
+    return dict(qui)
+
+
 async def _route_nettoyage(g, auteur, requete, corps):
-    """`GET api/nettoyage` → `{"regles", "compteurs", "dernier", "bilan", "par"}`."""
-    return 200, await etat_nettoyage(g.id)
+    """`GET api/nettoyage` → `{"regles", "compteurs", "dernier", "bilan", "par", "bilans", "personnes"}`."""
+    rep = await etat_nettoyage(g.id)
+    rep["personnes"] = _noms_nettoyage(g, rep)
+    return 200, rep
 
 
 async def _route_nettoyage_regle(g, auteur, requete, corps):
@@ -2425,7 +2443,7 @@ async def _route_nettoyage_regle(g, auteur, requete, corps):
                          " VALUES (?,?,?,?,?)", (int(g.id), cle, jours, int(time.time()), int(auteur.id)))
         await db.commit()
     rep = await etat_nettoyage(g.id)
-    rep.update(ok=True, regle=next(x for x in rep["regles"] if x["cle"] == cle),
+    rep.update(ok=True, regle=next(x for x in rep["regles"] if x["cle"] == cle), personnes=_noms_nettoyage(g, rep),
                _journal=f"Règle de nettoyage « {r['nom']} » : {jours} jours (avant : {avant})" if avant != jours else None)
     return 200, rep
 
@@ -2438,7 +2456,7 @@ async def _route_nettoyage_lancer(g, auteur, requete, corps):
     _nettoyages[g.id] = t
     await nettoyer(g, auteur, t)
     rep = await etat_nettoyage(g.id)
-    rep.update(ok=True, _journal=None)  # `nettoyer` a déjà noté son bilan
+    rep.update(ok=True, personnes=_noms_nettoyage(g, rep), _journal=None)  # `nettoyer` a déjà noté son bilan
     return 200, rep
 
 
