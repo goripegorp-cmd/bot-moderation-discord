@@ -77,12 +77,17 @@ export function raisonHorsLigne() {
 }
 
 // ─── Les personnes citées ───────────────────────────────────────────────────
+/** Une personne par son identifiant — ou déjà décrite par le serveur (`{ id, nom, … }` : les affiches, le
+ *  recrutement, les annonces envoient ainsi l'auteur d'une modification). Connue de la page : sa fiche complète. */
 export function P(id) {
-  const k = String(id || "");
+  const decrite = id && typeof id === "object" ? id : null;
+  const k = String((decrite ? decrite.id : id) || "");
   const p = etat.d && etat.d.personnes && etat.d.personnes[k];
   if (p) return p;
   const autres = etat.personnesVues && etat.personnesVues[k];
-  return autres || { id: k, nom: k ? "Membre parti" : "Serveur", pseudo: "", avatar: "" };
+  if (autres) return autres;
+  if (decrite && decrite.nom) return { id: k, nom: decrite.nom, pseudo: decrite.pseudo || "", avatar: decrite.avatar || "" };
+  return { id: k, nom: k ? "Membre parti" : "Serveur", pseudo: "", avatar: "" };
 }
 export function retenirPersonnes(dico) {
   if (!dico) return;
