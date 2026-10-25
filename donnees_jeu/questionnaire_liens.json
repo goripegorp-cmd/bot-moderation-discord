@@ -1,0 +1,97 @@
+[
+ {
+  "titre": "RELL Seas — page d'accueil",
+  "url": "https://rellseas.fandom.com/wiki/RELL_Seas",
+  "themes": [
+   "jeu",
+   "studio",
+   "actualites",
+   "races",
+   "factions",
+   "fruits",
+   "combat",
+   "navires",
+   "monde",
+   "evenements",
+   "boss",
+   "personnages"
+  ]
+ },
+ {
+  "titre": "God Fruits",
+  "url": "https://rellseas.fandom.com/wiki/God_Fruits",
+  "themes": [
+   "actualites",
+   "fruits",
+   "combat",
+   "personnages"
+  ]
+ },
+ {
+  "titre": "Bosses",
+  "url": "https://rellseas.fandom.com/wiki/Bosses",
+  "themes": [
+   "jeu",
+   "actualites",
+   "monde",
+   "boss",
+   "personnages"
+  ]
+ },
+ {
+  "titre": "Races",
+  "url": "https://rellseas.fandom.com/wiki/Races",
+  "themes": [
+   "races"
+  ]
+ },
+ {
+  "titre": "Factions",
+  "url": "https://rellseas.fandom.com/wiki/Factions",
+  "themes": [
+   "jeu",
+   "studio",
+   "actualites",
+   "factions",
+   "personnages"
+  ]
+ },
+ {
+  "titre": "Combat Mechanics",
+  "url": "https://rellseas.fandom.com/wiki/Combat_Mechanics",
+  "themes": [
+   "combat",
+   "personnages"
+  ]
+ },
+ {
+  "titre": "Ship Customisation",
+  "url": "https://rellseas.fandom.com/wiki/Ship_Customisation",
+  "themes": [
+   "jeu",
+   "actualites",
+   "navires",
+   "evenements",
+   "boss",
+   "personnages"
+  ]
+ },
+ {
+  "titre": "Monetisation",
+  "url": "https://rellseas.fandom.com/wiki/Monetisation",
+  "themes": [
+   "jeu",
+   "studio",
+   "actualites"
+  ]
+ },
+ {
+  "titre": "FAQ (questions fréquentes)",
+  "url": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "themes": [
+   "studio",
+   "jeu",
+   "actualites"
+  ]
+ }
+]

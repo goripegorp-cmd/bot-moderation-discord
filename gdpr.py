@@ -57,6 +57,9 @@ DELETE_SUBJECT = {
     "activite_jours": ["user_id"],
     "activite_etat": ["user_id"],
     "ticket_transcripts": ["user_id"],
+    # 25/10/2026 — site v2 : les réponses d'un candidat au questionnaire, son journal d'opérations hors ligne
+    "recrutement_reponses": ["candidat_id"],
+    "tableau_ops": ["user_id"],
     # colonnes sujet ≠ "user_id"
     "temp_voice_rooms": ["owner_id"],
     # relations symétriques (le membre est sujet des deux côtés) → delete par OR
@@ -69,6 +72,8 @@ DELETE_SUBJECT = {
 # Tables SANS guild_id (préférences globales) : purge par user_id seul, toutes guildes.
 GLOBAL_NO_GUILD = {
     "user_language": ["user_id"],
+    # 25/10/2026 — les réponses aux événements du clan (la table n'a pas de guild_id)
+    "clan_evenements_reponses": ["membre_id"],
     "dm_digest_prefs": ["user_id"],
 }
 
@@ -88,6 +93,10 @@ DELETE_SUBJECT_KEEP_ACTOR = {
     "mod_notes": {"subject": ["user_id"], "actor": ["mod_id"]},
     "restricted_members": {"subject": ["user_id"], "actor": ["restricted_by"]},
     "clan_rappels": {"subject": ["membre_id"], "actor": ["par", "resolu_par"]},
+    # 25/10/2026 — site v2 : recrutement en deux étapes, affiches des membres du clan
+    "recrutement_suivi": {"subject": ["candidat_id"], "actor": ["fermeture_par", "decide_par"]},
+    "recrutement_envois": {"subject": ["candidat_id"], "actor": ["envoye_par"]},
+    "rell_affiches": {"subject": ["membre_id"], "actor": ["cree_par", "maj_par", "retire_par"]},
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -104,6 +113,11 @@ ANONYMIZE = {
     "webhook_registry": {"ids": ["owner_id"], "redact": []},
     "ticket_audit": {"ids": ["actor_id"], "redact": []},
     "ticket_log_events": {"ids": ["actor_id"], "redact": []},
+    # 25/10/2026 — site v2 : qui a corrigé, modifié, publié (la ligne reste, l'auteur est neutralisé)
+    "recrutement_historique": {"ids": ["par"], "redact": []},
+    "rell_affiches_historique": {"ids": ["par"], "redact": []},
+    "clan_evenements": {"ids": ["cree_par", "maj_par", "publie_par"], "redact": []},
+    "tableau_medias": {"ids": ["auteur_id"], "redact": []},
 }
 
 # Colonnes HMAC (pas un user_id brut) : agies seulement si l'appelant fournit hmac_user.

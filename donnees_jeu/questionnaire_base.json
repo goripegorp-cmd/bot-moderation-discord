@@ -1,0 +1,2261 @@
+[
+ {
+  "id": "q001",
+  "theme": "jeu",
+  "question": "Selon la page d'accueil du wiki, de quel genre de jeu Roblox s'agit-il ?",
+  "reponse": "aventure",
+  "variantes": [
+   "adventure",
+   "jeu d'aventure",
+   "adventure game"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/RELL_Seas",
+  "section": "Welcome to the RELL Seas Wiki",
+  "extrait": "Welcome to the RELL Seas Wiki for the currently unreleased Roblox adventure game.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q002",
+  "theme": "jeu",
+  "question": "Selon la FAQ, sur quelles plateformes RELL Seas est-il prévu ?",
+  "reponse": "PC, PlayStation/Xbox et Mobile",
+  "variantes": [
+   "PC, PlayStation, Xbox, Mobile",
+   "PC, consoles PlayStation/Xbox et mobile"
+  ],
+  "type": "liste",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "section": "Game questions",
+  "extrait": "RELL Seas is planning to be available on PC, PlayStation/Xbox and Mobile.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q003",
+  "theme": "jeu",
+  "question": "Selon la FAQ, que signifie l'abréviation « CC » ?",
+  "reponse": "Closed Community",
+  "variantes": [
+   "Communauté fermée"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "section": "Game questions",
+  "extrait": "CC stands for Closed Community, and is a special game-mode in RELL Seas.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q004",
+  "theme": "jeu",
+  "question": "Selon la FAQ, quel est le seul type de game-pass que RELL Seas proposera ?",
+  "reponse": "cosmétique",
+  "variantes": [
+   "cosmetic",
+   "cosmétiques",
+   "des game-passes cosmétiques",
+   "cosmetic game-passes"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "section": "Game questions",
+  "extrait": "No, RELL Seas will only have cosmetic game-passes.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q005",
+  "theme": "jeu",
+  "question": "Selon la FAQ, comment qualifie-t-on la progression dans RELL Seas, où l'on peut faire tout ce que l'on veut ?",
+  "reponse": "non linéaire",
+  "variantes": [
+   "non-linéaire",
+   "non linear",
+   "non-linear"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "section": "Game questions",
+  "extrait": "RELL Seas has non linear progression, you can do anything you want.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q006",
+  "theme": "jeu",
+  "question": "Selon la page Talents, quelle lettre désigne le rang le plus bas d'un talent ?",
+  "reponse": "F",
+  "variantes": [
+   "rang F"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Talents",
+  "section": "Overview",
+  "extrait": "Talents will use a ranking system from \"F\" being the lowest, and \"A\" being the highest.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q007",
+  "theme": "jeu",
+  "question": "Selon la page Talents, quelle lettre désigne le rang le plus élevé d'un talent ?",
+  "reponse": "A",
+  "variantes": [
+   "rang A"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Talents",
+  "section": "Overview",
+  "extrait": "Talents will use a ranking system from \"F\" being the lowest, and \"A\" being the highest.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q008",
+  "theme": "jeu",
+  "question": "Combien de talents différents la page Talents présente-t-elle ?",
+  "reponse": "8",
+  "variantes": [
+   "huit",
+   "eight"
+  ],
+  "type": "nombre",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Talents",
+  "section": "Overview (tableau des talents)",
+  "extrait": "Fishing … Woodcutting … Cooking … Mining … Shipwright … Crafting … Navigation … Thieving",
+  "statut": "confirme"
+ },
+ {
+  "id": "q009",
+  "theme": "jeu",
+  "question": "Combien de points de talent au maximum peut-on obtenir dans Crafting ?",
+  "reponse": "500",
+  "variantes": [
+   "cinq cents"
+  ],
+  "type": "nombre",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Crafting",
+  "section": "Overview",
+  "extrait": "The maximum talent points for crafting are 500.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q010",
+  "theme": "jeu",
+  "question": "Quels sont les quatre Dex du jeu ?",
+  "reponse": "Adventure Dex, Fishing Dex, Recipe Dex, Craftsman Dex",
+  "variantes": [
+   "Adventure, Fishing, Recipe, Craftsman"
+  ],
+  "type": "liste",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Dexes",
+  "section": "Adventure Dex / Fishing Dex / Recipe Dex / Craftsman Dex",
+  "extrait": "Adventure Dex … Fishing Dex … Recipe Dex … Craftsman Dex",
+  "statut": "confirme"
+ },
+ {
+  "id": "q011",
+  "theme": "jeu",
+  "question": "Dans le mini-jeu de pêche, quelle forme faut-il garder sous l'icône du poisson ?",
+  "reponse": "un losange",
+  "variantes": [
+   "diamond",
+   "losange",
+   "diamant",
+   "forme de diamant"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Fishing",
+  "section": "Fishing System",
+  "extrait": "your aim is to keep the diamond shape underneath the fish icon at all times.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q012",
+  "theme": "jeu",
+  "question": "Quel objet réunit la hache, la pioche, la longue-vue, la réparation du navire, la pelle et la canne à pêche en un seul ?",
+  "reponse": "Utility Tool",
+  "variantes": [
+   "outil utilitaire"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Equipment",
+  "section": "Utility Items List",
+  "extrait": "Utility Tool | Combines your axe, pickaxe, telescope ship repair, shovel, and fishing rod into one item.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q013",
+  "theme": "jeu",
+  "question": "Selon la liste de l'équipement, comment obtient-on un Lock Pick ?",
+  "reponse": "en le fabriquant (Crafted)",
+  "variantes": [
+   "crafted",
+   "crafting",
+   "fabrication",
+   "il se fabrique"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Equipment",
+  "section": "Utility Items List",
+  "extrait": "Lock Pick | Unlock chests and objects. | Crafted",
+  "statut": "confirme"
+ },
+ {
+  "id": "q014",
+  "theme": "jeu",
+  "question": "Selon la liste de l'équipement, à quoi sert la pelle (Shovel) ?",
+  "reponse": "à déterrer des trésors",
+  "variantes": [
+   "dig up treasure",
+   "déterrer un trésor",
+   "chasse au trésor",
+   "creuser pour trouver des trésors"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Equipment",
+  "section": "Utility Items List",
+  "extrait": "Shovel | Dig up treasure.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q015",
+  "theme": "jeu",
+  "question": "Quel objet permet de parler aux autres joueurs et de gérer son équipage ?",
+  "reponse": "Den Den Mushi",
+  "variantes": [
+   "Den-Den Mushi"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Equipment",
+  "section": "Utility Items List",
+  "extrait": "Den Den Mushi | Talk with other players and manage your crew.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q016",
+  "theme": "jeu",
+  "question": "Quel objet permet de planer dans les airs en descendant lentement ?",
+  "reponse": "Paraglider",
+  "variantes": [
+   "parapente",
+   "planeur"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Equipment",
+  "section": "Utility Items List",
+  "extrait": "Paraglider | Glide in the air as you slowly descend.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q017",
+  "theme": "jeu",
+  "question": "Quelle est la seule monnaie connue de RELL Seas ?",
+  "reponse": "Relli",
+  "variantes": [
+   "RELLI Coin",
+   "Relli Coins",
+   "pièces Relli"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Currencies",
+  "section": "Overview",
+  "extrait": "Relli is the only known currency in RELL Seas as of now.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q018",
+  "theme": "jeu",
+  "question": "Selon la page Chests, quel talent permet d'ouvrir les coffres plus facilement ?",
+  "reponse": "Thieving",
+  "variantes": [
+   "vol",
+   "le vol",
+   "Thieving talent"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Chests",
+  "section": "Overview",
+  "extrait": "The player can use the thieving talent to unlock chests more easily.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q019",
+  "theme": "studio",
+  "question": "Selon la FAQ, quel serveur Discord faut-il rejoindre pour avoir les informations les plus à jour sur le jeu ?",
+  "reponse": "RELL Games",
+  "variantes": [
+   "le Discord RELL Games",
+   "RELLGames"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "section": "Game questions",
+  "extrait": "If you want the best up to date information about RELL Seas, join the RELL Games Discord server.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q020",
+  "theme": "studio",
+  "question": "Comment le wiki surnomme-t-il les développeurs qui présentent le jeu dans les « Movies » ?",
+  "reponse": "les RELL Bros",
+  "variantes": [
+   "RELL Bros",
+   "RELL Brothers",
+   "les frères RELL"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Factions/Pirates",
+  "section": "List of NPC Crews",
+  "extrait": "According to the RELL Bros in Movie 2 there are over 40 pirate factions.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q021",
+  "theme": "studio",
+  "question": "Selon la FAQ, sur quelle plateforme vidéo les RELL Bros ont-ils mentionné le début du développement ?",
+  "reponse": "YouTube",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "section": "Game questions",
+  "extrait": "Development first started mid-2023, as mentioned on one of the RELL Bros' YouTube Videos.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q022",
+  "theme": "studio",
+  "question": "Selon la FAQ, pourquoi RELL Seas ne peut-il pas être visé par un DMCA ?",
+  "reponse": "il n'utilise rien directement de l'IP One Piece",
+  "variantes": [
+   "doesn't use anything from the One Piece IP directly",
+   "aucun élément direct de One Piece",
+   "rien de One Piece directement"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "section": "Game questions",
+  "extrait": "No, RELL Seas doesn't use anything from the One Piece IP directly. There's no way for RELL Seas to get DMCA'D.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q023",
+  "theme": "studio",
+  "question": "Quel Community Manager a déclaré qu'il n'y aurait aucun gamepass pay-to-win dans RELL Seas ?",
+  "reponse": "RELLAdurite",
+  "variantes": [
+   "RELL Adurite"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Monetisation",
+  "section": "Introduction (citation)",
+  "extrait": "There will be no pay to win gamepasses in RELL Seas … Community Manager RELLAdurite",
+  "statut": "confirme"
+ },
+ {
+  "id": "q024",
+  "theme": "studio",
+  "question": "Quels étaient les deux abonnements que l'on pouvait acheter sur le Discord RELL Games ?",
+  "reponse": "Gold Supporter et Silver Supporter",
+  "variantes": [
+   "Gold et Silver",
+   "Gold Supporter, Silver Supporter"
+  ],
+  "type": "liste",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Discord_Subscriptions",
+  "section": "Discord Subscriptions",
+  "extrait": "In the RELL Games discord you could purchase two subscriptions consisting of Gold Supporter and Silver Supporter",
+  "statut": "confirme"
+ },
+ {
+  "id": "q025",
+  "theme": "studio",
+  "question": "Quel était le prix de l'abonnement Gold Supporter ?",
+  "reponse": "9,99 $",
+  "variantes": [
+   "$9.99",
+   "9.99 USD",
+   "9,99 dollars",
+   "9.99 $",
+   "$9.99 USD"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Discord_Subscriptions",
+  "section": "Subscriptions Overview",
+  "extrait": "Gold Supporter … Price … $9.99 USD",
+  "statut": "confirme"
+ },
+ {
+  "id": "q026",
+  "theme": "studio",
+  "question": "Quel était le prix de l'abonnement Silver Supporter ?",
+  "reponse": "5,99 $",
+  "variantes": [
+   "$5.99",
+   "5.99 USD",
+   "5,99 dollars",
+   "5.99 $",
+   "$5.99 USD"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Discord_Subscriptions",
+  "section": "Subscriptions Overview",
+  "extrait": "Silver Supporter … Price … $5.99 USD",
+  "statut": "confirme"
+ },
+ {
+  "id": "q027",
+  "theme": "studio",
+  "question": "Combien de mois d'abonnement cumulés fallait-il pour accéder aux rangs Gold+ ou Silver+ ?",
+  "reponse": "10",
+  "variantes": [
+   "dix",
+   "10 mois"
+  ],
+  "type": "nombre",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Discord_Subscriptions",
+  "section": "Subscription Ascension",
+  "extrait": "If you had a total subscription time of 10 months from June 1st to July 31st you would ascend to Gold+ and Silver+.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q028",
+  "theme": "studio",
+  "question": "Sur quel réseau social des concept arts d'armures du jeu ont-ils été publiés ?",
+  "reponse": "Twitter",
+  "variantes": [
+   "X",
+   "Twitter (X)",
+   "X (ex-Twitter)"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Accessories",
+  "section": "Accessories List",
+  "extrait": "Concept Art, shown on a twitter post",
+  "statut": "confirme"
+ },
+ {
+  "id": "q029",
+  "theme": "actualites",
+  "question": "Selon la FAQ, après quel évènement le CC (Closed Community) doit-il avoir lieu ?",
+  "reponse": "Movie 3",
+  "variantes": [
+   "le Movie 3",
+   "Film 3",
+   "la vidéo Movie 3"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "section": "Game questions",
+  "extrait": "CC is happening after Movie 3.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q030",
+  "theme": "actualites",
+  "question": "Selon la FAQ, en quelle année le développement de RELL Seas a-t-il commencé ?",
+  "reponse": "2023",
+  "variantes": [
+   "mi-2023",
+   "mid-2023"
+  ],
+  "type": "nombre",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "section": "Game questions",
+  "extrait": "Development first started mid-2023",
+  "statut": "confirme"
+ },
+ {
+  "id": "q031",
+  "theme": "actualites",
+  "question": "Selon la FAQ, en quelle année le jeu a-t-il été montré pour la première fois ?",
+  "reponse": "2021",
+  "variantes": [],
+  "type": "nombre",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Frequently_asked_questions",
+  "section": "Game questions",
+  "extrait": "The game was first shown off in 2021 from some early footage and concepts.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q032",
+  "theme": "actualites",
+  "question": "Selon la page God Fruits, quelle date de sortie était annoncée pour Movie 3 ?",
+  "reponse": "24 octobre",
+  "variantes": [
+   "October 24th",
+   "le 24 octobre",
+   "24/10",
+   "October 24"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/God_Fruits",
+  "section": "Overview",
+  "extrait": "More information to be announced on Movie 3, which is releasing October 24th.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q033",
+  "theme": "actualites",
+  "question": "Selon la page d'accueil, sur quelle plateforme peut-on regarder Movie 3 en entier ?",
+  "reponse": "YouTube",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/RELL_Seas",
+  "section": "Highlights",
+  "extrait": "Movie 3 is finally here! Watch the entirety of the movie on YouTube.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q034",
+  "theme": "actualites",
+  "question": "Selon la page d'accueil, dans quelle vidéo découvre-t-on les nouvelles fonctionnalités de RELL Seas ?",
+  "reponse": "Not Movie 3",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/RELL_Seas",
+  "section": "Highlights",
+  "extrait": "Find out the newest features of RELL Seas in Not Movie 3",
+  "statut": "confirme"
+ },
+ {
+  "id": "q035",
+  "theme": "actualites",
+  "question": "Selon la page Posters, de quel jeu le système de Posters s'inspire-t-il, comme mentionné dans Movie 3 ?",
+  "reponse": "Cult of the Lamb",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Posters",
+  "section": "Trivia",
+  "extrait": "As mentioned in Movie 3, the Poster system is inspired by Cult of the Lamb.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q036",
+  "theme": "actualites",
+  "question": "Selon la page Sailing, dans quel « Movie » le système de marqueurs de dégâts des navires est-il présenté ?",
+  "reponse": "Movie 1",
+  "variantes": [
+   "le Movie 1",
+   "Film 1"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Sailing",
+  "section": "Markers (référence)",
+  "extrait": "This is stated in movie 1",
+  "statut": "confirme"
+ },
+ {
+  "id": "q037",
+  "theme": "actualites",
+  "question": "À quelle date les abonnements Gold Supporter et Silver Supporter ont-ils été totalement supprimés ?",
+  "reponse": "30 novembre 2025",
+  "variantes": [
+   "November 30th, 2025",
+   "30/11/2025",
+   "le 30 novembre 2025"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Monetisation",
+  "section": "List of Monetisation Systems",
+  "extrait": "Both Gold Supporter, and Silver Supporter were fully phased out on November 30th, 2025, at 2:00 PM.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q038",
+  "theme": "actualites",
+  "question": "Selon la page Accessories, en quel mois et quelle année a eu lieu le Community Art Event dont les gagnants ont inspiré des accessoires ?",
+  "reponse": "août 2026",
+  "variantes": [
+   "August 2026",
+   "en août 2026",
+   "08/2026"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Accessories",
+  "section": "Image Gallery",
+  "extrait": "These Accessories we're created from the winners of the August 2026 Community Art Event.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q039",
+  "theme": "races",
+  "question": "Quelle race est, selon le wiki, sans conteste la plus commune ?",
+  "reponse": "Human",
+  "variantes": [
+   "Humain",
+   "Humains",
+   "Humans"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Human",
+  "section": "Overview",
+  "extrait": "The Human race is one of the races available in RELL Seas and is undoubtedly the most common.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q040",
+  "theme": "races",
+  "question": "Quelle race se reconnaît à sa paire d'ailes blanches angéliques dans le dos ?",
+  "reponse": "Avalonian",
+  "variantes": [
+   "Avalonien",
+   "Avalonienne",
+   "Avalonians",
+   "Skypiean"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Avalonian",
+  "section": "Overview",
+  "extrait": "The Avalonian race is one of the few races available in RELL Seas. The primary physical feature of this race is the pair of white angelic wings on the back.",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q041",
+  "theme": "races",
+  "question": "Quelle race se distingue par des ailes noires et une flamme dans le dos ?",
+  "reponse": "Lunarian",
+  "variantes": [
+   "Lunarians",
+   "Lunars",
+   "Lunarien",
+   "Lunarienne"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Lunars",
+  "section": "Overview",
+  "extrait": "Lunarians are visually distinguished primarily by their black wings and the flame on their back.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q042",
+  "theme": "races",
+  "question": "Quelle race est reconnaissable à ses éléments robotiques sur tout le corps ?",
+  "reponse": "Cyborg",
+  "variantes": [
+   "Cyborgs"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Cyborg",
+  "section": "Overview",
+  "extrait": "The Cyborg race is one of the few races available in RELL Seas. It is recognizable by robotic features across the entire body.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q043",
+  "theme": "races",
+  "question": "Quelle race peut rester dans l'eau sans craindre de manquer d'oxygène et s'y déplace rapidement ?",
+  "reponse": "Marinian",
+  "variantes": [
+   "Marinians",
+   "Marinien",
+   "Fishman",
+   "Fish-man",
+   "Homme-poisson"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Marinian",
+  "section": "Overview",
+  "extrait": "The Marinian's has the advantage in water such as staying in the water without fear of oxygen loss, and ease of moving quickly in the water",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q044",
+  "theme": "races",
+  "question": "Quelle race ne peut se transformer (« mode up ») qu'en regardant la lune pendant la nuit ?",
+  "reponse": "Beastman",
+  "variantes": [
+   "Beastmen",
+   "Mink",
+   "Minks",
+   "Homme-bête"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Beastman",
+  "section": "Overview",
+  "extrait": "The Beastman race can only mode up when looking at the moon during night time that changes every 2 in real life hours.",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q045",
+  "theme": "races",
+  "question": "Selon la page Beastman, toutes les combien d'heures réelles la lune change-t-elle ?",
+  "reponse": "2",
+  "variantes": [
+   "deux",
+   "2 heures",
+   "toutes les 2 heures"
+  ],
+  "type": "nombre",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Beastman",
+  "section": "Overview",
+  "extrait": "The Beastman race can only mode up when looking at the moon during night time that changes every 2 in real life hours.",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q046",
+  "theme": "races",
+  "question": "Quelle race se distingue par des cornes sur la tête et une taille plus grande et imposante ?",
+  "reponse": "Oni",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Oni",
+  "section": "Overview",
+  "extrait": "Individuals belonging to the Oni race are visually distinguished by the horns atop their heads, they also possess a physical appearance that is taller and more imposing.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q047",
+  "theme": "races",
+  "question": "Selon la page Races, de quelles deux façons le joueur obtient-il sa race ?",
+  "reponse": "en la tirant au hasard ou en la débloquant",
+  "variantes": [
+   "randomize or unlock",
+   "au hasard ou en la débloquant",
+   "aléatoirement ou par déblocage"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Races",
+  "section": "Overview",
+  "extrait": "Races are types of species that the player is able to randomize or unlock throughout their journey across the RELL Seas.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q048",
+  "theme": "factions",
+  "question": "Combien de factions principales les joueurs peuvent-ils choisir ?",
+  "reponse": "4",
+  "variantes": [
+   "quatre",
+   "four"
+  ],
+  "type": "nombre",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Factions",
+  "section": "Overview",
+  "extrait": "RELL Seas has 4 main factions the marines, the pirates, the revolutionaries and the world government which players can choose from.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q049",
+  "theme": "factions",
+  "question": "Quel est le nom officiel de la faction des révolutionnaires ?",
+  "reponse": "Arms of Revolution",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Factions",
+  "section": "Overview (tableau)",
+  "extrait": "Arms of Revolution | A covert faction dedicated to dismantling the current world order.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q050",
+  "theme": "factions",
+  "question": "Quel est le nom officiel complet de la faction militaire chargée de faire régner l'ordre et la justice sur les mers ?",
+  "reponse": "World Seas Marine Corps",
+  "variantes": [
+   "WSMC",
+   "Marine Corps"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Factions",
+  "section": "Overview (tableau)",
+  "extrait": "World Seas Marine Corps | A centralized military organization tasked with enforcing order and justice throughout the seas.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q051",
+  "theme": "factions",
+  "question": "Quel organe dirigeant supervise le Marine Corps comme son bras armé ?",
+  "reponse": "World Seas Government",
+  "variantes": [
+   "World Government",
+   "Gouvernement mondial",
+   "le gouvernement mondial"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Factions",
+  "section": "Overview (tableau)",
+  "extrait": "World Seas Government … oversees the Marine Corps as its military arm.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q052",
+  "theme": "factions",
+  "question": "Selon la page du World Government, quels sont ses deux principaux ennemis ?",
+  "reponse": "Pirates et Revolutionaries",
+  "variantes": [
+   "les pirates et les révolutionnaires",
+   "Pirates, Arms of Revolution",
+   "pirates et révolutionnaires"
+  ],
+  "type": "liste",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Factions/World_Seas_Government",
+  "section": "Overview",
+  "extrait": "The World Government's main enemies are Pirates and Revolutionaries.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q053",
+  "theme": "factions",
+  "question": "Quel est le rang le plus élevé de la hiérarchie des Marines ?",
+  "reponse": "Fleet Admiral",
+  "variantes": [
+   "Amiral de la flotte",
+   "Amiral en chef"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Factions/World_Seas_Marine_Corps",
+  "section": "Marine Ranks",
+  "extrait": "Rear-Admiral … Vice-Admiral … Admiral … Fleet Admiral",
+  "statut": "confirme"
+ },
+ {
+  "id": "q054",
+  "theme": "factions",
+  "question": "Selon la page des Marines, quel est le seul désavantage indiqué à les rejoindre ?",
+  "reponse": "les taxes",
+  "variantes": [
+   "Taxes",
+   "les impôts",
+   "impôts"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Factions/World_Seas_Marine_Corps",
+  "section": "Disadvantages",
+  "extrait": "Disadvantages … Taxes...",
+  "statut": "confirme"
+ },
+ {
+  "id": "q055",
+  "theme": "factions",
+  "question": "Selon les RELL Bros dans Movie 2, combien de factions pirates existe-t-il ?",
+  "reponse": "plus de 40",
+  "variantes": [
+   "over 40",
+   "40+",
+   "plus de quarante",
+   "+40"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Factions/Pirates",
+  "section": "List of NPC Crews",
+  "extrait": "According to the RELL Bros in Movie 2 there are over 40 pirate factions.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q056",
+  "theme": "factions",
+  "question": "Selon la page des Marines, quelle est leur mission « la plus importante » dans les zones urbaines du gouvernement ?",
+  "reponse": "protéger les contribuables",
+  "variantes": [
+   "protect taxpayers",
+   "les contribuables",
+   "taxpayers"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Factions/World_Seas_Marine_Corps",
+  "section": "Overview",
+  "extrait": "One of the Marines' primary functions is to control government-controlled areas, hunt pirates, and, most importantly, protect taxpayers in government-controlled urban areas.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q057",
+  "theme": "factions",
+  "question": "Selon la page Talents, quelle faction peut persécuter un joueur en fonction du grade de ses talents ?",
+  "reponse": "les Marines",
+  "variantes": [
+   "Marines",
+   "Marine",
+   "la Marine",
+   "World Seas Marine Corps"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Talents",
+  "section": "Overview",
+  "extrait": "You might want to be careful though, as you may even get persecuted by the Marines.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q058",
+  "theme": "factions",
+  "question": "Selon la page Posters, auprès de combien de factions trouve-t-on des Posters sur la carte ?",
+  "reponse": "40",
+  "variantes": [
+   "quarante",
+   "les 40 factions"
+  ],
+  "type": "nombre",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Posters",
+  "section": "Overview",
+  "extrait": "Posters can be found from the 40 factions that are located across the map.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q059",
+  "theme": "fruits",
+  "question": "Comment s'appellent les Devil Fruits dans RELL Seas ?",
+  "reponse": "God Fruits",
+  "variantes": [
+   "God Fruit",
+   "fruits divins",
+   "fruits des dieux"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/God_Fruits",
+  "section": "Overview",
+  "extrait": "God Fruits, aka Devil Fruits are rare and mysterious fruits found across the sea.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q060",
+  "theme": "fruits",
+  "question": "Que subit-on, en échange des pouvoirs, quand on mange un God Fruit ?",
+  "reponse": "on est rejeté par la mer",
+  "variantes": [
+   "rejected by the sea",
+   "rejeté par la mer",
+   "la mer nous rejette"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/God_Fruits",
+  "section": "Overview",
+  "extrait": "However, in exchange you will be rejected by the sea.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q061",
+  "theme": "fruits",
+  "question": "Quelles sont les trois classes de God Fruits ?",
+  "reponse": "Paramecia, Logia, Zoan",
+  "variantes": [],
+  "type": "liste",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/God_Fruits",
+  "section": "Overview",
+  "extrait": "They are classified into 3 classes. The Paramecia class … The Logia class … the Zoan class",
+  "statut": "confirme"
+ },
+ {
+  "id": "q062",
+  "theme": "fruits",
+  "question": "Quelle classe de God Fruits permet de se transformer en espèce animale ou en version hybride ?",
+  "reponse": "Zoan",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/God_Fruits",
+  "section": "Overview",
+  "extrait": "Lastly the Zoan class allows the user to transform into an animal species, or a hybrid version.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q063",
+  "theme": "fruits",
+  "question": "Quelle classe de God Fruits est invulnérable aux attaques physiques ?",
+  "reponse": "Logia",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/God_Fruits",
+  "section": "Overview",
+  "extrait": "The Logia class grants the user the ability to transform their body composition into a natural element … Due to their nature they are invulnerable to physical attacks",
+  "statut": "confirme"
+ },
+ {
+  "id": "q064",
+  "theme": "fruits",
+  "question": "Outre l'Armament Haki, qu'est-ce qui permet de contourner l'invulnérabilité des Logia ?",
+  "reponse": "le Seastone",
+  "variantes": [
+   "Seastone",
+   "Sea Stone",
+   "granite marin"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/God_Fruits",
+  "section": "Overview",
+  "extrait": "however this can be bypassed with Armament Haki or Seastone.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q065",
+  "theme": "fruits",
+  "question": "Quel fruit porte le nom japonais Gura Gura no Mi ?",
+  "reponse": "Quake",
+  "variantes": [
+   "Quake Fruit",
+   "Séisme",
+   "fruit du séisme"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Quake",
+  "section": "Overview",
+  "extrait": "The Quake Fruit (Gura Gura no Mi) is a … God Fruit which allows the user to create vibrations",
+  "statut": "confirme"
+ },
+ {
+  "id": "q066",
+  "theme": "fruits",
+  "question": "Quel fruit porte le nom japonais Mera Mera no Mi ?",
+  "reponse": "Flame",
+  "variantes": [
+   "Flamme",
+   "Flame Fruit"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Flame",
+  "section": "Overview",
+  "extrait": "Flame (Mera Mera no Mi) is a … type God Fruit that allows the user to create, control, and transform into fire at will.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q067",
+  "theme": "fruits",
+  "question": "Quel fruit porte le nom japonais Goro Goro no Mi ?",
+  "reponse": "Rumble",
+  "variantes": [
+   "Rumble Fruit",
+   "Lightning",
+   "Foudre"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Rumble",
+  "section": "Introduction",
+  "extrait": "The Rumble (Goro Goro No Mi) fruit is a … type God Fruit that grants the power to create, control, and become lightning at will",
+  "statut": "confirme"
+ },
+ {
+  "id": "q068",
+  "theme": "fruits",
+  "question": "Quel fruit porte le nom japonais Uo Uo no Mi, Model: Seiryu ?",
+  "reponse": "Dragon",
+  "variantes": [
+   "Azure Dragon",
+   "Dragon Azur",
+   "Dragon fruit"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Dragon",
+  "section": "Introduction",
+  "extrait": "The Dragon fruit (Uo Uo no Mi, Model: Seiryu) is a … God Fruit that allows its user to transform into a hybrid and full Azure Dragon at will.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q069",
+  "theme": "fruits",
+  "question": "Quel fruit Zoan mythique (Hito Hito no Mi, Model: Daibutsu) transforme son utilisateur en une gigantesque statue dorée ?",
+  "reponse": "Buddha",
+  "variantes": [
+   "Bouddha",
+   "Buddha God"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Buddha",
+  "section": "Introduction",
+  "extrait": "The Buddha God (Hito Hito no Mi, Model: Daibutsu) is a … God Fruit that allows its user to transform into a Daibutsu (a giant gold Buddha) at will.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q070",
+  "theme": "fruits",
+  "question": "Quel fruit Paramecia permet de ressusciter après sa première mort ?",
+  "reponse": "Revive",
+  "variantes": [
+   "Yomi Yomi no Mi",
+   "Revive Fruit"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Revive",
+  "section": "Overview",
+  "extrait": "Revive (Yomi Yomi no Mi) is a … God Fruit which enhances the user's soul to the point where they resurrect after their first death",
+  "statut": "confirme"
+ },
+ {
+  "id": "q071",
+  "theme": "fruits",
+  "question": "Quel fruit Paramecia rend immunisé contre toutes les formes de poison, sans être un Logia ?",
+  "reponse": "Venom",
+  "variantes": [
+   "Doku Doku no Mi",
+   "Venin",
+   "Venom Fruit"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Venom",
+  "section": "Introduction",
+  "extrait": "The Venom Fruit (Doku Doku no Mi) … grants immunity to all forms of poison … This ability is not to be confused with a Logia-type power",
+  "statut": "confirme"
+ },
+ {
+  "id": "q072",
+  "theme": "fruits",
+  "question": "Quel God Fruit ne sortira pas au lancement du jeu, mais dans une future mise à jour ?",
+  "reponse": "Mythical Wolf",
+  "variantes": [
+   "Inu Inu no Mi, Model: Okuchi no Makami",
+   "Loup mythique",
+   "Mythical Wolf fruit"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Mythical_Wolf",
+  "section": "Introduction",
+  "extrait": "The Mythical Wolf fruit (Inu Inu no Mi, Model: Okuchi no Makami) … This fruit is not releasing when the game comes out, it will be released in a future update.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q073",
+  "theme": "fruits",
+  "question": "Quel God Fruit apparaît comme une sphère violette à motif bouclé, avec une tige verte bouclée ?",
+  "reponse": "Rubber",
+  "variantes": [
+   "Caoutchouc",
+   "Rubber Fruit"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Rubber",
+  "section": "Introduction",
+  "extrait": "Rubber is a … type God Fruit that grants the user's body the properties of rubber … appears as a purple sphere with a unique curly pattern and a curly green stem.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q074",
+  "theme": "fruits",
+  "question": "Quel God Fruit apparaît comme une étoile jaune à motif bouclé ?",
+  "reponse": "Light",
+  "variantes": [
+   "Lumière",
+   "Light Fruit",
+   "Pika Pika no Mi"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Light",
+  "section": "Introduction",
+  "extrait": "Light is a … type God Fruit that allows the user to create, control, and transform into light at will … appears as a yellow star with a curly pattern.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q075",
+  "theme": "combat",
+  "question": "Combien d'attaques M1 peut-on enchaîner au maximum ?",
+  "reponse": "5",
+  "variantes": [
+   "cinq",
+   "five"
+  ],
+  "type": "nombre",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Combat_Mechanics",
+  "section": "Combat Basics (Attack)",
+  "extrait": "attacks can be performed up to 5 times dealing damage to players who do not block, switch or evade the attack.",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q076",
+  "theme": "combat",
+  "question": "Quelle propriété a toujours la dernière M1 d'un enchaînement ?",
+  "reponse": "elle brise la garde (block breaker)",
+  "variantes": [
+   "block breaker",
+   "brise la garde",
+   "casse le blocage",
+   "elle casse la garde"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Combat_Mechanics",
+  "section": "Combat Basics (Defend)",
+  "extrait": "The final M1 is always a block breaker.",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q077",
+  "theme": "combat",
+  "question": "Comment appelle-t-on couramment l'attaque « Strong », un dash suivi d'une attaque ?",
+  "reponse": "Q Spec",
+  "variantes": [
+   "Q-Spec"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Combat_Mechanics",
+  "section": "Combat Basics (Strong)",
+  "extrait": "Commonly referred to as Q Spec. The player dashes forwards and attacks the opponent.",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q078",
+  "theme": "combat",
+  "question": "Quelle touche permet l'Evade, pour sortir d'un combo grâce aux I-frames ?",
+  "reponse": "X",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Combat_Mechanics",
+  "section": "Combat Basics (Evade)",
+  "extrait": "When X is pressed the player will go out of a combo by gaining I-frames.",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q079",
+  "theme": "combat",
+  "question": "Comment se remplit la barre d'Evade ?",
+  "reponse": "en subissant des dégâts",
+  "variantes": [
+   "as you take damage",
+   "quand on prend des dégâts",
+   "en prenant des dégâts"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/UI_Explanation",
+  "section": "Main Interface (Evade Bar)",
+  "extrait": "The evade bar will fill up as you take damage.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q080",
+  "theme": "combat",
+  "question": "Comment se remplit la barre de Switch ?",
+  "reponse": "en infligeant des dégâts",
+  "variantes": [
+   "as you deal damage",
+   "quand on inflige des dégâts"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/UI_Explanation",
+  "section": "Main Interface (Switch Bar)",
+  "extrait": "The switch bar will fill up as you deal damage.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q081",
+  "theme": "combat",
+  "question": "Quelle couleur de point d'exclamation indique qu'il faut esquiver ?",
+  "reponse": "rouge",
+  "variantes": [
+   "red"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Combat_Mechanics",
+  "section": "Telegraphed Attacks",
+  "extrait": "When a red exclamation mark appears, this means you'll need to dodge.",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q082",
+  "theme": "combat",
+  "question": "Quelles sont les classes d'armes ?",
+  "reponse": "Light, Medium, Heavy, Ranged",
+  "variantes": [
+   "Légère, Moyenne, Lourde, À distance",
+   "légère, moyenne, lourde et à distance"
+  ],
+  "type": "liste",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Weapons",
+  "section": "Overview",
+  "extrait": "Weapons are categorised into 4 different classes: Light, Medium, Heavy, and Ranged.",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q083",
+  "theme": "combat",
+  "question": "Combien de fois au maximum une arme peut-elle être améliorée ?",
+  "reponse": "20",
+  "variantes": [
+   "vingt",
+   "twenty"
+  ],
+  "type": "nombre",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Weapons",
+  "section": "Progression (Upgrading)",
+  "extrait": "Weapons can be upgraded up to 20 times",
+  "statut": "confirme"
+ },
+ {
+  "id": "q084",
+  "theme": "combat",
+  "question": "À quel écran choisit-on la classe d'arme à laquelle se lier, pour un bonus d'EXP d'arme ?",
+  "reponse": "Character Customisation",
+  "variantes": [
+   "personnalisation du personnage",
+   "création du personnage",
+   "Character Customization"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Weapons",
+  "section": "Overview",
+  "extrait": "During the Character Customisation screen players can select a weapon class to bond with.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q085",
+  "theme": "combat",
+  "question": "Quelles sont les trois formes de Haki ?",
+  "reponse": "Armament, Observation, Conquerors",
+  "variantes": [
+   "Armement, Observation, Conquérant",
+   "Armament Haki, Observation Haki, Conquerors Haki"
+  ],
+  "type": "liste",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Haki",
+  "section": "Overview",
+  "extrait": "There are three forms of Haki … Armament Haki … Observation Haki … Conquerors Haki",
+  "statut": "confirme"
+ },
+ {
+  "id": "q086",
+  "theme": "combat",
+  "question": "Combien de cartes de Haki peut-on sélectionner au maximum ?",
+  "reponse": "6",
+  "variantes": [
+   "six"
+  ],
+  "type": "nombre",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Haki",
+  "section": "Haki Cards",
+  "extrait": "In RELL Seas you can select up to six haki cards from any Haki form.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q087",
+  "theme": "combat",
+  "question": "Quelle forme de Haki permet de blesser les utilisateurs de God Fruits immunisés aux attaques physiques, comme les Logia ?",
+  "reponse": "Armament Haki",
+  "variantes": [
+   "Armament",
+   "Haki de l'armement"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Armament_Haki",
+  "section": "Armament Haki",
+  "extrait": "Armament Haki is a form of Haki … can be used to injure God Fruit users who are immune to normal physical attacks, such as Logia users.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q088",
+  "theme": "combat",
+  "question": "Quelle forme de Haki donne un sixième sens pour sentir la présence, la puissance et les émotions des autres ?",
+  "reponse": "Observation Haki",
+  "variantes": [
+   "Observation",
+   "Haki de l'observation"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Haki",
+  "section": "Overview",
+  "extrait": "Observation Haki is a type of Haki that grants the user a sixth sense, allowing them to sense the presence, power, and emotions of others",
+  "statut": "confirme"
+ },
+ {
+  "id": "q089",
+  "theme": "combat",
+  "question": "Combien de posters peut-on équiper par catégorie ?",
+  "reponse": "1",
+  "variantes": [
+   "un",
+   "un seul",
+   "one"
+  ],
+  "type": "nombre",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Posters",
+  "section": "Overview",
+  "extrait": "The player can equip one poster of ech category.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q090",
+  "theme": "combat",
+  "question": "Quelle catégorie de posters augmente les dashes et les geppos ?",
+  "reponse": "Agile",
+  "variantes": [
+   "Agile posters"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Posters",
+  "section": "Overview",
+  "extrait": "The Agile posters can increase your dashes and geppos.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q091",
+  "theme": "combat",
+  "question": "Quelle catégorie de posters augmente le potentiel de combo et les dégâts ?",
+  "reponse": "Fierce",
+  "variantes": [
+   "Fierce posters"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Posters",
+  "section": "Overview",
+  "extrait": "The Fierce posters can increase your combo potential and damage.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q092",
+  "theme": "combat",
+  "question": "Quelle catégorie de posters agit sur l'end lag et la barre de parade ?",
+  "reponse": "Tactic",
+  "variantes": [
+   "Tactique",
+   "Tactic posters"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Posters",
+  "section": "Overview",
+  "extrait": "The Tatctic posters can increase your end lag and parry bar.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q093",
+  "theme": "combat",
+  "question": "Quels sont les quatre styles de combat connus listés sur la page Fighting Styles ?",
+  "reponse": "Black Leg, Electro, Rokushiki, Dragon Claw",
+  "variantes": [],
+  "type": "liste",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Fighting_Styles",
+  "section": "List of Fighting Styles",
+  "extrait": "there is only 4 known fighting styles … Black Leg … Electro … Rokushiki … Dragon Claw",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q094",
+  "theme": "navires",
+  "question": "Quels sont les trois types de navires que le joueur peut acheter ?",
+  "reponse": "Sloops, Caravels, Galleons",
+  "variantes": [
+   "Sloop, Caravelle, Galion",
+   "Sloops, Caravelles, Galions"
+  ],
+  "type": "liste",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Sailing",
+  "section": "Overview",
+  "extrait": "The player can buy three different ships of his choice. … Sloops … Caravels … Galleons",
+  "statut": "confirme"
+ },
+ {
+  "id": "q095",
+  "theme": "navires",
+  "question": "Selon la page Sailing, que risque-t-on si on ne jette pas l'ancre de son bateau ?",
+  "reponse": "que d'autres joueurs le volent",
+  "variantes": [
+   "other players can steal it",
+   "se faire voler son bateau",
+   "le vol du bateau",
+   "il peut être volé"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Sailing",
+  "section": "Overview",
+  "extrait": "If the player doesn't anchor their boat, other players can steal it from the player.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q096",
+  "theme": "navires",
+  "question": "Quel objet sert à faire apparaître son navire ou son sous-marin ?",
+  "reponse": "Ship in a bottle",
+  "variantes": [
+   "navire en bouteille",
+   "bateau en bouteille"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Ship_in_a_bottle",
+  "section": "Overview",
+  "extrait": "The Ship in a Bottle is a utility item that is used to spawn your ship or submarine.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q097",
+  "theme": "navires",
+  "question": "Dans quel type de bouteille le sous-marin apparaît-il en « grandissant » ?",
+  "reponse": "Cola",
+  "variantes": [
+   "une bouteille de Cola",
+   "Cola bottle",
+   "bouteille de cola"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Ship_in_a_bottle",
+  "section": "Overview",
+  "extrait": "Spawn Submarine: Spawns a Submarine by growing from inside a Cola bottle.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q098",
+  "theme": "navires",
+  "question": "En mode exploration, quelle touche permet de mettre les voiles ?",
+  "reponse": "E",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Sailing",
+  "section": "Exploration mode",
+  "extrait": "The player can set sail with E to begin exploring.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q099",
+  "theme": "navires",
+  "question": "Quelle touche fait passer le navire en mode bataille ?",
+  "reponse": "R",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Sailing",
+  "section": "Battle mode",
+  "extrait": "To begin battle mode, the player needs to control the boat and click R.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q100",
+  "theme": "navires",
+  "question": "À bord du navire, quelle attaque est associée à la touche G ?",
+  "reponse": "Mortar cannons",
+  "variantes": [
+   "canons mortiers",
+   "mortier",
+   "Mortar cannon",
+   "mortiers"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Sailing",
+  "section": "Exploration mode",
+  "extrait": "When controlling the ship, the player gets the following abilities: … G Mortar cannons",
+  "statut": "confirme"
+ },
+ {
+  "id": "q101",
+  "theme": "navires",
+  "question": "Quelle couleur de marqueur indique qu'un navire subit un multiplicateur de dégâts ×3 ?",
+  "reponse": "rouge",
+  "variantes": [
+   "red",
+   "Red Weak Point"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Sailing",
+  "section": "Markers",
+  "extrait": "Red Weak Point: The ship takes three times multiplier. Hitting the ship further will cause it to sink.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q102",
+  "theme": "navires",
+  "question": "Combien de types de statistiques de navire existe-t-il ?",
+  "reponse": "6",
+  "variantes": [
+   "six"
+  ],
+  "type": "nombre",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Ship_Customisation",
+  "section": "Ship Stats",
+  "extrait": "There's 6 types of stats which are:",
+  "statut": "confirme"
+ },
+ {
+  "id": "q103",
+  "theme": "navires",
+  "question": "Combien de configurations (layouts) peut-on créer pour son bateau ?",
+  "reponse": "3",
+  "variantes": [
+   "trois",
+   "three"
+  ],
+  "type": "nombre",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Ship_Customisation",
+  "section": "Overview",
+  "extrait": "There the player can create three layouts for his boat.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q104",
+  "theme": "navires",
+  "question": "Quel canon tire trois boulets simultanément ?",
+  "reponse": "Burst Cannon",
+  "variantes": [
+   "canon à rafale",
+   "Burst"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Cannon",
+  "section": "Overview",
+  "extrait": "Burst Cannon | A special cannon capable of firing 3 cannonballs simultaneously",
+  "statut": "confirme"
+ },
+ {
+  "id": "q105",
+  "theme": "navires",
+  "question": "Dans quel canon un joueur peut-il grimper pour être propulsé dans les airs ?",
+  "reponse": "Mortar cannon",
+  "variantes": [
+   "mortier",
+   "Mortar",
+   "canon mortier"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Cannon",
+  "section": "Overview",
+  "extrait": "It's a special cannon because anyone can climb into the mortar and be launched into the air.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q106",
+  "theme": "navires",
+  "question": "Comment s'appelle la sculpture placée à la proue d'un navire, sous le beaupré ?",
+  "reponse": "Figurehead",
+  "variantes": [
+   "figure de proue",
+   "Figureheads"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Figurehead",
+  "section": "Overview",
+  "extrait": "A figurehead is a figure located at the bow of a ship, beneath the bowsprit.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q107",
+  "theme": "navires",
+  "question": "Que peut-on afficher sur les voiles de son navire ?",
+  "reponse": "l'emblème de son équipage",
+  "variantes": [
+   "emblem",
+   "crew emblem",
+   "emblème de l'équipage",
+   "le logo de son équipage",
+   "logo d'équipage"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Basic_Sail",
+  "section": "Overview",
+  "extrait": "players have the option to customize their ship's sails to have an emblem on it, which will show you or other players what crew you belong to.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q108",
+  "theme": "monde",
+  "question": "Selon la page Locations, quelle mer serait prévue pour une future mise à jour (rumeur) ?",
+  "reponse": "Sea 4",
+  "variantes": [
+   "la Sea 4",
+   "Mer 4",
+   "la quatrième mer"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Locations",
+  "section": "Trivia",
+  "extrait": "Sea 4 is rumoured to be planned for a future update.",
+  "statut": "a_verifier"
+ },
+ {
+  "id": "q109",
+  "theme": "monde",
+  "question": "Quelles sont les trois classes de montures ?",
+  "reponse": "Terrestrial, Aerial, Aquatic",
+  "variantes": [
+   "terrestre, aérienne, aquatique",
+   "Terrestre, Aérien, Aquatique"
+  ],
+  "type": "liste",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Mounts",
+  "section": "Overview",
+  "extrait": "Mounts are characterized into three classes: Terrestrial, Aerial, and Aquatic.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q110",
+  "theme": "monde",
+  "question": "Comment obtenait-on la monture Whale (baleine) ?",
+  "reponse": "en achetant l'abonnement Gold ou Silver Supporter sur le Discord",
+  "variantes": [
+   "Gold/Silver Supporter",
+   "abonnement Gold/Silver",
+   "Gold/Silver subscription",
+   "via un abonnement Gold ou Silver"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Mounts",
+  "section": "List of Mounts",
+  "extrait": "Whale … Class: Aquatic … Obtainment: Through purchasing Gold/Silver Supporter on the discord.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q111",
+  "theme": "monde",
+  "question": "Selon la page Mounts, comment obtient-on les montures ?",
+  "reponse": "en les achetant à un marchand ou dans une boutique",
+  "variantes": [
+   "Bought from a Merchant",
+   "chez un marchand",
+   "achetées à un marchand",
+   "dans une boutique"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Mounts",
+  "section": "Obtainment",
+  "extrait": "Bought from a Merchant, or a specific shop that sells Mounts",
+  "statut": "confirme"
+ },
+ {
+  "id": "q112",
+  "theme": "monde",
+  "question": "Comment se comporte la faune « Neutral » ?",
+  "reponse": "elle n'attaque que les joueurs qui l'ont attaquée",
+  "variantes": [
+   "only attack players that have attacked them",
+   "n'attaque que si on l'attaque"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Wildlife",
+  "section": "Overview",
+  "extrait": "Wildlife which will only attack players that have attacked them.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q113",
+  "theme": "monde",
+  "question": "Comment appelle-t-on la faune qui n'attaque jamais les joueurs et fuit quand on l'attaque ?",
+  "reponse": "Friendly",
+  "variantes": [
+   "amicale",
+   "faune amicale"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Wildlife",
+  "section": "Overview",
+  "extrait": "Friendly | Wildlife which will never attack players. However, when attacked they will try to escape.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q114",
+  "theme": "monde",
+  "question": "Que lâche la faune en plus de matériaux, et qui sert à l'artisanat ?",
+  "reponse": "de la viande",
+  "variantes": [
+   "meat",
+   "viande"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Wildlife",
+  "section": "Overview",
+  "extrait": "Each Wildlife drops unique materials and meat which can be used in crafting.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q115",
+  "theme": "monde",
+  "question": "Selon la page Wildlife, que peut-on faire avec certains animaux sauvages ?",
+  "reponse": "les apprivoiser",
+  "variantes": [
+   "tame them",
+   "tamed",
+   "apprivoiser",
+   "les dresser"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Wildlife",
+  "section": "Overview",
+  "extrait": "Additionally, some wildlife can be tamed.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q116",
+  "theme": "personnages",
+  "question": "Chez quels PNJ améliore-t-on et enchante-t-on les armes ?",
+  "reponse": "les Blacksmith",
+  "variantes": [
+   "Blacksmith",
+   "Blacksmith NPCs",
+   "forgerons",
+   "les forgerons"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Weapons",
+  "section": "Progression (Upgrading)",
+  "extrait": "Upgrading weapons is done through Blacksmith NPCs found on various islands.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q117",
+  "theme": "personnages",
+  "question": "En mode bataille, qui peut tirer au canon à la place du joueur ?",
+  "reponse": "un équipage de PNJ",
+  "variantes": [
+   "NPC crew",
+   "équipage PNJ",
+   "l'équipage de PNJ"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Sailing",
+  "section": "Battle mode",
+  "extrait": "Additionally, the player can have an NPC crew that will shoot cannons instead.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q118",
+  "theme": "personnages",
+  "question": "Comment le wiki définit-il les « Enemies » ?",
+  "reponse": "des PNJ humains sans barre de vie",
+  "variantes": [
+   "NPCs that are human and without healthbars",
+   "PNJ humains sans barre de vie"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Enemies",
+  "section": "Introduction",
+  "extrait": "Refers to any NPCs that are human and without healthbars.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q119",
+  "theme": "personnages",
+  "question": "Selon la page des Marines, où faut-il se rendre pour trouver le PNJ qui enrôle les joueurs ?",
+  "reponse": "dans le bâtiment principal d'une Marine Base",
+  "variantes": [
+   "main building of a Marine Base",
+   "bâtiment principal d'une base de la Marine",
+   "Marine Base"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Factions/World_Seas_Marine_Corps",
+  "section": "Enlisting in the Marines",
+  "extrait": "Enter a Marine Base and go to the main building. Find the Recruiter NPC and you will be enlisted into the marines.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q120",
+  "theme": "evenements",
+  "question": "Que rapportent les évènements aléatoires (Random Events) quand on les termine ?",
+  "reponse": "de l'EXP et des objets",
+  "variantes": [
+   "EXP and items",
+   "XP et objets",
+   "de l'expérience et des objets"
+  ],
+  "type": "liste",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Random_Events",
+  "section": "Overview",
+  "extrait": "Random Events give players the chance to get EXP and items by completing the events.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q121",
+  "theme": "evenements",
+  "question": "Que se passe-t-il si plus de deux rencontres aléatoires se jouent en même temps ?",
+  "reponse": "une plus grande bataille commence",
+  "variantes": [
+   "a bigger battle",
+   "une bataille plus grande",
+   "une grande bataille"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Random_Events",
+  "section": "Overview",
+  "extrait": "If more than two random encounters play, it will start a bigger battle.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q122",
+  "theme": "evenements",
+  "question": "Quels sont les quatre évènements terrestres (Land Events) listés ?",
+  "reponse": "Camp Event, War Event, Pirate Dock Event, Raid Dock Event",
+  "variantes": [
+   "Camp, War, Pirate Dock, Raid Dock"
+  ],
+  "type": "liste",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Random_Events",
+  "section": "Land Events",
+  "extrait": "Camp Event … War Event … Pirate Dock Event … Raid Dock Event",
+  "statut": "confirme"
+ },
+ {
+  "id": "q123",
+  "theme": "evenements",
+  "question": "Dans le Camp Event, que fait-on avec les PNJ enfermés dans des cages ?",
+  "reponse": "les aider à s'échapper ou les combattre",
+  "variantes": [
+   "Help NPCs escape from cages or fight them",
+   "les libérer ou les combattre"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Random_Events",
+  "section": "Land Events",
+  "extrait": "Help NPCs escape from cages or fight them in an unknown location.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q124",
+  "theme": "evenements",
+  "question": "Lors d'un War Event, comment évolue la réputation ?",
+  "reponse": "positive avec la faction aidée, négative avec la faction adverse",
+  "variantes": [
+   "positive reputation with faction you helped; negative with opposing faction",
+   "+ avec la faction aidée, - avec la faction adverse"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Random_Events",
+  "section": "Land Events",
+  "extrait": "XP and items; positive reputation with faction you helped; negative with opposing faction",
+  "statut": "confirme"
+ },
+ {
+  "id": "q125",
+  "theme": "evenements",
+  "question": "Selon la page Sailing, où apparaissent les évènements aléatoires de mer ?",
+  "reponse": "autour du joueur, une fois qu'il est en mer",
+  "variantes": [
+   "around the proximity of the player",
+   "à proximité du joueur en mer"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Sailing",
+  "section": "Overview",
+  "extrait": "Random sea events will start to spawn around the proximity of the player once he's in the sea.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q126",
+  "theme": "evenements",
+  "question": "Dans les évènements aléatoires, qui choisit la faction à soutenir ?",
+  "reponse": "le joueur",
+  "variantes": [
+   "the player",
+   "le joueur lui-même",
+   "toi"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Random_Events",
+  "section": "Overview",
+  "extrait": "It is up to you how these events turn, as you can choose which faction to side with or help out.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q127",
+  "theme": "boss",
+  "question": "En quelles deux catégories de difficulté les boss sont-ils classés ?",
+  "reponse": "Mini Bosses et Greater Bosses",
+  "variantes": [
+   "Mini Boss et Greater Boss",
+   "mini-boss et grands boss"
+  ],
+  "type": "liste",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Bosses",
+  "section": "Overview",
+  "extrait": "Bosses often drop exclusive items and are categorised by difficulty into Mini Bosses and Greater Bosses.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q128",
+  "theme": "boss",
+  "question": "Quels sont les deux types de versions de boss ?",
+  "reponse": "humanoid et mesh",
+  "variantes": [
+   "humanoïde et mesh",
+   "humanoid, mesh"
+  ],
+  "type": "liste",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Bosses",
+  "section": "Overview",
+  "extrait": "There's 2 types of boss versions, humanoid and mesh.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q129",
+  "theme": "boss",
+  "question": "Où apparaît la barre de vie d'un boss quand on est à portée ?",
+  "reponse": "en haut de l'écran",
+  "variantes": [
+   "top of the screen",
+   "en haut"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Bosses",
+  "section": "Overview",
+  "extrait": "When in range, a boss health bar appears at the top of the screen.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q130",
+  "theme": "boss",
+  "question": "Quel boss est si énorme qu'il peut porter un navire sur son dos ?",
+  "reponse": "Crab",
+  "variantes": [
+   "Giant Crab",
+   "Crabe",
+   "le Crabe",
+   "Crabe géant"
+  ],
+  "type": "texte_court",
+  "difficulte": 1,
+  "source": "https://rellseas.fandom.com/wiki/Crab",
+  "section": "Introduction",
+  "extrait": "Crab is an Unknown level boss yet his size is massive as he's able to carry a ship on his back.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q131",
+  "theme": "boss",
+  "question": "Quel boss dit « Heh... fresh meat... » ?",
+  "reponse": "Sharkman",
+  "variantes": [
+   "Shark Fishman",
+   "Homme-requin"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Sharkman",
+  "section": "Introduction (citation)",
+  "extrait": "Heh... fresh meat... … Sharkman is an Unknown level boss that dwells deep in the sea.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q132",
+  "theme": "boss",
+  "question": "Quel boss dit « Blub-blub... HUAHH! » ?",
+  "reponse": "Octopusman",
+  "variantes": [
+   "Octopus Fishman",
+   "Homme-pieuvre"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Octopusman",
+  "section": "Introduction (citation)",
+  "extrait": "Blub-blub... HUAHH! … Octopusman is a deep sea boss that uses unpredictable tentacle attacks.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q133",
+  "theme": "boss",
+  "question": "Quel boss de la race des Léviathans est surnommé « Ancient Sea Serpent » ?",
+  "reponse": "Yahu",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Yahu",
+  "section": "Introduction (infobox)",
+  "extrait": "Ancient Sea Serpent … Yahu is a deep sea boss and is apart of the Leviathan race family.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q134",
+  "theme": "boss",
+  "question": "Quel boss est décrit comme largement supérieur au Giant Squid ?",
+  "reponse": "True Kraken",
+  "variantes": [
+   "le True Kraken"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/True_Kraken",
+  "section": "Introduction",
+  "extrait": "True Kraken is an Unknown level boss, who is vastly superior to the Giant Squid and dwells in the depths of the sea.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q135",
+  "theme": "boss",
+  "question": "Quel boss des profondeurs a des tentacules capables de broyer les navires ?",
+  "reponse": "Giant Squid",
+  "variantes": [
+   "Calmar géant",
+   "le Giant Squid"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Giant_Squid",
+  "section": "Introduction",
+  "extrait": "Giant Squid is a deep sea boss that lurks in the darkest depths of the ocean. Its massive tentacles can crush ships with ease.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q136",
+  "theme": "boss",
+  "question": "Quel boss tient une épée dans sa gueule ?",
+  "reponse": "Katame",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Katame",
+  "section": "Introduction",
+  "extrait": "Katame is an Unknown level Boss who wields a sword in its jaws.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q137",
+  "theme": "boss",
+  "question": "Quel boss est recouvert d'une armure d'argent pur ?",
+  "reponse": "Golem",
+  "variantes": [],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Golem",
+  "section": "Introduction",
+  "extrait": "Golem is an Unknown level Boss who's encased in pure silver armor.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q138",
+  "theme": "boss",
+  "question": "Quel boss manie des ciseaux géants et posséderait un God Fruit ?",
+  "reponse": "Alucard",
+  "variantes": [
+   "Moria",
+   "Alucard/Moria"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Alucard",
+  "section": "Introduction",
+  "extrait": "Alucard is an Unknown level Boss, wielding giant scissors and rumored to possess a God Fruit.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q139",
+  "theme": "boss",
+  "question": "À quelle race appartiennent les boss Baldur et Brogy ?",
+  "reponse": "Giant",
+  "variantes": [
+   "Géants",
+   "Géant",
+   "Giant Race",
+   "la race des Géants"
+  ],
+  "type": "texte_court",
+  "difficulte": 2,
+  "source": "https://rellseas.fandom.com/wiki/Brogy",
+  "section": "Introduction",
+  "extrait": "Brogy is an Unknown level Boss that's apart of the Giant Race.",
+  "statut": "confirme"
+ },
+ {
+  "id": "q140",
+  "theme": "boss",
+  "question": "À quelle race appartient le boss Aegon ?",
+  "reponse": "Skypiean",
+  "variantes": [
+   "Skypieans",
+   "Avalonian"
+  ],
+  "type": "texte_court",
+  "difficulte": 3,
+  "source": "https://rellseas.fandom.com/wiki/Aegon",
+  "section": "Introduction",
+  "extrait": "Aegon is an Unknown level Boss thats apart of the Skypiean race.",
+  "statut": "a_verifier"
+ }
+]

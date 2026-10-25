@@ -1031,8 +1031,8 @@ def carte_accueil(texte_panneau: str, nom_panneau: str, nombre: int, liens_: lis
     """L'accueil d'un ticket de recrutement : les deux étapes, le nombre de questions de l'étape 2, les liens."""
     s = "s" if nombre > 1 else ""
     combien, combien_en = (f"de **{nombre} question{s}** ", f"{nombre}-question ") if nombre > 0 else ("", "")
-    ou = " Toutes les réponses se trouvent dans les liens ci-dessous." if liens_ else ""
-    ou_en = " Every answer is in the links below." if liens_ else ""
+    ou = " Toutes les réponses se trouvent sur le wiki : dans les pages ci-dessous, ou à un clic depuis elles." if liens_ else ""
+    ou_en = " Every answer is on the wiki: in the pages below, or one click away from them." if liens_ else ""
     items = [discord.ui.TextDisplay("### Bienvenue · Welcome")]
     if texte_panneau:
         items.append(discord.ui.TextDisplay(str(texte_panneau)[:1500]))
@@ -1117,8 +1117,8 @@ def cartes_etape2(envoi: dict, etat: str = "ouvert", *, quand: int = 0) -> list:
     titre = (f"## Étape 2 — nouveau questionnaire · {n} question{s}\n-# Step 2 — new questionnaire · {n} question{s}"
              if renvoi else f"## Étape 2 — {n} question{s}\n-# Step 2 — {n} question{s}")
     liens_ = envoi.get("liens") or []
-    ou = " Toutes les réponses se trouvent dans les liens ci-dessous." if liens_ else ""
-    ou_en = " Every answer is in the links below." if liens_ else ""
+    ou = " Toutes les réponses se trouvent sur le wiki : dans les pages ci-dessous, ou à un clic depuis elles." if liens_ else ""
+    ou_en = " Every answer is on the wiki: in the pages below, or one click away from them." if liens_ else ""
     if pages > 1:
         forme = (f" Tu réponds en {pages} formulaires de {PAR_PAGE} questions au plus : chacun est gardé dès que tu "
                  "l'envoies, tu peux faire une pause et reprendre avec « Répondre ».")

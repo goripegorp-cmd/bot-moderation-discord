@@ -257,7 +257,7 @@ def test_Q01_ouverture_accueil_deux_etapes_nombre_liens_et_carte_de_l_etape_1(tm
     assert n == 10, "le nombre réglé sur le site (10 par défaut), toutes les questions confirmées de l'exemple"
     assert "deux étapes" in t and "two steps" in t and "**10 questions**" in t and "10-question" in t
     assert "Bienvenue à bord !" in t, "le mot du panneau est repris"
-    assert "Toutes les réponses se trouvent dans les liens ci-dessous." in t and "Every answer is in the links below." in t
+    assert "Toutes les réponses se trouvent sur le wiki : dans les pages ci-dessous, ou à un clic depuis elles." in t and "Every answer is on the wiki: in the pages below, or one click away from them." in t
     assert "[Wiki du jeu](https://exemple.fandom.com/wiki/Accueil)" in t and "[Guide du clan](https://discord.com/" in t
     assert "Lien refusé" not in t and "sans-titre" not in t, "un lien http ou sans titre n'entre pas"
     carte = _vues_du_fil(fil)[-1]
@@ -377,7 +377,7 @@ def test_Q03_parcours_complet_etape2_pages_reprise_corrections_acceptation(tmp_p
     assert len(cartes) == 1 and f"rq:rep:{eid}" in ids(cartes[0])
     t = textes(cartes[0])
     assert "## Étape 2 — 10 questions" in t and "Step 2 — 10 questions" in t
-    assert "Toutes les réponses se trouvent dans les liens ci-dessous." in t and "[Wiki du jeu](" in t
+    assert "Toutes les réponses se trouvent sur le wiki : dans les pages ci-dessous, ou à un clic depuis elles." in t and "[Wiki du jeu](" in t
     assert "**1.** Quel studio développe le jeu dont parle ce clan ?" in t and "**Formulaire 2/2**" in t
     assert "**3.** En quelle année le Movie 3 est-il sorti ?" in t, "le studio, puis les actualités"
     assert "**10.** Quel salon Discord du clan donne les annonces officielles ?" in t
