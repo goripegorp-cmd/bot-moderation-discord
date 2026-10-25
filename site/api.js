@@ -47,6 +47,11 @@ async function avecDelai(adresse, options, delai) {
   }
 }
 
+/** Un 5xx est une PANNE (serveur injoignable) seulement s'il vient du service worker hors ligne (« X-Hors-Ligne »)
+ *  ou n'est pas une réponse de notre serveur (page d'erreur du proxy). Un 5xx de notre serveur — un JSON avec
+ *  « erreur », par exemple « Discord ne répond pas » — dit que le serveur répond : la page reste en ligne. */
+const panne = (r, corps) => r.status >= 500 && (r.headers.get("X-Hors-Ligne") === "1" || !(corps && typeof corps.erreur === "string"));
+
 async function corpsJson(r) {
   if (r.status === 204) return {};
   try { return await r.json(); } catch (e) { return null; }
@@ -68,13 +73,14 @@ export async function lire(nom, params, { etag } = {}) {
   else if (r.status < 500) noterReseau(true);
   if (r.status === 304) return { ok: true, status: 304, etag };
   const corps = await corpsJson(r);
+  if (!horsLigne && r.status >= 500 && !panne(r, corps)) noterReseau(true);
   if (r.status === 401 || r.status === 403) {
     const m = (corps && (corps.erreur || corps.message)) || "";
     if (r.status === 401 || RE_SESSION.test(m) || nom === "donnees") sessionTerminee(m);
     return { ok: false, status: r.status, erreur: m || "Accès refusé." };
   }
   if (!r.ok) {
-    if (r.status >= 500) noterReseau(false, "serveur");
+    if (panne(r, corps)) noterReseau(false, "serveur");
     let erreur = (corps && (corps.erreur || corps.message)) || "";
     // Une adresse que ce serveur ne connaît pas encore (module pas encore branché) : le dire simplement.
     if (r.status === 404 && (!erreur || /^adresse inconnue/i.test(erreur))) erreur = "Pas encore disponible sur ce serveur.";
@@ -98,15 +104,16 @@ export async function poster(nom, corps, params) {
     noterReseau(false, "reseau");
     return { ok: false, status: 0, reseau: true, erreur: "Pas de connexion : rien n'est parti." };
   }
-  if (r.status < 500) noterReseau(true); else noterReseau(false, "serveur");
   const donnees = await corpsJson(r);
+  const enPanne = panne(r, donnees);
+  if (enPanne) noterReseau(false, "serveur"); else noterReseau(true);
   const message = (donnees && (donnees.erreur || donnees.message)) || "";
   if (r.status === 401 || (r.status === 403 && RE_SESSION.test(message))) {
     sessionTerminee(message);
     return { ok: false, status: r.status, erreur: message || "Session terminée.", donnees };
   }
   if (!r.ok) {
-    return { ok: false, status: r.status, erreur: message || (r.status >= 500 ? "Le serveur ne répond pas : réessaie dans un instant." : "Refusé."), donnees, reseau: r.status >= 500 };
+    return { ok: false, status: r.status, erreur: message || (r.status >= 500 ? "Le serveur ne répond pas : réessaie dans un instant." : "Refusé."), donnees, reseau: enPanne };
   }
   const ok = !donnees || donnees.ok !== false;
   return { ok, status: r.status, donnees: donnees || {}, erreur: ok ? "" : message || "Refusé." };
