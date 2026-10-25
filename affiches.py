@@ -54,6 +54,9 @@ import registre
 import tableau
 
 DEPART = Path(__file__).resolve().parent / "donnees_jeu" / "rell_catalogue.json"
+#  Le bilan du dernier chargement du catalogue de départ (affiché dans /stats, clé « catalogue_depart ») : une entrée
+#  écartée au démarrage se voit sans lire le journal (25/10 : 144 éléments écartés pour un chemin d'icône mal formé).
+DERNIER_DEPART: dict = {}
 STATUTS_ELEMENT = ("confirme", "a_verifier")
 FORMAT_CLE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 FORMAT_AFFICHE = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -353,9 +356,23 @@ def _sortie_type(t: dict) -> dict:
             "modifie": bool(t["modifie"])}
 
 
+_PRESENTES: dict = {}  # icône du site (s/…) → le fichier existe dans site/ (lu une fois : site/ ne change qu'au déploiement)
+
+
+def _icone_servie(icone: str) -> str:
+    """Une icône du site (`s/…`) absente de `site/` part vide : la page montre aussitôt la pastille gravée, sans
+    requête perdue (404). Le chemin a passé FORMAT_ICONE (segments [a-z0-9_-]) : il ne sort jamais de site/."""
+    if not icone or not icone.startswith("s/"):
+        return icone or ""
+    ok = _PRESENTES.get(icone)
+    if ok is None:
+        ok = _PRESENTES[icone] = (tableau.SITE / icone[2:]).is_file()
+    return icone if ok else ""
+
+
 def _sortie_element(e: dict) -> dict:
     return {"type": e["type"], "cle": e["cle"], "nom": e["nom"], "nom_en": e["nom_en"], "description": e["description"],
-            "categorie": e["categorie"], "rarete": e["rarete"], "icone": e["icone"], "statut": e["statut"],
+            "categorie": e["categorie"], "rarete": e["rarete"], "icone": _icone_servie(e["icone"]), "statut": e["statut"],
             "source": e["source"], "ordre": int(e["ordre"]), "actif": bool(e["actif"]),
             "nouveau_movie3": bool(e["nouveau_movie3"]), "version": int(e["version"]),
             "maj_le": int(e["maj_le"] or 0) or None, "modifie": bool(e["modifie"])}
@@ -449,6 +466,10 @@ async def charger_depart(chemin=None) -> dict:
                     bilan["mis_a_jour"] += 1
             await db.commit()
         _oublier_catalogue()
+    DERNIER_DEPART.clear()
+    DERNIER_DEPART.update(bilan, quand=int(time.time()))
+    if bilan["refuses"]:
+        _log("[AFFICHES][E2] catalogue de départ : entrées écartées")
     if any(bilan[k] for k in ("types", "elements", "mis_a_jour", "refuses")):
         _log(f"[AFFICHES] catalogue de départ : {bilan['types']} type(s), {bilan['elements']} élément(s) ajouté(s),"
              f" {bilan['mis_a_jour']} suivi(s), {bilan['gardes']} gardé(s) (modifiés sur le site), {bilan['refuses']} écarté(s)")

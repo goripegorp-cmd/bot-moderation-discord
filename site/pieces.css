@@ -1,0 +1,236 @@
+/* La Capitainerie — pièces : l'affiche WANTED, la fiche d'une personne, la conversation, le journal par jour,
+   les votes, la file d'envoi, les conflits, l'adieu. (Les ateliers ont leur suite plus bas.) */
+
+/* ─── Petits morceaux de texte ─────────────────────────────────────── */
+.titre-carte { font: 700 18px/1.3 var(--police-texte); margin: 10px 0 4px; overflow-wrap: anywhere; }
+.compte-pied { margin-top: 8px; font: 500 14px/1.2 var(--police-sc); color: var(--encre-2); }
+.gros-chiffre { flex: none; display: grid; justify-items: end; line-height: 1; }
+.gros-chiffre b { font: 700 28px/1 var(--police-chiffres); }
+.gros-chiffre span { font: 500 12.5px/1.3 var(--police-sc); color: var(--encre-2); }
+.meta { font-size: 14px; color: var(--encre-2); overflow-wrap: anywhere; }
+.feuillet .qui + .pastilles, .feuillet .qui + .entrees, .feuillet .pastilles + .entrees, .feuillet .titre-carte + .votes { margin-top: 10px; }
+.feuillet .entrees { margin-top: 8px; }
+.feuillet > .pastilles { margin-top: 10px; }
+.feuillet > p.texte, .feuillet > .texte { margin-top: 4px; color: var(--encre); }
+.ligne.lien { cursor: pointer; transition: border-color .15s, background-color .15s; }
+.ligne.lien:hover { border-color: var(--trait-fort); background: var(--papier-sombre); }
+.alerte-cadre { border-color: rgba(142, 42, 36, .6); }
+.sous-onglets, .onglets-fiche {
+  display: flex; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; padding: 2px 2px 6px;
+}
+.sous-onglets::-webkit-scrollbar, .onglets-fiche::-webkit-scrollbar { display: none; }
+.sous-onglets.fondu-droite, .onglets-fiche.fondu-droite { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); }
+.sous-onglets.fondu-gauche, .onglets-fiche.fondu-gauche { -webkit-mask-image: linear-gradient(90deg, transparent, #000 36px); mask-image: linear-gradient(90deg, transparent, #000 36px); }
+.sous-onglets.fondu-gauche.fondu-droite, .onglets-fiche.fondu-gauche.fondu-droite { -webkit-mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
+.champs-lus { display: grid; gap: 2px 12px; grid-template-columns: max-content minmax(0, 1fr); margin: 8px 0 0; font-size: 15px; }
+.champs-lus > div { display: contents; }
+.champs-lus dt { font: 500 14px/1.5 var(--police-sc); color: var(--encre-2); }
+.champs-lus dd { margin: 0; overflow-wrap: anywhere; }
+
+/* ─── Journal par jour ─────────────────────────────────────────────── */
+.jours { display: grid; }
+.fil { display: grid; gap: 18px; min-width: 0; }
+.jour { display: grid; gap: 4px; min-width: 0; }
+.jour-titre {
+  display: flex; align-items: center; gap: 10px;
+  font: 400 21px/1.2 var(--police-titre); color: var(--encre);
+}
+.jour-titre::after { content: ""; flex: 1 1 auto; border-bottom: 1px solid var(--trait); }
+
+/* ─── Votes (sondages, idées) ──────────────────────────────────────── */
+.votes { display: grid; gap: 8px; margin: 8px 0; }
+.vote-haut { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 15px; }
+.vote-haut span { min-width: 0; overflow-wrap: anywhere; }
+.vote-haut b { flex: none; font-weight: 700; }
+.vote-haut small { margin-left: 6px; font-weight: 400; color: var(--encre-2); }
+.vote-fond { display: block; height: 9px; margin-top: 4px; border: 1px solid var(--trait); border-radius: 1px; background: rgba(43, 29, 18, .05); overflow: hidden; }
+.vote-plein { display: block; height: 100%; width: var(--pc, 0%); background: repeating-linear-gradient(-45deg, var(--encre-3) 0 2px, var(--encre-2) 2px 4px); }
+.vote.tete .vote-plein { background: repeating-linear-gradient(-45deg, #4f7d48 0 2px, var(--vert) 2px 4px); }
+.vote.tete .vote-haut span { font-weight: 700; }
+
+/* ─── Questionnaires lus (questions / réponses) ────────────────────── */
+.reponses { display: grid; gap: 8px; margin: 0; }
+.reponse { padding: 9px 12px; border-left: 3px solid var(--laiton); background: rgba(248, 240, 221, .7); border-radius: 0 3px 3px 0; min-width: 0; }
+.reponse dt { font: 500 14.5px/1.3 var(--police-sc); color: var(--encre-2); overflow-wrap: anywhere; }
+.reponse dd { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ─── La fiche d'une personne ──────────────────────────────────────── */
+.fiche-entete { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.fiche-ident { display: grid; gap: 6px; min-width: 0; }
+.fiche-nom { font: 400 clamp(26px, 1.2vw + 20px, 34px)/1.1 var(--police-titre); }
+.mini-tuiles { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.mini-tuile {
+  display: grid; justify-items: center; gap: 2px; min-width: 0; padding: 10px 6px;
+  border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--papier); color: var(--encre);
+}
+.mini-tuile:hover { border-color: var(--trait-fort); background: var(--papier-sombre); }
+.mini-tuile b { font: 700 25px/1.1 var(--police-chiffres); }
+.mini-tuile span { font: 500 13.5px/1.2 var(--police-sc); color: var(--encre-2); text-align: center; }
+@media (max-width: 480px) {
+  .mini-tuiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fiche-entete { gap: 12px; }
+  .fiche-entete .avatar.tg { width: 68px; height: 68px; font-size: 27px; }
+}
+.infos { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); }
+.info { min-width: 0; padding: 10px 12px; border: 1px solid var(--trait); border-radius: var(--rayon); background: rgba(248, 240, 221, .6); }
+.info.large { grid-column: 1 / -1; }
+.info .k { font: 500 13.5px/1.3 var(--police-sc); color: var(--encre-2); }
+.info .v { font-weight: 600; overflow-wrap: anywhere; }
+.info .pastilles { margin-top: 6px; }
+
+/* ─── La conversation d'un ticket ──────────────────────────────────── */
+.conv-liste { display: grid; gap: 14px; min-width: 0; }
+.conv-liste.enligne { padding: 4px 0; }
+.conv-bloc { display: grid; gap: 10px; min-width: 0; margin-top: 6px; padding-top: 10px; border-top: 1px dotted var(--trait-fort); }
+.conv-msg { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 10px; min-width: 0; }
+.conv-av {
+  width: 38px; height: 38px; border-radius: 50%; object-fit: cover; display: grid; place-items: center;
+  background: var(--parchemin-3); font: 400 17px/1 var(--police-titre); box-shadow: 0 0 0 1.5px var(--laiton);
+}
+.conv-corps { min-width: 0; }
+.conv-haut { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.conv-haut b { overflow-wrap: anywhere; }
+.conv-haut .quand { font-size: 13.5px; color: var(--encre-2); font-variant-numeric: lining-nums tabular-nums; }
+.conv-bot { font: 700 11.5px/1.4 var(--police-sc); letter-spacing: .06em; padding: 0 6px; border: 1px solid var(--mer); color: var(--mer); border-radius: 2px; }
+.conv-texte { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+.conv-embed {
+  display: grid; gap: 4px; margin-top: 6px; padding: 8px 12px; min-width: 0;
+  border-left: 3px solid var(--mer); border-radius: 0 3px 3px 0; background: rgba(248, 240, 221, .75);
+  font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.conv-champ span { display: block; font: 500 13.5px/1.3 var(--police-sc); color: var(--encre-2); }
+.conv-medias { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.conv-medias img { max-width: min(320px, 100%); max-height: 260px; object-fit: contain; border: 1px solid var(--trait); border-radius: 3px; background: var(--papier); }
+.conv-suivi { display: grid; gap: 6px; padding: 12px 14px; border: 3px double var(--trait-fort); background: rgba(248, 240, 221, .6); font-size: 15px; }
+.conv-suivi-titre { font: 400 19px/1.2 var(--police-titre); }
+.conv-etape { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.conv-etape .ic { color: var(--encre-2); }
+.conv-etape .quand { color: var(--encre-2); font-size: 14px; }
+.conv-etape .meta { flex-basis: 100%; padding-left: 22px; }
+
+/* ─── File d'envoi, conflits ───────────────────────────────────────── */
+.file-liste { display: grid; gap: 10px; }
+.file-op { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--papier); }
+.file-op-tete { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; min-width: 0; }
+.file-op-tete b { min-width: 0; overflow-wrap: anywhere; }
+.conflit-liste { display: grid; gap: 12px; }
+.conflit-champ { margin: 0; padding: 10px 14px 12px; border: 1px solid var(--trait-fort); border-radius: var(--rayon); background: var(--papier); min-width: 0; }
+.conflit-champ legend { padding: 0 6px; font: 500 15px/1.2 var(--police-sc); color: var(--encre-2); }
+.conflit-choix { display: flex; width: 100%; }
+.conflit-valeur { display: block; margin-top: 2px; font-size: 14.5px; color: var(--encre-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9em; overflow: auto; }
+
+/* ─── L'adieu (déconnexion) ────────────────────────────────────────── */
+.adieu { display: grid; justify-items: center; gap: 12px; padding: 70px 10px; text-align: center; }
+.adieu h1 { font: 400 var(--t-titre)/1.1 var(--police-titre); }
+.adieu p { max-width: 52ch; color: var(--encre-2); }
+
+/* ─── Pastille gravée (icône officielle absente) ───────────────────────
+   L'initiale en Pirata One, gravée dans un disque de parchemin cerclé de la teinte du type ; sur les grandes
+   pastilles, l'icône maison du type en petit. La lettre suit la taille du disque (unités du conteneur). */
+.monogramme {
+  position: relative; display: inline-grid; place-items: center; flex: none;
+  width: 28px; height: 28px; border-radius: 50%;
+  container-type: size;
+  border: 1.5px solid var(--encre);
+  background: radial-gradient(circle at 34% 28%, #fbf4e0 0, var(--parchemin) 55%, #d6c094 100%);
+  box-shadow: inset 0 0 0 2px rgba(248, 240, 221, .92), inset 0 0 0 3.5px var(--teinte, var(--laiton)), inset 0 3px 5px rgba(43, 29, 18, .26);
+  color: var(--encre); font: 400 13px/1 var(--police-titre);
+}
+.monogramme-lettre {
+  font: 400 58cqh/1 var(--police-titre); color: var(--encre); translate: 0 4%;
+  text-shadow: 0 1px 0 rgba(255, 250, 235, .75), 0 -1px 0 rgba(43, 29, 18, .22);
+}
+.monogramme .monogramme-seul { width: 54%; height: 54%; color: var(--encre); --ton2: var(--teinte, var(--laiton)); }
+.monogramme .monogramme-type { display: none; }
+.element-icone.monogramme:not(.petit) .monogramme-type {
+  display: block; position: absolute; right: -4px; bottom: -4px; width: 40%; height: 40%; padding: 2px;
+  border-radius: 50%; border: 1px solid var(--encre); background: var(--parchemin); color: var(--encre); --ton2: var(--teinte, var(--laiton));
+}
+.image-absente {
+  display: inline-grid; place-items: center; min-width: 24px; min-height: 24px; max-width: 100%;
+  border-radius: 4px; background: rgba(110, 75, 35, .12); color: var(--encre-3); --ton2: var(--encre-3);
+}
+.image-absente .ic { width: 55%; height: 55%; max-width: 48px; max-height: 48px; min-width: 14px; min-height: 14px; }
+.logos-rell { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.logo-rell { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; color: var(--encre-2); }
+.logo-rell-img { width: 34px; height: 34px; border-radius: 8px; object-fit: cover; flex: none; box-shadow: 0 0 0 1px var(--trait-fort); }
+.logo-rell .monogramme.logo-rell-img { border-radius: 50%; }
+
+/* ═══ L'AFFICHE « WANTED » ═══════════════════════════════════════════
+   Les calques de l'illustrateur (ornements/affiche.json, viewBox 600 × 840) : le papier aux bords déchirés
+   transparents, le portrait, le cadre gravé (multiplié), puis les textes dans leurs zones. Tailles en cqw. */
+.affiche {
+  container-type: inline-size;
+  position: relative; display: block; width: 100%; min-width: 0;
+  margin: 0; padding: 0; border: 0; background: none; color: var(--encre); text-align: center; font: inherit;
+  transform: rotate(var(--incl, 0deg));
+  filter: drop-shadow(0 2px 1px rgba(43, 29, 18, .25)) drop-shadow(0 12px 14px rgba(29, 18, 9, .45));
+  transition: transform .25s var(--ease);
+}
+button.affiche { cursor: pointer; }
+button.affiche:hover, button.affiche:focus-visible { transform: rotate(0deg) translateY(-3px); }
+button.affiche:focus-visible { outline: 3px solid var(--encre); outline-offset: 4px; }
+.affiche-papier {
+  position: relative; overflow: hidden; aspect-ratio: 5 / 7; isolation: isolate; /* la fusion du cadre reste dans l'affiche */
+  background: url(textures/papier_affiche.webp) center / 100% 100% no-repeat;
+}
+.affiche-portrait { position: absolute; left: 20%; top: 24.524%; width: 60%; height: 38.571%; overflow: hidden; }
+.affiche-photo { display: block; width: 100%; height: 100%; object-fit: cover; filter: sepia(.35) contrast(1.06) saturate(.8); }
+.affiche-photo.vide { display: grid; place-items: center; background: rgba(110, 75, 35, .16); color: var(--encre-3); }
+.affiche-photo.vide .ic { width: 38%; height: 38%; }
+.affiche-cadre {
+  position: absolute; inset: 0; pointer-events: none;
+  background: url(ornements/affiche.svg) center / 100% 100% no-repeat;
+  mix-blend-mode: multiply;
+}
+.affiche-clou {
+  position: absolute; top: 1.2%; left: 50%; width: 5.5cqw; height: 5.5cqw; margin-left: -2.75cqw; z-index: 2;
+  background: url(ornements/clou.svg) center / contain no-repeat;
+}
+.affiche-grade, .affiche-surnom, .affiche-nom, .affiche-prime, .affiche-insignes, .affiche-creer {
+  position: absolute; margin: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--encre);
+}
+.affiche-grade { left: 38.667%; top: 62.738%; width: 22.667%; height: 2.857%; font: 700 3cqw/1 var(--police-sc); letter-spacing: .03em; }
+.affiche-surnom { left: 13.333%; top: 66.905%; width: 73.333%; height: 3.571%; font: italic 400 4.2cqw/1 var(--police-texte); color: var(--encre-2); }
+.affiche-nom { left: 9.333%; top: 70.476%; width: 81.333%; height: 7.143%; font: 400 7.8cqw/1 var(--police-affiche); text-transform: uppercase; letter-spacing: .01em; }
+.affiche-nom.moyen { font-size: 6.6cqw; }
+.affiche-nom.long { font-size: 5.4cqw; }
+.affiche-nom.tres-long { font-size: 4.2cqw; }
+.affiche-grade, .affiche-surnom, .affiche-nom { display: block; text-align: center; }
+.affiche-grade { line-height: 2.857cqw; padding-top: .45cqw; }
+.affiche-surnom { line-height: 5cqw; }
+.affiche-nom { line-height: 10cqw; }
+.affiche-prime { left: 15%; top: 79.524%; width: 70%; height: 6.429%; font: 400 7.2cqw/1 var(--police-affiche); }
+.affiche-prime .prime { display: inline-flex; align-items: center; gap: .16em; }
+.symbole-prime { display: inline-block; flex: none; width: .52em; height: .8em; background: url(ornements/symbole-prime.svg) center / contain no-repeat; }
+.affiche-insignes { left: 20%; top: 86.905%; width: 60%; height: 4.762%; gap: 1.6cqw; padding: 0; list-style: none; }
+.insigne { display: grid; place-items: center; flex: none; }
+.insigne-img { width: 6cqw; height: 6cqw; object-fit: contain; filter: sepia(.2) contrast(1.05); }
+.insigne .monogramme.insigne-img { width: 6cqw; height: 6cqw; font-size: 2.6cqw; border-width: .3cqw; box-shadow: inset 0 0 0 .35cqw var(--teinte, var(--laiton)); }
+.insigne.inconnu .insigne-img { opacity: .5; }
+.affiche-tampon {
+  position: absolute; top: 40%; left: 50%; z-index: 3;
+  transform: translateX(-50%) rotate(-14deg);
+  padding: .6cqw 3cqw; border: .8cqw solid var(--cire); border-radius: 1cqw;
+  color: var(--cire); font: 400 6.6cqw/1.1 var(--police-affiche); text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+  background: rgba(239, 226, 196, .3); opacity: .9;
+  -webkit-mask-image: url(textures/grain_tampon.webp); mask-image: url(textures/grain_tampon.webp); -webkit-mask-size: 70cqw auto; mask-size: 70cqw auto;
+}
+.affiche-tampon.corbeille { top: 52%; border-color: var(--encre-2); color: var(--encre-2); }
+.affiche-attente {
+  position: absolute; left: 5%; right: 5%; bottom: 3.5%; z-index: 4; padding: 1.2cqw 2cqw; border-radius: .6cqw;
+  background: rgba(43, 29, 18, .86); color: var(--clair); font: 500 3.6cqw/1.2 var(--police-sc); letter-spacing: .04em;
+}
+.affiche.retiree .affiche-papier { filter: grayscale(.55) brightness(.96); }
+.affiche.vierge { filter: drop-shadow(0 2px 1px rgba(43, 29, 18, .18)); }
+.affiche.vierge .affiche-papier { opacity: .78; }
+.affiche.vierge .affiche-photo { filter: grayscale(.85) sepia(.3) opacity(.55); }
+.affiche.vierge .affiche-portrait { outline: .5cqw dashed var(--encre-3); outline-offset: -2cqw; }
+.affiche-creer { left: 15%; top: 79.524%; width: 70%; height: 6.429%; gap: 1.6cqw; font: 600 5cqw/1 var(--police-sc); color: var(--cire); }
+.affiche-creer .ic { width: 5.5cqw; height: 5.5cqw; }
+@media (prefers-reduced-motion: reduce) { .affiche, button.affiche:hover, button.affiche:focus-visible { transform: none; } }
+
+/* La prime hors de l'affiche (tuiles, détails) : le ฿ dessiné, à la taille du texte. */
+.prime { display: inline-flex; align-items: center; gap: .14em; white-space: nowrap; font-variant-numeric: lining-nums tabular-nums; }
