@@ -53,6 +53,14 @@ from __future__ import annotations
 import ast
 import sys
 
+#  25/10/2026 : lancé par un test (sous-processus) sur la console Windows (cp1252), le « ⚠️ » d'un
+#  avertissement faisait planter l'outil — UTF-8 partout, comme verif_boutons_persistants.py.
+for _flux in (sys.stdout, sys.stderr):
+    try:
+        _flux.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass          # flux déjà redirigé : sans conséquence
+
 
 def _est_tasks_loop(deco) -> bool:
     """`@tasks.loop(...)` ou `@tasks.loop` — avec ou sans appel."""
