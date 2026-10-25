@@ -153,7 +153,7 @@
 .affiche-details { align-content: start; }
 .insignes-liste { display: grid; gap: 6px; }
 .insignes-liste li { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 8px; border-bottom: 1px dotted var(--trait-fort); }
-.insignes-liste li > span { display: grid; min-width: 0; flex: 1 1 auto; }
+.insignes-liste li > span:not(.monogramme) { display: grid; min-width: 0; flex: 1 1 auto; }
 .insignes-liste small { font: 500 13px/1.2 var(--police-sc); color: var(--encre-2); }
 .insignes-liste li.a-revoir { background: rgba(142, 42, 36, .05); }
 .insigne-liste-img { width: 34px; height: 34px; object-fit: contain; flex: none; }

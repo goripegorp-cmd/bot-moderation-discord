@@ -175,6 +175,18 @@ const CONTROLE = `(() => {
       if (el && !el.closest("script, style, noscript, template") && el.getClientRects().length) res.suspects.push(decrire(el).slice(0, 90) + " « " + t.slice(0, 40) + " »");
     }
   }
+  // Une pastille ronde (pastille gravée, avatar, rond à 50 %) étirée en ovale : une règle de mise en page l'a
+  // tirée (25/10 : « li > span { flex: 1 } » étirait la pastille d'une race sur toute la ligne).
+  res.deformes = [];
+  for (const el of zone.querySelectorAll("*")) {
+    if (el.closest("svg")) continue;
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.visibility === "hidden") continue;
+    if (!el.matches(".monogramme") && cs.borderTopLeftRadius !== "50%") continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 6 || r.height < 6) continue;
+    if (Math.abs(r.width - r.height) > 2) res.deformes.push({ el: decrire(el).slice(0, 90), l: Math.round(r.width), h: Math.round(r.height) });
+  }
   const diag = window.__capitainerie || {};
   res.violations = diag.violations || [];
   res.icones = [...(diag.icones || [])];
@@ -239,6 +251,7 @@ async function controlerScene(o, scene, [l, hh]) {
   for (const x of res.textes.slice(0, 6)) fautes.push(`texte qui déborde (${x.contenu} > ${x.boite}) : ${x.el}`);
   for (const x of res.petits.slice(0, 8)) fautes.push(`cible tactile trop petite (${x.l}×${x.h}) : ${x.el}`);
   for (const x of res.images.slice(0, 4)) fautes.push(`image cassée : ${x}`);
+  for (const x of (res.deformes || []).slice(0, 4)) fautes.push(`rond étiré en ovale (${x.l}×${x.h}) : ${x.el}`);
   for (const x of (res.suspects || []).slice(0, 4)) fautes.push(`valeur absente affichée : ${x}`);
   for (const x of res.violations.slice(0, 4)) fautes.push(`violation CSP : ${x.directive} (${x.source}:${x.ligne})`);
   for (const x of [...new Set(erreursCourantes)].slice(0, 6)) fautes.push(x);
