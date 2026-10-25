@@ -186,6 +186,10 @@ load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
 DB_PATH = '/data/bot.db' if os.path.exists('/data') else 'bot.db'
 intents = discord.Intents.all()
+#  25/10/2026 : une vue temporaire qui expire ne retire plus du registre global les boutons persistants
+#  (discord.py 2.7.1 le faisait : tous les boutons de ce type devenaient muets jusqu'au redémarrage).
+import persistants
+persistants.garder()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # ═══════════════════════════════════════════════════════════════════════════════
