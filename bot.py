@@ -121,6 +121,7 @@ import websub_youtube  # YouTube prévient le bot dès qu'une vidéo sort
 import vigilance  # un membre qui cumule les évènements graves : alerte dans « 📋logs »
 import tableau  # tableau de bord web : candidatures, tickets par type, clan
 import affiches  # le site, Capitainerie : catalogue RELL Seas, affiches, rôles des métiers
+import metiers  # les rôles de métier du clan : choisis dans le guide, créés au besoin, retirés en quittant le clan
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
@@ -6311,8 +6312,18 @@ async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif:
             return False, "Discord a refusé de donner le rôle."
     raison = "Accepté" if accepte else ("Refusé" + (f" : {motif[:150]}" if motif else ""))
     tk = dict(tk, decision="acceptes" if accepte else "refuses")
-    _fermer_en_fond(_fermer_ticket(g, ch, tk, auteur, raison,
-                                   public="Candidature acceptée" if accepte else "Candidature refusée"))
+    public = "Candidature acceptée" if accepte else "Candidature refusée"
+    if accepte:
+        #  25/10/2026 (rôles des métiers) : AVANT la fermeture, une carte dans le ticket dit au nouveau membre de
+        #  choisir son métier dans le guide du clan ; le lien suit dans le MP de fermeture (le ticket part en 5 s).
+        try:
+            guide = await metiers.inviter_au_choix(g, ch, candidat)
+        except Exception as ex:
+            guide = None
+            _logerr("recrutement.metier", ex, guild_id=g.id)
+        if guide:
+            public += f" · choisis ton métier dans le guide du clan (pick your job) : {guide}"
+    _fermer_en_fond(_fermer_ticket(g, ch, tk, auteur, raison, public=public))
     await _journal_rellseas(g, f"**Candidature {'acceptée' if accepte else 'refusée'}** · <@{tk['user']}> "
                                f"par {auteur.mention}" + (f" — {motif[:150]}" if motif and not accepte else ""),
                             membre_id=int(tk['user']), auteur_id=auteur.id)
@@ -15532,6 +15543,7 @@ _SUPERVISED_LOOP_NAMES = [
     "salon_logs_task",
     "websub_task",
     "amnistie_task",
+    "metiers_task",  # 25/10/2026 : les rôles du clan remis d'accord avec le clan, toutes les 30 minutes
     #  25/10/2026 : le nettoyage quotidien du site (règles de la rubrique « Nettoyage »).
     "nettoyage_site_task",
     "entraide_task",
@@ -15771,6 +15783,56 @@ async def _task_supervisor_wait():
 # reconnect=True (défaut de @tasks.loop), add_exception_type(Exception) fait que TOUTE
 # exception non gérée le fait DORMIR puis RÉESSAYER au lieu de s'arrêter à vie.
 task_supervisor.add_exception_type(Exception)
+
+
+# ═══ RÔLES DES MÉTIERS DU CLAN (25/10/2026) — voir metiers.py ═══════════════════════════════════════════════════════
+async def _membres_sanctionnes(g) -> set:
+    """Les membres dont une sanction a retiré et GARDÉ les rôles — radiation (/off), isolement (quarantaine),
+    restriction (/mod direction) : leurs rôles du clan ne bougent pas, la levée les rend (`_lever_radiation`,
+    `_rendre_roles_isolement`, `/mod undirection`). La fiche en base OU le rôle de la sanction suffit."""
+    ids = set()
+    async with get_db() as db:
+        for table in ("radiated_members", "isolements", "restricted_members"):
+            try:
+                async with db.execute(f"SELECT user_id FROM {table} WHERE guild_id=?", (g.id,)) as cur:
+                    ids |= {int(r[0]) for r in await cur.fetchall()}
+            except aiosqlite.OperationalError as ex:
+                if "no such table" not in str(ex):   # table jamais créée : personne n'a eu cette sanction ici
+                    raise
+    for r in getattr(g, "roles", []) or []:
+        nom = r.name or ""
+        if nom in (_RADIE_ROLE_NAME, "🔒 Restricted") or nom.lower() in _QUARANTINE_ROLE_NAMES:
+            ids |= {m.id for m in r.members}
+    return ids
+
+
+async def _metiers_membre(before, after):
+    """Le rôle du clan perdu ou rendu : les rôles du clan suivent (metiers.py)."""
+    try:
+        await metiers.sur_maj_membre(before, after)
+    except Exception as ex:
+        _logerr("metiers.membre", ex, guild_id=getattr(getattr(after, "guild", None), "id", 0))
+
+
+bot.add_listener(_metiers_membre, "on_member_update")
+
+
+@tasks.loop(minutes=30)
+async def metiers_task():
+    """Toutes les 30 minutes, les rôles du clan remis d'accord avec le clan : un ancien membre ne garde aucun rôle du
+    clan, un membre du clan porte ceux de ses métiers — rattrape ce qu'un redémarrage a manqué. Une sanction en cours
+    n'est jamais touchée."""
+    for g in list(bot.guilds):
+        try:
+            await metiers.reconcilier(g)
+        except Exception as ex:  # un serveur en échec n'arrête pas les autres ; réessai au tour suivant
+            _logerr("metiers.reconciliation", ex, guild_id=getattr(g, 'id', 0))
+
+
+@metiers_task.before_loop
+async def _metiers_attente():
+    await bot.wait_until_ready()
+    await asyncio.sleep(300)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -21736,6 +21798,16 @@ async def _activite_boot():
     with _Etape("liens_jeux"):
         liens_jeux.setup(cfg=cfg, db_set=db_set, autorise=_cadeaux_autorise, journal=_liens_journal, jeux=zones.JEUX,
                          log=print)
+    with _Etape("metiers"):
+        #  25/10/2026 : les rôles de métier du clan — le choix dans le guide du clan, les rôles créés au besoin et retirés
+        #  en quittant le clan (rien pendant une sanction), les réglages du site (Capitainerie → Rôles & métiers). Après
+        #  les étapes « affiches » et « zones » : leur `setup` remet ces deux branchements à zéro.
+        metiers.setup(get_db=get_db, cfg=cfg, db_set=db_set,
+                      role_clan=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
+                      sanctionnes=_membres_sanctionnes, epargnes=_a_la_tete,
+                      journal=lambda g, type_, texte, **kw: _au_journal(g, "Clan", type_, texte, **kw),
+                      guide=zones.assurer_guide_clan, log=print)
+        zones.brancher_metiers(metiers.section_guide)
 
     with _Etape("activite"):
         await activite_module.init_db()
@@ -21849,6 +21921,7 @@ async def on_ready():
         bot.add_dynamic_items(evenements.BoutonReponse, evenements.BoutonVu)
         bot.add_dynamic_items(vocaux.ChoixBut)
         bot.add_dynamic_items(liens_jeux.BoutonLiens)
+        bot.add_dynamic_items(metiers.ChoixMetier)  # 25/10/2026 : « Choisis ton métier » du guide du clan
         bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")

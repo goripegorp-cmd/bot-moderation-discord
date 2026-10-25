@@ -132,6 +132,13 @@ def _faux():
             self._roles[r.id] = r
             return r
 
+        async def edit_role_positions(self, positions, reason=None):
+            """Le rangement des rôles (un rôle de métier se pose juste sous le rôle du clan)."""
+            for objet, position in positions.items():
+                if int(objet.id) in self._roles:
+                    self._roles[int(objet.id)].position = position
+            return list(self._roles.values())
+
         def membre(self, uid, nom, *roles, **kw):
             m = Membre(uid, nom, *roles, **kw)
             m.guild = self
@@ -331,6 +338,13 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     depart = affiches.DEPART if affiches.DEPART.is_file() else CATALOGUE_EXEMPLE
     await affiches.charger_depart(depart)
     tableau.monter(affiches)
+    #  Les rôles de métier du clan (Capitainerie → Rôles & métiers), comme l'étape « metiers » du bot.
+    import metiers
+
+    async def aucune_sanction(_g):
+        return set()
+    metiers.setup(get_db=get_db, cfg=cfg, db_set=db_set, role_clan=lambda _g, _c: clan_r, sanctionnes=aucune_sanction,
+                  journal=journal, epargnes=a_la_tete, log=print)
     try:
         import evenements  # le module des événements du clan : branché s'il est là
     except ModuleNotFoundError:
@@ -573,9 +587,12 @@ async def _affiches_demo(g, X) -> None:
             im.save(dossier / f"{rid}.webp", "WEBP", quality=85)
     except Exception as ex:  # outil local : sans Pillow, les affiches n'ont pas de portrait
         print(f"[SITE LOCAL] portraits de démonstration non dessinés : {type(ex).__name__} {ex}")
-    metier = g.role("Navigateur", 6, couleur=0x1F4E5A)
-    await affiches._route_role(g, chef, {}, {"type": "metier", "cle": cle("metier", "navigation", "navigateur"), "role_id": str(metier.id),
-                                             "auto": True})
+    #  Un rôle de métier lié à la main — sauf si l'attribution automatique (metiers.py) l'a déjà créé avec les affiches.
+    cle_navigation = cle("metier", "navigation", "navigateur")
+    if cle_navigation and not any(x["type"] == "metier" and x["cle"] == cle_navigation for x in await affiches._liens(g.id)):
+        metier = g.role("Navigateur", 6, couleur=0x1F4E5A)
+        await affiches._route_role(g, chef, {}, {"type": "metier", "cle": cle_navigation, "role_id": str(metier.id),
+                                                 "auto": True})
 
 
 def main() -> int:
