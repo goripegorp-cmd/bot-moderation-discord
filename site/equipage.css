@@ -3,6 +3,8 @@
 
 /* ─── La planche : « La Capitainerie » (fondateur et direction) ─────── */
 .vers-capitainerie { min-height: 40px; padding: 6px 13px; }
+@media (pointer: coarse) { .vers-capitainerie { min-height: 44px; } }
+.titre-rubrique.titre-cache { display: none; } /* un bandeau ouvre l'accueil : il en est le titre (h1) */
 @media (max-width: 719px) {
   .vers-capitainerie { width: 44px; min-height: 44px; padding: 0; }
   .vers-capitainerie > span { display: none; }

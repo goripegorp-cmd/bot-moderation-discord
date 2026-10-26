@@ -98,6 +98,8 @@ const majuscule = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 /** « Capitainerie › Affiches » : le libellé d'une page (catégorie › rubrique › sous-page connue). */
 export function libellePage(cle) {
   const [c, r, s] = String(cle || "").split("/");
+  // 26/10/2026 : le site de l'équipage (`/tableau/equipage/`, ses trois onglets) n'est pas une catégorie de ce site-ci.
+  if (c === "site-equipage") return ["Site de l'équipage", { accueil: "Accueil", equipage: "L'équipage", fiche: "Ma fiche" }[r] || ""].filter(Boolean).join(" › ");
   const cat = CATEGORIES.find((x) => x.cle === c);
   if (!cat) return c ? majuscule(c) : "Le site";
   const rub = cat.rubriques.find((x) => x.cle === r);

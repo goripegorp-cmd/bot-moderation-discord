@@ -131,6 +131,11 @@ def local(tmp_path_factory):
         yield site
     finally:
         boucle.run_until_complete(client.close())
+        pendantes = [t for t in asyncio.all_tasks(boucle) if not t.done()]   # la ronde du direct (S11), entre autres
+        for t in pendantes:
+            t.cancel()
+        boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
+        tableau._direct_salles.clear()
         boucle.close()
         mp.undo()
         for nom in ("site_local", "site_local_port"):
@@ -629,6 +634,67 @@ def test_S10_le_bouton_du_guide_du_clan(local, monkeypatch):
     envoi = cliquer(BARBE)
     assert envoi["ephemeral"] is True and not any(isinstance(x, discord.ui.Button) for x in envoi["view"].walk_children())
     assert "rôle du clan" in "\n".join(x.content for x in envoi["view"].walk_children() if isinstance(x, discord.ui.TextDisplay))
+
+
+def test_S11_le_direct_refuse_l_equipage_et_ses_verrous_gardent_l_accueil(local):
+    """La présence en direct (`/tableau/espace/direct`, et son repli HTTP) : une session « equipage » n'y entre JAMAIS —
+    refusée dès la porte, aucune WebSocket ouverte —, même glissée dans une prise du direct (portée relue en base). Et
+    les écritures de l'accueil respectent les verrous : un bloc ou une actualité que la direction modifie ne s'écrit pas
+    depuis un autre compte (423), puis s'écrit dès qu'il est libre."""
+    import aiohttp
+    import tableau
+    origine = {"Origin": "http://localhost:8790"}
+
+    async def socket(h):
+        try:
+            ws = await local.client.ws_connect("/tableau/espace/direct", headers=dict(h, **origine))
+        except aiohttp.WSServerHandshakeError as ex:
+            return ex.status, None
+        return 101, ws
+    st, _ws = local.faire(socket(local.kolax))
+    assert st == 403, "aucune WebSocket pour l'équipage"
+    assert local.requete("GET", "/tableau/espace/api/direct/etat", local.kolax, params={"onglet": "onglet-equipage-1"})[0] == 403
+    assert local.requete("POST", "/tableau/espace/api/direct/envoi", local.kolax,
+                         {"onglet": "onglet-equipage-1", "t": "prendre", "o": "accueil:x"}, ecrire=True)[0] == 403
+    #  Même glissée dans une prise du direct (une erreur de câblage demain), la portée relue en base la refuse.
+    emp = hashlib.sha256(local.kolax["Cookie"].split("=", 1)[1].encode()).hexdigest()
+    prise = tableau._Prise("essai1", 1, KOLAX, emp, None, time.time())
+    assert local.faire(tableau._session_direct(prise, time.time(), forcer=True)) == "acces"
+    #  Les verrous de l'accueil : la direction tient un bloc, le fondateur ne peut pas l'écrire.
+    hd, _a = local.entrer("/tableau/demo?qui=direction&vers=equipage")
+    _st, acc = local.lire("accueil", local.tete)
+    bloc = next(b for b in acc["blocs"] if b["type"] == "texte")
+
+    async def tenir_puis_ecrire():
+        st, ws = await socket(hd)
+        assert st == 101
+        await ws.send_json({"t": "bonjour", "page": "site-equipage/accueil"})
+        await ws.send_json({"t": "prendre", "o": "accueil:" + bloc["id"], "ti": "le bloc « Le code » de l'accueil"})
+        for _ in range(20):
+            m = await ws.receive_json(timeout=3)
+            if m.get("t") == "pris":
+                break
+        corps = {"id": bloc["id"], "version": bloc["version"], "contenu": dict(bloc["contenu"], texte="Écrit par-dessus ?")}
+        r = await local.client.post("/tableau/espace/api/equipage/bloc", json=corps, headers=dict(local.tete, **ORIGINE))
+        refuse = (r.status, await r.json())
+        r = await local.client.post("/tableau/espace/api/equipage/bloc/visible", json={"id": bloc["id"], "visible": False},
+                                    headers=dict(local.tete, **ORIGINE))
+        refuse_visible = r.status
+        await ws.send_json({"t": "lacher", "o": "accueil:" + bloc["id"]})
+        await asyncio.sleep(0.3)
+        await ws.close()
+        r = await local.client.post("/tableau/espace/api/equipage/bloc", json=corps, headers=dict(local.tete, **ORIGINE))
+        return refuse, refuse_visible, r.status
+    refuse, refuse_visible, apres = local.faire(tenir_puis_ecrire())
+    assert refuse[0] == 423 and "Capitaine Direction" in refuse[1]["erreur"], refuse
+    assert refuse_visible == 423
+    assert apres == 200, "libéré : l'écriture passe"
+    #  La clé de chaque écriture : `accueil:<id>`, `actualite:<id>` ; un ajout ne verrouille rien.
+    import site_equipage
+    v = {n: d["verrou"] for n, d in site_equipage.ROUTES_SITE.items()}
+    assert v["equipage/bloc"]({"id": "abcdef12"}) == "accueil:abcdef12" and v["equipage/bloc"]({"type": "texte"}) is None
+    assert v["equipage/actualite/retirer"]({"id": "abcdef12"}) == "actualite:abcdef12"
+    assert v["equipage/bloc"]({"id": "../x"}) is None and all(callable(f) for f in v.values())
 
 
 def test_S10b_rgpd_et_cablage_dans_le_bot(local):

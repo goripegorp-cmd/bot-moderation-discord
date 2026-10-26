@@ -55,8 +55,21 @@ async function demarrer() {
   monterPancartes();
   pied();
   lireRoute(true);
+  if (E.peutEditer && d.donnees.modules && d.donnees.modules.direct) chargerDirect();
   setInterval(rafraichir, RAFRAICHIR);
   document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - dernier > RAFRAICHIR / 2) rafraichir(); });
+}
+
+/** La présence en direct (« À bord ») et les verrous d'édition (site/direct.js), pour le fondateur et la direction
+ *  seulement : l'équipage, en lecture seule, ne la charge jamais (le serveur la lui refuse aussi). */
+async function chargerDirect() {
+  try {
+    const m = await import("./direct.js");
+    E.direct = m;
+    m.demarrerDirect();
+  } catch (e) {
+    console.error("[equipage] présence en direct indisponible", e);
+  }
 }
 
 // ─── En-tête : le médaillon, le nom, les outils ─────────────────────────────
@@ -107,6 +120,7 @@ function lireRoute(premiere) {
   const a = lireAncre();
   const change = premiere || a.cle !== courant;
   courant = a.cle;
+  etat.route = { cat: "site-equipage", rub: courant, sous: "" };   // ce que « À bord » dit de cette page (direct.js)
   for (const x of $("#pancartes").querySelectorAll("a")) x.setAttribute("aria-current", x.dataset.onglet === courant ? "page" : "false");
   if (change) rendre();
   if (a.affiche) {

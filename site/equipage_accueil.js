@@ -66,7 +66,9 @@ function dessiner() {
   const edition = E.peutEditer && E.modeEdition;
   const blocs = a.blocs || [];
   const premierVisible = blocs.find((b) => edition || b.visible !== false);
-  if (titreRub) titreRub.classList.toggle("sr", !!premierVisible && premierVisible.type === "bandeau");
+  //  Un bandeau en tête : il EST le titre de la page (son h1) ; l'en-tête de rubrique s'efface (pas deux titres).
+  const bandeauEnTete = !!premierVisible && premierVisible.type === "bandeau";
+  if (titreRub) titreRub.classList.toggle("titre-cache", bandeauEnTete);
   const contenu = [];
   if (E.peutEditer) contenu.push(barreEdition());
   if (!blocs.some((b) => edition || b.visible !== false)) {
@@ -75,21 +77,21 @@ function dessiner() {
   blocs.forEach((b, i) => {
     if (!edition && b.visible === false) return;   // hors édition, la direction voit l'accueil comme l'équipage
     let rendu;
-    try { rendu = rendreBloc(b, a.donnees || {}); } catch (e) {
+    try { rendu = rendreBloc(b, a.donnees || {}, bandeauEnTete && b === premierVisible); } catch (e) {
       console.error("[equipage] bloc", b.type, e);
       rendu = vide("Ce bloc n'a pas pu s'afficher", "", "attention");
     }
-    contenu.push(h("section", { classe: "bloc-eq bloc-" + b.type + (b.visible === false ? " masque" : "") + (edition ? " en-edition" : ""), "aria-label": TYPES[b.type] ? TYPES[b.type].nom : "Bloc" },
-      edition ? barreBloc(b, i, blocs.length) : null, rendu));
+    contenu.push(cadenas(h("section", { classe: "bloc-eq bloc-" + b.type + (b.visible === false ? " masque" : "") + (edition ? " en-edition" : ""), "aria-label": TYPES[b.type] ? TYPES[b.type].nom : "Bloc" },
+      edition ? barreBloc(b, i, blocs.length) : null, rendu), "accueil:" + b.id));
   });
   remplacer(zone, ...contenu);
 }
 
 // ═══ LES BLOCS ═══════════════════════════════════════════════════════════════
-function rendreBloc(b, donnees) {
+function rendreBloc(b, donnees, titrePage) {
   const c = b.contenu || {};
   switch (b.type) {
-    case "bandeau": return blocBandeau(c);
+    case "bandeau": return blocBandeau(c, titrePage);
     case "texte": return blocTexte(c);
     case "image": return blocImage(c);
     case "actualites": return blocActualites(c, donnees.actualites || {});
@@ -106,12 +108,12 @@ function tete(titre, nomIcone, compteTexte, ...droite) {
     compteTexte ? h("span", { classe: "compte" }, compteTexte) : null, droite.filter(Boolean).length ? h("div", { classe: "rangee" }, droite) : null);
 }
 
-function blocBandeau(c) {
+function blocBandeau(c, titrePage) {
   const src = srcSure(c.image);
   const img = src ? h("img", { classe: "bandeau-eq-image", src, alt: "", decoding: "async" }) : null;
   if (img) img.addEventListener("error", () => img.remove(), { once: true });
   return h("div", { classe: "bandeau-eq" + (src ? " avec-image" : "") }, img,
-    h("div", { classe: "bandeau-eq-texte" }, h("h2", { classe: "bandeau-eq-titre" }, sansEmoji(c.titre) || "L'équipage"),
+    h("div", { classe: "bandeau-eq-texte" }, h(titrePage ? "h1" : "h2", { classe: "bandeau-eq-titre" }, sansEmoji(c.titre) || "L'équipage"),
       c.sous_titre ? h("p", { classe: "bandeau-eq-sous" }, c.sous_titre) : null));
 }
 
@@ -152,7 +154,7 @@ function carteActu(a, edition) {
   const quand = a.evenement && a.evenement.quand ? (a.evenement.phase === "termine" ? "a eu lieu le " + date(a.evenement.quand) : a.evenement.phase === "annule" ? "prévu le " + date(a.evenement.quand) : "le " + date(a.evenement.quand, true))
     : depuis(a.quand);
   const ouvrir = a.affiche ? () => ouvrirAffiche(a.affiche) : () => lireActu(a);
-  return h("article", { classe: "actu" + (a.epingle ? " epinglee" : "") + " actu-" + (a.genre || "annonce") },
+  const carte = h("article", { classe: "actu" + (a.epingle ? " epinglee" : "") + " actu-" + (a.genre || "annonce") },
     visuel,
     h("div", { classe: "actu-corps" },
       h("div", { classe: "actu-tete" },
@@ -163,6 +165,7 @@ function carteActu(a, edition) {
       edition && a.genre === "direction" ? h("div", { classe: "rangee" },
         bouton("Modifier", { classe: "p", icone: "modifier", onclick: () => editerActualite(a) }),
         bouton("Retirer", { classe: "p discret danger", icone: "supprimer", onclick: () => retirerActualite(a) })) : null));
+  return edition && a.genre === "direction" ? cadenas(carte, "actualite:" + a.id) : carte;
 }
 function lireActu(a) {
   const [genre] = GENRES[a.genre] || GENRES.annonce;
@@ -319,10 +322,13 @@ async function ecrire(nom, corps, succes) {
   } else toast(r.erreur || "Refusé.", "erreur");
   return r;
 }
-const deplacer = (b, sens) => ecrire("equipage/bloc/deplacer", { id: b.id, sens });
-const basculer = (b) => ecrire("equipage/bloc/visible", { id: b.id, visible: b.visible === false }, b.visible === false ? "Bloc montré à l'équipage." : "Bloc masqué : l'équipage ne le voit plus.");
+/** Un geste rapide (monter, masquer, supprimer) : refusé, avec un avis, si quelqu'un d'autre modifie ce bloc. */
+const libre = (objet) => !E.direct || E.direct.siLibre(objet);
+const deplacer = (b, sens) => libre("accueil:" + b.id) && ecrire("equipage/bloc/deplacer", { id: b.id, sens });
+const basculer = (b) => libre("accueil:" + b.id) && ecrire("equipage/bloc/visible", { id: b.id, visible: b.visible === false }, b.visible === false ? "Bloc montré à l'équipage." : "Bloc masqué : l'équipage ne le voit plus.");
 async function supprimer(b) {
   const t = TYPES[b.type] || { nom: b.type };
+  if (!libre("accueil:" + b.id)) return;
   const ok = await confirmer({ titre: "Supprimer ce bloc ?", texte: "« " + ((b.contenu && (b.contenu.titre || b.contenu.legende)) || t.nom) + " » quitte l'accueil pour de bon. Pour le cacher seulement, masque-le.", libelleOk: "Supprimer", style: "danger" });
   if (ok) ecrire("equipage/bloc/supprimer", { id: b.id }, "Bloc supprimé.");
 }
@@ -335,15 +341,14 @@ function choisirType() {
   ajouter(p.pied, [bouton("Annuler", { classe: "discret", onclick: () => p.fermer() })]);
 }
 
-/** Le point d'appel UNIQUE des verrous d'édition (site/direct.js, équipe « Présence en direct ») : branché seulement
- *  si le serveur dit que le module est là — sinon rien (aucune dépendance, aucune requête perdue). */
-async function proteger(cle, p) {
-  if (!(E.depart && E.depart.modules && E.depart.modules.direct)) return;
-  try {
-    const m = await import("./direct.js");
-    if (typeof m.protegerEditeur === "function") m.protegerEditeur(cle, p);
-  } catch (e) { console.warn("[equipage] verrous d'édition indisponibles", e); }
+/** Le point d'appel UNIQUE des verrous d'édition (site/direct.js) : une seule personne à la fois sur un bloc ou une
+ *  actualité. Pris par quelqu'un d'autre : lecture seule, « Demander la main » ; libéré : `relire` rouvre la dernière
+ *  version. Sans le direct (l'équipage n'édite pas, ou le module manque) : rien — le serveur refuse quand même (423). */
+function proteger(p, objet, titre, relire) {
+  if (E.direct && objet) E.direct.protegerEditeur(p, objet, titre, { relire });
 }
+/** Le cadenas d'un bloc ou d'une actualité que quelqu'un d'autre modifie (mode édition). */
+const cadenas = (el, objet) => (E.direct && E.modeEdition ? E.direct.avecVerrou(el, objet) : el);
 
 /** Envoyer une image (bandeau, image, actualité) : le serveur la refait ; rend son identifiant. */
 function televerser() {
@@ -383,7 +388,14 @@ function editerBloc(b) {
   const c = JSON.parse(JSON.stringify(b.contenu || {}));
   const v = Object.assign({}, c, { image: idMedia(c.image) });
   const p = pancarte({ titre: (b.id ? "Modifier : " : "Nouveau bloc : ") + t.nom, sous: t.phrase, icone: t.icone, taille: "large" });
-  proteger("equipage-bloc:" + (b.id || "nouveau"), p);
+  if (b.id) {
+    proteger(p, "accueil:" + b.id, "le bloc « " + ((c.titre || c.legende || t.nom).slice(0, 60)) + " » de l'accueil", async () => {
+      await recharger(true);
+      const frais = ((E.accueil && E.accueil.blocs) || []).find((x) => x.id === b.id);
+      if (!frais) throw new Error("bloc retiré");
+      editerBloc(frais);
+    });
+  }
   const champs = [];
   const texteSimple = (k, lib, max, attrs, o) => { const s = saisie(Object.assign({ value: v[k] || "", maxlength: max }, attrs || {})); s.addEventListener("input", () => { v[k] = s.value; }); return champ(lib, s, o); };
   const zoneLongue = (k, lib, max, o) => { const z = zoneTexte({ rows: 6, maxlength: max }, v[k] || ""); z.addEventListener("input", () => { v[k] = z.value; }); return champ(lib, z, o); };
@@ -459,7 +471,14 @@ function choixAffiches(v) {
 function editerActualite(a) {
   const v = a ? { titre: a.titre, texte: a.texte, image: idMedia(a.image), epingle: !!a.epingle } : { titre: "", texte: "", image: "", epingle: false };
   const p = pancarte({ titre: a ? "Modifier l'actualité" : "Publier une actualité", sous: "Tout l'équipage la lit sur l'accueil.", icone: "journal", taille: "large" });
-  proteger("equipage-actualite:" + (a ? a.id : "nouvelle"), p);
+  if (a) {
+    proteger(p, "actualite:" + a.id, "l'actualité « " + sansEmoji(a.titre).slice(0, 60) + " »", async () => {
+      await recharger(true);
+      const frais = ((((E.accueil || {}).donnees || {}).actualites || {}).direction || []).find((x) => x.id === a.id);
+      if (!frais) throw new Error("actualité retirée");
+      editerActualite(frais);
+    });
+  }
   const titre = saisie({ value: v.titre, maxlength: 100, placeholder: "Grande chasse au trésor samedi soir" });
   titre.addEventListener("input", () => { v.titre = titre.value; });
   const texte = zoneTexte({ rows: 6, maxlength: 2000, placeholder: "Rendez-vous au port à 21 h…" }, v.texte);
@@ -480,6 +499,7 @@ function editerActualite(a) {
   requestAnimationFrame(() => titre.focus());
 }
 async function retirerActualite(a) {
+  if (!libre("actualite:" + a.id)) return;
   const ok = await confirmer({ titre: "Retirer cette actualité ?", texte: "« " + sansEmoji(a.titre) + " » disparaît de l'accueil pour de bon.", libelleOk: "Retirer", style: "danger" });
   if (ok) ecrire("equipage/actualite/retirer", { id: a.id }, "Actualité retirée.");
 }

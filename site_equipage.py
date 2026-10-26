@@ -946,14 +946,30 @@ async def _route_actualite_retirer(g, auteur, requete, corps):
                  "_journal": f"Site de l'équipage : actualité « {r[0]} » retirée" if r is not None else None}
 
 
+def _cle_verrou(genre: str):
+    """La clé que touche une écriture (`accueil:<id>`, `actualite:<id>`) : la présence en direct (`tableau`, `site/
+    direct.js`) refuse (423) d'écrire un bloc ou une actualité que quelqu'un d'autre est en train de modifier. Un ajout
+    (sans identifiant) ne touche rien d'existant."""
+    def objet(corps):
+        ident = corps.get("id") if isinstance(corps, dict) else None
+        return f"{genre}:{ident}" if isinstance(ident, str) and FORMAT_ID.fullmatch(ident) else None
+    objet.__name__ = f"_cle_verrou_{genre}"
+    return objet
+
+
 ROUTES_SITE = {
-    "equipage/bloc": {"methode": "POST", "fn": _route_bloc, "ecriture": True, "corps_max": 32 * 1024},
-    "equipage/bloc/visible": {"methode": "POST", "fn": _route_bloc_visible, "ecriture": True, "corps_max": 1024},
-    "equipage/bloc/deplacer": {"methode": "POST", "fn": _route_bloc_deplacer, "ecriture": True, "corps_max": 1024},
-    "equipage/bloc/supprimer": {"methode": "POST", "fn": _route_bloc_supprimer, "ecriture": True, "corps_max": 1024},
-    "equipage/actualite": {"methode": "POST", "fn": _route_actualite, "ecriture": True, "corps_max": 16 * 1024},
+    "equipage/bloc": {"methode": "POST", "fn": _route_bloc, "ecriture": True, "corps_max": 32 * 1024,
+                      "verrou": _cle_verrou("accueil")},
+    "equipage/bloc/visible": {"methode": "POST", "fn": _route_bloc_visible, "ecriture": True, "corps_max": 1024,
+                              "verrou": _cle_verrou("accueil")},
+    "equipage/bloc/deplacer": {"methode": "POST", "fn": _route_bloc_deplacer, "ecriture": True, "corps_max": 1024,
+                               "verrou": _cle_verrou("accueil")},
+    "equipage/bloc/supprimer": {"methode": "POST", "fn": _route_bloc_supprimer, "ecriture": True, "corps_max": 1024,
+                                "verrou": _cle_verrou("accueil")},
+    "equipage/actualite": {"methode": "POST", "fn": _route_actualite, "ecriture": True, "corps_max": 16 * 1024,
+                           "verrou": _cle_verrou("actualite")},
     "equipage/actualite/retirer": {"methode": "POST", "fn": _route_actualite_retirer, "ecriture": True,
-                                   "corps_max": 1024},
+                                   "corps_max": 1024, "verrou": _cle_verrou("actualite")},
 }
 
 
