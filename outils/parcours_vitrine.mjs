@@ -261,7 +261,7 @@ async function parcoursDirectionVitrine(d, v) {
 // ═══ LES ÉQUIPES ═══════════════════════════════════════════════════════════
 async function parcoursEquipes(d) {
   let chef = null, membres = [];
-  await etape(d, "Direction : créer une équipe et nommer son chef (L'Équipage › Équipage, « Par équipe », l'éditeur)", async () => {
+  await etape(d, "Direction : créer une équipe et nommer son chef (L'Équipage › Équipage, la vue « Équipes », l'éditeur)", async () => {
     if (!await ouvrir(d, BASE + "/tableau/espace/#equipage/membres", "#contenu .titre-rubrique")) return { ok: false, detail: "rubrique absente" };
     const clan = (await api(d, "/tableau/espace/donnees")).d.clan.membres;
     const equipes = (await api(d, "/tableau/espace/api/equipage/equipes")).d.equipes;
@@ -269,7 +269,7 @@ async function parcoursEquipes(d) {
     const libres = clan.filter((m) => !places.has(String(m.id))).sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
     if (libres.length < 3) return { ok: false, detail: "pas assez de membres sans équipe" };
     [chef, ...membres] = libres.slice(0, 3);
-    await cliquer(d, ".segment button", "Par équipe");
+    await cliquer(d, "#contenu .sous-onglets a", "Équipes");   // la vue « Équipes » (27/10 : un sous-onglet)
     await pause(800);
     if (!await cliquer(d, "button", "Nouvelle équipe")) return { ok: false, detail: "« Nouvelle équipe » absent" };
     await pause(600);

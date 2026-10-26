@@ -342,7 +342,7 @@ async function principal() {
       await pause(300);
       await B.capture(join(SORTIE, String(numero).padStart(2, "0") + "-B-direction-zone-fermee.png"));
       const t0 = Date.now();
-      await A.s("Page.navigate", { url: SITE + "#port/apercu" });   // la page change (même document) : la zone quitte l'écran
+      await A.s("Page.navigate", { url: SITE + "#port/journal" });   // la page change (même document) : la zone quitte l'écran
       const libre = await attendre(() => B.evaluer("!document.querySelector('.direct-consigne') && !document.querySelector('.direct-zone-lecture')"), 15000, 100);
       const delai = Date.now() - t0;
       return { ok: !!libre && delai < 5000, detail: `A (${tape}) → B : « ${ferme.slice(0, 120)} » · libre ${delai} ms après le changement de page de A` };

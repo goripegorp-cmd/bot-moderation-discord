@@ -831,10 +831,10 @@ function blocNettoyage() {
     if (!r.ok || !r.donnees) { remplacer(z, vide("Nettoyage indisponible", r.erreur || "", "hors_ligne")); return; }
     const regles = r.donnees.regles || [];
     const total = regles.reduce((n, x) => n + (x.a_retirer || 0), 0);
-    remplacer(z, h("p", { classe: "aide" }, "Combien de temps le recrutement garde ses traces. Les durées se règlent dans Le Port, Nettoyage (le même réglage partout)."),
+    remplacer(z, h("p", { classe: "aide" }, "Combien de temps le recrutement garde ses traces. Les durées se règlent dans Réglages, Nettoyage (le même réglage partout)."),
       h("ul", { classe: "lignes-c" }, regles.map((x) => ligne({ visuel: pastilleIcone("nettoyage", "#4a5560"), titre: x.nom,
         sous: x.quoi + " · gardé " + quantite(x.garde_jours, "jour(s)"), badges: [x.a_retirer ? tampon(quantite(x.a_retirer, "à retirer"), "ambre", true) : tampon("Rien à retirer", "vert", true)] }))),
-      h("div", { classe: "rangee" }, bouton("Régler les durées", { classe: "p discret", icone: "cle", onclick: () => { location.hash = "#port/nettoyage"; } }),
+      h("div", { classe: "rangee" }, bouton("Régler les durées", { classe: "p discret", icone: "cle", onclick: () => { location.hash = "#capitainerie/reglages/nettoyage"; } }),
         peutAgir() ? bouton("Nettoyer maintenant" + (total ? " · " + total : ""), { classe: "p", icone: "nettoyage", reseau: true, disabled: !total, onclick: async () => {
           const ok = await confirmer({ titre: "Nettoyer maintenant ?", texte: quantite(total, "élément(s)") + " plus vieux que leur durée sont retirés. Une entrée active de la liste noire reste toujours.", libelleOk: "Nettoyer" });
           if (!ok) return;

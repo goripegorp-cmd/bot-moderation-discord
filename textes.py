@@ -226,7 +226,43 @@ async def init_db() -> None:
                          " valeur TEXT, version INTEGER NOT NULL DEFAULT 0, maj_le INTEGER NOT NULL DEFAULT 0,"
                          " maj_par INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, cle))")
         await db.commit()
+        try:
+            repris = await _reprendre_noms_deplaces(db)
+            await db.commit()
+            if repris:
+                _log("[TEXTES] noms déplacés repris (navigation regroupée)")
+                _log(f"[TEXTES:DETAIL] {repris} nom(s) repris")
+        except Exception as ex:  # ces places gardent le nom d'origine : dit au journal, jamais bloquant pour le bot
+            _signaler("E8", "noms déplacés non repris : noms d'origine employés", "", ex)
     await charger()
+
+
+async def _reprendre_noms_deplaces(db) -> int:
+    """La navigation regroupée (27/10/2026, `NOMS_DEPLACES`) : une rubrique devenue une sous-page reprend le nom que la
+    direction lui avait donné — une fois, et seulement si la nouvelle place n'a pas déjà le sien. Un nom qui ne tient pas
+    à sa nouvelle place (trop long) n'est pas repris : celui d'origine reste, et le journal le dit."""
+    repris = 0
+    for nouvelle, ancienne in NOMS_DEPLACES:
+        d = _DECLARES.get(nouvelle)
+        if d is None:
+            continue
+        async with db.execute("SELECT guild_id, valeur, maj_le, maj_par FROM site_textes"
+                              " WHERE cle=? AND valeur IS NOT NULL", (ancienne,)) as cur:
+            anciens = await cur.fetchall()
+        for gid, valeur, maj_le, maj_par in anciens:
+            if await _ligne_en_base(db, gid, nouvelle) is not None:
+                continue
+            try:
+                v = propre(valeur, d)
+            except _Invalide as ex:
+                _signaler("E7", "nom déplacé non repris : le nom d'origine reste",
+                          f"serveur={gid} {ancienne} → {nouvelle} : {ex.message}")
+                continue
+            await db.execute("INSERT INTO site_textes (guild_id, cle, valeur, version, maj_le, maj_par)"
+                             " VALUES (?,?,?,1,?,?)",
+                             (int(gid), nouvelle, None if v == d["defaut"] else v, int(maj_le or 0), int(maj_par or 0)))
+            repris += 1
+    return repris
 
 
 def _verrou() -> asyncio.Lock:
@@ -541,18 +577,14 @@ SITE_CATEGORIES = (
     ("accueil", "Accueil", "Accueil", "Ce qui t'attend", (
         ("attente", "Ce qui t'attend", "Tout ce qui demande une action, du plus urgent au moins urgent : un bouton par ligne."),)),
     ("port", "Le Port", "Le Port", "Discord", (
-        ("apercu", "Aperçu", "Ce qui demande ton attention, en un coup d'œil."),
         ("journal", "Journal", "Tout ce qui s'est passé sur le serveur : l'important d'abord, puis jour par jour."),
         ("sanctions", "Sanctions", "Le casier de chaque membre, les modérateurs, le nettoyage du casier."),
-        ("tickets", "Tickets", "Les tickets du serveur, ouverts et fermés, avec toute leur conversation."),
+        ("tickets", "Tickets", "Tous les tickets, du serveur et du clan, ouverts et fermés, avec toute leur conversation."),
         ("repertoire", "Répertoire", "Toutes les personnes, de A à Z : chaque fiche réunit tout ce qui la concerne."),
         ("salons", "Salons & questions", "Questions, idées, sondages, entraide, annonces, et ce que chacun peut faire "
-                                         "dans chaque salon."),
-        ("nettoyage", "Nettoyage", "Ce qui est gardé, combien de temps, et le grand ménage quand tu veux."))),
+                                         "dans chaque salon."))),
     ("equipage", "L'Équipage", "Équipage", "Clan GoRP", (
-        ("membres", "Équipage", "Les membres du clan, leur présence, les rappels d'inactivité."),
-        ("fiches", "Fiches techniques", "Chaque membre et son affiche : par métier, par grade, de A à Z."),
-        ("tickets", "Tickets du clan", "Les tickets Rell Seas du clan, ouverts et fermés."),
+        ("membres", "Équipage", "Les membres du clan : leur présence, leurs fiches techniques, leurs équipes."),
         ("annonces", "Annonces & événements", "Composer pour le salon Info : événements avec minuteur et réponses, "
                                                "annonces, métiers, listing."))),
     ("capitainerie", "La Capitainerie", "Capitainerie", "Fondateur & direction", (
@@ -562,18 +594,30 @@ SITE_CATEGORIES = (
         ("catalogue", "Catalogue RELL Seas", "Tout ce qui existe dans le jeu, et seulement cela : types, éléments, "
                                              "icônes officielles."),
         ("roles", "Rôles & métiers", "Un rôle Discord par métier, donné tout seul si tu le veux."),
-        ("textes", "Textes & noms", "Chaque texte du bot et chaque nom du site, à ta façon : enregistré, il sert tout "
-                                    "de suite."))),
+        ("reglages", "Réglages", "Les textes du bot et les noms du site, ce que le site garde et combien de temps."))),
 )
-#  Les sous-onglets des rubriques (`site/discord.js`, `site/recrutement_zone.js`, `site/annonces.js` : leur clé, « - »
-#  devenu « _ ») et les onglets de la fiche d'une personne (`site/fiche.js`).
+#  Les sous-onglets et les vues des rubriques (`site/discord.js`, `site/clan.js`, `site/recrutement_zone.js`,
+#  `site/annonces.js`, `site/reglages.js` : leur clé, « - » devenu « _ ») et les onglets de la fiche d'une personne
+#  (`site/fiche.js`). 27/10/2026, la navigation regroupée : les familles de Tickets, l'onglet « Idées & sondages » (avis)
+#  et ses deux vues, les vues d'Équipage, les onglets de Réglages.
 SITE_SOUS = (
-    ("port", "salons", (("questions", "Questions"), ("idees", "Idées"), ("sondages", "Sondages"),
+    ("port", "tickets", (("tous", "Tous"), ("normaux", "Tickets normaux"), ("clan", "Clan · RELL Seas"))),
+    ("port", "salons", (("questions", "Questions"), ("avis", "Idées & sondages"), ("idees", "Idées"), ("sondages", "Sondages"),
                         ("entraide", "Entraide & trade"), ("annonces", "Annonces"), ("droits", "Droits des salons"))),
+    ("equipage", "membres", (("presence", "Présence"), ("fiches", "Fiches techniques"), ("equipes", "Équipes"))),
     ("capitainerie", "recrutement", (("candidatures", "Candidatures"), ("chefs", "Chefs d'équipe"), ("questions", "Questions"),
                                      ("reglages", "Réglages"))),
     ("equipage", "annonces", (("composer", "Composer"), ("brouillons", "Brouillons"), ("a_venir", "À venir"),
                               ("publiees", "Publiées"), ("passes", "Passés"))),
+    ("capitainerie", "reglages", (("textes", "Textes & noms"), ("nettoyage", "Nettoyage"))),
+)
+#  27/10/2026 — la navigation regroupée : une rubrique devenue une sous-page garde le nom que la direction lui avait
+#  choisi (`init_db` le reprend une fois, si la nouvelle place n'a pas déjà le sien). (nouvelle clé, ancienne clé)
+NOMS_DEPLACES = (
+    ("site.sous.capitainerie.reglages.textes", "site.rub.capitainerie.textes.titre"),
+    ("site.sous.capitainerie.reglages.nettoyage", "site.rub.port.nettoyage.titre"),
+    ("site.sous.equipage.membres.fiches", "site.rub.equipage.fiches.titre"),
+    ("site.sous.port.tickets.clan", "site.rub.equipage.tickets.titre"),
 )
 SITE_FICHE = (("chrono", "Chronologie"), ("sanctions", "Sanctions"), ("tickets", "Tickets"),
               ("candidatures", "Candidatures"), ("questions", "Questions"), ("sondages", "Sondages et idées"),
@@ -599,7 +643,7 @@ def _declarer_site() -> None:
     onglets_de = {(c, r): o for c, r, o in SITE_SOUS}
     for cat, titre_cat, _court, _sous, rubriques in SITE_CATEGORIES:
         for rub, titre, phrase in rubriques:
-            ordre += 10          # le nom, la phrase, puis les sous-onglets dans leur ordre (6 au plus)
+            ordre += 10          # le nom, la phrase, puis les sous-onglets dans leur ordre (8 au plus)
             partie = f"Les rubriques · {titre_cat}"
             declarer(f"site.rub.{cat}.{rub}.titre", titre, groupe="site", partie=partie, ordre=ordre, titre=titre,
                      aide="Le nom de la rubrique : sur son onglet et en titre de la page.", max_=40, lignes=False)
