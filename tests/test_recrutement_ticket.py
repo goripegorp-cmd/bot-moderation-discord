@@ -736,7 +736,9 @@ def test_R15b_sans_page_web_les_formulaires_de_discord(tmp_path, monkeypatch):
         await Q.BoutonRepondre(corps["envoi"]).callback(clic)
         return fil, clic
     fil, clic = run(sc())
-    assert Q._web() is None and isinstance(clic.modals[0], Q.FormulairePage)
+    #  27/10/2026 : `candidature_site` existe désormais ; trouvé par son nom sans être branché au recrutement, il n'offre
+    #  aucune page (`lien_candidat` absent) — ce qui compte ici : pas de page, les formulaires de Discord.
+    assert Q._page_candidat() is None and isinstance(clic.modals[0], Q.FormulairePage)
     assert "**1.**" in texte_message(fil, fil.messages[-1]), "sans la page web, les questions sont dans le ticket"
 
 

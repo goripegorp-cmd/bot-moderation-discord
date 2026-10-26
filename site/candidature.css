@@ -1,0 +1,179 @@
+/* Le questionnaire en ligne du candidat (26/10/2026) — pensé d'abord pour le téléphone : une colonne, de grands champs,
+   la barre des gestes collée en bas de l'écran. Le livre de bord de la maison : parchemin, encre, cire, laiton.
+   Aucun style en ligne (CSP) : les valeurs calculées passent par des variables (--pc). */
+
+.page-candidature { --barre-mobile: 0px; }
+.page-candidature .feuille { width: min(100%, 880px); }
+.page-candidature .contenu { gap: 22px; padding-bottom: 28px; }
+.page-candidature .titre-rubrique p { max-width: 60ch; }
+.page-candidature.questionnaire-chef .titre-rubrique .sceau-rubrique {
+  background: radial-gradient(circle at 38% 32%, var(--laiton-clair), var(--laiton) 55%, var(--laiton-fonce));
+  color: var(--bois-3); --ton2: var(--bois-2);
+  box-shadow: 0 0 0 3px rgba(168, 130, 63, .3), 0 2px 3px rgba(43, 29, 18, .4);
+}
+
+/* ─── Les textes du registre (« -# » en petit) ─────────────────────── */
+.cand-texte { display: grid; gap: 8px; }
+.cand-texte p { max-width: 68ch; overflow-wrap: anywhere; }
+.cand-texte .petit { font-size: var(--t-mini); color: var(--encre-3); font-style: italic; }
+.cand-intro {
+  padding: 14px 16px; border-left: 4px solid var(--laiton); border-radius: var(--rayon);
+  background: rgba(248, 240, 221, .7);
+}
+
+/* ─── Où trouver les réponses (et « Tes réponses ») : un volet ─────── */
+.cand-liens { border: 1px solid var(--trait-fort); border-radius: var(--rayon); background: rgba(248, 240, 221, .55); min-width: 0; }
+.cand-liens > summary {
+  display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 14px;
+  cursor: pointer; list-style: none; font: 500 16px/1.25 var(--police-sc); letter-spacing: .02em; color: var(--encre);
+}
+.cand-liens > summary::-webkit-details-marker { display: none; }
+.cand-liens > summary .ic { width: 22px; height: 22px; color: var(--encre-2); }
+.cand-liens > summary:hover { background: rgba(43, 29, 18, .05); }
+.cand-liens-titre { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.cand-liens-n {
+  flex: none; min-width: 26px; height: 26px; padding: 0 8px; border-radius: 13px; display: grid; place-items: center;
+  background: var(--parchemin-3); font: 700 14px/1 var(--police-chiffres);
+}
+.cand-liens[open] > summary { border-bottom: 1px solid var(--trait); }
+.cand-liens-corps { display: grid; gap: 10px; padding: 12px 14px 14px; min-width: 0; }
+.cand-liens-corps ul { display: grid; gap: 6px; }
+.cand-lien {
+  display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 12px;
+  border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--papier);
+  color: var(--mer); text-decoration: none;
+}
+.cand-lien:hover { border-color: var(--trait-fort); color: var(--cire); }
+.cand-lien .ic { width: 20px; height: 20px; color: var(--encre-2); }
+.cand-lien-texte { display: grid; min-width: 0; overflow-wrap: anywhere; line-height: 1.3; }
+.cand-lien-texte b { color: var(--encre); font-weight: 700; }
+.cand-lien-texte span { color: var(--encre-2); font-size: var(--t-petit); }
+
+/* ─── La progression : les jalons des étapes, la barre ─────────────── */
+.cand-progression { display: grid; gap: 12px; min-width: 0; }
+.cand-jalons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cand-jalons > li { display: flex; align-items: center; gap: 8px; }
+.cand-jalons > li + li::before { /* le filet d'encre entre deux étapes */
+  content: ""; width: 14px; height: 0; border-top: 2px dotted var(--trait-fort);
+}
+.cand-jalon {
+  display: grid; place-items: center; flex: none;
+  width: 44px; height: 44px; padding: 0; border-radius: 50%;
+  border: 2px solid var(--encre-3); background: var(--papier); color: var(--encre);
+  font: 700 17px/1 var(--police-chiffres);
+}
+button.cand-jalon { cursor: pointer; }
+button.cand-jalon:hover { border-color: var(--encre); background: var(--papier-sombre); }
+.cand-jalon .ic { width: 20px; height: 20px; }
+.cand-jalon.complete { border-color: var(--vert); color: var(--vert-fonce); background: #e3e8cf; }
+.cand-jalon.a-remplir { border-color: var(--cire); color: var(--cire); }
+.cand-jalon.courante {
+  border-color: var(--cire-fonce); color: var(--clair);
+  background: radial-gradient(circle at 40% 30%, var(--cire-claire), var(--cire) 60%, var(--cire-fonce));
+  box-shadow: 0 0 0 3px rgba(142, 42, 36, .22);
+}
+.cand-jalon.fermee { border-style: dashed; border-color: var(--trait-fort); background: transparent; color: var(--encre-3); }
+.cand-jalon.fiche { border-color: var(--vert); }
+.cand-avance { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cand-barre-fond { flex: 1 1 auto; min-width: 60px; height: 10px; border-radius: 5px; background: rgba(43, 29, 18, .1); overflow: hidden; }
+.cand-barre-plein {
+  display: block; height: 100%; width: var(--pc, 0%);
+  background: repeating-linear-gradient(-45deg, var(--vert) 0 3px, var(--vert-fonce) 3px 6px);
+  transition: width .3s var(--ease);
+}
+.cand-compte { flex: none; font: 500 15px/1.2 var(--police-sc); color: var(--encre-2); white-space: nowrap; }
+
+/* ─── Une étape ────────────────────────────────────────────────────── */
+.cand-etape, .cand-relire {
+  display: grid; gap: 16px; min-width: 0;
+  padding: 18px 18px 20px; border: 1px solid var(--trait-fort); border-radius: var(--rayon-2);
+  background: var(--papier) url(textures/parchemin.webp); background-size: 600px auto;
+  box-shadow: var(--ombre-papier);
+}
+.cand-etape-titre { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; outline: none; }
+.cand-etape-num { font-family: var(--police-titre); font-size: clamp(25px, 1vw + 20px, 31px); color: var(--encre); }
+.cand-etape-nom { font: 500 18px/1.25 var(--police-sc); letter-spacing: .02em; color: var(--encre-2); overflow-wrap: anywhere; }
+.cand-tampon { align-self: center; }
+.cand-consigne { padding: 2px 0 2px 12px; border-left: 3px solid var(--laiton); color: var(--encre-2); }
+.cand-questions { display: grid; gap: 18px; counter-reset: none; }
+.cand-question { display: grid; gap: 8px; min-width: 0; }
+.cand-question-lib { display: grid; gap: 3px; cursor: text; }
+.cand-num { font: 600 14px/1.2 var(--police-sc); letter-spacing: .06em; text-transform: uppercase; color: var(--cire); }
+.cand-question.repondue .cand-num { color: var(--vert-fonce); }
+.cand-question.repondue .cand-reponse { border-color: rgba(63, 107, 58, .55); }
+.cand-intitule { font-size: 18px; font-weight: 600; line-height: 1.35; color: var(--encre); overflow-wrap: anywhere; }
+.cand-reponse {
+  width: 100%; min-height: 7.5em; max-height: 60vh; resize: vertical;
+  font-size: 17px; line-height: 1.5;
+  field-sizing: content;
+  background: rgba(255, 252, 244, .9);
+}
+.cand-compteur { justify-self: end; font: 400 13px/1 var(--police-chiffres); color: var(--encre-3); }
+.cand-compteur.proche { color: var(--cire); }
+.cand-etape.lecture { background-color: rgba(248, 240, 221, .6); }
+
+/* ─── La barre des gestes : collée en bas de l'écran ───────────────── */
+.cand-barre {
+  position: sticky; bottom: 0; z-index: 12;
+  display: grid; gap: 8px;
+  margin: 0 calc(-1 * var(--gouttiere)); padding: 10px var(--gouttiere) calc(10px + env(safe-area-inset-bottom));
+  background: var(--parchemin) url(textures/parchemin.webp); background-size: 720px auto;
+  border-top: 1px solid var(--trait-fort);
+  box-shadow: 0 -8px 14px -10px rgba(43, 29, 18, .5);
+}
+.cand-barre-boutons { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.cand-barre-boutons > .bouton { min-height: 48px; padding-left: 18px; padding-right: 18px; }
+.cand-barre-boutons > .principal, .cand-barre-boutons > .cand-suivant { margin-left: auto; }
+.cand-vide { flex: 0 0 1px; }
+.cand-etat-enr { display: flex; align-items: center; gap: 6px; min-height: 20px; font-size: var(--t-mini); color: var(--encre-3); }
+.cand-etat-enr:empty { display: none; }
+.cand-etat-enr .ic { width: 17px; height: 17px; }
+.cand-etat-enr span { min-width: 0; overflow-wrap: anywhere; }
+.cand-etat-enr.ok { color: var(--vert-fonce); }
+.cand-etat-enr.en-cours .ic { color: var(--encre-2); }
+.cand-etat-enr.hors-ligne { color: var(--cire); font-weight: 600; }
+@media (max-width: 519px) {
+  .cand-barre-boutons > .bouton { flex: 1 1 0; min-width: 0; padding-left: 10px; padding-right: 10px; }
+  .cand-barre-boutons > .cand-vide { display: none; }
+  /* Revenir en arrière : la flèche seule (son nom reste dit aux lecteurs d'écran), la place au geste principal. */
+  .cand-barre-boutons > .cand-precedent { flex: 0 0 48px; width: 48px; padding: 0; border-color: var(--trait-fort); }
+  .cand-barre-boutons > .cand-precedent > span { display: none; }
+  .cand-barre-boutons > .cand-precedent .ic { width: 22px; height: 22px; }
+}
+
+/* ─── Relire ───────────────────────────────────────────────────────── */
+.cand-relire-etape { display: grid; gap: 10px; min-width: 0; padding-top: 12px; border-top: 1px solid var(--trait); }
+.cand-relire-tete { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.cand-relire-etape h3, .cand-relire-tete h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; font-family: var(--police-titre); font-size: 22px; }
+.cand-lecture { display: grid; gap: 12px; margin: 0; }
+.cand-lecture-q { display: grid; gap: 4px; min-width: 0; }
+.cand-lecture-q dt { display: grid; gap: 2px; }
+.cand-lecture-q dd { margin: 0; padding: 8px 12px; border-left: 3px solid var(--vert); background: rgba(255, 252, 244, .75); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cand-lecture-q.manque dd { border-left-color: var(--cire); }
+.cand-manque { color: var(--cire); font-style: italic; }
+
+/* ─── Merci, l'attente, les messages ───────────────────────────────── */
+.cand-merci, .cand-message {
+  display: flex; align-items: flex-start; gap: 16px; min-width: 0;
+  padding: 20px 18px; border: 3px double var(--trait-fort); border-radius: 2px; background: rgba(248, 240, 221, .7);
+}
+.cand-merci > .pile { flex: 1 1 auto; min-width: 0; }
+.cand-sceau {
+  flex: none; width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center;
+  color: var(--clair); --ton2: var(--laiton-pale);
+  background: radial-gradient(circle at 38% 32%, #5b8a54, var(--vert) 55%, var(--vert-fonce));
+  box-shadow: 0 0 0 3px rgba(63, 107, 58, .25), 0 2px 3px rgba(43, 29, 18, .4);
+}
+.cand-sceau .ic { width: 28px; height: 28px; }
+.cand-sceau.gris { background: radial-gradient(circle at 38% 32%, #6b7783, var(--ardoise) 55%, #333b43); box-shadow: 0 0 0 3px rgba(74, 85, 96, .25), 0 2px 3px rgba(43, 29, 18, .4); }
+.cand-attente .cand-sceau { background: radial-gradient(circle at 38% 32%, var(--laiton-clair), var(--laiton) 55%, var(--laiton-fonce)); color: var(--bois-3); }
+.cand-message { flex-wrap: wrap; }
+.cand-message > .pile { flex: 1 1 240px; min-width: 0; }
+@media (max-width: 519px) {
+  .cand-merci, .cand-message { flex-direction: column; align-items: flex-start; padding: 16px 14px; }
+  .cand-etape, .cand-relire { padding: 14px 13px 16px; }
+  .cand-intitule { font-size: 17px; }
+}
+@media (min-width: 1100px) {
+  .cand-etape, .cand-relire { padding: 22px 26px 24px; }
+}

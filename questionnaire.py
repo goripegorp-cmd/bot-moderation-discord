@@ -4959,6 +4959,96 @@ async def _terminer(i, e: dict) -> None:
         await annoncer_reponses(i.guild, e, t)
 
 
+# ─── La page web du candidat (`candidature_site.py`, 26/10/2026) : l'envoi d'une étape, ou de tout d'un coup ─────
+
+def etape_de_question(q: dict) -> int:
+    """L'étape (1..N) d'une question de l'instantané (`etape`) ; sans étape valable : la première."""
+    v = q.get("etape") if isinstance(q, dict) else None
+    if isinstance(v, str) and v.isdigit():
+        v = int(v)
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else 1
+
+
+def derniere_etape(e: dict) -> int:
+    """La dernière étape du questionnaire d'un envoi (1 pour un envoi sans étapes)."""
+    return max((etape_de_question(q) for q in e.get("questions") or [] if isinstance(q, dict)), default=1)
+
+
+def _textes_complets(e: dict, reponses: dict, etape: int | None) -> dict | None:
+    """{rang: texte} si `reponses` couvre exactement les questions attendues (celles de `etape`, ou toutes), chacune
+    remplie — sinon None."""
+    rangs = {int(q["rang"]) for q in e.get("questions") or []
+             if isinstance(q, dict) and (etape is None or etape_de_question(q) == etape)}
+    try:
+        textes = {int(r): str(x) for r, x in (reponses or {}).items()}
+    except (TypeError, ValueError):
+        return None
+    if not rangs or set(textes) != rangs or not all(x.strip() for x in textes.values()):
+        return None
+    return textes
+
+
+async def _garder_reponses(db, e: dict, textes: dict, t: int) -> None:
+    for rang, texte in textes.items():
+        await db.execute("INSERT OR REPLACE INTO recrutement_reponses (envoi_id, rang, guild_id, candidat_id, texte,"
+                         " recu_le) VALUES (?,?,?,?,?,?)",
+                         (int(e["id"]), int(rang), int(e["guild_id"]), int(e["candidat_id"]), texte, int(t)))
+
+
+async def envoyer_etape(e: dict, t: int, etape: int, reponses: dict, g=None) -> bool:
+    """Le passage d'étape depuis la page web : UNE étape — l'étape OUVERTE pas encore envoyée —, toutes ses réponses
+    (cette étape seulement, remplies), écrites avec `etape_envoyee` dans la même transaction, une seule fois. La dernière
+    ferme l'envoi comme les formulaires de Discord (`clore_envoi`, puis `annoncer_reponses`) ; une autre : `etape_recue`
+    (la direction décide de la suite). Rend True pour le premier envoi de l'étape. `g` : le serveur (sinon celui du bot)."""
+    if isinstance(etape, bool):
+        return False
+    try:
+        etape = int(etape)
+    except (TypeError, ValueError):
+        return False
+    textes = _textes_complets(e, reponses, etape) if etape >= 1 else None
+    if textes is None:
+        return False
+    async with _get_db() as db:
+        cur = await db.execute("UPDATE recrutement_envois SET etape_envoyee=?, statut='en_cours' WHERE id=?"
+                               " AND statut IN (?, ?) AND etape_ouverte=? AND etape_envoyee<?",
+                               (etape, int(e["id"]), *EN_ATTENTE, etape, etape))
+        if (cur.rowcount or 0) < 1:
+            await db.rollback()
+            return False
+        await _garder_reponses(db, e, textes, t)
+        await db.commit()
+    g = g if g is not None else (_bot.get_guild(int(e["guild_id"])) if _bot is not None else None)
+    if etape >= len(etapes_de(e)):
+        if await clore_envoi(e, int(t)) and g is not None:
+            await annoncer_reponses(g, e, int(t))
+    elif g is not None:
+        await etape_recue(g, e, etape)
+    return True
+
+
+async def envoyer_tout(e: dict, t: int, reponses: dict, g=None) -> bool:
+    """Un questionnaire d'avant le passage d'étape (`etape_ouverte` = 0), depuis la page web : TOUTES ses réponses d'un
+    coup — gardées comme celles des formulaires de Discord —, puis leur fin (`clore_envoi`, une seule fois, puis
+    `annoncer_reponses`). Rend True pour le premier envoi."""
+    textes = _textes_complets(e, reponses, None)
+    if textes is None:
+        return False
+    async with _get_db() as db:
+        cur = await db.execute("UPDATE recrutement_envois SET statut='en_cours' WHERE id=? AND statut IN (?, ?)"
+                               " AND etape_ouverte=0", (int(e["id"]), *EN_ATTENTE))
+        if (cur.rowcount or 0) < 1:
+            await db.rollback()
+            return False
+        await _garder_reponses(db, e, textes, t)
+        await db.commit()
+    premier = await clore_envoi(e, int(t))
+    g = g if g is not None else (_bot.get_guild(int(e["guild_id"])) if _bot is not None else None)
+    if premier and g is not None:
+        await annoncer_reponses(g, e, int(t))
+    return premier
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Le site : la banque, les liens, les réglages, les modèles, les dossiers, les décisions
 # ═══════════════════════════════════════════════════════════════════════════════

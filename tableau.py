@@ -22,6 +22,8 @@ L'ACCÈS
     « equipage » : un membre du rôle du clan, qui ne voit QUE `/tableau/equipage/` (lecture seule). `_verifier`
     refuse une portée qu'on ne lui demande pas : toute adresse, présente ou future, est fermée à l'équipage par
     défaut. Le rôle du clan est revérifié à chaque requête ; perdu, la session est fermée.
+  · 26/10/2026, le questionnaire en ligne : la portée « candidat » (le candidat d'un ticket, SON questionnaire seulement,
+    `candidature_site.py`), un cookie à part limité à `/tableau/candidature/` ; refusée partout ailleurs, comme l'équipage.
   · Défenses : CSP à nonce (aucun script injecté ne s'exécute), en-têtes stricts, origine vérifiée
     sur les écritures (déconnexion comprise), cadence limitée par session et par adresse (faux liens
     et faux cookies : un cookie mal formé ne touche jamais la base), rien en cache, rien d'indexé.
@@ -100,7 +102,13 @@ ESPACE = "/tableau/espace/"
 #  26/10/2026 : le site de l'équipage (une page à part). Les portées d'une session : « tout » (fondateur, direction) et
 #  « equipage » (le rôle du clan, lecture seule) — une autre, ou une vieille, est refusée partout.
 EQUIPAGE = "/tableau/equipage/"
-PORTEES = ("tout", "equipage")
+#  26/10/2026 : le questionnaire en ligne du candidat (`candidature_site.py`) — une page à part et un cookie à part, limité
+#  à son chemin : un candidat n'envoie jamais de session aux pages de la direction, et la tête qui essaie le questionnaire
+#  garde la sienne. La portée « candidat » n'atteint que `/tableau/candidature/` ; partout ailleurs, refusée par défaut.
+CANDIDATURE = "/tableau/candidature/"
+COOKIE_CANDIDAT = "__Secure-candidat"
+PORTEES = ("tout", "equipage", "candidat")
+PORTEES_EQUIPAGE = ("tout", "equipage")   # le site de l'équipage et ses images : jamais une session « candidat »
 OUVERTURE_JOURNAL_S = 1800     # « Site de l'équipage ouvert par … » : une ligne par personne et par demi-heure
 TENTATIVE_JOURNAL_S = 600      # une session de l'équipage qui demande une page de la direction : une ligne / 10 min
 COOKIE = "__Host-tableau"
@@ -143,6 +151,9 @@ DEJA_EQUIPAGE = _message("Ce lien a déjà servi",
 RESERVE = _message("Réservé à la direction",
                    "Cette page est celle du fondateur et de la direction. Ton espace : "
                    "<a href='/tableau/equipage/' style='color:#e8c98a'>le site de l'équipage</a>.")
+RESERVE_CANDIDAT = _message("Réservé à la direction",
+                            "Cette page est celle du fondateur et de la direction. Ton questionnaire : "
+                            "<a href='/tableau/candidature/' style='color:#e8c98a'>ici</a>.")
 ENTETES = {
     "Cache-Control": "no-store",
     "X-Robots-Tag": "noindex, nofollow",
@@ -250,6 +261,9 @@ _verrous: dict = {}          # nom → (boucle, verrou) : un verrou né dans une
 #  Le site de l'équipage (26/10/2026) : ses lectures (`monter_equipage`) et les images qu'il peut voir.
 ROUTES_EQUIPAGE: dict = {}   # nom → async (g, membre, session, requete) → (statut, corps) — GET seulement
 MEDIAS_EQUIPAGE = None       # async (g) → l'ensemble des images (`media/…`) permises à une session « equipage »
+#  Le questionnaire en ligne (26/10/2026) : `AUTORISE_CANDIDAT(g, membre, empreinte)` → "" (permis) ou la raison du refus —
+#  posé par `candidature_site.setup` ; sans lui, une session « candidat » n'entre NULLE PART.
+AUTORISE_CANDIDAT = None
 _ouvertures: dict = {}       # (serveur, membre) → heure de la dernière ligne « site de l'équipage ouvert »
 _tentatives: dict = {}       # empreinte de session → heure de la dernière ligne « page de la direction refusée »
 
@@ -440,16 +454,17 @@ async def _session(request, maintenant: float | None = None, portees=("tout",)):
     return ses[0], ses[1]
 
 
-async def _lire_session(request, maintenant: float | None = None):
+async def _lire_session(request, maintenant: float | None = None, cookie: str = COOKIE):
     """(empreinte, (serveur, membre, fin), portée) — ou None.
 
     24/10/2026 : n'importe quel cookie occupait une connexion de la base, sans limite par adresse,
     et une session effacée de la base restait ouverte jusqu'au redémarrage (cache en mémoire). Un
     cookie mal formé ne touche plus la base ; un cookie inconnu compte comme un faux lien (même
     limite par adresse, et au-delà plus aucune lecture) ; une session en mémoire est relue en base
-    au-delà de RELIRE secondes (sa portée avec elle)."""
+    au-delà de RELIRE secondes (sa portée avec elle). `cookie` : celui du questionnaire en ligne
+    (`COOKIE_CANDIDAT`) pour ses seules adresses — la portée, elle, vient toujours de la base."""
     t = maintenant or time.time()
-    sid = request.cookies.get(COOKIE, "") if hasattr(request, "cookies") else ""
+    sid = request.cookies.get(cookie, "") if hasattr(request, "cookies") else ""
     if not sid:
         return None
     if not FORMAT_SESSION.fullmatch(sid):
@@ -544,13 +559,15 @@ def _trop_essais(request, compter: bool = False, maintenant: float | None = None
     return len(recents) > LIMITE_ESSAIS
 
 
-async def _verifier(request, maintenant: float | None = None, medias: bool = False, portees=("tout",)):
-    """Session valide et de l'une des `portees` (par défaut « tout » seulement : une session du site de l'équipage est
-    refusée PARTOUT où on ne la demande pas), personne toujours autorisée — « tout » : le fondateur ou la direction ;
-    « equipage » : le rôle du clan, sinon sa session est fermée —, pas suspendue, cadence raisonnable.
+async def _verifier(request, maintenant: float | None = None, medias: bool = False, portees=("tout",),
+                    cookie: str = COOKIE):
+    """Session valide et de l'une des `portees` (par défaut « tout » seulement : une session du site de l'équipage ou du
+    questionnaire en ligne est refusée PARTOUT où on ne la demande pas), personne toujours autorisée — « tout » : le
+    fondateur ou la direction ; « equipage » : le rôle du clan, sinon sa session est fermée ; « candidat » : sa session
+    liée à SON questionnaire (`AUTORISE_CANDIDAT`) —, pas suspendue, cadence raisonnable.
     `medias` : une image de la page (sa propre cadence : une galerie ne vide pas celle des données)."""
     t = maintenant or time.time()
-    ses = await _lire_session(request, t)
+    ses = await _lire_session(request, t, cookie)
     if ses is None:
         if _trop_essais(request, maintenant=t):
             raise _Refus(429, "Trop d'essais.")
@@ -568,6 +585,10 @@ async def _verifier(request, maintenant: float | None = None, medias: bool = Fal
         if not autorise_equipage(g, m, c):
             await _fermer_session_equipage(emp, g, m)
             raise _Refus(403, "Accès retiré.")
+    elif portee == "candidat":
+        raison = await _candidat_autorise(g, m, emp)
+        if raison:
+            raise _Refus(403, raison)
     elif _autorise_membre is None or not _autorise_membre(g, m, c):
         raise _Refus(403, "Accès retiré.")
     if await suspendu(gid, uid, t):
@@ -580,10 +601,26 @@ async def _verifier(request, maintenant: float | None = None, medias: bool = Fal
     return {"g": gid, "u": uid, "e": expire, "p": portee, "emp": emp}, g
 
 
+async def _candidat_autorise(g, m, emp: str) -> str:
+    """« » si la session « candidat » est bien celle de ce membre, liée à son questionnaire (`AUTORISE_CANDIDAT`) — sinon
+    la raison du refus. Sans branchement, ou en échec : refusé (et le détail au journal du bot)."""
+    if AUTORISE_CANDIDAT is None:
+        return "Accès retiré."
+    try:
+        r = AUTORISE_CANDIDAT(g, m, emp)
+        r = (await r) if inspect.isawaitable(r) else r
+    except Exception as ex:  # en doute, on refuse ; le détail part au journal du bot
+        _log("[TABLEAU][E50] questionnaire en ligne : accès illisible")
+        _log(f"[TABLEAU][E50:DETAIL] {type(ex).__name__} {ex}")
+        diag.compter("site", "candidature.acces", ex)
+        return "Accès retiré."
+    return str(r or "")
+
+
 async def _tentative_hors_portee(request, emp: str, gid: int, uid: int, portee: str, t: float) -> None:
-    """Une session de l'équipage demande une page de la direction : refusé, et noté au journal (Sécurité) — une ligne
-    par session et par 10 minutes au plus (un membre curieux ne remplit pas le journal)."""
-    if portee != "equipage" or t - _tentatives.get(emp, 0) < TENTATIVE_JOURNAL_S:
+    """Une session de l'équipage (ou du questionnaire en ligne) demande une page qui n'est pas la sienne : refusé, et
+    noté au journal (Sécurité) — une ligne par session et par 10 minutes au plus (un curieux ne remplit pas le journal)."""
+    if portee not in ("equipage", "candidat") or t - _tentatives.get(emp, 0) < TENTATIVE_JOURNAL_S:
         return
     _tentatives[emp] = t
     if len(_tentatives) > 5000:
@@ -591,10 +628,11 @@ async def _tentative_hors_portee(request, emp: str, gid: int, uid: int, portee: 
             _tentatives.pop(k, None)
     g = _bot.get_guild(gid) if _bot else None
     m = g.get_member(uid) if g else None
-    await registre.noter(gid, "Sécurité", "site.hors_portee",
-                         f"Site de l'équipage : {getattr(m, 'display_name', None) or 'un membre'} a demandé une page de "
-                         "la direction (refusé)", auteur_id=uid, detail=str(getattr(request, "path", "") or "")[:120],
-                         gravite=1)
+    qui = getattr(m, 'display_name', None) or 'un membre'
+    texte = (f"Site de l'équipage : {qui} a demandé une page de la direction (refusé)" if portee == "equipage"
+             else f"Questionnaire en ligne : {qui} a demandé une page qui ne lui est pas ouverte (refusé)")
+    await registre.noter(gid, "Sécurité", "site.hors_portee", texte, auteur_id=uid,
+                         detail=str(getattr(request, "path", "") or "")[:120], gravite=1)
 
 
 async def _fermer_session_equipage(emp: str, g, m) -> None:
@@ -1370,6 +1408,8 @@ async def entree(request):
     if _trop_essais(request):
         return _html(TROP, 429)
     j = lire_jeton(request.match_info.get("jeton", ""))
+    if j and j["p"] == "candidat":   # 26/10/2026 : le lien d'un candidat n'entre que par `/tableau/candidature/<lien>`
+        j = None
     g = _bot.get_guild(j["g"]) if j and _bot else None
     m = g.get_member(j["u"]) if g else None
     equipage = bool(j) and j["p"] == "equipage"
@@ -1425,6 +1465,8 @@ async def page(request):
     except _Refus as r:
         if r.portee == "equipage":  # 26/10/2026 : un membre du clan ici — refusé, et on lui montre SON espace
             return _html(RESERVE, 403)
+        if r.portee == "candidat":  # un candidat (cookie recopié à la main) : refusé, et on lui montre son questionnaire
+            return _html(RESERVE_CANDIDAT, 403)
         return _html(EXPIRE if r.status != 429 else TROP, r.status)
     neuve = _lire_page_site("index.html")
     if neuve is None and not PAGE:
@@ -2416,7 +2458,7 @@ async def media(request):
     """`GET /tableau/espace/media/{id}` : une image du site — session exigée, rien gardé en cache."""
     from aiohttp import web
     try:
-        j, g = await _verifier(request, medias=True, portees=PORTEES)
+        j, g = await _verifier(request, medias=True, portees=PORTEES_EQUIPAGE)
     except _Refus as r:
         return _json({"erreur": r.message}, r.status)
     ident = str(request.match_info.get("media", ""))
@@ -2885,7 +2927,7 @@ async def page_equipage(request):
     """La page du site de l'équipage (`site/equipage.html`) : une session « equipage » ou « tout »."""
     from aiohttp import web
     try:
-        await _verifier(request, portees=PORTEES)
+        await _verifier(request, portees=PORTEES_EQUIPAGE)
     except _Refus as r:
         return _html(EXPIRE_EQUIPAGE if r.status != 429 else TROP, r.status)
     texte = _lire_page_site("equipage.html")
@@ -2902,7 +2944,7 @@ async def api_equipage(request):
     from aiohttp import web
     nom = str(request.match_info.get("nom", ""))
     try:
-        j, g = await _verifier(request, portees=PORTEES)
+        j, g = await _verifier(request, portees=PORTEES_EQUIPAGE)
     except _Refus as r:
         return _json({"erreur": r.message}, r.status)
     fn = ROUTES_EQUIPAGE.get(nom) if FORMAT_ROUTE.fullmatch(nom) else None
@@ -2960,6 +3002,8 @@ async def api_equipage_refus(request):
 #    puis seulement des deltas — present, absent, page, verrou, libre, ecrit — et les réponses : pris {o, n, ch, v},
 #    refuse {o, par, nom}, demandee {o}, demande {o, par, nom} (au détenteur seulement). Sans WebSocket, le même
 #    message part dans `POST api/direct/envoi` avec l'identifiant de l'onglet (`onglet`).
+#  · 26/10/2026 : « candidat » {k (ticket), e (envoi), …} — le questionnaire en ligne, pendant que le candidat écrit
+#    (`diffuser_candidat`, débit borné par `candidature_site.py`) ; sans WebSocket : `GET api/direct/candidat`.
 
 DIRECT_BAIL = 60                 # s : le verrou d'un onglet qui ne bat plus tombe
 DIRECT_BAIL_CACHE = 330          # s : onglet caché (aucun battement) — l'inactivité (5 min) rend la main avant
@@ -3588,6 +3632,21 @@ def direct_ecrit(gid: int, objets, uid: int) -> None:
     salle = _direct_salles.get(gid)
     if salle is not None:
         _diffuser(salle, {"t": "ecrit", "o": objets[:10], "id": str(uid)})
+
+
+def diffuser_candidat(gid: int, m: dict) -> int:
+    """Le questionnaire en ligne (`candidature_site.py`, 26/10/2026) : ce que le candidat écrit, l'étape où il est, sa page
+    ouverte ou fermée, ses réponses envoyées — un message « candidat » aux onglets branchés sur le direct de ce serveur,
+    c'est-à-dire aux SEULES sessions « tout » (la porte du direct n'en laisse entrer aucune autre, et les relit). Le débit
+    est borné par l'appelant ; un onglet qui interroge (sans WebSocket) lit `api/direct/candidat`. Rend le nombre
+    d'onglets atteints."""
+    salle = _direct_salles.get(int(gid))
+    if salle is None:
+        return 0
+    message = dict(m, t="candidat")
+    n = sum(1 for p in salle.prises.values() if p.ws is not None and p.bonjour and not p.ferme_le and not p.fin)
+    _diffuser(salle, message)
+    return n
 
 
 def refus_verrou(gid: int, objets, uid: int, maintenant: float | None = None) -> dict | None:

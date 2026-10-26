@@ -62,6 +62,10 @@ DELETE_SUBJECT = {
     # 25/10/2026 — site v2 : les réponses d'un candidat au questionnaire, son journal d'opérations hors ligne
     "recrutement_reponses": ["candidat_id"],
     "tableau_ops": ["user_id"],
+    # 26/10/2026 — le questionnaire en ligne du candidat : ses brouillons, la liaison de ses sessions, sa page
+    "candidature_brouillons": ["candidat_id"],
+    "candidature_sessions": ["candidat_id"],
+    "candidature_etat": ["candidat_id"],
     # colonnes sujet ≠ "user_id"
     "temp_voice_rooms": ["owner_id"],
     # relations symétriques (le membre est sujet des deux côtés) → delete par OR
@@ -183,6 +187,8 @@ RETENTION = {
     "recrutements": ("ferme_le", 365),
     "registre": ("quand", 90),
     "questions": ("quand", 30),
+    # 26/10/2026 — un brouillon du questionnaire en ligne que personne n'a touché depuis 30 jours (l'envoi le retire avant)
+    "candidature_brouillons": ("maj_le", 30),
 }
 
 
