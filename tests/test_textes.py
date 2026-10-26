@@ -16,7 +16,9 @@ droits, refus, nom gardé pour le recréer. T13 les noms du site sont ceux de la
 sous-onglets, la fiche). T14 chaque clé écrite dans le code est déclarée. T15 le câblage (bot.py, site local, page hors
 ligne). 26/10, « même ce qui existe déjà » : T16 la carte de l'équipe dans le ticket, ses boutons, le formulaire du
 refus. T17 les réponses au choix du métier. T18 le listing et l'annonce des métiers. T19 le guide du clan (chaque
-ligne, chaque bouton ; réécrit quand un texte change). T20 les sous-onglets renommés, une famille nommée par un module."""
+ligne, chaque bouton ; réécrit quand un texte change). T20 les sous-onglets renommés, une famille nommée par un module.
+T21 la présence en direct : un texte que quelqu'un d'autre modifie n'est pas écrit (423), ni par la file hors ligne
+tant qu'il est tenu ; l'éditeur de la page prend le verrou « texte:<clé> »."""
 from __future__ import annotations
 
 import ast
@@ -808,6 +810,59 @@ def test_T20_les_sous_onglets_renommes_et_une_famille_nommee(registre_textes):
     assert familles[-1] == ("equipage_site", "Le site de l'équipage") and familles[-2][0] == "site"
     with pytest.raises(ValueError):
         textes.nommer_groupe("Mauvais Nom", "x")
+
+
+def test_T21_un_texte_en_cours_de_modification_ailleurs_est_refuse_423(tmp_path, monkeypatch, registre_textes):
+    """Le fondateur modifie « Merci, après ses réponses » (il tient « texte:recrutement.merci ») : la direction ne peut
+    ni l'écrire ni le remettre à l'origine (423, qui le tient) — un autre texte, oui ; sa file hors ligne attend, puis
+    passe quand il est libéré."""
+    from test_direct import Monde as MondeDirect, _socket, _attendre, BASE as BASE_DIRECT
+    monde = MondeDirect(tmp_path, monkeypatch)
+    tableau.monter(textes)
+    a, b = monde.biscuit(FONDATEUR), monde.biscuit(DIRECTION)
+    ecrire_a = dict(a, **{"X-Tableau": "1", "Origin": BASE_DIRECT})
+    ecrire_b = dict(b, **{"X-Tableau": "1", "Origin": BASE_DIRECT})
+    objet = "texte:recrutement.merci"
+
+    async def scenario(c):
+        out = {}
+        wa = await _socket(c, a, page="capitainerie/textes")
+        wb = await _socket(c, b, page="capitainerie/textes")
+        await wa.send_json({"t": "prendre", "o": objet, "ti": "le texte « Merci, après ses réponses »"})
+        await _attendre(wa, "pris")
+
+        async def poster(chemin, corps, entetes):
+            r = await c.post("/tableau/espace/api/" + chemin, json=corps, headers=entetes)
+            return r.status, await r.json()
+        out["b"] = await poster("texte", {"cle": "recrutement.merci", "valeur": "Merci !", "version": 0}, ecrire_b)
+        out["b_defaut"] = await poster("texte/defaut", {"cle": "recrutement.merci"}, ecrire_b)
+        out["b_autre"] = await poster("texte", {"cle": "recrutement.deja", "valeur": "Déjà reçu.", "version": 0}, ecrire_b)
+        out["a"] = await poster("texte", {"cle": "recrutement.merci", "valeur": "Merci, matelot.", "version": 0}, ecrire_a)
+        op = {"op_id": "op-textes-0423", "api": "texte",
+              "corps": {"cle": "recrutement.merci", "valeur": "Merci (hors ligne).", "version": 1}}
+        r = await c.post("/tableau/espace/sync", json={"ops": [op]}, headers=ecrire_b)
+        out["sync"] = (await r.json())["resultats"][0]
+        await wa.send_json({"t": "lacher", "o": objet})
+        await _attendre(wb, "libre", objet=objet)
+        r = await c.post("/tableau/espace/sync", json={"ops": [op]}, headers=ecrire_b)
+        out["sync_apres"] = (await r.json())["resultats"][0]["status"]
+        await wa.close()
+        await wb.close()
+        return out
+    out = monde.http(scenario)
+    st, corps = out["b"]
+    assert st == 423 and corps["verrou"] == {"objet": objet, "par": str(FONDATEUR), "nom": "GoRipe"}, out["b"]
+    assert corps["erreur"] == "En cours de modification par GoRipe."
+    assert out["b_defaut"][0] == 423, "« Revenir au texte d'origine » aussi"
+    assert out["b_autre"][0] == 200 and out["a"][0] == 200, "un autre texte, ou celui qui le tient : l'écriture passe"
+    assert out["sync"]["status"] == 423, "la file hors ligne attend que le texte soit libre"
+    assert out["sync_apres"] == 200
+    assert textes.item(monde.g, "recrutement.merci")["valeur"] == "Merci (hors ligne)."
+    #  La page : l'éditeur prend « texte:<clé> » (lecture seule s'il est pris) ; la liste porte le cadenas.
+    page = (RACINE / "site" / "textes.js").read_text(encoding="utf-8")
+    assert 'protegerEditeur(p, "texte:" + t.cle,' in page and 'avecVerrou(h("li", { classe: "texte-ligne"' in page
+    assert textes.ROUTES_SITE["texte"]["verrou"]({"cle": "a.b"}) == "texte:a.b"
+    assert textes.ROUTES_SITE["texte/defaut"]["verrou"] is textes.ROUTES_SITE["texte"]["verrou"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -2733,7 +2733,113 @@ def r_decision(m, q, c):
     return 400, {"ok": False, "erreur": "Décision inconnue."}
 
 
+# ─── Textes & noms (textes.py) ──────────────────────────────────────────────
+_TX: list = []
+
+
+def _tx():
+    """Le registre des textes du bot (`textes.py`) et les modules qui y déclarent les leurs : « Textes & noms » répond avec
+    les VRAIS textes ; ce qu'on y change reste en mémoire (la maquette n'a pas de base). None s'il ne se charge pas (ses
+    routes répondent alors 503, comme le serveur quand le registre démarre)."""
+    if not _TX:
+        try:
+            _ev()                     # le chemin du bot, et les textes des annonces & événements
+            import textes
+            import metiers            # noqa: F401 — leurs textes se déclarent au chargement
+            import questionnaire      # noqa: F401
+            import zones              # noqa: F401
+            _TX.append(textes)
+        except Exception as ex:  # la maquette reste utilisable : l'onglet dit « indisponible »
+            print("[MAQUETTE][E2] registre des textes illisible")
+            print(f"[MAQUETTE][E2:DETAIL] {type(ex).__name__} {ex}")
+            _TX.append(None)
+    return _TX[0]
+
+
+class _ServeurTextes:
+    """Le serveur vu par le registre (identifiant 0) : personne n'y est connu (« modifié » sans auteur)."""
+    id = 0
+
+    @staticmethod
+    def get_member(_uid):
+        return None
+
+
+_TX_INDISPONIBLE = (503, {"erreur": "Les textes démarrent : réessaie dans un instant."})
+
+
+def r_textes(m, q, c):
+    T = _tx()
+    return (200, {"groupes": T.groupes(_ServeurTextes)}) if T is not None else _TX_INDISPONIBLE
+
+
+def r_textes_site(m, q, c):
+    T = _tx()
+    return (200, {"valeurs": T.valeurs_site(0)}) if T is not None else _TX_INDISPONIBLE
+
+
+def _ecrire_texte(c, origine: bool):
+    """Comme `textes.ecrire` / `textes.remettre`, en mémoire : mêmes contrôles (`textes.propre`), même conflit (409)."""
+    T = _tx()
+    if T is None:
+        return _TX_INDISPONIBLE
+    cle = c.get("cle")
+    if not isinstance(cle, str) or not T.declare(cle):
+        return 404, {"erreur": "Ce texte n'existe pas (ou plus)."}
+    d = T._DECLARES[cle]
+    lignes = T._cache.setdefault(0, {})
+    ligne = lignes.get(cle)
+    actuelle = ligne[1] if ligne else 0
+    version = c.get("version")
+    if origine:
+        if ligne is None or ligne[0] is None:
+            return 200, {"ok": True, "deja": True, "texte": T.item(_ServeurTextes, cle)}
+        valeur = d["defaut"]
+        conflit = version is not None and version != actuelle
+    else:
+        try:
+            valeur = T.propre(c.get("valeur"), d)
+        except T._Invalide as ex:
+            return ex.status, {"erreur": ex.message}
+        conflit = version != actuelle
+    if conflit:
+        return 409, {"conflit": True, "erreur": "Ce texte a changé entre-temps.", "actuelle": T.item(_ServeurTextes, cle)}
+    lignes[cle] = (None if valeur == d["defaut"] else valeur, actuelle + 1, int(time.time()), 0)
+    return 200, {"ok": True, "texte": T.item(_ServeurTextes, cle), "avertissements": [] if origine else T.avertissements(valeur, d)}
+
+
+def r_texte(m, q, c):
+    return _ecrire_texte(c, False)
+
+
+def r_texte_defaut(m, q, c):
+    return _ecrire_texte(c, True)
+
+
+def r_role_renommer(m, q, c):
+    """Renommer un rôle lié (Rôles & métiers) : le nom suit dans les liens."""
+    role = next((x for x in m.roles if x["id"] == str(c.get("role_id"))), None)
+    if role is None:
+        return 404, {"erreur": "Ce rôle n'existe plus sur le serveur."}
+    nom = " ".join(str(c.get("nom") or "").split())[:100]
+    if not nom:
+        return 400, {"erreur": "Le nom du rôle ne peut pas être vide."}
+    if nom == role["nom"]:
+        return 200, {"ok": True, "deja": True, "role": role, "message": "Le rôle porte déjà ce nom."}
+    role["nom"] = nom
+    metiers_lies = []
+    for lien in m.liens_roles:
+        if lien["role_id"] == role["id"]:
+            lien["role_nom"] = nom
+            if lien["type"] == "metier":
+                metiers_lies.append(lien["cle"])
+    return 200, {"ok": True, "role": {"id": role["id"], "nom": nom, "couleur": role["couleur"]}, "metiers": metiers_lies,
+                 "message": f"Rôle renommé « {nom} »."}
+
+
 ROUTES = {
+    "textes": ("GET", r_textes, False), "textes/site": ("GET", r_textes_site, False), "texte": ("POST", r_texte, True),
+    "texte/defaut": ("POST", r_texte_defaut, True), "rell/role/renommer": ("POST", r_role_renommer, False),
     "rell/catalogue": ("GET", r_catalogue, False), "rell/catalogue/element": ("POST", r_catalogue_element, True),
     "rell/catalogue/retirer": ("POST", r_catalogue_retirer, True), "rell/catalogue/type": ("POST", r_catalogue_type, True),
     "rell/affiches": ("GET", r_affiches, False), "rell/affiche": ("GETPOST", None, True),

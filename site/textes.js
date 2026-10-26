@@ -13,14 +13,10 @@ import { lire, poster } from "./api.js";
 import { charger, perime } from "./donnees.js";
 import { mettreEnFile, renvoyer, garderServeur, file } from "./hors_ligne.js";
 import { bouton, vide, tampon, recherche, segment, champ, saisie, zoneTexte, confirmer, pancarte, toast, squelettes, groupe, bandeau, majBoutonsReseau, nomDe } from "./ui.js";
+import { protegerEditeur, avecVerrou } from "./direct.js";
 
 const VARIABLE = /\{([a-z][a-z0-9_]{0,30})\}/g;
 const CLE_LOCALE = "capitainerie.libelles";
-
-// ─── Le verrou d'édition (équipe « Présence en direct », site/direct.js) ─────
-// Branché après la fusion : `brancherVerrou(protegerEditeur)` — l'éditeur d'un texte prend alors le verrou « texte:<clé> ».
-let proteger = null;
-export function brancherVerrou(fn) { proteger = typeof fn === "function" ? fn : null; }
 
 // ─── Les noms du site (au démarrage, puis avec les données) ─────────────────
 // Relus au plus toutes les deux minutes : la cadence du site compte chaque requête (240 par minute et par session),
@@ -220,7 +216,8 @@ const ETATS_OP = { attente: ["En attente d'envoi", "ambre"], conflit: ["Conflit"
 function ligneTexte(t, surModifier) {
   const [libOp, coulOp] = ETATS_OP[t._attente] || [];
   const ouvrir = () => (surModifier ? surModifier(t) : ouvrirEditeur(t));
-  return h("li", { classe: "texte-ligne" + (t.modifie ? " modifie" : "") + (t._attente === "attente" ? " en-attente" : "") + (t._attente === "conflit" || t._attente === "refus" ? " conflit" : "") },
+  // Présence en direct : un texte que quelqu'un d'autre modifie porte son cadenas (et le serveur refuse l'écriture : 423).
+  return avecVerrou(h("li", { classe: "texte-ligne" + (t.modifie ? " modifie" : "") + (t._attente === "attente" ? " en-attente" : "") + (t._attente === "conflit" || t._attente === "refus" ? " conflit" : "") },
     h("div", { classe: "texte-tete" },
       h("b", { classe: "texte-titre" }, insecable(t.titre)),
       t.modifie ? tampon("Modifié", "vert", true) : null,
@@ -229,7 +226,7 @@ function ligneTexte(t, surModifier) {
     t.aide ? h("p", { classe: "texte-aide" }, t.aide) : null,
     apercu(t),
     t._attente === "refus" && t._op ? h("p", { classe: "meta alerte-texte" }, "Refusé par le serveur : " + (t._op.erreur || "réessaie.")) : null,
-    t.modifie && t.maj_le ? h("p", { classe: "meta" }, "Modifié " + depuis(t.maj_le) + (t.maj_par ? " par " + nomDe(P(t.maj_par)) : "") + ".") : null);
+    t.modifie && t.maj_le ? h("p", { classe: "meta" }, "Modifié " + depuis(t.maj_le) + (t.maj_par ? " par " + nomDe(P(t.maj_par)) : "") + ".") : null), "texte:" + t.cle);
 }
 
 // ─── L'éditeur ──────────────────────────────────────────────────────────────
@@ -292,9 +289,15 @@ function ouvrirEditeur(t, o = {}) {
   const p = pancarte({ titre: insecable(t.titre), sous: t.partie || "", icone: "plume", taille: "large",
     garde: async (v) => v === "enregistre" || enregistre || propre(champ_.value, t) === propre(depart, t)
       || !!(await confirmer({ titre: "Quitter sans enregistrer ?", texte: "Ce que tu as écrit dans ce texte sera perdu.", libelleOk: "Quitter", style: "danger" })) });
-  if (proteger) {
-    try { proteger(p, "texte:" + t.cle, t.titre); } catch (e) { console.warn("[TEXTES][E1] verrou d'édition indisponible"); }
-  }
+  // Présence en direct : l'éditeur prend la main sur « texte:<clé> » ; tenu par un autre, il s'ouvre en lecture seule
+  // (« Demander la main ») et, libéré, se rouvre sur la dernière version enregistrée.
+  protegerEditeur(p, "texte:" + t.cle, (formeDe(t) === "nom" ? "le nom « " : "le texte « ") + t.titre + " »", { relire: async () => {
+    perime("textes");
+    const T2 = await charger("textes", { forcer: true });
+    const t2 = T2 && !T2.erreur ? trouver(appliquerFile(T2), t.cle) : null;
+    if (!t2) throw new Error("texte introuvable");
+    ouvrirEditeur(t2, o);
+  } });
   const champ_ = t.lignes
     ? zoneTexte({ name: "texte", rows: Math.min(14, Math.max(4, String(depart).split("\n").length + 1)), maxlength: t.max, spellcheck: "true" }, depart)
     : saisie({ name: "texte", value: depart, maxlength: t.max, spellcheck: "true" });
