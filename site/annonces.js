@@ -6,7 +6,7 @@
 // Une date saisie est une heure de PARIS, quel que soit le fuseau de l'appareil (le minuteur Discord <t:…> en découle).
 
 import { h, icone, date, heure, depuis, dans, dateLongue, nombre, sansEmoji, uuid, retarder, maintenant, srcSure, majuscule, remplacer, BASE, ajouter } from "./dom.js";
-import { etat, emettre, ecouter, enLigne, aller, P } from "./noyau.js";
+import { etat, emettre, ecouter, enLigne, aller, P, nommerOnglets } from "./noyau.js";
 import { lire, poster, noterReseau } from "./api.js";
 import { charger, vue as vueJeu, perime, element as elementCat } from "./donnees.js";
 import { mettreEnFile, garderSaisie, lireSaisie, oublierSaisie, opsDe, abandonner } from "./hors_ligne.js";
@@ -14,6 +14,7 @@ import {
   bouton, pastille, tampon, vide, segment, liste, champ, saisie, zoneTexte, interrupteur, caseACocher, radios, confirmer, pancarte,
   toast, squelettes, paginer, bandeau, majBoutonsReseau, nomDe,
 } from "./ui.js";
+import { choisirTextes } from "./textes.js";
 import { avecVerrou, protegerZone, siLibre } from "./direct.js";
 
 const TYPES = [
@@ -152,7 +153,7 @@ function nettoyer(v) {
 }
 
 // ─── La rubrique ────────────────────────────────────────────────────────────
-const SOUS = [["composer", "Composer", "plume"], ["brouillons", "Brouillons", "parchemin"], ["a-venir", "À venir", "minuteur"], ["passes", "Passés", "coffre"]];
+const SOUS = nommerOnglets("site.sous.equipage.annonces", [["composer", "Composer", "plume"], ["brouillons", "Brouillons", "parchemin"], ["a-venir", "À venir", "minuteur"], ["publiees", "Publiées", "cloche"], ["passes", "Passés", "coffre"]]);
 let composeur = null;    // l'état du formulaire (survit aux changements de sous-onglet)
 let composeurOuvrir = null;
 let dernierE = null;     // le dernier contenu de clan/evenements (pour ouvrir, dupliquer)
@@ -167,7 +168,8 @@ export function annonces(vue, ctx) {
     const E = await charger("evenements", { forcer });
     if (fini || !zone.isConnected) return;
     if (E && !E.erreur) dernierE = E;
-    const nb = E && !E.erreur ? { brouillons: (E.brouillons || []).length, "a-venir": (E.a_venir || []).length, passes: E.passes_total ?? (E.passes || []).length } : {};
+    const nb = E && !E.erreur ? { brouillons: (E.brouillons || []).length, "a-venir": (E.a_venir || []).length, publiees: E.publiees_total ?? (E.publiees || []).length,
+      passes: E.passes_total ?? (E.passes || []).length } : {};
     remplacer(onglets, ...SOUS.map(([k, l, ic]) => h("a", { classe: "etiquette", role: "tab", href: "#equipage/annonces/" + k, "aria-selected": String(k === sous) },
       icone(ic), l, nb[k] ? h("span", { classe: "compteur calme" }, String(nb[k])) : null)));
     if (!centre) { centre = true; requestAnimationFrame(() => centrerOnglet(onglets)); }
@@ -175,7 +177,7 @@ export function annonces(vue, ctx) {
     if (sous === "composer") {
       if (!construction) construction = composer(zone, E).then((c) => { ctrl = c; if (fini && c) c.quitter(); return c; });
       else if (ctrl) ctrl.majDonnees(E);
-    } else remplacer(zone, ...[{ brouillons: listeBrouillons, "a-venir": listeAVenir, passes: listePasses }[sous](E, () => maj(true))].flat());
+    } else remplacer(zone, ...[{ brouillons: listeBrouillons, "a-venir": listeAVenir, publiees: listePubliees, passes: listePasses }[sous](E, () => maj(true))].flat());
   };
   maj();
   return { maj: () => maj(false), majJeu: () => maj(false), majFile: () => maj(false), quitter: () => { fini = true; if (ctrl) ctrl.quitter(); } };
@@ -450,7 +452,7 @@ async function composer(zone, E0) {
       emettre("recharger");
       toast("Publié sur Discord" + (el.destination && el.destination.nom ? " dans « " + sansEmoji(el.destination.nom) + " »" : "") + ".", "succes");
       if ((d.avertissements || []).length) remarques("Publié, avec une remarque", d.avertissements);
-      aller("equipage", "annonces", type === "evenement" ? "a-venir" : "passes");
+      aller("equipage", "annonces", type === "evenement" ? "a-venir" : "publiees");
       return;
     }
     if (d.incertain) {
@@ -466,7 +468,7 @@ async function composer(zone, E0) {
         toast((d.erreur || "Ce n'est plus un brouillon.") + " Il est dans la liste.", "erreur");
         nouveau(true);
         perime("evenements");
-        aller("equipage", "annonces", d.actuelle.statut === "publie" && d.actuelle.type !== "evenement" ? "passes" : "a-venir");
+        aller("equipage", "annonces", d.actuelle.statut === "publie" && d.actuelle.type !== "evenement" ? "publiees" : "a-venir");
       } else {
         toast("Ce brouillon a changé ailleurs : la version enregistrée est rechargée. Vérifie-la, puis publie.", "erreur");
         chargerElement(d.actuelle);
@@ -506,7 +508,8 @@ async function composer(zone, E0) {
         toast(d.erreur || "Cette publication ne se modifie plus.", "erreur");
         nouveau(true);
         perime("evenements");
-        aller("equipage", "annonces", el.type === "evenement" && el.statut === "publie" && el.phase !== "termine" ? "a-venir" : "passes");
+        aller("equipage", "annonces", el.type === "evenement" && el.statut === "publie" && el.phase !== "termine" ? "a-venir"
+          : el.type !== "evenement" && el.statut === "publie" ? "publiees" : "passes");
       }
       return;
     }
@@ -551,7 +554,9 @@ async function composer(zone, E0) {
     if (!composeur || !apercuZone.isConnected) return;
     const v = composeur.v;
     const distant = apercuDistant && !composeur.sale && String(apercuDistant.id) === String(composeur.id) ? apercuDistant : null;
-    remplacer(apercuZone, apercuDiscord(distant || apercuLocal(v, E, composeur), { local: !distant, destination: destinationDe(E, v) }));
+    // Les textes de la carte réécrits (Textes & noms) : l'aperçu les reprend aussitôt.
+    const apresTextes = async () => { const nE = await charger("evenements", { forcer: true }); if (nE && !nE.erreur) E = nE; majApercu(true); };
+    remplacer(apercuZone, apercuDiscord(distant || apercuLocal(v, E, composeur), { local: !distant, destination: destinationDe(E, v), type: v.type, apresTextes }));
     // Les icônes officielles des métiers (listing, annonce des métiers) viennent du catalogue des affiches.
     if (distant && (v.type === "metiers" || v.type === "listing") && !vueJeu("catalogue")) charger("catalogue").then(() => rendreApercu());
   }
@@ -590,7 +595,7 @@ async function versDiscord(nom, corps) {
   if (r.status === 502 && r.donnees && typeof r.donnees.erreur === "string") noterReseau(true);
   return r;
 }
-const trouver = (E, id) => (E && !E.erreur ? [...(E.brouillons || []), ...(E.a_venir || []), ...(E.passes || [])].find((x) => String(x.id) === String(id)) : null);
+const trouver = (E, id) => (E && !E.erreur ? [...(E.brouillons || []), ...(E.a_venir || []), ...(E.publiees || []), ...(E.passes || [])].find((x) => String(x.id) === String(id)) : null);
 const enLigneSurDiscord = (el) => el.statut === "publie" && !(el.type === "evenement" && el.phase === "termine");
 function messageErreur(r, defaut) {
   const d = r.donnees || {};
@@ -791,6 +796,14 @@ const boutonBloc = (label, style, ic) => ({ label, style, icone: ic, desactive: 
 /** Échapper le Markdown comme `discord.utils.escape_markdown` (le lieu, sur la carte). */
 const echapper = (s) => String(s || "").replace(/([\\*_~`|>#[\]()-])/g, "\\$1");
 
+/** Un texte des cartes tel que la direction l'a réécrit (Textes & noms : `libelles` de clan/evenements), sinon celui
+ *  d'origine ; les variables données remplacées (comme textes.py : seules celles-là). */
+function L(E, cle, defaut, valeurs) {
+  const v = E && E.libelles && E.libelles[cle];
+  const t = typeof v === "string" && v.trim() ? v : defaut;
+  return valeurs ? t.replace(/\{([a-z][a-z0-9_]{0,30})\}/g, (m, nom) => (nom in valeurs ? String(valeurs[nom]) : m)) : t;
+}
+
 /** Un aperçu local, de même forme que celui du serveur (evenements._cartes_*) : il suit la saisie avant l'enregistrement. */
 function apercuLocal(v, E, c) {
   const t = v.type, now = maintenant(), blocs = [];
@@ -801,26 +814,28 @@ function apercuLocal(v, E, c) {
   let rappels = [];
   if (t === "evenement") {
     if (image) blocs.push(image);
-    blocs.push(texteBloc(ligne(v.titre || "(sans titre)", "", 2), ligne("Événement du clan · Clan event", "drapeau", "petit")));
+    blocs.push(texteBloc(ligne(v.titre || "(sans titre)", "", 2), ligne(L(E, "evenements.carte.sous_titre", "Événement du clan · Clan event"), "drapeau", "petit")));
     if (v.texte) blocs.push(texteBloc(ligne(v.texte)));
-    const lq = q ? [ligne("**Début · Starts** <t:" + q + ":F>", "calendrier"), ligne("<t:" + q + ":R>", "minuteur", 3)] : [ligne("**Début · Starts** à choisir · to be set", "calendrier")];
-    if (v.duree_min) lq.push(ligne("**Durée · Duration** " + dureeTxt(v.duree_min), "horloge"));
-    if (v.lieu) lq.push(ligne("**Lieu · Location** RELL Seas · " + echapper(v.lieu), "lieu"));
+    const lq = q ? [ligne(L(E, "evenements.carte.debut", "**Début · Starts** {quand}", { quand: "<t:" + q + ":F>" }), "calendrier"), ligne("<t:" + q + ":R>", "minuteur", 3)]
+      : [ligne(L(E, "evenements.carte.debut_a_choisir", "**Début · Starts** à choisir · to be set"), "calendrier")];
+    if (v.duree_min) lq.push(ligne(L(E, "evenements.carte.duree", "**Durée · Duration** {duree}", { duree: dureeTxt(v.duree_min) }), "horloge"));
+    if (v.lieu) lq.push(ligne(L(E, "evenements.carte.lieu", "**Lieu · Location** RELL Seas · {lieu}", { lieu: echapper(v.lieu) }), "lieu"));
     blocs.push(SEP, texteBloc(...lq));
     if (v.reponses) {
       const places = minutes(v.places);
-      blocs.push(SEP, texteBloc(ligne("**Disponibles · Available — 0" + (places ? " / " + places + " places · spots" : "") + "**", "valider"),
-        ligne("Personne pour l'instant · Nobody yet", "", "petit"), ligne("**Peut-être · Maybe — 0**", "peut_etre"), ligne("**Pas disponibles · Unavailable — 0**", "annuler")));
-      blocs.push({ type: "boutons", boutons: [boutonBloc("Disponible · Available", "succes", "valider"), boutonBloc("Peut-être · Maybe", "secondaire", "peut_etre"),
-        boutonBloc("Pas disponible · Unavailable", "secondaire", "annuler")] });
+      blocs.push(SEP, texteBloc(ligne("**" + L(E, "evenements.carte.disponibles", "Disponibles · Available") + " — 0" + (places ? " / " + places + " " + L(E, "evenements.carte.places", "places · spots") : "") + "**", "valider"),
+        ligne(L(E, "evenements.carte.personne", "Personne pour l'instant · Nobody yet"), "", "petit"), ligne("**" + L(E, "evenements.carte.peut_etre", "Peut-être · Maybe") + " — 0**", "peut_etre"),
+        ligne("**" + L(E, "evenements.carte.pas_disponibles", "Pas disponibles · Unavailable") + " — 0**", "annuler")));
+      blocs.push({ type: "boutons", boutons: [boutonBloc(L(E, "evenements.bouton.dispo", "Disponible · Available"), "succes", "valider"),
+        boutonBloc(L(E, "evenements.bouton.peut_etre", "Peut-être · Maybe"), "secondaire", "peut_etre"), boutonBloc(L(E, "evenements.bouton.pas_dispo", "Pas disponible · Unavailable"), "secondaire", "annuler")] });
     }
-    const pied = [ligne(NOM_CLAN + (v.reserve_clan ? " · Réservé au clan · Clan only" : ""), "ancre", "petit")];
+    const pied = [ligne(NOM_CLAN + (v.reserve_clan ? " · " + L(E, "evenements.carte.reserve", "Réservé au clan · Clan only") : ""), "ancre", "petit")];
     // Les rappels déjà passés ne partiront pas : la carte ne les promet pas (comme le serveur).
     const restants = (v.rappels || []).map(minutes).filter((m) => !q || q - m * 60 > now);
     if (restants.length) {
       const avant = restants.filter((m) => m > 0);
-      pied.push(ligne("Rappels · Reminders : " + [...(avant.length ? [avant.map(dureeTxt).join(", ") + " avant · before"] : []), ...(restants.includes(0) ? ["au début · at start"] : [])].join(" · "), "cloche", "petit"));
-      if (v.mention !== "aucune" && v.reponses) pied.push(ligne("Les rappels mentionnent les disponibles · Reminders ping available members", "", "petit"));
+      pied.push(ligne(L(E, "evenements.carte.rappels", "Rappels · Reminders : {quand}", { quand: [...(avant.length ? [avant.map(dureeTxt).join(", ") + " avant · before"] : []), ...(restants.includes(0) ? ["au début · at start"] : [])].join(" · ") }), "cloche", "petit"));
+      if (v.mention !== "aucune" && v.reponses) pied.push(ligne(L(E, "evenements.carte.rappels_mention", "Les rappels mentionnent les disponibles · Reminders ping available members"), "", "petit"));
     }
     blocs.push(texteBloc(...pied));
     rappels = (v.rappels || []).map(minutes).map((m) => ({ minutes: m, quand: q ? q - m * 60 : null, fait: false, passe: !!q && q - m * 60 <= now }));
@@ -830,13 +845,13 @@ function apercuLocal(v, E, c) {
     blocs.push(texteBloc(ligne(v.titre || "(sans titre)", "", 2)));
     if (v.texte) blocs.push(texteBloc(ligne(v.texte)));
     blocs.push(SEP, texteBloc(ligne(NOM_CLAN + (c && c.publieLe ? " · <t:" + c.publieLe + ":D>" : ""), "ancre", "petit")));
-    blocs.push({ type: "boutons", boutons: [boutonBloc("Vu · Seen" + (c && c.vus ? " · " + c.vus : ""), "succes", "valider")] });
+    blocs.push({ type: "boutons", boutons: [boutonBloc(L(E, "evenements.bouton.vu", "Vu · Seen") + (c && c.vus ? " · " + c.vus : ""), "succes", "valider")] });
   } else {
     const groupement = t === "metiers" ? "metier" : GROUPES[v.groupement] ? v.groupement : "grade";
     const [fr, en] = GROUPES[groupement];
     if (image) blocs.push(image);
     else if (BANDEAUX[t]) blocs.push({ type: "bandeau", cle: BANDEAUX[t][0], titre: BANDEAUX[t][1], url: "/v/" + BANDEAUX[t][0] + ".gif" });
-    blocs.push(texteBloc(ligne(v.titre || NOMS_TYPES[t], "", 2), ligne("**Les membres du clan · Clan members** · par " + fr + " · by " + en, "membres")));
+    blocs.push(texteBloc(ligne(v.titre || L(E, "evenements.liste.titre." + t, NOMS_TYPES[t]), "", 2), ligne("**Les membres du clan · Clan members** · par " + fr + " · by " + en, "membres")));
     if (v.texte) blocs.push(texteBloc(ligne(v.texte)));
     blocs.push(SEP, texteBloc(ligne("Chaque " + fr + ", puis ses membres, d'après les affiches au moment de publier. Enregistre le brouillon : l'aperçu montre alors la liste exacte.", "", "petit")));
     blocs.push(texteBloc(ligne(NOM_CLAN, "ancre", "petit")));
@@ -864,7 +879,12 @@ function apercuDiscord(d, o) {
     icone(r.fait ? "valider" : "cloche", "ic-p"), libRappel(r.minutes), r.quand ? h("span", { classe: "meta" }, " · " + date(r.quand, true)) : null)))) : null;
   const de = d.discord_event && d.discord_event.demande ? h("p", { classe: "meta" }, icone("calendrier", "ic-p"),
     d.discord_event.lien ? " Évènement Discord créé." : d.discord_event.permission === false ? " Évènement Discord : permission manquante." : " L'évènement Discord sera créé à la publication.") : null;
-  return h("div", { classe: "apercu-cadre" }, tete, ou, corps, ...notes, rappels, de);
+  // Les boutons et les libellés de la carte se réécrivent là où on les voit (Textes & noms).
+  const textesCarte = o.type ? bouton("Modifier les textes de la carte", { classe: "p discret", icone: "plume",
+    titre: "Les boutons et les libellés de la carte, à ta façon (Textes & noms)", onclick: () => choisirTextes({ groupe: "evenements", titre: "Les textes de la carte",
+      parties: o.type === "annonce" ? ["Les boutons"] : o.type === "evenement" ? ["Les boutons", "La carte d'un événement", "Les états de la carte", "Les messages dans le post"]
+        : ["Le listing et l'annonce des métiers"], surFermer: o.apresTextes }) }) : null;
+  return h("div", { classe: "apercu-cadre" }, tete, ou, corps, ...notes, rappels, de, textesCarte);
 }
 function carteDiscord(c, ctx) {
   const haut = c.haut ? h("div", { classe: "discord-haut" }, markdown(c.haut, ctx)) : null;
@@ -1129,11 +1149,21 @@ function listeAVenir(E, recharger) {
   if (!l.length) return vide("Rien à venir", "Un événement publié reste ici jusqu'à sa fin, avec son minuteur et les réponses.", "minuteur");
   return [paginer("evt-avenir", l, (el) => carteElement(el, actionsDe(el, recharger)), { pas: 12 })];
 }
+/** Les annonces, annonces des métiers et listings EN LIGNE (sans date) : leur « Vu », les modifier, les retirer. */
+function listePubliees(E, recharger) {
+  const l = (E.publiees || []).slice();
+  if (!l.length) return vide("Aucune annonce en ligne", "Une annonce, l'annonce des métiers ou le listing publiés viennent ici, jusqu'à ce que tu les retires.", "cloche");
+  return [
+    h("p", { classe: "aide" }, "En ligne sur Discord : leur « Vu », les modifier, les retirer. Retirée, une annonce passe dans « Passés »."),
+    E.publiees_total && E.publiees_total > l.length ? h("p", { classe: "aide" }, "Les " + nombre(l.length) + " plus récentes sur " + nombre(E.publiees_total) + ".") : null,
+    paginer("evt-publiees", l, (el) => carteElement(el, actionsDe(el, recharger)), { pas: 12 }),
+  ];
+}
 function listePasses(E, recharger) {
   const l = (E.passes || []).slice();
-  if (!l.length) return vide("Rien de passé pour l'instant", "Les annonces publiées viennent ici, ainsi que les événements terminés, annulés ou retirés.", "coffre");
+  if (!l.length) return vide("Rien de passé pour l'instant", "Les événements terminés, annulés ou retirés viennent ici, et les annonces retirées.", "coffre");
   return [
-    h("p", { classe: "aide" }, "Les annonces, métiers et listings publiés restent ici : leur « Vu », les modifier, les retirer. Les événements terminés, annulés ou retirés y restent 60 jours (rubrique Nettoyage)."),
+    h("p", { classe: "aide" }, "Les événements terminés, annulés ou retirés, et les annonces retirées : ils restent 60 jours (rubrique Nettoyage)."),
     E.passes_total && E.passes_total > l.length ? h("p", { classe: "aide" }, "Les " + nombre(l.length) + " plus récents sur " + nombre(E.passes_total) + ".") : null,
     paginer("evt-passes", l, (el) => carteElement(el, actionsDe(el, recharger)), { pas: 12 }),
   ];

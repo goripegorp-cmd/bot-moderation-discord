@@ -46,6 +46,7 @@ import discord
 
 import diag
 import recrutements
+import textes as textes_du_site
 import visuels
 from ui_v2 import LayoutView
 
@@ -99,27 +100,229 @@ EN_ATTENTE = ("envoye", "en_cours")
 
 COULEUR_LAITON, COULEUR_MER, COULEUR_CIRE, COULEUR_VERT = 0xA8823F, 0x1F4E5A, 0x8E2A24, 0x3F6B3A
 
-#  Les textes envoyés au candidat (FR · EN). Aucun ne dit juste ou faux.
-REFUS_ETAPE1 = ("Tes réponses ne correspondent pas à ce que nous attendons : ce ticket va être clôturé. "
-                "Merci d'avoir créé un ticket.\n"
-                "-# Your answers don't match what we are looking for: this ticket will be closed. "
-                "Thank you for opening a ticket.")
-REFUS_FINAL = ("La direction a étudié ta candidature : elle n'est pas retenue. Ce ticket va être clôturé. "
-               "Merci d'avoir créé un ticket.\n"
-               "-# The leadership has reviewed your application: it was not accepted. This ticket will be closed. "
-               "Thank you for opening a ticket.")
-MERCI = ("Merci, tes réponses sont transmises à la direction.\n"
-         "-# Thank you, your answers have been sent to the leadership.")
-DEJA = ("Tes réponses sont déjà transmises à la direction.\n"
-        "-# Your answers have already been sent to the leadership.")
-SEUL_CANDIDAT = ("Seul le candidat peut répondre à ce questionnaire.\n"
-                 "-# Only the applicant can answer this questionnaire.")
-REMPLACE = ("Ce questionnaire n'est plus ouvert : réponds au plus récent, plus bas dans le ticket.\n"
-            "-# This questionnaire is no longer open: answer the latest one, further down in the ticket.")
-INTROUVABLE = "Ce questionnaire n'existe plus.\n-# This questionnaire no longer exists."
-DEMARRE = "Le bot démarre : réessaie dans un instant.\n-# The bot is starting: try again in a moment."
-SOUCI = "Un souci est survenu : réessaie dans quelques secondes.\n-# Something went wrong: try again in a few seconds."
-RESERVE = "Réservé au fondateur, à la direction et à l'équipe de recrutement."
+#  Les textes envoyés au candidat (FR · EN). Aucun ne dit juste ou faux. 26/10/2026 : chacun est DÉCLARÉ au registre
+#  des textes (`textes.py`) — la direction le réécrit sur le site (Capitainerie → Textes & noms) et le bot emploie le
+#  sien dès l'enregistrement ; la constante garde le texte d'origine.
+_declarer = functools.partial(textes_du_site.declarer, groupe="recrutement")
+_AU_CANDIDAT, _ACCUEIL, _ETAPE2, _BOUTONS = ("Les messages au candidat", "L'accueil du ticket",
+                                            "Le questionnaire de l'étape 2", "Les boutons et les formulaires")
+REFUS_ETAPE1 = _declarer(
+    "recrutement.refus_etape1",
+    "Tes réponses ne correspondent pas à ce que nous attendons : ce ticket va être clôturé. Merci d'avoir créé un "
+    "ticket.\n-# Your answers don't match what we are looking for: this ticket will be closed. Thank you for opening "
+    "a ticket.", titre="Refus de l'étape 1", partie=_AU_CANDIDAT, ordre=1, max_=1500,
+    aide="Posté dans le ticket quand l'étape 1 est refusée, juste avant la fermeture. Le candidat est mentionné "
+         "au-dessus.")
+REFUS_FINAL = _declarer(
+    "recrutement.refus_final",
+    "La direction a étudié ta candidature : elle n'est pas retenue. Ce ticket va être clôturé. Merci d'avoir créé un "
+    "ticket.\n-# The leadership has reviewed your application: it was not accepted. This ticket will be closed. Thank "
+    "you for opening a ticket.", titre="Refus de la candidature", partie=_AU_CANDIDAT, ordre=2, max_=1500,
+    aide="Posté dans le ticket quand la candidature est refusée après l'étape 2, juste avant la fermeture.")
+MERCI = _declarer(
+    "recrutement.merci", "Merci, tes réponses sont transmises à la direction.\n-# Thank you, your answers have been "
+    "sent to the leadership.", titre="Merci, après ses réponses", partie=_AU_CANDIDAT, ordre=3, max_=800,
+    aide="Pour le candidat seul, quand il vient d'envoyer toutes ses réponses.")
+DEJA = _declarer(
+    "recrutement.deja", "Tes réponses sont déjà transmises à la direction.\n-# Your answers have already been sent to "
+    "the leadership.", titre="Réponses déjà envoyées", partie=_AU_CANDIDAT, ordre=4, max_=800,
+    aide="Pour le candidat seul, s'il rouvre un questionnaire auquel il a déjà répondu.")
+SEUL_CANDIDAT = _declarer(
+    "recrutement.seul_candidat", "Seul le candidat peut répondre à ce questionnaire.\n-# Only the applicant can answer "
+    "this questionnaire.", titre="Un autre clique « Répondre »", partie=_AU_CANDIDAT, ordre=5, max_=800,
+    aide="Pour la personne seule, quand quelqu'un d'autre que le candidat touche « Répondre ».")
+REMPLACE = _declarer(
+    "recrutement.remplace", "Ce questionnaire n'est plus ouvert : réponds au plus récent, plus bas dans le ticket.\n-# "
+    "This questionnaire is no longer open: answer the latest one, further down in the ticket.",
+    titre="Un ancien questionnaire", partie=_AU_CANDIDAT, ordre=6, max_=800,
+    aide="Pour le candidat seul, s'il répond à un questionnaire remplacé par un plus récent.")
+INTROUVABLE = _declarer(
+    "recrutement.introuvable", "Ce questionnaire n'existe plus.\n-# This questionnaire no longer exists.",
+    titre="Questionnaire disparu", partie=_AU_CANDIDAT, ordre=7, max_=800,
+    aide="Pour la personne seule, quand le questionnaire a été effacé.")
+_declarer("recrutement.fermeture.acceptee", "Candidature acceptée", titre="Raison de fermeture : acceptée",
+          partie=_AU_CANDIDAT, ordre=8, max_=200, lignes=False,
+          aide="La raison lue dans le message privé et dans l'annonce de fermeture du ticket.")
+_declarer("recrutement.fermeture.refusee", "Candidature refusée", titre="Raison de fermeture : refusée",
+          partie=_AU_CANDIDAT, ordre=9, max_=200, lignes=False,
+          aide="La raison lue dans le message privé et dans l'annonce de fermeture (le motif interne reste à l'équipe).")
+_declarer("recrutement.accueil.titre", "### Bienvenue · Welcome", titre="Le titre de l'accueil", partie=_ACCUEIL,
+          ordre=20, max_=200, aide="En tête de la carte d'accueil, à l'ouverture d'un ticket du clan.")
+_declarer("recrutement.accueil.etapes",
+          "**Ta candidature se passe en deux étapes.**\n**1.** Le questionnaire que tu viens de remplir : la direction "
+          "le lit.\n**2.** S'il convient, un questionnaire de **{nombre}** sur le studio, le jeu et ses dernières "
+          "actualités, ici même, dans ce ticket.\n-# Your application has two steps. 1. The form you just filled in: "
+          "the leadership reads it. 2. If it fits, a {nombre_en} quiz about the studio, the game and its latest news, "
+          "right here in this ticket.", titre="Les deux étapes", partie=_ACCUEIL, ordre=21, max_=1500,
+          variables=(("nombre", "le nombre de questions de l'étape 2 (« 10 questions »)"),
+                     ("nombre_en", "le même nombre, en anglais (« 10-question »)")),
+          aide="Ce que le candidat lit à l'ouverture : les deux étapes et le nombre de questions qui l'attendent.")
+_declarer("recrutement.wiki",
+          "Toutes les réponses se trouvent sur le wiki : dans les pages ci-dessous, ou à un clic depuis elles.\n-# "
+          "Every answer is on the wiki: in the pages below, or one click away from them.",
+          titre="Où sont les réponses", partie=_ACCUEIL, ordre=22, max_=500, requis=False,
+          aide="Au-dessus des liens, dans l'accueil et dans le questionnaire. Vide : la phrase disparaît.")
+_declarer("recrutement.liens.titre", "**Où trouver les réponses** · *Where to find the answers*",
+          titre="Le titre des liens", partie=_ACCUEIL, ordre=23, max_=150, lignes=False,
+          aide="Au-dessus de la liste des liens donnés au candidat.")
+_declarer("recrutement.etape2.titre", "## Étape 2 — {nombre}\n-# Step 2 — {nombre}", titre="Le titre de l'étape 2",
+          partie=_ETAPE2, ordre=30, max_=300, variables=(("nombre", "le nombre de questions (« 10 questions »)"),),
+          aide="En tête du questionnaire posté dans le ticket.")
+_declarer("recrutement.etape2.titre_renvoi",
+          "## Étape 2 — nouveau questionnaire · {nombre}\n-# Step 2 — new questionnaire · {nombre}",
+          titre="Le titre d'un nouveau questionnaire", partie=_ETAPE2, ordre=31, max_=300,
+          variables=(("nombre", "le nombre de questions (« 10 questions »)"),),
+          aide="Quand la direction renvoie d'autres questions à la place des premières.")
+_declarer("recrutement.etape2.intro",
+          "Réponds à chaque question avec tes propres mots.\n-# Answer each question in your own words.",
+          titre="La consigne", partie=_ETAPE2, ordre=32, max_=600,
+          aide="Sous le titre du questionnaire ; le candidat est mentionné juste devant.")
+_declarer("recrutement.etape2.formulaires",
+          "Tu réponds en {pages} formulaires de {par_page} questions au plus : chacun est gardé dès que tu l'envoies, "
+          "tu peux faire une pause et reprendre avec « Répondre ».\n-# You answer in {pages} forms of up to {par_page} "
+          "questions: each one is saved as soon as you send it; you can take a break and resume with \"Answer\".",
+          titre="Plusieurs formulaires", partie=_ETAPE2, ordre=33, max_=600,
+          variables=(("pages", "le nombre de formulaires"), ("par_page", "le nombre de questions par formulaire")),
+          aide="Quand les questions tiennent en plusieurs formulaires (5 questions chacun).")
+_declarer("recrutement.etape2.un_formulaire", "Tu réponds dans un seul formulaire.\n-# You answer in a single form.",
+          titre="Un seul formulaire", partie=_ETAPE2, ordre=34, max_=400,
+          aide="Quand toutes les questions tiennent dans un seul formulaire.")
+_declarer("recrutement.formulaire.groupe", "**Formulaire {page}/{pages}** · *Form {page}/{pages}*",
+          titre="Le titre de chaque formulaire", partie=_ETAPE2, ordre=35, max_=100, lignes=False,
+          variables=(("page", "le numéro du formulaire"), ("pages", "le nombre de formulaires")),
+          aide="Au-dessus de chaque groupe de questions, quand il y a plusieurs formulaires.")
+_declarer("recrutement.etape2.pied",
+          "-# La direction lit tes réponses : le résultat ne s'affiche pas ici. · The leadership reads your answers: "
+          "the result isn't shown here.", titre="Le bas du questionnaire", partie=_ETAPE2, ordre=36, max_=400,
+          aide="Sous les questions, juste au-dessus du bouton « Répondre ».")
+_declarer("recrutement.etape2.suite", "## Étape 2 — suite · Step 2 — continued", titre="La suite du questionnaire",
+          partie=_ETAPE2, ordre=37, max_=150, aide="En tête du message suivant, quand les questions ne tiennent pas dans "
+                                                   "un seul.")
+_declarer("recrutement.etape2.envoyees",
+          "**Réponses envoyées** · *Answers sent* — {quand}\n-# Merci : la direction les lit. · Thank you: the "
+          "leadership reads them.", titre="Réponses envoyées (la carte)", partie=_ETAPE2, ordre=38, max_=400,
+          variables=(("quand", "la date d'envoi"),),
+          aide="Remplace le bouton « Répondre » quand le candidat a tout envoyé.")
+_declarer("recrutement.etape2.remplace",
+          "**Questionnaire remplacé** · *Questionnaire replaced*\n-# Les nouvelles questions sont plus bas dans le "
+          "ticket. · The new questions are further down in the ticket.", titre="Questionnaire remplacé (la carte)",
+          partie=_ETAPE2, ordre=39, max_=400, aide="Remplace le bouton quand un nouveau questionnaire est envoyé.")
+_declarer("recrutement.etape2.clos", "**Questionnaire clos** · *Questionnaire closed*",
+          titre="Questionnaire clos (la carte)", partie=_ETAPE2, ordre=40, max_=300,
+          aide="Remplace le bouton quand la candidature est décidée avant ses réponses.")
+_declarer("recrutement.bouton.repondre", "Répondre · Answer", titre="Le bouton « Répondre »", partie=_BOUTONS,
+          ordre=50, max_=80, lignes=False, aide="Sous le questionnaire : il ouvre le formulaire.")
+_declarer("recrutement.bouton.continuer", "Continuer · page {page}/{pages}", titre="Le bouton « Continuer »",
+          partie=_BOUTONS, ordre=51, max_=70, lignes=False,
+          variables=(("page", "le formulaire suivant"), ("pages", "le nombre de formulaires")),
+          aide="Après un formulaire envoyé, pour passer au suivant.")
+_declarer("recrutement.formulaire.titre", "Étape 2 · Step 2 — page {page}/{pages}", titre="Le titre du formulaire",
+          partie=_BOUTONS, ordre=52, max_=40, lignes=False,
+          variables=(("page", "le numéro du formulaire"), ("pages", "le nombre de formulaires")),
+          aide="En haut de la fenêtre où le candidat écrit (45 caractères au plus sur Discord, variables comprises).")
+_declarer("recrutement.formulaire.reponse", "Ta réponse · Your answer", titre="L'exemple dans chaque champ",
+          partie=_BOUTONS, ordre=53, max_=100, lignes=False, aide="Le texte gris dans chaque champ de réponse.")
+_declarer("recrutement.page_enregistree",
+          "Page {page}/{pages} enregistrée. Continue avec la page {suivante}/{pages} — ou plus tard, avec « Répondre » "
+          "sous les questions.\n-# Page {page}/{pages} saved. Continue with page {suivante}/{pages} — or later, with "
+          "\"Answer\" under the questions.", titre="Un formulaire enregistré", partie=_BOUTONS, ordre=54, max_=800,
+          variables=(("page", "le formulaire envoyé"), ("pages", "le nombre de formulaires"),
+                     ("suivante", "le formulaire suivant")),
+          aide="Pour le candidat seul, après chaque formulaire (sauf le dernier).")
+_declarer("recrutement.reponse_manquante",
+          "Chaque question demande une réponse : rouvre le formulaire avec « Répondre ».\n-# Every question needs an "
+          "answer: open the form again with \"Answer\".", titre="Une réponse manque", partie=_BOUTONS, ordre=55,
+          max_=600, aide="Pour le candidat seul, quand un champ est resté vide.")
+#  La carte de l'équipe, dans le ticket (la décision de l'étape 1, puis où en est la candidature), ses boutons, le
+#  formulaire du refus et le lien du site : réécrits eux aussi (le fondateur, 26/10 : « tout le site, à sa sauce »).
+_EQUIPE = "La carte de l'équipe (dans le ticket)"
+_PAR, _QUAND = ("par", "qui l'a fait (mention)"), ("quand", "il y a combien de temps (minuteur de Discord)")
+_QUESTIONS = ("questions", "« **10 questions** », ou « le questionnaire » si le nombre n'est pas connu")
+_declarer("recrutement.equipe.decision",
+          "### Étape 1 · décision\nLis le questionnaire d'ouverture ci-dessus, puis :\n- **Envoyer le questionnaire** : "
+          "l'étape 2 part tout de suite ({combien}la sélection par défaut du site).\n- **Choisir sur le site** : coche "
+          "toi-même les questions, sur sa fiche.\n- **Refuser l'étape 1** : un message automatique est posté, puis le "
+          "ticket se ferme.\n-# Réservé au fondateur, à la direction et à l'équipe de recrutement. Le candidat ne voit "
+          "jamais les réponses attendues.", titre="La décision de l'étape 1", partie=_EQUIPE, ordre=70, max_=1500,
+          variables=(("combien", "le nombre de questions et une virgule (« 10 questions, »), vide s'il n'est pas "
+                                 "connu"),),
+          aide="Posée dans le ticket sous le questionnaire d'ouverture ; ses boutons sont réservés à l'équipe.")
+_declarer("recrutement.equipe.envoye",
+          "### Étape 1 validée\nQuestionnaire de l'étape 2 envoyé par {par} {quand} : {questions}.\n-# Les réponses "
+          "arrivent sur le site (rubrique Candidatures) : c'est là qu'on les corrige.", titre="Étape 1 validée",
+          partie=_EQUIPE, ordre=71, max_=800, variables=(_PAR, _QUAND, _QUESTIONS),
+          aide="La même carte, une fois le questionnaire de l'étape 2 envoyé.")
+_declarer("recrutement.equipe.reponses",
+          "### Réponses reçues\n{candidat} a répondu à {questions} {quand}.\n-# À corriger sur le site : rien n'est jugé "
+          "ici.", titre="Réponses reçues", partie=_EQUIPE, ordre=72, max_=800,
+          variables=(("candidat", "le candidat (mention)"), _QUESTIONS, _QUAND),
+          aide="La même carte, quand le candidat a répondu à tout.")
+_declarer("recrutement.equipe.accepte",
+          "### Candidature acceptée\nPar {par} {quand} : rôle du clan donné, le ticket se ferme.",
+          titre="Candidature acceptée (la carte)", partie=_EQUIPE, ordre=73, max_=600, variables=(_PAR, _QUAND),
+          aide="La même carte, la candidature acceptée.")
+_declarer("recrutement.equipe.refus_etape1",
+          "### Étape 1 refusée\nPar {par} {quand} : le message automatique est posté, le ticket se ferme dans un "
+          "instant.", titre="Étape 1 refusée (la carte)", partie=_EQUIPE, ordre=74, max_=600, variables=(_PAR, _QUAND),
+          aide="La même carte, l'étape 1 refusée.")
+_declarer("recrutement.equipe.refuse",
+          "### Candidature refusée\nPar {par} {quand} : le message automatique est posté, le ticket se ferme dans un "
+          "instant.", titre="Candidature refusée (la carte)", partie=_EQUIPE, ordre=75, max_=600,
+          variables=(_PAR, _QUAND), aide="La même carte, la candidature refusée après l'étape 2.")
+for _k, (_cle, _defaut, _titre, _aide) in enumerate((
+        ("envoyer", "Envoyer le questionnaire", "Le bouton « Envoyer le questionnaire »", "L'étape 2 part tout de suite."),
+        ("site", "Choisir sur le site", "Le bouton « Choisir sur le site »", "Le lien personnel du site, sur la fiche."),
+        ("refuser", "Refuser l'étape 1", "Le bouton « Refuser l'étape 1 »", "Il ouvre le formulaire du refus."),
+        ("ouvrir", "Ouvrir sur le site", "Le bouton « Ouvrir sur le site »", "Une fois le questionnaire envoyé."),
+        ("corriger", "Corriger sur le site", "Le bouton « Corriger sur le site »", "Une fois les réponses reçues."),
+        ("fiche", "Ouvrir sa fiche sur le site", "Le bouton du lien personnel", "Sous le lien personnel du site."))):
+    _declarer(f"recrutement.equipe.bouton.{_cle}", _defaut, titre=_titre, partie=_EQUIPE, ordre=76 + _k, max_=80,
+              lignes=False, aide=_aide)
+_declarer("recrutement.equipe.refus.titre", "Refuser l'étape 1", titre="Le formulaire du refus : son titre",
+          partie=_EQUIPE, ordre=82, max_=45, lignes=False, aide="La fenêtre ouverte par « Refuser l'étape 1 ».")
+_declarer("recrutement.equipe.refus.note", "Note pour l'équipe (facultative)", titre="Le formulaire du refus : le champ",
+          partie=_EQUIPE, ordre=83, max_=45, lignes=False, aide="Le nom du champ de la note.")
+_declarer("recrutement.equipe.refus.note_aide", "Le candidat ne la voit pas : il lit le message automatique.",
+          titre="Le formulaire du refus : sous le champ", partie=_EQUIPE, ordre=84, max_=100, lignes=False,
+          requis=False, aide="La petite ligne sous le nom du champ. Vide : rien ne s'affiche.")
+_declarer("recrutement.equipe.refus.exemple", "Pseudo Roblox invalide, réponses vides…",
+          titre="Le formulaire du refus : l'exemple", partie=_EQUIPE, ordre=85, max_=100, lignes=False, requis=False,
+          aide="Le texte gris dans le champ.")
+_declarer("recrutement.equipe.lien",
+          "Ton lien personnel : il ne s'ouvre qu'une fois, valable 24 h. Ne le partage pas.\n-# Sur le site : coche les "
+          "questions dans la banque, ou reprends un modèle ou la sélection précédente, puis envoie l'étape 2.",
+          titre="Le lien personnel (pour soi)", partie=_EQUIPE, ordre=86, max_=800,
+          aide="Pour la personne seule, après « Choisir sur le site ».")
+_declarer("recrutement.equipe.reserve", "Réservé au fondateur, à la direction et à l'équipe de recrutement.",
+          titre="Réservé à l'équipe (pour soi)", partie=_EQUIPE, ordre=87, max_=400,
+          aide="Quelqu'un hors de l'équipe touche un bouton de la carte (le candidat, par exemple).")
+_declarer("recrutement.equipe.en_cours", "L'envoi du questionnaire est déjà en cours.",
+          titre="Envoi déjà en cours (pour soi)", partie=_EQUIPE, ordre=88, max_=400,
+          aide="Un second clic sur « Envoyer le questionnaire » pendant l'envoi.")
+
+
+def _t(guild_id, cle: str, **valeurs) -> str:
+    """Un texte que la direction peut réécrire (Capitainerie → Textes & noms) : le sien, sinon celui d'origine."""
+    return textes_du_site.texte_cache(guild_id, cle, **valeurs)
+
+
+def _questions_txt(n: int) -> tuple:
+    """(« 10 questions », « 10-question ») : le nombre annoncé au candidat, en français et en anglais."""
+    n = int(n or 0)
+    return (f"{n} question{'s' if n > 1 else ''}", f"{n}-question") if n > 0 else ("quelques questions", "short")
+_COINCE = "Quand quelque chose coince (pour la personne seule)"
+DEMARRE = _declarer("recrutement.demarre", "Le bot démarre : réessaie dans un instant.\n-# The bot is starting: try "
+                    "again in a moment.", titre="Le bot démarre", partie=_COINCE, ordre=90, max_=400,
+                    aide="Un clic pendant le démarrage du bot.")
+SOUCI = _declarer("recrutement.souci", "Un souci est survenu : réessaie dans quelques secondes.\n-# Something went "
+                  "wrong: try again in a few seconds.", titre="Un souci", partie=_COINCE, ordre=91, max_=400,
+                  aide="Une erreur imprévue (elle est aussi notée au journal du bot).")
+
+
+def _gid(i) -> int:
+    """Le serveur d'une interaction (0 hors serveur : les textes d'origine)."""
+    return int(getattr(getattr(i, "guild", None), "id", 0) or 0)
+RESERVE = textes_du_site.defaut("recrutement.equipe.reserve")
 DISCORD_HS = "Discord ne répond pas : réessaie dans un instant."
 FERME = "Ce ticket n'est plus ouvert."
 
@@ -1002,11 +1205,11 @@ def premiere_incomplete(qs: list, reponses: dict) -> int | None:
     return None
 
 
-def _bloc_liens(liens_: list) -> str:
+def _bloc_liens(liens_: list, guild_id: int = 0) -> str:
     """« Où trouver les réponses » : les liens, dans la place d'une carte (les descriptions tombent d'abord)."""
     if not liens_:
         return ""
-    tete = "**Où trouver les réponses** · *Where to find the answers*"
+    tete = _t(guild_id, "recrutement.liens.titre")
 
     def ligne(lien, avec_desc):
         titre = _md(lien["titre"]).replace("[", "(").replace("]", ")")
@@ -1027,25 +1230,18 @@ def _bloc_liens(liens_: list) -> str:
     return "\n".join([tete, *garde, f"-# + {reste} lien(s) : demande-les à la direction · ask the leadership"])
 
 
-def carte_accueil(texte_panneau: str, nom_panneau: str, nombre: int, liens_: list) -> LayoutView:
-    """L'accueil d'un ticket de recrutement : les deux étapes, le nombre de questions de l'étape 2, les liens."""
-    s = "s" if nombre > 1 else ""
-    combien, combien_en = (f"de **{nombre} question{s}** ", f"{nombre}-question ") if nombre > 0 else ("", "")
-    ou = " Toutes les réponses se trouvent sur le wiki : dans les pages ci-dessous, ou à un clic depuis elles." if liens_ else ""
-    ou_en = " Every answer is on the wiki: in the pages below, or one click away from them." if liens_ else ""
-    items = [discord.ui.TextDisplay("### Bienvenue · Welcome")]
+def carte_accueil(texte_panneau: str, nom_panneau: str, nombre: int, liens_: list, guild_id: int = 0) -> LayoutView:
+    """L'accueil d'un ticket de recrutement : les deux étapes, le nombre de questions de l'étape 2, les liens. Les
+    textes sont ceux du serveur (`guild_id`, Textes & noms), sinon ceux d'origine."""
+    nb, nb_en = _questions_txt(nombre)
+    items = [discord.ui.TextDisplay(_t(guild_id, "recrutement.accueil.titre"))]
     if texte_panneau:
         items.append(discord.ui.TextDisplay(str(texte_panneau)[:1500]))
-    items.append(discord.ui.TextDisplay(
-        "**Ta candidature se passe en deux étapes.**\n"
-        "**1.** Le questionnaire que tu viens de remplir : la direction le lit.\n"
-        f"**2.** S'il convient, un questionnaire {combien}sur le studio, le jeu et ses dernières actualités, ici même, "
-        f"dans ce ticket.{ou}\n"
-        f"-# Your application has two steps. 1. The form you just filled in: the leadership reads it. 2. If it fits, "
-        f"a {combien_en}quiz about the studio, the game and its latest news, right here in this ticket.{ou_en}"))
-    bloc = _bloc_liens(liens_)
+    items.append(discord.ui.TextDisplay(_t(guild_id, "recrutement.accueil.etapes", nombre=nb, nombre_en=nb_en)))
+    bloc = _bloc_liens(liens_, guild_id)
     if bloc:
-        items += [discord.ui.Separator(), discord.ui.TextDisplay(bloc)]
+        wiki = _t(guild_id, "recrutement.wiki")
+        items += [discord.ui.Separator(), discord.ui.TextDisplay("\n".join(x for x in (wiki, bloc) if x))]
     if nom_panneau:
         items.append(discord.ui.TextDisplay(f"-# {_md(nom_panneau)[:80]}"))
     v = LayoutView(timeout=None)
@@ -1054,40 +1250,35 @@ def carte_accueil(texte_panneau: str, nom_panneau: str, nombre: int, liens_: lis
 
 
 def carte_etape1(tid: int, etat: str = "attente", *, nombre: int = 0, par: int = 0, candidat: int = 0,
-                 quand: int = 0) -> LayoutView:
-    """La carte de l'équipe, dans le ticket : la décision de l'étape 1, puis où en est la candidature."""
+                 quand: int = 0, guild_id: int = 0) -> LayoutView:
+    """La carte de l'équipe, dans le ticket : la décision de l'étape 1, puis où en est la candidature. Ses textes et
+    ses boutons sont ceux du serveur (Textes & noms), sinon ceux d'origine."""
     s = "s" if nombre > 1 else ""
     q = f"**{nombre} question{s}**" if nombre else "le questionnaire"
+    qui, depuis_ = f"<@{int(par)}>", f"<t:{int(quand)}:R>"
+    gid = int(guild_id or 0)
+
+    def bouton(d: str, cle: str):
+        return BoutonEtape1(d, tid, _t(gid, f"recrutement.equipe.bouton.{cle}"))
     rangee = None
     if etat == "attente":
-        combien = f"{nombre} question{s}, " if nombre else ""
-        texte = ("### Étape 1 · décision\n"
-                 "Lis le questionnaire d'ouverture ci-dessus, puis :\n"
-                 f"- **Envoyer le questionnaire** : l'étape 2 part tout de suite ({combien}la sélection par défaut "
-                 "du site).\n"
-                 "- **Choisir sur le site** : coche toi-même les questions, sur sa fiche.\n"
-                 "- **Refuser l'étape 1** : un message automatique est posté, puis le ticket se ferme.\n"
-                 "-# Réservé au fondateur, à la direction et à l'équipe de recrutement. Le candidat ne voit jamais les "
-                 "réponses attendues.")
-        rangee = discord.ui.ActionRow(BoutonEtape1("e", tid), BoutonEtape1("s", tid), BoutonEtape1("r", tid))
+        texte = _t(gid, "recrutement.equipe.decision", combien=f"{nombre} question{s}, " if nombre else "")
+        rangee = discord.ui.ActionRow(bouton("e", "envoyer"), bouton("s", "site"), bouton("r", "refuser"))
         couleur = COULEUR_LAITON
     elif etat == "envoye":
-        texte = (f"### Étape 1 validée\nQuestionnaire de l'étape 2 envoyé par <@{int(par)}> <t:{int(quand)}:R> : {q}.\n"
-                 "-# Les réponses arrivent sur le site (rubrique Candidatures) : c'est là qu'on les corrige.")
-        rangee = discord.ui.ActionRow(BoutonEtape1("s", tid, "Ouvrir sur le site"))
+        texte = _t(gid, "recrutement.equipe.envoye", par=qui, quand=depuis_, questions=q)
+        rangee = discord.ui.ActionRow(bouton("s", "ouvrir"))
         couleur = COULEUR_VERT
     elif etat == "reponses":
-        texte = (f"### Réponses reçues\n<@{int(candidat)}> a répondu à {q} <t:{int(quand)}:R>.\n"
-                 "-# À corriger sur le site : rien n'est jugé ici.")
-        rangee = discord.ui.ActionRow(BoutonEtape1("s", tid, "Corriger sur le site"))
+        texte = _t(gid, "recrutement.equipe.reponses", candidat=f"<@{int(candidat)}>", questions=q, quand=depuis_)
+        rangee = discord.ui.ActionRow(bouton("s", "corriger"))
         couleur = COULEUR_MER
     elif etat == "accepte":
-        texte = f"### Candidature acceptée\nPar <@{int(par)}> <t:{int(quand)}:R> : rôle du clan donné, le ticket se ferme."
+        texte = _t(gid, "recrutement.equipe.accepte", par=qui, quand=depuis_)
         couleur = COULEUR_VERT
     else:
-        quoi = "Étape 1 refusée" if etat == "refus_etape1" else "Candidature refusée"
-        texte = (f"### {quoi}\nPar <@{int(par)}> <t:{int(quand)}:R> : le message automatique est posté, "
-                 "le ticket se ferme dans un instant.")
+        texte = _t(gid, "recrutement.equipe.refus_etape1" if etat == "refus_etape1" else "recrutement.equipe.refuse",
+                   par=qui, quand=depuis_)
         couleur = COULEUR_CIRE
     items = [discord.ui.TextDisplay(texte)] + ([rangee] if rangee is not None else [])
     v = LayoutView(timeout=None)
@@ -1095,12 +1286,12 @@ def carte_etape1(tid: int, etat: str = "attente", *, nombre: int = 0, par: int =
     return v
 
 
-def _groupes(qs: list) -> list:
+def _groupes(qs: list, guild_id: int = 0) -> list:
     """Les questions, en entier, par formulaire (« Formulaire 1/2 ») : ce que le candidat lit avant de répondre."""
     pages = nb_pages(len(qs))
     out = []
     for p in range(1, pages + 1):
-        lignes = [f"**Formulaire {p}/{pages}** · *Form {p}/{pages}*"] if pages > 1 else []
+        lignes = [_t(guild_id, "recrutement.formulaire.groupe", page=p, pages=pages)] if pages > 1 else []
         lignes += [f"**{int(q['rang'])}.** {_md(q['question'])}" for q in questions_de_la_page(qs, p)]
         out.append("\n".join(lignes))
     return out
@@ -1111,44 +1302,34 @@ def cartes_etape2(envoi: dict, etat: str = "ouvert", *, quand: int = 0) -> list:
     le bouton « Répondre » est sur le dernier. `etat` : ouvert · repondu · remplace · clos. Ni réponse attendue, ni
     variante, ni source : seulement les questions et les liens. Un nouveau questionnaire (`renvoi`) le dit."""
     qs = envoi["questions"]
+    gid = int(envoi.get("guild_id") or 0)
     n, pages = len(qs), nb_pages(len(qs))
-    s = "s" if n > 1 else ""
     renvoi = bool(envoi.get("renvoi"))
-    titre = (f"## Étape 2 — nouveau questionnaire · {n} question{s}\n-# Step 2 — new questionnaire · {n} question{s}"
-             if renvoi else f"## Étape 2 — {n} question{s}\n-# Step 2 — {n} question{s}")
+    titre = _t(gid, "recrutement.etape2.titre_renvoi" if renvoi else "recrutement.etape2.titre",
+               nombre=_questions_txt(n)[0])
     liens_ = envoi.get("liens") or []
-    ou = " Toutes les réponses se trouvent sur le wiki : dans les pages ci-dessous, ou à un clic depuis elles." if liens_ else ""
-    ou_en = " Every answer is on the wiki: in the pages below, or one click away from them." if liens_ else ""
-    if pages > 1:
-        forme = (f" Tu réponds en {pages} formulaires de {PAR_PAGE} questions au plus : chacun est gardé dès que tu "
-                 "l'envoies, tu peux faire une pause et reprendre avec « Répondre ».")
-        forme_en = (f" You answer in {pages} forms of up to {PAR_PAGE} questions: each one is saved as soon as you "
-                    "send it; you can take a break and resume with \"Answer\".")
-    else:
-        forme, forme_en = " Tu réponds dans un seul formulaire.", " You answer in a single form."
-    intro = (f"<@{int(envoi['candidat_id'])}> Réponds à chaque question avec tes propres mots.{ou}{forme}\n"
-             f"-# Answer each question in your own words.{ou_en}{forme_en}")
-    pied = ("-# La direction lit tes réponses : le résultat ne s'affiche pas ici. "
-            "· The leadership reads your answers: the result isn't shown here.")
+    forme = (_t(gid, "recrutement.etape2.formulaires", pages=pages, par_page=PAR_PAGE) if pages > 1
+             else _t(gid, "recrutement.etape2.un_formulaire"))
+    intro = f"<@{int(envoi['candidat_id'])}> " + _t(gid, "recrutement.etape2.intro") + "\n" + forme
+    pied = _t(gid, "recrutement.etape2.pied")
     if etat == "repondu":
-        fin = discord.ui.TextDisplay(f"**Réponses envoyées** · *Answers sent* — <t:{int(quand or _maintenant())}:f>\n"
-                                     "-# Merci : la direction les lit. · Thank you: the leadership reads them.")
+        fin = discord.ui.TextDisplay(_t(gid, "recrutement.etape2.envoyees", quand=f"<t:{int(quand or _maintenant())}:f>"))
     elif etat == "remplace":
-        fin = discord.ui.TextDisplay("**Questionnaire remplacé** · *Questionnaire replaced*\n"
-                                     "-# Les nouvelles questions sont plus bas dans le ticket. "
-                                     "· The new questions are further down in the ticket.")
+        fin = discord.ui.TextDisplay(_t(gid, "recrutement.etape2.remplace"))
     elif etat == "clos":
-        fin = discord.ui.TextDisplay("**Questionnaire clos** · *Questionnaire closed*")
+        fin = discord.ui.TextDisplay(_t(gid, "recrutement.etape2.clos"))
     else:
-        fin = discord.ui.ActionRow(BoutonRepondre(int(envoi["id"])))
-    bloc = _bloc_liens(liens_)
+        fin = discord.ui.ActionRow(BoutonRepondre(int(envoi["id"]), _t(gid, "recrutement.bouton.repondre")))
+    bloc = _bloc_liens(liens_, gid)
+    if bloc:
+        bloc = "\n".join(x for x in (_t(gid, "recrutement.wiki"), bloc) if x)
     messages = [[discord.ui.TextDisplay(titre), discord.ui.TextDisplay(intro)]
                 + ([discord.ui.Separator(), discord.ui.TextDisplay(bloc)] if bloc else []) + [discord.ui.Separator()]]
     taille = len(titre) + len(intro) + len(bloc)
     reserve = len(pied) + 260
-    for texte in _groupes(qs):
+    for texte in _groupes(qs, gid):
         if taille + len(texte) > TEXTE_MESSAGE - reserve:
-            suite = "## Étape 2 — suite · Step 2 — continued"
+            suite = _t(gid, "recrutement.etape2.suite")
             messages.append([discord.ui.TextDisplay(suite)])
             taille = len(suite)
         messages[-1].append(discord.ui.TextDisplay(texte))
@@ -1220,7 +1401,7 @@ async def _sans_echec(i, travail) -> None:
         _log("[RECRUTEMENT][E7] bouton en échec")
         _log(f"[RECRUTEMENT][E7:DETAIL] {type(ex).__name__} {ex}")
         try:
-            await _avis(i, SOUCI, couleur=COULEUR_CIRE)
+            await _avis(i, _t(_gid(i), "recrutement.souci"), couleur=COULEUR_CIRE)
         except discord.HTTPException as ex2:
             _log(f"[RECRUTEMENT][E7:DETAIL] réponse impossible {type(ex2).__name__}")
 
@@ -1252,9 +1433,9 @@ class BoutonEtape1(discord.ui.DynamicItem[discord.ui.Button], template=r"rq:e1:(
 class BoutonRepondre(discord.ui.DynamicItem[discord.ui.Button], template=r"rq:rep:(?P<eid>\d+)"):
     """« Répondre » sous la carte de l'étape 2 : le candidat seul ; reprend à la première page sans réponse."""
 
-    def __init__(self, envoi: int):
+    def __init__(self, envoi: int, libelle: str = ""):
         self.envoi = int(envoi)
-        super().__init__(discord.ui.Button(label="Répondre · Answer", style=discord.ButtonStyle.primary,
+        super().__init__(discord.ui.Button(label=(libelle or "Répondre · Answer")[:80], style=discord.ButtonStyle.primary,
                                            emoji=_icone("modifier"), custom_id=f"rq:rep:{int(envoi)}"))
 
     @classmethod
@@ -1268,9 +1449,9 @@ class BoutonRepondre(discord.ui.DynamicItem[discord.ui.Button], template=r"rq:re
 class BoutonPage(discord.ui.DynamicItem[discord.ui.Button], template=r"rq:pg:(?P<eid>\d+):(?P<p>\d+)"):
     """« Continuer · page 2/3 », dans le mot pour soi qui suit un formulaire."""
 
-    def __init__(self, envoi: int, page: int, pages: int = 0):
+    def __init__(self, envoi: int, page: int, pages: int = 0, libelle: str = ""):
         self.envoi, self.page = int(envoi), int(page)
-        libelle = f"Continuer · page {int(page)}/{int(pages)}" if pages else f"Continuer · page {int(page)}"
+        libelle = libelle or (f"Continuer · page {int(page)}/{int(pages)}" if pages else f"Continuer · page {int(page)}")
         super().__init__(discord.ui.Button(label=libelle[:80], style=discord.ButtonStyle.primary,
                                            emoji=_icone("suivant"), custom_id=f"rq:pg:{int(envoi)}:{int(page)}"))
 
@@ -1291,7 +1472,7 @@ async def _formulaire_en_echec(i, ou: str, error: Exception) -> None:
     _log("[RECRUTEMENT][E7] formulaire en échec")
     _log(f"[RECRUTEMENT][E7:DETAIL] {ou} {type(error).__name__} {error}")
     try:
-        await _avis(i, SOUCI, couleur=COULEUR_CIRE)
+        await _avis(i, _t(_gid(i), "recrutement.souci"), couleur=COULEUR_CIRE)
     except discord.HTTPException as ex:
         _log(f"[RECRUTEMENT][E7:DETAIL] réponse impossible {type(ex).__name__}")
 
@@ -1299,13 +1480,14 @@ async def _formulaire_en_echec(i, ou: str, error: Exception) -> None:
 class FormulaireRefus(discord.ui.Modal):
     """« Refuser l'étape 1 » : le formulaire est la confirmation (un clic de travers ne ferme rien)."""
 
-    def __init__(self, ticket: int):
-        super().__init__(title="Refuser l'étape 1", timeout=600)
+    def __init__(self, ticket: int, guild_id: int = 0):
+        gid = int(guild_id or 0)
+        super().__init__(title=_t(gid, "recrutement.equipe.refus.titre")[:45], timeout=600)
         self.ticket = int(ticket)
         self.note = discord.ui.TextInput(style=discord.TextStyle.short, required=False, max_length=NOTE_MAX,
-                                         placeholder="Pseudo Roblox invalide, réponses vides…")
-        self.add_item(discord.ui.Label(text="Note pour l'équipe (facultative)",
-                                       description="Le candidat ne la voit pas : il lit le message automatique.",
+                                         placeholder=_t(gid, "recrutement.equipe.refus.exemple")[:100] or None)
+        self.add_item(discord.ui.Label(text=_t(gid, "recrutement.equipe.refus.note")[:45],
+                                       description=_t(gid, "recrutement.equipe.refus.note_aide")[:100] or None,
                                        component=self.note))
 
     async def on_submit(self, i: discord.Interaction):
@@ -1321,11 +1503,14 @@ class FormulairePage(discord.ui.Modal):
 
     def __init__(self, envoi: dict, page: int):
         pages = nb_pages(len(envoi["questions"]))
-        super().__init__(title=f"Étape 2 · Step 2 — page {int(page)}/{pages}"[:45], timeout=FORMULAIRE_S)
+        gid = int(envoi.get("guild_id") or 0)
+        super().__init__(title=_t(gid, "recrutement.formulaire.titre", page=int(page), pages=pages)[:45],
+                         timeout=FORMULAIRE_S)
         self.envoi, self.page, self.champs = int(envoi["id"]), int(page), []
+        exemple = _t(gid, "recrutement.formulaire.reponse")[:100]
         for q in questions_de_la_page(envoi["questions"], page):
             champ = discord.ui.TextInput(style=discord.TextStyle.paragraph, required=True, min_length=1,
-                                         max_length=REPONSE_CANDIDAT_MAX, placeholder="Ta réponse · Your answer")
+                                         max_length=REPONSE_CANDIDAT_MAX, placeholder=exemple)
             self.add_item(discord.ui.Label(text=f"Question {int(q['rang'])}"[:45],
                                            description=extrait(q["question"], 100), component=champ))
             self.champs.append((int(q["rang"]), champ))
@@ -1345,7 +1530,8 @@ class FormulairePage(discord.ui.Modal):
 async def vue_accueil(g, texte_panneau: str = "", nom_panneau: str = "") -> tuple:
     """(la carte d'accueil, le nombre de questions annoncé)."""
     n = await annonce(g.id, texte_panneau)
-    return carte_accueil(texte_panneau, nom_panneau, n, await liens(g.id)), n
+    await textes_du_site.texte(g.id, "recrutement.accueil.titre")   # le cache des textes est chargé (sans attente ensuite)
+    return carte_accueil(texte_panneau, nom_panneau, n, await liens(g.id), g.id), n
 
 
 async def poser_etape1(g, ch, tid: int, candidat_id: int, *, nombre: int = 0) -> None:
@@ -1357,7 +1543,9 @@ async def poser_etape1(g, ch, tid: int, candidat_id: int, *, nombre: int = 0) ->
                          " annonce, cree_le, maj_le) VALUES (?,?,?,?,'etape1',?,?,?)",
                          (g.id, int(tid), int(candidat_id), int(getattr(ch, "id", 0) or 0), int(nombre), t, t))
         await db.commit()
-    m = await ch.send(view=carte_etape1(tid, nombre=nombre), allowed_mentions=discord.AllowedMentions.none())
+    await textes_du_site.texte(g.id, "recrutement.equipe.decision")   # le cache des textes est chargé
+    m = await ch.send(view=carte_etape1(tid, nombre=nombre, guild_id=g.id),
+                      allowed_mentions=discord.AllowedMentions.none())
     try:
         async with _get_db() as db:
             await db.execute("UPDATE recrutement_suivi SET carte_id=? WHERE guild_id=? AND ticket_id=?",
@@ -1464,7 +1652,8 @@ async def _editer(ch, mid: int, vue) -> bool:
 async def _editer_carte_staff(g, ch, s: dict | None, etat: str, **kw) -> None:
     if s is None or not s.get("carte_id"):
         return
-    await _editer(ch, s["carte_id"], carte_etape1(int(s["ticket_id"]), etat, candidat=int(s["candidat_id"]), **kw))
+    await _editer(ch, s["carte_id"], carte_etape1(int(s["ticket_id"]), etat, candidat=int(s["candidat_id"]),
+                                                  guild_id=getattr(g, "id", 0), **kw))
 
 
 async def _editer_cartes(ch, e: dict, etat: str, quand: int = 0) -> None:
@@ -1603,7 +1792,9 @@ async def refuser(g, tid: int, auteur, *, depuis: str = "etape1", note: str = ""
             return _erreur("La fermeture de ce ticket est déjà prévue.", 409, etape=s["etape"])
         if (depuis == "etape1" and s["etape"] != "etape1") or (depuis == "final" and s["etape"] not in ("etape2", "reponses")):
             return _erreur(_texte_etape(s["etape"]), 409, etape=s["etape"])
-        texte = REFUS_ETAPE1 if depuis == "etape1" else REFUS_FINAL
+        #  Le texte enregistré sur le site (Textes & noms), sinon celui d'origine : la page le montre avant de refuser.
+        texte = await textes_du_site.texte(g.id, "recrutement.refus_etape1" if depuis == "etape1"
+                                           else "recrutement.refus_final")
         try:
             await ch.send(view=_vue_candidat(int(tk["user"]), texte), allowed_mentions=_ping(tk["user"]))
         except discord.HTTPException as ex:
@@ -1813,36 +2004,37 @@ async def _peut(i) -> bool:
 
 async def etape1_bouton(i, d: str, tid: int) -> None:
     if not pret() or i.guild is None:
-        return await _avis(i, DEMARRE)
+        return await _avis(i, _t(_gid(i), "recrutement.demarre"))
+    gid = i.guild.id
     if d == "r":
         if not await _peut(i):
-            return await _avis(i, RESERVE)
-        return await i.response.send_modal(FormulaireRefus(tid))
+            return await _avis(i, _t(gid, "recrutement.equipe.reserve"))
+        return await i.response.send_modal(FormulaireRefus(tid, gid))
     await _acquitter(i)
     if not await _peut(i):
-        return await _avis(i, RESERVE)
+        return await _avis(i, _t(gid, "recrutement.equipe.reserve"))
     if d == "s":
         return await _lien_site(i, tid)
     cle = ("e1", i.guild.id, int(tid))
     if cle in _en_cours:
-        return await _avis(i, "L'envoi du questionnaire est déjà en cours.")
+        return await _avis(i, _t(gid, "recrutement.equipe.en_cours"))
     _en_cours.add(cle)
     try:
         status, corps = await envoyer(i.guild, tid, i.user, None, depuis="etape1")
     finally:
         _en_cours.discard(cle)
     texte = corps.get("message") if status == 200 else corps.get("erreur")
-    await _avis(i, texte or SOUCI, couleur=COULEUR_VERT if status == 200 else COULEUR_CIRE)
+    await _avis(i, texte or _t(gid, "recrutement.souci"), couleur=COULEUR_VERT if status == 200 else COULEUR_CIRE)
 
 
 async def _refuser_depuis_discord(i, tid: int, note: str) -> None:
     await _acquitter(i)
     if not pret() or i.guild is None:
-        return await _avis(i, DEMARRE)
+        return await _avis(i, _t(_gid(i), "recrutement.demarre"))
     if not await _peut(i):
-        return await _avis(i, RESERVE)
+        return await _avis(i, _t(i.guild.id, "recrutement.equipe.reserve"))
     status, corps = await refuser(i.guild, tid, i.user, depuis="etape1", note=note)
-    await _avis(i, corps.get("message") if status == 200 else corps.get("erreur") or SOUCI,
+    await _avis(i, corps.get("message") if status == 200 else corps.get("erreur") or _t(_gid(i), "recrutement.souci"),
                 couleur=COULEUR_VERT if status == 200 else COULEUR_CIRE)
 
 
@@ -1853,26 +2045,27 @@ async def _lien_site(i, tid: int) -> None:
         return await _avis(i, refus or "Le site n'est pas joignable pour le moment.")
     s = await _suivi(i.guild.id, tid)
     cible = f"#recrutement={int(tid)}" + (f"&membre={int(s['candidat_id'])}" if s else "")
-    bouton = discord.ui.Button(label="Ouvrir sa fiche sur le site", url=url + cible, emoji=_icone("lien"))
-    await _avis(i, "Ton lien personnel : il ne s'ouvre qu'une fois, valable 24 h. Ne le partage pas.\n"
-                   "-# Sur le site : coche les questions dans la banque, ou reprends un modèle ou la sélection "
-                   "précédente, puis envoie l'étape 2.", efface=False, boutons=[bouton])
+    bouton = discord.ui.Button(label=_t(i.guild.id, "recrutement.equipe.bouton.fiche")[:80], url=url + cible,
+                               emoji=_icone("lien"))
+    await _avis(i, _t(i.guild.id, "recrutement.equipe.lien"), efface=False, boutons=[bouton])
 
 
 async def ouvrir_formulaire(i, eid: int, page: int | None = None) -> None:
     """« Répondre » (ou « Continuer ») : le formulaire de la première page sans réponse. Une page déjà envoyée ne se
     rouvre pas ; un questionnaire répondu, remplacé ou clos le dit."""
     if not pret() or i.guild is None:
-        return await _avis(i, DEMARRE)
+        return await _avis(i, _t(_gid(i), "recrutement.demarre"))
     e = await _envoi(eid)
-    if e is None or e["guild_id"] != i.guild.id:
-        return await _avis(i, INTROUVABLE)
+    gid = i.guild.id
+    await textes_du_site.texte(gid, "recrutement.introuvable")   # le cache des textes est chargé
+    if e is None or e["guild_id"] != gid:
+        return await _avis(i, _t(gid, "recrutement.introuvable"))
     if i.user.id != e["candidat_id"]:
-        return await _avis(i, SEUL_CANDIDAT)
+        return await _avis(i, _t(gid, "recrutement.seul_candidat"))
     if e["statut"] == "repondu":
-        return await _avis(i, DEJA)
+        return await _avis(i, _t(gid, "recrutement.deja"))
     if e["statut"] not in EN_ATTENTE:
-        return await _avis(i, REMPLACE)
+        return await _avis(i, _t(gid, "recrutement.remplace"))
     p = premiere_incomplete(e["questions"], await _reponses(eid))
     if p is None:  # tout est là mais l'envoi n'a pas été clos (coupure au mauvais moment) : on le clôt maintenant
         await _acquitter(i)
@@ -1901,32 +2094,33 @@ async def _garder_page(e: dict, textes: dict) -> bool:
 async def soumettre_page(i, eid: int, page: int, valeurs: dict) -> None:
     await _acquitter(i)
     if not pret() or i.guild is None:
-        return await _avis(i, DEMARRE)
+        return await _avis(i, _t(_gid(i), "recrutement.demarre"))
     e = await _envoi(eid)
-    if e is None or e["guild_id"] != i.guild.id:
-        return await _avis(i, INTROUVABLE)
+    gid = i.guild.id
+    await textes_du_site.texte(gid, "recrutement.introuvable")   # le cache des textes est chargé
+    if e is None or e["guild_id"] != gid:
+        return await _avis(i, _t(gid, "recrutement.introuvable"))
     if i.user.id != e["candidat_id"]:
-        return await _avis(i, SEUL_CANDIDAT)
+        return await _avis(i, _t(gid, "recrutement.seul_candidat"))
     if e["statut"] == "repondu":
-        return await _avis(i, DEJA)
+        return await _avis(i, _t(gid, "recrutement.deja"))
     if e["statut"] not in EN_ATTENTE:
-        return await _avis(i, REMPLACE)
+        return await _avis(i, _t(gid, "recrutement.remplace"))
     attendus = {int(q["rang"]) for q in questions_de_la_page(e["questions"], page)}
     textes = {int(r): _net(v, lignes=True)[:REPONSE_CANDIDAT_MAX] for r, v in valeurs.items() if int(r) in attendus}
     if set(textes) != attendus or not all(textes.values()):
-        return await _avis(i, "Chaque question demande une réponse : rouvre le formulaire avec « Répondre ».\n"
-                              "-# Every question needs an answer: open the form again with \"Answer\".")
+        return await _avis(i, _t(gid, "recrutement.reponse_manquante"))
     if not await _garder_page(e, textes):
         e = await _envoi(eid)
-        return await _avis(i, DEJA if e is not None and e["statut"] == "repondu" else REMPLACE)
+        return await _avis(i, _t(gid, "recrutement.deja" if e is not None and e["statut"] == "repondu"
+                                 else "recrutement.remplace"))
     p = premiere_incomplete(e["questions"], await _reponses(eid))
     if p is None:
         return await _terminer(i, e)
     pages = nb_pages(len(e["questions"]))
-    await _avis(i, f"Page {page}/{pages} enregistrée. Continue avec la page {p}/{pages} — ou plus tard, avec "
-                   f"« Répondre » sous les questions.\n-# Page {page}/{pages} saved. Continue with page {p}/{pages} — "
-                   "or later, with \"Answer\" under the questions.",
-                delai=PAGE_S, couleur=COULEUR_MER, boutons=[BoutonPage(eid, p, pages)])
+    await _avis(i, _t(gid, "recrutement.page_enregistree", page=page, pages=pages, suivante=p),
+                delai=PAGE_S, couleur=COULEUR_MER,
+                boutons=[BoutonPage(eid, p, pages, _t(gid, "recrutement.bouton.continuer", page=p, pages=pages))])
 
 
 async def _terminer(i, e: dict) -> None:
@@ -1941,7 +2135,7 @@ async def _terminer(i, e: dict) -> None:
             await db.execute("UPDATE recrutement_suivi SET etape='reponses', maj_le=? WHERE guild_id=? AND ticket_id=?"
                              " AND envoi_id=? AND etape='etape2'", (t, e["guild_id"], e["ticket_id"], e["id"]))
         await db.commit()
-    await _avis(i, MERCI, efface=False, couleur=COULEUR_VERT)
+    await _avis(i, await textes_du_site.texte(e["guild_id"], "recrutement.merci"), efface=False, couleur=COULEUR_VERT)
     if not premier:
         return
     g = i.guild
@@ -2327,8 +2521,9 @@ async def dossier(g, tid: int) -> dict | None:
                               "carte_etape1": _lien_discord(g, salon, s["carte_id"]) if ouvert and s and s["carte_id"]
                               else ""},
             "exigence": EXIGENCE,
-            #  Les textes EXACTS que le candidat lira : la page les montre avant de refuser.
-            "message_refus_etape1": REFUS_ETAPE1, "message_refus": REFUS_FINAL,
+            #  Les textes EXACTS que le candidat lira (ceux de Textes & noms) : la page les montre avant de refuser.
+            "message_refus_etape1": await textes_du_site.texte(g.id, "recrutement.refus_etape1"),
+            "message_refus": await textes_du_site.texte(g.id, "recrutement.refus_final"),
             "peut": {"etape1": ouvert and etape == "etape1" and not fermeture,
                      "corriger": etape not in FINALES and any(e["statut"] == "repondu" for e in envois),
                      "accepter": ouvert and etape in OUVERTES and not fermeture,

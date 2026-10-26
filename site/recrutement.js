@@ -6,7 +6,7 @@
 // Questionnaire : la banque (modifiable), les modèles, les liens donnés au candidat, les réglages.
 
 import { h, icone, date, depuis, nombre, sansEmoji, contient, norm, maintenant, uuid, remplacer, moisDe, libelleMois, compte, copie, telephone, retarder, quantite, ajouter } from "./dom.js";
-import { etat, P, peutAgir, aller, filtres, enLigne, emettre, ecouter } from "./noyau.js";
+import { etat, P, peutAgir, aller, filtres, enLigne, emettre, ecouter, nommerOnglets } from "./noyau.js";
 import { lire, poster, action } from "./api.js";
 import { charger, vue as vueJeu, perime } from "./donnees.js";
 import { mettreEnFile, opsDe } from "./hors_ligne.js";
@@ -16,6 +16,7 @@ import {
 } from "./ui.js";
 import { ouvrirFiche, reponses, transcriptEnLigne, STATUTS_CAND, etapeCandidature, chargerSuivi } from "./fiche.js";
 import { indisponible } from "./discord.js";
+import { modifierTexte, choisirTextes } from "./textes.js";
 import { avecVerrou, protegerEditeur, protegerZone, siLibre } from "./direct.js";
 
 export const THEMES = [["studio", "Studio RELL Games"], ["jeu", "Le jeu RELL Seas"], ["races", "Races"], ["factions", "Factions"], ["fruits", "Fruits"],
@@ -89,7 +90,7 @@ function levenshtein(a, b) {
 const INDICATIONS = { identique: ["Identique", "vert"], proche: ["Proche", "ambre"], different: ["Différent", ""], vide: ["Sans réponse", "encre"] };
 
 // ═══ LA RUBRIQUE ════════════════════════════════════════════════════════
-const SOUS = [["en-cours", "En cours", "candidatures"], ["decidees", "Décidées", "coffre"], ["questionnaire", "Questionnaire", "parchemin"]];
+const SOUS = nommerOnglets("site.sous.equipage.candidatures", [["en-cours", "En cours", "candidatures"], ["decidees", "Décidées", "coffre"], ["questionnaire", "Questionnaire", "parchemin"]]);
 export function candidatures(vue, ctx) {
   const sous = SOUS.some(([k]) => k === ctx.sous) ? ctx.sous : "en-cours";
   const onglets = h("div", { classe: "sous-onglets", role: "tablist", "aria-label": "Candidatures" });
@@ -311,11 +312,17 @@ function carteCorrection(etatD, e, q, i, modifiable = true) {
       q._attente ? h("span", { classe: "meta" }, q._attente === "conflit" ? "conflit" : "gardé sur l'appareil") : null));
 }
 
+/** Le message automatique cité dans une confirmation, et « Modifier ce message » (Textes & noms) : enregistré, la
+ *  citation montre tout de suite le nouveau texte — celui que le bot postera. */
+function messageAuto(texte, cle) {
+  const bloc = h("blockquote", { classe: "message-auto" }, lignesMessage(texte).map((l) => h("p", {}, l)));
+  return [bloc, bouton("Modifier ce message", { classe: "p discret", icone: "plume", onclick: () => modifierTexte(cle, {
+    apres: (t) => { if (t && typeof t.valeur === "string") remplacer(bloc, ...lignesMessage(t.valeur).map((l) => h("p", {}, l))); } }) })];
+}
 async function refuserEtape1(etatD, D) {
-  const message = lignesMessage(D.message_refus_etape1 || MESSAGE_REFUS_1);
   const ok = await confirmer({ titre: "Refuser l'étape 1 ?", icone: "annuler", style: "danger", libelleOk: "Refuser et fermer le ticket", taille: "",
     texte: "Ce message part tout seul dans le ticket, puis le ticket se ferme (transcript et dossier gardés) :",
-    contenu: [h("blockquote", { classe: "message-auto" }, message.map((l) => h("p", {}, l)))] });
+    contenu: messageAuto(D.message_refus_etape1 || MESSAGE_REFUS_1, "recrutement.refus_etape1") });
   if (!ok) return;
   const r = await poster("recrutement/etape1", { ticket: Number(D.ticket) || D.ticket, decision: "refuser" });
   toast(r.ok ? (r.donnees.message || "Refus envoyé ; le ticket se ferme.") : r.erreur, r.ok ? "succes" : "erreur");
@@ -329,7 +336,7 @@ async function decision(etatD, D, quoi, justes, total) {
     if (!ok) return;
   } else {
     const ok = await confirmer({ titre: "Refuser la candidature ?", icone: "annuler", style: "danger", libelleOk: "Refuser et fermer le ticket",
-      texte: "Ce message neutre part dans le ticket (sans dire où il s'est trompé), puis le ticket se ferme :", contenu: [h("blockquote", { classe: "message-auto" }, lignesMessage(D.message_refus || MESSAGE_REFUS_2).map((l) => h("p", {}, l)))] });
+      texte: "Ce message neutre part dans le ticket (sans dire où il s'est trompé), puis le ticket se ferme :", contenu: messageAuto(D.message_refus || MESSAGE_REFUS_2, "recrutement.refus_final") });
     if (!ok) return;
   }
   const corps = { ticket: Number(D.ticket) || D.ticket, decision: quoi };
@@ -517,7 +524,15 @@ function questionnaire(zone) {
             cle: "bq-" + k, ouvert: f.theme !== "tous" || !!f.q ? true : undefined }, () => paginer("bq-" + k, parTheme.get(k), (q) => ligneBanque(B, q), { classe: "banque-registre", pas: 20 })))) : vide("Aucune question ici", "Change les filtres, ou ajoute une question."))),
       section("Les modèles", "etoile", compte((B.modeles || []).length, "modèle"), blocModeles(B)),
       section("Les liens donnés au candidat", "lien", compte((B.liens || []).length, "lien"), blocLiens(B, () => maj(true))),
-      section("Les réglages", "cle", "", blocReglages(B, () => maj(true))));
+      section("Les réglages", "cle", "", blocReglages(B, () => maj(true))),
+      // Ce que le bot écrit au candidat et à l'équipe, dans le ticket : réécrit là où on règle le questionnaire.
+      section("Les messages du bot", "plume", "", h("div", { classe: "pile serree" },
+        h("p", { classe: "aide" }, "Ce que le bot écrit dans le ticket : à toi de le dire à ta façon. Enregistré, un texte sert dès le message suivant."),
+        h("div", { classe: "rangee" },
+          bouton("Ce que lit le candidat", { classe: "p", icone: "plume", onclick: () => choisirTextes({ groupe: "recrutement", titre: "Ce que lit le candidat",
+            parties: ["Les messages au candidat", "L'accueil du ticket", "Le questionnaire de l'étape 2", "Les boutons et les formulaires"] }) }),
+          bouton("La carte de l'équipe", { classe: "p", icone: "plume", onclick: () => choisirTextes({ groupe: "recrutement", titre: "La carte de l'équipe",
+            parties: ["La carte de l'équipe (dans le ticket)"] }) })))));
     majBoutonsReseau(resultats);
   };
   maj();

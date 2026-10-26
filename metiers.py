@@ -32,6 +32,7 @@ réglé (/configure → Rell Seas) : sans lui, aucun rôle n'est créé, donné 
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import io
 import json
@@ -44,6 +45,7 @@ import discord
 
 import affiches
 import tableau
+import textes as textes_du_site
 import visuels
 from ui_v2 import LayoutView, Palette
 
@@ -53,6 +55,9 @@ RATTACHES_MAX = 20
 OPTIONS_MAX = 24                # une liste Discord : 25 choix, dont « Aucun métier »
 AUCUN = "_aucun"                # jamais une clé du catalogue (elles commencent par une lettre ou un chiffre)
 CLE_AUTO, CLE_MAX, CLE_RATTACHES = "metiers_auto", "metiers_max", "clan_roles_rattaches"
+#  26/10/2026 : le nom choisi sur le site pour le rôle d'un métier (Rôles & métiers → « Renommer ») — {clé: nom} ; il
+#  sert aussi quand il faut recréer le rôle, et dans la liste du guide.
+CLE_NOMS = "metiers_noms"
 CLE_BILAN = "metiers_derniere_reconciliation"
 AVIS_S = 120.0                  # un mot pour soi s'efface au bout de 2 minutes
 DEMARRE_S = 30.0
@@ -104,6 +109,102 @@ TEXTES = {
                   "-# Easy: your previous choice was just saved, try again in a few seconds."),
     "souci": "Un souci est survenu : réessaie dans quelques secondes.\n-# Something went wrong: try again in a few seconds.",
 }
+
+#  Les textes que la direction réécrit (26/10/2026 : Capitainerie → Textes & noms, registre `textes.py`) : la section
+#  « Ton métier » du guide du clan, la carte de l'acceptation, la ligne du message privé de fermeture.
+_GUIDE, _ACCEPTATION = "Le choix du métier (guide du clan)", "L'acceptation au clan"
+_declarer = functools.partial(textes_du_site.declarer, groupe="metiers")
+_declarer("metiers.guide.titre", "Ton métier · Your job", titre="Le titre de la section", partie=_GUIDE, ordre=1,
+          max_=100, lignes=False, aide="Dans le guide du clan, au-dessus de la liste des métiers (l'icône du navire "
+                                       "se pose devant).")
+_declarer("metiers.guide.texte_auto",
+          "Choisis {combien} dans la liste : ton affiche du clan et tes rôles de métier suivent ton choix. Tu peux en "
+          "changer quand tu veux.\n-# Pick {combien_en}: your clan poster and your job roles follow your choice. "
+          "Change anytime.", titre="Le texte (rôles donnés tout seuls)", partie=_GUIDE, ordre=2, max_=800,
+          variables=(("combien", "« ton métier » ou « jusqu'à 2 métiers »"),
+                     ("combien_en", "le même, en anglais")),
+          aide="Sous le titre, quand l'attribution automatique des rôles de métier est active.")
+_declarer("metiers.guide.texte_manuel",
+          "Choisis {combien} dans la liste : ton affiche du clan suit ton choix ; la direction attribue les rôles des "
+          "métiers.\n-# Pick {combien_en}: your clan poster follows your choice; the staff hands out job roles.",
+          titre="Le texte (rôles donnés par la direction)", partie=_GUIDE, ordre=3, max_=800,
+          variables=(("combien", "« ton métier » ou « jusqu'à 2 métiers »"),
+                     ("combien_en", "le même, en anglais")),
+          aide="Sous le titre, quand l'attribution automatique est coupée.")
+_declarer("metiers.guide.liste", "Choisis ton métier · Pick your job", titre="La liste « Choisis ton métier »",
+          partie=_GUIDE, ordre=4, max_=150, lignes=False, aide="Le texte gris de la liste, avant le choix.")
+_declarer("metiers.guide.aucun", "Aucun métier · No job", titre="Le choix « Aucun métier »", partie=_GUIDE, ordre=5,
+          max_=100, lignes=False, aide="Le dernier choix de la liste : retirer ses métiers.")
+_declarer("metiers.carte.auto",
+          "### Bienvenue dans l'équipage · Welcome aboard\n{membre}, dernière étape : choisis ton métier dans le **guide "
+          "du clan** — ton rôle de métier t'est donné tout de suite.\n-# Last step: pick your job in the clan guide — "
+          "your job role is given right away.", titre="La carte (rôles donnés tout seuls)", partie=_ACCEPTATION,
+          ordre=10, max_=1200, variables=(("membre", "la mention du nouveau membre"),),
+          aide="Postée dans le ticket quand une candidature est acceptée, juste avant la fermeture.")
+_declarer("metiers.carte.manuel",
+          "### Bienvenue dans l'équipage · Welcome aboard\n{membre}, dernière étape : choisis ton métier dans le **guide "
+          "du clan**.\n-# Last step: pick your job in the clan guide.", titre="La carte (rôles donnés par la direction)",
+          partie=_ACCEPTATION, ordre=11, max_=1200, variables=(("membre", "la mention du nouveau membre"),),
+          aide="La même carte, quand l'attribution automatique est coupée.")
+_declarer("metiers.carte.bouton", "Choisir mon métier · Pick my job", titre="Le bouton de la carte",
+          partie=_ACCEPTATION, ordre=12, max_=80, lignes=False, aide="Il mène au guide du clan.")
+_declarer("metiers.mp_lien", "choisis ton métier dans le guide du clan (pick your job) : {lien}",
+          titre="La ligne du message privé", partie=_ACCEPTATION, ordre=13, max_=300, lignes=False,
+          variables=(("lien", "le lien du guide du clan"),),
+          aide="Ajoutée à la raison de fermeture (« Candidature acceptée · … ») dans le message privé du nouveau membre.")
+
+
+#  Les réponses au choix du métier, pour la personne seule (elles s'effacent) : chacune réécrite à part.
+_REPONSES = "Les réponses au choix (pour la personne seule)"
+_AVIS = {"reserve": ("Réservé au clan", "Quelqu'un hors du clan choisit un métier dans le guide."),
+         "ferme": ("Choix pas encore ouvert", "Le rôle du clan n'est pas encore réglé sur le site."),
+         "indisponible": ("Indisponible", "Le serveur n'est pas lisible, ou le membre est sanctionné."),
+         "retire": ("Métier retiré", "Il choisit un métier qui n'est plus au catalogue."),
+         "trop": ("Trop de métiers", "Il en choisit plus que le nombre permis."),
+         "rien": ("Rien de choisi", "La liste refermée sans choix."),
+         "doucement": ("Doucement", "Deux choix coup sur coup."),
+         "demarre": ("Le bot démarre", "Un choix pendant le démarrage du bot."),
+         "souci": ("Un souci", "Une erreur imprévue (elle est aussi notée au journal du bot).")}
+for _k, (_titre, _aide) in _AVIS.items():
+    _declarer(f"metiers.avis.{_k}", TEXTES[_k], titre=_titre, partie=_REPONSES, ordre=40 + list(_AVIS).index(_k),
+              max_=600, aide=_aide, variables=(("n", "le nombre de métiers permis"),) if _k == "trop" else ())
+_METIERS_VARS = (("metiers", "les métiers choisis, en gras (« **Cuisinier**, **Pêcheur** »)"),
+                 ("metiers_en", "les mêmes, en anglais"))
+for _k, (_defaut, _titre, _aide, _vars) in enumerate((
+        ("C'est noté : {metiers}. Ton affiche du clan est à jour et tes rôles de métier suivent.\n-# Noted: "
+         "{metiers_en}. Your clan poster is up to date and your job roles follow.", "Choix noté (rôles donnés tout seuls)",
+         "Après un choix, quand l'attribution automatique des rôles de métier est active.", _METIERS_VARS),
+        ("C'est noté : {metiers}. Ton affiche du clan est à jour ; la direction attribue les rôles des métiers.\n-# "
+         "Noted: {metiers_en}. Your clan poster is up to date; the staff hands out job roles.",
+         "Choix noté (rôles donnés par la direction)", "Après un choix, quand l'attribution automatique est coupée.",
+         _METIERS_VARS),
+        ("C'est déjà ton choix : {metiers}. Ton affiche du clan est à jour et tes rôles de métier suivent.\n-# Already "
+         "your choice: {metiers_en}. Your clan poster is up to date and your job roles follow.",
+         "Déjà son choix (rôles donnés tout seuls)", "Il choisit de nouveau les mêmes métiers.", _METIERS_VARS),
+        ("C'est déjà ton choix : {metiers}. Ton affiche du clan est à jour ; la direction attribue les rôles des "
+         "métiers.\n-# Already your choice: {metiers_en}. Your clan poster is up to date; the staff hands out job roles.",
+         "Déjà son choix (rôles donnés par la direction)", "Les mêmes métiers, attribution automatique coupée.",
+         _METIERS_VARS),
+        ("C'est noté : tu n'as plus de métier. Tes rôles de métier sont retirés.\n-# Noted: no job anymore. Your job "
+         "roles are removed.", "Plus de métier (rôles retirés tout seuls)", "Il choisit « Aucun métier ».", ()),
+        ("C'est noté : tu n'as plus de métier.\n-# Noted: no job anymore.", "Plus de métier (rôles gérés par la "
+         "direction)", "« Aucun métier », attribution automatique coupée.", ()),
+        ("Ton choix est bien noté, mais un rôle n'a pas pu être posé (permission ou hiérarchie) : la direction le voit "
+         "sur le site.\n-# Your choice is saved, but a role couldn't be given (permission or hierarchy): the staff sees "
+         "it.", "Un rôle n'a pas pu être posé", "Ajouté sous la réponse quand Discord refuse un rôle de métier.", ()))):
+    _cle = ("note_auto", "note_manuel", "deja_auto", "deja_manuel", "aucun_auto", "aucun_manuel", "role_manquant")[_k]
+    _declarer(f"metiers.choix.{_cle}", _defaut, titre=_titre, partie=_REPONSES, ordre=30 + _k, max_=800, aide=_aide,
+              variables=_vars)
+
+
+def _t(guild_id, cle: str, **valeurs) -> str:
+    """Un texte que la direction peut réécrire (Textes & noms) : celui du serveur, sinon celui d'origine."""
+    return textes_du_site.texte_cache(guild_id, cle, **valeurs)
+
+
+def _reponse(i, cle: str, **valeurs) -> str:
+    """Une réponse au choix du métier (Textes & noms) : celle du serveur de l'interaction, sinon celle d'origine."""
+    return _t(getattr(getattr(i, "guild", None), "id", 0), f"metiers.avis.{cle}", **valeurs)
 
 _get_db = _cfg = _db_set = _role_clan = _sanctionnes = _journal = _guide = _epargnes = None
 _log = print
@@ -276,10 +377,31 @@ def _norme(s) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
 
 
-def nom_du_role(e: dict) -> str:
+def noms_choisis(c: dict) -> dict:
+    """{clé du métier : nom de son rôle} choisis sur le site (Rôles & métiers → « Renommer »)."""
+    brut = c.get(CLE_NOMS) if isinstance(c, dict) else None
+    if not isinstance(brut, dict):
+        return {}
+    return {str(k): " ".join(str(v).split())[:100] for k, v in brut.items()
+            if isinstance(k, str) and isinstance(v, str) and v.strip()}
+
+
+async def retenir_noms(g, noms: dict) -> None:
+    """Le nom choisi pour le rôle de ces métiers : gardé dans la configuration du serveur (il sert à la prochaine
+    création du rôle et dans la liste du guide)."""
+    c = await _cfg(g.id)
+    actuels = noms_choisis(c)
+    actuels.update({str(k): " ".join(str(v).split())[:100] for k, v in noms.items() if str(v).strip()})
+    await _db_set(g.id, CLE_NOMS, actuels)
+
+
+def nom_du_role(e: dict, noms: dict | None = None) -> str:
     """« Un nom clair du métier en français — un nom de profession » : Cuisinier, Artisan, Médecin… — reconnu par la
     clé, le nom ou le nom anglais que donne le catalogue (aucune clé n'est supposée présente) ; pour un métier ajouté
-    plus tard sur le site, son nom du catalogue."""
+    plus tard sur le site, son nom du catalogue. 26/10/2026 : le nom choisi sur le site (`noms`, « Renommer ») passe
+    avant tout."""
+    if noms and str(e.get("cle") or "") in noms:
+        return noms[str(e.get("cle"))][:100]
     for k in (e.get("cle"), _norme(e.get("nom")), _norme(e.get("nom_en"))):
         if k in _PROFESSIONS:
             return _PROFESSIONS[k]
@@ -308,8 +430,9 @@ def _icone_maison(nom: str) -> str:
 async def options_selecteur(g=None) -> list[dict]:
     """Les choix de la liste du guide : `{"cle", "label", "description", "emoji"}` par métier actif (24 au plus)."""
     out = []
+    noms = noms_choisis(await _cfg(g.id)) if g is not None and _cfg is not None else {}
     for e in (await metiers_du_catalogue())[:OPTIONS_MAX]:
-        nom, en = nom_du_role(e), str(e.get("nom_en") or "")
+        nom, en = nom_du_role(e, noms), str(e.get("nom_en") or "")
         label = f"{nom} · {en}" if en and _norme(en) != _norme(nom) else nom
         out.append({"cle": e["cle"], "label": label[:100], "description": str(e.get("categorie") or "")[:100],
                     "emoji": _emoji(e["cle"])})
@@ -373,7 +496,7 @@ async def role_du_metier(g, cle: str, *, creer: bool = True, auteur=None):
         e = elements.get((TYPE, cle))
         if e is None or not e["actif"]:
             return None, "inconnu"
-        nom = nom_du_role(e)
+        nom = nom_du_role(e, noms_choisis(c))
         exclus = set(liens.values()) | set(reglages_de(c)["rattaches"]) | ({clan.id} if clan is not None else set())
         role = _role_du_meme_nom(g, nom, exclus)
         etat = "relie"
@@ -819,13 +942,14 @@ def _emoji_option(texte: str):
 class ChoixMetier(discord.ui.DynamicItem[discord.ui.Select], template=r"mt:choix"):
     """« Choisis ton métier · Pick your job » dans le guide du clan : persistant, il répond après un redémarrage."""
 
-    def __init__(self, options: list | None = None, maxi: int = MAX_DEFAUT):
+    def __init__(self, options: list | None = None, maxi: int = MAX_DEFAUT, placeholder: str = "", aucun: str = ""):
         choix = [discord.SelectOption(label=o["label"][:100], value=o["cle"], description=(o["description"] or None),
                                       emoji=_emoji_option(o["emoji"])) for o in options or []][:OPTIONS_MAX]
         n = len(choix)
         if choix:
-            choix.append(discord.SelectOption(label="Aucun métier · No job", value=AUCUN))
-        super().__init__(discord.ui.Select(custom_id="mt:choix", placeholder="Choisis ton métier · Pick your job",
+            choix.append(discord.SelectOption(label=(aucun or "Aucun métier · No job")[:100], value=AUCUN))
+        super().__init__(discord.ui.Select(custom_id="mt:choix",
+                                           placeholder=(placeholder or "Choisis ton métier · Pick your job")[:150],
                                            min_values=1, max_values=max(1, min(int(maxi), n)) if n else 1,
                                            options=choix or [discord.SelectOption(label="—", value=AUCUN)]))
 
@@ -878,62 +1002,59 @@ async def _sans_echec(i, travail) -> None:
     except Exception as ex:
         _signaler("E9", "choix du métier en échec", f"{type(ex).__name__} {ex}")
         try:
-            await _avis(i, TEXTES["souci"], Palette.WARNING)
+            await _avis(i, _reponse(i, "souci"), Palette.WARNING)
         except discord.HTTPException as ex2:
             _signaler("E9", "réponse impossible", f"{type(ex2).__name__} {ex2}")
         raise
 
 
-def _texte_choix(choisis: list, auto: bool, res: dict | None, deja: bool) -> str:
+def _texte_choix(choisis: list, auto: bool, res: dict | None, deja: bool, choisis_noms: dict | None = None,
+                 guild_id: int = 0) -> str:
+    """La réponse au choix (Textes & noms : `metiers.choix.…`), le rôle refusé par Discord dit en dessous."""
+    mode = "auto" if auto else "manuel"
     if not choisis:
-        fr = "C'est noté : tu n'as plus de métier." + (" Tes rôles de métier sont retirés." if auto else "")
-        en = "Noted: no job anymore." + (" Your job roles are removed." if auto else "")
+        texte = _t(guild_id, f"metiers.choix.aucun_{mode}")
     else:
-        noms = ", ".join(f"**{nom_du_role(e)}**" for e in choisis)
-        noms_en = ", ".join(str(e.get("nom_en") or nom_du_role(e)) for e in choisis)
-        fr = (("C'est déjà ton choix" if deja else "C'est noté") + f" : {noms}. Ton affiche du clan est à jour"
-              + (" et tes rôles de métier suivent." if auto else " ; la direction attribue les rôles des métiers."))
-        en = (("Already your choice" if deja else "Noted") + f": {noms_en}. Your clan poster is up to date"
-              + (" and your job roles follow." if auto else "; the staff hands out job roles."))
+        noms = ", ".join(f"**{nom_du_role(e, choisis_noms)}**" for e in choisis)
+        noms_en = ", ".join(str(e.get("nom_en") or nom_du_role(e, choisis_noms)) for e in choisis)
+        texte = _t(guild_id, f"metiers.choix.{'deja' if deja else 'note'}_{mode}", metiers=noms, metiers_en=noms_en)
     if auto and res and (res.get("erreur") or res.get("manquants") or res.get("ignores")):
-        fr += ("\nTon choix est bien noté, mais un rôle n'a pas pu être posé (permission ou hiérarchie) : la direction "
-               "le voit sur le site.")
-        en += "\nYour choice is saved, but a role couldn't be given (permission or hierarchy): the staff sees it."
-    return f"{fr}\n-# {en}"
+        texte += "\n" + _t(guild_id, "metiers.choix.role_manquant")
+    return texte
 
 
 async def choisir(i, valeurs: list) -> None:
     """Le membre choisit ses métiers dans le guide du clan : son affiche les reçoit (créée au besoin), puis ses rôles
     suivent (attribution automatique). Réservé au clan ; chaque réponse est pour lui seul et s'efface."""
     if not pret():
-        return await _avis(i, TEXTES["demarre"], Palette.WARNING, DEMARRE_S)
+        return await _avis(i, _reponse(i, "demarre"), Palette.WARNING, DEMARRE_S)
     await i.response.defer(ephemeral=True, thinking=True)   # répondre d'abord : la base peut faire attendre
     g, m = getattr(i, "guild", None), getattr(i, "user", None)
     if g is None or not hasattr(m, "roles"):
-        return await _avis(i, TEXTES["indisponible"])
+        return await _avis(i, _reponse(i, "indisponible"))
     c = await _cfg(g.id)
     clan = await role_du_clan(g, c)
     if clan is None:
-        return await _avis(i, TEXTES["ferme"], Palette.WARNING)
+        return await _avis(i, _reponse(i, "ferme"), Palette.WARNING)
     if not _du_clan(m, clan):
-        return await _avis(i, TEXTES["reserve"], Palette.WARNING)
+        return await _avis(i, _reponse(i, "reserve"), Palette.WARNING)
     if await sous_sanction(g, m):
-        return await _avis(i, TEXTES["indisponible"], Palette.WARNING)
+        return await _avis(i, _reponse(i, "indisponible"), Palette.WARNING)
     reg = reglages_de(c)
     actifs = {e["cle"]: e for e in await metiers_du_catalogue()}
     choix = list(dict.fromkeys(valeurs))
     aucun = AUCUN in choix
     choix = [v for v in choix if v != AUCUN]
     if any(v not in actifs for v in choix):
-        return await _avis(i, TEXTES["retire"], Palette.WARNING)
+        return await _avis(i, _reponse(i, "retire"), Palette.WARNING)
     if not choix and not aucun:
-        return await _avis(i, TEXTES["rien"])
+        return await _avis(i, _reponse(i, "rien"))
     if len(choix) > reg["max"]:
-        return await _avis(i, TEXTES["trop"].format(n=reg["max"]), Palette.WARNING)
+        return await _avis(i, _reponse(i, "trop", n=reg["max"]), Palette.WARNING)
     async with _verrou_membre(g.id, m.id):
         cle = (g.id, m.id)
         if time.monotonic() - _derniers_choix.get(cle, -1e9) < PAUSE_CHOIX_S:
-            return await _avis(i, TEXTES["doucement"], Palette.WARNING, DEMARRE_S)
+            return await _avis(i, _reponse(i, "doucement"), Palette.WARNING, DEMARRE_S)
         _derniers_choix[cle] = time.monotonic()
         try:
             affiche, change = await affiches.definir_metiers(g, m, choix, m.id)
@@ -941,13 +1062,14 @@ async def choisir(i, valeurs: list) -> None:
             return await _avis(i, f"{ex.message}\n-# This choice can't be saved.", Palette.WARNING)
         res = await appliquer(g, m, choix, auteur=m, cause="son choix", creer=True) if reg["auto"] else None
     choisis = [actifs[k] for k in choix]
+    choisis_noms = noms_choisis(c)
     if change:
-        noms = ", ".join(nom_du_role(e) for e in choisis)
+        noms = ", ".join(nom_du_role(e, choisis_noms) for e in choisis)
         await _noter(g, "clan.metier_choisi", f"{m.display_name} a choisi son métier : {noms}" if choisis
                      else f"{m.display_name} n'a plus de métier", membre_id=m.id, auteur_id=m.id,
                      detail=f"affiche {affiche['id']}")
     erreur = bool(res and (res.get("erreur") or res.get("manquants") or res.get("ignores")))
-    await _avis(i, _texte_choix(choisis, reg["auto"], res, not change),
+    await _avis(i, _texte_choix(choisis, reg["auto"], res, not change, choisis_noms, g.id),
                 Palette.WARNING if erreur else (Palette.SUCCESS if change else Palette.NEUTRAL))
 
 
@@ -964,15 +1086,24 @@ async def section_guide(g, c: dict) -> tuple | None:
     icone = _icone_maison("navire")
     combien_fr = "ton métier" if maxi == 1 else f"jusqu'à **{maxi}** métiers"
     combien_en = "your job" if maxi == 1 else f"up to {maxi} jobs"
-    suite_fr = (" : ton affiche du clan et tes rôles de métier suivent ton choix. Tu peux en changer quand tu veux."
-                if reg["auto"] else " : ton affiche du clan suit ton choix ; la direction attribue les rôles des métiers.")
-    suite_en = (": your clan poster and your job roles follow your choice. Change anytime." if reg["auto"]
-                else ": your clan poster follows your choice; the staff hands out job roles.")
-    texte = (f"### {icone + ' ' if icone else ''}Ton métier · Your job\nChoisis {combien_fr} dans la liste{suite_fr}"
-             f"\n-# Pick {combien_en}{suite_en}")
-    composants = [discord.ui.TextDisplay(texte), discord.ui.ActionRow(ChoixMetier(options, maxi))]
-    empreinte = json.dumps([reg["auto"], maxi, icone, options], sort_keys=True, ensure_ascii=False)
+    #  Les textes de Textes & noms (sinon ceux d'origine) ; leur changement réécrit le guide (`quand_change`).
+    await textes_du_site.texte(g.id, "metiers.guide.titre")
+    titre = _t(g.id, "metiers.guide.titre")
+    corps = _t(g.id, "metiers.guide.texte_auto" if reg["auto"] else "metiers.guide.texte_manuel",
+               combien=combien_fr, combien_en=combien_en)
+    liste, aucun = _t(g.id, "metiers.guide.liste"), _t(g.id, "metiers.guide.aucun")
+    texte = f"### {icone + ' ' if icone else ''}{titre}\n{corps}"
+    composants = [discord.ui.TextDisplay(texte), discord.ui.ActionRow(ChoixMetier(options, maxi, liste, aucun))]
+    empreinte = json.dumps([reg["auto"], maxi, icone, options, texte, liste, aucun], sort_keys=True, ensure_ascii=False)
     return composants, hashlib.sha256(empreinte.encode("utf-8")).hexdigest()[:12]
+
+
+def _texte_change(g, cle: str) -> None:
+    """Un texte du guide (Textes & noms) vient de changer : le guide du clan se réécrit."""
+    planifier_guide(g)
+
+
+textes_du_site.quand_change("metiers.guide.", _texte_change)
 
 
 def planifier_guide(g) -> None:
@@ -1015,14 +1146,11 @@ async def inviter_au_choix(g, ch, membre) -> str | None:
     if lien is None or await role_du_clan(g, c) is None or not await options_selecteur(g):
         return None
     auto = reglages_de(c)["auto"]
+    await textes_du_site.texte(g.id, "metiers.carte.bouton")   # le cache des textes (Textes & noms) est chargé
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"### Bienvenue dans l'équipage · Welcome aboard\n{membre.mention}, dernière étape : choisis "
-                               "ton métier dans le **guide du clan**"
-                               + (" — ton rôle de métier t'est donné tout de suite." if auto else ".")
-                               + "\n-# Last step: pick your job in the clan guide"
-                               + (" — your job role is given right away." if auto else ".")),
-        discord.ui.ActionRow(discord.ui.Button(label="Choisir mon métier · Pick my job", url=lien)),
+        discord.ui.TextDisplay(_t(g.id, "metiers.carte.auto" if auto else "metiers.carte.manuel", membre=membre.mention)),
+        discord.ui.ActionRow(discord.ui.Button(label=_t(g.id, "metiers.carte.bouton")[:80], url=lien)),
         accent_color=discord.Color(COULEUR_CARTE)))
     try:
         await ch.send(view=v, allowed_mentions=discord.AllowedMentions.none())
@@ -1060,7 +1188,8 @@ async def etat(g) -> dict:
     for e in await metiers_du_catalogue(actifs=False):
         role = g.get_role(liens[e["cle"]]) if e["cle"] in liens else None
         metiers.append({"cle": e["cle"], "nom": e["nom"], "nom_en": e["nom_en"], "actif": bool(e["actif"]),
-                        "categorie": e["categorie"], "icone": affiches._icone_servie(e["icone"]), "role_nom": nom_du_role(e),
+                        "categorie": e["categorie"], "icone": affiches._icone_servie(e["icone"]),
+                        "role_nom": nom_du_role(e, noms_choisis(c)),
                         "couleur": f"#{couleur_du_role(e):06x}", "role": _role_sortie(role),
                         "lie": e["cle"] in liens, "attribuable": role is not None and affiches.refus_role(g, role) is None,
                         "affiches": par_metier.get(e["cle"], 0)})
