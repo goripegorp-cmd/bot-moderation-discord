@@ -1,7 +1,7 @@
 // discord.js — « Le Port » : aperçu, journal, sanctions, tickets, répertoire, salons & questions, nettoyage.
 
 import { h, icone, date, heure, depuis, duree, nombre, cleJour, libelleMois, moisDe, maintenant, sansEmoji, norm, contient, lettre, trier, compte, remplacer, quantite, accord, ajouter } from "./dom.js";
-import { etat, P, peutAgir, aller, filtres, enLigne, emettre, ecouter, retenirPersonnes } from "./noyau.js";
+import { etat, P, peutAgir, aller, filtres, enLigne, emettre, ecouter, retenirPersonnes, nommerOnglets } from "./noyau.js";
 import { lienExport, lire, poster } from "./api.js";
 import { charger, vue as vueJeu } from "./donnees.js";
 import { file } from "./hors_ligne.js";
@@ -516,8 +516,8 @@ function lignePersonne(x) {
 }
 
 // ─── Salons & questions ─────────────────────────────────────────────────────
-const SOUS_SALONS = [["questions", "Questions", "salons"], ["idees", "Idées", "etoile"], ["sondages", "Sondages", "drapeau"], ["entraide", "Entraide & trade", "ancre"],
-  ["annonces", "Annonces", "cloche"], ["droits", "Droits des salons", "cle"]];
+const SOUS_SALONS = nommerOnglets("site.sous.port.salons", [["questions", "Questions", "salons"], ["idees", "Idées", "etoile"], ["sondages", "Sondages", "drapeau"], ["entraide", "Entraide & trade", "ancre"],
+  ["annonces", "Annonces", "cloche"], ["droits", "Droits des salons", "cle"]]);
 export function salons(vue, ctx) {
   const sous = SOUS_SALONS.some(([k]) => k === ctx.sous) ? ctx.sous : "questions";
   const f = filtres("salons", { q: "", ques: "ouverte", idees: "ouvertes", sond: "en_cours", entr: "ouvertes" });

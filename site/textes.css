@@ -1,0 +1,106 @@
+/* textes.css — « Textes & noms » (La Capitainerie) : la liste des textes, leur aperçu tel que Discord l'affichera,
+   l'éditeur (variables en pastilles, aperçu vivant), le conflit (les deux versions côte à côte).
+   CSP : aucun style en ligne ; les couleurs de Discord reprennent celles de l'aperçu des annonces (ateliers.css). */
+
+/* ─── La liste ─────────────────────────────────────────────────────── */
+.textes-liste { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; min-width: 0; }
+.texte-partie { font: 400 21px/1.2 var(--police-titre); color: var(--encre-2); margin: 12px 0 2px; }
+.texte-partie:first-child { margin-top: 2px; }
+.texte-ligne {
+  display: grid; gap: 7px; min-width: 0; padding: 12px 14px 13px;
+  border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--papier);
+  box-shadow: var(--ombre-papier);
+}
+.texte-ligne.modifie { box-shadow: inset 4px 0 0 var(--vert), var(--ombre-papier); }
+.texte-ligne.en-attente { border-style: dashed; border-color: var(--laiton-fonce); }
+.texte-ligne.conflit { box-shadow: inset 4px 0 0 var(--cire), var(--ombre-papier); }
+.texte-tete { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
+.texte-titre { flex: 1 1 14em; min-width: 0; font-size: 17px; line-height: 1.3; overflow-wrap: anywhere; }
+.texte-tete > .bouton { margin-left: auto; }
+.texte-aide { font-size: 14.5px; line-height: 1.4; color: var(--encre-2); overflow-wrap: anywhere; }
+.alerte-texte { color: var(--cire); }
+
+/* Un texte de Discord, en petit (le thème sombre de Discord) */
+.texte-discord {
+  min-width: 0; max-width: 640px; padding: 8px 12px; border-radius: 6px;
+  background: #2b2d31; color: #dbdee1; border: 1px solid #3f4147; border-left: 4px solid #4f545c;
+  font: 400 15px/1.375 "gg sans", "Noto Sans", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  overflow-wrap: anywhere;
+}
+.texte-discord.bouton-seul { justify-self: start; max-width: 100%; padding: 8px 10px; border-left-width: 1px; }
+.texte-discord .discord-bouton { max-width: 100%; }
+.texte-discord .discord-bouton .md { display: inline; }
+.texte-discord .discord-bouton .md-ligne { display: inline; min-height: 0; }
+.discord-carte .texte-discord { max-width: none; padding: 0; border: 0; background: transparent; }
+/* Un nom du site : la plaque, comme sur les pancartes */
+.texte-nom {
+  justify-self: start; display: inline-block; max-width: 100%; padding: 3px 12px 1px;
+  border: 1px solid var(--trait-fort); border-radius: 3px; background: var(--papier-2);
+  font: 400 19px/1.35 var(--police-titre); color: var(--encre); overflow-wrap: anywhere;
+}
+.texte-nom.grand { font-size: 26px; padding: 6px 16px 3px; }
+.texte-nom.phrase { font: 400 16px/1.45 var(--police-texte); padding: 4px 12px; }
+.texte-nom.phrase.grand { font-size: 18px; padding: 6px 14px; }
+.texte-cadre-site {
+  display: grid; justify-items: start; padding: 16px; border: 6px solid var(--bois-2); border-radius: 8px;
+  background: var(--parchemin);
+}
+
+/* Les variables : des pastilles de laiton (dans l'aperçu et à insérer) */
+.var-pastille {
+  display: inline-block; padding: 0 7px; margin: 0 1px; border-radius: 9px;
+  background: #c9a35a; color: #1d1209; font: 600 13px/1.6 "Segoe UI", "Noto Sans", Arial, sans-serif;
+  vertical-align: baseline; white-space: nowrap;
+}
+.texte-variables { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.texte-variables > .champ-lib { flex-basis: 100%; }
+.var-bouton {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; max-width: 100%; padding: 4px 10px 4px 6px;
+  border: 1px dashed var(--laiton-fonce); border-radius: 18px; background: var(--papier-2); color: var(--encre);
+  font: 400 14px/1.25 var(--police-texte); text-align: left; cursor: pointer;
+}
+@media (pointer: coarse) { .var-bouton { min-height: 44px; } }
+.var-bouton:hover { border-style: solid; background: var(--papier-sombre); }
+.var-bouton:focus-visible { outline: 2.5px solid var(--encre); outline-offset: 2px; }
+.var-desc { min-width: 0; overflow-wrap: anywhere; }
+
+/* ─── L'éditeur ────────────────────────────────────────────────────── */
+.texte-editeur .md-bouton:nth-child(8) { font-size: 12px; font-weight: 500; color: var(--encre-2); }
+.texte-editeur { display: grid; gap: 18px; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); align-items: start; }
+@media (max-width: 900px) { .texte-editeur { grid-template-columns: minmax(0, 1fr); } }
+.texte-champ { width: 100%; }
+textarea.texte-champ { min-height: 120px; font-family: var(--police-texte); }
+.texte-compteur { font-size: 14px; color: var(--encre-3); white-space: nowrap; }
+.texte-compteur.alerte { color: var(--cire); font-weight: 700; }
+.texte-avertissements { display: grid; gap: 6px; }
+.texte-avertissements:empty { display: none; }
+.texte-avert {
+  display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px;
+  border-left: 3px solid var(--ambre); background: rgba(168, 100, 28, .1); font-size: 14.5px; color: var(--ambre-texte);
+}
+.texte-avert .ic { flex: none; margin-top: 2px; }
+.texte-apercu-vivant { min-width: 0; }
+
+/* Le conflit : les deux versions, côte à côte */
+.texte-conflit { display: grid; gap: 10px; }
+.texte-deux { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.texte-version {
+  display: grid; gap: 8px; align-content: start; min-width: 0; padding: 10px 12px;
+  border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--papier-2);
+}
+.texte-version > .bouton { justify-self: start; }
+
+/* Les renommages de rôles (Rôles & métiers) */
+.renommer-rattaches { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.renommer-rattaches > .champ-lib { flex-basis: 100%; }
+
+/* « Renommer » dans l'en-tête de chaque rubrique : à droite du titre, sans déplacer le sceau ni la phrase */
+.titre-rubrique.renommable { grid-template-columns: auto minmax(0, 1fr) auto; }
+.titre-rubrique.renommable > h1, .titre-rubrique.renommable > p { grid-column: 2; }
+.titre-rubrique.renommable > .renommer-rubrique { grid-column: 3; grid-row: 1; align-self: center; }
+@media (max-width: 519px) {
+  .titre-rubrique.renommable { grid-template-columns: minmax(0, 1fr) auto; }
+  .titre-rubrique.renommable > h1, .titre-rubrique.renommable > p { grid-column: 1; }
+  .titre-rubrique.renommable > .renommer-rubrique { grid-column: 2; }
+  .titre-rubrique.renommable > .renommer-rubrique > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}

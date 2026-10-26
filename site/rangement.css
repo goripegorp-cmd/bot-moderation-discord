@@ -59,17 +59,28 @@
 /* ─── Le mode simple ───────────────────────────────────────────────── */
 /* Caché en mode simple : les chiffres (tuiles), les graphiques, les filtres avancés, les détails techniques. */
 .mode-simple .avance, .mode-simple .contenu .tuiles, .mode-simple .ident, .mode-simple .copier { display: none !important; }
-.titre-rubrique { grid-template-columns: auto minmax(0, 1fr) auto; }
-.titre-rubrique > h1, .titre-rubrique > p { grid-column: 2; }
-.titre-rubrique .bascule-mode { grid-column: 3; grid-row: 1 / span 2; align-self: center; justify-self: end; }
+/* L'en-tête d'une rubrique : le sceau, le titre et sa phrase ; à droite, ensemble, « Renommer » (Textes & noms) et
+   « Tout afficher » (le mode simple). */
+.titre-rubrique, .titre-rubrique.renommable { grid-template-columns: auto minmax(0, 1fr) auto; }
+.titre-rubrique > h1, .titre-rubrique > p, .titre-rubrique.renommable > h1, .titre-rubrique.renommable > p { grid-column: 2; }
+.titre-rubrique > .rubrique-outils {
+  grid-column: 3; grid-row: 1 / span 2; align-self: center; justify-self: end;
+  display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; max-width: 30ch;
+}
 @media (max-width: 519px) {
-  .titre-rubrique { grid-template-columns: minmax(0, 1fr) auto; }
-  .titre-rubrique > h1 { grid-column: 1; grid-row: 1; }
-  .titre-rubrique > p { grid-column: 1 / -1; grid-row: 2; }
-  .titre-rubrique .bascule-mode { grid-column: 2; grid-row: 1; }
+  .titre-rubrique, .titre-rubrique.renommable { grid-template-columns: minmax(0, 1fr) auto; }
+  .titre-rubrique > h1, .titre-rubrique.renommable > h1 { grid-column: 1; grid-row: 1; }
+  .titre-rubrique > p, .titre-rubrique.renommable > p { grid-column: 1 / -1; grid-row: 2; }
+  .titre-rubrique > .rubrique-outils { grid-column: 2; grid-row: 1; flex-wrap: nowrap; gap: 4px; }
+  /* Au téléphone, les deux en icône : leur nom reste pour les lecteurs d'écran (et au survol). */
+  .rubrique-outils .renommer-rubrique > span, .rubrique-outils .bascule-mode .bm-simple > span, .rubrique-outils .bascule-mode .bm-tout > span {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .rubrique-outils .bascule-mode { padding: 4px 10px; }
+  .rubrique-outils .renommer-rubrique { padding-inline: 10px; }
 }
 .bascule-mode {
-  display: inline-flex; align-items: center; min-height: 36px; padding: 4px 12px;
+  position: relative; display: inline-flex; align-items: center; min-height: 36px; padding: 4px 12px;
   border: 1px dashed var(--trait-fort); border-radius: var(--rayon); background: transparent;
   color: var(--encre-2); font: 500 14.5px/1.2 var(--police-sc); letter-spacing: .02em; white-space: nowrap;
   transition: background-color .15s, color .15s, border-color .15s;

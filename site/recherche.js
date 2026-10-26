@@ -20,7 +20,8 @@ const SOUS = [["port", "salons", "questions", "Questions des salons"], ["port", 
   ["port", "salons", "sondages", "Sondages"], ["port", "salons", "entraide", "Entraide et trade"], ["port", "salons", "annonces", "Annonces du serveur"],
   ["port", "salons", "droits", "Droits des salons"], ["equipage", "candidatures", "questionnaire", "Banque de questions du recrutement"],
   ["equipage", "candidatures", "decidees", "Candidatures décidées"], ["equipage", "annonces", "brouillons", "Brouillons d'annonces"],
-  ["equipage", "annonces", "a-venir", "Événements à venir"], ["equipage", "annonces", "passes", "Publications passées"]];
+  ["equipage", "annonces", "a-venir", "Événements à venir"], ["equipage", "annonces", "publiees", "Annonces publiées"],
+  ["equipage", "annonces", "passes", "Publications passées"]];
 
 // ─── L'en-tête ──────────────────────────────────────────────────────────────
 const estSaisie = (el) => !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
@@ -113,9 +114,9 @@ function chercher(brut) {
       visuel: () => pastilleIcone("affiches", "#7a4b2a"), ouvrir: () => emettre("affiche:ouvrir", a.id), cle: "a" + a.id }));
     const E = vueJeu("evenements");
     if (E && !E.erreur) {
-      const tous = [...(E.brouillons || []).map((x) => ["brouillons", x]), ...(E.a_venir || []).map((x) => ["a-venir", x]), ...(E.passes || []).map((x) => ["passes", x])];
+      const tous = [...(E.brouillons || []).map((x) => ["brouillons", x]), ...(E.a_venir || []).map((x) => ["a-venir", x]), ...(E.publiees || []).map((x) => ["publiees", x]), ...(E.passes || []).map((x) => ["passes", x])];
       g("publications", "Annonces et événements", trouver(tous, ([, x]) => (x.titre || "") + " " + (NOMS_PUBLICATIONS[x.type] || ""), mots, PAR_GROUPE), ([ou, x]) => ({
-        titre: x.titre || NOMS_PUBLICATIONS[x.type] || "Publication", sous: (NOMS_PUBLICATIONS[x.type] || "Publication") + " · " + (ou === "brouillons" ? "brouillon" : ou === "a-venir" ? (x.quand && x.quand > maintenant() ? dans(x.quand) : "à venir") : "passé"),
+        titre: x.titre || NOMS_PUBLICATIONS[x.type] || "Publication", sous: (NOMS_PUBLICATIONS[x.type] || "Publication") + " · " + (ou === "brouillons" ? "brouillon" : ou === "a-venir" ? (x.quand && x.quand > maintenant() ? dans(x.quand) : "à venir") : ou === "publiees" ? "en ligne" : "passé"),
         visuel: () => pastilleIcone(x.type === "evenement" ? "calendrier" : "cloche", "#1f4e5a"), ouvrir: () => ouvrirPublication(x, ou), cle: "e" + x.id }));
     }
     const B = vueJeu("banque");

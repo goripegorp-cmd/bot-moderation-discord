@@ -59,6 +59,8 @@ const RECHERCHER = (texte) => `(async () => { document.dispatchEvent(new Keyboar
 const CASIER_DEPLIE = `(async () => { const c = [...document.querySelectorAll('.cadre')].find((x) => x.textContent.includes('Nettoyer le casier'));
   [...c.querySelectorAll('button')].find((b) => b.textContent.includes('Tout déplier')).click(); await new Promise(r => setTimeout(r, 400));
   for (const d of c.querySelectorAll('details.groupe')) d.open = true; await new Promise(r => setTimeout(r, 400)); c.scrollIntoView({ block: 'start' }); return 1; })()`;
+// Textes & noms : ouvrir le n-ième groupe (Recrutement, Métiers, Le guide du clan, Annonces & événements, Le site).
+const OUVRIR_GROUPE_TEXTES = (n) => `(async () => { const g = document.querySelectorAll('details.groupe')[${n}]; if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 600)); return 1; })()`;
 
 // Les scènes : une rubrique (ancre) et, au besoin, des gestes (code exécuté dans la page) avant le contrôle.
 // Les icônes officielles et les logos viennent d'une autre branche (et du wiki, plus tard) : leur 404 est attendu,
@@ -114,6 +116,24 @@ const SCENES = [
     geste2: "[...document.querySelectorAll('dialog button')].find(b => b.textContent.includes('Passer à l')).click()" },
   { nom: "fenetre-file", ancre: "#port/apercu", geste: "document.querySelector('#plaque-etat').click()" },
   { nom: "fenetre-element-catalogue", ancre: "#capitainerie/catalogue", geste: "(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.element-carte').click(); })()" },
+  // Textes & noms (26/10/2026) : la liste, un groupe ouvert, l'éditeur d'un texte de Discord et celui d'un nom du site ;
+  // les annonces « Publiées » ; les textes d'une carte depuis son aperçu ; renommer un rôle.
+  { nom: "capitainerie-textes", ancre: "#capitainerie/textes" },
+  { nom: "capitainerie-textes-groupe", ancre: "#capitainerie/textes", geste: OUVRIR_GROUPE_TEXTES(0) },
+  { nom: "fenetre-editeur-texte", ancre: "#capitainerie/textes", geste: OUVRIR_GROUPE_TEXTES(0),
+    geste2: "document.querySelector('details.groupe[open] .texte-ligne .bouton').click()" },
+  { nom: "fenetre-editeur-texte-site", ancre: "#capitainerie/textes", geste: OUVRIR_GROUPE_TEXTES(4),
+    geste2: "document.querySelector('details.groupe[open] .texte-ligne .bouton').click()" },
+  { nom: "equipage-annonces-publiees", ancre: "#equipage/annonces/publiees" },
+  { nom: "fenetre-textes-carte", ancre: "#equipage/annonces/brouillons", geste: OUVRIR_BROUILLON,
+    geste2: "[...document.querySelectorAll('.apercu-cadre button')].find(b => b.textContent.includes('Modifier les textes')).click()" },
+  { nom: "fenetre-renommer-role", ancre: "#capitainerie/roles", geste: "[...document.querySelectorAll('#contenu .rubrique-corps button')].find(b => b.textContent.includes('Renommer…')).click()" },
+  // « Même ce qui existe déjà » : « Renommer » dans l'en-tête d'une rubrique (son nom, sa phrase, ses sous-onglets) ;
+  // les textes de la carte de l'équipe (Candidatures → Questionnaire) ; ceux du guide du clan (Rôles & métiers).
+  { nom: "fenetre-renommer-rubrique", ancre: "#equipage/annonces/composer", geste: "document.querySelector('#contenu .titre-rubrique .renommer-rubrique').click()" },
+  // (Les messages du bot sont rangés dans un groupe replié du questionnaire : déplié d'abord.)
+  { nom: "fenetre-textes-equipe", ancre: "#equipage/candidatures/questionnaire", geste: "(async () => { const g = [...document.querySelectorAll('#contenu details.groupe')].find((d) => d.querySelector('summary').textContent.includes('Les messages du bot')); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); [...document.querySelectorAll('#contenu button')].find(b => b.textContent.includes(\"La carte de l'équipe\")).click(); return 1; })()" },
+  { nom: "fenetre-textes-guide", ancre: "#capitainerie/roles", geste: "[...document.querySelectorAll('#contenu button')].find(b => b.textContent.includes('Les textes du guide du clan')).click()" },
   // La présence en direct : une SECONDE personne (la direction, son propre cookie) tient l'affiche de Kolax en
   // modification. La liste « À bord » ouverte, la carte sous cadenas, l'éditeur en lecture seule (vrai site local).
   { nom: "direct-liste", ancre: "#capitainerie/affiches", autre: true, geste: "document.querySelector('.direct-bord').click()" },

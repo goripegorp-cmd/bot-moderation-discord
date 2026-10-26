@@ -50,6 +50,7 @@ from discord.ui import Button
 import annonces
 import diag
 import paths
+import textes as textes_du_site
 import visuels
 import zones
 from ui_v2 import LayoutView, Palette
@@ -129,6 +130,170 @@ TEXTES = {
               "en": "Something went wrong: try again in a few seconds."},
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Les textes que la direction réécrit (26/10/2026 : Capitainerie → Textes & noms, registre `textes.py`)
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Les boutons, les libellés de la carte, les messages du post (rappels, nouvel horaire, annulation) et les réponses
+#  aux clics : chacun est déclaré ici avec son texte d'origine ; le bot emploie celui du serveur dès l'enregistrement.
+
+_BOUTONS, _CARTE, _ETATS, _POST, _AVIS = ("Les boutons", "La carte d'un événement", "Les états de la carte",
+                                          "Les messages dans le post", "Les réponses aux clics (pour la personne seule)")
+_LISTE = "Le listing et l'annonce des métiers"
+
+
+def _declarer(cle: str, defaut: str, titre: str, partie: str, ordre: int, aide: str, *, max_: int = 300,
+              lignes: bool = False, variables=()) -> None:
+    textes_du_site.declarer(cle, defaut, groupe="evenements", titre=titre, partie=partie, ordre=ordre, aide=aide,
+                            max_=max_, lignes=lignes, variables=variables)
+
+
+_declarer("evenements.bouton.dispo", "Disponible · Available", "Le bouton « Disponible »", _BOUTONS, 1,
+          "Sous un événement : je viens. Les rappels mentionnent ceux qui l'ont touché.", max_=80)
+_declarer("evenements.bouton.peut_etre", "Peut-être · Maybe", "Le bouton « Peut-être »", _BOUTONS, 2,
+          "Sous un événement : je ne sais pas encore.", max_=80)
+_declarer("evenements.bouton.pas_dispo", "Pas disponible · Unavailable", "Le bouton « Pas disponible »", _BOUTONS, 3,
+          "Sous un événement : je ne viens pas.", max_=80)
+_declarer("evenements.complet", "Complet · Full", "Complet", _BOUTONS, 4,
+          "Sur le bouton « Disponible » et dans le compteur, quand toutes les places sont prises.", max_=60)
+_declarer("evenements.bouton.vu", "Vu · Seen", "Le bouton « Vu » d'une annonce", _BOUTONS, 5,
+          "Sous une annonce : « je l'ai lue ». Le nombre de lecteurs s'ajoute derrière.", max_=70)
+_declarer("evenements.bouton.voir", "Voir l'événement · View event", "Le bouton des rappels", _BOUTONS, 6,
+          "Sous un rappel, un nouvel horaire ou une annulation : il mène à la carte de l'événement.", max_=80)
+_declarer("evenements.carte.sous_titre", "Événement du clan · Clan event", "Sous le titre", _CARTE, 10,
+          "La petite ligne sous le titre de chaque événement.", max_=120)
+_declarer("evenements.carte.debut", "**Début · Starts** {quand}", "Le début", _CARTE, 11,
+          "La date et l'heure du début (Discord l'affiche dans le fuseau de chacun).", max_=150,
+          variables=(("quand", "la date et l'heure du début"),))
+_declarer("evenements.carte.debut_a_choisir", "**Début · Starts** à choisir · to be set", "Le début, pas encore choisi",
+          _CARTE, 12, "Dans l'aperçu d'un brouillon sans date.", max_=150)
+_declarer("evenements.carte.duree", "**Durée · Duration** {duree}", "La durée", _CARTE, 13,
+          "Sous le début, quand une durée est choisie.", max_=150, variables=(("duree", "la durée (« 1 h 30 »)"),))
+_declarer("evenements.carte.lieu", "**Lieu · Location** RELL Seas · {lieu}", "Le lieu", _CARTE, 14,
+          "Sous la durée, quand un lieu est choisi.", max_=200, variables=(("lieu", "le lieu écrit sur le site"),))
+_declarer("evenements.carte.disponibles", "Disponibles · Available", "Le compteur des disponibles", _CARTE, 15,
+          "En tête des réponses, suivi du nombre de disponibles.", max_=80)
+_declarer("evenements.carte.etaient_disponibles", "Étaient disponibles · Were available",
+          "Le compteur, une fois terminé", _CARTE, 16, "Le même compteur quand l'événement est fini.", max_=80)
+_declarer("evenements.carte.places", "places · spots", "Les places", _CARTE, 17,
+          "Derrière le nombre de places (« 3 / 12 places »).", max_=40)
+_declarer("evenements.carte.peut_etre", "Peut-être · Maybe", "Le compteur des peut-être", _CARTE, 18,
+          "Suivi du nombre de « Peut-être ».", max_=80)
+_declarer("evenements.carte.pas_disponibles", "Pas disponibles · Unavailable", "Le compteur des absents", _CARTE, 19,
+          "Suivi du nombre de « Pas disponible ».", max_=80)
+_declarer("evenements.carte.personne", "Personne pour l'instant · Nobody yet", "Personne encore", _CARTE, 20,
+          "Sous le compteur, tant que personne n'est disponible.", max_=120)
+_declarer("evenements.carte.personne_fini", "Personne · Nobody", "Personne (fini)", _CARTE, 21,
+          "Le même, une fois l'événement fini.", max_=120)
+_declarer("evenements.carte.reserve", "Réservé au clan · Clan only", "Réservé au clan", _CARTE, 22,
+          "En bas de la carte, après le nom du clan, quand seuls ses membres peuvent répondre.", max_=120)
+_declarer("evenements.carte.rappels", "Rappels · Reminders : {quand}", "Les rappels prévus", _CARTE, 23,
+          "En bas de la carte : quand partiront les rappels.", max_=200,
+          variables=(("quand", "les moments des rappels (« 1 h avant · before »)"),))
+_declarer("evenements.carte.rappels_mention",
+          "Les rappels mentionnent les disponibles · Reminders ping available members", "Qui les rappels mentionnent",
+          _CARTE, 24, "En bas de la carte, quand les rappels mentionnent les disponibles.", max_=200)
+_declarer("evenements.etat.en_cours", "En cours · Live now", "En cours", _ETATS, 30,
+          "À la place du minuteur, pendant l'événement.", max_=100)
+_declarer("evenements.etat.fin", "Fin · Ends {fin}", "La fin, pendant l'événement", _ETATS, 31,
+          "Sous « En cours », quand une durée est choisie.", max_=120, variables=(("fin", "l'heure de fin (minuteur)"),))
+_declarer("evenements.etat.commence", "Commencé · Started {debut}", "Commencé", _ETATS, 32,
+          "Sous « En cours », sans durée.", max_=120, variables=(("debut", "le début (minuteur)"),))
+_declarer("evenements.etat.termine", "Terminé · Ended", "Terminé", _ETATS, 33,
+          "Quand l'événement est fini (avec une durée).", max_=100)
+_declarer("evenements.etat.a_eu_lieu", "A eu lieu · Took place", "A eu lieu", _ETATS, 34,
+          "Quand l'événement est fini (sans durée).", max_=100)
+_declarer("evenements.etat.annule", "Annulé · Cancelled", "Annulé (la carte)", _ETATS, 35,
+          "En tête de la carte d'un événement annulé.", max_=100)
+_declarer("evenements.etat.prevu", "Prévu le · Was planned for {quand}", "La date prévue d'un annulé", _ETATS, 36,
+          "Sous « Annulé ».", max_=150, variables=(("quand", "la date qui était prévue"),))
+_declarer("evenements.rappel.titre", "Rappel · Reminder", "Rappel : le titre", _POST, 40,
+          "Le message posté avant le début, aux minutes choisies.", max_=100)
+_declarer("evenements.rappel.texte", "**{titre}** — {quand}", "Rappel : le texte", _POST, 41,
+          "Sous le titre du rappel ; les disponibles sont mentionnés au-dessus.", max_=400, lignes=True,
+          variables=(("titre", "le titre de l'événement"), ("quand", "le minuteur jusqu'au début")))
+_declarer("evenements.debut.titre", "C'est l'heure · It's time", "Au début : le titre", _POST, 42,
+          "Le message posté au début, si le rappel « Au début » est choisi.", max_=100)
+_declarer("evenements.debut.texte", "**{titre}** commence · starts", "Au début : le texte", _POST, 43,
+          "Sous le titre du message de début.", max_=400, lignes=True, variables=(("titre", "le titre de l'événement"),))
+_declarer("evenements.horaire.titre", "Nouvel horaire · New time", "Nouvel horaire : le titre", _POST, 44,
+          "Le message posté quand le début change.", max_=100)
+_declarer("evenements.horaire.texte",
+          "**{titre}** — {quand}. Toujours disponible ? Mets ta réponse à jour · Still available? Update your answer.",
+          "Nouvel horaire : le texte", _POST, 45, "Sous le titre ; les disponibles sont mentionnés.", max_=400,
+          lignes=True, variables=(("titre", "le titre de l'événement"), ("quand", "le minuteur jusqu'au nouveau début")))
+_declarer("evenements.annulation.titre", "Annulé · Cancelled", "Annulation : le titre", _POST, 46,
+          "Le message posté quand un événement est annulé (si des disponibles sont prévenus).", max_=100)
+_declarer("evenements.annulation.texte", "**{titre}** n'aura pas lieu · will not take place.",
+          "Annulation : le texte", _POST, 47, "Sous le titre du message d'annulation.", max_=400, lignes=True,
+          variables=(("titre", "le titre de l'événement"),))
+#  Le listing du clan et l'annonce des métiers : leur titre par défaut, le résumé, les groupes, la suite.
+_declarer("evenements.liste.titre.metiers", NOMS_TYPES["metiers"], "Le titre par défaut · annonce des métiers", _LISTE,
+          50, "Quand aucun titre n'est écrit sur le site.", max_=TITRE_MAX)
+_declarer("evenements.liste.titre.listing", NOMS_TYPES["listing"], "Le titre par défaut · listing du clan", _LISTE, 51,
+          "Quand aucun titre n'est écrit sur le site.", max_=TITRE_MAX)
+_declarer("evenements.liste.resume_metiers", "**{membres} membres · members** · **{metiers} métiers · trades**",
+          "Le résumé · annonce des métiers", _LISTE, 52, "Sous le titre de l'annonce des métiers.", max_=200,
+          variables=(("membres", "le nombre de membres qui ont un métier"), ("metiers", "le nombre de métiers")))
+_declarer("evenements.liste.resume_listing", "**{membres} membres · members** · par {groupe} · by {groupe_en}",
+          "Le résumé · listing du clan", _LISTE, 53, "Sous le titre du listing.", max_=200,
+          variables=(("membres", "le nombre de membres du clan"), ("groupe", "le rangement (« grade », « race »…)"),
+                     ("groupe_en", "le même, en anglais")))
+for _k, (_groupement, _nom) in enumerate((("metier", "Sans métier · No trade"), ("grade", "Sans grade · No rank"),
+                                          ("race", "Race non renseignée · Race not set"))):
+    _declarer(f"evenements.liste.sans.{_groupement}", _nom, f"Le groupe « {_nom.split(' · ')[0]} »", _LISTE, 54 + _k,
+              "Dans le listing : les membres dont l'affiche ne le dit pas.", max_=100)
+_declarer("evenements.liste.personne", "Personne à afficher pour l'instant · Nobody to show yet", "Personne à afficher",
+          _LISTE, 57, "Quand aucun membre n'a d'affiche à montrer.", max_=150)
+_declarer("evenements.liste.suite", "{titre} · suite · continued ({page}/{pages})", "La suite d'une longue liste", _LISTE,
+          58, "En tête de chaque message, quand la liste tient en plusieurs.", max_=200,
+          variables=(("titre", "le titre de la publication"), ("page", "le numéro du message"),
+                     ("pages", "le nombre de messages")))
+_declarer("evenements.liste.groupe_suite", "{nom} (suite · cont.)", "La suite d'un groupe", _LISTE, 59,
+          "Quand un groupe (un métier, un grade) continue dans un autre bloc.", max_=150,
+          variables=(("nom", "le nom du groupe"),))
+#  Les réponses aux clics : la langue du membre (français ou anglais), chacune réécrite à part.
+_AVIS_TITRES = {"ok": ("Réponse notée", "Après un clic sur un bouton de réponse."),
+                "deja": ("Déjà répondu", "Il touche la réponse qu'il avait déjà donnée."),
+                "complet": ("Complet", "« Disponible » alors que toutes les places sont prises."),
+                "reserve": ("Réservé au clan", "Quelqu'un hors du clan touche un bouton d'un événement réservé."),
+                "fini": ("Réponses closes", "Un clic après la fin de l'événement."),
+                "annule": ("Événement annulé", "Un clic sur un événement annulé."),
+                "debut": ("Le rappel du début", "Ajouté après « C'est noté », avant le début."),
+                "rappel_toi": ("Les rappels te mentionneront", "Ajouté quand il se dit disponible."),
+                "vu_ok": ("Annonce lue", "Après « Vu » sous une annonce."),
+                "vu_deja": ("Déjà lue", "« Vu » touché une seconde fois."),
+                "introuvable": ("Événement disparu", "Un clic sur un événement effacé."),
+                "annonce_introuvable": ("Annonce disparue", "« Vu » sous une annonce effacée."),
+                "demarre": ("Le bot démarre", "Un clic pendant le démarrage du bot."),
+                "souci": ("Un souci", "Une erreur imprévue (elle est aussi notée au journal du bot).")}
+_AVIS_VARIABLES = {"ok": (("choix", "le bouton touché"),), "deja": (("choix", "le bouton touché"),),
+                   "complet": (("n", "le nombre de places"),), "debut": (("q", "l'heure du début (minuteur)"),)}
+for _k, (_titre, _aide) in _AVIS_TITRES.items():
+    for _n, (_langue, _nom) in enumerate((("fr", "en français"), ("en", "en anglais"))):
+        _declarer(f"evenements.avis.{_k}.{_langue}", TEXTES[_k][_langue], f"{_titre} · {_nom}", _AVIS,
+                  60 + 2 * list(_AVIS_TITRES).index(_k) + _n, _aide, max_=300, variables=_AVIS_VARIABLES.get(_k, ()))
+
+
+def _t(guild_id, cle: str, **valeurs) -> str:
+    """Un texte que la direction peut réécrire (Textes & noms) : celui du serveur, sinon celui d'origine."""
+    return textes_du_site.texte_cache(guild_id, cle, **valeurs)
+
+
+def libelles_carte(guild_id) -> dict:
+    """Les textes des cartes de ce serveur (`evenements.…`) : l'aperçu de la page les emploie pendant la saisie."""
+    return {cle: _t(guild_id, cle) for cle in sorted(textes_du_site._DECLARES) if cle.startswith("evenements.")
+            and not cle.startswith("evenements.avis.")}
+
+
+def _noms_choix(guild_id, choix: str) -> tuple:
+    """(français, anglais) d'un bouton de réponse, lus dans son texte (« Disponible · Available ») : la réponse au clic
+    dit le bouton tel que le membre l'a lu."""
+    cle = {"d": "evenements.bouton.dispo", "p": "evenements.bouton.peut_etre", "n": "evenements.bouton.pas_dispo"}[choix]
+    morceaux = [x.strip() for x in _t(guild_id, cle).split(" · ") if x.strip()]
+    if not morceaux:
+        return CHOIX[choix]
+    return morceaux[0], morceaux[1] if len(morceaux) > 1 else morceaux[0]
+
 _get_db = _cfg = _journal = _role_clan = _langue = _est_tete = None
 _fiches = _catalogue = _media = None
 _log = print
@@ -143,7 +308,11 @@ _releve = {"boucles": 0, "derniere_boucle": 0, "rappels": 0, "cartes": 0, "publi
            "a_venir": 0}
 
 
-def tr(cle: str, langue: str = "fr", **kw) -> str:
+def tr(cle: str, langue: str = "fr", *, gid: int = 0, **kw) -> str:
+    """Un mot pour soi, dans la langue du membre : celui du serveur s'il est réécrit (Textes & noms, `gid`)."""
+    k = f"evenements.avis.{cle}.{'en' if langue == 'en' else 'fr'}"
+    if textes_du_site.declare(k):
+        return _t(gid, k, **kw)
     e = TEXTES.get(cle) or {}
     texte = e.get(langue) or e.get("fr") or cle
     return texte.format(**kw) if kw else texte
@@ -894,38 +1063,41 @@ def _mention_publication(g, c: dict, v: dict, salon) -> tuple:
                             "personne ne sera notifié.")
 
 
-def _boutons_reponse(n_d: int, places: int, actif: bool) -> dict:
+def _boutons_reponse(n_d: int, places: int, actif: bool, gid: int = 0) -> dict:
     complet = bool(places) and n_d >= places
+    libelles = {"d": _t(gid, "evenements.bouton.dispo"), "p": _t(gid, "evenements.bouton.peut_etre"),
+                "n": _t(gid, "evenements.bouton.pas_dispo")}
     out = []
     for choix in ("d", "p", "n"):
-        fr, en = CHOIX[choix]
-        label = "Complet · Full" if choix == "d" and complet else f"{fr} · {en}"
-        out.append({"label": label, "style": "succes" if choix == "d" else "secondaire", "icone": CHOIX_ICONE[choix],
-                    "action": f"r:{choix}", "desactive": not actif or (choix == "d" and complet)})
+        label = _t(gid, "evenements.complet") if choix == "d" and complet else libelles[choix]
+        out.append({"label": label[:80], "style": "succes" if choix == "d" else "secondaire",
+                    "icone": CHOIX_ICONE[choix], "action": f"r:{choix}", "desactive": not actif or (choix == "d" and complet)})
     return {"type": "boutons", "boutons": out}
 
 
-def _lignes_quand(v: dict, phase: str, statut: str) -> list:
+def _lignes_quand(v: dict, phase: str, statut: str, gid: int = 0) -> list:
     q, fin = int(v.get("quand") or 0), _fin(v)
     lignes = []
     if not q:
-        lignes.append(_l("**Début · Starts** à choisir · to be set", "calendrier"))
+        lignes.append(_l(_t(gid, "evenements.carte.debut_a_choisir"), "calendrier"))
     elif statut == "annule":
-        lignes += [_l("Annulé · Cancelled", "annuler", 3), _l(f"Prévu le · Was planned for <t:{q}:F>", niveau="petit")]
+        lignes += [_l(_t(gid, "evenements.etat.annule"), "annuler", 3),
+                   _l(_t(gid, "evenements.etat.prevu", quand=f"<t:{q}:F>"), niveau="petit")]
     elif phase == "a_venir":
-        lignes += [_l(f"**Début · Starts** <t:{q}:F>", "calendrier"), _l(f"<t:{q}:R>", "minuteur", 3)]
+        lignes += [_l(_t(gid, "evenements.carte.debut", quand=f"<t:{q}:F>"), "calendrier"), _l(f"<t:{q}:R>", "minuteur", 3)]
     elif phase == "en_cours":
-        lignes.append(_l("En cours · Live now", "minuteur", 3))
-        lignes.append(_l(f"Fin · Ends <t:{fin}:R>" if v.get("duree_min") else f"Commencé · Started <t:{q}:R>",
-                         niveau="petit"))
+        lignes.append(_l(_t(gid, "evenements.etat.en_cours"), "minuteur", 3))
+        lignes.append(_l(_t(gid, "evenements.etat.fin", fin=f"<t:{fin}:R>") if v.get("duree_min")
+                         else _t(gid, "evenements.etat.commence", debut=f"<t:{q}:R>"), niveau="petit"))
     else:
-        lignes.append(_l("Terminé · Ended" if v.get("duree_min") else "A eu lieu · Took place", niveau=3))
+        lignes.append(_l(_t(gid, "evenements.etat.termine" if v.get("duree_min") else "evenements.etat.a_eu_lieu"),
+                         niveau=3))
         lignes.append(_l(f"<t:{q}:F>" + (f" → <t:{fin}:t>" if v.get("duree_min") else ""), niveau="petit"))
     if statut != "annule":
         if v.get("duree_min"):
-            lignes.append(_l(f"**Durée · Duration** {_duree_txt(v['duree_min'])}", "horloge"))
+            lignes.append(_l(_t(gid, "evenements.carte.duree", duree=_duree_txt(v["duree_min"])), "horloge"))
         if v.get("lieu"):
-            lignes.append(_l(f"**Lieu · Location** RELL Seas · {discord.utils.escape_markdown(v['lieu'])}", "lieu"))
+            lignes.append(_l(_t(gid, "evenements.carte.lieu", lieu=discord.utils.escape_markdown(v["lieu"])), "lieu"))
     return lignes
 
 
@@ -947,7 +1119,9 @@ def _pied(e: dict) -> dict:
     """Le bas de la carte : le clan (et la date, ou « réservé au clan ») ; pour un événement à venir, les rappels
     qui partiront encore et qui ils mentionnent — la carte ne promet que ce qui arrivera."""
     v = e["valeurs"]
-    lignes = [_l(NOM_CLAN + (" · Réservé au clan · Clan only" if e["type"] == "evenement" and v.get("reserve_clan")
+    gid = int(e.get("guild_id") or 0)
+    lignes = [_l(NOM_CLAN + (" · " + _t(gid, "evenements.carte.reserve") if e["type"] == "evenement"
+                             and v.get("reserve_clan")
                              else f" · <t:{int(e['publie'])}:D>" if e["type"] != "evenement" and e.get("publie")
                              else ""), "ancre", "petit")]
     restants = [m for m in v.get("rappels") or [] if m not in (e.get("rappels_faits") or [])]
@@ -955,15 +1129,15 @@ def _pied(e: dict) -> dict:
             and (e.get("phase") or "a_venir") == "a_venir":
         quand = ([", ".join(_duree_txt(m) for m in restants if m > 0) + " avant · before"]
                  if any(m > 0 for m in restants) else []) + (["au début · at start"] if 0 in restants else [])
-        lignes.append(_l("Rappels · Reminders : " + " · ".join(quand), "cloche", "petit"))
+        lignes.append(_l(_t(gid, "evenements.carte.rappels", quand=" · ".join(quand)), "cloche", "petit"))
         if v.get("mention") != "aucune" and v.get("reponses"):
-            lignes.append(_l("Les rappels mentionnent les disponibles · Reminders ping available members",
-                             niveau="petit"))
+            lignes.append(_l(_t(gid, "evenements.carte.rappels_mention"), niveau="petit"))
     return _texte(*lignes)
 
 
 def _cartes_evenement(g, e: dict, rep: dict, maintenant: float, haut: str) -> list:
     v, statut = e["valeurs"], e["statut"]
+    gid = int(e.get("guild_id") or getattr(g, "id", 0) or 0)
     if statut == "brouillon":   # l'aperçu : les rappels déjà passés ne partiront pas, la carte ne les promet pas
         e = {**e, "rappels_faits": sorted(_rappels_dus(e, maintenant)[1])}
     phase = phase_de(e, maintenant) if statut in ("publie", "brouillon", "envoi", "incertain") else "termine"
@@ -972,27 +1146,29 @@ def _cartes_evenement(g, e: dict, rep: dict, maintenant: float, haut: str) -> li
     if v.get("image"):
         blocs.append({"type": "image", "media": v["image"]})
     titre = v["titre"] or "(sans titre)"
-    blocs.append(_texte(_l(titre, niveau=2), _l("Événement du clan · Clan event", "drapeau", "petit")))
+    blocs.append(_texte(_l(titre, niveau=2), _l(_t(gid, "evenements.carte.sous_titre"), "drapeau", "petit")))
     if v.get("texte"):
         blocs.append(_texte(_l(v["texte"])))
     blocs.append(_sep())
-    blocs.append(_texte(*_lignes_quand(v, phase, statut)))
+    blocs.append(_texte(*_lignes_quand(v, phase, statut, gid)))
     #  Ceux qui ont quitté le serveur ne comptent plus (ni dans la liste, ni dans les places : `repondre` aussi).
     presents = [u for u in rep.get("d") or [] if g is None or g.get_member(u) is not None]
     pied = _pied(e)
     if v.get("reponses"):
         n_d, n_p, n_n = len(presents), len(rep.get("p") or []), len(rep.get("n") or [])
-        titre_d = ("Disponibles · Available" if phase != "termine" else "Étaient disponibles · Were available")
+        titre_d = _t(gid, "evenements.carte.disponibles" if phase != "termine" else "evenements.carte.etaient_disponibles")
         places = int(v.get("places") or 0)
-        tete = _l(f"**{titre_d} — {n_d}" + (f" / {places} places · spots" if places else "") + "**"
-                  + (" · **Complet · Full**" if places and n_d >= places and actif else ""), "valider")
-        autres = [_l(f"**Peut-être · Maybe — {n_p}**", "peut_etre"),
-                  _l(f"**Pas disponibles · Unavailable — {n_n}**", "annuler")]
-        boutons = _boutons_reponse(n_d, int(v.get("places") or 0), actif) if actif else None
+        tete = _l(f"**{titre_d} — {n_d}" + (f" / {places} {_t(gid, 'evenements.carte.places')}" if places else "")
+                  + "**" + (f" · **{_t(gid, 'evenements.complet')}**" if places and n_d >= places and actif else ""),
+                  "valider")
+        autres = [_l(f"**{_t(gid, 'evenements.carte.peut_etre')} — {n_p}**", "peut_etre"),
+                  _l(f"**{_t(gid, 'evenements.carte.pas_disponibles')} — {n_n}**", "annuler")]
+        boutons = _boutons_reponse(n_d, int(v.get("places") or 0), actif, gid) if actif else None
         base = blocs + [_sep(), _texte(tete, _l("x"), *autres)] + ([boutons] if boutons else []) + [pied]
         budget = CARACTERES_CIBLE - mesurer({"haut": haut, "blocs": base})[1] + 1
         noms = (_l(_liste_noms(presents, max(0, budget))) if presents
-                else _l("Personne pour l'instant · Nobody yet" if actif else "Personne · Nobody", niveau="petit"))
+                else _l(_t(gid, "evenements.carte.personne" if actif else "evenements.carte.personne_fini"),
+                        niveau="petit"))
         blocs += [_sep(), _texte(tete, noms, *autres)] + ([boutons] if boutons else [])
     blocs.append(pied)
     return [{"haut": haut, "couleur": int(v.get("couleur") or COULEURS["evenement"]), "blocs": blocs}]
@@ -1012,13 +1188,14 @@ def _cartes_annonce(e: dict, rep: dict, haut: str) -> list:
     blocs += [_sep(), _pied(e)]
     if e["statut"] in ("publie", "brouillon", "envoi", "incertain"):
         n = len(rep.get("v") or [])
+        vu = _t(int(e.get("guild_id") or 0), "evenements.bouton.vu")
         blocs.append({"type": "boutons", "boutons": [
-            {"label": "Vu · Seen" + (f" · {n}" if n else ""), "style": "succes", "icone": "valider", "action": "vu",
+            {"label": (vu + (f" · {n}" if n else ""))[:80], "style": "succes", "icone": "valider", "action": "vu",
              "desactive": e["statut"] not in ("publie", "brouillon")}]})
     return [{"haut": haut, "couleur": int(v.get("couleur") or COULEURS["annonce"]), "blocs": blocs}]
 
 
-def _groupes(eq: dict, groupement: str, *, avec_sans: bool) -> list:
+def _groupes(eq: dict, groupement: str, *, avec_sans: bool, gid: int = 0) -> list:
     """[(tête, [membres])] : chaque métier (un membre à plusieurs métiers est dans chacun), grade ou race,
     dans l'ordre du catalogue ; ceux sans fiche à la fin (le listing seulement)."""
     entrees = _cat(eq["catalogue"], groupement)
@@ -1041,7 +1218,8 @@ def _groupes(eq: dict, groupement: str, *, avec_sans: bool) -> list:
     out = [({"cle": k, "nom": _nom_cat(entrees, k, bilingue=True), "jeu": (groupement, k) if k in entrees else None},
             sorted(groupes[k], key=nom)) for k in ordre]
     if avec_sans and sans:
-        out.append(({"cle": "", "nom": SANS_GROUPE[groupement], "jeu": None}, sorted(sans, key=nom)))
+        out.append(({"cle": "", "nom": _t(gid, f"evenements.liste.sans.{groupement}"), "jeu": None},
+                    sorted(sans, key=nom)))
     return out
 
 
@@ -1057,7 +1235,7 @@ def _ligne_membre(m, f: dict, champs: list, groupement: str, catalogue: dict) ->
     return " · ".join(morceaux)
 
 
-def _blocs_groupe(tete: dict, lignes: list) -> list:
+def _blocs_groupe(tete: dict, lignes: list, gid: int = 0) -> list:
     """Un groupe = un bloc (un composant) ; trop long, il continue dans un autre (« suite »)."""
     jeu = tete["jeu"]
     entete = _l(f"{tete['nom']} — {len(lignes)}", niveau=3, jeu=jeu)
@@ -1066,7 +1244,7 @@ def _blocs_groupe(tete: dict, lignes: list) -> list:
     for ln in lignes:
         if taille + len(ln) + 1 > LIGNES_GROUPE_MAX and len(cur) > 1:
             blocs.append(_texte(*cur))
-            cur = [_l(f"{tete['nom']} (suite · cont.)", niveau=3, jeu=jeu)]
+            cur = [_l(_t(gid, "evenements.liste.groupe_suite", nom=tete["nom"]), niveau=3, jeu=jeu)]
             taille = _longueur(cur[0])
         cur.append(_l(ln))
         taille += len(ln) + 1
@@ -1074,10 +1252,11 @@ def _blocs_groupe(tete: dict, lignes: list) -> list:
     return blocs
 
 
-def _empaqueter(premiere: list, corps: list, pied: dict, titre: str, couleur: int, haut: str = "") -> list:
+def _empaqueter(premiere: list, corps: list, pied: dict, titre: str, couleur: int, haut: str = "",
+                gid: int = 0) -> list:
     """Les blocs répartis en cartes de 38 composants et 3 800 caractères au plus (marge sous les limites de
     Discord) ; chaque carte suivante dit « suite (2/3) »."""
-    gabarit = _texte(_l(f"{titre} · suite · continued (99/99)", niveau="petit"))
+    gabarit = _texte(_l(_t(gid, "evenements.liste.suite", titre=titre, page=99, pages=99), niveau="petit"))
     pages, cur = [], list(premiere)
     for b in corps:
         if _tient(cur + [b], "" if pages else haut):
@@ -1092,8 +1271,8 @@ def _empaqueter(premiere: list, corps: list, pied: dict, titre: str, couleur: in
     n = len(pages)
     cartes = []
     for k, blocs in enumerate(pages):
-        blocs = [(_texte(_l(f"{titre} · suite · continued ({k + 1}/{n})", niveau="petit")) if b is gabarit else b)
-                 for b in blocs]
+        blocs = [(_texte(_l(_t(gid, "evenements.liste.suite", titre=titre, page=k + 1, pages=n), niveau="petit"))
+                  if b is gabarit else b) for b in blocs]
         cartes.append({"haut": haut if k == 0 else "", "couleur": couleur, "blocs": blocs})
     return cartes
 
@@ -1101,20 +1280,21 @@ def _empaqueter(premiere: list, corps: list, pied: dict, titre: str, couleur: in
 def _cartes_liste(e: dict, eq: dict, haut: str) -> list:
     v, t = e["valeurs"], e["type"]
     groupement = "metier" if t == "metiers" else v.get("groupement") or "grade"
-    groupes = _groupes(eq, groupement, avec_sans=(t == "listing"))
+    gid = int(e.get("guild_id") or 0)
+    groupes = _groupes(eq, groupement, avec_sans=(t == "listing"), gid=gid)
     premiere = []
     if v.get("image"):
         premiere.append({"type": "image", "media": v["image"]})
     elif t in BANDEAUX:
         cle, titre_b = BANDEAUX[t]
         premiere.append({"type": "bandeau", "cle": cle, "titre": titre_b})
-    titre = v["titre"] or NOMS_TYPES[t]
+    titre = v["titre"] or _t(gid, f"evenements.liste.titre.{t}")
     if t == "metiers":
-        dans = {m.id for _t, ms in groupes for m in ms}
-        resume = f"**{len(dans)} membres · members** · **{len(groupes)} métiers · trades**"
+        dans = {m.id for _x, ms in groupes for m in ms}
+        resume = _t(gid, "evenements.liste.resume_metiers", membres=len(dans), metiers=len(groupes))
     else:
         fr, en = GROUPES_NOMS[groupement]
-        resume = f"**{len(eq['membres'])} membres · members** · par {fr} · by {en}"
+        resume = _t(gid, "evenements.liste.resume_listing", membres=len(eq["membres"]), groupe=fr, groupe_en=en)
     premiere.append(_texte(_l(titre, niveau=2), _l(resume, "membres")))
     if v.get("texte"):
         premiere.append(_texte(_l(v["texte"])))
@@ -1123,11 +1303,11 @@ def _cartes_liste(e: dict, eq: dict, haut: str) -> list:
     for tete, membres in groupes:
         lignes = [_ligne_membre(m, eq["fiches"].get(m.id) or {}, v.get("champs") or [], groupement, eq["catalogue"])
                   for m in membres]
-        corps += _blocs_groupe(tete, lignes)
+        corps += _blocs_groupe(tete, lignes, gid)
     if not corps:
-        corps.append(_texte(_l("Personne à afficher pour l'instant · Nobody to show yet", niveau="petit")))
+        corps.append(_texte(_l(_t(gid, "evenements.liste.personne"), niveau="petit")))
     pied = _pied(e)
-    return _empaqueter(premiere, corps, pied, titre, int(v.get("couleur") or COULEURS[t]), haut)
+    return _empaqueter(premiere, corps, pied, titre, int(v.get("couleur") or COULEURS[t]), haut, gid)
 
 
 async def cartes(g, e: dict, *, maintenant: float | None = None, rep: dict | None = None, salon=None,
@@ -1136,6 +1316,7 @@ async def cartes(g, e: dict, *, maintenant: float | None = None, rep: dict | Non
     "mentions" (celles permises à la publication), "equipage"}."""
     maintenant = _mur() if maintenant is None else maintenant
     c = await _cfg(g.id)
+    await textes_du_site.texte(g.id, "evenements.bouton.dispo")   # le cache des textes (Textes & noms) est chargé
     rep = rep if rep is not None else await _reponses(e["id"])
     v = e["valeurs"]
     if salon is None and v.get("mention") == "clan":
@@ -1234,10 +1415,15 @@ async def _sans_echec(i, travail) -> None:
     except Exception as ex:
         _signaler("E19", "bouton en échec", ex)
         try:
-            await _avis(i, tr("souci", await langue_de(i)), Palette.WARNING)
+            await _avis(i, tr("souci", await langue_de(i), gid=_gid(i)), Palette.WARNING)
         except discord.HTTPException as ex2:
             _log(f"[EVENEMENTS][E19:DETAIL] réponse impossible {type(ex2).__name__} {ex2}")
         raise
+
+
+def _gid(i) -> int:
+    """Le serveur d'une interaction (0 hors serveur : les textes d'origine)."""
+    return int(getattr(getattr(i, "guild", None), "id", 0) or 0)
 
 
 async def _du_clan(g, membre) -> bool:
@@ -1250,21 +1436,23 @@ async def _du_clan(g, membre) -> bool:
 
 async def repondre(i, eid: int, choix: str) -> None:
     if not pret():
-        return await _avis(i, tr("demarre", await langue_de(i)), Palette.WARNING, DEMARRE_S)
+        return await _avis(i, tr("demarre", await langue_de(i), gid=_gid(i)), Palette.WARNING, DEMARRE_S)
     await i.response.defer(ephemeral=True, thinking=True)   # répondre d'abord : la base peut faire attendre
     langue = await langue_de(i)
     e = await charger(eid)
     if e is None or i.guild is None or e["guild_id"] != i.guild.id or e["type"] != "evenement" \
             or not e["valeurs"].get("reponses"):
-        return await _avis(i, tr("introuvable", langue))
+        return await _avis(i, tr("introuvable", langue, gid=_gid(i)))
+    gid = i.guild.id
+    await textes_du_site.texte(gid, "evenements.bouton.dispo")   # le cache des textes est chargé
     v = e["valeurs"]
     if e["statut"] == "annule":
-        return await _avis(i, tr("annule", langue))
+        return await _avis(i, tr("annule", langue, gid=gid))
     phase = phase_de(e, _mur())
     if e["statut"] != "publie" or phase == "termine":
-        return await _avis(i, tr("fini", langue))
+        return await _avis(i, tr("fini", langue, gid=gid))
     if v.get("reserve_clan") and not await _du_clan(i.guild, i.user):
-        return await _avis(i, tr("reserve", langue), Palette.WARNING)
+        return await _avis(i, tr("reserve", langue, gid=gid), Palette.WARNING)
     uid = i.user.id
     async with _verrou(eid):   # la place comptée et prise d'un seul tenant : jamais 21 inscrits pour 20 places
         async with _get_db() as db:
@@ -1287,15 +1475,15 @@ async def repondre(i, eid: int, choix: str) -> None:
                                  " VALUES(?,?,?,?) ON CONFLICT(evenement_id, membre_id) DO UPDATE SET"
                                  " choix=excluded.choix, quand=excluded.quand", (int(eid), uid, choix, int(_mur())))
                 await db.commit()
-    nom = CHOIX[choix][1 if langue == "en" else 0]
+    nom = _noms_choix(gid, choix)[1 if langue == "en" else 0]
     if resultat == "complet":
-        return await _avis(i, tr("complet", langue, n=v["places"]), Palette.WARNING)
-    texte = tr("deja" if resultat == "deja" else "ok", langue, choix=nom)
+        return await _avis(i, tr("complet", langue, gid=gid, n=v["places"]), Palette.WARNING)
+    texte = tr("deja" if resultat == "deja" else "ok", langue, gid=gid, choix=nom)
     if phase == "a_venir" and v.get("quand"):
-        texte += " " + tr("debut", langue, q=int(v["quand"]))
+        texte += " " + tr("debut", langue, gid=gid, q=int(v["quand"]))
     restants = [m for m in v.get("rappels") or [] if m not in e["rappels_faits"]]
     if choix == "d" and v.get("mention") != "aucune" and restants and phase == "a_venir":
-        texte += "\n-# " + tr("rappel_toi", langue)
+        texte += "\n-# " + tr("rappel_toi", langue, gid=gid)
     await _avis(i, texte, Palette.SUCCESS if resultat == "ok" else Palette.NEUTRAL)
     if resultat == "ok":
         planifier_maj(i.guild, eid)
@@ -1303,19 +1491,21 @@ async def repondre(i, eid: int, choix: str) -> None:
 
 async def marquer_vu(i, eid: int) -> None:
     if not pret():
-        return await _avis(i, tr("demarre", await langue_de(i)), Palette.WARNING, DEMARRE_S)
+        return await _avis(i, tr("demarre", await langue_de(i), gid=_gid(i)), Palette.WARNING, DEMARRE_S)
     await i.response.defer(ephemeral=True, thinking=True)
     langue = await langue_de(i)
     e = await charger(eid)
     if e is None or i.guild is None or e["guild_id"] != i.guild.id or e["type"] != "annonce" \
             or e["statut"] != "publie":
-        return await _avis(i, tr("annonce_introuvable", langue))
+        return await _avis(i, tr("annonce_introuvable", langue, gid=_gid(i)))
     async with _get_db() as db:
         cur = await db.execute("INSERT OR IGNORE INTO clan_evenements_reponses(evenement_id, membre_id, choix, quand)"
                                " VALUES(?,?,?,?)", (int(eid), i.user.id, "v", int(_mur())))
         nouveau = (cur.rowcount or 0) > 0
         await db.commit()
-    await _avis(i, tr("vu_ok" if nouveau else "vu_deja", langue), Palette.SUCCESS if nouveau else Palette.NEUTRAL)
+    await textes_du_site.texte(i.guild.id, "evenements.bouton.vu")   # le cache des textes est chargé
+    await _avis(i, tr("vu_ok" if nouveau else "vu_deja", langue, gid=i.guild.id),
+                Palette.SUCCESS if nouveau else Palette.NEUTRAL)
     if nouveau:
         planifier_maj(i.guild, eid)
 
@@ -1640,7 +1830,7 @@ async def _notice(g, e: dict, titre: str, md: str, icone: str, *, seulement_si_c
                                          if v.get("lieu") else ""), niveau="petit"))
     blocs = [_texte(*lignes)]
     if lien:
-        blocs.append({"type": "boutons", "boutons": [{"label": "Voir l'événement · View event", "url": lien}]})
+        blocs.append({"type": "boutons", "boutons": [{"label": _t(g.id, "evenements.bouton.voir")[:80], "url": lien}]})
     envoyes = 0
     for k, lot in enumerate(lots):
         haut = " ".join(f"<@{u}>" for u in lot)
@@ -1703,10 +1893,13 @@ async def traiter(g, eid: int) -> None:
     if rappel is not None:
         titre = discord.utils.escape_markdown(e["valeurs"]["titre"])
         q = int(e["valeurs"]["quand"])
+        await textes_du_site.texte(g.id, "evenements.rappel.titre")   # le cache des textes est chargé
         if rappel > 0:
-            n = await _notice(g, e, "Rappel · Reminder", f"**{titre}** — <t:{q}:R>", "cloche")
+            n = await _notice(g, e, _t(g.id, "evenements.rappel.titre"),
+                              _t(g.id, "evenements.rappel.texte", titre=titre, quand=f"<t:{q}:R>"), "cloche")
         else:
-            n = await _notice(g, e, "C'est l'heure · It's time", f"**{titre}** commence · starts", "cloche")
+            n = await _notice(g, e, _t(g.id, "evenements.debut.titre"), _t(g.id, "evenements.debut.texte", titre=titre),
+                              "cloche")
         _releve["rappels"] += 1 if n else 0
 
 
@@ -1809,9 +2002,9 @@ async def modifier(g, auteur, corps: dict) -> tuple:
                        " ".join(a for a in avertissements if a)[:500], int(maintenant), auteur.id, int(eid)))
     if q_change:
         titre = discord.utils.escape_markdown(valeurs["titre"])
-        await _notice(g, e, "Nouvel horaire · New time", f"**{titre}** — <t:{int(valeurs['quand'])}:R>. Toujours "
-                      "disponible ? Mets ta réponse à jour · Still available? Update your answer.", "calendrier",
-                      seulement_si_cibles=True)
+        await _notice(g, e, _t(g.id, "evenements.horaire.titre"),
+                      _t(g.id, "evenements.horaire.texte", titre=titre, quand=f"<t:{int(valeurs['quand'])}:R>"),
+                      "calendrier", seulement_si_cibles=True)
     await _noter(g, f"clan.{e['type']}.modifie", f"{auteur.mention} a modifié « {valeurs['titre']} » "
                  f"({NOMS_TYPES[e['type']].lower()})", auteur_id=auteur.id, salon_id=salon.id)
     e = await charger(eid)
@@ -1864,8 +2057,8 @@ async def annuler(g, auteur, eid: int, *, prevenir: bool = True) -> tuple:
             await _suivre_natif(g, e, annuler=True)
         if prevenir:
             titre = discord.utils.escape_markdown(e["valeurs"]["titre"])
-            await _notice(g, e, "Annulé · Cancelled", f"**{titre}** n'aura pas lieu · will not take place.", "annuler",
-                          seulement_si_cibles=True)
+            await _notice(g, e, _t(g.id, "evenements.annulation.titre"),
+                          _t(g.id, "evenements.annulation.texte", titre=titre), "annuler", seulement_si_cibles=True)
     await _noter(g, f"clan.{e['type']}.{statut}", f"{auteur.mention} a {'annulé' if statut == 'annule' else 'retiré'}"
                  f" « {e['valeurs']['titre']} » ({NOMS_TYPES[e['type']].lower()})", auteur_id=auteur.id)
     return 200, {"ok": True, "element": await _vers_site(g, await charger(eid))}
@@ -2080,8 +2273,9 @@ COULEURS_SUGGEREES = [["Laiton", "#a8823f"], ["Clan", f"#{COULEURS['annonce']:06
 
 
 async def route_evenements(g, auteur, requete, corps):
-    """GET clan/evenements : tout ce qu'il faut à l'onglet (destinations, brouillons, à venir, passés,
-    modèles, lieux du jeu, limites, droits du bot)."""
+    """GET clan/evenements : tout ce qu'il faut à l'onglet (destinations, brouillons, à venir, publiées, passés,
+    modèles, lieux du jeu, limites, droits du bot, textes des cartes). 26/10/2026 : une annonce, une annonce des
+    métiers ou un listing EN LIGNE (sans date) est « publiée » — plus rangé avec les passés."""
     refus = _refus(g, auteur)
     if refus:
         return refus
@@ -2089,7 +2283,7 @@ async def route_evenements(g, auteur, requete, corps):
     dests = destinations(g, c)
     lignes = await _tous(g.id)
     comptes = await _comptes([e["id"] for e in lignes])
-    brouillons, a_venir, passes = [], [], []
+    brouillons, a_venir, publiees, passes = [], [], [], []
     maintenant = _mur()
     for e in lignes:
         item = await _vers_site(g, e, comptes.get(e["id"], {}), dests)
@@ -2098,11 +2292,15 @@ async def route_evenements(g, auteur, requete, corps):
         elif e["statut"] in ("envoi", "incertain") or (e["type"] == "evenement" and e["statut"] == "publie"
                                                         and phase_de(e, maintenant) != "termine"):
             a_venir.append(item)
+        elif e["type"] != "evenement" and e["statut"] == "publie":
+            publiees.append(item)
         else:
             passes.append(item)
     a_venir.sort(key=lambda x: (x["quand"] or 0, x["id"]))
     brouillons.sort(key=lambda x: -(x["maj"] or 0))
+    publiees.sort(key=lambda x: (-(x["publie"] or 0), -x["id"]))
     passes.sort(key=lambda x: -max(x["quand"] or 0, x["publie"] or 0))
+    await textes_du_site.texte(g.id, "evenements.bouton.dispo")   # le cache des textes est chargé
     lieux = []
     if _catalogue is not None:
         try:
@@ -2115,7 +2313,9 @@ async def route_evenements(g, auteur, requete, corps):
     role = _role_clan(g, c) if _role_clan else None
     return 200, {
         "destinations": [{"id": d["id"], "nom": d["nom"], "defaut": d["defaut"]} for d in dests],
-        "brouillons": brouillons, "a_venir": a_venir, "passes": passes[:PASSES_MAX], "passes_total": len(passes),
+        "brouillons": brouillons, "a_venir": a_venir, "publiees": publiees[:PASSES_MAX],
+        "publiees_total": len(publiees), "passes": passes[:PASSES_MAX], "passes_total": len(passes),
+        "libelles": libelles_carte(g.id),
         "modeles": MODELES, "lieux": lieux, "rappels_suggeres": RAPPELS_SUGGERES, "couleurs": COULEURS_SUGGEREES,
         "defauts": {t: _valeurs_site(_defauts(t)) for t in TYPES},
         "limites": {"titre": TITRE_MAX, "texte": TEXTE_MAX, "lieu": LIEU_MAX, "duree_min": DUREE_MAX,

@@ -72,6 +72,12 @@ def _faux():
         def is_default(self):
             return self.position == 0
 
+        async def edit(self, *, name=None, reason=None, **_kw):
+            """Renommer le rôle (Capitainerie → Rôles & métiers → « Renommer »), comme `discord.Role.edit`."""
+            if name is not None:
+                self.name = str(name)
+            return self
+
     class Membre(F.Membre):
         def __init__(self, uid, nom, *roles, arrivee_jours=30, bot=False):
             super().__init__(uid, *roles)
@@ -252,6 +258,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     import sondages
     import suggestions
     import tableau
+    import textes
     import transcript_store
     import vigilance
 
@@ -300,8 +307,11 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     forum_clan = X.F.Forum(g, g.nouvel_id(), "🦜▷・clan-gorp", {})
     conf["clan_posts"] = {cle: {"id": g.nouveau_fil(forum_clan, titre).id} for cle, titre, _v, _t in zones.CLAN_POSTS}
 
-    #  Les modules, comme dans `_activite_boot`.
+    #  Les modules, comme dans `_activite_boot`. Les textes réécrits sur le site (Textes & noms) d'abord : les cartes de
+    #  démonstration les emploient, comme celles du bot.
     silence = print
+    textes.setup(get_db=get_db, log=silence)
+    await textes.init_db()
     registre.setup(get_db=get_db, log=silence)
     recrutements.setup(get_db=get_db, cfg=cfg, db_set=db_set, salon=None, role=lambda _g, _c: clan_r,
                        panneaux=rellseas_panneau.panneaux_tickets, log=silence)
@@ -368,6 +378,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
                    annonces, tableau, questionnaire):
         await module.init_db()
     await _tables_du_bot(get_db)
+    tableau.monter(textes)
     tableau.monter(questionnaire.ROUTES_SITE)
     tableau.ajouter_regle(**questionnaire.REGLE_NETTOYAGE)
 
@@ -381,8 +392,12 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
 
     async def aucune_sanction(_g):
         return set()
+    #  Le guide du clan (zones.py), dans son post de démonstration : un de ses textes réécrit sur le site (Textes &
+    #  noms) le fait réécrire, comme sur le vrai serveur ; le choix du métier y est posé.
+    zones.setup(cfg=cfg, db_set=db_set, log=silence)
     metiers.setup(get_db=get_db, cfg=cfg, db_set=db_set, role_clan=lambda _g, _c: clan_r, sanctionnes=aucune_sanction,
-                  journal=journal, epargnes=a_la_tete, log=print)
+                  journal=journal, epargnes=a_la_tete, guide=zones.assurer_guide_clan, log=print)
+    zones.brancher_metiers(metiers.section_guide)
     try:
         import evenements  # le module des événements du clan : branché s'il est là
     except ModuleNotFoundError:
@@ -408,6 +423,8 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         await _evenements_demo(evenements, g, clan_r, get_db)
     await site_local_port.remplir(get_db=get_db, g=g, salon=salon_annonces, tete=TETE, fondateur=FONDATEUR,
                                   direction=DIRECTION)
+    if not await zones.assurer_guide_clan(g):   # le guide du clan posé une première fois (son message d'ouverture)
+        print("[SITE LOCAL] guide du clan non posé")
     if lourd:
         await _remplir_lourd(get_db, g, clan_r, salon_annonces)
 
@@ -423,7 +440,71 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         r.set_cookie(tableau.COOKIE, sid, max_age=tableau.DUREE, path="/", secure=True, httponly=True, samesite="Lax")
         return r
     app.router.add_get("/tableau/demo", demo)
+
+    async def discord_lu(request):
+        """Ce que le FAUX Discord a reçu (ce script seulement, jamais le bot) : `?salon=<id>` (ou `?ticket=<n>`) → les
+        messages d'un salon ou d'un fil tels qu'ils sont maintenant (leur dernière réécriture), leur texte et leurs
+        boutons ; `?post=<clé>` → un post du forum du clan (`guide`, `infos`…) ; `?roles=1` → les rôles du serveur.
+        Les parcours y prouvent l'EFFET d'un geste du site (un texte réécrit, un rôle renommé)."""
+        from aiohttp import web
+        if request.query.get("roles"):
+            return web.json_response({"roles": [{"id": str(r.id), "nom": r.name, "position": r.position}
+                                                for r in g.roles]}, headers={"Cache-Control": "no-store"})
+        brut = request.query.get("salon", "")
+        salon = g.get_channel_or_thread(int(brut)) if brut.isdigit() else None
+        ticket = request.query.get("ticket", "")
+        if salon is None and ticket.isdigit():   # `?ticket=<n>` : le fil où le bot a posté pour ce ticket
+            salon = fils_tickets.get(int(ticket))
+            brut = str(getattr(salon, "id", ""))
+        post = request.query.get("post", "")
+        if salon is None and post:               # `?post=guide` : un post du forum du clan
+            brut = str(((conf.get("clan_posts") or {}).get(post) or {}).get("id", ""))
+            salon = g.get_channel_or_thread(int(brut)) if brut.isdigit() else None
+        if salon is None:
+            return web.json_response({"erreur": "salon ou fil inconnu"}, status=404)
+        return web.json_response({"salon": brut, "nom": salon.name, "messages": _messages_du_faux(salon)},
+                                 headers={"Cache-Control": "no-store"})
+    app.router.add_get("/tableau/demo/discord", discord_lu)
     return app, X.Obj(dossier=dossier, guild=g, get_db=get_db, conf=conf)
+
+
+def _boutons_de(vue) -> list:
+    """Les libellés des boutons d'une vue (Components V2), dans l'ordre."""
+    out = []
+
+    def tout(c):
+        if isinstance(c, dict):
+            if c.get("type") == 2 and c.get("label"):
+                out.append(str(c["label"]))
+            for x in c.get("components", []) or []:
+                tout(x)
+            if c.get("accessory"):
+                tout(c["accessory"])
+    for comp in (vue.to_components() if vue is not None else []):
+        tout(comp)
+    return out
+
+
+def _messages_du_faux(salon) -> list:
+    """Les messages d'un faux salon ou fil : `{id, texte, boutons, reecrit}`, chacun dans sa dernière version."""
+    import faux_serveur as F
+    reecrits = {int(mid): kw for mid, kw in getattr(salon, "cartes", []) or []}
+    if hasattr(salon, "messages"):   # un fil, un post de forum
+        bruts = [(m.id, m.content, m.kw) for m in salon.messages]
+    else:
+        bruts = list(getattr(salon, "envois", []) or [])
+    out = []
+    #  Le message d'ouverture d'un post (son identifiant est celui du post) n'est connu que par ses réécritures.
+    connus = {int(mid) for mid, _c, _k in bruts}
+    bruts = [(mid, "", {}) for mid in reecrits if mid not in connus] + bruts
+    for mid, contenu, kw in bruts:
+        if mid in salon.monde.effaces:
+            continue
+        kw = reecrits.get(int(mid), kw or {})
+        vue = kw.get("view")
+        texte = " ".join(x for x in (str(contenu or ""), F.textes(vue) if vue is not None else "") if x)
+        out.append({"id": str(mid), "texte": texte, "boutons": _boutons_de(vue), "reecrit": int(mid) in reecrits})
+    return out
 
 
 async def _tables_du_bot(get_db) -> None:
