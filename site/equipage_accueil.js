@@ -238,7 +238,7 @@ function blocAnalyses(c, an) {
   const groupes = [];
   const rep = (cle, titre, nomIcone, lignes, vides) => {
     if (!parties.has(cle)) return;
-    groupes.push(groupe({ titre, icone: nomIcone, compte: lignes.length, cle: "eq-an-" + cle, ouvert: groupes.length === 0 ? true : undefined },
+    groupes.push(groupe({ titre, icone: nomIcone, compte: lignes.length, cle: "eq-an-" + cle, defaut: groupes.length === 0 },
       () => (lignes.length ? barresH(lignes) : h("p", { classe: "aide" }, vides))));
   };
   const avecIcone = (x) => [h("span", { classe: "lib-icone" }, x.icone !== undefined ? insigneImage({ icone: x.icone, nom: x.nom, type: x.type }, "lib-icone-img") : null, h("span", { classe: "lib-texte" }, x.nom)), x.n, x.nom + " : " + quantite(x.n, "pirate(s)")];

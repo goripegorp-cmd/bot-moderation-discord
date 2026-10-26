@@ -576,7 +576,7 @@ button.barre-h { width: 100%; padding: 2px 0; border: 0; background: none; text-
 button.barre-h:hover .lib { color: var(--cire); }
 .barre-h .lib { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--encre); }
 .barre-h .fond { height: 10px; border-radius: 1px; background: rgba(43, 29, 18, .1); overflow: hidden; }
-.barre-h .plein { height: 100%; width: var(--pc, 0%); background: repeating-linear-gradient(-45deg, var(--encre-2) 0 2px, var(--encre-3) 2px 4px); }
+.barre-h .plein { display: block; height: 100%; width: var(--pc, 0%); background: repeating-linear-gradient(-45deg, var(--encre-2) 0 2px, var(--encre-3) 2px 4px); }
 
 /* ─── Bandeaux ─────────────────────────────────────────────────────── */
 .bandeau {

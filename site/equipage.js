@@ -196,12 +196,19 @@ function rendreEquipage(corps) {
     }
     const ordre = tm ? elementsDe(cat, tm.cle).map((e) => e.cle) : [];
     const cles = [...groupes.keys()].sort((a, b) => (a === "__aucun") - (b === "__aucun") || ((ordre.indexOf(a) + 1 || 999) - (ordre.indexOf(b) + 1 || 999)) || a.localeCompare(b));
+    //  Rien à défiler sans fin : au départ, le premier métier ouvert, et les suivants tant que le mur ouvert garde au plus
+    //  douze affiches (un petit équipage reste tout ouvert) ; au téléphone (deux par rangée), « Voir plus » par 8.
+    const pas = matchMedia("(max-width: 519px)").matches ? 8 : 18;
+    let ouvertes = 0;
     remplacer(resultats, ...cles.map((k, i) => {
       const e = tm && k !== "__aucun" ? element(cat, tm.cle, k) : null;
-      return groupe({ titre: k === "__aucun" ? "Sans métier" : e ? e.nom : sansEmoji(k), compte: groupes.get(k).length,
+      const n = groupes.get(k).length;
+      const defaut = i === 0 || ouvertes + n <= 12;
+      if (defaut) ouvertes += n;
+      return groupe({ titre: k === "__aucun" ? "Sans métier" : e ? e.nom : sansEmoji(k), compte: n,
         visuel: e ? insigneImage(e, "groupe-visuel") : null, icone: e ? null : "drapeau", cle: "eq-g-" + k,
-        ouvert: cles.length <= 3 || !!f.q || !!f.metier || i < 2 ? true : undefined },
-      () => paginer("eq-" + k, groupes.get(k), carte, { classe: "grille affiches", pas: 18 }));
+        ouvert: f.q || f.metier ? true : undefined, defaut },
+      () => paginer("eq-" + k, groupes.get(k), carte, { classe: "grille affiches", pas }));
     }));
   }
   maj();

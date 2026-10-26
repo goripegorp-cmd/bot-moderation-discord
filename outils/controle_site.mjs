@@ -296,6 +296,15 @@ const CONTROLE = `(() => {
     if (el.clientHeight > 0 && el.clientHeight < 30 && el.scrollHeight > el.clientHeight + 6 && el.querySelector("button, a[href], input"))
       res.ecrases.push({ el: decrire(el).slice(0, 90), h: el.clientHeight, contenu: el.scrollHeight });
   }
+  // Une jauge dont la part est posée (--pc > 0) mais qui ne montre aucune encre (26/10 : « .barre-h .plein », un span
+  // en ligne, ignorait sa largeur — toutes les barres horizontales vides, sur les deux sites).
+  res.jauges = [];
+  for (const el of zone.querySelectorAll("[style*='--pc']")) {
+    const pc = parseFloat(el.style.getPropertyValue("--pc"));
+    const cadre = el.parentElement ? el.parentElement.getBoundingClientRect() : null;
+    if (!(pc > 0) || !cadre || cadre.width < 20) continue;   // part nulle, ou jauge repliée (rien à voir)
+    if (el.getBoundingClientRect().width < 1) res.jauges.push(decrire(el).slice(0, 90) + " (--pc " + pc + " %)");
+  }
   const diag = window.__capitainerie || {};
   res.violations = diag.violations || [];
   res.icones = [...(diag.icones || [])];
@@ -406,6 +415,7 @@ async function controlerScene(o, scene, [l, hh]) {
   for (const x of res.images.slice(0, 4)) fautes.push(`image cassée : ${x}`);
   for (const x of (res.deformes || []).slice(0, 4)) fautes.push(`rond étiré en ovale (${x.l}×${x.h}) : ${x.el}`);
   for (const x of (res.ecrases || []).slice(0, 4)) fautes.push(`rangée écrasée (${x.h} px pour ${x.contenu} px de contenu) : ${x.el}`);
+  for (const x of (res.jauges || []).slice(0, 4)) fautes.push(`jauge sans encre : ${x}`);
   for (const x of (res.suspects || []).slice(0, 4)) fautes.push(`valeur absente affichée : ${x}`);
   for (const x of res.violations.slice(0, 4)) fautes.push(`violation CSP : ${x.directive} (${x.source}:${x.ligne})`);
   for (const x of [...new Set(erreursCourantes)].slice(0, 6)) fautes.push(x);

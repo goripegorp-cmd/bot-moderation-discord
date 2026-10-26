@@ -124,7 +124,7 @@
   .page-equipage .grille.affiches, .page-equipage .grille.affiches.honneur { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
   .ruban-mienne { top: 6px; right: 4px; padding: 1px 7px; font-size: 11.5px; }
 }
-.affiche-case { position: relative; min-width: 0; }
+.affiche-case { position: relative; min-width: 0; padding: 4px; }   /* l'affiche penche (jusqu'à 0,9°, --incl) : la marge la garde dans sa case */
 .ruban-mienne {
   position: absolute; top: 10px; right: 6px; z-index: 5; padding: 2px 10px; border-radius: 2px;
   background: var(--cire); color: var(--clair); font: 600 13px/1.45 var(--police-sc); letter-spacing: .04em;
