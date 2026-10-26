@@ -14,17 +14,19 @@ import { ticketsVue, indisponible } from "./discord.js";
 import { affiche, afficheVierge, nomAffiche, metiersDe, gradeDe, insigneImage } from "./affiche.js";
 import { ligne, lignes, groupes, outilsGroupes, badgeRestreint, avance } from "./rangement.js";
 import { avecVerrou } from "./direct.js";
+import { vueParEquipe } from "./equipes_admin.js";
 
 const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(p)) delete etat.pages[k]; };
 
 // ─── L'équipage ─────────────────────────────────────────────────────────────
 export function membres(vue) {
-  const f = filtres("clan", { q: "", rang: "tous", ajout: "" });
+  const f = filtres("clan", { q: "", rang: "tous", ajout: "", vue: "presence" });
   const haut = h("div", { classe: "pile" }), resultats = h("div", { classe: "pile" }), bas = h("div", { classe: "pile" });
   const lot = h("div", { classe: "lot-hote" });
   const changer = () => { resetPages("clan"); majResultats(); };
   ajouter(vue, [haut, h("div", { classe: "outils" },
     recherche(f.q, "Rechercher un membre ou un identifiant…", (q) => { f.q = q; changer(); }),
+    segment(f.vue, [["presence", "Par présence"], ["equipe", "Par équipe"]], (v) => { f.vue = v; changer(); }, "Regrouper"),
     bouton("Copier la liste", { icone: "copier", classe: "avance", onclick: () => {
       const l = (etat.d && etat.d.clan && etat.d.clan.membres) || [];
       const larg = Math.max(4, ...l.map((x) => nomDe(x).length));
@@ -86,6 +88,14 @@ export function membres(vue) {
       })))));
     blocs.push(puces([["tous", "Tous", c.membres.length], ...RANGS.map(([lib, t], r) => (nb[r] ? [String(r), lib, nb[r], t] : null)).filter(Boolean)], String(f.rang), (v) => { f.rang = v; changer(); }, "Présence"));
     if (!l.length) blocs.push(vide("Personne ici", "Change le filtre ou la recherche."));
+    //  27/10/2026 : par équipe (le chef d'abord, tamponné ; l'éditeur d'une équipe en panneau : equipes_admin.js).
+    if (f.vue === "equipe" && l.length) {
+      const zoneEq = h("div", { classe: "pile" });
+      remplacer(resultats, ...blocs, zoneEq);
+      vueParEquipe(zoneEq, l, (m, badge) => ligneClan(m, (RANGS[m.rang] || [])[1], () => { majLot(); }, badge), () => majResultats(), !!f.q || f.rang !== "tous");
+      majLot();
+      return;
+    }
     // Un groupe par présence (les inactifs d'abord) ; les deux premiers ouverts, une ligne par membre, « Voir plus » par 20.
     const zone = h("div", { classe: "groupes-zone" }, groupes([2, 1, 3, 4, 0].map((r) => {
       const g = l.filter((m) => m.rang === r);
@@ -103,7 +113,7 @@ export function membres(vue) {
 }
 
 /** Un membre du clan : sa case (sélection), son nom, sa présence sur 7 jours, son rappel ; « Retirer » à droite. */
-function ligneClan(m, teinte, surSelection) {
+function ligneClan(m, teinte, surSelection, badgeSup) {
   const presents = /^\d+\/\d+$/.test(m.jours) ? +m.jours.split("/")[0] : 0;
   let l = null;
   const coche = peutAgir() ? caseACocher(null, etat.selection.has(m.id), (v, entree) => {
@@ -115,8 +125,8 @@ function ligneClan(m, teinte, surSelection) {
   l = ligne({
     visuel: [coche, avatar(m, "p")], titre: nomDe(m), libelleOuvrir: "Ouvrir la fiche de " + nomDe(m), ouvrir: () => ouvrirFiche(m.id),
     sous: ["@" + m.pseudo, h("span", { classe: "ident" }, " · " + m.id), " · arrivé le " + m.arrivee],
-    badges: [m.jours !== "—" ? h("span", { classe: "jauge", vars: { "--teinte": teinte }, title: quantite(m.jours, "jour(s) actif(s)") + " sur 7" }, Array.from({ length: 7 }, (_, k) => h("i", { classe: k < presents ? "on" : "" }))) : null,
-      pastilleRappel(m.rappel), badgeRestreint(m.id), pastille(m.statut, teinte)], maxBadges: 4,
+    badges: [badgeSup || null, m.jours !== "—" ? h("span", { classe: "jauge", vars: { "--teinte": teinte }, title: quantite(m.jours, "jour(s) actif(s)") + " sur 7" }, Array.from({ length: 7 }, (_, k) => h("i", { classe: k < presents ? "on" : "" }))) : null,
+      pastilleRappel(m.rappel), badgeRestreint(m.id), pastille(m.statut, teinte)], maxBadges: badgeSup ? 5 : 4,
     date: m.derniere, dateTitre: "Dernière activité : " + m.derniere,
     actions: [peutAgir() ? { icone: "supprimer", libelle: "Retirer du clan", danger: true, reseau: true, onclick: () => agir({ action: "clan_retirer", membre: m.id }, "Retirer " + nomDe(m) + " du clan ?", "Seul le rôle du clan lui est retiré, sur Discord.", {}, "Retirer du clan", "danger") } : null],
     classe: etat.selection.has(m.id) ? "choisie" : "", donnees: { membre: m.id },
