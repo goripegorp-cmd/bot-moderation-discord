@@ -117,13 +117,13 @@ ELEMENTS: list[dict] = []
 
 
 def el(type_, cle, nom, nom_en, description, *, categorie="", statut="confirme", nouveau=False,
-       source="", image=None, rarete=""):
+       source="", image=None, rarete="", actif=True):
     """Un élément du catalogue. `image` : l'adresse donnée par le dossier de recherche (wiki),
     ou « api:<Fichier.png> » (adresse demandée à l'API du wiki), ou None (aucune icône officielle)."""
     ELEMENTS.append({
         "type": type_, "cle": cle, "nom": nom, "nom_en": nom_en, "description": description,
         "categorie": categorie, "rarete": rarete, "statut": statut, "source": source or VIDEO_M3,
-        "nouveau_movie3": nouveau, "image": image,
+        "nouveau_movie3": nouveau, "image": image, "actif": actif,
     })
 
 
@@ -165,9 +165,9 @@ el("metier", "mining", "Minage", "Mining",
    categorie="Récolte", source=WIKI + "Mining",
    image="https://static.wikia.nocookie.net/rell-seasw/images/5/55/Miningtalenticon.png/revision/latest?cb=20260622234434")
 el("metier", "shipwright", "Charpentier naval", "Shipwright",
-   "Talent de 2023 ; absent de la liste lue dans Movie 3 (le constructeur de navires est devenu "
-   "un système) : peut-être retiré.",
-   categorie="Navire", statut="a_verifier", source=WIKI + "Shipwright",
+   "N'existe pas dans le jeu (confirmé par le fondateur le 26/10/2026) : la construction des navires est un "
+   "système, pas un métier. Retiré du catalogue.",
+   categorie="Navire", statut="confirme", source=WIKI + "Shipwright", actif=False,
    image="https://static.wikia.nocookie.net/rell-seasw/images/6/6b/Shipwrighttalenticon.png/revision/latest?cb=20260622234652")
 
 # ── Races (Movie 3 : races et sous-espèces ; noms du wiki renommés le 25/10) ──
@@ -1251,7 +1251,7 @@ def catalogue(produits: dict) -> dict:
             "type": e["type"], "cle": e["cle"], "nom": e["nom"], "nom_en": e["nom_en"],
             "description": e["description"], "categorie": e["categorie"], "rarete": e["rarete"],
             "icone": f"s/icones/rell/{e['type']}/{e['cle']}.webp" if a_icone else "",
-            "statut": e["statut"], "source": e["source"], "ordre": rangs[e["type"]], "actif": True,
+            "statut": e["statut"], "source": e["source"], "ordre": rangs[e["type"]], "actif": e.get("actif", True),
             "nouveau_movie3": e["nouveau_movie3"], "version": 1,
         })
     return {"types": types, "elements": elements}
