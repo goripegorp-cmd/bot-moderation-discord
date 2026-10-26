@@ -38,6 +38,8 @@ DELETE_SUBJECT = {
     "infractions": ["user_id"],
     "infractions_archive": ["user_id"],
     "realsy_tracking": ["user_id"],
+    # 27/10/2026 — les équipes du clan : sa place dans une équipe part avec lui
+    "equipes_membres": ["membre_id"],
     "shop_purchases": ["user_id"],
     "user_toxicity_scores": ["user_id"],
     "user_fingerprints": ["user_id"],
@@ -125,6 +127,10 @@ ANONYMIZE = {
     # 26/10/2026 — le site de l'équipage : l'accueil et les actualités écrits par la direction (la ligne reste)
     "equipage_blocs": {"ids": ["cree_par", "maj_par"], "redact": []},
     "equipage_actualites": {"ids": ["cree_par", "maj_par"], "redact": []},
+    # 27/10/2026 — la vitrine publique : qui a retiré une affiche de la vitrine (le réglage reste)
+    "equipage_vitrine": {"ids": ["maj_par"], "redact": []},
+    # 27/10/2026 — les équipes du clan : chef effacé (l'équipe reste, sans chef), auteur neutralisé
+    "equipes": {"ids": ["chef_id", "maj_par"], "redact": []},
     # 26/10/2026 — Textes & noms : qui a réécrit un texte (le texte reste, l'auteur est neutralisé)
     "site_textes": {"ids": ["maj_par"], "redact": []},
 }

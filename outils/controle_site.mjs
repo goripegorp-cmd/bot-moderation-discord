@@ -51,6 +51,13 @@ async function ouvrirEditeurDirect() {
 // ─── Le site de l'équipage ──────────────────────────────────────────────────
 const EQ = { page: "/tableau/equipage/", entree: "/tableau/demo?qui=equipage" };
 const EQ_TETE = { page: "/tableau/equipage/", entree: "/tableau/demo?vers=equipage" };
+//  La vitrine publique : sa page, prête quand son mur est là ; rien de la direction, aucun nom Discord à l'écran.
+const VITRINE = { page: "/equipage", pret: "#contenu .vitrine-mur", interdits: ["Modifier l'accueil", "Se déconnecter", "Anne Bonny", "Ishmael", "Capitaine Direction"] };
+//  Le tri des équipes (« Trier » : la dernière liste des outils).
+const CHOISIR_TRI = (texte) => "(async () => { const seg = [...document.querySelectorAll('.segment button')].find((b) => b.textContent.includes('Les équipes')); "
+  + "if (seg && seg.getAttribute('aria-pressed') !== 'true') { seg.click(); await new Promise(r => setTimeout(r, 350)); } "
+  + "const l = [...document.querySelectorAll('.outils .liste-bouton')].pop(); l.click(); await new Promise(r => setTimeout(r, 350)); "
+  + "const o = [...document.querySelectorAll('[role=option]')].find((x) => x.textContent.includes(" + JSON.stringify(texte) + ")); if (!o) throw new Error('tri introuvable'); o.click(); return 1; })()";
 // Ce qu'un membre de l'équipage ne doit JAMAIS voir (aucun geste d'écriture sur son site).
 const GESTES_DIRECTION = ["Modifier l'accueil", "Publier une actualité", "Ajouter un bloc", "Mettre à la corbeille", "Enregistrer", "Retirer"];
 const cliquerTexte = (selecteur, texte) => "(async () => { const b = [...document.querySelectorAll(" + JSON.stringify(selecteur) + ")].find((x) => x.textContent.includes("
@@ -72,6 +79,21 @@ const SCENES_EQUIPAGE = [
   { nom: "site-equipage-editeur-bloc", ...EQ_TETE, ancre: "#accueil", geste: MODE_EDITION, geste2: cliquerTexte(".bloc-texte .barre-bloc button", "Modifier") },
   { nom: "site-equipage-editeur-honneur", ...EQ_TETE, ancre: "#accueil", geste: MODE_EDITION, geste2: cliquerTexte(".bloc-honneur .barre-bloc button", "Modifier") },
   { nom: "site-equipage-editeur-actualite", ...EQ_TETE, ancre: "#accueil", geste: cliquerTexte(".barre-edition button", "Publier une actualité") },
+  //  27/10/2026 : les équipes (Kolax est le chef des Cuistots) — la hiérarchie, « Mon équipe », toutes les affiches.
+  { nom: "site-equipage-hierarchie", ...EQ, ancre: "#equipage", interdits: GESTES_DIRECTION, geste: CHOISIR_TRI("hiérarchie") },
+  { nom: "site-equipage-par-type", ...EQ, ancre: "#equipage", interdits: GESTES_DIRECTION, geste: CHOISIR_TRI("type") },
+  { nom: "site-equipage-mon-equipe", ...EQ, ancre: "#fiche", interdits: GESTES_DIRECTION,
+    geste: "(() => { const s = document.querySelector('.mon-equipe'); if (!s) throw new Error('pas de « Mon équipe »'); s.scrollIntoView({ block: 'start' }); return 1; })()" },
+  { nom: "site-equipage-toutes-affiches", ...EQ, ancre: "#equipage", interdits: GESTES_DIRECTION, geste: cliquerTexte(".segment button", "Toutes les affiches"),
+    apres: "(() => { const b = [...document.querySelectorAll('.segment button')].find((x) => x.textContent.includes('Les équipes')); if (b) b.click(); return 1; })()" },
+  //  27/10/2026 : la VITRINE PUBLIQUE — sans session (la page ne lit aucun cookie : ses données partent sans).
+  { nom: "vitrine-accueil", ...VITRINE },
+  { nom: "vitrine-equipes", ...VITRINE, geste: "(() => { document.querySelector('.vitrine-mur').scrollIntoView({ block: 'start' }); return 1; })()" },
+  { nom: "vitrine-affiches", ...VITRINE, geste: cliquerTexte(".segment button", "Toutes les affiches"),
+    geste2: "(() => { document.querySelector('.vitrine-mur').scrollIntoView({ block: 'start' }); return 1; })()", apres: "(() => { const b = [...document.querySelectorAll('.segment button')].find((x) => x.textContent.includes('Les équipes')); if (b) b.click(); return 1; })()" },
+  { nom: "vitrine-affiche", ...VITRINE, geste: "(async () => { document.querySelector('button.affiche').click(); return 1; })()" },
+  { nom: "vitrine-hierarchie", ...VITRINE, geste: CHOISIR_TRI("hiérarchie"), geste2: "(() => { document.querySelector('.vitrine-mur').scrollIntoView({ block: 'start' }); return 1; })()" },
+  { nom: "vitrine-copier-lien", ...VITRINE, geste: "(async () => { document.querySelector('#entete-outils .lien-equipage').click(); await new Promise(r => setTimeout(r, 400)); return 1; })()" },
 ];
 
 // ─── Le questionnaire en ligne du candidat (26/10/2026) ─────────────────────
@@ -170,6 +192,13 @@ const SCENES = [
   // personne envoyée par le serveur (25/10 : `cree_par` est un objet { id, nom }, P() attendait un identifiant).
   { nom: "fenetre-affiche", ancre: "#capitainerie/affiches", geste: OUVRIR_AFFICHE, interdits: ["Membre parti", "[object Object]"] },
   { nom: "fenetre-editeur-affiche", ancre: "#capitainerie/affiches", geste: "[...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle affiche')).click()" },
+  //  27/10/2026 : les équipes du clan, côté direction — « Par équipe », l'éditeur d'une équipe, la ligne de la fiche.
+  { nom: "equipage-par-equipe", ancre: "#equipage/membres", geste: "(() => { [...document.querySelectorAll('.segment button')].find(b => b.textContent.includes('Par équipe')).click(); return 1; })()" },
+  { nom: "fenetre-editeur-equipe", ancre: "#equipage/membres", geste: "(() => { [...document.querySelectorAll('.segment button')].find(b => b.textContent.includes('Par équipe')).click(); return 1; })()",
+    geste2: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes(\"Modifier l'équipe\")).click(); return 1; })()" },
+  { nom: "fenetre-fiche-equipe", ancre: "#equipage/membres", geste: CLIQUER_LIGNE("Kolax"), interdits: ["Équipe : aucune"] },
+  { nom: "fenetre-nouvelle-equipe", ancre: "#equipage/membres", geste: "(() => { [...document.querySelectorAll('.segment button')].find(b => b.textContent.includes('Par équipe')).click(); return 1; })()",
+    geste2: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle équipe')).click(); return 1; })()" },
   { nom: "fenetre-dossier-etape1", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À décider") },
   { nom: "fenetre-dossier-correction", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À corriger") },
   { nom: "fenetre-choix-questions", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À décider"),
@@ -367,10 +396,10 @@ async function evaluer(o, expression) {
   if (r.exceptionDetails) throw new Error("évaluation : " + (r.exceptionDetails.exception && r.exceptionDetails.exception.description || r.exceptionDetails.text));
   return r.result.value;
 }
-async function attendrePret(o, max = 9000) {
+async function attendrePret(o, max = 9000, selecteur = "#contenu .titre-rubrique") {
   const t0 = Date.now();
   while (Date.now() - t0 < max) {
-    const pret = await evaluer(o, "!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette, dialog .squelette')").catch(() => false);
+    const pret = await evaluer(o, "!!document.querySelector(" + JSON.stringify(selecteur) + ") && !document.querySelector('#contenu .squelette, dialog .squelette')").catch(() => false);
     if (pret) { await pause(500); return true; }
     await pause(150);
   }
@@ -433,7 +462,7 @@ async function controlerScene(o, scene, [l, hh]) {
   await taille(o, l, hh);
   await o.s("Page.navigate", { url: (scene.page ? ORIGINE + scene.page : URL_SITE) + "?scene=" + scene.nom + "-" + l + scene.ancre });
   await pause(300);
-  const pret = await attendrePret(o);
+  const pret = await attendrePret(o, 9000, scene.pret || "#contenu .titre-rubrique");   // la vitrine : son mur
   if (scene.geste) { try { await evaluer(o, scene.geste); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
   if (scene.geste2) { try { await evaluer(o, scene.geste2); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
   const res = await evaluer(o, CONTROLE);

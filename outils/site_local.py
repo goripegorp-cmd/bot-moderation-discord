@@ -368,7 +368,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     #  Le Port et l'Équipage : les VRAIES actions de bot.py, l'activité du clan, la conversation d'un ticket.
     import site_local_port
     carnet = site_local_port.completer_faux_serveur(g, X)
-    tableau.setup(bot=X.Obj(get_guild=lambda gid: g if gid == SERVEUR_ID else None, user=X.Obj(id=999)),
+    tableau.setup(bot=X.Obj(get_guild=lambda gid: g if gid == SERVEUR_ID else None, user=X.Obj(id=999), guilds=[g]),
                   cle="site-local", base_url=f"http://localhost:{port}", cfg=cfg, get_db=get_db,
                   mesurer_groupe=site_local_port.mesurer_groupe(), autorise_membre=a_la_tete, direction=a_la_tete,
                   tete=TETE, alerte_securite=alerte, conversation=site_local_port.conversation(g=g, get_db=get_db),
@@ -442,6 +442,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         print("[SITE LOCAL] guide du clan non posé")
     if lourd:
         await _remplir_lourd(get_db, g, clan_r, salon_annonces)
+        await _equipes_demo(g, lourd=True)   # douze équipes sur les 80 membres du clan
 
     app = health_server.construire_app()
 
@@ -1099,6 +1100,7 @@ async def _equipage_demo(g) -> None:
                                                                 "contenu": dict(bandeau["contenu"], image=fond)})
         if st != 200:
             print(f"[SITE LOCAL] bandeau de démonstration refusé : {rep}")
+    await _equipes_demo(g)
     tresor = await image("carte-tresor.png", carte, (1200, 700))
     for corps in ({"titre": "Bienvenue aux nouvelles recrues",
                    "texte": "Trois nouveaux matelots ont rejoint le navire cette semaine.\nPassez les saluer au **chat du clan**."},
@@ -1108,6 +1110,48 @@ async def _equipage_demo(g) -> None:
         st, rep = await site_equipage._route_actualite(g, chef, {}, corps)
         if st != 200:
             print(f"[SITE LOCAL] actualité de démonstration refusée : {rep}")
+
+
+EQUIPES_DEMO = (("Les Cuistots du Requin", "metier", "cooking"), ("La Garde du Navire", "libre", "Garde du navire"),
+                ("La Vigie du Grand Mât", "metier", "navigation"), ("Les Écumeurs", "metier", "thieving"),
+                ("Les Charpentiers", "metier", "woodcutting"), ("Les Toubibs", "metier", "doctor"),
+                ("Les Mineurs de Corail", "metier", "mining"), ("L'Atelier des Forges", "metier", "crafting"),
+                ("Les Pêcheurs de Perles", "metier", "fishing"), ("Les Abordeurs", "libre", "Abordage"),
+                ("Les Canonniers", "libre", "Canonniers"), ("Les Éclaireurs", "libre", "Éclaireurs"))
+
+
+async def _equipes_demo(g, lourd: bool = False) -> None:
+    """Les équipes du clan (27/10/2026), par la VRAIE route de la direction : deux sur la base légère (un chef qui a son
+    affiche, un autre sans), douze sur la base lourde (ses 80 membres du clan, quelques-uns sans équipe)."""
+    import affiches
+    import site_equipage
+    tete = g.get_member(FONDATEUR)
+    clan = sorted(m.id for m in site_equipage._membres_clan(await site_equipage._role_clan(g)))
+    deja = await site_equipage._equipes(g.id)
+    places = {e["chef_id"] for e in deja} | {m for e in deja for m in e["membres"]}
+    libres = [i for i in clan if i not in places]
+    types, elements = await affiches._catalogue()
+    tm = site_equipage._type_metier(types)
+    tailles = (6, 6, 6, 5, 5, 5, 5, 5, 4, 4) if lourd else ()
+    plan = [(1000, (1001, 1003)), (1006, (1007, 1009))] if not lourd else []
+    for k in range(len(deja), 12 if lourd else 2):
+        nom, genre, valeur = EQUIPES_DEMO[k]
+        if lourd:
+            if len(libres) < 2:
+                break
+            chef, membres = libres[0], libres[1:1 + tailles[(k - 2) % len(tailles)]]
+        else:
+            chef, membres = plan[k]
+            if chef not in libres:
+                continue
+            membres = [m for m in membres if m in libres]
+        libres = [i for i in libres if i != chef and i not in membres]
+        type_ = {"genre": "metier", "cle": valeur} if genre == "metier" and (tm, valeur) in elements else \
+            {"genre": "libre", "texte": valeur if genre == "libre" else nom}
+        statut, rep = await site_equipage._route_equipe(g, tete, {}, {"nom": nom, "type": type_, "chef": str(chef),
+                                                                      "membres": [str(m) for m in membres]})
+        if statut != 200:
+            print(f"[SITE LOCAL] équipe de démonstration refusée : {rep}")
 
 
 #  --lourd : des volumes de vrai serveur, pour éprouver le rangement des pages (groupes repliables, « Voir plus »,

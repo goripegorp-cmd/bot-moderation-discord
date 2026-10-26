@@ -611,7 +611,11 @@ def test_S10_le_bouton_du_guide_du_clan(local, monkeypatch):
     assert "bot.add_dynamic_items(site_equipage.BoutonSiteEquipage)" in src
     #  Dans le guide du clan : une section, le bouton DynamicItem (une vue mixte effacerait le gabarit global).
     composants, signature = local.faire(site_equipage.section_guide(local.g, local.ctx.conf))
-    assert signature and any(isinstance(x, site_equipage.BoutonSiteEquipage) for c in composants for x in c.walk_children())
+    enfants = [x for c in composants for x in ([c, *c.walk_children()] if hasattr(c, "walk_children") else [c])]
+    assert signature and any(isinstance(x, site_equipage.BoutonSiteEquipage) for x in enfants)
+    #  27/10/2026 : à côté, le lien PUBLIC de la vitrine (un bouton lien : rien à garder en mémoire).
+    liens_guide = [x.url for x in enfants if isinstance(x, discord.ui.Button) and x.url]
+    assert liens_guide == [tableau._base + "/equipage"], liens_guide
     monkeypatch.setattr(zones, "_ticket", None)
     monkeypatch.setattr(zones, "_boutons_langue", None)
     vue, sig = zones.vue_guide_clan(local.g, local.ctx.conf, {}, None, (composants, signature))
@@ -698,7 +702,7 @@ def test_S11_le_direct_refuse_l_equipage_et_ses_verrous_gardent_l_accueil(local)
     assert apres == 200, "libéré : l'écriture passe"
     #  La clé de chaque écriture : `accueil:<id>`, `actualite:<id>` ; un ajout ne verrouille rien.
     import site_equipage
-    v = {n: d["verrou"] for n, d in site_equipage.ROUTES_SITE.items()}
+    v = {n: d["verrou"] for n, d in site_equipage.ROUTES_SITE.items() if "verrou" in d}
     assert v["equipage/bloc"]({"id": "abcdef12"}) == "accueil:abcdef12" and v["equipage/bloc"]({"type": "texte"}) is None
     assert v["equipage/actualite/retirer"]({"id": "abcdef12"}) == "actualite:abcdef12"
     assert v["equipage/bloc"]({"id": "../x"}) is None and all(callable(f) for f in v.values())
@@ -733,15 +737,19 @@ def test_S12_les_textes_de_l_equipage_dans_le_registre(local):
         auto = local.lire("accueil", local.kolax)[1]["donnees"]["actualites"]["auto"]
         assert any(a["genre"] == "affiche" and a["titre"].startswith("Avis placardé : ") for a in auto)
         composants, _sig = local.faire(site_equipage.section_guide(local.g, local.ctx.conf))
-        assert "### Le site du clan" in composants[0].children[0].content
+        assert "### Le site du clan" in composants[0].content
     finally:
         for cle in renommes:
             st, _r = local.ecrire("texte/defaut", {"cle": cle}, local.tete)
             assert st == 200
     #  La page et le registre disent la même chose : chaque T("…") de la page est déclaré, chaque libellé déclaré sert.
-    js = "\n".join((RACINE / "site" / f).read_text(encoding="utf-8") for f in ("equipage.js", "equipage_accueil.js",
-                                                                                 "equipage_commun.js"))
+    js = "\n".join((RACINE / "site" / f).read_text(encoding="utf-8") for f in (
+        "equipage.js", "equipage_accueil.js", "equipage_commun.js", "equipage_mur.js", "equipage_equipes.js", "vitrine.js",
+        "lien_equipage.js", "equipes_admin.js"))
     employes = {"equipage_site." + k for k in re.findall(r'\bT\("([a-z0-9_.]+)"', js)}
+    #  27/10/2026 : les noms « site. » (bouton « Copier le lien », équipes) se lisent par `libelle` sur les trois pages.
+    employes |= set(re.findall(r'\blibelle\("(site\.(?:equipes|equipage)\.[a-z0-9_.]+)"', js))
+    employes |= {"site.equipes." + k for k in re.findall(r'\bL\("([a-z0-9_.]+)"', js)}
     assert employes == set(site_equipage.PAGE), (employes ^ set(site_equipage.PAGE))
     for cle in site_equipage.PAGE:
         assert textes.defaut(cle) in js, f"le repli de la page diffère du texte d'origine : {cle}"
