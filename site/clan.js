@@ -12,6 +12,7 @@ import {
 import { ouvrirFiche, agir, RANGS } from "./fiche.js";
 import { ticketsVue, indisponible } from "./discord.js";
 import { affiche, afficheVierge, nomAffiche, metiersDe, gradeDe, insigneImage } from "./affiche.js";
+import { avecVerrou } from "./direct.js";
 
 const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(p)) delete etat.pages[k]; };
 
@@ -196,8 +197,8 @@ export function fiches(vue) {
     if (f.quoi === "sans") lignes = lignes.filter((x) => !x.a);
     lignes = lignes.filter((x) => contient([x.m.nom, x.m.pseudo, x.m.id, x.a && x.a.surnom, x.a && x.a.roblox && x.a.roblox.nom].join(" "), f.q));
     const avec = lignes.filter((x) => x.a).length;
-    const rendre = (x) => (x.a ? affiche(x.a, cat, { taille: "mini", clic: () => emettre("affiche:ouvrir", x.a.id) })
-      : afficheVierge(x.m, () => { if (peutAgir()) aller("capitainerie", "affiches", "nouvelle-" + x.m.id); else ouvrirFiche(x.m.id); }));
+    const rendre = (x) => (x.a ? avecVerrou(affiche(x.a, cat, { taille: "mini", clic: () => emettre("affiche:ouvrir", x.a.id) }), "affiche:" + x.a.id)
+      : avecVerrou(afficheVierge(x.m, () => { if (peutAgir()) aller("capitainerie", "affiches", "nouvelle-" + x.m.id); else ouvrirFiche(x.m.id); }), "affiche-membre:" + x.m.id));
     const blocs = [h("p", { classe: "aide" }, compte(lignes.length, "membre") + " · " + compte(avec, "affiche") + " · " + compte(lignes.length - avec, "fiche vierge", "fiches vierges") + ". Touche une affiche pour la voir en grand.")];
     if (!lignes.length) { remplacer(resultats, ...blocs, vide("Personne ici", "Change le filtre ou la recherche.")); return; }
     if (f.vue === "az") {
