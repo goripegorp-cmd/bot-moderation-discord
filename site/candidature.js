@@ -50,10 +50,13 @@ const E = {
 };
 
 // ─── Les textes : ceux de la direction (registre), sinon ceux d'origine ────
+/** Les guillemets et la ponctuation haute tiennent à leur mot (espaces insécables, à la française, comme `textes.js`) :
+ *  au téléphone, « Movies » ne se coupe plus en « dans les « » / « Movies » ? ». */
+const insecable = (s) => String(s ?? "").replace(/« /g, "« ").replace(/ ([»:;?!])/g, " $1");
 function T(cle, defaut, valeurs) {
   const v = E.textes["candidature." + cle];
   const s = typeof v === "string" && v.trim() ? v : defaut;
-  return valeurs ? s.replace(/\{([a-z_]+)\}/g, (m, k) => (k in valeurs ? String(valeurs[k]) : m)) : s;
+  return insecable(valeurs ? s.replace(/\{([a-z_]+)\}/g, (m, k) => (k in valeurs ? String(valeurs[k]) : m)) : s);
 }
 const chef = () => !!(E.q && E.q.nature === "chef");
 const metier = () => sansEmoji(E.q && E.q.metier);
@@ -66,7 +69,7 @@ function texteRiche(texte, classe) {
   const blocs = [];
   let courant = [];
   const finir = () => { if (courant.length) { blocs.push(h("p", {}, courant.flatMap((l, i) => (i ? [h("br"), ...gras(l)] : gras(l))))); courant = []; } };
-  for (const l of String(texte || "").replace(/\r\n?/g, "\n").split("\n")) {
+  for (const l of insecable(texte || "").replace(/\r\n?/g, "\n").split("\n")) {
     if (/^-#\s/.test(l)) { finir(); blocs.push(h("p", { classe: "petit" }, gras(l.replace(/^-#\s*/, "")))); }
     else if (!l.trim()) finir();
     else courant.push(l);
@@ -272,7 +275,7 @@ function vueEtape() {
   const et = etapes[E.etape];
   const ecrire = !parEtapes() || et.courante;
   const tete = h("h2", { classe: "cand-etape-titre", tabindex: "-1", id: "etape-titre" },
-    h("span", { classe: "cand-etape-num" }, libelleEtape(et.position || E.etape + 1)), et.titre ? h("span", { classe: "cand-etape-nom" }, et.titre) : null,
+    h("span", { classe: "cand-etape-num" }, libelleEtape(et.position || E.etape + 1)), et.titre ? h("span", { classe: "cand-etape-nom" }, insecable(et.titre)) : null,
     et.envoyee ? h("span", { classe: "tampon vert cand-tampon" }, T("envoyee", "Envoyée")) : null);
   const manquantes = ecrire && E.manque ? et.questions.filter((q) => !repondue(q)).length : 0;
   const corps = h("section", { classe: "cand-etape" + (ecrire ? "" : " lecture"), "aria-labelledby": "etape-titre" }, tete,
@@ -324,7 +327,7 @@ function question(q) {
   return h("li", { classe: "cand-question" + (repondue(q) ? " repondue" : "") },
     h("label", { for: id, classe: "cand-question-lib" },
       h("span", { classe: "cand-num" }, T("question", "Question {numero}", { numero: q.rang })),
-      h("span", { classe: "cand-intitule" }, q.question)),
+      h("span", { classe: "cand-intitule" }, insecable(q.question))),
     zone, compteur);
 }
 /** « Où trouver les réponses » : un volet replié (les questions d'abord), ouvert d'un geste. */
@@ -337,7 +340,7 @@ function blocLiens() {
     h("div", { classe: "cand-liens-corps" },
       phrase ? h("p", { classe: "aide" }, phrase) : null,
       h("ul", {}, liens.map((l) => h("li", {}, h("a", { href: l.url, classe: "cand-lien" }, icone("lien"),
-        h("span", { classe: "cand-lien-texte" }, h("b", {}, l.titre), l.description ? h("span", {}, l.description) : null)))))));
+        h("span", { classe: "cand-lien-texte" }, h("b", {}, insecable(l.titre)), l.description ? h("span", {}, insecable(l.description)) : null)))))));
   return d;
 }
 /** Les étapes (des jalons : la fiche, les envoyées, l'étape en cours, les suivantes sous cadenas), la barre et « 3 / 10
@@ -354,7 +357,7 @@ function progression() {
     "aria-label": T("etape", "Étape {numero} sur {total}", { numero: 1, total: total + 1 }) + " — " + T("fiche", "Ta fiche de candidature") }, icone("coche"))));
   for (let k = 0; k < total; k++) {
     const et = etapes[k];
-    const nom = libelleEtape(k + 1) + (et && et.titre ? " — " + et.titre : "");
+    const nom = libelleEtape(k + 1) + (et && et.titre ? " — " + insecable(et.titre) : "");
     if (!et) {   // pas encore ouverte : comptée, sous cadenas
       jalons.push(h("li", {}, h("span", { classe: "cand-jalon fermee", role: "img", title: nom + " — " + T("fermee", "Pas encore ouverte"), "aria-label": nom + " — " + T("fermee", "Pas encore ouverte") }, icone("cadenas"))));
       continue;
@@ -416,7 +419,7 @@ function vueRelire() {
       manque ? h("div", { classe: "bandeau rouge", role: "alert" }, icone("attention"), h("div", { classe: "bandeau-texte" }, T("manque", "Réponses manquantes : {n}. Chaque question en demande une.", { n: manque }))) : null,
       etapes.map((et, i) => h("div", { classe: "cand-relire-etape" },
         h("div", { classe: "cand-relire-tete" },
-          h("h3", {}, h("span", {}, libelleEtape(et.position || i + 1)), et.titre ? h("span", { classe: "cand-etape-nom" }, et.titre) : null),
+          h("h3", {}, h("span", {}, libelleEtape(et.position || i + 1)), et.titre ? h("span", { classe: "cand-etape-nom" }, insecable(et.titre)) : null),
           bouton(T("modifier", "Modifier"), { classe: "p discret", icone: "modifier", onclick: () => allerEtape(i) })),
         lecture(et.questions, true)))),
     barre(boutonRetour(T("modifier", "Modifier"), () => allerEtape(etapes.length - 1)), envoyerB),
@@ -427,7 +430,7 @@ function lecture(questions, signalerManque) {
   return h("dl", { classe: "cand-lecture" }, questions.map((q) => {
     const texte = String(E.reponses[String(q.rang)] || "").trim();
     return h("div", { classe: "cand-lecture-q" + (texte ? "" : " manque") },
-      h("dt", {}, h("span", { classe: "cand-num" }, T("question", "Question {numero}", { numero: q.rang })), h("span", { classe: "cand-intitule" }, q.question)),
+      h("dt", {}, h("span", { classe: "cand-num" }, T("question", "Question {numero}", { numero: q.rang })), h("span", { classe: "cand-intitule" }, insecable(q.question))),
       h("dd", {}, texte || h("span", { classe: signalerManque ? "cand-manque" : "aide" }, T("vide", "Pas encore de réponse"))));
   }));
 }
@@ -490,7 +493,7 @@ function mesReponses(ouvert) {
   const d = h("details", { classe: "cand-liens cand-mes-reponses" },
     h("summary", {}, icone("parchemin"), h("span", { classe: "cand-liens-titre" }, T("merci.reponses", "Tes réponses"))),
     h("div", { classe: "cand-liens-corps" }, etapes.map((et, i) => h("div", { classe: "cand-relire-etape" },
-      visibles().length > 1 || portes().fiche ? h("h3", {}, h("span", {}, libelleEtape(et.position || i + 1)), et.titre ? h("span", { classe: "cand-etape-nom" }, et.titre) : null) : null,
+      visibles().length > 1 || portes().fiche ? h("h3", {}, h("span", {}, libelleEtape(et.position || i + 1)), et.titre ? h("span", { classe: "cand-etape-nom" }, insecable(et.titre)) : null) : null,
       lecture(et.questions, false)))));
   d.open = !!ouvert;
   return d;

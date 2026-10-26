@@ -281,6 +281,21 @@ async function principal() {
   console.log("Navigateurs : " + C.exe + " (deux profils séparés)\nCaptures : " + SORTIE);
   const mesures = { delais: [] };
   let envoi = 0;
+  //  « À chaque instant, au plus deux messages du bot dans le ticket » : un relevé CONTINU (toutes les 120 ms) du fil du
+  //  vrai ticket, de la demande à la décision — pas seulement entre deux étapes.
+  const releve = { tid: 0, actif: true, n: 0, max: 0, pire: [] };
+  const releveur = (async () => {
+    while (releve.actif) {
+      if (releve.tid) {
+        const m = await messagesTicket(releve.tid).catch(() => null);
+        if (m) {
+          releve.n++;
+          if (m.length > releve.max) { releve.max = m.length; releve.pire = m.map((y) => (y.texte || "").slice(0, 60)); }
+        }
+      }
+      await pause(120);
+    }
+  })();
   try {
     await C.onglet(375, 812, true);
     await D.onglet(1366, 768, false);
@@ -454,6 +469,7 @@ async function principal() {
       const r = await demo(`recrutement/ouvrir?membre=${CAND}&pseudo=Parcours_Web`);
       tid = Number(r.ticket || 0);
       if (!tid) return { ok: false, detail: "pas de ticket : " + JSON.stringify(r).slice(0, 240) };
+      releve.tid = tid;
       const m = await messagesTicket(tid);
       return { ok: m.length === 1 && /Es-tu sûr/.test(r.confirmation || ""), detail: `ticket #${tid} · ${m.length} message(s) du bot · « ${((m[0] || {}).texte || "").slice(0, 90)}… »` };
     });
@@ -533,7 +549,11 @@ async function principal() {
       const d = await attendre(async () => { const x = await D.api("recrutement/dossier?ticket=" + tid); return x.etape === "accepte" ? x : null; }, 15000);
       const v = await deuxAuPlus();
       const mp = ((await demo("discord?mp=" + CAND)).mp || []).map((x) => x.texte).join(" | ");
-      return { ok: !!d && v.ok && /accepté/i.test(mp), detail: `${n} réponses justes · ${d ? "accepté" : "pas accepté"} · ticket : ${v.m.length} messages · MP : « ${mp.slice(-70)} »` };
+      releve.actif = false;
+      await releveur;
+      mesures.releve_ticket = { releves: releve.n, max: releve.max, pire: releve.pire };
+      return { ok: !!d && v.ok && /accepté/i.test(mp) && releve.n > 50 && releve.max <= 2,
+        detail: `${n} réponses justes · ${d ? "accepté" : "pas accepté"} · ticket : ${v.m.length} messages · relevé continu : ${releve.n} relevés, ${releve.max} message(s) du bot au plus · MP : « ${mp.slice(-70)} »` };
     });
 
     // ═══ LE VRAI CHEMIN D'UN CHEF D'ÉQUIPE : la proposition, le message privé, la page, 100 %, le rôle, le badge ═══
@@ -621,6 +641,8 @@ async function principal() {
         detail: `${marquer ? "« Marquer justes »" : n + " « Juste »"} · ${b.justes}/${b.total} · « ${badge} » · en tête du choix du chef : « ${(premier || {}).texte || "rien"} »` };
     });
   } finally {
+    releve.actif = false;
+    await releveur;
     await C.fermer(); await D.fermer();
   }
   const echecs = resultats.filter((r) => !r.ok);

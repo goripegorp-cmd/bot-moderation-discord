@@ -67,7 +67,14 @@ const MODE_EDITION = cliquerTexte("button", "Modifier l'accueil");
 //  rendu par le serveur — ou celui du site ; douze actualités de plus (idempotent : 14 de la direction au total, une
 //  sur deux avec la bannière de démonstration), l'accueil relu par son propre module.
 const VOIR_ACTUS = "(async () => { const b = document.querySelector('.bloc-actualites'); if (!b) throw new Error('bloc des actualités absent'); b.scrollIntoView({ block: 'start' }); await new Promise(r => setTimeout(r, 300)); return 1; })()";
-const OUVRIR_EDITEUR_PUBLICATION = (mode) => "(async () => { const c = [...document.querySelectorAll('article.actu')].find((a) => a.textContent.includes('Le Movie 3'));"
+//  --lourd : 37 actualités, « Le Movie 3 » n'est plus parmi celles de l'accueil — comme une personne, on la cherche dans
+//  « Toutes les actualités » (« Tout voir », sinon « Voir … de plus »). `voirMovie3()` rend sa carte (ou null).
+const MOVIE3 = "const voirMovie3 = async () => { const trouver = () => [...document.querySelectorAll('article.actu')].find((a) => a.textContent.includes('Le Movie 3'));"
+  + " let c = trouver(); if (c) return c; const t = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Toutes les actualités')); if (!t) return null;"
+  + " t.click(); for (let i = 0; i < 40 && !(c = trouver()); i++) { const p = [...document.querySelectorAll('dialog[open] .plus button')];"
+  + " const b = p.find((x) => x.textContent.includes('Tout voir')) || p.find((x) => x.textContent.includes('de plus')); if (b) b.click(); await new Promise(r => setTimeout(r, 200)); }"
+  + " return c || null; };";
+const OUVRIR_EDITEUR_PUBLICATION = (mode) => "(async () => { " + MOVIE3 + " const c = await voirMovie3();"
   + " if (!c) throw new Error('annonce publiée absente'); const b = [...c.querySelectorAll('button')].find((x) => x.textContent.includes('Modifier'));"
   + " if (!b) throw new Error('« Modifier » absent de l\\'annonce publiée'); b.click();"
   + " for (let i = 0; i < 40 && !document.querySelector('dialog[open] .discord-carte'); i++) await new Promise(r => setTimeout(r, 150));"
@@ -81,7 +88,9 @@ const TENIR_PUBLICATION = "(async () => { const a = await fetch('/tableau/equipa
   + " ws.send(JSON.stringify({ t: 'prendre', o: 'evenement:' + x.id.split('-').pop(), ti: 'la publication « Le Movie 3 »' }));"
   + " for (let i = 0; i < 30 && !document.querySelector('.actu .direct-badge:not([hidden])'); i++) await new Promise(r => setTimeout(r, 200)); return 1; })()";
 //  La carte sous cadenas au milieu de l'écran (au téléphone, elle est loin sous le début du bloc).
-const VOIR_VERROU = "(async () => { const c = document.querySelector('.actu.direct-chez-moi, .actu.direct-sous-verrou'); if (!c) throw new Error('carte sous cadenas absente');"
+const VOIR_VERROU = "(async () => { " + MOVIE3 + " let c = document.querySelector('.actu.direct-chez-moi, .actu.direct-sous-verrou');"
+  + " if (!c && await voirMovie3()) for (let i = 0; i < 20 && !(c = document.querySelector('dialog[open] .actu.direct-chez-moi, dialog[open] .actu.direct-sous-verrou')); i++) await new Promise(r => setTimeout(r, 150));"
+  + " if (!c) throw new Error('carte sous cadenas absente');"
   + " c.scrollIntoView({ block: 'center' }); await new Promise(r => setTimeout(r, 300)); return 1; })()";
 const BEAUCOUP_ACTUS ="(async () => { const lire = () => fetch('/tableau/equipage/api/accueil', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json());"
   + " const a = await lire(); const dir = ((a.donnees || {}).actualites || {}).direction || []; const img = ((dir.find((x) => x.image) || {}).image || '').replace(/^media\\//, '');"
@@ -133,7 +142,9 @@ const SCENES_EQUIPAGE = [
   { nom: "site-equipage-actualite-verrouillee", ...EQ_TETE, ancre: "#accueil", geste: TENIR_PUBLICATION, geste2: VOIR_VERROU,
     apres: "(() => { if (window.__essaiVerrou) window.__essaiVerrou.close(); return 1; })()" },
   { nom: "site-equipage-actualites-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: VOIR_ACTUS },
-  { nom: "site-equipage-lire-annonce-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: cliquerTexte("button.lien-titre", "Le Movie 3") },
+  { nom: "site-equipage-lire-annonce-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"],
+    geste: "(async () => { " + MOVIE3 + " const c = await voirMovie3(); const b = c && c.querySelector('button.lien-titre'); if (!b) throw new Error('introuvable : Le Movie 3');"
+      + " b.scrollIntoView({ block: 'center' }); b.click(); await new Promise((r) => setTimeout(r, 600)); })()" },
   { nom: "site-equipage-actualites-nombreuses", ...EQ_TETE, ancre: "#accueil", geste: BEAUCOUP_ACTUS, geste2: VOIR_ACTUS },
   { nom: "site-equipage-toutes-nombreuses", ...EQ_TETE, ancre: "#accueil", geste: BEAUCOUP_ACTUS, geste2: cliquerTexte("button", "Toutes les actualités") },
 ];

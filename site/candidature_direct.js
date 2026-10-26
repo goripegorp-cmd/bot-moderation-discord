@@ -22,6 +22,9 @@ const ECRIT_RECENT = 8;           // s : « en train d'écrire »
 const OUVERTE_VIE = 75;           // s : une page ouverte qui ne donne plus de nouvelles est fermée (son battement : 20 s)
 const CACHEE_VIE = 200;           // s : une page en arrière-plan (ses minuteurs ralentissent)
 
+/** Les guillemets et la ponctuation haute tiennent à leur mot (espaces insécables, comme la page du candidat). */
+const insecable = (s) => String(s ?? "").replace(/« /g, "« ").replace(/ ([»:;?!])/g, " $1");
+
 function ilYa(s) {
   if (s < 10) return "à l'instant";
   if (s < 60) return "il y a " + Math.round(s) + " s";
@@ -189,7 +192,7 @@ export function vueEnDirect(cible, opts = {}) {
     const etiquette = p.mode === "etapes" ? (et.envoyee ? ["vert", "Envoyée"] : et.courante ? ["mer", d.etat === "ouvert" ? "En cours" : "Ouverte"] : !ouverte ? ["encre", "Pas encore ouverte"] : null) : null;
     const titre = h("h4", { classe: "en-direct-etape-titre" },
       totalAff > 1 ? h("span", {}, "Étape " + (et.position + fiche) + " sur " + totalAff) : h("span", {}, "Le questionnaire"),
-      et.titre ? h("span", { classe: "en-direct-etape-nom" }, sansEmoji(et.titre)) : null,
+      et.titre ? h("span", { classe: "en-direct-etape-nom" }, insecable(sansEmoji(et.titre))) : null,
       etiquette ? h("span", { classe: "tampon droit " + etiquette[0] }, etiquette[1]) : null);
     const classe = "en-direct-etape" + (et.envoyee ? " envoyee" : "") + (et.courante ? " courante" : "") + (!ouverte ? " fermee" : "");
     if (!ouverte) return h("div", { classe }, titre, h("p", { classe: "meta" }, et.questions.length + (et.questions.length > 1 ? " questions" : " question") + " · le candidat ne les voit pas encore"));
@@ -199,7 +202,7 @@ export function vueEnDirect(cible, opts = {}) {
       const ecrit = Number(d.ecrits[rang]) || 0;
       const actif = Number(d.rang) === q.rang && d.etat === "ouvert" && ecrit && temps() - ecrit < ECRIT_RECENT;
       return h("li", { classe: "en-direct-q" + (actif ? " actif" : "") + (texte ? "" : " vide") },
-        h("div", { classe: "en-direct-question" }, h("span", { classe: "en-direct-num" }, String(q.rang)), h("span", {}, q.question)),
+        h("div", { classe: "en-direct-question" }, h("span", { classe: "en-direct-num" }, String(q.rang)), h("span", {}, insecable(q.question))),
         h("div", { classe: "en-direct-reponse" }, texte ? texte : h("span", { classe: "aide" }, "Pas encore de réponse"), actif ? h("span", { classe: "en-direct-plume", "aria-hidden": "true" }, icone("plume")) : null),
         ecrit && texte ? h("div", { classe: "en-direct-ecrit", "data-ecrit": String(ecrit), "data-rang": rang }, libelleEcrit(ecrit, q.rang)) : null);
     })));
