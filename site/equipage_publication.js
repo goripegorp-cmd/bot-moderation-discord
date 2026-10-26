@@ -91,8 +91,9 @@ export async function editerPublication(a, o = {}) {
   const champLiens = h("fieldset", { classe: "cadre pile serree bloc-form" }, h("legend", { classe: "cadre-titre" }, "Liens"),
     h("p", { classe: "aide" }, "Des boutons sous le texte, sur Discord (" + (lim.liens || 5) + " au plus) : un nom, une adresse en https://."), liens);
   const etat = h("div", { classe: "publication-etat" });
+  const publie = P.type === "evenement" || P.type === "listing" ? "Publié" : "Publiée";
   const majEtat = (extra) => remplacer(etat,
-    h("p", { classe: "meta" }, icone("discord"), " " + (P.publie ? "Publiée " + depuis(P.publie) : "Publiée") + (P.destination && P.destination.nom ? " dans « " + sansEmoji(P.destination.nom) + " »" : "")
+    h("p", { classe: "meta" }, icone("discord"), " " + (P.publie ? publie + " " + depuis(P.publie) : publie) + (P.destination && P.destination.nom ? " dans « " + sansEmoji(P.destination.nom) + " »" : "")
       + (P.type === "evenement" && P.quand ? " · le " + date(P.quand, true) : "")),
     P.lien ? h("a", { classe: "bouton p discret", href: P.lien }, icone("discord"), h("span", {}, "Voir sur Discord")) : null,
     extra || null);
@@ -144,7 +145,8 @@ export async function editerPublication(a, o = {}) {
     h("div", { classe: "pile serree apercu-colonne" }, onglets, zoneApercu));
   const bascule = segment("form", [["form", "Rédiger"], ["apercu", "Aperçu"]], (x) => { editeur.classList.toggle("voir-apercu", x === "apercu"); }, "Vue");
   bascule.classList.add("bascule-editeur");
-  ajouter(p.corps, [bascule, editeur]);
+  //  (dans une ligne à part : un enfant direct de la pancarte qui coupe son contenu serait écrasé par sa grille)
+  ajouter(p.corps, [h("div", { classe: "bascule-ligne" }, bascule), editeur]);
   // ─── Enregistrer ───
   const ok = bouton("Enregistrer sur Discord", { classe: "principal", icone: "valider", reseau: true, onclick: () => enregistrer() });
   async function enregistrer() {
@@ -192,5 +194,5 @@ export async function editerPublication(a, o = {}) {
   ajouter(p.pied, [bouton("Annuler", { classe: "discret", onclick: () => p.fermer() }), ok]);
   dessinerApercu();
   chercherApercu();
-  requestAnimationFrame(() => titre.focus());
+  requestAnimationFrame(() => titre.focus({ preventScroll: true }));   // la fenêtre reste en haut (« Rédiger · Aperçu » en vue)
 }

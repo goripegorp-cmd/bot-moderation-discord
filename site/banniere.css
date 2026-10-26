@@ -43,6 +43,10 @@
   .actu:not(.avec-banniere) > .actu-sceau { aspect-ratio: auto; height: 58px; }
 }
 .actu-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Le cadenas de la présence en direct (quelqu'un modifie cette publication) : sur SA carte, pendu au-dessus du titre. */
+.actu { position: relative; }
+.actu.direct-sous-verrou, .actu.direct-chez-moi { padding-top: 28px; }
+.actu > .direct-badge { padding: 2px 0; }   /* le sceau penché tient dans son étiquette */
 .actu-liens { display: flex; flex-wrap: wrap; gap: 6px 14px; min-width: 0; }
 .actu-liens a { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; overflow-wrap: anywhere; color: var(--mer, #1f4e5a); font-weight: 600; }
 @media (pointer: coarse) { .actu-liens a { min-height: 44px; } }
@@ -66,9 +70,10 @@
 @media (min-width: 1100px) { .editeur-publication { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
 .editeur-publication .apercu-cadre { min-width: 0; }
 .editeur-publication > .formulaire-colonne, .editeur-publication > .apercu-colonne { min-width: 0; }
-.bascule-editeur { display: none; }
+.bascule-editeur, .bascule-ligne { display: none; }
 @media (max-width: 1099px) {   /* une seule colonne : « Rédiger » ou « Aperçu » */
-  .segment.bascule-editeur { display: inline-flex; justify-self: start; margin-bottom: 6px; }
+  .bascule-ligne { display: block; }
+  .segment.bascule-editeur { display: inline-flex; }
   .editeur-publication:not(.voir-apercu) > .apercu-colonne { display: none; }
   .editeur-publication.voir-apercu > .formulaire-colonne { display: none; }
 }

@@ -74,7 +74,13 @@ const OUVRIR_EDITEUR_PUBLICATION = (mode) => "(async () => { const c = [...docum
   + (mode !== "form" ? " const ap = [...document.querySelectorAll('dialog[open] .bascule-editeur button')].find((x) => x.textContent.includes('Aperçu')); if (ap && ap.getClientRects().length) { ap.click(); await new Promise(r => setTimeout(r, 300)); }" : "")
   + (mode === "site" ? " [...document.querySelectorAll('dialog[open] .apercu-onglets button')].find((x) => x.textContent.includes('Sur le site')).click(); await new Promise(r => setTimeout(r, 500));" : "")
   + " return 1; })()";
-const BEAUCOUP_ACTUS = "(async () => { const lire = () => fetch('/tableau/equipage/api/accueil', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json());"
+const TENIR_PUBLICATION = "(async () => { const a = await fetch('/tableau/equipage/api/accueil', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json());"
+  + " const x = (((a.donnees || {}).actualites || {}).auto || []).find((y) => y.titre.includes('Le Movie 3')); if (!x) throw new Error('annonce publiée absente');"
+  + " const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/tableau/espace/direct'); window.__essaiVerrou = ws;"
+  + " await new Promise((ok, ko) => { ws.onopen = ok; ws.onerror = ko; }); ws.send(JSON.stringify({ t: 'bonjour', page: 'equipage/annonces' }));"
+  + " ws.send(JSON.stringify({ t: 'prendre', o: 'evenement:' + x.id.split('-').pop(), ti: 'la publication « Le Movie 3 »' }));"
+  + " for (let i = 0; i < 30 && !document.querySelector('.actu .direct-badge:not([hidden])'); i++) await new Promise(r => setTimeout(r, 200)); return 1; })()";
+const BEAUCOUP_ACTUS ="(async () => { const lire = () => fetch('/tableau/equipage/api/accueil', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json());"
   + " const a = await lire(); const dir = ((a.donnees || {}).actualites || {}).direction || []; const img = ((dir.find((x) => x.image) || {}).image || '').replace(/^media\\//, '');"
   + " for (let k = dir.length; k < 14; k++) { const r = await fetch('/tableau/espace/api/equipage/actualite', { method: 'POST', credentials: 'same-origin',"
   + " headers: { 'Content-Type': 'application/json', 'X-Tableau': '1' }, body: JSON.stringify({ titre: 'Nouvelle du bord n° ' + (k + 1) + (k % 3 ? '' : ' : un titre bien plus long, pour voir la carte passer à la ligne'),"
@@ -120,6 +126,9 @@ const SCENES_EQUIPAGE = [
   { nom: "site-equipage-editeur-publication-discord", ...EQ_TETE, ancre: "#accueil", geste: VOIR_ACTUS, geste2: OUVRIR_EDITEUR_PUBLICATION("discord") },
   { nom: "site-equipage-editeur-publication-site", ...EQ_TETE, ancre: "#accueil", geste: VOIR_ACTUS, geste2: OUVRIR_EDITEUR_PUBLICATION("site") },
   { nom: "site-equipage-editeur-bandeau", ...EQ_TETE, ancre: "#accueil", geste: MODE_EDITION, geste2: cliquerTexte(".bloc-bandeau .barre-bloc button", "Modifier") },
+  //  La publication tenue ailleurs (un autre onglet de la tête la modifie) : le cadenas pend sur SA carte.
+  { nom: "site-equipage-actualite-verrouillee", ...EQ_TETE, ancre: "#accueil", geste: TENIR_PUBLICATION, geste2: VOIR_ACTUS,
+    apres: "(() => { if (window.__essaiVerrou) window.__essaiVerrou.close(); return 1; })()" },
   { nom: "site-equipage-actualites-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: VOIR_ACTUS },
   { nom: "site-equipage-lire-annonce-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: cliquerTexte("button.lien-titre", "Le Movie 3") },
   { nom: "site-equipage-actualites-nombreuses", ...EQ_TETE, ancre: "#accueil", geste: BEAUCOUP_ACTUS, geste2: VOIR_ACTUS },
