@@ -21822,6 +21822,8 @@ async def _activite_boot():
                             extras=_recrutement_extras, liste_noire=_liste_noire_recrutement, web=_candidature_site,
                             metier=metiers.invitation, est_tete=lambda m: getattr(m, "id", 0) in TETE_IDS,
                             clan=_role_clan_de, metiers=_metiers_catalogue, metiers_membre=metiers.metiers_du_membre)
+        #  27/10/2026 : les chefs d'équipe validés, badgés et proposés en premier dans l'éditeur d'une équipe.
+        site_equipage.brancher_badges_chef(questionnaire.badges_chefs)
         await questionnaire.init_db()
         if hasattr(tableau, "monter"):
             tableau.monter(questionnaire.ROUTES_SITE)

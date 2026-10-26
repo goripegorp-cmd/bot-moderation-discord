@@ -566,6 +566,33 @@ async function parcoursRecrutementZone(o) {
     return { ok: !!c && c.etat === "en_cours", detail: qui + (c ? " : candidature de chef « " + c.metier_nom + " » en cours" : " : pas de candidature") };
   });
 
+  await etape(o, "Équipes : le chef validé est badgé et proposé en premier dans l'éditeur d'une équipe", async () => {
+    //  Le dernier du clan par son nom, nommé chef par le vrai chemin (`/tableau/demo/recrutement/chef` : proposé, ses
+    //  réponses, la correction à 100 %, « Accepter ») : son badge le fait passer devant tous les autres.
+    const c0 = await api(o, "recrutement/chefs");
+    const eq0 = await api(o, "equipage/equipes");
+    const occupes = new Set([...(c0.candidatures || []).filter((x) => x.etat === "en_cours" || x.etat === "corriger").map((x) => String(x.membre.id)),
+      ...(eq0.equipes || []).filter((e) => e.chef).map((e) => String(e.chef.id))]);
+    const qui = (c0.membres || []).filter((m) => !m.chef && !occupes.has(String(m.id)))
+      .sort((a, b) => b.nom.localeCompare(a.nom, "fr", { sensitivity: "base" }))[0];
+    if (!qui) return { ok: false, detail: "aucun membre du clan à nommer" };
+    const r = await demo("recrutement/chef?membre=" + qui.id);
+    if (!r.ok) return { ok: false, detail: "nomination refusée : " + JSON.stringify(r).slice(0, 240) };
+    const badge = ((await api(o, "equipage/equipes")).badges || {})[String(qui.id)] || "";
+    if (!badge.startsWith("Chef validé · ")) return { ok: false, detail: "le serveur ne badge pas " + qui.nom + " (« " + badge + " »)" };
+    await aller(o, "#equipage/membres");
+    await o.s("Page.reload", {});   // les équipes relues (la page les garde 20 s)
+    await attendre(() => evaluer(o, "!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 12000, 200);
+    await pause(600);
+    if (!await cliquer(o, ".segment button", "Par équipe")) return { ok: false, detail: "« Par équipe » absent" };
+    if (!await attendre(() => cliquer(o, "#contenu button", "Nouvelle équipe"), 8000)) return { ok: false, detail: "« Nouvelle équipe » absent" };
+    const premier = await attendre(() => evaluer(o, `(() => { const d = [...document.querySelectorAll("dialog[open]")].pop();
+      const li = d && d.querySelector('ol.choix-equipe[role="radiogroup"] > li'); if (!li) return null;
+      const r = li.querySelector('input[type="radio"]'); return { id: r ? r.value : "", texte: li.innerText.replace(/\\s+/g, " ").trim() }; })()`), 8000);
+    const ok = !!premier && premier.id === String(qui.id) && premier.texte.includes(badge);
+    return { ok, detail: qui.nom + " · « " + badge + " » · en tête du choix du chef : « " + (premier ? premier.texte : "rien") + " »" };
+  });
+
   await etape(o, "Ses messages, dans l'ordre : « Modifier ce message » réécrit les conditions de l'affiche", async () => {
     await aller(o, ZONE_RECRUTEMENT + "/reglages");
     await deplier(o, "Ses messages, dans l'ordre");

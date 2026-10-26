@@ -20,7 +20,8 @@ approuvée avec des étapes et des questions écrites pour lui · R09 le contrat
 R11 sans questionnaire · R12 « Es-tu sûr », la fiche, l'élimination d'office · R13 la liste noire · R14 l'aperçu de
 l'équipe (jamais un formulaire) · R15 la page web du candidat (module simulé) · R16 les chefs d'équipe · R17 la purge
 exceptionnelle · R18 le nettoyage · R19 le parcours réglé sur le site (validation, version, avertissements, messages) ·
-R20 les décidées · R21 un ticket d'avant l'affiche garde sa fermeture annoncée."""
+R20 les décidées · R21 un ticket d'avant l'affiche garde sa fermeture annoncée · R22 la carte RGPD · R23 les
+avertissements stables · R24 le chef validé badgé et proposé en premier dans l'éditeur d'une équipe."""
 from __future__ import annotations
 
 import json
@@ -1150,3 +1151,89 @@ def test_R23_rien_de_dynamique_dans_les_avertissements_du_module():
     for m in re.finditer(r'_log\((f?)"\[RECRUTEMENT\]\[E(\d+)\]([^"]*)"\)', src):
         assert m.group(1) == "", f"E{m.group(2)} : le message principal ne porte aucune valeur ({m.group(3)})"
     _ = os
+
+
+# ═══ R24 : les chefs validés sur les équipes du clan (site_equipage, 27/10/2026) ═══════════════════════════════════
+
+def test_R24_le_chef_valide_est_badge_et_propose_en_premier_dans_l_editeur_d_equipe(tmp_path, monkeypatch):
+    """Le chef validé par le recrutement porte « Chef validé · <métier> » dans l'éditeur d'une équipe et y passe en
+    premier : le fournisseur branché au démarrage (bot.py), le badge renommable, retiré avec le titre ; le tri de
+    l'éditeur exécuté tel quel (equipes_admin.js)."""
+    import ast
+    import re
+    import shutil
+    import subprocess
+    import site_equipage
+    import textes as T
+    racine = Path(__file__).resolve().parent.parent
+
+    async def inviter(g, e):
+        return True
+    b = banc(tmp_path, web=Obj(inviter=inviter, lien_candidat=None))
+    monkeypatch.setattr(Q, "_bot", Obj(get_guild=lambda gid: b.g if gid == b.g.id else None))
+    for nom, valeur in (("_get_db", b.get_db), ("_cache", {}), ("_etat", {"charge": False, "echec": 0.0}),
+                        ("_verrous", {}), ("_log", lambda *a: None)):
+        monkeypatch.setattr(T, nom, valeur)   # les textes du serveur dans la base du banc (rendus après le test)
+
+    async def sc():
+        await b.preparer()
+        await T.init_db()
+        await b.candidat.add_roles(b.clan_r)
+        st, rep = await Q._r_chef_question(b.g, b.fondateur, {}, {"question": "Combien de voiles a un galion de guerre ?",
+                                                                 "reponse": "Trois", "metiers": ["navigation"]})
+        assert st == 200, rep
+        st, envoi = await Q._r_chef_proposer(b.g, b.fondateur, {}, {"membre": CANDIDAT, "metier": "navigation",
+                                                                    "etapes": [{"titre": "",
+                                                                                "questions": [rep["question"]["id"]]}]})
+        assert st == 200, envoi
+        e = await Q._envoi(envoi["envoi"])
+        assert await Q._garder_page(e, {int(q["rang"]): q["reponse"] for q in e["questions"]})   # la page web
+        assert await Q.clore_envoi(e, 5)
+        await Q.annoncer_reponses(b.g, e, 5)
+        en_cours = await site_equipage.badges_chef(b.g.id)
+        await tout_corriger(b, e["id"])
+        st, ok = await Q._r_chef_decision(b.g, b.fondateur, {}, {"envoi": e["id"], "decision": "accepter"})
+        assert st == 200, ok
+        nomme = await site_equipage.badges_chef(b.g.id)
+        st, rep = await T.ecrire(b.g, b.fondateur, {"cle": "recrutement.chef.badge",
+                                                    "valeur": "Second de confiance · {metier}", "version": 0})
+        assert st == 200, rep
+        renomme = await site_equipage.badges_chef(b.g.id)
+        st, rep = await Q._r_chef_retirer(b.g, b.fondateur, {}, {"membre": CANDIDAT})
+        assert st == 200, rep
+        return en_cours, nomme, renomme, await site_equipage.badges_chef(b.g.id)
+
+    site_equipage.brancher_badges_chef(Q.badges_chefs)   # comme au démarrage du bot (vérifié plus bas)
+    try:
+        en_cours, nomme, renomme, retire = run(sc())
+    finally:
+        site_equipage.brancher_badges_chef(None)
+    assert en_cours == {}, "une candidature en cours n'est pas un chef validé"
+    assert nomme == {str(CANDIDAT): "Chef validé · Navigateur"}, nomme
+    assert renomme == {str(CANDIDAT): "Second de confiance · Navigateur"}, "le badge se renomme (Textes & noms)"
+    assert retire == {}, "le titre retiré : plus de badge"
+    sans_echec(b)
+
+    #  Branché au démarrage : dans l'étape « questionnaire » du bot (et le site local fait de même).
+    def branche(arbre) -> bool:
+        return any(isinstance(n, ast.Call) and ast.unparse(n.func) == "site_equipage.brancher_badges_chef"
+                   and [ast.unparse(a) for a in n.args] == ["questionnaire.badges_chefs"] for n in ast.walk(arbre))
+    etapes = [n for n in ast.walk(ast.parse((racine / "bot.py").read_text(encoding="utf-8"))) if isinstance(n, ast.With)
+              and any(ast.unparse(x.context_expr) == "_Etape('questionnaire')" for x in n.items)]
+    assert len(etapes) == 1 and branche(etapes[0]), "le fournisseur des badges est branché au démarrage du bot"
+    assert branche(ast.parse((racine / "outils" / "site_local.py").read_text(encoding="utf-8")))
+
+    #  Proposé en premier : le tri du sélecteur de l'éditeur d'une équipe, exécuté tel quel.
+    js = (racine / "site" / "equipes_admin.js").read_text(encoding="utf-8")
+    tri = re.search(r"const trier = (\(l\) => l\.sort\(.+?\));\n", js)
+    assert tri and "badges[id] ? pastille(badges[id]" in js, "le tri et le badge de l'éditeur"
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node absent : le tri de l'éditeur n'est pas exécuté")
+    script = ("const badges = " + json.dumps({str(CANDIDAT): nomme[str(CANDIDAT)]}) + ";\n"
+              "const nomDe = (m) => m.nom;\nconst trier = " + tri.group(1) + ";\n"
+              "const clan = [{ id: '1', nom: 'Anne Bonny' }, { id: '" + str(CANDIDAT) + "', nom: 'Zoé la Vigie' },"
+              " { id: '2', nom: 'Barbe Noire' }];\nconsole.log(JSON.stringify(trier(clan).map((m) => m.id)));\n")
+    r = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == [str(CANDIDAT), "1", "2"], "le chef validé d'abord, puis les autres par leur nom"

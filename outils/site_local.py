@@ -440,6 +440,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     #  Le site de l'équipage (26/10/2026), comme l'étape « site_equipage » du bot.
     import site_equipage
     site_equipage.setup(get_db=get_db, cfg=cfg, log=print)
+    site_equipage.brancher_badges_chef(questionnaire.badges_chefs)   # comme l'étape « questionnaire » du bot
     await site_equipage.init_db()
     tableau.monter(site_equipage)
     tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
@@ -462,7 +463,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     avis = (questionnaire.AVIS_S, questionnaire.PAGE_S)
     questionnaire.AVIS_S = questionnaire.PAGE_S = 0
     try:
-        await _recrutement_demo(get_db, g, ticket_ouvert, chemin)
+        await _recrutement_demo(get_db, g, ticket_ouvert, chemin, lourd=lourd)
     finally:
         questionnaire.AVIS_S, questionnaire.PAGE_S = avis
 
@@ -679,11 +680,12 @@ async def _remplir(get_db, g, clan_r, salon_annonces, X) -> None:
     registre._derniers.clear()
 
 
-async def _recrutement_demo(get_db, g, ticket_ouvert, chemin) -> None:
+async def _recrutement_demo(get_db, g, ticket_ouvert, chemin, lourd: bool = False) -> None:
     """Quatre candidatures du clan, OUVERTES PAR LE VRAI CHEMIN DU BOT (create_ticket : l'affiche, l'équipe dans le fil)
     et jouées par le vrai module (questionnaire.py) : une demande à lire, un questionnaire ouvert sans réponse, des
     réponses à corriger (justes, approchées, fausses), une correction commencée. Puis un ticket d'AVANT l'affiche (sa
-    carte de l'étape 1) : ces tickets-là marchent toujours."""
+    carte de l'étape 1) : ces tickets-là marchent toujours. Sur la base lourde : un chef d'équipe validé (le dernier du
+    clan par son nom), badgé et proposé en premier dans l'éditeur d'une équipe."""
     import questionnaire
     chef = g.get_member(FONDATEUR)
     candidats = [m for m in g.members if m.id not in TETE and not m.bot][14:19]
@@ -728,6 +730,12 @@ async def _recrutement_demo(get_db, g, ticket_ouvert, chemin) -> None:
             await db.commit()
         ch, _tk = await ticket_ouvert(g, ancien)
         await questionnaire.poser_etape1(g, ch, ancien, m.id, nombre=await questionnaire.annonce(g.id))
+    if lourd:
+        clan = [m for m in g.members if m.id not in TETE and not m.bot and await questionnaire.du_clan(g, m)]
+        if clan:
+            r = await chemin.nommer_chef(max(clan, key=lambda x: x.display_name.casefold()), questionnaire)
+            if not r["ok"]:
+                print(f"[SITE LOCAL] chef d'équipe de démonstration refusé : {r}")
 
 
 async def _affiches_demo(g, X) -> None:

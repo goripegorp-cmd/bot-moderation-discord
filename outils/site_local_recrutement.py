@@ -9,12 +9,16 @@ des tests (`tests/banc_ticket_recrutement.espace_du_bot`) : un seul chemin, le v
       le panneau touché, « Oui », la fiche remplie (le choix n° <n> de chaque liste, le texte <pseudo> ailleurs), envoyée
   GET /tableau/demo/recrutement/repondre?ticket=<n>
       le candidat répond à l'étape ouverte (les réponses attendues), page par page, dans les formulaires de Discord
+  GET /tableau/demo/recrutement/chef?membre=<id>[&metier=<clé>]
+      un membre du clan nommé chef d'équipe : proposé, ses réponses, la correction à 100 %, « Accepter » (son badge
+      « Chef validé · <métier> » dans l'éditeur d'une équipe)
   GET /tableau/demo/discord?mp=<id>
       les messages privés reçus par ce membre (le refus, l'acceptation, la demande approuvée…)
 """
 from __future__ import annotations
 
 import json
+import time
 
 import discord
 
@@ -138,6 +142,40 @@ class CheminDuBot:
         return {"ok": True, "envoi": eid, "statut": e["statut"], "etape_ouverte": e["etape_ouverte"],
                 "etape_envoyee": e["etape_envoyee"], "lu": lu[-3:]}
 
+    async def nommer_chef(self, membre, questionnaire, metier: str = "") -> dict:
+        """Un chef d'équipe VALIDÉ par le vrai chemin du site : une question de chef (la banque, au besoin), « Proposer
+        d'être chef », ses réponses (la page web, simulée par la base comme le fait `envoyer_etape`), la correction
+        (toutes justes : 100 % exigés), « Accepter ». Rend ce que le serveur a répondu."""
+        g = self.g
+        tete = next(m for m in (g.get_member(t) for t in sorted(self.tete)) if m is not None)
+        metiers_ = await questionnaire._liste_metiers(g)
+        metier = metier or (metiers_[0]["cle"] if metiers_ else "")
+        ids = [q["id"] for q in await questionnaire.questions_chef(g.id) if q["actif"] and not q["retiree"]
+               and not q["fuite"] and questionnaire._pour_metier(q, metier)]
+        if not ids:
+            st, rep = await questionnaire._r_chef_question(g, tete, {}, {"question": "Combien de voiles a un galion de "
+                                                                         "guerre ?", "reponse": "Trois", "metiers": [metier]})
+            if st != 200:
+                return {"ok": False, "etape": "question", "erreur": rep}
+            ids = [rep["question"]["id"]]
+        st, rep = await questionnaire._r_chef_proposer(g, tete, {}, {"membre": membre.id, "metier": metier,
+                                                                     "etapes": [{"titre": "", "questions": ids}]})
+        if st != 200:
+            return {"ok": False, "etape": "proposer", "erreur": rep}
+        e = await questionnaire._envoi(int(rep["envoi"]))
+        if not await questionnaire._garder_page(e, {int(q["rang"]): str(q.get("reponse") or "?") for q in e["questions"]}):
+            return {"ok": False, "etape": "réponses", "envoi": e["id"]}
+        t = int(time.time())
+        if await questionnaire.clore_envoi(e, t):
+            await questionnaire.annoncer_reponses(g, e, t)
+        for q in e["questions"]:
+            st, rep = await questionnaire._r_corriger(g, tete, {}, {"envoi": e["id"], "question": q["id"], "juste": True})
+            if st != 200:
+                return {"ok": False, "etape": "correction", "erreur": rep}
+        st, rep = await questionnaire._r_chef_decision(g, tete, {}, {"envoi": e["id"], "decision": "accepter"})
+        await laisser_finir()
+        return {"ok": st == 200, "envoi": int(e["id"]), "metier": metier, "decision": rep}
+
     def messages_prives(self, uid: int) -> list:
         """Les messages privés reçus par ce membre (le carnet du faux serveur : `site_local_port`)."""
         return [{"texte": " ".join(x for x in (str(c or ""), textes_vue(kw["view"]) if kw.get("view") is not None else "")
@@ -167,5 +205,13 @@ def brancher_demo(app, chemin: CheminDuBot, questionnaire, g) -> None:
         if not brut.isdigit():
             return repondre({"erreur": "ticket ?"}, 400)
         return repondre(await chemin.repondre(int(brut), questionnaire))
+
+    async def chef(request):
+        brut = request.query.get("membre", "")
+        m = g.get_member(int(brut)) if brut.isdigit() else None
+        if m is None:
+            return repondre({"erreur": "membre inconnu"}, 404)
+        return repondre(await chemin.nommer_chef(m, questionnaire, request.query.get("metier", "")))
     app.router.add_get("/tableau/demo/recrutement/ouvrir", ouvrir)
     app.router.add_get("/tableau/demo/recrutement/repondre", repondre_etape)
+    app.router.add_get("/tableau/demo/recrutement/chef", chef)

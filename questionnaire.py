@@ -619,6 +619,11 @@ _declarer("recrutement.chef.mp.attente",
           "leader application is on hold.", titre="Chef en attente (message privé)", partie=_CHEFS, ordre=132,
           max_=1500, requis=False, variables=(("metier", "son métier"),),
           aide="Envoyé en privé quand la direction met sa candidature en attente. Vide : pas de message privé.")
+BADGE_CHEF = _declarer("recrutement.chef.badge", "Chef validé · {metier}", titre="Chef validé (le badge, sur le site)",
+                       partie="Les chefs d'équipe (sur le site)", ordre=133, max_=60, lignes=False,
+                       variables=(("metier", "son métier"),),
+                       aide="Équipage → Par équipe, l'éditeur d'une équipe : le badge d'un chef d'équipe validé par le "
+                            "recrutement, proposé en premier comme chef de l'équipe.")
 
 
 def _t(guild_id, cle: str, **valeurs) -> str:
@@ -4076,6 +4081,18 @@ async def chefs(guild_id: int) -> dict:
     rows = await _lire("SELECT membre_id, metier, accepte_le, role_id FROM recrutement_chefs WHERE guild_id=?",
                        (int(guild_id),))
     return {int(m): {"metier": str(met), "depuis": int(le or 0), "role_id": int(r or 0)} for m, met, le, r in rows}
+
+
+async def badges_chefs(guild_id: int) -> dict:
+    """Les chefs d'équipe validés, pour l'éditeur d'une équipe (`site_equipage.brancher_badges_chef`, branché au
+    démarrage par bot.py) : {membre_id: « Chef validé · <métier> »} — un badge, et proposés en premier comme chef."""
+    nommes = await chefs(guild_id)
+    if not nommes:
+        return {}
+    g = _bot.get_guild(int(guild_id)) if _bot is not None else None
+    noms = {m["cle"]: m["nom"] for m in await _liste_metiers(g)}
+    return {m: await textes_du_site.texte(int(guild_id), "recrutement.chef.badge",
+                                          metier=noms.get(c["metier"], c["metier"])) for m, c in nommes.items()}
 
 
 async def chef_de(g, membre_id: int) -> dict | None:
