@@ -1,0 +1,142 @@
+/* recrutement_zone.css — « Demande de recrutement » (26/10/2026) : les planchettes des sous-onglets (suspendues comme les
+   pancartes du haut), le dossier d'un candidat, ses étapes, les réglages du parcours, les aperçus de Discord. */
+
+/* ─── Les planchettes : quatre sous-onglets suspendus à une corde ─────────────────────────────────────────────── */
+.zr-planches {
+  position: relative;
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 10px clamp(10px, 2vw, 26px);
+  margin: 2px 0 18px; padding: 18px 8px 6px;
+}
+.zr-planches::before { /* la corde, d'un bout à l'autre */
+  content: ""; position: absolute; left: 4%; right: 4%; top: 7px; height: 7px;
+  background: url(ornements/corde.svg) repeat-x center / auto 7px;
+  pointer-events: none;
+}
+.zr-planche {
+  position: relative; z-index: 1;
+  display: inline-flex; align-items: center; gap: 9px; min-height: 48px; min-width: 0;
+  padding: 7px 16px 7px 12px; border-radius: 5px;
+  color: var(--clair); text-decoration: none;
+  background-color: var(--bois);
+  background-image: linear-gradient(rgba(201, 163, 90, .08), rgba(0, 0, 0, .24)), url(textures/bois.webp);
+  background-size: auto, 260px auto;
+  box-shadow: 0 0 0 1px var(--bois-3), 0 2px 0 1px rgba(201, 163, 90, .14) inset, 0 8px 12px -8px rgba(0, 0, 0, .7);
+  transform-origin: 50% -12px;
+  transition: transform .35s var(--ressort), background-color .2s, box-shadow .2s;
+}
+.zr-planche::before, .zr-planche::after { /* les deux bouts de corde */
+  content: ""; position: absolute; top: -13px; width: 5px; height: 16px;
+  background: url(ornements/corde-v.svg) repeat-y center top / 5px auto;
+}
+.zr-planche::before { left: 18%; transform: rotate(12deg); }
+.zr-planche::after { right: 18%; transform: rotate(-12deg); }
+.zr-planche .ic { width: 22px; height: 22px; color: var(--laiton-clair); --ton2: var(--corde); flex: none; }
+.zr-planche-titre {
+  font-family: var(--police-titre); font-size: clamp(19px, .5vw + 15px, 23px); line-height: 1.05;
+  white-space: nowrap; text-shadow: 0 -1px 0 rgba(0, 0, 0, .7);
+}
+.zr-planche .compteur { margin-left: 2px; }
+.zr-planche:hover { background-color: var(--bois-clair); }
+.zr-planche[aria-selected="true"] {
+  transform: translateY(4px);
+  background-color: #5a3820;
+  box-shadow: 0 0 0 2px var(--laiton), 0 0 0 3px var(--bois-3), 0 2px 0 1px rgba(201, 163, 90, .2) inset, 0 12px 16px -8px rgba(0, 0, 0, .75);
+}
+.zr-planche[aria-selected="true"] .zr-planche-titre { color: var(--laiton-pale); }
+.zr-planche:focus-visible { outline: 2.5px solid var(--encre); outline-offset: 3px; }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .zr-planche:hover:not([aria-selected="true"]) { animation: balancer 1.1s var(--ease); }
+}
+@media (max-width: 560px) {
+  .zr-planches { gap: 12px 8px; padding-top: 16px; }
+  .zr-planche { padding: 6px 11px 6px 9px; gap: 6px; }
+  .zr-planche-titre { font-size: 18px; }
+}
+
+/* La scène du sous-onglet : elle entre doucement (rien pour qui réduit les mouvements). */
+.zr-scene { display: grid; gap: 16px; min-width: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .zr-scene { opacity: 0; transform: translateY(6px); transition: opacity .28s var(--ease), transform .32s var(--ease); }
+  .zr-scene.zr-entree { opacity: 1; transform: none; }
+}
+
+/* ─── Les listes ─────────────────────────────────────────────────────────────────────────────────────────── */
+.zr-mois { display: grid; gap: 6px; }
+.zr-mois-titre { margin: 6px 0 0; font: 400 21px/1.1 var(--police-titre); color: var(--encre-2); }
+.zr-pages { align-items: center; }
+
+/* ─── Le dossier ─────────────────────────────────────────────────────────────────────────────────────────── */
+.zr-demande, .zr-suivante { border-left: 4px solid var(--ambre); }
+.zr-etapes-resume { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+.zr-etapes-resume ul { margin: 2px 0 0; padding-left: 18px; }
+.zr-etape { display: grid; gap: 8px; min-width: 0; padding-top: 8px; border-top: 1px dashed var(--trait); }
+.zr-etape:first-of-type { border-top: 0; padding-top: 0; }
+.zr-etape.a-venir { opacity: .62; }
+.zr-etape-tete { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.zr-etape-tete h4, .zr-etape-edit h4 { margin: 0; font: 400 21px/1.15 var(--police-titre); color: var(--encre); }
+.zr-citation { margin: 0; }
+.zr-direct:empty { display: none; }
+.fiche-chef:empty { display: none; }
+.fiche-chef { margin: 2px 0; }
+
+/* Les étapes de CE candidat (approbation, nouveau questionnaire) */
+.zr-etape-edit { border-left: 4px solid var(--mer); }
+.zr-qs { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.zr-q {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 4px 6px; border-radius: var(--rayon); background: var(--papier-2); border: 1px solid var(--trait-doux);
+}
+.zr-q.perso { border-style: dashed; border-color: var(--mer); }
+.zr-q-texte { min-width: 0; overflow-wrap: anywhere; }
+
+/* ─── Les aperçus : Discord, les fenêtres (formulaires) ─────────────────────────────────────────────────────── */
+.zr-discord { max-width: 640px; }
+.zr-discord .discord-message { margin-left: 0; }
+.zr-discord .discord-message + .discord-message { margin-top: 8px; }
+.zr-fenetre {
+  max-width: 560px; padding: 12px 14px 14px; border-radius: 8px;
+  background: #313338; color: #dbdee1; border: 6px solid var(--bois-2);
+  font: 400 15px/1.4 "gg sans", "Noto Sans", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+.zr-fenetre + .zr-fenetre { margin-top: 10px; }
+.zr-fenetre .meta { color: #949ba4; }
+.zr-fenetre-titre { font-size: 18px; font-weight: 700; color: #f2f3f5; margin-bottom: 8px; overflow-wrap: anywhere; }
+.zr-fenetre-q { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.zr-fenetre-q > li { display: grid; gap: 3px; }
+.zr-fenetre-question { font-weight: 600; color: #f2f3f5; overflow-wrap: anywhere; }
+.zr-fenetre-reponse {
+  padding: 6px 9px; border-radius: 4px; background: #1e1f22; color: #dbdee1; overflow-wrap: anywhere; white-space: pre-wrap;
+}
+
+/* ─── Les réglages du parcours ───────────────────────────────────────────────────────────────────────────── */
+.zr-parcours { border-left: 4px solid var(--laiton); }
+.zr-parcours > .rangee > h3 { margin: 0; font: 400 24px/1.1 var(--police-titre); color: var(--encre); }
+.zr-parcours.modifie { border-left-color: var(--ambre); }
+.zr-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; }
+.zr-mode {
+  display: grid; gap: 3px; min-height: 64px; padding: 10px 12px; text-align: left;
+  border: 1px solid var(--trait); border-radius: var(--rayon-2); background: var(--papier-2); color: var(--encre);
+  font: inherit; cursor: pointer; transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+.zr-mode b { font: 400 20px/1.1 var(--police-titre); }
+.zr-mode span { font-size: var(--t-mini); color: var(--encre-2); }
+.zr-mode:hover { border-color: var(--trait-fort); }
+.zr-mode[aria-checked="true"] { border-color: var(--laiton); box-shadow: 0 0 0 2px var(--laiton) inset; background: var(--papier); }
+.zr-mode:focus-visible { outline: 2.5px solid var(--encre); outline-offset: 2px; }
+.zr-champ {
+  display: grid; gap: 8px; min-width: 0; padding: 10px 12px;
+  border: 1px solid var(--trait-doux); border-radius: var(--rayon-2); background: var(--papier-2);
+}
+.zr-option { gap: 6px; align-items: center; }
+.zr-nombre { max-width: 9em; }
+.zr-reglages-ligne { align-items: start; }
+.zr-messages { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; }
+.zr-message { display: grid; gap: 8px; min-width: 0; }
+.zr-message-tete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.zr-message-tete .bloc { flex: 1 1 16em; min-width: 0; }
+.zr-cle { justify-content: flex-start; overflow-wrap: anywhere; }
+
+@media (pointer: coarse) {
+  .zr-planche { min-height: 48px; }
+  .zr-mode { min-height: 64px; }
+}

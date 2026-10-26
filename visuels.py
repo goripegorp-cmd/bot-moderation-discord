@@ -114,6 +114,14 @@ async def verifier(essais: int = 10, pause: float = 30.0) -> bool:
     return False
 
 
+def url_image(nom: str):
+    """L'adresse publique d'une image servie par le bot (un .png ou un .gif de `visuels/` : la bannière de l'affiche
+    d'un ticket de recrutement) — None tant que l'adresse publique n'est pas vérifiée."""
+    if _servi and _base and fichier(nom) is not None:
+        return f"{_base}/v/{nom}?v={VERSION}"
+    return None
+
+
 def bandeau(cle: str, titre: str):
     """En tête de menu : le bandeau animé, ou le titre si l'image n'est pas servie."""
     u = url(cle)

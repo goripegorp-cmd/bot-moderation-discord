@@ -12,8 +12,10 @@ chef. […] Mais il n'a pas le droit à l'erreur. »
 LE LIEN (la sécurité d'abord)
   · `lien_envoi(i, envoi)` : un lien PERSONNEL, signé, à usage unique, valable 24 h — au candidat de CET envoi seulement,
     et seulement si le questionnaire l'attend. Deux portes y mènent : le bouton « Répondre au questionnaire » du ticket
-    (`lien_candidat(i, ticket)` / `envoyer_lien`, branché par l'équipe du recrutement) et le bouton PERSISTANT du message
-    privé d'un chef d'équipe (`inviter`, `BoutonQuestionnaire`). Le lien porte l'envoi dans sa partie signée ; ouvert, il
+    (`questionnaire.ouvrir_formulaire` appelle `lien_candidat(i, ticket)`, qui RÉPOND lui-même — le lien ou le refus,
+    pour la personne seule — et rend None ; la page injoignable : rien, les formulaires de Discord prennent le relais ;
+    `lien_ticket` rend (lien, refus)) et le bouton PERSISTANT du message privé d'un chef d'équipe (`inviter`, appelé à la
+    proposition et à chaque étape ouverte ; `BoutonQuestionnaire`). Le lien porte l'envoi dans sa partie signée ; ouvert, il
     devient une session de portée « candidat » liée à CET envoi, dans un cookie à part limité à `/tableau/candidature/`.
   · La portée « candidat » est refusée partout ailleurs (`tableau._verifier`, par défaut) ; elle n'atteint que la page,
     `LECTURES` et `ECRITURES` d'ici, et seulement pour son envoi. Ticket fermé, envoi remplacé ou clos — et, pour un chef
@@ -58,6 +60,7 @@ import json
 import re
 import secrets
 import sqlite3
+import sys
 import time
 
 import discord
@@ -235,6 +238,10 @@ TEXTES = (
                 "réponds à son questionnaire : chaque réponse doit être juste.\n-# The leadership offers you to become a "
                 "team leader. If you want it, answer its questionnaire: every answer must be right.",
      "Chef · le message privé", "L'invitation envoyée au membre, avec le bouton.", 1500, False, _CHEF, (_METIER,), True),
+    ("chef.mp.etape", "### Chef d'équipe · {metier}\nL'étape {numero} de ton questionnaire est ouverte : réponds-y avec le "
+                      "bouton ci-dessous. Chaque réponse doit être juste.\n-# Step {numero} of your team leader "
+                      "questionnaire is open.", "Chef · l'étape suivante (message privé)",
+     "Quand la direction ouvre l'étape suivante d'un chef d'équipe.", 1500, False, _CHEF, (_METIER, _NUMERO), True),
     ("chef.bouton", "Répondre au questionnaire", "Chef · le bouton du message privé", "Il donne le lien personnel.", 80,
      True, _CHEF, (), True),
     ("lien.texte", "**Ton questionnaire** : ce lien est à toi seul et ne s'ouvre qu'une fois. Tes réponses s'enregistrent "
@@ -259,7 +266,7 @@ for _k, (_cle, _defaut, _titre, _aide, _max, _ligne, _partie, _vars, _requis) in
                     partie=_partie, variables=_vars, ordre=10 + _k, requis=_requis)
 #  Les clés que la page lit (dans sa propre lecture : la portée « candidat » n'entre jamais dans `textes/site`).
 PAGE = tuple(f"candidature.{cle}" for cle, *_r in TEXTES
-             if not cle.startswith(("lien.", "servi.")) and cle not in ("chef.mp", "chef.bouton"))
+             if not cle.startswith(("lien.", "servi.", "chef.mp")) and cle != "chef.bouton")
 
 
 def _t(g, cle: str, **valeurs) -> str:
@@ -769,9 +776,14 @@ async def lien_envoi(i, envoi_id) -> tuple:
     return f"{tableau._base}{tableau.CANDIDATURE}{tableau.jeton(g.id, u.id, 'candidat', nonce=nonce)}", ""
 
 
-async def lien_candidat(i, ticket: int) -> tuple:
-    """Le bouton « Répondre au questionnaire » du TICKET : le lien du questionnaire en cours de ce ticket (`lien_envoi`),
-    pour son ouvreur seulement."""
+def joignable() -> bool:
+    """La page du candidat peut servir : ce module, le recrutement et le site (son adresse, sa clé) sont branchés."""
+    return pret() and questionnaire.pret() and bool(tableau._base) and bool(tableau._cle)
+
+
+async def lien_ticket(i, ticket: int) -> tuple:
+    """(lien personnel, "") ou (None, le refus) — le questionnaire en cours de ce TICKET (`lien_envoi`), pour son
+    ouvreur seulement."""
     g, m = getattr(i, "guild", None), getattr(i, "user", None)
     if g is None or m is None or not pret() or not questionnaire.pret():
         return None, "Le questionnaire en ligne n'est pas joignable pour le moment."
@@ -824,10 +836,19 @@ async def _repondre_lien(i, url, refus: str, g) -> None:
     _effacer_plus_tard(i)
 
 
-async def envoyer_lien(i, ticket: int) -> None:
-    """Le geste complet du bouton du TICKET : le lien (ou le refus), pour la personne seule, effacé après 3 minutes."""
-    url, refus = await lien_candidat(i, ticket)
+async def _lien_candidat(i, ticket: int) -> None:
+    """`lien_candidat` — le point d'appel de l'équipe du recrutement (`questionnaire.ouvrir_formulaire` : « Répondre au
+    questionnaire » du ticket, touché par le candidat) : son lien personnel — ou le refus — RÉPONDU ICI, pour lui seul,
+    effacé après 3 minutes (une adresse http du site local passe aussi) ; rend None. La page injoignable : rien n'est
+    répondu, les formulaires de Discord prennent le relais."""
+    if not joignable():
+        return None
+    url, refus = await lien_ticket(i, ticket)
     await _repondre_lien(i, url, refus, getattr(i, "guild", None))
+    return None
+
+
+envoyer_lien = _lien_candidat   # le geste complet du bouton du ticket (l'ancien nom)
 
 
 async def envoyer_lien_envoi(i, envoi_id: int) -> None:
@@ -867,20 +888,25 @@ class BoutonQuestionnaire(discord.ui.DynamicItem[Button], template=r"cq:rep:(?P<
 
 
 def vue_invitation(g, e: dict, metier: str) -> LayoutView:
-    """Le message privé d'un chef d'équipe : l'invitation (registre, « Chef · le message privé ») et le bouton persistant.
-    Rien d'autre qui réponde : une vue de DynamicItem seulement, sans fin (le bouton marche après un redémarrage)."""
+    """Le message privé d'un chef d'équipe : l'invitation (registre, « Chef · le message privé ») — ou, l'étape suivante
+    ouverte par la direction, « Chef · l'étape suivante » — et le bouton persistant. Rien d'autre qui réponde : une vue
+    de DynamicItem seulement, sans fin (le bouton marche après un redémarrage)."""
     v = LayoutView(timeout=None)
+    ouverte = int(e.get("etape_ouverte") or 0)
+    texte = (_t(g, "candidature.chef.mp.etape", metier=metier or "", numero=ouverte + int(e.get("etape_fiche") or 0))
+             if ouverte > 1 else _t(g, "candidature.chef.mp", metier=metier or ""))
     v.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(_t(g, "candidature.chef.mp", metier=metier or "")[:3900]),
+        discord.ui.TextDisplay(texte[:3900]),
         discord.ui.ActionRow(BoutonQuestionnaire(int(e["id"]), _t(g, "candidature.chef.bouton"))),
         accent_color=discord.Color(0xA8823F)))
     return v
 
 
-async def inviter(g, e: dict) -> bool:
-    """Le contrat « chef d'équipe » : le message privé d'invitation au membre `e["candidat_id"]`, avec le bouton
-    persistant « Répondre au questionnaire ». Rend False si ses messages privés sont fermés (ou s'il n'est plus là) —
-    l'appelant le dit à la direction, avec une ligne au journal."""
+async def _inviter(g, e: dict) -> bool:
+    """`inviter` — le contrat « chef d'équipe » : le message privé d'invitation au membre `e["candidat_id"]` (à la
+    proposition, puis à chaque étape ouverte : « l'étape N est ouverte »), avec le bouton persistant « Répondre au
+    questionnaire ». Rend False si ses messages privés sont fermés (ou s'il n'est plus là) — l'appelant le dit à la
+    direction, avec une ligne au journal."""
     m = g.get_member(int(e["candidat_id"])) if g is not None else None
     if m is None or getattr(m, "bot", False):
         return False
@@ -1103,7 +1129,7 @@ async def _finir_si_tout_envoye(g, ctx: dict) -> dict:
     t = int(time.time())
     if await questionnaire.clore_envoi(e, t):
         try:
-            await questionnaire.annoncer_reponses(g, e, t, None, source="(questionnaire en ligne)")
+            await questionnaire.annoncer_reponses(g, e, t)
         except Exception as ex:   # les réponses sont gardées ; seules les cartes ou le journal manquent — dit au journal
             _signaler("E4", "annonce des réponses du questionnaire en ligne en échec", ex, f"envoi={e['id']}")
     return await contexte(g, int(e["id"]), int(e["candidat_id"]))
@@ -1226,8 +1252,9 @@ async def _apres_envoi(g, lien: dict, e: dict, recus: dict, t: int) -> dict:
 
 async def _ecriture_envoyer(g, membre, lien: dict, corps: dict):
     """`POST envoyer` {reponses: {rang: texte}} — un envoi d'avant (`etape_ouverte` = 0) : TOUTES les réponses, d'un coup,
-    dans les mêmes tables et états que le formulaire Discord (`questionnaire.clore_envoi`, une seule fois), puis les
-    cartes du ticket, l'historique et le journal (`annoncer_reponses`), le direct ; les brouillons partent."""
+    dans les mêmes tables et états que le formulaire Discord (`questionnaire.envoyer_tout` : `clore_envoi`, une seule
+    fois, puis les cartes du ticket, l'historique et le journal, `annoncer_reponses`), le direct ; les brouillons
+    partent."""
     if not _cadence(lien, "envoyer", 2):
         return 429, {"erreur": "Un instant : l'envoi est déjà en route."}
     ctx = await contexte(g, lien["envoi"], lien["candidat"])
@@ -1245,12 +1272,17 @@ async def _ecriture_envoyer(g, membre, lien: dict, corps: dict):
     if manquent:
         return 400, {"erreur": _t(g, "candidature.manque", n=len(manquent)), "manquent": manquent}
     t = int(time.time())
-    if not await questionnaire.clore_envoi(e, t, recus):   # le formulaire Discord, ou un autre onglet, est passé avant
-        return _refus_etat(await contexte(g, lien["envoi"], lien["candidat"]))
     try:
-        await questionnaire.annoncer_reponses(g, e, t, None, source="(questionnaire en ligne)")
-    except Exception as ex:   # les réponses sont gardées ; seules les cartes ou le journal manquent — dit au journal
-        _signaler("E4", "annonce des réponses du questionnaire en ligne en échec", ex, f"envoi={e['id']}")
+        premier = await questionnaire.envoyer_tout(e, t, recus, g=g)
+    except Exception as ex:   # les réponses sont peut-être gardées (le ticket a échoué) : relues ci-dessous
+        _signaler("E4", "envoi du questionnaire en ligne en échec", ex, f"envoi={e['id']}")
+        premier = False
+    if not premier:   # le formulaire Discord, ou un autre onglet, est passé avant : la page relit où elle en est
+        ctx = await contexte(g, lien["envoi"], lien["candidat"])
+        if ctx["etat"] == "ouvert":
+            return 409, {"erreur": "Tes réponses n'ont pas pu être envoyées : recharge la page.", "etat": ctx["etat"],
+                         "portes": _portes_publiques(ctx)}
+        return _refus_etat(ctx)
     ctx = await _apres_envoi(g, lien, e, recus, t)
     return 200, {"ok": True, "etat": ctx["etat"], "envoye_le": t}
 
@@ -1280,7 +1312,7 @@ async def _ecriture_envoyer_etape(g, membre, lien: dict, corps: dict):
         return 400, {"erreur": _t(g, "candidature.manque", n=len(manquent)), "manquent": manquent}
     t = int(time.time())
     try:
-        premier = await questionnaire.envoyer_etape(e, t, numero, recus, g=g, source="(questionnaire en ligne)")
+        premier = await questionnaire.envoyer_etape(e, t, numero, recus, g=g)
     except Exception as ex:   # l'étape est peut-être gardée (le message du ticket a échoué) : relue ci-dessous
         _signaler("E9", "envoi d'une étape en échec", ex, f"envoi={e['id']} etape={numero}")
         premier = False
@@ -1359,6 +1391,24 @@ async def _route_direct_candidat(g, auteur, requete, corps):
 ROUTES_SITE = {"direct/candidat": {"methode": "GET", "fn": _route_direct_candidat, "corps_max": 0}}
 
 
-__all__ = ["setup", "init_db", "demarrer", "lien_envoi", "lien_candidat", "envoyer_lien", "envoyer_lien_envoi", "inviter",
-           "BoutonQuestionnaire", "LECTURES", "ECRITURES", "ROUTES_SITE", "etapes_de", "portes_de", "etat_direct",
+#  Les points d'appel du recrutement, `lien_candidat` et `inviter` : présents seulement quand le recrutement a reçu
+#  CETTE page (`questionnaire.setup(web=…)`, comme `_activite_boot`) et qu'elle peut servir. `questionnaire._web()`
+#  trouve aussi un module par son nom (un `import`) : la page n'est pas branchée pour autant — `_page_candidat()` lit
+#  None, les formulaires de Discord prennent le relais (et leurs tests restent les leurs).
+_POINTS_D_APPEL = {"lien_candidat": _lien_candidat, "inviter": _inviter}
+
+
+def branchee() -> bool:
+    """Le recrutement a reçu cette page (`questionnaire.setup(web=candidature_site)`) et elle peut servir (`joignable`)."""
+    return getattr(questionnaire, "_web_module", None) is sys.modules.get(__name__) and joignable()
+
+
+def __getattr__(nom: str):
+    if nom in _POINTS_D_APPEL and branchee():
+        return _POINTS_D_APPEL[nom]
+    raise AttributeError(f"module {__name__!r} has no attribute {nom!r}")
+
+
+__all__ = ["setup", "init_db", "demarrer", "lien_envoi", "lien_ticket", "joignable", "branchee", "envoyer_lien",
+           "envoyer_lien_envoi", "BoutonQuestionnaire", "LECTURES", "ECRITURES", "ROUTES_SITE", "etapes_de", "portes_de", "etat_direct",
            "ouvrir_session", "autorise", "contexte"]

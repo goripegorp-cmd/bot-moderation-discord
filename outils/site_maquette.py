@@ -2646,14 +2646,20 @@ def r_suivi(m, q, c):
             justes = sum(1 for x in corrigees if x["juste"])
             resume = {"id": e["id"], "nb": len(qs), "statut": "envoye" if e["statut"] == "attente" else "repondu",
                       "envoye_le": e["envoye_le"], "repondu_le": e["repondu_le"],
+                      #  26/10/2026 (questionnaire.suivi) : les étapes du questionnaire, une à la fois (« porte »).
+                      "etapes": 1, "etape_ouverte": 2, "etape_envoyee": 2 if e["statut"] != "attente" else 0, "total": 2,
+                      "porte": True,
                       "bilan": {"total": len(qs), "repondues": repondues, "corrigees": len(corrigees), "justes": justes,
                                 "fausses": len(corrigees) - justes, "complet": bool(qs) and len(corrigees) == len(qs),
                                 "reussite": bool(qs) and justes == len(qs), "taux": round(100 * justes / len(qs)) if qs else 0,
                                 "exigence": 100}}
+        #  26/10/2026 : le mode du panneau, la prise en charge et la PROCHAINE action (analyser · attendre · corriger).
+        action = "analyser" if etape == "etape1" else "corriger" if etape == "reponses" else "attendre"
         ouverts.append({"ticket": c_["ticket"], "candidat": dict(m.ident(c_["id"]), present=c_["id"] not in m.partis | m.bannis),
                         "ouvert": c_["ouvert"], "etape": etape,
-                        "annonce": 0, "fermeture_prevue": False, "salon": c_.get("salon", ""), "envoi": resume})
-    return 200, {"ouverts": ouverts, "recents": [], "exigence": 100}
+                        "annonce": 0, "mode": "approbation", "affiche": True, "panneau": "rellseas", "pris_par": None,
+                        "fermeture_prevue": False, "salon": c_.get("salon", ""), "action": action, "envoi": resume})
+    return 200, {"ouverts": ouverts, "recents": [], "elimines": [], "exigence": 100}
 
 
 def _selection(m, c) -> tuple[list, list]:

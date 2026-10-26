@@ -233,6 +233,16 @@ def _composants(vue) -> list:
     return out
 
 
+def _journal(local, avant: int, type_: str, membre: int) -> list:
+    """Les textes du journal de ce genre pour ce membre, écrits depuis `avant` (dans l'ordre)."""
+    return [t for (t,) in local.sql("SELECT texte FROM registre WHERE id > ? AND type=? AND membre_id=? ORDER BY id",
+                                    (avant, type_, membre))]
+
+
+def _dernier_id(local) -> int:
+    return local.sql("SELECT MAX(id) FROM registre")[0][0] or 0
+
+
 async def _texte_registre(cle):
     import textes
     return await textes.texte(1, cle)
@@ -457,7 +467,7 @@ def test_C3_la_liaison_a_son_envoi(local, sans_cadence):
     assert local.sql("SELECT envoi_id FROM candidature_brouillons WHERE texte='à moi'") == [(e1,)], "jamais l'envoi d'un autre"
 
     def lien(uid, ticket):
-        return local.faire(candidature_site.lien_candidat(Obj(guild=local.g, user=local.g.get_member(uid)), ticket))
+        return local.faire(candidature_site.lien_ticket(Obj(guild=local.g, user=local.g.get_member(uid)), ticket))
     #  Le lien : l'ouvreur seulement ; un autre membre, la tête elle-même : refusés.
     url, refus = lien(1005, t1)
     assert url and url.startswith("http://localhost:8790/tableau/candidature/") and refus == ""
@@ -614,7 +624,7 @@ def test_C4_l_envoi_du_site_et_le_formulaire_discord_donnent_les_memes_etats(loc
     assert local.ecrire("envoyer", {"reponses": {str(r): "x" for r in rangs}}, h)[0] == 409
     assert local.ecrire("brouillon", {"reponses": {"1": "x"}}, h)[0] == 409
     assert local.sql("SELECT texte FROM recrutement_reponses WHERE envoi_id=? AND rang=1", (eb,)) == [("Réponse 1",)]
-    url, refus = local.faire(candidature_site.lien_candidat(Obj(guild=local.g, user=local.g.get_member(1013)), tb))
+    url, refus = local.faire(candidature_site.lien_ticket(Obj(guild=local.g, user=local.g.get_member(1013)), tb))
     assert url is None and refus == local.faire(_texte_registre("candidature.lien.deja"))
 
 
@@ -637,7 +647,9 @@ def test_C4b_un_questionnaire_commence_sur_discord_se_finit_sur_le_site(local, s
     local.annonces()
     assert local.sql("SELECT texte FROM recrutement_reponses WHERE envoi_id=? AND rang=1", (eid,)) == [("Discord 1",)]
     assert local.faire(questionnaire._envoi(eid))["statut"] == "repondu"
-    assert len(local.sql("SELECT 1 FROM registre WHERE type='recrutement.reponses' AND membre_id=?", (1016,))) == 1
+    #  Fermé une seule fois : une ligne « réponses » à l'historique du ticket (le journal, lui, écarte les doublons de
+    #  texte — la démonstration du site local a déjà ses propres candidats).
+    assert local.sql("SELECT COUNT(*) FROM recrutement_historique WHERE ticket_id=? AND quoi='reponses'", (tid,)) == [(1,)]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -647,6 +659,7 @@ def test_C4b_un_questionnaire_commence_sur_discord_se_finit_sur_le_site(local, s
 def test_C5_une_etape_ouverte_a_la_fois_envoyee_une_fois(local, sans_cadence):
     import questionnaire
     tid, eid = local.ticket(1019, etapes=3, ouverte=1, fiche=1)
+    avant = _dernier_id(local)
     h = local.candidat(f"ticket={tid}")
     st, d = local.lire("questionnaire", h)
     r1 = [q["rang"] for q in d["etapes"][0]["questions"]]
@@ -705,11 +718,12 @@ def test_C5_une_etape_ouverte_a_la_fois_envoyee_une_fois(local, sans_cadence):
     assert local.faire(questionnaire._suivi(1, tid))["etape"] == "reponses"
     assert local.sql("SELECT COUNT(*) FROM recrutement_reponses WHERE envoi_id=?", (eid,)) == [(len(tous),)]
     fin = _etat_final(local, tid, eid)
-    assert fin["carte_equipe"] and fin["carte_candidat"] and fin["historique"] == ["questionnaire", "reponses"]
-    journal = [t for (t,) in local.sql("SELECT texte FROM registre WHERE type='recrutement.etape_recue' AND membre_id=?"
-                                       " ORDER BY id", (1019,))]
-    assert len(journal) == 2 and "étape 1 du questionnaire" in journal[0] and "étape 2" in journal[1], journal
-    assert len(local.sql("SELECT 1 FROM registre WHERE type='recrutement.reponses' AND membre_id=?", (1019,))) == 1
+    #  Les étapes reçues (l'historique et le journal de l'équipe du recrutement : la fiche est l'étape 1 du candidat).
+    assert fin["carte_equipe"] and fin["carte_candidat"]
+    assert fin["historique"] == ["questionnaire", "etape_recue", "etape_recue", "reponses"], fin["historique"]
+    journal = _journal(local, avant, "recrutement.etape_recue", 1019)
+    assert len(journal) == 2 and "étape 2 reçue" in journal[0] and "étape 3 reçue" in journal[1], journal
+    assert len(_journal(local, avant, "recrutement.reponses", 1019)) == 1
     st, d = local.lire("questionnaire", h)
     assert d["etat"] == "envoye" and [x["envoyee"] for x in d["etapes"]] == [True, True, True]
 
@@ -804,7 +818,7 @@ def test_C5e_la_derniere_etape_gardee_mais_pas_close_se_clot_a_la_lecture(local)
     assert local.faire(questionnaire._envoi(eid))["statut"] == "repondu"
     local.lire("questionnaire", h)
     local.annonces()
-    assert len(local.sql("SELECT 1 FROM registre WHERE type='recrutement.reponses' AND membre_id=?", (1015,))) == 1
+    assert local.sql("SELECT COUNT(*) FROM recrutement_historique WHERE ticket_id=? AND quoi='reponses'", (tid,)) == [(1,)]
 
 
 def test_C5f_les_cadences_et_les_bornes(local):
@@ -1040,7 +1054,7 @@ def test_C8_le_journal(local, sans_cadence):
     lignes = local.sql("SELECT type, texte FROM registre WHERE id > ? AND membre_id=? AND type LIKE 'recrutement.%' ORDER BY id",
                        (avant, 1021))
     assert [t for t, _x in lignes] == ["recrutement.en_ligne", "recrutement.reponses"], lignes
-    assert lignes[1][1].endswith("(questionnaire en ligne)")
+    assert "réponses reçues" in lignes[1][1], lignes[1][1]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1125,13 +1139,202 @@ def test_C10_cablage_page_et_rgpd(local):
     for css in ("candidature.css", "candidature_direct.css"):
         assert not re.search(r"[\U0001F300-\U0001FAFF☀-➿]", (RACINE / "site" / css).read_text(encoding="utf-8"))
     #  Le dossier de la direction charge le direct à la demande ; le service worker le garde, jamais ses données.
-    rec = (RACINE / "site" / "recrutement.js").read_text(encoding="utf-8")
-    assert 'import("./candidature_direct.js")' in rec and "vueEnDirect({ ticket: D.ticket, envoi: e.id }" in rec
+    zone = (RACINE / "site" / "recrutement_zone.js").read_text(encoding="utf-8")
+    assert 'import("./candidature_direct.js")' in zone and "m.vueEnDirect(Number(D.ticket), {" in zone
+    chefs = (RACINE / "site" / "recrutement_chefs.js").read_text(encoding="utf-8")
+    assert 'import("./candidature_direct.js")' in chefs and "m.vueEnDirect({ envoi: Number(e.id) }, {" in chefs
     sw = (RACINE / "site" / "sw.js").read_text(encoding="utf-8")
     assert '"candidature_direct.js"' in sw and '"candidature_direct.css"' in sw and r"api\/(?!direct\/)" in sw
     assert "/tableau/espace/s/candidature_direct.css?v={{V}}" in (RACINE / "site" / "index.html").read_text(encoding="utf-8")
     direct = (RACINE / "site" / "direct.js").read_text(encoding="utf-8")
     assert 'case "candidat": signaler({ type: "candidat", m }); break;' in direct and "export const modeDirect" in direct
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  C12, C13 — le VRAI chemin, avec l'équipe du recrutement : un ticket, puis un chef d'équipe
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _poster(local, nom, corps):
+    """Une écriture du site de la direction (la tête) : (statut, corps)."""
+    st, rep, _h = local.requete("POST", f"/tableau/espace/api/{nom}", local.tete, corps, ecrire=True)
+    return st, json.loads(rep) if rep else None
+
+
+def _liens_vues(vues) -> list:
+    return [c["url"] for v in vues for c in _composants(v) if c.get("url")]
+
+
+def test_C12_le_vrai_chemin_d_un_ticket_et_la_page_du_candidat(local, sans_cadence):
+    """Le ticket ouvert par le VRAI chemin du bot (le panneau, « Es-tu sûr ? », la fiche, l'affiche), la demande approuvée
+    avec deux étapes (la fiche est l'étape 1), « Répondre au questionnaire » (le vrai bouton du ticket) → le lien de SA
+    page, l'étape 2 envoyée sur la page → « réponses reçues » dans le ticket, l'étape 3 ouverte par la direction, envoyée
+    → « Réponses envoyées », la correction, « Accepter » — à chaque instant, au plus deux messages du bot dans le ticket."""
+    import banc_ticket_recrutement as B
+    import questionnaire
+    import tableau
+    m = local.g.get_member(1002)
+    r = local.faire(local.ctx.chemin.ouvrir_par_le_panneau(m, "p1", 2, "Parcours_C12"))
+    tid = int(r["ticket"])
+    assert tid, r
+
+    def messages():
+        return json.loads(_texte(local.requete("GET", f"/tableau/demo/discord?ticket={tid}")[1]))["messages"]
+    assert len(messages()) == 1, "l'affiche seule"
+    banque = [q["id"] for q in local.faire(questionnaire.questions(1)) if questionnaire.posable(q) and q["statut"] == "confirme"]
+    st, rep = _poster(local, "recrutement/etape1", {"ticket": tid, "decision": "approuver", "etapes": [
+        {"titre": "Le jeu", "consigne": "Quelques mots suffisent.", "questions": banque[:3]},
+        {"titre": "Le clan", "consigne": "Relis-toi.", "questions": banque[3:6]}]})
+    assert st == 200, rep
+    eid = int(rep["envoi"])
+    e = local.faire(questionnaire._envoi(eid))
+    assert e["etape_ouverte"] == 1 and e["etape_fiche"] == 1 and len(questionnaire.etapes_de(e)) == 2
+    m1 = messages()
+    assert len(m1) == 2 and "Étape 2 sur 3" in m1[1]["texte"], [x["texte"][:80] for x in m1]
+    assert not any(q["question"] in m1[1]["texte"] for q in e["questions"]), "les questions sont sur SA page, pas dans le ticket"
+    #  « Répondre au questionnaire » : sa page (le lien, pour lui seul), jamais un formulaire de Discord.
+    i = B.Inter(local.ctx.chemin, m)
+    local.faire(questionnaire.BoutonRepondre(eid).callback(i))
+    liens = _liens_vues(i.vues())
+    assert not i.modals and len(liens) == 1 and liens[0].startswith("http://localhost:8790/tableau/candidature/"), liens
+    j = tableau.lire_jeton(liens[0].rsplit("/", 1)[1])
+    assert (j["p"], j["u"]) == ("candidat", 1002)
+    h, arrivee = local.entrer("/tableau/candidature/" + liens[0].rsplit("/", 1)[1])
+    assert arrivee == "/tableau/candidature/"
+    st, d = local.lire("questionnaire", h)
+    assert d["portes"] == {"mode": "etapes", "ouverte": 1, "envoyee": 0, "fiche": 1, "total": 2, "courante": 1}
+    assert [x["titre"] for x in d["etapes"]] == ["Le jeu"]
+    r1 = [q["rang"] for q in d["etapes"][0]["questions"]]
+    st, rep = local.ecrire("envoyer_etape", {"etape": 1, "reponses": {str(r): f"Réponse {r}" for r in r1}}, h)
+    assert st == 200 and rep["etat"] == "attente", rep
+    m2 = messages()
+    assert len(m2) == 2 and m2[1]["id"] == m1[1]["id"] and "reçues" in m2[1]["texte"].lower(), [x["texte"][:80] for x in m2]
+    #  « Répondre » une seconde fois : l'étape attend la direction (dit par l'équipe du recrutement, sans lien).
+    i2 = B.Inter(local.ctx.chemin, m)
+    local.faire(questionnaire.BoutonRepondre(eid).callback(i2))
+    assert not _liens_vues(i2.vues()) and not i2.modals
+    #  La direction ouvre l'étape 3 : l'ancien message s'efface, le nouveau le prévient ; sa page la montre.
+    st, rep = _poster(local, "recrutement/etape_suivante", {"envoi": eid})
+    assert st == 200, rep
+    m3 = messages()
+    assert len(m3) == 2 and m3[1]["id"] != m1[1]["id"] and "Étape 3 sur 3" in m3[1]["texte"]
+    st, d = local.lire("questionnaire", h)
+    assert d["etat"] == "ouvert" and [(x["numero"], x["envoyee"], x["courante"]) for x in d["etapes"]] == [(1, True, False), (2, False, True)]
+    r2 = [q["rang"] for q in d["etapes"][1]["questions"]]
+    st, rep = local.ecrire("envoyer_etape", {"etape": 2, "reponses": {str(r): f"Réponse {r}" for r in r2}}, h)
+    assert st == 200 and rep["etat"] == "envoye", rep
+    local.annonces()
+    m4 = messages()
+    assert len(m4) <= 2 and "envoyées" in " ".join(x["texte"] for x in m4).lower(), [x["texte"][:80] for x in m4]
+    d = local.api("recrutement/dossier", local.tete, {"ticket": str(tid)})[1]
+    assert d["etape"] == "reponses" and d["envois"][-1]["bilan"]["repondues"] == len(r1) + len(r2)
+    #  La correction, puis « Accepter » : le ticket se ferme sur la décision, au plus deux messages.
+    for q in d["envois"][-1]["questions"]:
+        assert _poster(local, "recrutement/corriger", {"envoi": eid, "question": q["id"], "juste": True})[0] == 200
+    st, rep = _poster(local, "recrutement/decision", {"ticket": tid, "decision": "accepter"})
+    assert st == 200, rep
+    local.annonces()
+    d = local.api("recrutement/dossier", local.tete, {"ticket": str(tid)})[1]
+    assert d["etape"] == "accepte" and len(messages()) <= 2
+    st, fin = local.lire("questionnaire", h)
+    assert fin["etat"] in ("envoye", "ferme")
+
+
+def test_C12b_la_page_n_est_offerte_que_branchee_au_recrutement(local, monkeypatch):
+    """Les points d'appel (`lien_candidat`, `inviter`) n'existent que si le recrutement a reçu CETTE page
+    (`questionnaire.setup(web=…)`) et qu'elle peut servir : trouvée par son nom (un `import`), elle n'offre rien — le
+    recrutement garde ses formulaires de Discord, et un chef ne se propose pas sans page."""
+    import candidature_site
+    import questionnaire
+    import tableau
+    assert candidature_site.branchee() and questionnaire._page_candidat() is candidature_site._lien_candidat
+    assert getattr(candidature_site, "inviter") is candidature_site._inviter
+    monkeypatch.setattr(questionnaire, "_web_module", None)          # trouvée par son nom, pas branchée
+    assert questionnaire._web() is candidature_site and not candidature_site.branchee()
+    assert questionnaire._page_candidat() is None and getattr(candidature_site, "inviter", None) is None
+    with pytest.raises(AttributeError):
+        candidature_site.lien_candidat   # noqa: B018
+    monkeypatch.undo()
+    monkeypatch.setattr(tableau, "_base", "")                        # branchée, mais le site n'a pas d'adresse
+    assert not candidature_site.branchee() and questionnaire._page_candidat() is None
+    monkeypatch.undo()
+    assert candidature_site.branchee()
+
+
+def test_C13_le_vrai_chemin_d_un_chef_d_equipe(local, sans_cadence):
+    """« Proposer d'être chef » (la route du site) : le message privé (la page du candidat, son bouton persistant), le lien,
+    ses réponses justes étape par étape — l'étape suivante ouverte par la direction lui revient en message privé —, 100 %,
+    « Nommer chef » : son rôle « Chef · <métier> », son badge « Chef validé · <métier> » pour l'éditeur des équipes."""
+    import questionnaire
+    import tableau
+    nonce = int(time.time()) % 100000
+    m = local.g.get_member(1013)
+    metiers_ = {x["cle"]: x["nom"] for x in local.faire(questionnaire._liste_metiers(local.g))}
+    metier = "navigation" if "navigation" in metiers_ else next(iter(metiers_))
+    st, rep = _poster(local, "recrutement/chefs/role", {"metier": metier, "creer": True})
+    assert st == 200, rep
+    qa = [(f"Quel instrument mesure la hauteur du soleil, épreuve {nonce} ?", "Le sextant"),
+          (f"Comment appelle-t-on le côté droit d'un navire, épreuve {nonce} ?", "Tribord"),
+          (f"Combien de quarts compte une journée de bord, épreuve {nonce} ?", "Six"),
+          (f"Quel nœud fait une boucle qui ne glisse pas, épreuve {nonce} ?", "Le nœud de chaise")]
+    ids = []
+    for question, reponse in qa:
+        st, rep = _poster(local, "recrutement/chefs/question", {"question": question, "reponse": reponse, "metiers": [metier]})
+        assert st == 200, rep
+        ids.append(rep["question"]["id"])
+    carnet = local.ctx.carnet["mp"]
+    n = len(carnet)
+    st, rep = _poster(local, "recrutement/chefs/proposer", {"membre": str(m.id), "metier": metier, "etapes": [
+        {"titre": "Le cap", "consigne": "Chaque réponse doit être juste.", "questions": ids[:2]},
+        {"titre": "L'équipage", "consigne": "", "questions": ids[2:]}]})
+    assert st == 200 and rep["invite"] is True, rep
+    eid = int(rep["envoi"])
+    #  Le message privé : la page du candidat, son bouton persistant.
+    mp = [x for x in carnet[n:] if x[0] == m.id]
+    assert len(mp) == 1
+    comps = _composants(mp[0][2]["view"])
+    assert [c["custom_id"] for c in comps if c.get("custom_id")] == [f"cq:rep:{eid}"]
+    assert f"chef d'équipe · {metiers_[metier]}" in "\n".join(c.get("content", "") for c in comps)
+
+    def cliquer():
+        import candidature_site
+        gabarit = candidature_site.BoutonQuestionnaire.__discord_ui_compiled_template__.fullmatch(f"cq:rep:{eid}")
+        bouton = local.faire(candidature_site.BoutonQuestionnaire.from_custom_id(None, None, gabarit))
+        i = Obj(guild=None, user=m, response=_Reponse())
+        local.faire(bouton.callback(i))
+        return _liens_vues([i.response.envois[0]["view"]])
+    liens = cliquer()
+    assert len(liens) == 1
+    h, _a = local.entrer("/tableau/candidature/" + liens[0].rsplit("/", 1)[1])
+    st, d = local.lire("questionnaire", h)
+    assert d["nature"] == "chef" and d["metier"] == metiers_[metier] and d["portes"]["total"] == 2 and d["portes"]["fiche"] == 0
+    attendues = dict(qa)
+    e = local.faire(questionnaire._envoi(eid))
+    par_rang = {int(q["rang"]): attendues[q["question"]] for q in e["questions"]}
+    r1 = [q["rang"] for q in d["etapes"][0]["questions"]]
+    assert local.ecrire("envoyer_etape", {"etape": 1, "reponses": {str(r): par_rang[r] for r in r1}}, h)[0] == 200
+    #  L'étape suivante : ouverte par la direction, elle lui revient en message privé (« l'étape 2 est ouverte »).
+    n = len(carnet)
+    st, rep = _poster(local, "recrutement/etape_suivante", {"envoi": eid})
+    assert st == 200, rep
+    mp = [x for x in carnet[n:] if x[0] == m.id]
+    assert len(mp) == 1 and "L'étape 2 de ton questionnaire est ouverte" in "\n".join(
+        c.get("content", "") for c in _composants(mp[0][2]["view"]))
+    st, d = local.lire("questionnaire", h)
+    r2 = [q["rang"] for q in d["etapes"][1]["questions"]]
+    st, rep = local.ecrire("envoyer_etape", {"etape": 2, "reponses": {str(r): par_rang[r] for r in r2}}, h)
+    assert st == 200 and rep["etat"] == "envoye", rep
+    local.annonces()
+    #  100 % justes (cochées par la direction), « Nommer chef » : le rôle, le badge.
+    for q in e["questions"]:
+        assert _poster(local, "recrutement/corriger", {"envoi": eid, "question": q["id"], "juste": True})[0] == 200
+    st, rep = _poster(local, "recrutement/chefs/decision", {"envoi": eid, "decision": "accepter"})
+    assert st == 200, rep
+    assert any(r.name == f"Chef · {metiers_[metier]}" for r in m.roles), [r.name for r in m.roles]
+    badges = local.faire(questionnaire.badges_chefs(1))
+    assert badges.get(str(m.id), badges.get(m.id, "")).startswith("Chef validé · "), badges
+    #  Nommé : sa page ne prend plus rien.
+    assert local.lire("questionnaire", h)[1]["etat"] in ("envoye", "ferme")
+    assert local.ecrire("brouillon", {"reponses": {str(r1[0]): "encore"}}, h)[0] == 409
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

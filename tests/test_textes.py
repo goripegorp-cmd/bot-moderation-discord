@@ -216,10 +216,9 @@ def test_T5_conflit_par_version_et_retour_a_l_origine(registre_textes):
     st, r = remettre("recrutement.refus_etape1")
     assert st == 200 and r["deja"] and r["_journal"] is None, "déjà d'origine : rien à faire, rien au journal"
     #  Les avertissements : une variable qui disparaît, une variable inconnue.
-    st, r = ecrire("recrutement.accueil.etapes", "Deux étapes, {total} questions.")
+    st, r = ecrire("recrutement.affiche.attente", "Deux étapes : {etapes}, {questions}, {etapes_en}, {total}.")
     assert st == 200 and r["avertissements"] == [
-        "{nombre} n'apparaît plus : le nombre de questions de l'étape 2 (« 10 questions ») ne s'affichera pas.",
-        "{nombre_en} n'apparaît plus : le même nombre, en anglais (« 10-question ») ne s'affichera pas.",
+        "{questions_en} n'apparaît plus : les questions, en anglais ne s'affichera pas.",
         "{total} n'est pas une variable de ce texte : il s'affichera tel quel."]
 
 
@@ -432,8 +431,8 @@ def test_T9_le_recrutement_emploie_les_textes_enregistres(tmp_path, monkeypatch,
     monkeypatch.setattr(Q, "DELAI_FERMETURE", 0.0)
     monkeypatch.setattr(Q, "AVIS_S", 0)
     monkeypatch.setattr(Q, "PAGE_S", 0)
-    for cle, valeur in (("recrutement.accueil.titre", "### Ahoy · Ahoy"),
-                        ("recrutement.accueil.etapes", "Deux étapes, puis **{nombre}** · {nombre_en} quiz."),
+    for cle, valeur in (("recrutement.affiche.titre", "### Ahoy · Ahoy"),
+                        ("recrutement.affiche.attente", "Deux étapes, puis **{questions}** · {questions_en} quiz."),
                         ("recrutement.wiki", ""),
                         ("recrutement.liens.titre", "**Les pages utiles**"),
                         ("recrutement.refus_etape1", "Pas cette fois, moussaillon.\n-# Not this time."),
@@ -449,7 +448,9 @@ def test_T9_le_recrutement_emploie_les_textes_enregistres(tmp_path, monkeypatch,
 
     async def scenario():
         await b.preparer()
-        accueil, n = await Q.vue_accueil(b.g, "", "Rell Seas")
+        n = await Q.annonce(b.g.id)
+        accueil = Q.carte_affiche({"gid": b.g.id, "ticket": 9, "candidat": CANDIDAT, "etat": "demande",
+                                   "nb_etapes": 1, "nb_questions": n, "reponses": {}})
         t1, fil1 = await _ouvrir_avec_carte(b)
         dossier_avant = await Q.dossier(b.g, t1)
         refus = await Q.refuser(b.g, t1, b.fondateur, depuis="etape1")
@@ -466,9 +467,7 @@ def test_T9_le_recrutement_emploie_les_textes_enregistres(tmp_path, monkeypatch,
         return accueil, n, fil1, dossier_avant, refus, fil2, eid, modal, apres1, fin
     accueil, n, fil1, dossier_avant, refus, fil2, eid, modal, apres1, fin = asyncio.run(scenario())
     ta = textes_vue(accueil)
-    assert "### Ahoy · Ahoy" in ta and f"Deux étapes, puis **{n} questions** · {n}-question quiz." in ta
-    assert "**Les pages utiles**" in ta and "Toutes les réponses se trouvent sur le wiki" not in ta, \
-        "le texte vidé disparaît, les liens restent"
+    assert "### Ahoy · Ahoy" in ta and f"Deux étapes, puis **{n} questions** · {n} questions quiz." in ta
     assert dossier_avant["message_refus_etape1"] == "Pas cette fois, moussaillon.\n-# Not this time.", \
         "la page montre avant de refuser le texte exact qui partira"
     assert refus[0] == 200
@@ -476,6 +475,8 @@ def test_T9_le_recrutement_emploie_les_textes_enregistres(tmp_path, monkeypatch,
     assert "Pas cette fois, moussaillon." in message and "Tes réponses ne correspondent pas" not in message
     carte = next(v for v in _vues_du_fil(fil2) if "À toi de jouer" in textes_vue(v))
     assert f"## À toi de jouer — {n} questions" in textes_vue(carte)
+    assert "**Les pages utiles**" in textes_vue(carte) and "Toutes les réponses se trouvent sur le wiki" not in \
+        textes_vue(carte), "le texte vidé disparaît, les liens restent"
     assert libelles_boutons(carte) == ["J'y vais · Go"] and ids(carte) == [f"rq:rep:{eid}"], \
         "le libellé change, le bouton persistant reste le même"
     assert modal.title == "Page 1 sur 2" and "Écris ici" in _modal_textes(modal)
@@ -669,7 +670,7 @@ def test_T12_renommer_un_role_droits_refus_et_nom_garde(banc_metiers):
 def test_T16_la_carte_de_l_equipe_ses_boutons_et_le_formulaire_du_refus(tmp_path, monkeypatch, registre_textes):
     monkeypatch.setattr(Q, "AVIS_S", 0)
     for cle, valeur in (("recrutement.equipe.decision", "### À toi de trancher\n{combien}par défaut."),
-                        ("recrutement.equipe.bouton.envoyer", "Lancer l'étape 2"),
+                        ("recrutement.equipe.bouton.suivante", "Lancer l'étape 2"),
                         ("recrutement.equipe.bouton.refuser", "Recaler"),
                         ("recrutement.equipe.envoye", "### C'est parti\n{par} {quand} : {questions}."),
                         ("recrutement.equipe.bouton.ouvrir", "Voir sur le site"),
@@ -684,7 +685,7 @@ def test_T16_la_carte_de_l_equipe_ses_boutons_et_le_formulaire_du_refus(tmp_path
         await b.preparer()
         tid, fil = await _ouvrir_avec_carte(b)
         carte = _vues_du_fil(fil)[-1]
-        intrus = await _cliquer(b, Q.BoutonEtape1("e", tid), b.candidat, fil)
+        intrus = await _cliquer(b, Q.BoutonEtape1("n", tid), b.candidat, fil)
         refus = await _cliquer(b, Q.BoutonEtape1("r", tid), b.fondateur, fil)
         await _cliquer(b, Q.BoutonEtape1("e", tid), b.fondateur, fil)
         await laisser_finir()
@@ -692,7 +693,7 @@ def test_T16_la_carte_de_l_equipe_ses_boutons_et_le_formulaire_du_refus(tmp_path
     tid, fil, carte, intrus, refus, s = asyncio.run(scenario())
     assert "### À toi de trancher\n10 questions, par défaut." in textes_vue(carte)
     assert libelles_boutons(carte) == ["Lancer l'étape 2", "Choisir sur le site", "Recaler"]
-    assert ids(carte) == [f"rq:e1:e:{tid}", f"rq:e1:s:{tid}", f"rq:e1:r:{tid}"], "les boutons persistants restent"
+    assert ids(carte) == [f"rq:e1:n:{tid}", f"rq:e1:s:{tid}", f"rq:e1:r:{tid}"], "les boutons persistants restent"
     assert "Pas pour toi, matelot." in intrus.texte() and Q.RESERVE not in intrus.texte()
     modal = refus.response.modals[0]
     assert modal.title == "Recaler ce candidat"
@@ -703,7 +704,7 @@ def test_T16_la_carte_de_l_equipe_ses_boutons_et_le_formulaire_du_refus(tmp_path
     assert libelles_boutons(vue_envoyee) == ["Voir sur le site"]
     #  Les textes d'origine, mot pour mot, sans rien d'enregistré (un autre serveur).
     t0 = textes_vue(Q.carte_etape1(7, nombre=3, guild_id=2))
-    assert "### Étape 1 · décision" in t0 and "(3 questions, la sélection par défaut du site)" in t0
+    assert "### La demande" in t0 and "l'étape 2 s'ouvre (3 questions)" in t0
 
 
 def test_T17_les_reponses_au_choix_du_metier(banc_metiers):
@@ -895,7 +896,7 @@ def test_T13_les_noms_du_site_sont_ceux_de_la_page():
     assert 'nomme("site.affiche.statut."' in affiche and 'nomme("site.affiche.tampon."' in affiche
     #  Les sous-onglets et les onglets de la fiche : les mêmes clés et les mêmes noms que la page, lus par `libelle`.
     vus = []
-    for f in ("discord.js", "recrutement.js", "annonces.js", "fiche.js"):
+    for f in ("discord.js", "recrutement.js", "recrutement_zone.js", "annonces.js", "fiche.js"):
         src = (RACINE / "site" / f).read_text(encoding="utf-8")
         for prefixe, corps in re.findall(r'nommerOnglets\("([a-z.]+)", \[(.*?)\]\);', src, re.S):
             vus.append((prefixe, [(k.replace("-", "_"), nom)
@@ -927,7 +928,8 @@ def test_T14_chaque_cle_ecrite_dans_le_code_est_declaree():
     """Une clé mal écrite donnerait la clé elle-même sur Discord : chaque appel est vérifié ici."""
     appels = {"questionnaire.py": ("_t", "texte"), "evenements.py": ("_t", "texte"), "metiers.py": ("_t", "texte"),
               "zones.py": ("_t",), "bot.py": ("texte",), "site/annonces.js": ("L",),
-              "site/recrutement.js": ("messageAuto", "modifierTexte")}
+              "site/recrutement.js": ("messageAuto", "modifierTexte"),
+              "site/recrutement_zone.js": ("citation", "modifierTexte")}
     par_fichier = {f: _cles_appelees((RACINE / f).read_text(encoding="utf-8"), noms) for f, noms in appels.items()}
     inconnues = {c: f for f, cles in par_fichier.items() for c in cles if not textes.declare(c)}
     assert not inconnues, inconnues
