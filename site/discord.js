@@ -13,6 +13,7 @@ import {
   ouvrirFiche, ouvrirConversation, agir, entreeJournal, teinteCat, teinteType, libelleType, GROUPES_SANCTION, STATUTS_Q, STATUTS_S,
   STATUTS_I, STATUTS_CAND, deplier, sondageVotes, etapeCandidature, ETAPES_CANDIDATURE, chargerSuivi, nomSalon, recentsDabord, propre,
 } from "./fiche.js";
+import { avecVerrou, protegerZone } from "./direct.js";
 
 const JOUR = 86400;
 const resetPages = (prefixe) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(prefixe)) delete etat.pages[k]; };
@@ -725,11 +726,14 @@ function carteRegle(r, garde, recharger) {
     toast(rep.ok ? "Règle enregistrée : " + r.nom + ", " + jours + " jours." : rep.erreur, rep.ok ? "succes" : "erreur");
     if (rep.ok) recharger();
   });
-  return h("article", { classe: "feuillet regle" },
+  const carte = h("article", { classe: "feuillet regle" },
     h("h3", { classe: "titre-carte" }, r.nom), h("p", { classe: "aide" }, r.quoi),
     h("div", { classe: "regle-ligne" }, h("span", { classe: "champ-lib" }, "Garder"), valeur),
     reg, h("div", { classe: "regle-bornes" }, h("span", {}, mini + " j"), h("span", {}, maxi + " j")),
     r.defaut && Number(r.defaut) !== Number(r.garde_jours) ? h("p", { classe: "meta" }, "Par défaut : " + r.defaut + " j ",
       h("button", { classe: "lien-nom", type: "button", onclick: () => { reg.value = r.defaut; reg.dispatchEvent(new Event("input")); } }, "remettre")) : null,
     h("div", { classe: "rangee entre" }, h("span", { classe: "meta" }, [nb, sorte].filter(Boolean).join(" · ")), enregistrer));
+  // Présence en direct : la règle se prend au premier geste ; prise ailleurs, elle se fige sous le cadenas.
+  protegerZone(carte, "nettoyage:" + r.cle, "la règle « " + r.nom + " »", { des: "saisie", compact: true, relire: recharger });
+  return avecVerrou(carte, "nettoyage:" + r.cle);
 }

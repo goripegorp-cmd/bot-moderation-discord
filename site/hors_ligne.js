@@ -185,6 +185,13 @@ async function traiter(res) {
     emettre("file:conflit", { op });
     return false;
   }
+  if (st === 423) { // en cours de modification par quelqu'un d'autre (direct.js) : elle attend, et repart quand c'est libre
+    op.verrou = corps.verrou || { objet: "", nom: "" };
+    op.erreur = corps.erreur || "";
+    await persister(op);
+    emettre("file:verrou", { op });
+    return false;
+  }
   if (st === 429) { // trop d'écritures d'un coup : elle repartira au prochain passage
     op.essais += 1;
     await persister(op);

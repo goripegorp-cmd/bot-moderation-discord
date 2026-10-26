@@ -1,0 +1,211 @@
+/* La Capitainerie — la présence en direct (« À bord ») et la ZONE VERROUILLÉE (direct.js).
+   Un objet en cours de modification par quelqu'un d'autre : scellé à la cire (le cadenas), consigné à l'encre
+   (hachures), avec la personne qui le tient. Rien de futuriste : cire, laiton, encre, bois. */
+
+/* ─── L'avatar d'une personne : rond, liseré de sa couleur ─────────────── */
+.direct-avatar {
+  position: relative; flex: none; display: inline-grid; place-items: center;
+  width: 30px; height: 30px; border-radius: 50%; overflow: hidden;
+  background: var(--parchemin-3); color: var(--encre);
+  box-shadow: 0 0 0 2px var(--lisere, var(--laiton)), 0 0 0 3px rgba(29, 18, 9, .55);
+}
+.direct-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.direct-avatar .direct-initiales { font: 400 14px/1 var(--police-titre); letter-spacing: .02em; }
+.direct-avatar.mini { width: 20px; height: 20px; box-shadow: 0 0 0 1.5px var(--lisere, var(--laiton)); }
+.direct-avatar.mini .direct-initiales { font-size: 10px; }
+.direct-avatar.bord { width: 28px; height: 28px; }
+.direct-avatar.moyen { width: 34px; height: 34px; }
+.direct-avatar.liste { width: 40px; height: 40px; }
+.direct-avatar.liste .direct-initiales { font-size: 17px; }
+.direct-avatar.grand { width: 48px; height: 48px; box-shadow: 0 0 0 3px var(--lisere, var(--laiton)), 0 0 0 4px rgba(29, 18, 9, .45); }
+.direct-avatar.grand .direct-initiales { font-size: 20px; }
+
+/* ─── « À bord » : la plaque de l'en-tête ──────────────────────────────── */
+.direct-bord {
+  display: inline-flex; align-items: center; gap: 9px; min-width: 0; max-width: 300px;
+  min-height: 38px; padding: 3px 10px 3px 12px;
+  border: 1px solid var(--laiton-fonce); border-radius: 20px;
+  background: rgba(20, 11, 5, .5);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .55), 0 1px 0 rgba(201, 163, 90, .2);
+  color: var(--laiton-pale);
+}
+.direct-bord:hover { background: rgba(20, 11, 5, .7); border-color: var(--laiton); }
+.direct-bord:focus-visible { outline: 2.5px solid var(--clair); outline-offset: 2px; }
+.direct-bord-lib { font: 500 13.5px/1 var(--police-sc); letter-spacing: .05em; white-space: nowrap; }
+.direct-equipage { display: inline-flex; align-items: center; padding-left: 7px; }
+.direct-equipage > .direct-avatar { margin-left: -7px; }
+.direct-equipage > .direct-avatar.moi { opacity: .82; }
+@media (prefers-reduced-motion: no-preference) {
+  .direct-equipage > .direct-avatar { animation: monter-a-bord .45s var(--ressort) both; }
+}
+@keyframes monter-a-bord { from { opacity: 0; transform: translateY(6px) scale(.7); } }
+.direct-plus {
+  display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 5px; margin-left: -2px;
+  border-radius: 13px; background: var(--laiton); color: var(--encre);
+  font: 700 12.5px/1 var(--police-chiffres); font-variant-numeric: lining-nums tabular-nums;
+}
+.direct-lunette { width: 22px; height: 22px; color: var(--laiton-clair); --ton2: var(--corde); }
+.direct-bord.coupe { opacity: .55; }
+@media (pointer: coarse) { .direct-bord { min-height: var(--cible); } }
+@media (max-width: 719px) {
+  .direct-bord { gap: 0; padding: 3px 8px; min-width: var(--cible); justify-content: center; }
+  .direct-bord-lib { display: none; }
+  .direct-avatar.bord { width: 26px; height: 26px; }
+}
+
+/* La liste qui s'ouvre */
+.direct-liste { width: min(430px, calc(100vw - 16px)); max-width: min(430px, calc(100vw - 16px)); padding: 10px 10px 12px; }
+.direct-liste-tete { display: flex; align-items: center; gap: 9px; padding: 2px 6px 10px; border-bottom: 1px solid var(--trait); }
+.direct-liste-tete .ic { width: 24px; height: 24px; color: var(--encre-2); }
+.direct-liste-tete b { font: 400 22px/1.1 var(--police-titre); }
+.direct-liste-compte { margin-left: auto; font: 500 13.5px/1.2 var(--police-sc); letter-spacing: .03em; color: var(--encre-3); }
+.direct-personnes { display: grid; }
+.direct-personne {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: start;
+  padding: 10px 6px; border-bottom: 1px dotted var(--trait-fort);
+}
+.direct-personne > .direct-avatar { margin-top: 2px; }
+.direct-personne:last-child { border-bottom: 0; }
+.direct-personne-bloc { display: grid; gap: 2px; min-width: 0; }
+.direct-personne-nom { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 30px; }
+.direct-personne-nom .bouton { margin-left: auto; flex: none; }
+.direct-personne-nom b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.direct-toi { font: 500 12px/1.3 var(--police-sc); letter-spacing: .06em; color: var(--encre-3); text-transform: uppercase; }
+.direct-ou, .direct-quoi { display: flex; align-items: flex-start; gap: 6px; min-width: 0; font-size: 14.5px; line-height: 1.35; color: var(--encre-2); }
+.direct-ou .ic, .direct-quoi .ic { flex: none; margin-top: .18em; color: var(--encre-3); }
+.direct-ou > span, .direct-quoi > span { min-width: 0; overflow-wrap: anywhere; }
+.direct-quoi { color: var(--cire); font-weight: 500; }
+.direct-quoi .ic { color: var(--cire); }
+.direct-depuis { color: var(--encre-3); font-weight: 400; }
+.direct-arrivee { font-size: 13px; color: var(--encre-3); }
+.direct-liste-note { margin: 8px 6px 0; font-size: 13.5px; color: var(--encre-3); font-style: italic; }
+
+/* ─── La ZONE VERROUILLÉE : la carte d'un objet pris par un autre ───────── */
+/* Ficelée et scellée : la corde en travers, le sceau de cire et son cadenas, des hachures d'encre, la plaque qui dit
+   qui la tient. Les gestes de la carte restent visibles mais passent par l'éditeur (lecture seule) ou un avis. */
+.direct-sous-verrou, .direct-chez-moi { position: relative; }
+.direct-sous-verrou::after { /* consignée à l'encre : des hachures de graveur, un filet de cire */
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none; border-radius: inherit;
+  background: repeating-linear-gradient(-45deg, rgba(142, 42, 36, .085) 0 2px, transparent 2px 10px);
+  box-shadow: inset 0 0 0 2px rgba(142, 42, 36, .5);
+}
+.direct-sous-verrou::before { /* la corde qui la ferme */
+  content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 8px; z-index: 4; pointer-events: none;
+  background: url(ornements/corde.svg) repeat-x left center / auto 8px;
+  filter: drop-shadow(0 1px 1px rgba(29, 18, 9, .45));
+}
+.direct-badge {
+  position: absolute; top: 10px; right: 8px; z-index: 5; max-width: calc(100% - 16px);
+  display: inline-flex; align-items: center; gap: 0; min-width: 0;
+  pointer-events: none;
+}
+.direct-badge[hidden] { display: none; }
+.direct-badge-plaque {
+  display: inline-flex; align-items: center; gap: 7px; min-width: 0;
+  margin-left: -10px; padding: 3px 12px 3px 14px; border-radius: 0 16px 16px 0;
+  border: 1px solid var(--bois-3); border-left: 0;
+  background: var(--bois) url(textures/bois.webp); background-size: 220px auto;
+  color: var(--clair);
+  box-shadow: 0 1px 0 rgba(201, 163, 90, .25) inset, 0 2px 5px rgba(29, 18, 9, .45);
+}
+.direct-badge-texte { display: grid; min-width: 0; line-height: 1.15; }
+.direct-badge-texte > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.direct-badge-quoi { font: 500 11px/1.2 var(--police-sc); letter-spacing: .05em; color: var(--laiton-pale); }
+.direct-badge-texte b { font: 600 13.5px/1.2 var(--police-texte); }
+.direct-sceau { /* le sceau de cire et son cadenas de laiton */
+  position: relative; z-index: 1; flex: none; display: inline-grid; place-items: center;
+  width: 34px; height: 34px;
+  background: url(ornements/sceau-rouge.svg) center / 100% 100% no-repeat;
+  color: var(--laiton-pale); --ton2: var(--laiton);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .4));
+  transform: rotate(-8deg);
+}
+.direct-sceau .ic { width: 15px; height: 15px; }
+.direct-badge-plaque > .direct-avatar.mini { box-shadow: 0 0 0 1.5px var(--lisere, var(--laiton)), 0 0 0 2.5px var(--bois-3); }
+.direct-chez-moi > .direct-badge .direct-badge-plaque { background: var(--papier-2); color: var(--encre-2); border-color: var(--trait-fort); box-shadow: var(--ombre-papier); }
+.direct-chez-moi > .direct-badge .direct-badge-texte b { font-size: 12.5px; }
+.direct-chez-moi > .direct-badge .direct-sceau { filter: grayscale(.7) drop-shadow(0 1px 1px rgba(0, 0, 0, .25)); }
+/* Une affiche « WANTED » : ficelée en travers, le grand sceau au milieu, la plaque en bas. */
+.affiche.direct-sous-verrou::after { display: none; }
+.affiche.direct-sous-verrou::before {
+  left: -3%; right: -3%; top: 49%; height: 3cqw; min-height: 6px;
+  background-size: auto 100%; transform: rotate(-9deg); z-index: 4;
+}
+.affiche.direct-sous-verrou .affiche-papier { filter: sepia(.32) brightness(.9) contrast(.96); }
+.affiche > .direct-badge { inset: 0; top: 0; right: 0; max-width: none; display: block; }
+.affiche > .direct-badge > .direct-sceau { position: absolute; left: 50%; top: 49%; width: 19cqw; height: 19cqw; min-width: 30px; min-height: 30px; margin: 0;
+  transform: translate(-50%, -50%) rotate(-9deg); }
+.affiche > .direct-badge > .direct-sceau .ic { width: 8.5cqw; height: 8.5cqw; min-width: 13px; min-height: 13px; }
+.affiche > .direct-badge > .direct-badge-plaque { position: absolute; left: 5%; right: 5%; bottom: 3%; margin: 0; justify-content: center;
+  padding: 1.6cqw 3cqw; border-radius: 1.2cqw; border: 1px solid var(--bois-3); }
+.affiche > .direct-badge .direct-badge-quoi { font-size: max(9.5px, 3.3cqw); }
+.affiche > .direct-badge .direct-badge-texte b { font-size: max(11px, 4.2cqw); }
+.affiche.direct-chez-moi::before { display: none; }
+/* Une carte (feuillet, ligne de la banque…) : l'étiquette pend à la corde, au-dessus du bord — le titre reste lisible. */
+.direct-sous-verrou:not(.affiche):not(.registre-ligne) > .direct-badge,
+.direct-chez-moi:not(.affiche):not(.registre-ligne) > .direct-badge { top: -17px; right: 12px; }
+.feuillet.direct-sous-verrou, .banque-ligne.direct-sous-verrou, .feuillet.direct-chez-moi, .banque-ligne.direct-chez-moi { padding-top: 28px; }
+.element-carte.direct-sous-verrou, .element-carte.direct-chez-moi { overflow: visible; }
+.direct-sous-verrou > .ruban-neuf, .direct-chez-moi > .ruban-neuf { display: none; }
+/* Une ligne de tableau (rôles) : la plaque se pose sur ses gestes. */
+.registre-ligne.direct-sous-verrou > .direct-badge { top: 50%; transform: translateY(-50%); }
+.registre-ligne.direct-sous-verrou > .rangee { visibility: hidden; }
+
+/* ─── L'éditeur et la zone en lecture seule ───────────────────────────── */
+.direct-fige { position: relative; opacity: .82; filter: saturate(.7); }
+.direct-fige::after { /* ce qui est consigné : hachuré à l'encre, rien ne s'y touche */
+  content: ""; position: absolute; inset: 0; z-index: 5; pointer-events: none; border-radius: 4px;
+  background: repeating-linear-gradient(-45deg, rgba(142, 42, 36, .06) 0 2px, transparent 2px 12px);
+}
+.direct-zone-lecture { position: relative; }
+.direct-consigne, .direct-avis {
+  position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 16px; align-items: center; min-width: 0;
+  padding: 14px 16px 14px 18px; border-radius: var(--rayon);
+  border: 1px solid rgba(106, 28, 23, .45); border-left: 6px solid var(--cire);
+  background: var(--papier-sombre) url(textures/parchemin_fonce.webp); background-size: 520px auto;
+  box-shadow: inset 0 0 0 1px rgba(255, 245, 225, .35), 0 2px 6px -3px rgba(43, 29, 18, .5);
+}
+.direct-consigne::before { /* la corde qui ferme le coffre */
+  content: ""; position: absolute; left: 0; right: 0; top: -5px; height: 9px; pointer-events: none;
+  background: url(ornements/corde.svg) repeat-x left center / auto 9px; opacity: .85;
+}
+.direct-consigne-qui { position: relative; display: inline-grid; }
+.direct-consigne-qui > .direct-sceau { position: absolute; right: -9px; bottom: -7px; width: 28px; height: 28px; }
+.direct-consigne-qui > .direct-sceau .ic { width: 14px; height: 14px; }
+.direct-consigne-texte, .direct-avis-texte { display: grid; gap: 3px; min-width: 0; }
+.direct-consigne-titre { font-size: 17px; overflow-wrap: anywhere; }
+.direct-consigne-titre b { font-weight: 700; }
+.direct-consigne-meta { font-size: 14.5px; color: var(--encre-2); overflow-wrap: anywhere; }
+.direct-consigne-actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 8px; }
+@media (min-width: 760px) {
+  .direct-consigne, .direct-avis { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .direct-consigne-actions { grid-column: auto; justify-content: flex-end; }
+}
+.direct-avis { border-left-color: var(--laiton-fonce); border-color: rgba(122, 90, 34, .45); }
+.direct-avis-texte b { font-weight: 700; }
+@media (prefers-reduced-motion: no-preference) {
+  .direct-avis { animation: epingler .35s var(--ressort) both; }
+}
+.direct-cadre {
+  display: flex; align-items: flex-start; gap: 12px; min-width: 0;
+  padding: 12px 16px; border-radius: var(--rayon);
+  border: 1px solid var(--trait-fort); border-left: 5px solid var(--laiton-fonce);
+  background: rgba(248, 240, 221, .9);
+}
+.direct-cadre > .ic { width: 24px; height: 24px; margin-top: 1px; color: var(--encre-2); }
+.direct-cadre-texte { flex: 1 1 auto; min-width: 0; display: grid; gap: 8px; }
+.direct-cadre.rendu { border-left-color: var(--ambre); }
+.direct-cadre.rendu > .ic { color: var(--ambre-texte); }
+.direct-cadre.libre, .direct-cadre.relecture { border-left-color: var(--vert); }
+.direct-cadre.libre > .ic, .direct-cadre.relecture > .ic { color: var(--vert); }
+.direct-cadre.ailleurs { border-left-color: var(--mer); padding: 9px 14px; }
+.direct-cadre.ailleurs > .ic { color: var(--mer); }
+@media (prefers-reduced-motion: no-preference) {
+  .direct-cadre.relecture > .ic { animation: tourner 1.6s linear infinite; }
+}
+@media (max-width: 519px) {
+  .direct-consigne, .direct-avis { grid-template-columns: minmax(0, 1fr); padding: 14px 14px 14px 16px; }
+  .direct-consigne-qui { justify-self: start; }
+  .direct-consigne-actions { grid-column: auto; }
+  .direct-consigne-actions .bouton { flex: 1 1 auto; }
+}
