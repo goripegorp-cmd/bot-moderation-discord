@@ -360,8 +360,8 @@ export function tickets(vue, ctx = {}) {
     ].filter(Boolean), { ouverts: 2, forcer: !!f.q }) : vide("Aucun ticket ouvert ici", "Tout est traité.", "succes"));
     const zoneF = h("div", { classe: "groupes-zone" }, recents.length ? groupesParPeriode(p + "-f", recents, (t) => t.ferme || t.ouvert, ligneTicketFerme, { forcer: !!f.q })
       : vide("Aucun ticket fermé ces " + jours + " derniers jours"));
-    const rendreMois = (k) => (liste) => {
-      const l = liste.filter((t) => garde(t) && cherche(t, P(t.id)) && t.ferme && n - t.ferme > jours * JOUR);
+    const rendreMois = (k) => (lot) => {
+      const l = lot.filter((t) => garde(t) && cherche(t, P(t.id)) && t.ferme && n - t.ferme > jours * JOUR);
       return l.length ? lignes(p + "-a-" + k, l, ligneTicketFerme) : vide("Rien ce mois-ci", "Change le type ou la recherche.");
     };
     const zoneA = h("div", { classe: "groupes-zone" }, moisTries.length ? groupes(moisTries.map((k) => ({ cle: p + "-a-" + k, titre: libelleMois(k),
