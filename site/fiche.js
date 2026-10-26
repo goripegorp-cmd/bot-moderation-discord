@@ -155,12 +155,14 @@ function rendreFiche() {
     m.bot ? pastille("Robot", "#4a5560") : null,
   ].filter(Boolean);
   const corps = [];
+  const chef = h("div", { classe: "rangee fiche-chef" });   // « Chef d'équipe · <métier> » (recrutement_chefs.js)
+  emettre("fiche:rendue", { membre: m, zone: chef });
   if (etatFiche.horsLigne) corps.push(h("p", { classe: "aide" }, icone("hors_ligne", "ic-p"), " Fiche lue dans la mémoire de l'appareil (hors ligne)."));
   // L'identité, ramassée (le nom est dans le titre de la fenêtre) : ce qui la distingue, depuis quand, ses rôles, ses liens.
   corps.push(h("div", { classe: "fiche-entete" },
     avatar(p, "g"),
     h("div", { classe: "fiche-ident" },
-      pastilles_.length ? h("div", { classe: "pastilles" }, pastilles_) : null,
+      pastilles_.length ? h("div", { classe: "pastilles" }, pastilles_) : null, chef,
       h("div", { classe: "sous-nom" }, [m.present ? "Sur le serveur depuis le " + date(m.arrivee) : m.banni ? "Banni du serveur" : "A quitté le serveur",
         m.cree ? "compte Discord créé le " + date(m.cree) : ""].filter(Boolean).join(" · "), h("span", { classe: "ident" }, " · " + p.id), boutonCopie(p.id, "Identifiant copié")),
       m.roles && m.roles.length ? h("div", { classe: "pastilles fiche-roles", title: "Rôles sur Discord (lecture seule)" },

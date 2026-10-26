@@ -127,8 +127,12 @@ def test_I2_la_fermeture_partagee_log_mp_base_puis_suppression(base):
     async def dormir(_s):
         return None
 
+    async def sans_affiche(*_a):
+        return False   # 26/10/2026 : un ticket à affiche (recrutement) n'a pas d'annonce de plus — celui-ci n'en a pas
+
     g = Obj(id=1, name="GoRP", get_member=lambda _u: Createur())
-    ns = {"send_ticket_log": log, "_recent_transcript_urls": {}, "_ticket_transcript_html": transcript,
+    ns = {"questionnaire": Obj(est_affiche=sans_affiche),
+          "send_ticket_log": log, "_recent_transcript_urls": {}, "_ticket_transcript_html": transcript,
           "_ticket_transcript_file": transcript, "_ticket_feedback_view": lambda *a: "notes",
           "get_db": base, "tix_module": Obj(log_action=audit), "asyncio": Obj(sleep=dormir),
           "discord": discord, "_logerr": lambda *a, **k: journal.append(("ERREUR", a))}

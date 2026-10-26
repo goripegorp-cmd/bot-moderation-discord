@@ -31,12 +31,15 @@ class FilTicket(Fil):
 
     def __init__(self, monde, tid, parent, name):
         super().__init__(monde, tid, parent, name)
-        self.dedans, self.ajouts, self.cartes_equipe = set(), [], []
+        self.dedans, self.ajouts, self.cartes_equipe, self.supprimees = set(), [], [], 0
 
     async def send(self, content=None, **kw):
         fil = self
 
         class Msg:
+            async def delete(self):
+                fil.supprimees += 1
+
             async def edit(self, **k):
                 fil.cartes_equipe.append(k)
                 if fil.entrer_par_mention:
@@ -92,6 +95,7 @@ def test_V1_le_fondateur_la_direction_et_l_equipe_entrent_sans_notification():
         "la carte part SANS mention : personne n'est notifié"
     assert "<@&500>" in textes(modif["view"]) and f"<@{FONDATEUR}>" in textes(modif["view"])
     assert r == {"cibles": 3, "par_mention": 3, "un_par_un": 0, "erreurs": 0, "inconnus": 0, "detail": []}
+    assert fil.supprimees == 1, "26/10/2026 : la carte a fait son travail, elle ne reste pas dans le ticket"
 
 
 def test_V2_si_la_mention_ne_suffit_pas_chacun_est_ajoute_un_par_un():

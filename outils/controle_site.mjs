@@ -76,6 +76,12 @@ const SCENES_EQUIPAGE = [
 
 // Ouvrir la première affiche (les groupes par métier sont repliés au départ).
 const OUVRIR_AFFICHE ="(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.affiche').click(); })()";
+// « Demande de recrutement » : ouvrir un groupe de la zone (par son titre), tous ses groupes, ceux du parcours ; un bouton
+// de la fenêtre ouverte.
+const OUVRIR_GROUPE_ZONE = (titre) => `(async () => { const d = [...document.querySelectorAll("#contenu details.groupe")].find((x) => x.querySelector("summary").textContent.includes(${JSON.stringify(titre)})); if (!d) throw new Error("groupe absent : " + ${JSON.stringify(titre)}); d.open = true; await new Promise((r) => setTimeout(r, 700)); d.scrollIntoView({ block: "start" }); return 1; })()`;
+const OUVRIR_GROUPES_ZONE = "(async () => { for (const d of document.querySelectorAll('#contenu .zr-scene details.groupe')) d.open = true; await new Promise((r) => setTimeout(r, 700)); return 1; })()";
+const OUVRIR_GROUPES_PARCOURS = "(async () => { for (const d of document.querySelectorAll('#contenu .zr-parcours details.groupe')) d.open = true; await new Promise((r) => setTimeout(r, 700)); document.querySelector('.zr-parcours').scrollIntoView({ block: 'start' }); return 1; })()";
+const CLIQUER_DIALOGUE = (texte) => `(async () => { await new Promise((r) => setTimeout(r, 900)); const b = [...document.querySelectorAll("dialog[open] button")].reverse().find((x) => x.textContent.includes(${JSON.stringify(texte)})); if (!b) throw new Error("bouton absent : " + ${JSON.stringify(texte)}); b.click(); await new Promise((r) => setTimeout(r, 900)); return 1; })()`;
 // Une ligne compacte (rangement.js) ou une ancienne carte, cliquable, dont le texte contient… (la première sinon).
 const CLIQUER_LIGNE = (texte) => `(() => { const l = [...document.querySelectorAll('.lc-clic, .feuillet.lien')].filter((x) => x.getClientRects().length); (l.find((x) => x.textContent.includes(${JSON.stringify(texte)})) || l[0]).click(); return 1; })()`;
 // La recherche universelle, ouverte au clavier (Ctrl+K), avec un texte tapé.
@@ -112,8 +118,6 @@ const SCENES = [
   { nom: "port-nettoyage", ancre: "#port/nettoyage" },
   { nom: "equipage-membres", ancre: "#equipage/membres" },
   { nom: "equipage-fiches", ancre: "#equipage/fiches" },
-  { nom: "equipage-candidatures", ancre: "#equipage/candidatures" },
-  { nom: "equipage-questionnaire", ancre: "#equipage/candidatures/questionnaire" },
   { nom: "equipage-tickets", ancre: "#equipage/tickets" },
   { nom: "equipage-annonces", ancre: "#equipage/annonces" },
   { nom: "equipage-annonces-avenir", ancre: "#equipage/annonces/a-venir" },
@@ -123,6 +127,18 @@ const SCENES = [
   { nom: "equipage-annonces-ouvert", ancre: "#equipage/annonces/brouillons", geste: OUVRIR_BROUILLON },
   { nom: "fenetre-publier", ancre: "#equipage/annonces/brouillons", geste: OUVRIR_BROUILLON,
     geste2: "[...document.querySelectorAll('.composeur-actions button')].find(b => b.textContent.includes('Publier')).click()" },
+  // « Demande de recrutement » (26/10/2026) : les quatre sous-onglets, leurs groupes ouverts.
+  { nom: "recrutement-candidatures", ancre: "#capitainerie/recrutement" },
+  { nom: "recrutement-decidees", ancre: "#capitainerie/recrutement", geste: OUVRIR_GROUPE_ZONE("Décidées") },
+  { nom: "recrutement-chefs", ancre: "#capitainerie/recrutement/chefs", geste: OUVRIR_GROUPES_ZONE },
+  { nom: "recrutement-questions", ancre: "#capitainerie/recrutement/questions" },
+  { nom: "recrutement-banque-chefs", ancre: "#capitainerie/recrutement/questions", geste: OUVRIR_GROUPE_ZONE("La banque des chefs") },
+  { nom: "recrutement-reglages", ancre: "#capitainerie/recrutement/reglages" },
+  { nom: "recrutement-parcours", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPES_PARCOURS },
+  { nom: "recrutement-messages", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("Ses messages, dans l'ordre") },
+  { nom: "recrutement-liste-noire", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("La liste noire") },
+  { nom: "recrutement-nettoyage-purge", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("Le nettoyage"),
+    geste2: OUVRIR_GROUPE_ZONE("La purge exceptionnelle") },
   { nom: "capitainerie-affiches", ancre: "#capitainerie/affiches" },
   { nom: "capitainerie-catalogue", ancre: "#capitainerie/catalogue" },
   { nom: "capitainerie-roles", ancre: "#capitainerie/roles" },
@@ -136,10 +152,19 @@ const SCENES = [
   // personne envoyée par le serveur (25/10 : `cree_par` est un objet { id, nom }, P() attendait un identifiant).
   { nom: "fenetre-affiche", ancre: "#capitainerie/affiches", geste: OUVRIR_AFFICHE, interdits: ["Membre parti", "[object Object]"] },
   { nom: "fenetre-editeur-affiche", ancre: "#capitainerie/affiches", geste: "[...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle affiche')).click()" },
-  { nom: "fenetre-dossier-etape1", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À décider") },
-  { nom: "fenetre-dossier-correction", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À corriger") },
-  { nom: "fenetre-choix-questions", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À décider"),
-    geste2: "[...document.querySelectorAll('dialog button')].find(b => b.textContent.includes('Passer à l')).click()" },
+  { nom: "fenetre-dossier-demande", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("Demande à lire") },
+  { nom: "fenetre-dossier-correction", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("À corriger") },
+  { nom: "fenetre-dossier-en-cours", ancre: "#capitainerie/recrutement", geste: OUVRIR_GROUPE_ZONE("En cours"), geste2: CLIQUER_LIGNE("Il répond") },
+  { nom: "fenetre-etapes-candidat", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("Demande à lire"),
+    geste2: CLIQUER_DIALOGUE("Choisir ses étapes") },
+  { nom: "fenetre-question-pour-lui", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("Demande à lire"),
+    geste2: CLIQUER_DIALOGUE("Choisir ses étapes"), geste3: CLIQUER_DIALOGUE("Écrire une question pour lui") },
+  { nom: "fenetre-voir-candidat", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("À corriger"),
+    geste2: CLIQUER_DIALOGUE("Voir comme le candidat") },
+  { nom: "fenetre-proposer-chef", ancre: "#capitainerie/recrutement/chefs", geste: OUVRIR_GROUPES_ZONE,
+    geste2: "[...document.querySelectorAll('#contenu button')].find((b) => b.textContent.includes(\"Proposer d'être chef\")).click()" },
+  { nom: "fenetre-purge", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("La purge exceptionnelle"),
+    geste2: "[...document.querySelectorAll('#contenu button')].find((b) => b.textContent.includes('Voir ce qui serait effacé')).click()" },
   { nom: "fenetre-file", ancre: "#port/apercu", geste: "document.querySelector('#plaque-etat').click()" },
   { nom: "fenetre-element-catalogue", ancre: "#capitainerie/catalogue", geste: "(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.element-carte').click(); })()" },
   // Textes & noms (26/10/2026) : la liste, un groupe ouvert, l'éditeur d'un texte de Discord et celui d'un nom du site ;
@@ -158,7 +183,7 @@ const SCENES = [
   // les textes de la carte de l'équipe (Candidatures → Questionnaire) ; ceux du guide du clan (Rôles & métiers).
   { nom: "fenetre-renommer-rubrique", ancre: "#equipage/annonces/composer", geste: "document.querySelector('#contenu .titre-rubrique .renommer-rubrique').click()" },
   // (Les messages du bot sont rangés dans un groupe replié du questionnaire : déplié d'abord.)
-  { nom: "fenetre-textes-equipe", ancre: "#equipage/candidatures/questionnaire", geste: "(async () => { const g = [...document.querySelectorAll('#contenu details.groupe')].find((d) => d.querySelector('summary').textContent.includes('Les messages du bot')); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); [...document.querySelectorAll('#contenu button')].find(b => b.textContent.includes(\"La carte de l'équipe\")).click(); return 1; })()" },
+  { nom: "fenetre-textes-equipe", ancre: "#capitainerie/recrutement/questions", geste: "(async () => { const g = [...document.querySelectorAll('#contenu details.groupe')].find((d) => d.querySelector('summary').textContent.includes('Les messages du bot')); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); [...document.querySelectorAll('#contenu button')].find(b => b.textContent.includes(\"La carte de l'équipe\")).click(); return 1; })()" },
   { nom: "fenetre-textes-guide", ancre: "#capitainerie/roles", geste: "[...document.querySelectorAll('#contenu button')].find(b => b.textContent.includes('Les textes du guide du clan')).click()" },
   // La présence en direct : une SECONDE personne (la direction, son propre cookie) tient l'affiche de Kolax en
   // modification. La liste « À bord » ouverte, la carte sous cadenas, l'éditeur en lecture seule (vrai site local).
@@ -400,6 +425,7 @@ async function controlerScene(o, scene, [l, hh]) {
   const pret = await attendrePret(o);
   if (scene.geste) { try { await evaluer(o, scene.geste); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
   if (scene.geste2) { try { await evaluer(o, scene.geste2); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
+  if (scene.geste3) { try { await evaluer(o, scene.geste3); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
   const res = await evaluer(o, CONTROLE);
   const texteVu = scene.interdits ? await evaluer(o, "(document.querySelector('dialog[open]') || document.body).innerText") : "";
   const fichier = join(SORTIE, `${scene.nom}-${l}x${hh}.png`);

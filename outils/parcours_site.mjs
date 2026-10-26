@@ -7,7 +7,8 @@
 //   node outils/parcours_site.mjs [--url http://localhost:8790] [--sortie <dossier>] [--parcours recrutement,capitainerie,metiers,textes]
 //                                 [--navigateur <exe>]
 //   Parcours : recrutement, capitainerie, metiers, accueil (« Ce qui t'attend » : chaque ligne mène au bon endroit),
-//              recherche (Ctrl+K : membre, ticket, affiche, catalogue, banque, rubrique).
+//              recherche (Ctrl+K : membre, ticket, affiche, catalogue, banque, rubrique), recrutement_zone (« Demande de
+//              recrutement » de bout en bout : le vrai chemin du bot sur le site local seulement).
 //   « textes » (Textes & noms) lit aussi ce que le FAUX Discord du site local a reçu (`/tableau/demo/discord`) : il ne se
 //   joue que sur le site local, jamais sur la maquette.
 //
@@ -155,49 +156,59 @@ async function etape(o, nom, fn) {
 }
 
 // ═══ LE RECRUTEMENT ═════════════════════════════════════════════════════════
+// 26/10/2026 : tout le recrutement est dans La Capitainerie, « Demande de recrutement » (recrutement_zone.js). Les
+// lignes portent leur ticket (`data-ticket`) ; le dossier s'ouvre au clic, ses décisions sont en bas de la fenêtre.
+const ZONE_RECRUTEMENT = "#capitainerie/recrutement";
 async function ouvrirCandidature(o, ticket, attendu) {
   await fermerTout(o);
-  await aller(o, "#equipage/candidatures");
-  // Une ligne compacte (rangement.js, 26/10) — ou une ancienne carte.
-  if (!await cliquer(o, ".lc-clic, .feuillet.lien", "Ticket #" + ticket + " ")) return false;
-  return attendre(async () => (await texteZone(o)).includes(attendu), 10000);
+  //  La liste relue : on passe par une autre page (la même adresse ne redessinerait rien).
+  if ((await evaluer(o, "location.hash")).startsWith(ZONE_RECRUTEMENT)) await aller(o, "#accueil/attente");
+  await aller(o, ZONE_RECRUTEMENT);
+  await evaluer(o, "(async () => { for (const d of document.querySelectorAll('#contenu .zr-scene details.groupe')) d.open = true; await new Promise((r) => setTimeout(r, 500)); return 1; })()");
+  const clic = await evaluer(o, `(() => { const li = document.querySelector('#contenu li.lc[data-ticket="${Number(ticket)}"]');
+    const b = li && li.querySelector(".lc-ouvrir"); if (!b) return false; b.scrollIntoView({ block: "center" }); b.click(); return true; })()`);
+  if (!clic) return false;
+  return attendre(async () => { const t = await texteZone(o); return t.includes("Dossier de") && t.includes(attendu) ? t : null; }, 10000);
 }
+/** Le nombre affiché dans le titre d'un groupe de la zone (0 : le groupe n'est pas là). */
+const compteGroupe = (o, titre) => evaluer(o, `(() => { const d = [...document.querySelectorAll("#contenu details.groupe")].find((x) => x.querySelector(".groupe-titre").textContent.trim() === ${JSON.stringify(titre)});
+  if (!d) return 0; const c = d.querySelector("summary .compteur"); return c ? Number(c.textContent) : 0; })()`);
+
 async function parcoursRecrutement(o) {
   const dossier = (t) => api(o, "recrutement/dossier?ticket=" + t);
   const suivi = await api(o, "recrutement/suivi");
-  const parEtape = (e) => (suivi.ouverts || []).filter((x) => x.etape === e).map((x) => x.ticket);
+  const ouverts = (suivi.ouverts || []).filter((x) => !x.fermeture_prevue);
+  const parEtape = (e) => ouverts.filter((x) => x.etape === e).map((x) => x.ticket);
   const [t1, t1bis] = parEtape("etape1");
   const [tAttente] = parEtape("etape2");
   const [tCorr, tCorr2] = parEtape("reponses");
 
-  await etape(o, "Liste : les étapes du serveur", async () => {
-    await aller(o, "#equipage/candidatures");
-    const t = await evaluer(o, "document.querySelector('#contenu').innerText");
-    const nb = (lib) => { const m = t.match(new RegExp(lib + "\\s+(\\d+)")); return m ? Number(m[1]) : -1; };
-    const ok = nb("Étape 1 à décider") === parEtape("etape1").length && nb("Réponses à corriger") === parEtape("reponses").length && nb("Questions envoyées") === parEtape("etape2").length;
-    return { ok, detail: `page : ${nb("Étape 1 à décider")}/${nb("Réponses à corriger")}/${nb("Questions envoyées")} · serveur : ${parEtape("etape1").length}/${parEtape("reponses").length}/${parEtape("etape2").length}` };
+  await etape(o, "Liste : les étapes du serveur, rangées par prochaine action", async () => {
+    await aller(o, ZONE_RECRUTEMENT);
+    const n = (a) => ouverts.filter((x) => a.includes(x.action)).length;
+    const page = [await compteGroupe(o, "À analyser"), await compteGroupe(o, "À corriger"), await compteGroupe(o, "En cours")];
+    const serveur = [n(["analyser", "etape_suivante"]), n(["corriger"]), n(["attendre"])];
+    return { ok: JSON.stringify(page) === JSON.stringify(serveur), detail: `page : ${page.join("/")} · serveur : ${serveur.join("/")}` };
   });
 
-  await etape(o, "Étape 1 → étape 2 : la sélection précédente part", async () => {
-    if (!await ouvrirCandidature(o, t1, "La décision de l'étape 1")) return { ok: false, detail: "dossier de l'étape 1 introuvable (ticket " + t1 + ")" };
-    if (!await cliquer(o, "button", "Passer à l'étape 2")) return { ok: false, detail: "bouton « Passer à l'étape 2 » absent" };
-    if (!await attendre(() => cliquer(o, "button.depart", "Reprendre la sélection précédente"), 6000)) return { ok: false, detail: "départ « sélection précédente » absent" };
-    await pause(300);
-    if (!await cliquer(o, "button.envoyer", "Envoyer")) return { ok: false, detail: "bouton d'envoi absent ou inactif" };
+  await etape(o, "Demande approuvée : le questionnaire prévu part", async () => {
+    if (!await ouvrirCandidature(o, t1, "Sa demande")) return { ok: false, detail: "dossier de la demande introuvable (ticket " + t1 + ")" };
+    if (!await cliquer(o, "dialog[open] button", "Approuver la demande")) return { ok: false, detail: "bouton « Approuver la demande » absent" };
     const d = await attendre(async () => { const x = await dossier(t1); return x.etape === "etape2" && x.envois.length === 1 ? x : null; });
     if (!d) return { ok: false, detail: "le serveur n'a pas l'envoi : " + JSON.stringify(await dossier(t1)).slice(0, 200) };
-    const vu = await attendre(async () => (await texteZone(o)).includes("questions envoyées"), 6000);
+    const vu = await attendre(async () => (await texteZone(o)).includes("Son questionnaire"), 6000);
     return { ok: !!vu, detail: d.envois[0].nb + " questions envoyées" + (vu ? "" : " — la page ne l'affiche pas") };
   });
 
   await etape(o, "En attente : questions listées, aucune correction possible", async () => {
-    if (!await ouvrirCandidature(o, tAttente, "questions envoyées")) return { ok: false, detail: "dossier en attente introuvable" };
+    if (!await ouvrirCandidature(o, tAttente, "Son questionnaire")) return { ok: false, detail: "dossier en attente introuvable" };
     const t = await texteZone(o);
-    return { ok: t.includes("En attente des réponses du candidat") && !t.includes("Réponse du candidat"), detail: "" };
+    const corrigeable = await evaluer(o, `${ZONE}.querySelectorAll(".correction-reponse").length`);
+    return { ok: t.includes("En attente des réponses du candidat") && !corrigeable, detail: corrigeable ? corrigeable + " cartes de correction" : "" };
   });
 
   await etape(o, "Correction : tout juste, puis accepter", async () => {
-    if (!await ouvrirCandidature(o, tCorr, "la correction")) return { ok: false, detail: "dossier à corriger introuvable" };
+    if (!await ouvrirCandidature(o, tCorr, "Son questionnaire")) return { ok: false, detail: "dossier à corriger introuvable" };
     const avant = await dossier(tCorr);
     const total = avant.envois[0].questions.length;
     const rep = await evaluer(o, `[...${ZONE}.querySelectorAll(".correction-reponse p")].filter((p) => !p.classList.contains("aide")).length`);
@@ -216,8 +227,8 @@ async function parcoursRecrutement(o) {
   });
 
   await etape(o, "Refuser après correction : message, fermeture", async () => {
-    if (!await ouvrirCandidature(o, tCorr2, "la correction")) return { ok: false, detail: "second dossier à corriger introuvable" };
-    if (!await cliquer(o, "button", "Refuser")) return { ok: false, detail: "bouton « Refuser » absent" };
+    if (!await ouvrirCandidature(o, tCorr2, "Son questionnaire")) return { ok: false, detail: "second dossier à corriger introuvable" };
+    if (!await cliquer(o, "dialog[open] button", "Refuser")) return { ok: false, detail: "bouton « Refuser » absent" };
     const t = await attendre(async () => { const x = await texteZone(o); return x.includes("La direction a étudié ta candidature") ? x : null; }, 6000);
     if (!t) return { ok: false, detail: "la confirmation ne montre pas le message exact du serveur" };
     if (t.includes("-#")) return { ok: false, detail: "le message montre la syntaxe Discord « -# »" };
@@ -228,24 +239,25 @@ async function parcoursRecrutement(o) {
     return { ok: !!ferme, detail: ferme ? "refusé, ticket fermé" : "état : " + JSON.stringify(await dossier(tCorr2)).slice(0, 200) };
   });
 
-  await etape(o, "Refuser l'étape 1 : message exact, fermeture prévue", async () => {
-    if (!await ouvrirCandidature(o, t1bis, "La décision de l'étape 1")) return { ok: false, detail: "second dossier de l'étape 1 introuvable" };
-    if (!await cliquer(o, "button", "Refuser l'étape 1")) return { ok: false, detail: "bouton absent" };
+  await etape(o, "Refuser la demande : message exact, fermeture prévue", async () => {
+    if (!await ouvrirCandidature(o, t1bis, "Sa demande")) return { ok: false, detail: "seconde demande introuvable" };
+    if (!await cliquer(o, "dialog[open] button", "Refuser la demande")) return { ok: false, detail: "bouton absent" };
     const t = await attendre(async () => { const x = await texteZone(o); return x.includes("ne correspondent pas à ce que nous attendons") ? x : null; }, 6000);
     if (!t) return { ok: false, detail: "la confirmation ne montre pas le message du serveur" };
     if (!await cliquer(o, "dialog[open] button", "Refuser et fermer le ticket")) return { ok: false, detail: "confirmation absente" };
     const d = await attendre(async () => { const x = await dossier(t1bis); return x.etape === "refus_etape1" ? x : null; }, 10000);
-    return { ok: !!d, detail: d ? "étape 1 refusée" + (d.fermeture_prevue ? ", fermeture prévue" : ", ticket fermé") : "état : " + JSON.stringify(await dossier(t1bis)).slice(0, 200) };
+    return { ok: !!d, detail: d ? "demande refusée" + (d.fermeture_prevue ? ", fermeture prévue" : ", ticket fermé") : "état : " + JSON.stringify(await dossier(t1bis)).slice(0, 200) };
   });
 
   // ─── La banque de questions ───
   const QUESTION = "Combien de joueurs au plus un équipage du parcours compte-t-il ?";
   const banque = () => api(o, "recrutement/banque");
   const laQuestion = async () => ((await banque()).questions || []).find((q) => q.question === QUESTION);
+  const QUESTIONS = ZONE_RECRUTEMENT + "/questions";
 
   await etape(o, "Banque : ajouter une question", async () => {
     await fermerTout(o);
-    await aller(o, "#equipage/candidatures/questionnaire");
+    await aller(o, QUESTIONS);
     if (!await cliquer(o, "button", "Ajouter une question")) return { ok: false, detail: "bouton absent" };
     await attendre(async () => (await texteZone(o)).includes("Nouvelle question"), 5000);
     const champs = [await ecrire(o, "Quel studio développe RELL Seas ?", QUESTION), await ecrire(o, "RELL Games", "Huit"),
@@ -259,7 +271,7 @@ async function parcoursRecrutement(o) {
   });
 
   await etape(o, "Banque : désactiver puis réactiver", async () => {
-    await aller(o, "#equipage/candidatures/questionnaire");
+    await aller(o, QUESTIONS);
     if (!await ecrire(o, "Question, réponse, source…", QUESTION)) return { ok: false, detail: "recherche absente" };
     await pause(700);
     const basculer = () => evaluer(o, `(() => { const l = [...document.querySelectorAll(".banque-ligne")].find((x) => x.textContent.includes(${JSON.stringify(QUESTION)}));
@@ -274,7 +286,7 @@ async function parcoursRecrutement(o) {
   });
 
   await etape(o, "Banque : retirer la question", async () => {
-    await aller(o, "#equipage/candidatures/questionnaire");
+    await aller(o, QUESTIONS);
     await ecrire(o, "Question, réponse, source…", QUESTION);
     await pause(700);
     const clic = await evaluer(o, `(() => { const l = [...document.querySelectorAll(".banque-ligne")].find((x) => x.textContent.includes(${JSON.stringify(QUESTION)}));
@@ -283,7 +295,7 @@ async function parcoursRecrutement(o) {
     if (!await attendre(() => cliquer(o, "dialog[open] button", "Retirer"), 5000)) return { ok: false, detail: "confirmation absente" };
     const q = await attendre(async () => { const x = await laQuestion(); return x && x.retiree ? x : null; });
     if (!q) return { ok: false, detail: "retrait non reçu" };
-    await aller(o, "#equipage/candidatures/questionnaire");
+    await aller(o, QUESTIONS);
     await ecrire(o, "Question, réponse, source…", QUESTION);
     await pause(700);
     const encore = await evaluer(o, `[...document.querySelectorAll(".banque-ligne")].some((x) => x.textContent.includes(${JSON.stringify(QUESTION)}))`);
@@ -291,7 +303,7 @@ async function parcoursRecrutement(o) {
   });
 
   await etape(o, "Liens : en ajouter un", async () => {
-    await aller(o, "#equipage/candidatures/questionnaire");
+    await aller(o, QUESTIONS);
     const avant = (await banque()).liens.length;
     await deplier(o, "Les liens donnés au candidat");
     if (!await cliquer(o, "button", "Ajouter un lien")) return { ok: false, detail: "bouton absent" };
@@ -305,7 +317,7 @@ async function parcoursRecrutement(o) {
   });
 
   await etape(o, "Réglages : une question de plus", async () => {
-    await aller(o, "#equipage/candidatures/questionnaire");
+    await aller(o, QUESTIONS);
     const avant = (await banque()).reglages.nombre;
     await deplier(o, "Les réglages");
     if (!await cliquer(o, "button", "Une de plus")) return { ok: false, detail: "bouton « Une de plus » absent" };
@@ -315,7 +327,7 @@ async function parcoursRecrutement(o) {
   });
 
   await etape(o, "Modèles : enregistrer la sélection précédente, la mettre par défaut", async () => {
-    await aller(o, "#equipage/candidatures/questionnaire");
+    await aller(o, QUESTIONS);
     await deplier(o, "Les modèles");
     if (!await cliquer(o, "button", "Nouveau modèle")) return { ok: false, detail: "bouton « Nouveau modèle » absent" };
     if (!await attendre(() => cliquer(o, "button.depart", "Reprendre la sélection précédente"), 6000)) return { ok: false, detail: "départ absent" };
@@ -325,13 +337,266 @@ async function parcoursRecrutement(o) {
     const m = await attendre(async () => ((await banque()).modeles || []).find((x) => x.nom === "Parcours complet"));
     if (!m) return { ok: false, detail: "le serveur n'a pas le modèle" };
     await fermerTout(o);
-    await aller(o, "#equipage/candidatures/questionnaire");
+    await aller(o, QUESTIONS);
     await deplier(o, "Les modèles");
     const clic = await evaluer(o, `(() => { const f = [...document.querySelectorAll(".feuillet")].find((x) => x.textContent.includes("Parcours complet"));
       const b = f && [...f.querySelectorAll("button")].find((x) => x.textContent.trim() === "Par défaut"); if (!b) return false; b.click(); return true; })()`);
     if (!clic) return { ok: false, detail: "bouton « Par défaut » introuvable" };
     const d = await attendre(async () => ((await banque()).modeles || []).find((x) => x.nom === "Parcours complet" && x.par_defaut));
     return { ok: !!d, detail: d ? d.questions.length + " questions, par défaut" : "« par défaut » non reçu" };
+  });
+}
+
+// ═══ LA ZONE « DEMANDE DE RECRUTEMENT » DE BOUT EN BOUT (26/10/2026) ═════════
+// Le VRAI chemin du bot (le site local : `/tableau/demo/recrutement/…` joue le panneau, « Oui », la fiche, les réponses
+// du candidat), le FAUX Discord relu (`/tableau/demo/discord`) : la preuve est ce que le candidat voit dans son ticket
+// et en message privé, jamais seulement l'écran du site.
+async function parcoursRecrutementZone(o) {
+  const N = Date.now().toString(36).slice(-4);
+  const demo = (chemin) => evaluer(o, `fetch(${JSON.stringify(BASE + "/tableau/demo/")} + ${JSON.stringify(chemin)}, { cache: "no-store", credentials: "same-origin" }).then((r) => r.json())`);
+  const ecrireApi = (chemin, corps) => evaluer(o, `fetch(${JSON.stringify(SITE + "api/")} + ${JSON.stringify(chemin)}, { method: "POST", credentials: "same-origin",
+    headers: { "X-Tableau": "1", "Content-Type": "application/json" }, body: ${JSON.stringify(JSON.stringify(corps))} }).then(async (r) => ({ status: r.status, corps: await r.json() }))`);
+  const dossier = (t) => api(o, "recrutement/dossier?ticket=" + t);
+  const parcoursP1 = async () => ((await api(o, "recrutement/parcours")).panneaux || []).find((p) => p.panneau === "p1");
+  const visibles = async (t) => ((await demo("discord?ticket=" + t)).messages || []);
+  const d0 = await donneesSite(o);
+  //  Des candidats hors du clan, pas encore en ticket : trois personnes du serveur.
+  const clan = new Set(((await api(o, "recrutement/chefs")).membres || []).map((m) => String(m.id)));
+  //  Ni un candidat en cours, ni quelqu'un sur la liste noire (un parcours d'avant a pu refuser sa demande).
+  const pris = new Set([...(d0.en_cours || []).map((c) => String(c.id)),
+    ...((await api(o, "recrutement/liste_noire")).actifs || []).map((x) => String(x.membre.id))]);
+  const libres = Object.values(d0.personnes || {}).filter((p) => p && /^\d+$/.test(String(p.id)) && !pris.has(String(p.id)) && !clan.has(String(p.id))
+    && !(d0.a_part || []).includes(String(p.id)));
+  const [cand, elimine, refuse] = libres.slice(-3);
+  let tid = 0;
+
+  await etape(o, "Zone : l'ancienne adresse mène à « Demande de recrutement », ses quatre sous-onglets", async () => {
+    await aller(o, "#equipage/candidatures");
+    const h = await evaluer(o, "location.hash");
+    const planches = await evaluer(o, "[...document.querySelectorAll('.zr-planche .zr-planche-titre')].map((x) => x.textContent.trim())");
+    const equipage = await evaluer(o, "(async () => { location.hash = '#equipage/membres'; await new Promise((r) => setTimeout(r, 800)); return [...document.querySelectorAll('#rubriques a')].map((a) => a.textContent.trim()); })()");
+    const ok = h.startsWith("#capitainerie/recrutement") && JSON.stringify(planches) === JSON.stringify(["Candidatures", "Chefs d'équipe", "Questions", "Réglages"])
+      && !equipage.some((t) => t.includes("Candidatures"));
+    return { ok, detail: h + " · " + planches.join(", ") + " · Équipage : " + equipage.join(", ") };
+  });
+
+  await etape(o, "Réglages : le parcours (approbation, la fiche avec un choix éliminatoire, deux étapes)", async () => {
+    await aller(o, ZONE_RECRUTEMENT + "/reglages");
+    const fait = await evaluer(o, `(async () => {
+      const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+      const cadre = document.querySelector(".zr-parcours"); if (!cadre) return "cadre absent";
+      for (const d of cadre.querySelectorAll("details.groupe")) d.open = true; await pause(400);
+      [...cadre.querySelectorAll(".zr-mode")].find((b) => b.textContent.includes("Approbation")).click();
+      // La fiche : on retire les champs du panneau, puis deux champs — la tranche d'âge (un choix, « Moins de 13 ans » éliminatoire), le pseudo.
+      while (cadre.querySelector('[aria-label="Retirer ce champ"]')) { cadre.querySelector('[aria-label="Retirer ce champ"]').click(); await pause(150); }
+      const ajouterChamp = async () => { [...cadre.querySelectorAll("button")].find((b) => b.textContent.includes("Ajouter un champ")).click(); await pause(250); };
+      await ajouterChamp();
+      let champs = cadre.querySelectorAll(".zr-champ");
+      let c = champs[champs.length - 1];
+      const titre = c.querySelector('input[aria-label^="Titre du champ"]'); titre.value = "Tranche d'âge"; titre.dispatchEvent(new Event("input", { bubbles: true }));
+      c.querySelector('button.liste-bouton').click(); await pause(300);
+      const opt = [...document.querySelectorAll(".menu-pop button.option")].find((b) => b.textContent.includes("Un choix dans une liste")); if (!opt) return "type « choix » absent"; opt.click(); await pause(300);
+      champs = cadre.querySelectorAll(".zr-champ"); c = [...champs].find((x) => x.querySelector('input[aria-label="Nouveau choix"]'));
+      for (const t of ["Moins de 13 ans", "13 à 15 ans", "16 à 17 ans", "18 ans ou plus"]) {
+        const s = c.querySelector('input[aria-label="Nouveau choix"]'); s.value = t; s.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); await pause(200);
+        c = [...cadre.querySelectorAll(".zr-champ")].find((x) => x.querySelector('input[aria-label="Nouveau choix"]'));
+      }
+      const elim = c.querySelector('input[aria-label="Éliminatoire : Moins de 13 ans"]'); if (!elim) return "case éliminatoire absente"; elim.click(); await pause(200);
+      await ajouterChamp();
+      champs = cadre.querySelectorAll(".zr-champ"); c = [...champs].filter((x) => x.querySelector('input[aria-label^="Titre du champ"]')).pop();
+      const t2 = c.querySelector('input[aria-label^="Titre du champ"]'); t2.value = "Pseudo Roblox"; t2.dispatchEvent(new Event("input", { bubbles: true }));
+      // Deux étapes : le jeu (un tirage de 3), le clan (un tirage de 2).
+      while (cadre.querySelector('[aria-label="Retirer l\\'étape"]')) { cadre.querySelector('[aria-label="Retirer l\\'étape"]').click(); await pause(150); }
+      for (const [n, nb] of [["Le jeu", "3"], ["Le clan", "2"]]) {
+        [...cadre.querySelectorAll("button")].find((b) => b.textContent.includes("Ajouter une étape")).click(); await pause(250);
+        const e = [...cadre.querySelectorAll(".zr-champ")].filter((x) => x.querySelector('input[aria-label^="Titre de l\\'étape"]')).pop();
+        const ti = e.querySelector('input[aria-label^="Titre de l\\'étape"]'); ti.value = n; ti.dispatchEvent(new Event("input", { bubbles: true }));
+        const nbr = e.querySelector('input[aria-label="Nombre de questions tirées"]'); nbr.value = nb; nbr.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      [...cadre.querySelectorAll("button")].find((b) => b.textContent.includes("Enregistrer le parcours")).click();
+      return "ok"; })()`);
+    if (fait !== "ok") return { ok: false, detail: fait };
+    const p = await attendre(async () => { const x = await parcoursP1(); return x && x.version >= 1 && (x.gabarit || []).length === 2 && (x.fiche || []).length === 2 ? x : null; }, 15000);
+    if (!p) return { ok: false, detail: "le serveur n'a pas le parcours : " + JSON.stringify(await parcoursP1()).slice(0, 300) };
+    const age = p.fiche[0];
+    const ok = p.mode === "approbation" && age.type === "choix" && JSON.stringify(age.eliminatoires) === JSON.stringify(["Moins de 13 ans"]) && p.gabarit[0].titre === "Le jeu" && p.gabarit[1].nombre === 2;
+    return { ok, detail: "version " + p.version + " · fiche : " + p.fiche.map((c) => c.titre + (c.eliminatoires.length ? " (" + c.eliminatoires.join(", ") + " éliminatoire)" : "")).join(", ") + " · étapes : " + p.gabarit.map((e) => e.titre).join(", ") };
+  });
+
+  await etape(o, "Ticket : « Es-tu sûr ? », la fiche, puis l'affiche seule (le vrai chemin du bot)", async () => {
+    if (!cand) return { ok: false, detail: "aucun candidat libre" };
+    const r = await demo(`recrutement/ouvrir?membre=${cand.id}&choix=2&pseudo=Parcours_${N}`);
+    if (!r.ok || !r.ticket) return { ok: false, detail: "pas de ticket : " + JSON.stringify(r).slice(0, 300) };
+    tid = r.ticket;
+    const m = await visibles(tid);
+    const t = (m[0] || {}).texte || "";
+    const ok = r.confirmation.includes("Es-tu sûr") && r.fiche.map((c) => c.titre).join(",") === "Tranche d'âge,Pseudo Roblox" && m.length === 1
+      && t.includes("Parcours\\_" + N) && t.includes("16 à 17 ans") && !/Ticket (n°|#)/.test(t) && JSON.stringify(m[0].boutons) === JSON.stringify(["Direction"]);
+    return { ok, detail: "ticket #" + tid + " · " + m.length + " message(s) · « " + t.slice(0, 110) + "… » · boutons " + JSON.stringify((m[0] || {}).boutons) };
+  });
+
+  await etape(o, "Élimination d'office : aucun ticket, un message privé, « Éliminé d'office » dans les décidées", async () => {
+    if (!elimine) return { ok: false, detail: "aucun second candidat libre" };
+    const r = await demo(`recrutement/ouvrir?membre=${elimine.id}&choix=0`);
+    if (r.ticket) return { ok: false, detail: "un ticket a été ouvert : #" + r.ticket };
+    const mp = ((await demo("discord?mp=" + elimine.id)).mp || []).map((x) => x.texte).join(" | ");
+    await aller(o, ZONE_RECRUTEMENT);
+    await evaluer(o, `(async () => { const d = [...document.querySelectorAll("#contenu details.groupe")].find((x) => x.querySelector(".groupe-titre").textContent.trim() === "Décidées"); if (d) d.open = true; await new Promise((r) => setTimeout(r, 900)); return 1; })()`);
+    const vu = await attendre(async () => (await texteZone(o)).includes("Éliminé d'office · Tranche d'âge"), 8000);
+    const noire = ((await api(o, "recrutement/liste_noire")).actifs || []).some((x) => x.membre.id === String(elimine.id));
+    return { ok: r.elimine && mp.includes("n'est pas retenue") && !!vu && noire, detail: "lu : « " + (r.lu || "").slice(0, 80) + "… » · MP : « " + mp.slice(0, 60) + "… » · liste noire " + noire };
+  });
+
+  await etape(o, "Approbation : ses étapes, une question écrite pour lui — le ticket reçoit exactement cela", async () => {
+    if (!await ouvrirCandidature(o, tid, "Sa demande")) return { ok: false, detail: "dossier du ticket #" + tid + " introuvable" };
+    if (!await cliquer(o, "dialog[open] button", "Choisir ses étapes")) return { ok: false, detail: "« Choisir ses étapes » absent" };
+    if (!await attendre(async () => (await texteZone(o)).includes("Ses étapes, pour lui seul"), 8000)) return { ok: false, detail: "l'éditeur ne s'ouvre pas" };
+    const etapes = await evaluer(o, `[...${ZONE}.querySelectorAll(".zr-etape-edit h4")].map((x) => x.textContent)`);
+    if (!await cliquer(o, "dialog[open] button", "Écrire une question pour lui")) return { ok: false, detail: "« Écrire une question pour lui » absent" };
+    await pause(500);
+    const QUESTION = "Quel est le nom du navire amiral de l'équipage " + N + " ?";
+    const ecrit = await evaluer(o, `(() => { const d = [...document.querySelectorAll("dialog[open]")].pop();
+      const t = d.querySelector("textarea"); t.value = ${JSON.stringify(QUESTION)}; t.dispatchEvent(new Event("input", { bubbles: true }));
+      const r = d.querySelector('input[placeholder="Charpentier"]'); r.value = "La Sirène"; r.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+    if (!ecrit || !await cliquer(o, "dialog[open] button", "Ajouter à l'étape")) return { ok: false, detail: "la question n'a pas pu être écrite" };
+    await pause(400);
+    if (!await cliquer(o, "dialog[open] button", "Approuver et ouvrir l'étape 2")) return { ok: false, detail: "bouton d'approbation absent" };
+    const d = await attendre(async () => { const x = await dossier(tid); return x.etape === "etape2" && x.envois.length === 1 ? x : null; }, 15000);
+    if (!d) return { ok: false, detail: "le serveur n'a pas l'envoi" };
+    const e = d.envois[0];
+    const perso = e.questions.find((q) => q.question === QUESTION);
+    const m = await attendre(async () => { const x = await visibles(tid); return x.length === 2 ? x : null; }, 8000);
+    const message = ((m || [])[1] || {}).texte || "";
+    const affiche = ((m || [])[0] || {}).texte || "";
+    const mp = ((await demo("discord?mp=" + cand.id)).mp || []).map((x) => x.texte).join(" | ");
+    const ok = !!perso && perso.id.startsWith("p-") && perso.etape === 1 && e.etapes.map((x) => x.titre).join(",") === "Le jeu,Le clan"
+      && message.includes(QUESTION) && message.includes("Étape 2 sur 3") && !message.includes("La Sirène") && affiche.includes("Étape 2 sur 3 : à toi")
+      && mp.includes("Ta demande de recrutement est acceptée");
+    return { ok, detail: "éditeur : " + etapes.join(", ") + " · envoi : " + e.etapes.map((x) => x.titre + " (" + e.questions.filter((q) => q.etape === x.numero).length + ")").join(", ")
+      + " · messages du ticket : " + (m || []).length + " · « " + message.slice(0, 80) + "… »" };
+  });
+
+  await etape(o, "Passage d'étape : il envoie l'étape 2, la direction ouvre l'étape 3 (l'ancien message s'efface)", async () => {
+    const avant = (await visibles(tid)).map((x) => x.id);
+    const r = await demo("recrutement/repondre?ticket=" + tid);
+    if (!r.ok || r.etape_envoyee !== 1) return { ok: false, detail: "réponses du candidat : " + JSON.stringify(r).slice(0, 200) };
+    const recue = ((await visibles(tid))[1] || {}).texte || "";
+    if (!await ouvrirCandidature(o, tid, "Étape 2 reçue")) return { ok: false, detail: "le dossier ne dit pas « Étape 2 reçue »" };
+    if (!await cliquer(o, "dialog[open] button", "Ouvrir l'étape 3")) return { ok: false, detail: "bouton « Ouvrir l'étape 3 » absent" };
+    const d = await attendre(async () => { const x = await dossier(tid); return x.envois[0].etape_ouverte === 2 ? x : null; }, 10000);
+    if (!d) return { ok: false, detail: "le serveur n'a pas ouvert l'étape suivante" };
+    const apres = await visibles(tid);
+    const ok = recue.includes("réponses reçues") && apres.length === 2 && !apres.some((x) => x.id === avant[1]) && apres[1].texte.includes("Étape 3 sur 3");
+    return { ok, detail: "après l'étape 2 : « " + recue.slice(0, 60) + "… » · ticket : " + apres.length + " messages, « " + ((apres[1] || {}).texte || "").slice(0, 60) + "… »" };
+  });
+
+  await etape(o, "Voir comme le candidat : l'affiche, ses formulaires, jamais les réponses attendues", async () => {
+    if (!await ouvrirCandidature(o, tid, "Son questionnaire")) return { ok: false, detail: "dossier introuvable" };
+    if (!await cliquer(o, "dialog[open] button", "Voir comme le candidat")) return { ok: false, detail: "bouton absent" };
+    const t = await attendre(async () => { const x = await texteZone(o); return x.includes("Ses formulaires") ? x : null; }, 8000);
+    const banniere = await evaluer(o, "!!([...document.querySelectorAll('dialog[open]')].pop().querySelector('.discord-media img'))");
+    //  Ses réponses à lui y sont (il a répondu) ; jamais la réponse attendue ni ses variantes.
+    return { ok: !!t && t.includes("L'affiche, dans son ticket") && !/Réponse attendue|Variantes admises/.test(t) && banniere,
+      detail: t ? "bannière " + banniere + " · " + t.slice(0, 120).replace(/\s+/g, " ") : "aperçu absent" };
+  });
+
+  await etape(o, "Toutes ses réponses : à corriger, les identiques marquées, puis accepté (le rôle, le message, le MP)", async () => {
+    const r = await demo("recrutement/repondre?ticket=" + tid);
+    if (!r.ok || r.statut !== "repondu") return { ok: false, detail: "réponses : " + JSON.stringify(r).slice(0, 200) };
+    if (!await ouvrirCandidature(o, tid, "Son questionnaire")) return { ok: false, detail: "dossier introuvable" };
+    if (!await cliquer(o, "dialog[open] button", "Marquer justes les")) return { ok: false, detail: "« Marquer justes » absent" };
+    const corrige = await attendre(async () => { const x = await dossier(tid); const b = x.envois[0].bilan; return b.justes === b.total ? x : null; }, 20000);
+    if (!corrige) return { ok: false, detail: "corrections : " + JSON.stringify((await dossier(tid)).envois[0].bilan) };
+    const total = corrige.envois[0].questions.length;
+    if (!await attendre(() => cliquer(o, "dialog[open] button", "Accepter · " + total + "/" + total), 8000)) return { ok: false, detail: "« Accepter » absent" };
+    if (!await attendre(() => cliquer(o, "dialog[open] button", "Accepter"), 6000)) return { ok: false, detail: "confirmation absente" };
+    const d = await attendre(async () => { const x = await dossier(tid); return x.etape === "accepte" ? x : null; }, 15000);
+    const m = await visibles(tid);
+    const mp = ((await demo("discord?mp=" + cand.id)).mp || []).map((x) => x.texte).join(" | ");
+    const ok = !!d && m.some((x) => x.texte.includes("Bienvenue dans le clan")) && mp.includes("Tu es accepté dans le clan") && m.length <= 2;
+    return { ok, detail: (d ? "accepté" : "pas accepté") + " · ticket : " + m.length + " message(s) visibles · MP : « " + mp.slice(-70) + " »" };
+  });
+
+  await etape(o, "Liste noire : une demande refusée, puis levée", async () => {
+    if (!refuse) return { ok: false, detail: "aucun troisième candidat libre" };
+    const r = await demo(`recrutement/ouvrir?membre=${refuse.id}&choix=3`);
+    if (!r.ticket) return { ok: false, detail: "pas de ticket : " + JSON.stringify(r).slice(0, 200) };
+    if (!await ouvrirCandidature(o, r.ticket, "Sa demande")) return { ok: false, detail: "dossier introuvable" };
+    if (!await cliquer(o, "dialog[open] button", "Refuser la demande")) return { ok: false, detail: "bouton absent" };
+    if (!await attendre(() => cliquer(o, "dialog[open] button", "Refuser et fermer le ticket"), 6000)) return { ok: false, detail: "confirmation absente" };
+    const noire = await attendre(async () => ((await api(o, "recrutement/liste_noire")).actifs || []).find((x) => x.membre.id === String(refuse.id)), 10000);
+    if (!noire) return { ok: false, detail: "pas sur la liste noire" };
+    await aller(o, ZONE_RECRUTEMENT + "/reglages");
+    await deplier(o, "La liste noire");
+    await pause(800);
+    const clic = await evaluer(o, `(() => { const l = [...document.querySelectorAll("#contenu li.lc")].find((x) => x.textContent.includes(${JSON.stringify(noire.membre.nom)}));
+      const b = l && [...l.querySelectorAll("button")].find((x) => x.textContent.includes("Lever")); if (!b) return false; b.click(); return true; })()`);
+    if (!clic) return { ok: false, detail: "« Lever » introuvable (" + noire.membre.nom + ")" };
+    if (!await attendre(() => cliquer(o, "dialog[open] button", "Lever"), 6000)) return { ok: false, detail: "confirmation absente" };
+    const leve = await attendre(async () => !((await api(o, "recrutement/liste_noire")).actifs || []).some((x) => x.membre.id === String(refuse.id)), 10000);
+    return { ok: !!leve, detail: noire.membre.nom + " · motif « " + noire.motif + " » · levée " + !!leve };
+  });
+
+  await etape(o, "Chefs d'équipe : une question de chef, puis proposer un membre du clan", async () => {
+    await aller(o, ZONE_RECRUTEMENT + "/questions");
+    await deplier(o, "La banque des chefs d'équipe");
+    await pause(600);
+    const ouvre = await attendre(() => evaluer(o, `(() => { const g = [...document.querySelectorAll("#contenu details.groupe")].find((x) => x.querySelector("summary").textContent.includes("La banque des chefs"));
+      const b = g && [...g.querySelectorAll("button")].find((x) => x.textContent.includes("Ajouter une question")); if (!b) return false; b.scrollIntoView({ block: "center" }); b.click(); return true; })()`), 8000);
+    if (!ouvre) return { ok: false, detail: "« Ajouter une question » (chefs) absent" };
+    const QUESTION = "Combien de voiles porte un galion de guerre " + N + " ?";
+    const ecrit = await attendre(() => evaluer(o, `(() => { const d = [...document.querySelectorAll("dialog[open]")].pop(); if (!d || !d.textContent.includes("question de chef")) return false;
+      const t = d.querySelector("textarea"); t.value = ${JSON.stringify(QUESTION)}; t.dispatchEvent(new Event("input", { bubbles: true }));
+      const r = d.querySelector('input[placeholder="Douze"]'); r.value = "Trois"; r.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`), 6000);
+    if (!ecrit || !await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "la question de chef n'a pas pu être écrite" };
+    const q = await attendre(async () => ((await api(o, "recrutement/chefs")).questions || []).find((x) => x.question === QUESTION), 10000);
+    if (!q) return { ok: false, detail: "le serveur n'a pas la question de chef" };
+    await aller(o, ZONE_RECRUTEMENT + "/chefs");
+    await deplier(o, "Proposer d'être chef");
+    await pause(600);
+    const qui = await evaluer(o, `(() => { const l = [...document.querySelectorAll("#contenu li.lc")].find((x) => [...x.querySelectorAll("button")].some((b) => b.textContent.includes("Proposer d'être chef")));
+      if (!l) return ""; const nom = l.querySelector(".lc-titre").textContent.trim(); [...l.querySelectorAll("button")].find((b) => b.textContent.includes("Proposer d'être chef")).click(); return nom; })()`);
+    if (!qui) return { ok: false, detail: "aucun membre du clan à proposer" };
+    if (!await attendre(async () => (await texteFenetre(o)).includes(QUESTION), 8000)) return { ok: false, detail: "la question de chef n'est pas proposée" };
+    const coche = await evaluer(o, `(() => { const l = [...[...document.querySelectorAll("dialog[open]")].pop().querySelectorAll("label.case")].find((x) => x.textContent.includes(${JSON.stringify(QUESTION)}));
+      const i = l && l.querySelector("input"); if (!i) return false; if (!i.checked) i.click(); return true; })()`);
+    if (!coche || !await attendre(() => cliquer(o, "dialog[open] button", "Envoyer ·"), 6000)) return { ok: false, detail: "envoi impossible" };
+    if (!await attendre(() => cliquer(o, "dialog[open] button", "Envoyer"), 6000)) return { ok: false, detail: "confirmation absente" };
+    const c = await attendre(async () => ((await api(o, "recrutement/chefs")).candidatures || []).find((x) => x.membre.nom === qui), 10000);
+    return { ok: !!c && c.etat === "en_cours", detail: qui + (c ? " : candidature de chef « " + c.metier_nom + " » en cours" : " : pas de candidature") };
+  });
+
+  await etape(o, "Ses messages, dans l'ordre : « Modifier ce message » réécrit les conditions de l'affiche", async () => {
+    await aller(o, ZONE_RECRUTEMENT + "/reglages");
+    await deplier(o, "Ses messages, dans l'ordre");
+    await pause(800);
+    const clic = await evaluer(o, `(() => { const li = [...document.querySelectorAll(".zr-message")].find((x) => x.querySelector("b").textContent.trim() === "L'affiche");
+      const b = li && [...li.querySelectorAll("button")].find((x) => x.textContent.includes("Modifier ce message")); if (!b) return false; b.click(); return true; })()`);
+    if (!clic) return { ok: false, detail: "« Modifier ce message » absent sur l'affiche" };
+    if (!await attendre(() => cliquer(o, "dialog[open] button", "Les conditions"), 6000)) return { ok: false, detail: "le texte des conditions n'est pas proposé" };
+    const CONDITIONS = "**Pour rejoindre le clan " + N + "**\n- Jouer à RELL Seas.";
+    const ok1 = await attendre(() => evaluer(o, `(() => { const c = [...document.querySelectorAll("dialog[open] .texte-champ")].pop(); if (!c) return false;
+      c.focus(); c.value = ${JSON.stringify(CONDITIONS)}; c.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`), 6000);
+    if (!ok1 || !await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "éditeur ou enregistrement absent" };
+    const p = await attendre(async () => { const x = await parcoursP1(); const m = (x.messages || []).find((y) => y.cle === "affiche"); return m && JSON.stringify(m.blocs).includes("Pour rejoindre le clan " + N) ? x : null; }, 10000);
+    return { ok: !!p, detail: p ? "l'aperçu de l'affiche montre les nouvelles conditions" : "l'aperçu ne suit pas" };
+  });
+
+  await etape(o, "Purge exceptionnelle : l'aperçu, le mot à taper, puis plus rien à effacer", async () => {
+    await aller(o, ZONE_RECRUTEMENT + "/reglages");
+    await deplier(o, "La purge exceptionnelle");
+    await pause(500);
+    const avant = await api(o, "recrutement/purge");
+    if (!await cliquer(o, "#contenu button", "Voir ce qui serait effacé")) return { ok: false, detail: "« Voir ce qui serait effacé » absent" };
+    if (!await attendre(async () => (await texteFenetre(o)).includes("rien n'est effacé ici"), 8000)) return { ok: false, detail: "aperçu absent" };
+    if (!avant.total_personnes) return { ok: true, detail: "personne n'est concerné : rien à purger" };
+    if (!await cliquer(o, "dialog[open] button", "Purger…")) return { ok: false, detail: "« Purger… » absent" };
+    const bloque = await attendre(() => evaluer(o, `(() => { const b = [...[...document.querySelectorAll("dialog[open]")].pop().querySelectorAll("button")].find((x) => x.textContent.trim() === "Purger"); return b ? b.disabled : null; })()`), 6000);
+    if (bloque !== true) return { ok: false, detail: "« Purger » n'attend pas le mot tapé" };
+    await evaluer(o, `(() => { const i = [...document.querySelectorAll("dialog[open]")].pop().querySelector('input[name="confirmation"]'); i.value = ${JSON.stringify(avant.confirmation)}; i.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+    if (!await cliquer(o, "dialog[open] button", "Purger")) return { ok: false, detail: "« Purger » absent" };
+    const apres = await attendre(async () => { const x = await api(o, "recrutement/purge"); return x.total_personnes === 0 ? x : null; }, 15000);
+    return { ok: !!apres, detail: avant.total_personnes + " personne(s), " + avant.total_candidatures + " candidature(s) → " + (apres ? "0" : "encore là") };
   });
 }
 
@@ -605,7 +870,7 @@ async function parcoursAccueil(o) {
   await etape(o, "Raccourcis « Voir les candidatures » et « Chercher un membre »", async () => {
     await aller(o, "#accueil/attente");
     await cliquer(o, "button.tache", "Voir les candidatures");
-    const cand = await attendre(() => evaluer(o, "location.hash.includes('equipage/candidatures')"), 6000);
+    const cand = await attendre(() => evaluer(o, "location.hash.includes('capitainerie/recrutement')"), 6000);
     await aller(o, "#accueil/attente");
     await cliquer(o, "button.tache", "Chercher un membre");
     const rech = await attendre(() => evaluer(o, "!!document.querySelector('dialog[open] .recherche-champ') && document.activeElement === document.querySelector('dialog[open] .recherche-champ')"), 6000);
@@ -622,13 +887,13 @@ async function parcoursAccueil(o) {
     decider: async (l) => {
       const t = ticketDe(l);
       if (!await boutonAFaire(o, "decider", l.titre)) return { ok: false, detail: "bouton absent" };
-      const x = await attendre(async () => { const y = await texteFenetre(o); return y.includes("Ticket #" + t) && y.includes("Dossier de") ? y : null; }, 10000);
-      return { ok: !!x && (await evaluer(o, "location.hash")).includes("equipage/candidatures"), detail: "ticket #" + t + (x ? " : son dossier s'ouvre" : " : dossier absent") };
+      const x = await attendre(async () => { const y = await texteFenetre(o); return y.includes("ticket #" + t) && y.includes("Dossier de") ? y : null; }, 10000);
+      return { ok: !!x && (await evaluer(o, "location.hash")).includes("capitainerie/recrutement"), detail: "ticket #" + t + (x ? " : son dossier s'ouvre" : " : dossier absent") };
     },
     corriger: async (l) => {
       const t = ticketDe(l);
       if (!await boutonAFaire(o, "corriger", l.titre)) return { ok: false, detail: "bouton absent" };
-      const x = await attendre(async () => { const y = await texteFenetre(o); return y.includes("Ticket #" + t) && /correction/i.test(y) ? y : null; }, 10000);
+      const x = await attendre(async () => { const y = await texteFenetre(o); return y.includes("ticket #" + t) && /Son questionnaire|correction/i.test(y) ? y : null; }, 10000);
       return { ok: !!x, detail: "ticket #" + t + (x ? " : la correction s'ouvre" : " : correction absente") };
     },
     alerte: async (l) => {
@@ -663,7 +928,7 @@ async function parcoursAccueil(o) {
     },
     banque: async (l) => {
       if (!await boutonAFaire(o, "banque", l.titre)) return { ok: false, detail: "bouton absent" };
-      const x = await attendre(() => evaluer(o, "location.hash.includes('candidatures/questionnaire') && [...document.querySelectorAll('button.liste-bouton')].some((b) => b.textContent.includes('À vérifier'))"
+      const x = await attendre(() => evaluer(o, "location.hash.includes('recrutement/questions') && [...document.querySelectorAll('button.liste-bouton')].some((b) => b.textContent.includes('À vérifier'))"
         + " && document.querySelectorAll('.banque-ligne').length > 0 && [...document.querySelectorAll('.banque-ligne')].every((b) => b.textContent.includes('À vérifier'))"), 8000);
       return { ok: !!x, detail: "la banque, filtrée sur « À vérifier »" };
     },
@@ -686,7 +951,7 @@ async function parcoursAccueil(o) {
       return { ok: !!await attendre(() => evaluer(o, "location.hash.includes('capitainerie/affiches')"), 6000), detail: "Affiches" };
     },
   };
-  const RESTES = { "ticket-reste": "port/tickets", "question-reste": "port/salons/questions", "decider-reste": "equipage/candidatures", "corriger-reste": "equipage/candidatures",
+  const RESTES = { "ticket-reste": "port/tickets", "question-reste": "port/salons/questions", "decider-reste": "capitainerie/recrutement", "corriger-reste": "capitainerie/recrutement",
     "inactif-reste": "equipage/membres", "alerte-reste": "port/apercu", "brouillon-reste": "annonces/brouillons", "evenement-reste": "annonces/a-venir" };
   const vues = new Set();
   for (const l of lignes) {
@@ -779,7 +1044,7 @@ async function parcoursRecherche(o) {
     await ouvrir(q.question.slice(0, 30));
     const ok = await evaluer(o, `(() => { const o = [...document.querySelectorAll('dialog[open] .rech-groupe[aria-label="Questions de la banque"] .rech-option')][0]; if (!o) return false; o.click(); return true; })()`);
     if (!ok) return { ok: false, detail: "groupe « Questions de la banque » absent" };
-    const x = await attendre(() => evaluer(o, `location.hash.includes('candidatures/questionnaire') && [...document.querySelectorAll('.banque-ligne')].some((b) => b.textContent.includes(${JSON.stringify(q.question)}))`), 8000);
+    const x = await attendre(() => evaluer(o, `location.hash.includes('recrutement/questions') && [...document.querySelectorAll('.banque-ligne')].some((b) => b.textContent.includes(${JSON.stringify(q.question)}))`), 8000);
     return { ok: !!x, detail: q.question.slice(0, 60) };
   });
   await etape(o, "Recherche : une rubrique (« Nettoyage ») y mène", async () => {
@@ -831,7 +1096,7 @@ async function parcoursTextes(o) {
   // 1. Le refus de l'étape 1, réécrit dans « Textes & noms ».
   const REFUS = "Merci pour ta candidature " + N + " : elle ne convient pas pour l'instant. Ce ticket va être clôturé.\n-# Thank you for applying: it doesn't fit for now. This ticket will be closed.";
   await etape(o, "Textes : réécrire le refus de l'étape 1", async () => {
-    if (!await ouvrirTexte("Recrutement", "Refus de l'étape 1")) return { ok: false, detail: "éditeur du refus introuvable" };
+    if (!await ouvrirTexte("Recrutement", "Demande refusée (dans le ticket)")) return { ok: false, detail: "éditeur du refus introuvable" };
     if (!await ecrireTexte(REFUS)) return { ok: false, detail: "champ du texte introuvable" };
     const vivant = await evaluer(o, "(document.querySelector('dialog[open] .texte-apercu-vivant') || {}).innerText || ''");
     if (!vivant.includes("Merci pour ta candidature " + N)) return { ok: false, detail: "l'aperçu ne suit pas la saisie : " + vivant.slice(0, 120) };
@@ -842,14 +1107,14 @@ async function parcoursTextes(o) {
     return { ok: !!vu, detail: "version " + t.version + (vu ? "" : " — la liste ne montre pas le nouveau texte") };
   });
 
-  // 1 b. La carte de l'équipe (dans le ticket), réécrite là où on règle le questionnaire (Candidatures → Questionnaire).
-  const CARTE = "### Étape 1 refusée " + N + "\nPar {par} {quand} : le message est posté, le ticket se ferme.";
-  await etape(o, "Textes : la carte de l'équipe, réécrite depuis Candidatures → Questionnaire", async () => {
+  // 1 b. La carte de l'équipe (dans le ticket), réécrite là où on règle le questionnaire (Demande de recrutement → Questions).
+  const CARTE = "### Demande refusée " + N + "\nPar {par} {quand} : le message est posté, le ticket se ferme.";
+  await etape(o, "Textes : la carte de l'équipe, réécrite depuis Demande de recrutement → Questions", async () => {
     await fermerTout(o);
-    await aller(o, "#equipage/candidatures/questionnaire");
+    await aller(o, "#capitainerie/recrutement/questions");
     // Les messages du bot sont rangés dans un groupe replié du questionnaire (rangement.js) : on le déplie.
     if (!await attendre(async () => { await deplier(o, "Les messages du bot"); return cliquer(o, "button", "La carte de l'équipe"); }, 10000)) return { ok: false, detail: "bouton « La carte de l'équipe » absent" };
-    if (!await modifierLigne("Étape 1 refusée (la carte)")) return { ok: false, detail: "ligne « Étape 1 refusée (la carte) » ou éditeur absent" };
+    if (!await modifierLigne("Demande refusée")) return { ok: false, detail: "ligne « Demande refusée » ou éditeur absent" };
     if (!await ecrireTexte(CARTE) || !await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "saisie ou enregistrement impossible" };
     const t = await attendre(async () => { const x = await leTexte("recrutement.equipe.refus_etape1"); return x && x.valeur === CARTE ? x : null; });
     await fermerTout(o);
@@ -858,31 +1123,33 @@ async function parcoursTextes(o) {
 
   // 2. Refuser une candidature : le ticket reçoit le NOUVEAU texte — réécrit encore une fois depuis la confirmation.
   const REFUS2 = REFUS.replace("Merci pour ta candidature", "Merci pour ton intérêt");
-  await etape(o, "Textes : refuser l'étape 1 — le ticket reçoit le texte réécrit (« Modifier ce message »)", async () => {
+  await etape(o, "Textes : refuser la demande — le ticket reçoit le texte réécrit (« Modifier ce message »)", async () => {
+    //  Un ticket d'AVANT l'affiche (sa carte de l'équipe y est encore) : la carte réécrite se voit dans le fil.
     const suivi = await api(o, "recrutement/suivi");
-    const tid = ((suivi.ouverts || []).filter((x) => x.etape === "etape1" && !x.fermeture_prevue).map((x) => x.ticket).sort((a, b) => b - a))[0];
-    if (!tid) return { ok: false, detail: "aucune candidature à l'étape 1" };
-    await fermerTout(o);
-    await aller(o, "#equipage/candidatures");
-    if (!await cliquer(o, ".lc-clic, .feuillet.lien", "Ticket #" + tid + " ")) return { ok: false, detail: "dossier du ticket " + tid + " introuvable" };
-    if (!await attendre(async () => (await texteZone(o)).includes("La décision de l'étape 1"), 8000)) return { ok: false, detail: "dossier pas ouvert" };
-    if (!await cliquer(o, "button", "Refuser l'étape 1")) return { ok: false, detail: "bouton « Refuser l'étape 1 » absent" };
+    let tid = 0;
+    for (const x of (suivi.ouverts || []).filter((y) => y.etape === "etape1" && !y.fermeture_prevue && !y.affiche)) {
+      const d = await api(o, "recrutement/dossier?ticket=" + x.ticket);
+      if (d.liens_discord && d.liens_discord.carte_etape1) { tid = x.ticket; break; }
+    }
+    if (!tid) return { ok: false, detail: "aucune demande d'avant l'affiche, avec sa carte" };
+    if (!await ouvrirCandidature(o, tid, "Sa demande")) return { ok: false, detail: "dossier du ticket " + tid + " introuvable" };
+    if (!await cliquer(o, "dialog[open] button", "Refuser la demande")) return { ok: false, detail: "bouton « Refuser la demande » absent" };
     const montre = await attendre(async () => (await texteZone(o)).includes("Merci pour ta candidature " + N), 6000);
     if (!montre) return { ok: false, detail: "la confirmation ne montre pas le texte réécrit" };
     if (!await cliquer(o, "dialog[open] button", "Modifier ce message")) return { ok: false, detail: "« Modifier ce message » absent" };
     if (!await attendre(() => evaluer(o, "!!document.querySelector('dialog[open] .texte-champ')"), 6000) || !await ecrireTexte(REFUS2)) return { ok: false, detail: "éditeur non ouvert" };
     if (!await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "« Enregistrer » absent" };
     if (!await attendre(() => evaluer(o, "!document.querySelector('dialog[open] .texte-champ')"), 8000)) return { ok: false, detail: "l'éditeur ne se ferme pas après l'enregistrement" };
-    const suit = await attendre(async () => (await evaluer(o, "(document.querySelector('dialog[open] blockquote.message-auto') || {}).innerText || ''")).includes("Merci pour ton intérêt " + N), 8000);
+    const suit = await attendre(async () => (await evaluer(o, "(document.querySelector('dialog[open] .zr-citation') || {}).innerText || ''")).includes("Merci pour ton intérêt " + N), 8000);
     if (!suit) return { ok: false, detail: "la confirmation ne montre pas le texte modifié sur place" };
     if (!await cliquer(o, "dialog[open] button", "Refuser et fermer le ticket")) return { ok: false, detail: "confirmation absente" };
     const d = await attendre(async () => { const x = await api(o, "recrutement/dossier?ticket=" + tid); return x.etape === "refus_etape1" ? x : null; }, 10000);
-    if (!d) return { ok: false, detail: "le serveur n'a pas refusé l'étape 1" };
+    if (!d) return { ok: false, detail: "le serveur n'a pas refusé la demande" };
     const fil = await attendre(async () => { const x = await discordLu("ticket=" + tid); return (x.messages || []).some((m) => m.texte.includes("Merci pour ton intérêt " + N)) ? x : null; }, 8000);
     if (!fil) return { ok: false, detail: "le faux Discord n'a pas le nouveau texte : " + JSON.stringify(await discordLu("ticket=" + tid)).slice(0, 300) };
     const ancien = fil.messages.some((m) => m.texte.includes("Tes réponses ne correspondent pas"));
     // La carte de l'équipe, dans le même ticket, réécrite avec le texte choisi en 1 b.
-    const carteEquipe = await attendre(async () => { const x = await discordLu("ticket=" + tid); return (x.messages || []).find((m) => m.reecrit && m.texte.includes("Étape 1 refusée " + N)); }, 8000);
+    const carteEquipe = await attendre(async () => { const x = await discordLu("ticket=" + tid); return (x.messages || []).find((m) => m.reecrit && m.texte.includes("Demande refusée " + N)); }, 8000);
     return { ok: !ancien && !!carteEquipe, detail: "ticket #" + tid + " : « " + fil.messages.find((m) => m.texte.includes("Merci pour ton intérêt " + N)).texte.slice(0, 90) + "… »"
       + (ancien ? " — L'ANCIEN texte est aussi parti" : "") + (carteEquipe ? " · carte de l'équipe : « " + carteEquipe.texte.slice(0, 60) + "… »" : " — la carte de l'équipe n'a pas le texte réécrit") };
   });
@@ -1037,6 +1304,7 @@ async function principal() {
     await o.s("Page.navigate", { url: BASE + "/tableau/demo" });
     await pause(2000);
     if (PARCOURS.includes("recrutement")) await parcoursRecrutement(o);
+    if (PARCOURS.includes("recrutement_zone")) await parcoursRecrutementZone(o);
     if (PARCOURS.includes("capitainerie")) await parcoursCapitainerie(o);
     if (PARCOURS.includes("metiers")) await parcoursMetiers(o);
     if (PARCOURS.includes("accueil")) await parcoursAccueil(o);

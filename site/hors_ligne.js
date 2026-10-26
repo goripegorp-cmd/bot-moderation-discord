@@ -13,6 +13,7 @@ export const ROUTES_HORS_LIGNE = new Set([
   "clan/brouillon",
   "recrutement/question", "recrutement/question/retirer", "recrutement/liens", "recrutement/reglages",
   "recrutement/corriger", "recrutement/modele", "recrutement/modele/retirer",
+  "recrutement/parcours", "recrutement/chefs/question", "recrutement/chefs/question/retirer", "recrutement/chefs/gabarit",
   "texte", "texte/defaut",
 ]);
 
