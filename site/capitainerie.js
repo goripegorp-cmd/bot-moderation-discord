@@ -152,27 +152,27 @@ async function chargerHistorique(a, zone) {
   const LIBELLES = { membre_id: "Membre", roblox_nom: "Pseudo Roblox", roblox_id: "Compte Roblox", surnom: "Surnom", prime: "Prime", niveau: "Niveau", grade: "Grade",
     statut: "Statut", attributs: "Fiche du jeu", notes: "Notes" };
   const vide_ = (v) => v === null || v === undefined || v === "" || v === 0;
-  const valeur = (champ, v) => {
+  const valeur = (cleChamp, v) => {
     if (vide_(v)) return "(vide)";
-    if (champ === "prime") return nombre(Number(v) || 0) + " berrys";
-    if (champ === "niveau") return nombre(Number(v) || 0);
-    if (champ === "membre_id") return nomDe(P(v));
-    if (champ === "statut") return STATUTS_AFFICHE[v] || String(v);
-    if (champ === "grade") { const tg = typeGrade(cat); const e = tg && element(cat, tg.cle, v); return e ? e.nom : String(v); }
+    if (cleChamp === "prime") return nombre(Number(v) || 0) + " berrys";
+    if (cleChamp === "niveau") return nombre(Number(v) || 0);
+    if (cleChamp === "membre_id") return nomDe(P(v));
+    if (cleChamp === "statut") return STATUTS_AFFICHE[v] || String(v);
+    if (cleChamp === "grade") { const tg = typeGrade(cat); const e = tg && element(cat, tg.cle, v); return e ? e.nom : String(v); }
     return typeof v === "object" ? "" : String(v);
   };
   const nomsDe = (fiche) => { const out = new Map(); for (const [t, cles] of Object.entries(fiche || {})) for (const k of cles || []) { const e = element(cat, t, k); out.set(t + ":" + k, e ? e.nom : k); } return out; };
   const ligne = (c) => {
-    const champ = c.champ || c.nom || "";
-    const lib = LIBELLES[champ] || champ || "Champ";
-    if (champ === "notes") return h("li", {}, h("b", {}, lib), " : modifiées");
-    if (champ === "attributs") {
+    const cleChamp = c.champ || c.nom || "";
+    const lib = LIBELLES[cleChamp] || cleChamp || "Champ";
+    if (cleChamp === "notes") return h("li", {}, h("b", {}, lib), " : modifiées");
+    if (cleChamp === "attributs") {
       const avant = nomsDe(c.avant), apres = nomsDe(c.apres);
       const plus = [...apres].filter(([k]) => !avant.has(k)).map(([, n]) => n), moins = [...avant].filter(([k]) => !apres.has(k)).map(([, n]) => n);
       return h("li", {}, h("b", {}, lib), " : ", plus.length ? "ajouté " + plus.join(", ") : "", plus.length && moins.length ? " · " : "", moins.length ? "retiré " + moins.join(", ") : "", !plus.length && !moins.length ? "réordonnée" : "");
     }
     // Une valeur d'avant vide (la création, un champ rempli pour la première fois) : la nouvelle seule, sans « (vide) → ».
-    return h("li", {}, h("b", {}, lib), " : ", !vide_(c.avant) ? [h("s", {}, valeur(champ, c.avant)), " → "] : null, valeur(champ, c.apres !== undefined ? c.apres : c.valeur));
+    return h("li", {}, h("b", {}, lib), " : ", !vide_(c.avant) ? [h("s", {}, valeur(cleChamp, c.avant)), " → "] : null, valeur(cleChamp, c.apres !== undefined ? c.apres : c.valeur));
   };
   remplacer(zone, hist.length ? h("ul", { classe: "entrees" }, hist.map((x) => h("li", { classe: "entree" }, h("div", { classe: "haut" }, h("span", { classe: "quoi" }, x.quoi || "Modification"), h("span", { classe: "quand" }, date(x.quand, true))),
     x.par || x.qui ? h("div", { classe: "meta" }, "par " + quiEst(x.par || x.qui)) : null,

@@ -115,7 +115,17 @@ class CheminDuBot:
                 "elimine": not nouveau, "lu": " ".join(textes_vue(v) for v in i3.vues())}
 
     async def repondre(self, tid: int, questionnaire) -> dict:
-        """Le candidat répond à l'étape ouverte de son questionnaire (les réponses attendues), page par page."""
+        """Le candidat répond à l'étape ouverte de son questionnaire (les réponses attendues), page par page, dans les
+        formulaires de Discord — le repli quand la page du candidat ne répond pas (26/10/2026 : la VRAIE page est
+        branchée sur le site local ; ce geste éprouve le repli, la page simulée le temps de répondre)."""
+        page = questionnaire._web_module
+        questionnaire._web_module = self.page_candidat()
+        try:
+            return await self._repondre_formulaires(tid, questionnaire)
+        finally:
+            questionnaire._web_module = page
+
+    async def _repondre_formulaires(self, tid: int, questionnaire) -> dict:
         s = await questionnaire._suivi(self.g.id, int(tid))
         if s is None or not s["envoi_id"]:
             return {"ok": False, "erreur": "pas de questionnaire pour ce ticket"}

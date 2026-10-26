@@ -35,7 +35,7 @@ import time
 import pytest
 
 import test_site_equipage as _socle
-from test_site_equipage import KOLAX, MIRA, ORIGINE, RACINE
+from test_site_equipage import BARBE, KOLAX, ORIGINE, RACINE
 
 local = _socle.local   # le même site local que test_site_equipage.py (un à part pour ce fichier : portée « module »)
 
@@ -92,7 +92,17 @@ ADRESSES = {
     ("GET", "/tableau/equipage/"): "equipage",
     ("GET", "/tableau/equipage/api/{nom}"): "lectures",
     ("POST", "/tableau/equipage/api/{nom}"): "lecture_seule",
+    #  Le questionnaire en ligne du CANDIDAT (27/10/2026, candidature_site.py) : SA page, SES lectures et écritures,
+    #  pour SON envoi — la portée « candidat » seule (son cookie à part, limité à ce chemin).
+    ("GET", "/tableau/candidature"): "renvoi",
+    ("GET", "/tableau/candidature/"): "candidat",
+    ("GET", "/tableau/candidature/api/{nom}"): "lectures_candidat",
+    ("POST", "/tableau/candidature/api/{nom}"): "ecritures_candidat",
+    ("GET", "/tableau/candidature/{jeton}"): "entree",
 }
+#  Les lectures et écritures du candidat (`candidature_site.LECTURES`, `ECRITURES`) : déclarées ici, une à une.
+LECTURES_CANDIDAT = {"questionnaire"}
+ECRITURES_CANDIDAT = {"saisie", "brouillon", "presence", "envoyer", "envoyer_etape"}
 #  Le registre : chaque adresse (« MÉTHODE nom ») et la portée qui l'obtient. Aujourd'hui, la tête seule partout —
 #  l'équipage lit par /tableau/equipage/api/… et n'écrit nulle part. Une adresse ajoutée au registre s'ajoute ICI,
 #  avec sa portée (une autre que « tete » se décide ici, et `_verifier` doit l'ouvrir).
@@ -106,6 +116,7 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
     POST clan/supprimer_brouillon
     GET direct/etat
     POST direct/envoi
+    GET direct/candidat
     GET equipage/equipes
     POST equipage/equipe
     POST equipage/equipe/deplacer
@@ -197,7 +208,9 @@ PUBLICATIONS = ("GET equipage/publication", "POST equipage/publication", "POST e
 RECRUTEMENT = "recrutement/"
 #  Le site local seulement (jamais dans le bot : tests/test_site_v2_serveur.py, V16) — hors de la table.
 DEMO = {("GET", "/tableau/demo"), ("GET", "/tableau/demo/discord"), ("GET", "/tableau/demo/recrutement/ouvrir"),
-        ("GET", "/tableau/demo/recrutement/repondre"), ("GET", "/tableau/demo/recrutement/chef")}
+        ("GET", "/tableau/demo/recrutement/repondre"), ("GET", "/tableau/demo/recrutement/chef"),
+        ("GET", "/tableau/demo/etape_suivante"), ("GET", "/tableau/demo/recrutement/lien"), ("GET", "/tableau/demo/mp"),
+        ("GET", "/tableau/demo/mp/cliquer")}
 #  Les refus de la porte (`tableau._verifier`) : un « tout » ne doit JAMAIS les lire.
 REFUS_PORTE = {"Session expirée.", "Réservé au fondateur et à la direction.", "Accès retiré.", "Accès suspendu."}
 #  L'image du site : publique (le navigateur lit le manifeste et ses icônes sans cookie).
@@ -227,18 +240,29 @@ def _cadences_libres(monkeypatch):
     site_vitrine._passages.clear()
 
 
-@pytest.fixture
-def portees(local, monkeypatch):
-    """{portée : en-têtes} — sans session, l'équipage (Kolax), un candidat, la tête (le fondateur). « candidat » : la
-    vraie portée si elle existe ; sinon une portée FUTURE, ajoutée ici le temps du test (refusée partout par défaut)."""
+def _session_candidat(local) -> dict:
+    """Une VRAIE session « candidat » : un ticket du clan pour Barbe-Grise (hors du clan), son questionnaire envoyé par le
+    vrai `questionnaire.envoyer`, puis son entrée — liée à CET envoi. Ses DEUX cookies portent son identifiant : le sien
+    (limité à /tableau/candidature/) et celui de la direction, recopié à la main (refusé partout ailleurs)."""
     import tableau
-    if "candidat" not in tableau.PORTEES:
-        monkeypatch.setattr(tableau, "PORTEES", tuple(tableau.PORTEES) + ("candidat",))
+    import test_candidature_site as _cand
+    tid, _eid = _cand.Local.ticket(local, BARBE)
+
+    async def f():
+        r = await local.client.get(f"/tableau/demo?qui=candidat&ticket={tid}", allow_redirects=False)
+        return r.status, r.cookies.get(tableau.COOKIE_CANDIDAT)
+    st, c = local.faire(f())
+    assert st == 303 and c is not None, st
+    return {"Cookie": f"{tableau.COOKIE_CANDIDAT}={c.value}; {tableau.COOKIE}={c.value}"}
+
+
+@pytest.fixture
+def portees(local):
+    """{portée : en-têtes} — sans session, l'équipage (Kolax), un candidat (une vraie session, son envoi), la tête."""
     tete, _a = local.entrer("/tableau/demo")
     equipage, arrivee = local.entrer("/tableau/demo?qui=equipage")
     assert arrivee == "/tableau/equipage/"
-    sid = local.faire(tableau._ouvrir_session(1, MIRA, int(time.time()) + 3600, portee="candidat"))
-    return {"anonyme": {}, "equipage": equipage, "candidat": {"Cookie": f"{tableau.COOKIE}={sid}"}, "tout": tete}
+    return {"anonyme": {}, "equipage": equipage, "candidat": _session_candidat(local), "tout": tete}
 
 
 def _requete(local, methode, chemin, h=None, data=None, entetes=None, json_=None):
@@ -289,7 +313,8 @@ def _charge_par(page: str) -> set:
 
 def _lecteurs_attendus(rel: str) -> set:
     """Qui DOIT lire ce fichier de `site/`, d'après ce que chaque page charge (indépendamment de tableau.py)."""
-    if rel.startswith(IMAGE_PUBLIQUE) or rel in FICHIERS_PUBLICS or rel in _charge_par("vitrine.html"):
+    if (rel.startswith(IMAGE_PUBLIQUE) or rel in FICHIERS_PUBLICS or rel in _charge_par("vitrine.html")
+            or rel in _charge_par("candidature.html")):   # les deux pages SANS session de la direction
         return {"anonyme", "equipage", "candidat", "tout"}
     if rel in _charge_par("equipage.html"):
         return {"equipage", "tout"}
@@ -328,6 +353,8 @@ def test_A1_toute_adresse_du_serveur_est_declaree(local):
                                                 " — l'ajouter à REGISTRE avec la portée qui l'obtient")
     assert not sorted(declares - _registre()), f"déclarée(s) sans adresse : {sorted(declares - _registre())}"
     assert set(tableau.ROUTES_EQUIPAGE) == set(LECTURES), f"lectures de l'équipage : {sorted(tableau.ROUTES_EQUIPAGE)}"
+    import candidature_site
+    assert (set(candidature_site.LECTURES), set(candidature_site.ECRITURES)) == (LECTURES_CANDIDAT, ECRITURES_CANDIDAT),         "lectures et écritures du candidat : les déclarer ici"
     assert set(EQUIPES) <= declares, "les équipes du clan sont dans le registre"
     #  Le site local monte EXACTEMENT les adresses du bot, plus sa seule entrée de démonstration.
     assert {(r.method, r.resource.canonical) for r in local.client.server.app.router.routes()
@@ -369,6 +396,14 @@ def _cases(local):
     for nom, portee in LECTURES.items():
         out.append(("lectures:" + portee, "GET", f"/tableau/equipage/api/{nom}", None))
     out.append(("lectures:equipage", "GET", "/tableau/equipage/api/inconnue", None))
+    #  Le candidat : sa page, ses lectures, ses écritures (un corps vide : refusé sur le fond, jamais envoyé), une adresse
+    #  inconnue de son API, un lien forgé, la redirection.
+    out += [("candidat", "GET", "/tableau/candidature/", None), ("renvoi", "GET", "/tableau/candidature", None),
+            ("entree", "GET", "/tableau/candidature/" + tableau.jeton(1, BARBE, "candidat") + "x", None)]
+    out += [("lectures_candidat", "GET", f"/tableau/candidature/api/{n}", None) for n in sorted(LECTURES_CANDIDAT)]
+    out += [("ecritures_candidat", "POST", f"/tableau/candidature/api/{n}", {}) for n in sorted(ECRITURES_CANDIDAT)]
+    out += [("lectures_candidat", "GET", "/tableau/candidature/api/inconnue", None),
+            ("ecritures_candidat", "POST", "/tableau/candidature/api/inconnue", {})]
     return out
 
 
@@ -380,6 +415,8 @@ def _admis(qui, regle) -> bool:
         return qui == "tout"
     if regle in ("equipage", "lectures:equipage"):
         return qui in ("equipage", "tout")
+    if regle in ("candidat", "lectures_candidat", "ecritures_candidat"):
+        return qui == "candidat"
     if regle == "lecture_seule":
         return False
     raise AssertionError(f"règle inconnue : {regle}")
@@ -422,6 +459,13 @@ def test_A2_chaque_case_de_la_table(local, portees):
     assert statuts[("GET", "/tableau/espace/")] == {"anonyme": 403, "equipage": 403, "candidat": 403, "tout": 200}
     assert statuts[("GET", "/tableau/equipage/")] == {"anonyme": 403, "equipage": 200, "candidat": 403, "tout": 200}
     assert statuts[("GET", "/equipage")] == {"anonyme": 200, "equipage": 200, "candidat": 200, "tout": 200}
+    #  Le candidat (coordinateur, 27/10) : SA page et son API, rien d'autre — ni l'équipage, ni l'administration, ni le
+    #  direct de la direction (`api/direct/candidat`, interrogé par « equipage » ou « candidat » : 403).
+    assert statuts[("GET", "/tableau/candidature/")] == {"anonyme": 403, "equipage": 403, "candidat": 200, "tout": 403}
+    assert statuts[("GET", "/tableau/candidature/api/questionnaire")]["candidat"] == 200
+    assert statuts[("GET", "/tableau/espace/api/direct/candidat")] == {"anonyme": 403, "equipage": 403, "candidat": 403,
+                                                                       "tout": 400}, "le direct : la tête seule"
+    assert statuts[("GET", "/tableau/equipage/")]["candidat"] == statuts[("GET", "/tableau/espace/")]["candidat"] == 403
     assert len(vus) >= 4 * 90, len(vus)
 
 

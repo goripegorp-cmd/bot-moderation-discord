@@ -121,8 +121,8 @@ def test_S1b_les_fichiers_de_chaque_page_sont_ceux_qu_elle_charge():
     la Capitainerie ne sort pas), rien de moins (les pages marchent). `direct.js`, chargé seulement en mode édition (la
     tête), n'en fait pas partie. Un import ajouté sans y penser fait échouer ce test : le décider ici (tableau.py)."""
     publics = {m for m in tableau.ACCES_STATIQUES["public"] if "*" not in m and m.endswith((".js", ".css"))}
-    vitrine = _charge_par("vitrine.html")
-    assert publics == vitrine, (f"vitrine.html charge {sorted(vitrine - publics)} (à rendre publics) ; "
+    vitrine = _charge_par("vitrine.html") | _charge_par("candidature.html")   # les deux pages SANS session de la direction
+    assert publics == vitrine, (f"vitrine.html et candidature.html chargent {sorted(vitrine - publics)} (à rendre publics) ; "
                                 f"publics sans raison : {sorted(publics - vitrine)}")
     equipage = _charge_par("equipage.html") - vitrine
     assert set(tableau.ACCES_STATIQUES["equipage"]) == equipage, sorted(equipage)

@@ -1,0 +1,49 @@
+/* Le direct du questionnaire en ligne (26/10/2026), dans le dossier d'une candidature : la réponse qui s'écrit à l'encre
+   pendant que le candidat tape, le point vivant de sa page, les étapes ouvertes, envoyées, à venir. */
+
+.en-direct {
+  display: grid; gap: 12px; min-width: 0;
+  padding: 16px 18px; border: 1px solid var(--trait-fort); border-left: 5px solid var(--mer); border-radius: var(--rayon);
+  background: rgba(248, 240, 221, .82);
+}
+.en-direct-tete { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+.en-direct-tete h3 { font-family: var(--police-titre); font-size: 22px; color: var(--encre); }
+.en-direct-etat { flex: 1 1 220px; min-width: 0; font: 500 15px/1.3 var(--police-sc); letter-spacing: .02em; color: var(--encre-2); overflow-wrap: anywhere; }
+.en-direct-etat.vif { color: var(--mer); }
+.en-direct-etat.ambre { color: var(--ambre-texte); }
+.en-direct-etat.vert { color: var(--vert-fonce); }
+.en-direct-point { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--encre-3); box-shadow: 0 0 0 3px rgba(43, 29, 18, .12); }
+.en-direct-point.vif { background: var(--mer); box-shadow: 0 0 0 3px rgba(31, 78, 90, .2); }
+.en-direct-point.ambre { background: var(--ambre); box-shadow: 0 0 0 3px rgba(168, 100, 28, .2); }
+.en-direct-point.vert { background: var(--vert); box-shadow: 0 0 0 3px rgba(63, 107, 58, .2); }
+@media (prefers-reduced-motion: no-preference) {
+  .en-direct-point.vif { animation: battre 1.8s ease-in-out infinite; }
+  .en-direct-q.actif .en-direct-plume { animation: plume 1s ease-in-out infinite; }
+}
+@keyframes battre { 50% { box-shadow: 0 0 0 7px rgba(31, 78, 90, .08); } }
+@keyframes plume { 50% { transform: translate(2px, -2px) rotate(-8deg); } }
+.en-direct-corps { display: grid; gap: 12px; min-width: 0; }
+.en-direct-resume { font: 500 14.5px/1.3 var(--police-sc); color: var(--encre-2); }
+.en-direct-etape { display: grid; gap: 10px; min-width: 0; padding-top: 10px; border-top: 1px solid var(--trait); }
+.en-direct-etape-titre { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; font-family: var(--police-titre); font-size: 19px; font-weight: 400; }
+.en-direct-etape-nom { font: 500 15px/1.3 var(--police-sc); color: var(--encre-2); overflow-wrap: anywhere; }
+.en-direct-etape.fermee { opacity: .75; }
+.en-direct-questions { display: grid; gap: 10px; }
+.en-direct-q { display: grid; gap: 4px; min-width: 0; padding: 8px 10px; border-left: 3px solid var(--trait-fort); background: rgba(255, 252, 244, .6); }
+.en-direct-q.actif { border-left-color: var(--mer); background: rgba(232, 240, 238, .7); }
+.en-direct-etape.envoyee .en-direct-q { border-left-color: var(--vert); }
+.en-direct-question { display: flex; gap: 8px; min-width: 0; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.en-direct-num { flex: none; min-width: 22px; color: var(--cire); font-family: var(--police-chiffres); }
+.en-direct-reponse {
+  position: relative; min-width: 0; padding-left: 30px;
+  font-family: var(--police-texte); font-style: italic; color: var(--encre); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.en-direct-q.vide .en-direct-reponse { font-style: normal; }
+.en-direct-plume { display: inline-block; vertical-align: -.15em; margin-left: 4px; }
+.en-direct-plume .ic { width: 18px; height: 18px; color: var(--mer); }
+.en-direct-ecrit { padding-left: 30px; font-size: 13px; color: var(--encre-3); }
+.en-direct-q.actif .en-direct-ecrit { color: var(--mer); font-weight: 600; }
+@media (max-width: 519px) {
+  .en-direct { padding: 12px 12px; }
+  .en-direct-reponse, .en-direct-ecrit { padding-left: 0; }
+}

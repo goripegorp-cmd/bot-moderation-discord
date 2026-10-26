@@ -130,17 +130,22 @@ def local(tmp_path_factory):
         assert arrivee == "/tableau/equipage/"
         yield site
     finally:
-        boucle.run_until_complete(client.close())
-        pendantes = [t for t in asyncio.all_tasks(boucle) if not t.done()]   # la ronde du direct (S11), entre autres
-        for t in pendantes:
-            t.cancel()
-        if pendantes:   # sans tâche, gather() naîtrait sur une AUTRE boucle (ValueError au démontage)
-            boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
-        tableau._direct_salles.clear()
-        boucle.close()
-        mp.undo()
-        for nom in ("site_local", "site_local_port"):
-            sys.modules.pop(nom, None)
+        #  26/10/2026 : une suite lente (la ronde du direct finie après sa grâce de 10 s) laissait `gather()` SANS tâche
+        #  chercher une boucle courante — il n'y en a plus après un `asyncio.run` (S9) : l'erreur sautait `mp.undo()`, et
+        #  les réglages du site local (ses règles de nettoyage) restaient aux modules suivants. Rendus quoi qu'il arrive.
+        try:
+            boucle.run_until_complete(client.close())
+            pendantes = [t for t in asyncio.all_tasks(boucle) if not t.done()]   # la ronde du direct (S11), entre autres
+            for t in pendantes:
+                t.cancel()
+            if pendantes:
+                boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
+            tableau._direct_salles.clear()
+            boucle.close()
+        finally:
+            mp.undo()
+            for nom in ("site_local", "site_local_port"):
+                sys.modules.pop(nom, None)
 
 
 def _corps(octets) -> str:
@@ -162,6 +167,7 @@ LIBRES = {
     ("GET", "/tableau/espace/media/{media}"),   # seulement les images que son site cite (S5)
     ("POST", "/tableau/espace/sortir"),         # se déconnecter
     ("GET", "/tableau/{jeton}"),                # l'entrée par lien (S4)
+    ("GET", "/tableau/candidature"),            # 26/10/2026 : une redirection sans donnée (le questionnaire en ligne : 403)
 }
 
 
@@ -205,6 +211,12 @@ def test_S1_une_session_equipage_n_atteint_que_sa_page_et_n_ecrit_rien(local):
         elif gabarit == "/tableau/espace/sync":
             essais.append((methode, gabarit, {"ops": [{"op_id": "op-equipage-01", "api": "rell/affiche",
                                                        "corps": {"id": "demo-kolax-01", "surnom": "Pirate"}}]}))
+        elif gabarit == "/tableau/candidature/api/{nom}":   # 26/10/2026 : le questionnaire en ligne (« candidat » seulement)
+            import candidature_site
+            noms = candidature_site.LECTURES if methode == "GET" else candidature_site.ECRITURES
+            essais += [(methode, f"/tableau/candidature/api/{n}", {}) for n in [*noms, "inconnue"]]
+        elif gabarit == "/tableau/candidature/{jeton}":
+            essais.append((methode, "/tableau/candidature/" + tableau.jeton(1, KOLAX, "equipage"), {}))
         elif "{" in gabarit:
             pytest.fail(f"adresse nouvelle et non couverte par ce test : {methode} {gabarit} — l'ajouter ici")
         else:
