@@ -109,7 +109,7 @@ TEXTES = (
      "La petite ligne de la pancarte.", 40, True, _ONGLETS, ()),
     ("accueil.phrase", "Les nouvelles du bord, les sorties en mer et l'équipage en chiffres.", "L'accueil · la phrase",
      "Sous le titre de l'accueil, quand aucun bandeau ne l'ouvre.", 160, True, _PAGES, ()),
-    ("equipage.phrase", "Chaque pirate du clan et son avis de recherche, rangés par métier.", "L'équipage · la phrase",
+    ("equipage.phrase", "Les équipes du clan, leur chef en tête, et l'avis de recherche de chaque pirate.", "L'équipage · la phrase",
      "Sous le titre de la page des affiches.", 160, True, _PAGES, ()),
     ("fiche.phrase", "Ton avis de recherche, tel que tout l'équipage le voit.", "Ma fiche · la phrase",
      "Sous le titre de la page « Ma fiche ».", 160, True, _PAGES, ()),
