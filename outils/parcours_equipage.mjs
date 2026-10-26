@@ -22,7 +22,7 @@ const opt = (nom, defaut) => { const i = args.indexOf("--" + nom); return i >= 0
 const BASE = String(opt("url", "http://localhost:8790")).replace(/\/+$/, "");
 const PAGE = BASE + "/tableau/equipage/";
 const SORTIE = opt("sortie", join(tmpdir(), "equipage-parcours"));
-const IMAGE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "site", "app-192.png");   // une vraie image PNG du dépôt
+const IMAGE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "tests", "donnees", "banniere_1600x640.png");   // une vraie bannière PNG du dépôt (1600 × 640 : bannieres.py)
 const KOLAX = "1000";
 const PORT = 9939 + Math.floor(Math.random() * 50);
 const NAVIGATEURS = [opt("navigateur", ""), process.env.CHROME || "",

@@ -125,6 +125,7 @@ import metiers  # les rôles de métier du clan : choisis dans le guide, créés
 import site_equipage  # 26/10/2026 : le site de l'équipage — le clan en lecture seule, l'accueil composé par la direction
 import longevite  # 26/10/2026 : le site sur plusieurs années — la suite des listes, une règle par famille, les orphelins
 import compactage  # 26/10/2026 : la base rend sa place au disque, la nuit (auto_vacuum incrémental)
+import annonces_modifiables  # 26/10/2026 : une annonce publiée, modifiée EN PLACE depuis le site de l'équipage (la tête)
 import textes  # 26/10/2026 : les textes du bot et les noms du site, réécrits par la direction (Textes & noms)
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
@@ -21995,6 +21996,7 @@ async def _activite_boot():
         site_equipage.setup(get_db=get_db, cfg=cfg, log=print)
         await site_equipage.init_db()
         tableau.monter(site_equipage)
+        tableau.monter(annonces_modifiables)   # modifier une annonce publiée, en place, depuis l'accueil (la tête)
         tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
         zones.brancher_site_equipage(site_equipage.section_guide)
     with _Etape("longevite"):
