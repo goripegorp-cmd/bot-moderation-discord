@@ -538,6 +538,8 @@ ROUTES_SITE = {
 #  Les mêmes que la page : un test compare cette liste à `site/noyau.js` (rien ne dérive sans se voir).
 
 SITE_CATEGORIES = (
+    ("accueil", "Accueil", "Accueil", "Ce qui t'attend", (
+        ("attente", "Ce qui t'attend", "Tout ce qui demande une action, du plus urgent au moins urgent : un bouton par ligne."),)),
     ("port", "Le Port", "Le Port", "Discord", (
         ("apercu", "Aperçu", "Ce qui demande ton attention, en un coup d'œil."),
         ("journal", "Journal", "Tout ce qui s'est passé sur le serveur : l'important d'abord, puis jour par jour."),
@@ -582,13 +584,13 @@ def _declarer_site() -> None:
     ordre = 0
     for cat, titre, court, sous, rubriques in SITE_CATEGORIES:
         ordre += 10
-        declarer(f"site.cat.{cat}.titre", titre, groupe="site", partie="Les trois grandes parties", ordre=ordre,
+        declarer(f"site.cat.{cat}.titre", titre, groupe="site", partie="Les grandes parties du site", ordre=ordre,
                  titre=f"{titre} · le nom", aide="En haut du site, sur la pancarte de cette partie.", max_=40,
                  lignes=False)
-        declarer(f"site.cat.{cat}.court", court, groupe="site", partie="Les trois grandes parties", ordre=ordre + 1,
+        declarer(f"site.cat.{cat}.court", court, groupe="site", partie="Les grandes parties du site", ordre=ordre + 1,
                  titre=f"{titre} · le nom court", aide="Sur téléphone, quand la place manque. Laissé tel quel, il suit "
                                                        "le nom choisi au-dessus.", max_=20, lignes=False)
-        declarer(f"site.cat.{cat}.sous", sous, groupe="site", partie="Les trois grandes parties", ordre=ordre + 2,
+        declarer(f"site.cat.{cat}.sous", sous, groupe="site", partie="Les grandes parties du site", ordre=ordre + 2,
                  titre=f"{titre} · le sous-titre", aide="La petite ligne sous le nom de la pancarte.", max_=40,
                  lignes=False)
     ordre = 100
