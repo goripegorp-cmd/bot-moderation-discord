@@ -16,7 +16,8 @@ A3 les fichiers de `site/`, un par un : publics (l'image, la vitrine), de l'équ
 A4 la WebSocket du direct : la tête seule.
 A5 la vitrine publique : GET seulement (toute écriture → 405), aucun cookie lu ni posé, noindex, cadence par adresse IP
    (la PREMIÈRE de X-Forwarded-For), des champs publics seulement (jamais un identifiant ni un nom Discord).
-A6 les écritures sans l'en-tête de la page, d'une autre origine, d'un autre site : refusées, rien d'écrit.
+A6 les écritures sans l'en-tête de la page, d'une autre origine, d'un autre site : refusées, rien d'écrit — celles du
+   candidat aussi (ses autres cas : tests/test_candidat_ses_cases.py).
 A7 corps trop gros, JSON illisible ou piégé : refusés proprement (jamais une erreur 500), rien d'écrit.
 A8 les chemins de fichiers normalisés : aucun pas hors de `site/`, aucun fichier de la tête par un détour.
 A9 les images au-delà des limites : refusées.
@@ -653,6 +654,7 @@ def _ecritures() -> list:
 
 def test_A6_une_ecriture_d_ailleurs_est_refusee_et_rien_n_est_ecrit(local):
     tete, _a = local.entrer("/tableau/demo")
+    candidat = _session_candidat(local)
     avant = _empreinte(local)
     variantes = {
         "sans l'en-tête de la page": {"Origin": "http://localhost:8790", "Sec-Fetch-Site": "same-origin"},
@@ -669,6 +671,12 @@ def test_A6_une_ecriture_d_ailleurs_est_refusee_et_rien_n_est_ecrit(local):
             assert st == 400, f"{chemin} {nom} → {st} {rep[:120]!r}"
             n += 1
     assert n >= 5 * 40, n
+    #  Les écritures du CANDIDAT (sa propre session, liée à son questionnaire) : les mêmes refus, avant tout.
+    corps_c = {"rang": 1, "texte": "x", "reponses": {"1": "x"}, "vue": "ouverte", "etape": 1}
+    for nom_c in sorted(ECRITURES_CANDIDAT):
+        for nom, entetes in variantes.items():
+            st, rep, _e = _requete(local, "POST", f"/tableau/candidature/api/{nom_c}", candidat, entetes=entetes, json_=corps_c)
+            assert st == 400 and _erreur(rep) == "Requête refusée.", f"candidat {nom_c} {nom} → {st} {rep[:120]!r}"
     assert _empreinte(local) == avant, "une écriture refusée a laissé une trace en base"
     #  La session est toujours là (la déconnexion refusée n'a rien coupé).
     assert _requete(local, "GET", "/tableau/espace/donnees", tete)[0] == 200

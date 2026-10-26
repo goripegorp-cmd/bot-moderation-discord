@@ -92,6 +92,7 @@ ETAPES_MAX = 50
 TITRE_ETAPE_MAX, CONSIGNE_MAX = 120, 600
 AVIS_S = 180.0                  # le mot pour soi (le lien) s'efface au bout de 3 minutes
 FORMAT_NONCE = re.compile(r"e(\d{1,12})x[A-Za-z0-9_-]{12}")
+CHIFFRES = re.compile(r"[0-9]{1,6}")       # un numéro écrit par la page : des chiffres ASCII seulement (`_entier`)
 _CONTROLE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f]")
 VUES = ("ouverte", "cachee", "fermee")
 #  Ce que l'instantané d'un envoi gagne avec le passage d'étape et les chefs d'équipe (`questionnaire.COLONNES_ENVOIS`,
@@ -108,6 +109,7 @@ _contextes: dict = {}           # envoi → (heure, contexte) — pour les frapp
 _seaux: dict = {}               # (empreinte, genre) → heures des dernières requêtes
 _taches: set = set()            # les tâches de fond (un mot pour soi qui s'efface), gardées jusqu'au bout
 _colonnes: dict = {}            # {"vu": heure, "noms": colonnes de `recrutement_envois`}
+_verrous: dict = {}             # envoi → (boucle, verrou) : un envoi à la fois par questionnaire (`_verrou`)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Les textes (registre `textes.py`, famille « Le questionnaire en ligne »)
@@ -377,11 +379,14 @@ def _texte_net(texte, maxi: int, lignes: bool = False) -> str:
 
 
 def _entier(x) -> int | None:
+    """Un nombre entier, ou un texte de chiffres 0-9 (les clés des réponses) — sinon None. 27/10/2026 (sécurité) :
+    `str.isdigit()` accepte aussi « ² », « ① »… que `int()` refuse (une erreur 500 à la demande du candidat, et une
+    ligne d'erreur au journal du bot à chaque fois) ; seuls les chiffres ASCII comptent."""
     if isinstance(x, bool):
         return None
     if isinstance(x, int):
         return x
-    if isinstance(x, str) and x.isdigit() and len(x) <= 6:
+    if isinstance(x, str) and CHIFFRES.fullmatch(x):
         return int(x)
     return None
 
@@ -1058,6 +1063,22 @@ async def api(request):
 api_post = api   # le même, pour la route POST (aiohttp : un nom par route)
 
 
+def _verrou(envoi: int) -> asyncio.Lock:
+    """Le verrou d'UN envoi : ses envois (`envoyer`, `envoyer_etape`) passent l'un après l'autre. 27/10/2026 (sécurité,
+    tests/test_candidat_ses_cases.py, K4) : deux onglets ou un double clic lisaient tous deux « ouvert », et le second,
+    refusé à la fin (409), avait déjà RÉÉCRIT les réponses du premier — `envoyer_tout` ne ferme l'envoi qu'après avoir
+    écrit. Le second relit maintenant l'état APRÈS le premier. Un verrou d'asyncio sert une seule boucle : gardé avec
+    elle ; les plus anciens, libres, partent quand il y en a trop."""
+    boucle = asyncio.get_running_loop()
+    x = _verrous.get(int(envoi))
+    if x is None or x[0] is not boucle:
+        if len(_verrous) > 500:
+            for k in [k for k, (_b, v) in _verrous.items() if not v.locked()][:250]:
+                _verrous.pop(k, None)
+        x = _verrous[int(envoi)] = (boucle, asyncio.Lock())
+    return x[1]
+
+
 def _cadence(lien: dict, genre: str, par_seconde: int) -> bool:
     """True si la requête passe : au plus `par_seconde` par seconde, par session et par genre."""
     t = time.monotonic()
@@ -1257,6 +1278,11 @@ async def _ecriture_envoyer(g, membre, lien: dict, corps: dict):
     partent."""
     if not _cadence(lien, "envoyer", 2):
         return 429, {"erreur": "Un instant : l'envoi est déjà en route."}
+    async with _verrou(lien["envoi"]):   # un second envoi (deux onglets, un double clic) relit l'état APRÈS le premier
+        return await _envoyer_tout(g, lien, corps)
+
+
+async def _envoyer_tout(g, lien: dict, corps: dict):
     ctx = await contexte(g, lien["envoi"], lien["candidat"])
     if ctx["etat"] != "ouvert":
         return _refus_etat(ctx)
@@ -1293,6 +1319,11 @@ async def _ecriture_envoyer_etape(g, membre, lien: dict, corps: dict):
     `questionnaire.envoyer_etape` (une seule fois) : la dernière clôt l'envoi, une autre attend la direction."""
     if not _cadence(lien, "envoyer", 2):
         return 429, {"erreur": "Un instant : l'envoi est déjà en route."}
+    async with _verrou(lien["envoi"]):   # la même étape envoyée deux fois : la seconde relit l'état APRÈS la première
+        return await _envoyer_etape(g, lien, corps)
+
+
+async def _envoyer_etape(g, lien: dict, corps: dict):
     ctx = await contexte(g, lien["envoi"], lien["candidat"])
     if ctx["etat"] != "ouvert":
         return _refus_etat(ctx)
@@ -1382,10 +1413,12 @@ async def _route_direct_candidat(g, auteur, requete, corps):
     """`GET api/direct/candidat?envoi=<n>` (ou `?ticket=<n>`) : l'état complet du direct d'un questionnaire (sans
     WebSocket, la page l'interroge toutes les quelques secondes ; avec, une fois, puis les messages « candidat »)."""
     brut_e, brut_t = str((requete or {}).get("envoi", "")), str((requete or {}).get("ticket", ""))
-    if not (brut_e.isdigit() and len(brut_e) <= 12) and not (brut_t.isdigit() and len(brut_t) <= 12):
+    #  Des chiffres ASCII seulement (`isdigit()` laissait passer « ² », qu'`int()` refuse : une erreur 500).
+    ok_e, ok_t = bool(re.fullmatch(r"[0-9]{1,12}", brut_e)), bool(re.fullmatch(r"[0-9]{1,12}", brut_t))
+    if not ok_e and not ok_t:
         return 400, {"erreur": "Envoi ou ticket invalide."}
-    d = await etat_direct(g, ticket=int(brut_t) if brut_t.isdigit() else 0, envoi=int(brut_e) if brut_e.isdigit() else 0)
-    if d is None and brut_t.isdigit() and not brut_e.isdigit():
+    d = await etat_direct(g, ticket=int(brut_t) if ok_t else 0, envoi=int(brut_e) if ok_e else 0)
+    if d is None and ok_t and not ok_e:
         #  Un ticket encore sans questionnaire (sa demande attend la direction) : un état, pas une erreur — la vue le dit
         #  et se branche dès que le questionnaire part.
         return 200, {"ticket": int(brut_t), "envoi": 0, "etat": "aucun", "s": int(time.time())}
