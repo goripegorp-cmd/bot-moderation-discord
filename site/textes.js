@@ -79,9 +79,14 @@ function appliquerFile(T) {
   }
   return d;
 }
-/** Un texte enregistré : la liste est relue (la version canonique du serveur), sans attendre. */
+/** Un texte enregistré : la liste est relue (la version canonique du serveur), sans attendre ; et les données qui
+ *  EMBARQUENT des textes du bot (libellés des cartes d'événement, messages du recrutement, choix du métier) sont
+ *  périmées : leur prochain affichage relit le serveur. (26/10 : l'accueil charge les événements dès l'arrivée, et
+ *  l'aperçu du composeur gardait l'ancien bouton « Disponible » après un texte réécrit.) */
+const JEUX_AVEC_TEXTES = ["evenements", "banque", "dossier", "metiers_reglages"];
 function relire() {
   perime("textes");
+  for (const nom of JEUX_AVEC_TEXTES) perime(nom);
   charger("textes", { forcer: true });
 }
 ecouter("file:succes", ({ op, corps }) => {
