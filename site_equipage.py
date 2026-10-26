@@ -23,7 +23,10 @@ L'ACCUEIL (composé par la direction : `ROUTES_SITE`, écritures de la tête seu
     événements publiés du clan, recrues acceptées, nouvelles affiches.
   · Les analyses : calculées ici, depuis les affiches, le rôle du clan, le recrutement et les événements.
 
-Les textes passent par `_t(cle, défaut)` — le seul point à brancher sur le registre des textes (`textes.py`).
+Les textes (la page, les actualités automatiques, le lien sur Discord, la ligne du guide du clan) sont DÉCLARÉS dans
+le registre `textes.py` : la direction les réécrit dans Capitainerie → Textes & noms (famille « Le site de
+l'équipage », et « Le guide du clan » pour sa ligne). La page reçoit les siens par `depart` (sa propre lecture : la
+portée « equipage » n'entre jamais dans `textes/site`).
 """
 from __future__ import annotations
 
@@ -45,6 +48,7 @@ import diag
 import recrutements
 import rellseas_panneau
 import tableau
+import textes
 from ui_v2 import LayoutView, Palette
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -76,33 +80,80 @@ _permis: dict = {}              # serveur → (heure, ensemble des images permis
 _taches: set = set()
 
 
-def _t(cle: str, defaut: str) -> str:
-    """Un texte du site de l'équipage : le défaut, tant que le registre des textes (`textes.py`, autre branche) n'est
-    pas branché. LE seul point d'appel : à la fusion, `return textes.texte(cle, defaut)` (ou son équivalent)."""
-    return defaut
+def _t(g, cle: str, **valeurs) -> str:
+    """Un texte du site de l'équipage (registre `textes.py`) : celui de ce serveur, sinon celui d'origine."""
+    return textes.texte_cache(getattr(g, "id", g) or 0, cle, **valeurs)
 
 
-#  Les libellés de la page que la direction pourra renommer (registre des textes) : envoyés par `depart`.
-TEXTES_PAGE = {
-    "onglet.accueil": "Accueil", "onglet.accueil.sous": "Le pont du navire",
-    "onglet.equipage": "L'équipage", "onglet.equipage.sous": "Toutes les affiches",
-    "onglet.fiche": "Ma fiche", "onglet.fiche.sous": "Mon avis de recherche",
-    "accueil.phrase": "Les nouvelles du bord, les sorties en mer et l'équipage en chiffres.",
-    "equipage.phrase": "Chaque pirate du clan et son avis de recherche, rangés par métier.",
-    "fiche.phrase": "Ton avis de recherche, tel que tout l'équipage le voit.",
-    "fiche.vide.titre": "Pas encore d'affiche",
-    "fiche.vide.texte": "Demande à la direction : elle crée ton avis de recherche.",
-    "pied.lecture": "Lecture seule : rien ne se modifie ici.",
-    "pied.edition": "Tu peux composer l'accueil : bouton « Modifier l'accueil ».",
-    "adieu.titre": "Bon vent, matelot",
-    "adieu.texte": "Tu es déconnecté. Pour revenir : le guide du clan sur Discord, « Le site de l'équipage ».",
-    "retire.titre": "Accès retiré",
-    "retire.texte": "Ce site est réservé à l'équipage. Pour revenir : le guide du clan sur Discord.",
-}
+#  Les textes déclarés au registre : (clé, texte d'origine, titre dans l'onglet, aide, longueur, sur une ligne, partie,
+#  variables). La famille « equipage_site » ; la ligne du guide du clan dans la famille du guide (« guide. » : le guide
+#  se réécrit quand elle change).
+GROUPE = "equipage_site"
+textes.nommer_groupe(GROUPE, "Le site de l'équipage", 50)
+_ONGLETS, _PAGES, _FIN, _AUTO, _LIEN = ("Les trois onglets", "Les pages", "Le pied de page et les adieux",
+                                        "Les actualités automatiques", "Le lien sur Discord")
+TEXTES = (
+    ("titre", "L'Équipage", "Le nom du site", "En haut de la page, à côté du médaillon.", 40, True, _ONGLETS, ()),
+    ("onglet.accueil", "Accueil", "L'onglet « Accueil »", "Sur sa pancarte.", 30, True, _ONGLETS, ()),
+    ("onglet.accueil.sous", "Le pont du navire", "L'onglet « Accueil » · le sous-titre", "La petite ligne de la pancarte.",
+     40, True, _ONGLETS, ()),
+    ("onglet.equipage", "L'équipage", "L'onglet « L'équipage »", "Sur sa pancarte.", 30, True, _ONGLETS, ()),
+    ("onglet.equipage.sous", "Toutes les affiches", "L'onglet « L'équipage » · le sous-titre",
+     "La petite ligne de la pancarte.", 40, True, _ONGLETS, ()),
+    ("onglet.fiche", "Ma fiche", "L'onglet « Ma fiche »", "Sur sa pancarte.", 30, True, _ONGLETS, ()),
+    ("onglet.fiche.sous", "Mon avis de recherche", "L'onglet « Ma fiche » · le sous-titre",
+     "La petite ligne de la pancarte.", 40, True, _ONGLETS, ()),
+    ("accueil.phrase", "Les nouvelles du bord, les sorties en mer et l'équipage en chiffres.", "L'accueil · la phrase",
+     "Sous le titre de l'accueil, quand aucun bandeau ne l'ouvre.", 160, True, _PAGES, ()),
+    ("equipage.phrase", "Chaque pirate du clan et son avis de recherche, rangés par métier.", "L'équipage · la phrase",
+     "Sous le titre de la page des affiches.", 160, True, _PAGES, ()),
+    ("fiche.phrase", "Ton avis de recherche, tel que tout l'équipage le voit.", "Ma fiche · la phrase",
+     "Sous le titre de la page « Ma fiche ».", 160, True, _PAGES, ()),
+    ("fiche.vide.titre", "Pas encore d'affiche", "Ma fiche · sans affiche, le titre",
+     "Ce que lit un membre qui n'a pas encore son affiche.", 60, True, _PAGES, ()),
+    ("fiche.vide.texte", "Demande à la direction : elle crée ton avis de recherche.", "Ma fiche · sans affiche, la phrase",
+     "Sous le titre précédent.", 200, True, _PAGES, ()),
+    ("pied.lecture", "Lecture seule : rien ne se modifie ici.", "Le pied de page · l'équipage",
+     "En bas de chaque page, pour les membres du clan.", 160, True, _FIN, ()),
+    ("pied.edition", "Tu peux composer l'accueil : bouton « Modifier l'accueil ».", "Le pied de page · la direction",
+     "En bas de chaque page, pour le fondateur et la direction.", 160, True, _FIN, ()),
+    ("adieu.titre", "Bon vent, matelot", "La déconnexion · le titre", "Après « Se déconnecter ».", 60, True, _FIN, ()),
+    ("adieu.texte", "Tu es déconnecté. Pour revenir : le guide du clan sur Discord, « Le site de l'équipage ».",
+     "La déconnexion · la phrase", "Sous le titre précédent.", 300, True, _FIN, ()),
+    ("retire.titre", "Accès retiré", "L'accès retiré · le titre",
+     "Quand la session finit (rôle du clan retiré, lien expiré…).", 60, True, _FIN, ()),
+    ("retire.texte", "Ce site est réservé à l'équipage. Pour revenir : le guide du clan sur Discord.",
+     "L'accès retiré · la phrase", "Sous le titre précédent.", 300, True, _FIN, ()),
+    ("auto.recrue", "{nom} rejoint l'équipage", "Une recrue acceptée", "Une actualité automatique.", 120, True, _AUTO,
+     (("nom", "le nom de la recrue"),)),
+    ("auto.affiche", "Nouvelle affiche : {nom}", "Une nouvelle affiche", "Une actualité automatique.", 120, True, _AUTO,
+     (("nom", "le nom sur l'affiche"),)),
+    ("auto.annule", "Annulé : {titre}", "Un événement annulé", "Une actualité automatique.", 140, True, _AUTO,
+     (("titre", "le titre de l'événement"),)),
+    ("lien.texte", "**Ton lien personnel** : il ne s'ouvre qu'une fois. Ne le partage pas.\n-# Your personal link: it "
+                   "opens once. Don't share it.", "Le lien personnel", "Le message pour soi, après le bouton du guide.",
+     600, False, _LIEN, ()),
+    ("lien.bouton", "Ouvrir le site de l'équipage", "Le lien personnel · le bouton", "Il ouvre le site.", 80, True, _LIEN,
+     ()),
+    ("lien.reserve", "Réservé aux membres de l'équipage : il faut le rôle du clan.", "Le refus",
+     "Pour quelqu'un qui n'a pas le rôle du clan.", 300, True, _LIEN, ()),
+)
+for _k, (_cle, _defaut, _titre, _aide, _max, _ligne, _partie, _vars) in enumerate(TEXTES):
+    textes.declarer(f"{GROUPE}.{_cle}", _defaut, groupe=GROUPE, titre=_titre, aide=_aide, max_=_max, lignes=not _ligne,
+                    partie=_partie, variables=_vars, ordre=10 + _k)
+textes.declarer("guide.site.texte", "### Le site de l'équipage · Crew website\nTon avis de recherche, tout l'équipage, les "
+                "nouvelles et les chiffres du clan, en lecture seule.\n-# Your WANTED poster, the whole crew, clan news "
+                "and stats, read-only.", groupe="guide", titre="Le site de l'équipage", partie="Le bas du guide", ordre=35,
+                max_=800, aide="Sa ligne dans le guide (pour les membres du rôle du clan) : un lien personnel au site.")
+textes.declarer("guide.site.bouton", "Ouvrir · Open", groupe="guide", titre="Le site de l'équipage · le bouton",
+                partie="Le bas du guide", ordre=36, max_=80, lignes=False, aide="Il donne le lien personnel, pour soi.")
+#  Les clés que la page lit (`depart`) : la famille, sauf ce qui ne sert qu'au bot (le lien, les actualités).
+PAGE = tuple(f"{GROUPE}.{cle}" for cle, *_r in TEXTES if not cle.startswith(("lien.", "auto.")))
 
 
-def textes_page() -> dict:
-    return {f"site_equipage.{k}": _t(f"site_equipage.{k}", v) for k, v in TEXTES_PAGE.items()}
+def textes_page(g) -> dict:
+    """Les libellés de la page, tels que ce serveur les a (réécrits, sinon d'origine) : servis par `depart`."""
+    return {cle: _t(g, cle) for cle in PAGE}
 
 
 def setup(*, get_db, cfg, log=None):
@@ -304,22 +355,20 @@ async def _bloc(guild_id: int, ident: str):
 def depart() -> list:
     """Le contenu de départ, pirate et sobre — entièrement modifiable : (type, contenu)."""
     return [
-        ("bandeau", {"titre": _t("site_equipage.depart.bandeau.titre", "L'équipage"),
-                     "sous_titre": _t("site_equipage.depart.bandeau.sous",
-                                      "Le pavillon est hissé. Bienvenue à bord, matelot."), "image": ""}),
-        ("texte", {"titre": _t("site_equipage.depart.code.titre", "Le code de l'équipage"),
-                   "texte": _t("site_equipage.depart.code.texte",
-                               "On ne laisse jamais un équipier à la mer.\n"
-                               "Le butin se partage, les tempêtes aussi.\n"
-                               "La parole d'un pirate vaut de l'or : on la tient.\n"
-                               "Le capitaine écoute, l'équipage décide.")}),
-        ("actualites", {"titre": _t("site_equipage.depart.actualites", "Le journal de bord"), "nombre": 5,
+        ("bandeau", {"titre": "L'équipage",
+                     "sous_titre": "Le pavillon est hissé. Bienvenue à bord, matelot.", "image": ""}),
+        ("texte", {"titre": "Le code de l'équipage",
+                   "texte": "On ne laisse jamais un équipier à la mer.\n"
+                            "Le butin se partage, les tempêtes aussi.\n"
+                            "La parole d'un pirate vaut de l'or : on la tient.\n"
+                            "Le capitaine écoute, l'équipage décide."}),
+        ("actualites", {"titre": "Le journal de bord", "nombre": 5,
                         "automatiques": True}),
-        ("evenements", {"titre": _t("site_equipage.depart.evenements", "Prochaines sorties en mer"), "nombre": 4}),
-        ("honneur", {"titre": _t("site_equipage.depart.honneur", "Équipiers à l'honneur"),
-                     "texte": _t("site_equipage.depart.honneur.texte", "Les plus hautes primes de l'équipage."),
+        ("evenements", {"titre": "Prochaines sorties en mer", "nombre": 4}),
+        ("honneur", {"titre": "Équipiers à l'honneur",
+                     "texte": "Les plus hautes primes de l'équipage.",
                      "affiches": []}),
-        ("analyses", {"titre": _t("site_equipage.depart.analyses", "L'équipage en chiffres"),
+        ("analyses", {"titre": "L'équipage en chiffres",
                       "parties": list(PARTIES_ANALYSES)}),
     ]
 
@@ -513,18 +562,18 @@ async def actualites_auto(g, maintenant: float, publications=None, recrues=None,
         genre = "evenement" if evenement else "annonce"
         titre = p["titre"]
         if p["phase"] == "annule":
-            titre = f"Annulé : {titre}"
+            titre = _t(g, f"{GROUPE}.auto.annule", titre=titre)
         out.append({"id": f"auto-pub-{p['id']}", "genre": genre, "titre": titre, "texte": p["texte"],
                     "image": _media_sortie(p["image"]), "quand": int(quand), "evenement": {
                         "quand": p["quand"], "lieu": p["lieu"], "phase": p["phase"]} if evenement else None})
     for r in recrues:
         if r["quand"] >= borne:
             out.append({"id": f"auto-recrue-{r['quand']}-{hashlib.sha256(r['nom'].encode()).hexdigest()[:6]}",
-                        "genre": "recrue", "titre": f"{r['nom']} rejoint l'équipage", "texte": "", "image": "",
+                        "genre": "recrue", "titre": _t(g, f"{GROUPE}.auto.recrue", nom=r["nom"]), "texte": "", "image": "",
                         "quand": r["quand"]})
     for a in lignes:
         if int(a["cree_le"] or 0) >= maintenant - AFFICHES_NEUVES_JOURS * 86400:
-            out.append({"id": f"auto-affiche-{a['id']}", "genre": "affiche", "titre": f"Nouvelle affiche : {_nom_affiche(g, a)}",
+            out.append({"id": f"auto-affiche-{a['id']}", "genre": "affiche", "titre": _t(g, f"{GROUPE}.auto.affiche", nom=_nom_affiche(g, a)),
                         "texte": f"« {a['surnom']} »" if a["surnom"] else "", "image": "", "quand": int(a["cree_le"]),
                         "affiche": a["id"]})
     out.sort(key=lambda x: -x["quand"])
@@ -649,7 +698,10 @@ async def lecture_depart(g, membre, session: dict, requete: dict):
         "edition": edition, "expire": int(session.get("expire") or 0),
         "serveur": {"nom": getattr(g, "name", "") or "", "icone": str(g.icon.with_size(128).url) if getattr(g, "icon", None) else ""},
         "clan": sans_emoji(getattr(role, "name", "")) if role is not None else "",
-        "version": tableau.version_page(), "textes": textes_page(),
+        "version": tableau.version_page(), "textes": textes_page(g),
+        #  Les noms des statuts et des tampons d'affiche renommés par la direction (`site/affiche.js` les lit par
+        #  `libelle`) : seulement ceux-là — l'équipage n'entre pas dans `textes/site`.
+        "libelles": {k: v for k, v in textes.valeurs_site(g.id).items() if k.startswith("site.affiche.")},
         "modules": {"direct": edition and (tableau.SITE / "direct.js").is_file()},
     }
 
@@ -983,24 +1035,23 @@ async def lien_equipage(i) -> tuple:
     page avec le mode édition. Personne d'autre."""
     g, m = getattr(i, "guild", None), getattr(i, "user", None)
     if g is None or m is None or not tableau._base or not tableau._cle or not pret():
-        return None, _t("site_equipage.lien.injoignable", "Le site de l'équipage n'est pas joignable pour le moment.")
+        return None, "Le site de l'équipage n'est pas joignable pour le moment."
     c = await _cfg(g.id)
     tete = tableau.a_la_tete(g, m.id) and tableau._autorise_membre is not None and tableau._autorise_membre(g, m, c)
     if not tete and not tableau.autorise_equipage(g, m, c):
-        return None, _t("site_equipage.lien.reserve", "Réservé aux membres de l'équipage : il faut le rôle du clan.")
+        return None, _t(g, f"{GROUPE}.lien.reserve")
     if await tableau.suspendu(g.id, m.id):
-        return None, _t("site_equipage.lien.suspendu", "Ton accès au site est suspendu pour le moment. Réessaie plus tard.")
+        return None, "Ton accès au site est suspendu pour le moment. Réessaie plus tard."
     if tete:
         return f"{tableau._base}/tableau/{tableau.jeton(g.id, m.id, 'tout')}?vers=equipage", ""
     return f"{tableau._base}/tableau/{tableau.jeton(g.id, m.id, 'equipage')}", ""
 
 
-def _vue_avis(texte: str, couleur=Palette.NEUTRAL, lien: str = "") -> LayoutView:
+def _vue_avis(texte: str, couleur=Palette.NEUTRAL, lien: str = "", bouton: str = "") -> LayoutView:
     v = LayoutView(timeout=AVIS_S)
     morceaux = [discord.ui.TextDisplay(texte)]
     if lien:
-        morceaux.append(discord.ui.ActionRow(Button(label=_t("site_equipage.lien.bouton", "Ouvrir le site de l'équipage"),
-                                                    url=lien)))
+        morceaux.append(discord.ui.ActionRow(Button(label=(bouton or "Ouvrir")[:80], url=lien)))
     v.add_item(discord.ui.Container(*morceaux, accent_color=couleur))
     return v
 
@@ -1025,9 +1076,8 @@ def _effacer_plus_tard(i, delai: float = AVIS_S) -> None:
 async def envoyer_lien(i) -> None:
     url, refus = await lien_equipage(i)
     if url:
-        texte = _t("site_equipage.lien.texte", "**Ton lien personnel** : il ne s'ouvre qu'une fois. Ne le partage pas.\n"
-                                               "-# Your personal link: it opens once. Don't share it.")
-        vue = _vue_avis(texte, discord.Color(0xA8823F), url)
+        g = getattr(i, "guild", None)
+        vue = _vue_avis(_t(g, f"{GROUPE}.lien.texte"), discord.Color(0xA8823F), url, _t(g, f"{GROUPE}.lien.bouton"))
     else:
         vue = _vue_avis(refus, Palette.WARNING)
     if i.response.is_done():
@@ -1040,8 +1090,9 @@ async def envoyer_lien(i) -> None:
 class BoutonSiteEquipage(discord.ui.DynamicItem[Button], template=r"eq:site"):
     """« Le site de l'équipage » (guide du clan) : persistant, il répond après un redémarrage (`bot.add_dynamic_items`)."""
 
-    def __init__(self):
-        super().__init__(Button(label=_t("site_equipage.guide.bouton", "Ouvrir · Open"),
+    def __init__(self, libelle: str = ""):
+        #  Le libellé : celui du guide (`section_guide`, réécrit sur le site) ; recréé au clic, il ne se voit pas.
+        super().__init__(Button(label=(libelle or textes.defaut("guide.site.bouton"))[:80],
                                 style=discord.ButtonStyle.secondary, custom_id="eq:site"))
 
     @classmethod
@@ -1054,8 +1105,7 @@ class BoutonSiteEquipage(discord.ui.DynamicItem[Button], template=r"eq:site"):
         except Exception as ex:
             _signaler("E9", "lien du site de l'équipage en échec", ex)
             try:
-                vue = _vue_avis(_t("site_equipage.lien.souci", "Un souci est survenu : réessaie dans un instant."),
-                                Palette.WARNING)
+                vue = _vue_avis("Un souci est survenu : réessaie dans un instant.", Palette.WARNING)
                 if i.response.is_done():
                     await i.followup.send(view=vue, ephemeral=True)
                 else:
@@ -1073,12 +1123,9 @@ async def section_guide(g, c: dict) -> tuple | None:
     rid = int((c or {}).get(rellseas_panneau.CLE_ROLE_CIBLE, 0) or 0)
     if not rid or g.get_role(rid) is None:
         return None
-    texte = _t("site_equipage.guide", "### Le site de l'équipage · Crew website\n"
-                                      "Ton avis de recherche, tout l'équipage, les nouvelles et les chiffres du clan, "
-                                      "en lecture seule.\n-# Your WANTED poster, the whole crew, clan news and stats, "
-                                      "read-only.")
-    composants = [discord.ui.Section(discord.ui.TextDisplay(texte), accessory=BoutonSiteEquipage())]
-    return composants, hashlib.sha256(texte.encode("utf-8")).hexdigest()[:12]
+    texte, libelle = _t(g, "guide.site.texte"), _t(g, "guide.site.bouton")
+    composants = [discord.ui.Section(discord.ui.TextDisplay(texte), accessory=BoutonSiteEquipage(libelle))]
+    return composants, hashlib.sha256(f"{texte}\x1f{libelle}".encode("utf-8")).hexdigest()[:12]
 
 
 __all__ = ["setup", "init_db", "LECTURES", "ROUTES_SITE", "medias_permis", "medias_utilises", "section_guide",

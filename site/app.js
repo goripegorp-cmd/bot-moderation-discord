@@ -107,6 +107,7 @@ function monterEntete() {
     { l: "File d'envoi", sous: HL.file.ops.length ? quantite(HL.file.ops.length, "modification(s) en attente") : "rien en attente", icone: "synchro", onclick: ouvrirFile },
     { l: "Exporter le journal (30 jours)", icone: "exporter", href: BASE + "/export?quoi=journal&jours=30", telecharger: true, desactive: !enLigne() },
     { l: "Exporter le casier", icone: "exporter", href: BASE + "/export?quoi=sanctions", telecharger: true, desactive: !enLigne() },
+    { l: "Le site de l'équipage", sous: "ce que voit le clan · l'accueil à composer", icone: "equipage", onclick: () => { location.href = "/tableau/equipage/"; } },
     "-",
     { l: "Fermer toutes mes sessions", icone: "cadenas", onclick: fermerPartout, desactive: !enLigne() },
     { l: "Se déconnecter", icone: "deconnexion", onclick: deconnecter, danger: true },

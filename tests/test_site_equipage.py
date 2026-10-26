@@ -608,7 +608,7 @@ def test_S10_le_bouton_du_guide_du_clan(local, monkeypatch):
     monkeypatch.setattr(zones, "_ticket", None)
     monkeypatch.setattr(zones, "_boutons_langue", None)
     vue, sig = zones.vue_guide_clan(local.g, local.ctx.conf, {}, None, (composants, signature))
-    assert sig.endswith("|s" + signature)
+    assert "|s" + signature + "|" in sig, sig
     assert all(isinstance(x, discord.ui.DynamicItem) or not x.is_dispatchable() for x in vue.walk_children())
     assert "Le site de l'équipage" in "\n".join(x.content for x in vue.walk_children() if isinstance(x, discord.ui.TextDisplay))
     assert sum(1 for _x in vue.walk_children()) <= 40
@@ -695,6 +695,49 @@ def test_S11_le_direct_refuse_l_equipage_et_ses_verrous_gardent_l_accueil(local)
     assert v["equipage/bloc"]({"id": "abcdef12"}) == "accueil:abcdef12" and v["equipage/bloc"]({"type": "texte"}) is None
     assert v["equipage/actualite/retirer"]({"id": "abcdef12"}) == "actualite:abcdef12"
     assert v["equipage/bloc"]({"id": "../x"}) is None and all(callable(f) for f in v.values())
+
+
+def test_S12_les_textes_de_l_equipage_dans_le_registre(local):
+    """Textes & noms : la tête réécrit un libellé de la page, une phrase des actualités automatiques, la ligne du guide —
+    par la VRAIE adresse du registre ; l'équipage lit les nouveaux par SA lecture (`depart`), jamais par `textes/site`
+    (refusé à sa portée). Et chaque libellé de la page est déclaré, chaque déclaration employée par la page."""
+    import site_equipage
+    import textes
+
+    def ecrire_texte(cle, valeur):
+        st, rep = local.ecrire("texte", {"cle": cle, "valeur": valeur, "version": textes.item(local.g, cle)["version"]},
+                               local.tete)
+        assert st == 200, rep
+    renommes = ("equipage_site.onglet.accueil", "equipage_site.auto.affiche", "guide.site.texte",
+                "site.affiche.statut.en_mer", "site.cat.port.titre")
+    try:
+        ecrire_texte("equipage_site.onglet.accueil", "Le pont")
+        ecrire_texte("equipage_site.auto.affiche", "Avis placardé : {nom}")
+        ecrire_texte("guide.site.texte", "### Le site du clan\nTon avis de recherche.")
+        ecrire_texte("site.affiche.statut.en_mer", "Au large")
+        ecrire_texte("site.cat.port.titre", "La Rade")
+        _st, d = local.lire("depart", local.kolax)
+        assert d["textes"]["equipage_site.onglet.accueil"] == "Le pont"
+        assert d["libelles"] == {"site.affiche.statut.en_mer": "Au large"}, \
+            "les noms d'affiche renommés suivent ; aucun autre nom de la direction ne sort"
+        assert d["textes"]["equipage_site.titre"] == "L'Équipage", "le reste : le texte d'origine"
+        assert set(d["textes"]) == set(site_equipage.PAGE) and not any(k.startswith("equipage_site.lien") for k in d["textes"])
+        assert local.requete("GET", "/tableau/espace/api/textes/site", local.kolax)[0] == 403
+        auto = local.lire("accueil", local.kolax)[1]["donnees"]["actualites"]["auto"]
+        assert any(a["genre"] == "affiche" and a["titre"].startswith("Avis placardé : ") for a in auto)
+        composants, _sig = local.faire(site_equipage.section_guide(local.g, local.ctx.conf))
+        assert "### Le site du clan" in composants[0].children[0].content
+    finally:
+        for cle in renommes:
+            st, _r = local.ecrire("texte/defaut", {"cle": cle}, local.tete)
+            assert st == 200
+    #  La page et le registre disent la même chose : chaque T("…") de la page est déclaré, chaque libellé déclaré sert.
+    js = "\n".join((RACINE / "site" / f).read_text(encoding="utf-8") for f in ("equipage.js", "equipage_accueil.js",
+                                                                                 "equipage_commun.js"))
+    employes = {"equipage_site." + k for k in re.findall(r'\bT\("([a-z0-9_.]+)"', js)}
+    assert employes == set(site_equipage.PAGE), (employes ^ set(site_equipage.PAGE))
+    for cle in site_equipage.PAGE:
+        assert textes.defaut(cle) in js, f"le repli de la page diffère du texte d'origine : {cle}"
 
 
 def test_S10b_rgpd_et_cablage_dans_le_bot(local):

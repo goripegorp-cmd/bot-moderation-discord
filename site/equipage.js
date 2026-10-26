@@ -4,7 +4,7 @@
 // Rien du site de la direction n'est chargé ici : ni ses données, ni sa file hors ligne, ni son service worker.
 
 import { h, icone, $, BASE, chargerSprite, completerSprite, remplacer, ajouter, sansEmoji, srcSure, date, contient, nombre, compte, reduit } from "./dom.js";
-import { etat, ecouter, filtres } from "./noyau.js";
+import { etat, ecouter, filtres, poserLibelles } from "./noyau.js";
 import { poster } from "./api.js";
 import { bouton, boutonIcone, menu, confirmer, toast, titreRubrique, vide, bandeau, groupe, paginer, recherche, liste } from "./ui.js";
 import { affiche, nomAffiche, metiersDe, gradeDe, insigneImage } from "./affiche.js";
@@ -48,6 +48,7 @@ async function demarrer() {
   }
   E.depart = d.donnees;
   E.textes = d.donnees.textes || {};
+  poserLibelles(d.donnees.libelles || {});   // les statuts et tampons d'affiche renommés (affiche.js les lit)
   E.peutEditer = !!d.donnees.edition;
   if (eq.ok) E.equipage = eq.donnees;
   if (d.donnees.version && V !== "dev" && d.donnees.version !== V) versionNeuve = true;

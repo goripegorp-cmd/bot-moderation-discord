@@ -2,7 +2,7 @@
 // en lecture seule), les textes renommables par la direction, l'affiche en grand, le texte « riche » (**gras** seulement).
 // Aucune donnée n'est écrite en HTML : tout passe par h() (dom.js).
 
-import { h, icone, sansEmoji, nombre, ajouter } from "./dom.js";
+import { h, icone, sansEmoji, nombre, ajouter, majuscule } from "./dom.js";
 import { etat } from "./noyau.js";
 import { sessionTerminee } from "./api.js";
 import { pancarte, bouton, toast } from "./ui.js";
@@ -15,9 +15,10 @@ const DELAI = 15000;
  *  `accueil` (blocs et leurs données), `textes` (les libellés renommés par la direction). */
 export const E = { depart: null, equipage: null, accueil: null, textes: {}, peutEditer: false, modeEdition: false };
 
-/** Un libellé de la page : celui que la direction a choisi (registre des textes), sinon le défaut. */
+/** Un libellé de la page : celui que la direction a choisi (registre `textes.py`, famille « Le site de l'équipage »,
+ *  servi par la lecture `depart`), sinon le texte d'origine donné ici en repli. */
 export function T(cle, defaut) {
-  const v = E.textes && E.textes["site_equipage." + cle];
+  const v = E.textes && E.textes["equipage_site." + cle];
   return typeof v === "string" && v.trim() ? v : defaut;
 }
 
@@ -81,7 +82,7 @@ export function detailsAffiche(a) {
       ligne("Prime", h("span", { classe: "num" }, primeNoeud(a.prime || 0), rang ? h("span", { classe: "rang-prime" }, " · " + rang + (rang === 1 ? "re" : "e") + " sur " + nombre(total)) : null)),
       ligne("Grade", gradeDe(a, cat) || "—"),
       ligne("Niveau", a.niveau ? nombre(a.niveau) : "—"),
-      ligne("Statut", STATUTS_AFFICHE[a.statut] || sansEmoji(a.statut) || "—"),
+      ligne("Statut", STATUTS_AFFICHE[a.statut] || majuscule(sansEmoji(a.statut)) || "—"),
       a.membre && a.membre.nom ? ligne("Sur Discord", sansEmoji(a.membre.nom)) : null),
     ins.length
       ? h("ul", { classe: "insignes-liste" }, ins.map((i) => h("li", {}, insigneImage(i, "insigne-liste-img"), h("span", {}, h("b", {}, i.nom), h("small", {}, i.typeNom)))))
