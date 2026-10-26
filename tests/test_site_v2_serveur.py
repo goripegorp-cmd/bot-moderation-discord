@@ -1148,7 +1148,8 @@ def test_V14d_journal_sessions_transcripts_et_archives_des_tickets(site):
     for quand, cat, guild in ((t - 100 * 86400, "Modération", 1), (t - 100 * 86400, "Modération", 2),
                               (t - 40 * 86400, "Modération", 1), (t - 40 * 86400, "Vocal", 1)):
         site.ecrire("INSERT INTO registre (guild_id, quand, categorie, type, texte) VALUES (?,?,?,'x','x')", (guild, quand, cat))
-    site.ecrire("INSERT INTO tableau_sessions VALUES ('perimee', 1, ?, ?, ?)", (FONDATEUR, t - 90000, t - 10))
+    site.ecrire("INSERT INTO tableau_sessions (empreinte, guild_id, user_id, cree_le, expire_le) VALUES ('perimee', 1, ?, ?, ?)",
+                (FONDATEUR, t - 90000, t - 10))   # (26/10 : la table a aussi une portée, « tout » par défaut)
     site.ecrire("INSERT INTO tableau_jetons VALUES ('vieux-nonce', ?)", (t - 10,))
     vivante = site.session()
     dossier = Path(transcript_store._BASE_DIR)

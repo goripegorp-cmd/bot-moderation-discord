@@ -122,6 +122,7 @@ import vigilance  # un membre qui cumule les évènements graves : alerte dans �
 import tableau  # tableau de bord web : candidatures, tickets par type, clan
 import affiches  # le site, Capitainerie : catalogue RELL Seas, affiches, rôles des métiers
 import metiers  # les rôles de métier du clan : choisis dans le guide, créés au besoin, retirés en quittant le clan
+import site_equipage  # 26/10/2026 : le site de l'équipage — le clan en lecture seule, l'accueil composé par la direction
 import textes  # 26/10/2026 : les textes du bot et les noms du site, réécrits par la direction (Textes & noms)
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
@@ -21817,6 +21818,15 @@ async def _activite_boot():
                       journal=lambda g, type_, texte, **kw: _au_journal(g, "Clan", type_, texte, **kw),
                       guide=zones.assurer_guide_clan, log=print)
         zones.brancher_metiers(metiers.section_guide)
+    with _Etape("site_equipage"):
+        #  26/10/2026 : le site de l'équipage — les membres du rôle du clan lisent La Capitainerie (`/tableau/equipage/`,
+        #  portée « equipage », rien d'autre) ; la tête y compose l'accueil (`/tableau/espace/api/equipage/…`). Le lien
+        #  personnel : le bouton du guide du clan. Après « tableau » et « zones » (son `setup` remet le guide à zéro).
+        site_equipage.setup(get_db=get_db, cfg=cfg, log=print)
+        await site_equipage.init_db()
+        tableau.monter(site_equipage)
+        tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
+        zones.brancher_site_equipage(site_equipage.section_guide)
 
     with _Etape("activite"):
         await activite_module.init_db()
@@ -21931,6 +21941,7 @@ async def on_ready():
         bot.add_dynamic_items(vocaux.ChoixBut)
         bot.add_dynamic_items(liens_jeux.BoutonLiens)
         bot.add_dynamic_items(metiers.ChoixMetier)  # 25/10/2026 : « Choisis ton métier » du guide du clan
+        bot.add_dynamic_items(site_equipage.BoutonSiteEquipage)  # 26/10/2026 : « Le site de l'équipage » (guide du clan)
         bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")

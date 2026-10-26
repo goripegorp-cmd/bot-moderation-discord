@@ -48,6 +48,32 @@ async function ouvrirEditeurDirect() {
   await new Promise((r) => setTimeout(r, 1000));
   [...document.querySelectorAll("dialog[open] button")].find((x) => x.textContent.includes("Modifier")).click();
 }
+// ─── Le site de l'équipage ──────────────────────────────────────────────────
+const EQ = { page: "/tableau/equipage/", entree: "/tableau/demo?qui=equipage" };
+const EQ_TETE = { page: "/tableau/equipage/", entree: "/tableau/demo?vers=equipage" };
+// Ce qu'un membre de l'équipage ne doit JAMAIS voir (aucun geste d'écriture sur son site).
+const GESTES_DIRECTION = ["Modifier l'accueil", "Publier une actualité", "Ajouter un bloc", "Mettre à la corbeille", "Enregistrer", "Retirer"];
+const cliquerTexte = (selecteur, texte) => "(async () => { const b = [...document.querySelectorAll(" + JSON.stringify(selecteur) + ")].find((x) => x.textContent.includes("
+  + JSON.stringify(texte) + ")); if (!b) throw new Error('introuvable : ' + " + JSON.stringify(texte) + "); b.scrollIntoView({ block: 'center' }); b.click(); await new Promise((r) => setTimeout(r, 600)); })()";
+const MODE_EDITION = cliquerTexte("button", "Modifier l'accueil");
+const SCENES_EQUIPAGE = [
+  { nom: "site-equipage-accueil", ...EQ, ancre: "#accueil", interdits: GESTES_DIRECTION },
+  { nom: "site-equipage-analyses", ...EQ, ancre: "#accueil", interdits: GESTES_DIRECTION,
+    geste: "(async () => { for (const g of document.querySelectorAll('.groupes-analyses details.groupe')) g.open = true; await new Promise((r) => setTimeout(r, 500)); document.querySelector('.groupes-analyses').scrollIntoView({ block: 'start' }); })()" },
+  { nom: "site-equipage-actualites", ...EQ, ancre: "#accueil", interdits: GESTES_DIRECTION, geste: cliquerTexte("button", "Toutes les actualités") },
+  { nom: "site-equipage-lire-actu", ...EQ, ancre: "#accueil", interdits: GESTES_DIRECTION, geste: cliquerTexte("button.lien-titre", "Grande chasse") },
+  { nom: "site-equipage-equipage", ...EQ, ancre: "#equipage", interdits: GESTES_DIRECTION },
+  { nom: "site-equipage-affiche", ...EQ, ancre: "#equipage", interdits: GESTES_DIRECTION, geste: "document.querySelector('button.affiche').click()" },
+  { nom: "site-equipage-filtre", ...EQ, ancre: "#equipage", interdits: GESTES_DIRECTION, geste: "document.querySelector('.liste-bouton').click()" },
+  { nom: "site-equipage-fiche", ...EQ, ancre: "#fiche", interdits: GESTES_DIRECTION },
+  { nom: "site-equipage-sans-fiche", page: EQ.page, entree: "/tableau/demo?qui=equipage&id=1003", ancre: "#fiche", interdits: GESTES_DIRECTION },
+  { nom: "site-equipage-edition", ...EQ_TETE, ancre: "#accueil", geste: MODE_EDITION },
+  { nom: "site-equipage-ajouter-bloc", ...EQ_TETE, ancre: "#accueil", geste: MODE_EDITION, geste2: cliquerTexte(".barre-edition button", "Ajouter un bloc") },
+  { nom: "site-equipage-editeur-bloc", ...EQ_TETE, ancre: "#accueil", geste: MODE_EDITION, geste2: cliquerTexte(".bloc-texte .barre-bloc button", "Modifier") },
+  { nom: "site-equipage-editeur-honneur", ...EQ_TETE, ancre: "#accueil", geste: MODE_EDITION, geste2: cliquerTexte(".bloc-honneur .barre-bloc button", "Modifier") },
+  { nom: "site-equipage-editeur-actualite", ...EQ_TETE, ancre: "#accueil", geste: cliquerTexte(".barre-edition button", "Publier une actualité") },
+];
+
 // Ouvrir la première affiche (les groupes par métier sont repliés au départ).
 const OUVRIR_AFFICHE ="(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.affiche').click(); })()";
 // Une ligne compacte (rangement.js) ou une ancienne carte, cliquable, dont le texte contient… (la première sinon).
@@ -140,6 +166,9 @@ const SCENES = [
   { nom: "direct-carte-verrouillee", ancre: "#capitainerie/affiches", autre: true, geste: "(" + voirCarteDirect + ")()" },
   { nom: "direct-lecture-seule", ancre: "#capitainerie/affiches", autre: true, geste: "(" + voirCarteDirect + ")()",
     geste2: "(" + ouvrirEditeurDirect + ")()" },
+  // Le site de l'équipage (`/tableau/equipage/`) : un MEMBRE du clan (Kolax, portée « equipage ») en lecture seule —
+  // aucun bouton d'action —, puis la tête en mode édition. Chaque scène porte sa page et son entrée (sa session).
+  ...SCENES_EQUIPAGE,
 ];
 
 // ─── Le protocole DevTools ──────────────────────────────────────────────────
@@ -267,6 +296,15 @@ const CONTROLE = `(() => {
     if (el.clientHeight > 0 && el.clientHeight < 30 && el.scrollHeight > el.clientHeight + 6 && el.querySelector("button, a[href], input"))
       res.ecrases.push({ el: decrire(el).slice(0, 90), h: el.clientHeight, contenu: el.scrollHeight });
   }
+  // Une jauge dont la part est posée (--pc > 0) mais qui ne montre aucune encre (26/10 : « .barre-h .plein », un span
+  // en ligne, ignorait sa largeur — toutes les barres horizontales vides, sur les deux sites).
+  res.jauges = [];
+  for (const el of zone.querySelectorAll("[style*='--pc']")) {
+    const pc = parseFloat(el.style.getPropertyValue("--pc"));
+    const cadre = el.parentElement ? el.parentElement.getBoundingClientRect() : null;
+    if (!(pc > 0) || !cadre || cadre.width < 20) continue;   // part nulle, ou jauge repliée (rien à voir)
+    if (el.getBoundingClientRect().width < 1) res.jauges.push(decrire(el).slice(0, 90) + " (--pc " + pc + " %)");
+  }
   const diag = window.__capitainerie || {};
   res.violations = diag.violations || [];
   res.icones = [...(diag.icones || [])];
@@ -342,11 +380,22 @@ async function preparerAutre() {
   return autre;
 }
 
+// La session de la page : l'entrée donnée (`--entree`, ou celle d'une scène) n'est rouverte que si elle change.
+let entreeCourante = "";
+async function entrer(o, entree) {
+  if (!entree || entree === entreeCourante) return;
+  await o.s("Page.navigate", { url: entree });
+  await pause(1500);
+  entreeCourante = entree;
+}
+
 async function controlerScene(o, scene, [l, hh]) {
   if (scene.autre && !(await preparerAutre())) { console.log(`passée ${scene.nom.padEnd(30)} (une seconde personne : vrai site local, --entree)`); return; }
+  if (scene.page && !opt("entree", "")) { console.log(`passée ${scene.nom.padEnd(30)} (le site de l'équipage : vrai site local, --entree)`); return; }
+  await entrer(o, scene.entree ? ORIGINE + scene.entree : String(opt("entree", "") || ""));
   erreursCourantes = [];
   await taille(o, l, hh);
-  await o.s("Page.navigate", { url: URL_SITE + "?scene=" + scene.nom + "-" + l + scene.ancre });
+  await o.s("Page.navigate", { url: (scene.page ? ORIGINE + scene.page : URL_SITE) + "?scene=" + scene.nom + "-" + l + scene.ancre });
   await pause(300);
   const pret = await attendrePret(o);
   if (scene.geste) { try { await evaluer(o, scene.geste); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
@@ -366,6 +415,7 @@ async function controlerScene(o, scene, [l, hh]) {
   for (const x of res.images.slice(0, 4)) fautes.push(`image cassée : ${x}`);
   for (const x of (res.deformes || []).slice(0, 4)) fautes.push(`rond étiré en ovale (${x.l}×${x.h}) : ${x.el}`);
   for (const x of (res.ecrases || []).slice(0, 4)) fautes.push(`rangée écrasée (${x.h} px pour ${x.contenu} px de contenu) : ${x.el}`);
+  for (const x of (res.jauges || []).slice(0, 4)) fautes.push(`jauge sans encre : ${x}`);
   for (const x of (res.suspects || []).slice(0, 4)) fautes.push(`valeur absente affichée : ${x}`);
   for (const x of res.violations.slice(0, 4)) fautes.push(`violation CSP : ${x.directive} (${x.source}:${x.ligne})`);
   for (const x of [...new Set(erreursCourantes)].slice(0, 6)) fautes.push(x);
@@ -467,10 +517,7 @@ async function principal() {
     brancherConsole();
     const o = await nouvelOnglet();
     // --entree : une adresse ouverte d'abord (le vrai site local : /tableau/demo pose la session), puis les scènes.
-    if (opt("entree", "")) {
-      await o.s("Page.navigate", { url: String(opt("entree")) });
-      await pause(1500);
-    }
+    if (opt("entree", "")) await entrer(o, String(opt("entree")));
     if (!opt("seulement-hors-ligne", false)) {
       const filtre = opt("scenes", "") ? String(opt("scenes")).split(",") : null;
       for (const scene of SCENES.filter((s) => !filtre || filtre.some((f) => s.nom.includes(f)))) {

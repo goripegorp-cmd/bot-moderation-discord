@@ -1,0 +1,161 @@
+/* Le site de l'équipage — ce qui lui est propre. Le reste (parchemin, bois, pancartes, affiches, composants) vient des
+   feuilles de La Capitainerie, inchangées. Aucun style en ligne (CSP) ; aucun émoji, rien de « futuriste ». */
+
+/* ─── La planche : « La Capitainerie » (fondateur et direction) ─────── */
+.vers-capitainerie { min-height: 40px; padding: 6px 13px; }
+@media (pointer: coarse) { .vers-capitainerie { min-height: 44px; } }
+.titre-rubrique.titre-cache { display: none; } /* un bandeau ouvre l'accueil : il en est le titre (h1) */
+@media (max-width: 719px) {
+  .vers-capitainerie { width: 44px; min-height: 44px; padding: 0; }
+  .vers-capitainerie > span { display: none; }
+}
+
+/* ─── Les blocs de l'accueil ───────────────────────────────────────── */
+.bloc-eq { position: relative; display: grid; gap: 12px; min-width: 0; }
+.bloc-eq.en-edition { padding: 12px; border: 1px dashed var(--trait-fort); border-radius: var(--rayon-2); background: rgba(248, 240, 221, .35); }
+.bloc-eq.en-edition.masque > :not(.barre-bloc) { opacity: .55; }
+.barre-bloc { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-width: 0;
+  padding-bottom: 8px; border-bottom: 1px dotted var(--trait-fort); }
+.barre-bloc-nom { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font: 500 15px/1.2 var(--police-sc); color: var(--encre-2); }
+.barre-bloc-nom .ic { color: var(--encre-2); }
+.barre-bloc-boutons { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.barre-bloc .bouton-icone { border-color: var(--trait); background: var(--papier); }
+.barre-bloc .bouton-icone:hover:not(:disabled) { background: var(--papier-sombre); }
+.barre-bloc .bouton-icone:disabled { opacity: .35; cursor: not-allowed; }
+.barre-bloc .bouton-icone.danger { color: var(--cire); }
+.barre-edition {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; min-width: 0;
+  padding: 10px 14px; border: 1px solid var(--trait-fort); border-left: 5px solid var(--laiton); border-radius: var(--rayon);
+  background: rgba(248, 240, 221, .9);
+}
+.barre-edition .aide { max-width: 62ch; }
+.barre-edition.active { position: sticky; top: 8px; z-index: 6; border-left-color: var(--cire); box-shadow: var(--ombre-levee); }
+@media (max-width: 719px) { .barre-edition.active { position: static; } }
+
+/* Le titre d'un bloc : un sceau de cire, le titre, le filet d'encre */
+.sceau-bloc {
+  flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%;
+  color: var(--clair); --ton2: var(--laiton-pale);
+  background: radial-gradient(circle at 38% 32%, var(--cire-claire), var(--cire) 55%, var(--cire-fonce));
+  box-shadow: 0 0 0 2px rgba(142, 42, 36, .22), 0 1px 2px rgba(43, 29, 18, .4);
+}
+.section-tete h2 .sceau-bloc .ic { width: 21px; height: 21px; color: var(--clair); }
+
+/* ─── Le bandeau ───────────────────────────────────────────────────── */
+.bandeau-eq {
+  position: relative; isolation: isolate; overflow: hidden;
+  display: grid; align-items: end; min-width: 0; min-height: clamp(190px, 21vw, 320px);
+  padding: clamp(18px, 3vw, 38px); border-radius: 4px; color: var(--clair);
+  background: var(--bois-2) url(textures/carte_marine.webp) center / cover;
+  box-shadow: inset 0 0 0 1px var(--bois-3), 0 12px 24px -16px rgba(0, 0, 0, .75);
+}
+.bandeau-eq::before { /* le cadre de laiton, en retrait */
+  content: ""; position: absolute; inset: 8px; z-index: 1; pointer-events: none;
+  border: 1px solid rgba(220, 192, 138, .45); border-radius: 2px;
+}
+.bandeau-eq::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgba(20, 11, 5, .12) 0%, rgba(20, 11, 5, .38) 45%, rgba(20, 11, 5, .82) 100%); }
+.bandeau-eq-image { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; }
+.bandeau-eq-texte { position: relative; z-index: 2; display: grid; gap: 6px; min-width: 0; max-width: 72ch; }
+.bandeau-eq-titre {
+  font: 400 clamp(36px, 3.2vw + 18px, 66px)/1.02 var(--police-titre); color: var(--clair); overflow-wrap: anywhere;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, .6), 0 0 22px rgba(0, 0, 0, .45);
+}
+.bandeau-eq-sous { font: italic 400 clamp(17px, .5vw + 15px, 21px)/1.35 var(--police-texte); color: var(--laiton-pale); text-shadow: 0 1px 1px rgba(0, 0, 0, .7); overflow-wrap: anywhere; }
+
+/* ─── Le texte, l'image ────────────────────────────────────────────── */
+.bloc-texte-cadre { display: grid; gap: 8px; }
+.texte-riche { display: grid; gap: .55em; min-width: 0; max-width: 78ch; overflow-wrap: anywhere; }
+.texte-riche b { font-weight: 700; }
+.bloc-texte-cadre .texte-riche { font-size: clamp(17px, .25vw + 16px, 19px); }
+.image-eq { display: grid; justify-items: center; gap: 6px; margin: 0; min-width: 0; }
+.image-eq img { max-width: 100%; max-height: 560px; object-fit: contain; border: 1px solid var(--trait); border-radius: 3px; background: var(--papier); box-shadow: var(--ombre-papier); }
+.image-eq figcaption { max-width: 70ch; font: italic 400 15.5px/1.35 var(--police-texte); color: var(--encre-2); text-align: center; overflow-wrap: anywhere; }
+.image-eq-absente { width: 100%; min-height: 160px; }
+
+/* ─── Les actualités ───────────────────────────────────────────────── */
+.actus { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 430px), 1fr)); align-items: start; }
+.actu {
+  display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 14px; align-items: start; min-width: 0;
+  padding: 12px; border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--papier); box-shadow: var(--ombre-papier);
+}
+.actu.epinglee { border-color: var(--laiton-fonce); box-shadow: inset 4px 0 0 var(--laiton), var(--ombre-papier); }
+.actu-image, .actu-sceau { width: 104px; height: 78px; border-radius: 3px; }
+.actu-image { object-fit: cover; border: 1px solid var(--trait); background: var(--papier-2); }
+.actu-sceau { display: grid; place-items: center; background: rgba(110, 75, 35, .1); color: var(--encre-2); --ton2: var(--laiton-fonce); box-shadow: inset 0 0 0 1px var(--trait-doux); }
+.actu-sceau .ic { width: 34px; height: 34px; }
+.actu-direction .actu-sceau { background: rgba(142, 42, 36, .08); color: var(--cire); }
+.actu-corps { display: grid; gap: 4px; min-width: 0; }
+.actu-tete { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
+.actu-titre { min-width: 0; font: 700 17.5px/1.25 var(--police-texte); }
+.lien-titre {
+  display: inline; min-width: 0; padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  font: inherit; color: var(--encre); overflow-wrap: anywhere;
+  text-decoration: underline; text-decoration-color: var(--trait-fort); text-decoration-thickness: 1px; text-underline-offset: 3px;
+}
+.lien-titre:hover { color: var(--cire); text-decoration-color: currentColor; }
+@media (pointer: coarse) { .lien-titre { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; } }
+.actu-extrait { color: var(--encre-2); font-size: 15px; }
+.actu-image-grande { justify-self: center; max-width: 100%; max-height: 440px; object-fit: contain; border: 1px solid var(--trait); border-radius: 3px; background: var(--papier); }
+@media (max-width: 480px) {
+  .actu { grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 10px; }
+  .actu-image, .actu-sceau { width: 64px; height: 58px; }
+  .actu-sceau .ic { width: 26px; height: 26px; }
+}
+
+/* ─── Les événements à venir ───────────────────────────────────────── */
+.evts-eq { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 560px)); align-items: start; }
+.evt-eq { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 14px; align-items: start; }
+.evt-eq.en-cours { box-shadow: inset 4px 0 0 var(--vert), var(--ombre-papier); }
+.evt-sceau {
+  display: grid; justify-items: center; align-content: center; width: 76px; min-height: 86px; padding: 6px 4px; border-radius: 4px;
+  color: var(--clair); text-align: center; background: var(--bois) url(textures/bois.webp); background-size: 240px auto;
+  box-shadow: inset 0 0 0 1px var(--bois-3), 0 2px 4px rgba(43, 29, 18, .35);
+}
+.evt-sceau b { font: 400 34px/1 var(--police-titre); }
+.evt-jour, .evt-mois { font: 500 13px/1.15 var(--police-sc); color: var(--laiton-pale); letter-spacing: .04em; }
+.evt-corps { display: grid; gap: 6px; min-width: 0; }
+.evt-corps h3 { font: 700 18px/1.25 var(--police-texte); overflow-wrap: anywhere; }
+.evt-maintenant { color: var(--vert-fonce); }
+.evt-texte { color: var(--encre-2); font-size: 15px; }
+
+/* ─── Les équipiers à l'honneur, l'équipage ────────────────────────── */
+.grille.affiches.honneur { grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); }
+@media (max-width: 519px) { /* au téléphone : deux affiches par rangée (« rien à défiler sans fin ») */
+  .page-equipage .grille.affiches, .page-equipage .grille.affiches.honneur { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
+  .ruban-mienne { top: 6px; right: 4px; padding: 1px 7px; font-size: 11.5px; }
+}
+.affiche-case { position: relative; min-width: 0; padding: 4px; }   /* l'affiche penche (jusqu'à 0,9°, --incl) : la marge la garde dans sa case */
+.ruban-mienne {
+  position: absolute; top: 10px; right: 6px; z-index: 5; padding: 2px 10px; border-radius: 2px;
+  background: var(--cire); color: var(--clair); font: 600 13px/1.45 var(--police-sc); letter-spacing: .04em;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, .35); transform: rotate(4deg); pointer-events: none;
+}
+.affiche-case.la-mienne .affiche { filter: drop-shadow(0 0 0 var(--cire)) drop-shadow(0 2px 1px rgba(43, 29, 18, .25)) drop-shadow(0 12px 14px rgba(29, 18, 9, .45)); }
+
+/* ─── Les analyses ─────────────────────────────────────────────────── */
+.groupes-analyses { display: grid; min-width: 0; }
+.lib-icone { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; vertical-align: middle; }
+.lib-icone-img { width: 26px; height: 26px; flex: none; object-fit: contain; }
+.lib-icone .monogramme.lib-icone-img { width: 26px; height: 26px; font-size: 12px; }
+.lib-texte { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.classement { display: grid; gap: 4px; min-width: 0; }
+.classement li { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 4px 2px; border-bottom: 1px dotted var(--trait-fort); }
+.classement li .lien-nom { justify-self: start; min-width: 0; overflow-wrap: anywhere; text-align: left; }
+.classement-rang { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--encre); color: var(--clair); font: 700 14px/1 var(--police-chiffres); }
+.classement li:first-child .classement-rang { background: var(--laiton); color: var(--encre); }
+.classement-val { font-weight: 700; }
+
+/* ─── Ma fiche ─────────────────────────────────────────────────────── */
+.fiche-perso { align-items: start; }
+.fiche-rang { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-left: 4px solid var(--laiton); border-radius: 0 3px 3px 0; background: rgba(248, 240, 221, .75); font-weight: 600; }
+.fiche-rang .ic { width: 22px; height: 22px; color: var(--encre-2); }
+.rang-prime { font-weight: 400; color: var(--encre-2); white-space: nowrap; }
+.aide.centre { justify-self: center; text-align: center; }
+
+/* ─── Les formulaires de la direction ──────────────────────────────── */
+.parties-choix { display: grid; gap: 2px 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); }
+.nombre-choix { gap: 10px; }
+.reglette-valeur { min-width: 2.2ch; text-align: center; font: 700 22px/1 var(--police-chiffres); }
+.choix-honneur { display: grid; gap: 8px; }
+.choix-honneur .choix-insignes { grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); }
+.choix-affiche { width: 100%; }

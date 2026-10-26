@@ -416,6 +416,14 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         except Exception as ex:  # outil local : on le dit et on continue sans les événements
             print(f"[SITE LOCAL] événements non branchés : {type(ex).__name__} {ex}")
 
+    #  Le site de l'équipage (26/10/2026), comme l'étape « site_equipage » du bot.
+    import site_equipage
+    site_equipage.setup(get_db=get_db, cfg=cfg, log=print)
+    await site_equipage.init_db()
+    tableau.monter(site_equipage)
+    tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
+    zones.brancher_site_equipage(site_equipage.section_guide)   # sa ligne dans le guide du clan de démonstration
+
     await _remplir(get_db, g, clan_r, salon_annonces, X)
     await _recrutement_demo(get_db, g, ticket_ouvert)
     await _affiches_demo(g, X)
@@ -423,6 +431,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         await _evenements_demo(evenements, g, clan_r, get_db)
     await site_local_port.remplir(get_db=get_db, g=g, salon=salon_annonces, tete=TETE, fondateur=FONDATEUR,
                                   direction=DIRECTION)
+    await _equipage_demo(g)
     if not await zones.assurer_guide_clan(g):   # le guide du clan posé une première fois (son message d'ouverture)
         print("[SITE LOCAL] guide du clan non posé")
     if lourd:
@@ -431,12 +440,25 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     app = health_server.construire_app()
 
     async def demo(request):
-        """L'entrée de démonstration : une session SANS lien — ce script seulement."""
+        """L'entrée de démonstration : une session SANS lien — ce script seulement. `?qui=direction` : la direction ;
+        `?qui=equipage` : un membre du clan (Kolax, qui a son affiche ; `&id=` en choisit un autre du clan), portée
+        « equipage » ; `?vers=equipage` : la tête, sur le site de l'équipage (mode édition)."""
         from aiohttp import web
-        uid = DIRECTION if request.query.get("qui") == "direction" else qui
+        portee, vers = "tout", tableau.ESPACE
+        if request.query.get("qui") == "equipage":
+            brut = request.query.get("id", "1000")
+            uid = int(brut) if brut.isdigit() and len(brut) <= 20 else 0
+            m = g.get_member(uid)
+            if m is None or clan_r not in m.roles:
+                return web.Response(status=403, text="Pas un membre du clan.")
+            portee, vers = "equipage", tableau.EQUIPAGE
+        else:
+            uid = DIRECTION if request.query.get("qui") == "direction" else qui
+            if request.query.get("vers") == "equipage":
+                vers = tableau.EQUIPAGE
         expire = int(time.time()) + tableau.DUREE
-        sid = await tableau._ouvrir_session(SERVEUR_ID, uid, expire)
-        r = web.Response(status=303, headers=dict(tableau.ENTETES, Location=tableau.ESPACE))
+        sid = await tableau._ouvrir_session(SERVEUR_ID, uid, expire, portee=portee)
+        r = web.Response(status=303, headers=dict(tableau.ENTETES, Location=vers))
         r.set_cookie(tableau.COOKIE, sid, max_age=tableau.DUREE, path="/", secure=True, httponly=True, samesite="Lax")
         return r
     app.router.add_get("/tableau/demo", demo)
@@ -817,6 +839,76 @@ async def _evenements_demo(ev, g, clan_r, get_db) -> None:
     c = await publier(c) if c else None
     if c:
         await ev.annuler(g, chef, c["id"], prevenir=False)
+
+
+async def _equipage_demo(g) -> None:
+    """Le site de l'équipage : l'accueil de départ (posé par le VRAI module), une image de bandeau et deux actualités de
+    la direction (l'une épinglée, avec son image) — par les mêmes adresses que la page."""
+    import base64
+    import io
+
+    import site_equipage
+    import tableau
+    chef = g.get_member(FONDATEUR)
+    statut, accueil = await site_equipage.lecture_accueil(g, chef, {"portee": "tout"}, {})
+    if statut != 200:
+        print(f"[SITE LOCAL] accueil de l'équipage illisible : {accueil}")
+        return
+
+    async def image(nom, dessiner, taille):
+        try:
+            from PIL import Image, ImageDraw
+        except ImportError:  # outil local : sans Pillow, pas d'image de démonstration
+            return ""
+        im = Image.new("RGB", taille, (20, 40, 52))
+        dessiner(ImageDraw.Draw(im), *taille)
+        tampon = io.BytesIO()
+        im.save(tampon, "PNG")
+        st, rep = await tableau._route_media(g, chef, {}, {"nom": nom, "type": "image/png",
+                                                           "base64": base64.b64encode(tampon.getvalue()).decode()})
+        return rep.get("id", "") if st == 200 else ""
+
+    def mer(d, larg, haut):
+        """Un horizon au crépuscule et un trois-mâts en ombre chinoise."""
+        for y in range(haut):
+            k = y / haut
+            couleur = (int(196 - 150 * k), int(120 - 80 * k), int(64 - 10 * k)) if y < haut * .58 else \
+                (int(30 - 12 * k), int(58 - 20 * k), int(72 - 18 * k))
+            d.line((0, y, larg, y), fill=couleur)
+        d.ellipse((larg * .62, haut * .34, larg * .74, haut * .66), fill=(236, 196, 120))
+        base = haut * .64
+        d.polygon([(larg * .22, base), (larg * .46, base), (larg * .43, base + haut * .07), (larg * .25, base + haut * .07)],
+                  fill=(18, 12, 8))
+        for x, h_ in ((.28, .40), (.34, .48), (.40, .36)):
+            d.line((larg * x, base, larg * x, base - haut * h_), fill=(18, 12, 8), width=max(2, larg // 300))
+            d.polygon([(larg * x, base - haut * h_ * .92), (larg * (x + .045), base - haut * h_ * .5),
+                       (larg * x, base - haut * h_ * .12)], fill=(30, 22, 14))
+
+    def carte(d, larg, haut):
+        """Une carte au trésor : le parchemin, un chemin pointillé, la croix."""
+        d.rectangle((0, 0, larg, haut), fill=(226, 204, 158))
+        for k in range(0, larg, 24):
+            d.ellipse((k, haut * .78 - (k % 72), k + 8, haut * .78 - (k % 72) + 8), fill=(122, 75, 42))
+        d.line((larg * .72, haut * .25, larg * .82, haut * .45), fill=(142, 42, 36), width=10)
+        d.line((larg * .82, haut * .25, larg * .72, haut * .45), fill=(142, 42, 36), width=10)
+        d.ellipse((larg * .08, haut * .12, larg * .30, haut * .52), outline=(43, 29, 18), width=6)
+
+    fond = await image("bandeau-equipage.png", mer, (1600, 560))
+    bandeau = next((b for b in accueil["blocs"] if b["type"] == "bandeau"), None)
+    if fond and bandeau is not None:
+        st, rep = await site_equipage._route_bloc(g, chef, {}, {"id": bandeau["id"], "version": bandeau["version"],
+                                                                "contenu": dict(bandeau["contenu"], image=fond)})
+        if st != 200:
+            print(f"[SITE LOCAL] bandeau de démonstration refusé : {rep}")
+    tresor = await image("carte-tresor.png", carte, (1200, 700))
+    for corps in ({"titre": "Bienvenue aux nouvelles recrues",
+                   "texte": "Trois nouveaux matelots ont rejoint le navire cette semaine.\nPassez les saluer au **chat du clan**."},
+                  {"titre": "Grande chasse au trésor samedi soir", "image": tresor, "epingle": True,
+                   "texte": "Rendez-vous au port à **21 h**.\nLa carte est entre les mains du capitaine : "
+                            "l'équipage qui trouve le coffre partage le butin."}):
+        st, rep = await site_equipage._route_actualite(g, chef, {}, corps)
+        if st != 200:
+            print(f"[SITE LOCAL] actualité de démonstration refusée : {rep}")
 
 
 #  --lourd : des volumes de vrai serveur, pour éprouver le rangement des pages (groupes repliables, « Voir plus »,

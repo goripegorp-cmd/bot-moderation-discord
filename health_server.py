@@ -236,6 +236,12 @@ def construire_app():
     app.router.add_get('/tableau/espace/conversation', _tableau, name="tableau:conversation")
     app.router.add_post('/tableau/espace/action', _tableau, name="tableau:action")
     app.router.add_post('/tableau/espace/sortir', _tableau, name="tableau:sortir")
+    #  26/10/2026 : le site de l'équipage (les membres du rôle du clan, en lecture seule ; la tête y compose l'accueil).
+    #  Avant le lien à usage unique, sinon « equipage » serait pris pour un jeton. AUCUNE écriture n'y entre.
+    app.router.add_get('/tableau/equipage', _tableau, name="tableau:vers_equipage")
+    app.router.add_get('/tableau/equipage/', _tableau, name="tableau:page_equipage")
+    app.router.add_get('/tableau/equipage/api/{nom:.+}', _tableau, name="tableau:api_equipage")
+    app.router.add_post('/tableau/equipage/api/{nom:.+}', _tableau, name="tableau:api_equipage_refus")
     app.router.add_get('/tableau/{jeton}', _tableau, name="tableau:entree")
     return app
 

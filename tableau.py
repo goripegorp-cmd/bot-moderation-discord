@@ -18,6 +18,10 @@ L'ACCÈS
   · Agir : les mêmes, revérifiés à chaque action. Trop d'actions graves en peu de temps — le signe
     d'un compte volé — est signalé au fondateur dans « 📋logs » (la tête n'est jamais suspendue ;
     tout autre compte le serait une heure).
+  · 26/10/2026, le site de l'équipage : une session a une PORTÉE. « tout » : le fondateur et la direction ;
+    « equipage » : un membre du rôle du clan, qui ne voit QUE `/tableau/equipage/` (lecture seule). `_verifier`
+    refuse une portée qu'on ne lui demande pas : toute adresse, présente ou future, est fermée à l'équipage par
+    défaut. Le rôle du clan est revérifié à chaque requête ; perdu, la session est fermée.
   · Défenses : CSP à nonce (aucun script injecté ne s'exécute), en-têtes stricts, origine vérifiée
     sur les écritures (déconnexion comprise), cadence limitée par session et par adresse (faux liens
     et faux cookies : un cookie mal formé ne touche jamais la base), rien en cache, rien d'indexé.
@@ -92,6 +96,12 @@ DUREE = 24 * 3600
 #  (`s/app.js`, `api/…`) restent dans l'espace, et le service worker (portée `/tableau/espace/`) la
 #  contrôle — sans la barre, ni l'un ni l'autre. `/tableau/espace` y renvoie.
 ESPACE = "/tableau/espace/"
+#  26/10/2026 : le site de l'équipage (une page à part). Les portées d'une session : « tout » (fondateur, direction) et
+#  « equipage » (le rôle du clan, lecture seule) — une autre, ou une vieille, est refusée partout.
+EQUIPAGE = "/tableau/equipage/"
+PORTEES = ("tout", "equipage")
+OUVERTURE_JOURNAL_S = 1800     # « Site de l'équipage ouvert par … » : une ligne par personne et par demi-heure
+TENTATIVE_JOURNAL_S = 600      # une session de l'équipage qui demande une page de la direction : une ligne / 10 min
 COOKIE = "__Host-tableau"
 LIMITE_REQUETES = 240          # par minute et par session
 LIMITE_ESSAIS = 30             # liens ou cookies invalides par adresse et par 10 minutes
@@ -123,6 +133,15 @@ DEJA = _message("Ce lien a déjà servi",
                 "Chaque lien ne s'ouvre qu'une fois. Demande-en un nouveau dans Discord : salon <b>📋logs</b> → "
                 "<b>Ouvrir le tableau de bord</b>.")
 TROP = _message("Trop d'essais", "Réessaie dans quelques minutes.")
+EXPIRE_EQUIPAGE = _message("Ce lien n'est plus valable",
+                           "Demande un nouveau lien dans Discord : forum du clan → <b>Guide du clan</b> → "
+                           "<b>Le site de l'équipage</b>.")
+DEJA_EQUIPAGE = _message("Ce lien a déjà servi",
+                         "Chaque lien ne s'ouvre qu'une fois. Demande-en un nouveau dans Discord : forum du clan → "
+                         "<b>Guide du clan</b> → <b>Le site de l'équipage</b>.")
+RESERVE = _message("Réservé à la direction",
+                   "Cette page est celle du fondateur et de la direction. Ton espace : "
+                   "<a href='/tableau/equipage/' style='color:#e8c98a'>le site de l'équipage</a>.")
 ENTETES = {
     "Cache-Control": "no-store",
     "X-Robots-Tag": "noindex, nofollow",
@@ -227,6 +246,11 @@ REGLES: dict = {}            # clé → règle de nettoyage
 _SOURCES_MEDIAS: list = []   # async (guild_id) → set des images utilisées
 RACINE_DONNEES: Path | None = None   # tests : le dossier des images ; sinon `base_data_dir()/site`
 _verrous: dict = {}          # nom → (boucle, verrou) : un verrou né dans une autre boucle y lèverait une erreur
+#  Le site de l'équipage (26/10/2026) : ses lectures (`monter_equipage`) et les images qu'il peut voir.
+ROUTES_EQUIPAGE: dict = {}   # nom → async (g, membre, session, requete) → (statut, corps) — GET seulement
+MEDIAS_EQUIPAGE = None       # async (g) → l'ensemble des images (`media/…`) permises à une session « equipage »
+_ouvertures: dict = {}       # (serveur, membre) → heure de la dernière ligne « site de l'équipage ouvert »
+_tentatives: dict = {}       # empreinte de session → heure de la dernière ligne « page de la direction refusée »
 
 #  Le casier mélange les sanctions décidées (staff ou escalade) et les détections du bot.
 SANCTIONS = {"warn": "Avertissement", "mute": "Mute", "kick": "Expulsion", "ban": "Bannissement"}
@@ -265,7 +289,7 @@ def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_memb
     _alerte_securite = alerte_securite
     _log = log or print
     for d in (_sessions, _requetes, _requetes_medias, _essais, _graves, _blocages, _cadence, _cache, _ops_recentes,
-              _nettoyages, _medias_vus, _alertes_tete, _direct_salles, _direct_ecrits):
+              _nettoyages, _medias_vus, _alertes_tete, _ouvertures, _tentatives, _direct_salles, _direct_ecrits):
         d.clear()
 
 
@@ -273,6 +297,11 @@ async def init_db():
     async with _get_db() as db:
         await db.execute("CREATE TABLE IF NOT EXISTS tableau_sessions (empreinte TEXT PRIMARY KEY, guild_id INTEGER,"
                          " user_id INTEGER, cree_le INTEGER, expire_le INTEGER)")
+        #  26/10/2026 : la portée de chaque session (« tout » : la tête ; « equipage » : le site de l'équipage). Les
+        #  sessions d'avant sont toutes celles de la tête : « tout ».
+        async with db.execute("PRAGMA table_info(tableau_sessions)") as cur:
+            if "portee" not in [r[1] for r in await cur.fetchall()]:
+                await db.execute("ALTER TABLE tableau_sessions ADD COLUMN portee TEXT NOT NULL DEFAULT 'tout'")
         await db.execute("CREATE TABLE IF NOT EXISTS tableau_jetons (nonce TEXT PRIMARY KEY, expire_le INTEGER)")
         await db.execute("CREATE TABLE IF NOT EXISTS tableau_blocages (guild_id INTEGER, user_id INTEGER, jusqu INTEGER,"
                          " raison TEXT, PRIMARY KEY (guild_id, user_id))")
@@ -306,6 +335,15 @@ def a_la_tete(g, user_id: int) -> bool:
     return int(user_id) in _tete
 
 
+def autorise_equipage(g, membre, c) -> bool:
+    """Le site de l'équipage (26/10/2026) : le RÔLE DU CLAN (réglages Rell Seas, `rellseas_panneau.CLE_ROLE_CIBLE`),
+    et rien d'autre — jamais un bot. Lu à chaque requête (en mémoire : un rôle retiré coupe tout de suite)."""
+    if g is None or membre is None or getattr(membre, "bot", False):
+        return False
+    rid = int((c or {}).get(rellseas_panneau.CLE_ROLE_CIBLE, 0) or 0)
+    return rid > 0 and any(int(getattr(r, "id", 0) or 0) == rid for r in (getattr(membre, "roles", None) or []))
+
+
 # ─── Le lien personnel, à usage unique ──────────────────────────────────────
 
 def _b64(b: bytes) -> str:
@@ -333,7 +371,8 @@ def lire_jeton(j: str, maintenant: float | None = None) -> dict | None:
         return None
     if not _cle or not hmac.compare_digest(sig, hmac.new(_cle, charge, hashlib.sha256).digest()[:18]):
         return None
-    if e < (maintenant or time.time()) or p not in ("rs", "tout") or not n:
+    #  26/10/2026 : une portée inconnue (dont l'ancienne « rs », jamais donnée) est refusée.
+    if e < (maintenant or time.time()) or p not in PORTEES or not n:
         return None
     return {"g": g, "u": u, "p": p, "e": e, "n": n}
 
@@ -375,25 +414,39 @@ def _empreinte(sid: str) -> str:
     return hashlib.sha256(sid.encode()).hexdigest()
 
 
-async def _ouvrir_session(guild_id: int, user_id: int, expire: int, maintenant: float | None = None) -> str:
+async def _ouvrir_session(guild_id: int, user_id: int, expire: int, maintenant: float | None = None,
+                         portee: str = "tout") -> str:
+    if portee not in PORTEES:
+        raise ValueError("portée de session inconnue")
     sid = secrets.token_urlsafe(32)
     emp = _empreinte(sid)
     async with _get_db() as db:
-        await db.execute("INSERT INTO tableau_sessions (empreinte, guild_id, user_id, cree_le, expire_le)"
-                         " VALUES (?,?,?,?,?)", (emp, guild_id, user_id, int(maintenant or time.time()), int(expire)))
+        await db.execute("INSERT INTO tableau_sessions (empreinte, guild_id, user_id, cree_le, expire_le, portee)"
+                         " VALUES (?,?,?,?,?,?)", (emp, guild_id, user_id, int(maintenant or time.time()), int(expire),
+                                                   portee))
         await db.commit()
-    _sessions[emp] = (guild_id, user_id, int(expire), float(maintenant or time.time()))
+    _sessions[emp] = (guild_id, user_id, int(expire), float(maintenant or time.time()), portee)
     return sid
 
 
-async def _session(request, maintenant: float | None = None):
-    """(empreinte, (serveur, membre, fin)) — ou None.
+async def _session(request, maintenant: float | None = None, portees=("tout",)):
+    """(empreinte, (serveur, membre, fin)) d'une session de l'une des `portees` (None : n'importe laquelle) — ou None.
+    26/10/2026 : par défaut « tout » seulement — une session du site de l'équipage n'est jamais rendue à qui ne la
+    demande pas (une adresse écrite demain sans y penser lui reste fermée)."""
+    ses = await _lire_session(request, maintenant)
+    if ses is None or (portees is not None and ses[2] not in portees):
+        return None
+    return ses[0], ses[1]
+
+
+async def _lire_session(request, maintenant: float | None = None):
+    """(empreinte, (serveur, membre, fin), portée) — ou None.
 
     24/10/2026 : n'importe quel cookie occupait une connexion de la base, sans limite par adresse,
     et une session effacée de la base restait ouverte jusqu'au redémarrage (cache en mémoire). Un
     cookie mal formé ne touche plus la base ; un cookie inconnu compte comme un faux lien (même
     limite par adresse, et au-delà plus aucune lecture) ; une session en mémoire est relue en base
-    au-delà de RELIRE secondes."""
+    au-delà de RELIRE secondes (sa portée avec elle)."""
     t = maintenant or time.time()
     sid = request.cookies.get(COOKIE, "") if hasattr(request, "cookies") else ""
     if not sid:
@@ -403,11 +456,13 @@ async def _session(request, maintenant: float | None = None):
         return None
     emp = _empreinte(sid)
     s = _sessions.get(emp)
-    if s is None or t - s[3] > RELIRE:
+    #  Une session gardée en mémoire SANS sa portée (écrite par un code d'avant la colonne) est relue en base : la portée
+    #  vient toujours de la base, jamais devinée.
+    if s is None or t - s[3] > RELIRE or len(s) < 5:
         if s is None and _trop_essais(request, maintenant=t):
             return None
         async with _get_db() as db:
-            async with db.execute("SELECT guild_id, user_id, expire_le FROM tableau_sessions WHERE empreinte=?",
+            async with db.execute("SELECT guild_id, user_id, expire_le, portee FROM tableau_sessions WHERE empreinte=?",
                                   (emp,)) as cur:
                 r = await cur.fetchone()
         if r is None:
@@ -415,10 +470,10 @@ async def _session(request, maintenant: float | None = None):
                 _trop_essais(request, compter=True, maintenant=t)
             _sessions.pop(emp, None)
             return None
-        s = _sessions[emp] = (int(r[0]), int(r[1]), int(r[2]), t)
+        s = _sessions[emp] = (int(r[0]), int(r[1]), int(r[2]), t, str(r[3] or ""))
     if s[2] < t:
         return None
-    return emp, s[:3]
+    return emp, s[:3], (s[4] if len(s) > 4 else "")  # une portée absente : refusée partout
 
 
 async def fermer_sessions(guild_id: int | None, user_id: int) -> int:
@@ -458,9 +513,10 @@ async def suspendre(g, membre, raison: str, maintenant: float | None = None) -> 
 
 
 class _Refus(Exception):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, portee: str = ""):
         super().__init__(message)
         self.status, self.message = status, message
+        self.portee = portee  # refus de portée : celle de la session refusée (la page de la direction le dit)
 
 
 def _ip(request) -> str:
@@ -487,19 +543,31 @@ def _trop_essais(request, compter: bool = False, maintenant: float | None = None
     return len(recents) > LIMITE_ESSAIS
 
 
-async def _verifier(request, maintenant: float | None = None, medias: bool = False):
-    """Session valide, personne toujours fondateur ou direction, pas suspendue, cadence raisonnable.
+async def _verifier(request, maintenant: float | None = None, medias: bool = False, portees=("tout",)):
+    """Session valide et de l'une des `portees` (par défaut « tout » seulement : une session du site de l'équipage est
+    refusée PARTOUT où on ne la demande pas), personne toujours autorisée — « tout » : le fondateur ou la direction ;
+    « equipage » : le rôle du clan, sinon sa session est fermée —, pas suspendue, cadence raisonnable.
     `medias` : une image de la page (sa propre cadence : une galerie ne vide pas celle des données)."""
     t = maintenant or time.time()
-    ses = await _session(request, t)
+    ses = await _lire_session(request, t)
     if ses is None:
         if _trop_essais(request, maintenant=t):
             raise _Refus(429, "Trop d'essais.")
         raise _Refus(403, "Session expirée.")
-    emp, (gid, uid, expire) = ses
+    emp, (gid, uid, expire), portee = ses
+    if portee not in portees:
+        await _tentative_hors_portee(request, emp, gid, uid, portee, t)
+        raise _Refus(403, "Réservé au fondateur et à la direction.", portee=portee or "?")
     g = _bot.get_guild(gid) if _bot else None
     m = g.get_member(uid) if g else None
-    if m is None or _autorise_membre is None or not _autorise_membre(g, m, await _cfg(g.id)):
+    if m is None:
+        raise _Refus(403, "Accès retiré.")
+    c = await _cfg(g.id)
+    if portee == "equipage":
+        if not autorise_equipage(g, m, c):
+            await _fermer_session_equipage(emp, g, m)
+            raise _Refus(403, "Accès retiré.")
+    elif _autorise_membre is None or not _autorise_membre(g, m, c):
         raise _Refus(403, "Accès retiré.")
     if await suspendu(gid, uid, t):
         raise _Refus(403, "Accès suspendu.")
@@ -508,7 +576,34 @@ async def _verifier(request, maintenant: float | None = None, medias: bool = Fal
     if len(recents) >= limite:
         raise _Refus(429, "Trop de requêtes.")
     seau[emp] = recents + [t]
-    return {"g": gid, "u": uid, "e": expire, "p": "tout", "emp": emp}, g
+    return {"g": gid, "u": uid, "e": expire, "p": portee, "emp": emp}, g
+
+
+async def _tentative_hors_portee(request, emp: str, gid: int, uid: int, portee: str, t: float) -> None:
+    """Une session de l'équipage demande une page de la direction : refusé, et noté au journal (Sécurité) — une ligne
+    par session et par 10 minutes au plus (un membre curieux ne remplit pas le journal)."""
+    if portee != "equipage" or t - _tentatives.get(emp, 0) < TENTATIVE_JOURNAL_S:
+        return
+    _tentatives[emp] = t
+    if len(_tentatives) > 5000:
+        for k in sorted(_tentatives, key=_tentatives.get)[:1000]:
+            _tentatives.pop(k, None)
+    g = _bot.get_guild(gid) if _bot else None
+    m = g.get_member(uid) if g else None
+    await registre.noter(gid, "Sécurité", "site.hors_portee",
+                         f"Site de l'équipage : {getattr(m, 'display_name', None) or 'un membre'} a demandé une page de "
+                         "la direction (refusé)", auteur_id=uid, detail=str(getattr(request, "path", "") or "")[:120],
+                         gravite=1)
+
+
+async def _fermer_session_equipage(emp: str, g, m) -> None:
+    """Le rôle du clan est perdu : la session est fermée (en base et en mémoire) — y revenir demandera un lien neuf."""
+    async with _get_db() as db:
+        await db.execute("DELETE FROM tableau_sessions WHERE empreinte=?", (emp,))
+        await db.commit()
+    _sessions.pop(emp, None)
+    await registre.noter(g.id, "Accès", "site.equipage_ferme",
+                         f"Site de l'équipage fermé à {m.display_name} : il n'a plus le rôle du clan", auteur_id=m.id)
 
 
 # ─── Les personnes ──────────────────────────────────────────────────────────
@@ -1267,33 +1362,58 @@ def _html(texte: str, status: int = 200, nonce: str | None = None):
 
 
 async def entree(request):
-    """Le lien du bouton : vérifié, consommé, changé en session — puis l'adresse propre."""
+    """Le lien du bouton : vérifié, consommé, changé en session DE SA PORTÉE — puis l'adresse propre. 26/10/2026 : un
+    lien « equipage » (le rôle du clan exigé) ouvre `/tableau/equipage/` ; un lien « tout » avec `?vers=equipage` (le
+    bouton du guide du clan, pour la tête) ouvre la même page, avec le mode édition."""
     from aiohttp import web
     if _trop_essais(request):
         return _html(TROP, 429)
     j = lire_jeton(request.match_info.get("jeton", ""))
     g = _bot.get_guild(j["g"]) if j and _bot else None
     m = g.get_member(j["u"]) if g else None
-    if m is None or _autorise_membre is None or not _autorise_membre(g, m, await _cfg(g.id)) \
-            or await suspendu(g.id, m.id):
+    equipage = bool(j) and j["p"] == "equipage"
+    if m is None:
+        permis = False
+    else:
+        c = await _cfg(g.id)
+        permis = autorise_equipage(g, m, c) if equipage else (_autorise_membre is not None and _autorise_membre(g, m, c))
+    if not permis or await suspendu(g.id, m.id):
         _trop_essais(request, compter=True)
-        return _html(EXPIRE, 403)
+        return _html(EXPIRE_EQUIPAGE if equipage else EXPIRE, 403)
+    vers = EQUIPAGE if equipage or (getattr(request, "query", None) or {}).get("vers") == "equipage" else ESPACE
     async with _get_db() as db:
         cur = await db.execute("INSERT OR IGNORE INTO tableau_jetons (nonce, expire_le) VALUES (?,?)", (j["n"], j["e"]))
         await db.commit()
         neuf = bool(cur.rowcount)
     if not neuf:
-        ses = await _session(request)
-        if ses is not None and ses[1][:2] == (j["g"], j["u"]):
-            return web.Response(status=303, headers=dict(ENTETES, Location=ESPACE))
+        ses = await _lire_session(request)
+        if ses is not None and ses[1][:2] == (j["g"], j["u"]) and ses[2] == j["p"]:
+            return web.Response(status=303, headers=dict(ENTETES, Location=vers))
         _trop_essais(request, compter=True)
-        return _html(DEJA, 403)
-    sid = await _ouvrir_session(j["g"], j["u"], j["e"])
-    r = web.Response(status=303, headers=dict(ENTETES, Location=ESPACE))
+        return _html(DEJA_EQUIPAGE if equipage else DEJA, 403)
+    sid = await _ouvrir_session(j["g"], j["u"], j["e"], portee=j["p"])
+    r = web.Response(status=303, headers=dict(ENTETES, Location=vers))
     r.set_cookie(COOKIE, sid, max_age=max(60, j["e"] - int(time.time())), path="/", secure=True, httponly=True,
                  samesite="Lax")
-    await registre.noter(g.id, "Accès", "site.ouvert", f"Site ouvert par {m.display_name}", auteur_id=m.id)
+    if equipage:
+        await _noter_ouverture_equipage(g, m)
+    else:
+        await registre.noter(g.id, "Accès", "site.ouvert", f"Site ouvert par {m.display_name}", auteur_id=m.id)
     return r
+
+
+async def _noter_ouverture_equipage(g, m, maintenant: float | None = None) -> None:
+    """« Site de l'équipage ouvert par … » : une ligne par personne et par demi-heure (le journal reste lisible)."""
+    t = maintenant or time.time()
+    cle = (g.id, m.id)
+    if t - _ouvertures.get(cle, 0) < OUVERTURE_JOURNAL_S:
+        return
+    _ouvertures[cle] = t
+    if len(_ouvertures) > 5000:
+        for k in sorted(_ouvertures, key=_ouvertures.get)[:1000]:
+            _ouvertures.pop(k, None)
+    await registre.noter(g.id, "Accès", "site.equipage", f"Site de l'équipage ouvert par {m.display_name}",
+                         auteur_id=m.id)
 
 
 async def page(request):
@@ -1302,6 +1422,8 @@ async def page(request):
     try:
         await _verifier(request)
     except _Refus as r:
+        if r.portee == "equipage":  # 26/10/2026 : un membre du clan ici — refusé, et on lui montre SON espace
+            return _html(RESERVE, 403)
         return _html(EXPIRE if r.status != 429 else TROP, r.status)
     neuve = _lire_page_site("index.html")
     if neuve is None and not PAGE:
@@ -1523,7 +1645,7 @@ async def sortir(request):
     from aiohttp import web
     if not _origine_ok(request):
         return _json({"ok": False, "message": "Requête refusée."}, 400)
-    ses = await _session(request)
+    ses = await _session(request, portees=None)  # se déconnecter : toute portée (le site de l'équipage aussi)
     if getattr(request, "query", {}).get("partout") == "1":
         if ses is None:
             return _json({"ok": False, "message": "Session expirée."}, 403)
@@ -2279,10 +2401,14 @@ async def media(request):
     """`GET /tableau/espace/media/{id}` : une image du site — session exigée, rien gardé en cache."""
     from aiohttp import web
     try:
-        await _verifier(request, medias=True)
+        j, g = await _verifier(request, medias=True, portees=PORTEES)
     except _Refus as r:
         return _json({"erreur": r.message}, r.status)
     ident = str(request.match_info.get("media", ""))
+    #  26/10/2026 : une session du site de l'équipage ne voit QUE les images que ses lectures citent (portraits des
+    #  affiches, icônes du catalogue, images de l'accueil) — jamais une autre image envoyée sur le site.
+    if j["p"] != "tout" and not await _media_permis_equipage(g, ident):
+        return _json({"erreur": "Réservé au fondateur et à la direction."}, 403)
     chemin, typ = _chemin_media(ident)
     if chemin is None:
         return _json({"erreur": "Image introuvable."}, 404)
@@ -2691,6 +2817,109 @@ _INTERNES.update({nom: {d["methode"]: _normaliser_route(nom, d)} for nom, d in {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Le site de l'équipage (26/10/2026) — `/tableau/equipage/`
+#  Une page à part, en LECTURE SEULE pour les membres du rôle du clan (portée « equipage ») ; le fondateur et la
+#  direction (« tout ») y ont le mode édition, dont les écritures passent par `/tableau/espace/api/equipage/…`
+#  (registre `monter` : origine, tête, cadence, journal). Les données viennent de `site_equipage.py`.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def monter_equipage(lectures: dict, medias=None) -> int:
+    """Branche les lectures du site de l'équipage — `{nom : async (g, membre, session, requete) → (statut, corps)}`,
+    servies en GET seulement sous `/tableau/equipage/api/<nom>` — et `medias(g)` → les images qu'une session
+    « equipage » peut voir (sans elle : aucune). Tout est vérifié avant de brancher ; rebrancher les mêmes ne change
+    rien. Rend le nombre de lectures."""
+    if not isinstance(lectures, dict):
+        raise ValueError("monter_equipage : une table de lectures")
+    for nom, fn in lectures.items():
+        if not isinstance(nom, str) or not FORMAT_ROUTE.fullmatch(nom) or not callable(fn):
+            raise ValueError(f"lecture de l'équipage invalide : {nom!r}")
+        deja = ROUTES_EQUIPAGE.get(nom)
+        if deja is not None and deja is not fn:
+            raise ValueError(f"lecture de l'équipage en double : {nom}")
+    if medias is not None and not callable(medias):
+        raise ValueError("monter_equipage : `medias` doit être une fonction")
+    ROUTES_EQUIPAGE.update(lectures)
+    if medias is not None:
+        global MEDIAS_EQUIPAGE
+        MEDIAS_EQUIPAGE = medias
+    return len(lectures)
+
+
+async def _media_permis_equipage(g, ident: str) -> bool:
+    """L'image fait partie de celles que le site de l'équipage cite. Sans source, ou en échec : non (fermé)."""
+    if MEDIAS_EQUIPAGE is None or g is None:
+        return False
+    try:
+        permis = MEDIAS_EQUIPAGE(g)
+        permis = (await permis) if inspect.isawaitable(permis) else permis
+    except Exception as ex:  # en doute, on refuse ; le détail part au journal du bot
+        _log("[TABLEAU][E41] images du site de l'équipage illisibles")
+        _log(f"[TABLEAU][E41:DETAIL] {type(ex).__name__} {ex}")
+        diag.compter("site", "equipage.medias", ex)
+        return False
+    return str(ident) in (permis or ())
+
+
+async def vers_equipage(request):
+    """`/tableau/equipage` sans la barre : la page est à `/tableau/equipage/`."""
+    from aiohttp import web
+    return web.Response(status=303, headers=dict(ENTETES, Location=EQUIPAGE))
+
+
+async def page_equipage(request):
+    """La page du site de l'équipage (`site/equipage.html`) : une session « equipage » ou « tout »."""
+    from aiohttp import web
+    try:
+        await _verifier(request, portees=PORTEES)
+    except _Refus as r:
+        return _html(EXPIRE_EQUIPAGE if r.status != 429 else TROP, r.status)
+    texte = _lire_page_site("equipage.html")
+    if texte is None:
+        return _html(_message("Site en maintenance", "Réessaie dans quelques minutes."), 503)
+    r = web.Response(text=texte, content_type="text/html", headers=dict(ENTETES, **{"Content-Security-Policy": CSP_SITE}))
+    r.enable_compression()
+    return r
+
+
+async def api_equipage(request):
+    """`GET /tableau/equipage/api/{nom}` : une lecture du site de l'équipage (`monter_equipage`). Même porte que le reste
+    (session, rôle du clan revérifié, cadence) ; une erreur reste ici (« indisponible », le détail au journal)."""
+    from aiohttp import web
+    nom = str(request.match_info.get("nom", ""))
+    try:
+        j, g = await _verifier(request, portees=PORTEES)
+    except _Refus as r:
+        return _json({"erreur": r.message}, r.status)
+    fn = ROUTES_EQUIPAGE.get(nom) if FORMAT_ROUTE.fullmatch(nom) else None
+    if fn is None:
+        return _json({"erreur": "Adresse inconnue."}, 404)
+    try:
+        res = fn(g, g.get_member(j["u"]), {"portee": j["p"], "expire": j["e"]}, _parametres(request))
+        status, rep = (await res) if inspect.isawaitable(res) else res
+        if isinstance(status, bool) or not isinstance(status, int) or not 200 <= status <= 599 or not isinstance(rep, dict):
+            raise TypeError("réponse mal formée")
+    except Exception as ex:  # la page lit « indisponible », le détail part au journal
+        _log("[TABLEAU][E40] lecture du site de l'équipage en échec")
+        _log(f"[TABLEAU][E40:DETAIL] {nom} {type(ex).__name__} {ex}")
+        diag.compter("site", f"equipage.{nom}", ex)
+        return _json({"erreur": "Indisponible pour le moment."}, 500)
+    rep = {k: v for k, v in rep.items() if not str(k).startswith("_")}
+    if status == 200:
+        etag = '"' + hashlib.sha256(json.dumps(rep, sort_keys=True, ensure_ascii=False, default=str)
+                                    .encode("utf-8")).hexdigest()[:20] + '"'
+        if _meme_etag(request, etag):
+            return web.Response(status=304, headers=dict(ENTETES, ETag=etag))
+        return _json(rep, 200, etag=etag)
+    return _json(rep, status)
+
+
+async def api_equipage_refus(request):
+    """`POST /tableau/equipage/api/…` : le site de l'équipage ne reçoit AUCUNE écriture (les modifications de la
+    direction passent par `/tableau/espace/api/equipage/…`, avec toutes leurs vérifications)."""
+    return _json({"erreur": "Lecture seule."}, 403)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Site v2 — la présence en direct et les verrous d'édition (`/tableau/espace/direct`)
 # ═══════════════════════════════════════════════════════════════════════════════
 #  26/10/2026 — « quand la direction ou quelqu'un est sur le site et l'utilise, affiche les personnes qui utilisent le
@@ -3005,17 +3234,20 @@ async def _session_direct(prise: _Prise, t: float, forcer: bool = False) -> str:
     """« » si la session de cet onglet tient toujours ; sinon « session » (finie, fermée ailleurs) ou « acces »
     (retiré, suspendu). La ligne de la session est relue en base au-delà de RELIRE secondes, ou si `forcer`."""
     s = _sessions.get(prise.emp)
-    if s is None or forcer or t - s[3] > RELIRE:
+    if s is None or forcer or t - s[3] > RELIRE or len(s) < 5:
         async with _get_db() as db:
-            async with db.execute("SELECT guild_id, user_id, expire_le FROM tableau_sessions WHERE empreinte=?",
+            async with db.execute("SELECT guild_id, user_id, expire_le, portee FROM tableau_sessions WHERE empreinte=?",
                                   (prise.emp,)) as cur:
                 r = await cur.fetchone()
         if r is None:
             _sessions.pop(prise.emp, None)
             return "session"
-        s = _sessions[prise.emp] = (int(r[0]), int(r[1]), int(r[2]), t)
+        #  La portée reste dans la mémoire des sessions (la porte `_verifier` la lit) : « tout » seule entre ici.
+        s = _sessions[prise.emp] = (int(r[0]), int(r[1]), int(r[2]), t, str(r[3] or ""))
     if s[2] < t or (s[0], s[1]) != (prise.gid, prise.uid):
         return "session"
+    if s[4] != PORTEE_DIRECT:
+        return "acces"
     g = _bot.get_guild(prise.gid) if _bot is not None else None
     m = g.get_member(prise.uid) if g is not None else None
     if m is None or _autorise_membre is None or not _autorise_membre(g, m, await _cfg(g.id)):
