@@ -972,9 +972,12 @@ def _decision(banc, **plus):
     ns = {"discord": discord, "asyncio": asyncio, "metiers": metiers, "rellseas_ui": rellseas_panneau, "cfg": banc.cfg,
           "textes": module_textes,
           "_ticket_ouvert": ouvert, "_fermer_ticket": fermer, "_journal_rellseas": journaliser, "log_staff_action": rien,
-          "_logerr": lambda ou, ex, guild_id=0: erreurs.append((ou, type(ex).__name__))}
+          "_logerr": lambda ou, ex, guild_id=0: erreurs.append((ou, type(ex).__name__)),
+          #  26/10/2026 (sécurité) : « Accepter » passe par la règle de /rellseas (jamais un membre sanctionné).
+          "TETE_IDS": frozenset(), "owner_ids_module": Obj(is_super_owner=lambda _u: False), "_RADIE_ROLE_NAME": "🚫 Radié",
+          "_QUARANTINE_ROLE_NAMES": ("vérification", "verification", "verify", "quarantaine")}
     ns.update(plus)
-    for nom in ("_TACHES_FERMETURE", "_fermer_en_fond", "_decision_recrutement"):
+    for nom in ("_TACHES_FERMETURE", "_fermer_en_fond", "_refus_cible_rellseas", "_decision_recrutement"):
         exec(_source(nom), ns)  # noqa: S102 — code du dépôt
 
     async def scenario():

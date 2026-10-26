@@ -110,6 +110,11 @@ const SCENES = [
   { nom: "port-salons-idees", ancre: "#port/salons/idees" },
   { nom: "port-salons-droits", ancre: "#port/salons/droits" },
   { nom: "port-nettoyage", ancre: "#port/nettoyage" },
+  // 26/10/2026 (sécurité) : la rubrique Sécurité — sessions, actions du site, permissions dangereuses (un rôle déplié),
+  // et la fenêtre du bouton d'urgence.
+  { nom: "port-securite", ancre: "#port/securite",
+    geste: "(async () => { for (const g of document.querySelectorAll('details.groupe')) g.open = true; await new Promise((r) => setTimeout(r, 400)); const l = [...document.querySelectorAll('.lc-clic')].find((x) => x.textContent.includes('Staff')); if (l) l.click(); })()" },
+  { nom: "fenetre-fermer-sessions", ancre: "#port/securite", geste: "[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Fermer toutes les autres sessions')).click()" },
   { nom: "equipage-membres", ancre: "#equipage/membres" },
   { nom: "equipage-fiches", ancre: "#equipage/fiches" },
   { nom: "equipage-candidatures", ancre: "#equipage/candidatures" },

@@ -26,6 +26,7 @@ export const CATEGORIES = [
       { cle: "repertoire", titre: "Répertoire", icone: "repertoire", phrase: "Toutes les personnes, de A à Z : chaque fiche réunit tout ce qui la concerne." },
       { cle: "salons", titre: "Salons & questions", icone: "salons", phrase: "Questions, idées, sondages, entraide, annonces, et ce que chacun peut faire dans chaque salon." },
       { cle: "nettoyage", titre: "Nettoyage", icone: "nettoyage", phrase: "Ce qui est gardé, combien de temps, et le grand ménage quand tu veux." },
+      { cle: "securite", titre: "Sécurité", icone: "cadenas", phrase: "Qui est connecté au site, ce que le site a fait sur Discord, et qui a les permissions dangereuses." },
     ],
   },
   {

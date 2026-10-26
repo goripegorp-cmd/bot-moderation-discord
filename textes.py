@@ -548,7 +548,9 @@ SITE_CATEGORIES = (
         ("repertoire", "Répertoire", "Toutes les personnes, de A à Z : chaque fiche réunit tout ce qui la concerne."),
         ("salons", "Salons & questions", "Questions, idées, sondages, entraide, annonces, et ce que chacun peut faire "
                                          "dans chaque salon."),
-        ("nettoyage", "Nettoyage", "Ce qui est gardé, combien de temps, et le grand ménage quand tu veux."))),
+        ("nettoyage", "Nettoyage", "Ce qui est gardé, combien de temps, et le grand ménage quand tu veux."),
+        ("securite", "Sécurité", "Qui est connecté au site, ce que le site a fait sur Discord, et qui a les "
+                                 "permissions dangereuses."))),
     ("equipage", "L'Équipage", "Équipage", "Clan GoRP", (
         ("membres", "Équipage", "Les membres du clan, leur présence, les rappels d'inactivité."),
         ("fiches", "Fiches techniques", "Chaque membre et son affiche : par métier, par grade, de A à Z."),

@@ -376,8 +376,13 @@ def test_V3_cadence_et_limites_graves(tmp_path, monkeypatch):
     cadence, graves_tete, graves_intrus, apres = site.http(scenario)
     assert cadence == [200] * 5 + [429], "120 écritures par minute et par personne (5 ici)"
     assert graves_tete == [200] * 27, "la tête n'est jamais suspendue…"
-    assert site.alertes[0] == (DIRECTION, "26 actions graves (roles) en moins de 10 minutes", False),         "…mais signalée, une fois"
-    assert site.alertes[1:] == [(9, "26 actions graves (roles) en moins de 10 minutes", True)], "l'autre : suspendu"
+    #  26/10/2026, décision du fondateur (« faut pas que tu fasses non plus une fausse alerte ») : la tête n'est plus
+    #  alertée ; sa rafale reste VISIBLE (rubrique Sécurité : une ligne du journal, une fois).
+    assert site.alertes == [(9, "26 actions graves (roles) en moins de 10 minutes", True)], \
+        "…ni alertée ; l'autre : suspendu, le fondateur prévenu"
+    rafale = [x for x in site.journal() if x["type"] == "site.rafale"]
+    assert len(rafale) == 1 and (rafale[0]["categorie"], rafale[0]["auteur_id"], rafale[0]["gravite"]) == \
+        ("Sécurité", DIRECTION, 0), "la rafale de la tête : notée une fois, sans gravité (aucune alerte par ricochet)"
     assert graves_intrus == [200] * 25 + [403] and apres == 403, "tout autre compte : suspendu, sessions fermées"
     assert faits.count(9) == 25
 
@@ -421,6 +426,8 @@ def _site_v2(dossier: Path) -> None:
 
 
 def test_V5_fichiers_du_site_types_cache_et_aucun_pas_dehors(site):
+    """26/10/2026 (sécurité) : « le fameux F12 » — le code et le style de la Capitainerie à la tête SEULE, l'image à
+    tous ; « private » dès qu'il faut une session (aucun cache partagé ne le garde pour un autre)."""
     _site_v2(site.tmp / "site")
     (site.tmp / "secret.js").write_text("le secret d'à côté", encoding="utf-8")
     lien_possible = True
@@ -428,35 +435,46 @@ def test_V5_fichiers_du_site_types_cache_et_aucun_pas_dehors(site):
         os.symlink(site.tmp / "secret.js", site.tmp / "site" / "fuite.js")
     except (OSError, NotImplementedError):
         lien_possible = False
+    tete = site.biscuit(origine=False)
 
     async def scenario(c):
-        out = {}
+        out, anonymes = {}, {}
         for nom, chemin in (("js", "/tableau/espace/s/app.js?v=abc"), ("css", "/tableau/espace/s/style.css"),
                             ("svg", "/tableau/espace/s/icones/ui.svg?v=1"), ("manif", "/tableau/espace/s/manifest.webmanifest")):
-            r = await c.get(chemin)
+            r = await c.get(chemin, headers=tete)
             out[nom] = (r.status, r.headers.get("Content-Type"), r.headers.get("Cache-Control"), r.headers.get("ETag"),
                         r.headers.get("X-Content-Type-Options"), r.headers.get("Cross-Origin-Resource-Policy"),
                         r.headers.get("Content-Security-Policy"), await r.text())
-        out["304"] = (await c.get("/tableau/espace/s/app.js?v=abc", headers={"If-None-Match": out["js"][3]})).status
+            r = await c.get(chemin)
+            anonymes[nom] = (r.status, await r.text(), r.headers.get("ETag"))
+        out["304"] = (await c.get("/tableau/espace/s/app.js?v=abc", headers=dict(tete, **{"If-None-Match": out["js"][3]}))).status
+        out["304_anonyme"] = (await c.get("/tableau/espace/s/app.js?v=abc", headers={"If-None-Match": out["js"][3]})).status
         refuses = {}
         for chemin in ("../tableau.py", "%2e%2e/tableau.py", "..%2Ftableau.py", "icones/../../tableau.py",
                        "icones/%2e%2e/%2e%2e/tableau.py", ".env", "index.html", "LICENCES.md", "app.js%00.png",
                        "..\\tableau.py", "icones//ui.svg", "%2Fetc%2Fpasswd", "C:/Windows/win.ini", "rien.js",
                        "app.JS.", "fuite.js"):
-            r = await c.get("/tableau/espace/s/" + chemin)
-            refuses[chemin] = (r.status, await r.text())
-        return out, refuses
-    out, refuses = site.http(scenario)
-    assert out["js"][:3] == (200, "text/javascript; charset=utf-8", "public, max-age=31536000, immutable")
-    assert out["css"][:3] == (200, "text/css; charset=utf-8", "no-cache"), "sans ?v= : revalidé à chaque fois"
-    assert out["svg"][1] == "image/svg+xml" and out["manif"][1] == "application/manifest+json; charset=utf-8"
+            for avec in (False, True):
+                r = await c.get("/tableau/espace/s/" + chemin, headers=tete if avec else {})
+                refuses[(chemin, avec)] = (r.status, await r.text())
+        return out, anonymes, refuses
+    out, anonymes, refuses = site.http(scenario)
+    assert out["js"][:3] == (200, "text/javascript; charset=utf-8", "private, max-age=31536000, immutable")
+    assert out["css"][:3] == (200, "text/css; charset=utf-8", "private, no-cache"), "sans ?v= : revalidé à chaque fois"
+    assert out["svg"][:3] == (200, "image/svg+xml", "public, max-age=31536000, immutable"), "l'image : publique"
+    assert out["manif"][:3] == (200, "application/manifest+json; charset=utf-8", "public, no-cache"), \
+        "le manifeste : public (le navigateur le lit sans cookie)"
     for x in (out["js"], out["css"], out["svg"], out["manif"]):
-        assert x[4] == "nosniff" and x[5] == "same-origin", "servi sans session, mais protégé"
+        assert x[4] == "nosniff" and x[5] == "same-origin"
     assert out["svg"][6] == out["css"][6] == tableau.CSP_STATIQUE, "un SVG ouvert seul : aucun script"
     assert out["js"][6] == tableau.CSP_SW, "un script lancé en Web Worker : ses requêtes restent chez nous"
-    assert out["304"] == 304
-    for chemin, (status, texte) in refuses.items():
-        assert status in (400, 404) and "secret" not in texte and "import" not in texte, f"servi à tort : {chemin}"
+    assert out["304"] == 304 and out["304_anonyme"] == 404, "sans session, pas même l'empreinte du code"
+    for nom in ("js", "css"):
+        assert anonymes[nom][:2] == (404, "Introuvable.") and anonymes[nom][2] is None, \
+            f"le code et le style ({nom}) ne sortent jamais sans session — refusés comme un fichier absent"
+    assert anonymes["svg"][0] == anonymes["manif"][0] == 200
+    for (chemin, avec), (status, texte) in refuses.items():
+        assert status in (400, 404) and "secret" not in texte and "import" not in texte, f"servi à tort : {chemin} {avec}"
     if lien_possible:
         assert tableau._lire_statique("fuite.js") is None, "un lien qui sort du dossier n'est jamais suivi"
 
@@ -478,26 +496,29 @@ def test_V6_la_page_v2_son_empreinte_et_le_service_worker(site):
 
     async def lire(c):
         p = await c.get("/tableau/espace/", headers=sans)
-        sw = await c.get("/tableau/espace/sw.js")
+        sw = await c.get("/tableau/espace/sw.js", headers=sans)
         barre = await c.get("/tableau/espace", headers=sans, allow_redirects=False)
         anonyme = await c.get("/tableau/espace/")
+        sw_anonyme = await c.get("/tableau/espace/sw.js")
         return (p.status, dict(p.headers), await p.text(), sw.status, dict(sw.headers), await sw.text(),
-                barre.status, barre.headers.get("Location"), anonyme.status)
+                barre.status, barre.headers.get("Location"), anonyme.status, sw_anonyme.status, await sw_anonyme.text())
     #  Sans `site/index.html` : l'ancienne page, son nonce ; pas de service worker.
-    st, h, texte, sw_st, _swh, _sw, barre, ou, anonyme = site.http(lire)
+    st, h, texte, sw_st, _swh, _sw, barre, ou, anonyme, _swa, _swat = site.http(lire)
     assert st == 200 and "script-src 'nonce-" in h["Content-Security-Policy"] and "Espace direction" in texte
     assert sw_st == 404 and barre == 303 and ou == "/tableau/espace/" and anonyme == 403
     assert tableau.version_page() == tableau.VERSION
     #  Avec `site/` : la page v2, `{{V}}` remplacé par l'empreinte, la CSP de la spécification.
     _site_v2(site.tmp / "site")
     tableau._cache_empreinte["vu"] = 0  # l'empreinte est relue au plus toutes les 2 s : on n'attend pas
-    st, h, texte, sw_st, swh, sw, *_r = site.http(lire)
+    st, h, texte, sw_st, swh, sw, _b, _o, _a, sw_anonyme, sw_anonyme_texte = site.http(lire)
+    #  26/10/2026 (sécurité) : le service worker est le code de la Capitainerie — la tête seule le reçoit.
+    assert (sw_anonyme, sw_anonyme_texte) == (404, "Introuvable."), "sans session : comme absent"
     v = tableau.empreinte_site()
     assert len(v) == 12 and tableau.version_page() == v
     assert st == 200 and h["Content-Security-Policy"] == CSP_SPEC == tableau.CSP_SITE
     assert "{{V}}" not in texte and f"s/app.js?v={v}" in texte and "nonce" not in texte
     assert h["Cache-Control"] == "no-store" and "noindex" in h["X-Robots-Tag"] and h["X-Frame-Options"] == "DENY"
-    assert sw_st == 200 and sw == f"const V = '{v}';\n" and swh["Cache-Control"] == "no-cache"
+    assert sw_st == 200 and sw == f"const V = '{v}';\n" and swh["Cache-Control"] == "private, no-cache"
     assert swh["Content-Type"] == "text/javascript; charset=utf-8" and swh["Content-Security-Policy"] == tableau.CSP_SW
     assert swh["Service-Worker-Allowed"] == "/tableau/espace/"
     #  Un fichier change : nouvelle empreinte, nouvelles adresses.

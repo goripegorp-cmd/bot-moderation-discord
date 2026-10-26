@@ -19,6 +19,7 @@ import { monterRecherche } from "./recherche.js";
 import { basculeMode, modeSimple, changerMode } from "./mode.js";
 import * as textes from "./textes.js";
 import { demarrerDirect } from "./direct.js";
+import { securite } from "./securite.js";
 
 const RAFRAICHIR = 60000;
 const ICONES = ["port", "equipage", "capitainerie", "apercu", "journal", "sanctions", "tickets", "repertoire", "salons", "nettoyage", "membres", "fiches",
@@ -30,14 +31,14 @@ const ICONES = ["port", "equipage", "capitainerie", "apercu", "journal", "sancti
 const RENDUS = {
   "accueil/attente": accueil.accueil,
   "port/apercu": port.apercu, "port/journal": port.journal, "port/sanctions": port.sanctions, "port/tickets": port.tickets,
-  "port/repertoire": port.repertoire, "port/salons": port.salons, "port/nettoyage": port.nettoyage,
+  "port/repertoire": port.repertoire, "port/salons": port.salons, "port/nettoyage": port.nettoyage, "port/securite": securite,
   "equipage/membres": clan.membres, "equipage/fiches": clan.fiches, "equipage/candidatures": recrutement.candidatures,
   "equipage/tickets": clan.tickets, "equipage/annonces": annonces.annonces,
   "capitainerie/affiches": cap.affiches, "capitainerie/catalogue": cap.catalogue, "capitainerie/roles": cap.roles,
   "capitainerie/textes": textes.textes,
 };
 // Ces rubriques n'ont pas besoin des grandes données du serveur pour s'afficher.
-const AUTONOMES = new Set(["accueil/attente", "port/nettoyage", "capitainerie/affiches", "capitainerie/catalogue", "capitainerie/roles", "equipage/annonces",
+const AUTONOMES = new Set(["accueil/attente", "port/nettoyage", "port/securite", "capitainerie/affiches", "capitainerie/catalogue", "capitainerie/roles", "equipage/annonces",
   "capitainerie/textes"]);
 
 let courante = null;

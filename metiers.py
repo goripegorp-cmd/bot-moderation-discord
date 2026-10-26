@@ -858,10 +858,11 @@ async def reconcilier(g, *, auteur=None) -> dict:
     return bilan
 
 
-async def donner_aux_affiches(g, cles, *, cause: str = "installation") -> int:
+async def donner_aux_affiches(g, cles, *, cause: str = "installation", auteur=None) -> int:
     """Les rôles de ces métiers (déjà liés) donnés aux membres du clan dont l'affiche les porte (parmi ses N premiers
     métiers), avec l'attribution automatique — rien n'est retiré ni créé ; une sanction en cours : rien. → le nombre
-    de rôles donnés."""
+    de rôles donnés. 26/10/2026 (sécurité) : `auteur`, la personne du site qui l'a déclenché — un autre compte de la tête
+    n'est pas touché par elle (`affiches.protege_de`)."""
     c = await _cfg(g.id)
     reg, clan = reglages_de(c), await role_du_clan(g, c)
     cles = set(cles or ())
@@ -875,6 +876,8 @@ async def donner_aux_affiches(g, cles, *, cause: str = "installation") -> int:
     for a in await affiches._affiches(g.id):
         m = g.get_member(int(a["membre_id"])) if a["membre_id"] and not a["retire_le"] else None
         if m is None or getattr(m, "bot", False) or not _du_clan(m, clan) or m.id in sanctionnes:
+            continue
+        if auteur is not None and affiches.protege_de(g, auteur, m):
             continue
         voulus = [k for k in list(dict.fromkeys(a["attributs"].get(TYPE) or []))[:reg["max"]] if k in cles and k in liens]
         roles = [r for r in (g.get_role(liens[k]) for k in voulus) if r is not None and r.id != clan.id
@@ -894,14 +897,14 @@ async def donner_aux_affiches(g, cles, *, cause: str = "installation") -> int:
     return donnes
 
 
-def planifier_attribution(g, cle: str) -> None:
+def planifier_attribution(g, cle: str, auteur=None) -> None:
     """Un métier vient d'avoir son rôle (créé ou lié sur le site) : donné tout de suite, en fond, à ceux qui l'ont."""
     if g is None or not pret():
         return
 
     async def _faire():
         try:
-            await donner_aux_affiches(g, {cle}, cause="rôle lié sur le site")
+            await donner_aux_affiches(g, {cle}, cause="rôle lié sur le site", auteur=auteur)
         except Exception as ex:
             _signaler("E3", "rôles des métiers non donnés", f"serveur={g.id} {cle} {type(ex).__name__} {ex}")
     t = asyncio.create_task(_faire())
@@ -1295,8 +1298,8 @@ async def route_installer(g, auteur, requete, corps):
     if sortie["crees"] or sortie["lies"]:
         planifier_guide(g)
     auto = (await reglages(g))["auto"]
-    donnes = await donner_aux_affiches(g, {x["cle"] for x in sortie["crees"] + sortie["lies"] + sortie["deja"]}) \
-        if auto else 0
+    donnes = await donner_aux_affiches(g, {x["cle"] for x in sortie["crees"] + sortie["lies"] + sortie["deja"]},
+                                       auteur=auteur) if auto else 0
     message = "" if auto else ("Attribution automatique sur NON : les rôles sont prêts, donnés à personne (« Appliquer »"
                                " sur chaque affiche).")
     phrase = (f"Rôles des métiers installés : {len(sortie['crees'])} créé(s), {len(sortie['lies'])} relié(s), "

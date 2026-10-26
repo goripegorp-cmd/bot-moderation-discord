@@ -23,6 +23,7 @@ Usage dans bot.py :
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import TYPE_CHECKING
 
@@ -75,6 +76,46 @@ async def _health_handler(request):
 #  Les travaux uniques passés (oui/non), posés par le bot : vérifier un déploiement sans Railway.
 ETAT_PUBLIC: dict = {}
 
+#  26/10/2026 (sécurité) : /stats est PUBLIQUE. Elle ne montre que des nombres, des oui/non et des dates — jamais un nom,
+#  un identifiant, un texte, une mention ni le contenu d'un cadeau. Ce que le bot pose dans ETAT_PUBLIC passe par
+#  `_epure` (une donnée ajoutée demain sans y penser n'en sort pas plus) : un texte devient « il y en a un », une liste
+#  son nombre, une clé d'identifiant disparaît. Seules exceptions : les étapes ratées du démarrage (des noms d'étape) et
+#  les erreurs comptées (`diag.releve` : « module/endroit:Type » → [nombre, heure], les identifiants déjà remplacés).
+STATS_RETIRES = frozenset({"cadeaux_detail",   # les conditions et les comptes de chaque cadeau
+                           "membres"})         # la taille du serveur (déjà retirée de /health le 24/10)
+_STATS_LISTES = frozenset({"etapes_ratees"})
+_STATS_DATE = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ][0-9:.]{5,15}(?:Z|[+-]\d{2}:?\d{2})?)?")
+_STATS_MOT = re.compile(r"[a-z0-9_]{1,40}")
+_SNOWFLAKE = 10 ** 15
+
+
+def _cle_id(k: str) -> bool:
+    k = k.lower()
+    return k in ("id", "ids", "ticket", "message", "salon", "membre", "auteur") or k.endswith(("_id", "_ids"))
+
+
+def _epure(valeur, cle: str = "", profondeur: int = 0):
+    """Ce que /stats peut montrer d'une valeur de ETAT_PUBLIC (voir plus haut)."""
+    if valeur is None or isinstance(valeur, bool):
+        return valeur
+    if isinstance(valeur, (int, float)):
+        return None if abs(valeur) >= _SNOWFLAKE else valeur      # un identifiant Discord n'est pas un compte
+    if profondeur > 6:
+        return None
+    if isinstance(valeur, str):
+        return valeur if _STATS_DATE.fullmatch(valeur) else bool(valeur)
+    if isinstance(valeur, dict):
+        return {str(k)[:80]: _epure(v, str(k), profondeur + 1) for k, v in valeur.items()
+                if str(k) not in STATS_RETIRES and not str(k).isdigit() and not (_cle_id(str(k)) and not isinstance(v, bool))}
+    if isinstance(valeur, (list, tuple, set)):
+        valeur = list(valeur)
+        if cle in _STATS_LISTES and all(isinstance(x, str) and _STATS_MOT.fullmatch(x) for x in valeur):
+            return valeur[:50]
+        if all(isinstance(x, (int, float)) and not isinstance(x, bool) and abs(x) < _SNOWFLAKE for x in valeur):
+            return valeur[:50]                                     # [nombre, heure] des erreurs comptées
+        return len(valeur)
+    return None
+
 
 async def _stats_handler(request):
     """GET /stats → métriques détaillées (DB, cache, tasks)."""
@@ -99,11 +140,12 @@ async def _stats_handler(request):
         try:
             import stockage
             if stockage.DERNIER:
-                data["stockage"] = dict(stockage.DERNIER)
-        except Exception:
-            pass
+                data["stockage"] = _epure(dict(stockage.DERNIER))
+        except Exception as ex:  # adresse PUBLIQUE : le détail au journal, jamais dehors
+            print("[HEALTH][E4] relevé du stockage illisible")
+            print(f"[HEALTH][E4:DETAIL] {type(ex).__name__} {ex}")
         if ETAT_PUBLIC:
-            data["travaux"] = dict(ETAT_PUBLIC)
+            data["travaux"] = _epure(dict(ETAT_PUBLIC))
         #  20/10/2026 : la notification instantanée YouTube — des compteurs seulement.
         try:
             import websub_youtube
@@ -142,15 +184,18 @@ async def _transcript_handler(request):
                 text="Transcript introuvable ou expiré.", status=404, content_type="text/plain",
                 headers={"X-Robots-Tag": NON_INDEXE})
         return web.FileResponse(p, headers={
-            "Cache-Control": "private, max-age=3600",
+            #  26/10/2026 (sécurité) : une conversation de ticket est personnelle — jamais gardée en cache (ni par le
+            #  navigateur d'un poste partagé, ni par un proxy).
+            "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer",
             "X-Robots-Tag": NON_INDEXE,
             # défense en profondeur : images, vidéos et CSS inline, de chez nous ou de Discord ; aucun script.
             "Content-Security-Policy": CSP_TRANSCRIPT,
         })
-    except Exception as ex:
-        print(f"[health_server transcript] {ex}")
+    except Exception as ex:  # adresse PUBLIQUE : message stable, le détail à part
+        print("[HEALTH][E5] transcript en échec")
+        print(f"[HEALTH][E5:DETAIL] {type(ex).__name__} {ex}")
         return web.Response(text="Erreur.", status=500, content_type="text/plain")
 
 
@@ -164,30 +209,45 @@ async def _asset_handler(request):
         if not p or not os.path.isfile(p):
             return web.Response(status=404, text="404", headers={"X-Robots-Tag": NON_INDEXE})
         return web.FileResponse(p, headers={
-            "Cache-Control": "private, max-age=86400",
+            "Cache-Control": "private, no-store",   # 26/10/2026 : l'image d'un ticket, personnelle comme lui
             "X-Content-Type-Options": "nosniff",
             "Content-Disposition": "inline",
             "X-Robots-Tag": NON_INDEXE,
             "Content-Security-Policy": "default-src 'none'; sandbox",
         })
-    except Exception as ex:
-        print(f"[health_server asset] {ex}")
+    except Exception as ex:  # adresse PUBLIQUE : message stable, le détail à part
+        print("[HEALTH][E6] image de transcript en échec")
+        print(f"[HEALTH][E6:DETAIL] {type(ex).__name__} {ex}")
         return web.Response(status=500, text="err")
 
 
+#  26/10/2026 (sécurité) : un visuel est un nom simple (lettres, chiffres, « _ », « - ») et une extension d'image — rien
+#  qui ressemble à un chemin (« C:… », « %00 », « .. »), et le fichier résolu reste dans `visuels/`.
+_NOM_VISUEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,80}\.(?:gif|png)")
+
+
 async def _visuel_handler(request):
-    """GET /v/<nom> → un bandeau ou une icône de `visuels/` (images publiques, cache long)."""
+    """GET /v/<nom> → un bandeau ou une icône de `visuels/` (images publiques, cache long ; montrées par Discord)."""
     try:
         import visuels
-        f = visuels.fichier(request.match_info.get('nom', ''))
+        nom = request.match_info.get('nom', '')
+        f = visuels.fichier(nom) if _NOM_VISUEL.fullmatch(nom) else None
+        if f is not None:
+            try:
+                if not os.path.realpath(f).startswith(os.path.realpath(visuels.DOSSIER) + os.sep):
+                    f = None
+            except (OSError, ValueError):
+                f = None
         if f is None:
             return web.Response(status=404, text="404")
         return web.FileResponse(f, headers={
             "Cache-Control": "public, max-age=604800",
             "X-Content-Type-Options": "nosniff",
+            "Cross-Origin-Resource-Policy": "cross-origin",   # une image publique, lue par Discord
         })
-    except Exception as ex:
-        print(f"[health_server visuel] {ex}")
+    except Exception as ex:  # adresse PUBLIQUE : message stable, le détail à part
+        print("[HEALTH][E7] visuel en échec")
+        print(f"[HEALTH][E7:DETAIL] {type(ex).__name__} {ex}")
         return web.Response(status=500, text="err")
 
 
@@ -206,9 +266,34 @@ async def _websub(request):
     return await websub_youtube.verification(request)
 
 
+#  26/10/2026 (sécurité) : les en-têtes de base de TOUTE réponse, même celles qu'aiohttp fabrique seul (404 d'une adresse
+#  inconnue, 405) et celles des adresses publiques (/, /health, /stats, /t/, /v/, /websub). Ceux qu'une adresse pose
+#  elle-même passent avant (`setdefault`). Le nom et la version du serveur ne sortent plus (« Server »).
+ENTETES_BASE = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+    "Strict-Transport-Security": "max-age=31536000",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+}
+
+
+async def _entetes_securite(request, response) -> None:
+    for k, v in ENTETES_BASE.items():
+        response.headers.setdefault(k, v)
+    response.headers["Server"] = "capitainerie"
+    #  Une erreur fabriquée par aiohttp (404, 405…) : jamais gardée en cache, jamais indexée.
+    if response.status >= 400:
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+
+
 def construire_app():
     """Toutes les adresses servies par le bot (testées telles quelles)."""
     app = web.Application()
+    app.on_response_prepare.append(_entetes_securite)
     app.router.add_get('/', _root_handler)
     app.router.add_get('/health', _health_handler)
     app.router.add_get('/stats', _stats_handler)
