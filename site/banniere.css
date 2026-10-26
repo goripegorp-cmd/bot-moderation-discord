@@ -46,7 +46,7 @@
 /* Le cadenas de la présence en direct (quelqu'un modifie cette publication) : sur SA carte, pendu au-dessus du titre. */
 .actu { position: relative; }
 .actu.direct-sous-verrou, .actu.direct-chez-moi { padding-top: 28px; }
-.actu > .direct-badge { padding: 2px 0; }   /* le sceau penché tient dans son étiquette */
+.actu > .direct-badge { padding: 2px 0 2px 3px; }   /* le sceau penché (−8°) tient dans son étiquette : 34 px → 38,4 px */
 .actu-liens { display: flex; flex-wrap: wrap; gap: 6px 14px; min-width: 0; }
 .actu-liens a { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; overflow-wrap: anywhere; color: var(--mer, #1f4e5a); font-weight: 600; }
 @media (pointer: coarse) { .actu-liens a { min-height: 44px; } }

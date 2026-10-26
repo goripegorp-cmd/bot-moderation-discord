@@ -80,6 +80,9 @@ const TENIR_PUBLICATION = "(async () => { const a = await fetch('/tableau/equipa
   + " await new Promise((ok, ko) => { ws.onopen = ok; ws.onerror = ko; }); ws.send(JSON.stringify({ t: 'bonjour', page: 'equipage/annonces' }));"
   + " ws.send(JSON.stringify({ t: 'prendre', o: 'evenement:' + x.id.split('-').pop(), ti: 'la publication « Le Movie 3 »' }));"
   + " for (let i = 0; i < 30 && !document.querySelector('.actu .direct-badge:not([hidden])'); i++) await new Promise(r => setTimeout(r, 200)); return 1; })()";
+//  La carte sous cadenas au milieu de l'écran (au téléphone, elle est loin sous le début du bloc).
+const VOIR_VERROU = "(async () => { const c = document.querySelector('.actu.direct-chez-moi, .actu.direct-sous-verrou'); if (!c) throw new Error('carte sous cadenas absente');"
+  + " c.scrollIntoView({ block: 'center' }); await new Promise(r => setTimeout(r, 300)); return 1; })()";
 const BEAUCOUP_ACTUS ="(async () => { const lire = () => fetch('/tableau/equipage/api/accueil', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json());"
   + " const a = await lire(); const dir = ((a.donnees || {}).actualites || {}).direction || []; const img = ((dir.find((x) => x.image) || {}).image || '').replace(/^media\\//, '');"
   + " for (let k = dir.length; k < 14; k++) { const r = await fetch('/tableau/espace/api/equipage/actualite', { method: 'POST', credentials: 'same-origin',"
@@ -127,7 +130,7 @@ const SCENES_EQUIPAGE = [
   { nom: "site-equipage-editeur-publication-site", ...EQ_TETE, ancre: "#accueil", geste: VOIR_ACTUS, geste2: OUVRIR_EDITEUR_PUBLICATION("site") },
   { nom: "site-equipage-editeur-bandeau", ...EQ_TETE, ancre: "#accueil", geste: MODE_EDITION, geste2: cliquerTexte(".bloc-bandeau .barre-bloc button", "Modifier") },
   //  La publication tenue ailleurs (un autre onglet de la tête la modifie) : le cadenas pend sur SA carte.
-  { nom: "site-equipage-actualite-verrouillee", ...EQ_TETE, ancre: "#accueil", geste: TENIR_PUBLICATION, geste2: VOIR_ACTUS,
+  { nom: "site-equipage-actualite-verrouillee", ...EQ_TETE, ancre: "#accueil", geste: TENIR_PUBLICATION, geste2: VOIR_VERROU,
     apres: "(() => { if (window.__essaiVerrou) window.__essaiVerrou.close(); return 1; })()" },
   { nom: "site-equipage-actualites-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: VOIR_ACTUS },
   { nom: "site-equipage-lire-annonce-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: cliquerTexte("button.lien-titre", "Le Movie 3") },
