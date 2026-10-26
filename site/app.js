@@ -2,7 +2,7 @@
 // service worker (hors ligne), session et déconnexion.
 
 import { h, icone, $, BASE, chargerSprite, completerSprite, icones, depuis, date, nombre, sansEmoji, srcSure, retarder, reduit, telephone, remplacer, quantite, ajouter } from "./dom.js";
-import { V, CATEGORIES, categorie, rubrique, etat, emettre, ecouter, lireAncre, poserAncre, aller, peutAgir, enLigne, retenirPersonnes, oublierPrefs, P, libelle } from "./noyau.js";
+import { V, CATEGORIES, categorie, rubrique, etat, emettre, ecouter, lireAncre, poserAncre, aller, peutAgir, enLigne, retenirPersonnes, oublierPrefs, P, libelle, suivreAlias } from "./noyau.js";
 import { lire, poster, noterReseau } from "./api.js";
 import * as HL from "./hors_ligne.js";
 import { oublierTout, perime, vue as vueJeu } from "./donnees.js";
@@ -18,9 +18,9 @@ import { monterRecherche } from "./recherche.js";
 import { basculeMode, modeSimple, changerMode } from "./mode.js";
 import * as textes from "./textes.js";
 import { demarrerDirect } from "./direct.js";
-import { securite } from "./securite.js";
 import * as zoneRecrutement from "./recrutement_zone.js";
 import { boutonLienEquipage, copierLienEquipage } from "./lien_equipage.js";
+import * as reglages from "./reglages.js";
 
 const RAFRAICHIR = 60000;
 const ICONES = ["port", "equipage", "capitainerie", "apercu", "journal", "sanctions", "tickets", "repertoire", "salons", "nettoyage", "membres", "fiches",
@@ -29,18 +29,20 @@ const ICONES = ["port", "equipage", "capitainerie", "apercu", "journal", "sancti
   "synchro", "attention", "info", "succes", "erreur", "minuteur", "calendrier", "lieu", "prime", "drapeau", "navire", "ancre", "boussole", "longue_vue",
   "cloche", "parchemin", "plume", "cadenas", "cle", "coffre", "sabre", "canon", "carte", "etoile", "oeil", "personne", "discord", "roblox", "peut_etre"];
 
+// 27/10/2026 : la navigation regroupée — l'Aperçu dans l'accueil, les tickets du clan dans Tickets, les fiches
+// techniques dans Équipage, Textes & noms et Nettoyage dans Réglages (reglages.js).
 const RENDUS = {
   "accueil/attente": accueil.accueil,
-  "port/apercu": port.apercu, "port/journal": port.journal, "port/sanctions": port.sanctions, "port/tickets": port.tickets,
-  "port/repertoire": port.repertoire, "port/salons": port.salons, "port/nettoyage": port.nettoyage, "port/securite": securite,
-  "equipage/membres": clan.membres, "equipage/fiches": clan.fiches, "capitainerie/recrutement": zoneRecrutement.zone,
-  "equipage/tickets": clan.tickets, "equipage/annonces": annonces.annonces,
+  "port/journal": port.journal, "port/sanctions": port.sanctions, "port/tickets": port.tickets,
+  "port/repertoire": port.repertoire, "port/salons": port.salons,
+  "equipage/membres": clan.membres, "capitainerie/recrutement": zoneRecrutement.zone,
+  "equipage/annonces": annonces.annonces,
   "capitainerie/affiches": cap.affiches, "capitainerie/catalogue": cap.catalogue, "capitainerie/roles": cap.roles,
-  "capitainerie/textes": textes.textes,
+  "capitainerie/reglages": reglages.reglages,
 };
 // Ces rubriques n'ont pas besoin des grandes données du serveur pour s'afficher.
-const AUTONOMES = new Set(["accueil/attente", "port/nettoyage", "port/securite", "capitainerie/affiches", "capitainerie/catalogue", "capitainerie/roles", "equipage/annonces",
-  "capitainerie/textes", "capitainerie/recrutement"]);
+const AUTONOMES = new Set(["accueil/attente", "capitainerie/affiches", "capitainerie/catalogue", "capitainerie/roles", "equipage/annonces",
+  "capitainerie/reglages", "capitainerie/recrutement"]);
 
 let courante = null;
 const plaque = h("button", { classe: "plaque-etat", type: "button", id: "plaque-etat", "aria-live": "polite", title: "État de la connexion et des envois" });
@@ -243,8 +245,9 @@ function fonduSur(el) {
   if (!defilements.has(el)) {
     defilements.add(el);
     el.addEventListener("scroll", maj, { passive: true });
-    // Une rangée de filtres qui défile (téléphone) : le filtre choisi reste en vue après un nouveau rendu.
-    const choisi = el.querySelector('[aria-pressed="true"]');
+    // Une rangée de filtres qui défile (téléphone) : le filtre choisi reste en vue après un nouveau rendu ; une rangée de
+    // sous-onglets, l'onglet ouvert (27/10 : « Idées & sondages », « Fiches techniques » arrivent coupés au bord sinon).
+    const choisi = el.querySelector('[aria-pressed="true"], [aria-selected="true"]');
     if (choisi && el.scrollWidth > el.clientWidth) {
       const r = choisi.getBoundingClientRect(), p = el.getBoundingClientRect();
       if (r.right > p.right || r.left < p.left) el.scrollLeft += r.left - p.left - (p.width - r.width) / 2;
@@ -269,7 +272,6 @@ function compteurs() {
   if (!d) return {};
   const qOuvertes = ((d.questions && d.questions.liste) || []).filter((q) => q.statut === "ouverte").length;
   const oublies = d.tickets.ouverts.filter((t) => !t.pris_par && t.ouvert && n - t.ouvert > 86400 && !t.rellseas).length;
-  const ticketsClan = d.tickets.ouverts.filter((t) => t.rellseas).length;
   const echus = ((d.clan && d.clan.membres) || []).filter((m) => m.rappel && m.rappel.statut === "echu").length;
   const aDecider = d.en_cours.filter((c) => ["decider", "corriger"].includes(etapeCandidature(c))).length;
   const zr = zoneRecrutement.compteursZone();
@@ -280,8 +282,9 @@ function compteurs() {
   const aFaire = accueil.nombreAFaire();
   return {
     "accueil/attente": [aFaire, aFaire > 0], accueil: aFaire,
-    "port/apercu": [alertes, alertes > 0], "port/tickets": [d.tickets.ouverts.filter((t) => !t.rellseas).length, oublies > 0], "port/salons": [qOuvertes, qOuvertes > 0],
-    "equipage/membres": [echus, echus > 0], "capitainerie/recrutement": [aRecruter, aRecruter > 0], "equipage/tickets": [ticketsClan, false],
+    // 27/10 : les alertes de l'Aperçu sur le Répertoire (son filtre « Alertes ») ; Tickets compte tous les tickets ouverts.
+    "port/repertoire": [alertes, alertes > 0], "port/tickets": [d.tickets.ouverts.length, oublies > 0], "port/salons": [qOuvertes, qOuvertes > 0],
+    "equipage/membres": [echus, echus > 0], "capitainerie/recrutement": [aRecruter, aRecruter > 0],
     "equipage/annonces": [brouillons, false],
     port: alertes + qOuvertes + oublies, equipage: echus, capitainerie: att + aRecruter,
   };
@@ -309,13 +312,14 @@ function lireRoute(premiere) {
   const a = lireAncre();
   let cat = a.cat, rub = a.rub;
   if (!cat && a.ancien) {
-    const anciens = { apercu: ["port", "apercu"], candidatures: ["capitainerie", "recrutement"], tickets: ["port", "tickets"], moderation: ["port", "sanctions"],
+    const anciens = { apercu: ["accueil", "attente"], candidatures: ["capitainerie", "recrutement"], tickets: ["port", "tickets"], moderation: ["port", "sanctions"],
       journal: ["port", "journal"], questions: ["port", "salons"], sondages: ["port", "salons"], clan: ["equipage", "membres"] };
     [cat, rub] = anciens[a.ancien] || [];
   }
   if (!cat) {
     let mem = null;
     try { mem = JSON.parse(sessionStorage.getItem("capitainerie.route") || "null"); } catch (e) { mem = null; }
+    if (mem && mem.cat) [mem.cat, mem.rub] = suivreAlias([mem.cat, mem.rub].filter(Boolean));   // une rubrique d'avant le 27/10
     cat = (mem && CATEGORIES.some((c) => c.cle === mem.cat) && mem.cat) || CATEGORIES[0].cle;   // l'accueil
     rub = (mem && mem.cat === cat && mem.rub) || null;
   }
@@ -330,10 +334,21 @@ function lireRoute(premiere) {
 }
 addEventListener("hashchange", () => {
   const a = lireAncre();
-  if (lireRoute(false)) { rendre(true); scrollTo({ top: 0 }); }
+  if (lireRoute(false) && !changerSousEnPlace()) { rendre(true); scrollTo({ top: 0 }); }
   if (a.recrutement) emettre("dossier:ouvrir", a.recrutement);
   else if (a.membre) ouvrirFiche(a.membre);
 });
+/** 27/10/2026 : une autre vue de la même rubrique (Équipage › Fiches techniques, Tickets › Clan, Idées › Sondages) — la
+ *  rubrique la montre elle-même (`ctrl.sous(sous)`), sans tout redessiner ni remonter en haut ; `false` : un rendu neuf. */
+function changerSousEnPlace() {
+  const { cat, rub, sous } = etat.route;
+  const c = courante && courante.ctrl;
+  if (!c || typeof c.sous !== "function" || courante.cle !== cat + "/" + rub || courante.sous === sous) return false;
+  if (c.sous(sous) === false) return false;
+  courante.sous = sous;
+  majCompteurs();
+  return true;
+}
 
 function rendre(force) {
   const { cat, rub, sous } = etat.route;

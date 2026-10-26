@@ -16,25 +16,23 @@ export const CATEGORIES = [
       { cle: "attente", titre: "Ce qui t'attend", icone: "boussole", phrase: "Tout ce qui demande une action, du plus urgent au moins urgent : un bouton par ligne." },
     ],
   },
+  // 27/10/2026 : la navigation regroupée — l'Aperçu est dans l'accueil, les tickets du clan dans Tickets (« Clan · RELL
+  // Seas »), les fiches techniques dans Équipage (une vue), Textes & noms et Nettoyage dans Réglages. Les anciennes
+  // adresses y mènent (ALIAS, plus bas).
   {
     cle: "port", titre: "Le Port", court: "Le Port", sous: "Discord", icone: "port",
     rubriques: [
-      { cle: "apercu", titre: "Aperçu", icone: "apercu", phrase: "Ce qui demande ton attention, en un coup d'œil." },
       { cle: "journal", titre: "Journal", icone: "journal", phrase: "Tout ce qui s'est passé sur le serveur : l'important d'abord, puis jour par jour." },
       { cle: "sanctions", titre: "Sanctions", icone: "sanctions", phrase: "Le casier de chaque membre, les modérateurs, le nettoyage du casier." },
-      { cle: "tickets", titre: "Tickets", icone: "tickets", phrase: "Les tickets du serveur, ouverts et fermés, avec toute leur conversation." },
+      { cle: "tickets", titre: "Tickets", icone: "tickets", phrase: "Tous les tickets, du serveur et du clan, ouverts et fermés, avec toute leur conversation." },
       { cle: "repertoire", titre: "Répertoire", icone: "repertoire", phrase: "Toutes les personnes, de A à Z : chaque fiche réunit tout ce qui la concerne." },
       { cle: "salons", titre: "Salons & questions", icone: "salons", phrase: "Questions, idées, sondages, entraide, annonces, et ce que chacun peut faire dans chaque salon." },
-      { cle: "nettoyage", titre: "Nettoyage", icone: "nettoyage", phrase: "Ce qui est gardé, combien de temps, et le grand ménage quand tu veux." },
-      { cle: "securite", titre: "Sécurité", icone: "cadenas", phrase: "Qui est connecté au site, ce que le site a fait sur Discord, et qui a les permissions dangereuses." },
     ],
   },
   {
     cle: "equipage", titre: "L'Équipage", court: "Équipage", sous: "Clan GoRP", icone: "equipage",
     rubriques: [
-      { cle: "membres", titre: "Équipage", icone: "membres", phrase: "Les membres du clan, leur présence, les rappels d'inactivité." },
-      { cle: "fiches", titre: "Fiches techniques", icone: "fiches", phrase: "Chaque membre et son affiche : par métier, par grade, de A à Z." },
-      { cle: "tickets", titre: "Tickets du clan", icone: "tickets", phrase: "Les tickets Rell Seas du clan, ouverts et fermés." },
+      { cle: "membres", titre: "Équipage", icone: "membres", phrase: "Les membres du clan : leur présence, leurs fiches techniques, leurs équipes." },
       { cle: "annonces", titre: "Annonces & événements", icone: "annonces", phrase: "Composer pour le salon Info : événements avec minuteur et réponses, annonces, métiers, listing." },
     ],
   },
@@ -45,7 +43,7 @@ export const CATEGORIES = [
       { cle: "affiches", titre: "Affiches", icone: "affiches", phrase: "L'atelier des avis de recherche de l'équipage : créer, modifier, ranger par métier." },
       { cle: "catalogue", titre: "Catalogue RELL Seas", icone: "catalogue", phrase: "Tout ce qui existe dans le jeu, et seulement cela : types, éléments, icônes officielles." },
       { cle: "roles", titre: "Rôles & métiers", icone: "roles", phrase: "Un rôle Discord par métier, donné tout seul si tu le veux." },
-      { cle: "textes", titre: "Textes & noms", icone: "plume", phrase: "Chaque texte du bot et chaque nom du site, à ta façon : enregistré, il sert tout de suite." },
+      { cle: "reglages", titre: "Réglages", icone: "cle", phrase: "Les textes du bot et les noms du site, ce que le site garde et combien de temps, et sa sécurité." },
     ],
   },
 ];
@@ -99,7 +97,7 @@ export const etat = {
   etag: null,
   dernier: 0,         // ms : dernière réponse fraîche du serveur
   ageCache: 0,        // ms : âge des données servies hors ligne (0 = fraîches)
-  route: { cat: "port", rub: "apercu", sous: "" },
+  route: { cat: "accueil", rub: "attente", sous: "" },
   reseau: { enLigne: navigator.onLine !== false, depuis: Date.now(), raison: "" },
   session: "ok",      // ok · expiree
   versionNeuve: false,
@@ -145,13 +143,27 @@ export function retenirPersonnes(dico) {
 export const aPart = (id) => !!(etat.d && (etat.d.a_part || []).includes(String(id)));
 
 // ─── La navigation (ancre) ──────────────────────────────────────────────────
-// Forme : #port/journal · #equipage/candidatures/questionnaire · &membre=123 (fiche ouverte) · ancien #membre=123
+// Forme : #port/journal · #capitainerie/recrutement/questions · &membre=123 (fiche ouverte) · ancien #membre=123
 // 26/10/2026 : « Candidatures » a quitté l'Équipage pour la Capitainerie (« Demande de recrutement ») — les anciennes
 // adresses y mènent encore (signets, raccourcis, liens donnés).
-const ALIAS = { "equipage/candidatures": ["capitainerie", "recrutement", { questionnaire: "questions", decidees: "candidatures", "en-cours": "candidatures" }] };
-function suivreAlias(morceaux) {
+// 27/10/2026 : la navigation regroupée — une rubrique devenue une sous-page (ou absorbée) y mène aussi.
+// [catégorie, rubrique, sous-pages renommées, sous-page imposée].
+const ALIAS = {
+  "equipage/candidatures": ["capitainerie", "recrutement", { questionnaire: "questions", decidees: "candidatures", "en-cours": "candidatures" }],
+  "port/apercu": ["accueil", "attente", null, ""],
+  "port/nettoyage": ["capitainerie", "reglages", null, "nettoyage"],
+  "capitainerie/textes": ["capitainerie", "reglages", null, "textes"],
+  "capitainerie/securite": ["capitainerie", "reglages", null, "securite"],   // la Sécurité (26/10/2026) : un sous-onglet
+  "port/securite": ["capitainerie", "reglages", null, "securite"],
+  "equipage/fiches": ["equipage", "membres", null, "fiches"],
+  "equipage/tickets": ["port", "tickets", null, "clan"],
+};
+/** Une adresse d'avant ([catégorie, rubrique, sous-page]) : celle d'aujourd'hui (le même tableau si rien n'a bougé). */
+export function suivreAlias(morceaux) {
   const a = ALIAS[morceaux.slice(0, 2).join("/")];
-  return a ? [a[0], a[1], ...(morceaux[2] ? [a[2][morceaux[2]] || morceaux[2]] : [])] : morceaux;
+  if (!a) return morceaux;
+  const sous = a[3] !== undefined ? a[3] : morceaux[2] ? (a[2] && a[2][morceaux[2]]) || morceaux[2] : "";
+  return [a[0], a[1], ...(sous ? [sous] : [])];
 }
 export function lireAncre() {
   const brut = location.hash.replace(/^#/, "");
