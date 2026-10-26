@@ -63,23 +63,41 @@ const GESTES_DIRECTION = ["Modifier l'accueil", "Publier une actualité", "Ajout
 const cliquerTexte = (selecteur, texte) => "(async () => { const b = [...document.querySelectorAll(" + JSON.stringify(selecteur) + ")].find((x) => x.textContent.includes("
   + JSON.stringify(texte) + ")); if (!b) throw new Error('introuvable : ' + " + JSON.stringify(texte) + "); b.scrollIntoView({ block: 'center' }); b.click(); await new Promise((r) => setTimeout(r, 600)); })()";
 const MODE_EDITION = cliquerTexte("button", "Modifier l'accueil");
-//  Les actualités de l'accueil en vue ; l'éditeur de l'annonce publiée « Le Movie 3 » (son « Modifier »), aperçu Discord
-//  rendu par le serveur — ou celui du site ; douze actualités de plus (idempotent : 14 de la direction au total, une
-//  sur deux avec la bannière de démonstration), l'accueil relu par son propre module.
+//  Les actualités de l'accueil en vue ; l'éditeur d'une publication (son « Modifier »), aperçu Discord rendu par le
+//  serveur — ou celui du site ; douze actualités de plus (idempotent : 14 de la direction au total, une sur deux avec la
+//  bannière de démonstration), l'accueil relu par son propre module.
 const VOIR_ACTUS = "(async () => { const b = document.querySelector('.bloc-actualites'); if (!b) throw new Error('bloc des actualités absent'); b.scrollIntoView({ block: 'start' }); await new Promise(r => setTimeout(r, 300)); return 1; })()";
-const OUVRIR_EDITEUR_PUBLICATION = (mode) => "(async () => { const c = [...document.querySelectorAll('article.actu')].find((a) => a.textContent.includes('Le Movie 3'));"
-  + " if (!c) throw new Error('annonce publiée absente'); const b = [...c.querySelectorAll('button')].find((x) => x.textContent.includes('Modifier'));"
-  + " if (!b) throw new Error('« Modifier » absent de l\\'annonce publiée'); b.click();"
+//  La PREMIÈRE publication visible, quelles que soient les données (la base --lourd enterre les publications sous ses
+//  affiches) : sur l'accueil, sinon dans « Toutes les actualités » (ouverte et dépliée au besoin). La tête la reconnaît à
+//  son « Modifier » (hors mode édition, seules les publications modifiables en ont un) ; un membre, à son genre. Une
+//  annonce passe avant un événement. Une expression (elle tourne dans la page) qui rend la carte.
+const TROUVER_PUBLICATION = (tete) => "(async () => { const pause = (ms) => new Promise((r) => setTimeout(r, ms));"
+  + (tete ? " const modif = (c) => [...c.querySelectorAll('.actu-actions button')].some((b) => b.textContent.includes('Modifier'));"
+    + " const choix = [(c) => modif(c) && c.matches('.actu-annonce'), modif];"
+    : " const choix = [(c) => c.matches('.actu-annonce'), (c) => c.matches('.actu-evenement')];")
+  + " const chercher = (racine) => { const cartes = racine ? [...racine.querySelectorAll('article.actu')] : []; for (const f of choix) { const c = cartes.find(f); if (c) return c; } return null; };"
+  + " let c = chercher(document.querySelector('.bloc-actualites')); if (c) return c;"
+  + " const toutes = [...document.querySelectorAll('.bloc-actualites button')].find((b) => b.textContent.includes('Toutes les actualités'));"
+  + " if (!toutes) throw new Error('aucune publication sur l\\'accueil, et pas de « Toutes les actualités »'); toutes.click(); let d = null;"
+  + " for (let i = 0; i < 80; i++) { await pause(150); d = [...document.querySelectorAll('dialog[open]')].pop() || null; if (!d || !d.querySelector('article.actu')) continue;"
+  + " const plus = [...d.querySelectorAll('.plus button')].find((b) => /^(Voir \\d+ de plus|Tout voir)/.test(b.textContent.trim())); if (!plus) break; plus.click(); }"
+  + " c = chercher(d); if (!c) throw new Error('aucune publication dans « Toutes les actualités »'); return c; })()";
+const OUVRIR_EDITEUR_PUBLICATION = (mode) => "(async () => { const c = await " + TROUVER_PUBLICATION(true) + ";"
+  + " const b = [...c.querySelectorAll('.actu-actions button')].find((x) => x.textContent.includes('Modifier')); b.scrollIntoView({ block: 'center' }); b.click();"
   + " for (let i = 0; i < 40 && !document.querySelector('dialog[open] .discord-carte'); i++) await new Promise(r => setTimeout(r, 150));"
   + (mode !== "form" ? " const ap = [...document.querySelectorAll('dialog[open] .bascule-editeur button')].find((x) => x.textContent.includes('Aperçu')); if (ap && ap.getClientRects().length) { ap.click(); await new Promise(r => setTimeout(r, 300)); }" : "")
   + (mode === "site" ? " [...document.querySelectorAll('dialog[open] .apercu-onglets button')].find((x) => x.textContent.includes('Sur le site')).click(); await new Promise(r => setTimeout(r, 500));" : "")
   + " return 1; })()";
-const TENIR_PUBLICATION = "(async () => { const a = await fetch('/tableau/equipage/api/accueil', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json());"
-  + " const x = (((a.donnees || {}).actualites || {}).auto || []).find((y) => y.titre.includes('Le Movie 3')); if (!x) throw new Error('annonce publiée absente');"
+const TENIR_PUBLICATION = "(async () => { const c = await " + TROUVER_PUBLICATION(true) + ";"
+  + " const badge = c.querySelector('.direct-badge[data-direct-objet^=\"evenement:\"]'); if (!badge) throw new Error('la carte de la publication n\\'a pas de cadenas');"
+  + " const o = badge.dataset.directObjet, titre = (c.querySelector('.lien-titre') || c).textContent.trim();"
   + " const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/tableau/espace/direct'); window.__essaiVerrou = ws;"
   + " await new Promise((ok, ko) => { ws.onopen = ok; ws.onerror = ko; }); ws.send(JSON.stringify({ t: 'bonjour', page: 'equipage/annonces' }));"
-  + " ws.send(JSON.stringify({ t: 'prendre', o: 'evenement:' + x.id.split('-').pop(), ti: 'la publication « Le Movie 3 »' }));"
+  + " ws.send(JSON.stringify({ t: 'prendre', o, ti: 'la publication « ' + titre + ' »' }));"
   + " for (let i = 0; i < 30 && !document.querySelector('.actu .direct-badge:not([hidden])'); i++) await new Promise(r => setTimeout(r, 200)); return 1; })()";
+//  Un membre ouvre la première publication visible (sa lecture : bannière, texte, liens — jamais « Modifier »).
+const LIRE_PUBLICATION = "(async () => { const c = await " + TROUVER_PUBLICATION(false) + "; const t = c.querySelector('button.lien-titre');"
+  + " t.scrollIntoView({ block: 'center' }); t.click(); await new Promise((r) => setTimeout(r, 600)); return 1; })()";
 //  La carte sous cadenas au milieu de l'écran (au téléphone, elle est loin sous le début du bloc).
 const VOIR_VERROU = "(async () => { const c = document.querySelector('.actu.direct-chez-moi, .actu.direct-sous-verrou'); if (!c) throw new Error('carte sous cadenas absente');"
   + " c.scrollIntoView({ block: 'center' }); await new Promise(r => setTimeout(r, 300)); return 1; })()";
@@ -133,7 +151,7 @@ const SCENES_EQUIPAGE = [
   { nom: "site-equipage-actualite-verrouillee", ...EQ_TETE, ancre: "#accueil", geste: TENIR_PUBLICATION, geste2: VOIR_VERROU,
     apres: "(() => { if (window.__essaiVerrou) window.__essaiVerrou.close(); return 1; })()" },
   { nom: "site-equipage-actualites-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: VOIR_ACTUS },
-  { nom: "site-equipage-lire-annonce-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: cliquerTexte("button.lien-titre", "Le Movie 3") },
+  { nom: "site-equipage-lire-annonce-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: LIRE_PUBLICATION },
   { nom: "site-equipage-actualites-nombreuses", ...EQ_TETE, ancre: "#accueil", geste: BEAUCOUP_ACTUS, geste2: VOIR_ACTUS },
   { nom: "site-equipage-toutes-nombreuses", ...EQ_TETE, ancre: "#accueil", geste: BEAUCOUP_ACTUS, geste2: cliquerTexte("button", "Toutes les actualités") },
 ];
@@ -264,11 +282,14 @@ const SCENES = [
   { nom: "fenetre-editeur-texte-site", ancre: "#capitainerie/reglages/textes", geste: OUVRIR_GROUPE_TEXTES(4),
     geste2: "document.querySelector('details.groupe[open] .texte-ligne .bouton').click()" },
   { nom: "equipage-annonces-publiees", ancre: "#equipage/annonces/publiees" },
-  //  26/10/2026 : une annonce publiée rouverte dans le composeur : sa bannière (1600 × 640, la consigne) et ses liens.
+  //  26/10/2026 : une annonce publiée rouverte dans le composeur : sa bannière (1600 × 640, la consigne) et ses liens. La
+  //  première publication modifiable (une annonce d'abord), quelles que soient les données.
   { nom: "equipage-annonces-publiee-modifier", ancre: "#equipage/annonces/publiees",
     geste: "(async () => { for (const g of document.querySelectorAll('details.groupe')) g.open = true; await new Promise(r => setTimeout(r, 400));"
-      + " const c = [...document.querySelectorAll('article.evt-carte')].find((a) => a.textContent.includes('Le Movie 3')); if (!c) throw new Error('annonce publiée absente');"
-      + " [...c.querySelectorAll('button')].find((b) => b.textContent.includes('Modifier')).click(); await new Promise(r => setTimeout(r, 1200));"
+      + " const modif = (a) => [...a.querySelectorAll('button')].find((b) => b.textContent.includes('Modifier'));"
+      + " const cartes = [...document.querySelectorAll('article.evt-carte')].filter(modif);"
+      + " const c = cartes.find((a) => ((a.querySelector('.evt-tete .champ-lib') || {}).textContent || '') === 'Annonce') || cartes[0];"
+      + " if (!c) throw new Error('aucune publication modifiable dans « Publiées »'); modif(c).click(); await new Promise(r => setTimeout(r, 1200));"
       + " const f = document.querySelector('.banniere-champ'); if (f) f.scrollIntoView({ block: 'start' }); return 1; })()" },
   { nom: "fenetre-textes-carte", ancre: "#equipage/annonces/brouillons", geste: OUVRIR_BROUILLON,
     geste2: "[...document.querySelectorAll('.apercu-cadre button')].find(b => b.textContent.includes('Modifier les textes')).click()" },
