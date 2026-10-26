@@ -31,7 +31,7 @@ const ONGLETS = [
   { cle: "accueil", icone: "navire", titre: () => T("onglet.accueil", "Accueil"), sous: () => T("onglet.accueil.sous", "Le pont du navire"),
     phrase: () => T("accueil.phrase", "Les nouvelles du bord, les sorties en mer et l'équipage en chiffres.") },
   { cle: "equipage", icone: "affiches", titre: () => T("onglet.equipage", "L'équipage"), sous: () => T("onglet.equipage.sous", "Toutes les affiches"),
-    phrase: () => T("equipage.phrase", "Chaque pirate du clan et son avis de recherche, rangés par métier.") },
+    phrase: () => T("equipage.phrase", "Les équipes du clan, leur chef en tête, et l'avis de recherche de chaque pirate.") },
   { cle: "fiche", icone: "personne", titre: () => T("onglet.fiche", "Ma fiche"), sous: () => T("onglet.fiche.sous", "Mon avis de recherche"),
     phrase: () => T("fiche.phrase", "Ton avis de recherche, tel que tout l'équipage le voit.") },
 ];
