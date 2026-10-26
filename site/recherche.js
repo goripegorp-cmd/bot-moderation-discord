@@ -7,7 +7,7 @@ import { h, icone, $, norm, sansEmoji, depuis, retarder, remplacer, ajouter, dan
 import { etat, P, CATEGORIES, aller, filtres, enLigne, ecouter, emettre, peutAgir } from "./noyau.js";
 import { lire } from "./api.js";
 import { charger, vue as vueJeu } from "./donnees.js";
-import { pancarte, avatar, nomDe, idUnique, pancartesOuvertes } from "./ui.js";
+import { pancarte, avatar, nomDe, idUnique } from "./ui.js";
 import { ouvrirFiche, ouvrirConversation, propre, etapeCandidature, ETAPES_CANDIDATURE } from "./fiche.js";
 import { nomAffiche, insigneImage } from "./affiche.js";
 import { titreNav, estRestreint, pastilleIcone } from "./rangement.js";
@@ -37,7 +37,7 @@ export function monterRecherche() {
   planche.insertBefore(b, outils);
   document.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "k" || e.key === "K")) { e.preventDefault(); ouvrirRecherche(); }
-    else if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !estSaisie(document.activeElement) && !pancartesOuvertes()) { e.preventDefault(); ouvrirRecherche(); }
+    else if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !estSaisie(document.activeElement) && !document.querySelector("dialog[open]")) { e.preventDefault(); ouvrirRecherche(); }
   });
 }
 ecouter("recherche:ouvrir", (q) => ouvrirRecherche(typeof q === "string" ? q : ""));
@@ -157,7 +157,9 @@ function ouvrirElementCatalogue(e) {
 // ─── La fenêtre ─────────────────────────────────────────────────────────────
 /** Ouvre la recherche (ou y revient si elle est déjà ouverte). */
 export function ouvrirRecherche(depart = "") {
-  if (ouverte && !ouverte.p.fermee()) { ouverte.champ.focus(); return; }
+  // Déjà ouverte : le champ reprend le focus. Fermée sans passer par la pancarte (dialog.close() direct) : on l'oublie.
+  if (ouverte && !ouverte.p.fermee() && ouverte.p.dlg.open) { ouverte.champ.focus(); return; }
+  ouverte = null;
   const idListe = idUnique("rech-liste");
   const p = pancarte({ titre: "Rechercher", sous: "Un membre, un ticket, une affiche, une question, un élément du jeu, une rubrique.", icone: "rechercher", taille: "large recherche-fenetre",
     surFermer: () => { stopJeu(); if (ouverte && ouverte.p === p) ouverte = null; } });

@@ -622,6 +622,9 @@ export function ouvrirPublication(el, ou) {
 /** Commencer une publication d'un type (raccourcis de l'accueil) : le composeur, sur un brouillon neuf de ce type —
  *  sauf une saisie déjà en cours, rouverte telle quelle (« Nouveau » repart de zéro). */
 export async function commencer(type) {
+  // Les réglages par défaut du serveur (post, mention…) : lus avant de partir d'une page neuve, même si la rubrique des
+  // annonces n'a pas encore été ouverte dans cette session.
+  if (!dernierE) { const E = await charger("evenements"); if (E && !E.erreur) dernierE = E; }
   if (!composeur) {
     const garde = await lireSaisie("composeur");
     if (garde && garde.valeur && garde.valeur.v) composeur = Object.assign({}, garde.valeur, { restaure: true, v: nettoyer(garde.valeur.v) });

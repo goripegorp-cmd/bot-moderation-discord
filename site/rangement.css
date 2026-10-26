@@ -23,7 +23,8 @@
   font: normal 600 12px/1.45 var(--police-sc); letter-spacing: .04em; color: var(--laiton-pale);
 }
 @media (pointer: coarse) { .recherche-entete { min-height: 44px; } .recherche-touche { display: none; } }
-@media (max-width: 719px) {
+/* Jusqu'à 899 px, la loupe seule : le nom du serveur, « À bord » et la plaque gardent leur place entière. */
+@media (max-width: 899px) {
   .recherche-entete {
     flex: none; width: var(--cible); height: var(--cible); min-height: var(--cible); margin: 0 0 0 auto; padding: 0;
     justify-content: center; border-color: transparent; background: transparent; box-shadow: none;
@@ -31,6 +32,10 @@
   .recherche-entete-texte, .recherche-touche { display: none; }
   .recherche-entete .ic { width: 22px; height: 22px; color: var(--laiton-pale); }
 }
+
+/* Petit téléphone : l'en-tête garde la loupe, « À bord », la plaque et le menu entiers ; le nom du serveur (sur le
+   médaillon et dans le titre de la page) cède sa place plutôt que d'être coupé en « G… ». */
+@media (max-width: 449px) { .marque-texte { display: none; } }
 
 /* ─── Quatre pancartes : l'accueil, puis les trois maisons ─────────── */
 @media (min-width: 1200px) { .pancarte-nav { width: min(250px, 19.5vw); } }
@@ -189,7 +194,8 @@ html.mode-simple .bm-tout, html:not(.mode-simple) .bm-simple { display: none; }
      largeur, à droite ; l'avatar reste en face du nom. */
   .lc.lc-larges { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "v t" "v s" "v b" "a a"; padding-right: 8px; }
   .lc.lc-larges .lc-visuel { align-self: start; margin-top: 2px; }
-  .lc.lc-larges .lc-actions { flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .lc.lc-larges .lc-actions { flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .lc-actions .bouton.p { padding-inline: 10px; gap: 6px; }   /* « Le garder » et « Retirer du clan » tiennent sur une rangée */
 }
 
 /* ─── Les longues rangées de filtres au téléphone : une seule ligne qui défile au doigt ─── */
