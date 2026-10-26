@@ -989,6 +989,7 @@ class Monde:
              ("casier_sanctions", "Casier : sanctions du staff", "Avertissements, mutes, expulsions : effacés du casier après ce délai (annulable 30 jours). Les bannissements restent deux ans.", 730, 365, 730, True, 41),
              ("evenements_passes", "Événements passés", "Annonces et événements du clan terminés, annulés ou retirés : effacés après ce délai (les brouillons et les annonces publiées restent).", 60, 14, 365, True, 50),
              ("actualites", "Actualités de l'équipage", "Les actualités publiées sur le site de l'équipage : effacées après ce délai (jamais les épinglées).", 365, 30, 3650, True, 52),
+             ("equipes_partis", "Équipes : membres partis", "Un membre parti du serveur sort de son équipe ; un chef parti la laisse sans chef. Fait à son départ, rattrapé chaque jour.", 0, 0, 0, True, 54),
              ("affiches_corbeille", "Affiches en corbeille", "Une affiche retirée reste restaurable pendant ce délai, puis elle est effacée pour de bon.", 30, 7, 90, True, 60),
              ("affiches_historique", "Historique des affiches", "Qui a changé quoi sur chaque affiche : effacé après ce délai.", 180, 30, 365, True, 61),
              ("portraits", "Portraits Roblox inutilisés", "Un portrait qu'aucune affiche ne montre (recherche sans suite, affiche effacée) : effacé après ce délai.", 90, 14, 365, True, 62),
@@ -1001,19 +1002,22 @@ class Monde:
              ("medias", "Images inutilisées", "Une image envoyée sur le site, utilisée nulle part et pas vue depuis ce délai : effacée.", 30, 7, 180, True, 80),
              ("ops", "Modifications hors ligne", "La trace des modifications envoyées au retour du réseau (pour ne jamais les appliquer deux fois).", 30, 7, 90, True, 90),
              ("sessions", "Sessions et liens du site", "Les sessions et les liens expirés : effacés dès leur fin.", 0, 0, 0, True, 95),
-             ("orphelins", "Fichiers orphelins", "Images, portraits et pièces de conversations que plus rien ne cite, restes d'écriture : effacés après un jour.", 1, 1, 1, True, 96)]
+             ("orphelins", "Fichiers orphelins", "Images, portraits et pièces de conversations que plus rien ne cite, restes d'écriture, réglages de vitrine d'une affiche effacée : effacés après un jour.", 1, 1, 1, True, 96)]
         self.regles = [{"cle": c, "nom": n, "quoi": q, "garde_jours": g, "defaut": g, "min": mi, "max": ma, "reglable": mi < ma, "auto": a,
                         "ordre": o} for c, n, q, g, mi, ma, a, o in R]
+        for r in self.regles:   # une durée dite autrement qu'en jours (comme le serveur)
+            if r["cle"] == "equipes_partis":
+                r["duree"] = "tant qu'il est sur le serveur"
         self.nettoyage_dernier = int(MAINTENANT - 9 * 3600)
         self.nettoyage_par = ""                      # le dernier passage : la boucle du jour
         self.nettoyage_lance = 0.0                   # « Lancer maintenant » : une fois toutes les 5 minutes au plus
         #  Ce que chaque règle garde aujourd'hui (« Événements passés » n'a pas de compte, comme sur le serveur).
         self.nettoyage_compteurs = {"journal_messages": 214, "journal": 1630, "tickets_archives": 58, "transcripts": 212,
                                     "candidatures_refusees": 4, "questionnaires": 31, "affiches_corbeille": 2,
-                                    "affiches_historique": 96, "medias": 18, "ops": 31, "sessions": 3}
+                                    "affiches_historique": 96, "medias": 18, "ops": 31, "sessions": 3, "equipes_partis": 14}
         #  Ce qu'un passage retirerait (ce qui a dépassé sa durée).
         self.nettoyage_excedents = {"journal_messages": 12, "journal": 4, "candidatures_refusees": 1, "medias": 2, "ops": 6, "sessions": 1,
-                                    "tickets_fermes": 9, "empreintes": 41, "portraits": 3}
+                                    "tickets_fermes": 9, "empreintes": 41, "portraits": 3, "equipes_partis": 1}
         self.nettoyage_bilan = {r["cle"]: 0 for r in self.regles if r["auto"]}
         self.nettoyage_bilan.update(journal_messages=380, medias=12, ops=20)
         self.nettoyage_bilans = [{"quand": int(MAINTENANT - 9 * 3600), "total": 412, "par": "",

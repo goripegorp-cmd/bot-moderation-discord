@@ -558,6 +558,89 @@ async def _apercu_audit(gid, jours, t):
                           (gid, _sqlite(t - jours * JOUR)))
 
 
+#  ─── Les équipes du clan (27/10/2026) : un membre parti du serveur sort de son équipe ───────────────────────────
+#  `equipes` (une ligne par équipe, son chef) et `equipes_membres` (une place par membre, la clé est le membre) : leur
+#  taille est bornée (EQUIPES_MAX équipes, une place par membre du clan) — sauf les places de ceux qui partent. Le bot
+#  appelle `membre_parti` à chaque départ ; la règle « Équipes : membres partis » rattrape chaque jour ceux partis
+#  pendant qu'il était éteint, et les places d'une équipe qui n'existe plus.
+async def membre_parti(guild_id: int, membre_id: int, maintenant: float | None = None) -> int:
+    """Un membre a quitté le serveur : il sort de son équipe ; s'il en était le chef, l'équipe reste, sans chef (comme
+    l'effacement RGPD). Rend le nombre de places libérées (0 ou 1). Avant le branchement du site : rien (le rattrapage
+    du jour s'en charge)."""
+    if _get_db is None:
+        return 0
+    return await _liberer(int(guild_id), [int(membre_id)], maintenant or time.time())
+
+
+async def _liberer(gid: int, ids: list, t: float) -> int:
+    """Les places de `ids` libérées ; chaque équipe touchée change de version (une saisie ouverte sur le site le voit)."""
+    n = 0
+    for k in range(0, len(ids), LOT):
+        lot = ids[k:k + LOT]
+        marques = ",".join("?" * len(lot))
+        touchees = {str(r[0]) for r in await _lignes(
+            f"SELECT equipe_id FROM equipes_membres WHERE guild_id=? AND membre_id IN ({marques})"
+            f" UNION SELECT id FROM equipes WHERE guild_id=? AND chef_id IN ({marques})", (gid, *lot, gid, *lot))}
+        if not touchees:
+            continue
+        async with _get_db() as db:
+            cur = await db.execute(f"DELETE FROM equipes_membres WHERE guild_id=? AND membre_id IN ({marques})", (gid, *lot))
+            n += max(cur.rowcount or 0, 0)
+            cur = await db.execute(f"UPDATE equipes SET chef_id=0 WHERE guild_id=? AND chef_id IN ({marques})", (gid, *lot))
+            n += max(cur.rowcount or 0, 0)
+            for eid in sorted(touchees):
+                await db.execute("UPDATE equipes SET version=version+1, maj_le=?, maj_par=0 WHERE guild_id=? AND id=?",
+                                 (int(t), gid, eid))
+            await db.commit()
+    return n
+
+
+async def _equipes_a_liberer(gid: int) -> tuple:
+    """(places à retirer — (équipe, membre) : un membre parti, ou une équipe qui n'existe plus —, équipes dont le chef est
+    parti). Liste des membres du serveur incomplète : seules les places orphelines (on ne retire jamais quelqu'un qu'on
+    n'a pas vu partir)."""
+    equipes = {str(i): int(c or 0) for i, c in await _lignes("SELECT id, chef_id FROM equipes WHERE guild_id=?", (gid,))}
+    places = [(str(e), int(m)) for e, m in await _lignes("SELECT equipe_id, membre_id FROM equipes_membres WHERE guild_id=?",
+                                                          (gid,))]
+    g = tableau._bot.get_guild(int(gid)) if tableau._bot is not None else None
+    complet = g is not None and bool(getattr(g, "chunked", False))
+    presents = {int(m.id) for m in getattr(g, "members", None) or []} if complet else set()
+
+    def parti(uid: int) -> bool:
+        return complet and uid not in presents
+    return ([(e, m) for e, m in places if e not in equipes or parti(m)],
+            sorted(e for e, chef in equipes.items() if chef and parti(chef)))
+
+
+async def _purger_equipes(gid, jours, t):
+    retirer, sans_chef = await _equipes_a_liberer(gid)
+    if not retirer and not sans_chef:
+        return 0
+    n = 0
+    async with _get_db() as db:
+        for e, m in retirer:
+            cur = await db.execute("DELETE FROM equipes_membres WHERE guild_id=? AND equipe_id=? AND membre_id=?", (gid, e, m))
+            n += max(cur.rowcount or 0, 0)
+        for e in sans_chef:
+            cur = await db.execute("UPDATE equipes SET chef_id=0 WHERE guild_id=? AND id=?", (gid, e))
+            n += max(cur.rowcount or 0, 0)
+        for e in sorted({e for e, _m in retirer} | set(sans_chef)):   # une équipe effacée n'a plus de ligne : rien
+            await db.execute("UPDATE equipes SET version=version+1, maj_le=?, maj_par=0 WHERE guild_id=? AND id=?",
+                             (int(t), gid, e))
+        await db.commit()
+    return n
+
+
+async def _apercu_equipes(gid, jours, t):
+    retirer, sans_chef = await _equipes_a_liberer(gid)
+    return len(retirer) + len(sans_chef)
+
+
+async def _compter_equipes(gid, jours, t):
+    return (await _compter("SELECT COUNT(*) FROM equipes_membres WHERE guild_id=?", (gid,))
+            + await _compter("SELECT COUNT(*) FROM equipes WHERE guild_id=? AND chef_id != 0", (gid,)))
+
+
 #  ─── Les fichiers orphelins ──────────────────────────────────────────────────────────────────────────────────────
 async def _references() -> tuple:
     medias = {str(r[0]) for r in await _lignes("SELECT id FROM tableau_medias")}
@@ -628,7 +711,11 @@ async def _orphelins(t: float, effacer: bool) -> int:
         for k in range(0, len(perdues), LOT):
             lot = perdues[k:k + LOT]
             await _supprimer(f"DELETE FROM tableau_medias WHERE id IN ({','.join('?' * len(lot))})", tuple(lot))
-    return n + len(perdues)
+    #  27/10/2026 : une affiche retirée de la vitrine puis effacée pour de bon laissait son réglage (`equipage_vitrine`).
+    sans_affiche = (" FROM equipage_vitrine WHERE NOT EXISTS (SELECT 1 FROM rell_affiches a"
+                    " WHERE a.guild_id=equipage_vitrine.guild_id AND a.id=equipage_vitrine.affiche_id)")
+    reglages = await (_supprimer("DELETE" + sans_affiche) if effacer else _compter("SELECT COUNT(*)" + sans_affiche))
+    return n + len(perdues) + reglages
 
 
 async def _purger_orphelins(gid, jours, t):
@@ -666,6 +753,11 @@ REGLES_NETTOYAGE = [
     {"cle": "actualites", "nom": "Actualités de l'équipage",
      "quoi": "Les actualités publiées sur le site de l'équipage : effacées après ce délai (jamais les épinglées).",
      "garde_jours": 365, "min": 30, "max": 3650, "ordre": 52, "fn": _purger_actualites, "apercu": _apercu_actualites},
+    {"cle": "equipes_partis", "nom": "Équipes : membres partis",
+     "quoi": "Un membre parti du serveur sort de son équipe ; un chef parti la laisse sans chef. Fait à son départ, "
+             "rattrapé chaque jour.",
+     "garde_jours": 0, "min": 0, "max": 0, "ordre": 54, "duree": "tant qu'il est sur le serveur",
+     "fn": _purger_equipes, "apercu": _apercu_equipes, "compter": _compter_equipes},
     {"cle": "portraits", "nom": "Portraits Roblox inutilisés",
      "quoi": "Un portrait qu'aucune affiche ne montre (recherche sans suite, affiche effacée) : effacé après ce délai.",
      "garde_jours": 90, "min": 14, "max": 365, "ordre": 62,
@@ -693,8 +785,8 @@ REGLES_NETTOYAGE = [
      "quoi": "Qui a fait quoi, sur qui (sanctions, isolements, notes) : effacé après ce délai.",
      "garde_jours": 365, "min": 90, "max": 730, "ordre": 72, "fn": _purger_audit, "apercu": _apercu_audit},
     {"cle": "orphelins", "nom": "Fichiers orphelins",
-     "quoi": "Images, portraits et pièces de conversations que plus rien ne cite, restes d'écriture : effacés après "
-             "un jour.",
+     "quoi": "Images, portraits et pièces de conversations que plus rien ne cite, restes d'écriture, réglages de "
+             "vitrine d'une affiche effacée : effacés après un jour.",
      "garde_jours": 1, "min": 1, "max": 1, "ordre": 96, "fn": _purger_orphelins, "apercu": _apercu_orphelins},
 ]
 

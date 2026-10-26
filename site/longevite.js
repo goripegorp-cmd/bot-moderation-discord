@@ -264,11 +264,14 @@ export function casierRecherche(q, redessiner) {
 }
 
 // ─── Nettoyage : l'aperçu, « Nettoyer maintenant », la place prise ───────────
-/** « 1 234 éléments partiront au prochain passage » (ou rien si la règle n'en dit rien). */
+/** « 1 234 éléments partiront au prochain passage », ou avec une autre durée « avec 45 j : 3 éléments partiraient »
+ *  (rien si la règle n'en dit rien). */
 export function texteApercu(n, jours) {
   if (n === undefined) return "";
   if (n === null) return "aperçu indisponible";
-  return (jours ? "avec " + jours + " j : " : "") + (n ? quantite(n, "élément(s)") + (jours ? " partiraient" : " partiront au prochain passage") : "rien ne partirait");
+  const avec = jours ? "avec " + jours + " j : " : "", un = Number(n) < 2;
+  if (!Number(n)) return avec + (jours ? "rien ne partirait" : "rien ne partira au prochain passage");
+  return avec + quantite(n, "élément(s)") + (jours ? (un ? " partirait" : " partiraient") : (un ? " partira" : " partiront") + " au prochain passage");
 }
 
 /** L'aperçu d'une durée sur la réglette, demandé au serveur (300 ms après le dernier geste). */

@@ -794,7 +794,7 @@ function carteRegle(r, garde, recharger, partira) {
   const nb = garde === undefined ? "" : garde === null ? "compte indisponible"
     : garde ? quantite(garde, rangement ? "élément(s) rangé(s)" : "élément(s) gardé(s)") : rangement ? "rien de rangé" : "rien de gardé";
   const sorte = rangement ? "rangement : rien n'est effacé" : r.reglable === false ? "règle fixe, appliquée chaque jour" : "appliquée chaque jour";
-  const duree = (j) => (Number(j) ? j + " j" : "jusqu'à expiration");
+  const duree = (j) => r.duree || (Number(j) ? j + " j" : "jusqu'à expiration");
   // Ce qui partira au prochain passage, et « Nettoyer maintenant » quand il y a quelque chose (26/10/2026).
   const apercu = h("p", { classe: "meta regle-apercu", "aria-live": "polite" }, texteApercu(partira));
   const maintenant_ = boutonNettoyerRegle(r, Number(partira) || 0, recharger);

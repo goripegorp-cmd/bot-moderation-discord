@@ -75,6 +75,10 @@ HYPOTHESES = {
     "annonces_logs": 0.15,    # par jour (annonces du salon des logs) ; « Vu » : 25 % des membres
     "evenements": 0.25, "annonces_clan": 0.15,   # par jour (le clan) ; réponses : 40 % du clan
     "affiches": 0.70,         # du clan a son affiche ; 3 modifications par jour
+    "clan_depart_an": 0.35,   # part du clan qui le quitte chaque année (27/10/2026 : vitrine et équipes)
+    "affiches_partis_retirees": 0.5,   # affiches de ceux qui ont quitté le clan que la direction retire (les autres restent)
+    "equipe_taille": (3, 9),  # membres d'une équipe, en plus de son chef ; une équipe pour huit membres du clan
+    "vitrine": "tous les blocs de l'accueil publics (le pire cas : événements, analyses, actualités)",
     "portraits": 1.0,         # recherches Roblox par jour (le portrait est gardé, même sans affiche)
     "medias": 0.5,            # images envoyées par jour (~150 Ko) ; 55 % utilisées (annonces, accueil)
     "actualites": 0.25,       # actualités de l'équipage par jour (40 % avec image)
@@ -564,8 +568,46 @@ def remplir(monde: Monde, fichiers: bool = True) -> dict:
     for d in range(jours):
         for _ in range(monde.combien(h["portraits"], d, fixe=True)):
             portraits.append(6_000_000_000 + len(portraits))
+    #  27/10/2026 — le roulement du clan : qui l'a quitté garde son affiche (« un membre parti garde son nom ») tant que la
+    #  direction ne la retire pas ; la vitrine publique montre toutes les affiches actives.
+    anciens = list(monde.partis)
+    n_anciens = int(len(clan_ids) * h["clan_depart_an"] * monde.annees * h["affiches"]) if gab is not None else 0
+    for k in range(min(n_anciens, len(anciens))):
+        c = monde.quand(hasard.randint(30, max(31, jours)))
+        rid = 5_500_000_000 + k
+        retiree = hasard.random() < h["affiches_partis_retirees"]
+        aff.append(dict(gab, id=f"banc-p{k:06d}", membre_id=anciens[k], membre_nom=f"Ancien {k}", roblox_nom=f"Ancien_{k}",
+                        roblox_id=rid, surnom=hasard.choice(SURNOMS), prime=hasard.randint(1, 400) * 10000,
+                        niveau=hasard.randint(1, 90), cree_le=c, maj_le=c,
+                        retire_le=min(int(now - JOUR), c + hasard.randint(1, 20) * JOUR) if retiree else 0))
+        portraits.append(rid)
     b.ajouter("rell_affiches", aff)
     b.ajouter("rell_affiches_historique", histo)
+    #  Les équipes du clan : une pour huit membres (EQUIPES_MAX au plus), un chef chacune. Avant le premier nettoyage, la
+    #  part du clan partie depuis leur création y est restée (le bot éteint ne l'a pas vue partir) : la règle « Équipes :
+    #  membres partis » la retire.
+    import site_equipage
+    places_prises = {r[0] for r in b.c.execute("SELECT membre_id FROM equipes_membres")} | {
+        r[0] for r in b.c.execute("SELECT chef_id FROM equipes")}
+    libres_clan = [i for i in clan_ids if i not in places_prises]
+    hasard.shuffle(libres_clan)
+    equipes, places = [], []
+    for k in range(min(site_equipage.EQUIPES_MAX - 2, max(1, len(clan_ids) // 8))):
+        if len(libres_clan) < 2:
+            break
+        chef, c = libres_clan.pop(), monde.quand(hasard.randint(0, max(1, min(jours, 365))))
+        eid = f"banc-eq-{k:03d}"
+        equipes.append({"guild_id": SERVEUR_ID, "id": eid, "nom": f"Équipe {k + 1}", "type": "libre:Équipe", "chef_id": chef,
+                        "ordre": 10 + k, "version": 1, "cree_le": c, "maj_le": c, "maj_par": FONDATEUR})
+        for _ in range(min(hasard.randint(*h["equipe_taille"]), len(libres_clan))):
+            places.append({"guild_id": SERVEUR_ID, "equipe_id": eid, "membre_id": libres_clan.pop()})
+    partis_equipes = anciens[n_anciens:n_anciens + int(len(places) * h["clan_depart_an"] * min(1.0, monde.annees))]
+    for k, uid in enumerate(partis_equipes):
+        places.append({"guild_id": SERVEUR_ID, "equipe_id": hasard.choice(equipes)["id"], "membre_id": uid})
+    if equipes and len(anciens) > n_anciens + len(partis_equipes):
+        equipes[-1]["chef_id"] = anciens[n_anciens + len(partis_equipes)]   # un chef parti
+    b.ajouter("equipes", equipes)
+    b.ajouter("equipes_membres", places, "INSERT OR IGNORE")
     av = [{"roblox_id": rid, "nom": f"Pirate_{rid}", "nom_cle": f"pirate_{rid}", "maj_le": int(now - hasard.randint(0, max(1, jours)) * JOUR)}
           for rid in portraits]
     b.ajouter("rell_avatars", av, "INSERT OR REPLACE")
@@ -672,6 +714,9 @@ def remplir(monde: Monde, fichiers: bool = True) -> dict:
     b.ajouter("daily_join_log", arr, "INSERT OR IGNORE")
     b.ajouter("security_logs", sec)
     b.ajouter("error_log", err)
+    #  La vitrine publique au pire : tous les blocs de l'accueil publics (événements, analyses, actualités, honneur…).
+    if "public" in b.cols("equipage_blocs"):
+        b.c.execute("UPDATE equipage_blocs SET public=1")
     compte = dict(b.compte)
     b.fin()
     compte["_fichiers_transcripts_octets"] = octets_tr
@@ -706,7 +751,9 @@ async def nettoyer_comme_le_bot(monde: Monde) -> dict:
         await db.execute("DELETE FROM infractions_archive WHERE lot=? AND abs(random() % 1000) >= ?",
                          (bilan["lot"], int(1000 * 30 / max(30, min(monde.jours, 730)))))
         await db.commit()
-    out["site"] = sum(max(0, n) for n in (await tableau.nettoyer(monde.g, None)).values())
+    bilan_site = await tableau.nettoyer(monde.g, None)
+    out["site"] = sum(max(0, n) for n in bilan_site.values())
+    out["site : équipes (membres partis)"] = max(0, int(bilan_site.get("equipes_partis", 0)))
     out["transcripts"] = await asyncio.to_thread(transcript_store.purge_old)
     #  Comme `db_optimizer_task`, chaque jour : les statistiques de SQLite (le choix des index en dépend).
     async with get_db() as db:
@@ -802,6 +849,11 @@ def _vider_caches():
         site_equipage._permis.clear()
     except (ImportError, AttributeError):   # un dépôt sans le site de l'équipage : rien à vider
         pass
+    try:
+        import site_vitrine
+        site_vitrine.oublier()
+    except ImportError:   # un dépôt d'avant la vitrine publique : rien à vider
+        pass
 
 
 async def mesurer_routes(monde: Monde, port: int) -> dict:
@@ -863,6 +915,27 @@ async def mesurer_routes(monde: Monde, port: int) -> dict:
                                     "candidats": len(d.get("candidats", [])), "personnes": len(d.get("personnes", {})),
                                     "questions": len(d.get("questions", {}).get("liste", [])),
                                     "entraide": len(d.get("entraide", {}).get("liste", []))}
+    #  27/10/2026 : la vitrine PUBLIQUE (sans session ; réponses gardées 60 s — « froid » : recalculée) et les équipes.
+    if "equipage/equipes" in tableau.ROUTES:
+        routes_suite = [("équipes (direction)", "/tableau/espace/api/equipage/equipes")]
+    else:
+        routes_suite = []
+    try:
+        import site_vitrine   # noqa: F401 — la vitrine existe dans ce dépôt
+        routes_suite += [("vitrine : données", "/equipage/donnees"), ("vitrine : la page", "/equipage"),
+                         ("vitrine : l'image de l'aperçu", "/equipage/banniere.png")]
+    except ImportError:   # un dépôt d'avant la vitrine (le banc mesure aussi l'état « avant »)
+        pass
+    for nom, chemin in routes_suite:
+        _vider_caches()
+        froid = await tete.lire(chemin)
+        chauds = [await tete.lire(chemin) for _ in range(3)]
+        out[nom] = {"statut": froid["statut"], "froid_ms": froid["ms"], "chaud_ms": round(statistics.median(c["ms"] for c in chauds), 1),
+                    "octets": froid["octets"], "gzip": froid["gzip"]}
+        if nom == "vitrine : données" and froid["statut"] == 200:
+            d = json.loads(froid["corps"])
+            out[nom]["elements"] = {"affiches": len(d.get("affiches", [])), "equipes": len(d.get("equipes", [])),
+                                    "blocs": len((d.get("accueil") or {}).get("blocs", []))}
     for nom, chemin in (("équipage : accueil", "/tableau/equipage/api/accueil"), ("équipage : équipage", "/tableau/equipage/api/equipage")):
         _vider_caches()
         froid = await equipage.lire(chemin)
@@ -1169,6 +1242,13 @@ def markdown(rapports: list, titre: str = "Banc de plusieurs années") -> str:
             cellules.append("—" if not v else f"{v['froid_ms']:.0f} ms · {v['chaud_ms']:.0f} ms · {v['octets'] / 1024:.0f} Ko / "
                             f"{(v['gzip'] or v['octets']) / 1024:.0f} Ko" + ("" if v["statut"] == 200 else f" · **{v['statut']}**"))
         L.append(f"| {nom} | " + " | ".join(cellules) + " |")
+    if all("vitrine : données" in x["routes"] for x in r):
+        v = [x["routes"]["vitrine : données"].get("elements", {}) for x in r]
+        L += ["", "### La vitrine publique (sans session, réponses gardées 60 s)", "", f"| | {col} |", f"|{sep}|",
+              "| Affiches montrées (dont celles des anciens du clan, tant que la direction ne les retire pas) | "
+              + " | ".join(_n(e.get("affiches", 0)) for e in v) + " |",
+              "| Équipes montrées | " + " | ".join(_n(e.get("equipes", 0)) for e in v) + " |",
+              "| Blocs publics | " + " | ".join(_n(e.get("blocs", 0)) for e in v) + " |"]
     L += ["", "### Ce que pèse `donnees`, partie par partie (octets JSON)", "", f"| Partie | {col} |", f"|{sep}|"]
     parties = sorted({p for x in r for p in x["routes"]["donnees"].get("parties", {})},
                      key=lambda p: -r[-1]["routes"]["donnees"].get("parties", {}).get(p, 0))

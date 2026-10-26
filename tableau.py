@@ -916,8 +916,8 @@ async def _sanctions(g, apart: set, qui) -> dict:
             groupes = await recrutements._lignes(
                 db, "SELECT CASE WHEN type IS NULL OR type='' THEN 'autre' ELSE lower(type) END, COALESCE(mod_id, 0),"
                     " CASE WHEN substr(created_at, 9, 2) >= '28' THEN substr(created_at, 1, 13) ELSE substr(created_at, 1, 7)"
-                    " END, created_at >= ?, COUNT(*) FROM infractions WHERE guild_id=? GROUP BY 1, 2, 3, 4",
-                (_sqlite_date(time.time() - 30 * 86400), g.id))
+                    " END, created_at >= ?, created_at >= ?, COUNT(*) FROM infractions WHERE guild_id=? GROUP BY 1, 2, 3, 4, 5",
+                (_sqlite_date(time.time() - 30 * 86400), _sqlite_date(time.time() - 365 * 86400), g.id))
     maintenant = time.time()
     par_type, mois, staff, staff30 = {}, {}, {}, {}
     auto = manuel = recents_30 = 0
@@ -944,10 +944,9 @@ async def _sanctions(g, apart: set, qui) -> dict:
     total = len(rows)
     if groupes is not None:   # le casier dépasse ce qui est lu : les chiffres viennent du comptage groupé
         par_type, mois, total, auto, manuel, recents_30, staff30 = {}, {}, 0, 0, 0, 0, {}
-        premier_mois = _mois_paris(maintenant - 365 * 86400)
         for st in staff.values():
             st["total"], st["types"] = 0, {}
-        for typ, mod, m, recent, n in groupes:
+        for typ, mod, m, recent, dans_l_an, n in groupes:
             est_auto = not mod or int(mod) == robot
             if m and len(m) == 13:   # « AAAA-MM-JJ HH » : une heure de fin de mois, rangée dans son mois de Paris
                 heure = recrutements._unix(m + ":00:00")
@@ -956,7 +955,7 @@ async def _sanctions(g, apart: set, qui) -> dict:
             par_type[typ] = par_type.get(typ, 0) + n
             auto, manuel = auto + n * est_auto, manuel + n * (not est_auto)
             recents_30 += n if recent else 0
-            if m and m >= premier_mois:
+            if m and dans_l_an:   # comme la lecture complète : les entrées de moins d'un an
                 mois.setdefault(m, {"Avertissements": 0, "Mutes": 0, "Expulsions et bans": 0,
                                     "Détections": 0})[GROUPES.get(typ, "Détections")] += n
             if not est_auto and int(mod) not in apart:
@@ -2023,9 +2022,10 @@ def _normaliser_regle(r) -> dict:
         raise ValueError(f"règle de nettoyage : fonction invalide ({cle})")
     #  26/10/2026 (plusieurs années) : `apercu(guild_id, jours, maintenant)` → combien d'éléments partiraient avec cette
     #  durée (la rubrique le dit avant d'enregistrer, et avant « Nettoyer maintenant »).
+    #  27/10/2026 : `duree`, la durée dite autrement qu'en jours (« tant qu'il est sur le serveur »), facultative.
     return {"cle": cle, "nom": str(r.get("nom") or cle)[:60], "quoi": str(r.get("quoi") or "")[:300],
             "garde_jours": garde, "min": mini, "max": maxi, "fn": fn, "compter": compter, "apercu": apercu,
-            "ordre": int(r.get("ordre") or 0)}
+            "ordre": int(r.get("ordre") or 0), "duree": str(r.get("duree") or "")[:60]}
 
 
 def _definitions(nom, d) -> list:
@@ -2630,7 +2630,8 @@ async def etat_nettoyage(guild_id: int, maintenant: float | None = None) -> dict
         jours = await jours_regle(guild_id, r["cle"])
         regles.append({"cle": r["cle"], "nom": r["nom"], "quoi": r["quoi"], "garde_jours": jours,
                        "defaut": r["garde_jours"], "min": r["min"], "max": r["max"],
-                       "reglable": r["min"] < r["max"], "auto": r["fn"] is not None, "ordre": r["ordre"]})
+                       "reglable": r["min"] < r["max"], "auto": r["fn"] is not None, "ordre": r["ordre"],
+                       **({"duree": r["duree"]} if r.get("duree") else {})})
         if r["compter"] is not None:
             try:
                 n = r["compter"](int(guild_id), jours, t)

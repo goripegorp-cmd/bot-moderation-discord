@@ -23284,6 +23284,11 @@ async def on_member_remove(m):
         await equipages.sur_depart(m)  # un capitaine emporte son équipage
     except Exception as ex:
         _logerr("equipages.depart", ex, guild_id=m.guild.id)
+    # 27/10/2026 : les équipes du clan (site) — il sort de son équipe ; un chef parti la laisse sans chef.
+    try:
+        await longevite.membre_parti(m.guild.id, m.id)
+    except Exception as ex:
+        _logerr("equipes.depart", ex, guild_id=m.guild.id)
     # Parti du serveur : son boost s'arrête, sa carte de remerciement aussi.
     try:
         await boosts.retirer(m.guild, m.id)

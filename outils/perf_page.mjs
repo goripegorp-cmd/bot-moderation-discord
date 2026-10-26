@@ -28,6 +28,7 @@ const RUBRIQUES = [
   ["accueil", "#accueil/attente"], ["apercu", "#port/apercu"], ["journal", "#port/journal"], ["sanctions", "#port/sanctions"],
   ["tickets", "#port/tickets"], ["repertoire", "#port/repertoire"], ["salons", "#port/salons/questions"], ["nettoyage", "#port/nettoyage"],
   ["candidatures", "#equipage/candidatures/decidees"], ["affiches", "#capitainerie/affiches"], ["annonces", "#equipage/annonces"],
+  ["vitrine", null],   // 27/10/2026 : la vitrine PUBLIQUE de l'équipage (/equipage, sans session)
 ];
 const filtre = opt("rubriques", "") ? String(opt("rubriques")).split(",") : null;
 const PAGE_ENTIERE = !opt("sans-capture", false);
@@ -95,10 +96,13 @@ async function principal() {
       await pause(300);
       enCours.clear(); octets.clear(); erreurs = [];
       const t0 = Date.now();
-      await s("Page.navigate", { url: BASE + "/tableau/espace/" + ancre });
+      await s("Page.navigate", { url: ancre === null ? BASE + "/equipage" : BASE + "/tableau/espace/" + ancre });
+      //  Prête : la rubrique affichée sans squelette — la vitrine : sortie de son démarrage.
+      const pretJs = ancre === null ? "!document.body.classList.contains('demarrage') && !document.querySelector('#attente-depart')"
+        : "!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')";
       let pret = false, calme = 0;
       while (Date.now() - t0 < 30000) {
-        const affiche = await evaluer("!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')").catch(() => false);
+        const affiche = await evaluer(pretJs).catch(() => false);
         const reseau = [...enCours.values()].filter((u) => !/\/direct|sw\.js/.test(u)).length;
         if (affiche && reseau === 0) { calme += 1; if (calme >= 3) { pret = true; break; } } else calme = 0;
         await pause(100);
@@ -107,7 +111,7 @@ async function principal() {
       const ms = Date.now() - t0 - (pret ? 200 : 0);
       const m = Object.fromEntries((await s("Performance.getMetrics")).metrics.map((x) => [x.name, x.value]));
       const recu = [...octets.entries()];
-      const donnees = recu.filter(([u]) => /\/(donnees|api\/)/.test(u)).reduce((a, [, v]) => a + v, 0);
+      const donnees = recu.filter(([u]) => /\/(donnees|api\/)/.test(u)).reduce((a, [, v]) => a + v, 0);   // vitrine : /equipage/donnees
       const r = { rubrique: nom, pret, ms, tas_mo: +(m.JSHeapUsedSize / 1048576).toFixed(1), noeuds: m.Nodes, mises_en_page: m.LayoutCount,
         script_ms: Math.round((m.ScriptDuration || 0) * 1000), taches_ms: Math.round((m.TaskDuration || 0) * 1000),
         recu_ko: Math.round(recu.reduce((a, [, v]) => a + v, 0) / 1024), donnees_ko: Math.round(donnees / 1024), erreurs: [...new Set(erreurs)] };
@@ -119,7 +123,7 @@ async function principal() {
       //  La page entière : la fenêtre agrandie à sa hauteur (`captureBeyondViewport` ne finissait jamais sur le mur des
       //  affiches, des centaines de portraits), puis remise à sa taille.
       //  (Les murs d'images — affiches, annonces — restent à l'écran seul : leur capture entière ne finit jamais sans fenêtre.)
-      const entiere = PAGE_ENTIERE && !["affiches", "annonces"].includes(nom);
+      const entiere = PAGE_ENTIERE && !["affiches", "annonces", "vitrine"].includes(nom);
       if (entiere) { await s("Emulation.setDeviceMetricsOverride", { width: LARGEUR, height: hauteur, deviceScaleFactor: 1, mobile: LARGEUR < 720 }); await pause(900); }
       const cap = await s("Page.captureScreenshot", { format: "png" });
       await s("Emulation.setDeviceMetricsOverride", { width: LARGEUR, height: HAUTEUR, deviceScaleFactor: 1, mobile: LARGEUR < 720 });
