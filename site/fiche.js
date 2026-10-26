@@ -7,6 +7,7 @@ import { lire, action as envoyerAction, lienExport } from "./api.js";
 import { charger, vue as vueJeu } from "./donnees.js";
 import { pancarte, confirmer, bouton, avatar, pastille, tampon, vide, squelettes, boutonCopie, nomDe, lienNom, toast, liste, champ, zoneTexte } from "./ui.js";
 import { ligne, groupesParJours, outilsGroupes } from "./rangement.js";
+import { ligneEquipe } from "./equipes_admin.js";
 
 // ─── Couleurs et libellés partagés ──────────────────────────────────────────
 export const COULEURS_CAT = {
@@ -167,6 +168,7 @@ function rendreFiche() {
         m.cree ? "compte Discord créé le " + date(m.cree) : ""].filter(Boolean).join(" · "), h("span", { classe: "ident" }, " · " + p.id), boutonCopie(p.id, "Identifiant copié")),
       m.roles && m.roles.length ? h("div", { classe: "pastilles fiche-roles", title: "Rôles sur Discord (lecture seule)" },
         m.roles.slice(0, 8).map((r) => pastille(sansEmoji(r.nom) || "Rôle", r.couleur || null)), m.roles.length > 8 ? pastille("+" + (m.roles.length - 8), null, m.roles.slice(8).map((r) => sansEmoji(r.nom)).join(", "), true) : null) : null,
+      m.clan ? ligneEquipe(m.id) : null,   // 27/10/2026 : « Équipe : … (chef : …) » (equipes_admin.js)
       h("div", { classe: "rangee fiche-liens" },
         h("a", { classe: "bouton p", href: "https://discord.com/users/" + m.id }, icone("discord"), h("span", {}, "Profil Discord")),
         h("a", { classe: "bouton p discret avance", href: lienExport({ quoi: "membre", membre: m.id }), download: "" }, icone("exporter"), h("span", {}, "Exporter sa fiche")),

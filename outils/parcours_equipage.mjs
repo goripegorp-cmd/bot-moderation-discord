@@ -189,6 +189,9 @@ async function parcoursMembre(m) {
     const { d } = await lireEq(m, "equipage");
     const metiers = new Set(d.affiches.flatMap((a) => (a.attributs.metier || [])));
     await aller(m, "#equipage");
+    //  27/10/2026 : l'onglet s'ouvre sur les équipes du clan ; le mur par métier est sous « Toutes les affiches ».
+    if (!await cliquer(m, ".segment button", "Toutes les affiches")) return { ok: false, detail: "« Toutes les affiches » absent" };
+    await pause(500);
     const groupes = await evaluer(m, "document.querySelectorAll('#contenu details.groupe').length");
     if (groupes !== metiers.size + (d.affiches.some((a) => !(a.attributs.metier || []).length) ? 1 : 0)) return { ok: false, detail: `groupes ${groupes} ≠ métiers ${metiers.size}` };
     await ecrire(m, ".recherche input", "mira");
