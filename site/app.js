@@ -14,6 +14,7 @@ import * as clan from "./clan.js";
 import * as recrutement from "./recrutement.js";
 import * as annonces from "./annonces.js";
 import * as cap from "./capitainerie.js";
+import { demarrerDirect } from "./direct.js";
 
 const RAFRAICHIR = 60000;
 const ICONES = ["port", "equipage", "capitainerie", "apercu", "journal", "sanctions", "tickets", "repertoire", "salons", "nettoyage", "membres", "fiches",
@@ -58,6 +59,7 @@ async function demarrer() {
   monterEntete();
   monterPancartes();
   lireRoute(true);
+  demarrerDirect();   // la présence en direct (« À bord ») et les verrous d'édition : direct.js
   document.body.classList.remove("demarrage");
   await chargerDonnees();
   rendre(true);

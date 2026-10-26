@@ -12,6 +12,7 @@ import {
 } from "./ui.js";
 import { affiche, insignes, nomAffiche, metiersDe, gradeDe, insigneImage, STATUTS_AFFICHE, monogramme, primeNoeud, logo } from "./affiche.js";
 import { ouvrirFiche } from "./fiche.js";
+import { avecVerrou, protegerEditeur, protegerZone, siLibre } from "./direct.js";
 
 const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(p)) delete etat.pages[k]; };
 const RAYON_CORBEILLE = 30;
@@ -44,7 +45,7 @@ export function affiches(vue, ctx) {
     const texte = (a) => [nomAffiche(a), a.surnom, a.membre && a.membre.nom, a.roblox && a.roblox.nom, ...insignes(a, cat).map((i) => i.nom), gradeDe(a, cat)].join(" ");
     let l = (f.vue === "corbeille" ? corbeille : actives).filter((a) => (f.statut === "tous" || a.statut === f.statut) && contient(texte(a), f.q));
     l = f.tri === "prime" ? l.sort((a, b) => (b.prime || 0) - (a.prime || 0)) : f.tri === "recent" ? l.sort((a, b) => (b.maj_le || 0) - (a.maj_le || 0)) : l.sort((a, b) => nomAffiche(a).localeCompare(nomAffiche(b), "fr", { sensitivity: "base" }));
-    const carte = (a) => affiche(a, cat, { taille: "mini", clic: () => ouvrirAffiche(a.id) });
+    const carte = (a) => avecVerrou(affiche(a, cat, { taille: "mini", clic: () => ouvrirAffiche(a.id) }), "affiche:" + a.id);
     if (!l.length) remplacer(resultats, vide(f.vue === "corbeille" ? "La corbeille est vide" : "Aucune affiche ici", f.vue === "corbeille" ? "Une affiche mise à la corbeille y reste " + RAYON_CORBEILLE + " jours." : "Crée la première : « Nouvelle affiche ».", f.vue === "corbeille" ? "supprimer" : "affiches"));
     else if (f.vue === "corbeille") remplacer(resultats, h("p", { classe: "aide" }, "Dans la corbeille : restaure une affiche pour la remettre au mur. Au-delà de " + RAYON_CORBEILLE + " jours, elle est effacée pour de bon."),
       paginer("aff-corbeille", l, (a) => h("div", { classe: "corbeille-item" }, carte(a),
@@ -88,6 +89,7 @@ export function rangerAffiches(aff) {
   return { actives: l.filter((a) => !a.retire_le), corbeille: l.filter((a) => a.retire_le) };
 }
 async function restaurer(a) {
+  if (!siLibre("affiche:" + a.id)) return;
   await mettreEnFile("rell/affiche/retirer", { id: a.id, restaurer: true }, { genre: "affiche", cle: String(a.id), resume: "Restaurer l'affiche de " + nomAffiche(a), objet: Object.assign({}, a, { retire_le: null }) });
   toast(enLigne() ? "Affiche restaurée." : "Restauration gardée sur l'appareil : elle partira au retour de la connexion.", "succes");
   emettre("jeu", { nom: "affiches" });
@@ -115,11 +117,12 @@ export async function ouvrirAffiche(id) {
     a.notes ? h("div", { classe: "reponse" }, h("dt", {}, "Notes"), h("dd", {}, a.notes)) : null,
     h("p", { classe: "meta" }, "Créée " + depuis(a.cree_le) + (a.cree_par ? " par " + nomDe(P(a.cree_par)) : "") + (a.maj_le && a.maj_le !== a.cree_le ? " · modifiée " + depuis(a.maj_le) + (a.maj_par ? " par " + nomDe(P(a.maj_par)) : "") : "")),
     groupe({ titre: "Historique", icone: "journal", cle: "aff-hist" }, () => { chargerHistorique(a, historique); return historique; }));
-  ajouter(p.corps, [h("div", { classe: "affiche-grand" }, h("div", { classe: "affiche-grand-mur" }, affiche(a, cat, { taille: "grande" })), detail)]);
+  ajouter(p.corps, [h("div", { classe: "affiche-grand" }, h("div", { classe: "affiche-grand-mur" }, avecVerrou(affiche(a, cat, { taille: "grande" }), "affiche:" + a.id)), detail)]);
   if (peutAgir()) {
     ajouter(p.pied, [
       a.retire_le ? bouton("Restaurer", { classe: "vert", icone: "synchro", onclick: () => { restaurer(a); p.fermer(); } })
         : bouton("Mettre à la corbeille", { classe: "discret danger gauche", icone: "supprimer", onclick: async () => {
+          if (!siLibre("affiche:" + a.id)) return;
           const ok = await confirmer({ titre: "Mettre cette affiche à la corbeille ?", texte: "Elle quitte le mur ; tu peux la restaurer pendant " + RAYON_CORBEILLE + " jours.", libelleOk: "À la corbeille", style: "danger" });
           if (!ok) return;
           await mettreEnFile("rell/affiche/retirer", { id: a.id }, { genre: "affiche", cle: String(a.id), resume: "Corbeille : affiche de " + nomAffiche(a), objet: Object.assign({}, a, { retire_le: maintenant() }) });
@@ -179,17 +182,32 @@ async function appliquerRoles(a) {
 }
 
 // ─── L'éditeur d'affiche ────────────────────────────────────────────────────
+/** Présence en direct : l'affiche vient d'être libérée — sa dernière version relue, l'éditeur rouvert dessus (pour une
+ *  nouvelle affiche : celle que le membre a peut-être reçue entre-temps). */
+async function rouvrirAffiche(a, membreId) {
+  perime("affiches");
+  const { actives, corbeille } = rangerAffiches(await charger("affiches", { forcer: true }));
+  const frais = a ? [...actives, ...corbeille].find((x) => String(x.id) === String(a.id))
+    : actives.find((x) => x.membre && String(x.membre.id) === String(membreId));
+  if (a && !frais) throw new Error("affiche introuvable");
+  await editer(frais || null, frais ? undefined : { membre_id: membreId });
+}
 /** Crée (a = null) ou modifie une affiche. Les choix viennent UNIQUEMENT du catalogue. */
 export async function editer(a, preremplir) {
   const cat = await charger("catalogue");
   if (!cat || cat.erreur) { toast("Le catalogue est indisponible : impossible de choisir les insignes.", "erreur"); return; }
   const cleSaisie = "affiche:" + (a ? a.id : "nouvelle");
   const gardee = await lireSaisie(cleSaisie);
+  //  26/10/2026 (présence en direct) : une saisie gardée sur une version plus ancienne (l'affiche a été modifiée depuis,
+  //  ailleurs) n'est jamais reprise d'office — enregistrée, elle effacerait sans le dire le travail de l'autre.
+  const perimee = !!(a && gardee && gardee.valeur && gardee.valeur._version !== undefined && gardee.valeur._version !== (a.version || 0));
+  if (perimee) await oublierSaisie(cleSaisie);
   const base_ = a ? {
     membre_id: a.membre && a.membre.id ? String(a.membre.id) : "", membre: a.membre || null, roblox: { nom: (a.roblox && a.roblox.nom) || "", id: (a.roblox && a.roblox.id) || "", avatar: (a.roblox && a.roblox.avatar) || "" },
     surnom: a.surnom || "", prime: a.prime || 0, niveau: a.niveau || 0, grade: a.grade || "", statut: a.statut || "actif", attributs: copie(a.attributs || {}), notes: a.notes || "",
   } : { membre_id: "", membre: null, roblox: { nom: "", id: "", avatar: "" }, surnom: "", prime: 0, niveau: 0, grade: "", statut: "actif", attributs: {}, notes: "" };
-  const v = gardee && gardee.valeur ? gardee.valeur : base_;
+  const v = gardee && gardee.valeur && !perimee ? gardee.valeur : base_;
+  v._version = a ? a.version || 0 : 0;
   if (!a && preremplir && preremplir.membre_id && !v.membre_id) {
     v.membre_id = String(preremplir.membre_id);
     const m = ((etat.d && etat.d.clan && etat.d.clan.membres) || []).find((x) => String(x.id) === v.membre_id) || P(v.membre_id);
@@ -203,6 +221,10 @@ export async function editer(a, preremplir) {
       return !!(await confirmer({ titre: "Quitter sans enregistrer ?", texte: "Ta saisie reste gardée sur cet appareil : tu la retrouveras en rouvrant l'éditeur.", libelleOk: "Quitter", style: "danger" }));
     },
   });
+  // Présence en direct : une seule personne à la fois sur cette affiche (ou sur la nouvelle affiche de ce membre).
+  const verrou = protegerEditeur(p, a ? "affiche:" + a.id : v.membre_id ? "affiche-membre:" + v.membre_id : null,
+    a ? "l'affiche de " + nomAffiche(a) : "la nouvelle affiche de " + ((v.membre && sansEmoji(v.membre.nom)) || "ce membre"),
+    { relire: () => rouvrirAffiche(a, a ? null : v.membre_id) });
   const apercu = h("div", { classe: "affiche-apercu" });
   const garder = retarder(() => garderSaisie(cleSaisie, v), 300);
   const objetApercu = () => ({
@@ -212,7 +234,8 @@ export async function editer(a, preremplir) {
   const majApercu = () => remplacer(apercu, affiche(objetApercu(), cat, { taille: "grande" }));
   const changer = (k, x) => { v[k] = x; modifie = true; garder(); majApercu(); };
   const form = h("div", { classe: "pile" });
-  if (gardee && gardee.valeur) ajouter(form, [bandeau("Ta saisie précédente a été retrouvée sur cet appareil.", "vert", bouton("Revenir à la version enregistrée", { classe: "p discret", onclick: async () => { await oublierSaisie(cleSaisie); p.fermer("enregistre"); editer(a, preremplir); } }))]);
+  if (gardee && gardee.valeur && !perimee) ajouter(form, [bandeau("Ta saisie précédente a été retrouvée sur cet appareil.", "vert", bouton("Revenir à la version enregistrée", { classe: "p discret", onclick: async () => { await oublierSaisie(cleSaisie); p.fermer("enregistre"); editer(a, preremplir); } }))]);
+  else if (perimee) ajouter(form, [bandeau("L'affiche a été modifiée depuis ta dernière saisie : c'est la version enregistrée qui est ouverte.", "")]);
 
   // Le membre
   const membreZone = h("div", { classe: "membre-choisi" });
@@ -223,6 +246,7 @@ export async function editer(a, preremplir) {
   const choisirMembre = async () => {
     const m = await selecteurMembre();
     if (m) { v.membre_id = String(m.id); v.membre = { id: String(m.id), nom: m.nom, avatar: m.avatar }; modifie = true; garder(); majMembre(); majApercu(); }
+    if (m && !a) verrou.changerObjet("affiche-membre:" + m.id, "la nouvelle affiche de " + (sansEmoji(m.nom) || "ce membre"));
   };
   majMembre();
   // Roblox
@@ -414,7 +438,7 @@ function creditsRell() {
 const sourceCourte = (s) => String(s || "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
 function carteElement(e) {
   const ouvrir = () => (peutAgir() ? editerElement(e) : null);
-  return h(peutAgir() ? "button" : "article", { classe: "feuillet element-carte" + (e.actif === false ? " retire" : "") + (e._attente ? " en-attente" : ""), type: peutAgir() ? "button" : null, onclick: peutAgir() ? ouvrir : null },
+  return avecVerrou(h(peutAgir() ? "button" : "article", { classe: "feuillet element-carte" + (e.actif === false ? " retire" : "") + (e._attente ? " en-attente" : ""), type: peutAgir() ? "button" : null, onclick: peutAgir() ? ouvrir : null },
     e.nouveau_movie3 ? h("span", { classe: "ruban-neuf" }, "Movie 3") : null,
     h("div", { classe: "element-tete" }, insigneImage(e, "element-icone"),
       h("div", { classe: "bloc" }, h("b", { classe: "element-nom" }, e.nom), e.nom_en ? h("span", { classe: "element-en" }, e.nom_en) : null)),
@@ -423,7 +447,7 @@ function carteElement(e) {
     h("div", { classe: "element-pied" },
       e.actif === false ? tampon("Retiré", "encre", true) : e.statut === "a_verifier" ? tampon("À vérifier", "ambre", true) : tampon("Confirmé", "vert", true),
       e._attente ? tampon(e._attente === "conflit" ? "Conflit" : "En attente", "", true) : null,
-      e.source ? h("span", { classe: "meta une-ligne", title: e.source }, "Source : " + sourceCourte(e.source)) : null));
+      e.source ? h("span", { classe: "meta une-ligne", title: e.source }, "Source : " + sourceCourte(e.source)) : null)), "element:" + e.type + ":" + e.cle);
 }
 async function editerElement(e, typeParDefaut) {
   const cat = await charger("catalogue");
@@ -431,6 +455,12 @@ async function editerElement(e, typeParDefaut) {
   const types = typesTries(cat);
   const v = e ? Object.assign({}, e) : { type: typeParDefaut || (types[0] && types[0].cle) || "", nom: "", nom_en: "", description: "", categorie: "", rarete: "", icone: "", statut: "a_verifier", source: "", ordre: 0, actif: true, nouveau_movie3: false };
   const p = pancarte({ titre: e ? "« " + e.nom + " »" : "Ajouter un élément", sous: e ? (types.find((t) => t.cle === e.type) || {}).nom : "Uniquement ce qui existe dans le jeu.", icone: "catalogue", taille: "large" });
+  if (e) protegerEditeur(p, "element:" + e.type + ":" + e.cle, "l'élément « " + e.nom + " »", { relire: async () => {
+    perime("catalogue");
+    const frais = element(await charger("catalogue", { forcer: true }), e.type, e.cle);
+    if (!frais) throw new Error("élément introuvable");
+    await editerElement(frais);
+  } });
   const icZone = h("div", { classe: "rangee icone-choix" });
   const majIcone = () => {
     remplacer(icZone, insigneImage({ icone: v.icone, nom: v.nom || "?", type: v.type }, "element-icone grand"),
@@ -490,6 +520,7 @@ function televerser(fin) {
 async function gererTypes() {
   const cat = await charger("catalogue");
   const p = pancarte({ titre: "Les types du catalogue", sous: "Métiers, races, factions… : l'ordre est celui des insignes sur les affiches.", icone: "filtrer", taille: "large" });
+  protegerEditeur(p, "catalogue:types", "les types du catalogue", { relire: async () => { perime("catalogue"); await charger("catalogue", { forcer: true }); await gererTypes(); } });
   const zone = h("div", { classe: "registre" });
   const ligne = (t) => {
     const nom = saisie({ value: t.nom || "", maxlength: 60, "aria-label": "Nom" });
@@ -617,7 +648,7 @@ function blocReglagesMetiers(M, rolesD, apres) {
       : d.non_membres ? h("p", { classe: "meta alerte-texte" }, "« " + sansEmoji(d.nom) + " » : " + compte(d.non_membres, "personne hors du clan l'a", "personnes hors du clan l'ont") + " — " + (d.non_membres > 1 ? "elles le perdront" : "elle le perdra") + " à la prochaine vérification.")
         : null).filter(Boolean);
   const derniere = M.derniere_reconciliation && M.derniere_reconciliation.quand ? M.derniere_reconciliation : null;
-  return h("div", { classe: "cadre pile serree" }, h("h3", {}, "Les réglages"),
+  return zoneReglagesMetiers(apres, h("div", { classe: "cadre pile serree" }, h("h3", {}, "Les réglages"),
     ...alertes,
     interrupteur("Attribution automatique des rôles de métier", v.auto, (x) => { v.auto = x; etat_(); }),
     h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Nombre de métiers par membre"),
@@ -636,7 +667,12 @@ function blocReglagesMetiers(M, rolesD, apres) {
       action("Créer les rôles manquants", "ajouter", "rell/metiers/installer", "Créer les rôles manquants ?",
         "Un rôle est créé pour chaque métier qui n'en a pas encore" + (v.auto ? ", puis donné à ceux qui ont ce métier (attribution automatique)." : ". L'attribution automatique est coupée : personne ne le reçoit pour l'instant."), "Rôles des métiers"),
       action("Vérifier maintenant", "synchro", "rell/metiers/reconcilier", "Vérifier tous les rôles maintenant ?",
-        "Chaque membre est comparé à son affiche : les rôles en trop sont retirés (métiers abandonnés, départs du clan)" + (v.auto ? " et les rôles manquants rendus." : ". L'attribution automatique est coupée : les rôles manquants ne sont pas rendus."), "Vérification")));
+        "Chaque membre est comparé à son affiche : les rôles en trop sont retirés (métiers abandonnés, départs du clan)" + (v.auto ? " et les rôles manquants rendus." : ". L'attribution automatique est coupée : les rôles manquants ne sont pas rendus."), "Vérification"))));
+}
+/** Présence en direct : les réglages se prennent à la première modification ; pris ailleurs, ils se figent. */
+function zoneReglagesMetiers(apres, bloc) {
+  protegerZone(bloc, "metiers:reglages", "les réglages des rôles de métier", { des: "saisie", relire: () => apres(null) });
+  return bloc;
 }
 
 function ligneRole(t, e, lien, rolesD, nbMembres, autoMetiers, recharger) {
@@ -670,9 +706,12 @@ function ligneRole(t, e, lien, rolesD, nbMembres, autoMetiers, recharger) {
   ecouter("reseau", etatBouton);
   const roleLie = lien ? h("span", { classe: "role-lie" }, h("i", { classe: "pastille-couleur", vars: { "--teinte": lien.couleur || "#6e553f" } }), sansEmoji(lien.role_nom || "") || "rôle")
     : h("span", { classe: "role-lie a-venir" }, autoMetiers ? "sera créé au premier choix" : "aucun rôle");
-  return h("div", { classe: "registre-ligne" },
+  const ligne = h("div", { classe: "registre-ligne" },
     h("div", { classe: "qui" }, insigneImage(e, "element-icone petit"), h("div", { classe: "bloc" }, h("b", {}, e.nom), roleLie)),
     choix,
     h("span", { classe: "num role-membres" }, nombre(nbMembres), h("span", { classe: "meta" }, nbMembres > 1 ? " membres" : " membre")),
     h("div", { classe: "rangee" }, enregistrer, lien ? null : creer));
+  // Présence en direct : la ligne se prend au premier geste ; prise ailleurs, elle se fige sous le cadenas.
+  protegerZone(ligne, "role:" + t.cle + ":" + e.cle, "le rôle du métier « " + e.nom + " »", { des: "saisie", compact: true, relire: recharger });
+  return avecVerrou(ligne, "role:" + t.cle + ":" + e.cle);
 }
