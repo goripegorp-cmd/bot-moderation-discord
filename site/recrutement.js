@@ -5,18 +5,18 @@
 // direction coche « Juste » ou « Faux » ; 100 % exigés ; puis Accepter, Refuser ou Renvoyer d'autres questions.
 // Questionnaire : la banque (modifiable), les modèles, les liens donnés au candidat, les réglages.
 
-import { h, icone, date, depuis, nombre, sansEmoji, contient, norm, maintenant, uuid, remplacer, moisDe, libelleMois, compte, copie, telephone, retarder, quantite, ajouter } from "./dom.js";
-import { etat, P, peutAgir, aller, filtres, enLigne, emettre, ecouter, nommerOnglets } from "./noyau.js";
+import { h, icone, date, depuis, nombre, sansEmoji, contient, norm, maintenant, uuid, remplacer, compte, copie, telephone, retarder, quantite, ajouter } from "./dom.js";
+import { etat, P, peutAgir, filtres, enLigne, emettre, ecouter } from "./noyau.js";
 import { lire, poster, action } from "./api.js";
 import { charger, vue as vueJeu, perime } from "./donnees.js";
 import { mettreEnFile, opsDe } from "./hors_ligne.js";
 import {
   bouton, boutonIcone, avatar, pastille, tampon, vide, tuile, tuiles, puces, segment, recherche, liste, champ, saisie, zoneTexte, interrupteur,
-  caseACocher, radios, confirmer, pancarte, toast, section, squelettes, groupe, bandeau, compteur, nomDe, majBoutonsReseau, barres, ENCRES,
+  caseACocher, radios, confirmer, pancarte, toast, section, squelettes, groupe, bandeau, nomDe, majBoutonsReseau,
 } from "./ui.js";
-import { ouvrirFiche, reponses, transcriptEnLigne, STATUTS_CAND, etapeCandidature, chargerSuivi } from "./fiche.js";
+import { ouvrirFiche, reponses, transcriptEnLigne } from "./fiche.js";
 import { indisponible } from "./discord.js";
-import { ligne, lignes, groupes, outilsGroupes, badgeRestreint, quandLigne, avance } from "./rangement.js";
+import { ligne, lignes, groupes, outilsGroupes, avance } from "./rangement.js";
 import { modifierTexte, choisirTextes } from "./textes.js";
 import { avecVerrou, protegerEditeur, protegerZone, siLibre } from "./direct.js";
 
@@ -58,9 +58,6 @@ const indicationDe = (q) => (q.indication && typeof q.indication === "object" ? 
 const etapeDossier = (D) => Number(D.etape) || (/^(etape1|refus_etape1)$/.test(String(D.etape || "")) ? 1 : (D.envois || []).length ? 2 : 1);
 const paires = (x) => (Array.isArray(x) ? x : x && typeof x === "object" ? Object.entries(x) : []);
 const lignesMessage = (t) => String(t || "").split("\n").map((l) => l.replace(/^-#\s*/, ""));
-// L'étape d'une candidature : la même règle partout (aperçu, pastille, cette page) — `fiche.etapeCandidature` lit le
-// suivi du recrutement, sinon l'étape portée par les données. « decidee » : décidée, le ticket se ferme dans un instant.
-const etatCandidature = (c) => etapeCandidature(c);
 
 /** Une simple aide à la correction : identique, proche ou différent (casse, accents, espaces, ponctuation, distance). */
 export function proximite(reponse, attendue, variantes) {
@@ -90,120 +87,8 @@ function levenshtein(a, b) {
 }
 const INDICATIONS = { identique: ["Identique", "vert"], proche: ["Proche", "ambre"], different: ["Différent", ""], vide: ["Sans réponse", "encre"] };
 
-// ═══ LA RUBRIQUE ════════════════════════════════════════════════════════
-const SOUS = nommerOnglets("site.sous.equipage.candidatures", [["en-cours", "En cours", "candidatures"], ["decidees", "Décidées", "coffre"], ["questionnaire", "Questionnaire", "parchemin"]]);
-export function candidatures(vue, ctx) {
-  const sous = SOUS.some(([k]) => k === ctx.sous) ? ctx.sous : "en-cours";
-  const onglets = h("div", { classe: "sous-onglets", role: "tablist", "aria-label": "Candidatures" });
-  const zone = h("div", { classe: "pile" });
-  ajouter(vue, [onglets, zone]);
-  let ctrl = null;
-  const majOnglets = () => {
-    const d = etat.d;
-    const nb = d ? { "en-cours": d.en_cours.length, decidees: d.candidats.length } : {};
-    const chaud = d ? d.en_cours.filter((c) => ["decider", "corriger"].includes(etatCandidature(c))).length : 0;
-    remplacer(onglets, ...SOUS.map(([k, l, ic]) => h("a", { classe: "etiquette", role: "tab", href: "#equipage/candidatures/" + k, "aria-selected": String(k === sous) },
-      icone(ic), l, nb[k] ? h("span", { classe: "compteur" + (k === "en-cours" && chaud ? " chaud" : " calme") }, String(nb[k])) : null)));
-  };
-  majOnglets();
-  if (sous === "questionnaire") ctrl = questionnaire(zone);
-  else if (sous === "decidees") ctrl = decidees(zone);
-  else ctrl = enCours(zone);
-  return { maj: () => { majOnglets(); ctrl && ctrl.maj && ctrl.maj(); }, majJeu: () => ctrl && ctrl.majJeu && ctrl.majJeu(), majFile: () => ctrl && ctrl.majFile && ctrl.majFile() };
-}
-
-// ─── En cours ───────────────────────────────────────────────────────────────
-function enCours(zone) {
-  const f = filtres("cand-encours", { q: "", etape: "tous" });
-  const resultats = h("div", { classe: "pile" });
-  remplacer(zone, h("div", { classe: "outils" }, recherche(f.q, "Nom, pseudo, réponse…", (q) => { f.q = q; maj(); }),
-    bouton("La banque de questions", { classe: "discret", icone: "parchemin", onclick: () => aller("equipage", "candidatures", "questionnaire") })), resultats);
-  // Les étapes, dans l'ordre de l'urgence : un groupe chacune (les plus anciennes en tête), les puces pour n'en voir qu'une.
-  const ETAPES = [["corriger", "Réponses à corriger", "plume", "#8e2a24"], ["decider", "Étape 1 à décider", "candidatures", "#a8641c"], ["attente", "Questions envoyées", "minuteur", "#1f4e5a"]];
-  const maj = () => {
-    const d = etat.d;
-    if (!d) { remplacer(resultats, indisponible()); return; }
-    const l = d.en_cours.filter((c) => contient([c.nom, c.pseudo, c.id, ...(c.reponses || []).flat()].join(" "), f.q));
-    const parEtat = { decider: [], corriger: [], attente: [] };
-    l.forEach((c) => { const e = etatCandidature(c); if (parEtat[e]) parEtat[e].push(c); });   // « decidee » : plus en cours
-    if (f.etape !== "tous" && !parEtat[f.etape]) f.etape = "tous";
-    const zoneG = h("div", { classe: "groupes-zone" }, groupes(ETAPES.filter(([k]) => parEtat[k].length && (f.etape === "tous" || f.etape === k)).map(([k, titre, ic]) => ({
-      cle: "cand-" + k, titre, icone: ic, compte: parEtat[k].length, chaud: k !== "attente",
-      contenu: () => lignes("cand-" + k, parEtat[k].slice().sort((a, b) => (a.ouvert || 0) - (b.ouvert || 0)), ligneCandidat),
-    })), { ouverts: 3 }));
-    remplacer(resultats,
-      tuiles(tuile({ cle: "r1", lib: "Étape 1 à décider", val: parEtat.decider.length, icone: "candidatures", teinte: "#a8641c" }),
-        tuile({ cle: "r2", lib: "Réponses à corriger", val: parEtat.corriger.length, icone: "plume", teinte: "#8e2a24" }),
-        tuile({ cle: "r3", lib: "Questions envoyées", val: parEtat.attente.length, icone: "minuteur", sous: "en attente du candidat", teinte: "#1f4e5a" }),
-        tuile({ cle: "r4", lib: "Écartées", val: d.ecartes || 0, icone: "coffre", sous: "sans décision, vides, doublons", teinte: "#4a5560" })),
-      puces([["tous", "Toutes", l.length], ...ETAPES.map(([k, lib, , teinte]) => [k, lib, parEtat[k].length, teinte])], f.etape, (v) => { f.etape = v; maj(); }, "Étapes"),
-      h("p", { classe: "aide avance" }, "Deux étapes : le questionnaire d'ouverture (étape 1), puis les questions choisies ici dans la banque (étape 2). Le candidat n'apprend jamais où il s'est trompé ; c'est toi qui corriges. 100 % de réponses justes exigés."),
-      l.length ? zoneG : vide("Aucune candidature en cours", "Les nouvelles candidatures apparaissent ici dès l'ouverture du ticket.", "candidatures"));
-  };
-  maj();
-  chargerSuivi();   // l'étape la plus fraîche : la liste se redessine à son arrivée (« jeu »)
-  return { maj, majJeu: maj };
-}
-/** Une candidature en cours : le candidat, son ticket, son étape ; le dossier au clic. */
-function ligneCandidat(c) {
-  const e = etatCandidature(c);
-  // Court : le groupe dit déjà l'étape (« Étape 1 à décider », « Réponses à corriger », « Questions envoyées »).
-  const [lib, coul] = { decider: ["À décider", "ambre"], corriger: ["À corriger", ""], attente: ["En attente", "mer"],
-    decidee: ["Décidée", "encre"] }[e] || ["Candidature", "encre"];
-  return avecVerrou(ligne({
-    visuel: avatar(c, "p"), titre: nomDe(c), sous: "Ticket #" + c.ticket + " · ouvert " + depuis(c.ouvert) + " · " + (c.pris_par ? "pris par " + sansEmoji(c.pris_par) : "pas encore pris"),
-    badges: [tampon(lib, coul, true), badgeRestreint(c.id)], ...quandLigne(c.ouvert), etat: e === "corriger" ? "alerte" : e === "decider" ? "chaude" : null,
-    ouvrir: () => ouvrirDossier(c.ticket), libelleOuvrir: "Ouvrir le dossier de " + nomDe(c), donnees: { ticket: c.ticket },
-  }), "dossier:" + c.ticket);
-}
-
-// ─── Décidées ───────────────────────────────────────────────────────────────
-function decidees(zone) {
-  const f = filtres("cand-decidees", { q: "", statut: "tous", tri: "recent" });
-  const resultats = h("div", { classe: "pile" });
-  const changer = () => { resetPages("cand"); maj(); };
-  remplacer(zone, h("div", { classe: "outils" }, recherche(f.q, "Nom, identifiant, motif…", (q) => { f.q = q; changer(); }),
-    avance(liste({ valeur: f.tri, label: "Tri", options: [{ v: "recent", l: "Plus récentes" }, { v: "ancien", l: "Plus anciennes" }, { v: "nom", l: "Nom A → Z" }], changer: (v) => { f.tri = v; changer(); } }))), resultats);
-  const maj = () => {
-    const d = etat.d;
-    if (!d) { remplacer(resultats, indisponible()); return; }
-    const toutes = d.candidats;
-    const nb = { tous: toutes.length, acceptes: toutes.filter((c) => c.statut === "acceptes").length, refuses: toutes.filter((c) => c.statut === "refuses").length };
-    let l = toutes.filter((c) => (f.statut === "tous" || c.statut === f.statut) && contient([c.nom, c.pseudo, c.id, c.motif, c.pris_par, ...(c.reponses || []).flat()].join(" "), f.q));
-    const cle = (c) => c.ferme || c.ouvert || 0;
-    l.sort(f.tri === "nom" ? (a, b) => nomDe(a).localeCompare(nomDe(b), "fr") : f.tri === "ancien" ? (a, b) => cle(a) - cle(b) : (a, b) => cle(b) - cle(a));
-    const parMois = new Map();
-    l.forEach((c) => { const k = cle(c) ? moisDe(cle(c)) : "inconnu"; if (!parMois.has(k)) parMois.set(k, []); parMois.get(k).push(c); });
-    const stats = {};
-    toutes.forEach((c) => { if (!c.ferme) return; const k = moisDe(c.ferme); (stats[k] = stats[k] || { acceptes: 0, refuses: 0 })[c.statut] = ((stats[k] || {})[c.statut] || 0) + 1; });
-    const taux = nb.acceptes + nb.refuses ? Math.round(100 * nb.acceptes / (nb.acceptes + nb.refuses)) : 0;
-    // Un mois par groupe (le plus récent ouvert), une ligne par candidature.
-    const zoneG = h("div", { classe: "groupes-zone" }, groupes([...parMois.entries()].map(([k, g]) => ({ titre: k === "inconnu" ? "Date inconnue" : libelleMois(k), compte: g.length,
-      info: quantite(g.filter((c) => c.statut === "acceptes").length, "acceptée(s)"), cle: "cand-m-" + k, contenu: () => lignes("cand-m-" + k, g, ligneDecidee) })), { ouverts: 1, forcer: !!f.q }));
-    remplacer(resultats,
-      tuiles(tuile({ cle: "d1", lib: "Acceptés", val: nb.acceptes, icone: "succes", teinte: "#3f6b3a" }), tuile({ cle: "d2", lib: "Refusés", val: nb.refuses, icone: "annuler", teinte: "#8e2a24" }),
-        tuile({ cle: "d3", lib: "Taux d'acceptation", val: taux, suffixe: " %", icone: "boussole", teinte: "#1f4e5a" })),
-      h("div", { classe: "rangee entre" }, puces([["tous", "Toutes", nb.tous], ["acceptes", "Acceptés", nb.acceptes, "#3f6b3a"], ["refuses", "Refusés", nb.refuses, "#8e2a24"]], f.statut, (v) => { f.statut = v; changer(); }, "Décision"),
-        parMois.size > 1 ? outilsGroupes(zoneG) : null),
-      l.length ? zoneG : vide("Rien ici", "Change le filtre ou la recherche."),
-      groupe({ titre: "Tendances", cle: "cand-tendances", icone: "carte", classe: "avance" }, () => h("div", { classe: "cadre" }, h("h3", {}, "Candidatures par mois"), h("p", { classe: "aide" }, "Selon la date de la décision."),
-        barres(Object.keys(stats).sort().slice(-12), stats, [["acceptes", ENCRES.vert, "Acceptés"], ["refuses", ENCRES.cire, "Refusés"]], "Les mois apparaîtront avec les premières décisions."))));
-  };
-  maj();
-  return { maj };
-}
-/** Une candidature décidée : la décision, le motif, qui l'a traitée ; la fiche au clic. */
-function ligneDecidee(c) {
-  const [lib] = STATUTS_CAND[c.statut] || [c.statut, null];
-  return ligne({
-    visuel: avatar(c, "p"), titre: nomDe(c),
-    sous: [c.pseudo ? "@" + c.pseudo : "", c.motif || "", c.pris_par || c.ferme_par ? "traité par " + sansEmoji(c.pris_par || c.ferme_par) : "",
-      (c.candidatures || []).length > 1 ? c.candidatures.length + " candidatures" : ""].filter(Boolean).join(" · "),
-    badges: [tampon(lib, c.statut === "acceptes" ? "vert" : "", true), c.parti ? pastille("A quitté le serveur", "#4a5560") : null, badgeRestreint(c.id)],
-    ...quandLigne(c.ferme || c.ouvert), etat: c.parti ? "eteinte" : null,
-    ouvrir: () => ouvrirFiche(c.id, "candidatures"), libelleOuvrir: "Ouvrir la fiche de " + nomDe(c), donnees: { membre: c.id },
-  });
-}
+// La rubrique des candidatures est dans La Capitainerie, « Demande de recrutement » (recrutement_zone.js, 26/10/2026) :
+// ce module garde le dossier d'origine, la correction, la banque, les modèles et le choix des questions.
 
 // ═══ LE DOSSIER D'UN CANDIDAT ═══════════════════════════════════════════
 let dossierOuvert = null;
@@ -298,7 +183,7 @@ function blocEnvoi(etatD, D, e, courant) {
   corps.push(h("ol", { classe: "correction-liste" }, qs.map((q, i) => carteCorrection(etatD, e, q, i, courant && etatD.peutCorriger !== false))));
   return h("section", { classe: "cadre pile envoi" + (courant ? " courant" : "") }, h("h3", {}, courant ? "Étape 2 · la correction" : "Correction"), corps);
 }
-function carteCorrection(etatD, e, q, i, modifiable = true) {
+export function carteCorrection(etatD, e, q, i, modifiable = true) {
   const variantes = qVariantes(q);
   const rc = repCandidat(q), attendue = repAttendue(q) || qReponse(q), juste = justeDe(q);
   const indic = indicationDe(q);
@@ -309,7 +194,7 @@ function carteCorrection(etatD, e, q, i, modifiable = true) {
     await mettreEnFile("recrutement/corriger", { envoi: e.id, question: q.id, juste: nouvelle }, { genre: "correction", cle: e.id + ":" + q.id, resume: "Correction de la question " + (i + 1) + (nouvelle === true ? " : juste" : nouvelle === false ? " : faux" : " : à revoir") });
     q.juste = nouvelle;
     if (q.correction !== undefined) q.correction = Object.assign({}, q.correction || {}, { juste: nouvelle });
-    rendreDossier(etatD);
+    if (etatD.rendre) etatD.rendre(false); else rendreDossier(etatD);
   };
   return h("li", { classe: "correction" + (juste === true ? " juste" : juste === false ? " faux" : "") + (q._attente ? " en-attente" : "") },
     h("div", { classe: "correction-tete" }, h("span", { classe: "correction-num" }, String(i + 1)), h("b", { classe: "correction-question" }, q.question || qTexte(q)), q.theme ? h("span", { classe: "meta" }, nomTheme(vueJeu("banque"), q.theme)) : null),
@@ -502,7 +387,7 @@ async function choisirHorsDossier(mode, depart, surValider, titre, m) {
 }
 
 // ═══ LE QUESTIONNAIRE (la banque, les modèles, les liens, les réglages) ═══
-function questionnaire(zone) {
+export function questionnaire(zone) {
   const f = filtres("questionnaire", { q: "", theme: "tous", diff: "0", statut: "tous", actives: "toutes" });
   const resultats = h("div", { classe: "pile" }, squelettes(3));
   const changer = () => { resetPages("bq"); maj(); };
@@ -550,9 +435,10 @@ function questionnaire(zone) {
           h("p", { classe: "aide" }, "Ce que le bot écrit dans le ticket : à toi de le dire à ta façon. Enregistré, un texte sert dès le message suivant."),
           h("div", { classe: "rangee" },
             bouton("Ce que lit le candidat", { classe: "p", icone: "plume", onclick: () => choisirTextes({ groupe: "recrutement", titre: "Ce que lit le candidat",
-              parties: ["Les messages au candidat", "L'accueil du ticket", "Le questionnaire de l'étape 2", "Les boutons et les formulaires"] }) }),
+              parties: ["Les messages au candidat", "L'ouverture d'une demande", "L'affiche du ticket", "Le questionnaire", "Le passage d'étape",
+                "Les boutons et les formulaires", "Les décisions (ticket et message privé)", "Quand quelque chose coince (pour la personne seule)"] }) }),
             bouton("La carte de l'équipe", { classe: "p", icone: "plume", onclick: () => choisirTextes({ groupe: "recrutement", titre: "La carte de l'équipe",
-              parties: ["La carte de l'équipe (dans le ticket)"] }) }))) },
+              parties: ["Le panneau de l'équipe (dans le ticket)", "L'aperçu de l'équipe (pour soi)", "Les chefs d'équipe (messages privés)"] }) }))) },
       ], { ouverts: 0 })));
     majBoutonsReseau(resultats);
   };

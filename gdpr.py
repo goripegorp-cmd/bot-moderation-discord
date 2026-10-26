@@ -99,6 +99,11 @@ DELETE_SUBJECT_KEEP_ACTOR = {
     "recrutement_suivi": {"subject": ["candidat_id"], "actor": ["fermeture_par", "decide_par"]},
     "recrutement_envois": {"subject": ["candidat_id"], "actor": ["envoye_par"]},
     "rell_affiches": {"subject": ["membre_id"], "actor": ["cree_par", "maj_par", "retire_par"]},
+    # 26/10/2026 — recrutement configurable : liste noire, éliminations d'office, chefs d'équipe
+    "recrutement_liste_noire": {"subject": ["membre_id"], "actor": ["par", "leve_par"]},
+    "recrutement_eliminations": {"subject": ["membre_id"], "actor": []},
+    "recrutement_chef_candidatures": {"subject": ["membre_id"], "actor": ["decide_par"]},
+    "recrutement_chefs": {"subject": ["membre_id"], "actor": ["accepte_par"]},
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -129,6 +134,11 @@ ANONYMIZE = {
     "equipes": {"ids": ["chef_id", "maj_par"], "redact": []},
     # 26/10/2026 — Textes & noms : qui a réécrit un texte (le texte reste, l'auteur est neutralisé)
     "site_textes": {"ids": ["maj_par"], "redact": []},
+    # 26/10/2026 — recrutement configurable : qui a réglé un parcours, une question ou un rôle de chef
+    "recrutement_parcours": {"ids": ["maj_par"], "redact": []},
+    "recrutement_chef_questions": {"ids": ["cree_par", "maj_par"], "redact": []},
+    "recrutement_chef_gabarits": {"ids": ["maj_par"], "redact": []},
+    "recrutement_chef_roles": {"ids": ["maj_par"], "redact": []},
 }
 
 # Colonnes HMAC (pas un user_id brut) : agies seulement si l'appelant fournit hmac_user.

@@ -18,8 +18,8 @@ const PAR_GROUPE = 6;
 // Les sous-onglets, trouvés comme les rubriques.
 const SOUS = [["port", "salons", "questions", "Questions des salons"], ["port", "salons", "idees", "Idées des membres"],
   ["port", "salons", "sondages", "Sondages"], ["port", "salons", "entraide", "Entraide et trade"], ["port", "salons", "annonces", "Annonces du serveur"],
-  ["port", "salons", "droits", "Droits des salons"], ["equipage", "candidatures", "questionnaire", "Banque de questions du recrutement"],
-  ["equipage", "candidatures", "decidees", "Candidatures décidées"], ["equipage", "annonces", "brouillons", "Brouillons d'annonces"],
+  ["port", "salons", "droits", "Droits des salons"], ["capitainerie", "recrutement", "questions", "Banque de questions du recrutement"],
+  ["capitainerie", "recrutement", "candidatures", "Candidatures décidées"], ["equipage", "annonces", "brouillons", "Brouillons d'annonces"],
   ["equipage", "annonces", "a-venir", "Événements à venir"], ["equipage", "annonces", "publiees", "Annonces publiées"],
   ["equipage", "annonces", "passes", "Publications passées"]];
 
@@ -146,7 +146,7 @@ function chercher(brut) {
 function ouvrirQuestion(x) {
   const f = filtres("questionnaire", {});
   Object.assign(f, { q: norm(String(x.question || x.texte || "").trim()).slice(0, 120), theme: "tous", diff: "0", statut: "tous", actives: "toutes" });
-  aller("equipage", "candidatures", "questionnaire");
+  aller("capitainerie", "recrutement", "questions");
 }
 function ouvrirElementCatalogue(e) {
   if (peutAgir()) { ouvrirElement(e); return; }

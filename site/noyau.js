@@ -33,7 +33,6 @@ export const CATEGORIES = [
     rubriques: [
       { cle: "membres", titre: "Équipage", icone: "membres", phrase: "Les membres du clan, leur présence, les rappels d'inactivité." },
       { cle: "fiches", titre: "Fiches techniques", icone: "fiches", phrase: "Chaque membre et son affiche : par métier, par grade, de A à Z." },
-      { cle: "candidatures", titre: "Candidatures", icone: "candidatures", phrase: "Le recrutement en deux étapes : décider, choisir les questions, corriger." },
       { cle: "tickets", titre: "Tickets du clan", icone: "tickets", phrase: "Les tickets Rell Seas du clan, ouverts et fermés." },
       { cle: "annonces", titre: "Annonces & événements", icone: "annonces", phrase: "Composer pour le salon Info : événements avec minuteur et réponses, annonces, métiers, listing." },
     ],
@@ -41,6 +40,7 @@ export const CATEGORIES = [
   {
     cle: "capitainerie", titre: "La Capitainerie", court: "Capitainerie", sous: "Fondateur & direction", icone: "capitainerie",
     rubriques: [
+      { cle: "recrutement", titre: "Demande de recrutement", icone: "candidatures", phrase: "Les demandes et leurs étapes, les chefs d'équipe, les questions, les réglages : tout le recrutement au même endroit." },
       { cle: "affiches", titre: "Affiches", icone: "affiches", phrase: "L'atelier des avis de recherche de l'équipage : créer, modifier, ranger par métier." },
       { cle: "catalogue", titre: "Catalogue RELL Seas", icone: "catalogue", phrase: "Tout ce qui existe dans le jeu, et seulement cela : types, éléments, icônes officielles." },
       { cle: "roles", titre: "Rôles & métiers", icone: "roles", phrase: "Un rôle Discord par métier, donné tout seul si tu le veux." },
@@ -145,22 +145,33 @@ export const aPart = (id) => !!(etat.d && (etat.d.a_part || []).includes(String(
 
 // ─── La navigation (ancre) ──────────────────────────────────────────────────
 // Forme : #port/journal · #equipage/candidatures/questionnaire · &membre=123 (fiche ouverte) · ancien #membre=123
+// 26/10/2026 : « Candidatures » a quitté l'Équipage pour la Capitainerie (« Demande de recrutement ») — les anciennes
+// adresses y mènent encore (signets, raccourcis, liens donnés).
+const ALIAS = { "equipage/candidatures": ["capitainerie", "recrutement", { questionnaire: "questions", decidees: "candidatures", "en-cours": "candidatures" }] };
+function suivreAlias(morceaux) {
+  const a = ALIAS[morceaux.slice(0, 2).join("/")];
+  return a ? [a[0], a[1], ...(morceaux[2] ? [a[2][morceaux[2]] || morceaux[2]] : [])] : morceaux;
+}
 export function lireAncre() {
   const brut = location.hash.replace(/^#/, "");
   const [chemin, ...reste] = brut.split("&");
   const params = new URLSearchParams(reste.join("&"));
   if (chemin.includes("=")) for (const [k, v] of new URLSearchParams(chemin)) params.set(k, v);
-  const morceaux = chemin.includes("=") ? [] : chemin.split("/").filter(Boolean);
+  const bruts = chemin.includes("=") ? [] : chemin.split("/").filter(Boolean);
+  const morceaux = suivreAlias(bruts);
   const cat = CATEGORIES.some((c) => c.cle === morceaux[0]) ? morceaux[0] : null;
   const rub = cat && categorie(cat).rubriques.some((r) => r.cle === morceaux[1]) ? morceaux[1] : null;
   const membre = params.get("membre") || "";
   const ancien = params.get("onglet") || "";
-  return { cat, rub, sous: morceaux[2] || "", membre: /^\d{5,22}$/.test(membre) ? membre : "", ancien };
+  const recrutement = params.get("recrutement") || "";   // « Choisir sur le site » (Discord) : le dossier de ce ticket
+  return { cat, rub, sous: morceaux[2] || "", membre: /^\d{5,22}$/.test(membre) ? membre : "", ancien,
+    recrutement: /^\d{1,12}$/.test(recrutement) ? recrutement : "", alias: morceaux !== bruts };
 }
 export function ancre(cat, rub, sous, extra) {
   return "#" + [cat, rub, sous].filter(Boolean).join("/") + (extra ? "&" + extra : "");
 }
 export function aller(cat, rub, sous) {
+  [cat, rub, sous] = suivreAlias([cat, rub, sous].filter(Boolean));
   const a = ancre(cat, rub || categorie(cat).rubriques[0].cle, sous);
   if (location.hash !== a) location.hash = a;
   else emettre("route:meme");
