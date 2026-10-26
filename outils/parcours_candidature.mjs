@@ -129,8 +129,11 @@ async function attendre(fn, ms = 15000, pas = 250) {
 
 // ─── Les gestes ─────────────────────────────────────────────────────────────
 const VISIBLE = "(x) => x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden' && !x.closest('[inert]')";
-const cliquer = (n, selecteur, texte) => n.evaluer(`(() => { const vis = ${VISIBLE};
-  const el = [...document.querySelectorAll(${JSON.stringify(selecteur)})].find((x) => vis(x) && !x.disabled && (x.textContent || x.getAttribute("aria-label") || "").replace(/\\s+/g, " ").includes(${JSON.stringify(texte)}));
+//  « dialog[open] … » : dans la DERNIÈRE fenêtre ouverte (une confirmation par-dessus un dossier).
+const cliquer = (n, selecteur, texte) => n.evaluer(`(() => { const vis = ${VISIBLE}; const sel = ${JSON.stringify(selecteur)};
+  const racine = sel.startsWith("dialog[open] ") ? [...document.querySelectorAll("dialog[open]")].pop() : document;
+  if (!racine) return false;
+  const el = [...racine.querySelectorAll(sel.startsWith("dialog[open] ") ? sel.slice(13) : sel)].find((x) => vis(x) && !x.disabled && (x.textContent || x.getAttribute("aria-label") || "").replace(/\\s+/g, " ").includes(${JSON.stringify(texte)}));
   if (!el) return false; el.scrollIntoView({ block: "center" }); el.click(); return true; })()`);
 /** La page du candidat : sa vue, le titre de l'étape, le petit mot « Enregistré », ses champs, un débordement. */
 const pageC = (C) => C.evaluer(`(() => { const t = document.querySelector('#etape-titre, #attente-titre, #merci-titre, #message-titre, #relire-titre');
@@ -166,17 +169,56 @@ async function revenir(C) {
   await C.evaluer("(() => { dispatchEvent(new Event('focus')); return true; })()");
 }
 const ouvrirEtapeSuivante = () => fetch(BASE + "/tableau/demo/etape_suivante?ticket=" + TICKET).then((r) => r.json());
-
-/** Le dossier du ticket (la direction) : la liste, la ligne du ticket, puis le bloc « En direct ». */
-async function ouvrirDossier(D, ticket) {
-  await D.s("Page.navigate", { url: SITE + "#equipage/candidatures" });
-  if (!await attendre(() => D.evaluer("!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 15000)) return false;
-  await D.evaluer("(() => { for (const g of document.querySelectorAll('#contenu details.groupe')) g.open = true; return true; })()");
+/** Une adresse de démonstration du site local (le faux Discord, le vrai chemin du bot) : sa réponse JSON. */
+const demo = (chemin) => fetch(BASE + "/tableau/demo/" + chemin, { cache: "no-store" }).then((r) => r.json());
+/** Les messages du bot dans le fil d'un ticket, tels qu'ils sont maintenant (le faux Discord). */
+const messagesTicket = async (tid) => ((await demo("discord?ticket=" + tid)).messages || []);
+/** Une écriture du site de la direction, par la session de D (la même route que ses boutons). */
+const posterD = (D, nom, corps) => D.evaluer(`fetch(${JSON.stringify(SITE + "api/")} + ${JSON.stringify(nom)}, { method: "POST", credentials: "same-origin",
+  headers: { "X-Tableau": "1", "Content-Type": "application/json" }, body: ${JSON.stringify(JSON.stringify(corps))} }).then(async (r) => ({ status: r.status, corps: await r.json() }))`);
+const fermerFenetres = (D) => D.evaluer("(() => { for (const d of [...document.querySelectorAll('dialog[open]')].reverse()) d.close(); return true; })()");
+/** Une page du site de la direction, relue (on passe par une autre : la même adresse ne redessinerait rien). */
+async function allerD(D, ancre) {
+  await fermerFenetres(D).catch(() => null);
+  await D.s("Page.navigate", { url: SITE + "#accueil/attente" });
+  await pause(300);
+  await D.s("Page.navigate", { url: SITE + ancre });
+  const pret = await attendre(() => D.evaluer("!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 15000);
   await pause(500);
-  const ok = await D.evaluer(`(() => { const l = [...document.querySelectorAll('.lc-clic, .feuillet.lien')].find((x) => x.textContent.includes('Ticket #${ticket} '));
-    if (!l) return false; l.click(); return true; })()`);
-  if (!ok) return false;
+  return pret;
+}
+/** Ouvre la ligne `selecteur` d'une liste (ses groupes dépliés), puis attend la fenêtre. */
+async function ouvrirLigne(D, selecteur, attendu) {
+  const ok = await attendre(() => D.evaluer(`(() => { for (const g of document.querySelectorAll('#contenu details.groupe')) g.open = true;
+    const li = document.querySelector(${JSON.stringify(selecteur)}); const b = li && li.querySelector('.lc-ouvrir');
+    if (!b) return false; b.scrollIntoView({ block: 'center' }); b.click(); return true; })()`), 10000);
+  return ok && attendre(() => D.evaluer(`!!document.querySelector(${JSON.stringify("dialog[open] " + attendu)})`), 15000);
+}
+/** Le dossier d'un ticket (la zone « Demande de recrutement ») ; `direct` : attendre le bloc « En direct ». */
+async function ouvrirDossier(D, ticket, direct = true) {
+  if (!await allerD(D, "#capitainerie/recrutement")) return false;
+  if (!await ouvrirLigne(D, `#contenu li.lc[data-ticket="${ticket}"]`, ".dossier-tete")) return false;
+  if (!direct) return true;
   return attendre(() => D.evaluer("(() => { const d = document.querySelector('dialog[open] .en-direct'); if (!d || !d.querySelector('.en-direct-etape')) return false; d.scrollIntoView({ block: 'start' }); return true; })()"), 15000);
+}
+/** La candidature d'un chef d'équipe (Capitainerie › Demande de recrutement › Chefs), son bloc « En direct ». */
+async function ouvrirCandidatureChef(D, envoi, direct = true) {
+  if (!await allerD(D, "#capitainerie/recrutement/chefs")) return false;
+  if (!await ouvrirLigne(D, `#contenu li.lc[data-envoi="${envoi}"]`, ".correction-barre")) return false;
+  if (!direct) return true;
+  return attendre(() => D.evaluer("(() => { const d = document.querySelector('dialog[open] .en-direct'); if (!d || !d.querySelector('.en-direct-etape')) return false; d.scrollIntoView({ block: 'start' }); return true; })()"), 15000);
+}
+/** Coche « Juste » sur chaque réponse de la fenêtre ouverte (une à une : la page se redessine après chacune). */
+async function toutJuste(D) {
+  let n = 0;
+  for (let k = 0; k < 30; k++) {
+    const fait = await D.evaluer(`(() => { const b = [...document.querySelectorAll('dialog[open] .bouton-juste')].find((x) => x.getAttribute('aria-pressed') !== 'true' && !x.disabled);
+      if (!b) return false; b.scrollIntoView({ block: 'center' }); b.click(); return true; })()`);
+    if (!fait) break;
+    n += 1;
+    await pause(450);
+  }
+  return n;
 }
 const etatDirect = (D) => D.evaluer("(() => { const e = document.querySelector('dialog[open] .en-direct .en-direct-etat'); return e ? e.innerText.trim() : null; })()");
 const reponseDirect = (D, rang) => D.evaluer(`(() => { const li = [...document.querySelectorAll('dialog[open] .en-direct .en-direct-q')].find((x) => ((x.querySelector('.en-direct-num') || {}).textContent || '') === '${rang}');
@@ -390,6 +432,193 @@ async function principal() {
       const err = await envoyer(C, "Envoyer mes réponses");
       const f = await pageC(C);
       return { ok: !err && f.vue === "merci" && !f.debord, detail: err || `« ${p.titre} » (${Object.keys(p.zones).length} questions) → « ${f.titre} »` };
+    });
+
+    // ═══ LE VRAI CHEMIN D'UN TICKET : la demande, la fiche, l'approbation, la page, l'étape suivante, la décision ═══
+    //  Barbe-Grise (hors du clan, aucun ticket) ; à chaque instant, au plus deux messages du bot dans le ticket.
+    const CAND = 1002;
+    let tid = 0, eidT = 0, msgEtape = "";
+    const deuxAuPlus = async () => { const m = await messagesTicket(tid); return { m, ok: m.length <= 2 }; };
+    await etape("Le parcours du panneau : la fiche (étape 1), puis deux étapes de questions", [D], async () => {
+      const p = ((await D.api("recrutement/parcours")).panneaux || []).find((x) => x.panneau === "p1");
+      if (!p) return { ok: false, detail: "le panneau p1 n'a pas de parcours" };
+      const r = await posterD(D, "recrutement/parcours", { panneau: "p1", version: p.version || 0, mode: "approbation",
+        fiche: [{ titre: "Pseudo Roblox", type: "court", aide: "Ton pseudo exact" }],
+        gabarit: [{ titre: "Le jeu", consigne: "Quelques mots suffisent.", source: "tirage", nombre: 3 },
+          { titre: "Le clan", consigne: "Relis-toi avant d'envoyer.", source: "tirage", nombre: 2 }],
+        exigence: 100, delai: 20, liste_noire: true, metier: true });
+      return { ok: r.status === 200, detail: r.status === 200 ? "version " + r.corps.parcours.version + " · étapes : Le jeu (3), Le clan (2)" : JSON.stringify(r.corps).slice(0, 200) };
+    });
+
+    await etape("La demande : « Es-tu sûr ? », la fiche, puis l'affiche seule dans le ticket (le vrai chemin du bot)", [D], async () => {
+      const r = await demo(`recrutement/ouvrir?membre=${CAND}&pseudo=Parcours_Web`);
+      tid = Number(r.ticket || 0);
+      if (!tid) return { ok: false, detail: "pas de ticket : " + JSON.stringify(r).slice(0, 240) };
+      const m = await messagesTicket(tid);
+      return { ok: m.length === 1 && /Es-tu sûr/.test(r.confirmation || ""), detail: `ticket #${tid} · ${m.length} message(s) du bot · « ${((m[0] || {}).texte || "").slice(0, 90)}… »` };
+    });
+
+    await etape("L'approbation sur le site : l'étape 2 part dans le ticket (deux messages du bot, les questions sur SA page)", [D], async () => {
+      if (!await ouvrirDossier(D, tid, false)) return { ok: false, detail: "dossier du ticket #" + tid + " introuvable" };
+      if (!await cliquer(D, "dialog[open] button", "Approuver la demande")) return { ok: false, detail: "« Approuver la demande » absent" };
+      const d = await attendre(async () => { const x = await D.api("recrutement/dossier?ticket=" + tid); return x.etape === "etape2" && (x.envois || []).length ? x : null; }, 15000);
+      if (!d) return { ok: false, detail: "le serveur n'a pas l'envoi" };
+      const e = d.envois[d.envois.length - 1];
+      eidT = Number(e.id);
+      const m = await messagesTicket(tid);
+      msgEtape = ((m[1] || {}).id) || "";
+      const texte = (m[1] || {}).texte || "";
+      const ok = m.length === 2 && /Étape 2 sur 3/.test(texte) && !e.questions.some((q) => texte.includes(q.question)) && e.etape_ouverte === 1 && e.etape_fiche === 1;
+      return { ok, detail: `envoi ${eidT} · ${e.questions.length} questions en ${(e.etapes || []).length} étapes · ticket : ${m.length} messages · « ${texte.slice(0, 90)}… »` };
+    });
+
+    await etape("« Répondre au questionnaire » (le vrai bouton du ticket) : son lien, sa page sur son téléphone — aucun formulaire", [C], async () => {
+      const l = await demo("recrutement/lien?ticket=" + tid);
+      if (!l.url || l.formulaire) return { ok: false, detail: "pas de lien : " + JSON.stringify(l).slice(0, 240) };
+      await C.s("Page.navigate", { url: l.url });
+      const p = await attendre(async () => { const x = await pageC(C); return x.vue === "etape" && Object.keys(x.zones).length ? x : null; }, 15000);
+      return { ok: !!p && /^Étape 2 sur 3/.test(p.titre) && Object.keys(p.zones).length === 3 && !p.debord,
+        detail: p ? `lu pour lui seul : « ${(l.lu || "").slice(0, 70)}… » · « ${p.titre} » · ${Object.keys(p.zones).length} questions` : "la page ne s'ouvre pas" };
+    });
+
+    await etape("Le direct : la direction voit sa page ouverte et chaque frappe dans le dossier", [C, D], async () => {
+      if (!await ouvrirDossier(D, tid)) return { ok: false, detail: "le bloc « En direct » n'apparaît pas dans le dossier" };
+      const rangs = Object.keys(await pageC(C).then((x) => x.zones)).map(Number).sort((a, b) => a - b);
+      const x = await mesurer(C, D, rangs[0], "Les Rell Bros, sur le wiki");
+      mesures.delais_ticket = x;
+      const etat = await etatDirect(D);
+      return { ok: x.motEntierMs !== null && x.motEntierMs < 2500 && x.enTrain, detail: `mot entier ${x.motEntierMs} ms après la dernière touche · 1er caractère ${x.premierCaractereMs} ms · « ${etat} »` };
+    });
+
+    await etape("Il envoie l'étape 2 : « réponses reçues » dans le ticket (le même message, réécrit) ; la direction est prévenue", [C, D], async () => {
+      await remplir(C, "Ma réponse depuis la page");
+      const err = await envoyer(C, "Envoyer cette étape");
+      if (err) return { ok: false, detail: err };
+      const m = await attendre(async () => { const y = await messagesTicket(tid); return y.length === 2 && /reçues/i.test((y[1] || {}).texte || "") ? y : null; }, 10000);
+      const t = await attendre(async () => { const y = await toasts(D); return y.some((z) => /étape du questionnaire est arrivée/.test(z)) ? y : null; }, 10000);
+      const bouton = await attendre(() => D.evaluer("[...document.querySelectorAll('dialog[open] button')].some((b) => b.textContent.includes(\"Ouvrir l'étape 3\"))"), 10000);
+      return { ok: !!m && m[1].id === msgEtape && !!t && !!bouton,
+        detail: m ? `ticket : ${m.length} messages, « ${m[1].texte.slice(0, 80)}… » (le même) · avis : ${t ? "oui" : "non"} · « Ouvrir l'étape 3 » : ${bouton ? "oui" : "non"}` : "le message d'étape n'est pas réécrit" };
+    });
+
+    await etape("La direction ouvre l'étape 3 : l'ancien message s'efface, le nouveau le prévient (deux messages au plus)", [D], async () => {
+      if (!await cliquer(D, "dialog[open] button", "Ouvrir l'étape 3")) return { ok: false, detail: "« Ouvrir l'étape 3 » absent" };
+      const m = await attendre(async () => { const y = await messagesTicket(tid); return y.length === 2 && y[1].id !== msgEtape && /Étape 3 sur 3/.test(y[1].texte) ? y : null; }, 10000);
+      if (m) msgEtape = m[1].id;
+      return { ok: !!m, detail: m ? `ticket : ${m.length} messages · « ${m[1].texte.slice(0, 90)}… »` : JSON.stringify((await messagesTicket(tid)).map((y) => y.texte.slice(0, 60))) };
+    });
+
+    await etape("Il revient sur sa page : l'étape 3, puis l'envoi — « Merci » ; « Réponses envoyées » dans le ticket", [C, D], async () => {
+      await revenir(C);
+      const p = await attendre(async () => { const x = await pageC(C); return x.vue === "etape" && /^Étape 3 sur 3/.test(x.titre) ? x : null; }, 30000);
+      if (!p) return { ok: false, detail: "l'étape 3 n'apparaît pas : " + JSON.stringify(await pageC(C)).slice(0, 200) };
+      await remplir(C, "Ma réponse de la dernière étape");
+      const err = await envoyer(C, "Envoyer cette étape");
+      const f = await pageC(C);
+      const v = await deuxAuPlus();
+      const t = await attendre(async () => { const y = await toasts(D); return y.some((z) => /Réponses reçues/.test(z)) ? y : null; }, 15000);
+      return { ok: !err && f.vue === "merci" && v.ok && v.m.some((y) => /envoyées/i.test(y.texte)) && !!t,
+        detail: err || `C : « ${f.titre} » · ticket : ${v.m.length} messages · avis D : ${t ? "« Réponses reçues »" : "aucun"}` };
+    });
+
+    await etape("La décision : chaque réponse cochée « Juste », « Accepter » — le rôle du clan, le ticket fermé, deux messages au plus", [D], async () => {
+      if (!await ouvrirDossier(D, tid, false)) return { ok: false, detail: "dossier introuvable" };
+      const n = await toutJuste(D);
+      const corrige = await attendre(async () => { const x = await D.api("recrutement/dossier?ticket=" + tid); const b = x.envois[x.envois.length - 1].bilan; return b.justes === b.total ? b : null; }, 15000);
+      if (!corrige) return { ok: false, detail: n + " « Juste » cochés, le serveur n'a pas tout" };
+      if (!await ouvrirDossier(D, tid, false)) return { ok: false, detail: "le dossier ne se rouvre pas" };   // relu : 100 %
+      if (!await attendre(() => cliquer(D, "dialog[open] button", "Accepter · " + corrige.total + "/" + corrige.total), 8000)) return { ok: false, detail: "« Accepter » absent" };
+      if (!await attendre(() => D.evaluer("document.querySelectorAll('dialog[open]').length > 1"), 6000)) return { ok: false, detail: "confirmation absente" };
+      if (!await cliquer(D, "dialog[open] button", "Accepter")) return { ok: false, detail: "« Accepter » absent de la confirmation" };
+      const d = await attendre(async () => { const x = await D.api("recrutement/dossier?ticket=" + tid); return x.etape === "accepte" ? x : null; }, 15000);
+      const v = await deuxAuPlus();
+      const mp = ((await demo("discord?mp=" + CAND)).mp || []).map((x) => x.texte).join(" | ");
+      return { ok: !!d && v.ok && /accepté/i.test(mp), detail: `${n} réponses justes · ${d ? "accepté" : "pas accepté"} · ticket : ${v.m.length} messages · MP : « ${mp.slice(-70)} »` };
+    });
+
+    // ═══ LE VRAI CHEMIN D'UN CHEF D'ÉQUIPE : la proposition, le message privé, la page, 100 %, le rôle, le badge ═══
+    let chef = null, eidC = 0;
+    await etape("Proposer d'être chef (la route du bouton) : le rôle des chefs du métier, son message privé et son bouton persistant", [D], async () => {
+      const C0 = await D.api("recrutement/chefs");
+      const occupes = new Set([...(C0.candidatures || []).filter((x) => /en_cours|corriger|attente/.test(x.etat)).map((x) => String(x.membre.id)),
+        ...(C0.chefs || []).map((x) => String(x.membre.id))]);
+      chef = (C0.membres || []).filter((m) => !m.chef && !occupes.has(String(m.id))).sort((a, b) => a.nom.localeCompare(b.nom, "fr"))[0];
+      const qs = (C0.questions || []).filter((q) => (q.metiers || []).includes("navigation") && q.actif !== false && !q.retiree).slice(0, 4);
+      if (!chef || qs.length < 4) return { ok: false, detail: "membre ou questions de chef manquants : " + JSON.stringify({ chef, qs: qs.length }) };
+      const role = await posterD(D, "recrutement/chefs/role", { metier: "navigation", creer: true });
+      const r = await posterD(D, "recrutement/chefs/proposer", { membre: String(chef.id), metier: "navigation", etapes: [
+        { titre: "Le cap", consigne: "Chaque réponse doit être juste.", questions: qs.slice(0, 2).map((q) => q.id) },
+        { titre: "L'équipage", consigne: "Pense à ceux que tu guideras.", questions: qs.slice(2).map((q) => q.id) }] });
+      if (r.status !== 200) return { ok: false, detail: "proposition refusée : " + JSON.stringify(r.corps).slice(0, 200) };
+      eidC = Number(r.corps.envoi);
+      const mp = ((await demo("mp?membre=" + chef.id)).messages || []).pop() || {};
+      return { ok: role.status === 200 && r.corps.invite === true && (mp.custom_ids || []).includes("cq:rep:" + eidC) && /Chef d'équipe · Navigation/.test(mp.texte || ""),
+        detail: `${chef.nom} · rôle des chefs : ${role.status} · envoi ${eidC} · MP : « ${(mp.texte || "").slice(0, 80)}… » · bouton ${JSON.stringify(mp.custom_ids)}` };
+    });
+
+    let attendues = {};
+    await etape("Le bouton de son message privé : sa page de chef (le titre, la règle), la direction le voit écrire", [C, D], async () => {
+      const l = await demo(`mp/cliquer?membre=${chef.id}&custom_id=cq:rep:${eidC}`);
+      if (!l.url) return { ok: false, detail: "pas de lien : " + JSON.stringify(l).slice(0, 200) };
+      await C.s("Page.navigate", { url: l.url });
+      const p = await attendre(async () => { const x = await pageC(C); return x.vue === "etape" && Object.keys(x.zones).length ? x : null; }, 15000);
+      if (!p) return { ok: false, detail: "la page du chef ne s'ouvre pas" };
+      const entete = await C.evaluer("document.querySelector('#nom-page').textContent + ' | ' + document.querySelector('.titre-rubrique h1').textContent");
+      const dossier = await D.api("recrutement/chefs/dossier?envoi=" + eidC);
+      attendues = Object.fromEntries(((dossier.questionnaire || {}).questions || []).map((q) => [String(q.rang), q.attendue || ""]));
+      if (!await ouvrirCandidatureChef(D, eidC)) return { ok: false, detail: "le direct n'apparaît pas dans sa candidature" };
+      const rangs = Object.keys(p.zones).map(Number).sort((a, b) => a - b);
+      const x = await mesurer(C, D, rangs[0], attendues[String(rangs[0])]);
+      mesures.delais_chef = x;
+      return { ok: /Questionnaire de chef d'équipe · Navigation/.test(entete) && /^Étape 1 sur 2/.test(p.titre) && x.motEntierMs !== null && x.motEntierMs < 2500,
+        detail: `« ${entete} » · « ${p.titre} » · direct : mot entier ${x.motEntierMs} ms après la dernière touche` };
+    });
+
+    await etape("Ses réponses justes : l'étape 1 envoyée ; la direction ouvre l'étape 2 — un nouveau message privé, sa page la montre", [C, D], async () => {
+      await C.evaluer(`(async () => { const a = ${JSON.stringify(attendues)}; for (const z of document.querySelectorAll('textarea.cand-reponse')) { const r = z.id.slice(2);
+        if (!z.value.trim() || z.value !== a[r]) { z.focus(); z.value = a[r]; z.dispatchEvent(new Event('input', { bubbles: true })); } } await new Promise((r) => setTimeout(r, 1800)); return 1; })()`);
+      const err = await envoyer(C, "Envoyer cette étape");
+      if (err) return { ok: false, detail: err };
+      const avant = ((await demo("mp?membre=" + chef.id)).messages || []).length;
+      const bouton = await attendre(() => cliquer(D, "dialog[open] button", "Ouvrir l'étape suivante"), 15000);
+      if (!bouton) return { ok: false, detail: "« Ouvrir l'étape suivante » absent" };
+      const mp = await attendre(async () => { const x = (await demo("mp?membre=" + chef.id)).messages || []; return x.length > avant ? x[x.length - 1] : null; }, 10000);
+      await revenir(C);
+      const p = await attendre(async () => { const x = await pageC(C); return x.vue === "etape" && /^Étape 2 sur 2/.test(x.titre) ? x : null; }, 30000);
+      return { ok: !!mp && /L'étape 2 de ton questionnaire est ouverte/.test(mp.texte) && !!p,
+        detail: `MP : « ${((mp || {}).texte || "").slice(0, 90)}… » · page : « ${(p || {}).titre || ""} »` };
+    });
+
+    await etape("Sa dernière étape envoyée : « Merci » ; la direction coche 100 %, « Nommer chef » — son rôle, son badge dans l'éditeur des équipes", [C, D], async () => {
+      await C.evaluer(`(async () => { const a = ${JSON.stringify(attendues)}; for (const z of document.querySelectorAll('textarea.cand-reponse')) { const r = z.id.slice(2);
+        z.focus(); z.value = a[r]; z.dispatchEvent(new Event('input', { bubbles: true })); } await new Promise((r) => setTimeout(r, 1800)); return 1; })()`);
+      const err = await envoyer(C, "Envoyer cette étape");
+      const f = await pageC(C);
+      if (err || f.vue !== "merci") return { ok: false, detail: err || "pas de « Merci » : " + f.titre };
+      if (!await ouvrirCandidatureChef(D, eidC, false)) return { ok: false, detail: "sa candidature ne s'ouvre pas" };
+      const marquer = await attendre(() => cliquer(D, "dialog[open] button", "Marquer justes les"), 8000);
+      const n = marquer ? 0 : await toutJuste(D);
+      const b = await attendre(async () => { const x = await D.api("recrutement/chefs/dossier?envoi=" + eidC); const y = (x.questionnaire || {}).bilan || {}; return y.total && y.justes === y.total ? y : null; }, 15000);
+      if (!b) return { ok: false, detail: "corrections incomplètes" };
+      //  Les corrections partent par la file du site : la candidature relue, « Nommer chef » (100 %) s'ouvre.
+      if (!await ouvrirCandidatureChef(D, eidC, false)) return { ok: false, detail: "sa candidature ne se rouvre pas" };
+      if (!await attendre(() => cliquer(D, "dialog[open] button", "Nommer chef"), 8000)) return { ok: false, detail: "« Nommer chef » absent (" + b.justes + "/" + b.total + ")" };
+      if (!await attendre(() => D.evaluer("document.querySelectorAll('dialog[open]').length > 1"), 6000)) return { ok: false, detail: "confirmation absente" };
+      if (!await cliquer(D, "dialog[open] button", "Nommer chef")) return { ok: false, detail: "« Nommer chef » absent de la confirmation" };
+      const nomme = await attendre(async () => ((await D.api("recrutement/chefs")).chefs || []).find((x) => String(x.membre.id) === String(chef.id)), 15000);
+      const badge = ((await D.api("equipage/equipes")).badges || {})[String(chef.id)] || "";
+      if (!nomme || !badge.startsWith("Chef validé · ")) return { ok: false, detail: "pas nommé ou pas de badge : « " + badge + " »" };
+      await allerD(D, "#equipage/membres");
+      await D.s("Page.reload", {});
+      await attendre(() => D.evaluer("!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 12000);
+      await pause(600);
+      if (!await cliquer(D, ".segment button", "Par équipe")) return { ok: false, detail: "« Par équipe » absent" };
+      if (!await attendre(() => cliquer(D, "#contenu button", "Nouvelle équipe"), 8000)) return { ok: false, detail: "« Nouvelle équipe » absent" };
+      const premier = await attendre(() => D.evaluer(`(() => { const d = [...document.querySelectorAll("dialog[open]")].pop();
+        const li = d && d.querySelector('ol.choix-equipe[role="radiogroup"] > li'); if (!li) return null;
+        const r = li.querySelector('input[type="radio"]'); return { id: r ? r.value : "", texte: li.innerText.replace(/\\s+/g, " ").trim() }; })()`), 8000);
+      return { ok: !!premier && premier.id === String(chef.id) && premier.texte.includes(badge),
+        detail: `${marquer ? "« Marquer justes »" : n + " « Juste »"} · ${b.justes}/${b.total} · « ${badge} » · en tête du choix du chef : « ${(premier || {}).texte || "rien"} »` };
     });
   } finally {
     await C.fermer(); await D.fermer();

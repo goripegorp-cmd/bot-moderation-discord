@@ -84,7 +84,8 @@ export function vueEnDirect(cible, opts = {}) {
   /** Un message « candidat » (la présence en direct) : appliqué sur place, sans relire. */
   function appliquer(m) {
     if (!S.d || Number(m.e) !== Number(S.d.envoi)) {
-      if (!S.d && demande.ticket && Number(m.k) === Number(demande.ticket)) lireEtat();
+      //  Son questionnaire vient de partir (la vue attendait, « aucun ») : la lecture le trouve.
+      if ((!S.d || !S.d.envoi) && demande.ticket && Number(m.k) === Number(demande.ticket)) lireEtat();
       return;
     }
     const avant = JSON.parse(JSON.stringify(S.d));
@@ -128,6 +129,7 @@ export function vueEnDirect(cible, opts = {}) {
   /** L'état du candidat, en une phrase : où en est le questionnaire, et sa page. */
   function etatCandidat() {
     const d = S.d, p = d.portes || {}, t = temps();
+    if (d.etat === "aucun") return ["", "Le questionnaire n'est pas encore parti"];
     const fiche = p.fiche ? 1 : 0;
     if (d.etat === "envoye") return ["vert", "Réponses envoyées" + (d.envoye_le ? " à " + heure(d.envoye_le) + (t - d.envoye_le > 86400 ? " le " + date(d.envoye_le) : "") : "")];
     if (d.etat === "ferme") return ["", "Candidature terminée : le questionnaire n'attend plus de réponse"];
@@ -161,6 +163,10 @@ export function vueEnDirect(cible, opts = {}) {
     const d = S.d;
     if (!d) return;
     rendreTete();
+    if (d.etat === "aucun" || !Array.isArray(d.etapes)) {   // sa demande attend : le direct se branchera avec le questionnaire
+      remplacer(corps, h("p", { classe: "aide" }, "Dès que son questionnaire part, ce qu'il écrit apparaît ici pendant qu'il tape."));
+      return;
+    }
     const p = d.portes || {};
     const fiche = p.fiche ? 1 : 0;
     const totalAff = (Number(p.total) || d.etapes.length) + fiche;

@@ -215,7 +215,7 @@ async function rendreDossier(etatD, forcer) {
   const blocs = [tete];
   if (D.fermeture_prevue) blocs.push(bandeau("La décision est partie dans le ticket : il se ferme dans un instant.", ""));
   if (D.liste_noire) blocs.push(bandeau("Sur la liste noire des tickets de recrutement : il ne peut plus ouvrir de demande.", "rouge"));
-  if (D.vue_direct && !FINALES.has(D.etape)) blocs.push(zoneDirect(etatD, D));
+  if (D.vue_direct && D.envoi_courant && !FINALES.has(D.etape)) blocs.push(zoneDirect(etatD, D));   // dès qu'un questionnaire est parti
   blocs.push(groupe({ titre: "Étape 1 · sa fiche", icone: "candidatures", cle: "zr-dossier-fiche", defaut: D.etape === "etape1" }, () => [
     listeReponses(Object.entries((D.etape1 && D.etape1.reponses) || {})),
     transcriptEnLigne(Number(D.ticket), "Ticket #" + D.ticket, false)]));

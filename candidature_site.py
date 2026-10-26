@@ -1385,6 +1385,10 @@ async def _route_direct_candidat(g, auteur, requete, corps):
     if not (brut_e.isdigit() and len(brut_e) <= 12) and not (brut_t.isdigit() and len(brut_t) <= 12):
         return 400, {"erreur": "Envoi ou ticket invalide."}
     d = await etat_direct(g, ticket=int(brut_t) if brut_t.isdigit() else 0, envoi=int(brut_e) if brut_e.isdigit() else 0)
+    if d is None and brut_t.isdigit() and not brut_e.isdigit():
+        #  Un ticket encore sans questionnaire (sa demande attend la direction) : un état, pas une erreur — la vue le dit
+        #  et se branche dès que le questionnaire part.
+        return 200, {"ticket": int(brut_t), "envoi": 0, "etat": "aucun", "s": int(time.time())}
     return (200, d) if d is not None else (404, {"erreur": "Aucun questionnaire ici."})
 
 

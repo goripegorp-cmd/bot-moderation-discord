@@ -109,10 +109,16 @@ const CAND_REMPLIR = `(async () => { for (const z of document.querySelectorAll('
   z.dispatchEvent(new Event('input', { bubbles: true })); } } await new Promise((r) => setTimeout(r, 1600)); return 1; })()`;
 const CAND_JALON = (n) => `(async () => { const b = [...document.querySelectorAll('button.cand-jalon')][${n}]; if (!b) throw new Error('jalon introuvable'); b.click(); await ${CAND_ATTENDRE}; return 1; })()`;
 const CAND_DESCENDRE = "(async () => { const e = document.querySelector('.cand-etape, .cand-relire, .cand-merci'); if (e) e.scrollIntoView({ block: 'start' }); await new Promise((r) => setTimeout(r, 400)); return 1; })()";
-// Le dossier d'une candidature (la direction) : les groupes dépliés, la ligne du ticket, puis « En direct ».
-const OUVRIR_DOSSIER = (ticket) => `(async () => { for (const g of document.querySelectorAll('#contenu details.groupe')) g.open = true; await new Promise((r) => setTimeout(r, 500));
-  const l = [...document.querySelectorAll('.lc-clic, .feuillet.lien')].find((x) => x.textContent.includes('Ticket #${ticket} ')); if (!l) throw new Error('ligne du ticket ${ticket} introuvable');
-  l.click(); for (let i = 0; i < 30 && !document.querySelector('dialog[open] .en-direct .en-direct-etape'); i++) await new Promise((r) => setTimeout(r, 200));
+// Le dossier d'une candidature (la zone « Demande de recrutement ») ou d'un chef d'équipe : les groupes dépliés, sa
+// ligne (`data-ticket` / `data-envoi`), puis le bloc « En direct ».
+const OUVRIR_DIRECT = (attribut, valeur) => `(async () => { for (const g of document.querySelectorAll('#contenu details.groupe')) g.open = true; await new Promise((r) => setTimeout(r, 500));
+  const li = document.querySelector('#contenu li.lc[data-${attribut}="${valeur}"]'); const b = li && li.querySelector('.lc-ouvrir'); if (!b) throw new Error('ligne ${attribut} ${valeur} introuvable');
+  b.click(); for (let i = 0; i < 40 && !document.querySelector('dialog[open] .en-direct .en-direct-etape'); i++) await new Promise((r) => setTimeout(r, 200));
+  const d = document.querySelector('dialog[open] .en-direct'); if (d) d.scrollIntoView({ block: 'start' }); await new Promise((r) => setTimeout(r, 300)); return 1; })()`;
+// La candidature de chef de Kolax (la démonstration) : son envoi, lu dans la liste des chefs.
+const OUVRIR_DIRECT_CHEF = `(async () => { for (const g of document.querySelectorAll('#contenu details.groupe')) g.open = true; await new Promise((r) => setTimeout(r, 500));
+  const li = [...document.querySelectorAll('#contenu li.lc[data-envoi]')].find((x) => x.textContent.includes('Kolax')); const b = li && li.querySelector('.lc-ouvrir'); if (!b) throw new Error('candidature de chef de Kolax introuvable');
+  b.click(); for (let i = 0; i < 40 && !document.querySelector('dialog[open] .en-direct .en-direct-etape'); i++) await new Promise((r) => setTimeout(r, 200));
   const d = document.querySelector('dialog[open] .en-direct'); if (d) d.scrollIntoView({ block: 'start' }); await new Promise((r) => setTimeout(r, 300)); return 1; })()`;
 const SCENES_CANDIDATURE = [
   { nom: "candidat-etape", ...CAND("ticket=60"), ancre: "" },
@@ -126,8 +132,9 @@ const SCENES_CANDIDATURE = [
   { nom: "candidat-ancien-relire", ...CAND("ticket=61"), ancre: "", geste: CAND_BOUTON("Relire et envoyer") },
   { nom: "candidat-merci", ...CAND("ticket=62"), ancre: "" },
   { nom: "candidat-chef", ...CAND("chef=1000"), ancre: "" },
-  { nom: "dossier-en-direct", ancre: "#equipage/candidatures", geste: OUVRIR_DOSSIER(60) },
-  { nom: "dossier-en-direct-attente", ancre: "#equipage/candidatures", geste: OUVRIR_DOSSIER(63) },
+  { nom: "dossier-en-direct", ancre: "#capitainerie/recrutement", geste: OUVRIR_DIRECT("ticket", 60) },
+  { nom: "dossier-en-direct-attente", ancre: "#capitainerie/recrutement", geste: OUVRIR_DIRECT("ticket", 63) },
+  { nom: "chef-en-direct", ancre: "#capitainerie/recrutement/chefs", geste: OUVRIR_DIRECT_CHEF },
 ];
 
 // Ouvrir la première affiche (les groupes par métier sont repliés au départ).
