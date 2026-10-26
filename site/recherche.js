@@ -13,15 +13,27 @@ import { nomAffiche, insigneImage } from "./affiche.js";
 import { titreNav, estRestreint, pastilleIcone } from "./rangement.js";
 import { ouvrirPublication, NOMS_PUBLICATIONS } from "./annonces.js";
 import { ouvrirElement } from "./capitainerie.js";
+import { FAMILLES_TICKETS } from "./discord.js";
+import { VUES_EQUIPAGE } from "./clan.js";
+import { SOUS_REGLAGES } from "./reglages.js";
 
 const PAR_GROUPE = 6;
-// Les sous-onglets, trouvés comme les rubriques.
-const SOUS = [["port", "salons", "questions", "Questions des salons"], ["port", "salons", "idees", "Idées des membres"],
+const nomDans = (onglets, cle) => (onglets.find(([k]) => k === cle) || [cle, cle])[1];
+// Les sous-onglets, trouvés comme les rubriques : [catégorie, rubrique, sous-page, titre, mots cherchés en plus].
+// 27/10/2026 : les rubriques regroupées s'y trouvent sous leur nom (renommable, relu à chaque recherche) et sous celui
+// d'avant (« Aperçu », « Tickets du clan », « Fiches techniques », « Textes & noms », « Nettoyage »).
+const SOUS = () => [["port", "salons", "questions", "Questions des salons"], ["port", "salons", "idees", "Idées des membres"],
   ["port", "salons", "sondages", "Sondages"], ["port", "salons", "entraide", "Entraide et trade"], ["port", "salons", "annonces", "Annonces du serveur"],
   ["port", "salons", "droits", "Droits des salons"], ["capitainerie", "recrutement", "questions", "Banque de questions du recrutement"],
   ["capitainerie", "recrutement", "candidatures", "Candidatures décidées"], ["equipage", "annonces", "brouillons", "Brouillons d'annonces"],
   ["equipage", "annonces", "a-venir", "Événements à venir"], ["equipage", "annonces", "publiees", "Annonces publiées"],
-  ["equipage", "annonces", "passes", "Publications passées"]];
+  ["equipage", "annonces", "passes", "Publications passées"],
+  ["accueil", "attente", "", "Les chiffres du bord", "aperçu tendances"],
+  ["port", "tickets", "clan", "Tickets · " + nomDans(FAMILLES_TICKETS, "clan"), "tickets du clan"],
+  ["equipage", "membres", "fiches", nomDans(VUES_EQUIPAGE, "fiches"), "fiches techniques affiches"],
+  ["equipage", "membres", "equipes", "Équipes du clan", nomDans(VUES_EQUIPAGE, "equipes") + " chefs d'équipe"],
+  ["capitainerie", "reglages", "textes", nomDans(SOUS_REGLAGES, "textes"), "textes et noms renommer"],
+  ["capitainerie", "reglages", "nettoyage", nomDans(SOUS_REGLAGES, "nettoyage"), "nettoyage ménage durées"]];
 
 // ─── L'en-tête ──────────────────────────────────────────────────────────────
 const estSaisie = (el) => !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
@@ -134,8 +146,9 @@ function chercher(brut) {
   // Les rubriques (et, sans recherche, toutes : la recherche sert aussi de sommaire)
   const rubs = [];
   for (const c of CATEGORIES) for (const r of c.rubriques) rubs.push({ titre: titreNav(r), sous: titreNav(c), texte: titreNav(c) + " " + titreNav(r) + " " + (r.phrase || ""), cat: c.cle, rub: r.cle, icone: r.icone });
-  for (const [cat, rub, sous, titre] of SOUS) rubs.push({ titre, sous: titreNav(CATEGORIES.find((c) => c.cle === cat) || {}), texte: titre, cat, rub, sous_: sous, icone: "droite" });
-  const rr = mots.length ? trouver(rubs, (x) => x.texte, mots, PAR_GROUPE) : { l: rubs.filter((x) => !x.sous_), total: rubs.length };
+  for (const [cat, rub, sous, titre, autres] of SOUS()) rubs.push({ titre, sous: titreNav(CATEGORIES.find((c) => c.cle === cat) || {}), texte: titre + " " + (autres || ""), cat, rub, sous_: sous, icone: "droite", extra: true });
+  const sommaire = rubs.filter((x) => !x.extra);
+  const rr = mots.length ? trouver(rubs, (x) => x.texte, mots, PAR_GROUPE) : { l: sommaire, total: sommaire.length };
   g("rubriques", mots.length ? "Rubriques" : "Aller à", rr, (x) => ({ titre: x.titre, sous: x.sous, visuel: () => pastilleIcone(x.icone, "#5a4330"),
     ouvrir: () => aller(x.cat, x.rub, x.sous_ || ""), cle: "r" + x.cat + x.rub + (x.sous_ || "") }));
   if (numero !== null) groupes.sort((a, b) => (b.cle === "tickets") - (a.cle === "tickets"));

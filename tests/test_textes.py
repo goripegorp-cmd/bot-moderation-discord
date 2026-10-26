@@ -892,12 +892,14 @@ def test_T13_les_noms_du_site_sont_ceux_de_la_page():
     assert "export function libelle(" in noyau and "nommer(c, \"site.cat.\" + c.cle" in noyau
     assert 'nomme("site.affiche.statut."' in affiche and 'nomme("site.affiche.tampon."' in affiche
     #  Les sous-onglets et les onglets de la fiche : les mêmes clés et les mêmes noms que la page, lus par `libelle`.
+    #  27/10/2026 : les vues d'Équipage (clan.js), les familles de Tickets, les onglets de Réglages (reglages.js : leur
+    #  rendu en quatrième place, [clé, nom, icône, rendu]).
     vus = []
-    for f in ("discord.js", "recrutement.js", "recrutement_zone.js", "annonces.js", "fiche.js"):
+    for f in ("discord.js", "clan.js", "recrutement.js", "recrutement_zone.js", "annonces.js", "fiche.js", "reglages.js"):
         src = (RACINE / "site" / f).read_text(encoding="utf-8")
         for prefixe, corps in re.findall(r'nommerOnglets\("([a-z.]+)", \[(.*?)\]\);', src, re.S):
             vus.append((prefixe, [(k.replace("-", "_"), nom)
-                                  for k, nom in re.findall(r'\["([\w-]+)", "([^"]+)", "\w+"\]', corps)]))
+                                  for k, nom in re.findall(r'\["([\w-]+)", "([^"]+)", "\w+"(?:, [\w.]+)?\]', corps)]))
     attendu = [(f"site.sous.{c}.{r}", list(o)) for c, r, o in textes.SITE_SOUS] + \
         [("site.fiche.onglet", list(textes.SITE_FICHE))]
     assert sorted(vus) == sorted(attendu), vus

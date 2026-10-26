@@ -9,6 +9,7 @@
 //   Parcours : recrutement, capitainerie, metiers, accueil (« Ce qui t'attend » : chaque ligne mène au bon endroit),
 //              recherche (Ctrl+K : membre, ticket, affiche, catalogue, banque, rubrique), recrutement_zone (« Demande de
 //              recrutement » de bout en bout : le vrai chemin du bot sur le site local seulement).
+//              navigation (27/10/2026 : les rubriques regroupées, les anciennes adresses, les vues sur place, les noms).
 //   « textes » (Textes & noms) lit aussi ce que le FAUX Discord du site local a reçu (`/tableau/demo/discord`) : il ne se
 //   joue que sur le site local, jamais sur la maquette.
 //
@@ -580,11 +581,11 @@ async function parcoursRecrutementZone(o) {
     if (!r.ok) return { ok: false, detail: "nomination refusée : " + JSON.stringify(r).slice(0, 240) };
     const badge = ((await api(o, "equipage/equipes")).badges || {})[String(qui.id)] || "";
     if (!badge.startsWith("Chef validé · ")) return { ok: false, detail: "le serveur ne badge pas " + qui.nom + " (« " + badge + " »)" };
-    await aller(o, "#equipage/membres");
+    await aller(o, "#equipage/membres/equipes");
     await o.s("Page.reload", {});   // les équipes relues (la page les garde 20 s)
     await attendre(() => evaluer(o, "!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 12000, 200);
     await pause(600);
-    if (!await cliquer(o, ".segment button", "Par équipe")) return { ok: false, detail: "« Par équipe » absent" };
+    if (!await evaluer(o, "(document.querySelector('#contenu .sous-onglets [aria-selected=true]') || {}).textContent === 'Équipes'")) return { ok: false, detail: "la vue « Équipes » n'est pas ouverte" };
     if (!await attendre(() => cliquer(o, "#contenu button", "Nouvelle équipe"), 8000)) return { ok: false, detail: "« Nouvelle équipe » absent" };
     const premier = await attendre(() => evaluer(o, `(() => { const d = [...document.querySelectorAll("dialog[open]")].pop();
       const li = d && d.querySelector('ol.choix-equipe[role="radiogroup"] > li'); if (!li) return null;
@@ -979,7 +980,7 @@ async function parcoursAccueil(o) {
     },
   };
   const RESTES = { "ticket-reste": "port/tickets", "question-reste": "port/salons/questions", "decider-reste": "capitainerie/recrutement", "corriger-reste": "capitainerie/recrutement",
-    "inactif-reste": "equipage/membres", "alerte-reste": "port/apercu", "brouillon-reste": "annonces/brouillons", "evenement-reste": "annonces/a-venir" };
+    "inactif-reste": "equipage/membres", "alerte-reste": "port/repertoire", "brouillon-reste": "annonces/brouillons", "evenement-reste": "annonces/a-venir" };
   const vues = new Set();
   for (const l of lignes) {
     if (vues.has(l.sorte)) continue;
@@ -1012,7 +1013,7 @@ async function parcoursRecherche(o) {
   const groupes = () => evaluer(o, "[...document.querySelectorAll('dialog[open] .rech-groupe')].map((g) => ({ g: g.getAttribute('aria-label'), r: [...g.querySelectorAll('.rech-titre')].map((t) => t.textContent) }))");
   const touche = (k) => evaluer(o, `(() => { const i = document.querySelector('dialog[open] .recherche-champ'); i.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true })); return 1; })()`);
   const h2 = () => evaluer(o, "(() => { const d = [...document.querySelectorAll('dialog[open]')].pop(); return d ? d.querySelector('h2').textContent : ''; })()");
-  await aller(o, "#port/apercu");
+  await aller(o, "#port/journal");
 
   await etape(o, "Recherche : Ctrl+K l'ouvre, le champ a le focus, le sommaire des rubriques est là", async () => {
     if (!await ouvrir("")) return { ok: false, detail: "Ctrl+K n'ouvre rien" };
@@ -1074,11 +1075,11 @@ async function parcoursRecherche(o) {
     const x = await attendre(() => evaluer(o, `location.hash.includes('recrutement/questions') && [...document.querySelectorAll('.banque-ligne')].some((b) => b.textContent.includes(${JSON.stringify(q.question)}))`), 8000);
     return { ok: !!x, detail: q.question.slice(0, 60) };
   });
-  await etape(o, "Recherche : une rubrique (« Nettoyage ») y mène", async () => {
+  await etape(o, "Recherche : « Nettoyage » (un onglet de Réglages) y mène", async () => {
     await ouvrir("Nettoyage");
     const ok = await evaluer(o, `(() => { const o = [...document.querySelectorAll('dialog[open] .rech-groupe[aria-label="Rubriques"] .rech-option')].find((x) => x.querySelector('.rech-titre').textContent === 'Nettoyage'); if (!o) return false; o.click(); return true; })()`);
     if (!ok) return { ok: false, detail: "rubrique absente" };
-    return { ok: !!await attendre(() => evaluer(o, "location.hash.includes('port/nettoyage')"), 6000), detail: "#port/nettoyage" };
+    return { ok: !!await attendre(() => evaluer(o, "location.hash.includes('reglages/nettoyage')"), 6000), detail: "#capitainerie/reglages/nettoyage" };
   });
   await etape(o, "Recherche : « / » l'ouvre aussi, Échap la ferme", async () => {
     await fermerTout(o);
@@ -1102,7 +1103,7 @@ async function parcoursTextes(o) {
     headers: { "X-Tableau": "1", "Content-Type": "application/json" }, body: ${JSON.stringify(JSON.stringify(corps))} }).then(async (r) => ({ status: r.status, corps: await r.json() }))`);
   /** Textes & noms : le groupe ouvert, « Modifier » sur le texte de ce titre. */
   const ouvrirTexte = async (groupe, titre) => {
-    await aller(o, "#capitainerie/textes");
+    await aller(o, "#capitainerie/reglages/textes");
     await evaluer(o, `(() => { const g = [...document.querySelectorAll("details.groupe")].find((x) => x.querySelector("summary").textContent.includes(${JSON.stringify(groupe)})); if (g) g.open = true; return !!g; })()`);
     await pause(500);
     const ok = await evaluer(o, `(() => { const li = [...document.querySelectorAll(".texte-ligne")].find((x) => x.querySelector(".texte-titre").textContent.replace(/\\s+/g, " ").trim() === ${JSON.stringify(titre)});
@@ -1320,6 +1321,197 @@ async function parcoursTextes(o) {
   });
 }
 
+// ═══ LA NAVIGATION REGROUPÉE (27/10/2026) ═══════════════════════════════════
+// Le fondateur : « regrouper tous les onglets, pas des milliers de sous-onglets ». Les rubriques de chaque pancarte ;
+// chaque ancienne adresse mène au bon endroit ; les vues d'une rubrique changent sur place (la recherche tapée reste, la
+// page ne se redessine pas ni ne remonte) ; les noms suivent (renommés, la présence en direct, la recherche).
+const ANCIENNES = [   // [ancienne adresse, nouvelle, titre, sous-onglet ouvert (ou puce choisie), un texte de la page]
+  ["#port/apercu", "#accueil/attente", "Ce qui t'attend", "", "À faire"],   // une ancienne adresse
+  ["#port/nettoyage", "#capitainerie/reglages/nettoyage", "Réglages", "Nettoyage", "Le grand ménage"],   // une ancienne adresse
+  ["#capitainerie/textes", "#capitainerie/reglages/textes", "Réglages", "Textes & noms", "le bot emploie ton texte"],   // une ancienne adresse
+  ["#equipage/fiches", "#equipage/membres/fiches", "Équipage", "Fiches techniques", "fiches vierges"],   // une ancienne adresse
+  ["#equipage/tickets", "#port/tickets/clan", "Tickets", "Clan · RELL Seas", "Ouverts"],   // une ancienne adresse
+];
+async function parcoursNavigation(o) {
+  const titre = () => evaluer(o, "(document.querySelector('#contenu h1') || {}).textContent || ''");
+  const ouvert = () => evaluer(o, "((document.querySelector('#contenu .sous-onglets [aria-selected=true]') || document.querySelector('#contenu .puces [aria-pressed=true]') || {}).textContent || '').replace(/\\d+$/, '').trim()");
+  const texte = () => evaluer(o, "document.querySelector('#contenu').innerText");
+  const marquer = () => evaluer(o, "(() => { document.querySelector('#contenu .titre-rubrique').dataset.marque = 'nav'; return 1; })()");
+  const marque = () => evaluer(o, "(document.querySelector('#contenu .titre-rubrique') || { dataset: {} }).dataset.marque === 'nav'");
+  const hash = () => evaluer(o, "location.hash");
+  const ecrireApi = (chemin, corps) => evaluer(o, `fetch(${JSON.stringify(SITE + "api/")} + ${JSON.stringify(chemin)}, { method: "POST", credentials: "same-origin",
+    headers: { "X-Tableau": "1", "Content-Type": "application/json" }, body: ${JSON.stringify(JSON.stringify(corps))} }).then(async (r) => ({ status: r.status, corps: await r.json() }))`);
+
+  //  Joué après d'autres parcours : leurs filtres gardés (statut « à vérifier » du catalogue…) oubliés, la page relue.
+  await aller(o, "#accueil/attente");
+  await evaluer(o, "(() => { sessionStorage.removeItem('capitainerie.filtres'); return 1; })()");
+  await o.s("Page.reload", {});
+  await attendre(() => evaluer(o, "!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 12000, 200);
+  await etape(o, "Navigation : quinze rubriques (dix-neuf avant), cinq au plus par pancarte", async () => {
+    const vu = {};
+    for (const cat of ["accueil", "port", "equipage", "capitainerie"]) {
+      await aller(o, "#" + cat);
+      vu[cat] = await evaluer(o, "[...document.querySelectorAll('#rubriques a')].map((a) => a.querySelector('span:not(.compteur)').textContent.trim())");
+    }
+    const attendu = { accueil: ["Ce qui t'attend"], port: ["Journal", "Sanctions", "Tickets", "Répertoire", "Salons & questions"],
+      equipage: ["Équipage", "Annonces & événements"], capitainerie: ["Demande de recrutement", "Affiches", "Catalogue RELL Seas", "Rôles & métiers", "Réglages"] };
+    return { ok: JSON.stringify(vu) === JSON.stringify(attendu), detail: Object.entries(vu).map(([c, l]) => c + " : " + l.join(", ")).join(" · ") };
+  });
+
+  for (const [avant, apres, t, sous, mot] of ANCIENNES) {
+    await etape(o, "Ancienne adresse " + avant + " → " + apres, async () => {
+      await aller(o, avant);
+      await attendre(async () => (await texte()).includes(mot), 8000, 250);
+      const vu = { hash: await hash(), titre: await titre(), ouvert: await ouvert(), mot: (await texte()).includes(mot) };
+      return { ok: vu.hash === apres && vu.titre === t && (!sous || vu.ouvert === sous) && vu.mot, detail: JSON.stringify(vu) };
+    });
+  }
+  const d = await donneesSite(o);
+  //  Un vrai identifiant Discord (5 chiffres au moins : la page ignore les autres dans l'adresse).
+  const membre = Object.values(d.personnes || {}).find((p) => /^\d{5,22}$/.test(String(p.id)) && p.nom && p.nom !== "Membre parti");
+  await etape(o, "Ancienne adresse avec une fiche ouverte (l'Aperçu et un membre) : l'accueil, et la fiche", async () => {
+    await aller(o, ANCIENNES[0][0] + "&membre=" + membre.id);
+    const fiche = await attendre(() => evaluer(o, "(() => { const d = [...document.querySelectorAll('dialog[open]')].pop(); return d ? d.querySelector('h2').textContent : ''; })()"), 8000);
+    const h = await hash();
+    return { ok: h === "#accueil/attente&membre=" + membre.id && !!fiche && fiche.includes(membre.nom), detail: h + " · " + fiche };
+  });
+
+  await etape(o, "Équipage : Présence → Fiches techniques → Équipes, sur place (la recherche tapée reste)", async () => {
+    await aller(o, "#equipage/membres");
+    await marquer();
+    await evaluer(o, "(() => { const i = document.querySelector('#contenu .outils input[type=search]'); i.value = 'a'; i.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()");
+    await pause(500);
+    const etapes = [];
+    const equipes = "[...document.querySelectorAll('#contenu button')].some((b) => b.textContent.includes('Nouvelle équipe'))";
+    for (const [onglet, attendu, preuve] of [["Fiches techniques", "#equipage/membres/fiches", "document.querySelector('#contenu').innerText.includes('fiches vierges')"],
+      ["Équipes", "#equipage/membres/equipes", equipes], ["Présence", "#equipage/membres", "!!document.querySelector('#contenu [aria-label=Présence]') && !" + equipes]]) {
+      if (!await cliquer(o, "#contenu .sous-onglets a", onglet)) return { ok: false, detail: "onglet « " + onglet + " » absent" };
+      const ok = await attendre(async () => (await hash()) === attendu && (await ouvert()) === onglet && await evaluer(o, preuve), 8000, 250);
+      const v = await evaluer(o, "document.querySelector('#contenu .outils input[type=search]').value");
+      etapes.push(onglet + " : " + (ok ? "ok" : "ÉCHEC " + await hash()) + ", recherche « " + v + " », " + (await marque() ? "sur place" : "page redessinée"));
+      if (!ok || v !== "a" || !await marque()) return { ok: false, detail: etapes.join(" · ") };
+    }
+    return { ok: true, detail: etapes.join(" · ") };
+  });
+
+  await etape(o, "Tickets : la famille « Clan · RELL Seas » sur place (la page ne remonte pas), puis « Tous »", async () => {
+    await aller(o, "#port/tickets");
+    await o.s("Page.reload", {});   // les données de la page relues : les mêmes que celles lues ci-dessous
+    await attendre(() => evaluer(o, "!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 12000, 200);
+    await pause(600);
+    const rell = new Set(((await donneesSite(o)).tickets.ouverts || []).filter((t) => t.rellseas).map((t) => String(t.ticket)));
+    await marquer();
+    const avant = await evaluer(o, "(() => { const b = [...document.querySelectorAll('#contenu .puces .puce')].find((x) => x.textContent.includes('Clan · RELL Seas')); b.scrollIntoView({ block: 'center' }); return scrollY; })()");
+    await evaluer(o, "(() => { [...document.querySelectorAll('#contenu .puces .puce')].find((x) => x.textContent.includes('Clan · RELL Seas')).click(); return 1; })()");
+    const ok = await attendre(async () => (await hash()) === "#port/tickets/clan" && (await ouvert()) === "Clan · RELL Seas", 6000, 200);
+    await pause(400);
+    const apres = await evaluer(o, "scrollY");
+    await evaluer(o, "(() => { for (const g of document.querySelectorAll('#contenu details.groupe')) g.open = true; return 1; })()");
+    await pause(500);
+    const lignes = await evaluer(o, "[...document.querySelectorAll('#contenu .lc[data-ticket]')].filter((l) => l.closest('section') && l.closest('section').querySelector('h2').textContent.includes('Ouverts')).map((l) => l.dataset.ticket)");
+    const tousClan = lignes.length > 0 && lignes.every((t) => rell.has(t));
+    const surPlace = await marque();
+    await cliquer(o, "#contenu .puces .puce", "Tous");
+    const retour = await attendre(async () => (await hash()) === "#port/tickets", 6000, 200);
+    return { ok: !!ok && tousClan && surPlace && Math.abs(apres - avant) < 6 && !!retour,
+      detail: `${lignes.length} ticket(s) ouvert(s), tous du clan : ${tousClan} · défilement ${avant} → ${apres} · ${surPlace ? "sur place" : "page redessinée"} · retour « Tous » ${!!retour}` };
+  });
+
+  await etape(o, "Salons : « Idées & sondages », ses deux vues sur place (#…/idees ↔ #…/sondages)", async () => {
+    await aller(o, "#port/salons/idees");
+    await marquer();
+    const onglet0 = await ouvert();
+    if (!await cliquer(o, "#contenu .outils .segment button", "Sondages")) return { ok: false, detail: "« Sondages » absent" };
+    const ok = await attendre(async () => (await hash()) === "#port/salons/sondages" && (await texte()).includes("Créés par les membres sur Discord"), 6000, 200);
+    const onglet1 = await ouvert();
+    const nb = await evaluer(o, "document.querySelectorAll('#contenu .sous-onglets a').length");
+    return { ok: !!ok && onglet0 === "Idées & sondages" && onglet1 === "Idées & sondages" && await marque() && nb === 5,
+      detail: `onglet « ${onglet0} » puis « ${onglet1} » · ${nb} onglets · ${await marque() ? "sur place" : "page redessinée"}` };
+  });
+
+  await etape(o, "Réglages : Textes & noms, Nettoyage ; « Régler les durées » du recrutement y mène", async () => {
+    await aller(o, "#capitainerie/reglages");
+    const o1 = await ouvert();
+    if (!await cliquer(o, "#contenu .sous-onglets a", "Nettoyage")) return { ok: false, detail: "onglet « Nettoyage » absent" };
+    const n = await attendre(async () => (await hash()) === "#capitainerie/reglages/nettoyage" && (await texte()).includes("Le grand ménage"), 8000, 250);
+    await aller(o, "#capitainerie/recrutement/reglages");
+    await deplier(o, "Le nettoyage");
+    const b = await attendre(() => cliquer(o, "#contenu button", "Régler les durées"), 6000);
+    const r = await attendre(async () => (await hash()) === "#capitainerie/reglages/nettoyage" && (await titre()) === "Réglages", 6000, 200);
+    return { ok: o1 === "Textes & noms" && !!n && !!b && !!r, detail: `ouvert d'abord « ${o1} » · Nettoyage ${!!n} · depuis le recrutement ${!!r}` };
+  });
+
+  await etape(o, "Accueil : les chiffres de l'Aperçu (« Tout afficher ») ; « Alertes en cours » ouvre le Répertoire filtré", async () => {
+    await aller(o, "#accueil/attente");
+    await evaluer(o, "(() => { if (document.documentElement.classList.contains('mode-simple')) document.querySelector('.bascule-mode').click(); return 1; })()");
+    await pause(300);
+    const tuiles = await evaluer(o, "[...document.querySelectorAll('#contenu .tuile .lib')].filter((x) => x.getClientRects().length).map((x) => x.textContent)");
+    const tendances = await evaluer(o, "[...document.querySelectorAll('#contenu details.groupe summary')].some((s) => s.textContent.includes('Tendances'))");
+    const alertes = (d.alertes || []).length;
+    let filtre = "";
+    if (alertes) {
+      await evaluer(o, "(() => { [...document.querySelectorAll('#contenu button.tuile')].find((b) => b.textContent.includes('Alertes en cours')).click(); return 1; })()");
+      await attendre(async () => (await hash()) === "#port/repertoire", 6000, 200);
+      filtre = await evaluer(o, "((document.querySelector('#contenu .puces [aria-pressed=true]') || {}).textContent || '').replace(/\\d+$/, '').trim()");
+    }
+    await evaluer(o, "(() => { if (!document.documentElement.classList.contains('mode-simple')) document.querySelector('.bascule-mode').click(); return 1; })()");
+    const attendues = ["Tickets ouverts", "Questions sans réponse", "Alertes en cours", "Sanctions · 30 jours", "Candidatures", "Membres du clan"];
+    return { ok: attendues.every((x) => tuiles.includes(x)) && tendances && (!alertes || filtre === "Alertes"),
+      detail: tuiles.join(", ") + " · Tendances " + tendances + (alertes ? " · Répertoire filtré « " + filtre + " »" : "") };
+  });
+
+  await etape(o, "Catalogue : le type dans une liste (plus de rangée d'onglets) ; « Métiers » ne montre que les métiers", async () => {
+    await aller(o, "#capitainerie/catalogue");
+    const rangee = await evaluer(o, "!!document.querySelector('#contenu .sous-onglets')");
+    const cat = await api(o, "rell/catalogue");
+    const metiers = (cat.elements || []).filter((e) => e.type === "metier" && e.actif !== false).length;
+    await evaluer(o, "(async () => { const g = [...document.querySelectorAll('#contenu .liste-groupe')].find((x) => x.querySelector('.liste-lib').textContent.trim() === 'Type'); g.querySelector('.liste-bouton').click(); await new Promise((r) => setTimeout(r, 400)); [...document.querySelectorAll('[role=option]')].find((x) => x.textContent.includes('Métiers')).click(); return 1; })()");
+    const vus = await attendre(async () => { const n = await evaluer(o, "document.querySelectorAll('#contenu button.element-carte, #contenu article.element-carte').length"); return n ? n : null; }, 6000, 200);
+    await evaluer(o, "(async () => { const g = [...document.querySelectorAll('#contenu .liste-groupe')].find((x) => x.querySelector('.liste-lib').textContent.trim() === 'Type'); g.querySelector('.liste-bouton').click(); await new Promise((r) => setTimeout(r, 400)); [...document.querySelectorAll('[role=option]')].find((x) => x.textContent.includes('Tous les types')).click(); return 1; })()");
+    return { ok: !rangee && vus === Math.min(metiers, 24), detail: `rangée d'onglets : ${rangee} · ${vus} carte(s) pour ${metiers} métier(s)` };
+  });
+
+  await etape(o, "Recherche : les anciens noms trouvent leur nouvelle place (« aperçu », « tickets du clan », « fiches techniques »)", async () => {
+    const essais = [["aperçu", "Les chiffres du bord", "#accueil/attente"], ["tickets du clan", "Tickets · Clan · RELL Seas", "#port/tickets/clan"],
+      ["fiches techniques", "Fiches techniques", "#equipage/membres/fiches"]];
+    const vus = [];
+    for (const [q, option, cible] of essais) {
+      await aller(o, "#port/journal");
+      await evaluer(o, "(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })); return 1; })()");
+      await attendre(() => evaluer(o, "!!document.querySelector('dialog[open] .recherche-champ')"), 5000, 150);
+      await evaluer(o, `(() => { const i = document.querySelector('dialog[open] .recherche-champ'); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
+      await pause(800);
+      const ok = await evaluer(o, `(() => { const x = [...document.querySelectorAll('dialog[open] .rech-groupe[aria-label="Rubriques"] .rech-option')].find((e) => e.querySelector('.rech-titre').textContent === ${JSON.stringify(option)}); if (!x) return false; x.click(); return true; })()`);
+      const arrive = ok && await attendre(async () => (await hash()) === cible, 6000, 200);
+      vus.push(q + " → " + (arrive ? cible : ok ? "pas arrivé" : "absent"));
+      if (!arrive) return { ok: false, detail: vus.join(" · ") };
+    }
+    return { ok: true, detail: vus.join(" · ") };
+  });
+
+  await etape(o, "Noms : une vue renommée (Textes & noms) se lit partout — l'onglet, la présence en direct", async () => {
+    const cle = "site.sous.equipage.membres.fiches";
+    const t0 = await api(o, "textes");
+    const t = (t0.groupes || []).flatMap((g) => g.textes || []).find((x) => x.cle === cle);
+    if (!t) return { ok: false, detail: "nom « " + cle + " » absent du registre" };
+    const r = await ecrireApi("texte", { cle, valeur: "Fiches du bord", version: t.version });
+    if (r.status !== 200) return { ok: false, detail: "écriture refusée : " + JSON.stringify(r).slice(0, 200) };
+    await evaluer(o, "(() => { localStorage.removeItem('capitainerie.libelles'); return 1; })()");
+    await aller(o, "#equipage/membres");
+    await o.s("Page.reload", {});   // la page relit les noms (sinon toutes les deux minutes)
+    await attendre(() => evaluer(o, "!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 12000, 200);
+    const onglet = await attendre(async () => { const l = await evaluer(o, "[...document.querySelectorAll('#contenu .sous-onglets a')].map((a) => a.textContent.trim())"); return l.includes("Fiches du bord") ? l : null; }, 8000, 300);
+    //  La présence en direct dit la page de chacun, aussi celle d'un onglet pas encore rechargé (une ancienne adresse).
+    const pages = [ANCIENNES[3][0], ANCIENNES[1][0], "#port/tickets/clan", ANCIENNES[0][0]].map((x) => x.slice(1));
+    const presence = await evaluer(o, "import('/tableau/espace/s/direct.js').then((m) => " + JSON.stringify(pages) + ".map((p) => m.libellePage(p)))");
+    const t1 = (await api(o, "textes")).groupes.flatMap((g) => g.textes || []).find((x) => x.cle === cle);
+    const remis = await ecrireApi("texte/defaut", { cle, version: t1.version });
+    const ok = !!onglet && presence[0] === "Équipage › Équipage › Fiches du bord" && presence[1] === "Capitainerie › Réglages › Nettoyage"
+      && presence[2] === "Le Port › Tickets › Clan · RELL Seas" && presence[3] === "Accueil › Ce qui t'attend" && remis.status === 200;
+    return { ok, detail: "onglets : " + (onglet || []).join(", ") + " · présence : " + presence.join(" | ") + " · remis : " + remis.status };
+  });
+}
+
 // ─── Le tout ────────────────────────────────────────────────────────────────
 async function principal() {
   mkdirSync(SORTIE, { recursive: true });
@@ -1337,6 +1529,7 @@ async function principal() {
     if (PARCOURS.includes("accueil")) await parcoursAccueil(o);
     if (PARCOURS.includes("recherche")) await parcoursRecherche(o);
     if (PARCOURS.includes("textes")) await parcoursTextes(o);
+    if (PARCOURS.includes("navigation")) await parcoursNavigation(o);
   } finally {
     try { await envoyer("Browser.close"); } catch (e) { /* déjà fermé */ }
     await pause(400);
