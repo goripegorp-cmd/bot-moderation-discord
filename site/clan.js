@@ -13,6 +13,7 @@ import { ouvrirFiche, agir, RANGS } from "./fiche.js";
 import { ticketsVue, indisponible } from "./discord.js";
 import { affiche, afficheVierge, nomAffiche, metiersDe, gradeDe, insigneImage } from "./affiche.js";
 import { ligne, lignes, groupes, outilsGroupes, badgeRestreint, avance } from "./rangement.js";
+import { avecVerrou } from "./direct.js";
 
 const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(p)) delete etat.pages[k]; };
 
@@ -202,10 +203,13 @@ export function fiches(vue) {
     equipage = equipage.filter((x) => contient([x.m.nom, x.m.pseudo, x.m.id, x.a && x.a.surnom, x.a && x.a.roblox && x.a.roblox.nom].join(" "), f.q));
     const avec = equipage.filter((x) => x.a).length;
     const creer = (m) => { if (peutAgir()) aller("capitainerie", "affiches", "nouvelle-" + m.id); else ouvrirFiche(m.id); };
-    const rendre = (x) => (x.a ? affiche(x.a, cat, { taille: "mini", clic: () => emettre("affiche:ouvrir", x.a.id) }) : afficheVierge(x.m, () => creer(x.m)));
+    // Présence en direct : le cadenas sur une affiche (ou sur la nouvelle affiche d'un membre) en cours de modification.
+    const rendre = (x) => (x.a ? avecVerrou(affiche(x.a, cat, { taille: "mini", clic: () => emettre("affiche:ouvrir", x.a.id) }), "affiche:" + x.a.id)
+      : avecVerrou(afficheVierge(x.m, () => creer(x.m)), "affiche-membre:" + x.m.id));
     // Les membres sans affiche : une ligne chacun (pas un mur de fiches vierges), « Créer l'affiche » à droite.
-    const ligneSans = (x) => ligne({ visuel: avatar(x.m, "p"), titre: nomDe(x.m), sous: x.m.pseudo ? "@" + x.m.pseudo : "", badges: [badgeRestreint(x.m.id)],
-      actions: [peutAgir() ? { texte: true, icone: "plume", libelle: "Créer l'affiche", onclick: () => creer(x.m) } : null], ouvrir: () => ouvrirFiche(x.m.id), libelleOuvrir: "Ouvrir la fiche de " + nomDe(x.m) });
+    const ligneSans = (x) => avecVerrou(ligne({ visuel: avatar(x.m, "p"), titre: nomDe(x.m), sous: x.m.pseudo ? "@" + x.m.pseudo : "", badges: [badgeRestreint(x.m.id)],
+      actions: [peutAgir() ? { texte: true, icone: "plume", libelle: "Créer l'affiche", onclick: () => creer(x.m) } : null], ouvrir: () => ouvrirFiche(x.m.id), libelleOuvrir: "Ouvrir la fiche de " + nomDe(x.m) }),
+      "affiche-membre:" + x.m.id);
     const zone = h("div", { classe: "groupes-zone" });
     const blocs = [h("div", { classe: "rangee entre" }, h("p", { classe: "aide" }, compte(equipage.length, "membre") + " · " + compte(avec, "affiche") + " · " + compte(equipage.length - avec, "fiche vierge", "fiches vierges") + ". Touche une affiche pour la voir en grand."),
       equipage.length ? outilsGroupes(zone) : null)];

@@ -18,10 +18,11 @@ const DELAI_PAGE = 6000;
 const MAX_DONNEES = 160;
 const MAX_MEDIAS = 400;
 const MODULES = ["app.js", "noyau.js", "dom.js", "ui.js", "api.js", "hors_ligne.js", "donnees.js", "discord.js", "fiche.js", "clan.js",
-  "recrutement.js", "annonces.js", "capitainerie.js", "affiche.js", "accueil.js", "recherche.js", "rangement.js", "mode.js"];
-const VERSIONNES = ["app.js", "style.css", "composants.css", "pieces.css", "ateliers.css", "rangement.css", "polices/polices.css", "icones/ui.svg", "manifest.webmanifest",
+  "recrutement.js", "annonces.js", "capitainerie.js", "affiche.js", "direct.js", "accueil.js", "recherche.js", "rangement.js", "mode.js"];
+const VERSIONNES = ["app.js", "style.css", "composants.css", "pieces.css", "ateliers.css", "direct.css", "rangement.css", "polices/polices.css", "icones/ui.svg", "manifest.webmanifest",
   "app-192.png"];
-const DONNEES = /^\/tableau\/espace\/(donnees|membre|conversation|recherche|api\/.+)$/;
+// Le direct (qui est à bord, les verrous) n'est jamais servi de mémoire : un état d'il y a une heure mentirait.
+const DONNEES = /^\/tableau\/espace\/(donnees|membre|conversation|recherche|api\/(?!direct\/).+)$/;
 
 const attendre = (ms) => new Promise((ok) => setTimeout(() => ok("delai"), ms));
 

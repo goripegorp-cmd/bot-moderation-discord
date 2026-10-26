@@ -17,6 +17,7 @@ import * as cap from "./capitainerie.js";
 import * as accueil from "./accueil.js";
 import { monterRecherche } from "./recherche.js";
 import { basculeMode, modeSimple, changerMode } from "./mode.js";
+import { demarrerDirect } from "./direct.js";
 
 const RAFRAICHIR = 60000;
 const ICONES = ["port", "equipage", "capitainerie", "apercu", "journal", "sanctions", "tickets", "repertoire", "salons", "nettoyage", "membres", "fiches",
@@ -63,6 +64,7 @@ async function demarrer() {
   monterRecherche();
   monterPancartes();
   lireRoute(true);
+  demarrerDirect();   // la présence en direct (« À bord ») et les verrous d'édition : direct.js
   document.body.classList.remove("demarrage");
   await chargerDonnees();
   rendre(true);

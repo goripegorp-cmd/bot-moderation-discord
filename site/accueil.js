@@ -15,6 +15,7 @@ import { ligne, pastilleIcone } from "./rangement.js";
 import { commencer, ouvrirPublication, NOMS_PUBLICATIONS } from "./annonces.js";
 import { indisponible } from "./discord.js";
 import { editer as editerAffiche } from "./capitainerie.js";
+import { avecVerrou } from "./direct.js";
 
 const HEURE = 3600, JOUR = 86400;
 // La priorité : son nom (lu par les lecteurs d'écran) et sa teinte (le filet à gauche de la ligne).
@@ -44,10 +45,10 @@ export function aFaire() {
       candidatures.add(c.ticket);
       const e = etapeCandidature(c);
       if (e === "corriger") pousser({ sorte: "corriger", prio: 2, personne: c, phrase: nomDe(c) + " : réponses à corriger", sous: "Candidature · ticket #" + c.ticket + " · étape 2",
-        quand: c.ouvert, action: { libelle: "Corriger", icone: "plume", faire: () => emettre("dossier:ouvrir", c.ticket) } });
+        quand: c.ouvert, objet: "dossier:" + c.ticket, action: { libelle: "Corriger", icone: "plume", faire: () => emettre("dossier:ouvrir", c.ticket) } });
       else if (e === "decider") pousser({ sorte: "decider", prio: c.ouvert && n - c.ouvert > 2 * JOUR ? 1 : 2, personne: c, phrase: nomDe(c) + " : étape 1 à décider",
         sous: "Candidature · ticket #" + c.ticket + (c.pris_par ? " · prise par " + propre(c.pris_par) : " · pas encore prise"),
-        quand: c.ouvert, action: { libelle: "Décider", icone: "candidatures", faire: () => emettre("dossier:ouvrir", c.ticket) } });
+        quand: c.ouvert, objet: "dossier:" + c.ticket, action: { libelle: "Décider", icone: "candidatures", faire: () => emettre("dossier:ouvrir", c.ticket) } });
     }
     for (const m of (d.clan && d.clan.membres) || []) {
       if (!m.rappel || m.rappel.statut !== "echu") continue;
@@ -82,7 +83,7 @@ export function aFaire() {
         action: { libelle: "Voir", icone: "calendrier", faire: () => aller("equipage", "annonces", "a-venir") } });
     }
     for (const el of E.brouillons || []) pousser({ sorte: "brouillon", prio: 4, icone: "parchemin", phrase: "Brouillon « " + (el.titre || NOMS_PUBLICATIONS[el.type] || "Sans titre") + " » pas encore publié",
-      sous: (NOMS_PUBLICATIONS[el.type] || "Publication") + " · modifié " + depuis(el.maj || n), quand: el.maj,
+      sous: (NOMS_PUBLICATIONS[el.type] || "Publication") + " · modifié " + depuis(el.maj || n), quand: el.maj, objet: el.id ? "brouillon:" + el.id : null,
       action: { libelle: "Ouvrir", icone: "plume", faire: () => ouvrirPublication(el, "brouillons") } });
   }
   // Les rôles des métiers : ce qui les empêche de marcher.
@@ -148,11 +149,12 @@ export function resserrer(items) {
 
 export function ligneAFaire(x) {
   const [nomPrio, teinte] = PRIORITES[x.prio] || PRIORITES[4];
-  return ligne({
+  // Présence en direct : le dossier ou le brouillon que quelqu'un d'autre a ouvert porte son cadenas (déjà pris en main).
+  return avecVerrou(ligne({
     visuel: x.personne ? avatar(x.personne, "p") : pastilleIcone(x.icone || "info", teinte), titre: x.phrase, sous: [h("span", { classe: "sr" }, nomPrio + " · "), x.sous || ""],
     date: x.quand ? depuis(x.quand) : "", dateTitre: x.quand ? date(x.quand, true) : "", teinte, classe: "a-faire", donnees: { sorte: x.sorte, prio: x.prio },
     actions: [Object.assign({ texte: true, onclick: x.action.faire, classe: x.prio === 1 ? "principal" : "" }, x.action)],
-  });
+  }), x.objet);
 }
 
 // ─── Les raccourcis par tâche ───────────────────────────────────────────────

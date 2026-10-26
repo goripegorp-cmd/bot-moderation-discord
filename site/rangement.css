@@ -334,3 +334,16 @@ dialog.pancarte.recherche-fenetre[open] { animation: fondu .16s ease both; }
 
 /* Au téléphone, la recherche va droit au champ : le sous-titre (ce qu'on peut chercher) est déjà dans l'exemple du champ. */
 @media (max-width: 519px) { .recherche-fenetre .pancarte-tete .sous-titre { display: none; } }
+
+/* ─── Le direct sur une ligne compacte (direct.js) ─────────────────── */
+/* Prise par un autre (ou ouverte dans un autre de mes onglets) : la plaque se pose sur la date et les gestes, au milieu
+   de la ligne, jamais au-dessus du bord (les lignes se suivent à 6 px) ; le nom et le titre restent lisibles. */
+.lignes-c > .lc.direct-sous-verrou > .direct-badge, .lignes-c > .lc.direct-chez-moi > .direct-badge {
+  top: 50%; right: 8px; max-width: min(62%, 300px); transform: translateY(-50%);
+}
+.lignes-c > .lc.direct-sous-verrou > .lc-date, .lignes-c > .lc.direct-sous-verrou > .lc-actions,
+.lignes-c > .lc.direct-chez-moi > .lc-date, .lignes-c > .lc.direct-chez-moi > .lc-actions { visibility: hidden; }
+.lignes-c > .lc.banque-ligne.direct-sous-verrou, .lignes-c > .lc.banque-ligne.direct-chez-moi { padding-top: 6px; }
+@media (max-width: 719px) {   /* au téléphone, les gestes écrits ont leur rangée en bas : la plaque s'y pose */
+  .lignes-c > .lc.lc-larges.direct-sous-verrou > .direct-badge, .lignes-c > .lc.lc-larges.direct-chez-moi > .direct-badge { top: auto; bottom: 6px; transform: none; }
+}

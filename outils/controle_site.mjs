@@ -35,6 +35,19 @@ const NAVIGATEURS = [opt("navigateur", ""), process.env.CHROME || "",
 
 // Ouvrir le brouillon « Sortie en mer » (le vrai site local et la maquette en ont un) dans le composeur.
 const OUVRIR_BROUILLON = "[...document.querySelectorAll('article.evt-carte')].find(a => a.textContent.includes('Sortie en mer')).querySelector('.feuillet-pied button').click()";
+// La présence en direct : la carte de l'affiche tenue par l'autre personne, bien en vue ; puis son éditeur (lecture
+// seule). Exécutées DANS la page (elles ne capturent rien du script).
+async function voirCarteDirect() {
+  for (const g of document.querySelectorAll("details.groupe")) g.open = true;
+  await new Promise((r) => setTimeout(r, 500));
+  const b = document.querySelector('[data-direct-objet="affiche:demo-kolax-01"]');
+  if (b && b.parentElement) b.parentElement.scrollIntoView({ block: "center" });
+}
+async function ouvrirEditeurDirect() {
+  document.querySelector('[data-direct-objet="affiche:demo-kolax-01"]').closest("button.affiche").click();
+  await new Promise((r) => setTimeout(r, 1000));
+  [...document.querySelectorAll("dialog[open] button")].find((x) => x.textContent.includes("Modifier")).click();
+}
 // Ouvrir la première affiche (les groupes par métier sont repliés au départ).
 const OUVRIR_AFFICHE ="(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.affiche').click(); })()";
 // Une ligne compacte (rangement.js) ou une ancienne carte, cliquable, dont le texte contient… (la première sinon).
@@ -101,6 +114,12 @@ const SCENES = [
     geste2: "[...document.querySelectorAll('dialog button')].find(b => b.textContent.includes('Passer à l')).click()" },
   { nom: "fenetre-file", ancre: "#port/apercu", geste: "document.querySelector('#plaque-etat').click()" },
   { nom: "fenetre-element-catalogue", ancre: "#capitainerie/catalogue", geste: "(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.element-carte').click(); })()" },
+  // La présence en direct : une SECONDE personne (la direction, son propre cookie) tient l'affiche de Kolax en
+  // modification. La liste « À bord » ouverte, la carte sous cadenas, l'éditeur en lecture seule (vrai site local).
+  { nom: "direct-liste", ancre: "#capitainerie/affiches", autre: true, geste: "document.querySelector('.direct-bord').click()" },
+  { nom: "direct-carte-verrouillee", ancre: "#capitainerie/affiches", autre: true, geste: "(" + voirCarteDirect + ")()" },
+  { nom: "direct-lecture-seule", ancre: "#capitainerie/affiches", autre: true, geste: "(" + voirCarteDirect + ")()",
+    geste2: "(" + ouvrirEditeurDirect + ")()" },
 ];
 
 // ─── Le protocole DevTools ──────────────────────────────────────────────────
@@ -273,7 +292,38 @@ async function capture(o, chemin) {
   writeFileSync(chemin, Buffer.from(r.data, "base64"));
 }
 
+// La seconde personne des scènes « direct-* » : la direction, dans un autre contexte du navigateur (son propre cookie),
+// ouvre l'affiche de Kolax en modification et la garde. Seulement avec --entree (le vrai site local a deux personnes).
+let autre = null;
+async function preparerAutre() {
+  if (autre !== null) return autre;
+  autre = false;
+  const entree = String(opt("entree", "") || "");
+  if (!entree) return false;
+  try {
+    const { browserContextId } = await envoyer("Target.createBrowserContext", {});
+    const { targetId } = await envoyer("Target.createTarget", { url: "about:blank", browserContextId });
+    const { sessionId } = await envoyer("Target.attachToTarget", { targetId, flatten: true });
+    const o = { s: (m, p) => envoyer(m, p, sessionId), sessionId, targetId };
+    await o.s("Page.enable");
+    await o.s("Runtime.enable");
+    await o.s("Emulation.setDeviceMetricsOverride", { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false });
+    await o.s("Page.navigate", { url: entree + (entree.includes("?") ? "&" : "?") + "qui=direction" });
+    await pause(1500);
+    await o.s("Page.navigate", { url: URL_SITE + "#capitainerie/affiches" });
+    await attendrePret(o, 12000);
+    await evaluer(o, "(" + voirCarteDirect + ")()");
+    await evaluer(o, "(" + ouvrirEditeurDirect + ")()");
+    await pause(1200);
+    autre = o;
+  } catch (e) {
+    console.log("        · seconde personne impossible : " + e.message);
+  }
+  return autre;
+}
+
 async function controlerScene(o, scene, [l, hh]) {
+  if (scene.autre && !(await preparerAutre())) { console.log(`passée ${scene.nom.padEnd(30)} (une seconde personne : vrai site local, --entree)`); return; }
   erreursCourantes = [];
   await taille(o, l, hh);
   await o.s("Page.navigate", { url: URL_SITE + "?scene=" + scene.nom + "-" + l + scene.ancre });

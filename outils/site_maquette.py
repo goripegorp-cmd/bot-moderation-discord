@@ -42,7 +42,7 @@ import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
-from aiohttp import web
+from aiohttp import web, WSMsgType
 
 try:
     from zoneinfo import ZoneInfo
@@ -2812,6 +2812,36 @@ async def sync(request):
     return _json({"resultats": resultats})
 
 
+# ─── La présence en direct (site/direct.js) ─────────────────────────────────
+async def direct(request):
+    """La WebSocket du direct, réduite à une personne (la maquette n'en a qu'une) : chaque verrou lui est accordé.
+    Le vrai serveur (tableau.py, plusieurs personnes, verrous refusés, 423) : outils/site_local.py."""
+    if not _session_ok():
+        return _json({"erreur": "Session expirée."}, 403)
+    ws = web.WebSocketResponse(heartbeat=25, max_msg_size=1024)
+    await ws.prepare(request)
+    moi = MONDE.fondateur
+    async for msg in ws:
+        if msg.type != WSMsgType.TEXT:
+            break
+        try:
+            m = json.loads(msg.data)
+        except ValueError:
+            break
+        t, maintenant = m.get("t"), int(time.time())
+        if t == "bonjour":
+            await ws.send_json({"t": "etat", "moi": moi["id"], "o": "maquette", "s": maintenant, "v": [],
+                                "p": [{"id": moi["id"], "nom": moi["nom"], "av": moi["avatar"], "n": 1, "d": maintenant,
+                                       "pages": [[str(m.get("page") or ""), maintenant]]}],
+                                "cfg": {"bat": 20, "bail": 60, "inactif": 300, "tour": 10}})
+        elif t == "prendre":
+            await ws.send_json({"t": "pris", "o": m.get("o"), "n": 0, "ch": False,
+                                "v": {"o": m.get("o"), "ti": str(m.get("ti") or ""), "id": moi["id"], "d": maintenant, "nb": 1}})
+        elif t == "lacher":
+            await ws.send_json({"t": "libre", "o": m.get("o"), "s": maintenant})
+    return ws
+
+
 # ─── Les bascules de la maquette ────────────────────────────────────────────
 async def bascule(request):
     global MONDE
@@ -2883,6 +2913,7 @@ def application() -> web.Application:
     r.add_post(ESPACE + "/action", action)
     r.add_post(ESPACE + "/sortir", sortir)
     r.add_post(ESPACE + "/sync", sync)
+    r.add_get(ESPACE + "/direct", direct)
     r.add_route("*", ESPACE + "/api/{nom:.+}", api)
     r.add_get("/maquette/{quoi}", bascule)
     r.add_get("/v/{nom}", visuel)

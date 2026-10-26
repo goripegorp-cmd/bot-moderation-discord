@@ -17,6 +17,7 @@ import {
 import { ouvrirFiche, reponses, transcriptEnLigne, STATUTS_CAND, etapeCandidature, chargerSuivi } from "./fiche.js";
 import { indisponible } from "./discord.js";
 import { ligne, lignes, groupes, outilsGroupes, badgeRestreint, quandLigne, avance } from "./rangement.js";
+import { avecVerrou, protegerEditeur, protegerZone, siLibre } from "./direct.js";
 
 export const THEMES = [["studio", "Studio RELL Games"], ["jeu", "Le jeu RELL Seas"], ["races", "Races"], ["factions", "Factions"], ["fruits", "Fruits"],
   ["combat", "Combat"], ["navires", "Navires"], ["monde", "Le monde"], ["evenements", "Évènements"], ["boss", "Boss"], ["personnages", "Personnages"], ["actualites", "Actualités · Movie 3"]];
@@ -45,6 +46,7 @@ function qSource(q) {
   return { titre: typeof s === "string" ? s : q.source_titre || "", url: q.source_url || q.lien || "", minutage: q.minutage || "" };
 }
 const qRetiree = (q) => !!q.retiree;
+const court = (s) => { const t = String(s || "").trim(); return t.length > 48 ? t.slice(0, 47) + "…" : t; };
 const DIFF_NOMS = { 1: "facile", 2: "moyenne", 3: "difficile" };
 // Le dossier (questionnaire.py) : la réponse du candidat, l'attendue, la correction, l'indication — avec repli sur
 // les noms de la maquette d'origine.
@@ -147,11 +149,11 @@ function ligneCandidat(c) {
   // Court : le groupe dit déjà l'étape (« Étape 1 à décider », « Réponses à corriger », « Questions envoyées »).
   const [lib, coul] = { decider: ["À décider", "ambre"], corriger: ["À corriger", ""], attente: ["En attente", "mer"],
     decidee: ["Décidée", "encre"] }[e] || ["Candidature", "encre"];
-  return ligne({
+  return avecVerrou(ligne({
     visuel: avatar(c, "p"), titre: nomDe(c), sous: "Ticket #" + c.ticket + " · ouvert " + depuis(c.ouvert) + " · " + (c.pris_par ? "pris par " + sansEmoji(c.pris_par) : "pas encore pris"),
     badges: [tampon(lib, coul, true), badgeRestreint(c.id)], ...quandLigne(c.ouvert), etat: e === "corriger" ? "alerte" : e === "decider" ? "chaude" : null,
     ouvrir: () => ouvrirDossier(c.ticket), libelleOuvrir: "Ouvrir le dossier de " + nomDe(c), donnees: { ticket: c.ticket },
-  });
+  }), "dossier:" + c.ticket);
 }
 
 // ─── Décidées ───────────────────────────────────────────────────────────────
@@ -210,6 +212,9 @@ export async function ouvrirDossier(ticket) {
   const p = pancarte({ titre: "Dossier de " + (nomDe(c0) || "candidat"), sous: "Ticket #" + ticket, icone: "candidatures", taille: "tres-large", surFermer: () => { if (dossierOuvert && dossierOuvert.p === p) dossierOuvert = null; } });
   const etatD = { p, ticket: String(ticket), vue: "dossier", choix: null };
   dossierOuvert = etatD;
+  // Présence en direct : une seule personne à la fois corrige et décide ; libéré, le dossier est relu sur place.
+  etatD.verrou = protegerEditeur(p, "dossier:" + ticket, "le dossier de " + (c0.nom ? nomDe(c0) : "ce candidat"),
+    { surPlace: true, relire: () => { etatD.vue = "dossier"; etatD.choix = null; return rendreDossier(etatD, true); } });
   remplacer(p.corps, squelettes(3));
   await rendreDossier(etatD, true);
 }
@@ -220,6 +225,7 @@ async function rendreDossier(etatD, forcer) {
   if (!D || D.erreur) { remplacer(p.corps, vide("Dossier indisponible", (D && D.erreur) || "Réessaie dans un instant.", "attention")); remplacer(p.pied, bouton("Fermer", { classe: "discret", onclick: () => p.fermer() })); return; }
   const cand = D.candidat || {};
   p.titre.firstChild.textContent = "Dossier de " + (nomDe(cand) || nomDe(P(cand.id)) || "candidat");
+  if (etatD.verrou) etatD.verrou.changerObjet("dossier:" + etatD.ticket, "le dossier de " + (cand.nom ? nomDe(cand) : cand.id ? nomDe(P(cand.id)) : "ce candidat"));
   if (etatD.vue === "choix") return rendreChoix(etatD, D, B);
   const envois = (D.envois || []).slice().sort((a, b) => (b.envoye_le || 0) - (a.envoye_le || 0));
   const dernier = envois[0];
@@ -473,9 +479,16 @@ async function envoyerQuestions(etatD, D, B) {
   emettre("recharger");
   await rendreDossier(etatD, true);
 }
-/** Le choix des questions hors dossier (modèle, sélection par défaut). */
-async function choisirHorsDossier(mode, depart, surValider, titre) {
+/** Le choix des questions hors dossier (modèle, sélection par défaut). `m` : le modèle modifié (présence en direct). */
+async function choisirHorsDossier(mode, depart, surValider, titre, m) {
   const p = pancarte({ titre, icone: "parchemin", taille: "tres-large" });
+  if (m && m.id) protegerEditeur(p, "modele:" + m.id, "le modèle « " + sansEmoji(m.nom) + " »", { relire: async () => {
+    perime("banque");
+    const B2 = await charger("banque", { forcer: true });
+    const m2 = ((B2 && B2.modeles) || []).find((x) => String(x.id) === String(m.id));
+    if (!m2) throw new Error("modèle introuvable");
+    choisirHorsDossier("modele", (m2.questions || []).map(String), (ids) => enregistrerModeleDirect(m2, { questions: ids }), "Modèle « " + m2.nom + " »", m2);
+  } });
   const etatD = { p, ticket: null, vue: "choix", mode, depart, choix: null, retour: true, surValider: async (ids) => { await surValider(ids); p.fermer(); } };
   const B = await charger("banque");
   rendreChoix(etatD, null, B);
@@ -523,8 +536,8 @@ function questionnaire(zone) {
       // Les réglages du questionnaire, rarement touchés : repliés, chacun avec son compte.
       h("div", { classe: "groupes-zone" }, groupes([
         { titre: "Les modèles", icone: "etoile", compte: (B.modeles || []).length, cle: "bq-modeles", contenu: () => blocModeles(B) },
-        { titre: "Les liens donnés au candidat", icone: "lien", compte: (B.liens || []).length, cle: "bq-liens", contenu: () => blocLiens(B) },
-        { titre: "Les réglages", icone: "cle", cle: "bq-reglages", contenu: () => blocReglages(B) },
+        { titre: "Les liens donnés au candidat", icone: "lien", compte: (B.liens || []).length, cle: "bq-liens", contenu: () => blocLiens(B, () => maj(true)) },
+        { titre: "Les réglages", icone: "cle", cle: "bq-reglages", contenu: () => blocReglages(B, () => maj(true)) },
       ], { ouverts: 0 })));
     majBoutonsReseau(resultats);
   };
@@ -535,13 +548,14 @@ function questionnaire(zone) {
  *  Modifier et Retirer à droite ; les variantes, la source et l'extrait au clic. */
 function ligneBanque(B, q) {
   const src = qSource(q), vari = qVariantes(q);
-  return ligne({
+  return avecVerrou(ligne({
     titre: qTexte(q), sous: "Réponse : " + (qReponse(q) || "—") + (vari.length ? " · " + quantite(vari.length, "variante(s)") : "") + (src.titre || src.url ? " · source : " + (src.titre || src.url) : ""),
     badges: [h("span", { classe: "difficulte d" + qDifficulte(q) }, DIFFICULTES[qDifficulte(q)]),
       (q.statut || "a_verifier") === "a_verifier" ? tampon("À vérifier", "ambre", true) : tampon("Confirmée", "vert", true), q._attente ? tampon("En attente", "", true) : null], maxBadges: 3,
-    actions: peutAgir() ? [{ noeud: interrupteur("Active", qActive(q), (v) => enregistrerQuestion(Object.assign({}, q, { active: v, actif: v }), q)) },
+    actions: peutAgir() ? [{ noeud: interrupteur("Active", qActive(q), (v, i) => { if (!siLibre("question:" + q.id)) { i.checked = !v; return; } enregistrerQuestion(Object.assign({}, q, { active: v, actif: v }), q); }) },
       { icone: "plume", libelle: "Modifier", onclick: () => editerQuestion(B, q) },
       { icone: "supprimer", libelle: "Retirer", danger: true, onclick: async () => {
+        if (!siLibre("question:" + q.id)) return;
         const ok = await confirmer({ titre: "Retirer cette question de la banque ?", texte: "« " + qTexte(q) + " » ne sera plus proposée. Les dossiers qui l'ont déjà gardent leur réponse.", libelleOk: "Retirer", style: "danger" });
         if (ok) { await mettreEnFile("recrutement/question/retirer", { id: q.id }, { genre: "question", cle: String(q.id), resume: "Retirer une question de la banque", retrait: true }); emettre("jeu", { nom: "banque" }); }
       } }] : [],
@@ -551,7 +565,7 @@ function ligneBanque(B, q) {
       src.titre || src.url ? h("div", { classe: "meta banque-source" }, icone("lien", "ic-p"), " ", src.url ? h("a", { href: src.url }, src.titre || src.url) : src.titre, src.minutage ? " · à " + src.minutage : "",
         q.section ? " · " + q.section : "") : null,
       q.extrait ? h("p", { classe: "banque-extrait" }, q.extrait) : null],
-  });
+  }), "question:" + q.id);
 }
 async function enregistrerQuestion(v, q) {
   const corps = { theme: v.theme, question: qTexte(v).trim(), reponse: qReponse(v).trim(), variantes: qVariantes(v), source: (qSource(v).url || "").trim(),
@@ -567,6 +581,13 @@ function editerQuestion(B, q) {
   const v = q ? Object.assign({}, q, { question: qTexte(q), reponse: qReponse(q), variantes: qVariantes(q).slice(), source: qSource(q), difficulte: qDifficulte(q) })
     : { theme: themesDe(B)[0][0], question: "", reponse: "", variantes: [], source: { titre: "", url: "", minutage: "" }, section: "", extrait: "", difficulte: 1, statut: "a_verifier", active: true };
   const p = pancarte({ titre: q ? "Modifier la question" : "Nouvelle question", sous: "Uniquement des faits vérifiables, avec leur source.", icone: "parchemin", taille: "large" });
+  if (q && q.id && !String(q.id).startsWith("tmp-")) protegerEditeur(p, "question:" + q.id, "la question « " + court(qTexte(q)) + " »", { relire: async () => {
+    perime("banque");
+    const B2 = await charger("banque", { forcer: true });
+    const q2 = ((B2 && B2.questions) || []).find((x) => String(x.id) === String(q.id));
+    if (!q2) throw new Error("question introuvable");
+    editerQuestion(B2, q2);
+  } });
   const texte = zoneTexte({ rows: 3, maxlength: 400, placeholder: "Quel studio développe RELL Seas ?" }, v.question);
   texte.addEventListener("input", () => { v.question = texte.value; });
   const rep = saisie({ value: v.reponse, maxlength: 200, placeholder: "RELL Games" });
@@ -602,21 +623,23 @@ function blocModeles(B) {
   const modeles = B.modeles || [];
   return h("div", { classe: "pile" },
     h("p", { classe: "aide" }, "Un modèle, c'est une sélection de questions prête à envoyer en un clic. Le modèle par défaut est proposé d'emblée à chaque candidat (et utilisé sur Discord)."),
-    modeles.length ? h("div", { classe: "grille egale" }, modeles.map((m) => h("article", { classe: "feuillet" + (m.par_defaut ? " calme" : "") + (m._attente ? " en-attente" : "") },
+    modeles.length ? h("div", { classe: "grille egale" }, modeles.map((m) => avecVerrou(h("article", { classe: "feuillet" + (m.par_defaut ? " calme" : "") + (m._attente ? " en-attente" : "") },
       h("div", { classe: "rangee entre" }, h("h3", { classe: "titre-carte" }, sansEmoji(m.nom)), m.par_defaut ? tampon("Par défaut", "vert", true) : null),
       h("p", { classe: "meta" }, compte((m.questions || []).length, "question")),
       peutAgir() ? h("div", { classe: "feuillet-pied" },
-        bouton("Les questions", { classe: "p", icone: "plume", onclick: () => choisirHorsDossier("modele", (m.questions || []).map(String), (ids) => enregistrerModeleDirect(m, { questions: ids }), "Modèle « " + m.nom + " »") }),
+        bouton("Les questions", { classe: "p", icone: "plume", onclick: () => choisirHorsDossier("modele", (m.questions || []).map(String), (ids) => enregistrerModeleDirect(m, { questions: ids }), "Modèle « " + m.nom + " »", m) }),
         bouton("Renommer", { classe: "p discret", onclick: async () => {
+          if (!siLibre("modele:" + m.id)) return;
           const nom = saisie({ value: m.nom, maxlength: 60 });
           const ok = await confirmer({ titre: "Renommer le modèle", contenu: [champ("Nom", nom)], libelleOk: "Renommer" });
           if (ok && nom.value.trim()) enregistrerModeleDirect(m, { nom: nom.value.trim() });
         } }),
-        m.par_defaut ? null : bouton("Par défaut", { classe: "p discret", icone: "etoile", onclick: () => enregistrerModeleDirect(m, { par_defaut: true }) }),
+        m.par_defaut ? null : bouton("Par défaut", { classe: "p discret", icone: "etoile", onclick: () => { if (siLibre("modele:" + m.id)) enregistrerModeleDirect(m, { par_defaut: true }); } }),
         bouton("Supprimer", { classe: "p discret danger", icone: "supprimer", onclick: async () => {
+          if (!siLibre("modele:" + m.id)) return;
           const ok = await confirmer({ titre: "Supprimer le modèle « " + m.nom + " » ?", texte: "Les questions restent dans la banque.", libelleOk: "Supprimer", style: "danger" });
           if (ok) { await mettreEnFile("recrutement/modele/retirer", { id: m.id }, { genre: "modele", cle: String(m.id), resume: "Supprimer le modèle « " + m.nom + " »", retrait: true }); emettre("jeu", { nom: "banque" }); }
-        } })) : null))) : vide("Aucun modèle", "Dans le choix des questions d'un candidat, « Enregistrer comme modèle »."),
+        } })) : null), "modele:" + m.id))) : vide("Aucun modèle", "Dans le choix des questions d'un candidat, « Enregistrer comme modèle »."),
     peutAgir() ? h("div", { classe: "rangee" }, bouton("Nouveau modèle", { icone: "ajouter", onclick: () => choisirHorsDossier("modele", [], (ids) => enregistrerModele(ids, false), "Nouveau modèle") })) : null);
 }
 async function enregistrerModeleDirect(m, changements) {
@@ -625,9 +648,10 @@ async function enregistrerModeleDirect(m, changements) {
   toast("Modèle enregistré.", "succes");
   emettre("jeu", { nom: "banque" });
 }
-function blocLiens(B) {
+function blocLiens(B, recharger) {
   const liens = copie(B.liens || []);
   const zone = h("div", { classe: "pile" });
+  protegerZone(zone, "questionnaire:liens", "les liens du questionnaire", { des: "saisie", relire: recharger });   // présence en direct
   const ligne = (l, i) => {
     const titre = saisie({ value: l.titre || "", maxlength: 120, "aria-label": "Titre du lien", placeholder: "Vidéo officielle du Movie 3" });
     const url = saisie({ value: l.url || "", maxlength: 500, "aria-label": "Adresse", placeholder: "https://…", inputmode: "url" });
@@ -660,7 +684,7 @@ function blocLiens(B) {
   dessiner();
   return zone;
 }
-function blocReglages(B) {
+function blocReglages(B, recharger) {
   const r = B.reglages || {};
   const max = (B.limites && B.limites.par_envoi) || 40;
   const v = { nombre: Math.max(1, Math.min(max, Number(r.nombre || r.nombre_defaut) || 10)), version: r.version };
@@ -668,7 +692,7 @@ function blocReglages(B) {
   nombreE.addEventListener("input", () => { v.nombre = Math.max(1, Math.min(max, Number(nombreE.value) || 1)); });
   const pas = (d) => () => { v.nombre = Math.max(1, Math.min(max, v.nombre + d)); nombreE.value = v.nombre; };
   const defaut = modeleDefautObjet(B);
-  return h("div", { classe: "cadre pile serree" },
+  const bloc = h("div", { classe: "cadre pile serree" },
     B._reglagesAttente ? bandeau("Réglages gardés sur l'appareil : ils partiront au retour de la connexion.", "") : null,
     h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Nombre de questions par défaut"),
       h("div", { classe: "pas-a-pas" }, boutonIcone("moins", "Une de moins", pas(-1)), nombreE, boutonIcone("plus", "Une de plus", pas(1))),
@@ -678,6 +702,8 @@ function blocReglages(B) {
       h("p", { classe: "aide" }, defaut ? "Le modèle « " + sansEmoji(defaut.nom) + " » (" + compte((defaut.questions || []).length, "question") + ") : proposé à chaque candidat, et envoyé quand on passe à l'étape 2 depuis Discord."
         : "Aucun modèle par défaut : marque un modèle « Par défaut » pour choisir les questions envoyées d'office.")),
     peutAgir() ? h("div", { classe: "rangee" }, bouton("Enregistrer les réglages", { classe: "p principal", icone: "valider", onclick: () => enregistrerReglages(v) })) : null);
+  protegerZone(bloc, "questionnaire:reglages", "les réglages du questionnaire", { des: "saisie", relire: recharger });   // présence en direct
+  return bloc;
 }
 async function enregistrerReglages(v) {
   await mettreEnFile("recrutement/reglages", { nombre: v.nombre, version: v.version }, { genre: "reglages", cle: "reglages", resume: "Réglages du questionnaire" });
