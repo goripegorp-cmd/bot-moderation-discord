@@ -1,8 +1,9 @@
-// clan.js — « L'Équipage » (clan GoRP) : les membres, les fiches techniques (affiches), les tickets du clan.
-// Les candidatures : recrutement.js ; les annonces et événements : annonces.js.
+// clan.js — « L'Équipage » (clan GoRP) : les membres et leurs trois vues — présence, fiches techniques (affiches),
+// équipes. Les tickets du clan : Le Port › Tickets (discord.js) ; les candidatures : recrutement_zone.js ; les annonces
+// et événements : annonces.js.
 
 import { h, icone, date, depuis, nombre, sansEmoji, contient, lettre, compte, maintenant, remplacer, quantite, accord, ajouter } from "./dom.js";
-import { etat, P, peutAgir, aller, filtres, enLigne, emettre } from "./noyau.js";
+import { etat, P, peutAgir, aller, filtres, enLigne, emettre, nommerOnglets } from "./noyau.js";
 import { lire, action as envoyerAction } from "./api.js";
 import { charger, typeMetier, typeGrade, elementsDe, element } from "./donnees.js";
 import {
@@ -10,7 +11,7 @@ import {
   toast, copier, confirmer, caseACocher, liste, squelettes, compteur, champ,
 } from "./ui.js";
 import { ouvrirFiche, agir, RANGS } from "./fiche.js";
-import { ticketsVue, indisponible } from "./discord.js";
+import { indisponible } from "./discord.js";
 import { affiche, afficheVierge, nomAffiche, metiersDe, gradeDe, insigneImage } from "./affiche.js";
 import { ligne, lignes, groupes, outilsGroupes, badgeRestreint, avance } from "./rangement.js";
 import { avecVerrou } from "./direct.js";
@@ -19,19 +20,45 @@ import { vueParEquipe } from "./equipes_admin.js";
 const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(p)) delete etat.pages[k]; };
 
 // ─── L'équipage ─────────────────────────────────────────────────────────────
-export function membres(vue) {
-  const f = filtres("clan", { q: "", rang: "tous", ajout: "", vue: "presence" });
+// 27/10/2026 : « Équipage » est UNE liste et ses trois vues, un sous-onglet chacune — Présence (#equipage/membres),
+// Fiches techniques (…/fiches : l'ancienne rubrique) et Équipes (…/equipes : l'ancien « Par équipe ») ; on passe de
+// l'une à l'autre sans quitter la page (la recherche, les tuiles et « Ajouter au clan » restent).
+export const VUES_EQUIPAGE = nommerOnglets("site.sous.equipage.membres", [["presence", "Présence", "membres"], ["fiches", "Fiches techniques", "fiches"], ["equipes", "Équipes", "equipage"]]);
+const vueEquipage = (sous) => (VUES_EQUIPAGE.some(([k]) => k === sous) ? sous : "presence");
+export function membres(vue, ctx = {}) {
+  const f = filtres("clan", { q: "", rang: "tous", ajout: "" });
+  let v = vueEquipage(ctx.sous);
+  let fic = null;   // la vue « Fiches techniques » : son contrôleur (fiches())
+  const onglets = h("div", { classe: "sous-onglets", role: "tablist", "aria-label": "L'équipage" });
   const haut = h("div", { classe: "pile" }), resultats = h("div", { classe: "pile" }), bas = h("div", { classe: "pile" });
   const lot = h("div", { classe: "lot-hote" });
-  const changer = () => { resetPages("clan"); majResultats(); };
-  ajouter(vue, [haut, h("div", { classe: "outils" },
-    recherche(f.q, "Rechercher un membre ou un identifiant…", (q) => { f.q = q; changer(); }),
-    segment(f.vue, [["presence", "Par présence"], ["equipe", "Par équipe"]], (v) => { f.vue = v; changer(); }, "Regrouper"),
-    bouton("Copier la liste", { icone: "copier", classe: "avance", onclick: () => {
-      const l = (etat.d && etat.d.clan && etat.d.clan.membres) || [];
-      const larg = Math.max(4, ...l.map((x) => nomDe(x).length));
-      copier(l.map((x) => nomDe(x).padEnd(larg + 2) + x.id + "  " + x.statut).join("\n"), quantite(l.length, "membre(s) copié(s)"));
-    } })), resultats, bas, lot]);
+  const changer = () => { resetPages("clan"); if (fic) fic.chercher(); else majResultats(); };
+  const champRecherche = recherche(f.q, "Rechercher un membre ou un identifiant…", (q) => { f.q = q; changer(); });
+  const copierListe = bouton("Copier la liste", { icone: "copier", classe: "avance", onclick: () => {
+    const l = (etat.d && etat.d.clan && etat.d.clan.membres) || [];
+    const larg = Math.max(4, ...l.map((x) => nomDe(x).length));
+    copier(l.map((x) => nomDe(x).padEnd(larg + 2) + x.id + "  " + x.statut).join("\n"), quantite(l.length, "membre(s) copié(s)"));
+  } });
+  const outils = h("div", { classe: "outils" }, champRecherche);
+  ajouter(vue, [onglets, haut, outils, resultats, bas, lot]);
+  /** La vue choisie : son onglet, ses outils (la recherche reste en place : elle garde ce qui est tapé), sa liste. */
+  const montrerVue = () => {
+    remplacer(onglets, ...VUES_EQUIPAGE.map(([k, l, ic]) => h("a", { classe: "etiquette", role: "tab", href: "#equipage/membres" + (k === "presence" ? "" : "/" + k),
+      "aria-selected": String(k === v) }, icone(ic), l)));
+    const indice = v === "fiches" ? "Nom, surnom, nom Roblox…" : "Rechercher un membre ou un identifiant…";
+    champRecherche.champ.placeholder = indice;
+    champRecherche.champ.setAttribute("aria-label", indice);
+    for (const x of [...outils.children]) if (x !== champRecherche) x.remove();
+    if (v === "fiches") {
+      etat.selection.clear();
+      remplacer(lot); remplacer(bas); remplacer(resultats);
+      fic = fiches(resultats, { q: () => f.q, outils: (commandes) => outils.append(...commandes) });
+    } else {
+      fic = null;
+      outils.append(copierListe);
+      majResultats(); majBas();
+    }
+  };
   const majHaut = () => {
     const c = etat.d && etat.d.clan;
     if (!c) { remplacer(haut, indisponible()); return; }
@@ -43,8 +70,11 @@ export function membres(vue) {
       tuile({ cle: "k3", lib: "Peu présents", val: nb[1], icone: "minuteur", sous: "absents plus de 7 jours", teinte: "#a8641c" }),
       tuile({ cle: "k4", lib: "Inactifs", val: nb[2], icone: "attention", sous: "absents un mois ou plus", teinte: "#8e2a24" })),
     peutAgir() && c.role ? cadreAjout(f) : null,
-    peutAgir() ? h("p", { classe: "aide avance" }, "Coche des membres pour les prévenir de leur inactivité ou leur retirer le rôle du clan (25 au plus d'un coup). Le fondateur et la direction ne sont jamais touchés.") : null);
-    remplacer(bas, (c.direction || []).length ? h("div", { classe: "cadre pile serree" }, h("h3", {}, "Fondateur et direction"),
+    peutAgir() && v !== "fiches" ? h("p", { classe: "aide avance" }, "Coche des membres pour les prévenir de leur inactivité ou leur retirer le rôle du clan (25 au plus d'un coup). Le fondateur et la direction ne sont jamais touchés.") : null);
+  };
+  const majBas = () => {
+    const c = etat.d && etat.d.clan;
+    remplacer(bas, c && (c.direction || []).length ? h("div", { classe: "cadre pile serree" }, h("h3", {}, "Fondateur et direction"),
       h("p", { classe: "aide" }, "Mis à part : hors statistiques, intouchables depuis le site."),
       h("div", { classe: "pastilles" }, c.direction.map((m) => h("button", { classe: "puce", type: "button", onclick: () => ouvrirFiche(m.id) }, avatar(m, "xs"), h("span", { classe: "puce-lib" }, nomDe(m)))))) : "");
   };
@@ -89,7 +119,7 @@ export function membres(vue) {
     blocs.push(puces([["tous", "Tous", c.membres.length], ...RANGS.map(([lib, t], r) => (nb[r] ? [String(r), lib, nb[r], t] : null)).filter(Boolean)], String(f.rang), (v) => { f.rang = v; changer(); }, "Présence"));
     if (!l.length) blocs.push(vide("Personne ici", "Change le filtre ou la recherche."));
     //  27/10/2026 : par équipe (le chef d'abord, tamponné ; l'éditeur d'une équipe en panneau : equipes_admin.js).
-    if (f.vue === "equipe" && l.length) {
+    if (v === "equipes" && l.length) {
       const zoneEq = h("div", { classe: "pile" });
       remplacer(resultats, ...blocs, zoneEq);
       vueParEquipe(zoneEq, l, (m, badge) => ligneClan(m, (RANGS[m.rang] || [])[1], () => { majLot(); }, badge), () => majResultats(), !!f.q || f.rang !== "tous");
@@ -107,9 +137,11 @@ export function membres(vue) {
     remplacer(resultats, ...blocs);
     majLot();
   };
-  const maj = () => { majHaut(); majResultats(); };
-  maj();
-  return { maj, quitter: () => etat.selection.clear() };
+  const maj = () => { majHaut(); if (fic) fic.maj(); else { majResultats(); majBas(); } };
+  majHaut();
+  montrerVue();
+  return { maj, majJeu: () => { if (fic) fic.maj(); }, quitter: () => etat.selection.clear(),
+    sous: (s) => { const n = vueEquipage(s); if (n !== v) { v = n; resetPages("clan"); majHaut(); montrerVue(); } } };
 }
 
 /** Un membre du clan : sa case (sélection), son nom, sa présence sur 7 jours, son rappel ; « Retirer » à droite. */
@@ -189,15 +221,18 @@ async function dialoguePrevenir(n) {
 }
 
 // ─── Les fiches techniques (affiches des membres) ───────────────────────────
-export function fiches(vue) {
-  const f = filtres("fiches", { q: "", vue: "metier", quoi: "tous" });
+// 27/10/2026 : une vue d'« Équipage » (l'ancienne rubrique) — `o.q()` : la recherche de la rubrique ; `o.outils(commandes)` :
+// ses commandes (regrouper, afficher, l'atelier), rangées à côté de cette recherche.
+export function fiches(vue, o) {
+  const f = filtres("fiches", { vue: "metier", quoi: "tous" });
+  const q = () => o.q() || "";
   const resultats = h("div", { classe: "pile" }, squelettes(3));
   const changer = () => { resetPages("fic"); maj(); };
-  ajouter(vue, [h("div", { classe: "outils" },
-    recherche(f.q, "Nom, surnom, nom Roblox…", (q) => { f.q = q; changer(); }),
+  o.outils([
     segment(f.vue, [["metier", "Par métier"], ["grade", "Par grade"], ["az", "De A à Z"]], (v) => { f.vue = v; changer(); }, "Regrouper"),
     liste({ valeur: f.quoi, label: "Afficher", options: [{ v: "tous", l: "Tout l'équipage" }, { v: "avec", l: "Avec une affiche" }, { v: "sans", l: "Sans affiche" }], changer: (v) => { f.quoi = v; changer(); } }),
-    bouton("Ouvrir l'atelier", { icone: "affiches", classe: "discret", onclick: () => aller("capitainerie", "affiches") })), resultats]);
+    bouton("Ouvrir l'atelier", { icone: "affiches", classe: "discret", onclick: () => aller("capitainerie", "affiches") })]);
+  ajouter(vue, [resultats]);
   let pret = false;
   const maj = async () => {
     const [cat, aff] = [await charger("catalogue"), await charger("affiches")];
@@ -210,7 +245,7 @@ export function fiches(vue) {
     let equipage = etat.d.clan.membres.map((m) => ({ m, a: parMembre.get(String(m.id)) || null }));
     if (f.quoi === "avec") equipage = equipage.filter((x) => x.a);
     if (f.quoi === "sans") equipage = equipage.filter((x) => !x.a);
-    equipage = equipage.filter((x) => contient([x.m.nom, x.m.pseudo, x.m.id, x.a && x.a.surnom, x.a && x.a.roblox && x.a.roblox.nom].join(" "), f.q));
+    equipage = equipage.filter((x) => contient([x.m.nom, x.m.pseudo, x.m.id, x.a && x.a.surnom, x.a && x.a.roblox && x.a.roblox.nom].join(" "), q()));
     const avec = equipage.filter((x) => x.a).length;
     const creer = (m) => { if (peutAgir()) aller("capitainerie", "affiches", "nouvelle-" + m.id); else ouvrirFiche(m.id); };
     // Présence en direct : le cadenas sur une affiche (ou sur la nouvelle affiche d'un membre) en cours de modification.
@@ -228,7 +263,7 @@ export function fiches(vue) {
       const parL = new Map();
       equipage.sort((x, y) => nomDe(x.m).localeCompare(nomDe(y.m), "fr", { sensitivity: "base" })).forEach((x) => { const l = lettre(x.m.nom); if (!parL.has(l)) parL.set(l, []); parL.get(l).push(x); });
       ajouter(zone, groupes([...parL.entries()].map(([l, g]) => ({ titre: l, compte: g.length, cle: "fic-az-" + l,
-        contenu: () => paginer("fic-az-" + l, g, rendre, { classe: "grille affiches", pas: 18 }) })), { ouverts: equipage.length <= 40 ? parL.size : 1, forcer: !!f.q }));
+        contenu: () => paginer("fic-az-" + l, g, rendre, { classe: "grille affiches", pas: 18 }) })), { ouverts: equipage.length <= 40 ? parL.size : 1, forcer: !!q() }));
     } else {
       const t = f.vue === "metier" ? typeMetier(cat) : typeGrade(cat);
       const parCle = new Map();
@@ -243,13 +278,10 @@ export function fiches(vue) {
         const titre = k === "__sans" ? "Sans affiche" : k === "__aucun" ? (f.vue === "metier" ? "Sans métier" : "Sans grade") : e ? e.nom : sansEmoji(k);
         return { titre, compte: parCle.get(k).length, visuel: e ? insigneImage(e, "groupe-visuel") : null, icone: !e ? (k === "__sans" ? "plume" : "drapeau") : null, cle: "fic-" + f.vue + "-" + k,
           contenu: () => (k === "__sans" ? lignes("fic-" + f.vue + "-" + k, parCle.get(k), ligneSans) : paginer("fic-" + f.vue + "-" + k, parCle.get(k), rendre, { classe: "grille affiches", pas: 18 })) };
-      }), { ouverts: cles.length <= 3 ? cles.length : 2, forcer: !!f.q }));
+      }), { ouverts: cles.length <= 3 ? cles.length : 2, forcer: !!q() }));
     }
     remplacer(resultats, ...blocs, zone);
   };
   maj();
-  return { maj: () => { if (pret) maj(); } };
+  return { maj: () => { if (pret) maj(); }, chercher: changer };
 }
-
-// ─── Les tickets du clan ────────────────────────────────────────────────────
-export const tickets = (vue) => ticketsVue(vue, "clan");
