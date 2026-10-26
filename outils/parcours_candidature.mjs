@@ -628,12 +628,12 @@ async function principal() {
       const nomme = await attendre(async () => ((await D.api("recrutement/chefs")).chefs || []).find((x) => String(x.membre.id) === String(chef.id)), 15000);
       const badge = ((await D.api("equipage/equipes")).badges || {})[String(chef.id)] || "";
       if (!nomme || !badge.startsWith("Chef validé · ")) return { ok: false, detail: "pas nommé ou pas de badge : « " + badge + " »" };
-      await allerD(D, "#equipage/membres");
+      //  27/10/2026 (la navigation regroupée) : l'ancien « Par équipe » est la vue « Équipes » d'Équipage (…/equipes).
+      await allerD(D, "#equipage/membres/equipes");
       await D.s("Page.reload", {});
       await attendre(() => D.evaluer("!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 12000);
       await pause(600);
-      if (!await cliquer(D, ".segment button", "Par équipe")) return { ok: false, detail: "« Par équipe » absent" };
-      if (!await attendre(() => cliquer(D, "#contenu button", "Nouvelle équipe"), 8000)) return { ok: false, detail: "« Nouvelle équipe » absent" };
+      if (!await attendre(() => cliquer(D, "#contenu button", "Nouvelle équipe"), 8000)) return { ok: false, detail: "« Nouvelle équipe » absent de la vue « Équipes »" };
       const premier = await attendre(() => D.evaluer(`(() => { const d = [...document.querySelectorAll("dialog[open]")].pop();
         const li = d && d.querySelector('ol.choix-equipe[role="radiogroup"] > li'); if (!li) return null;
         const r = li.querySelector('input[type="radio"]'); return { id: r ? r.value : "", texte: li.innerText.replace(/\\s+/g, " ").trim() }; })()`), 8000);
