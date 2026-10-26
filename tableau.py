@@ -2641,22 +2641,36 @@ async def etat_nettoyage(guild_id: int, maintenant: float | None = None) -> dict
     aujourd'hui, le dernier passage et son bilan."""
     t = maintenant or time.time()
     regles, compteurs, partiront = [], {}, {}
-    for r in sorted(REGLES.values(), key=lambda x: (x["ordre"], x["cle"])):
-        jours = await jours_regle(guild_id, r["cle"])
+    #  27/10/2026 (plusieurs années) : une trentaine de règles, chacune son compte et son aperçu — lus quatre à la fois
+    #  (à 5 ans, l'un après l'autre : 0,6 s à chaque visite de la rubrique).
+    a_la_fois = asyncio.Semaphore(NETTOYAGE_LECTURES)
+
+    async def lire_regle(r):
+        async with a_la_fois:
+            jours = await jours_regle(guild_id, r["cle"])
+            garde = _ABSENT
+            if r["compter"] is not None:
+                try:
+                    n = r["compter"](int(guild_id), jours, t)
+                    garde = int(((await n) if inspect.isawaitable(n) else n) or 0)
+                except Exception as ex:  # un compteur illisible n'empêche pas les autres
+                    _log("[TABLEAU][E15] compteur de nettoyage illisible")
+                    _log(f"[TABLEAU][E15:DETAIL] {r['cle']} {type(ex).__name__} {ex}")
+                    garde = None
+            partira = _ABSENT
+            if r.get("apercu") is not None and r["fn"] is not None:
+                partira = await apercu_regle(r, guild_id, jours, t)
+            return jours, garde, partira
+    ordre = sorted(REGLES.values(), key=lambda x: (x["ordre"], x["cle"]))
+    for r, (jours, garde, partira) in zip(ordre, await asyncio.gather(*(lire_regle(r) for r in ordre))):
         regles.append({"cle": r["cle"], "nom": r["nom"], "quoi": r["quoi"], "garde_jours": jours,
                        "defaut": r["garde_jours"], "min": r["min"], "max": r["max"],
                        "reglable": r["min"] < r["max"], "auto": r["fn"] is not None, "ordre": r["ordre"],
                        **({"duree": r["duree"]} if r.get("duree") else {})})
-        if r["compter"] is not None:
-            try:
-                n = r["compter"](int(guild_id), jours, t)
-                compteurs[r["cle"]] = int(((await n) if inspect.isawaitable(n) else n) or 0)
-            except Exception as ex:  # un compteur illisible n'empêche pas les autres
-                _log("[TABLEAU][E15] compteur de nettoyage illisible")
-                _log(f"[TABLEAU][E15:DETAIL] {r['cle']} {type(ex).__name__} {ex}")
-                compteurs[r["cle"]] = None
-        if r.get("apercu") is not None and r["fn"] is not None:
-            partiront[r["cle"]] = await apercu_regle(r, guild_id, jours, t)
+        if garde is not _ABSENT:
+            compteurs[r["cle"]] = garde
+        if partira is not _ABSENT:
+            partiront[r["cle"]] = partira
     async with _get_db() as db:
         async with db.execute("SELECT dernier, bilan, par FROM tableau_nettoyage_etat WHERE guild_id=?",
                               (int(guild_id),)) as cur:
@@ -2683,6 +2697,7 @@ async def etat_nettoyage(guild_id: int, maintenant: float | None = None) -> dict
 
 
 ETAT_STOCKAGE = None   # async (guild_id) → {base, libre, dossiers…} : branché par longevite.py
+NETTOYAGE_LECTURES = 4   # règles lues en même temps par la rubrique (le bot a 20 connexions à la base)
 
 
 async def apercu_regle(r: dict, guild_id: int, jours: int, t: float):
