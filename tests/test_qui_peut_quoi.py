@@ -19,6 +19,11 @@ Q11 « Bannir définitivement » un recours : la hiérarchie d'avant la radiatio
 Q12 jamais le rôle du clan à un membre sanctionné (radié, isolé, restreint) : ni « Accepter » une candidature, ni
     /rellseas « Donner ».
 Q13 /mod unmute ne défait pas une restriction de la direction (/mod direction) : elle se lève par /mod undirection.
+Q14 une sanction qui finit pendant qu'une autre tient (restriction, radiation) ne rend RIEN : ses rôles gardés passent
+    à celle qui tient, rendus à SA levée — dans les deux sens, par la commande comme par l'expiration.
+Q15 /mod clear : l'auteur gère les messages du salon visé (revérifié à la confirmation).
+Q16 le fondateur et la direction (TETE_IDS) protégés EN DUR, un seul refus stable : /mod mute, warn, direction,
+    infractions, le panneau « Action staff requise », les dossiers suspects.
 """
 from __future__ import annotations
 
@@ -46,6 +51,13 @@ SCHEMA_RADIES = ("CREATE TABLE IF NOT EXISTS radiated_members (guild_id INTEGER,
 
 def _noeud(nom):
     return next((n for n in ARBRE.body if getattr(n, "name", None) == nom), None)
+
+
+def _constante(nom, defaut=""):
+    """La valeur d'une constante texte de premier niveau de bot.py (le chargeur ne lit que fonctions et classes)."""
+    import re
+    m = re.search(rf'^{nom} = "(.*)"$', SRC, re.M)
+    return m.group(1) if m else defaut
 
 
 def _charger(ns: dict, *noms, optionnels=()) -> dict:
@@ -121,6 +133,9 @@ class Membre:
 
     async def timeout(self, quand, reason=None):
         self.exclusions.append(quand)
+
+    async def kick(self, reason=None):
+        self.expulsions = getattr(self, "expulsions", 0) + 1
 
     def is_timed_out(self):
         return bool(self.exclusions) and self.exclusions[-1] is not None
@@ -329,7 +344,8 @@ def test_Q3_undirection_ne_rend_que_des_roles_plus_bas_que_le_sien(tmp_path):
             return lambda f: f
     ns = _charger(_ns(_conf={"direction_allowed_role": 50}, get_db=get_db, mod_group=Groupe(),
                       app_commands=Obj(describe=lambda **kw: (lambda f: f)), carte_embed=lambda e: e,
-                      send_mod_log=journal, now=lambda: None), "undirection_cmd")
+                      send_mod_log=journal, now=lambda: None, aiosqlite=aiosqlite), "undirection_cmd",
+                  optionnels=("_fiche_sanction", "_confier_roles"))
     conf = {"direction_allowed_role": 50}
 
     async def cfg(_gid):
@@ -662,7 +678,8 @@ def test_Q10_lever_une_radiation_suit_la_hierarchie_d_avant(tmp_path):
     cible = Membre(80, radie_r)      # radiée : il ne lui reste que « 🚫 Radié »
     g = Serveur(admin_bas, admin_tres_haut, porteur, fondateur, cible,
                 roles=(radie_r, membre_r, admin_bas_r, admin_haut_r, direction_r))
-    ns = _charger(_ns_radiation(get_db), "_lever_radiation", optionnels=("_refus_rang_radie",))
+    ns = _charger(_ns_radiation(get_db), "_lever_radiation",
+                  optionnels=("_refus_rang_radie", "_fiche_sanction", "_confier_roles"))
 
     async def lever(qui, uid, sauves):
         cible.id = uid
@@ -828,3 +845,299 @@ def test_Q13_unmute_ne_defait_pas_une_restriction_de_la_direction():
     assert "undirection" in i.textes()
     asyncio.run(ns["unmute_cmd"](Interaction(g, modo), muet))
     assert not muet.is_timed_out(), "le modérateur garde son /mod unmute pour un mute ordinaire"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Q14 — les sanctions qui se chevauchent
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#  La table des restrictions telle que bot.py la crée (`init_db`).
+SCHEMA_RESTREINTS = ("CREATE TABLE IF NOT EXISTS restricted_members (guild_id INTEGER, user_id INTEGER, roles_backup TEXT"
+                     " DEFAULT '[]', restricted_at DATETIME, duration INTEGER DEFAULT 0, reason TEXT DEFAULT '',"
+                     " restricted_by INTEGER DEFAULT 0, PRIMARY KEY (guild_id, user_id))")
+
+
+class _Groupe:
+    def command(self, **kw):
+        return lambda f: f
+
+
+def test_Q14_une_sanction_qui_finit_ne_defait_pas_celle_qui_tient(tmp_path):
+    """Le trou : un membre restreint (/mod direction), puis radié (/off) entre-temps ; la restriction finit (/mod
+    undirection, ou son expiration) : elle rendait ses rôles gardés et levait l'exclusion — le radié reparlait, ses
+    salons rouverts. Et dans l'autre sens : la radiation levée (/off off) défaisait la restriction posée après elle.
+    Une sanction qui finit pendant qu'une autre tient ne rend RIEN : ses rôles gardés passent à celle qui tient, rendus
+    à SA levée."""
+    from datetime import datetime, timedelta, timezone
+    get_db = _base(tmp_path / "chevauchement.db")
+    restreint_r, radie_r = Role(2, "🔒 Restricted", 2), Role(3, "🚫 Radié", 3)
+    membre_r, peche_r, direction_r = Role(10, "Membre", 10), Role(20, "Pêcheur", 20), Role(50, "Direction", 50)
+    porteur, fondateur, cible = Membre(40, direction_r), Membre(FONDATEUR, direction_r), Membre(30)
+    g = Serveur(porteur, fondateur, cible, roles=(restreint_r, radie_r, membre_r, peche_r, direction_r))
+    conf = {"direction_allowed_role": 50}
+    maintenant = datetime.now(timezone.utc)
+
+    async def cfg(_gid):
+        return conf
+
+    async def rien(*a, **k):
+        return None
+    ns = _charger(_ns_radiation(get_db, mod_group=_Groupe(), app_commands=discord.app_commands, carte_embed=lambda e: e,
+                                send_mod_log=rien, now=lambda: maintenant, tasks=Obj(loop=lambda **kw: (lambda f: f))),
+                  "_lever_radiation", "undirection_cmd", "check_expired_restrictions",
+                  optionnels=("_refus_rang_radie", "_fiche_sanction", "_confier_roles"))
+    ns["cfg"] = cfg
+    ns["bot"] = Obj(get_guild=lambda gid: g if gid == 1 else None)
+
+    async def poser(restriction=None, radiation=None, portes=(), duree=0, depuis_min=0):
+        async with get_db() as db:
+            await db.execute(SCHEMA_RADIES)
+            await db.execute(SCHEMA_RESTREINTS)
+            await db.execute("DELETE FROM radiated_members")
+            await db.execute("DELETE FROM restricted_members")
+            if radiation is not None:
+                await db.execute("INSERT INTO radiated_members (guild_id, user_id, saved_roles, saved_nick)"
+                                 " VALUES (1, 30, ?, 'Ancien')", (json.dumps(list(radiation)),))
+            if restriction is not None:
+                await db.execute("INSERT INTO restricted_members VALUES (1, 30, ?, ?, ?, 'x', ?)",
+                                 (json.dumps(list(restriction)), (maintenant - timedelta(minutes=depuis_min)).isoformat(),
+                                  duree, FONDATEUR))
+            await db.commit()
+        cible.roles, cible.ajouts, cible.retraits, cible.exclusions = [TOUS, *portes], [], [], ["28 jours"]
+
+    async def fiches():
+        async with get_db() as db:
+            async with db.execute("SELECT saved_roles FROM radiated_members WHERE user_id=30") as cur:
+                ra = await cur.fetchone()
+            async with db.execute("SELECT roles_backup FROM restricted_members WHERE user_id=30") as cur:
+                re_ = await cur.fetchone()
+        return (json.loads(ra[0]) if ra else None), (json.loads(re_[0]) if re_ else None)
+
+    async def etat():
+        return list(cible.ajouts), cible.is_timed_out(), await fiches()
+
+    #  A. Restreint (il gardait Membre et Pêcheur), PUIS radié (la radiation garde « Restricted »), la restriction est levée.
+    async def a():
+        await poser(restriction=(10, 20), radiation=(2,), portes=(radie_r,))
+        await ns["undirection_cmd"](Interaction(g, porteur), cible)
+        return await etat()
+    ajouts, muet, (radiation, restriction) = asyncio.run(a())
+    assert ajouts == [] and muet, "la restriction levée ne rend ni rôles ni parole à un radié"
+    assert restriction is None and radiation == [10, 20], "ses rôles gardés passent à la radiation (sans « Restricted »)"
+
+    #  B. La même chose par l'expiration de la restriction (la boucle de fond).
+    async def b():
+        await poser(restriction=(10, 20), radiation=(2,), portes=(radie_r,), duree=1, depuis_min=120)
+        await ns["check_expired_restrictions"]()
+        return await etat()
+    ajouts, muet, (radiation, restriction) = asyncio.run(b())
+    assert ajouts == [] and muet and restriction is None and radiation == [10, 20], "l'expiration non plus"
+
+    #  C. L'autre sens : radié (il gardait Membre et Pêcheur), PUIS restreint (la restriction garde « Radié »), la
+    #  radiation est levée.
+    async def c():
+        await poser(radiation=(10, 20), restriction=(3,), portes=(restreint_r,))
+        erreur = await ns["_lever_radiation"](g, cible, fondateur, "recours accepté")
+        return erreur, *await etat()
+    erreur, ajouts, muet, (radiation, restriction) = asyncio.run(c())
+    assert erreur is None and ajouts == [] and muet, "la radiation levée ne défait pas la restriction posée après elle"
+    assert radiation is None and restriction == [10, 20], "ses rôles gardés passent à la restriction (sans « Radié »)"
+
+    #  D. Puis la restriction est levée à son tour : tout revient — la direction garde son outil.
+    async def d():
+        cible.ajouts = []
+        await ns["undirection_cmd"](Interaction(g, porteur), cible)
+        return await etat()
+    ajouts, muet, fiches_ = asyncio.run(d())
+    assert sorted(ajouts) == [10, 20] and not muet and fiches_ == (None, None), "tout revient à la dernière levée"
+
+    #  E. Sans chevauchement, rien ne change : la levée rend tout.
+    async def e():
+        await poser(restriction=(10, 20))
+        await ns["undirection_cmd"](Interaction(g, porteur), cible)
+        return await etat()
+    ajouts, muet, fiches_ = asyncio.run(e())
+    assert sorted(ajouts) == [10, 20] and not muet and fiches_ == (None, None)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Q15 — /mod clear : l'auteur gère les messages du salon visé
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_Q15_mod_clear_seulement_ou_l_auteur_gere_les_messages():
+    """Le trou : le rôle de `/mod clear` suffisait — un modérateur vidait #annonces, #règles ou un salon de logs où il
+    ne pouvait que lire. Il lui faut aussi « Gérer les messages » dans CE salon (le bot l'exige déjà pour lui-même),
+    revérifié à la confirmation de « Tout supprimer »."""
+    from typing import Optional
+    purges = []
+
+    async def purger(guild, ch, n, moderateur):
+        purges.append((ch.id, n))
+        return n or 0
+
+    async def permis(i, cle):
+        return True
+
+    class Salon:
+        def __init__(self, sid, gerants):
+            self.id, self.gerants, self.mention = sid, set(gerants), f"<#{sid}>"
+
+        def permissions_for(self, qui):
+            return discord.Permissions(manage_messages=qui.id in self.gerants or qui.id == 999, read_message_history=True)
+
+    class _Discord:   # le vrai discord.py, nos salons y passant pour des salons texte
+        TextChannel = Thread = VoiceChannel = Salon
+
+        def __getattr__(self, n):
+            return getattr(discord, n)
+    ns = _charger(_ns(discord=_Discord(), check_mod_perm=permis, mod_group=_Groupe(), app_commands=discord.app_commands,
+                      Optional=Optional, _run_clear_and_report=purger, carte_texte=lambda *a, **k: a,
+                      Palette=Obj(DANGER=0, SUCCESS=0, NEUTRAL=0), LayoutView=discord.ui.LayoutView, _clear_tasks=set(),
+                      REFUS_CLEAR=_constante("REFUS_CLEAR")),
+                  "mod_clear", "ClearAllConfirmView")
+    modo = Membre(5, Role(40, "Modération", 40))
+    g = Serveur(modo)
+    annonces, general = Salon(100, gerants=()), Salon(101, gerants=(5,))
+    g.get_channel = {100: annonces, 101: general}.get
+
+    async def vider(salon, nombre):
+        i = Interaction(g, modo, channel=salon)
+        await ns["mod_clear"](i, nombre)
+        await asyncio.sleep(0)
+        return i.textes()
+
+    async def confirmer(salon):
+        v = ns["ClearAllConfirmView"].__new__(ns["ClearAllConfirmView"])
+        v.user_id, v.channel_id = modo.id, salon.id
+        i = Interaction(g, modo)
+        await v._confirm(i)
+        await asyncio.sleep(0)
+        return i.textes()
+    texte = asyncio.run(vider(annonces, 50))
+    assert purges == [] and "Gérer les messages" in texte, "pas « Gérer les messages » dans #annonces : rien n'est effacé"
+    texte = asyncio.run(vider(annonces, None))
+    assert purges == [] and "Gérer les messages" in texte and "ClearAllConfirmView" not in texte, \
+        "« tout supprimer » : la confirmation ne s'ouvre même pas"
+    asyncio.run(confirmer(annonces))
+    assert purges == [], "la confirmation revérifie (le droit a pu changer entre-temps)"
+    #  Le modérateur garde son outil là où il gère les messages.
+    asyncio.run(vider(general, 50))
+    asyncio.run(confirmer(general))
+    assert purges == [(101, 50), (101, None)], purges
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Q16 — la tête protégée en dur, partout où un membre peut être visé
+# ═══════════════════════════════════════════════════════════════════════════════
+
+REFUS_TETE = "Cible protégée : le fondateur et la direction ne sont jamais sanctionnés."
+
+
+def test_Q16_la_tete_protegee_en_dur_partout_ou_un_membre_peut_etre_vise(tmp_path, monkeypatch):
+    """Le trou : le compte de la direction n'était protégé que par la hiérarchie dans /mod mute, /mod warn,
+    /mod direction et les boutons de /mod infractions (un administrateur plus haut, ou le propriétaire, le
+    sanctionnait) ; le fondateur et le propriétaire passaient outre dans le panneau « Action staff requise » et dans les
+    dossiers suspects. Les deux comptes de TETE_IDS sont protégés EN DUR, avec un refus au message stable — et les
+    modérateurs gardent leurs outils sur les membres plus bas."""
+    import staff_sanction
+    get_db = _base(tmp_path / "tete.db")
+    admin_r, direction_r, restreint_r = Role(85, "Admin", 85), Role(50, "Direction", 50), Role(2, "🔒 Restricted", 2)
+    haut = Membre(5, admin_r, perms=discord.Permissions(administrator=True))   # passe la hiérarchie de la direction
+    proprio = Membre(4242, Role(60, "Proprio", 60))
+    fondateur = Membre(FONDATEUR, direction_r)
+    direction = Membre(DIRECTION, direction_r)
+    simple, simple2 = Membre(7, Role(5, "Membre", 5)), Membre(8, Role(5, "Membre", 5))
+    g = Serveur(haut, proprio, fondateur, direction, simple, simple2, roles=(admin_r, direction_r, restreint_r))
+    g.owner_id = 4242
+
+    async def permis(i, cle):
+        return True
+
+    async def rien(*a, **k):
+        return None
+
+    async def faux(*a, **k):
+        return False
+    conf = {"direction_allowed_role": 50}
+
+    async def cfg(_gid):
+        return conf
+    ns = _charger(_ns(get_db=get_db, check_mod_perm=permis, mod_group=_Groupe(), app_commands=discord.app_commands,
+                      C=Obj(YELLOW=0, ORANGE=0, RED=0, GREEN=0), now=lambda: None, _dm_sanction=rien,
+                      _announce_sanction_public=rien, send_mod_log=rien, _escalade_warns=rien, carte_embed=lambda e: e,
+                      is_fully_immune=faux, lift_isolation=faux, log_staff_action=rien, _dossier_traite=rien,
+                      timedelta=__import__("datetime").timedelta),
+                  "mute_cmd", "warn_cmd", "direction_cmd", "_staff_sanction_guard", "_dossier_agir", "_format_warn_id")
+    ns["cfg"] = cfg
+    ns["REFUS_TETE"] = REFUS_TETE   # la constante de bot.py (vérifiée plus bas dans sa source : le chargeur lit les fonctions)
+
+    async def preparer():
+        async with get_db() as db:
+            await db.execute("CREATE TABLE IF NOT EXISTS infractions (id INTEGER PRIMARY KEY, guild_id INTEGER,"
+                             " user_id INTEGER, mod_id INTEGER, type TEXT, reason TEXT, duration TEXT)")
+            await db.execute(SCHEMA_RESTREINTS)
+            await db.commit()
+    asyncio.run(preparer())
+
+    async def avertis(uid):
+        async with get_db() as db:
+            async with db.execute("SELECT COUNT(*) FROM infractions WHERE user_id=? AND type='warn'", (uid,)) as cur:
+                return (await cur.fetchone())[0]
+
+    async def essai(coro):
+        try:
+            await coro
+        except Exception:   # au-delà de la sanction, l'entourage n'est pas simulé : seul l'effet compte
+            pass
+    refus = []
+
+    def lancer(fn, qui, *args, **kw):
+        i = Interaction(g, qui, **kw)
+        asyncio.run(essai(fn(i, *args)))
+        refus.append(i.textes())
+        return i
+    #  /mod mute — un administrateur plus haut que la direction ; le propriétaire (qui passe la hiérarchie).
+    lancer(ns["mute_cmd"], haut, direction, 1, "heures", "essai")
+    lancer(ns["mute_cmd"], proprio, fondateur, 1, "heures", "essai")
+    assert direction.exclusions == [] and fondateur.exclusions == [], "/mod mute : jamais la tête"
+    #  /mod warn
+    lancer(ns["warn_cmd"], haut, direction, "essai")
+    assert asyncio.run(avertis(DIRECTION)) == 0, "/mod warn : jamais la tête"
+    #  /mod direction — même le propriétaire
+    lancer(ns["direction_cmd"], proprio, direction, 0, "essai")
+    assert direction.retraits == [] and restreint_r not in direction.roles, "/mod direction : jamais la tête"
+    #  /mod infractions — la garde partagée de ses boutons et de son formulaire
+    ok, motif = ns["_staff_sanction_guard"](haut, direction, g)
+    assert not ok and "fondateur et la direction" in str(motif), "/mod infractions : jamais la tête"
+    #  Les dossiers suspects — même le fondateur
+    for act in ("mute", "kick", "ban"):
+        lancer(ns["_dossier_agir"], fondateur, act, DIRECTION, message=None)
+    assert direction.exclusions == [] and DIRECTION not in g.bannis, "dossier suspect : jamais la tête"
+    #  Le panneau « Action staff requise » — même le fondateur
+    monkeypatch.setattr(staff_sanction, "_ratelimit", None)
+    staff_sanction.setup(None, get_db, None, {}, avertir=None, tete=TETE)
+    salon = Obj(permissions_for=lambda u: discord.Permissions(manage_messages=True))
+
+    async def clic(qui, cible, action):
+        await staff_sanction.init_db()
+        async with get_db() as db:
+            cur = await db.execute("INSERT INTO staff_sanction_log (guild_id, target_user_id, reason) VALUES (1, ?, 'x')",
+                                   (cible.id,))
+            sid = cur.lastrowid
+            await db.commit()
+        i = Interaction(g, qui, channel=salon, message=None)
+        await essai(staff_sanction._handle_sanction_click(i, sid, action))
+        return i.textes()
+    texte = asyncio.run(clic(fondateur, direction, "mute_1h"))
+    assert direction.exclusions == [], "panneau du staff : jamais la tête, même par le fondateur"
+    #  Chaque refus est le MÊME message, stable (aucune valeur dedans).
+    assert f'REFUS_TETE = "{REFUS_TETE}"' in SRC and getattr(staff_sanction, "REFUS_TETE", None) == REFUS_TETE,         "un seul message, stable, dans bot.py et dans le panneau du staff"
+    assert all(REFUS_TETE in t for t in refus + [texte]), [t[:80] for t in refus + [texte]]
+    #  Les modérateurs gardent leurs outils sur les autres membres.
+    lancer(ns["mute_cmd"], haut, simple, 1, "heures", "essai")
+    assert simple.exclusions, "/mod mute : un membre plus bas, toujours"
+    lancer(ns["warn_cmd"], haut, simple2, "essai")
+    assert asyncio.run(avertis(8)) == 1, "/mod warn : un membre plus bas, toujours"
+    assert ns["_staff_sanction_guard"](haut, simple, g) == (True, None)
+    lancer(ns["_dossier_agir"], fondateur, "ban", 77, message=None)
+    assert 77 in g.bannis, "dossier suspect : le fondateur tranche toujours pour les autres"

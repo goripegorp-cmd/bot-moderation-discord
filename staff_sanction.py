@@ -69,6 +69,8 @@ STAFF_CHANNEL_NAME = "🚨-actions-staff"
 
 #  26/10/2026 (sécurité) : la tête (fondateur et direction, par identifiant), passée par bot.py — jamais visée d'un clic.
 _tete: frozenset = frozenset()
+#  Le refus STABLE, le même que bot.py (`REFUS_TETE`) : le fondateur et la direction ne sont jamais sanctionnés.
+REFUS_TETE = "Cible protégée : le fondateur et la direction ne sont jamais sanctionnés."
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, avertir=None, tete=()):
@@ -296,6 +298,10 @@ async def _handle_sanction_click(
                 "🔒 Impossible de kick/ban l'owner ou super-owner.",
                 ephemeral=True,
             )
+        # 26/10/2026 (sécurité) : le fondateur et la direction sont protégés EN DUR — même par le fondateur et le
+        # propriétaire ; « faux positif » reste possible (il ne sanctionne rien).
+        if target_id in _tete and action != "ignore":
+            return await i.response.send_message(f"🔒 {REFUS_TETE}", ephemeral=True)
         # 26/10/2026 (sécurité) — comme /mod (hiérarchie) : ni soi-même (s'avertir, classer « faux positif » le panneau
         # qui nous vise), ni la tête, ni un rang égal ou supérieur. Le propriétaire et le fondateur passent.
         if not is_super:

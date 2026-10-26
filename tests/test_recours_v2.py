@@ -243,7 +243,7 @@ def test_R6_le_bouton_de_decision_inscrit_la_decision():
     async def send(*a, **k):
         suivis.append(a or k)
     ns = _ns("RadieDecisionButton", _autorise_radiation=rien, _lever_radiation=rien, _prevenir_radie=rien,
-             _carte_recours_decidee=carte, _fermer_recours=rien)
+             _carte_recours_decidee=carte, _fermer_recours=rien, _fiche_sanction=rien)   # aucune restriction en cours
     msg = Obj()
     i = Obj(response=Obj(defer=rien), followup=Obj(send=send), user=Obj(mention="<@50>"), message=msg,
             guild=Obj(id=1, get_member=lambda _uid: Obj(mention="<@42>")))
