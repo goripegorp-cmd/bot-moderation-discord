@@ -1306,8 +1306,8 @@ async function parcoursTextes(o) {
       if (!await attendre(() => cliquer(o, "dialog[open] button", "Revenir à l'origine"), 5000)) return "confirmation absente (" + titre + ")";
       return "";
     };
-    for (const [groupe, titre] of [["Le site", "Le Port · le nom"], ["Recrutement", "Refus de l'étape 1"], ["Annonces & événements", "Le bouton « Disponible »"],
-      ["Recrutement", "Étape 1 refusée (la carte)"], ["Le site", "Annonces & événements · l'onglet « Publiées »"], ["Le guide du clan", "Le post 📢 Infos · le bouton"]]) {
+    for (const [groupe, titre] of [["Le site", "Le Port · le nom"], ["Recrutement", "Demande refusée (dans le ticket)"], ["Annonces & événements", "Le bouton « Disponible »"],
+      ["Recrutement", "Demande refusée"], ["Le site", "Annonces & événements · l'onglet « Publiées »"], ["Le guide du clan", "Le post 📢 Infos · le bouton"]]) {
       const faute = await remettre(groupe, titre);
       if (faute) return { ok: false, detail: faute };
       await pause(600);

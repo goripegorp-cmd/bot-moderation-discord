@@ -38,6 +38,7 @@ const ETATS = { etape1: ["Demande", "ambre"], etape2: ["Questionnaire", "mer"], 
   refuse: ["Refusé", ""], refus_etape1: ["Demande refusée", ""], ferme: ["Fermé", "encre"] };
 const FINALES = new Set(["accepte", "refuse", "refus_etape1", "ferme"]);
 const STYLES_DISCORD = { 1: "primary", 2: "", 3: "success", 4: "danger", 5: "lien" };
+const RE_BANNIERE = /^\/v\/[A-Za-z0-9_-]{1,40}\.(png|gif)(\?v=[A-Za-z0-9_.-]{1,20})?$/;   // la bannière de l'affiche (/v/)
 const SOURCES = [["defaut", "La sélection par défaut"], ["tirage", "Un tirage dans la banque"], ["modele", "Un modèle"], ["questions", "Des questions choisies"]];
 const TYPES_CHAMP = [["court", "Texte court"], ["long", "Texte long"], ["choix", "Un choix dans une liste"]];
 
@@ -543,7 +544,15 @@ function blocDiscord(b) {
   if (!b) return null;
   if (b.type === "texte") return h("div", { classe: "discord-texte" }, apercuMarkdown(b.texte || ""));
   if (b.type === "separateur") return h("hr", { classe: "discord-sep" });
-  if (b.type === "image") return b.src ? h("figure", { classe: "discord-media" }, h("img", { src: b.src, alt: b.description || "" })) : h("p", { classe: "discord-vide" }, "(la bannière)");
+  if (b.type === "image") {
+    //  La bannière de l'affiche (/v/<nom>.png, servie par ce serveur) : l'adresse est vérifiée ici, dom.js ne connaît
+    //  pas /v/ (comme les bandeaux des annonces).
+    const u = String(b.src || "");
+    if (!RE_BANNIERE.test(u)) return h("p", { classe: "discord-vide" }, "(la bannière)");
+    const img = h("img", { alt: b.description || "" });
+    img.setAttribute("src", u);
+    return h("figure", { classe: "discord-media" }, img);
+  }
   if (b.type === "boutons") return h("div", { classe: "discord-boutons" }, (b.boutons || []).map((x) => h("span", { classe: "discord-bouton " + (x.lien ? "lien" : STYLES_DISCORD[x.style] || "") + (x.desactive ? " desactive" : "") }, x.libelle || "")));
   if (b.type === "section") return h("div", { classe: "discord-texte" }, (b.blocs || []).map(blocDiscord));
   return null;
