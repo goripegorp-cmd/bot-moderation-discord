@@ -2159,7 +2159,7 @@ def r_evenements(m, q, c):
         return refus
     E = _ev()
     maintenant = time.time()
-    brouillons, a_venir, passes = [], [], []
+    brouillons, a_venir, publiees, passes = [], [], [], []
     for e in sorted(m.evts.values(), key=lambda x: -x["id"])[:E.LIGNES_MAX]:
         m._suivre_evt(e)
         item = m.evt_site(e)
@@ -2167,14 +2167,18 @@ def r_evenements(m, q, c):
             brouillons.append(item)
         elif e["statut"] in ("envoi", "incertain") or (e["type"] == "evenement" and e["statut"] == "publie" and E.phase_de(e, maintenant) != "termine"):
             a_venir.append(item)
+        elif e["type"] != "evenement" and e["statut"] == "publie":   # 26/10/2026 : « Publiées », comme le serveur
+            publiees.append(item)
         else:
             passes.append(item)
     a_venir.sort(key=lambda x: (x["quand"] or 0, x["id"]))
     brouillons.sort(key=lambda x: -(x["maj"] or 0))
+    publiees.sort(key=lambda x: (-(x["publie"] or 0), -x["id"]))
     passes.sort(key=lambda x: -max(x["quand"] or 0, x["publie"] or 0))
     return 200, {
         "destinations": [{"id": d["id"], "nom": d["nom"], "defaut": d["defaut"]} for d in m.destinations],
-        "brouillons": brouillons, "a_venir": a_venir, "passes": passes[:E.PASSES_MAX], "passes_total": len(passes),
+        "brouillons": brouillons, "a_venir": a_venir, "publiees": publiees[:E.PASSES_MAX], "publiees_total": len(publiees),
+        "passes": passes[:E.PASSES_MAX], "passes_total": len(passes), "libelles": E.libelles_carte(0),
         "modeles": E.MODELES, "lieux": m.lieux_evt, "rappels_suggeres": E.RAPPELS_SUGGERES, "couleurs": E.COULEURS_SUGGEREES,
         "defauts": {t: E._valeurs_site(E._defauts(t)) for t in E.TYPES},
         "limites": {"titre": E.TITRE_MAX, "texte": E.TEXTE_MAX, "lieu": E.LIEU_MAX, "duree_min": E.DUREE_MAX, "rappel_min": E.RAPPEL_MAX,

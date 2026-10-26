@@ -4,8 +4,10 @@
 // un faux Discord, une base neuve à chaque démarrage), clique comme une personne, puis RELIT l'état par l'API après
 // chaque geste : un bouton qui « marche » à l'écran sans rien changer au serveur est un échec. Une capture par étape.
 //
-//   node outils/parcours_site.mjs [--url http://localhost:8790] [--sortie <dossier>] [--parcours recrutement,capitainerie,metiers]
+//   node outils/parcours_site.mjs [--url http://localhost:8790] [--sortie <dossier>] [--parcours recrutement,capitainerie,metiers,textes]
 //                                 [--navigateur <exe>]
+//   « textes » (Textes & noms) lit aussi ce que le FAUX Discord du site local a reçu (`/tableau/demo/discord`) : il ne se
+//   joue que sur le site local, jamais sur la maquette.
 //
 // La base du site local change à chaque parcours : relancer le site local avant de rejouer.
 
@@ -536,6 +538,223 @@ async function parcoursMetiers(o) {
 }
 const compte_ = (n) => String(n);
 
+// ═══ TEXTES & NOMS : un texte réécrit sur le site, et son EFFET (le faux Discord du site local le montre) ═════════
+// Le site local seul a `/tableau/demo/discord` (ce que le faux Discord a reçu) : la preuve n'est pas l'écran du site,
+// c'est le message posté dans le ticket, la carte publiée, le rôle renommé.
+async function parcoursTextes(o) {
+  const N = Date.now().toString(36).slice(-4);
+  const leTexte = async (cle) => { const d = await api(o, "textes"); for (const g of d.groupes || []) for (const t of g.textes || []) if (t.cle === cle) return t; return null; };
+  const discordLu = (params) => evaluer(o, `fetch(${JSON.stringify(BASE + "/tableau/demo/discord?")} + ${JSON.stringify(params)}, { cache: "no-store" }).then((r) => r.json())`);
+  const ecrireApi = (chemin, corps) => evaluer(o, `fetch(${JSON.stringify(SITE + "api/")} + ${JSON.stringify(chemin)}, { method: "POST", credentials: "same-origin",
+    headers: { "X-Tableau": "1", "Content-Type": "application/json" }, body: ${JSON.stringify(JSON.stringify(corps))} }).then(async (r) => ({ status: r.status, corps: await r.json() }))`);
+  /** Textes & noms : le groupe ouvert, « Modifier » sur le texte de ce titre. */
+  const ouvrirTexte = async (groupe, titre) => {
+    await aller(o, "#capitainerie/textes");
+    await evaluer(o, `(() => { const g = [...document.querySelectorAll("details.groupe")].find((x) => x.querySelector("summary").textContent.includes(${JSON.stringify(groupe)})); if (g) g.open = true; return !!g; })()`);
+    await pause(500);
+    const ok = await evaluer(o, `(() => { const li = [...document.querySelectorAll(".texte-ligne")].find((x) => x.querySelector(".texte-titre").textContent.replace(/\\s+/g, " ").trim() === ${JSON.stringify(titre)});
+      const b = li && li.querySelector(".texte-tete .bouton"); if (!b) return false; b.scrollIntoView({ block: "center" }); b.click(); return true; })()`);
+    return ok && attendre(() => evaluer(o, "!!document.querySelector('dialog[open] .texte-champ')"), 6000);
+  };
+  const ecrireTexte = (valeur) => evaluer(o, `(() => { const c = [...document.querySelectorAll("dialog[open] .texte-champ")].pop(); if (!c) return false;
+    c.focus(); c.value = ${JSON.stringify(valeur)}; c.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+  const titrePort = () => evaluer(o, "(document.querySelector('#pancartes a[data-cat=\"port\"] .pancarte-titre') || {}).textContent || ''");
+  /** Une liste de textes ouverte là où ils s'affichent (« La carte de l'équipe », « Renommer »…) : « Modifier » sur la ligne
+   *  de ce titre, puis l'éditeur ouvert. */
+  const modifierLigne = async (titre) => {
+    const ok = await attendre(() => evaluer(o, `(() => { const li = [...document.querySelectorAll("dialog[open] .texte-ligne")].find((x) => x.querySelector(".texte-titre").textContent.replace(/\\s+/g, " ").trim() === ${JSON.stringify(titre)});
+      const b = li && li.querySelector(".texte-tete .bouton"); if (!b) return false; b.scrollIntoView({ block: "center" }); b.click(); return true; })()`), 8000);
+    return ok && attendre(() => evaluer(o, "!!document.querySelector('dialog[open] .texte-champ')"), 6000);
+  };
+
+  // 1. Le refus de l'étape 1, réécrit dans « Textes & noms ».
+  const REFUS = "Merci pour ta candidature " + N + " : elle ne convient pas pour l'instant. Ce ticket va être clôturé.\n-# Thank you for applying: it doesn't fit for now. This ticket will be closed.";
+  await etape(o, "Textes : réécrire le refus de l'étape 1", async () => {
+    if (!await ouvrirTexte("Recrutement", "Refus de l'étape 1")) return { ok: false, detail: "éditeur du refus introuvable" };
+    if (!await ecrireTexte(REFUS)) return { ok: false, detail: "champ du texte introuvable" };
+    const vivant = await evaluer(o, "(document.querySelector('dialog[open] .texte-apercu-vivant') || {}).innerText || ''");
+    if (!vivant.includes("Merci pour ta candidature " + N)) return { ok: false, detail: "l'aperçu ne suit pas la saisie : " + vivant.slice(0, 120) };
+    if (!await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "bouton « Enregistrer » absent" };
+    const t = await attendre(async () => { const x = await leTexte("recrutement.refus_etape1"); return x && x.valeur === REFUS && x.modifie ? x : null; });
+    if (!t) return { ok: false, detail: "le serveur n'a pas le nouveau texte" };
+    const vu = await attendre(async () => (await texteZone(o)).includes("Merci pour ta candidature " + N), 6000);
+    return { ok: !!vu, detail: "version " + t.version + (vu ? "" : " — la liste ne montre pas le nouveau texte") };
+  });
+
+  // 1 b. La carte de l'équipe (dans le ticket), réécrite là où on règle le questionnaire (Candidatures → Questionnaire).
+  const CARTE = "### Étape 1 refusée " + N + "\nPar {par} {quand} : le message est posté, le ticket se ferme.";
+  await etape(o, "Textes : la carte de l'équipe, réécrite depuis Candidatures → Questionnaire", async () => {
+    await fermerTout(o);
+    await aller(o, "#equipage/candidatures/questionnaire");
+    if (!await attendre(() => cliquer(o, "button", "La carte de l'équipe"), 10000)) return { ok: false, detail: "bouton « La carte de l'équipe » absent" };
+    if (!await modifierLigne("Étape 1 refusée (la carte)")) return { ok: false, detail: "ligne « Étape 1 refusée (la carte) » ou éditeur absent" };
+    if (!await ecrireTexte(CARTE) || !await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "saisie ou enregistrement impossible" };
+    const t = await attendre(async () => { const x = await leTexte("recrutement.equipe.refus_etape1"); return x && x.valeur === CARTE ? x : null; });
+    await fermerTout(o);
+    return { ok: !!t, detail: t ? "enregistré (version " + t.version + ")" : "le serveur n'a pas le nouveau texte" };
+  });
+
+  // 2. Refuser une candidature : le ticket reçoit le NOUVEAU texte — réécrit encore une fois depuis la confirmation.
+  const REFUS2 = REFUS.replace("Merci pour ta candidature", "Merci pour ton intérêt");
+  await etape(o, "Textes : refuser l'étape 1 — le ticket reçoit le texte réécrit (« Modifier ce message »)", async () => {
+    const suivi = await api(o, "recrutement/suivi");
+    const tid = ((suivi.ouverts || []).filter((x) => x.etape === "etape1" && !x.fermeture_prevue).map((x) => x.ticket).sort((a, b) => b - a))[0];
+    if (!tid) return { ok: false, detail: "aucune candidature à l'étape 1" };
+    await fermerTout(o);
+    await aller(o, "#equipage/candidatures");
+    if (!await cliquer(o, ".feuillet.lien", "Ticket #" + tid + " ")) return { ok: false, detail: "dossier du ticket " + tid + " introuvable" };
+    if (!await attendre(async () => (await texteZone(o)).includes("La décision de l'étape 1"), 8000)) return { ok: false, detail: "dossier pas ouvert" };
+    if (!await cliquer(o, "button", "Refuser l'étape 1")) return { ok: false, detail: "bouton « Refuser l'étape 1 » absent" };
+    const montre = await attendre(async () => (await texteZone(o)).includes("Merci pour ta candidature " + N), 6000);
+    if (!montre) return { ok: false, detail: "la confirmation ne montre pas le texte réécrit" };
+    if (!await cliquer(o, "dialog[open] button", "Modifier ce message")) return { ok: false, detail: "« Modifier ce message » absent" };
+    if (!await attendre(() => evaluer(o, "!!document.querySelector('dialog[open] .texte-champ')"), 6000) || !await ecrireTexte(REFUS2)) return { ok: false, detail: "éditeur non ouvert" };
+    if (!await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "« Enregistrer » absent" };
+    if (!await attendre(() => evaluer(o, "!document.querySelector('dialog[open] .texte-champ')"), 8000)) return { ok: false, detail: "l'éditeur ne se ferme pas après l'enregistrement" };
+    const suit = await attendre(async () => (await evaluer(o, "(document.querySelector('dialog[open] blockquote.message-auto') || {}).innerText || ''")).includes("Merci pour ton intérêt " + N), 8000);
+    if (!suit) return { ok: false, detail: "la confirmation ne montre pas le texte modifié sur place" };
+    if (!await cliquer(o, "dialog[open] button", "Refuser et fermer le ticket")) return { ok: false, detail: "confirmation absente" };
+    const d = await attendre(async () => { const x = await api(o, "recrutement/dossier?ticket=" + tid); return x.etape === "refus_etape1" ? x : null; }, 10000);
+    if (!d) return { ok: false, detail: "le serveur n'a pas refusé l'étape 1" };
+    const fil = await attendre(async () => { const x = await discordLu("ticket=" + tid); return (x.messages || []).some((m) => m.texte.includes("Merci pour ton intérêt " + N)) ? x : null; }, 8000);
+    if (!fil) return { ok: false, detail: "le faux Discord n'a pas le nouveau texte : " + JSON.stringify(await discordLu("ticket=" + tid)).slice(0, 300) };
+    const ancien = fil.messages.some((m) => m.texte.includes("Tes réponses ne correspondent pas"));
+    // La carte de l'équipe, dans le même ticket, réécrite avec le texte choisi en 1 b.
+    const carteEquipe = await attendre(async () => { const x = await discordLu("ticket=" + tid); return (x.messages || []).find((m) => m.reecrit && m.texte.includes("Étape 1 refusée " + N)); }, 8000);
+    return { ok: !ancien && !!carteEquipe, detail: "ticket #" + tid + " : « " + fil.messages.find((m) => m.texte.includes("Merci pour ton intérêt " + N)).texte.slice(0, 90) + "… »"
+      + (ancien ? " — L'ANCIEN texte est aussi parti" : "") + (carteEquipe ? " · carte de l'équipe : « " + carteEquipe.texte.slice(0, 60) + "… »" : " — la carte de l'équipe n'a pas le texte réécrit") };
+  });
+
+  // 3. Le bouton « Disponible » réécrit : la carte publiée porte le nouveau libellé.
+  const DISPO = "Présent · Here";
+  await etape(o, "Textes : réécrire le bouton « Disponible »", async () => {
+    if (!await ouvrirTexte("Annonces & événements", "Le bouton « Disponible »")) return { ok: false, detail: "éditeur du bouton introuvable" };
+    if (!await ecrireTexte(DISPO) || !await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "saisie ou enregistrement impossible" };
+    const t = await attendre(async () => { const x = await leTexte("evenements.bouton.dispo"); return x && x.valeur === DISPO ? x : null; });
+    return { ok: !!t, detail: t ? "enregistré (version " + t.version + ")" : "le serveur n'a pas le nouveau libellé" };
+  });
+  const TITRE = "Essai des textes " + N;
+  await etape(o, "Textes : publier un événement — la carte a le nouveau bouton", async () => {
+    await aller(o, "#equipage/annonces/composer");
+    if (!await attendre(() => evaluer(o, "!!document.querySelector('.composeur-form input.saisie')"), 8000)) return { ok: false, detail: "composeur absent" };
+    await evaluer(o, `(() => { const t = document.querySelector('.composeur-form input.saisie'); t.value = ${JSON.stringify(TITRE)}; t.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
+    const apercu = await attendre(async () => { const x = await evaluer(o, "(document.querySelector('.apercu-discord-zone') || {}).innerText || ''"); return x.includes(DISPO) ? x : null; }, 6000);
+    if (!apercu) return { ok: false, detail: "l'aperçu de la saisie ne montre pas le nouveau bouton" };
+    if (!await cliquer(o, "button", "Publier…")) return { ok: false, detail: "bouton « Publier… » absent" };
+    if (!await attendre(async () => (await texteZone(o)).includes("Publier « " + TITRE), 10000)) return { ok: false, detail: "confirmation de publication absente" };
+    if (!await cliquer(o, "dialog[open] button", "Publier")) return { ok: false, detail: "bouton « Publier » de la confirmation absent" };
+    const el = await attendre(async () => { const E = await api(o, "clan/evenements"); return (E.a_venir || []).find((x) => x.titre === TITRE && x.statut === "publie" && x.lien); }, 15000);
+    if (!el) return { ok: false, detail: "l'événement n'est pas publié" };
+    const salon = (el.lien.match(/channels\/\d+\/(\d+)/) || [])[1];
+    const carte = await attendre(async () => { const x = await discordLu("salon=" + salon); return (x.messages || []).find((m) => m.texte.includes(TITRE)); }, 8000);
+    if (!carte) return { ok: false, detail: "la carte n'est pas dans le post " + salon };
+    const ok = carte.boutons.includes(DISPO) && !carte.boutons.includes("Disponible · Available");
+    return { ok, detail: "boutons de la carte : " + carte.boutons.join(" | ") };
+  });
+
+  // 4. Un conflit : le même texte modifié ailleurs pendant qu'on l'écrit — les deux versions, côte à côte.
+  await etape(o, "Textes : un conflit montre les deux versions et garde la mienne", async () => {
+    if (!await ouvrirTexte("Annonces & événements", "Le bouton « Peut-être »")) return { ok: false, detail: "éditeur introuvable" };
+    const avant = await leTexte("evenements.bouton.peut_etre");
+    const ailleurs = await ecrireApi("texte", { cle: "evenements.bouton.peut_etre", valeur: "Pourquoi pas · Why not", version: avant.version });
+    if (ailleurs.status !== 200) return { ok: false, detail: "écriture « ailleurs » refusée : " + JSON.stringify(ailleurs).slice(0, 200) };
+    if (!await ecrireTexte("Je verrai · Maybe later") || !await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "saisie impossible" };
+    const deux = await attendre(async () => { const x = await evaluer(o, "(document.querySelector('dialog[open] .texte-conflit') || {}).innerText || ''"); return x.includes("Ta version") && x.includes("La version enregistrée") && x.includes("Pourquoi pas") ? x : null; }, 8000);
+    if (!deux) return { ok: false, detail: "pas de vue du conflit" };
+    if (!await cliquer(o, "dialog[open] button", "Garder la mienne")) return { ok: false, detail: "« Garder la mienne » absent" };
+    const t = await attendre(async () => { const x = await leTexte("evenements.bouton.peut_etre"); return x && x.valeur === "Je verrai · Maybe later" ? x : null; });
+    return { ok: !!t, detail: t ? "ma version gardée (version " + t.version + ")" : "le serveur n'a pas ma version" };
+  });
+
+  // 5. Renommer le rôle d'un métier : le rôle Discord change de nom, et le nom servira pour le recréer.
+  await etape(o, "Rôles : renommer le rôle d'un métier", async () => {
+    const avant = (await discordLu("roles=1")).roles || [];
+    await aller(o, "#capitainerie/roles");
+    const nomAvant = await evaluer(o, `(() => { const l = [...document.querySelectorAll(".registre-ligne")].find((x) => [...x.querySelectorAll("button")].some((b) => b.textContent.includes("Renommer")));
+      return l ? l.querySelector(".role-lie").textContent.trim() : ""; })()`);
+    if (!nomAvant) return { ok: false, detail: "aucun rôle de métier à renommer" };
+    const role = avant.find((r) => r.nom === nomAvant);
+    if (!await cliquer(o, "button", "Renommer…")) return { ok: false, detail: "bouton « Renommer… » absent" };
+    const NOUVEAU = "Maître " + N;
+    if (!await attendre(() => ecrire(o, "Nouveau nom du rôle", NOUVEAU), 5000)) return { ok: false, detail: "champ du nom absent" };
+    if (!await cliquer(o, "dialog[open] button", "Renommer")) return { ok: false, detail: "confirmation absente" };
+    const apres = await attendre(async () => { const x = (await discordLu("roles=1")).roles || []; return x.find((r) => r.nom === NOUVEAU) ? x : null; }, 10000);
+    if (!apres) return { ok: false, detail: "le faux Discord n'a pas de rôle « " + NOUVEAU + " »" };
+    const meme = role && apres.find((r) => r.nom === NOUVEAU).id === role.id;
+    const reg = await api(o, "rell/metiers/reglages");
+    const metier = (reg.metiers || []).find((m) => m.role && m.role.id === (role && role.id));
+    const vu = await attendre(async () => (await texteZone(o)).includes(NOUVEAU), 6000);
+    return { ok: !!(meme && metier && metier.role_nom === NOUVEAU && vu), detail: "« " + nomAvant + " » → « " + NOUVEAU + " » (même rôle : " + !!meme + ", nom gardé pour le recréer : " + (metier && metier.role_nom) + (vu ? "" : ", pas affiché") + ")" };
+  });
+
+  // 5 b. Un sous-onglet renommé depuis l'en-tête de sa rubrique (« Renommer ») : la rubrique se redessine avec lui.
+  const PARUES = "Déjà parues";
+  const onglets = () => evaluer(o, "[...document.querySelectorAll('#contenu .sous-onglets .etiquette')].map((a) => a.textContent).join(' | ')");
+  await etape(o, "Site : renommer un sous-onglet depuis l'en-tête de sa rubrique", async () => {
+    await fermerTout(o);
+    await aller(o, "#equipage/annonces/composer");
+    if (!await attendre(() => cliquer(o, "#contenu .titre-rubrique button", "Renommer"), 8000)) return { ok: false, detail: "« Renommer » absent de l'en-tête" };
+    if (!await modifierLigne("Annonces & événements · l'onglet « Publiées »")) return { ok: false, detail: "ligne de l'onglet « Publiées » absente" };
+    if (!await ecrireTexte(PARUES) || !await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "saisie ou enregistrement impossible" };
+    const t = await attendre(async () => { const x = await leTexte("site.sous.equipage.annonces.publiees"); return x && x.valeur === PARUES ? x : null; });
+    if (!t) return { ok: false, detail: "le serveur n'a pas le nouveau nom" };
+    if (!await attendre(() => evaluer(o, "!document.querySelector('dialog[open] .texte-champ')"), 6000)) return { ok: false, detail: "l'éditeur reste ouvert" };
+    if (!await cliquer(o, "dialog[open] button", "Fermer")) return { ok: false, detail: "« Fermer » absent" };
+    const vu = await attendre(async () => { const x = await onglets(); return x.includes(PARUES) ? x : null; }, 8000);
+    return { ok: !!vu, detail: vu ? "onglets : " + vu : "les onglets disent encore : " + await onglets() };
+  });
+
+  // 5 c. Le guide du clan (le post 🧭 Guide du clan), réécrit depuis Rôles & métiers : le post suit tout seul.
+  const LIRE = "Lire le tableau " + N;
+  await etape(o, "Textes : le guide du clan réécrit depuis Rôles & métiers — le post du guide suit", async () => {
+    const avant = ((await discordLu("post=guide")).messages || [])[0];
+    if (!avant || avant.boutons[0] !== "Lire · Read") return { ok: false, detail: "guide du clan absent du faux Discord : " + JSON.stringify(avant || {}).slice(0, 200) };
+    await fermerTout(o);
+    await aller(o, "#capitainerie/roles");
+    if (!await attendre(() => cliquer(o, "button", "Les textes du guide du clan"), 10000)) return { ok: false, detail: "bouton « Les textes du guide du clan » absent" };
+    if (!await modifierLigne("Le post 📢 Infos · le bouton")) return { ok: false, detail: "ligne du bouton des infos absente" };
+    if (!await ecrireTexte(LIRE) || !await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "saisie ou enregistrement impossible" };
+    const t = await attendre(async () => { const x = await leTexte("guide.infos.bouton"); return x && x.valeur === LIRE ? x : null; });
+    await fermerTout(o);
+    if (!t) return { ok: false, detail: "le serveur n'a pas le nouveau texte" };
+    const apres = await attendre(async () => { const m = ((await discordLu("post=guide")).messages || [])[0]; return m && m.boutons[0] === LIRE ? m : null; }, 25000);
+    return { ok: !!apres, detail: apres ? "boutons du guide : " + apres.boutons.join(" | ") : "le post du guide n'a pas été réécrit : " + JSON.stringify(((await discordLu("post=guide")).messages || [])[0] || {}).slice(0, 200) };
+  });
+
+  // 6. Renommer « Le Port » : la navigation l'affiche tout de suite, et après un rechargement.
+  await etape(o, "Site : renommer « Le Port » — la navigation suit", async () => {
+    if (!await ouvrirTexte("Le site", "Le Port · le nom")) return { ok: false, detail: "éditeur du nom introuvable" };
+    if (!await ecrireTexte("La Taverne") || !await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "saisie impossible" };
+    const tout_de_suite = await attendre(async () => (await titrePort()) === "La Taverne", 6000);
+    if (!tout_de_suite) return { ok: false, detail: "la pancarte dit encore « " + await titrePort() + " »" };
+    await o.s("Page.reload");
+    await attendre(() => evaluer(o, "!!document.querySelector('#contenu .titre-rubrique')"), 12000);
+    const apres = await attendre(async () => (await titrePort()) === "La Taverne", 6000);
+    return { ok: !!apres, detail: apres ? "« La Taverne », aussi après rechargement" : "après rechargement : « " + await titrePort() + " »" };
+  });
+
+  // 7. « Revenir au texte d'origine » : l'ancien revient (le nom, le refus, le bouton).
+  await etape(o, "Textes : revenir au texte d'origine", async () => {
+    const remettre = async (groupe, titre) => {
+      if (!await ouvrirTexte(groupe, titre)) return "éditeur « " + titre + " » introuvable";
+      if (!await cliquer(o, "dialog[open] button", "Revenir au texte d'origine")) return "« Revenir au texte d'origine » absent (" + titre + ")";
+      if (!await attendre(() => cliquer(o, "dialog[open] button", "Revenir à l'origine"), 5000)) return "confirmation absente (" + titre + ")";
+      return "";
+    };
+    for (const [groupe, titre] of [["Le site", "Le Port · le nom"], ["Recrutement", "Refus de l'étape 1"], ["Annonces & événements", "Le bouton « Disponible »"],
+      ["Recrutement", "Étape 1 refusée (la carte)"], ["Le site", "Annonces & événements · l'onglet « Publiées »"], ["Le guide du clan", "Le post 📢 Infos · le bouton"]]) {
+      const faute = await remettre(groupe, titre);
+      if (faute) return { ok: false, detail: faute };
+      await pause(600);
+    }
+    const port = await attendre(async () => (await titrePort()) === "Le Port", 6000);
+    const textes_ = await Promise.all(["site.cat.port.titre", "recrutement.refus_etape1", "evenements.bouton.dispo", "recrutement.equipe.refus_etape1",
+      "site.sous.equipage.annonces.publiees", "guide.infos.bouton"].map(leTexte));
+    const origine = textes_.every((t) => t && !t.modifie && t.valeur === t.defaut);
+    return { ok: !!port && origine, detail: "pancarte « " + await titrePort() + " » · " + textes_.map((t) => t && t.cle + (t.modifie ? " MODIFIÉ" : " d'origine")).join(", ") };
+  });
+}
+
 // ─── Le tout ────────────────────────────────────────────────────────────────
 async function principal() {
   mkdirSync(SORTIE, { recursive: true });
@@ -549,6 +768,7 @@ async function principal() {
     if (PARCOURS.includes("recrutement")) await parcoursRecrutement(o);
     if (PARCOURS.includes("capitainerie")) await parcoursCapitainerie(o);
     if (PARCOURS.includes("metiers")) await parcoursMetiers(o);
+    if (PARCOURS.includes("textes")) await parcoursTextes(o);
   } finally {
     try { await envoyer("Browser.close"); } catch (e) { /* déjà fermé */ }
     await pause(400);

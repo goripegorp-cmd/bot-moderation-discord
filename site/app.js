@@ -14,6 +14,7 @@ import * as clan from "./clan.js";
 import * as recrutement from "./recrutement.js";
 import * as annonces from "./annonces.js";
 import * as cap from "./capitainerie.js";
+import * as textes from "./textes.js";
 
 const RAFRAICHIR = 60000;
 const ICONES = ["port", "equipage", "capitainerie", "apercu", "journal", "sanctions", "tickets", "repertoire", "salons", "nettoyage", "membres", "fiches",
@@ -28,9 +29,11 @@ const RENDUS = {
   "equipage/membres": clan.membres, "equipage/fiches": clan.fiches, "equipage/candidatures": recrutement.candidatures,
   "equipage/tickets": clan.tickets, "equipage/annonces": annonces.annonces,
   "capitainerie/affiches": cap.affiches, "capitainerie/catalogue": cap.catalogue, "capitainerie/roles": cap.roles,
+  "capitainerie/textes": textes.textes,
 };
 // Ces rubriques n'ont pas besoin des grandes données du serveur pour s'afficher.
-const AUTONOMES = new Set(["port/nettoyage", "capitainerie/affiches", "capitainerie/catalogue", "capitainerie/roles", "equipage/annonces"]);
+const AUTONOMES = new Set(["port/nettoyage", "capitainerie/affiches", "capitainerie/catalogue", "capitainerie/roles", "equipage/annonces",
+  "capitainerie/textes"]);
 
 let courante = null;
 const plaque = h("button", { classe: "plaque-etat", type: "button", id: "plaque-etat", "aria-live": "polite", title: "État de la connexion et des envois" });
@@ -52,9 +55,11 @@ document.addEventListener("error", (ev) => {
 async function demarrer() {
   await canoniser();
   enregistrerServiceWorker();
+  const noms = textes.chargerLibelles();   // les noms choisis sur le site (Textes & noms), pendant les icônes
   await Promise.race([chargerSprite(BASE + "/s/icones/ui.svg?v=" + V), new Promise((ok) => setTimeout(ok, 2500))]);
   completerSprite(ICONES);
   await HL.ouvrir();
+  await Promise.race([noms, new Promise((ok) => setTimeout(ok, 1200))]);
   monterEntete();
   monterPancartes();
   lireRoute(true);
@@ -178,6 +183,21 @@ function monterPancartes() {
   addEventListener("resize", retarder(centrerEtiquette, 120));
 }
 const memoireRubrique = {};
+/** Les noms changés sur le site (Textes & noms) : la navigation et le titre suivent, sans recharger. */
+function majNoms() {
+  for (const a of $("#pancartes").querySelectorAll("a")) {
+    const c = categorie(a.dataset.cat);
+    for (const [classe, texte] of [[".pancarte-titre", c.titre], [".pancarte-court", c.court || c.titre], [".pancarte-sous", c.sous]]) {
+      const el = a.querySelector(classe);
+      if (el) el.textContent = texte;
+    }
+  }
+  majRubriques();
+  const r = rubrique(etat.route.cat, etat.route.rub), tete = $("#contenu .titre-rubrique");
+  if (tete && tete.querySelector("h1")) { tete.querySelector("h1").textContent = r.titre; if (tete.querySelector("p")) tete.querySelector("p").textContent = r.phrase || ""; }
+  document.title = r.titre + " · La Capitainerie";
+}
+ecouter("libelles", majNoms);
 function majRubriques() {
   const c = categorie(etat.route.cat);
   const r = $("#rubriques");
@@ -294,7 +314,11 @@ function rendre(force) {
   if (courante && courante.ctrl && courante.ctrl.quitter) { try { courante.ctrl.quitter(); } catch (e) { /* rien */ } }
   const r = rubrique(cat, rub);
   const corps = h("div", { classe: "rubrique-corps" });
-  remplacer(contenu, titreRubrique(r), corps);
+  // « Renommer » : le nom, la phrase et les sous-onglets de la rubrique, là où on les lit (Textes & noms).
+  const tete = titreRubrique(r);
+  tete.classList.add("renommable");
+  ajouter(tete, [textes.boutonRenommer(cat, rub, () => rendre(true))]);
+  remplacer(contenu, tete, corps);
   let ctrl = null;
   if (!etat.d && !AUTONOMES.has(cle)) {
     ajouter(corps, [etat.chargementEnCours ? chargement("Lecture du livre de bord…") : port.indisponible()]);
@@ -449,7 +473,7 @@ function ligneOp(op, p) {
     h("div", { classe: "meta" }, "Faite " + depuis(op.cree / 1000) + (op.essais ? " · " + quantite(op.essais, "essai(s)") : "") + (op.erreur ? " · " + op.erreur : "")),
     op.etat === "conflit" && op.conflitGenre === "doublon" ? h("p", { classe: "aide" }, "Ce membre a déjà une affiche active : une seule par membre. Modifie celle qui existe, ou mets-la d'abord à la corbeille.") : null,
     op.etat === "conflit" && op.conflitGenre === "retiree" ? h("p", { classe: "aide" }, "Cette affiche est dans la corbeille : restaure-la, puis renvoie la modification.") : null,
-    op.etat === "conflit" && op.conflitGenre === "publie" ? h("p", { classe: "aide" }, "Cet élément a été publié entre-temps : modifie-le depuis « À venir » (un événement) ou « Passés » (une annonce).") : null,
+    op.etat === "conflit" && op.conflitGenre === "publie" ? h("p", { classe: "aide" }, "Cet élément a été publié entre-temps : modifie-le depuis « À venir » (un événement) ou « Publiées » (une annonce).") : null,
     h("div", { classe: "rangee" },
       op.etat === "conflit" && (!op.conflitGenre || op.conflitGenre === "version") ? bouton("Régler le conflit", { classe: "p principal", icone: "attention", onclick: () => reglerConflit(op) }) : null,
       op.etat === "conflit" && op.conflitGenre === "retiree" ? bouton("Restaurer puis renvoyer", { classe: "p principal", icone: "restaurer", reseau: true, onclick: async () => {
@@ -479,7 +503,8 @@ const LIBELLES_CHAMPS = { membre_id: "Membre", roblox: "Nom Roblox", surnom: "Su
   destination: "Post", reponses: "Boutons de réponse", places: "Places", discord_event: "Évènement Discord", reserve_clan: "Réservé au clan", nom: "Nom",
   groupement: "Rangé par", champs: "Montré pour chacun", nom_en: "Nom en anglais",
   description: "Description", categorie: "Catégorie", rarete: "Rareté", icone: "Icône", source: "Source", actif: "Présent dans le jeu", nouveau_movie3: "Nouveauté du Movie 3",
-  question: "Question", reponse: "Réponse attendue", variantes: "Variantes", difficulte: "Difficulté", active: "Active", questions: "Questions", par_defaut: "Par défaut" };
+  question: "Question", reponse: "Réponse attendue", variantes: "Variantes", difficulte: "Difficulté", active: "Active", questions: "Questions", par_defaut: "Par défaut",
+  valeur: "Texte" };
 function valeurLisible(k, v) {
   if (v === undefined || v === null || v === "") return "(vide)";
   if (k === "membre_id") return nomDe(P(v)) + " (" + v + ")";

@@ -118,6 +118,8 @@ ANONYMIZE = {
     "rell_affiches_historique": {"ids": ["par"], "redact": []},
     "clan_evenements": {"ids": ["cree_par", "maj_par", "publie_par"], "redact": []},
     "tableau_medias": {"ids": ["auteur_id"], "redact": []},
+    # 26/10/2026 — Textes & noms : qui a réécrit un texte (le texte reste, l'auteur est neutralisé)
+    "site_textes": {"ids": ["maj_par"], "redact": []},
 }
 
 # Colonnes HMAC (pas un user_id brut) : agies seulement si l'appelant fournit hmac_user.

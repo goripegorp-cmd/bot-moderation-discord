@@ -151,7 +151,7 @@ async function ecrire(nomApi, corps) {
 }
 async function element(titre) {
   const { corps } = await api("clan/evenements");
-  for (const liste of ["brouillons", "a_venir", "passes"]) for (const e of corps[liste] || []) if (e.titre === titre) return Object.assign({ _liste: liste }, e);
+  for (const liste of ["brouillons", "a_venir", "publiees", "passes"]) for (const e of corps[liste] || []) if (e.titre === titre) return Object.assign({ _liste: liste }, e);
   return null;
 }
 
@@ -389,12 +389,12 @@ async function parcours(o) {
   await attendre(o, "!!document.querySelector('dialog[open]') && document.querySelector('dialog[open]').textContent.includes('Publier « ')", 10000);
   await g(o, "__p.clic('Publier', { exact: true }); return 1;");
   const pa = await attendreServeur(async () => { const e = await element(ANNONCE); return e && e.statut === "publie" ? e : null; }, 10000);
-  note(pa && pa.valeurs.image && pa._liste === "passes", "l'annonce est publiée avec son image (elle est rangée dans « Passés »)", JSON.stringify(pa && { image: pa.valeurs.image, liste: pa._liste }));
-  const surPasses = await attendre(o, `location.hash.includes('passes') && !!__p.carte(${JSON.stringify(ANNONCE)})`, 10000);
+  note(pa && pa.valeurs.image && pa._liste === "publiees", "l'annonce est publiée avec son image (elle est rangée dans « Publiées »)", JSON.stringify(pa && { image: pa.valeurs.image, liste: pa._liste }));
+  const surPasses = await attendre(o, `location.hash.includes('publiees') && !!__p.carte(${JSON.stringify(ANNONCE)})`, 10000);
   const carteAnnonce = await evaluer(o, `(__p.carte(${JSON.stringify(ANNONCE)}) || {}).textContent || ''`);
   note(surPasses && /Personne ne l'a encore marquée/.test(carteAnnonce) && /Retirer/.test(carteAnnonce) && /Modifier/.test(carteAnnonce),
-    "après publication, la page montre l'annonce dans « Passés » : « Vu », Modifier, Retirer", carteAnnonce.replace(/\s+/g, " ").slice(0, 300));
-  await capture(o, "passes-annonce");
+    "après publication, la page montre l'annonce dans « Publiées » : « Vu », Modifier, Retirer", carteAnnonce.replace(/\s+/g, " ").slice(0, 300));
+  await capture(o, "publiees-annonce");
   await g(o, `__p.clicCarte(${JSON.stringify(ANNONCE)}, 'Retirer'); return 1;`);
   await attendre(o, "!!document.querySelector('dialog[open]')");
   await g(o, "__p.clic('Retirer', { exact: true }); return 1;");
