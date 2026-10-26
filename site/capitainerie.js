@@ -392,15 +392,19 @@ function selecteurMembre() {
 // ═══ LE CATALOGUE RELL SEAS ═════════════════════════════════════════════
 export function catalogue(vue) {
   const f = filtres("catalogue", { q: "", type: "", statut: "tous", movie3: false, inactifs: false });
-  const haut = h("div", { classe: "pile" }), onglets = h("div", { classe: "sous-onglets", role: "tablist", "aria-label": "Types" }), resultats = h("div", { classe: "pile" }, squelettes(3));
+  const haut = h("div", { classe: "pile" }), resultats = h("div", { classe: "pile" }, squelettes(3));
   const changer = () => { resetPages("cat"); maj(); };
+  // 27/10/2026 : le type se choisit dans une liste (dix-huit onglets défilaient) ; « Tous les types » : un groupe repliable
+  // par type, comme avant.
+  const typeL = liste({ valeur: f.type, label: "Type", options: [{ v: "", l: "Tous les types" }], changer: (v) => { f.type = v; changer(); } });
   ajouter(vue, [haut, h("div", { classe: "outils" },
     recherche(f.q, "Chercher dans tout le catalogue…", (q) => { f.q = q; changer(); }),
+    typeL,
     liste({ valeur: f.statut, label: "Statut", options: [{ v: "tous", l: "Tous" }, { v: "confirme", l: "Confirmés" }, { v: "a_verifier", l: "À vérifier" }], changer: (v) => { f.statut = v; changer(); } }),
     avance(caseACocher("Nouveautés du Movie 3", f.movie3, (v) => { f.movie3 = v; changer(); })),
     avance(caseACocher("Montrer les retirés", f.inactifs, (v) => { f.inactifs = v; changer(); })),
     peutAgir() ? bouton("Ajouter un élément", { classe: "principal", icone: "ajouter", onclick: () => editerElement(null, f.type) }) : null,
-    peutAgir() ? bouton("Les types", { icone: "filtrer", classe: "avance", onclick: () => gererTypes() }) : null), onglets, resultats, creditsRell()]);
+    peutAgir() ? bouton("Les types", { icone: "filtrer", classe: "avance", onclick: () => gererTypes() }) : null), resultats, creditsRell()]);
   const maj = async () => {
     const cat = await charger("catalogue");
     if (!resultats.isConnected) return;
@@ -417,8 +421,9 @@ export function catalogue(vue) {
     const garde = (e) => (f.inactifs || e.actif !== false) && (f.statut === "tous" || e.statut === f.statut) && (!f.movie3 || e.nouveau_movie3)
       && contient([e.nom, e.nom_en, e.description, e.categorie, e.rarete, e.source].join(" "), f.q);
     const nb = Object.fromEntries(types.map((t) => [t.cle, els.filter((e) => e.type === t.cle && garde(e)).length]));
-    remplacer(onglets, h("button", { classe: "etiquette", type: "button", role: "tab", "aria-selected": String(!f.type), onclick: () => { f.type = ""; changer(); } }, icone("catalogue"), "Tout", h("span", { classe: "compteur calme" }, String(Object.values(nb).reduce((a, b) => a + b, 0)))),
-      ...types.map((t) => h("button", { classe: "etiquette", type: "button", role: "tab", "aria-selected": String(f.type === t.cle), onclick: () => { f.type = t.cle; changer(); } }, sansEmoji(t.nom), h("span", { classe: "compteur calme" }, String(nb[t.cle] || 0)))));
+    typeL.options([{ v: "", l: "Tous les types", sous: compte(Object.values(nb).reduce((a, b) => a + b, 0), "élément") },
+      ...types.map((t) => ({ v: t.cle, l: sansEmoji(t.nom), sous: compte(nb[t.cle] || 0, "élément") }))]);
+    typeL.poser(f.type);
     const visibles = types.filter((t) => !f.type || t.cle === f.type);
     const grilleDe = (t, l) => (l.length ? paginer("cat-" + t.cle, l, (e) => carteElement(e), { classe: "grille catalogue-grille egale", pas: 24 })
       : vide("Rien ici", f.q || f.statut !== "tous" || f.movie3 ? "Change le filtre ou la recherche." : "Ajoute le premier élément de ce type."));
