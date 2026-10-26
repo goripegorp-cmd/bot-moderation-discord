@@ -1206,9 +1206,13 @@ class Monde:
             roles.insert(0, {"nom": "Fondateur" if uid == self.fondateur["id"] else "Direction", "couleur": "#8e2a24"})
         al = next((a for a in self.alertes() if a["id"] == uid), None)
         qui = {x: self.ident(x) for x in {uid, *[s["id"] for s in par_lui], *[e["auteur"] for e in self.journal if e["membre"] == uid and e["auteur"]]}}
+        r = next((x for x in self.restreints if x["uid"] == uid), None)   # comme `tableau.fiche` : restreint par la direction
+        if r:
+            qui[r["par"]] = self.ident(r["par"])
         membre = dict(self.ident(uid), present=present, a_part=a_part, protege=a_part, bot=False, roles=roles if present else [],
                       arrivee=p["arrivee"] if p else None, cree=p["cree"] if p else None, mute_jusqu=self.mutes.get(uid),
-                      clan=uid in self.clan)
+                      clan=uid in self.clan,
+                      restreint={"depuis": r["depuis"], "duree": 0, "raison": r["raison"], "par": r["par"]} if r else None)
         if not present:
             membre["banni"] = uid in [x["id"] for x in self.serveur[1580:1584]] or uid in self.bannis
         return {"membre": membre, "agir": not a_part, "sanctions": sanctions, "donnees": par_lui, "tickets": tickets,

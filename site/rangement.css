@@ -1,0 +1,336 @@
+/* La Capitainerie — le rangement : la recherche de l'en-tête, la quatrième pancarte (l'accueil), le mode simple,
+   les lignes compactes (une ligne par élément, actions dans une colonne fixe à droite), les outils des groupes,
+   l'accueil « Ce qui t'attend », la fenêtre de recherche, les alignements des cartes. */
+
+/* ─── La recherche, au milieu de l'en-tête ─────────────────────────── */
+.planche .marque { flex: 0 1 auto; }
+.recherche-entete {
+  flex: 1 1 260px; max-width: 470px; min-width: 0; margin: 0 auto;
+  display: flex; align-items: center; gap: 10px;
+  min-height: 40px; padding: 4px 8px 4px 12px;
+  border: 1px solid rgba(201, 163, 90, .45); border-radius: var(--rayon);
+  background: rgba(16, 9, 4, .5); color: var(--laiton-pale);
+  font: italic 400 15.5px/1.2 var(--police-texte); text-align: left; cursor: text;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .55);
+  transition: border-color .15s, color .15s, background-color .15s;
+}
+.recherche-entete:hover { border-color: var(--laiton-clair); color: var(--clair); background: rgba(16, 9, 4, .62); }
+.recherche-entete:focus-visible { outline: 2.5px solid var(--clair); outline-offset: 2px; }
+.recherche-entete .ic { width: 20px; height: 20px; color: var(--laiton-clair); --ton2: var(--corde); }
+.recherche-entete-texte { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recherche-touche {
+  flex: none; padding: 1px 6px; border: 1px solid rgba(201, 163, 90, .5); border-radius: 3px;
+  font: normal 600 12px/1.45 var(--police-sc); letter-spacing: .04em; color: var(--laiton-pale);
+}
+@media (pointer: coarse) { .recherche-entete { min-height: 44px; } .recherche-touche { display: none; } }
+@media (max-width: 719px) {
+  .recherche-entete {
+    flex: none; width: var(--cible); height: var(--cible); min-height: var(--cible); margin: 0 0 0 auto; padding: 0;
+    justify-content: center; border-color: transparent; background: transparent; box-shadow: none;
+  }
+  .recherche-entete-texte, .recherche-touche { display: none; }
+  .recherche-entete .ic { width: 22px; height: 22px; color: var(--laiton-pale); }
+}
+
+/* ─── Quatre pancartes : l'accueil, puis les trois maisons ─────────── */
+@media (min-width: 1200px) { .pancarte-nav { width: min(250px, 19.5vw); } }
+@media (min-width: 720px) and (max-width: 1199px) {
+  .pancartes { gap: clamp(10px, 1.6vw, 22px); }
+  .pancarte-nav { width: auto; flex: 0 1 214px; min-width: 0; column-gap: 9px; padding: 9px 12px 9px 11px; }
+  .pancarte-nav .ic { width: 28px; height: 28px; }
+  .pancarte-titre { display: none; }
+  .pancarte-court {
+    display: block; min-width: 0; font-family: var(--police-titre); font-size: clamp(19px, 1.2vw + 10px, 24px); line-height: 1.05;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 -1px 0 rgba(0, 0, 0, .7), 0 1px 0 rgba(201, 163, 90, .2);
+  }
+  .pancarte-sous { font-size: 12.5px; letter-spacing: .01em; }
+}
+@media (max-width: 719px) {
+  .pancartes { gap: 4px; }
+  .pancarte-nav { padding: 5px 2px 6px; }
+  .pancarte-court { font-size: clamp(14px, 3.9vw, 17.5px); }
+}
+
+/* ─── Le mode simple ───────────────────────────────────────────────── */
+/* Caché en mode simple : les chiffres (tuiles), les graphiques, les filtres avancés, les détails techniques. */
+.mode-simple .avance, .mode-simple .contenu .tuiles, .mode-simple .ident, .mode-simple .copier { display: none !important; }
+.titre-rubrique { grid-template-columns: auto minmax(0, 1fr) auto; }
+.titre-rubrique > h1, .titre-rubrique > p { grid-column: 2; }
+.titre-rubrique .bascule-mode { grid-column: 3; grid-row: 1 / span 2; align-self: center; justify-self: end; }
+@media (max-width: 519px) {
+  .titre-rubrique { grid-template-columns: minmax(0, 1fr) auto; }
+  .titre-rubrique > h1 { grid-column: 1; grid-row: 1; }
+  .titre-rubrique > p { grid-column: 1 / -1; grid-row: 2; }
+  .titre-rubrique .bascule-mode { grid-column: 2; grid-row: 1; }
+}
+.bascule-mode {
+  display: inline-flex; align-items: center; min-height: 36px; padding: 4px 12px;
+  border: 1px dashed var(--trait-fort); border-radius: var(--rayon); background: transparent;
+  color: var(--encre-2); font: 500 14.5px/1.2 var(--police-sc); letter-spacing: .02em; white-space: nowrap;
+  transition: background-color .15s, color .15s, border-color .15s;
+}
+.bascule-mode > span { display: inline-flex; align-items: center; gap: 7px; }
+.bascule-mode .ic { width: 19px; height: 19px; color: var(--encre-2); }
+.bascule-mode:hover { color: var(--encre); border-style: solid; background: rgba(43, 29, 18, .05); }
+.bascule-mode[aria-pressed="true"] { border-style: solid; color: var(--encre); }
+html.mode-simple .bm-tout, html:not(.mode-simple) .bm-simple { display: none; }
+@media (pointer: coarse) { .bascule-mode { min-height: 44px; } }
+@media (max-width: 719px) { .bascule-mode { padding: 4px 9px; font-size: 13.5px; } }
+
+/* ─── La ligne compacte ────────────────────────────────────────────── */
+/* Au bureau, les lignes d'une liste partagent leurs colonnes (sous-grille) : badges, dates et actions alignés. */
+.lignes-c {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; column-gap: 14px; row-gap: 6px;
+  min-width: 0; margin: 0; padding: 0; list-style: none;
+}
+.lc {
+  position: relative; grid-column: 1 / -1;
+  display: grid; grid-template-columns: subgrid; align-items: center;
+  min-width: 0; min-height: 54px; padding: 6px 8px 6px 14px;
+  border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--papier);
+  box-shadow: inset 4px 0 0 var(--teinte, transparent), 0 1px 1px rgba(43, 29, 18, .08);
+  transition: background-color .15s, border-color .15s, box-shadow .2s;
+}
+.lc-clic { cursor: pointer; }
+.lc-clic:hover { background: var(--papier-2); border-color: var(--trait-fort); box-shadow: inset 4px 0 0 var(--teinte, transparent), 0 3px 8px -5px rgba(43, 29, 18, .45); }
+.lc-alerte { --teinte: var(--cire); }
+.lc-chaude { --teinte: var(--ambre); }
+.lc-calme { --teinte: var(--vert); }
+.lc-attente { border-style: dashed; border-color: var(--laiton-fonce); }
+.lc-eteinte { background: rgba(244, 234, 210, .55); }
+.lc-eteinte .lc-titre { color: var(--encre-2); font-weight: 600; }
+.lc-visuel { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; }
+.lc-visuel > .avatar { margin: 2px 0; }
+.lc-corps { display: grid; gap: 1px; min-width: 0; }
+.lc-titre {
+  display: block; min-width: 0; max-width: 100%; margin: 0; padding: 0; border: 0; background: none;
+  color: var(--encre); font: 700 16px/1.3 var(--police-texte); text-align: left; letter-spacing: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Le bouton transparent d'une ligne qui s'ouvre : toute la ligne (rangement.js) ; au-dessus de lui, ce qui se touche. */
+.lc-ouvrir {
+  position: absolute; inset: 0; z-index: 1; margin: 0; padding: 0; border: 0; border-radius: inherit;
+  background: transparent; color: transparent; cursor: pointer;
+}
+.lc-ouvrir:focus-visible { outline: 2.5px solid var(--encre); outline-offset: 2px; }
+.lc-actions, .lc-sous .lien-nom, .lc-visuel .case, .lc-detail, .lc-badges [title] { position: relative; z-index: 2; }
+.lc:has(> .lc-ouvrir:focus-visible) .lc-titre, .lc.deplie .lc-titre { white-space: normal; }
+.lc-sous { display: block; min-width: 0; font-size: 14px; line-height: 1.35; color: var(--encre-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-sous.vide, .lc-sous.seulement-date { display: none; }
+.lc-sous .lien-nom { white-space: nowrap; }
+.lc-date-m { display: none; }
+.lc-badges { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.lc-badges > * { flex: none; max-width: 22ch; }
+.lc-badges .pastille { min-height: 24px; padding: 1px 8px; font-size: 13.5px; }
+.lc-badges .tampon { transform: none; max-width: none; }
+.lc-date { min-width: 0; font-size: 14px; color: var(--encre-2); white-space: nowrap; text-align: right; font-variant-numeric: lining-nums tabular-nums; }
+.lc-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
+.lc-actions .bouton.p { min-height: 36px; }
+.lc-detail {
+  grid-column: 2 / -1; display: grid; gap: 8px; min-width: 0;
+  margin-top: 6px; padding: 8px 2px 4px; border-top: 1px dotted var(--trait-fort); cursor: auto;
+}
+.lc-detail[hidden] { display: none; }
+.lc-detail .texte { overflow-wrap: anywhere; white-space: pre-line; }
+.lc-sep {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; min-width: 0;
+  padding: 10px 2px 2px; font: 400 19px/1.2 var(--police-titre); color: var(--encre);
+}
+.lc-sep:first-child { padding-top: 0; }
+.lc-sep::after { content: ""; flex: 1 1 auto; border-bottom: 1px solid var(--trait); }
+.lc-ic {
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; flex: none;
+  background: var(--papier-2); color: var(--teinte, var(--encre-2)); --ton2: var(--teinte, var(--laiton));
+  box-shadow: inset 0 0 0 1.5px var(--teinte, var(--encre-3));
+}
+.lc-ic .ic { width: 19px; height: 19px; }
+.lc-cat { color: var(--teinte, var(--encre-2)); font-weight: 700; }
+.lc-heure { display: inline-block; min-width: 3.1em; font: 600 14.5px/1 var(--police-chiffres); color: var(--encre-2); font-variant-numeric: lining-nums tabular-nums; text-align: center; }
+/* Les actions en icônes */
+.action-ic {
+  display: inline-grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0;
+  border: 1px solid transparent; border-radius: var(--rayon); background: transparent; color: var(--encre-2);
+  text-decoration: none; transition: background-color .15s, color .15s, border-color .15s;
+}
+.action-ic:hover { background: rgba(43, 29, 18, .08); border-color: var(--trait); color: var(--encre); }
+.action-ic.danger { color: var(--cire); }
+.action-ic.danger:hover { background: #f1d9c6; border-color: rgba(142, 42, 36, .45); color: var(--cire-fonce); }
+.action-ic:disabled { opacity: .45; cursor: not-allowed; }
+.action-ic .ic { width: 20px; height: 20px; }
+.action-ic[aria-expanded="true"] { background: var(--encre); color: var(--clair); }
+@media (pointer: coarse) {
+  .action-ic { width: 44px; height: 44px; }
+  .lc { min-height: 60px; }
+  .lc-actions .bouton.p { min-height: 44px; }
+}
+/* Au téléphone : deux lignes (titre, puis la date et les détails), les actions à droite, les badges dessous. */
+@media (max-width: 719px) {
+  .lignes-c { grid-template-columns: minmax(0, 1fr); }
+  .lc {
+    grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "v t a" "v s a" "v b a";
+    column-gap: 10px; row-gap: 1px; padding: 7px 4px 7px 12px;
+  }
+  .lc-visuel { grid-area: v; align-self: center; }
+  .lc-visuel:empty { display: none; }
+  .lc-corps { display: contents; }
+  .lc-titre { grid-area: t; align-self: end; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }   /* deux lignes au plus, jamais un mot coupé à mi-titre */
+  .lc.deplie .lc-titre { display: block; -webkit-line-clamp: none; }
+  .lc-sous { grid-area: s; align-self: start; }
+  .lc-sous.seulement-date { display: block; }
+  .lc-date-m { display: inline; }
+  .lc-sous:not(.seulement-date) .lc-date-m::after { content: " · "; }
+  .lc-badges { grid-area: b; justify-content: flex-start; flex-wrap: wrap; row-gap: 4px; max-width: none; margin-top: 3px; }
+  .lc-badges > * { max-width: 100%; }
+  .lc-badges:empty { display: none; }
+  .lc-date { display: none; }
+  .lc-actions { grid-area: a; gap: 0; }
+  .lc-detail { grid-column: 1 / -1; }
+  /* Des actions écrites (« Le garder », « Ajouter au clan », un interrupteur) : leur rangée sous le texte, sur toute la
+     largeur, à droite ; l'avatar reste en face du nom. */
+  .lc.lc-larges { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "v t" "v s" "v b" "a a"; padding-right: 8px; }
+  .lc.lc-larges .lc-visuel { align-self: start; margin-top: 2px; }
+  .lc.lc-larges .lc-actions { flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+}
+
+/* ─── Les longues rangées de filtres au téléphone : une seule ligne qui défile au doigt ─── */
+/* (au lieu de trois ou quatre lignes de puces qui poussent la liste vers le bas ; fondu du côté où il en reste : app.js) */
+@media (max-width: 719px) {
+  .puces:has(> .puce:nth-child(5)) { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .puces:has(> .puce:nth-child(5))::-webkit-scrollbar { display: none; }
+  .puces:has(> .puce:nth-child(5)) > .puce { flex: none; }
+}
+.puces.fondu-droite { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); }
+.puces.fondu-gauche { -webkit-mask-image: linear-gradient(90deg, transparent, #000 36px); mask-image: linear-gradient(90deg, transparent, #000 36px); }
+.puces.fondu-gauche.fondu-droite { -webkit-mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
+
+/* ─── Les groupes : outils, groupes dans un groupe ─────────────────── */
+.outils-groupes { display: inline-flex; flex-wrap: wrap; gap: 2px; margin-left: auto; }   /* à droite, même seul dans sa rangée */
+.outils-groupes .bouton.p { font-size: 13.5px; }
+.groupe .groupe { margin: 4px 0 0; padding: 0 10px; border: 1px dashed var(--trait-fort); border-radius: var(--rayon); background: rgba(248, 240, 221, .45); }
+.groupe .groupe:last-of-type { border-bottom: 1px dashed var(--trait-fort); }
+.groupe .groupe > summary { min-height: 46px; }
+.groupe .groupe > summary .groupe-titre { font-size: 18px; }
+.groupe .groupe > .groupe-corps { padding-bottom: 10px; }
+.groupes-zone { display: grid; min-width: 0; }
+.cadre .groupe:first-of-type { margin-top: 4px; }
+
+/* Un bloc de réglages rangé dans un groupe « Les réglages » : son propre titre ferait doublon. */
+.groupe-reglages > .groupe-corps > .cadre > h3:first-child { display: none; }
+
+/* ─── Le corps d'une rubrique : un rythme régulier entre ses blocs ─── */
+.rubrique-corps { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.rubrique-corps > * { min-width: 0; }
+.rubrique-corps > :empty { display: none; }
+
+/* ─── L'accueil : ce qui t'attend, les raccourcis ──────────────────── */
+.a-faire-liste .lc { min-height: 58px; }
+.a-faire-liste .lc-actions .bouton { min-width: 128px; }
+@media (max-width: 719px) {   /* la phrase en entier sur toute la largeur, le bouton dessous à droite */
+  .a-faire-liste .lc { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "v t" "v s" "v a"; padding-right: 8px; }
+  .a-faire-liste .lc-visuel { align-self: start; margin-top: 2px; }
+  .a-faire-liste .lc-actions { margin-top: 6px; }
+  .a-faire-liste .lc-actions .bouton { min-width: 0; }
+  .a-faire-liste .lc-badges { display: none; }
+}
+.taches { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+.tache {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 14px; min-width: 0; min-height: 86px;
+  padding: 14px 16px; border: 1px solid var(--trait-fort); border-radius: var(--rayon); background: var(--papier);
+  box-shadow: var(--ombre-papier); color: var(--encre); text-align: left; font: inherit;
+  transition: transform .2s var(--ease), box-shadow .2s, border-color .2s;
+}
+.tache:hover { transform: translateY(-2px); box-shadow: var(--ombre-levee); border-color: var(--encre-3); }
+.tache:focus-visible { outline: 2.5px solid var(--encre); outline-offset: 2px; }
+.tache-ic {
+  display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; flex: none;
+  background: radial-gradient(circle at 38% 32%, var(--cire-claire), var(--cire) 55%, var(--cire-fonce));
+  color: var(--clair); --ton2: var(--laiton-pale); box-shadow: 0 0 0 3px rgba(142, 42, 36, .2), 0 2px 3px rgba(43, 29, 18, .35);
+}
+.tache-ic .ic { width: 26px; height: 26px; }
+.tache-texte { display: grid; gap: 2px; min-width: 0; }
+.tache-texte b { font: 400 21px/1.15 var(--police-titre); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tache-texte span { font-size: 14.5px; color: var(--encre-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 719px) {
+  .taches { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tache { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 8px; min-height: 118px; padding: 12px 8px; text-align: center; }
+  .tache-ic { width: 46px; height: 46px; }
+  .tache-texte b { font-size: 17.5px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .tache-texte span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .tache:hover { transform: none; } }
+
+/* ─── La fenêtre de recherche ──────────────────────────────────────── */
+dialog.pancarte.recherche-fenetre { width: min(780px, calc(100vw - 24px)); }
+dialog.pancarte.recherche-fenetre[open] { animation: fondu .16s ease both; }
+.recherche-fenetre .pancarte-corps { gap: 12px; padding-top: 0; }
+.recherche-tete {
+  position: sticky; top: 0; z-index: 2; padding: 14px 0 8px;
+  background: var(--parchemin) url(textures/parchemin.webp); background-size: 640px auto;
+}
+.recherche-tete .recherche-champ { min-height: 48px; font-size: 18px; }
+.recherche-resultats { display: grid; gap: 14px; min-width: 0; }
+.rech-groupe { display: grid; gap: 2px; min-width: 0; }
+.rech-groupe-titre {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 0 4px 4px;
+  border-bottom: 1px solid var(--trait); font: 500 14px/1.2 var(--police-sc); letter-spacing: .04em; color: var(--encre-2);
+}
+.rech-plus { font-family: var(--police-texte); letter-spacing: 0; font-size: 13.5px; color: var(--encre-3); }
+.rech-option {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; min-width: 0;
+  min-height: 52px; padding: 6px 10px; border-radius: var(--rayon); cursor: pointer; color: var(--encre);
+  scroll-margin: 84px 0 10px;   /* choisi au clavier : jamais sous le champ (collant) */
+}
+.rech-option:hover { background: rgba(43, 29, 18, .07); }
+.rech-option.actif { background: var(--encre); color: var(--clair); }
+.rech-option.actif .rech-sous { color: var(--laiton-pale); }
+.rech-option.actif .lc-ic { background: var(--bois-2); }
+.rech-visuel { display: grid; place-items: center; width: 34px; }
+.rech-texte { display: grid; min-width: 0; }
+.rech-titre { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rech-sous { font-size: 14px; color: var(--encre-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rech-fleche { width: 18px; height: 18px; opacity: 0; transition: opacity .12s; }
+.rech-option.actif .rech-fleche { opacity: 1; }
+.rech-insigne { width: 34px; height: 34px; object-fit: contain; }
+.rech-insigne.monogramme { font-size: 14px; }
+.rech-vide { padding: 22px 12px; }
+.recherche-serveur:empty { display: none; }
+.recherche-aide { margin: 0 auto 0 0; font-size: 13.5px; color: var(--encre-2); }
+.recherche-aide kbd, .recherche-touche { font-variant-numeric: lining-nums; }
+.recherche-aide kbd { display: inline-block; min-width: 22px; margin: 0 2px; padding: 0 5px; border: 1px solid var(--trait-fort); border-radius: 3px; background: var(--papier-2); font: 600 12px/1.5 var(--police-sc); text-align: center; }
+@media (pointer: coarse) { .recherche-fenetre .pancarte-pied { display: none; } .rech-option { min-height: 56px; } }
+
+/* ─── Les cartes d'une même grille : même hauteur, pieds alignés ───── */
+.grille.egale { align-items: stretch; }
+.grille.egale > .feuillet { display: flex; flex-direction: column; gap: 6px; }
+.grille.egale > .feuillet > * { margin-top: 0; margin-bottom: 0; }
+.grille.egale > .feuillet > :last-child:not(:first-child) { margin-top: auto; padding-top: 6px; }
+.grille.egale > .feuillet > .titre-carte { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feuillet-pied .bouton { flex: 0 0 auto; }
+.evt-carte .titre-carte { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ─── Les fenêtres trop pleines ────────────────────────────────────── */
+/* Le corps d'une fenêtre défile ; ses rangées gardent leur hauteur. Sans cela, une rangée qui défile en largeur (les
+   onglets de la fiche) était écrasée en un mince filet sous « Modérer » : ses boutons à moitié cachés (26/10). */
+.pancarte-corps { grid-auto-rows: max-content; }
+.pancarte-pied:empty { display: none; }   /* une fenêtre sans boutons de pied ne garde pas une barre vide qui mange le bas */
+
+/* ─── La fiche d'une personne : ramassée, ses actions en haut ──────── */
+.fiche-entete { align-items: flex-start; gap: 16px; }
+.fiche-entete .fiche-ident { gap: 7px; flex: 1 1 auto; }
+.fiche-roles { gap: 4px; }
+.fiche-roles .pastille { min-height: 24px; padding: 1px 8px; font-size: 13.5px; }
+.fiche-liens { gap: 6px; }
+.fiche-agir { gap: 10px; padding: 12px 16px; }
+.fiche-agir-ligne { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); align-items: center; gap: 6px 12px; min-width: 0; }
+.fiche-agir-ligne .rangee { gap: 6px; }
+.bandeau.restreint { border-left-color: var(--prune); }
+.bandeau.restreint .ic { color: var(--prune); }
+@media (max-width: 719px) {
+  .fiche-entete { gap: 12px; }
+  .fiche-entete .avatar.g { width: 52px; height: 52px; font-size: 21px; }
+  .fiche-agir-ligne { grid-template-columns: minmax(0, 1fr); }
+  .fiche-agir-ligne .bouton.p { flex: 1 1 auto; }
+}
+
+/* Au téléphone, la recherche va droit au champ : le sous-titre (ce qu'on peut chercher) est déjà dans l'exemple du champ. */
+@media (max-width: 519px) { .recherche-fenetre .pancarte-tete .sous-titre { display: none; } }

@@ -37,12 +37,29 @@ const NAVIGATEURS = [opt("navigateur", ""), process.env.CHROME || "",
 const OUVRIR_BROUILLON = "[...document.querySelectorAll('article.evt-carte')].find(a => a.textContent.includes('Sortie en mer')).querySelector('.feuillet-pied button').click()";
 // Ouvrir la première affiche (les groupes par métier sont repliés au départ).
 const OUVRIR_AFFICHE ="(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.affiche').click(); })()";
+// Une ligne compacte (rangement.js) ou une ancienne carte, cliquable, dont le texte contient… (la première sinon).
+const CLIQUER_LIGNE = (texte) => `(() => { const l = [...document.querySelectorAll('.lc-clic, .feuillet.lien')].filter((x) => x.getClientRects().length); (l.find((x) => x.textContent.includes(${JSON.stringify(texte)})) || l[0]).click(); return 1; })()`;
+// La recherche universelle, ouverte au clavier (Ctrl+K), avec un texte tapé.
+const RECHERCHER = (texte) => `(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })); await new Promise(r => setTimeout(r, 500));
+  const i = document.querySelector('dialog[open] .recherche-champ'); i.value = ${JSON.stringify(texte)}; i.dispatchEvent(new Event('input', { bubbles: true })); await new Promise(r => setTimeout(r, 1200)); return 1; })()`;
+// « Nettoyer le casier » : tout déplié (les membres partis aussi), pour voir les soixante nettoyages rangés.
+const CASIER_DEPLIE = `(async () => { const c = [...document.querySelectorAll('.cadre')].find((x) => x.textContent.includes('Nettoyer le casier'));
+  [...c.querySelectorAll('button')].find((b) => b.textContent.includes('Tout déplier')).click(); await new Promise(r => setTimeout(r, 400));
+  for (const d of c.querySelectorAll('details.groupe')) d.open = true; await new Promise(r => setTimeout(r, 400)); c.scrollIntoView({ block: 'start' }); return 1; })()`;
 
 // Les scènes : une rubrique (ancre) et, au besoin, des gestes (code exécuté dans la page) avant le contrôle.
 // Les icônes officielles et les logos viennent d'une autre branche (et du wiki, plus tard) : leur 404 est attendu,
 // la page montre alors la pastille gravée. Ce n'est pas une faute de la page, seulement une image pas encore livrée.
 const ATTENDUS_404 = /\/tableau\/espace\/s\/(icones\/rell|logos)\//;
 const SCENES = [
+  // L'accueil « Ce qui t'attend », la recherche universelle, le mode simple et « Tout afficher » (rangement, 26/10).
+  { nom: "accueil", ancre: "#accueil/attente" },
+  { nom: "recherche-membre", ancre: "#accueil/attente", geste: RECHERCHER("mi") },
+  { nom: "recherche-ticket", ancre: "#port/tickets", geste: RECHERCHER("#1") },
+  // « Tout afficher » (chiffres, graphiques, filtres avancés), puis retour au mode simple après la capture.
+  { nom: "mode-tout-afficher", ancre: "#port/sanctions", geste: "(() => { document.querySelector('.bascule-mode').click(); return 1; })()",
+    apres: "(() => { if (!document.documentElement.classList.contains('mode-simple')) document.querySelector('.bascule-mode').click(); return 1; })()" },
+  { nom: "casier-nettoyer", ancre: "#port/sanctions", geste: CASIER_DEPLIE },
   { nom: "port-apercu", ancre: "#port/apercu" },
   { nom: "port-journal", ancre: "#port/journal" },
   { nom: "port-sanctions", ancre: "#port/sanctions" },
@@ -69,15 +86,18 @@ const SCENES = [
   { nom: "capitainerie-catalogue", ancre: "#capitainerie/catalogue" },
   { nom: "capitainerie-roles", ancre: "#capitainerie/roles" },
   // Les fenêtres (pancartes)
-  { nom: "fenetre-fiche", ancre: "#port/sanctions", geste: "document.querySelector('.feuillet.lien').click()" },
+  { nom: "fenetre-fiche", ancre: "#port/sanctions", geste: CLIQUER_LIGNE("") },
+  // La fiche descendue jusqu'à ses onglets : jamais écrasés sous « Agir » (le contrôle « rangée écrasée » le vérifie).
+  { nom: "fenetre-fiche-onglets", ancre: "#port/sanctions", geste: CLIQUER_LIGNE(""),
+    geste2: "(() => { const o = document.querySelector('dialog[open] .onglets-fiche'); o.scrollIntoView({ block: 'center' }); return 1; })()" },
   { nom: "fenetre-conversation", ancre: "#port/tickets", geste: "[...document.querySelectorAll('button')].find(b => b.textContent.includes('Conversation')).click()" },
   // « Membre parti » pour l'auteur d'une affiche de démonstration (créée par la tête) : la page ne sait pas lire la
   // personne envoyée par le serveur (25/10 : `cree_par` est un objet { id, nom }, P() attendait un identifiant).
   { nom: "fenetre-affiche", ancre: "#capitainerie/affiches", geste: OUVRIR_AFFICHE, interdits: ["Membre parti", "[object Object]"] },
   { nom: "fenetre-editeur-affiche", ancre: "#capitainerie/affiches", geste: "[...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle affiche')).click()" },
-  { nom: "fenetre-dossier-etape1", ancre: "#equipage/candidatures", geste: "[...document.querySelectorAll('.feuillet.lien')].find(x => x.textContent.includes('Étape 1')).click()" },
-  { nom: "fenetre-dossier-correction", ancre: "#equipage/candidatures", geste: "[...document.querySelectorAll('.feuillet.lien')].find(x => x.textContent.includes('à corriger')).click()" },
-  { nom: "fenetre-choix-questions", ancre: "#equipage/candidatures", geste: "[...document.querySelectorAll('.feuillet.lien')].find(x => x.textContent.includes('Étape 1')).click()",
+  { nom: "fenetre-dossier-etape1", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À décider") },
+  { nom: "fenetre-dossier-correction", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À corriger") },
+  { nom: "fenetre-choix-questions", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À décider"),
     geste2: "[...document.querySelectorAll('dialog button')].find(b => b.textContent.includes('Passer à l')).click()" },
   { nom: "fenetre-file", ancre: "#port/apercu", geste: "document.querySelector('#plaque-etat').click()" },
   { nom: "fenetre-element-catalogue", ancre: "#capitainerie/catalogue", geste: "(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.element-carte').click(); })()" },
@@ -199,6 +219,15 @@ const CONTROLE = `(() => {
     if (r.width < 6 || r.height < 6) continue;
     if (Math.abs(r.width - r.height) > 2) res.deformes.push({ el: decrire(el).slice(0, 90), l: Math.round(r.width), h: Math.round(r.height) });
   }
+  // Une rangée de boutons écrasée en un mince filet (26/10 : les onglets de la fiche, à 8 px sous « Modérer », leurs
+  // boutons à moitié cachés) : un conteneur qui coupe son contenu, moins de 30 px de haut, des boutons dedans.
+  res.ecrases = [];
+  for (const el of zone.querySelectorAll("*")) {
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || !/(auto|scroll|hidden|clip)/.test(cs.overflowY)) continue;
+    if (el.clientHeight > 0 && el.clientHeight < 30 && el.scrollHeight > el.clientHeight + 6 && el.querySelector("button, a[href], input"))
+      res.ecrases.push({ el: decrire(el).slice(0, 90), h: el.clientHeight, contenu: el.scrollHeight });
+  }
   const diag = window.__capitainerie || {};
   res.violations = diag.violations || [];
   res.icones = [...(diag.icones || [])];
@@ -256,6 +285,7 @@ async function controlerScene(o, scene, [l, hh]) {
   const texteVu = scene.interdits ? await evaluer(o, "(document.querySelector('dialog[open]') || document.body).innerText") : "";
   const fichier = join(SORTIE, `${scene.nom}-${l}x${hh}.png`);
   await capture(o, fichier);
+  if (scene.apres) { try { await evaluer(o, scene.apres); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } }
   const fautes = [];
   if (!pret) fautes.push("la rubrique ne s'est pas affichée");
   if (res.pageDeborde) fautes.push(`la page défile en largeur (${res.scrollWidth} > ${res.innerWidth})`);
@@ -265,6 +295,7 @@ async function controlerScene(o, scene, [l, hh]) {
   for (const x of res.petits.slice(0, 8)) fautes.push(`cible tactile trop petite (${x.l}×${x.h}) : ${x.el}`);
   for (const x of res.images.slice(0, 4)) fautes.push(`image cassée : ${x}`);
   for (const x of (res.deformes || []).slice(0, 4)) fautes.push(`rond étiré en ovale (${x.l}×${x.h}) : ${x.el}`);
+  for (const x of (res.ecrases || []).slice(0, 4)) fautes.push(`rangée écrasée (${x.h} px pour ${x.contenu} px de contenu) : ${x.el}`);
   for (const x of (res.suspects || []).slice(0, 4)) fautes.push(`valeur absente affichée : ${x}`);
   for (const x of res.violations.slice(0, 4)) fautes.push(`violation CSP : ${x.directive} (${x.source}:${x.ligne})`);
   for (const x of [...new Set(erreursCourantes)].slice(0, 6)) fautes.push(x);

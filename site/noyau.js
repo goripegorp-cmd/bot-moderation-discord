@@ -10,6 +10,13 @@ export const V = (() => {
 
 export const CATEGORIES = [
   {
+    // La première page : tout ce qui attend une action, et les raccourcis par tâche (accueil.js).
+    cle: "accueil", titre: "Accueil", court: "Accueil", sous: "Ce qui t'attend", icone: "boussole",
+    rubriques: [
+      { cle: "attente", titre: "Ce qui t'attend", icone: "boussole", phrase: "Tout ce qui demande une action, du plus urgent au moins urgent : un bouton par ligne." },
+    ],
+  },
+  {
     cle: "port", titre: "Le Port", court: "Le Port", sous: "Discord", icone: "port",
     rubriques: [
       { cle: "apercu", titre: "Aperçu", icone: "apercu", phrase: "Ce qui demande ton attention, en un coup d'œil." },

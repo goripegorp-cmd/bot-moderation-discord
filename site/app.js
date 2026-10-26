@@ -14,6 +14,9 @@ import * as clan from "./clan.js";
 import * as recrutement from "./recrutement.js";
 import * as annonces from "./annonces.js";
 import * as cap from "./capitainerie.js";
+import * as accueil from "./accueil.js";
+import { monterRecherche } from "./recherche.js";
+import { basculeMode, modeSimple, changerMode } from "./mode.js";
 
 const RAFRAICHIR = 60000;
 const ICONES = ["port", "equipage", "capitainerie", "apercu", "journal", "sanctions", "tickets", "repertoire", "salons", "nettoyage", "membres", "fiches",
@@ -23,6 +26,7 @@ const ICONES = ["port", "equipage", "capitainerie", "apercu", "journal", "sancti
   "cloche", "parchemin", "plume", "cadenas", "cle", "coffre", "sabre", "canon", "carte", "etoile", "oeil", "personne", "discord", "roblox", "peut_etre"];
 
 const RENDUS = {
+  "accueil/attente": accueil.accueil,
   "port/apercu": port.apercu, "port/journal": port.journal, "port/sanctions": port.sanctions, "port/tickets": port.tickets,
   "port/repertoire": port.repertoire, "port/salons": port.salons, "port/nettoyage": port.nettoyage,
   "equipage/membres": clan.membres, "equipage/fiches": clan.fiches, "equipage/candidatures": recrutement.candidatures,
@@ -30,7 +34,7 @@ const RENDUS = {
   "capitainerie/affiches": cap.affiches, "capitainerie/catalogue": cap.catalogue, "capitainerie/roles": cap.roles,
 };
 // Ces rubriques n'ont pas besoin des grandes données du serveur pour s'afficher.
-const AUTONOMES = new Set(["port/nettoyage", "capitainerie/affiches", "capitainerie/catalogue", "capitainerie/roles", "equipage/annonces"]);
+const AUTONOMES = new Set(["accueil/attente", "port/nettoyage", "capitainerie/affiches", "capitainerie/catalogue", "capitainerie/roles", "equipage/annonces"]);
 
 let courante = null;
 const plaque = h("button", { classe: "plaque-etat", type: "button", id: "plaque-etat", "aria-live": "polite", title: "État de la connexion et des envois" });
@@ -56,6 +60,7 @@ async function demarrer() {
   completerSprite(ICONES);
   await HL.ouvrir();
   monterEntete();
+  monterRecherche();
   monterPancartes();
   lireRoute(true);
   document.body.classList.remove("demarrage");
@@ -100,6 +105,8 @@ function monterEntete() {
     { l: "File d'envoi", sous: HL.file.ops.length ? quantite(HL.file.ops.length, "modification(s) en attente") : "rien en attente", icone: "synchro", onclick: ouvrirFile },
     { l: "Exporter le journal (30 jours)", icone: "exporter", href: BASE + "/export?quoi=journal&jours=30", telecharger: true, desactive: !enLigne() },
     { l: "Exporter le casier", icone: "exporter", href: BASE + "/export?quoi=sanctions", telecharger: true, desactive: !enLigne() },
+    { titre: "Affichage" },
+    { l: modeSimple() ? "Tout afficher" : "Mode simple", sous: modeSimple() ? "les chiffres, graphiques, filtres et détails" : "l'essentiel seulement", icone: modeSimple() ? "oeil" : "masquer", onclick: () => changerMode(!modeSimple()) },
     "-",
     { l: "Fermer toutes mes sessions", icone: "cadenas", onclick: fermerPartout, desactive: !enLigne() },
     { l: "Se déconnecter", icone: "deconnexion", onclick: deconnecter, danger: true },
@@ -205,12 +212,21 @@ function fonduSur(el) {
     el.classList.toggle("fondu-gauche", el.scrollLeft > 4);
     el.classList.toggle("fondu-droite", el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
   };
-  if (!defilements.has(el)) { defilements.add(el); el.addEventListener("scroll", maj, { passive: true }); }
+  if (!defilements.has(el)) {
+    defilements.add(el);
+    el.addEventListener("scroll", maj, { passive: true });
+    // Une rangée de filtres qui défile (téléphone) : le filtre choisi reste en vue après un nouveau rendu.
+    const choisi = el.querySelector('[aria-pressed="true"]');
+    if (choisi && el.scrollWidth > el.clientWidth) {
+      const r = choisi.getBoundingClientRect(), p = el.getBoundingClientRect();
+      if (r.right > p.right || r.left < p.left) el.scrollLeft += r.left - p.left - (p.width - r.width) / 2;
+    }
+  }
   maj();
 }
 const observateurOnglets = "MutationObserver" in window ? new MutationObserver(() => surveillerDefilements()) : null;
 function surveillerDefilements() {
-  requestAnimationFrame(() => { for (const el of document.querySelectorAll(".sous-onglets, .onglets-fiche")) fonduSur(el); });
+  requestAnimationFrame(() => { for (const el of document.querySelectorAll(".sous-onglets, .onglets-fiche, .puces")) fonduSur(el); });
 }
 if (observateurOnglets) observateurOnglets.observe(document.body, { childList: true, subtree: true });
 addEventListener("resize", retarder(surveillerDefilements, 150));
@@ -231,7 +247,9 @@ function compteurs() {
   const alertes = (d.alertes || []).length;
   const att = HL.file.ops.length;
   const brouillons = ((vueJeu("evenements") || {}).brouillons || []).length;
+  const aFaire = accueil.nombreAFaire();
   return {
+    "accueil/attente": [aFaire, aFaire > 0], accueil: aFaire,
     "port/apercu": [alertes, alertes > 0], "port/tickets": [d.tickets.ouverts.filter((t) => !t.rellseas).length, oublies > 0], "port/salons": [qOuvertes, qOuvertes > 0],
     "equipage/membres": [echus, echus > 0], "equipage/candidatures": [aDecider, aDecider > 0], "equipage/tickets": [ticketsClan, false],
     "equipage/annonces": [brouillons, false],
@@ -268,7 +286,7 @@ function lireRoute(premiere) {
   if (!cat) {
     let mem = null;
     try { mem = JSON.parse(sessionStorage.getItem("capitainerie.route") || "null"); } catch (e) { mem = null; }
-    cat = (mem && CATEGORIES.some((c) => c.cle === mem.cat) && mem.cat) || "port";
+    cat = (mem && CATEGORIES.some((c) => c.cle === mem.cat) && mem.cat) || CATEGORIES[0].cle;   // l'accueil
     rub = (mem && mem.cat === cat && mem.rub) || null;
   }
   rub = rubrique(cat, rub).cle;
@@ -294,7 +312,9 @@ function rendre(force) {
   if (courante && courante.ctrl && courante.ctrl.quitter) { try { courante.ctrl.quitter(); } catch (e) { /* rien */ } }
   const r = rubrique(cat, rub);
   const corps = h("div", { classe: "rubrique-corps" });
-  remplacer(contenu, titreRubrique(r), corps);
+  const titre = titreRubrique(r);
+  ajouter(titre, [basculeMode()]);
+  remplacer(contenu, titre, corps);
   let ctrl = null;
   if (!etat.d && !AUTONOMES.has(cle)) {
     ajouter(corps, [etat.chargementEnCours ? chargement("Lecture du livre de bord…") : port.indisponible()]);
@@ -384,6 +404,8 @@ ecouter("recharger", () => chargerDonnees());
 ecouter("jeu", () => { if (courante && courante.ctrl && courante.ctrl.majJeu) courante.ctrl.majJeu(); majCompteurs(); });
 ecouter("dossier:ouvrir", (ticket) => { if (etat.route.cat !== "equipage" || etat.route.rub !== "candidatures") aller("equipage", "candidatures"); setTimeout(() => recrutement.ouvrirDossier(ticket), 60); });
 ecouter("affiche:ouvrir", (id) => cap.ouvrirAffiche(id));
+// Aller là où l'on est déjà (un raccourci, la recherche qui vient de poser un filtre) : la rubrique se redessine.
+ecouter("route:meme", () => rendre(true));
 
 // ─── Bandeaux (session, hors ligne, nouvelle version) ───────────────────────
 function majBandeaux() {

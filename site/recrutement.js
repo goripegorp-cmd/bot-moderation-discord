@@ -12,10 +12,11 @@ import { charger, vue as vueJeu, perime } from "./donnees.js";
 import { mettreEnFile, opsDe } from "./hors_ligne.js";
 import {
   bouton, boutonIcone, avatar, pastille, tampon, vide, tuile, tuiles, puces, segment, recherche, liste, champ, saisie, zoneTexte, interrupteur,
-  caseACocher, radios, confirmer, pancarte, toast, section, squelettes, paginer, groupe, bandeau, compteur, nomDe, majBoutonsReseau, barres, ENCRES,
+  caseACocher, radios, confirmer, pancarte, toast, section, squelettes, groupe, bandeau, compteur, nomDe, majBoutonsReseau, barres, ENCRES,
 } from "./ui.js";
 import { ouvrirFiche, reponses, transcriptEnLigne, STATUTS_CAND, etapeCandidature, chargerSuivi } from "./fiche.js";
 import { indisponible } from "./discord.js";
+import { ligne, lignes, groupes, outilsGroupes, badgeRestreint, quandLigne, avance } from "./rangement.js";
 
 export const THEMES = [["studio", "Studio RELL Games"], ["jeu", "Le jeu RELL Seas"], ["races", "Races"], ["factions", "Factions"], ["fruits", "Fruits"],
   ["combat", "Combat"], ["navires", "Navires"], ["monde", "Le monde"], ["evenements", "Évènements"], ["boss", "Boss"], ["personnages", "Personnages"], ["actualites", "Actualités · Movie 3"]];
@@ -110,40 +111,47 @@ export function candidatures(vue, ctx) {
 
 // ─── En cours ───────────────────────────────────────────────────────────────
 function enCours(zone) {
-  const f = filtres("cand-encours", { q: "" });
+  const f = filtres("cand-encours", { q: "", etape: "tous" });
   const resultats = h("div", { classe: "pile" });
   remplacer(zone, h("div", { classe: "outils" }, recherche(f.q, "Nom, pseudo, réponse…", (q) => { f.q = q; maj(); }),
     bouton("La banque de questions", { classe: "discret", icone: "parchemin", onclick: () => aller("equipage", "candidatures", "questionnaire") })), resultats);
+  // Les étapes, dans l'ordre de l'urgence : un groupe chacune (les plus anciennes en tête), les puces pour n'en voir qu'une.
+  const ETAPES = [["corriger", "Réponses à corriger", "plume", "#8e2a24"], ["decider", "Étape 1 à décider", "candidatures", "#a8641c"], ["attente", "Questions envoyées", "minuteur", "#1f4e5a"]];
   const maj = () => {
     const d = etat.d;
     if (!d) { remplacer(resultats, indisponible()); return; }
     const l = d.en_cours.filter((c) => contient([c.nom, c.pseudo, c.id, ...(c.reponses || []).flat()].join(" "), f.q));
     const parEtat = { decider: [], corriger: [], attente: [] };
     l.forEach((c) => { const e = etatCandidature(c); if (parEtat[e]) parEtat[e].push(c); });   // « decidee » : plus en cours
+    if (f.etape !== "tous" && !parEtat[f.etape]) f.etape = "tous";
+    const zoneG = h("div", { classe: "groupes-zone" }, groupes(ETAPES.filter(([k]) => parEtat[k].length && (f.etape === "tous" || f.etape === k)).map(([k, titre, ic]) => ({
+      cle: "cand-" + k, titre, icone: ic, compte: parEtat[k].length, chaud: k !== "attente",
+      contenu: () => lignes("cand-" + k, parEtat[k].slice().sort((a, b) => (a.ouvert || 0) - (b.ouvert || 0)), ligneCandidat),
+    })), { ouverts: 3 }));
     remplacer(resultats,
       tuiles(tuile({ cle: "r1", lib: "Étape 1 à décider", val: parEtat.decider.length, icone: "candidatures", teinte: "#a8641c" }),
         tuile({ cle: "r2", lib: "Réponses à corriger", val: parEtat.corriger.length, icone: "plume", teinte: "#8e2a24" }),
         tuile({ cle: "r3", lib: "Questions envoyées", val: parEtat.attente.length, icone: "minuteur", sous: "en attente du candidat", teinte: "#1f4e5a" }),
         tuile({ cle: "r4", lib: "Écartées", val: d.ecartes || 0, icone: "coffre", sous: "sans décision, vides, doublons", teinte: "#4a5560" })),
-      h("p", { classe: "aide" }, "Deux étapes : le questionnaire d'ouverture (étape 1), puis les questions choisies ici dans la banque (étape 2). Le candidat n'apprend jamais où il s'est trompé ; c'est toi qui corriges. 100 % de réponses justes exigés."),
-      l.length ? null : vide("Aucune candidature en cours", "Les nouvelles candidatures apparaissent ici dès l'ouverture du ticket.", "candidatures"),
-      parEtat.corriger.length ? section("Réponses à corriger", "plume", compte(parEtat.corriger.length, "candidat"), h("div", { classe: "grille" }, parEtat.corriger.map(carteCandidat))) : null,
-      parEtat.decider.length ? section("Étape 1 · à décider", "candidatures", compte(parEtat.decider.length, "candidat"), h("div", { classe: "grille" }, parEtat.decider.map(carteCandidat))) : null,
-      parEtat.attente.length ? section("Étape 2 · questions envoyées", "minuteur", compte(parEtat.attente.length, "candidat"), h("div", { classe: "grille" }, parEtat.attente.map(carteCandidat))) : null);
+      puces([["tous", "Toutes", l.length], ...ETAPES.map(([k, lib, , teinte]) => [k, lib, parEtat[k].length, teinte])], f.etape, (v) => { f.etape = v; maj(); }, "Étapes"),
+      h("p", { classe: "aide avance" }, "Deux étapes : le questionnaire d'ouverture (étape 1), puis les questions choisies ici dans la banque (étape 2). Le candidat n'apprend jamais où il s'est trompé ; c'est toi qui corriges. 100 % de réponses justes exigés."),
+      l.length ? zoneG : vide("Aucune candidature en cours", "Les nouvelles candidatures apparaissent ici dès l'ouverture du ticket.", "candidatures"));
   };
   maj();
   chargerSuivi();   // l'étape la plus fraîche : la liste se redessine à son arrivée (« jeu »)
   return { maj, majJeu: maj };
 }
-function carteCandidat(c) {
+/** Une candidature en cours : le candidat, son ticket, son étape ; le dossier au clic. */
+function ligneCandidat(c) {
   const e = etatCandidature(c);
-  const [lib, coul] = { decider: ["Étape 1 · à décider", "ambre"], corriger: ["Étape 2 · à corriger", ""], attente: ["Étape 2 · en attente", "mer"],
-    decidee: ["Décidée · fermeture prévue", "encre"] }[e] || ["Candidature", "encre"];
-  const ouvrir = () => ouvrirDossier(c.ticket);
-  return h("article", { classe: "feuillet lien" + (e === "corriger" ? " alerte" : e === "decider" ? " chaude" : ""), tabindex: 0, onclick: ouvrir, onkeydown: (ev) => { if (ev.key === "Enter") ouvrir(); } },
-    h("div", { classe: "qui" }, avatar(c), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(c)), h("div", { classe: "sous-nom" }, "Ticket #" + c.ticket + " · ouvert " + depuis(c.ouvert))), tampon(lib, coul)),
-    (c.reponses || []).length ? h("ul", { classe: "entrees" }, c.reponses.slice(0, 2).map(([q, r]) => h("li", { classe: "entree" }, h("div", { classe: "meta" }, q), h("div", { classe: "texte coupe2" }, r)))) : h("p", { classe: "aide" }, "Formulaire non rempli."),
-    h("div", { classe: "sous-nom" }, c.pris_par ? "Pris par " + sansEmoji(c.pris_par) : "Pas encore pris"));
+  // Court : le groupe dit déjà l'étape (« Étape 1 à décider », « Réponses à corriger », « Questions envoyées »).
+  const [lib, coul] = { decider: ["À décider", "ambre"], corriger: ["À corriger", ""], attente: ["En attente", "mer"],
+    decidee: ["Décidée", "encre"] }[e] || ["Candidature", "encre"];
+  return ligne({
+    visuel: avatar(c, "p"), titre: nomDe(c), sous: "Ticket #" + c.ticket + " · ouvert " + depuis(c.ouvert) + " · " + (c.pris_par ? "pris par " + sansEmoji(c.pris_par) : "pas encore pris"),
+    badges: [tampon(lib, coul, true), badgeRestreint(c.id)], ...quandLigne(c.ouvert), etat: e === "corriger" ? "alerte" : e === "decider" ? "chaude" : null,
+    ouvrir: () => ouvrirDossier(c.ticket), libelleOuvrir: "Ouvrir le dossier de " + nomDe(c), donnees: { ticket: c.ticket },
+  });
 }
 
 // ─── Décidées ───────────────────────────────────────────────────────────────
@@ -152,7 +160,7 @@ function decidees(zone) {
   const resultats = h("div", { classe: "pile" });
   const changer = () => { resetPages("cand"); maj(); };
   remplacer(zone, h("div", { classe: "outils" }, recherche(f.q, "Nom, identifiant, motif…", (q) => { f.q = q; changer(); }),
-    liste({ valeur: f.tri, label: "Tri", options: [{ v: "recent", l: "Plus récentes" }, { v: "ancien", l: "Plus anciennes" }, { v: "nom", l: "Nom A → Z" }], changer: (v) => { f.tri = v; changer(); } })), resultats);
+    avance(liste({ valeur: f.tri, label: "Tri", options: [{ v: "recent", l: "Plus récentes" }, { v: "ancien", l: "Plus anciennes" }, { v: "nom", l: "Nom A → Z" }], changer: (v) => { f.tri = v; changer(); } }))), resultats);
   const maj = () => {
     const d = etat.d;
     if (!d) { remplacer(resultats, indisponible()); return; }
@@ -166,27 +174,32 @@ function decidees(zone) {
     const stats = {};
     toutes.forEach((c) => { if (!c.ferme) return; const k = moisDe(c.ferme); (stats[k] = stats[k] || { acceptes: 0, refuses: 0 })[c.statut] = ((stats[k] || {})[c.statut] || 0) + 1; });
     const taux = nb.acceptes + nb.refuses ? Math.round(100 * nb.acceptes / (nb.acceptes + nb.refuses)) : 0;
+    // Un mois par groupe (le plus récent ouvert), une ligne par candidature.
+    const zoneG = h("div", { classe: "groupes-zone" }, groupes([...parMois.entries()].map(([k, g]) => ({ titre: k === "inconnu" ? "Date inconnue" : libelleMois(k), compte: g.length,
+      info: quantite(g.filter((c) => c.statut === "acceptes").length, "acceptée(s)"), cle: "cand-m-" + k, contenu: () => lignes("cand-m-" + k, g, ligneDecidee) })), { ouverts: 1, forcer: !!f.q }));
     remplacer(resultats,
       tuiles(tuile({ cle: "d1", lib: "Acceptés", val: nb.acceptes, icone: "succes", teinte: "#3f6b3a" }), tuile({ cle: "d2", lib: "Refusés", val: nb.refuses, icone: "annuler", teinte: "#8e2a24" }),
         tuile({ cle: "d3", lib: "Taux d'acceptation", val: taux, suffixe: " %", icone: "boussole", teinte: "#1f4e5a" })),
-      puces([["tous", "Toutes", nb.tous], ["acceptes", "Acceptés", nb.acceptes, "#3f6b3a"], ["refuses", "Refusés", nb.refuses, "#8e2a24"]], f.statut, (v) => { f.statut = v; changer(); }, "Décision"),
-      l.length ? h("div", {}, [...parMois.entries()].map(([k, g], i) => groupe({ titre: k === "inconnu" ? "Date inconnue" : libelleMois(k), compte: g.length, info: quantite(g.filter((c) => c.statut === "acceptes").length, "acceptée(s)"),
-        cle: "cand-m-" + k, ouvert: i === 0 || !!f.q ? true : undefined }, () => paginer("cand-m-" + k, g, carteDecidee)))) : vide("Rien ici", "Change le filtre ou la recherche."),
-      groupe({ titre: "Tendances", cle: "cand-tendances", icone: "carte" }, () => h("div", { classe: "cadre" }, h("h3", {}, "Candidatures par mois"), h("p", { classe: "aide" }, "Selon la date de la décision."),
+      h("div", { classe: "rangee entre" }, puces([["tous", "Toutes", nb.tous], ["acceptes", "Acceptés", nb.acceptes, "#3f6b3a"], ["refuses", "Refusés", nb.refuses, "#8e2a24"]], f.statut, (v) => { f.statut = v; changer(); }, "Décision"),
+        parMois.size > 1 ? outilsGroupes(zoneG) : null),
+      l.length ? zoneG : vide("Rien ici", "Change le filtre ou la recherche."),
+      groupe({ titre: "Tendances", cle: "cand-tendances", icone: "carte", classe: "avance" }, () => h("div", { classe: "cadre" }, h("h3", {}, "Candidatures par mois"), h("p", { classe: "aide" }, "Selon la date de la décision."),
         barres(Object.keys(stats).sort().slice(-12), stats, [["acceptes", ENCRES.vert, "Acceptés"], ["refuses", ENCRES.cire, "Refusés"]], "Les mois apparaîtront avec les premières décisions."))));
   };
   maj();
   return { maj };
 }
-function carteDecidee(c) {
-  const [lib, teinte] = STATUTS_CAND[c.statut] || [c.statut, null];
-  const ouvrir = () => ouvrirFiche(c.id, "candidatures");
-  return h("article", { classe: "feuillet lien", tabindex: 0, onclick: ouvrir, onkeydown: (e) => { if (e.key === "Enter") ouvrir(); } },
-    h("div", { classe: "qui" }, avatar(c), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(c)), h("div", { classe: "sous-nom" }, (c.pseudo ? "@" + c.pseudo + " · " : "") + date(c.ferme || c.ouvert))),
-      tampon(lib, c.statut === "acceptes" ? "vert" : "")),
-    c.parti ? h("div", { classe: "pastilles" }, pastille("A quitté le serveur", "#4a5560")) : null,
-    c.motif ? h("p", { classe: "texte coupe2" }, c.motif) : null,
-    h("div", { classe: "sous-nom" }, (c.pris_par || c.ferme_par ? "Traité par " + sansEmoji(c.pris_par || c.ferme_par) : "Traitement non renseigné") + ((c.candidatures || []).length > 1 ? " · " + c.candidatures.length + " candidatures" : "")));
+/** Une candidature décidée : la décision, le motif, qui l'a traitée ; la fiche au clic. */
+function ligneDecidee(c) {
+  const [lib] = STATUTS_CAND[c.statut] || [c.statut, null];
+  return ligne({
+    visuel: avatar(c, "p"), titre: nomDe(c),
+    sous: [c.pseudo ? "@" + c.pseudo : "", c.motif || "", c.pris_par || c.ferme_par ? "traité par " + sansEmoji(c.pris_par || c.ferme_par) : "",
+      (c.candidatures || []).length > 1 ? c.candidatures.length + " candidatures" : ""].filter(Boolean).join(" · "),
+    badges: [tampon(lib, c.statut === "acceptes" ? "vert" : "", true), c.parti ? pastille("A quitté le serveur", "#4a5560") : null, badgeRestreint(c.id)],
+    ...quandLigne(c.ferme || c.ouvert), etat: c.parti ? "eteinte" : null,
+    ouvrir: () => ouvrirFiche(c.id, "candidatures"), libelleOuvrir: "Ouvrir la fiche de " + nomDe(c), donnees: { membre: c.id },
+  });
 }
 
 // ═══ LE DOSSIER D'UN CANDIDAT ═══════════════════════════════════════════
@@ -487,6 +500,11 @@ function questionnaire(zone) {
     l.forEach((q) => { const k = q.theme || "autre"; if (!parTheme.has(k)) parTheme.set(k, []); parTheme.get(k).push(q); });
     const ordre = themesDe(B).map(([k]) => k);
     const reglages = B.reglages || {};
+    // Un thème par groupe (tous repliés : on choisit son thème ; tous ouverts pendant une recherche ou un filtre), une question
+    // par ligne : son détail au clic.
+    const zoneG = h("div", { classe: "groupes-zone" }, groupes([...parTheme.keys()].sort((a, b) => ((ordre.indexOf(a) + 1) || 99) - ((ordre.indexOf(b) + 1) || 99)).map((k) => ({
+      titre: nomTheme(B, k), compte: parTheme.get(k).length, cle: "bq-" + k, info: (() => { const n = parTheme.get(k).filter((q) => (q.statut || "a_verifier") === "a_verifier").length; return n ? n + " à vérifier" : ""; })(),
+      contenu: () => lignes("bq-" + k, parTheme.get(k), (q) => ligneBanque(B, q)) })), { ouverts: 0, forcer: f.theme !== "tous" || !!f.q || f.statut !== "tous" }));
     remplacer(resultats,
       tuiles(tuile({ cle: "b1", lib: "Questions actives", val: qs.filter(qActive).length, icone: "parchemin", sous: compte(qs.length, "question") + " dans la banque", teinte: "#1f4e5a" }),
         tuile({ cle: "b2", lib: "À vérifier", val: qs.filter((q) => (q.statut || "a_verifier") === "a_verifier").length, icone: "attention", teinte: "#a8641c", clic: () => { f.statut = "a_verifier"; changer(); } }),
@@ -495,39 +513,45 @@ function questionnaire(zone) {
       section("La banque de questions", "parchemin", compte(l.length, "question"),
         h("div", { classe: "pile" },
           h("div", { classe: "outils" }, recherche(f.q, "Question, réponse, source…", (q) => { f.q = q; changer(); }),
-            segment(f.diff, [["0", "Toutes"], ["1", "Faciles"], ["2", "Moyennes"], ["3", "Difficiles"]], (v) => { f.diff = v; changer(); }, "Difficulté"),
+            avance(segment(f.diff, [["0", "Toutes"], ["1", "Faciles"], ["2", "Moyennes"], ["3", "Difficiles"]], (v) => { f.diff = v; changer(); }, "Difficulté")),
             liste({ valeur: f.statut, label: "Statut", options: [{ v: "tous", l: "Tous" }, { v: "confirme", l: "Confirmées" }, { v: "a_verifier", l: "À vérifier" }], changer: (v) => { f.statut = v; changer(); } }),
-            liste({ valeur: f.actives, label: "Actives", options: [{ v: "toutes", l: "Actives et désactivées" }, { v: "actives", l: "Actives" }, { v: "inactives", l: "Désactivées" }], changer: (v) => { f.actives = v; changer(); } }),
+            avance(liste({ valeur: f.actives, label: "Actives", options: [{ v: "toutes", l: "Actives et désactivées" }, { v: "actives", l: "Actives" }, { v: "inactives", l: "Désactivées" }], changer: (v) => { f.actives = v; changer(); } })),
             peutAgir() ? bouton("Ajouter une question", { classe: "principal", icone: "ajouter", onclick: () => editerQuestion(B, null) }) : null),
-          puces([["tous", "Tous les thèmes", qs.length], ...themesDe(B).map(([k, n]) => [k, n, nbTheme[k] || 0])], f.theme, (v) => { f.theme = v; changer(); }, "Thèmes"),
-          l.length ? h("div", {}, [...parTheme.keys()].sort((a, b) => ((ordre.indexOf(a) + 1) || 99) - ((ordre.indexOf(b) + 1) || 99)).map((k) => groupe({ titre: nomTheme(B, k), compte: parTheme.get(k).length,
-            cle: "bq-" + k, ouvert: f.theme !== "tous" || !!f.q ? true : undefined }, () => paginer("bq-" + k, parTheme.get(k), (q) => ligneBanque(B, q), { classe: "banque-registre", pas: 20 })))) : vide("Aucune question ici", "Change les filtres, ou ajoute une question."))),
-      section("Les modèles", "etoile", compte((B.modeles || []).length, "modèle"), blocModeles(B)),
-      section("Les liens donnés au candidat", "lien", compte((B.liens || []).length, "lien"), blocLiens(B)),
-      section("Les réglages", "cle", "", blocReglages(B)));
+          avance(puces([["tous", "Tous les thèmes", qs.length], ...themesDe(B).map(([k, n]) => [k, n, nbTheme[k] || 0])], f.theme, (v) => { f.theme = v; changer(); }, "Thèmes")),
+          l.length ? zoneG : vide("Aucune question ici", "Change les filtres, ou ajoute une question.")),
+        parTheme.size > 1 ? outilsGroupes(zoneG) : null),
+      // Les réglages du questionnaire, rarement touchés : repliés, chacun avec son compte.
+      h("div", { classe: "groupes-zone" }, groupes([
+        { titre: "Les modèles", icone: "etoile", compte: (B.modeles || []).length, cle: "bq-modeles", contenu: () => blocModeles(B) },
+        { titre: "Les liens donnés au candidat", icone: "lien", compte: (B.liens || []).length, cle: "bq-liens", contenu: () => blocLiens(B) },
+        { titre: "Les réglages", icone: "cle", cle: "bq-reglages", contenu: () => blocReglages(B) },
+      ], { ouverts: 0 })));
     majBoutonsReseau(resultats);
   };
   maj();
   return { maj: () => maj(false), majJeu: () => maj(false), majFile: () => maj(false) };
 }
+/** Une question de la banque, sur une ligne : la question, sa réponse, sa difficulté et son statut ; « Active »,
+ *  Modifier et Retirer à droite ; les variantes, la source et l'extrait au clic. */
 function ligneBanque(B, q) {
   const src = qSource(q), vari = qVariantes(q);
-  return h("article", { classe: "banque-ligne" + (qActive(q) ? "" : " inactive") + (q._attente ? " en-attente" : "") },
-    h("div", { classe: "banque-ligne-tete" }, h("b", { classe: "banque-question" }, qTexte(q)),
-      h("span", { classe: "rangee" }, h("span", { classe: "difficulte d" + qDifficulte(q) }, DIFFICULTES[qDifficulte(q)]),
-        (q.statut || "a_verifier") === "a_verifier" ? tampon("À vérifier", "ambre", true) : tampon("Confirmée", "vert", true), q._attente ? tampon("En attente", "", true) : null)),
-    h("div", { classe: "banque-reponse" }, h("span", { classe: "champ-lib" }, "Réponse attendue"), h("span", {}, qReponse(q) || "—")),
-    vari.length ? h("div", { classe: "variantes" }, h("span", { classe: "meta" }, "Variantes : "), vari.map((v) => h("span", { classe: "variante" }, v))) : null,
-    src.titre || src.url ? h("div", { classe: "meta banque-source" }, icone("lien", "ic-p"), " ", src.url ? h("a", { href: src.url }, src.titre || src.url) : src.titre, src.minutage ? " · à " + src.minutage : "",
-      q.section ? " · " + q.section : "") : null,
-    q.extrait ? h("p", { classe: "banque-extrait" }, q.extrait) : null,
-    peutAgir() ? h("div", { classe: "rangee" },
-      interrupteur("Active", qActive(q), (v) => enregistrerQuestion(Object.assign({}, q, { active: v, actif: v }), q)),
-      bouton("Modifier", { classe: "p", icone: "plume", onclick: () => editerQuestion(B, q) }),
-      bouton("Retirer", { classe: "p discret danger", icone: "supprimer", onclick: async () => {
+  return ligne({
+    titre: qTexte(q), sous: "Réponse : " + (qReponse(q) || "—") + (vari.length ? " · " + quantite(vari.length, "variante(s)") : "") + (src.titre || src.url ? " · source : " + (src.titre || src.url) : ""),
+    badges: [h("span", { classe: "difficulte d" + qDifficulte(q) }, DIFFICULTES[qDifficulte(q)]),
+      (q.statut || "a_verifier") === "a_verifier" ? tampon("À vérifier", "ambre", true) : tampon("Confirmée", "vert", true), q._attente ? tampon("En attente", "", true) : null], maxBadges: 3,
+    actions: peutAgir() ? [{ noeud: interrupteur("Active", qActive(q), (v) => enregistrerQuestion(Object.assign({}, q, { active: v, actif: v }), q)) },
+      { icone: "plume", libelle: "Modifier", onclick: () => editerQuestion(B, q) },
+      { icone: "supprimer", libelle: "Retirer", danger: true, onclick: async () => {
         const ok = await confirmer({ titre: "Retirer cette question de la banque ?", texte: "« " + qTexte(q) + " » ne sera plus proposée. Les dossiers qui l'ont déjà gardent leur réponse.", libelleOk: "Retirer", style: "danger" });
         if (ok) { await mettreEnFile("recrutement/question/retirer", { id: q.id }, { genre: "question", cle: String(q.id), resume: "Retirer une question de la banque", retrait: true }); emettre("jeu", { nom: "banque" }); }
-      } })) : null);
+      } }] : [],
+    visibles: 3, classe: "banque-ligne" + (qActive(q) ? "" : " inactive") + (q._attente ? " en-attente" : ""), etat: q._attente ? "attente" : null,
+    deplier: () => [h("div", { classe: "banque-reponse" }, h("span", { classe: "champ-lib" }, "Réponse attendue"), h("span", {}, qReponse(q) || "—")),
+      vari.length ? h("div", { classe: "variantes" }, h("span", { classe: "meta" }, "Variantes : "), vari.map((v) => h("span", { classe: "variante" }, v))) : null,
+      src.titre || src.url ? h("div", { classe: "meta banque-source" }, icone("lien", "ic-p"), " ", src.url ? h("a", { href: src.url }, src.titre || src.url) : src.titre, src.minutage ? " · à " + src.minutage : "",
+        q.section ? " · " + q.section : "") : null,
+      q.extrait ? h("p", { classe: "banque-extrait" }, q.extrait) : null],
+  });
 }
 async function enregistrerQuestion(v, q) {
   const corps = { theme: v.theme, question: qTexte(v).trim(), reponse: qReponse(v).trim(), variantes: qVariantes(v), source: (qSource(v).url || "").trim(),
@@ -578,7 +602,7 @@ function blocModeles(B) {
   const modeles = B.modeles || [];
   return h("div", { classe: "pile" },
     h("p", { classe: "aide" }, "Un modèle, c'est une sélection de questions prête à envoyer en un clic. Le modèle par défaut est proposé d'emblée à chaque candidat (et utilisé sur Discord)."),
-    modeles.length ? h("div", { classe: "grille" }, modeles.map((m) => h("article", { classe: "feuillet" + (m.par_defaut ? " calme" : "") + (m._attente ? " en-attente" : "") },
+    modeles.length ? h("div", { classe: "grille egale" }, modeles.map((m) => h("article", { classe: "feuillet" + (m.par_defaut ? " calme" : "") + (m._attente ? " en-attente" : "") },
       h("div", { classe: "rangee entre" }, h("h3", { classe: "titre-carte" }, sansEmoji(m.nom)), m.par_defaut ? tampon("Par défaut", "vert", true) : null),
       h("p", { classe: "meta" }, compte((m.questions || []).length, "question")),
       peutAgir() ? h("div", { classe: "feuillet-pied" },

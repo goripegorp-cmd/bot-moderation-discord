@@ -28,6 +28,7 @@ MOTS_GRAVES = re.compile(r"menace|racis|nsfw|porn|doxx|phishing|arnaque|scam|\br
 INSULTES_MAX = 3
 PORTEES = {"warns": "Avertissements", "auto": "Détections automatiques", "tout": "Tout le casier (sauf bannissements)"}
 AGES = (0, 30, 90)
+LOTS_MAX = 200   # les nettoyages des 30 derniers jours montrés sur le site (rangés par sorte : jamais un long pavé)
 PURGES = [("archive du casier", "DELETE FROM infractions_archive WHERE archive_le < ?", GARDE_JOURS, "unix"),
           ("nettoyages du casier", "DELETE FROM casier_lots WHERE quand < ?", GARDE_JOURS, "unix")]
 _COLS = "id, guild_id, user_id, mod_id, type, reason, duration, created_at"
@@ -182,8 +183,8 @@ async def restaurer(guild_id: int, lot: str, par: int) -> dict:
 async def lots(guild_id: int) -> list[dict]:
     async with _get_db() as db:
         async with db.execute("SELECT lot, quand, par, quoi, n, personnes, restaure_le, restaure_par FROM casier_lots"
-                              " WHERE guild_id=? AND quand>=? ORDER BY quand DESC, rowid DESC LIMIT 30",
-                              (guild_id, int(time.time()) - GARDE_JOURS * 86400)) as cur:
+                              " WHERE guild_id=? AND quand>=? ORDER BY quand DESC, rowid DESC LIMIT ?",
+                              (guild_id, int(time.time()) - GARDE_JOURS * 86400, LOTS_MAX)) as cur:
             return [{"lot": l, "quand": q, "par": p, "quoi": quoi, "n": n, "personnes": pers, "restaure_le": rl or None,
                      "restaure_par": rp} for l, q, p, quoi, n, pers, rl, rp in await cur.fetchall()]
 

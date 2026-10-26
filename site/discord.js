@@ -1,18 +1,21 @@
 // discord.js — « Le Port » : aperçu, journal, sanctions, tickets, répertoire, salons & questions, nettoyage.
 
-import { h, icone, date, heure, depuis, duree, nombre, cleJour, libelleJour, libelleMois, moisDe, maintenant, sansEmoji, norm, contient, lettre, trier, compte, remplacer, quantite, accord, ajouter } from "./dom.js";
+import { h, icone, date, heure, depuis, duree, nombre, cleJour, libelleMois, moisDe, maintenant, sansEmoji, norm, contient, lettre, trier, compte, remplacer, quantite, accord, ajouter } from "./dom.js";
 import { etat, P, peutAgir, aller, filtres, enLigne, emettre, ecouter, retenirPersonnes } from "./noyau.js";
 import { lienExport, lire, poster } from "./api.js";
 import { charger, vue as vueJeu } from "./donnees.js";
 import { file } from "./hors_ligne.js";
 import {
-  bouton, avatar, pastille, tampon, vide, tuile, tuiles, puces, segment, recherche, liste, menu, groupe, paginer, indexAZ,
+  bouton, avatar, pastille, tampon, vide, tuile, tuiles, puces, segment, recherche, liste, menu, groupe, indexAZ,
   section, sectionTete, barres, barresH, ENCRES, lienNom, nomDe, confirmer, toast, bandeau, caseACocher, compteur, squelettes, boutonCopie,
 } from "./ui.js";
 import {
-  ouvrirFiche, ouvrirConversation, agir, entreeJournal, teinteCat, teinteType, libelleType, GROUPES_SANCTION, STATUTS_Q, STATUTS_S,
-  STATUTS_I, STATUTS_CAND, deplier, sondageVotes, etapeCandidature, ETAPES_CANDIDATURE, chargerSuivi, nomSalon, recentsDabord, propre,
+  ouvrirFiche, ouvrirConversation, agir, teinteCat, teinteType, libelleType, GROUPES_SANCTION, STATUTS_Q, STATUTS_S,
+  STATUTS_I, STATUTS_CAND, deplier, sondageVotes, etapeCandidature, chargerSuivi, nomSalon, recentsDabord, propre,
+  ligneJournal,
 } from "./fiche.js";
+import { ligne, lignes, groupes, outilsGroupes, groupesParPeriode, groupesParJours, pastilleIcone, quandLigne, badgeRestreint, estRestreint, avance } from "./rangement.js";
+import { aFaire, ligneAFaire, resserrer } from "./accueil.js";
 
 const JOUR = 86400;
 const resetPages = (prefixe) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(prefixe)) delete etat.pages[k]; };
@@ -44,14 +47,12 @@ export function apercu(vue) {
       tuile({ cle: "a5", lib: "Candidatures", val: d.en_cours.length, icone: "candidatures", sous: aDecider + " à décider · " + aCorriger + " à corriger", teinte: "#7a4b2a", clic: () => aller("equipage", "candidatures") }),
       tuile({ cle: "a6", lib: "Membres du clan", val: clan.length, icone: "equipage", sous: quantite(inactifs, "inactif(s)") + " depuis un mois", teinte: "#3f6b3a", clic: () => aller("equipage", "membres") }),
       attente ? tuile({ cle: "a7", lib: "Modifications à envoyer", val: attente, icone: "synchro", sous: "faites hors ligne, elles partent au retour", teinte: "#7a5a22", clic: () => emettre("file:ouvrir") }) : null);
-    const items = [];
-    alertes.forEach((a) => items.push(carteAlerte(a)));
-    nonPris.filter((x) => x.ouvert && n - x.ouvert > 6 * 3600).slice(0, 4).forEach((x) => items.push(carteTicketOuvert(x)));
-    qOuvertes.filter((q) => n - q.quand > 1800).slice(0, 4).forEach((q) => items.push(carteQuestions(q.id, [q])));
-    [...d.en_cours.filter((c) => etapes.get(c) === "corriger"), ...d.en_cours.filter((c) => c.ouvert && n - c.ouvert > 2 * JOUR && etapes.get(c) === "decider")]
-      .slice(0, 4).forEach((c) => items.push(carteCandidatureCourte(c)));
-    const urgent = section("À traiter maintenant", "attention", items.length ? compte(items.length, "élément") : "",
-      items.length ? h("div", { classe: "grille" }, items) : vide("Rien d'urgent", "Pas d'alerte, pas de ticket oublié, pas de question en attente.", "succes"));
+    // À traiter maintenant : ce qui attend sur Discord (alertes, tickets, questions, idées), comme à l'accueil — trois par
+    // sorte, puis « Et N autres » vers la bonne page. Les candidatures sont à l'Équipage (et à l'accueil).
+    const tous = aFaire().filter((x) => ["alerte", "ticket", "question", "idees"].includes(x.sorte)), items = resserrer(tous);
+    const urgent = section("À traiter maintenant", "attention", tous.length ? compte(tous.length, "élément") : "",
+      items.length ? lignes("apercu-urgent", items, ligneAFaire, { classe: "a-faire-liste" }) : vide("Rien d'urgent", "Pas d'alerte, pas de ticket oublié, pas de question en attente.", "succes"),
+      bouton("Tout ce qui t'attend", { classe: "p discret", icone: "boussole", onclick: () => aller("accueil") }));
     const pj = (d.journal && d.journal.par_jour) || {}, jours = [], fam = {};
     for (let i = 13; i >= 0; i--) jours.push(cleJour(n - i * JOUR));
     const connues = ["Modération", "Sécurité", "Tickets", "Questions", "Clan", "Membres", "Messages", "Vocal"];
@@ -62,7 +63,7 @@ export function apercu(vue) {
         autre: Object.entries(v).filter(([c]) => !connues.includes(c)).reduce((a, [, x]) => a + x, 0) };
     }
     const eq = d.equipe || [];
-    const graphes = h("div", { classe: "duo" },
+    const graphes = h("div", { classe: "duo avance" },
       h("div", { classe: "cadre" }, h("h3", {}, "Activité · 14 jours"), h("p", { classe: "aide" }, "Tout ce que le journal a consigné, jour par jour."),
         barres(jours, fam, [["mod", ENCRES.cire, "Modération et sécurité"], ["sup", ENCRES.sienne, "Tickets, questions, clan"], ["mem", ENCRES.vert, "Arrivées et départs"],
           ["msg", ENCRES.mer, "Messages et vocal"], ["autre", ENCRES.corde, "Autre"]], "Le journal se remplit au fil des évènements.")),
@@ -76,24 +77,6 @@ export function apercu(vue) {
   return { maj, majJeu: maj };
 }
 
-function carteAlerte(a) {
-  const p = P(a.id);
-  return h("article", { classe: "feuillet alerte" },
-    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(p)),
-      h("div", { classe: "sous-nom" }, quantite(a.incidents, "incident(s)") + " · " + quantite(a.points, "point(s)") + " en 24 h")), tampon("Alerte")),
-    h("ul", { classe: "entrees" }, (a.evenements || []).slice(-3).reverse().map((e) => h("li", { classe: "entree" + (e.gravite >= 2 ? " grave" : "") },
-      h("div", { classe: "haut" }, h("span", { classe: "quoi" }, heure(e.quand)), h("span", { classe: "quand" }, depuis(e.quand))), h("div", { classe: "texte coupe2" }, e.texte)))),
-    h("div", { classe: "feuillet-pied" },
-      bouton("Voir la fiche", { classe: "p", icone: "oeil", onclick: () => ouvrirFiche(a.id) }),
-      bouton("Gérée", { classe: "p vert", icone: "valider", reseau: true, onclick: () => agir({ action: "alerte_geree", membre: a.id }, "Alerte gérée ?", "Elle disparaît des alertes ; le compteur de " + nomDe(p) + " repart de zéro.", {}, "Gérée", "vert") })));
-}
-function carteCandidatureCourte(c) {
-  const [etape, couleur] = ETAPES_CANDIDATURE[etapeCandidature(c)];
-  return h("article", { classe: "feuillet lien chaude", tabindex: 0, onclick: () => emettre("dossier:ouvrir", c.ticket), onkeydown: (e) => { if (e.key === "Enter") emettre("dossier:ouvrir", c.ticket); } },
-    h("div", { classe: "qui" }, avatar(c), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(c)), h("div", { classe: "sous-nom" }, "Candidature · ouverte " + depuis(c.ouvert))), tampon(etape, couleur)),
-    h("p", { classe: "aide" }, "Ouvre le dossier pour décider, choisir les questions ou corriger."));
-}
-
 // ─── Journal ────────────────────────────────────────────────────────────────
 export function journal(vue) {
   const f = filtres("journal", { q: "", periode: "7", cat: "tous", vue: "jours", gravite: "0" });
@@ -104,10 +87,10 @@ export function journal(vue) {
     liste({ valeur: f.periode, label: "Période", options: [["1", "24 heures"], ["7", "7 jours"], ["30", "30 jours"], ["tout", "Tout ce qui est chargé"]].map(([v, l]) => ({ v, l })), changer: (v) => { f.periode = v; changer(); } }),
     segment(f.gravite, [["0", "Tout"], ["1", "Important"], ["2", "Grave"]], (v) => { f.gravite = v; changer(); }, "Gravité"),
     segment(f.vue, [["jours", "Par jour"], ["personnes", "Par personne"]], (v) => { f.vue = v; changer(); }, "Présentation"),
-    exporter("Exporter", [["Journal · 7 jours (CSV)", { quoi: "journal", jours: 7 }], ["Journal · 30 jours (CSV)", { quoi: "journal", jours: 30 }], ["Journal · 90 jours (CSV)", { quoi: "journal", jours: 90 }],
-      ["Journal · 30 jours (JSON)", { quoi: "journal", jours: 30, format: "json" }], ...(peutAgir() ? [["Erreurs du bot · 30 jours (CSV)", { quoi: "erreurs" }]] : [])]));
+    avance(exporter("Exporter", [["Journal · 7 jours (CSV)", { quoi: "journal", jours: 7 }], ["Journal · 30 jours (CSV)", { quoi: "journal", jours: 30 }], ["Journal · 90 jours (CSV)", { quoi: "journal", jours: 90 }],
+      ["Journal · 30 jours (JSON)", { quoi: "journal", jours: 30, format: "json" }], ...(peutAgir() ? [["Erreurs du bot · 30 jours (CSV)", { quoi: "erreurs" }]] : [])])));
   const tete = h("div");
-  ajouter(vue, [tete, outils, h("p", { classe: "aide" }, "Plus aucun log sur Discord : tout arrive ici. Conservation : messages et vocal 30 jours, le reste 90 jours (rubrique Nettoyage). Les 400 derniers évènements sont chargés ; l'export prend tout."), resultats]);
+  ajouter(vue, [tete, outils, h("p", { classe: "aide avance" }, "Plus aucun log sur Discord : tout arrive ici. Conservation : messages et vocal 30 jours, le reste 90 jours (rubrique Nettoyage). Les 400 derniers évènements sont chargés ; l'export prend tout."), resultats]);
   const maj = () => {
     const d = etat.d;
     if (!d) { remplacer(resultats, indisponible()); return; }
@@ -127,44 +110,43 @@ export function journal(vue) {
     const liste_ = dansPeriode.filter((e) => (f.cat === "tous" || e.cat === f.cat) && contient(texte(e), f.q));
     const blocs = [puces([["tous", "Tout", dansPeriode.length], ...Object.keys(nb).sort((a, b) => nb[b] - nb[a]).map((c) => [c, c, nb[c], teinteCat(c)])], f.cat, (v) => { f.cat = v; changer(); }, "Catégories")];
     if (!liste_.length) { remplacer(resultats, ...blocs, vide("Rien ici", "Change la période, la catégorie ou la recherche.")); return; }
-    // L'important d'abord : les faits graves de la période, en tête.
+    // L'important d'abord : les faits graves de la période, en tête (une ligne chacun, 8 puis « Voir plus »).
     const graves = liste_.filter((e) => e.gravite >= 2);
     if (graves.length && f.gravite !== "2") {
       blocs.push(section("L'important d'abord", "attention", compte(graves.length, "fait grave", "faits graves"),
-        h("div", { classe: "feuillet alerte" }, paginer("jour-graves", graves, (e) => entreeJournal(e, null), { classe: "entrees", balise: "ul", pas: 8 }))));
+        lignes("jour-graves", graves, (e) => ligneJournal(e, null, true), { pas: 8 })));
     }
     if (f.vue === "personnes") {
-      const groupes = new Map();
-      liste_.forEach((e) => { const k = e.membre || "serveur"; if (!groupes.has(k)) groupes.set(k, []); groupes.get(k).push(e); });
-      blocs.push(section("Par personne", "membres", quantite(groupes.size, "personne(s)") + " · " + quantite(liste_.length, "évènement(s)"),
-        paginer("jour-p", [...groupes.entries()], ([id, l]) => carteJournal(id, l))));
+      const parQui = new Map();
+      liste_.forEach((e) => { const k = e.membre || "serveur"; if (!parQui.has(k)) parQui.set(k, []); parQui.get(k).push(e); });
+      blocs.push(section("Par personne", "membres", quantite(parQui.size, "personne(s)") + " · " + quantite(liste_.length, "évènement(s)"),
+        lignes("jour-p", [...parQui.entries()], ([id, l]) => lignePersonneJournal(id, l))));
     } else {
-      const jours = new Map();
-      liste_.forEach((e) => { const k = cleJour(e.quand); if (!jours.has(k)) jours.set(k, []); jours.get(k).push(e); });
-      const cles = [...jours.keys()];
-      blocs.push(section("Jour par jour", "calendrier", compte(liste_.length, "évènement"),
-        h("div", { classe: "jours" }, cles.map((k, i) => {
-          const l = jours.get(k), g = l.filter((e) => e.gravite >= 2).length;
-          return groupe({ titre: libelleJour(k), compte: l.length, chaud: g > 0, info: g ? compte(g, "grave", "graves") : "", cle: "jour-" + k, ouvert: i === 0 || !!f.q || f.cat !== "tous" ? true : undefined },
-            () => h("div", { classe: "feuillet" }, paginer("jour-j-" + k, l, (e) => entreeJournal(e, null), { classe: "entrees", balise: "ul", pas: 30 })));
-        }))));
+      // Un groupe par jour (aujourd'hui, hier, vendredi 23…), puis par semaine et par mois : le plus récent ouvert, les
+      // autres fermés avec leur compte ; une ligne par évènement, « Voir plus » par 20.
+      const graves_ = (l) => l.filter((e) => e.gravite >= 2).length;
+      const zone = h("div", { classe: "groupes-zone" }, groupesParJours("jour", liste_, (e) => e.quand, (e) => ligneJournal(e, null),
+        { forcer: !!f.q || f.cat !== "tous", chaud: (l) => graves_(l) > 0, info: (l) => (graves_(l) ? compte(graves_(l), "grave", "graves") : "") }));
+      blocs.push(section("Jour par jour", "calendrier", compte(liste_.length, "évènement"), zone, outilsGroupes(zone)));
     }
     remplacer(resultats, ...blocs);
   };
   maj();
   return { maj };
 }
-function carteJournal(id, evts) {
+/** Une personne au journal : combien, de quoi, le dernier évènement ; sa fiche au clic. */
+function lignePersonneJournal(id, evts) {
   const serveur = id === "serveur", p = serveur ? { nom: "Serveur", pseudo: "", avatar: "" } : P(id);
   const cats = {};
   evts.forEach((e) => { cats[e.cat] = (cats[e.cat] || 0) + 1; });
   const graves = evts.filter((e) => e.gravite >= 2).length;
-  const ouvrir = () => ouvrirFiche(id, "journal");
-  return h("article", { classe: "feuillet" + (serveur ? "" : " lien") + (graves ? " alerte" : ""), tabindex: serveur ? null : 0, onclick: serveur ? null : ouvrir, onkeydown: serveur ? null : (e) => { if (e.key === "Enter") ouvrir(); } },
-    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(p)), h("div", { classe: "sous-nom" }, quantite(evts.length, "évènement(s)") + " · dernier " + depuis(evts[0].quand)))),
-    h("div", { classe: "pastilles" }, Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([c, k]) => pastille(k + " · " + c, teinteCat(c)))),
-    h("ul", { classe: "entrees" }, evts.slice(0, 3).map((e) => entreeJournal(e, id))),
-    evts.length > 3 ? h("div", { classe: "compte-pied" }, "+ " + quantite(evts.length - 3, "autre(s)") + (serveur ? "" : " — tout est dans la fiche")) : null);
+  return ligne({
+    visuel: avatar(p, "p"), titre: nomDe(p), sous: quantite(evts.length, "évènement(s)") + " · dernier : " + (evts[0].texte || evts[0].cat),
+    badges: [graves ? pastille(compte(graves, "grave", "graves"), "#8e2a24") : null, serveur ? null : badgeRestreint(id),
+      ...Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([c, k]) => pastille(k + " · " + c, teinteCat(c)))],
+    maxBadges: 3, ...quandLigne(evts[0].quand), etat: graves ? "alerte" : null,
+    ouvrir: serveur ? undefined : () => ouvrirFiche(id, "journal"), libelleOuvrir: serveur ? null : "Ouvrir la fiche de " + nomDe(p),
+  });
 }
 
 // ─── Sanctions ──────────────────────────────────────────────────────────────
@@ -175,9 +157,9 @@ export function sanctions(vue) {
   const outils = h("div", { classe: "outils" },
     recherche(f.q, "Membre, identifiant, motif, modérateur…", (q) => { f.q = q; changer(); }),
     liste({ valeur: f.periode, label: "Période", options: [["7", "7 jours"], ["30", "30 jours"], ["90", "90 jours"], ["365", "12 mois"], ["tout", "Tout le casier"]].map(([v, l]) => ({ v, l })), changer: (v) => { f.periode = v; changer(); } }),
-    liste({ valeur: f.origine, label: "Origine", options: [["tous", "Staff et automatique"], ["staff", "Décidées par le staff"], ["auto", "Automatiques"]].map(([v, l]) => ({ v, l })), changer: (v) => { f.origine = v; changer(); } }),
-    liste({ valeur: f.tri, label: "Tri", options: [["recent", "Plus récents"], ["nombre", "Plus sanctionnés"], ["nom", "Nom A → Z"]].map(([v, l]) => ({ v, l })), changer: (v) => { f.tri = v; changer(); } }),
-    exporter("Exporter", [["Casier complet (CSV)", { quoi: "sanctions" }], ["Casier complet (JSON)", { quoi: "sanctions", format: "json" }]]));
+    avance(liste({ valeur: f.origine, label: "Origine", options: [["tous", "Staff et automatique"], ["staff", "Décidées par le staff"], ["auto", "Automatiques"]].map(([v, l]) => ({ v, l })), changer: (v) => { f.origine = v; changer(); } })),
+    avance(liste({ valeur: f.tri, label: "Tri", options: [["recent", "Plus récents"], ["nombre", "Plus sanctionnés"], ["nom", "Nom A → Z"]].map(([v, l]) => ({ v, l })), changer: (v) => { f.tri = v; changer(); } })),
+    avance(exporter("Exporter", [["Casier complet (CSV)", { quoi: "sanctions" }], ["Casier complet (JSON)", { quoi: "sanctions", format: "json" }]])));
   ajouter(vue, [haut, outils, resultats, bas]);
   const majHaut = () => {
     const s = etat.d && etat.d.sanctions;
@@ -197,8 +179,8 @@ export function sanctions(vue) {
       tuile({ cle: "m6", lib: "En ce moment", val: actives, icone: "minuteur", sous: "mutés, radiés, restreints", teinte: "#7a4b2a" })), enCeMoment, cadreNettoyageCasier());
     remplacer(bas,
       groupe({ titre: "Modérateurs", compte: s.staff.length, cle: "mod-staff", icone: "personne" }, () => [h("p", { classe: "aide" }, "Sanctions décidées à la main, par personne. Direction et fondateur à part."),
-        s.staff.length ? h("div", { classe: "grille etroite" }, s.staff.map(carteModerateur)) : vide("Aucune sanction décidée à la main")]),
-      groupe({ titre: "Tendances", cle: "mod-tendances", icone: "carte" }, () => h("div", { classe: "duo" },
+        s.staff.length ? lignes("mod-staff", s.staff, ligneModerateur) : vide("Aucune sanction décidée à la main")]),
+      groupe({ titre: "Tendances", cle: "mod-tendances", icone: "carte", classe: "avance" }, () => h("div", { classe: "duo" },
         h("div", { classe: "cadre" }, h("h3", {}, "Sanctions par mois"), h("p", { classe: "aide" }, "Tout le casier, sur douze mois."),
           barres(Object.keys(s.mois).sort(), s.mois, Object.entries(GROUPES_SANCTION).map(([g, c]) => [g, c, g]), "Le casier est vide pour l'instant.")),
         h("div", { classe: "cadre" }, h("h3", {}, "Par type"), h("p", { classe: "aide" }, "Depuis le début du casier."),
@@ -227,11 +209,17 @@ export function sanctions(vue) {
     }
     if (f.tri === "nombre") cartes.sort((a, b) => parseInt(b[2], 10) - parseInt(a[2], 10) || b[0].derniere - a[0].derniere);
     else if (f.tri === "nom") cartes.sort((a, b) => nomDe(P(a[0].id)).localeCompare(nomDe(P(b[0].id)), "fr"));
+    // Une ligne par personne. Triées par date : rangées par période de leur dernière sanction (la plus récente ouverte).
+    const zone = h("div", { classe: "groupes-zone" });
+    const rendreUn = ([m, e, c]) => ligneCasier(m, e, c);
+    if (!cartes.length) ajouter(zone, [vide("Personne au casier ici", "Change la période, le type ou la recherche.")]);
+    else if (f.tri !== "recent") ajouter(zone, [lignes("mod-liste", cartes, rendreUn)]);
+    else ajouter(zone, groupesParPeriode("mod", cartes, ([, e]) => (e[0] && e[0].date) || 0, rendreUn, { forcer: !!f.q, chaud: (l) => l.some(([m]) => m.n30 >= 3) }));
     remplacer(resultats,
       puces([["tous", "Tous", nbGroupe.tous], ...Object.entries(GROUPES_SANCTION).map(([g, c]) => [g, g, nbGroupe[g], c])], f.groupe, (v) => { f.groupe = v; changer(); }, "Types"),
       section("Le casier, par membre", "repertoire", compte(cartes.length, "personne"),
-        h("div", { classe: "pile" }, h("p", { classe: "aide" }, "Une case par personne : tout ce qu'elle a reçu sur la période. Clique pour toute sa fiche."),
-          cartes.length ? paginer("mod", cartes, ([m, e, c]) => carteCasier(m, e, c)) : vide("Personne au casier ici", "Change la période, le type ou la recherche."))));
+        h("div", { classe: "pile" }, h("p", { classe: "aide" }, "Une ligne par personne : ce qu'elle a reçu sur la période, rangé par date de sa dernière sanction. Touche une ligne pour toute sa fiche."), zone),
+        cartes.length && f.tri === "recent" ? outilsGroupes(zone) : null));
   };
   const maj = () => { majHaut(); majResultats(); };
   maj();
@@ -242,17 +230,51 @@ function groupeActif(titre, l, extra) {
   return h("div", { classe: "pile serree" }, h("div", { classe: "champ-lib" }, titre + " · " + l.length),
     h("div", { classe: "pastilles" }, l.slice(0, 40).map((m) => h("button", { classe: "puce", type: "button", onclick: () => ouvrirFiche(m.id) }, avatar(m, "xs"), h("span", { classe: "puce-lib" }, nomDe(m)), extra(m) ? h("span", { classe: "n" }, extra(m)) : null))));
 }
+// Les nettoyages des 30 derniers jours, rangés par sorte (un groupe chacune, celle du plus récent ouverte) ; les casiers
+// des membres partis regroupés à part (« 12 casiers de membres partis »), les nettoyages annulés à la fin.
+const SORTES_LOTS = [["zones", "Nettoyages du serveur", "nettoyage"], ["avertissements", "Avertissements d'un membre", "plume"],
+  ["casiers", "Casiers entiers d'un membre", "sanctions"], ["amnisties", "Amnisties automatiques", "minuteur"], ["annules", "Nettoyages annulés", "restaurer"]];
+const sorteLot = (l) => (l.restaure_le ? "annules" : /^amnistie/i.test(String(l.lot || "")) || /^Amnistie/i.test(String(l.quoi || "")) ? "amnisties"
+  : l.membre ? (/^Casier entier/i.test(String(l.quoi || "")) ? "casiers" : "avertissements") : "zones");
+/** Parti du serveur : le serveur ne le connaît plus (« Membre parti »). */
+const estParti = (id) => { const p = (etat.d && etat.d.personnes && etat.d.personnes[String(id)]) || null; return !p || p.nom === "Membre parti"; };
 function cadreNettoyageCasier() {
   const c = (etat.d && etat.d.casier) || {}, lots = c.lots || [];
   if (!peutAgir() && !lots.length) return null;
-  return h("div", { classe: "cadre pile serree" }, h("h3", {}, "Nettoyer le casier"),
+  const zone = h("div", { classe: "groupes-zone" });
+  if (lots.length) {
+    const parSorte = new Map(SORTES_LOTS.map(([k]) => [k, []]));
+    for (const l of lots) parSorte.get(sorteLot(l)).push(l);
+    const recent = lots.find((l) => !l.restaure_le) || lots[0];
+    ajouter(zone, SORTES_LOTS.filter(([k]) => parSorte.get(k).length).map(([k, titre, ic]) => {
+      const l = parSorte.get(k), partis = k === "avertissements" || k === "casiers" ? l.filter((x) => estParti(x.membre)) : [];
+      const presents = l.filter((x) => !partis.includes(x));
+      return groupe({ cle: "casier-" + k, titre, icone: ic, compte: l.length, info: "dernier " + depuis(l[0].quand), defaut: sorteLot(recent) === k }, () => [
+        presents.length ? lignes("casier-" + k, presents, ligneLot) : null,
+        partis.length ? groupe({ cle: "casier-" + k + "-partis", titre: quantite(partis.length, k === "casiers" ? "casier(s) de membres partis" : "membre(s) parti(s)"), icone: "deconnexion", compte: partis.length },
+          () => lignes("casier-" + k + "-partis", partis, ligneLot)) : null]);
+    }));
+  }
+  return h("div", { classe: "cadre pile serree" }, h("div", { classe: "rangee entre" }, h("h3", { classe: "cadre-titre" }, "Nettoyer le casier"), lots.length > 1 ? outilsGroupes(zone) : null),
     h("p", { classe: "aide" }, "Repartir de zéro ou nettoyer une zone ; les bannissements restent, tout se défait pendant 30 jours. Amnistie automatique : 3 mois sans infraction."),
     peutAgir() ? h("div", { classe: "rangee" }, bouton("Nettoyer le casier…", { classe: "p danger", icone: "nettoyage", reseau: true, onclick: nettoyerCasier })) : null,
-    lots.length ? h("ul", { classe: "entrees" }, lots.map((l) => h("li", { classe: "entree" },
-      h("div", { classe: "haut" }, h("span", { classe: "quoi" }, l.membre ? [l.quoi + " de ", lienNom(l.membre, ouvrirFiche)] : l.quoi), h("span", { classe: "quand" }, depuis(l.quand))),
-      h("div", { classe: "meta" }, quantite(l.n, "entrée(s)") + " · " + quantite(l.personnes, "personne(s)") + " · " + (l.par ? "par " + nomDe(P(l.par)) : "automatique")
-        + (l.restaure_le ? " · annulé " + depuis(l.restaure_le) + (l.restaure_par ? " par " + nomDe(P(l.restaure_par)) : "") : "")),
-      l.restaure_le ? tampon("Annulé", "encre") : peutAgir() ? h("div", {}, bouton("Annuler ce nettoyage", { classe: "p discret", icone: "synchro", reseau: true, onclick: () => agir({ action: "casier_restaurer", lot: l.lot }, "Annuler ce nettoyage ?", quantite(l.n, "entrée(s)") + (l.n > 1 ? " reviennent" : " revient") + " au casier.", {}, "Remettre au casier") })) : null))) : null);
+    lots.length ? zone : null);
+}
+/** Un nettoyage du casier : quoi, combien, par qui, quand ; « Annuler ce nettoyage » à droite (30 jours). */
+function ligneLot(l) {
+  const qui = l.membre ? P(l.membre) : null, parti = l.membre && estParti(l.membre);
+  const titre = l.membre ? l.quoi + " de " + (parti ? "membre parti" : nomDe(qui)) : /^Amnistie/i.test(String(l.quoi || "")) ? "Amnistie automatique" : l.quoi;
+  const sous = [quantite(l.n, "entrée(s)"), quantite(l.personnes, "personne(s)"), l.par ? "par " + nomDe(P(l.par)) : "automatique",
+    l.restaure_le ? "annulé " + depuis(l.restaure_le) + (l.restaure_par ? " par " + nomDe(P(l.restaure_par)) : "") : ""].filter(Boolean).join(" · ");
+  return ligne({
+    visuel: qui && !parti ? avatar(qui, "p") : pastilleIcone(l.membre ? "personne" : /^Amnistie/i.test(String(l.quoi || "")) ? "minuteur" : "nettoyage", l.restaure_le ? "#6e553f" : "#7a4b2a"),
+    titre, sous: [sous, parti ? h("span", { classe: "ident" }, " · identifiant " + l.membre) : null], ...quandLigne(l.quand),
+    badges: l.restaure_le ? [tampon("Annulé", "encre", true)] : [], etat: l.restaure_le ? "eteinte" : null,
+    actions: !l.restaure_le && peutAgir() ? [{ icone: "restaurer", libelle: "Annuler ce nettoyage", reseau: true,
+      onclick: () => agir({ action: "casier_restaurer", lot: l.lot }, "Annuler ce nettoyage ?", quantite(l.n, "entrée(s)") + (l.n > 1 ? " reviennent" : " revient") + " au casier.", {}, "Remettre au casier") }] : [],
+    ouvrir: qui && !parti ? () => ouvrirFiche(l.membre, "sanctions") : undefined, libelleOuvrir: qui && !parti ? "Ouvrir la fiche de " + nomDe(qui) : null,
+    donnees: { lot: l.lot },
+  });
 }
 async function nettoyerCasier() {
   const compteParZone = (etat.d.casier && etat.d.casier.compte) || {};
@@ -266,24 +288,27 @@ async function nettoyerCasier() {
     mot: "EFFACER", libelleOk: "Effacer", style: "danger" });
   if (r) agir({ action: "casier_serveur", portee: zone, jours: Number(age), confirmation: "EFFACER" }, "", "", { direct: true });
 }
-function carteCasier(m, entrees, nbr) {
-  const p = P(m.id), ouvrir = () => ouvrirFiche(m.id, "sanctions");
+// Les types de sanction en court dans les pastilles d'une ligne (le nom complet au survol).
+const TYPES_COURTS = { warn: "Avert.", mute: "Mute", kick: "Expuls.", ban: "Ban" };
+const badgeType = (t, n) => pastille(n + " × " + (TYPES_COURTS[t] || libelleType(t)), teinteType(t), n + " × " + libelleType(t));
+/** Une personne au casier : son nombre sur la période, sa dernière sanction, ses types ; sa fiche au clic. */
+function ligneCasier(m, entrees, nbr) {
+  const p = P(m.id), der = entrees[0];
   const types = Object.entries(m.types).sort((a, b) => b[1] - a[1]);
-  return h("article", { classe: "feuillet lien" + (m.n30 >= 3 ? " alerte" : ""), tabindex: 0, onclick: ouvrir, onkeydown: (e) => { if (e.key === "Enter") ouvrir(); } },
-    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(p)),
-      h("div", { classe: "sous-nom" }, (p.pseudo ? "@" + p.pseudo + " · " : "") + "dernière " + depuis(m.derniere))),
-      h("div", { classe: "gros-chiffre" }, h("b", { classe: "num" }, String(nbr)), h("span", {}, "sur la période"))),
-    h("div", { classe: "pastilles" }, types.slice(0, 4).map(([t, n]) => pastille(n + " × " + libelleType(t), teinteType(t)))),
-    h("ul", { classe: "entrees" }, entrees.slice(0, 3).map((x) => h("li", { classe: "entree" + (["kick", "ban"].includes(x.type) ? " grave" : ""), vars: { "--teinte": teinteType(x.type) } },
-      h("div", { classe: "haut" }, h("span", { classe: "quoi" }, x.libelle + (x.duree ? " · " + x.duree : "")), h("span", { classe: "quand" }, date(x.date, true))),
-      x.raison ? h("div", { classe: "texte coupe2" }, x.raison) : null, h("div", { classe: "meta" }, x.auto ? "Automatique" : "Par " + propre(x.par))))),
-    entrees.length > 3 ? h("div", { classe: "compte-pied" }, "+ " + quantite(entrees.length - 3, "autre(s)") + " — tout est dans la fiche") : null);
+  return ligne({
+    visuel: avatar(p, "p"), titre: nomDe(p),
+    sous: String(nbr) + " sur la période" + (der ? " · dernière : " + der.libelle + (der.duree ? " " + der.duree : "") + (der.raison ? " — " + der.raison : "") + " · " + (der.auto ? "automatique" : "par " + propre(der.par)) : ""),
+    badges: [badgeRestreint(m.id), ...types.map(([t, n]) => badgeType(t, n))], maxBadges: 3,
+    ...quandLigne(der ? der.date : m.derniere), etat: m.n30 >= 3 ? "alerte" : null,
+    ouvrir: () => ouvrirFiche(m.id, "sanctions"), libelleOuvrir: "Ouvrir la fiche de " + nomDe(p), donnees: { membre: m.id },
+  });
 }
-function carteModerateur(x) {
-  const ouvrir = () => ouvrirFiche(x.id, "donnees");
-  return h("article", { classe: "feuillet lien", tabindex: 0, onclick: ouvrir, onkeydown: (e) => { if (e.key === "Enter") ouvrir(); } },
-    h("div", { classe: "qui" }, avatar(P(x.id), "p"), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, sansEmoji(x.nom)), h("div", { classe: "sous-nom" }, quantite(x.total, "sanction(s) décidée(s)")))),
-    h("div", { classe: "pastilles" }, Object.entries(x.types).sort((a, b) => b[1] - a[1]).map(([t, n]) => pastille(n + " × " + libelleType(t), teinteType(t)))));
+function ligneModerateur(x) {
+  return ligne({
+    visuel: avatar(P(x.id), "p"), titre: sansEmoji(x.nom), sous: quantite(x.total, "sanction(s) décidée(s)"),
+    badges: Object.entries(x.types).sort((a, b) => b[1] - a[1]).map(([t, n]) => badgeType(t, n)), maxBadges: 3,
+    ouvrir: () => ouvrirFiche(x.id, "donnees"), libelleOuvrir: "Ouvrir la fiche de " + sansEmoji(x.nom),
+  });
 }
 
 // ─── Tickets (partagé avec le clan) ─────────────────────────────────────────
@@ -308,7 +333,7 @@ export function ticketsVue(vue, portee) {
       tuile({ cle: pre + "2", lib: "Pas encore pris", val: ouverts.filter((t) => !t.pris_par).length, icone: "attention", teinte: "#8e2a24" }),
       tuile({ cle: pre + "3", lib: "Prise en charge", texte: duree(prises.length ? prises[Math.floor(prises.length / 2)] : 0), icone: "minuteur", sous: "délai médian", teinte: "#1f4e5a" }),
       tuile({ cle: pre + "4", lib: "Fermés · 30 jours", val: tk.fermes.filter((t) => dansPortee(t) && t.ferme && n - t.ferme <= 30 * JOUR).length, icone: "cadenas", teinte: "#3f6b3a" })));
-    remplacer(bas, groupe({ titre: "Tendances", cle: pre + "-tendances", icone: "carte" }, () => h("div", { classe: "duo" },
+    remplacer(bas, groupe({ titre: "Tendances", cle: pre + "-tendances", icone: "carte", classe: "avance" }, () => h("div", { classe: "duo" },
       h("div", { classe: "cadre" }, h("h3", {}, "Tickets ouverts par mois"), h("p", { classe: "aide" }, "Rell Seas et tickets normaux, douze mois."),
         barres(Object.keys(tk.mois).sort(), tk.mois, [["Rell Seas", ENCRES.mer, "Rell Seas"], ["Tickets normaux", ENCRES.sienne, "Tickets normaux"]], "Les mois apparaîtront avec les premiers tickets.")),
       h("div", { classe: "cadre" }, h("h3", {}, "Staff"), h("p", { classe: "aide" }, "Tickets pris en charge et fermés, depuis le début. Direction et fondateur à part."),
@@ -335,18 +360,23 @@ export function ticketsVue(vue, portee) {
     const fermes = tk.fermes.filter((t) => garde(t) && cherche(t, P(t.id)));
     const jours = Number(tk.archives_jours) || 30;
     const recents = fermes.filter((t) => !t.ferme || n - t.ferme <= jours * JOUR), archives = fermes.filter((t) => t.ferme && n - t.ferme > jours * JOUR);
-    const groupes = new Map();
-    recents.forEach((t) => { if (!groupes.has(t.id)) groupes.set(t.id, []); groupes.get(t.id).push(t); });
     const parMois = new Map();
     archives.forEach((t) => { const k = moisDe(t.ferme); if (!parMois.has(k)) parMois.set(k, []); parMois.get(k).push(t); });
+    // Les ouverts : ceux que personne n'a pris d'abord (les plus anciens en tête), puis ceux pris en charge.
+    const nonPris = ouverts.filter((t) => !t.pris_par).sort((a, b) => (a.ouvert || 0) - (b.ouvert || 0)), pris = ouverts.filter((t) => t.pris_par);
+    const zoneO = h("div", { classe: "groupes-zone" }, ouverts.length ? groupes([
+      nonPris.length ? { cle: pre + "-o-libres", titre: "Personne ne les a pris", icone: "attention", compte: nonPris.length, chaud: true, contenu: () => lignes(pre + "-o-libres", nonPris, ligneTicketOuvert) } : null,
+      pris.length ? { cle: pre + "-o-pris", titre: "Pris en charge", icone: "personne", compte: pris.length, contenu: () => lignes(pre + "-o-pris", pris, ligneTicketOuvert) } : null,
+    ].filter(Boolean), { ouverts: 2, forcer: !!f.q }) : vide("Aucun ticket ouvert ici", "Tout est traité.", "succes"));
+    const zoneF = h("div", { classe: "groupes-zone" }, recents.length ? groupesParPeriode(pre + "-f", recents, (t) => t.ferme || t.ouvert, ligneTicketFerme, { forcer: !!f.q })
+      : vide("Aucun ticket fermé ces " + jours + " derniers jours"));
+    const zoneA = h("div", { classe: "groupes-zone" }, archives.length ? groupes([...parMois.entries()].map(([k, l]) => ({ cle: pre + "-a-" + k, titre: libelleMois(k), compte: l.length,
+      contenu: () => lignes(pre + "-a-" + k, l, ligneTicketFerme) })), { ouverts: 0, forcer: !!f.q }) : vide("Rien aux archives", "Les tickets y sont rangés " + jours + " jours après leur fermeture."));
     remplacer(resultats,
       puces(options, f.type, (v) => { f.type = v; changer(); }, "Types de tickets"),
-      section("Ouverts", "tickets", compte(ouverts.length, "ticket"), ouverts.length ? paginer(pre + "-o", ouverts, carteTicketOuvert) : vide("Aucun ticket ouvert ici", "Tout est traité.", "succes")),
-      section("Fermés ces " + jours + " derniers jours", "cadenas", quantite(groupes.size, "personne(s)") + " · " + compte(recents.length, "ticket"),
-        groupes.size ? paginer(pre + "-f", [...groupes.entries()], ([id, l]) => carteTicketsFermes(id, l)) : vide("Aucun ticket fermé ces " + jours + " derniers jours")),
-      section("Archives", "coffre", compte(archives.length, "ticket") + " · fermés depuis plus de " + jours + " jours",
-        archives.length ? h("div", {}, [...parMois.entries()].map(([k, l]) => groupe({ titre: libelleMois(k), compte: l.length, cle: pre + "-a-" + k },
-          () => paginer(pre + "-a-" + k, l, ligneArchive, { classe: "lignes", pas: 30 })))) : vide("Rien aux archives", "Les tickets y sont rangés " + jours + " jours après leur fermeture.")));
+      section("Ouverts", "tickets", compte(ouverts.length, "ticket"), zoneO),
+      section("Fermés ces " + jours + " derniers jours", "cadenas", compte(recents.length, "ticket"), zoneF, recents.length ? outilsGroupes(zoneF) : null),
+      section("Archives", "coffre", compte(archives.length, "ticket") + " · fermés depuis plus de " + jours + " jours", zoneA, archives.length > 1 ? outilsGroupes(zoneA) : null));
   };
   const maj = () => { majHaut(); majResultats(); };
   maj();
@@ -354,37 +384,30 @@ export function ticketsVue(vue, portee) {
 }
 export const tickets = (vue) => ticketsVue(vue, "serveur");
 
-export function carteTicketOuvert(t) {
+/** Un ticket ouvert : numéro et nom, type, qui l'a pris, depuis quand ; la conversation au clic. */
+function ligneTicketOuvert(t) {
   const tard = !t.pris_par && t.ouvert && maintenant() - t.ouvert > JOUR;
-  return h("article", { classe: "feuillet" + (tard ? " chaude" : "") },
-    h("div", { classe: "qui" }, avatar(t), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, nomDe(t)), h("div", { classe: "sous-nom" }, "Ticket #" + t.ticket + " · ouvert " + depuis(t.ouvert)))),
-    h("div", { classe: "pastilles" }, pastille(propre(t.type), t.rellseas ? ENCRES.mer : ENCRES.sienne),
-      t.pris_par ? pastille("Pris par " + sansEmoji(t.pris_par), "#3f6b3a") : pastille(tard ? "Personne depuis plus de 24 h" : "Pas encore pris", "#a8641c")),
-    h("div", { classe: "feuillet-pied" },
-      t.salon ? h("a", { classe: "bouton p", href: t.salon }, icone("discord"), h("span", {}, "Sur Discord")) : null,
-      bouton("Conversation", { classe: "p", icone: "parchemin", onclick: () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + nomDe(t)) }),
-      bouton("Fiche", { classe: "p discret", icone: "personne", onclick: () => ouvrirFiche(t.id, "tickets") }),
-      peutAgir() ? bouton("Fermer", { classe: "p danger", reseau: true, onclick: () => agir({ action: "ticket_fermer", ticket: t.ticket }, "Fermer le ticket #" + t.ticket + " ?", "Le salon du ticket est supprimé ; le transcript est gardé.", { motif: true }, "Fermer", "danger") }) : null));
+  const conv = () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + nomDe(t));
+  return ligne({
+    visuel: avatar(t, "p"), titre: "#" + t.ticket + " · " + nomDe(t),
+    sous: t.pris_par ? "pris par " + sansEmoji(t.pris_par) : tard ? "personne depuis plus de 24 h" : "pas encore pris",
+    badges: [pastille(propre(t.type), t.rellseas ? ENCRES.mer : ENCRES.sienne), badgeRestreint(t.id)], ...quandLigne(t.ouvert), etat: tard ? "chaude" : null,
+    actions: [{ icone: "parchemin", libelle: "Conversation", onclick: conv }, t.salon ? { icone: "discord", libelle: "Sur Discord", href: t.salon } : null,
+      { icone: "personne", libelle: "Sa fiche", onclick: () => ouvrirFiche(t.id, "tickets") },
+      peutAgir() ? { icone: "cadenas", libelle: "Fermer le ticket", danger: true, reseau: true, onclick: () => agir({ action: "ticket_fermer", ticket: t.ticket }, "Fermer le ticket #" + t.ticket + " ?", "Le salon du ticket est supprimé ; le transcript est gardé.", { motif: true }, "Fermer", "danger") } : null],
+    ouvrir: conv, libelleOuvrir: "Conversation du ticket #" + t.ticket, donnees: { ticket: t.ticket },
+  });
 }
-function carteTicketsFermes(id, l) {
-  const p = P(id), ouvrir = () => ouvrirFiche(id, "tickets");
-  return h("article", { classe: "feuillet" },
-    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("button", { classe: "lien-nom nom", type: "button", onclick: ouvrir }, nomDe(p)),
-      h("div", { classe: "sous-nom" }, quantite(l.length, "ticket(s)") + " · dernier fermé " + depuis(l[0].ferme || l[0].ouvert)))),
-    h("ul", { classe: "entrees" }, l.slice(0, 3).map((t) => h("li", { classe: "entree" },
-      h("div", { classe: "haut" }, h("span", { classe: "quoi" }, "#" + t.ticket + " · " + propre(t.type)), h("span", { classe: "quand" }, date(t.ferme || t.ouvert, true))),
-      h("div", { classe: "texte coupe2" }, t.motif || "Sans motif"),
-      h("div", { classe: "meta" }, (t.ferme_par ? "fermé par " + sansEmoji(t.ferme_par) + " · " : "") + "durée " + duree(t.ferme && t.ouvert ? t.ferme - t.ouvert : 0)),
-      h("div", {}, bouton("Conversation", { classe: "p discret", icone: "parchemin", onclick: () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + nomDe(p)) }))))),
-    l.length > 3 ? h("div", { classe: "compte-pied" }, "+ " + quantite(l.length - 3, "autre(s)") + " dans la fiche") : null);
-}
-function ligneArchive(t) {
-  const p = P(t.id);
-  return h("div", { classe: "ligne" }, avatar(p, "p"),
-    h("div", { classe: "bloc" }, h("div", { classe: "nom une-ligne" }, "#" + t.ticket + " · " + nomDe(p)),
-      h("div", { classe: "sous-nom" }, propre(t.type) + " · fermé le " + date(t.ferme) + (t.motif ? " · " + t.motif : ""))),
-    h("div", { classe: "droite" }, tampon("Archivé", "encre", true),
-      bouton("Conversation", { classe: "p discret", icone: "parchemin", onclick: () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + nomDe(p)) })));
+/** Un ticket fermé (récent ou aux archives) : motif, qui l'a fermé, durée ; la conversation au clic. */
+function ligneTicketFerme(t) {
+  const p = P(t.id), conv = () => ouvrirConversation(t.ticket, "Ticket #" + t.ticket + " · " + nomDe(p));
+  return ligne({
+    visuel: avatar(p, "p"), titre: "#" + t.ticket + " · " + nomDe(p),
+    sous: [t.motif || "Sans motif", t.ferme_par ? "fermé par " + sansEmoji(t.ferme_par) : "", t.ferme && t.ouvert ? "durée " + duree(t.ferme - t.ouvert) : ""].filter(Boolean).join(" · "),
+    badges: [pastille(propre(t.type), t.rellseas ? ENCRES.mer : ENCRES.sienne), badgeRestreint(t.id)], ...quandLigne(t.ferme || t.ouvert),
+    actions: [{ icone: "parchemin", libelle: "Conversation", onclick: conv }, { icone: "personne", libelle: "Sa fiche", onclick: () => ouvrirFiche(t.id, "tickets") }],
+    ouvrir: conv, libelleOuvrir: "Conversation du ticket #" + t.ticket, donnees: { ticket: t.ticket },
+  });
 }
 
 // ─── Répertoire ─────────────────────────────────────────────────────────────
@@ -411,6 +434,7 @@ function annuaire() {
   for (const e of (d.journal && d.journal.evenements) || []) if (e.membre) inscrire(P(e.membre), (f) => { f.journal++; f.derniere = Math.max(f.derniere, e.quand || 0); });
   for (const q of (d.questions && d.questions.liste) || []) inscrire(P(q.id), (f) => { f.questions++; });
   for (const a of d.alertes || []) inscrire(P(a.id), (f) => { f.alerte = true; });
+  for (const r of (d.sanctions.actives && d.sanctions.actives.restreints) || []) inscrire(r);
   for (const id of d.a_part || []) inscrire(P(id), (f) => { f.direction = true; });
   return [...fiches.values()].filter((f) => f.nom !== "Membre parti" || f.casier || f.tickets);
 }
@@ -420,14 +444,14 @@ export function repertoire(vue) {
   const changer = () => { resetPages("rep"); maj(); };
   const champRecherche = recherche(f.q, "Nom, pseudo ou identifiant…", (q) => { f.q = q; f.lettre = ""; changer(); });
   ajouter(vue, [h("div", { classe: "outils" }, champRecherche,
-    liste({ valeur: f.tri, label: "Tri", options: [["nom", "Nom A → Z"], ["recent", "Activité récente"], ["casier", "Casier le plus lourd"]].map(([v, l]) => ({ v, l })), changer: (v) => { f.tri = v; changer(); } })), resultats]);
+    avance(liste({ valeur: f.tri, label: "Tri", options: [["nom", "Nom A → Z"], ["recent", "Activité récente"], ["casier", "Casier le plus lourd"]].map(([v, l]) => ({ v, l })), changer: (v) => { f.tri = v; changer(); } }))), resultats]);
   let cache = null, versionCache = null;
   const maj = () => {
     const d = etat.d;
     if (!d) { remplacer(resultats, indisponible()); return; }
     if (versionCache !== d) { cache = annuaire(); versionCache = d; }
     const FILTRES = [["tous", "Tout le monde", () => true], ["clan", "Clan", (x) => x.clan], ["casier", "Au casier", (x) => x.casier > 0], ["tickets", "Avec tickets", (x) => x.tickets > 0],
-      ["candidats", "Candidats", (x) => !!x.candidat], ["alertes", "Alertes", (x) => x.alerte], ["direction", "Direction", (x) => x.direction]];
+      ["candidats", "Candidats", (x) => !!x.candidat], ["alertes", "Alertes", (x) => x.alerte], ["restreints", "Restreints", (x) => estRestreint(x.id)], ["direction", "Direction", (x) => x.direction]];
     const nb = Object.fromEntries(FILTRES.map(([k, , fn]) => [k, cache.filter(fn).length]));
     const fn = (FILTRES.find(([k]) => k === f.filtre) || FILTRES[0])[2];
     const choisis = cache.filter((x) => fn(x) && contient([x.nom, x.pseudo, x.id].join(" "), f.q));
@@ -446,14 +470,15 @@ export function repertoire(vue) {
     if (!affiches.length) { remplacer(resultats, ...blocs, vide("Personne ici", "Personne de connu ici : regarde « Dans tout le serveur » ci-dessous."), serveur); return; }
     if (f.tri !== "nom" || f.q || f.lettre) {
       blocs.push(section(f.lettre ? "Lettre " + f.lettre : f.q ? "Résultats" : "Tout le répertoire", "repertoire", compte(affiches.length, "personne"),
-        paginer("rep-liste", affiches, lignePersonne, { classe: "lignes", pas: 40 })));
+        lignes("rep-liste", affiches, lignePersonne)));
     } else {
+      // De A à Z : une lettre par groupe (toutes ouvertes s'il y a peu de monde, sinon la première), « Voir plus » par 20.
       const parLettre = new Map();
       affiches.forEach((x) => { const l = lettre(x.nom || x.pseudo); if (!parLettre.has(l)) parLettre.set(l, []); parLettre.get(l).push(x); });
       const ordre = [...parLettre.keys()].sort((a, b) => (a === "#") - (b === "#") || a.localeCompare(b));
-      blocs.push(section("De A à Z", "repertoire", compte(affiches.length, "personne"),
-        h("div", {}, ordre.map((l) => groupe({ titre: l, compte: parLettre.get(l).length, cle: "rep-" + l, ouvert: affiches.length <= 60 ? true : undefined },
-          () => paginer("rep-l-" + l, parLettre.get(l), lignePersonne, { classe: "lignes", pas: 30 }))))));
+      const zone = h("div", { classe: "groupes-zone" }, groupes(ordre.map((l) => ({ titre: l, compte: parLettre.get(l).length, cle: "rep-" + l,
+        contenu: () => lignes("rep-l-" + l, parLettre.get(l), lignePersonne) })), { ouverts: affiches.length <= 60 ? ordre.length : 0 }));   // beaucoup de monde : on choisit sa lettre
+      blocs.push(section("De A à Z", "repertoire", compte(affiches.length, "personne"), zone, ordre.length > 1 ? outilsGroupes(zone) : null));
     }
     remplacer(resultats, ...blocs, serveur);
   };
@@ -467,23 +492,26 @@ async function chercherServeur(q, zone, deja) {
   const r = await lire("recherche", { q });
   if (!zone.isConnected) return;
   const l = r.ok ? (r.donnees.membres || []).filter((m) => !deja.has(String(m.id))) : [];
-  remplacer(zone, l.length ? section("Dans tout le serveur", "rechercher", compte(l.length, "personne"), h("div", { classe: "lignes" }, l.slice(0, 25).map((m) => lignePersonne({
+  remplacer(zone, l.length ? section("Dans tout le serveur", "rechercher", compte(l.length, "personne"), h("ul", { classe: "lignes-c" }, l.slice(0, 25).map((m) => lignePersonne({
     id: String(m.id), nom: m.nom, pseudo: m.pseudo, avatar: m.avatar, clan: !!m.clan, direction: !!m.a_part, casier: 0, tickets: 0, candidat: "", alerte: false, journal: 0 })))) : null);
 }
+/** Une personne du répertoire : son nom, son pseudo, ses marques (les plus importantes d'abord) ; sa fiche au clic. */
 function lignePersonne(x) {
-  const ouvrir = () => ouvrirFiche(x.id);
   const marques = [
+    x.alerte ? pastille("Alerte", "#8e2a24") : null,
+    badgeRestreint(x.id),
     x.direction ? pastille("Direction", "#5e3a4e") : null,
     x.clan ? pastille("Clan", "#3f6b3a") : null,
-    x.alerte ? pastille("Alerte", "#8e2a24") : null,
+    x.candidat ? pastille("Candidat · " + (STATUTS_CAND[x.candidat] || [x.candidat])[0], (STATUTS_CAND[x.candidat] || [])[1]) : null,
     x.casier ? pastille(x.casier + " au casier", "#a8641c") : null,
     x.tickets ? pastille(quantite(x.tickets, "ticket(s)"), "#7a4b2a") : null,
-    x.candidat ? pastille("Candidat · " + (STATUTS_CAND[x.candidat] || [x.candidat])[0], (STATUTS_CAND[x.candidat] || [])[1]) : null,
   ].filter(Boolean);
-  return h("div", { classe: "ligne lien", tabindex: 0, role: "button", onclick: ouvrir, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); ouvrir(); } } },
-    avatar(x, "p"),
-    h("div", { classe: "bloc" }, h("div", { classe: "nom une-ligne" }, nomDe(x)), h("div", { classe: "sous-nom une-ligne" }, (x.pseudo ? "@" + x.pseudo + " · " : "") + x.id)),
-    h("div", { classe: "droite" }, marques.length ? marques : h("span", { classe: "meta" }, x.journal ? x.journal + " au journal" : "")));
+  return ligne({
+    visuel: avatar(x, "p"), titre: nomDe(x), sous: [x.pseudo ? "@" + x.pseudo : "", h("span", { classe: "ident" }, (x.pseudo ? " · " : "") + x.id),
+      !marques.length && x.journal ? " · " + quantite(x.journal, "évènement(s)") + " au journal" : ""],
+    badges: marques, maxBadges: 3, date: x.derniere ? depuis(x.derniere) : "", dateTitre: x.derniere ? "Dernière trace : " + date(x.derniere, true) : "",
+    ouvrir: () => ouvrirFiche(x.id), libelleOuvrir: "Ouvrir la fiche de " + nomDe(x), donnees: { membre: x.id },
+  });
 }
 
 // ─── Salons & questions ─────────────────────────────────────────────────────
@@ -518,9 +546,9 @@ function sousQuestions(d, f, maj) {
   const top = (st.salons || [])[0];
   const nb = { tous: l.length };
   l.forEach((x) => { nb[x.statut] = (nb[x.statut] || 0) + 1; });
-  const filtre = l.filter((x) => (f.ques === "tous" || x.statut === f.ques) && contient([x.texte, x.salon, P(x.id).nom, P(x.id).pseudo, x.id].join(" "), f.q));
-  const groupes = new Map();
-  filtre.forEach((x) => { if (!groupes.has(x.id)) groupes.set(x.id, []); groupes.get(x.id).push(x); });
+  const filtre = recentsDabord(l.filter((x) => (f.ques === "tous" || x.statut === f.ques) && contient([x.texte, x.salon, P(x.id).nom, P(x.id).pseudo, x.id].join(" "), f.q)), "quand");
+  const zone = h("div", { classe: "groupes-zone" }, filtre.length ? groupesParPeriode("sal-q", filtre, (x) => x.quand, (x) => ligneQuestion(x, f.ques !== "tous"), { forcer: !!f.q, ouverts: f.ques === "ouverte" ? 5 : 1 })
+    : vide(f.ques === "ouverte" ? "Aucune question en attente" : "Rien ici", f.ques === "ouverte" ? "Tout le monde a eu sa réponse." : "Change le filtre ou la recherche.", "succes"));
   return [tuiles(
     tuile({ cle: "q1", lib: "Sans réponse", val: st.ouvertes || 0, icone: "salons", teinte: "#a8641c" }),
     tuile({ cle: "q2", lib: "Répondues · 7 jours", val: st.repondues_7 || 0, icone: "valider", teinte: "#3f6b3a" }),
@@ -528,28 +556,25 @@ function sousQuestions(d, f, maj) {
     tuile({ cle: "q4", lib: "Salon le plus questionné", texte: top ? nomSalon(top.salon) : "—", icone: "carte", sous: top ? quantite(top.n, "question(s)") + " sur 30 jours" : null, teinte: "#5e3a4e" })),
   h("div", { classe: "rangee entre" }, puces([["ouverte", "Sans réponse", nb.ouverte || 0, "#a8641c"], ["repondue", "Répondues", nb.repondue || 0, "#3f6b3a"], ["resolue", "Résolues", nb.resolue || 0, "#3f6b3a"],
     ["traitee", "Traitées", nb.traitee || 0, "#1f4e5a"], ["ignoree", "Pas des questions", nb.ignoree || 0, "#4a5560"], ["tous", "Toutes", nb.tous]], f.ques, (v) => { f.ques = v; resetPages("sal"); maj(); }, "Statut"),
-    exporter("Exporter", [["Questions · 30 jours (CSV)", { quoi: "questions" }], ["Questions · 30 jours (JSON)", { quoi: "questions", format: "json" }]])),
-  h("p", { classe: "aide" }, "Relevées toutes seules dans les salons publics. Elles se ferment quand le staff répond ou quand l'auteur dit que c'est bon."),
-  filtre.length ? paginer("sal-q", [...groupes.entries()], ([id, x]) => carteQuestions(id, x)) : vide(f.ques === "ouverte" ? "Aucune question en attente" : "Rien ici", f.ques === "ouverte" ? "Tout le monde a eu sa réponse." : "Change le filtre ou la recherche.", "succes")];
+    h("div", { classe: "rangee" }, filtre.length > 1 ? outilsGroupes(zone) : null,
+      avance(exporter("Exporter", [["Questions · 30 jours (CSV)", { quoi: "questions" }], ["Questions · 30 jours (JSON)", { quoi: "questions", format: "json" }]])))),
+  h("p", { classe: "aide avance" }, "Relevées toutes seules dans les salons publics. Elles se ferment quand le staff répond ou quand l'auteur dit que c'est bon."),
+  zone];
 }
-export function carteQuestions(id, qs) {
-  const p = P(id);
-  return h("article", { classe: "feuillet" },
-    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, lienNom(id, ouvrirFiche)), h("div", { classe: "sous-nom" }, quantite(qs.length, "question(s)") + " · dernière " + depuis(qs[0].quand)))),
-    h("ul", { classe: "entrees" }, qs.slice(0, 4).map((x) => {
-      const [lib, teinte] = STATUTS_Q[x.statut] || [x.libelle, null];
-      return h("li", { classe: "entree" },
-        h("div", { classe: "haut" }, h("span", { classe: "quoi" }, nomSalon(x.salon)), h("span", { classe: "quand" }, depuis(x.quand))),
-        h("div", { classe: "texte coupe3 deplier", onclick: deplier }, x.texte),
-        h("div", { classe: "pastilles" }, pastille(lib, teinte), x.par ? h("span", { classe: "meta" }, "par " + sansEmoji(x.par) + (x.repondu_le && x.repondu_le >= x.quand ? " · en " + duree(x.repondu_le - x.quand) : "")) : null),
-        h("div", { classe: "rangee" },
-          x.message ? h("a", { classe: "bouton p", href: x.message }, icone("discord"), h("span", {}, x.statut === "ouverte" ? "Répondre sur Discord" : "Voir sur Discord")) : null,
-          x.statut === "ouverte" ? [
-            bouton("Traitée", { classe: "p vert", icone: "valider", reseau: true, onclick: () => agir({ action: "question", question: x.question, statut: "traitee" }, "", "", { direct: true }) }),
-            bouton("Pas une question", { classe: "p discret", reseau: true, onclick: () => agir({ action: "question", question: x.question, statut: "ignoree" }, "", "", { direct: true }) }),
-          ] : bouton("Rouvrir", { classe: "p discret", icone: "synchro", reseau: true, onclick: () => agir({ action: "question", question: x.question, statut: "ouverte" }, "", "", { direct: true }) })));
-    })),
-    qs.length > 4 ? h("div", { classe: "compte-pied" }, "+ " + quantite(qs.length - 4, "autre(s)") + " dans la fiche") : null);
+/** Une question relevée dans un salon : le texte sur une ligne (en entier au clic), qui, où ; Discord et le statut à droite. */
+function ligneQuestion(x, sansStatut) {   // sansStatut : la liste est déjà filtrée sur un statut, inutile de le répéter
+  const [lib, teinte] = STATUTS_Q[x.statut] || [x.libelle, null];
+  const ouverte = x.statut === "ouverte";
+  return ligne({
+    visuel: avatar(P(x.id), "p"), titre: x.texte,
+    sous: [lienNom(x.id, ouvrirFiche), " · " + nomSalon(x.salon), x.par ? " · répondu par " + sansEmoji(x.par) + (x.repondu_le && x.repondu_le >= x.quand ? " en " + duree(x.repondu_le - x.quand) : "") : ""],
+    badges: sansStatut ? [] : [pastille(lib, teinte)], ...quandLigne(x.quand), etat: ouverte ? "chaude" : null,
+    actions: [x.message ? { icone: "discord", libelle: ouverte ? "Répondre sur Discord" : "Voir sur Discord", href: x.message } : null,
+      ouverte ? { icone: "valider", libelle: "Traitée", reseau: true, onclick: () => agir({ action: "question", question: x.question, statut: "traitee" }, "", "", { direct: true }) }
+        : { icone: "synchro", libelle: "Rouvrir", reseau: true, onclick: () => agir({ action: "question", question: x.question, statut: "ouverte" }, "", "", { direct: true }) },
+      ouverte ? { icone: "annuler", libelle: "Pas une question", reseau: true, onclick: () => agir({ action: "question", question: x.question, statut: "ignoree" }, "", "", { direct: true }) } : null],
+    visibles: 3, deplier: () => h("p", { classe: "texte" }, x.texte), donnees: { question: x.question },
+  });
 }
 function sousIdees(d, f, maj) {
   const idees = d.suggestions || {}, li = idees.liste || [];
@@ -560,26 +585,28 @@ function sousIdees(d, f, maj) {
   const filtre = li.filter((x) => (f.idees === "toutes" || groupe_(x) === f.idees) && contient([x.titre, x.details, x.note, P(x.auteur).nom].join(" "), f.q));
   return [h("p", { classe: "aide" }, "Les idées des membres et leurs votes. Réponds d'ici : la carte change sur Discord et l'auteur reçoit ta réponse en privé."),
     puces([["ouvertes", "À traiter", nb.ouvertes || 0, "#a8641c"], ["decidees", "Décidées", nb.decidees || 0, "#3f6b3a"], ["retirees", "Retirées", nb.retirees || 0, "#4a5560"], ["toutes", "Toutes", nb.toutes]], f.idees, (v) => { f.idees = v; resetPages("sal"); maj(); }, "Statut"),
-    filtre.length ? paginer("sal-i", filtre, carteIdee) : vide(f.idees === "ouvertes" ? "Aucune idée à traiter" : "Rien ici", "Change le filtre ou la recherche.")];
+    filtre.length ? lignes("sal-i", filtre, ligneIdee) : vide(f.idees === "ouvertes" ? "Aucune idée à traiter" : "Rien ici", "Change le filtre ou la recherche.")];
 }
-function carteIdee(x) {
+const accordIdee = (x) => { const total = x.pour + x.contre; return total ? Math.round(100 * x.pour / total) + " % d'accord · " + nombre(x.pour) + " pour, " + nombre(x.contre) + " contre" : "pas encore de vote"; };
+/** Une idée : son titre, qui, ses votes ; le détail, la barre des votes et la réponse au clic ; Répondre à droite. */
+function ligneIdee(x) {
   const p = P(x.auteur), [lib, teinte] = STATUTS_I[x.statut] || [x.libelle, null];
   const total = x.pour + x.contre, pourcent = total ? Math.round(100 * x.pour / total) : 0;
   const ouverte = !x.retire_le && (x.statut === "attente" || x.statut === "etude");
-  return h("article", { classe: "feuillet" + (ouverte ? " chaude" : "") },
-    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, lienNom(x.auteur, ouvrirFiche)), h("div", { classe: "sous-nom" }, "Idée n°" + x.id + " · " + nomSalon(x.salon) + " · " + depuis(x.cree)))),
-    h("h3", { classe: "titre-carte" }, x.titre),
-    x.details ? h("p", { classe: "texte coupe3 deplier", onclick: deplier }, x.details) : null,
-    h("div", { classe: "votes" }, h("div", { classe: "vote" + (total && pourcent >= 50 ? " tete" : "") },
-      h("div", { classe: "vote-haut" }, h("span", {}, total ? pourcent + " % d'accord" : "Pas encore de vote"), h("b", { classe: "num" }, nombre(x.pour) + " pour", h("small", {}, nombre(x.contre) + " contre"))),
-      h("span", { classe: "vote-fond" }, h("span", { classe: "vote-plein", vars: { "--pc": pourcent + "%" } })))),
-    x.note ? h("div", { classe: "bandeau vert" }, icone("plume"), h("div", { classe: "bandeau-texte" }, h("span", {}, h("b", {}, "Réponse : "), x.note))) : null,
-    h("div", { classe: "pastilles" }, pastille(x.retire_le ? "Retirée du salon" : lib, x.retire_le ? "#4a5560" : teinte), x.decide_par ? h("span", { classe: "meta" }, "par " + nomDe(P(x.decide_par)) + (x.decide_le ? " · " + depuis(x.decide_le) : "")) : null),
-    !x.retire_le ? h("div", { classe: "feuillet-pied" },
-      x.lien ? h("a", { classe: "bouton p", href: x.lien }, icone("discord"), h("span", {}, "Sur Discord")) : null,
-      peutAgir() ? bouton("Répondre", { classe: "p vert", icone: "plume", reseau: true, onclick: () => agir({ action: "suggestion_repondre", suggestion: x.id }, "Répondre à l'idée n°" + x.id, x.titre,
-        { motif: true, choix: Object.entries(STATUTS_I).map(([k, [l]]) => [k, l]), choixDefaut: x.statut === "attente" ? "etude" : x.statut }, "Envoyer la réponse") }) : null,
-      peutAgir() ? bouton("Retirer", { classe: "p danger", reseau: true, onclick: () => agir({ action: "suggestion_retirer", suggestion: x.id }, "Retirer cette idée du salon ?", "Sa carte disparaît de Discord ; elle reste ici.", {}, "Retirer du salon", "danger") }) : null) : null);
+  return ligne({
+    visuel: avatar(p, "p"), titre: x.titre, sous: ["Idée n°" + x.id + " · ", lienNom(x.auteur, ouvrirFiche), " · " + accordIdee(x)],
+    badges: [pastille(x.retire_le ? "Retirée du salon" : lib, x.retire_le ? "#4a5560" : teinte)], ...quandLigne(x.cree), etat: ouverte ? "chaude" : x.retire_le ? "eteinte" : null,
+    actions: x.retire_le ? [] : [x.lien ? { icone: "discord", libelle: "Sur Discord", href: x.lien } : null,
+      peutAgir() ? { icone: "plume", libelle: "Répondre", reseau: true, onclick: () => agir({ action: "suggestion_repondre", suggestion: x.id }, "Répondre à l'idée n°" + x.id, x.titre,
+        { motif: true, choix: Object.entries(STATUTS_I).map(([k, [l]]) => [k, l]), choixDefaut: x.statut === "attente" ? "etude" : x.statut }, "Envoyer la réponse") } : null,
+      peutAgir() ? { icone: "supprimer", libelle: "Retirer du salon", danger: true, reseau: true, onclick: () => agir({ action: "suggestion_retirer", suggestion: x.id }, "Retirer cette idée du salon ?", "Sa carte disparaît de Discord ; elle reste ici.", {}, "Retirer du salon", "danger") } : null],
+    deplier: () => [x.details ? h("p", { classe: "texte" }, x.details) : null,
+      h("div", { classe: "votes" }, h("div", { classe: "vote" + (total && pourcent >= 50 ? " tete" : "") },
+        h("div", { classe: "vote-haut" }, h("span", {}, total ? pourcent + " % d'accord" : "Pas encore de vote"), h("b", { classe: "num" }, nombre(x.pour) + " pour", h("small", {}, nombre(x.contre) + " contre"))),
+        h("span", { classe: "vote-fond" }, h("span", { classe: "vote-plein", vars: { "--pc": pourcent + "%" } })))),
+      x.note ? h("div", { classe: "bandeau vert" }, icone("plume"), h("div", { classe: "bandeau-texte" }, h("span", {}, h("b", {}, "Réponse : "), x.note))) : null,
+      x.decide_par ? h("p", { classe: "meta" }, "Décidée par " + nomDe(P(x.decide_par)) + (x.decide_le ? " · " + depuis(x.decide_le) : "")) : null],
+  });
 }
 function sousSondages(d, f, maj) {
   const s = d.sondages || {}, l = s.liste || [], st = s.stats || {};
@@ -591,18 +618,19 @@ function sousSondages(d, f, maj) {
     tuile({ cle: "s2", lib: "Votes · 30 jours", val: st.votes_mois || 0, icone: "valider", teinte: "#1f4e5a" })),
   h("p", { classe: "aide" }, "Créés par les membres sur Discord ; les votes suivent en direct. Un sondage retiré quitte le salon, son résultat reste ici."),
   puces([["en_cours", "En cours", nb.en_cours || 0, "#3f6b3a"], ["termine", "Terminés", nb.termine || 0, "#1f4e5a"], ["retire", "Retirés", nb.retire || 0, "#4a5560"], ["tous", "Tous", nb.tous]], f.sond, (v) => { f.sond = v; resetPages("sal"); maj(); }, "Statut"),
-  filtre.length ? paginer("sal-s", filtre, carteSondage) : vide(f.sond === "en_cours" ? "Aucun sondage en cours" : "Rien ici", "Change le filtre ou la recherche.")];
+  filtre.length ? lignes("sal-s", filtre, ligneSondage) : vide(f.sond === "en_cours" ? "Aucun sondage en cours" : "Rien ici", "Change le filtre ou la recherche.")];
 }
-function carteSondage(x) {
+/** Un sondage : la question, qui, combien de votes ; les résultats au clic. */
+function ligneSondage(x) {
   const p = P(x.auteur), [lib, teinte] = STATUTS_S[x.statut] || [x.statut, null];
   const quand = x.statut === "en_cours" ? "fin le " + date(x.fin, true) : x.statut === "retire" ? "retiré " + depuis(x.retire_le) + (x.retire_par ? " par " + nomDe(P(x.retire_par)) : "") : "terminé le " + date(x.fin, true);
-  return h("article", { classe: "feuillet" },
-    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, lienNom(x.auteur, ouvrirFiche)), h("div", { classe: "sous-nom" }, nomSalon(x.salon) + " · " + depuis(x.cree)))),
-    h("h3", { classe: "titre-carte" }, x.question), sondageVotes(x),
-    h("div", { classe: "pastilles" }, pastille(lib, teinte), h("span", { classe: "meta" }, quantite(x.total, "vote(s)") + (x.multiple ? " · plusieurs choix" : "") + " · " + quand)),
-    x.statut !== "retire" ? h("div", { classe: "feuillet-pied" },
-      x.lien ? h("a", { classe: "bouton p", href: x.lien }, icone("discord"), h("span", {}, "Sur Discord")) : null,
-      peutAgir() ? bouton("Retirer du salon", { classe: "p danger", reseau: true, onclick: () => agir({ action: "sondage_retirer", sondage: x.id }, "Retirer ce sondage du salon ?", "Le message disparaît de Discord ; son résultat reste ici.", {}, "Retirer du salon", "danger") }) : null) : null);
+  return ligne({
+    visuel: avatar(p, "p"), titre: x.question, sous: [lienNom(x.auteur, ouvrirFiche), " · " + nomSalon(x.salon) + " · " + quantite(x.total, "vote(s)") + (x.multiple ? " · plusieurs choix" : "") + " · " + quand],
+    badges: [pastille(lib, teinte)], ...quandLigne(x.cree), etat: x.statut === "retire" ? "eteinte" : null,
+    actions: x.statut === "retire" ? [] : [x.lien ? { icone: "discord", libelle: "Sur Discord", href: x.lien } : null,
+      peutAgir() ? { icone: "supprimer", libelle: "Retirer du salon", danger: true, reseau: true, onclick: () => agir({ action: "sondage_retirer", sondage: x.id }, "Retirer ce sondage du salon ?", "Le message disparaît de Discord ; son résultat reste ici.", {}, "Retirer du salon", "danger") } : null],
+    deplier: () => sondageVotes(x),
+  });
 }
 const STATUTS_E = { ouverte: ["Ouverte", "#3f6b3a"], prise: ["En cours", "#a8641c"], terminee: ["Terminée", "#1f4e5a"], fermee: ["Fermée", "#4a5560"], expiree: ["Fermée sans activité", "#4a5560"], retiree: ["Retirée", "#4a5560"] };
 // Les zones d'échange du serveur : « trade » (Rell Seas) et « cl_trade » (Clover RPG) — entraide.ZONES.
@@ -614,47 +642,48 @@ function sousEntraide(d, f, maj) {
   const filtre = le.filter((x) => (f.entr === "toutes" || (f.entr === "ouvertes" ? ouverte(x) : f.entr === "trade" ? estEchange(x) : x.zone === f.entr)) && contient([x.titre, x.type, (x.champs || []).map((c) => c[1]).join(" "), P(x.auteur).nom].join(" "), f.q));
   return [h("p", { classe: "aide" }, "Chaque demande d'aide et de trade : qui l'a faite, qui est venu, qui l'a certifiée, avec qui l'échange s'est fait. Close, elle disparaît de Discord ; elle reste ici."),
     puces([["ouvertes", "En cours", le.filter(ouverte).length, "#3f6b3a"], ["trade", "Trade", le.filter(estEchange).length, "#a8641c"], ["toutes", "Toutes", le.length]], f.entr, (v) => { f.entr = v; resetPages("sal"); maj(); }, "Statut"),
-    filtre.length ? paginer("sal-e", filtre, carteDemande) : vide(f.entr === "ouvertes" ? "Aucune demande en cours" : "Rien ici", "Change le filtre ou la recherche.")];
+    filtre.length ? lignes("sal-e", filtre, ligneDemande) : vide(f.entr === "ouvertes" ? "Aucune demande en cours" : "Rien ici", "Change le filtre ou la recherche.")];
 }
-function carteDemande(x) {
+/** Une demande d'entraide ou de trade : le titre, qui, où ; les champs, les aidants et l'échange au clic. */
+function ligneDemande(x) {
   const p = P(x.auteur), [lib, teinte] = STATUTS_E[x.statut] || [x.libelle, null];
   const fin = x.certifie_par ? "certifiée par " + nomDe(P(x.certifie_par)) : x.ferme_par ? "close par " + nomDe(P(x.ferme_par)) : "";
-  return h("article", { classe: "feuillet" + (x.statut === "ouverte" || x.statut === "prise" ? " chaude" : "") },
-    h("div", { classe: "qui" }, avatar(p), h("div", { classe: "bloc" }, h("div", { classe: "nom" }, lienNom(x.auteur, ouvrirFiche)), h("div", { classe: "sous-nom" }, sansEmoji(x.type) + " · n°" + x.id + " · " + depuis(x.cree)))),
-    h("h3", { classe: "titre-carte" }, x.titre),
-    (x.champs || []).length ? h("dl", { classe: "champs-lus" }, x.champs.map(([l, v]) => h("div", {}, h("dt", {}, l), h("dd", {}, v)))) : null,
-    (x.aidants || []).length ? h("div", { classe: "meta" }, (estEchange(x) ? "Intéressés : " : "Venus aider : ") + x.aidants.map((a) => nomDe(P(a))).join(", ")) : null,
-    x.partenaire ? h("div", { classe: "meta" }, "Échange avec " + nomDe(P(x.partenaire))) : null,
-    h("div", { classe: "pastilles" }, pastille(lib, teinte), fin ? h("span", { classe: "meta" }, fin + (x.ferme ? " · " + depuis(x.ferme) : "")) : null),
-    x.lien || x.transcript ? h("div", { classe: "feuillet-pied" },
-      x.lien ? h("a", { classe: "bouton p", href: x.lien }, icone("discord"), h("span", {}, "Sur Discord")) : null,
-      x.transcript ? h("a", { classe: "bouton p discret", href: x.transcript }, icone("parchemin"), h("span", {}, "Historique")) : null) : null);
+  return ligne({
+    visuel: avatar(p, "p"), titre: x.titre, sous: [sansEmoji(x.type) + " · n°" + x.id + " · ", lienNom(x.auteur, ouvrirFiche), fin ? " · " + fin : ""],
+    badges: [pastille(lib, teinte)], ...quandLigne(x.cree), etat: x.statut === "ouverte" || x.statut === "prise" ? "chaude" : null,
+    actions: [x.lien ? { icone: "discord", libelle: "Sur Discord", href: x.lien } : null, x.transcript ? { icone: "parchemin", libelle: "Historique", href: x.transcript } : null],
+    deplier: () => [(x.champs || []).length ? h("dl", { classe: "champs-lus" }, x.champs.map(([l, v]) => h("div", {}, h("dt", {}, l), h("dd", {}, v)))) : null,
+      (x.aidants || []).length ? h("p", { classe: "meta" }, (estEchange(x) ? "Intéressés : " : "Venus aider : ") + x.aidants.map((a) => nomDe(P(a))).join(", ")) : null,
+      x.partenaire ? h("p", { classe: "meta" }, "Échange avec " + nomDe(P(x.partenaire))) : null,
+      fin ? h("p", { classe: "meta" }, fin + (x.ferme ? " · " + depuis(x.ferme) : "")) : null],
+  });
 }
 function sousAnnonces(d, f) {
   const an = d.annonces || {}, la = an.liste || [];
   if (an.erreur) return vide("Annonces momentanément illisibles");
   const filtre = la.filter((x) => contient([x.titre, x.texte, x.salon].join(" "), f.q));
   return [h("p", { classe: "aide" }, "Les annonces publiées depuis le salon « logs », et combien de membres les ont vues. Pour composer une annonce du clan : L'Équipage, Annonces & événements."),
-    filtre.length ? paginer("sal-a", filtre, (x) => h("article", { classe: "feuillet" },
-      h("div", { classe: "qui" }, avatar(P(x.auteur)), h("div", { classe: "bloc" }, h("h3", { classe: "titre-carte" }, x.titre),
-        h("div", { classe: "sous-nom" }, nomSalon(x.salon) + " · " + depuis(x.cree) + " · par " + nomDe(P(x.auteur))))),
-      h("p", { classe: "texte coupe3 deplier", onclick: deplier }, x.texte),
-      h("div", { classe: "pastilles" }, pastille(x.vues ? "Vue par " + quantite(x.vues, "membre(s)") : "Pas encore vue", x.vues ? "#3f6b3a" : "#4a5560", (x.vus || []).length ? x.vus.map((v) => nomDe(P(v))).join(", ") : null),
-        x.mention ? h("span", { classe: "meta" }, "mention " + x.mention.replace(/^@/, "")) : null),
-      x.lien ? h("div", { classe: "feuillet-pied" }, h("a", { classe: "bouton p", href: x.lien }, icone("discord"), h("span", {}, "Sur Discord"))) : null)) : vide("Aucune annonce")];
+    filtre.length ? lignes("sal-a", filtre, (x) => ligne({
+      visuel: avatar(P(x.auteur), "p"), titre: x.titre, sous: nomSalon(x.salon) + " · par " + nomDe(P(x.auteur)) + (x.mention ? " · mention " + x.mention.replace(/^@/, "") : ""),
+      badges: [pastille(x.vues ? "Vue par " + quantite(x.vues, "membre(s)") : "Pas encore vue", x.vues ? "#3f6b3a" : "#4a5560", (x.vus || []).length ? x.vus.map((v) => nomDe(P(v))).join(", ") : null)],
+      ...quandLigne(x.cree), actions: [x.lien ? { icone: "discord", libelle: "Sur Discord", href: x.lien } : null],
+      deplier: () => [h("p", { classe: "texte" }, x.texte), (x.vus || []).length ? h("p", { classe: "meta" }, "Vue par " + x.vus.map((v) => nomDe(P(v))).join(", ")) : null],
+    })) : vide("Aucune annonce")];
 }
 const PROFILS = { ouvert: ["Ouvert à tous", "#3f6b3a"], lecture: ["Lecture seule", "#1f4e5a"], vitrine: ["Visible, fermé", "#5e3a4e"], clan: ["Clan seulement", "#7a4b2a"], cache: ["Réservé", "#4a5560"] };
 function sousDroits(d) {
   const cats = d.salons || [];
   if (!Array.isArray(cats) || !cats.length) return vide("Aucun salon lisible");
-  return [h("p", { classe: "aide" }, "Lecture seule : rien ne se règle d'ici. Ouvert à tous : on écrit. Lecture seule : on lit sans écrire. Visible, fermé : on voit le vocal sans y entrer. Clan seulement : réservé au rôle du clan. Réservé : caché à tout le monde."),
-    h("div", { classe: "grille" }, cats.map((cat) => h("article", { classe: "feuillet" }, h("h3", { classe: "titre-carte" }, sansEmoji(cat.categorie) || "Sans catégorie"),
-      h("div", { classe: "salons-liste" }, cat.salons.map((sl) => {
-        const [lib, teinte] = PROFILS[sl.profil] || [sl.profil, null];
-        const peut = sl.vocal ? [sl.rejoindre ? "rejoindre" : null] : [sl.ecrire ? "écrire" : null, sl.images ? "images" : null, sl.reagir ? "réagir" : null];
-        return h("div", { classe: "salon-ligne" }, h("span", { classe: "nom-salon" }, icone(sl.vocal ? "cloche" : "salons", "ic-p"), h("span", { classe: "une-ligne" }, sansEmoji(sl.nom) || "salon")),
-          pastille(lib, teinte, peut.filter(Boolean).join(", ") || "rien d'autre que voir"));
-      })))))];
+  // Une catégorie de salons par groupe (la première ouverte), un salon par ligne : ce que chacun peut y faire.
+  const zone = h("div", { classe: "groupes-zone" }, groupes(cats.map((cat, i) => ({ cle: "droits-" + i + "-" + (sansEmoji(cat.categorie) || "sans"), titre: sansEmoji(cat.categorie) || "Sans catégorie", compte: cat.salons.length,
+    contenu: () => h("ul", { classe: "lignes-c" }, cat.salons.map((sl) => {
+      const [lib, teinte] = PROFILS[sl.profil] || [sl.profil, null];
+      const peut = sl.vocal ? [sl.rejoindre ? "rejoindre" : null] : [sl.ecrire ? "écrire" : null, sl.images ? "images" : null, sl.reagir ? "réagir" : null];
+      return ligne({ visuel: pastilleIcone(sl.vocal ? "cloche" : "salons", teinte), titre: sansEmoji(sl.nom) || "salon",
+        sous: "Chacun peut : " + (peut.filter(Boolean).join(", ") || "rien d'autre que voir"), badges: [pastille(lib, teinte)] });
+    })) }))));
+  return [h("div", { classe: "rangee entre" }, h("p", { classe: "aide" }, "Lecture seule : rien ne se règle d'ici. Ouvert à tous : on écrit. Lecture seule : on lit sans écrire. Visible, fermé : on voit le vocal sans y entrer. Clan seulement : réservé au rôle du clan. Réservé : caché à tout le monde."),
+    cats.length > 1 ? outilsGroupes(zone) : null), zone];
 }
 
 // ─── Nettoyage ──────────────────────────────────────────────────────────────
@@ -683,6 +712,8 @@ export function nettoyage(vue) {
           teinte: echecs.length ? "#8e2a24" : "#4a5560" }) : null),
       h("div", { classe: "cadre pile serree" }, h("h3", {}, "Le grand ménage"),
         h("p", { classe: "aide" }, "Il passe tout seul chaque jour. Tu peux aussi le lancer maintenant : chaque règle efface ce qui a dépassé sa durée, et le bilan est noté au journal."),
+        h("p", { classe: "meta" }, icone("nettoyage", "ic-p"), " Dernier passage : " + (n.dernier ? depuis(n.dernier) + " · " + parQui(n.par) : "jamais")
+          + (dernier ? " · " + (dernier.total ? quantite(dernier.total, "élément(s) retiré(s)") : "rien à retirer") : "") + (echecs.length ? " · en échec : " + echecs.join(", ") : "")),
         h("div", { classe: "rangee" }, bouton("Lancer le nettoyage maintenant", { classe: "principal", icone: "nettoyage", reseau: true, onclick: async () => {
           const ok = await confirmer({ titre: "Lancer le nettoyage maintenant ?", texte: "Chaque règle ci-dessous efface ce qui a dépassé sa durée ; les rangements n'effacent rien. Le casier ne se nettoie que depuis Sanctions.", libelleOk: "Nettoyer", style: "principal" });
           if (!ok) return;
@@ -692,13 +723,22 @@ export function nettoyage(vue) {
           toast(b ? "Nettoyage fait : " + (b.total ? quantite(b.total, "élément(s) retiré(s)") : "rien à retirer") + "." : "Nettoyage fait.", "succes");
           maj(true);
         } }), h("a", { classe: "bouton discret", href: "#port/sanctions" }, icone("sanctions"), h("span", {}, "Nettoyer le casier (Sanctions)")))),
-      section("Les règles", "parchemin", compte(regles.length, "règle"), h("div", { classe: "grille" }, regles.map((r) => carteRegle(r, compteurs[r.cle], () => maj(true))))),
-      (n.bilans || []).length ? groupe({ titre: "Les derniers bilans", compte: n.bilans.length, cle: "net-bilans", icone: "journal" }, () => h("ul", { classe: "entrees feuillet" }, n.bilans.map((b) => h("li", { classe: "entree" },
-        h("div", { classe: "haut" }, h("span", { classe: "quoi" }, b.total ? quantite(b.total, "élément(s) retiré(s)") : "Rien à retirer"), h("span", { classe: "quand" }, date(b.quand, true))),
-        h("div", { classe: "meta" }, parQui(b.par) + (b.detail ? " · " + b.detail : "")))))) : null);
+      section("Les règles", "parchemin", compte(regles.length, "règle"), reglesRangees(regles, compteurs, () => maj(true))),
+      (n.bilans || []).length ? groupe({ titre: "Les derniers bilans", compte: n.bilans.length, cle: "net-bilans", icone: "journal" }, () => lignes("net-bilans", n.bilans, (b) => ligne({
+        visuel: pastilleIcone("nettoyage", b.total ? "#3f6b3a" : "#6e553f"), titre: b.total ? quantite(b.total, "élément(s) retiré(s)") : "Rien à retirer",
+        sous: parQui(b.par) + (b.detail ? " · " + b.detail : ""), date: date(b.quand, true), deplier: b.detail ? () => h("p", { classe: "texte" }, b.detail) : undefined }))) : null);
   };
   maj();
   return { maj: () => maj(false) };
+}
+/** Les règles en deux groupes : celles qu'on règle (ouvertes), puis les fixes ; des cartes de même hauteur. */
+function reglesRangees(regles, compteurs, recharger) {
+  const reglables = regles.filter((r) => r.reglable !== false), fixes = regles.filter((r) => r.reglable === false);
+  const grille = (l) => h("div", { classe: "grille egale" }, l.map((r) => carteRegle(r, compteurs[r.cle], recharger)));
+  return h("div", { classe: "groupes-zone" }, groupes([
+    reglables.length ? { cle: "net-reglables", titre: "Les durées à régler", icone: "minuteur", compte: reglables.length, contenu: () => grille(reglables) } : null,
+    fixes.length ? { cle: "net-fixes", titre: "Les règles fixes", icone: "cadenas", compte: fixes.length, info: "appliquées chaque jour", contenu: () => grille(fixes) } : null,
+  ].filter(Boolean)));
 }
 function carteRegle(r, garde, recharger) {
   // Le compte : absent (la règle n'en donne pas), null (illisible côté serveur), ou ce que la règle garde aujourd'hui.
