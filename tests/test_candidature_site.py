@@ -188,16 +188,21 @@ def local(tmp_path_factory):
         site.kolax_equipage, _ = site.entrer("/tableau/demo?qui=equipage")
         yield site
     finally:
-        boucle.run_until_complete(client.close())
-        pendantes = [t for t in asyncio.all_tasks(boucle) if not t.done()]
-        for t in pendantes:
-            t.cancel()
-        boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
-        tableau._direct_salles.clear()
-        boucle.close()
-        mp.undo()
-        for nom in ("site_local", "site_local_port"):
-            sys.modules.pop(nom, None)
+        #  Les réglages du module rendus QUOI QU'IL ARRIVE (sinon les modules suivants héritent du site local) ; `gather()`
+        #  sans tâche chercherait une boucle courante, qu'aucune n'est plus après un `asyncio.run` (C11).
+        try:
+            boucle.run_until_complete(client.close())
+            pendantes = [t for t in asyncio.all_tasks(boucle) if not t.done()]
+            for t in pendantes:
+                t.cancel()
+            if pendantes:
+                boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
+            tableau._direct_salles.clear()
+            boucle.close()
+        finally:
+            mp.undo()
+            for nom in ("site_local", "site_local_port"):
+                sys.modules.pop(nom, None)
 
 
 @pytest.fixture

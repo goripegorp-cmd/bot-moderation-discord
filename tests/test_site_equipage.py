@@ -130,16 +130,22 @@ def local(tmp_path_factory):
         assert arrivee == "/tableau/equipage/"
         yield site
     finally:
-        boucle.run_until_complete(client.close())
-        pendantes = [t for t in asyncio.all_tasks(boucle) if not t.done()]   # la ronde du direct (S11), entre autres
-        for t in pendantes:
-            t.cancel()
-        boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
-        tableau._direct_salles.clear()
-        boucle.close()
-        mp.undo()
-        for nom in ("site_local", "site_local_port"):
-            sys.modules.pop(nom, None)
+        #  26/10/2026 : une suite lente (la ronde du direct finie après sa grâce de 10 s) laissait `gather()` SANS tâche
+        #  chercher une boucle courante — il n'y en a plus après un `asyncio.run` (S9) : l'erreur sautait `mp.undo()`, et
+        #  les réglages du site local (ses règles de nettoyage) restaient aux modules suivants. Rendus quoi qu'il arrive.
+        try:
+            boucle.run_until_complete(client.close())
+            pendantes = [t for t in asyncio.all_tasks(boucle) if not t.done()]   # la ronde du direct (S11), entre autres
+            for t in pendantes:
+                t.cancel()
+            if pendantes:
+                boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
+            tableau._direct_salles.clear()
+            boucle.close()
+        finally:
+            mp.undo()
+            for nom in ("site_local", "site_local_port"):
+                sys.modules.pop(nom, None)
 
 
 def _corps(octets) -> str:
