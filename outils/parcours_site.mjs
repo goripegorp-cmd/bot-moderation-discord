@@ -469,9 +469,12 @@ async function parcoursRecrutementZone(o) {
     const message = ((m || [])[1] || {}).texte || "";
     const affiche = ((m || [])[0] || {}).texte || "";
     const mp = ((await demo("discord?mp=" + cand.id)).mp || []).map((x) => x.texte).join(" | ");
+    //  27/10/2026 : la page du candidat est branchée (comme `_activite_boot`) — « Répondre au questionnaire » donne son
+    //  lien, ses questions sont sur SA page, jamais dans le ticket ; sans elle, le ticket les liste (les formulaires).
+    const pageWeb = !!(await demo("recrutement/lien?ticket=" + tid)).url;
     const ok = !!perso && perso.id.startsWith("p-") && perso.etape === 1 && e.etapes.map((x) => x.titre).join(",") === "Le jeu,Le clan"
-      && message.includes(QUESTION) && message.includes("Étape 2 sur 3") && !message.includes("La Sirène") && affiche.includes("Étape 2 sur 3 : à toi")
-      && mp.includes("Ta demande de recrutement est acceptée");
+      && (pageWeb ? !message.includes(QUESTION) : message.includes(QUESTION)) && message.includes("Étape 2 sur 3") && !message.includes("La Sirène")
+      && affiche.includes("Étape 2 sur 3 : à toi") && mp.includes("Ta demande de recrutement est acceptée");
     return { ok, detail: "éditeur : " + etapes.join(", ") + " · envoi : " + e.etapes.map((x) => x.titre + " (" + e.questions.filter((q) => q.etape === x.numero).length + ")").join(", ")
       + " · messages du ticket : " + (m || []).length + " · « " + message.slice(0, 80) + "… »" };
   });

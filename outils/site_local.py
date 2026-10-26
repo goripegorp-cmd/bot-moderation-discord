@@ -913,7 +913,9 @@ async def _candidature_demo(get_db, g, ticket_ouvert) -> None:
     import questionnaire
     chef = g.get_member(FONDATEUR)
     t = int(time.time())
-    qui = {60: g.get_member(1020), 61: g.get_member(1023), 62: g.get_member(1011), 63: g.get_member(1008)}
+    #  #61 et #62 : deux membres du clan (des questionnaires d'avant) — les candidats hors du clan restent libres pour les
+    #  parcours (`outils/parcours_site.mjs` en prend trois, `parcours_candidature.mjs` un).
+    qui = {60: g.get_member(1020), 61: g.get_member(1004), 62: g.get_member(1022), 63: g.get_member(1008)}
     async with get_db() as db:
         for tid, m in qui.items():
             await db.execute("INSERT INTO tickets VALUES (?,?,?,?,?,?,?,?,?)",
