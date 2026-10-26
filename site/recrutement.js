@@ -553,7 +553,7 @@ function blocLiens(B, recharger) {
   const liens = copie(B.liens || []);
   const zone = h("div", { classe: "pile" });
   protegerZone(zone, "questionnaire:liens", "les liens du questionnaire", { des: "saisie", relire: recharger });   // présence en direct
-  const ligne = (l, i) => {
+  const ligneLien = (l, i) => {
     const titre = saisie({ value: l.titre || "", maxlength: 120, "aria-label": "Titre du lien", placeholder: "Vidéo officielle du Movie 3" });
     const url = saisie({ value: l.url || "", maxlength: 500, "aria-label": "Adresse", placeholder: "https://…", inputmode: "url" });
     const desc = saisie({ value: l.description || "", maxlength: 300, "aria-label": "Description", placeholder: "Ce qu'on y trouve" });
@@ -569,7 +569,7 @@ function blocLiens(B, recharger) {
   const dessiner = () => remplacer(zone,
     h("p", { classe: "aide" }, "Rappelés dans chaque questionnaire de l'étape 2 : « toutes les réponses se trouvent dans ces liens »."),
     B._liensAttente ? bandeau("Liens gardés sur l'appareil : ils partiront au retour de la connexion.", "") : null,
-    liens.length ? h("div", { classe: "pile serree" }, liens.map(ligne)) : vide("Aucun lien", "Ajoute la vidéo du Movie 3, le wiki, le guide du clan…", "lien"),
+    liens.length ? h("div", { classe: "pile serree" }, liens.map(ligneLien)) : vide("Aucun lien", "Ajoute la vidéo du Movie 3, le wiki, le guide du clan…", "lien"),
     peutAgir() ? h("div", { classe: "rangee" },
       bouton("Ajouter un lien", { classe: "p", icone: "ajouter", onclick: () => { const max = (B.limites && B.limites.liens) || 10; if (liens.length >= max) { toast(max + " liens au plus.", "erreur"); return; } liens.push({ titre: "", url: "", description: "" }); dessiner(); } }),
       bouton("Enregistrer les liens", { classe: "p principal", icone: "valider", onclick: async () => {

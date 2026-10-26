@@ -763,13 +763,13 @@ function carteRegle(r, garde, recharger, partira) {
   const nb = garde === undefined ? "" : garde === null ? "compte indisponible"
     : garde ? quantite(garde, rangement ? "élément(s) rangé(s)" : "élément(s) gardé(s)") : rangement ? "rien de rangé" : "rien de gardé";
   const sorte = rangement ? "rangement : rien n'est effacé" : r.reglable === false ? "règle fixe, appliquée chaque jour" : "appliquée chaque jour";
-  const duree = (j) => r.duree || (Number(j) ? j + " j" : "jusqu'à expiration");
+  const dureeGarde = (j) => r.duree || (Number(j) ? j + " j" : "jusqu'à expiration");
   // Ce qui partira au prochain passage, et « Nettoyer maintenant » quand il y a quelque chose (26/10/2026).
   const apercu = h("p", { classe: "meta regle-apercu", "aria-live": "polite" }, texteApercu(partira));
   const maintenant_ = boutonNettoyerRegle(r, Number(partira) || 0, recharger);
   if (r.reglable === false) {
     return h("article", { classe: "feuillet regle" }, h("h3", { classe: "titre-carte" }, r.nom), h("p", { classe: "aide" }, r.quoi),
-      h("div", { classe: "regle-ligne" }, h("span", { classe: "champ-lib" }, "Garder"), h("b", { classe: "num regle-valeur" }, duree(r.garde_jours))),
+      h("div", { classe: "regle-ligne" }, h("span", { classe: "champ-lib" }, "Garder"), h("b", { classe: "num regle-valeur" }, dureeGarde(r.garde_jours))),
       h("p", { classe: "meta" }, [nb, sorte].filter(Boolean).join(" · ")), apercu, maintenant_ ? h("div", { classe: "rangee" }, maintenant_) : null);
   }
   const mini = Number(r.min) || 1, maxi = Number(r.max) || 365;

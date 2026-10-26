@@ -210,7 +210,8 @@ export async function ouvrirCandidatureChef(envoi) {
         h("div", { classe: "zr-etape-tete" }, h("h4", {}, "Étape " + x.numero + (x.titre ? " · " + x.titre : ""))),
         h("ol", { classe: "correction-liste" }, (parEtape.get(Number(x.numero)) || []).map((q) => R.carteCorrection(etatC, e, q, Number(q.rang) - 1, !CD.decision && q.reponse_candidat != null))))),
       !peut.accepter && CD.raison_accepter && !CD.decision ? h("p", { classe: "aide" }, icone("info", "ic-p"), " Accepter : " + CD.raison_accepter) : null,
-      CD.note ? h("p", { classe: "meta" }, "Note : " + CD.note) : null);
+      CD.note ? h("p", { classe: "meta" }, "Note : " + CD.note) : null,
+      !CD.decision && /^(envoye|en_cours)$/.test(e.statut || "") && e.id ? zoneDirectChef(etatC, e, CD) : null);
     const pied = [bouton("Fermer", { classe: "discret", onclick: () => p.fermer() })];
     if (peut.etape_suivante) pied.push(bouton("Ouvrir l'étape suivante", { icone: "droite", reseau: true, onclick: async () => {
       const rep = await poster("recrutement/etape_suivante", { envoi: Number(e.id) });
@@ -239,6 +240,19 @@ export async function ouvrirCandidatureChef(envoi) {
     }
   }
   await rendre();
+}
+
+// ─── La vue en direct (la page du candidat, 26/10/2026) : un chef n'a pas de ticket — le direct se branche sur son ENVOI ──
+function zoneDirectChef(etatC, e, CD) {
+  const z = h("div", { classe: "zr-direct" });
+  import("./candidature_direct.js").then((m) => {
+    if (!z.isConnected || !m || typeof m.vueEnDirect !== "function") return;
+    ajouter(z, [m.vueEnDirect({ envoi: Number(e.id) }, {
+      surEnvoye: () => { if (etatC.p.fermee()) return; toast("Réponses reçues : " + nomDe(CD.membre) + " a tout envoyé.", "succes"); etatC.rendre(); },
+      surEtape: () => { if (etatC.p.fermee()) return; toast("Une étape de son questionnaire est arrivée : à toi de décider de la suite.", "succes"); etatC.rendre(); },
+    })]);
+  }).catch(() => { z.remove(); });
+  return z;
 }
 
 // ═══ LA BANQUE DES CHEFS (dans « Questions ») ═══════════════════════════

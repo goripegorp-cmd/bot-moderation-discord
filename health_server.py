@@ -198,6 +198,14 @@ async def _tableau(request):
     return await getattr(tableau, nom.split(":", 1)[1])(request)
 
 
+async def _candidature(request):
+    """Le questionnaire en ligne du candidat : `candidature_site` sert chaque adresse (lien à usage unique, puis session
+    « candidat », la sienne seulement)."""
+    import candidature_site
+    nom = request.match_info.route.name or ""
+    return await getattr(candidature_site, nom.split(":", 1)[1])(request)
+
+
 async def _vitrine(request):
     """La vitrine PUBLIQUE de l'équipage (`site_vitrine`) : sans session, lecture seule, données publiques seulement."""
     import site_vitrine
@@ -249,6 +257,13 @@ def construire_app():
     app.router.add_get('/tableau/equipage/', _tableau, name="tableau:page_equipage")
     app.router.add_get('/tableau/equipage/api/{nom:.+}', _tableau, name="tableau:api_equipage")
     app.router.add_post('/tableau/equipage/api/{nom:.+}', _tableau, name="tableau:api_equipage_refus")
+    #  26/10/2026 : le questionnaire en ligne du candidat (portée « candidat », son cookie limité à ce chemin) : sa page,
+    #  son lien, ses lectures et écritures DÉDIÉES — rien d'autre. Avant le lien à usage unique (« candidature » n'en est pas un).
+    app.router.add_get('/tableau/candidature', _candidature, name="candidature:vers_page")
+    app.router.add_get('/tableau/candidature/', _candidature, name="candidature:page")
+    app.router.add_route('GET', '/tableau/candidature/api/{nom:.+}', _candidature, name="candidature:api")
+    app.router.add_route('POST', '/tableau/candidature/api/{nom:.+}', _candidature, name="candidature:api_post")
+    app.router.add_get('/tableau/candidature/{jeton}', _candidature, name="candidature:entree")
     app.router.add_get('/tableau/{jeton}', _tableau, name="tableau:entree")
     #  27/10/2026 : la vitrine PUBLIQUE de l'équipage (le lien officiel à partager) — ces cinq adresses, en lecture.
     app.router.add_get('/equipage', _vitrine, name="vitrine:page")
