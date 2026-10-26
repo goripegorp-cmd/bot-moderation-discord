@@ -157,6 +157,30 @@ async def compter_vues(aid: int) -> int:
             return int((await cur.fetchone())[0])
 
 
+async def resume_vues(ids, noms: int = 12) -> dict:
+    """{annonce : (nombre de « Vu », `noms` membres qui l'ont vue)} pour une liste d'annonces, en deux lectures.
+    26/10/2026 (banc de plusieurs années) : le site lisait TOUS les « Vu » de ses 60 annonces pour en montrer 40 noms
+    chacune — 120 000 lignes à 5 ans (400 ms) ; un compte groupé et une courte liste par annonce suffisent (lue dans
+    l'ordre de la clé : sans tri, quelques lignes par annonce)."""
+    ids = [int(x) for x in ids][:400]
+    if not ids:
+        return {}
+    marques = ",".join("?" * len(ids))
+    async with _get_db() as db:
+        async with db.execute(f"SELECT annonce_id, COUNT(*) FROM annonces_vues WHERE annonce_id IN ({marques})"
+                              " GROUP BY annonce_id", ids) as cur:
+            comptes = {int(a): int(n) for a, n in await cur.fetchall()}
+        premiers: dict = {}
+        avec_vus = [a for a in ids if comptes.get(a)]
+        if avec_vus and noms > 0:
+            union = " UNION ALL ".join("SELECT * FROM (SELECT annonce_id, membre_id FROM annonces_vues WHERE annonce_id=?"
+                                       " LIMIT ?)" for _ in avec_vus)
+            async with db.execute(union, [x for a in avec_vus for x in (a, int(noms))]) as cur:
+                for a, m in await cur.fetchall():
+                    premiers.setdefault(int(a), []).append(int(m))
+    return {a: (comptes.get(a, 0), premiers.get(a, [])) for a in ids}
+
+
 async def qui_a_vu(aid: int) -> list:
     async with _get_db() as db:
         async with db.execute("SELECT membre_id, quand FROM annonces_vues WHERE annonce_id=? ORDER BY quand",

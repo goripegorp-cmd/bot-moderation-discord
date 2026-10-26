@@ -153,9 +153,17 @@ async def enregistrer(guild_id: int, ticket_id: int, candidat_id: int, candidat_
 
 
 def _unix(texte) -> int | None:
-    """« 2026-10-19 14:05:00 » (UTC, SQLite) → horodatage ; la date bouche-trou de 2020 → None."""
+    """« 2026-10-19 14:05:00 » (UTC, SQLite) → horodatage ; la date bouche-trou de 2020 → None.
+    26/10/2026 (banc de plusieurs années) : appelée pour chaque ticket, sanction et ligne d'audit du site — `strptime`
+    y coûtait un tiers du temps de `donnees`. La forme exacte de SQLite passe par `fromisoformat` (dix fois plus
+    rapide, même résultat) ; toute autre forme garde `strptime`, et donc le même verdict qu'avant."""
+    s = str(texte)[:19]
     try:
-        d = datetime.strptime(str(texte)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        if len(s) == 19 and s.isascii() and s[4] == "-" and s[7] == "-" and s[10] == " " and s[13] == ":" \
+                and s[16] == ":" and all(s[i:i + k].isdigit() for i, k in ((0, 4), (5, 2), (8, 2), (11, 2), (14, 2), (17, 2))):
+            d = datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+        else:
+            d = datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
         return None
     return None if d.year <= 2020 else int(d.timestamp())

@@ -124,7 +124,8 @@ def test_L2_le_journal_se_nettoie_seul(tmp_path, monkeypatch):
         async with get_db() as db:
             await db.executemany("INSERT INTO registre (guild_id, quand, categorie, type, texte) VALUES (1,?,?,?,?)",
                                  [(maintenant, "Membres", "member.join", f"arrivée {k}") for k in range(5)])
-            await db.execute(registre.PURGES[2][1].replace(str(registre.PLAFOND), "3"))
+            plafond_ = next(sql for nom, sql, _j, _f in registre.PURGES if nom == "registre : plafond")
+            await db.execute(plafond_.replace(str(registre.PLAFOND), "3"))
             await db.commit()
         plafond = await textes()
         async with get_db() as db:

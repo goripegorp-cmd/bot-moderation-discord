@@ -461,7 +461,10 @@ class Monde:
                 "groupe": self.GROUPES.get(x["type"], "Détections"), "raison": x["raison"], "duree": x["duree"],
                 "date": x["date"], "auto": x["auto"], "par": "Automatique" if x["auto"] else self.nom(x["mod"])}
 
-    def sanctions_donnees(self) -> dict:
+    def sanctions_donnees_toutes(self) -> list:
+        return self.sanctions_donnees(toutes=True)
+
+    def sanctions_donnees(self, toutes: bool = False):
         par_type, mois, staff, staff30, membres = {}, {}, {}, {}, {}
         auto = manuel = r30 = 0
         apart = {self.fondateur["id"], self.direction["id"]}
@@ -490,13 +493,15 @@ class Monde:
             if len(f["liste"]) < 12:
                 f["liste"].append(self.entree(x))
         self._staff30_sanctions = staff30
+        if toutes:
+            return list(membres.values())
         return {"total": len(self.infractions), "trente_jours": r30, "auto": auto, "manuel": manuel,
                 "libelles": {k: self.LIB.get(k, k) for k in par_type},
                 "types": sorted(({"type": k, "libelle": self.LIB.get(k, k), "n": v, "detection": k not in self.GROUPES}
                                  for k, v in par_type.items()), key=lambda t: -t["n"]),
                 "mois": dict(sorted(mois.items())[-12:]),
                 "staff": sorted(({"nom": self.nom(k), "id": k, **v} for k, v in staff.items()), key=lambda x: -x["total"])[:15],
-                "membres": sorted(membres.values(), key=lambda f: -f["derniere"])[:250],
+                "membres": sorted(membres.values(), key=lambda f: -f["derniere"])[:250], "membres_total": len(membres),
                 "actives": {"mutes": [dict(self.ident(u), jusqu=j) for u, j in self.mutes.items()],
                             "radies": [self.ident(u) for u in self.radies],
                             "restreints": [dict(self.ident(x["uid"]), depuis=x["depuis"], raison=x["raison"], par=self.nom(x["par"]))
@@ -555,7 +560,12 @@ class Monde:
         fermes.sort(key=lambda x: -x["fin"][0])
         self._staff30_tickets = staff30
         jours = next((r["garde_jours"] for r in self.regles if r["cle"] == "tickets_archives"), 30)  # la règle « Nettoyage »
-        return {"archives_jours": jours, "types": sorted(types.values(), key=lambda t: (not t["rellseas"], -t["total"], t["nom"])),
+        par_mois: dict = {}
+        for x in fermes:
+            cle_m = (_mois(x["fin"][0]), *self.PANNEAUX[x["panel"]])
+            par_mois[cle_m] = par_mois.get(cle_m, 0) + 1
+        return {"archives_jours": jours, "fermes_total": len(fermes),
+                "fermes_mois": [{"mois": k, "type": t, "rellseas": r, "n": n} for (k, t, r), n in sorted(par_mois.items(), reverse=True)], "types": sorted(types.values(), key=lambda t: (not t["rellseas"], -t["total"], t["nom"])),
                 "ouverts": sorted(ouverts, key=lambda o: (not o["rellseas"], o["type"], o["ouvert"])),
                 "staff": sorted(({"nom": self.nom(k), **v} for k, v in staff.items()), key=lambda x: -(x["pris"] + x["fermes"]))[:15],
                 "mois": dict(sorted(mois.items())[-12:]),
@@ -966,29 +976,48 @@ class Monde:
         """Comme `tableau.etat_nettoyage` : les règles du serveur (celles de tableau.py et des modules branchés), ce que
         chacune GARDE aujourd'hui (`compteurs` ; une règle sans compte n'y est pas), le dernier passage (`bilan` : règle
         → éléments retirés), qui l'a lancé (`par` : vide pour la boucle du jour) et les 10 derniers bilans."""
-        R = [("journal_messages", "Journal : messages et vocal", "Messages supprimés ou modifiés, allées et venues en vocal : effacés du journal après ce délai.", 30, 30, 30, True),
-             ("journal", "Journal : tout le reste", "Sanctions, tickets, arrivées, sécurité, site… : effacés du journal après ce délai.", 90, 90, 90, True),
-             ("tickets_archives", "Tickets fermés : archives", "Un ticket fermé depuis plus longtemps passe dans les archives de la liste (il reste consultable).", 30, 7, 90, False),
-             ("transcripts", "Conversations des tickets fermés", "Les pages des conversations (transcripts) : effacées après ce délai.", 120, 120, 120, True),
-             ("candidatures_refusees", "Candidatures refusées", "Les fiches des candidatures refusées : effacées après ce délai (les acceptées restent).", 180, 30, 365, True),
-             ("questionnaires", "Questionnaires de recrutement", "Les questions posées, les réponses et les corrections des candidatures fermées : effacées après ce délai.", 365, 30, 365, True),
-             ("evenements_passes", "Événements passés", "Annonces et événements du clan terminés, annulés ou retirés : effacés après ce délai (les brouillons et les annonces publiées restent).", 60, 14, 365, True),
-             ("affiches_corbeille", "Affiches en corbeille", "Une affiche retirée reste restaurable pendant ce délai, puis elle est effacée pour de bon.", 30, 7, 90, True),
-             ("affiches_historique", "Historique des affiches", "Qui a changé quoi sur chaque affiche : effacé après ce délai.", 180, 30, 365, True),
-             ("medias", "Images inutilisées", "Une image envoyée sur le site, utilisée nulle part et pas vue depuis ce délai : effacée.", 30, 7, 180, True),
-             ("ops", "Modifications hors ligne", "La trace des modifications envoyées au retour du réseau (pour ne jamais les appliquer deux fois).", 30, 7, 90, True),
-             ("sessions", "Sessions et liens du site", "Les sessions et les liens expirés : effacés dès leur fin.", 0, 0, 0, True)]
-        self.regles = [{"cle": c, "nom": n, "quoi": q, "garde_jours": g, "defaut": g, "min": mi, "max": ma, "reglable": mi < ma, "auto": a}
-                       for c, n, q, g, mi, ma, a in R]
+        R = [("journal_messages", "Journal : messages et vocal", "Messages supprimés ou modifiés, allées et venues en vocal : effacés du journal après ce délai.", 30, 7, 30, True, 10),
+             ("journal", "Journal : tout le reste", "Sanctions, tickets, arrivées, sécurité, site… : effacés du journal après ce délai.", 90, 30, 90, True, 11),
+             ("questions", "Questions relevées", "Les questions relevées dans les salons : effacées après ce délai.", 30, 7, 30, True, 73),
+             ("tickets_archives", "Tickets fermés : archives", "Un ticket fermé depuis plus longtemps passe dans les archives de la liste (il reste consultable).", 30, 7, 90, False, 20),
+             ("transcripts", "Conversations des tickets fermés", "Les pages des conversations (transcripts) et leurs images : effacées après ce délai.", 120, 14, 120, True, 21),
+             ("tickets_fermes", "Tickets fermés", "Un ticket fermé depuis plus longtemps est effacé pour de bon : sa ligne, son suivi, son audit et sa conversation (celle d'une candidature reste avec sa fiche).", 365, 30, 365, True, 22),
+             ("candidatures_refusees", "Candidatures refusées", "Les fiches des candidatures refusées : effacées après ce délai.", 180, 30, 365, True, 30),
+             ("questionnaires", "Questionnaires de recrutement", "Les questions posées, les réponses et les corrections des candidatures fermées : effacées après ce délai.", 365, 30, 365, True, 31),
+             ("candidatures", "Candidatures acceptées", "Les fiches des candidatures acceptées : effacées après un an (règle RGPD du bot).", 365, 365, 365, True, 32),
+             ("casier_detections", "Casier : détections automatiques", "Insultes, filtre, protection : effacées du casier après ce délai (annulable 30 jours, dans Sanctions). L'amnistie de 3 mois passe aussi, chaque jour.", 365, 90, 365, True, 40),
+             ("casier_sanctions", "Casier : sanctions du staff", "Avertissements, mutes, expulsions : effacés du casier après ce délai (annulable 30 jours). Les bannissements restent deux ans.", 730, 365, 730, True, 41),
+             ("evenements_passes", "Événements passés", "Annonces et événements du clan terminés, annulés ou retirés : effacés après ce délai (les brouillons et les annonces publiées restent).", 60, 14, 365, True, 50),
+             ("actualites", "Actualités de l'équipage", "Les actualités publiées sur le site de l'équipage : effacées après ce délai (jamais les épinglées).", 365, 30, 3650, True, 52),
+             ("equipes_partis", "Équipes : membres partis", "Un membre parti du serveur sort de son équipe ; un chef parti la laisse sans chef. Fait à son départ, rattrapé chaque jour.", 0, 0, 0, True, 54),
+             ("affiches_corbeille", "Affiches en corbeille", "Une affiche retirée reste restaurable pendant ce délai, puis elle est effacée pour de bon.", 30, 7, 90, True, 60),
+             ("affiches_historique", "Historique des affiches", "Qui a changé quoi sur chaque affiche : effacé après ce délai.", 180, 30, 365, True, 61),
+             ("portraits", "Portraits Roblox inutilisés", "Un portrait qu'aucune affiche ne montre (recherche sans suite, affiche effacée) : effacé après ce délai.", 90, 14, 365, True, 62),
+             ("empreintes", "Comptes partis : empreintes", "Ce que la détection des doubles comptes garde de ceux qui ont quitté le serveur : effacé après ce délai (elle ne compare qu'aux membres présents).", 90, 30, 365, True, 70),
+             ("invitations", "Invitations des membres partis", "Qui a invité un membre parti depuis ce délai : effacé (il ne compte plus dans les invitations).", 180, 30, 730, True, 71),
+             ("audit_staff", "Audit des actions du staff", "Qui a fait quoi, sur qui (sanctions, isolements, notes) : effacé après ce délai.", 365, 90, 730, True, 72),
+             ("sondages", "Sondages", "Les sondages des membres et leurs résultats : effacés après ce délai.", 90, 30, 90, True, 75),
+             ("idees", "Idées décidées ou retirées", "Une idée décidée (acceptée, refusée, réalisée) ou retirée du salon, et ses votes : effacée après ce délai.", 365, 60, 730, True, 76),
+             ("entraide", "Entraide et trade : demandes closes", "Une demande close est effacée de l'historique après ce délai. Les échanges certifiés restent : ils font la réputation de chacun.", 365, 30, 730, True, 77),
+             ("medias", "Images inutilisées", "Une image envoyée sur le site, utilisée nulle part et pas vue depuis ce délai : effacée.", 30, 7, 180, True, 80),
+             ("ops", "Modifications hors ligne", "La trace des modifications envoyées au retour du réseau (pour ne jamais les appliquer deux fois).", 30, 7, 90, True, 90),
+             ("sessions", "Sessions et liens du site", "Les sessions et les liens expirés : effacés dès leur fin.", 0, 0, 0, True, 95),
+             ("orphelins", "Fichiers orphelins", "Images, portraits et pièces de conversations que plus rien ne cite, restes d'écriture, réglages de vitrine d'une affiche effacée : effacés après un jour.", 1, 1, 1, True, 96)]
+        self.regles = [{"cle": c, "nom": n, "quoi": q, "garde_jours": g, "defaut": g, "min": mi, "max": ma, "reglable": mi < ma, "auto": a,
+                        "ordre": o} for c, n, q, g, mi, ma, a, o in R]
+        for r in self.regles:   # une durée dite autrement qu'en jours (comme le serveur)
+            if r["cle"] == "equipes_partis":
+                r["duree"] = "tant qu'il est sur le serveur"
         self.nettoyage_dernier = int(MAINTENANT - 9 * 3600)
         self.nettoyage_par = ""                      # le dernier passage : la boucle du jour
         self.nettoyage_lance = 0.0                   # « Lancer maintenant » : une fois toutes les 5 minutes au plus
         #  Ce que chaque règle garde aujourd'hui (« Événements passés » n'a pas de compte, comme sur le serveur).
         self.nettoyage_compteurs = {"journal_messages": 214, "journal": 1630, "tickets_archives": 58, "transcripts": 212,
                                     "candidatures_refusees": 4, "questionnaires": 31, "affiches_corbeille": 2,
-                                    "affiches_historique": 96, "medias": 18, "ops": 31, "sessions": 3}
+                                    "affiches_historique": 96, "medias": 18, "ops": 31, "sessions": 3, "equipes_partis": 14}
         #  Ce qu'un passage retirerait (ce qui a dépassé sa durée).
-        self.nettoyage_excedents = {"journal_messages": 12, "journal": 4, "candidatures_refusees": 1, "medias": 2, "ops": 6, "sessions": 1}
+        self.nettoyage_excedents = {"journal_messages": 12, "journal": 4, "candidatures_refusees": 1, "medias": 2, "ops": 6, "sessions": 1,
+                                    "tickets_fermes": 9, "empreintes": 41, "portraits": 3, "equipes_partis": 1}
         self.nettoyage_bilan = {r["cle"]: 0 for r in self.regles if r["auto"]}
         self.nettoyage_bilan.update(journal_messages=380, medias=12, ops=20)
         self.nettoyage_bilans = [{"quand": int(MAINTENANT - 9 * 3600), "total": 412, "par": "",
@@ -999,8 +1028,13 @@ class Monde:
     def etat_nettoyage(self) -> dict:
         qui = {x: self.ident(x) for x in [self.nettoyage_par, *(b["par"] for b in self.nettoyage_bilans)] if x}
         return {"regles": [dict(r) for r in self.regles], "compteurs": dict(self.nettoyage_compteurs),
+                "partiront": {r["cle"]: self.nettoyage_excedents.get(r["cle"], 0) for r in self.regles if r["auto"]},
                 "dernier": self.nettoyage_dernier, "bilan": dict(self.nettoyage_bilan), "par": self.nettoyage_par,
-                "bilans": [dict(b) for b in self.nettoyage_bilans[:10]], "personnes": qui}
+                "bilans": [dict(b) for b in self.nettoyage_bilans[:10]], "personnes": qui,
+                "stockage": {"base": 48 * 1048576, "libres": 3 * 1048576, "incremental": True, "compacte_le": int(MAINTENANT - 7 * 3600),
+                             "dossiers": {"transcripts": {"fichiers": 212, "octets": 31 * 1048576}, "images": {"fichiers": 18, "octets": 4 * 1048576},
+                                          "portraits": {"fichiers": 40, "octets": 1048576}, "copies": {"fichiers": 7, "octets": 330 * 1048576}},
+                             "volume": {"total": 5 * 1073741824, "libre": 4 * 1073741824}}}
 
     # ── recrutement en deux étapes : la banque, les dossiers ──
     THEMES = [("studio", "Studio RELL Games"), ("jeu", "Le jeu RELL Seas"), ("races", "Races"), ("factions", "Factions"),
@@ -2485,23 +2519,103 @@ def r_nettoyage_regle(m, q, c):
 
 def r_nettoyage_lancer(m, q, c):
     """Comme `tableau._route_nettoyage_lancer` : chaque règle qui efface retire ce qui a dépassé sa durée ; le bilan
-    est gardé ; une fois toutes les 5 minutes au plus (429)."""
-    if time.time() - m.nettoyage_lance < 300:
+    est gardé ; une fois toutes les 5 minutes au plus (429). Avec `{"cle"}` : cette règle seule."""
+    cle = c.get("cle")
+    if cle is None and time.time() - m.nettoyage_lance < 300:
         return 429, {"erreur": "Déjà lancé il y a moins de 5 minutes."}
-    m.nettoyage_lance = time.time()
+    if cle is not None and not any(r["cle"] == cle and r["auto"] for r in m.regles):
+        return 404, {"erreur": "Cette règle n'efface rien.", "champ": "cle"}
+    if cle is None:
+        m.nettoyage_lance = time.time()
     noms = {r["cle"]: r["nom"] for r in m.regles}
-    bilan = {r["cle"]: 0 for r in m.regles if r["auto"]}
-    for k, n in m.nettoyage_excedents.items():
+    bilan = {r["cle"]: 0 for r in m.regles if r["auto"] and (cle is None or r["cle"] == cle)}
+    for k, n in list(m.nettoyage_excedents.items()):
+        if k not in bilan:
+            continue
         bilan[k] = n
         m.nettoyage_compteurs[k] = max(0, m.nettoyage_compteurs.get(k, 0) - n)
-    m.nettoyage_excedents = {}
+        m.nettoyage_excedents.pop(k)
     retires = {k: n for k, n in bilan.items() if n > 0}
     m.nettoyage_dernier, m.nettoyage_par, m.nettoyage_bilan = int(time.time()), m.moi, bilan
     m.nettoyage_bilans.insert(0, {"quand": int(time.time()), "total": sum(retires.values()), "par": m.moi,
                                   "detail": " · ".join(f"{noms[k]} {n}" for k, n in retires.items())})
     rep = m.etat_nettoyage()
-    rep.update(ok=True)
+    rep.update(ok=True, retires=bilan)
     return 200, rep
+
+
+def r_nettoyage_apercu(m, q, c):
+    """Comme `tableau._route_nettoyage_apercu` : ce qu'une durée retirerait (plus court : davantage)."""
+    rg = next((x for x in m.regles if x["cle"] == q.get("cle")), None)
+    if rg is None:
+        return 404, {"erreur": "Règle inconnue.", "champ": "cle"}
+    j = str(q.get("jours", ""))
+    if not j.isdigit() or not rg["min"] <= int(j) <= rg["max"]:
+        return 400, {"erreur": f"Entre {rg['min']} et {rg['max']} jours.", "champ": "jours"}
+    base = m.nettoyage_excedents.get(rg["cle"], 0)
+    garde = max(1, rg["garde_jours"])
+    return 200, {"cle": rg["cle"], "jours": int(j), "partiront": None if not rg["auto"] else base + max(0, (garde - int(j)) * 3)}
+
+
+def _norm(x) -> str:
+    import unicodedata
+    return "".join(ch for ch in unicodedata.normalize("NFD", str(x or "")) if unicodedata.category(ch) != "Mn").casefold()
+
+
+def r_journal(m, q, c):
+    """Comme `longevite._route_journal` : le journal filtré (période, catégorie, gravité, recherche), par pages."""
+    depuis_, cat, grav, rech = int(q.get("depuis") or 0), q.get("cat", ""), int(q.get("gravite") or 0), _norm(q.get("q", ""))
+    n = min(500, int(q.get("n") or 200))
+    l = [e for e in m.journal if e["quand"] >= depuis_ and (not cat or e["cat"] == cat) and (e["gravite"] or 0) >= grav
+         and (not rech or rech in _norm(" ".join([e["texte"], e["detail"], m.nom(e["membre"]) if e["membre"] else ""])))]
+    l.sort(key=lambda e: (-e["quand"], -e["id"]))
+    avant = q.get("avant", "")
+    if avant:
+        aq, ai = (int(x) for x in avant.split(":"))
+        l = [e for e in l if e["quand"] < aq or (e["quand"] == aq and e["id"] < ai)]
+    page = l[:n]
+    rep = {"evenements": page, "suite": f"{page[-1]['quand']}:{page[-1]['id']}" if len(l) > n else None, "total": len(l),
+           "personnes": {x: m.ident(x) for e in page for x in (e["membre"], e["auteur"]) if x}}
+    if q.get("resume") == "1":
+        rep.update(graves=sum(1 for e in l if (e["gravite"] or 0) >= 2), personnes_n=len({e["membre"] for e in l if e["membre"]}))
+    if q.get("comptes") == "1":
+        sans_cat = [e for e in m.journal if e["quand"] >= depuis_ and (e["gravite"] or 0) >= grav
+                    and (not rech or rech in _norm(" ".join([e["texte"], e["detail"], m.nom(e["membre"]) if e["membre"] else ""])))]
+        par_cat, par_jour = {}, {}
+        for e in sans_cat:
+            par_cat[e["cat"]] = par_cat.get(e["cat"], 0) + 1
+        for e in l:
+            par_jour[_jour(e["quand"])] = par_jour.get(_jour(e["quand"]), 0) + 1
+        rep.update(par_categorie=par_cat, par_jour=par_jour)
+    return 200, rep
+
+
+def r_tickets_fermes(m, q, c):
+    """Comme `longevite._route_tickets_fermes` : un mois des archives, les fermés depuis une date, ou une recherche."""
+    tk = m.tickets_donnees()
+    mois, depuis_, rech = q.get("mois", ""), int(q.get("depuis") or 0), _norm(q.get("q", ""))
+    if not (mois or depuis_ or rech):
+        return 400, {"erreur": "Un mois, une date ou une recherche.", "champ": "mois"}
+    tous = sorted((x for x in m.tickets if x["statut"] != "open"), key=lambda x: -x["fin"][0])
+    l = [x for x in tous if (not mois or _mois(x["fin"][0]) == mois) and x["fin"][0] >= depuis_
+         and (not rech or rech in _norm(" ".join([str(x["ticket"]), x["motif"], m.nom(x["uid"])])))]
+    fermes = [{"id": x["uid"], "ticket": x["ticket"], "type": m.PANNEAUX[x["panel"]][0], "rellseas": m.PANNEAUX[x["panel"]][1],
+               "ouvert": x["ouvert"], "ferme": x["fin"][0], "ferme_par": m.nom(x["fin"][1]), "motif": x["motif"],
+               "transcript": x["transcript"]} for x in l]
+    del tk
+    return 200, {"fermes": fermes, "total": len(fermes), "personnes": {x["id"]: m.ident(x["id"]) for x in fermes}}
+
+
+def r_casier_membres(m, q, c):
+    """Comme `longevite._route_casier_membres` : la suite du casier (250 cases par page), ou une recherche."""
+    toutes = sorted(m.sanctions_donnees_toutes(), key=lambda f: -f["derniere"])
+    rech = _norm(q.get("q", ""))
+    if rech:
+        toutes = [f for f in toutes if rech in _norm(" ".join([f["id"], m.nom(f["id"]), *(x["raison"] for x in f["liste"])]))]
+    apres, n = int(q.get("apres") or 0), min(500, int(q.get("n") or 250))
+    page = toutes[apres:apres + n]
+    return 200, {"membres": page, "total": len(toutes), "suite": apres + n if apres + n < len(toutes) else None,
+                 "personnes": {f["id"]: m.ident(f["id"]) for f in page}}
 
 
 def r_media(m, q, c):
@@ -2885,6 +2999,8 @@ ROUTES = {
     "clan/supprimer_brouillon": ("POST", r_supprimer_brouillon, True), "clan/modifier": ("POST", r_modifier, False),
     "nettoyage": ("GET", r_nettoyage, False), "nettoyage/regle": ("POST", r_nettoyage_regle, False),
     "nettoyage/lancer": ("POST", r_nettoyage_lancer, False), "media": ("POST", r_media, False),
+    "nettoyage/apercu": ("GET", r_nettoyage_apercu, False), "journal": ("GET", r_journal, False),
+    "tickets/fermes": ("GET", r_tickets_fermes, False), "casier/membres": ("GET", r_casier_membres, False),
     "recrutement/banque": ("GET", r_banque, False), "recrutement/question": ("POST", r_question, True),
     "recrutement/question/retirer": ("POST", r_question_retirer, True), "recrutement/liens": ("POST", r_liens, True),
     "recrutement/reglages": ("POST", r_reglages, True), "recrutement/modele": ("POST", r_modele, True),

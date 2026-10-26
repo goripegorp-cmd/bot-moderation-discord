@@ -206,7 +206,10 @@ FORMAT_ROUTE = re.compile(r"[a-z0-9_]{1,40}(?:/[a-z0-9_]{1,40}){0,4}")
 CORPS_DEFAUT = 64 * 1024
 CORPS_PLAFOND = 12 * 1024 * 1024
 LIMITE_ECRITURES = 120     # écritures du site (adresses + synchronisation) par minute et par personne
-LIMITE_MEDIAS = 1500       # images servies par minute et par session (une galerie entière, pas plus)
+LIMITE_MEDIAS = 3000       # images servies par minute et par session (deux galeries entières, pas plus)
+#  27/10/2026 (banc de plusieurs années) : à 5 ans, le mur de l'équipage montre ~600 affiches (celles des anciens du clan
+#  y restent tant que la direction ne les retire pas) ; les images ne sont jamais gardées par le navigateur
+#  (`no-store`) — trois passages en une minute dépassaient 1 500 et des portraits s'affichaient cassés (429).
 PARAMETRES_MAX = 20
 #  La synchronisation hors ligne.
 SYNC_OPS_MAX = 50
@@ -275,6 +278,7 @@ DETECTIONS = {"insulte": "Insulte", "menace": "Menace", "discrimination": "Discr
 GROUPES = {"warn": "Avertissements", "mute": "Mutes", "kick": "Expulsions et bans",
            "ban": "Expulsions et bans"}
 MEMBRES_CASIER = 250   # cartes « par membre » envoyées à la page (les plus récents)
+VUS_NOMMES = 40        # « Vu » nommés par annonce, comme avant (le compte, lui, est entier)
 LISTE_PAR_MEMBRE = 12  # entrées par carte ; la fiche complète vient de /membre
 EXPORT_MAX = 20000
 PURGES = [("sessions du site", "DELETE FROM tableau_sessions WHERE expire_le < ?", 1, "unix"),
@@ -304,7 +308,8 @@ def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_memb
     _alerte_securite = alerte_securite
     _log = log or print
     for d in (_sessions, _requetes, _requetes_medias, _essais, _graves, _blocages, _cadence, _cache, _ops_recentes,
-              _nettoyages, _medias_vus, _alertes_tete, _ouvertures, _tentatives, _direct_salles, _direct_ecrits):
+              _nettoyages, _medias_vus, _alertes_tete, _ouvertures, _tentatives, _direct_salles, _direct_ecrits,
+              _empreintes_donnees):
         d.clear()
 
 
@@ -598,7 +603,30 @@ async def _verifier(request, maintenant: float | None = None, medias: bool = Fal
     if len(recents) >= limite:
         raise _Refus(429, "Trop de requêtes.")
     seau[emp] = recents + [t]
+    _elaguer(t)
     return {"g": gid, "u": uid, "e": expire, "p": portee, "emp": emp}, g
+
+
+MEMOIRE_MAX = 2000   # entrées d'un compteur en mémoire (sessions, cadences) avant d'en retirer les périmées
+
+
+def _elaguer(t: float) -> None:
+    """26/10/2026 (banc de plusieurs années) : les compteurs en mémoire gardaient chaque session et chaque cadence
+    jusqu'au redémarrage — des années de sessions si le bot ne redémarre pas. Au-delà de MEMOIRE_MAX entrées, les
+    périmées partent (une session expirée, une cadence de plus d'une minute)."""
+    for seau in (_requetes, _requetes_medias):
+        if len(seau) > MEMOIRE_MAX:
+            for k in [k for k, v in seau.items() if not v or t - v[-1] >= 60]:
+                seau.pop(k, None)
+    if len(_sessions) > MEMOIRE_MAX:
+        for k in [k for k, s in _sessions.items() if s[2] < t]:
+            _sessions.pop(k, None)
+    if len(_cadence) > MEMOIRE_MAX:
+        for k in [k for k, v in _cadence.items() if not v or t - v[-1] >= 60]:
+            _cadence.pop(k, None)
+    if len(_graves) > MEMOIRE_MAX:
+        for k in [k for k, v in _graves.items() if not v or t - v[-1] >= 600]:
+            _graves.pop(k, None)
 
 
 async def _candidat_autorise(g, m, emp: str) -> str:
@@ -771,19 +799,31 @@ def _mediane(valeurs) -> int:
     return int(v[len(v) // 2]) if v else 0
 
 
+def _mois_paris(t) -> str:
+    """« 2026-10 » : le mois (heure de Paris) d'un horodatage — comme `recrutements.cle_mois`, sans ses détours (26/10/2026,
+    banc de plusieurs années : appelé pour chaque ticket et chaque sanction)."""
+    d = datetime.fromtimestamp(int(t), PARIS)
+    return f"{d.year:04d}-{d.month:02d}"
+
+
 async def _lignes_tickets(g, filtre: str = "", args: tuple = ()) -> list[dict]:
+    #  26/10/2026 (banc de plusieurs années) : avec un filtre (la fiche d'un membre), le suivi, l'audit et les transcripts
+    #  ne sont plus lus pour TOUS les tickets du serveur — seulement pour les siens.
+    seuls = (" AND ticket_id IN (SELECT id FROM tickets WHERE guild_id=?" + filtre + ")") if filtre else ""
+    seuls_salons = (" AND channel_id IN (SELECT channel_id FROM tickets WHERE guild_id=?" + filtre + ")") if filtre else ""
+    extra = (g.id, *args) if filtre else ()
     async with _get_db() as db:
         tickets = await recrutements._lignes(
             db, "SELECT id, user_id, panel_id, claimed_by, status, created_at, channel_id FROM tickets"
                 " WHERE guild_id=?" + filtre + " ORDER BY id", (g.id, *args))
         evts = await recrutements._lignes(
             db, "SELECT ticket_id, kind, actor_id, created_unix FROM ticket_log_events"
-                " WHERE guild_id=? AND kind IN ('claim', 'close') ORDER BY id", (g.id,))
+                " WHERE guild_id=? AND kind IN ('claim', 'close')" + seuls + " ORDER BY id", (g.id, *extra))
         audit = await recrutements._lignes(
             db, "SELECT channel_id, action, actor_id, at, detail FROM ticket_audit"
-                " WHERE guild_id=? AND action IN ('claim', 'close') ORDER BY id", (g.id,))
+                " WHERE guild_id=? AND action IN ('claim', 'close')" + seuls_salons + " ORDER BY id", (g.id, *extra))
         transcripts = dict(await recrutements._lignes(
-            db, "SELECT ticket_id, url FROM ticket_transcripts WHERE guild_id=? AND url != ''", (g.id,)))
+            db, "SELECT ticket_id, url FROM ticket_transcripts WHERE guild_id=? AND url != ''" + seuls, (g.id, *extra)))
     prises, fins = {}, {}
     for tid, kind, actor, t in evts:
         (prises if kind == "claim" else fins).setdefault(tid, (int(t or 0), int(actor or 0)))
@@ -842,13 +882,22 @@ async def _tickets(g, c, apart: set, qui) -> dict:
         if ouvert and prise and prise[0]:
             t["_prise"].append(prise[0] - ouvert)
         if ouvert and ouvert >= debut_mois:
-            cle_m = recrutements.cle_mois(datetime.fromtimestamp(ouvert, timezone.utc))
+            cle_m = _mois_paris(ouvert)
             groupe = "Rell Seas" if est_rell else "Tickets normaux"
             mois.setdefault(cle_m, {"Rell Seas": 0, "Tickets normaux": 0})[groupe] += 1
     for t in types.values():
         t["prise_mediane"] = _mediane(t.pop("_prise"))
         t["fermeture_mediane"] = _mediane(t.pop("_fin"))
     fermes.sort(key=lambda f: f[0], reverse=True)
+    #  26/10/2026 (banc de plusieurs années) : la page ne reçoit que les FERMES_MAX plus récents (à 5 ans, 26 jours de
+    #  tickets) ; chaque mois de fermeture dit combien il en compte, par type — un mois incomplet se charge en entier
+    #  quand on l'ouvre (`api/tickets/fermes`, longevite.py).
+    par_mois: dict = {}
+    for ferme, _x, nom, est_rell in fermes:
+        if ferme:
+            cle_mt = (_mois_paris(ferme), nom, est_rell)
+            par_mois[cle_mt] = par_mois.get(cle_mt, 0) + 1
+    par_mois = [{"mois": m, "type": nom, "rellseas": r, "n": n} for (m, nom, r), n in sorted(par_mois.items(), reverse=True)]
     return {
         "types": sorted(types.values(), key=lambda t: (not t["rellseas"], -t["total"], t["nom"])),
         "ouverts": sorted(ouverts, key=lambda o: (not o["rellseas"], o["type"], o["ouvert"] or 0)),
@@ -856,12 +905,20 @@ async def _tickets(g, c, apart: set, qui) -> dict:
                         key=lambda x: -(x["pris"] + x["fermes"]))[:15],
         "staff30": staff30,
         "mois": dict(sorted(mois.items())[-12:]),
-        "fermes": [{"id": qui(x["uid"]), "ticket": x["ticket"], "type": nom, "rellseas": est_rell,
-                    "ouvert": x["ouvert"], "ferme": ferme or None,
-                    "ferme_par": _nom(g, x["fin"][1] if x["fin"] else 0), "motif": x["motif"],
-                    "transcript": x["transcript"]}
-                   for ferme, x, nom, est_rell in fermes[:300]],
+        "fermes": [ticket_ferme(g, qui, ferme, x, nom, est_rell) for ferme, x, nom, est_rell in fermes[:FERMES_MAX]],
+        "fermes_total": len(fermes), "fermes_mois": par_mois,
     }
+
+
+FERMES_MAX = 300   # tickets fermés envoyés avec les données (les plus récents) ; le reste, mois par mois
+
+
+def ticket_ferme(g, qui, ferme, x: dict, nom: str, est_rell: bool) -> dict:
+    """Un ticket fermé tel que la page le lit (données et `api/tickets/fermes`)."""
+    return {"id": qui(x["uid"]), "ticket": x["ticket"], "type": nom, "rellseas": est_rell,
+            "ouvert": x["ouvert"], "ferme": ferme or None,
+            "ferme_par": _nom(g, x["fin"][1] if x["fin"] else 0), "motif": x["motif"],
+            "transcript": x["transcript"]}
 
 
 def _libelle(typ: str) -> str:
@@ -876,17 +933,35 @@ def _entree_casier(g, iid, typ, raison, duree, quand, est_auto, mod) -> dict:
 
 async def _sanctions(g, apart: set, qui) -> dict:
     """Le casier, en chiffres et PAR MEMBRE : « quelqu'un qui a fait plusieurs avertissements, une
-    case pour lui avec tous ses avertissements », et ce qui est en cours sur le serveur."""
+    case pour lui avec tous ses avertissements », et ce qui est en cours sur le serveur.
+
+    26/10/2026 (banc de plusieurs années) : seules les CASIER_LUES entrées les plus récentes sont lues pour les cases ;
+    au-delà, les chiffres (total, types, mois, staff) viennent d'un comptage groupé sur TOUT le casier — ils étaient
+    faux passé 5 000 entrées. Les personnes des cases non envoyées ne vont plus dans `personnes` (à 5 ans : 5 000
+    fiches envoyées pour 250 cases). `membres_total` : combien de personnes au casier (la suite : `api/casier/membres`)."""
     robot = getattr(getattr(_bot, "user", None), "id", 0) or 0
+    marques = ",".join("?" * len(apart)) or "0"
     async with _get_db() as db:
         rows = await recrutements._lignes(
             db, "SELECT id, user_id, mod_id, type, reason, duration, created_at FROM infractions"
-                " WHERE guild_id=? ORDER BY id DESC LIMIT 5000", (g.id,))
+                " WHERE guild_id=? ORDER BY id DESC LIMIT ?", (g.id, CASIER_LUES))
         restreints = await recrutements._lignes(
             db, "SELECT user_id, restricted_at, duration, reason, restricted_by FROM restricted_members"
                 " WHERE guild_id=?", (g.id,))
+        total_membres = await recrutements._lignes(
+            db, f"SELECT COUNT(DISTINCT user_id) FROM infractions WHERE guild_id=? AND user_id>0 AND user_id NOT IN ({marques})",
+            (g.id, *sorted(apart)))
+        groupes = None
+        if len(rows) >= CASIER_LUES:
+            #  Le mois de Paris : celui du jour UTC, sauf en fin de mois (du 28 au 31), où les dernières heures UTC sont
+            #  déjà le mois suivant à Paris — ces jours-là sont comptés heure par heure.
+            groupes = await recrutements._lignes(
+                db, "SELECT CASE WHEN type IS NULL OR type='' THEN 'autre' ELSE lower(type) END, COALESCE(mod_id, 0),"
+                    " CASE WHEN substr(created_at, 9, 2) >= '28' THEN substr(created_at, 1, 13) ELSE substr(created_at, 1, 7)"
+                    " END, created_at >= ?, created_at >= ?, COUNT(*) FROM infractions WHERE guild_id=? GROUP BY 1, 2, 3, 4, 5",
+                (_sqlite_date(time.time() - 30 * 86400), _sqlite_date(time.time() - 365 * 86400), g.id))
     maintenant = time.time()
-    par_type, mois, staff, staff30, membres = {}, {}, {}, {}, {}
+    par_type, mois, staff, staff30 = {}, {}, {}, {}
     auto = manuel = recents_30 = 0
     for iid, uid, mod, typ, raison, duree, cree in rows:
         typ = str(typ or "autre").lower()
@@ -897,9 +972,8 @@ async def _sanctions(g, apart: set, qui) -> dict:
         age = maintenant - quand if quand else 10 ** 9
         recents_30 += age <= 30 * 86400
         if age <= 365 * 86400:
-            cle_m = recrutements.cle_mois(datetime.fromtimestamp(quand, timezone.utc))
-            mois.setdefault(cle_m, {"Avertissements": 0, "Mutes": 0, "Expulsions et bans": 0,
-                                    "Détections": 0})[GROUPES.get(typ, "Détections")] += 1
+            mois.setdefault(_mois_paris(quand), {"Avertissements": 0, "Mutes": 0, "Expulsions et bans": 0,
+                                                 "Détections": 0})[GROUPES.get(typ, "Détections")] += 1
         if not est_auto and int(mod) not in apart:
             st = staff.setdefault(int(mod), {"total": 0, "types": {}, "dernieres": []})
             st["total"] += 1
@@ -909,21 +983,36 @@ async def _sanctions(g, apart: set, qui) -> dict:
             if len(st["dernieres"]) < 15:
                 st["dernieres"].append(dict(_entree_casier(g, iid, typ, raison, duree, quand, est_auto, mod),
                                             id=qui(uid)))
-        if not uid or int(uid) in apart:
-            continue
-        f = membres.setdefault(int(uid), {"id": qui(uid), "total": 0, "n30": 0, "n90": 0, "types": {},
-                                          "derniere": 0, "liste": []})
-        f["total"] += 1
-        f["n30"] += age <= 30 * 86400
-        f["n90"] += age <= 90 * 86400
-        f["types"][typ] = f["types"].get(typ, 0) + 1
-        f["derniere"] = max(f["derniere"], quand or 0)
-        if len(f["liste"]) < LISTE_PAR_MEMBRE:
-            f["liste"].append(_entree_casier(g, iid, typ, raison, duree, quand, est_auto, mod))
+    total = len(rows)
+    if groupes is not None:   # le casier dépasse ce qui est lu : les chiffres viennent du comptage groupé
+        par_type, mois, total, auto, manuel, recents_30, staff30 = {}, {}, 0, 0, 0, 0, {}
+        for st in staff.values():
+            st["total"], st["types"] = 0, {}
+        for typ, mod, m, recent, dans_l_an, n in groupes:
+            est_auto = not mod or int(mod) == robot
+            if m and len(m) == 13:   # « AAAA-MM-JJ HH » : une heure de fin de mois, rangée dans son mois de Paris
+                heure = recrutements._unix(m + ":00:00")
+                m = _mois_paris(heure) if heure else None
+            total += n
+            par_type[typ] = par_type.get(typ, 0) + n
+            auto, manuel = auto + n * est_auto, manuel + n * (not est_auto)
+            recents_30 += n if recent else 0
+            if m and dans_l_an:   # comme la lecture complète : les entrées de moins d'un an
+                mois.setdefault(m, {"Avertissements": 0, "Mutes": 0, "Expulsions et bans": 0,
+                                    "Détections": 0})[GROUPES.get(typ, "Détections")] += n
+            if not est_auto and int(mod) not in apart:
+                st = staff.setdefault(int(mod), {"total": 0, "types": {}, "dernieres": []})
+                st["total"] += n
+                st["types"][typ] = st["types"].get(typ, 0) + n
+                if recent:
+                    staff30[int(mod)] = staff30.get(int(mod), 0) + n
+    cartes = sorted(cartes_casier(g, rows, apart, robot, maintenant).values(), key=lambda f: -f["derniere"])[:MEMBRES_CASIER]
+    for f in cartes:
+        qui(int(f["id"]))
     radie = next((r for r in getattr(g, "roles", []) if r.name == _radie), None)
     mutes = [m for m in getattr(g, "members", []) if getattr(m, "is_timed_out", lambda: False)()]
     return {
-        "total": len(rows), "trente_jours": recents_30, "auto": auto, "manuel": manuel,
+        "total": total, "trente_jours": recents_30, "auto": auto, "manuel": manuel,
         "libelles": {k: _libelle(k) for k in par_type},
         "types": sorted(({"type": k, "libelle": _libelle(k), "n": v, "detection": k not in SANCTIONS}
                          for k, v in par_type.items()), key=lambda t: -t["n"]),
@@ -931,7 +1020,8 @@ async def _sanctions(g, apart: set, qui) -> dict:
         "staff": sorted(({"nom": _nom(g, k), "id": qui(k), **v} for k, v in staff.items()),
                         key=lambda x: -x["total"])[:15],
         "staff30": staff30,
-        "membres": sorted(membres.values(), key=lambda f: -f["derniere"])[:MEMBRES_CASIER],
+        "membres": cartes,
+        "membres_total": int(total_membres[0][0] or 0) if total_membres else len(cartes),
         "actives": {
             "mutes": [dict(_ident(g, m.id), jusqu=int(m.timed_out_until.timestamp()) if m.timed_out_until else None)
                       for m in mutes if m.id not in apart],
@@ -940,6 +1030,32 @@ async def _sanctions(g, apart: set, qui) -> dict:
                                 par=_nom(g, par)) for uid, depuis, _d, raison, par in restreints],
         },
     }
+
+
+CASIER_LUES = 5000   # entrées du casier lues pour les cases (les plus récentes) ; les chiffres, eux, comptent tout
+
+
+def cartes_casier(g, rows, apart: set, robot: int, maintenant: float) -> dict:
+    """{membre : sa case} — combien, sur 30 et 90 jours, quels types, la dernière, ses LISTE_PAR_MEMBRE dernières
+    entrées — d'après des lignes du casier, de la plus récente à la plus ancienne (données et `api/casier/membres`).
+    L'identifiant de la case reste à nommer (`_Personnes`) par l'appelant, pour les seules cases envoyées."""
+    membres: dict = {}
+    for iid, uid, mod, typ, raison, duree, cree in rows:
+        if not uid or int(uid) in apart:
+            continue
+        typ = str(typ or "autre").lower()
+        quand = recrutements._unix(cree)
+        age = maintenant - quand if quand else 10 ** 9
+        f = membres.setdefault(int(uid), {"id": str(int(uid)), "total": 0, "n30": 0, "n90": 0, "types": {},
+                                          "derniere": 0, "liste": []})
+        f["total"] += 1
+        f["n30"] += age <= 30 * 86400
+        f["n90"] += age <= 90 * 86400
+        f["types"][typ] = f["types"].get(typ, 0) + 1
+        f["derniere"] = max(f["derniere"], quand or 0)
+        if len(f["liste"]) < LISTE_PAR_MEMBRE:
+            f["liste"].append(_entree_casier(g, iid, typ, raison, duree, quand, not mod or int(mod) == robot, mod))
+    return membres
 
 
 def _evenement(g, r: dict, qui) -> dict:
@@ -1039,12 +1155,16 @@ async def _entraide(g, qui) -> dict:
 async def _annonces(g, qui) -> dict:
     """Les annonces publiées depuis 📋logs et qui a cliqué « ✅ Vu »."""
     liste = []
-    for a in await annonces.recentes(g.id, 60):
+    recentes = await annonces.recentes(g.id, 60)
+    #  26/10/2026 (banc de plusieurs années) : le compte et 40 noms, d'une lecture groupée — avant, tous les « Vu » de
+    #  soixante annonces étaient lus (120 000 lignes à 5 ans) pour n'en nommer que 40 chacune.
+    vues = await annonces.resume_vues([a["id"] for a in recentes], VUS_NOMMES)
+    for a in recentes:
         ch = g.get_channel(int(a["salon_id"])) or g.get_thread(int(a["salon_id"]))
-        vus = await annonces.qui_a_vu(a["id"])
+        n, premiers = vues.get(a["id"], (0, []))
         liste.append({"id": a["id"], "titre": a["titre"], "texte": a["texte"][:1500],
                       "salon": f"#{ch.name}" if ch is not None else "#salon supprimé", "auteur": qui(a["auteur_id"]),
-                      "cree": a["cree"], "vues": len(vus), "vus": [qui(m) for m, _q in vus[:40]],
+                      "cree": a["cree"], "vues": n, "vus": [qui(m) for m in premiers],
                       "mention": "@everyone" if a["mention"] == "@everyone" else ("le clan" if a["mention"] else ""),
                       "lien": f"https://discord.com/channels/{g.id}/{a['salon_id']}/{a['message_id']}"})
     return {"liste": liste, "stats": {"total": len(liste), "vues": sum(x["vues"] for x in liste)}}
@@ -1502,12 +1622,28 @@ async def api(request):
         _log(f"[TABLEAU][E1:DETAIL] {type(ex).__name__} {ex}")
         return _json({"erreur": "données indisponibles"}, 500)
     corps = dict(d, expire=j["e"], droits=droits)
-    empreinte = dict(corps)
-    empreinte.pop("genere", None)
-    etag = '"' + hashlib.sha256(json.dumps(empreinte, sort_keys=True, default=str).encode()).hexdigest()[:20] + '"'
+    #  26/10/2026 (banc de plusieurs années) : l'empreinte des données (2 Mo de JSON à 5 ans) est calculée une fois par
+    #  version des données, plus à chaque visite ; la session (fin, droits) s'y ajoute.
+    etag = '"' + hashlib.sha256((_empreinte_donnees((g.id, j["p"]), d) + json.dumps(
+        {"expire": j["e"], "droits": droits}, sort_keys=True)).encode()).hexdigest()[:20] + '"'
     if request.headers.get("If-None-Match") == etag:
         return web.Response(status=304, headers=dict(ENTETES, ETag=etag))
     return _json(corps, etag=etag)
+
+
+_empreintes_donnees: dict = {}   # (serveur, portée) → (les données, leur empreinte)
+
+
+def _empreinte_donnees(cle, d: dict) -> str:
+    """L'empreinte des données (sans l'heure de génération), gardée tant que `donnees` rend le même objet."""
+    deja = _empreintes_donnees.get(cle)
+    if deja is not None and deja[0] is d:
+        return deja[1]
+    sans = dict(d)
+    sans.pop("genere", None)
+    h = hashlib.sha256(json.dumps(sans, sort_keys=True, default=str).encode()).hexdigest()
+    _empreintes_donnees[cle] = (d, h)
+    return h
 
 
 async def membre(request):
@@ -1927,12 +2063,15 @@ def _normaliser_regle(r) -> dict:
     garde, mini, maxi = nombres
     if not 0 <= mini <= garde <= maxi <= 3650:
         raise ValueError(f"règle de nettoyage : bornes incohérentes ({cle})")
-    fn, compter = r.get("fn"), r.get("compter")
-    if (fn is not None and not callable(fn)) or (compter is not None and not callable(compter)):
+    fn, compter, apercu = r.get("fn"), r.get("compter"), r.get("apercu")
+    if any(x is not None and not callable(x) for x in (fn, compter, apercu)):
         raise ValueError(f"règle de nettoyage : fonction invalide ({cle})")
+    #  26/10/2026 (plusieurs années) : `apercu(guild_id, jours, maintenant)` → combien d'éléments partiraient avec cette
+    #  durée (la rubrique le dit avant d'enregistrer, et avant « Nettoyer maintenant »).
+    #  27/10/2026 : `duree`, la durée dite autrement qu'en jours (« tant qu'il est sur le serveur »), facultative.
     return {"cle": cle, "nom": str(r.get("nom") or cle)[:60], "quoi": str(r.get("quoi") or "")[:300],
-            "garde_jours": garde, "min": mini, "max": maxi, "fn": fn, "compter": compter,
-            "ordre": int(r.get("ordre") or 0)}
+            "garde_jours": garde, "min": mini, "max": maxi, "fn": fn, "compter": compter, "apercu": apercu,
+            "ordre": int(r.get("ordre") or 0), "duree": str(r.get("duree") or "")[:60]}
 
 
 def _definitions(nom, d) -> list:
@@ -2546,20 +2685,37 @@ async def etat_nettoyage(guild_id: int, maintenant: float | None = None) -> dict
     """Ce que la rubrique « Nettoyage » montre : les règles (durée, bornes), ce que chacune garde
     aujourd'hui, le dernier passage et son bilan."""
     t = maintenant or time.time()
-    regles, compteurs = [], {}
-    for r in sorted(REGLES.values(), key=lambda x: (x["ordre"], x["cle"])):
-        jours = await jours_regle(guild_id, r["cle"])
+    regles, compteurs, partiront = [], {}, {}
+    #  27/10/2026 (plusieurs années) : une trentaine de règles, chacune son compte et son aperçu — lus quatre à la fois
+    #  (à 5 ans, l'un après l'autre : 0,6 s à chaque visite de la rubrique).
+    a_la_fois = asyncio.Semaphore(NETTOYAGE_LECTURES)
+
+    async def lire_regle(r):
+        async with a_la_fois:
+            jours = await jours_regle(guild_id, r["cle"])
+            garde = _ABSENT
+            if r["compter"] is not None:
+                try:
+                    n = r["compter"](int(guild_id), jours, t)
+                    garde = int(((await n) if inspect.isawaitable(n) else n) or 0)
+                except Exception as ex:  # un compteur illisible n'empêche pas les autres
+                    _log("[TABLEAU][E15] compteur de nettoyage illisible")
+                    _log(f"[TABLEAU][E15:DETAIL] {r['cle']} {type(ex).__name__} {ex}")
+                    garde = None
+            partira = _ABSENT
+            if r.get("apercu") is not None and r["fn"] is not None:
+                partira = await apercu_regle(r, guild_id, jours, t)
+            return jours, garde, partira
+    ordre = sorted(REGLES.values(), key=lambda x: (x["ordre"], x["cle"]))
+    for r, (jours, garde, partira) in zip(ordre, await asyncio.gather(*(lire_regle(r) for r in ordre))):
         regles.append({"cle": r["cle"], "nom": r["nom"], "quoi": r["quoi"], "garde_jours": jours,
                        "defaut": r["garde_jours"], "min": r["min"], "max": r["max"],
-                       "reglable": r["min"] < r["max"], "auto": r["fn"] is not None})
-        if r["compter"] is not None:
-            try:
-                n = r["compter"](int(guild_id), jours, t)
-                compteurs[r["cle"]] = int(((await n) if inspect.isawaitable(n) else n) or 0)
-            except Exception as ex:  # un compteur illisible n'empêche pas les autres
-                _log("[TABLEAU][E15] compteur de nettoyage illisible")
-                _log(f"[TABLEAU][E15:DETAIL] {r['cle']} {type(ex).__name__} {ex}")
-                compteurs[r["cle"]] = None
+                       "reglable": r["min"] < r["max"], "auto": r["fn"] is not None, "ordre": r["ordre"],
+                       **({"duree": r["duree"]} if r.get("duree") else {})})
+        if garde is not _ABSENT:
+            compteurs[r["cle"]] = garde
+        if partira is not _ABSENT:
+            partiront[r["cle"]] = partira
     async with _get_db() as db:
         async with db.execute("SELECT dernier, bilan, par FROM tableau_nettoyage_etat WHERE guild_id=?",
                               (int(guild_id),)) as cur:
@@ -2572,19 +2728,43 @@ async def etat_nettoyage(guild_id: int, maintenant: float | None = None) -> dict
         bilan = json.loads(row[1]) if row else {}
     except ValueError:
         bilan = {}
-    return {"regles": regles, "compteurs": compteurs, "dernier": int(row[0]) if row and row[0] else None,
-            "bilan": bilan if isinstance(bilan, dict) else {}, "par": str(row[2]) if row and row[2] else "",
-            "bilans": bilans}
+    out = {"regles": regles, "compteurs": compteurs, "partiront": partiront,
+           "dernier": int(row[0]) if row and row[0] else None,
+           "bilan": bilan if isinstance(bilan, dict) else {}, "par": str(row[2]) if row and row[2] else "",
+           "bilans": bilans}
+    if ETAT_STOCKAGE is not None:   # la place prise par la base et les dossiers (longevite.py)
+        try:
+            out["stockage"] = await ETAT_STOCKAGE(int(guild_id))
+        except Exception as ex:  # l'état du stockage manque : les règles restent lisibles
+            _log("[TABLEAU][E42] état du stockage illisible")
+            _log(f"[TABLEAU][E42:DETAIL] {type(ex).__name__} {ex}")
+    return out
 
 
-async def nettoyer(g, auteur=None, maintenant: float | None = None) -> dict:
+ETAT_STOCKAGE = None   # async (guild_id) → {base, libre, dossiers…} : branché par longevite.py
+NETTOYAGE_LECTURES = 4   # règles lues en même temps par la rubrique (le bot a 20 connexions à la base)
+
+
+async def apercu_regle(r: dict, guild_id: int, jours: int, t: float):
+    """Combien d'éléments une règle retirerait avec `jours` — None si son aperçu est illisible."""
+    try:
+        n = r["apercu"](int(guild_id), int(jours), t)
+        return int(((await n) if inspect.isawaitable(n) else n) or 0)
+    except Exception as ex:  # un aperçu illisible n'empêche ni les autres ni la règle
+        _log("[TABLEAU][E43] aperçu de nettoyage illisible")
+        _log(f"[TABLEAU][E43:DETAIL] {r['cle']} {type(ex).__name__} {ex}")
+        return None
+
+
+async def nettoyer(g, auteur=None, maintenant: float | None = None, seulement: str | None = None) -> dict:
     """Applique chaque règle à ce serveur ; le bilan (clé → éléments retirés, -1 : en échec) est gardé et
-    noté au journal du site. `auteur` None : la boucle quotidienne."""
+    noté au journal du site. `auteur` None : la boucle quotidienne. `seulement` (26/10/2026) : une seule règle
+    (« Nettoyer maintenant » sur sa carte) — le passage quotidien garde alors son heure."""
     t = maintenant or time.time()
     bilan: dict = {}
     async with _verrou("nettoyage", asyncio.Lock):
         for r in sorted(REGLES.values(), key=lambda x: (x["ordre"], x["cle"])):
-            if r["fn"] is None:
+            if r["fn"] is None or (seulement is not None and r["cle"] != seulement):
                 continue
             jours = await jours_regle(g.id, r["cle"])
             try:
@@ -2595,10 +2775,11 @@ async def nettoyer(g, auteur=None, maintenant: float | None = None) -> dict:
                 _log(f"[TABLEAU][E17:DETAIL] {r['cle']} {type(ex).__name__} {ex}")
                 diag.compter("site", f"nettoyage.{r['cle']}", ex)
                 bilan[r["cle"]] = -1
-        async with _get_db() as db:
-            await db.execute("INSERT OR REPLACE INTO tableau_nettoyage_etat (guild_id, dernier, bilan, par)"
-                             " VALUES (?,?,?,?)", (int(g.id), int(t), json.dumps(bilan), int(getattr(auteur, "id", 0) or 0)))
-            await db.commit()
+        if seulement is None:
+            async with _get_db() as db:
+                await db.execute("INSERT OR REPLACE INTO tableau_nettoyage_etat (guild_id, dernier, bilan, par)"
+                                 " VALUES (?,?,?,?)", (int(g.id), int(t), json.dumps(bilan), int(getattr(auteur, "id", 0) or 0)))
+                await db.commit()
     retires = {k: n for k, n in bilan.items() if n > 0}
     echecs = [REGLES[k]["nom"] for k, n in bilan.items() if n < 0 and k in REGLES]
     total = sum(retires.values())
@@ -2611,7 +2792,8 @@ async def nettoyer(g, auteur=None, maintenant: float | None = None) -> dict:
                          " tableau_nettoyage_bilans WHERE guild_id=? ORDER BY id DESC LIMIT ?)",
                          (int(g.id), int(g.id), NETTOYAGE_BILANS))
         await db.commit()
-    texte = ("Nettoyage du site" + (" (automatique)" if auteur is None else f" lancé par {auteur.display_name}")
+    texte = ("Nettoyage du site" + (f" — {REGLES[seulement]['nom']}" if seulement in REGLES else "")
+             + (" (automatique)" if auteur is None else f" lancé par {auteur.display_name}")
              + (f" : {total} élément(s) retiré(s)" if total else " : rien à retirer"))
     detail = " · ".join([f"{REGLES[k]['nom']} : {n}" for k, n in retires.items() if k in REGLES]
                         + ([f"en échec : {', '.join(echecs)}"] if echecs else []))
@@ -2670,15 +2852,44 @@ async def _route_nettoyage_regle(g, auteur, requete, corps):
 
 
 async def _route_nettoyage_lancer(g, auteur, requete, corps):
-    """`POST api/nettoyage/lancer` : toutes les règles maintenant (une fois toutes les 5 minutes au plus)."""
+    """`POST api/nettoyage/lancer` : toutes les règles maintenant (une fois toutes les 5 minutes au plus) — ou, avec
+    `{"cle"}` (26/10/2026), une seule règle (« Nettoyer maintenant » sur sa carte : une fois par minute et par règle)."""
     t = time.time()
-    if t - _nettoyages.get(g.id, 0) < NETTOYAGE_MANUEL:
-        return 429, {"erreur": "Déjà lancé il y a moins de 5 minutes."}
-    _nettoyages[g.id] = t
-    await nettoyer(g, auteur, t)
+    cle = corps.get("cle") if isinstance(corps, dict) else None
+    if cle is not None:
+        r = REGLES.get(cle) if isinstance(cle, str) else None
+        if r is None or r["fn"] is None:
+            return 404, {"erreur": "Cette règle n'efface rien.", "champ": "cle"}
+        if t - _nettoyages.get((g.id, cle), 0) < NETTOYAGE_REGLE_MANUEL:
+            return 429, {"erreur": "Déjà lancé il y a moins d'une minute."}
+        _nettoyages[(g.id, cle)] = t
+        bilan = await nettoyer(g, auteur, t, seulement=cle)
+    else:
+        if t - _nettoyages.get(g.id, 0) < NETTOYAGE_MANUEL:
+            return 429, {"erreur": "Déjà lancé il y a moins de 5 minutes."}
+        _nettoyages[g.id] = t
+        bilan = await nettoyer(g, auteur, t)
     rep = await etat_nettoyage(g.id)
-    rep.update(ok=True, personnes=_noms_nettoyage(g, rep), _journal=None)  # `nettoyer` a déjà noté son bilan
+    rep.update(ok=True, retires=bilan, personnes=_noms_nettoyage(g, rep), _journal=None)  # `nettoyer` a noté son bilan
     return 200, rep
+
+
+NETTOYAGE_REGLE_MANUEL = 60   # « Nettoyer maintenant » d'une règle : une fois par minute au plus
+
+
+async def _route_nettoyage_apercu(g, auteur, requete, corps):
+    """`GET api/nettoyage/apercu?cle=&jours=` → `{"cle", "jours", "partiront"}` : ce qu'une durée retirerait, avant
+    de l'enregistrer (la réglette de la rubrique)."""
+    cle = str(requete.get("cle", ""))
+    r = REGLES.get(cle)
+    brut = str(requete.get("jours", ""))
+    if r is None:
+        return 404, {"erreur": "Règle inconnue.", "champ": "cle"}
+    if not brut.isdigit() or not r["min"] <= int(brut) <= r["max"]:
+        return 400, {"erreur": f"Entre {r['min']} et {r['max']} jours.", "champ": "jours"}
+    if r.get("apercu") is None or r["fn"] is None:
+        return 200, {"cle": cle, "jours": int(brut), "partiront": None}
+    return 200, {"cle": cle, "jours": int(brut), "partiront": await apercu_regle(r, g.id, int(brut), time.time())}
 
 
 #  Les règles de ce fichier (les modules ajoutent les leurs par `monter`).
@@ -2716,7 +2927,7 @@ async def _compter_archives(gid, jours, t):
 
 
 async def _purger_transcripts(gid, jours, t):
-    return await asyncio.to_thread(transcript_store.purge_old)
+    return await asyncio.to_thread(transcript_store.purge_old, jours)
 
 
 async def _compter_transcripts(gid, jours, t):
@@ -2795,6 +3006,64 @@ async def _compter_ops(gid, jours, t):
     return await _compter("SELECT COUNT(*) FROM tableau_ops WHERE guild_id=?", (gid,))
 
 
+#  26/10/2026 (plusieurs années) — « l'aperçu de ce qui part » : combien chaque règle retirerait avec une durée donnée.
+async def _apercu_journal_messages(gid, jours, t):
+    return await _compter("SELECT COUNT(*) FROM registre WHERE guild_id=? AND categorie IN ('Messages', 'Vocal') AND quand < ?",
+                          (gid, int(t - jours * 86400)))
+
+
+async def _apercu_journal(gid, jours, t):
+    return await _compter("SELECT COUNT(*) FROM registre WHERE guild_id=? AND quand < ?", (gid, int(t - jours * 86400)))
+
+
+async def _apercu_transcripts(gid, jours, t):
+    def compter():
+        borne, n = t - jours * 86400, 0
+        try:
+            entrees = list(os.scandir(transcript_store._BASE_DIR))
+        except OSError:
+            return 0
+        for e in entrees:
+            try:
+                n += e.name.endswith(".html") and e.stat().st_mtime < borne
+            except OSError:
+                continue
+        return n
+    return await asyncio.to_thread(compter)
+
+
+async def _apercu_candidatures(gid, jours, t):
+    return len(await _candidatures_refusees(gid, jours, t))
+
+
+async def _purger_candidatures_acceptees(gid, jours, t):
+    return await _supprimer("DELETE FROM recrutements WHERE guild_id=? AND ferme_le < ?", (gid, int(t - jours * 86400)))
+
+
+async def _apercu_candidatures_acceptees(gid, jours, t):
+    return await _compter("SELECT COUNT(*) FROM recrutements WHERE guild_id=? AND ferme_le < ?", (gid, int(t - jours * 86400)))
+
+
+async def _apercu_medias(gid, jours, t):
+    borne = int(t - jours * 86400)
+    utilises = await _medias_utilises(gid)
+    async with _get_db() as db:
+        async with db.execute("SELECT id FROM tableau_medias WHERE guild_id=? AND cree_le < ? AND vu_le < ?",
+                              (gid, borne, borne)) as cur:
+            return sum(1 for (ident,) in await cur.fetchall() if str(ident) not in utilises)
+
+
+async def _apercu_ops(gid, jours, t):
+    return await _compter("SELECT COUNT(*) FROM tableau_ops WHERE guild_id=? AND quand < ?", (gid, int(t - jours * 86400)))
+
+
+async def _apercu_sessions(gid, jours, t):
+    n = 0
+    for _nom, sql, _j, _f in PURGES:
+        n += await _compter(sql.replace("DELETE FROM", "SELECT COUNT(*) FROM", 1), (int(t),))
+    return n
+
+
 async def _purger_sessions(gid, jours, t):
     n = 0
     for _nom, sql, _j, _f in PURGES:
@@ -2836,38 +3105,50 @@ def ajouter_regle(**r) -> None:
     REGLES[regle["cle"]] = regle
 
 
+#  26/10/2026 (plusieurs années) : « qu'on puisse nettoyer tout comme on souhaite ». Les durées que le bot tenait
+#  cachées se règlent ici VERS LE BAS : leur ancienne valeur fixe reste le plafond (et le filet du bot, qui passe
+#  toujours derrière) — jamais une règle du site n'efface plus tard que lui, ni plus tôt sans qu'on l'ait choisi.
 _regle_interne(cle="journal_messages", nom="Journal : messages et vocal",
                quoi="Messages supprimés ou modifiés, allées et venues en vocal : effacés du journal après ce délai.",
-               garde_jours=registre.JOURS_COURTS, min=registre.JOURS_COURTS, max=registre.JOURS_COURTS, ordre=10,
-               fn=_purger_journal_messages, compter=_compter_journal_messages)
+               garde_jours=registre.JOURS_COURTS, min=7, max=registre.JOURS_COURTS, ordre=10,
+               fn=_purger_journal_messages, compter=_compter_journal_messages, apercu=_apercu_journal_messages)
 _regle_interne(cle="journal", nom="Journal : tout le reste",
                quoi="Sanctions, tickets, arrivées, sécurité, site… : effacés du journal après ce délai.",
-               garde_jours=registre.JOURS, min=registre.JOURS, max=registre.JOURS, ordre=11,
-               fn=_purger_journal, compter=_compter_journal)
+               garde_jours=registre.JOURS, min=30, max=registre.JOURS, ordre=11,
+               fn=_purger_journal, compter=_compter_journal, apercu=_apercu_journal)
 _regle_interne(cle="tickets_archives", nom="Tickets fermés : archives",
                quoi="Un ticket fermé depuis plus longtemps passe dans les archives de la liste (il reste consultable).",
                garde_jours=30, min=7, max=90, ordre=20, compter=_compter_archives)
 _regle_interne(cle="transcripts", nom="Conversations des tickets fermés",
-               quoi="Les pages des conversations (transcripts) : effacées après ce délai.",
-               garde_jours=transcript_store._RETENTION_DAYS, min=transcript_store._RETENTION_DAYS,
-               max=transcript_store._RETENTION_DAYS, ordre=21, fn=_purger_transcripts, compter=_compter_transcripts)
+               quoi="Les pages des conversations (transcripts) et leurs images : effacées après ce délai.",
+               garde_jours=transcript_store._RETENTION_DAYS, min=min(14, transcript_store._RETENTION_DAYS),
+               max=transcript_store._RETENTION_DAYS, ordre=21, fn=_purger_transcripts, compter=_compter_transcripts,
+               apercu=_apercu_transcripts)
 _regle_interne(cle="candidatures_refusees", nom="Candidatures refusées",
-               quoi="Les fiches des candidatures refusées : effacées après ce délai (les acceptées restent).",
-               garde_jours=180, min=30, max=365, ordre=30, fn=_purger_candidatures, compter=_compter_candidatures)
+               quoi="Les fiches des candidatures refusées : effacées après ce délai.",
+               garde_jours=180, min=30, max=365, ordre=30, fn=_purger_candidatures, compter=_compter_candidatures,
+               apercu=_apercu_candidatures)
+#  La rétention RGPD (`gdpr.RETENTION["recrutements"]`) efface TOUTES les fiches après un an : dite ici, plus cachée.
+_regle_interne(cle="candidatures", nom="Candidatures acceptées",
+               quoi="Les fiches des candidatures acceptées : effacées après un an (règle RGPD du bot).",
+               garde_jours=365, min=365, max=365, ordre=32, fn=_purger_candidatures_acceptees,
+               apercu=_apercu_candidatures_acceptees)
 _regle_interne(cle="medias", nom="Images inutilisées",
                quoi="Une image envoyée sur le site, utilisée nulle part et pas vue depuis ce délai : effacée.",
-               garde_jours=30, min=7, max=180, ordre=80, fn=_purger_medias, compter=_compter_medias)
+               garde_jours=30, min=7, max=180, ordre=80, fn=_purger_medias, compter=_compter_medias, apercu=_apercu_medias)
 _regle_interne(cle="ops", nom="Modifications hors ligne",
                quoi="La trace des modifications envoyées au retour du réseau (pour ne jamais les appliquer deux fois).",
-               garde_jours=30, min=7, max=90, ordre=90, fn=_purger_ops, compter=_compter_ops)
+               garde_jours=30, min=7, max=90, ordre=90, fn=_purger_ops, compter=_compter_ops, apercu=_apercu_ops)
 _regle_interne(cle="sessions", nom="Sessions et liens du site",
                quoi="Les sessions et les liens expirés : effacés dès leur fin.",
-               garde_jours=0, min=0, max=0, ordre=95, fn=_purger_sessions, compter=_compter_sessions)
+               garde_jours=0, min=0, max=0, ordre=95, fn=_purger_sessions, compter=_compter_sessions,
+               apercu=_apercu_sessions)
 
 #  Les adresses de ce fichier, sous `/tableau/espace/api/`.
 _INTERNES.update({nom: {d["methode"]: _normaliser_route(nom, d)} for nom, d in {
     "media": {"methode": "POST", "fn": _route_media, "ecriture": True, "corps_max": (MEDIA_MAX + 2) // 3 * 4 + 64 * 1024},
     "nettoyage": {"methode": "GET", "fn": _route_nettoyage},
+    "nettoyage/apercu": {"methode": "GET", "fn": _route_nettoyage_apercu},
     "nettoyage/regle": {"methode": "POST", "fn": _route_nettoyage_regle, "ecriture": True},
     "nettoyage/lancer": {"methode": "POST", "fn": _route_nettoyage_lancer, "ecriture": True},
 }.items()})

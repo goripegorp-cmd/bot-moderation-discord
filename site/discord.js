@@ -16,6 +16,10 @@ import {
 } from "./fiche.js";
 import { ligne, lignes, groupes, outilsGroupes, groupesParPeriode, groupesParJours, pastilleIcone, quandLigne, badgeRestreint, estRestreint, avance } from "./rangement.js";
 import { avecVerrou, protegerZone } from "./direct.js";
+import {
+  journalSuite, comptesParCategorie, chiffresJournal, comptesMois, moisArchive, fermesDepuis, fermesRecherche, reunirFermes,
+  casierMembres, casierPlus, casierRecherche, texteApercu, apercuReglette, boutonNettoyerRegle, cadreStockage, FAMILLES, familleDe as familleRegle,
+} from "./longevite.js";
 
 const JOUR = 86400;
 const resetPages = (prefixe) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(prefixe)) delete etat.pages[k]; };
@@ -35,25 +39,34 @@ export function journal(vue) {
     avance(exporter("Exporter", [["Journal · 7 jours (CSV)", { quoi: "journal", jours: 7 }], ["Journal · 30 jours (CSV)", { quoi: "journal", jours: 30 }], ["Journal · 90 jours (CSV)", { quoi: "journal", jours: 90 }],
       ["Journal · 30 jours (JSON)", { quoi: "journal", jours: 30, format: "json" }], ...(peutAgir() ? [["Erreurs du bot · 30 jours (CSV)", { quoi: "erreurs" }]] : [])])));
   const tete = h("div");
-  ajouter(vue, [tete, outils, h("p", { classe: "aide avance" }, "Plus aucun log sur Discord : tout arrive ici. Conservation : messages et vocal 30 jours, le reste 90 jours (Réglages, Nettoyage). Les 400 derniers évènements sont chargés ; l'export prend tout."), resultats]);
+  ajouter(vue, [tete, outils, h("p", { classe: "aide avance" }, "Plus aucun log sur Discord : tout arrive ici. Conservation : messages et vocal 30 jours, le reste 90 jours (Réglages, Nettoyage). Au-delà des derniers évènements, le serveur cherche pour toi ; l'export prend tout."), resultats]);
+  // Au-delà des 400 derniers évènements des données, le serveur filtre (période, catégorie, gravité, recherche) : à
+  // plusieurs années, un jour en compte des milliers (longevite.js).
+  const suite = journalSuite(() => maj());
   const maj = () => {
     const d = etat.d;
     if (!d) { remplacer(resultats, indisponible()); return; }
-    const j = d.journal || {}, evts = recentsDabord(j.evenements, "quand"), n = maintenant();
+    const j = d.journal || {}, base = recentsDabord(j.evenements, "quand"), n = maintenant();
     if (j.erreur) { remplacer(resultats, vide("Journal momentanément illisible", "Nouvel essai à la prochaine mise à jour.", "attention")); return; }
-    const auj = cleJour(n), sept = evts.filter((e) => n - e.quand <= 7 * JOUR);
+    const c = chiffresJournal(j.par_jour, base, n, () => maj());
     remplacer(tete, tuiles(
-      tuile({ cle: "j1", lib: "Aujourd'hui", val: evts.filter((e) => cleJour(e.quand) === auj).length, icone: "journal", sous: "évènements consignés", teinte: "#1f4e5a" }),
-      tuile({ cle: "j2", lib: "Graves · 7 jours", val: sept.filter((e) => e.gravite >= 2).length, icone: "attention", sous: "sanctions lourdes, détections", teinte: "#8e2a24" }),
-      tuile({ cle: "j3", lib: "Personnes · 7 jours", val: new Set(sept.map((e) => e.membre).filter(Boolean)).size, icone: "membres", sous: "concernées par un évènement", teinte: "#3f6b3a" })));
+      tuile({ cle: "j1", lib: "Aujourd'hui", val: c.aujourdhui, icone: "journal", sous: "évènements consignés", teinte: "#1f4e5a" }),
+      tuile({ cle: "j2", lib: "Graves · 7 jours", val: c.graves, icone: "attention", sous: "sanctions lourdes, détections", teinte: "#8e2a24" }),
+      tuile({ cle: "j3", lib: "Personnes · 7 jours", val: c.personnes, icone: "membres", sous: "concernées par un évènement", teinte: "#3f6b3a" })));
     const limite = f.periode === "tout" ? 0 : n - Number(f.periode) * JOUR;
+    const v = suite.vue(f, base, limite), evts = v.evts;
     const dansPeriode = evts.filter((e) => e.quand >= limite && (e.gravite || 0) >= Number(f.gravite));
     const nb = {};
     dansPeriode.forEach((e) => { nb[e.cat] = (nb[e.cat] || 0) + 1; });
+    // Les comptes exacts : ceux du serveur pour ce filtre, sinon le comptage jour par jour des données.
+    const exacts = !v.serveur ? null : v.parCategorie || (f.gravite === "0" && !f.q ? comptesParCategorie(j.par_jour, f.periode, n) : null);
+    if (exacts) Object.assign(nb, exacts);
     if (f.cat !== "tous" && !nb[f.cat]) f.cat = "tous";
     const texte = (e) => [e.texte, e.detail, e.salon, e.cat, ...[e.membre, e.auteur].filter(Boolean).flatMap((id) => [id, P(id).nom, P(id).pseudo])].join(" ");
-    const liste_ = dansPeriode.filter((e) => (f.cat === "tous" || e.cat === f.cat) && contient(texte(e), f.q));
-    const blocs = [puces([["tous", "Tout", dansPeriode.length], ...Object.keys(nb).sort((a, b) => nb[b] - nb[a]).map((c) => [c, c, nb[c], teinteCat(c)])], f.cat, (v) => { f.cat = v; changer(); }, "Catégories")];
+    const liste_ = v.serveur ? dansPeriode : dansPeriode.filter((e) => (f.cat === "tous" || e.cat === f.cat) && contient(texte(e), f.q));
+    const tous = exacts ? Object.values(exacts).reduce((a, k) => a + k, 0) : v.serveur && f.cat === "tous" ? v.total : dansPeriode.length;
+    const blocs = [puces([["tous", "Tout", tous], ...Object.keys(nb).sort((a, b) => nb[b] - nb[a]).map((c_) => [c_, c_, nb[c_], teinteCat(c_)])], f.cat, (val) => { f.cat = val; changer(); }, "Catégories")];
+    if (v.serveur && !evts.length && (v.charge || v.erreur)) { remplacer(resultats, ...blocs, v.erreur ? vide("Journal momentanément illisible", v.erreur, "hors_ligne") : squelettes(4)); return; }
     if (!liste_.length) { remplacer(resultats, ...blocs, vide("Rien ici", "Change la période, la catégorie ou la recherche.")); return; }
     // L'important d'abord : les faits graves de la période, en tête (une ligne chacun, 8 puis « Voir plus »).
     const graves = liste_.filter((e) => e.gravite >= 2);
@@ -66,14 +79,19 @@ export function journal(vue) {
       liste_.forEach((e) => { const k = e.membre || "serveur"; if (!parQui.has(k)) parQui.set(k, []); parQui.get(k).push(e); });
       blocs.push(section("Par personne", "membres", quantite(parQui.size, "personne(s)") + " · " + quantite(liste_.length, "évènement(s)"),
         lignes("jour-p", [...parQui.entries()], ([id, l]) => lignePersonneJournal(id, l))));
+    } else if (v.serveur && v.parJour) {
+      // Le serveur filtre : chaque groupe (jour, semaine, mois) a son compte exact et se charge quand on l'ouvre.
+      const zone = h("div", { classe: "groupes-zone" }, groupes(suite.groupes(liste_, (l, k) => lignes("jour-s-" + k, l, (e) => ligneJournal(e, null))), { ouverts: 1 }));
+      blocs.push(section("Jour par jour", "calendrier", compte(v.total, "évènement"), zone, outilsGroupes(zone)));
     } else {
       // Un groupe par jour (aujourd'hui, hier, vendredi 23…), puis par semaine et par mois : le plus récent ouvert, les
       // autres fermés avec leur compte ; une ligne par évènement, « Voir plus » par 20.
       const graves_ = (l) => l.filter((e) => e.gravite >= 2).length;
       const zone = h("div", { classe: "groupes-zone" }, groupesParJours("jour", liste_, (e) => e.quand, (e) => ligneJournal(e, null),
         { forcer: !!f.q || f.cat !== "tous", chaud: (l) => graves_(l) > 0, info: (l) => (graves_(l) ? compte(graves_(l), "grave", "graves") : "") }));
-      blocs.push(section("Jour par jour", "calendrier", compte(liste_.length, "évènement"), zone, outilsGroupes(zone)));
+      blocs.push(section("Jour par jour", "calendrier", v.serveur && v.total > liste_.length ? nombre(liste_.length) + " sur " + compte(v.total, "évènement") : compte(liste_.length, "évènement"), zone, outilsGroupes(zone)));
     }
+    if (v.plus && f.vue === "personnes") blocs.push(h("div", { classe: "rangee" }, v.plus));
     remplacer(resultats, ...blocs);
   };
   maj();
@@ -139,7 +157,10 @@ export function sanctions(vue) {
     const nbGroupe = { tous: 0 };
     Object.keys(GROUPES_SANCTION).forEach((g) => { nbGroupe[g] = 0; });
     const cartes = [];
-    for (const m of s.membres) {
+    // Les 250 personnes des données, puis celles chargées d'un bouton ; une recherche cherche dans tout le casier (longevite.js).
+    const membres = casierMembres(), connus = new Set(membres.map((m) => m.id));
+    for (const m of (f.q && casierRecherche(f.q, () => majResultats())) || []) if (!connus.has(m.id)) { connus.add(m.id); membres.push(m); }
+    for (const m of membres) {
       const p = P(m.id);
       if (f.q && !contient([p.nom, p.pseudo, m.id, ...m.liste.map((x) => x.raison + " " + x.par)].join(" "), f.q)) continue;
       const dansPeriode = recentsDabord(m.liste, "date").filter(garde);
@@ -163,7 +184,8 @@ export function sanctions(vue) {
     remplacer(resultats,
       puces([["tous", "Tous", nbGroupe.tous], ...Object.entries(GROUPES_SANCTION).map(([g, c]) => [g, g, nbGroupe[g], c])], f.groupe, (v) => { f.groupe = v; changer(); }, "Types"),
       section("Le casier, par membre", "repertoire", compte(cartes.length, "personne"),
-        h("div", { classe: "pile" }, h("p", { classe: "aide" }, "Une ligne par personne : ce qu'elle a reçu sur la période, rangé par date de sa dernière sanction. Touche une ligne pour toute sa fiche."), zone),
+        h("div", { classe: "pile" }, h("p", { classe: "aide" }, "Une ligne par personne : ce qu'elle a reçu sur la période, rangé par date de sa dernière sanction. Touche une ligne pour toute sa fiche."), zone,
+          casierPlus(() => majResultats())),
         cartes.length && f.tri === "recent" ? outilsGroupes(zone) : null));
   };
   const maj = () => { majHaut(); majResultats(); };
@@ -310,11 +332,25 @@ export function tickets(vue, ctx = {}) {
     const garde = (t) => dansFamille(t) && (!f.sorte || t.type === f.sorte);
     const cherche = (t, p) => contient([p.nom, p.pseudo, p.id, "#" + t.ticket, t.motif, t.type].join(" "), f.q);
     const ouverts = tk.ouverts.filter((t) => garde(t) && cherche(t, t));
-    const fermes = tk.fermes.filter((t) => garde(t) && cherche(t, P(t.id)));
     const jours = Number(tk.archives_jours) || 30;
+    // Les données portent les 300 fermés les plus récents : au-delà, les récents et une recherche viennent du serveur,
+    // et chaque mois des archives se charge en entier quand on l'ouvre (longevite.js).
+    const enPlus = [...(fermesDepuis(n - jours * JOUR, () => majResultats()) || []), ...((f.q && fermesRecherche(f.q, () => majResultats())) || [])];
+    const fermes = (enPlus.length ? reunirFermes(tk.fermes, enPlus) : tk.fermes).filter((t) => garde(t) && cherche(t, P(t.id)));
     const recents = fermes.filter((t) => !t.ferme || n - t.ferme <= jours * JOUR), archives = fermes.filter((t) => t.ferme && n - t.ferme > jours * JOUR);
     const parMois = new Map();
     archives.forEach((t) => { const k = moisDe(t.ferme); if (!parMois.has(k)) parMois.set(k, []); parMois.get(k).push(t); });
+    const attendus = new Map();   // mois → combien d'archives il compte en tout (pour ce filtre), chargées ou non
+    if (!f.q) {
+      const recentsParMois = new Map();
+      recents.forEach((t) => { if (t.ferme) { const k = moisDe(t.ferme); recentsParMois.set(k, (recentsParMois.get(k) || 0) + 1); } });
+      for (const [k, total] of comptesMois(garde)) {
+        const reste = total - (recentsParMois.get(k) || 0);
+        if (reste > 0) { attendus.set(k, reste); if (!parMois.has(k)) parMois.set(k, []); }
+      }
+    }
+    const moisTries = [...parMois.keys()].sort().reverse();
+    const nbArchives = moisTries.reduce((a, k) => a + Math.max(parMois.get(k).length, attendus.get(k) || 0), 0);
     // Les ouverts : ceux que personne n'a pris d'abord (les plus anciens en tête), puis ceux pris en charge.
     const nonPris = ouverts.filter((t) => !t.pris_par).sort((a, b) => (a.ouvert || 0) - (b.ouvert || 0)), pris = ouverts.filter((t) => t.pris_par);
     const p = pre();
@@ -324,14 +360,20 @@ export function tickets(vue, ctx = {}) {
     ].filter(Boolean), { ouverts: 2, forcer: !!f.q }) : vide("Aucun ticket ouvert ici", "Tout est traité.", "succes"));
     const zoneF = h("div", { classe: "groupes-zone" }, recents.length ? groupesParPeriode(p + "-f", recents, (t) => t.ferme || t.ouvert, ligneTicketFerme, { forcer: !!f.q })
       : vide("Aucun ticket fermé ces " + jours + " derniers jours"));
-    const zoneA = h("div", { classe: "groupes-zone" }, archives.length ? groupes([...parMois.entries()].map(([k, l]) => ({ cle: p + "-a-" + k, titre: libelleMois(k), compte: l.length,
-      contenu: () => lignes(p + "-a-" + k, l, ligneTicketFerme) })), { ouverts: 0, forcer: !!f.q }) : vide("Rien aux archives", "Les tickets y sont rangés " + jours + " jours après leur fermeture."));
+    const rendreMois = (k) => (lot) => {
+      const l = lot.filter((t) => garde(t) && cherche(t, P(t.id)) && t.ferme && n - t.ferme > jours * JOUR);
+      return l.length ? lignes(p + "-a-" + k, l, ligneTicketFerme) : vide("Rien ce mois-ci", "Change le type ou la recherche.");
+    };
+    const zoneA = h("div", { classe: "groupes-zone" }, moisTries.length ? groupes(moisTries.map((k) => ({ cle: p + "-a-" + k, titre: libelleMois(k),
+      compte: Math.max(parMois.get(k).length, attendus.get(k) || 0),
+      contenu: () => moisArchive(k, parMois.get(k), attendus.get(k) || 0, rendreMois(k)) })), { ouverts: 0, forcer: !!f.q })
+      : vide("Rien aux archives", "Les tickets y sont rangés " + jours + " jours après leur fermeture."));
     remplacer(resultats,
       // La famille change l'adresse (la présence en direct la dit, un rechargement la garde) ; la page suit sans se redessiner.
       puces(familles, fam, (k) => { if (k !== fam) aller("port", "tickets", k === "tous" ? "" : k); }, "Tickets"),
       section("Ouverts", "tickets", compte(ouverts.length, "ticket"), zoneO),
       section("Fermés ces " + jours + " derniers jours", "cadenas", compte(recents.length, "ticket"), zoneF, recents.length ? outilsGroupes(zoneF) : null),
-      section("Archives", "coffre", compte(archives.length, "ticket") + " · fermés depuis plus de " + jours + " jours", zoneA, archives.length > 1 ? outilsGroupes(zoneA) : null));
+      section("Archives", "coffre", compte(nbArchives, "ticket") + " · fermés depuis plus de " + jours + " jours", zoneA, moisTries.length > 1 ? outilsGroupes(zoneA) : null));
   };
   const maj = () => { majHaut(); majResultats(); };
   maj();
@@ -670,22 +712,25 @@ export function nettoyage(vue) {
     if (!zone.isConnected) return;
     if (!n || n.erreur) { remplacer(zone, n && n.erreur ? vide("Nettoyage indisponible", n.erreur, "hors_ligne") : squelettes(3)); return; }
     retenirPersonnes(n.personnes);
-    const regles = n.regles || [], compteurs = n.compteurs || {};
+    const regles = n.regles || [], compteurs = n.compteurs || {}, partiront = n.partiront || {};
     const garde = regles.reduce((a, r) => a + (Number(compteurs[r.cle]) || 0), 0);
+    const aPartir = Object.values(partiront).reduce((a, k) => a + (Number(k) || 0), 0);
     const dernier = (n.bilans || [])[0] || null;
     const echecs = Object.entries(n.bilan || {}).filter(([, v]) => Number(v) < 0).map(([k]) => (regles.find((r) => r.cle === k) || { nom: k }).nom);
     remplacer(zone,
       tuiles(tuile({ cle: "n1", lib: "Dernier nettoyage", texte: n.dernier ? depuis(n.dernier) : "jamais", icone: "nettoyage",
         sous: n.dernier ? date(n.dernier, true) + " · " + parQui(n.par) : "il passe tout seul chaque jour", teinte: "#3f6b3a" }),
         tuile({ cle: "n2", lib: "Gardé aujourd'hui", val: garde, icone: "coffre", sous: "sous les " + quantite(regles.length, "règle(s)") + " ci-dessous", teinte: "#a8641c" }),
+        tuile({ cle: "n4", lib: "Au prochain passage", val: aPartir, icone: "minuteur", sous: aPartir ? accord(aPartir, "élément(s) à effacer") : "rien n'a dépassé sa durée", teinte: "#7a4b2a" }),
         dernier ? tuile({ cle: "n3", lib: "Dernier bilan", val: dernier.total, icone: "journal", sous: echecs.length ? "en échec : " + echecs.join(", ") : dernier.total ? accord(dernier.total, "élément(s) retiré(s)") : "rien à retirer",
           teinte: echecs.length ? "#8e2a24" : "#4a5560" }) : null),
+      cadreStockage(n.stockage),
       h("div", { classe: "cadre pile serree" }, h("h3", {}, "Le grand ménage"),
         h("p", { classe: "aide" }, "Il passe tout seul chaque jour. Tu peux aussi le lancer maintenant : chaque règle efface ce qui a dépassé sa durée, et le bilan est noté au journal."),
         h("p", { classe: "meta" }, icone("nettoyage", "ic-p"), " Dernier passage : " + (n.dernier ? depuis(n.dernier) + " · " + parQui(n.par) : "jamais")
           + (dernier ? " · " + (dernier.total ? quantite(dernier.total, "élément(s) retiré(s)") : "rien à retirer") : "") + (echecs.length ? " · en échec : " + echecs.join(", ") : "")),
         h("div", { classe: "rangee" }, bouton("Lancer le nettoyage maintenant", { classe: "principal", icone: "nettoyage", reseau: true, onclick: async () => {
-          const ok = await confirmer({ titre: "Lancer le nettoyage maintenant ?", texte: "Chaque règle ci-dessous efface ce qui a dépassé sa durée ; les rangements n'effacent rien. Le casier ne se nettoie que depuis Sanctions.", libelleOk: "Nettoyer", style: "principal" });
+          const ok = await confirmer({ titre: "Lancer le nettoyage maintenant ?", texte: "Chaque règle ci-dessous efface ce qui a dépassé sa durée" + (aPartir ? " (" + quantite(aPartir, "élément(s)") + ")" : "") + " ; les rangements n'effacent rien. Ce qui part du casier reste annulable 30 jours (Sanctions).", libelleOk: "Nettoyer", style: "principal" });
           if (!ok) return;
           const r = await poster("nettoyage/lancer", {});
           if (!r.ok) { toast(r.erreur || "Le nettoyage n'a pas pu être lancé.", "erreur"); return; }
@@ -693,7 +738,7 @@ export function nettoyage(vue) {
           toast(b ? "Nettoyage fait : " + (b.total ? quantite(b.total, "élément(s) retiré(s)") : "rien à retirer") + "." : "Nettoyage fait.", "succes");
           maj(true);
         } }), h("a", { classe: "bouton discret", href: "#port/sanctions" }, icone("sanctions"), h("span", {}, "Nettoyer le casier (Sanctions)")))),
-      section("Les règles", "parchemin", compte(regles.length, "règle"), reglesRangees(regles, compteurs, () => maj(true))),
+      section("Les règles", "parchemin", compte(regles.length, "règle"), reglesRangees(regles, compteurs, partiront, () => maj(true))),
       (n.bilans || []).length ? groupe({ titre: "Les derniers bilans", compte: n.bilans.length, cle: "net-bilans", icone: "journal" }, () => lignes("net-bilans", n.bilans, (b) => ligne({
         visuel: pastilleIcone("nettoyage", b.total ? "#3f6b3a" : "#6e553f"), titre: b.total ? quantite(b.total, "élément(s) retiré(s)") : "Rien à retirer",
         sous: parQui(b.par) + (b.detail ? " · " + b.detail : ""), date: date(b.quand, true), deplier: b.detail ? () => h("p", { classe: "texte" }, b.detail) : undefined }))) : null);
@@ -701,26 +746,31 @@ export function nettoyage(vue) {
   maj();
   return { maj: () => maj(false) };
 }
-/** Les règles en deux groupes : celles qu'on règle (ouvertes), puis les fixes ; des cartes de même hauteur. */
-function reglesRangees(regles, compteurs, recharger) {
-  const reglables = regles.filter((r) => r.reglable !== false), fixes = regles.filter((r) => r.reglable === false);
-  const grille = (l) => h("div", { classe: "grille egale" }, l.map((r) => carteRegle(r, compteurs[r.cle], recharger)));
-  return h("div", { classe: "groupes-zone" }, groupes([
-    reglables.length ? { cle: "net-reglables", titre: "Les durées à régler", icone: "minuteur", compte: reglables.length, contenu: () => grille(reglables) } : null,
-    fixes.length ? { cle: "net-fixes", titre: "Les règles fixes", icone: "cadenas", compte: fixes.length, info: "appliquées chaque jour", contenu: () => grille(fixes) } : null,
-  ].filter(Boolean)));
+/** Les règles rangées par famille (le journal, les tickets, le casier…) : un groupe chacune, celles où quelque chose
+ *  attend d'être effacé en avant ; des cartes de même hauteur (26/10/2026 : une règle par famille de données). */
+function reglesRangees(regles, compteurs, partiront, recharger) {
+  const parFamille = new Map(FAMILLES.map((f) => [f[2], []]));
+  for (const r of regles) parFamille.get(familleRegle(Number(r.ordre) || 0)[2]).push(r);
+  const grille = (l) => h("div", { classe: "grille egale" }, l.map((r) => carteRegle(r, compteurs[r.cle], recharger, partiront[r.cle])));
+  return h("div", { classe: "groupes-zone" }, groupes(FAMILLES.filter((f) => parFamille.get(f[2]).length).map(([, , titre, ic]) => {
+    const l = parFamille.get(titre), n = l.reduce((a, r) => a + (Number(partiront[r.cle]) || 0), 0);
+    return { cle: "net-f-" + ic, titre, icone: ic, compte: l.length, chaud: n > 0, info: n ? quantite(n, "élément(s)") + " à effacer" : "", contenu: () => grille(l) };
+  }), { ouverts: 1 }));
 }
-function carteRegle(r, garde, recharger) {
+function carteRegle(r, garde, recharger, partira) {
   // Le compte : absent (la règle n'en donne pas), null (illisible côté serveur), ou ce que la règle garde aujourd'hui.
   const rangement = r.auto === false;
   const nb = garde === undefined ? "" : garde === null ? "compte indisponible"
     : garde ? quantite(garde, rangement ? "élément(s) rangé(s)" : "élément(s) gardé(s)") : rangement ? "rien de rangé" : "rien de gardé";
   const sorte = rangement ? "rangement : rien n'est effacé" : r.reglable === false ? "règle fixe, appliquée chaque jour" : "appliquée chaque jour";
-  const dureeGarde = (j) => (Number(j) ? j + " j" : "jusqu'à expiration");
+  const dureeGarde = (j) => r.duree || (Number(j) ? j + " j" : "jusqu'à expiration");
+  // Ce qui partira au prochain passage, et « Nettoyer maintenant » quand il y a quelque chose (26/10/2026).
+  const apercu = h("p", { classe: "meta regle-apercu", "aria-live": "polite" }, texteApercu(partira));
+  const maintenant_ = boutonNettoyerRegle(r, Number(partira) || 0, recharger);
   if (r.reglable === false) {
     return h("article", { classe: "feuillet regle" }, h("h3", { classe: "titre-carte" }, r.nom), h("p", { classe: "aide" }, r.quoi),
       h("div", { classe: "regle-ligne" }, h("span", { classe: "champ-lib" }, "Garder"), h("b", { classe: "num regle-valeur" }, dureeGarde(r.garde_jours))),
-      h("p", { classe: "meta" }, [nb, sorte].filter(Boolean).join(" · ")));
+      h("p", { classe: "meta" }, [nb, sorte].filter(Boolean).join(" · ")), apercu, maintenant_ ? h("div", { classe: "rangee" }, maintenant_) : null);
   }
   const mini = Number(r.min) || 1, maxi = Number(r.max) || 365;
   let jours = Number(r.garde_jours) || mini;
@@ -728,7 +778,11 @@ function carteRegle(r, garde, recharger) {
   const reg = h("input", { classe: "reglette", type: "range", min: mini, max: maxi, step: 1, value: jours, "aria-label": "Garder pendant (jours)" });
   const enregistrer = bouton("Enregistrer", { classe: "p", icone: "valider", disabled: true });
   const etatBouton = () => { enregistrer.disabled = jours === Number(r.garde_jours) || !enLigne(); enregistrer.title = enLigne() ? "" : "Hors ligne : à enregistrer au retour de la connexion."; };
-  reg.addEventListener("input", () => { jours = Number(reg.value); valeur.textContent = jours + " j"; etatBouton(); });
+  const avecDuree = apercuReglette(r.cle, apercu);   // « avec 45 j : 1 234 éléments partiraient »
+  reg.addEventListener("input", () => {
+    jours = Number(reg.value); valeur.textContent = jours + " j"; etatBouton();
+    if (r.auto !== false && partira !== undefined) { if (jours === Number(r.garde_jours)) apercu.textContent = texteApercu(partira); else avecDuree(jours); }
+  });
   const stop = ecouter("reseau", () => { if (!enregistrer.isConnected) { stop(); return; } etatBouton(); });
   enregistrer.addEventListener("click", async () => {
     const rep = await poster("nettoyage/regle", { cle: r.cle, garde_jours: jours });
@@ -741,7 +795,8 @@ function carteRegle(r, garde, recharger) {
     reg, h("div", { classe: "regle-bornes" }, h("span", {}, mini + " j"), h("span", {}, maxi + " j")),
     r.defaut && Number(r.defaut) !== Number(r.garde_jours) ? h("p", { classe: "meta" }, "Par défaut : " + r.defaut + " j ",
       h("button", { classe: "lien-nom", type: "button", onclick: () => { reg.value = r.defaut; reg.dispatchEvent(new Event("input")); } }, "remettre")) : null,
-    h("div", { classe: "rangee entre" }, h("span", { classe: "meta" }, [nb, sorte].filter(Boolean).join(" · ")), enregistrer));
+    h("div", { classe: "rangee entre" }, h("span", { classe: "meta" }, [nb, sorte].filter(Boolean).join(" · ")), enregistrer),
+    apercu, maintenant_ ? h("div", { classe: "rangee" }, maintenant_) : null);
   // Présence en direct : la règle se prend au premier geste ; prise ailleurs, elle se fige sous le cadenas.
   protegerZone(carte, "nettoyage:" + r.cle, "la règle « " + r.nom + " »", { des: "saisie", compact: true, relire: recharger });
   return avecVerrou(carte, "nettoyage:" + r.cle);
