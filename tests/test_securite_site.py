@@ -20,7 +20,6 @@ import discord
 import pytest
 
 import health_server
-import registre
 import rellseas_panneau
 import securite_site
 import tableau
@@ -155,6 +154,12 @@ def test_S2_entetes_de_base_partout_meme_sur_les_erreurs(site):
                 continue
             assert h.get(k), f"{nom} : {k} absent"
         assert h.get("Server") == "capitainerie" and "aiohttp" not in json.dumps(h), f"{nom} : ni nom ni version"
+        #  Les politiques de document : sur les pages HTML seulement (sur un fichier, elles ne protègent rien et pèsent).
+        est_page = "text/html" in h.get("Content-Type", "")
+        for k in health_server.ENTETES_DOCUMENT:
+            assert bool(h.get(k)) == est_page or (est_page and h.get(k)), f"{nom} : {k}"
+    assert out["page"]["Cross-Origin-Opener-Policy"] == "same-origin" and out["page"]["Permissions-Policy"]
+    assert "Permissions-Policy" not in out["health"], "un JSON public ne porte pas les politiques d'une page"
     assert out["inconnue"]["Cache-Control"] == "no-store" and "noindex" in out["inconnue"]["X-Robots-Tag"]
     assert out["methode"]["statut"] == 405
     #  Le cookie de session : __Host-, Secure, HttpOnly, SameSite=Lax (le lien du bouton Discord est une navigation

@@ -281,8 +281,12 @@ ENTETES_BASE = {
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
     "Strict-Transport-Security": "max-age=31536000",
-    "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
+}
+#  Des politiques de DOCUMENT (une page HTML) : sur un script, une image ou du JSON, elles ne protègent rien et
+#  alourdissaient chaque fichier du site (mesuré : ≈ 120 octets × 60 fichiers à chaque ouverture).
+ENTETES_DOCUMENT = {
+    "Cross-Origin-Opener-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
 }
 
@@ -290,6 +294,9 @@ ENTETES_BASE = {
 async def _entetes_securite(request, response) -> None:
     for k, v in ENTETES_BASE.items():
         response.headers.setdefault(k, v)
+    if "text/html" in (response.headers.get("Content-Type") or ""):
+        for k, v in ENTETES_DOCUMENT.items():
+            response.headers.setdefault(k, v)
     response.headers["Server"] = "capitainerie"
     #  Une erreur fabriquée par aiohttp (404, 405…) : jamais gardée en cache, jamais indexée.
     if response.status >= 400:

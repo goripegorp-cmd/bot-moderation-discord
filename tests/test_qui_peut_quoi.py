@@ -30,7 +30,6 @@ from pathlib import Path
 
 import aiosqlite
 import discord
-import pytest
 
 from conftest_discord import Obj
 

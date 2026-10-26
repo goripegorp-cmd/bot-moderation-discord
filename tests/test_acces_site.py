@@ -274,6 +274,8 @@ def _verifier_entetes(chemin, st, entetes, vus: list):
     if "text/html" in (entetes.get("Content-Type") or ""):
         csp = entetes.get("Content-Security-Policy") or ""
         assert "default-src 'none'" in csp and "frame-ancestors 'none'" in csp, f"{chemin} : CSP d'une page HTML"
+        assert entetes.get("Cross-Origin-Opener-Policy") == "same-origin" and entetes.get("Permissions-Policy"), \
+            f"{chemin} : les politiques d'une page HTML"
     vus.append(chemin)
 
 
