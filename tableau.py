@@ -45,6 +45,8 @@ LE SITE V2, « LA CAPITAINERIE » (25/10/2026)
     opération a son identifiant, appliquée une seule fois même renvoyée dix fois.
   · Les images envoyées sont refaites (Pillow) : jamais le fichier reçu tel quel.
   · Le nettoyage : des règles bornées, réglables sur le site, appliquées chaque jour, bilan au journal.
+  · La présence en direct (26/10/2026, `/tableau/espace/direct`) : qui est à bord, sur quelle page, ce qu'il modifie ;
+    un objet en cours de modification est verrouillé pour les autres, et le serveur refuse leurs écritures (423).
 """
 from __future__ import annotations
 
@@ -287,7 +289,7 @@ def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_memb
     _alerte_securite = alerte_securite
     _log = log or print
     for d in (_sessions, _requetes, _requetes_medias, _essais, _graves, _blocages, _cadence, _cache, _ops_recentes,
-              _nettoyages, _medias_vus, _alertes_tete, _ouvertures, _tentatives):
+              _nettoyages, _medias_vus, _alertes_tete, _ouvertures, _tentatives, _direct_salles, _direct_ecrits):
         d.clear()
 
 
@@ -454,7 +456,9 @@ async def _lire_session(request, maintenant: float | None = None):
         return None
     emp = _empreinte(sid)
     s = _sessions.get(emp)
-    if s is None or t - s[3] > RELIRE:
+    #  Une session gardée en mémoire SANS sa portée (écrite par un code d'avant la colonne) est relue en base : la portée
+    #  vient toujours de la base, jamais devinée.
+    if s is None or t - s[3] > RELIRE or len(s) < 5:
         if s is None and _trop_essais(request, maintenant=t):
             return None
         async with _get_db() as db:
@@ -1587,6 +1591,9 @@ async def action(request):
     auteur = g.get_member(j["u"])
     if _direction is None or not _direction(g, auteur, await _cfg(g.id)):
         return _json({"ok": False, "message": "Réservé au fondateur et à la direction."}, 403)
+    refus = refus_verrou(g.id, await _objets_ecriture(nom, VERROUS_ACTIONS.get(nom), corps), auteur.id)
+    if refus is not None:   # présence en direct : le dossier est en cours de modification par quelqu'un d'autre
+        return _json({"ok": False, "message": refus["erreur"]}, 423)
     maintenant = time.time()
     recents = [t for t in _cadence.get(auteur.id, []) if maintenant - t < 60]
     if len(recents) >= 20:
@@ -1837,8 +1844,11 @@ def _normaliser_route(nom, d) -> dict:
         raise ValueError(f"route du site : corps_max hors bornes ({nom})")  # 0 : aucun corps (une lecture)
     if grave is not None and grave not in LIMITES_GRAVES:
         raise ValueError(f"route du site : genre grave inconnu ({nom})")
+    verrou = d.get("verrou")   # présence en direct : fonction(corps) → objet(s) que l'écriture touche
+    if verrou is not None and (not callable(verrou) or not ecriture):
+        raise ValueError(f"route du site : « verrou » est la fonction d'une écriture ({nom})")
     return {"nom": nom, "methode": methode, "fn": fn, "ecriture": ecriture, "hors_ligne": hors_ligne,
-            "corps_max": corps_max, "grave": grave}
+            "corps_max": corps_max, "grave": grave, "verrou": verrou}
 
 
 def _normaliser_regle(r) -> dict:
@@ -1989,9 +1999,15 @@ async def _executer(nom: str, route: dict, g, auteur, requete: dict, corps, main
     (« indisponible » pour la page, le détail au journal du bot). Les clés « _… » de la réponse ne sortent
     jamais (`_journal` : la phrase du journal ; None : rien à noter)."""
     t = maintenant or time.time()
+    objets: list = []
     if route["ecriture"]:
         if auteur is None or _direction is None or not _direction(g, auteur, await _cfg(g.id)):
             return 403, {"erreur": "Réservé au fondateur et à la direction."}
+        #  26/10/2026 (présence en direct) : un objet en cours de modification par quelqu'un d'autre n'est pas écrit.
+        objets = await _objets_ecriture(nom, route.get("verrou") or VERROUS_ROUTES.get(nom), corps)
+        refus = refus_verrou(g.id, objets, auteur.id)
+        if refus is not None:
+            return 423, refus
         cle = ("site", auteur.id)
         recents = [x for x in _cadence.get(cle, []) if t - x < 60]
         if len(recents) >= LIMITE_ECRITURES:
@@ -2021,6 +2037,7 @@ async def _executer(nom: str, route: dict, g, auteur, requete: dict, corps, main
             _cache.pop(k, None)
         if journal is not None:
             await _noter_ecriture(g, auteur, nom, None if journal is _ABSENT else journal)
+        direct_ecrit(g.id, objets, auteur.id)
     return status, rep
 
 
@@ -2037,6 +2054,8 @@ async def api_site(request):
     par_methode = _routes_de(nom)
     if not par_methode:
         return _json({"erreur": "Adresse inconnue."}, 404)
+    if nom.startswith("direct/") and j.get("p") != PORTEE_DIRECT:   # le direct : les sessions de portée « tout » seules
+        return _json({"erreur": "Réservé au fondateur et à la direction."}, 403)
     methode = "GET" if request.method == "HEAD" else request.method
     route = par_methode.get(methode)
     if route is None:
@@ -2070,8 +2089,8 @@ api_site_post = api_site  # le même, pour la route POST (aiohttp : un nom par r
 
 def _resultat_garde(status: int) -> bool:
     """Un résultat qui ne changera pas si on rejoue (fait, refusé, en conflit) — pas une panne, ni une
-    cadence, ni une session tombée : ceux-là se retentent."""
-    return status < 500 and status not in (401, 403, 429)
+    cadence, ni une session tombée, ni un objet en cours de modification ailleurs (423) : ceux-là se retentent."""
+    return status < 500 and status not in (401, 403, 423, 429)
 
 
 async def _op_connue(op_id: str):
@@ -2877,3 +2896,757 @@ async def api_equipage_refus(request):
     """`POST /tableau/equipage/api/…` : le site de l'équipage ne reçoit AUCUNE écriture (les modifications de la
     direction passent par `/tableau/espace/api/equipage/…`, avec toutes leurs vérifications)."""
     return _json({"erreur": "Lecture seule."}, 403)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Site v2 — la présence en direct et les verrous d'édition (`/tableau/espace/direct`)
+# ═══════════════════════════════════════════════════════════════════════════════
+#  26/10/2026 — « quand la direction ou quelqu'un est sur le site et l'utilise, affiche les personnes qui utilisent le
+#  site en temps réel et ce qu'ils modifient (…) qu'ils aient vraiment une zone comme quoi on ne peut pas toucher parce
+#  que c'est en cours de modification. »
+#
+#  · Une WebSocket par onglet (`GET /tableau/espace/direct`) : la même porte que le reste — session du cookie (relue
+#    chaque minute et à chaque prise de verrou), personne toujours à la tête, pas suspendue, origine de la page —, une
+#    « salle » par serveur Discord. Sans WebSocket (un proxy qui la bloque), la page interroge `GET api/direct/etat` et
+#    envoie par `POST api/direct/envoi` toutes les 10 s : le même protocole, en plus lent.
+#  · Tout vit en MÉMOIRE (un seul processus) : qui est là, ses onglets et leur page, les verrous. Aucune lecture de la
+#    base pour la présence (seule la revérification d'une session relit sa ligne).
+#  · Un verrou est un bail par onglet (60 s), renouvelé par le battement de la page (20 s) ; onglet caché : pas de
+#    battement, un bail de 5 min 30 (sans saisie depuis 5 min, la page rend la main d'elle-même). Il tombe à
+#    « lacher », à l'expiration, à la fermeture de la socket après une grâce de 10 s (un rechargement ne le perd pas).
+#    La même personne dans deux onglets : le verrou est à elle (réentrant).
+#  · Le serveur fait respecter les verrous : une écriture dont la route déclare un « verrou » (`ROUTES_SITE` :
+#    `"verrou": fonction(corps) → objet(s) | None`, sinon la table `VERROUS_ROUTES` ci-dessous) est refusée (423,
+#    « En cours de modification par X. ») si l'objet est tenu par QUELQU'UN D'AUTRE. Rejouée par la file hors ligne,
+#    elle n'est jamais gardée comme refusée : elle attend dans la page et repart quand l'objet se libère.
+#  · Les messages (JSON compacts, 1 Ko au plus ; `o` : la clé de l'objet). Page → serveur : bonjour {page, onglet?},
+#    page {page}, prendre {o, ti, n?}, lacher {o}, vivant {cache?}, demande {o}. Serveur → page : etat (à l'arrivée),
+#    puis seulement des deltas — present, absent, page, verrou, libre, ecrit — et les réponses : pris {o, n, ch, v},
+#    refuse {o, par, nom}, demandee {o}, demande {o, par, nom} (au détenteur seulement). Sans WebSocket, le même
+#    message part dans `POST api/direct/envoi` avec l'identifiant de l'onglet (`onglet`).
+
+DIRECT_BAIL = 60                 # s : le verrou d'un onglet qui ne bat plus tombe
+DIRECT_BAIL_CACHE = 330          # s : onglet caché (aucun battement) — l'inactivité (5 min) rend la main avant
+DIRECT_BATTEMENT = 20            # s : le battement d'une page qui tient un verrou
+DIRECT_GRACE = 10                # s : une socket fermée garde sa présence et ses verrous (un rechargement)
+DIRECT_VERIFIER = 60             # s : la session de chaque socket est revérifiée
+DIRECT_PING = 25                 # s : battement WebSocket (aiohttp) : une connexion morte est coupée
+DIRECT_RONDE = 5                 # s : la ronde d'une salle (baux, grâces, sessions)
+DIRECT_BONJOUR = 10              # s : le premier message attendu d'une socket
+DIRECT_INACTIF = 300             # s : (page) sans saisie depuis, l'éditeur rend la main
+DIRECT_TOUR = 10                 # s : (page, sans WebSocket) l'interrogation
+DIRECT_HTTP_VIE = 35             # s : un onglet qui interroge et ne donne plus de nouvelles est parti
+DIRECT_MSG_MAX = 1024            # octets par message
+DIRECT_CADENCE = 40              # messages par 10 s et par onglet (au-delà : ignorés ; trois fois plus : coupé)
+DIRECT_ONGLETS = 8               # onglets branchés par personne
+DIRECT_PRISES = 64               # onglets branchés par salle
+DIRECT_VERROUS = 24              # verrous par personne
+DIRECT_FILE = 200                # messages en attente d'écriture sur une socket (au-delà : trop lente, coupée)
+DIRECT_BOITE = 20                # messages gardés pour un onglet qui interroge
+DIRECT_DEMANDE = 20              # s entre deux « Demander la main » du même objet, par onglet
+DIRECT_ECRITS = 4096             # objets dont le compteur d'écritures est gardé
+DIRECT_TITRE = 120
+FORMAT_OBJET = re.compile(r"[a-z][a-z0-9_-]{0,29}:[A-Za-z0-9_.:@~-]{1,270}")
+FORMAT_PAGE = re.compile(r"[a-z0-9_-]{1,30}(?:/[a-z0-9_-]{1,60}){0,3}")
+FORMAT_ONGLET = re.compile(r"[A-Za-z0-9_-]{8,40}")
+_INVISIBLES_DIRECT = re.compile(r"[\x00-\x1f\x7f​-‏‪-‮⁠-⁤⁦-⁩﻿]")
+#  Les codes de fermeture (la page les lit) : session finie ou accès retiré → « session terminée », sans reconnexion ;
+#  une session d'une autre portée que « tout » (l'équipage, en lecture seule) → le direct ne la concerne pas.
+CODE_SESSION, CODE_ACCES, CODE_MESSAGE, CODE_TROP, CODE_LENT, CODE_PORTEE = 4401, 4403, 4400, 4429, 4408, 4406
+PORTEE_DIRECT = "tout"           # seules les sessions du fondateur et de la direction entrent dans le direct
+_direct_salles: dict = {}        # serveur → _Salle
+_direct_ecrits: dict = {}        # (serveur, objet) → {"n": compteur, "h": [(n, auteur)…] (les 8 dernières écritures)}
+
+
+def _fnv(texte: str) -> str:
+    """FNV-1a sur 32 bits (la page fait le même calcul) : l'empreinte d'une clé d'objet trop longue."""
+    h = 0x811C9DC5
+    for octet in texte.encode("utf-8"):
+        h = ((h ^ octet) * 0x01000193) & 0xFFFFFFFF
+    return f"{h:08x}"
+
+
+def objet_direct(o) -> str | None:
+    """La clé d'un objet (`type:identifiant`) telle que le direct la garde : 100 caractères au plus (au-delà, raccourcie
+    par son empreinte, comme le fait la page) — None si elle est invalide."""
+    if not isinstance(o, str) or len(o) > 300 or not FORMAT_OBJET.fullmatch(o):
+        return None
+    return o if len(o) <= 100 else o[:91] + "~" + _fnv(o)
+
+
+def _titre_direct(t) -> str:
+    return re.sub(r"\s+", " ", _INVISIBLES_DIRECT.sub("", str(t or ""))).strip()[:DIRECT_TITRE]
+
+
+def _page_direct(p) -> str:
+    p = str(p or "")[:200]
+    return p if FORMAT_PAGE.fullmatch(p) else ""
+
+
+class _Verrou:
+    """Un objet en cours de modification : par qui, et le bail de chacun de ses onglets."""
+    __slots__ = ("objet", "titre", "uid", "prises", "depuis")
+
+    def __init__(self, objet: str, titre: str, uid: int, t: float):
+        self.objet, self.titre, self.uid, self.depuis = objet, titre, uid, t
+        self.prises: dict = {}       # onglet → fin de son bail
+
+
+class _Prise:
+    """Un onglet branché : une WebSocket (`ws`), ou une page qui interroge (`ws` None : ses messages passent par
+    `api/direct/…`, et ce qui lui est adressé attend dans `boite`)."""
+    __slots__ = ("id", "gid", "uid", "emp", "ws", "page", "page_t", "depuis", "vu", "verifie", "cache", "ferme_le",
+                 "bonjour", "file", "ecrivain", "seau", "demandes", "boite", "fin", "code")
+
+    def __init__(self, ident: str, gid: int, uid: int, emp: str, ws, t: float):
+        self.id, self.gid, self.uid, self.emp, self.ws = ident, gid, uid, emp, ws
+        self.page, self.page_t, self.depuis, self.vu, self.verifie = "", t, t, t, t
+        self.cache, self.ferme_le, self.bonjour, self.fin, self.code = False, 0.0, False, "", 0
+        self.file = asyncio.Queue() if ws is not None else None
+        self.ecrivain = None
+        self.seau: list = []
+        self.demandes: dict = {}
+        self.boite: list = []
+
+    def envoyer(self, texte: str) -> None:
+        if self.ferme_le or self.file is None or self.fin:
+            return
+        if self.file.qsize() >= DIRECT_FILE:   # elle ne lit plus : coupée, elle se reconnectera
+            _couper(self, CODE_LENT, "lent")
+            return
+        self.file.put_nowait(texte)
+
+
+class _Salle:
+    """Un serveur Discord : ses onglets branchés, ses verrous, l'arrivée de chacun (gardée tant qu'il est là), et ce
+    que les pages savent des pages de chacun (le dernier delta « page » envoyé)."""
+    __slots__ = ("gid", "prises", "verrous", "arrivees", "vues", "ronde")
+
+    def __init__(self, gid: int):
+        self.gid = gid
+        self.prises: dict = {}
+        self.verrous: dict = {}
+        self.arrivees: dict = {}
+        self.vues: dict = {}
+        self.ronde = None
+
+
+def _salle_direct(gid: int) -> _Salle:
+    s = _direct_salles.get(gid)
+    if s is None:
+        s = _direct_salles[gid] = _Salle(gid)
+    return s
+
+
+def _texte_direct(m: dict) -> str:
+    return json.dumps(m, ensure_ascii=False, separators=(",", ":"))
+
+
+def _envoyer_a(prise: _Prise, m: dict) -> None:
+    """Un message pour cet onglet seul (une réponse, une demande de la main)."""
+    if prise.ferme_le:
+        return
+    if prise.ws is None:
+        if len(prise.boite) < DIRECT_BOITE:
+            prise.boite.append(m)
+        return
+    prise.envoyer(_texte_direct(m))
+
+
+def _diffuser(salle: _Salle, m: dict, sauf: _Prise | None = None) -> None:
+    """Un delta à tous les onglets branchés (ceux qui interrogent relisent l'état complet à leur tour)."""
+    texte = None
+    for p in list(salle.prises.values()):
+        if p is sauf or p.ferme_le or not p.bonjour or p.ws is None:
+            continue
+        texte = texte or _texte_direct(m)
+        p.envoyer(texte)
+
+
+def _couper(prise: _Prise, code: int, raison: str) -> None:
+    """Ferme la socket d'un onglet (session finie, trop de messages, trop lente) : sa boucle de réception s'arrête."""
+    if not prise.fin:
+        prise.fin, prise.code = raison, code
+    ws = prise.ws
+    if ws is not None and not ws.closed:
+        asyncio.get_running_loop().create_task(ws.close(code=prise.code, message=prise.fin.encode()))
+
+
+def _qui_direct(gid: int, uid: int) -> dict:
+    g = _bot.get_guild(gid) if _bot is not None else None
+    i = _ident(g, uid) if g is not None else {"id": str(uid), "nom": "Membre parti", "avatar": ""}
+    return {"id": i["id"], "nom": i["nom"], "av": i["avatar"]}
+
+
+def _personne_direct(salle: _Salle, uid: int) -> dict | None:
+    """Une personne à bord : nom, avatar, les pages de ses onglets ouverts (la plus récente d'abord ; pendant un
+    rechargement, celles d'avant), combien d'onglets, son arrivée. None si elle n'a plus d'onglet."""
+    prises = [p for p in salle.prises.values() if p.uid == uid and p.bonjour]
+    if not prises:
+        return None
+    pages: dict = {}
+    for p in sorted([p for p in prises if not p.ferme_le] or prises, key=lambda x: x.page_t):
+        if p.page:
+            pages[p.page] = int(p.page_t)
+    rec = _qui_direct(salle.gid, uid)
+    rec.update(pages=sorted(([k, t] for k, t in pages.items()), key=lambda x: -x[1])[:4],
+               n=sum(1 for p in prises if not p.ferme_le) or 1,
+               d=int(salle.arrivees.get(uid, min(p.depuis for p in prises))))
+    return rec
+
+
+def _verrou_rec(salle: _Salle, v: _Verrou) -> dict:
+    vivants = sum(1 for i in v.prises if (p := salle.prises.get(i)) is not None and not p.ferme_le)
+    return {"o": v.objet, "ti": v.titre, "id": str(v.uid), "d": int(v.depuis), "nb": vivants}
+
+
+def _etat_direct(salle: _Salle, prise: _Prise, t: float) -> dict:
+    uids: list = []
+    for p in salle.prises.values():
+        if p.bonjour and p.uid not in uids:
+            uids.append(p.uid)
+    return {"t": "etat", "moi": str(prise.uid), "o": prise.id, "s": int(t),
+            "p": [r for r in (_personne_direct(salle, u) for u in uids) if r],
+            "v": [_verrou_rec(salle, v) for v in salle.verrous.values()],
+            "cfg": {"bat": DIRECT_BATTEMENT, "bail": DIRECT_BAIL, "inactif": DIRECT_INACTIF, "tour": DIRECT_TOUR}}
+
+
+def _place_direct(salle: _Salle, uid: int) -> bool:
+    vivantes = [p for p in salle.prises.values() if not p.ferme_le]
+    return len(vivantes) < DIRECT_PRISES and sum(1 for p in vivantes if p.uid == uid) < DIRECT_ONGLETS
+
+
+def _brancher(salle: _Salle, prise: _Prise) -> None:
+    """L'onglet entre dans la salle (muet jusqu'à son « bonjour ») ; la ronde de la salle tourne tant qu'il y a du monde."""
+    salle.prises[prise.id] = prise
+    boucle = asyncio.get_running_loop()
+    if salle.ronde is None or salle.ronde.done() or salle.ronde.get_loop() is not boucle:
+        salle.ronde = boucle.create_task(_ronde(salle))
+
+
+def _vue_pages(rec) -> tuple:
+    return (tuple(p for p, _t in rec["pages"]), rec["n"]) if rec else ()
+
+
+def _delta_page(salle: _Salle, uid: int) -> None:
+    """Les onglets d'une personne ont bougé : un delta « page » — seulement si ce qu'en montrent les pages change
+    (comparé au dernier envoyé : un rechargement, une socket fantôme qui s'en va ne disent rien)."""
+    rec = _personne_direct(salle, uid)
+    if rec is None:
+        return
+    vue = _vue_pages(rec)
+    if salle.vues.get(uid) != vue:
+        salle.vues[uid] = vue
+        _diffuser(salle, {"t": "page", "id": rec["id"], "pages": rec["pages"], "n": rec["n"]})
+
+
+def _bonjour(salle: _Salle, prise: _Prise, page: str, t: float, onglet=None) -> list:
+    nouveau = prise.uid not in salle.arrivees
+    prise.page, prise.page_t, prise.bonjour = page, t, True
+    if nouveau:
+        salle.arrivees[prise.uid] = t
+    #  Une socket qui remplace l'interrogation du même onglet (la WebSocket revient) : ses verrous passent à la
+    #  socket, l'onglet qui interrogeait part tout de suite (il les aurait gardés jusqu'à son extinction).
+    ancienne = (salle.prises.get("h-" + onglet) if prise.ws is not None and isinstance(onglet, str)
+                and FORMAT_ONGLET.fullmatch(onglet) else None)
+    if ancienne is not None and ancienne.uid == prise.uid:
+        for v in salle.verrous.values():
+            if ancienne.id in v.prises:
+                v.prises[prise.id] = max(v.prises.pop(ancienne.id), _bail(prise, t))
+        _retirer(salle, ancienne, t)
+    elif nouveau:
+        rec = _personne_direct(salle, prise.uid)
+        salle.vues[prise.uid] = _vue_pages(rec)
+        _diffuser(salle, {"t": "present", "p": rec}, sauf=prise)
+    else:
+        _delta_page(salle, prise.uid)
+    return [_etat_direct(salle, prise, t)]
+
+
+def _changer_page(salle: _Salle, prise: _Prise, page: str, t: float) -> None:
+    if page and page != prise.page:
+        prise.page, prise.page_t = page, t
+        _delta_page(salle, prise.uid)
+
+
+def _liberer(salle: _Salle, v: _Verrou, t: float) -> None:
+    if salle.verrous.get(v.objet) is v:
+        del salle.verrous[v.objet]
+    _diffuser(salle, {"t": "libre", "o": v.objet, "s": int(t)})
+
+
+def _retirer_du_verrou(salle: _Salle, v: _Verrou, onglets, t: float) -> None:
+    for i in onglets:
+        v.prises.pop(i, None)
+    if not v.prises:
+        _liberer(salle, v, t)
+    else:
+        _diffuser(salle, {"t": "verrou", "v": _verrou_rec(salle, v)})
+
+
+def _bail(prise: _Prise, t: float) -> float:
+    return t + (DIRECT_BAIL_CACHE if prise.cache else DIRECT_BAIL)
+
+
+def _ecrits_n(gid: int, o: str) -> int:
+    e = _direct_ecrits.get((gid, o))
+    return e["n"] if e else 0
+
+
+def _ecrit_depuis(gid: int, o: str, n, uid: int) -> bool:
+    """Quelqu'un d'AUTRE a-t-il écrit cet objet depuis le compteur `n` que la page connaît ? Sans `n` : non. Une
+    histoire perdue (compteur effacé, serveur redémarré) : oui, par prudence — la page relira."""
+    if n is None:
+        return False
+    e = _direct_ecrits.get((gid, o))
+    if e is None:
+        return n > 0
+    if e["n"] <= n:
+        return False
+    h = e["h"]
+    if not h or h[0][0] > n + 1:
+        return True
+    return any(k > n and u != uid for k, u in h)
+
+
+async def _session_direct(prise: _Prise, t: float, forcer: bool = False) -> str:
+    """« » si la session de cet onglet tient toujours ; sinon « session » (finie, fermée ailleurs) ou « acces »
+    (retiré, suspendu). La ligne de la session est relue en base au-delà de RELIRE secondes, ou si `forcer`."""
+    s = _sessions.get(prise.emp)
+    if s is None or forcer or t - s[3] > RELIRE or len(s) < 5:
+        async with _get_db() as db:
+            async with db.execute("SELECT guild_id, user_id, expire_le, portee FROM tableau_sessions WHERE empreinte=?",
+                                  (prise.emp,)) as cur:
+                r = await cur.fetchone()
+        if r is None:
+            _sessions.pop(prise.emp, None)
+            return "session"
+        #  La portée reste dans la mémoire des sessions (la porte `_verifier` la lit) : « tout » seule entre ici.
+        s = _sessions[prise.emp] = (int(r[0]), int(r[1]), int(r[2]), t, str(r[3] or ""))
+    if s[2] < t or (s[0], s[1]) != (prise.gid, prise.uid):
+        return "session"
+    if s[4] != PORTEE_DIRECT:
+        return "acces"
+    g = _bot.get_guild(prise.gid) if _bot is not None else None
+    m = g.get_member(prise.uid) if g is not None else None
+    if m is None or _autorise_membre is None or not _autorise_membre(g, m, await _cfg(g.id)):
+        return "acces"
+    if await suspendu(prise.gid, prise.uid, t):
+        return "acces"
+    return ""
+
+
+def _retirer(salle: _Salle, prise: _Prise, t: float) -> None:
+    """L'onglet quitte la salle pour de bon : ses verrous tombent, sa personne part si c'était son dernier onglet."""
+    if salle.prises.get(prise.id) is not prise:
+        return
+    del salle.prises[prise.id]
+    prise.ferme_le = prise.ferme_le or t
+    for v in list(salle.verrous.values()):
+        if prise.id in v.prises:
+            _retirer_du_verrou(salle, v, [prise.id], t)
+    if not prise.bonjour:
+        return
+    if _personne_direct(salle, prise.uid) is None:
+        salle.arrivees.pop(prise.uid, None)
+        salle.vues.pop(prise.uid, None)
+        _diffuser(salle, {"t": "absent", "id": str(prise.uid)})
+    else:
+        _delta_page(salle, prise.uid)
+
+
+def _finir(salle: _Salle, prise: _Prise, raison: str, t: float) -> None:
+    """Session finie ou accès retiré : la socket est fermée avec son code, sans grâce (ses verrous tombent tout de suite)."""
+    _couper(prise, CODE_SESSION if raison == "session" else CODE_ACCES, raison)
+    _retirer(salle, prise, t)
+
+
+def _debrancher(salle: _Salle, prise: _Prise, t: float) -> None:
+    """La socket est fermée : présence et verrous gardés DIRECT_GRACE secondes (un rechargement les retrouve)."""
+    if salle.prises.get(prise.id) is not prise:
+        return
+    if prise.fin in ("session", "acces") or not prise.bonjour:
+        _retirer(salle, prise, t)
+    else:
+        prise.ferme_le = prise.ferme_le or t
+
+
+async def _ronde(salle: _Salle) -> None:
+    """Toutes les DIRECT_RONDE secondes, tant que la salle a du monde : grâces finies, baux échus, sessions relues."""
+    while salle.prises or salle.verrous:
+        await asyncio.sleep(DIRECT_RONDE)
+        try:
+            await _balayer(salle, time.time())
+        except Exception as ex:  # une ronde ratée n'arrête pas les suivantes ; le détail part au journal
+            _log("[TABLEAU][E21] ronde du direct en échec")
+            _log(f"[TABLEAU][E21:DETAIL] {type(ex).__name__} {ex}")
+            diag.compter("site", "direct.ronde", ex)
+
+
+async def _balayer(salle: _Salle, t: float) -> None:
+    for p in list(salle.prises.values()):
+        if p.ws is None and not p.ferme_le and t - p.vu > (DIRECT_BAIL_CACHE if p.cache else DIRECT_HTTP_VIE):
+            p.ferme_le = t       # un onglet qui interrogeait et ne donne plus de nouvelles
+        if p.ferme_le and t - p.ferme_le >= DIRECT_GRACE:
+            _retirer(salle, p, t)
+    for v in list(salle.verrous.values()):
+        echus = [i for i, fin in v.prises.items() if fin <= t]
+        if echus:
+            _retirer_du_verrou(salle, v, echus, t)
+    for p in list(salle.prises.values()):
+        if (p.ws is not None and p.emp and p.bonjour and not p.ferme_le and not p.fin
+                and (p.emp not in _sessions or t - p.verifie >= DIRECT_VERIFIER)):
+            p.verifie = t
+            raison = await _session_direct(p, t)
+            if raison:
+                _finir(salle, p, raison, t)
+
+
+def _cadence_direct(prise: _Prise, t: float) -> str:
+    """« ok » ; « ignore » (trop d'un coup : le message est laissé) ; « coupe » (bien trop : l'onglet est coupé)."""
+    prise.seau = [x for x in prise.seau if t - x < 10]
+    prise.seau.append(t)
+    n = len(prise.seau)
+    return "coupe" if n > DIRECT_CADENCE * 3 else "ignore" if n > DIRECT_CADENCE else "ok"
+
+
+async def _prendre(salle: _Salle, prise: _Prise, m: dict, t: float) -> list:
+    o = objet_direct(m.get("o"))
+    if o is None:
+        return [{"t": "refuse", "o": str(m.get("o") or "")[:100], "err": "objet"}]
+    if prise.emp:   # « à chaque prise de verrou » : la session relue en base
+        prise.verifie = t
+        raison = await _session_direct(prise, t, forcer=True)
+        if raison:
+            _finir(salle, prise, raison, t)
+            return []
+    titre = _titre_direct(m.get("ti")) or o.split(":", 1)[0]
+    v = salle.verrous.get(o)
+    if v is not None:
+        echus = [i for i, fin in v.prises.items() if fin <= t]
+        if echus:   # un bail échu que la ronde n'a pas encore vu
+            _retirer_du_verrou(salle, v, echus, t)
+            v = salle.verrous.get(o)
+    if v is not None and v.uid != prise.uid:
+        return [{"t": "refuse", "o": o, "par": str(v.uid), "nom": _qui_direct(salle.gid, v.uid)["nom"]}]
+    if v is None:
+        if sum(1 for x in salle.verrous.values() if x.uid == prise.uid) >= DIRECT_VERROUS:
+            return [{"t": "refuse", "o": o, "err": "trop"}]
+        v = salle.verrous[o] = _Verrou(o, titre, prise.uid, t)
+    avant = (_verrou_rec(salle, v)["nb"], v.titre) if v.prises else None
+    v.prises[prise.id] = _bail(prise, t)
+    v.titre = titre
+    rec = _verrou_rec(salle, v)
+    if avant != (rec["nb"], v.titre):
+        _diffuser(salle, {"t": "verrou", "v": rec}, sauf=prise)
+    n = m.get("n")
+    n = n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else None
+    return [{"t": "pris", "o": o, "n": _ecrits_n(salle.gid, o), "ch": _ecrit_depuis(salle.gid, o, n, prise.uid),
+             "v": rec}]
+
+
+def _lacher(salle: _Salle, prise: _Prise, o, t: float) -> None:
+    o = objet_direct(o)
+    v = salle.verrous.get(o) if o else None
+    if v is not None and prise.id in v.prises:
+        _retirer_du_verrou(salle, v, [prise.id], t)
+
+
+def _vivant(salle: _Salle, prise: _Prise, cache: bool, t: float) -> None:
+    """Le battement : les baux de cet onglet repartent (longs s'il est caché)."""
+    prise.cache = bool(cache)
+    for v in salle.verrous.values():
+        if prise.id in v.prises:
+            v.prises[prise.id] = _bail(prise, t)
+
+
+def _demande(salle: _Salle, prise: _Prise, o, t: float) -> list:
+    """« Demander la main » : la personne qui tient l'objet est prévenue (ses onglets qui le tiennent)."""
+    o = objet_direct(o)
+    v = salle.verrous.get(o) if o else None
+    if v is None:
+        return [{"t": "libre", "o": o or "", "s": int(t)}]
+    if v.uid == prise.uid:
+        return []
+    if t - prise.demandes.get(o, 0) < DIRECT_DEMANDE:
+        return [{"t": "demandee", "o": o, "deja": 1}]
+    if len(prise.demandes) > 50:
+        prise.demandes = {k: x for k, x in prise.demandes.items() if t - x < DIRECT_DEMANDE}
+    prise.demandes[o] = t
+    qui = _qui_direct(salle.gid, prise.uid)
+    for i in v.prises:
+        p = salle.prises.get(i)
+        if p is not None:
+            _envoyer_a(p, {"t": "demande", "o": o, "par": qui["id"], "nom": qui["nom"]})
+    return [{"t": "demandee", "o": o}]
+
+
+async def _traiter_direct(salle: _Salle, prise: _Prise, m, t: float) -> list:
+    """Un message d'un onglet → ses réponses (les deltas partent d'eux-mêmes aux autres)."""
+    if not isinstance(m, dict):
+        return []
+    genre = m.get("t")
+    prise.vu = t
+    if genre == "bonjour":
+        return _bonjour(salle, prise, _page_direct(m.get("page")), t, m.get("onglet"))
+    if not prise.bonjour:
+        return []
+    if genre == "page":
+        _changer_page(salle, prise, _page_direct(m.get("page")), t)
+    elif genre == "prendre":
+        return await _prendre(salle, prise, m, t)
+    elif genre == "lacher":
+        _lacher(salle, prise, m.get("o"), t)
+    elif genre == "vivant":
+        _vivant(salle, prise, m.get("cache") is True, t)
+    elif genre == "demande":
+        return _demande(salle, prise, m.get("o"), t)
+    return []
+
+
+def _origine_direct_ok(request) -> bool:
+    """La WebSocket vient de la page elle-même : même origine (un navigateur l'envoie toujours), même site."""
+    h = request.headers
+    if h.get("Sec-Fetch-Site", "same-origin") != "same-origin":
+        return False
+    attendue = _base.split("/", 3)[:3] if _base else None
+    attendue = "/".join(attendue) if attendue else f"{getattr(request, 'scheme', 'https')}://{getattr(request, 'host', '')}"
+    return h.get("Origin", "") == attendue
+
+
+async def _ecrire_direct(prise: _Prise) -> None:
+    """L'écrivain d'une socket : ses messages dans l'ordre, une socket lente n'en retarde aucune autre."""
+    ws = prise.ws
+    while True:
+        texte = await prise.file.get()
+        if texte is None or ws.closed:
+            return
+        try:
+            await asyncio.wait_for(ws.send_str(texte), 10)
+        except (asyncio.TimeoutError, ConnectionError, RuntimeError) as ex:
+            if not ws.closed:   # trop lente : coupée, elle se reconnectera
+                _log("[TABLEAU][E22] message du direct non envoyé")
+                _log(f"[TABLEAU][E22:DETAIL] {type(ex).__name__} {ex}")
+                _couper(prise, CODE_LENT, "lent")
+            return
+
+
+async def direct(request):
+    """`GET /tableau/espace/direct` : la WebSocket du direct, une par onglet."""
+    from aiohttp import web, WSMsgType
+    try:
+        j, g = await _verifier(request)
+    except _Refus as r:
+        return _json({"erreur": r.message}, r.status)
+    if not _origine_direct_ok(request):
+        return _json({"erreur": "Requête refusée."}, 400)
+    ws = web.WebSocketResponse(heartbeat=DIRECT_PING, max_msg_size=DIRECT_MSG_MAX, compress=False)
+    if not ws.can_prepare(request).ok:
+        return _json({"erreur": "WebSocket attendue."}, 400)
+    if j.get("p") != PORTEE_DIRECT:   # une autre portée (l'équipage, en lecture seule) : refusée proprement, sans retour
+        await ws.prepare(request)
+        await ws.close(code=CODE_PORTEE, message=b"portee")
+        return ws
+    salle = _salle_direct(j["g"])
+    prise = _Prise(secrets.token_urlsafe(6), j["g"], j["u"], j["emp"], ws, time.time())
+    place = _place_direct(salle, j["u"])
+    if place:
+        _brancher(salle, prise)     # avant tout `await` : la ronde voit l'onglet dès son arrivée
+    await ws.prepare(request)
+    if not place:
+        await ws.close(code=CODE_TROP, message=b"trop")
+        return ws
+    prise.ecrivain = asyncio.get_running_loop().create_task(_ecrire_direct(prise))
+    try:
+        while not prise.fin:
+            try:
+                msg = await ws.receive(timeout=None if prise.bonjour else DIRECT_BONJOUR)
+            except asyncio.TimeoutError:
+                prise.fin = "bonjour"
+                await ws.close(code=CODE_MESSAGE, message=b"bonjour")
+                break
+            if msg.type == WSMsgType.TEXT:
+                t = time.time()
+                verdict = _cadence_direct(prise, t)
+                if verdict == "coupe":
+                    prise.fin = "trop"
+                    await ws.close(code=CODE_TROP, message=b"trop")
+                    break
+                if verdict == "ignore":
+                    continue
+                try:
+                    m = json.loads(msg.data)
+                except ValueError:
+                    prise.fin = "message"
+                    await ws.close(code=CODE_MESSAGE, message=b"message")
+                    break
+                for r in await _traiter_direct(salle, prise, m, t):
+                    _envoyer_a(prise, r)
+                if prise.fin:   # session finie à la prise d'un verrou : fermée ici, avec son code
+                    await ws.close(code=prise.code or CODE_MESSAGE, message=prise.fin.encode())
+                    break
+            elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.CLOSED, WSMsgType.ERROR):
+                break
+            else:   # du binaire : rien de tel dans le protocole
+                prise.fin = "message"
+                await ws.close(code=CODE_MESSAGE, message=b"message")
+                break
+    finally:
+        _debrancher(salle, prise, time.time())
+        prise.file.put_nowait(None)
+    return ws
+
+
+async def _route_direct_etat(g, auteur, requete, corps):
+    """`GET api/direct/etat?onglet=<id>&page=…&cache=0|1` (sans WebSocket, toutes les 10 s) : l'onglet donne de ses
+    nouvelles (c'est aussi son battement) et lit l'état complet, avec ce qui lui est adressé (`msgs`)."""
+    o = str(requete.get("onglet", ""))
+    if not FORMAT_ONGLET.fullmatch(o) or auteur is None:
+        return 400, {"erreur": "Onglet invalide."}
+    t = time.time()
+    salle = _salle_direct(g.id)
+    prise = salle.prises.get("h-" + o)
+    if prise is not None and prise.uid != auteur.id:
+        return 409, {"erreur": "Onglet invalide."}
+    if prise is None:
+        if not _place_direct(salle, auteur.id):
+            return 429, {"erreur": "Trop d'onglets ouverts sur le site."}
+        prise = _Prise("h-" + o, g.id, auteur.id, "", None, t)
+        _brancher(salle, prise)
+    prise.ferme_le, prise.vu = 0.0, t     # revenu dans sa grâce : il retrouve tout
+    _vivant(salle, prise, requete.get("cache") == "1", t)
+    page = _page_direct(requete.get("page"))
+    if not prise.bonjour:
+        _bonjour(salle, prise, page, t)
+    else:
+        _changer_page(salle, prise, page, t)
+    boite, prise.boite = prise.boite, []
+    return 200, dict(_etat_direct(salle, prise, t), msgs=boite)
+
+
+async def _route_direct_envoi(g, auteur, requete, corps):
+    """`POST api/direct/envoi` `{"onglet": <id>, "t": …, …}` : un message de l'onglet qui interroge → `{"r": [réponses]}`."""
+    o = str(corps.get("onglet", ""))
+    salle = _direct_salles.get(g.id)
+    prise = salle.prises.get("h-" + o) if salle is not None and FORMAT_ONGLET.fullmatch(o) else None
+    if prise is None or auteur is None or prise.uid != auteur.id or prise.ferme_le:
+        return 409, {"erreur": "Onglet inconnu : l'état doit être relu."}
+    t = time.time()
+    if _cadence_direct(prise, t) != "ok":
+        return 429, {"erreur": "Trop de messages d'un coup."}
+    return 200, {"r": await _traiter_direct(salle, prise, corps, t)}
+
+
+def direct_ecrit(gid: int, objets, uid: int) -> None:
+    """Une écriture faite (le registre l'appelle) : les compteurs, et « ecrit » à la salle (les autres pages relisent)."""
+    objets = list(objets or [])
+    if not objets:
+        return
+    for o in objets:
+        e = _direct_ecrits.pop((gid, o), None) or {"n": 0, "h": []}
+        e["n"] += 1
+        e["h"] = (e["h"] + [(e["n"], int(uid))])[-8:]
+        _direct_ecrits[(gid, o)] = e
+    while len(_direct_ecrits) > DIRECT_ECRITS:
+        _direct_ecrits.pop(next(iter(_direct_ecrits)))
+    salle = _direct_salles.get(gid)
+    if salle is not None:
+        _diffuser(salle, {"t": "ecrit", "o": objets[:10], "id": str(uid)})
+
+
+def refus_verrou(gid: int, objets, uid: int, maintenant: float | None = None) -> dict | None:
+    """Le corps du refus (423) d'une écriture sur un objet tenu par QUELQU'UN D'AUTRE — ou None : elle peut se faire."""
+    salle = _direct_salles.get(gid)
+    if salle is None or not objets:
+        return None
+    t = maintenant or time.time()
+    for o in objets:
+        v = salle.verrous.get(o)
+        if v is not None and v.uid != uid and any(fin > t for fin in v.prises.values()):
+            nom = _qui_direct(gid, v.uid)["nom"]
+            return {"erreur": f"En cours de modification par {nom}.", "verrou": {"objet": o, "par": str(v.uid), "nom": nom}}
+    return None
+
+
+#  Les objets que touche chaque écriture du site (la page prend les mêmes clés : `site/direct.js`). Une route peut
+#  aussi déclarer le sien dans `ROUTES_SITE` (`"verrou": fonction(corps)`), qui passe avant cette table.
+def _champ_id(c: dict, k: str = "id") -> str:
+    v = c.get(k)
+    return "" if v is None or isinstance(v, (bool, dict, list)) else str(v).strip()[:120]
+
+
+def _objet_si(genre: str, *valeurs) -> str | None:
+    return genre + ":" + ":".join(valeurs) if valeurs and all(valeurs) else None
+
+
+def _v_affiche(c: dict) -> list:
+    out = [_objet_si("affiche", _champ_id(c))]
+    if not c.get("version"):   # une création : l'affiche de ce membre est peut-être en train d'être créée ailleurs
+        out.append(_objet_si("affiche-membre", _champ_id(c, "membre_id")))
+    return [o for o in out if o]
+
+
+async def _v_correction(c: dict):
+    """`recrutement/corriger` porte l'envoi, pas le ticket : le dossier se retrouve par l'envoi."""
+    eid = _champ_id(c, "envoi")
+    if not eid.isdigit():
+        return None
+    e = await questionnaire._envoi(int(eid))
+    return f"dossier:{int(e['ticket_id'])}" if e else None
+
+
+def _v_par_id(genre: str):
+    return lambda c: _objet_si(genre, _champ_id(c))
+
+
+VERROUS_ROUTES = {
+    "rell/affiche": _v_affiche,
+    "rell/affiche/retirer": _v_par_id("affiche"),
+    "rell/affiche/restaurer": _v_par_id("affiche"),
+    "rell/catalogue/element": lambda c: _objet_si("element", _champ_id(c, "type"), _champ_id(c, "cle")),
+    "rell/catalogue/retirer": lambda c: _objet_si("element", _champ_id(c, "type"), _champ_id(c, "cle")),
+    "rell/catalogue/type": lambda c: "catalogue:types",
+    "rell/role": lambda c: _objet_si("role", _champ_id(c, "type"), _champ_id(c, "cle")),
+    "rell/metiers/reglages": lambda c: "metiers:reglages",
+    "recrutement/question": _v_par_id("question"),
+    "recrutement/question/retirer": _v_par_id("question"),
+    "recrutement/modele": _v_par_id("modele"),
+    "recrutement/modele/retirer": _v_par_id("modele"),
+    "recrutement/liens": lambda c: "questionnaire:liens",
+    "recrutement/reglages": lambda c: "questionnaire:reglages",
+    "recrutement/corriger": _v_correction,
+    "recrutement/etape1": lambda c: _objet_si("dossier", _champ_id(c, "ticket")),
+    "recrutement/decision": lambda c: _objet_si("dossier", _champ_id(c, "ticket")),
+    "clan/brouillon": _v_par_id("brouillon"),
+    "clan/supprimer_brouillon": _v_par_id("brouillon"),
+    #  Publier : le brouillon, ou la publication incertaine qu'on force (ouverte dans le composeur sous ce nom-là).
+    "clan/publier": lambda c: [o for o in (_objet_si("brouillon", _champ_id(c)), _objet_si("evenement", _champ_id(c))) if o],
+    "clan/modifier": _v_par_id("evenement"),
+    "clan/annuler": _v_par_id("evenement"),
+    "nettoyage/regle": lambda c: _objet_si("nettoyage", _champ_id(c, "cle")),
+}
+#  Les actions historiques (`/tableau/espace/action`) qui touchent un objet du site.
+VERROUS_ACTIONS = {"ticket_fermer": lambda c: _objet_si("dossier", _champ_id(c, "ticket")),
+                   "candidature": lambda c: _objet_si("dossier", _champ_id(c, "ticket"))}
+
+
+async def _objets_ecriture(nom: str, fn, corps) -> list:
+    """Les objets (clés valides) que touche une écriture. Une fonction en échec : aucun (l'écriture garde ses propres
+    contrôles), et le détail part au journal."""
+    if fn is None or not isinstance(corps, dict):
+        return []
+    try:
+        r = fn(corps)
+        if inspect.isawaitable(r):
+            r = await r
+    except Exception as ex:
+        _log("[TABLEAU][E20] objet d'un verrou illisible")
+        _log(f"[TABLEAU][E20:DETAIL] {nom} {type(ex).__name__} {ex}")
+        return []
+    return [o for o in (objet_direct(x) for x in ([r] if isinstance(r, str) else list(r or []))) if o]
+
+
+_INTERNES.update({nom: {d["methode"]: _normaliser_route(nom, d)} for nom, d in {
+    "direct/etat": {"methode": "GET", "fn": _route_direct_etat},
+    "direct/envoi": {"methode": "POST", "fn": _route_direct_envoi, "ecriture": False, "corps_max": DIRECT_MSG_MAX},
+}.items()})

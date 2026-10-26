@@ -228,6 +228,7 @@ def construire_app():
     app.router.add_route('GET', '/tableau/espace/api/{nom:.+}', _tableau, name="tableau:api_site")
     app.router.add_route('POST', '/tableau/espace/api/{nom:.+}', _tableau, name="tableau:api_site_post")
     app.router.add_post('/tableau/espace/sync', _tableau, name="tableau:sync")
+    app.router.add_get('/tableau/espace/direct', _tableau, name="tableau:direct")   # la présence en direct (WebSocket)
     app.router.add_get('/tableau/espace/donnees', _tableau, name="tableau:api")
     app.router.add_get('/tableau/espace/membre', _tableau, name="tableau:membre")
     app.router.add_get('/tableau/espace/recherche', _tableau, name="tableau:recherche")

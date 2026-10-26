@@ -14,6 +14,7 @@ import {
   bouton, pastille, tampon, vide, segment, liste, champ, saisie, zoneTexte, interrupteur, caseACocher, radios, confirmer, pancarte,
   toast, squelettes, paginer, bandeau, majBoutonsReseau, nomDe,
 } from "./ui.js";
+import { avecVerrou, protegerZone, siLibre } from "./direct.js";
 
 const TYPES = [
   ["evenement", "Événement", "calendrier", "Une date, un minuteur, des rappels, et qui est disponible."],
@@ -221,6 +222,15 @@ async function composer(zone, E0) {
   const garderLocal = retarder(() => garderSaisie("composeur", composeur), 400);
   const apercuServeur = retarder(() => majApercu(true), 900);
   let apercuDistant = null, jeton = 0;
+  // Présence en direct : le brouillon (ou la publication) ouvert ici ne s'ouvre que chez une personne à la fois.
+  const objetOuvert = () => (composeur && composeur.id ? (composeur.publie ? "evenement:" : "brouillon:") + composeur.id : null);
+  const titreOuvert = () => (composeur && composeur.publie ? "la publication « " : "le brouillon « ") + ((composeur && (composeur.v.titre || LIB_TYPE[composeur.v.type])) || "sans titre") + " »";
+  const verrou = protegerZone(zone, objetOuvert(), titreOuvert(), { des: "ouverture", quitter: { libelle: "Nouveau brouillon", fn: () => nouveau(true) },
+    relire: async () => {
+      const el = trouver(await charger("evenements", { forcer: true }), composeur && composeur.id);
+      if (el) chargerElement(el); else nouveau(true);
+    } });
+  const suivreObjet = () => verrou.changerObjet(objetOuvert(), titreOuvert());
 
   const changer = (k, x, sansRendu) => {
     composeur.v[k] = x;
@@ -354,6 +364,7 @@ async function composer(zone, E0) {
     const meme = (composeur.cle_client && (op.cle === composeur.cle_client || objet.cle_client === composeur.cle_client)) || (composeur.id && String(objet.id) === String(composeur.id));
     if (!meme) return;
     composeur.id = objet.id; composeur.version = objet.version; composeur.maj = objet.maj || Math.floor(maintenant());
+    suivreObjet();
     // Rien de saisi depuis : le composeur montre la version enregistrée (un conflit réglé champ par champ, un texte
     // nettoyé par le serveur). Il ne se redessine que si elle diffère de ce qui est à l'écran.
     if (!composeur.sale && objet.valeurs && objet.type) {
@@ -507,6 +518,7 @@ async function composer(zone, E0) {
       && !(await confirmer({ titre: "Repartir de zéro ?", texte: "Les modifications pas encore enregistrées sont perdues.", libelleOk: "Repartir de zéro", style: "danger" }))) return;
     composeur = neuf(E, composeur ? composeur.v.type : "evenement");
     oublierSaisie("composeur");
+    suivreObjet();
     apercuDistant = null;
     construire();
     majApercu(false);
@@ -516,6 +528,7 @@ async function composer(zone, E0) {
   /** Un élément du serveur dans le composeur (brouillon, publication, ou la réponse du serveur après un envoi). */
   function chargerElement(el) {
     composeur = etatDepuis(el, E);
+    suivreObjet();
     garderLocal();
     apercuDistant = null;
     construire();
@@ -552,6 +565,7 @@ async function composer(zone, E0) {
     // supprimé depuis la liste ne doit plus être relu par un aperçu différé.
     quitter() {
       stopSucces(); stopFile(); stopReseau();
+      verrou.finir();
       apercuServeur.annuler();
       garderLocal.annuler();
       if (composeur) garderSaisie("composeur", composeur);
@@ -1011,7 +1025,7 @@ function carteElement(el, actions) {
   const att = enAttenteDe(el);
   const r = el.reponses || {};
   const evenementPublie = el.type === "evenement" && el.statut && el.statut !== "brouillon";
-  return h("article", { classe: "feuillet evt-carte" + (att ? " en-attente" : ""), vars: { "--accent": RE_HEX.test(f.couleur || "") ? f.couleur : "#a8823f" } },
+  return avecVerrou(h("article", { classe: "feuillet evt-carte" + (att ? " en-attente" : ""), vars: { "--accent": RE_HEX.test(f.couleur || "") ? f.couleur : "#a8823f" } },
     h("div", { classe: "evt-tete" }, icone((TYPES.find((t) => t[0] === el.type) || TYPES[1])[2]), h("span", { classe: "champ-lib" }, LIB_TYPE[el.type] || el.type),
       el.statut && el.statut !== "brouillon" ? tampon(lib, coul, true) : null, att ? tampon(att === "conflit" ? "Conflit" : att === "refus" || att === "erreur" ? "Refusé" : "En attente d'envoi", att === "attente" ? "ambre" : "", true) : null),
     h("h3", { classe: "titre-carte" }, el.titre || f.titre || "Sans titre"),
@@ -1024,8 +1038,10 @@ function carteElement(el, actions) {
     el.type === "annonce" && el.statut && el.statut !== "brouillon" ? h("p", { classe: "meta" }, r.vus ? "Vu par " + nombre(r.vus) + (r.vus > 1 ? " membres" : " membre") : "Personne ne l'a encore marquée « Vu ».") : null,
     el.note ? h("p", { classe: "aide" }, el.note) : null,
     h("p", { classe: "meta" }, ligneMeta(el)),
-    h("div", { classe: "feuillet-pied" }, actions));
+    h("div", { classe: "feuillet-pied" }, actions)), objetDe(el));
 }
+/** La clé du direct d'un élément : un brouillon, ou une publication (la page d'en face la tient sous ce nom). */
+const objetDe = (el) => (el && el.id ? (!el.statut || el.statut === "brouillon" ? "brouillon:" : "evenement:") + el.id : null);
 /** Les gestes possibles selon l'état réel de l'élément (le serveur refuse le reste). */
 function actionsDe(el, recharger) {
   if (!el.statut || el.statut === "brouillon") return [
@@ -1047,6 +1063,7 @@ function actionsDe(el, recharger) {
   if (enLigneSurDiscord(el)) {
     a.push(bouton("Modifier", { classe: "p", icone: "plume", onclick: () => ouvrirDansComposeur(el) }),
       bouton("Actualiser la carte", { classe: "p discret", icone: "synchro", reseau: true, titre: "Réécrire la carte sur Discord d'après les données du jour (réponses, noms, affiches).", onclick: async () => {
+        if (!siLibre(objetDe(el))) return;
         const r = await versDiscord("clan/modifier", { id: el.id, version: el.version });
         toast(r.ok ? "Carte actualisée sur Discord." : messageErreur(r, "Actualisation impossible."), r.ok ? "succes" : "erreur");
         recharger();
@@ -1059,6 +1076,7 @@ function actionsDe(el, recharger) {
 function boutonAnnuler(el, recharger) {
   const evenement = el.type === "evenement" && el.statut === "publie";
   return bouton(evenement ? "Annuler l'événement" : "Retirer", { classe: "p danger", reseau: true, onclick: async () => {
+    if (!siLibre(objetDe(el))) return;
     const v = el.valeurs || {};
     const prevenirPossible = evenement && v.reponses && v.mention !== "aucune" && (el.reponses || {}).disponibles > 0;
     let prevenir = prevenirPossible;
@@ -1075,6 +1093,7 @@ function boutonAnnuler(el, recharger) {
   } });
 }
 async function supprimerBrouillon(el, recharger) {
+  if (!siLibre(objetDe(el))) return;
   const ok = await confirmer({ titre: "Supprimer ce brouillon ?", texte: "« " + (el.titre || "Sans titre") + " » disparaît. Rien n'a été publié.", libelleOk: "Supprimer", style: "danger" });
   if (!ok) return;
   // Le brouillon ouvert dans le composeur : le composeur repart de zéro (sinon il enregistrerait un brouillon disparu).
