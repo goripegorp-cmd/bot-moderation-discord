@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import math
 import re
@@ -78,6 +79,8 @@ _log = print
 _verrou = None
 _permis: dict = {}              # serveur → (heure, ensemble des images permises)
 _taches: set = set()
+_generations: dict = {}         # serveur → compteur des écritures (la vitrine publique renouvelle ses réponses)
+PUBLICS_DEPART = ("bandeau", "texte")   # au départ, sur la vitrine : le bandeau et le code de l'équipage
 
 
 def _t(g, cle: str, **valeurs) -> str:
@@ -90,8 +93,9 @@ def _t(g, cle: str, **valeurs) -> str:
 #  se réécrit quand elle change).
 GROUPE = "equipage_site"
 textes.nommer_groupe(GROUPE, "Le site de l'équipage", 50)
-_ONGLETS, _PAGES, _FIN, _AUTO, _LIEN = ("Les trois onglets", "Les pages", "Le pied de page et les adieux",
-                                        "Les actualités automatiques", "Le lien sur Discord")
+_ONGLETS, _PAGES, _FIN, _AUTO, _LIEN, _VITRINE = ("Les trois onglets", "Les pages", "Le pied de page et les adieux",
+                                                  "Les actualités automatiques", "Le lien sur Discord",
+                                                  "La vitrine publique")
 TEXTES = (
     ("titre", "L'Équipage", "Le nom du site", "En haut de la page, à côté du médaillon.", 40, True, _ONGLETS, ()),
     ("onglet.accueil", "Accueil", "L'onglet « Accueil »", "Sur sa pancarte.", 30, True, _ONGLETS, ()),
@@ -137,18 +141,80 @@ TEXTES = (
      ()),
     ("lien.reserve", "Réservé aux membres de l'équipage : il faut le rôle du clan.", "Le refus",
      "Pour quelqu'un qui n'a pas le rôle du clan.", 300, True, _LIEN, ()),
+    #  27/10/2026 : la vitrine publique (`site_vitrine.py`, `/equipage`) et l'aperçu de son lien dans Discord.
+    ("vitrine.phrase", "Les avis de recherche de tout l'équipage, rangés par métier.", "La vitrine · la phrase du mur",
+     "Sous le titre du mur des affiches, sur la vitrine publique.", 160, True, _VITRINE, ()),
+    ("vitrine.vide", "Les avis de recherche arrivent bientôt.", "La vitrine · sans affiche",
+     "Quand aucune affiche n'est montrée sur la vitrine.", 160, True, _VITRINE, ()),
+    ("vitrine.pied", "La vitrine de l'équipage : ce que la direction choisit de montrer.", "La vitrine · le pied de page",
+     "En bas de la vitrine publique.", 200, True, _VITRINE, ()),
+    ("vitrine.membre", "Membre du clan ? Ton accès personnel : le guide du clan sur Discord.",
+     "La vitrine · pour les membres", "Sous le pied de page de la vitrine.", 200, True, _VITRINE, ()),
+    ("vitrine.og.titre", "{titre} · {clan}", "L'aperçu du lien · le titre",
+     "Le titre de la carte quand le lien de la vitrine est collé dans Discord.", 100, True, _VITRINE,
+     (("titre", "le nom du site"), ("clan", "« Clan » et le nom du clan"))),
+    ("vitrine.og.description", "{pirates} pirates, leurs avis de recherche et le code de l'équipage. Viens voir à quoi "
+                               "ressemble notre équipage.", "L'aperçu du lien · la phrase",
+     "Sous le titre de la carte, dans Discord.", 300, True, _VITRINE, (("pirates", "le nombre d'affiches montrées"),)),
+    ("vitrine.banniere", "{pirates} pirates · {primes} berrys de primes", "L'aperçu du lien · la ligne de l'image",
+     "Sur l'image de la carte, sous le nom du clan.", 100, True, _VITRINE,
+     (("pirates", "le nombre d'affiches montrées"), ("primes", "le total de leurs primes"))),
 )
 for _k, (_cle, _defaut, _titre, _aide, _max, _ligne, _partie, _vars) in enumerate(TEXTES):
     textes.declarer(f"{GROUPE}.{_cle}", _defaut, groupe=GROUPE, titre=_titre, aide=_aide, max_=_max, lignes=not _ligne,
                     partie=_partie, variables=_vars, ordre=10 + _k)
+#  Le bouton « Copier le lien de l'équipage » est AUSSI sur le site de la direction : des clés « site. » (servies à la
+#  page de la direction par `textes/site`), rangées dans cette famille.
+LIEN_PUBLIC = (("site.equipage.lien", "Copier le lien de l'équipage", "Le bouton « Copier le lien de l'équipage »",
+                "En haut à droite des deux sites et de la vitrine : il copie l'adresse publique de la vitrine.", 60),
+               ("site.equipage.lien.copie", "Lien copié", "Le bouton « Copier le lien » · l'avis",
+                "Ce que le site dit une fois le lien copié.", 60),
+               ("site.equipage.lien.repli", "Copie ce lien pour le partager :", "Le bouton « Copier le lien » · sans "
+                "presse-papiers", "Quand le navigateur refuse la copie : le lien est montré, prêt à copier.", 100))
+for _k, (_cle, _defaut, _titre, _aide, _max) in enumerate(LIEN_PUBLIC):
+    textes.declarer(_cle, _defaut, groupe=GROUPE, titre=_titre, aide=_aide, max_=_max, lignes=False, partie=_VITRINE,
+                    ordre=200 + _k)
+#  Les équipes du clan (27/10/2026) : leurs noms se lisent sur les trois pages (la direction, l'équipage, la vitrine) —
+#  des clés « site. », rangées dans cette famille.
+NOMS_EQUIPES = (("site.equipes.titre", "Les équipes", "Les équipes · le titre", "Sur le site de l'équipage et la vitrine.", 40),
+                ("site.equipes.phrase", "Chaque équipe, son chef d'équipe et les matelots qu'il a sous sa main.",
+                 "Les équipes · la phrase", "Sous le titre des équipes.", 160),
+                ("site.equipes.chef", "Chef d'équipe", "Le chef d'équipe · son titre",
+                 "Sur l'insigne du chef, partout où il paraît.", 40),
+                ("site.equipes.sans", "Sans équipe", "Les membres sans équipe · le titre", "Le dernier groupe.", 40),
+                ("site.equipes.mon", "Mon équipe", "« Mon équipe » · le titre", "Sur « Ma fiche », pour chaque membre d'une "
+                 "équipe.", 40),
+                ("site.equipes.sous_main", "Sous ta main", "« Mon équipe » · pour le chef",
+                 "Ce que lit le chef au-dessus des membres de son équipe.", 60),
+                ("site.equipes.aucune", "Pas encore d'équipe : la direction forme les équipes.", "Sans équipe · « Ma fiche »",
+                 "Ce que lit un membre qui n'est dans aucune équipe.", 160))
+for _k, (_cle, _defaut, _titre, _aide, _max) in enumerate(NOMS_EQUIPES):
+    textes.declarer(_cle, _defaut, groupe=GROUPE, titre=_titre, aide=_aide, max_=_max, lignes=False,
+                    partie="Les équipes", ordre=300 + _k)
 textes.declarer("guide.site.texte", "### Le site de l'équipage · Crew website\nTon avis de recherche, tout l'équipage, les "
-                "nouvelles et les chiffres du clan, en lecture seule.\n-# Your WANTED poster, the whole crew, clan news "
-                "and stats, read-only.", groupe="guide", titre="Le site de l'équipage", partie="Le bas du guide", ordre=35,
-                max_=800, aide="Sa ligne dans le guide (pour les membres du rôle du clan) : un lien personnel au site.")
+                "nouvelles et les chiffres du clan, en lecture seule. La vitrine, elle, est publique : partage-la.\n-# "
+                "Your WANTED poster, the whole crew, clan news and stats, read-only. The showcase is public: share it.",
+                groupe="guide", titre="Le site de l'équipage", partie="Le bas du guide", ordre=35, max_=800,
+                aide="Sa ligne dans le guide (pour les membres du rôle du clan) : un lien personnel au site, et le lien "
+                     "public de la vitrine.")
 textes.declarer("guide.site.bouton", "Ouvrir · Open", groupe="guide", titre="Le site de l'équipage · le bouton",
                 partie="Le bas du guide", ordre=36, max_=80, lignes=False, aide="Il donne le lien personnel, pour soi.")
-#  Les clés que la page lit (`depart`) : la famille, sauf ce qui ne sert qu'au bot (le lien, les actualités).
-PAGE = tuple(f"{GROUPE}.{cle}" for cle, *_r in TEXTES if not cle.startswith(("lien.", "auto.")))
+textes.declarer("guide.vitrine.bouton", "La vitrine · Showcase", groupe="guide",
+                titre="Le site de l'équipage · le bouton de la vitrine", partie="Le bas du guide", ordre=37, max_=80,
+                lignes=False, aide="À côté du précédent : il ouvre la vitrine publique de l'équipage (le lien à partager).")
+#  Les clés que la page lit (`depart`) : la famille, sauf ce qui ne sert qu'au bot (le lien, les actualités, l'aperçu
+#  du lien dans Discord), et les libellés du bouton « Copier le lien ».
+PAGE = tuple(f"{GROUPE}.{cle}" for cle, *_r in TEXTES
+             if not cle.startswith(("lien.", "auto.", "vitrine.og.", "vitrine.banniere"))) + tuple(c for c, *_r in LIEN_PUBLIC) \
+    + tuple(c for c, *_r in NOMS_EQUIPES)
+#  Les noms « site. » que les pages de l'équipage et la vitrine lisent par `libelle` (seulement ceux-là).
+PREFIXES_LIBELLES = ("site.affiche.", "site.equipage.", "site.equipes.")
+
+
+def libelles_page(g) -> dict:
+    """Les noms « site. » de ces pages, tels que ce serveur les a (réécrits, sinon d'origine)."""
+    renommes = textes.valeurs_site(getattr(g, "id", g) or 0)
+    return {k: v for k, v in renommes.items() if k.startswith(PREFIXES_LIBELLES)}
 
 
 def textes_page(g) -> dict:
@@ -187,6 +253,33 @@ async def init_db():
             " ordre INTEGER NOT NULL DEFAULT 0, visible INTEGER NOT NULL DEFAULT 1, contenu TEXT NOT NULL DEFAULT '{}',"
             " version INTEGER NOT NULL DEFAULT 1, cree_le INTEGER NOT NULL, cree_par INTEGER NOT NULL DEFAULT 0,"
             " maj_le INTEGER NOT NULL, maj_par INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, id))")
+        #  27/10/2026 : la vitrine publique — un bloc « public » s'y montre. Une base d'avant (sans la colonne) : le
+        #  bandeau et le premier texte (le code de l'équipage, au départ) deviennent publics, le reste reste privé.
+        async with db.execute("PRAGMA table_info(equipage_blocs)") as cur:
+            colonnes = {r[1] for r in await cur.fetchall()}
+        if "public" not in colonnes:
+            await db.execute("ALTER TABLE equipage_blocs ADD COLUMN public INTEGER NOT NULL DEFAULT 0")
+            async with db.execute("SELECT guild_id, id, type FROM equipage_blocs ORDER BY guild_id, ordre, cree_le, id") as cur:
+                lignes = await cur.fetchall()
+            premiers_textes = set()
+            for gid, ident, type_ in lignes:
+                if type_ == "bandeau" or (type_ == "texte" and gid not in premiers_textes):
+                    await db.execute("UPDATE equipage_blocs SET public=1 WHERE guild_id=? AND id=?", (gid, ident))
+                if type_ == "texte":
+                    premiers_textes.add(gid)
+        #  Les affiches retirées de la vitrine par la direction (une ligne = masquée ; aucune ligne = visible).
+        await db.execute("CREATE TABLE IF NOT EXISTS equipage_vitrine (guild_id INTEGER NOT NULL, affiche_id TEXT NOT NULL,"
+                         " maj_le INTEGER NOT NULL, maj_par INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, affiche_id))")
+        #  Les équipes du clan : un nom, un type (« metier:<clé> » ou « libre:<libellé> »), un chef, l'ordre de la direction.
+        #  Un membre est dans UNE équipe à la fois (la clé de `equipes_membres` est le membre) ; le chef n'y est pas listé.
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS equipes (guild_id INTEGER NOT NULL, id TEXT NOT NULL, nom TEXT NOT NULL,"
+            " type TEXT NOT NULL DEFAULT '', chef_id INTEGER NOT NULL DEFAULT 0, ordre INTEGER NOT NULL DEFAULT 0,"
+            " version INTEGER NOT NULL DEFAULT 1, cree_le INTEGER NOT NULL, maj_le INTEGER NOT NULL,"
+            " maj_par INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, id))")
+        await db.execute("CREATE TABLE IF NOT EXISTS equipes_membres (guild_id INTEGER NOT NULL, equipe_id TEXT NOT NULL,"
+                         " membre_id INTEGER NOT NULL, PRIMARY KEY (guild_id, membre_id))")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_equipes_membres ON equipes_membres(guild_id, equipe_id)")
         await db.execute(
             "CREATE TABLE IF NOT EXISTS equipage_actualites (guild_id INTEGER NOT NULL, id TEXT NOT NULL,"
             " titre TEXT NOT NULL, texte TEXT NOT NULL DEFAULT '', image TEXT NOT NULL DEFAULT '',"
@@ -323,7 +416,7 @@ def _cle_tri(g, a: dict):
 #  Les blocs de l'accueil
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_COL_BLOCS = ("id", "type", "ordre", "visible", "contenu", "version", "cree_le", "cree_par", "maj_le", "maj_par")
+_COL_BLOCS = ("id", "type", "ordre", "visible", "contenu", "version", "cree_le", "cree_par", "maj_le", "maj_par", "public")
 
 
 def _ligne_bloc(r) -> dict:
@@ -334,6 +427,7 @@ def _ligne_bloc(r) -> dict:
         contenu = {}
     b["contenu"] = contenu if isinstance(contenu, dict) else {}
     b["visible"] = bool(b["visible"])
+    b["public"] = bool(b["public"])
     return b
 
 
@@ -392,9 +486,9 @@ async def _assurer_depart(g) -> None:
                 t = int(time.time())
                 for n, (type_, contenu) in enumerate(depart(), start=1):
                     await db.execute("INSERT INTO equipage_blocs (guild_id, id, type, ordre, visible, contenu, version,"
-                                     " cree_le, cree_par, maj_le, maj_par) VALUES (?,?,?,?,1,?,1,?,0,?,0)",
+                                     " cree_le, cree_par, maj_le, maj_par, public) VALUES (?,?,?,?,1,?,1,?,0,?,0,?)",
                                      (g.id, secrets.token_urlsafe(8), type_, n, json.dumps(contenu, ensure_ascii=False),
-                                      t, t))
+                                      t, t, int(type_ in PUBLICS_DEPART)))
             await db.execute("INSERT OR REPLACE INTO equipage_etat (guild_id, depart_pose) VALUES (?, 1)", (g.id,))
             await db.commit()
     _permis.pop(g.id, None)
@@ -407,7 +501,7 @@ def _sortie_bloc(b: dict, edition: bool) -> dict:
         c["image"] = _media_sortie(c.get("image") or "")
     out = {"id": b["id"], "type": b["type"], "contenu": c}
     if edition:
-        out.update(visible=b["visible"], version=int(b["version"]))
+        out.update(visible=b["visible"], version=int(b["version"]), public=b["public"])
     return out
 
 
@@ -497,9 +591,10 @@ def _sortie_actu(a: dict, edition: bool) -> dict:
     return out
 
 
-async def _publications(g, maintenant: float) -> list:
+async def _publications(g, maintenant: float, public: bool = False) -> list:
     """Les annonces et événements PUBLIÉS du clan (module des événements, s'il est là) — jamais un brouillon, ni qui
-    les a écrits, ni où ils sont postés : titre, texte, image, date, lieu, réponses (des nombres)."""
+    les a écrits, ni où ils sont postés : titre, texte, image, date, lieu, réponses (des nombres). `public` (la
+    vitrine) : les mentions deviennent « @membre » et « #salon » — aucun nom de Discord ne sort."""
     try:
         import evenements
     except ModuleNotFoundError:
@@ -517,7 +612,8 @@ async def _publications(g, maintenant: float) -> list:
         quand = int(v.get("quand") or 0) if evenement else 0
         out.append({"id": int(e["id"]), "type": e["type"], "statut": e["statut"],
                     "titre": sans_emoji(v.get("titre")) or ("Événement" if evenement else "Annonce"),
-                    "texte": texte_discord(v.get("texte"), g), "image": image if FORMAT_MEDIA.fullmatch(image or "") else "",
+                    "texte": texte_discord(v.get("texte"), None if public else g),
+                    "image": image if FORMAT_MEDIA.fullmatch(image or "") else "",
                     "quand": quand or None, "fin": evenements._fin(v) if evenement and quand else None,
                     "lieu": sans_emoji(v.get("lieu")) if evenement else "",
                     "duree_min": int(v.get("duree_min") or 0) if evenement else 0,
@@ -689,6 +785,325 @@ async def analyses(g, maintenant: float | None = None, lignes=None, publications
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Les équipes du clan (27/10/2026) : un nom, un type (un métier, ou un libellé), un chef, ses membres
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Le fondateur : « le chef d'équipe, on peut aussi lui attribuer une équipe sur le site que lui-même, il verra dans
+#  l'équipage […] ceux qui ouvriront la liste des équipages, ils verront le chef d'équipe […] trier par type d'équipe.
+#  Et en fonction de la hiérarchie. » La hiérarchie est celle qui EXISTE : le chef d'abord, puis l'ordre des grades du
+#  catalogue (un type « grade », s'il y en a un), puis le rang de prime, puis le nom. Rien d'inventé.
+
+EQUIPES_MAX = 60
+EQUIPE_MEMBRES_MAX = 250
+_badges_chef = None   # (guild_id) → {membre_id: libellé} (ou sa coroutine) — rien par défaut
+
+
+def brancher_badges_chef(fn) -> None:
+    """Le fournisseur des badges du sélecteur de chef (les chefs validés par le recrutement : « Chef validé · métier »),
+    proposés en premier. `fn(guild_id)` rend `{membre_id: libellé}` (ou une coroutine qui le rend)."""
+    global _badges_chef
+    _badges_chef = fn
+
+
+async def badges_chef(guild_id: int) -> dict:
+    """{identifiant (texte): libellé} — vide sans fournisseur, ou s'il échoue (le détail part au journal)."""
+    if _badges_chef is None:
+        return {}
+    try:
+        r = _badges_chef(int(guild_id))
+        if inspect.isawaitable(r):
+            r = await r
+    except Exception as ex:   # le sélecteur reste utilisable, sans badges
+        _signaler("E21", "badges des chefs illisibles", ex)
+        return {}
+    if not isinstance(r, dict):
+        return {}
+    return {str(k): sans_emoji(v)[:60] for k, v in r.items() if str(k).isdigit() and isinstance(v, str) and v.strip()}
+
+
+_COL_EQUIPES = ("id", "nom", "type", "chef_id", "ordre", "version", "cree_le", "maj_le", "maj_par")
+
+
+async def _equipes(guild_id: int) -> list:
+    """Les équipes (l'ordre de la direction), chacune avec ses membres (identifiants, le chef à part)."""
+    async with _get_db() as db:
+        async with db.execute(f"SELECT {', '.join(_COL_EQUIPES)} FROM equipes WHERE guild_id=? ORDER BY ordre, cree_le, id",
+                              (int(guild_id),)) as cur:
+            equipes = [dict(zip(_COL_EQUIPES, r)) for r in await cur.fetchall()]
+        async with db.execute("SELECT equipe_id, membre_id FROM equipes_membres WHERE guild_id=?", (int(guild_id),)) as cur:
+            liens = await cur.fetchall()
+    par_equipe: dict = {}
+    for eid, mid in liens:
+        par_equipe.setdefault(eid, []).append(int(mid))
+    for e in equipes:
+        e["chef_id"] = int(e["chef_id"] or 0)
+        e["membres"] = [m for m in par_equipe.get(e["id"], []) if m != e["chef_id"]]
+    return equipes
+
+
+def _type_metier(types: dict):
+    return _type_par(types, "metier", r"m[ée]tier")
+
+
+def type_equipe(brut: str, elements: dict, tm) -> dict | None:
+    """Le type d'une équipe tel que les pages le montrent : {genre, cle?, nom, icone?} — ou None."""
+    brut = str(brut or "")
+    if brut.startswith("metier:"):
+        cle = brut[7:]
+        e = elements.get((tm, cle)) if tm else None
+        return {"genre": "metier", "cle": cle, "nom": e["nom"] if e else sans_emoji(cle.replace("_", " ")).capitalize(),
+                "icone": affiches._icone_servie(e["icone"]) if e else ""}
+    if brut.startswith("libre:") and brut[6:].strip():
+        return {"genre": "libre", "nom": brut[6:]}
+    return None
+
+
+def rangs_grades(types: dict, elements: dict) -> dict:
+    """{clé de grade: rang} — l'ordre des grades du catalogue (un type « grade »), s'il y en a un ; sinon vide."""
+    gt = _type_par(types, "grade", r"\bgrades?\b")
+    if not gt:
+        return {}
+    els = sorted((e for (t, _k), e in elements.items() if t == gt), key=lambda e: (int(e["ordre"]), e["nom"].casefold()))
+    return {e["cle"]: n for n, e in enumerate(els)}
+
+
+def cle_hierarchie(a, nom: str, rangs: dict) -> tuple:
+    """La hiérarchie EXISTANTE d'un membre : son grade (ordre du catalogue), puis sa prime (rang de prime), puis son nom.
+    Sans affiche : après tous ceux qui en ont une."""
+    if a is None:
+        return (2, 0, 0, nom.casefold())
+    rang = rangs.get(a["grade"]) if a["grade"] else None
+    return (0 if rang is not None else 1, rang if rang is not None else 0, -int(a["prime"] or 0), nom.casefold())
+
+
+async def _valider_equipe(g, corps) -> dict:
+    """Une équipe saisie par la direction : nom, type (un métier du catalogue ou un libellé), chef et membres (du clan)."""
+    T = affiches._texte
+    nom = T(corps.get("nom"), "nom", 60, requis=True)
+    t = corps.get("type")
+    if t in (None, "", {}):
+        type_ = ""
+    elif isinstance(t, dict) and t.get("genre") == "metier":
+        types, elements = await affiches._catalogue()
+        tm, cle = _type_metier(types), t.get("cle")
+        if not tm or not isinstance(cle, str) or (tm, cle) not in elements:
+            raise affiches.Invalide("type", "Ce métier n'est pas au catalogue.")
+        type_ = f"metier:{cle}"
+    elif isinstance(t, dict) and t.get("genre") == "libre":
+        type_ = "libre:" + T(t.get("texte"), "type", 40, requis=True)
+    else:
+        raise affiches.Invalide("type", "Type d'équipe invalide : un métier, ou un libellé.")
+    clan = {m.id for m in _membres_clan(await _role_clan(g))}
+    chef = corps.get("chef")
+    chef_id = 0
+    if chef not in (None, "", 0, "0"):
+        chef_id = int(chef) if isinstance(chef, (str, int)) and str(chef).isdigit() else -1
+        if chef_id not in clan:
+            raise affiches.Invalide("chef", "Le chef d'équipe doit être un membre du clan.")
+    brut = corps.get("membres") or []
+    if not isinstance(brut, list) or len(brut) > EQUIPE_MEMBRES_MAX:
+        raise affiches.Invalide("membres", f"{EQUIPE_MEMBRES_MAX} membres au plus.")
+    membres = []
+    for x in brut:
+        if not isinstance(x, (str, int)) or isinstance(x, bool) or not str(x).isdigit():
+            raise affiches.Invalide("membres", "Membre invalide.")
+        if int(x) not in clan:
+            raise affiches.Invalide("membres", "Un de ces membres n'est plus au clan.")
+        if int(x) != chef_id and int(x) not in membres:
+            membres.append(int(x))
+    return {"nom": nom, "type": type_, "chef_id": chef_id, "membres": membres}
+
+
+def _nom_membre(g, mid: int) -> str:
+    m = g.get_member(int(mid)) if mid else None
+    return sans_emoji(m.display_name) if m is not None else "Membre parti"
+
+
+async def equipes_direction(g) -> dict:
+    """Pour le site de la direction (`GET equipage/equipes`) : les équipes, les métiers proposés comme type, et les badges
+    du sélecteur de chef."""
+    types, elements = await affiches._catalogue()
+    tm = _type_metier(types)
+
+    def personne(mid):
+        return {"id": str(mid), "nom": _nom_membre(g, mid), "present": g.get_member(int(mid)) is not None}
+    sortie = []
+    for e in await _equipes(g.id):
+        t = type_equipe(e["type"], elements, tm)
+        saisie = ({"genre": "metier", "cle": t["cle"]} if t and t["genre"] == "metier"
+                  else {"genre": "libre", "texte": t["nom"]} if t else None)
+        sortie.append({"id": e["id"], "nom": e["nom"], "type": t, "saisie_type": saisie,
+                       "chef": personne(e["chef_id"]) if e["chef_id"] else None,
+                       "membres": [personne(m) for m in e["membres"]], "ordre": int(e["ordre"]),
+                       "version": int(e["version"]), "maj_le": int(e["maj_le"])})
+    metiers = sorted(((k, e) for (t, k), e in elements.items() if tm and t == tm and e["actif"]),
+                     key=lambda x: (int(x[1]["ordre"]), x[1]["nom"].casefold()))
+    return {"equipes": sortie, "badges": await badges_chef(g.id),
+            "metiers": [{"cle": k, "nom": e["nom"], "icone": affiches._icone_servie(e["icone"])} for k, e in metiers]}
+
+
+async def equipes_lues(g, lignes: list, *, publiques=None) -> dict:
+    """Les équipes telles que l'équipage (ou la vitrine) les lit, chacun rangé par la hiérarchie existante.
+    `lignes` : les affiches montrées. `publiques` (la vitrine) : {id d'affiche: jeton} — une personne n'y paraît QUE par
+    son affiche montrée (aucun nom Discord, aucun avatar) ; sinon (l'équipage) : son nom et son avatar Discord aussi.
+    Rend {"equipes": [...], "sans_equipe": [...] (l'équipage seulement), "chefs": {membre: équipe}, "places": {membre: équipe}}."""
+    types, elements = await affiches._catalogue()
+    tm, rangs = _type_metier(types), rangs_grades(types, elements)
+    equipes = await _equipes(g.id)
+    affiche_de = {int(a["membre_id"]): a for a in lignes if a["membre_id"]}
+    clan = _membres_clan(await _role_clan(g))
+    tous = {m.id: m for m in clan}
+    pour_tous = sorted({e["chef_id"] for e in equipes if e["chef_id"]} | {m for e in equipes for m in e["membres"]}
+                       | (set(tous) if publiques is None else set()),
+                       key=lambda mid: cle_hierarchie(affiche_de.get(mid), _nom_membre(g, mid), rangs))
+    rang_de = {mid: n for n, mid in enumerate(pour_tous)}
+
+    def personne(mid):
+        a = affiche_de.get(mid)
+        if publiques is not None:
+            return {"affiche": publiques[a["id"]], "h": rang_de.get(mid, 0)} if a is not None and a["id"] in publiques else None
+        m = tous.get(mid) or g.get_member(int(mid))
+        return {"nom": sans_emoji(m.display_name) if m is not None else "Membre parti",
+                "avatar": str(m.display_avatar.with_size(64).url) if m is not None else "",
+                "affiche": a["id"] if a is not None else None, "h": rang_de.get(mid, 0)}
+    sortie, places, chefs = [], {}, {}
+    for n, e in enumerate(equipes, start=1):
+        membres = [p for p in (personne(m) for m in sorted(e["membres"], key=lambda mid: rang_de.get(mid, 0))) if p]
+        chef = personne(e["chef_id"]) if e["chef_id"] else None
+        if publiques is not None and chef is None and not membres:
+            continue   # la vitrine ne montre une équipe que par des affiches montrées
+        t = type_equipe(e["type"], elements, tm)
+        sortie.append({"id": e["id"] if publiques is None else f"q{n}", "nom": e["nom"], "type": t, "chef": chef,
+                       "membres": membres})
+        if e["chef_id"]:
+            chefs[e["chef_id"]] = e["id"]
+            places[e["chef_id"]] = e["id"]
+        for m in e["membres"]:
+            places[m] = e["id"]
+    out = {"equipes": sortie, "chefs": chefs, "places": places}
+    if publiques is None:
+        out["sans_equipe"] = [personne(mid) for mid in pour_tous if mid in tous and mid not in places]
+    return out
+
+
+# ─── Les écritures de la direction (tête seule : `tableau._executer`) ──────────
+
+def _sortie_equipe_conflit(e: dict, g) -> dict:
+    return {"id": e["id"], "nom": e["nom"], "version": int(e["version"]),
+            "chef": {"id": str(e["chef_id"]), "nom": _nom_membre(g, e["chef_id"])} if e["chef_id"] else None,
+            "membres": [str(m) for m in e["membres"]]}
+
+
+async def _route_equipes(g, auteur, requete, corps):
+    """`GET equipage/equipes` : les équipes (site de la direction)."""
+    return 200, await equipes_direction(g)
+
+
+async def _route_equipe(g, auteur, requete, corps):
+    """`POST equipage/equipe` `{id?, nom, type, chef, membres, version?}` : créer ou modifier une équipe. Un membre ajouté
+    quitte son ancienne équipe ; le chef n'est le chef que d'UNE équipe, et jamais membre d'une autre."""
+    ident = corps.get("id")
+    try:
+        version = affiches._entier(corps.get("version"), "version", 0, 10 ** 9, defaut=0)
+        v = await _valider_equipe(g, corps)
+        async with _verrou_ecriture():
+            equipes = await _equipes(g.id)
+            deja = None
+            if ident not in (None, ""):
+                if not isinstance(ident, str) or not FORMAT_ID.fullmatch(ident):
+                    return 400, {"erreur": "Identifiant d'équipe invalide.", "champ": "id"}
+                deja = next((e for e in equipes if e["id"] == ident), None)
+                if deja is None:
+                    return 404, {"erreur": "Cette équipe n'existe plus."}
+                if version != int(deja["version"]):
+                    return 409, {"conflit": True, "actuelle": _sortie_equipe_conflit(deja, g)}
+            elif len(equipes) >= EQUIPES_MAX:
+                return 400, {"erreur": f"{EQUIPES_MAX} équipes au plus : supprime d'abord une équipe."}
+            autres = [e for e in equipes if deja is None or e["id"] != deja["id"]]
+            if any(e["nom"].casefold() == v["nom"].casefold() for e in autres):
+                raise affiches.Invalide("nom", "Une autre équipe porte déjà ce nom.")
+            chefs = {e["chef_id"]: e for e in autres if e["chef_id"]}
+            if v["chef_id"] in chefs:
+                raise affiches.Invalide("chef", f"{_nom_membre(g, v['chef_id'])} est déjà chef de « {chefs[v['chef_id']]['nom']} ».")
+            for m in v["membres"]:
+                if m in chefs:
+                    raise affiches.Invalide("membres", f"{_nom_membre(g, m)} est chef de « {chefs[m]['nom']} » : nomme d'abord "
+                                                       "un autre chef là-bas.")
+            personnes = set(v["membres"]) | ({v["chef_id"]} if v["chef_id"] else set())
+            quittees = {e["id"] for e in autres if personnes & set(e["membres"])}
+            t = int(time.time())
+            async with _get_db() as db:
+                if deja is None:
+                    ident = secrets.token_urlsafe(8)
+                    await db.execute("INSERT INTO equipes (guild_id, id, nom, type, chef_id, ordre, version, cree_le, maj_le,"
+                                     " maj_par) VALUES (?,?,?,?,?,?,1,?,?,?)",
+                                     (g.id, ident, v["nom"], v["type"], v["chef_id"],
+                                      max([int(e["ordre"]) for e in equipes], default=0) + 1, t, t, auteur.id))
+                else:
+                    await db.execute("UPDATE equipes SET nom=?, type=?, chef_id=?, version=version+1, maj_le=?, maj_par=?"
+                                     " WHERE guild_id=? AND id=?", (v["nom"], v["type"], v["chef_id"], t, auteur.id, g.id, ident))
+                    await db.execute("DELETE FROM equipes_membres WHERE guild_id=? AND equipe_id=?", (g.id, ident))
+                for m in personnes:   # une seule équipe à la fois : ils quittent l'ancienne
+                    await db.execute("DELETE FROM equipes_membres WHERE guild_id=? AND membre_id=?", (g.id, m))
+                for m in v["membres"]:
+                    await db.execute("INSERT INTO equipes_membres (guild_id, equipe_id, membre_id) VALUES (?,?,?)", (g.id, ident, m))
+                for eid in quittees:   # une équipe qui perd un membre change aussi (son éditeur ouvert le saura : 409)
+                    await db.execute("UPDATE equipes SET version=version+1, maj_le=?, maj_par=? WHERE guild_id=? AND id=?",
+                                     (t, auteur.id, g.id, eid))
+                await db.commit()
+    except affiches.Invalide as ex:
+        return 400, ex.corps()
+    _apres_ecriture(g)
+    morceaux = [f"chef : {_nom_membre(g, v['chef_id'])}" if v["chef_id"] else "sans chef",
+                f"{len(v['membres'])} membre{'s' if len(v['membres']) > 1 else ''}"]
+    return 200, {"ok": True, "id": ident, **(await equipes_direction(g)),
+                 "_journal": f"Équipes : « {v['nom']} » {'créée' if deja is None else 'modifiée'} ({', '.join(morceaux)})"}
+
+
+async def _route_equipe_supprimer(g, auteur, requete, corps):
+    """`POST equipage/equipe/supprimer` `{id}` : l'équipe part ; ses membres et son chef deviennent « sans équipe »."""
+    ident = corps.get("id")
+    if not isinstance(ident, str) or not FORMAT_ID.fullmatch(ident):
+        return 400, {"erreur": "Identifiant d'équipe invalide.", "champ": "id"}
+    async with _verrou_ecriture():
+        e = next((x for x in await _equipes(g.id) if x["id"] == ident), None)
+        if e is not None:
+            async with _get_db() as db:
+                await db.execute("DELETE FROM equipes_membres WHERE guild_id=? AND equipe_id=?", (g.id, ident))
+                await db.execute("DELETE FROM equipes WHERE guild_id=? AND id=?", (g.id, ident))
+                await db.commit()
+    _apres_ecriture(g)
+    return 200, {"ok": True, **(await equipes_direction(g)),
+                 "_journal": f"Équipes : « {e['nom']} » supprimée" if e is not None else None}
+
+
+async def _route_equipe_deplacer(g, auteur, requete, corps):
+    """`POST equipage/equipe/deplacer` `{id, sens: "haut" | "bas"}` : l'ordre des équipes (sur les trois pages)."""
+    ident, sens = corps.get("id"), corps.get("sens")
+    if not isinstance(ident, str) or not FORMAT_ID.fullmatch(ident):
+        return 400, {"erreur": "Identifiant d'équipe invalide.", "champ": "id"}
+    if sens not in ("haut", "bas"):
+        return 400, {"erreur": "Sens : « haut » ou « bas ».", "champ": "sens"}
+    async with _verrou_ecriture():
+        equipes = await _equipes(g.id)
+        i = next((k for k, e in enumerate(equipes) if e["id"] == ident), None)
+        if i is None:
+            return 404, {"erreur": "Cette équipe n'existe plus."}
+        j = i - 1 if sens == "haut" else i + 1
+        bouge = 0 <= j < len(equipes)
+        if bouge:
+            equipes[i], equipes[j] = equipes[j], equipes[i]
+            async with _get_db() as db:
+                for n, e in enumerate(equipes, start=1):
+                    await db.execute("UPDATE equipes SET ordre=? WHERE guild_id=? AND id=?", (n, g.id, e["id"]))
+                await db.commit()
+    if bouge:
+        _apres_ecriture(g)
+    e = equipes[j] if bouge else equipes[i]
+    return 200, {"ok": True, **(await equipes_direction(g)),
+                 "_journal": f"Équipes : « {e['nom']} » déplacée vers le {sens}" if bouge else None}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Les lectures (`/tableau/equipage/api/<nom>`) — session « equipage » ou « tout »
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -705,7 +1120,7 @@ async def lecture_depart(g, membre, session: dict, requete: dict):
         "version": tableau.version_page(), "textes": textes_page(g),
         #  Les noms des statuts et des tampons d'affiche renommés par la direction (`site/affiche.js` les lit par
         #  `libelle`) : seulement ceux-là — l'équipage n'entre pas dans `textes/site`.
-        "libelles": {k: v for k, v in textes.valeurs_site(g.id).items() if k.startswith("site.affiche.")},
+        "libelles": libelles_page(g),
         "modules": {"direct": edition and (tableau.SITE / "direct.js").is_file()},
     }
 
@@ -720,8 +1135,16 @@ async def lecture_equipage(g, membre, session: dict, requete: dict):
     if grade_t:
         cites |= {(grade_t, a["grade"]) for a in publiques if a["grade"]}
     moi = next((a["id"] for a in lignes if membre is not None and int(a["membre_id"] or 0) == membre.id), None)
+    #  La direction (mode édition) voit aussi quelles affiches sont retirées de la vitrine publique.
+    vitrine = {"masquees": sorted(await vitrine_masquees(g.id) & {a["id"] for a in lignes})} \
+        if session.get("portee") == "tout" else None
+    #  Les équipes (27/10/2026) : chacune, son chef mis en avant, ses membres par la hiérarchie existante ; la mienne.
+    eq = await equipes_lues(g, lignes)
+    mien = int(getattr(membre, "id", 0) or 0)
+    mon = {"id": eq["places"][mien], "role": "chef" if mien in eq["chefs"] else "membre"} if mien in eq["places"] else None
     return 200, {
-        "affiches": publiques, "moi": moi,
+        "affiches": publiques, "moi": moi, **({"vitrine": vitrine} if vitrine is not None else {}),
+        "equipes": eq["equipes"], "sans_equipe": eq["sans_equipe"], "mon_equipe": mon,
         "catalogue": {
             "types": [{"cle": t["cle"], "nom": t["nom"], "ordre": int(t["ordre"]), "multiple": bool(t["multiple"]),
                        "champ": t["champ"]} for t in sorted(types.values(), key=lambda t: (t["ordre"], t["nom"].casefold()))],
@@ -824,6 +1247,20 @@ async def _accueil_direction(g) -> dict:
 
 def _apres_ecriture(g) -> None:
     _permis.pop(g.id, None)
+    _generations[g.id] = _generations.get(g.id, 0) + 1
+
+
+def generation(guild_id: int) -> int:
+    """Le compteur des écritures de la direction sur ce serveur : la vitrine publique renouvelle ses réponses quand il
+    change (sinon au plus tard au bout de son délai)."""
+    return _generations.get(int(guild_id), 0)
+
+
+async def vitrine_masquees(guild_id: int) -> set:
+    """Les affiches que la direction a retirées de la vitrine publique (identifiants)."""
+    async with _get_db() as db:
+        async with db.execute("SELECT affiche_id FROM equipage_vitrine WHERE guild_id=?", (int(guild_id),)) as cur:
+            return {str(r[0]) for r in await cur.fetchall()}
 
 
 async def _route_bloc(g, auteur, requete, corps):
@@ -897,6 +1334,63 @@ async def _route_bloc_visible(g, auteur, requete, corps):
                  f"Site de l'équipage : bloc « {_titre_bloc(b['type'], b['contenu'])} » {'montré' if visible else 'masqué'}"}
 
 
+async def _route_bloc_public(g, auteur, requete, corps):
+    """`POST equipage/bloc/public` `{id, public}` : montrer un bloc sur la vitrine publique (`/equipage`), ou l'en
+    retirer. Un bloc masqué n'y paraît jamais, même public."""
+    ident = corps.get("id")
+    if not isinstance(ident, str) or not FORMAT_ID.fullmatch(ident):
+        return 400, {"erreur": "Identifiant de bloc invalide.", "champ": "id"}
+    try:
+        public = affiches._booleen(corps.get("public"), "public", False)
+    except affiches.Invalide as ex:
+        return 400, ex.corps()
+    async with _verrou_ecriture():
+        b = await _bloc(g.id, ident)
+        if b is None:
+            return 404, {"erreur": "Ce bloc n'existe plus."}
+        if b["public"] != public:
+            async with _get_db() as db:
+                await db.execute("UPDATE equipage_blocs SET public=?, version=version+1, maj_le=?, maj_par=?"
+                                 " WHERE guild_id=? AND id=?", (int(public), int(time.time()), auteur.id, g.id, ident))
+                await db.commit()
+    _apres_ecriture(g)
+    return 200, {"ok": True, "accueil": await _accueil_direction(g),
+                 "_journal": None if b["public"] == public else
+                 f"Site de l'équipage : bloc « {_titre_bloc(b['type'], b['contenu'])} » "
+                 f"{'montré sur la vitrine publique' if public else 'retiré de la vitrine publique'}"}
+
+
+async def _route_vitrine_affiche(g, auteur, requete, corps):
+    """`POST equipage/vitrine/affiche` `{id, visible}` : une affiche sur la vitrine publique (par défaut), ou retirée
+    (elle reste au mur du site de l'équipage)."""
+    ident = corps.get("id")
+    if not isinstance(ident, str) or not affiches.FORMAT_AFFICHE.fullmatch(ident):
+        return 400, {"erreur": "Identifiant d'affiche invalide.", "champ": "id"}
+    try:
+        visible = affiches._booleen(corps.get("visible"), "visible", True)
+    except affiches.Invalide as ex:
+        return 400, ex.corps()
+    a = next((x for x in await _affiches_actives(g) if x["id"] == ident), None)
+    if a is None:
+        return 404, {"erreur": "Cette affiche n'est plus au mur."}
+    async with _verrou_ecriture():
+        avant = ident not in await vitrine_masquees(g.id)
+        if avant != visible:
+            async with _get_db() as db:
+                if visible:
+                    await db.execute("DELETE FROM equipage_vitrine WHERE guild_id=? AND affiche_id=?", (g.id, ident))
+                else:
+                    await db.execute("INSERT OR REPLACE INTO equipage_vitrine (guild_id, affiche_id, maj_le, maj_par)"
+                                     " VALUES (?,?,?,?)", (g.id, ident, int(time.time()), auteur.id))
+                await db.commit()
+    _apres_ecriture(g)
+    return 200, {"ok": True, "id": ident, "visible": visible,
+                 "masquees": sorted(await vitrine_masquees(g.id)),
+                 "_journal": None if avant == visible else
+                 f"Site de l'équipage : affiche de {_nom_affiche(g, a)} "
+                 f"{'remise sur la vitrine publique' if visible else 'retirée de la vitrine publique'}"}
+
+
 async def _route_bloc_deplacer(g, auteur, requete, corps):
     """`POST equipage/bloc/deplacer` `{id, sens: "haut" | "bas"}` : échange avec son voisin (puis 1, 2, 3…)."""
     ident, sens = corps.get("id"), corps.get("sens")
@@ -917,6 +1411,8 @@ async def _route_bloc_deplacer(g, auteur, requete, corps):
                 for n, b in enumerate(blocs, start=1):
                     await db.execute("UPDATE equipage_blocs SET ordre=? WHERE guild_id=? AND id=?", (n, g.id, b["id"]))
                 await db.commit()
+    if bouge:
+        _apres_ecriture(g)   # l'ordre de la vitrine publique suit
     b = blocs[j] if bouge else blocs[i]
     return 200, {"ok": True, "accueil": await _accueil_direction(g),
                  "_journal": f"Site de l'équipage : bloc « {_titre_bloc(b['type'], b['contenu'])} » déplacé vers le {sens}"
@@ -1018,6 +1514,17 @@ ROUTES_SITE = {
                       "verrou": _cle_verrou("accueil")},
     "equipage/bloc/visible": {"methode": "POST", "fn": _route_bloc_visible, "ecriture": True, "corps_max": 1024,
                               "verrou": _cle_verrou("accueil")},
+    "equipage/bloc/public": {"methode": "POST", "fn": _route_bloc_public, "ecriture": True, "corps_max": 1024,
+                             "verrou": _cle_verrou("accueil")},
+    "equipage/vitrine/affiche": {"methode": "POST", "fn": _route_vitrine_affiche, "ecriture": True, "corps_max": 1024},
+    #  Les équipes du clan (27/10/2026) : lues par la direction (et la fiche d'un membre) ; écrites par la tête seule.
+    "equipage/equipes": {"methode": "GET", "fn": _route_equipes},
+    "equipage/equipe": {"methode": "POST", "fn": _route_equipe, "ecriture": True, "corps_max": 16 * 1024,
+                        "verrou": _cle_verrou("equipe")},
+    "equipage/equipe/supprimer": {"methode": "POST", "fn": _route_equipe_supprimer, "ecriture": True, "corps_max": 1024,
+                                  "verrou": _cle_verrou("equipe")},
+    "equipage/equipe/deplacer": {"methode": "POST", "fn": _route_equipe_deplacer, "ecriture": True, "corps_max": 1024,
+                                 "verrou": _cle_verrou("equipe")},
     "equipage/bloc/deplacer": {"methode": "POST", "fn": _route_bloc_deplacer, "ecriture": True, "corps_max": 1024,
                                "verrou": _cle_verrou("accueil")},
     "equipage/bloc/supprimer": {"methode": "POST", "fn": _route_bloc_supprimer, "ecriture": True, "corps_max": 1024,
@@ -1119,18 +1626,29 @@ class BoutonSiteEquipage(discord.ui.DynamicItem[Button], template=r"eq:site"):
             raise
 
 
+ADRESSE_VITRINE = "/equipage"   # la vitrine publique (`site_vitrine.py`) : le lien officiel de l'équipage
+
+
+def lien_vitrine() -> str:
+    """L'adresse publique de la vitrine (à partager), ou "" quand le site n'a pas d'adresse publique."""
+    return f"{tableau._base}{ADRESSE_VITRINE}" if tableau._base else ""
+
+
 async def section_guide(g, c: dict) -> tuple | None:
-    """Pour le guide du clan (`zones.vue_guide_clan`) : (la ligne « Le site de l'équipage » et son bouton, leur
-    signature) — None quand le site n'est pas joignable ou qu'aucun rôle du clan n'est réglé (aucun bouton qui ment)."""
+    """Pour le guide du clan (`zones.vue_guide_clan`) : (la ligne « Le site de l'équipage », son bouton personnel et, à
+    côté, le lien PUBLIC de la vitrine ; leur signature) — None quand le site n'est pas joignable ou qu'aucun rôle du
+    clan n'est réglé (aucun bouton qui ment)."""
     if not pret() or not tableau._base or not tableau._cle or g is None:
         return None
     rid = int((c or {}).get(rellseas_panneau.CLE_ROLE_CIBLE, 0) or 0)
     if not rid or g.get_role(rid) is None:
         return None
-    texte, libelle = _t(g, "guide.site.texte"), _t(g, "guide.site.bouton")
-    composants = [discord.ui.Section(discord.ui.TextDisplay(texte), accessory=BoutonSiteEquipage(libelle))]
-    return composants, hashlib.sha256(f"{texte}\x1f{libelle}".encode("utf-8")).hexdigest()[:12]
+    texte, libelle, vitrine = _t(g, "guide.site.texte"), _t(g, "guide.site.bouton"), _t(g, "guide.vitrine.bouton")
+    composants = [discord.ui.TextDisplay(texte),
+                  discord.ui.ActionRow(BoutonSiteEquipage(libelle), Button(label=vitrine[:80], url=lien_vitrine()))]
+    return composants, hashlib.sha256(f"{texte}\x1f{libelle}\x1f{vitrine}\x1f{lien_vitrine()}".encode("utf-8")).hexdigest()[:12]
 
 
 __all__ = ["setup", "init_db", "LECTURES", "ROUTES_SITE", "medias_permis", "medias_utilises", "section_guide",
-           "BoutonSiteEquipage", "lien_equipage", "analyses", "actualites_auto", "texte_discord"]
+           "BoutonSiteEquipage", "lien_equipage", "analyses", "actualites_auto", "texte_discord", "lien_vitrine",
+           "vitrine_masquees", "generation", "ADRESSE_VITRINE"]

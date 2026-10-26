@@ -3,14 +3,16 @@
 // fondateur et la direction : le mode édition de l'accueil (equipage_accueil.js).
 // Rien du site de la direction n'est chargé ici : ni ses données, ni sa file hors ligne, ni son service worker.
 
-import { h, icone, $, BASE, chargerSprite, completerSprite, remplacer, ajouter, sansEmoji, srcSure, date, contient, nombre, compte, reduit } from "./dom.js";
-import { etat, ecouter, filtres, poserLibelles } from "./noyau.js";
+import { h, icone, $, BASE, chargerSprite, completerSprite, remplacer, ajouter, sansEmoji, srcSure, date, nombre, reduit } from "./dom.js";
+import { etat, ecouter, poserLibelles, filtres, libelle } from "./noyau.js";
 import { poster } from "./api.js";
-import { bouton, boutonIcone, menu, confirmer, toast, titreRubrique, vide, bandeau, groupe, paginer, recherche, liste } from "./ui.js";
-import { affiche, nomAffiche, metiersDe, gradeDe, insigneImage } from "./affiche.js";
-import { typeMetier, typesTries, elementsDe, element } from "./donnees.js";
+import { bouton, boutonIcone, menu, confirmer, toast, titreRubrique, vide, bandeau, segment } from "./ui.js";
+import { affiche } from "./affiche.js";
 import { E, T, lire, ouvrirAffiche, detailsAffiche, catalogue, afficheParId, rangPrime } from "./equipage_commun.js";
 import * as accueil from "./equipage_accueil.js";
+import { rendreMur } from "./equipage_mur.js";
+import { rendreEquipes, sectionMonEquipe, avecEquipes } from "./equipage_equipes.js";
+import { boutonLienEquipage } from "./lien_equipage.js";
 
 /** La version des fichiers : celle de la balise <script> de cette page (s/equipage.js?v=…), posée par le serveur. */
 const V = (() => {
@@ -23,7 +25,8 @@ const RAFRAICHIR = 60000;
 const ICONES = ["navire", "affiches", "personne", "capitainerie", "menu", "deconnexion", "cadenas", "fermer", "rechercher", "filtrer",
   "journal", "calendrier", "etoile", "apercu", "parchemin", "image", "plume", "ajouter", "modifier", "supprimer", "haut", "bas", "oeil",
   "masquer", "valider", "epingle", "info", "attention", "succes", "minuteur", "lieu", "membres", "prime", "berry", "grade", "drapeau",
-  "carte", "boussole", "ancre", "crane", "droite", "synchro", "annonces", "evenements", "equipage", "longue_vue", "coffre", "sabre"];
+  "carte", "boussole", "ancre", "crane", "droite", "synchro", "annonces", "evenements", "equipage", "longue_vue", "coffre", "sabre",
+  "lien", "copier"];
 const ONGLETS = [
   { cle: "accueil", icone: "navire", titre: () => T("onglet.accueil", "Accueil"), sous: () => T("onglet.accueil.sous", "Le pont du navire"),
     phrase: () => T("accueil.phrase", "Les nouvelles du bord, les sorties en mer et l'équipage en chiffres.") },
@@ -86,7 +89,7 @@ function monterEntete() {
     img.addEventListener("error", () => remplacer(logo, nom.slice(0, 1)), { once: true });
     remplacer(logo, img);
   } else remplacer(logo, nom.slice(0, 1));
-  const outils = [];
+  const outils = [boutonLienEquipage()];   // le lien PUBLIC de la vitrine, à partager (tout le monde peut le copier)
   if (E.peutEditer) {
     outils.push(h("button", { classe: "bouton bois vers-capitainerie", type: "button", title: "Le site de la direction", onclick: () => { location.href = BASE + "/"; } },
       icone("capitainerie"), h("span", {}, "La Capitainerie")));
@@ -149,78 +152,28 @@ function rendre() {
 }
 ecouter("equipage:rendre", () => { if (courant === "accueil") rendre(); });
 
-// ═══ L'ÉQUIPAGE : toutes les affiches, par métier ═══════════════════════════
+// ═══ L'ÉQUIPAGE : toutes les affiches, par métier (equipage_mur.js, le même mur que la vitrine publique) ═════
 function rendreEquipage(corps) {
-  const eq = E.equipage;
-  if (!eq) { remplacer(corps, vide("Les affiches ne se sont pas chargées", "Recharge la page dans un instant.", "attention")); return; }
-  const cat = catalogue();
-  const f = filtres("site-equipage", { q: "", metier: "", race: "", faction: "" });
-  const tm = typeMetier(cat);
-  const parCle = (cle, motif) => typesTries(cat).find((t) => t.cle === cle) || typesTries(cat).find((t) => motif.test(t.nom || "")) || null;
-  const tr = parCle("race", /\braces?\b/i), tf = parCle("faction", /\bfactions?\b/i);
-  const toutes = eq.affiches || [];
-  const de = (a, t) => (t ? (a.attributs && a.attributs[t.cle]) || [] : []);
-  const options = (t, tous) => {
-    if (!t) return null;
-    const n = new Map();
-    for (const a of toutes) for (const k of de(a, t)) n.set(k, (n.get(k) || 0) + 1);
-    return [{ v: "", l: tous }, ...elementsDe(cat, t.cle).filter((e) => n.has(e.cle)).map((e) => ({ v: e.cle, l: e.nom + " (" + n.get(e.cle) + ")", img: srcSure(e.icone) || null }))];
-  };
-  const resultats = h("div", { classe: "pile" });
-  const resume = h("p", { classe: "aide" });
-  const changer = () => { for (const k of Object.keys(etat.pages)) if (k.startsWith("eq-")) delete etat.pages[k]; maj(); };
-  const filtresListes = [[tm, "metier", "Métier", "Tous les métiers"], [tr, "race", "Race", "Toutes les races"], [tf, "faction", "Faction", "Toutes les factions"]]
-    .map(([t, k, lib, tous]) => {
-      const opts = options(t, tous);
-      if (!opts || opts.length < 2) { f[k] = ""; return null; }
-      if (f[k] && !opts.some((o) => o.v === f[k])) f[k] = "";
-      return liste({ valeur: f[k], options: opts, label: lib, changer: (v) => { f[k] = v; changer(); } });
-    });
-  ajouter(corps, [h("div", { classe: "outils" }, recherche(f.q, "Nom, surnom, métier…", (q) => { f.q = q; changer(); }), ...filtresListes), resume, resultats]);
-  const texte = (a) => [nomAffiche(a), a.surnom, a.membre && a.membre.nom, gradeDe(a, cat), ...Object.entries(a.attributs || {}).flatMap(([t, ks]) => ks.map((k) => (element(cat, t, k) || {}).nom || k))].join(" ");
-  function maj() {
-    const l = toutes.filter((a) => contient(texte(a), f.q) && (!f.metier || de(a, tm).includes(f.metier))
-      && (!f.race || de(a, tr).includes(f.race)) && (!f.faction || de(a, tf).includes(f.faction)));
-    const carte = (a) => h("div", { classe: "affiche-case" + (eq.moi && String(a.id) === String(eq.moi) ? " la-mienne" : "") },
-      affiche(a, cat, { taille: "mini", clic: () => ouvrirAffiche(a.id) }),
-      eq.moi && String(a.id) === String(eq.moi) ? h("span", { classe: "ruban-mienne" }, "Ma fiche") : null);
-    remplacer(resume, l.length === toutes.length ? compte(toutes.length, "affiche") + " au mur. Touche une affiche pour la voir en grand."
-      : compte(l.length, "affiche") + " sur " + nombre(toutes.length) + " pour ce filtre.");
-    if (!toutes.length) { remplacer(resultats, vide("Aucune affiche pour le moment", "La direction prépare les avis de recherche de l'équipage.", "affiches")); return; }
-    if (!l.length) { remplacer(resultats, vide("Personne ici", "Change le filtre ou la recherche.", "rechercher")); return; }
-    const groupes = new Map();
-    for (const a of l) for (const k of (metiersDe(a, cat).length ? metiersDe(a, cat) : ["__aucun"])) {
-      if (f.metier && k !== f.metier && k !== "__aucun") continue;
-      if (!groupes.has(k)) groupes.set(k, []);
-      groupes.get(k).push(a);
-    }
-    const ordre = tm ? elementsDe(cat, tm.cle).map((e) => e.cle) : [];
-    const cles = [...groupes.keys()].sort((a, b) => (a === "__aucun") - (b === "__aucun") || ((ordre.indexOf(a) + 1 || 999) - (ordre.indexOf(b) + 1 || 999)) || a.localeCompare(b));
-    //  Rien à défiler sans fin : au départ, le premier métier ouvert, et les suivants tant que le mur ouvert garde au plus
-    //  douze affiches (un petit équipage reste tout ouvert) ; au téléphone (deux par rangée), « Voir plus » par 8.
-    const pas = matchMedia("(max-width: 519px)").matches ? 8 : 18;
-    let ouvertes = 0;
-    remplacer(resultats, ...cles.map((k, i) => {
-      const e = tm && k !== "__aucun" ? element(cat, tm.cle, k) : null;
-      const n = groupes.get(k).length;
-      const defaut = i === 0 || ouvertes + n <= 12;
-      if (defaut) ouvertes += n;
-      return groupe({ titre: k === "__aucun" ? "Sans métier" : e ? e.nom : sansEmoji(k), compte: n,
-        visuel: e ? insigneImage(e, "groupe-visuel") : null, icone: e ? null : "drapeau", cle: "eq-g-" + k,
-        ouvert: f.q || f.metier ? true : undefined, defaut },
-      () => paginer("eq-" + k, groupes.get(k), carte, { classe: "grille affiches", pas }));
-    }));
-  }
-  maj();
+  if (!avecEquipes()) { rendreMur(corps, { cle: "site-equipage" }); return; }
+  //  27/10/2026 : les équipes du clan (le chef mis en avant), ou toutes les affiches par métier.
+  const f = filtres("site-equipage-vue", { vue: "equipes" });
+  const zone = h("div", { classe: "pile" });
+  const dessiner = () => { remplacer(zone); if (f.vue === "affiches") rendreMur(zone, { cle: "site-equipage" }); else rendreEquipes(zone, { cle: "site-equipes" }); };
+  ajouter(corps, [segment(f.vue, [["equipes", libelle("site.equipes.titre", "Les équipes")], ["affiches", "Toutes les affiches"]], (v) => { f.vue = v; dessiner(); }, "Afficher"), zone]);
+  dessiner();
 }
+/** Après un réglage de la direction (une affiche retirée de la vitrine, ou remise) : le mur se redessine. */
+E.majMur = () => { if (courant === "equipage") rendre(); };
 
 // ═══ MA FICHE ════════════════════════════════════════════════════════════
 function rendreFiche(corps) {
   const eq = E.equipage;
   const a = eq && eq.moi ? afficheParId(eq.moi) : null;
+  //  Mon équipe (27/10/2026) : le chef y voit les membres qu'il a sous sa main ; un membre, son équipe.
+  const equipe = avecEquipes() ? sectionMonEquipe() : null;
   if (!a) {
     ajouter(corps, [vide(T("fiche.vide.titre", "Pas encore d'affiche"), T("fiche.vide.texte", "Demande à la direction : elle crée ton avis de recherche."), "affiches"),
-      eq && (eq.affiches || []).length ? h("p", { classe: "aide centre" }, h("a", { href: "#equipage" }, "Voir les affiches de l'équipage")) : null]);
+      eq && (eq.affiches || []).length ? h("p", { classe: "aide centre" }, h("a", { href: "#equipage" }, "Voir les affiches de l'équipage")) : null, equipe]);
     return;
   }
   const rang = rangPrime(a);
@@ -229,7 +182,7 @@ function rendreFiche(corps) {
     h("div", { classe: "pile" },
       rang ? h("p", { classe: "fiche-rang" }, icone("prime"), h("span", {}, rang === 1 ? "La plus haute prime de l'équipage." : "La " + rang + "e prime de l'équipage, sur " + nombre((eq.affiches || []).length) + ".")) : null,
       detailsAffiche(a),
-      h("p", { classe: "aide" }, "Une erreur sur ton affiche ? Demande à la direction : elle seule la modifie.")))]);
+      h("p", { classe: "aide" }, "Une erreur sur ton affiche ? Demande à la direction : elle seule la modifie."))), equipe]);
 }
 
 // ─── Le rafraîchissement (chaque minute, page visible, rien en cours d'écriture) ─────

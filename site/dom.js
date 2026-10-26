@@ -16,6 +16,7 @@ window.__capitainerie = diagnostic;
 const SRC_SURES = [
   /^https:\/\/(cdn\.discordapp\.com|media\.discordapp\.net|images-ext-\d+\.discordapp\.net)\/[^\s"'<>]+$/,
   /^\/tableau\/espace\/(media|s)\/[A-Za-z0-9_./%-]+(\?[A-Za-z0-9=&_.%-]*)?$/,
+  /^\/equipage\/image\/[A-Za-z0-9_-]{22}$/,   // la vitrine publique : une image citée par ses données (jeton opaque)
   /^\/ta\/[A-Za-z0-9_-]{16,86}\/\d{1,4}$/,
   /^blob:/,
   /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/,

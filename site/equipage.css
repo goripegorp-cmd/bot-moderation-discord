@@ -2,13 +2,17 @@
    feuilles de La Capitainerie, inchangées. Aucun style en ligne (CSP) ; aucun émoji, rien de « futuriste ». */
 
 /* ─── La planche : « La Capitainerie » (fondateur et direction) ─────── */
-.vers-capitainerie { min-height: 40px; padding: 6px 13px; }
-@media (pointer: coarse) { .vers-capitainerie { min-height: 44px; } }
+.vers-capitainerie, .entete .lien-equipage.bois { min-height: 40px; padding: 6px 13px; }
+@media (pointer: coarse) { .vers-capitainerie, .entete .lien-equipage.bois { min-height: 44px; } }
 .titre-rubrique.titre-cache { display: none; } /* un bandeau ouvre l'accueil : il en est le titre (h1) */
 @media (max-width: 719px) {
-  .vers-capitainerie { width: 44px; min-height: 44px; padding: 0; }
-  .vers-capitainerie > span { display: none; }
+  .vers-capitainerie, .entete .lien-equipage.bois { width: 44px; min-height: 44px; padding: 0; justify-content: center; }
+  .vers-capitainerie > span, .entete .lien-equipage-lib { display: none; }
 }
+/* « Copier le lien de l'équipage » (la vitrine publique) : le libellé entier au bureau, l'icône au téléphone. */
+.lien-equipage { white-space: nowrap; }
+@media (max-width: 1099px) and (min-width: 720px) { .page-equipage:not(.page-vitrine) .entete .lien-equipage-lib { display: none; }
+  .page-equipage:not(.page-vitrine) .entete .lien-equipage.bois { width: 44px; padding: 0; justify-content: center; } }
 
 /* ─── Les blocs de l'accueil ───────────────────────────────────────── */
 .bloc-eq { position: relative; display: grid; gap: 12px; min-width: 0; }
@@ -131,6 +135,18 @@
   box-shadow: 0 2px 3px rgba(0, 0, 0, .35); transform: rotate(4deg); pointer-events: none;
 }
 .affiche-case.la-mienne .affiche { filter: drop-shadow(0 0 0 var(--cire)) drop-shadow(0 2px 1px rgba(43, 29, 18, .25)) drop-shadow(0 12px 14px rgba(29, 18, 9, .45)); }
+/* La direction : une affiche retirée de la vitrine publique (elle reste au mur de l'équipage). */
+.ruban-hors-vitrine {
+  position: absolute; left: 6px; bottom: 12px; z-index: 5; max-width: calc(100% - 12px); padding: 1px 8px; border-radius: 2px;
+  background: var(--encre); color: var(--clair); font: 600 12.5px/1.45 var(--police-sc); letter-spacing: .04em;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, .35); transform: rotate(-3deg); pointer-events: none; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.affiche-case.hors-vitrine .affiche { opacity: .78; }
+.reglage-vitrine { display: grid; gap: 4px; padding-top: 10px; border-top: 1px dashed var(--trait-fort); }
+.reglage-vitrine .aide { margin: 0; }
+.bascule-vitrine[aria-pressed="true"] { color: var(--clair); background: var(--mer); border-color: var(--mer); }
+.bascule-vitrine[aria-pressed="true"]:hover { color: var(--clair); background: #173c46; }
 
 /* ─── Les analyses ─────────────────────────────────────────────────── */
 .groupes-analyses { display: grid; min-width: 0; }
@@ -159,3 +175,59 @@
 .choix-honneur { display: grid; gap: 8px; }
 .choix-honneur .choix-insignes { grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); }
 .choix-affiche { width: 100%; }
+
+/* ─── Les équipes du clan (27/10/2026) : le chef d'équipe mis en avant, ses membres, la hiérarchie ───────── */
+.equipes-phrase { margin: 0; font: italic 400 16.5px/1.4 var(--police-texte); color: var(--encre-2); max-width: 70ch; }
+.equipe-corps { display: grid; grid-template-columns: minmax(190px, 240px) minmax(0, 1fr); gap: 18px; align-items: start; min-width: 0; padding: 4px 0 6px; }
+.equipe-chef {
+  display: grid; justify-items: center; gap: 8px; min-width: 0; padding: 12px 10px 14px; border: 2px solid var(--laiton);
+  border-radius: var(--rayon-2); background: rgba(168, 130, 63, .12); box-shadow: inset 0 0 0 1px rgba(43, 29, 18, .18);
+}
+.equipe-chef.vacant { border-style: dashed; background: rgba(248, 240, 221, .4); }
+.equipe-chef-titre {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 100%; margin: 0; padding: 3px 11px; border-radius: 2px;
+  background: var(--laiton); color: var(--encre); font: 700 14.5px/1.35 var(--police-sc); letter-spacing: .03em; text-align: center;
+  box-shadow: 0 1px 0 rgba(255, 244, 214, .5) inset, 0 2px 3px rgba(43, 29, 18, .3);
+}
+.equipe-chef-titre > span { min-width: 0; overflow-wrap: anywhere; }   /* un titre long passe à la ligne (jamais hors de la carte) */
+.equipe-chef-titre .ic { width: 18px; height: 18px; flex: none; }
+.equipe-chef-insigne { width: 22px; height: 22px; flex: none; object-fit: contain; }
+.equipe-chef .affiche-case { width: 100%; max-width: 210px; }
+.equipe-chef-vide { margin: 8px 0; font: italic 400 15px/1.4 var(--police-texte); color: var(--encre-2); text-align: center; }
+.equipe-membres { display: grid; gap: 8px; min-width: 0; }
+.equipe-membres-titre { display: inline-flex; align-items: center; gap: 7px; margin: 0; font: 700 15px/1.3 var(--police-sc); color: var(--encre-2); }
+.equipe-membres-titre .ic { width: 18px; height: 18px; }
+.equipe-grille { padding-top: 2px; }
+.membre-sans-affiche {
+  display: grid; justify-items: center; align-content: center; gap: 6px; min-width: 0; min-height: 170px; padding: 14px 8px;
+  border: 1px dashed var(--trait-fort); border-radius: var(--rayon); background: rgba(248, 240, 221, .5); text-align: center;
+}
+.membre-sans-affiche-nom { max-width: 100%; font: 700 15px/1.3 var(--police-texte); color: var(--encre); overflow-wrap: anywhere; }
+.membre-sans-affiche-sous { font: italic 400 13.5px/1.3 var(--police-texte); color: var(--encre-2); }
+.equipes-type { display: flex; align-items: center; gap: 9px; margin: 12px 0 0; font: 400 24px/1.2 var(--police-titre); color: var(--encre); }
+.equipes-type-insigne, .equipes-type .ic { width: 28px; height: 28px; flex: none; object-fit: contain; }
+.groupe-equipe > summary .groupe-info { font: italic 400 14.5px/1.3 var(--police-texte); color: var(--encre-2); }
+/* « Par hiérarchie » : tout l'équipage en un rang (les chefs d'abord). */
+.hierarchie { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.hierarchie-bouton {
+  display: grid; grid-template-columns: 30px 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 50px;
+  padding: 6px 12px; border: 1px solid var(--trait); border-radius: var(--rayon); background: rgba(248, 240, 221, .6);
+  color: inherit; font: inherit; text-align: left;
+}
+button.hierarchie-bouton { cursor: pointer; }
+button.hierarchie-bouton:hover { background: rgba(248, 240, 221, .95); border-color: var(--trait-fort); }
+.hierarchie-ligne.chef .hierarchie-bouton { border-color: var(--laiton); background: rgba(168, 130, 63, .14); }
+.hierarchie-rang { font: 700 16px/1 var(--police-chiffres); color: var(--encre-2); text-align: right; }
+.hierarchie-texte { display: grid; min-width: 0; }
+.hierarchie-texte > b, .hierarchie-sous { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hierarchie-sous { font-size: 14px; color: var(--encre-2); }
+.hierarchie-chef { display: inline-flex; color: var(--laiton-fonce, #7a5c22); }
+.hierarchie-insigne, .hierarchie-chef .ic { width: 26px; height: 26px; object-fit: contain; }
+/* « Mon équipe » (Ma fiche). */
+.mon-equipe { display: grid; gap: 12px; margin-top: 26px; min-width: 0; }
+.mon-equipe.vide .aide { margin: 0; }
+@media (max-width: 719px) {
+  .equipe-corps { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .equipe-chef { justify-self: center; width: min(100%, 300px); }
+  .hierarchie-bouton { grid-template-columns: 24px 34px minmax(0, 1fr) auto; gap: 8px; padding: 6px 10px; }
+}

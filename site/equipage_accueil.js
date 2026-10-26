@@ -324,7 +324,7 @@ function barreEdition() {
         bouton("Modifier l'accueil", { classe: "principal", icone: "modifier", onclick: () => { E.modeEdition = true; dessiner(); } })));
   }
   return h("div", { classe: "barre-edition active" },
-    h("p", { classe: "aide" }, h("b", {}, "Mode édition. "), "Chaque bloc a ses boutons ; ce qui est masqué reste visible pour toi seul."),
+    h("p", { classe: "aide" }, h("b", {}, "Mode édition. "), "Chaque bloc a ses boutons ; ce qui est masqué reste visible pour toi seul. « Sur la vitrine » le montre aussi sur la vitrine publique (le lien de l'équipage)."),
     h("div", { classe: "rangee" },
       bouton("Ajouter un bloc", { classe: "p", icone: "ajouter", onclick: choisirType }),
       bouton("Publier une actualité", { classe: "p", icone: "journal", onclick: () => editerActualite(null) }),
@@ -334,10 +334,17 @@ function barreEdition() {
 function barreBloc(b, i, n) {
   const t = TYPES[b.type] || { nom: b.type, icone: "info" };
   const masque = b.visible === false;
+  //  La vitrine publique (`/equipage`) : un bloc public ET visible s'y montre à tout le monde, sans compte.
+  const vitrine = bouton("Sur la vitrine", { classe: "p bascule-vitrine" + (b.public ? " actif" : ""), icone: "longue_vue",
+    titre: b.public ? "Montré sur la vitrine publique (le lien de l'équipage) : toucher pour le retirer" : "Privé : toucher pour le montrer aussi sur la vitrine publique",
+    onclick: () => rendrePublic(b) });
+  vitrine.setAttribute("aria-pressed", String(!!b.public));
   return h("div", { classe: "barre-bloc", role: "group", "aria-label": "Bloc " + t.nom },
-    h("span", { classe: "barre-bloc-nom" }, icone(t.icone), h("span", {}, t.nom), masque ? tampon("Masqué", "encre", true) : null),
+    h("span", { classe: "barre-bloc-nom" }, icone(t.icone), h("span", {}, t.nom), masque ? tampon("Masqué", "encre", true) : null,
+      b.public && !masque ? tampon("Sur la vitrine", "mer", true) : null),
     h("div", { classe: "barre-bloc-boutons" },
       bouton("Modifier", { classe: "p", icone: "modifier", onclick: () => editerBloc(b) }),
+      vitrine,
       inactif(boutonIcone("haut", "Monter ce bloc", () => deplacer(b, "haut")), i === 0),
       inactif(boutonIcone("bas", "Descendre ce bloc", () => deplacer(b, "bas")), i === n - 1),
       boutonIcone(masque ? "oeil" : "masquer", masque ? "Montrer ce bloc à l'équipage" : "Masquer ce bloc à l'équipage", () => basculer(b)),
@@ -364,6 +371,8 @@ async function ecrire(nom, corps, succes) {
 const libre = (objet) => !E.direct || E.direct.siLibre(objet);
 const deplacer = (b, sens) => libre("accueil:" + b.id) && ecrire("equipage/bloc/deplacer", { id: b.id, sens });
 const basculer = (b) => libre("accueil:" + b.id) && ecrire("equipage/bloc/visible", { id: b.id, visible: b.visible === false }, b.visible === false ? "Bloc montré à l'équipage." : "Bloc masqué : l'équipage ne le voit plus.");
+const rendrePublic = (b) => libre("accueil:" + b.id) && ecrire("equipage/bloc/public", { id: b.id, public: !b.public },
+  b.public ? "Bloc retiré de la vitrine publique." : (b.visible === false ? "Bloc public, mais masqué : il paraîtra sur la vitrine une fois montré." : "Bloc montré sur la vitrine publique."));
 async function supprimer(b) {
   const t = TYPES[b.type] || { nom: b.type };
   if (!libre("accueil:" + b.id)) return;
