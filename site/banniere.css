@@ -7,8 +7,11 @@
   position: relative; display: block; margin: 0; width: 100%; min-width: 0; aspect-ratio: 5 / 2; overflow: hidden;
   border: 1px solid var(--trait); border-radius: 3px; background: var(--papier-2);
 }
-.banniere-cadre > img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.banniere-cadre.hors-format > img { object-fit: contain; }
+.banniere-cadre > img, .image-choix .banniere-cadre > img {   /* (le cadre décide : pas les règles d'une image seule) */
+  display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover;
+  border: 0; border-radius: 0; background: none; box-shadow: none;
+}
+.banniere-cadre.hors-format > img, .image-choix .banniere-cadre.hors-format > img { object-fit: contain; }
 .banniere-vide {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
   padding: 8px; text-align: center; color: var(--encre-3); font: italic 400 15px/1.3 var(--police-texte);
@@ -28,9 +31,17 @@
 .banniere-choix .banniere-cadre { max-width: 560px; }
 .banniere-note:empty { display: none; }
 
-/* ─── Les actualités du site de l'équipage : la bannière en tête de la carte ─ */
-.actu.avec-banniere { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-.actu.avec-banniere > .banniere-cadre { border-radius: 2px; }
+/* ─── Les actualités du site de l'équipage : la bannière en vignette 5:2 (exacte), le sceau dans une case de la même
+   taille quand il n'y a pas d'image — des lignes alignées ; au téléphone, la bannière en tête de la carte ─ */
+.actus { align-items: stretch; }
+.actu { --vignette: clamp(140px, 38%, 250px); grid-template-columns: var(--vignette) minmax(0, 1fr); }
+.actu > .actu-banniere, .actu > .actu-sceau { width: 100%; height: auto; aspect-ratio: 5 / 2; }
+.actu > .actu-banniere { border-radius: 2px; }
+@media (max-width: 480px) {
+  .actu.avec-banniere { grid-template-columns: minmax(0, 1fr); }
+  .actu:not(.avec-banniere) { grid-template-columns: 64px minmax(0, 1fr); }
+  .actu:not(.avec-banniere) > .actu-sceau { aspect-ratio: auto; height: 58px; }
+}
 .actu-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .actu-liens { display: flex; flex-wrap: wrap; gap: 6px 14px; min-width: 0; }
 .actu-liens a { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; overflow-wrap: anywhere; color: var(--mer, #1f4e5a); font-weight: 600; }
@@ -54,6 +65,16 @@
 .editeur-publication { display: grid; gap: 16px; min-width: 0; grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 1100px) { .editeur-publication { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
 .editeur-publication .apercu-cadre { min-width: 0; }
+.editeur-publication > .formulaire-colonne, .editeur-publication > .apercu-colonne { min-width: 0; }
+.bascule-editeur { display: none; }
+@media (max-width: 1099px) {   /* une seule colonne : « Rédiger » ou « Aperçu » */
+  .segment.bascule-editeur { display: inline-flex; justify-self: start; margin-bottom: 6px; }
+  .editeur-publication:not(.voir-apercu) > .apercu-colonne { display: none; }
+  .editeur-publication.voir-apercu > .formulaire-colonne { display: none; }
+}
+.apercu-site .lecture-actu { padding: 12px; }
+.apercu-site .lecture-actu .actu-titre { margin: 0; }
+.liens-editeur > .bouton { justify-self: start; }
 .liens-editeur { display: grid; gap: 8px; min-width: 0; }
 .lien-ligne { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; gap: 6px; align-items: center; min-width: 0; }
 @media (max-width: 559px) { .lien-ligne { grid-template-columns: minmax(0, 1fr) auto; } .lien-ligne > .lien-url { grid-column: 1 / 2; } }
@@ -62,4 +83,6 @@
 .apercu-onglets { justify-self: start; }
 .apercu-site { display: grid; gap: 10px; min-width: 0; }
 .apercu-site .actu { max-width: 520px; }
-.publication-etat { display: grid; gap: 6px; }
+.publication-etat { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-width: 0; }
+.publication-etat > .meta { margin: 0; min-width: 0; }
+.publication-etat > .bandeau { flex: 1 1 100%; }

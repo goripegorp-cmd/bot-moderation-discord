@@ -13,7 +13,8 @@
 import { h, icone, remplacer, ajouter, sansEmoji, nombre, retarder, depuis, date } from "./dom.js";
 import { lire, poster } from "./api.js";
 import { bouton, boutonIcone, toast, pancarte, champ, saisie, zoneTexte, confirmer, bandeau, segment } from "./ui.js";
-import { choixBanniere } from "./banniere.js";
+import { choixBanniere, cadreBanniere } from "./banniere.js";
+import { texteRiche } from "./equipage_commun.js";
 
 const NOMS = { annonce: "l'annonce", evenement: "l'événement", metiers: "l'annonce des métiers", listing: "le listing" };
 const RE_URL = /^https:\/\/[^\s<>"'`]{3,505}$/;
@@ -116,10 +117,19 @@ export async function editerPublication(a, o = {}) {
     if (p.fermee()) return;
     if (!dernier) { remplacer(zoneApercu, h("p", { classe: "aide" }, "Aperçu…")); return; }
     if (vue === "site") {
+      // Ce que l'équipage verra : la carte de l'actualité (la liste de l'accueil), puis l'actualité ouverte.
       const s = dernier.site || {};
       const actu = { id: "apercu-" + id, genre: a.genre, titre: s.titre || v.titre, texte: s.texte || "", image: s.image || "", quand: a.quand, evenement: a.evenement || null, liens: s.liens || [] };
-      remplacer(zoneApercu, h("div", { classe: "apercu-site" }, h("p", { classe: "aide" }, "L'actualité telle que l'équipage la lira sur l'accueil."),
-        o.carte ? o.carte(actu) : null));
+      const liensSite = (actu.liens || []).filter((x) => x && x.url);
+      remplacer(zoneApercu, h("div", { classe: "apercu-site" },
+        h("p", { classe: "aide" }, "Dans les actualités de l'accueil :"),
+        o.carte ? o.carte(actu) : null,
+        h("p", { classe: "aide" }, "Une fois ouverte :"),
+        h("div", { classe: "lecture-actu cadre" },
+          actu.image ? cadreBanniere(actu.image, { paresseux: false }) : null,
+          h("h3", { classe: "actu-titre" }, sansEmoji(actu.titre)),
+          actu.texte ? texteRiche(actu.texte) : h("p", { classe: "aide" }, "Pas de texte de plus."),
+          liensSite.length ? h("div", { classe: "actu-liens" }, liensSite.map((x) => h("a", { href: x.url }, icone("droite"), h("span", {}, sansEmoji(x.nom) || "Lien")))) : null)));
       return;
     }
     try {
@@ -129,7 +139,12 @@ export async function editerPublication(a, o = {}) {
       remplacer(zoneApercu, bandeau("L'aperçu Discord n'a pas pu s'afficher.", "rouge"));
     }
   }
-  ajouter(p.corps, [h("div", { classe: "editeur-publication" }, form, h("div", { classe: "pile serree" }, onglets, zoneApercu))]);
+  // Au téléphone et sur une tablette (une seule colonne) : « Rédiger » ou « Aperçu », comme le composeur de l'administration.
+  const editeur = h("div", { classe: "editeur-publication" }, h("div", { classe: "formulaire-colonne" }, form),
+    h("div", { classe: "pile serree apercu-colonne" }, onglets, zoneApercu));
+  const bascule = segment("form", [["form", "Rédiger"], ["apercu", "Aperçu"]], (x) => { editeur.classList.toggle("voir-apercu", x === "apercu"); }, "Vue");
+  bascule.classList.add("bascule-editeur");
+  ajouter(p.corps, [bascule, editeur]);
   // ─── Enregistrer ───
   const ok = bouton("Enregistrer sur Discord", { classe: "principal", icone: "valider", reseau: true, onclick: () => enregistrer() });
   async function enregistrer() {

@@ -42,6 +42,9 @@ const RE_LIEN = /^https:\/\/[^\s<>"'`]{3,505}$/;
 /** Les liens complets (un nom, une adresse https) : ceux que le serveur accepte ; une ligne entamée reste à l'écran. */
 const liensComplets = (l) => (Array.isArray(l) ? l : []).filter((x) => x && String(x.nom || "").trim() && RE_LIEN.test(String(x.url || "").trim()))
   .map((x) => ({ nom: String(x.nom).trim(), url: String(x.url).trim() })).slice(0, LIENS_MAX);
+/** Un lien commencé mais incomplet (un nom sans adresse https, ou l'inverse) : publier ou modifier attend qu'il soit juste. */
+const lienEntame = (v) => (Array.isArray(v.liens) ? v.liens : []).some((x) => x && (String(x.nom || "").trim() || String(x.url || "").trim()) && !liensComplets([x]).length);
+const LIEN_INCOMPLET = "Un lien a besoin d'un nom et d'une adresse complète en https:// (ou retire-le).";
 // Les limites du serveur (evenements.py), quand il ne les envoie pas.
 const LIMITES = { titre: 100, texte: { evenement: 2000, annonce: 3500, metiers: 1500, listing: 1500 }, lieu: 100, places: 500, rappels: 5, duree_min: 10080 };
 const COULEURS = [["Laiton", "#a8823f"], ["Clan", "#14b8a6"], ["Cire", "#8e2a24"], ["Mer", "#1f4e5a"], ["Vert", "#3f6b3a"], ["Ambre", "#a8641c"], ["Encre", "#2b1d12"]];
@@ -425,6 +428,7 @@ async function composer(zone, E0) {
     if (!String(v.titre || "").trim()) { toast("Donne un titre avant de publier.", "erreur"); return; }
     if (v.type === "evenement" && !(v.quand > maintenant() + 60)) { toast("Choisis un début dans le futur (une minute au moins).", "erreur"); return; }
     if (!destinationsDe(E).length) { toast("Le forum du clan n'est pas installé : il n'y a aucun post où publier.", "erreur"); return; }
+    if (lienEntame(v)) { toast(LIEN_INCOMPLET, "erreur"); return; }
     if (composeur.sale || !composeur.id) await enregistrer(true);
     const att = await attendreEnregistrement();
     if (att !== true) {
@@ -494,6 +498,7 @@ async function composer(zone, E0) {
 
   async function modifierPublie() {
     const v = composeur.v;
+    if (lienEntame(v)) { toast(LIEN_INCOMPLET, "erreur"); return; }
     const corps = Object.assign({ id: composeur.id, version: composeur.version }, corpsDe(v));
     if (v.type === "evenement" && composeur.quandPublie && v.quand !== composeur.quandPublie) {
       if (!(v.quand > maintenant() + 60)) { toast("Le nouveau début doit être dans le futur (une minute au moins).", "erreur"); return; }

@@ -751,7 +751,9 @@ def _liens(brut) -> tuple:
     adresse) est ignorée ; une adresse en double aussi."""
     if brut is None:
         return [], ""
-    if not isinstance(brut, list) or len(brut) > 2 * LIENS_MAX:
+    if not isinstance(brut, list):
+        return [], "Une liste de liens est attendue."
+    if len(brut) > 2 * LIENS_MAX:
         return [], f"{LIENS_MAX} liens au plus."
     out, vus = [], set()
     for x in brut:

@@ -106,7 +106,7 @@ export function choixBanniere(v, cle, o = {}) {
           v[cle] = r.id;
           maj();
           note.textContent = noteCadrage(r);
-          toast("Bannière prête : " + (noteCadrage(r) || TAILLE).replace(/\.$/, "") + ".", "succes");
+          toast("Bannière prête. " + noteCadrage(r), "succes");
           if (o.changer) o.changer(v[cle]);
         } }),
         v[cle] && !o.requis ? bouton("Retirer l'image", { classe: "p discret", onclick: () => { v[cle] = ""; note.textContent = ""; maj(); if (o.changer) o.changer(""); } }) : null),
