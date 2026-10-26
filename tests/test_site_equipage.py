@@ -134,7 +134,8 @@ def local(tmp_path_factory):
         pendantes = [t for t in asyncio.all_tasks(boucle) if not t.done()]   # la ronde du direct (S11), entre autres
         for t in pendantes:
             t.cancel()
-        boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
+        if pendantes:   # sans tâche, gather() naîtrait sur une AUTRE boucle (ValueError au démontage)
+            boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
         tableau._direct_salles.clear()
         boucle.close()
         mp.undo()
