@@ -1342,6 +1342,11 @@ async function parcoursNavigation(o) {
   const ecrireApi = (chemin, corps) => evaluer(o, `fetch(${JSON.stringify(SITE + "api/")} + ${JSON.stringify(chemin)}, { method: "POST", credentials: "same-origin",
     headers: { "X-Tableau": "1", "Content-Type": "application/json" }, body: ${JSON.stringify(JSON.stringify(corps))} }).then(async (r) => ({ status: r.status, corps: await r.json() }))`);
 
+  //  Joué après d'autres parcours : leurs filtres gardés (statut « à vérifier » du catalogue…) oubliés, la page relue.
+  await aller(o, "#accueil/attente");
+  await evaluer(o, "(() => { sessionStorage.removeItem('capitainerie.filtres'); return 1; })()");
+  await o.s("Page.reload", {});
+  await attendre(() => evaluer(o, "!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 12000, 200);
   await etape(o, "Navigation : quinze rubriques (dix-neuf avant), cinq au plus par pancarte", async () => {
     const vu = {};
     for (const cat of ["accueil", "port", "equipage", "capitainerie"]) {
@@ -1389,9 +1394,12 @@ async function parcoursNavigation(o) {
     return { ok: true, detail: etapes.join(" · ") };
   });
 
-  const rell = new Set((d.tickets.ouverts || []).filter((t) => t.rellseas).map((t) => String(t.ticket)));
   await etape(o, "Tickets : la famille « Clan · RELL Seas » sur place (la page ne remonte pas), puis « Tous »", async () => {
     await aller(o, "#port/tickets");
+    await o.s("Page.reload", {});   // les données de la page relues : les mêmes que celles lues ci-dessous
+    await attendre(() => evaluer(o, "!!document.querySelector('#contenu .titre-rubrique') && !document.querySelector('#contenu .squelette')"), 12000, 200);
+    await pause(600);
+    const rell = new Set(((await donneesSite(o)).tickets.ouverts || []).filter((t) => t.rellseas).map((t) => String(t.ticket)));
     await marquer();
     const avant = await evaluer(o, "(() => { const b = [...document.querySelectorAll('#contenu .puces .puce')].find((x) => x.textContent.includes('Clan · RELL Seas')); b.scrollIntoView({ block: 'center' }); return scrollY; })()");
     await evaluer(o, "(() => { [...document.querySelectorAll('#contenu .puces .puce')].find((x) => x.textContent.includes('Clan · RELL Seas')).click(); return 1; })()");
