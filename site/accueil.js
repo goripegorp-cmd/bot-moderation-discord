@@ -102,7 +102,7 @@ export function aFaire() {
     if (nb) pousser({ sorte: "banque", prio: 4, icone: "parchemin", phrase: nb > 1 ? nb + " questions de la banque à vérifier" : "Une question de la banque à vérifier",
       sous: "Recrutement · confirme-les à la source, ou corrige-les", action: { libelle: "Vérifier", icone: "valider", faire: () => {
         Object.assign(filtres("questionnaire", {}), { q: "", theme: "tous", diff: "0", statut: "a_verifier", actives: "toutes" });
-        aller("equipage", "candidatures", "questionnaire");
+        aller("capitainerie", "recrutement", "questions");
       } } });
   }
   const cat = vueJeu("catalogue");
@@ -128,7 +128,7 @@ export const nombreAFaire = () => aFaire().filter((x) => x.prio <= 3).length;
 // Au-delà de trois choses de la même sorte : les trois plus anciennes, puis « et N autres » vers la bonne page.
 const TOUT_VOIR = {
   ticket: ["autres tickets que personne n'a pris", () => aller("port", "tickets")], question: ["autres questions sans réponse", () => aller("port", "salons", "questions")],
-  decider: ["autres candidatures à décider", () => aller("equipage", "candidatures")], corriger: ["autres candidatures à corriger", () => aller("equipage", "candidatures")],
+  decider: ["autres candidatures à décider", () => aller("capitainerie", "recrutement")], corriger: ["autres candidatures à corriger", () => aller("capitainerie", "recrutement")],
   inactif: ["autres membres inactifs après le rappel", () => aller("equipage", "membres")], alerte: ["autres alertes", () => aller("port", "apercu")],
   brouillon: ["autres brouillons", () => aller("equipage", "annonces", "brouillons")], evenement: ["autres événements sans réponse", () => aller("equipage", "annonces", "a-venir")],
 };
@@ -164,7 +164,7 @@ export function raccourcis() {
     { cle: "evenement", titre: "Annoncer un événement", sous: "Une date, des rappels, qui vient", icone: "calendrier", faire: () => commencer("evenement") },
     { cle: "annonce", titre: "Faire une annonce", sous: "Un message pour tout l'équipage", icone: "cloche", faire: () => commencer("annonce") },
     peutAgir() ? { cle: "affiche", titre: "Créer une affiche", sous: "L'avis de recherche d'un membre", icone: "affiches", faire: () => { aller("capitainerie", "affiches"); editerAffiche(null); } } : null,
-    { cle: "candidatures", titre: "Voir les candidatures", sous: "Décider, corriger, recruter", icone: "candidatures", faire: () => aller("equipage", "candidatures") },
+    { cle: "candidatures", titre: "Voir les candidatures", sous: "Décider, corriger, recruter", icone: "candidatures", faire: () => aller("capitainerie", "recrutement") },
     { cle: "membre", titre: "Chercher un membre", sous: "Sa fiche, son casier, ses tickets", icone: "rechercher", faire: () => emettre("recherche:ouvrir") },
     rubriqueExiste("capitainerie", "textes") ? { cle: "textes", titre: "Modifier les textes", sous: "Ce que disent le bot et le site", icone: "plume", faire: () => aller("capitainerie", "textes") } : null,
   ].filter(Boolean);

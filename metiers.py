@@ -1135,11 +1135,11 @@ def lien_guide(g, c: dict) -> str | None:
     return f"https://discord.com/channels/{g.id}/{pid}" if pid else None
 
 
-async def inviter_au_choix(g, ch, membre) -> str | None:
-    """À l'acceptation au clan, AVANT la fermeture du ticket : une carte dit au nouveau membre de choisir son métier dans
-    le guide du clan (un bouton vers le post), sans mention de masse. Rend le lien du guide — None (rien posté) s'il n'y
-    a ni guide, ni métier à choisir, ni rôle du clan réglé."""
-    if not pret() or g is None or ch is None or membre is None:
+async def invitation(g, membre) -> tuple | None:
+    """(le texte, le lien du guide, le libellé du bouton) de l'invitation à choisir son métier — None s'il n'y a ni guide, ni métier à choisir,
+    ni rôle du clan réglé. 26/10/2026 : le recrutement la met dans SON message de décision (un message de moins dans
+    le ticket) ; `inviter_au_choix` la pose en carte."""
+    if not pret() or g is None or membre is None:
         return None
     c = await _cfg(g.id)
     lien = lien_guide(g, c)
@@ -1147,10 +1147,32 @@ async def inviter_au_choix(g, ch, membre) -> str | None:
         return None
     auto = reglages_de(c)["auto"]
     await textes_du_site.texte(g.id, "metiers.carte.bouton")   # le cache des textes (Textes & noms) est chargé
+    return (_t(g.id, "metiers.carte.auto" if auto else "metiers.carte.manuel", membre=membre.mention), lien,
+            _t(g.id, "metiers.carte.bouton"))
+
+
+async def metiers_du_membre(g, membre) -> list:
+    """Les clés des métiers dont ce membre porte le rôle (les chefs d'équipe : le métier proposé d'office)."""
+    if not pret() or g is None or membre is None:
+        return []
+    siens = {getattr(r, "id", None) for r in getattr(membre, "roles", []) or []}
+    return [cle for cle, rid in (await _liens_metiers(g.id)).items() if rid in siens]
+
+
+async def inviter_au_choix(g, ch, membre) -> str | None:
+    """À l'acceptation au clan, AVANT la fermeture du ticket : une carte dit au nouveau membre de choisir son métier dans
+    le guide du clan (un bouton vers le post), sans mention de masse. Rend le lien du guide — None (rien posté) s'il n'y
+    a ni guide, ni métier à choisir, ni rôle du clan réglé."""
+    if ch is None:
+        return None
+    inv = await invitation(g, membre)
+    if inv is None:
+        return None
+    texte, lien, libelle = inv
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(_t(g.id, "metiers.carte.auto" if auto else "metiers.carte.manuel", membre=membre.mention)),
-        discord.ui.ActionRow(discord.ui.Button(label=_t(g.id, "metiers.carte.bouton")[:80], url=lien)),
+        discord.ui.TextDisplay(texte),
+        discord.ui.ActionRow(discord.ui.Button(label=libelle[:80], url=lien)),
         accent_color=discord.Color(COULEUR_CARTE)))
     try:
         await ch.send(view=v, allowed_mentions=discord.AllowedMentions.none())
