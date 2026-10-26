@@ -899,6 +899,15 @@ async function parcoursTextes(o) {
   await etape(o, "Textes : publier un événement — la carte a le nouveau bouton", async () => {
     await aller(o, "#equipage/annonces/composer");
     if (!await attendre(() => evaluer(o, "!!document.querySelector('.composeur-form input.saisie')"), 8000)) return { ok: false, detail: "composeur absent" };
+    // Un composeur NEUF, de type « Événement » : un parcours précédent (l'accueil ouvre un brouillon) peut l'avoir laissé
+    // sur autre chose — le composeur garde sa saisie d'une page à l'autre.
+    if (await cliquer(o, "button", "Nouveau")) {
+      await pause(400);
+      if (await evaluer(o, "!!document.querySelector('dialog[open]')")) await cliquer(o, "dialog[open] button", "Repartir de zéro");
+      await pause(500);
+    }
+    if (!await evaluer(o, "(() => { const b = [...document.querySelectorAll('.choix-type')].find((x) => x.textContent.includes('Événement')); if (!b) return false; b.click(); return true; })()")) return { ok: false, detail: "type « Événement » introuvable" };
+    await pause(400);
     await evaluer(o, `(() => { const t = document.querySelector('.composeur-form input.saisie'); t.value = ${JSON.stringify(TITRE)}; t.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
     const apercu = await attendre(async () => { const x = await evaluer(o, "(document.querySelector('.apercu-discord-zone') || {}).innerText || ''"); return x.includes(DISPO) ? x : null; }, 6000);
     if (!apercu) return { ok: false, detail: "l'aperçu de la saisie ne montre pas le nouveau bouton" };
