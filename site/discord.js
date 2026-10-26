@@ -45,7 +45,7 @@ export function apercu(vue) {
       tuile({ cle: "a2", lib: "Questions sans réponse", val: qOuvertes.length, icone: "salons", sous: st.delai_median ? "réponse médiane : " + duree(st.delai_median) : "aucune réponse mesurée", teinte: "#1f4e5a", clic: () => aller("port", "salons", "questions") }),
       tuile({ cle: "a3", lib: "Alertes en cours", val: alertes.length, icone: "attention", sous: alertes.length ? "membres qui cumulent du grave" : "rien à signaler", teinte: alertes.length ? "#8e2a24" : "#3f6b3a" }),
       tuile({ cle: "a4", lib: "Sanctions · 30 jours", val: d.sanctions.trente_jours, icone: "sanctions", sous: nombre(d.sanctions.total) + " au casier", teinte: "#5e3a4e", clic: () => aller("port", "sanctions") }),
-      tuile({ cle: "a5", lib: "Candidatures", val: d.en_cours.length, icone: "candidatures", sous: aDecider + " à décider · " + aCorriger + " à corriger", teinte: "#7a4b2a", clic: () => aller("equipage", "candidatures") }),
+      tuile({ cle: "a5", lib: "Candidatures", val: d.en_cours.length, icone: "candidatures", sous: aDecider + " à décider · " + aCorriger + " à corriger", teinte: "#7a4b2a", clic: () => aller("capitainerie", "recrutement") }),
       tuile({ cle: "a6", lib: "Membres du clan", val: clan.length, icone: "equipage", sous: quantite(inactifs, "inactif(s)") + " depuis un mois", teinte: "#3f6b3a", clic: () => aller("equipage", "membres") }),
       attente ? tuile({ cle: "a7", lib: "Modifications à envoyer", val: attente, icone: "synchro", sous: "faites hors ligne, elles partent au retour", teinte: "#7a5a22", clic: () => emettre("file:ouvrir") }) : null);
     // À traiter maintenant : ce qui attend sur Discord (alertes, tickets, questions, idées), comme à l'accueil — trois par

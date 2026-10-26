@@ -340,11 +340,13 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
 
     async def ticket_ouvert(_g, tid):
         async with get_db() as db:
-            async with db.execute("SELECT user_id, claimed_by, answers, panel_id FROM tickets WHERE id=? AND guild_id=?"
-                                  " AND status='open'", (int(tid), SERVEUR_ID)) as cur:
+            async with db.execute("SELECT user_id, claimed_by, answers, panel_id, channel_id FROM tickets WHERE id=? AND"
+                                  " guild_id=? AND status='open'", (int(tid), SERVEUR_ID)) as cur:
                 r = await cur.fetchone()
         if r is None:
             return None, None
+        if int(tid) not in fils_tickets and g.fils.get(int(r[4] or 0)) is not None:
+            fils_tickets[int(tid)] = g.fils[int(r[4])]      # ouvert par le vrai chemin du bot : son fil
         if int(tid) not in fils_tickets:
             fils_tickets[int(tid)] = await salon_annonces.create_thread(name=f"ticket-{int(tid)}")
         try:
@@ -354,7 +356,9 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         return fils_tickets[int(tid)], {"id": int(tid), "user": r[0], "claimed": r[1] or 0, "answers": reponses,
                                         "panel_id": r[3] or ""}
 
-    async def decider(_g, tid, auteur, accepte, motif=""):
+    async def decider(_g, tid, auteur, accepte, motif="", *, annonce=None, mp=True):
+        if annonce is not None:   # comme `_decision_recrutement` : le message de la décision avant la fermeture
+            await annonce()
         async with get_db() as db:
             await db.execute("UPDATE tickets SET status='closed' WHERE id=? AND guild_id=?", (int(tid), SERVEUR_ID))
             await db.commit()
@@ -380,7 +384,8 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     await _tables_du_bot(get_db)
     tableau.monter(textes)
     tableau.monter(questionnaire.ROUTES_SITE)
-    tableau.ajouter_regle(**questionnaire.REGLE_NETTOYAGE)
+    for regle in questionnaire.REGLES_RECRUTEMENT:   # comme `_activite_boot` (26/10/2026)
+        tableau.ajouter_regle(**regle)
 
     affiches.setup(get_db=get_db, log=print)
     await affiches.init_db()
@@ -398,6 +403,22 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     metiers.setup(get_db=get_db, cfg=cfg, db_set=db_set, role_clan=lambda _g, _c: clan_r, sanctionnes=aucune_sanction,
                   journal=journal, epargnes=a_la_tete, guide=zones.assurer_guide_clan, log=print)
     zones.brancher_metiers(metiers.section_guide)
+    #  26/10/2026 : le VRAI chemin d'un ticket de recrutement (bot.py : « Es-tu sûr ? », la fiche, l'affiche, l'équipe
+    #  qui entre) et le questionnaire branché comme dans `_activite_boot`.
+    import site_local_recrutement
+    #  Ce serveur sert /v/ : la bannière de l'affiche y est (le vrai bot la sert sur son adresse publique). Les autres
+    #  bandeaux des menus gardent leur titre en texte, comme avant.
+    questionnaire._banniere = lambda: f"http://localhost:{port}/v/{questionnaire.BANNIERE}"
+    porteur_tickets = g._salon(X.F.Texte, "🎫・tickets-rell-seas", {"category": g.commu})
+    chemin = site_local_recrutement.CheminDuBot(g=g, get_db=get_db, cfg=cfg, db_set=db_set, porteur=porteur_tickets,
+                                                categorie=g.commu, metiers=metiers, tete=TETE, carnet=carnet)
+    conf["ticket_panels"]["p1"].update({"welcome_message": "Bienvenue à bord, futur matelot !",
+                                        "questions": [{"title": "Pseudo Roblox", "question": "Ton pseudo exact"},
+                                                      {"title": "Niveau", "question": "Ton niveau dans le jeu"}]})
+    questionnaire.setup(get_db=get_db, cfg=cfg, panneaux=rellseas_panneau.panneaux_tickets, ticket_ouvert=ticket_ouvert,
+                        decider=decider, autorise=lambda _i: True, journal=journal, log=silence,
+                        web=chemin.page_candidat(), metier=metiers.invitation, metiers_membre=metiers.metiers_du_membre,
+                        **chemin.hooks())
     try:
         import evenements  # le module des événements du clan : branché s'il est là
     except ModuleNotFoundError:
@@ -419,13 +440,13 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     #  Le site de l'équipage (26/10/2026), comme l'étape « site_equipage » du bot.
     import site_equipage
     site_equipage.setup(get_db=get_db, cfg=cfg, log=print)
+    site_equipage.brancher_badges_chef(questionnaire.badges_chefs)   # comme l'étape « questionnaire » du bot
     await site_equipage.init_db()
     tableau.monter(site_equipage)
     tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
     zones.brancher_site_equipage(site_equipage.section_guide)   # sa ligne dans le guide du clan de démonstration
 
     await _remplir(get_db, g, clan_r, salon_annonces, X)
-    await _recrutement_demo(get_db, g, ticket_ouvert)
     await _affiches_demo(g, X)
     if evenements is not None and evenements.pret():
         await _evenements_demo(evenements, g, clan_r, get_db)
@@ -437,6 +458,14 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     if lourd:
         await _remplir_lourd(get_db, g, clan_r, salon_annonces)
         await _equipes_demo(g, lourd=True)   # douze équipes sur les 80 membres du clan
+    #  Après les autres tickets de démonstration (leurs numéros sont fixés) : ceux-ci prennent les numéros suivants. Les
+    #  mots « pour soi » de la démonstration ne s'effacent pas plus tard (aucune tâche laissée en attente).
+    avis = (questionnaire.AVIS_S, questionnaire.PAGE_S)
+    questionnaire.AVIS_S = questionnaire.PAGE_S = 0
+    try:
+        await _recrutement_demo(get_db, g, ticket_ouvert, chemin, lourd=lourd)
+    finally:
+        questionnaire.AVIS_S, questionnaire.PAGE_S = avis
 
     app = health_server.construire_app()
 
@@ -473,11 +502,19 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         if request.query.get("roles"):
             return web.json_response({"roles": [{"id": str(r.id), "nom": r.name, "position": r.position}
                                                 for r in g.roles]}, headers={"Cache-Control": "no-store"})
+        if request.query.get("mp", "").isdigit():   # les messages privés reçus par ce membre (le recrutement)
+            return web.json_response({"mp": chemin.messages_prives(int(request.query["mp"]))},
+                                     headers={"Cache-Control": "no-store"})
         brut = request.query.get("salon", "")
         salon = g.get_channel_or_thread(int(brut)) if brut.isdigit() else None
         ticket = request.query.get("ticket", "")
         if salon is None and ticket.isdigit():   # `?ticket=<n>` : le fil où le bot a posté pour ce ticket
             salon = fils_tickets.get(int(ticket))
+            if salon is None:                    # ouvert par le vrai chemin du bot : son fil (même fermé)
+                async with get_db() as db:
+                    async with db.execute("SELECT channel_id FROM tickets WHERE id=?", (int(ticket),)) as cur:
+                        r = await cur.fetchone()
+                salon = g.fils.get(int(r[0] or 0)) if r else None
             brut = str(getattr(salon, "id", ""))
         post = request.query.get("post", "")
         if salon is None and post:               # `?post=guide` : un post du forum du clan
@@ -488,7 +525,8 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         return web.json_response({"salon": brut, "nom": salon.name, "messages": _messages_du_faux(salon)},
                                  headers={"Cache-Control": "no-store"})
     app.router.add_get("/tableau/demo/discord", discord_lu)
-    return app, X.Obj(dossier=dossier, guild=g, get_db=get_db, conf=conf)
+    site_local_recrutement.brancher_demo(app, chemin, questionnaire, g)
+    return app, X.Obj(dossier=dossier, guild=g, get_db=get_db, conf=conf, chemin=chemin)
 
 
 def _boutons_de(vue) -> list:
@@ -642,52 +680,62 @@ async def _remplir(get_db, g, clan_r, salon_annonces, X) -> None:
     registre._derniers.clear()
 
 
-async def _recrutement_demo(get_db, g, ticket_ouvert) -> None:
-    """Quatre candidatures du clan, jouées par le VRAI module (questionnaire.py) : une à l'étape 1, un questionnaire
-    envoyé sans réponse, des réponses à corriger (justes, approchées, fausses), une correction commencée."""
+async def _recrutement_demo(get_db, g, ticket_ouvert, chemin, lourd: bool = False) -> None:
+    """Quatre candidatures du clan, OUVERTES PAR LE VRAI CHEMIN DU BOT (create_ticket : l'affiche, l'équipe dans le fil)
+    et jouées par le vrai module (questionnaire.py) : une demande à lire, un questionnaire ouvert sans réponse, des
+    réponses à corriger (justes, approchées, fausses), une correction commencée. Puis un ticket d'AVANT l'affiche (sa
+    carte de l'étape 1) : ces tickets-là marchent toujours. Sur la base lourde : un chef d'équipe validé (le dernier du
+    clan par son nom), badgé et proposé en premier dans l'éditeur d'une équipe."""
     import questionnaire
     chef = g.get_member(FONDATEUR)
-    maintenant = time.time()
-    candidats = [m for m in g.members if m.id not in TETE and not m.bot][14:18]
-    async with get_db() as db:
-        for k, m in enumerate(candidats):
-            await db.execute("INSERT INTO tickets VALUES (?,?,?,?,?,?,?,?,?)",
-                             (41 + k, SERVEUR_ID, 6041 + k, m.id, "p1", FONDATEUR, "open",
-                              json.dumps({"Pseudo Roblox": f"{m.display_name.split()[0]}_RS",
-                                          "Niveau": str(24 + 11 * k)}),
-                              _date(maintenant - (4 - k) * 5400)))
-        await db.commit()
-    for k, m in enumerate(candidats):
-        ch, _tk = await ticket_ouvert(g, 41 + k)
-        await questionnaire.poser_etape1(g, ch, 41 + k, m.id, nombre=await questionnaire.annonce(g.id))
-    for tid in (42, 43, 44):
+    candidats = [m for m in g.members if m.id not in TETE and not m.bot][14:19]
+    tids = []
+    for k, m in enumerate(candidats[:4]):
+        tid, _ch = await chemin.ouvrir(m, "p1", {"Pseudo Roblox": f"{m.display_name.split()[0]}_RS", "Niveau": str(24 + 11 * k)})
+        tids.append(tid)
+    for tid in tids[1:]:
         st, rep = await questionnaire.envoyer(g, tid, chef, {}, depuis="etape1")
         if st != 200:
             print(f"[SITE LOCAL] questionnaire de démonstration non envoyé : {rep}")
             return
-    for tid in (43, 44):
-        e = next(x for x in await questionnaire._envois_du_ticket(g.id, tid) if x["statut"] == "envoye")
-        textes = {}
-        for n, q in enumerate(e["questions"]):
-            juste = str(q.get("reponse") or "")
-            if n % 4 == 1 and len(juste) > 4:
-                textes[int(q["rang"])] = juste[:-2] + juste[-1]           # approchée : une lettre oubliée
-            elif n % 5 == 3:
-                textes[int(q["rang"])] = "Je ne sais pas"
-            else:
-                textes[int(q["rang"])] = juste or "?"
-        if not await questionnaire._garder_page(e, textes):
-            print("[SITE LOCAL] réponses de démonstration refusées")
-            return
-        t = int(time.time())
-        async with get_db() as db:   # ce que fait `_terminer` quand la dernière page arrive
-            await db.execute("UPDATE recrutement_envois SET statut='repondu', repondu_le=? WHERE id=?", (t, e["id"]))
-            await db.execute("UPDATE recrutement_suivi SET etape='reponses', maj_le=? WHERE guild_id=? AND ticket_id=?",
-                             (t, g.id, tid))
+    await chemin.repondre(tids[2], questionnaire)       # toutes justes, par les formulaires de Discord
+    e = next(x for x in await questionnaire._envois_du_ticket(g.id, tids[3]) if x["statut"] == "envoye")
+    textes = {}
+    for n, q in enumerate(e["questions"]):
+        juste = str(q.get("reponse") or "")
+        if n % 4 == 1 and len(juste) > 4:
+            textes[int(q["rang"])] = juste[:-2] + juste[-1]           # approchée : une lettre oubliée
+        elif n % 5 == 3:
+            textes[int(q["rang"])] = "Je ne sais pas"
+        else:
+            textes[int(q["rang"])] = juste or "?"
+    if not await questionnaire._garder_page(e, textes):
+        print("[SITE LOCAL] réponses de démonstration refusées")
+        return
+    t = int(time.time())
+    if await questionnaire.clore_envoi(e, t):          # comme la dernière page reçue
+        await questionnaire.annoncer_reponses(g, e, t)
+    for q in e["questions"][:3]:                         # une correction commencée : les trois premières réponses cochées
+        await questionnaire.corriger(g, chef, {"envoi": e["id"], "question": q["id"], "juste": True})
+    #  Un ticket ouvert AVANT l'affiche (le 25/10) : sa carte de l'étape 1, l'ancien chemin.
+    if len(candidats) > 4:
+        m = candidats[4]
+        async with get_db() as db:
+            await db.execute("INSERT INTO tickets (guild_id, channel_id, user_id, panel_id, claimed_by, status, answers,"
+                             " created_at) VALUES (?,?,?,?,?,?,?,?)", (SERVEUR_ID, 6099, m.id, "p1", 0, "open",
+                                                                        json.dumps({"Pseudo Roblox": "Ancien_RS"}),
+                                                                        _date(time.time() - 3 * 86400)))
+            async with db.execute("SELECT last_insert_rowid()") as cur:
+                ancien = (await cur.fetchone())[0]
             await db.commit()
-        if tid == 44:   # une correction commencée : les trois premières réponses cochées
-            for q in e["questions"][:3]:
-                await questionnaire.corriger(g, chef, {"envoi": e["id"], "question": q["id"], "juste": True})
+        ch, _tk = await ticket_ouvert(g, ancien)
+        await questionnaire.poser_etape1(g, ch, ancien, m.id, nombre=await questionnaire.annonce(g.id))
+    if lourd:
+        clan = [m for m in g.members if m.id not in TETE and not m.bot and await questionnaire.du_clan(g, m)]
+        if clan:
+            r = await chemin.nommer_chef(max(clan, key=lambda x: x.display_name.casefold()), questionnaire)
+            if not r["ok"]:
+                print(f"[SITE LOCAL] chef d'équipe de démonstration refusé : {r}")
 
 
 async def _affiches_demo(g, X) -> None:

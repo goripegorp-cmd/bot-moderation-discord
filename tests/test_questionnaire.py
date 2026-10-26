@@ -235,48 +235,46 @@ async def _soumettre(banc, modal, membre, valeurs, salon=None):
 
 
 async def _ouvrir_avec_carte(b):
+    """Un ticket ouvert AVANT l'affiche (26/10/2026) : l'ancienne carte de l'étape 1 — ces tickets marchent toujours."""
     tid, fil = await b.ouvrir()
-    _vue, n = await Q.vue_accueil(b.g, b.conf["ticket_panels"]["p1"]["welcome_message"], "Rell Seas")
+    n = await Q.annonce(b.g.id, b.conf["ticket_panels"]["p1"]["welcome_message"])
     await Q.poser_etape1(b.g, fil, tid, CANDIDAT, nombre=n)
     return tid, fil
 
 
-# ═══ 1. L'ouverture : l'accueil (deux étapes, N questions, les liens) et la carte de l'étape 1 ═══════════════════════
+# ═══ 1. Un ticket ouvert AVANT l'affiche (26/10/2026) : sa carte de l'étape 1 marche toujours ══════════════════════
 
-def test_Q01_ouverture_accueil_deux_etapes_nombre_liens_et_carte_de_l_etape_1(tmp_path):
+def test_Q01_ancienne_carte_de_l_etape_1_pour_les_tickets_d_avant_l_affiche(tmp_path):
+    """L'accueil en deux messages a laissé place à l'AFFICHE (tests/test_recrutement_ticket.py). Un ticket ouvert avant
+    garde sa carte : ses boutons persistants (même l'ancien « e ») répondent, ses textes viennent du registre."""
     b = Banc(tmp_path)
 
     async def scenario():
         await b.preparer()
-        tid, fil = await b.ouvrir()
-        accueil, n = await Q.vue_accueil(b.g, "Bienvenue à bord !", "Rell Seas")
-        await Q.poser_etape1(b.g, fil, tid, CANDIDAT, nombre=n)
-        return tid, fil, accueil, n, await Q._suivi(b.g.id, tid)
-    tid, fil, accueil, n, s = run(scenario())
-    t = textes(accueil)
-    assert n == 10, "le nombre réglé sur le site (10 par défaut), toutes les questions confirmées de l'exemple"
-    assert "deux étapes" in t and "two steps" in t and "**10 questions**" in t and "10-question" in t
-    assert "Bienvenue à bord !" in t, "le mot du panneau est repris"
-    assert "Toutes les réponses se trouvent sur le wiki : dans les pages ci-dessous, ou à un clic depuis elles." in t and "Every answer is on the wiki: in the pages below, or one click away from them." in t
-    assert "[Wiki du jeu](https://exemple.fandom.com/wiki/Accueil)" in t and "[Guide du clan](https://discord.com/" in t
-    assert "Lien refusé" not in t and "sans-titre" not in t, "un lien http ou sans titre n'entre pas"
+        tid, fil = await _ouvrir_avec_carte(b)
+        return tid, fil, await Q._suivi(b.g.id, tid)
+    tid, fil, s = run(scenario())
     carte = _vues_du_fil(fil)[-1]
-    assert ids(carte) == [f"rq:e1:e:{tid}", f"rq:e1:s:{tid}", f"rq:e1:r:{tid}"]
+    assert ids(carte) == [f"rq:e1:n:{tid}", f"rq:e1:s:{tid}", f"rq:e1:r:{tid}"]
     tc = textes(carte)
-    assert "Envoyer le questionnaire" in tc and "Choisir sur le site" in tc and "Refuser l'étape 1" in tc
-    assert "10 questions, la sélection par défaut" in tc
+    assert "Étape suivante" in tc and "Choisir sur le site" in tc and "Refuser la demande" in tc
+    assert "l'étape 2 s'ouvre (10 questions)" in tc
     am = fil.envois[-1][1]["allowed_mentions"]
     assert am.users is False and am.roles is False and am.everyone is False, "la carte de l'équipe ne prévient personne"
     assert (s["etape"], s["annonce"], s["candidat_id"], s["salon_id"]) == ("etape1", 10, CANDIDAT, fil.id)
-    assert s["carte_id"] == fil.messages[-1].id
-    assert not EMOJI.search(t + tc), "aucun émoji Unicode dans les cartes du recrutement"
+    assert s["carte_id"] == fil.messages[-1].id and s["carte"] == "", "pas une affiche : l'ancien chemin"
+    assert not EMOJI.search(tc), "aucun émoji Unicode dans les cartes du recrutement"
+    gabarit = Q.BoutonEtape1.__discord_ui_compiled_template__
+    assert gabarit.fullmatch(f"rq:e1:e:{tid}"), "un bouton « Envoyer » posé avant le 26/10 répond toujours"
 
 
-def test_Q01b_accueil_sans_liens_ne_promet_pas_de_liens(tmp_path):
-    vue = Q.carte_accueil("", "", 0, [])
-    t = textes(vue)
-    assert "liens" not in t and "links" not in t and "question" in t, "pas de liens réglés : aucune promesse de liens"
-    assert "**0 question" not in t
+def test_Q01b_message_d_etape_sans_liens_ne_promet_pas_de_liens():
+    envoi = {"id": 3, "guild_id": 0, "candidat_id": CANDIDAT, "etape_ouverte": 1, "etape_envoyee": 0, "etape_fiche": 1,
+             "questions": [{"rang": 1, "id": "a", "question": "Une question ?", "etape": 1}], "liens": [],
+             "etapes": [{"numero": 1, "titre": "", "consigne": ""}]}
+    t = textes(Q.carte_etape(envoi))
+    assert "liens" not in t and "links" not in t and "wiki" not in t, "pas de liens réglés : aucune promesse de liens"
+    assert f"<@{CANDIDAT}> **Étape 2 sur 2**" in t, "sa fiche est l'étape 1 : le questionnaire commence à 2"
 
 
 # ═══ 2. Étape 1 refusée : le message automatique, puis la fermeture par le circuit normal ═════════════════════════
@@ -311,7 +309,7 @@ def test_Q02_etape1_refusee_message_automatique_puis_fermeture(tmp_path):
     assert statut == "closed" and s["etape"] == "refus_etape1" and s["fermeture_le"] == 0
     assert "pseudo Roblox" not in t, "la note interne ne part jamais dans le ticket"
     carte = [kw["view"] for mid, kw in fil.cartes if mid == s["carte_id"]][-1]
-    assert "Étape 1 refusée" in textes(carte) and not ids(carte), "la carte de l'équipe le dit, sans boutons"
+    assert "Demande refusée" in textes(carte) and not ids(carte), "la carte de l'équipe le dit, sans boutons"
     assert "Message envoyé au candidat" in fin.texte()
     assert any(x[0] == "recrutement.etape1_refusee" and "pseudo Roblox introuvable" in x[1] for x in b.journal)
 
@@ -373,10 +371,10 @@ def test_Q03_parcours_complet_etape2_pages_reprise_corrections_acceptation(tmp_p
     tid, fil, eid, envoi_clic, intrus, page1, modal1, apres1, reprise, modal2, fin = r
     #  L'envoi depuis la carte de l'équipe : la sélection par défaut (10 questions), en deux formulaires.
     assert "Questionnaire envoyé : 10 questions." in envoi_clic.texte()
-    cartes = [v for v in _vues_du_fil(fil) if "Étape 2" in textes(v)]
+    cartes = [v for v in _vues_du_fil(fil) if "Le questionnaire —" in textes(v)]
     assert len(cartes) == 1 and f"rq:rep:{eid}" in ids(cartes[0])
     t = textes(cartes[0])
-    assert "## Étape 2 — 10 questions" in t and "Step 2 — 10 questions" in t
+    assert "## Le questionnaire — 10 questions" in t and "The quiz — 10 questions" in t
     assert "Toutes les réponses se trouvent sur le wiki : dans les pages ci-dessous, ou à un clic depuis elles." in t and "[Wiki du jeu](" in t
     assert "**1.** Quel studio développe le jeu dont parle ce clan ?" in t and "**Formulaire 2/2**" in t
     assert "**3.** En quelle année le Movie 3 est-il sorti ?" in t, "le studio, puis les actualités"
@@ -597,11 +595,14 @@ def test_Q08_droits_carte_etape1_site_et_formulaires(tmp_path):
         eid = (await Q._suivi(b.g.id, tid))["envoi_id"]
         formulaire = await _cliquer(b, Q.BoutonRepondre(eid), b.candidat, fil)
         vole = await _soumettre(b, formulaire.response.modals[0], b.autre, ECRIT, fil)
-        page_autre = await _cliquer(b, Q.BoutonPage(eid, 2, 2), b.fondateur, fil)
+        page_autre = await _cliquer(b, Q.BoutonPage(eid, 2, 2), b.autre, fil)
+        apercu = await _cliquer(b, Q.BoutonPage(eid, 2, 2), b.fondateur, fil)
         inconnu = await _cliquer(b, Q.BoutonRepondre(eid + 99), b.candidat, fil)
         return tid, envoi_candidat, site_candidat, site_recruteur, site_tete, envoi_recruteur, vole, page_autre, \
-            inconnu, await Q._reponses(eid)
-    tid, envoi_c, site_c, site_r, site_t, envoi_r, vole, page_autre, inconnu, reponses = run(scenario())
+            inconnu, await Q._reponses(eid), apercu
+    tid, envoi_c, site_c, site_r, site_t, envoi_r, vole, page_autre, inconnu, reponses, apercu = run(scenario())
+    #  26/10/2026 : la tête qui touche le questionnaire le VOIT (lecture seule), sans jamais un formulaire.
+    assert not apercu.response.modals and "Aperçu" in apercu.texte() and "Lecture seule" in apercu.texte()
     assert Q.RESERVE in envoi_c.texte() and Q.RESERVE in site_c.texte()
     assert "Réservé au fondateur et à la direction." in site_r.texte(), "le site : les deux comptes de tête seuls"
     lien = json.dumps(site_t.vues()[-1].to_components())
@@ -643,7 +644,7 @@ def test_Q09_double_clic_un_seul_envoi_une_seule_fin(tmp_path):
     assert n_envois == 1, "deux clics : un seul questionnaire"
     assert sum("Questionnaire envoyé" in t for t in textes_) == 1
     assert sum(("déjà envoyé" in t) or ("déjà en cours" in t) for t in textes_) == 1
-    assert len([v for v in _vues_du_fil(fil) if "Étape 2 —" in textes(v)]) == 1
+    assert len([v for v in _vues_du_fil(fil) if "Le questionnaire —" in textes(v)]) == 1
     merci, deja = Q.MERCI.split("\n")[0], Q.DEJA.split("\n")[0]
     assert {merci in x.texte() or deja in x.texte(), merci in y.texte() or deja in y.texte()} == {True}
     assert merci in x.texte() + y.texte(), "l'un des deux lit « Merci », l'autre « déjà transmises » — jamais une erreur"
@@ -661,16 +662,41 @@ def test_Q10_limites_components_v2_et_formulaires_au_maximum():
              "liens": [{"titre": "T" * Q.LIEN_TITRE_MAX, "url": "https://exemple.com/" + "a" * (Q.URL_MAX - 20),
                         "description": "d" * Q.LIEN_DESC_MAX} for _ in range(Q.LIENS_MAX)]}
 
+    #  Le pire cas de l'affiche (26/10/2026) : le mot du panneau, cinq réponses de fiche au maximum, la bannière ; le
+    #  message de l'étape avec toutes les questions ; le panneau de la direction ; la fiche à cinq champs.
+    fiche = {f"Champ {k} " + "t" * 30: "r" * Q.CHAMP_LONGUEUR_MAX for k in range(Q.FICHE_MAX)}
+    affiches = [Q.carte_affiche({"gid": 0, "ticket": 10 ** 11, "candidat": CANDIDAT, "etat": etat, "mode": "approbation",
+                                 "nb_etapes": Q.ETAPES_MAX, "nb_questions": Q.PAR_ENVOI, "texte_panneau": "m" * 3000,
+                                 "reponses": fiche, "banniere": "https://bot.exemple/v/recrutement_affiche.png",
+                                 "porte": True, "numeros": (3, 2, Q.ETAPES_MAX + 1)})
+                for etat in ("demande", "questionnaire", "reponses", "accepte", "refuse")]
+    etape = dict(envoi, guild_id=0, etape_ouverte=1, etape_envoyee=0, etape_fiche=1,
+                 questions=[dict(q, etape=1) for q in envoi["questions"]],
+                 etapes=[{"numero": 1, "titre": "T" * Q.ETAPE_TITRE_MAX, "consigne": "c" * Q.ETAPE_CONSIGNE_MAX}])
+    champs = [{"titre": "C" * Q.CHAMP_TITRE_MAX, "aide": "a" * Q.CHAMP_AIDE_MAX, "exemple": "e" * Q.CHAMP_EXEMPLE_MAX,
+               "type": "choix" if k == 0 else "long", "requis": True, "max": Q.CHAMP_LONGUEUR_MAX,
+               "options": ["o" * (Q.OPTION_MAX - 3) + f"{n:03d}" for n in range(Q.OPTIONS_MAX)] if k == 0 else []}
+              for k in range(Q.FICHE_MAX)]
+
     async def scenario():
         vues = {etat: Q.cartes_etape2(envoi, etat, quand=1) for etat in ("ouvert", "repondu", "remplace", "clos")}
         modals = [Q.FormulairePage(envoi, p) for p in range(1, Q.nb_pages(Q.PAR_ENVOI) + 1)]
-        accueil = Q.carte_accueil("m" * 3000, "N" * 200, 25, envoi["liens"])
         etape1 = [Q.carte_etape1(10 ** 11, etat, nombre=25, par=FONDATEUR, candidat=CANDIDAT, quand=1)
                   for etat in ("attente", "envoye", "reponses", "refus_etape1", "refuse", "accepte")]
+        etapes = [Q.carte_etape(etape, etat, quand=1) for etat in ("ouverte", "recue", "repondu", "remplace", "clos")]
+        direction = [Q.panneau_direction({"gid": 0, "ticket": 10 ** 11, "candidat": CANDIDAT, "etat": etat,
+                                          "nb_etapes": Q.ETAPES_MAX, "nb_questions": Q.PAR_ENVOI, "porte": True,
+                                          "numeros": (3, 3, Q.ETAPES_MAX + 1), "par": FONDATEUR, "quand": 1,
+                                          "extras": {"contexte": ["x" * 400] * 3, "pris_par": FONDATEUR}})
+                     for etat in ("demande", "direct", "questionnaire", "reponses", "accepte", "refuse")]
         refus = Q.FormulaireRefus(10 ** 11)
+        formulaire_fiche = Q.FormulaireFiche(champs)
         page = Q._vue_texte("x" * 5000, boutons=[Q.BoutonPage(10 ** 11, 5, 5)])
-        return vues, modals, accueil, etape1, refus, page
-    vues, modals, accueil, etape1, refus, page = run(scenario())
+        return vues, modals, etape1, etapes, direction, refus, formulaire_fiche, page
+    vues, modals, etape1, etapes, direction, refus, formulaire_fiche, page = run(scenario())
+    accueil = affiches[0]
+    for v in affiches + etapes + direction:
+        assert compter(v) <= 40 and len(textes(v)) <= 4000, (compter(v), len(textes(v)))
     for etat, liste in vues.items():
         assert 1 <= len(liste) <= 4, etat
         tout = " ".join(textes(v) for v in liste)
@@ -681,13 +707,16 @@ def test_Q10_limites_components_v2_et_formulaires_au_maximum():
         assert (f"rq:rep:123456" in ids(liste[-1])) == (etat == "ouvert"), "le bouton sur le dernier message"
     for v in [accueil, page, *etape1]:
         assert compter(v) <= 40 and len(textes(v)) <= 4000
-    for m in [*modals, refus]:
+    for m in [*modals, refus, formulaire_fiche]:
         d = m.to_dict()
         assert len(d["title"]) <= 45 and 1 <= len(d["components"]) <= 5
         for c in d["components"]:
             assert len(c["label"]) <= 45 and len(c.get("description") or "") <= 100
             assert len(c["component"].get("placeholder") or "") <= 100
-    for v in [*vues["ouvert"], *etape1, page]:
+            for o in c["component"].get("options") or []:
+                assert len(o["label"]) <= 100 and len(o["value"]) <= 100
+            assert len(c["component"].get("options") or []) <= 25
+    for v in [*vues["ouvert"], *etape1, *affiches, *etapes, *direction, page]:
         for item in v.walk_children():
             bouton = item.item if isinstance(item, discord.ui.DynamicItem) else item
             if isinstance(bouton, discord.ui.Button):
@@ -934,8 +963,8 @@ def test_Q14_renvoyer_puis_refuser_message_neutre_et_fermeture(tmp_path):
             await Q.dossier(b.g, tid), await b.statut_ticket(tid)
     tid, fil, eid, renvoi, e2, renvoi_encore, e3, vieux, sans_reponse, refus, apres, dossier, statut = run(scenario())
     assert renvoi[0] == 200 and renvoi[1]["questions"] == 2
-    nouvelles = [v for v in _vues_du_fil(fil) if "nouveau questionnaire" in textes(v)]
-    assert len(nouvelles) == 2 and "Step 2 — new questionnaire · 2 questions" in textes(nouvelles[0])
+    nouvelles = [v for v in _vues_du_fil(fil) if "Nouveau questionnaire" in textes(v)]
+    assert len(nouvelles) == 2 and "New quiz — 2 questions" in textes(nouvelles[0])
     assert any(mid != 0 and "Questionnaire remplacé" in textes(kw["view"]) for mid, kw in fil.cartes), \
         "le questionnaire non répondu, remplacé, le dit"
     assert Q.REMPLACE.split("\n")[0] in vieux.texte(), "un formulaire d'un questionnaire remplacé n'écrit rien"
@@ -947,7 +976,9 @@ def test_Q14_renvoyer_puis_refuser_message_neutre_et_fermeture(tmp_path):
     assert b.decisions == [(tid, DIRECTION, False, "étape 2 — deux réponses fausses")] and statut == "closed"
     assert apres[0] == 409, "le ticket est fermé"
     assert dossier["etape"] == "refuse" and [e["statut"] for e in dossier["envois"]] == ["repondu", "remplace", "clos"]
-    assert [d["quoi"] for d in dossier["decisions"]] == ["questionnaire", "reponses", "renvoi", "renvoi", "refuse"]
+    #  Le message privé du refus (26/10/2026) : ce faux serveur n'en envoie pas — c'est noté, rien ne bloque.
+    assert [d["quoi"] for d in dossier["decisions"]] == ["questionnaire", "reponses", "renvoi", "renvoi", "refuse",
+                                                       "mp_impossible"]
 
 
 # ═══ 13. Redémarrage pendant la fermeture prévue, pannes de Discord ════════════════════════════════════════════════
@@ -1085,58 +1116,78 @@ def test_Q19_boutons_persistants_enregistres_et_routes_du_site(tmp_path):
     gabarits = [c.__discord_ui_compiled_template__ for c in Q.BOUTONS_PERSISTANTS]
     tous = [cid for v in vues for cid in ids(v)]
     assert tous and all(any(g.fullmatch(cid) for g in gabarits) for cid in tous), tous
-    assert ("bot.add_dynamic_items(questionnaire.BoutonEtape1, questionnaire.BoutonRepondre, "
-            "questionnaire.BoutonPage)") in SRC, "les trois capteurs sont enregistrés au démarrage"
-    for c in Q.BOUTONS_PERSISTANTS:
-        assert f"questionnaire.{c.__name__}" in SRC
+    appel = next(n for n in ast.walk(ARBRE) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and n.func.attr == "add_dynamic_items" and any("questionnaire" in ast.unparse(a) for a in n.args))
+    assert [ast.unparse(a) for a in appel.args] == [f"questionnaire.{c.__name__}" for c in Q.BOUTONS_PERSISTANTS], \
+        "chaque capteur persistant du questionnaire est enregistré au démarrage"
     boot = _source("_activite_boot")
     for bout in ("with _Etape('questionnaire'):", "questionnaire.setup(get_db=get_db", "ticket_ouvert=_ticket_ouvert",
                  "decider=_decision_recrutement", "autorise=_peut_decider", "lien=tableau.lien_pour",
                  "await questionnaire.init_db()", "if hasattr(tableau, 'monter'):",
                  "tableau.monter(questionnaire.ROUTES_SITE)", "if hasattr(tableau, 'ajouter_regle'):",
-                 "tableau.ajouter_regle(**questionnaire.REGLE_NETTOYAGE)", "await questionnaire.demarrer(bot)"):
+                 "for _regle in questionnaire.REGLES_RECRUTEMENT:", "tableau.ajouter_regle(**_regle)",
+                 "await questionnaire.demarrer(bot)"):
         assert bout in boot, bout
     corps = _source("_create_ticket_corps")
-    assert "await _accueil_recrutement(i.guild, ch, tid, i.user.id, pnl)" in corps
+    assert "affiche = recrutement and await _accueil_recrutement(i.guild, ch, tid, i.user.id, pnl, pid)" in corps
     assert "if welcome_message and not recrutement:" in SRC, "un seul accueil pour un ticket du clan"
     format_route = re.compile(r"[a-z0-9_]{1,40}(?:/[a-z0-9_]{1,40}){0,4}")
-    attendu = {"recrutement/banque": ("GET", False), "recrutement/modeles": ("GET", False),
-               "recrutement/suivi": ("GET", False), "recrutement/dossier": ("GET", False),
-               "recrutement/question": ("POST", True), "recrutement/question/retirer": ("POST", True),
-               "recrutement/liens": ("POST", True), "recrutement/reglages": ("POST", True),
-               "recrutement/modele": ("POST", True), "recrutement/modele/retirer": ("POST", True),
-               "recrutement/corriger": ("POST", True), "recrutement/etape1": ("POST", False),
-               "recrutement/decision": ("POST", False)}
-    assert set(Q.ROUTES_SITE) == set(attendu)
-    for nom, (methode, hors_ligne) in attendu.items():
-        r = Q.ROUTES_SITE[nom]
-        assert format_route.fullmatch(nom) and r["methode"] == methode and r["hors_ligne"] is hors_ligne, nom
+    #  (nom, méthode) → rejouable hors ligne. 26/10/2026 : le parcours de chaque panneau, la proposition d'étapes,
+    #  « Voir comme le candidat », le passage d'étape, les décidées, la liste noire, le nettoyage, la purge, les chefs.
+    attendu = {("recrutement/banque", "GET"): False, ("recrutement/modeles", "GET"): False,
+               ("recrutement/suivi", "GET"): False, ("recrutement/dossier", "GET"): False,
+               ("recrutement/question", "POST"): True, ("recrutement/question/retirer", "POST"): True,
+               ("recrutement/liens", "POST"): True, ("recrutement/reglages", "POST"): True,
+               ("recrutement/modele", "POST"): True, ("recrutement/modele/retirer", "POST"): True,
+               ("recrutement/corriger", "POST"): True, ("recrutement/etape1", "POST"): False,
+               ("recrutement/decision", "POST"): False,
+               ("recrutement/parcours", "GET"): False, ("recrutement/parcours", "POST"): True,
+               ("recrutement/proposition", "GET"): False, ("recrutement/apercu", "GET"): False,
+               ("recrutement/etape_suivante", "POST"): False, ("recrutement/decidees", "GET"): False,
+               ("recrutement/liste_noire", "GET"): False, ("recrutement/liste_noire/lever", "POST"): False,
+               ("recrutement/nettoyage", "GET"): False, ("recrutement/nettoyage", "POST"): False,
+               ("recrutement/purge", "GET"): False, ("recrutement/purge", "POST"): False,
+               ("recrutement/chefs", "GET"): False, ("recrutement/chefs/question", "POST"): True,
+               ("recrutement/chefs/question/retirer", "POST"): True, ("recrutement/chefs/gabarit", "POST"): True,
+               ("recrutement/chefs/proposition", "GET"): False, ("recrutement/chefs/proposer", "POST"): False,
+               ("recrutement/chefs/dossier", "GET"): False, ("recrutement/chefs/decision", "POST"): False,
+               ("recrutement/chefs/retirer", "POST"): False, ("recrutement/chefs/role", "POST"): False,
+               ("recrutement/chef", "GET"): False}
+    definitions = {(nom, r["methode"]): r for nom, d in Q.ROUTES_SITE.items()
+                   for r in (d if isinstance(d, list) else [d])}
+    assert set(definitions) == set(attendu), set(definitions) ^ set(attendu)
+    for (nom, methode), hors_ligne in attendu.items():
+        r = definitions[(nom, methode)]
+        assert format_route.fullmatch(nom) and r["hors_ligne"] is hors_ligne, nom
         assert r["ecriture"] is (methode == "POST") and asyncio.iscoroutinefunction(r["fn"])
         assert list(__import__("inspect").signature(r["fn"]).parameters) == ["g", "auteur", "requete", "corps"]
-    assert Q.ROUTES_SITE["recrutement/decision"]["grave"] == "roles", "accepter donne le rôle du clan"
+    for nom in ("recrutement/decision", "recrutement/chefs/decision", "recrutement/chefs/retirer",
+                "recrutement/chefs/role"):
+        assert definitions[(nom, "POST")]["grave"] == "roles", f"{nom} donne ou retire un rôle"
     #  Les règles du registre de tableau.py (`_normaliser_route`) : une lecture n'écrit pas et ne se rejoue pas,
-    #  seule une écriture se rejoue hors ligne, un corps borné, un genre grave connu.
+    #  seule une écriture se rejoue hors ligne, un corps borné, un genre grave connu — vérifiées par tableau lui-même.
     import tableau
-    for nom, r in Q.ROUTES_SITE.items():
-        if r["methode"] == "GET":
-            assert not r["ecriture"] and not r["hors_ligne"] and r["corps_max"] == 0, nom
-        assert not r["hors_ligne"] or r["ecriture"], nom
-        assert isinstance(r["corps_max"], int) and 0 <= r["corps_max"] <= 12 * 1024 * 1024, nom
-        assert r["grave"] is None or r["grave"] in tableau.LIMITES_GRAVES, nom
-    regle = Q.REGLE_NETTOYAGE
-    assert format_route.fullmatch(regle["cle"]) and "/" not in regle["cle"]
-    assert 0 <= regle["min"] <= regle["garde_jours"] <= regle["max"] <= 3650
-    assert callable(regle["fn"]) and callable(regle["compter"]) and len(regle["nom"]) <= 60
+    for nom, d in Q.ROUTES_SITE.items():
+        for r in (d if isinstance(d, list) else [d]):
+            tableau._normaliser_route(nom, r)
+            if r["methode"] == "GET":
+                assert not r["ecriture"] and not r["hors_ligne"] and r["corps_max"] == 0, nom
+            assert not r["hors_ligne"] or r["ecriture"], nom
+            assert isinstance(r["corps_max"], int) and 0 <= r["corps_max"] <= 12 * 1024 * 1024, nom
+            assert r["grave"] is None or r["grave"] in tableau.LIMITES_GRAVES, nom
+    for regle in Q.REGLES_RECRUTEMENT:
+        assert format_route.fullmatch(regle["cle"]) and "/" not in regle["cle"]
+        assert 0 <= regle["min"] <= regle["garde_jours"] <= regle["max"] <= 3650
+        assert callable(regle["fn"]) and callable(regle["compter"]) and len(regle["nom"]) <= 60
+        tableau._normaliser_regle(regle)
 
 
-def test_Q20_l_accueil_d_un_ticket_du_clan_dans_le_bot(tmp_path):
+def test_Q20_l_affiche_d_un_ticket_du_clan_dans_le_bot(tmp_path):
+    """26/10/2026 : `_accueil_recrutement` pose l'AFFICHE (un seul message, le candidat cité sans être prévenu, le seul
+    bouton « Direction ») ; en panne, l'ancienne carte de décision reste possible et la panne est dite."""
     b = Banc(tmp_path)
-    envois, erreurs = [], []
-
-    async def webhook_send(ch, profil, **kw):
-        envois.append((ch, profil, kw))
-
-    ns = {"discord": discord, "questionnaire": Q, "recrutements": recrutements, "webhook_send": webhook_send,
+    erreurs = []
+    ns = {"discord": discord, "questionnaire": Q, "recrutements": recrutements,
           "_logerr": lambda ou, ex, **k: erreurs.append(ou)}
     exec(_source("_accueil_recrutement"), ns)  # noqa: S102 — code du dépôt
 
@@ -1146,20 +1197,23 @@ def test_Q20_l_accueil_d_un_ticket_du_clan_dans_le_bot(tmp_path):
     async def scenario():
         await b.preparer()
         tid, fil = await b.ouvrir()
-        await ns["_accueil_recrutement"](b.g, fil, tid, CANDIDAT, b.conf["ticket_panels"]["p1"])
+        ok = await ns["_accueil_recrutement"](b.g, fil, tid, CANDIDAT, b.conf["ticket_panels"]["p1"], "p1")
         t2, f2 = await b.ouvrir()
-        ns["questionnaire"] = Obj(vue_accueil=panne, poser_etape1=panne)
-        await ns["_accueil_recrutement"](b.g, f2, t2, CANDIDAT, b.conf["ticket_panels"]["p1"])
-        return tid, fil, t2, f2
-    tid, fil, t2, f2 = run(scenario())
-    (ch, profil, kw), = envois
-    assert ch is fil and profil == "ticket" and kw["allowed_mentions"].users is False
+        ns["questionnaire"] = Obj(poser_affiche=panne)
+        ko = await ns["_accueil_recrutement"](b.g, f2, t2, CANDIDAT, b.conf["ticket_panels"]["p1"], "p1")
+        return tid, fil, ok, t2, f2, ko, await Q._suivi(b.g.id, tid)
+    tid, fil, ok, t2, f2, ko, s = run(scenario())
+    assert ok is True and len(fil.envois) == 1, "un seul message : l'affiche"
+    kw = fil.envois[0][1]
+    am = kw["allowed_mentions"]
+    assert am.users is False and am.roles is False and am.everyone is False, "cité, jamais prévenu"
     t = textes(kw["view"])
-    assert "**10 questions**" in t and "Bienvenue à bord !" in t and "-# Rell Seas" in t
-    assert ids(_vues_du_fil(fil)[-1])[0] == f"rq:e1:e:{tid}"
-    assert erreurs == ["recrutement.accueil", "recrutement.carte"], "la panne est dite, le ticket reste ouvert"
-    assert ids(_vues_du_fil(f2)[-1]) == [f"recr:dec:a:{t2}", f"recr:dec:r:{t2}"], \
-        "sans la nouvelle carte, l'ancienne décision (accepter, refuser) reste possible"
+    assert f"<@{CANDIDAT}>" in t and "Bienvenue à bord !" in t and r"Kolax\_RS" in t, "le mot du panneau et sa fiche"
+    assert f"#{tid}" not in t and "Ticket #" not in t, "aucun numéro de ticket"
+    assert ids(kw["view"]) == [f"rq:e1:d:{tid}"], "un seul bouton, discret : « Direction »"
+    assert (s["carte"], s["mode"], s["panneau"], s["carte_id"]) == ("affiche", "approbation", "p1", fil.messages[0].id)
+    assert ko is False and erreurs == ["recrutement.affiche"], "la panne est dite, le ticket reste ouvert"
+    assert ids(_vues_du_fil(f2)[-1]) == [f"recr:dec:a:{t2}", f"recr:dec:r:{t2}"],         "sans l'affiche, l'ancienne décision (accepter, refuser) reste possible"
 
 
 # ═══ 17. Le journal du site, la règle de nettoyage ═════════════════════════════════════════════════════════════════
