@@ -107,6 +107,9 @@ ESPACE = "/tableau/espace/"
 #  « equipage » (le rôle du clan, lecture seule) — une autre, ou une vieille, est refusée partout.
 EQUIPAGE = "/tableau/equipage/"
 PORTEES = ("tout", "equipage")
+#  26/10/2026 (sécurité) : les adresses du site de l'équipage nomment LEURS portées — une portée ajoutée demain
+#  (« candidat ») n'y entre pas sans qu'on le décide (tests/test_acces_site.py).
+PORTEES_EQUIPAGE = ("tout", "equipage")
 OUVERTURE_JOURNAL_S = 1800     # « Site de l'équipage ouvert par … » : une ligne par personne et par demi-heure
 TENTATIVE_JOURNAL_S = 600      # une session de l'équipage qui demande une page de la direction : une ligne / 10 min
 COOKIE = "__Host-tableau"
@@ -192,15 +195,21 @@ COMPRESSIBLES = {"js", "css", "svg", "json", "webmanifest"}
 #    · une portée de session ("equipage", demain "candidat"…) : les fichiers que SA page charge ;
 #    · tout le reste — le code et le style de la Capitainerie, et tout fichier inconnu ou ajouté demain sans y penser :
 #      la tête seule (portée « tout »). Un fichier refusé répond 404, comme un fichier absent.
-#  La vitrine publique et la page du candidat AJOUTENT ici leurs fichiers (et rien d'autre ne devient lisible).
+#  La page du candidat AJOUTE ici ses fichiers (et rien d'autre ne devient lisible). Les listes suivent exactement ce que
+#  chaque page charge (tests/test_securite_site.py, S1b, le vérifie : un import ajouté sans y penser fait échouer le test).
 ACCES_STATIQUES = {
     "public": ("polices/*", "icones/*", "textures/*", "ornements/*", "logos/*", "app-192.png", "app-512.png",
-               "manifest.webmanifest"),
-    #  Le site de l'équipage (site/equipage.html) : ses modules (import statiques ; `direct.js` n'est chargé qu'en mode
-    #  édition, par la tête) et ses feuilles de style.
-    "equipage": ("equipage.js", "equipage_accueil.js", "equipage_commun.js", "dom.js", "noyau.js", "api.js", "ui.js",
-                 "affiche.js", "donnees.js", "hors_ligne.js", "style.css", "composants.css", "pieces.css", "ateliers.css",
-                 "direct.css", "equipage.css"),
+               "manifest.webmanifest",
+               #  27/10/2026 : la vitrine PUBLIQUE de l'équipage (site/vitrine.html, `/equipage`) — ses modules (imports
+               #  statiques de vitrine.js, le socle commun compris) et ses feuilles de style. Le code PROPRE à la
+               #  Capitainerie (app, discord, clan, recrutement, annonces, capitainerie, fiche, securite, textes, direct,
+               #  equipes_admin, accueil, recherche, rangement, mode…) n'y est pas : la tête seule.
+               "vitrine.js", "vitrine.css", "equipage_accueil.js", "equipage_commun.js", "equipage_equipes.js",
+               "equipage_mur.js", "lien_equipage.js", "affiche.js", "api.js", "dom.js", "donnees.js", "hors_ligne.js",
+               "noyau.js", "ui.js", "style.css", "composants.css", "pieces.css", "ateliers.css", "equipage.css"),
+    #  Le site de l'équipage (site/equipage.html) : ce que sa page charge EN PLUS de la vitrine (`direct.js` n'est chargé
+    #  qu'en mode édition, par la tête).
+    "equipage": ("equipage.js", "direct.css"),
 }
 STATIQUE_MAX = 6 * 1024 * 1024          # un fichier de `site/` (au-delà : refusé, jamais tout en mémoire)
 STATIQUES_CACHE = 48 * 1024 * 1024      # ce que la mémoire garde des fichiers de `site/`
@@ -2538,7 +2547,7 @@ async def media(request):
     """`GET /tableau/espace/media/{id}` : une image du site — session exigée, rien gardé en cache."""
     from aiohttp import web
     try:
-        j, g = await _verifier(request, medias=True, portees=PORTEES)
+        j, g = await _verifier(request, medias=True, portees=PORTEES_EQUIPAGE)
     except _Refus as r:
         return _json({"erreur": r.message}, r.status)
     ident = str(request.match_info.get("media", ""))
@@ -3007,7 +3016,7 @@ async def page_equipage(request):
     """La page du site de l'équipage (`site/equipage.html`) : une session « equipage » ou « tout »."""
     from aiohttp import web
     try:
-        await _verifier(request, portees=PORTEES)
+        await _verifier(request, portees=PORTEES_EQUIPAGE)
     except _Refus as r:
         return _html(EXPIRE_EQUIPAGE if r.status != 429 else TROP, r.status)
     texte = _lire_page_site("equipage.html")
@@ -3024,7 +3033,7 @@ async def api_equipage(request):
     from aiohttp import web
     nom = str(request.match_info.get("nom", ""))
     try:
-        j, g = await _verifier(request, portees=PORTEES)
+        j, g = await _verifier(request, portees=PORTEES_EQUIPAGE)
     except _Refus as r:
         return _json({"erreur": r.message}, r.status)
     fn = ROUTES_EQUIPAGE.get(nom) if FORMAT_ROUTE.fullmatch(nom) else None

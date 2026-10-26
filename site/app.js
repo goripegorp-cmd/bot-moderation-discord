@@ -2,7 +2,7 @@
 // service worker (hors ligne), session et déconnexion.
 
 import { h, icone, $, BASE, chargerSprite, completerSprite, icones, depuis, date, nombre, sansEmoji, srcSure, retarder, reduit, telephone, remplacer, quantite, ajouter } from "./dom.js";
-import { V, CATEGORIES, categorie, rubrique, etat, emettre, ecouter, lireAncre, poserAncre, aller, peutAgir, enLigne, retenirPersonnes, oublierPrefs, P } from "./noyau.js";
+import { V, CATEGORIES, categorie, rubrique, etat, emettre, ecouter, lireAncre, poserAncre, aller, peutAgir, enLigne, retenirPersonnes, oublierPrefs, P, libelle } from "./noyau.js";
 import { lire, poster, noterReseau } from "./api.js";
 import * as HL from "./hors_ligne.js";
 import { oublierTout, perime, vue as vueJeu } from "./donnees.js";
@@ -20,6 +20,7 @@ import { basculeMode, modeSimple, changerMode } from "./mode.js";
 import * as textes from "./textes.js";
 import { demarrerDirect } from "./direct.js";
 import { securite } from "./securite.js";
+import { boutonLienEquipage, copierLienEquipage } from "./lien_equipage.js";
 
 const RAFRAICHIR = 60000;
 const ICONES = ["port", "equipage", "capitainerie", "apercu", "journal", "sanctions", "tickets", "repertoire", "salons", "nettoyage", "membres", "fiches",
@@ -114,6 +115,7 @@ function monterEntete() {
     { l: "Exporter le journal (30 jours)", icone: "exporter", href: BASE + "/export?quoi=journal&jours=30", telecharger: true, desactive: !enLigne() },
     { l: "Exporter le casier", icone: "exporter", href: BASE + "/export?quoi=sanctions", telecharger: true, desactive: !enLigne() },
     { l: "Le site de l'équipage", sous: "ce que voit le clan · l'accueil à composer", icone: "equipage", onclick: () => { location.href = "/tableau/equipage/"; } },
+    { l: libelle("site.equipage.lien", "Copier le lien de l'équipage"), sous: "la vitrine publique, à partager", icone: "lien", onclick: copierLienEquipage },
     { titre: "Affichage" },
     { l: modeSimple() ? "Tout afficher" : "Mode simple", sous: modeSimple() ? "les chiffres, graphiques, filtres et détails" : "l'essentiel seulement", icone: modeSimple() ? "oeil" : "masquer", onclick: () => changerMode(!modeSimple()) },
     "-",
@@ -121,7 +123,8 @@ function monterEntete() {
     { l: "Se déconnecter", icone: "deconnexion", onclick: deconnecter, danger: true },
   ]);
   plaque.addEventListener("click", ouvrirFile);
-  remplacer(outils, plaque, rafraichir, menuB);
+  //  27/10/2026 : « Copier le lien de l'équipage » (la vitrine publique), près de « À bord » (posé devant la plaque).
+  remplacer(outils, boutonLienEquipage({ iconeSeule: true }), plaque, rafraichir, menuB);
   majPlaque();
 }
 

@@ -258,6 +258,13 @@ async def _tableau(request):
     return await getattr(tableau, nom.split(":", 1)[1])(request)
 
 
+async def _vitrine(request):
+    """La vitrine PUBLIQUE de l'équipage (`site_vitrine`) : sans session, lecture seule, données publiques seulement."""
+    import site_vitrine
+    nom = request.match_info.route.name or ""
+    return await getattr(site_vitrine, nom.split(":", 1)[1])(request)
+
+
 async def _websub(request):
     """YouTube (hub WebSub) : vérification d'abonnement (GET) et vidéos publiées (POST)."""
     import websub_youtube
@@ -328,6 +335,12 @@ def construire_app():
     app.router.add_get('/tableau/equipage/api/{nom:.+}', _tableau, name="tableau:api_equipage")
     app.router.add_post('/tableau/equipage/api/{nom:.+}', _tableau, name="tableau:api_equipage_refus")
     app.router.add_get('/tableau/{jeton}', _tableau, name="tableau:entree")
+    #  27/10/2026 : la vitrine PUBLIQUE de l'équipage (le lien officiel à partager) — ces cinq adresses, en lecture.
+    app.router.add_get('/equipage', _vitrine, name="vitrine:page")
+    app.router.add_get('/equipage/', _vitrine, name="vitrine:vers_vitrine")
+    app.router.add_get('/equipage/donnees', _vitrine, name="vitrine:donnees")
+    app.router.add_get('/equipage/banniere.png', _vitrine, name="vitrine:banniere")
+    app.router.add_get('/equipage/image/{jeton}', _vitrine, name="vitrine:image")
     return app
 
 

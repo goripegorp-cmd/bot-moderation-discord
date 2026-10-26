@@ -427,8 +427,10 @@ def _site_v2(dossier: Path) -> None:
 
 def test_V5_fichiers_du_site_types_cache_et_aucun_pas_dehors(site):
     """26/10/2026 (sécurité) : « le fameux F12 » — le code et le style de la Capitainerie à la tête SEULE, l'image à
-    tous ; « private » dès qu'il faut une session (aucun cache partagé ne le garde pour un autre)."""
+    tous ; « private » dès qu'il faut une session (aucun cache partagé ne le garde pour un autre). 27/10/2026 : le
+    socle commun que charge la vitrine publique (style.css…) est public, lui aussi."""
     _site_v2(site.tmp / "site")
+    (site.tmp / "site" / "textes.css").write_text(".t{color:#2b1d12}" * 50, encoding="utf-8")   # la Capitainerie seule
     (site.tmp / "secret.js").write_text("le secret d'à côté", encoding="utf-8")
     lien_possible = True
     try:
@@ -439,7 +441,7 @@ def test_V5_fichiers_du_site_types_cache_et_aucun_pas_dehors(site):
 
     async def scenario(c):
         out, anonymes = {}, {}
-        for nom, chemin in (("js", "/tableau/espace/s/app.js?v=abc"), ("css", "/tableau/espace/s/style.css"),
+        for nom, chemin in (("js", "/tableau/espace/s/app.js?v=abc"), ("css", "/tableau/espace/s/textes.css"),
                             ("svg", "/tableau/espace/s/icones/ui.svg?v=1"), ("manif", "/tableau/espace/s/manifest.webmanifest")):
             r = await c.get(chemin, headers=tete)
             out[nom] = (r.status, r.headers.get("Content-Type"), r.headers.get("Cache-Control"), r.headers.get("ETag"),
@@ -473,6 +475,7 @@ def test_V5_fichiers_du_site_types_cache_et_aucun_pas_dehors(site):
         assert anonymes[nom][:2] == (404, "Introuvable.") and anonymes[nom][2] is None, \
             f"le code et le style ({nom}) ne sortent jamais sans session — refusés comme un fichier absent"
     assert anonymes["svg"][0] == anonymes["manif"][0] == 200
+    assert tableau.lecteurs_statique("style.css") is None, "le style commun : public (la vitrine le charge)"
     for (chemin, avec), (status, texte) in refuses.items():
         assert status in (400, 404) and "secret" not in texte and "import" not in texte, f"servi à tort : {chemin} {avec}"
     if lien_possible:

@@ -55,15 +55,17 @@ def test_S1_chaque_fichier_a_ses_seuls_lecteurs(site):
     _site_v2(dossier)
     for rel, texte in (("equipage.js", "export const E = 1;"), ("dom.js", "export const d = 1;"),
                        ("securite.js", "export const s = 1;"), ("polices/polices.css", "@font-face{}"),
-                       ("textures/bois.webp", "RIFF0000WEBP"), ("nouveau-module.js", "export const n = 1;")):
+                       ("textures/bois.webp", "RIFF0000WEBP"), ("nouveau-module.js", "export const n = 1;"),
+                       ("vitrine.js", "export const v = 1;"), ("direct.css", ".d{}"), ("textes.css", ".t{}")):
         (dossier / rel).parent.mkdir(parents=True, exist_ok=True)
         (dossier / rel).write_text(texte, encoding="utf-8")
     tete, eq = site.biscuit(origine=False), _equipage(site)
 
     async def scenario(c):
         out = {}
-        for rel in ("app.js", "style.css", "equipage.js", "dom.js", "securite.js", "nouveau-module.js",
-                    "polices/polices.css", "textures/bois.webp", "icones/ui.svg", "manifest.webmanifest"):
+        for rel in ("app.js", "textes.css", "equipage.js", "direct.css", "style.css", "dom.js", "vitrine.js",
+                    "securite.js", "nouveau-module.js", "polices/polices.css", "textures/bois.webp", "icones/ui.svg",
+                    "manifest.webmanifest"):
             for qui, h in (("anonyme", {}), ("equipage", eq), ("tete", tete)):
                 r = await c.get(f"/tableau/espace/s/{rel}?v=1", headers=h)
                 out[(rel, qui)] = (r.status, r.headers.get("Cache-Control"), await r.text())
@@ -72,20 +74,22 @@ def test_S1_chaque_fichier_a_ses_seuls_lecteurs(site):
         out["absent"] = (await c.get("/tableau/espace/s/rien.js?v=1")).status
         return out
     out = site.http(scenario)
-    for rel in ("app.js", "securite.js", "nouveau-module.js"):
+    for rel in ("app.js", "textes.css", "securite.js", "nouveau-module.js"):
         assert out[(rel, "anonyme")][0] == out[(rel, "equipage")][0] == 404, f"{rel} : la tête seule"
         assert out[(rel, "tete")][:2] == (200, "private, max-age=31536000, immutable")
     assert out[("nouveau-module.js", "anonyme")][2] == "Introuvable.", "un fichier inconnu : la tête seule, par défaut"
-    for rel in ("style.css", "equipage.js", "dom.js"):
+    for rel in ("equipage.js", "direct.css"):
         assert out[(rel, "anonyme")][0] == 404 and out[(rel, "equipage")][0] == out[(rel, "tete")][0] == 200, \
             f"{rel} : la page de l'équipage et la tête"
         assert out[(rel, "equipage")][1].startswith("private"), "jamais gardé par un cache partagé"
-    for rel in ("polices/polices.css", "textures/bois.webp", "icones/ui.svg", "manifest.webmanifest"):
+    #  27/10/2026 : la vitrine publique (`/equipage`) charge le socle commun — public, comme l'image.
+    for rel in ("style.css", "dom.js", "vitrine.js", "polices/polices.css", "textures/bois.webp", "icones/ui.svg",
+                "manifest.webmanifest"):
         assert out[(rel, "anonyme")][0] == 200 and out[(rel, "anonyme")][1].startswith("public"), f"{rel} : public"
     assert out[("sw.js", "anonyme")] == out[("sw.js", "equipage")] == (404,) and out[("sw.js", "tete")] == (200,)
     assert out["absent"] == 404
     #  Les lecteurs : la liste explicite, le reste à la tête.
-    assert tableau.lecteurs_statique("polices/alegreya.woff2") is None
+    assert tableau.lecteurs_statique("polices/alegreya.woff2") is None and tableau.lecteurs_statique("ui.js") is None
     assert tableau.lecteurs_statique("equipage.js") == frozenset({"tout", "equipage"})
     assert tableau.lecteurs_statique("app.js") == tableau.lecteurs_statique("inconnu.css") == frozenset({"tout"})
     #  Un membre de l'équipage qui demande le code de la direction : noté (une ligne, jamais une alerte).
@@ -94,26 +98,39 @@ def test_S1_chaque_fichier_a_ses_seuls_lecteurs(site):
     assert securite_site._compteurs.get("fichier", 0) >= 4 and site.alertes == []
 
 
-def test_S1b_les_fichiers_du_site_de_l_equipage_sont_ceux_que_sa_page_charge():
-    """La liste « equipage » suit le graphe des modules de `site/equipage.js` (imports statiques) et les feuilles de
-    style de `site/equipage.html` : rien de plus (le reste de la Capitainerie ne sort pas), rien de moins (la page
-    marche). `direct.js`, chargé seulement en mode édition (la tête), n'en fait pas partie."""
+def _charge_par(page: str) -> set:
+    """Ce que la page `site/<page>` charge : ses scripts et leur graphe d'imports statiques, ses feuilles de style."""
     import re
     racine = tableau.SITE
+    texte = (racine / page).read_text(encoding="utf-8")
 
     def deps(f):
         t = (racine / f).read_text(encoding="utf-8")
-        return set(re.findall(r'from\s+"\./([^"]+)"', t))
-    vus, pile = set(), ["equipage.js"]
+        return set(re.findall(r'from\s+"\./([^"]+)"', t)) | set(re.findall(r'import\s+"\./([^"]+)"', t))
+    vus, pile = set(), list(re.findall(r'<script[^>]+src="/tableau/espace/s/([A-Za-z0-9_.-]+\.js)', texte))
     while pile:
         f = pile.pop()
         if f not in vus:
             vus.add(f)
             pile.extend(deps(f))
-    feuilles = set(re.findall(r'/tableau/espace/s/([a-z_]+\.css)', (racine / "equipage.html").read_text(encoding="utf-8")))
-    attendus = vus | feuilles
-    assert set(tableau.ACCES_STATIQUES["equipage"]) == attendus
-    assert "direct.js" not in attendus and "app.js" not in attendus and "securite.js" not in attendus
+    return vus | set(re.findall(r'/tableau/espace/s/([A-Za-z0-9_-]+\.css)', texte))
+
+
+def test_S1b_les_fichiers_de_chaque_page_sont_ceux_qu_elle_charge():
+    """Les listes suivent EXACTEMENT ce que chaque page charge : la vitrine publique (`site/vitrine.html`) → « public » ;
+    le site de l'équipage (`site/equipage.html`) → « equipage » pour ce qu'il charge en plus. Rien de plus (le code de
+    la Capitainerie ne sort pas), rien de moins (les pages marchent). `direct.js`, chargé seulement en mode édition (la
+    tête), n'en fait pas partie. Un import ajouté sans y penser fait échouer ce test : le décider ici (tableau.py)."""
+    publics = {m for m in tableau.ACCES_STATIQUES["public"] if "*" not in m and m.endswith((".js", ".css"))}
+    vitrine = _charge_par("vitrine.html")
+    assert publics == vitrine, (f"vitrine.html charge {sorted(vitrine - publics)} (à rendre publics) ; "
+                                f"publics sans raison : {sorted(publics - vitrine)}")
+    equipage = _charge_par("equipage.html") - vitrine
+    assert set(tableau.ACCES_STATIQUES["equipage"]) == equipage, sorted(equipage)
+    capitainerie = _charge_par("index.html") - vitrine - equipage
+    for propre in ("app.js", "securite.js", "discord.js", "clan.js", "recrutement.js", "fiche.js", "textes.js",
+                   "equipes_admin.js", "direct.js"):
+        assert propre in capitainerie and tableau.lecteurs_statique(propre) == frozenset({"tout"}), propre
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
