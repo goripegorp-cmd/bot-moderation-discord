@@ -134,7 +134,10 @@ def local(tmp_path_factory):
         pendantes = [t for t in asyncio.all_tasks(boucle) if not t.done()]   # la ronde du direct (S11), entre autres
         for t in pendantes:
             t.cancel()
-        boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
+        #  27/10/2026 : la ronde déjà finie (aucune tâche), `gather()` cherchait une boucle courante — il n'y en a plus
+        #  après un `asyncio.run` — et l'erreur sautait `mp.undo()` : les règles du site local restaient pour la suite.
+        if pendantes:
+            boucle.run_until_complete(asyncio.gather(*pendantes, return_exceptions=True))
         tableau._direct_salles.clear()
         boucle.close()
         mp.undo()
