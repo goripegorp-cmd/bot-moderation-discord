@@ -1,0 +1,101 @@
+// equipage_commun.js — ce que partagent les pages du site de l'équipage : l'état, les lectures (`/tableau/equipage/api/…`,
+// en lecture seule), les textes renommables par la direction, l'affiche en grand, le texte « riche » (**gras** seulement).
+// Aucune donnée n'est écrite en HTML : tout passe par h() (dom.js).
+
+import { h, icone, sansEmoji, nombre, ajouter } from "./dom.js";
+import { etat } from "./noyau.js";
+import { sessionTerminee } from "./api.js";
+import { pancarte, bouton, toast } from "./ui.js";
+import { affiche, insignes, nomAffiche, gradeDe, insigneImage, STATUTS_AFFICHE, primeNoeud } from "./affiche.js";
+
+export const RACINE = "/tableau/equipage";
+const DELAI = 15000;
+
+/** L'état de la page : `depart` (qui, le serveur, le mode édition), `equipage` (affiches, catalogue, la mienne),
+ *  `accueil` (blocs et leurs données), `textes` (les libellés renommés par la direction). */
+export const E = { depart: null, equipage: null, accueil: null, textes: {}, peutEditer: false, modeEdition: false };
+
+/** Un libellé de la page : celui que la direction a choisi (registre des textes), sinon le défaut. */
+export function T(cle, defaut) {
+  const v = E.textes && E.textes["site_equipage." + cle];
+  return typeof v === "string" && v.trim() ? v : defaut;
+}
+
+/** GET `/tableau/equipage/api/<nom>` → { ok, status, donnees, erreur } — ne lève jamais. 401 / 403 : la session est
+ *  finie (rôle du clan retiré, lien expiré, déconnexion ailleurs) : la page le dit et n'appelle plus le serveur. */
+export async function lire(nom) {
+  if (etat.session !== "ok") return { ok: false, status: 401, erreur: "Session terminée." };
+  let r;
+  const ctrl = new AbortController();
+  const minuteur = setTimeout(() => ctrl.abort(), DELAI);
+  try {
+    r = await fetch(RACINE + "/api/" + nom, { credentials: "same-origin", cache: "no-store", signal: ctrl.signal });
+  } catch (e) {
+    return { ok: false, status: 0, erreur: "Pas de connexion : réessaie dans un instant." };
+  } finally {
+    clearTimeout(minuteur);
+  }
+  let corps = null;
+  try { corps = await r.json(); } catch (e) { corps = null; }
+  const message = (corps && (corps.erreur || corps.message)) || "";
+  if (r.status === 401 || r.status === 403) {
+    sessionTerminee(message || "Accès retiré.");
+    return { ok: false, status: r.status, erreur: message || "Accès retiré." };
+  }
+  if (!r.ok || !corps) return { ok: false, status: r.status, erreur: message || "Indisponible pour le moment." };
+  return { ok: true, status: r.status, donnees: corps };
+}
+
+// ─── Le texte « riche » : des paragraphes, des retours à la ligne, le **gras** — rien d'autre ──────────────
+function gras(ligne) {
+  return String(ligne).split(/(\*\*[^*\n]+\*\*)/g).filter(Boolean)
+    .map((s) => (/^\*\*[^*\n]+\*\*$/.test(s) ? h("b", {}, s.slice(2, -2)) : s));
+}
+export function texteRiche(texte, classe) {
+  const paragraphes = String(texte || "").replace(/\r\n?/g, "\n").split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  return h("div", { classe: "texte-riche" + (classe ? " " + classe : "") }, paragraphes.map((p) => h("p", {},
+    p.split("\n").flatMap((l, i) => (i ? [h("br"), ...gras(l)] : gras(l))))));
+}
+/** Le texte sans ses marques de gras (un résumé sur une ligne). */
+export const textePlat = (texte) => String(texte || "").replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+
+// ─── Les affiches ───────────────────────────────────────────────────────────
+export const afficheParId = (id) => ((E.equipage && E.equipage.affiches) || []).find((a) => String(a.id) === String(id)) || null;
+export const catalogue = () => (E.equipage && E.equipage.catalogue) || { types: [], elements: [] };
+
+/** Le rang d'une prime dans l'équipage (1 : la plus haute), ou 0 sans prime. */
+export function rangPrime(a) {
+  if (!a || !(Number(a.prime) > 0)) return 0;
+  return 1 + ((E.equipage && E.equipage.affiches) || []).filter((x) => Number(x.prime) > Number(a.prime)).length;
+}
+
+/** Les détails lus d'une affiche : prime, grade, niveau, statut, puis ses insignes (icônes officielles). */
+export function detailsAffiche(a) {
+  const cat = catalogue();
+  const ins = insignes(a, cat);
+  const ligne = (k, v) => h("div", {}, h("dt", {}, k), h("dd", {}, v));
+  const rang = rangPrime(a);
+  const total = ((E.equipage && E.equipage.affiches) || []).length;
+  return h("div", { classe: "pile affiche-details" },
+    h("dl", { classe: "champs-lus" },
+      ligne("Prime", h("span", { classe: "num" }, primeNoeud(a.prime || 0), rang ? h("span", { classe: "rang-prime" }, " · " + rang + (rang === 1 ? "re" : "e") + " sur " + nombre(total)) : null)),
+      ligne("Grade", gradeDe(a, cat) || "—"),
+      ligne("Niveau", a.niveau ? nombre(a.niveau) : "—"),
+      ligne("Statut", STATUTS_AFFICHE[a.statut] || sansEmoji(a.statut) || "—"),
+      a.membre && a.membre.nom ? ligne("Sur Discord", sansEmoji(a.membre.nom)) : null),
+    ins.length
+      ? h("ul", { classe: "insignes-liste" }, ins.map((i) => h("li", {}, insigneImage(i, "insigne-liste-img"), h("span", {}, h("b", {}, i.nom), h("small", {}, i.typeNom)))))
+      : h("p", { classe: "aide" }, "Aucun insigne pour le moment."));
+}
+
+/** Une affiche en grand, en lecture seule : aucun bouton d'action, seulement « Fermer ». */
+export function ouvrirAffiche(id) {
+  const a = afficheParId(id);
+  if (!a) { toast("Cette affiche n'est plus au mur.", "erreur"); return; }
+  const p = pancarte({ titre: "Affiche de " + nomAffiche(a), sous: a.surnom ? "« " + sansEmoji(a.surnom) + " »" : "", icone: "affiches", taille: "large" });
+  ajouter(p.corps, [h("div", { classe: "affiche-grand" }, h("div", { classe: "affiche-grand-mur" }, affiche(a, catalogue(), { taille: "grande" })), detailsAffiche(a))]);
+  ajouter(p.pied, [bouton("Fermer", { classe: "discret", onclick: () => p.fermer() })]);
+}
+
+/** Le sceau rond d'un titre de bloc (comme ceux des rubriques). */
+export const sceau = (nomIcone) => h("span", { classe: "sceau-bloc", "aria-hidden": "true" }, icone(nomIcone));

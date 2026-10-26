@@ -180,21 +180,31 @@ _verrous: dict = {}
 #  25/10/2026 : « Choisis ton métier · Pick your job » dans le guide du clan (`metiers.section_guide`, branché par
 #  `brancher_metiers`) — async (g, c) → (composants, signature) ou None.
 _section_metiers = None
+#  26/10/2026 : « Le site de l'équipage » dans le guide du clan (`site_equipage.section_guide`, branché par
+#  `brancher_site_equipage`) — async (g, c) → (composants, signature) ou None.
+_section_site = None
 
 
 def setup(*, cfg, db_set, lecteurs=None, ticket=None, boutons_langue=None, log=None):
     """`lecteurs(g, c)` → les rôles qui voient « 📦 Archives » (la direction et au-dessus) ;
     `ticket(g)` → le salon des tickets ; `boutons_langue()` → les boutons 🇫🇷 / 🇬🇧 du bot."""
-    global _cfg, _db_set, _lecteurs, _ticket, _boutons_langue, _log, _section_metiers
+    global _cfg, _db_set, _lecteurs, _ticket, _boutons_langue, _log, _section_metiers, _section_site
     _cfg, _db_set, _lecteurs, _ticket, _boutons_langue = cfg, db_set, lecteurs, ticket, boutons_langue
     _log = log or print
     _section_metiers = None         # rebranché par l'étape des métiers (après celle-ci au démarrage)
+    _section_site = None            # rebranché par l'étape du site de l'équipage (après celle-ci au démarrage)
 
 
 def brancher_metiers(fn) -> None:
     """Le choix du métier dans le guide du clan (`metiers.section_guide`) ; None le retire."""
     global _section_metiers
     _section_metiers = fn
+
+
+def brancher_site_equipage(fn) -> None:
+    """« Le site de l'équipage » dans le guide du clan (`site_equipage.section_guide`) ; None le retire."""
+    global _section_site
+    _section_site = fn
 
 
 def _verrou(gid):
@@ -1051,10 +1061,11 @@ async def demenager_clan(g, *, deplacer_annonces=None) -> list:
     return faits
 
 
-def vue_guide_clan(g, c: dict, posts: dict, metiers: tuple | None = None) -> tuple:
+def vue_guide_clan(g, c: dict, posts: dict, metiers: tuple | None = None, site: tuple | None = None) -> tuple:
     """Le guide du clan, en tête de 🦜▷・clan-gorp : chaque post et à quoi il sert, le vocal, à qui
     s'adresser. Une ligne n'apparaît que si son post existe (aucun bouton qui ment). `metiers` : (composants,
-    signature) du choix du métier (`metiers.section_guide`), posés avant le ticket. Rend (vue, signature)."""
+    signature) du choix du métier (`metiers.section_guide`), posés avant le ticket ; `site` : de même, « Le site de
+    l'équipage » (`site_equipage.section_guide`). Rend (vue, signature)."""
     vocal = _vocal_clan(g, c)
     demande = _vocal_clan(g, c, "clan_demande")
     ticket = _ticket(g) if _ticket else None
@@ -1095,6 +1106,8 @@ def vue_guide_clan(g, c: dict, posts: dict, metiers: tuple | None = None) -> tup
     items.append(discord.ui.Separator())
     if metiers is not None:   # 25/10/2026 : « Choisis ton métier » — l'affiche et les rôles de métier suivent
         items += [*metiers[0], discord.ui.Separator()]
+    if site is not None:      # 26/10/2026 : « Le site de l'équipage » — un lien personnel, en lecture seule
+        items += [*site[0], discord.ui.Separator()]
     if ticket is not None:
         items.append(discord.ui.Section(
             discord.ui.TextDisplay("### 🎫 Une question, un souci ? · A question?\nOuvre un ticket : le staff du clan "
@@ -1106,7 +1119,8 @@ def vue_guide_clan(g, c: dict, posts: dict, metiers: tuple | None = None) -> tup
     v.add_item(discord.ui.Container(*items, accent_color=discord.Color(0x14B8A6)))
     signature = "|".join([str(GUIDE_CLAN_VERSION), *(str(p.id) for p, _t, _b in presentes),
                           str(getattr(vocal, "id", 0)), str(getattr(demande, "id", 0)), str(getattr(ticket, "id", 0)),
-                          str(int(_boutons_langue is not None))] + ([f"m{metiers[1]}"] if metiers is not None else []))
+                          str(int(_boutons_langue is not None))] + ([f"m{metiers[1]}"] if metiers is not None else [])
+                         + ([f"s{site[1]}"] if site is not None else []))
     return v, signature
 
 
@@ -1126,7 +1140,15 @@ async def assurer_guide_clan(g) -> bool:
             _log("[ZONES][E10] choix du métier indisponible : guide du clan inchangé")
             _log(f"[ZONES][E10:DETAIL] {type(ex).__name__} {ex}")
             return False
-    vue, signature = vue_guide_clan(g, c, posts, metiers)
+    site = None
+    if _section_site is not None:
+        try:
+            site = await _section_site(g, c)
+        except Exception as ex:  # jamais un guide réécrit sans le bouton, puis avec : il reste tel quel
+            _log("[ZONES][E11] site de l'équipage indisponible : guide du clan inchangé")
+            _log(f"[ZONES][E11:DETAIL] {type(ex).__name__} {ex}")
+            return False
+    vue, signature = vue_guide_clan(g, c, posts, metiers, site)
     if c.get("clan_guide_v") == signature:
         return False
     fil = await _resoudre(g, info["id"])
