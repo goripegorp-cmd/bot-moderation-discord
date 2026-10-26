@@ -12,11 +12,12 @@ import { charger, vue as vueJeu, perime, element as elementCat } from "./donnees
 import { mettreEnFile, garderSaisie, lireSaisie, oublierSaisie, opsDe, abandonner } from "./hors_ligne.js";
 import {
   bouton, pastille, tampon, vide, segment, liste, champ, saisie, zoneTexte, interrupteur, caseACocher, radios, confirmer, pancarte,
-  toast, squelettes, paginer, bandeau, majBoutonsReseau, nomDe,
+  toast, squelettes, paginer, bandeau, majBoutonsReseau, nomDe, boutonIcone,
 } from "./ui.js";
 import { groupes, outilsGroupes, parPeriode } from "./rangement.js";
 import { choisirTextes } from "./textes.js";
 import { avecVerrou, protegerZone, siLibre } from "./direct.js";
+import { envoyerBanniere, cadreBanniere, noteCadrage, CONSIGNE as CONSIGNE_BANNIERE } from "./banniere.js";
 
 const TYPES = [
   ["evenement", "Événement", "calendrier", "Une date, un minuteur, des rappels, et qui est disponible."],
@@ -30,11 +31,20 @@ const NOMS_TYPES = { evenement: "Événement", annonce: "Annonce", metiers: "Ann
 const STATUTS = { brouillon: ["Brouillon", "encre"], envoi: ["Envoi en cours", "mer"], publie: ["Publié", "vert"], annule: ["Annulé", ""], retire: ["Retiré", "encre"], incertain: ["À vérifier", "ambre"] };
 // Les champs de chaque type (evenements.CHAMPS_TYPE) : le serveur refuse un champ inconnu.
 const CHAMPS = {
-  evenement: ["titre", "texte", "quand", "duree_min", "lieu", "image", "couleur", "rappels", "mention", "destination", "reponses", "places", "discord_event", "reserve_clan"],
-  annonce: ["titre", "texte", "image", "couleur", "mention", "destination"],
-  metiers: ["titre", "texte", "image", "couleur", "mention", "destination", "groupement", "champs"],
-  listing: ["titre", "texte", "image", "couleur", "mention", "destination", "groupement", "champs"],
+  evenement: ["titre", "texte", "quand", "duree_min", "lieu", "image", "couleur", "rappels", "mention", "destination", "reponses", "places", "discord_event", "reserve_clan", "liens"],
+  annonce: ["titre", "texte", "image", "couleur", "mention", "destination", "liens"],
+  metiers: ["titre", "texte", "image", "couleur", "mention", "destination", "groupement", "champs", "liens"],
+  listing: ["titre", "texte", "image", "couleur", "mention", "destination", "groupement", "champs", "liens"],
 };
+// Les liens d'une publication (26/10/2026) : des boutons sous son texte, sur Discord (evenements.LIENS_MAX…).
+const LIENS_MAX = 5;
+const RE_LIEN = /^https:\/\/[^\s<>"'`]{3,505}$/;
+/** Les liens complets (un nom, une adresse https) : ceux que le serveur accepte ; une ligne entamée reste à l'écran. */
+const liensComplets = (l) => (Array.isArray(l) ? l : []).filter((x) => x && String(x.nom || "").trim() && RE_LIEN.test(String(x.url || "").trim()))
+  .map((x) => ({ nom: String(x.nom).trim(), url: String(x.url).trim() })).slice(0, LIENS_MAX);
+/** Un lien commencé mais incomplet (un nom sans adresse https, ou l'inverse) : publier ou modifier attend qu'il soit juste. */
+const lienEntame = (v) => (Array.isArray(v.liens) ? v.liens : []).some((x) => x && (String(x.nom || "").trim() || String(x.url || "").trim()) && !liensComplets([x]).length);
+const LIEN_INCOMPLET = "Un lien a besoin d'un nom et d'une adresse complète en https:// (ou retire-le).";
 // Les limites du serveur (evenements.py), quand il ne les envoie pas.
 const LIMITES = { titre: 100, texte: { evenement: 2000, annonce: 3500, metiers: 1500, listing: 1500 }, lieu: 100, places: 500, rappels: 5, duree_min: 10080 };
 const COULEURS = [["Laiton", "#a8823f"], ["Clan", "#14b8a6"], ["Cire", "#8e2a24"], ["Mer", "#1f4e5a"], ["Vert", "#3f6b3a"], ["Ambre", "#a8641c"], ["Encre", "#2b1d12"]];
@@ -148,6 +158,8 @@ function nettoyer(v) {
   if (o.couleur) o.couleur = String(o.couleur).toLowerCase();
   if (o.quand !== undefined) o.quand = Math.floor(Number(o.quand)) || null;
   if (o.champs !== undefined && !Array.isArray(o.champs)) delete o.champs;
+  if (o.liens !== undefined) o.liens = (Array.isArray(o.liens) ? o.liens : []).filter((x) => x && typeof x === "object")
+    .map((x) => ({ nom: String(x.nom || ""), url: String(x.url || "") })).slice(0, LIENS_MAX);
   for (const k of ["places", "duree_min"]) if (o[k] !== undefined) o[k] = minutes(o[k]);
   if (o.type && o.type !== "evenement" && o.mention === "inscrits") o.mention = "aucune"; // « inscrits » n'existe que pour un événement
   return o;
@@ -199,7 +211,7 @@ function valeursNeuves(E, type) {
   const base = {
     type, titre: "", texte: "", quand: type === "evenement" ? demainParis(21, 0) : null, duree_min: 60, lieu: "", image: "", couleur: COULEURS[0][1],
     rappels: [60], mention: type === "evenement" ? "inscrits" : "aucune", destination: "", reponses: type === "evenement", places: 0, discord_event: false,
-    reserve_clan: true, groupement: type === "listing" ? "grade" : "metier", champs: type === "listing" ? ["metiers", "race"] : ["grade"],
+    reserve_clan: true, groupement: type === "listing" ? "grade" : "metier", champs: type === "listing" ? ["metiers", "race"] : ["grade"], liens: [],
   };
   // Seuls les champs connus du composeur sont repris ; une valeur vide du serveur (pas de date, post par défaut) laisse la nôtre.
   const d = ((E && E.defauts) || {})[type];
@@ -280,6 +292,7 @@ async function composer(zone, E0) {
     if (t === "evenement") blocs.push(blocEvenement(v, changer, E));
     if (t === "metiers" || t === "listing") blocs.push(blocGroupement(v, changer));
     blocs.push(blocApparence(v, changer, E));
+    blocs.push(blocLiens(changer));
     blocs.push(blocEnvoi(v, changer, E));
     remplacer(formulaire, ...blocs);
     majActions();
@@ -339,6 +352,7 @@ async function composer(zone, E0) {
     const corps = {};
     for (const k of CHAMPS[v.type]) if (v[k] !== undefined) corps[k] = v[k];
     if ("destination" in corps) corps.destination = idPost(corps.destination);
+    if ("liens" in corps) corps.liens = liensComplets(corps.liens);
     if (v.type === "evenement" && !corps.reponses) corps.places = 0;
     return corps;
   }
@@ -414,6 +428,7 @@ async function composer(zone, E0) {
     if (!String(v.titre || "").trim()) { toast("Donne un titre avant de publier.", "erreur"); return; }
     if (v.type === "evenement" && !(v.quand > maintenant() + 60)) { toast("Choisis un début dans le futur (une minute au moins).", "erreur"); return; }
     if (!destinationsDe(E).length) { toast("Le forum du clan n'est pas installé : il n'y a aucun post où publier.", "erreur"); return; }
+    if (lienEntame(v)) { toast(LIEN_INCOMPLET, "erreur"); return; }
     if (composeur.sale || !composeur.id) await enregistrer(true);
     const att = await attendreEnregistrement();
     if (att !== true) {
@@ -483,6 +498,7 @@ async function composer(zone, E0) {
 
   async function modifierPublie() {
     const v = composeur.v;
+    if (lienEntame(v)) { toast(LIEN_INCOMPLET, "erreur"); return; }
     const corps = Object.assign({ id: composeur.id, version: composeur.version }, corpsDe(v));
     if (v.type === "evenement" && composeur.quandPublie && v.quand !== composeur.quandPublie) {
       if (!(v.quand > maintenant() + 60)) { toast("Le nouveau début doit être dans le futur (une minute au moins).", "erreur"); return; }
@@ -759,20 +775,41 @@ function blocApparence(v, changer, E) {
   const majNuancier = () => remplacer(nuancier, ...palette.map(([nom, c]) => h("button", { classe: "nuance", type: "button", role: "radio", "aria-checked": String(composeur.v.couleur === c),
     "aria-label": "Couleur " + nom, title: nom, vars: { "--teinte": c }, onclick: () => { changer("couleur", c, true); majNuancier(); } })));
   majNuancier();
-  const image = h("div", { classe: "image-choix" });
+  // 26/10/2026 : l'image de la carte est une BANNIÈRE aux dimensions exactes (banniere.js) — refaite par le serveur.
+  const image = h("div", { classe: "image-choix banniere-choix" });
+  const note = h("p", { classe: "aide banniere-note", "aria-live": "polite" });
   const majImage = () => {
     const id = composeur.v.image;
-    remplacer(image, id ? h("img", { src: BASE + "/media/" + id, alt: "Image de la carte" }) : h("span", { classe: "image-vide" }, icone("carte"), "Aucune image"),
+    remplacer(image, cadreBanniere(id ? "media/" + id : "", { alt: "Bannière de la carte", vide: "Aucune image", paresseux: false }),
       h("div", { classe: "rangee" },
-        bouton(id ? "Changer l'image" : "Ajouter une image", { classe: "p", icone: "ajouter", reseau: true, onclick: () => choisirImage((nouvel) => { changer("image", nouvel, true); majImage(); }) }),
-        id ? bouton("Retirer", { classe: "p discret", icone: "supprimer", onclick: () => { changer("image", "", true); majImage(); } }) : null));
+        bouton(id ? "Changer l'image" : "Ajouter une image", { classe: "p", icone: "ajouter", reseau: true, onclick: () => choisirImage((nouvel, r) => { changer("image", nouvel, true); majImage(); note.textContent = noteCadrage(r); }) }),
+        id ? bouton("Retirer", { classe: "p discret", icone: "supprimer", onclick: () => { changer("image", "", true); note.textContent = ""; majImage(); } }) : null), note);
     majBoutonsReseau(image);
   };
   majImage();
   return h("fieldset", { classe: "cadre pile serree bloc-form" }, h("legend", { classe: "cadre-titre" }, "L'apparence"),
     h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Couleur de la carte"), nuancier),
-    h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Image"), image,
-      h("span", { classe: "champ-aide" }, v.type === "annonce" || v.type === "listing" ? "Sans image, la carte porte le bandeau du clan." : "PNG, JPEG, WebP ou GIF, 8 Mo au plus.")));
+    h("div", { classe: "champ banniere-champ" }, h("span", { classe: "champ-lib" }, "Bannière"),
+      h("p", { classe: "banniere-consigne" }, icone("image"), h("span", {}, CONSIGNE_BANNIERE)), image,
+      v.type === "annonce" || v.type === "listing" ? h("span", { classe: "champ-aide" }, "Sans image, la carte porte le bandeau du clan.") : null));
+}
+/** Les liens : des boutons sous le texte, sur Discord (5 au plus) — un nom et une adresse en https://. */
+function blocLiens(changer) {
+  const zone = h("div", { classe: "liens-editeur" });
+  const liensDe = () => (Array.isArray(composeur.v.liens) ? composeur.v.liens : (composeur.v.liens = []));
+  const maj = () => {
+    const l = liensDe();
+    remplacer(zone, ...l.map((x, k) => {
+      const n = saisie({ value: x.nom || "", maxlength: 80, placeholder: "Nom du bouton", "aria-label": "Nom du lien " + (k + 1) });
+      const u = saisie({ value: x.url || "", maxlength: 512, placeholder: "https://…", inputmode: "url", "aria-label": "Adresse du lien " + (k + 1), classe: "saisie lien-url" });
+      n.addEventListener("input", () => { liensDe()[k].nom = n.value; changer("liens", liensDe(), true); });
+      u.addEventListener("input", () => { liensDe()[k].url = u.value.trim(); u.setAttribute("aria-invalid", u.value.trim() && !RE_LIEN.test(u.value.trim()) ? "true" : "false"); changer("liens", liensDe(), true); });
+      return h("div", { classe: "lien-ligne" }, n, u, boutonIcone("supprimer", "Retirer ce lien", () => { liensDe().splice(k, 1); changer("liens", liensDe(), true); maj(); }, "danger"));
+    }), l.length < LIENS_MAX ? bouton("Ajouter un lien", { classe: "p discret", icone: "ajouter", onclick: () => { liensDe().push({ nom: "", url: "" }); maj(); } }) : null);
+  };
+  maj();
+  return h("fieldset", { classe: "cadre pile serree bloc-form" }, h("legend", { classe: "cadre-titre" }, "Les liens"),
+    h("p", { classe: "aide" }, "Des boutons sous le texte, sur Discord (" + LIENS_MAX + " au plus) : un nom, une adresse en https://."), zone);
 }
 function blocEnvoi(v, changer, E) {
   const dests = destinationsDe(E), def = destDefaut(E);
@@ -791,26 +828,10 @@ function blocEnvoi(v, changer, E) {
     composeur.publie ? h("p", { classe: "aide" }, "Une publication ne change pas de post : pour la mettre ailleurs, annule-la et republie.") : null,
     radios("mention-" + v.type, mentions, ev || v.mention !== "inscrits" ? v.mention : "aucune", (x) => changer("mention", x, true), "Mention"));
 }
+/** La bannière de la carte (1600 × 640) : choisie sur l'appareil, refaite par le serveur (banniere.js) → fin(id, réponse). */
 async function choisirImage(fin) {
-  const entree = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif" });
-  entree.addEventListener("change", async () => {
-    const f = entree.files && entree.files[0];
-    if (!f) return;
-    if (f.size > 8 * 1024 * 1024) { toast("8 Mo au plus.", "erreur"); return; }
-    let b64 = "";
-    try {
-      b64 = await new Promise((ok, ko) => { const lec = new FileReader(); lec.onload = () => ok(String(lec.result).split(",")[1] || ""); lec.onerror = () => ko(lec.error); lec.readAsDataURL(f); });
-    } catch (e) {
-      console.warn("[ANNONCES][E1] image illisible sur l'appareil");
-      toast("Cette image ne se lit pas sur l'appareil.", "erreur");
-      return;
-    }
-    toast("Envoi de l'image…");
-    const r = await poster("media", { nom: f.name.slice(0, 80), type: f.type, base64: b64 });
-    if (r.ok && r.donnees && r.donnees.id) { fin(r.donnees.id); toast("Image ajoutée.", "succes"); }
-    else toast(r.erreur || "Image refusée.", "erreur");
-  });
-  entree.click();
+  const r = await envoyerBanniere();
+  if (r && r.id) { fin(r.id, r); toast("Bannière ajoutée. " + noteCadrage(r), "succes"); }
 }
 
 // ─── L'aperçu Discord (fidèle) ─────────────────────────────────────────────
@@ -818,6 +839,8 @@ const ligne = (md, ic, niveau) => ({ md, icone: ic || "", niveau: niveau || 0 })
 const texteBloc = (...lignes) => ({ type: "texte", lignes });
 const SEP = { type: "separateur" };
 const boutonBloc = (label, style, ic) => ({ label, style, icone: ic, desactive: false, url: "" });
+/** Les liens de la publication : une rangée de boutons-liens sous le texte (comme evenements._bloc_liens). */
+const liensBlocs = (v) => { const l = liensComplets(v.liens); return l.length ? [{ type: "boutons", boutons: l.map((x) => ({ label: x.nom, style: "lien", icone: "", desactive: false, url: x.url })) }] : []; };
 /** Échapper le Markdown comme `discord.utils.escape_markdown` (le lieu, sur la carte). */
 const echapper = (s) => String(s || "").replace(/([\\*_~`|>#[\]()-])/g, "\\$1");
 
@@ -841,6 +864,7 @@ function apercuLocal(v, E, c) {
     if (image) blocs.push(image);
     blocs.push(texteBloc(ligne(v.titre || "(sans titre)", "", 2), ligne(L(E, "evenements.carte.sous_titre", "Événement du clan · Clan event"), "drapeau", "petit")));
     if (v.texte) blocs.push(texteBloc(ligne(v.texte)));
+    blocs.push(...liensBlocs(v));
     const lq = q ? [ligne(L(E, "evenements.carte.debut", "**Début · Starts** {quand}", { quand: "<t:" + q + ":F>" }), "calendrier"), ligne("<t:" + q + ":R>", "minuteur", 3)]
       : [ligne(L(E, "evenements.carte.debut_a_choisir", "**Début · Starts** à choisir · to be set"), "calendrier")];
     if (v.duree_min) lq.push(ligne(L(E, "evenements.carte.duree", "**Durée · Duration** {duree}", { duree: dureeTxt(v.duree_min) }), "horloge"));
@@ -869,6 +893,7 @@ function apercuLocal(v, E, c) {
     blocs.push(image || { type: "bandeau", cle, titre, url: "/v/" + cle + ".gif" });
     blocs.push(texteBloc(ligne(v.titre || "(sans titre)", "", 2)));
     if (v.texte) blocs.push(texteBloc(ligne(v.texte)));
+    blocs.push(...liensBlocs(v));
     blocs.push(SEP, texteBloc(ligne(NOM_CLAN + (c && c.publieLe ? " · <t:" + c.publieLe + ":D>" : ""), "ancre", "petit")));
     blocs.push({ type: "boutons", boutons: [boutonBloc(L(E, "evenements.bouton.vu", "Vu · Seen") + (c && c.vus ? " · " + c.vus : ""), "succes", "valider")] });
   } else {
@@ -878,6 +903,7 @@ function apercuLocal(v, E, c) {
     else if (BANDEAUX[t]) blocs.push({ type: "bandeau", cle: BANDEAUX[t][0], titre: BANDEAUX[t][1], url: "/v/" + BANDEAUX[t][0] + ".gif" });
     blocs.push(texteBloc(ligne(v.titre || L(E, "evenements.liste.titre." + t, NOMS_TYPES[t]), "", 2), ligne("**Les membres du clan · Clan members** · par " + fr + " · by " + en, "membres")));
     if (v.texte) blocs.push(texteBloc(ligne(v.texte)));
+    blocs.push(...liensBlocs(v));
     blocs.push(SEP, texteBloc(ligne("Chaque " + fr + ", puis ses membres, d'après les affiches au moment de publier. Enregistre le brouillon : l'aperçu montre alors la liste exacte.", "", "petit")));
     blocs.push(texteBloc(ligne(NOM_CLAN, "ancre", "petit")));
   }
@@ -886,7 +912,8 @@ function apercuLocal(v, E, c) {
     discord_event: t === "evenement" ? { demande: !!v.discord_event, permission: droits.discord_event !== false, lien: "" } : null };
 }
 
-function apercuDiscord(d, o) {
+/** L'aperçu d'une carte Discord, rendu du serveur ou local (exporté : l'éditeur du site de l'équipage le reprend). */
+export function apercuDiscord(d, o) {
   const cartes = (d && d.cartes) || [];
   const ctx = { personnes: d.personnes || {}, roles: d.roles || {}, salons: d.salons || {} };
   const n = cartes.reduce((a, c) => a + (Number(c.caracteres) || 0), 0);
