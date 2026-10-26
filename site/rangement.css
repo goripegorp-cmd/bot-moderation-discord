@@ -65,7 +65,7 @@
 .titre-rubrique > h1, .titre-rubrique > p, .titre-rubrique.renommable > h1, .titre-rubrique.renommable > p { grid-column: 2; }
 .titre-rubrique > .rubrique-outils {
   grid-column: 3; grid-row: 1 / span 2; align-self: center; justify-self: end;
-  display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; max-width: 30ch;
+  display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px;
 }
 @media (max-width: 519px) {
   .titre-rubrique, .titre-rubrique.renommable { grid-template-columns: minmax(0, 1fr) auto; }
@@ -76,8 +76,7 @@
   .rubrique-outils .renommer-rubrique > span, .rubrique-outils .bascule-mode .bm-simple > span, .rubrique-outils .bascule-mode .bm-tout > span {
     position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
   }
-  .rubrique-outils .bascule-mode { padding: 4px 10px; }
-  .rubrique-outils .renommer-rubrique { padding-inline: 10px; }
+  .rubrique-outils .bascule-mode, .rubrique-outils .renommer-rubrique { min-width: var(--cible); min-height: var(--cible); padding: 4px 10px; justify-content: center; }
 }
 .bascule-mode {
   position: relative; display: inline-flex; align-items: center; min-height: 36px; padding: 4px 12px;
