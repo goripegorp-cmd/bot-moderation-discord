@@ -121,6 +121,8 @@ ANONYMIZE = {
     # 26/10/2026 — le site de l'équipage : l'accueil et les actualités écrits par la direction (la ligne reste)
     "equipage_blocs": {"ids": ["cree_par", "maj_par"], "redact": []},
     "equipage_actualites": {"ids": ["cree_par", "maj_par"], "redact": []},
+    # 26/10/2026 — Textes & noms : qui a réécrit un texte (le texte reste, l'auteur est neutralisé)
+    "site_textes": {"ids": ["maj_par"], "redact": []},
 }
 
 # Colonnes HMAC (pas un user_id brut) : agies seulement si l'appelant fournit hmac_user.

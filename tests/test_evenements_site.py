@@ -281,12 +281,15 @@ def test_ES2_le_site_local_a_le_forum_du_clan_et_des_exemples(sites):
     assert {x["type"] for x in ev["brouillons"]} == {"evenement", "annonce", "metiers"}
     a_venir = ev["a_venir"][0]
     assert a_venir["statut"] == "publie" and a_venir["reponses"]["disponibles"] == 6 and a_venir["discord_event"]
-    assert {(x["type"], x["statut"]) for x in ev["passes"]} >= {("evenement", "annule"), ("annonce", "publie"),
-                                                                  ("evenement", "publie")}
+    assert {(x["type"], x["statut"]) for x in ev["passes"]} >= {("evenement", "annule"), ("evenement", "publie")}
     termine = next(x for x in ev["passes"] if x["statut"] == "publie" and x["type"] == "evenement")
     assert termine["phase"] == "termine"
-    annonce = next(x for x in ev["passes"] if x["type"] == "annonce")
+    #  26/10/2026 : une annonce en ligne est dans « Publiées », plus avec les passés.
+    assert [(x["type"], x["statut"]) for x in ev["publiees"]] == [("annonce", "publie")] and ev["publiees_total"] == 1
+    assert not any(x["type"] == "annonce" and x["statut"] == "publie" for x in ev["passes"])
+    annonce = ev["publiees"][0]
     assert annonce["reponses"]["vus"] == 9 and annonce["valeurs"]["image"], "l'annonce de démonstration a son image"
+    assert ev["libelles"]["evenements.bouton.dispo"] == "Disponible · Available", "les textes des cartes, pour l'aperçu"
     #  Les heures de démonstration sont rondes, à Paris (21:00 pour la sortie en mer).
     assert datetime.fromtimestamp(next(x for x in ev["brouillons"] if x["type"] == "evenement")["quand"],
                                   ZoneInfo("Europe/Paris")).strftime("%H:%M") == "21:00"

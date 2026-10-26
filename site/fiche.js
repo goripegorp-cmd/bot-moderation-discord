@@ -2,7 +2,7 @@
 // Aussi : couleurs, libellés et entrées partagés par les rubriques.
 
 import { h, icone, date, heure, depuis, duree, nombre, cleJour, libelleJour, sansEmoji, maintenant, srcSure, BASE, remplacer, quantite, ajouter } from "./dom.js";
-import { etat, P, peutAgir, retenirPersonnes, poserAncre, aller, emettre } from "./noyau.js";
+import { etat, P, peutAgir, retenirPersonnes, poserAncre, aller, emettre, nommerOnglets } from "./noyau.js";
 import { lire, action as envoyerAction, lienExport } from "./api.js";
 import { charger, vue as vueJeu } from "./donnees.js";
 import { pancarte, confirmer, bouton, avatar, pastille, tampon, vide, squelettes, boutonCopie, nomDe, lienNom, toast, liste, champ, zoneTexte } from "./ui.js";
@@ -89,9 +89,9 @@ export function entreeJournal(e, sujet, ouvrir) {
 }
 
 // ─── La fiche ───────────────────────────────────────────────────────────────
-const ONGLETS = [["chrono", "Chronologie", "journal"], ["sanctions", "Sanctions", "sanctions"], ["tickets", "Tickets", "tickets"],
+const ONGLETS = nommerOnglets("site.fiche.onglet", [["chrono", "Chronologie", "journal"], ["sanctions", "Sanctions", "sanctions"], ["tickets", "Tickets", "tickets"],
   ["candidatures", "Candidatures", "candidatures"], ["questions", "Questions", "salons"], ["sondages", "Sondages et idées", "salons"],
-  ["journal", "Journal", "parchemin"], ["donnees", "Décidées par lui", "plume"]];
+  ["journal", "Journal", "parchemin"], ["donnees", "Décidées par lui", "plume"]]);
 const etatFiche = { id: null, onglet: "chrono", max: 40, f: null, pan: null, horsLigne: false };
 export const ficheOuverte = () => etatFiche.id;
 

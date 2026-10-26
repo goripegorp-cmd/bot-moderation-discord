@@ -968,7 +968,9 @@ def _decision(banc, **plus):
 
     async def rien(*_a, **_k):
         return None
+    import textes as module_textes   # le registre des textes (bot.py : `import textes`) ; `textes` ici lit les vues
     ns = {"discord": discord, "asyncio": asyncio, "metiers": metiers, "rellseas_ui": rellseas_panneau, "cfg": banc.cfg,
+          "textes": module_textes,
           "_ticket_ouvert": ouvert, "_fermer_ticket": fermer, "_journal_rellseas": journaliser, "log_staff_action": rien,
           "_logerr": lambda ou, ex, guild_id=0: erreurs.append((ou, type(ex).__name__))}
     ns.update(plus)

@@ -25,10 +25,13 @@ from dataclasses import dataclass
 
 import discord
 
+import zlib
+
 import boosts
 import config_salons
 import entraide
 import suggestions
+import textes as textes_du_site
 import visuels
 from ui_v2 import LayoutView
 
@@ -126,6 +129,60 @@ EQUIPE_FORUM_CLAN = discord.PermissionOverwrite(**config_salons.EQUIPE_TEXTE, se
                                                 manage_threads=True)
 GUIDE_CLAN_VERSION = 1
 INFOS_MAX = 100       # messages d'info-gorp recopiés au plus
+GUIDE_TEXTE_APRES_S = 5.0   # un texte du guide changé sur le site : le guide réécrit après une rafale de changements
+
+#  26/10/2026 — le guide du clan, réécrit par la direction (Capitainerie → Textes & noms, registre `textes.py`) : chaque
+#  texte et chaque bouton ; le texte d'origine reste ici. Un texte changé réécrit le guide (`quand_change("guide.")`).
+_declarer = textes_du_site.declarer
+_HAUT, _POSTS, _BAS = "Le haut du guide", "Les posts du clan", "Le bas du guide"
+_declarer("guide.bienvenue",
+          "🇫🇷 **Bienvenue dans l'équipage.** Tout le clan se retrouve ici : les infos, les annonces, le chat et nos "
+          "posts — en français ou en anglais. On écrit dans les posts.\n🇬🇧 **Welcome aboard.** The whole clan meets "
+          "here: info, announcements, chat and our posts — in French or English. Write in the posts.",
+          groupe="guide", titre="L'accueil", partie=_HAUT, ordre=1, max_=1200,
+          aide="En tête du guide du clan (le post 🧭 Guide du clan), sous l'image.")
+#  (clé du post, texte d'origine, bouton d'origine, ce qu'il présente)
+GUIDE_POSTS = (
+    ("infos", "### 📢 Infos · Info\nCe qu'il faut savoir sur le clan : à lire en arrivant.\n-# What to know about the "
+              "clan: read it first.", "Lire · Read", "Le post 📢 Infos"),
+    ("annonces", "### 📣 Annonces · Announcements\nLes nouvelles du clan. Lis-les et clique « ✅ Vu ».\n-# Clan news: "
+                 "read them and click “✅ Seen”.", "Lire · Read", "Le post 📣 Annonces"),
+    ("chat", "### 💬 Chat\nLe chat du clan, entre nous{salons}.\n-# The clan chat, among us.", "Ouvrir · Open",
+     "Le post 💬 Chat"),
+    ("economie", "### 💰 Économie · Economy\nLes objectifs, les dons et les dépenses du clan.\n-# Goals, donations and "
+                 "spending.", "Ouvrir · Open", "Le post 💰 Économie"),
+    ("trade", "### 🤝 Trade du clan · Clan trade\nLes échanges entre membres : propose, demande.\n-# Trades between "
+              "members: offer, ask.", "Échanger · Trade", "Le post 🤝 Trade du clan"),
+    ("taverne", "### 🍺 Taverne · Tavern\nOn se pose, on raconte ses aventures en mer.\n-# Sit down and tell your "
+                "adventures at sea.", "Entrer · Enter", "Le post 🍺 Taverne"),
+)
+for _k, (_post, _texte, _bouton, _nom) in enumerate(GUIDE_POSTS):
+    _declarer(f"guide.{_post}.texte", _texte, groupe="guide", titre=_nom, partie=_POSTS, ordre=10 + 2 * _k, max_=800,
+              aide="Sa ligne dans le guide (elle n'apparaît que si le post existe).",
+              variables=(("salons", "le vocal et le salon des demandes, quand ils existent (« . Le vocal : 🔊 "
+                                    "#vocal · une demande… »)"),) if _post == "chat" else ())
+    _declarer(f"guide.{_post}.bouton", _bouton, groupe="guide", titre=f"{_nom} · le bouton", partie=_POSTS,
+              ordre=11 + 2 * _k, max_=80, lignes=False, aide="Le bouton à droite de la ligne : il ouvre le post.")
+_declarer("guide.chat.vocal", "Le vocal : 🔊 {salon}", groupe="guide", titre="Le post 💬 Chat · le vocal", partie=_POSTS,
+          ordre=30, max_=200, lignes=False, variables=(("salon", "le salon vocal du clan"),),
+          aide="Ajouté à la ligne du chat quand le clan a un vocal.")
+_declarer("guide.chat.demande", "une demande (aide, farm, boss…) : 🙋 {salon}", groupe="guide",
+          titre="Le post 💬 Chat · les demandes", partie=_POSTS, ordre=31, max_=200, lignes=False,
+          variables=(("salon", "le salon des demandes"),), aide="Ajouté à la ligne du chat quand ce salon existe.")
+_declarer("guide.ticket.texte", "### 🎫 Une question, un souci ? · A question?\nOuvre un ticket : le staff du clan te "
+          "répond en privé.\n-# Open a ticket: the clan staff answers privately.", groupe="guide",
+          titre="Les tickets", partie=_BAS, ordre=40, max_=800, aide="Vers la fin du guide, avec le bouton du salon "
+                                                                        "des tickets.")
+_declarer("guide.ticket.bouton", "Ticket", groupe="guide", titre="Les tickets · le bouton", partie=_BAS, ordre=41,
+          max_=80, lignes=False, aide="Il ouvre le salon des tickets.")
+_declarer("guide.securite", "-# 🛡️ Personne du staff ne te demandera ton mot de passe · No staff will ever ask for your "
+          "password", groupe="guide", titre="La mise en garde", partie=_BAS, ordre=42, max_=300,
+          aide="La dernière ligne du guide.")
+
+
+def _t(guild_id, cle: str, **valeurs) -> str:
+    """Un texte du guide du clan (Textes & noms) : celui du serveur, sinon celui d'origine."""
+    return textes_du_site.texte_cache(guild_id, cle, **valeurs)
 
 #  Un post, même endormi (hors mémoire) : son identifiant et son lien suffisent au panneau ❓ aide.
 Post = namedtuple("Post", "id jump_url")
@@ -1073,28 +1130,14 @@ def vue_guide_clan(g, c: dict, posts: dict, metiers: tuple | None = None, site: 
     def lien(cle):
         pid = int((posts.get(cle) or {}).get("id", 0) or 0)
         return Post(pid, f"https://discord.com/channels/{g.id}/{pid}") if pid else None
-    lignes = [
-        (lien("infos"), "### 📢 Infos · Info\nCe qu'il faut savoir sur le clan : à lire en arrivant.\n-# What to "
-         "know about the clan: read it first.", "Lire · Read"),
-        (lien("annonces"), "### 📣 Annonces · Announcements\nLes nouvelles du clan. Lis-les et clique « ✅ Vu ».\n-# "
-         "Clan news: read them and click “✅ Seen”.", "Lire · Read"),
-        (lien("chat"), "### 💬 Chat\nLe chat du clan, entre nous"
-         + (f". Le vocal : 🔊 <#{vocal.id}>" if vocal is not None else "")
-         + (f" · une demande (aide, farm, boss…) : 🙋 <#{demande.id}>" if demande is not None else "")
-         + ".\n-# The clan chat, among us.",
-         "Ouvrir · Open"),
-        (lien("economie"), "### 💰 Économie · Economy\nLes objectifs, les dons et les dépenses du clan.\n-# Goals, "
-         "donations and spending.", "Ouvrir · Open"),
-        (lien("trade"), "### 🤝 Trade du clan · Clan trade\nLes échanges entre membres : propose, demande.\n-# Trades "
-         "between members: offer, ask.", "Échanger · Trade"),
-        (lien("taverne"), "### 🍺 Taverne · Tavern\nOn se pose, on raconte ses aventures en mer.\n-# Sit down and "
-         "tell your adventures at sea.", "Entrer · Enter"),
-    ]
-    items = [visuels.bandeau("clan_guide", "Guide du clan"),
-             discord.ui.TextDisplay("🇫🇷 **Bienvenue dans l'équipage.** Tout le clan se retrouve ici : les infos, les "
-                                    "annonces, le chat et nos posts — en français ou en anglais. On écrit dans les "
-                                    "posts.\n🇬🇧 **Welcome aboard.** The whole clan meets here: info, announcements, "
-                                    "chat and our posts — in French or English. Write in the posts.")]
+    #  Les textes du serveur (Textes & noms), sinon ceux d'origine ; ils entrent dans la signature : un texte changé
+    #  réécrit le guide.
+    salons = ((". " + _t(g.id, "guide.chat.vocal", salon=f"<#{vocal.id}>") if vocal is not None else "")
+              + (" · " + _t(g.id, "guide.chat.demande", salon=f"<#{demande.id}>") if demande is not None else ""))
+    lignes = [(lien(cle), _t(g.id, f"guide.{cle}.texte", salons=salons), _t(g.id, f"guide.{cle}.bouton"))
+              for cle, *_x in GUIDE_POSTS]
+    bienvenue = _t(g.id, "guide.bienvenue")
+    items = [visuels.bandeau("clan_guide", "Guide du clan"), discord.ui.TextDisplay(bienvenue)]
     if _boutons_langue is not None:
         items.append(discord.ui.ActionRow(*_boutons_langue()))
     presentes = [(p, t, b) for p, t, b in lignes if p is not None]
@@ -1108,20 +1151,46 @@ def vue_guide_clan(g, c: dict, posts: dict, metiers: tuple | None = None, site: 
         items += [*metiers[0], discord.ui.Separator()]
     if site is not None:      # 26/10/2026 : « Le site de l'équipage » — un lien personnel, en lecture seule
         items += [*site[0], discord.ui.Separator()]
+    ticket_t = (_t(g.id, "guide.ticket.texte"), _t(g.id, "guide.ticket.bouton"))
     if ticket is not None:
-        items.append(discord.ui.Section(
-            discord.ui.TextDisplay("### 🎫 Une question, un souci ? · A question?\nOuvre un ticket : le staff du clan "
-                                   "te répond en privé.\n-# Open a ticket: the clan staff answers privately."),
-            accessory=discord.ui.Button(label="Ticket", url=ticket.jump_url)))
-    items.append(discord.ui.TextDisplay("-# 🛡️ Personne du staff ne te demandera ton mot de passe · No staff will ever "
-                                        "ask for your password"))
+        items.append(discord.ui.Section(discord.ui.TextDisplay(ticket_t[0]),
+                                        accessory=discord.ui.Button(label=ticket_t[1][:80], url=ticket.jump_url)))
+    securite = _t(g.id, "guide.securite")
+    items.append(discord.ui.TextDisplay(securite))
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(*items, accent_color=discord.Color(0x14B8A6)))
+    textes_ = "\x1f".join([bienvenue, *(f"{t}\x1e{b}" for _p, t, b in lignes), *ticket_t, securite])
     signature = "|".join([str(GUIDE_CLAN_VERSION), *(str(p.id) for p, _t, _b in presentes),
                           str(getattr(vocal, "id", 0)), str(getattr(demande, "id", 0)), str(getattr(ticket, "id", 0)),
                           str(int(_boutons_langue is not None))] + ([f"m{metiers[1]}"] if metiers is not None else [])
-                         + ([f"s{site[1]}"] if site is not None else []))
+                         + ([f"s{site[1]}"] if site is not None else [])
+                         + [f"t{zlib.crc32(textes_.encode('utf-8')):08x}"])
     return v, signature
+
+
+_guides_clan_prevus: dict = {}
+
+
+def _texte_du_guide_change(g, cle: str) -> None:
+    """Un texte du guide du clan vient de changer sur le site (Textes & noms) : le guide se réécrit, une fois pour
+    toute une rafale de changements."""
+    if _cfg is None or g is None:
+        return
+    t = _guides_clan_prevus.get(g.id)
+    if t is not None and not t.done():
+        return
+
+    async def _plus_tard():
+        await asyncio.sleep(GUIDE_TEXTE_APRES_S)
+        try:
+            await assurer_guide_clan(g)
+        except Exception as ex:  # le texte est enregistré ; seul le guide attend : dit au journal
+            _log("[ZONES][E11] guide du clan non réécrit après un texte changé")
+            _log(f"[ZONES][E11:DETAIL] serveur={g.id} {type(ex).__name__} {ex}")
+    _guides_clan_prevus[g.id] = asyncio.get_running_loop().create_task(_plus_tard())
+
+
+textes_du_site.quand_change("guide.", _texte_du_guide_change)
 
 
 async def assurer_guide_clan(g) -> bool:

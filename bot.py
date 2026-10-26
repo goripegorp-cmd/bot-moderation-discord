@@ -123,6 +123,7 @@ import tableau  # tableau de bord web : candidatures, tickets par type, clan
 import affiches  # le site, Capitainerie : catalogue RELL Seas, affiches, rôles des métiers
 import metiers  # les rôles de métier du clan : choisis dans le guide, créés au besoin, retirés en quittant le clan
 import site_equipage  # 26/10/2026 : le site de l'équipage — le clan en lecture seule, l'accueil composé par la direction
+import textes  # 26/10/2026 : les textes du bot et les noms du site, réécrits par la direction (Textes & noms)
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
@@ -6313,7 +6314,8 @@ async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif:
             return False, "Discord a refusé de donner le rôle."
     raison = "Accepté" if accepte else ("Refusé" + (f" : {motif[:150]}" if motif else ""))
     tk = dict(tk, decision="acceptes" if accepte else "refuses")
-    public = "Candidature acceptée" if accepte else "Candidature refusée"
+    #  26/10/2026 : ce que lit le candidat vient de Textes & noms (sinon le texte d'origine).
+    public = await textes.texte(g.id, "recrutement.fermeture.acceptee" if accepte else "recrutement.fermeture.refusee")
     if accepte:
         #  25/10/2026 (rôles des métiers) : AVANT la fermeture, une carte dans le ticket dit au nouveau membre de
         #  choisir son métier dans le guide du clan ; le lien suit dans le MP de fermeture (le ticket part en 5 s).
@@ -6323,7 +6325,7 @@ async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif:
             guide = None
             _logerr("recrutement.metier", ex, guild_id=g.id)
         if guide:
-            public += f" · choisis ton métier dans le guide du clan (pick your job) : {guide}"
+            public += " · " + await textes.texte(g.id, "metiers.mp_lien", lien=guide)
     _fermer_en_fond(_fermer_ticket(g, ch, tk, auteur, raison, public=public))
     await _journal_rellseas(g, f"**Candidature {'acceptée' if accepte else 'refusée'}** · <@{tk['user']}> "
                                f"par {auteur.mention}" + (f" — {motif[:150]}" if motif and not accepte else ""),
@@ -21667,6 +21669,13 @@ async def _activite_boot():
                            decider=_decision_recrutement, autorise=_peut_decider, log=print)
         await recrutements.init_db()
         recrutements.demarrer(bot)
+    with _Etape("textes"):
+        #  26/10/2026 : les textes du bot et les noms du site, réécrits par la direction (Capitainerie → Textes & noms).
+        #  Chargés AVANT les modules qui posent des cartes ; le renommage des rôles (Rôles & métiers) passe aussi par là.
+        textes.setup(get_db=get_db, log=print)
+        await textes.init_db()
+        if hasattr(tableau, "monter"):
+            tableau.monter(textes)
     with _Etape("questionnaire"):
         #  25/10/2026 : le recrutement du clan en deux étapes — la banque de questions, les cartes du ticket, les
         #  adresses du site (Clan GoRP, Candidatures). Les décisions passent par le circuit de `_decision_recrutement`.

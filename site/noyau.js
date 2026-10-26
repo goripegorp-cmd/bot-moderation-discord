@@ -37,9 +37,50 @@ export const CATEGORIES = [
       { cle: "affiches", titre: "Affiches", icone: "affiches", phrase: "L'atelier des avis de recherche de l'équipage : créer, modifier, ranger par métier." },
       { cle: "catalogue", titre: "Catalogue RELL Seas", icone: "catalogue", phrase: "Tout ce qui existe dans le jeu, et seulement cela : types, éléments, icônes officielles." },
       { cle: "roles", titre: "Rôles & métiers", icone: "roles", phrase: "Un rôle Discord par métier, donné tout seul si tu le veux." },
+      { cle: "textes", titre: "Textes & noms", icone: "plume", phrase: "Chaque texte du bot et chaque nom du site, à ta façon : enregistré, il sert tout de suite." },
     ],
   },
 ];
+
+// ─── Les noms choisis par la direction (Capitainerie → Textes & noms) ────────
+// Le serveur envoie les noms CHANGÉS (`textes/site`) ; tout le reste garde le nom écrit ici. Les catégories et les
+// rubriques lisent leurs noms par `libelle` : renommées sur le site, elles le sont partout à la fois (navigation,
+// titres, recherche).
+const libelles = new Map();
+/** Le nom choisi sur le site pour `cle` (« site.cat.port.titre »…), sinon `defaut`. */
+export function libelle(cle, defaut) {
+  const v = libelles.get(cle);
+  return typeof v === "string" && v.trim() ? v : defaut;
+}
+/** Les noms reçus du serveur ({ clé: nom }) ; « libelles » est annoncé s'ils changent. */
+export function poserLibelles(valeurs) {
+  const avant = JSON.stringify([...libelles]);
+  libelles.clear();
+  for (const [k, v] of Object.entries(valeurs || {})) if (typeof v === "string" && v.trim()) libelles.set(k, v);
+  if (JSON.stringify([...libelles]) !== avant) emettre("libelles", Object.fromEntries(libelles));
+}
+function nommer(objet, prefixe, champs) {
+  for (const champ of champs) {
+    const defaut = objet[champ];
+    Object.defineProperty(objet, champ, { enumerable: true, configurable: true,
+      // Le nom court suit le nom choisi tant qu'il n'est pas changé lui-même.
+      get: () => (champ === "court" && !libelles.has(prefixe + ".court") && libelles.has(prefixe + ".titre")
+        ? libelle(prefixe + ".titre", defaut) : libelle(prefixe + "." + champ, defaut)) });
+  }
+}
+for (const c of CATEGORIES) {
+  nommer(c, "site.cat." + c.cle, ["titre", "court", "sous"]);
+  for (const r of c.rubriques) nommer(r, "site.rub." + c.cle + "." + r.cle, ["titre", "phrase"]);
+}
+/** Des onglets [[clé, nom, icône], …] dont le nom se lit par `libelle(prefixe + "." + clé)` (« a-venir » → « a_venir ») :
+ *  renommés sur le site, ils le sont au prochain affichage. Rend la même liste. */
+export function nommerOnglets(prefixe, onglets) {
+  for (const o of onglets) {
+    const defaut = o[1], cle = prefixe + "." + String(o[0]).replace(/-/g, "_");
+    Object.defineProperty(o, 1, { enumerable: true, configurable: true, get: () => libelle(cle, defaut) });
+  }
+  return onglets;
+}
 
 export const categorie = (cle) => CATEGORIES.find((c) => c.cle === cle) || CATEGORIES[0];
 export const rubrique = (cat, cle) => categorie(cat).rubriques.find((r) => r.cle === cle) || categorie(cat).rubriques[0];

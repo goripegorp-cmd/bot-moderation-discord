@@ -12,6 +12,7 @@ import {
 } from "./ui.js";
 import { affiche, insignes, nomAffiche, metiersDe, gradeDe, insigneImage, STATUTS_AFFICHE, monogramme, primeNoeud, logo } from "./affiche.js";
 import { ouvrirFiche } from "./fiche.js";
+import { choisirTextes } from "./textes.js";
 import { avecVerrou, protegerEditeur, protegerZone, siLibre } from "./direct.js";
 
 const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(p)) delete etat.pages[k]; };
@@ -595,6 +596,12 @@ export function roles(vue) {
     };
     remplacer(zone,
       h("p", { classe: "aide" }, "Chaque métier a son rôle Discord : il est créé au premier membre qui choisit ce métier, donné à ceux qui l'ont, retiré à ceux qui ne l'ont plus. Quand quelqu'un quitte le clan, il perd tous les rôles du clan : ses métiers et les rôles rattachés ci-dessous. Tout est noté au journal."),
+      // Ce que le bot écrit autour des métiers se réécrit d'ici aussi (Textes & noms).
+      h("div", { classe: "rangee" },
+        bouton("Les textes du choix du métier", { classe: "p discret", icone: "plume", titre: "Le choix dans le guide, les réponses au membre, la carte de l'acceptation (Textes & noms)",
+          onclick: () => choisirTextes({ groupe: "metiers", titre: "Le choix du métier" }) }),
+        bouton("Les textes du guide du clan", { classe: "p discret", icone: "plume", titre: "Le message d'accueil du clan : chaque ligne et chaque bouton (Textes & noms)",
+          onclick: () => choisirTextes({ groupe: "guide", titre: "Le guide du clan" }) })),
       !enLigne() ? bandeau("Hors ligne : les rôles se règlent avec la connexion (ils changent tout de suite sur Discord).", "") : null,
       blocReglagesMetiers(M, rolesD, (b) => { dernierBilan = b; maj(true); }),
       dernierBilan ? bandeau(dernierBilan, "vert") : null,
@@ -648,6 +655,11 @@ function blocReglagesMetiers(M, rolesD, apres) {
       : d.non_membres ? h("p", { classe: "meta alerte-texte" }, "« " + sansEmoji(d.nom) + " » : " + compte(d.non_membres, "personne hors du clan l'a", "personnes hors du clan l'ont") + " — " + (d.non_membres > 1 ? "elles le perdront" : "elle le perdra") + " à la prochaine vérification.")
         : null).filter(Boolean);
   const derniere = M.derniere_reconciliation && M.derniere_reconciliation.quand ? M.derniere_reconciliation : null;
+  // Les rôles rattachés (enregistrés) se renomment ici (Textes & noms) : un bouton par rôle.
+  const renommables = (M.rattaches_details || []).filter((d) => d.existe && d.attribuable);
+  const renommer = renommables.length ? h("div", { classe: "renommer-rattaches" }, h("span", { classe: "champ-lib" }, "Renommer un rôle rattaché"),
+    ...renommables.map((d) => bouton(sansEmoji(d.nom) || "Rôle", { classe: "p discret", icone: "plume", reseau: true, titre: "Changer le nom de ce rôle sur Discord",
+      onclick: () => renommerRole({ id: d.id, nom: d.nom }, "Le rôle change de nom tout de suite sur Discord.", () => apres(null)) }))) : null;
   return zoneReglagesMetiers(apres, h("div", { classe: "cadre pile serree" }, h("h3", {}, "Les réglages"),
     ...alertes,
     interrupteur("Attribution automatique des rôles de métier", v.auto, (x) => { v.auto = x; etat_(); }),
@@ -656,7 +668,7 @@ function blocReglagesMetiers(M, rolesD, apres) {
       h("span", { classe: "champ-aide" }, "De 1 à 5. L'atelier des affiches n'en laisse pas choisir davantage.")),
     h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Rôles rattachés au clan"),
       h("span", { classe: "champ-aide" }, "Coche les rôles qui partent avec le clan : quand quelqu'un quitte le clan, ils lui sont retirés en même temps que ses métiers."),
-      candidats.length ? grille : h("p", { classe: "aide" }, "Aucun rôle attribuable trouvé."), ...avisRattaches),
+      candidats.length ? grille : h("p", { classe: "aide" }, "Aucun rôle attribuable trouvé."), ...avisRattaches, renommer),
     h("p", { classe: "meta" }, icone(M.icones_roles ? "succes" : "info", "ic-p"), M.icones_roles
       ? " Ce serveur peut afficher une icône sur les rôles : chaque rôle de métier prend l'icône officielle de son métier."
       : " Ce serveur ne peut pas encore afficher d'icône sur les rôles (il faut le niveau 2 de boost) : les rôles de métier n'ont que leur couleur."),
@@ -673,6 +685,19 @@ function blocReglagesMetiers(M, rolesD, apres) {
 function zoneReglagesMetiers(apres, bloc) {
   protegerZone(bloc, "metiers:reglages", "les réglages des rôles de métier", { des: "saisie", relire: () => apres(null) });
   return bloc;
+}
+
+/** Renommer un rôle sur Discord (un rôle lié au catalogue, ou rattaché au clan) : le serveur vérifie qu'il le peut. */
+async function renommerRole(role, aide, apres) {
+  const nom = saisie({ value: role.nom || "", maxlength: 100, "aria-label": "Nouveau nom du rôle" });
+  const attente = confirmer({ titre: "Renommer « " + (sansEmoji(role.nom) || "le rôle") + " »", icone: "roles", libelleOk: "Renommer",
+    contenu: [champ("Nouveau nom", nom, { aide })] });
+  requestAnimationFrame(() => requestAnimationFrame(() => { nom.focus(); nom.select(); }));   // le nom, prêt à être réécrit
+  const ok = await attente;
+  if (!ok) return;
+  const r = await poster("rell/role/renommer", { role_id: String(role.id), nom: nom.value.trim() });
+  toast(r.ok ? (r.donnees.message || "Rôle renommé.") : r.erreur, r.ok ? "succes" : "erreur");
+  if (r.ok) apres();
 }
 
 function ligneRole(t, e, lien, rolesD, nbMembres, autoMetiers, recharger) {
@@ -706,11 +731,15 @@ function ligneRole(t, e, lien, rolesD, nbMembres, autoMetiers, recharger) {
   ecouter("reseau", etatBouton);
   const roleLie = lien ? h("span", { classe: "role-lie" }, h("i", { classe: "pastille-couleur", vars: { "--teinte": lien.couleur || "#6e553f" } }), sansEmoji(lien.role_nom || "") || "rôle")
     : h("span", { classe: "role-lie a-venir" }, autoMetiers ? "sera créé au premier choix" : "aucun rôle");
+  // Le rôle lié se renomme ici (Textes & noms) ; pour un métier, ce nom sert aussi s'il faut recréer le rôle.
+  const renommer = lien && lien.existe !== false && lien.attribuable !== false ? bouton("Renommer…", { classe: "p discret", icone: "plume", reseau: true,
+    titre: "Changer le nom du rôle sur Discord", onclick: () => renommerRole({ id: lien.role_id, nom: lien.role_nom },
+      t.cle === "metier" ? "Le rôle change de nom tout de suite sur Discord. S'il est recréé un jour, il reprendra ce nom." : "Le rôle change de nom tout de suite sur Discord.", recharger) }) : null;
   const ligne = h("div", { classe: "registre-ligne" },
     h("div", { classe: "qui" }, insigneImage(e, "element-icone petit"), h("div", { classe: "bloc" }, h("b", {}, e.nom), roleLie)),
     choix,
     h("span", { classe: "num role-membres" }, nombre(nbMembres), h("span", { classe: "meta" }, nbMembres > 1 ? " membres" : " membre")),
-    h("div", { classe: "rangee" }, enregistrer, lien ? null : creer));
+    h("div", { classe: "rangee" }, enregistrer, lien ? renommer : creer));
   // Présence en direct : la ligne se prend au premier geste ; prise ailleurs, elle se fige sous le cadenas.
   protegerZone(ligne, "role:" + t.cle + ":" + e.cle, "le rôle du métier « " + e.nom + " »", { des: "saisie", compact: true, relire: recharger });
   return avecVerrou(ligne, "role:" + t.cle + ":" + e.cle);

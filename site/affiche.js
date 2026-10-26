@@ -6,9 +6,13 @@
 
 import { h, icone, srcSure, nombre, sansEmoji, majuscule } from "./dom.js";
 import { element, typesTries, typeMetier, typeGrade } from "./donnees.js";
+import { libelle } from "./noyau.js";
 
-export const STATUTS_AFFICHE = { actif: "En service", en_mer: "En mer", absent: "Absent", ancien: "Ancien de l'équipage" };
-const TAMPONS = { en_mer: "En mer", absent: "Absent", ancien: "Ancien" };
+// Les statuts et les tampons lisent leur nom par `libelle` : renommés sur le site (Textes & noms), partout à la fois.
+const nomme = (prefixe, noms) => Object.defineProperties({}, Object.fromEntries(Object.entries(noms).map(([k, defaut]) =>
+  [k, { enumerable: true, get: () => libelle(prefixe + k, defaut) }])));
+export const STATUTS_AFFICHE = nomme("site.affiche.statut.", { actif: "En service", en_mer: "En mer", absent: "Absent", ancien: "Ancien de l'équipage" });
+const TAMPONS = nomme("site.affiche.tampon.", { en_mer: "En mer", absent: "Absent", ancien: "Ancien" });
 
 export const nomAffiche = (a) => sansEmoji((a.roblox && a.roblox.nom) || (a.membre && a.membre.nom) || "") || "Inconnu";
 export function portrait(a) {

@@ -13,6 +13,7 @@ export const ROUTES_HORS_LIGNE = new Set([
   "clan/brouillon",
   "recrutement/question", "recrutement/question/retirer", "recrutement/liens", "recrutement/reglages",
   "recrutement/corriger", "recrutement/modele", "recrutement/modele/retirer",
+  "texte", "texte/defaut",
 ]);
 
 const NOM_BASE = "capitainerie";
@@ -149,7 +150,7 @@ export async function envoyer() {
 
 function objetDe(corps) {
   if (!corps || typeof corps !== "object") return null;
-  for (const k of ["affiche", "element", "brouillon", "question", "modele", "correction", "type"]) {
+  for (const k of ["affiche", "element", "brouillon", "question", "modele", "correction", "type", "texte"]) {
     const o = corps[k];
     if (o && typeof o === "object" && !Array.isArray(o)) return o;
   }

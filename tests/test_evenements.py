@@ -691,9 +691,12 @@ def test_EV22_l_annonce_vue_et_son_compteur(env):
         "réécrite, la carte garde sa pièce jointe (même nom, même extension)"
     assert "attachments" not in [kw for mid, kw in env.infos.cartes if mid == m.id][-1], "l'image reste en place"
     statut, r2 = api(env, "clan/evenements")
-    assert r2["passes"][0]["reponses"]["vus"] == 2
+    #  26/10/2026 : une annonce en ligne est rangée dans « Publiées » (plus avec les passés).
+    assert r2["publiees"][0]["reponses"]["vus"] == 2 and not any(x["id"] == a["id"] for x in r2["passes"])
     statut, r3 = api(env, "clan/annuler", {"id": a["id"]})
     assert statut == 200 and r3["element"]["statut"] == "retire" and m.id in env.g.effaces
+    statut, r4 = api(env, "clan/evenements")
+    assert r4["passes"][0]["id"] == a["id"] and r4["publiees"] == [], "retirée, elle passe dans « Passés »"
     i = inter(env, env.g.membre(63))
     courir(E.BoutonVu(a["id"]).callback(i))
     assert textes(i.suivis[-1][1]["view"]) == "Cette annonce n'existe plus."
