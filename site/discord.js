@@ -1,21 +1,20 @@
-// discord.js — « Le Port » : aperçu, journal, sanctions, tickets, répertoire, salons & questions, nettoyage.
+// discord.js — « Le Port » : journal, sanctions, tickets (ceux du clan compris), répertoire, salons & questions ; et le
+// nettoyage, montré dans La Capitainerie › Réglages (reglages.js). 27/10/2026 : l'Aperçu est dans l'accueil (accueil.js).
 
 import { h, icone, date, heure, depuis, duree, nombre, cleJour, libelleMois, moisDe, maintenant, sansEmoji, norm, contient, lettre, trier, compte, remplacer, quantite, accord, ajouter } from "./dom.js";
-import { etat, P, peutAgir, aller, filtres, enLigne, emettre, ecouter, retenirPersonnes, nommerOnglets } from "./noyau.js";
+import { etat, P, peutAgir, aller, filtres, enLigne, ecouter, retenirPersonnes, nommerOnglets } from "./noyau.js";
 import { lienExport, lire, poster } from "./api.js";
 import { charger, vue as vueJeu } from "./donnees.js";
-import { file } from "./hors_ligne.js";
 import {
   bouton, avatar, pastille, tampon, vide, tuile, tuiles, puces, segment, recherche, liste, menu, groupe, indexAZ,
   section, sectionTete, barres, barresH, ENCRES, lienNom, nomDe, confirmer, toast, bandeau, caseACocher, compteur, squelettes, boutonCopie,
 } from "./ui.js";
 import {
   ouvrirFiche, ouvrirConversation, agir, teinteCat, teinteType, libelleType, GROUPES_SANCTION, STATUTS_Q, STATUTS_S,
-  STATUTS_I, STATUTS_CAND, deplier, sondageVotes, etapeCandidature, chargerSuivi, nomSalon, recentsDabord, propre,
+  STATUTS_I, STATUTS_CAND, deplier, sondageVotes, nomSalon, recentsDabord, propre,
   ligneJournal,
 } from "./fiche.js";
 import { ligne, lignes, groupes, outilsGroupes, groupesParPeriode, groupesParJours, pastilleIcone, quandLigne, badgeRestreint, estRestreint, avance } from "./rangement.js";
-import { aFaire, ligneAFaire, resserrer } from "./accueil.js";
 import { avecVerrou, protegerZone } from "./direct.js";
 import {
   journalSuite, comptesParCategorie, chiffresJournal, comptesMois, moisArchive, fermesDepuis, fermesRecherche, reunirFermes,
@@ -26,61 +25,6 @@ const JOUR = 86400;
 const resetPages = (prefixe) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(prefixe)) delete etat.pages[k]; };
 export const indisponible = () => vide("Données indisponibles", etat.reseau.enLigne ? "Le serveur ne répond pas pour le moment : nouvel essai automatique." : "Hors ligne, et rien n'est encore en mémoire sur cet appareil.", "hors_ligne");
 const exporter = (libelle, items) => menu(bouton(libelle || "Exporter", { icone: "exporter", reseau: true }), items.map(([l, p]) => ({ l, icone: "exporter", href: lienExport(p), telecharger: true })));
-
-// ─── Aperçu ─────────────────────────────────────────────────────────────────
-export function apercu(vue) {
-  const zone = h("div", { classe: "pile" });
-  ajouter(vue, [zone]);
-  const maj = () => {
-    const d = etat.d;
-    if (!d) { remplacer(zone, indisponible()); return; }
-    const n = maintenant();
-    const ouverts = d.tickets.ouverts, nonPris = ouverts.filter((t) => !t.pris_par);
-    const qs = (d.questions && d.questions.liste) || [], qOuvertes = qs.filter((q) => q.statut === "ouverte");
-    const alertes = d.alertes || [], clan = (d.clan && d.clan.membres) || [];
-    const inactifs = clan.filter((m) => m.rang === 2).length;
-    const st = (d.questions && d.questions.stats) || {};
-    const etapes = new Map(d.en_cours.map((c) => [c, etapeCandidature(c)]));
-    const aCorriger = d.en_cours.filter((c) => etapes.get(c) === "corriger").length;
-    const aDecider = d.en_cours.filter((c) => etapes.get(c) === "decider").length;
-    const attente = file.ops.length;
-    const t = tuiles(
-      tuile({ cle: "a1", lib: "Tickets ouverts", val: ouverts.length, icone: "tickets", sous: nonPris.length + " pas encore pris", teinte: "#a8641c", clic: () => aller("port", "tickets") }),
-      tuile({ cle: "a2", lib: "Questions sans réponse", val: qOuvertes.length, icone: "salons", sous: st.delai_median ? "réponse médiane : " + duree(st.delai_median) : "aucune réponse mesurée", teinte: "#1f4e5a", clic: () => aller("port", "salons", "questions") }),
-      tuile({ cle: "a3", lib: "Alertes en cours", val: alertes.length, icone: "attention", sous: alertes.length ? "membres qui cumulent du grave" : "rien à signaler", teinte: alertes.length ? "#8e2a24" : "#3f6b3a" }),
-      tuile({ cle: "a4", lib: "Sanctions · 30 jours", val: d.sanctions.trente_jours, icone: "sanctions", sous: nombre(d.sanctions.total) + " au casier", teinte: "#5e3a4e", clic: () => aller("port", "sanctions") }),
-      tuile({ cle: "a5", lib: "Candidatures", val: d.en_cours.length, icone: "candidatures", sous: aDecider + " à décider · " + aCorriger + " à corriger", teinte: "#7a4b2a", clic: () => aller("capitainerie", "recrutement") }),
-      tuile({ cle: "a6", lib: "Membres du clan", val: clan.length, icone: "equipage", sous: quantite(inactifs, "inactif(s)") + " depuis un mois", teinte: "#3f6b3a", clic: () => aller("equipage", "membres") }),
-      attente ? tuile({ cle: "a7", lib: "Modifications à envoyer", val: attente, icone: "synchro", sous: "faites hors ligne, elles partent au retour", teinte: "#7a5a22", clic: () => emettre("file:ouvrir") }) : null);
-    // À traiter maintenant : ce qui attend sur Discord (alertes, tickets, questions, idées), comme à l'accueil — trois par
-    // sorte, puis « Et N autres » vers la bonne page. Les candidatures sont à l'Équipage (et à l'accueil).
-    const tous = aFaire().filter((x) => ["alerte", "ticket", "question", "idees"].includes(x.sorte)), items = resserrer(tous);
-    const urgent = section("À traiter maintenant", "attention", tous.length ? compte(tous.length, "élément") : "",
-      items.length ? lignes("apercu-urgent", items, ligneAFaire, { classe: "a-faire-liste" }) : vide("Rien d'urgent", "Pas d'alerte, pas de ticket oublié, pas de question en attente.", "succes"),
-      bouton("Tout ce qui t'attend", { classe: "p discret", icone: "boussole", onclick: () => aller("accueil") }));
-    const pj = (d.journal && d.journal.par_jour) || {}, jours = [], fam = {};
-    for (let i = 13; i >= 0; i--) jours.push(cleJour(n - i * JOUR));
-    const connues = ["Modération", "Sécurité", "Tickets", "Questions", "Clan", "Membres", "Messages", "Vocal"];
-    for (const k of jours) {
-      const v = pj[k] || {};
-      fam[k] = { mod: (v["Modération"] || 0) + (v["Sécurité"] || 0), sup: (v["Tickets"] || 0) + (v["Questions"] || 0) + (v["Clan"] || 0),
-        mem: v["Membres"] || 0, msg: (v["Messages"] || 0) + (v["Vocal"] || 0),
-        autre: Object.entries(v).filter(([c]) => !connues.includes(c)).reduce((a, [, x]) => a + x, 0) };
-    }
-    const eq = d.equipe || [];
-    const graphes = h("div", { classe: "duo avance" },
-      h("div", { classe: "cadre" }, h("h3", {}, "Activité · 14 jours"), h("p", { classe: "aide" }, "Tout ce que le journal a consigné, jour par jour."),
-        barres(jours, fam, [["mod", ENCRES.cire, "Modération et sécurité"], ["sup", ENCRES.sienne, "Tickets, questions, clan"], ["mem", ENCRES.vert, "Arrivées et départs"],
-          ["msg", ENCRES.mer, "Messages et vocal"], ["autre", ENCRES.corde, "Autre"]], "Le journal se remplit au fil des évènements.")),
-      h("div", { classe: "cadre" }, h("h3", {}, "Équipe · 30 jours"), h("p", { classe: "aide" }, "Tickets pris ou fermés, sanctions, questions répondues. Direction et fondateur à part."),
-        eq.length ? barresH(eq.map((x) => [nomDe(P(x.id)), x.tickets + x.sanctions + x.questions, quantite(x.tickets, "ticket(s)") + " · " + quantite(x.sanctions, "sanction(s)") + " · " + quantite(x.questions, "question(s)"), () => ouvrirFiche(x.id)])) : vide("Rien sur 30 jours")));
-    remplacer(zone, t, urgent, graphes);
-  };
-  maj();
-  chargerSuivi();
-  // Le suivi du recrutement arrive après les données : l'aperçu se redessine quand il change (« jeu »).
-  return { maj, majJeu: maj };
-}
 
 // ─── Journal ────────────────────────────────────────────────────────────────
 export function journal(vue) {
@@ -95,7 +39,7 @@ export function journal(vue) {
     avance(exporter("Exporter", [["Journal · 7 jours (CSV)", { quoi: "journal", jours: 7 }], ["Journal · 30 jours (CSV)", { quoi: "journal", jours: 30 }], ["Journal · 90 jours (CSV)", { quoi: "journal", jours: 90 }],
       ["Journal · 30 jours (JSON)", { quoi: "journal", jours: 30, format: "json" }], ...(peutAgir() ? [["Erreurs du bot · 30 jours (CSV)", { quoi: "erreurs" }]] : [])])));
   const tete = h("div");
-  ajouter(vue, [tete, outils, h("p", { classe: "aide avance" }, "Plus aucun log sur Discord : tout arrive ici. Conservation : messages et vocal 30 jours, le reste 90 jours (rubrique Nettoyage). Au-delà des derniers évènements, le serveur cherche pour toi ; l'export prend tout."), resultats]);
+  ajouter(vue, [tete, outils, h("p", { classe: "aide avance" }, "Plus aucun log sur Discord : tout arrive ici. Conservation : messages et vocal 30 jours, le reste 90 jours (Réglages, Nettoyage). Au-delà des derniers évènements, le serveur cherche pour toi ; l'export prend tout."), resultats]);
   // Au-delà des 400 derniers évènements des données, le serveur filtre (période, catégorie, gravité, recherche) : à
   // plusieurs années, un jour en compte des milliers (longevite.js).
   const suite = journalSuite(() => maj());
@@ -334,29 +278,35 @@ function ligneModerateur(x) {
   });
 }
 
-// ─── Tickets (partagé avec le clan) ─────────────────────────────────────────
-/** portee : "serveur" (tickets normaux d'abord) ou "clan" (Rell Seas seulement). */
-export function ticketsVue(vue, portee) {
-  const clan = portee === "clan";
-  const f = filtres("tickets-" + portee, { q: "", type: clan ? "tous" : "normaux" });
+// ─── Tickets (tous : ceux du serveur et ceux du clan) ───────────────────────
+// 27/10/2026 : « Tickets » réunit TOUS les tickets ; l'ancien « Tickets du clan » (L'Équipage) est la famille « Clan ·
+// RELL Seas ». La famille est la sous-page (#port/tickets · …/normaux · …/clan) et se choisit sans quitter la page
+// (`sous`) ; le type, dans une liste (seulement s'il y en a plusieurs). Les tuiles et les tendances suivent la famille.
+export const FAMILLES_TICKETS = nommerOnglets("site.sous.port.tickets", [["tous", "Tous", "tickets"], ["normaux", "Tickets normaux", "tickets"], ["clan", "Clan · RELL Seas", "equipage"]]);
+const familleDe = (sous) => (FAMILLES_TICKETS.some(([k]) => k === sous) ? sous : "tous");
+export function tickets(vue, ctx = {}) {
+  let fam = familleDe(ctx.sous);
+  const f = filtres("tickets", { q: "", sorte: "" });
   const haut = h("div", { classe: "pile" }), resultats = h("div", { classe: "pile" }), bas = h("div", { classe: "pile" });
-  const pre = "tick-" + portee;
-  const changer = () => { resetPages(pre); majResultats(); };
-  ajouter(vue, [haut, h("div", { classe: "outils" }, recherche(f.q, "Membre, numéro, motif…", (q) => { f.q = q; changer(); })), resultats, bas]);
-  const dansPortee = (t) => (clan ? t.rellseas : true);
+  const pre = () => "tick-" + fam;
+  const changer = () => { resetPages("tick-"); majResultats(); };
+  const typeL = liste({ valeur: f.sorte, label: "Type", options: [], changer: (v) => { f.sorte = v; changer(); } });
+  typeL.hidden = true;   // montrée avec les données, s'il y a plusieurs types
+  ajouter(vue, [haut, h("div", { classe: "outils" }, recherche(f.q, "Membre, numéro, motif…", (q) => { f.q = q; changer(); }), typeL), resultats, bas]);
+  const dansFamille = (t) => fam === "tous" || (fam === "clan") === !!t.rellseas;
   const majHaut = () => {
     const d = etat.d;
     if (!d) { remplacer(haut, indisponible()); return; }
     const tk = d.tickets, n = maintenant();
-    const types = tk.types.filter(dansPortee);
+    const types = tk.types.filter(dansFamille);
     const prises = types.filter((t) => t.prise_mediane).map((t) => t.prise_mediane).sort((a, b) => a - b);
-    const ouverts = tk.ouverts.filter(dansPortee);
+    const ouverts = tk.ouverts.filter(dansFamille);
     remplacer(haut, tuiles(
-      tuile({ cle: pre + "1", lib: "Ouverts", val: ouverts.length, icone: "tickets", teinte: "#a8641c" }),
-      tuile({ cle: pre + "2", lib: "Pas encore pris", val: ouverts.filter((t) => !t.pris_par).length, icone: "attention", teinte: "#8e2a24" }),
-      tuile({ cle: pre + "3", lib: "Prise en charge", texte: duree(prises.length ? prises[Math.floor(prises.length / 2)] : 0), icone: "minuteur", sous: "délai médian", teinte: "#1f4e5a" }),
-      tuile({ cle: pre + "4", lib: "Fermés · 30 jours", val: tk.fermes.filter((t) => dansPortee(t) && t.ferme && n - t.ferme <= 30 * JOUR).length, icone: "cadenas", teinte: "#3f6b3a" })));
-    remplacer(bas, groupe({ titre: "Tendances", cle: pre + "-tendances", icone: "carte", classe: "avance" }, () => h("div", { classe: "duo" },
+      tuile({ cle: "tick1", lib: "Ouverts", val: ouverts.length, icone: "tickets", teinte: "#a8641c" }),
+      tuile({ cle: "tick2", lib: "Pas encore pris", val: ouverts.filter((t) => !t.pris_par).length, icone: "attention", teinte: "#8e2a24" }),
+      tuile({ cle: "tick3", lib: "Prise en charge", texte: duree(prises.length ? prises[Math.floor(prises.length / 2)] : 0), icone: "minuteur", sous: "délai médian", teinte: "#1f4e5a" }),
+      tuile({ cle: "tick4", lib: "Fermés · 30 jours", val: tk.fermes.filter((t) => dansFamille(t) && t.ferme && n - t.ferme <= 30 * JOUR).length, icone: "cadenas", teinte: "#3f6b3a" })));
+    remplacer(bas, groupe({ titre: "Tendances", cle: "tick-tendances", icone: "carte", classe: "avance" }, () => h("div", { classe: "duo" },
       h("div", { classe: "cadre" }, h("h3", {}, "Tickets ouverts par mois"), h("p", { classe: "aide" }, "Rell Seas et tickets normaux, douze mois."),
         barres(Object.keys(tk.mois).sort(), tk.mois, [["Rell Seas", ENCRES.mer, "Rell Seas"], ["Tickets normaux", ENCRES.sienne, "Tickets normaux"]], "Les mois apparaîtront avec les premiers tickets.")),
       h("div", { classe: "cadre" }, h("h3", {}, "Staff"), h("p", { classe: "aide" }, "Tickets pris en charge et fermés, depuis le début. Direction et fondateur à part."),
@@ -369,15 +319,17 @@ export function ticketsVue(vue, portee) {
     const d = etat.d;
     if (!d) { remplacer(resultats); return; }
     const tk = d.tickets, n = maintenant();
-    const types = tk.types.filter(dansPortee);
-    const rell = types.filter((t) => t.rellseas), norm_ = types.filter((t) => !t.rellseas);
     const somme = (l) => l.reduce((a, t) => a + t.total, 0);
-    const options = clan
-      ? [["tous", "Tous", somme(types)], ...(types.length > 1 ? types.map((t) => ["t:" + t.nom, propre(t.nom), t.total, ENCRES.mer]) : [])]
-      : [["normaux", "Tickets normaux", somme(norm_), ENCRES.sienne], ["rell", "Rell Seas", somme(rell), ENCRES.mer], ["tous", "Tous", somme(types)],
-        ...(norm_.length > 1 ? norm_.map((t) => ["t:" + t.nom, propre(t.nom), t.total, ENCRES.sienne]) : [])];
-    if (!options.some((o) => o[0] === f.type)) f.type = options[0][0];
-    const garde = (t) => dansPortee(t) && (f.type === "tous" || (f.type === "rell" && t.rellseas) || (f.type === "normaux" && !t.rellseas) || f.type === "t:" + t.type);
+    const deFamille = (k) => tk.types.filter((t) => k === "tous" || (k === "clan") === !!t.rellseas);
+    const types = deFamille(fam);
+    // Le type : une liste, seulement quand la famille en a plusieurs (un type qui n'y est plus : tous les types).
+    if (f.sorte && !types.some((t) => t.nom === f.sorte)) f.sorte = "";
+    typeL.options([{ v: "", l: "Tous les types" }, ...types.map((t) => ({ v: t.nom, l: propre(t.nom), sous: quantite(t.total, "ticket(s)"), teinte: t.rellseas ? ENCRES.mer : ENCRES.sienne }))]);
+    typeL.poser(f.sorte);
+    typeL.hidden = types.length < 2;
+    const teintes = { normaux: ENCRES.sienne, clan: ENCRES.mer };
+    const familles = FAMILLES_TICKETS.map(([k, l]) => [k, l, somme(deFamille(k)), teintes[k]]);
+    const garde = (t) => dansFamille(t) && (!f.sorte || t.type === f.sorte);
     const cherche = (t, p) => contient([p.nom, p.pseudo, p.id, "#" + t.ticket, t.motif, t.type].join(" "), f.q);
     const ouverts = tk.ouverts.filter((t) => garde(t) && cherche(t, t));
     const jours = Number(tk.archives_jours) || 30;
@@ -401,31 +353,32 @@ export function ticketsVue(vue, portee) {
     const nbArchives = moisTries.reduce((a, k) => a + Math.max(parMois.get(k).length, attendus.get(k) || 0), 0);
     // Les ouverts : ceux que personne n'a pris d'abord (les plus anciens en tête), puis ceux pris en charge.
     const nonPris = ouverts.filter((t) => !t.pris_par).sort((a, b) => (a.ouvert || 0) - (b.ouvert || 0)), pris = ouverts.filter((t) => t.pris_par);
+    const p = pre();
     const zoneO = h("div", { classe: "groupes-zone" }, ouverts.length ? groupes([
-      nonPris.length ? { cle: pre + "-o-libres", titre: "Personne ne les a pris", icone: "attention", compte: nonPris.length, chaud: true, contenu: () => lignes(pre + "-o-libres", nonPris, ligneTicketOuvert) } : null,
-      pris.length ? { cle: pre + "-o-pris", titre: "Pris en charge", icone: "personne", compte: pris.length, contenu: () => lignes(pre + "-o-pris", pris, ligneTicketOuvert) } : null,
+      nonPris.length ? { cle: p + "-o-libres", titre: "Personne ne les a pris", icone: "attention", compte: nonPris.length, chaud: true, contenu: () => lignes(p + "-o-libres", nonPris, ligneTicketOuvert) } : null,
+      pris.length ? { cle: p + "-o-pris", titre: "Pris en charge", icone: "personne", compte: pris.length, contenu: () => lignes(p + "-o-pris", pris, ligneTicketOuvert) } : null,
     ].filter(Boolean), { ouverts: 2, forcer: !!f.q }) : vide("Aucun ticket ouvert ici", "Tout est traité.", "succes"));
-    const zoneF = h("div", { classe: "groupes-zone" }, recents.length ? groupesParPeriode(pre + "-f", recents, (t) => t.ferme || t.ouvert, ligneTicketFerme, { forcer: !!f.q })
+    const zoneF = h("div", { classe: "groupes-zone" }, recents.length ? groupesParPeriode(p + "-f", recents, (t) => t.ferme || t.ouvert, ligneTicketFerme, { forcer: !!f.q })
       : vide("Aucun ticket fermé ces " + jours + " derniers jours"));
     const rendreMois = (k) => (liste) => {
       const l = liste.filter((t) => garde(t) && cherche(t, P(t.id)) && t.ferme && n - t.ferme > jours * JOUR);
-      return l.length ? lignes(pre + "-a-" + k, l, ligneTicketFerme) : vide("Rien ce mois-ci", "Change le type ou la recherche.");
+      return l.length ? lignes(p + "-a-" + k, l, ligneTicketFerme) : vide("Rien ce mois-ci", "Change le type ou la recherche.");
     };
-    const zoneA = h("div", { classe: "groupes-zone" }, moisTries.length ? groupes(moisTries.map((k) => ({ cle: pre + "-a-" + k, titre: libelleMois(k),
+    const zoneA = h("div", { classe: "groupes-zone" }, moisTries.length ? groupes(moisTries.map((k) => ({ cle: p + "-a-" + k, titre: libelleMois(k),
       compte: Math.max(parMois.get(k).length, attendus.get(k) || 0),
       contenu: () => moisArchive(k, parMois.get(k), attendus.get(k) || 0, rendreMois(k)) })), { ouverts: 0, forcer: !!f.q })
       : vide("Rien aux archives", "Les tickets y sont rangés " + jours + " jours après leur fermeture."));
     remplacer(resultats,
-      puces(options, f.type, (v) => { f.type = v; changer(); }, "Types de tickets"),
+      // La famille change l'adresse (la présence en direct la dit, un rechargement la garde) ; la page suit sans se redessiner.
+      puces(familles, fam, (k) => { if (k !== fam) aller("port", "tickets", k === "tous" ? "" : k); }, "Tickets"),
       section("Ouverts", "tickets", compte(ouverts.length, "ticket"), zoneO),
       section("Fermés ces " + jours + " derniers jours", "cadenas", compte(recents.length, "ticket"), zoneF, recents.length ? outilsGroupes(zoneF) : null),
       section("Archives", "coffre", compte(nbArchives, "ticket") + " · fermés depuis plus de " + jours + " jours", zoneA, moisTries.length > 1 ? outilsGroupes(zoneA) : null));
   };
   const maj = () => { majHaut(); majResultats(); };
   maj();
-  return { maj };
+  return { maj, sous: (s) => { fam = familleDe(s); f.sorte = ""; resetPages("tick-"); maj(); } };
 }
-export const tickets = (vue) => ticketsVue(vue, "serveur");
 
 /** Un ticket ouvert : numéro et nom, type, qui l'a pris, depuis quand ; la conversation au clic. */
 function ligneTicketOuvert(t) {
@@ -558,15 +511,22 @@ function lignePersonne(x) {
 }
 
 // ─── Salons & questions ─────────────────────────────────────────────────────
-const SOUS_SALONS = nommerOnglets("site.sous.port.salons", [["questions", "Questions", "salons"], ["idees", "Idées", "etoile"], ["sondages", "Sondages", "drapeau"], ["entraide", "Entraide & trade", "ancre"],
-  ["annonces", "Annonces", "cloche"], ["droits", "Droits des salons", "cle"]]);
+// 27/10/2026 : cinq onglets — « Idées & sondages » (avis) réunit deux vues, les idées et les sondages, aux adresses
+// d'avant (#port/salons/idees, #port/salons/sondages), choisies sans quitter la page. Chaque nom se renomme (Textes &
+// noms) : l'onglet et ses deux vues.
+export const SOUS_SALONS = nommerOnglets("site.sous.port.salons", [["questions", "Questions", "salons"], ["avis", "Idées & sondages", "etoile"], ["idees", "Idées", "etoile"],
+  ["sondages", "Sondages", "drapeau"], ["entraide", "Entraide & trade", "ancre"], ["annonces", "Annonces", "cloche"], ["droits", "Droits des salons", "cle"]]);
+const ONGLETS_SALONS = ["questions", "avis", "entraide", "annonces", "droits"];
+const VUES_AVIS = ["idees", "sondages"];
+const nomSous = (k) => (SOUS_SALONS.find(([x]) => x === k) || [k, k])[1];
 export function salons(vue, ctx) {
-  const sous = SOUS_SALONS.some(([k]) => k === ctx.sous) ? ctx.sous : "questions";
+  let sous = ctx.sous === "avis" ? "idees" : SOUS_SALONS.some(([k]) => k === ctx.sous) ? ctx.sous : "questions";
   const f = filtres("salons", { q: "", ques: "ouverte", idees: "ouvertes", sond: "en_cours", entr: "ouvertes" });
   const onglets = h("div", { classe: "sous-onglets", role: "tablist", "aria-label": "Salons" });
   const resultats = h("div", { classe: "pile" });
   const outils = h("div", { classe: "outils" }, recherche(f.q, "Question, idée, membre, salon…", (q) => { f.q = q; resetPages("sal"); maj(); }));
   ajouter(vue, [onglets, outils, resultats]);
+  let vues = null;   // « Idées | Sondages », à côté de la recherche
   const maj = () => {
     const d = etat.d;
     const nb = d ? {
@@ -574,14 +534,23 @@ export function salons(vue, ctx) {
       sondages: ((d.sondages && d.sondages.stats) || {}).en_cours || 0, entraide: ((d.entraide && d.entraide.stats) || {}).ouvertes || 0,
       annonces: ((d.annonces && d.annonces.stats) || {}).total || 0, droits: (Array.isArray(d.salons) ? d.salons : []).reduce((a, c) => a + ((c && c.salons) || []).length, 0),
     } : {};
-    remplacer(onglets, ...SOUS_SALONS.map(([k, l, ic]) => h("a", { classe: "etiquette", role: "tab", href: "#port/salons/" + k, "aria-selected": String(k === sous) },
-      icone(ic), l, nb[k] ? h("span", { classe: "compteur" + (k === "questions" && nb[k] ? " chaud" : " calme") }, String(nb[k])) : null)));
+    nb.avis = (nb.idees || 0) + (nb.sondages || 0);
+    const avis = VUES_AVIS.includes(sous);
+    remplacer(onglets, ...ONGLETS_SALONS.map((k) => {
+      const [, l, ic] = SOUS_SALONS.find(([x]) => x === k);
+      return h("a", { classe: "etiquette", role: "tab", href: "#port/salons/" + (k === "avis" ? (avis ? sous : "idees") : k), "aria-selected": String(k === (avis ? "avis" : sous)) },
+        icone(ic), l, nb[k] ? h("span", { classe: "compteur" + (k === "questions" && nb[k] ? " chaud" : " calme") }, String(nb[k])) : null);
+    }));
+    if (vues) vues.remove();
+    vues = avis ? segment(sous, VUES_AVIS.map((k) => [k, nomSous(k)]), (v) => { if (v !== sous) aller("port", "salons", v); }, nomSous("avis")) : null;
+    if (vues) outils.append(vues);
     outils.hidden = sous === "droits";
     if (!d) { remplacer(resultats, indisponible()); return; }
     remplacer(resultats, ...[{ questions: sousQuestions, idees: sousIdees, sondages: sousSondages, entraide: sousEntraide, annonces: sousAnnonces, droits: sousDroits }[sous](d, f, maj)].flat());
   };
   maj();
-  return { maj };
+  // Les deux vues d'« Idées & sondages » : sans quitter la page ; un autre onglet : la page neuve (`false`).
+  return { maj, sous: (s) => { const n = s === "avis" ? "idees" : s; if (!VUES_AVIS.includes(n) || !VUES_AVIS.includes(sous)) return false; sous = n; resetPages("sal"); maj(); } };
 }
 function sousQuestions(d, f, maj) {
   const q = d.questions || {}, l = q.liste || [], st = q.stats || {};

@@ -38,7 +38,7 @@
 // questionnaire » — la page écrit « Mira modifie l'affiche de Kolax ».
 
 import { h, icone, BASE, remplacer, ajouter, initiales, srcSure, sansEmoji, retarder, telephone, uuid, quantite } from "./dom.js";
-import { etat, emettre, ecouter, CATEGORIES, aller, enLigne } from "./noyau.js";
+import { etat, emettre, ecouter, CATEGORIES, aller, enLigne, suivreAlias, libelle } from "./noyau.js";
 import { lire, poster, sessionTerminee, url } from "./api.js";
 import * as HL from "./hors_ligne.js";
 import { perime, charger, vue as vueJeu } from "./donnees.js";
@@ -51,10 +51,13 @@ const ESSAIS_AVANT_REPLI = 3;          // ouvertures ratées de la WebSocket ava
 const REESSAI_WS = 120000;             // ms : en interrogation, la WebSocket est retentée de temps en temps
 const POPOVER = typeof HTMLElement !== "undefined" && "showPopover" in HTMLElement.prototype;
 const LECTURE = new Set(["autre", "rendu", "relecture", "libre"]);
-// Les sous-pages qui ont un nom (les autres ne sont pas dites).
+// Les sous-pages qui ont un nom (les autres ne sont pas dites) ; un nom renommé sur le site (Textes & noms) passe devant.
+// 27/10/2026 : la navigation regroupée — les vues d'Équipage, les familles de Tickets, les onglets de Réglages.
 const SOUS = { questionnaire: "Questionnaire", "en-cours": "En cours", decidees: "Décidées", composer: "Composer", brouillons: "Brouillons",
   "a-venir": "À venir", passes: "Passés", questions: "Questions", idees: "Idées", droits: "Droits des salons", sondages: "Sondages",
-  entraide: "Entraide", annonces: "Annonces" };
+  entraide: "Entraide", annonces: "Annonces", candidatures: "Candidatures", chefs: "Chefs d'équipe", reglages: "Réglages", publiees: "Publiées",
+  fiches: "Fiches techniques", equipes: "Équipes", normaux: "Tickets normaux", clan: "Clan · RELL Seas", textes: "Textes & noms", nettoyage: "Nettoyage",
+  avis: "Idées & sondages" };
 // Les jeux de données que relit une page quand quelqu'un d'autre écrit (« ecrit »).
 const JEUX = { affiche: ["affiches"], "affiche-membre": ["affiches"], element: ["catalogue"], catalogue: ["catalogue"], question: ["banque"],
   modele: ["banque"], questionnaire: ["banque"], dossier: ["dossier"], brouillon: ["evenements"], evenement: ["evenements"], role: ["roles"],
@@ -97,13 +100,16 @@ function duree(t) {
 const majuscule = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 /** « Capitainerie › Affiches » : le libellé d'une page (catégorie › rubrique › sous-page connue). */
 export function libellePage(cle) {
-  const [c, r, s] = String(cle || "").split("/");
+  const bruts = String(cle || "").split("/");
   // 26/10/2026 : le site de l'équipage (`/tableau/equipage/`, ses trois onglets) n'est pas une catégorie de ce site-ci.
-  if (c === "site-equipage") return ["Site de l'équipage", { accueil: "Accueil", equipage: "L'équipage", fiche: "Ma fiche" }[r] || ""].filter(Boolean).join(" › ");
+  if (bruts[0] === "site-equipage") return ["Site de l'équipage", { accueil: "Accueil", equipage: "L'équipage", fiche: "Ma fiche" }[bruts[1]] || ""].filter(Boolean).join(" › ");
+  // 27/10/2026 : une page d'avant la navigation regroupée (un onglet pas encore rechargé) est dite à sa place d'aujourd'hui.
+  const [c, r, s] = suivreAlias(bruts.filter(Boolean));
   const cat = CATEGORIES.find((x) => x.cle === c);
   if (!cat) return c ? majuscule(c) : "Le site";
   const rub = cat.rubriques.find((x) => x.cle === r);
-  return [cat.court || cat.titre, rub ? rub.titre : "", SOUS[s] || ""].filter(Boolean).join(" › ");
+  const sous = s && SOUS[s] ? libelle("site.sous." + c + "." + r + "." + s.replace(/-/g, "_"), SOUS[s]) : "";
+  return [cat.court || cat.titre, rub ? rub.titre : "", sous].filter(Boolean).join(" › ");
 }
 function signaler(ev) {
   for (const f of [...D.ecouteurs]) { try { f(ev); } catch (e) { /* un abonné en échec n'arrête pas les autres */ } }

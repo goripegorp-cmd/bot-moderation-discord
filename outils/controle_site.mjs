@@ -63,23 +63,41 @@ const GESTES_DIRECTION = ["Modifier l'accueil", "Publier une actualité", "Ajout
 const cliquerTexte = (selecteur, texte) => "(async () => { const b = [...document.querySelectorAll(" + JSON.stringify(selecteur) + ")].find((x) => x.textContent.includes("
   + JSON.stringify(texte) + ")); if (!b) throw new Error('introuvable : ' + " + JSON.stringify(texte) + "); b.scrollIntoView({ block: 'center' }); b.click(); await new Promise((r) => setTimeout(r, 600)); })()";
 const MODE_EDITION = cliquerTexte("button", "Modifier l'accueil");
-//  Les actualités de l'accueil en vue ; l'éditeur de l'annonce publiée « Le Movie 3 » (son « Modifier »), aperçu Discord
-//  rendu par le serveur — ou celui du site ; douze actualités de plus (idempotent : 14 de la direction au total, une
-//  sur deux avec la bannière de démonstration), l'accueil relu par son propre module.
+//  Les actualités de l'accueil en vue ; l'éditeur d'une publication (son « Modifier »), aperçu Discord rendu par le
+//  serveur — ou celui du site ; douze actualités de plus (idempotent : 14 de la direction au total, une sur deux avec la
+//  bannière de démonstration), l'accueil relu par son propre module.
 const VOIR_ACTUS = "(async () => { const b = document.querySelector('.bloc-actualites'); if (!b) throw new Error('bloc des actualités absent'); b.scrollIntoView({ block: 'start' }); await new Promise(r => setTimeout(r, 300)); return 1; })()";
-const OUVRIR_EDITEUR_PUBLICATION = (mode) => "(async () => { const c = [...document.querySelectorAll('article.actu')].find((a) => a.textContent.includes('Le Movie 3'));"
-  + " if (!c) throw new Error('annonce publiée absente'); const b = [...c.querySelectorAll('button')].find((x) => x.textContent.includes('Modifier'));"
-  + " if (!b) throw new Error('« Modifier » absent de l\\'annonce publiée'); b.click();"
+//  La PREMIÈRE publication visible, quelles que soient les données (la base --lourd enterre les publications sous ses
+//  affiches) : sur l'accueil, sinon dans « Toutes les actualités » (ouverte et dépliée au besoin). La tête la reconnaît à
+//  son « Modifier » (hors mode édition, seules les publications modifiables en ont un) ; un membre, à son genre. Une
+//  annonce passe avant un événement. Une expression (elle tourne dans la page) qui rend la carte.
+const TROUVER_PUBLICATION = (tete) => "(async () => { const pause = (ms) => new Promise((r) => setTimeout(r, ms));"
+  + (tete ? " const modif = (c) => [...c.querySelectorAll('.actu-actions button')].some((b) => b.textContent.includes('Modifier'));"
+    + " const choix = [(c) => modif(c) && c.matches('.actu-annonce'), modif];"
+    : " const choix = [(c) => c.matches('.actu-annonce'), (c) => c.matches('.actu-evenement')];")
+  + " const chercher = (racine) => { const cartes = racine ? [...racine.querySelectorAll('article.actu')] : []; for (const f of choix) { const c = cartes.find(f); if (c) return c; } return null; };"
+  + " let c = chercher(document.querySelector('.bloc-actualites')); if (c) return c;"
+  + " const toutes = [...document.querySelectorAll('.bloc-actualites button')].find((b) => b.textContent.includes('Toutes les actualités'));"
+  + " if (!toutes) throw new Error('aucune publication sur l\\'accueil, et pas de « Toutes les actualités »'); toutes.click(); let d = null;"
+  + " for (let i = 0; i < 80; i++) { await pause(150); d = [...document.querySelectorAll('dialog[open]')].pop() || null; if (!d || !d.querySelector('article.actu')) continue;"
+  + " const plus = [...d.querySelectorAll('.plus button')].find((b) => /^(Voir \\d+ de plus|Tout voir)/.test(b.textContent.trim())); if (!plus) break; plus.click(); }"
+  + " c = chercher(d); if (!c) throw new Error('aucune publication dans « Toutes les actualités »'); return c; })()";
+const OUVRIR_EDITEUR_PUBLICATION = (mode) => "(async () => { const c = await " + TROUVER_PUBLICATION(true) + ";"
+  + " const b = [...c.querySelectorAll('.actu-actions button')].find((x) => x.textContent.includes('Modifier')); b.scrollIntoView({ block: 'center' }); b.click();"
   + " for (let i = 0; i < 40 && !document.querySelector('dialog[open] .discord-carte'); i++) await new Promise(r => setTimeout(r, 150));"
   + (mode !== "form" ? " const ap = [...document.querySelectorAll('dialog[open] .bascule-editeur button')].find((x) => x.textContent.includes('Aperçu')); if (ap && ap.getClientRects().length) { ap.click(); await new Promise(r => setTimeout(r, 300)); }" : "")
   + (mode === "site" ? " [...document.querySelectorAll('dialog[open] .apercu-onglets button')].find((x) => x.textContent.includes('Sur le site')).click(); await new Promise(r => setTimeout(r, 500));" : "")
   + " return 1; })()";
-const TENIR_PUBLICATION = "(async () => { const a = await fetch('/tableau/equipage/api/accueil', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json());"
-  + " const x = (((a.donnees || {}).actualites || {}).auto || []).find((y) => y.titre.includes('Le Movie 3')); if (!x) throw new Error('annonce publiée absente');"
+const TENIR_PUBLICATION = "(async () => { const c = await " + TROUVER_PUBLICATION(true) + ";"
+  + " const badge = c.querySelector('.direct-badge[data-direct-objet^=\"evenement:\"]'); if (!badge) throw new Error('la carte de la publication n\\'a pas de cadenas');"
+  + " const o = badge.dataset.directObjet, titre = (c.querySelector('.lien-titre') || c).textContent.trim();"
   + " const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/tableau/espace/direct'); window.__essaiVerrou = ws;"
   + " await new Promise((ok, ko) => { ws.onopen = ok; ws.onerror = ko; }); ws.send(JSON.stringify({ t: 'bonjour', page: 'equipage/annonces' }));"
-  + " ws.send(JSON.stringify({ t: 'prendre', o: 'evenement:' + x.id.split('-').pop(), ti: 'la publication « Le Movie 3 »' }));"
+  + " ws.send(JSON.stringify({ t: 'prendre', o, ti: 'la publication « ' + titre + ' »' }));"
   + " for (let i = 0; i < 30 && !document.querySelector('.actu .direct-badge:not([hidden])'); i++) await new Promise(r => setTimeout(r, 200)); return 1; })()";
+//  Un membre ouvre la première publication visible (sa lecture : bannière, texte, liens — jamais « Modifier »).
+const LIRE_PUBLICATION = "(async () => { const c = await " + TROUVER_PUBLICATION(false) + "; const t = c.querySelector('button.lien-titre');"
+  + " t.scrollIntoView({ block: 'center' }); t.click(); await new Promise((r) => setTimeout(r, 600)); return 1; })()";
 //  La carte sous cadenas au milieu de l'écran (au téléphone, elle est loin sous le début du bloc).
 const VOIR_VERROU = "(async () => { const c = document.querySelector('.actu.direct-chez-moi, .actu.direct-sous-verrou'); if (!c) throw new Error('carte sous cadenas absente');"
   + " c.scrollIntoView({ block: 'center' }); await new Promise(r => setTimeout(r, 300)); return 1; })()";
@@ -133,7 +151,7 @@ const SCENES_EQUIPAGE = [
   { nom: "site-equipage-actualite-verrouillee", ...EQ_TETE, ancre: "#accueil", geste: TENIR_PUBLICATION, geste2: VOIR_VERROU,
     apres: "(() => { if (window.__essaiVerrou) window.__essaiVerrou.close(); return 1; })()" },
   { nom: "site-equipage-actualites-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: VOIR_ACTUS },
-  { nom: "site-equipage-lire-annonce-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: cliquerTexte("button.lien-titre", "Le Movie 3") },
+  { nom: "site-equipage-lire-annonce-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: LIRE_PUBLICATION },
   { nom: "site-equipage-actualites-nombreuses", ...EQ_TETE, ancre: "#accueil", geste: BEAUCOUP_ACTUS, geste2: VOIR_ACTUS },
   { nom: "site-equipage-toutes-nombreuses", ...EQ_TETE, ancre: "#accueil", geste: BEAUCOUP_ACTUS, geste2: cliquerTexte("button", "Toutes les actualités") },
 ];
@@ -151,6 +169,14 @@ const CLIQUER_LIGNE = (texte) => `(() => { const l = [...document.querySelectorA
 // La recherche universelle, ouverte au clavier (Ctrl+K), avec un texte tapé.
 const RECHERCHER = (texte) => `(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })); await new Promise(r => setTimeout(r, 500));
   const i = document.querySelector('dialog[open] .recherche-champ'); i.value = ${JSON.stringify(texte)}; i.dispatchEvent(new Event('input', { bubbles: true })); await new Promise(r => setTimeout(r, 1200)); return 1; })()`;
+// « Tout afficher » (le mode simple cache les tuiles et les tendances), puis le retour au mode simple.
+const TOUT_AFFICHER = "(() => { if (document.documentElement.classList.contains('mode-simple')) document.querySelector('.bascule-mode').click(); return 1; })()";
+const MODE_SIMPLE = "(() => { if (!document.documentElement.classList.contains('mode-simple')) document.querySelector('.bascule-mode').click(); return 1; })()";
+// Un groupe repliable de la page (par son titre), déplié et amené en haut ; un bouton d'un segment ; une valeur d'une liste.
+const OUVRIR_GROUPE_TITRE = (titre) => `(async () => { const d = [...document.querySelectorAll("#contenu details.groupe")].find((x) => x.querySelector("summary").textContent.includes(${JSON.stringify(titre)})); if (!d) throw new Error("groupe absent : " + ${JSON.stringify(titre)}); d.open = true; await new Promise((r) => setTimeout(r, 600)); d.scrollIntoView({ block: "start" }); return 1; })()`;
+const CLIQUER_SEGMENT = (texte) => `(async () => { const b = [...document.querySelectorAll("#contenu .segment button")].find((x) => x.textContent.includes(${JSON.stringify(texte)})); if (!b) throw new Error("segment absent : " + ${JSON.stringify(texte)}); b.click(); await new Promise((r) => setTimeout(r, 700)); return 1; })()`;
+const CHOISIR_LISTE = (libelle, valeur) => `(async () => { const g = [...document.querySelectorAll("#contenu .liste-groupe")].find((x) => x.querySelector(".liste-lib").textContent.trim() === ${JSON.stringify(libelle)}); if (!g) throw new Error("liste absente : " + ${JSON.stringify(libelle)});
+  g.querySelector(".liste-bouton").click(); await new Promise((r) => setTimeout(r, 400)); const o = [...document.querySelectorAll("[role=option]")].find((x) => x.textContent.includes(${JSON.stringify(valeur)})); if (!o) throw new Error("valeur absente : " + ${JSON.stringify(valeur)}); o.click(); await new Promise((r) => setTimeout(r, 800)); return 1; })()`;
 // « Nettoyer le casier » : tout déplié (les membres partis aussi), pour voir les soixante nettoyages rangés.
 const CASIER_DEPLIE = `(async () => { const c = [...document.querySelectorAll('.cadre')].find((x) => x.textContent.includes('Nettoyer le casier'));
   [...c.querySelectorAll('button')].find((b) => b.textContent.includes('Tout déplier')).click(); await new Promise(r => setTimeout(r, 400));
@@ -165,24 +191,29 @@ const ATTENDUS_404 = /\/tableau\/espace\/s\/(icones\/rell|logos)\//;
 const SCENES = [
   // L'accueil « Ce qui t'attend », la recherche universelle, le mode simple et « Tout afficher » (rangement, 26/10).
   { nom: "accueil", ancre: "#accueil/attente" },
+  //  27/10/2026 : l'accueil a absorbé l'Aperçu — ses tuiles et ses « Tendances » (dépliées), en « Tout afficher ».
+  { nom: "accueil-tout-afficher", ancre: "#accueil/attente", geste: TOUT_AFFICHER, geste2: OUVRIR_GROUPE_TITRE("Tendances"), apres: MODE_SIMPLE },
   { nom: "recherche-membre", ancre: "#accueil/attente", geste: RECHERCHER("mi") },
   { nom: "recherche-ticket", ancre: "#port/tickets", geste: RECHERCHER("#1") },
   // « Tout afficher » (chiffres, graphiques, filtres avancés), puis retour au mode simple après la capture.
   { nom: "mode-tout-afficher", ancre: "#port/sanctions", geste: "(() => { document.querySelector('.bascule-mode').click(); return 1; })()",
     apres: "(() => { if (!document.documentElement.classList.contains('mode-simple')) document.querySelector('.bascule-mode').click(); return 1; })()" },
   { nom: "casier-nettoyer", ancre: "#port/sanctions", geste: CASIER_DEPLIE },
-  { nom: "port-apercu", ancre: "#port/apercu" },
   { nom: "port-journal", ancre: "#port/journal" },
   { nom: "port-sanctions", ancre: "#port/sanctions" },
   { nom: "port-tickets", ancre: "#port/tickets" },
+  //  27/10/2026 : les tickets du clan sont la famille « Clan · RELL Seas » de Tickets ; les tickets normaux, l'autre.
+  { nom: "port-tickets-clan", ancre: "#port/tickets/clan" },
+  { nom: "port-tickets-normaux", ancre: "#port/tickets/normaux" },
   { nom: "port-repertoire", ancre: "#port/repertoire" },
   { nom: "port-salons-questions", ancre: "#port/salons/questions" },
   { nom: "port-salons-idees", ancre: "#port/salons/idees" },
+  { nom: "port-salons-sondages", ancre: "#port/salons/sondages" },
   { nom: "port-salons-droits", ancre: "#port/salons/droits" },
-  { nom: "port-nettoyage", ancre: "#port/nettoyage" },
   { nom: "equipage-membres", ancre: "#equipage/membres" },
-  { nom: "equipage-fiches", ancre: "#equipage/fiches" },
-  { nom: "equipage-tickets", ancre: "#equipage/tickets" },
+  //  27/10/2026 : Équipage, UNE liste et ses trois vues (Présence, Fiches techniques, Équipes).
+  { nom: "equipage-fiches", ancre: "#equipage/membres/fiches" },
+  { nom: "equipage-fiches-grade", ancre: "#equipage/membres/fiches", geste: CLIQUER_SEGMENT("Par grade"), apres: CLIQUER_SEGMENT("Par métier") },
   { nom: "equipage-annonces", ancre: "#equipage/annonces" },
   { nom: "equipage-annonces-avenir", ancre: "#equipage/annonces/a-venir" },
   { nom: "equipage-annonces-brouillons", ancre: "#equipage/annonces/brouillons" },
@@ -205,6 +236,8 @@ const SCENES = [
     geste2: OUVRIR_GROUPE_ZONE("La purge exceptionnelle") },
   { nom: "capitainerie-affiches", ancre: "#capitainerie/affiches" },
   { nom: "capitainerie-catalogue", ancre: "#capitainerie/catalogue" },
+  //  27/10/2026 : le type du catalogue dans une liste (plus de rangée de dix-huit onglets).
+  { nom: "capitainerie-catalogue-type", ancre: "#capitainerie/catalogue", geste: CHOISIR_LISTE("Type", "Métiers"), apres: CHOISIR_LISTE("Type", "Tous les types") },
   { nom: "capitainerie-roles", ancre: "#capitainerie/roles" },
   // Les fenêtres (pancartes)
   { nom: "fenetre-fiche", ancre: "#port/sanctions", geste: CLIQUER_LIGNE("") },
@@ -216,13 +249,13 @@ const SCENES = [
   // personne envoyée par le serveur (25/10 : `cree_par` est un objet { id, nom }, P() attendait un identifiant).
   { nom: "fenetre-affiche", ancre: "#capitainerie/affiches", geste: OUVRIR_AFFICHE, interdits: ["Membre parti", "[object Object]"] },
   { nom: "fenetre-editeur-affiche", ancre: "#capitainerie/affiches", geste: "[...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle affiche')).click()" },
-  //  27/10/2026 : les équipes du clan, côté direction — « Par équipe », l'éditeur d'une équipe, la ligne de la fiche.
-  { nom: "equipage-par-equipe", ancre: "#equipage/membres", geste: "(() => { [...document.querySelectorAll('.segment button')].find(b => b.textContent.includes('Par équipe')).click(); return 1; })()" },
-  { nom: "fenetre-editeur-equipe", ancre: "#equipage/membres", geste: "(() => { [...document.querySelectorAll('.segment button')].find(b => b.textContent.includes('Par équipe')).click(); return 1; })()",
-    geste2: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes(\"Modifier l'équipe\")).click(); return 1; })()" },
+  //  27/10/2026 : les équipes du clan, côté direction — la vue « Équipes », l'éditeur d'une équipe, la ligne de la fiche.
+  { nom: "equipage-par-equipe", ancre: "#equipage/membres/equipes" },
+  { nom: "fenetre-editeur-equipe", ancre: "#equipage/membres/equipes",
+    geste: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes(\"Modifier l'équipe\")).click(); return 1; })()" },
   { nom: "fenetre-fiche-equipe", ancre: "#equipage/membres", geste: CLIQUER_LIGNE("Kolax"), interdits: ["Équipe : aucune"] },
-  { nom: "fenetre-nouvelle-equipe", ancre: "#equipage/membres", geste: "(() => { [...document.querySelectorAll('.segment button')].find(b => b.textContent.includes('Par équipe')).click(); return 1; })()",
-    geste2: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle équipe')).click(); return 1; })()" },
+  { nom: "fenetre-nouvelle-equipe", ancre: "#equipage/membres/equipes",
+    geste: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle équipe')).click(); return 1; })()" },
   { nom: "fenetre-dossier-demande", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("Demande à lire") },
   { nom: "fenetre-dossier-correction", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("À corriger") },
   { nom: "fenetre-dossier-en-cours", ancre: "#capitainerie/recrutement", geste: OUVRIR_GROUPE_ZONE("En cours"), geste2: CLIQUER_LIGNE("Il répond") },
@@ -236,22 +269,27 @@ const SCENES = [
     geste2: "[...document.querySelectorAll('#contenu button')].find((b) => b.textContent.includes(\"Proposer d'être chef\")).click()" },
   { nom: "fenetre-purge", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("La purge exceptionnelle"),
     geste2: "[...document.querySelectorAll('#contenu button')].find((b) => b.textContent.includes('Voir ce qui serait effacé')).click()" },
-  { nom: "fenetre-file", ancre: "#port/apercu", geste: "document.querySelector('#plaque-etat').click()" },
+  { nom: "fenetre-file", ancre: "#accueil/attente", geste: "document.querySelector('#plaque-etat').click()" },
   { nom: "fenetre-element-catalogue", ancre: "#capitainerie/catalogue", geste: "(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.element-carte').click(); })()" },
   // Textes & noms (26/10/2026) : la liste, un groupe ouvert, l'éditeur d'un texte de Discord et celui d'un nom du site ;
   // les annonces « Publiées » ; les textes d'une carte depuis son aperçu ; renommer un rôle.
-  { nom: "capitainerie-textes", ancre: "#capitainerie/textes" },
-  { nom: "capitainerie-textes-groupe", ancre: "#capitainerie/textes", geste: OUVRIR_GROUPE_TEXTES(0) },
-  { nom: "fenetre-editeur-texte", ancre: "#capitainerie/textes", geste: OUVRIR_GROUPE_TEXTES(0),
+  //  27/10/2026 : Textes & noms et Nettoyage sont les deux onglets de « Réglages » (La Capitainerie).
+  { nom: "reglages", ancre: "#capitainerie/reglages" },
+  { nom: "reglages-nettoyage", ancre: "#capitainerie/reglages/nettoyage" },
+  { nom: "reglages-textes-groupe", ancre: "#capitainerie/reglages/textes", geste: OUVRIR_GROUPE_TEXTES(0) },
+  { nom: "fenetre-editeur-texte", ancre: "#capitainerie/reglages/textes", geste: OUVRIR_GROUPE_TEXTES(0),
     geste2: "document.querySelector('details.groupe[open] .texte-ligne .bouton').click()" },
-  { nom: "fenetre-editeur-texte-site", ancre: "#capitainerie/textes", geste: OUVRIR_GROUPE_TEXTES(4),
+  { nom: "fenetre-editeur-texte-site", ancre: "#capitainerie/reglages/textes", geste: OUVRIR_GROUPE_TEXTES(4),
     geste2: "document.querySelector('details.groupe[open] .texte-ligne .bouton').click()" },
   { nom: "equipage-annonces-publiees", ancre: "#equipage/annonces/publiees" },
-  //  26/10/2026 : une annonce publiée rouverte dans le composeur : sa bannière (1600 × 640, la consigne) et ses liens.
+  //  26/10/2026 : une annonce publiée rouverte dans le composeur : sa bannière (1600 × 640, la consigne) et ses liens. La
+  //  première publication modifiable (une annonce d'abord), quelles que soient les données.
   { nom: "equipage-annonces-publiee-modifier", ancre: "#equipage/annonces/publiees",
     geste: "(async () => { for (const g of document.querySelectorAll('details.groupe')) g.open = true; await new Promise(r => setTimeout(r, 400));"
-      + " const c = [...document.querySelectorAll('article.evt-carte')].find((a) => a.textContent.includes('Le Movie 3')); if (!c) throw new Error('annonce publiée absente');"
-      + " [...c.querySelectorAll('button')].find((b) => b.textContent.includes('Modifier')).click(); await new Promise(r => setTimeout(r, 1200));"
+      + " const modif = (a) => [...a.querySelectorAll('button')].find((b) => b.textContent.includes('Modifier'));"
+      + " const cartes = [...document.querySelectorAll('article.evt-carte')].filter(modif);"
+      + " const c = cartes.find((a) => ((a.querySelector('.evt-tete .champ-lib') || {}).textContent || '') === 'Annonce') || cartes[0];"
+      + " if (!c) throw new Error('aucune publication modifiable dans « Publiées »'); modif(c).click(); await new Promise(r => setTimeout(r, 1200));"
       + " const f = document.querySelector('.banniere-champ'); if (f) f.scrollIntoView({ block: 'start' }); return 1; })()" },
   { nom: "fenetre-textes-carte", ancre: "#equipage/annonces/brouillons", geste: OUVRIR_BROUILLON,
     geste2: "[...document.querySelectorAll('.apercu-cadre button')].find(b => b.textContent.includes('Modifier les textes')).click()" },
@@ -259,6 +297,8 @@ const SCENES = [
   // « Même ce qui existe déjà » : « Renommer » dans l'en-tête d'une rubrique (son nom, sa phrase, ses sous-onglets) ;
   // les textes de la carte de l'équipe (Candidatures → Questionnaire) ; ceux du guide du clan (Rôles & métiers).
   { nom: "fenetre-renommer-rubrique", ancre: "#equipage/annonces/composer", geste: "document.querySelector('#contenu .titre-rubrique .renommer-rubrique').click()" },
+  //  27/10/2026 : les noms des vues d'Équipage se renomment comme des sous-onglets.
+  { nom: "fenetre-renommer-equipage", ancre: "#equipage/membres", geste: "document.querySelector('#contenu .titre-rubrique .renommer-rubrique').click()" },
   // (Les messages du bot sont rangés dans un groupe replié du questionnaire : déplié d'abord.)
   { nom: "fenetre-textes-equipe", ancre: "#capitainerie/recrutement/questions", geste: "(async () => { const g = [...document.querySelectorAll('#contenu details.groupe')].find((d) => d.querySelector('summary').textContent.includes('Les messages du bot')); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); [...document.querySelectorAll('#contenu button')].find(b => b.textContent.includes(\"La carte de l'équipe\")).click(); return 1; })()" },
   { nom: "fenetre-textes-guide", ancre: "#capitainerie/roles", geste: "[...document.querySelectorAll('#contenu button')].find(b => b.textContent.includes('Les textes du guide du clan')).click()" },
