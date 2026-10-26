@@ -1,0 +1,17 @@
+/* Les équipes du clan — côté direction (equipes_admin.js) : l'éditeur d'une équipe (chef, membres) et la ligne
+   « Équipe » de la fiche d'un membre. Le reste (lignes, groupes, pancarte) vient des feuilles de La Capitainerie.
+   Aucun style en ligne (CSP). */
+
+.choix-equipe .selection-item { cursor: pointer; min-height: 46px; padding: 5px 8px; border-radius: var(--rayon); }
+.choix-equipe .selection-item:hover { background: rgba(248, 240, 221, .9); }
+.choix-equipe .selection-item.choisie { background: rgba(168, 130, 63, .16); }
+.choix-equipe .selection-item > input { width: 18px; height: 18px; margin: 0; accent-color: var(--mer); }
+.choix-personne { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.choix-personne-texte { display: grid; min-width: 0; }
+.choix-personne-texte b, .choix-personne-texte small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.choix-personne-texte small { font-size: 13.5px; color: var(--encre-2); }
+.fiche-equipe { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; }
+.fiche-equipe .ic { width: 16px; height: 16px; }
+/* « Copier le lien de l'équipage » : au téléphone, l'en-tête de la direction n'a plus la place — le lien est dans son
+   menu (app.js). */
+@media (max-width: 519px) { #entete-outils .lien-equipage.bouton-icone { display: none; } }

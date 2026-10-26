@@ -1,0 +1,24 @@
+/* La vitrine publique de l'équipage (`/equipage`) — ce qui lui est propre. Tout le reste (bois, parchemin, affiches,
+   blocs de l'accueil, mur) vient des feuilles de La Capitainerie et du site de l'équipage, inchangées.
+   Aucun style en ligne (CSP) ; aucun émoji. */
+
+.page-vitrine .contenu { display: grid; gap: 30px; align-content: start; }
+.vitrine-accueil { display: grid; gap: 22px; min-width: 0; }
+.vitrine-titre {
+  margin: 4px 0 0; text-align: center; font: 400 clamp(44px, 7vw, 76px)/1.05 var(--police-titre); color: var(--encre);
+  text-shadow: 0 2px 0 rgba(255, 244, 214, .7); overflow-wrap: anywhere;
+}
+.vitrine-mur { display: grid; gap: 12px; min-width: 0; }
+.vitrine-phrase { margin: -4px 0 4px; font: italic 400 17px/1.4 var(--police-texte); color: var(--encre-2); max-width: 70ch; }
+
+/* Le pied : la phrase de la direction, le lien à copier (gros, au centre : on le partage d'ici aussi), l'accès membre. */
+.pied-vitrine { display: grid; justify-items: center; gap: 12px; width: 100%; padding: 8px 28px 24px; text-align: center; }
+.pied-vitrine-texte { margin: 0; font: italic 400 16px/1.45 var(--police-texte); color: var(--encre-2); max-width: 60ch; }
+.pied-vitrine .aide { margin: 0; max-width: 60ch; }
+.pied-vitrine .lien-equipage { min-height: 46px; padding: 8px 18px; font-size: 16px; }
+
+@media (max-width: 719px) {
+  .page-vitrine .contenu { gap: 22px; }
+  .vitrine-phrase { font-size: 16px; }
+  .pied-vitrine .lien-equipage { width: 100%; max-width: 340px; justify-content: center; }
+}

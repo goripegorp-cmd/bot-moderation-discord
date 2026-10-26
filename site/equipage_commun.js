@@ -4,8 +4,8 @@
 
 import { h, icone, sansEmoji, nombre, ajouter, majuscule } from "./dom.js";
 import { etat } from "./noyau.js";
-import { sessionTerminee } from "./api.js";
-import { pancarte, bouton, toast } from "./ui.js";
+import { sessionTerminee, poster } from "./api.js";
+import { pancarte, bouton, toast, interrupteur } from "./ui.js";
 import { affiche, insignes, nomAffiche, gradeDe, insigneImage, STATUTS_AFFICHE, primeNoeud } from "./affiche.js";
 
 export const RACINE = "/tableau/equipage";
@@ -89,13 +89,34 @@ export function detailsAffiche(a) {
       : h("p", { classe: "aide" }, "Aucun insigne pour le moment."));
 }
 
-/** Une affiche en grand, en lecture seule : aucun bouton d'action, seulement « Fermer ». */
+/** Une affiche en grand, en lecture seule : aucun bouton d'action, seulement « Fermer » (la direction, en plus : la
+ *  vitrine publique, oui ou non). */
 export function ouvrirAffiche(id) {
   const a = afficheParId(id);
   if (!a) { toast("Cette affiche n'est plus au mur.", "erreur"); return; }
   const p = pancarte({ titre: "Affiche de " + nomAffiche(a), sous: a.surnom ? "« " + sansEmoji(a.surnom) + " »" : "", icone: "affiches", taille: "large" });
-  ajouter(p.corps, [h("div", { classe: "affiche-grand" }, h("div", { classe: "affiche-grand-mur" }, affiche(a, catalogue(), { taille: "grande" })), detailsAffiche(a))]);
+  ajouter(p.corps, [h("div", { classe: "affiche-grand" }, h("div", { classe: "affiche-grand-mur" }, affiche(a, catalogue(), { taille: "grande" })),
+    h("div", { classe: "pile" }, detailsAffiche(a), reglageVitrine(a)))]);
   ajouter(p.pied, [bouton("Fermer", { classe: "discret", onclick: () => p.fermer() })]);
+}
+
+/** La direction (site de l'équipage) : cette affiche sur la vitrine publique — oui par défaut — ou retirée (elle reste
+ *  au mur de l'équipage). L'équipage et la vitrine ne voient jamais ce réglage. */
+function reglageVitrine(a) {
+  const v = E.peutEditer && E.equipage && E.equipage.vitrine;
+  if (!v) return null;
+  const visible = !(v.masquees || []).includes(String(a.id));
+  return h("div", { classe: "reglage-vitrine" },
+    interrupteur("Visible sur la vitrine publique", visible, async (oui, i) => {
+      i.disabled = true;
+      const r = await poster("equipage/vitrine/affiche", { id: a.id, visible: oui });
+      i.disabled = false;
+      if (!r.ok) { i.checked = !oui; toast(r.erreur || "Refusé.", "erreur"); return; }
+      v.masquees = (r.donnees && r.donnees.masquees) || [];
+      toast(oui ? "Affiche remise sur la vitrine publique." : "Affiche retirée de la vitrine publique : seul l'équipage la voit.", "succes");
+      if (E.majMur) E.majMur();
+    }),
+    h("p", { classe: "aide" }, "La vitrine publique, c'est le lien de l'équipage : tout le monde la voit, sans compte."));
 }
 
 /** Le sceau rond d'un titre de bloc (comme ceux des rubriques). */
