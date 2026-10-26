@@ -313,7 +313,7 @@ def forme(x):
 
 #  Des dictionnaires aux clés libres (catégories, règles branchées, identifiants) : seule la forme des valeurs compte.
 CLES_LIBRES = ("journal.par_jour", "journal.par_jour.<clé>", "sanctions.libelles", "sanctions.membres[].types", "sanctions.staff[].types",
-               "nettoyage.compteurs", "nettoyage.bilan", "personnes", "sanctions.mois", "tickets.mois")
+               "nettoyage.compteurs", "nettoyage.bilan", "nettoyage.partiront", "personnes", "sanctions.mois", "tickets.mois")
 #  Ce que la maquette porte en plus et que la page tolère (l'étape des candidatures : le suivi du recrutement fait foi).
 EN_PLUS_PERMIS = ("donnees.en_cours[].etape", "donnees.en_cours[].recrutement")
 

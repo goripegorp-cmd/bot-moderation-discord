@@ -225,6 +225,15 @@ async def vacuum_db() -> bool:
     if _get_db is None:
         return False
     try:
+        #  26/10/2026 (plusieurs années) : une base passée en compactage incrémental (`compactage.py`, la nuit) rend ses
+        #  pages par petits paquets — plus de VACUUM complet, qui bloquait toute la base pendant qu'il la recopiait.
+        import compactage
+        async with _get_db() as db:
+            async with db.execute("PRAGMA auto_vacuum") as cur:
+                mode = (await cur.fetchone() or (0,))[0]
+        if int(mode or 0) == compactage.INCREMENTAL:
+            await compactage.passer(_get_db, forcer=True)
+            return True
         async with _get_db() as db:
             await db.execute("VACUUM")
             await db.commit()
