@@ -15,6 +15,8 @@
 //   prendre(objet, titre)             Promise<{ ok, par?, nom?, horsDirect? }> — la main sur l'objet (réentrant pour soi).
 //   lacher(objet)                     rend la main (une fois la file d'envoi partie : jamais avant la modification).
 //   surDirect(fn)                     fn({ type, objet?, id? }) à chaque changement ; rend la fonction « se désabonner ».
+//                                       { type: "candidat", m } : le questionnaire en ligne (candidature_direct.js).
+//   modeDirect()                      « ws » (WebSocket branchée), « http » (interrogation), « coupe », « fini »…
 //   badgeVerrou(objet)                un élément vivant : le cadenas et la personne si l'objet est pris par un autre.
 //   avecVerrou(el, objet)             pose ce badge sur une carte (la carte est alors marquée « prise ») ; rend la carte.
 //   protegerEditeur(pancarte, objet, titre, { relire, surPlace })
@@ -109,6 +111,8 @@ function signaler(ev) {
   for (const f of [...D.ecouteurs]) { try { f(ev); } catch (e) { /* un abonné en échec n'arrête pas les autres */ } }
 }
 export function surDirect(fn) { D.ecouteurs.add(fn); return () => D.ecouteurs.delete(fn); }
+/** « ws » quand la WebSocket est branchée (les messages arrivent seuls) ; sinon « http », « coupe », « fini »… */
+export const modeDirect = () => D.mode;
 
 // ─── Ce que la page sait ────────────────────────────────────────────────────
 export function presents() {
@@ -316,6 +320,7 @@ function recevoir(m) {
     case "refuse": surRefuse(m); break;
     case "demande": surDemande(m); break;
     case "demandee": for (const em of emprisesDe(m.o)) em.demandeEnvoyee(!!m.deja); break;
+    case "candidat": signaler({ type: "candidat", m }); break;   // le questionnaire en ligne : candidature_direct.js
     default: break;
   }
 }

@@ -74,6 +74,40 @@ const SCENES_EQUIPAGE = [
   { nom: "site-equipage-editeur-actualite", ...EQ_TETE, ancre: "#accueil", geste: cliquerTexte(".barre-edition button", "Publier une actualité") },
 ];
 
+// ─── Le questionnaire en ligne du candidat (26/10/2026) ─────────────────────
+// Chaque scène porte sa page (`/tableau/candidature/`) et son entrée (`/tableau/demo?qui=candidat&…`, un cookie à part,
+// limité au chemin du candidat) : #60 trois étapes, la première ouverte (la fiche est l'étape 1) ; #63 une étape envoyée,
+// la direction décide ; #61 un questionnaire d'avant (tout ouvert, un seul envoi) ; #62 déjà envoyé ; Kolax : chef d'équipe.
+const CAND = (q) => ({ page: "/tableau/candidature/", entree: "/tableau/demo?qui=candidat&" + q, interdits: ["GoRipe", "Capitaine Direction", "undefined"] });
+const CAND_ATTENDRE = "new Promise((r) => setTimeout(r, 700))";
+const CAND_BOUTON = (texte) => `(async () => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes(${JSON.stringify(texte)}) && !x.disabled);
+  if (!b) throw new Error('bouton introuvable : ' + ${JSON.stringify(texte)}); b.scrollIntoView({ block: 'center' }); b.click(); await ${CAND_ATTENDRE}; return 1; })()`;
+// Remplir toutes les questions de l'étape à l'écran (ce que ferait le candidat), sans envoyer.
+const CAND_REMPLIR = `(async () => { for (const z of document.querySelectorAll('textarea.cand-reponse')) { if (!z.value.trim()) { z.focus(); z.value = 'Ma réponse, écrite pour le contrôle.';
+  z.dispatchEvent(new Event('input', { bubbles: true })); } } await new Promise((r) => setTimeout(r, 1600)); return 1; })()`;
+const CAND_JALON = (n) => `(async () => { const b = [...document.querySelectorAll('button.cand-jalon')][${n}]; if (!b) throw new Error('jalon introuvable'); b.click(); await ${CAND_ATTENDRE}; return 1; })()`;
+const CAND_DESCENDRE = "(async () => { const e = document.querySelector('.cand-etape, .cand-relire, .cand-merci'); if (e) e.scrollIntoView({ block: 'start' }); await new Promise((r) => setTimeout(r, 400)); return 1; })()";
+// Le dossier d'une candidature (la direction) : les groupes dépliés, la ligne du ticket, puis « En direct ».
+const OUVRIR_DOSSIER = (ticket) => `(async () => { for (const g of document.querySelectorAll('#contenu details.groupe')) g.open = true; await new Promise((r) => setTimeout(r, 500));
+  const l = [...document.querySelectorAll('.lc-clic, .feuillet.lien')].find((x) => x.textContent.includes('Ticket #${ticket} ')); if (!l) throw new Error('ligne du ticket ${ticket} introuvable');
+  l.click(); for (let i = 0; i < 30 && !document.querySelector('dialog[open] .en-direct .en-direct-etape'); i++) await new Promise((r) => setTimeout(r, 200));
+  const d = document.querySelector('dialog[open] .en-direct'); if (d) d.scrollIntoView({ block: 'start' }); await new Promise((r) => setTimeout(r, 300)); return 1; })()`;
+const SCENES_CANDIDATURE = [
+  { nom: "candidat-etape", ...CAND("ticket=60"), ancre: "" },
+  { nom: "candidat-etape-questions", ...CAND("ticket=60"), ancre: "", geste: CAND_DESCENDRE },
+  { nom: "candidat-etape-manque", ...CAND("ticket=60"), ancre: "", geste: CAND_BOUTON("Envoyer cette étape") },
+  { nom: "candidat-liens", ...CAND("ticket=60"), ancre: "", geste: "(async () => { const d = document.querySelector('details.cand-liens'); d.open = true; d.scrollIntoView({ block: 'start' }); await new Promise((r) => setTimeout(r, 300)); return 1; })()" },
+  { nom: "candidat-confirmer", ...CAND("ticket=60"), ancre: "", geste: CAND_REMPLIR, geste2: CAND_BOUTON("Envoyer cette étape") },
+  { nom: "candidat-attente", ...CAND("ticket=63"), ancre: "" },
+  { nom: "candidat-etape-envoyee", ...CAND("ticket=63"), ancre: "", geste: CAND_JALON(0) },
+  { nom: "candidat-ancien", ...CAND("ticket=61"), ancre: "" },
+  { nom: "candidat-ancien-relire", ...CAND("ticket=61"), ancre: "", geste: CAND_BOUTON("Relire et envoyer") },
+  { nom: "candidat-merci", ...CAND("ticket=62"), ancre: "" },
+  { nom: "candidat-chef", ...CAND("chef=1000"), ancre: "" },
+  { nom: "dossier-en-direct", ancre: "#equipage/candidatures", geste: OUVRIR_DOSSIER(60) },
+  { nom: "dossier-en-direct-attente", ancre: "#equipage/candidatures", geste: OUVRIR_DOSSIER(63) },
+];
+
 // Ouvrir la première affiche (les groupes par métier sont repliés au départ).
 const OUVRIR_AFFICHE ="(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.affiche').click(); })()";
 // Une ligne compacte (rangement.js) ou une ancienne carte, cliquable, dont le texte contient… (la première sinon).
@@ -169,6 +203,8 @@ const SCENES = [
   // Le site de l'équipage (`/tableau/equipage/`) : un MEMBRE du clan (Kolax, portée « equipage ») en lecture seule —
   // aucun bouton d'action —, puis la tête en mode édition. Chaque scène porte sa page et son entrée (sa session).
   ...SCENES_EQUIPAGE,
+  // Le questionnaire en ligne : la page du candidat (téléphone d'abord), puis le direct dans le dossier (la direction).
+  ...SCENES_CANDIDATURE,
 ];
 
 // ─── Le protocole DevTools ──────────────────────────────────────────────────

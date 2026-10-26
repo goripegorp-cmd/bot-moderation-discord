@@ -161,6 +161,7 @@ LIBRES = {
     ("GET", "/tableau/espace/media/{media}"),   # seulement les images que son site cite (S5)
     ("POST", "/tableau/espace/sortir"),         # se déconnecter
     ("GET", "/tableau/{jeton}"),                # l'entrée par lien (S4)
+    ("GET", "/tableau/candidature"),            # 26/10/2026 : une redirection sans donnée (le questionnaire en ligne : 403)
 }
 
 
@@ -204,6 +205,12 @@ def test_S1_une_session_equipage_n_atteint_que_sa_page_et_n_ecrit_rien(local):
         elif gabarit == "/tableau/espace/sync":
             essais.append((methode, gabarit, {"ops": [{"op_id": "op-equipage-01", "api": "rell/affiche",
                                                        "corps": {"id": "demo-kolax-01", "surnom": "Pirate"}}]}))
+        elif gabarit == "/tableau/candidature/api/{nom}":   # 26/10/2026 : le questionnaire en ligne (« candidat » seulement)
+            import candidature_site
+            noms = candidature_site.LECTURES if methode == "GET" else candidature_site.ECRITURES
+            essais += [(methode, f"/tableau/candidature/api/{n}", {}) for n in [*noms, "inconnue"]]
+        elif gabarit == "/tableau/candidature/{jeton}":
+            essais.append((methode, "/tableau/candidature/" + tableau.jeton(1, KOLAX, "equipage"), {}))
         elif "{" in gabarit:
             pytest.fail(f"adresse nouvelle et non couverte par ce test : {methode} {gabarit} — l'ajouter ici")
         else:

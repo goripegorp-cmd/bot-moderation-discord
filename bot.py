@@ -123,6 +123,7 @@ import tableau  # tableau de bord web : candidatures, tickets par type, clan
 import affiches  # le site, Capitainerie : catalogue RELL Seas, affiches, rôles des métiers
 import metiers  # les rôles de métier du clan : choisis dans le guide, créés au besoin, retirés en quittant le clan
 import site_equipage  # 26/10/2026 : le site de l'équipage — le clan en lecture seule, l'accueil composé par la direction
+import candidature_site  # 26/10/2026 : le questionnaire en ligne du candidat (son lien, sa page) et son direct
 import textes  # 26/10/2026 : les textes du bot et les noms du site, réécrits par la direction (Textes & noms)
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
@@ -21827,6 +21828,15 @@ async def _activite_boot():
         tableau.monter(site_equipage)
         tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
         zones.brancher_site_equipage(site_equipage.section_guide)
+    with _Etape("candidature_site"):
+        #  26/10/2026 : le questionnaire en ligne du candidat — son lien personnel (le bouton du ticket : `candidature_site.
+        #  envoyer_lien` ; le message privé d'un chef d'équipe : `inviter`, bouton persistant), sa page `/tableau/candidature/`
+        #  (portée « candidat », la sienne seulement), et le direct de la direction (`api/direct/candidat`, messages
+        #  « candidat »). Après « tableau » et « questionnaire ».
+        candidature_site.setup(get_db=get_db, cfg=cfg, log=print)
+        await candidature_site.init_db()
+        tableau.monter(candidature_site)
+        await candidature_site.demarrer()
 
     with _Etape("activite"):
         await activite_module.init_db()
@@ -21942,6 +21952,7 @@ async def on_ready():
         bot.add_dynamic_items(liens_jeux.BoutonLiens)
         bot.add_dynamic_items(metiers.ChoixMetier)  # 25/10/2026 : « Choisis ton métier » du guide du clan
         bot.add_dynamic_items(site_equipage.BoutonSiteEquipage)  # 26/10/2026 : « Le site de l'équipage » (guide du clan)
+        bot.add_dynamic_items(candidature_site.BoutonQuestionnaire)  # 26/10/2026 : « Répondre au questionnaire » (MP d'un chef d'équipe)
         bot.add_dynamic_items(BoutonArchives, TicketHubGererDynamic)
     except Exception as ex:
         print(f"[on_ready add_dynamic_items] {ex}")

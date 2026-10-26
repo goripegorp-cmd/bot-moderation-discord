@@ -409,10 +409,27 @@ _SCHEMA = (
 )
 
 
+#  26/10/2026, le passage d'étape (contrat commun avec le questionnaire en ligne) : chaque étape du questionnaire est une
+#  porte que la direction ouvre. `etape_ouverte` : la plus haute étape (1..N) que le candidat peut voir — 0 : un envoi
+#  d'avant, tout ouvert, un seul envoi à la fin ; `etape_envoyee` : la plus haute étape envoyée ; `etape_fiche` : 1 si le
+#  panneau a une fiche (l'« Étape 1 » du candidat, les étapes du questionnaire deviennent 2…N+1) ; `message_etape` : le
+#  message d'étape du ticket. Puis le contrat « chef d'équipe » : un envoi `nature` « chef » (sinon « recrutement »), son
+#  `metier`, `ticket_id` 0 (aucun ticket : invité par message privé). Ajoutées sans rien casser (une base d'avant les
+#  reçoit au démarrage).
+COLONNES_ENVOIS = (("etape_ouverte", "INTEGER NOT NULL DEFAULT 0"), ("etape_envoyee", "INTEGER NOT NULL DEFAULT 0"),
+                   ("etape_fiche", "INTEGER NOT NULL DEFAULT 0"), ("message_etape", "INTEGER NOT NULL DEFAULT 0"),
+                   ("nature", "TEXT NOT NULL DEFAULT 'recrutement'"), ("metier", "TEXT NOT NULL DEFAULT ''"))
+
+
 async def init_db():
     async with _get_db() as db:
         for sql in _SCHEMA:
             await db.execute(sql)
+        async with db.execute("PRAGMA table_info(recrutement_envois)") as cur:
+            presentes = {r[1] for r in await cur.fetchall()}
+        for nom, definition in COLONNES_ENVOIS:
+            if nom not in presentes:
+                await db.execute(f"ALTER TABLE recrutement_envois ADD COLUMN {nom} {definition}")
         await db.commit()
 
 
@@ -2127,19 +2144,34 @@ async def _terminer(i, e: dict) -> None:
     """Toutes les réponses sont là : l'envoi se ferme UNE fois (le premier qui y arrive), le candidat lit « Merci »,
     la carte dit « Réponses envoyées », celle de l'équipe « Réponses reçues »."""
     t = _maintenant()
+    premier = await clore_envoi(e, t)
+    await _avis(i, await textes_du_site.texte(e["guild_id"], "recrutement.merci"), efface=False, couleur=COULEUR_VERT)
+    if premier:
+        await annoncer_reponses(i.guild, e, t, getattr(i, "channel", None))
+
+
+async def clore_envoi(e: dict, t: int, reponses: dict | None = None) -> bool:
+    """L'envoi se ferme UNE fois (le premier qui y arrive) : statut « repondu », le suivi passe à « reponses ». Rend True
+    pour le premier. `reponses` ({rang: texte}) : le questionnaire en ligne envoie tout d'un coup (`candidature_site.py`)
+    — écrites dans la même transaction, pour le premier seulement. Le formulaire Discord et le site passent ici."""
     async with _get_db() as db:
         cur = await db.execute("UPDATE recrutement_envois SET statut='repondu', repondu_le=? WHERE id=?"
                                " AND statut IN (?, ?)", (t, int(e["id"]), *EN_ATTENTE))
         premier = (cur.rowcount or 0) > 0
         if premier:
+            for rang, texte in (reponses or {}).items():
+                await db.execute("INSERT OR REPLACE INTO recrutement_reponses (envoi_id, rang, guild_id, candidat_id,"
+                                 " texte, recu_le) VALUES (?,?,?,?,?,?)",
+                                 (int(e["id"]), int(rang), int(e["guild_id"]), int(e["candidat_id"]), texte, t))
             await db.execute("UPDATE recrutement_suivi SET etape='reponses', maj_le=? WHERE guild_id=? AND ticket_id=?"
                              " AND envoi_id=? AND etape='etape2'", (t, e["guild_id"], e["ticket_id"], e["id"]))
         await db.commit()
-    await _avis(i, await textes_du_site.texte(e["guild_id"], "recrutement.merci"), efface=False, couleur=COULEUR_VERT)
-    if not premier:
-        return
-    g = i.guild
-    ch = getattr(i, "channel", None)
+    return premier
+
+
+async def annoncer_reponses(g, e: dict, t: int, ch=None, source: str = "") -> None:
+    """Après `clore_envoi` (le premier seulement) : la carte du candidat dit « Réponses envoyées », celle de l'équipe
+    « Réponses reçues » ; l'historique et le journal (`source` : d'où elles viennent, à la fin de la ligne)."""
     if ch is None or getattr(ch, "id", 0) != e["salon_id"]:
         try:
             ch, _tk = await _ticket_ouvert(g, e["ticket_id"])
@@ -2150,7 +2182,67 @@ async def _terminer(i, e: dict) -> None:
     await _editer_carte_staff(g, ch, s, "reponses", nombre=len(e["questions"]), quand=t)
     await _noter(g.id, e["ticket_id"], "reponses", e["candidat_id"], f"{len(e['questions'])} réponse(s)")
     await _au_journal(g, "recrutement.reponses", f"Recrutement : réponses de l'étape 2 reçues de <@{e['candidat_id']}>"
-                      f" ({len(e['questions'])} question(s)) — à corriger sur le site", membre_id=e["candidat_id"])
+                      f" ({len(e['questions'])} question(s)) — à corriger sur le site" + (f" {source}" if source else ""),
+                      membre_id=e["candidat_id"])
+
+
+def etape_de_question(q: dict) -> int:
+    """L'étape (1..N) d'une question de l'instantané (`etape`) ; sans étape valable : la première."""
+    v = q.get("etape") if isinstance(q, dict) else None
+    if isinstance(v, str) and v.isdigit():
+        v = int(v)
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else 1
+
+
+def derniere_etape(e: dict) -> int:
+    """La dernière étape du questionnaire d'un envoi (1 pour un envoi sans étapes)."""
+    return max((etape_de_question(q) for q in e.get("questions") or [] if isinstance(q, dict)), default=1)
+
+
+async def envoyer_etape(e: dict, t: int, etape: int, reponses: dict, g=None, source: str = "") -> bool:
+    """Le passage d'étape (26/10/2026) : le candidat envoie UNE étape du questionnaire. Ses réponses ({rang: texte}, cette
+    étape seulement, toutes remplies) et `etape_envoyee` sont écrites dans la même transaction — une seule fois (le
+    premier envoi compte), et seulement pour l'étape OUVERTE (`etape_ouverte`) pas encore envoyée. La dernière étape
+    ferme l'envoi comme le formulaire Discord (`clore_envoi`, statut « repondu », puis `annoncer_reponses`) ; une autre :
+    `etape_recue` (la direction décide de la suite). Rend True pour le premier envoi de l'étape. `g` : le serveur (sinon
+    celui du bot)."""
+    if isinstance(etape, bool):
+        return False
+    try:
+        etape = int(etape)
+    except (TypeError, ValueError):
+        return False
+    rangs = {int(q["rang"]) for q in e.get("questions") or [] if isinstance(q, dict) and etape_de_question(q) == etape}
+    textes = {int(r): str(x) for r, x in (reponses or {}).items()}
+    if etape < 1 or not rangs or set(textes) != rangs or not all(x.strip() for x in textes.values()):
+        return False
+    async with _get_db() as db:
+        cur = await db.execute("UPDATE recrutement_envois SET etape_envoyee=?, statut='en_cours' WHERE id=?"
+                               " AND statut IN (?, ?) AND etape_ouverte=? AND etape_envoyee<?",
+                               (etape, int(e["id"]), *EN_ATTENTE, etape, etape))
+        if (cur.rowcount or 0) < 1:
+            await db.rollback()
+            return False
+        for rang, texte in textes.items():
+            await db.execute("INSERT OR REPLACE INTO recrutement_reponses (envoi_id, rang, guild_id, candidat_id,"
+                             " texte, recu_le) VALUES (?,?,?,?,?,?)",
+                             (int(e["id"]), rang, int(e["guild_id"]), int(e["candidat_id"]), texte, int(t)))
+        await db.commit()
+    g = g if g is not None else (_bot.get_guild(int(e["guild_id"])) if _bot is not None else None)
+    if etape >= derniere_etape(e):
+        if await clore_envoi(e, int(t)) and g is not None:
+            await annoncer_reponses(g, e, int(t), None, source=source)
+    elif g is not None:
+        await etape_recue(g, e, etape)
+    return True
+
+
+async def etape_recue(g, e: dict, etape: int) -> None:
+    """Une étape du questionnaire (pas la dernière) est arrivée : la direction décide de la suite sur le site (« Étape
+    suivante », « Refuser »). Version minimale : une ligne au journal (l'équipe du recrutement y ajoute le message d'étape
+    du ticket, « Réponses reçues »)."""
+    await _au_journal(g, "recrutement.etape_recue", f"Recrutement : étape {int(etape)} du questionnaire reçue de"
+                      f" <@{int(e['candidat_id'])}> — la suite se décide sur le site", membre_id=int(e["candidat_id"]))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

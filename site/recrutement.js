@@ -283,11 +283,15 @@ function blocEnvoi(etatD, D, e, courant) {
   const corps = [];
   corps.push(h("p", { classe: "meta" }, "Envoyé " + depuis(e.envoye_le) + (par ? " par " + par : "") + " · " + compte(qs.length, "question") + (e.repondu_le ? " · réponses reçues " + depuis(e.repondu_le) : "")));
   if (e.statut === "remplace") corps.push(h("p", { classe: "aide" }, "Remplacé par un questionnaire plus récent."));
+  //  26/10/2026 : le questionnaire attend encore le candidat → « En direct » (candidature_direct.js) : ce qu'il écrit.
+  const enCours = courant && /^(envoye|en_cours)$/.test(e.statut || "");
   if (!repondu) {
     corps.push(bandeau("En attente des réponses du candidat. Il a reçu les " + qs.length + " questions et les liens où se trouvent toutes les réponses.", ""));
-    corps.push(h("ol", { classe: "questions-envoyees" }, qs.map((q) => h("li", {}, q.question || qTexte(q)))));
+    const liste = h("ol", { classe: "questions-envoyees" }, qs.map((q) => h("li", {}, q.question || qTexte(q))));
+    corps.push(enCours ? enDirect(etatD, D, e, liste) : liste);
     return h("section", { classe: "cadre pile envoi" + (courant ? " courant" : "") }, h("h3", {}, courant ? "Étape 2 · questions envoyées" : "Envoi"), corps);
   }
+  if (enCours) corps.push(enDirect(etatD, D, e, null));
   const pc = qs.length ? Math.round(100 * justes / qs.length) : 0;
   const barre = h("div", { classe: "correction-barre" + (justes === qs.length && qs.length ? " complet" : "") },
     h("div", { classe: "correction-compte" }, h("b", { classe: "num" }, justes + " / " + qs.length), " justes — 100 % exigés"),
@@ -297,6 +301,19 @@ function blocEnvoi(etatD, D, e, courant) {
   corps.push(h("p", { classe: "aide" }, "L'indication de proximité n'est qu'une aide (fautes, accents, mots proches) : c'est toi qui décides si c'est juste."));
   corps.push(h("ol", { classe: "correction-liste" }, qs.map((q, i) => carteCorrection(etatD, e, q, i, courant && etatD.peutCorriger !== false))));
   return h("section", { classe: "cadre pile envoi" + (courant ? " courant" : "") }, h("h3", {}, courant ? "Étape 2 · la correction" : "Correction"), corps);
+}
+/** « En direct » : le questionnaire en ligne pendant que le candidat répond (chargé à la demande ; sans lui, `repli`
+ *  reste). Ses dernières réponses, ou une étape envoyée : le dossier se relit. */
+function enDirect(etatD, D, e, repli) {
+  const place = h("div", { classe: "en-direct-place" }, repli);
+  import("./candidature_direct.js").then((m) => {
+    if (etatD.p.fermee()) return;
+    remplacer(place, m.vueEnDirect({ ticket: D.ticket, envoi: e.id }, {
+      surEnvoye: () => { if (etatD.p.fermee()) return; toast("Réponses reçues : " + (nomDe(D.candidat || {}) || "le candidat") + " a tout envoyé.", "succes"); emettre("recharger"); rendreDossier(etatD, true); },
+      surEtape: (n) => { if (etatD.p.fermee()) return; toast("Une étape du questionnaire est arrivée : à toi de décider de la suite.", "succes"); rendreDossier(etatD, true); },
+    }));
+  }).catch((err) => console.error("[recrutement] direct du questionnaire indisponible", err));
+  return place;
 }
 function carteCorrection(etatD, e, q, i, modifiable = true) {
   const variantes = qVariantes(q);
