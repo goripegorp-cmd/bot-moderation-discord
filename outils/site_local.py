@@ -237,8 +237,9 @@ async def _appeler_setup(module, deps: dict) -> bool:
     return True
 
 
-async def construire(dossier: Path | None = None, port: int = PORT, qui: int = FONDATEUR):
-    """(application aiohttp, contexte) : le site complet sur une base neuve, prêt à servir."""
+async def construire(dossier: Path | None = None, port: int = PORT, qui: int = FONDATEUR, lourd: bool = False):
+    """(application aiohttp, contexte) : le site complet sur une base neuve, prêt à servir. `lourd` : des volumes de vrai
+    serveur en plus (pour le contrôle visuel du rangement ; les tests gardent les données légères)."""
     dossier = Path(dossier or tempfile.mkdtemp(prefix="site_local_"))
     (dossier / "data").mkdir(parents=True, exist_ok=True)
     paths._RESOLVED_BASE = dossier / "data"
@@ -424,6 +425,8 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
                                   direction=DIRECTION)
     if not await zones.assurer_guide_clan(g):   # le guide du clan posé une première fois (son message d'ouverture)
         print("[SITE LOCAL] guide du clan non posé")
+    if lourd:
+        await _remplir_lourd(get_db, g, clan_r, salon_annonces)
 
     app = health_server.construire_app()
 
@@ -816,6 +819,153 @@ async def _evenements_demo(ev, g, clan_r, get_db) -> None:
         await ev.annuler(g, chef, c["id"], prevenir=False)
 
 
+#  --lourd : des volumes de vrai serveur, pour éprouver le rangement des pages (groupes repliables, « Voir plus »,
+#  alignements) — jamais utilisés par les tests (construire(lourd=False)).
+SURNOMS = ("le Rouge", "Main-de-Fer", "des Abysses", "la Brune", "Bois-Flotté", "l'Écumeur", "Sans-Peur", "du Levant", "la Vigie",
+           "Grand-Mât", "Barbe-Sel", "le Taciturne", "des Sept Mers et des Récifs Oubliés", "Œil-de-Lynx", "la Tempête")
+MOTIFS_SANCTION = ("Spam dans le salon", "Insulte envers un membre", "Lien interdit", "Pub pour un autre serveur", "Hors sujet répété",
+                   "Flood de mentions", "Contournement d'un mute", "Langage inapproprié en vocal", "Arnaque au trade", "Image interdite")
+TEXTES_JOURNAL = (("Modération", "mod.warn", 1, "Avertissement : {n}"), ("Modération", "mod.mute", 2, "Mute : {n} (1 h)"),
+                  ("Membres", "member.join", 0, "Arrivée : {n}"), ("Membres", "member.leave", 0, "Départ : {n}"),
+                  ("Messages", "message.delete", 0, "Message supprimé de {n} dans le salon"),
+                  ("Messages", "message.edit", 0, "Message modifié par {n} : « la réunion est déplacée à demain soir, prévenez les autres »"),
+                  ("Vocal", "voice.join", 0, "Vocal : {n} rejoint « Taverne »"), ("Tickets", "ticket.open", 0, "Ticket ouvert par {n}"),
+                  ("Tickets", "ticket.close", 0, "Ticket de {n} fermé"), ("Sécurité", "sec.spam", 2, "Spam bloqué : {n}"),
+                  ("Sécurité", "sec.scam", 3, "Lien d'arnaque supprimé : {n}"), ("Clan", "clan.journal", 0, "Rôle du clan donné à {n}"),
+                  ("Questions", "question.ouverte", 0, "Question relevée : {n}"))
+
+
+async def _remplir_lourd(get_db, g, clan_r, salon) -> None:
+    """Un serveur chargé : ~110 membres (80 au clan), 400 sanctions, 60 nettoyages du casier (des membres partis surtout),
+    300 tickets, 1 000 lignes de journal, des questions, des idées, des sondages, 60 décisions de recrutement, des
+    membres restreints par la direction. Appelé APRÈS le remplissage léger (ses index de membres restent les mêmes)."""
+    import site_local_port
+    hasard = random.Random(26102026)
+    t = time.time()
+    #  Les membres : 90 de plus (64 au clan), et 40 partis (cités par le casier, les tickets, le journal).
+    nouveaux = []
+    for k in range(90):
+        nom = PRENOMS[k % len(PRENOMS)] + " " + SURNOMS[(k * 7) % len(SURNOMS)]
+        m = g.membre(1100 + k, nom, *([clan_r] if k < 64 else []), arrivee_jours=hasard.randint(2, 700))
+        nouveaux.append(m)
+        #  Leur présence (site_local_port.mesurer_groupe) : surtout actifs, des peu présents, des inactifs, des jamais vus.
+        tirage = hasard.random()
+        site_local_port.ACTIVITE[m.id] = ((hasard.randint(0, 5), hasard.randint(1, 7)) if tirage < .55 else (hasard.randint(8, 28), 0) if tirage < .75
+                                          else (hasard.randint(31, 160), 0) if tirage < .92 else None if tirage < .96 else "recent")
+    presents = [m.id for m in g.members if m.id not in TETE and not m.bot]
+    partis = [2000 + k for k in range(40)]
+    gens = presents + partis
+    staff = (FONDATEUR, DIRECTION, site_local_port.STAFF_ID)
+    async with get_db() as db:
+        #  400 sanctions sur un an.
+        for n in range(400):
+            uid = hasard.choice(gens)
+            typ = hasard.choice(("warn", "warn", "warn", "warn", "mute", "mute", "insulte", "protection", "kick", "ban"))
+            auto = typ in ("insulte", "protection")
+            await db.execute("INSERT INTO infractions (guild_id, user_id, mod_id, type, reason, duration, created_at) VALUES (?,?,?,?,?,?,?)",
+                             (SERVEUR_ID, uid, site_local_port.BOT_ID if auto else hasard.choice(staff), typ, hasard.choice(MOTIFS_SANCTION),
+                              hasard.choice(("1 heure", "6 heures", "1 jour")) if typ == "mute" else "", _date(t - hasard.uniform(0, 365) ** 1.3 * 86400 / 7)))
+        #  60 nettoyages du casier sur 30 jours : des amnisties, des casiers de membres (partis surtout), des zones, des annulés.
+        sortes = ([("amnistie", 0, "Amnistie : 3 mois sans infraction, ou parti depuis 3 mois", None)] * 18
+                  + [("membre", DIRECTION, "Avertissements de {}", "warns")] * 16 + [("membre", FONDATEUR, "Casier entier de {}", "tout")] * 18
+                  + [("zone", FONDATEUR, "Avertissements, plus de 90 jours", None), ("zone", DIRECTION, "Détections automatiques, plus de 30 jours", None),
+                     ("zone", FONDATEUR, "Tout le casier (sauf bannissements), plus de 90 jours", None)] * 2 + [("membre", DIRECTION, "Avertissements de {}", "warns")] * 2)
+        for n, (prefixe, par, quoi, _quoi) in enumerate(sortes):
+            cible = hasard.choice(partis if n % 4 else presents)
+            quand = int(t - hasard.uniform(.02, 29.5) * 86400)
+            restaure = n % 11 == 5
+            await db.execute("INSERT INTO casier_lots (lot, guild_id, quand, par, quoi, n, personnes, restaure_le, restaure_par) VALUES (?,?,?,?,?,?,?,?,?)",
+                             (f"{prefixe}-lourd-{n:03d}", SERVEUR_ID, quand, par, quoi.format(cible), hasard.randint(1, 9) if prefixe == "membre" else hasard.randint(4, 60),
+                              1 if prefixe == "membre" else hasard.randint(2, 25), quand + 3600 if restaure else 0, DIRECTION if restaure else 0))
+        #  300 tickets sur un an (une vingtaine ouverts, récents), avec leur prise en charge, leur fermeture et leur motif.
+        motifs = site_local_port.MOTIFS
+        for n in range(300):
+            tid, uid = 100 + n, hasard.choice(gens)
+            ouvert = t - (hasard.uniform(.1, 4) if n < 22 else hasard.uniform(1, 365)) * 86400
+            ouvert_t = n < 22
+            panneau = hasard.choice(("p2", "p3")) if ouvert_t else hasard.choice(("p1", "p2", "p2", "p3"))
+            pris = hasard.choice(staff) if (not ouvert_t or n % 3) else 0
+            await db.execute("INSERT INTO tickets VALUES (?,?,?,?,?,?,?,?,?)",
+                             (tid, SERVEUR_ID, 9000 + tid, uid, panneau, pris, "open" if ouvert_t else "closed", "{}", _date(ouvert)))
+            if pris:
+                await db.execute("INSERT INTO ticket_log_events (guild_id, ticket_id, kind, actor_id, created_unix) VALUES (?,?,?,?,?)",
+                                 (SERVEUR_ID, tid, "claim", pris, int(ouvert + hasard.randint(300, 20000))))
+            if not ouvert_t:
+                fin, qui_ferme, motif = int(ouvert + hasard.randint(1800, 400000)), hasard.choice(staff), motifs[n % len(motifs)]
+                await db.execute("INSERT INTO ticket_log_events (guild_id, ticket_id, kind, actor_id, detail, created_unix) VALUES (?,?,?,?,?,?)",
+                                 (SERVEUR_ID, tid, "close", qui_ferme, motif, fin))
+                await db.execute("INSERT INTO ticket_audit (guild_id, channel_id, action, actor_id, at, detail) VALUES (?,?,?,?,?,?)",
+                                 (SERVEUR_ID, 9000 + tid, "close", qui_ferme, _date(fin), motif))
+        #  1 000 lignes de journal sur 30 jours (la page en lit les 400 plus récentes).
+        noms = {m.id: m.display_name for m in g.members}
+        for n in range(1000):
+            cat, typ, gravite, texte = hasard.choice(TEXTES_JOURNAL)
+            uid = hasard.choice(gens)
+            await db.execute("INSERT INTO registre (guild_id, quand, categorie, type, membre_id, auteur_id, salon_id, texte, detail, gravite)"
+                             " VALUES (?,?,?,?,?,?,?,?,?,?)", (SERVEUR_ID, int(t - hasard.uniform(0, 30) ** 1.4 * 86400 / 3.3), cat, typ, uid,
+                                                               hasard.choice((0, 0, FONDATEUR, DIRECTION, site_local_port.STAFF_ID)), salon.id,
+                                                               texte.format(n=noms.get(uid, "Membre parti")), "", gravite))
+        #  Des questions (ouvertes, répondues, traitées), des idées, des sondages.
+        for n in range(40):
+            quand, statut = int(t - hasard.uniform(.05, 25) * 86400), hasard.choice(("ouverte", "ouverte", "repondue", "resolue", "traitee", "ignoree"))
+            repondu = statut in ("repondue", "resolue")
+            await db.execute("INSERT INTO questions (guild_id, salon_id, message_id, auteur_id, texte, quand, statut, repondu_par, repondu_le, par_staff, lien)"
+                             " VALUES (?,?,?,?,?,?,?,?,?,?,?)", (SERVEUR_ID, salon.id, 7500 + n, hasard.choice(presents),
+                                                                  hasard.choice(("Comment on rejoint le clan ?", "C'est quand le prochain raid sur le boss des abysses avec tout l'équipage ?",
+                                                                                 "Où trouver le marchand de fruits ?", "On peut changer de faction après le Movie 3 ?",
+                                                                                 "Qui vient farmer des berrys ce soir ?")) + f" ({n})", quand, statut,
+                                                                  site_local_port.STAFF_ID if repondu else 0, quand + 3600 if repondu else 0, 1 if repondu else 0,
+                                                                  f"https://discord.com/channels/{SERVEUR_ID}/{salon.id}/{7600 + n}"))
+        for n in range(15):
+            statut = hasard.choice(("attente", "attente", "etude", "acceptee", "refusee", "realisee"))
+            await db.execute("INSERT INTO suggestions_v2 (guild_id, channel_id, message_id, auteur_id, titre, details, statut, note, decide_par, cree_le, decide_le)"
+                             " VALUES (?,?,?,?,?,?,?,?,?,?,?)", (SERVEUR_ID, salon.id, 8300 + n, hasard.choice(presents),
+                                                                  f"Idée n°{n + 10} : " + hasard.choice(("un tournoi de pêche", "un salon pour les cartes au trésor",
+                                                                                                         "des grades pour les vétérans du clan et ceux qui aident les nouveaux",
+                                                                                                         "un événement chaque samedi")),
+                                                                  "Pour motiver l'équipage et accueillir les nouveaux.", statut,
+                                                                  "" if statut == "attente" else "Bonne idée, on regarde.", 0 if statut == "attente" else DIRECTION,
+                                                                  _date(t - hasard.uniform(1, 60) * 86400), _date(t - hasard.uniform(0, 1) * 86400)))
+        for n in range(8):
+            await db.execute("INSERT INTO sondages (message_id, guild_id, channel_id, auteur_id, question, choix, comptes, total, cree_le, fin_le, termine)"
+                             " VALUES (?,?,?,?,?,?,?,?,?,?,?)", (8400 + n, SERVEUR_ID, salon.id, hasard.choice(presents), f"Sondage n°{n + 3} : quel soir pour le raid ?",
+                                                                  json.dumps(["Vendredi", "Samedi", "Dimanche"]), json.dumps([n + 2, 5, 3]), n + 10,
+                                                                  _date(t - (n + 1) * 2 * 86400), _date(t + (1 - n) * 86400), 1 if n > 1 else 0))
+        #  60 décisions de recrutement (acceptées, refusées) sur un an.
+        for n in range(60):
+            uid = hasard.choice(gens)
+            ferme = t - hasard.uniform(1, 365) * 86400
+            decision = "acceptes" if n % 3 else "refuses"
+            await db.execute("INSERT OR REPLACE INTO recrutements (guild_id, ticket_id, candidat_id, candidat_nom, ouvert_le, ferme_le, ferme_par, pris_par, reponses,"
+                             " msg_candidat, msg_staff, transcript, raison, decision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                             (SERVEUR_ID, 1000 + n, uid, noms.get(uid, f"Ancien candidat {n}"), int(ferme - 7200), int(ferme), DIRECTION, FONDATEUR,
+                              json.dumps({"Pseudo Roblox": f"Candidat_{n}", "Pourquoi nous ?": "J'aime naviguer en équipage."}), 3, 2, "",
+                              "" if decision == "acceptes" else hasard.choice(("Niveau insuffisant", "Réponses trop vagues", "N'a pas répondu")), decision))
+        #  Des membres restreints par la direction (dates ISO, comme les écrit /mod direction) — durée en minutes, 0 : sans fin.
+        for k, (duree, raison) in enumerate(((0, "Comportement à surveiller pendant l'enquête"), (1440, "Spam répété dans les salons"),
+                                             (180, "Contournement d'un mute"), (0, ""))):
+            cible = nouveaux[3 + 11 * k]
+            await db.execute("INSERT INTO restricted_members VALUES (?,?,?,?,?,?,?)",
+                             (SERVEUR_ID, cible.id, "[]", datetime.fromtimestamp(t - (k + 1) * 9000, timezone.utc).isoformat(), duree, raison,
+                              DIRECTION if k % 2 else FONDATEUR))
+        await db.commit()
+    #  Quatorze affiches de plus (le mur rangé par métier) : des éléments du catalogue chargé, jamais inventés.
+    import affiches
+    par_type: dict = {}
+    for e in (await affiches.catalogue())["elements"]:
+        if e["actif"]:
+            par_type.setdefault(e["type"], []).append(e["cle"])
+    chef = g.get_member(FONDATEUR)
+    for k, m in enumerate(nouveaux[:14]):
+        corps = {"id": f"lourd-affiche-{k:02d}", "membre_id": str(m.id), "roblox_nom": f"Pirate_{k:02d}", "surnom": SURNOMS[k % len(SURNOMS)][:40],
+                 "prime": hasard.randint(1, 400) * 10000, "niveau": hasard.randint(1, 90), "statut": "actif",
+                 "attributs": {t: [hasard.choice(par_type[t])] for t in ("metier", "race", "faction") if par_type.get(t)}}
+        statut, rep = await affiches._route_affiche(g, chef, {}, corps)
+        if statut != 200:
+            print(f"[SITE LOCAL] affiche lourde refusée : {rep}")
+    print("[SITE LOCAL] volumes lourds : 110 membres, 400 sanctions, 60 nettoyages du casier, 300 tickets, 1 000 lignes de journal")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Le vrai site en local, avec un faux serveur Discord.")
     parser.add_argument("--port", type=int, default=PORT, help=f"le port ({PORT} par défaut)")
@@ -823,6 +973,8 @@ def main() -> int:
                         help="le compte de l'entrée de démonstration")
     parser.add_argument("--garder", default="", help="dossier de travail gardé (sinon un dossier temporaire)")
     parser.add_argument("--site", default="", help="servir un autre dossier « site/ » (sinon celui du dépôt)")
+    parser.add_argument("--lourd", action="store_true",
+                        help="des volumes de vrai serveur (400 sanctions, 60 nettoyages du casier, 300 tickets, 1 000 lignes de journal…)")
     args = parser.parse_args()
     from aiohttp import web
 
@@ -831,7 +983,7 @@ def main() -> int:
             import tableau
             tableau.SITE = Path(args.site).resolve()
         app, ctx = await construire(Path(args.garder) if args.garder else None, args.port,
-                                    DIRECTION if args.qui == "direction" else FONDATEUR)
+                                    DIRECTION if args.qui == "direction" else FONDATEUR, lourd=args.lourd)
         runner = web.AppRunner(app)
         await runner.setup()
         await web.TCPSite(runner, "localhost", args.port).start()

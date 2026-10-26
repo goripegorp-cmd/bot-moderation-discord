@@ -18,8 +18,8 @@ const DELAI_PAGE = 6000;
 const MAX_DONNEES = 160;
 const MAX_MEDIAS = 400;
 const MODULES = ["app.js", "noyau.js", "dom.js", "ui.js", "api.js", "hors_ligne.js", "donnees.js", "discord.js", "fiche.js", "clan.js",
-  "recrutement.js", "annonces.js", "capitainerie.js", "affiche.js", "direct.js", "textes.js"];
-const VERSIONNES = ["app.js", "style.css", "composants.css", "pieces.css", "ateliers.css", "direct.css", "textes.css", "polices/polices.css", "icones/ui.svg", "manifest.webmanifest",
+  "recrutement.js", "annonces.js", "capitainerie.js", "affiche.js", "direct.js", "textes.js", "accueil.js", "recherche.js", "rangement.js", "mode.js"];
+const VERSIONNES = ["app.js", "style.css", "composants.css", "pieces.css", "ateliers.css", "direct.css", "textes.css", "rangement.css", "polices/polices.css", "icones/ui.svg", "manifest.webmanifest",
   "app-192.png"];
 // Le direct (qui est à bord, les verrous) n'est jamais servi de mémoire : un état d'il y a une heure mentirait.
 const DONNEES = /^\/tableau\/espace\/(donnees|membre|conversation|recherche|api\/(?!direct\/).+)$/;

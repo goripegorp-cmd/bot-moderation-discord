@@ -6,6 +6,8 @@
 //
 //   node outils/parcours_site.mjs [--url http://localhost:8790] [--sortie <dossier>] [--parcours recrutement,capitainerie,metiers,textes]
 //                                 [--navigateur <exe>]
+//   Parcours : recrutement, capitainerie, metiers, accueil (« Ce qui t'attend » : chaque ligne mène au bon endroit),
+//              recherche (Ctrl+K : membre, ticket, affiche, catalogue, banque, rubrique).
 //   « textes » (Textes & noms) lit aussi ce que le FAUX Discord du site local a reçu (`/tableau/demo/discord`) : il ne se
 //   joue que sur le site local, jamais sur la maquette.
 //
@@ -78,7 +80,7 @@ async function onglet() {
     if (d.method === "Runtime.consoleAPICalled" && d.params.type === "error") erreursPage.push("console : " + d.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
   });
   await s("Emulation.setDeviceMetricsOverride", { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false });
-  return { s };
+  return { s, targetId };
 }
 async function evaluer(o, expression) {
   const r = await o.s("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
@@ -125,6 +127,9 @@ async function aller(o, ancre) {
   return pret;
 }
 const fermerTout = (o) => evaluer(o, "(() => { for (const d of [...document.querySelectorAll('dialog[open]')].reverse()) d.close(); return true; })()");
+/** Déplier le groupe repliable dont le titre contient `titre` (rangement.js, 26/10 : les réglages rarement touchés sont repliés). */
+const deplier = (o, titre) => evaluer(o, `(async () => { const d = [...document.querySelectorAll("details.groupe")].find((x) => x.querySelector("summary").textContent.includes(${JSON.stringify(titre)}));
+  if (!d) return false; if (!d.open) { d.open = true; await new Promise((r) => setTimeout(r, 200)); } return true; })()`);
 
 // ─── Le rapport ─────────────────────────────────────────────────────────────
 const resultats = [];
@@ -153,7 +158,8 @@ async function etape(o, nom, fn) {
 async function ouvrirCandidature(o, ticket, attendu) {
   await fermerTout(o);
   await aller(o, "#equipage/candidatures");
-  if (!await cliquer(o, ".feuillet.lien", "Ticket #" + ticket + " ")) return false;
+  // Une ligne compacte (rangement.js, 26/10) — ou une ancienne carte.
+  if (!await cliquer(o, ".lc-clic, .feuillet.lien", "Ticket #" + ticket + " ")) return false;
   return attendre(async () => (await texteZone(o)).includes(attendu), 10000);
 }
 async function parcoursRecrutement(o) {
@@ -287,6 +293,7 @@ async function parcoursRecrutement(o) {
   await etape(o, "Liens : en ajouter un", async () => {
     await aller(o, "#equipage/candidatures/questionnaire");
     const avant = (await banque()).liens.length;
+    await deplier(o, "Les liens donnés au candidat");
     if (!await cliquer(o, "button", "Ajouter un lien")) return { ok: false, detail: "bouton absent" };
     await pause(300);
     const ok1 = await ecrire(o, "Titre du lien", "Les équipages (wiki)");
@@ -300,6 +307,7 @@ async function parcoursRecrutement(o) {
   await etape(o, "Réglages : une question de plus", async () => {
     await aller(o, "#equipage/candidatures/questionnaire");
     const avant = (await banque()).reglages.nombre;
+    await deplier(o, "Les réglages");
     if (!await cliquer(o, "button", "Une de plus")) return { ok: false, detail: "bouton « Une de plus » absent" };
     if (!await cliquer(o, "button", "Enregistrer les réglages")) return { ok: false, detail: "bouton absent" };
     const b = await attendre(async () => { const x = await banque(); return x.reglages.nombre === avant + 1 ? x : null; });
@@ -308,6 +316,7 @@ async function parcoursRecrutement(o) {
 
   await etape(o, "Modèles : enregistrer la sélection précédente, la mettre par défaut", async () => {
     await aller(o, "#equipage/candidatures/questionnaire");
+    await deplier(o, "Les modèles");
     if (!await cliquer(o, "button", "Nouveau modèle")) return { ok: false, detail: "bouton « Nouveau modèle » absent" };
     if (!await attendre(() => cliquer(o, "button.depart", "Reprendre la sélection précédente"), 6000)) return { ok: false, detail: "départ absent" };
     if (!await cliquer(o, "button", "Enregistrer le modèle")) return { ok: false, detail: "bouton « Enregistrer le modèle » absent" };
@@ -317,6 +326,7 @@ async function parcoursRecrutement(o) {
     if (!m) return { ok: false, detail: "le serveur n'a pas le modèle" };
     await fermerTout(o);
     await aller(o, "#equipage/candidatures/questionnaire");
+    await deplier(o, "Les modèles");
     const clic = await evaluer(o, `(() => { const f = [...document.querySelectorAll(".feuillet")].find((x) => x.textContent.includes("Parcours complet"));
       const b = f && [...f.querySelectorAll("button")].find((x) => x.textContent.trim() === "Par défaut"); if (!b) return false; b.click(); return true; })()`);
     if (!clic) return { ok: false, detail: "bouton « Par défaut » introuvable" };
@@ -492,6 +502,7 @@ async function parcoursMetiers(o) {
   await etape(o, "Rôles des métiers : couper puis remettre l'attribution automatique", async () => {
     const basculer = async () => {
       await aller(o, "#capitainerie/roles");
+      await deplier(o, "Les réglages");
       const fait = await evaluer(o, `(() => { const l = [...document.querySelectorAll("label, .interrupteur")].find((x) => x.textContent.includes("Attribution automatique des rôles de métier"));
         const i = l && (l.querySelector("input") || (l.htmlFor && document.getElementById(l.htmlFor))); if (!i) return false; i.click(); return true; })()`);
       if (!fait) return false;
@@ -510,6 +521,7 @@ async function parcoursMetiers(o) {
     const avant = (await reglages()).max_metiers;
     const vise = avant < 5 ? avant + 1 : avant - 1;
     await aller(o, "#capitainerie/roles");
+    await deplier(o, "Les réglages");
     if (!await cliquer(o, "button", vise > avant ? "Un de plus" : "Un de moins")) return { ok: false, detail: "bouton du nombre absent" };
     if (!await cliquer(o, "button", "Enregistrer les réglages")) return { ok: false, detail: "bouton absent" };
     const x = await attendre(async () => { const y = await reglages(); return y.max_metiers === vise ? y : null; });
@@ -518,6 +530,7 @@ async function parcoursMetiers(o) {
 
   await etape(o, "Rôles des métiers : créer les rôles manquants", async () => {
     await aller(o, "#capitainerie/roles");
+    await deplier(o, "Les réglages");
     if (!await cliquer(o, "button", "Créer les rôles manquants")) return { ok: false, detail: "bouton absent" };
     if (!await attendre(() => cliquer(o, "dialog[open] button", "Créer les rôles manquants"), 5000)) return { ok: false, detail: "confirmation absente" };
     const x = await attendre(async () => { const y = await reglages(); const actifs = (y.metiers || []).filter((m) => m.actif); return actifs.length && actifs.every((m) => m.lie) ? y : null; }, 20000);
@@ -527,16 +540,264 @@ async function parcoursMetiers(o) {
   await etape(o, "Rôles des métiers : vérifier maintenant", async () => {
     const avant = ((await reglages()).derniere_reconciliation || {}).quand || 0;
     await aller(o, "#capitainerie/roles");
+    await deplier(o, "Les réglages");
     if (!await cliquer(o, "button", "Vérifier maintenant")) return { ok: false, detail: "bouton absent" };
     if (!await attendre(() => cliquer(o, "dialog[open] button", "Vérifier maintenant"), 5000)) return { ok: false, detail: "confirmation absente" };
     const x = await attendre(async () => { const y = await reglages(); const q = (y.derniere_reconciliation || {}).quand || 0; return q > avant ? y : null; }, 20000);
     if (!x) return { ok: false, detail: "aucune vérification enregistrée" };
     await aller(o, "#capitainerie/roles");
+    await deplier(o, "Les réglages");
     const vu = await evaluer(o, "document.querySelector('#contenu').innerText.includes('Dernière vérification')");
     return { ok: vu, detail: JSON.stringify(x.derniere_reconciliation) + (vu ? "" : " — la page ne montre pas la dernière vérification") };
   });
 }
 const compte_ = (n) => String(n);
+
+// ═══ L'ACCUEIL « CE QUI T'ATTEND » ══════════════════════════════════════════
+// Chaque ligne « à faire » ouvre exactement le bon endroit (ou porte le bon lien) ; chaque raccourci aussi.
+const donneesSite = (o) => evaluer(o, `fetch(${JSON.stringify(SITE + "donnees")}, { credentials: "same-origin" }).then((r) => r.json())`);
+const lignesAFaire = (o) => evaluer(o, `[...document.querySelectorAll(".a-faire-liste .lc")].map((l) => ({ sorte: l.dataset.sorte, prio: Number(l.dataset.prio),
+  titre: l.querySelector(".lc-titre").textContent, sous: l.querySelector(".lc-sous-texte").textContent,
+  bouton: ((l.querySelector(".lc-actions .bouton") || {}).textContent || "").trim(), href: (l.querySelector(".lc-actions a") || {}).href || "" }))`);
+/** Le bouton de la première ligne « à faire » d'une sorte (dont le titre contient `texte`). */
+const boutonAFaire = (o, sorte, texte = "") => evaluer(o, `(() => { const l = [...document.querySelectorAll(".a-faire-liste .lc")].find((x) => x.dataset.sorte === ${JSON.stringify(sorte)}
+  && x.querySelector(".lc-titre").textContent.includes(${JSON.stringify(texte)})); if (!l) return false; l.querySelector(".lc-actions .bouton").click(); return true; })()`);
+async function allerAccueil(o) {
+  await aller(o, "#accueil/attente");
+  // Les jeux chargés à la demande (publications, banque, catalogue, rôles, affiches) : la liste se complète.
+  await attendre(async () => { const a = await lignesAFaire(o); await pause(700); const b = await lignesAFaire(o); return a.length && a.length === b.length; }, 8000, 300);
+}
+const texteFenetre = (o) => evaluer(o, "(() => { const d = [...document.querySelectorAll('dialog[open]')].pop(); return d ? d.innerText : ''; })()");
+
+async function parcoursAccueil(o) {
+  await etape(o, "Accueil : la première page d'un nouvel onglet, une liste priorisée", async () => {
+    const o2 = await onglet();
+    await o2.s("Page.navigate", { url: SITE });
+    await attendre(() => evaluer(o2, "!!document.querySelector('#contenu .titre-rubrique') && !!document.querySelector('.a-faire-liste, #contenu .vide')"), 12000, 200);
+    await pause(1200);
+    const vu = await evaluer(o2, "({ hash: location.hash, titre: document.querySelector('#contenu h1').textContent, n: document.querySelectorAll('.a-faire-liste .lc').length,"
+      + " prios: [...document.querySelectorAll('.a-faire-liste .lc')].map((l) => Number(l.dataset.prio)), boutons: [...document.querySelectorAll('.a-faire-liste .lc')].every((l) => l.querySelectorAll('.lc-actions .bouton').length === 1),"
+      + " pastille: (document.querySelector('.pancarte-nav[data-cat=accueil] .pancarte-pastille') || {}).textContent || '' })");
+    try { await envoyer("Target.closeTarget", { targetId: o2.targetId }); } catch (e) { /* déjà fermé */ }
+    const trie = vu.prios.every((p, i) => !i || vu.prios[i - 1] <= p);
+    return { ok: vu.titre === "Ce qui t'attend" && vu.n > 0 && trie && vu.boutons && !!vu.pastille, detail: JSON.stringify(vu).slice(0, 240) };
+  });
+
+  // Les raccourcis par tâche (avant toute publication ouverte : le composeur part d'un brouillon neuf).
+  await etape(o, "Raccourci « Annoncer un événement » : le composeur, sur un événement neuf", async () => {
+    await aller(o, "#accueil/attente");
+    if (!await cliquer(o, "button.tache", "Annoncer un événement")) return { ok: false, detail: "raccourci absent" };
+    const ok = await attendre(() => evaluer(o, "location.hash.includes('annonces/composer') && /Événement/.test((document.querySelector('.choix-type.actif') || {}).textContent || '')"), 8000);
+    return { ok: !!ok, detail: await evaluer(o, "location.hash + ' · ' + ((document.querySelector('.choix-type.actif') || {}).textContent || '')") };
+  });
+  await etape(o, "Raccourci « Faire une annonce » : le composeur, sur une annonce", async () => {
+    await aller(o, "#accueil/attente");
+    if (!await cliquer(o, "button.tache", "Faire une annonce")) return { ok: false, detail: "raccourci absent" };
+    const ok = await attendre(() => evaluer(o, "location.hash.includes('annonces/composer') && /Annonce/.test((document.querySelector('.choix-type.actif') || {}).textContent || '')"), 8000);
+    return { ok: !!ok, detail: await evaluer(o, "location.hash + ' · ' + ((document.querySelector('.choix-type.actif') || {}).textContent || '')") };
+  });
+  await etape(o, "Raccourci « Créer une affiche » : l'éditeur d'une nouvelle affiche", async () => {
+    await aller(o, "#accueil/attente");
+    if (!await cliquer(o, "button.tache", "Créer une affiche")) return { ok: false, detail: "raccourci absent" };
+    const t = await attendre(async () => { const x = await texteFenetre(o); return x.includes("Nouvelle affiche") ? x : null; }, 8000);
+    return { ok: !!t && (await evaluer(o, "location.hash")).includes("capitainerie/affiches"), detail: (t || "").slice(0, 80) };
+  });
+  await etape(o, "Raccourcis « Voir les candidatures » et « Chercher un membre »", async () => {
+    await aller(o, "#accueil/attente");
+    await cliquer(o, "button.tache", "Voir les candidatures");
+    const cand = await attendre(() => evaluer(o, "location.hash.includes('equipage/candidatures')"), 6000);
+    await aller(o, "#accueil/attente");
+    await cliquer(o, "button.tache", "Chercher un membre");
+    const rech = await attendre(() => evaluer(o, "!!document.querySelector('dialog[open] .recherche-champ') && document.activeElement === document.querySelector('dialog[open] .recherche-champ')"), 6000);
+    return { ok: !!cand && !!rech, detail: "candidatures " + !!cand + " · recherche ouverte, le champ a le focus " + !!rech };
+  });
+
+  // Chaque ligne « à faire » présente : le bon endroit.
+  const d = await donneesSite(o);
+  await allerAccueil(o);
+  const lignes = await lignesAFaire(o);
+  await etape(o, "Accueil : les sortes présentes (" + [...new Set(lignes.map((l) => l.sorte))].join(", ") + ")", async () => ({ ok: lignes.length > 0, detail: lignes.length + " lignes" }));
+  const ticketDe = (l) => Number((/ticket #(\d+)/i.exec(l.sous) || /#(\d+)/.exec(l.titre) || [])[1]);
+  const essais = {
+    decider: async (l) => {
+      const t = ticketDe(l);
+      if (!await boutonAFaire(o, "decider", l.titre)) return { ok: false, detail: "bouton absent" };
+      const x = await attendre(async () => { const y = await texteFenetre(o); return y.includes("Ticket #" + t) && y.includes("Dossier de") ? y : null; }, 10000);
+      return { ok: !!x && (await evaluer(o, "location.hash")).includes("equipage/candidatures"), detail: "ticket #" + t + (x ? " : son dossier s'ouvre" : " : dossier absent") };
+    },
+    corriger: async (l) => {
+      const t = ticketDe(l);
+      if (!await boutonAFaire(o, "corriger", l.titre)) return { ok: false, detail: "bouton absent" };
+      const x = await attendre(async () => { const y = await texteFenetre(o); return y.includes("Ticket #" + t) && /correction/i.test(y) ? y : null; }, 10000);
+      return { ok: !!x, detail: "ticket #" + t + (x ? " : la correction s'ouvre" : " : correction absente") };
+    },
+    alerte: async (l) => {
+      const nom = l.titre.replace(/^Alerte : /, "").replace(/ cumule du grave$/, "");
+      if (!await boutonAFaire(o, "alerte", l.titre)) return { ok: false, detail: "bouton absent" };
+      const x = await attendre(async () => { const y = await evaluer(o, "(() => { const d = [...document.querySelectorAll('dialog[open]')].pop(); return d ? d.querySelector('h2').textContent : ''; })()"); return y.includes(nom) ? y : null; }, 10000);
+      return { ok: !!x, detail: nom + (x ? " : sa fiche s'ouvre" : " : fiche absente") };
+    },
+    inactif: async (l) => {
+      if (!await boutonAFaire(o, "inactif", l.titre)) return { ok: false, detail: "bouton absent" };
+      const x = await attendre(() => evaluer(o, "location.hash.includes('equipage/membres') && document.querySelector('#contenu').innerText.includes('À décider')"), 8000);
+      return { ok: !!x, detail: "Équipage, cadre « À décider »" };
+    },
+    ticket: async (l) => {
+      const t = d.tickets.ouverts.find((x) => l.titre.includes("#" + x.ticket + " "));
+      return { ok: !!t && (t.salon ? l.href === t.salon : l.bouton.includes("Voir")), detail: "ticket #" + (t && t.ticket) + " → " + (l.href || l.bouton) };
+    },
+    question: async (l) => {
+      const q = d.questions.liste.find((x) => x.statut === "ouverte" && l.sous.includes(x.texte));
+      return { ok: !!q && (q.message ? l.href === q.message : l.bouton.includes("Voir")), detail: (q ? q.texte.slice(0, 40) : "question introuvable") + " → " + (l.href || l.bouton) };
+    },
+    idees: async (l) => {
+      if (!await boutonAFaire(o, "idees", l.titre)) return { ok: false, detail: "bouton absent" };
+      const x = await attendre(() => evaluer(o, "location.hash.includes('port/salons/idees')"), 6000);
+      return { ok: !!x, detail: "Salons, Idées" };
+    },
+    brouillon: async (l) => {
+      const titre = (/« (.+) »/.exec(l.titre) || [])[1];
+      if (!await boutonAFaire(o, "brouillon", l.titre)) return { ok: false, detail: "bouton absent" };
+      const x = await attendre(() => evaluer(o, `location.hash.includes('annonces/composer') && (document.querySelector('.composeur-form input.saisie') || {}).value === ${JSON.stringify(titre)}`), 8000);
+      return { ok: !!x, detail: "« " + titre + " » ouvert dans le composeur" };
+    },
+    banque: async (l) => {
+      if (!await boutonAFaire(o, "banque", l.titre)) return { ok: false, detail: "bouton absent" };
+      const x = await attendre(() => evaluer(o, "location.hash.includes('candidatures/questionnaire') && [...document.querySelectorAll('button.liste-bouton')].some((b) => b.textContent.includes('À vérifier'))"
+        + " && document.querySelectorAll('.banque-ligne').length > 0 && [...document.querySelectorAll('.banque-ligne')].every((b) => b.textContent.includes('À vérifier'))"), 8000);
+      return { ok: !!x, detail: "la banque, filtrée sur « À vérifier »" };
+    },
+    catalogue: async (l) => {
+      if (!await boutonAFaire(o, "catalogue", l.titre)) return { ok: false, detail: "bouton absent" };
+      const x = await attendre(() => evaluer(o, "location.hash.includes('capitainerie/catalogue') && [...document.querySelectorAll('button.liste-bouton')].some((b) => b.textContent.includes('À vérifier'))"
+        + " && [...document.querySelectorAll('button.element-carte')].every((b) => b.textContent.includes('À vérifier'))"), 8000);
+      return { ok: !!x, detail: "le catalogue, filtré sur « À vérifier »" };
+    },
+    evenement: async (l) => {
+      if (!await boutonAFaire(o, "evenement", l.titre)) return { ok: false, detail: "bouton absent" };
+      return { ok: !!await attendre(() => evaluer(o, "location.hash.includes('annonces/a-venir')"), 6000), detail: "À venir" };
+    },
+    roles: async (l) => {
+      if (!await boutonAFaire(o, "roles", l.titre)) return { ok: false, detail: "bouton absent" };
+      return { ok: !!await attendre(() => evaluer(o, "location.hash.includes('capitainerie/roles')"), 6000), detail: "Rôles & métiers" };
+    },
+    insignes: async (l) => {
+      if (!await boutonAFaire(o, "insignes", l.titre)) return { ok: false, detail: "bouton absent" };
+      return { ok: !!await attendre(() => evaluer(o, "location.hash.includes('capitainerie/affiches')"), 6000), detail: "Affiches" };
+    },
+  };
+  const RESTES = { "ticket-reste": "port/tickets", "question-reste": "port/salons/questions", "decider-reste": "equipage/candidatures", "corriger-reste": "equipage/candidatures",
+    "inactif-reste": "equipage/membres", "alerte-reste": "port/apercu", "brouillon-reste": "annonces/brouillons", "evenement-reste": "annonces/a-venir" };
+  const vues = new Set();
+  for (const l of lignes) {
+    if (vues.has(l.sorte)) continue;
+    vues.add(l.sorte);
+    if (RESTES[l.sorte]) {
+      await etape(o, "Accueil · « " + l.titre + " » → Tout voir", async () => {
+        await fermerTout(o); await allerAccueil(o);
+        if (!await boutonAFaire(o, l.sorte, l.titre)) return { ok: false, detail: "bouton absent" };
+        return { ok: !!await attendre(() => evaluer(o, `location.hash.includes(${JSON.stringify(RESTES[l.sorte])})`), 6000), detail: RESTES[l.sorte] };
+      });
+      continue;
+    }
+    if (!essais[l.sorte]) continue;
+    await etape(o, "Accueil · « " + l.titre.slice(0, 60) + " » (" + l.bouton + ")", async () => { await fermerTout(o); await allerAccueil(o); return essais[l.sorte](l); });
+  }
+  await fermerTout(o);
+}
+
+// ═══ LA RECHERCHE UNIVERSELLE ═══════════════════════════════════════════════
+async function parcoursRecherche(o) {
+  const d = await donneesSite(o);
+  const ouvrir = async (texte) => {
+    await fermerTout(o);
+    await evaluer(o, "(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })); return 1; })()");
+    if (!await attendre(() => evaluer(o, "!!document.querySelector('dialog[open] .recherche-champ')"), 5000, 150)) return false;
+    await evaluer(o, `(() => { const i = document.querySelector('dialog[open] .recherche-champ'); i.value = ${JSON.stringify(texte)}; i.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
+    await pause(900);
+    return true;
+  };
+  const groupes = () => evaluer(o, "[...document.querySelectorAll('dialog[open] .rech-groupe')].map((g) => ({ g: g.getAttribute('aria-label'), r: [...g.querySelectorAll('.rech-titre')].map((t) => t.textContent) }))");
+  const touche = (k) => evaluer(o, `(() => { const i = document.querySelector('dialog[open] .recherche-champ'); i.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true })); return 1; })()`);
+  const h2 = () => evaluer(o, "(() => { const d = [...document.querySelectorAll('dialog[open]')].pop(); return d ? d.querySelector('h2').textContent : ''; })()");
+  await aller(o, "#port/apercu");
+
+  await etape(o, "Recherche : Ctrl+K l'ouvre, le champ a le focus, le sommaire des rubriques est là", async () => {
+    if (!await ouvrir("")) return { ok: false, detail: "Ctrl+K n'ouvre rien" };
+    const vu = await evaluer(o, "({ focus: document.activeElement === document.querySelector('dialog[open] .recherche-champ'), rubriques: document.querySelectorAll('dialog[open] .rech-option').length })");
+    return { ok: vu.focus && vu.rubriques >= 10, detail: JSON.stringify(vu) };
+  });
+  const membre = (d.clan.membres || []).find((m) => (m.nom || "").length >= 4);
+  await etape(o, "Recherche : un membre, Entrée ouvre sa fiche", async () => {
+    await ouvrir(membre.nom);
+    const g = await groupes();
+    const premier = g[0];
+    if (!premier || premier.g !== "Membres" || !premier.r.some((x) => x.includes(membre.nom))) return { ok: false, detail: JSON.stringify(g).slice(0, 200) };
+    await touche("Enter");
+    const x = await attendre(async () => { const t = await h2(); return t.includes(membre.nom) && !t.includes("Rechercher") ? t : null; }, 8000);
+    return { ok: !!x, detail: membre.nom + (x ? " : sa fiche s'ouvre" : " : rien d'ouvert") };
+  });
+  const ferme = d.tickets.fermes[0];
+  await etape(o, "Recherche : « #" + ferme.ticket + " », le ticket d'abord, Entrée ouvre sa conversation", async () => {
+    await ouvrir("#" + ferme.ticket);
+    const g = await groupes();
+    if (!g.length || g[0].g !== "Tickets" || !g[0].r[0].startsWith("Ticket #" + ferme.ticket + " ")) return { ok: false, detail: JSON.stringify(g).slice(0, 200) };
+    await touche("Enter");
+    const x = await attendre(async () => { const t = await h2(); return t.startsWith("Ticket #" + ferme.ticket + " ") ? t : null; }, 8000);
+    return { ok: !!x, detail: x || "conversation absente" };
+  });
+  await etape(o, "Recherche : les flèches choisissent (aria-activedescendant suit)", async () => {
+    await ouvrir("a");
+    const avant = await evaluer(o, "document.querySelector('dialog[open] .recherche-champ').getAttribute('aria-activedescendant')");
+    await touche("ArrowDown"); await touche("ArrowDown");
+    const apres = await evaluer(o, "(() => { const i = document.querySelector('dialog[open] .recherche-champ'); const id = i.getAttribute('aria-activedescendant'); const el = document.getElementById(id); return { id, choisi: el && el.getAttribute('aria-selected'), rang: [...document.querySelectorAll('dialog[open] .rech-option')].indexOf(el) }; })()");
+    return { ok: !!avant && apres.id !== avant && apres.choisi === "true" && apres.rang === 2, detail: JSON.stringify(apres) };
+  });
+  const aff = await api(o, "rell/affiches");
+  const a = (aff.affiches || []).find((x) => !x.retire_le);   // la recherche ne propose pas les affiches retirées
+  await etape(o, "Recherche : une affiche s'ouvre en grand", async () => {
+    if (!a) return { ok: false, detail: "aucune affiche" };
+    const nom = (a.roblox && a.roblox.nom) || (a.membre && a.membre.nom);
+    await ouvrir(nom);
+    const ok = await evaluer(o, `(() => { const o = [...document.querySelectorAll('dialog[open] .rech-groupe[aria-label="Affiches"] .rech-option')][0]; if (!o) return false; o.click(); return true; })()`);
+    if (!ok) return { ok: false, detail: "pas de groupe « Affiches » pour " + nom };
+    const x = await attendre(async () => { const t = await h2(); return t.startsWith("Affiche de") ? t : null; }, 8000);
+    return { ok: !!x, detail: x || "affiche absente" };
+  });
+  const cat = await api(o, "rell/catalogue");
+  const el = (cat.elements || []).find((e) => e.actif !== false && (e.nom || "").length >= 5);
+  await etape(o, "Recherche : un élément du catalogue ouvre sa fiche", async () => {
+    await ouvrir(el.nom);
+    const ok = await evaluer(o, `(() => { const o = [...document.querySelectorAll('dialog[open] .rech-groupe[aria-label="Catalogue RELL Seas"] .rech-option')].find((x) => x.querySelector('.rech-titre').textContent === ${JSON.stringify(el.nom)}); if (!o) return false; o.click(); return true; })()`);
+    if (!ok) return { ok: false, detail: "« " + el.nom + " » absent du groupe Catalogue" };
+    const x = await attendre(async () => { const t = await h2(); return t.includes(el.nom) ? t : null; }, 8000);
+    return { ok: !!x, detail: x || "fiche de l'élément absente" };
+  });
+  const B = await api(o, "recrutement/banque");
+  const q = (B.questions || []).find((x) => !x.retiree && (x.question || "").length > 10);
+  await etape(o, "Recherche : une question de la banque, la banque filtrée sur elle", async () => {
+    await ouvrir(q.question.slice(0, 30));
+    const ok = await evaluer(o, `(() => { const o = [...document.querySelectorAll('dialog[open] .rech-groupe[aria-label="Questions de la banque"] .rech-option')][0]; if (!o) return false; o.click(); return true; })()`);
+    if (!ok) return { ok: false, detail: "groupe « Questions de la banque » absent" };
+    const x = await attendre(() => evaluer(o, `location.hash.includes('candidatures/questionnaire') && [...document.querySelectorAll('.banque-ligne')].some((b) => b.textContent.includes(${JSON.stringify(q.question)}))`), 8000);
+    return { ok: !!x, detail: q.question.slice(0, 60) };
+  });
+  await etape(o, "Recherche : une rubrique (« Nettoyage ») y mène", async () => {
+    await ouvrir("Nettoyage");
+    const ok = await evaluer(o, `(() => { const o = [...document.querySelectorAll('dialog[open] .rech-groupe[aria-label="Rubriques"] .rech-option')].find((x) => x.querySelector('.rech-titre').textContent === 'Nettoyage'); if (!o) return false; o.click(); return true; })()`);
+    if (!ok) return { ok: false, detail: "rubrique absente" };
+    return { ok: !!await attendre(() => evaluer(o, "location.hash.includes('port/nettoyage')"), 6000), detail: "#port/nettoyage" };
+  });
+  await etape(o, "Recherche : « / » l'ouvre aussi, Échap la ferme", async () => {
+    await fermerTout(o);
+    await evaluer(o, "(() => { document.activeElement && document.activeElement.blur && document.activeElement.blur(); document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true })); return 1; })()");
+    const ouverte = await attendre(() => evaluer(o, "!!document.querySelector('dialog[open] .recherche-champ')"), 4000, 150);
+    await evaluer(o, "(() => { const d = document.querySelector('dialog[open]'); d.dispatchEvent(new Event('cancel', { cancelable: true })); return 1; })()");
+    const fermee = await attendre(() => evaluer(o, "!document.querySelector('dialog[open]')"), 4000, 150);
+    return { ok: !!ouverte && !!fermee, detail: "ouverte " + !!ouverte + " · fermée " + !!fermee };
+  });
+  await fermerTout(o);
+}
 
 // ═══ TEXTES & NOMS : un texte réécrit sur le site, et son EFFET (le faux Discord du site local le montre) ═════════
 // Le site local seul a `/tableau/demo/discord` (ce que le faux Discord a reçu) : la preuve n'est pas l'écran du site,
@@ -586,7 +847,8 @@ async function parcoursTextes(o) {
   await etape(o, "Textes : la carte de l'équipe, réécrite depuis Candidatures → Questionnaire", async () => {
     await fermerTout(o);
     await aller(o, "#equipage/candidatures/questionnaire");
-    if (!await attendre(() => cliquer(o, "button", "La carte de l'équipe"), 10000)) return { ok: false, detail: "bouton « La carte de l'équipe » absent" };
+    // Les messages du bot sont rangés dans un groupe replié du questionnaire (rangement.js) : on le déplie.
+    if (!await attendre(async () => { await deplier(o, "Les messages du bot"); return cliquer(o, "button", "La carte de l'équipe"); }, 10000)) return { ok: false, detail: "bouton « La carte de l'équipe » absent" };
     if (!await modifierLigne("Étape 1 refusée (la carte)")) return { ok: false, detail: "ligne « Étape 1 refusée (la carte) » ou éditeur absent" };
     if (!await ecrireTexte(CARTE) || !await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "saisie ou enregistrement impossible" };
     const t = await attendre(async () => { const x = await leTexte("recrutement.equipe.refus_etape1"); return x && x.valeur === CARTE ? x : null; });
@@ -602,7 +864,7 @@ async function parcoursTextes(o) {
     if (!tid) return { ok: false, detail: "aucune candidature à l'étape 1" };
     await fermerTout(o);
     await aller(o, "#equipage/candidatures");
-    if (!await cliquer(o, ".feuillet.lien", "Ticket #" + tid + " ")) return { ok: false, detail: "dossier du ticket " + tid + " introuvable" };
+    if (!await cliquer(o, ".lc-clic, .feuillet.lien", "Ticket #" + tid + " ")) return { ok: false, detail: "dossier du ticket " + tid + " introuvable" };
     if (!await attendre(async () => (await texteZone(o)).includes("La décision de l'étape 1"), 8000)) return { ok: false, detail: "dossier pas ouvert" };
     if (!await cliquer(o, "button", "Refuser l'étape 1")) return { ok: false, detail: "bouton « Refuser l'étape 1 » absent" };
     const montre = await attendre(async () => (await texteZone(o)).includes("Merci pour ta candidature " + N), 6000);
@@ -768,6 +1030,8 @@ async function principal() {
     if (PARCOURS.includes("recrutement")) await parcoursRecrutement(o);
     if (PARCOURS.includes("capitainerie")) await parcoursCapitainerie(o);
     if (PARCOURS.includes("metiers")) await parcoursMetiers(o);
+    if (PARCOURS.includes("accueil")) await parcoursAccueil(o);
+    if (PARCOURS.includes("recherche")) await parcoursRecherche(o);
     if (PARCOURS.includes("textes")) await parcoursTextes(o);
   } finally {
     try { await envoyer("Browser.close"); } catch (e) { /* déjà fermé */ }

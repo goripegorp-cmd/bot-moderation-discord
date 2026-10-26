@@ -554,6 +554,20 @@ def _quand(t) -> str:
     return datetime.fromtimestamp(int(t), PARIS).strftime("%d/%m/%Y %H:%M") if t else ""
 
 
+def _instant(valeur) -> int | None:
+    """Une date de la base en horodatage : « 2026-10-19 14:05:00 » (SQLite, UTC) comme l'ISO complet que `/mod direction`
+    écrit dans `restricted_members` (« 2026-10-19T14:05:00.123+00:00 ») ; la date bouche-trou d'avant 2021 → None."""
+    if not valeur:
+        return None
+    try:
+        d = datetime.fromisoformat(str(valeur).strip())
+    except ValueError:
+        return recrutements._unix(valeur)
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return None if d.year <= 2020 else int(d.timestamp())
+
+
 # ─── Les données ────────────────────────────────────────────────────────────
 
 async def _clan(g, c, apart: set) -> dict:
@@ -788,7 +802,7 @@ async def _sanctions(g, apart: set, qui) -> dict:
             "mutes": [dict(_ident(g, m.id), jusqu=int(m.timed_out_until.timestamp()) if m.timed_out_until else None)
                       for m in mutes if m.id not in apart],
             "radies": [_ident(g, m.id) for m in (radie.members if radie else [])],
-            "restreints": [dict(_ident(g, uid), depuis=recrutements._unix(depuis), raison=str(raison or "")[:200],
+            "restreints": [dict(_ident(g, uid), depuis=_instant(depuis), raison=str(raison or "")[:200],
                                 par=_nom(g, par)) for uid, depuis, _d, raison, par in restreints],
         },
     }
@@ -1092,6 +1106,13 @@ async def fiche(g, uid: int, auteur) -> dict:
         par_lui = await recrutements._lignes(
             db, "SELECT id, user_id, mod_id, type, reason, duration, created_at FROM infractions"
                 " WHERE guild_id=? AND mod_id=? ORDER BY id DESC LIMIT 100", (g.id, int(uid)))
+        restriction = await recrutements._lignes(
+            db, "SELECT restricted_at, duration, reason, restricted_by FROM restricted_members"
+                " WHERE guild_id=? AND user_id=?", (g.id, int(uid)))
+    #  Restreint par la direction (/direction) : depuis quand, pour combien de minutes (0 : sans fin), pourquoi, par qui.
+    infos["restreint"] = ({"depuis": _instant(restriction[0][0]), "duree": int(restriction[0][1] or 0),
+                           "raison": str(restriction[0][2] or "")[:300], "par": qui(restriction[0][3]) if restriction[0][3] else ""}
+                          if restriction else None)
     sanctions = [_entree_casier(g, iid, str(typ or "autre").lower(), raison, duree, recrutements._unix(cree),
                                 not mod or int(mod) == robot, mod)
                  for iid, _u, mod, typ, raison, duree, cree in rows]

@@ -14,6 +14,7 @@ import {
   bouton, pastille, tampon, vide, segment, liste, champ, saisie, zoneTexte, interrupteur, caseACocher, radios, confirmer, pancarte,
   toast, squelettes, paginer, bandeau, majBoutonsReseau, nomDe,
 } from "./ui.js";
+import { groupes, outilsGroupes, parPeriode } from "./rangement.js";
 import { choisirTextes } from "./textes.js";
 import { avecVerrou, protegerZone, siLibre } from "./direct.js";
 
@@ -614,6 +615,30 @@ function ouvrirDansComposeur(el) {
   if (composeurOuvrir && etat.route.sous === "composer") composeurOuvrir(el);
   else aller("equipage", "annonces", "composer");
 }
+/** Les noms des sortes de publication (accueil, recherche). */
+export const NOMS_PUBLICATIONS = NOMS_TYPES;
+/** Ouvrir une publication depuis l'accueil ou la recherche : un brouillon ou une publication en ligne dans le
+ *  composeur ; une publication passée, annulée ou incertaine dans sa liste. */
+export function ouvrirPublication(el, ou) {
+  if (!el) return;
+  if (!el.statut || el.statut === "brouillon" || enLigneSurDiscord(el)) ouvrirDansComposeur(el);
+  else aller("equipage", "annonces", ou === "a-venir" || ou === "publiees" ? ou : "passes");
+}
+/** Commencer une publication d'un type (raccourcis de l'accueil) : le composeur, sur un brouillon neuf de ce type —
+ *  sauf une saisie déjà en cours, rouverte telle quelle (« Nouveau » repart de zéro). */
+export async function commencer(type) {
+  // Les réglages par défaut du serveur (post, mention…) : lus avant de partir d'une page neuve, même si la rubrique des
+  // annonces n'a pas encore été ouverte dans cette session.
+  if (!dernierE) { const E = await charger("evenements"); if (E && !E.erreur) dernierE = E; }
+  if (!composeur) {
+    const garde = await lireSaisie("composeur");
+    if (garde && garde.valeur && garde.valeur.v) composeur = Object.assign({}, garde.valeur, { restaure: true, v: nettoyer(garde.valeur.v) });
+  }
+  const enCours = composeur && (composeur.id || composeur.publie || (composeur.v && (composeur.v.titre || composeur.v.texte)));
+  if (enCours) toast("Ta publication en cours est rouverte : « Nouveau » pour en commencer une autre.");
+  else composeur = neuf(dernierE, LIB_TYPE[type] ? type : "evenement");
+  aller("equipage", "annonces", "composer");
+}
 
 // ─── Les blocs du formulaire ────────────────────────────────────────────────
 function compteurCaracteres(entree, max) {
@@ -1141,30 +1166,42 @@ function dupliquer(el, copie) {
 function listeBrouillons(E, recharger) {
   const l = (E.brouillons || []).slice().sort((a, b) => (b.maj || 0) - (a.maj || 0));
   if (!l.length) return vide("Aucun brouillon", "Compose un événement ou une annonce : il est gardé ici jusqu'à sa publication.", "parchemin");
-  return [h("p", { classe: "aide" }, "Les brouillons sont gardés sur le serveur — et sur cet appareil hors ligne, envoyés au retour de la connexion."),
-    paginer("evt-brouillons", l, (el) => carteElement(el, actionsDe(el, recharger)))];
+  return [h("p", { classe: "aide avance" }, "Les brouillons sont gardés sur le serveur — et sur cet appareil hors ligne, envoyés au retour de la connexion."),
+    paginer("evt-brouillons", l, (el) => carteElement(el, actionsDe(el, recharger)), { classe: "grille egale" })];
 }
 function listeAVenir(E, recharger) {
   const l = (E.a_venir || []).slice().sort((a, b) => (a.quand || a.publie || 0) - (b.quand || b.publie || 0));
   if (!l.length) return vide("Rien à venir", "Un événement publié reste ici jusqu'à sa fin, avec son minuteur et les réponses.", "minuteur");
-  return [paginer("evt-avenir", l, (el) => carteElement(el, actionsDe(el, recharger)), { pas: 12 })];
+  return [paginer("evt-avenir", l, (el) => carteElement(el, actionsDe(el, recharger)), { pas: 12, classe: "grille egale" })];
 }
 /** Les annonces, annonces des métiers et listings EN LIGNE (sans date) : leur « Vu », les modifier, les retirer. */
 function listePubliees(E, recharger) {
-  const l = (E.publiees || []).slice();
+  // De la plus récemment touchée à la plus ancienne, rangées par période (la plus récente ouverte), comme « Passés ».
+  const quand = (el) => el.maj || el.publie || el.quand || 0;
+  const l = (E.publiees || []).slice().sort((a, b) => quand(b) - quand(a));
   if (!l.length) return vide("Aucune annonce en ligne", "Une annonce, l'annonce des métiers ou le listing publiés viennent ici, jusqu'à ce que tu les retires.", "cloche");
+  const periodes = parPeriode(l, quand);
+  const zone = h("div", { classe: "groupes-zone" }, groupes(periodes.map(([k, lib, g]) => ({ cle: "evt-publiees-" + k, titre: lib, compte: g.length,
+    contenu: () => paginer("evt-publiees-" + k, g, (el) => carteElement(el, actionsDe(el, recharger)), { pas: 12, classe: "grille egale" }) }))));
   return [
-    h("p", { classe: "aide" }, "En ligne sur Discord : leur « Vu », les modifier, les retirer. Retirée, une annonce passe dans « Passés »."),
+    h("div", { classe: "rangee entre" }, h("p", { classe: "aide avance" }, "En ligne sur Discord : leur « Vu », les modifier, les retirer. Retirée, une annonce passe dans « Passés »."),
+      periodes.length > 1 ? outilsGroupes(zone) : null),
     E.publiees_total && E.publiees_total > l.length ? h("p", { classe: "aide" }, "Les " + nombre(l.length) + " plus récentes sur " + nombre(E.publiees_total) + ".") : null,
-    paginer("evt-publiees", l, (el) => carteElement(el, actionsDe(el, recharger)), { pas: 12 }),
+    zone,
   ];
 }
 function listePasses(E, recharger) {
-  const l = (E.passes || []).slice();
+  // Du plus récemment touché au plus ancien, rangés par période (la plus récente ouverte) : jamais un long mur de cartes.
+  const quand = (el) => el.maj || el.publie || el.quand || 0;
+  const l = (E.passes || []).slice().sort((a, b) => quand(b) - quand(a));
   if (!l.length) return vide("Rien de passé pour l'instant", "Les événements terminés, annulés ou retirés viennent ici, et les annonces retirées.", "coffre");
+  const periodes = parPeriode(l, quand);
+  const zone = h("div", { classe: "groupes-zone" }, groupes(periodes.map(([k, lib, g]) => ({ cle: "evt-passes-" + k, titre: lib, compte: g.length,
+    contenu: () => paginer("evt-passes-" + k, g, (el) => carteElement(el, actionsDe(el, recharger)), { pas: 12, classe: "grille egale" }) }))));
   return [
-    h("p", { classe: "aide" }, "Les événements terminés, annulés ou retirés, et les annonces retirées : ils restent 60 jours (rubrique Nettoyage)."),
+    h("div", { classe: "rangee entre" }, h("p", { classe: "aide avance" }, "Les événements terminés, annulés ou retirés, et les annonces retirées : ils restent 60 jours (rubrique Nettoyage)."),
+      periodes.length > 1 ? outilsGroupes(zone) : null),
     E.passes_total && E.passes_total > l.length ? h("p", { classe: "aide" }, "Les " + nombre(l.length) + " plus récents sur " + nombre(E.passes_total) + ".") : null,
-    paginer("evt-passes", l, (el) => carteElement(el, actionsDe(el, recharger)), { pas: 12 }),
+    zone,
   ];
 }

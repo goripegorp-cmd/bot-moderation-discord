@@ -430,8 +430,10 @@ export function confirmer(o) {
 }
 
 // ─── Groupes repliables, « voir plus », index A–Z ──────────────────────────
-const groupesOuverts = new Set();
-/** Un groupe repliable avec compteur ; le contenu n'est construit qu'à la première ouverture. */
+const groupesOuverts = new Map();   // cle → ouvert : le choix de la personne, gardé d'un rendu à l'autre
+/** Un groupe repliable avec compteur ; le contenu n'est construit qu'à la première ouverture.
+ *  o.ouvert : imposé (true : une recherche en cours) ; o.defaut : l'état de départ, tant que la personne n'a pas
+ *  ouvert ni fermé ce groupe (une mise à jour des données ne rouvre plus un groupe fermé). */
 /** Une petite image de titre ; si elle ne se charge pas, une icône maison à sa place (jamais une image cassée). */
 function imageOuIcone(src, repli = "drapeau") {
   if (!src) return null;
@@ -442,7 +444,7 @@ function imageOuIcone(src, repli = "drapeau") {
 }
 export function groupe(o, fabriquer) {
   const cle = o.cle || null;
-  const ouvert = o.ouvert ?? (cle ? groupesOuverts.has(cle) : false);
+  const ouvert = o.ouvert ?? (cle && groupesOuverts.has(cle) ? groupesOuverts.get(cle) : !!o.defaut);
   const corps = h("div", { classe: "groupe-corps" });
   const d = h("details", { classe: "groupe" + (o.classe ? " " + o.classe : "") },
     h("summary", {}, icone("droite", "chevron"),
@@ -458,7 +460,8 @@ export function groupe(o, fabriquer) {
     ajouter(corps, [...[c].flat().filter(Boolean)]);
   };
   d.addEventListener("toggle", () => {
-    if (d.open) { construire(); if (cle) groupesOuverts.add(cle); } else if (cle) groupesOuverts.delete(cle);
+    if (d.open) construire();
+    if (cle) groupesOuverts.set(cle, d.open);
   });
   if (ouvert) { d.open = true; construire(); }
   return d;

@@ -12,6 +12,7 @@ import {
 } from "./ui.js";
 import { affiche, insignes, nomAffiche, metiersDe, gradeDe, insigneImage, STATUTS_AFFICHE, monogramme, primeNoeud, logo } from "./affiche.js";
 import { ouvrirFiche } from "./fiche.js";
+import { groupes as rangerGroupes, outilsGroupes, avance } from "./rangement.js";
 import { choisirTextes } from "./textes.js";
 import { avecVerrou, protegerEditeur, protegerZone, siLibre } from "./direct.js";
 
@@ -26,8 +27,8 @@ export function affiches(vue, ctx) {
   ajouter(vue, [haut, h("div", { classe: "outils" },
     recherche(f.q, "Nom, surnom, nom Roblox, métier…", (q) => { f.q = q; changer(); }),
     segment(f.vue, [["metier", "Par métier"], ["tout", "Toutes"], ["corbeille", "Corbeille"]], (v) => { f.vue = v; changer(); }, "Présentation"),
-    liste({ valeur: f.statut, label: "Statut", options: [{ v: "tous", l: "Tous les statuts" }, ...Object.entries(STATUTS_AFFICHE).map(([v, l]) => ({ v, l }))], changer: (v) => { f.statut = v; changer(); } }),
-    liste({ valeur: f.tri, label: "Tri", options: [{ v: "nom", l: "Nom A → Z" }, { v: "prime", l: "Prime la plus haute" }, { v: "recent", l: "Modifiées récemment" }], changer: (v) => { f.tri = v; changer(); } }),
+    avance(liste({ valeur: f.statut, label: "Statut", options: [{ v: "tous", l: "Tous les statuts" }, ...Object.entries(STATUTS_AFFICHE).map(([v, l]) => ({ v, l }))], changer: (v) => { f.statut = v; changer(); } })),
+    avance(liste({ valeur: f.tri, label: "Tri", options: [{ v: "nom", l: "Nom A → Z" }, { v: "prime", l: "Prime la plus haute" }, { v: "recent", l: "Modifiées récemment" }], changer: (v) => { f.tri = v; changer(); } })),
     peutAgir() ? bouton("Nouvelle affiche", { classe: "principal", icone: "plume", onclick: () => editer(null) }) : null), resultats]);
   let premier = true;
   const maj = async () => {
@@ -59,14 +60,16 @@ export function affiches(vue, ctx) {
       for (const a of l) for (const k of (metiersDe(a, cat).length ? metiersDe(a, cat) : ["__aucun"])) { if (!groupes.has(k)) groupes.set(k, []); groupes.get(k).push(a); }
       const ordre = t ? elementsDe(cat, t.cle).map((e) => e.cle) : [];
       const cles = [...groupes.keys()].sort((a, b) => (a === "__aucun") - (b === "__aucun") || ((ordre.indexOf(a) + 1 || 999) - (ordre.indexOf(b) + 1 || 999)) || a.localeCompare(b));
-      remplacer(resultats, h("p", { classe: "aide" }, "Une affiche à plusieurs métiers apparaît dans chacun. Touche une affiche pour la voir en grand, la modifier ou voir son historique."),
-        ...cles.map((k) => {
-          const e = t && k !== "__aucun" ? element(cat, t.cle, k) : null;
-          return groupe({ titre: k === "__aucun" ? "Sans métier" : e ? e.nom : sansEmoji(k), compte: groupes.get(k).length,
-            visuel: e ? insigneImage(e, "groupe-visuel") : null, icone: e ? null : "drapeau",
-            info: e && e.nouveau_movie3 ? "nouveau · Movie 3" : "", cle: "aff-m-" + k, ouvert: cles.length <= 4 || !!f.q || cles.indexOf(k) < 2 ? true : undefined },
-          () => paginer("aff-m-" + k, groupes.get(k), carte, { classe: "grille affiches", pas: 18 }));
-        }));
+      // Un métier par groupe : les deux premiers ouverts (tous s'il y en a peu), « Tout déplier / Tout replier ».
+      const zone = h("div", { classe: "groupes-zone" }, rangerGroupes(cles.map((k) => {
+        const e = t && k !== "__aucun" ? element(cat, t.cle, k) : null;
+        return { titre: k === "__aucun" ? "Sans métier" : e ? e.nom : sansEmoji(k), compte: groupes.get(k).length,
+          visuel: e ? insigneImage(e, "groupe-visuel") : null, icone: e ? null : "drapeau",
+          info: e && e.nouveau_movie3 ? "nouveau · Movie 3" : "", cle: "aff-m-" + k,
+          contenu: () => paginer("aff-m-" + k, groupes.get(k), carte, { classe: "grille affiches", pas: 18 }) };
+      }), { ouverts: cles.length <= 4 ? cles.length : 2, forcer: !!f.q }));
+      remplacer(resultats, h("div", { classe: "rangee entre" }, h("p", { classe: "aide avance" }, "Une affiche à plusieurs métiers apparaît dans chacun. Touche une affiche pour la voir en grand, la modifier ou voir son historique."),
+        cles.length > 1 ? outilsGroupes(zone) : null), zone);
     }
     if (premier) {
       premier = false;
@@ -394,10 +397,10 @@ export function catalogue(vue) {
   ajouter(vue, [haut, h("div", { classe: "outils" },
     recherche(f.q, "Chercher dans tout le catalogue…", (q) => { f.q = q; changer(); }),
     liste({ valeur: f.statut, label: "Statut", options: [{ v: "tous", l: "Tous" }, { v: "confirme", l: "Confirmés" }, { v: "a_verifier", l: "À vérifier" }], changer: (v) => { f.statut = v; changer(); } }),
-    caseACocher("Nouveautés du Movie 3", f.movie3, (v) => { f.movie3 = v; changer(); }),
-    caseACocher("Montrer les retirés", f.inactifs, (v) => { f.inactifs = v; changer(); }),
+    avance(caseACocher("Nouveautés du Movie 3", f.movie3, (v) => { f.movie3 = v; changer(); })),
+    avance(caseACocher("Montrer les retirés", f.inactifs, (v) => { f.inactifs = v; changer(); })),
     peutAgir() ? bouton("Ajouter un élément", { classe: "principal", icone: "ajouter", onclick: () => editerElement(null, f.type) }) : null,
-    peutAgir() ? bouton("Les types", { icone: "filtrer", onclick: () => gererTypes() }) : null), onglets, resultats, creditsRell()]);
+    peutAgir() ? bouton("Les types", { icone: "filtrer", classe: "avance", onclick: () => gererTypes() }) : null), onglets, resultats, creditsRell()]);
   const maj = async () => {
     const cat = await charger("catalogue");
     if (!resultats.isConnected) return;
@@ -410,20 +413,27 @@ export function catalogue(vue) {
       tuile({ cle: "c2", lib: "À vérifier", val: aVerifier, icone: "attention", sous: "pas encore confirmés", teinte: aVerifier ? "#a8641c" : "#3f6b3a", clic: () => { f.statut = "a_verifier"; changer(); } }),
       tuile({ cle: "c3", lib: "Nouveautés · Movie 3", val: neufs, icone: "etoile", teinte: "#7a5a22", clic: () => { f.movie3 = true; changer(); } }),
       tuile({ cle: "c4", lib: "Mis à jour", texte: cat.maj ? depuis(cat.maj) : "—", icone: "calendrier", teinte: "#4a5560" })),
-      h("p", { classe: "aide" }, "Uniquement ce qui existe dans le jeu. Ce qui n'est pas encore sûr porte le tampon « à vérifier », avec sa source. Les affiches ne proposent que ces éléments."));
+      h("p", { classe: "aide avance" }, "Uniquement ce qui existe dans le jeu. Ce qui n'est pas encore sûr porte le tampon « à vérifier », avec sa source. Les affiches ne proposent que ces éléments."));
     const garde = (e) => (f.inactifs || e.actif !== false) && (f.statut === "tous" || e.statut === f.statut) && (!f.movie3 || e.nouveau_movie3)
       && contient([e.nom, e.nom_en, e.description, e.categorie, e.rarete, e.source].join(" "), f.q);
     const nb = Object.fromEntries(types.map((t) => [t.cle, els.filter((e) => e.type === t.cle && garde(e)).length]));
     remplacer(onglets, h("button", { classe: "etiquette", type: "button", role: "tab", "aria-selected": String(!f.type), onclick: () => { f.type = ""; changer(); } }, icone("catalogue"), "Tout", h("span", { classe: "compteur calme" }, String(Object.values(nb).reduce((a, b) => a + b, 0)))),
       ...types.map((t) => h("button", { classe: "etiquette", type: "button", role: "tab", "aria-selected": String(f.type === t.cle), onclick: () => { f.type = t.cle; changer(); } }, sansEmoji(t.nom), h("span", { classe: "compteur calme" }, String(nb[t.cle] || 0)))));
     const visibles = types.filter((t) => !f.type || t.cle === f.type);
-    const blocs = visibles.map((t) => {
+    const grilleDe = (t, l) => (l.length ? paginer("cat-" + t.cle, l, (e) => carteElement(e), { classe: "grille catalogue-grille egale", pas: 24 })
+      : vide("Rien ici", f.q || f.statut !== "tous" || f.movie3 ? "Change le filtre ou la recherche." : "Ajoute le premier élément de ce type."));
+    if (f.type) {
+      const t = visibles[0];
+      remplacer(resultats, t ? grilleDe(t, elementsDe(cat, t.cle).filter(garde)) : vide("Rien ici", "Change le filtre ou la recherche."));
+      return;
+    }
+    // Tout le catalogue : un type par groupe (le premier ouvert, tous si un filtre est posé), « Tout déplier / Tout replier ».
+    const defs = visibles.map((t) => {
       const l = elementsDe(cat, t.cle).filter(garde);
-      if (!l.length && (!f.type || f.q)) return null;
-      const contenu = l.length ? paginer("cat-" + t.cle, l, (e) => carteElement(e), { classe: "grille catalogue-grille", pas: 24 }) : vide("Rien ici", "Ajoute le premier élément de ce type.");
-      return f.type ? contenu : groupe({ titre: sansEmoji(t.nom), compte: l.length, cle: "cat-g-" + t.cle, info: t.nom_en || "", ouvert: visibles.length <= 2 || !!f.q || f.movie3 || f.statut !== "tous" || visibles.indexOf(t) === 0 ? true : undefined }, () => contenu);
+      return l.length ? { titre: sansEmoji(t.nom), compte: l.length, cle: "cat-g-" + t.cle, info: t.nom_en || "", contenu: () => grilleDe(t, l) } : null;
     }).filter(Boolean);
-    remplacer(resultats, ...(blocs.length ? blocs : [vide("Rien ici", "Change le filtre ou la recherche.")]));
+    const zone = h("div", { classe: "groupes-zone" }, rangerGroupes(defs, { ouverts: defs.length <= 2 ? defs.length : 1, forcer: !!f.q || f.movie3 || f.statut !== "tous" }));
+    remplacer(resultats, ...(defs.length ? [defs.length > 1 ? h("div", { classe: "rangee droite" }, outilsGroupes(zone)) : null, zone] : [vide("Rien ici", "Change le filtre ou la recherche.")]));
   };
   maj();
   return { maj, majJeu: maj, majFile: maj };
@@ -506,6 +516,8 @@ async function editerElement(e, typeParDefaut) {
       emettre("jeu", { nom: "catalogue" });
     } })]);
 }
+/** Ouvrir un élément du catalogue depuis la recherche : sa fiche, à modifier. */
+export const ouvrirElement = (e) => editerElement(e);
 function televerser(fin) {
   const entree = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif" });
   entree.addEventListener("change", async () => {
@@ -595,7 +607,7 @@ export function roles(vue) {
         : groupe({ titre: sansEmoji(t.nom), compte: lies, info: compte(lies, "lié", "liés") + " sur " + nombre(els.length), cle: "roles-" + t.cle }, contenu);
     };
     remplacer(zone,
-      h("p", { classe: "aide" }, "Chaque métier a son rôle Discord : il est créé au premier membre qui choisit ce métier, donné à ceux qui l'ont, retiré à ceux qui ne l'ont plus. Quand quelqu'un quitte le clan, il perd tous les rôles du clan : ses métiers et les rôles rattachés ci-dessous. Tout est noté au journal."),
+      h("p", { classe: "aide avance" }, "Chaque métier a son rôle Discord : il est créé au premier membre qui choisit ce métier, donné à ceux qui l'ont, retiré à ceux qui ne l'ont plus. Quand quelqu'un quitte le clan, il perd tous les rôles du clan : ses métiers et les rôles rattachés ci-dessous. Tout est noté au journal."),
       // Ce que le bot écrit autour des métiers se réécrit d'ici aussi (Textes & noms).
       h("div", { classe: "rangee" },
         bouton("Les textes du choix du métier", { classe: "p discret", icone: "plume", titre: "Le choix dans le guide, les réponses au membre, la carte de l'acceptation (Textes & noms)",
@@ -603,7 +615,9 @@ export function roles(vue) {
         bouton("Les textes du guide du clan", { classe: "p discret", icone: "plume", titre: "Le message d'accueil du clan : chaque ligne et chaque bouton (Textes & noms)",
           onclick: () => choisirTextes({ groupe: "guide", titre: "Le guide du clan" }) })),
       !enLigne() ? bandeau("Hors ligne : les rôles se règlent avec la connexion (ils changent tout de suite sur Discord).", "") : null,
-      blocReglagesMetiers(M, rolesD, (b) => { dernierBilan = b; maj(true); }),
+      // Les réglages, rarement touchés : repliés, leur état en résumé ; ouverts d'office quand quelque chose cloche.
+      groupe({ titre: "Les réglages", icone: "cle", cle: "roles-reglages", classe: "groupe-reglages", info: resumeReglagesMetiers(M), ouvert: reglagesMetiersAlerte(M) ? true : undefined },
+        () => blocReglagesMetiers(M, rolesD, (b) => { dernierBilan = b; maj(true); })),
       dernierBilan ? bandeau(dernierBilan, "vert") : null,
       tm ? blocType(tm) : vide("Pas de type « Métiers » dans le catalogue", "Ajoute-le dans Catalogue RELL Seas, « Les types »."),
       ...types.filter((t) => t !== tm).map(blocType));
@@ -612,6 +626,16 @@ export function roles(vue) {
   maj();
   return { maj: () => maj(false), majJeu: () => maj(false) };
 }
+
+/** Le résumé des réglages, lisible le groupe replié : « attribution automatique · 2 métiers par membre ». */
+function resumeReglagesMetiers(M) {
+  if (!M || M.erreur) return "indisponibles";
+  const n = Math.max(1, Math.min(5, Number(M.max_metiers) || 2));
+  return (M.auto !== false ? "attribution automatique" : "attribution à la main") + " · " + compte(n, "métier", "métiers") + " par membre";
+}
+/** Ce qui doit se voir sans rien ouvrir : rôle du clan absent, permission manquante, rôle rattaché en défaut. */
+const reglagesMetiersAlerte = (M) => !M || !!M.erreur || M.actif === false || M.gestion === false
+  || (M.rattaches_details || []).some((d) => (M.rattaches || []).map(String).includes(String(d.id)) && (!d.existe || !d.attribuable || d.non_membres));
 
 /** Les réglages des rôles de métier (jamais hors ligne). */
 function blocReglagesMetiers(M, rolesD, apres) {
@@ -669,7 +693,7 @@ function blocReglagesMetiers(M, rolesD, apres) {
     h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Rôles rattachés au clan"),
       h("span", { classe: "champ-aide" }, "Coche les rôles qui partent avec le clan : quand quelqu'un quitte le clan, ils lui sont retirés en même temps que ses métiers."),
       candidats.length ? grille : h("p", { classe: "aide" }, "Aucun rôle attribuable trouvé."), ...avisRattaches, renommer),
-    h("p", { classe: "meta" }, icone(M.icones_roles ? "succes" : "info", "ic-p"), M.icones_roles
+    h("p", { classe: "meta avance" }, icone(M.icones_roles ? "succes" : "info", "ic-p"), M.icones_roles
       ? " Ce serveur peut afficher une icône sur les rôles : chaque rôle de métier prend l'icône officielle de son métier."
       : " Ce serveur ne peut pas encore afficher d'icône sur les rôles (il faut le niveau 2 de boost) : les rôles de métier n'ont que leur couleur."),
     derniere ? h("p", { classe: "meta" }, icone("synchro", "ic-p"), " Dernière vérification " + depuis(derniere.quand) + " : " + compte(derniere.verifies || derniere.membres || 0, "membre vérifié", "membres vérifiés")

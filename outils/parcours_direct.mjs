@@ -122,6 +122,10 @@ async function attendre(fn, ms = 15000, pas = 300) {
 
 // ─── Les gestes (dans la pancarte ouverte, sinon la page) ───────────────────
 const ZONE = "([...document.querySelectorAll('dialog[open]')].pop() || document)";
+// Les liens du questionnaire sont rangés dans un groupe replié (rangement.js, 26/10) : on le déplie, puis on attend
+// le bouton « Enregistrer les liens ».
+const PRET_LIENS = "(() => { for (const d of document.querySelectorAll('#contenu details.groupe')) if (d.querySelector('summary').textContent.includes('Les liens')) d.open = true;"
+  + " return [...document.querySelectorAll('#contenu button')].some((b) => /Enregistrer les liens/.test(b.textContent)); })()";
 const VISIBLE = "(x) => x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden' && !x.closest('[inert]')";
 const cliquer = (n, selecteur, texte) => n.evaluer(`(() => { const z = ${ZONE}; const vis = ${VISIBLE};
   const el = [...z.querySelectorAll(${JSON.stringify(selecteur)})].find((x) => vis(x) && !x.disabled && (x.textContent || x.getAttribute("aria-label") || "").replace(/\\s+/g, " ").includes(${JSON.stringify(texte)}));
@@ -324,7 +328,7 @@ async function principal() {
 
     await etape("Une zone de la page : A touche aux liens du questionnaire, B la voit fermée ; A change de page → libre aussitôt", [A, B], async () => {
       await A.evaluer("(() => { if (document.querySelector('.direct-liste')) document.querySelector('.direct-bord').click(); return true; })()");
-      const PRET = "[...document.querySelectorAll('#contenu button')].some((b) => /Enregistrer les liens/.test(b.textContent))";
+      const PRET = PRET_LIENS;
       await Promise.all([A.s("Page.navigate", { url: SITE + "#equipage/candidatures/questionnaire" }), B.s("Page.navigate", { url: SITE + "#equipage/candidatures/questionnaire" })]);
       if (!await attendre(() => A.evaluer(PRET), 15000) || !await attendre(() => B.evaluer(PRET), 15000)) return { ok: false, detail: "le questionnaire ne s'affiche pas" };
       // A tape dans un titre de lien (sans enregistrer) : la main est prise à la première saisie.
@@ -345,7 +349,7 @@ async function principal() {
     });
 
     await etape("A ferme la page en pleine modification : la main est rendue aussitôt (pas au bout de la grâce de 10 s)", [A, B], async () => {
-      const PRET = "[...document.querySelectorAll('#contenu button')].some((b) => /Enregistrer les liens/.test(b.textContent))";
+      const PRET = PRET_LIENS;
       await A.s("Page.navigate", { url: SITE + "#equipage/candidatures/questionnaire" });
       if (!await attendre(() => A.evaluer(PRET), 15000)) return { ok: false, detail: "le questionnaire ne s'affiche pas chez A" };
       await A.evaluer(`(() => { const b = [...document.querySelectorAll("#contenu button")].find((x) => /Ajouter un lien/.test(x.textContent)); if (b) b.click(); return !!b; })()`);
