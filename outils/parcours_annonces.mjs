@@ -376,7 +376,7 @@ async function parcours(o) {
   await evaluer(o, AIDE);
   await g(o, `__p.saisir('.composeur-form input.saisie', ${JSON.stringify(ANNONCE)}); __p.saisir('#composeur-texte', 'Le **Movie 3** est là.'); __p.radio('mention-annonce', 'clan'); return 1;`);
   const image = join(SORTIE, "image-essai.png");
-  writeFileSync(image, png(480, 180));
+  writeFileSync(image, png(1600, 640));   // une bannière aux dimensions exactes (bannieres.py : 1600 × 640)
   await o.s("Page.setInterceptFileChooserDialog", { enabled: true });
   const choisi = new Promise((ok) => { const f = (d) => { if (d.method === "Page.fileChooserOpened") { ecouteurs.splice(ecouteurs.indexOf(f), 1); ok(d.params); } }; ecouteurs.push(f); });
   await g(o, "__p.clic('Ajouter une image'); return 1;", true);

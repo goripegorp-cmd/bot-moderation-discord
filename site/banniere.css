@@ -1,0 +1,93 @@
+/* La bannière aux dimensions exactes (26/10/2026) : 1600 × 640 px, 5:2, partout (bannieres.py, banniere.js).
+   Son cadre a le MÊME rapport que l'image : rien d'écrasé, rien de rogné au hasard. Une image d'avant, d'un autre
+   rapport (« hors-format »), s'y montre entière, sur le papier. Aucun style en ligne (CSP). */
+
+/* ─── Le cadre ─────────────────────────────────────────────────────── */
+.banniere-cadre {
+  position: relative; display: block; margin: 0; width: 100%; min-width: 0; aspect-ratio: 5 / 2; overflow: hidden;
+  border: 1px solid var(--trait); border-radius: 3px; background: var(--papier-2);
+}
+.banniere-cadre > img, .image-choix .banniere-cadre > img {   /* (le cadre décide : pas les règles d'une image seule) */
+  display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover;
+  border: 0; border-radius: 0; background: none; box-shadow: none;
+}
+.banniere-cadre.hors-format > img, .image-choix .banniere-cadre.hors-format > img { object-fit: contain; }
+.banniere-vide {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px; text-align: center; color: var(--encre-3); font: italic 400 15px/1.3 var(--police-texte);
+  border: 2px dashed var(--trait-fort); border-radius: 3px; background: rgba(248, 240, 221, .6);
+}
+.banniere-vide .ic { width: 30px; height: 30px; color: var(--encre-3); }
+
+/* ─── Le choix dans un formulaire ──────────────────────────────────── */
+.banniere-champ { display: grid; gap: 6px; min-width: 0; }
+.banniere-consigne {
+  display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 10px; border-left: 4px solid var(--laiton);
+  border-radius: 0 3px 3px 0; background: rgba(248, 240, 221, .85); font: 600 15px/1.3 var(--police-texte); color: var(--encre);
+}
+.banniere-consigne .ic { flex: none; width: 20px; height: 20px; color: var(--encre-2); }
+.banniere-consigne > span { min-width: 0; overflow-wrap: anywhere; }
+.banniere-choix { justify-items: stretch; }
+.banniere-choix .banniere-cadre { max-width: 560px; }
+.banniere-note:empty { display: none; }
+
+/* ─── Les actualités du site de l'équipage : la bannière en vignette 5:2 (exacte), le sceau dans une case de la même
+   taille quand il n'y a pas d'image — des lignes alignées ; au téléphone, la bannière en tête de la carte ─ */
+.actus { align-items: stretch; }
+.actu { --vignette: clamp(140px, 38%, 250px); grid-template-columns: var(--vignette) minmax(0, 1fr); }
+.actu > .actu-banniere, .actu > .actu-sceau { width: 100%; height: auto; aspect-ratio: 5 / 2; }
+.actu > .actu-banniere { border-radius: 2px; }
+@media (max-width: 480px) {
+  .actu.avec-banniere { grid-template-columns: minmax(0, 1fr); }
+  .actu:not(.avec-banniere) { grid-template-columns: 64px minmax(0, 1fr); }
+  .actu:not(.avec-banniere) > .actu-sceau { aspect-ratio: auto; height: 58px; }
+}
+.actu-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Le cadenas de la présence en direct (quelqu'un modifie cette publication) : sur SA carte, pendu au-dessus du titre. */
+.actu { position: relative; }
+.actu.direct-sous-verrou, .actu.direct-chez-moi { padding-top: 28px; }
+.actu > .direct-badge { padding: 2px 0 2px 3px; }   /* le sceau penché (−8°) tient dans son étiquette : 34 px → 38,4 px */
+.actu-liens { display: flex; flex-wrap: wrap; gap: 6px 14px; min-width: 0; }
+.actu-liens a { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; overflow-wrap: anywhere; color: var(--mer, #1f4e5a); font-weight: 600; }
+@media (pointer: coarse) { .actu-liens a { min-height: 44px; } }
+.lecture-actu { display: grid; gap: 12px; min-width: 0; }
+
+/* ─── Le bandeau de l'Accueil avec sa bannière : le cadre exact, plafonné à la moitié de l'écran ─ */
+.bandeau-eq.avec-image {
+  min-height: 0; aspect-ratio: 5 / 2; width: min(100%, 1150px, 140vh); justify-self: center;
+  background: var(--bois-2);
+}
+@media (max-width: 899px) {   /* le texte sous l'image : jamais posé dessus, il la rognerait */
+  .bandeau-eq.avec-image { aspect-ratio: auto; width: 100%; padding: 0; align-items: stretch; }
+  .bandeau-eq.avec-image::after { display: none; }
+  .bandeau-eq.avec-image::before { inset: 6px; }
+  .bandeau-eq.avec-image .bandeau-eq-image { position: static; z-index: auto; height: auto; aspect-ratio: 5 / 2; }
+  .bandeau-eq.avec-image .bandeau-eq-texte { max-width: none; padding: 14px 16px 18px; background: var(--bois-2) url(textures/bois.webp); background-size: 240px auto; }
+}
+
+/* ─── L'éditeur d'une publication (site de l'équipage) ─────────────── */
+.editeur-publication { display: grid; gap: 16px; min-width: 0; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1100px) { .editeur-publication { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+.editeur-publication .apercu-cadre { min-width: 0; }
+.editeur-publication > .formulaire-colonne, .editeur-publication > .apercu-colonne { min-width: 0; }
+.bascule-editeur, .bascule-ligne { display: none; }
+@media (max-width: 1099px) {   /* une seule colonne : « Rédiger » ou « Aperçu » */
+  .bascule-ligne { display: block; }
+  .segment.bascule-editeur { display: inline-flex; }
+  .editeur-publication:not(.voir-apercu) > .apercu-colonne { display: none; }
+  .editeur-publication.voir-apercu > .formulaire-colonne { display: none; }
+}
+.apercu-site .lecture-actu { padding: 12px; }
+.apercu-site .lecture-actu .actu-titre { margin: 0; }
+.liens-editeur > .bouton { justify-self: start; }
+.liens-editeur { display: grid; gap: 8px; min-width: 0; }
+.lien-ligne { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; gap: 6px; align-items: center; min-width: 0; }
+@media (max-width: 559px) { .lien-ligne { grid-template-columns: minmax(0, 1fr) auto; } .lien-ligne > .lien-url { grid-column: 1 / 2; } }
+.compteur-texte { font-size: 13.5px; color: var(--encre-2); }
+.compteur-texte.alerte { color: var(--cire); font-weight: 700; }
+.apercu-onglets { justify-self: start; }
+.apercu-site { display: grid; gap: 10px; min-width: 0; }
+.apercu-site .actu { max-width: 520px; }
+.publication-etat { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-width: 0; }
+.publication-etat > .meta { margin: 0; min-width: 0; }
+.publication-etat > .bandeau { flex: 1 1 100%; }

@@ -63,6 +63,33 @@ const GESTES_DIRECTION = ["Modifier l'accueil", "Publier une actualité", "Ajout
 const cliquerTexte = (selecteur, texte) => "(async () => { const b = [...document.querySelectorAll(" + JSON.stringify(selecteur) + ")].find((x) => x.textContent.includes("
   + JSON.stringify(texte) + ")); if (!b) throw new Error('introuvable : ' + " + JSON.stringify(texte) + "); b.scrollIntoView({ block: 'center' }); b.click(); await new Promise((r) => setTimeout(r, 600)); })()";
 const MODE_EDITION = cliquerTexte("button", "Modifier l'accueil");
+//  Les actualités de l'accueil en vue ; l'éditeur de l'annonce publiée « Le Movie 3 » (son « Modifier »), aperçu Discord
+//  rendu par le serveur — ou celui du site ; douze actualités de plus (idempotent : 14 de la direction au total, une
+//  sur deux avec la bannière de démonstration), l'accueil relu par son propre module.
+const VOIR_ACTUS = "(async () => { const b = document.querySelector('.bloc-actualites'); if (!b) throw new Error('bloc des actualités absent'); b.scrollIntoView({ block: 'start' }); await new Promise(r => setTimeout(r, 300)); return 1; })()";
+const OUVRIR_EDITEUR_PUBLICATION = (mode) => "(async () => { const c = [...document.querySelectorAll('article.actu')].find((a) => a.textContent.includes('Le Movie 3'));"
+  + " if (!c) throw new Error('annonce publiée absente'); const b = [...c.querySelectorAll('button')].find((x) => x.textContent.includes('Modifier'));"
+  + " if (!b) throw new Error('« Modifier » absent de l\\'annonce publiée'); b.click();"
+  + " for (let i = 0; i < 40 && !document.querySelector('dialog[open] .discord-carte'); i++) await new Promise(r => setTimeout(r, 150));"
+  + (mode !== "form" ? " const ap = [...document.querySelectorAll('dialog[open] .bascule-editeur button')].find((x) => x.textContent.includes('Aperçu')); if (ap && ap.getClientRects().length) { ap.click(); await new Promise(r => setTimeout(r, 300)); }" : "")
+  + (mode === "site" ? " [...document.querySelectorAll('dialog[open] .apercu-onglets button')].find((x) => x.textContent.includes('Sur le site')).click(); await new Promise(r => setTimeout(r, 500));" : "")
+  + " return 1; })()";
+const TENIR_PUBLICATION = "(async () => { const a = await fetch('/tableau/equipage/api/accueil', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json());"
+  + " const x = (((a.donnees || {}).actualites || {}).auto || []).find((y) => y.titre.includes('Le Movie 3')); if (!x) throw new Error('annonce publiée absente');"
+  + " const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/tableau/espace/direct'); window.__essaiVerrou = ws;"
+  + " await new Promise((ok, ko) => { ws.onopen = ok; ws.onerror = ko; }); ws.send(JSON.stringify({ t: 'bonjour', page: 'equipage/annonces' }));"
+  + " ws.send(JSON.stringify({ t: 'prendre', o: 'evenement:' + x.id.split('-').pop(), ti: 'la publication « Le Movie 3 »' }));"
+  + " for (let i = 0; i < 30 && !document.querySelector('.actu .direct-badge:not([hidden])'); i++) await new Promise(r => setTimeout(r, 200)); return 1; })()";
+//  La carte sous cadenas au milieu de l'écran (au téléphone, elle est loin sous le début du bloc).
+const VOIR_VERROU = "(async () => { const c = document.querySelector('.actu.direct-chez-moi, .actu.direct-sous-verrou'); if (!c) throw new Error('carte sous cadenas absente');"
+  + " c.scrollIntoView({ block: 'center' }); await new Promise(r => setTimeout(r, 300)); return 1; })()";
+const BEAUCOUP_ACTUS ="(async () => { const lire = () => fetch('/tableau/equipage/api/accueil', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json());"
+  + " const a = await lire(); const dir = ((a.donnees || {}).actualites || {}).direction || []; const img = ((dir.find((x) => x.image) || {}).image || '').replace(/^media\\//, '');"
+  + " for (let k = dir.length; k < 14; k++) { const r = await fetch('/tableau/espace/api/equipage/actualite', { method: 'POST', credentials: 'same-origin',"
+  + " headers: { 'Content-Type': 'application/json', 'X-Tableau': '1' }, body: JSON.stringify({ titre: 'Nouvelle du bord n° ' + (k + 1) + (k % 3 ? '' : ' : un titre bien plus long, pour voir la carte passer à la ligne'),"
+  + " texte: 'Une ligne de nouvelles pour tout l\\'équipage, la numéro ' + (k + 1) + '. Rendez-vous au port à la tombée de la nuit.', image: k % 2 ? img : '' }) });"
+  + " if (!r.ok) throw new Error('actualité refusée : ' + r.status); }"
+  + " const m = await import('/tableau/espace/s/equipage_accueil.js'); await m.recharger(true); await new Promise(r => setTimeout(r, 500)); return 1; })()";
 const SCENES_EQUIPAGE = [
   { nom: "site-equipage-accueil", ...EQ, ancre: "#accueil", interdits: GESTES_DIRECTION },
   { nom: "site-equipage-analyses", ...EQ, ancre: "#accueil", interdits: GESTES_DIRECTION,
@@ -94,10 +121,31 @@ const SCENES_EQUIPAGE = [
   { nom: "vitrine-affiche", ...VITRINE, geste: "(async () => { document.querySelector('button.affiche').click(); return 1; })()" },
   { nom: "vitrine-hierarchie", ...VITRINE, geste: CHOISIR_TRI("hiérarchie"), geste2: "(() => { document.querySelector('.vitrine-mur').scrollIntoView({ block: 'start' }); return 1; })()" },
   { nom: "vitrine-copier-lien", ...VITRINE, geste: "(async () => { document.querySelector('#entete-outils .lien-equipage').click(); await new Promise(r => setTimeout(r, 400)); return 1; })()" },
+  //  26/10/2026 : modifier une annonce PUBLIÉE depuis l'accueil (la tête), la bannière aux dimensions exactes (1600 × 640, 5:2)
+  //  partout — les actualités en lecture et en édition, beaucoup d'actualités, l'éditeur et ses deux aperçus, le bandeau.
+  { nom: "site-equipage-actualites-tete", ...EQ_TETE, ancre: "#accueil", geste: VOIR_ACTUS },
+  { nom: "site-equipage-actualites-edition", ...EQ_TETE, ancre: "#accueil", geste: MODE_EDITION, geste2: VOIR_ACTUS },
+  { nom: "site-equipage-editeur-publication", ...EQ_TETE, ancre: "#accueil", geste: VOIR_ACTUS, geste2: OUVRIR_EDITEUR_PUBLICATION("form") },
+  { nom: "site-equipage-editeur-publication-discord", ...EQ_TETE, ancre: "#accueil", geste: VOIR_ACTUS, geste2: OUVRIR_EDITEUR_PUBLICATION("discord") },
+  { nom: "site-equipage-editeur-publication-site", ...EQ_TETE, ancre: "#accueil", geste: VOIR_ACTUS, geste2: OUVRIR_EDITEUR_PUBLICATION("site") },
+  { nom: "site-equipage-editeur-bandeau", ...EQ_TETE, ancre: "#accueil", geste: MODE_EDITION, geste2: cliquerTexte(".bloc-bandeau .barre-bloc button", "Modifier") },
+  //  La publication tenue ailleurs (un autre onglet de la tête la modifie) : le cadenas pend sur SA carte.
+  { nom: "site-equipage-actualite-verrouillee", ...EQ_TETE, ancre: "#accueil", geste: TENIR_PUBLICATION, geste2: VOIR_VERROU,
+    apres: "(() => { if (window.__essaiVerrou) window.__essaiVerrou.close(); return 1; })()" },
+  { nom: "site-equipage-actualites-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: VOIR_ACTUS },
+  { nom: "site-equipage-lire-annonce-membre", ...EQ, ancre: "#accueil", interdits: [...GESTES_DIRECTION, "Modifier"], geste: cliquerTexte("button.lien-titre", "Le Movie 3") },
+  { nom: "site-equipage-actualites-nombreuses", ...EQ_TETE, ancre: "#accueil", geste: BEAUCOUP_ACTUS, geste2: VOIR_ACTUS },
+  { nom: "site-equipage-toutes-nombreuses", ...EQ_TETE, ancre: "#accueil", geste: BEAUCOUP_ACTUS, geste2: cliquerTexte("button", "Toutes les actualités") },
 ];
 
 // Ouvrir la première affiche (les groupes par métier sont repliés au départ).
 const OUVRIR_AFFICHE ="(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.affiche').click(); })()";
+// « Demande de recrutement » : ouvrir un groupe de la zone (par son titre), tous ses groupes, ceux du parcours ; un bouton
+// de la fenêtre ouverte.
+const OUVRIR_GROUPE_ZONE = (titre) => `(async () => { const d = [...document.querySelectorAll("#contenu details.groupe")].find((x) => x.querySelector("summary").textContent.includes(${JSON.stringify(titre)})); if (!d) throw new Error("groupe absent : " + ${JSON.stringify(titre)}); d.open = true; await new Promise((r) => setTimeout(r, 700)); d.scrollIntoView({ block: "start" }); return 1; })()`;
+const OUVRIR_GROUPES_ZONE = "(async () => { for (const d of document.querySelectorAll('#contenu .zr-scene details.groupe')) d.open = true; await new Promise((r) => setTimeout(r, 700)); return 1; })()";
+const OUVRIR_GROUPES_PARCOURS = "(async () => { for (const d of document.querySelectorAll('#contenu .zr-parcours details.groupe')) d.open = true; await new Promise((r) => setTimeout(r, 700)); document.querySelector('.zr-parcours').scrollIntoView({ block: 'start' }); return 1; })()";
+const CLIQUER_DIALOGUE = (texte) => `(async () => { await new Promise((r) => setTimeout(r, 900)); const b = [...document.querySelectorAll("dialog[open] button")].reverse().find((x) => x.textContent.includes(${JSON.stringify(texte)})); if (!b) throw new Error("bouton absent : " + ${JSON.stringify(texte)}); b.click(); await new Promise((r) => setTimeout(r, 900)); return 1; })()`;
 // Une ligne compacte (rangement.js) ou une ancienne carte, cliquable, dont le texte contient… (la première sinon).
 const CLIQUER_LIGNE = (texte) => `(() => { const l = [...document.querySelectorAll('.lc-clic, .feuillet.lien')].filter((x) => x.getClientRects().length); (l.find((x) => x.textContent.includes(${JSON.stringify(texte)})) || l[0]).click(); return 1; })()`;
 // La recherche universelle, ouverte au clavier (Ctrl+K), avec un texte tapé.
@@ -139,8 +187,6 @@ const SCENES = [
   { nom: "fenetre-fermer-sessions", ancre: "#port/securite", geste: "[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Fermer toutes les autres sessions')).click()" },
   { nom: "equipage-membres", ancre: "#equipage/membres" },
   { nom: "equipage-fiches", ancre: "#equipage/fiches" },
-  { nom: "equipage-candidatures", ancre: "#equipage/candidatures" },
-  { nom: "equipage-questionnaire", ancre: "#equipage/candidatures/questionnaire" },
   { nom: "equipage-tickets", ancre: "#equipage/tickets" },
   { nom: "equipage-annonces", ancre: "#equipage/annonces" },
   { nom: "equipage-annonces-avenir", ancre: "#equipage/annonces/a-venir" },
@@ -150,6 +196,18 @@ const SCENES = [
   { nom: "equipage-annonces-ouvert", ancre: "#equipage/annonces/brouillons", geste: OUVRIR_BROUILLON },
   { nom: "fenetre-publier", ancre: "#equipage/annonces/brouillons", geste: OUVRIR_BROUILLON,
     geste2: "[...document.querySelectorAll('.composeur-actions button')].find(b => b.textContent.includes('Publier')).click()" },
+  // « Demande de recrutement » (26/10/2026) : les quatre sous-onglets, leurs groupes ouverts.
+  { nom: "recrutement-candidatures", ancre: "#capitainerie/recrutement" },
+  { nom: "recrutement-decidees", ancre: "#capitainerie/recrutement", geste: OUVRIR_GROUPE_ZONE("Décidées") },
+  { nom: "recrutement-chefs", ancre: "#capitainerie/recrutement/chefs", geste: OUVRIR_GROUPES_ZONE },
+  { nom: "recrutement-questions", ancre: "#capitainerie/recrutement/questions" },
+  { nom: "recrutement-banque-chefs", ancre: "#capitainerie/recrutement/questions", geste: OUVRIR_GROUPE_ZONE("La banque des chefs") },
+  { nom: "recrutement-reglages", ancre: "#capitainerie/recrutement/reglages" },
+  { nom: "recrutement-parcours", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPES_PARCOURS },
+  { nom: "recrutement-messages", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("Ses messages, dans l'ordre") },
+  { nom: "recrutement-liste-noire", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("La liste noire") },
+  { nom: "recrutement-nettoyage-purge", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("Le nettoyage"),
+    geste2: OUVRIR_GROUPE_ZONE("La purge exceptionnelle") },
   { nom: "capitainerie-affiches", ancre: "#capitainerie/affiches" },
   { nom: "capitainerie-catalogue", ancre: "#capitainerie/catalogue" },
   { nom: "capitainerie-roles", ancre: "#capitainerie/roles" },
@@ -170,10 +228,19 @@ const SCENES = [
   { nom: "fenetre-fiche-equipe", ancre: "#equipage/membres", geste: CLIQUER_LIGNE("Kolax"), interdits: ["Équipe : aucune"] },
   { nom: "fenetre-nouvelle-equipe", ancre: "#equipage/membres", geste: "(() => { [...document.querySelectorAll('.segment button')].find(b => b.textContent.includes('Par équipe')).click(); return 1; })()",
     geste2: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle équipe')).click(); return 1; })()" },
-  { nom: "fenetre-dossier-etape1", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À décider") },
-  { nom: "fenetre-dossier-correction", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À corriger") },
-  { nom: "fenetre-choix-questions", ancre: "#equipage/candidatures", geste: CLIQUER_LIGNE("À décider"),
-    geste2: "[...document.querySelectorAll('dialog button')].find(b => b.textContent.includes('Passer à l')).click()" },
+  { nom: "fenetre-dossier-demande", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("Demande à lire") },
+  { nom: "fenetre-dossier-correction", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("À corriger") },
+  { nom: "fenetre-dossier-en-cours", ancre: "#capitainerie/recrutement", geste: OUVRIR_GROUPE_ZONE("En cours"), geste2: CLIQUER_LIGNE("Il répond") },
+  { nom: "fenetre-etapes-candidat", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("Demande à lire"),
+    geste2: CLIQUER_DIALOGUE("Choisir ses étapes") },
+  { nom: "fenetre-question-pour-lui", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("Demande à lire"),
+    geste2: CLIQUER_DIALOGUE("Choisir ses étapes"), geste3: CLIQUER_DIALOGUE("Écrire une question pour lui") },
+  { nom: "fenetre-voir-candidat", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("À corriger"),
+    geste2: CLIQUER_DIALOGUE("Voir comme le candidat") },
+  { nom: "fenetre-proposer-chef", ancre: "#capitainerie/recrutement/chefs", geste: OUVRIR_GROUPES_ZONE,
+    geste2: "[...document.querySelectorAll('#contenu button')].find((b) => b.textContent.includes(\"Proposer d'être chef\")).click()" },
+  { nom: "fenetre-purge", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("La purge exceptionnelle"),
+    geste2: "[...document.querySelectorAll('#contenu button')].find((b) => b.textContent.includes('Voir ce qui serait effacé')).click()" },
   { nom: "fenetre-file", ancre: "#port/apercu", geste: "document.querySelector('#plaque-etat').click()" },
   { nom: "fenetre-element-catalogue", ancre: "#capitainerie/catalogue", geste: "(async () => { const g = document.querySelector('details.groupe'); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); document.querySelector('button.element-carte').click(); })()" },
   // Textes & noms (26/10/2026) : la liste, un groupe ouvert, l'éditeur d'un texte de Discord et celui d'un nom du site ;
@@ -185,6 +252,12 @@ const SCENES = [
   { nom: "fenetre-editeur-texte-site", ancre: "#capitainerie/textes", geste: OUVRIR_GROUPE_TEXTES(4),
     geste2: "document.querySelector('details.groupe[open] .texte-ligne .bouton').click()" },
   { nom: "equipage-annonces-publiees", ancre: "#equipage/annonces/publiees" },
+  //  26/10/2026 : une annonce publiée rouverte dans le composeur : sa bannière (1600 × 640, la consigne) et ses liens.
+  { nom: "equipage-annonces-publiee-modifier", ancre: "#equipage/annonces/publiees",
+    geste: "(async () => { for (const g of document.querySelectorAll('details.groupe')) g.open = true; await new Promise(r => setTimeout(r, 400));"
+      + " const c = [...document.querySelectorAll('article.evt-carte')].find((a) => a.textContent.includes('Le Movie 3')); if (!c) throw new Error('annonce publiée absente');"
+      + " [...c.querySelectorAll('button')].find((b) => b.textContent.includes('Modifier')).click(); await new Promise(r => setTimeout(r, 1200));"
+      + " const f = document.querySelector('.banniere-champ'); if (f) f.scrollIntoView({ block: 'start' }); return 1; })()" },
   { nom: "fenetre-textes-carte", ancre: "#equipage/annonces/brouillons", geste: OUVRIR_BROUILLON,
     geste2: "[...document.querySelectorAll('.apercu-cadre button')].find(b => b.textContent.includes('Modifier les textes')).click()" },
   { nom: "fenetre-renommer-role", ancre: "#capitainerie/roles", geste: "[...document.querySelectorAll('#contenu .rubrique-corps button')].find(b => b.textContent.includes('Renommer…')).click()" },
@@ -192,7 +265,7 @@ const SCENES = [
   // les textes de la carte de l'équipe (Candidatures → Questionnaire) ; ceux du guide du clan (Rôles & métiers).
   { nom: "fenetre-renommer-rubrique", ancre: "#equipage/annonces/composer", geste: "document.querySelector('#contenu .titre-rubrique .renommer-rubrique').click()" },
   // (Les messages du bot sont rangés dans un groupe replié du questionnaire : déplié d'abord.)
-  { nom: "fenetre-textes-equipe", ancre: "#equipage/candidatures/questionnaire", geste: "(async () => { const g = [...document.querySelectorAll('#contenu details.groupe')].find((d) => d.querySelector('summary').textContent.includes('Les messages du bot')); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); [...document.querySelectorAll('#contenu button')].find(b => b.textContent.includes(\"La carte de l'équipe\")).click(); return 1; })()" },
+  { nom: "fenetre-textes-equipe", ancre: "#capitainerie/recrutement/questions", geste: "(async () => { const g = [...document.querySelectorAll('#contenu details.groupe')].find((d) => d.querySelector('summary').textContent.includes('Les messages du bot')); if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 500)); [...document.querySelectorAll('#contenu button')].find(b => b.textContent.includes(\"La carte de l'équipe\")).click(); return 1; })()" },
   { nom: "fenetre-textes-guide", ancre: "#capitainerie/roles", geste: "[...document.querySelectorAll('#contenu button')].find(b => b.textContent.includes('Les textes du guide du clan')).click()" },
   // La présence en direct : une SECONDE personne (la direction, son propre cookie) tient l'affiche de Kolax en
   // modification. La liste « À bord » ouverte, la carte sous cadenas, l'éditeur en lecture seule (vrai site local).
@@ -434,6 +507,7 @@ async function controlerScene(o, scene, [l, hh]) {
   const pret = await attendrePret(o, 9000, scene.pret || "#contenu .titre-rubrique");   // la vitrine : son mur
   if (scene.geste) { try { await evaluer(o, scene.geste); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
   if (scene.geste2) { try { await evaluer(o, scene.geste2); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
+  if (scene.geste3) { try { await evaluer(o, scene.geste3); } catch (e) { erreursCourantes.push("geste impossible : " + e.message); } await pause(900); }
   const res = await evaluer(o, CONTROLE);
   const texteVu = scene.interdits ? await evaluer(o, "(document.querySelector('dialog[open]') || document.body).innerText") : "";
   const fichier = join(SORTIE, `${scene.nom}-${l}x${hh}.png`);

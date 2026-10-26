@@ -554,11 +554,12 @@ SITE_CATEGORIES = (
     ("equipage", "L'Équipage", "Équipage", "Clan GoRP", (
         ("membres", "Équipage", "Les membres du clan, leur présence, les rappels d'inactivité."),
         ("fiches", "Fiches techniques", "Chaque membre et son affiche : par métier, par grade, de A à Z."),
-        ("candidatures", "Candidatures", "Le recrutement en deux étapes : décider, choisir les questions, corriger."),
         ("tickets", "Tickets du clan", "Les tickets Rell Seas du clan, ouverts et fermés."),
         ("annonces", "Annonces & événements", "Composer pour le salon Info : événements avec minuteur et réponses, "
                                                "annonces, métiers, listing."))),
     ("capitainerie", "La Capitainerie", "Capitainerie", "Fondateur & direction", (
+        ("recrutement", "Demande de recrutement", "Les demandes et leurs étapes, les chefs d'équipe, les questions, les "
+                                                  "réglages : tout le recrutement au même endroit."),
         ("affiches", "Affiches", "L'atelier des avis de recherche de l'équipage : créer, modifier, ranger par métier."),
         ("catalogue", "Catalogue RELL Seas", "Tout ce qui existe dans le jeu, et seulement cela : types, éléments, "
                                              "icônes officielles."),
@@ -566,12 +567,13 @@ SITE_CATEGORIES = (
         ("textes", "Textes & noms", "Chaque texte du bot et chaque nom du site, à ta façon : enregistré, il sert tout "
                                     "de suite."))),
 )
-#  Les sous-onglets des rubriques (`site/discord.js`, `site/recrutement.js`, `site/annonces.js` : leur clé, « - »
+#  Les sous-onglets des rubriques (`site/discord.js`, `site/recrutement_zone.js`, `site/annonces.js` : leur clé, « - »
 #  devenu « _ ») et les onglets de la fiche d'une personne (`site/fiche.js`).
 SITE_SOUS = (
     ("port", "salons", (("questions", "Questions"), ("idees", "Idées"), ("sondages", "Sondages"),
                         ("entraide", "Entraide & trade"), ("annonces", "Annonces"), ("droits", "Droits des salons"))),
-    ("equipage", "candidatures", (("en_cours", "En cours"), ("decidees", "Décidées"), ("questionnaire", "Questionnaire"))),
+    ("capitainerie", "recrutement", (("candidatures", "Candidatures"), ("chefs", "Chefs d'équipe"), ("questions", "Questions"),
+                                     ("reglages", "Réglages"))),
     ("equipage", "annonces", (("composer", "Composer"), ("brouillons", "Brouillons"), ("a_venir", "À venir"),
                               ("publiees", "Publiées"), ("passes", "Passés"))),
 )

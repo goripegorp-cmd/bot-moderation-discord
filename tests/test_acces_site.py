@@ -118,17 +118,43 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
     POST equipage/bloc/supprimer
     POST equipage/bloc/visible
     POST equipage/vitrine/affiche
+    GET equipage/publication
+    POST equipage/publication
+    POST equipage/publication/apercu
     POST media
     GET nettoyage
     POST nettoyage/lancer
     POST nettoyage/regle
+    GET recrutement/apercu
     GET recrutement/banque
+    GET recrutement/chef
+    GET recrutement/chefs
+    GET recrutement/chefs/dossier
+    GET recrutement/chefs/proposition
+    GET recrutement/decidees
     GET recrutement/dossier
+    GET recrutement/liste_noire
     GET recrutement/modeles
+    GET recrutement/nettoyage
+    GET recrutement/parcours
+    GET recrutement/proposition
+    GET recrutement/purge
     GET recrutement/suivi
+    POST recrutement/chefs/decision
+    POST recrutement/chefs/gabarit
+    POST recrutement/chefs/proposer
+    POST recrutement/chefs/question
+    POST recrutement/chefs/question/retirer
+    POST recrutement/chefs/retirer
+    POST recrutement/chefs/role
     POST recrutement/corriger
     POST recrutement/decision
     POST recrutement/etape1
+    POST recrutement/etape_suivante
+    POST recrutement/liste_noire/lever
+    POST recrutement/nettoyage
+    POST recrutement/parcours
+    POST recrutement/purge
     POST recrutement/liens
     POST recrutement/modele
     POST recrutement/modele/retirer
@@ -164,8 +190,14 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
 LECTURES = {"accueil": "equipage", "depart": "equipage", "equipage": "equipage"}
 #  Les ÉQUIPES du clan (27/10/2026) : écrites par la tête seule ; la portée « equipage » reçoit 403 partout ici.
 EQUIPES = ("GET equipage/equipes", "POST equipage/equipe", "POST equipage/equipe/supprimer", "POST equipage/equipe/deplacer")
+#  Une publication modifiée depuis le site de l'équipage (27/10/2026, annonces_modifiables.py) : la tête seule —
+#  l'éditeur s'ouvre sur la page de l'équipage, mais l'adresse est celle de la direction ; « equipage » → 403.
+PUBLICATIONS = ("GET equipage/publication", "POST equipage/publication", "POST equipage/publication/apercu")
+#  Le recrutement et les chefs d'équipe (27/10/2026, questionnaire.py) : la tête seule, toutes leurs adresses.
+RECRUTEMENT = "recrutement/"
 #  Le site local seulement (jamais dans le bot : tests/test_site_v2_serveur.py, V16) — hors de la table.
-DEMO = {("GET", "/tableau/demo"), ("GET", "/tableau/demo/discord")}
+DEMO = {("GET", "/tableau/demo"), ("GET", "/tableau/demo/discord"), ("GET", "/tableau/demo/recrutement/ouvrir"),
+        ("GET", "/tableau/demo/recrutement/repondre"), ("GET", "/tableau/demo/recrutement/chef")}
 #  Les refus de la porte (`tableau._verifier`) : un « tout » ne doit JAMAIS les lire.
 REFUS_PORTE = {"Session expirée.", "Réservé au fondateur et à la direction.", "Accès retiré.", "Accès suspendu."}
 #  L'image du site : publique (le navigateur lit le manifeste et ses icônes sans cookie).
@@ -379,7 +411,11 @@ def test_A2_chaque_case_de_la_table(local, portees):
             assert len(set(par_portee.values())) == 1, f"{methode} {chemin} : la session y change la réponse {par_portee}"
     #  Les équipes (le coordinateur, 27/10) : écrites par la tête seule ; l'équipage reçoit 403 sur toute écriture ET sur
     #  la lecture des équipes de la direction.
-    for a in EQUIPES:
+    #  Le recrutement et les chefs (coordinateur, 27/10) : la tête seule ; la modification d'une publication depuis le site
+    #  de l'équipage : la tête seule, « equipage » → 403.
+    recrutement = [a for a in sorted(set().union(*REGISTRE.values())) if a.split(" ", 1)[1].startswith(RECRUTEMENT)]
+    assert len(recrutement) >= 30, len(recrutement)
+    for a in (*EQUIPES, *PUBLICATIONS, *recrutement):
         m, nom = a.split(" ", 1)
         st = statuts[(m, f"/tableau/espace/api/{nom}")]
         assert st["equipage"] == st["candidat"] == st["anonyme"] == 403 and st["tout"] not in (401, 403), (a, st)
@@ -682,8 +718,8 @@ def test_A9_les_images_au_dela_des_limites_sont_refusees(local):
     import tableau
     tete, _a = local.entrer("/tableau/demo")
 
-    def envoyer(octets, typ="image/png"):
-        corps = {"nom": "essai.png", "type": typ, "base64": base64.b64encode(octets).decode()}
+    def envoyer(octets, typ="image/png", **plus):
+        corps = dict({"nom": "essai.png", "type": typ, "base64": base64.b64encode(octets).decode()}, **plus)
         st, rep, _e = _requete(local, "POST", "/tableau/espace/api/media", tete, entetes=ORIGINE, json_=corps)
         return st, json.loads(rep)
 
@@ -700,9 +736,12 @@ def test_A9_les_images_au_dela_des_limites_sont_refusees(local):
         "SVG": envoyer(b"<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'/>", "image/svg+xml"),
         "PNG tronqué": envoyer(png((64, 64))[:40]),
         "trop lourde": envoyer(b"\x89PNG\r\n\x1a\n" + b"\x00" * (tableau.MEDIA_MAX + 1)),
+        #  27/10/2026 : la bannière (recadrée à sa taille exacte, bannieres.py) borne aussi les pixels avant de décoder.
+        "bombe en bannière": envoyer(bombe, format="banniere"),
+        "GIF en bannière": envoyer(b"GIF89a" + b"\x00" * 64, "image/gif", format="banniere"),
     }
     for nom, (st, rep) in refus.items():
-        assert st in (400, 413, 415) and not rep.get("ok"), f"{nom} → {st} {rep}"
+        assert st in (400, 413, 415, 422) and not rep.get("ok"), f"{nom} → {st} {rep}"
     assert refus["trop lourde"][0] == 413 and refus["bombe de décompression"][0] == 415
     assert local.sql("SELECT COUNT(*) FROM tableau_medias")[0][0] == avant, "une image refusée a été gardée"
     #  Une vraie image passe, refaite (jamais le fichier reçu tel quel).

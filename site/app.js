@@ -11,7 +11,6 @@ import { ouvrirFiche, etapeCandidature, chargerSuivi } from "./fiche.js";
 import { monogramme } from "./affiche.js";
 import * as port from "./discord.js";
 import * as clan from "./clan.js";
-import * as recrutement from "./recrutement.js";
 import * as annonces from "./annonces.js";
 import * as cap from "./capitainerie.js";
 import * as accueil from "./accueil.js";
@@ -20,6 +19,7 @@ import { basculeMode, modeSimple, changerMode } from "./mode.js";
 import * as textes from "./textes.js";
 import { demarrerDirect } from "./direct.js";
 import { securite } from "./securite.js";
+import * as zoneRecrutement from "./recrutement_zone.js";
 import { boutonLienEquipage, copierLienEquipage } from "./lien_equipage.js";
 
 const RAFRAICHIR = 60000;
@@ -33,14 +33,14 @@ const RENDUS = {
   "accueil/attente": accueil.accueil,
   "port/apercu": port.apercu, "port/journal": port.journal, "port/sanctions": port.sanctions, "port/tickets": port.tickets,
   "port/repertoire": port.repertoire, "port/salons": port.salons, "port/nettoyage": port.nettoyage, "port/securite": securite,
-  "equipage/membres": clan.membres, "equipage/fiches": clan.fiches, "equipage/candidatures": recrutement.candidatures,
+  "equipage/membres": clan.membres, "equipage/fiches": clan.fiches, "capitainerie/recrutement": zoneRecrutement.zone,
   "equipage/tickets": clan.tickets, "equipage/annonces": annonces.annonces,
   "capitainerie/affiches": cap.affiches, "capitainerie/catalogue": cap.catalogue, "capitainerie/roles": cap.roles,
   "capitainerie/textes": textes.textes,
 };
 // Ces rubriques n'ont pas besoin des grandes données du serveur pour s'afficher.
 const AUTONOMES = new Set(["accueil/attente", "port/nettoyage", "port/securite", "capitainerie/affiches", "capitainerie/catalogue", "capitainerie/roles", "equipage/annonces",
-  "capitainerie/textes"]);
+  "capitainerie/textes", "capitainerie/recrutement"]);
 
 let courante = null;
 const plaque = h("button", { classe: "plaque-etat", type: "button", id: "plaque-etat", "aria-live": "polite", title: "État de la connexion et des envois" });
@@ -76,7 +76,8 @@ async function demarrer() {
   await chargerDonnees();
   rendre(true);
   const a = lireAncre();
-  if (a.membre) ouvrirFiche(a.membre);
+  if (a.recrutement) emettre("dossier:ouvrir", a.recrutement);
+  else if (a.membre) ouvrirFiche(a.membre);
   planifier();
   setInterval(() => { if (HL.enAttente().length && enLigne() && !document.hidden) HL.envoyer(); }, 30000);
   setInterval(majPlaque, 20000);
@@ -271,6 +272,8 @@ function compteurs() {
   const ticketsClan = d.tickets.ouverts.filter((t) => t.rellseas).length;
   const echus = ((d.clan && d.clan.membres) || []).filter((m) => m.rappel && m.rappel.statut === "echu").length;
   const aDecider = d.en_cours.filter((c) => ["decider", "corriger"].includes(etapeCandidature(c))).length;
+  const zr = zoneRecrutement.compteursZone();
+  const aRecruter = Math.max(aDecider, zr.candidatures) + zr.chefs;
   const alertes = (d.alertes || []).length;
   const att = HL.file.ops.length;
   const brouillons = ((vueJeu("evenements") || {}).brouillons || []).length;
@@ -278,9 +281,9 @@ function compteurs() {
   return {
     "accueil/attente": [aFaire, aFaire > 0], accueil: aFaire,
     "port/apercu": [alertes, alertes > 0], "port/tickets": [d.tickets.ouverts.filter((t) => !t.rellseas).length, oublies > 0], "port/salons": [qOuvertes, qOuvertes > 0],
-    "equipage/membres": [echus, echus > 0], "equipage/candidatures": [aDecider, aDecider > 0], "equipage/tickets": [ticketsClan, false],
+    "equipage/membres": [echus, echus > 0], "capitainerie/recrutement": [aRecruter, aRecruter > 0], "equipage/tickets": [ticketsClan, false],
     "equipage/annonces": [brouillons, false],
-    port: alertes + qOuvertes + oublies, equipage: echus + aDecider, capitainerie: att,
+    port: alertes + qOuvertes + oublies, equipage: echus, capitainerie: att + aRecruter,
   };
 }
 function majCompteurs() {
@@ -306,7 +309,7 @@ function lireRoute(premiere) {
   const a = lireAncre();
   let cat = a.cat, rub = a.rub;
   if (!cat && a.ancien) {
-    const anciens = { apercu: ["port", "apercu"], candidatures: ["equipage", "candidatures"], tickets: ["port", "tickets"], moderation: ["port", "sanctions"],
+    const anciens = { apercu: ["port", "apercu"], candidatures: ["capitainerie", "recrutement"], tickets: ["port", "tickets"], moderation: ["port", "sanctions"],
       journal: ["port", "journal"], questions: ["port", "salons"], sondages: ["port", "salons"], clan: ["equipage", "membres"] };
     [cat, rub] = anciens[a.ancien] || [];
   }
@@ -321,14 +324,15 @@ function lireRoute(premiere) {
   etat.route = { cat, rub, sous: a.sous || "" };
   memoireRubrique[cat] = rub;
   try { sessionStorage.setItem("capitainerie.route", JSON.stringify({ cat, rub })); } catch (e) { /* rien */ }
-  if (premiere) poserAncre(a.membre ? "membre=" + a.membre : "");
+  if (premiere || a.alias) poserAncre(a.membre ? "membre=" + a.membre : "");   // une adresse d'avant : la nouvelle
   majRubriques();
   return change;
 }
 addEventListener("hashchange", () => {
   const a = lireAncre();
   if (lireRoute(false)) { rendre(true); scrollTo({ top: 0 }); }
-  if (a.membre) ouvrirFiche(a.membre);
+  if (a.recrutement) emettre("dossier:ouvrir", a.recrutement);
+  else if (a.membre) ouvrirFiche(a.membre);
 });
 
 function rendre(force) {
@@ -432,7 +436,7 @@ ecouter("file:refus", ({ op }) => toast("Refusé par le serveur : " + (op.erreur
 ecouter("file:ouvrir", () => ouvrirFile());
 ecouter("recharger", () => chargerDonnees());
 ecouter("jeu", () => { if (courante && courante.ctrl && courante.ctrl.majJeu) courante.ctrl.majJeu(); majCompteurs(); });
-ecouter("dossier:ouvrir", (ticket) => { if (etat.route.cat !== "equipage" || etat.route.rub !== "candidatures") aller("equipage", "candidatures"); setTimeout(() => recrutement.ouvrirDossier(ticket), 60); });
+ecouter("dossier:ouvrir", (ticket) => { if (etat.route.cat !== "capitainerie" || etat.route.rub !== "recrutement") aller("capitainerie", "recrutement"); setTimeout(() => zoneRecrutement.ouvrirDossier(ticket), 60); });
 ecouter("affiche:ouvrir", (id) => cap.ouvrirAffiche(id));
 // Aller là où l'on est déjà (un raccourci, la recherche qui vient de poser un filtre) : la rubrique se redessine.
 ecouter("route:meme", () => rendre(true));

@@ -124,6 +124,7 @@ import securite_site  # 26/10/2026 : la trace de ce que le site fait sur Discord
 import affiches  # le site, Capitainerie : catalogue RELL Seas, affiches, rôles des métiers
 import metiers  # les rôles de métier du clan : choisis dans le guide, créés au besoin, retirés en quittant le clan
 import site_equipage  # 26/10/2026 : le site de l'équipage — le clan en lecture seule, l'accueil composé par la direction
+import annonces_modifiables  # 26/10/2026 : une annonce publiée, modifiée EN PLACE depuis le site de l'équipage (la tête)
 import textes  # 26/10/2026 : les textes du bot et les noms du site, réécrits par la direction (Textes & noms)
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
@@ -6359,12 +6360,15 @@ async def _ticket_ouvert(g, ticket_id: int):
     return (ch, tk) if tk else (None, None)
 
 
-async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif: str = ""):
+async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif: str = "", *, annonce=None,
+                                mp: bool = True):
     """Accepter (rôle du clan, puis fermeture) ou refuser (fermeture) une candidature : la
     fermeture passe par le circuit normal — dossier, transcript, suivi des recrutements.
     24/10/2026 (revue) : le motif d'un refus reste à l'équipe (historique, journal du site, suivi) ; le
     candidat lit « Candidature refusée » (MP et fil) — le formulaire promet « le candidat ne le voit pas ».
-    La décision suit le ticket jusqu'au suivi des recrutements, qui ne la devine plus dans le texte."""
+    La décision suit le ticket jusqu'au suivi des recrutements, qui ne la devine plus dans le texte.
+    26/10/2026 (le ticket propre) : `annonce()` (questionnaire.py) pose le message de la décision et le message privé
+    juste avant la fermeture — le rôle est déjà donné ; `mp=False` : pas de second message privé à la fermeture."""
     try:
         ch, tk = await _ticket_ouvert(g, ticket_id)
     except discord.HTTPException as ex:
@@ -6396,7 +6400,13 @@ async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif:
     tk = dict(tk, decision="acceptes" if accepte else "refuses")
     #  26/10/2026 : ce que lit le candidat vient de Textes & noms (sinon le texte d'origine).
     public = await textes.texte(g.id, "recrutement.fermeture.acceptee" if accepte else "recrutement.fermeture.refusee")
-    if accepte:
+    if annonce is not None:
+        #  26/10/2026 : le message de la décision (avec le choix du métier, s'il est réglé) et le message privé.
+        try:
+            await annonce()
+        except Exception as ex:
+            _logerr("recrutement.annonce", ex, guild_id=g.id)
+    elif accepte:
         #  25/10/2026 (rôles des métiers) : AVANT la fermeture, une carte dans le ticket dit au nouveau membre de
         #  choisir son métier dans le guide du clan ; le lien suit dans le MP de fermeture (le ticket part en 5 s).
         try:
@@ -6406,7 +6416,7 @@ async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif:
             _logerr("recrutement.metier", ex, guild_id=g.id)
         if guide:
             public += " · " + await textes.texte(g.id, "metiers.mp_lien", lien=guide)
-    _fermer_en_fond(_fermer_ticket(g, ch, tk, auteur, raison, public=public))
+    _fermer_en_fond(_fermer_ticket(g, ch, tk, auteur, raison, public=public, mp=mp))
     await _journal_rellseas(g, f"**Candidature {'acceptée' if accepte else 'refusée'}** · <@{tk['user']}> "
                                f"par {auteur.mention}" + (f" — {motif[:150]}" if motif and not accepte else ""),
                             membre_id=int(tk['user']), auteur_id=auteur.id)
@@ -6416,26 +6426,98 @@ async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif:
                   else "Candidature refusée : ticket fermé.")
 
 
-async def _accueil_recrutement(g, ch, tid: int, candidat_id: int, pnl: dict) -> None:
-    """25/10/2026 (recrutement en deux étapes, questionnaire.py) : l'accueil d'un ticket du clan dit les deux étapes,
-    le nombre de questions de l'étape 2 et les liens où se trouvent les réponses ; la carte de l'étape 1 suit. Le
-    ticket est déjà ouvert : une erreur ici ne le défait jamais — elle est journalisée, et sans la nouvelle carte,
-    l'ancienne carte de décision (accepter, refuser) est posée pour que l'équipe puisse toujours trancher."""
-    n = 0
+async def _accueil_recrutement(g, ch, tid: int, candidat_id: int, pnl: dict, pid: str = "") -> bool:
+    """26/10/2026 (le ticket propre, questionnaire.py) : l'AFFICHE — le message unique d'un ticket de recrutement (la
+    bannière, le candidat cité sans être prévenu, les conditions, sa fiche, où il en est, « Direction » pour la tête) ;
+    un panneau « automatique » envoie aussitôt la première étape du questionnaire. Le ticket est déjà ouvert : une erreur
+    ici ne le défait jamais — elle est journalisée, et sans l'affiche, l'ancienne carte de décision (accepter, refuser)
+    est posée pour que l'équipe puisse toujours trancher. Rend True si l'affiche est posée."""
     try:
-        accueil, n = await questionnaire.vue_accueil(g, str(pnl.get('welcome_message') or '').strip(),
-                                                     str(pnl.get('name') or ''))
-        await webhook_send(ch, 'ticket', view=accueil, allowed_mentions=discord.AllowedMentions.none())
+        await questionnaire.poser_affiche(g, ch, tid, candidat_id, pnl, pid)
+        return True
     except Exception as ex:
-        _logerr("recrutement.accueil", ex, guild_id=g.id)
+        _logerr("recrutement.affiche", ex, guild_id=g.id)
     try:
-        await questionnaire.poser_etape1(g, ch, tid, candidat_id, nombre=n)
+        await ch.send(view=recrutements.carte_decision(tid), allowed_mentions=discord.AllowedMentions.none())
+    except discord.HTTPException as ex2:
+        _logerr("recrutement.carte_repli", ex2, guild_id=g.id)
+    return False
+
+
+async def _recrutement_extras(g, tid: int, pris_par=None) -> dict:
+    """Le bas du panneau « Direction » d'une affiche (éphémère, la tête seule) : le contexte du dossier (son compte, son
+    ancienneté, ses tickets, son casier), qui l'a pris en charge, et « Fermer » — le bouton du ticket, avec son
+    gestionnaire de toujours (`TicketControlView`, enregistré au démarrage). Pas « Prendre en charge » : il poste un
+    message de plus, et le ticket de recrutement n'en garde que deux."""
+    async with get_db() as db:
+        async with db.execute("SELECT user_id, claimed_by FROM tickets WHERE id=? AND guild_id=?",
+                              (int(tid), g.id)) as cur:
+            r = await cur.fetchone()
+    if r is None:
+        return {}
+    ctrl = TicketControlView()
+    boutons = {b.custom_id: b for b in list(ctrl.children) if isinstance(b, discord.ui.Button)}
+    garde = [boutons[k] for k in ("ticket_ctrl_close",) if k in boutons]
+    for b in boutons.values():
+        ctrl.remove_item(b)
+    return {"contexte": await _contexte_ticket(g, int(r[0]), int(tid)), "pris_par": int(pris_par or r[1] or 0),
+            "boutons": garde}
+
+
+async def _liste_noire_recrutement(g, membre_id, ajouter: bool) -> bool:
+    """26/10/2026 : la liste noire des panneaux de RECRUTEMENT (celle que lit `_ticket_ouvrir`, le système d'avant) —
+    un membre ajouté ou retiré, ou toute la liste vidée (`membre_id` None, `ajouter` faux). Les autres panneaux ne
+    bougent pas. Tenue par questionnaire.py (qui, quand, pourquoi, par qui : la liste du site)."""
+    c = await cfg(g.id)
+    panels = c.get('ticket_panels') or {}
+    change = False
+    for pid in rellseas_ui.panneaux_tickets(c):
+        pnl = panels.get(pid)
+        if not isinstance(pnl, dict):
+            continue
+        avant = [int(x) for x in pnl.get('blacklist') or [] if str(x).isdigit()]
+        if membre_id is None:
+            apres = avant if ajouter else []
+        elif ajouter:
+            apres = avant if int(membre_id) in avant else avant + [int(membre_id)]
+        else:
+            apres = [x for x in avant if x != int(membre_id)]
+        if apres != avant:
+            pnl['blacklist'] = apres
+            change = True
+    return bool(await db_set(g.id, 'ticket_panels', panels)) if change else True
+
+
+async def _role_clan_de(g):
+    """Le rôle du clan (/configure → Rell Seas), ou None."""
+    return g.get_role(int((await cfg(g.id)).get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0))
+
+
+async def _metiers_catalogue(g) -> list:
+    """Les métiers du catalogue RELL Seas ({cle, nom}) : la banque et les rôles des chefs d'équipe."""
+    return [{"cle": e["cle"], "nom": e["nom"]} for e in await metiers.metiers_du_catalogue()]
+
+
+async def _fiche_recue(i, pid, champs: list, reponses: dict) -> None:
+    """26/10/2026 : la FICHE remplie (l'étape obligatoire, AVANT le ticket). Une réponse éliminatoire (une tranche d'âge,
+    par exemple) n'ouvre aucun ticket : un avis pour lui seul, le message privé du refus, la liste noire si le panneau
+    le règle, la trace « Éliminé d'office » sur le site. Sinon le ticket s'ouvre, comme avec le formulaire d'avant."""
+    try:
+        await i.response.defer(ephemeral=True)
+        elimine = questionnaire.eliminatoire(champs, reponses)
+        if elimine is not None:
+            await questionnaire.eliminer(i.guild, i.user, pid, *elimine)
+            return await i.followup.send(view=_vue_ticket_message(
+                await textes.texte(i.guild.id, "recrutement.elimine"), Palette.WARNING), ephemeral=True)
+        ch, err = await create_ticket(i, pid, reponses)
+        await i.followup.send(view=_vue_ticket_message(err if err else f"✅ Ticket créé : {ch.mention}",
+                                                       Palette.WARNING if err else Palette.SUCCESS), ephemeral=True)
     except Exception as ex:
-        _logerr("recrutement.carte", ex, guild_id=g.id)
+        _logerr("ticket.fiche", ex, guild_id=getattr(i.guild, 'id', 0))
         try:
-            await ch.send(view=recrutements.carte_decision(tid), allowed_mentions=discord.AllowedMentions.none())
+            await i.followup.send(view=_vue_ticket_message(f"❌ {type(ex).__name__}", Palette.DANGER), ephemeral=True)
         except discord.HTTPException as ex2:
-            _logerr("recrutement.carte_repli", ex2, guild_id=g.id)
+            _logerr("ticket.fiche.reponse", ex2, guild_id=getattr(i.guild, 'id', 0))
 
 
 async def _peut_decider(i) -> bool:
@@ -8451,11 +8533,13 @@ def _echec(ex, quoi: str, qui: str = "") -> str:
                     if x != "")
 
 
-async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0, carte: bool = True) -> dict:
+async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0, carte: bool = True, ticket: int = 0) -> dict:
     """Le fondateur, la direction et l'équipe du type entrent dans le fil du ticket — il apparaît dans leur liste
     de salons — SANS notification : la carte est posée sans mention puis modifiée pour mentionner (une
     modification ne prévient personne, et Discord ajoute au fil privé qui y est mentionné). Ensuite on vérifie
-    les membres du fil : qui manque encore est ajouté un par un. Rend {cibles, par_mention, un_par_un, erreurs}."""
+    les membres du fil : qui manque encore est ajouté un par un. Rend {cibles, par_mention, un_par_un, erreurs}.
+    26/10/2026 (le ticket propre) : la carte ne reste plus — supprimée une fois la vérification faite ; un ticket de
+    recrutement n'en pose même pas : son AFFICHE cite l'équipe le temps d'une modification, puis reprend sa forme."""
     out = {"cibles": 0, "par_mention": 0, "un_par_un": 0, "erreurs": 0, "inconnus": 0, "detail": []}
     if not isinstance(fil, discord.Thread):
         return out          # un ticket en salon classique est déjà dans la liste de qui y a droit
@@ -8465,15 +8549,19 @@ async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0, carte: bool = Tru
     if not gens:
         return out
     tete = [m for m in gens if m.id in TETE_IDS]
+    msg, affiche = None, False
+    qui = " · ".join([r.mention for r in roles] + [m.mention for m in tete])
+    cites = discord.AllowedMentions(everyone=False, users=tete, roles=roles, replied_user=False)
     try:
         if not carte:
             raise _SansCarte()
-        msg = await fil.send(view=_carte_equipe("👥 **L'équipe suit ce ticket** · *The team follows this ticket*"),
-                             allowed_mentions=discord.AllowedMentions.none())
-        qui = " · ".join([r.mention for r in roles] + [m.mention for m in tete])
-        await msg.edit(view=_carte_equipe("👥 **L'équipe suit ce ticket** · *The team follows this ticket*\n" + qui),
-                       allowed_mentions=discord.AllowedMentions(everyone=False, users=tete, roles=roles,
-                                                                replied_user=False))
+        if ticket:
+            affiche = await questionnaire.citer_sur_affiche(g, fil, int(ticket), qui, cites)
+        if not affiche:
+            msg = await fil.send(view=_carte_equipe("👥 **L'équipe suit ce ticket** · *The team follows this ticket*"),
+                                 allowed_mentions=discord.AllowedMentions.none())
+            await msg.edit(view=_carte_equipe("👥 **L'équipe suit ce ticket** · *The team follows this ticket*\n" + qui),
+                           allowed_mentions=cites)
     except _SansCarte:
         pass
     except discord.HTTPException as ex:
@@ -8500,9 +8588,19 @@ async def _faire_voir_ticket(g, fil, pid, ouvreur_id: int = 0, carte: bool = Tru
                 out["inconnus"] += 1
                 continue
             out["erreurs"] += 1
-            qui = "fondateur" if m.id == g.owner_id else ("direction" if m.id in TETE_IDS else "equipe")
-            out["detail"].append(_echec(ex, "ajout", qui))
+            role_ = "fondateur" if m.id == g.owner_id else ("direction" if m.id in TETE_IDS else "equipe")
+            out["detail"].append(_echec(ex, "ajout", role_))
             _logerr("ticket.equipe.ajout", ex, guild_id=g.id)
+    #  La carte a fait son travail : elle ne reste pas dans le ticket (l'affiche, elle, reprend sa forme).
+    try:
+        if msg is not None:
+            await msg.delete()
+        elif affiche:
+            await questionnaire.reprendre_affiche(g, fil, int(ticket))
+    except discord.HTTPException as ex:
+        out["erreurs"] += 1
+        out["detail"].append(_echec(ex, "retrait"))
+        _logerr("ticket.equipe.retrait", ex, guild_id=g.id)
     out["detail"] = out["detail"][:10]
     return out
 
@@ -8515,7 +8613,7 @@ def _faire_voir_plus_tard(g, fil, pid, ouvreur_id: int, tid: int) -> None:
     """En fond : l'ouvreur a déjà sa réponse ; l'équipe entre dans le fil juste après."""
     async def _travail():
         try:
-            r = await _faire_voir_ticket(g, fil, pid, ouvreur_id)
+            r = await _faire_voir_ticket(g, fil, pid, ouvreur_id, ticket=tid)
             _TICKETS_VUS["dernier"] = {"ticket": int(tid), "quand": int(time.time()), **r}
         except Exception as ex:
             _logerr("ticket.equipe", ex, guild_id=g.id)
@@ -8714,14 +8812,14 @@ async def _create_ticket_corps(i, pid, ans=None):
         # ping de masse inutile à chaque ticket). 22/10/2026 : le dossier dit qui, son historique,
         # ses réponses et qui s'en occupe. 25/10/2026 : l'équipe entre dans le fil sans notification
         # (`_faire_voir_ticket`) — « Gérer les fils » seul ne le montrait dans la liste de personne.
-        await webhook_send(ch, 'ticket', view=await _vue_dossier_ticket(
-            i.guild, tid, i.user.id, panel_name, ans or {}, int(now().timestamp())),
-            allowed_mentions=discord.AllowedMentions.none())
-        #  25/10/2026 : le recrutement du clan en deux étapes — l'accueil (les deux étapes, le nombre de questions de
-        #  l'étape 2, les liens des réponses ; le mot du panneau y est repris) puis la carte de l'étape 1.
+        #  26/10/2026 (le ticket propre) : un ticket de recrutement n'a qu'UN message, l'affiche (questionnaire.py) —
+        #  le dossier y est fondu (le panneau « Direction ») ; sans elle, l'ancienne carte de décision et le dossier.
         recrutement = str(pid) in rellseas_ui.panneaux_tickets(await cfg(i.guild.id))
-        if recrutement:
-            await _accueil_recrutement(i.guild, ch, tid, i.user.id, pnl)
+        affiche = recrutement and await _accueil_recrutement(i.guild, ch, tid, i.user.id, pnl, pid)
+        if not affiche:
+            await webhook_send(ch, 'ticket', view=await _vue_dossier_ticket(
+                i.guild, tid, i.user.id, panel_name, ans or {}, int(now().timestamp())),
+                allowed_mentions=discord.AllowedMentions.none())
 
         # ═══════════════════════════════════════════════════════════════════════════════
         #                    👋 MESSAGE D'ACCUEIL PERSONNALISÉ
@@ -8797,19 +8895,26 @@ class TicketConfirmCreateView(LayoutView):
     """Confirmation ÉPHÉMÈRE avant création d'un ticket SANS questionnaire (owner 2026-06-29,
     audit) : évite les tickets ouverts par erreur (« il se trompe / crée pour rien »). Le bouton
     Confirmer appelle create_ticket INCHANGÉ (re-checks autoritatifs heures/cooldown/gate/quota/
-    max/blacklist conservés). Components V2 (24/10/2026). Non persistant (vue courte, éphémère)."""
-    def __init__(self, pid, recap: str = ""):
+    max/blacklist conservés). Components V2 (24/10/2026). Non persistant (vue courte, éphémère).
+    26/10/2026 (recrutement) : « Es-tu sûr de vouloir créer un ticket ? » (textes réglables) puis, avec `champs`, la
+    FICHE (questionnaire.FormulaireFiche) — l'étape obligatoire, remplie avant que le ticket existe."""
+    def __init__(self, pid, recap: str = "", *, champs=None, oui: str = "", non: str = "", annule: str = ""):
         super().__init__(timeout=120)
-        self.pid = pid
-        oui = Button(emoji=visuels.icone("valider"), label="Confirmer l'ouverture", style=discord.ButtonStyle.success)
-        oui.callback = self._confirm
-        non = Button(emoji=visuels.icone("fermer"), label="Annuler", style=discord.ButtonStyle.secondary)
-        non.callback = self._cancel
+        self.pid, self.champs, self.annule = pid, list(champs or []), annule
+        b_oui = Button(emoji=visuels.icone("valider"), label=(oui or "Confirmer l'ouverture")[:80],
+                       style=discord.ButtonStyle.success)
+        b_oui.callback = self._confirm
+        b_non = Button(emoji=visuels.icone("fermer"), label=(non or "Annuler")[:80], style=discord.ButtonStyle.secondary)
+        b_non.callback = self._cancel
         self.add_item(discord.ui.Container(discord.ui.TextDisplay(recap or "📩 Ouvrir ce ticket ?"),
-                                           discord.ui.ActionRow(oui, non), accent_color=Palette.INFO))
+                                           discord.ui.ActionRow(b_oui, b_non), accent_color=Palette.INFO))
 
     async def _confirm(self, i):
         try:
+            if self.champs:
+                champs, pid = self.champs, self.pid
+                return await i.response.send_modal(questionnaire.FormulaireFiche(
+                    champs, guild_id=i.guild.id, sur_envoi=lambda i2, rep: _fiche_recue(i2, pid, champs, rep)))
             await i.response.defer(ephemeral=True)
             ch, err = await create_ticket(i, self.pid)
             await i.followup.send(view=_vue_ticket_message(err if err else f"✅ Ticket créé : {ch.mention}",
@@ -8823,7 +8928,8 @@ class TicketConfirmCreateView(LayoutView):
 
     async def _cancel(self, i):
         try:
-            await i.response.edit_message(view=_vue_ticket_message("Annulé — aucun ticket créé.", Palette.NEUTRAL))
+            await i.response.edit_message(view=_vue_ticket_message(self.annule or "Annulé — aucun ticket créé.",
+                                                                   Palette.NEUTRAL))
         except discord.HTTPException as ex:
             _logerr("ticket.annuler", ex, guild_id=getattr(i.guild, 'id', 0))
 
@@ -8863,6 +8969,12 @@ async def _ticket_ouvrir(i, pid):
         #                    🚫 VÉRIFICATION BLACKLIST
         # ═══════════════════════════════════════════════════════════════════════════════
         blacklist = pnl.get('blacklist', [])
+        #  26/10/2026 : un panneau de recrutement — sa liste noire (un refus) dit un refus poli et réglable.
+        recrutement = str(pid) in rellseas_ui.panneaux_tickets(c)
+        if recrutement and not libre and (i.user.id in blacklist
+                                          or await questionnaire.sur_liste_noire(i.guild.id, i.user.id)):
+            return await i.response.send_message(view=_vue_ticket_message(
+                await textes.texte(i.guild.id, "recrutement.liste_noire.refus"), Palette.WARNING), ephemeral=True)
         if i.user.id in blacklist and not libre:
             return await i.response.send_message(
                 "🚫 **Accès refusé**\n\nVous avez été blacklisté de ce panel de tickets.\nContactez un administrateur si vous pensez que c'est une erreur.",
@@ -8881,6 +8993,17 @@ async def _ticket_ouvrir(i, pid):
         mx = pnl.get('max', 1)
         if not libre and await count_user_tickets(i.guild, i.user.id, pid) >= mx:
             return await i.response.send_message(f"❌ Max {mx} ticket(s)", ephemeral=True)
+        if recrutement:
+            #  26/10/2026 : « Es-tu sûr ? » (réglable, avec à quoi servent ses réponses), puis sa FICHE (réglée sur le
+            #  site, sinon les questions de /configure) — remplie avant que le ticket existe.
+            g_ = i.guild.id
+            recap = (await textes.texte(g_, "recrutement.confirmation") + "\n"
+                     + await textes.texte(g_, "recrutement.confirmation.info")).strip()
+            return await i.response.send_message(view=TicketConfirmCreateView(
+                pid, recap, champs=await questionnaire.fiche_ouverture(g_, pid, pnl),
+                oui=await textes.texte(g_, "recrutement.confirmation.oui"),
+                non=await textes.texte(g_, "recrutement.confirmation.non"),
+                annule=await textes.texte(g_, "recrutement.confirmation.annule")), ephemeral=True)
         if qs:
             await i.response.send_modal(TicketQuestionnaireModal(pid, qs))
         else:
@@ -10093,12 +10216,20 @@ async def _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours=0, *
     if not conserve:
         return await _garder_ticket_sans_transcript(guild, ch, tid, prevenir)
     if not inactif_jours:
+        #  26/10/2026 (le ticket propre) : un ticket de recrutement à affiche garde deux messages du bot au plus — la
+        #  décision (ou le message de l'étape) dit déjà qu'il se ferme : pas d'annonce de plus.
+        affiche = False
         try:
-            await ch.send(f"🔒 **Ticket fermé** par {closer.mention}\n**Raison :** {public}\n"
-                          + ("_Transcript envoyé en MP au créateur. " if mp_parti else "_") + "Suppression dans 5 s…_",
-                          allowed_mentions=discord.AllowedMentions.none())
-        except discord.HTTPException:
-            pass
+            affiche = str(tid).isdigit() and await questionnaire.est_affiche(guild.id, int(tid))
+        except Exception as ex:
+            _logerr("ticket.close_affiche", ex, guild_id=guild.id)
+        if not affiche:
+            try:
+                await ch.send(f"🔒 **Ticket fermé** par {closer.mention}\n**Raison :** {public}\n"
+                              + ("_Transcript envoyé en MP au créateur. " if mp_parti else "_") + "Suppression dans 5 s…_",
+                              allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException:
+                pass
         await asyncio.sleep(5)
     try:
         await ch.delete()
@@ -21780,14 +21911,27 @@ async def _activite_boot():
     with _Etape("questionnaire"):
         #  25/10/2026 : le recrutement du clan en deux étapes — la banque de questions, les cartes du ticket, les
         #  adresses du site (Clan GoRP, Candidatures). Les décisions passent par le circuit de `_decision_recrutement`.
+        #  26/10/2026 : le ticket propre (l'affiche), le parcours réglable de chaque panneau, la fiche et l'élimination
+        #  d'office, le passage d'étape, la liste noire, les chefs d'équipe ; la page web du candidat (`candidature_site`,
+        #  l'équipe « candidature ») si elle est là — sinon les formulaires de Discord.
+        try:
+            import candidature_site as _candidature_site
+        except ModuleNotFoundError:
+            _candidature_site = None
         questionnaire.setup(get_db=get_db, cfg=cfg, panneaux=rellseas_ui.panneaux_tickets, ticket_ouvert=_ticket_ouvert,
                             decider=_decision_recrutement, autorise=_peut_decider, lien=tableau.lien_pour,
-                            journal=lambda g, type_, texte, **kw: _au_journal(g, "Clan", type_, texte, **kw), log=print)
+                            journal=lambda g, type_, texte, **kw: _au_journal(g, "Clan", type_, texte, **kw), log=print,
+                            extras=_recrutement_extras, liste_noire=_liste_noire_recrutement, web=_candidature_site,
+                            metier=metiers.invitation, est_tete=lambda m: getattr(m, "id", 0) in TETE_IDS,
+                            clan=_role_clan_de, metiers=_metiers_catalogue, metiers_membre=metiers.metiers_du_membre)
+        #  27/10/2026 : les chefs d'équipe validés, badgés et proposés en premier dans l'éditeur d'une équipe.
+        site_equipage.brancher_badges_chef(questionnaire.badges_chefs)
         await questionnaire.init_db()
         if hasattr(tableau, "monter"):
             tableau.monter(questionnaire.ROUTES_SITE)
-        if hasattr(tableau, "ajouter_regle"):   # la rubrique « Nettoyage » du site : les questionnaires des candidatures fermées
-            tableau.ajouter_regle(**questionnaire.REGLE_NETTOYAGE)
+        if hasattr(tableau, "ajouter_regle"):   # la rubrique « Nettoyage » : les questionnaires fermés, les traces levées
+            for _regle in questionnaire.REGLES_RECRUTEMENT:
+                tableau.ajouter_regle(**_regle)
         await questionnaire.demarrer(bot)
     with _Etape("registre"):
         registre.setup(get_db=get_db, log=print, apres_grave=vigilance.planifier)
@@ -21927,6 +22071,7 @@ async def _activite_boot():
         site_equipage.setup(get_db=get_db, cfg=cfg, log=print)
         await site_equipage.init_db()
         tableau.monter(site_equipage)
+        tableau.monter(annonces_modifiables)   # modifier une annonce publiée, en place, depuis l'accueil (la tête)
         tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
         zones.brancher_site_equipage(site_equipage.section_guide)
 
@@ -22030,7 +22175,8 @@ async def on_ready():
                               recrutements.BoutonTableau, recrutements.BoutonDecision,
                               BoutonAnciensSalons, BoutonGere, BoutonFicheSite, BoutonApprouverBot)
         #  25/10/2026 : le recrutement en deux étapes — l'étape 1 (équipe), « Répondre » et « Continuer » (candidat).
-        bot.add_dynamic_items(questionnaire.BoutonEtape1, questionnaire.BoutonRepondre, questionnaire.BoutonPage)
+        bot.add_dynamic_items(questionnaire.BoutonEtape1, questionnaire.BoutonRepondre, questionnaire.BoutonPage,
+                              questionnaire.BoutonApercu)
         bot.add_dynamic_items(entraide.BoutonNouvelle, entraide.BoutonRejoindre, entraide.BoutonCertifier,
                               entraide.BoutonFermer, entraide.BoutonMiddleman)
         bot.add_dynamic_items(equipages.BoutonPublier, equipages.BoutonRejoindre, equipages.BoutonRecrutement,
