@@ -75,6 +75,7 @@ except Exception:  # sans base de fuseaux : l'heure UTC
 import discord
 
 import annonces
+import bannieres
 import casier
 import clan
 import diag
@@ -2317,8 +2318,10 @@ async def _place_medias(dossier: Path) -> bool:
 
 
 async def _route_media(g, auteur, requete, corps):
-    """`POST api/media` `{"nom", "type", "base64"}` → `{"id", "url", "largeur", "hauteur", "octets", "type"}`.
-    PNG, JPEG, WebP ou GIF (reconnus à leurs octets), 8 Mo au plus, refaits en WebP ≤ 2048 px."""
+    """`POST api/media` `{"nom", "type", "base64", "format"?}` → `{"id", "url", "largeur", "hauteur", "octets", "type"}`.
+    PNG, JPEG, WebP ou GIF (reconnus à leurs octets), 8 Mo au plus, refaits en WebP ≤ 2048 px. 26/10/2026 :
+    `"format": "banniere"` → la bannière REFAITE à sa taille exacte (`bannieres.py` : 1600 × 640, recadrage centré,
+    jamais étirée ; PNG, JPEG ou WebP ; trop petite : refusée, la taille reçue et la taille demandée dites)."""
     nom, brut = corps.get("nom", ""), corps.get("base64")
     if nom is None:
         nom = ""
@@ -2326,6 +2329,9 @@ async def _route_media(g, auteur, requete, corps):
         return 400, {"erreur": "Nom de fichier invalide.", "champ": "nom"}
     if corps.get("type") is not None and not isinstance(corps.get("type"), str):
         return 400, {"erreur": "Type invalide.", "champ": "type"}
+    if corps.get("format") not in (None, "", "banniere"):
+        return 400, {"erreur": "Format demandé inconnu.", "champ": "format"}
+    banniere = corps.get("format") == "banniere"
     if not isinstance(brut, str) or not brut:
         return 400, {"erreur": "Image absente.", "champ": "base64"}
     if brut.startswith("data:"):
@@ -2341,14 +2347,22 @@ async def _route_media(g, auteur, requete, corps):
         return 400, {"erreur": "Image absente.", "champ": "base64"}
     if len(data) > MEDIA_MAX:
         return 413, {"erreur": "Image trop lourde : 8 Mo au plus."}
-    if type_image(data) is None:
-        return 415, {"erreur": "Format refusé : PNG, JPEG, WebP ou GIF seulement."}
+    if type_image(data) is None or (banniere and type_image(data) not in bannieres.TYPES):
+        return 415, {"erreur": bannieres.REFUS_FORMAT if banniere else "Format refusé : PNG, JPEG, WebP ou GIF seulement."}
     dossier = dossier_site("medias")
     if not await _place_medias(dossier):
         return 507, {"erreur": "Plus de place pour les images : le nettoyage en libère."}
+    cadrage = None
     async with _verrou("media", lambda: asyncio.Semaphore(1)):  # une image refaite à la fois : la mémoire tenue
         try:
-            sortie, largeur, hauteur, typ = await asyncio.to_thread(reencoder_image, data)
+            if banniere:
+                cadrage = await asyncio.to_thread(bannieres.recadrer, data)
+                sortie, largeur, hauteur, typ = (cadrage.pop("octets"), cadrage.pop("largeur"), cadrage.pop("hauteur"),
+                                                 cadrage.pop("type"))
+            else:
+                sortie, largeur, hauteur, typ = await asyncio.to_thread(reencoder_image, data)
+        except bannieres.Refus as ex:   # la phrase pour la personne (trop petite : la taille reçue, la taille demandée)
+            return ex.statut, ex.corps()
         except ValueError:
             return 415, {"erreur": "Image illisible, ou trop grande à décoder."}
     ident = secrets.token_urlsafe(12)
@@ -2361,7 +2375,8 @@ async def _route_media(g, auteur, requete, corps):
                          (ident, g.id, auteur.id, nom, typ, len(sortie), largeur, hauteur, t, t))
         await db.commit()
     return 200, {"ok": True, "id": ident, "url": f"media/{ident}", "largeur": largeur, "hauteur": hauteur,
-                 "octets": len(sortie), "type": typ, "_journal": f"Image ajoutée au site : {nom or ident}"}
+                 "octets": len(sortie), "type": typ, **({"banniere": cadrage} if cadrage is not None else {}),
+                 "_journal": f"{'Bannière' if banniere else 'Image'} ajoutée au site : {nom or ident}"}
 
 
 async def lire_media(ident):
