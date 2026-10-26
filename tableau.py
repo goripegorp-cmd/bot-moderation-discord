@@ -195,7 +195,10 @@ FORMAT_ROUTE = re.compile(r"[a-z0-9_]{1,40}(?:/[a-z0-9_]{1,40}){0,4}")
 CORPS_DEFAUT = 64 * 1024
 CORPS_PLAFOND = 12 * 1024 * 1024
 LIMITE_ECRITURES = 120     # écritures du site (adresses + synchronisation) par minute et par personne
-LIMITE_MEDIAS = 1500       # images servies par minute et par session (une galerie entière, pas plus)
+LIMITE_MEDIAS = 3000       # images servies par minute et par session (deux galeries entières, pas plus)
+#  27/10/2026 (banc de plusieurs années) : à 5 ans, le mur de l'équipage montre ~600 affiches (celles des anciens du clan
+#  y restent tant que la direction ne les retire pas) ; les images ne sont jamais gardées par le navigateur
+#  (`no-store`) — trois passages en une minute dépassaient 1 500 et des portraits s'affichaient cassés (429).
 PARAMETRES_MAX = 20
 #  La synchronisation hors ligne.
 SYNC_OPS_MAX = 50

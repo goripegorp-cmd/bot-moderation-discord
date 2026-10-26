@@ -231,7 +231,8 @@ export function casierPlus(redessiner) {
   const s = etat.d && etat.d.sanctions;
   const restant = s ? Number(s.membres_total || 0) - casierMembres().length : 0;
   if (!s || restant <= 0 || casier.complet) return null;
-  return bouton(casier.charge ? "Chargement…" : "Afficher les " + quantite(restant, "autre(s) personne(s)") + " du casier", {
+  //  Court : au téléphone, un bouton ne passe pas à la ligne (« Afficher les 4 510 autres personnes du casier » débordait).
+  return bouton(casier.charge ? "Chargement…" : "Voir les " + quantite(restant, "autre(s) personne(s)"), {
     classe: "p discret", icone: "bas", reseau: true, disabled: casier.charge, onclick: async () => {
       casier.charge = true; redessiner();
       let apres = s.membres.length + casier.autres.length;

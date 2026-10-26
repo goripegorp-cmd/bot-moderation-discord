@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import gzip
+import io
 import json
 import os
 import random
@@ -265,10 +266,22 @@ def _tables_du_bot(b: Base) -> None:
     b.c.execute("CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_user ON ticket_transcripts(guild_id, user_id)")
 
 
+_GABARITS: dict = {}   # (webp, tranche de 4 Ko) → une vraie image de ce poids
+
+
 def _octets_image(hasard, taille: int, webp: bool = True) -> bytes:
-    """Des octets d'image (en-tête juste, contenu au hasard) : leur poids compte, pas leur contenu."""
-    entete = b"RIFF" + (taille - 8).to_bytes(4, "little") + b"WEBPVP8 " if webp else b"\x89PNG\r\n\x1a\n"
-    return entete + hasard.randbytes(max(0, taille - len(entete)))
+    """Une VRAIE image d'environ `taille` octets (du bruit, sans perte : son poids est celui de ses pixels) — la page la
+    décode, et le contrôle visuel le vérifie (27/10/2026 : des octets au hasard sous un en-tête juste s'affichaient en
+    images cassées). Une par tranche de 4 Ko, faite une fois puis recopiée."""
+    cle = (bool(webp), max(1, round(taille / 4096)))
+    if cle not in _GABARITS:
+        from PIL import Image
+        cote = max(8, int((cle[1] * 4096 / 3) ** 0.5))
+        im = Image.frombytes("RGB", (cote, cote), random.Random(cle[1]).randbytes(cote * cote * 3))
+        tampon = io.BytesIO()
+        im.save(tampon, "WEBP", lossless=True, method=0) if webp else im.save(tampon, "PNG", compress_level=0)
+        _GABARITS[cle] = tampon.getvalue()
+    return _GABARITS[cle]
 
 
 def _transcript_html(monde: Monde, tid: int, auteur: str, debut: int, n: int, images: list) -> str:
