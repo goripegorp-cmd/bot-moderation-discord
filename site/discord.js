@@ -18,7 +18,7 @@ import { ligne, lignes, groupes, outilsGroupes, groupesParPeriode, groupesParJou
 import { avecVerrou, protegerZone } from "./direct.js";
 import {
   journalSuite, comptesParCategorie, chiffresJournal, comptesMois, moisArchive, fermesDepuis, fermesRecherche, reunirFermes,
-  casierMembres, casierPlus, casierRecherche, texteApercu, apercuReglette, boutonNettoyerRegle, cadreStockage, FAMILLES, familleDe,
+  casierMembres, casierPlus, casierRecherche, texteApercu, apercuReglette, boutonNettoyerRegle, cadreStockage, FAMILLES, familleDe as familleRegle,
 } from "./longevite.js";
 
 const JOUR = 86400;
@@ -750,7 +750,7 @@ export function nettoyage(vue) {
  *  attend d'être effacé en avant ; des cartes de même hauteur (26/10/2026 : une règle par famille de données). */
 function reglesRangees(regles, compteurs, partiront, recharger) {
   const parFamille = new Map(FAMILLES.map((f) => [f[2], []]));
-  for (const r of regles) parFamille.get(familleDe(Number(r.ordre) || 0)[2]).push(r);
+  for (const r of regles) parFamille.get(familleRegle(Number(r.ordre) || 0)[2]).push(r);
   const grille = (l) => h("div", { classe: "grille egale" }, l.map((r) => carteRegle(r, compteurs[r.cle], recharger, partiront[r.cle])));
   return h("div", { classe: "groupes-zone" }, groupes(FAMILLES.filter((f) => parFamille.get(f[2]).length).map(([, , titre, ic]) => {
     const l = parFamille.get(titre), n = l.reduce((a, r) => a + (Number(partiront[r.cle]) || 0), 0);

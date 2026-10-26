@@ -1091,3 +1091,23 @@ console.log(JSON.stringify({
                              "avec 45 j : 12 éléments partiraient"]
     assert vu["comptes7"] == {"A": 3, "B": 4} and vu["comptes90"] is None, "sept jours de Paris, aujourd'hui compris"
     assert vu["fermes"] == [2, 3, 1], "sans doublon, les plus récents d'abord"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LV17 — chaque module de la page se lit comme un module ES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_LV17_chaque_module_de_la_page_se_lit_comme_un_module_es():
+    """27/10/2026 : une fusion avait déclaré `familleDe` deux fois dans discord.js (l'import des règles du Nettoyage et
+    les familles des tickets) — tout le Port ne s'ouvrait plus, et aucun test ne le voyait (`node --check` seul lit un
+    .js comme un script)."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node n'est pas installé : les modules de la page ne se vérifient pas ici")
+    fautes = []
+    for f in sorted((RACINE / "site").glob("*.js")):
+        r = subprocess.run([node, "--input-type=module", "--check"], input=f.read_text(encoding="utf-8"), capture_output=True,
+                           text=True, encoding="utf-8", timeout=60)
+        if r.returncode != 0:
+            fautes.append(f"{f.name} : {(r.stderr.strip().splitlines() or ['?'])[-1]}")
+    assert not fautes, fautes

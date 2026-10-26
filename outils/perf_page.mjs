@@ -24,10 +24,11 @@ const NAVIGATEURS = [opt("navigateur", ""), process.env.CHROME || "",
   "C:/Program Files/Google/Chrome/Application/chrome.exe", "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files (x86)/Microsoft/EdgeCore/155.0.4283.62/msedge.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean);
+//  Les adresses de la navigation regroupée (27/10/2026) : l'Aperçu est dans l'Accueil, le Nettoyage dans les Réglages.
 const RUBRIQUES = [
-  ["accueil", "#accueil/attente"], ["apercu", "#port/apercu"], ["journal", "#port/journal"], ["sanctions", "#port/sanctions"],
-  ["tickets", "#port/tickets"], ["repertoire", "#port/repertoire"], ["salons", "#port/salons/questions"], ["nettoyage", "#port/nettoyage"],
-  ["candidatures", "#equipage/candidatures/decidees"], ["affiches", "#capitainerie/affiches"], ["annonces", "#equipage/annonces"],
+  ["accueil", "#accueil/attente"], ["journal", "#port/journal"], ["sanctions", "#port/sanctions"],
+  ["tickets", "#port/tickets"], ["repertoire", "#port/repertoire"], ["salons", "#port/salons/questions"], ["nettoyage", "#capitainerie/reglages/nettoyage"],
+  ["candidatures", "#capitainerie/recrutement/candidatures"], ["affiches", "#capitainerie/affiches"], ["annonces", "#equipage/annonces"],
   ["vitrine", null],   // 27/10/2026 : la vitrine PUBLIQUE de l'équipage (/equipage, sans session)
 ];
 const filtre = opt("rubriques", "") ? String(opt("rubriques")).split(",") : null;
