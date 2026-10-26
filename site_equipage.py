@@ -524,6 +524,9 @@ async def _publications(g, maintenant: float) -> list:
                     "places": int(v.get("places") or 0) if evenement else 0,
                     "phase": ("annule" if e["statut"] == "annule" else evenements.phase_de(e, maintenant)) if evenement else "",
                     "publie": int(e["publie"] or 0) or None,
+                    #  Les liens de la publication (des boutons sur Discord ; des adresses https vérifiées à l'écriture).
+                    "liens": [{"nom": sans_emoji(x.get("nom")), "url": x["url"]} for x in v.get("liens") or []
+                              if isinstance(x, dict) and isinstance(x.get("url"), str) and x["url"].startswith("https://")],
                     "reponses": {"d": int(n.get("d", 0)), "p": int(n.get("p", 0)), "n": int(n.get("n", 0)),
                                  "v": int(n.get("v", 0))}})
     return out
@@ -565,7 +568,8 @@ async def actualites_auto(g, maintenant: float, publications=None, recrues=None,
             titre = _t(g, f"{GROUPE}.auto.annule", titre=titre)
         out.append({"id": f"auto-pub-{p['id']}", "genre": genre, "titre": titre, "texte": p["texte"],
                     "image": _media_sortie(p["image"]), "quand": int(quand), "evenement": {
-                        "quand": p["quand"], "lieu": p["lieu"], "phase": p["phase"]} if evenement else None})
+                        "quand": p["quand"], "lieu": p["lieu"], "phase": p["phase"]} if evenement else None,
+                    "liens": p.get("liens") or []})
     for r in recrues:
         if r["quand"] >= borne:
             out.append({"id": f"auto-recrue-{r['quand']}-{hashlib.sha256(r['nom'].encode()).hexdigest()[:6]}",

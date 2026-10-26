@@ -421,6 +421,9 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     site_equipage.setup(get_db=get_db, cfg=cfg, log=print)
     await site_equipage.init_db()
     tableau.monter(site_equipage)
+    if evenements is not None:   # modifier une annonce publiée, en place, depuis l'accueil (comme le bot)
+        import annonces_modifiables
+        tableau.monter(annonces_modifiables)
     tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
     zones.brancher_site_equipage(site_equipage.section_guide)   # sa ligne dans le guide du clan de démonstration
 
@@ -790,15 +793,15 @@ async def _evenements_demo(ev, g, clan_r, get_db) -> None:
     image = ""
     try:
         from PIL import Image, ImageDraw
-        im = Image.new("RGB", (960, 360), (31, 78, 90))
+        im = Image.new("RGB", (1600, 640), (31, 78, 90))   # une bannière aux dimensions exactes (bannieres.py)
         d = ImageDraw.Draw(im)
-        for y in range(0, 360, 6):
-            d.line((0, y, 960, y), fill=(31 + y // 12, 78 + y // 20, 90 + y // 24))
-        d.ellipse((380, 60, 580, 260), outline=(239, 226, 196), width=10)
-        d.line((480, 70, 480, 250), fill=(239, 226, 196), width=8)
+        for y in range(0, 640, 6):
+            d.line((0, y, 1600, y), fill=(31 + y // 22, 78 + y // 36, 90 + y // 42))
+        d.ellipse((630, 150, 970, 490), outline=(239, 226, 196), width=14)
+        d.line((800, 165, 800, 475), fill=(239, 226, 196), width=12)
         tampon = io.BytesIO()
         im.save(tampon, "PNG")
-        statut, rep = await tableau._route_media(g, chef, {}, {"nom": "movie3.png", "type": "image/png",
+        statut, rep = await tableau._route_media(g, chef, {}, {"nom": "movie3.png", "type": "image/png", "format": "banniere",
                                                               "base64": base64.b64encode(tampon.getvalue()).decode()})
         image = rep.get("id", "") if statut == 200 else ""
     except Exception as ex:  # outil local : sans Pillow, l'annonce part sans image
@@ -864,7 +867,8 @@ async def _equipage_demo(g) -> None:
         dessiner(ImageDraw.Draw(im), *taille)
         tampon = io.BytesIO()
         im.save(tampon, "PNG")
-        st, rep = await tableau._route_media(g, chef, {}, {"nom": nom, "type": "image/png",
+        #  Le bandeau de l'Accueil et l'image d'une actualité : des bannières aux dimensions exactes (bannieres.py).
+        st, rep = await tableau._route_media(g, chef, {}, {"nom": nom, "type": "image/png", "format": "banniere",
                                                            "base64": base64.b64encode(tampon.getvalue()).decode()})
         return rep.get("id", "") if st == 200 else ""
 
@@ -893,14 +897,14 @@ async def _equipage_demo(g) -> None:
         d.line((larg * .82, haut * .25, larg * .72, haut * .45), fill=(142, 42, 36), width=10)
         d.ellipse((larg * .08, haut * .12, larg * .30, haut * .52), outline=(43, 29, 18), width=6)
 
-    fond = await image("bandeau-equipage.png", mer, (1600, 560))
+    fond = await image("bandeau-equipage.png", mer, (1600, 640))
     bandeau = next((b for b in accueil["blocs"] if b["type"] == "bandeau"), None)
     if fond and bandeau is not None:
         st, rep = await site_equipage._route_bloc(g, chef, {}, {"id": bandeau["id"], "version": bandeau["version"],
                                                                 "contenu": dict(bandeau["contenu"], image=fond)})
         if st != 200:
             print(f"[SITE LOCAL] bandeau de démonstration refusé : {rep}")
-    tresor = await image("carte-tresor.png", carte, (1200, 700))
+    tresor = await image("carte-tresor.png", carte, (1600, 640))
     for corps in ({"titre": "Bienvenue aux nouvelles recrues",
                    "texte": "Trois nouveaux matelots ont rejoint le navire cette semaine.\nPassez les saluer au **chat du clan**."},
                   {"titre": "Grande chasse au trésor samedi soir", "image": tresor, "epingle": True,

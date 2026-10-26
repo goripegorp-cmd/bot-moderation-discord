@@ -2125,6 +2125,12 @@ def _evt_valider(m, corps: dict, type_: str, avant: dict) -> tuple:
                 erreurs[cle] = "Une liste parmi metiers, grade, race est attendue."
             else:
                 propres[cle] = list(dict.fromkeys(brut))
+        elif cle == "liens":   # 26/10/2026 : les liens d'une publication (des boutons sous son texte)
+            liens, faute = E._liens(brut)
+            if faute:
+                erreurs[cle] = faute
+            else:
+                propres[cle] = liens
     return {k: v for k, v in propres.items() if k in E.CHAMPS_TYPE[type_]}, erreurs
 
 
@@ -2401,23 +2407,27 @@ def r_modifier(m, q, c):
         erreurs["quand"] = "Le nouveau début doit être dans le futur (une minute au moins)."
     if erreurs:
         return 400, {"erreur": next(iter(erreurs.values())), "champs": erreurs}
-    e["valeurs"] = valeurs
-    if e["type"] == "evenement":
+    #  La publication telle qu'elle serait (une copie : un refus ne laisse rien derrière lui, comme le serveur).
+    f = dict(e, valeurs=valeurs, rappels_faits=list(e["rappels_faits"]))
+    if f["type"] == "evenement":
         qd = int(valeurs.get("quand") or 0)
-        faits = set() if q_change else set(e["rappels_faits"])
+        faits = set() if q_change else set(f["rappels_faits"])
         faits |= {mi for mi in valeurs.get("rappels") or [] if qd and qd - mi * 60 <= maintenant}
-        e["rappels_faits"] = sorted(faits)
+        f["rappels_faits"] = sorted(faits)
         if q_change:
-            e["phase"] = "a_venir"
-        if valeurs.get("discord_event") and not e["discord_event_id"]:
-            e["discord_event_id"], m.prochain_message = m.prochain_message, m.prochain_message + 1
-        elif e["discord_event_id"] and not valeurs.get("discord_event"):
-            e["discord_event_id"] = 0
-    cartes_, avertissements, _eq = _evt_cartes(m, e)
+            f["phase"] = "a_venir"
+    cartes_, avertissements, _eq = _evt_cartes(m, f)
     n = len(cartes_)
-    if n > len(e["messages"]):
-        e["messages"] = e["messages"] + list(range(m.prochain_message, m.prochain_message + n - len(e["messages"])))
-        m.prochain_message += n
+    #  26/10/2026 : les messages sont réécrits EN PLACE, jamais un de plus (`evenements._hors_limites`).
+    hors = E._hors_limites(cartes_, len(e["messages"]), e["type"])
+    if hors:
+        return 400, {"erreur": hors, "champs": {"texte": hors}, "messages": {"publies": len(e["messages"]), "demandes": n}}
+    if f["type"] == "evenement":
+        if valeurs.get("discord_event") and not f["discord_event_id"]:
+            f["discord_event_id"], m.prochain_message = m.prochain_message, m.prochain_message + 1
+        elif f["discord_event_id"] and not valeurs.get("discord_event"):
+            f["discord_event_id"] = 0
+    e.update(f)
     e.update(messages=e["messages"][:n], quand=int(valeurs.get("quand") or 0), fin=E._fin(valeurs), version=e["version"] + 1,
              maj=int(maintenant), maj_par=int(m.moi), note="")
     site = m.evt_site(e)
@@ -2510,8 +2520,20 @@ def r_media(m, q, c):
     magiques = (b"\x89PNG", b"\xff\xd8\xff", b"GIF8")
     if not (octets.startswith(magiques) or (octets[:4] == b"RIFF" and octets[8:12] == b"WEBP")):
         return 415, {"erreur": "Format refusé : PNG, JPEG, WebP ou GIF seulement."}
+    if c.get("format") not in (None, "", "banniere"):
+        return 400, {"erreur": "Format demandé inconnu.", "champ": "format"}
     mid = "m" + hashlib.sha256(octets).hexdigest()[:16]
     largeur = hauteur = 0
+    if c.get("format") == "banniere":   # 26/10/2026 : la bannière refaite à sa taille exacte, par le code du bot
+        import bannieres
+        try:
+            r = bannieres.recadrer(octets)
+        except bannieres.Refus as ex:
+            return ex.statut, ex.corps()
+        m.medias[mid] = (r["octets"], r["type"])
+        return 200, {"ok": True, "id": mid, "url": f"media/{mid}", "largeur": r["largeur"], "hauteur": r["hauteur"],
+                     "octets": len(r["octets"]), "type": r["type"],
+                     "banniere": {"source": r["source"], "coupe": r["coupe"], "recadree": r["recadree"]}}
     if Image is not None:
         try:
             img = Image.open(io.BytesIO(octets))

@@ -74,6 +74,10 @@ DUREE_MAX = 10080              # minutes : une semaine
 RAPPEL_MAX = 20160             # minutes : deux semaines avant
 RAPPELS_MAX = 5
 PLACES_MAX = 500
+#  26/10/2026 : les liens d'une publication, des boutons sous son texte (« Le site du jeu », « Le règlement »…) :
+#  5 au plus (une rangée de boutons Discord), un nom d'une ligne, une adresse https (la seule que le site ouvre).
+LIENS_MAX, LIEN_NOM_MAX, LIEN_URL_MAX = 5, 80, 512
+LIEN_URL = re.compile(r"https://[^\s<>\"'`]{3,505}")
 HORIZON_S = 366 * 86400        # un événement se prévoit un an à l'avance au plus
 AVANCE_S = 60                  # publié au moins une minute avant son début
 FIN_SANS_DUREE_S = 2 * 3600    # sans durée : les réponses se ferment deux heures après le début
@@ -423,7 +427,8 @@ async def init_db():
 
 def _defauts(type_: str) -> dict:
     """Les valeurs d'un brouillon neuf : de quoi publier tout de suite, en changeant ce qu'on veut."""
-    v = {"titre": "", "texte": "", "image": "", "couleur": COULEURS[type_], "destination": "", "mention": "aucune"}
+    v = {"titre": "", "texte": "", "image": "", "couleur": COULEURS[type_], "destination": "", "mention": "aucune",
+         "liens": []}
     if type_ == "evenement":
         v.update(quand=None, duree_min=60, lieu="", rappels=[60], mention="inscrits", reponses=True, places=0,
                  discord_event=False, reserve_clan=True)
@@ -741,6 +746,34 @@ def _paragraphes(x) -> str:
     return _CTRL.sub("", t).strip()
 
 
+def _liens(brut) -> tuple:
+    """Les liens d'une publication → ([{"nom", "url"}], "") ou ([], la faute). Une ligne laissée vide (ni nom ni
+    adresse) est ignorée ; une adresse en double aussi."""
+    if brut is None:
+        return [], ""
+    if not isinstance(brut, list) or len(brut) > 2 * LIENS_MAX:
+        return [], f"{LIENS_MAX} liens au plus."
+    out, vus = [], set()
+    for x in brut:
+        if not isinstance(x, dict) or not isinstance(x.get("nom", ""), str) or not isinstance(x.get("url", ""), str):
+            return [], "Chaque lien : un nom et une adresse."
+        nom, url = _une_ligne(x.get("nom") or ""), str(x.get("url") or "").strip()
+        if not nom and not url:
+            continue
+        if not nom:
+            return [], "Chaque lien a besoin d'un nom (le texte du bouton)."
+        if len(nom) > LIEN_NOM_MAX:
+            return [], f"Le nom d'un lien : {LIEN_NOM_MAX} caractères au plus."
+        if len(url) > LIEN_URL_MAX or not LIEN_URL.fullmatch(url):
+            return [], f"« {nom[:40]} » : une adresse complète en https:// est attendue."
+        if url not in vus:
+            vus.add(url)
+            out.append({"nom": nom, "url": url})
+    if len(out) > LIENS_MAX:
+        return [], f"{LIENS_MAX} liens au plus."
+    return out, ""
+
+
 async def _valider(g, corps: dict, type_: str, avant: dict) -> tuple:
     """Les champs envoyés, vérifiés un par un → (valeurs propres, {champ: erreur}). `avant` : les valeurs
     actuelles (une image déjà en place n'est pas relue à chaque sauvegarde)."""
@@ -852,6 +885,12 @@ async def _valider(g, corps: dict, type_: str, avant: dict) -> tuple:
                 erreurs[cle] = "Une liste parmi metiers, grade, race est attendue."
             else:
                 propres[cle] = list(dict.fromkeys(brut))
+        elif cle == "liens":
+            liens, faute = _liens(brut)
+            if faute:
+                erreurs[cle] = faute
+            else:
+                propres[cle] = liens
     #  Un champ qui ne concerne pas ce type (des réponses sur une annonce) : vérifié, puis laissé de côté.
     return {k: v for k, v in propres.items() if k in CHAMPS_TYPE[type_]}, erreurs
 
@@ -936,6 +975,13 @@ def _texte(*lignes) -> dict:
 
 def _sep() -> dict:
     return {"type": "separateur"}
+
+
+def _bloc_liens(v: dict) -> list:
+    """Les liens de la publication : une rangée de boutons-liens sous son texte (rien sans lien)."""
+    liens = [x for x in v.get("liens") or [] if isinstance(x, dict) and x.get("nom") and x.get("url")]
+    return [{"type": "boutons", "boutons": [{"label": str(x["nom"])[:LIEN_NOM_MAX], "url": str(x["url"])}
+                                            for x in liens[:LIENS_MAX]]}] if liens else []
 
 
 def _emoji_app(nom):
@@ -1149,6 +1195,7 @@ def _cartes_evenement(g, e: dict, rep: dict, maintenant: float, haut: str) -> li
     blocs.append(_texte(_l(titre, niveau=2), _l(_t(gid, "evenements.carte.sous_titre"), "drapeau", "petit")))
     if v.get("texte"):
         blocs.append(_texte(_l(v["texte"])))
+    blocs += _bloc_liens(v)
     blocs.append(_sep())
     blocs.append(_texte(*_lignes_quand(v, phase, statut, gid)))
     #  Ceux qui ont quitté le serveur ne comptent plus (ni dans la liste, ni dans les places : `repondre` aussi).
@@ -1185,6 +1232,7 @@ def _cartes_annonce(e: dict, rep: dict, haut: str) -> list:
     blocs.append(_texte(_l(v["titre"] or "(sans titre)", niveau=2)))
     if v.get("texte"):
         blocs.append(_texte(_l(v["texte"])))
+    blocs += _bloc_liens(v)
     blocs += [_sep(), _pied(e)]
     if e["statut"] in ("publie", "brouillon", "envoi", "incertain"):
         n = len(rep.get("v") or [])
@@ -1298,6 +1346,7 @@ def _cartes_liste(e: dict, eq: dict, haut: str) -> list:
     premiere.append(_texte(_l(titre, niveau=2), _l(resume, "membres")))
     if v.get("texte"):
         premiere.append(_texte(_l(v["texte"])))
+    premiere += _bloc_liens(v)
     premiere.append(_sep())
     corps = []
     for tete, membres in groupes:
@@ -1786,9 +1835,9 @@ async def publier(g, auteur, eid: int, *, version=None, forcer: bool = False) ->
                           ("Discord a refusé la publication : rien n'est parti.", int(eid)))
             return 502, {"erreur": "Discord a refusé la publication : rien n'est parti, réessaie dans un instant."}
         avertissements = [a for a in contexte["avertissements"] if a]
-        if len(ids) < len(cartes_):
-            avertissements.append(f"Seules {len(ids)} cartes sur {len(cartes_)} sont parties : « Actualiser » "
-                                  "(modifier sans rien changer) enverra le reste.")
+        if len(ids) < len(cartes_):   # 26/10/2026 : une modification n'ajoute jamais de message (rien ne se republie)
+            avertissements.append(f"Seules {len(ids)} cartes sur {len(cartes_)} sont parties : retire la publication, "
+                                  "puis republie-la.")
         lien = _lien(g, salon.id, ids[0])
         natif = 0
         if e["type"] == "evenement" and e["valeurs"].get("discord_event"):
@@ -1903,8 +1952,78 @@ async def traiter(g, eid: int) -> None:
         _releve["rappels"] += 1 if n else 0
 
 
+def _en_ligne(e: dict) -> bool:
+    """Une publication qui se modifie : publiée, et (un événement) pas encore terminé."""
+    return e["statut"] == "publie" and not (e["type"] == "evenement" and "termine" in (e["phase"], phase_de(e, _mur())))
+
+
+async def _preparer_modification(g, e: dict, corps: dict, maintenant: float) -> tuple:
+    """Les valeurs d'une publication en ligne après `corps`, vérifiées comme `modifier` les écrira → (valeurs, avant,
+    erreurs {champ: faute}, horaire changé, refus (statut, corps) | None). Rien n'est écrit, rien ne part : `modifier`
+    et son aperçu (`apercu_modification`) les partagent."""
+    if "type" in corps and corps["type"] != e["type"]:
+        return None, None, {}, False, (400, {"erreur": "Le type d'une publication ne change pas.",
+                                             "champs": {"type": "Immuable."}})
+    if "destination" in corps and str(corps["destination"] or "") not in ("", str(e["salon_id"])):
+        return None, None, {}, False, (400, {"erreur": "Une publication ne change pas de post : annule-la et republie.",
+                                             "champs": {"destination": "Immuable."}})
+    corps = {k: x for k, x in corps.items() if k != "destination"}
+    propres, erreurs = await _valider(g, corps, e["type"], e["valeurs"])
+    avant = dict(e["valeurs"])
+    valeurs = {**avant, **propres}
+    erreurs.update(_croiser(e["type"], valeurs))
+    q_change = e["type"] == "evenement" and valeurs.get("quand") != avant.get("quand")
+    if q_change and (not valeurs.get("quand") or valeurs["quand"] < maintenant + AVANCE_S):
+        erreurs["quand"] = "Le nouveau début doit être dans le futur (une minute au moins)."
+    return valeurs, avant, erreurs, q_change, None
+
+
+def _appliquer_modification(e: dict, valeurs: dict, q_change: bool, maintenant: float) -> None:
+    """La publication telle qu'elle sera écrite : ses valeurs ; pour un événement, ses rappels et son état. Un nouvel
+    horaire : les rappels repartent de zéro, l'état aussi. Un rappel ajouté dont l'heure est déjà passée ne part pas
+    (comme à la publication) : jamais un « rappel » surprise."""
+    e["valeurs"] = valeurs
+    if e["type"] == "evenement":
+        q = int(valeurs.get("quand") or 0)
+        faits = set() if q_change else set(e["rappels_faits"])
+        faits |= {m for m in valeurs.get("rappels") or [] if q and q - m * 60 <= maintenant}
+        e["rappels_faits"] = sorted(faits)
+        if q_change:
+            e["phase"] = "a_venir"
+
+
+def _hors_limites(cartes_: list, n_messages: int, type_: str) -> str:
+    """"" quand les cartes tiennent dans les messages DÉJÀ postés, chacune sous les limites de Discord — sinon la
+    raison, en clair. 26/10/2026, le fondateur : « que ça riposte pas une annonce, mais que ça fasse un truc au
+    propre » : une modification réécrit les messages EN PLACE ; elle n'en poste jamais un de plus (elle est refusée)."""
+    for k, x in enumerate(cartes_):
+        n, c = mesurer(x)
+        ou = f" (message {k + 1} sur {len(cartes_)})" if len(cartes_) > 1 else ""
+        if c > CARACTERES_MAX:
+            return f"Trop long pour un message Discord : {c} caractères sur {CARACTERES_MAX}{ou}. Raccourcis le texte."
+        if n > COMPOSANTS_MAX:
+            return f"Trop d'éléments pour un message Discord : {n} sur {COMPOSANTS_MAX}{ou}. Retire des liens."
+    if len(cartes_) > n_messages:
+        quoi = "La liste" if type_ in ("metiers", "listing") else "Ce texte"
+        return (f"{quoi} demanderait {len(cartes_)} messages sur Discord ; la publication en a {n_messages}. Une "
+                "modification n'en ajoute jamais : raccourcis le texte, ou retire la publication et republie-la.")
+    return ""
+
+
+async def _message_disparu(g, e: dict, eid: int, erreur: str) -> tuple:
+    """Le message (ou le post) d'une publication n'existe plus sur Discord : on le dit, on le note — rien ne se
+    republie tout seul."""
+    _log("[EVENEMENTS] message d'une publication introuvable sur Discord")
+    _log(f"[EVENEMENTS:DETAIL] evenement={eid} salon={e['salon_id']} messages={len(e['messages'])}")
+    await _ecrire("UPDATE clan_evenements SET note=? WHERE id=?",
+                  ("Le message de cette publication n'existe plus sur Discord (supprimé) : rien n'a été republié.",
+                   int(eid)))
+    return 409, {"erreur": erreur, "disparu": True, "actuelle": await _vers_site(g, await charger(eid))}
+
+
 async def modifier(g, auteur, corps: dict) -> tuple:
-    """Une publication déjà sur Discord, modifiée (ou réécrite telle quelle : « Actualiser »)."""
+    """Une publication déjà sur Discord, modifiée (ou réécrite telle quelle : « Actualiser »). Ses messages sont
+    réécrits EN PLACE (mêmes identifiants) ; jamais un message de plus — trop long, la modification est refusée."""
     eid = _id(corps.get("id"))
     if eid is None:
         return 400, {"erreur": "Identifiant manquant.", "champs": {"id": "Identifiant manquant."}}
@@ -1913,45 +2032,27 @@ async def modifier(g, auteur, corps: dict) -> tuple:
         e = await charger(eid)
         if e is None or e["guild_id"] != g.id:
             return 404, {"erreur": "Publication introuvable."}
-        if e["statut"] != "publie" or (e["type"] == "evenement" and "termine" in (e["phase"], phase_de(e, _mur()))):
+        if not _en_ligne(e):
             return 409, {"erreur": "Seule une publication en ligne (événement pas encore terminé) se modifie.",
                          "actuelle": await _vers_site(g, e)}
         if version is None:
             return 400, {"erreur": "La version est demandée.", "champs": {"version": "La version est demandée."}}
         if version != e["version"]:
             return 409, {"conflit": True, "actuelle": await _vers_site(g, e)}
-        if "type" in corps and corps["type"] != e["type"]:
-            return 400, {"erreur": "Le type d'une publication ne change pas.", "champs": {"type": "Immuable."}}
-        if "destination" in corps and str(corps["destination"] or "") not in ("", str(e["salon_id"])):
-            return 400, {"erreur": "Une publication ne change pas de post : annule-la et republie.",
-                         "champs": {"destination": "Immuable."}}
-        corps = {k: x for k, x in corps.items() if k != "destination"}
-        propres, erreurs = await _valider(g, corps, e["type"], e["valeurs"])
-        avant = dict(e["valeurs"])
-        valeurs = {**avant, **propres}
-        erreurs.update(_croiser(e["type"], valeurs))
         maintenant = _mur()
-        q_change = e["type"] == "evenement" and valeurs.get("quand") != avant.get("quand")
-        if q_change and (not valeurs.get("quand") or valeurs["quand"] < maintenant + AVANCE_S):
-            erreurs["quand"] = "Le nouveau début doit être dans le futur (une minute au moins)."
+        valeurs, avant, erreurs, q_change, refus = await _preparer_modification(g, e, corps, maintenant)
+        if refus is not None:
+            return refus
         if erreurs:
             return 400, {"erreur": next(iter(erreurs.values())), "champs": erreurs}
         salon = await _salon(g, e["salon_id"])
         if salon is None or not e["messages"]:
-            return 409, {"erreur": "Le post ou le message de cette publication n'existe plus : republie-la."}
+            return await _message_disparu(g, e, eid, "Le post de cette publication n'existe plus sur Discord : rien n'a "
+                                                     "été modifié, rien n'a été republié.")
         if not await _reveiller(salon):
             return 400, {"erreur": "Ce post est archivé et je ne peux pas le rouvrir."}
-        e["valeurs"] = valeurs
+        _appliquer_modification(e, valeurs, q_change, maintenant)
         avertissements = []
-        if e["type"] == "evenement":
-            #  Un nouvel horaire : les rappels repartent de zéro, l'état aussi. Un rappel ajouté dont l'heure est
-            #  déjà passée ne part pas (comme à la publication) : jamais un « rappel » surprise.
-            q = int(valeurs.get("quand") or 0)
-            faits = set() if q_change else set(e["rappels_faits"])
-            faits |= {m for m in valeurs.get("rappels") or [] if q and q - m * 60 <= maintenant}
-            e["rappels_faits"] = sorted(faits)
-            if q_change:
-                e["phase"] = "a_venir"
         image_change = valeurs.get("image") != avant.get("image")
         image = await _image(valeurs.get("image") or "") if image_change and valeurs.get("image") else None
         if image_change and valeurs.get("image") and image is None:
@@ -1959,27 +2060,29 @@ async def modifier(g, auteur, corps: dict) -> tuple:
         if image is not None:
             valeurs["image_ext"] = image[1]
         cartes_, contexte = await cartes(g, e, maintenant=maintenant, salon=salon)
+        hors = _hors_limites(cartes_, len(e["messages"]), e["type"])
+        if hors:
+            return 400, {"erreur": hors, "champs": {"texte": hors},
+                         "messages": {"publies": len(e["messages"]), "demandes": len(cartes_)}}
         avertissements += contexte["avertissements"]
         nom = _nom_image(e)
         ids = list(e["messages"])
         try:
-            for k, carte in enumerate(cartes_):
-                vue_ = vue(carte, eid, image_nom=nom if k == 0 else "", catalogue=contexte["catalogue"])
-                if k < len(ids):
-                    envoi = {"view": vue_, "allowed_mentions": discord.AllowedMentions.none()}
-                    if k == 0 and image_change:
-                        envoi["attachments"] = [discord.File(io.BytesIO(image[0]), filename=nom)] if image else []
-                    await salon.get_partial_message(ids[k]).edit(**envoi)
-                else:
-                    ids.append(int((await salon.send(view=vue_, allowed_mentions=discord.AllowedMentions.none())).id))
-            for mid in ids[len(cartes_):]:
+            for k, carte in enumerate(cartes_):   # chaque carte réécrit SON message : jamais un envoi
+                envoi = {"view": vue(carte, eid, image_nom=nom if k == 0 else "", catalogue=contexte["catalogue"]),
+                         "allowed_mentions": discord.AllowedMentions.none()}
+                if k == 0 and image_change:
+                    envoi["attachments"] = [discord.File(io.BytesIO(image[0]), filename=nom)] if image else []
+                await salon.get_partial_message(ids[k]).edit(**envoi)
+            for mid in ids[len(cartes_):]:   # moins de membres au listing : les cartes en trop partent
                 try:
                     await salon.get_partial_message(mid).delete()
                 except discord.NotFound:
                     pass
             ids = ids[:len(cartes_)]
         except discord.NotFound:
-            return 409, {"erreur": "Le message de cette publication a été supprimé sur Discord : republie-la."}
+            return await _message_disparu(g, e, eid, "Le message de cette publication n'existe plus sur Discord (supprimé) :"
+                                                     " rien n'a été republié. Retire-la, ou publie-en une nouvelle.")
         except discord.HTTPException as ex:
             _signaler("E5", "publication non modifiée", ex, f"evenement={eid}")
             return 502, {"erreur": "Discord a refusé la modification : réessaie dans un instant."}
@@ -2010,6 +2113,50 @@ async def modifier(g, auteur, corps: dict) -> tuple:
     e = await charger(eid)
     return 200, {"ok": True, "lien": lien, "element": await _vers_site(g, e),
                  "avertissements": [a for a in avertissements if a]}
+
+
+async def apercu_modification(g, auteur, corps: dict) -> tuple:
+    """Les cartes d'une publication en ligne TELLES QU'ELLES SERAIENT après `corps` — rien n'est écrit, rien ne part
+    (l'éditeur du site de l'équipage les montre avant « Enregistrer »). Les mêmes contrôles que `modifier` (champs,
+    limites de Discord, jamais un message de plus) : ses refus arrivent ici en avance, dans `erreurs`."""
+    refus = _refus(g, auteur)
+    if refus:
+        return refus
+    if not isinstance(corps, dict):
+        return 400, {"erreur": "Corps JSON attendu."}
+    inconnus = [k for k in corps if k not in CHAMPS and k not in CLES_CONTROLE]
+    if inconnus:
+        return 400, {"erreur": f"Champ inconnu : {inconnus[0]}.", "champs": {k: "Champ inconnu." for k in inconnus}}
+    eid = _id(corps.get("id"))
+    if eid is None:
+        return 400, {"erreur": "Identifiant manquant.", "champs": {"id": "Identifiant manquant."}}
+    e = await charger(eid)
+    if e is None or e["guild_id"] != g.id:
+        return 404, {"erreur": "Publication introuvable."}
+    if not _en_ligne(e):
+        return 409, {"erreur": "Seule une publication en ligne (événement pas encore terminé) se modifie.",
+                     "actuelle": await _vers_site(g, e)}
+    maintenant = _mur()
+    valeurs, _avant, erreurs, q_change, refus = await _preparer_modification(g, e, corps, maintenant)
+    if refus is not None:
+        return refus
+    _appliquer_modification(e, valeurs, q_change, maintenant)
+    rep = await _reponses(eid)
+    cartes_, contexte = await cartes(g, e, maintenant=maintenant, rep=rep)
+    hors = _hors_limites(cartes_, len(e["messages"]), e["type"])
+    fautes = list(dict.fromkeys([*erreurs.values(), *([hors] if hors else [])]))
+    personnes, roles = _noms_cartes(g, cartes_)
+    dests = destinations(g, await _cfg(g.id))
+    dest = next((d for d in dests if d["id"] == str(e["salon_id"])), None)
+    return 200, {
+        "id": e["id"], "type": e["type"], "statut": e["statut"], "version": e["version"],
+        "destination": ({"id": dest["id"], "nom": dest["nom"]} if dest else None),
+        "cartes": [_carte_site(x) for x in cartes_], "limites": {"composants": COMPOSANTS_MAX, "caracteres": CARACTERES_MAX},
+        "messages": {"publies": len(e["messages"]), "demandes": len(cartes_)}, "valeurs": _valeurs_site(valeurs),
+        "personnes": personnes, "roles": roles, "erreurs": fautes, "champs": erreurs,
+        "avertissements": [a for a in contexte["avertissements"] if a], "modifiable": not fautes,
+        "maintenant": int(maintenant),
+    }
 
 
 async def annuler(g, auteur, eid: int, *, prevenir: bool = True) -> tuple:
@@ -2456,6 +2603,24 @@ def _carte_site(carte: dict) -> dict:
             "composants": n, "caracteres": c}
 
 
+def _noms_cartes(g, cartes_: list) -> tuple:
+    """({membre: nom}, {rôle: nom}) des mentions des cartes : l'aperçu du site les écrit en noms."""
+    personnes, roles = {}, {}
+    for x in cartes_:
+        for b in x["blocs"]:
+            for ln in b.get("lignes") or []:
+                for uid in re.findall(r"<@!?(\d+)>", ln["md"]):
+                    m = g.get_member(int(uid))
+                    personnes[uid] = m.display_name if m is not None else "Membre parti"
+        for rid in re.findall(r"<@&(\d+)>", x.get("haut") or ""):
+            r = g.get_role(int(rid))
+            roles[rid] = getattr(r, "name", "") or "rôle supprimé"
+    for uid in re.findall(r"<@!?(\d+)>", " ".join(x.get("haut") or "" for x in cartes_)):
+        m = g.get_member(int(uid))
+        personnes[uid] = m.display_name if m is not None else "Membre parti"
+    return personnes, roles
+
+
 async def route_apercu(g, auteur, requete, corps):
     """GET clan/apercu?id= : les cartes telles que Discord les affichera, et ce qui bloque ou prévient."""
     refus = _refus(g, auteur)
@@ -2499,19 +2664,7 @@ async def route_apercu(g, auteur, requete, corps):
     trop = [k + 1 for k, x in enumerate(cartes_) if mesurer(x)[0] > COMPOSANTS_MAX or mesurer(x)[1] > CARACTERES_MAX]
     if trop:
         erreurs.append("Une carte dépasse les limites de Discord : raccourcis le texte.")
-    personnes, roles = {}, {}
-    for x in cartes_:
-        for b in x["blocs"]:
-            for ln in b.get("lignes") or []:
-                for uid in re.findall(r"<@!?(\d+)>", ln["md"]):
-                    m = g.get_member(int(uid))
-                    personnes[uid] = m.display_name if m is not None else "Membre parti"
-        for rid in re.findall(r"<@&(\d+)>", x.get("haut") or ""):
-            r = g.get_role(int(rid))
-            roles[rid] = getattr(r, "name", "") or "rôle supprimé"
-    for uid in re.findall(r"<@!?(\d+)>", " ".join(x.get("haut") or "" for x in cartes_)):
-        m = g.get_member(int(uid))
-        personnes[uid] = m.display_name if m is not None else "Membre parti"
+    personnes, roles = _noms_cartes(g, cartes_)
     dest = _destination(dests, v)
     return 200, {
         "id": e["id"], "type": e["type"], "statut": e["statut"], "version": e["version"],

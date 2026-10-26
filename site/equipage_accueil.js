@@ -12,6 +12,8 @@ import {
 } from "./ui.js";
 import { affiche, insigneImage, primeNoeud, nomAffiche } from "./affiche.js";
 import { E, T, lire, texteRiche, textePlat, ouvrirAffiche, afficheParId, catalogue, sceau } from "./equipage_commun.js";
+import { cadreBanniere, choixBanniere } from "./banniere.js";
+import { editerPublication, modifiable, idPublication } from "./equipage_publication.js";
 
 // ─── Les types de blocs ─────────────────────────────────────────────────────
 const TYPES = {
@@ -53,15 +55,29 @@ export async function recharger(force) {
   if (!force && egaux(r.donnees, E.accueil)) return;
   E.accueil = r.donnees;
   if (zone && zone.isConnected) dessiner();
+  majToutes();
 }
 
 function accepter(accueil) {
   if (!accueil) return;
   E.accueil = accueil;
   if (zone && zone.isConnected) dessiner();
+  majToutes();
+}
+
+/** Une publication, un bloc ou une actualité écrits ailleurs (l'administration aussi : « evenement:<id> ») : l'accueil
+ *  se relit aussitôt (la tête seule a le direct ; l'équipage relit chaque minute). */
+let suitDirect = false;
+function suivreDirect() {
+  if (suitDirect || !E.direct || typeof E.direct.surDirect !== "function") return;
+  suitDirect = true;
+  E.direct.surDirect((x) => {
+    if (x && x.type === "ecrit" && (x.objets || []).some((o) => /^(evenement|accueil|actualite):/.test(String(o)))) recharger();
+  });
 }
 
 function dessiner() {
+  suivreDirect();
   const a = E.accueil;
   const edition = E.peutEditer && E.modeEdition;
   const blocs = a.blocs || [];
@@ -149,12 +165,18 @@ function blocActualites(c, donnees) {
 function carteActu(a, edition) {
   const [genre, ic] = GENRES[a.genre] || GENRES.annonce;
   const src = srcSure(a.image);
-  const visuel = src ? h("img", { classe: "actu-image", src, alt: "", loading: "lazy", decoding: "async" }) : h("span", { classe: "actu-sceau", "aria-hidden": "true" }, icone(ic));
-  if (src) visuel.addEventListener("error", () => visuel.replaceWith(h("span", { classe: "actu-sceau", "aria-hidden": "true" }, icone(ic))), { once: true });
+  // 26/10/2026 : l'image d'une actualité est une bannière (1600 × 640) : en tête de la carte, dans son cadre 5:2 — rien
+  // d'écrasé, rien de rogné. Sans image, le sceau du genre.
+  const visuel = src ? cadreBanniere(a.image, { classe: "actu-banniere" }) : h("span", { classe: "actu-sceau", "aria-hidden": "true" }, icone(ic));
   const quand = a.evenement && a.evenement.quand ? (a.evenement.phase === "termine" ? "a eu lieu le " + date(a.evenement.quand) : a.evenement.phase === "annule" ? "prévu le " + date(a.evenement.quand) : "le " + date(a.evenement.quand, true))
     : depuis(a.quand);
   const ouvrir = a.affiche ? () => ouvrirAffiche(a.affiche) : () => lireActu(a);
-  const carte = h("article", { classe: "actu" + (a.epingle ? " epinglee" : "") + " actu-" + (a.genre || "annonce") },
+  // Une annonce ou un événement publiés : « Modifier » pour la tête seule (le message Discord est réécrit en place).
+  const publication = E.peutEditer && modifiable(a);
+  const actions = edition && a.genre === "direction" ? [bouton("Modifier", { classe: "p", icone: "modifier", onclick: () => editerActualite(a) }),
+    bouton("Retirer", { classe: "p discret danger", icone: "supprimer", onclick: () => retirerActualite(a) })]
+    : publication ? [bouton("Modifier", { classe: "p", icone: "modifier", titre: "Modifier le message sur Discord, sur place", onclick: () => modifierPublication(a) })] : [];
+  const carte = h("article", { classe: "actu" + (src ? " avec-banniere" : "") + (a.epingle ? " epinglee" : "") + " actu-" + (a.genre || "annonce") },
     visuel,
     h("div", { classe: "actu-corps" },
       h("div", { classe: "actu-tete" },
@@ -162,24 +184,40 @@ function carteActu(a, edition) {
         a.epingle ? tampon("Épinglée", "", true) : null),
       h("p", { classe: "meta" }, genre + " · " + quand + (a.evenement && a.evenement.lieu ? " · " + a.evenement.lieu : "")),
       a.texte ? h("p", { classe: "actu-extrait coupe2" }, textePlat(a.texte)) : null,
-      edition && a.genre === "direction" ? h("div", { classe: "rangee" },
-        bouton("Modifier", { classe: "p", icone: "modifier", onclick: () => editerActualite(a) }),
-        bouton("Retirer", { classe: "p discret danger", icone: "supprimer", onclick: () => retirerActualite(a) })) : null));
-  return edition && a.genre === "direction" ? cadenas(carte, "actualite:" + a.id) : carte;
+      actions.length ? h("div", { classe: "rangee actu-actions" }, actions) : null));
+  if (edition && a.genre === "direction") return cadenas(carte, "actualite:" + a.id);
+  return publication && E.direct ? E.direct.avecVerrou(carte, "evenement:" + idPublication(a)) : carte;
+}
+/** Modifier une annonce ou un événement publiés : l'éditeur (equipage_publication.js), verrou de présence compris ;
+ *  la réponse du serveur redessine l'accueil. */
+function modifierPublication(a) {
+  editerPublication(a, { proteger, apres: accepter, carte: (x) => carteActu(x, false) });
 }
 function lireActu(a) {
-  const [genre] = GENRES[a.genre] || GENRES.annonce;
-  const p = pancarte({ titre: sansEmoji(a.titre) || genre, sous: genre + " · " + (a.quand ? date(a.quand, true) : ""), icone: (GENRES[a.genre] || GENRES.annonce)[1], taille: "large" });
-  const src = srcSure(a.image);
-  ajouter(p.corps, [src ? h("img", { classe: "actu-image-grande", src, alt: "", decoding: "async" }) : null,
+  const [genre, ic] = GENRES[a.genre] || GENRES.annonce;
+  const p = pancarte({ titre: sansEmoji(a.titre) || genre, sous: genre + " · " + (a.quand ? date(a.quand, true) : ""), icone: ic, taille: "large" });
+  const liens = (a.liens || []).filter((x) => x && x.url);
+  ajouter(p.corps, [h("div", { classe: "lecture-actu" },
+    srcSure(a.image) ? cadreBanniere(a.image, { paresseux: false }) : null,
     a.evenement && a.evenement.quand ? h("p", { classe: "meta" }, icone("calendrier"), " ", majuscule(date(a.evenement.quand, true)) + (a.evenement.lieu ? " · " + a.evenement.lieu : "")) : null,
-    a.texte ? texteRiche(a.texte) : h("p", { classe: "aide" }, "Pas de texte de plus.")]);
-  ajouter(p.pied, [bouton("Fermer", { classe: "discret", onclick: () => p.fermer() })]);
+    a.texte ? texteRiche(a.texte) : h("p", { classe: "aide" }, "Pas de texte de plus."),
+    liens.length ? h("div", { classe: "actu-liens" }, liens.map((x) => h("a", { href: x.url }, icone("droite"), h("span", {}, sansEmoji(x.nom) || "Lien")))) : null)]);
+  const modifier = !E.peutEditer ? null : modifiable(a) ? () => modifierPublication(a) : a.genre === "direction" && a.version !== undefined ? () => editerActualite(a) : null;
+  ajouter(p.pied, [modifier ? bouton("Modifier", { classe: "p", icone: "modifier", onclick: () => { p.fermer(); modifier(); } }) : null,
+    bouton("Fermer", { classe: "discret", onclick: () => p.fermer() })]);
 }
+/** « Toutes les actualités » : la fenêtre ouverte se redessine quand l'accueil change (une annonce modifiée). */
+let toutesOuverte = null;
 function toutesActualites(c, toutes) {
-  const p = pancarte({ titre: c.titre || "Actualités", sous: compte(toutes.length, "nouvelle"), icone: "journal", taille: "large" });
+  const p = pancarte({ titre: c.titre || "Actualités", sous: compte(toutes.length, "nouvelle"), icone: "journal", taille: "large", surFermer: () => { toutesOuverte = null; } });
+  toutesOuverte = { p, c };
   ajouter(p.corps, [paginer("eq-actus-toutes", toutes, (a) => carteActu(a, E.peutEditer && E.modeEdition), { classe: "actus", pas: 12 })]);
   ajouter(p.pied, [bouton("Fermer", { classe: "discret", onclick: () => p.fermer() })]);
+}
+function majToutes() {
+  if (!toutesOuverte || toutesOuverte.p.fermee() || !E.accueil) return;
+  const toutes = actualitesDe(toutesOuverte.c, (E.accueil.donnees || {}).actualites || {});
+  remplacer(toutesOuverte.p.corps, paginer("eq-actus-toutes", toutes, (a) => carteActu(a, E.peutEditer && E.modeEdition), { classe: "actus", pas: 12 }));
 }
 
 // ─── Les événements à venir ─────────────────────────────────────────────────
@@ -401,7 +439,7 @@ function editerBloc(b) {
   const zoneLongue = (k, lib, max, o) => { const z = zoneTexte({ rows: 6, maxlength: max }, v[k] || ""); z.addEventListener("input", () => { v[k] = z.value; }); return champ(lib, z, o); };
   if (b.type === "bandeau") {
     champs.push(texteSimple("titre", "Titre", 80, { placeholder: "L'équipage" }), texteSimple("sous_titre", "Sous-titre", 200, { placeholder: "Le pavillon est hissé. Bienvenue à bord, matelot." }, { optionnel: true }),
-      h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Image de fond ", h("span", { classe: "optionnel" }, "(facultatif : sans image, la carte marine)")), choixImage(v, "image")));
+      choixBanniere(v, "image", { libelle: "Image de fond", aide: "Sans image : la carte marine. Avec : elle s'affiche entière, au-dessus du titre au téléphone." }));
   } else if (b.type === "texte") {
     champs.push(texteSimple("titre", "Titre", 80, { placeholder: "Le code de l'équipage" }, { optionnel: true }),
       zoneLongue("texte", "Texte", 2500, { aide: "Une ligne vide sépare deux paragraphes. **Entre deux paires d'étoiles** : en gras." }));
@@ -485,7 +523,7 @@ function editerActualite(a) {
   texte.addEventListener("input", () => { v.texte = texte.value; });
   ajouter(p.corps, [h("div", { classe: "pile" },
     champ("Titre", titre), champ("Texte", texte, { optionnel: true, aide: "Une ligne vide sépare deux paragraphes. **Entre deux paires d'étoiles** : en gras." }),
-    h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Image ", h("span", { classe: "optionnel" }, "(facultatif)")), choixImage(v, "image")),
+    choixBanniere(v, "image"),
     interrupteur("Épingler en tête des actualités", v.epingle, (x) => { v.epingle = x; }))]);
   const ok = bouton(a ? "Enregistrer" : "Publier", { classe: "principal", icone: a ? "valider" : "plume", reseau: true, onclick: async () => {
     if (!v.titre.trim()) { titre.closest(".champ").erreur("Le titre est obligatoire."); titre.focus(); return; }
