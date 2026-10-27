@@ -9,6 +9,7 @@ import { vide, groupe, paginer, recherche, liste } from "./ui.js";
 import { affiche, nomAffiche, metiersDe, gradeDe, insigneImage } from "./affiche.js";
 import { typeMetier, typesTries, elementsDe, element } from "./donnees.js";
 import { E, ouvrirAffiche, catalogue } from "./equipage_commun.js";
+import { texteAncien } from "./lien_equipage.js";
 
 /** Le mur dans `corps`. o : { cle (les filtres gardés pour cette page), vide: [titre, phrase] (aucune affiche) }. */
 export function rendreMur(corps, o = {}) {
@@ -21,6 +22,7 @@ export function rendreMur(corps, o = {}) {
   const tr = parCle("race", /\braces?\b/i), tf = parCle("faction", /\bfactions?\b/i);
   const toutes = eq.affiches || [];
   const masquees = new Set((E.peutEditer && eq.vitrine && eq.vitrine.masquees) || []);
+  const anciennes = new Set((E.peutEditer && eq.vitrine && eq.vitrine.anciennes) || []);   // plus au clan : hors vitrine
   const de = (a, t) => (t ? (a.attributs && a.attributs[t.cle]) || [] : []);
   const options = (t, tous) => {
     if (!t) return null;
@@ -42,11 +44,13 @@ export function rendreMur(corps, o = {}) {
   const texte = (a) => [nomAffiche(a), a.surnom, a.membre && a.membre.nom, gradeDe(a, cat), ...Object.entries(a.attributs || {}).flatMap(([t, ks]) => ks.map((k) => (element(cat, t, k) || {}).nom || k))].join(" ");
   const carte = (a) => {
     const mienne = !!eq.moi && String(a.id) === String(eq.moi);
-    const hors = masquees.has(String(a.id));
+    const ancienne = anciennes.has(String(a.id));
+    const hors = ancienne || masquees.has(String(a.id));
     return h("div", { classe: "affiche-case" + (mienne ? " la-mienne" : "") + (hors ? " hors-vitrine" : "") },
       affiche(a, cat, { taille: "mini", clic: () => ouvrirAffiche(a.id) }),
       mienne ? h("span", { classe: "ruban-mienne" }, "Ma fiche") : null,
-      hors ? h("span", { classe: "ruban-hors-vitrine", title: "Retirée de la vitrine publique : seul l'équipage la voit." }, "Hors vitrine") : null);
+      hors ? h("span", { classe: "ruban-hors-vitrine", title: ancienne ? "Plus au clan : elle revient sur la vitrine s'il revient au clan." : "Retirée de la vitrine publique : seul l'équipage la voit." },
+        ancienne ? texteAncien() : "Hors vitrine") : null);
   };
   function maj() {
     const l = toutes.filter((a) => contient(texte(a), f.q) && (!f.metier || de(a, tm).includes(f.metier))

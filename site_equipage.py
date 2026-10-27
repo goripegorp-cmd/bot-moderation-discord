@@ -170,7 +170,10 @@ LIEN_PUBLIC = (("site.equipage.lien", "Copier le lien de l'équipage", "Le bouto
                ("site.equipage.lien.copie", "Lien copié", "Le bouton « Copier le lien » · l'avis",
                 "Ce que le site dit une fois le lien copié.", 60),
                ("site.equipage.lien.repli", "Copie ce lien pour le partager :", "Le bouton « Copier le lien » · sans "
-                "presse-papiers", "Quand le navigateur refuse la copie : le lien est montré, prêt à copier.", 100))
+                "presse-papiers", "Quand le navigateur refuse la copie : le lien est montré, prêt à copier.", 100),
+               ("site.equipage.ancien", "Ancien membre · masquée de la vitrine", "L'affiche d'un ancien membre",
+                "Dans l'atelier des affiches : son membre n'a plus le rôle du clan (ou a quitté le serveur). Elle reste là, "
+                "et revient sur la vitrine s'il revient au clan.", 60))
 for _k, (_cle, _defaut, _titre, _aide, _max) in enumerate(LIEN_PUBLIC):
     textes.declarer(_cle, _defaut, groupe=GROUPE, titre=_titre, aide=_aide, max_=_max, lignes=False, partie=_VITRINE,
                     ordre=200 + _k)
@@ -1136,8 +1139,13 @@ async def lecture_equipage(g, membre, session: dict, requete: dict):
         cites |= {(grade_t, a["grade"]) for a in publiques if a["grade"]}
     moi = next((a["id"] for a in lignes if membre is not None and int(a["membre_id"] or 0) == membre.id), None)
     #  La direction (mode édition) voit aussi quelles affiches sont retirées de la vitrine publique.
-    vitrine = {"masquees": sorted(await vitrine_masquees(g.id) & {a["id"] for a in lignes})} \
-        if session.get("portee") == "tout" else None
+    vitrine = None
+    if session.get("portee") == "tout":
+        #  Et celles des ANCIENS membres (plus le rôle du clan, ou partis du serveur) : jamais sur la vitrine, tant qu'ils
+        #  ne reviennent pas au clan (27/10/2026).
+        clan_ids = {m.id for m in _membres_clan(await _role_clan(g))}
+        vitrine = {"masquees": sorted(await vitrine_masquees(g.id) & {a["id"] for a in lignes}),
+                   "anciennes": sorted(a["id"] for a in lignes if a["membre_id"] and int(a["membre_id"]) not in clan_ids)}
     #  Les équipes (27/10/2026) : chacune, son chef mis en avant, ses membres par la hiérarchie existante ; la mienne.
     eq = await equipes_lues(g, lignes)
     mien = int(getattr(membre, "id", 0) or 0)
