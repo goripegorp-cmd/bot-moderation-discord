@@ -8,7 +8,8 @@
 //                                 [--navigateur <exe>]
 //   Parcours : recrutement, capitainerie, metiers, accueil (« Ce qui t'attend » : chaque ligne mène au bon endroit),
 //              recherche (Ctrl+K : membre, ticket, affiche, catalogue, banque, rubrique), recrutement_zone (« Demande de
-//              recrutement » de bout en bout : le vrai chemin du bot sur le site local seulement).
+//              recrutement » de bout en bout : le vrai chemin du bot sur le site local seulement), recrutement_decidees
+//              (les décidées par morceaux, « Voir plus » : sur la base --lourd).
 //              navigation (27/10/2026 : les rubriques regroupées, les anciennes adresses, les vues sur place, les noms).
 //   « textes » (Textes & noms) lit aussi ce que le FAUX Discord du site local a reçu (`/tableau/demo/discord`) : il ne se
 //   joue que sur le site local, jamais sur la maquette.
@@ -628,6 +629,33 @@ async function parcoursRecrutementZone(o) {
     if (!await cliquer(o, "dialog[open] button", "Purger")) return { ok: false, detail: "« Purger » absent" };
     const apres = await attendre(async () => { const x = await api(o, "recrutement/purge"); return x.total_personnes === 0 ? x : null; }, 15000);
     return { ok: !!apres, detail: avant.total_personnes + " personne(s), " + avant.total_candidatures + " candidature(s) → " + (apres ? "0" : "encore là") };
+  });
+}
+
+// ═══ LES DÉCIDÉES PAR MORCEAUX (27/10/2026) ═══════════════════════════════════
+// L'historique des décisions se lit par morceaux, comme le journal : le premier morceau (25), puis « Voir plus ». À jouer
+// sur une base qui a plus de 25 décisions (`site_local.py --lourd`) : sur la base légère, le parcours le dit et échoue.
+async function parcoursDecidees(o) {
+  const lignesD = () => evaluer(o, `(() => { const d = [...document.querySelectorAll("#contenu details.groupe")].find((x) => x.querySelector(".groupe-titre").textContent.trim() === "Décidées");
+    return d ? [...d.querySelectorAll("li.lc")].map((li) => li.dataset.decision || "") : null; })()`);
+  await etape(o, "Décidées : le premier morceau, puis « Voir plus » ajoute le suivant, sans doublon, du plus récent", async () => {
+    const d0 = await api(o, "recrutement/decidees");
+    if (!d0.suite) return { ok: false, detail: (d0.total || 0) + " décision(s) : un seul morceau — jouer sur la base --lourd" };
+    await aller(o, ZONE_RECRUTEMENT);
+    await evaluer(o, `(async () => { const d = [...document.querySelectorAll("#contenu details.groupe")].find((x) => x.querySelector(".groupe-titre").textContent.trim() === "Décidées"); if (d) d.open = true; await new Promise((r) => setTimeout(r, 600)); return 1; })()`);
+    const avant = await attendre(async () => { const l = await lignesD(); return l && l.length ? l : null; }, 8000);
+    if (!avant || avant.length !== d0.lignes.length) return { ok: false, detail: "premier morceau : " + (avant ? avant.length : 0) + " ligne(s) à l'écran, " + d0.lignes.length + " servies" };
+    if (!await cliquer(o, "#contenu button", "décisions de plus")) return { ok: false, detail: "« Voir plus » absent" };
+    const attendu = Math.min(d0.total, avant.length + (d0.n || 25));
+    const apres = await attendre(async () => { const l = await lignesD(); return l && l.length === attendu ? l : null; }, 8000);
+    if (!apres) return { ok: false, detail: "après « Voir plus » : " + ((await lignesD()) || []).length + " ligne(s), " + attendu + " attendues" };
+    const d1 = await api(o, "recrutement/decidees?avant=" + encodeURIComponent(d0.suite));
+    const serveur = [...d0.lignes, ...(d1.lignes || [])].map((x) => x.quand + ":" + x.ticket + ":" + x.membre.id);
+    const quand = apres.map((k) => Number(k.split(":")[0]));
+    const ok = new Set(apres).size === apres.length && JSON.stringify(apres) === JSON.stringify(serveur.slice(0, apres.length))
+      && quand.every((q, i) => i === 0 || quand[i - 1] >= q);
+    return { ok, detail: avant.length + " → " + apres.length + " ligne(s) sur " + d0.total + " · sans doublon " + (new Set(apres).size === apres.length)
+      + " · comme le serveur " + (JSON.stringify(apres) === JSON.stringify(serveur.slice(0, apres.length))) };
   });
 }
 
@@ -1537,6 +1565,7 @@ async function principal() {
     await pause(2000);
     if (PARCOURS.includes("recrutement")) await parcoursRecrutement(o);
     if (PARCOURS.includes("recrutement_zone")) await parcoursRecrutementZone(o);
+    if (PARCOURS.includes("recrutement_decidees")) await parcoursDecidees(o);
     if (PARCOURS.includes("capitainerie")) await parcoursCapitainerie(o);
     if (PARCOURS.includes("metiers")) await parcoursMetiers(o);
     if (PARCOURS.includes("accueil")) await parcoursAccueil(o);

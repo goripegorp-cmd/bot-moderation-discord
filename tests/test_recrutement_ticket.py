@@ -21,7 +21,9 @@ R11 sans questionnaire · R12 « Es-tu sûr », la fiche, l'élimination d'offic
 l'équipe (jamais un formulaire) · R15 la page web du candidat (module simulé) · R16 les chefs d'équipe · R17 la purge
 exceptionnelle · R18 le nettoyage · R19 le parcours réglé sur le site (validation, version, avertissements, messages) ·
 R20 les décidées · R21 un ticket d'avant l'affiche garde sa fermeture annoncée · R22 la carte RGPD · R23 les
-avertissements stables · R24 le chef validé badgé et proposé en premier dans l'éditeur d'une équipe."""
+avertissements stables · R24 le chef validé badgé et proposé en premier dans l'éditeur d'une équipe · R25-R27 le recrutement léger dans le
+chargement du site (le suivi en une connexion, les décidées par morceaux, le résumé dans les données) · R28 un
+numéro venu du client : des chiffres 0-9, sinon 400 (jamais 500)."""
 from __future__ import annotations
 
 import json
@@ -39,6 +41,9 @@ import transcript_store
 from banc_ticket_recrutement import (AUTRE, BancTicket, CANDIDAT, DIRECTION, FONDATEUR, Inter, RECRUTEUR)
 from conftest_discord import Obj, laisser_finir
 from faux_serveur import compter, ids, run, textes
+import test_site_v2_port as _port
+
+local = _port.local   # le vrai site local (R27 : les données de la page et la fiche d'un membre)
 
 RESERVE = "Réservé au fondateur et à la direction."
 
@@ -1239,3 +1244,192 @@ def test_R24_le_chef_valide_est_badge_et_propose_en_premier_dans_l_editeur_d_equ
     r = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout) == [str(CANDIDAT), "1", "2"], "le chef validé d'abord, puis les autres par leur nom"
+
+
+# ═══ R25-R27 : le recrutement léger dans le chargement du site (27/10/2026, banc de 5 ans) ═══════════════════════════
+
+def test_R25_le_suivi_une_connexion_et_des_lectures_groupees(tmp_path, monkeypatch):
+    """`recrutement/suivi` passait de 66 à 330 ms (banc de 5 ans : une connexion et une lecture par ticket ouvert, par
+    réponse, par correction, par transcript récent). Il ouvre UNE connexion et fait le même nombre de lectures pour 3
+    ou 30 tickets ouverts ; les transcripts récents viennent de l'index (le plus récent), sinon du suivi des
+    candidatures ; `recents=False` (les données de la page) ne lit que les ouvertes."""
+    b = banc(tmp_path)
+    connexions, lectures = [], []
+    get_db0, lire0 = Q._get_db, Q._lire_dans
+
+    def get_db():
+        connexions.append(1)
+        return get_db0()
+
+    async def lire_dans(db, sql, args=(), tolerant=False):
+        lectures.append(sql)
+        return await lire0(db, sql, args, tolerant)
+
+    async def ouvrir(n, debut):
+        t = int(time.time())
+        async with b.get_db() as db:
+            for k in range(debut, debut + n):
+                await db.execute("INSERT INTO tickets (id, guild_id, channel_id, user_id, panel_id, claimed_by, status, answers)"
+                                 " VALUES (?,?,?,?,?,?,?,?)", (k, b.g.id, 9000 + k, 7000 + k, "p1", 0, "open", "{}"))
+                cur = await db.execute("INSERT INTO recrutement_envois (guild_id, ticket_id, candidat_id, questions, statut)"
+                                       " VALUES (?,?,?,?,?)", (b.g.id, k, 7000 + k, json.dumps(
+                                           [{"id": "q1", "rang": 1, "question": "Quel cap ?", "reponse": "Nord"}]), "repondu"))
+                await db.execute("INSERT INTO recrutement_reponses (envoi_id, rang, guild_id, candidat_id, texte, recu_le)"
+                                 " VALUES (?,?,?,?,?,?)", (cur.lastrowid, 1, b.g.id, 7000 + k, "Nord", t))
+                await db.execute("INSERT INTO recrutement_suivi (guild_id, ticket_id, candidat_id, etape, envoi_id, cree_le,"
+                                 " maj_le) VALUES (?,?,?,?,?,?,?)", (b.g.id, k, 7000 + k, "reponses", cur.lastrowid, t, t))
+            await db.commit()
+
+    async def mesurer(**kw):
+        connexions.clear()
+        lectures.clear()
+        s = await Q.suivi(b.g, **kw)
+        return s, (len(connexions), len(lectures))
+
+    async def sc():
+        await b.preparer()
+        t = int(time.time())
+        async with b.get_db() as db:   # trois décisions récentes : deux transcripts à trouver, une étape sans
+            await db.execute("CREATE TABLE IF NOT EXISTS ticket_transcripts (guild_id INTEGER, ticket_id INTEGER, url TEXT)")
+            for k, etape in ((500, "accepte"), (501, "refuse"), (502, "etape2")):
+                await db.execute("INSERT INTO recrutement_suivi (guild_id, ticket_id, candidat_id, etape, maj_le)"
+                                 " VALUES (?,?,?,?,?)", (b.g.id, k, 7500 + k, etape, t - 60 - k))
+            for url in ("https://t/ancien", "https://t/500"):
+                await db.execute("INSERT INTO ticket_transcripts (guild_id, ticket_id, url) VALUES (?,?,?)", (b.g.id, 500, url))
+            await db.execute("INSERT INTO recrutements (guild_id, ticket_id, candidat_id, ferme_le, transcript)"
+                             " VALUES (?,?,?,?,?)", (b.g.id, 501, 8001, t, "https://t/501"))
+            await db.commit()
+        await ouvrir(3, 100)
+        monkeypatch.setattr(Q, "_get_db", get_db)
+        monkeypatch.setattr(Q, "_lire_dans", lire_dans)
+        s3, n3 = await mesurer()
+        await ouvrir(27, 200)
+        s30, n30 = await mesurer()
+        o, no = await mesurer(recents=False)
+        return s3, n3, s30, n30, o, no
+    s3, n3, s30, n30, o, no = run(sc())
+    assert n3[0] == n30[0] == no[0] == 1, "une seule connexion"
+    assert n3[1] == n30[1], f"autant de lectures pour 3 ou 30 tickets ouverts : {n3} · {n30}"
+    assert len(s30["ouverts"]) == 30 and all(x["envoi"]["bilan"]["repondues"] == 1 and x["action"] == "corriger"
+                                             for x in s30["ouverts"])
+    assert [(x["ticket"], x["transcript"]) for x in s30["recents"]] == [(500, "https://t/500"), (501, "https://t/501"),
+                                                                       (502, "")], s30["recents"]
+    assert o["ouverts"] == s30["ouverts"] and o["recents"] == [] and o["elimines"] == [] and no[1] < n30[1]
+
+
+def test_R26_les_decidees_par_morceaux_comme_le_journal(tmp_path):
+    """L'historique des décisions se lit par morceaux (`avant` = la `suite` du morceau précédent) : tout est rendu une
+    fois, du plus récent, égalités comprises ; seul le morceau demandé est lu ; l'ancienne pagination reste lue."""
+    b = banc(tmp_path)
+
+    async def sc():
+        await b.preparer()
+        async with b.get_db() as db:
+            for k in range(60):   # deux décisions par seconde : le curseur départage
+                await db.execute("INSERT INTO recrutements (guild_id, ticket_id, candidat_id, candidat_nom, ferme_le, ferme_par,"
+                                 " decision, raison, transcript) VALUES (?,?,?,?,?,?,?,?,?)",
+                                 (b.g.id, 100 + k, 5000 + k, f"Matelot {k}", 1000 + k // 2, FONDATEUR,
+                                  "acceptes" if k % 3 == 0 else "refuses", "", ""))
+            for k in range(5):    # éliminés d'office à la même seconde que deux décisions
+                await db.execute("INSERT INTO recrutement_eliminations (guild_id, membre_id, nom, champ, reponse, quand)"
+                                 " VALUES (?,?,?,?,?,?)", (b.g.id, 6000 + k, f"Mousse {k}", "Tranche d'âge", "Moins de 13 ans",
+                                                           1010))
+            await db.commit()
+        morceaux, suite = [], None
+        while True:
+            st, r = await Q._r_decidees(b.g, b.fondateur, {"avant": suite} if suite else {}, None)
+            assert st == 200, r
+            morceaux.append(r)
+            suite = r["suite"]
+            if not suite or len(morceaux) > 10:
+                break
+        page2 = (await Q._r_decidees(b.g, b.fondateur, {"page": "2"}, None))[1]
+        invalide = await Q._r_decidees(b.g, b.fondateur, {"avant": "1000:abc"}, None)
+        grand = (await Q._r_decidees(b.g, b.fondateur, {"n": "500"}, None))[1]
+        return morceaux, page2, invalide, grand
+    morceaux, page2, invalide, grand = run(sc())
+    tout = [x for m in morceaux for x in m["lignes"]]
+    assert [len(m["lignes"]) for m in morceaux] == [25, 25, 15] and morceaux[-1]["suite"] is None
+    cles = [(x["quand"], x["ticket"], int(x["membre"]["id"])) for x in tout]
+    assert len(set(cles)) == 65 and cles == sorted(cles, reverse=True), "tout, une fois, du plus récent"
+    assert morceaux[0]["total"] == 65 and morceaux[0]["comptes"] == {"acceptes": 20, "refuses": 40, "elimine": 5}
+    assert [x["ticket"] for x in page2["lignes"]] == [x["ticket"] for x in morceaux[1]["lignes"]], "l'ancienne pagination"
+    assert invalide[0] == 400, "une suite illisible est refusée"
+    assert grand["n"] == Q.DECIDEES_MAX and len(grand["lignes"]) == 65 and grand["suite"] is None, "100 au plus par morceau"
+
+
+def test_R27_les_donnees_portent_le_resume_la_fiche_porte_tout(local):
+    """`donnees` ne porte plus que le RÉSUMÉ des 30 dernières candidatures décidées (banc de 5 ans : 560 candidats,
+    520 Ko) ; la fiche du membre a toutes les siennes : la dernière décision, qui l'a prise, ses réponses, le
+    transcript (fiche.js les lit là)."""
+    import site_local
+    import tableau
+    t = int(time.time())
+
+    async def ecrire(sql, lignes):
+        async with local.ctx.get_db() as db:
+            for x in lignes:
+                await db.execute(sql, x)
+            await db.commit()
+    local.faire(ecrire("INSERT OR REPLACE INTO recrutements (guild_id, ticket_id, candidat_id, candidat_nom, ouvert_le, ferme_le,"
+                       " ferme_par, reponses, msg_candidat, transcript, raison, decision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                       [(site_local.SERVEUR_ID, 80000 + k, 990000 + k, f"Ancien {k}", t - 90 * 86400 - k * 3600,
+                         t - 80 * 86400 - k * 3600, FONDATEUR, json.dumps({"Pseudo Roblox": f"Ancien_{k}"}), 3,
+                         f"https://exemple.invalid/t/{k}", "Bienvenue à bord", "acceptes") for k in range(45)]))
+    try:
+        tableau._cache.clear()
+        d = local.donnees()
+        f = local.fiche(990044)
+    finally:
+        local.faire(ecrire("DELETE FROM recrutements WHERE ticket_id >= ?", [(80000,)]))
+        tableau._cache.clear()
+    c = d["candidats"]
+    assert len(c) == tableau.CANDIDATS_RECENTS and [x["ferme"] for x in c] == sorted((x["ferme"] for x in c), reverse=True)
+    assert not {"reponses", "transcript", "candidatures", "pris_par"} & set().union(*map(set, c)), "le résumé seulement"
+    assert "990044" not in {x["id"] for x in c}, "un ancien candidat n'est plus dans les données…"
+    derniere = f["candidatures"][0]
+    assert (derniere["statut"], derniere["ferme_par"], derniere["raison"]) == ("acceptes", "GoRipe", "Bienvenue à bord")
+    assert derniere["reponses"] == [["Pseudo Roblox", "Ancien_44"]] and derniere["transcript"].endswith("/t/44"), \
+        "… sa fiche a tout"
+    js = (Path(__file__).resolve().parent.parent / "site" / "fiche.js").read_text(encoding="utf-8")
+    assert "etat.d.candidats" not in js and '(f.candidatures || []).find((c) => c.statut === "acceptes"' in js
+
+
+# ═══ R28 : un nombre venu du client = des chiffres 0-9, sinon 400 (revue de sécurité, 27/10/2026) ═══════════════════
+
+#  « ² » : `str.isdigit()` dit oui et `int()` lève (une erreur 500) ; « ١٢ » et « ５ » : `int()` les lit en silence.
+PAS_DES_NOMBRES = ("²", "١٢", "５", "1.5", "-3", " 7", "7 ", "0x10", "1e3", "")
+
+
+def test_R28_un_identifiant_non_ascii_est_refuse_en_400_jamais_500(local):
+    """Chaque adresse du recrutement qui lit un numéro (ticket, envoi, membre, rôle, morceau) le lit en chiffres 0-9 :
+    autre chose est refusé proprement (400), jamais une erreur 500 ; le bon numéro marche toujours."""
+    import questionnaire as Q_
+    api = "/tableau/espace/api/recrutement/"
+    lectures = [("dossier", "ticket", {}), ("proposition", "ticket", {}), ("apercu", "ticket", {}), ("apercu", "envoi", {}),
+                ("chefs/proposition", "membre", {"metier": "navigation"}), ("chefs/dossier", "envoi", {}),
+                ("chef", "membre", {}), ("decidees", "n", {}), ("decidees", "page", {}), ("decidees", "avant", {})]
+    vus = {}
+    for route, cle, autres in lectures:
+        for brut in PAS_DES_NOMBRES:
+            if brut == "" and (route == "decidees" or cle == "envoi"):
+                continue   # vide : le défaut (le premier morceau), ou l'autre clé d'`apercu`
+            valeur = brut + ":1:1" if cle == "avant" and brut else brut
+            st, rep = local.get(api + route, **dict(autres, **{cle: valeur}))
+            vus[(route, cle, brut)] = st
+            assert st == 400, f"{route}?{cle}={brut!r} → {st} {rep}"
+    #  Les écritures : le même nombre lu dans le corps (`_entier`), et le verrou d'une correction.
+    for route, corps in (("etape1", {"ticket": "²"}), ("decision", {"ticket": "١٢", "accepte": True}),
+                         ("corriger", {"envoi": "²", "question": "q1", "juste": True}),
+                         ("liste_noire/lever", {"membre": "５"}), ("chefs/retirer", {"membre": "²"})):
+        st, rep = local.post(api + route, corps)
+        assert st in (400, 404, 409) and st != 500, f"{route} {corps} → {st} {rep}"
+    #  Les bons numéros passent toujours (et un numéro inconnu reste un 404, pas une erreur).
+    ticket = local.get(api + "suivi")[1]["ouverts"][0]["ticket"]
+    assert local.get(api + "dossier", ticket=str(ticket))[0] == 200
+    assert local.get(api + "dossier", ticket="999999")[0] == 404
+    assert local.get(api + "decidees", n="5")[0] == 200
+    #  Le lecteur lui-même.
+    assert [Q_._chiffres(x) for x in ("0", "42", "007", "²", "١٢", "５", "-1", "", None, True, 12, -4)] == \
+        [0, 42, 7, None, None, None, None, None, None, None, 12, None]
+    assert Q_._chiffres("1" * 21) is None and Q_._chiffres("1" * 16, 15) is None

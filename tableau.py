@@ -1323,6 +1323,10 @@ async def _sondages(g, qui) -> dict:
 
 
 _ETAPE1 = {"etape": 1, "recrutement": "etape1", "fermeture_prevue": False}
+#  27/10/2026 (banc de 5 ans : 560 candidats, 520 Ko des données) : `donnees` ne porte que le RÉSUMÉ des dernières
+#  candidatures décidées ; la fiche d'un membre a toutes les siennes (réponses, transcript), le dossier se charge à son
+#  ouverture et l'historique se lit par morceaux (`recrutement/decidees`).
+CANDIDATS_RECENTS = 30
 _DECIDEES = frozenset({"accepte", "refuse", "refus_etape1", "ferme"})
 
 
@@ -1333,7 +1337,7 @@ async def _etapes_recrutement(g) -> dict:
     if not questionnaire.pret():
         return {}
     try:
-        s = await questionnaire.suivi(g)
+        s = await questionnaire.suivi(g, recents=False)   # les ouvertes seulement : leur étape
     except Exception as ex:  # la liste reste lisible : chaque candidature retombe à l'étape 1
         _log("[TABLEAU][E19] étapes du recrutement illisibles")
         _log(f"[TABLEAU][E19:DETAIL] {type(ex).__name__} {ex}")
@@ -1381,11 +1385,9 @@ async def donnees(g, portee: str = "tout") -> dict:
             parties[nom] = [] if nom == "alertes" else {"erreur": True}
     cand = await recrutements.candidatures(g)
     candidats = [dict(_ident(g, d["candidat_id"], d["nom"]), statut=d["statut"], ticket=d["ticket"],
-                      ouvert=d["ouvert"], ferme=d["ferme"], pris_par=_nom(g, d["pris_par"]),
-                      ferme_par=_nom(g, d["ferme_par"]), motif=d["raison"], parti=d.get("parti", False),
-                      reponses=list(d["reponses"].items()), transcript=d["transcript"] or "",
-                      candidatures=d["dates"])
-                 for d in cand["fiches"]]
+                      ouvert=d["ouvert"], ferme=d["ferme"], ferme_par=_nom(g, d["ferme_par"]), motif=d["raison"],
+                      parti=d.get("parti", False))
+                 for d in cand["fiches"][:CANDIDATS_RECENTS]]
     en_cours = [dict(_ident(g, o["candidat_id"]), statut="en_cours", ticket=o["ticket"],
                      ouvert=o["ouvert"], pris_par=_nom(g, o["pris_par"]),
                      reponses=list(o["reponses"].items()),
@@ -1492,8 +1494,8 @@ async def fiche(g, uid: int, auteur) -> dict:
                 "transcript": x["transcript"],
                 "salon": f"https://discord.com/channels/{g.id}/{x['salon']}" if x["statut"] == "open" and x["salon"] else ""}
                for x in reversed(await _lignes_tickets(g, " AND user_id=?", (int(uid),)))]
-    candidatures = [dict(r, reponses=list(r["reponses"].items())[:20])
-                    for r in await recrutements.du_candidat(g.id, int(uid))]
+    candidatures = [dict(r, reponses=list(r["reponses"].items())[:20], ferme_par=_nom(g, r["ferme_par"]))
+                    for r in await recrutements.du_candidat(g.id, int(uid), a_le_role=infos["clan"])]
     journal = await _journal(g, qui, int(uid), 300)
     qs = [_question(g, q, qui) for q in await questions.du_membre(g.id, int(uid))]
     alerte = next((a for a in await _alertes(g, qui) if a["id"] == str(int(uid))), None)

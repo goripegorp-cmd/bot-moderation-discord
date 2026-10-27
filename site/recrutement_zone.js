@@ -78,12 +78,15 @@ export function compteursZone() {
 
 // ═══ LES CANDIDATURES ════════════════════════════════════════════════════
 function candidaturesZone(scene) {
-  const f = filtres("zr-candidatures", { q: "", page: 1 });
+  const f = filtres("zr-candidatures", { q: "" });
+  //  Les décidées plus anciennes, par morceaux (comme le journal) : le premier morceau vient de `charger`, la suite
+  //  (« Voir plus ») s'y ajoute tant que ce premier morceau ne change pas.
+  const suiteD = { cle: "", lignes: [], suite: null, charge: false };
   const resultats = h("div", { classe: "pile" }, squelettes(3));
   remplacer(scene, h("div", { classe: "outils" }, recherche(f.q, "Nom, pseudo, ticket…", (q) => { f.q = q; maj(); })), resultats);
   let vivant = true;
   async function maj(forcer) {
-    const [S, D] = await Promise.all([charger(SUIVI, { forcer }), charger(DECIDEES, { params: { page: String(f.page || 1) }, forcer })]);
+    const [S, D] = await Promise.all([charger(SUIVI, { forcer }), charger(DECIDEES, { forcer })]);
     if (!vivant || !resultats.isConnected) return;
     if (!S || S.erreur) { remplacer(resultats, vide("Candidatures indisponibles", (S && S.erreur) || "Réessaie dans un instant.", "hors_ligne")); return; }
     const garde = (o) => contient([nomDe(o.candidat), o.candidat && o.candidat.pseudo, o.ticket, o.panneau].join(" "), f.q);
@@ -94,6 +97,8 @@ function candidaturesZone(scene) {
     }
     for (const k of Object.keys(par)) par[k].sort((a, b) => (a.ouvert || 0) - (b.ouvert || 0));
     const dec = D && !D.erreur ? D : null;
+    const cleD = dec ? JSON.stringify([dec.total, dec.suite, (dec.lignes || []).map((x) => x.quand + ":" + x.ticket)]) : "";
+    if (cleD !== suiteD.cle) Object.assign(suiteD, { cle: cleD, lignes: [], suite: dec ? dec.suite || null : null, charge: false });
     const elimines30 = (S.elimines || []).length;
     remplacer(resultats,
       tuiles(tuile({ cle: "zr-t1", lib: "À analyser", val: par.analyser.length, icone: "oeil", sous: "demandes et étapes reçues", teinte: "#a8641c" }),
@@ -109,7 +114,13 @@ function candidaturesZone(scene) {
           contenu: () => lignes("zr-corriger", par.corriger, ligneCandidature) } : null,
         par.attendre.length ? { cle: "zr-encours", titre: "En cours", icone: "minuteur", compte: par.attendre.length, info: "le candidat répond",
           contenu: () => lignes("zr-encours", par.attendre, ligneCandidature) } : null,
-        { cle: "zr-decidees", titre: "Décidées", icone: "coffre", compte: dec ? dec.total : 0, contenu: () => blocDecidees(dec, f, () => maj(true)) },
+        { cle: "zr-decidees", titre: "Décidées", icone: "coffre", compte: dec ? dec.total : 0, contenu: () => {
+          //  « Voir plus » redessine ce groupe seul (rien d'autre n'est relu).
+          const z = h("div");
+          const dessiner = () => remplacer(z, blocDecidees(dec, suiteD, dessiner));
+          dessiner();
+          return z;
+        } },
       ], { ouverts: 2, forcer: !!f.q })));
     majBoutonsReseau(resultats);
   }
@@ -139,23 +150,33 @@ function ligneCandidature(o) {
   }), "dossier:" + o.ticket);
 }
 
-/** L'historique des décisions, page par page (25), rangé par mois : quand, qui, par qui, le transcript. */
-function blocDecidees(D, f, recharger) {
+/** L'historique des décisions, par morceaux de 25 (« Voir plus », comme le journal), rangé par mois : quand, qui, par
+ *  qui, le transcript. Seul le morceau demandé est lu sur le serveur. */
+function blocDecidees(D, suiteD, redessiner) {
   if (!D) return vide("Historique indisponible", "Réessaie dans un instant.", "hors_ligne");
   if (!D.total) return vide("Aucune décision pour l'instant", "Les candidatures acceptées, refusées ou éliminées d'office arrivent ici.", "coffre");
+  const tout = (D.lignes || []).concat(suiteD.lignes);
   const parMois = new Map();
-  for (const x of D.lignes || []) { const k = x.quand ? moisDe(x.quand) : "inconnu"; if (!parMois.has(k)) parMois.set(k, []); parMois.get(k).push(x); }
+  for (const x of tout) { const k = x.quand ? moisDe(x.quand) : "inconnu"; if (!parMois.has(k)) parMois.set(k, []); parMois.get(k).push(x); }
   const c = D.comptes || {};
-  const pages = Number(D.pages) || 1, page = Number(D.page) || 1;
-  const aller_ = (p) => { f.page = Math.max(1, Math.min(pages, p)); recharger(); };
+  const reste = Math.max(0, (Number(D.total) || 0) - tout.length);
+  const plus = async () => {
+    if (suiteD.charge || !suiteD.suite) return;
+    suiteD.charge = true;
+    const r = await lire(DECIDEES, { avant: suiteD.suite });
+    suiteD.charge = false;
+    if (!r.ok || !r.donnees) { toast(r.erreur || "La suite de l'historique n'a pas pu être chargée.", "erreur"); return; }
+    suiteD.lignes = suiteD.lignes.concat(r.donnees.lignes || []);
+    suiteD.suite = r.donnees.suite || null;
+    redessiner();
+  };
   return h("div", { classe: "pile serree" },
     h("p", { classe: "meta" }, [quantite(c.acceptes || 0, "acceptée(s)"), quantite(c.refuses || 0, "refusée(s)"), quantite(c.elimine || 0, "éliminé(s) d'office")].join(" · ")),
     ...[...parMois.entries()].map(([k, l]) => h("div", { classe: "zr-mois" }, h("h3", { classe: "zr-mois-titre" }, k === "inconnu" ? "Date inconnue" : libelleMois(k)),
       h("ul", { classe: "lignes-c" }, l.map(ligneDecidee)))),
-    pages > 1 ? h("div", { classe: "rangee entre zr-pages" },
-      bouton("Plus récentes", { classe: "p discret", icone: "gauche", disabled: page <= 1, onclick: () => aller_(page - 1) }),
-      h("span", { classe: "meta" }, "Page " + page + " sur " + pages),
-      bouton("Plus anciennes", { classe: "p discret", icone: "droite", disabled: page >= pages, onclick: () => aller_(page + 1) })) : null);
+    suiteD.suite ? h("div", { classe: "rangee zr-pages" },
+      bouton("Voir " + nombre(Math.min(Number(D.n) || 25, reste || 25)) + " décisions de plus", { classe: "p discret", icone: "bas", reseau: true, onclick: plus }),
+      h("span", { classe: "meta" }, nombre(tout.length) + " sur " + nombre(D.total))) : null);
 }
 function ligneDecidee(x) {
   const [lib, coul] = DECISIONS[x.decision] || [x.decision, "encre"];
@@ -167,7 +188,7 @@ function ligneDecidee(x) {
     badges: [tampon(lib, coul, true)], ...quandLigne(x.quand),
     actions: x.transcript ? [{ icone: "parchemin", libelle: "Le transcript", href: x.transcript }] : [],
     ouvrir: () => (x.ticket ? ouvrirDossier(x.ticket) : ouvrirFiche(m.id)), libelleOuvrir: "Ouvrir " + (x.ticket ? "le dossier" : "la fiche") + " de " + nomDe(m),
-    donnees: { membre: m.id },
+    donnees: { membre: m.id, decision: x.quand + ":" + x.ticket + ":" + m.id },
   });
 }
 

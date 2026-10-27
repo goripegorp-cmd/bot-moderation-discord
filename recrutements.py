@@ -263,21 +263,23 @@ async def lire(guild_id: int, mois: str = "tout") -> list[dict]:
     return out
 
 
-async def du_candidat(guild_id: int, candidat_id: int) -> list[dict]:
-    """Toutes les candidatures fermées d'une personne, de la plus récente à la plus ancienne."""
+async def du_candidat(guild_id: int, candidat_id: int, a_le_role: bool = False) -> list[dict]:
+    """Toutes les candidatures fermées d'une personne, de la plus récente à la plus ancienne — qui l'a fermée
+    (`ferme_par`), et la décision lue comme le tableau (`decision`) : `a_le_role`, la personne porte le rôle du clan
+    (un ancien ticket sans décision enregistrée)."""
     async with _get_db() as db:
-        rows = await _lignes(db, "SELECT ticket_id, ouvert_le, ferme_le, raison, reponses, transcript, decision"
+        rows = await _lignes(db, "SELECT ticket_id, ouvert_le, ferme_le, raison, reponses, transcript, decision, ferme_par"
                                  " FROM recrutements WHERE guild_id=? AND candidat_id=? ORDER BY ferme_le DESC",
                              (int(guild_id), int(candidat_id)))
     out = []
-    for tid, ouvert, ferme, raison, reponses, transcript, prise in rows:
+    for tid, ouvert, ferme, raison, reponses, transcript, prise, par in rows:
         try:
             rep = json.loads(reponses or "{}")
         except ValueError:
             rep = {}
         out.append({"ticket": tid, "ouvert": ouvert, "ferme": ferme, "raison": raison or "",
-                    "statut": decision(False, raison or "", prise or "") or "", "reponses": rep,
-                    "transcript": transcript or ""})
+                    "statut": decision(bool(a_le_role), raison or "", prise or "") or "", "reponses": rep,
+                    "transcript": transcript or "", "ferme_par": int(par or 0)})
     return out
 
 

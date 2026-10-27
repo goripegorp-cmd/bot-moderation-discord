@@ -1204,7 +1204,10 @@ class Monde:
             "version": version, "serveur": {"nom": "GoRP · Rell Seas FR", "icone": f"{ESPACE}/media/demo/serveur.png"},
             "genere": datetime.now(timezone.utc).isoformat(), "portee": "tout",
             "a_part": [self.fondateur["id"], self.direction["id"]],
-            "candidats": self.candidats, "en_cours": self.en_cours, "ecartes": 7,
+            #  Comme `tableau.donnees` (27/10/2026) : le résumé des 30 dernières décidées ; le reste, sur la fiche.
+            "candidats": [{k: v for k, v in c.items() if k not in ("reponses", "transcript", "candidatures", "pris_par")}
+                          for c in sorted(self.candidats, key=lambda c: -c["ferme"])[:30]],
+            "en_cours": self.en_cours, "ecartes": 7,
             "tickets": tickets, "clan": self.clan_donnees(), "sanctions": sanctions, "equipe": eq,
             "journal": {"evenements": self.journal[:400], "par_jour": self.par_jour()},
             "questions": self.questions_donnees(), "alertes": self.alertes(),
@@ -1232,7 +1235,8 @@ class Monde:
                     "salon": f"https://discord.com/channels/1/{x['ticket']}" if x["statut"] == "open" else ""}
                    for x in reversed(self.tickets) if x["uid"] == uid]
         cands = [{"ticket": c["ticket"], "ouvert": c["ouvert"], "ferme": c["ferme"], "raison": c["motif"], "statut": c["statut"],
-                  "reponses": c["reponses"], "transcript": c["transcript"]} for c in self.candidats if c["id"] == uid]
+                  "reponses": c["reponses"], "transcript": c["transcript"], "ferme_par": c["ferme_par"]}
+                 for c in self.candidats if c["id"] == uid]
         qd = self.questions_donnees()["liste"]
         roles = [{"nom": "Clan GoRP", "couleur": "#3f6b3a"}] if uid in self.clan else []
         roles += [{"nom": "Membre", "couleur": ""}, {"nom": "🎉 Évènements", "couleur": ""}]
