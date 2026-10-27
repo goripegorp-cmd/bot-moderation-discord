@@ -558,17 +558,18 @@ def test_K9_une_session_apres_la_fermeture_du_ticket(local, sans_cadence):
     h = local.candidat(f"ticket={tid}")
     st, d = local.lire("questionnaire", h)
     rangs = _rangs(d)
-    assert local.ecrire("brouillon", {"reponses": {str(rangs[0]): "avant la fermeture"}}, h)[0] == 200
+    assert local.ecrire("brouillon", {"reponses": {str(rangs[0]): "AVANT-FERMETURE-k9"}}, h)[0] == 200
     local.sql("UPDATE tickets SET status='closed' WHERE id=?", (tid,))
     candidature_site._contextes.pop(eid, None)   # sans attendre les 4 s du cache des frappes (rien n'y est écrit en base)
     avant = _etat_envoi(local, eid)
     st, d = local.lire("questionnaire", h)
     assert st == 200 and d["etat"] == "ferme"
     assert not {"etapes", "reponses", "envoi", "liens", "portes"} & set(d), sorted(d)
-    assert "avant la fermeture" not in json.dumps(d, ensure_ascii=False)
-    for nom, corps in (("saisie", {"rang": rangs[0], "texte": "après"}), ("brouillon", {"reponses": {str(rangs[0]): "après"}}),
-                       ("envoyer", {"reponses": {str(r): "après" for r in rangs}}),
-                       ("envoyer_etape", {"etape": 1, "reponses": {str(r): "après" for r in rangs}})):
+    assert "AVANT-FERMETURE-k9" not in json.dumps(d, ensure_ascii=False)
+    apres = "APRES-FERMETURE-k9"   # des marqueurs uniques : un texte de question de la banque peut contenir « après »
+    for nom, corps in (("saisie", {"rang": rangs[0], "texte": apres}), ("brouillon", {"reponses": {str(rangs[0]): apres}}),
+                       ("envoyer", {"reponses": {str(r): apres for r in rangs}}),
+                       ("envoyer_etape", {"etape": 1, "reponses": {str(r): apres for r in rangs}})):
         st, rep = local.ecrire(nom, corps, h)
         _stable(st, rep)
         assert st == 409 and rep["etat"] == "ferme", (nom, st, rep)
@@ -576,7 +577,7 @@ def test_K9_une_session_apres_la_fermeture_du_ticket(local, sans_cadence):
     assert st == 200 and rep["etat"] == "ferme", "le battement de la page lui dit seulement que c'est fini"
     assert _etat_envoi(local, eid) == avant, "rien d'écrit après la fermeture"
     st, dd = local.api("direct/candidat", local.tete, {"envoi": str(eid)})
-    assert dd["etat"] == "ferme" and "après" not in json.dumps(dd, ensure_ascii=False)
+    assert dd["etat"] == "ferme" and apres not in json.dumps(dd, ensure_ascii=False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
