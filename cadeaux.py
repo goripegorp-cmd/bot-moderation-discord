@@ -13,7 +13,8 @@ multiplicateur… Par exemple, ceux qui offrent le nitro. »
   qui peut participer (rôles) ; les conditions — messages et/ou minutes en vocal, ET ou OU ; les rôles
   chanceux et leur multiplicateur (les boosters, ×2, proposés d'office). L'aperçu exact, puis Lancer.
 - Les compteurs partent du lancement, un jeu par cadeau. Un message compte s'il a 2 caractères ou plus,
-  un toutes les 3 s au plus, et ne compte plus s'il est supprimé dans les 10 minutes (la modération). Le
+  un toutes les 3 s au plus, et ne compte plus s'il est supprimé dans les 10 minutes (la modération). Une
+  rafale de messages courts (« le jeux » / « me » / « tente » / « pas » / « dsl », 27/10) compte pour UN. Le
   vocal compte hors salon AFK, casque non coupé. « 📊 Mes stats » montre sa progression en direct.
 - Le tirage : parmi les inscrits qui ont encore le rôle demandé et remplissent les conditions, au hasard
   pondéré (×2 = deux fois plus de chances). Puis les compteurs et la liste des inscrits sont effacés ;
@@ -27,7 +28,7 @@ import json
 import random
 import re
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -54,6 +55,12 @@ MULT_MIN, MULT_MAX = 1.1, 10.0
 ROLES_MAX = 5
 ECART_MSG_S = 3.0          # un message compte toutes les 3 s au plus (pas de spam)
 TEXTE_MIN = 2              # « a », « . » ne comptent pas
+#  27/10, le fondateur : « si quelqu'un spam comme ça et ne sait pas faire de phrase complète […] tu comptes
+#  comme s'il avait envoyé qu'un seul message ». Même personne, même salon : chaque message court envoyé à
+#  moins de RAFALE_S du précédent prolonge la rafale, qui compte pour UN. Une phrase complète compte normalement.
+RAFALE_MOTS = 3            # 3 mots ou moins : un message court (émojis, mentions, liens, nombres : 0 mot)
+RAFALE_S = 8.0             # au-delà de 8 s sans message court, la rafale est finie
+RAFALES_MAX = 5000         # les rafales suivies à la fois : la mémoire reste bornée
 EFFACE_S = 600.0           # supprimé dans les 10 minutes (la modération) : il ne compte plus
 MAJ_CARTE_S = 15.0         # le nombre d'inscrits sur la carte : réécrit au plus toutes les 15 s
 GARDER_RESULTAT_S = 7 * 86400   # la liste des gagnables reste 7 jours (un nouveau tirage), puis part
@@ -91,9 +98,9 @@ TEXTES = {
                     "en": "🎟️ Not entered yet: click “Enter”."},
     "tirage": {"fr": "⏳ Tirage", "en": "⏳ Draw"},
     "regles": {"fr": "Comptés depuis le lancement : un message de 2 caractères ou plus, un toutes les 3 s au "
-                     "plus ; le vocal hors AFK, casque non coupé.",
-               "en": "Counted since the launch: a message of 2+ characters, one every 3 s at most; voice "
-                     "outside AFK, not deafened."},
+                     "plus, une rafale de messages courts pour un ; le vocal hors AFK, casque non coupé.",
+               "en": "Counted since the launch: a message of 2+ characters, one every 3 s at most, a burst of "
+                     "short messages as one; voice outside AFK, not deafened."},
     "manque": {"fr": "⛔ **Pas encore** : il te faut d'abord ceci. Reclique « Participer » quand c'est bon.",
                "en": "⛔ **Not yet**: you need this first. Click “Enter” again once it's done."},
     "pas_inscrit_cond": {"fr": "🎟️ Pas encore inscrit : remplis les conditions, puis clique « Participer ».",
@@ -126,6 +133,7 @@ _mur = time.time
 _actifs: dict = {}                                # guild_id → {cadeau_id: début (_mur())}
 _tampon: dict = defaultdict(lambda: [0, 0.0])     # (cadeau_id, membre_id) → [messages, secondes]
 _dernier_msg: dict = {}                           # (guild_id, membre_id) → _mono()
+_rafales: OrderedDict = OrderedDict()             # (salon_id, membre_id) → [_mono() du dernier court, a compté]
 _comptes: dict = {}                               # message_id → (guild_id, membre_id, (cadeau_id…), monotonic)
 _vocal: dict = {}                                 # (guild_id, membre_id) → _mur() du début du segment
 _charges: set = set()                             # les serveurs dont les cadeaux actifs sont en mémoire
@@ -361,12 +369,17 @@ def sur_message(message) -> bool:
                                                                       discord.MessageType.reply):
         return False
     texte = (getattr(message, "content", "") or "").strip()
+    t = _mono()
+    rafale = _rafale((getattr(getattr(message, "channel", None), "id", 0), auteur.id), texte, t)
     if len(texte) < TEXTE_MIN and not (getattr(message, "attachments", None) or getattr(message, "stickers", None)):
         return False
-    t = _mono()
     cle = (g.id, auteur.id)
     if t - _dernier_msg.get(cle, -1e9) < ECART_MSG_S:
         return False
+    if rafale is not None:
+        if rafale[1]:
+            return False    # la rafale a déjà compté : « le jeux » / « me » / « tente »… = un message
+        rafale[1] = True
     _dernier_msg[cle] = t
     cids = tuple(actifs)
     for cid in cids:
@@ -393,6 +406,48 @@ def _elaguer(maintenant: float) -> None:
         _comptes.pop(mid, None)
     for cle in [k for k, t in _dernier_msg.items() if maintenant - t > 60]:
         _dernier_msg.pop(cle, None)
+    _elaguer_rafales(maintenant)
+
+
+_BALISES = re.compile(r"<[^<>\s]*>|https?://\S+")   # émojis du serveur, mentions, liens (un GIF) : pas des mots
+_MOT = re.compile(r"[^\W\d_]+")                   # une suite de lettres (« c'est » : 2 mots)
+
+
+def court(texte: str) -> bool:
+    """Un message court : RAFALE_MOTS mots ou moins (une image, un GIF, des émojis seuls : 0 mot)."""
+    n = 0
+    for _m in _MOT.finditer(_BALISES.sub(" ", texte)):
+        n += 1
+        if n > RAFALE_MOTS:
+            return False
+    return True
+
+
+def _elaguer_rafales(t: float) -> None:
+    """Les rafales finies sortent, la plus ancienne devant (chaque mise à jour passe en dernier) : une
+    sortie par entrée au plus, et jamais plus de RAFALES_MAX rafales suivies."""
+    while _rafales:
+        vieille = next(iter(_rafales))
+        if t - _rafales[vieille][0] < RAFALE_S and len(_rafales) < RAFALES_MAX:
+            return
+        del _rafales[vieille]
+
+
+def _rafale(cle: tuple, texte: str, t: float):
+    """La rafale (même personne, même salon) que ce message court prolonge ou commence :
+    [dernier message court, a déjà compté]. None pour une phrase complète, qui compte normalement et clôt
+    la rafale. Tout message passe ici, compté ou non : la rafale se mesure d'un message au suivant."""
+    _elaguer_rafales(t)
+    if not court(texte):
+        _rafales.pop(cle, None)
+        return None
+    r = _rafales.get(cle)
+    if r is None:
+        r = _rafales[cle] = [t, False]
+    else:
+        r[0] = t
+        _rafales.move_to_end(cle)
+    return r
 
 
 def compte_en_vocal(g, etat) -> bool:
@@ -1771,7 +1826,8 @@ def vue_accueil() -> LayoutView:
             "then “📊 My stats” to follow your progress. Conditions (messages, voice) count from the giveaway's "
             "launch; winners are drawn at random among those who meet them."),
         discord.ui.TextDisplay(
-            "-# 💬 Un message compte s'il a 2 caractères ou plus, un toutes les 3 s au plus · 🔊 le vocal compte hors "
+            "-# 💬 Un message compte s'il a 2 caractères ou plus, un toutes les 3 s au plus, une rafale de "
+            "messages courts pour un · 🔊 le vocal compte hors "
             "AFK, casque non coupé · 🍀 un rôle chanceux ×2 a deux fois plus de chances."),
         accent_color=discord.Color(COULEUR)))
     return v
