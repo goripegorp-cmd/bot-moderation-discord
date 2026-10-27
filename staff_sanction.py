@@ -67,13 +67,20 @@ except Exception:
 STAFF_CHANNEL_NAME = "🚨-actions-staff"
 
 
-def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, avertir=None):
-    global _bot, _get_db, _db_get, _v2, _avertir
+#  26/10/2026 (sécurité) : la tête (fondateur et direction, par identifiant), passée par bot.py — jamais visée d'un clic.
+_tete: frozenset = frozenset()
+#  Le refus STABLE, le même que bot.py (`REFUS_TETE`) : le fondateur et la direction ne sont jamais sanctionnés.
+REFUS_TETE = "Cible protégée : le fondateur et la direction ne sont jamais sanctionnés."
+
+
+def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, avertir=None, tete=()):
+    global _bot, _get_db, _db_get, _v2, _avertir, _tete
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
     _avertir = avertir
+    _tete = frozenset(int(x) for x in tete)
 
 
 async def init_db():
@@ -291,6 +298,21 @@ async def _handle_sanction_click(
                 "🔒 Impossible de kick/ban l'owner ou super-owner.",
                 ephemeral=True,
             )
+        # 26/10/2026 (sécurité) : le fondateur et la direction sont protégés EN DUR — même par le fondateur et le
+        # propriétaire ; « faux positif » reste possible (il ne sanctionne rien).
+        if target_id in _tete and action != "ignore":
+            return await i.response.send_message(f"🔒 {REFUS_TETE}", ephemeral=True)
+        # 26/10/2026 (sécurité) — comme /mod (hiérarchie) : ni soi-même (s'avertir, classer « faux positif » le panneau
+        # qui nous vise), ni la tête, ni un rang égal ou supérieur. Le propriétaire et le fondateur passent.
+        if not is_super:
+            cible = i.guild.get_member(target_id)
+            haut = getattr(i.user, "top_role", None)
+            if (target_id == i.user.id or target_id in _tete
+                    or (cible is not None and (haut is None or cible.top_role >= haut))):
+                return await i.response.send_message(
+                    "🔒 Cible protégée : toi-même, la tête ou un rang égal ou supérieur au tien.",
+                    ephemeral=True,
+                )
 
         await i.response.defer(ephemeral=True)
         target = i.guild.get_member(target_id)

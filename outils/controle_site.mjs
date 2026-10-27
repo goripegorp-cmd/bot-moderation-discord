@@ -319,6 +319,11 @@ const SCENES = [
   //  27/10/2026 : Textes & noms et Nettoyage sont les deux onglets de « Réglages » (La Capitainerie).
   { nom: "reglages", ancre: "#capitainerie/reglages" },
   { nom: "reglages-nettoyage", ancre: "#capitainerie/reglages/nettoyage" },
+  // 26/10/2026 (sécurité) : Réglages › Sécurité — sessions, actions du site, permissions dangereuses (un rôle déplié),
+  // et la fenêtre du bouton d'urgence.
+  { nom: "reglages-securite", ancre: "#capitainerie/reglages/securite",
+    geste: "(async () => { for (const g of document.querySelectorAll('details.groupe')) g.open = true; await new Promise((r) => setTimeout(r, 400)); const l = [...document.querySelectorAll('.lc-clic')].find((x) => x.textContent.includes('Staff')); if (l) l.click(); })()" },
+  { nom: "fenetre-fermer-sessions", ancre: "#capitainerie/reglages/securite", geste: "[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Fermer toutes les autres sessions')).click()" },
   { nom: "reglages-textes-groupe", ancre: "#capitainerie/reglages/textes", geste: OUVRIR_GROUPE_TEXTES(0) },
   { nom: "fenetre-editeur-texte", ancre: "#capitainerie/reglages/textes", geste: OUVRIR_GROUPE_TEXTES(0),
     geste2: "document.querySelector('details.groupe[open] .texte-ligne .bouton').click()" },

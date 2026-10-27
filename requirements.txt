@@ -1,10 +1,17 @@
-audioop-lts
+# 26/10/2026 : `audioop` est dans Python jusqu'à 3.12 ; audioop-lts (3.13+, la production) n'existe pas avant.
+audioop-lts; python_version >= "3.13"
 discord.py==2.7.1
-python-dotenv==1.0.0
+# 26/10/2026 (sécurité) : 1.0.0 avait 2 avis publics (OSV : GHSA-mf9w-mj56-hr94) — corrigés en 1.2.2.
+python-dotenv==1.2.2
 aiosqlite==0.19.0
-aiohttp>=3.9.5,<3.11
+# 26/10/2026 (sécurité) : « <3.11 » faisait installer aiohttp 3.10.11 en production — 74 avis publics (OSV), dont du
+# request smuggling sur le serveur HTTP PUBLIC du bot (site, transcripts, /health). Le dernier corrigé : 3.14.4.
+# discord.py 2.7.1 demande « >=3.7.4,<4 ».
+aiohttp>=3.14.4,<4
 pytesseract==0.3.13
-Pillow>=10.0.0
+# 26/10/2026 (sécurité) : 12.3.0 avait 41 avis publics (OSV : débordements de tampon, bombes de décompression…) — corrigés
+# en 13.0.0. Les images envoyées sur le site sont refaites par Pillow.
+Pillow>=13.0.0
 nudenet==3.4.2
 pyzbar==0.1.9
 

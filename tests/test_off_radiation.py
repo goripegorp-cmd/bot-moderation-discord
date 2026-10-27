@@ -551,7 +551,7 @@ def test_on_previent_AVANT_de_bannir():
     #  trouvait cet appel-la et le test passait alors que le bannissement
     #  precedait bien son avertissement. Mutation testee, defaut reel.
     i = SRC.index("class RadieDecisionButton")
-    bloc = SRC[i:i + 4000]
+    bloc = SRC[i:SRC.index("\nclass ", i + 10)]   # la classe entière (26/10/2026 : ses vérifications l'ont allongée)
     i_ban = bloc.index("guild.ban(")
     branche = bloc[bloc.index("else:", 0, i_ban):i_ban]
     assert "_prevenir_radie(" in branche, (
@@ -669,8 +669,10 @@ def test_le_proprietaire_et_le_super_owner_passent_toujours():
 
 
 def test_un_administrateur_garde_son_acces():
-    """Le comportement d'avant ne doit pas être retiré en chemin."""
-    assert _droit(FauxUtilisateur(4, admin=True), FauxCible(rang=99)) is None
+    """Le comportement d'avant ne doit pas être retiré en chemin. 26/10/2026 (sécurité, tests/test_qui_peut_quoi.py Q2) :
+    sur un membre PLUS BAS que lui — comme dans Discord, il ne radie plus un administrateur plus haut."""
+    assert _droit(FauxUtilisateur(4, admin=True), FauxCible(rang=5)) is None
+    assert _droit(FauxUtilisateur(4, admin=True), FauxCible(rang=99)), "plus haut que lui : le propriétaire seul"
 
 
 def test_une_panne_de_configuration_REFUSE_la_radiation():

@@ -37,9 +37,14 @@ LE SITE V2, « LA CAPITAINERIE » (25/10/2026)
   · La page vient du dossier `site/` (index.html, scripts et styles SANS rien en ligne) ; `{{V}}` y
     devient l'empreinte du dossier : un fichier changé = de nouvelles adresses, jamais un vieux
     script gardé en cache. Sans `site/index.html`, l'ancienne page reste servie.
-  · Les fichiers de `site/` (`/tableau/espace/s/…`) sont publics : rien de secret dedans, extensions
-    choisies, jamais un pas hors du dossier. Le service worker (`/tableau/espace/sw.js`) garde la
-    coquille pour travailler hors ligne.
+  · Les fichiers de `site/` (`/tableau/espace/s/…`) : extensions choisies, jamais un pas hors du dossier.
+    26/10/2026 (sécurité) : chacun à ses SEULS lecteurs (`ACCES_STATIQUES`) — le code et le style de la
+    Capitainerie à la tête, ceux du site de l'équipage à ses sessions, seule l'image (polices, icônes,
+    textures…) à tous. Le service worker (`/tableau/espace/sw.js`, tête seule) garde la coquille pour
+    travailler hors ligne.
+  · 26/10/2026 (sécurité) : chaque écriture du site est tracée à la porte (`securite_site`), les sessions
+    gardent leur appareil et leur adresse approximative ; la rubrique « Sécurité » les montre. Aucune
+    alerte sur ce que fait la tête ; une alerte regroupée seulement pour un signal fort.
   · Les modules branchent leurs adresses (`monter`) sous `/tableau/espace/api/…` : session, tête,
     origine pour toute écriture, taille du corps, cadence, limites graves, journal du site ; une
     erreur reste ici (« indisponible » côté page, le détail au journal du bot).
@@ -55,6 +60,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import csv
+import fnmatch
 import hashlib
 import hmac
 import inspect
@@ -89,6 +95,7 @@ import questionnaire
 import recrutements
 import registre
 import rellseas_panneau
+import securite_site
 import sondages
 import suggestions
 import transcript_store
@@ -189,6 +196,37 @@ TYPES_STATIQUES = {"js": "text/javascript; charset=utf-8", "css": "text/css; cha
                    "json": "application/json; charset=utf-8",
                    "webmanifest": "application/manifest+json; charset=utf-8", "ico": "image/x-icon"}
 COMPRESSIBLES = {"js", "css", "svg", "json", "webmanifest"}
+#  26/10/2026 (sécurité) : « le fameux F12 qui leur permet de voir le code source entier du site ». Un navigateur voit
+#  toujours ce qu'il reçoit : la vraie protection est que PERSONNE d'autre que la tête ne reçoive le code. Chaque fichier
+#  de `site/` a ses lecteurs (motifs `fnmatch`, chemin relatif à `site/`) :
+#    · "public" : ce qui n'est que de l'image (polices, icônes, textures, ornements, logos, l'icône de l'application et
+#      son manifeste, que le navigateur lit SANS cookie) — sans session ;
+#    · une portée de session ("equipage", demain "candidat"…) : les fichiers que SA page charge ;
+#    · tout le reste — le code et le style de la Capitainerie, et tout fichier inconnu ou ajouté demain sans y penser :
+#      la tête seule (portée « tout »). Un fichier refusé répond 404, comme un fichier absent.
+#  La page du candidat AJOUTE ici ses fichiers (et rien d'autre ne devient lisible). Les listes suivent exactement ce que
+#  chaque page charge (tests/test_securite_site.py, S1b, le vérifie : un import ajouté sans y penser fait échouer le test).
+ACCES_STATIQUES = {
+    "public": ("polices/*", "icones/*", "textures/*", "ornements/*", "logos/*", "app-192.png", "app-512.png",
+               "manifest.webmanifest",
+               #  27/10/2026 : la vitrine PUBLIQUE de l'équipage (site/vitrine.html, `/equipage`) — ses modules (imports
+               #  statiques de vitrine.js, le socle commun compris) et ses feuilles de style. Le code PROPRE à la
+               #  Capitainerie (app, discord, clan, recrutement, annonces, capitainerie, fiche, securite, textes, direct,
+               #  equipes_admin, accueil, recherche, rangement, mode…) n'y est pas : la tête seule.
+               "vitrine.js", "vitrine.css", "equipage_accueil.js", "equipage_commun.js", "equipage_equipes.js",
+               "equipage_mur.js", "lien_equipage.js", "affiche.js", "api.js", "dom.js", "donnees.js", "hors_ligne.js",
+               "noyau.js", "ui.js", "style.css", "composants.css", "pieces.css", "ateliers.css", "equipage.css",
+               #  27/10/2026 : les bannières, et le petit module des publications modifiables (son éditeur, annonces.js,
+               #  n'est chargé qu'à la demande, par la tête : il reste à elle, comme l'adresse qui écrit).
+               "banniere.js", "banniere.css", "equipage_publication.js",
+               #  26/10/2026 : la page du CANDIDAT (site/candidature.html) — son cookie est limité à `/tableau/candidature/` : son
+               #  navigateur ne l'envoie jamais ici, ses deux fichiers propres sont donc publics (le reste qu'elle charge l'est
+               #  déjà) ; la vue de la direction (candidature_direct.*) reste à la tête.
+               "candidature.js", "candidature.css"),
+    #  Le site de l'équipage (site/equipage.html) : ce que sa page charge EN PLUS de la vitrine (`direct.js` n'est chargé
+    #  qu'en mode édition, par la tête).
+    "equipage": ("equipage.js", "direct.css"),
+}
 STATIQUE_MAX = 6 * 1024 * 1024          # un fichier de `site/` (au-delà : refusé, jamais tout en mémoire)
 STATIQUES_CACHE = 48 * 1024 * 1024      # ce que la mémoire garde des fichiers de `site/`
 SEGMENT_STATIQUE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}")
@@ -210,6 +248,7 @@ LIMITE_MEDIAS = 3000       # images servies par minute et par session (deux gale
 #  27/10/2026 (banc de plusieurs années) : à 5 ans, le mur de l'équipage montre ~600 affiches (celles des anciens du clan
 #  y restent tant que la direction ne les retire pas) ; les images ne sont jamais gardées par le navigateur
 #  (`no-store`) — trois passages en une minute dépassaient 1 500 et des portraits s'affichaient cassés (429).
+LIMITE_STATIQUES = 3000    # fichiers de `site/` servis avec la session, par minute (des pages rechargées en rafale)
 PARAMETRES_MAX = 20
 #  La synchronisation hors ligne.
 SYNC_OPS_MAX = 50
@@ -244,6 +283,7 @@ _cadence: dict = {}
 _sessions: dict = {}
 _requetes: dict = {}
 _requetes_medias: dict = {}
+_requetes_statiques: dict = {}   # 26/10/2026 : les fichiers de `site/` lus avec la session (leur propre cadence)
 _essais: dict = {}
 _graves: dict = {}
 _blocages: dict = {}
@@ -307,9 +347,10 @@ def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_memb
     _cfg, _get_db, _mesurer_groupe, _autorise_membre = cfg, get_db, mesurer_groupe, autorise_membre
     _alerte_securite = alerte_securite
     _log = log or print
-    for d in (_sessions, _requetes, _requetes_medias, _essais, _graves, _blocages, _cadence, _cache, _ops_recentes,
-              _nettoyages, _medias_vus, _alertes_tete, _ouvertures, _tentatives, _direct_salles, _direct_ecrits,
-              _empreintes_donnees):
+    securite_site.setup(get_db=get_db, log=_log)   # 26/10/2026 : la trace des écritures, les sessions et leurs appareils
+    for d in (_sessions, _requetes, _requetes_medias, _requetes_statiques, _essais, _graves, _blocages, _cadence, _cache,
+              _ops_recentes, _nettoyages, _medias_vus, _alertes_tete, _ouvertures, _tentatives, _direct_salles,
+              _direct_ecrits, _empreintes_donnees):
         d.clear()
 
 
@@ -320,8 +361,16 @@ async def init_db():
         #  26/10/2026 : la portée de chaque session (« tout » : la tête ; « equipage » : le site de l'équipage). Les
         #  sessions d'avant sont toutes celles de la tête : « tout ».
         async with db.execute("PRAGMA table_info(tableau_sessions)") as cur:
-            if "portee" not in [r[1] for r in await cur.fetchall()]:
-                await db.execute("ALTER TABLE tableau_sessions ADD COLUMN portee TEXT NOT NULL DEFAULT 'tout'")
+            colonnes = [r[1] for r in await cur.fetchall()]
+        if "portee" not in colonnes:
+            await db.execute("ALTER TABLE tableau_sessions ADD COLUMN portee TEXT NOT NULL DEFAULT 'tout'")
+        #  26/10/2026 (sécurité) : l'appareil, l'adresse approximative et la dernière activité de chaque session (rubrique
+        #  « Sécurité » du site).
+        for col, sql in (("appareil", "TEXT NOT NULL DEFAULT ''"), ("adresse", "TEXT NOT NULL DEFAULT ''"),
+                         ("vu_le", "INTEGER NOT NULL DEFAULT 0")):
+            if col not in colonnes:
+                await db.execute(f"ALTER TABLE tableau_sessions ADD COLUMN {col} {sql}")
+        await securite_site.creer_tables(db)
         await db.execute("CREATE TABLE IF NOT EXISTS tableau_jetons (nonce TEXT PRIMARY KEY, expire_le INTEGER)")
         await db.execute("CREATE TABLE IF NOT EXISTS tableau_blocages (guild_id INTEGER, user_id INTEGER, jusqu INTEGER,"
                          " raison TEXT, PRIMARY KEY (guild_id, user_id))")
@@ -435,15 +484,18 @@ def _empreinte(sid: str) -> str:
 
 
 async def _ouvrir_session(guild_id: int, user_id: int, expire: int, maintenant: float | None = None,
-                         portee: str = "tout") -> str:
+                         portee: str = "tout", appareil: str = "", adresse: str = "") -> str:
     if portee not in PORTEES:
         raise ValueError("portée de session inconnue")
     sid = secrets.token_urlsafe(32)
     emp = _empreinte(sid)
+    t = int(maintenant or time.time())
     async with _get_db() as db:
-        await db.execute("INSERT INTO tableau_sessions (empreinte, guild_id, user_id, cree_le, expire_le, portee)"
-                         " VALUES (?,?,?,?,?,?)", (emp, guild_id, user_id, int(maintenant or time.time()), int(expire),
-                                                   portee))
+        await db.execute("INSERT INTO tableau_sessions (empreinte, guild_id, user_id, cree_le, expire_le, portee, appareil,"
+                         " adresse, vu_le) VALUES (?,?,?,?,?,?,?,?,?)",
+                         (emp, guild_id, user_id, t, int(expire), portee, appareil[:80], adresse[:60], t))
+        if appareil:   # 26/10/2026 : « nouvel appareil » se lit dans la rubrique Sécurité (jamais alerté)
+            await securite_site.noter_appareil(db, guild_id, user_id, appareil, adresse, t)
         await db.commit()
     _sessions[emp] = (guild_id, user_id, int(expire), float(maintenant or time.time()), portee)
     return sid
@@ -474,6 +526,7 @@ async def _lire_session(request, maintenant: float | None = None, cookie: str = 
         return None
     if not FORMAT_SESSION.fullmatch(sid):
         _trop_essais(request, compter=True, maintenant=t)
+        securite_site.compter("cookie")
         return None
     emp = _empreinte(sid)
     s = _sessions.get(emp)
@@ -483,18 +536,42 @@ async def _lire_session(request, maintenant: float | None = None, cookie: str = 
         if s is None and _trop_essais(request, maintenant=t):
             return None
         async with _get_db() as db:
-            async with db.execute("SELECT guild_id, user_id, expire_le, portee FROM tableau_sessions WHERE empreinte=?",
-                                  (emp,)) as cur:
+            async with db.execute("SELECT guild_id, user_id, expire_le, portee, appareil FROM tableau_sessions"
+                                  " WHERE empreinte=?", (emp,)) as cur:
                 r = await cur.fetchone()
+            if r is not None:
+                await _noter_vue(db, request, emp, r, t)
         if r is None:
             if s is None:
                 _trop_essais(request, compter=True, maintenant=t)
+                securite_site.compter("cookie")
             _sessions.pop(emp, None)
             return None
         s = _sessions[emp] = (int(r[0]), int(r[1]), int(r[2]), t, str(r[3] or ""))
     if s[2] < t:
         return None
     return emp, s[:3], (s[4] if len(s) > 4 else "")  # une portée absente : refusée partout
+
+
+def _appareil(request) -> str:
+    return securite_site.appareil(request.headers.get("User-Agent", "") if hasattr(request, "headers") else "")
+
+
+async def _noter_vue(db, request, emp: str, r, t: float) -> None:
+    """26/10/2026 (rubrique Sécurité) : la dernière activité d'une session, à la minute près (sa ligne n'est relue qu'une
+    fois par minute) ; une session ouverte sans appareil connu (l'entrée de démonstration) prend celui de la requête."""
+    try:
+        if str(r[4] or ""):
+            await db.execute("UPDATE tableau_sessions SET vu_le=? WHERE empreinte=?", (int(t), emp))
+        else:
+            app, adr = _appareil(request), securite_site.adresse_approx(_ip(request))
+            await db.execute("UPDATE tableau_sessions SET vu_le=?, appareil=?, adresse=? WHERE empreinte=?",
+                             (int(t), app, adr, emp))
+            await securite_site.noter_appareil(db, int(r[0]), int(r[1]), app, adr, t)
+        await db.commit()
+    except Exception as ex:  # la date de dernière activité manque ; la session, elle, tient
+        _log("[TABLEAU][E23] dernière activité d'une session non notée")
+        _log(f"[TABLEAU][E23:DETAIL] {type(ex).__name__} {ex}")
 
 
 async def fermer_sessions(guild_id: int | None, user_id: int) -> int:
@@ -540,6 +617,17 @@ class _Refus(Exception):
         self.portee = portee  # refus de portée : celle de la session refusée (la page de la direction le dit)
 
 
+CHIFFRES = re.compile(r"[0-9]+")
+
+
+def chiffres(s, maxi: int = 20) -> bool:
+    """Un numéro lu dans une adresse ou une donnée : des chiffres 0-9 seulement, `maxi` au plus. 27/10/2026 (sécurité,
+    tests/test_acces_site.py, A12) : `str.isdigit()` acceptait « ² », « ① »… qu'`int()` refuse — une erreur 500 à
+    chaque fois (fiche, conversation, export, aperçu du Nettoyage) — ou lit autrement (« １２ »)."""
+    s = str(s if s is not None else "")
+    return 0 < len(s) <= maxi and CHIFFRES.fullmatch(s) is not None
+
+
 def _ip(request) -> str:
     """Le client : la PREMIÈRE adresse de X-Forwarded-For. Vérifié le 20/10/2026 : le proxy de Railway
     retire l'en-tête envoyé par le client, et la DERNIÈRE adresse est celle du CDN — partagée par
@@ -565,12 +653,14 @@ def _trop_essais(request, compter: bool = False, maintenant: float | None = None
 
 
 async def _verifier(request, maintenant: float | None = None, medias: bool = False, portees=("tout",),
-                    cookie: str = COOKIE):
+                    statiques: bool = False, cookie: str = COOKIE):
     """Session valide et de l'une des `portees` (par défaut « tout » seulement : une session du site de l'équipage ou du
     questionnaire en ligne est refusée PARTOUT où on ne la demande pas), personne toujours autorisée — « tout » : le
     fondateur ou la direction ; « equipage » : le rôle du clan, sinon sa session est fermée ; « candidat » : sa session
     liée à SON questionnaire (`AUTORISE_CANDIDAT`) —, pas suspendue, cadence raisonnable.
-    `medias` : une image de la page (sa propre cadence : une galerie ne vide pas celle des données)."""
+    `medias` : une image de la page (sa propre cadence : une galerie ne vide pas celle des données) ; `statiques` : un
+    fichier de `site/` (la sienne aussi). 26/10/2026 : la session admise devient celle de la requête en cours
+    (`securite_site.SESSION` : la trace des écritures dit de quel appareil elles viennent)."""
     t = maintenant or time.time()
     ses = await _lire_session(request, t, cookie)
     if ses is None:
@@ -579,6 +669,7 @@ async def _verifier(request, maintenant: float | None = None, medias: bool = Fal
         raise _Refus(403, "Session expirée.")
     emp, (gid, uid, expire), portee = ses
     if portee not in portees:
+        securite_site.compter("hors_portee")
         await _tentative_hors_portee(request, emp, gid, uid, portee, t)
         raise _Refus(403, "Réservé au fondateur et à la direction.", portee=portee or "?")
     g = _bot.get_guild(gid) if _bot else None
@@ -598,12 +689,21 @@ async def _verifier(request, maintenant: float | None = None, medias: bool = Fal
         raise _Refus(403, "Accès retiré.")
     if await suspendu(gid, uid, t):
         raise _Refus(403, "Accès suspendu.")
-    seau, limite = (_requetes_medias, LIMITE_MEDIAS) if medias else (_requetes, LIMITE_REQUETES)
+    seau, limite = ((_requetes_medias, LIMITE_MEDIAS) if medias else (_requetes_statiques, LIMITE_STATIQUES) if statiques
+                    else (_requetes, LIMITE_REQUETES))
     recents = [x for x in seau.get(emp, []) if t - x < 60]
     if len(recents) >= limite:
+        securite_site.compter("cadence")
         raise _Refus(429, "Trop de requêtes.")
     seau[emp] = recents + [t]
     _elaguer(t)
+    securite_site.SESSION.set({"emp": emp, "u": uid, "appareil": _appareil(request)})
+    if portee == "tout" and _tete and uid not in _tete:
+        #  La porte de la direction a laissé passer quelqu'un hors de la tête (avec `autorise_membre` = la tête, par
+        #  identifiant, cela n'arrive jamais). Une lecture : un fait VISIBLE dans la rubrique Sécurité, une ligne par session
+        #  et par 10 minutes — jamais une alerte (décision du fondateur : l'alerte est pour une action qui ABOUTIT,
+        #  `_action_hors_tete`). Rien n'est bloqué ici.
+        await securite_site.lecture_hors_tete(g, m, emp, str(getattr(request, "path", "") or ""), t)
     return {"g": gid, "u": uid, "e": expire, "p": portee, "emp": emp}, g
 
 
@@ -614,7 +714,7 @@ def _elaguer(t: float) -> None:
     """26/10/2026 (banc de plusieurs années) : les compteurs en mémoire gardaient chaque session et chaque cadence
     jusqu'au redémarrage — des années de sessions si le bot ne redémarre pas. Au-delà de MEMOIRE_MAX entrées, les
     périmées partent (une session expirée, une cadence de plus d'une minute)."""
-    for seau in (_requetes, _requetes_medias):
+    for seau in (_requetes, _requetes_medias, _requetes_statiques):
         if len(seau) > MEMOIRE_MAX:
             for k in [k for k, v in seau.items() if not v or t - v[-1] >= 60]:
                 seau.pop(k, None)
@@ -627,6 +727,17 @@ def _elaguer(t: float) -> None:
     if len(_graves) > MEMOIRE_MAX:
         for k in [k for k, v in _graves.items() if not v or t - v[-1] >= 600]:
             _graves.pop(k, None)
+
+
+async def _action_hors_tete(g, auteur, quoi: str) -> None:
+    """Le signal fort a. (décision du fondateur) : une action privilégiée du site qui ABOUTIT pour quelqu'un hors de la
+    tête — appelé seulement après la réussite (une tentative refusée ou en échec n'alerte jamais). Avec le bot tel qu'il
+    est, cela n'arrive jamais : si oui, la porte a un trou. Une alerte regroupée dans « 📋logs » ; rien n'est bloqué."""
+    uid = int(getattr(auteur, "id", 0) or 0)
+    if _tete and uid not in _tete:
+        await securite_site.signal_fort(g, "hors_tete", "Une action du site a abouti hors de la tête",
+                                        f"{getattr(auteur, 'display_name', None) or uid} ({uid}) : {str(quoi)[:120]}",
+                                        auteur_id=uid)
 
 
 async def _candidat_autorise(g, m, emp: str) -> str:
@@ -1542,6 +1653,7 @@ async def entree(request):
         permis = autorise_equipage(g, m, c) if equipage else (_autorise_membre is not None and _autorise_membre(g, m, c))
     if not permis or await suspendu(g.id, m.id):
         _trop_essais(request, compter=True)
+        securite_site.compter("lien")
         return _html(EXPIRE_EQUIPAGE if equipage else EXPIRE, 403)
     vers = EQUIPAGE if equipage or (getattr(request, "query", None) or {}).get("vers") == "equipage" else ESPACE
     async with _get_db() as db:
@@ -1553,8 +1665,10 @@ async def entree(request):
         if ses is not None and ses[1][:2] == (j["g"], j["u"]) and ses[2] == j["p"]:
             return web.Response(status=303, headers=dict(ENTETES, Location=vers))
         _trop_essais(request, compter=True)
+        securite_site.compter("lien")
         return _html(DEJA_EQUIPAGE if equipage else DEJA, 403)
-    sid = await _ouvrir_session(j["g"], j["u"], j["e"], portee=j["p"])
+    sid = await _ouvrir_session(j["g"], j["u"], j["e"], portee=j["p"], appareil=_appareil(request),
+                                adresse=securite_site.adresse_approx(_ip(request)))
     r = web.Response(status=303, headers=dict(ENTETES, Location=vers))
     r.set_cookie(COOKIE, sid, max_age=max(60, j["e"] - int(time.time())), path="/", secure=True, httponly=True,
                  samesite="Lax")
@@ -1655,7 +1769,7 @@ async def membre(request):
     except _Refus as r:
         return _json({"erreur": r.message}, r.status)
     uid = request.query.get("id", "")
-    if not uid.isdigit() or len(uid) > 20:
+    if not chiffres(uid, 20):
         return _json({"erreur": "membre invalide"}, 400)
     try:
         return _json(await fiche(g, int(uid), g.get_member(j["u"])))
@@ -1675,7 +1789,7 @@ async def conversation(request):
     except _Refus as r:
         return _json({"erreur": r.message}, r.status)
     ticket = request.query.get("ticket", "")
-    if not ticket.isdigit() or len(ticket) > 12 or _conversation is None:
+    if not chiffres(ticket, 12) or _conversation is None:
         return _json({"erreur": "ticket invalide"}, 400)
     try:
         return _json(await _conversation(g, int(ticket)))
@@ -1694,7 +1808,7 @@ async def export(request):
     q = request.query
     membre_ = q.get("membre", "")
     jours = q.get("jours", "30")
-    if (membre_ and (not membre_.isdigit() or len(membre_) > 20)) or not jours.isdigit() or len(jours) > 3:
+    if (membre_ and not chiffres(membre_, 20)) or not chiffres(jours, 3):
         return _json({"erreur": "demande invalide"}, 400)
     try:
         res = await exporter(g, q.get("quoi", ""), g.get_member(j["u"]), int(jours), int(membre_ or 0),
@@ -1713,24 +1827,23 @@ async def export(request):
 
 
 def _origine_ok(request) -> bool:
-    """Une écriture vient de la page elle-même : en-tête maison, même origine, même site."""
+    """Une écriture vient de la page elle-même : en-tête maison, même origine, même site. Un refus est compté (rubrique
+    Sécurité), jamais alerté."""
     h = request.headers
-    if h.get("X-Tableau") != "1":
-        return False
-    if h.get("Sec-Fetch-Site", "same-origin") != "same-origin":
-        return False
     origine = h.get("Origin")
-    if origine is None:
-        return True
     attendue = _base.split("/", 3)[:3] if _base else None
     attendue = "/".join(attendue) if attendue else f"{getattr(request, 'scheme', 'https')}://{getattr(request, 'host', '')}"
-    return origine == attendue
+    ok = (h.get("X-Tableau") == "1" and h.get("Sec-Fetch-Site", "same-origin") == "same-origin"
+          and (origine is None or origine == attendue))
+    if not ok:
+        securite_site.compter("origine")
+    return ok
 
 
 async def limite_grave(g, auteur, genre: str, n: int = 1, maintenant: float | None = None) -> str | None:
     """Compte `n` actions graves de ce genre. None : elles peuvent se faire. Sinon le refus à montrer
-    (accès au site suspendu une heure, le fondateur prévenu) — jamais pour la tête, seulement signalée
-    au fondateur, une fois par 10 minutes. Partagé par les actions et les adresses du site (`grave`)."""
+    (accès au site suspendu une heure, le fondateur prévenu) — jamais pour la tête : la rafale est seulement
+    notée (rubrique Sécurité), une fois par 10 minutes. Partagé par les actions et les adresses du site (`grave`)."""
     t = maintenant or time.time()
     cle = (g.id, auteur.id, genre)
     faits = [x for x in _graves.get(cle, []) if t - x < 600]
@@ -1740,14 +1853,13 @@ async def limite_grave(g, auteur, genre: str, n: int = 1, maintenant: float | No
             await suspendre(g, auteur, raison)
             return "Trop d'actions graves en peu de temps : accès au site suspendu une heure, le fondateur est prévenu."
         #  « Si tu es suspendu alors que je suis le fondateur, il y a un petit problème » : jamais de
-        #  suspension pour la tête ; la direction est seulement signalée au fondateur, une fois.
-        if _alerte_securite is not None and t - _alertes_tete.get(cle, 0) > 600:
+        #  suspension pour la tête. 26/10/2026, décision du fondateur (« faut pas que tu fasses non plus une fausse
+        #  alerte ») : plus d'alerte non plus — le fait reste VISIBLE dans la rubrique Sécurité (une ligne du journal par
+        #  10 minutes au plus).
+        if t - _alertes_tete.get(cle, 0) > 600:
             _alertes_tete[cle] = t
-            try:
-                await _alerte_securite(g, auteur, raison, suspendu=False)
-            except Exception as ex:  # l'alerte ne bloque jamais l'action
-                _log("[TABLEAU][E6] alerte de sécurité impossible")
-                _log(f"[TABLEAU][E6:DETAIL] {type(ex).__name__} {ex}")
+            await registre.noter(g.id, "Sécurité", "site.rafale",
+                                 f"{raison} : {getattr(auteur, 'display_name', None) or auteur.id}", auteur_id=auteur.id)
     _graves[cle] = faits + [t] * n
     return None
 
@@ -1782,7 +1894,7 @@ async def action(request):
         return _json({"ok": False, "message": "Requête refusée."}, 400)
     try:
         corps = await request.json() if request.content_length and request.content_length <= 4096 else {}
-    except ValueError:
+    except (ValueError, RecursionError):   # 26/10/2026 : un JSON imbriqué 2 000 fois levait RecursionError (500)
         corps = {}
     if not isinstance(corps, dict):
         corps = {}
@@ -1806,14 +1918,20 @@ async def action(request):
         refus = await limite_grave(g, auteur, grave[0], grave[1], maintenant)
         if refus is not None:
             return _json({"ok": False, "message": refus}, 403)
+    statut = 200
     try:
         ok, message = await fn(g, auteur, corps)
+        statut = 200 if ok else 409
     except Exception as ex:  # l'action échoue : la page le dit, le détail part au journal
         _log("[TABLEAU][E2] action impossible")
         _log(f"[TABLEAU][E2:DETAIL] {nom} {type(ex).__name__} {ex}")
-        ok, message = False, "L'action n'a pas pu être faite."
+        ok, message, statut = False, "L'action n'a pas pu être faite.", 500
     for cle in [k for k in _cache if k[0] == g.id]:
         _cache.pop(cle, None)
+    #  26/10/2026 : la trace de chaque action du site vers Discord, à la porte même (réussie, refusée ou en échec).
+    await securite_site.noter_action(g, auteur, f"action/{nom}", statut, str(message))
+    if ok:
+        await _action_hors_tete(g, auteur, f"action/{nom} — {message}")
     return _json({"ok": bool(ok), "message": str(message)})
 
 
@@ -1940,6 +2058,16 @@ def _chemin_statique(brut) -> tuple[str, str] | None:
     return "/".join(segments), ext
 
 
+def lecteurs_statique(rel: str):
+    """Qui peut lire ce fichier de `site/` : None (public), sinon l'ensemble des portées de session permises — « tout »
+    toujours ; un fichier qu'aucune liste ne cite : la tête seule (`ACCES_STATIQUES`)."""
+    rel = str(rel or "")
+    if any(fnmatch.fnmatchcase(rel, m) for m in ACCES_STATIQUES.get("public", ())):
+        return None
+    return frozenset({"tout"} | {p for p, motifs in ACCES_STATIQUES.items()
+                                 if p != "public" and any(fnmatch.fnmatchcase(rel, m) for m in motifs)})
+
+
 def _lire_statique(rel: str):
     """(octets, etag) d'un fichier de `site/`, gardés en mémoire tant qu'il ne change pas — ou None.
     Le chemin résolu (liens suivis) doit rester DANS `site/`."""
@@ -1978,17 +2106,33 @@ def _introuvable(cache: str = "no-store"):
 
 
 async def statique(request):
-    """`/tableau/espace/s/{chemin}` : un fichier de `site/`. Public (rien de secret dedans, aucune
-    donnée), jamais hors du dossier, type exact ; gardé un an par le navigateur quand l'adresse porte
-    `?v=` (l'empreinte change avec le fichier), revalidé sinon."""
+    """`/tableau/espace/s/{chemin}` : un fichier de `site/`, jamais hors du dossier, type exact. 26/10/2026 (sécurité) :
+    servi à ses SEULS lecteurs (`ACCES_STATIQUES`) — le code et le style de la Capitainerie à la tête, ceux du site de
+    l'équipage à ses sessions, l'image à tous ; un refus répond comme un fichier absent (404). Gardé un an par le
+    navigateur quand l'adresse porte `?v=` (l'empreinte change avec le fichier), revalidé sinon — « private » dès qu'il
+    faut une session : aucun cache partagé (proxy, CDN) ne le garde pour le servir à un autre."""
     from aiohttp import web
     demande = _chemin_statique(request.match_info.get("chemin", ""))
-    lu = _lire_statique(demande[0]) if demande else None
+    if demande is None:
+        return _introuvable()
+    lecteurs = lecteurs_statique(demande[0])
+    if lecteurs is not None:
+        try:
+            await _verifier(request, portees=lecteurs, statiques=True)
+        except _Refus as r:
+            if r.status == 429:
+                return web.Response(status=429, text="Trop de requêtes.",
+                                    headers=dict(ENTETES_STATIQUES, **{"Cache-Control": "no-store",
+                                                                       "Retry-After": str(REESSAYER_S)}))
+            securite_site.compter("fichier")
+            return _introuvable()
+    lu = _lire_statique(demande[0])
     if lu is None:
         return _introuvable()
     data, etag = lu
     entetes = dict(ENTETES_STATIQUES, ETag=etag, **{
-        "Cache-Control": "public, max-age=31536000, immutable" if "v" in request.query else "no-cache"})
+        "Cache-Control": ("public, " if lecteurs is None else "private, ")
+        + ("max-age=31536000, immutable" if "v" in request.query else "no-cache")})
     if _meme_etag(request, etag):
         return web.Response(status=304, headers=entetes)
     entetes["Content-Type"] = TYPES_STATIQUES[demande[1]]
@@ -2002,12 +2146,19 @@ async def statique(request):
 
 async def service_worker(request):
     """`/tableau/espace/sw.js` : le service worker (portée `/tableau/espace/`), `{{V}}` remplacé pour qu'il
-    se renouvelle avec le site. Toujours revalidé ; sa propre politique de sécurité."""
+    se renouvelle avec le site. Toujours revalidé ; sa propre politique de sécurité. 26/10/2026 : le code de la
+    Capitainerie, donc à la tête seule (le navigateur le demande avec le cookie ; sans session, sa mise à jour échoue
+    et l'ancien reste en place : le hors ligne ne se perd pas)."""
     from aiohttp import web
+    try:
+        await _verifier(request, statiques=True)
+    except _Refus:
+        securite_site.compter("fichier")
+        return _introuvable()
     texte = _lire_page_site("sw.js")
     if texte is None:
         return _introuvable()
-    entetes = dict(ENTETES_STATIQUES, **{"Cache-Control": "no-cache", "Content-Type": "text/javascript; charset=utf-8",
+    entetes = dict(ENTETES_STATIQUES, **{"Cache-Control": "private, no-cache", "Content-Type": "text/javascript; charset=utf-8",
                                          "Content-Security-Policy": CSP_SW, "Service-Worker-Allowed": "/tableau/espace/"})
     r = web.Response(body=texte.encode("utf-8"), headers=entetes)
     r.enable_compression()
@@ -2234,15 +2385,22 @@ async def _executer(nom: str, route: dict, g, auteur, requete: dict, corps, main
         _log("[TABLEAU][E11] adresse du site en échec")
         _log(f"[TABLEAU][E11:DETAIL] {nom} {type(ex).__name__} {ex}")
         diag.compter("site", f"api.{nom}", ex)
+        if route["ecriture"]:   # 26/10/2026 : une écriture en échec reste tracée (Discord a pu être touché à moitié)
+            await securite_site.noter_action(g, auteur, nom, 500, "en échec")
         return 500, {"erreur": "Indisponible pour le moment."}
     journal = rep.get("_journal", _ABSENT)
     rep = {k: v for k, v in rep.items() if not str(k).startswith("_")}
+    if route["ecriture"]:
+        #  26/10/2026 : la trace de chaque écriture du site, à la porte même — réussie ou non (rubrique Sécurité).
+        await securite_site.noter_action(g, auteur, nom, status, securite_site.texte_journal(
+            journal, str(rep.get("erreur") or rep.get("message") or nom.replace("/", " › "))))
     if route["ecriture"] and status < 400:
         for k in [k for k in _cache if k[0] == g.id]:
             _cache.pop(k, None)
         if journal is not None:
             await _noter_ecriture(g, auteur, nom, None if journal is _ABSENT else journal)
         direct_ecrit(g.id, objets, auteur.id)
+        await _action_hors_tete(g, auteur, nom)
     return status, rep
 
 
@@ -2440,7 +2598,8 @@ def reencoder_image(data: bytes, cote: int = MEDIA_COTE) -> tuple[bytes, int, in
     except ImportError as ex:
         raise ValueError("Pillow absent") from ex
     try:
-        with Image.open(io.BytesIO(data)) as im:
+        #  26/10/2026 : `formats` — seuls ces quatre décodeurs de Pillow sont essayés (aucun format exotique ouvert).
+        with Image.open(io.BytesIO(data), formats=("PNG", "JPEG", "WEBP", "GIF")) as im:
             if im.format not in ("PNG", "JPEG", "WEBP", "GIF"):
                 raise ValueError("format")
             largeur, hauteur = im.size
@@ -2820,7 +2979,7 @@ def _noms_nettoyage(g, etat: dict) -> dict:
     citées dans ses données (25/10/2026 : le fondateur, absent des 400 derniers évènements, s'y lisait « Membre parti »)."""
     qui = _Personnes(g)
     for uid in [etat.get("par"), *(b.get("par") for b in etat.get("bilans") or [])]:
-        if str(uid or "").isdigit():
+        if chiffres(uid, 20):
             qui(int(uid))
     return dict(qui)
 
@@ -2887,7 +3046,7 @@ async def _route_nettoyage_apercu(g, auteur, requete, corps):
     brut = str(requete.get("jours", ""))
     if r is None:
         return 404, {"erreur": "Règle inconnue.", "champ": "cle"}
-    if not brut.isdigit() or not r["min"] <= int(brut) <= r["max"]:
+    if not chiffres(brut, 6) or not r["min"] <= int(brut) <= r["max"]:
         return 400, {"erreur": f"Entre {r['min']} et {r['max']} jours.", "champ": "jours"}
     if r.get("apercu") is None or r["fn"] is None:
         return 200, {"cle": cle, "jours": int(brut), "partiront": None}
@@ -3802,6 +3961,7 @@ async def direct(request):
     except _Refus as r:
         return _json({"erreur": r.message}, r.status)
     if not _origine_direct_ok(request):
+        securite_site.compter("websocket")
         return _json({"erreur": "Requête refusée."}, 400)
     ws = web.WebSocketResponse(heartbeat=DIRECT_PING, max_msg_size=DIRECT_MSG_MAX, compress=False)
     if not ws.can_prepare(request).ok:
@@ -3967,7 +4127,7 @@ def _v_affiche(c: dict) -> list:
 async def _v_correction(c: dict):
     """`recrutement/corriger` porte l'envoi, pas le ticket : le dossier se retrouve par l'envoi."""
     eid = _champ_id(c, "envoi")
-    if not eid.isdigit():
+    if not chiffres(eid, 12):
         return None
     e = await questionnaire._envoi(int(eid))
     return f"dossier:{int(e['ticket_id'])}" if e else None
@@ -4028,3 +4188,6 @@ _INTERNES.update({nom: {d["methode"]: _normaliser_route(nom, d)} for nom, d in {
     "direct/etat": {"methode": "GET", "fn": _route_direct_etat},
     "direct/envoi": {"methode": "POST", "fn": _route_direct_envoi, "ecriture": False, "corps_max": DIRECT_MSG_MAX},
 }.items()})
+#  26/10/2026 : la rubrique « Sécurité » (securite_site.py) — sessions et appareils, dernières écritures du site, refus
+#  comptés, alertes, qui détient une permission dangereuse ; et le bouton d'urgence « Fermer toutes les autres sessions ».
+_INTERNES.update({nom: {d["methode"]: _normaliser_route(nom, d)} for nom, d in securite_site.ROUTES_INTERNES.items()})

@@ -69,14 +69,21 @@ MAX_ROLES = 25
 MAX_MEMBRES = 25
 
 
+#  26/10/2026 (sécurité) : (guild, auteur, membre, donner) → le motif du refus pour CETTE cible, ou None — la tête, un
+#  radié à qui l'on donnerait le rôle (bot.py `_refus_cible_rellseas`). Le rang du membre visé ne compte pas (comme
+#  dans Discord pour un rôle) : les recruteurs gardent tout leur geste.
+_cible = None
+
+
 def setup(*, cfg, db_set, get_db=None, mesurer=None, marquer_suivi=None,
-          autorise=None, log=None, mesurer_groupe=None):
-    global _cfg, _db_set, _log, _mesurer, _marquer_suivi, _autorise, _mesurer_groupe
+          autorise=None, log=None, mesurer_groupe=None, cible=None):
+    global _cfg, _db_set, _log, _mesurer, _marquer_suivi, _autorise, _mesurer_groupe, _cible
     _cfg, _db_set = cfg, db_set
     _mesurer = mesurer
     _mesurer_groupe = mesurer_groupe
     _marquer_suivi = marquer_suivi
     _autorise = autorise
+    _cible = cible
     if log is not None:
         _log = log
 
@@ -933,6 +940,16 @@ class RellseasGestionV2(LayoutView):
             if not donner and not a_le_role:
                 echecs.append(f"{m.mention} — ne l'avait pas")
                 continue
+            if _cible is not None:
+                try:
+                    refus = _cible(g, u, m, donner)
+                except Exception as ex:  # en doute, on ne touche pas à ce membre
+                    _log("[RELLSEAS][E1] vérification de la cible impossible")
+                    _log(f"[RELLSEAS][E1:DETAIL] {uid} {type(ex).__name__} {ex}")
+                    refus = "vérification impossible"
+                if refus:
+                    echecs.append(f"{m.mention} — {refus}")
+                    continue
             try:
                 geste = m.add_roles if donner else m.remove_roles
                 await geste(role, reason=f"/rellseas par {u} ({u.id})")

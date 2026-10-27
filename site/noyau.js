@@ -43,7 +43,7 @@ export const CATEGORIES = [
       { cle: "affiches", titre: "Affiches", icone: "affiches", phrase: "L'atelier des avis de recherche de l'équipage : créer, modifier, ranger par métier." },
       { cle: "catalogue", titre: "Catalogue RELL Seas", icone: "catalogue", phrase: "Tout ce qui existe dans le jeu, et seulement cela : types, éléments, icônes officielles." },
       { cle: "roles", titre: "Rôles & métiers", icone: "roles", phrase: "Un rôle Discord par métier, donné tout seul si tu le veux." },
-      { cle: "reglages", titre: "Réglages", icone: "cle", phrase: "Les textes du bot et les noms du site, ce que le site garde et combien de temps." },
+      { cle: "reglages", titre: "Réglages", icone: "cle", phrase: "Les textes du bot et les noms du site, ce que le site garde et combien de temps, et sa sécurité." },
     ],
   },
 ];
@@ -153,6 +153,8 @@ const ALIAS = {
   "port/apercu": ["accueil", "attente", null, ""],
   "port/nettoyage": ["capitainerie", "reglages", null, "nettoyage"],
   "capitainerie/textes": ["capitainerie", "reglages", null, "textes"],
+  "capitainerie/securite": ["capitainerie", "reglages", null, "securite"],   // la Sécurité (26/10/2026) : un sous-onglet
+  "port/securite": ["capitainerie", "reglages", null, "securite"],
   "equipage/fiches": ["equipage", "membres", null, "fiches"],
   "equipage/tickets": ["port", "tickets", null, "clan"],
 };

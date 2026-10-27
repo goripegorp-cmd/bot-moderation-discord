@@ -284,12 +284,15 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
 
     #  Les rôles et les membres.
     direction_r = g.role("Direction", 60, couleur=0x8E2A24)
-    g.role("Staff", 40, couleur=0xA8823F, permissions=discord.Permissions(manage_messages=True))
+    #  26/10/2026 : « Expulser » et « Bannir » — la rubrique Sécurité (qui a une permission dangereuse) a de quoi montrer.
+    g.role("Staff", 40, couleur=0xA8823F, permissions=discord.Permissions(manage_messages=True, kick_members=True,
+                                                                         ban_members=True))
     clan_r = g.role("Rell Seas", 30, couleur=0x1F4E5A)
     g.role("Notifications", 5)
     g.role("Bot musique", 20, managed=True)
     g.me = X.Obj(id=999, top_role=g.role("GoRP Bot", 80), guild_permissions=discord.Permissions(
-        manage_roles=True, manage_channels=True, ban_members=True, mention_everyone=True, manage_events=True))
+        manage_roles=True, manage_channels=True, ban_members=True, mention_everyone=True, manage_events=True,
+        view_audit_log=True))
     g.membre(FONDATEUR, "GoRipe", direction_r, arrivee_jours=600)
     g.membre(DIRECTION, "Capitaine Direction", direction_r, arrivee_jours=420)
     hasard = random.Random(25102026)
@@ -506,7 +509,8 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
             if request.query.get("vers") == "equipage":
                 vers = tableau.EQUIPAGE
         expire = int(time.time()) + tableau.DUREE
-        sid = await tableau._ouvrir_session(SERVEUR_ID, uid, expire, portee=portee)
+        sid = await tableau._ouvrir_session(SERVEUR_ID, uid, expire, portee=portee, appareil=tableau._appareil(request),
+                                            adresse=tableau.securite_site.adresse_approx(tableau._ip(request)))
         r = web.Response(status=303, headers=dict(tableau.ENTETES, Location=vers))
         r.set_cookie(tableau.COOKIE, sid, max_age=tableau.DUREE, path="/", secure=True, httponly=True, samesite="Lax")
         return r

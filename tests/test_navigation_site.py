@@ -216,9 +216,11 @@ async def _compter(get_db) -> int:
 def test_N6_reglages_une_ligne_et_ce_qui_suit_les_rubriques():
     reg = (SITE / "reglages.js").read_text(encoding="utf-8")
     ligne = re.search(r'export const SOUS_REGLAGES = nommerOnglets\("site\.sous\.capitainerie\.reglages", \[(.*)\]\);', reg).group(1)
-    assert re.findall(r'\["(\w+)", "[^"]+", "\w+", (\w+)\]', ligne) == [("textes", "textes"), ("nettoyage", "nettoyage")], \
-        "un sous-onglet = [clé, nom, icône, rendu] : une ligne pour en ajouter un (« Sécurité »)"
-    assert ("capitainerie", "reglages", (("textes", "Textes & noms"), ("nettoyage", "Nettoyage"))) in textes.SITE_SOUS
+    assert re.findall(r'\["(\w+)", "[^"]+", "\w+", (\w+)\]', ligne) == [("textes", "textes"), ("nettoyage", "nettoyage"),
+                                                                    ("securite", "securite")], \
+        "un sous-onglet = [clé, nom, icône, rendu] : une ligne pour en ajouter un (« Sécurité », 26/10/2026)"
+    assert ("capitainerie", "reglages", (("textes", "Textes & noms"), ("nettoyage", "Nettoyage"),
+                                         ("securite", "Sécurité"))) in textes.SITE_SOUS
     sw = (SITE / "sw.js").read_text(encoding="utf-8")
     assert '"reglages.js"' in sw, "gardé hors ligne"
     app = (SITE / "app.js").read_text(encoding="utf-8")
@@ -229,7 +231,8 @@ def test_N6_reglages_une_ligne_et_ce_qui_suit_les_rubriques():
     #  La recherche trouve les anciennes rubriques sous leur nom (renommable) et celui d'avant.
     rech = (SITE / "recherche.js").read_text(encoding="utf-8")
     for morceau in ('["capitainerie", "reglages", "nettoyage", nomDans(SOUS_REGLAGES, "nettoyage")', '["port", "tickets", "clan"',
-                    '["equipage", "membres", "fiches", nomDans(VUES_EQUIPAGE, "fiches")', '"aperçu tendances"'):
+                    '["equipage", "membres", "fiches", nomDans(VUES_EQUIPAGE, "fiches")', '"aperçu tendances"',
+                    '["capitainerie", "reglages", "securite", nomDans(SOUS_REGLAGES, "securite")'):
         assert morceau in rech, morceau
     #  La présence en direct (« où est chacun ») : les nouvelles sous-pages ont un nom, une page d'avant est dite à sa place.
     direct = (SITE / "direct.js").read_text(encoding="utf-8")

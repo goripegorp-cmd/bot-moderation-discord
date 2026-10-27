@@ -11,8 +11,9 @@ import { h, icone, ajouter } from "./dom.js";
 import { nommerOnglets } from "./noyau.js";
 import { textes } from "./textes.js";
 import { nettoyage } from "./discord.js";
+import { securite } from "./securite.js";
 
-export const SOUS_REGLAGES = nommerOnglets("site.sous.capitainerie.reglages", [["textes", "Textes & noms", "plume", textes], ["nettoyage", "Nettoyage", "nettoyage", nettoyage]]);
+export const SOUS_REGLAGES = nommerOnglets("site.sous.capitainerie.reglages", [["textes", "Textes & noms", "plume", textes], ["nettoyage", "Nettoyage", "nettoyage", nettoyage], ["securite", "Sécurité", "cadenas", securite]]);
 
 export function reglages(vue, ctx = {}) {
   const choisi = SOUS_REGLAGES.find(([k]) => k === ctx.sous) || SOUS_REGLAGES[0];

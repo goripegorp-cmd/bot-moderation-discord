@@ -553,7 +553,7 @@ def test_6b_la_decision_ferme_le_ticket_de_recours_sans_mp():
     async def carte(*_a):
         return None
     ns2 = _ns("RadieDecisionButton", _autorise_radiation=_rien, _lever_radiation=_rien, _prevenir_radie=_rien,
-              _carte_recours_decidee=carte, _fermer_recours=noter)
+              _carte_recours_decidee=carte, _fermer_recours=noter, _fiche_sanction=_rien)   # aucune restriction
     i2 = Obj(response=Obj(defer=_rien), followup=Obj(send=_rien), user=Obj(mention="<@50>"), message=Obj(),
              guild=Obj(id=1, get_member=lambda _u: Obj(mention="<@42>")))
     asyncio.run(ns2["RadieDecisionButton"]("lever", 42).callback(i2))

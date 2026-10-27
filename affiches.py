@@ -1126,11 +1126,24 @@ def refus_role(g, role) -> str | None:
     droits = getattr(role, "permissions", None)
     if droits is not None and any(getattr(droits, p, False) is True for p in PERMISSIONS_INTERDITES):
         return "Ce rôle donne des droits de gestion ou de modération : jamais depuis le site."
+    #  26/10/2026 (sécurité) : un rôle de SANCTION n'a aucune permission mais retire la parole partout — il se pose par la
+    #  modération (/mod direction, /off), jamais par le catalogue (un lien le donnait d'un coup à tout un métier).
+    if getattr(role, "name", "") in ("🔒 Restricted", tableau._radie):
+        return "Rôle de sanction : il se pose par la modération, jamais depuis le site."
     return None
 
 
 def _peut_gerer_roles(g) -> bool:
     return bool(getattr(getattr(getattr(g, "me", None), "guild_permissions", None), "manage_roles", False))
+
+
+def protege_de(g, auteur, membre) -> bool:
+    """26/10/2026 (sécurité) — « fondateur et direction protégés » vaut aussi pour les rôles des affiches : une session de
+    la direction (ou une session volée) ne change pas les rôles d'un autre compte de la tête ; le fondateur agit sur tous,
+    chacun sur lui-même, le bot (automatismes) comme avant."""
+    a, m = int(getattr(auteur, "id", 0) or 0), int(getattr(membre, "id", 0) or 0)
+    bot = int(getattr(getattr(g, "me", None), "id", -1) or -1)
+    return m in tableau._tete and a not in (m, bot) and not tableau.owner_ids.is_super_owner(a)
 
 
 def _couleur_role(role) -> str:
@@ -1221,7 +1234,7 @@ async def _route_role(g, auteur, requete, corps):
         #  donné tout de suite à ceux dont l'affiche porte ce métier — ce que la page annonce.
         if cree:
             await _metiers.placer_sous_le_clan(g, role, await _metiers.role_du_clan(g))
-        _metiers.planifier_attribution(g, cle)
+        _metiers.planifier_attribution(g, cle, auteur)
     lien = {"type": type_, "cle": cle, "role_id": role.id, "auto": auto}
     return 200, {"ok": True, "lien": _sortie_lien(g, lien, elements),
                  "liens": [_sortie_lien(g, x, elements) for x in await _liens(g.id)],
@@ -1235,6 +1248,8 @@ async def appliquer_roles(g, auteur, membre, attributs: dict, seulement_auto: bo
     un autre rôle. `types` : seulement les liens de ces types du catalogue ; `exclure` : sauf ceux-là ; `sauf_roles` :
     des rôles jamais touchés (le rôle du clan) ; `trace` : une ligne dans l'historique du staff. → `{"ajoutes",
     "retires", "ignores"}` ou `{"erreur"}`."""
+    if protege_de(g, auteur, membre):
+        return {"erreur": "Le fondateur et la direction sont protégés : leurs rôles ne se changent pas d'ici."}
     liens = [x for x in await _liens(g.id, seulement_auto)
              if (types is None or x["type"] in types) and x["type"] not in exclure and x["role_id"] not in sauf_roles]
     voulus = {x["role_id"] for x in liens if x["cle"] in (attributs.get(x["type"]) or [])}

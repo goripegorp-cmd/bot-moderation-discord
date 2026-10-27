@@ -594,7 +594,8 @@ SITE_CATEGORIES = (
         ("catalogue", "Catalogue RELL Seas", "Tout ce qui existe dans le jeu, et seulement cela : types, éléments, "
                                              "icônes officielles."),
         ("roles", "Rôles & métiers", "Un rôle Discord par métier, donné tout seul si tu le veux."),
-        ("reglages", "Réglages", "Les textes du bot et les noms du site, ce que le site garde et combien de temps."))),
+        ("reglages", "Réglages", "Les textes du bot et les noms du site, ce que le site garde et combien de temps, et sa "
+                                  "sécurité."))),
 )
 #  Les sous-onglets et les vues des rubriques (`site/discord.js`, `site/clan.js`, `site/recrutement_zone.js`,
 #  `site/annonces.js`, `site/reglages.js` : leur clé, « - » devenu « _ ») et les onglets de la fiche d'une personne
@@ -609,7 +610,7 @@ SITE_SOUS = (
                                      ("reglages", "Réglages"))),
     ("equipage", "annonces", (("composer", "Composer"), ("brouillons", "Brouillons"), ("a_venir", "À venir"),
                               ("publiees", "Publiées"), ("passes", "Passés"))),
-    ("capitainerie", "reglages", (("textes", "Textes & noms"), ("nettoyage", "Nettoyage"))),
+    ("capitainerie", "reglages", (("textes", "Textes & noms"), ("nettoyage", "Nettoyage"), ("securite", "Sécurité"))),
 )
 #  27/10/2026 — la navigation regroupée : une rubrique devenue une sous-page garde le nom que la direction lui avait
 #  choisi (`init_db` le reprend une fois, si la nouvelle place n'a pas déjà le sien). (nouvelle clé, ancienne clé)

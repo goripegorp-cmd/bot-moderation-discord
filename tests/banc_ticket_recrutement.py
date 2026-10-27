@@ -47,7 +47,9 @@ NOMS_DU_BOT = (
 #  Des noms facultatifs (ajoutés par le chantier du recrutement, 26/10/2026) : lus s'ils existent (le banc mesure aussi
 #  le code d'avant).
 NOMS_FACULTATIFS = ("_recrutement_extras", "_liste_noire_recrutement", "_role_clan_de", "_metiers_catalogue",
-                    "_fiche_recue")
+                    "_fiche_recue",
+                    #  26/10/2026 (sécurité) : « Accepter » passe par la règle de /rellseas (jamais un membre sanctionné).
+                    "_RADIE_ROLE_NAME", "_QUARANTINE_ROLE_NAMES", "_refus_cible_rellseas")
 
 
 def _noeud(nom):

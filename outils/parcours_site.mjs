@@ -1362,6 +1362,7 @@ const ANCIENNES = [   // [ancienne adresse, nouvelle, titre, sous-onglet ouvert 
   ["#capitainerie/textes", "#capitainerie/reglages/textes", "Réglages", "Textes & noms", "le bot emploie ton texte"],   // une ancienne adresse
   ["#equipage/fiches", "#equipage/membres/fiches", "Équipage", "Fiches techniques", "fiches vierges"],   // une ancienne adresse
   ["#equipage/tickets", "#port/tickets/clan", "Tickets", "Clan · RELL Seas", "Ouverts"],   // une ancienne adresse
+  ["#capitainerie/securite", "#capitainerie/reglages/securite", "Réglages", "Sécurité", "En cas de doute"],   // la Sécurité : un sous-onglet
 ];
 async function parcoursNavigation(o) {
   const titre = () => evaluer(o, "(document.querySelector('#contenu h1') || {}).textContent || ''");
@@ -1397,6 +1398,15 @@ async function parcoursNavigation(o) {
       return { ok: vu.hash === apres && vu.titre === t && (!sous || vu.ouvert === sous) && vu.mot, detail: JSON.stringify(vu) };
     });
   }
+  await etape(o, "Réglages : le sous-onglet « Sécurité » (sessions, actions du site, permissions dangereuses)", async () => {
+    await aller(o, "#capitainerie/reglages");
+    if (!await cliquer(o, "#contenu .sous-onglets a", "Sécurité")) return { ok: false, detail: "onglet « Sécurité » absent" };
+    const ok = await attendre(async () => (await hash()) === "#capitainerie/reglages/securite" && (await ouvert()) === "Sécurité"
+      && (await texte()).toLowerCase().includes("fermer toutes les autres sessions"), 8000, 250);
+    const vu = await evaluer(o, "[...document.querySelectorAll('#contenu h2')].map((x) => x.textContent.trim()).join(' | ')");
+    return { ok: !!ok, detail: (await hash()) + " · " + vu };
+  });
+
   const d = await donneesSite(o);
   //  Un vrai identifiant Discord (5 chiffres au moins : la page ignore les autres dans l'adresse).
   const membre = Object.values(d.personnes || {}).find((p) => /^\d{5,22}$/.test(String(p.id)) && p.nom && p.nom !== "Membre parti");

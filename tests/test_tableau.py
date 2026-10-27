@@ -512,7 +512,12 @@ def test_T14_la_tete_n_est_jamais_suspendue(tmp_path):
                                              entetes=ORIGINE)) for k in range(8)]
     reps = asyncio.run(scenario())
     assert [r.status for r in reps] == [200] * 8 and len(faits) == 8, "jamais suspendu"
-    assert env.alertes == [(3, "6 actions graves (exclusion) en moins de 10 minutes", False)], "signalé une fois, pas suspendu"
+    #  26/10/2026, décision du fondateur (« aucune fausse alerte ») : ni suspendue ni alertée — la rafale de la tête reste
+    #  VISIBLE dans la rubrique Sécurité (une ligne du journal, une fois par 10 minutes).
+    assert env.alertes == [], "jamais alertée"
+    rafales = [x for x in asyncio.run(registre.lire(1, 100)) if x["type"] == "site.rafale"]
+    assert len(rafales) == 1 and rafales[0]["categorie"] == "Sécurité" and rafales[0]["auteur_id"] == 3
+    assert rafales[0]["texte"].startswith("6 actions graves (exclusion) en moins de 10 minutes")
 
 
 def test_T15_la_fiche_montre_les_sondages_du_membre(tmp_path):

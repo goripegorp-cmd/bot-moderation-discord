@@ -587,8 +587,9 @@ def test_R7_une_image_seule_dans_le_salon_piege_passe_par_le_piege():
 def _levee(tmp_path, avec_table=True):
     get_db, *_ = base(tmp_path)
     ns = _Espace(discord=discord, json=json, aiosqlite=aiosqlite, get_db=get_db,
-                 owner_ids_module=Obj(is_super_owner=lambda uid: uid == TETE))
-    _executer(("_RADIE_ROLE_NAME", "_lever_radiation"), ns)
+                 owner_ids_module=Obj(is_super_owner=lambda uid: uid == TETE),
+                 TETE_IDS=frozenset({TETE, 827633340797681714}))
+    _executer(("_RADIE_ROLE_NAME", "_refus_rang_radie", "_lever_radiation"), ns)   # 26/10/2026 : la hiérarchie partagée
 
     async def creer():
         async with get_db() as db:
@@ -781,8 +782,10 @@ def test_R12_warn_inscrit_l_avertissement_au_casier(tmp_path):
             await db.execute("INSERT INTO staff_sanction_log (guild_id, target_user_id, reason) VALUES (1, 42, 'insultes')")
             await db.commit()
         cible = Membre(42, Role(10, "Membre", 5))
+        #  26/10/2026 (sécurité) : le membre du staff qui clique a un rang (le panneau refuse une cible égale ou plus haute).
         i = Obj(guild=Obj(id=1, owner_id=1, get_member=lambda uid: cible if uid == 42 else None),
-                user=Obj(id=7), channel=Obj(permissions_for=lambda _u: Obj(manage_messages=True)),
+                user=Obj(id=7, top_role=Role(40, "Modération", 40)),
+                channel=Obj(permissions_for=lambda _u: Obj(manage_messages=True)),
                 response=Obj(defer=rien, send_message=rien, is_done=lambda: True), followup=Obj(send=suivre),
                 message=Obj(delete=rien))
         await staff_sanction._handle_sanction_click(i, 1, "warn")

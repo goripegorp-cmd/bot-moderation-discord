@@ -33,7 +33,8 @@ const SOUS = () => [["port", "salons", "questions", "Questions des salons"], ["p
   ["equipage", "membres", "fiches", nomDans(VUES_EQUIPAGE, "fiches"), "fiches techniques affiches"],
   ["equipage", "membres", "equipes", "Équipes du clan", nomDans(VUES_EQUIPAGE, "equipes") + " chefs d'équipe"],
   ["capitainerie", "reglages", "textes", nomDans(SOUS_REGLAGES, "textes"), "textes et noms renommer"],
-  ["capitainerie", "reglages", "nettoyage", nomDans(SOUS_REGLAGES, "nettoyage"), "nettoyage ménage durées"]];
+  ["capitainerie", "reglages", "nettoyage", nomDans(SOUS_REGLAGES, "nettoyage"), "nettoyage ménage durées"],
+  ["capitainerie", "reglages", "securite", nomDans(SOUS_REGLAGES, "securite"), "sécurité sessions appareils permissions"]];
 
 // ─── L'en-tête ──────────────────────────────────────────────────────────────
 const estSaisie = (el) => !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);

@@ -120,6 +120,7 @@ import clan  # le clan Rell Seas depuis le site : ajouter, prévenir les inactif
 import websub_youtube  # YouTube prévient le bot dès qu'une vidéo sort
 import vigilance  # un membre qui cumule les évènements graves : alerte dans « 📋logs »
 import tableau  # tableau de bord web : candidatures, tickets par type, clan
+import securite_site  # 26/10/2026 : la trace de ce que le site fait sur Discord, les alertes fortes (regroupées)
 import affiches  # le site, Capitainerie : catalogue RELL Seas, affiches, rôles des métiers
 import metiers  # les rôles de métier du clan : choisis dans le guide, créés au besoin, retirés en quittant le clan
 import site_equipage  # 26/10/2026 : le site de l'équipage — le clan en lecture seule, l'accueil composé par la direction
@@ -2428,6 +2429,11 @@ async def _autorise_radiation(i, cible=None) -> str | None:
         if auteur.id == guild.owner_id or owner_ids_module.is_super_owner(auteur.id):
             return None
         if getattr(auteur.guild_permissions, "administrator", False):
+            #  26/10/2026 (sécurité) : un administrateur respecte la hiérarchie, comme dans Discord — sinon le plus bas
+            #  des administrateurs radiait un administrateur plus haut que lui (tous ses rôles retirés, 28 jours muet).
+            if cible is not None and cible.top_role >= auteur.top_role:
+                return ("❌ Cette personne a un rôle **égal ou supérieur au vôtre** "
+                        "— seul le propriétaire peut la radier.")
             return None
         c = await cfg(guild.id)
         rid = int(c.get('direction_allowed_role', 0) or 0)
@@ -2465,6 +2471,8 @@ def _refus_radiation(guild, membre, auteur) -> str | None:
         return "❌ Cible interdite : propriétaire du serveur."
     if owner_ids_module.is_super_owner(membre.id):
         return "❌ Cible interdite : super-owner."
+    if membre.id in TETE_IDS and not owner_ids_module.is_super_owner(auteur.id):   # 26/10/2026 (sécurité)
+        return "❌ Cible interdite : la direction (seul le fondateur peut la radier)."
     if membre.id == auteur.id:
         return "❌ Vous ne pouvez pas vous radier vous-même."
     if me is None:
@@ -2832,13 +2840,36 @@ class RadieDecisionButton(discord.ui.DynamicItem[Button],
                 erreur = await _lever_radiation(i.guild, membre, i.user, "Recours accepté")
                 if erreur:
                     return await i.followup.send(f"❌ {erreur}", ephemeral=True)
+                reste = await _fiche_sanction("restricted_members", i.guild.id, self.uid) is not None
                 await i.followup.send(
+                    (f"✅ Radiation levée : {membre.mention} reste **restreint** par la direction — ses rôles reviendront "
+                     "avec `/mod undirection`.") if reste else
                     f"✅ Radiation levée : {membre.mention} retrouve ses rôles et son pseudo.",
                     ephemeral=True)
                 await _prevenir_radie(
                     i.guild, self.uid,
                     "✅ **Votre recours a été accepté.** Votre radiation est levée.")
             else:
+                #  26/10/2026 (sécurité) : seulement un membre ENCORE radié (une radiation levée par « /off off » laissait
+                #  la carte et ses boutons : un membre réintégré se bannissait d'un clic), jamais la direction, et la
+                #  hiérarchie de /off sur le rang d'AVANT la radiation (ses rôles gardés : il ne lui reste que « Radié »).
+                try:
+                    async with get_db() as db:
+                        async with db.execute("SELECT saved_roles FROM radiated_members WHERE guild_id=? AND user_id=?",
+                                              (i.guild.id, self.uid)) as cur:
+                            fiche = await cur.fetchone()
+                except Exception as ex:  # fiche illisible : on ne bannit pas à l'aveugle
+                    _logerr("radie.bannir.verif", ex, guild_id=i.guild.id)
+                    fiche = None
+                if fiche is None:
+                    return await i.followup.send("❌ Ce membre n'est plus radié : rien à bannir.", ephemeral=True)
+                try:
+                    sauves = json.loads(fiche[0] or "[]") or []
+                except ValueError:
+                    sauves = []
+                refus = _refus_rang_radie(i.guild, membre, i.user, sauves, "le bannir", membre_id=self.uid)
+                if refus:
+                    return await i.followup.send(f"❌ {refus}", ephemeral=True)
                 #  ⚠️ LE BANNISSEMENT EST DÉFINITIF ET IRRÉVERSIBLE CÔTÉ MEMBRE :
                 #  on le prévient AVANT de bannir, sinon le message ne part
                 #  jamais (on ne peut plus écrire à quelqu'un qui n'a plus
@@ -3032,6 +3063,83 @@ async def radier_menu_contextuel(i: discord.Interaction, membre: discord.Member)
             pass
 
 
+#  26/10/2026 (sécurité) — les sanctions qui GARDENT les rôles d'un membre : la radiation (`radiated_members.saved_roles`)
+#  et la restriction de la direction (`restricted_members.roles_backup`). Quand l'une finit pendant que l'autre tient,
+#  elle ne rend RIEN, ni rôles ni parole : ses rôles gardés passent à celle qui tient, rendus à SA levée.
+
+async def _fiche_sanction(table: str, guild_id: int, user_id: int, db=None):
+    """Les rôles que garde cette sanction pour ce membre (identifiants), ou None si elle n'est pas en cours. `db` : la
+    connexion de l'appelant (une boucle qui a déjà écrit sans valider : une 2ᵉ connexion attendrait son verrou)."""
+    colonne = {"radiated_members": "saved_roles", "restricted_members": "roles_backup"}[table]
+
+    async def lire(c):
+        async with c.execute(f"SELECT {colonne} FROM {table} WHERE guild_id=? AND user_id=?",
+                             (int(guild_id), int(user_id))) as cur:
+            return await cur.fetchone()
+    try:
+        if db is not None:
+            r = await lire(db)
+        else:
+            async with get_db() as c:
+                r = await lire(c)
+    except aiosqlite.OperationalError as ex:
+        if "no such table" not in str(ex):   # table jamais créée : personne n'a eu cette sanction ici
+            raise
+        return None
+    if r is None:
+        return None
+    try:
+        brut = json.loads(r[0] or "[]") or []
+    except ValueError:
+        brut = []
+    return [int(x) for x in brut if isinstance(x, int) or str(x).isdigit()]
+
+
+async def _confier_roles(table: str, guild_id: int, user_id: int, roles_ids, sans=(), db=None) -> None:
+    """Les rôles gardés d'une sanction qui finit passent à celle qui tient encore (`table`) : ajoutés à SA liste, sans
+    doublon, et sans les rôles marqueurs `sans` (« 🔒 Restricted », « 🚫 Radié ») qu'on ne rend jamais. Avec `db`, dans
+    la transaction de l'appelant (il valide)."""
+    colonne = {"radiated_members": "saved_roles", "restricted_members": "roles_backup"}[table]
+    ecartes = {int(x) for x in sans}
+    actuels = await _fiche_sanction(table, guild_id, user_id, db=db) or []
+    fusion = [x for x in dict.fromkeys([*actuels, *(int(r) for r in roles_ids or [])]) if x not in ecartes]
+    requete = (f"UPDATE {table} SET {colonne}=? WHERE guild_id=? AND user_id=?",
+               (json.dumps(fusion), int(guild_id), int(user_id)))
+    if db is not None:
+        await db.execute(*requete)
+        return
+    async with get_db() as c:
+        await c.execute(*requete)
+        await c.commit()
+
+
+def _refus_rang_radie(guild, membre, auteur, saved_ids, geste: str, membre_id: int = 0) -> str | None:
+    """26/10/2026 (sécurité) — lever une radiation ou bannir sur son recours suit la hiérarchie de /off, sur le rang
+    d'AVANT la radiation : radié, il ne reste au membre que « 🚫 Radié », tout en bas ; ses rôles gardés disent son rang
+    (et le disent encore s'il a quitté le serveur). Les administrateurs compris, comme pour radier ; la direction radiée
+    ne se tranche que par le fondateur (`_refus_radiation`). Le propriétaire et le fondateur passent. Le motif, ou None."""
+    uid = int(getattr(membre, "id", 0) or membre_id or 0)
+    if owner_ids_module.is_super_owner(auteur.id):
+        return None
+    if uid in TETE_IDS:
+        return f"Cible protégée : la direction — seul le fondateur peut {geste}."
+    if auteur.id == guild.owner_id:
+        return None
+    rangs = [membre.top_role] if membre is not None else []
+    for x in saved_ids or []:
+        try:
+            r = guild.get_role(int(x))
+        except (TypeError, ValueError):
+            r = None
+        if r is not None:
+            rangs.append(r)
+    haut = getattr(auteur, "top_role", None)
+    if haut is None or any(r >= haut for r in rangs):
+        return (f"Cette personne a (ou avait avant sa radiation) un rôle égal ou supérieur au vôtre — "
+                f"seul le propriétaire peut {geste}.")
+    return None
+
+
 async def _lever_radiation(guild, membre, auteur, raison: str) -> str | None:
     """Rend les rôles et le pseudo, lève l'exclusion, efface la fiche. Rend l'erreur, ou None.
     Un seul corps pour `/off off` et le bouton « Lever la radiation » du recours : le bouton disait
@@ -3056,26 +3164,32 @@ async def _lever_radiation(guild, membre, auteur, raison: str) -> str | None:
         saved_ids = json.loads(row[0] or "[]") or []
         ancien = (row[1] or "").strip() or None
     #  Hiérarchie : lever, c'est rendre les rôles gardés. Qui n'aurait pas pu radier la personne (rang
-    #  égal ou supérieur, AVANT sa radiation) ne la lève pas non plus ; le propriétaire, si.
-    if not (auteur.id == guild.owner_id or owner_ids_module.is_super_owner(auteur.id)
-            or getattr(getattr(auteur, "guild_permissions", None), "administrator", False)):
-        rangs = [membre.top_role] + [r for r in (guild.get_role(int(x)) for x in saved_ids) if r is not None]
-        if any(r >= auteur.top_role for r in rangs):
-            return ("Cette personne a (ou avait avant sa radiation) un rôle égal ou supérieur au vôtre — "
-                    "seul le propriétaire peut lever sa radiation.")
+    #  égal ou supérieur, AVANT sa radiation) ne la lève pas non plus ; le propriétaire, si. 26/10/2026 (sécurité) :
+    #  les administrateurs compris (comme pour radier), et la direction radiée par le fondateur seul.
+    refus = _refus_rang_radie(guild, membre, auteur, saved_ids, "lever sa radiation")
+    if refus:
+        return refus
+    #  26/10/2026 (sécurité) : une restriction de la direction posée entre-temps TIENT le membre — la radiation se lève
+    #  (son rôle, sa fiche, le pseudo), mais ne rend RIEN : ses rôles gardés passent à la restriction (rendus par
+    #  /mod undirection), et l'exclusion reste.
+    restreint = await _fiche_sanction("restricted_members", guild.id, membre.id) is not None
     try:
         if role and role in membre.roles:
             await membre.remove_roles(role, reason=f"/off levée — {raison}"[:400])
-        restore = [guild.get_role(int(rid)) for rid in saved_ids]
-        restore = [r for r in restore if r and me and me.top_role > r and not r.is_default()]
-        if restore:
-            await membre.add_roles(*restore, reason=f"/off levée — {raison}"[:400])
+        if restreint:
+            await _confier_roles("restricted_members", guild.id, membre.id, saved_ids, sans=[role.id] if role else ())
+        else:
+            restore = [guild.get_role(int(rid)) for rid in saved_ids]
+            restore = [r for r in restore if r and me and me.top_role > r and not r.is_default()]
+            if restore:
+                await membre.add_roles(*restore, reason=f"/off levée — {raison}"[:400])
     except discord.HTTPException as ex:
         return f"Échec : {ex}"
-    try:
-        await membre.timeout(None, reason="/off levée")
-    except discord.HTTPException as ex:
-        print(f"[off levee exclusion] {ex}")
+    if not restreint:
+        try:
+            await membre.timeout(None, reason="/off levée")
+        except discord.HTTPException as ex:
+            print(f"[off levee exclusion] {ex}")
     #  ⚠️ RENDRE LE PSEUDO, SINON LA LEVÉE EST INCOMPLÈTE : « ⛔ RADIÉ-1234 » sur quelqu'un dont on
     #  vient de reconnaître le bon droit serait une sanction qui survit à sa levée. `None` remet le
     #  nom de compte quand la personne n'avait pas de pseudo avant.
@@ -3089,7 +3203,9 @@ async def _lever_radiation(guild, membre, auteur, raison: str) -> str | None:
     await ulogger2026.log_event(
         bot, guild, ulogger2026.EventType.SEC_ESCALATION,
         description=(f"✅ **Radiation levée** — {membre.mention} `{membre.id}`\nPar : {auteur.mention}\n"
-                     f"**Raison :** {str(raison or '')[:300]}\n_Rôles restaurés._"),
+                     f"**Raison :** {str(raison or '')[:300]}\n"
+                     + ("_Il reste restreint par la direction : ses rôles reviendront à la levée de la restriction._"
+                        if restreint else "_Rôles restaurés._")),
         user=membre, moderator=auteur)
     return None
 
@@ -3113,6 +3229,10 @@ async def off_off_cmd(i: discord.Interaction, membre: discord.Member, raison: st
         erreur = await _lever_radiation(guild, membre, i.user, raison)
         if erreur:
             return await i.followup.send(f"❌ {erreur}", ephemeral=True)
+        if await _fiche_sanction("restricted_members", guild.id, membre.id) is not None:   # 26/10/2026 (sécurité)
+            return await i.followup.send(
+                f"✅ {membre.mention} n'est plus radié — il reste **restreint** par la direction : ses rôles "
+                "reviendront avec `/mod undirection`.", ephemeral=True)
         await i.followup.send(f"✅ **{membre.mention} réintégré** — ses rôles ont été restaurés.", ephemeral=True)
     except Exception as ex:
         _logerr("off_off_cmd", ex, guild_id=getattr(guild, "id", 0))
@@ -3260,12 +3380,28 @@ bouclier_group = app_commands.Group(
     guild_only=True)
 
 
+def _refus_bouclier(i) -> str | None:
+    """26/10/2026 (sécurité) : `default_permissions` ne règle que l'AFFICHAGE — un administrateur peut ouvrir la commande
+    à n'importe quel rôle (Paramètres → Intégrations). La garde réelle est ici : les administrateurs, le propriétaire du
+    serveur, la tête. Le motif du refus, ou None."""
+    u, g = getattr(i, "user", None), getattr(i, "guild", None)
+    if u is None or g is None:
+        return "Serveur uniquement."
+    if (getattr(getattr(u, "guild_permissions", None), "administrator", False) or u.id == g.owner_id
+            or owner_ids_module.is_super_owner(u.id) or u.id in TETE_IDS):
+        return None
+    return "🔒 Le bouclier est réservé aux administrateurs du serveur."
+
+
 @bouclier_group.command(name="on", description="🔒 Verrouille tout le serveur (lecture seule + pause des arrivées)")
 async def bouclier_on(i: discord.Interaction):
     await i.response.defer(ephemeral=True)
     g = i.guild
     if g is None:
         return await i.followup.send("Serveur uniquement.", ephemeral=True)
+    refus = _refus_bouclier(i)
+    if refus:
+        return await i.followup.send(refus, ephemeral=True)
     n, pause = None, False
     try:
         n = await _shield_lock(g)
@@ -3294,6 +3430,9 @@ async def bouclier_off(i: discord.Interaction):
     g = i.guild
     if g is None:
         return await i.followup.send("Serveur uniquement.", ephemeral=True)
+    refus = _refus_bouclier(i)
+    if refus:
+        return await i.followup.send(refus, ephemeral=True)
     bilan, reprise = "⚠️ salons NON rouverts (erreur notée)", False
     try:
         n, reste = await _shield_unlock(g)
@@ -3325,6 +3464,9 @@ async def bouclier_secours(i: discord.Interaction):
     g = i.guild
     if g is None:
         return await i.followup.send("Serveur uniquement.", ephemeral=True)
+    refus = _refus_bouclier(i)
+    if refus:
+        return await i.followup.send(refus, ephemeral=True)
     me = g.me
     if me is None or not me.guild_permissions.manage_guild:
         return await i.followup.send(
@@ -6223,6 +6365,11 @@ def _staff_ou_plus(g, membre, c) -> bool:
 #  premier, c'est moi, le fondateur même, et le deuxième, c'est la direction ». Eux seuls entrent sur
 #  le site ; jamais suspendus.
 TETE_IDS = frozenset({781205382923288593, 827633340797681714})
+#  26/10/2026 (sécurité) — des refus STABLES (aucune valeur dedans) : le fondateur et la direction, protégés EN DUR partout
+#  où un membre peut être visé (/mod mute, warn, direction, infractions, panneau du staff, dossiers suspects) ; et le
+#  nettoyage d'un salon où l'auteur ne gère pas les messages.
+REFUS_TETE = "Cible protégée : le fondateur et la direction ne sont jamais sanctionnés."
+REFUS_CLEAR = "❌ Il te faut « Gérer les messages » dans ce salon pour le vider."
 
 
 def _a_la_tete(g, membre, c=None) -> bool:
@@ -6312,6 +6459,11 @@ async def _decision_recrutement(g, ticket_id: int, auteur, accepte: bool, motif:
             return False, "Aucun rôle Rell Seas réglé dans /configure."
         if candidat is None:
             return False, "Le candidat a quitté le serveur : rien à donner."
+        #  26/10/2026 (sécurité) : la règle de /rellseas — jamais le rôle du clan à un membre sanctionné (radié, isolé,
+        #  restreint) ; la carte du ticket et le site passent tous deux ici.
+        refus = _refus_cible_rellseas(g, auteur, candidat, True)
+        if refus:
+            return False, f"Candidature non acceptée : {refus}."
         if g.me is None or role >= g.me.top_role or not g.me.guild_permissions.manage_roles:
             return False, "Je ne peux pas donner ce rôle (permission ou hiérarchie)."
         try:
@@ -7120,6 +7272,25 @@ async def _alerte_securite_site(g, membre, raison: str, suspendu: bool = True):
         discord.ui.ActionRow(BoutonGere(0)), accent_color=Palette.DANGER))
     await salon.send(view=v, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False,
                                                                      users=[discord.Object(id=proprio)]))
+
+
+async def _alerte_forte_site(g, titre: str, texte: str) -> bool:
+    """26/10/2026 (sécurité) — les SEULES alertes de sécurité du site (décisions du fondateur : « aucune fausse alerte ») :
+    un signal FORT (une action privilégiée du site qui aboutit hors de la tête ; une permission dangereuse donnée hors de
+    la tête, lue dans le journal d'audit), déjà regroupé par `securite_site`. Une carte dans « 📋logs », le fondateur
+    mentionné DANS la carte (V2 : jamais de `content=`), personne d'autre pingé. Rien n'est retiré ni bloqué. Rend True si
+    la carte est partie."""
+    salon = await _salon_alertes_site(g)
+    if salon is None:
+        return False
+    v = LayoutView(timeout=None)
+    v.add_item(discord.ui.Container(
+        discord.ui.TextDisplay(f"### 🛡️ {titre}\n{texte[:3500]}\n-# Rien n'a été retiré ni bloqué. Le détail : site → "
+                               f"Le Port → Sécurité.\n<@{SUPER_OWNER_ID}>"),
+        accent_color=Palette.DANGER))
+    await salon.send(view=v, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False,
+                                                                     users=[discord.Object(id=SUPER_OWNER_ID)]))
+    return True
 
 
 class BoutonGere(discord.ui.DynamicItem[Button], template=r"alerte:gere:(?P<m>\d+)"):
@@ -15149,7 +15320,9 @@ class BoutonAnnulerConfig(discord.ui.DynamicItem[Button], template=r"cfgsal:annu
 
     async def callback(self, i: discord.Interaction):
         p = getattr(i.user, "guild_permissions", None)
-        if not (p and (p.administrator or p.manage_guild)) and not _direction_ou_plus(i.guild, i.user, await cfg(i.guild.id)):
+        #  26/10/2026 (sécurité) : « Gérer le serveur » seul ne suffit plus (il remettait d'un clic les permissions de
+        #  salons d'avant, refus « 🚫 Radié » compris) — les administrateurs, la direction et au-dessus.
+        if not (p and p.administrator) and not _direction_ou_plus(i.guild, i.user, await cfg(i.guild.id)):
             return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
         await i.response.defer(ephemeral=True)
         async with get_db() as db:
@@ -20499,6 +20672,8 @@ async def _dossier_agir(i, act: str, uid: int) -> None:
     """Mute : propriétaire du serveur ou fondateur. Expulsion, ban, faux positif, levée de
     l'isolement : fondateur seul (règle 2026-06-13)."""
     fondateur = owner_ids_module.is_super_owner(i.user.id)
+    if act in ("mute", "kick", "ban") and int(uid) in TETE_IDS:   # 26/10/2026 (sécurité) : protégés en dur
+        return await i.response.send_message(f"❌ {REFUS_TETE}", ephemeral=True)
     if act == "mute" and not (fondateur or i.user.id == i.guild.owner_id):
         return await i.response.send_message(
             "⛔ Seul le propriétaire du serveur peut décider sur les comptes suspects.", ephemeral=True)
@@ -21819,7 +21994,7 @@ async def _activite_boot():
                           #  ⚠️ La garde passe par le setup, plus par le
                           #  constructeur : le panneau est PERSISTANT, il est
                           #  construit au démarrage sans savoir qui l'ouvrira.
-                          autorise=_rellseas_autorise, log=print)
+                          autorise=_rellseas_autorise, cible=_refus_cible_rellseas, log=print)
         rellseas_ui.set_retour(_retour_vers_configure)
     with _Etape("recrutements"):
         recrutements.setup(get_db=get_db, cfg=cfg, db_set=db_set, salon=_salon_transcripts_rellseas,
@@ -21880,6 +22055,7 @@ async def _activite_boot():
                       mis_a_part=lambda g, m, c: _a_la_tete(g, m, c) or _direction_ou_plus(g, m, c),
                       actions=_ACTIONS_TABLEAU, alerte_securite=_alerte_securite_site,
                       conversation=_conversation_ticket, log=print)
+        securite_site.setup(envoyer=_alerte_forte_site)   # 26/10/2026 : les seules alertes de sécurité du site (signaux forts)
         await tableau.init_db()
     #  25/10/2026 (site v2) : la Capitainerie — catalogue RELL Seas (départ : donnees_jeu/rell_catalogue.json),
     #  affiches, portraits Roblox, rôles des métiers — branchée sur le site (`/tableau/espace/api/rell/…`).
@@ -22523,7 +22699,7 @@ async def on_ready():
             'v2_divider': v2_divider, 'v2_container': v2_container,
             'LayoutView': LayoutView,
         }
-        staff_sanction_module.setup(bot, get_db, db_get, _v2h, avertir=_avertissement_staff)
+        staff_sanction_module.setup(bot, get_db, db_get, _v2h, avertir=_avertissement_staff, tete=TETE_IDS)
         await staff_sanction_module.init_db()
         staff_sanction_module.register_persistent_views(bot)
 
@@ -23723,6 +23899,12 @@ async def on_audit_log_entry_create(entry):
         me = g.me
         if entry.user_id is None or (me is not None and entry.user_id == me.id):
             return
+        #  26/10/2026 (sécurité) : une permission dangereuse donnée par quelqu'un hors de la tête (rôle créé ou modifié,
+        #  rôle donné, droit sur un salon) → une alerte regroupée dans « 📋logs ». Rien n'est retiré ni bloqué.
+        try:
+            await securite_site.sur_entree_audit(entry, TETE_IDS)
+        except Exception as ex:
+            _logerr("securite.audit", ex, guild_id=getattr(g, 'id', 0))
         A = discord.AuditLogAction
         if entry.action not in (A.member_role_update, A.member_update):
             return
@@ -27491,6 +27673,8 @@ class ClearAllConfirmView(LayoutView):
         ch = i.guild.get_channel(self.channel_id) if i.guild else None
         if ch is None:
             return await i.response.edit_message(view=carte_texte("❌ Salon introuvable.", couleur=Palette.DANGER))
+        if not ch.permissions_for(i.user).manage_messages:   # 26/10/2026 (sécurité) : revérifié à la confirmation
+            return await i.response.edit_message(view=carte_texte(REFUS_CLEAR, couleur=Palette.DANGER))
         if not ch.permissions_for(i.guild.me).manage_messages:
             return await i.response.edit_message(
                 view=carte_texte("❌ Il me manque « Gérer les messages » ici.", couleur=Palette.DANGER))
@@ -27524,6 +27708,10 @@ async def mod_clear(i: discord.Interaction,
     if not isinstance(ch, (discord.TextChannel, discord.Thread, discord.VoiceChannel)):
         return await i.response.send_message(
             "❌ À utiliser dans un salon texte, un fil, ou le chat d'un salon vocal.", ephemeral=True)
+    #  26/10/2026 (sécurité) : l'auteur gère les messages de CE salon — le rôle de /mod clear seul ne suffit plus (on
+    #  vidait #annonces, #règles ou un salon de logs où l'on ne pouvait que lire).
+    if not ch.permissions_for(i.user).manage_messages:
+        return await i.response.send_message(REFUS_CLEAR, ephemeral=True)
     perms = ch.permissions_for(i.guild.me)
     if not (perms.manage_messages and perms.read_message_history):
         return await i.response.send_message(
@@ -27649,6 +27837,8 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     # ÉPHÉMÈRE d'origine (l'erreur ne doit pas s'afficher en public).
     if not await check_mod_perm(i, 'mod_warn_role'):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
+    if membre.id in TETE_IDS:   # 26/10/2026 (sécurité) : le fondateur et la direction, protégés en dur
+        return await i.response.send_message(f"❌ {REFUS_TETE}", ephemeral=True)
 
     if membre.id == i.user.id:
         return await i.response.send_message("❌ Vous ne pouvez pas vous warn vous-même", ephemeral=True)
@@ -27879,6 +28069,8 @@ class UnwarnSelect(Select):
 async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, unite: str, raison: str):
     if not await check_mod_perm(i, 'mod_mute_role'):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
+    if membre.id in TETE_IDS:   # 26/10/2026 (sécurité) : le fondateur et la direction, protégés en dur
+        return await i.response.send_message(f"❌ {REFUS_TETE}", ephemeral=True)
     
     if membre.id == i.user.id:
         return await i.response.send_message("❌ Vous ne pouvez pas vous mute vous-même", ephemeral=True)
@@ -27974,6 +28166,12 @@ async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str
     if any(r.name == _RADIE_ROLE_NAME for r in membre.roles):
         return await i.response.send_message(
             f"❌ {membre.mention} est **radié** : la levée passe par `/off off`.", ephemeral=True)
+    #  26/10/2026 (sécurité) : une restriction de la direction (/mod direction : « 🔒 Restricted », tout en bas) ne se
+    #  défait pas au niveau du mute — la hiérarchie passait, l'exclusion tombait.
+    if any(r.name == "🔒 Restricted" for r in membre.roles):
+        return await i.response.send_message(
+            f"❌ {membre.mention} est **restreint** par la direction : la levée passe par `/mod undirection`.",
+            ephemeral=True)
     await i.response.defer(ephemeral=True, thinking=True)
     #  Un isolement de SÉCURITÉ (raid, compte suspect, kick/ban d'un modérateur changé en isolement) ne
     #  se lève que par le fondateur et la direction, comme « Lever l'isolement » sur le dossier ; le mute
@@ -28035,6 +28233,8 @@ async def direction_cmd(i: discord.Interaction, membre: discord.Member, duree: i
 
     if not (is_owner or is_super or has_role or is_user or i.user.guild_permissions.administrator):
         return await i.response.send_message("⛔ Vous n'avez pas la permission d'utiliser cette commande.", ephemeral=True)
+    if membre.id in TETE_IDS:   # 26/10/2026 (sécurité) : le fondateur et la direction, protégés en dur
+        return await i.response.send_message(f"❌ {REFUS_TETE}", ephemeral=True)
 
     if membre.id == i.user.id:
         return await i.response.send_message("❌ Vous ne pouvez pas vous restreindre vous-même.", ephemeral=True)
@@ -28176,11 +28376,33 @@ async def undirection_cmd(i: discord.Interaction, membre: discord.Member, raison
             return await i.followup.send("❌ Ce membre n'est pas restreint.", ephemeral=True)
 
         saved_roles = json.loads(row[0]) if row[0] else []
+        #  26/10/2026 (sécurité) : jamais rendre un rôle égal ou supérieur au sien — un porteur du rôle Direction rendait
+        #  l'Administrateur d'un membre restreint par le fondateur (escalade). Dans ce cas RIEN ne bouge (la restriction et
+        #  sa sauvegarde restent) : seul un rang au-dessus, le propriétaire ou le fondateur la lève.
+        if not (is_owner or is_super):
+            trop_hauts = [r.name for r in (i.guild.get_role(rid) for rid in saved_roles)
+                          if r is not None and r.is_assignable() and r >= i.user.top_role]
+            if trop_hauts:
+                return await i.followup.send(
+                    "❌ Ce membre avait un rôle égal ou supérieur au tien (" + ", ".join(trop_hauts[:5])
+                    + ") : seul le propriétaire ou le fondateur peut lever sa restriction. Rien n'a changé.",
+                    ephemeral=True)
 
         # Retirer le rôle Restricted
         restricted_role = discord.utils.get(i.guild.roles, name="🔒 Restricted")
         if restricted_role and restricted_role in membre.roles:
             await membre.remove_roles(restricted_role, reason=raison)
+
+        #  26/10/2026 (sécurité) : une radiation posée entre-temps TIENT le membre — la restriction se lève, mais ne rend
+        #  RIEN : ses rôles gardés passent à la radiation (rendus par /off off), et l'exclusion reste.
+        if await _fiche_sanction("radiated_members", i.guild.id, membre.id, db=db) is not None:
+            await _confier_roles("radiated_members", i.guild.id, membre.id, saved_roles,
+                                 sans=[restricted_role.id] if restricted_role else (), db=db)
+            await db.execute('DELETE FROM restricted_members WHERE guild_id=? AND user_id=?', (i.guild.id, membre.id))
+            await db.commit()
+            await i.followup.send(f"✅ Restriction levée — mais {membre.mention} est **radié** : ses rôles reviendront "
+                                  "avec `/off off`, la radiation tient.", ephemeral=True)
+            return await send_mod_log(i.guild, 'undirection', i.user, membre, raison)
 
         # Restaurer les rôles
         restored = 0
@@ -28247,6 +28469,8 @@ def _staff_sanction_guard(moderator: discord.Member, target: discord.Member, gui
     try:
         if target is None:
             return False, "Membre introuvable (a peut-être quitté le serveur)."
+        if target.id in TETE_IDS:   # 26/10/2026 (sécurité) : le fondateur et la direction, protégés en dur
+            return False, REFUS_TETE
         if target.id == moderator.id:
             return False, "Vous ne pouvez pas vous sanctionner vous-même."
         if getattr(target, 'bot', False):
@@ -28591,6 +28815,19 @@ class _CasierManageView(LayoutView):
         if not await check_mod_perm(i, 'mod_infractions_role'):
             try:
                 await i.response.send_message("❌ Permission de modération requise.", ephemeral=True)
+            except Exception:
+                pass
+            return False
+        #  26/10/2026 (sécurité) — comme /mod unwarn : jamais son propre casier (effacer ses avertissements remettait son
+        #  escalade à zéro), ni celui d'un rang égal ou supérieur. Le propriétaire et le fondateur passent.
+        chef = i.user.id == self.guild.owner_id or owner_ids_module.is_super_owner(i.user.id)
+        membre = self.guild.get_member(int(self.member.id)) or self.member
+        haut = getattr(i.user, "top_role", None)
+        if not chef and (int(self.member.id) == i.user.id or haut is None
+                         or getattr(membre, "top_role", None) is not None and membre.top_role >= haut):
+            try:
+                await i.response.send_message("❌ Ni ton propre casier, ni celui d'un rang égal ou supérieur au tien.",
+                                              ephemeral=True)
             except Exception:
                 pass
             return False
@@ -29138,6 +29375,27 @@ bot.tree.add_command(mod_group)
 #  un panneau ». Les sous-commandes `donner` / `retirer` / `activite` ont donc
 #  été retirées : elles traitaient UN membre par appel, là où le travail réel
 #  est un lot. Tout se fait maintenant dans `RellseasGestionV2`.
+
+
+def _refus_cible_rellseas(g, auteur, membre, donner: bool) -> str | None:
+    """26/10/2026 (sécurité) — le panneau /rellseas, membre par membre (le motif du refus, ou None) : jamais la tête
+    (fondateur et direction : seul le fondateur, ou elle-même), et jamais le rôle du clan donné à un radié (il l'emportait
+    sur le refus « 🚫 Radié » : le forum du clan redevenait visible). Comme dans Discord, donner ou retirer un rôle ne
+    dépend pas du rang du membre visé : les recruteurs gardent tout leur geste."""
+    chef = auteur.id == g.owner_id or owner_ids_module.is_super_owner(auteur.id)
+    if membre.id in TETE_IDS and membre.id != auteur.id and not chef:
+        return "protégé : le fondateur et la direction"
+    if donner:
+        #  26/10/2026 (sécurité) : toute sanction qui garde ses refus par un rôle — radiation, restriction (/mod direction),
+        #  isolement (quarantaine) : l'autorisation du rôle du clan l'emporterait sur eux dans les salons du clan.
+        noms = [str(getattr(r, "name", "") or "") for r in getattr(membre, "roles", []) or []]
+        if _RADIE_ROLE_NAME in noms:
+            return "radié : la radiation se lève d'abord (/off off)"
+        if "🔒 Restricted" in noms:
+            return "sanctionné (restreint) : la restriction se lève d'abord (/mod undirection)"
+        if any(n.lower() in _QUARANTINE_ROLE_NAMES for n in noms):
+            return "sanctionné (isolé) : l'isolement se lève d'abord"
+    return None
 
 
 async def _rellseas_autorise(i) -> bool:
@@ -31380,6 +31638,15 @@ async def check_expired_restrictions():
 
                         # Restaurer les rôles
                         saved_roles = json.loads(roles_json) if roles_json else []
+                        #  26/10/2026 (sécurité) : une radiation posée entre-temps tient le membre — l'expiration ne rend
+                        #  RIEN : ses rôles gardés passent à la radiation (même connexion : elle a déjà écrit), et
+                        #  l'exclusion reste.
+                        if await _fiche_sanction("radiated_members", guild_id, user_id, db=db) is not None:
+                            await _confier_roles("radiated_members", guild_id, user_id, saved_roles,
+                                                 sans=[restricted_role.id] if restricted_role else (), db=db)
+                            await db.execute('DELETE FROM restricted_members WHERE guild_id=? AND user_id=?',
+                                             (guild_id, user_id))
+                            continue
                         for role_id in saved_roles:
                             role = guild.get_role(role_id)
                             if role and role.is_assignable():
