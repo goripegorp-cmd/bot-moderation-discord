@@ -617,6 +617,17 @@ class _Refus(Exception):
         self.portee = portee  # refus de portée : celle de la session refusée (la page de la direction le dit)
 
 
+CHIFFRES = re.compile(r"[0-9]+")
+
+
+def chiffres(s, maxi: int = 20) -> bool:
+    """Un numéro lu dans une adresse ou une donnée : des chiffres 0-9 seulement, `maxi` au plus. 27/10/2026 (sécurité,
+    tests/test_acces_site.py, A12) : `str.isdigit()` acceptait « ² », « ① »… qu'`int()` refuse — une erreur 500 à
+    chaque fois (fiche, conversation, export, aperçu du Nettoyage) — ou lit autrement (« １２ »)."""
+    s = str(s if s is not None else "")
+    return 0 < len(s) <= maxi and CHIFFRES.fullmatch(s) is not None
+
+
 def _ip(request) -> str:
     """Le client : la PREMIÈRE adresse de X-Forwarded-For. Vérifié le 20/10/2026 : le proxy de Railway
     retire l'en-tête envoyé par le client, et la DERNIÈRE adresse est celle du CDN — partagée par
@@ -1756,7 +1767,7 @@ async def membre(request):
     except _Refus as r:
         return _json({"erreur": r.message}, r.status)
     uid = request.query.get("id", "")
-    if not uid.isdigit() or len(uid) > 20:
+    if not chiffres(uid, 20):
         return _json({"erreur": "membre invalide"}, 400)
     try:
         return _json(await fiche(g, int(uid), g.get_member(j["u"])))
@@ -1776,7 +1787,7 @@ async def conversation(request):
     except _Refus as r:
         return _json({"erreur": r.message}, r.status)
     ticket = request.query.get("ticket", "")
-    if not ticket.isdigit() or len(ticket) > 12 or _conversation is None:
+    if not chiffres(ticket, 12) or _conversation is None:
         return _json({"erreur": "ticket invalide"}, 400)
     try:
         return _json(await _conversation(g, int(ticket)))
@@ -1795,7 +1806,7 @@ async def export(request):
     q = request.query
     membre_ = q.get("membre", "")
     jours = q.get("jours", "30")
-    if (membre_ and (not membre_.isdigit() or len(membre_) > 20)) or not jours.isdigit() or len(jours) > 3:
+    if (membre_ and not chiffres(membre_, 20)) or not chiffres(jours, 3):
         return _json({"erreur": "demande invalide"}, 400)
     try:
         res = await exporter(g, q.get("quoi", ""), g.get_member(j["u"]), int(jours), int(membre_ or 0),
@@ -2966,7 +2977,7 @@ def _noms_nettoyage(g, etat: dict) -> dict:
     citées dans ses données (25/10/2026 : le fondateur, absent des 400 derniers évènements, s'y lisait « Membre parti »)."""
     qui = _Personnes(g)
     for uid in [etat.get("par"), *(b.get("par") for b in etat.get("bilans") or [])]:
-        if str(uid or "").isdigit():
+        if chiffres(uid, 20):
             qui(int(uid))
     return dict(qui)
 
@@ -3033,7 +3044,7 @@ async def _route_nettoyage_apercu(g, auteur, requete, corps):
     brut = str(requete.get("jours", ""))
     if r is None:
         return 404, {"erreur": "Règle inconnue.", "champ": "cle"}
-    if not brut.isdigit() or not r["min"] <= int(brut) <= r["max"]:
+    if not chiffres(brut, 6) or not r["min"] <= int(brut) <= r["max"]:
         return 400, {"erreur": f"Entre {r['min']} et {r['max']} jours.", "champ": "jours"}
     if r.get("apercu") is None or r["fn"] is None:
         return 200, {"cle": cle, "jours": int(brut), "partiront": None}
@@ -4114,7 +4125,7 @@ def _v_affiche(c: dict) -> list:
 async def _v_correction(c: dict):
     """`recrutement/corriger` porte l'envoi, pas le ticket : le dossier se retrouve par l'envoi."""
     eid = _champ_id(c, "envoi")
-    if not eid.isdigit():
+    if not chiffres(eid, 12):
         return None
     e = await questionnaire._envoi(int(eid))
     return f"dossier:{int(e['ticket_id'])}" if e else None

@@ -849,3 +849,40 @@ def test_A11_stats_sans_donnee_personnelle(local):
     st, corps, _e = _requete(local, "GET", "/health")
     assert st == 200 and not re.search(r"\d{15,}", corps.decode("utf-8"))
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  A12 — un numéro dans l'adresse : des chiffres 0-9 seulement, jamais une erreur 500
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#  `str.isdigit()` accepte « ² », « ① », « ١ », « １ »… qu'`int()` refuse (ou lit autrement).
+CHIFFRES_PIEGES = ("²", "①", "1²", "١", "１２", "-1", "+1", " 1", "1 ", "1.0", "0x1", "1_0")
+
+
+def test_A12_un_numero_ecrit_avec_d_autres_chiffres_est_refuse_proprement(local):
+    """La tête recevait une erreur 500 (et le bot une ligne d'erreur à chaque fois) pour `?id=²` sur la fiche d'une
+    personne, la conversation d'un ticket, l'export, l'aperçu d'une règle du Nettoyage : `str.isdigit()` laissait passer
+    ce qu'`int()` refuse. Des chiffres 0-9 seulement (`tableau.chiffres`) ; tout le reste → 400."""
+    import ast
+    from urllib.parse import urlencode
+    tete, _a = local.entrer("/tableau/demo")
+    adresses = (("/tableau/espace/membre", "id", {}), ("/tableau/espace/conversation", "ticket", {}),
+                ("/tableau/espace/export", "membre", {"quoi": "membre"}), ("/tableau/espace/export", "jours", {"quoi": "journal"}),
+                ("/tableau/espace/api/nettoyage/apercu", "jours", {"cle": "journal"}))
+    faux = []
+    for x in CHIFFRES_PIEGES:
+        for chemin, nom, autres in adresses:
+            st, corps, _e = _requete(local, "GET", f"{chemin}?{urlencode(dict(autres, **{nom: x}))}", tete)
+            if st != 400:
+                faux.append(f"{chemin.rsplit('/', 1)[1]} {nom}={x!r} → {st}")
+    assert not faux, f"{len(faux)} réponse(s) autre que 400 : {faux}"
+    #  Les bons numéros passent toujours.
+    for chemin, attendu in (("/tableau/espace/membre?id=" + str(KOLAX), 200), ("/tableau/espace/conversation?ticket=60", 200),
+                            ("/tableau/espace/export?quoi=journal&jours=30", 200),
+                            ("/tableau/espace/api/nettoyage/apercu?cle=journal&jours=60", 200)):
+        st, corps, _e = _requete(local, "GET", chemin, tete)
+        assert st == attendu, f"{chemin} → {st} {corps[:120]!r}"
+    #  La prévention : tableau.py ne lit plus aucun nombre par `isdigit()` (ni ses cousins).
+    arbre = ast.parse((RACINE / "tableau.py").read_text(encoding="utf-8"))
+    appels = [n.lineno for n in ast.walk(arbre) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+              and n.func.attr in ("isdigit", "isnumeric", "isdecimal")]
+    assert not appels, f"tableau.py, ligne(s) {appels} : lire un numéro par `chiffres()` (0-9 seulement)"
