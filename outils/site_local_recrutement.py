@@ -18,6 +18,7 @@ des tests (`tests/banc_ticket_recrutement.espace_du_bot`) : un seul chemin, le v
 from __future__ import annotations
 
 import json
+import re
 import time
 
 import discord
@@ -196,29 +197,32 @@ def brancher_demo(app, chemin: CheminDuBot, questionnaire, g) -> None:
     """Les adresses de démonstration du recrutement (le site local seulement)."""
     from aiohttp import web
 
+    def nombre(brut: str):
+        """Des chiffres 0-9 seulement (« ² » : `isdigit()` dit oui, `int()` lève) — sinon None."""
+        return int(brut) if re.fullmatch(r"[0-9]{1,20}", brut or "") else None
+
     def repondre(corps, statut=200):
         return web.json_response(corps, status=statut, headers={"Cache-Control": "no-store"},
                                  dumps=lambda x: json.dumps(x, ensure_ascii=False))
 
     async def ouvrir(request):
         brut = request.query.get("membre", "")
-        m = g.get_member(int(brut)) if brut.isdigit() else None
+        m = g.get_member(nombre(brut)) if nombre(brut) is not None else None
         if m is None:
             return repondre({"erreur": "membre inconnu"}, 404)
-        choix = request.query.get("choix", "0")
         r = await chemin.ouvrir_par_le_panneau(m, request.query.get("panneau", "p1"),
-                                               int(choix) if choix.isdigit() else 0, request.query.get("pseudo", ""))
+                                               nombre(request.query.get("choix", "0")) or 0, request.query.get("pseudo", ""))
         return repondre(r)
 
     async def repondre_etape(request):
         brut = request.query.get("ticket", "")
-        if not brut.isdigit():
+        if nombre(brut) is None:
             return repondre({"erreur": "ticket ?"}, 400)
-        return repondre(await chemin.repondre(int(brut), questionnaire))
+        return repondre(await chemin.repondre(nombre(brut), questionnaire))
 
     async def chef(request):
         brut = request.query.get("membre", "")
-        m = g.get_member(int(brut)) if brut.isdigit() else None
+        m = g.get_member(nombre(brut)) if nombre(brut) is not None else None
         if m is None:
             return repondre({"erreur": "membre inconnu"}, 404)
         return repondre(await chemin.nommer_chef(m, questionnaire, request.query.get("metier", "")))
