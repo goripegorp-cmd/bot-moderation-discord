@@ -15,3 +15,12 @@
 /* « Copier le lien de l'équipage » : au téléphone, l'en-tête de la direction n'a plus la place — le lien est dans son
    menu (app.js). */
 @media (max-width: 519px) { #entete-outils .lien-equipage.bouton-icone { display: none; } }
+/* L'atelier des affiches : l'affiche d'un ANCIEN membre (plus au clan) — hors de la vitrine publique, gardée ici
+   (lien_equipage.js, mentionAncien). */
+.affiche .ruban-ancien {
+  position: absolute; left: 50%; top: 46%; z-index: 6; width: max-content; max-width: 84%; padding: 3px 10px;
+  border-radius: 2px; transform: translate(-50%, -50%) rotate(-6deg); background: var(--encre); color: var(--clair);
+  font: 600 11.5px/1.35 var(--police-sc); letter-spacing: .03em; text-align: center; overflow-wrap: anywhere;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, .35); pointer-events: none;
+}
+.affiche.affiche-ancienne .affiche-papier { filter: grayscale(.35); }

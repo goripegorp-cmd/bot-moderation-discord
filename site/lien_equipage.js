@@ -4,7 +4,7 @@
 // l'équipage et sur la vitrine elle-même. Les libellés se renomment (Textes & noms : « site.equipage.lien… »).
 
 import { h, icone, ajouter } from "./dom.js";
-import { libelle, ecouter } from "./noyau.js";
+import { libelle, ecouter, etat } from "./noyau.js";
 import { toast, pancarte, bouton } from "./ui.js";
 
 export const ADRESSE_VITRINE = "/equipage";
@@ -67,4 +67,29 @@ export function boutonLienEquipage(o = {}) {
   nommer();
   ecouter("libelles", nommer);
   return b;
+}
+
+// ─── L'atelier des affiches (direction) : l'affiche d'un ANCIEN membre ──────
+//  27/10/2026 : la vitrine montre l'équipage ACTUEL. L'affiche d'un membre qui n'a plus le rôle du clan (ou a quitté le
+//  serveur) n'y paraît plus : elle reste dans l'atelier (rien n'est supprimé), avec cette mention, et revient sur la
+//  vitrine s'il revient au clan. Une affiche sans membre lié : rien (la direction la gère à la main).
+let memoClan = null, memoDonnees = null;
+function idsDuClan() {
+  const c = etat.d && etat.d.clan;
+  if (!c || !c.role) return null;
+  if (memoDonnees !== etat.d) {
+    memoDonnees = etat.d;
+    memoClan = new Set([...(c.membres || []), ...(c.direction || [])].map((m) => String(m.id)));
+  }
+  return memoClan;
+}
+export const texteAncien = () => libelle("site.equipage.ancien", "Ancien membre · masquée de la vitrine");
+/** La carte `el` d'une affiche `a` (atelier) : la mention si son membre n'est plus au clan ; rend `el`. */
+export function mentionAncien(el, a) {
+  const id = a && a.membre && a.membre.id ? String(a.membre.id) : "";
+  const clan = id ? idsDuClan() : null;
+  if (!el || !clan || (clan.has(id) && a.membre.present !== false)) return el;
+  el.classList.add("affiche-ancienne");
+  ajouter(el, [h("span", { classe: "ruban-ancien", title: "Plus au clan : elle reste ici, et revient sur la vitrine s'il revient au clan." }, texteAncien())]);
+  return el;
 }

@@ -258,6 +258,37 @@ async function parcoursDirectionVitrine(d, v) {
   });
 }
 
+// ═══ L'ÉQUIPAGE ACTUEL : un départ, un retour (27/10/2026) ═════════════════
+async function parcoursDepart(d, v) {
+  await etape(d, "Un membre quitte le clan : son affiche quitte la vitrine, l'atelier la garde (« Ancien membre »), son retour la rend", async () => {
+    const affs = (await api(d, "/tableau/espace/api/rell/affiches")).d.affiches;
+    const clan = new Set((await api(d, "/tableau/espace/donnees")).d.clan.membres.map((m) => String(m.id)));
+    const vues = new Set((await donneesVitrine(v)).affiches.map((a) => a.roblox.nom));
+    const a = affs.find((x) => !x.retire_le && x.membre && clan.has(String(x.membre.id)) && x.roblox && vues.has(x.roblox.nom));
+    if (!a) return { ok: false, detail: "aucune affiche d'un membre du clan sur la vitrine" };
+    const action = (nom) => ecrire(d, "/tableau/espace/action", { action: nom, membre: String(a.membre.id) });
+    const r1 = await action("clan_retirer");
+    if (r1.st !== 200) return { ok: false, detail: "rôle du clan non retiré : " + r1.st };
+    await ouvrir(v, VITRINE, "#contenu .vitrine-mur");
+    const partie = !(await donneesVitrine(v)).affiches.some((x) => x.roblox.nom === a.roblox.nom);
+    //  L'atelier de la direction : l'affiche est là, avec sa mention.
+    await ouvrir(d, BASE + "/tableau/espace/#capitainerie/affiches", "#contenu .titre-rubrique");
+    await evaluer(d, `(() => { const i = document.querySelector('#contenu .outils input[type=search]'); i.value = ${JSON.stringify(a.roblox.nom)};
+      i.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
+    const mention = await attendre(() => evaluer(d, `(() => { const r = document.querySelector('#contenu .affiche.affiche-ancienne .ruban-ancien');
+      if (!r) return null; r.closest('.affiche').scrollIntoView({ block: "center" }); return r.innerText; })()`), 8000);
+    await pause(400);
+    const capture = await d.s("Page.captureScreenshot", { format: "png" });
+    writeFileSync(join(SORTIE, "atelier-ancien-membre.png"), Buffer.from(capture.data, "base64"));
+    const r2 = await action("clan_ajouter");
+    await ouvrir(v, VITRINE, "#contenu .vitrine-mur");
+    const revenue = (await donneesVitrine(v)).affiches.some((x) => x.roblox.nom === a.roblox.nom);
+    const gardee = (await api(d, "/tableau/espace/api/rell/affiches")).d.affiches.some((x) => x.id === a.id && !x.retire_le);
+    return { ok: partie && /Ancien membre/.test(mention || "") && r2.st === 200 && revenue && gardee,
+      detail: `« ${a.roblox.nom} » : hors de la vitrine ${partie} · atelier : « ${mention} » · rôle rendu, de retour : ${revenue} · jamais supprimée : ${gardee}` };
+  });
+}
+
 // ═══ LES ÉQUIPES ═══════════════════════════════════════════════════════════
 async function parcoursEquipes(d) {
   let chef = null, membres = [];
@@ -357,6 +388,7 @@ async function principal() {
     const direction = await personne("direction", "/tableau/demo");
     await parcoursVisiteur(visiteur);
     await parcoursDirectionVitrine(direction, visiteur);
+    await parcoursDepart(direction, visiteur);
     const { chef, membres } = await parcoursEquipes(direction);
     if (chef && membres.length) await parcoursChefEtMembre(direction, chef, membres[0]);
   } finally {
