@@ -1092,14 +1092,29 @@ def _texte(corps: dict, cle: str, *, mini: int = 0, maxi: int, requis: bool = Tr
     return v
 
 
+_CHIFFRES = re.compile(r"[0-9]{1,20}")
+
+
+def _chiffres(v, longueur: int = 20) -> int | None:
+    """Un nombre écrit en chiffres 0-9, et rien d'autre — sinon None. 27/10/2026 (revue de sécurité) : `str.isdigit()`
+    accepte « ² », que `int()` refuse (une erreur 500), et `int()` lit « ١٢ » ou « ５ » : une adresse ou un corps
+    venus du client ne sont jamais lus autrement qu'ici."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v if v >= 0 else None
+    s = v if isinstance(v, str) else ""
+    return int(s) if len(s) <= longueur and _CHIFFRES.fullmatch(s) else None
+
+
 def _entier(corps: dict, cle: str, *, requis: bool = True, mini: int = 0, maxi: int = 2 ** 53):
     v = corps.get(cle)
     if v is None:
         if requis:
             raise _Invalide(f"« {cle} » manque.")
         return None
-    if isinstance(v, str) and v.isdigit() and len(v) <= 15:
-        v = int(v)
+    if isinstance(v, str):   # des chiffres 0-9 seulement (« ² » ou « ١٢ » : refusés, jamais une erreur 500)
+        v = _chiffres(v, 15)
     if not isinstance(v, int) or isinstance(v, bool) or not mini <= v <= maxi:
         raise _Invalide(f"« {cle} » doit être un nombre entre {mini} et {maxi}.")
     return v
@@ -1157,6 +1172,32 @@ async def _lire_tolerant(sql: str, args: tuple = ()) -> list:
         if "no such table" not in str(ex):
             raise
         return []
+
+
+PAQUET_IDS = 500   # identifiants par lecture groupée (sous la limite des variables de SQLite)
+
+
+async def _lire_dans(db, sql: str, args: tuple = (), tolerant: bool = False) -> list:
+    """Une lecture dans une connexion déjà ouverte (ouvrir une connexion coûte ~4 ms : une page en fait UNE).
+    `tolerant` : une table ou une colonne du bot absente (base neuve, ancienne, tests) = rien, le reste remonte."""
+    try:
+        async with db.execute(sql, args) as cur:
+            return list(await cur.fetchall())
+    except sqlite3.OperationalError as ex:
+        if not tolerant or "no such" not in str(ex):
+            raise
+        return []
+
+
+async def _par_paquets(db, sql: str, avant: tuple, ids, tolerant: bool = False) -> list:
+    """`sql` porte « {ids} » : la même lecture pour tous ces identifiants, par paquets de `PAQUET_IDS`, dans la même
+    connexion — jamais une lecture par identifiant."""
+    ids = list(dict.fromkeys(int(x) for x in ids if x))
+    out = []
+    for k in range(0, len(ids), PAQUET_IDS):
+        lot = ids[k:k + PAQUET_IDS]
+        out += await _lire_dans(db, sql.format(ids=",".join("?" * len(lot))), (*avant, *lot), tolerant)
+    return out
 
 
 def _verrou(gid: int, tid: int) -> asyncio.Lock:
@@ -2847,7 +2888,7 @@ def _envoi_dict(r) -> dict:
     d = dict(zip(_COLS_E, tuple(r)))
     d["questions"] = [q for q in _json_liste(d["questions"]) if isinstance(q, dict)]
     d["liens"] = [x for x in _json_liste(d["liens"]) if isinstance(x, dict)]
-    d["messages"] = [int(x) for x in _json_liste(d["messages"]) if str(x).isdigit()]
+    d["messages"] = [x for x in (_chiffres(y) for y in _json_liste(d["messages"])) if x]
     d["renvoi"] = bool(d["renvoi"])
     d["etapes"] = [x for x in _json_liste(d.get("etapes")) if isinstance(x, dict)]
     return d
@@ -2864,16 +2905,56 @@ async def _envois_du_ticket(guild_id: int, tid: int) -> list:
     return [_envoi_dict(r) for r in rows]
 
 
+def _reponse_lue(texte, recu) -> dict:
+    return {"texte": texte, "recu_le": int(recu or 0)}
+
+
+def _correction_lue(juste, par, le, version) -> dict:
+    return {"juste": None if juste is None else bool(juste), "par": int(par or 0), "le": int(le or 0),
+            "version": int(version)}
+
+
 async def _reponses(eid: int) -> dict:
     rows = await _lire("SELECT rang, texte, recu_le FROM recrutement_reponses WHERE envoi_id=?", (int(eid),))
-    return {int(r[0]): {"texte": r[1], "recu_le": int(r[2] or 0)} for r in rows}
+    return {int(r[0]): _reponse_lue(*r[1:]) for r in rows}
 
 
 async def _corrections(eid: int) -> dict:
     rows = await _lire("SELECT rang, juste, par, le, version FROM recrutement_corrections WHERE envoi_id=?",
                        (int(eid),))
-    return {int(r[0]): {"juste": None if r[1] is None else bool(r[1]), "par": int(r[2] or 0), "le": int(r[3] or 0),
-                        "version": int(r[4])} for r in rows}
+    return {int(r[0]): _correction_lue(*r[1:]) for r in rows}
+
+
+async def _envois_complets(db, ids) -> tuple:
+    """({envoi_id: envoi}, {envoi_id: réponses}, {envoi_id: corrections}) de plusieurs envois, en trois lectures
+    groupées dans la connexion `db` — comme `_envoi`, `_reponses` et `_corrections` pour chacun."""
+    envois = {int(r[0]): _envoi_dict(r) for r in await _par_paquets(
+        db, f"SELECT {', '.join(_COLS_E)} FROM recrutement_envois WHERE id IN ({{ids}})", (), ids)}
+    reps: dict = {}
+    corrs: dict = {}
+    for eid, rang, *r in await _par_paquets(db, "SELECT envoi_id, rang, texte, recu_le FROM recrutement_reponses"
+                                                " WHERE envoi_id IN ({ids})", (), envois):
+        reps.setdefault(int(eid), {})[int(rang)] = _reponse_lue(*r)
+    for eid, rang, *r in await _par_paquets(db, "SELECT envoi_id, rang, juste, par, le, version FROM"
+                                                " recrutement_corrections WHERE envoi_id IN ({ids})", (), envois):
+        corrs.setdefault(int(eid), {})[int(rang)] = _correction_lue(*r)
+    return envois, reps, corrs
+
+
+async def _transcripts_lots(db, guild_id: int, tids) -> dict:
+    """{ticket: adresse de son transcript} de plusieurs tickets fermés, en deux lectures groupées : l'index des
+    transcripts (le plus récent de chaque ticket), sinon le suivi des candidatures (`_transcript_du_ticket`, groupé)."""
+    out: dict = {}
+    for tid, url in await _par_paquets(db, "SELECT ticket_id, url FROM ticket_transcripts WHERE guild_id=? AND ticket_id"
+                                           " IN ({ids}) ORDER BY rowid", (int(guild_id),), tids, tolerant=True):
+        if url:
+            out[int(tid)] = str(url)
+    for tid, url in await _par_paquets(db, "SELECT ticket_id, transcript FROM recrutements WHERE guild_id=? AND ticket_id"
+                                           " IN ({ids})", (int(guild_id),), [t for t in tids if int(t) not in out],
+                                       tolerant=True):
+        if url:
+            out[int(tid)] = str(url)
+    return out
 
 
 def bilan(questions_: list, reponses_: dict, corrections_: dict, exigence: int = EXIGENCE) -> dict:
@@ -3641,16 +3722,16 @@ async def liste_noire_site(g) -> dict:
     for pid in panneaux_:
         pnl = ((c.get("ticket_panels") or {}).get(pid) or {}) if isinstance(c, dict) else {}
         for x in (pnl.get("blacklist") or []) if isinstance(pnl, dict) else []:
-            if str(x).isdigit():
-                anciens.add(int(x))
+            if _chiffres(x):
+                anciens.add(_chiffres(x))
     comptes = {}
     if panneaux_:
         marques = ",".join("?" * len(panneaux_))
         for uid, n in await _lire_tolerant(f"SELECT user_id, COUNT(*) FROM tickets WHERE guild_id=? AND panel_id IN"
                                            f" ({marques}) GROUP BY user_id", (g.id, *sorted(panneaux_))):
             comptes[int(uid)] = int(n)
-    transcripts = {int(t): str(u or "") for t, u in await _lire_tolerant(
-        "SELECT ticket_id, url FROM ticket_transcripts WHERE guild_id=?", (g.id,)) if str(t or "").isdigit()}
+    transcripts = {_chiffres(t): str(u or "") for t, u in await _lire_tolerant(
+        "SELECT ticket_id, url FROM ticket_transcripts WHERE guild_id=?", (g.id,)) if _chiffres(t)}
     actifs, leves, vus = [], [], set()
     for rid, uid, nom, depuis, motif, par, tid, leve_le, leve_par in rows:
         ident = _ident(g, int(uid))
@@ -3777,7 +3858,8 @@ class FormulaireFiche(discord.ui.Modal):
             if isinstance(comp, discord.ui.Select):
                 v = (comp.values or [""])[0]
                 opts = ch.get("options") or []
-                texte = opts[int(v)] if str(v).isdigit() and int(v) < len(opts) else ""
+                k = _chiffres(v)
+                texte = opts[k] if k is not None and k < len(opts) else ""
             else:
                 texte = _net(comp.value or "", lignes=True)[:int(ch.get("max") or CHAMP_LONGUEUR_DEFAUT)]
             if texte:
@@ -4054,8 +4136,8 @@ async def regler_role_chef(g, auteur, corps) -> tuple[int, dict]:
             _log(f"[RECRUTEMENT][E22:DETAIL] {type(ex).__name__} {getattr(ex, 'status', '')}")
             return _erreur("Discord a refusé de créer le rôle.", 503)
     elif corps.get("role") is not None:
-        brut = str(corps.get("role"))
-        role = g.get_role(int(brut)) if brut.isdigit() else None
+        rid = _chiffres(corps.get("role"))
+        role = g.get_role(rid) if rid else None
         refus = _refus_role_chef(g, role)
         if refus:
             return _erreur(refus, 409)
@@ -4964,8 +5046,8 @@ async def _terminer(i, e: dict) -> None:
 def etape_de_question(q: dict) -> int:
     """L'étape (1..N) d'une question de l'instantané (`etape`) ; sans étape valable : la première."""
     v = q.get("etape") if isinstance(q, dict) else None
-    if isinstance(v, str) and v.isdigit():
-        v = int(v)
+    if isinstance(v, str):
+        v = _chiffres(v)
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else 1
 
 
@@ -5717,21 +5799,38 @@ async def dossier(g, tid: int) -> dict | None:
                      "renvoyer": ouvert and etape in ("etape2", "reponses") and not fermeture}}
 
 
-async def suivi(g) -> dict:
+async def suivi(g, recents: bool = True) -> dict:
     """Les candidatures ouvertes (« À analyser », « En cours », « À corriger ») avec leur étape et leur PROCHAINE action,
-    et celles décidées depuis 30 jours (l'historique complet : `decidees`, paginé)."""
+    et celles décidées depuis 30 jours (l'historique complet : `decidees`, par morceaux). `recents=False` : les ouvertes
+    seulement (`tableau.donnees` n'en range que l'étape).
+    27/10/2026 (banc de 5 ans : 270 ms, dont 33 recherches de transcript à 4 ms) : UNE connexion et des lectures
+    groupées — le nombre de lectures ne dépend plus du nombre de tickets ouverts ni des décisions récentes."""
     pids = sorted(_panneaux(await _cfg(g.id)))
-    tickets = []
-    if pids:
-        tickets = await _lire_tolerant(f"SELECT id, user_id, channel_id, created_at, panel_id, claimed_by FROM tickets"
-                                       f" WHERE guild_id=? AND status='open' AND panel_id IN ({','.join('?' * len(pids))})"
-                                       f" ORDER BY id", (g.id, *pids))
-    suivis = {int(r[0]): dict(zip(_COLS_S, tuple(r))) for r in
-              await _lire(f"SELECT {', '.join(_COLS_S)} FROM recrutement_suivi WHERE guild_id=?", (g.id,))}
+    limite = _maintenant() - 30 * 86400
+    async with _get_db() as db:
+        tickets = []
+        if pids:
+            tickets = await _lire_dans(db, f"SELECT id, user_id, channel_id, created_at, panel_id, claimed_by FROM tickets"
+                                           f" WHERE guild_id=? AND status='open' AND panel_id IN ({','.join('?' * len(pids))})"
+                                           " ORDER BY id", (g.id, *pids), tolerant=True)
+        ouverts_ids = [int(r[0]) for r in tickets]
+        suivis = {int(r[0]): dict(zip(_COLS_S, tuple(r))) for r in await _par_paquets(
+            db, f"SELECT {', '.join(_COLS_S)} FROM recrutement_suivi WHERE guild_id=? AND ticket_id IN ({{ids}})",
+            (g.id,), ouverts_ids)}
+        envois, reps, corrs = await _envois_complets(db, [s["envoi_id"] for s in suivis.values() if s["envoi_id"]])
+        decides, transcripts, elimines = [], {}, []
+        if recents:
+            ouverts_set = set(ouverts_ids)
+            decides = sorted((dict(zip(_COLS_S, tuple(r))) for r in await _lire_dans(
+                db, f"SELECT {', '.join(_COLS_S)} FROM recrutement_suivi WHERE guild_id=? AND maj_le >= ?", (g.id, limite))
+                if int(r[0]) not in ouverts_set), key=lambda s: -int(s["maj_le"] or 0))[:50]
+            transcripts = await _transcripts_lots(db, g.id, [int(s["ticket_id"]) for s in decides if s["etape"] in FINALES])
+            elimines = await _lire_dans(db, "SELECT membre_id, champ, reponse, quand FROM recrutement_eliminations WHERE"
+                                            " guild_id=? AND quand >= ? ORDER BY quand DESC LIMIT 50", (g.id, limite))
     ouverts = []
     for tid, uid, salon, cree, pid, pris in tickets:
         s = suivis.get(int(tid))
-        e = await _envoi(s["envoi_id"]) if s and s["envoi_id"] else None
+        e = envois.get(int(s["envoi_id"])) if s and s["envoi_id"] else None
         resume = None
         etape = s["etape"] if s else "etape1"
         if e is not None:
@@ -5739,24 +5838,22 @@ async def suivi(g) -> dict:
             resume = {"id": e["id"], "nb": len(e["questions"]), "statut": e["statut"], "envoye_le": e["envoye_le"],
                       "repondu_le": e["repondu_le"], "etapes": len(etapes_de(e)), "etape_ouverte": ouv,
                       "etape_envoyee": env, "total": total, "porte": int(e["etape_ouverte"] or 0) > 0,
-                      "bilan": bilan(e["questions"], await _reponses(e["id"]), await _corrections(e["id"]))}
+                      "bilan": bilan(e["questions"], reps.get(e["id"], {}), corrs.get(e["id"], {}))}
         ouverts.append({"ticket": int(tid), "candidat": _ident(g, int(uid)), "ouvert": recrutements._unix(cree),
                         "etape": etape, "annonce": int(s["annonce"]) if s else 0, "mode": _mode(s),
                         "affiche": bool(s and s["carte"] == "affiche"),
                         "panneau": str(pid or ""), "pris_par": _qui(g, pris) if pris else None,
                         "fermeture_prevue": bool(s and s["fermeture_le"]), "salon": _lien_discord(g, int(salon)),
                         "action": _action(etape, e), "envoi": resume})
-    ouverts_ids = {o["ticket"] for o in ouverts}
-    limite = _maintenant() - 30 * 86400
-    recents = [{"ticket": tid, "candidat": _ident(g, s["candidat_id"]), "etape": s["etape"],
-                "maj_le": int(s["maj_le"] or 0), "par": _qui(g, s["decide_par"]),
-                "transcript": await _transcript_du_ticket(g, tid) if s["etape"] in FINALES else ""}
-               for tid, s in suivis.items() if tid not in ouverts_ids and int(s["maj_le"] or 0) >= limite]
-    recents = sorted(recents, key=lambda x: -x["maj_le"])[:50]
-    elimines = [{"membre": _ident(g, int(uid)), "champ": champ, "reponse": rep, "quand": int(q or 0)} for uid, champ, rep, q
-                in await _lire("SELECT membre_id, champ, reponse, quand FROM recrutement_eliminations WHERE guild_id=?"
-                               " AND quand >= ? ORDER BY quand DESC LIMIT 50", (g.id, limite))]
-    return {"ouverts": ouverts, "recents": recents, "elimines": elimines, "exigence": EXIGENCE}
+    out = {"ouverts": ouverts, "recents": [], "elimines": [], "exigence": EXIGENCE}
+    if recents:
+        out["recents"] = [{"ticket": int(s["ticket_id"]), "candidat": _ident(g, s["candidat_id"]), "etape": s["etape"],
+                           "maj_le": int(s["maj_le"] or 0), "par": _qui(g, s["decide_par"]),
+                           "transcript": transcripts.get(int(s["ticket_id"]), "") if s["etape"] in FINALES else ""}
+                          for s in decides]
+        out["elimines"] = [{"membre": _ident(g, int(uid)), "champ": champ, "reponse": rep, "quand": int(q or 0)}
+                           for uid, champ, rep, q in elimines]
+    return out
 
 
 async def corriger(g, auteur, corps) -> tuple[int, dict]:
@@ -5849,38 +5946,65 @@ def _action(etape: str, e: dict | None) -> str:
 DECIDEES_PAR_PAGE = 25
 
 
+DECIDEES_MAX = 100
+_DECIDEES_RECRUTEMENTS = ("SELECT COALESCE(ferme_le, 0) AS quand, ticket_id AS ticket, COALESCE(candidat_id, 0) AS membre,"
+                          " candidat_nom AS nom, ferme_par AS par, decision, raison AS motif, transcript, '' AS champ,"
+                          " '' AS reponse FROM recrutements WHERE guild_id=? AND decision IN ('acceptes', 'refuses')")
+_DECIDEES_ELIMINATIONS = ("SELECT COALESCE(quand, 0) AS quand, 0 AS ticket, membre_id AS membre, nom, 0 AS par,"
+                          " 'elimine' AS decision, '' AS motif, '' AS transcript, champ, reponse FROM"
+                          " recrutement_eliminations WHERE guild_id=?")
+
+
 async def decidees(g, requete) -> tuple[int, dict]:
-    """L'historique des décisions de recrutement (acceptés, refusés, éliminés d'office), du plus récent, PAGINÉ (`page`,
-    25 par page) — quand, par qui, le motif interne, le transcript. Rien ne grossit sans fin : la liste du site en
-    lit une page à la fois."""
+    """L'historique des décisions de recrutement (acceptés, refusés, éliminés d'office), du plus récent — quand, par
+    qui, le motif interne, le transcript — PAR MORCEAUX, comme le journal : `n` lignes (25 ; 100 au plus), `avant` = la
+    `suite` du morceau précédent (« quand:ticket:membre ») ; `page` (l'ancienne pagination) reste lue. Seul ce
+    morceau est lu dans la base (un tri, une limite) ; les comptes, d'un COUNT."""
     q = dict(requete or {})
-    try:
-        page = int(q.get("page") or 1)
-    except ValueError:
+    n, page = _chiffres(q.get("n") or str(DECIDEES_PAR_PAGE), 6), _chiffres(q.get("page") or "1", 7)
+    if n is None or page is None:
+        return _erreur("Demande invalide.")
+    n, page = max(1, min(n, DECIDEES_MAX)), max(1, min(page, 10 ** 6))
+    curseur = ()
+    if q.get("avant"):
+        m = re.fullmatch(r"([0-9]{1,12}):([0-9]{1,20}):([0-9]{1,20})", str(q["avant"]))
+        if m is None:
+            return _erreur("Suite invalide.", champ="avant")
+        curseur = tuple(int(x) for x in m.groups())
         page = 1
-    page = max(1, min(page, 10 ** 6))
+    ou = " WHERE quand < ? OR (quand = ? AND (ticket < ? OR (ticket = ? AND membre < ?)))" if curseur else ""
+    args_c = (curseur[0], curseur[0], curseur[1], curseur[1], curseur[2]) if curseur else ()
+    async with _get_db() as db:
+        sources, args = [_DECIDEES_RECRUTEMENTS, _DECIDEES_ELIMINATIONS], [g.id, g.id]
+        #  Une base sans la table du suivi des candidatures (`recrutements`, tests) : les éliminations seules.
+        if not await _lire_dans(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='recrutements'"):
+            sources, args = sources[1:], args[1:]
+        rows = await _lire_dans(db, f"SELECT quand, ticket, membre, nom, par, decision, motif, transcript, champ, reponse"
+                                    f" FROM ({' UNION ALL '.join(sources)}){ou} ORDER BY quand DESC, ticket DESC,"
+                                    " membre DESC LIMIT ? OFFSET ?", (*args, *args_c, n + 1, (page - 1) * n))
+        comptes = {"acceptes": 0, "refuses": 0, "elimine": 0}
+        if len(sources) == 2:
+            for decision, k in await _lire_dans(db, "SELECT decision, COUNT(*) FROM recrutements WHERE guild_id=? AND"
+                                                    " decision IN ('acceptes', 'refuses') GROUP BY decision", (g.id,)):
+                comptes[str(decision)] = int(k)
+        comptes["elimine"] = int((await _lire_dans(db, "SELECT COUNT(*) FROM recrutement_eliminations WHERE"
+                                                       " guild_id=?", (g.id,)))[0][0])
     lignes = []
-    for tid, uid, nom, ferme, par, decision, raison, transcript in await _lire_tolerant(
-            "SELECT ticket_id, candidat_id, candidat_nom, ferme_le, ferme_par, decision, raison, transcript FROM"
-            " recrutements WHERE guild_id=? AND decision IN ('acceptes', 'refuses')", (g.id,)):
+    for quand, tid, uid, nom, par, decision, motif, transcript, champ, rep in rows[:n]:
         ident = _ident(g, int(uid or 0))
         if not ident["present"] and nom:
             ident["nom"] = nom
-        lignes.append({"ticket": int(tid or 0), "membre": ident, "decision": decision, "quand": int(ferme or 0),
-                       "par": _qui(g, par), "motif": str(raison or ""), "transcript": str(transcript or "")})
-    for uid, nom, champ, rep, quand in await _lire("SELECT membre_id, nom, champ, reponse, quand FROM"
-                                                   " recrutement_eliminations WHERE guild_id=?", (g.id,)):
-        ident = _ident(g, int(uid))
-        if not ident["present"] and nom:
-            ident["nom"] = nom
-        lignes.append({"ticket": 0, "membre": ident, "decision": "elimine", "quand": int(quand or 0), "par": None,
-                       "motif": f"Éliminé d'office · {champ}", "reponse": rep, "transcript": ""})
-    lignes.sort(key=lambda x: -x["quand"])
-    total = len(lignes)
-    debut = (page - 1) * DECIDEES_PAR_PAGE
-    return 200, {"lignes": lignes[debut:debut + DECIDEES_PAR_PAGE], "page": page, "par_page": DECIDEES_PAR_PAGE,
-                 "total": total, "pages": max(1, math.ceil(total / DECIDEES_PAR_PAGE)),
-                 "comptes": {k: sum(1 for x in lignes if x["decision"] == k) for k in ("acceptes", "refuses", "elimine")}}
+        if decision == "elimine":
+            lignes.append({"ticket": 0, "membre": ident, "decision": "elimine", "quand": int(quand or 0), "par": None,
+                           "motif": f"Éliminé d'office · {champ}", "reponse": rep, "transcript": ""})
+        else:
+            lignes.append({"ticket": int(tid or 0), "membre": ident, "decision": decision, "quand": int(quand or 0),
+                           "par": _qui(g, par), "motif": str(motif or ""), "transcript": str(transcript or "")})
+    total = sum(comptes.values())
+    dernier = rows[n - 1] if len(rows) > n else None
+    return 200, {"lignes": lignes, "suite": f"{int(dernier[0])}:{int(dernier[1])}:{int(dernier[2])}" if dernier else None,
+                 "n": n, "total": total, "comptes": comptes, "page": page, "par_page": n,
+                 "pages": max(1, math.ceil(total / n))}
 
 
 # ─── Les adresses du site (`tableau.monter`) : fn(g, auteur, requete, corps) → (statut, corps) ─────────────────
@@ -6022,10 +6146,10 @@ async def _r_proposition(g, auteur, requete, corps):
 
 async def _r_apercu(g, auteur, requete, corps):
     q = dict(requete or {})
-    t, e = str(q.get("ticket") or ""), str(q.get("envoi") or "")
-    if not (t.isdigit() or e.isdigit()):
+    t, e = _chiffres(q.get("ticket")), _chiffres(q.get("envoi"))
+    if not (t or e):
         return _erreur("« ticket » ou « envoi » : un numéro.")
-    return await apercu_candidat(g, ticket=int(t) if t.isdigit() else 0, envoi=int(e) if e.isdigit() else 0)
+    return await apercu_candidat(g, ticket=t or 0, envoi=e or 0)
 
 
 async def _r_etape_suivante(g, auteur, requete, corps):
@@ -6105,13 +6229,13 @@ async def _r_chef_gabarit(g, auteur, requete, corps):
 
 async def _r_chef_proposition(g, auteur, requete, corps):
     q = dict(requete or {})
-    membre, metier = str(q.get("membre") or ""), str(q.get("metier") or "")
-    if not membre.isdigit() or not FORMAT_ID.fullmatch(metier or "-"):
+    membre, metier = _chiffres(q.get("membre")), str(q.get("metier") or "")
+    if not membre or not FORMAT_ID.fullmatch(metier or "-"):
         return _erreur("« membre » et « metier » sont demandés.")
-    m = g.get_member(int(membre))
+    m = g.get_member(membre)
     if m is None or not await du_clan(g, m):
         return _erreur("Seul un membre du clan peut devenir chef d'équipe.", 409)
-    return 200, dict(await proposition_chef(g, int(membre), metier), metiers_membre=await _metiers_de(g, m))
+    return 200, dict(await proposition_chef(g, membre, metier), metiers_membre=await _metiers_de(g, m))
 
 
 async def _r_chef_proposer(g, auteur, requete, corps):
@@ -6119,10 +6243,10 @@ async def _r_chef_proposer(g, auteur, requete, corps):
 
 
 async def _r_chef_dossier(g, auteur, requete, corps):
-    e = str(dict(requete or {}).get("envoi") or "")
-    if not e.isdigit():
+    e = _chiffres(dict(requete or {}).get("envoi"))
+    if not e:
         return _erreur("« envoi » : un numéro.")
-    d = await chef_dossier(g, int(e))
+    d = await chef_dossier(g, e)
     return (200, d) if d is not None else _erreur("Candidature de chef introuvable.", 404)
 
 
@@ -6139,10 +6263,10 @@ async def _r_chef_role(g, auteur, requete, corps):
 
 
 async def _r_chef(g, auteur, requete, corps):
-    m = str(dict(requete or {}).get("membre") or "")
-    if not m.isdigit():
+    m = _chiffres(dict(requete or {}).get("membre"))
+    if not m:
         return _erreur("« membre » : un identifiant.")
-    return 200, {"chef": await chef_de(g, int(m))}
+    return 200, {"chef": await chef_de(g, m)}
 
 
 def _objet(genre: str, valeur) -> str | None:
@@ -6152,10 +6276,10 @@ def _objet(genre: str, valeur) -> str | None:
 
 async def _v_corriger(c: dict):
     """Le verrou d'une correction : le dossier de son ticket, ou la candidature du chef (sans ticket)."""
-    eid = str((c or {}).get("envoi") or "")
-    if not eid.isdigit():
+    eid = _chiffres((c or {}).get("envoi"))
+    if not eid:
         return None
-    e = await _envoi(int(eid))
+    e = await _envoi(eid)
     if e is None:
         return None
     return f"dossier:{int(e['ticket_id'])}" if int(e["ticket_id"] or 0) else f"chef:{int(e['id'])}"

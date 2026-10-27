@@ -337,11 +337,13 @@ function candidaturesFiche(f) {
     h("div", { classe: "rangee" }, bouton("Ouvrir le dossier de recrutement", { classe: "p principal", icone: "candidatures", onclick: () => { etatFiche.pan.fermer(); emettre("dossier:ouvrir", enCours.ticket); } }),
       enCours.salon ? h("a", { classe: "bouton p", href: enCours.salon }, icone("ouvrir"), h("span", {}, "Ouvrir le ticket")) : null),
     reponses(enCours.reponses), transcriptEnLigne(enCours.ticket, "Candidature · ticket #" + enCours.ticket, false)));
-  const fiche = ((etat.d && etat.d.candidats) || []).find((c) => c.id === f.membre.id);
-  if (fiche) blocs.push(h("div", { classe: "cadre pile serree" }, h("h3", {}, "Dernière décision : " + (STATUTS_CAND[fiche.statut] || [fiche.statut])[0]),
-    h("p", { classe: "aide" }, "Fermée le " + date(fiche.ferme, true) + (fiche.ferme_par ? " par " + propre(fiche.ferme_par) : "") + (fiche.motif ? " — " + fiche.motif : "")),
+  //  27/10/2026 : sa dernière décision vient de SA fiche (le serveur la lit à l'ouverture) ; `donnees` ne porte plus que
+  //  le résumé des dernières candidatures décidées.
+  const fiche = (f.candidatures || []).find((c) => c.statut === "acceptes" || c.statut === "refuses");
+  if (fiche) blocs.push(h("div", { classe: "cadre pile serree" }, h("h3", {}, "Dernière décision : " + STATUTS_CAND[fiche.statut][0]),
+    h("p", { classe: "aide" }, "Fermée le " + date(fiche.ferme, true) + (fiche.ferme_par ? " par " + propre(fiche.ferme_par) : "") + (fiche.raison ? " — " + fiche.raison : "")),
     reponses(fiche.reponses),
-    peutAgir() ? h("div", { classe: "rangee" }, bouton("Retirer ses fiches", { classe: "p danger", reseau: true, onclick: () => agir({ action: "fiche_retirer", candidat: fiche.id }, "Retirer ses fiches de candidature ?", "Elles disparaissent du site. Les transcripts restent.", {}, "Retirer", "danger") })) : null,
+    peutAgir() ? h("div", { classe: "rangee" }, bouton("Retirer ses fiches", { classe: "p danger", reseau: true, onclick: () => agir({ action: "fiche_retirer", candidat: f.membre.id }, "Retirer ses fiches de candidature ?", "Elles disparaissent du site. Les transcripts restent.", {}, "Retirer", "danger") })) : null,
     transcriptEnLigne(fiche.ticket, "Candidature · ticket #" + fiche.ticket, true)));
   f.candidatures.forEach((c) => blocs.push(h("div", { classe: "entree" }, h("div", { classe: "haut" }, h("span", { classe: "quoi" }, "Ticket #" + c.ticket), h("span", { classe: "quand" }, date(c.ferme, true))),
     h("div", { classe: "texte" }, c.raison || "Sans motif"), fiche && fiche.ticket === c.ticket ? null : transcriptEnLigne(c.ticket, "Candidature · ticket #" + c.ticket, false))));
