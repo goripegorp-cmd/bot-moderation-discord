@@ -16,7 +16,10 @@ name: Symbol Index
 
 on:
   schedule:
-    - cron: '0 4 * * *'   # 04:00 UTC daily
+    # 27/10/2026 : « 0 4 » (une heure pile, la plus chargée chez GitHub) est parti à 09:28 UTC, et son commit a
+    # relancé le bot en pleine journée. Une minute impaire de la nuit part à l'heure ; railway.json ignore de
+    # toute façon un commit qui ne touche qu'INDEX.md.
+    - cron: '23 2 * * *'   # 02:23 UTC daily
   workflow_dispatch:
 
 permissions:

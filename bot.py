@@ -219,9 +219,16 @@ _STALL_COOLDOWN = 20.0          # s entre 2 dumps (anti-spam de logs)
 
 async def _loop_heartbeat():
     """Bat toutes les 100 ms DANS la boucle. Si la boucle est bloquée, le battement s'arrête."""
-    while True:
-        _LOOP_BEAT['t'] = _time_mod.monotonic()
-        await asyncio.sleep(0.1)
+    try:
+        while True:
+            _LOOP_BEAT['t'] = _time_mod.monotonic()
+            await asyncio.sleep(0.1)
+    except asyncio.CancelledError:
+        # 27/10/2026 : annulé = la boucle s'arrête (SIGTERM d'une mise en ligne, puis asyncio.run annule les
+        # tâches). Le battement s'arrête VOLONTAIREMENT : sans ce drapeau, le chien de garde criait « [STALL] »
+        # pendant que Python attendait ses derniers fils (threading._shutdown) — une fausse alarme par mise en ligne.
+        _LOOP_BEAT['arret'] = True
+        raise
 
 
 def _stall_watchdog():
@@ -230,6 +237,8 @@ def _stall_watchdog():
     import traceback as _tb_mod
     while True:
         _time_mod.sleep(0.5)
+        if _LOOP_BEAT.get('arret'):
+            return                            # le bot s'arrête : plus rien à surveiller (le fil se termine)
         try:
             _last = _LOOP_BEAT['t']
             if not _last:
@@ -33645,3 +33654,15 @@ if __name__ == "__main__":
     _gestionnaire = logging.StreamHandler()
     _gestionnaire.addFilter(_journal.FiltreLogging())
     bot.run(TOKEN, log_handler=_gestionnaire, log_level=_dlevel, root_logger=True)
+    #  27/10/2026 : après l'arrêt, Python attend encore ses fils non « daemon » (threading._shutdown) avant de
+    #  rendre la main à Railway (22 fils actifs relevés le 27/10 à 10 h 29). Ce relevé les NOMME : la prochaine
+    #  mise en ligne dira qui retarde la sortie, au lieu de deviner.
+    try:
+        _restants = [t.name for t in _threading_mod.enumerate()
+                     if t.is_alive() and not t.daemon and t is not _threading_mod.main_thread()]
+        if _restants:
+            print("[BOOT] arrêt : des fils retardent la sortie", flush=True)
+            print(f"[BOOT:DETAIL] {len(_restants)} : {', '.join(_restants[:15])}", flush=True)
+    except Exception as _ex_fils:
+        print("[BOOT] arrêt : relevé des fils impossible", flush=True)
+        print(f"[BOOT:DETAIL] {type(_ex_fils).__name__} {_ex_fils}", flush=True)

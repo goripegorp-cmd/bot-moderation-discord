@@ -23,7 +23,8 @@ import os
 import sys
 
 # Directories never worth indexing.
-_SKIP_DIRS = {".git", "venv", ".venv", "__pycache__", ".github", "node_modules", ".mypy_cache", ".ruff_cache"}
+_SKIP_DIRS = {".git", "venv", ".venv", "__pycache__", ".github", "node_modules", ".mypy_cache", ".ruff_cache",
+              ".claude"}   # 27/10/2026 : les worktrees de l'application Claude (une copie du dépôt) gonflaient l'index
 _OUT = "INDEX.md"
 
 
