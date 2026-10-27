@@ -109,6 +109,7 @@ ECRITURES_CANDIDAT = {"saisie", "brouillon", "presence", "envoyer", "envoyer_eta
 #  avec sa portée (une autre que « tete » se décide ici, et `_verifier` doit l'ouvrir).
 REGISTRE = {"tete": frozenset(x.strip() for x in """
     GET clan/apercu
+    GET casier/membres
     GET clan/evenements
     POST clan/annuler
     POST clan/brouillon
@@ -116,6 +117,7 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
     POST clan/publier
     POST clan/supprimer_brouillon
     GET direct/etat
+    GET journal
     POST direct/envoi
     GET direct/candidat
     GET equipage/equipes
@@ -135,6 +137,7 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
     POST equipage/publication/apercu
     POST media
     GET nettoyage
+    GET nettoyage/apercu
     POST nettoyage/lancer
     POST nettoyage/regle
     GET recrutement/apercu
@@ -194,6 +197,7 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
     GET securite
     POST securite/fermer_autres
     GET textes
+    GET tickets/fermes
     GET textes/site
     POST texte
     POST texte/defaut
@@ -207,6 +211,11 @@ EQUIPES = ("GET equipage/equipes", "POST equipage/equipe", "POST equipage/equipe
 PUBLICATIONS = ("GET equipage/publication", "POST equipage/publication", "POST equipage/publication/apercu")
 #  Le recrutement et les chefs d'équipe (27/10/2026, questionnaire.py) : la tête seule, toutes leurs adresses.
 RECRUTEMENT = "recrutement/"
+#  Le site sur plusieurs années (27/10/2026, longevite.py) : les règles et les actions du Nettoyage (l'aperçu d'une
+#  durée, « Nettoyer maintenant », la place prise) et les lectures par morceaux (le journal, les tickets fermés, le
+#  casier) — la tête seule ; « equipage » et « candidat » → 403.
+NETTOYAGE = ("GET nettoyage", "GET nettoyage/apercu", "POST nettoyage/regle", "POST nettoyage/lancer")
+MORCEAUX = ("GET journal", "GET tickets/fermes", "GET casier/membres")
 #  Le site local seulement (jamais dans le bot : tests/test_site_v2_serveur.py, V16) — hors de la table.
 DEMO = {("GET", "/tableau/demo"), ("GET", "/tableau/demo/discord"), ("GET", "/tableau/demo/recrutement/ouvrir"),
         ("GET", "/tableau/demo/recrutement/repondre"), ("GET", "/tableau/demo/recrutement/chef"),
@@ -453,7 +462,7 @@ def test_A2_chaque_case_de_la_table(local, portees):
     #  de l'équipage : la tête seule, « equipage » → 403.
     recrutement = [a for a in sorted(set().union(*REGISTRE.values())) if a.split(" ", 1)[1].startswith(RECRUTEMENT)]
     assert len(recrutement) >= 30, len(recrutement)
-    for a in (*EQUIPES, *PUBLICATIONS, *recrutement):
+    for a in (*EQUIPES, *PUBLICATIONS, *recrutement, *NETTOYAGE, *MORCEAUX):
         m, nom = a.split(" ", 1)
         st = statuts[(m, f"/tableau/espace/api/{nom}")]
         assert st["equipage"] == st["candidat"] == st["anonyme"] == 403 and st["tout"] not in (401, 403), (a, st)
@@ -507,7 +516,8 @@ def test_A3_chaque_fichier_du_site_a_ses_lecteurs(local, portees):
     #  Le code PROPRE à la Capitainerie ne sort jamais de la tête ; la vitrine et l'image sont publiques.
     assert comptes["tete"] >= 15 and comptes["public"] >= 30 and comptes["equipage"] >= 1, comptes
     for propre in ("app.js", "securite.js", "discord.js", "clan.js", "recrutement.js", "fiche.js", "textes.js", "direct.js",
-                   "equipes_admin.js", "capitainerie.js", "annonces.js", "accueil.js", "recherche.js", "rangement.js", "mode.js"):
+                   "equipes_admin.js", "capitainerie.js", "annonces.js", "accueil.js", "recherche.js", "rangement.js", "mode.js",
+                   "longevite.js"):
         assert _lecteurs_attendus(propre) == {"tout"}, propre
     #  Les pages ne sont JAMAIS servies comme des fichiers (seulement par leur adresse, avec leur porte).
     for page in ("index.html", "equipage.html", "vitrine.html"):
@@ -838,3 +848,4 @@ def test_A11_stats_sans_donnee_personnelle(local):
             assert m.display_name not in texte, f"le nom « {m.display_name} » dans /stats"
     st, corps, _e = _requete(local, "GET", "/health")
     assert st == 200 and not re.search(r"\d{15,}", corps.decode("utf-8"))
+

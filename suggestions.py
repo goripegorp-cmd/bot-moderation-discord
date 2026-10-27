@@ -615,11 +615,14 @@ async def retirer(g, sid: int, auteur) -> tuple[bool, str]:
 
 async def lister(guild_id: int, limite: int = 60, auteur_id: int = 0) -> dict:
     """Pour le site : les idées (d'un membre, si demandé), les plus récentes d'abord, avec leurs votes."""
-    filtre, args = ("AND s.auteur_id=? ", (int(auteur_id),)) if auteur_id else ("", ())
+    filtre, args = ("AND auteur_id=? ", (int(auteur_id),)) if auteur_id else ("", ())
+    #  26/10/2026 (banc de plusieurs années) : les `limite` idées d'abord, leurs votes ensuite — la jointure comptait les
+    #  votes de TOUTES les idées avant de n'en garder que soixante (30 ms à 5 ans, 2 ms ainsi).
     requete = ("SELECT s.id, s.channel_id, s.message_id, s.auteur_id, s.titre, s.details, s.statut, s.note, s.decide_par,"
                " s.cree_le, s.decide_le, s.retire_le, COALESCE(SUM(v.vote=1), 0), COALESCE(SUM(v.vote=-1), 0)"
-               " FROM suggestions_v2 s LEFT JOIN suggestions_votes v ON v.suggestion_id=s.id WHERE s.guild_id=? " + filtre
-               + "GROUP BY s.id ORDER BY s.id DESC LIMIT ?")
+               " FROM (SELECT * FROM suggestions_v2 WHERE guild_id=? " + filtre
+               + "ORDER BY id DESC LIMIT ?) s LEFT JOIN suggestions_votes v ON v.suggestion_id=s.id"
+               " GROUP BY s.id ORDER BY s.id DESC")
     async with _get_db() as db:
         async with db.execute(requete, (guild_id, *args, limite)) as cur:
             lignes = await cur.fetchall()

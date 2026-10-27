@@ -1093,7 +1093,7 @@ def test_V14_nettoyage_regles_bornees_et_bilan(site):
         out["regle"] = await post(c, "nettoyage/regle", {"cle": "affiches_corbeille", "garde_jours": 20})
         out["hors_bornes"] = await post(c, "nettoyage/regle", {"cle": "affiches_corbeille", "garde_jours": 5})
         out["texte"] = await post(c, "nettoyage/regle", {"cle": "affiches_corbeille", "garde_jours": "20"})
-        out["fixe"] = await post(c, "nettoyage/regle", {"cle": "journal", "garde_jours": 90})
+        out["fixe"] = await post(c, "nettoyage/regle", {"cle": "sessions", "garde_jours": 0})
         out["inconnue"] = await post(c, "nettoyage/regle", {"cle": "tout", "garde_jours": 9})
         out["lancer"] = await post(c, "nettoyage/lancer", {})
         out["encore"] = await post(c, "nettoyage/lancer", {})
@@ -1102,10 +1102,12 @@ def test_V14_nettoyage_regles_bornees_et_bilan(site):
     st, avant = out["avant"]
     cles = [r["cle"] for r in avant["regles"]]
     assert st == 200 and cles == ["journal_messages", "journal", "tickets_archives", "transcripts", "candidatures_refusees",
-                                  "affiches_corbeille", "affiches_historique", "medias", "ops", "sessions"]
+                                  "candidatures", "affiches_corbeille", "affiches_historique", "medias", "ops", "sessions"]
     r = {x["cle"]: x for x in avant["regles"]}
-    assert set(r["journal"]) == {"cle", "nom", "quoi", "garde_jours", "defaut", "min", "max", "reglable", "auto"}
-    assert (r["journal"]["garde_jours"], r["journal"]["reglable"]) == (90, False)
+    assert set(r["journal"]) == {"cle", "nom", "quoi", "garde_jours", "defaut", "min", "max", "reglable", "auto", "ordre"}
+    #  26/10/2026 (plusieurs années) : les durées cachées se règlent vers le bas — l'ancienne valeur reste le plafond.
+    assert (r["journal"]["garde_jours"], r["journal"]["reglable"], r["journal"]["min"], r["journal"]["max"]) == (90, True, 30, 90)
+    assert (r["candidatures"]["garde_jours"], r["candidatures"]["reglable"]) == (365, False), "la règle RGPD, dite"
     assert (r["affiches_corbeille"]["min"], r["affiches_corbeille"]["max"], r["affiches_corbeille"]["reglable"]) == (7, 90, True)
     assert r["tickets_archives"]["auto"] is False, "les archives de la liste : un rangement, rien n'est effacé"
     assert avant["compteurs"]["affiches_corbeille"] == 2 and avant["compteurs"]["medias"] == 3 and avant["dernier"] is None
@@ -1242,11 +1244,17 @@ def test_V15_cablage_bot_etape_boucle_supervisee():
     corps = copy.deepcopy(boucle)
     corps.name, corps.decorator_list = "corps", []
     corps = ast.Module(body=[corps], type_ignores=[])
+    compactages = []
+
+    async def si_heure_creuse(get_db, chemin):   # 26/10/2026 : le compactage de la nuit, après les règles
+        compactages.append(chemin)
     ns = {"bot": Obj(guilds=[Obj(id=1), Obj(id=2)]), "tableau": Obj(nettoyer_si_du=nettoyer_si_du),
-          "_logerr": lambda ou, ex, guild_id=0: erreurs.append((ou, type(ex).__name__, guild_id))}
+          "_logerr": lambda ou, ex, guild_id=0: erreurs.append((ou, type(ex).__name__, guild_id)),
+          "compactage": Obj(si_heure_creuse=si_heure_creuse), "get_db": None, "DB_PATH": "bot.db"}
     exec(compile(ast.fix_missing_locations(corps), "bot.py", "exec"), ns)  # noqa: S102 — code du dépôt
     asyncio.run(ns["corps"]())
     assert vus == [1, 2] and erreurs == [("site.nettoyage", "RuntimeError", 1)]
+    assert compactages == ["bot.db"], "une fois par tour, après les serveurs (il ne passe qu'aux heures creuses)"
     assert "import affiches" in SRC
 
 

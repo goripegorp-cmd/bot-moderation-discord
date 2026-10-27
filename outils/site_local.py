@@ -455,6 +455,11 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         tableau.monter(annonces_modifiables)
     tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
     zones.brancher_site_equipage(site_equipage.section_guide)   # sa ligne dans le guide du clan de démonstration
+    #  Le site sur plusieurs années (26/10/2026), comme l'étape « longevite » du bot : la suite des listes, les règles
+    #  de nettoyage de chaque famille, les orphelins, l'état du stockage.
+    import longevite
+    longevite.setup(get_db=get_db, chemin_base=dossier / "site_local.db", log=print)
+    tableau.monter(longevite)
     #  Le questionnaire en ligne du candidat (26/10/2026), comme l'étape « candidature_site » du bot.
     candidature_site.setup(get_db=get_db, cfg=cfg, log=print)
     await candidature_site.init_db()
@@ -729,8 +734,10 @@ async def _tables_du_bot(get_db) -> None:
                 " ticket_id INTEGER, kind TEXT, actor_id INTEGER, detail TEXT, created_unix INTEGER)",
                 "CREATE TABLE IF NOT EXISTS ticket_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,"
                 " channel_id INTEGER, action TEXT, actor_id INTEGER, at DATETIME, detail TEXT)",
-                "CREATE TABLE IF NOT EXISTS ticket_transcripts (guild_id INTEGER, ticket_id INTEGER, url TEXT,"
-                " user_name TEXT, closed_at DATETIME)",
+                #  Comme bot.py (26/10/2026) : la personne, le type et le jeton du fichier (le nettoyage des tickets
+                #  fermés efface aussi leur conversation, retrouvée par son jeton).
+                "CREATE TABLE IF NOT EXISTS ticket_transcripts (guild_id INTEGER, ticket_id INTEGER, user_id INTEGER,"
+                " user_name TEXT, panel TEXT, url TEXT, closed_at TEXT, jeton TEXT, PRIMARY KEY (guild_id, ticket_id))",
                 #  Comme bot.py : une sanction posée depuis le site (sans date) prend l'heure de l'écriture.
                 "CREATE TABLE IF NOT EXISTS infractions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,"
                 " user_id INTEGER, mod_id INTEGER, type TEXT, reason TEXT, duration TEXT DEFAULT '',"

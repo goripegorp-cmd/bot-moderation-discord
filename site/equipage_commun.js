@@ -116,7 +116,9 @@ function reglageVitrine(a) {
       toast(oui ? "Affiche remise sur la vitrine publique." : "Affiche retirée de la vitrine publique : seul l'équipage la voit.", "succes");
       if (E.majMur) E.majMur();
     }),
-    h("p", { classe: "aide" }, "La vitrine publique, c'est le lien de l'équipage : tout le monde la voit, sans compte."));
+    (v.anciennes || []).includes(String(a.id))
+      ? h("p", { classe: "aide" }, "Ancien membre : plus au clan, son affiche n'est pas sur la vitrine. Elle y revient s'il revient au clan.")
+      : h("p", { classe: "aide" }, "La vitrine publique, c'est le lien de l'équipage : tout le monde la voit, sans compte."));
 }
 
 /** Le sceau rond d'un titre de bloc (comme ceux des rubriques). */

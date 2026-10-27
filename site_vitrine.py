@@ -176,7 +176,13 @@ async def _construire(g) -> dict:
     await site_equipage._assurer_depart(g)
     types, elements = await affiches._catalogue()
     masquees = await site_equipage.vitrine_masquees(g.id)
-    lignes = [a for a in await site_equipage._affiches_actives(g) if a["id"] not in masquees]
+    #  27/10/2026 : l'équipage ACTUEL — l'affiche d'un membre qui n'a plus le rôle du clan (ou a quitté le serveur) n'y
+    #  paraît plus ; elle reste dans l'atelier (rien n'est supprimé) et revient s'il revient au clan. Sans membre lié :
+    #  la direction la gère à la main (« visible sur la vitrine »).
+    role = await site_equipage._role_clan(g)
+    clan_ids = _clan_ids(role)
+    lignes = [a for a in await site_equipage._affiches_actives(g)
+              if a["id"] not in masquees and (not a["membre_id"] or int(a["membre_id"]) in clan_ids)]
     lignes.sort(key=lambda a: (_nom_public(a).casefold(), _jeton("affiche", a["id"])))
     images: dict = {}
 
@@ -274,7 +280,6 @@ async def _construire(g) -> dict:
         equipes.append(dict(e, nom=_propre(e["nom"], 60), type=None if te is None else {
             "genre": te["genre"], "nom": _propre(te["nom"], 60), "icone": icone_servie_publique(te.get("icone"), image)}))
 
-    role = await site_equipage._role_clan(g)
     clan = site_equipage.sans_emoji(getattr(role, "name", "")) if role is not None else ""
     serveur = site_equipage.sans_emoji(getattr(g, "name", ""))
     libelles = site_equipage.libelles_page(g)
@@ -326,19 +331,26 @@ def _nombre(n: int) -> str:
     return f"{int(n):,}".replace(",", " ")
 
 
+def _clan_ids(role) -> frozenset:
+    """Les membres du rôle du clan, ceux qui sont sur le serveur (les robots à part) : l'équipage ACTUEL."""
+    return frozenset(m.id for m in site_equipage._membres_clan(role))
+
+
 async def _entree(g) -> dict:
-    """L'entrée publique de ce serveur : gardée `FRAIS` secondes, renouvelée après une écriture de la direction."""
+    """L'entrée publique de ce serveur : gardée `FRAIS` secondes, renouvelée après une écriture de la direction — et dès
+    que l'équipage change (un départ, un rôle retiré, un retour : l'empreinte du rôle du clan, relue à chaque visite)."""
     gen = site_equipage.generation(g.id)
+    clan = hash(_clan_ids(await site_equipage._role_clan(g)))
     e = _cache.get(g.id)
-    if e is not None and e["gen"] == gen and time.monotonic() - e["t"] < FRAIS:
+    if e is not None and e["gen"] == gen and e["clan"] == clan and time.monotonic() - e["t"] < FRAIS:
         return e
     async with _verrou(g.id):
         e = _cache.get(g.id)
-        if e is not None and e["gen"] == gen and time.monotonic() - e["t"] < FRAIS:
+        if e is not None and e["gen"] == gen and e["clan"] == clan and time.monotonic() - e["t"] < FRAIS:
             return e
         x = await _construire(g)
         corps = json.dumps(x["donnees"], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        e = {"t": time.monotonic(), "gen": gen, "corps": corps,
+        e = {"t": time.monotonic(), "gen": gen, "clan": clan, "corps": corps,
              "etag": '"' + hashlib.sha256(corps).hexdigest()[:24] + '"', "images": x["images"], "apercu": x["apercu"],
              "pages": {}}
         _cache[g.id] = e

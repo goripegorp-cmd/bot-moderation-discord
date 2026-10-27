@@ -555,3 +555,100 @@ def test_E7_rgpd_des_equipes_et_de_la_vitrine(local):
     for table in ("equipes", "equipes_membres", "equipage_vitrine"):
         assert table not in rapport["missing_tables"], rapport
         assert not [x for x in rapport["missing_columns"] if x[0] == table], rapport
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  V12 — la vitrine montre l'équipage ACTUEL (27/10/2026)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _action(local, action, membre):
+    st, rep, _h = local.requete("POST", "/tableau/espace/action", local.tete, {"action": action, "membre": str(membre)}, ecrire=True)
+    assert st == 200, rep
+    return json.loads(rep)
+
+
+def _partir(g, uid):
+    """Un membre quitte le serveur (le faux serveur du site local) : plus dans ses listes, ni dans ses rôles."""
+    m = g.get_member(uid)
+    for r in list(m.roles):
+        if m in r.members:
+            r.members.remove(m)
+    g.members.remove(m)
+    del g.membres[uid]
+    return m
+
+
+def _revenir(g, m):
+    g.membres[m.id] = m
+    g.members.append(m)
+    for r in m.roles:
+        if m not in r.members:
+            r.members.append(m)
+
+
+def _sur_la_vitrine(local, nom_roblox) -> bool:
+    return any(a["roblox"]["nom"] == nom_roblox for a in _donnees(local)["affiches"])
+
+
+def test_V12_un_depart_masque_l_affiche_un_retour_la_rend_rien_n_est_supprime(local):
+    import site_equipage
+    mira = next(a for a in local.faire(site_equipage._affiches_actives(local.g)) if a["membre_id"] == MIRA)
+    nom = mira["roblox_nom"]
+    assert _sur_la_vitrine(local, nom), "au départ, au mur"   # (la réponse est gardée en cache)
+    jeton = next(a["id"] for a in _donnees(local)["affiches"] if a["roblox"]["nom"] == nom)
+    #  Le rôle du clan retiré (la vraie action de la direction) : AUSSITÔT hors de la vitrine — le cache suit l'équipage.
+    _action(local, "clan_retirer", MIRA)
+    try:
+        d = _donnees(local)
+        assert not _sur_la_vitrine(local, nom) and jeton not in json.dumps(d), "ni au mur, ni dans une équipe publique"
+        #  Rien n'est supprimé : la base la garde, l'atelier de la direction et le site de l'équipage la montrent encore.
+        assert local.sql("SELECT retire_le FROM rell_affiches WHERE id=?", (mira["id"],)) == [(0,)]
+        st, corps, _e = local.requete("GET", "/tableau/espace/api/rell/affiches", local.tete)
+        assert st == 200 and any(a["id"] == mira["id"] for a in json.loads(corps)["affiches"])
+        assert any(a["id"] == mira["id"] for a in local.lire("equipage", local.kolax)[1]["affiches"])
+        #  La direction la voit « ancienne » (le mode édition, l'atelier : « Ancien membre · masquée de la vitrine »).
+        assert mira["id"] in local.lire("equipage", local.tete)[1]["vitrine"]["anciennes"]
+        assert "anciennes" not in json.dumps(local.lire("equipage", local.kolax)[1].get("vitrine", {})), "l'équipage n'a pas ce réglage"
+    finally:
+        _action(local, "clan_ajouter", MIRA)
+    #  Le rôle rendu : elle revient toute seule, avec le même jeton.
+    assert _sur_la_vitrine(local, nom) and jeton in json.dumps(_donnees(local))
+    assert mira["id"] not in local.lire("equipage", local.tete)[1]["vitrine"]["anciennes"]
+
+
+def test_V13_un_membre_parti_du_serveur_puis_revenu(local):
+    import site_equipage
+    kolax = next(a for a in local.faire(site_equipage._affiches_actives(local.g)) if a["membre_id"] == KOLAX)
+    assert _sur_la_vitrine(local, kolax["roblox_nom"])
+    m = _partir(local.g, KOLAX)
+    try:
+        d = _donnees(local)
+        assert not _sur_la_vitrine(local, kolax["roblox_nom"])
+        cuistots = next((e for e in d["equipes"] if e["nom"] == "Les Cuistots du Requin"), None)
+        assert cuistots is None or cuistots["chef"] is None, "le chef parti n'est plus montré"
+        assert local.sql("SELECT COUNT(*) FROM rell_affiches WHERE id=? AND retire_le=0", (kolax["id"],)) == [(1,)]
+    finally:
+        _revenir(local.g, m)
+    assert _sur_la_vitrine(local, kolax["roblox_nom"])
+    assert next(e for e in _donnees(local)["equipes"] if e["nom"] == "Les Cuistots du Requin")["chef"] is not None
+
+
+def test_V14_une_affiche_sans_membre_lie_ne_change_pas(local):
+    import site_equipage
+    import tableau
+    st, rep = local.ecrire("rell/affiche", {"id": "sans-membre-01", "roblox_nom": "Fantome_Seas", "surnom": "Le Fantôme",
+                                            "prime": 1000, "niveau": 3, "statut": "actif"}, local.tete)
+    assert st == 200, rep
+    try:
+        assert _sur_la_vitrine(local, "Fantome_Seas"), "sans membre lié : la direction la gère à la main"
+        assert "sans-membre-01" not in local.lire("equipage", local.tete)[1]["vitrine"]["anciennes"]
+        assert local.ecrire("equipage/vitrine/affiche", {"id": "sans-membre-01", "visible": False}, local.tete)[0] == 200
+        assert not _sur_la_vitrine(local, "Fantome_Seas")
+    finally:
+        assert local.ecrire("equipage/vitrine/affiche", {"id": "sans-membre-01", "visible": True}, local.tete)[0] == 200
+        st, _r = local.ecrire("rell/affiche/retirer", {"id": "sans-membre-01", "version": 1}, local.tete)
+    del site_equipage, tableau
+    #  La mention dans l'atelier de la direction : une ligne de capitainerie.js, le reste dans lien_equipage.js.
+    cap = (RACINE / "site" / "capitainerie.js").read_text(encoding="utf-8")
+    assert "mentionAncien(avecVerrou(affiche(a, cat," in cap
+    assert 'libelle("site.equipage.ancien", "Ancien membre · masquée de la vitrine")' in (RACINE / "site" / "lien_equipage.js").read_text(encoding="utf-8")

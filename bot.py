@@ -124,6 +124,8 @@ import securite_site  # 26/10/2026 : la trace de ce que le site fait sur Discord
 import affiches  # le site, Capitainerie : catalogue RELL Seas, affiches, rôles des métiers
 import metiers  # les rôles de métier du clan : choisis dans le guide, créés au besoin, retirés en quittant le clan
 import site_equipage  # 26/10/2026 : le site de l'équipage — le clan en lecture seule, l'accueil composé par la direction
+import longevite  # 26/10/2026 : le site sur plusieurs années — la suite des listes, une règle par famille, les orphelins
+import compactage  # 26/10/2026 : la base rend sa place au disque, la nuit (auto_vacuum incrémental)
 import candidature_site  # 26/10/2026 : le questionnaire en ligne du candidat (son lien, sa page) et son direct
 import annonces_modifiables  # 26/10/2026 : une annonce publiée, modifiée EN PLACE depuis le site de l'équipage (la tête)
 import textes  # 26/10/2026 : les textes du bot et les noms du site, réécrits par la direction (Textes & noms)
@@ -7135,6 +7137,11 @@ async def nettoyage_site_task():
             await tableau.nettoyer_si_du(g)
         except Exception as ex:  # un serveur en échec n'arrête pas les autres ; réessai au tour suivant
             _logerr("site.nettoyage", ex, guild_id=getattr(g, 'id', 0))
+    #  26/10/2026 : une fois par nuit (3 h – 6 h), la base rend au disque les pages que les nettoyages ont libérées.
+    try:
+        await compactage.si_heure_creuse(get_db, DB_PATH)
+    except Exception as ex:  # réessai la nuit suivante ; le détail au journal des erreurs
+        _logerr("site.compactage", ex)
 
 
 @nettoyage_site_task.before_loop
@@ -11725,6 +11732,22 @@ def username_similarity(name1, name2):
     similarity = (1 - distance / max_len) * 100
     return max(0, min(100, similarity))
 
+def _nom_peut_ressembler(nom, autre) -> bool:
+    """Faux seulement si `username_similarity(…, autre)` est SÛREMENT sous 85 % (un tri exact, sans faux négatif) : la
+    distance d'édition vaut au moins l'écart des longueurs, et au moins l'écart des lettres (en multiensembles) ;
+    au-delà de 15 % du plus long nom, la ressemblance ne peut pas atteindre 85 %. 26/10/2026 (banc de plusieurs
+    années) : la distance complète, en Python, pour chaque empreinte, à chaque arrivée."""
+    from collections import Counter
+    a, b = normalize_username(nom), normalize_username(autre)   # les mêmes chaînes que `username_similarity`
+    if not a or not b:
+        return False
+    plus_long = max(len(a), len(b))
+    if abs(len(a) - len(b)) * 20 > 3 * plus_long:
+        return False
+    ca, cb = Counter(a), Counter(b)
+    return max(sum((ca - cb).values()), sum((cb - ca).values())) * 20 <= 3 * plus_long
+
+
 def get_avatar_hash(member):
     """Récupère le hash de l'avatar d'un membre"""
     if member.avatar:
@@ -11825,14 +11848,18 @@ async def detect_alt_account(guild, new_member):
                 existing_users = await cursor.fetchall()
                 for existing_id, existing_norm in existing_users:
                     if existing_norm and new_username_norm:
+                        #  26/10/2026 (banc de plusieurs années) : seuls les membres PRÉSENTS comptent (comme avant), mais
+                        #  la distance n'est plus calculée pour les partis — ni quand la longueur ou les lettres disent déjà
+                        #  « moins de 85 % » : à 5 ans, 74 000 empreintes = des secondes de calcul à CHAQUE arrivée.
+                        existing_member = guild.get_member(existing_id)
+                        if not existing_member or not _nom_peut_ressembler(new_member.name, existing_norm):
+                            continue
                         sim = username_similarity(new_member.name, existing_norm)
                         if sim >= 85:
-                            existing_member = guild.get_member(existing_id)
-                            if existing_member:
-                                confidence += 30
-                                if not main_account_id:
-                                    main_account_id = existing_id
-                                reasons.append(f"Nom très similaire ({int(sim)}%) à {existing_member.name}")
+                            confidence += 30
+                            if not main_account_id:
+                                main_account_id = existing_id
+                            reasons.append(f"Nom très similaire ({int(sim)}%) à {existing_member.name}")
             
             # 5. Vérifier si le compte a été créé juste après un ban
             async with db.execute('''
@@ -22149,6 +22176,12 @@ async def _activite_boot():
         tableau.monter(annonces_modifiables)   # modifier une annonce publiée, en place, depuis l'accueil (la tête)
         tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
         zones.brancher_site_equipage(site_equipage.section_guide)
+    with _Etape("longevite"):
+        #  26/10/2026 : « est-ce qu'il peut tenir le coup sur plusieurs années ? » — la suite des longues listes (journal,
+        #  tickets fermés, casier), une règle de nettoyage visible par famille, les fichiers orphelins, l'état du
+        #  stockage (rubrique Nettoyage). Le compactage de la base passe la nuit (`nettoyage_site_task`).
+        longevite.setup(get_db=get_db, chemin_base=DB_PATH, log=print)
+        tableau.monter(longevite)
     with _Etape("candidature_site"):
         #  26/10/2026 : le questionnaire en ligne du candidat — son lien personnel (le bouton du ticket : `candidature_site.
         #  envoyer_lien` ; le message privé d'un chef d'équipe : `inviter`, bouton persistant), sa page `/tableau/candidature/`
@@ -23584,6 +23617,11 @@ async def on_member_remove(m):
         await equipages.sur_depart(m)  # un capitaine emporte son équipage
     except Exception as ex:
         _logerr("equipages.depart", ex, guild_id=m.guild.id)
+    # 27/10/2026 : les équipes du clan (site) — il sort de son équipe ; un chef parti la laisse sans chef.
+    try:
+        await longevite.membre_parti(m.guild.id, m.id)
+    except Exception as ex:
+        _logerr("equipes.depart", ex, guild_id=m.guild.id)
     # Parti du serveur : son boost s'arrête, sa carte de remerciement aussi.
     try:
         await boosts.retirer(m.guild, m.id)

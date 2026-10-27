@@ -15,6 +15,7 @@ import { ouvrirFiche } from "./fiche.js";
 import { groupes as rangerGroupes, outilsGroupes, avance } from "./rangement.js";
 import { choisirTextes } from "./textes.js";
 import { avecVerrou, protegerEditeur, protegerZone, siLibre } from "./direct.js";
+import { mentionAncien } from "./lien_equipage.js";
 
 const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(p)) delete etat.pages[k]; };
 const RAYON_CORBEILLE = 30;
@@ -47,7 +48,7 @@ export function affiches(vue, ctx) {
     const texte = (a) => [nomAffiche(a), a.surnom, a.membre && a.membre.nom, a.roblox && a.roblox.nom, ...insignes(a, cat).map((i) => i.nom), gradeDe(a, cat)].join(" ");
     let l = (f.vue === "corbeille" ? corbeille : actives).filter((a) => (f.statut === "tous" || a.statut === f.statut) && contient(texte(a), f.q));
     l = f.tri === "prime" ? l.sort((a, b) => (b.prime || 0) - (a.prime || 0)) : f.tri === "recent" ? l.sort((a, b) => (b.maj_le || 0) - (a.maj_le || 0)) : l.sort((a, b) => nomAffiche(a).localeCompare(nomAffiche(b), "fr", { sensitivity: "base" }));
-    const carte = (a) => avecVerrou(affiche(a, cat, { taille: "mini", clic: () => ouvrirAffiche(a.id) }), "affiche:" + a.id);
+    const carte = (a) => mentionAncien(avecVerrou(affiche(a, cat, { taille: "mini", clic: () => ouvrirAffiche(a.id) }), "affiche:" + a.id), a);   // 27/10 : ancien membre (lien_equipage.js)
     if (!l.length) remplacer(resultats, vide(f.vue === "corbeille" ? "La corbeille est vide" : "Aucune affiche ici", f.vue === "corbeille" ? "Une affiche mise à la corbeille y reste " + RAYON_CORBEILLE + " jours." : "Crée la première : « Nouvelle affiche ».", f.vue === "corbeille" ? "supprimer" : "affiches"));
     else if (f.vue === "corbeille") remplacer(resultats, h("p", { classe: "aide" }, "Dans la corbeille : restaure une affiche pour la remettre au mur. Au-delà de " + RAYON_CORBEILLE + " jours, elle est effacée pour de bon."),
       paginer("aff-corbeille", l, (a) => h("div", { classe: "corbeille-item" }, carte(a),

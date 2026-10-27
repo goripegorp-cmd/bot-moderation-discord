@@ -294,7 +294,9 @@ const SCENES = [
   { nom: "equipage-par-equipe", ancre: "#equipage/membres/equipes" },
   { nom: "fenetre-editeur-equipe", ancre: "#equipage/membres/equipes",
     geste: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes(\"Modifier l'équipe\")).click(); return 1; })()" },
-  { nom: "fenetre-fiche-equipe", ancre: "#equipage/membres", geste: CLIQUER_LIGNE("Kolax"), interdits: ["Équipe : aucune"] },
+  //  27/10/2026 : la fiche de Kolax par son adresse — sur une base de plusieurs années (472 au clan), sa ligne n'est pas
+  //  dans la première page de la liste, et le geste ouvrait la fiche d'un autre (sans équipe).
+  { nom: "fenetre-fiche-equipe", ancre: "#equipage/membres&membre=1000", interdits: ["Équipe : aucune"] },
   { nom: "fenetre-nouvelle-equipe", ancre: "#equipage/membres/equipes",
     geste: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle équipe')).click(); return 1; })()" },
   { nom: "fenetre-dossier-demande", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("Demande à lire") },
