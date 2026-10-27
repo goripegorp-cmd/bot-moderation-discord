@@ -1111,3 +1111,22 @@ def test_LV17_chaque_module_de_la_page_se_lit_comme_un_module_es():
         if r.returncode != 0:
             fautes.append(f"{f.name} : {(r.stderr.strip().splitlines() or ['?'])[-1]}")
     assert not fautes, fautes
+
+
+def test_LV18_nombres_lus_en_chiffres_0_9_seulement():
+    """« ² » : 400 et le nom du champ, jamais une erreur 500 ni le texte d'une exception Python (journal?n=²,
+    journal?q=², journal?avant=²:1). Relevé par la sécurité le 27/10/2026 ; même lecture que `tableau.chiffres`."""
+    import asyncio
+    import pytest
+    import longevite
+    with pytest.raises(ValueError) as ex:
+        longevite._entier({"n": "²"}, "n")
+    assert str(ex.value) == "n"
+    assert longevite._entier({"n": "12"}, "n", 0, 1, 50) == 12
+    assert longevite._ids_nommes(None, "²") == []
+    assert longevite._ids_nommes(None, "123") == [123]
+    code, corps = asyncio.run(longevite._route_journal(None, None, {"avant": "²:1"}, None))
+    assert code == 400 and corps.get("champ") == "avant"
+    code, corps = asyncio.run(longevite._route_journal(None, None, {"n": "²"}, None))
+    assert code == 400 and corps.get("champ") == "n"
+    assert ".isdigit()" not in Path(longevite.__file__).read_text(encoding="utf-8")

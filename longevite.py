@@ -105,7 +105,7 @@ def _entier(requete: dict, nom: str, defaut: int = 0, mini: int = 0, maxi: int =
     brut = str(requete.get(nom, "") or "")
     if not brut:
         return defaut
-    if not brut.isdigit() or len(brut) > 18:
+    if not tableau.chiffres(brut, 18):   # 0-9 seulement : « ² » cassait int() (erreur 500)
         raise ValueError(nom)
     return max(mini, min(maxi, int(brut)))
 
@@ -116,7 +116,7 @@ def _recherche(requete: dict) -> str:
 
 def _ids_nommes(g, q: str) -> list:
     """Les membres dont le nom, le pseudo ou l'identifiant contient `q` (RECHERCHE_IDS au plus)."""
-    if q.isdigit():
+    if tableau.CHIFFRES.fullmatch(q):
         return [int(q)] if len(q) <= 20 else []
     cle, out = q.casefold(), []
     for m in getattr(g, "members", None) or []:
@@ -153,7 +153,7 @@ async def _route_journal(g, auteur, requete, corps):
     curseur = None
     if avant:
         morceaux = avant.split(":")
-        if len(morceaux) != 2 or not all(x.isdigit() and len(x) <= 18 for x in morceaux):
+        if len(morceaux) != 2 or not all(tableau.chiffres(x, 18) for x in morceaux):
             return 400, {"erreur": "Demande invalide.", "champ": "avant"}
         curseur = (int(morceaux[0]), int(morceaux[1]))
     cat = str(requete.get("cat", "") or "")[:40]
@@ -683,7 +683,7 @@ def _balayer(medias: set, portraits: set, t: float, effacer: bool) -> dict:
             racine, _, ext = e.name.rpartition(".")
             if e.name.endswith(".tmp"):
                 retirer(e, "restes")
-            elif ext in ("webp", "png") and (int(racine) if sorte == "portraits" and racine.isdigit() else racine) not in connus:
+            elif ext in ("webp", "png") and (int(racine) if sorte == "portraits" and tableau.CHIFFRES.fullmatch(racine) else racine) not in connus:
                 retirer(e, sorte)
     try:
         entrees = list(os.scandir(transcript_store._BASE_DIR))
