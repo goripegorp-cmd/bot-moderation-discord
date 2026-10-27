@@ -19,6 +19,7 @@ import questionnaire as Q
 import recrutements
 import rellseas_panneau
 import textes as textes_registre
+import tickets_interdits  # 27/10/2026 : le refus générique d'un panneau interdit (ses textes)
 import tickets_fils as tickets_fils_vrai
 import visuels
 from conftest_discord import Obj, laisser_finir
@@ -330,6 +331,7 @@ def espace_du_bot(*, g, get_db, cfg, db_set, porteur, categorie, journal, logs, 
           "timezone": timezone, "LayoutView": LayoutView, "Palette": Palette, "View": View, "visuels": visuels,
           "Button": discord.ui.Button, "questionnaire": Q, "recrutements": recrutements,
           "rellseas_ui": rellseas_panneau, "textes": textes_registre, "tickets_fils": outils_fils,
+          "tickets_interdits": tickets_interdits,
           "metiers": metiers, "cfg": cfg, "db_set": db_set,
           "get_db": get_db, "now": lambda: datetime.now(timezone.utc), "webhook_send": webhook_send,
           "send_ticket_log": vrai, "_ticket_hours_allows": heures, "check_rate_limit": lambda *a, **k: True,

@@ -225,6 +225,10 @@ const CASIER_DEPLIE = `(async () => { const c = [...document.querySelectorAll('.
 // Textes & noms : ouvrir le n-ième groupe (Recrutement, Métiers, Le guide du clan, Annonces & événements, Le site).
 const OUVRIR_GROUPE_TEXTES = (n) => `(async () => { const g = document.querySelectorAll('details.groupe')[${n}]; if (g && !g.open) g.open = true; await new Promise(r => setTimeout(r, 600)); return 1; })()`;
 
+// Le bloc « Tickets » de la fiche ouverte, lu (ses lignes ont leur état), amené au milieu de l'écran.
+//  (Par la fiche elle-même : l'adresse « &membre= » ne lit que les identifiants de Discord, 5 chiffres et plus.)
+const VOIR_TICKETS = (id) => "(async () => { (await import('/tableau/espace/s/fiche.js')).ouvrirFiche('" + id + "'); for (let i = 0; i < 40 && !document.querySelector('dialog[open] .fiche-tickets .ti-ligne[data-etat]'); i++) await new Promise(r => setTimeout(r, 200));"
+  + " const b = document.querySelector('dialog[open] .fiche-tickets'); if (!b) throw new Error('bloc Tickets absent'); b.scrollIntoView({ block: 'center' }); return 1; })()";
 // Les scènes : une rubrique (ancre) et, au besoin, des gestes (code exécuté dans la page) avant le contrôle.
 // Les icônes officielles et les logos viennent d'une autre branche (et du wiki, plus tard) : leur 404 est attendu,
 // la page montre alors la pastille gravée. Ce n'est pas une faute de la page, seulement une image pas encore livrée.
@@ -297,6 +301,11 @@ const SCENES = [
   //  27/10/2026 : la fiche de Kolax par son adresse — sur une base de plusieurs années (472 au clan), sa ligne n'est pas
   //  dans la première page de la liste, et le geste ouvrait la fiche d'un autre (sans équipe).
   { nom: "fenetre-fiche-equipe", ancre: "#equipage/membres&membre=1000", interdits: ["Équipe : aucune"] },
+  //  27/10/2026 : le bloc « Tickets » de la fiche (tickets_interdits.js), sous les sanctions — Calico (les tickets du serveur
+  //  interdits depuis le site), puis Ishmael (ceux du clan, la liste noire du recrutement) et « Panneau par panneau ».
+  { nom: "fenetre-fiche-tickets", ancre: "#port/repertoire", geste: VOIR_TICKETS("1004"), interdits: ["undefined", "null"] },
+  { nom: "fenetre-tickets-panneaux", ancre: "#port/repertoire", geste: VOIR_TICKETS("1006"),
+    geste2: cliquerTexte("dialog[open] button", "Panneau par panneau") },
   { nom: "fenetre-nouvelle-equipe", ancre: "#equipage/membres/equipes",
     geste: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle équipe')).click(); return 1; })()" },
   { nom: "fenetre-dossier-demande", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("Demande à lire") },

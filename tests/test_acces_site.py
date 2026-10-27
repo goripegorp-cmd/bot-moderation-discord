@@ -198,6 +198,9 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
     POST securite/fermer_autres
     GET textes
     GET tickets/fermes
+    GET tickets/interdictions
+    POST tickets/interdire
+    POST tickets/lever
     GET textes/site
     POST texte
     POST texte/defaut

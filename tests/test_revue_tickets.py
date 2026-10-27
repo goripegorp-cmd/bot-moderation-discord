@@ -51,7 +51,7 @@ def _source(nom):
 def _ns(*noms, **plus):
     import textes as module_textes   # le registre des textes (bot.py : `import textes`) ; `textes` ici lit les vues
     ns = {"discord": discord, "asyncio": asyncio, "json": json, "re": re, "io": io, "datetime": datetime,
-          "textes": module_textes,
+          "textes": module_textes, "tickets_interdits": __import__("tickets_interdits"),
           "timezone": timezone, "time": __import__("time"), "LayoutView": LayoutView, "Palette": Palette,
           "visuels": visuels, "tickets_fils": tickets_fils, "transcript_store": transcript_store,
           "rellseas_ui": rellseas_panneau, "carte_embed": carte_embed, "Button": discord.ui.Button,

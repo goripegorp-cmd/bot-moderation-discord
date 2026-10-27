@@ -108,6 +108,8 @@ DELETE_SUBJECT_KEEP_ACTOR = {
     "recrutement_eliminations": {"subject": ["membre_id"], "actor": []},
     "recrutement_chef_candidatures": {"subject": ["membre_id"], "actor": ["decide_par"]},
     "recrutement_chefs": {"subject": ["membre_id"], "actor": ["accepte_par"]},
+    # 27/10/2026 — les interdictions de tickets (la fiche d'une personne) : qui, depuis quand, pourquoi, par qui
+    "tickets_interdictions": {"subject": ["membre_id"], "actor": ["par"]},
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

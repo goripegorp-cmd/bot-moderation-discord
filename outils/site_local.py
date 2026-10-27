@@ -274,6 +274,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
 
     async def db_set(_gid, k, v):
         conf[k] = v
+        return True   # comme `db_set` de bot.py (un faux y dit un échec)
 
     def a_la_tete(_g, m, _c=None):
         return m is not None and m.id in TETE
@@ -426,6 +427,13 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
                         decider=decider, autorise=lambda _i: True, journal=journal, log=silence,
                         web=candidature_site, metier=metiers.invitation, metiers_membre=metiers.metiers_du_membre,
                         **chemin.hooks())
+    #  Les interdictions de tickets (27/10/2026), comme l'étape « tickets_interdits » du bot : la VRAIE règle des
+    #  exemptions (`_ticket_sans_limite` de bot.py, lue par le chemin du bot).
+    import tickets_interdits
+    tickets_interdits.setup(get_db=get_db, cfg=cfg, db_set=db_set, tete=TETE, exempte=chemin.ns["_ticket_sans_limite"],
+                            robot=lambda: 999, log=print)
+    await tickets_interdits.init_db()
+    tableau.monter(tickets_interdits)
     try:
         import evenements  # le module des événements du clan : branché s'il est là
     except ModuleNotFoundError:
@@ -486,6 +494,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         await _recrutement_demo(get_db, g, ticket_ouvert, chemin, lourd=lourd)
     finally:
         questionnaire.AVIS_S, questionnaire.PAGE_S = avis
+    await _interdictions_demo(g)
 
     app = health_server.construire_app()
 
@@ -893,6 +902,20 @@ async def _recrutement_demo(get_db, g, ticket_ouvert, chemin, lourd: bool = Fals
             r = await chemin.nommer_chef(max(clan, key=lambda x: x.display_name.casefold()), questionnaire)
             if not r["ok"]:
                 print(f"[SITE LOCAL] chef d'équipe de démonstration refusé : {r}")
+
+
+#  Les interdictions de tickets (27/10/2026) : Calico, les tickets du serveur (posée sur le site, avec son motif) ; Ishmael,
+#  ceux du clan (la liste noire du recrutement) — le bloc « Tickets » de leur fiche a de quoi montrer.
+INTERDITS_DEMO = ((1004, "serveur", "Tickets ouverts pour rien, trois fois", DIRECTION),
+                  (1006, "clan", "Candidature refusée : réponses copiées", FONDATEUR))
+
+
+async def _interdictions_demo(g) -> None:
+    import tickets_interdits
+    for uid, famille, motif, par in INTERDITS_DEMO:
+        r = await tickets_interdits.interdire(g, g.get_member(par), uid, familles=[famille], motif=motif)
+        if not r.get("ok"):
+            print(f"[SITE LOCAL] interdiction de démonstration refusée : {uid} {famille}")
 
 
 #  Le questionnaire en ligne (26/10/2026) : des candidatures de plus, à l'étape du questionnaire, et un chef d'équipe.
