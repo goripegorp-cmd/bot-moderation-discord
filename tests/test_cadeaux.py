@@ -41,7 +41,7 @@ def env(tmp_path, monkeypatch):
     async def noter(_g, type_, texte, **_kw):
         journal.append((type_, texte))
     K.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=autorise, journal=noter, log=lambda *a: None)
-    for d in (K._actifs, K._tampon, K._dernier_msg, K._comptes, K._vocal, K._maj_prevues, K._verrous,
+    for d in (K._actifs, K._tampon, K._dernier_msg, K._rafales, K._comptes, K._vocal, K._maj_prevues, K._verrous,
               K._en_cours, K._annonces_faites):
         d.clear()
     K._charges.clear()
@@ -58,9 +58,10 @@ def serveur():
     return g
 
 
-def _msg(g, mid, auteur, texte="bonjour", bot=False):
+def _msg(g, mid, auteur, texte="bonjour tout le monde !", bot=False, salon=0):
+    """Une phrase complète par défaut : des messages courts à la suite feraient une rafale (27/10)."""
     return Obj(id=mid, guild=g, author=Obj(id=auteur, bot=bot), content=texte, webhook_id=None,
-               type=discord.MessageType.default, attachments=[], stickers=[])
+               type=discord.MessageType.default, attachments=[], stickers=[], channel=Obj(id=salon))
 
 
 def _c(**kw):
@@ -389,3 +390,44 @@ def test_K14_la_commande_giveaway(env):
     run(K.ouvrir_composeur(i))
     vue = _vue(i)
     assert isinstance(vue, K.VueCadeau) and "Rôles exclus" in textes(vue) and "Rôles autorisés" in textes(vue)
+
+
+def test_K15_une_rafale_de_messages_courts_compte_pour_un(env, monkeypatch):
+    """27/10, le fondateur : « si quelqu'un spam comme ça et ne sait pas faire de phrase complète, bah, tu comptes
+    comme s'il avait envoyé qu'un seul message. » Entre deux messages, plus que les 3 s anti-spam : seule la
+    rafale (même personne, même salon, messages courts à moins de RAFALE_S l'un de l'autre) les regroupe."""
+    g = serveur()
+    K._actifs[g.id] = {1: time.time() - 10}
+    horloge = [1000.0]
+    monkeypatch.setattr(K, "_mono", lambda: horloge[0])
+    ids = iter(range(1, 10_000))
+    ecart = K.ECART_MSG_S + 1
+    assert ecart < K.RAFALE_S
+
+    def ecrire(auteur, *textes, salon=50, apres=None):
+        for texte in textes:
+            horloge[0] += ecart if apres is None else apres
+            K.sur_message(_msg(g, next(ids), auteur, texte, salon=salon))
+        return K._tampon[(1, auteur)][0]
+
+    assert K.court("le jeux") and K.court("<:pepe:123> <@45> https://tenor.com/view/chat-drole-gif-123")
+    assert not K.court("je vais tenter ma chance")
+    assert ecrire(7, "le jeux", "me", "tente", "pas", "dsl") == 1, "l'exemple du fondateur : un seul message"
+    assert ecrire(8, "je vais tenter ma chance ce soir", "bonne chance à tout le monde") == 2, \
+        "deux phrases complètes à la suite : deux messages"
+    ecrire(9, "le jeux", "me")
+    horloge[0] += K.RAFALE_S
+    assert ecrire(9, "tente", "pas", "dsl") == 2, "une pause plus longue que la fenêtre : une nouvelle rafale"
+    ecrire(10, "le jeux", salon=50)
+    assert ecrire(10, "me", salon=51) == 2, "deux salons : deux rafales"
+    ecrire(11, "le jeux")
+    ecrire(12, "me", apres=1)
+    ecrire(11, "tente", apres=ecart - 1)
+    assert K._tampon[(1, 11)][0] == 1 and K._tampon[(1, 12)][0] == 1, "deux personnes : deux rafales"
+    horloge[0] += K.RAFALE_S
+    ecrire(13, "ok")
+    assert list(K._rafales) == [(50, 13)], "les rafales finies sortent de la mémoire"
+    monkeypatch.setattr(K, "RAFALES_MAX", 3)
+    for uid in range(20, 30):
+        ecrire(uid, "salut", apres=0)
+    assert len(K._rafales) == 3, "jamais plus de RAFALES_MAX rafales suivies"

@@ -36,7 +36,7 @@ def env(tmp_path, monkeypatch):
     async def noter(_g, type_, texte, **_kw):
         journal.append((type_, texte))
     K.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=autorise, journal=noter, log=lambda *a: None)
-    for d in (K._actifs, K._tampon, K._dernier_msg, K._comptes, K._vocal, K._maj_prevues, K._verrous,
+    for d in (K._actifs, K._tampon, K._dernier_msg, K._rafales, K._comptes, K._vocal, K._maj_prevues, K._verrous,
               K._en_cours, K._annonces_faites):
         d.clear()
     K._charges.clear()
@@ -64,7 +64,7 @@ def _ecrire(env, g, uid, n):
     for _k in range(n):
         env.horloge[0] += 5
         assert K.sur_message(Obj(id=int(env.horloge[0] * 10) + uid, guild=g, author=Obj(id=uid, bot=False),
-                                 content="bonjour", webhook_id=None, type=discord.MessageType.default,
+                                 content="bonjour tout le monde !", webhook_id=None, type=discord.MessageType.default,
                                  attachments=[], stickers=[]))
 
 

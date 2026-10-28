@@ -44,7 +44,7 @@ def env(tmp_path, monkeypatch):
     run(I.init_db())
     K.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=autorise, journal=noter, log=logs.append,
             invitations=I.total, invitations_tous=I.totaux, relever=I.reconcilier)
-    for d in (K._actifs, K._tampon, K._dernier_msg, K._comptes, K._vocal, K._maj_prevues, K._verrous,
+    for d in (K._actifs, K._tampon, K._dernier_msg, K._rafales, K._comptes, K._vocal, K._maj_prevues, K._verrous,
               K._minuteurs, K._en_cours, K._annonces_faites):
         d.clear()
     K._charges.clear()
@@ -76,7 +76,7 @@ def _ecrire(env, g, uid, n):
     for _k in range(n):
         env.horloge[0] += 5
         assert K.sur_message(Obj(id=int(env.horloge[0] * 10) + uid, guild=g, author=Obj(id=uid, bot=False),
-                                 content="bonjour", webhook_id=None, type=discord.MessageType.default,
+                                 content="bonjour tout le monde !", webhook_id=None, type=discord.MessageType.default,
                                  attachments=[], stickers=[]))
 
 
@@ -322,7 +322,7 @@ def test_R4_la_purge_en_masse_decompte_les_messages(env):
         env.horloge[0] += 5
         mid = int(env.horloge[0] * 10)
         ids_.append(mid)
-        assert K.sur_message(Obj(id=mid, guild=g, author=Obj(id=7, bot=False), content="bonjour", webhook_id=None,
+        assert K.sur_message(Obj(id=mid, guild=g, author=Obj(id=7, bot=False), content="bonjour tout le monde !", webhook_id=None,
                                  type=discord.MessageType.default, attachments=[], stickers=[]))
     erreurs = []
     ns = {"cadeaux": K, "_logerr": lambda *a, **k: erreurs.append(a)}
