@@ -188,6 +188,113 @@ _RE_THREAT = (None, None)
 _RE_THREAT_SOFT = (None, None)
 
 
+# ── LANGUE DE LA PHRASE (27/10/2026, le fondateur : « les mots utilisés dans d'autres pays, si c'est utilisé
+# en français, ça ne veut pas dire la même chose ») ─────────────────────────────────────────────────────────
+# Une détection simple par mots outils : elle ne sert qu'aux mots AMBIGUS d'une langue à l'autre (« retard »
+# validiste en anglais, « en retard » en français ; « bite » grossier en français, « don't bite » en anglais).
+# Un mot outil propre à une langue compte 2, un mot partagé (« la », « de », « en »…) 1 pour chaque langue.
+_OUTILS = {
+    "fr": {"le", "les", "des", "du", "au", "aux", "et", "est", "je", "il", "elle", "on", "nous", "vous", "ils",
+           "elles", "ce", "cette", "ces", "ca", "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses", "pas",
+           "ne", "qui", "quoi", "pour", "dans", "sur", "avec", "mais", "ou", "donc", "car", "suis", "sommes",
+           "etes", "ai", "avons", "avez", "ont", "fait", "trop", "tres", "moi", "toi", "lui", "leur", "j", "c",
+           "qu", "t", "l", "d", "n", "m", "s", "une", "toujours", "encore", "deja"},
+    "en": {"the", "an", "is", "are", "was", "were", "be", "you", "your", "youre", "i", "im", "my", "me", "it",
+           "its", "this", "that", "dont", "do", "does", "did", "to", "of", "on", "and", "or", "with", "for", "at",
+           "by", "from", "not", "so", "what", "why", "how", "just", "like", "he", "she", "they", "we", "us",
+           "them", "his", "her", "their", "there", "here", "can", "cant", "will", "would", "should", "could",
+           "have", "has", "had", "get", "got", "go", "gonna", "wanna", "u", "ur", "such", "alert"},
+    "es": {"el", "los", "las", "del", "al", "y", "soy", "eres", "esta", "estan", "estoy", "con", "mi", "mis",
+           "tus", "sus", "por", "para", "pero", "como", "muy", "yo", "ella", "ellos", "lo", "hay", "ser",
+           "estar", "hola", "gracias", "amigo", "amiga", "amigos", "mucho", "nada", "porque", "cuando"},
+}
+_OUTILS_PARTAGES = {"la": ("fr", "es"), "de": ("fr", "es"), "en": ("fr", "es"), "un": ("fr", "es"),
+                    "que": ("fr", "es"), "tu": ("fr", "es"), "es": ("fr", "es"), "a": ("fr", "en", "es"),
+                    "no": ("en", "es"), "si": ("fr", "es"), "se": ("fr", "es"), "me": ("fr", "es")}
+_MOT_RE = re.compile(r"[a-z0-9]+")
+
+
+def _plier_texte(texte: str) -> str:
+    """Minuscules, sans accents, apostrophes et ponctuation en espaces : « T'es ATTEINT ! » → « t es atteint »."""
+    import unicodedata
+    try:
+        t = unicodedata.normalize("NFKD", str(texte or "").lower())
+        t = "".join(c for c in t if not unicodedata.combining(c))
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", t).split())
+    except Exception:
+        return str(texte or "").lower()
+
+
+def langue(texte: str, defaut: str = "fr") -> str:
+    """« fr », « en » ou « es » d'après les mots outils ; `defaut` sans indice (le texte du serveur : « fr » ; le
+    titre d'un GIF, presque toujours anglais : « en ») ou à égalité qui ne le contient pas (alors « fr »)."""
+    score = {"fr": 0, "en": 0, "es": 0}
+    #  Les contractions anglaises restent un mot (« don't » → « dont », pas « don t » : « t » est un indice français).
+    texte = re.sub(r"(?i)(\w)['’](t|s|m|re|ll|ve|d)\b", r"\1\2", str(texte or ""))
+    for mot in _MOT_RE.findall(_plier_texte(texte)):
+        for lg, mots in _OUTILS.items():
+            if mot in mots:
+                score[lg] += 2
+        for lg in _OUTILS_PARTAGES.get(mot, ()):
+            score[lg] += 1
+    haut = max(score.values())
+    if haut == 0:
+        return defaut
+    tetes = [lg for lg in ("fr", "en", "es") if score[lg] == haut]
+    return defaut if defaut in tetes else tetes[0]
+
+
+# Mots AMBIGUS d'une langue à l'autre : (mot plié) → {langue : effet}. Effet = niveau d'insulte, ou
+# « validisme ». Absent pour une langue = un mot normal dans cette langue (« con mi amigo », « pain », « coin »).
+_AMBIGUS = {
+    "retard": {"en": "validisme"}, "retards": {"en": "validisme"},     # « you retard » ≠ « je suis en retard »
+    "bite": {"fr": 2}, "bites": {"fr": 2},                             # FR grossier ≠ « don't bite »
+}
+
+# ── VALIDISME EN CONTEXTE (27/10/2026, le fondateur : « trisomique », « mongol », « attardé », « t'es atteint ») ──
+# Toujours, quel que soit le contexte : les formes sans autre sens. En CONTEXTE seulement (une personne visée :
+# « t'es », « espèce de », « sale », « gros »…) : « mongol » (le peuple, l'empire du jeu), « gogol » (l'écrivain,
+# « Google » chez les petits), « handicapé » (un fait), « atteint » (« objectif atteint », « atteint du covid »).
+_VALIDISME_TOUJOURS = frozenset({"golmon", "golmons", "mongolito", "mongolitos"})
+_VALIDISME_CIBLE_RE = re.compile(
+    r"(?<![a-z0-9])(?:t es|tu es|tes|t etais|tu etais|vous etes|espece d|espece de|sale|gros|grosse|pauvre|"
+    r"bande de|petit|petite)\s+(?:(?:un|une|vraiment|completement|grave|trop|tellement|vrai|vraie|gros|grosse|"
+    r"sale)\s+)*(?:mongol|mongole|mongols|mongoles|gogol|gogole|gogols|gogoles|handicape|handicapee|handicapes|"
+    r"handicapees|atteint|atteinte|atteints|atteintes)(?![a-z0-9])"
+    r"(?!\s+(?:de|du|des|d|par|moteur|physique|d une|d un)(?![a-z0-9]))")
+_VALIDISME_CERVEAU_RE = re.compile(
+    r"(?<![a-z0-9])(?:atteint|atteinte|atteints|atteintes|handicape|handicapee|handicapes)\s+"
+    r"(?:du cerveau|au cerveau|de la tete|mentalement|mental)(?![a-z0-9])")
+
+
+def ambigus(texte: str, lg: str | None = None, defaut: str = "fr") -> list:
+    """[(mot, effet)] des mots AMBIGUS qui, dans la langue de la phrase, sont une insulte."""
+    try:
+        lg = lg or langue(texte, defaut)
+        return [(m, _AMBIGUS[m][lg]) for m in _MOT_RE.findall(_plier_texte(texte))
+                if m in _AMBIGUS and lg in _AMBIGUS[m]]
+    except Exception:
+        return []
+
+
+def validisme_en_contexte(texte: str, lg: str | None = None, defaut: str = "fr"):
+    """Le terme validiste trouvé par le contexte ou la langue (voir plus haut), ou None."""
+    try:
+        p = _plier_texte(texte)
+        for m in _MOT_RE.findall(p):
+            if m in _VALIDISME_TOUJOURS:
+                return m
+        x = _VALIDISME_CIBLE_RE.search(p) or _VALIDISME_CERVEAU_RE.search(p)
+        if x:
+            return x.group(0)
+        for m, effet in ambigus(texte, lg, defaut):
+            if effet == "validisme":
+                return m
+    except Exception:
+        return None
+    return None
+
+
 def _compile_abbr(terms):
     """Compile des termes COURTS (≥2) en frontière de mot stricte (pour « tg » & co.)."""
     terms = sorted({(t or "").lower().strip() for t in terms if t and len((t or "").strip()) >= 2},
@@ -305,11 +412,12 @@ def _hit(pair, text):
     return None
 
 
-def scan(raw: str, normalized: str | None = None):
+def scan(raw: str, normalized: str | None = None, lg: str | None = None):
     """Renvoie (niveau, terme) le PLUS GRAVE trouvé (3 > 2 > 1) sur le texte, ou (0, None).
 
     `normalized` : version dé-obfusquée (anti-homoglyphes/zero-width) fournie par l'appelant
-    (bot._normalize_for_scan) — scannée EN PLUS du brut (defense in depth). FAIL-SAFE."""
+    (bot._normalize_for_scan) — scannée EN PLUS du brut (defense in depth). `lg` : la langue de la phrase pour
+    les mots ambigus (sinon devinée, le français par défaut ; le titre d'un GIF passe « en »). FAIL-SAFE."""
     if not raw:
         return 0, None
     variants = [raw]
@@ -351,10 +459,14 @@ def scan(raw: str, normalized: str | None = None):
             h = _hit(_RE1, v)
             if h:
                 best, term = 1, h
+    if best < 2:   # 27/10/2026 : un mot AMBIGU d'une langue à l'autre, jugé selon la langue de la phrase
+        for mot, effet in ambigus(raw, lg):
+            if isinstance(effet, int) and effet > best:
+                best, term = effet, mot
     return best, term
 
 
-def ableist_hit(raw: str, normalized: str | None = None):
+def ableist_hit(raw: str, normalized: str | None = None, lg: str | None = None):
     """Renvoie le terme de VALIDISME trouvé (« autiste », « mongol », « trisomique »…), ou None.
     À bloquer MÊME en auto-référence (owner 2026-06-27). Scan brut + plié + normalisé, frontière
     de mot. FAIL-SAFE → None."""
@@ -376,9 +488,9 @@ def ableist_hit(raw: str, normalized: str | None = None):
             h = _hit(_RE_ABLEIST, v)
             if h:
                 return h
+        return validisme_en_contexte(raw, lg) or (validisme_en_contexte(normalized, lg) if normalized else None)
     except Exception:
         return None
-    return None
 
 
 def threat_hit(raw: str, normalized: str | None = None):
