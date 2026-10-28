@@ -14,10 +14,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.12
+      - name: Setup Python 3.13
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'   # 28/10/2026 : la version de la production (Railway)
 
       - name: Install dependencies
         run: |
@@ -25,7 +25,10 @@ jobs:
           # On installe juste pytest + les deps réelles du bot.
           # discord.py / aiosqlite / aiohttp sont nécessaires pour les imports.
           pip install pytest pytest-asyncio
-          pip install "discord.py>=2.7,<3" aiosqlite aiohttp python-dotenv
+          # 28/10/2026 : les vraies dépendances du bot (Pillow compris : les images du site, la bannière de la vitrine) —
+          # sans nudenet (le modèle d'images, lourd, que les tests n'utilisent pas).
+          grep -viE '^nudenet' requirements.txt > /tmp/req-ci.txt
+          pip install -r /tmp/req-ci.txt
 
       - name: Run pytest smoke tests
         run: |
