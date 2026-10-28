@@ -7,7 +7,7 @@
 // dans « Tendances », en bas (« Tout afficher » : le mode simple les cache, comme partout) ; sa liste « À traiter
 // maintenant » était celle-ci.
 
-import { h, icone, depuis, dans, maintenant, remplacer, quantite, ajouter, date, cleJour, duree, nombre } from "./dom.js";
+import { h, icone, depuis, dans, maintenant, remplacer, quantite, ajouter, date, cleJour, nombre } from "./dom.js";
 import { etat, P, peutAgir, aller, emettre, filtres, CATEGORIES } from "./noyau.js";
 import { charger, vue as vueJeu } from "./donnees.js";
 import * as HL from "./hors_ligne.js";
@@ -64,12 +64,7 @@ export function aFaire() {
         sous: propre(t.type) + " · ouvert " + depuis(t.ouvert), quand: t.ouvert,
         action: t.salon ? { libelle: "Ouvrir sur Discord", icone: "discord", href: t.salon } : { libelle: "Voir", icone: "tickets", faire: () => aller("port", "tickets", t.rellseas ? "clan" : "normaux") } });
     }
-    for (const q of (d.questions && d.questions.liste) || []) {
-      if (q.statut !== "ouverte" || n - q.quand < 30 * 60) continue;
-      const p = P(q.id);
-      pousser({ sorte: "question", prio: 3, personne: p, phrase: "Question de " + nomDe(p) + " sans réponse", sous: nomSalon(q.salon) + " · « " + q.texte + " »", quand: q.quand,
-        action: q.message ? { libelle: "Répondre", icone: "discord", href: q.message } : { libelle: "Voir", icone: "salons", faire: () => aller("port", "salons", "questions") } });
-    }
+    //  28/10/2026 : plus de « Question sans réponse » ici — le bot répond lui-même (Le Port › Salons › Réponses du bot).
     const idees = ((d.suggestions && d.suggestions.liste) || []).filter((x) => !x.retire_le && x.statut === "attente");
     if (idees.length) pousser({ sorte: "idees", prio: 4, icone: "etoile", phrase: idees.length > 1 ? idees.length + " idées attendent ta réponse" : "Une idée attend ta réponse",
       sous: idees.slice(0, 3).map((x) => "« " + x.titre + " »").join(" · "), quand: Math.min(...idees.map((x) => x.cree || n)),
@@ -130,7 +125,7 @@ export const nombreAFaire = () => aFaire().filter((x) => x.prio <= 3).length;
 
 // Au-delà de trois choses de la même sorte : les trois plus anciennes, puis « et N autres » vers la bonne page.
 const TOUT_VOIR = {
-  ticket: ["autres tickets que personne n'a pris", () => aller("port", "tickets")], question: ["autres questions sans réponse", () => aller("port", "salons", "questions")],
+  ticket: ["autres tickets que personne n'a pris", () => aller("port", "tickets")],
   decider: ["autres candidatures à décider", () => aller("capitainerie", "recrutement")], corriger: ["autres candidatures à corriger", () => aller("capitainerie", "recrutement")],
   inactif: ["autres membres inactifs après le rappel", () => aller("equipage", "membres")], alerte: ["autres alertes", () => voirAlertes()],
   brouillon: ["autres brouillons", () => aller("equipage", "annonces", "brouillons")], evenement: ["autres événements sans réponse", () => aller("equipage", "annonces", "a-venir")],
@@ -186,17 +181,16 @@ function chiffresBord() {
   const d = etat.d;
   if (!d) return null;
   const ouverts = d.tickets.ouverts, nonPris = ouverts.filter((t) => !t.pris_par);
-  const qOuvertes = ((d.questions && d.questions.liste) || []).filter((q) => q.statut === "ouverte");
+  const parLeBot = ((d.questions && d.questions.liste) || []).filter((q) => q.statut === "bot");
   const alertes = d.alertes || [], clan = (d.clan && d.clan.membres) || [];
   const inactifs = clan.filter((m) => m.rang === 2).length;
-  const st = (d.questions && d.questions.stats) || {};
   const etapes = new Map(d.en_cours.map((c) => [c, etapeCandidature(c)]));
   const aCorriger = d.en_cours.filter((c) => etapes.get(c) === "corriger").length;
   const aDecider = d.en_cours.filter((c) => etapes.get(c) === "decider").length;
   const attente = HL.file.ops.length;
   return tuiles(
     tuile({ cle: "a1", lib: "Tickets ouverts", val: ouverts.length, icone: "tickets", sous: nonPris.length + " pas encore pris", teinte: "#a8641c", clic: () => aller("port", "tickets") }),
-    tuile({ cle: "a2", lib: "Questions sans réponse", val: qOuvertes.length, icone: "salons", sous: st.delai_median ? "réponse médiane : " + duree(st.delai_median) : "aucune réponse mesurée", teinte: "#1f4e5a", clic: () => aller("port", "salons", "questions") }),
+    tuile({ cle: "a2", lib: "Réponses du bot", val: parLeBot.length, icone: "salons", sous: "questions traitées par le bot · 30 jours", teinte: "#1f4e5a", clic: () => aller("port", "salons", "questions") }),
     tuile({ cle: "a3", lib: "Alertes en cours", val: alertes.length, icone: "attention", sous: alertes.length ? "membres qui cumulent du grave" : "rien à signaler", teinte: alertes.length ? "#8e2a24" : "#3f6b3a", clic: alertes.length ? voirAlertes : null }),
     tuile({ cle: "a4", lib: "Sanctions · 30 jours", val: d.sanctions.trente_jours, icone: "sanctions", sous: nombre(d.sanctions.total) + " au casier", teinte: "#5e3a4e", clic: () => aller("port", "sanctions") }),
     tuile({ cle: "a5", lib: "Candidatures", val: d.en_cours.length, icone: "candidatures", sous: aDecider + " à décider · " + aCorriger + " à corriger", teinte: "#7a4b2a", clic: () => aller("capitainerie", "recrutement") }),

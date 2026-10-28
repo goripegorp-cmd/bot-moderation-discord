@@ -17,7 +17,6 @@ import zones
 from conftest_discord import Obj, base
 from faux_serveur import Forum, Monde, interaction, run, textes
 from test_entraide import demande_valeurs, env, installe, publier  # noqa: F401 — la fixture `env` est réutilisée
-from test_faq_tickets import Message as MessageFaq, faq_env  # noqa: F401
 
 RACINE = Path(__file__).resolve().parent.parent
 SRC = (RACINE / "bot.py").read_text(encoding="utf-8")
@@ -35,7 +34,6 @@ def _propre():
         d.clear()
     E._SUIVI.update(reponses=0, retirees_en_direct=0)
     yield
-    faq.set_hooks()
 
 
 def _reponse(g, fil, membre_id, a):
@@ -131,27 +129,7 @@ def test_R4_certifier_ni_soi_meme_ni_un_echange_dont_on_est_partie(env):
 
 # ─── La FAQ ──────────────────────────────────────────────────────────────────
 
-def test_R5_la_faq_se_tait_dans_help_et_trade_et_un_membre_retenu_ne_bloque_pas_le_salon(faq_env):
-    g, chat = faq_env.g, faq_env.chat
-    effaces = []
-
-    async def plus_tard(m, s):
-        effaces.append(s)
-    faq.set_hooks(exclus=lambda _g, _c: {chat.id}, effacer_plus_tard=plus_tard)
-    assert not run(faq.sur_message(MessageFaq(chat, g.membre(7), "comment on peut faire du trading ?"), maintenant=1.0))
-    faq.set_hooks(exclus=lambda _g, _c: set(), effacer_plus_tard=plus_tard)
-    q = "comment on peut faire du trading ?"
-    m = MessageFaq(chat, g.membre(7), q)
-
-    async def reponse(**kw):
-        m.reponses.append(kw)
-        return Obj(id=1)
-    m.reply = reponse
-    assert run(faq.sur_message(m, maintenant=10.0)) and effaces == [faq.EFFACER_S], "l'effacement survit au redémarrage"
-    autre = MessageFaq(chat, g.membre(7), q)
-    assert not run(faq.sur_message(autre, maintenant=10.0 + faq.SALON_S + 1)), "le même membre attend"
-    assert run(faq.sur_message(MessageFaq(chat, g.membre(8), q), maintenant=10.0 + faq.SALON_S + 2)), \
-        "un autre membre, juste après : le salon n'a pas été pris par la question retenue"
+#  R5 (la FAQ se tait dans 🛟 Help / 🤝 Trade, l'effacement survit au redémarrage) : tests/test_reponses_auto.py, R8.
 
 
 def test_R6_les_motifs_trop_larges():
@@ -212,7 +190,7 @@ def test_R9_branche_dans_le_bot():
     assert 'bot.add_listener(_entraide_message, "on_message")' in SRC
     assert 'bot.add_listener(_entraide_effacement, "on_raw_message_delete")' in SRC
     assert 'bot.add_listener(_entraide_effacement_masse, "on_raw_bulk_message_delete")' in SRC
-    assert "faq.set_hooks(exclus=" in SRC and '_register_for_cleanup(m, secondes, "faq")' in SRC
+    assert "exclus=lambda g, c: entraide.ids_salons(c) - {0}" in SRC and '_register_for_cleanup(m, secondes, "faq")' in SRC
     assert "if _dans_entraide(msg.channel, c):" in _source("_questions_hook")
     boucle = _source("entraide_task")
     assert boucle.index("suggestions.assurer_panneau(g)") < boucle.index("zones.entretenir(g)")

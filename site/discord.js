@@ -10,12 +10,13 @@ import {
   section, sectionTete, barres, barresH, ENCRES, lienNom, nomDe, confirmer, toast, bandeau, caseACocher, compteur, squelettes, boutonCopie,
 } from "./ui.js";
 import {
-  ouvrirFiche, ouvrirConversation, agir, teinteCat, teinteType, libelleType, GROUPES_SANCTION, STATUTS_Q, STATUTS_S,
+  ouvrirFiche, ouvrirConversation, agir, teinteCat, teinteType, libelleType, GROUPES_SANCTION, STATUTS_S,
   STATUTS_I, STATUTS_CAND, deplier, sondageVotes, nomSalon, recentsDabord, propre,
   ligneJournal,
 } from "./fiche.js";
 import { ligne, lignes, groupes, outilsGroupes, groupesParPeriode, groupesParJours, pastilleIcone, quandLigne, badgeRestreint, estRestreint, avance } from "./rangement.js";
 import { avecVerrou, protegerZone } from "./direct.js";
+import { vueReponsesBot } from "./reponses_bot.js";
 import {
   journalSuite, comptesParCategorie, chiffresJournal, comptesMois, moisArchive, fermesDepuis, fermesRecherche, reunirFermes,
   casierMembres, casierPlus, casierRecherche, texteApercu, apercuReglette, boutonNettoyerRegle, cadreStockage, FAMILLES, familleDe as familleRegle,
@@ -514,7 +515,7 @@ function lignePersonne(x) {
 // 27/10/2026 : cinq onglets — « Idées & sondages » (avis) réunit deux vues, les idées et les sondages, aux adresses
 // d'avant (#port/salons/idees, #port/salons/sondages), choisies sans quitter la page. Chaque nom se renomme (Textes &
 // noms) : l'onglet et ses deux vues.
-export const SOUS_SALONS = nommerOnglets("site.sous.port.salons", [["questions", "Questions", "salons"], ["avis", "Idées & sondages", "etoile"], ["idees", "Idées", "etoile"],
+export const SOUS_SALONS = nommerOnglets("site.sous.port.salons", [["questions", "Réponses du bot", "salons"], ["avis", "Idées & sondages", "etoile"], ["idees", "Idées", "etoile"],
   ["sondages", "Sondages", "drapeau"], ["entraide", "Entraide & trade", "ancre"], ["annonces", "Annonces", "cloche"], ["droits", "Droits des salons", "cle"]]);
 const ONGLETS_SALONS = ["questions", "avis", "entraide", "annonces", "droits"];
 const VUES_AVIS = ["idees", "sondages"];
@@ -524,13 +525,13 @@ export function salons(vue, ctx) {
   const f = filtres("salons", { q: "", ques: "ouverte", idees: "ouvertes", sond: "en_cours", entr: "ouvertes" });
   const onglets = h("div", { classe: "sous-onglets", role: "tablist", "aria-label": "Salons" });
   const resultats = h("div", { classe: "pile" });
-  const outils = h("div", { classe: "outils" }, recherche(f.q, "Question, idée, membre, salon…", (q) => { f.q = q; resetPages("sal"); maj(); }));
+  const outils = h("div", { classe: "outils" }, recherche(f.q, "Message, idée, membre, salon…", (q) => { f.q = q; resetPages("sal"); maj(); }));
   ajouter(vue, [onglets, outils, resultats]);
   let vues = null;   // « Idées | Sondages », à côté de la recherche
   const maj = () => {
     const d = etat.d;
     const nb = d ? {
-      questions: ((d.questions && d.questions.stats) || {}).ouvertes || 0, idees: ((d.suggestions && d.suggestions.stats) || {}).ouvertes || 0,
+      idees: ((d.suggestions && d.suggestions.stats) || {}).ouvertes || 0,
       sondages: ((d.sondages && d.sondages.stats) || {}).en_cours || 0, entraide: ((d.entraide && d.entraide.stats) || {}).ouvertes || 0,
       annonces: ((d.annonces && d.annonces.stats) || {}).total || 0, droits: (Array.isArray(d.salons) ? d.salons : []).reduce((a, c) => a + ((c && c.salons) || []).length, 0),
     } : {};
@@ -546,47 +547,11 @@ export function salons(vue, ctx) {
     if (vues) outils.append(vues);
     outils.hidden = sous === "droits";
     if (!d) { remplacer(resultats, indisponible()); return; }
-    remplacer(resultats, ...[{ questions: sousQuestions, idees: sousIdees, sondages: sousSondages, entraide: sousEntraide, annonces: sousAnnonces, droits: sousDroits }[sous](d, f, maj)].flat());
+    remplacer(resultats, ...[{ questions: (_d, f_, m_) => vueReponsesBot(f_, m_), idees: sousIdees, sondages: sousSondages, entraide: sousEntraide, annonces: sousAnnonces, droits: sousDroits }[sous](d, f, maj)].flat());
   };
   maj();
   // Les deux vues d'« Idées & sondages » : sans quitter la page ; un autre onglet : la page neuve (`false`).
   return { maj, sous: (s) => { const n = s === "avis" ? "idees" : s; if (!VUES_AVIS.includes(n) || !VUES_AVIS.includes(sous)) return false; sous = n; resetPages("sal"); maj(); } };
-}
-function sousQuestions(d, f, maj) {
-  const q = d.questions || {}, l = q.liste || [], st = q.stats || {};
-  if (q.erreur) return vide("Questions momentanément illisibles");
-  const top = (st.salons || [])[0];
-  const nb = { tous: l.length };
-  l.forEach((x) => { nb[x.statut] = (nb[x.statut] || 0) + 1; });
-  const filtre = recentsDabord(l.filter((x) => (f.ques === "tous" || x.statut === f.ques) && contient([x.texte, x.salon, P(x.id).nom, P(x.id).pseudo, x.id].join(" "), f.q)), "quand");
-  const zone = h("div", { classe: "groupes-zone" }, filtre.length ? groupesParPeriode("sal-q", filtre, (x) => x.quand, (x) => ligneQuestion(x, f.ques !== "tous"), { forcer: !!f.q, ouverts: f.ques === "ouverte" ? 5 : 1 })
-    : vide(f.ques === "ouverte" ? "Aucune question en attente" : "Rien ici", f.ques === "ouverte" ? "Tout le monde a eu sa réponse." : "Change le filtre ou la recherche.", "succes"));
-  return [tuiles(
-    tuile({ cle: "q1", lib: "Sans réponse", val: st.ouvertes || 0, icone: "salons", teinte: "#a8641c" }),
-    tuile({ cle: "q2", lib: "Répondues · 7 jours", val: st.repondues_7 || 0, icone: "valider", teinte: "#3f6b3a" }),
-    tuile({ cle: "q3", lib: "Réponse du staff", texte: duree(st.delai_median), icone: "minuteur", sous: "délai médian", teinte: "#1f4e5a" }),
-    tuile({ cle: "q4", lib: "Salon le plus questionné", texte: top ? nomSalon(top.salon) : "—", icone: "carte", sous: top ? quantite(top.n, "question(s)") + " sur 30 jours" : null, teinte: "#5e3a4e" })),
-  h("div", { classe: "rangee entre" }, puces([["ouverte", "Sans réponse", nb.ouverte || 0, "#a8641c"], ["repondue", "Répondues", nb.repondue || 0, "#3f6b3a"], ["resolue", "Résolues", nb.resolue || 0, "#3f6b3a"],
-    ["traitee", "Traitées", nb.traitee || 0, "#1f4e5a"], ["ignoree", "Pas des questions", nb.ignoree || 0, "#4a5560"], ["tous", "Toutes", nb.tous]], f.ques, (v) => { f.ques = v; resetPages("sal"); maj(); }, "Statut"),
-    h("div", { classe: "rangee" }, filtre.length > 1 ? outilsGroupes(zone) : null,
-      avance(exporter("Exporter", [["Questions · 30 jours (CSV)", { quoi: "questions" }], ["Questions · 30 jours (JSON)", { quoi: "questions", format: "json" }]])))),
-  h("p", { classe: "aide avance" }, "Relevées toutes seules dans les salons publics. Elles se ferment quand le staff répond ou quand l'auteur dit que c'est bon."),
-  zone];
-}
-/** Une question relevée dans un salon : le texte sur une ligne (en entier au clic), qui, où ; Discord et le statut à droite. */
-function ligneQuestion(x, sansStatut) {   // sansStatut : la liste est déjà filtrée sur un statut, inutile de le répéter
-  const [lib, teinte] = STATUTS_Q[x.statut] || [x.libelle, null];
-  const ouverte = x.statut === "ouverte";
-  return ligne({
-    visuel: avatar(P(x.id), "p"), titre: x.texte,
-    sous: [lienNom(x.id, ouvrirFiche), " · " + nomSalon(x.salon), x.par ? " · répondu par " + sansEmoji(x.par) + (x.repondu_le && x.repondu_le >= x.quand ? " en " + duree(x.repondu_le - x.quand) : "") : ""],
-    badges: sansStatut ? [] : [pastille(lib, teinte)], ...quandLigne(x.quand), etat: ouverte ? "chaude" : null,
-    actions: [x.message ? { icone: "discord", libelle: ouverte ? "Répondre sur Discord" : "Voir sur Discord", href: x.message } : null,
-      ouverte ? { icone: "valider", libelle: "Traitée", reseau: true, onclick: () => agir({ action: "question", question: x.question, statut: "traitee" }, "", "", { direct: true }) }
-        : { icone: "synchro", libelle: "Rouvrir", reseau: true, onclick: () => agir({ action: "question", question: x.question, statut: "ouverte" }, "", "", { direct: true }) },
-      ouverte ? { icone: "annuler", libelle: "Pas une question", reseau: true, onclick: () => agir({ action: "question", question: x.question, statut: "ignoree" }, "", "", { direct: true }) } : null],
-    visibles: 3, deplier: () => h("p", { classe: "texte" }, x.texte), donnees: { question: x.question },
-  });
 }
 function sousIdees(d, f, maj) {
   const idees = d.suggestions || {}, li = idees.liste || [];

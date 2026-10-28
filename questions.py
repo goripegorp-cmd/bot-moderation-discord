@@ -9,11 +9,16 @@ membre, une mention d'un autre membre) est écarté. Elle devient « répondue �
 répond (réponse, mention de l'auteur, fil ouvert sur elle, message dans les 10 minutes) ou qu'un
 membre lui répond directement, « résolue » quand l'auteur dit merci ou que c'est bon, « traitée »
 ou « ignorée » depuis le site. Conservée 30 jours.
+
+27/10/2026 — le bot répond lui-même (`reponses_auto.py`) : une question qu'il a traitée (répondue, ou retenue par son
+anti-spam) passe « bot » et n'attend plus personne ; le bavardage social (« Ma pp est bien ? », « vous aimez mon
+skin ? », « qui veut jouer ? ») n'est plus une question (`SOCIAL`). Le site ne demande plus au staff d'y répondre.
 """
 from __future__ import annotations
 
 import re
 import time
+import unicodedata
 
 import discord
 
@@ -28,6 +33,23 @@ BAVARDAGE = re.compile(
     r"^(ça|ca|sa|cv|tu|t'?es|tes|vous|wsh|slt|salut|yo|hey|re|bjr|bonjour|bonsoir|hello|hi|mdr|ptdr|lol)\b"
     r".{0,25}$|\b(ça va|ca va|tu fais quoi|vous faites quoi|t'?es o[uù]|qui (joue|veut jouer|est co|est l[aà])"
     r"|quelqu'?un (pour|veut) (jouer|voc|vocal)|on joue)\b", re.I)
+#  27/10/2026 : le bavardage social, sur le texte sans accents (`plat`) — l'avis sur soi (« ma pp est bien ? »), les goûts
+#  (« vous aimez… », « ton avis »), les questions personnelles, la présence (« y a quelqu'un ? »), l'envie de jouer
+#  ensemble, « how are you ».
+SOCIAL = re.compile(
+    r"\b(?:ma|mon|mes)\s+(?:pp|pdp|pfp|photo(?: de profil)?|avatar|skin|pseudo|tenue|outfit|look|tete|perso|dessin|edit"
+    r"|montage|banniere|bio)\b.{0,30}\b(?:bien|beau|belle|beaux|bo|jolie?s?|stylee?s?|cool|swag|nulle?s?|moche|bg|ok"
+    r"|correcte?|valide|propre|potable|mignonn?e?)\b"
+    r"|\b(?:je suis|jsuis|chui|j'?suis|suis[- ]je) (?:beau|belle|bg|moche|nulle?|bo|mignonn?e?|drole)\b"
+    r"|\b(?:vous|tu) (?:aimez|aimes|kiffez|kiffes|trouvez|trouves|preferez|preferes|pensez|penses)\b"
+    r"|\b(?:votre|ton|vos|tes) avis\b|\b(?:vous en|t'?en) pensez? quoi\b"
+    r"|\bquel age\b|\b(?:tu viens|vous venez|tu habites|vous habitez) d'?ou\b"
+    r"|\b(?:fille|gars|garcon|meuf|mec) ou (?:fille|gars|garcon|meuf|mec)\b"
+    r"|^(?:y'?a|ya|il y a|y a|quelqu'?un|qqn|qui)\s+(?:quelqu'?un|qqn|du monde|des gens|personne|la|co|connecte|en ligne"
+    r"|on|dispo|ici|present)\s*\?*\s*$"
+    r"|\b(?:qui|quelqu'?un|qqn) (?:veut|vient|joue|est chaud|chaud|est co|est la) (?:jouer|en voc|en vocal|un raid|farm"
+    r"|avec moi|ce soir)?"
+    r"|\b(?:how are you|how r u|hru|wbu|hbu|what'?s up|wassup)\b|\b(?:are you|r u|anyone) (?:there|here|online)\s*\?*\s*$")
 RESOLU = re.compile(r"\b(merci|thanks|thx|c'?est bon|r[ée]solu|trouv[ée]|[çc]a marche|nickel|parfait)\b", re.I)
 MIN_CARACTERES = 15
 MIN_MOTS = 3
@@ -36,7 +58,7 @@ FENETRE = 2 * 3600     # au-delà, plus de détection automatique (le site garde
 FUSION = 180           # deux questions d'affilée du même membre ne font qu'une
 JOURS = 30
 STATUTS = {"ouverte": "Sans réponse", "repondue": "Répondue", "resolue": "Résolue",
-           "traitee": "Traitée", "ignoree": "Pas une question"}
+           "traitee": "Traitée", "ignoree": "Pas une question", "bot": "Répondue par le bot"}
 PURGES = [("questions", "DELETE FROM questions WHERE quand < ?", JOURS, "unix")]
 _COLS = ("id", "salon_id", "message_id", "auteur_id", "texte", "quand", "statut", "repondu_par",
          "repondu_le", "par_staff", "lien")
@@ -74,12 +96,19 @@ def nettoyer(texte: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+def plat(texte: str) -> str:
+    """Le texte en minuscules, sans accents (l'apostrophe typographique gardée), les lettres répétées ramenées à une."""
+    t = str(texte or "").replace("’", "'").replace("‘", "'")
+    t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"([a-z])\1{2,}", r"\1", t)
+
+
 def est_question(texte: str) -> bool:
     """FONCTION PURE : une vraie question, pas du bavardage."""
     t = nettoyer(texte)
     if len(t) < MIN_CARACTERES or len(t.split()) < MIN_MOTS or t[0] in "/!.$?":
         return False
-    if BAVARDAGE.search(t):
+    if BAVARDAGE.search(t) or SOCIAL.search(plat(t)):
         return False
     return "?" in t or bool(INTERROGATIFS.match(t))
 
@@ -214,6 +243,24 @@ async def marquer(guild_id: int, qid: int, statut: str, par: int, maintenant: fl
                 liste.remove(q)
     if salon is not None and salon[0]:
         _charges.discard(int(salon[0]))  # relu au prochain message (la liste est remplacée, pas vidée ici)
+    return bool(n)
+
+
+async def marquer_bot(guild_id: int, message_id: int, auteur_id: int, salon_id: int,
+                      maintenant: float | None = None) -> bool:
+    """27/10/2026 : le bot a traité ce message (`reponses_auto`) — sa question (ou celle qu'il prolonge, fusionnée) passe
+    « bot » : elle n'attend plus personne."""
+    t = int(maintenant or time.time())
+    async with _get_db() as db:
+        cur = await db.execute("UPDATE questions SET statut='bot', repondu_le=?, par_staff=0 WHERE guild_id=? AND"
+                               " statut='ouverte' AND (message_id=? OR (auteur_id=? AND salon_id=? AND quand>=?))",
+                               (t, int(guild_id), int(message_id), int(auteur_id), int(salon_id), t - FUSION))
+        n = cur.rowcount
+        await db.commit()
+    for liste in _ouvertes.values():
+        for q in list(liste):
+            if q["message_id"] == int(message_id) or (q["auteur_id"] == int(auteur_id) and t - q["quand"] <= FUSION):
+                liste.remove(q)
     return bool(n)
 
 
